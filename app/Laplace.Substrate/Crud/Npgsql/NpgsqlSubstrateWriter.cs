@@ -186,14 +186,13 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
                 roundTrips += r.rt;
                 journalReplayHit = r.journalHit;
 
-                // The insert-time ON CONFLICT adjudication is the sole novelty
-                // gate: compose stages the whole working set (content-addressed,
-                // deduped in the content bank), the apply lands every distinct
-                // row, and the server skips content it already holds (present
-                // attestations merge instead). Skipped rows are therefore
-                // EXPECTED — shared substrate already committed by an earlier
-                // working set or source, not an error and not a race. Logged at
-                // info for volume visibility.
+                // Apply-side bitmap verify is the presence gate: compose descent
+                // stages the working set (content-addressed, deduped in the
+                // content bank), apply probes claimed-novel ids and COPYs only
+                // survivors (present attestations merge via attestation_merge).
+                // Skipped rows are therefore EXPECTED — shared substrate already
+                // committed by an earlier working set or source, not an error and
+                // not a race. Logged at info for volume visibility.
                 if (entitiesSkipped > 0 || physicalitiesSkipped > 0)
                 {
                     _log.LogInformation(

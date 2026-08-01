@@ -17,6 +17,9 @@ adds harness-specific adaptations and quick references; where they overlap, CLAU
 - **No skills or guard hooks are wired up.** There is no `.claude/skills/` and no
   `.claude/settings.json` → `.claude/hooks/` guard. The `cmd /c` wrapping rule and the
   one-ingest-at-a-time rule below are enforced by you reading them, not by a hook.
+  CLAUDE.md splits **axioms** (05), **enforced gates** (architecture gate tests,
+  pg_regress `schema_law`, etc.), and **ops discipline** (this bullet) — not every line
+  is automated.
 - **Subagents** ([.github/agents/](.github/agents)): `substrate-verifier` (read-only
   live-data proof of claims), `doc-reconciler` (kills .scratchpad doc drift).
 - **Prompt**: [.github/prompts/next-task.prompt.md](.github/prompts/next-task.prompt.md) ranks work from binding docs (05/06/09) + code-verified open items — not doc 13 alone. It is a file to read, not a registered slash command in every harness.

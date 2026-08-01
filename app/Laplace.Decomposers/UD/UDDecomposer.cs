@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
@@ -19,16 +20,28 @@ public sealed class UDDecomposer : DecomposerMultiFile<UdIngestRecord, UDSource,
 
     protected override ConcurrentDictionary<string, byte>? VocabularyReadback => _canonicalNames;
 
-    protected override IMultiFileRecordStream<UdIngestRecord> CreateMultiFileStream(
+    protected override IReadOnlyList<(string Path, string Label)> ListFiles(
         string ecosystemPath, DecomposerOptions options)
     {
         var files = ListTreebankFiles(ecosystemPath, options);
-        var labeled = files.Select(p =>
+        return files.Select(p =>
         {
             string stem = Path.GetFileNameWithoutExtension(p);
             return (Path: p, Label: $"ud/{stem}");
         }).ToList();
-        return new UdConlluMultiFileStream(labeled);
+    }
+
+    protected override async IAsyncEnumerable<UdIngestRecord> ExtractFileAsync(
+        string filePath, string fileLabel, DecomposerOptions options,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        string langCode = UdIngestSupport.ExtractLangCode(Path.GetFileName(filePath));
+        Hash128 langId = LanguageReference.Resolve(langCode);
+        await foreach (var sentence in UdConlluParser.ParseSentencesAsync(filePath, ct))
+        {
+            ct.ThrowIfCancellationRequested();
+            yield return new UdIngestRecord(sentence, langId, langCode);
+        }
     }
 
     protected override IIngestRecordHandler<UdIngestRecord> CreateHandlerForFile(string fileLabel) =>
@@ -44,15 +57,8 @@ public sealed class UDDecomposer : DecomposerMultiFile<UdIngestRecord, UDSource,
     {
         var paths = ListTreebankFiles(context.EcosystemPath, options);
         if (paths.Count == 0) return Task.FromResult<IngestInventory?>(null);
-        if (options.MaxInputUnits > 0)
-            return Task.FromResult(IngestInventory.FromFiles("sentences", paths, options.MaxInputUnits, ct));
-        var files = paths.Select(p =>
-        {
-            string id = Path.GetFileNameWithoutExtension(p);
-            return new IngestFileSpec(id, p, EtlInventory.CountConlluSentences(p));
-        }).ToList();
-        long total = files.Sum(f => f.InputUnits);
-        return Task.FromResult<IngestInventory?>(new IngestInventory("sentences", total, files));
+        return Task.FromResult(IngestInventory.FromConlluFiles(
+            "sentences", paths, options.MaxInputUnits, ct, tracksFileCompletion: true));
     }
 
     public override async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
@@ -65,12 +71,9 @@ public sealed class UDDecomposer : DecomposerMultiFile<UdIngestRecord, UDSource,
         options.Languages is { IsActive: true } ? options.Languages
         : LanguageFilter.ForSource("UDDecomposer");
 
-    // Root may be a single .conllu file, a directory of treebanks, or the ecosystem
-    // root containing ud-treebanks-v2.17 — resolved by the shared IngestInput valet.
     private static List<string> ListTreebankFiles(string root, DecomposerOptions options)
     {
         var all = IngestInput.ResolveFiles(root, "*.conllu", "ud-treebanks-v2.17");
-        // Explicit single file: the operator named it — honour it, skip the language filter.
         if (IngestInput.IsSingleFile(root)) return all;
         var langs = EffectiveLanguages(options);
         if (langs is { IsActive: true })

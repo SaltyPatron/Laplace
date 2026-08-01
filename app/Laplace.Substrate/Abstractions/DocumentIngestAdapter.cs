@@ -4,6 +4,11 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Abstractions;
 
+/// <summary>
+/// Thin multi-file wrapper over <see cref="DocumentFileExtract"/> — same unit
+/// <see cref="DocumentDecomposer.ExtractFileAsync"/> uses. Kept for tests that
+/// construct the stream directly.
+/// </summary>
 public sealed class DocumentMultiFileStream : IMultiFileRecordStream<ContentIngestRecord>
 {
     private readonly string _root;
@@ -13,11 +18,6 @@ public sealed class DocumentMultiFileStream : IMultiFileRecordStream<ContentInge
     public async IAsyncEnumerable<IFileRecordSource<ContentIngestRecord>> FilesAsync(
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        // Cheap enumeration: yield a source per file with a label derived from the PATH only —
-        // no read here. Each worker opens (reads bytes) its own file, so the read is parallel and
-        // never serialized ahead of the compose. source_id IS the file's content-DAG root
-        // (FileEntity.SourceId), stamped onto the record below; name/size/mtime ride as a
-        // metadata DAG fetched off the trunk, never hashed into identity.
         bool rootIsFile = File.Exists(_root);
         foreach (string file in DocumentDecomposer.EnumerateInputFiles(_root))
         {
@@ -27,49 +27,9 @@ public sealed class DocumentMultiFileStream : IMultiFileRecordStream<ContentInge
                 ? Path.GetFileName(f)
                 : Path.GetRelativePath(_root, f).Replace('\\', '/');
             yield return new DelegateFileRecordSource<ContentIngestRecord>(
-                $"document/{rel}", token => OpenAsync(f, rel, token));
+                $"document/{rel}", token => DocumentFileExtract.OpenAsync(f, rel, token));
         }
         await Task.CompletedTask;
-    }
-
-    private static async IAsyncEnumerable<ContentIngestRecord> OpenAsync(
-        string file, string relativePath, [EnumeratorCancellation] CancellationToken ct)
-    {
-        byte[] bytes = await ReadFileBytesAsync(file, ct);
-        if (bytes.Length == 0) yield break;
-        Hash128 fileRoot = ContentTierSpine.ResolveRoot(bytes)
-            ?? throw new InvalidOperationException(
-                $"document '{relativePath}': content has no resolvable root");
-        yield return new ContentIngestRecord(
-            bytes, SourceId: fileRoot, Metadata: FileMetadata.FromPath(file, relativePath));
-    }
-
-    // Read failures are FAILURES: they surface as per-file ingest failures (the
-    // multi-file driver's isolation lane), never a silent skip. Only a genuinely
-    // empty file is a non-event.
-    private static async Task<byte[]> ReadFileBytesAsync(string file, CancellationToken ct)
-    {
-        var fi = new FileInfo(file);
-        if (!fi.Exists)
-            throw new FileNotFoundException($"document vanished between enumeration and open: {file}");
-        if (fi.Length == 0) return Array.Empty<byte>();
-        if (fi.Length > int.MaxValue)
-            throw new InvalidOperationException(
-                $"document '{file}' is {fi.Length:N0} bytes — exceeds the 2 GiB single-document "
-                + "compose limit; split the file into documents below the limit");
-        var bytes = new byte[(int)fi.Length];
-        await using var fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read,
-            bufferSize: 1 << 20, useAsync: true);
-        int off = 0;
-        while (off < bytes.Length)
-        {
-            int n = await fs.ReadAsync(bytes.AsMemory(off), ct);
-            if (n == 0)
-                throw new IOException(
-                    $"document '{file}' truncated mid-read at {off:N0}/{bytes.Length:N0} bytes");
-            off += n;
-        }
-        return bytes;
     }
 }
 

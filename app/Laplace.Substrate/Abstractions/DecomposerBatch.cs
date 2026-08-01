@@ -19,7 +19,8 @@ public static class IngestComposePipeline
         DecomposerOptions options,
         CancellationToken ct = default,
         int commitEpoch = 0,
-        int? attestationCapacity = null)
+        int? attestationCapacity = null,
+        Func<T, bool>? trunkShortcircuit = null)
     {
         if (options.DryRun) return Empty();
 
@@ -31,7 +32,7 @@ public static class IngestComposePipeline
             options);
         return IngestBatchPipeline.RunAsync(
             new AsyncEnumerableRecordStream<T>(records),
-            new DirectComposeHandler<T>(compose),
+            new DirectComposeHandler<T>(compose, trunkShortcircuit),
             config, ct);
     }
 
@@ -49,13 +50,20 @@ public static class IngestComposePipeline
 public sealed class DirectComposeHandler<T> : IIngestRecordHandler<T>
 {
     private readonly Action<T, SubstrateChangeBuilder> _compose;
+    private readonly Func<T, bool>? _trunkShortcircuit;
 
-    public DirectComposeHandler(Action<T, SubstrateChangeBuilder> compose) => _compose = compose;
+    public DirectComposeHandler(
+        Action<T, SubstrateChangeBuilder> compose,
+        Func<T, bool>? trunkShortcircuit = null)
+    {
+        _compose = compose;
+        _trunkShortcircuit = trunkShortcircuit;
+    }
 
     public ValueTask<bool> TryTrunkShortcircuitAsync(
         T record, SubstrateChangeBuilder builder, ISubstrateReader reader,
         double witnessWeight, CancellationToken ct) =>
-        ValueTask.FromResult(false);
+        ValueTask.FromResult(_trunkShortcircuit?.Invoke(record) == true);
 
     public IIngestDeferredUnit CreateDeferredUnit(T record) => new Unit(record, _compose);
 

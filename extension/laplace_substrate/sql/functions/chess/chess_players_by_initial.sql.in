@@ -26,11 +26,10 @@ CREATE OR REPLACE FUNCTION chess_players_by_initial(
     ),
     named AS MATERIALIZED (
         -- Name entities whose FIRST constituent is that codepoint -- index range scan.
-        SELECT ph.entity_id AS name_id
-        FROM @extschema@.physicalities ph, target t
-        WHERE ph.trajectory IS NOT NULL
-          AND ph.type = 1
-          AND (public.laplace_trajectory_constituent_ids(ph.trajectory))[1] = t.cp
+        SELECT w.id AS name_id
+        FROM @extschema@.v_word_points w, target t
+        WHERE w.trajectory IS NOT NULL
+          AND (public.laplace_trajectory_constituent_ids(w.trajectory))[1] = t.cp
     ),
     players AS MATERIALIZED (
         -- Back to the players those names belong to. HAS_NAME_ALIAS is the edge the chess

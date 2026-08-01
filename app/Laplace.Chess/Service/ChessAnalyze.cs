@@ -81,13 +81,7 @@ public static class ChessAnalyze
     private static bool ValidName(string n) => !string.IsNullOrWhiteSpace(n) && n != "?";
     private static string? NullIfBlank(string s) => string.IsNullOrWhiteSpace(s) ? null : s;
     private static double ParseClockSeconds(string t)
-    {
-        var p = t.Split(':');
-        return p.Length >= 3
-            ? int.Parse(p[0]) * 3600 + int.Parse(p[1]) * 60
-              + double.Parse(p[2], System.Globalization.CultureInfo.InvariantCulture)
-            : 0;
-    }
+        => PgnClocks.TryParseHms(t, out double sec) ? sec : 0;
 
     // Derive one playing's calculated layer from its witnessed inputs. `sans` is the replayed
     // movetext; token arrays are indexed by ply (sparse allowed); `evals` are centipawns (mover

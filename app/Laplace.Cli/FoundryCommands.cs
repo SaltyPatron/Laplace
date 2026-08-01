@@ -121,18 +121,15 @@ internal static class FoundryCommands
     private static async Task<string?> MaterializeDiscoveredMoldAsync(string recipeIdPrefix, string tokenizerDir)
     {
         await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
-        await using var conn = await ds.OpenConnectionAsync();
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT recipe_id, recipe_json FROM laplace.model_recipes()";
+        var recipes = await NpgsqlSubstrateReads.ModelRecipesAsync(ds, CancellationToken.None);
         var hits = new List<(string Hex, string Json)>();
-        await using (var rdr = await cmd.ExecuteReaderAsync())
-            while (await rdr.ReadAsync())
-            {
-                string hex = Convert.ToHexString((byte[])rdr[0]).ToLowerInvariant();
-                if (recipeIdPrefix == "*" || hex.StartsWith(recipeIdPrefix.ToLowerInvariant(), StringComparison.Ordinal))
-                    hits.Add((hex, rdr.GetString(1)));
-            }
-        if (hits.Count == 0) { Fail($"no deposed recipe matches '{recipeIdPrefix}' — list them: SELECT * FROM laplace.model_recipes()"); return null; }
+        foreach (var recipe in recipes)
+        {
+            string hex = Convert.ToHexString(recipe.RecipeId).ToLowerInvariant();
+            if (recipeIdPrefix == "*" || hex.StartsWith(recipeIdPrefix.ToLowerInvariant(), StringComparison.Ordinal))
+                hits.Add((hex, recipe.RecipeJson));
+        }
+        if (hits.Count == 0) { Fail($"no deposed recipe matches '{recipeIdPrefix}' — list them via laplace.model_recipes()"); return null; }
         if (hits.Count > 1) { Fail($"recipe prefix '{recipeIdPrefix}' is ambiguous ({hits.Count} matches) — extend the prefix"); return null; }
 
         string moldDir = Path.Combine(Path.GetTempPath(), $"laplace-foundry-mold-{hits[0].Hex[..12]}");
@@ -186,58 +183,33 @@ internal static class FoundryCommands
             ?.Split(new[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         string[] crawlS = [];
         await using (var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString))
-        await using (var conn = await ds.OpenConnectionAsync())
-        await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandTimeout = 0;
             if (grapheme)
             {
-                cmd.CommandText = "SELECT surface, weight FROM laplace.grapheme_floor_vocab($1)";
-                cmd.Parameters.AddWithValue(vocabN);
                 Console.WriteLine($"  vocab: GRAPHEME FLOOR ({vocabN} codepoint/grapheme atoms — "
                     + "tokenizes any text char-by-char in-engine, no merge path)");
+                foreach (var r in await NpgsqlFoundryReads.GraphemeFloorVocabAsync(ds, vocabN))
+                    sel.Add((r.Surface, r.Weight));
             }
             else
             {
-
-
-
-
-
-
                 crawlS = seeds is { Length: > 0 } ? seeds : [];
                 if (crawlS.Length == 0)
                 {
                     int seedN = Math.Min(vocabN, FoundryDefaults.CrawlSeeds);
-                    var ss = new List<string>(seedN);
-                    await using (var sc = conn.CreateCommand())
-                    {
-                        sc.CommandTimeout = 0;
-                        sc.CommandText = "SELECT surface FROM laplace.corpus_word_vocab($1, $2)";
-                        sc.Parameters.AddWithValue(seedN);
-                        sc.Parameters.AddWithValue(FoundryDefaults.WordTrajs);
-                        await using var sr = await sc.ExecuteReaderAsync();
-                        while (await sr.ReadAsync()) ss.Add(sr.GetString(0));
-                    }
-                    crawlS = ss.ToArray();
+                    crawlS = (await NpgsqlFoundryReads.CorpusWordVocabAsync(
+                        ds, seedN, FoundryDefaults.WordTrajs)).ToArray();
                     Console.WriteLine($"  vocab: corpus-seeded relation-closed crawl ({crawlS.Length} corpus seeds → {vocabN}, hops {crawlHops}, fanout {crawlFanout})");
                 }
                 else
                     Console.WriteLine($"  vocab: seeded crawl from [{string.Join(", ", seeds!)}] (hops {crawlHops}, fanout {crawlFanout})");
-                cmd.CommandText = "SELECT surface, weight FROM laplace.foundry_vocab_crawl($1, $2, $3, $4)";
-                cmd.Parameters.AddWithValue(crawlS);
-                cmd.Parameters.AddWithValue(vocabN);
-                cmd.Parameters.AddWithValue(crawlHops);
-                cmd.Parameters.AddWithValue(crawlFanout);
-            }
-            await using (var rdr = await cmd.ExecuteReaderAsync())
-            {
-                while (await rdr.ReadAsync())
-                    sel.Add((rdr.GetString(0), rdr.GetInt64(1)));
-            }
+                foreach (var r in await NpgsqlFoundryReads.FoundryVocabCrawlAsync(
+                    ds, crawlS, vocabN, crawlHops, crawlFanout))
+                    sel.Add((r.Surface, r.Weight));
 
-            if (!grapheme && crawlS.Length > 0)
-                await PinCrawlSeedsInPlaceAsync(conn, crawlS, sel, vocabN);
+                if (crawlS.Length > 0)
+                    await PinCrawlSeedsInPlaceAsync(ds, crawlS, sel, vocabN);
+            }
         }
         if (sel.Count == 0)
         {
@@ -1125,43 +1097,25 @@ internal static class FoundryCommands
         // physical connection — the temp table shadows laplace.consensus inside all
         // plane functions (pg_temp resolves first), so the entire synthesis reads the
         // scoped world with zero plane changes.
-        string? scopedInitSql = null;
+        IReadOnlyList<byte[]>? scopeSourceIds = null;
         if (!string.IsNullOrWhiteSpace(scopeSource))
         {
             var names = scopeSource.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            var idHexes = new List<string>();
+            var ids = new List<byte[]>(names.Length);
             await using (var probeDs = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString))
-            await using (var probeConn = await probeDs.OpenConnectionAsync())
             {
                 foreach (var name in names)
                 {
-                    await using var sc = probeConn.CreateCommand();
-                    sc.CommandText = "SELECT laplace.source_id($1)";
-                    sc.Parameters.AddWithValue(name);
-                    var sid = await sc.ExecuteScalarAsync();
-                    if (sid is byte[] sb) idHexes.Add(Convert.ToHexString(sb));
-                    else return Fail($"--scope-source: unknown source '{name}' (short names — see source registry)");
+                    var sid = await NpgsqlFoundryReads.SourceIdAsync(probeDs, name);
+                    if (sid is null)
+                        return Fail($"--scope-source: unknown source '{name}' (short names — see source registry)");
+                    ids.Add(sid);
                 }
             }
-            string arr = string.Join(",", idHexes.Select(h => $"decode('{h}','hex')"));
-            scopedInitSql =
-                "CREATE TEMP TABLE IF NOT EXISTS consensus AS " +
-                $"SELECT * FROM laplace.scoped_consensus(ARRAY[{arr}]::bytea[]); " +
-                "CREATE INDEX IF NOT EXISTS scoped_consensus_subject ON pg_temp.consensus (subject_id)";
+            scopeSourceIds = ids;
             Console.WriteLine($"  scope: {names.Length} source(s) — synthesis reads a re-folded scoped consensus ({scopeSource})");
         }
-        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, dsb =>
-        {
-            if (scopedInitSql is null) return;
-            // Pool reset (DISCARD ALL) drops temp tables while the physical
-            // connection survives — the initializer would not re-fire and later
-            // readers would silently see the UNSCOPED world (observed live:
-            // type planes scoped, adjacency unscoped in one synthesis).
-            dsb.ConnectionStringBuilder.NoResetOnClose = true;
-            dsb.UsePhysicalConnectionInitializer(
-                conn => { using var c = conn.CreateCommand(); c.CommandText = scopedInitSql; c.ExecuteNonQuery(); },
-                async conn => { await using var c = conn.CreateCommand(); c.CommandText = scopedInitSql; await c.ExecuteNonQueryAsync(); });
-        }, ConnString);
+        await using var ds = NpgsqlFoundryReads.CreateIngestDataSource(ConnString, scopeSourceIds);
         int degreeCap = FoundryDefaults.LeDegree;
 
         var opKeys = new HashSet<string>(StringComparer.Ordinal);
@@ -1918,21 +1872,14 @@ internal static class FoundryCommands
 
 
     private static async Task PinCrawlSeedsInPlaceAsync(
-        NpgsqlConnection conn, string[] seeds, List<(string surface, long weight)> sel, int budget)
+        NpgsqlDataSource ds, string[] seeds, List<(string surface, long weight)> sel, int budget)
     {
         var bySurf = new Dictionary<string, long>(StringComparer.Ordinal);
         foreach (var (s, w) in sel) bySurf[s] = w;
         long pin = bySurf.Count > 0 ? bySurf.Values.Max() + 1 : 1_000_000;
         int resolved = 0, pinned = 0;
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandTimeout = 120;
-        cmd.CommandText =
-            "SELECT render_text(word_id(s), 80) FROM unnest($1::text[]) AS s WHERE word_id(s) IS NOT NULL";
-        cmd.Parameters.AddWithValue(seeds);
-        await using var rdr = await cmd.ExecuteReaderAsync();
-        while (await rdr.ReadAsync())
+        foreach (var s in await NpgsqlFoundryReads.RenderResolvedWordSurfacesAsync(ds, seeds))
         {
-            string s = rdr.GetString(0);
             if (string.IsNullOrWhiteSpace(s)) continue;
             resolved++;
             if (!bySurf.ContainsKey(s)) pinned++;

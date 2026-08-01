@@ -40,23 +40,22 @@ internal static class PredicateMatrixIngest
         long maxInputUnits,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        await using var stream = new FileStream(
-            path, FileMode.Open, FileAccess.Read, FileShare.Read,
-            bufferSize: 1 << 20, FileOptions.Asynchronous | FileOptions.SequentialScan);
-        using var reader = new StreamReader(stream);
-
-        string? header = await reader.ReadLineAsync(ct);
-        if (header is null) yield break;
-
+        bool skippedHeader = false;
         long rowsTotal = 0;
 
-        while (true)
+        await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
         {
             ct.ThrowIfCancellationRequested();
-            string? line = await reader.ReadLineAsync(ct);
-            if (line is null) break;
-            if (line.Length == 0) continue;
+            if (lineMem.Length == 0) continue;
 
+            // First non-empty line is the column header (same as the old StreamReader path).
+            if (!skippedHeader)
+            {
+                skippedHeader = true;
+                continue;
+            }
+
+            string line = Encoding.UTF8.GetString(lineMem.Span);
             var fields = line.Split('\t');
             if (fields.Length <= ColPbRoleset) continue;
             if (fields[ColLang].Equals("1_ID_LANG", StringComparison.Ordinal)) continue;
@@ -126,12 +125,10 @@ internal static class PredicateMatrixIngest
         }
     }
 
-    internal static async Task<long?> EstimateLineCountAsync(string path, CancellationToken ct)
+    internal static Task<long?> EstimateLineCountAsync(string path, CancellationToken ct)
     {
-        long lines = 0;
-        await foreach (var _ in ReadLinesAsync(path, ct))
-            lines++;
-        return lines > 1 ? lines - 1 : null;
+        long n = EtlInventory.EstimateNewlineCount(path, ct);
+        return Task.FromResult<long?>(n > 1 ? n - 1 : null);
     }
 
     private static readonly string[] UnpackDirs = ["PredicateMatrix", "predicate-matrix", "PredicateMatrix.v1.3"];
@@ -154,22 +151,6 @@ internal static class PredicateMatrixIngest
 
     internal static IEnumerable<string> ResolvePaths(string ecosystemPath) =>
         IngestInput.Locate(ecosystemPath, Layout);
-
-    private static async IAsyncEnumerable<string> ReadLinesAsync(
-        string path, [EnumeratorCancellation] CancellationToken ct)
-    {
-        await using var stream = new FileStream(
-            path, FileMode.Open, FileAccess.Read, FileShare.Read,
-            bufferSize: 1 << 20, FileOptions.Asynchronous | FileOptions.SequentialScan);
-        using var reader = new StreamReader(stream);
-        while (true)
-        {
-            ct.ThrowIfCancellationRequested();
-            string? line = await reader.ReadLineAsync(ct);
-            if (line is null) yield break;
-            yield return line;
-        }
-    }
 
     private static string? VerbNetClassKey(string[] fields)
     {

@@ -46,7 +46,7 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
     public static async Task<ChessPgnIngestor> CreateAsync(CancellationToken ct = default)
     {
         CodepointPerfcache.LoadDefault();
-        var ds = new NpgsqlDataSourceBuilder(ChessEngineService.ResolveConnString()).Build();
+        var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest);
         var inner = new NpgsqlSubstrateWriter(ds);
         var writer = new ConsensusAccumulatingWriter(
             inner, ds, persistEvidence: true);
@@ -57,7 +57,7 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
             writer, ChessVocabulary.PgnSourceId, "ChessPgn", ChessVocabulary.PgnTrustClass, ct));
         names.UnionWith(await ChessVocabulary.BootstrapAsync(
             writer, ChessVocabulary.AnalysisSourceId, "ChessAnalysis", ChessVocabulary.AnalysisTrustClass, ct));
-        await RegisterCanonicalsAsync(ds, names, ct);
+        await NpgsqlCanonicalRegistry.RegisterCanonicalsAsync(ds, names, ct);
 
         return new ChessPgnIngestor(ds, writer, reader);
     }
@@ -118,22 +118,6 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
         await _writer.ApplyAsync(await record.BuildAsync(ct), ct);
         await _writer.ApplyAsync(await analyze.BuildAsync(ct), ct);
         return (novel, novel);
-    }
-
-    private static async Task RegisterCanonicalsAsync(
-        NpgsqlDataSource ds, IReadOnlyCollection<string> names, CancellationToken ct)
-    {
-        if (names.Count == 0) return;
-        await using var conn = await ds.OpenConnectionAsync(ct);
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT laplace.register_canonicals(@names)";
-        cmd.Parameters.Add(new NpgsqlParameter
-        {
-            ParameterName = "names",
-            Value = names.ToArray(),
-            NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Text,
-        });
-        await cmd.ExecuteNonQueryAsync(ct);
     }
 
     public async ValueTask DisposeAsync()

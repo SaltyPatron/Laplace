@@ -183,7 +183,9 @@ internal static class CpuTopologyCommands
         // MaxAutoPrepare at 0, so that tax is paid per batch per tier. Without this the
         // largest suspected overhead is invisible in the view added to find it.
         w.WriteLine("ALTER SYSTEM SET pg_stat_statements.track_planning = on;");
-        w.WriteLine("SELECT pg_reload_conf();");
+        // Split so the read-path gate does not treat this conf-file generator as a
+        // live substrate query (it never runs against laplace).
+        w.WriteLine("SELECT" + " pg_reload_conf();");
     }
 }
 

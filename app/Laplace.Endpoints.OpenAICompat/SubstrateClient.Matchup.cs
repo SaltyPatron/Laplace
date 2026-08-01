@@ -1,6 +1,5 @@
 using Laplace.Api.Contracts;
-using Npgsql;
-using NpgsqlTypes;
+using Laplace.SubstrateCRUD.Npgsql;
 
 namespace Laplace.Endpoints.OpenAICompat;
 
@@ -10,35 +9,23 @@ namespace Laplace.Endpoints.OpenAICompat;
 /// so this presents it as one: leaders per arena, games played, win/loss record.
 /// Split into fast reads (leaders, record, tape) and the slow path/verdict read,
 /// which the UI fetches lazily; path search competes with active seeds for the
-/// box, so it must never block the parts that return in a second.
+/// box, so it must never block the parts that return in a second. The SQL
+/// itself lives in <see cref="NpgsqlSubstrateReads"/> (doc 41) — salient_facts
+/// in particular is shared with the CLI's neighbors command and the MCP facts tool.
 /// </summary>
 internal sealed partial class SubstrateClient
 {
     /// <summary>Top consensus edges per salience band, fully labeled.</summary>
     public async Task<IReadOnlyList<BandLeaders>> LeadersAsync(int[] bands, int perBand, CancellationToken ct)
     {
-        const string sql = """
-            SELECT band, encode(subject_id, 'hex'), subject, relation,
-                   encode(object_id, 'hex'), object, eff_mu, witnesses
-            FROM laplace.band_leaders(@bands, @per)
-            """;
-        var rows = await ReadRowsAsync(sql,
-            static r => (Band: r.GetInt32(0), Row: new LeaderRow(
-                r.GetString(1), r.IsDBNull(2) ? "" : r.GetString(2), r.GetString(3),
-                r.GetString(4), r.IsDBNull(5) ? "" : r.GetString(5),
-                r.GetDecimal(6), r.GetInt64(7))),
-            cmd =>
-            {
-                cmd.Parameters.Add("bands", NpgsqlDbType.Array | NpgsqlDbType.Integer).Value = bands;
-                cmd.Parameters.AddWithValue("per", perBand);
-            }, "band_leaders", ct);
+        var rows = await NpgsqlSubstrateReads.BandLeadersAsync(_dataSource, bands, perBand, ct, TranslateSubstrateError);
 
         var catalog = await RelationBandsAsync(ct);
         var names = catalog.ToDictionary(b => b.Band, b => b.Name);
         return rows.GroupBy(r => r.Band)
             .OrderBy(g => g.Key)
             .Select(g => new BandLeaders(g.Key, names.GetValueOrDefault(g.Key, $"band {g.Key}"),
-                [.. g.Select(r => r.Row)]))
+                [.. g.Select(r => new LeaderRow(r.SubjectIdHex, r.Subject, r.Relation, r.ObjectIdHex, r.Object, r.EffMu, r.Witnesses))]))
             .ToList();
     }
 
@@ -50,12 +37,7 @@ internal sealed partial class SubstrateClient
     public async Task<EntityRecordResponse?> EntityRecordAsync(string idHex, CancellationToken ct)
     {
         if (TryParseIdHex(idHex) is not { } id) return null;
-        const string sql = "SELECT confirmed, contested, refuted, thin FROM laplace.entity_record(@id)";
-        var rows = await ReadRowsAsync(sql,
-            static r => (r.GetInt64(0), r.GetInt64(1), r.GetInt64(2), r.GetInt64(3)),
-            cmd => cmd.Parameters.Add("id", NpgsqlDbType.Bytea).Value = id,
-            "entity_record", ct);
-        var (c, x, f, t) = rows.Count == 0 ? (0L, 0L, 0L, 0L) : rows[0];
+        var (c, x, f, t) = await NpgsqlSubstrateReads.EntityRecordAsync(_dataSource, id, ct, TranslateSubstrateError);
         return new EntityRecordResponse("entity.record", idHex.ToLowerInvariant(), c, x, f, t);
     }
 
@@ -81,31 +63,18 @@ internal sealed partial class SubstrateClient
     private async Task<MatchupSide> SideAsync(string hex, byte[] id, string label, CancellationToken ct)
     {
         var recordTask = EntityRecordAsync(hex, ct);
-        var factsTask = ReadRowsAsync("""
-            SELECT f.type, f.fact, f.eff_mu, f.witnesses
-            FROM laplace.salient_facts(@id, NULL, 6) f
-            """,
-            static r => new SalientFactRow(r.GetString(0), r.GetString(1), r.GetDecimal(2), r.GetInt64(3)),
-            cmd => cmd.Parameters.Add("id", NpgsqlDbType.Bytea).Value = id,
-            "salient_facts", ct);
+        var factsTask = NpgsqlSubstrateReads.SalientFactsAsync(_dataSource, id, 6, ct, TranslateSubstrateError);
         await Task.WhenAll(recordTask, factsTask);
         return new MatchupSide(hex, label,
             recordTask.Result ?? new EntityRecordResponse("entity.record", hex, 0, 0, 0, 0),
-            factsTask.Result);
+            [.. factsTask.Result.Select(f => new SalientFactRow(f.Type, f.Fact, f.EffMu, f.Witnesses))]);
     }
 
-    private Task<IReadOnlyList<TapeRow>> TapeAsync(byte[] x, byte[] y, CancellationToken ct) =>
-        ReadRowsAsync("""
-            SELECT c.holder, c.type, c.fact, c.mu
-            FROM laplace.contrast(@x, @y, NULL, 60) c
-            """,
-            static r => new TapeRow(r.GetString(0), r.GetString(1), r.GetString(2),
-                r.IsDBNull(3) ? null : r.GetDecimal(3)),
-            cmd =>
-            {
-                cmd.Parameters.Add("x", NpgsqlDbType.Bytea).Value = x;
-                cmd.Parameters.Add("y", NpgsqlDbType.Bytea).Value = y;
-            }, "contrast", ct);
+    private async Task<IReadOnlyList<TapeRow>> TapeAsync(byte[] x, byte[] y, CancellationToken ct)
+    {
+        var rows = await NpgsqlSubstrateReads.ContrastAsync(_dataSource, x, y, 60, ct, TranslateSubstrateError);
+        return [.. rows.Select(r => new TapeRow(r.Holder, r.Type, r.Fact, r.Mu))];
+    }
 
     /// <summary>
     /// The slow half: relation_summary's path search and verdict. Measured
@@ -117,24 +86,9 @@ internal sealed partial class SubstrateClient
         var y = await ResolveTopicAsync(yRef, ct);
         if (x is null || y is null) return null;
 
-        const string sql = """
-            SELECT s.relation, s.plane, s.mu, s.usage, s.geodesic, s.verdict
-            FROM laplace.relation_summary(@x, @y) s
-            """;
-        var rows = await ReadRowsAsync(sql,
-            static r => new MatchupVerdictResponse("matchup.verdict",
-                r.IsDBNull(0) ? null : r.GetString(0),
-                r.IsDBNull(1) ? null : r.GetString(1),
-                r.IsDBNull(2) ? null : r.GetDecimal(2),
-                r.IsDBNull(3) ? null : r.GetInt64(3),
-                r.IsDBNull(4) ? null : r.GetDouble(4),
-                r.IsDBNull(5) ? null : r.GetString(5)),
-            cmd =>
-            {
-                cmd.Parameters.Add("x", NpgsqlDbType.Bytea).Value = x.Value.Id;
-                cmd.Parameters.Add("y", NpgsqlDbType.Bytea).Value = y.Value.Id;
-            }, "relation_summary", ct, timeoutSeconds: 120);
-        return rows.Count == 0 ? new MatchupVerdictResponse("matchup.verdict", null, null, null, null, null, null) : rows[0];
+        var s = await NpgsqlSubstrateReads.RelationSummaryAsync(_dataSource, x.Value.Id, y.Value.Id, ct, TranslateSubstrateError);
+        return new MatchupVerdictResponse("matchup.verdict",
+            s?.Relation, s?.Plane, s?.Mu, s?.Usage, s?.Geodesic, s?.Verdict);
     }
 
     /// <summary>
@@ -144,19 +98,9 @@ internal sealed partial class SubstrateClient
     /// scan ~1s cold. A sample is the honest bounded read — "top" would demand
     /// an unbounded sort over millions of rows.
     /// </summary>
-    public Task<IReadOnlyList<SourceRosterRow>> SourceRosterAsync(byte[] sourceId, int limit, CancellationToken ct) =>
-        ReadRowsAsync("""
-            SELECT encode(subject_id, 'hex'), subject, relation,
-                   encode(object_id, 'hex'), object, observations
-            FROM laplace.source_roster(@sid, @lim)
-            """,
-            static r => new SourceRosterRow(
-                r.GetString(0), r.IsDBNull(1) ? "" : r.GetString(1), r.GetString(2),
-                r.GetString(3), r.IsDBNull(4) ? "" : r.GetString(4), r.GetInt64(5)),
-            cmd =>
-            {
-                cmd.Parameters.Add("sid", NpgsqlDbType.Bytea).Value = sourceId;
-                cmd.Parameters.AddWithValue("lim", limit);
-            }, "source_roster", ct, timeoutSeconds: 30);
-
+    public async Task<IReadOnlyList<SourceRosterRow>> SourceRosterAsync(byte[] sourceId, int limit, CancellationToken ct)
+    {
+        var rows = await NpgsqlSubstrateReads.SourceRosterAsync(_dataSource, sourceId, limit, ct, TranslateSubstrateError);
+        return [.. rows.Select(r => new SourceRosterRow(r.SubjectIdHex, r.Subject, r.Relation, r.ObjectIdHex, r.Object, r.Observations))];
+    }
 }

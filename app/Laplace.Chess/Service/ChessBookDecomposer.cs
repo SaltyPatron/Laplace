@@ -104,8 +104,7 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
         }
 
         byte[] bm = await reader.EntitiesExistBitmapAsync(probeIds.ToArray(), ct).ConfigureAwait(false);
-        long bits = (long)bm.Length * 8;
-        bool Present(int k) => k >= 0 && k < bits && (bm[k >> 3] & (1 << (k & 7))) != 0;
+        bool Present(int k) => BitmapBits.IsSet(bm, k);
 
         var novel = new List<ChessBookRecord>(records.Count);
         for (int i = 0; i < records.Count; i++)

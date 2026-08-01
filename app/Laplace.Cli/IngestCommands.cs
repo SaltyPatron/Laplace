@@ -240,12 +240,16 @@ internal static class IngestCommands
         if (string.IsNullOrEmpty(modelDir))
             return Fail("usage: laplace ingest safetensors <snapshot-dir>\n"
                         + "  HF snapshot: config.json + tokenizer.json + *.safetensors\n"
-                        + "  (safetensors are not self-contained like GGUF — the directory is the witness unit)");
+                        + "  (safetensors are not self-contained like GGUF — the directory is the witness unit)\n"
+                        + "  Also accepts an HF hub cache root or models--* family dir (resolves snapshots/<rev>).");
 
-        var snapshotCheck = SafetensorSnapshotWitness.Validate(modelDir);
+        var resolved = SafetensorSnapshotWitness.ResolveCompleteDir(modelDir) ?? modelDir;
+        var snapshotCheck = SafetensorSnapshotWitness.Validate(resolved);
         if (!snapshotCheck.Ok)
             return Fail($"invalid safetensor snapshot: {snapshotCheck.Error}\n"
-                        + $"path: {modelDir}");
+                        + $"path: {modelDir}"
+                        + (resolved != modelDir ? $"\nresolved: {resolved}" : ""));
+        modelDir = resolved;
 
         // IngestAsync already loaded the blob when dispatching here; don't pay it twice.
         if (!CodepointPerfcache.IsLoaded) CodepointPerfcache.Load(ResolveBlob());
@@ -280,14 +284,11 @@ internal static class IngestCommands
         // re-passes over an already-recorded model; the recorder's re-deposition
         // guard must not block them.
         if (Laplace.Decomposers.Model.ModelTokenEdgeETL.ResolvePlanesMode() == "structure")
-        await using (var chkConn = await ds.OpenConnectionAsync())
         {
-            await using var chkCmd = chkConn.CreateCommand();
-            chkCmd.CommandText =
-                "SELECT laplace.evidence_count(p_type => $2, p_source => $1) > 0";
-            chkCmd.Parameters.Add(new global::Npgsql.NpgsqlParameter { Value = modelSource.ToBytes(), NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Bytea });
-            chkCmd.Parameters.Add(new global::Npgsql.NpgsqlParameter { Value = Laplace.Ingestion.LayerCompletion.RelationTypeId(dec.LayerOrder).ToBytes(), NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Bytea });
-            bool alreadyIngested = (bool)(await chkCmd.ExecuteScalarAsync() ?? false);
+            bool alreadyIngested = await NpgsqlIngestOps.EvidenceExistsForTypeAndSourceAsync(
+                ds,
+                modelSource.ToBytes(),
+                Laplace.Ingestion.LayerCompletion.RelationTypeId(dec.LayerOrder).ToBytes());
             if (alreadyIngested)
             {
                 Console.WriteLine($"Safetensor snapshot already deposited — source {modelName}: {modelSource}");
@@ -657,15 +658,7 @@ internal static class IngestCommands
     {
         await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
 
-        async Task<long> JournalCountAsync()
-        {
-            await using var conn = await ds.OpenConnectionAsync();
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandText = "SELECT count(*) FROM laplace.index_cycle_journal";
-            return (long)(await cmd.ExecuteScalarAsync() ?? 0L);
-        }
-
-        long pending = await JournalCountAsync();
+        long pending = await NpgsqlIngestOps.IndexCycleJournalCountAsync(ds);
         if (pending == 0)
         {
             Console.WriteLine("index-cycle journal empty — nothing to recover");
@@ -680,17 +673,10 @@ internal static class IngestCommands
         await NpgsqlIndexCycle.RebuildJournaledAsync(ds, log, CancellationToken.None);
 
         Console.WriteLine("refreshing planner statistics ...");
-        await using (var conn = await ds.OpenConnectionAsync())
-        await using (var stats = conn.CreateCommand())
-        {
-            stats.CommandTimeout = 0;
-            stats.CommandText =
-                "ANALYZE laplace.attestations; ANALYZE laplace.consensus; ANALYZE laplace.entities";
-            await stats.ExecuteNonQueryAsync();
-        }
+        await NpgsqlIngestOps.AnalyzeCoreWriteTablesAsync(ds);
         sw.Stop();
 
-        long remaining = await JournalCountAsync();
+        long remaining = await NpgsqlIngestOps.IndexCycleJournalCountAsync(ds);
         Console.WriteLine(
             $"recovered {pending - remaining}/{pending} index(es) in {sw.Elapsed.TotalSeconds:F0}s"
             + (remaining > 0 ? $" — {remaining} still journaled (rerun)" : ""));
@@ -713,10 +699,7 @@ internal static class IngestCommands
         await NpgsqlIndexCycle.DropSecondariesAsync(ds, log, tables, CancellationToken.None);
         sw.Stop();
 
-        await using var conn = await ds.OpenConnectionAsync();
-        await using var cnt = conn.CreateCommand();
-        cnt.CommandText = "SELECT count(*) FROM laplace.index_cycle_journal";
-        long journaled = (long)(await cnt.ExecuteScalarAsync() ?? 0L);
+        long journaled = await NpgsqlIngestOps.IndexCycleJournalCountAsync(ds);
         Console.WriteLine(
             $"index-drop complete in {sw.Elapsed.TotalSeconds:F0}s — {journaled} secondary index(es) journaled "
             + "(down until `recover-indexes`)");
@@ -761,16 +744,7 @@ internal static class IngestCommands
         var names = new HashSet<string>(decomposer.CanonicalNamesForReadback, StringComparer.Ordinal);
         names.Add($"substrate/source/{decomposer.SourceName}/v1");
         if (names.Count == 0) return;
-        await using var conn = await ds.OpenConnectionAsync();
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT laplace.register_canonicals(@names)";
-        cmd.Parameters.Add(new global::Npgsql.NpgsqlParameter
-        {
-            ParameterName = "names",
-            Value = names.ToArray(),
-            NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Text,
-        });
-        await cmd.ExecuteNonQueryAsync();
+        await NpgsqlCanonicalRegistry.RegisterCanonicalsAsync(ds, names);
         Console.WriteLine($"registered {names.Count:N0} canonical names");
     }
 
@@ -787,74 +761,20 @@ internal static class IngestCommands
         // ND-stats on physicalities.coord/trajectory (never touched by these counts); a
         // column-list ANALYZE still refreshes pg_class.reltuples, which is the estimate that
         // matters here.
-        await using (var an = conn.CreateCommand())
-        {
-            an.CommandTimeout = 0;
-            an.CommandText =
-                "ANALYZE laplace.attestations (subject_id, source_id, type_id, object_id); "
-                + "ANALYZE laplace.physicalities (entity_id, type); "
-                + "ANALYZE laplace.entities (id, tier, type_id); "
-                // consensus is freshly folded here; lexical/edge reads plan against
-                // it, and without stats the planner picks a nested loop that never returns under
-                // CommandTimeout=0 (post-ingest confirmation queries hung ~17 min on this).
-                + "ANALYZE laplace.consensus (subject_id, type_id, object_id, rating, rd);";
-            await an.ExecuteNonQueryAsync();
-        }
+        await NpgsqlIngestOps.AnalyzePostIngestValidationAsync(conn);
 
+        Task<long> EvidenceForSource(string sourceKey) =>
+            NpgsqlIngestOps.EvidenceCountForSourceNameAsync(conn, sourceKey);
+        Task<long> ContentForSource(string sourceKey) =>
+            NpgsqlIngestOps.ContentCountForSourceNameAsync(conn, sourceKey);
+        Task<long> RelationEvidence(string relationType, string? sourceKey = null) =>
+            NpgsqlIngestOps.EvidenceCountForRelationAsync(conn, relationType, sourceKey);
 
-        NpgsqlCommand Cmd()
+        Console.WriteLine("substrate counts (pg_class.reltuples ESTIMATE — not count(*); run ANALYZE, evidence_count(), or substrate_counts() for exact):");
         {
-            var c = conn.CreateCommand();
-            c.CommandTimeout = 0;
-            return c;
-        }
-
-        async Task<long> EvidenceForSource(string sourceKey)
-        {
-            await using var c = Cmd();
-            c.CommandText = "SELECT laplace.evidence_count(p_source => laplace.source_id($1))";
-            c.Parameters.AddWithValue(sourceKey);
-            return (long)(await c.ExecuteScalarAsync() ?? 0L);
-        }
-
-        async Task<long> ContentForSource(string sourceKey)
-        {
-            await using var c = Cmd();
-            c.CommandText = "SELECT laplace.content_count(p_source => laplace.source_id($1))";
-            c.Parameters.AddWithValue(sourceKey);
-            return (long)(await c.ExecuteScalarAsync() ?? 0L);
-        }
-
-        async Task<long> RelationEvidence(string relationType, string? sourceKey = null)
-        {
-            await using var c = Cmd();
-            c.CommandText = sourceKey is null
-                ? "SELECT laplace.evidence_count(p_type => laplace.relation_type_id($1))"
-                : "SELECT laplace.evidence_count(p_type => laplace.relation_type_id($1), p_source => laplace.source_id($2))";
-            c.Parameters.AddWithValue(relationType);
-            if (sourceKey is not null) c.Parameters.AddWithValue(sourceKey);
-            return (long)(await c.ExecuteScalarAsync() ?? 0L);
-        }
-
-        async Task<bool> LayerMarkedComplete(int layer, string sourceKey)
-        {
-            await using var c = Cmd();
-            c.CommandText =
-                "SELECT laplace.evidence_count("
-                + "p_type => laplace.canonical_id('substrate/type/HasLayerCompleted/' || $1 || '/v1'), "
-                + "p_source => laplace.source_id($2)) > 0";
-            c.Parameters.AddWithValue(layer);
-            c.Parameters.AddWithValue(sourceKey);
-            return (bool)(await c.ExecuteScalarAsync() ?? false);
-        }
-
-        Console.WriteLine("substrate counts (pg_class.reltuples ESTIMATE — not count(*); run ANALYZE or evidence_count() for exact):");
-        {
-            await using var counts = Cmd();
-            counts.CommandText = "SELECT metric, value FROM laplace.substrate_counts()";
-            await using var rdr = await counts.ExecuteReaderAsync();
-            while (await rdr.ReadAsync())
-                Console.WriteLine($"  {rdr.GetString(0),-32}: {rdr.GetInt64(1),12:N0}");
+            var counts = await NpgsqlSubstrateReads.SubstrateCountsAsync(conn, CancellationToken.None);
+            foreach (var row in counts)
+                Console.WriteLine($"  {row.Metric,-32}: {row.Value,12:N0}");
         }
 
         if (decomposer is null)
@@ -867,17 +787,8 @@ internal static class IngestCommands
             Console.WriteLine("  witnesses (evidence per source; content: run `stats <source>`):");
             try
             {
-                await using var src = Cmd();
-                src.CommandText = """
-                    SELECT laplace.render(a.source_id) AS source, count(*) AS evidence
-                    FROM laplace.attestations a
-                    GROUP BY a.source_id
-                    ORDER BY evidence DESC
-                    """;
-                src.CommandTimeout = 120;
-                await using var rdr = await src.ExecuteReaderAsync();
-                while (await rdr.ReadAsync())
-                    Console.WriteLine($"    {rdr.GetString(0),-44}: {rdr.GetInt64(1),12:N0} att");
+                foreach (var row in await NpgsqlIngestOps.AttestationCountsBySourceAsync(conn, timeoutSeconds: 120))
+                    Console.WriteLine($"    {row.Source,-44}: {row.Evidence,12:N0} att");
             }
             catch (Exception ex) when (ex is NpgsqlException { InnerException: TimeoutException } or TimeoutException)
             {
@@ -889,7 +800,7 @@ internal static class IngestCommands
         string srcKey = decomposer.SourceName;
         long att = await EvidenceForSource(srcKey);
         long content = await ContentForSource(srcKey);
-        bool layerOk = await LayerMarkedComplete(decomposer.LayerOrder, srcKey);
+        bool layerOk = await NpgsqlIngestOps.LayerMarkedCompleteAsync(conn, decomposer.LayerOrder, srcKey);
         Console.WriteLine($"  witness [{srcKey}] L{decomposer.LayerOrder}: {att:N0} attestations, {content:N0} content, layer_complete={layerOk}");
 
         if (decomposer.LayerOrder == 10)
@@ -899,27 +810,13 @@ internal static class IngestCommands
             // TOKEN_MAPS_TO/MERGES_WITH/APPEARS_IN + per-circuit Projection
             // trajectories — not the retired tensor-role relations.
             byte[] srcId = decomposer.SourceId.ToBytes();
-            async Task<long> Rel(string rel)
-            {
-                await using var c = Cmd();
-                c.CommandText = "SELECT laplace.evidence_count("
-                    + "p_type => laplace.relation_type_id($1), p_source => $2)";
-                c.Parameters.AddWithValue(rel);
-                c.Parameters.Add(new global::Npgsql.NpgsqlParameter { Value = srcId, NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Bytea });
-                return (long)(await c.ExecuteScalarAsync() ?? 0L);
-            }
+            Task<long> Rel(string rel) =>
+                NpgsqlIngestOps.EvidenceCountForRelationAndSourceIdAsync(conn, rel, srcId);
             long maps = await Rel("TOKEN_MAPS_TO");
             long merges = await Rel("MERGES_WITH");
             long occ = await Rel("APPEARS_IN");
             long structure = await Rel("CONTAINS") + await Rel("PRECEDES");
-            long circuits;
-            await using (var c = Cmd())
-            {
-                c.CommandText = "SELECT count(*) FROM laplace.physicalities p "
-                    + "JOIN laplace.entities e ON e.id = p.entity_id "
-                    + "WHERE p.type = 3 AND e.type_id = laplace.canonical_id('Model_Circuit')";
-                circuits = (long)(await c.ExecuteScalarAsync() ?? 0L);
-            }
+            long circuits = await NpgsqlIngestOps.ModelCircuitTrajectoryCountAsync(conn);
             Console.WriteLine(
                 $"  check model deposition: maps_to={maps:N0} merges={merges:N0} "
                 + $"appears_in={occ:N0} structure={structure:N0} circuit_trajectories={circuits:N0} "
@@ -931,24 +828,15 @@ internal static class IngestCommands
         {
             case "UnicodeDecomposer":
                 {
-
-
-
-                    await using var cmd = Cmd();
-                    cmd.CommandText = @"SELECT laplace.render(laplace.canonical_id('A')), f.tier,
-                                           p.x, p.y, p.z, p.m, encode(p.hilbert_index, 'hex')
-                                    FROM laplace.entity_facets(laplace.canonical_id('A')) f
-                                    CROSS JOIN laplace.entity_physicalities(laplace.canonical_id('A')) p
-                                    WHERE p.type = 1";
-                    await using var rdr = await cmd.ExecuteReaderAsync();
-                    if (await rdr.ReadAsync())
+                    var probe = await NpgsqlIngestOps.UnicodeCapitalAContentProbeAsync(conn);
+                    if (probe.Count > 0)
                     {
+                        var r = probe[0];
                         Console.WriteLine("  check U+0041 'A':");
-                        Console.WriteLine($"    render  : {rdr.GetString(0)}  tier={rdr.GetInt16(1)}");
-                        Console.WriteLine($"    coord   : ({rdr.GetDouble(2):F6}, {rdr.GetDouble(3):F6}, {rdr.GetDouble(4):F6}, {rdr.GetDouble(5):F6})");
+                        Console.WriteLine($"    render  : {r.Render}  tier={r.Tier}");
+                        Console.WriteLine($"    coord   : ({r.X:F6}, {r.Y:F6}, {r.Z:F6}, {r.M:F6})");
                     }
                     else Console.WriteLine("  FAIL: no Unicode CONTENT for U+0041");
-                    await rdr.CloseAsync();
                     long uniProv = await EvidenceForSource("UnicodeDecomposer");
                     Console.WriteLine($"    provenance: {uniProv:N0} UnicodeDecomposer attestations");
                     break;
@@ -1022,4 +910,5 @@ internal static class IngestCommands
                 break;
         }
     }
+
 }

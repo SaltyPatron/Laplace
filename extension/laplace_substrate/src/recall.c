@@ -908,12 +908,11 @@ word_shape_peers_fast_impl(Datum p_word, double p_frechet_max)
      * candidate curves build inside the batched call below (STABLE functions in
      * filters run per row -- the anchor must never be recomputed per candidate). */
     rc = SPI_execute_with_args(
-        "SELECT laplace.word_curve($1), p.coord, e.type_id, p.n_constituents "
-        "FROM laplace.physicalities p "
-        "JOIN laplace.entities e ON e.id = p.entity_id "
-        "WHERE p.entity_id = $1 AND p.type = 1 "
-        "  AND p.trajectory IS NOT NULL AND p.coord IS NOT NULL "
-        "ORDER BY p.id LIMIT 1",
+        "SELECT laplace.word_curve($1), w.coord, w.type_id, w.n_constituents "
+        "FROM laplace.v_word_points w "
+        "WHERE w.id = $1 "
+        "  AND w.trajectory IS NOT NULL AND w.coord IS NOT NULL "
+        "LIMIT 1",
         1, types1, args1, NULL, true, 1);
     if (rc != SPI_OK_SELECT || SPI_processed == 0)
         return PointerGetDatum(construct_empty_array(BYTEAOID));
@@ -953,12 +952,11 @@ word_shape_peers_fast_impl(Datum p_word, double p_frechet_max)
         Datum args2[3] = { p_word, me_coord, Int32GetDatum(500) };
 
         rc = SPI_execute_with_args(
-            "SELECT p2.entity_id, p2.coord, e2.type_id, p2.n_constituents "
-            "FROM laplace.physicalities p2 "
-            "JOIN laplace.entities e2 ON e2.id = p2.entity_id "
-            "WHERE p2.type = 1 AND p2.trajectory IS NOT NULL AND p2.coord IS NOT NULL "
-            "  AND p2.entity_id <> $1 "
-            "ORDER BY p2.coord <<->> $2 LIMIT $3",
+            "SELECT w.id, w.coord, w.type_id, w.n_constituents "
+            "FROM laplace.v_word_points w "
+            "WHERE w.trajectory IS NOT NULL AND w.coord IS NOT NULL "
+            "  AND w.id <> $1 "
+            "ORDER BY w.coord <<->> $2 LIMIT $3",
             3, types2, args2, NULL, true, 0);
         if (rc != SPI_OK_SELECT)
             elog(ERROR, "word_shape_peers_fast: KNN query failed: %s", SPI_result_code_string(rc));

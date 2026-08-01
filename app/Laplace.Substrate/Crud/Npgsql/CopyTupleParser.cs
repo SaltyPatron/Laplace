@@ -28,6 +28,8 @@ internal static class CopyTupleParser
         /// <summary>Partition key (LIST(tier), t2 further HASH(id)) — the
         /// keyed presence probe needs it because id alone cannot prune.</summary>
         public readonly List<short> Tiers = new();
+        /// <summary>type_id — secondary-index contention key for parallel COPY.</summary>
+        public readonly List<Hash128> TypeIds = new();
         public readonly List<StagedRowRef> Rows = new();
     }
 
@@ -35,10 +37,9 @@ internal static class CopyTupleParser
     {
         public readonly List<Hash128> Ids = new();
         public readonly List<Hash128> EntityIds = new();
-        /// <summary>Hilbert index bytes (big-endian, bytewise-comparable) —
-        /// the spatial locality key for partitioning parallel COPY groups
-        /// into disjoint GiST subtrees.</summary>
-        public readonly List<Hash128> HilbertKeys = new();
+        /// <summary>128-bit Hilbert curve index of the row's coord (wire packing
+        /// is 16 octets; value is the index, not a hash).</summary>
+        public readonly List<Hilbert128> HilbertKeys = new();
         public readonly List<StagedRowRef> Rows = new();
     }
 
@@ -84,15 +85,17 @@ internal static class CopyTupleParser
             while (off < len)
             {
                 long rowStart = off;
-                Hash128 id = default;
+                Hash128 id = default, typeId = default;
                 short tier = 0;
                 WalkRow(p, len, ref off, EntityFields, "entities", (field, valOff, valLen) =>
                 {
                     if (field == 0) id = ReadHash(p, valOff, valLen, "entities.id");
                     else if (field == 1) tier = ReadInt16(p, valOff, valLen, "entities.tier");
+                    else if (field == 2) typeId = ReadHash(p, valOff, valLen, "entities.type_id");
                 });
                 result.Ids.Add(id);
                 result.Tiers.Add(tier);
+                result.TypeIds.Add(typeId);
                 result.Rows.Add(new StagedRowRef(b, rowStart, checked((int)(off - rowStart))));
             }
         }
@@ -110,13 +113,14 @@ internal static class CopyTupleParser
             while (off < len)
             {
                 long rowStart = off;
-                Hash128 id = default, entityId = default, hilbert = default;
+                Hash128 id = default, entityId = default;
+                Hilbert128 hilbert = default;
                 WalkRow(p, len, ref off, PhysicalityFields, "physicalities", (field, valOff, valLen) =>
                 {
                     if (field == 0) id = ReadHash(p, valOff, valLen, "physicalities.id");
                     else if (field == 1) entityId = ReadHash(p, valOff, valLen, "physicalities.entity_id");
-                    else if (field == 4 && valLen == 16)
-                        hilbert = ReadHash(p, valOff, valLen, "physicalities.hilbert_index");
+                    else if (field == 4)
+                        hilbert = ReadHilbert(p, valOff, valLen, "physicalities.hilbert_index");
                 });
                 result.Ids.Add(id);
                 result.EntityIds.Add(entityId);
@@ -218,6 +222,13 @@ internal static class CopyTupleParser
         return Hash128.FromBytes(new ReadOnlySpan<byte>(p + valOff, 16));
     }
 
+    private static unsafe Hilbert128 ReadHilbert(byte* p, long valOff, int valLen, string what)
+    {
+        if (valLen != 16)
+            throw new InvalidOperationException($"{what}: expected 128-bit hilbert index (16 octets), got {valLen}");
+        return Hilbert128.FromBytes(new ReadOnlySpan<byte>(p + valOff, 16));
+    }
+
     private static unsafe long ReadInt64(byte* p, long valOff, int valLen, string what)
     {
         if (valLen != 8)
@@ -237,14 +248,13 @@ internal static class CopyTupleParser
 
     /// <summary>
     /// Streams the kept rows as one PGCOPY payload: header, then each row's
-    /// bytes straight out of the native blobs (contiguous kept rows coalesce
-    /// into single windowed copies), then the trailer. When
-    /// <paramref name="patchedCounts"/> is non-null, a row with
-    /// patchedCounts[i] >= 0 has its observation_count value rewritten to
-    /// that value on the way out (the duplicate-collapse representative
-    /// carrying its group's summed games), and its sum_score_fp1e9 value
-    /// rewritten to patchedSums[i] (the group's summed fold score — evidence
-    /// stays the exact record of what was folded).
+    /// bytes out of the native blobs into a large write buffer, then the
+    /// trailer. Contiguous same-blob runs memcpy in one shot; after Apply
+    /// sorts kept rows by id/hilbert for index locality, offsets scatter and
+    /// the old path issued one <c>WriteAsync</c> per row — that is what this
+    /// buffer kills. When <paramref name="patchedCounts"/> is non-null, a row
+    /// with patchedCounts[i] >= 0 has its observation_count / sum_score_fp1e9
+    /// rewritten on the way out.
     /// </summary>
     public static async Task WriteFilteredAsync(
         Stream stream,
@@ -263,29 +273,73 @@ internal static class CopyTupleParser
 
         await stream.WriteAsync(PgBinaryCopy.Header, ct).ConfigureAwait(false);
 
-        byte[]? window = null;
+        // 4 MiB flush cadence — large enough that sorted (non-contiguous) kept
+        // rows stop paying a syscall/await per tuple on the Npgsql COPY stream.
+        const int FlushBytes = 4 << 20;
+        byte[] buf = new byte[FlushBytes];
+        int filled = 0;
+
+        async ValueTask FlushAsync()
+        {
+            if (filled == 0) return;
+            await stream.WriteAsync(buf.AsMemory(0, filled), ct).ConfigureAwait(false);
+            filled = 0;
+        }
+
+        async ValueTask AppendBytesAsync(byte[] src)
+        {
+            int off = 0;
+            while (off < src.Length)
+            {
+                if (filled == buf.Length) await FlushAsync().ConfigureAwait(false);
+                int n = Math.Min(src.Length - off, buf.Length - filled);
+                src.AsSpan(off, n).CopyTo(buf.AsSpan(filled));
+                filled += n;
+                off += n;
+            }
+        }
+
         int i = 0;
         while (i < rows.Count)
         {
             if (patchedCounts is not null && patchedCounts[i] >= 0)
             {
                 var row = rows[i];
-                window = EnsureWindow(window, row.Length);
-                unsafe
+                // Patch into a scratch that rides the flush buffer when small,
+                // otherwise a one-off window (observation-count rewrite path).
+                if (row.Length <= buf.Length - filled)
                 {
-                    new ReadOnlySpan<byte>((void*)(blobs[row.Blob].Ptr + (nint)row.Offset), row.Length)
-                        .CopyTo(window);
+                    unsafe
+                    {
+                        new ReadOnlySpan<byte>((void*)(blobs[row.Blob].Ptr + (nint)row.Offset), row.Length)
+                            .CopyTo(buf.AsSpan(filled));
+                    }
+                    BinaryPrimitives.WriteInt64BigEndian(
+                        buf.AsSpan(filled + countValueOffsets![i], 8), patchedCounts[i]);
+                    BinaryPrimitives.WriteInt64BigEndian(
+                        buf.AsSpan(filled + sumValueOffsets![i], 8), patchedSums![i]);
+                    filled += row.Length;
                 }
-                BinaryPrimitives.WriteInt64BigEndian(
-                    window.AsSpan(countValueOffsets![i], 8), patchedCounts[i]);
-                BinaryPrimitives.WriteInt64BigEndian(
-                    window.AsSpan(sumValueOffsets![i], 8), patchedSums![i]);
-                await stream.WriteAsync(window.AsMemory(0, row.Length), ct).ConfigureAwait(false);
+                else
+                {
+                    await FlushAsync().ConfigureAwait(false);
+                    var scratch = new byte[row.Length];
+                    unsafe
+                    {
+                        new ReadOnlySpan<byte>((void*)(blobs[row.Blob].Ptr + (nint)row.Offset), row.Length)
+                            .CopyTo(scratch);
+                    }
+                    BinaryPrimitives.WriteInt64BigEndian(
+                        scratch.AsSpan(countValueOffsets![i], 8), patchedCounts[i]);
+                    BinaryPrimitives.WriteInt64BigEndian(
+                        scratch.AsSpan(sumValueOffsets![i], 8), patchedSums![i]);
+                    await AppendBytesAsync(scratch).ConfigureAwait(false);
+                }
                 i++;
                 continue;
             }
 
-            // Coalesce a run of contiguous, unpatched rows from the same blob.
+            // Contiguous same-blob run — one memcpy into the flush buffer.
             var first = rows[i];
             long runLen = first.Length;
             int j = i + 1;
@@ -301,24 +355,21 @@ internal static class CopyTupleParser
             IntPtr basePtr = blobs[first.Blob].Ptr + (nint)first.Offset;
             for (long done = 0; done < runLen;)
             {
-                int n = (int)Math.Min(runLen - done, 1 << 23);
-                window = EnsureWindow(window, n);
+                if (filled == buf.Length) await FlushAsync().ConfigureAwait(false);
+                int n = (int)Math.Min(runLen - done, buf.Length - filled);
                 unsafe
                 {
-                    new ReadOnlySpan<byte>((void*)(basePtr + (nint)done), n).CopyTo(window);
+                    new ReadOnlySpan<byte>((void*)(basePtr + (nint)done), n)
+                        .CopyTo(buf.AsSpan(filled));
                 }
-                await stream.WriteAsync(window.AsMemory(0, n), ct).ConfigureAwait(false);
+                filled += n;
                 done += n;
             }
             i = j;
         }
 
+        await FlushAsync().ConfigureAwait(false);
         await stream.WriteAsync(PgBinaryCopy.Trailer, ct).ConfigureAwait(false);
         await stream.FlushAsync(ct).ConfigureAwait(false);
     }
-
-    private static byte[] EnsureWindow(byte[]? window, int needed) =>
-        window is not null && window.Length >= needed
-            ? window
-            : new byte[Math.Max(needed, 64 * 1024)];
 }

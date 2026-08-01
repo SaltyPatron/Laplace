@@ -391,26 +391,17 @@ pg_laplace_hypernyms(PG_FUNCTION_ARGS)
         {
             ArrayType *ids_arr = construct_array(emit_ids, n_emit, BYTEAOID,
                                                  -1, false, TYPALIGN_INT);
-            Oid   rtypes[2] = { BYTEAARRAYOID, BYTEAOID };
-            Datum rargs[2] = { PointerGetDatum(ids_arr), lang };
-            char  rnulls[3] = "  ";
+            Oid   rtypes[1] = { BYTEAARRAYOID };
+            Datum rargs[1] = { PointerGetDatum(ids_arr) };
             int   rc2;
             bool  isnull;
+            Datum label_arr;
 
-            if (lang == (Datum) 0)
-                rnulls[1] = 'n';
-            rc2 = SPI_execute_with_args(
-                "SELECT laplace.realize_batch($1, $2)",
-                2, rtypes, rargs, rnulls, true, 1);
-            if (rc2 == SPI_OK_SELECT && SPI_processed > 0)
-            {
-                Datum arr = SPI_getbinval(SPI_tuptable->vals[0],
-                                          SPI_tuptable->tupdesc, 1, &isnull);
-                if (!isnull)
-                    deconstruct_array(DatumGetArrayTypePCopy(arr), TEXTOID,
-                                      -1, false, TYPALIGN_INT,
-                                      &labels, &label_nulls, &n_labels);
-            }
+            label_arr = spi_realize_batch(PointerGetDatum(ids_arr), lang);
+            if (label_arr != (Datum) 0)
+                deconstruct_array(DatumGetArrayTypePCopy(label_arr), TEXTOID,
+                                  -1, false, TYPALIGN_INT,
+                                  &labels, &label_nulls, &n_labels);
 
             rc2 = SPI_execute_with_args(
                 "SELECT array_agg(laplace.synset_gloss(u.id) ORDER BY u.ord) "

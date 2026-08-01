@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Text;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
@@ -272,10 +273,12 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>
             [EnumeratorCancellation] CancellationToken ct)
         {
             bool hdr = false;
-            await foreach (var line in File.ReadLinesAsync(
-                               Path.Combine(ecosystemPath, "iso-639-3_Retirements.tab"), ct))
+            string path = Path.Combine(ecosystemPath, "iso-639-3_Retirements.tab");
+            await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
             {
                 if (!hdr) { hdr = true; continue; }
+                if (lineMem.Length == 0) continue;
+                string line = Encoding.UTF8.GetString(lineMem.Span);
                 var c = line.Split('\t');
                 if (c.Length < 4) continue;
                 string retired = c[0].Trim(), changeTo = c[3].Trim();
@@ -322,10 +325,12 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>
             [EnumeratorCancellation] CancellationToken ct)
         {
             bool hdr = false;
-            await foreach (var line in File.ReadLinesAsync(
-                               Path.Combine(ecosystemPath, "iso-639-3_Name_Index.tab"), ct))
+            string path = Path.Combine(ecosystemPath, "iso-639-3_Name_Index.tab");
+            await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
             {
                 if (!hdr) { hdr = true; continue; }
+                if (lineMem.Length == 0) continue;
+                string line = Encoding.UTF8.GetString(lineMem.Span);
                 var c = line.Split('\t');
                 if (c.Length < 2) continue;
                 string id = c[0].Trim(), printName = c[1].Trim();
@@ -340,9 +345,11 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>
         [EnumeratorCancellation] CancellationToken ct)
     {
         bool headerSkipped = false;
-        await foreach (var line in File.ReadLinesAsync(path, ct))
+        await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
         {
             if (!headerSkipped) { headerSkipped = true; continue; }
+            if (lineMem.Length == 0) continue;
+            string line = Encoding.UTF8.GetString(lineMem.Span);
             if (string.IsNullOrWhiteSpace(line)) continue;
 
             var parts = line.Split('\t');

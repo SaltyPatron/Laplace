@@ -24,11 +24,10 @@ public sealed class ContentLadderLedgerTests : IDisposable
 {
     private static readonly Hash128 Source = WiktionaryDecomposer.Source;
 
-    public ContentLadderLedgerTests() => ContentLadderLedger.End();
+    public ContentLadderLedgerTests() => ContentLadderLedger.Reset();
 
-    // Static run-scoped state in a shared-process suite: leave it disarmed on the way out
-    // so no later test inherits an armed ledger.
-    public void Dispose() => ContentLadderLedger.End();
+    // Static process state: wipe membership on the way out so no later test inherits skips.
+    public void Dispose() => ContentLadderLedger.Reset();
 
     private static SubstrateChangeBuilder NewBuilder(string context) =>
         new(Source, context, null,
@@ -57,7 +56,7 @@ public sealed class ContentLadderLedgerTests : IDisposable
     [MemberData(nameof(Surfaces))]
     public void Disarmed_never_skips_and_keeps_the_derived_id(string surface)
     {
-        ContentLadderLedger.End();
+        ContentLadderLedger.Reset();
         Assert.False(ContentLadderLedger.Armed);
 
         var first = Stage(surface, "disarmed-1");
@@ -141,7 +140,7 @@ public sealed class ContentLadderLedgerTests : IDisposable
     }
 
     [Fact]
-    public void End_disarms_so_the_next_run_re_proves_presence()
+    public void End_disarms_but_Begin_keeps_membership_for_warm_reingest()
     {
         var derived = Stage("filter", "baseline");
         ContentLadderLedger.Begin();
@@ -152,14 +151,33 @@ public sealed class ContentLadderLedgerTests : IDisposable
 
         Assert.False(ContentLadderLedger.Armed);
         Assert.False(ContentLadderLedger.IsPersisted(derived));
-        Assert.Equal(derived, Stage("filter", "after-end"));
+
+        // Warm re-arm of the same source: membership survives End.
+        ContentLadderLedger.Begin();
+        Assert.True(ContentLadderLedger.Armed);
+        Assert.True(ContentLadderLedger.IsPersisted(derived));
+        Assert.Equal(derived, Stage("filter", "warm"));
+    }
+
+    [Fact]
+    public void Reset_clears_membership_for_source_change()
+    {
+        var derived = Stage("filter", "baseline");
+        ContentLadderLedger.Begin();
+        ContentLadderLedger.MarkPersisted([derived]);
+        ContentLadderLedger.Reset();
+
+        Assert.False(ContentLadderLedger.Armed);
+        ContentLadderLedger.Begin();
+        Assert.False(ContentLadderLedger.IsPersisted(derived));
+        Assert.Equal(derived, Stage("filter", "after-reset"));
     }
 
     [Fact]
     public void Marking_outside_a_run_is_a_no_op()
     {
         var derived = Stage("filter", "baseline");
-        ContentLadderLedger.End();
+        ContentLadderLedger.Reset();
 
         ContentLadderLedger.MarkPersisted([derived]);
 

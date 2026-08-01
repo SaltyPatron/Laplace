@@ -45,11 +45,11 @@ BEGIN
     -- (the same two-step structural_neighbors_of uses) and label once.
     RETURN QUERY
     WITH g AS (
-        SELECT p.entity_id,
-               public.laplace_angular_distance_4d(p.coord, v_anchor) AS geo
-        FROM physicalities p
-        WHERE p.type = 1 AND p.coord IS NOT NULL
-        ORDER BY p.coord <<->> v_anchor
+        SELECT w.id AS entity_id,
+               public.laplace_angular_distance_4d(w.coord, v_anchor) AS geo
+        FROM v_word_points w
+        WHERE w.coord IS NOT NULL
+        ORDER BY w.coord <<->> v_anchor
         LIMIT GREATEST(p_geodesic_k * 6, 60)
     ),
     dedup AS (
@@ -76,11 +76,10 @@ BEGIN
     IF v_traj IS NOT NULL THEN
         RETURN QUERY
         WITH pre AS (
-            SELECT p.entity_id, p.trajectory
-            FROM physicalities p
-            JOIN entities e ON e.id = p.entity_id AND e.tier = 2
-            WHERE p.type = 1 AND p.trajectory IS NOT NULL
-            ORDER BY p.coord <<->> v_anchor
+            SELECT w.id AS entity_id, w.trajectory
+            FROM v_word_points w
+            WHERE w.tier = 2 AND w.trajectory IS NOT NULL
+            ORDER BY w.coord <<->> v_anchor
             LIMIT 500
         ),
         f AS (

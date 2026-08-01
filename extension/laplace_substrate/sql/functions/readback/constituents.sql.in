@@ -4,12 +4,10 @@ CREATE OR REPLACE FUNCTION constituents(p_id bytea)
     SET search_path = @extschema@, public AS $$
     SELECT u.ordinal, u.entity_id, u.run_length, u.flags
     FROM (
-        SELECT p.trajectory AS traj
-        FROM physicalities p
-        WHERE p.entity_id = p_id
-          AND p.type = 1
-          AND p.trajectory IS NOT NULL
-        ORDER BY p.id
+        SELECT w.trajectory AS traj
+        FROM v_word_points w
+        WHERE w.id = p_id AND w.trajectory IS NOT NULL
+        ORDER BY w.physicality_id
         LIMIT 1
     ) t
     CROSS JOIN LATERAL public.laplace_trajectory_constituents(t.traj) AS u

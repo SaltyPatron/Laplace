@@ -7,7 +7,12 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.OpenSubtitles;
 
-public sealed class OpenSubtitlesDecomposer : RelationTripleDecomposerBase<OpenSubtitlesSource, FullScope>, IIngestInventoryProvider
+/// <summary>
+/// Multi-file relation-triple source. Each language-pair zip is one
+/// <see cref="ExtractFileAsync"/> unit; the pool parallelizes across zips.
+/// </summary>
+public sealed class OpenSubtitlesDecomposer
+    : RelationTripleMultiFileDecomposerBase<OpenSubtitlesSource, FullScope>, IIngestInventoryProvider
 {
     public static readonly Hash128 Source = OpenSubtitlesSource.SourceId;
     public static readonly Hash128 TrustClass = OpenSubtitlesSource.TrustClass;
@@ -34,21 +39,22 @@ public sealed class OpenSubtitlesDecomposer : RelationTripleDecomposerBase<OpenS
 
     protected override ConcurrentDictionary<string, byte>? VocabularyReadback => LanguageNames;
 
-    protected override async IAsyncEnumerable<RelationTripleRecord> ExtractRecordsAsync(
-        string ecosystemPath, DecomposerOptions options,
-        [EnumeratorCancellation] CancellationToken ct = default)
+    protected override IReadOnlyList<(string Path, string Label)> ListFiles(
+        string ecosystemPath, DecomposerOptions options)
     {
-        if (!Directory.Exists(ecosystemPath)) yield break;
-        foreach (var (zipPath, _) in SelectZips(ecosystemPath, options))
-        {
-            string pairStem = Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(zipPath));
-            await foreach (var pair in OpenSubtitlesZipIngest.ReadZipPairsAsync(zipPath, pairStem, ct))
-            {
-                yield return new RelationTripleRecord(
-                    pair.LineA, "IS_TRANSLATION_OF", pair.LineB,
-                    SubjectLangId: pair.LangA, ObjectLangId: pair.LangB);
-            }
-        }
+        if (!Directory.Exists(ecosystemPath)) return [];
+        return SelectZips(ecosystemPath, options)
+            .Select(z => (z.Path, $"opensubtitles/{z.Stem}"))
+            .ToList();
+    }
+
+    protected override async IAsyncEnumerable<RelationTripleRecord> ExtractFileAsync(
+        string filePath, string fileLabel, DecomposerOptions options,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        string pairStem = Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(filePath));
+        await foreach (var record in OpenSubtitlesZipIngest.ReadZipTripleAsync(filePath, pairStem, ct))
+            yield return record;
     }
 
     public Task<IngestInventory?> DescribeInputAsync(
@@ -60,7 +66,8 @@ public sealed class OpenSubtitlesDecomposer : RelationTripleDecomposerBase<OpenS
         if (options.MaxInputUnits > 0)
         {
             var paths = zips.Select(z => z.Path).ToList();
-            return Task.FromResult(IngestInventory.FromFiles("pairs", paths, options.MaxInputUnits, ct));
+            return Task.FromResult(IngestInventory.FromFiles(
+                "pairs", paths, options.MaxInputUnits, ct, tracksFileCompletion: true));
         }
         var files = zips
             .Select(z =>
@@ -69,7 +76,8 @@ public sealed class OpenSubtitlesDecomposer : RelationTripleDecomposerBase<OpenS
                 return new IngestFileSpec(z.Stem, z.Path, pairs);
             })
             .ToList();
-        return Task.FromResult<IngestInventory?>(new IngestInventory("pairs", files.Sum(f => f.InputUnits), files));
+        return Task.FromResult<IngestInventory?>(
+            new IngestInventory("pairs", files.Sum(f => f.InputUnits), files, TracksFileCompletion: true));
     }
 
     public override async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)

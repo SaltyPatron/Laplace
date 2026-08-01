@@ -1,6 +1,6 @@
 namespace Laplace.Decomposers.Model;
 
-public sealed class ArchitectureProfile
+public sealed record ArchitectureProfile
 {
     public required string ModelType { get; init; }
 
@@ -35,13 +35,10 @@ public sealed class ArchitectureProfile
     public string? TokenTypeEmbeddings { get; init; }
     public string? EmbeddingNormWeight { get; init; }
     public string? EmbeddingNormBias { get; init; }
-    // Norm epsilon; config-key override (CON-CFG gate, doc 27) still owed.
+
+    // Family-default ε / activation — BindWitnessed overlays config.json values.
     public double NormEps { get; init; } = 1e-6;
-
-
-
-
-
+    public string HiddenAct { get; init; } = "silu";
 
     public static ArchitectureProfile For(string modelType) => modelType.ToLowerInvariant() switch
     {
@@ -52,12 +49,40 @@ public sealed class ArchitectureProfile
         _ => Llama,
     };
 
+    /// <summary>
+    /// Family skeleton + config-witnessed scalars. NormEps and HiddenAct are
+    /// source-asserted (#540/#541); static profiles only carry family defaults.
+    /// </summary>
+    public static ArchitectureProfile For(ModelConfig cfg)
+    {
+        var skeleton = For(cfg.ModelType);
+        string act = string.IsNullOrWhiteSpace(cfg.HiddenAct) ? skeleton.HiddenAct : cfg.HiddenAct;
+        return skeleton with { NormEps = cfg.NormEps, HiddenAct = act };
+    }
+
+    /// <summary>
+    /// Native <c>ffn_write_vectors_d</c> act code from the witnessed identity:
+    /// 0 = SiLU-gated (requires a gate tensor), 1 = erf-GELU ungated.
+    /// Unknown strings keep the prior gate-presence heuristic so ingest does not refuse.
+    /// </summary>
+    public int ResolveFfnActCode(bool gatePresent)
+    {
+        string a = HiddenAct.Trim().ToLowerInvariant();
+        if (a is "gelu" or "gelu_new" or "gelu_fast" or "gelu_pytorch_tanh" or "quick_gelu")
+            return 1;
+        if (a is "silu" or "swish")
+            return gatePresent ? 0 : 1;
+        return gatePresent ? 0 : 1;
+    }
+
     public static readonly ArchitectureProfile Llama = new()
     {
         ModelType = "llama",
         HasGate = true,
         HasBiases = false,
         RmsNorm = true,
+        HiddenAct = "silu",
+        NormEps = 1e-5,
         EmbedTokens = "model.embed_tokens.weight",
         LmHead = "lm_head.weight",
         FinalNorm = "model.norm.weight",
@@ -97,6 +122,8 @@ public sealed class ArchitectureProfile
         HasGate = false,
         HasBiases = true,
         RmsNorm = false,
+        HiddenAct = "gelu_new",
+        NormEps = 1e-5,
         EmbedTokens = "model.embed_tokens.weight",
         LmHead = "lm_head.weight",
         FinalNorm = "model.final_layernorm.weight",
@@ -135,6 +162,8 @@ public sealed class ArchitectureProfile
         HasGate = true,
         HasBiases = true,
         RmsNorm = true,
+        HiddenAct = "silu",
+        NormEps = 1e-6,
         EmbedTokens = "model.embed_tokens.weight",
         LmHead = "lm_head.weight",
         FinalNorm = "model.norm.weight",
@@ -168,18 +197,13 @@ public sealed class ArchitectureProfile
         },
     };
 
-
-
-
-
-
-
     public static readonly ArchitectureProfile Bert = new()
     {
         ModelType = "bert",
         HasGate = false,
         HasBiases = true,
         RmsNorm = false,
+        HiddenAct = "gelu",
         PositionEmbeddings = "embeddings.position_embeddings.weight",
         TokenTypeEmbeddings = "embeddings.token_type_embeddings.weight",
         EmbeddingNormWeight = "embeddings.LayerNorm.weight",

@@ -54,19 +54,12 @@ Rule #6: No duplicate/overlapping logic without a documented reason it isn't con
       one of the copies.
     - This is the concrete first target for the "foundational set of functions/views" ask:
       a shared view layer that every consumer joins against instead of re-deriving.
-      STATUS UPDATE (2026-07-05): v_consensus_unrefuted BUILT + deployed to 21 files
-      (Issue 30); consensus_peer migrated too (ee3bfef); edge_rank() centralized (d061beb).
-      Still outstanding: v_word_senses, the remaining NOT-refuted inliners (relate_path,
-      senses_with_context x2), and the missing views from the 07 audit (v_word_points —
-      ~25 inline copies of the entity+physicality type=1 join — word_anchor(),
-      v_attestation_readable). Roadmap + statuses: 07 §5 re-baseline; execution order:
-      .scratchpad/13 Phase 2.
-      [Repointed 2026-07-20: the STATUS above is still correct — all four of v_word_senses /
-      v_word_points / word_anchor / v_attestation_readable return 0 rows from api() on the
-      live DB. But the execution pointer was dead: .scratchpad/13 is marked "NOT the active
-      plan" (docs/INDEX.md:40) and .scratchpad is an append-only historical log. **The
-      tracker is GitHub issue #463** (read-side: v_word_points + word_anchor() +
-      v_attestation_readable unbuilt — Rule #6 residual), which also covers v_word_senses.]
+      STATUS UPDATE (2026-08-01): v_consensus_unrefuted remains; v_word_points,
+      word_anchor(), v_word_senses, and v_attestation_readable are BUILT and registered
+      in manifest.install / manifest.upgrade. Call sites migrate onto v_word_points /
+      word_anchor instead of hand-rolling entities⋈physicalities type=1. Remaining:
+      finish migrating every type=1 inliner; drain remaining NOT-refuted / define wrappers;
+      shrink HandWrittenSqlAllowlist onto NpgsqlRead / edges(). Tracker: GitHub #463.
 
 Rule #7: `_fast` is the established suffix for a native-C replacement of a CTE-blocked SQL
 chain (define_fast, word_shape_peers_fast). Keep using it — don't invent `_v2`/`_native`/etc.
@@ -84,34 +77,42 @@ wrong point in the sequence is a violation even if the algorithm itself is corre
        bulk read of touched edge ids).
     5. ONE trunk->tier descent across the whole working set -- O(tiers) round trips per
        ingest, each a bulk set-membership probe, present nodes pruning their subtrees.
-    6. The descent output is the write list. Writes are bulk raw-binary COPY of the
-       client-deduped rows into per-session TEMP staging, then ONE set-based
-       INSERT .. SELECT .. ON CONFLICT per table adjudicates presence AT INSERT TIME:
-       DO NOTHING for content (entities/physicalities), DO UPDATE for attestations
-       (present rows merge observation counts — dropping counts drops testimony).
-       The client owns DEDUP (one row per id per statement — DO UPDATE faults on
-       intra-statement duplicates); the server owns PRESENCE (the PK arbiter is
-       always live). No standalone apply-side existence probe — the bitmap probes
-       (*_stored_bitmap / *_exist_bitmap) remain compose-side (Layer A) only.
-       [AMENDED 2026-07-18 — deliberate, measured reversal of the former "No
-       anti-join. No ON CONFLICT. No server-side re-verification." clause: the
-       apply-side probe re-verified ~12M mostly-novel ids per apply at cache-cold
-       random I/O, measured 37-53 MINUTES per apply at Wiktionary scale. The DB is
-       the lookup structure; adjudication rides the same PK descent the write pays
-       anyway, fused with the insert.]
-    STATUS RE-BASELINE (2026-07-05, verified against source — the 2026-07-02 violations
-    list preserved in git history is now HISTORICAL): all five phases of the write-protocol
-    plan LANDED. Working-set mode is the adapter default (one builder per record stream,
-    ids probed at most once per set); apply_batch.c is DELETED (drop-files in both
-    manifests) and the ingest_bulk_novel GUC no longer exists — the write lane is
-    NpgsqlWorkingSetApply (pure parallel binary COPY of client-proven-novel rows,
-    client-side duplicate collapse, journal-idempotent retries); Glicko accumulation AND
-    the consensus fold are client-side (ConsensusAccumulatingWriter + NpgsqlConsensusFold,
-    bit-parity-tested against the retired server fold). Remaining Rule #8 gaps:
-    (a) step 5's O(tiers) BULK descent across the whole working set (Issue 19's
-    architectural half); (b) apply of set N does not overlap compose of N+1 (apply-bound
-    at chess scale); (c) seven adapter lanes feed this one spine — unification is
-    .scratchpad/13 Phase 1 (Issue 45).
+       This descent is the write protocol's novelty proof — mandatory, not optional,
+       and not something step 6's apply-side probe substitutes for. Lives in
+       IngestDescentFlush.FinalizePendingAsync -> BulkDescent ->
+       TierTreeDescent.ProbeBatchEmitBitmapsAsync (ContentTierSpine).
+    6. The descent output is the write list: rows step 5 has already proven novel.
+       Writes are pure bulk raw-binary COPY of the client-deduped rows straight into
+       entities -> physicalities -> attestations (NpgsqlWorkingSetApply.cs). No TEMP
+       staging tables. No ON CONFLICT on a table landing — the only ON CONFLICT in the
+       apply path is the ingest_flush_journal idempotency-token insert (DO NOTHING),
+       which guards apply-retry replay and has nothing to do with row presence.
+       Immediately before the COPY, in the same transaction, the apply runs its own
+       presence probe (entities_stored_bitmap / physicalities_exist_bitmap /
+       attestations_exist_bitmap) over the claimed-novel set and drops any row the
+       probe finds already present; a present attestation is not dropped but merged
+       (attestation_merge, additive observation-count fold — dropping counts drops
+       testimony). This probe is NOT a second novelty proof and does not replace step
+       5's descent: it is a concurrent-overlap check, closing the one window step 5
+       cannot see across — step 5's descent runs unlocked, and a second ingest can
+       commit a subtree between that descent and this apply's transaction. The probe
+       is flat over the whole claimed-novel set, not frontier-only. The client owns
+       DEDUP (one row per id per statement); the probe also owns PRESENCE inside the
+       apply transaction. See NpgsqlWorkingSetApply.cs's header for tier-0/structural
+       fast paths that let some ids skip the probe without weakening it.
+       [SUPERSEDED: 2026-07-18 ca1148f amended this step to TEMP staging + INSERT ..
+       ON CONFLICT per table (measured old probe at 37-53 min/apply cache-cold).
+       2026-07-19 da69225 reverted to probe-then-COPY. Treat ON CONFLICT-on-landing
+       as attempted-and-reverted, not a default restore target — re-attempt needs
+       fresh measurement against today's probe mitigations.]
+    STATUS RE-BASELINE (2026-08-01, verified against source): write-protocol spine is
+    IngestBatchPipeline → ConsensusAccumulatingWriter → IngestDescentFlush/TierTreeDescent
+    → NpgsqlWorkingSetApply (concurrent-overlap probe + pure binary COPY). Step 5's
+    O(tiers) bulk descent is LANDED (the 2026-07-05 baseline listed it as open; closed).
+    apply_batch.c remains DELETED. There is NO NpgsqlConsensusFold class — that name
+    never shipped; read ghosts as ConsensusAccumulatingWriter. Remaining Rule #8 gaps:
+    (a) apply of set N overlapping compose of N+1 (apply-bound at chess scale);
+    (b) adapter-lane unification onto one spine (.scratchpad/13 Phase 1 / Issue 45).
 
 Rule #9: The CLI is a server workload — it runs with Server GC (DOTNET_gcServer=1 +
 DOTNET_GCHeapCount=8 in env.cmd, guarded). Grounded in: parallel chess compose measured
@@ -150,7 +151,7 @@ Open items surfaced by the 2026-07-01 survey, not yet actioned:
       order-sensitive/order-insensitive metric bug: survey did one pass, found no other
       confirmed instance, but explicitly flagged this as not exhaustive.
     - Shared view layer: STARTED, see Rule #6's 2026-07-05 status update (v_consensus_
-      unrefuted deployed; v_word_points/word_anchor et al. still missing).
+      unrefuted deployed; v_word_points/word_anchor/v_word_senses/v_attestation_readable built 2026-08-01).
 
 ================================================================================
 LESSONS THAT MUST NOT BE RELEARNED (promoted 2026-07-18 from the closed

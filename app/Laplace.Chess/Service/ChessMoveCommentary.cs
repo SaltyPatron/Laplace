@@ -1,8 +1,8 @@
 using global::Npgsql;
-using NpgsqlTypes;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.Modality.Chess;
+using Laplace.SubstrateCRUD.Npgsql;
 
 namespace Laplace.Chess.Service;
 
@@ -58,33 +58,14 @@ public static class ChessMoveCommentary
             Hash128 posId;
             lock (ChessCompose.Gate) { posId = ChessCompose.PositionId(positionSurface); }
 
-            Hash128 textId;
-            await using (var conn = await ds.OpenConnectionAsync(ct))
-            await using (var cmd = conn.CreateCommand())
-            {
-                cmd.CommandText =
-                    "SELECT subject_id FROM laplace.attestations "
-                    + "WHERE object_id = $1 AND type_id = $2 LIMIT 1";
-                cmd.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Bytea, Value = posId.ToBytes() });
-                cmd.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Bytea, Value = ExplainsRelation.ToBytes() });
-                var scalar = await cmd.ExecuteScalarAsync(ct);
-                if (scalar is not byte[] bytes) return null;
-                textId = Hash128.FromBytes(bytes);
-            }
+            var subject = await NpgsqlSubstrateReads.FirstAttestationSubjectAsync(
+                ds, posId.ToBytes(), ExplainsRelation.ToBytes(), ct);
+            if (subject is null) return null;
 
-            await using (var conn = await ds.OpenConnectionAsync(ct))
-            await using (var render = conn.CreateCommand())
-            {
-                render.CommandText = "SELECT laplace.render_text_batch($1, 48)";
-                render.Parameters.Add(new NpgsqlParameter
-                {
-                    NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea,
-                    Value = new[] { textId.ToBytes() },
-                });
-                var rendered = await render.ExecuteScalarAsync(ct);
-                if (rendered is string[] { Length: > 0 } texts && !string.IsNullOrWhiteSpace(texts[0]))
-                    return $"Book: {Truncate(texts[0], 70)}";
-            }
+            var rendered = await NpgsqlSubstrateReads.RenderTextBatchAsync(
+                ds, [subject], 48, ct);
+            if (rendered is { Length: > 0 } texts && !string.IsNullOrWhiteSpace(texts[0]))
+                return $"Book: {Truncate(texts[0], 70)}";
         }
         catch
         {
@@ -115,42 +96,17 @@ public static class ChessMoveCommentary
     private static async Task<string?> MotifLineAsync(NpgsqlDataSource ds, string motif, CancellationToken ct)
     {
         await using var conn = await ds.OpenConnectionAsync(ct);
+        var recall = await NpgsqlSubstrateReads.RecallAsync(conn, $"define {motif}", ct);
+        if (recall.Count > 0 && !string.IsNullOrWhiteSpace(recall[0].Reply))
+            return $"{Label(motif)}: {Truncate(recall[0].Reply, 60)}";
 
-        await using (var recall = conn.CreateCommand())
-        {
-            recall.CommandText = "SELECT reply, eff_mu FROM laplace.recall(@p) ORDER BY eff_mu DESC LIMIT 1";
-            recall.Parameters.AddWithValue("p", $"define {motif}");
-            await using var r = await recall.ExecuteReaderAsync(ct);
-            if (await r.ReadAsync(ct))
-            {
-                string reply = r.IsDBNull(0) ? "" : r.GetString(0);
-                if (!string.IsNullOrWhiteSpace(reply))
-                    return $"{Label(motif)}: {Truncate(reply, 60)}";
-            }
-        }
+        var traj = await NpgsqlSubstrateReads.RecallTrajectoryAnswerAsync(ds, motif, 2, ct);
+        if (!string.IsNullOrWhiteSpace(traj))
+            return $"{Label(motif)} — {Truncate(traj, 60)}";
 
-        await using (var traj = conn.CreateCommand())
-        {
-            traj.CommandText =
-                "SELECT answer FROM laplace.recall_trajectories(laplace.word_id(@w), @k) LIMIT 1";
-            traj.Parameters.AddWithValue("w", motif);
-            traj.Parameters.AddWithValue("k", 2);
-            var scalar = await traj.ExecuteScalarAsync(ct);
-            if (scalar is string answer && !string.IsNullOrWhiteSpace(answer))
-                return $"{Label(motif)} — {Truncate(answer, 60)}";
-        }
-
-        await using (var facts = conn.CreateCommand())
-        {
-            facts.CommandText =
-                "SELECT fact FROM laplace.salient_facts(laplace.word_id(@w), NULL, @k) "
-                + "ORDER BY eff_mu DESC LIMIT 1";
-            facts.Parameters.AddWithValue("w", motif);
-            facts.Parameters.AddWithValue("k", 3);
-            var scalar = await facts.ExecuteScalarAsync(ct);
-            if (scalar is string fact && !string.IsNullOrWhiteSpace(fact))
-                return $"{Label(motif)} — {Truncate(fact, 60)}";
-        }
+        var fact = await NpgsqlSubstrateReads.SalientFactForWordAsync(ds, motif, 3, ct);
+        if (!string.IsNullOrWhiteSpace(fact))
+            return $"{Label(motif)} — {Truncate(fact, 60)}";
 
         return inputMotifOnly(motif);
     }

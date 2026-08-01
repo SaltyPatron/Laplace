@@ -942,20 +942,59 @@ def _rank_to_band(rank_key: str) -> int:
 
 
 def emit_highway_perfcache(rel: dict, bin_out_dir: Path) -> None:
-    """Generate laplace_highway_perfcache.bin + highway_manifest.h from relation_types.toml."""
+    """Generate laplace_highway_perfcache.bin + highway_manifest.h from relation_types.toml.
+
+    ADR 0001 / GH #551: bits are an explicit append-only registry in the TOML
+    (`bit = N`). Codegen VALIDATES (required, unique, in-range, no reuse) and
+    never reassigns alphabetically — adding a relation must not renumber peers.
+    """
     relations = rel["relation"]
     ranks     = rel["ranks"]
 
-    canon_set   = sorted({r["canonical"] for r in relations})
+    HIGHWAY_MASK_BITS = 256
+
+    missing = [r["canonical"] for r in relations if "bit" not in r]
+    if missing:
+        raise SystemExit(
+            "codegen-attestation-law: every [[relation]] requires an explicit bit = N "
+            f"(ADR 0001 / GH #551). Missing on: {', '.join(missing[:8])}"
+            + ("…" if len(missing) > 8 else "")
+        )
+
     name_to_rel = {r["canonical"]: r for r in relations}
-    N      = len(canon_set)
+    bit_to_name: dict[int, str] = {}
+    for r in relations:
+        name = r["canonical"]
+        bit = int(r["bit"])
+        if bit < 0 or bit >= HIGHWAY_MASK_BITS:
+            raise SystemExit(
+                f"codegen-attestation-law: {name} bit={bit} out of range "
+                f"[0, {HIGHWAY_MASK_BITS})"
+            )
+        if bit in bit_to_name:
+            raise SystemExit(
+                f"codegen-attestation-law: bit {bit} claimed by both "
+                f"{bit_to_name[bit]!r} and {name!r} — bits are append-only and unique"
+            )
+        bit_to_name[bit] = name
+
+    # Emit order: ascending bit (stable layout). Alphabetical sort is dead.
+    ordered = sorted(bit_to_name.items())  # (bit, name)
+    N      = len(ordered)
     N_BANDS = len(_RANK_BANDS)
+
+    if N > HIGHWAY_MASK_BITS:
+        raise SystemExit(
+            f"codegen-attestation-law: {N} governed relations exceed the "
+            f"{HIGHWAY_MASK_BITS}-bit highway mask. Widen entities.highway_mask "
+            f"or reduce the governed set — do not let this generate."
+        )
 
     band_masks: list[bytearray] = [bytearray(32) for _ in range(N_BANDS)]
 
     string_section = bytearray()
     name_off: dict[str, int] = {}
-    for name in canon_set:
+    for _bit, name in ordered:
         name_off[name] = len(string_section)
         string_section.extend(name.encode("utf-8"))
         string_section.append(0)
@@ -981,7 +1020,7 @@ def emit_highway_perfcache(rel: dict, bin_out_dir: Path) -> None:
     assert len(header) == HEADER_SIZE, f"header {len(header)}"
 
     records = bytearray()
-    for bit_pos, name in enumerate(canon_set):
+    for bit_pos, name in ordered:
         r        = name_to_rel[name]
         rank_key = r["rank"]
         rank_val = float(ranks.get(rank_key, 0.09))
@@ -992,8 +1031,8 @@ def emit_highway_perfcache(rel: dict, bin_out_dir: Path) -> None:
 
         parent    = r.get("parent")
         parent_bit: int = -1
-        if parent and parent in name_off:
-            parent_bit = canon_set.index(parent)
+        if parent and parent in name_to_rel:
+            parent_bit = int(name_to_rel[parent]["bit"])
 
         rec = struct.pack("<IBBBBfh18x",
                           noff, nlen, band, bit_pos, sym, rank_val, parent_bit)
@@ -1021,6 +1060,7 @@ def emit_highway_perfcache(rel: dict, bin_out_dir: Path) -> None:
         "#pragma once",
         "",
         "/* Generated from engine/manifest/relation_types.toml — do not edit. */",
+        "/* Bits are the explicit append-only registry (ADR 0001 / GH #551). */",
         "",
         f"#define LAPLACE_HIGHWAY_MAGIC    0x{_HIGHWAY_MAGIC:08X}u",
         "#define LAPLACE_HIGHWAY_VERSION  1u",
@@ -1031,28 +1071,8 @@ def emit_highway_perfcache(rel: dict, bin_out_dir: Path) -> None:
         "",
         "/* Bit position of each relation type in the 256-bit highway mask */",
     ]
-    # The mask is 256 bits wide (entities.highway_mask is bytea, 32 bytes -- verified
-    # against a live row: octet_length * 8 = 256). Bits are assigned by position in
-    # canon_set, and nothing bounded that position, so relation number 257 would have
-    # emitted `#define HIGHWAY_BIT_X 256u` -- a bit that cannot be set in a 256-bit mask
-    # and cannot be tested. No compile error, no runtime error: the relation would simply
-    # never participate in any mask-gated walk, silently, forever.
-    #
-    # MEASURED 2026-08-01: 207 relations occupy bits 0..206, leaving 49. Bits are assigned
-    # ALPHABETICALLY, so an addition renumbers every bit after it and owes a full reseed
-    # -- which means the wall arrives during a reseed campaign, the worst possible moment
-    # to discover it. Fail here instead, where the manifest is edited.
-    HIGHWAY_MASK_BITS = 256
-    if len(canon_set) > HIGHWAY_MASK_BITS:
-        raise SystemExit(
-            f"codegen-attestation-law: {len(canon_set)} governed relations exceed the "
-            f"{HIGHWAY_MASK_BITS}-bit highway mask. Bits are assigned alphabetically, so "
-            f"every relation past {HIGHWAY_MASK_BITS} silently gets a bit that cannot be "
-            f"set or tested. Widen entities.highway_mask (and every reader of it) or "
-            f"reduce the governed set -- do not let this generate."
-        )
 
-    for bit_pos, name in enumerate(canon_set):
+    for bit_pos, name in ordered:
         lines.append(f"#define HIGHWAY_BIT_{name:<50} {bit_pos}u")
 
     lines += [

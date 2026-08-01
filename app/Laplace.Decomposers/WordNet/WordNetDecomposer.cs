@@ -176,7 +176,8 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
         if (paths.Count == 0) return Task.FromResult<IngestInventory?>(null);
         if (options.MaxInputUnits > 0)
             return Task.FromResult(IngestInventory.FromFiles("synsets", paths, options.MaxInputUnits, ct));
-        var files = paths.Select(p => new IngestFileSpec(Path.GetFileName(p), p, CountSynsetLines(p))).ToList();
+        var files = paths.Select(p => new IngestFileSpec(
+            Path.GetFileName(p), p, EtlInventory.EstimateNewlineCount(p, ct))).ToList();
         // Decompose runs four streams (synsets, index.sense, *.exc,
         // sentidx.vrb) against one consumed-units counter — a synsets-only
         // total made progress read ~284%. Uncapped inventory counts them all;
@@ -185,63 +186,17 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
         foreach (var extra in new[] { "index.sense", "noun.exc", "verb.exc", "adj.exc", "adv.exc", "sentidx.vrb" })
         {
             string ep = Path.Combine(dictDir, extra);
-            if (File.Exists(ep)) files.Add(new IngestFileSpec(extra, ep, CountNonEmptyLines(ep)));
+            if (File.Exists(ep))
+                files.Add(new IngestFileSpec(extra, ep, EtlInventory.EstimateNewlineCount(ep, ct)));
         }
         long total = files.Sum(f => f.InputUnits);
         return Task.FromResult<IngestInventory?>(new IngestInventory("records", total, files));
-    }
-
-    private static long CountNonEmptyLines(string path)
-    {
-        long n = 0;
-        using var fs = File.OpenRead(path);
-        Span<byte> buf = stackalloc byte[65536];
-        bool lineHasContent = false;
-        int read;
-        while ((read = fs.Read(buf)) > 0)
-        {
-            for (int i = 0; i < read; i++)
-            {
-                byte c = buf[i];
-                if (c == (byte)'\n')
-                {
-                    if (lineHasContent) n++;
-                    lineHasContent = false;
-                }
-                else if (c != (byte)'\r' && c != (byte)' ') lineHasContent = true;
-            }
-        }
-        if (lineHasContent) n++;
-        return n;
     }
 
     public override async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         var inv = await DescribeInputAsync(context, DecomposerOptions.Default, ct);
         return inv?.TotalInputUnits ?? EstimatedSynsets;
-    }
-
-    private static long CountSynsetLines(string path)
-    {
-        long n = 0;
-        using var fs = File.OpenRead(path);
-        Span<byte> buf = stackalloc byte[65536];
-        bool atLineStart = true;
-        int read;
-        while ((read = fs.Read(buf)) > 0)
-        {
-            for (int i = 0; i < read; i++)
-            {
-                byte c = buf[i];
-                if (atLineStart)
-                {
-                    if (c >= (byte)'0' && c <= (byte)'9') n++;
-                    atLineStart = false;
-                }
-                if (c == (byte)'\n') atLineStart = true;
-            }
-        }
-        return n;
     }
 
     private static async IAsyncEnumerable<WnSynset> ParseAllSynsetsAsync(

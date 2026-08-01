@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
 
@@ -21,13 +22,27 @@ public sealed class DocumentDecomposer : DecomposerMultiFile<ContentIngestRecord
     public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
         => context.Writer.ApplyAsync(UserPromptContent.BuildBootstrapChange(), ct);
 
-    // Each document is its own content DAG — no cross-file state, single phase (the default),
-    // fully parallel across the file-worker pool.
-    protected override IMultiFileRecordStream<ContentIngestRecord> CreateMultiFileStream(
+    protected override IReadOnlyList<(string Path, string Label)> ListFiles(
         string ecosystemPath, DecomposerOptions options)
     {
         _reObservePresent = options.ReObservePresent;
-        return new DocumentMultiFileStream(ecosystemPath);
+        bool rootIsFile = File.Exists(ecosystemPath);
+        return EnumerateInputFiles(ecosystemPath).Select(f =>
+        {
+            string rel = rootIsFile
+                ? Path.GetFileName(f)
+                : Path.GetRelativePath(ecosystemPath, f).Replace('\\', '/');
+            return (f, $"document/{rel}");
+        }).ToList();
+    }
+
+    protected override IAsyncEnumerable<ContentIngestRecord> ExtractFileAsync(
+        string filePath, string fileLabel, DecomposerOptions options, CancellationToken ct)
+    {
+        string rel = fileLabel.StartsWith("document/", StringComparison.Ordinal)
+            ? fileLabel["document/".Length..]
+            : Path.GetFileName(filePath);
+        return DocumentFileExtract.OpenAsync(filePath, rel, ct);
     }
 
     protected override IIngestRecordHandler<ContentIngestRecord> CreateHandlerForFile(string fileLabel) =>
@@ -46,9 +61,11 @@ public sealed class DocumentDecomposer : DecomposerMultiFile<ContentIngestRecord
         var paths = EnumerateInputFiles(context.EcosystemPath).ToList();
         if (paths.Count == 0) return Task.FromResult<IngestInventory?>(null);
         if (options.MaxInputUnits > 0)
-            return Task.FromResult(IngestInventory.FromFiles("documents", paths, options.MaxInputUnits, ct));
+            return Task.FromResult(IngestInventory.FromFiles(
+                "documents", paths, options.MaxInputUnits, ct, tracksFileCompletion: true));
         var specs = paths.Select(f => new IngestFileSpec(Path.GetFileName(f), f, 1)).ToList();
-        return Task.FromResult<IngestInventory?>(new IngestInventory("documents", paths.Count, specs));
+        return Task.FromResult<IngestInventory?>(
+            new IngestInventory("documents", paths.Count, specs, TracksFileCompletion: true));
     }
 
     public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
@@ -69,13 +86,50 @@ public sealed class DocumentDecomposer : DecomposerMultiFile<ContentIngestRecord
 
         if (!Directory.Exists(path)) yield break;
 
-        // Share the ONE VendoredPathFilter (Laplace.Core) that Code/RepoDecomposer
-        // use — otherwise vendored .txt (OMW's core-*.txt shipped inside an
-        // ecosystem/external tree, generated dumps, >2MB blobs) get enumerated for
-        // document ingest under the corpus's identity (GH #608).
         foreach (string file in Directory.EnumerateFiles(path, "*.txt", SearchOption.AllDirectories)
                                          .Where(f => !VendoredPathFilter.IsVendoredOrBuildPath(f))
                                          .OrderBy(p => p, StringComparer.Ordinal))
             yield return file;
+    }
+}
+
+/// <summary>Single-file document masticator — shared by multi-file workers and tests.</summary>
+public static class DocumentFileExtract
+{
+    public static async IAsyncEnumerable<ContentIngestRecord> OpenAsync(
+        string file, string relativePath, [EnumeratorCancellation] CancellationToken ct)
+    {
+        byte[] bytes = await ReadFileBytesAsync(file, ct);
+        if (bytes.Length == 0) yield break;
+        Hash128 fileRoot = ContentTierSpine.ResolveRoot(bytes)
+            ?? throw new InvalidOperationException(
+                $"document '{relativePath}': content has no resolvable root");
+        yield return new ContentIngestRecord(
+            bytes, SourceId: fileRoot, Metadata: FileMetadata.FromPath(file, relativePath));
+    }
+
+    private static async Task<byte[]> ReadFileBytesAsync(string file, CancellationToken ct)
+    {
+        var fi = new FileInfo(file);
+        if (!fi.Exists)
+            throw new FileNotFoundException($"document vanished between enumeration and open: {file}");
+        if (fi.Length == 0) return Array.Empty<byte>();
+        if (fi.Length > int.MaxValue)
+            throw new InvalidOperationException(
+                $"document '{file}' is {fi.Length:N0} bytes — exceeds the 2 GiB single-document "
+                + "compose limit; split the file into documents below the limit");
+        var bytes = new byte[(int)fi.Length];
+        await using var fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read,
+            bufferSize: 1 << 20, useAsync: true);
+        int off = 0;
+        while (off < bytes.Length)
+        {
+            int n = await fs.ReadAsync(bytes.AsMemory(off), ct);
+            if (n == 0)
+                throw new IOException(
+                    $"document '{file}' truncated mid-read at {off:N0}/{bytes.Length:N0} bytes");
+            off += n;
+        }
+        return bytes;
     }
 }

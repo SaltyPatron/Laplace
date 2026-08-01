@@ -3,9 +3,13 @@
 Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) first; it describes the system with
 file citations. This file is only the rules for changing it.
 
-Every rule below is enforced by something in the tree — a schema constraint, a CI job, a
-test, or a build step that fails without it. Nothing here is a principle for its own
-sake. If you find a rule here that no code enforces, delete it.
+Rules below split three ways: **substrate axioms** (schema + identity math — enforced by
+DDL, C, and gates), **architecture gates** (tests that fail the build —
+`DecomposerArchitectureGateTests`, `ReadPathArchitectureGateTests`, schema_law regress,
+INVENTORY CI), and **ops discipline** (one-ingest, cmd wrapping, install order —
+documented in AGENTS.md; no hook auto-fails them yet). Do not claim a rule is enforced
+when only prose states it. Absence of a gate is not grounds to delete a rule — delete
+only when the defect it guards against no longer applies.
 
 ## Ground truth
 
@@ -13,8 +17,9 @@ sake. If you find a rule here that no code enforces, delete it.
   they live on: a schema claim against the DDL or a live `psql` query, a build claim by
   running the build, a performance claim by measuring. `docs/INVENTORY.md` is generated
   and CI-gated — trust it over any count written in prose.
-- `SELECT * FROM api('<substring>')` lists the installed SQL surface. Check it before
-  concluding a helper doesn't exist.
+- `SET search_path = laplace, public;` then `SELECT * FROM api('<substring>')` (or
+  `SELECT * FROM laplace.api('<substring>')`) lists the installed SQL surface. Check it
+  before concluding a helper doesn't exist.
 - The extension is the deployment unit for substrate schema and functions. Do not add
   DbUp migrations for substrate objects, and do not hand-`ALTER` or hand-`INSERT` into a
   live database — `.sql.in` files are the schema of record.
@@ -37,7 +42,10 @@ sake. If you find a rule here that no code enforces, delete it.
   Emitting an undeclared relation faults the native attestation path.
   `DecomposerArchitectureGateTests` pins this.
 - The ingest order is fixed: unpack → records → client-side dedup across the working set
-  → client-side accumulation → one bulk tier descent → COPY of proven-novel rows. The
+  → client-side accumulation → one bulk tier descent (O(tier) novelty:
+  `IngestDescentFlush` → `BulkDescent` → `TierTreeDescent` / `ContentTierSpine`) →
+  apply-side bitmap verify + COPY of proven-novel rows (`attestation_merge` for present
+  attestations). Step 5 owns descent; step 6 does not replace it with ON CONFLICT. The
   right algorithm at the wrong point in that sequence is a defect.
 - Consensus accumulates at ingest. There is no backfill or rebuild path; do not add one.
 - Rows are idempotent under re-ingest, but testimony is not — a re-ingest doubles

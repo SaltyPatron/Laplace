@@ -110,14 +110,16 @@ public class TypeIdLawTests
     {
         var repoRoot = FindRepoRoot();
         var cliDir = Path.Combine(repoRoot, "app", "Laplace.Cli");
-
-
+        var reads = Path.Combine(repoRoot, "app", "Laplace.Substrate", "Crud", "Npgsql",
+            "NpgsqlSubstrateReads.cs");
 
         var sb = new System.Text.StringBuilder();
         foreach (var f in Directory.EnumerateFiles(cliDir, "*.cs", SearchOption.AllDirectories))
             sb.Append(File.ReadAllText(f));
         var text = sb.ToString();
-        Assert.Contains("laplace.walk_text", text, StringComparison.OrdinalIgnoreCase);
+        // CLI walks via the shared catalog reader; the SQL text lives once in NpgsqlSubstrateReads.
+        Assert.Contains("WalkTextAsync", text, StringComparison.Ordinal);
+        Assert.Contains("laplace.walk_text", File.ReadAllText(reads), StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("laplace.generate(", text, StringComparison.Ordinal);
     }
 

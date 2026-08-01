@@ -1,0 +1,20 @@
+-- Word → sense edges on the unrefuted consensus surface. senses()/bubble_up own
+-- the ranked synset walk; this view is the shared HAS_SENSE join so callers
+-- stop re-typing relation_type_id('HAS_SENSE') + v_consensus_unrefuted.
+--
+-- PERFORMANCE: inherits v_consensus_unrefuted (filter on consensus) plus a
+-- type_id equality. Prefer subject_id / object_id predicates; do not
+-- `SELECT * FROM v_word_senses` without a key.
+CREATE OR REPLACE VIEW v_word_senses AS
+SELECT c.subject_id AS word_id,
+       c.object_id  AS sense_id,
+       c.id         AS consensus_id,
+       c.rating,
+       c.rd,
+       c.volatility,
+       c.witness_count,
+       c.last_observed_at,
+       eff_mu(c.rating, c.rd) AS eff_mu
+FROM v_consensus_unrefuted c
+WHERE c.type_id = relation_type_id('HAS_SENSE')
+  AND c.object_id IS NOT NULL;

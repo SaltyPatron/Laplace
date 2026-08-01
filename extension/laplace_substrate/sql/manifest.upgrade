@@ -107,6 +107,7 @@ functions/consensus/top_relations.sql.in
 functions/consensus/completions.sql.in
 functions/consensus/consensus_out.sql.in
 functions/consensus/consensus_by_ids.sql.in
+functions/consensus/subjects_of_type.sql.in
 functions/consensus/consensus_in.sql.in
 functions/consensus/classify_circuit.sql.in
 functions/consensus/walk_branches.sql.in
@@ -362,6 +363,10 @@ views/v_consensus_resolved.sql.in
 views/v_consensus_edges.sql.in
 views/v_entities_highway.sql.in
 views/v_consensus_unrefuted.sql.in
+views/v_word_points.sql.in
+views/v_word_senses.sql.in
+views/v_attestation_readable.sql.in
+functions/structural/word_anchor.sql.in
 functions/analysis/drop_retired_eff_mu.sql.in
 functions/analysis/laplace_entity_attestations.sql.in
 functions/analysis/laplace_entities_at_depth.sql.in

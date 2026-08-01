@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Text;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Decomposers.Extractors;
 using Laplace.Engine.Core;
@@ -7,7 +8,13 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Atomic2020;
 
-public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase<Atomic2020Source, FullScope>, IIngestInventoryProvider
+/// <summary>
+/// Multi-file relation-triple source. train/dev/test.tsv each go through
+/// <see cref="ExtractFileAsync"/> — the same StreamingUtf8LineReader masticator
+/// ConceptNet uses for its monolith file; the multi-file pool runs those units in parallel.
+/// </summary>
+public sealed class Atomic2020Decomposer
+    : RelationTripleMultiFileDecomposerBase<Atomic2020Source, FullScope>, IIngestInventoryProvider
 {
     public static readonly Hash128 Source = Atomic2020Source.SourceId;
     public static readonly Hash128 TrustClass = Atomic2020Source.TrustClass;
@@ -42,11 +49,9 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase<Atomic20
     public Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
     {
-        var paths = Splits
-            .Select(s => Path.Combine(context.EcosystemPath, $"{s}.tsv"))
-            .Where(File.Exists)
-            .ToList();
-        return Task.FromResult(IngestInventory.FromFiles("records", paths, options.MaxInputUnits, ct));
+        var paths = ListFiles(context.EcosystemPath, options).Select(f => f.Path).ToList();
+        return Task.FromResult(IngestInventory.FromFiles(
+            "records", paths, options.MaxInputUnits, ct, tracksFileCompletion: true));
     }
 
     public override IReadOnlyCollection<string> CanonicalNamesForReadback
@@ -68,52 +73,58 @@ public sealed class Atomic2020Decomposer : RelationTripleDecomposerBase<Atomic20
         }
     }
 
-    // Extraction only. ATOMIC-2020 rows are already-delimited `head <TAB> relation
-    // <TAB> tail`; there is no container to unpack, so no tree-sitter. Blanks ('_',
-    // e.g. "PersonX abandons ___ altogether") canonicalize to spaces. Everything
-    // downstream — content-address, dedup, bulk COPY, fold — is the shared pipeline.
-    protected override async IAsyncEnumerable<RelationTripleRecord> ExtractRecordsAsync(
-        string ecosystemPath, DecomposerOptions options,
-        [EnumeratorCancellation] CancellationToken ct)
+    protected override IReadOnlyList<(string Path, string Label)> ListFiles(
+        string ecosystemPath, DecomposerOptions options)
     {
-        long cap = options.MaxInputUnits;
-        long consumed = 0;
-
+        var list = new List<(string, string)>(Splits.Length);
         foreach (var split in Splits)
         {
             string file = Path.Combine(ecosystemPath, $"{split}.tsv");
-            if (!File.Exists(file)) continue;
-            Hash128 splitId = SplitId(split);
-
-            await using var stream = new FileStream(
-                file, FileMode.Open, FileAccess.Read, FileShare.Read,
-                bufferSize: 1 << 20, FileOptions.Asynchronous | FileOptions.SequentialScan);
-            using var reader = new StreamReader(stream);
-
-            while (true)
-            {
-                ct.ThrowIfCancellationRequested();
-                string? line = await reader.ReadLineAsync(ct);
-                if (line is null) break;
-                if (line.Length == 0) continue;
-
-                int t1 = line.IndexOf('\t');
-                if (t1 <= 0) continue;
-                int t2 = line.IndexOf('\t', t1 + 1);
-                if (t2 <= t1 + 1) continue;
-
-                string rel = line.Substring(t1 + 1, t2 - t1 - 1);
-                if (!RelTypeId.TryGetValue(rel, out var relType)) continue;
-
-                string head = line[..t1];
-                string tail = line[(t2 + 1)..];
-                if (head.Length == 0 || tail.Length == 0) continue;
-
-                yield return new RelationTripleRecord(
-                    UnderscoredUtf8Canonicalize.ToSpacesBytes(head), relType, UnderscoredUtf8Canonicalize.ToSpacesBytes(tail), splitId, 1.0);
-
-                if (cap > 0 && ++consumed >= cap) yield break;
-            }
+            if (File.Exists(file))
+                list.Add((file, $"atomic/{split}"));
         }
+        return list;
+    }
+
+    // head <TAB> relation <TAB> tail — UTF-8 span parse, same reader as ConceptNet.
+    protected override async IAsyncEnumerable<RelationTripleRecord> ExtractFileAsync(
+        string filePath, string fileLabel, DecomposerOptions options,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        int slash = fileLabel.LastIndexOf('/');
+        string split = slash >= 0 ? fileLabel[(slash + 1)..] : Path.GetFileNameWithoutExtension(filePath);
+        Hash128 splitId = SplitId(split);
+
+        await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(filePath, ct))
+        {
+            if (lineMem.Length == 0) continue;
+            if (!TryExtract(lineMem.Span, splitId, out var record)) continue;
+            yield return record;
+        }
+    }
+
+    private static bool TryExtract(
+        ReadOnlySpan<byte> line, Hash128 splitId, out RelationTripleRecord record)
+    {
+        record = default;
+        int t1 = line.IndexOf((byte)'\t');
+        if (t1 <= 0) return false;
+        var rest = line[(t1 + 1)..];
+        int t2 = rest.IndexOf((byte)'\t');
+        if (t2 <= 0) return false;
+        var relBytes = rest[..t2];
+        var tail = rest[(t2 + 1)..];
+        var head = line[..t1];
+        if (head.IsEmpty || tail.IsEmpty) return false;
+
+        string rel = Encoding.UTF8.GetString(relBytes);
+        if (!RelTypeId.TryGetValue(rel, out var relType)) return false;
+
+        record = new RelationTripleRecord(
+            UnderscoredUtf8Canonicalize.ToSpaces(head),
+            relType,
+            UnderscoredUtf8Canonicalize.ToSpaces(tail),
+            splitId, 1.0);
+        return true;
     }
 }

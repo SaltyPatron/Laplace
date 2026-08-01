@@ -1,6 +1,6 @@
 using Laplace.Api.Contracts;
+using Laplace.SubstrateCRUD.Npgsql;
 using Npgsql;
-using NpgsqlTypes;
 
 namespace Laplace.Endpoints.OpenAICompat;
 
@@ -31,20 +31,10 @@ internal sealed partial class SubstrateClient
     /// </summary>
     public async Task<IReadOnlyList<ChessPlayerRow>> ChessRosterAsync(int limit, int offset, CancellationToken ct)
     {
-        const string sql = """
-            SELECT rank, encode(player_id, 'hex'), name, games, rating, rd, eff_mu
-            FROM laplace.chess_ranked(@limit, @offset)
-            """;
-        return await ReadRowsAsync(sql,
-            static r => new ChessPlayerRow(
-                r.GetInt64(0), r.GetString(1), r.GetString(2),
-                r.GetInt64(3), r.GetDouble(4), r.GetDouble(5), r.GetDouble(6)),
-            cmd =>
-            {
-                cmd.Parameters.AddWithValue("limit", Math.Clamp(limit, 1, 200));
-                cmd.Parameters.AddWithValue("offset", Math.Max(0, offset));
-            },
-            "chess_ranked", ct);
+        var rows = await NpgsqlSubstrateReads.ChessRankedAsync(
+            _dataSource, limit, offset, ct, TranslateReadError);
+        return rows.Select(static r => new ChessPlayerRow(
+            r.Rank, r.IdHex, r.Name, r.Games, r.Rating, r.Rd, r.EffMu)).ToList();
     }
 
     /// <summary>
@@ -58,23 +48,12 @@ internal sealed partial class SubstrateClient
     public async Task<IReadOnlyList<ChessPlayerRow>> ChessPlayersByInitialAsync(
         string initial, int limit, int offset, CancellationToken ct)
     {
-        const string sql = """
-            SELECT encode(player_id, 'hex'), name, games, rating, rd, eff_mu
-            FROM laplace.chess_players_by_initial(@initial, @limit, @offset)
-            """;
-        var rows = await ReadRowsAsync(sql,
-            static r => new ChessPlayerRow(0, r.GetString(0), r.GetString(1),
-                r.GetInt64(2), r.GetDouble(3), r.GetDouble(4), r.GetDouble(5)),
-            cmd =>
-            {
-                cmd.Parameters.AddWithValue("initial", initial);
-                cmd.Parameters.AddWithValue("limit", Math.Clamp(limit, 1, 200));
-                cmd.Parameters.AddWithValue("offset", Math.Max(0, offset));
-            },
-            "chess_players_by_initial", ct, timeoutSeconds: 60);
+        var rows = await NpgsqlSubstrateReads.ChessPlayersByInitialAsync(
+            _dataSource, initial, limit, offset, ct, TranslateReadError);
 
         // Rank is positional within the letter; the fold's ordering already decided it.
-        return [.. rows.Select((r, i) => r with { Rank = offset + i + 1 })];
+        return [.. rows.Select((r, i) => new ChessPlayerRow(
+            offset + i + 1, r.IdHex, r.Name, r.Games, r.Rating, r.Rd, r.EffMu))];
     }
 
     /// <summary>
@@ -119,24 +98,11 @@ internal sealed partial class SubstrateClient
     /// </summary>
     public async Task<ChessPlayerRow?> ChessFindPlayerAsync(string name, CancellationToken ct)
     {
-        const string sql = """
-            WITH p AS (SELECT laplace.chess_player_id(@name) AS id)
-            SELECT encode(p.id, 'hex'), laplace.label_or_hex(p.id),
-                   c.witness_count,
-                   round((c.rating / 1e9)::numeric, 3)::double precision,
-                   round((c.rd / 1e9)::numeric, 3)::double precision,
-                   laplace.eff_mu_display(c.rating, c.rd)::double precision
-            FROM p
-            JOIN laplace.consensus c
-              ON c.subject_id = p.id
-             AND c.type_id = laplace.relation_type_id('OUTCOME')
-            """;
-        var rows = await ReadRowsAsync(sql,
-            static r => new ChessPlayerRow(0, r.GetString(0), r.GetString(1),
-                r.GetInt64(2), r.GetDouble(3), r.GetDouble(4), r.GetDouble(5)),
-            cmd => cmd.Parameters.AddWithValue("name", name),
-            "chess_player_id", ct);
-        return rows.Count == 0 ? null : rows[0];
+        var rows = await NpgsqlSubstrateReads.ChessFindPlayerAsync(
+            _dataSource, name, ct, TranslateReadError);
+        if (rows.Count == 0) return null;
+        var r = rows[0];
+        return new ChessPlayerRow(0, r.IdHex, r.Name, r.Games, r.Rating, r.Rd, r.EffMu);
     }
 
     /// <summary>The career page: record by colour, the Elo the source tagged, the rivals.</summary>
@@ -144,89 +110,49 @@ internal sealed partial class SubstrateClient
     {
         if (TryParseIdHex(idHex) is not { } id) return null;
 
-        const string recordSql = """
-            SELECT as_white, games, wins, draws, losses, unscored, score
-            FROM laplace.chess_player_record(@id)
-            """;
-        var record = await ReadRowsAsync(recordSql,
-            static r => (
-                AsWhite: r.IsDBNull(0) ? (bool?)null : r.GetBoolean(0),
-                Rec: new ChessRecord(r.GetInt64(1), r.GetInt64(2), r.GetInt64(3), r.GetInt64(4),
-                    r.GetInt64(5), r.IsDBNull(6) ? null : r.GetDouble(6))),
-            cmd => cmd.Parameters.Add("id", NpgsqlDbType.Bytea).Value = id,
-            "chess_player_record", ct);
-
-        var overall = record.FirstOrDefault(x => x.AsWhite is null).Rec ?? Empty;
+        var record = await NpgsqlSubstrateReads.ChessPlayerRecordAsync(
+            _dataSource, id, ct, TranslateReadError);
+        var overall = MapRecord(record.FirstOrDefault(x => x.AsWhite is null));
         if (overall.Games == 0) return null;
 
-        const string ratingSql = "SELECT rating, games FROM laplace.chess_player_ratings(@id)";
-        var ratings = await ReadRowsAsync(ratingSql,
-            static r => new ChessRatingRow(r.GetInt32(0), r.GetInt64(1)),
-            cmd => cmd.Parameters.Add("id", NpgsqlDbType.Bytea).Value = id,
-            "chess_player_ratings", ct);
+        var ratings = await NpgsqlSubstrateReads.ChessPlayerRatingsAsync(
+            _dataSource, id, ct, TranslateReadError);
+        var ratingRows = ratings.Select(static r => new ChessRatingRow(r.Rating, r.Games)).ToList();
 
-        const string oppSql = """
-            SELECT encode(opponent_id, 'hex'), opponent, games, rating, rd, eff_mu
-            FROM laplace.chess_head_to_head(@id, @limit)
-            """;
-        var opponents = await ReadRowsAsync(oppSql,
-            static r => new ChessOpponentRow(r.GetString(0), r.GetString(1),
-                r.GetInt64(2), r.GetDouble(3), r.GetDouble(4), r.GetDouble(5)),
-            cmd =>
-            {
-                cmd.Parameters.Add("id", NpgsqlDbType.Bytea).Value = id;
-                cmd.Parameters.AddWithValue("limit", Math.Clamp(opponentLimit, 1, 200));
-            },
-            "chess_head_to_head", ct);
+        var opponents = await NpgsqlSubstrateReads.ChessHeadToHeadAsync(
+            _dataSource, id, opponentLimit, ct, TranslateReadError);
+        var opponentRows = opponents.Select(static r => new ChessOpponentRow(
+            r.OpponentIdHex, r.Opponent, r.Games, r.Rating, r.Rd, r.EffMu)).ToList();
 
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
         var name = await ReadLabelAsync(conn, id, ct) ?? idHex;
 
         return new ChessPlayerResponse("chess.player", idHex.ToLowerInvariant(), name,
             overall,
-            record.FirstOrDefault(x => x.AsWhite is true).Rec ?? Empty,
-            record.FirstOrDefault(x => x.AsWhite is false).Rec ?? Empty,
+            MapRecord(record.FirstOrDefault(x => x.AsWhite is true)),
+            MapRecord(record.FirstOrDefault(x => x.AsWhite is false)),
             // Peak is the highest Elo any source ever tagged him with. Ratings come
             // back rating-descending, so it is the first row — no client-side max.
-            ratings.Count == 0 ? null : ratings[0].Rating,
-            ratings, opponents);
+            ratingRows.Count == 0 ? null : ratingRows[0].Rating,
+            ratingRows, opponentRows);
     }
 
-    private static readonly ChessRecord Empty = new(0, 0, 0, 0, 0, null);
+    private static ChessRecord MapRecord(NpgsqlSubstrateReads.ChessPlayerRecordRow row)
+        => new(row.Games, row.Wins, row.Draws, row.Losses, row.Unscored, row.Score);
 
     /// <summary>A page of one player's game log, most recent first.</summary>
     public async Task<ChessGamesResponse?> ChessPlayerGamesAsync(
         string idHex, int limit, int offset, CancellationToken ct)
     {
         if (TryParseIdHex(idHex) is not { } id) return null;
-        // GH #736: the game-log key column is the playing-EVENT id (the row identifies a
-        // playing; the line is shared content reachable through PLAYS_LINE).
-        const string sql = """
-            SELECT encode(event_id, 'hex'), played_on, event, eco, as_white,
-                   encode(opponent_id, 'hex'), opponent, result, outcome
-            FROM laplace.chess_player_games(@id, @limit, @offset)
-            """;
-        var games = await ReadRowsAsync(sql,
-            static r => new ChessGameRow(
-                r.GetString(0),
-                r.IsDBNull(1) ? null : r.GetString(1),
-                r.IsDBNull(2) ? null : r.GetString(2),
-                r.IsDBNull(3) ? null : r.GetString(3),
-                r.GetBoolean(4),
-                r.IsDBNull(5) ? null : r.GetString(5),
-                r.IsDBNull(6) ? "" : r.GetString(6),
-                r.IsDBNull(7) ? null : r.GetString(7),
-                r.IsDBNull(8) ? null : r.GetInt16(8)),
-            cmd =>
-            {
-                cmd.Parameters.Add("id", NpgsqlDbType.Bytea).Value = id;
-                cmd.Parameters.AddWithValue("limit", Math.Clamp(limit, 1, 200));
-                cmd.Parameters.AddWithValue("offset", Math.Max(0, offset));
-            },
-            "chess_player_games", ct, timeoutSeconds: 60);
+        var games = await NpgsqlSubstrateReads.ChessPlayerGamesAsync(
+            _dataSource, id, limit, offset, ct, TranslateReadError);
+        var rows = games.Select(static r => new ChessGameRow(
+            r.EventIdHex, r.PlayedOn, r.Event, r.Eco, r.AsWhite,
+            r.OpponentIdHex, r.Opponent, r.Result, r.Outcome)).ToList();
 
         return new ChessGamesResponse("chess.games", idHex.ToLowerInvariant(),
-            Math.Max(0, offset), games);
+            Math.Max(0, offset), rows);
     }
 
     /// <summary>
@@ -249,19 +175,8 @@ internal sealed partial class SubstrateClient
     {
         if (TryParseIdHex(idHex) is not { } id) return null;
 
-        const string sql = """
-            SELECT ply, encode(position_id, 'hex'), san, clock, eval_token
-            FROM laplace.chess_game_plies(@id)
-            """;
-        var stored = await ReadRowsAsync(sql,
-            static r => (
-                Ply: r.GetInt32(0),
-                PositionId: r.GetString(1),
-                San: r.IsDBNull(2) ? null : r.GetString(2),
-                Clock: r.IsDBNull(3) ? null : r.GetString(3),
-                Eval: r.IsDBNull(4) ? null : r.GetString(4)),
-            cmd => cmd.Parameters.Add("id", NpgsqlDbType.Bytea).Value = id,
-            "chess_game_plies", ct, timeoutSeconds: 60);
+        var stored = await NpgsqlSubstrateReads.ChessGamePliesAsync(
+            _dataSource, id, ct, TranslateReadError);
 
         // Vertex 1 is the starting position; ply N is vertex N+1, and the SAN on vertex N is
         // the move that LEFT it. A game with no trajectory yields nothing here.
@@ -279,10 +194,10 @@ internal sealed partial class SubstrateClient
                     Fen: "",
                     WhiteMoved: i % 2 == 0,
                     ClockSeconds: ParseClockSeconds(from.Clock),
-                    PositionId: to.PositionId));
+                    PositionId: to.PositionIdHex));
             }
             return new ChessGamePliesResponse("chess.game.plies", idHex.ToLowerInvariant(),
-                stored[0].PositionId, plies.Any(p => p.ClockSeconds is not null), null, plies);
+                stored[0].PositionIdHex, plies.Any(p => p.ClockSeconds is not null), null, plies);
         }
 
         // Fallback: pre-analysis game, no stored line. Replay the verbatim movetext.
@@ -313,29 +228,13 @@ internal sealed partial class SubstrateClient
     public async Task<ChessGameResponse?> ChessGameAsync(string idHex, CancellationToken ct)
     {
         if (TryParseIdHex(idHex) is not { } id) return null;
-        const string sql = """
-            SELECT encode(white_id, 'hex'), white, encode(black_id, 'hex'), black,
-                   result, played_on, event, eco, termination, time_control,
-                   tc_class, movetext
-            FROM laplace.chess_game(@id)
-            """;
-        var rows = await ReadRowsAsync(sql,
-            static r => new ChessGameResponse("chess.game", "",
-                r.IsDBNull(0) ? null : r.GetString(0),
-                r.IsDBNull(1) ? "" : r.GetString(1),
-                r.IsDBNull(2) ? null : r.GetString(2),
-                r.IsDBNull(3) ? "" : r.GetString(3),
-                r.IsDBNull(4) ? null : r.GetString(4),
-                r.IsDBNull(5) ? null : r.GetString(5),
-                r.IsDBNull(6) ? null : r.GetString(6),
-                r.IsDBNull(7) ? null : r.GetString(7),
-                r.IsDBNull(8) ? null : r.GetString(8),
-                r.IsDBNull(9) ? null : r.GetString(9),
-                r.IsDBNull(10) ? null : r.GetString(10),
-                r.IsDBNull(11) ? null : r.GetString(11)),
-            cmd => cmd.Parameters.Add("id", NpgsqlDbType.Bytea).Value = id,
-            "chess_game", ct, timeoutSeconds: 60);
-
-        return rows.Count == 0 ? null : rows[0] with { IdHex = idHex.ToLowerInvariant() };
+        var rows = await NpgsqlSubstrateReads.ChessGameAsync(
+            _dataSource, id, ct, TranslateReadError);
+        if (rows.Count == 0) return null;
+        var r = rows[0];
+        return new ChessGameResponse("chess.game", idHex.ToLowerInvariant(),
+            r.WhiteIdHex, r.White, r.BlackIdHex, r.Black,
+            r.Result, r.PlayedOn, r.Event, r.Eco,
+            r.Termination, r.TimeControl, r.TcClass, r.Movetext);
     }
 }

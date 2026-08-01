@@ -91,7 +91,7 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         var unknownIdx = new List<int>(n);
         for (int i = 0; i < n; i++)
         {
-            if (_proven.ContainsKey(candidates[i])) bm[i >> 3] |= (byte)(1 << (i & 7));
+            if (_proven.ContainsKey(candidates[i])) BitmapBits.Set(bm, i);
             else unknownIdx.Add(i);
         }
         if (unknownIdx.Count == 0) return bm;
@@ -103,7 +103,7 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
             int i = unknownIdx[u];
             if (CodepointPerfcache.IsKnownCodepointId(candidates[i]))
             {
-                bm[i >> 3] |= (byte)(1 << (i & 7));
+                BitmapBits.Set(bm, i);
                 _proven.TryAdd(candidates[i], 1);
             }
             else
@@ -119,15 +119,13 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         p.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
         var result = await cmd.ExecuteScalarAsync(ct);
         var dbBm = result as byte[] ?? Array.Empty<byte>();
-        long dbBits = (long)dbBm.Length * 8;
-
 
         for (int u = 0; u < dbUnknownIdx.Count; u++)
         {
-            if (u < dbBits && (dbBm[u >> 3] & (1 << (u & 7))) != 0)
+            if (BitmapBits.IsSet(dbBm, u))
             {
                 int i = dbUnknownIdx[u];
-                bm[i >> 3] |= (byte)(1 << (i & 7));
+                BitmapBits.Set(bm, i);
                 _proven.TryAdd(candidates[i], 1);
             }
         }
@@ -166,9 +164,9 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         }
         if (allProven)
         {
-            var allBm = new byte[(ids.Count + 7) / 8];
+            var allBm = new byte[BitmapBits.ByteLength(ids.Count)];
             for (int i = 0; i < ids.Count; i++)
-                allBm[i >> 3] |= (byte)(1 << (i & 7));
+                BitmapBits.Set(allBm, i);
             return allBm;
         }
 

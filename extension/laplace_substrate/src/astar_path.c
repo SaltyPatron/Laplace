@@ -32,7 +32,7 @@ static const char *Q_DIRECTED =
  * the admissible-heuristic closure below. */
 static const char *Q_COORD =
     "SELECT ST_X(coord), ST_Y(coord), ST_Z(coord), ST_M(coord) "
-    "FROM laplace.physicalities WHERE entity_id = $1 AND type = 1 LIMIT 1";
+    "FROM laplace.v_word_points WHERE id = $1 AND coord IS NOT NULL LIMIT 1";
 
 static SPIPlanPtr coord_plan = NULL;
 

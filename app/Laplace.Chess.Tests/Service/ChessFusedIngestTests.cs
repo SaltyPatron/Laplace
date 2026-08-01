@@ -43,6 +43,15 @@ public sealed class ChessFusedIngestTests
             "fused pass must compose position geometry");
         Assert.Contains(change.Attestations, a =>
             a.TypeId == RelationTypeRegistry.RelationTypeId("ANALYZED_AT"));
+
+        // GH #547 / CONSOLIDATION: EmitGame stays a bare Document (spec 08 recorder);
+        // the fused calculated pass deposits the game-tier mantissa-packed trajectory
+        // on the LINE. Closing the claim that "EmitGame deposits a bare Document" as
+        // the whole story — bare on record, trajectory on analyze/fusion.
+        var lineId = Assert.Single(change.Entities, e => e.TypeId == ChessVocabulary.GameType).Id;
+        var gameTraj = Assert.Single(change.Physicalities, p => p.EntityId == lineId);
+        Assert.NotNull(gameTraj.TrajectoryXyzm);
+        Assert.True(gameTraj.NConstituents > 0);
     }
 
     [Fact]

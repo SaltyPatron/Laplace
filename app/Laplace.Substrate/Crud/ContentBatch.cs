@@ -85,12 +85,11 @@ public sealed class ContentBatch : IDisposable
 
         var probeTrees = new List<TierTree>();
         var emitEntries = new List<Entry>();
-        long bits = (long)rootBm.Length * 8;
 
         for (int i = 0; i < entries.Count; i++)
         {
             var e = entries[i];
-            if (i < bits && (rootBm[i >> 3] & (1 << (i & 7))) != 0)
+            if (BitmapBits.IsSet(rootBm, i))
             {
                 _reader.MarkProven([e.RootId]);
                 _reader.CacheRoot(Hash128.Blake3(e.Canonical), e.RootId);

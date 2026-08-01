@@ -19,13 +19,25 @@ public sealed class MapNetDecomposer : DecomposerMultiFile<CategoryCorrespondenc
         return Task.CompletedTask;
     }
 
-    protected override IMultiFileRecordStream<CategoryCorrespondenceRecord> CreateMultiFileStream(
-        string ecosystemPath, DecomposerOptions options)
-    {
-        var files = MapNetIngest.ResolvePaths(ecosystemPath)
-            .Select(MapNetIngest.DescribeFile)
+    protected override IReadOnlyList<(string Path, string Label)> ListFiles(
+        string ecosystemPath, DecomposerOptions options) =>
+        MapNetIngest.ResolvePaths(ecosystemPath)
+            .Select(p =>
+            {
+                var spec = MapNetIngest.DescribeFile(p);
+                return (spec.Path, spec.Label);
+            })
             .ToList();
-        return new MapNetMultiFileStream(files);
+
+    protected override IAsyncEnumerable<CategoryCorrespondenceRecord> ExtractFileAsync(
+        string filePath, string fileLabel, DecomposerOptions options, CancellationToken ct)
+    {
+        bool isLu = fileLabel.Equals("mapnet/lu", StringComparison.Ordinal)
+            || Path.GetFileName(filePath).Equals(MapNetIngest.LuMappingFile, StringComparison.OrdinalIgnoreCase);
+        return isLu
+            ? FnLuSynsetBridgeIngest.EnumerateTabRecordsAsync(
+                filePath, FnLuSynsetBridgeIngest.MultiWordNetVersion, 0, ct)
+            : MapNetIngest.EnumerateFrameRecordsAsync(filePath, 0, ct);
     }
 
     protected override IIngestRecordHandler<CategoryCorrespondenceRecord> CreateHandlerForFile(string fileLabel) =>
@@ -43,17 +55,15 @@ public sealed class MapNetDecomposer : DecomposerMultiFile<CategoryCorrespondenc
     {
         var paths = MapNetIngest.ResolvePaths(context.EcosystemPath).ToList();
         if (paths.Count == 0) return Task.FromResult<IngestInventory?>(null);
-        return Task.FromResult(IngestInventory.FromFiles("records", paths, options.MaxInputUnits, ct));
+        return Task.FromResult(IngestInventory.FromFiles(
+            "records", paths, options.MaxInputUnits, ct, tracksFileCompletion: true));
     }
 
-    public override async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+    public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         long total = 0;
         foreach (string path in MapNetIngest.ResolvePaths(context.EcosystemPath))
-        {
-            long? lines = await MapNetIngest.EstimateLineCountAsync(path, ct);
-            if (lines is not null) total += lines.Value;
-        }
-        return total > 0 ? total : null;
+            total += EtlInventory.EstimateNewlineCount(path, ct);
+        return Task.FromResult<long?>(total > 0 ? total : null);
     }
 }

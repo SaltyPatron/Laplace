@@ -111,7 +111,7 @@ public sealed class ChessEngineService : IAsyncDisposable
         {
             if (_engine is not null) return _engine;
             LoadPerfcache();
-            var ds = new NpgsqlDataSourceBuilder(_connString).Build();
+            var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, _connString);
             var inner = new NpgsqlSubstrateWriter(ds);
             var writer = new ConsensusAccumulatingWriter(
                 inner, ds, persistEvidence: true);
@@ -120,7 +120,7 @@ public sealed class ChessEngineService : IAsyncDisposable
             var modality = new ChessModality();
             var engine = new ModalityEngine<ChessState, ChessMove>(modality, ChessVocabulary.MoveType, host, host);
             var canonicalNames = await ChessVocabulary.BootstrapAsync(writer, ct);
-            await RegisterCanonicalsAsync(ds, canonicalNames, ct);
+            await NpgsqlCanonicalRegistry.RegisterCanonicalsAsync(ds, canonicalNames, ct);
             _ds = ds; _writer = writer; _host = host; _modality = modality; _engine = engine;
             _log.LogInformation("chess engine initialized against {Conn}", LaplaceInstall.RedactConnectionString(_connString));
             return engine;
@@ -130,22 +130,6 @@ public sealed class ChessEngineService : IAsyncDisposable
 
 
 
-
-    private static async Task RegisterCanonicalsAsync(
-        NpgsqlDataSource ds, IReadOnlyCollection<string> names, CancellationToken ct)
-    {
-        if (names.Count == 0) return;
-        await using var conn = await ds.OpenConnectionAsync(ct);
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT laplace.register_canonicals(@names)";
-        cmd.Parameters.Add(new NpgsqlParameter
-        {
-            ParameterName = "names",
-            Value = names.ToArray(),
-            NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Text,
-        });
-        await cmd.ExecuteNonQueryAsync(ct);
-    }
 
     private static void LoadPerfcache() => CodepointPerfcache.LoadDefault();
 
@@ -200,44 +184,32 @@ public sealed class ChessEngineService : IAsyncDisposable
 
         var rows = new List<ChessExploreMove>(limit);
         var playerStats = new Dictionary<Hash128, (long Games, double Score)>();
-        await using var conn = await _ds!.OpenConnectionAsync(ct);
 
         if (!string.IsNullOrWhiteSpace(player))
         {
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandText =
-                "SELECT next_position, games, score FROM laplace.chess_player_moves($1, $2, $3, $4)";
-            cmd.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Bytea, Value = rootId.ToBytes() });
-            cmd.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Bytea, Value = ChessVocabulary.PlayerId(player).ToBytes() });
-            cmd.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Boolean, Value = state.Board.WhiteToMove });
-            cmd.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Integer, Value = Math.Max(limit, legal.Count) });
-            await using var r = await cmd.ExecuteReaderAsync(ct);
-            while (await r.ReadAsync(ct))
-                playerStats[Hash128.FromBytes((byte[])r[0])] = (r.GetInt64(1), r.GetDouble(2));
+            var playerRows = await NpgsqlSubstrateReads.ChessPlayerMovesAsync(
+                _ds!, rootId.ToBytes(), ChessVocabulary.PlayerId(player).ToBytes(),
+                state.Board.WhiteToMove, Math.Max(limit, legal.Count), ct);
+            foreach (var pr in playerRows)
+                playerStats[Hash128.FromBytes(pr.NextPosition)] = (pr.Games, pr.Score);
         }
 
-        await using (var cmd = conn.CreateCommand())
+        var moveRows = await NpgsqlSubstrateReads.ChessMovesAsync(
+            _ds!, rootId.ToBytes(), limit, ct);
+        foreach (var mr in moveRows)
         {
-            cmd.CommandText =
-                "SELECT next_position, eff_mu, rd, witness_count FROM laplace.chess_moves($1, $2)";
-            cmd.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Bytea, Value = rootId.ToBytes() });
-            cmd.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Integer, Value = limit });
-            await using var r = await cmd.ExecuteReaderAsync(ct);
-            while (await r.ReadAsync(ct))
-            {
-                var childId = Hash128.FromBytes((byte[])r[0]);
-                if (!byChild.TryGetValue(childId, out var mv)) continue;
-                var ps = playerStats.TryGetValue(childId, out var s) ? s : (Games: 0L, Score: 0d);
-                rows.Add(new ChessExploreMove(
-                    mv.Uci, mv.San,
-                    // chess_moves() returns DISPLAY units (fp1e9 already /1e9-rounded),
-                    // so only the neutral prior still needs scaling here.
-                    r.GetDouble(1) - GlickoPriors.NeutralMu / 1e9,
-                    r.GetDouble(2),
-                    r.GetInt64(3),
-                    ps.Games,
-                    ps.Games > 0 ? ps.Score : null));
-            }
+            var childId = Hash128.FromBytes(mr.NextPosition);
+            if (!byChild.TryGetValue(childId, out var mv)) continue;
+            var ps = playerStats.TryGetValue(childId, out var s) ? s : (Games: 0L, Score: 0d);
+            rows.Add(new ChessExploreMove(
+                mv.Uci, mv.San,
+                // chess_moves() returns DISPLAY units (fp1e9 already /1e9-rounded),
+                // so only the neutral prior still needs scaling here.
+                mr.EffMu - GlickoPriors.NeutralMu / 1e9,
+                mr.Rd,
+                mr.WitnessCount,
+                ps.Games,
+                ps.Games > 0 ? ps.Score : null));
         }
 
         // Player-scoped rows whose continuation fell outside the consensus read's LIMIT

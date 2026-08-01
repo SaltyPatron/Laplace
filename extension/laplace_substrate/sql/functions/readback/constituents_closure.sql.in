@@ -40,10 +40,10 @@ WITH RECURSIVE reach(entity_id, depth) AS (
     SELECT u.entity_id, rc.depth + 1
     FROM reach rc
     CROSS JOIN LATERAL (
-        SELECT p2.trajectory
-        FROM physicalities p2
-        WHERE p2.entity_id = rc.entity_id AND p2.type = 1 AND p2.trajectory IS NOT NULL
-        ORDER BY p2.id
+        SELECT w.trajectory
+        FROM v_word_points w
+        WHERE w.id = rc.entity_id AND w.trajectory IS NOT NULL
+        ORDER BY w.physicality_id
         LIMIT 1
     ) ph
     CROSS JOIN LATERAL public.laplace_trajectory_constituents(ph.trajectory) AS u
@@ -80,11 +80,11 @@ picked AS (
     -- sharing a physicality id means that id is not a function of what it holds,
     -- and the tier-2/tier-3 pair means collapse_idx did not fire for content that
     -- is span-identical to its own single child. Both are upstream of here.
-    SELECT DISTINCT ON (p2.entity_id) p2.entity_id, p2.trajectory
-    FROM physicalities p2
-    JOIN node n ON n.entity_id = p2.entity_id
-    WHERE p2.type = 1 AND p2.trajectory IS NOT NULL
-    ORDER BY p2.entity_id, p2.id, public.ST_NPoints(p2.trajectory) DESC
+    SELECT DISTINCT ON (w.id) w.id AS entity_id, w.trajectory
+    FROM v_word_points w
+    JOIN node n ON n.entity_id = w.id
+    WHERE w.trajectory IS NOT NULL
+    ORDER BY w.id, w.physicality_id, public.ST_NPoints(w.trajectory) DESC
 )
 SELECT pk.entity_id AS parent_id, u.ordinal, u.entity_id AS child_id, u.run_length, u.flags
 FROM picked pk

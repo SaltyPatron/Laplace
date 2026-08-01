@@ -19,11 +19,12 @@ applyTo: 'app/Laplace.Decomposers/**'
 - Duplicate content-addressed inserts mean "we agree", not "error" (lesson L9). Do not
   add prevention logic for them.
 - There are SEVEN historical ingestion lanes (Issue 45, [doc 13 §2.1](../../.scratchpad/13_Stabilization_Audit_and_Plan.txt)).
-  Do NOT create a new source by copying the nearest neighbor. Check doc 13 Phase 1 for
-  the target lane first; prefer the working-set pipeline lanes (`DecomposerBatch`,
-  `StructuredGrammarIngest`). Four sources (atomic2020, conceptnet, omw, wiktionary)
-  have TWO parallel implementations — verify which lane CLI dispatch
-  (`IngestCommands.cs`) actually routes to before editing either.
+  Do NOT create a new source by copying the nearest neighbor. Doc 13 Phase 1 (one
+  ingestion spine) is still the open migration plan — it has **not** resolved lane
+  winners. Four sources (atomic2020, conceptnet, omw, wiktionary) still have TWO
+  parallel implementations; verify which lane CLI dispatch (`IngestCommands.cs`)
+  actually routes to before editing either. Prefer the spine the live CLI route
+  already uses; do not invent a Phase-1 completion status from this file.
 - `outcome ∈ {Loss=0, Draw=1, Win=2}` is bit-identical to chess `PlyOutcome` by design.
 - Tier is a floor, not identity: same content = same id at every tier; tier is NEVER
   mixed into the BLAKE3 hash.

@@ -11,9 +11,9 @@ CREATE OR REPLACE FUNCTION trajectory_unpacked_points(p_entity bytea)
                (SELECT min(e.tier) FROM entities e WHERE e.id = u.entity_id),
                CASE WHEN @extschema@.codepoint_for_id(u.entity_id) IS NOT NULL THEN 0 END
            ) AS ctier
-    FROM physicalities p,
-    LATERAL public.ST_DumpPoints(p.trajectory) dp,
+    FROM v_word_points w,
+    LATERAL public.ST_DumpPoints(w.trajectory) dp,
     LATERAL public.laplace_mantissa_unpack(dp.geom) u
-    WHERE p.entity_id = p_entity AND p.type = 1 AND p.trajectory IS NOT NULL
+    WHERE w.id = p_entity AND w.trajectory IS NOT NULL
     ORDER BY u.ordinal
 $$;

@@ -25,9 +25,9 @@ public static class NativeRuntimeEnv
         //    exclusively through Dynamics/Synthesis NativeInterop (the foundry/export path),
         //    called from single-threaded orchestration -- NEVER nested inside a pinned ingest
         //    worker. The ingest RunPinned* regions (compose in IngestDescentFlush, the glicko
-        //    fold in NpgsqlConsensusFold, apply/COPY in NpgsqlWorkingSetApply) call only
-        //    custom laplace_core C (glicko2/hash/geometry), never MKL. If you ever invoke an
-        //    MKL/Eigen kernel from inside a RunPinned* body, set MKL threads to 1 for that
+        //    fold in ConsensusAccumulatingWriter, apply/COPY in NpgsqlWorkingSetApply) call
+        //    only custom laplace_core C (glicko2/hash/geometry), never MKL. If you ever invoke
+        //    an MKL/Eigen kernel from inside a RunPinned* body, set MKL threads to 1 for that
         //    region FIRST -- otherwise pThreads-per-worker x workers is real oversubscription.
         SetThreadVar("MKL_DYNAMIC", 0, force: true);
 

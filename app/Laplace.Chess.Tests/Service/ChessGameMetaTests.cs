@@ -59,6 +59,23 @@ public sealed class ChessGameMetaTests
         Assert.Contains("halfmove clock", ex.Message);
     }
 
+    [Fact]
+    public void FromFen_MalformedFullmove_NamesTheField()
+    {
+        var ex = Assert.Throws<FormatException>(
+            () => Board.FromFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 nope"));
+        Assert.Contains("fullmove number", ex.Message);
+    }
+
+    [Fact]
+    public void FromFen_XFenCastlingLetter_ThrowsNotSilentZero()
+    {
+        var ex = Assert.Throws<FormatException>(
+            () => Board.FromFen("qrbbnkrn/pppppppp/8/8/8/8/PPPPPPPP/QRBBNKRN w GBgb - 0 1"));
+        Assert.Contains("Unsupported castling", ex.Message);
+        Assert.Contains("X-FEN", ex.Message);
+    }
+
     [Theory]
     [InlineData("60", "bullet")]
     [InlineData("120+1", "bullet")]

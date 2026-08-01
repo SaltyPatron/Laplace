@@ -57,27 +57,25 @@ public static class TierTreeDescent
 
     public static void ApplyTier01Present(byte[] emitBm, IReadOnlyList<int> nodeIndices, byte[] flatBm)
     {
-        long bits = (long)flatBm.Length * 8;
         for (int k = 0; k < nodeIndices.Count; k++)
         {
-            if (k >= bits || (flatBm[k >> 3] & (1 << (k & 7))) == 0) continue;
+            if (!BitmapBits.IsSet(flatBm, k)) continue;
             int j = nodeIndices[k];
-            emitBm[j >> 3] |= (byte)(1 << (j & 7));
+            BitmapBits.Set(emitBm, j);
         }
     }
 
     public static byte[] NodeEmitBitmap(TierTree tree, byte[] descentBm, int[]? treeIdxToFlat = null)
     {
         int n = tree.NodeCount;
-        var bm = new byte[(n + 7) / 8];
-        long descentBits = (long)descentBm.Length * 8;
+        var bm = new byte[BitmapBits.ByteLength(n)];
 
         if (treeIdxToFlat is null)
         {
             for (int j = 0; j < n; j++)
             {
-                if (j < descentBits && (descentBm[j >> 3] & (1 << (j & 7))) != 0)
-                    bm[j >> 3] |= (byte)(1 << (j & 7));
+                if (BitmapBits.IsSet(descentBm, j))
+                    BitmapBits.Set(bm, j);
             }
         }
         else
@@ -86,8 +84,8 @@ public static class TierTreeDescent
             {
                 int flat = treeIdxToFlat[j];
                 if (flat < 0) continue;
-                if (flat < descentBits && (descentBm[flat >> 3] & (1 << (flat & 7))) != 0)
-                    bm[j >> 3] |= (byte)(1 << (j & 7));
+                if (BitmapBits.IsSet(descentBm, flat))
+                    BitmapBits.Set(bm, j);
             }
         }
         return bm;
@@ -153,7 +151,7 @@ public static class TierTreeDescent
                 if (tree.GetNode((uint)j).Tier != 0) continue;
                 var id = tree.GetNode((uint)j).Id;
                 if (CodepointPerfcache.IsKnownCodepointId(id))
-                    perTreeEmitBm[t][j >> 3] |= (byte)(1 << (j & 7));
+                    BitmapBits.Set(perTreeEmitBm[t], j);
                 else
                     unresolvedTier0.Add((t, j));
             }
@@ -224,12 +222,11 @@ public static class TierTreeDescent
     public static void ApplyBatchTier01Present(
         byte[][] perTreeEmitBm, IReadOnlyList<(int TreeIndex, int NodeIndex)> placements, byte[] flatBm)
     {
-        long bits = (long)flatBm.Length * 8;
         for (int k = 0; k < placements.Count; k++)
         {
-            if (k >= bits || (flatBm[k >> 3] & (1 << (k & 7))) == 0) continue;
+            if (!BitmapBits.IsSet(flatBm, k)) continue;
             var (t, j) = placements[k];
-            perTreeEmitBm[t][j >> 3] |= (byte)(1 << (j & 7));
+            BitmapBits.Set(perTreeEmitBm[t], j);
         }
     }
 
@@ -323,7 +320,7 @@ public static class TierTreeDescent
         for (int t = 0; t < treeCount; t++)
         {
             int nodeCount = probeTrees[t].NodeCount;
-            perTreeBm[t] = new byte[(nodeCount + 7) / 8];
+            perTreeBm[t] = new byte[BitmapBits.ByteLength(nodeCount)];
             resolved[t] = new bool[nodeCount];
             for (int j = 0; j < nodeCount; j++)
                 maxTier = Math.Max(maxTier, probeTrees[t].GetNode((uint)j).Tier);
@@ -354,7 +351,7 @@ public static class TierTreeDescent
                     // and subtree-prune without a DB round trip.
                     if (reader.IsProvenPresent(id))
                     {
-                        perTreeBm[t][j >> 3] |= (byte)(1 << (j & 7));
+                        BitmapBits.Set(perTreeBm[t], j);
                         resolved[t][j] = true;
                         MarkSubtreeResolvedPresent(probeTrees[t], perTreeBm[t], resolved[t], (uint)j);
                         continue;
@@ -382,12 +379,11 @@ public static class TierTreeDescent
             if (ids.Count == 0) continue;
 
             byte[] bm = await reader.TierBatchExistenceProbeAsync(ids, (short)tier, ct).ConfigureAwait(false);
-            long bits = (long)bm.Length * 8;
 
             var confirmedPresent = new List<Hash128>();
             for (int k = 0; k < ids.Count; k++)
             {
-                bool present = k < bits && (bm[k >> 3] & (1 << (k & 7))) != 0;
+                bool present = BitmapBits.IsSet(bm, k);
                 if (!present)
                 {
                     probedAbsent?.Add(ids[k]);
@@ -396,7 +392,7 @@ public static class TierTreeDescent
                 confirmedPresent.Add(ids[k]);
                 foreach (var (t, j) in placements[k])
                 {
-                    perTreeBm[t][j >> 3] |= (byte)(1 << (j & 7));
+                    BitmapBits.Set(perTreeBm[t], j);
                     resolved[t][j] = true;
                     MarkSubtreeResolvedPresent(probeTrees[t], perTreeBm[t], resolved[t], (uint)j);
                 }
@@ -435,7 +431,7 @@ public static class TierTreeDescent
                 uint childIdx = node.FirstChildIdx + c;
                 if (resolved[childIdx]) continue;
                 resolved[childIdx] = true;
-                emitBm[childIdx >> 3] |= (byte)(1 << (int)(childIdx & 7));
+                BitmapBits.Set(emitBm, (int)childIdx);
                 stack.Push(childIdx);
             }
         }

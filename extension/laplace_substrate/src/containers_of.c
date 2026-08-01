@@ -60,10 +60,9 @@
  * prepared once with SPI_keepplan and reused process-wide, so a literal would
  * pin the first caller's limit for every later caller. */
 static const char *CONTAINERS_QUERY =
-    "SELECT p.entity_id, e.tier, e.type_id "
-    "FROM laplace.physicalities p JOIN laplace.entities e ON e.id = p.entity_id "
-    "WHERE p.type = 1 "
-    "  AND public.laplace_trajectory_constituent_ids(p.trajectory) @> ARRAY[$1]::bytea[] "
+    "SELECT w.id, w.tier, w.type_id "
+    "FROM laplace.v_word_points w "
+    "WHERE public.laplace_trajectory_constituent_ids(w.trajectory) @> ARRAY[$1]::bytea[] "
     "LIMIT $2";
 
 static SPIPlanPtr containers_plan = NULL;

@@ -46,16 +46,8 @@ internal static class MapNetIngest
         }
     }
 
-    internal static async Task<long?> EstimateLineCountAsync(string path, CancellationToken ct)
-    {
-        if (Path.GetFileName(path).Equals(LuMappingFile, StringComparison.OrdinalIgnoreCase))
-            return await FnLuSynsetBridgeIngest.EstimateLineCountAsync(path, ct);
-
-        long lines = 0;
-        await foreach (var _ in ReadLinesAsync(path, ct))
-            lines++;
-        return lines > 0 ? lines : null;
-    }
+    internal static Task<long?> EstimateLineCountAsync(string path, CancellationToken ct) =>
+        Task.FromResult<long?>(EtlInventory.EstimateNewlineCount(path, ct));
 
     private static readonly IngestSourceLayout Layout = new()
     {
@@ -74,41 +66,4 @@ internal static class MapNetIngest
     internal static IEnumerable<string> ResolvePaths(string ecosystemPath) =>
         IngestInput.Locate(ecosystemPath, Layout);
 
-    private static async IAsyncEnumerable<string> ReadLinesAsync(
-        string path, [EnumeratorCancellation] CancellationToken ct)
-    {
-        await using var stream = new FileStream(
-            path, FileMode.Open, FileAccess.Read, FileShare.Read,
-            bufferSize: 1 << 20, FileOptions.Asynchronous | FileOptions.SequentialScan);
-        using var reader = new StreamReader(stream);
-        while (true)
-        {
-            ct.ThrowIfCancellationRequested();
-            string? line = await reader.ReadLineAsync(ct);
-            if (line is null) yield break;
-            yield return line;
-        }
-    }
-}
-
-internal sealed class MapNetMultiFileStream : IMultiFileRecordStream<CategoryCorrespondenceRecord>
-{
-    private readonly IReadOnlyList<MapNetIngest.MapNetFileSpec> _files;
-
-    public MapNetMultiFileStream(IReadOnlyList<MapNetIngest.MapNetFileSpec> files) => _files = files;
-
-    public async IAsyncEnumerable<IFileRecordSource<CategoryCorrespondenceRecord>> FilesAsync(
-        [EnumeratorCancellation] CancellationToken ct = default)
-    {
-        foreach (var spec in _files)
-        {
-            var s = spec;
-            yield return new DelegateFileRecordSource<CategoryCorrespondenceRecord>(
-                s.Label, token => s.IsLuFile
-                    ? FnLuSynsetBridgeIngest.EnumerateTabRecordsAsync(
-                        s.Path, FnLuSynsetBridgeIngest.MultiWordNetVersion, 0, token)
-                    : MapNetIngest.EnumerateFrameRecordsAsync(s.Path, 0, token));
-        }
-        await Task.CompletedTask;
-    }
 }

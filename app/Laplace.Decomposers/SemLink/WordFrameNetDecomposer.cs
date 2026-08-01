@@ -19,13 +19,25 @@ public sealed class WordFrameNetDecomposer : DecomposerMultiFile<CategoryCorresp
         return Task.CompletedTask;
     }
 
-    protected override IMultiFileRecordStream<CategoryCorrespondenceRecord> CreateMultiFileStream(
-        string ecosystemPath, DecomposerOptions options)
-    {
-        var files = WordFrameNetIngest.ResolvePaths(ecosystemPath)
-            .Select(WordFrameNetIngest.DescribeFile)
+    protected override IReadOnlyList<(string Path, string Label)> ListFiles(
+        string ecosystemPath, DecomposerOptions options) =>
+        WordFrameNetIngest.ResolvePaths(ecosystemPath)
+            .Select(p =>
+            {
+                var spec = WordFrameNetIngest.DescribeFile(p);
+                return (spec.Path, spec.Label);
+            })
             .ToList();
-        return new WordFrameNetMultiFileStream(files);
+
+    protected override IAsyncEnumerable<CategoryCorrespondenceRecord> ExtractFileAsync(
+        string filePath, string fileLabel, DecomposerOptions options, CancellationToken ct)
+    {
+        var spec = WordFrameNetIngest.DescribeFile(filePath);
+        return spec.NativeFormat
+            ? FnLuSynsetBridgeIngest.EnumerateWfnNativeRecordsAsync(
+                filePath, FnLuSynsetBridgeIngest.MultiWordNetVersion, 0, ct)
+            : FnLuSynsetBridgeIngest.EnumerateTabRecordsAsync(
+                filePath, FnLuSynsetBridgeIngest.MultiWordNetVersion, 0, ct);
     }
 
     protected override IIngestRecordHandler<CategoryCorrespondenceRecord> CreateHandlerForFile(string fileLabel) =>
@@ -43,17 +55,15 @@ public sealed class WordFrameNetDecomposer : DecomposerMultiFile<CategoryCorresp
     {
         var paths = WordFrameNetIngest.ResolvePaths(context.EcosystemPath).ToList();
         if (paths.Count == 0) return Task.FromResult<IngestInventory?>(null);
-        return Task.FromResult(IngestInventory.FromFiles("records", paths, options.MaxInputUnits, ct));
+        return Task.FromResult(IngestInventory.FromFiles(
+            "records", paths, options.MaxInputUnits, ct, tracksFileCompletion: true));
     }
 
-    public override async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+    public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         long total = 0;
         foreach (string path in WordFrameNetIngest.ResolvePaths(context.EcosystemPath))
-        {
-            long? lines = await WordFrameNetIngest.EstimateLineCountAsync(path, ct);
-            if (lines is not null) total += lines.Value;
-        }
-        return total > 0 ? total : null;
+            total += EtlInventory.EstimateNewlineCount(path, ct);
+        return Task.FromResult<long?>(total > 0 ? total : null);
     }
 }

@@ -79,7 +79,7 @@ public sealed class SemLinkDecomposer : DecomposerMultiPhase<SemLinkSource, Full
     private static DecomposerOptions RemainingOptions(DecomposerOptions options, long cap, long consumed) =>
         cap > 0 ? options with { MaxInputUnits = cap - consumed } : options;
 
-    public async Task<IngestInventory?> DescribeInputAsync(
+    public Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
     {
         string instancesDir = ResolveInstancesDir(context.EcosystemPath);
@@ -93,35 +93,16 @@ public sealed class SemLinkDecomposer : DecomposerMultiPhase<SemLinkSource, Full
         }
         string? roleMappingPath = SemLinkRoleMappingIngest.ResolvePath(context.EcosystemPath);
         if (roleMappingPath is not null) paths.Add(roleMappingPath);
-        if (paths.Count == 0) return null;
-        if (options.MaxInputUnits > 0)
-            return IngestInventory.FromFiles("records", paths, options.MaxInputUnits, ct);
-        long? total = await EstimateUnitCountAsync(context, ct);
-        return total is long n ? IngestInventory.Single(n, "records") : null;
+        if (paths.Count == 0) return Task.FromResult<IngestInventory?>(null);
+        // Inventory is a progress denominator — never full-parse JSON / XML / TSV here.
+        return Task.FromResult(IngestInventory.FromFiles(
+            "records", paths, options.MaxInputUnits, ct));
     }
 
     public override async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
     {
-        string instancesDir = ResolveInstancesDir(context.EcosystemPath);
-        long total = 0;
-        foreach (var (path, _, _) in JsonDocumentSpecs(instancesDir))
-            total += await SemLinkJsonPairStream.CountPairsAsync(path, ct);
-
-        foreach (string pmPath in PredicateMatrixIngest.ResolvePaths(context.EcosystemPath))
-        {
-            long? lines = await PredicateMatrixIngest.EstimateLineCountAsync(pmPath, ct);
-            if (lines is not null) total += lines.Value;
-            break;
-        }
-
-        string? roleMappingPath = SemLinkRoleMappingIngest.ResolvePath(context.EcosystemPath);
-        if (roleMappingPath is not null)
-        {
-            long? roleCount = await SemLinkRoleMappingIngest.EstimateUnitCountAsync(roleMappingPath, ct);
-            if (roleCount is not null) total += roleCount.Value;
-        }
-
-        return total > 0 ? total : null;
+        var inv = await DescribeInputAsync(context, DecomposerOptions.Default, ct);
+        return inv?.TotalInputUnits;
     }
 
     private static IEnumerable<(string Path, SemLinkDocumentKind Kind, string Label)> JsonDocumentSpecs(string dir)

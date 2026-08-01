@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using global::Npgsql;
+using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Xunit;
 
@@ -33,6 +34,8 @@ public sealed class LocalPgFixture : IAsyncLifetime
         {
             if (_refCount++ == 0)
             {
+                // New empty DB: forget any content-ladder skips from a prior fixture life.
+                ContentLadderLedger.Reset();
                 await RunPsqlAdminAsync("dropdb", $"-h {PgHost} -U {PgUser} --force --if-exists {DatabaseName}");
                 await RunPsqlAdminAsync("createdb", $"-h {PgHost} -U {PgUser} -O {PgUser} {DatabaseName}");
             }

@@ -65,8 +65,11 @@ deps_fingerprint() {
       echo "cmake=MISSING"
     fi
     for d in "${DEPS[@]}"; do
-      if [ -d "$EXT/$d/.git" ]; then
-        rev="$(git -C "$EXT/$d" rev-parse HEAD 2>/dev/null || echo UNKNOWN)"
+      if [ -d "$EXT/$d/.git" ] || [ -f "$EXT/$d/.git" ]; then
+        # -c safe.directory=* : submodule checkouts under /opt or root-owned trees
+        # otherwise fail rev-parse with "dubious ownership" and stamp as UNKNOWN,
+        # which defeats the skip logic every run (GH #423).
+        rev="$(git -c safe.directory='*' -C "$EXT/$d" rev-parse HEAD 2>/dev/null || echo UNKNOWN)"
         echo "$d=$rev"
       elif [ -d "$EXT/$d" ]; then
         echo "$d=NOGIT"

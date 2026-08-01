@@ -193,4 +193,95 @@ public sealed class DocumentIngestPipelineTests
             if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
         }
     }
+
+    [Fact]
+    public async Task DocumentMultiFileStream_StampsSourceIdAsFileRoot()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), $"laplace-doc-src-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        try
+        {
+            string path = Path.Combine(dir, "prov.txt");
+            string text = "pillar-0 provenance content.";
+            await File.WriteAllTextAsync(path, text);
+            byte[] bytes = Encoding.UTF8.GetBytes(text);
+            Hash128 expectedRoot = ContentTierSpine.ResolveRoot(bytes)
+                ?? throw new InvalidOperationException("expected root");
+
+            var records = new List<ContentIngestRecord>();
+            await foreach (var source in new DocumentMultiFileStream(dir).FilesAsync())
+            await foreach (var r in source.RecordsAsync())
+                records.Add(r);
+
+            var stamped = Assert.Single(records);
+            Assert.Equal(expectedRoot, stamped.SourceId);
+            Assert.Equal(FileEntity.SourceId(bytes), stamped.SourceId);
+            Assert.NotNull(stamped.Metadata);
+            Assert.Equal("prov.txt", stamped.Metadata.Value.Name);
+            Assert.Equal("prov.txt", stamped.Metadata.Value.RelativePath);
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task DocumentMultiFileStream_ZeroByteFile_SkipsWithoutRecord()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), $"laplace-doc-empty-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(dir, "empty.txt"), "");
+            await File.WriteAllTextAsync(Path.Combine(dir, "ok.txt"), "non-empty document.");
+
+            int recordCount = 0;
+            await foreach (var source in new DocumentMultiFileStream(dir).FilesAsync())
+            await foreach (var _ in source.RecordsAsync())
+                recordCount++;
+
+            Assert.Equal(1, recordCount);
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task DocumentMultiFileStream_Over2GiB_ThrowsWithReason()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), $"laplace-doc-huge-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        string path = Path.Combine(dir, "huge.txt");
+        try
+        {
+            // Sparse file: Length reports >2 GiB without allocating the bytes.
+            // Point the stream at the FILE (not the dir): directory enumeration skips
+            // >2MB blobs via VendoredPathFilter before OpenAsync ever runs.
+            using (var fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None))
+                fs.SetLength((long)int.MaxValue + 1);
+
+            var source = Assert.Single(await CollectSources(path));
+            var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            {
+                await foreach (var _ in source.RecordsAsync()) { }
+            });
+            Assert.Contains("2 GiB", ex.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("exceeds", ex.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    private static async Task<List<IFileRecordSource<ContentIngestRecord>>> CollectSources(string root)
+    {
+        var list = new List<IFileRecordSource<ContentIngestRecord>>();
+        await foreach (var s in new DocumentMultiFileStream(root).FilesAsync())
+            list.Add(s);
+        return list;
+    }
 }

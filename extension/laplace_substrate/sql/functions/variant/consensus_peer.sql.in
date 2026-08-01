@@ -48,12 +48,11 @@ BEGIN
     -- FROM-subquery reference that could not drive the coord GiST index. Fetch
     -- the anchor into locals first so the ordering operand is a genuine bound
     -- parameter, and gate the whole branch behind the election miss.
-    SELECT e.type_id, p.coord, p.trajectory
+    -- word_anchor + v_word_points: one shared type=1 join, and the anchor
+    -- lands in locals so <<->> sees a bound parameter (Rule #4).
+    SELECT a.type_id, a.coord, a.trajectory
       INTO v_type, v_coord, v_traj
-    FROM entities e
-    JOIN physicalities p ON p.entity_id = e.id AND p.type = 1
-    WHERE e.id = p_id AND p.trajectory IS NOT NULL
-    LIMIT 1;
+    FROM word_anchor(p_id) a;
     IF v_coord IS NULL THEN
         RETURN NULL;
     END IF;
@@ -62,11 +61,10 @@ BEGIN
     FROM (
         SELECT knn.id
         FROM (
-            SELECT e2.id, p2.trajectory AS t2
-            FROM entities e2
-            JOIN physicalities p2 ON p2.entity_id = e2.id AND p2.type = 1
-            WHERE e2.type_id = v_type AND e2.id <> p_id AND p2.trajectory IS NOT NULL
-            ORDER BY p2.coord <<->> v_coord
+            SELECT w.id, w.trajectory AS t2
+            FROM v_word_points w
+            WHERE w.type_id = v_type AND w.id <> p_id AND w.trajectory IS NOT NULL
+            ORDER BY w.coord <<->> v_coord
             LIMIT 48
         ) knn
         ORDER BY public.laplace_frechet_4d(knn.t2, v_traj) ASC

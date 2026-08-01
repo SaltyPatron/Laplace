@@ -101,7 +101,10 @@ db-reset:
 db-nuke:
     cd app && dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -c Release -- nuke
 
+# Shebang so nested indent inside the if/fi is legal (just 1.x rejects extra
+# leading whitespace on ordinary recipe lines — GH #422).
 migrate-new name:
+    #!/usr/bin/env bash
     set -euo pipefail
     if [[ ! "{{name}}" =~ ^[a-z][a-z0-9_]*$ ]]; then
         echo "Migration name must be snake_case (a-z0-9_), starting with a letter."
@@ -109,8 +112,7 @@ migrate-new name:
     fi
     stamp=$(date -u +%Y%m%d%H%M%S)
     file="db/migrations/${stamp}_{{name}}.sql"
-    cat > "$file" <<EOF
-    EOF
+    : > "$file"
     echo "Created $file"
     echo "Layer-1 only — substrate objects belong in extension/laplace_substrate/sql/ (see its README.md)"
 

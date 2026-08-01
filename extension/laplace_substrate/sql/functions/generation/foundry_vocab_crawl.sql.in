@@ -103,11 +103,11 @@ CREATE OR REPLACE FUNCTION foundry_vocab_crawl(
             -- Pillar 5: corpus frequency from the trajectory, not PRECEDES mass.
             SELECT tc.entity_id AS id, count(*)::bigint AS d
             FROM (
-                SELECT DISTINCT ON (p.entity_id) p.entity_id, p.trajectory
-                FROM physicalities p
-                JOIN entities et ON et.id = p.entity_id AND et.type_id IN (canonical_id('Sentence'), canonical_id('Document'))
-                WHERE p.type = 1 AND p.trajectory IS NOT NULL
-                ORDER BY p.entity_id, p.id LIMIT 400000
+                SELECT DISTINCT ON (w.id) w.id AS entity_id, w.trajectory
+                FROM v_word_points w
+                WHERE w.type_id IN (canonical_id('Sentence'), canonical_id('Document'))
+                  AND w.trajectory IS NOT NULL
+                ORDER BY w.id, w.physicality_id LIMIT 400000
             ) t
             CROSS JOIN LATERAL laplace_trajectory_constituents(t.trajectory) tc
             JOIN entities e ON e.id = tc.entity_id AND e.type_id = canonical_id('Word')

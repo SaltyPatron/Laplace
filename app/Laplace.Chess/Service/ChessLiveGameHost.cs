@@ -48,14 +48,14 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
     {
         CodepointPerfcache.LoadDefault();
         var conn = connString ?? ChessEngineService.ResolveConnString();
-        var ds = new NpgsqlDataSourceBuilder(conn).Build();
+        var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, conn);
         var inner = new NpgsqlSubstrateWriter(ds);
         var writer = new ConsensusAccumulatingWriter(
             inner, ds, persistEvidence: true);
         var reader = new NpgsqlSubstrateReader(ds);
         var host = new SubstrateTurnHost(ds, writer, reader, witnessWeight, defaultLearnContext);
         var canonicalNames = await ChessVocabulary.BootstrapAsync(writer, ct);
-        await RegisterCanonicalsAsync(ds, canonicalNames, ct);
+        await NpgsqlCanonicalRegistry.RegisterCanonicalsAsync(ds, canonicalNames, ct);
         return new ChessLiveGameHost(ds, writer, host);
     }
 
@@ -345,22 +345,6 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
         if (ContentEmitter.Emit(b, token, ChessVocabulary.SourceId) is { } rid)
             b.AddAttestation(NativeAttestation.Categorical(
                 lineId, "HAS_RESULT", rid, ChessVocabulary.SourceId, eventId, WitnessWeight));
-    }
-
-    private static async Task RegisterCanonicalsAsync(
-        NpgsqlDataSource ds, IReadOnlyCollection<string> names, CancellationToken ct)
-    {
-        if (names.Count == 0) return;
-        await using var conn = await ds.OpenConnectionAsync(ct);
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT laplace.register_canonicals(@names)";
-        cmd.Parameters.Add(new NpgsqlParameter
-        {
-            ParameterName = "names",
-            Value = names.ToArray(),
-            NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Text,
-        });
-        await cmd.ExecuteNonQueryAsync(ct);
     }
 
     private sealed class LiveGameSession(string learnContext, Hash128? whitePlayerId, Hash128? blackPlayerId)

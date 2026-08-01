@@ -93,10 +93,9 @@ internal static class IngestExistenceGate
             var ids = new Hash128[roots.Count];
             for (int k = 0; k < roots.Count; k++) ids[k] = roots[k].RootId;
             byte[] bm = await reader.EntitiesExistBitmapAsync(ids, ct).ConfigureAwait(false);
-            long bits = (long)bm.Length * 8;
             for (int k = 0; k < roots.Count; k++)
             {
-                bool present = k < bits && (bm[k >> 3] & (1 << (k & 7))) != 0;
+                bool present = BitmapBits.IsSet(bm, k);
                 if (!present)
                 {
                     probedAbsent?.Add(roots[k].RootId);
@@ -208,8 +207,7 @@ internal static class IngestExistenceGate
         if (probeIds.Count > 0)
         {
             byte[] bm = await reader.EntitiesExistBitmapAsync(probeIds, ct).ConfigureAwait(false);
-            long bits = (long)bm.Length * 8;
-            bool Present(int slot) => slot < bits && (bm[slot >> 3] & (1 << (slot & 7))) != 0;
+            bool Present(int slot) => BitmapBits.IsSet(bm, slot);
 
             var proven = new List<Hash128>();
             for (int s = 0; s < probeIds.Count; s++)

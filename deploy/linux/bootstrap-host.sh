@@ -35,11 +35,13 @@ echo "==> nginx vhost: /etc/nginx/sites-available/laplace (port 8080)"
 install -m 0644 "$HERE/nginx-laplace.conf" /etc/nginx/sites-available/laplace
 ln -sfn /etc/nginx/sites-available/laplace /etc/nginx/sites-enabled/laplace
 
-echo "==> sudoers grant for $RUN_USER (restart service + reload nginx only)"
-# PostgreSQL is deliberately NOT here: the postmaster runs AS the runner user
-# (laplace-postgresql.service, User=laplace-runner), so the runner bounces its
-# own postgres rootlessly — SIGINT to the owned postmaster + the unit's
-# Restart=always (see bootstrap-laplace-runner.sh). No new sudo surface.
+echo "==> sudoers grant for $RUN_USER (restart API + reload nginx only)"
+# PostgreSQL bounce lives in /etc/sudoers.d/laplace-pg-bounce, written by
+# scripts/bootstrap-laplace-runner.sh (bootstrap_pg_bounce_sudoers /
+# mode pg-bounce-sudoers). Operators (ahart) run pipeline.sh and cannot
+# SIGINT the laplace-runner-owned postmaster; that drop-in is the
+# sudo -n systemctl restart laplace-postgresql.service fallback. Do NOT
+# fold PG into this API/nginx file — keep the surfaces separate.
 cat > /etc/sudoers.d/laplace-runner-deploy <<EOF
 $RUN_USER ALL=(root) NOPASSWD: /usr/bin/systemctl restart laplace-api, \\
   /usr/bin/systemctl start laplace-api, /usr/bin/systemctl stop laplace-api, \\

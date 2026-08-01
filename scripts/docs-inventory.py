@@ -126,8 +126,9 @@ Chess:
 - Governed canonical relations: **{rel_count}** (+{alias_count} aliases — aliases map to a canonical and add no highway bits)
 - Salience bands: **{len(bands)}** — {", ".join(f"`{b}`" for b in bands)}
 
-Highway bits are assigned alphabetically at codegen: adding a relation renumbers
-bits and owes a reseed (see CLAUDE.md).
+Highway bits are an explicit append-only `bit = N` registry in
+`relation_types.toml` (ADR 0001 / GH #551). Codegen validates uniqueness and
+range; adding a relation takes the next free bit and does not renumber peers.
 
 ## Perfcache blobs referenced in source
 

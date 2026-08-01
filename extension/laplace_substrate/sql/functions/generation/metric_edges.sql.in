@@ -5,11 +5,10 @@ CREATE OR REPLACE FUNCTION metric_edges(
     SET search_path = @extschema@, public AS $$
     WITH v AS (
         
-        SELECT DISTINCT ON (p.entity_id) p.entity_id AS id, p.coord, p.trajectory
-        FROM physicalities p
-        JOIN unnest(p_vocab) AS u(id) ON u.id = p.entity_id
-        WHERE p.type = 1
-        ORDER BY p.entity_id, p.id
+        SELECT DISTINCT ON (w.id) w.id, w.coord, w.trajectory
+        FROM v_word_points w
+        JOIN unnest(p_vocab) AS u(id) ON u.id = w.id
+        ORDER BY w.id, w.physicality_id
     ),
     cand AS (
         

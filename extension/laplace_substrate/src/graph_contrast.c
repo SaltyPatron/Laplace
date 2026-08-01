@@ -307,11 +307,11 @@ pg_laplace_contrast(PG_FUNCTION_ARGS)
             Datum *obj_ids  = (Datum *) palloc(sizeof(Datum) * n_emit);
             Datum *type_ids = (Datum *) palloc(sizeof(Datum) * n_emit);
             ArrayType *obj_arr, *type_arr;
-            Oid   rtypes[2] = { BYTEAARRAYOID, BYTEAOID };
-            Datum rargs[2];
-            char  rnulls[3] = "  ";
+            Oid   rtypes[1] = { BYTEAARRAYOID };
+            Datum rargs[1];
             bool  isnull;
             int   rc2;
+            Datum fact_arr;
 
             for (int i = 0; i < n_emit; i++)
             {
@@ -321,22 +321,11 @@ pg_laplace_contrast(PG_FUNCTION_ARGS)
             obj_arr  = construct_array(obj_ids, n_emit, BYTEAOID, -1, false, TYPALIGN_INT);
             type_arr = construct_array(type_ids, n_emit, BYTEAOID, -1, false, TYPALIGN_INT);
 
-            rargs[0] = PointerGetDatum(obj_arr);
-            rargs[1] = lang;
-            if (lang == (Datum) 0)
-                rnulls[1] = 'n';
-            rc2 = SPI_execute_with_args(
-                "SELECT laplace.realize_batch($1, $2)",
-                2, rtypes, rargs, rnulls, true, 1);
-            if (rc2 == SPI_OK_SELECT && SPI_processed > 0)
-            {
-                Datum arr = SPI_getbinval(SPI_tuptable->vals[0],
-                                          SPI_tuptable->tupdesc, 1, &isnull);
-                if (!isnull)
-                    deconstruct_array(DatumGetArrayTypePCopy(arr), TEXTOID,
-                                      -1, false, TYPALIGN_INT,
-                                      &facts, &fact_nulls, &n_facts);
-            }
+            fact_arr = spi_realize_batch(PointerGetDatum(obj_arr), lang);
+            if (fact_arr != (Datum) 0)
+                deconstruct_array(DatumGetArrayTypePCopy(fact_arr), TEXTOID,
+                                  -1, false, TYPALIGN_INT,
+                                  &facts, &fact_nulls, &n_facts);
 
             rargs[0] = PointerGetDatum(type_arr);
             rc2 = SPI_execute_with_args(

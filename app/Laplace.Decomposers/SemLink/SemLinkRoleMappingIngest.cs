@@ -76,23 +76,9 @@ internal static class SemLinkRoleMappingIngest
         }
     }
 
-    internal static async Task<long?> EstimateUnitCountAsync(string path, CancellationToken ct)
-    {
-        long total = 0;
-        await Task.Run(() =>
-        {
-            var doc = new XmlDocument();
-            doc.Load(path);
-            var root = doc.DocumentElement;
-            if (root is null) return;
-            foreach (XmlNode _ in root.GetElementsByTagName("role"))
-            {
-                ct.ThrowIfCancellationRequested();
-                total++;
-            }
-        }, ct);
-        return total > 0 ? total : null;
-    }
+    // Inventory denominator only — do not DOM-load the XML just to count <role> tags.
+    internal static Task<long?> EstimateUnitCountAsync(string path, CancellationToken ct) =>
+        Task.FromResult<long?>(Math.Max(1, EtlInventory.EstimateNewlineCount(path, ct)));
 }
 
 internal sealed class SemLinkRoleMappingPhase : DecomposerPhase<RelationTripleRecord>

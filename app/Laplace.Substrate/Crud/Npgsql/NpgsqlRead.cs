@@ -41,6 +41,32 @@ public static class NpgsqlRead
         try
         {
             await using var conn = await dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+            return await ReadRowsAsync(conn, sql, map, bind, timeoutSeconds, ct, label, onError: null)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (Translatable(ex, onError))
+        {
+            throw onError!(ex, label ?? "query");
+        }
+    }
+
+    /// <summary>
+    /// Same as the <see cref="NpgsqlDataSource"/> overload, but on an already-open
+    /// connection — for multi-command scopes (TEMP TABLE then SELECT) where opening a
+    /// fresh connection would lose session state.
+    /// </summary>
+    public static async Task<IReadOnlyList<T>> ReadRowsAsync<T>(
+        NpgsqlConnection conn,
+        string sql,
+        Func<NpgsqlDataReader, T> map,
+        Action<NpgsqlParameterCollection>? bind = null,
+        int timeoutSeconds = 0,
+        CancellationToken ct = default,
+        string? label = null,
+        ErrorTranslator? onError = null)
+    {
+        try
+        {
             await using var cmd = new NpgsqlCommand(sql, conn);
             if (timeoutSeconds > 0) cmd.CommandTimeout = timeoutSeconds;
             bind?.Invoke(cmd.Parameters);
@@ -76,6 +102,29 @@ public static class NpgsqlRead
         try
         {
             await using var conn = await dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+            return await ReadFirstOrDefaultAsync(conn, sql, map, bind, timeoutSeconds, ct, label, onError: null)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (Translatable(ex, onError))
+        {
+            throw onError!(ex, label ?? "query");
+        }
+    }
+
+    /// <inheritdoc cref="ReadFirstOrDefaultAsync{T}(NpgsqlDataSource, string, Func{NpgsqlDataReader, T}, Action{NpgsqlParameterCollection}?, int, CancellationToken, string?, ErrorTranslator?)"/>
+    public static async Task<T?> ReadFirstOrDefaultAsync<T>(
+        NpgsqlConnection conn,
+        string sql,
+        Func<NpgsqlDataReader, T> map,
+        Action<NpgsqlParameterCollection>? bind = null,
+        int timeoutSeconds = 0,
+        CancellationToken ct = default,
+        string? label = null,
+        ErrorTranslator? onError = null)
+        where T : class
+    {
+        try
+        {
             await using var cmd = new NpgsqlCommand(sql, conn);
             if (timeoutSeconds > 0) cmd.CommandTimeout = timeoutSeconds;
             bind?.Invoke(cmd.Parameters);
@@ -107,6 +156,27 @@ public static class NpgsqlRead
         try
         {
             await using var conn = await dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+            return await ExecuteScalarAsync<T>(conn, sql, bind, timeoutSeconds, ct, label, onError: null)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (Translatable(ex, onError))
+        {
+            throw onError!(ex, label ?? "query");
+        }
+    }
+
+    /// <inheritdoc cref="ExecuteScalarAsync{T}(NpgsqlDataSource, string, Action{NpgsqlParameterCollection}?, int, CancellationToken, string?, ErrorTranslator?)"/>
+    public static async Task<T?> ExecuteScalarAsync<T>(
+        NpgsqlConnection conn,
+        string sql,
+        Action<NpgsqlParameterCollection>? bind = null,
+        int timeoutSeconds = 0,
+        CancellationToken ct = default,
+        string? label = null,
+        ErrorTranslator? onError = null)
+    {
+        try
+        {
             await using var cmd = new NpgsqlCommand(sql, conn);
             if (timeoutSeconds > 0) cmd.CommandTimeout = timeoutSeconds;
             bind?.Invoke(cmd.Parameters);
@@ -133,6 +203,27 @@ public static class NpgsqlRead
         try
         {
             await using var conn = await dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+            return await ExecuteNonQueryAsync(conn, sql, bind, timeoutSeconds, ct, label, onError: null)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (Translatable(ex, onError))
+        {
+            throw onError!(ex, label ?? "query");
+        }
+    }
+
+    /// <inheritdoc cref="ExecuteNonQueryAsync(NpgsqlDataSource, string, Action{NpgsqlParameterCollection}?, int, CancellationToken, string?, ErrorTranslator?)"/>
+    public static async Task<int> ExecuteNonQueryAsync(
+        NpgsqlConnection conn,
+        string sql,
+        Action<NpgsqlParameterCollection>? bind = null,
+        int timeoutSeconds = 0,
+        CancellationToken ct = default,
+        string? label = null,
+        ErrorTranslator? onError = null)
+    {
+        try
+        {
             await using var cmd = new NpgsqlCommand(sql, conn);
             if (timeoutSeconds > 0) cmd.CommandTimeout = timeoutSeconds;
             bind?.Invoke(cmd.Parameters);

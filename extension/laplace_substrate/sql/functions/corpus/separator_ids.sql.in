@@ -44,9 +44,8 @@ CREATE OR REPLACE FUNCTION separator_ids()
     clusters AS (
         SELECT e.id
         FROM entities e
-        JOIN physicalities p
-          ON p.entity_id = e.id AND p.type = 1 AND p.trajectory IS NOT NULL
-        CROSS JOIN LATERAL public.laplace_trajectory_constituents(p.trajectory) c
+        JOIN v_word_points w ON w.id = e.id AND w.trajectory IS NOT NULL
+        CROSS JOIN LATERAL public.laplace_trajectory_constituents(w.trajectory) c
         WHERE e.tier = 1
         GROUP BY e.id
         HAVING bool_and(c.entity_id IN (SELECT id FROM atoms))

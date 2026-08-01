@@ -1,5 +1,4 @@
 using global::Npgsql;
-using NpgsqlTypes;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.Modality;
@@ -38,37 +37,18 @@ public sealed class SubstrateTurnHost : IContentAddresser, IEdgeRatings, IStateV
 
     public async Task<double[]> EffMuAsync(IReadOnlyList<Hash128> edgeIds, CancellationToken ct = default)
     {
-        var raw = new byte[edgeIds.Count][];
-        for (int i = 0; i < edgeIds.Count; i++) raw[i] = edgeIds[i].ToBytes();
-
-        var map = new Dictionary<Hash128, (double Mu, double W)>(edgeIds.Count);
-        await using (var conn = await _ds.OpenConnectionAsync(ct))
-        await using (var cmd = conn.CreateCommand())
-        {
-            // Edge ids arrive from ModalityEngine.ScoreMovesAsync, which builds them
-            // with ChessVocabulary.MoveType — thread that type so the partitioned
-            // consensus scan prunes to the MOVE partition instead of Append-scanning
-            // every relation type.
-            cmd.CommandText =
-                "SELECT id, eff_mu, witness_count FROM laplace.consensus_by_ids($1, $2)";
-            cmd.Parameters.Add(new NpgsqlParameter
-            {
-                NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea,
-                Value = raw,
-            });
-            cmd.Parameters.Add(new NpgsqlParameter
-            {
-                NpgsqlDbType = NpgsqlDbType.Bytea,
-                Value = ChessVocabulary.MoveType.ToBytes(),
-            });
-            await using var r = await cmd.ExecuteReaderAsync(ct);
-            while (await r.ReadAsync(ct))
-                map[Hash128.FromBytes((byte[])r[0])] = (r.GetDouble(1), r.GetDouble(2));
-        }
+        // Edge ids arrive from ModalityEngine.ScoreMovesAsync, which builds them
+        // with ChessVocabulary.MoveType — thread that type so the partitioned
+        // consensus scan prunes to the MOVE partition instead of Append-scanning
+        // every relation type.
+        var byId = await Laplace.SubstrateCRUD.Npgsql.NpgsqlConsensusByIds.ReadAsync(
+            _ds, edgeIds, ChessVocabulary.MoveType, ct).ConfigureAwait(false);
 
         var outv = new double[edgeIds.Count];
         for (int i = 0; i < edgeIds.Count; i++)
-            outv[i] = map.TryGetValue(edgeIds[i], out var v) ? ChessShrink.Apply(v.Mu, v.W) : GlickoPriors.UnratedEffMu;
+            outv[i] = byId.TryGetValue(edgeIds[i], out var row)
+                ? ChessShrink.Apply(row.EffMu, row.Witnesses)
+                : GlickoPriors.UnratedEffMu;
         return outv;
     }
 

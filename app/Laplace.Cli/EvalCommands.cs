@@ -1,20 +1,7 @@
-using global::Npgsql;
 using Laplace.SubstrateCRUD.Npgsql;
 using static Laplace.Cli.CliRuntime;
 
 namespace Laplace.Cli;
-
-
-
-
-
-
-
-
-
-
-
-
 
 internal static class EvalCommands
 {
@@ -29,8 +16,8 @@ internal static class EvalCommands
 
         await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
 
-        var pos = await ScoresAsync(ds, PositivesSql, relation, gt, n);
-        var neg = await ScoresAsync(ds, NegativesSql, relation, gt, n);
+        var pos = (await NpgsqlSubstrateReads.IngestFidelityPositiveScoresAsync(ds, relation, gt, n)).ToList();
+        var neg = (await NpgsqlSubstrateReads.IngestFidelityNegativeScoresAsync(ds, relation, gt, n)).ToList();
 
         Console.WriteLine($"eval ingest-fidelity: relation={relation} ground-truth={gt} (two-hop synonym join)");
         if (pos.Count == 0)
@@ -49,64 +36,7 @@ internal static class EvalCommands
         return 0;
     }
 
-    private static async Task<List<double>> ScoresAsync(
-        NpgsqlDataSource ds, string sql, string relation, string gt, int n)
-    {
-        await using var cmd = ds.CreateCommand(sql);
-        cmd.CommandTimeout = 0;
-        cmd.Parameters.AddWithValue("rel", relation);
-        cmd.Parameters.AddWithValue("gt", gt);
-        cmd.Parameters.AddWithValue("n", n);
-        var outv = new List<double>(n);
-        await using var rdr = await cmd.ExecuteReaderAsync();
-        while (await rdr.ReadAsync()) outv.Add(rdr.GetDouble(0));
-        return outv;
-    }
-
-
-
-    private const string PositivesSql = @"
-        WITH vocab AS (
-          SELECT DISTINCT subject_id AS id FROM laplace.consensus
-          WHERE type_id = laplace.relation_type_id(@rel)
-        ),
-        syn AS (
-          SELECT subject_id AS w, object_id AS sense FROM laplace.consensus
-          WHERE type_id = laplace.relation_type_id(@gt)
-            AND subject_id IN (SELECT id FROM vocab)
-        ),
-        pairs AS (
-          SELECT DISTINCT a.w AS w1, b.w AS w2
-          FROM syn a JOIN syn b ON a.sense = b.sense AND a.w < b.w
-        )
-        SELECT GREATEST(
-          COALESCE(laplace.eff_mu_display(c1.rating, c1.rd), 0),
-          COALESCE(laplace.eff_mu_display(c2.rating, c2.rd), 0))::float8
-        FROM (SELECT w1, w2 FROM pairs ORDER BY random() LIMIT @n) p
-        LEFT JOIN laplace.consensus c1 ON c1.id = laplace.consensus_id(p.w1, laplace.relation_type_id(@rel), p.w2)
-        LEFT JOIN laplace.consensus c2 ON c2.id = laplace.consensus_id(p.w2, laplace.relation_type_id(@rel), p.w1)";
-
-
-    private const string NegativesSql = @"
-        WITH vocab AS (
-          SELECT DISTINCT subject_id AS id FROM laplace.consensus
-          WHERE type_id = laplace.relation_type_id(@rel)
-        ),
-        samp AS (SELECT id, row_number() OVER (ORDER BY random()) AS rn FROM vocab),
-        cnt  AS (SELECT count(*) AS c FROM samp),
-        neg  AS (
-          SELECT a.id AS w1, b.id AS w2
-          FROM samp a JOIN samp b ON b.rn = a.rn + (SELECT c/2 FROM cnt)
-        )
-        SELECT GREATEST(
-          COALESCE(laplace.eff_mu_display(c1.rating, c1.rd), 0),
-          COALESCE(laplace.eff_mu_display(c2.rating, c2.rd), 0))::float8
-        FROM (SELECT w1, w2 FROM neg ORDER BY random() LIMIT @n) p
-        LEFT JOIN laplace.consensus c1 ON c1.id = laplace.consensus_id(p.w1, laplace.relation_type_id(@rel), p.w2)
-        LEFT JOIN laplace.consensus c2 ON c2.id = laplace.consensus_id(p.w2, laplace.relation_type_id(@rel), p.w1)";
-
     private static double Mean(List<double> xs) => xs.Count == 0 ? 0 : xs.Average();
-
 
     private static double RocAuc(List<double> pos, List<double> neg)
     {
@@ -128,7 +58,6 @@ internal static class EvalCommands
         double u = rankSumPos - pos.Count * (pos.Count + 1) / 2.0;
         return u / ((double)pos.Count * neg.Count);
     }
-
 
     private static double PrecisionAtK(List<double> pos, List<double> neg)
     {

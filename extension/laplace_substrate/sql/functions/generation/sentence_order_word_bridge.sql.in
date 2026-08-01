@@ -10,11 +10,11 @@ CREATE OR REPLACE FUNCTION sentence_order_word_bridge(p_vocab bytea[], p_docs in
     SET search_path = @extschema@, public AS $$
     WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
     t AS (
-        SELECT DISTINCT ON (p.entity_id) p.entity_id AS did, p.trajectory
-        FROM physicalities p
-        JOIN entities e ON e.id = p.entity_id AND e.type_id = canonical_id('Document')
-        WHERE p.type = 1 AND p.trajectory IS NOT NULL
-        ORDER BY p.entity_id, p.id LIMIT p_docs
+        SELECT DISTINCT ON (w.id) w.id AS did, w.trajectory
+        FROM v_word_points w
+        WHERE w.type_id = canonical_id('Document')
+          AND w.trajectory IS NOT NULL
+        ORDER BY w.id, w.physicality_id LIMIT p_docs
     ),
     g AS (
         SELECT t.did, tc.ordinal AS ord, tc.entity_id AS sid
@@ -31,11 +31,11 @@ CREATE OR REPLACE FUNCTION sentence_order_word_bridge(p_vocab bytea[], p_docs in
         ) u
     ),
     sent_traj AS (
-        SELECT DISTINCT ON (p.entity_id) p.entity_id AS sid, p.trajectory
-        FROM physicalities p
-        JOIN live s ON s.sid = p.entity_id
-        WHERE p.type = 1 AND p.trajectory IS NOT NULL
-        ORDER BY p.entity_id, p.id
+        SELECT DISTINCT ON (w.id) w.id AS sid, w.trajectory
+        FROM v_word_points w
+        JOIN live s ON s.sid = w.id
+        WHERE w.trajectory IS NOT NULL
+        ORDER BY w.id, w.physicality_id
     ),
     words AS (
         -- in-vocab join doubles as the content filter (whitespace/punctuation

@@ -1,0 +1,27 @@
+-- Attestations with the four endpoint labels resolved once. The inspect
+-- attestation family kept re-joining entities / calling label_or_hex per
+-- column. label_or_hex owns the id-display decision (hex fallback); this view
+-- does not invent a second renderer.
+--
+-- PERFORMANCE CONTRACT: each row pays up to five label_or_hex calls. Use ONLY
+-- with a selective predicate and LIMIT (inspect/UI). Never as the base of a
+-- bulk fold, ingest, or unbounded join — that turns a cheap scan into a render
+-- storm.
+CREATE OR REPLACE VIEW v_attestation_readable AS
+SELECT a.id,
+       a.subject_id,
+       a.type_id,
+       a.object_id,
+       a.source_id,
+       a.context_id,
+       a.outcome,
+       a.observation_count,
+       a.sum_score_fp1e9,
+       a.opponent_rd_fp1e9,
+       a.last_observed_at,
+       label_or_hex(a.subject_id) AS subject_label,
+       label_or_hex(a.type_id)    AS type_label,
+       label_or_hex(a.object_id)  AS object_label,
+       label_or_hex(a.source_id)  AS source_label,
+       label_or_hex(a.context_id) AS context_label
+FROM attestations a;

@@ -20,6 +20,7 @@ probationary = 0.05
 
 [[relation]]
 canonical = "ADJACENT_TO_PIXEL"
+bit = 0
 rank = "associative"
 symmetry = "symmetric"
 parent = null
@@ -27,6 +28,7 @@ family_root = "ADJACENT_TO_PIXEL"
 
 [[relation]]
 canonical = "ALSO_SEE"
+bit = 1
 rank = "associative"
 symmetry = "asymmetric"
 parent = "RELATED_TO"
@@ -43,6 +45,7 @@ family_root = "RELATED_TO"
 # context — same occurrence semantics, different modality.
 [[relation]]
 canonical = "APPEARS_IN"
+bit = 2
 hot = true
 rank = "tensor_calculation"
 symmetry = "asymmetric"
@@ -54,6 +57,7 @@ family_root = "APPEARS_IN"
 # comment describes. Scalar-valued: they attach numeric Scalar entities to a recipe.
 [[relation]]
 canonical = "HAS_HIDDEN_SIZE"
+bit = 75
 rank = "scalar_valued"
 symmetry = "asymmetric"
 parent = null
@@ -61,6 +65,7 @@ family_root = "HAS_HIDDEN_SIZE"
 
 [[relation]]
 canonical = "HAS_NUM_LAYERS"
+bit = 99
 rank = "scalar_valued"
 symmetry = "asymmetric"
 parent = null
@@ -68,6 +73,7 @@ family_root = "HAS_NUM_LAYERS"
 
 [[relation]]
 canonical = "HAS_NUM_HEADS"
+bit = 97
 rank = "scalar_valued"
 symmetry = "asymmetric"
 parent = null
@@ -75,6 +81,7 @@ family_root = "HAS_NUM_HEADS"
 
 [[relation]]
 canonical = "HAS_NUM_KV_HEADS"
+bit = 98
 rank = "scalar_valued"
 symmetry = "asymmetric"
 parent = null
@@ -82,6 +89,7 @@ family_root = "HAS_NUM_KV_HEADS"
 
 [[relation]]
 canonical = "HAS_INTERMEDIATE_SIZE"
+bit = 76
 rank = "scalar_valued"
 symmetry = "asymmetric"
 parent = null
@@ -89,6 +97,7 @@ family_root = "HAS_INTERMEDIATE_SIZE"
 
 [[relation]]
 canonical = "HAS_VOCAB_SIZE"
+bit = 131
 rank = "scalar_valued"
 symmetry = "asymmetric"
 parent = null
@@ -96,6 +105,7 @@ family_root = "HAS_VOCAB_SIZE"
 
 [[relation]]
 canonical = "ATTENDS"
+bit = 3
 hot = true
 rank = "tensor_calculation"
 symmetry = "asymmetric"
@@ -104,6 +114,7 @@ family_root = "RELATED_TO"
 
 [[relation]]
 canonical = "AT_LOCATION"
+bit = 4
 rank = "associative"
 symmetry = "asymmetric"
 parent = null
@@ -111,6 +122,7 @@ family_root = "AT_LOCATION"
 
 [[relation]]
 canonical = "CALLS"
+bit = 6
 rank = "associative"
 symmetry = "asymmetric"
 parent = "RELATED_TO"
@@ -118,6 +130,7 @@ family_root = "RELATED_TO"
 
 [[relation]]
 canonical = "CANONICAL_DECOMPOSES_TO"
+bit = 7
 rank = "standards_structural"
 symmetry = "asymmetric"
 parent = null
@@ -125,6 +138,7 @@ family_root = "CANONICAL_DECOMPOSES_TO"
 
 [[relation]]
 canonical = "CAPABLE_OF"
+bit = 8
 rank = "associative"
 symmetry = "asymmetric"
 parent = null
@@ -132,6 +146,7 @@ family_root = "CAPABLE_OF"
 
 [[relation]]
 canonical = "CAPTIONS"
+bit = 9
 rank = "associative"
 symmetry = "asymmetric"
 parent = null
@@ -139,6 +154,7 @@ family_root = "CAPTIONS"
 
 [[relation]]
 canonical = "CAUSATIVE_OF"
+bit = 10
 rank = "causal"
 symmetry = "asymmetric"
 parent = null
@@ -146,6 +162,7 @@ family_root = "CAUSATIVE_OF"
 
 [[relation]]
 canonical = "CAUSES"
+bit = 11
 rank = "causal"
 symmetry = "asymmetric"
 parent = null
@@ -153,6 +170,7 @@ family_root = "CAUSES"
 
 [[relation]]
 canonical = "CAUSES_DESIRE"
+bit = 12
 rank = "causal"
 symmetry = "asymmetric"
 parent = null
@@ -160,6 +178,7 @@ family_root = "CAUSES_DESIRE"
 
 [[relation]]
 canonical = "COMPATIBILITY_DECOMPOSES_TO"
+bit = 13
 rank = "standards_structural"
 symmetry = "asymmetric"
 parent = null
@@ -167,6 +186,7 @@ family_root = "COMPATIBILITY_DECOMPOSES_TO"
 
 [[relation]]
 canonical = "COMPLETES_TO"
+bit = 14
 hot = true
 rank = "tensor_calculation"
 symmetry = "asymmetric"
@@ -175,6 +195,7 @@ family_root = "COMPLETES_TO"
 
 [[relation]]
 canonical = "CONTINUES_TO"
+bit = 17
 hot = true
 rank = "tensor_calculation"
 symmetry = "asymmetric"
@@ -183,6 +204,7 @@ family_root = "CONTINUES_TO"
 
 [[relation]]
 canonical = "CONFUSABLE_WITH"
+bit = 15
 rank = "standards_structural"
 symmetry = "symmetric"
 parent = null
@@ -190,6 +212,7 @@ family_root = "CONFUSABLE_WITH"
 
 [[relation]]
 canonical = "CONTAINS"
+bit = 16
 hot = true
 rank = "partitive"
 symmetry = "asymmetric"
@@ -198,6 +221,7 @@ family_root = "HAS_PART"
 
 [[relation]]
 canonical = "CORRESPONDS_TO"
+bit = 18
 rank = "equivalence"
 symmetry = "symmetric"
 parent = null
@@ -205,6 +229,7 @@ family_root = "CORRESPONDS_TO"
 
 [[relation]]
 canonical = "CREATED_BY"
+bit = 19
 rank = "causal"
 symmetry = "asymmetric"
 parent = null
@@ -212,6 +237,7 @@ family_root = "CREATED_BY"
 
 [[relation]]
 canonical = "DECODES_TO"
+bit = 20
 rank = "standards_structural"
 symmetry = "asymmetric"
 parent = null
@@ -219,6 +245,7 @@ family_root = "DECODES_TO"
 
 [[relation]]
 canonical = "DEPENDS_ON"
+bit = 21
 rank = "partitive"
 symmetry = "asymmetric"
 parent = null
@@ -226,6 +253,7 @@ family_root = "DEPENDS_ON"
 
 [[relation]]
 canonical = "DEPICTS"
+bit = 22
 rank = "associative"
 symmetry = "asymmetric"
 parent = null
@@ -233,6 +261,7 @@ family_root = "DEPICTS"
 
 [[relation]]
 canonical = "DERIVATIONALLY_RELATED"
+bit = 23
 rank = "associative"
 symmetry = "symmetric"
 parent = "RELATED_TO"
@@ -240,6 +269,7 @@ family_root = "RELATED_TO"
 
 [[relation]]
 canonical = "DERIVED_FROM"
+bit = 24
 rank = "associative"
 symmetry = "asymmetric"
 parent = "DERIVATIONALLY_RELATED"
@@ -247,6 +277,7 @@ family_root = "RELATED_TO"
 
 [[relation]]
 canonical = "DESIRES"
+bit = 25
 rank = "associative"
 symmetry = "asymmetric"
 parent = null
@@ -254,6 +285,7 @@ family_root = "DESIRES"
 
 [[relation]]
 canonical = "DISTINCT_FROM"
+bit = 26
 rank = "oppositional"
 symmetry = "symmetric"
 parent = null
@@ -265,6 +297,7 @@ family_root = "DISTINCT_FROM"
 # highway mask — same gap the chess block below fixed for its vocabulary.
 [[relation]]
 canonical = "ENCODES"
+bit = 27
 rank = "tensor_calculation"
 symmetry = "asymmetric"
 parent = null
@@ -272,6 +305,7 @@ family_root = "ENCODES"
 
 [[relation]]
 canonical = "ENHANCED_DEPENDS_ON"
+bit = 28
 rank = "partitive"
 symmetry = "asymmetric"
 parent = null
@@ -279,6 +313,7 @@ family_root = "ENHANCED_DEPENDS_ON"
 
 [[relation]]
 canonical = "ENTAILS"
+bit = 29
 rank = "causal"
 symmetry = "asymmetric"
 parent = null
@@ -286,6 +321,7 @@ family_root = "ENTAILS"
 
 [[relation]]
 canonical = "ETYMOLOGICALLY_DERIVED_FROM"
+bit = 30
 rank = "associative"
 symmetry = "asymmetric"
 parent = "HAS_ETYMOLOGY"
@@ -293,6 +329,7 @@ family_root = "HAS_ETYMOLOGY"
 
 [[relation]]
 canonical = "ETYMOLOGICALLY_RELATED_TO"
+bit = 31
 rank = "associative"
 symmetry = "symmetric"
 parent = "HAS_ETYMOLOGY"
@@ -300,6 +337,7 @@ family_root = "HAS_ETYMOLOGY"
 
 [[relation]]
 canonical = "EVOKES_FRAME"
+bit = 32
 rank = "taxonomic"
 symmetry = "asymmetric"
 parent = null
@@ -308,6 +346,7 @@ family_root = "EVOKES_FRAME"
 # HOT: Wiktionary inflection edges — one per surface form; 3.7M rows / 4.7%.
 [[relation]]
 canonical = "FORM_OF"
+bit = 35
 hot = true
 rank = "equivalence"
 symmetry = "asymmetric"
@@ -316,6 +355,7 @@ family_root = "RELATED_TO"
 
 [[relation]]
 canonical = "FRAME_USES"
+bit = 36
 rank = "associative"
 symmetry = "asymmetric"
 parent = "RELATED_TO"
@@ -323,6 +363,7 @@ family_root = "RELATED_TO"
 
 [[relation]]
 canonical = "HAS_A"
+bit = 42
 rank = "partitive"
 symmetry = "asymmetric"
 parent = "HAS_PART"
@@ -330,6 +371,7 @@ family_root = "HAS_PART"
 
 [[relation]]
 canonical = "HAS_AGE"
+bit = 43
 rank = "standards_structural"
 symmetry = "asymmetric"
 parent = null
@@ -337,6 +379,7 @@ family_root = "HAS_AGE"
 
 [[relation]]
 canonical = "HAS_ATTRIBUTE"
+bit = 46
 rank = "partitive"
 symmetry = "asymmetric"
 parent = null
@@ -344,6 +387,7 @@ family_root = "HAS_ATTRIBUTE"
 
 [[relation]]
 canonical = "HAS_BIDI_CLASS"
+bit = 48
 rank = "standards_structural"
 symmetry = "asymmetric"
 parent = null
@@ -351,6 +395,7 @@ family_root = "HAS_BIDI_CLASS"
 
 [[relation]]
 canonical = "HAS_BLOCK"
+bit = 50
 rank = "standards_structural"
 symmetry = "asymmetric"
 parent = null
@@ -358,6 +403,7 @@ family_root = "HAS_BLOCK"
 
 [[relation]]
 canonical = "HAS_COMBINING_CLASS"
+bit = 53
 rank = "standards_structural"
 symmetry = "asymmetric"
 parent = null
@@ -365,6 +411,7 @@ family_root = "HAS_COMBINING_CLASS"
 
 [[relation]]
 canonical = "HAS_CONTEXT"
+bit = 54
 rank = "associative"
 symmetry = "asymmetric"
 parent = null
@@ -372,6 +419,7 @@ family_root = "HAS_CONTEXT"
 
 [[relation]]
 canonical = "HAS_DBPEDIA_RELATION"
+bit = 55
 rank = "associative"
 symmetry = "asymmetric"
 parent = null
@@ -379,6 +427,7 @@ family_root = "HAS_DBPEDIA_RELATION"
 
 [[relation]]
 canonical = "HAS_DEFINITION"
+bit = 56
 hot = true
 rank = "definitional"
 symmetry = "asymmetric"
@@ -387,6 +436,7 @@ family_root = "HAS_DEFINITION"
 
 [[relation]]
 canonical = "HAS_DOMAIN_REGION"
+bit = 57
 rank = "associative"
 symmetry = "asymmetric"
 parent = null
@@ -394,6 +444,7 @@ family_root = "HAS_DOMAIN_REGION"
 
 [[relation]]
 canonical = "HAS_DOMAIN_TOPIC"
+bit = 58
 rank = "associative"
 symmetry = "asymmetric"
 parent = null
@@ -401,6 +452,7 @@ family_root = "HAS_DOMAIN_TOPIC"
 
 [[relation]]
 canonical = "HAS_DOMAIN_USAGE"
+bit = 59
 rank = "associative"
 symmetry = "asymmetric"
 parent = null
@@ -408,6 +460,7 @@ family_root = "HAS_DOMAIN_USAGE"
 
 [[relation]]
 canonical = "HAS_EMOJI_PROPERTY"
+bit = 63
 rank = "standards_structural"
 symmetry = "asymmetric"
 parent = null
@@ -415,6 +468,7 @@ family_root = "HAS_EMOJI_PROPERTY"
 
 [[relation]]
 canonical = "HAS_ETYMOLOGY"
+bit = 64
 rank = "associative"
 symmetry = "asymmetric"
 parent = null
@@ -422,6 +476,7 @@ family_root = "HAS_ETYMOLOGY"
 
 [[relation]]
 canonical = "HAS_EXAMPLE"
+bit = 68
 rank = "associative"
 symmetry = "asymmetric"
 parent = null
@@ -434,6 +489,7 @@ family_root = "HAS_EXAMPLE"
 # follows traffic, not salience.
 [[relation]]
 canonical = "HAS_EXTERNAL_ID"
+bit = 69
 hot = true
 rank = "scalar_valued"
 symmetry = "asymmetric"
@@ -442,6 +498,7 @@ family_root = "HAS_EXTERNAL_ID"
 
 [[relation]]
 canonical = "HAS_FEATURE"
+bit = 70
 rank = "lexical_glue"
 symmetry = "asymmetric"
 parent = null
@@ -449,6 +506,7 @@ family_root = "HAS_FEATURE"
 
 [[relation]]
 canonical = "HAS_FIRST_SUBEVENT"
+bit = 71
 rank = "causal"
 symmetry = "asymmetric"
 parent = "HAS_SUBEVENT"
@@ -456,6 +514,7 @@ family_root = "HAS_SUBEVENT"
 
 [[relation]]
 canonical = "HAS_FRAME_ELEMENT"
+bit = 73
 rank = "partitive"
 symmetry = "asymmetric"
 parent = null
@@ -463,6 +522,7 @@ family_root = "HAS_FRAME_ELEMENT"
 
 [[relation]]
 canonical = "HAS_VALENCE_PATTERN"
+bit = 127
 rank = "partitive"
 symmetry = "asymmetric"
 parent = null
@@ -470,6 +530,7 @@ family_root = "HAS_VALENCE_PATTERN"
 
 [[relation]]
 canonical = "HAS_GENERAL_CATEGORY"
+bit = 74
 rank = "standards_structural"
 symmetry = "asymmetric"
 parent = null
@@ -477,6 +538,7 @@ family_root = "HAS_GENERAL_CATEGORY"
 
 [[relation]]
 canonical = "HAS_ISO639_1_CODE"
+bit = 77
 rank = "standards_structural"
 symmetry = "asymmetric"
 parent = null
@@ -484,6 +546,7 @@ family_root = "HAS_ISO639_1_CODE"
 
 [[relation]]
 canonical = "HAS_ISO639_2_CODE"
+bit = 80
 rank = "standards_structural"
 symmetry = "asymmetric"
 parent = null
@@ -491,6 +554,7 @@ family_root = "HAS_ISO639_2_CODE"
 
 [[relation]]
 canonical = "HAS_LANGUAGE"
+bit = 82
 hot = true
 rank = "standards_structural"
 symmetry = "asymmetric"
@@ -499,6 +563,7 @@ family_root = "HAS_LANGUAGE"
 
 [[relation]]
 canonical = "HAS_LANGUAGE_SCOPE"
+bit = 83
 rank = "standards_structural"
 symmetry = "asymmetric"
 parent = null
@@ -506,6 +571,7 @@ family_root = "HAS_LANGUAGE_SCOPE"
 
 [[relation]]
 canonical = "HAS_LANGUAGE_TYPE"
+bit = 84
 rank = "standards_structural"
 symmetry = "asymmetric"
 parent = null
@@ -513,6 +579,7 @@ family_root = "HAS_LANGUAGE_TYPE"
 
 [[relation]]
 canonical = "HAS_LAST_SUBEVENT"
+bit = 85
 rank = "causal"
 symmetry = "asymmetric"
 parent = "HAS_SUBEVENT"
@@ -520,6 +587,7 @@ family_root = "HAS_SUBEVENT"
 
 [[relation]]
 canonical = "HAS_LOWERCASE_MAPPING"
+bit = 89
 rank = "standards_structural"
 symmetry = "asymmetric"
 parent = null
@@ -527,6 +595,7 @@ family_root = "HAS_LOWERCASE_MAPPING"
 
 [[relation]]
 canonical = "HAS_MEMBER"
+bit = 90
 rank = "partitive"
 symmetry = "asymmetric"
 parent = "HAS_PART"
@@ -534,6 +603,7 @@ family_root = "HAS_PART"
 
 [[relation]]
 canonical = "HAS_MIRROR"
+bit = 91
 rank = "standards_structural"
 symmetry = "symmetric"
 parent = null
@@ -541,6 +611,7 @@ family_root = "HAS_MIRROR"
 
 [[relation]]
 canonical = "HAS_NAME_ALIAS"
+bit = 94
 rank = "standards_structural"
 symmetry = "asymmetric"
 parent = null
@@ -548,6 +619,7 @@ family_root = "HAS_NAME_ALIAS"
 
 [[relation]]
 canonical = "HAS_NUMERIC_VALUE"
+bit = 96
 rank = "scalar_valued"
 symmetry = "asymmetric"
 parent = null
@@ -555,6 +627,7 @@ family_root = "HAS_NUMERIC_VALUE"
 
 [[relation]]
 canonical = "HAS_PART"
+bit = 101
 rank = "partitive"
 symmetry = "asymmetric"
 parent = null
@@ -562,6 +635,7 @@ family_root = "HAS_PART"
 
 [[relation]]
 canonical = "HAS_POS"
+bit = 103
 hot = true
 rank = "lexical_glue"
 symmetry = "asymmetric"
@@ -570,6 +644,7 @@ family_root = "HAS_POS"
 
 [[relation]]
 canonical = "HAS_PREREQUISITE"
+bit = 104
 rank = "causal"
 symmetry = "asymmetric"
 parent = null
@@ -577,6 +652,7 @@ family_root = "HAS_PREREQUISITE"
 
 [[relation]]
 canonical = "HAS_PROPERTY"
+bit = 105
 rank = "partitive"
 symmetry = "asymmetric"
 parent = "HAS_ATTRIBUTE"
@@ -584,6 +660,7 @@ family_root = "HAS_ATTRIBUTE"
 
 [[relation]]
 canonical = "HAS_SCRIPT"
+bit = 110
 rank = "standards_structural"
 symmetry = "asymmetric"
 parent = null
@@ -591,6 +668,7 @@ family_root = "HAS_SCRIPT"
 
 [[relation]]
 canonical = "HAS_SEMANTIC_ROLE"
+bit = 111
 rank = "partitive"
 symmetry = "asymmetric"
 parent = null
@@ -598,6 +676,7 @@ family_root = "HAS_SEMANTIC_ROLE"
 
 [[relation]]
 canonical = "HAS_SENSE"
+bit = 112
 hot = true
 rank = "equivalence"
 symmetry = "asymmetric"
@@ -606,6 +685,7 @@ family_root = "HAS_SENSE"
 
 [[relation]]
 canonical = "HAS_SYNSET_KEY"
+bit = 117
 hot = true
 rank = "associative"
 symmetry = "asymmetric"
@@ -614,6 +694,7 @@ family_root = "HAS_SYNSET_KEY"
 
 [[relation]]
 canonical = "HAS_SUBEVENT"
+bit = 115
 rank = "causal"
 symmetry = "asymmetric"
 parent = null
@@ -621,6 +702,7 @@ family_root = "HAS_SUBEVENT"
 
 [[relation]]
 canonical = "HAS_SUBSTANCE"
+bit = 116
 rank = "partitive"
 symmetry = "asymmetric"
 parent = "HAS_PART"
@@ -628,6 +710,7 @@ family_root = "HAS_PART"
 
 [[relation]]
 canonical = "HAS_THEMATIC_ROLE"
+bit = 120
 rank = "partitive"
 symmetry = "asymmetric"
 parent = null
@@ -635,6 +718,7 @@ family_root = "HAS_THEMATIC_ROLE"
 
 [[relation]]
 canonical = "HAS_TITLECASE_MAPPING"
+bit = 123
 rank = "standards_structural"
 symmetry = "asymmetric"
 parent = null
@@ -642,6 +726,7 @@ family_root = "HAS_TITLECASE_MAPPING"
 
 [[relation]]
 canonical = "HAS_UPPERCASE_MAPPING"
+bit = 124
 rank = "standards_structural"
 symmetry = "asymmetric"
 parent = null
@@ -649,6 +734,7 @@ family_root = "HAS_UPPERCASE_MAPPING"
 
 [[relation]]
 canonical = "HAS_USAGE_REGISTER"
+bit = 125
 rank = "associative"
 symmetry = "asymmetric"
 parent = null
@@ -656,6 +742,7 @@ family_root = "HAS_USAGE_REGISTER"
 
 [[relation]]
 canonical = "HAS_UTF8_ROLE"
+bit = 126
 rank = "standards_structural"
 symmetry = "asymmetric"
 parent = null
@@ -663,6 +750,7 @@ family_root = "HAS_UTF8_ROLE"
 
 [[relation]]
 canonical = "HAS_VARIANT_OF"
+bit = 128
 rank = "equivalence"
 symmetry = "symmetric"
 parent = "RELATED_TO"
@@ -670,6 +758,7 @@ family_root = "RELATED_TO"
 
 [[relation]]
 canonical = "HAS_VERB_FRAME"
+bit = 129
 rank = "associative"
 symmetry = "asymmetric"
 parent = null
@@ -678,6 +767,7 @@ family_root = "HAS_VERB_FRAME"
 # HOT: UD emits one per token; 3.2M rows / 4.1%. (Family pulls HAS_POS, already hot.)
 [[relation]]
 canonical = "HAS_XPOS"
+bit = 134
 hot = true
 rank = "lexical_glue"
 symmetry = "asymmetric"
@@ -686,6 +776,7 @@ family_root = "HAS_POS"
 
 [[relation]]
 canonical = "INCHOATIVE_OF"
+bit = 135
 rank = "causal"
 symmetry = "asymmetric"
 parent = null
@@ -693,6 +784,7 @@ family_root = "INCHOATIVE_OF"
 
 [[relation]]
 canonical = "IN_VERB_GROUP_WITH"
+bit = 138
 rank = "associative"
 symmetry = "symmetric"
 parent = "RELATED_TO"
@@ -700,6 +792,7 @@ family_root = "RELATED_TO"
 
 [[relation]]
 canonical = "IS_A"
+bit = 139
 rank = "taxonomic"
 symmetry = "asymmetric"
 parent = null
@@ -714,6 +807,7 @@ hot = true
 # Entity typing (e.g. synset -> WordNet_Synset). De-conflated from IS_A so typing edges never
 # pollute hypernym/subsumption walks. Structural authority, not a content subsumption.
 canonical = "IS_TYPED_AS"
+bit = 155
 rank = "standards_structural"
 symmetry = "asymmetric"
 parent = null
@@ -723,6 +817,7 @@ family_root = "IS_TYPED_AS"
 # Frame-semantic inheritance (FrameNet "Inherits from": Revenge inherits from Rewards_and_punishments).
 # De-conflated from IS_A — frame composition is not lexical subsumption and must not pollute hypernym walks.
 canonical = "INHERITS_FROM"
+bit = 137
 rank = "taxonomic"
 symmetry = "asymmetric"
 parent = null
@@ -730,6 +825,7 @@ family_root = "INHERITS_FROM"
 
 [[relation]]
 canonical = "IS_AFTER"
+bit = 140
 rank = "causal"
 symmetry = "asymmetric"
 parent = null
@@ -737,6 +833,7 @@ family_root = "IS_AFTER"
 
 [[relation]]
 canonical = "IS_ANTONYM_OF"
+bit = 141
 rank = "oppositional"
 symmetry = "symmetric"
 parent = null
@@ -744,6 +841,7 @@ family_root = "IS_ANTONYM_OF"
 
 [[relation]]
 canonical = "IS_AT_SAMPLE"
+bit = 142
 rank = "partitive"
 symmetry = "asymmetric"
 parent = null
@@ -751,6 +849,7 @@ family_root = "IS_AT_SAMPLE"
 
 [[relation]]
 canonical = "IS_BEFORE"
+bit = 143
 rank = "causal"
 symmetry = "asymmetric"
 parent = null
@@ -758,6 +857,7 @@ family_root = "IS_BEFORE"
 
 [[relation]]
 canonical = "IS_COORDINATE_TERM_WITH"
+bit = 144
 rank = "associative"
 symmetry = "symmetric"
 parent = "RELATED_TO"
@@ -765,6 +865,7 @@ family_root = "RELATED_TO"
 
 [[relation]]
 canonical = "IS_INSTANCE_OF"
+bit = 146
 rank = "taxonomic"
 symmetry = "asymmetric"
 parent = "IS_A"
@@ -772,6 +873,7 @@ family_root = "IS_A"
 
 [[relation]]
 canonical = "IS_LANGUAGE_CODE"
+bit = 147
 rank = "standards_structural"
 symmetry = "asymmetric"
 parent = null
@@ -781,6 +883,7 @@ family_root = "IS_LANGUAGE_CODE"
 # hop; 2.3M rows / 3.0%.
 [[relation]]
 canonical = "IS_LEMMA_OF"
+bit = 148
 hot = true
 rank = "lexical_glue"
 symmetry = "asymmetric"
@@ -789,6 +892,7 @@ family_root = "IS_LEMMA_OF"
 
 [[relation]]
 canonical = "IS_PARTICIPLE_OF"
+bit = 149
 rank = "equivalence"
 symmetry = "asymmetric"
 parent = null
@@ -796,6 +900,7 @@ family_root = "IS_PARTICIPLE_OF"
 
 [[relation]]
 canonical = "IS_PIXEL_OF"
+bit = 150
 rank = "partitive"
 symmetry = "asymmetric"
 parent = null
@@ -806,6 +911,7 @@ family_root = "IS_PIXEL_OF"
 # up to HAS_SENSE so relation_type_in_family(type,'HAS_SENSE') covers both.
 [[relation]]
 canonical = "IS_SENSE_OF"
+bit = 151
 hot = true
 rank = "equivalence"
 symmetry = "asymmetric"
@@ -814,6 +920,7 @@ family_root = "HAS_SENSE"
 
 [[relation]]
 canonical = "IS_SIMILAR_TO"
+bit = 152
 rank = "equivalence"
 symmetry = "symmetric"
 parent = "RELATED_TO"
@@ -824,6 +931,7 @@ family_root = "RELATED_TO"
 # under SEMANTIC_EQUIVALENCE — do not collapse the two.
 [[relation]]
 canonical = "IS_SYNONYM_OF"
+bit = 153
 hot = true
 rank = "equivalence"
 symmetry = "symmetric"
@@ -835,6 +943,7 @@ family_root = "HAS_SENSE"
 # consensus_rdefault (2.27M) at the time it was promoted.
 [[relation]]
 canonical = "IS_TRANSLATION_OF"
+bit = 154
 hot = true
 rank = "equivalence"
 symmetry = "symmetric"
@@ -843,6 +952,7 @@ family_root = "SEMANTIC_EQUIVALENCE"
 
 [[relation]]
 canonical = "LOCATED_NEAR"
+bit = 156
 rank = "associative"
 symmetry = "symmetric"
 parent = null
@@ -850,6 +960,7 @@ family_root = "LOCATED_NEAR"
 
 [[relation]]
 canonical = "MADE_UP_OF"
+bit = 157
 rank = "partitive"
 symmetry = "asymmetric"
 parent = "HAS_PART"
@@ -857,6 +968,7 @@ family_root = "HAS_PART"
 
 [[relation]]
 canonical = "MANNER_OF"
+bit = 158
 rank = "taxonomic"
 symmetry = "asymmetric"
 parent = "IS_A"
@@ -866,6 +978,7 @@ family_root = "IS_A"
 # VerbNet MEMBER element: lemma belongs to a Levin/VN class. De-conflated from IS_A so class
 # membership does not pollute WordNet-style hypernym/subsumption walks.
 canonical = "MEMBER_OF_VERBNET_CLASS"
+bit = 160
 rank = "taxonomic"
 symmetry = "asymmetric"
 parent = null
@@ -873,6 +986,7 @@ family_root = "MEMBER_OF_VERBNET_CLASS"
 
 [[relation]]
 canonical = "MEMBER_OF_MACROLANGUAGE"
+bit = 159
 rank = "standards_structural"
 symmetry = "asymmetric"
 parent = null
@@ -880,6 +994,7 @@ family_root = "MEMBER_OF_MACROLANGUAGE"
 
 [[relation]]
 canonical = "MERGES_WITH"
+bit = 161
 rank = "tensor_calculation"
 symmetry = "asymmetric"
 parent = null
@@ -887,6 +1002,7 @@ family_root = "MERGES_WITH"
 
 [[relation]]
 canonical = "MOTIVATED_BY_GOAL"
+bit = 162
 rank = "causal"
 symmetry = "asymmetric"
 parent = null
@@ -894,6 +1010,7 @@ family_root = "MOTIVATED_BY_GOAL"
 
 [[relation]]
 canonical = "NORMALIZES_TO"
+bit = 165
 rank = "standards_structural"
 symmetry = "asymmetric"
 parent = null
@@ -901,6 +1018,7 @@ family_root = "NORMALIZES_TO"
 
 [[relation]]
 canonical = "NOT_CAPABLE_OF"
+bit = 166
 rank = "oppositional"
 symmetry = "asymmetric"
 parent = null
@@ -908,6 +1026,7 @@ family_root = "NOT_CAPABLE_OF"
 
 [[relation]]
 canonical = "NOT_DESIRES"
+bit = 167
 rank = "oppositional"
 symmetry = "asymmetric"
 parent = null
@@ -915,6 +1034,7 @@ family_root = "NOT_DESIRES"
 
 [[relation]]
 canonical = "NOT_HAS_PROPERTY"
+bit = 168
 rank = "oppositional"
 symmetry = "asymmetric"
 parent = null
@@ -922,6 +1042,7 @@ family_root = "NOT_HAS_PROPERTY"
 
 [[relation]]
 canonical = "NOT_USED_FOR"
+bit = 169
 rank = "oppositional"
 symmetry = "asymmetric"
 parent = null
@@ -929,6 +1050,7 @@ family_root = "NOT_USED_FOR"
 
 [[relation]]
 canonical = "OBJECT_USE"
+bit = 170
 rank = "causal"
 symmetry = "asymmetric"
 parent = null
@@ -936,6 +1058,7 @@ family_root = "OBJECT_USE"
 
 [[relation]]
 canonical = "OBSTRUCTED_BY"
+bit = 171
 rank = "causal"
 symmetry = "asymmetric"
 parent = null
@@ -943,6 +1066,7 @@ family_root = "OBSTRUCTED_BY"
 
 [[relation]]
 canonical = "OV_RELATES"
+bit = 175
 hot = true
 rank = "tensor_calculation"
 symmetry = "asymmetric"
@@ -951,6 +1075,7 @@ family_root = "RELATED_TO"
 
 [[relation]]
 canonical = "O_EFFECT"
+bit = 176
 rank = "causal"
 symmetry = "asymmetric"
 parent = null
@@ -958,6 +1083,7 @@ family_root = "O_EFFECT"
 
 [[relation]]
 canonical = "O_REACT"
+bit = 177
 rank = "causal"
 symmetry = "asymmetric"
 parent = null
@@ -965,6 +1091,7 @@ family_root = "O_REACT"
 
 [[relation]]
 canonical = "O_WANT"
+bit = 178
 rank = "causal"
 symmetry = "asymmetric"
 parent = null
@@ -972,6 +1099,7 @@ family_root = "O_WANT"
 
 [[relation]]
 canonical = "PERSPECTIVE_ON"
+bit = 179
 rank = "associative"
 symmetry = "asymmetric"
 parent = "RELATED_TO"
@@ -979,6 +1107,7 @@ family_root = "RELATED_TO"
 
 [[relation]]
 canonical = "PERTAINS_TO"
+bit = 180
 rank = "associative"
 symmetry = "asymmetric"
 parent = "RELATED_TO"
@@ -986,6 +1115,7 @@ family_root = "RELATED_TO"
 
 [[relation]]
 canonical = "PRECEDES"
+bit = 183
 hot = true
 rank = "lexical_glue"
 symmetry = "asymmetric"
@@ -994,6 +1124,7 @@ family_root = "PRECEDES"
 
 [[relation]]
 canonical = "RECEIVES_ACTION"
+bit = 185
 rank = "associative"
 symmetry = "asymmetric"
 parent = null
@@ -1001,6 +1132,7 @@ family_root = "RECEIVES_ACTION"
 
 [[relation]]
 canonical = "REFERENCES"
+bit = 186
 rank = "associative"
 symmetry = "asymmetric"
 parent = "RELATED_TO"
@@ -1010,6 +1142,7 @@ family_root = "RELATED_TO"
 # IS_TRANSLATION_OF/ALSO_SEE hang; 8.5M rows / 10.8% of the default.
 [[relation]]
 canonical = "RELATED_TO"
+bit = 187
 hot = true
 rank = "associative"
 symmetry = "symmetric"
@@ -1024,6 +1157,7 @@ family_root = "RELATED_TO"
 # via the RELATED_TO parent climb where applicable.
 [[relation]]
 canonical = "SEMANTIC_EQUIVALENCE"
+bit = 190
 rank = "equivalence"
 symmetry = "symmetric"
 parent = "RELATED_TO"
@@ -1039,6 +1173,7 @@ family_root = "SEMANTIC_EQUIVALENCE"
 # alias resolution and left the plane ungoverned.
 [[relation]]
 canonical = "SIMILAR_TO"
+bit = 191
 hot = true
 rank = "tensor_calculation"
 symmetry = "symmetric"
@@ -1047,6 +1182,7 @@ family_root = "RELATED_TO"
 
 [[relation]]
 canonical = "SYMBOL_OF"
+bit = 193
 rank = "associative"
 symmetry = "asymmetric"
 parent = null
@@ -1054,6 +1190,7 @@ family_root = "SYMBOL_OF"
 
 [[relation]]
 canonical = "TOKEN_MAPS_TO"
+bit = 194
 hot = true
 rank = "tensor_calculation"
 symmetry = "asymmetric"
@@ -1062,6 +1199,7 @@ family_root = "TOKEN_MAPS_TO"
 
 [[relation]]
 canonical = "TRANSCRIBES_AS"
+bit = 195
 rank = "standards_structural"
 symmetry = "asymmetric"
 parent = null
@@ -1069,6 +1207,7 @@ family_root = "TRANSCRIBES_AS"
 
 [[relation]]
 canonical = "USED_FOR"
+bit = 196
 rank = "associative"
 symmetry = "asymmetric"
 parent = null
@@ -1076,6 +1215,7 @@ family_root = "USED_FOR"
 
 [[relation]]
 canonical = "USES_SCRIPT"
+bit = 197
 rank = "standards_structural"
 symmetry = "asymmetric"
 parent = null
@@ -1083,6 +1223,7 @@ family_root = "USES_SCRIPT"
 
 [[relation]]
 canonical = "X_ATTR"
+bit = 199
 rank = "causal"
 symmetry = "asymmetric"
 parent = null
@@ -1090,6 +1231,7 @@ family_root = "X_ATTR"
 
 [[relation]]
 canonical = "X_EFFECT"
+bit = 200
 rank = "causal"
 symmetry = "asymmetric"
 parent = null
@@ -1097,6 +1239,7 @@ family_root = "X_EFFECT"
 
 [[relation]]
 canonical = "X_FILLED_BY"
+bit = 201
 rank = "causal"
 symmetry = "asymmetric"
 parent = null
@@ -1104,6 +1247,7 @@ family_root = "X_FILLED_BY"
 
 [[relation]]
 canonical = "X_INTENT"
+bit = 202
 rank = "causal"
 symmetry = "asymmetric"
 parent = null
@@ -1111,6 +1255,7 @@ family_root = "X_INTENT"
 
 [[relation]]
 canonical = "X_NEED"
+bit = 203
 rank = "causal"
 symmetry = "asymmetric"
 parent = null
@@ -1118,6 +1263,7 @@ family_root = "X_NEED"
 
 [[relation]]
 canonical = "X_REACT"
+bit = 204
 rank = "causal"
 symmetry = "asymmetric"
 parent = null
@@ -1125,6 +1271,7 @@ family_root = "X_REACT"
 
 [[relation]]
 canonical = "X_REASON"
+bit = 205
 rank = "causal"
 symmetry = "asymmetric"
 parent = null
@@ -1132,6 +1279,7 @@ family_root = "X_REASON"
 
 [[relation]]
 canonical = "X_WANT"
+bit = 206
 rank = "causal"
 symmetry = "asymmetric"
 parent = null
@@ -1141,6 +1289,7 @@ family_root = "X_WANT"
 # WordNet lexicographer-file class (noun.animal, verb.motion) — a coarse semantic category. Was emitted
 # ungoverned (absent from the manifest); register it so it has a rank/family in consensus.
 canonical = "HAS_LEX_CATEGORY"
+bit = 86
 rank = "associative"
 symmetry = "asymmetric"
 parent = "HAS_DOMAIN_TOPIC"
@@ -1150,6 +1299,7 @@ family_root = "HAS_DOMAIN_TOPIC"
 # Cross-resource ROLE-level alignment (PropBank argument <-> VerbNet thematic role). Distinct from the
 # class/frame-level CORRESPONDS_TO so the model can tell a class equivalence from an argument-role one.
 canonical = "ROLE_CORRESPONDS_TO"
+bit = 189
 rank = "equivalence"
 symmetry = "symmetric"
 parent = "CORRESPONDS_TO"
@@ -1158,6 +1308,7 @@ family_root = "CORRESPONDS_TO"
 [[relation]]
 # ISO 639-2 bibliographic code (ger, fre) — distinct channel from the terminologic code.
 canonical = "HAS_ISO639_2B_CODE"
+bit = 78
 rank = "standards_structural"
 symmetry = "asymmetric"
 parent = null
@@ -1166,6 +1317,7 @@ family_root = "HAS_ISO639_2B_CODE"
 [[relation]]
 # ISO 639-2 terminologic code (deu, fra) — distinct channel from the bibliographic code.
 canonical = "HAS_ISO639_2T_CODE"
+bit = 79
 rank = "standards_structural"
 symmetry = "asymmetric"
 parent = null
@@ -1174,6 +1326,7 @@ family_root = "HAS_ISO639_2T_CODE"
 [[relation]]
 # Directional supersession: a retired code/entity is superseded by its successor (not a symmetric variant).
 canonical = "SUPERSEDED_BY"
+bit = 192
 rank = "standards_structural"
 symmetry = "asymmetric"
 parent = null
@@ -1183,6 +1336,7 @@ family_root = "SUPERSEDED_BY"
 # Unicode character's official name (UnicodeData.txt field 1), e.g. U+0041 -> "LATIN CAPITAL LETTER A".
 # The authoritative human identifier for a codepoint; distinct from HAS_NAME_ALIAS (corrections/abbrevs).
 canonical = "HAS_NAME"
+bit = 93
 rank = "standards_structural"
 symmetry = "asymmetric"
 parent = null
@@ -1191,6 +1345,7 @@ family_root = "HAS_NAME"
 [[relation]]
 # Unicode Line_Break property (LineBreak.txt): AL, BA, CR, ... — the text-segmentation class of a codepoint.
 canonical = "HAS_LINE_BREAK"
+bit = 88
 rank = "standards_structural"
 symmetry = "asymmetric"
 parent = null
@@ -1199,6 +1354,7 @@ family_root = "HAS_LINE_BREAK"
 [[relation]]
 # Unicode East_Asian_Width property (EastAsianWidth.txt): F, H, W, Na, A, N — fixed-width rendering class.
 canonical = "HAS_EAST_ASIAN_WIDTH"
+bit = 61
 rank = "standards_structural"
 symmetry = "asymmetric"
 parent = null
@@ -1207,6 +1363,7 @@ family_root = "HAS_EAST_ASIAN_WIDTH"
 [[relation]]
 # Unicode Joining_Type property (DerivedJoiningType.txt): C, D, L, R, T, U — Arabic/Syriac cursive shaping.
 canonical = "HAS_JOINING_TYPE"
+bit = 81
 rank = "standards_structural"
 symmetry = "asymmetric"
 parent = null
@@ -1216,6 +1373,7 @@ family_root = "HAS_JOINING_TYPE"
 # Unicode Numeric_Type property (DerivedNumericType.txt): Decimal, Digit, Numeric — the KIND of numeric,
 # distinct from HAS_NUMERIC_VALUE (the scalar value).
 canonical = "HAS_NUMERIC_TYPE"
+bit = 95
 rank = "standards_structural"
 symmetry = "asymmetric"
 parent = null
@@ -1225,6 +1383,7 @@ family_root = "HAS_NUMERIC_TYPE"
 # Unicode Script_Extensions (ScriptExtensions.txt): a codepoint usable across multiple scripts. Weaker,
 # multi-valued sibling of USES_SCRIPT.
 canonical = "USES_SCRIPT_EXTENSION"
+bit = 198
 rank = "standards_structural"
 symmetry = "asymmetric"
 parent = "USES_SCRIPT"
@@ -1234,6 +1393,7 @@ family_root = "USES_SCRIPT"
 # Wiktionary etymology "borrowed" (bor): a word taken from another language without native transmission
 # (English "sushi" <- Japanese). Distinct etymological channel from inheritance/derivation.
 canonical = "BORROWED_FROM"
+bit = 5
 rank = "associative"
 symmetry = "asymmetric"
 parent = "HAS_ETYMOLOGY"
@@ -1243,6 +1403,7 @@ family_root = "HAS_ETYMOLOGY"
 # Wiktionary etymology "inherited" (inh): native intergenerational transmission within a language lineage
 # (French "mere" <- Latin "mater"). NOT frame-inheritance (INHERITS_FROM) — this is etymological lineage.
 canonical = "INHERITED_FROM"
+bit = 136
 rank = "associative"
 symmetry = "asymmetric"
 parent = "HAS_ETYMOLOGY"
@@ -1251,6 +1412,7 @@ family_root = "HAS_ETYMOLOGY"
 [[relation]]
 # FrameNet FE-to-FE "Requires": one frame element's presence structurally requires another's within a frame.
 canonical = "REQUIRES"
+bit = 188
 rank = "associative"
 symmetry = "asymmetric"
 parent = null
@@ -1259,6 +1421,7 @@ family_root = "REQUIRES"
 [[relation]]
 # FrameNet FE-to-FE "Excludes": two frame elements are mutually exclusive within a frame.
 canonical = "EXCLUDES"
+bit = 33
 rank = "oppositional"
 symmetry = "symmetric"
 parent = null
@@ -1272,6 +1435,7 @@ family_root = "EXCLUDES"
 
 [[relation]]
 canonical = "MOVE"
+bit = 163
 hot = true
 rank = "causal"
 symmetry = "asymmetric"
@@ -1282,6 +1446,7 @@ family_root = "MOVE"
 # largest writer in the reseeded substrate.
 [[relation]]
 canonical = "OUTCOME"
+bit = 174
 hot = true
 rank = "causal"
 symmetry = "asymmetric"
@@ -1290,6 +1455,7 @@ family_root = "OUTCOME"
 
 [[relation]]
 canonical = "PLAYED_BY"
+bit = 181
 rank = "associative"
 symmetry = "asymmetric"
 parent = null
@@ -1300,6 +1466,7 @@ family_root = "PLAYED_BY"
 # outcome in aggregated form. Exactly one per playing.
 [[relation]]
 canonical = "PLAYS_LINE"
+bit = 182
 rank = "associative"
 symmetry = "asymmetric"
 parent = null
@@ -1307,6 +1474,7 @@ family_root = "PLAYS_LINE"
 
 [[relation]]
 canonical = "HAS_RATING"
+bit = 106
 rank = "scalar_valued"
 symmetry = "asymmetric"
 parent = null
@@ -1314,6 +1482,7 @@ family_root = "HAS_RATING"
 
 [[relation]]
 canonical = "OPENING_NAME"
+bit = 173
 rank = "taxonomic"
 symmetry = "asymmetric"
 parent = null
@@ -1321,6 +1490,7 @@ family_root = "OPENING_NAME"
 
 [[relation]]
 canonical = "HAS_ECO"
+bit = 62
 rank = "taxonomic"
 symmetry = "asymmetric"
 parent = null
@@ -1328,6 +1498,7 @@ family_root = "HAS_ECO"
 
 [[relation]]
 canonical = "HAS_WHITE"
+bit = 133
 rank = "partitive"
 symmetry = "asymmetric"
 parent = null
@@ -1335,6 +1506,7 @@ family_root = "HAS_WHITE"
 
 [[relation]]
 canonical = "HAS_BLACK"
+bit = 49
 rank = "partitive"
 symmetry = "asymmetric"
 parent = null
@@ -1342,6 +1514,7 @@ family_root = "HAS_BLACK"
 
 [[relation]]
 canonical = "HAS_EVENT"
+bit = 67
 rank = "standards_structural"
 symmetry = "asymmetric"
 parent = null
@@ -1349,6 +1522,7 @@ family_root = "HAS_EVENT"
 
 [[relation]]
 canonical = "ON_DATE"
+bit = 172
 rank = "standards_structural"
 symmetry = "asymmetric"
 parent = null
@@ -1356,6 +1530,7 @@ family_root = "ON_DATE"
 
 [[relation]]
 canonical = "HAS_TIME_CONTROL"
+bit = 122
 rank = "standards_structural"
 symmetry = "asymmetric"
 parent = null
@@ -1363,6 +1538,7 @@ family_root = "HAS_TIME_CONTROL"
 
 [[relation]]
 canonical = "HAS_TC_CLASS"
+bit = 118
 rank = "standards_structural"
 symmetry = "asymmetric"
 parent = "HAS_TIME_CONTROL"
@@ -1370,6 +1546,7 @@ family_root = "HAS_TIME_CONTROL"
 
 [[relation]]
 canonical = "HAS_TERMINATION"
+bit = 119
 rank = "associative"
 symmetry = "asymmetric"
 parent = null
@@ -1377,6 +1554,7 @@ family_root = "HAS_TERMINATION"
 
 [[relation]]
 canonical = "HAS_RESULT"
+bit = 109
 rank = "definitional"
 symmetry = "asymmetric"
 parent = null
@@ -1384,6 +1562,7 @@ family_root = "HAS_RESULT"
 
 [[relation]]
 canonical = "GAME_AT"
+bit = 37
 rank = "partitive"
 symmetry = "asymmetric"
 parent = null
@@ -1391,6 +1570,7 @@ family_root = "GAME_AT"
 
 [[relation]]
 canonical = "GAME_AT_PLY"
+bit = 38
 rank = "partitive"
 symmetry = "asymmetric"
 parent = "GAME_AT"
@@ -1398,6 +1578,7 @@ family_root = "GAME_AT"
 
 [[relation]]
 canonical = "HAS_EVAL"
+bit = 65
 rank = "scalar_valued"
 symmetry = "asymmetric"
 parent = null
@@ -1408,6 +1589,7 @@ family_root = "HAS_EVAL"
 # blessed-loss/loss tokens (side-to-move POV); HAS_DTZ is distance-to-zeroing.
 [[relation]]
 canonical = "HAS_WDL"
+bit = 132
 rank = "scalar_valued"
 symmetry = "asymmetric"
 parent = null
@@ -1415,6 +1597,7 @@ family_root = "HAS_WDL"
 
 [[relation]]
 canonical = "HAS_DTZ"
+bit = 60
 rank = "scalar_valued"
 symmetry = "asymmetric"
 parent = null
@@ -1422,6 +1605,7 @@ family_root = "HAS_DTZ"
 
 [[relation]]
 canonical = "HAS_EVAL_TOKEN"
+bit = 66
 rank = "scalar_valued"
 symmetry = "asymmetric"
 parent = "HAS_EVAL"
@@ -1429,6 +1613,7 @@ family_root = "HAS_EVAL"
 
 [[relation]]
 canonical = "MOVE_QUALITY"
+bit = 164
 rank = "scalar_valued"
 symmetry = "asymmetric"
 parent = null
@@ -1436,6 +1621,7 @@ family_root = "MOVE_QUALITY"
 
 [[relation]]
 canonical = "HAS_CLOCK"
+bit = 52
 rank = "scalar_valued"
 symmetry = "asymmetric"
 parent = null
@@ -1443,6 +1629,7 @@ family_root = "HAS_CLOCK"
 
 [[relation]]
 canonical = "HAS_THINK_CLASS"
+bit = 121
 rank = "scalar_valued"
 symmetry = "asymmetric"
 parent = "HAS_CLOCK"
@@ -1450,6 +1637,7 @@ family_root = "HAS_CLOCK"
 
 [[relation]]
 canonical = "GAME_HAS_OPENING"
+bit = 41
 rank = "taxonomic"
 symmetry = "asymmetric"
 parent = "OPENING_NAME"
@@ -1457,6 +1645,7 @@ family_root = "OPENING_NAME"
 
 [[relation]]
 canonical = "GAME_HAS_ECO"
+bit = 39
 rank = "taxonomic"
 symmetry = "asymmetric"
 parent = "HAS_ECO"
@@ -1464,6 +1653,7 @@ family_root = "HAS_ECO"
 
 [[relation]]
 canonical = "GAME_HAS_MOTIF"
+bit = 40
 rank = "associative"
 symmetry = "asymmetric"
 parent = null
@@ -1475,6 +1665,7 @@ family_root = "GAME_HAS_MOTIF"
 # this one answers "which POSITIONS are sacrifice positions" — walkable content.
 [[relation]]
 canonical = "HAS_MOTIF"
+bit = 92
 rank = "associative"
 symmetry = "asymmetric"
 parent = "GAME_HAS_MOTIF"
@@ -1482,6 +1673,7 @@ family_root = "GAME_HAS_MOTIF"
 
 [[relation]]
 canonical = "EXPLAINS"
+bit = 34
 rank = "definitional"
 symmetry = "asymmetric"
 parent = null
@@ -1489,6 +1681,7 @@ family_root = "EXPLAINS"
 
 [[relation]]
 canonical = "IS_EXAMPLE_OF"
+bit = 145
 rank = "taxonomic"
 symmetry = "asymmetric"
 parent = null
@@ -1496,6 +1689,7 @@ family_root = "IS_EXAMPLE_OF"
 
 [[relation]]
 canonical = "HAS_LICENSE"
+bit = 87
 rank = "scalar_valued"
 symmetry = "asymmetric"
 parent = null
@@ -1503,6 +1697,7 @@ family_root = "HAS_LICENSE"
 
 [[relation]]
 canonical = "HAS_ATTRIBUTION"
+bit = 47
 rank = "scalar_valued"
 symmetry = "asymmetric"
 parent = null
@@ -1510,6 +1705,7 @@ family_root = "HAS_ATTRIBUTION"
 
 [[relation]]
 canonical = "HAS_SOURCE_URL"
+bit = 113
 rank = "scalar_valued"
 symmetry = "asymmetric"
 parent = null
@@ -1517,6 +1713,7 @@ family_root = "HAS_SOURCE_URL"
 
 [[relation]]
 canonical = "HAS_CITATION"
+bit = 51
 rank = "scalar_valued"
 symmetry = "asymmetric"
 parent = null
@@ -1524,6 +1721,7 @@ family_root = "HAS_CITATION"
 
 [[relation]]
 canonical = "HAS_VERSION"
+bit = 130
 rank = "scalar_valued"
 symmetry = "asymmetric"
 parent = null
@@ -1534,6 +1732,7 @@ family_root = "HAS_VERSION"
 # Audio: sentence/content root ↔ recording entity (Tatoeba audio lane).
 [[relation]]
 canonical = "HAS_RECORDING"
+bit = 107
 rank = "partitive"
 symmetry = "asymmetric"
 parent = null
@@ -1542,6 +1741,7 @@ family_root = "HAS_RECORDING"
 # Calculated audio analyzer outputs (versioned/evictable; not identity).
 [[relation]]
 canonical = "HAS_SPECTRAL_PEAK"
+bit = 114
 rank = "associative"
 symmetry = "asymmetric"
 parent = null
@@ -1549,6 +1749,7 @@ family_root = "HAS_SPECTRAL_PEAK"
 
 [[relation]]
 canonical = "HAS_ONSET_SEGMENT"
+bit = 100
 rank = "partitive"
 symmetry = "asymmetric"
 parent = null
@@ -1558,6 +1759,7 @@ family_root = "HAS_ONSET_SEGMENT"
 # ADJACENT_TO_PIXEL; object/caption semantics reuse DEPICTS/CAPTIONS).
 [[relation]]
 canonical = "HAS_REGION"
+bit = 108
 rank = "partitive"
 symmetry = "asymmetric"
 parent = null
@@ -1565,6 +1767,7 @@ family_root = "HAS_REGION"
 
 [[relation]]
 canonical = "HAS_PATCH"
+bit = 102
 rank = "partitive"
 symmetry = "asymmetric"
 parent = "HAS_REGION"
@@ -1574,6 +1777,7 @@ family_root = "HAS_REGION"
 # text PRECEDES lexical glue — temporal media order is its own family).
 [[relation]]
 canonical = "HAS_FRAME"
+bit = 72
 rank = "partitive"
 symmetry = "asymmetric"
 parent = null
@@ -1581,6 +1785,7 @@ family_root = "HAS_FRAME"
 
 [[relation]]
 canonical = "PRECEDES_IN_TIME"
+bit = 184
 rank = "causal"
 symmetry = "asymmetric"
 parent = null
@@ -1589,6 +1794,7 @@ family_root = "PRECEDES_IN_TIME"
 # Code AST witnessed structure (tree-sitter unpack → ordered child edges).
 [[relation]]
 canonical = "HAS_AST_CHILD"
+bit = 44
 rank = "partitive"
 symmetry = "asymmetric"
 parent = null
@@ -1596,10 +1802,39 @@ family_root = "HAS_AST_CHILD"
 
 [[relation]]
 canonical = "HAS_AST_KIND"
+bit = 45
 rank = "standards_structural"
 symmetry = "asymmetric"
 parent = null
 family_root = "HAS_AST_KIND"
+
+# Git commit → person (author). Reserved for git-lane (#504/#551 completeness).
+[[relation]]
+canonical = "AUTHORED_BY"
+bit = 207
+rank = "associative"
+symmetry = "asymmetric"
+parent = null
+family_root = "AUTHORED_BY"
+
+# Git commit → root tree. Reserved when CONTAINS is too weak for the root pointer (#504/#551).
+[[relation]]
+canonical = "COMMITS_TREE"
+bit = 208
+rank = "partitive"
+symmetry = "asymmetric"
+parent = null
+family_root = "COMMITS_TREE"
+
+# Git commit → message document. May collapse to content witness; reserved until ledger decides (#504/#551).
+[[relation]]
+canonical = "HAS_COMMIT_MESSAGE"
+bit = 209
+rank = "partitive"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_COMMIT_MESSAGE"
+
 
 [[alias]]
 surface = "DEFINED_AS"

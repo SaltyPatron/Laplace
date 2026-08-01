@@ -128,11 +128,12 @@ Chess:
 
 ## Relation manifest (`engine/manifest/relation_types.toml`)
 
-- Governed canonical relations: **207** (+23 aliases — aliases map to a canonical and add no highway bits)
+- Governed canonical relations: **210** (+23 aliases — aliases map to a canonical and add no highway bits)
 - Salience bands: **13** — `mandate`, `definitional`, `taxonomic`, `equivalence`, `partitive`, `causal`, `oppositional`, `associative`, `tensor_calculation`, `lexical_glue`, `scalar_valued`, `standards_structural`, `probationary`
 
-Highway bits are assigned alphabetically at codegen: adding a relation renumbers
-bits and owes a reseed (see CLAUDE.md).
+Highway bits are an explicit append-only `bit = N` registry in
+`relation_types.toml` (ADR 0001 / GH #551). Codegen validates uniqueness and
+range; adding a relation takes the next free bit and does not renumber peers.
 
 ## Perfcache blobs referenced in source
 

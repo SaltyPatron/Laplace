@@ -107,7 +107,11 @@ public sealed class ChessTrajectoryDecomposer : ComposeDecomposer<ChessTrajector
     public static void Deposit(SubstrateChangeBuilder b, ChessWitnessedGame w, Hash128 sourceId)
     {
         var m = new ChessModality();
-        var state = w.StartFen is { Length: > 0 } fen ? m.FromFen(fen) : m.Initial();
+        // Same refuse-not-invent law as ChessAnalyze.InitialState: an unreadable
+        // start (X-FEN Chess960, garbage) deposits nothing so a later run can retry
+        // once the parser models it — never substitute the standard array.
+        if (ChessAnalyze.InitialState(w.StartFen, m) is not { } start) return;
+        var state = start.Initial;
 
         var line = new List<ChessNode>(w.Moves.Count + 1);
         lock (ChessCompose.Gate)
