@@ -666,12 +666,25 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
                 double o_share    = o->total_mass    > 0.0 ? o->coherence    / o->total_mass    : 0.0;
                 double best_share = best->total_mass > 0.0 ? best->coherence / best->total_mass : 0.0;
 
+                /* total_mass DESC between denote_mu and the id: on a
+                 * foundation-only seed every DENOTES edge has ONE witness, so
+                 * denote_mu is the same constant (~1169.73) for nearly every
+                 * sense and the id memcmp was the real elector -- measured
+                 * 2026-08-01: "What is a dog?" answered the derogatory sense
+                 * ("a dull unattractive unpleasant girl") and "car" the
+                 * railway carriage, both by id order. The sense that carries
+                 * more witnessed mass is the dominant sense, and mass is
+                 * fold-produced; the id stays only as the determinism anchor. */
                 if (o_share > best_share
                     || (o_share == best_share && o->rel_mass > best->rel_mass)
                     || (o_share == best_share && o->rel_mass == best->rel_mass
                         && o->denote_mu > best->denote_mu)
                     || (o_share == best_share && o->rel_mass == best->rel_mass
                         && o->denote_mu == best->denote_mu
+                        && o->total_mass > best->total_mass)
+                    || (o_share == best_share && o->rel_mass == best->rel_mass
+                        && o->denote_mu == best->denote_mu
+                        && o->total_mass == best->total_mass
                         && memcmp(o->syn, best->syn, 16) < 0))
                 {
                     is_best = false;
