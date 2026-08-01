@@ -40,16 +40,29 @@ CREATE OR REPLACE FUNCTION highway_mask_deposit(p_entity_ids bytea[], p_type_ids
     SET search_path = @extschema@, public AS $$
 DECLARE
     updated bigint;
+    v_eids  bytea[];
+    v_bits  int[];
 BEGIN
     IF NOT laplace_highway_ready() THEN
         RAISE WARNING 'highway_mask_deposit: highway perfcache not configured — masks not deposited (set laplace_substrate.highway_perfcache_path)';
         RETURN 0;
     END IF;
 
-    -- xact-scoped: released at the caller's per-chunk COMMIT. hashtext of the
-    -- function's own name — one well-known key, not a magic number.
-    PERFORM pg_advisory_xact_lock(hashtext('laplace.highway_mask_deposit')::bigint);
-
+    -- COMPUTE OUTSIDE THE LOCK. MEASURED 2026-08-01 on the English corpus:
+    --   highway_mask_deposit        196 calls  651,955 ms  (3,321 ms mean)
+    --   its pairs/types/tbits CTE   196 calls  468,420 ms  (2,390 ms mean)
+    --   pg_advisory_xact_lock       196 calls  181,947 ms    (928 ms mean)
+    -- 72% of each call was the CTE, and the lock was held across ALL of it, so every
+    -- other fold lane queued behind work that never touches `entities`. 182 s of that
+    -- run was pure convoy wait.
+    --
+    -- The serialization argument in the header is about ENTITIES ROW CONTENTION: the
+    -- UPDATE is the only part that writes entities, so it is the only part that must be
+    -- alone. pairs/types/tbits read `consensus` and the unnested arguments and touch no
+    -- entity row, so computing them concurrently cannot reintroduce the AB/BA deadlock
+    -- the lock exists to prevent. The UPDATE still re-reads e.highway_mask inside the
+    -- lock, so OR-accumulate remains read-modify-write under a single writer and no bit
+    -- can be lost.
     WITH pairs AS (
         SELECT DISTINCT u.eid, u.tid
         FROM unnest(p_entity_ids, p_type_ids) AS u(eid, tid)
@@ -66,22 +79,40 @@ BEGIN
         LEFT JOIN consensus fam
           ON fam.subject_id = t.tid
          AND fam.type_id = relation_type_id('IS_A')
-    ),
-    m AS (
-        SELECT p.eid, array_agg(DISTINCT tb.bit) AS bits
+    )
+    -- Flat parallel arrays, one element per (entity, bit). NOT array_agg of an int[]:
+    -- that yields a 2-D array, and unnest() flattens multidimensional arrays completely
+    -- rather than yielding rows of arrays, so the pairing would be silently destroyed.
+    SELECT array_agg(y.eid), array_agg(y.bit)
+      INTO v_eids, v_bits
+    FROM (
+        SELECT DISTINCT p.eid, tb.bit
         FROM pairs p
         JOIN tbits tb ON tb.tid = p.tid
         WHERE tb.bit IS NOT NULL
-        GROUP BY p.eid
+    ) y;
+
+    IF v_eids IS NULL OR array_length(v_eids, 1) IS NULL THEN
+        RETURN 0;
+    END IF;
+
+    -- xact-scoped, released at the caller's per-chunk COMMIT. Held for the UPDATE
+    -- alone now, not for the computation above.
+    PERFORM pg_advisory_xact_lock(hashtext('laplace.highway_mask_deposit')::bigint);
+
+    WITH d AS (
+        SELECT u.eid, array_agg(DISTINCT u.bit) AS bits
+        FROM unnest(v_eids, v_bits) AS u(eid, bit)
+        GROUP BY u.eid
     ),
     upd AS (
         UPDATE entities e
         SET highway_mask = laplace_highway_mask_from_bits(
-                COALESCE(laplace_highway_mask_bits(e.highway_mask), ARRAY[]::int[]) || m.bits)
-        FROM m
-        WHERE e.id = m.eid
+                COALESCE(laplace_highway_mask_bits(e.highway_mask), ARRAY[]::int[]) || d.bits)
+        FROM d
+        WHERE e.id = d.eid
           AND (e.highway_mask IS NULL
-               OR NOT (laplace_highway_mask_bits(e.highway_mask) @> m.bits))
+               OR NOT (laplace_highway_mask_bits(e.highway_mask) @> d.bits))
         RETURNING 1
     )
     SELECT count(*) INTO updated FROM upd;
