@@ -151,28 +151,19 @@ internal static class CpuTopologyCommands
         w.WriteLine("ALTER SYSTEM SET huge_pages = try;");
         w.WriteLine("ALTER SYSTEM SET io_method = worker;");
 
-        // STATEMENT-LEVEL PROFILING. Until this landed there was none: nothing on the
-        // cluster could report total execution time per statement, so "the seed is slow"
-        // has been settled by inference for the life of the project -- including several
-        // wrong diagnoses that survived only because no instrument could contradict them.
+        // NO shared_preload_libraries HERE. On 2026-08-01 this emitted
+        // ALTER SYSTEM SET shared_preload_libraries = 'laplace_substrate,pg_stat_statements'
+        // and the postmaster then FAILED TO START, looping 80 times on
+        //   FATAL: could not access file "laplace_substrate,pg_stat_statements"
+        // -- the value was taken as one filename, not a list. The cluster went down hard
+        // and could only be recovered by editing postgresql.auto.conf as root.
         //
-        // MEASURED 2026-08-01 on the tier-descent probe over a 2000-id batch:
-        // Planning Time 5.760 ms against Execution Time 21.053 ms. Planning is 27% of that
-        // call, and the ingest connection policy leaves MaxAutoPrepare at 0, so every
-        // probe re-plans on every batch at every tier. pg_stat_statements separates
-        // plan time from execute time per statement, which is the only way to rank that
-        // against everything else competing for the same seconds.
-        //
-        // shared_preload_libraries must keep laplace_substrate -- the extension image is
-        // pinned in the postmaster and the perfcache blobs are mmap'd at preload.
-        // Requires a postmaster restart; tune-pg performs it when the setting is pending.
-        w.WriteLine("ALTER SYSTEM SET shared_preload_libraries = 'laplace_substrate,pg_stat_statements';");
-        w.WriteLine("ALTER SYSTEM SET pg_stat_statements.track = 'all';");
-        w.WriteLine("ALTER SYSTEM SET pg_stat_statements.max = 10000;");
-        // Track planning separately from execution. Off by default, and it is precisely
-        // the split that the 27%-planning measurement above says we need.
-        w.WriteLine("ALTER SYSTEM SET pg_stat_statements.track_planning = on;");
+        // Two lessons, both paid for: this GUC cannot be changed without a verified
+        // restart path, and ALTER SYSTEM is the WRONG mechanism for it -- a bad value is
+        // only detectable at postmaster start, by which point the server is already gone
+        // and SQL (including ALTER SYSTEM RESET) is unreachable. Any future attempt must
+        // stage the value, restart, and verify on a cluster that is not the seed host.
         w.WriteLine("SELECT pg_reload_conf();");
     }
 }
-
+
