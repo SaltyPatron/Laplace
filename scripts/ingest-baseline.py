@@ -160,6 +160,22 @@ def cmd_check(args) -> int:
         if ratio > args.tolerance:
             failures.append((source, ratio))
 
+    # ROW COUNTS ARE THE CORRECTNESS CHECK, and they matter more than the timings.
+    # Ids are content hashes, so re-seeding the same files from scratch must produce the
+    # same rows_new. A changed count means the run ingested DIFFERENT CONTENT -- which is
+    # exactly what a refactor of per-source file RESOLUTION can silently cause, and no
+    # timing comparison would ever show it.
+    for source, obs in sorted(observed.items()):
+        rows = obs.get("rows_new")
+        prev = baseline.get(source)
+        if rows is None or not prev or not prev.get("rows_new"):
+            continue
+        if rows != prev["rows_new"]:
+            delta = rows - prev["rows_new"]
+            print(f"  ROWS {source}: {rows:,} vs baseline {prev['rows_new']:,} "
+                  f"({delta:+,}) — different content ingested, not a timing difference")
+            failures.append((source, 0.0))
+
     if args.max_seconds:
         for source, obs in sorted(observed.items()):
             elapsed = obs.get("elapsed_s")
@@ -168,8 +184,14 @@ def cmd_check(args) -> int:
                 failures.append((source, elapsed / args.max_seconds))
 
     if failures:
-        sys.stderr.write(
-            f"ingest-baseline: {len(failures)} source(s) regressed beyond {args.tolerance}x\n")
+        slow = [f for f in failures if f[1] > 0.0]
+        drift = [f for f in failures if f[1] == 0.0]
+        parts = []
+        if slow:
+            parts.append(f"{len(slow)} slower than {args.tolerance}x")
+        if drift:
+            parts.append(f"{len(drift)} ingested different content")
+        sys.stderr.write("ingest-baseline: " + "; ".join(parts) + "\n")
         return 1
     print("ingest-baseline: OK")
     return 0
