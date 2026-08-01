@@ -1,0 +1,102 @@
+{
+  "cili": {
+    "decomposer": "CILIDecomposer",
+    "elapsed_s": 115.3,
+    "rc": 0,
+    "rows_new": 5802652,
+    "rows_per_s": 50326.6,
+    "source": "cili",
+    "status": "ok",
+    "wall_s": 121
+  },
+  "framenet": {
+    "decomposer": "FrameNetDecomposer",
+    "elapsed_s": 93.3,
+    "rc": 0,
+    "rows_new": 1384659,
+    "rows_per_s": 14840.9,
+    "source": "framenet",
+    "status": "ok",
+    "wall_s": 103
+  },
+  "iso639": {
+    "decomposer": "ISO639Decomposer",
+    "elapsed_s": 4.0,
+    "rc": 0,
+    "rows_new": 73622,
+    "rows_per_s": 18405.5,
+    "source": "iso639",
+    "status": "ok",
+    "wall_s": 7
+  },
+  "mapnet": {
+    "decomposer": "MapNetDecomposer",
+    "elapsed_s": 3.0,
+    "rc": 0,
+    "rows_new": 14998,
+    "rows_per_s": 4999.3,
+    "source": "mapnet",
+    "status": "ok",
+    "wall_s": 13
+  },
+  "propbank": {
+    "decomposer": "PropBankDecomposer",
+    "elapsed_s": 23.2,
+    "rc": 0,
+    "rows_new": 290199,
+    "rows_per_s": 12508.6,
+    "source": "propbank",
+    "status": "ok",
+    "wall_s": 32
+  },
+  "semlink": {
+    "decomposer": "SemLinkDecomposer",
+    "elapsed_s": 10.5,
+    "rc": 0,
+    "rows_new": 99564,
+    "rows_per_s": 9482.3,
+    "source": "semlink",
+    "status": "ok",
+    "wall_s": 20
+  },
+  "unicode": {
+    "decomposer": "UnicodeDecomposer",
+    "elapsed_s": 55.5,
+    "rc": 0,
+    "rows_new": 3979786,
+    "rows_per_s": 71707.9,
+    "source": "unicode",
+    "status": "ok",
+    "wall_s": 60
+  },
+  "verbnet": {
+    "decomposer": "VerbNetDecomposer",
+    "elapsed_s": 6.4,
+    "rc": 0,
+    "rows_new": 32582,
+    "rows_per_s": 5090.9,
+    "source": "verbnet",
+    "status": "ok",
+    "wall_s": 15
+  },
+  "wordframenet": {
+    "decomposer": "WordFrameNetDecomposer",
+    "elapsed_s": 4.9,
+    "rc": 0,
+    "rows_new": 73168,
+    "rows_per_s": 14932.2,
+    "source": "wordframenet",
+    "status": "ok",
+    "wall_s": 14
+  },
+  "wordnet": {
+    "decomposer": "WordNetDecomposer",
+    "elapsed_s": 137.4,
+    "rc": 0,
+    "rows_new": 3190904,
+    "rows_per_s": 23223.5,
+    "source": "wordnet",
+    "status": "ok",
+    "wall_s": 148
+  }
+}
