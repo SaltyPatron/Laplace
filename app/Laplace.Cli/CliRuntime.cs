@@ -4,6 +4,7 @@ using Laplace.Decomposers.Composition;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD.Npgsql;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace Laplace.Cli;
 
@@ -17,6 +18,16 @@ internal static class CliRuntime
 
     public static ISeedDecomposerResolver Decomposers =>
         Services.GetRequiredService<ISeedDecomposerResolver>();
+
+    /// <summary>
+    /// The one CLI logger factory. ConsoleAndFile opens a file sink, so calling it per
+    /// command gave the process several independent Serilog pipelines writing the same
+    /// laplace-cli.csv concurrently. Lazy so nothing is opened for commands that never log.
+    /// </summary>
+    private static readonly Lazy<ILoggerFactory> _loggerFactory =
+        new(() => Laplace.Ops.LaplaceLogging.ConsoleAndFile("cli"), isThreadSafe: true);
+
+    public static ILoggerFactory LoggerFactory => _loggerFactory.Value;
 
     public static void InitializeServices()
     {

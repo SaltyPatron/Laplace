@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Laplace.SubstrateCRUD.Npgsql;
 using Npgsql;
 using NpgsqlTypes;
 
@@ -30,17 +31,8 @@ internal sealed class PostgresBillingEntitlementStore : IBillingEntitlementStore
                 stripe_subscription_id = EXCLUDED.stripe_subscription_id,
                 updated_at = EXCLUDED.updated_at;
             """;
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await using var cmd = new NpgsqlCommand(sql, conn);
-        cmd.Parameters.AddWithValue("tenant", tenant);
-        cmd.Parameters.AddWithValue("plan_id", plan.PlanId);
-        cmd.Parameters.AddWithValue("start", activatedAt);
-        cmd.Parameters.AddWithValue("end", activatedAt.AddMonths(1));
-        cmd.Parameters.Add(new NpgsqlParameter("credits", NpgsqlDbType.Jsonb)
-        { Value = JsonSerializer.Serialize(plan.MonthlyCredits) });
-        cmd.Parameters.AddWithValue("customer", (object?)stripeCustomerId ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("subscription", (object?)stripeSubscriptionId ?? DBNull.Value);
-        await cmd.ExecuteNonQueryAsync(ct);
+        await NpgsqlRead.ExecuteNonQueryAsync(_dataSource, sql,
+            p => BindPeriod(p, tenant, plan, stripeCustomerId, stripeSubscriptionId, activatedAt), ct: ct);
 
         return new BillingEntitlement(
             Tenant: tenant,
@@ -59,8 +51,6 @@ internal sealed class PostgresBillingEntitlementStore : IBillingEntitlementStore
         string tenant, BillingPlan plan, string? stripeCustomerId, string? stripeSubscriptionId,
         DateTimeOffset renewedAt, CancellationToken ct)
     {
-
-
         const string sql = """
             INSERT INTO app.billing_entitlements
                 (tenant, plan_id, status, period_start, period_end, monthly_credits, used_credits,
@@ -78,26 +68,13 @@ internal sealed class PostgresBillingEntitlementStore : IBillingEntitlementStore
                 updated_at = EXCLUDED.updated_at
             RETURNING stripe_customer_id, stripe_subscription_id;
             """;
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await using var cmd = new NpgsqlCommand(sql, conn);
-        cmd.Parameters.AddWithValue("tenant", tenant);
-        cmd.Parameters.AddWithValue("plan_id", plan.PlanId);
-        cmd.Parameters.AddWithValue("start", renewedAt);
-        cmd.Parameters.AddWithValue("end", renewedAt.AddMonths(1));
-        cmd.Parameters.Add(new NpgsqlParameter("credits", NpgsqlDbType.Jsonb)
-        { Value = JsonSerializer.Serialize(plan.MonthlyCredits) });
-        cmd.Parameters.AddWithValue("customer", (object?)stripeCustomerId ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("subscription", (object?)stripeSubscriptionId ?? DBNull.Value);
-
-        string? customerId = stripeCustomerId, subscriptionId = stripeSubscriptionId;
-        await using (var reader = await cmd.ExecuteReaderAsync(ct))
-        {
-            if (await reader.ReadAsync(ct))
-            {
-                customerId = reader.IsDBNull(0) ? null : reader.GetString(0);
-                subscriptionId = reader.IsDBNull(1) ? null : reader.GetString(1);
-            }
-        }
+        // The COALESCE keeps whatever Stripe ids the row already carried, so the RETURNING
+        // row — not the arguments — is the authority when there is one.
+        var returned = await NpgsqlRead.ReadFirstOrDefaultAsync(_dataSource, sql,
+            r => new StripeIds(
+                r.IsDBNull(0) ? null : r.GetString(0),
+                r.IsDBNull(1) ? null : r.GetString(1)),
+            p => BindPeriod(p, tenant, plan, stripeCustomerId, stripeSubscriptionId, renewedAt), ct: ct);
 
         return new BillingEntitlement(
             Tenant: tenant,
@@ -107,12 +84,12 @@ internal sealed class PostgresBillingEntitlementStore : IBillingEntitlementStore
             PeriodEnd: renewedAt.AddMonths(1),
             MonthlyCredits: new Dictionary<string, int>(plan.MonthlyCredits, StringComparer.OrdinalIgnoreCase),
             UsedCredits: new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase),
-            StripeCustomerId: customerId,
-            StripeSubscriptionId: subscriptionId,
+            StripeCustomerId: returned?.CustomerId ?? stripeCustomerId,
+            StripeSubscriptionId: returned?.SubscriptionId ?? stripeSubscriptionId,
             UpdatedAt: renewedAt);
     }
 
-    public async Task<BillingEntitlement?> DeactivateSubscriptionAsync(string stripeSubscriptionId, string status, CancellationToken ct)
+    public Task<BillingEntitlement?> DeactivateSubscriptionAsync(string stripeSubscriptionId, string status, CancellationToken ct)
     {
         const string sql = """
             UPDATE app.billing_entitlements
@@ -121,17 +98,14 @@ internal sealed class PostgresBillingEntitlementStore : IBillingEntitlementStore
             RETURNING tenant, plan_id, status, period_start, period_end, monthly_credits, used_credits,
                       stripe_customer_id, stripe_subscription_id, updated_at;
             """;
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await using var cmd = new NpgsqlCommand(sql, conn);
-        cmd.Parameters.AddWithValue("status", status);
-        cmd.Parameters.AddWithValue("subscription", stripeSubscriptionId);
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-        if (!await reader.ReadAsync(ct))
-            return null;
-        return ReadEntitlement(reader);
+        return NpgsqlRead.ReadFirstOrDefaultAsync(_dataSource, sql, ReadEntitlement, p =>
+        {
+            p.AddWithValue("status", status);
+            p.AddWithValue("subscription", stripeSubscriptionId);
+        }, ct: ct);
     }
 
-    public async Task<IReadOnlyList<BillingEntitlement>> GetByTenantAsync(string tenant, CancellationToken ct)
+    public Task<IReadOnlyList<BillingEntitlement>> GetByTenantAsync(string tenant, CancellationToken ct)
     {
         const string sql = """
             SELECT tenant, plan_id, status, period_start, period_end, monthly_credits, used_credits,
@@ -140,14 +114,8 @@ internal sealed class PostgresBillingEntitlementStore : IBillingEntitlementStore
             WHERE tenant = @tenant
             ORDER BY plan_id;
             """;
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await using var cmd = new NpgsqlCommand(sql, conn);
-        cmd.Parameters.AddWithValue("tenant", tenant);
-        var rows = new List<BillingEntitlement>();
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
-            rows.Add(ReadEntitlement(reader));
-        return rows;
+        return NpgsqlRead.ReadRowsAsync(_dataSource, sql, ReadEntitlement,
+            p => p.AddWithValue("tenant", tenant), ct: ct);
     }
 
     public async Task<(bool Consumed, BillingCreditDebit Debit)> TryConsumeCreditAsync(
@@ -155,9 +123,6 @@ internal sealed class PostgresBillingEntitlementStore : IBillingEntitlementStore
     {
         if (units <= 0)
             return (false, new BillingCreditDebit(tenant, string.Empty, serviceId, units, 0, DateTimeOffset.MinValue, "invalid_units"));
-
-
-
 
         const string sql = """
             WITH candidate AS (
@@ -182,23 +147,43 @@ internal sealed class PostgresBillingEntitlementStore : IBillingEntitlementStore
             WHERE e.tenant = c.tenant AND e.plan_id = c.plan_id
             RETURNING e.plan_id, c.credit_limit - c.used - @units, e.period_end;
             """;
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await using var cmd = new NpgsqlCommand(sql, conn);
-        cmd.Parameters.AddWithValue("tenant", tenant);
-        cmd.Parameters.AddWithValue("service", serviceId);
-        cmd.Parameters.AddWithValue("units", units);
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-        if (!await reader.ReadAsync(ct))
-            return (false, new BillingCreditDebit(tenant, string.Empty, serviceId, units, 0, DateTimeOffset.MinValue, "insufficient_credits"));
+        var debit = await NpgsqlRead.ReadFirstOrDefaultAsync(_dataSource, sql,
+            r => new BillingCreditDebit(
+                Tenant: tenant,
+                PlanId: r.GetString(0),
+                ServiceId: serviceId,
+                Units: units,
+                Remaining: r.GetInt32(1),
+                PeriodEnd: r.GetFieldValue<DateTimeOffset>(2),
+                Status: "consumed"),
+            p =>
+            {
+                p.AddWithValue("tenant", tenant);
+                p.AddWithValue("service", serviceId);
+                p.AddWithValue("units", units);
+            }, ct: ct);
 
-        return (true, new BillingCreditDebit(
-            Tenant: tenant,
-            PlanId: reader.GetString(0),
-            ServiceId: serviceId,
-            Units: units,
-            Remaining: reader.GetInt32(1),
-            PeriodEnd: reader.GetFieldValue<DateTimeOffset>(2),
-            Status: "consumed"));
+        return debit is null
+            ? (false, new BillingCreditDebit(tenant, string.Empty, serviceId, units, 0, DateTimeOffset.MinValue, "insufficient_credits"))
+            : (true, debit);
+    }
+
+    /// <summary>Stripe ids as a period upsert returns them; a record so it can be absent.</summary>
+    private sealed record StripeIds(string? CustomerId, string? SubscriptionId);
+
+    /// <summary>The activate/renew upserts differ only in their conflict clause, not their binds.</summary>
+    private static void BindPeriod(
+        NpgsqlParameterCollection p, string tenant, BillingPlan plan,
+        string? stripeCustomerId, string? stripeSubscriptionId, DateTimeOffset periodStart)
+    {
+        p.AddWithValue("tenant", tenant);
+        p.AddWithValue("plan_id", plan.PlanId);
+        p.AddWithValue("start", periodStart);
+        p.AddWithValue("end", periodStart.AddMonths(1));
+        p.Add(new NpgsqlParameter("credits", NpgsqlDbType.Jsonb)
+        { Value = JsonSerializer.Serialize(plan.MonthlyCredits) });
+        p.AddWithValue("customer", (object?)stripeCustomerId ?? DBNull.Value);
+        p.AddWithValue("subscription", (object?)stripeSubscriptionId ?? DBNull.Value);
     }
 
     private static BillingEntitlement ReadEntitlement(NpgsqlDataReader reader) => new(

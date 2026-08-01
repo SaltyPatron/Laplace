@@ -51,12 +51,49 @@ public sealed class ModelTokenEdgeETL
 
     public readonly record struct OccurrenceRecord(Hash128 Token, Hash128 Coordinate, long ScoreFp);
 
-    // Witnessed occurrence: this token APPEARS_IN this circuit coordinate, at the
+    // Witnessed occurrence: this token occurs in this circuit coordinate, at the
     // salience the checkpoint itself assigns, scored through the native score law.
-    // Every token the circuit touches is recorded — the source's assertion is never
-    // truncated; the fold and read-side RD/eff_mu are the noise model. The
-    // coordinate is shared content across models; the model is only the source, so
-    // consensus (token, APPEARS_IN, coord) rates cross-model convergence.
+    //
+    // PILLAR 3a, THIRD PATH. This used to emit one attestation per VOCABULARY TOKEN
+    // per circuit and defend it as "the source's assertion is never truncated". It
+    // was the same error text made twice before: word→word PRECEDES/CONTAINS jammed
+    // onto the text lane (TextEntityBuilder.TryBuildContentWitness: "duplicated what
+    // the geometry already holds losslessly. Deleted."), then again on the grammar
+    // lane (GrammarEntityBuilder — 785,637 rows nothing read). Here the same
+    // duplication scaled with V·circuits: TinyLlama-1.1B (22 layers × 32 heads)
+    // manufactured 1,430 circuits × 32,000 tokens = 45.8M attestation rows, Phi-2
+    // (32 × 32, V=51,200) 2,080 × 51,200 = 106.5M. Both model seeds failed. That is
+    // a representation defect, not a throughput one.
+    //
+    // The assertion is NOT truncated: it is carried losslessly by geometry, exactly
+    // as text carries sequence. One circuit = one entity = ONE physicality whose
+    // trajectory is the whole (token, score) walk in salience order, exactly
+    // invertible through laplace_testimony_unpack_vertex. The attestations that
+    // remain are TESTIMONY — the top-k salient tokens — not storage.
+    //
+    // The coordinate stays shared content across models; the model is only the
+    // source, so consensus (token, <plane relation>, coord) still rates cross-model
+    // convergence, and the physicality's 4-space coordinate (below) puts two
+    // checkpoints' matching circuits next to each other under physicalities_coord_gist.
+
+    // Testimony width per circuit. NOT a hand-set k: it is one target compose
+    // batch's record count (IngestSizing.TargetBytesPerBatch /
+    // IngestSizing.DefaultEstBytesPerRecord) divided across the intents the sizing
+    // authority permits one commit (IngestSizing.MaxIntentsPerCommitCap) — one
+    // circuit's testimony is one intent's share of one batch.
+    //
+    // Read off the sizing authority's CONSTANTS and deliberately not off
+    // ResolveForSource: k decides WHICH consensus cells exist, so a machine-derived
+    // k would make two boxes disagree about content. _rowsPerChange below is
+    // machine-derived because it only decides how rows are GROUPED, never which
+    // rows there are.
+    private static readonly int TopTokensPerCircuit =
+        IngestSizing.TargetBytesPerBatch
+        / IngestSizing.DefaultEstBytesPerRecord
+        / IngestSizing.MaxIntentsPerCommitCap;
+
+    /// <summary>Per-circuit testimony width — the bound the row-count regression pins.</summary>
+    public static int TestimonyWidthPerCircuit => TopTokensPerCircuit;
 
     public static string ResolvePlanesMode()
     {
@@ -69,8 +106,6 @@ public sealed class ModelTokenEdgeETL
                 + "'factors' (per-head factor trajectories; pair evidence derives at read). "
                 + "Eager pair-fold modes were deleted (doc 26: rejected V² materialization).");
     }
-
-    private const int TopPairsPerCircuit = 64;
 
     // Rows per change/chunk: the machine's commit-row budget from the one sizing
     // authority (IngestSizing.ResolveForSource — RAM + topology derived), not a
@@ -819,8 +854,12 @@ public sealed class ModelTokenEdgeETL
             {
                 ct.ThrowIfCancellationRequested();
                 for (int i = 0; i < n; i++) salE[i] = proj[(long)i * E + e];
+                // An expert IS the layer's MLP for the tokens the router sends it,
+                // so it testifies with the MLP plane's relation. APPEARS_IN at a
+                // circuit coordinate means "a factor slice lives here" and is the
+                // factors lane's alone (model_circuit_slices reads exactly that).
                 await foreach (var change in EmitNormOccurrences(
-                    new CircuitDescriptor(L, e, "expert", "APPEARS_IN"), salE, ents, n,
+                    new CircuitDescriptor(L, e, "expert", "COMPLETES_TO"), salE, ents, n,
                     commitEpoch, reader, options, ct))
                     yield return change;
             }
@@ -892,10 +931,11 @@ public sealed class ModelTokenEdgeETL
         }
     }
 
-    // Salience norms → occurrence rows through the NATIVE score law
-    // (NativeAttestation.ScoreFp → score.c); arena = the RMS of the circuit's
-    // salience distribution — the MERGES_WITH arena convention. Every token is
-    // recorded; the score carries the circuit's own weighting and the fold rates it.
+    // Salience norms → the circuit's ranked (token, score) walk through the NATIVE
+    // score law (NativeAttestation.ScoreFp → score.c); arena = the RMS of the
+    // circuit's salience distribution — the MERGES_WITH arena convention. Every
+    // token is still recorded, in the trajectory; the score carries the circuit's
+    // own weighting and the fold rates the testimony prefix.
     private async IAsyncEnumerable<SubstrateChange> EmitNormOccurrences(
         CircuitDescriptor descriptor, double[] sal, List<Hash128> ents, int n, int commitEpoch,
         ISubstrateReader? reader, DecomposerOptions options,
@@ -904,11 +944,21 @@ public sealed class ModelTokenEdgeETL
         double arena = VectorNorm(sal, n) / Math.Sqrt(Math.Max(1, n));
         if (arena <= 0) yield break;
 
-        var scores = new Dictionary<Hash128, long>(n);
+        var ranked = new (Hash128 Token, long ScoreFp)[n];
         for (int i = 0; i < n; i++)
-            scores[ents[i]] = NativeAttestation.ScoreFp(sal[i], arena);
+            ranked[i] = (ents[i], NativeAttestation.ScoreFp(sal[i], arena));
 
-        await foreach (var change in EmitOccurrenceChange(descriptor, scores, commitEpoch, reader, options, ct))
+        // Salience DESCENDING, ties broken bytewise on the id. The trajectory IS
+        // the record now, so its order has to be a function of content alone: the
+        // Dictionary this replaced enumerated in hash-bucket order, which is
+        // neither a ranking nor reproducible across runs.
+        Array.Sort(ranked, static (a, b) =>
+        {
+            int c = b.ScoreFp.CompareTo(a.ScoreFp);
+            return c != 0 ? c : a.Token.CompareToBytewise(b.Token);
+        });
+
+        await foreach (var change in EmitOccurrenceChange(descriptor, ranked, commitEpoch, reader, options, ct))
             yield return change;
     }
 
@@ -934,38 +984,71 @@ public sealed class ModelTokenEdgeETL
 
 
     private async IAsyncEnumerable<SubstrateChange> EmitOccurrenceChange(
-        CircuitDescriptor descriptor, Dictionary<Hash128, long> salience, int commitEpoch,
+        CircuitDescriptor descriptor, (Hash128 Token, long ScoreFp)[] ranked, int commitEpoch,
         ISubstrateReader? reader, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        if (salience.Count == 0) yield break;
+        if (ranked.Length == 0) yield break;
         var coord = ModelCoordinates.CoordinateId(descriptor);
-        var top = salience.ToList();
-        double weight = WeightFor("APPEARS_IN");
+        // The circuit's OWN relation — attention ATTENDS, OV OV_RELATES, MLP/expert
+        // COMPLETES_TO — not a blanket APPEARS_IN. The descriptor has carried the
+        // name since the pair planes were deleted and nothing read it, which is why
+        // ATTENDS/OV_RELATES/COMPLETES_TO consensus was empty on every model seed
+        // while seed-models.yml gated on all three, and why model_circuit_slices /
+        // model_forward saw vocabulary tokens where they expect factor SLICES
+        // (both read APPEARS_IN consensus at a coordinate). APPEARS_IN now belongs
+        // to the factors lane's slice→coordinate anatomy link alone.
+        var relationTypeId = RelationTypeRegistry.RelationTypeId(descriptor.RelationName);
+        double weight = WeightFor(descriptor.RelationName);
         bool metaStaged = false;
 
         // THE CIRCUIT IS THE GAME (chess trajectory parity): one testimony-packed
         // linestring on the coordinate entity carrying the circuit's ENTIRE
-        // assertion — every token, its score — exactly as a game's trajectory
-        // carries its whole move sequence. Calculated payload (Projection class,
-        // doc 08: versioned, evictable); anatomy queries read 1 row per circuit.
-        var trajTokens = new Hash128[top.Count];
-        var trajScores = new long[top.Count];
-        for (int i = 0; i < top.Count; i++)
+        // assertion — every token, its score, in salience order — exactly as a
+        // game's trajectory carries its whole move sequence, and exactly invertible
+        // through laplace_testimony_unpack_vertex. This is the lossless record the
+        // deleted per-token attestations were a second, unread copy of. Calculated
+        // payload (Projection class, doc 08: versioned, evictable); anatomy queries
+        // read 1 row per circuit.
+        var trajTokens = new Hash128[ranked.Length];
+        var trajScores = new long[ranked.Length];
+        for (int i = 0; i < ranked.Length; i++)
         {
-            trajTokens[i] = top[i].Key;
-            trajScores[i] = top[i].Value;
+            trajTokens[i] = ranked[i].Token;
+            trajScores[i] = ranked[i].ScoreFp;
         }
         byte[] packed = TestimonyWalk.Pack(trajTokens, trajScores);
         double[] trajXyzm = System.Runtime.InteropServices.MemoryMarshal
             .Cast<byte, double>(packed).ToArray();
+
+        // Bounded testimony: the top-k salient tokens, capped by the collector the
+        // file already owns rather than a second cap written here. Offered in
+        // salience order, so the drained set is the ranked prefix and stays
+        // deterministic even where scores tie at the boundary.
+        var collector = new TopPairCollector(Math.Min(TopTokensPerCircuit, ranked.Length));
+        foreach (var (token, scoreFp) in ranked) collector.Offer(token, coord, scoreFp);
+        var top = collector.Drain();
+
+        // The circuit's point in 4-space: the centroid of the substrate's OWN
+        // projection of its salient tokens — Trajectory.Build then Math4d.Centroid,
+        // the NgramTrajectory.Compose convention verbatim, with Hilbert128 over the
+        // same centroid. Content-derived and model-free, so two checkpoints whose
+        // L5.H7 head is salient for the same tokens land on neighbouring points and
+        // find each other through physicalities_coord_gist / the Hilbert order.
+        // Taken over the SALIENT PREFIX, never the whole vocabulary: averaged over
+        // every token, every circuit converges on the same vocabulary centroid and
+        // discriminates nothing. (The old coord was trajXyzm[0..3] — the packed
+        // mantissa of one vertex, a hash slot, not a position.)
+        var signature = new Hash128[top.Count];
+        for (int i = 0; i < top.Count; i++) signature[i] = top[i].Subject;
+        double[] centroid = Math4d.Centroid(Trajectory.Build(signature));
         var circuitPhys = new PhysicalityRow(
             Id: PhysicalityId.Compute(coord, PhysicalityType.Projection),
             EntityId: coord, SourceId: _source,
             Type: PhysicalityType.Projection,
-            CoordX: trajXyzm[0], CoordY: trajXyzm[1], CoordZ: trajXyzm[2], CoordM: trajXyzm[3],
-            HilbertIndex: default,
-            TrajectoryXyzm: trajXyzm, NConstituents: top.Count,
+            CoordX: centroid[0], CoordY: centroid[1], CoordZ: centroid[2], CoordM: centroid[3],
+            HilbertIndex: Hilbert128.Encode(centroid),
+            TrajectoryXyzm: trajXyzm, NConstituents: ranked.Length,
             AlignmentResidual: null, SourceDim: null,
             ObservedAtUnixUs: IngestClock.NowUnixUs());
 
@@ -975,21 +1058,21 @@ public sealed class ModelTokenEdgeETL
         var staged = new AttestationStagedNative[cells.Length];
         var chunks = new List<EdgeRowChunk>((top.Count + cells.Length - 1) / cells.Length);
         int filled = 0;
-        foreach (var kv in top)
+        foreach (var pair in top)
         {
             cells[filled] = new AttestationAggregatedCellNative
             {
-                Subject = kv.Key, Object = coord, ObjectIsNull = 0,
-                Games = 1, SumScoreFp1e9 = kv.Value,
+                Subject = pair.Subject, Object = coord, ObjectIsNull = 0,
+                Games = 1, SumScoreFp1e9 = pair.ScoreFp,
             };
             if (++filled == cells.Length)
             {
-                chunks.Add(BuildChunk(cells, filled, ModelCoordinates.AppearsInTypeId, _source, weight, staged));
+                chunks.Add(BuildChunk(cells, filled, relationTypeId, _source, weight, staged));
                 filled = 0;
             }
         }
         if (filled > 0)
-            chunks.Add(BuildChunk(cells, filled, ModelCoordinates.AppearsInTypeId, _source, weight, staged));
+            chunks.Add(BuildChunk(cells, filled, relationTypeId, _source, weight, staged));
 
         await foreach (var batch in IngestComposePipeline.RunAsync(
                            EnumerateChunksAsync(chunks, ct),
@@ -1015,18 +1098,6 @@ public sealed class ModelTokenEdgeETL
         {
             ct.ThrowIfCancellationRequested();
             yield return c;
-        }
-        await Task.CompletedTask;
-    }
-
-    private static async IAsyncEnumerable<OccurrenceRecord> EnumerateOccurrenceRecords(
-        List<KeyValuePair<Hash128, long>> top, Hash128 coord,
-        [EnumeratorCancellation] CancellationToken ct)
-    {
-        foreach (var kv in top)
-        {
-            ct.ThrowIfCancellationRequested();
-            yield return new OccurrenceRecord(kv.Key, coord, kv.Value);
         }
         await Task.CompletedTask;
     }

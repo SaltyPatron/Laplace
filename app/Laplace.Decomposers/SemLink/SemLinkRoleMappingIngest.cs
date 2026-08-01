@@ -12,24 +12,19 @@ internal static class SemLinkRoleMappingIngest
 {
     internal const string FileName = "VN-FNRoleMapping.txt";
 
+    // Ecosystem-local: the role mapping ships inside the SemLink unpack, so the shared
+    // ingest root is deliberately NOT searched. Root last — an unpacked
+    // other_resources/ outranks a stray copy at the top level.
+    private static readonly IngestSourceLayout Layout = new()
+    {
+        Files = [IngestFileMatch.Name(FileName)],
+        EcosystemDirs = [Path.Combine("semlink-master", "other_resources"), "other_resources", "."],
+    };
+
     internal static bool ExistsLocally(string dir) => File.Exists(Path.Combine(dir, FileName));
 
-    internal static string? ResolvePath(string ecosystemPath)
-    {
-        foreach (var dir in CandidateDirs(ecosystemPath))
-        {
-            string candidate = Path.Combine(dir, FileName);
-            if (File.Exists(candidate)) return candidate;
-        }
-        return null;
-    }
-
-    private static IEnumerable<string> CandidateDirs(string ecosystemPath)
-    {
-        yield return Path.Combine(ecosystemPath, "semlink-master", "other_resources");
-        yield return Path.Combine(ecosystemPath, "other_resources");
-        yield return ecosystemPath;
-    }
+    internal static string? ResolvePath(string ecosystemPath) =>
+        IngestInput.Locate(ecosystemPath, Layout).FirstOrDefault();
 
     internal static async IAsyncEnumerable<RelationTripleRecord> EnumerateRecordsAsync(
         string path, [EnumeratorCancellation] CancellationToken ct)

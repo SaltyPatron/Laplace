@@ -12,21 +12,14 @@ internal static class ReportEndpoints
             if (string.IsNullOrWhiteSpace(target))
                 return EndpointJson.BadRequest("invalid_request_error", "Route parameter 'target' is required.");
 
-            try
-            {
-                var evidence = await substrate.EvidenceAsync(target.Trim(), Math.Clamp(limit ?? 10, 1, 50), ct);
-                if (evidence is null)
-                    return EndpointJson.NotFound("entity_not_found", $"No entity for target '{target.Trim()}'.");
+            var evidence = await substrate.EvidenceAsync(target.Trim(), Math.Clamp(limit ?? 10, 1, 50), ct);
+            if (evidence is null)
+                return EndpointJson.NotFound("entity_not_found", $"No entity for target '{target.Trim()}'.");
 
-                return Results.Json(new EvidenceResponse(
-                    EntityId: evidence.EntityIdHex,
-                    EntityLabel: evidence.EntityLabel,
-                    Evidence: evidence.Items));
-            }
-            catch (SubstrateUnavailableException ex)
-            {
-                return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message);
-            }
+            return Results.Json(new EvidenceResponse(
+                EntityId: evidence.EntityIdHex,
+                EntityLabel: evidence.EntityLabel,
+                Evidence: evidence.Items));
         })
         .WithTags("openai")
         .Produces<EvidenceResponse>()
@@ -150,13 +143,6 @@ internal static class ReportEndpoints
         if (!gate.Allowed)
             return EndpointJson.PaymentRequired(gate.Code, gate.Message, gate.Quote is null ? null : new QuotePendingDetail(gate.Quote.QuoteId, gate.Quote.Status, gate.Quote.StripeCheckoutUrl));
 
-        try
-        {
-            return await produce(gate.Quote);
-        }
-        catch (SubstrateUnavailableException ex)
-        {
-            return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message);
-        }
+        return await produce(gate.Quote);
     }
 }

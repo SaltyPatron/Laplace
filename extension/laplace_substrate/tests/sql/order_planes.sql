@@ -1,0 +1,121 @@
+-- The order planes had NO coverage of any kind before this file. word_order,
+-- grapheme_order and sentence_order are the functions that turn witnessed trajectory
+-- order into exported adjacency, and nothing pinned what they emit -- which is how
+-- word_order came to fabricate pairs that never occurred and nobody noticed.
+--
+-- Each test here pins a change that was made blind. Fixtures stamp the SAME compositional
+-- types the compose path stamps (TextEntityBuilder.TierTypeId / content_witness_batch.c),
+-- because these functions select roles by type_id: tier cannot be used for that, since
+-- bootstrap mints relation types, trust classes, POS tags, sources and languages at tier 2
+-- and single-grapheme words collapse to tier 0.
+BEGIN;
+SET search_path = laplace, public;
+
+DO $$
+DECLARE
+    src       bytea := laplace_hash128_blake3('test/order/source');
+    type_t    bytea := laplace_hash128_blake3('Type');
+    type_word bytea := laplace_hash128_blake3('Word');
+    type_sent bytea := laplace_hash128_blake3('Sentence');
+    type_doc  bytea := laplace_hash128_blake3('Document');
+    w_a       bytea := laplace_hash128_blake3('test/order/word-a');
+    w_gap     bytea := laplace_hash128_blake3('test/order/word-gap');
+    w_b       bytea := laplace_hash128_blake3('test/order/word-b');
+    w_rep     bytea := laplace_hash128_blake3('test/order/word-rep');
+    sent      bytea := laplace_hash128_blake3('test/order/sentence');
+    sent_rep  bytea := laplace_hash128_blake3('test/order/sentence-rep');
+    doc       bytea := laplace_hash128_blake3('test/order/document');
+    t2flag    bigint := (2::bigint << 1);
+    t3flag    bigint := (3::bigint << 1);
+    vocab     bytea[];
+    n         bigint;
+BEGIN
+    INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
+        (src, 0, type_t, NULL),
+        (w_a, 2, type_word, src), (w_gap, 2, type_word, src),
+        (w_b, 2, type_word, src), (w_rep, 2, type_word, src),
+        (sent, 3, type_sent, src), (sent_rep, 3, type_sent, src),
+        (doc, 4, type_doc, src)
+    ON CONFLICT (id, tier) DO NOTHING;
+
+    -- sent = a, gap, b  — three CONSECUTIVE words. `gap` is deliberately left OUT of the
+    -- vocabulary below, so (a -> b) is NOT an adjacency that occurred.
+    INSERT INTO physicalities (id, entity_id, type, coord, hilbert_index,
+                               trajectory, n_constituents, observed_at)
+    VALUES (laplace_hash128_blake3('test/order/phys-sentence'), sent, 1,
+            public.ST_SetSRID(public.ST_MakePoint(1,1,1,1), 0),
+            decode('00000000000000000000000000000000','hex'),
+            public.ST_MakeLine(ARRAY[
+                public.laplace_mantissa_pack(w_a,   1, 1, t2flag),
+                public.laplace_mantissa_pack(w_gap, 2, 1, t2flag),
+                public.laplace_mantissa_pack(w_b,   3, 1, t2flag)]),
+            3, now());
+
+    -- sent_rep = rep, rep — a legitimately repeated token.
+    INSERT INTO physicalities (id, entity_id, type, coord, hilbert_index,
+                               trajectory, n_constituents, observed_at)
+    VALUES (laplace_hash128_blake3('test/order/phys-sentence-rep'), sent_rep, 1,
+            public.ST_SetSRID(public.ST_MakePoint(2,2,2,2), 0),
+            decode('00000000000000000000000000000000','hex'),
+            public.ST_MakeLine(ARRAY[
+                public.laplace_mantissa_pack(w_rep, 1, 1, t2flag),
+                public.laplace_mantissa_pack(w_rep, 2, 1, t2flag)]),
+            2, now());
+
+    -- doc = sent, sent_rep — two consecutive sentences, for sentence_order.
+    INSERT INTO physicalities (id, entity_id, type, coord, hilbert_index,
+                               trajectory, n_constituents, observed_at)
+    VALUES (laplace_hash128_blake3('test/order/phys-document'), doc, 1,
+            public.ST_SetSRID(public.ST_MakePoint(3,3,3,3), 0),
+            decode('00000000000000000000000000000000','hex'),
+            public.ST_MakeLine(ARRAY[
+                public.laplace_mantissa_pack(sent,     1, 1, t3flag),
+                public.laplace_mantissa_pack(sent_rep, 2, 1, t3flag)]),
+            2, now());
+
+    -- THE FABRICATED-ADJACENCY TEST. Vocabulary excludes `gap`. word_order used to join
+    -- the vocab BEFORE the lead() window, which deleted `gap` from the sequence and let
+    -- lead() bridge the hole, emitting (a -> b) as though they had been adjacent. They
+    -- never were. grapheme_order always filtered after counting; the two disagreed.
+    vocab := ARRAY[w_a, w_b];
+    SELECT count(*) INTO n
+    FROM word_order(vocab, 1000, 1)
+    WHERE subject_id = w_a AND object_id = w_b;
+    IF n <> 0 THEN
+        RAISE EXCEPTION
+            'FAIL: word_order fabricated an adjacency across an out-of-vocabulary token '
+            '(a -> b with gap between them): % row(s)', n;
+    END IF;
+
+    -- With `gap` present the two real adjacencies appear, proving the fixture is live
+    -- and the emptiness above is the filter working rather than an empty read.
+    vocab := ARRAY[w_a, w_gap, w_b];
+    SELECT count(*) INTO n FROM word_order(vocab, 1000, 1);
+    IF n <> 2 THEN
+        RAISE EXCEPTION 'FAIL: expected 2 real adjacencies (a->gap, gap->b), got %', n;
+    END IF;
+
+    -- A repeated token is witnessed data. `cur <> nxt` used to discard it, while
+    -- grapheme_order kept its repeats -- an inconsistency inside one family, not a rule.
+    vocab := ARRAY[w_rep];
+    SELECT count(*) INTO n
+    FROM word_order(vocab, 1000, 1)
+    WHERE subject_id = w_rep AND object_id = w_rep;
+    IF n <> 1 THEN
+        RAISE EXCEPTION 'FAIL: word_order dropped a legitimately repeated token: % row(s)', n;
+    END IF;
+
+    -- sentence_order reads document trajectories and must find the sentence pair. This
+    -- also pins the type_id role predicate: the document is selected by
+    -- canonical_id('Document'), so a regression to a tier test shows up as zero rows.
+    SELECT count(*) INTO n
+    FROM sentence_order(1000, 1)
+    WHERE subject_id = sent AND object_id = sent_rep;
+    IF n <> 1 THEN
+        RAISE EXCEPTION 'FAIL: sentence_order did not pair the document constituents: %', n;
+    END IF;
+
+    RAISE NOTICE 'order planes: no fabricated adjacency, repeats kept, roles by type';
+END $$;
+
+ROLLBACK;

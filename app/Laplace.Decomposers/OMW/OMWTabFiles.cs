@@ -14,18 +14,19 @@ public static class OMWTabFiles
     internal static readonly string[] TabGlobPatterns =
         ["wn-data-*.tab", "wn-wikt-*.tab", "wn-cldr-*.tab", "wn-nodia-*.tab"];
 
+    private static readonly IngestSourceLayout Layout = new()
+    {
+        Files = [.. TabGlobPatterns.Select(p => IngestFileMatch.Glob(p))],
+        Search = SearchOption.AllDirectories,
+    };
+
     public static IEnumerable<string> EnumerateTabFiles(string wnsDir, LanguageFilter? langs)
     {
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (string pattern in TabGlobPatterns)
+        foreach (string tabFile in IngestInput.FilesIn(wnsDir, Layout))
         {
-            foreach (string tabFile in Directory.EnumerateFiles(wnsDir, pattern, SearchOption.AllDirectories))
-            {
-                if (!seen.Add(tabFile)) continue;
-                string fileLang = FileLang(tabFile);
-                if (langs?.MatchesRaw(fileLang) == false) continue;
-                yield return tabFile;
-            }
+            string fileLang = FileLang(tabFile);
+            if (langs?.MatchesRaw(fileLang) == false) continue;
+            yield return tabFile;
         }
     }
 

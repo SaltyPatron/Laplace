@@ -527,7 +527,7 @@ public static class CpuTopology
     //   place freely across P+E (spreads load instead of concentrating it on the P-cores).
     // Unset = current behavior, byte-for-byte.
     internal static readonly bool PinDisabled =
-        (Environment.GetEnvironmentVariable("LAPLACE_NO_PIN")?.Trim().ToLowerInvariant()) is "1" or "true" or "yes";
+        EnvFlag.IsSet("LAPLACE_NO_PIN");
 
     private static readonly HashSet<int> ExcludedLps = ParseExcludedLps();
 

@@ -59,7 +59,34 @@ public static class LaplaceDataSource
     public static string ConnectionStringFor(SubstrateAccess access, string? baseConnectionString = null)
     {
         var basis = baseConnectionString ?? LaplaceInstall.PostgresConnectionString();
-        if (access == SubstrateAccess.Ingest) return basis;
+        if (access == SubstrateAccess.Ingest)
+        {
+            // PLAN REUSE ON THE INGEST PATH. This used to return the base string untouched,
+            // leaving MaxAutoPrepare at Npgsql's default of 0 -- every statement re-planned
+            // on every execution, for the entire run.
+            //
+            // MEASURED 2026-08-01 on physicalities_present_ordinals, the tier-descent probe:
+            //   Planning Time   28.622 ms   (Buffers: shared hit=10660)
+            //   Execution Time   7.108 ms
+            // Four times more expensive to PLAN than to run, and the planning is where the
+            // buffers go: physicalities is RANGE-partitioned into ~130 leaves, so the planner
+            // opens every leaf's catalog and index metadata to build the Append, then prunes
+            // to almost nothing at runtime. The same run recorded 131,686,449 buffer HITS
+            // against only 59,163 disk reads across 67 probe calls -- ~2M buffer touches per
+            // call, none of it I/O, all of it re-derivation.
+            //
+            // The old justification -- "the ingest path issues staging DDL, which invalidates
+            // cached plans" -- is not a reason to disable caching. PostgreSQL invalidates a
+            // cached plan automatically when a dependent object changes and re-plans on next
+            // use; that is the mechanism working, not a hazard. It is a reason to expect some
+            // re-planning, not to pay for it on every call of every statement.
+            var ing = new NpgsqlConnectionStringBuilder(basis)
+            {
+                MaxAutoPrepare = MaxAutoPrepare,
+                AutoPrepareMinUsages = AutoPrepareMinUsages,
+            };
+            return ing.ConnectionString;
+        }
 
         var b = new NpgsqlConnectionStringBuilder(basis);
 

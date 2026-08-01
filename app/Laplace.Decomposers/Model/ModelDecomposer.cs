@@ -392,9 +392,13 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
             }
         }
 
-        // Matches ModelTokenEdgeETL's untruncated emission for the active mode:
-        // every token per circuit in structure mode; every pair per plane in
-        // analyzer modes (identical ids merge across circuits at apply).
+        // Matches ModelTokenEdgeETL's emission for the active mode. Structure mode
+        // scales with CIRCUITS, not vocabulary: the circuit's whole salience
+        // assertion is one physicality trajectory and the attestations are a
+        // bounded testimony prefix (ModelTokenEdgeETL.TestimonyWidthPerCircuit).
+        // This used to read `circuits * distinctVocab` and matched the emission
+        // that made TinyLlama a 45.8M-row deposit; leaving it would over-estimate
+        // the unit count ~125x and make every progress line meaningless.
         if (ModelTokenEdgeETL.ResolvePlanesMode() == "structure")
         {
             // Per layer: attention + OV heads, plus either one dense MLP circuit or
@@ -404,8 +408,8 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
             catch (Exception) { }
             long mlpSlots = Math.Max(1, numExperts);
             long circuits = (2L * Math.Max(1, r.NumHeads) + mlpSlots) * r.NumLayers;
-            long occurrences = circuits * distinctVocab;
-            return distinctVocab + occurrences;
+            long testimony = circuits * ModelTokenEdgeETL.TestimonyWidthPerCircuit;
+            return distinctVocab + testimony;
         }
         long perLayerPlanes = 3L * distinctVocab * distinctVocab * r.NumLayers;
         long similarTo = distinctVocab * distinctVocab;

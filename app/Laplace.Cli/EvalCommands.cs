@@ -1,4 +1,5 @@
 using global::Npgsql;
+using Laplace.SubstrateCRUD.Npgsql;
 using static Laplace.Cli.CliRuntime;
 
 namespace Laplace.Cli;
@@ -26,7 +27,7 @@ internal static class EvalCommands
         string gt = args.Length > 2 ? args[2] : "IS_SYNONYM_OF";
         int n = args.Length > 3 && int.TryParse(args[3], out var v) && v > 0 ? v : 3000;
 
-        await using var ds = NpgsqlDataSource.Create(ConnString);
+        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
 
         var pos = await ScoresAsync(ds, PositivesSql, relation, gt, n);
         var neg = await ScoresAsync(ds, NegativesSql, relation, gt, n);

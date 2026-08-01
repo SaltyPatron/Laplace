@@ -257,9 +257,12 @@ internal static class IngestCommands
 
 
 
-        var dsb = new NpgsqlDataSourceBuilder(ConnString);
-        dsb.ConnectionStringBuilder.CommandTimeout = 0;
-        await using var ds = dsb.Build();
+        // Explicit unbounded timeout: the Ingest policy passes the base string through
+        // untouched, so it inherits Command Timeout=0 only when LAPLACE_DB carries it.
+        await using var ds = LaplaceDataSource.Create(
+            SubstrateAccess.Ingest,
+            b => b.ConnectionStringBuilder.CommandTimeout = 0,
+            ConnString);
 
         var dec = CliRuntime.Decomposers.ResolveModel(modelDir, persistEvidence: ResolvePersistEvidence(cli));
 
@@ -294,7 +297,7 @@ internal static class IngestCommands
             }
         }
 
-        var loggerFactory = Laplace.Ops.LaplaceLogging.ConsoleAndFile("cli");
+        var loggerFactory = CliRuntime.LoggerFactory;
         var inner = new NpgsqlSubstrateWriter(ds,
             logger: loggerFactory.CreateLogger<NpgsqlSubstrateWriter>());
 
@@ -470,6 +473,33 @@ internal static class IngestCommands
             CliRuntime.Decomposers.Resolve("parquet"), path, skipLayerCheck: true, cli, skipSourceCompletion: true);
     }
 
+    /// <summary>
+    /// Line-delimited formats where the mean line length IS the record size. Deliberately a
+    /// whitelist: measuring an XML or Parquet file this way yields a number with no relation
+    /// to a record, and sizing a batch from it would be worse than the declared constant.
+    /// </summary>
+    private static readonly string[] LineDelimitedExtensions =
+        [".jsonl", ".ndjson", ".csv", ".tsv", ".tab", ".conllu", ".txt"];
+
+    private static IngestSourceProfile ApplyMeasuredRecordSize(
+        IngestSourceProfile profile, string? path, string sourceName)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return profile;
+        string ext = Path.GetExtension(path);
+        if (!LineDelimitedExtensions.Contains(ext, StringComparer.OrdinalIgnoreCase))
+            return profile;
+
+        int measured = IngestSizing.MeasureBytesPerRecord(
+            path, fallback: profile.EstBytesPerRecord);
+        if (measured == profile.EstBytesPerRecord) return profile;
+
+        Console.Error.WriteLine(
+            $"ingest_record_size: source={sourceName} file={Path.GetFileName(path)} "
+            + $"declared={profile.EstBytesPerRecord} measured={measured} "
+            + $"ratio={(double)profile.EstBytesPerRecord / measured:F2}x — sizing from the file");
+        return profile with { EstBytesPerRecord = measured };
+    }
+
     private static IngestRunOptions BuildIngestOptions(
         Stopwatch sw, string sourceName, bool skipLayerCheck, string? ecosystemPath,
         IngestCliArgs? cli = null, bool skipSourceCompletion = false,
@@ -509,6 +539,22 @@ internal static class IngestCommands
             long.TryParse(Environment.GetEnvironmentVariable("LAPLACE_INGEST_MAX_UNITS"),
                 out var mu) && mu > 0 ? mu : 0;
         var profile = sizingProfile ?? IngestSourceProfile.Default;
+        // MEASURE the record size from the file in hand instead of trusting the per-source
+        // constant. EstBytesPerRecord is the DENOMINATOR in ResolveRecordBatch
+        // (TargetBytesPerBatch / estBytesPerRecord), so a wrong value silently halves or
+        // quadruples every batch for the whole run.
+        //
+        // The constants are demonstrably wrong, and worse, one constant cannot be right for
+        // one source: MEASURED 2026-08-01, WiktionaryDecomposer ingests BOTH
+        // raw-wiktextract-data.jsonl at 6,158 bytes/record AND
+        // kaikki.org-dictionary-English.jsonl at 26,719 -- a 4.3x spread behind a single
+        // IngestSourceProfile.Wiktionary. Whatever number sits in that constant is badly
+        // wrong for one of the two files. Only the file itself knows.
+        //
+        // Guarded to line-delimited formats: for XML or Parquet the mean LINE length is not
+        // the record size, and sizing from it would be worse than the constant. Anything
+        // else keeps the declared profile untouched.
+        profile = ApplyMeasuredRecordSize(profile, ecosystemPath, sourceName);
         var sized = IngestSizing.ResolveForSource(profile);
         sized.Log(sourceName);
         int batch = sized.RecordBatchSize;
@@ -547,8 +593,8 @@ internal static class IngestCommands
         LanguageReference.EnsureLoaded();
         var topo = IngestTopology.EnsureReady();
 
-        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
-        var loggerFactory = Laplace.Ops.LaplaceLogging.ConsoleAndFile("cli");
+        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
+        var loggerFactory = CliRuntime.LoggerFactory;
         bool force = cli?.Force ?? false;
         var innerWriter = new NpgsqlSubstrateWriter(ds,
             logger: loggerFactory.CreateLogger<NpgsqlSubstrateWriter>());
@@ -597,7 +643,7 @@ internal static class IngestCommands
 
     public static async Task<int> StatsAsync()
     {
-        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
+        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
         await PrintIngestValidationAsync(ds, decomposer: null);
         return 0;
     }
@@ -609,7 +655,7 @@ internal static class IngestCommands
     // planner statistics afterwards: freshly built indexes without stats still plan badly.
     public static async Task<int> RecoverCycledIndexesAsync()
     {
-        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
+        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
 
         async Task<long> JournalCountAsync()
         {
@@ -627,7 +673,7 @@ internal static class IngestCommands
         }
 
         Console.WriteLine($"recovering {pending} journaled secondary index(es) — serial builds ...");
-        var log = Laplace.Ops.LaplaceLogging.ConsoleAndFile("cli").CreateLogger("index-cycle");
+        var log = CliRuntime.LoggerFactory.CreateLogger("index-cycle");
         var sw = Stopwatch.StartNew();
         // Force the rebuild even under LAPLACE_INDEX_CYCLE_DEFER: this verb IS the deliberate
         // campaign-end rebuild the defer flag was holding for (RecoverAsync no-ops when deferred).
@@ -659,8 +705,8 @@ internal static class IngestCommands
     // (e.g. attestations_relation_btree, which the interleaved chess-analyze hydrate reads).
     public static async Task<int> DropCoreIndexesAsync()
     {
-        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
-        var log = Laplace.Ops.LaplaceLogging.ConsoleAndFile("cli").CreateLogger("index-cycle");
+        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
+        var log = CliRuntime.LoggerFactory.CreateLogger("index-cycle");
         string[] tables = ["entities", "physicalities", "attestations", "consensus"];
         Console.WriteLine($"campaign index-drop across {tables.Length} core table(s) — journaled for one rebuild ...");
         var sw = Stopwatch.StartNew();
@@ -679,7 +725,7 @@ internal static class IngestCommands
 
     public static async Task<int> RebuildPhysIndexesAsync()
     {
-        await using var ds = new NpgsqlDataSourceBuilder(ConnString).Build();
+        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
         var indexPolicy = new SecondaryIndexPolicy(ds);
         if (await indexPolicy.SecondaryIndexesPresentAsync("physicalities", CancellationToken.None))
         {

@@ -57,73 +57,22 @@ internal static class MapNetIngest
         return lines > 0 ? lines : null;
     }
 
+    private static readonly IngestSourceLayout Layout = new()
+    {
+        Files = [IngestFileMatch.Name(FrameMappingFile), IngestFileMatch.Name(LuMappingFile)],
+        EcosystemDirs = [".", "MapNet", "MapNet-0.1", "mapnet", "mapnet-0.1"],
+        RootDirectoryGlobs = ["MapNet*"],
+        RootDirs = ["MapNet", "MapNet-0.1"],
+        SearchIngestRoots = true,
+        IncludeEcosystemParent = true,
+    };
+
     internal static bool ExistsUnder(string ecosystemPath) => ResolvePaths(ecosystemPath).Any();
 
-    internal static bool ExistsLocally(string dir) => MappingFilesIn(dir).Any();
+    internal static bool ExistsLocally(string dir) => IngestInput.FilesIn(dir, Layout).Any();
 
-    internal static IEnumerable<string> ResolvePaths(string ecosystemPath)
-    {
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var dir in DataDirs(ecosystemPath))
-        {
-            foreach (string path in MappingFilesIn(dir))
-            {
-                if (seen.Add(path))
-                    yield return path;
-            }
-        }
-    }
-
-    private static IEnumerable<string> MappingFilesIn(string dir)
-    {
-        if (!Directory.Exists(dir)) yield break;
-
-        foreach (var name in new[] { FrameMappingFile, LuMappingFile })
-        {
-            string canonical = Path.Combine(dir, name);
-            if (File.Exists(canonical)) yield return canonical;
-        }
-    }
-
-    private static IEnumerable<string> DataDirs(string ecosystemPath)
-    {
-        yield return ecosystemPath;
-
-        foreach (var sub in new[] { "MapNet", "MapNet-0.1", "mapnet", "mapnet-0.1" })
-        {
-            string nested = Path.Combine(ecosystemPath, sub);
-            if (Directory.Exists(nested)) yield return nested;
-        }
-
-        foreach (string root in VaultRoots(ecosystemPath))
-        {
-            yield return root;
-
-            foreach (var dir in Directory.EnumerateDirectories(root, "MapNet*"))
-                yield return dir;
-
-            foreach (var sub in new[] { "MapNet", "MapNet-0.1" })
-            {
-                string nested = Path.Combine(root, sub);
-                if (Directory.Exists(nested)) yield return nested;
-            }
-        }
-    }
-
-    private static IEnumerable<string> VaultRoots(string ecosystemPath)
-    {
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        string ingest = LaplaceInstall.ResolveIngestRoot();
-        if (seen.Add(ingest)) yield return ingest;
-
-        string platformDefault = OperatingSystem.IsWindows() ? @"D:\Data\Ingest" : "/vault/Data";
-        if (seen.Add(platformDefault)) yield return platformDefault;
-
-        string? parent = Path.GetDirectoryName(Path.GetFullPath(ecosystemPath));
-        if (!string.IsNullOrEmpty(parent) && seen.Add(parent))
-            yield return parent;
-    }
+    internal static IEnumerable<string> ResolvePaths(string ecosystemPath) =>
+        IngestInput.Locate(ecosystemPath, Layout);
 
     private static async IAsyncEnumerable<string> ReadLinesAsync(
         string path, [EnumeratorCancellation] CancellationToken ct)

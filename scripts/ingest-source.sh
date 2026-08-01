@@ -40,7 +40,21 @@ build_cli() {
     ( cd "$ROOT/app" && dotnet build Laplace.Cli/Laplace.Cli.csproj -c Release -v q -clp:NoSummary >/dev/null )
     fp_record cli-build "$fp"
 }
-ingest()    { ( cd "$ROOT/app" && dotnet "$DLL" ingest "$@" ); }
+# Every branch below routes through here, so timing is recorded once for all of them.
+# Only the `all` path used to print any timing at all; the single-source path -- the one
+# _ingest.yml and ensure-foundation.sh actually call -- printed none, so no seed run in CI
+# history has a recorded duration. A timeout is a ceiling, not a measurement.
+# INGEST_TIMING is machine-readable on purpose: it is what a throughput baseline parses.
+ingest() {
+    local t0=$SECONDS rc=0
+    ( cd "$ROOT/app" && dotnet "$DLL" ingest "$@" ) || rc=$?
+    local elapsed=$((SECONDS - t0))
+    echo "INGEST_TIMING source=$source elapsed_s=$elapsed rc=$rc"
+    if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+        echo "elapsed_s=$elapsed" >> "$GITHUB_OUTPUT"
+    fi
+    return "$rc"
+}
 
 case "$source" in
     all)

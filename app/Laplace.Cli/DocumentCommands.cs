@@ -1,6 +1,7 @@
 using System.Text.Json;
 using global::Npgsql;
 using Laplace.Cli.Provenance;
+using Laplace.SubstrateCRUD.Npgsql;
 using static Laplace.Cli.CliRuntime;
 
 namespace Laplace.Cli;
@@ -36,7 +37,7 @@ internal static class DocumentCommands
         Console.WriteLine($"  recipe: {recipePath}");
         Console.WriteLine($"  output: {outDir}");
 
-        await using var ds = NpgsqlDataSource.Create(ConnString);
+        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
         var record = await ProvenanceExtractor.ExtractAsync(ds, recipePath);
 
         string outPath = Path.Combine(outDir, "provenance.json");

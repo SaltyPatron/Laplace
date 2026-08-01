@@ -1,6 +1,5 @@
 using System.Runtime.CompilerServices;
 using Laplace.Decomposers.Abstractions;
-using Laplace.Engine.Core;
 
 namespace Laplace.Decomposers.SemLink;
 
@@ -23,6 +22,21 @@ internal static class WordFrameNetIngest
         "XWFN",
     ];
 
+    private static readonly IngestSourceLayout Layout = new()
+    {
+        Files =
+        [
+            .. MappingFileNames.Select(IngestFileMatch.Name),
+            IngestFileMatch.Glob("*.map"),
+            IngestFileMatch.Glob("*.txt", name => name.Equals("README", StringComparison.OrdinalIgnoreCase)),
+            .. ExtensionlessMappingNames.Select(IngestFileMatch.Name),
+        ],
+        EcosystemDirs = [".", "WordFrameNet", "wordframenet", "WFN", "eXtendedWFN", "XWFN"],
+        RootDirectoryGlobs = ["WordFrameNet*"],
+        RootDirs = ["WordFrameNet", "WFN", "eXtendedWFN", "XWFN"],
+        SearchIngestRoots = true,
+    };
+
     internal readonly record struct WordFrameNetFileSpec(string Path, string Label, bool NativeFormat);
 
     internal static WordFrameNetFileSpec DescribeFile(string path)
@@ -40,45 +54,8 @@ internal static class WordFrameNetIngest
 
     internal static bool ExistsUnder(string ecosystemPath) => ResolvePaths(ecosystemPath).Any();
 
-    internal static IEnumerable<string> ResolvePaths(string ecosystemPath)
-    {
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var dir in DataDirs(ecosystemPath))
-        {
-            foreach (string path in MappingFilesIn(dir))
-            {
-                if (seen.Add(path))
-                    yield return path;
-            }
-        }
-    }
-
-    private static IEnumerable<string> MappingFilesIn(string dir)
-    {
-        if (!Directory.Exists(dir)) yield break;
-
-        foreach (string name in MappingFileNames)
-        {
-            string canonical = Path.Combine(dir, name);
-            if (File.Exists(canonical)) yield return canonical;
-        }
-
-        foreach (var file in Directory.EnumerateFiles(dir, "*.map"))
-            yield return file;
-
-        foreach (var file in Directory.EnumerateFiles(dir, "*.txt"))
-        {
-            string name = Path.GetFileName(file);
-            if (name.Equals("README", StringComparison.OrdinalIgnoreCase)) continue;
-            yield return file;
-        }
-
-        foreach (string name in ExtensionlessMappingNames)
-        {
-            string path = Path.Combine(dir, name);
-            if (File.Exists(path)) yield return path;
-        }
-    }
+    internal static IEnumerable<string> ResolvePaths(string ecosystemPath) =>
+        IngestInput.Locate(ecosystemPath, Layout);
 
     private static bool LooksLikeNativeWfn(string path)
     {
@@ -93,41 +70,6 @@ internal static class WordFrameNetIngest
         return false;
     }
 
-    private static IEnumerable<string> DataDirs(string ecosystemPath)
-    {
-        yield return ecosystemPath;
-
-        foreach (var sub in new[] { "WordFrameNet", "wordframenet", "WFN", "eXtendedWFN", "XWFN" })
-        {
-            string nested = Path.Combine(ecosystemPath, sub);
-            if (Directory.Exists(nested)) yield return nested;
-        }
-
-        foreach (string root in VaultRoots(ecosystemPath))
-        {
-            yield return root;
-
-            foreach (var dir in Directory.EnumerateDirectories(root, "WordFrameNet*"))
-                yield return dir;
-
-            foreach (var sub in new[] { "WordFrameNet", "WFN", "eXtendedWFN", "XWFN" })
-            {
-                string nested = Path.Combine(root, sub);
-                if (Directory.Exists(nested)) yield return nested;
-            }
-        }
-    }
-
-    private static IEnumerable<string> VaultRoots(string ecosystemPath)
-    {
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        string ingest = LaplaceInstall.ResolveIngestRoot();
-        if (seen.Add(ingest)) yield return ingest;
-
-        string platformDefault = OperatingSystem.IsWindows() ? @"D:\Data\Ingest" : "/vault/Data";
-        if (seen.Add(platformDefault)) yield return platformDefault;
-    }
 }
 
 internal sealed class WordFrameNetMultiFileStream : IMultiFileRecordStream<CategoryCorrespondenceRecord>

@@ -21,15 +21,8 @@ internal static class ChessReadEndpoints
             int? limit, int? offset, string? search, string? initial,
             ISubstrateClient substrate, CancellationToken ct) =>
         {
-            try
-            {
-                return Results.Json(await substrate.ChessPlayersAsync(
-                    limit ?? 50, offset ?? 0, search, initial, ct));
-            }
-            catch (SubstrateUnavailableException ex)
-            {
-                return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message);
-            }
+            return Results.Json(await substrate.ChessPlayersAsync(
+                limit ?? 50, offset ?? 0, search, initial, ct));
         })
         .WithTags("chess")
         .Produces<ChessPlayersResponse>()
@@ -38,18 +31,11 @@ internal static class ChessReadEndpoints
         app.MapGet("/v1/chess/players/{idHex}", async (
             string idHex, int? opponents, ISubstrateClient substrate, CancellationToken ct) =>
         {
-            try
-            {
-                var player = await substrate.ChessPlayerAsync(idHex, opponents ?? 25, ct);
-                return player is null
-                    ? EndpointJson.NotFound("player_not_found",
-                        $"'{idHex}' is not a player the substrate has witnessed at a board.")
-                    : Results.Json(player);
-            }
-            catch (SubstrateUnavailableException ex)
-            {
-                return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message);
-            }
+            var player = await substrate.ChessPlayerAsync(idHex, opponents ?? 25, ct);
+            return player is null
+                ? EndpointJson.NotFound("player_not_found",
+                    $"'{idHex}' is not a player the substrate has witnessed at a board.")
+                : Results.Json(player);
         })
         .WithTags("chess")
         .Produces<ChessPlayerResponse>()
@@ -59,17 +45,10 @@ internal static class ChessReadEndpoints
         app.MapGet("/v1/chess/players/{idHex}/games", async (
             string idHex, int? limit, int? offset, ISubstrateClient substrate, CancellationToken ct) =>
         {
-            try
-            {
-                var games = await substrate.ChessPlayerGamesAsync(idHex, limit ?? 25, offset ?? 0, ct);
-                return games is null
-                    ? EndpointJson.NotFound("player_not_found", $"'{idHex}' is not a 32-hex entity id.")
-                    : Results.Json(games);
-            }
-            catch (SubstrateUnavailableException ex)
-            {
-                return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message);
-            }
+            var games = await substrate.ChessPlayerGamesAsync(idHex, limit ?? 25, offset ?? 0, ct);
+            return games is null
+                ? EndpointJson.NotFound("player_not_found", $"'{idHex}' is not a 32-hex entity id.")
+                : Results.Json(games);
         })
         .WithTags("chess")
         .Produces<ChessGamesResponse>()
@@ -79,18 +58,11 @@ internal static class ChessReadEndpoints
         app.MapGet("/v1/chess/games/{idHex}/plies", async (
             string idHex, ISubstrateClient substrate, CancellationToken ct) =>
         {
-            try
-            {
-                var plies = await substrate.ChessGamePliesAsync(idHex, ct);
-                return plies is null
-                    ? EndpointJson.NotFound("game_not_found",
-                        $"'{idHex}' is not a game the substrate has witnessed.")
-                    : Results.Json(plies);
-            }
-            catch (SubstrateUnavailableException ex)
-            {
-                return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message);
-            }
+            var plies = await substrate.ChessGamePliesAsync(idHex, ct);
+            return plies is null
+                ? EndpointJson.NotFound("game_not_found",
+                    $"'{idHex}' is not a game the substrate has witnessed.")
+                : Results.Json(plies);
         })
         .WithTags("chess")
         .Produces<ChessGamePliesResponse>()
@@ -100,18 +72,11 @@ internal static class ChessReadEndpoints
         app.MapGet("/v1/chess/games/{idHex}", async (
             string idHex, ISubstrateClient substrate, CancellationToken ct) =>
         {
-            try
-            {
-                var game = await substrate.ChessGameAsync(idHex, ct);
-                return game is null
-                    ? EndpointJson.NotFound("game_not_found",
-                        $"'{idHex}' is not a game the substrate has witnessed.")
-                    : Results.Json(game);
-            }
-            catch (SubstrateUnavailableException ex)
-            {
-                return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message);
-            }
+            var game = await substrate.ChessGameAsync(idHex, ct);
+            return game is null
+                ? EndpointJson.NotFound("game_not_found",
+                    $"'{idHex}' is not a game the substrate has witnessed.")
+                : Results.Json(game);
         })
         .WithTags("chess")
         .Produces<ChessGameResponse>()

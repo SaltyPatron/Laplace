@@ -1031,6 +1031,27 @@ def emit_highway_perfcache(rel: dict, bin_out_dir: Path) -> None:
         "",
         "/* Bit position of each relation type in the 256-bit highway mask */",
     ]
+    # The mask is 256 bits wide (entities.highway_mask is bytea, 32 bytes -- verified
+    # against a live row: octet_length * 8 = 256). Bits are assigned by position in
+    # canon_set, and nothing bounded that position, so relation number 257 would have
+    # emitted `#define HIGHWAY_BIT_X 256u` -- a bit that cannot be set in a 256-bit mask
+    # and cannot be tested. No compile error, no runtime error: the relation would simply
+    # never participate in any mask-gated walk, silently, forever.
+    #
+    # MEASURED 2026-08-01: 207 relations occupy bits 0..206, leaving 49. Bits are assigned
+    # ALPHABETICALLY, so an addition renumbers every bit after it and owes a full reseed
+    # -- which means the wall arrives during a reseed campaign, the worst possible moment
+    # to discover it. Fail here instead, where the manifest is edited.
+    HIGHWAY_MASK_BITS = 256
+    if len(canon_set) > HIGHWAY_MASK_BITS:
+        raise SystemExit(
+            f"codegen-attestation-law: {len(canon_set)} governed relations exceed the "
+            f"{HIGHWAY_MASK_BITS}-bit highway mask. Bits are assigned alphabetically, so "
+            f"every relation past {HIGHWAY_MASK_BITS} silently gets a bit that cannot be "
+            f"set or tested. Widen entities.highway_mask (and every reader of it) or "
+            f"reduce the governed set -- do not let this generate."
+        )
+
     for bit_pos, name in enumerate(canon_set):
         lines.append(f"#define HIGHWAY_BIT_{name:<50} {bit_pos}u")
 

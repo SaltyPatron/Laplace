@@ -45,7 +45,7 @@ public sealed class PropBankDecomposer : ComposeDecomposer<XmlElement, PropBankS
         string ecosystemPath, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        string framesDir = DecomposerFileDiscovery.ResolveSubdir(
+        string framesDir = IngestInput.ResolveSubdir(
             ecosystemPath, "*.xml",
             Path.Combine("propbank-frames-main", "frames"), "frames");
         await foreach (var root in SharedXmlFramesetReader.ReadRootsAsync(

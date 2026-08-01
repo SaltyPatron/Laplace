@@ -34,7 +34,7 @@ public sealed class VerbNetDecomposer : ComposeDecomposer<XmlElement, VerbNetSou
         string ecosystemPath, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        string classDir = DecomposerFileDiscovery.ResolveSubdir(
+        string classDir = IngestInput.ResolveSubdir(
             ecosystemPath, "*.xml",
             Path.Combine("verbnet-master", "verbnet3.4"), "verbnet3.4");
         await foreach (var root in SharedXmlFramesetReader.ReadRootsAsync(

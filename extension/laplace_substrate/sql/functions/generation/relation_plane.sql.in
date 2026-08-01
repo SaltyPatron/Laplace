@@ -20,14 +20,14 @@ BEGIN
         IF p_vocab IS NULL THEN
             RETURN QUERY
             SELECT c.subject_id, c.object_id,
-                   (c.rating - glicko2_neutral_mu())::double precision / 1e9
+                   walk_edge_weight(c.rating, c.rd, c.witness_count)
             FROM consensus c
             WHERE c.type_id = v_type AND c.object_id IS NOT NULL;
         ELSE
             RETURN QUERY
             WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u)
             SELECT c.subject_id, c.object_id,
-                   (c.rating - glicko2_neutral_mu())::double precision / 1e9
+                   walk_edge_weight(c.rating, c.rd, c.witness_count)
             FROM v
             JOIN consensus c ON c.type_id = v_type AND c.subject_id = v.id
             JOIN v vo ON vo.id = c.object_id
@@ -75,7 +75,7 @@ BEGIN
     seq AS (
         SELECT ph.entity_id AS root, c.ordinal, c.entity_id AS tok
         FROM physicalities ph
-        JOIN entities e ON e.id = ph.entity_id AND e.tier >= 3
+        JOIN entities e ON e.id = ph.entity_id AND e.type_id IN (canonical_id('Sentence'), canonical_id('Document'))
         CROSS JOIN LATERAL public.laplace_trajectory_constituents(ph.trajectory) c
         WHERE ph.type = 1 AND ph.trajectory IS NOT NULL
     ),

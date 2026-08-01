@@ -20,12 +20,13 @@ CREATE OR REPLACE FUNCTION consensus_layer_plane_masked(
              WHERE bt.rank IS NOT NULL
          ),
          -- P5 Glicko-complete weight (doc 14 M5): signed, rd-discounted,
-         -- witness-saturated (see consensus_type_plane).
+         -- witness-saturated. walk_edge_weight IS the law; kappa resolved once
+         -- rather than per row.
+         kappa(k) AS (SELECT foundry_rd_kappa()),
          ranked AS (
              SELECT e.subject_id, e.object_id,
-                    (e.rating - glicko2_neutral_mu())::float8 / 1e9
-                      * exp(- foundry_rd_kappa() * e.rd::float8 / 1e9)
-                      * foundry_witness_sat(e.witness_count) AS w,
+                    walk_edge_weight(e.rating, e.rd, e.witness_count,
+                                     (SELECT k FROM kappa)) AS w,
                     e.rank AS rk
              FROM edges e
          ),

@@ -53,6 +53,16 @@ pg_compute_machine_tuning() {
   PG_TUNE_PDEG=$pdeg
   PG_TUNE_MWP=$mwp
   PG_TUNE_AVW=$avw
+  # MUST equal CpuTopologyCommands.EmitPgTuning's literal. That emitter is the
+  # AUTHORITY -- pg_apply_machine_tuning runs `cpu-topology --pg-tuning` first and only
+  # falls back to these formulas when it fails -- so a value changed here alone never
+  # reaches a cluster. PgTuningParityTests pins the pair.
+  #
+  # Measured 2026-07-31 on the 125GB host: 202 volume-forced checkpoints against 24 timed,
+  # i.e. one roughly every 9 minutes against a 30-minute target, each re-arming full-page
+  # writes. That is evidence 32GB is small for this write rate. It is NOT evidence that a
+  # larger value is better here, which needs a controlled run, so the number stays where
+  # policy put it and the measurement is recorded rather than acted on.
   PG_TUNE_MAX_WAL=32GB
   PG_TUNE_MIN_WAL=4GB
   PG_TUNE_IO_CONC=256

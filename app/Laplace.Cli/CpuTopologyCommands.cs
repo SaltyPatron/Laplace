@@ -123,8 +123,16 @@ internal static class CpuTopologyCommands
         // perfcache map; connections are budgeted, not free. Memory ceiling
         // arithmetic and the 2026-07-15 incident live in doc 28.
         w.WriteLine("ALTER SYSTEM SET max_connections = 60;");
-        // The two-axis partitioned substrate holds ~220 leaves (13 entity +
-        // 64 physicality + ~145 attestation) plus their indexes/toast: one
+        // MEASURED 2026-08-01 on a freshly migrated cluster: 479 partitions and 4,456
+        // total relations in the laplace schema — more than double the ~220 this was
+        // sized against, because the leaf count tracks relation_types.toml (207 relations)
+        // and that file grows. The setting still holds: it sizes a SHARED pool of
+        // max_locks_per_transaction x max_connections = 61,440 slots, not a per-transaction
+        // ceiling, so 4,456 objects sit well inside it. Recording the real number because
+        // the old one was stale and nothing re-derives it — if the leaf count ever
+        // approaches the pool, this comment is the only thing that would have warned.
+        //
+        // The two-axis partitioned substrate holds those leaves plus indexes/toast: one
         // CREATE EXTENSION or one COPY-to-parent transaction locks hundreds
         // of objects, and parallel test fixtures / apply lanes run several
         // such transactions at once. The PG default (64) exhausts the shared
@@ -142,7 +150,40 @@ internal static class CpuTopologyCommands
         w.WriteLine("ALTER SYSTEM SET autovacuum_vacuum_cost_delay = 0;");
         w.WriteLine("ALTER SYSTEM SET huge_pages = try;");
         w.WriteLine("ALTER SYSTEM SET io_method = worker;");
+
+        // STATEMENT-LEVEL PROFILING. Nothing on this cluster could report execution time
+        // per statement before this, so where a seed spends its time was argued from wait
+        // events for the life of the project -- and several confident diagnoses survived
+        // only because no instrument could contradict them.
+        //
+        // THE SYNTAX IS LOAD-BEARING. shared_preload_libraries is GUC_LIST_QUOTE: passing
+        // 'a,b' as ONE string literal makes ALTER SYSTEM store it as a single list element,
+        // written back quoted as one identifier. On 2026-08-01 that took the cluster down
+        // hard -- the postmaster looped 80 times on
+        //   FATAL: could not access file "laplace_substrate,pg_stat_statements"
+        // and recovery needed root, because the data directory is 0700 owned by the runner
+        // and SQL is unreachable when the server will not start. Each library MUST be its
+        // own value in the list.
+        //
+        // VERIFY BEFORE RESTARTING. pg_file_settings reports how the file actually parses
+        // without starting anything:
+        //   SELECT setting, error FROM pg_file_settings WHERE name='shared_preload_libraries'
+        // The correct form reads back as [laplace_substrate, pg_stat_statements]; the broken
+        // one reads back as a single quoted element. applied=false is EXPECTED here -- this
+        // is a postmaster-start parameter, so it differs from the running value until a
+        // bounce. pipeline.sh checks this before it will restart.
+        //
+        // laplace_substrate must stay first: the extension image is pinned in the postmaster
+        // and the perfcache blobs are mmap'd at preload.
+        w.WriteLine("ALTER SYSTEM SET shared_preload_libraries = 'laplace_substrate', 'pg_stat_statements';");
+        w.WriteLine("ALTER SYSTEM SET pg_stat_statements.track = 'all';");
+        w.WriteLine("ALTER SYSTEM SET pg_stat_statements.max = 10000;");
+        // Planning time separately from execution: MEASURED 5.760 ms planning against
+        // 21.053 ms execution on one descent probe, and the ingest path leaves
+        // MaxAutoPrepare at 0, so that tax is paid per batch per tier. Without this the
+        // largest suspected overhead is invisible in the view added to find it.
+        w.WriteLine("ALTER SYSTEM SET pg_stat_statements.track_planning = on;");
         w.WriteLine("SELECT pg_reload_conf();");
     }
 }
-
+

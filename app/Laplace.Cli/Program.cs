@@ -58,7 +58,7 @@ internal static class Program
         // The DI bridge (GH #603): the shared ops logging factory is available to any command
         // that wants a constructor-injected ILogger; the existing static composition root
         // (CliRuntime.Services) remains for the seed decomposer resolver.
-        services.AddSingleton<ILoggerFactory>(_ => LaplaceLogging.ConsoleAndFile("cli"));
+        services.AddSingleton<ILoggerFactory>(_ => CliRuntime.LoggerFactory);
         services.AddSingleton(typeof(ILogger<>), typeof(Logger<>));
 
         var app = new CommandApp(new DiTypeRegistrar(services));

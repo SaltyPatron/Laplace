@@ -136,13 +136,16 @@ public class ModelTokenEdgeETLTests
 
             using var _ = PlanesMode("structure");
             var etl = new ModelTokenEdgeETL(dir, manifest, tokens, Source);
-            var appearsIn = RelationTypeRegistry.RelationTypeId("APPEARS_IN");
+            // An attention circuit testifies with its OWN relation (ATTENDS), not a
+            // blanket APPEARS_IN — APPEARS_IN at a coordinate is the factors lane's
+            // slice anatomy link.
+            var attends = RelationTypeRegistry.RelationTypeId("ATTENDS");
             var map = new Dictionary<int, long>();
             await foreach (var c in etl.EmitAsync(1, null, DecomposerOptions.Default))
             {
                 foreach (var a in c.Attestations)
                 {
-                    if (a.TypeId != appearsIn) continue;
+                    if (a.TypeId != attends) continue;
                     int si = Array.IndexOf(ent, a.SubjectId);
                     if (si >= 0) map[si] = a.SumScoreFp1e9 ?? a.ScoreFp1e9;
                 }
@@ -156,10 +159,10 @@ public class ModelTokenEdgeETLTests
     }
 
     [Fact]
-    public async Task StructureMode_DepositsAppearsInOccurrences_OnSharedCoordinates()
+    public async Task StructureMode_DepositsPlaneRelationTestimony_OnSharedCoordinates()
     {
         // Default mode. A 1-layer/1-head QK model must deposit:
-        //   (token, APPEARS_IN, coordinate) occurrences scored by the native tiles,
+        //   (token, ATTENDS, coordinate) testimony scored by the native tiles,
         //   the coordinate entity composed from plane anchor + layer scalar + head
         //   scalar (Merkle — no model name near any id), CONTAINS/PRECEDES structure
         //   scoped by context = coordinate, and NO token-pair rows.
@@ -244,6 +247,7 @@ public class ModelTokenEdgeETLTests
 
             var atts = changes.SelectMany(c => c.Attestations).ToList();
             var entities = changes.SelectMany(c => c.Entities).ToList();
+            var physicalities = changes.SelectMany(c => c.Physicalities).ToList();
 
             var appearsIn = RelationTypeRegistry.RelationTypeId("APPEARS_IN");
             var attends = RelationTypeRegistry.RelationTypeId("ATTENDS");
@@ -263,18 +267,37 @@ public class ModelTokenEdgeETLTests
                 ]),
                 coord);
 
-            var occ = atts.Where(a => a.TypeId == appearsIn).ToList();
+            var occ = atts.Where(a => a.TypeId == attends).ToList();
             Assert.NotEmpty(occ);
             var tokenSet = new HashSet<Hash128>(ent);
             Assert.All(occ, a =>
             {
                 Assert.Contains(a.SubjectId, tokenSet);
                 Assert.Equal(coord, a.ObjectId);
-                Assert.True((a.SumScoreFp1e9 ?? a.ScoreFp1e9) > 0, "occurrence must carry the native tile score");
+                Assert.True((a.SumScoreFp1e9 ?? a.ScoreFp1e9) > 0, "testimony must carry the native tile score");
             });
 
-            // No token-pair rows in structure mode.
-            Assert.DoesNotContain(atts, a => a.TypeId == attends);
+            // No token-pair rows in structure mode: every ATTENDS row objects on the
+            // coordinate, never on another token (asserted above), and the lane no
+            // longer manufactures APPEARS_IN — that relation at a coordinate is the
+            // factors lane's slice anatomy link (model_circuit_slices reads it).
+            Assert.DoesNotContain(atts, a => a.TypeId == appearsIn);
+
+            // Pillar 3a: the circuit's WHOLE assertion is the physicality trajectory
+            // — one row per circuit, every token, exactly invertible — and the
+            // testimony above is a bounded prefix of it, not a second copy.
+            var phys = Assert.Single(physicalities, p => p.EntityId == coord);
+            Assert.Equal(PhysicalityType.Projection, phys.Type);
+            Assert.Equal(n, phys.NConstituents);
+            Assert.Equal(n * 4, phys.TrajectoryXyzm!.Length);
+            Assert.Equal(
+                ent.OrderBy(x => x.Hi).ThenBy(x => x.Lo).ToArray(),
+                Trajectory.Constituents(phys.TrajectoryXyzm).OrderBy(x => x.Hi).ThenBy(x => x.Lo).ToArray());
+
+            // Testimony is ranked: the emitted rows are the trajectory's leading
+            // salience prefix, in order.
+            var walk = Trajectory.Constituents(phys.TrajectoryXyzm);
+            Assert.Equal(walk.Take(occ.Count).ToArray(), occ.Select(a => a.SubjectId).ToArray());
 
             // Coordinate entity + constituents, typed correctly.
             Assert.Contains(entities, e => e.Id == coord && e.TypeId == ModelCoordinates.CoordinateTypeId);
@@ -293,6 +316,181 @@ public class ModelTokenEdgeETLTests
             Assert.All(containsRows, a => Assert.Equal(coord, a.ContextId));
             var precedesRows = atts.Where(a => a.TypeId == precedes && a.ContextId == coord).ToList();
             Assert.Equal(2, precedesRows.Count);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    // The row-count regression. Structure mode used to emit one attestation per
+    // VOCABULARY TOKEN per circuit, so the deposit scaled V × circuits: TinyLlama
+    // 1,430 × 32,000 = 45.8M rows, Phi-2 2,080 × 51,200 = 106.5M. Both model seeds
+    // failed on it. The circuit's whole assertion now lives in ONE physicality
+    // trajectory and the attestations are a bounded testimony prefix, so the deposit
+    // scales with CIRCUITS alone.
+    //
+    // Measured, not asserted from a formula: two real emissions differing only in
+    // vocabulary size must produce byte-identical row counts. A Phi-2-scale run
+    // needs a 5 GB checkpoint and hours of GEMM, so the Phi-2 line is a PROJECTION
+    // — the measured per-circuit row cost (scale-invariant: three entities, one
+    // physicality, the CONTAINS/PRECEDES structure and k testimony rows, none of
+    // which depend on layer/head/vocab magnitude) times Phi-2's circuit count. That
+    // is stated plainly rather than dressed up as a measurement.
+    [Fact]
+    public async Task StructureMode_RowCount_ScalesWithCircuits_NotVocabulary()
+    {
+        const int layers = 2, heads = 1, d = 2;
+        int k = ModelTokenEdgeETL.TestimonyWidthPerCircuit;
+
+        // Both vocabularies exceed k so the cap is actually exercised.
+        var small = await CountRows(vocab: k + 44, layers: layers, d: d);
+        var large = await CountRows(vocab: 2 * (k + 44), layers: layers, d: d);
+
+        Assert.True(small.Attestations > 0, "the lane must still testify");
+        Assert.Equal(small.Total, large.Total);
+        Assert.Equal(small.Attestations, large.Attestations);
+
+        // Per layer: attention head circuits + OV head circuits + one dense MLP.
+        int circuits = layers * (2 * heads + 1);
+        Assert.Equal(circuits, small.Physicalities);
+
+        // Testimony is capped at k per circuit, whatever the vocabulary holds.
+        Assert.Equal(circuits * k, small.Testimony);
+
+        // The trajectory keeps the WHOLE assertion — nothing was truncated, it moved
+        // into the geometry (Pillar 3a).
+        Assert.Equal(k + 44, small.MaxTrajectoryConstituents);
+        Assert.Equal(2 * (k + 44), large.MaxTrajectoryConstituents);
+
+        double perCircuit = (double)small.Total / circuits;
+        // Phi-2: 32 layers x 32 heads x (attention + OV) + 32 dense MLP circuits.
+        const int phi2Circuits = 32 * (2 * 32 + 1);
+        double phi2Rows = perCircuit * phi2Circuits;
+        Assert.True(phi2Rows < 1e6,
+            $"Phi-2-scale deposit projects to {phi2Rows:N0} rows "
+            + $"({perCircuit:N1}/circuit x {phi2Circuits} circuits); the bound is 1e6. "
+            + "Before the fix this was 2,080 x 51,200 = 106,496,000 attestations alone.");
+    }
+
+    private readonly record struct RowCounts(
+        int Entities, int Physicalities, int Attestations, int Testimony,
+        int MaxTrajectoryConstituents)
+    {
+        public int Total => Entities + Physicalities + Attestations;
+    }
+
+    private static async Task<RowCounts> CountRows(int vocab, int layers, int d)
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "laplace-rows-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var embed = new float[vocab * d];
+            for (int i = 0; i < embed.Length; i++) embed[i] = 1f + (i % 17) * 0.25f;
+            float[] Eye() => new float[] { 1, 0, 0, 1 };
+
+            var tensors = new List<TensorSpec>
+            {
+                Tensor("model.embed_tokens.weight", new[] { vocab, d }, embed),
+            };
+            var roles = new List<TensorRole>
+            {
+                new("model.embed_tokens.weight", new[] { vocab, d }, "F32",
+                    TensorRoleKind.Embedding, -1, -1),
+            };
+            for (int L = 0; L < layers; L++)
+            {
+                foreach (var (suffix, kind) in new (string, TensorRoleKind)[]
+                {
+                    ("self_attn.q_proj", TensorRoleKind.AttnQ),
+                    ("self_attn.k_proj", TensorRoleKind.AttnK),
+                    ("self_attn.v_proj", TensorRoleKind.AttnV),
+                    ("self_attn.o_proj", TensorRoleKind.AttnO),
+                    ("mlp.up_proj", TensorRoleKind.MlpUp),
+                    ("mlp.gate_proj", TensorRoleKind.MlpGate),
+                    ("mlp.down_proj", TensorRoleKind.MlpDown),
+                })
+                {
+                    string name = $"model.layers.{L}.{suffix}.weight";
+                    tensors.Add(Tensor(name, new[] { d, d }, Eye()));
+                    roles.Add(new(name, new[] { d, d }, "F32", kind, L, -1));
+                }
+            }
+            WriteSafetensors(Path.Combine(dir, "model.safetensors"), tensors);
+
+            var tokens = new LlamaTokenizerParser.TokenRecord[vocab];
+            for (int i = 0; i < vocab; i++)
+                tokens[i] = new LlamaTokenizerParser.TokenRecord
+                {
+                    TokenId = i,
+                    RawToken = $"r{i}",
+                    CanonicalBytes = Encoding.UTF8.GetBytes($"r{i}"),
+                    EntityId = Hash128.OfCanonical($"substrate/test/rows/tok/{i}"),
+                    Tier = 2,
+                    IsByteLevel = false,
+                    Role = TokenRole.None,
+                    ContentX = double.NaN,
+                    ContentY = double.NaN,
+                    ContentZ = double.NaN,
+                    ContentM = double.NaN,
+                    HasContentCoord = false,
+                };
+
+            var cfg = new ModelConfig
+            {
+                ModelType = "llama",
+                Architecture = "LlamaForCausalLM",
+                VocabSize = vocab,
+                HiddenSize = d,
+                NumLayers = layers,
+                NumHeads = 1,
+                NumKvHeads = 1,
+                HeadDim = d,
+                IntermediateSize = d,
+                NumExperts = 0,
+                TieWordEmbeddings = false,
+                QkNorm = false,
+                RopeTheta = 10000,
+                NormEps = 1e-5,
+                MlaQLoraRank = 0,
+                MlaKvLoraRank = 0,
+                QkRopeHeadDim = 0,
+                QkNopeHeadDim = 0,
+                VHeadDim = 0,
+                RecipeEntityId = SubstrateCanonicalIds.Of("test", "rows", "recipe"),
+                CanonicalJson = Encoding.UTF8.GetBytes("{}"),
+            };
+            var manifest = new ModelManifest
+            {
+                Config = cfg,
+                Roles = roles,
+                Modality = Modality.Text,
+                Coverage = Coverage.Full,
+                ModelName = "rows-model",
+            };
+
+            var planeRelations = new HashSet<Hash128>
+            {
+                RelationTypeRegistry.RelationTypeId("ATTENDS"),
+                RelationTypeRegistry.RelationTypeId("OV_RELATES"),
+                RelationTypeRegistry.RelationTypeId("COMPLETES_TO"),
+            };
+
+            using var _ = PlanesMode("structure");
+            var etl = new ModelTokenEdgeETL(dir, manifest, tokens, Source);
+            int ents = 0, phys = 0, atts = 0, testimony = 0, maxTraj = 0;
+            await foreach (var c in etl.EmitAsync(1, null, DecomposerOptions.Default))
+            {
+                ents += c.Entities.Length;
+                phys += c.Physicalities.Length;
+                atts += c.Attestations.Length;
+                foreach (var a in c.Attestations)
+                    if (planeRelations.Contains(a.TypeId)) testimony++;
+                foreach (var p in c.Physicalities)
+                    if (p.NConstituents > maxTraj) maxTraj = p.NConstituents;
+            }
+            return new RowCounts(ents, phys, atts, testimony, maxTraj);
         }
         finally
         {

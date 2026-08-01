@@ -130,7 +130,7 @@ internal static class ChessCommands
         bool seedOpenings = HasFlag(args, "--openings");
         bool record = !HasFlag(args, "--no-record");
 
-        await using var ds = new NpgsqlDataSourceBuilder(ChessEngineService.ResolveConnString()).Build();
+        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest);
         IRootBias? bias = mode switch
         {
             "fold" => new SubstructureFoldBias(ds, cpPerPoint, cap),
@@ -203,7 +203,7 @@ internal static class ChessCommands
             var m = new ChessModality();
             var b = new SubstrateChangeBuilder(ChessVocabulary.ReviewSourceId, "chess/review");
             int n = ChessReviewIngest.IngestPath(b, m, path, depth);
-            await using var ds = new NpgsqlDataSourceBuilder(ChessEngineService.ResolveConnString()).Build();
+            await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest);
             var inner = new NpgsqlSubstrateWriter(ds);
             await using var acc = new ConsensusAccumulatingWriter(inner, ds);
             await ((ISubstrateWriter)acc).ApplyAsync(b.Build(), System.Threading.CancellationToken.None);
@@ -236,7 +236,7 @@ internal static class ChessCommands
     private static async Task<int> LearnedPstAsync(string[] args)
     {
         string pieces = ArgStr(args, "--piece", LearnedPst.WhitePieces).ToUpperInvariant();
-        await using var ds = new NpgsqlDataSourceBuilder(ChessEngineService.ResolveConnString()).Build();
+        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest);
         var learned = LearnedPst.ReadWhite(ds);
         Console.WriteLine($"learned piece-square values (rating-point deviation from a draw; >0 = good for the mover), db={LaplaceInstall.RedactConnectionString(ChessEngineService.ResolveConnString())}");
 
@@ -305,7 +305,7 @@ internal static class ChessCommands
         var book = seedOpenings ? OpeningSeed.Fens(openingsDir, plies: ArgInt(args, "--openings-plies", 10)) : null;
 
         bool blend = HasFlag(args, "--blend");
-        await using var ds = new NpgsqlDataSourceBuilder(ChessEngineService.ResolveConnString()).Build();
+        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest);
         var (mg, eg) = LearnedPst.BuildTables(ds, scale);
 
 
@@ -482,7 +482,7 @@ internal static class ChessCommands
         {
             try
             {
-                ds = new NpgsqlDataSourceBuilder(ChessEngineService.ResolveConnString()).Build();
+                ds = LaplaceDataSource.Create(SubstrateAccess.Ingest);
                 bias = new SubstructureFoldBias(ds);
                 try { (mg, eg) = LearnedPst.BuildTables(ds, 1.0); (mg, eg) = Evaluation.BlendPeStoWith(mg, eg); }
                 catch { }

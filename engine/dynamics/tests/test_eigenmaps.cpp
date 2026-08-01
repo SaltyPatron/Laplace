@@ -156,3 +156,63 @@ TEST(LaplaceDynamicsEigenmaps, DeterministicOnIdenticalInput) {
             << "non-determinism at element " << i;
     }
 }
+
+// A negative weight is a REFUTATION, not an affinity of equal magnitude. Before this was
+// pinned, the sparse entry point took fabs() per triplet, so a refuted edge entered the
+// Laplacian as a claim of similarity -- and since duplicate (r,c) triplets are summed,
+// +w and -w on the same pair reinforced to 2w instead of cancelling. Refuted edges must
+// contribute nothing at all.
+TEST(LaplaceDynamicsEigenmaps, RefutedEdgesAreNotAffinity) {
+    constexpr int N = 40;
+    constexpr std::size_t TARGET = 3;
+    std::vector<int> rows, cols; std::vector<double> w, deg;
+    make_path_graph(N, rows, cols, w, deg);
+
+    std::vector<double> baseline(static_cast<std::size_t>(N) * TARGET);
+    ASSERT_EQ(0, laplacian_eigenmaps_from_sparse_graph(
+        rows.data(), cols.data(), w.data(), rows.size(),
+        static_cast<std::size_t>(N), TARGET, baseline.data()));
+
+    // Same graph, plus a strongly refuted long-range edge in both directions.
+    std::vector<int> rows2 = rows, cols2 = cols;
+    std::vector<double> w2 = w;
+    rows2.push_back(0);      cols2.push_back(N - 1); w2.push_back(-25.0);
+    rows2.push_back(N - 1);  cols2.push_back(0);     w2.push_back(-25.0);
+
+    std::vector<double> refuted(static_cast<std::size_t>(N) * TARGET);
+    ASSERT_EQ(0, laplacian_eigenmaps_from_sparse_graph(
+        rows2.data(), cols2.data(), w2.data(), rows2.size(),
+        static_cast<std::size_t>(N), TARGET, refuted.data()));
+
+    // Refutation contributed no affinity, so the embedding is unchanged. Under fabs()
+    // this edge would have closed the path into a ring and moved every coordinate.
+    for (std::size_t i = 0; i < static_cast<std::size_t>(N) * TARGET; ++i) {
+        EXPECT_NEAR(std::abs(baseline[i]), std::abs(refuted[i]), 1e-9)
+            << "a refuted edge changed the embedding at element " << i;
+    }
+
+    // And a claim cancelled by an equal refutation on the same pair must not reinforce.
+    std::vector<int> rows3 = rows, cols3 = cols;
+    std::vector<double> w3 = w;
+    rows3.push_back(0); cols3.push_back(N - 1); w3.push_back(3.0);
+    rows3.push_back(0); cols3.push_back(N - 1); w3.push_back(-3.0);
+
+    std::vector<double> mixed(static_cast<std::size_t>(N) * TARGET);
+    ASSERT_EQ(0, laplacian_eigenmaps_from_sparse_graph(
+        rows3.data(), cols3.data(), w3.data(), rows3.size(),
+        static_cast<std::size_t>(N), TARGET, mixed.data()));
+    // The surviving +3.0 is real affinity, so the embedding SHOULD move -- what must not
+    // happen is the -3.0 adding another 3.0 of similarity on top of it.
+    std::vector<int> rows4 = rows, cols4 = cols;
+    std::vector<double> w4 = w;
+    rows4.push_back(0); cols4.push_back(N - 1); w4.push_back(3.0);
+    std::vector<double> positiveOnly(static_cast<std::size_t>(N) * TARGET);
+    ASSERT_EQ(0, laplacian_eigenmaps_from_sparse_graph(
+        rows4.data(), cols4.data(), w4.data(), rows4.size(),
+        static_cast<std::size_t>(N), TARGET, positiveOnly.data()));
+
+    for (std::size_t i = 0; i < static_cast<std::size_t>(N) * TARGET; ++i) {
+        EXPECT_NEAR(std::abs(mixed[i]), std::abs(positiveOnly[i]), 1e-9)
+            << "a refutation reinforced the claim it contradicts, at element " << i;
+    }
+}

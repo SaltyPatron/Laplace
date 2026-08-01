@@ -134,84 +134,26 @@ internal static class PredicateMatrixIngest
         return lines > 1 ? lines - 1 : null;
     }
 
+    private static readonly string[] UnpackDirs = ["PredicateMatrix", "predicate-matrix", "PredicateMatrix.v1.3"];
+
+    private static readonly IngestSourceLayout Layout = new()
+    {
+        // Canonical name first: SemLinkDecomposer ingests the FIRST path only, so the
+        // versioned siblings the glob also matches must not outrank PredicateMatrix.txt.
+        Files = [IngestFileMatch.Name("PredicateMatrix.txt"), IngestFileMatch.Glob("PredicateMatrix*.txt")],
+        EcosystemDirs = [".", "instances", Path.Combine("semlink-master", "instances"), .. UnpackDirs],
+        RootDirs = UnpackDirs,
+        NestedDirs = UnpackDirs,
+        SearchIngestRoots = true,
+        IncludeEcosystemParent = true,
+    };
+
     internal static bool ExistsUnder(string ecosystemPath) => ResolvePaths(ecosystemPath).Any();
 
-    internal static bool ExistsLocally(string dir) => PredicateMatrixFilesIn(dir).Any();
+    internal static bool ExistsLocally(string dir) => IngestInput.FilesIn(dir, Layout).Any();
 
-    internal static IEnumerable<string> ResolvePaths(string ecosystemPath)
-    {
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var dir in DataDirs(ecosystemPath))
-        {
-            foreach (string path in PredicateMatrixFilesIn(dir))
-            {
-                if (seen.Add(path))
-                    yield return path;
-            }
-        }
-    }
-
-    private static IEnumerable<string> PredicateMatrixFilesIn(string dir)
-    {
-        if (!Directory.Exists(dir)) yield break;
-
-        string canonical = Path.Combine(dir, "PredicateMatrix.txt");
-        if (File.Exists(canonical)) yield return canonical;
-
-        foreach (var file in Directory.EnumerateFiles(dir, "PredicateMatrix*.txt"))
-        {
-            if (!file.Equals(canonical, StringComparison.OrdinalIgnoreCase))
-                yield return file;
-        }
-
-        foreach (var sub in new[] { "PredicateMatrix", "predicate-matrix", "PredicateMatrix.v1.3" })
-        {
-            string nestedDir = Path.Combine(dir, sub);
-            if (!Directory.Exists(nestedDir)) continue;
-
-            string nested = Path.Combine(nestedDir, "PredicateMatrix.txt");
-            if (File.Exists(nested)) yield return nested;
-
-            foreach (var file in Directory.EnumerateFiles(nestedDir, "PredicateMatrix*.txt"))
-            {
-                if (!file.Equals(nested, StringComparison.OrdinalIgnoreCase))
-                    yield return file;
-            }
-        }
-    }
-
-    private static IEnumerable<string> DataDirs(string ecosystemPath)
-    {
-        yield return ecosystemPath;
-        yield return Path.Combine(ecosystemPath, "instances");
-        yield return Path.Combine(ecosystemPath, "semlink-master", "instances");
-        yield return Path.Combine(ecosystemPath, "PredicateMatrix");
-        yield return Path.Combine(ecosystemPath, "predicate-matrix");
-        yield return Path.Combine(ecosystemPath, "PredicateMatrix.v1.3");
-
-        foreach (string root in VaultRoots(ecosystemPath))
-        {
-            yield return root;
-            yield return Path.Combine(root, "PredicateMatrix");
-            yield return Path.Combine(root, "predicate-matrix");
-            yield return Path.Combine(root, "PredicateMatrix.v1.3");
-        }
-    }
-
-    private static IEnumerable<string> VaultRoots(string ecosystemPath)
-    {
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        string ingest = LaplaceInstall.ResolveIngestRoot();
-        if (seen.Add(ingest)) yield return ingest;
-
-        string platformDefault = OperatingSystem.IsWindows() ? @"D:\Data\Ingest" : "/vault/Data";
-        if (seen.Add(platformDefault)) yield return platformDefault;
-
-        string? parent = Path.GetDirectoryName(Path.GetFullPath(ecosystemPath));
-        if (!string.IsNullOrEmpty(parent) && seen.Add(parent))
-            yield return parent;
-    }
+    internal static IEnumerable<string> ResolvePaths(string ecosystemPath) =>
+        IngestInput.Locate(ecosystemPath, Layout);
 
     private static async IAsyncEnumerable<string> ReadLinesAsync(
         string path, [EnumeratorCancellation] CancellationToken ct)

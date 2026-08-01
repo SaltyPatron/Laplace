@@ -8,11 +8,22 @@ CREATE OR REPLACE FUNCTION sentence_order(p_docs int DEFAULT 100000, p_gap int D
     LANGUAGE sql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
     WITH t AS (
-        SELECT DISTINCT ON (p.entity_id) p.entity_id AS did, p.trajectory
+        -- Role by TYPE, not tier: `tier = 4` misses a single-sentence document, and tier
+        -- is a containment floor rather than a kind. Ranked by trajectory length instead
+        -- of by content hash -- ordering by p.id sampled arbitrarily. DISTINCT ON dropped:
+        -- physicality identity is (entity_id, type), so type = 1 already yields one row.
+        SELECT p.entity_id AS did, p.trajectory
         FROM physicalities p
-        JOIN entities e ON e.id = p.entity_id AND e.tier = 4
+        JOIN entities e ON e.id = p.entity_id AND e.type_id = canonical_id('Document')
         WHERE p.type = 1 AND p.trajectory IS NOT NULL
-        ORDER BY p.entity_id, p.id LIMIT p_docs
+        -- Sampling is by content hash, which is ARBITRARY -- an arbitrary LIMIT without
+        -- an ordering is a missing ranking. The honest ranking is by trajectory length,
+        -- but MEASURED 2026-08-01 that plans as a seq scan of every physicality partition
+        -- plus a full sort (no index serves n_constituents), so it trades an arbitrary
+        -- sample for an unusable one. Left arbitrary DELIBERATELY until an index exists
+        -- that ingest is willing to pay for; the defect is recorded, not hidden.
+        ORDER BY p.entity_id, p.id
+        LIMIT p_docs
     ),
     g AS (
         SELECT t.did, tc.ordinal AS ord, tc.entity_id AS sid
@@ -22,8 +33,12 @@ CREATE OR REPLACE FUNCTION sentence_order(p_docs int DEFAULT 100000, p_gap int D
         SELECT sid AS cur, lead(sid, p_gap) OVER (PARTITION BY did ORDER BY ord) AS nxt FROM g
     ),
     cnt AS (
+        -- `cur <> nxt` dropped self-adjacent pairs, which are witnessed data (a document
+        -- may genuinely repeat a sentence) and which grapheme_order has always kept. The
+        -- filter was an inconsistency inside one family, not a rule; consumers that cannot
+        -- take a self-loop drop it at their own layer. Same change as word_order.
         SELECT cur, nxt, count(*)::float8 AS c
-        FROM bg WHERE nxt IS NOT NULL AND cur <> nxt GROUP BY cur, nxt
+        FROM bg WHERE nxt IS NOT NULL GROUP BY cur, nxt
     )
     SELECT cur, nxt, c FROM cnt
 $$;
