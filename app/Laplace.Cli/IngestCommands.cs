@@ -473,6 +473,33 @@ internal static class IngestCommands
             CliRuntime.Decomposers.Resolve("parquet"), path, skipLayerCheck: true, cli, skipSourceCompletion: true);
     }
 
+    /// <summary>
+    /// Line-delimited formats where the mean line length IS the record size. Deliberately a
+    /// whitelist: measuring an XML or Parquet file this way yields a number with no relation
+    /// to a record, and sizing a batch from it would be worse than the declared constant.
+    /// </summary>
+    private static readonly string[] LineDelimitedExtensions =
+        [".jsonl", ".ndjson", ".csv", ".tsv", ".tab", ".conllu", ".txt"];
+
+    private static IngestSourceProfile ApplyMeasuredRecordSize(
+        IngestSourceProfile profile, string? path, string sourceName)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return profile;
+        string ext = Path.GetExtension(path);
+        if (!LineDelimitedExtensions.Contains(ext, StringComparer.OrdinalIgnoreCase))
+            return profile;
+
+        int measured = IngestSizing.MeasureBytesPerRecord(
+            path, fallback: profile.EstBytesPerRecord);
+        if (measured == profile.EstBytesPerRecord) return profile;
+
+        Console.Error.WriteLine(
+            $"ingest_record_size: source={sourceName} file={Path.GetFileName(path)} "
+            + $"declared={profile.EstBytesPerRecord} measured={measured} "
+            + $"ratio={(double)profile.EstBytesPerRecord / measured:F2}x — sizing from the file");
+        return profile with { EstBytesPerRecord = measured };
+    }
+
     private static IngestRunOptions BuildIngestOptions(
         Stopwatch sw, string sourceName, bool skipLayerCheck, string? ecosystemPath,
         IngestCliArgs? cli = null, bool skipSourceCompletion = false,
@@ -512,6 +539,22 @@ internal static class IngestCommands
             long.TryParse(Environment.GetEnvironmentVariable("LAPLACE_INGEST_MAX_UNITS"),
                 out var mu) && mu > 0 ? mu : 0;
         var profile = sizingProfile ?? IngestSourceProfile.Default;
+        // MEASURE the record size from the file in hand instead of trusting the per-source
+        // constant. EstBytesPerRecord is the DENOMINATOR in ResolveRecordBatch
+        // (TargetBytesPerBatch / estBytesPerRecord), so a wrong value silently halves or
+        // quadruples every batch for the whole run.
+        //
+        // The constants are demonstrably wrong, and worse, one constant cannot be right for
+        // one source: MEASURED 2026-08-01, WiktionaryDecomposer ingests BOTH
+        // raw-wiktextract-data.jsonl at 6,158 bytes/record AND
+        // kaikki.org-dictionary-English.jsonl at 26,719 -- a 4.3x spread behind a single
+        // IngestSourceProfile.Wiktionary. Whatever number sits in that constant is badly
+        // wrong for one of the two files. Only the file itself knows.
+        //
+        // Guarded to line-delimited formats: for XML or Parquet the mean LINE length is not
+        // the record size, and sizing from it would be worse than the constant. Anything
+        // else keeps the declared profile untouched.
+        profile = ApplyMeasuredRecordSize(profile, ecosystemPath, sourceName);
         var sized = IngestSizing.ResolveForSource(profile);
         sized.Log(sourceName);
         int batch = sized.RecordBatchSize;

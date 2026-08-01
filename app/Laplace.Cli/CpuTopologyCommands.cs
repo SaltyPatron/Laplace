@@ -151,18 +151,38 @@ internal static class CpuTopologyCommands
         w.WriteLine("ALTER SYSTEM SET huge_pages = try;");
         w.WriteLine("ALTER SYSTEM SET io_method = worker;");
 
-        // NO shared_preload_libraries HERE. On 2026-08-01 this emitted
-        // ALTER SYSTEM SET shared_preload_libraries = 'laplace_substrate,pg_stat_statements'
-        // and the postmaster then FAILED TO START, looping 80 times on
-        //   FATAL: could not access file "laplace_substrate,pg_stat_statements"
-        // -- the value was taken as one filename, not a list. The cluster went down hard
-        // and could only be recovered by editing postgresql.auto.conf as root.
+        // STATEMENT-LEVEL PROFILING. Nothing on this cluster could report execution time
+        // per statement before this, so where a seed spends its time was argued from wait
+        // events for the life of the project -- and several confident diagnoses survived
+        // only because no instrument could contradict them.
         //
-        // Two lessons, both paid for: this GUC cannot be changed without a verified
-        // restart path, and ALTER SYSTEM is the WRONG mechanism for it -- a bad value is
-        // only detectable at postmaster start, by which point the server is already gone
-        // and SQL (including ALTER SYSTEM RESET) is unreachable. Any future attempt must
-        // stage the value, restart, and verify on a cluster that is not the seed host.
+        // THE SYNTAX IS LOAD-BEARING. shared_preload_libraries is GUC_LIST_QUOTE: passing
+        // 'a,b' as ONE string literal makes ALTER SYSTEM store it as a single list element,
+        // written back quoted as one identifier. On 2026-08-01 that took the cluster down
+        // hard -- the postmaster looped 80 times on
+        //   FATAL: could not access file "laplace_substrate,pg_stat_statements"
+        // and recovery needed root, because the data directory is 0700 owned by the runner
+        // and SQL is unreachable when the server will not start. Each library MUST be its
+        // own value in the list.
+        //
+        // VERIFY BEFORE RESTARTING. pg_file_settings reports how the file actually parses
+        // without starting anything:
+        //   SELECT setting, error FROM pg_file_settings WHERE name='shared_preload_libraries'
+        // The correct form reads back as [laplace_substrate, pg_stat_statements]; the broken
+        // one reads back as a single quoted element. applied=false is EXPECTED here -- this
+        // is a postmaster-start parameter, so it differs from the running value until a
+        // bounce. pipeline.sh checks this before it will restart.
+        //
+        // laplace_substrate must stay first: the extension image is pinned in the postmaster
+        // and the perfcache blobs are mmap'd at preload.
+        w.WriteLine("ALTER SYSTEM SET shared_preload_libraries = 'laplace_substrate', 'pg_stat_statements';");
+        w.WriteLine("ALTER SYSTEM SET pg_stat_statements.track = 'all';");
+        w.WriteLine("ALTER SYSTEM SET pg_stat_statements.max = 10000;");
+        // Planning time separately from execution: MEASURED 5.760 ms planning against
+        // 21.053 ms execution on one descent probe, and the ingest path leaves
+        // MaxAutoPrepare at 0, so that tax is paid per batch per tier. Without this the
+        // largest suspected overhead is invisible in the view added to find it.
+        w.WriteLine("ALTER SYSTEM SET pg_stat_statements.track_planning = on;");
         w.WriteLine("SELECT pg_reload_conf();");
     }
 }
