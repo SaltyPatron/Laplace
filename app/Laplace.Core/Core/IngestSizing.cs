@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace Laplace.Engine.Core;
 
 public static class IngestSizing
@@ -6,6 +8,65 @@ public static class IngestSizing
 
     // Fallback only — real bytes/record comes from IngestSourceProfile.
     public const int DefaultEstBytesPerRecord = 512;
+
+    /// <summary>
+    /// Records sampled by <see cref="MeasureBytesPerRecord"/>. Enough to average out a
+    /// long tail without reading a meaningful fraction of a 20GB file.
+    /// </summary>
+    public const int RecordSampleCount = 4096;
+
+    /// <summary>
+    /// Widest believable mean record size. A sample that lands above this is not a
+    /// measurement of records, it is a file that is not line-delimited the way the caller
+    /// thinks — fall back rather than size a batch from it.
+    /// </summary>
+    public const int MaxCredibleBytesPerRecord = 1 << 20;
+
+    /// <summary>
+    /// MEASURE bytes/record from the file about to be read, instead of trusting the
+    /// per-source constant declared in <c>IngestSourceProfile</c>.
+    ///
+    /// Those constants are estimates that nothing ever checked against a corpus, and they
+    /// are wrong by enough to matter. MEASURED 2026-08-01 on
+    /// /vault/Data/Wiktionary/raw-wiktextract-data.jsonl (20.4 GB): the mean over the
+    /// first 20,000 records is 6,158 bytes. <c>IngestSourceProfile.Wiktionary</c> declares
+    /// 12,000 — 1.95x too high.
+    ///
+    /// The error is in the slow direction, not the dangerous one:
+    /// <see cref="ResolveRecordBatch"/> computes <c>TargetBytesPerBatch / estBytesPerRecord</c>,
+    /// so an over-estimate halves the batch and doubles the round trips for the same
+    /// corpus. Nothing fails; it just costs the whole run.
+    ///
+    /// Returns <paramref name="fallback"/> on any unreadable/empty/implausible input.
+    /// Sizing must never be the thing that throws.
+    /// </summary>
+    public static int MeasureBytesPerRecord(
+        string path,
+        int sampleRecords = RecordSampleCount,
+        int fallback = DefaultEstBytesPerRecord)
+    {
+        if (string.IsNullOrWhiteSpace(path) || sampleRecords <= 0) return fallback;
+        try
+        {
+            if (!File.Exists(path)) return fallback;
+
+            long bytes = 0;
+            int records = 0;
+            using var reader = new StreamReader(path);
+            while (records < sampleRecords && reader.ReadLine() is { } line)
+            {
+                if (line.Length == 0) continue;          // blank separators are not records
+                bytes += Encoding.UTF8.GetByteCount(line) + 1;   // + the newline it cost
+                records++;
+            }
+
+            if (records == 0 || bytes <= 0) return fallback;
+            long mean = bytes / records;
+            return mean is > 0 and <= MaxCredibleBytesPerRecord ? (int)mean : fallback;
+        }
+        catch (IOException) { return fallback; }
+        catch (UnauthorizedAccessException) { return fallback; }
+    }
 
     public const int ApplyWavesPerCommit = 2;
 
