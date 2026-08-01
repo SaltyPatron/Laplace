@@ -33,6 +33,45 @@ public class PgTuningParityTests
     }
 
     /// <summary>
+    /// The POLICY literals -- the ones that are not derived from RAM -- exist in TWO
+    /// bodies, and only one of them ever runs. pg_apply_machine_tuning invokes
+    /// `cpu-topology --pg-tuning` (CpuTopologyCommands.EmitPgTuning) FIRST and treats it as
+    /// authoritative; the bash formulas are reached only when that emitter fails. So a
+    /// policy value edited in the shell alone never reaches any cluster, silently.
+    ///
+    /// That happened: max_wal_size was changed to 64GB in the shell on 2026-07-31 while the
+    /// emitter kept '32GB'. The shell carries the comment "this script is what actually
+    /// issues the ALTER SYSTEM", which is false, and nothing contradicted it. The cluster
+    /// stayed at 32GB and the change looked applied.
+    ///
+    /// Pinning the pair by parsing both sources, so whichever side moves next fails here.
+    /// </summary>
+    [Theory]
+    [InlineData("max_wal_size", "PG_TUNE_MAX_WAL")]
+    [InlineData("min_wal_size", "PG_TUNE_MIN_WAL")]
+    [InlineData("checkpoint_timeout", "PG_TUNE_CHECKPOINT")]
+    public void PolicyLiterals_MatchBetweenTheEmitterAndTheShellFallback(string guc, string shellVar)
+    {
+        var emitterPath = Path.Combine(TypeIdLawTests.FindRepoRootPublic(),
+            "app", "Laplace.Cli", "CpuTopologyCommands.cs");
+        Assert.True(File.Exists(emitterPath), $"emitter not found at {emitterPath}");
+        var emitter = File.ReadAllText(emitterPath);
+
+        var em = Regex.Match(emitter, Regex.Escape(guc) + @"\s*=\s*'([^']+)'");
+        Assert.True(em.Success, $"{guc} literal not found in CpuTopologyCommands.EmitPgTuning");
+
+        var sm = Regex.Match(TuningScript(), @"^\s*" + Regex.Escape(shellVar) + @"=(\S+)\s*$",
+            RegexOptions.Multiline);
+        Assert.True(sm.Success, $"{shellVar} not found in pg-machine-tuning.sh");
+
+        Assert.True(
+            string.Equals(em.Groups[1].Value, sm.Groups[1].Value, StringComparison.OrdinalIgnoreCase),
+            $"{guc} diverged: emitter (AUTHORITATIVE) says '{em.Groups[1].Value}', shell "
+            + $"{shellVar} says '{sm.Groups[1].Value}'. The emitter is what runs -- a value "
+            + "changed only in the shell never reaches a cluster.");
+    }
+
+    /// <summary>
     /// Reads `name=$(( mem_kb / DIV / 1024 )); (( name &lt; LO )) &amp;&amp; name=LO; (( name &gt; HI )) &amp;&amp; name=HI`
     /// and returns (divisor, loMB, hiMB). Whitespace-tolerant, order-fixed (lo then hi).
     /// </summary>
