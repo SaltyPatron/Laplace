@@ -397,3 +397,4 @@ functions/chess/chess_game_plies.sql.in
 functions/chess/chess_line.sql.in
 functions/chess/drop_retired_chess_aggregates.sql.in
 functions/readback/drop_retired_constituent_edges.sql.in
+functions/converse/infer.sql.in
