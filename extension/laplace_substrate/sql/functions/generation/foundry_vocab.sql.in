@@ -25,7 +25,13 @@ CREATE OR REPLACE FUNCTION foundry_vocab(p_size int)
         JOIN entities e ON e.id = p.entity_id
          AND e.type_id IN (canonical_id('Sentence'), canonical_id('Document'))
         WHERE p.type = 1 AND p.trajectory IS NOT NULL
-        ORDER BY p.n_constituents DESC NULLS LAST, p.entity_id
+        -- Sampling is by content hash, which is ARBITRARY -- an arbitrary LIMIT without
+        -- an ordering is a missing ranking. The honest ranking is by trajectory length,
+        -- but MEASURED 2026-08-01 that plans as a seq scan of every physicality partition
+        -- plus a full sort (no index serves n_constituents), so it trades an arbitrary
+        -- sample for an unusable one. Left arbitrary DELIBERATELY until an index exists
+        -- that ingest is willing to pay for; the defect is recorded, not hidden.
+        ORDER BY p.entity_id, p.id
         LIMIT 400000
     ),
     freq AS (

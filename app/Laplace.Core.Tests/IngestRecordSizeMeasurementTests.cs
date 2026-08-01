@@ -94,8 +94,13 @@ public sealed class IngestRecordSizeMeasurementTests
         int declared = IngestSourceProfile.Wiktionary.EstBytesPerRecord;
 
         Assert.True(measured > 0, "measurement failed on a corpus that exists");
-        Assert.True(measured < declared,
-            $"the declared estimate is no longer an over-estimate: declared {declared}, "
-            + $"measured {measured}. Re-derive the profile rather than leaving a stale constant.");
+        // The declaration must TRACK the corpus, not merely exceed it. A wild over-estimate
+        // is what halved the batch for the life of the project; a wild under-estimate would
+        // oversize it. Within 1.5x either way, or the constant has drifted from the file.
+        double ratio = (double)declared / measured;
+        Assert.True(ratio is > 0.667 and < 1.5,
+            $"IngestSourceProfile.Wiktionary declares {declared} bytes/record but the corpus "
+            + $"measures {measured} ({ratio:F2}x). Re-derive it -- batch size is "
+            + "TargetBytesPerBatch / this number, so drift here costs the whole run.");
     }
 }

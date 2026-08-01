@@ -25,7 +25,13 @@ public sealed record IngestSourceProfile(
     public static readonly IngestSourceProfile UdSentence = new(2_048, 1);
 
     /// <summary>Kaikki wiktextract JSON — tens of KB per entry.</summary>
-    public static readonly IngestSourceProfile Wiktionary = new(12_000, 1);
+    // MEASURED 2026-08-01 over 20,000 records of the 20.4 GB raw-wiktextract-data.jsonl:
+    // the mean record is 6,158 bytes. The previous 12,000 was an estimate nothing ever
+    // checked, and it is the DENOMINATOR in ResolveRecordBatch's
+    // TargetBytesPerBatch / estBytesPerRecord -- so it halved every batch and doubled the
+    // round trips across a 20 GB corpus. Rounded up to 6,500 for headroom on the tail.
+    // IngestRecordSizeMeasurementTests keeps this honest against the real file.
+    public static readonly IngestSourceProfile Wiktionary = new(6_500, 1);
 
     /// <summary>Document ingest — large text blobs per file chunk.</summary>
     public static readonly IngestSourceProfile Document = new(64_000, 1);
