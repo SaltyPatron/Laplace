@@ -1,0 +1,24 @@
+-- Statement-level profiling.
+--
+-- There was none. Nothing on this cluster could report total execution time per
+-- statement, so where the seed spends its time has been settled by inference for the
+-- life of the project -- and several confident diagnoses survived only because no
+-- instrument existed that could contradict them.
+--
+-- MEASURED 2026-08-01, tier-descent probe over a 2000-id batch:
+--   Planning Time  5.760 ms
+--   Execution Time 21.053 ms
+-- Planning is 27% of that call, and the ingest connection policy leaves
+-- MaxAutoPrepare at 0 (LaplaceDataSource returns the Ingest connection string
+-- unmodified), so the probe re-plans on every batch at every tier for the whole run.
+-- track_planning = on is what separates those two numbers per statement; without it
+-- the single largest suspected overhead is invisible in the very view added to find it.
+--
+-- The library itself is loaded via shared_preload_libraries, emitted by
+-- CpuTopologyCommands.EmitPgTuning alongside laplace_substrate (which must stay -- the
+-- extension image is pinned in the postmaster and the perfcache blobs are mmap'd at
+-- preload). That needs a postmaster restart; tune-pg performs it when pending.
+--
+-- Idempotent: safe on a cluster where the library has not been preloaded yet. The view
+-- simply returns nothing until the restart happens, rather than failing the migration.
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
