@@ -5,6 +5,11 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 
+# Repo-local launches are the OPERATOR lane: the raw-SQL escape hatch stays
+# available here. The gate defaults CLOSED in code — any client deployment that
+# does not export this gets the typed tool surface only.
+export LAPLACE_MCP_OPERATOR="${LAPLACE_MCP_OPERATOR:-1}"
+
 # Prefer repo-local builds (dev freshest), then the published apphost.
 # app/Directory.Build.props redirects BaseOutputPath to $LAPLACE_BUILD_ROOT/app/bin
 # (defaulting to D:\Data\Laplace on Windows), so the in-tree probe misses there.

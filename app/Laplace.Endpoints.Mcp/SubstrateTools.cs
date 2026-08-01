@@ -47,6 +47,15 @@ internal sealed class SubstrateTools
     /// </summary>
     private sealed record ToolSpec(string Name, string Summary, string Description, Func<JsonObject> BuildSchema);
 
+    /// <summary>
+    /// The raw-SQL escape hatch is OPERATOR-LANE ONLY. It is server-enforced
+    /// read-only (default_transaction_read_only) so it cannot write, but it can
+    /// read every table — including witnessed session prompts — and no product
+    /// client should hold that. Closed by default; scripts/laplace-mcp opts the
+    /// local operator in. A client deployment that wants it must say so out loud.
+    /// </summary>
+    private static readonly bool OperatorLane =
+        Environment.GetEnvironmentVariable("LAPLACE_MCP_OPERATOR") == "1";
 
     private static readonly ToolSpec[] ToolCatalog =
     [
@@ -105,6 +114,10 @@ internal sealed class SubstrateTools
                          ("relation_type", "string", "canonical relation name to constrain the walk", false),
                          ("depth", "integer", "walk depth, default 4", false),
                          ("breadth", "integer", "beam breadth, default 5", false))),
+        new("infer", "One forward pass: the topic's distribution reweighted by the prompt's bias tokens.",
+            "One forward pass over the substrate (laplace.infer): prompt_coherence elects the topic (attention), the topic's consensus objects are read as an uncollapsed ranked distribution, EVERY sense of every non-topic token reweights it by id-space intersection (the bias heads), and realize_batch renders once at the end. Returns prediction, weight (eff_mu/1e9), bias_hits — the whole ranked frontier, never just the argmax.",
+            () => Schema(("prompt", "string", "the prompt to complete", true),
+                         ("limit", "integer", "max candidates, default 8", false))),
         new("bubble", "Bubble a surface term up the mesh to its concept hub.",
             "Bubble a surface term up the mesh to the highway (laplace.bubble_up): surface -> sense -> synset (ranked by base_eff_mu x domain-log-boost from geometry adjacency, not consensus rows), then the hub above it (IS_INSTANCE_OF/IS_A) and every relation channel available there with edge counts. Returns entity ids, so the next step continues from where this one landed instead of re-entering from text. Use this before facts/walk when a term may resolve at the wrong layer — all three layers render with the SAME text, so a query aimed at the wrong one returns zero rows and looks like missing knowledge. There is no bubble_down (see the taxonomy tool for the closest, IS_A-specific, downward move). Note the render/label split: this tool's rows use render() (canonical name -> tier-0 codepoint -> resolve_name -> full recursive content rebuild -> hex fallback) because a sense/synset's actual gloss text is the point; most other tools (taxonomy, facts, walk, leaders) use label_or_hex() instead (resolve_name, else render() with internal canonical-key scaffolding regex-stripped for readability, else hex) because they want a short display tag, not content. Pick the wrong one and you get either a wall of text where a tag was wanted, or a stripped tag where the actual definition was wanted.",
             () => Schema(("term", "string", "the surface word or phrase", true),
@@ -128,7 +141,8 @@ internal sealed class SubstrateTools
     ];
 
     public JsonArray ListTools() => new(
-        ToolCatalog.Select(t => (JsonNode)Tool(t.Name, t.Summary, t.BuildSchema())).ToArray());
+        ToolCatalog.Where(t => OperatorLane || t.Name != "sql")
+            .Select(t => (JsonNode)Tool(t.Name, t.Summary, t.BuildSchema())).ToArray());
 
     public (string Text, bool IsError) Call(string name, JsonObject? args)
     {
@@ -137,9 +151,12 @@ internal sealed class SubstrateTools
             return name switch
             {
                 "api" => Api(args),
-                "sql" => Rows(_dbReadOnly,
-                    Req(args, "query"),
-                    Int(args, "max_rows", DefaultRowCap)),
+                "sql" => OperatorLane
+                    ? Rows(_dbReadOnly,
+                        Req(args, "query"),
+                        Int(args, "max_rows", DefaultRowCap))
+                    : ("sql is operator-lane only (launch with LAPLACE_MCP_OPERATOR=1); product reads go through the typed tools", true),
+                "infer" => Infer(args),
                 "recall" => Recall(args),
                 "chat" => ChatTurn(args),
                 "witness" => WitnessFact(args),
@@ -215,6 +232,26 @@ internal sealed class SubstrateTools
             ["eff_mu"] = r.EffMu is null ? null : Math.Round(r.EffMu.Value, 1),
             ["witnesses"] = r.Witnesses,
         }));
+    }
+
+    // The forward pass as a typed surface: parameterized end to end — this tool
+    // exists so no client composes SQL strings, so it does not compose one itself.
+    private (string, bool) Infer(JsonObject? args)
+    {
+        using var cmd = _dbReadOnly.CreateCommand(
+            "SELECT prediction, weight, bias_hits FROM laplace.infer($1, $2)");
+        cmd.Parameters.Add(new() { Value = Req(args, "prompt") });
+        cmd.Parameters.Add(new() { Value = Int(args, "limit", 8) });
+        using var rd = cmd.ExecuteReader();
+        var rows = new List<JsonObject>();
+        while (rd.Read())
+            rows.Add(new JsonObject
+            {
+                ["prediction"] = rd.IsDBNull(0) ? null : rd.GetString(0),
+                ["weight"] = rd.IsDBNull(1) ? null : Math.Round(rd.GetDouble(1), 1),
+                ["bias_hits"] = rd.IsDBNull(2) ? null : rd.GetInt64(2),
+            });
+        return JsonRows(rows);
     }
 
     private (string, bool) Query(JsonObject? args)
