@@ -118,6 +118,13 @@ internal sealed class SubstrateTools
             "One forward pass over the substrate (laplace.infer): prompt_coherence elects the topic (attention), the topic's consensus objects are read as an uncollapsed ranked distribution, EVERY sense of every non-topic token reweights it by id-space intersection (the bias heads), and realize_batch renders once at the end. Returns prediction, weight (eff_mu/1e9), bias_hits — the whole ranked frontier, never just the argmax.",
             () => Schema(("prompt", "string", "the prompt to complete", true),
                          ("limit", "integer", "max candidates, default 8", false))),
+        new("sense_audit", "Why senses() returned what it returned — type, admitting relation, language, strength.",
+            "Diagnose a term's candidate sense set (laplace.sense_audit). Per candidate: the target's ENTITY TYPE (bubble_up promotes any IS_SYNONYM_OF target into the synset slot, so the value is frequently typed Word or Sentence rather than WordNet_Synset), the RELATION that admitted it (a candidate arriving via IS_SYNONYM_OF is a TRANSLATION competing as a sense), its attested HAS_LANGUAGE, and the denote_mu + witness count the election actually ranks on. Use this when a reply is on the right concept in the wrong language, or on an unrelated sense.",
+            () => Schema(("term", "string", "the surface word", true),
+                         ("limit", "integer", "max candidates, default 64", false))),
+        new("prompt_language", "Which language a prompt is written in, as a ranked tally.",
+            "The request's language (laplace.prompt_language): a weighted tally of eff_mu over EVERY HAS_LANGUAGE edge carried by the prompt's entities, at every tier that has one. Deliberately not word_language() per token — that is LIMIT 1 and discards the distribution, making a token shared across languages look monolingual. Returns the ranked tally rather than just the winner, because an elector should BIAS toward a language, not hard-filter to it: a cross-lingual prompt must still work.",
+            () => Schema(("prompt", "string", "the prompt", true))),
         new("bubble", "Bubble a surface term up the mesh to its concept hub.",
             "Bubble a surface term up the mesh to the highway (laplace.bubble_up): surface -> sense -> synset (ranked by base_eff_mu x domain-log-boost from geometry adjacency, not consensus rows), then the hub above it (IS_INSTANCE_OF/IS_A) and every relation channel available there with edge counts. Returns entity ids, so the next step continues from where this one landed instead of re-entering from text. Use this before facts/walk when a term may resolve at the wrong layer — all three layers render with the SAME text, so a query aimed at the wrong one returns zero rows and looks like missing knowledge. There is no bubble_down (see the taxonomy tool for the closest, IS_A-specific, downward move). Note the render/label split: this tool's rows use render() (canonical name -> tier-0 codepoint -> resolve_name -> full recursive content rebuild -> hex fallback) because a sense/synset's actual gloss text is the point; most other tools (taxonomy, facts, walk, leaders) use label_or_hex() instead (resolve_name, else render() with internal canonical-key scaffolding regex-stripped for readability, else hex) because they want a short display tag, not content. Pick the wrong one and you get either a wall of text where a tag was wanted, or a stripped tag where the actual definition was wanted.",
             () => Schema(("term", "string", "the surface word or phrase", true),
@@ -157,6 +164,8 @@ internal sealed class SubstrateTools
                         Int(args, "max_rows", DefaultRowCap))
                     : ("sql is operator-lane only (launch with LAPLACE_MCP_OPERATOR=1); product reads go through the typed tools", true),
                 "infer" => Infer(args),
+                "sense_audit" => SenseAudit(args),
+                "prompt_language" => PromptLanguage(args),
                 "recall" => Recall(args),
                 "chat" => ChatTurn(args),
                 "witness" => WitnessFact(args),
@@ -250,6 +259,45 @@ internal sealed class SubstrateTools
                 ["prediction"] = rd.IsDBNull(0) ? null : rd.GetString(0),
                 ["weight"] = rd.IsDBNull(1) ? null : Math.Round(rd.GetDouble(1), 1),
                 ["bias_hits"] = rd.IsDBNull(2) ? null : rd.GetInt64(2),
+            });
+        return JsonRows(rows);
+    }
+
+    // Both parameterized end to end. A typed tool that string-builds SQL is the
+    // same hole wearing a schema.
+    private (string, bool) SenseAudit(JsonObject? args)
+    {
+        using var cmd = _dbReadOnly.CreateCommand(
+            "SELECT sense, sense_type, via_relation, language, denote_mu, witnesses FROM laplace.sense_audit($1, $2)");
+        cmd.Parameters.Add(new() { Value = Req(args, "term") });
+        cmd.Parameters.Add(new() { Value = Int(args, "limit", 64) });
+        using var rd = cmd.ExecuteReader();
+        var rows = new List<JsonObject>();
+        while (rd.Read())
+            rows.Add(new JsonObject
+            {
+                ["sense"] = rd.IsDBNull(0) ? null : rd.GetString(0),
+                ["sense_type"] = rd.IsDBNull(1) ? null : rd.GetString(1),
+                ["via_relation"] = rd.IsDBNull(2) ? null : rd.GetString(2),
+                ["language"] = rd.IsDBNull(3) ? null : rd.GetString(3),
+                ["denote_mu"] = rd.IsDBNull(4) ? null : (double)rd.GetDecimal(4),
+                ["witnesses"] = rd.IsDBNull(5) ? null : rd.GetInt64(5),
+            });
+        return JsonRows(rows);
+    }
+
+    private (string, bool) PromptLanguage(JsonObject? args)
+    {
+        using var cmd = _dbReadOnly.CreateCommand(
+            "SELECT laplace.realize(lang_id) AS language, mass FROM laplace.prompt_language($1)");
+        cmd.Parameters.Add(new() { Value = Req(args, "prompt") });
+        using var rd = cmd.ExecuteReader();
+        var rows = new List<JsonObject>();
+        while (rd.Read())
+            rows.Add(new JsonObject
+            {
+                ["language"] = rd.IsDBNull(0) ? null : rd.GetString(0),
+                ["mass"] = rd.IsDBNull(1) ? null : (double)rd.GetDecimal(1),
             });
         return JsonRows(rows);
     }

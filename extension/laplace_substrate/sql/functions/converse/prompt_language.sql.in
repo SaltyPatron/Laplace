@@ -1,0 +1,49 @@
+-- prompt_language(prompt): which language is this prompt written in.
+--
+-- THE TALLY, EXTRACTED. This computation already existed -- inline, in the
+-- body of chat() -- and was therefore callable by nothing. converse(),
+-- converse_walk(), infer() and prompt_coherence() all need it and none could
+-- reach it. A canonical implementation with one inline caller is the drift
+-- shape spec 37 section 0 names; this is the same defect one level down.
+--
+-- WHY A TALLY AND NOT word_language() PER TOKEN. word_language() is LIMIT 1 --
+-- one language per word -- which discards the distribution and makes a token
+-- shared across languages ("chat" English/French, "die" English/German, "a"
+-- in a dozen) look monolingual. Summing eff_mu over EVERY HAS_LANGUAGE edge
+-- carried by the prompt's entities lets genuinely ambiguous tokens contribute
+-- to both tallies and be settled by the tokens that are decisive, which is how
+-- a reader disambiguates too.
+--
+-- TIER-AGNOSTIC BY CONSTRUCTION: it tallies whatever the prompt resolved to,
+-- so a sentence-root HAS_LANGUAGE counts alongside word-tier evidence rather
+-- than being invisible to a word-only scan.
+--
+-- NO FLOOR AND NO MINIMUM MARGIN: the fold already carries confidence, ties
+-- break on the id for determinism, and a prompt with no language evidence
+-- returns NULL -- the honest answer when the prompt genuinely does not say.
+--
+-- Returns the ranked tally, not just the winner, because an elector wants to
+-- BIAS toward a language rather than hard-filter to it: a genuinely
+-- cross-lingual prompt must still work, and the substrate's identity law is
+-- language-agnostic by construction.
+CREATE OR REPLACE FUNCTION prompt_language(p_prompt text)
+    RETURNS TABLE(lang_id bytea, mass numeric)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT c.object_id, sum(eff_mu(c.rating, c.rd))::numeric
+    FROM prompt_state(p_prompt) p
+    JOIN consensus c ON c.subject_id = p.id
+                    AND c.type_id = relation_type_id('HAS_LANGUAGE')
+    WHERE p.id IS NOT NULL AND c.object_id IS NOT NULL
+    GROUP BY c.object_id
+    ORDER BY sum(eff_mu(c.rating, c.rd)) DESC, c.object_id
+$$;
+
+-- The winner alone, for callers that just want to pin a rendering language.
+-- A wrapper, not a second ladder.
+CREATE OR REPLACE FUNCTION prompt_language_top(p_prompt text)
+    RETURNS bytea
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT lang_id FROM prompt_language(p_prompt) LIMIT 1
+$$;
