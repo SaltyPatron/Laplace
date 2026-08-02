@@ -1,7 +1,6 @@
--- entities_tier_btree (single-column btree on entities(tier)) is a STRICT leading
--- prefix of entities_tier_type_btree (tier, type_id), which serves every tier-only
--- query as well as tier+type_id lookups. The narrow index is provably redundant;
--- drop it on upgrade. New installs never create it (removed from manifest.install).
+-- entities_tier_btree (single-column btree on entities(tier)) is redundant with
+-- LIST(tier) partitioning + entities_tier_brin. Drop it on upgrade. New installs
+-- never create it (removed from manifest.install).
 DO $do$
 BEGIN
     -- Release extension membership first (no-op on a fresh install where the index

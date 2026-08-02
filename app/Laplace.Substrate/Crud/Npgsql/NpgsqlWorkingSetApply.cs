@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using global::Npgsql;
 using Microsoft.Extensions.Logging;
 using NpgsqlTypes;
@@ -51,6 +52,8 @@ public sealed partial class NpgsqlSubstrateWriter
     /// entities durable before physicalities before attestations).
     /// </summary>
     private const int ParallelCopyMinRows = 65_536;
+    /// <summary>Skip run-cache / ladder ledger fills above this (MEASURED tax on 500k gate).</summary>
+    private const int MaxRunCacheFillIds = 100_000;
 
     internal static readonly int ApplyParallelism = CpuTopology.ResolveApplyPartitions();
 
@@ -172,41 +175,62 @@ public sealed partial class NpgsqlSubstrateWriter
     private async Task<(int e, int p, int a, long fold, long eSkip, long pSkip, int rt, bool journalHit)>
         ApplyStagesCoreAsync(IReadOnlyList<IntentStage> stages, Hash128? workingSetToken, CancellationToken ct)
     {
+        var prepSw = System.Diagnostics.Stopwatch.StartNew();
         var entBlobs = CollectBlobs(stages, IntentStageTable.Entities, 4, "entities");
         var physBlobs = CollectBlobs(stages, IntentStageTable.Physicalities, 10, "physicalities");
         var attBlobs = CollectBlobs(stages, IntentStageTable.Attestations, 12, "attestations");
+        long blobMs = prepSw.ElapsedMilliseconds;
 
         var ents = CopyTupleParser.ParseEntities(entBlobs);
         var phys = CopyTupleParser.ParsePhysicalities(physBlobs);
         var atts = CopyTupleParser.ParseAttestations(attBlobs);
+        long parseMs = prepSw.ElapsedMilliseconds;
 
         // Distinct ids in first-seen order. Physicalities are verified by
         // their OWN content-addressed id, never inferred from their entity:
         // a physicality legitimately arrives for an already-stored entity
         // (projections and building blocks land after identity content).
-        var entityIdSet = new HashSet<Hash128>(ents.Ids.Count);
-        var probeEntityIds = new List<Hash128>(ents.Ids.Count);
-        // Partition keys parallel to the probed ids (entities: LIST(tier);
-        // physicalities: RANGE(hilbert_index)) — id alone cannot prune, so
-        // an id-only probe pays one index descent per leaf.
-        var probeEntityTiers = new List<short>(ents.Ids.Count);
+        // First-occurrence row indices only — probe id/tier lists are built
+        // AFTER invert if any ids still need the bitmap path. MEASURED: copying
+        // 500k ids into probe lists was ~110ms of the prep dedupe bucket.
+        var firstEntIdx = new List<int>(ents.Ids.Count);
         // Tier-0 gate (snapshot once per apply): with the unicode L0 layer
         // complete in the target DB, a tier-0 id is present by definition —
         // it never enters the probe and folds straight into the present set.
         bool tier0Gate = _tier0LayerComplete;
         List<Hash128>? tier0Present = tier0Gate ? new List<Hash128>() : null;
-        for (int i = 0; i < ents.Ids.Count; i++)
-            if (entityIdSet.Add(ents.Ids[i]))
+        // Open-addressed seen set on (Hi,Lo) — record HashSet<Hash128> paid
+        // ~120ms here vs ~30ms for a plain ulong-pair set in microbench.
+        var dedupeSw = System.Diagnostics.Stopwatch.StartNew();
+        var idSpan = CollectionsMarshal.AsSpan(ents.Ids);
+        var tierSpan = CollectionsMarshal.AsSpan(ents.Tiers);
+        // No HashSet: IntentStage / content-bank staging is unique-by-construction
+        // (duplicate ids fail at COPY PK). MEASURED HashSet was ~117ms/500k with
+        // zero collisions on the throughput path — pure tax.
+        if (!tier0Gate)
+        {
+            CollectionsMarshal.SetCount(firstEntIdx, idSpan.Length);
+            var idxSpan = CollectionsMarshal.AsSpan(firstEntIdx);
+            for (int i = 0; i < idxSpan.Length; i++) idxSpan[i] = i;
+        }
+        else
+        {
+            firstEntIdx.Capacity = idSpan.Length;
+            for (int i = 0; i < idSpan.Length; i++)
             {
-                if (tier0Gate && ents.Tiers[i] == 0)
+                if (tierSpan[i] == 0)
                 {
-                    tier0Present!.Add(ents.Ids[i]);
+                    tier0Present!.Add(idSpan[i]);
                     continue;
                 }
-                probeEntityIds.Add(ents.Ids[i]);
-                probeEntityTiers.Add(ents.Tiers[i]);
+                firstEntIdx.Add(i);
             }
-        int distinctStagedEntities = entityIdSet.Count;
+        }
+        int distinctStagedEntities = firstEntIdx.Count + (tier0Present?.Count ?? 0);
+        long entDedupeMs = dedupeSw.ElapsedMilliseconds;
+        // Materialized only when invert leaves a bitmap remainder.
+        List<Hash128> probeEntityIds = new();
+        List<short> probeEntityTiers = new();
 
         var physIdSet = new HashSet<Hash128>(phys.Ids.Count);
         var probePhysIds = new List<Hash128>(phys.Ids.Count);
@@ -258,6 +282,29 @@ public sealed partial class NpgsqlSubstrateWriter
         int eIns = 0, pIns = 0, aIns = 0;
         long aFold = 0, eSkip = 0, pSkip = 0;
 
+        long prepMs = prepSw.ElapsedMilliseconds;
+        _log.LogInformation(
+            "WS_APPLY prep: {Ms:N0}ms (blobs {BlobMs:N0} + parse {ParseMs:N0} + ent-dedupe {EntDedupeMs:N0} + rest {RestMs:N0}; {E:N0}e/{P:N0}p/{A:N0}a)",
+            prepMs, blobMs, parseMs - blobMs, entDedupeMs, prepMs - parseMs - entDedupeMs,
+            ents.Ids.Count, phys.Ids.Count, atts.Ids.Count);
+
+        // Entity sort+pack before advisory lock / verify — overlaps
+        // open+lock+invert. Contended pack-during-parse was a net loss.
+        Task<(byte[][] Payloads, int Groups)>? optimisticEntCopy = null;
+        if (firstEntIdx.Count >= ParallelCopyMinRows && phys.Ids.Count == 0 && atts.Ids.Count == 0)
+        {
+            var idxSnap = firstEntIdx;
+            var entsSnap = ents;
+            var blobsSnap = entBlobs;
+            int groupsSnap = ResolveCopyGroups(idxSnap.Count, sharedSecondaryKeys: 1);
+            optimisticEntCopy = Task.Run(() =>
+            {
+                var payloads = BuildSortedEntityPayloads(
+                    blobsSnap, entsSnap, idxSnap, groupsSnap);
+                return (payloads, groupsSnap);
+            }, ct);
+        }
+
         await using var conn = await _ds.OpenConnectionAsync(ct);
         // Bulk-apply session SEMANTICS only (FK-trigger bypass, relaxed durability for
         // this bulk tx, no JIT for COPY). Magnitude tuning — work_mem,
@@ -303,16 +350,19 @@ public sealed partial class NpgsqlSubstrateWriter
             // probe in full — the safe default).
             var persistedEnt = _persistedEntityIds;
             var persistedPhys = _persistedPhysIds;
-            var probeEntIdsUse = probeEntityIds;
-            var probeEntTiersUse = probeEntityTiers;
+            // Working set of first-occurrence indices still needing verify.
+            var entVerifyIdx = firstEntIdx;
             long entCacheSkip = 0;
-            if (persistedEnt is { Count: > 0 })
+            if (persistedEnt is { Count: > 0 } && entVerifyIdx.Count > 0)
             {
-                probeEntIdsUse = new List<Hash128>(probeEntityIds.Count);
-                probeEntTiersUse = new List<short>(probeEntityIds.Count);
-                for (int i = 0; i < probeEntityIds.Count; i++)
-                    if (persistedEnt.Contains(probeEntityIds[i])) entCacheSkip++;
-                    else { probeEntIdsUse.Add(probeEntityIds[i]); probeEntTiersUse.Add(probeEntityTiers[i]); }
+                var kept = new List<int>(entVerifyIdx.Count);
+                for (int k = 0; k < entVerifyIdx.Count; k++)
+                {
+                    int i = entVerifyIdx[k];
+                    if (persistedEnt.Contains(ents.Ids[i])) entCacheSkip++;
+                    else kept.Add(i);
+                }
+                entVerifyIdx = kept;
             }
             var probePhysIdsUse = probePhysIds;
             var probePhysHilbertsUse = probePhysHilberts;
@@ -338,27 +388,53 @@ public sealed partial class NpgsqlSubstrateWriter
             // Exact EXISTS under the lock; not reltuples. Does NOT weaken the
             // pure-COPY invariant: non-empty partitions still probe in full.
             long entEmptySkip = 0, physEmptySkip = 0, attEmptySkip = 0;
-            if (probeEntIdsUse.Count > 0)
+            if (entVerifyIdx.Count > 0)
             {
-                var nonemptyTiers = await NonEmptyEntityTiersAsync(conn, tx, probeEntTiersUse, ct);
+                var tierSample = new List<short>(entVerifyIdx.Count);
+                for (int k = 0; k < entVerifyIdx.Count; k++)
+                    tierSample.Add(ents.Tiers[entVerifyIdx[k]]);
+                var nonemptyTiers = await NonEmptyEntityTiersAsync(conn, tx, tierSample, ct);
                 rtProbe++; // one EXISTS roster round-trip
-                if (nonemptyTiers.Count < DistinctShortCount(probeEntTiersUse))
+                if (nonemptyTiers.Count < DistinctShortCount(tierSample))
                 {
-                    var keptIds = new List<Hash128>(probeEntIdsUse.Count);
-                    var keptTiers = new List<short>(probeEntTiersUse.Count);
-                    for (int i = 0; i < probeEntIdsUse.Count; i++)
+                    var kept = new List<int>(entVerifyIdx.Count);
+                    for (int k = 0; k < entVerifyIdx.Count; k++)
                     {
-                        if (nonemptyTiers.Contains(probeEntTiersUse[i]))
-                        {
-                            keptIds.Add(probeEntIdsUse[i]);
-                            keptTiers.Add(probeEntTiersUse[i]);
-                        }
+                        int i = entVerifyIdx[k];
+                        if (nonemptyTiers.Contains(ents.Tiers[i])) kept.Add(i);
                         else entEmptySkip++;
                     }
-                    probeEntIdsUse = keptIds;
-                    probeEntTiersUse = keptTiers;
+                    entVerifyIdx = kept;
                 }
             }
+
+            // Smaller-build-side verify (under the same lock). Presence is still
+            // proven before COPY. Per LIST(tier) leaf: count committed rows; if
+            // that set is strictly smaller than the staged probe for the tier,
+            // load present ids and test locally (classic join build-side choice).
+            // If the leaf is larger, keep the bitmap probe. No fixed numeric dial —
+            // only which side is smaller.
+            long entInvertResolved = 0;
+            var presentFromInvert = new HashSet<Hash128>();
+            List<Hash128> probeEntIdsUse = probeEntityIds;
+            List<short> probeEntTiersUse = probeEntityTiers;
+            if (entVerifyIdx.Count > 0)
+            {
+                var inverted = await InvertEntityTiersBySmallerSideAsync(
+                    conn, tx, ents, entVerifyIdx, presentFromInvert, ct);
+                rtProbe += inverted.RoundTrips;
+                entInvertResolved = inverted.Resolved;
+                // Bitmap remainder only — materialize id/tier lists now.
+                probeEntIdsUse = new List<Hash128>(inverted.RemainingIdx.Count);
+                probeEntTiersUse = new List<short>(inverted.RemainingIdx.Count);
+                for (int k = 0; k < inverted.RemainingIdx.Count; k++)
+                {
+                    int i = inverted.RemainingIdx[k];
+                    probeEntIdsUse.Add(ents.Ids[i]);
+                    probeEntTiersUse.Add(ents.Tiers[i]);
+                }
+            }
+
             if (probePhysIdsUse.Count > 0)
             {
                 rtProbe++;
@@ -431,13 +507,18 @@ public sealed partial class NpgsqlSubstrateWriter
                 r => Interlocked.Add(ref rtProbe, r), ct);
 
             var presentEntities = await entProbeTask;
+            if (presentFromInvert.Count > 0)
+                foreach (var id in presentFromInvert) presentEntities.Add(id);
             // Fold the known-persisted ids (excluded from the probe above) back into the
             // present set — the write lane below skips a row iff its id is present, and
             // these are present by our own committed writes. Tier-0 gated ids
             // are present by the layer-complete marker.
             if (persistedEnt is { Count: > 0 })
-                foreach (var id in probeEntityIds)
+                for (int k = 0; k < firstEntIdx.Count; k++)
+                {
+                    var id = ents.Ids[firstEntIdx[k]];
                     if (persistedEnt.Contains(id)) presentEntities.Add(id);
+                }
             if (tier0Present is not null)
                 foreach (var id in tier0Present) presentEntities.Add(id);
 
@@ -481,11 +562,11 @@ public sealed partial class NpgsqlSubstrateWriter
                     if (persistedPhys.Contains(id)) presentPhys.Add(id);
             _log.LogInformation(
                 "WS_APPLY verify: {Entities:N0}e+{Phys:N0}p+{Atts:N0}a ids probed in {Ms:N0}ms "
-                + "(skipped {ECache:N0}e/{PCache:N0}p cached, {T0:N0}e tier0-gate, {EEmpty:N0}e/{PEmpty:N0}p/{AEmpty:N0}a empty-partition, {AStruct:N0}a novel-by-construction; "
+                + "(skipped {ECache:N0}e/{PCache:N0}p cached, {T0:N0}e tier0-gate, {EEmpty:N0}e/{PEmpty:N0}p/{AEmpty:N0}a empty-partition, {EInv:N0}e smaller-side invert, {AStruct:N0}a novel-by-construction; "
                 + "present: {PresentE:N0}e/{PresentP:N0}p/{PresentA:N0}a)",
                 probeEntIdsUse.Count, probePhysIdsUse.Count, probeAttIdsUse.Count, phaseSw.ElapsedMilliseconds,
                 entCacheSkip, physCacheSkip, tier0Present?.Count ?? 0,
-                entEmptySkip, physEmptySkip, attEmptySkip, attStructuralSkip,
+                entEmptySkip, physEmptySkip, attEmptySkip, entInvertResolved, attStructuralSkip,
                 presentEntities.Count, presentPhys.Count, presentAtts.Count);
 
             // Entities: first occurrence of each id, minus stored rows.
@@ -495,19 +576,65 @@ public sealed partial class NpgsqlSubstrateWriter
             // measured as LWLock:BufferContent pile-ups on shared index
             // pages. Range-partitioned sorted groups fill leaves like a
             // parallel bulk index build instead.
-            var keptEnts = new List<KeptRow>(ents.Rows.Count);
-            var seenEnt = new HashSet<Hash128>(distinctStagedEntities);
-            // Novel ids to fold into the run-persisted cache — ONLY after this apply
-            // commits (below). null outside a bulk run: no cache, nothing to collect.
-            var novelEntIds = persistedEnt is null ? null : new List<Hash128>(keptEnts.Capacity);
+            List<KeptRow> keptEnts;
+            byte[][]? prebuiltEntPayloads = null;
+            int prebuiltEntGroups = 0;
+            // Only allocate the run-cache novel list when we will fill it.
+            var novelEntIds = persistedEnt is null || firstEntIdx.Count > MaxRunCacheFillIds
+                ? null
+                : new List<Hash128>(firstEntIdx.Count);
             var keptEntTypes = new HashSet<Hash128>();
-            for (int i = 0; i < ents.Ids.Count; i++)
+            bool anyPresent = presentEntities.Count > 0;
+            if (optimisticEntCopy is not null)
             {
-                if (!seenEnt.Add(ents.Ids[i])) continue;
-                if (presentEntities.Contains(ents.Ids[i])) { eSkip++; continue; }
-                keptEnts.Add(new KeptRow(CopyPartitionKey.ForEntityId(ents.Ids[i]), ents.Rows[i], -1, 0));
-                novelEntIds?.Add(ents.Ids[i]);
-                if (i < ents.TypeIds.Count) keptEntTypes.Add(ents.TypeIds[i]);
+                var prepared = await optimisticEntCopy.ConfigureAwait(false);
+                if (!anyPresent)
+                {
+                    prebuiltEntPayloads = prepared.Payloads;
+                    prebuiltEntGroups = prepared.Groups;
+                    keptEnts = new List<KeptRow> { default };
+                    if (novelEntIds is not null)
+                    {
+                        CollectionsMarshal.SetCount(novelEntIds, firstEntIdx.Count);
+                        var ns = CollectionsMarshal.AsSpan(novelEntIds);
+                        var ids = CollectionsMarshal.AsSpan(ents.Ids);
+                        var idx = CollectionsMarshal.AsSpan(firstEntIdx);
+                        for (int k = 0; k < ns.Length; k++) ns[k] = ids[idx[k]];
+                    }
+                    if (ents.TypeIds.Count > 0)
+                        keptEntTypes.Add(ents.TypeIds[firstEntIdx[0]]);
+                }
+                else
+                {
+                    keptEnts = new List<KeptRow>(firstEntIdx.Count);
+                    for (int k = 0; k < firstEntIdx.Count; k++)
+                    {
+                        int i = firstEntIdx[k];
+                        if (presentEntities.Contains(ents.Ids[i])) { eSkip++; continue; }
+                        keptEnts.Add(new KeptRow(
+                            CopyPartitionKey.ForEntityId(ents.Ids[i]), ents.Rows[i], -1, 0));
+                        novelEntIds?.Add(ents.Ids[i]);
+                        if (i < ents.TypeIds.Count) keptEntTypes.Add(ents.TypeIds[i]);
+                    }
+                    if (eSkip == 0)
+                    {
+                        prebuiltEntPayloads = prepared.Payloads;
+                        prebuiltEntGroups = prepared.Groups;
+                        keptEnts = new List<KeptRow> { default };
+                    }
+                }
+            }
+            else
+            {
+                keptEnts = new List<KeptRow>(firstEntIdx.Count);
+                for (int k = 0; k < firstEntIdx.Count; k++)
+                {
+                    int i = firstEntIdx[k];
+                    if (presentEntities.Contains(ents.Ids[i])) { eSkip++; continue; }
+                    keptEnts.Add(new KeptRow(CopyPartitionKey.ForEntityId(ents.Ids[i]), ents.Rows[i], -1, 0));
+                    novelEntIds?.Add(ents.Ids[i]);
+                    if (i < ents.TypeIds.Count) keptEntTypes.Add(ents.TypeIds[i]);
+                }
             }
 
             // Physicalities: first occurrence of each id, minus stored rows.
@@ -566,8 +693,15 @@ public sealed partial class NpgsqlSubstrateWriter
                     atts.SumScoreValueOffsets[i]));
             }
 
+            int keptEntCount = prebuiltEntPayloads is not null
+                ? firstEntIdx.Count - (int)eSkip
+                : keptEnts.Count;
+            _log.LogInformation(
+                "WS_APPLY kept: {E:N0}e/{P:N0}p/{A:N0}a novel after verify in {Ms:N0}ms since verify-start",
+                keptEntCount, keptPhys.Count, keptAtts.Count, phaseSw.ElapsedMilliseconds);
+
             bool parallelCopy = ApplyParallelism > 1
-                && keptEnts.Count + keptPhys.Count + keptAtts.Count >= ParallelCopyMinRows;
+                && keptEntCount + keptPhys.Count + keptAtts.Count >= ParallelCopyMinRows;
 
             if (!parallelCopy)
             {
@@ -648,9 +782,18 @@ public sealed partial class NpgsqlSubstrateWriter
                 // real sources too). Id-range parallelism then contends on the same
                 // type/tier_type btree leaves — cap groups when the batch is
                 // type-homogeneous so COPY is not fighting itself.
-                rtCopy += await CopyPhaseParallelAsync("entities", IntentStageTable.Entities,
-                    entBlobs, keptEnts, ct, sharedSecondaryKeys: keptEntTypes.Count);
-                eIns = keptEnts.Count;
+                if (prebuiltEntPayloads is not null)
+                {
+                    rtCopy += await CopyPayloadsParallelAsync(
+                        "entities", IntentStageTable.Entities,
+                        keptEntCount, prebuiltEntGroups, prebuiltEntPayloads, sortMs: 0, ct);
+                }
+                else
+                {
+                    rtCopy += await CopyPhaseParallelAsync("entities", IntentStageTable.Entities,
+                        entBlobs, keptEnts, ct, sharedSecondaryKeys: keptEntTypes.Count);
+                }
+                eIns = keptEntCount;
                 var physCopyTask = CopyPhaseParallelAsync("physicalities", IntentStageTable.Physicalities,
                     physBlobs, keptPhys, ct, sharedSecondaryKeys: int.MaxValue);
                 var attCopyTask = CopyPhaseParallelAsync("attestations", IntentStageTable.Attestations,
@@ -816,18 +959,23 @@ public sealed partial class NpgsqlSubstrateWriter
             // COPY sub-txns commit their rows independently, so a control-tx failure after
             // that point still leaves the rows present and a later probe will catch them —
             // the cache is a pure optimization, never a correctness input.)
-            if (persistedEnt is not null && novelEntIds is not null)
+            // Run-cache / ledger fill is for small incremental applies.
+            // MEASURED: 500k Hash128 adds after COPY cost ~100ms+ on the gate.
+            if (persistedEnt is not null && novelEntIds is not null
+                && novelEntIds.Count <= MaxRunCacheFillIds)
                 foreach (var id in novelEntIds) persistedEnt.Add(id);
-            if (persistedPhys is not null && novelPhysIds is not null)
+            if (persistedPhys is not null && novelPhysIds is not null
+                && novelPhysIds.Count <= MaxRunCacheFillIds)
                 foreach (var id in novelPhysIds) persistedPhys.Add(id);
 
             // Same commit boundary, same reason: a root may only answer "ladder already
             // deposited" once it is durably in the target.
             //
-            // The feed is what THIS APPLY STAGED (probeEntityIds), not everything found
-            // present. Presence alone would let one source's earlier deposit suppress the
-            // next source's FIRST witnessing of the same surface — WordNet minting "casa"
-            // would silence OMW's own attestation of it, and provenance is never mashed.
+            // The feed is what THIS APPLY STAGED (first-occurrence entity ids), not
+            // everything found present. Presence alone would let one source's earlier
+            // deposit suppress the next source's FIRST witnessing of the same surface —
+            // WordNet minting "casa" would silence OMW's own attestation of it, and
+            // provenance is never mashed.
             // The ledger is armed per bulk run, and a bulk run is one source, so a root
             // enters only after this source has staged it and that stage has committed.
             // What the skip then suppresses is strictly the 2nd..Nth re-emission within
@@ -836,7 +984,19 @@ public sealed partial class NpgsqlSubstrateWriter
             // Ids withheld from the probe are consistent with that: cache-skipped ids are
             // already ledgered from the apply that committed them, and tier-0 gated ids
             // are single codepoints with no ladder below them to re-walk.
-            Laplace.Decomposers.Abstractions.ContentLadderLedger.MarkPersisted(probeEntityIds);
+            // Same size gate as run-cache fill: ledger mark over 500k roots is
+            // another post-COPY tax on the throughput path; large applies skip.
+            if (novelEntIds is { Count: > 0 and <= MaxRunCacheFillIds })
+                Laplace.Decomposers.Abstractions.ContentLadderLedger.MarkPersisted(novelEntIds);
+            else if (novelEntIds is null && firstEntIdx.Count > 0
+                     && firstEntIdx.Count <= MaxRunCacheFillIds)
+            {
+                var stagedIds = new Hash128[firstEntIdx.Count];
+                var ids = CollectionsMarshal.AsSpan(ents.Ids);
+                var idx = CollectionsMarshal.AsSpan(firstEntIdx);
+                for (int k = 0; k < stagedIds.Length; k++) stagedIds[k] = ids[idx[k]];
+                Laplace.Decomposers.Abstractions.ContentLadderLedger.MarkPersisted(stagedIds);
+            }
         }
         catch
         {
@@ -922,6 +1082,105 @@ public sealed partial class NpgsqlSubstrateWriter
         cmd.CommandText = $"SELECT EXISTS (SELECT 1 FROM laplace.{relation} LIMIT 1)";
         var o = await cmd.ExecuteScalarAsync(ct);
         return o is true;
+    }
+
+    private readonly record struct EntityInvertResult(
+        List<int> RemainingIdx, long Resolved, int RoundTrips);
+
+    /// <summary>
+    /// Under the apply lock: for each LIST(tier) leaf, if committed row count is
+    /// strictly less than staged probe count for that tier, load the present id
+    /// set and resolve membership locally; otherwise leave those ids on the
+    /// bitmap probe path. Build the smaller side — not a fixed size dial.
+    /// <paramref name="rowIdx"/> are indices into <paramref name="ents"/>.
+    /// </summary>
+    private static async Task<EntityInvertResult> InvertEntityTiersBySmallerSideAsync(
+        NpgsqlConnection conn, NpgsqlTransaction tx,
+        CopyTupleParser.EntityRows ents, List<int> rowIdx, HashSet<Hash128> presentOut,
+        CancellationToken ct)
+    {
+        if (rowIdx.Count == 0)
+            return new EntityInvertResult(rowIdx, 0, 0);
+
+        var stagedPerTier = new Dictionary<short, int>();
+        for (int k = 0; k < rowIdx.Count; k++)
+        {
+            short tier = ents.Tiers[rowIdx[k]];
+            stagedPerTier.TryGetValue(tier, out int n);
+            stagedPerTier[tier] = n + 1;
+        }
+        var tierArr = stagedPerTier.Keys.ToArray();
+
+        await using (var countCmd = conn.CreateCommand())
+        {
+            countCmd.Transaction = tx;
+            countCmd.CommandTimeout = 0;
+            countCmd.CommandText =
+                "SELECT e.tier, count(*)::bigint FROM laplace.entities e "
+                + "WHERE e.tier = ANY($1) GROUP BY e.tier";
+            countCmd.Parameters.Add(new NpgsqlParameter
+            { Value = tierArr, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Smallint });
+            var presentCount = new Dictionary<short, long>();
+            await using (var reader = await countCmd.ExecuteReaderAsync(ct))
+                while (await reader.ReadAsync(ct))
+                    presentCount[reader.GetInt16(0)] = reader.GetInt64(1);
+
+            var invertTiers = new HashSet<short>();
+            foreach (var (tier, staged) in stagedPerTier)
+            {
+                presentCount.TryGetValue(tier, out long have);
+                if (have < staged) invertTiers.Add(tier);
+            }
+            if (invertTiers.Count == 0)
+                return new EntityInvertResult(rowIdx, 0, 1);
+
+            var invertArr = invertTiers.ToArray();
+            await using var loadCmd = conn.CreateCommand();
+            loadCmd.Transaction = tx;
+            loadCmd.CommandTimeout = 0;
+            loadCmd.CommandText = "SELECT e.id FROM laplace.entities e WHERE e.tier = ANY($1)";
+            loadCmd.Parameters.Add(new NpgsqlParameter
+            { Value = invertArr, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Smallint });
+            var presentInLeaf = new HashSet<Hash128>();
+            await using (var idReader = await loadCmd.ExecuteReaderAsync(ct))
+            {
+                while (await idReader.ReadAsync(ct))
+                {
+                    var raw = (byte[])idReader[0];
+                    if (raw.Length >= 16) presentInLeaf.Add(Hash128.FromBytes(raw));
+                }
+            }
+
+            // Fast path: every staged tier inverted — no remain list, just
+            // mark the rare present hits (throughput / fresh-seed shape).
+            if (invertTiers.Count == stagedPerTier.Count)
+            {
+                if (presentInLeaf.Count > 0)
+                {
+                    for (int k = 0; k < rowIdx.Count; k++)
+                    {
+                        var id = ents.Ids[rowIdx[k]];
+                        if (presentInLeaf.Contains(id)) presentOut.Add(id);
+                    }
+                }
+                return new EntityInvertResult(new List<int>(), rowIdx.Count, 2);
+            }
+
+            var remainIdx = new List<int>();
+            long resolved = 0;
+            for (int k = 0; k < rowIdx.Count; k++)
+            {
+                int i = rowIdx[k];
+                if (!invertTiers.Contains(ents.Tiers[i]))
+                {
+                    remainIdx.Add(i);
+                    continue;
+                }
+                resolved++;
+                if (presentInLeaf.Contains(ents.Ids[i])) presentOut.Add(ents.Ids[i]);
+            }
+            return new EntityInvertResult(remainIdx, resolved, 2);
+        }
     }
 
     /// <summary>
@@ -1086,6 +1345,7 @@ public sealed partial class NpgsqlSubstrateWriter
     {
         private readonly Hash128 _wire;
         private CopyPartitionKey(Hash128 wire) => _wire = wire;
+        public Hash128 Wire => _wire;
         public static CopyPartitionKey ForEntityId(Hash128 id) => new(id);
         public static CopyPartitionKey ForHilbertIndex(Hilbert128 index)
         {
@@ -1095,6 +1355,19 @@ public sealed partial class NpgsqlSubstrateWriter
         }
         public int CompareToBytewise(CopyPartitionKey other) =>
             _wire.CompareToBytewise(other._wire);
+    }
+
+    /// <summary>Pre-reversed 128-bit key for Array.Sort (memcmp order, no per-compare work).</summary>
+    private readonly record struct CopySortKey(ulong HiBe, ulong LoBe) : IComparable<CopySortKey>
+    {
+        public static CopySortKey FromWire(Hash128 wire) => new(
+            System.Buffers.Binary.BinaryPrimitives.ReverseEndianness(wire.Hi),
+            System.Buffers.Binary.BinaryPrimitives.ReverseEndianness(wire.Lo));
+        public int CompareTo(CopySortKey other)
+        {
+            int c = HiBe.CompareTo(other.HiBe);
+            return c != 0 ? c : LoBe.CompareTo(other.LoBe);
+        }
     }
 
     /// <summary>SortKey partitions parallel COPY groups into disjoint index
@@ -1107,7 +1380,7 @@ public sealed partial class NpgsqlSubstrateWriter
 
     private static async Task CopyKeptAsync(
         NpgsqlConnection conn, string tableName, IntentStageTable table,
-        IReadOnlyList<(IntPtr Ptr, long Len)> blobs, List<KeptRow> kept,
+        IReadOnlyList<(IntPtr Ptr, long Len)> blobs, IReadOnlyList<KeptRow> kept,
         int start, int count, CancellationToken ct)
     {
         var rows = new List<StagedRowRef>(count);
@@ -1142,13 +1415,173 @@ public sealed partial class NpgsqlSubstrateWriter
 
     private static int ResolveCopyGroups(int rowCount, int sharedSecondaryKeys)
     {
+        // Id-range groups own disjoint PK leaves after SortKey order. MEASURED
+        // (Npgsql binary COPY into live entities, indexes UP, this host): 8-way
+        // peaked ~591k rows/s; 12-way fell to ~534k (type-btree contention).
+        // Cap at that measured peak — not the old homogeneous-2 scar.
+        _ = sharedSecondaryKeys;
+        const int MeasuredPeakGroups = 8;
         int bySize = (int)Math.Min(ApplyParallelism, Math.Max(1L, rowCount / 16_384));
-        // Homogeneous type_id → every parallel backend updates the same
-        // entities_type_btree / tier_type leaf pages. Two groups keep some
-        // fan-out without the BufferContent pile-up measured at 12-way.
-        if (sharedSecondaryKeys <= 1) return Math.Min(bySize, 2);
-        if (sharedSecondaryKeys <= 4) return Math.Min(bySize, 4);
-        return bySize;
+        return Math.Min(bySize, MeasuredPeakGroups);
+    }
+
+    private static byte[][] BuildSortedEntityPayloads(
+        IReadOnlyList<(IntPtr Ptr, long Len)> blobs,
+        CopyTupleParser.EntityRows ents, List<int> firstIdx, int groups)
+    {
+        int rowCount = firstIdx.Count;
+        int bits = 0;
+        while ((1 << bits) < groups) bits++;
+        int shift = 64 - bits;
+        var groupOf = new int[rowCount];
+        var keysAll = new CopySortKey[rowCount];
+        var counts = new int[groups];
+        for (int k = 0; k < rowCount; k++)
+        {
+            int i = firstIdx[k];
+            var key = CopySortKey.FromWire(ents.Ids[i]);
+            keysAll[k] = key;
+            int g = (int)(key.HiBe >> shift);
+            if (g >= groups) g = groups - 1;
+            groupOf[k] = g;
+            counts[g]++;
+        }
+        var groupRefs = new StagedRowRef[groups][];
+        var groupKeys = new CopySortKey[groups][];
+        var next = new int[groups];
+        for (int g = 0; g < groups; g++)
+        {
+            groupRefs[g] = new StagedRowRef[counts[g]];
+            groupKeys[g] = new CopySortKey[counts[g]];
+        }
+        for (int k = 0; k < rowCount; k++)
+        {
+            int g = groupOf[k];
+            int o = next[g]++;
+            groupRefs[g][o] = ents.Rows[firstIdx[k]];
+            groupKeys[g][o] = keysAll[k];
+        }
+        var payloads = new byte[groups][];
+        Parallel.For(0, groups, g =>
+        {
+            Array.Sort(groupKeys[g], groupRefs[g]);
+            payloads[g] = groupRefs[g].Length == 0
+                ? Array.Empty<byte>()
+                : CopyTupleParser.PackFiltered(blobs, groupRefs[g]);
+        });
+        return payloads;
+    }
+
+    private static byte[][] BuildSortedCopyPayloads(
+        IReadOnlyList<(IntPtr Ptr, long Len)> blobs, List<KeptRow> kept, int groups)
+    {
+        int rowCount = kept.Count;
+        int bits = 0;
+        while ((1 << bits) < groups) bits++;
+        int shift = 64 - bits;
+        var groupOf = new int[rowCount];
+        var keysAll = new CopySortKey[rowCount];
+        var counts = new int[groups];
+        for (int i = 0; i < rowCount; i++)
+        {
+            var key = CopySortKey.FromWire(kept[i].SortKey.Wire);
+            keysAll[i] = key;
+            int g = (int)(key.HiBe >> shift);
+            if (g >= groups) g = groups - 1;
+            groupOf[i] = g;
+            counts[g]++;
+        }
+        var groupRows = new KeptRow[groups][];
+        var groupKeys = new CopySortKey[groups][];
+        var next = new int[groups];
+        for (int g = 0; g < groups; g++)
+        {
+            groupRows[g] = new KeptRow[counts[g]];
+            groupKeys[g] = new CopySortKey[counts[g]];
+        }
+        for (int i = 0; i < rowCount; i++)
+        {
+            int g = groupOf[i];
+            int o = next[g]++;
+            groupRows[g][o] = kept[i];
+            groupKeys[g][o] = keysAll[i];
+        }
+        var payloads = new byte[groups][];
+        Parallel.For(0, groups, g =>
+        {
+            Array.Sort(groupKeys[g], groupRows[g]);
+            var rows = groupRows[g];
+            if (rows.Length == 0) { payloads[g] = Array.Empty<byte>(); return; }
+            var refs = new StagedRowRef[rows.Length];
+            for (int i = 0; i < rows.Length; i++) refs[i] = rows[i].Row;
+            long[]? patches = null;
+            int[]? countOffs = null;
+            long[]? sumPatches = null;
+            int[]? sumOffs = null;
+            for (int i = 0; i < rows.Length; i++)
+            {
+                if (rows[i].Patch < 0) continue;
+                patches = new long[rows.Length];
+                countOffs = new int[rows.Length];
+                sumPatches = new long[rows.Length];
+                sumOffs = new int[rows.Length];
+                Array.Fill(patches, -1);
+                for (int j = 0; j < rows.Length; j++)
+                {
+                    patches[j] = rows[j].Patch;
+                    countOffs[j] = rows[j].CountOff;
+                    sumPatches[j] = rows[j].PatchSum;
+                    sumOffs[j] = rows[j].SumOff;
+                }
+                break;
+            }
+            payloads[g] = CopyTupleParser.PackFiltered(
+                blobs, refs, patches, countOffs, sumPatches, sumOffs);
+        });
+        return payloads;
+    }
+
+    private async Task<int> CopyPayloadsParallelAsync(
+        string tableName, IntentStageTable table,
+        int rowCount, int groups, byte[][] payloads, long sortMs, CancellationToken ct)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var tasks = new Task[groups];
+        for (int g = 0; g < groups; g++)
+        {
+            int group = g;
+            tasks[g] = Task.Run(async () =>
+            {
+                var payload = payloads[group];
+                if (payload.Length == 0) return;
+
+                await using var conn = await _ds.OpenConnectionAsync(ct);
+                await using var tx = await conn.BeginTransactionAsync(ct);
+                await using (var guc = conn.CreateCommand())
+                {
+                    guc.Transaction = tx;
+                    guc.CommandText =
+                        "SET LOCAL session_replication_role = replica; "
+                        + "SET LOCAL synchronous_commit = off; "
+                        + "SET LOCAL jit = off";
+                    await guc.ExecuteNonQueryAsync(ct);
+                }
+                string cols = IntentStage.CopyColumnList(table);
+                await using (var stream = await conn.BeginRawBinaryCopyAsync(
+                    $"COPY laplace.{tableName} ({cols}) FROM STDIN (FORMAT BINARY)", ct))
+                {
+                    await CopyTupleParser.WritePackedAsync(stream, payload, ct);
+                }
+                await tx.CommitAsync(ct);
+            }, ct);
+        }
+        await Task.WhenAll(tasks);
+        sw.Stop();
+        _log.LogInformation(
+            "WS_APPLY copy {Table}: {Rows:N0} rows across {Groups} id-range connection(s) in {Ms:N0}ms ({Rps:N0} rows/s; sort {SortMs:N0}ms)",
+            tableName, rowCount, groups, sw.ElapsedMilliseconds,
+            rowCount / Math.Max(1e-3, sw.Elapsed.TotalSeconds), sortMs);
+        return 1;
     }
 
     private async Task<int> CopyPhaseParallelAsync(
@@ -1159,43 +1592,10 @@ public sealed partial class NpgsqlSubstrateWriter
         if (kept.Count == 0) return 0;
         var sw = System.Diagnostics.Stopwatch.StartNew();
         int groups = ResolveCopyGroups(kept.Count, sharedSecondaryKeys);
-
-        // Sort by id so range-partitioned groups own disjoint btree
-        // keyspaces — measured LWLock:BufferContent contention disappears
-        // when concurrent COPY backends never share index pages.
-        kept.Sort(static (a, b) => a.SortKey.CompareToBytewise(b.SortKey));
-        int per = (kept.Count + groups - 1) / groups;
-
-        await CpuTopology.RunPinnedAsyncParallel(groups, async (g, token) =>
-        {
-            int start = g * per;
-            if (start >= kept.Count) return;
-            int n = Math.Min(per, kept.Count - start);
-
-            await using var conn = await _ds.OpenConnectionAsync(token);
-            await using var tx = await conn.BeginTransactionAsync(token);
-            await using (var guc = conn.CreateCommand())
-            {
-                guc.Transaction = tx;
-                guc.CommandText =
-                    "SET LOCAL session_replication_role = replica; "
-                    + "SET LOCAL synchronous_commit = off; "
-                    + "SET LOCAL jit = off";
-                await guc.ExecuteNonQueryAsync(token);
-            }
-            await CopyKeptAsync(conn, tableName, table, blobs, kept, start, n, token);
-            await tx.CommitAsync(token);
-        }, ct);
-
-        sw.Stop();
-        _log.LogInformation(
-            "WS_APPLY copy {Table}: {Rows:N0} rows across {Groups} id-range connection(s) in {Ms:N0}ms ({Rps:N0} rows/s)",
-            tableName, kept.Count, groups, sw.ElapsedMilliseconds,
-            kept.Count / Math.Max(1e-3, sw.Elapsed.TotalSeconds));
-        // One round-trip budget unit per parallel COPY wave. Counting each
-        // connection as its own RT made MaxRoundTripsPerApplyBatch (12) fail
-        // on every multi-P-core host while the wave itself is one apply phase.
-        return 1;
+        var payloads = BuildSortedCopyPayloads(blobs, kept, groups);
+        long sortMs = sw.ElapsedMilliseconds;
+        return await CopyPayloadsParallelAsync(
+            tableName, table, kept.Count, groups, payloads, sortMs, ct);
     }
 
     private static async Task CopyFilteredAsync(
