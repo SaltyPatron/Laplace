@@ -1,0 +1,152 @@
+name: DB — lifecycle ops
+
+# The database as its own lane: drop, repair, recreate, inspect — with no build,
+# no deploy, and no seeding. Those are separate workflows on purpose:
+#
+#   laplace.yml     build -> deploy -> db-ops -> test        (code changes)
+#   db-ops.yml      THIS  — the database's own lifecycle     (operator actions)
+#   seed-*.yml      corpus in                                (data)
+#
+# Every operation is a composition of primitives that already exist and are
+# already exercised by laplace.yml: `Laplace.Migrations` verbs (status/up/reset/
+# nuke) and `scripts/pipeline.sh` phases. Nothing here reimplements them, so a
+# fix to the pipeline is a fix here too.
+#
+# DESTRUCTIVE OPERATIONS REQUIRE TYPING THE DATABASE NAME. A workflow_dispatch
+# is a button, and `recreate` drops every entity, physicality and attestation in
+# the substrate. The confirm field is the difference between an operator
+# decision and a misclick.
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: "what to do to the database"
+        type: choice
+        required: true
+        default: status
+        options:
+          - status      # READ-ONLY. Migration state + extension version + substrate counts.
+          - migrate     # `up` only. Idempotent; applies any pending migrations.
+          - repair      # Re-sync extension SQL + re-tune + re-point perfcache/API env. NO DATA LOSS.
+          - remigrate   # `reset` + `up`: re-apply ALL migrations. Keeps substrate data.
+          - recreate    # DESTRUCTIVE. `nuke` + `up` + repair. Drops the database and rebuilds it EMPTY.
+      confirm:
+        description: "type the database name to authorize a destructive operation (recreate)"
+        type: string
+        required: false
+        default: ""
+      database:
+        description: "target DB (one database: laplace)"
+        type: choice
+        options: [laplace]
+        default: laplace
+
+permissions:
+  contents: read
+
+concurrency:
+  # One database, one lifecycle operation at a time. Queue rather than cancel:
+  # cancelling mid-nuke leaves the box without a database, which is worse than
+  # waiting.
+  group: laplace-db-ops
+  cancel-in-progress: false
+
+jobs:
+  db:
+    name: "DB — ${{ inputs.operation }}"
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/setup-laplace-env
+
+      - name: Authorize
+        run: |
+          op="${{ inputs.operation }}"
+          case "$op" in
+            recreate)
+              if [ "${{ inputs.confirm }}" != "${{ inputs.database }}" ]; then
+                echo "::error::'$op' is destructive — type '${{ inputs.database }}' in the confirm field to authorize."
+                exit 1
+              fi
+              echo "::warning::'$op' authorized: dropping ${{ inputs.database }} and rebuilding it EMPTY. All substrate data is lost; re-seed with the seed-* workflows."
+              ;;
+            remigrate)
+              echo "::notice::'$op' re-applies all migrations; substrate data is preserved."
+              ;;
+            *)
+              echo "'$op' is non-destructive."
+              ;;
+          esac
+
+      - name: Guard — refuse to drop the database out from under a running ingest
+        # An ingest holds the substrate mutex and streams COPY. Dropping the
+        # database beneath it destroys hours of work and leaves a half-folded
+        # corpus. Cheap to check, so check.
+        if: inputs.operation == 'recreate' || inputs.operation == 'remigrate'
+        run: |
+          busy=$(psql -h /var/run/postgresql -U laplace_admin -d "${{ inputs.database }}" -tAc \
+            "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND state = 'active' AND query ILIKE 'COPY %'" 2>/dev/null || echo 0)
+          if [ "${busy:-0}" -gt 0 ]; then
+            echo "::error::$busy active COPY statement(s) — an ingest is running. Refusing to touch the database."
+            exit 1
+          fi
+          echo "no active ingest"
+
+      - name: Status (read-only)
+        if: inputs.operation == 'status'
+        run: |
+          set +e
+          dotnet build app/Laplace.Migrations/Laplace.Migrations.csproj -c Release -v q --nologo
+          dotnet app/Laplace.Migrations/bin/Release/net10.0/Laplace.Migrations.dll status
+          echo "----- extension -----"
+          psql -h /var/run/postgresql -U laplace_admin -d "${{ inputs.database }}" -c \
+            "SELECT extname, extversion FROM pg_extension WHERE extname LIKE 'laplace%'"
+          echo "----- substrate -----"
+          psql -h /var/run/postgresql -U laplace_admin -d "${{ inputs.database }}" -c \
+            "SET search_path=laplace,public; SELECT * FROM substrate_health()"
+          echo "----- what has been ingested -----"
+          psql -h /var/run/postgresql -U laplace_admin -d "${{ inputs.database }}" -c \
+            "SET search_path=laplace,public; SELECT source_name, status, attestations, ended_at FROM ingest_run_journal ORDER BY started_at DESC LIMIT 20"
+
+      - name: Migrate
+        if: inputs.operation == 'migrate'
+        run: bash scripts/pipeline.sh migrate
+
+      - name: Repair
+        # Everything that makes a live database correct without touching its
+        # data: extension SQL to the installed version, PG + Laplace tuning,
+        # the perfcache GUC, the API env. This is the fix for "the database is
+        # there but the extension or a GUC drifted".
+        if: inputs.operation == 'repair'
+        run: bash scripts/pipeline.sh sync-extension tune-pg tune-laplace perfcache-guc api-env
+
+      - name: Remigrate (reset + up)
+        if: inputs.operation == 'remigrate'
+        run: |
+          dotnet build app/Laplace.Migrations/Laplace.Migrations.csproj -c Release -v q --nologo
+          dotnet app/Laplace.Migrations/bin/Release/net10.0/Laplace.Migrations.dll reset --yes
+          bash scripts/pipeline.sh migrate
+
+      - name: Recreate (nuke + up + repair)
+        # `pipeline.sh --fresh-db migrate` is `migrate nuke --yes` then `up`,
+        # the same path laplace.yml takes for its fresh_db dispatch input.
+        if: inputs.operation == 'recreate'
+        run: bash scripts/pipeline.sh --fresh-db migrate sync-extension tune-pg tune-laplace perfcache-guc api-env
+
+      - name: Verify
+        # Every operation ends by proving the database answers. A lifecycle
+        # action that reports success without a read is how "the DB is fine"
+        # becomes a claim nobody checked.
+        run: |
+          psql -h /var/run/postgresql -U laplace_admin -d "${{ inputs.database }}" -c \
+            "SELECT extname, extversion FROM pg_extension WHERE extname LIKE 'laplace%'"
+          psql -h /var/run/postgresql -U laplace_admin -d "${{ inputs.database }}" -c \
+            "SET search_path=laplace,public; SELECT * FROM substrate_health()"
+
+      - name: Next step
+        if: inputs.operation == 'recreate' || inputs.operation == 'remigrate'
+        run: |
+          echo "::notice::Database is rebuilt and EMPTY. Seed it: run seed-foundation.yml, then seed-knowledge / seed-documents / seed-chess as needed."
