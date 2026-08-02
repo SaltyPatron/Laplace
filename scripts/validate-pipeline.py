@@ -293,10 +293,20 @@ def validate_decomposer_matrix(manifest: dict, gates: dict) -> list[str]:
             f"decomposer-gates.json: missing gate entries for manifest sources: {missing_gates}"
         )
 
-    extra_gates = sorted(gate_sources - manifest_sources)
-    if extra_gates:
+    # CLI keys used only for journal name resolution (verify-ingest-journal.sh
+    # --cli-key) may sit outside the foundation/knowledge ladder. Reject extras
+    # that claim consensus thresholds without being ladder sources — not mere
+    # name maps. Otherwise journal proof and this check fight each other.
+    sources_spec = gates.get("sources", {})
+    extra_consensus = sorted(
+        key
+        for key in (gate_sources - manifest_sources)
+        if sources_spec.get(key, {}).get("consensus_gates")
+    )
+    if extra_consensus:
         errs.append(
-            f"decomposer-gates.json: entries not in manifest ingest order: {extra_gates}"
+            "decomposer-gates.json: consensus_gates outside manifest ingest order: "
+            f"{extra_consensus}"
         )
 
     manifest_order = gates.get("manifest_order", [])
