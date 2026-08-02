@@ -328,16 +328,23 @@ internal static class ChessWitnessHydrator
     {
         if (wanted.Count == 0) return Array.Empty<ChessWitnessedGame>();
 
+        // Result and SetUp are single surfaces — render_text_batch round-trips them.
+        // The MOVETEXT is a composition over ordered tokens and does NOT round-trip
+        // through render (see RebuildMovetextsAsync), so it is rebuilt from its
+        // trajectory instead.
         var contentIds = new List<Hash128>();
+        var movetextIds = new List<Hash128>();
         void Need(Hash128 id) { if (id != default) contentIds.Add(id); }
         foreach (var (_, _, gm) in wanted)
         {
-            Need(gm.MovetextObj);
+            if (gm.MovetextObj != default) movetextIds.Add(gm.MovetextObj);
             Need(gm.ResultObj);
             Need(gm.SetupObj);
         }
 
         var textById = await RenderTextBatchAsync(ds, contentIds, ct).ConfigureAwait(false);
+        foreach (var (id, text) in await RebuildMovetextsAsync(ds, movetextIds, ct).ConfigureAwait(false))
+            textById[id] = text;
 
         var outList = new List<ChessWitnessedGame>(wanted.Count);
         foreach (var (lineId, eventId, gm) in wanted)
@@ -445,6 +452,51 @@ internal static class ChessWitnessHydrator
         {
             if (!string.IsNullOrEmpty(texts[i])) map[unique[i]] = texts[i];
         }
+        return map;
+    }
+
+    /// <summary>
+    /// Rebuild a movetext from its ORDERED TOKEN IDS, space-joined.
+    ///
+    /// WHY render() CANNOT BE USED HERE. RecordMovetext composes the movetext as a Merkle
+    /// over its ordered ply-token ids — "1." "d4" "d5" "2." … — with the trajectory
+    /// carrying the sequence. That record is lossless and the tokens are all present and
+    /// in order. But <c>render()</c> concatenates a composed document's constituents with
+    /// NO SEPARATOR, so a movetext reads back as
+    ///
+    ///     1.d4d52.c4dxc43.Nf3Nf64.e3e65.Bxc4c5...
+    ///
+    /// which no PGN parser can tokenize. ParseMovetext's walk returns nothing, its legacy
+    /// whitespace split returns one giant token, and every caller then hits
+    /// `if (moves.Length == 0) continue;` and drops the line — SILENTLY, because each
+    /// substrate-sourced lane returns early on an unreplayable line by design.
+    ///
+    /// Measured on this box: 3,314 of 3,341 hydrated lines (99.19%) failed to replay for
+    /// exactly this reason, across chess-opening-match, chess-syzygy, chess-trajectory,
+    /// chess-analyze and chess-eval — every lane that reads games back out of the
+    /// substrate rather than off a PGN file. The recorded data was never wrong; it was
+    /// unreadable, and the lanes reported status=ok while writing almost nothing.
+    ///
+    /// The separator is a space because that is the separator MovetextTokens.Parse split
+    /// on, so join-of-split round-trips exactly. Proven in SQL against a stored game:
+    /// unpacking the 49 token ids and joining with ' ' reproduces the source movetext
+    /// byte for byte, result token included.
+    /// </summary>
+    private static async Task<Dictionary<Hash128, string>> RebuildMovetextsAsync(
+        NpgsqlDataSource ds, IReadOnlyList<Hash128> movetextIds, CancellationToken ct)
+    {
+        var map = new Dictionary<Hash128, string>();
+        var unique = movetextIds.Distinct().Where(id => id != default).ToArray();
+        if (unique.Length == 0) return map;
+
+        var bytes = new byte[unique.Length][];
+        for (int i = 0; i < unique.Length; i++) bytes[i] = unique[i].ToBytes();
+
+        var byHex = await NpgsqlSubstrateReads.TrajectoryTokenTextBatchAsync(ds, bytes, ct)
+            .ConfigureAwait(false);
+        for (int i = 0; i < unique.Length; i++)
+            if (byHex.TryGetValue(Convert.ToHexString(bytes[i]), out var text))
+                map[unique[i]] = text;
         return map;
     }
 

@@ -123,6 +123,14 @@ internal static class IngestDispatchTable
             new Laplace.Chess.Service.ChessSyzygyDecomposer(), "",
             skipLayerCheck: true, cli, skipSourceCompletion: true)),
 
+        // Names each recorded line's opening by BOARD IDENTITY -- the deepest position
+        // that collides with one the ChessOpenings catalog named. A third witness beside
+        // the PGN header and the analyzer's SAN-prefix guess; additive and marker-gated,
+        // never a re-derivation of ChessAnalysis. No path: the substrate is the source.
+        ("chess-opening-match", cli => IngestCommands.IngestViaRunnerAsync(
+            new Laplace.Chess.Service.ChessOpeningMatchDecomposer(), "",
+            skipLayerCheck: true, cli, skipSourceCompletion: true)),
+
         ("openings", cli => IngestCommands.IngestViaRunnerAsync(
             new Laplace.Chess.Service.ChessOpeningsDecomposer(cli.Recursive), cli.Path ?? "",
             skipLayerCheck: true, cli)),

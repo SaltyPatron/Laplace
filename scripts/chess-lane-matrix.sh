@@ -108,11 +108,12 @@ lane ok "books"                   chess-books "$CORPUS/books"
 lane ok "nested with --recursive" chess       "$CORPUS/nested" --recursive
 lane ok "syzygy probe"            chess-syzygy
 lane ok "trajectory backfill"     chess-trajectory
+lane ok "opening match (board id)" chess-opening-match
 
 echo "==== durable ledger (the journal, not the exit code) ===="
 # Exit 0 is the process's opinion. This is the row the CI verifier reads, and the two
 # disagreeing is exactly how a run reported success while its journal said 'running'.
-for key in chess openings chess-books chess-syzygy chess-trajectory; do
+for key in chess openings chess-books chess-syzygy chess-trajectory chess-opening-match; do
   if bash "$ROOT/scripts/verify-ingest-journal.sh" --cli-key "$key" >/tmp/journal-$$.txt 2>&1; then
     echo "  PASS  journal $key: $(tail -1 /tmp/journal-$$.txt)"
     pass=$((pass + 1))
@@ -124,7 +125,7 @@ done
 rm -f /tmp/journal-$$.txt
 
 echo "==== per-source gates (decomposer-gates.json) ===="
-for key in chess openings chess-books chess-syzygy chess-trajectory; do
+for key in chess openings chess-books chess-syzygy chess-trajectory chess-opening-match; do
   if python3 "$ROOT/scripts/decomposer-gate-check.py" --source "$key" --dbname "$DB" \
        --user "$PGUSER" --host "$PGHOST" >/tmp/gate-$$.txt 2>&1; then
     echo "  PASS  gates $key"

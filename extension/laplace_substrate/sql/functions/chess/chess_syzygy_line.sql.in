@@ -1,0 +1,52 @@
+-- chess_syzygy_line(line): the exact endgame oracle along one line.
+--
+-- The ChessSyzygy lane has written HAS_WDL / HAS_DTZ since campaign PR-8 and had NO
+-- read surface at all — `api('chess')` listed fourteen functions and not one of them
+-- mentioned a tablebase. Verdicts that cannot be read are verdicts nobody probed.
+--
+-- LAYERING (GH #736). A tablebase verdict is a pure function of the POSITION, so the
+-- subject is the position and the context is the LINE it was reached along — the same
+-- grain as stockfish-eval. Reading "the endgame of this game" is therefore a
+-- context-pinned scan, riding attestations_context_btree, not a walk of the trajectory.
+--
+-- WDL is five-valued and SIDE-TO-MOVE POV, not white POV: 'win' means the player to
+-- move in that position wins with perfect play. It is never mixed with the OUTCOME
+-- fold's white-POV eff_mu, which is why this returns the token rather than a number.
+CREATE OR REPLACE FUNCTION chess_syzygy_line(p_line bytea, p_limit int DEFAULT 64)
+    RETURNS TABLE(position_id bytea, wdl text, dtz text)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+WITH probed AS MATERIALIZED (
+    SELECT a.subject_id AS pos,
+           max(a.object_id) FILTER (WHERE a.type_id = relation_type_id('HAS_WDL')) AS wdl_id,
+           max(a.object_id) FILTER (WHERE a.type_id = relation_type_id('HAS_DTZ')) AS dtz_id
+    FROM attestations a
+    WHERE a.context_id = p_line
+      AND a.type_id IN (relation_type_id('HAS_WDL'), relation_type_id('HAS_DTZ'))
+    GROUP BY a.subject_id
+    LIMIT p_limit
+),
+ord AS MATERIALIZED (
+    SELECT p.*, row_number() OVER (ORDER BY p.pos) AS ix FROM probed p
+),
+-- Render last, once, over DISTINCT ids. A tablebase page repeats itself harder than
+-- any other read here: WDL is five-valued and DTZ is a small integer, so a 64-position
+-- endgame carries maybe eight distinct surfaces between 128 id slots.
+surfaces AS MATERIALIZED (
+    SELECT COALESCE(array_agg(DISTINCT s), '{}'::bytea[]) AS ids
+    FROM ord o, LATERAL (VALUES (o.wdl_id), (o.dtz_id)) v(s)
+    WHERE s IS NOT NULL
+),
+label AS MATERIALIZED (
+    SELECT p.id, t.txt
+    FROM surfaces b,
+         LATERAL unnest(b.ids) WITH ORDINALITY AS p(id, i),
+         LATERAL unnest(realize_batch(b.ids, NULL)) WITH ORDINALITY AS t(txt, j)
+    WHERE p.i = t.j
+)
+SELECT o.pos, w.txt, d.txt
+FROM ord o
+LEFT JOIN label w ON w.id = o.wdl_id
+LEFT JOIN label d ON d.id = o.dtz_id
+ORDER BY o.ix
+$$;

@@ -1,0 +1,138 @@
+-- chess_opening_games(opening, limit, offset): the PLAYINGS of one opening.
+--
+-- WHY THIS EXISTS. Openings and games were both in the substrate and joined
+-- correctly, and there was no read surface that joined them. `api('chess')` listed
+-- fourteen chess functions and the only one that touched openings was
+-- chess_opening_preference, which is per-PLAYER and returns ECO codes. Answering
+-- "which games were played in the Sicilian" meant hand-writing the layer map again
+-- (GH #736: the subject is the shared LINE, the context pins the PLAYING), which is
+-- the rediscovery chess_opening_preference's header already argues nobody should
+-- have to do.
+--
+-- THE JOIN IS A CONTENT COLLISION, NOT A LOOKUP. The openings catalog attests
+-- (final_position, OPENING_NAME, name) and a game attests (line, GAME_HAS_OPENING,
+-- name). Both mint `name` through the same content law, so they are the SAME id and
+-- word_id() reproduces it — including for multi-word names like 'Sicilian Defense'.
+-- The filter is therefore in ID SPACE, one index seek on attestations_object_btree,
+-- never a render-and-compare.
+--
+-- Two witnesses assert the opening and BOTH are wanted: ChessPgn transcribes what the
+-- PGN's Opening header claimed, ChessAnalysis derives it by replaying the line against
+-- the ECO table. p_source filters to one when they disagree; NULL (default) returns
+-- the line once per opening claim, which is what "who says so" needs.
+--
+-- Ranked by the LINE'S OWN FOLD CELL — (line, OUTCOME, Chess_Result) — where
+-- witness_count IS how many times the line was played and eff_mu IS how it fares
+-- (white POV). That is a ranking the fold produced, not an arbitrary LIMIT over an
+-- unordered scan.
+CREATE OR REPLACE FUNCTION chess_opening_games(p_opening text,
+                                               p_limit int DEFAULT 25,
+                                               p_offset int DEFAULT 0,
+                                               p_source bytea DEFAULT NULL)
+    RETURNS TABLE(line_id bytea, event_id bytea, opening text, eco text,
+                  played_on text, result text, white text, black text,
+                  times_played bigint, eff_mu double precision)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+WITH claim AS MATERIALIZED (
+    -- Lines whose opening is this one. object_id = the name's content id.
+    --
+    -- The opening claim itself is LINE-GRAIN with context_id NULL, deliberately:
+    -- every playing that asserts the same opening for the same line MERGES into one
+    -- evidence row whose observation count accumulates (ChessPgnDecomposer
+    -- RecordOpeningHeaders). Reading the playing off this row therefore yields NULL,
+    -- and the first cut of this function did exactly that and returned a page of
+    -- games with no date, no result and no players. The playings come from
+    -- PLAYS_LINE, which is the one record edge whose subject IS the event.
+    SELECT DISTINCT a.subject_id AS line
+    FROM attestations a
+    WHERE a.object_id = word_id(p_opening)
+      AND a.type_id = relation_type_id('GAME_HAS_OPENING')
+      AND (p_source IS NULL OR a.source_id = p_source)
+),
+played AS MATERIALIZED (
+    SELECT k.line, pl.subject_id AS event
+    FROM claim k
+    JOIN attestations pl ON pl.object_id = k.line
+                        AND pl.type_id = relation_type_id('PLAYS_LINE')
+),
+fold AS MATERIALIZED (
+    -- The line's outcome cell. LEFT-joined below: a line recorded before the fold
+    -- ran returns with NULL rather than vanishing (unattested is not attested-false).
+    SELECT c.subject_id AS line, c.witness_count, c.rating, c.rd
+    FROM consensus c
+    JOIN claim k ON k.line = c.subject_id
+    WHERE c.type_id = relation_type_id('OUTCOME')
+),
+ranked AS MATERIALIZED (
+    SELECT g.line, g.event, f.witness_count, f.rating, f.rd
+    FROM played g
+    LEFT JOIN fold f ON f.line = g.line
+    ORDER BY f.witness_count DESC NULLS LAST, eff_mu(f.rating, f.rd) DESC NULLS LAST,
+             g.line, g.event
+    LIMIT p_limit OFFSET p_offset
+),
+hdr AS MATERIALIZED (
+    -- Every header this page needs off ONE scan of the page's subject rows.
+    -- GAME_HAS_ECO is line-grain (ctx NULL by design — each playing corroborates the
+    -- same cell), so it is read without the context pin; the rest are per-playing.
+    SELECT r.line, r.event,
+           max(a.object_id) FILTER (WHERE a.type_id = relation_type_id('ON_DATE')
+                                      AND a.context_id = r.event)   AS date_id,
+           max(a.object_id) FILTER (WHERE a.type_id = relation_type_id('HAS_RESULT')
+                                      AND a.context_id = r.event)   AS result_id,
+           max(a.object_id) FILTER (WHERE a.type_id = relation_type_id('HAS_WHITE')
+                                      AND a.context_id = r.event)   AS white_id,
+           max(a.object_id) FILTER (WHERE a.type_id = relation_type_id('HAS_BLACK')
+                                      AND a.context_id = r.event)   AS black_id,
+           max(a.object_id) FILTER (WHERE a.type_id = relation_type_id('GAME_HAS_ECO')) AS eco_id
+    FROM ranked r
+    LEFT JOIN attestations a
+           ON a.subject_id = r.line
+          AND a.type_id IN (relation_type_id('ON_DATE'), relation_type_id('HAS_RESULT'),
+                            relation_type_id('HAS_WHITE'), relation_type_id('HAS_BLACK'),
+                            relation_type_id('GAME_HAS_ECO'))
+    GROUP BY r.line, r.event
+),
+ord AS MATERIALIZED (
+    SELECT h.*, r.witness_count, r.rating, r.rd,
+           row_number() OVER (ORDER BY r.witness_count DESC NULLS LAST,
+                                       eff_mu(r.rating, r.rd) DESC NULLS LAST,
+                                       r.line, r.event) AS ix
+    FROM ranked r JOIN hdr h ON h.line = r.line AND h.event = r.event
+),
+-- RENDER LAST, AND ONCE, OVER DISTINCT IDS. Everything above this line is id
+-- arithmetic; `ord` is already the final page (LIMIT/OFFSET landed in `ranked`), so
+-- nothing realized here is thrown away.
+--
+-- DISTINCT matters as much as the batching. A page of one opening repeats the same
+-- ECO on nearly every row and the same player across a tournament, so the positional
+-- form (five ids per row, ordered) handed realize_batch 125 ids for a 25-row page with
+-- perhaps 40 distinct values among them. realize_batch measured 12 ms per id on this
+-- box, so the duplicates were most of the call. Realize the distinct set, then map
+-- back by id — the same surface_batch/surface_text shape chess_line uses.
+surfaces AS MATERIALIZED (
+    SELECT COALESCE(array_agg(DISTINCT s), '{}'::bytea[]) AS ids
+    FROM ord o, LATERAL (VALUES (o.eco_id), (o.date_id), (o.result_id),
+                                (o.white_id), (o.black_id)) v(s)
+    WHERE s IS NOT NULL
+),
+label AS MATERIALIZED (
+    SELECT p.id, t.txt
+    FROM surfaces b,
+         LATERAL unnest(b.ids) WITH ORDINALITY AS p(id, i),
+         LATERAL unnest(realize_batch(b.ids, NULL)) WITH ORDINALITY AS t(txt, j)
+    WHERE p.i = t.j
+)
+SELECT o.line, o.event, p_opening,
+       eco.txt, dat.txt, res.txt, wht.txt, blk.txt,
+       o.witness_count::bigint,
+       eff_mu_display(o.rating, o.rd)::double precision
+FROM ord o
+LEFT JOIN label eco ON eco.id = o.eco_id
+LEFT JOIN label dat ON dat.id = o.date_id
+LEFT JOIN label res ON res.id = o.result_id
+LEFT JOIN label wht ON wht.id = o.white_id
+LEFT JOIN label blk ON blk.id = o.black_id
+ORDER BY o.ix
+$$;
