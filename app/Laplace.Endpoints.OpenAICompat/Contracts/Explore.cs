@@ -135,6 +135,28 @@ public sealed record ExploreConstituentRow(
     [property: JsonPropertyName("run_length")] int RunLength,
     [property: JsonPropertyName("flags")] long Flags);
 
+/// <summary>Packed trajectory vertex — identity-space XYZ; M/RLE/flags are paint.</summary>
+public sealed record ExplorePackedVertexRow(
+    [property: JsonPropertyName("ordinal")] int Ordinal,
+    [property: JsonPropertyName("x")] double X,
+    [property: JsonPropertyName("y")] double Y,
+    [property: JsonPropertyName("z")] double Z,
+    [property: JsonPropertyName("m")] double M,
+    [property: JsonPropertyName("child_id_hex")] string ChildIdHex,
+    [property: JsonPropertyName("run_length")] int RunLength,
+    [property: JsonPropertyName("flags")] long Flags);
+
+/// <summary>Realized curve vertex — child live coords (entity_curve / word_curve).</summary>
+public sealed record ExploreRealizedVertexRow(
+    [property: JsonPropertyName("ordinal")] int Ordinal,
+    [property: JsonPropertyName("x")] double X,
+    [property: JsonPropertyName("y")] double Y,
+    [property: JsonPropertyName("z")] double Z,
+    [property: JsonPropertyName("m")] double M,
+    [property: JsonPropertyName("child_id_hex")] string ChildIdHex,
+    [property: JsonPropertyName("child_label")] string ChildLabel,
+    [property: JsonPropertyName("radius")] double Radius);
+
 public sealed record ExploreMemberRow(
     [property: JsonPropertyName("member_id_hex")] string MemberIdHex,
     [property: JsonPropertyName("member_label")] string MemberLabel,
@@ -155,6 +177,8 @@ public sealed record ExploreEntityResponse(
     [property: JsonPropertyName("consensus_in")] IReadOnlyList<ExploreConsensusRow> ConsensusIn,
     [property: JsonPropertyName("senses")] IReadOnlyList<ExploreSenseRow> Senses,
     [property: JsonPropertyName("constituents")] IReadOnlyList<ExploreConstituentRow> Constituents,
+    [property: JsonPropertyName("packed_vertices")] IReadOnlyList<ExplorePackedVertexRow> PackedVertices,
+    [property: JsonPropertyName("realized_vertices")] IReadOnlyList<ExploreRealizedVertexRow> RealizedVertices,
     [property: JsonPropertyName("evidence")] IReadOnlyList<LabeledEvidenceItem> Evidence);
 
 public sealed record ExploreEntityDetailResponse(

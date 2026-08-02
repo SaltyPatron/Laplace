@@ -57,13 +57,14 @@ internal sealed class ExploreDecomposeService
             Nodes: nodes);
     }
 
-    // Compute the anchor for a surface: the natural-unit centroid coord + the
-    // grapheme-level trajectory WKT (LINESTRING ZM), plus the decomposition tree
-    // for display. Trajectory prefers tier-1 (grapheme) coords to match how
-    // witnessed words store physicalities.trajectory (type=1); falls back to
-    // tier-0 codepoints, and is null for a degenerate <2-point curve (Frechet
-    // then skipped, geodesic still runs).
-    public ExploreAnchor ComputeAnchor(string text)
+        // Compute the anchor for a surface: the natural-unit centroid coord + a
+        // REALIZED grapheme-level curve WKT (LINESTRING ZM of child live coords),
+        // plus the decomposition tree for display. This is the Frechet operand
+        // (entity_curve shape), NOT the packed physicalities.trajectory manifest
+        // (Rule #3). Prefers tier-1 grapheme coords; falls back to tier-0
+        // codepoints; null for a degenerate <2-point curve (Frechet skipped,
+        // geodesic still runs).
+        public ExploreAnchor ComputeAnchor(string text)
     {
         ArgumentException.ThrowIfNullOrEmpty(text);
         EnsurePerfcache();

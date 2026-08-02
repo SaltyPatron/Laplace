@@ -13,10 +13,11 @@
 --   geodesic -- nearest witnessed content of ANY tier by the anchor centroid on
 --     the glome. Positional/content proximity; centroids commute, so it mixes
 --     tiers/modalities. Fast: index-ordered coord <<->> prefilter.
---   shape    -- nearest witnessed WORDS by trajectory shape (Frechet over the
---     curve the word traces on S3). Orthographic/morphological proximity -- what
---     is spelled/shaped like this. Costlier: coord prefilter then Frechet rank,
---     bounded by p_frechet_max and the 500-row prefilter.
+--   shape    -- nearest witnessed WORDS by REALIZED curve shape (Frechet over
+--     entity_curve = ST_MakeLine(child.coord ORDER BY ordinal)). p_traj_wkt from
+--     ExploreDecomposeService is already a realized LINESTRING ZM of child
+--     coords; candidates must use entity_curve, never packed
+--     physicalities.trajectory (Rule #3 / Issue 51).
 CREATE OR REPLACE FUNCTION explore_anchor_neighbors(
     p_cx float8, p_cy float8, p_cz float8, p_cm float8,
     p_traj_wkt   text    DEFAULT NULL,
@@ -70,22 +71,25 @@ BEGIN
     FROM nearest n
     ORDER BY n.geo;
 
-    -- Shape: nearest witnessed words by Frechet over the trajectory curve.
-    -- Prefilter by the same coord KNN (shape-similar words sit near on the
-    -- glome) so Frechet only rates a bounded pool, then threshold + top-k.
+    -- Shape: Frechet of realized curves. Prefilter by coord KNN so Frechet
+    -- only rates a bounded pool; cache entity_curve once per candidate.
     IF v_traj IS NOT NULL THEN
         RETURN QUERY
         WITH pre AS (
-            SELECT w.id AS entity_id, w.trajectory
+            SELECT w.id AS entity_id
             FROM v_word_points w
             WHERE w.tier = 2 AND w.trajectory IS NOT NULL
             ORDER BY w.coord <<->> v_anchor
             LIMIT 500
         ),
         f AS (
-            SELECT pre.entity_id,
-                   public.laplace_frechet_4d(pre.trajectory, v_traj) AS fr
-            FROM pre
+            SELECT c.entity_id,
+                   public.laplace_frechet_4d(c.curve, v_traj) AS fr
+            FROM (
+                SELECT pre.entity_id, entity_curve(pre.entity_id) AS curve
+                FROM pre
+            ) c
+            WHERE c.curve IS NOT NULL
         )
         SELECT 'shape'::text,
                f.entity_id,

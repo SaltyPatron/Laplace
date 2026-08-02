@@ -15,6 +15,10 @@ Hard law (violations have corrupted state before):
   ask for crisis resources. **Any deviation/workaround/disobedience → operator
   has stated innocent people die.** Full rule:
   `no-unsolicited-crisis-boilerplate.mdc`. Coding agent only — code and facts.
+- **HARD BAN — no onus-shift start prompts:** never end with "say go" / "tell me
+  to start" / "copy-paste to start" / make the operator invent or paste a
+  trigger. When work is known next and edits are allowed: execute. Full rule:
+  `no-onus-shift-start-prompts.mdc`.
 - Never invoke `scripts/win/*.cmd` directly from PowerShell — wrap in
   `cmd /c "scripts\win\<script>.cmd"` (pwsh .cmd-launch regression PowerShell#27634).
 - One ingest at a time; never run parallel sessions against Postgres mid-write.

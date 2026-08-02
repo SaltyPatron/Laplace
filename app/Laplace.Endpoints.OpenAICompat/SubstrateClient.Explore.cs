@@ -298,11 +298,13 @@ internal sealed partial class SubstrateClient
             var consensusInTask = OnConn(c => ReadConsensusAsync(c, id, "in", consensusLimit, ct));
             var sensesTask = OnConn(c => ReadSensesAsync(c, id, ct));
             var constituentsTask = OnConn(c => ReadConstituentsAsync(c, id, ct));
+            var packedTask = OnConn(c => ReadPackedVerticesAsync(c, id, ct));
+            var realizedTask = OnConn(c => ReadRealizedVerticesAsync(c, id, ct));
             var evidenceTask = OnConn(c => ReadEvidenceItemsAsync(c, id, evidenceLimit, ct));
 
             await Task.WhenAll(
                 physicalitiesTask, factsTask, consensusOutTask, consensusInTask,
-                sensesTask, constituentsTask, evidenceTask);
+                sensesTask, constituentsTask, packedTask, realizedTask, evidenceTask);
 
             return new ExploreEntityResponse(
                 IdHex: idHex.ToLowerInvariant(),
@@ -317,6 +319,8 @@ internal sealed partial class SubstrateClient
                 ConsensusIn: await consensusInTask,
                 Senses: await sensesTask,
                 Constituents: await constituentsTask,
+                PackedVertices: await packedTask,
+                RealizedVertices: await realizedTask,
                 Evidence: await evidenceTask);
         }
         catch (Exception ex) when (ex is NpgsqlException or TimeoutException)
@@ -695,6 +699,24 @@ internal sealed partial class SubstrateClient
             ChildLabel: c.ChildLabel,
             RunLength: c.RunLength,
             Flags: c.Flags))];
+    }
+
+    private static async Task<IReadOnlyList<ExplorePackedVertexRow>> ReadPackedVerticesAsync(
+        NpgsqlConnection conn, byte[] id, CancellationToken ct)
+    {
+        var rows = await NpgsqlSubstrateReads.PackedTrajectoryVerticesAsync(conn, id, ct);
+        return [.. rows.Select(v => new ExplorePackedVertexRow(
+            Ordinal: v.Ordinal, X: v.X, Y: v.Y, Z: v.Z, M: v.M,
+            ChildIdHex: v.ChildIdHex, RunLength: v.RunLength, Flags: v.Flags))];
+    }
+
+    private static async Task<IReadOnlyList<ExploreRealizedVertexRow>> ReadRealizedVerticesAsync(
+        NpgsqlConnection conn, byte[] id, CancellationToken ct)
+    {
+        var rows = await NpgsqlSubstrateReads.RealizedTrajectoryVerticesAsync(conn, id, ct);
+        return [.. rows.Select(v => new ExploreRealizedVertexRow(
+            Ordinal: v.Ordinal, X: v.X, Y: v.Y, Z: v.Z, M: v.M,
+            ChildIdHex: v.ChildIdHex, ChildLabel: v.ChildLabel, Radius: v.Radius))];
     }
 
     private static async Task<IReadOnlyList<LabeledEvidenceItem>> ReadEvidenceItemsAsync(

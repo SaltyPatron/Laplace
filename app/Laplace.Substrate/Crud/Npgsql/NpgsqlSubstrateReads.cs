@@ -1335,6 +1335,73 @@ public static class NpgsqlSubstrateReads
             p => p.Add("id", NpgsqlDbType.Bytea).Value = id,
             ct: ct, label: "constituents", onError: onError);
 
+    /// <summary>
+    /// Packed trajectory vertices: ST_DumpPoints XYZM + mantissa_unpack.
+    /// Identity-space fold for the Packed glome pane — not geometry for Frechet.
+    /// </summary>
+    public readonly record struct PackedTrajectoryVertexRow(
+        int Ordinal, double X, double Y, double Z, double M,
+        string ChildIdHex, int RunLength, long Flags);
+
+    public static Task<IReadOnlyList<PackedTrajectoryVertexRow>> PackedTrajectoryVerticesAsync(
+        NpgsqlConnection conn, byte[] id, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(conn, """
+            SELECT u.ordinal,
+                   public.ST_X(dp.geom), public.ST_Y(dp.geom),
+                   public.ST_Z(dp.geom), public.ST_M(dp.geom),
+                   encode(u.entity_id, 'hex'),
+                   GREATEST(u.run_length, 1),
+                   u.flags
+            FROM (
+                SELECT w.trajectory
+                FROM laplace.v_word_points w
+                WHERE w.id = @id AND w.trajectory IS NOT NULL
+                LIMIT 1
+            ) t,
+                 LATERAL public.ST_DumpPoints(t.trajectory) dp,
+                 LATERAL public.laplace_mantissa_unpack(dp.geom) u
+            ORDER BY u.ordinal
+            LIMIT 512
+            """,
+            static r => new PackedTrajectoryVertexRow(
+                r.GetInt32(0), r.GetDouble(1), r.GetDouble(2), r.GetDouble(3), r.GetDouble(4),
+                r.GetString(5), r.GetInt32(6), r.GetInt64(7)),
+            p => p.Add("id", NpgsqlDbType.Bytea).Value = id,
+            ct: ct, label: "packed_trajectory_vertices", onError: onError);
+
+    /// <summary>
+    /// Realized curve vertices — same join as word_curve / entity_curve
+    /// (child live coords by constituent ordinal). Placement glome ribbon.
+    /// </summary>
+    public readonly record struct RealizedTrajectoryVertexRow(
+        int Ordinal, double X, double Y, double Z, double M,
+        string ChildIdHex, string ChildLabel, double Radius);
+
+    public static Task<IReadOnlyList<RealizedTrajectoryVertexRow>> RealizedTrajectoryVerticesAsync(
+        NpgsqlConnection conn, byte[] id, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(conn, """
+            SELECT c.ordinal,
+                   public.ST_X(w.coord), public.ST_Y(w.coord),
+                   public.ST_Z(w.coord), public.ST_M(w.coord),
+                   encode(c.child_id, 'hex'),
+                   COALESCE(
+                       NULLIF(laplace.render_text_fast(c.child_id, 8), ''),
+                       left(encode(c.child_id, 'hex'), 16)),
+                   w.radius_origin
+            FROM laplace.constituents(@id) c
+            JOIN laplace.v_word_points w ON w.id = c.child_id
+            WHERE w.coord IS NOT NULL
+            ORDER BY c.ordinal
+            LIMIT 512
+            """,
+            static r => new RealizedTrajectoryVertexRow(
+                r.GetInt32(0), r.GetDouble(1), r.GetDouble(2), r.GetDouble(3), r.GetDouble(4),
+                r.GetString(5), r.GetString(6), r.GetDouble(7)),
+            p => p.Add("id", NpgsqlDbType.Bytea).Value = id,
+            ct: ct, label: "realized_trajectory_vertices", onError: onError);
+
     public readonly record struct ConsensusInLabeledRow(
         string SubjectIdHex, string TypeLabel, string SubjectLabel, decimal EffMu, long Witnesses);
 

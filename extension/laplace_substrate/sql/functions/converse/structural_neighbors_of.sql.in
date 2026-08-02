@@ -1,5 +1,8 @@
 -- Entity-id keyed structural KNN with S³ coords (explore glome overlay).
 -- Unlike structural_neighbors(text), does not re-resolve via prompt_state.
+--
+-- Shape axis: Frechet over REALIZED curves (entity_curve), never packed
+-- physicalities.trajectory (Rule #3 / Issue 51).
 CREATE OR REPLACE FUNCTION structural_neighbors_of(
     p_id bytea,
     p_k  integer DEFAULT 10)
@@ -17,28 +20,28 @@ CREATE OR REPLACE FUNCTION structural_neighbors_of(
     SET search_path = @extschema@, public AS $sn$
 DECLARE
     v_coord geometry;
-    v_traj  geometry;
+    v_curve geometry;
 BEGIN
-    SELECT a.coord, a.trajectory
-      INTO v_coord, v_traj
+    SELECT a.coord, entity_curve(p_id)
+      INTO v_coord, v_curve
     FROM word_anchor(p_id) a;
     IF v_coord IS NULL THEN RETURN; END IF;
 
     RETURN QUERY
     WITH knn AS (
-        SELECT w.id AS entity_id, w.coord, w.trajectory, w.radius_origin
+        SELECT w.id AS entity_id, w.coord, w.radius_origin
         FROM v_word_points w
         WHERE w.coord IS NOT NULL
         ORDER BY w.coord <<->> v_coord
         LIMIT GREATEST(p_k * 20, 200)),
     dedup AS (
         SELECT DISTINCT ON (k.entity_id)
-               k.entity_id, k.coord, k.trajectory, k.radius_origin,
+               k.entity_id, k.coord, k.radius_origin,
                public.laplace_angular_distance_4d(k.coord, v_coord) AS geo
         FROM knn k
         ORDER BY k.entity_id, public.laplace_angular_distance_4d(k.coord, v_coord)),
     nearest AS (
-        SELECT entity_id, coord, trajectory, radius_origin, geo
+        SELECT entity_id, coord, radius_origin, geo
         FROM dedup
         WHERE entity_id <> p_id
         ORDER BY geo
@@ -47,22 +50,28 @@ BEGIN
         SELECT n.*, row_number() OVER (ORDER BY n.geo) AS ord
         FROM nearest n
     ),
+    curves AS (
+        -- Cache realized curves once per survivor (never rebuild inside Frechet).
+        SELECT o.entity_id, o.coord, o.radius_origin, o.geo, o.ord,
+               entity_curve(o.entity_id) AS curve
+        FROM ordered o
+    ),
     labels AS (
         -- Full-mesh resolution via ONE realize_batch over the <= p_k survivors
         -- (was: scalar realize per neighbour): synset/ILI hubs resolve through
         -- the name/synset-lemma/translation arms to the real word; hex stays
         -- only as the genuine last resort so the node still plots.
-        SELECT realize_batch(array_agg(o.entity_id ORDER BY o.ord)) AS l
-        FROM ordered o
+        SELECT realize_batch(array_agg(c.entity_id ORDER BY c.ord)) AS l
+        FROM curves c
     )
-    SELECT o.entity_id,
-           COALESCE(NULLIF(labels.l[o.ord], ''), left(encode(o.entity_id, 'hex'), 16)),
-           ST_X(o.coord), ST_Y(o.coord), ST_Z(o.coord), ST_M(o.coord),
-           o.radius_origin,
-           o.geo,
-           CASE WHEN o.trajectory IS NOT NULL AND v_traj IS NOT NULL
-                THEN public.laplace_frechet_4d(o.trajectory, v_traj) END
-    FROM ordered o, labels
-    ORDER BY o.ord;
+    SELECT c.entity_id,
+           COALESCE(NULLIF(labels.l[c.ord], ''), left(encode(c.entity_id, 'hex'), 16)),
+           ST_X(c.coord), ST_Y(c.coord), ST_Z(c.coord), ST_M(c.coord),
+           c.radius_origin,
+           c.geo,
+           CASE WHEN c.curve IS NOT NULL AND v_curve IS NOT NULL
+                THEN public.laplace_frechet_4d(c.curve, v_curve) END
+    FROM curves c, labels
+    ORDER BY c.ord;
 END;
 $sn$;
