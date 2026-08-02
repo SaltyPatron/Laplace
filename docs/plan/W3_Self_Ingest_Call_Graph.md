@@ -61,8 +61,12 @@ The grammar itself is present and registered: `tree_sitter_sql` at
 `engine/core/src/grammar_registry.c:74`, extension map `{"sql","sql"},
 {"ddl","sql"}, {"dml","sql"}` at `:132`.
 
-**The substrate's schema of record is unreadable by its own code lane because
-of a two-part file extension.**
+**Code-level correction (2026-08-02):** `ModalityOf` now strips the recognized
+templating suffix and re-resolves the preceding extension, so `.sql.in` reaches
+the existing SQL grammar without globally mapping arbitrary `.in` files to SQL.
+`CodeDecomposerTests` pins plain, templated, mixed-case, unknown and repeated
+suffixes. The live `input_units > 0` check remains owed after the empty
+substrate is seeded; §2.2 remains the structural blocker even when files parse.
 
 ### 2.2 Even when accepted, SQL yields zero structural edges
 
