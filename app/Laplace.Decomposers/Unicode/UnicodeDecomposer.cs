@@ -79,8 +79,8 @@ public sealed class UnicodeDecomposer : DecomposerMultiPhase<UnicodeSource, Full
         // this preamble has run, tier-0 existence is a guaranteed precondition for everything
         // that follows -- StageCodepointTarget below asserts against it instead of defensively
         // re-staging an entity-only row. Redundant re-emission of the same ids by BuildBatch's
-        // own per-chunk pairing further down is intentional and harmless: apply_batch's
-        // anti-join dedup (`LEFT JOIN ... WHERE id IS NULL`) skips ids that already exist.
+        // per-chunk pairing is absorbed first by the shared writer's cross-stage identity
+        // dedup, then by its in-transaction presence probe. COPY itself has no conflict lane.
         for (int start = 0; start < total; start += batch)
         {
             ct.ThrowIfCancellationRequested();

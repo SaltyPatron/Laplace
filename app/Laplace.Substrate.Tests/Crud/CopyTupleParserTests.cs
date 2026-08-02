@@ -163,4 +163,27 @@ public class CopyTupleParserTests
         var reparsed = ParseBody(wire, CopyTupleParser.ParseEntities);
         Assert.Equal(new[] { H(1), H(2), H(3) }, reparsed.Ids);
     }
+
+    [Fact]
+    public void MultipleBlobs_DistinctEntityRowsCollapseCrossStageDuplicates()
+    {
+        using var s1 = IntentStage.New(2);
+        using var s2 = IntentStage.New(2);
+        s1.AddEntity(H(1), 2, H(100), null);
+        s1.AddEntity(H(2), 2, H(100), null);
+        s2.AddEntity(H(1), 2, H(100), null);
+        s2.AddEntity(H(3), 2, H(100), null);
+
+        var blobs = new List<(IntPtr, long)>();
+        blobs.AddRange(Blobs(s1, IntentStageTable.Entities));
+        blobs.AddRange(Blobs(s2, IntentStageTable.Entities));
+        var parsed = CopyTupleParser.ParseEntities(blobs);
+
+        var distinct = NpgsqlSubstrateWriter.DistinctEntityRowIndices(
+            parsed, tier0Gate: false, out var tier0Present);
+
+        Assert.Equal(new[] { 0, 1, 3 }, distinct);
+        Assert.Null(tier0Present);
+        Assert.Equal(new[] { H(1), H(2), H(3) }, distinct.Select(i => parsed.Ids[i]));
+    }
 }

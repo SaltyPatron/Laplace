@@ -58,4 +58,13 @@ public class TransientErrorRetryPolicyTests
     {
         Assert.False(TransientErrorRetryPolicy.Default.IsTransient(new ArgumentException()));
     }
+
+    [Theory]
+    [InlineData("40P01", true)]
+    [InlineData("40001", true)]
+    [InlineData("23505", false)]
+    public void ConcurrencyRetry_RetriesOnlyConcurrencySqlStates(string sqlState, bool expected)
+    {
+        Assert.Equal(expected, TransientErrorRetryPolicy.IsConcurrencySqlState(sqlState));
+    }
 }
