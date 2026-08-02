@@ -40,13 +40,15 @@ public sealed class IngestRosterParityTests
         var runtimeRoutes = IngestDispatchTable.RegisteredKeys
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        var missing = manifestRoutes.Except(runtimeRoutes)
+        var missing = manifestRoutes.Except(runtimeRoutes, StringComparer.OrdinalIgnoreCase)
             .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
             .ToList();
-        var unclassified = runtimeRoutes.Except(manifestRoutes).Except(OperationalOnlyRoutes)
+        var unclassified = runtimeRoutes
+            .Except(manifestRoutes, StringComparer.OrdinalIgnoreCase)
+            .Except(OperationalOnlyRoutes, StringComparer.OrdinalIgnoreCase)
             .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
             .ToList();
-        var stale = OperationalOnlyRoutes.Except(runtimeRoutes)
+        var stale = OperationalOnlyRoutes.Except(runtimeRoutes, StringComparer.OrdinalIgnoreCase)
             .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
