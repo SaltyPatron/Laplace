@@ -37,11 +37,10 @@ VALUES
      word_id('roster-content'), relation_type_id('HAS_NAME_ALIAS'), word_id('roster-label'),
      laplace_hash128_blake3('test/ops/source'), NULL, 2,
      statement_timestamp(), 1, 1000000000, 350000000000, NULL);
-INSERT 0 2
 SELECT count(*) = 1 AS roster_excludes_bootstrap,
        bool_and(subject_id = word_id('roster-content')) AS roster_returns_content
 FROM source_roster(laplace_hash128_blake3('test/ops/source'), 3);
- roster_excludes_bootstrap | roster_returns_content
+ roster_excludes_bootstrap | roster_returns_content 
 ---------------------------+------------------------
  t                         | t
 (1 row)
