@@ -9,6 +9,9 @@ namespace Laplace.Decomposers.Code;
 
 public sealed class CodeDecomposer : GrammarComposeDecomposer<CodeSource, FullScope>
 {
+    private static readonly HashSet<string> TemplateSuffixes =
+        new(StringComparer.OrdinalIgnoreCase) { ".in" };
+
     public static readonly Hash128 Source = CodeSource.SourceId;
     public static readonly Hash128 TrustClass = CodeSource.TrustClass;
 
@@ -56,10 +59,22 @@ public sealed class CodeDecomposer : GrammarComposeDecomposer<CodeSource, FullSc
         }
     }
 
-    private static string? ModalityOf(string path)
+    internal static string? ModalityOf(string path)
     {
         string ext = Path.GetExtension(path);
-        if (ext.Length > 0 && ext[0] == '.') ext = ext[1..];
-        return ext.Length == 0 ? null : GrammarDecomposer.ModalityByExt(ext.ToLowerInvariant());
+        var modality = ResolveExtension(ext);
+        if (modality is not null || !TemplateSuffixes.Contains(ext))
+            return modality;
+
+        // A trailing template marker has no modality of its own. Resolve the
+        // preceding extension instead (`chat.sql.in` -> SQL); never map `.in`
+        // globally, because non-SQL template inputs use the same suffix.
+        string stem = path[..^ext.Length];
+        return ResolveExtension(Path.GetExtension(stem));
     }
+
+    private static string? ResolveExtension(string ext)
+        => ext.Length <= 1 || ext[0] != '.'
+            ? null
+            : GrammarDecomposer.ModalityByExt(ext[1..].ToLowerInvariant());
 }
