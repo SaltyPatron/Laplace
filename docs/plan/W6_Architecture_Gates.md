@@ -1,0 +1,191 @@
+# W6 — Architecture gates (spec 37 G1–G10 + the elector invariant)
+
+**Issue:** #758 · **Plan:** `COMPLETION_PLAN.md` R9 / Phase 1 · **Blocks:** honest
+"done" for every later phase · **Related:** #765 (G4's real form), #764
+
+---
+
+## 1. Why this exists
+
+> *A rule without a gate is a comment, and this document exists because comments
+> were the parity mechanism.* — spec 37 §7 (`:381-382`)
+
+This repo's rules are mostly true and mostly unenforced. The measured state
+(2026-08-02): **only L4 has real enforcement**, and only through
+generation-determinism rather than the literal ban it states. L1, L3, L5, L6,
+L7, L8 have **zero** mechanical enforcement. L2 has one mode pinned.
+
+The cost is not theoretical. Two examples from this repo's last 24 hours:
+
+- The elector key list was edited in `26397e7`, reverted in `4c4106d` — **two
+  edits in one session with no net** — and nothing would have caught a mistake.
+- **A fifth elector was then created** (`infer.sql.in`, commits `cb4438f` /
+  `17d4934`) while `prompt_coherence.sql.in:46` still reads *"The four
+  electors."* The invariant grew a site and the prose describing it did not.
+  That is spec 37 §0's drift, committed hours after it was documented.
+
+## 2. How gates work here today
+
+Four distinct families, all real, all worth reusing rather than reinventing.
+
+### 2.1 C# xUnit tests reading the tree as text — the dominant style
+
+| Gate | File | Mechanism | Allowlisting |
+|---|---|---|---|
+| Decomposer architecture (16 facts) | `app/Laplace.Substrate.Tests/Abstractions/DecomposerArchitectureGateTests.cs` | `EnumerateFiles` + whole-file `Regex`; two facts use reflection (`:121`, `:129`) | five `HashSet<string>`; two asserted **empty** (`:543`); `MultiPhaseAllowlist` is **bidirectional** (`:398-406`) — unknown violators fail *and* stale entries fail |
+| Read-path architecture (5 facts) | `.../ReadPathArchitectureGateTests.cs` | whole-file `Regex` (deliberately not line-oriented, `:110-115`) | **the ratchet**: `AssertNoNewcomers` (`:154`) + `AssertNoStaleEntries` (`:161`) + `AllowlistsOnlyShrink` against `const int` ceilings (`:107,116,201-209`), each entry carrying dated prose |
+| Reading a `.sql.in` from C# | `.../SubstrateCountsExactTests.cs:12-22` | `File.ReadAllText` + `Assert.Contains` | none |
+
+Repo-root discovery for all of them: `TypeIdLawTests.FindRepoRootPublic()`
+(`TypeIdLawTests.cs:143-165`). **Any new C# gate must use it.**
+
+### 2.2 Python policy scripts — the pre-build job
+
+`.github/workflows/laplace.yml:77-200`, job *"Policy — manifest, attestation,
+vocabulary"*, self-hosted, 15 min, six steps. Notable: a **CI presence
+tripwire** (`:89-115`, added after a commit deleted every workflow), the
+**codegen determinism** check (`:120-151` — regenerate, sha256, require
+byte-identical; the only real L4 enforcement), and a **pure-grep violation
+counter** (`:161-174`) whose exit code *is* the violation count — the template
+for a cheap policy gate, and also the anti-pattern to avoid (no allowlist).
+
+`scripts/validate-pipeline.py` (478 lines) cross-checks manifests against five
+shell/cmd rosters by regex-parsing them, and `validate_type_identity_law()`
+(`:324-369`) is the closest existing template for G3.
+
+### 2.3 Live-data gates
+
+`scripts/decomposer-gate-check.py` — shells `psql -tAc` against a **seeded** DB
+and asserts per-source facts; runs in `_ingest.yml:149-167` on seed workflows
+only. Grandfathering via `--allow-health-tier` and per-source `content_only` /
+`skip_layer_complete` flags in `decomposer-gates.json`.
+
+### 2.4 pg_regress
+
+`extension/laplace_substrate/tests/CMakeLists.txt:12` lists 19 tests.
+**Constraint that shapes everything:** `:16-19` does `dropdb && createdb` — the
+regress DB is **fresh and unseeded** every run. Hence
+`realize_ladder_parity.sql:23-31`'s design note: no sampling, every id minted
+via `word_id()`, every assertion carrying a cardinality guard so an empty DB
+**fails** rather than vacuously passing.
+
+Two existing parity tests are the direct G6 template:
+`walk_edge_weight_parity.sql` (C↔SQL constants + formula against hand-written
+reference algebra over a 7-row `VALUES` vector) and `realize_ladder_parity.sql`
+(scalar↔native agreement, position alignment, abstention, degenerate inputs).
+
+## 3. G1–G10: measured status
+
+| Gate | Status | Evidence |
+|---|---|---|
+| **G1** weight literalism | not built; **19 live violations** | `converse_facts.sql.in:52,66,122,127,155,162`; `chat.sql.in:267,269,272,274,277,279`; `highway_mask.c:332,337,338`; `prompt_coherence.c:211,600`; `related_objects.sql.in:14,19`; `scripts/sql/model-planes-audit.sql` (×6). Exempt per spec: `mu/eff_mu.sql.in`, `glicko2.c:435`, the three `sql/indexes/*eff_mu*` |
+| **G2** render-before-select | not built; 66 `.sql.in` call a scalar realizer at all | naive regex is not decidable — see §5 D4 |
+| **G3** vocabulary literalism | not built; **245 SQL sites / 63 files, 17 C sites** | template exists: `validate-pipeline.py:324-369` |
+| **G4** dead canonical | not built; **`converse_tiered` would fire today** (one hit, its own `CREATE`) | destination is the substrate `CALLS` read — see [W3](W3_Self_Ingest_Call_Graph.md); grep is scaffolding |
+| **G5** shape parity | not built; **five** hand-written declarations | `query_shapes.sql.in:6`, `recall_route.c:64`, `recall.c:347`, `recall.c:1237,1245`, and — notably — **prose in an MCP tool description**, `SubstrateTools.cs:74` |
+| **G6** weight parity | **partial** — COMPLETE mode + constants pinned | `walk_edge_weight_parity.sql`; SALIENCE and STRENGTH unpinned |
+| **G7** roster parity | **partial** — shell/cmd rosters pinned | `validate-pipeline.py:260-321`; C#-side roster missing |
+| **G8** band literalism | not built; **8 sites in 3 files** | `chat.sql.in`, `converse_compose.sql.in`, `senses_with_context.sql.in` |
+| **G9** envelope | not built **and not buildable yet** | `chat.sql.in:35` is `RETURNS text`; needs an OP-level change first |
+| **G10** one mutex | not built | `evidence_count` verify logic appears in 6 script + 6 C# files; the ingest mutex may not exist under the names spec 37 assumes — **unverified** |
+
+## 4. The elector invariant — ground truth and design
+
+### 4.1 Five sites, not four
+
+All five carry the identical six-key list `specificity DESC NULLS LAST,
+rel_mass DESC NULLS LAST, peers DESC, ord DESC, denote_mu DESC NULLS LAST,
+synset_id` — in **five different syntactic shapes**:
+
+| File | Line | Form | Selects |
+|---|---|---|---|
+| `converse/chat.sql.in` | 233-238 | `array_agg(… ORDER BY …)` | full ranked list |
+| `converse/converse.sql.in` | 57-62 | statement `ORDER BY … LIMIT 1` | `synset_id` |
+| `converse/converse_walk.sql.in` | 60-65 | statement `ORDER BY … LIMIT 1` | `synset_id` |
+| `converse/resolve_topic.sql.in` | 73-78 | scalar subquery + `WHERE specificity > 0` (`:72`), `@extschema@.` prefix, column-aligned whitespace | **`tok`** |
+| `converse/infer.sql.in` | 31-36 | `row_number() OVER (ORDER BY …)` | ranked id |
+
+**Byte-equality will not work.** The gate must tokenize.
+
+### 4.2 Design
+
+A C# `[Fact]` reading the five `.sql.in` files. Rejected alternatives, with
+reasons: **pg_regress** can't see the key list across five query shapes without
+re-implementing a parser in PL/pgSQL, and `prosrc LIKE '%specificity DESC%'`
+catches deletion but not reordering; **a python policy script** would work and
+fails 45 minutes earlier, but the repo's *structured* text gates already live in
+C# and `validate-pipeline.py`'s charter is manifests-vs-orchestration.
+
+Three facts:
+
+1. **Key-order parity.** Regex-anchor on `y\.specificity\s+DESC` per file;
+   consume to the first unbalanced `)` / `LIMIT` / `;`; normalize (strip
+   `@extschema@.` and the `y.` alias, collapse whitespace, uppercase keywords);
+   assert each equals one `const string ExpectedElectorKeys` declared beside the
+   rationale quoted from `prompt_coherence.sql.in:28-49`.
+2. **Completeness (bidirectional).** Enumerate every `.sql.in` under
+   `sql/functions/` containing `prompt_coherence(`; assert that set equals the
+   five declared sites plus `prompt_coherence.sql.in` itself. **This is the fact
+   that would have caught `infer.sql.in` becoming a sixth elector unpinned.**
+   Copy `DecomposerArchitectureGateTests.DecomposerMultiPhase_AllowlistMatchesTree`
+   (`:380-407`).
+3. **No exemptions.** Assert the site set has no allowlist — mirrors
+   `UnicodeAndHandBuilderAllowlists_AreEmpty` (`:543`).
+
+## 5. What to consider
+
+| # | Decision | Recommendation |
+|---|---|---|
+| D1 | policy job (python, pre-build, ~2 min) vs `integration-test` (C#, post-build, ~45-60 min) | **Split.** G1/G3/G8 are flat greps with flat allowlists → one `scripts/isa-gate-check.py` step in the policy job. G2/G4/G5/elector need sets, ceilings and ratchets → C#. The repo already splits this way. |
+| D2 | allowlists as C# constants vs JSON | Constants keep rationale next to rule and make `git blame` meaningful. JSON only for the python half. **Never put ceilings in JSON** — `ReadPathArchitectureGateTests.cs:107,116` proves a compile-time `const` is what makes "may only shrink" enforceable. |
+| D3 | G4 now or after W3 | Ship the grep now as **explicitly labeled scaffolding** with a shrink-only allowlist; replace with the substrate `CALLS` read when W3 lands, deleting the grep in the same PR. |
+| D4 | G2's definition | Not decidable by regex (`realize_batch`, the realizer bodies, `label_is_content` over already-rendered text all false-positive). Define G2 as a **ratchet over a hand-drawn violator list** (~30 files), excluding `realize/`, `readback/`, `lexical/type_label.sql.in`, `converse/label*.sql.in`. |
+| D5 | grandfathering style | **Ratchet, never a bare counter.** Porting `laplace.yml:161-174`'s `exit "$violations"` to G1 fails the build on day one at 19 sites. |
+
+**Trap:** a gate that goes red on merge-day teaches people to ignore it
+(`ingest-baseline.py:34-37` says this in the repo's own words). Land each gate
+with its current violations enumerated and dated, then shrink.
+
+## 6. Where to look
+
+| Concern | File |
+|---|---|
+| Ratchet pattern (copy this) | `app/Laplace.Substrate.Tests/Abstractions/ReadPathArchitectureGateTests.cs:107,116,154,161,201-209` |
+| Bidirectional set check (copy this for the elector) | `.../DecomposerArchitectureGateTests.cs:380-407,543` |
+| Repo-root discovery | `.../TypeIdLawTests.cs:143-165` |
+| C# reading a `.sql.in` | `.../SubstrateCountsExactTests.cs:12-22` |
+| Policy job + grep-counter template | `.github/workflows/laplace.yml:77-200`, esp. `:161-174` |
+| Vocabulary-law template | `scripts/validate-pipeline.py:324-369` |
+| Parity regress templates | `extension/.../tests/sql/walk_edge_weight_parity.sql`, `realize_ladder_parity.sql:23-31` |
+| Regress DB is unseeded | `extension/laplace_substrate/tests/CMakeLists.txt:16-19` |
+| The laws | `docs/specs/37_Substrate_Operation_ISA.md` §2 (L1-L8), §7 (G1-G10) |
+
+## 7. Acceptance
+
+1. Reordering or deleting a key in **any** of the five elector `ORDER BY` lists
+   fails a named test.
+2. Adding a **sixth** `prompt_coherence(` caller with an unpinned key list fails.
+3. A new open-coded `rating - 2*rd` outside the three exempt paths fails; the 19
+   existing sites are enumerated with dated rationale.
+4. Removing a violation and forgetting its allowlist entry fails (stale check).
+5. Every allowlist has a `const` ceiling ≥ its count; no ceiling rises without a
+   diff on the constant.
+6. `converse_tiered` either gains a caller or is deleted — G4's first casualty.
+7. `prompt_coherence.sql.in`'s prose no longer states a site count; it points at
+   the gate's declaration instead (see D-note below).
+
+**D-note on prose vs gate:** rather than updating "four electors" to "five" and
+waiting for the next drift, let the gate's site list be the single declaration
+and have the prose reference it. That is spec 37 §7's own thesis applied to
+itself.
+
+## 8. Risks / ordering
+
+1. **G9 is blocked** on `chat()` returning something richer than `text`. Do not
+   schedule it here.
+2. **G6 cannot complete** until OP4's mode unification exists — there is no
+   `weight_mode` type anywhere in the tree (verified: zero hits).
+3. **G5's fifth declaration is prose in an MCP tool description**
+   (`SubstrateTools.cs:74`); generating that string is a code change, not a gate.
+4. Order: elector + G1 + G3 + G8 (mechanical, no code motion) → G4 grep → G2
+   ratchet → G7 C# half → G5/G6/G9/G10 after their opcodes exist.
