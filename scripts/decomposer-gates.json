@@ -28,7 +28,10 @@
     "opensubtitles",
     "chess",
     "openings",
-    "chess-books"
+    "chess-books",
+    "chess-syzygy",
+    "chess-eval",
+    "chess-trajectory"
   ],
   "sources": {
     "unicode": {
@@ -395,6 +398,51 @@
           "min": 1
         }
       ]
+    },
+    "chess-syzygy": {
+      "decomposer": "ChessSyzygy",
+      "layer": 23,
+      "prerequisites": [
+        "chess"
+      ],
+      "skip_layer_complete": true,
+      "consensus_gates": [
+        {
+          "relation": "HAS_WDL",
+          "min": 1
+        },
+        {
+          "relation": "HAS_DTZ",
+          "min": 1
+        }
+      ]
+    },
+    "chess-eval": {
+      "decomposer": "ChessStockfish",
+      "layer": 22,
+      "prerequisites": [
+        "chess"
+      ],
+      "skip_layer_complete": true,
+      "consensus_gates": [
+        {
+          "relation": "MOVE_QUALITY",
+          "min": 1
+        },
+        {
+          "relation": "ANALYZED_AT",
+          "min": 1
+        }
+      ]
+    },
+    "chess-trajectory": {
+      "decomposer": "ChessTrajectory",
+      "layer": 21,
+      "prerequisites": [
+        "chess"
+      ],
+      "consensus_gates": [],
+      "marker_entities": "Chess_AnalysisMarker"
     }
   }
 }

@@ -5,13 +5,21 @@ name: Seed — chess
 #   chess        — PGN games: record (ChessPgn) + substrate analyze pass
 #   openings     — opening book (ChessOpenings)
 #   chess-books  — annotated chess books (ChessBook): record + derive in one pass
+#   chess-syzygy — exact endgame WDL/DTZ from the tablebases (ChessSyzygy). No path;
+#                  the substrate is the source. A no-op with no tablebases on the box.
+#   chess-trajectory — game-trajectory geometry backfill (ChessTrajectory). No path;
+#                  physicality upserts only, never testimony, so re-runs cannot
+#                  double-count. Both were reachable from `laplace ingest` and from
+#                  IngestDispatchTable but from no workflow at all.
 #   chess-eval   — stockfish eval census over recorded games (ChessStockfish): the
 #                  calculated eval layer is DERIVED STATE — this step is what makes it
 #                  survive a db-reset, exactly like every other seed re-derives its
 #                  layer. No path (the substrate is the source); marker-gated, so
 #                  re-runs skip already-evaluated games.
 # Corpus sources take an explicit corpus dir (no DATA_ROOT default); chess-eval takes none.
-# Delegates to _ingest.yml; chess is not in decomposer-gates.json, so run_gate:false.
+# Delegates to _ingest.yml. All four sources are registered in decomposer-gates.json,
+# so the run is gated on the consensus cells and on re-ingest idempotency, not on the
+# ingest exit code.
 
 on:
   workflow_dispatch:
@@ -20,7 +28,7 @@ on:
         description: "chess source (one per run)"
         type: choice
         required: true
-        options: [chess, openings, chess-books, chess-eval]
+        options: [chess, openings, chess-books, chess-eval, chess-syzygy, chess-trajectory]
       corpus:
         # Dropdown over what is actually on the runner. The chess corpus is
         # static (same filenames on re-download), so a literal list is durable;
@@ -231,12 +239,13 @@ jobs:
             lumbras-otb|lumbras-online) : ;;
             *) [ "$slice" = "all" ] || echo "::notice::slice '$slice' ignored for corpus '$corpus'" ;;
           esac
-          # chess-eval reads the substrate, not a file: it takes no path at all.
-          if [ "$src" = "chess-eval" ]; then
-            echo "source=chess-eval — corpus ignored, no path passed"
-            echo "path=" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
+          # Substrate-sourced lanes read recorded games, not a file: no path at all.
+          case "$src" in
+            chess-eval|chess-syzygy|chess-trajectory)
+              echo "source=$src reads the substrate — corpus ignored, no path passed"
+              echo "path=" >> "$GITHUB_OUTPUT"
+              exit 0 ;;
+          esac
           if [ -z "$p" ]; then
             echo "::error::corpus=path-override requires the path input"; exit 1
           fi
@@ -254,5 +263,11 @@ jobs:
       path: ${{ needs.resolve.outputs.path }}
       database: ${{ inputs.database }}
       timeout_minutes: 720
-      run_gate: false
-      run_idempotency: false
+      # Gates ON. These were `false` with the comment "chess is not in
+      # decomposer-gates.json" -- true at the time, and the reason every chess seed
+      # run was green on the ingest exit code alone. The entries exist now
+      # (chess / openings / chess-books / chess-syzygy), so the run proves the
+      # consensus cells landed, and re-ingest proves it does not double-count
+      # testimony (which re-ingest DOES, by design, if a lane is not idempotent).
+      run_gate: true
+      run_idempotency: true

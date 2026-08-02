@@ -133,6 +133,34 @@ def check_source(
             record("layer_complete", exists, f"content physicalities present (document tier)={exists}")
         except Exception as e:
             record("layer_complete", False, str(e))
+    elif src.get("marker_entities"):
+        # A pass whose whole output is GEOMETRY plus a completion marker (chess-trajectory:
+        # one physicality upsert per line and, by design, zero attestations — re-deriving
+        # testimony would double every observation_count, which is why it is a separate
+        # pass at all). The attestation-joined physicality probe below finds nothing for
+        # it, because the lines it decorates were attested by a DIFFERENT source. Its
+        # markers are entities first-observed by this decomposer, so count those: that is
+        # the row the lane's own idempotency gate reads, and the honest proof it ran.
+        marker_type = src["marker_entities"]
+        try:
+            n = int(
+                psql(
+                    dbname,
+                    "SELECT count(*) FROM laplace.entities "
+                    f"WHERE first_observed_by = laplace.source_id('{decomposer}') "
+                    f"AND type_id = laplace.entity_type_id('{marker_type}');",
+                    host=host,
+                    user=user,
+                )
+            )
+            record(
+                "layer_complete",
+                n > 0,
+                f"{n:,} {marker_type} marker entities first observed by {decomposer}",
+                count=n,
+            )
+        except Exception as e:
+            record("layer_complete", False, str(e))
     elif src.get("skip_layer_complete"):
         try:
             exists = psql(
