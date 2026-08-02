@@ -28,6 +28,30 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
+      stage:
+        # HOW FAR TO GO. A dispatch used to mean the whole ladder -- policy,
+        # build, unit tests, deploy, migrate, pg_regress, publish, smoke --
+        # even when the operator only wanted to know whether a branch compiles.
+        # Stop where you meant to stop.
+        #
+        # Cumulative: each stage runs everything before it. Push to main is
+        # ALWAYS `all` and is unaffected by this input, so the deploy path
+        # cannot be weakened by a default.
+        #
+        #   check      policy + deps           -- manifest, vocabulary, codegen
+        #                                         determinism, presence tripwire
+        #   build      + build                 -- engine, extensions, app, perfcache
+        #   test       + unit tests            -- native ctest
+        #   deploy     + deploy + db-ops       -- install to /opt/laplace, migrate,
+        #                                         extension sync, tuning
+        #   integrate  + integration tests     -- pg_regress + dotnet (+ seed, when
+        #                                         the seed/fresh_db inputs ask for it)
+        #   all        + publish + smoke       -- ship the API and SPA, prove it live
+        description: "how far to run (cumulative; push to main is always 'all')"
+        type: choice
+        required: true
+        default: all
+        options: [check, build, test, deploy, integrate, all]
       full_clean:
         description: "wipe build/ before building (same as --force-rebuild)"
         type: boolean
@@ -269,6 +293,9 @@ jobs:
   build:
     name: Build — engine, extensions, app, perfcache
     needs: [policy, deps]
+    if: >-
+      github.event_name != 'workflow_dispatch' ||
+      contains(fromJSON('["build", "test", "deploy", "integrate", "all"]'), inputs.stage)
     runs-on: [self-hosted, laplace]
     timeout-minutes: 60
     steps:
@@ -300,6 +327,9 @@ jobs:
   unit-test:
     name: Unit tests — native engine (ctest, excludes pg_regress)
     needs: build
+    if: >-
+      github.event_name != 'workflow_dispatch' ||
+      contains(fromJSON('["test", "deploy", "integrate", "all"]'), inputs.stage)
     runs-on: [self-hosted, laplace]
     timeout-minutes: 30
     steps:
@@ -320,6 +350,9 @@ jobs:
   deploy:
     name: Deploy — stage install to /opt/laplace
     needs: unit-test
+    if: >-
+      github.event_name != 'workflow_dispatch' ||
+      contains(fromJSON('["deploy", "integrate", "all"]'), inputs.stage)
     runs-on: [self-hosted, laplace]
     timeout-minutes: 15
     steps:
@@ -335,6 +368,9 @@ jobs:
   db-ops:
     name: DB — migrate, extension sync, perfcache GUC
     needs: deploy
+    if: >-
+      github.event_name != 'workflow_dispatch' ||
+      contains(fromJSON('["deploy", "integrate", "all"]'), inputs.stage)
     runs-on: [self-hosted, laplace]
     timeout-minutes: 20
     steps:
@@ -358,7 +394,9 @@ jobs:
     needs: [db-ops, seed]
     if: >-
       !cancelled() && needs.db-ops.result == 'success' &&
-      (needs.seed.result == 'success' || needs.seed.result == 'skipped')
+      (needs.seed.result == 'success' || needs.seed.result == 'skipped') &&
+      (github.event_name != 'workflow_dispatch' ||
+       contains(fromJSON('["integrate", "all"]'), inputs.stage))
     runs-on: [self-hosted, laplace]
     timeout-minutes: 60
     steps:
@@ -399,7 +437,8 @@ jobs:
     needs: db-ops
     if: >-
       github.event_name == 'workflow_dispatch' &&
-      (inputs.seed == true || inputs.fresh_db == true)
+      (inputs.seed == true || inputs.fresh_db == true) &&
+      contains(fromJSON('["integrate", "all"]'), inputs.stage)
     runs-on: [self-hosted, laplace]
     timeout-minutes: 240
     steps:
@@ -428,7 +467,9 @@ jobs:
     # box looked healthy and served stale code. State what this job actually
     # requires instead of inheriting a condition about a job it does not use.
     if: >-
-      !cancelled() && needs.integration-test.result == 'success'
+      !cancelled() && needs.integration-test.result == 'success' &&
+      (github.event_name != 'workflow_dispatch' ||
+       inputs.stage == 'all')
     runs-on: [self-hosted, laplace]
     timeout-minutes: 20
     outputs:
