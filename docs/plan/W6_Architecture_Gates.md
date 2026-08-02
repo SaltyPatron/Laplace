@@ -78,14 +78,14 @@ reference algebra over a 7-row `VALUES` vector) and `realize_ladder_parity.sql`
 
 | Gate | Status | Evidence |
 |---|---|---|
-| **G1** weight literalism | not built; **19 live violations** | `converse_facts.sql.in:52,66,122,127,155,162`; `chat.sql.in:267,269,272,274,277,279`; `highway_mask.c:332,337,338`; `prompt_coherence.c:211,600`; `related_objects.sql.in:14,19`; `scripts/sql/model-planes-audit.sql` (×6). Exempt per spec: `mu/eff_mu.sql.in`, `glicko2.c:435`, the three `sql/indexes/*eff_mu*` |
+| **G1** weight literalism | **built; 25 grandfathered violations** | `isa-gate-check.py` strips comments and finds 19 production-path expressions plus 6 in `scripts/sql/model-planes-audit.sql`. The earlier total of 19 omitted those 6 despite listing them. Exempt per spec: `mu/eff_mu.sql.in`, `glicko2.c:435`, the three `sql/indexes/*eff_mu*` |
 | **G2** render-before-select | not built; 66 `.sql.in` call a scalar realizer at all | naive regex is not decidable — see §5 D4 |
-| **G3** vocabulary literalism | not built; **245 SQL sites / 63 files, 17 C sites** | template exists: `validate-pipeline.py:324-369` |
+| **G3** vocabulary literalism | **built; 243 executable SQL sites, 17 C sites, 702 production C# sites** | the earlier raw SQL count of 245 included 2 comments; C# is checked against canonical + alias names parsed from the manifest. Exact path/literal/count baselines ratchet all three |
 | **G4** dead canonical | not built; **`converse_tiered` would fire today** (one hit, its own `CREATE`) | destination is the substrate `CALLS` read — see [W3](W3_Self_Ingest_Call_Graph.md); grep is scaffolding |
 | **G5** shape parity | not built; **five** hand-written declarations | `query_shapes.sql.in:6`, `recall_route.c:64`, `recall.c:347`, `recall.c:1237,1245`, and — notably — **prose in an MCP tool description**, `SubstrateTools.cs:74` |
 | **G6** weight parity | **partial** — COMPLETE mode + constants pinned | `walk_edge_weight_parity.sql`; SALIENCE and STRENGTH unpinned |
 | **G7** roster parity | **partial** — shell/cmd rosters pinned | `validate-pipeline.py:260-321`; C#-side roster missing |
-| **G8** band literalism | not built; **8 sites in 3 files** | `chat.sql.in`, `converse_compose.sql.in`, `senses_with_context.sql.in` |
+| **G8** band literalism | **built; 8 grandfathered sites in 3 files** | `chat.sql.in`, `converse_compose.sql.in`, `senses_with_context.sql.in`; exact expressions are shrink-only |
 | **G9** envelope | not built **and not buildable yet** | `chat.sql.in:35` is `RETURNS text`; needs an OP-level change first |
 | **G10** one mutex | not built | `evidence_count` verify logic appears in 6 script + 6 C# files; the ingest mutex may not exist under the names spec 37 assumes — **unverified** |
 
@@ -140,7 +140,7 @@ Three facts:
 | D2 | allowlists as C# constants vs JSON | Constants keep rationale next to rule and make `git blame` meaningful. JSON only for the python half. **Never put ceilings in JSON** — `ReadPathArchitectureGateTests.cs:107,116` proves a compile-time `const` is what makes "may only shrink" enforceable. |
 | D3 | G4 now or after W3 | Ship the grep now as **explicitly labeled scaffolding** with a shrink-only allowlist; replace with the substrate `CALLS` read when W3 lands, deleting the grep in the same PR. |
 | D4 | G2's definition | Not decidable by regex (`realize_batch`, the realizer bodies, `label_is_content` over already-rendered text all false-positive). Define G2 as a **ratchet over a hand-drawn violator list** (~30 files), excluding `realize/`, `readback/`, `lexical/type_label.sql.in`, `converse/label*.sql.in`. |
-| D5 | grandfathering style | **Ratchet, never a bare counter.** Porting `laplace.yml:161-174`'s `exit "$violations"` to G1 fails the build on day one at 19 sites. |
+| D5 | grandfathering style | **Ratchet, never a bare counter.** Porting `laplace.yml:161-174`'s `exit "$violations"` to G1 fails the build on day one at 25 sites. |
 
 **Trap:** a gate that goes red on merge-day teaches people to ignore it
 (`ingest-baseline.py:34-37` says this in the repo's own words). Land each gate
@@ -165,7 +165,7 @@ with its current violations enumerated and dated, then shrink.
 1. Reordering or deleting a key in **any** of the five elector `ORDER BY` lists
    fails a named test.
 2. Adding a **sixth** `prompt_coherence(` caller with an unpinned key list fails.
-3. A new open-coded `rating - 2*rd` outside the three exempt paths fails; the 19
+3. A new open-coded `rating - 2*rd` outside the three exempt paths fails; the 25
    existing sites are enumerated with dated rationale.
 4. Removing a violation and forgetting its allowlist entry fails (stale check).
 5. Every allowlist has a `const` ceiling ≥ its count; no ceiling rises without a

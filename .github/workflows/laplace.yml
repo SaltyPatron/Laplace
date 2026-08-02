@@ -109,6 +109,8 @@ jobs:
             scripts/setup-host.sh \
             scripts/bootstrap-laplace-runner.sh \
             scripts/ingest-source.sh \
+            scripts/isa-gate-check.py \
+            scripts/isa-gate-baseline.json \
             scripts/ensure-foundation.sh; do
             [ -f "$f" ] || { echo "::error file=$f::CI-critical file missing"; fail=1; }
           done
@@ -116,6 +118,9 @@ jobs:
 
       - name: Validate witness-manifest vs orchestration scripts
         run: python3 scripts/validate-pipeline.py
+
+      - name: Enforce ISA literalism ratchets
+        run: python3 scripts/isa-gate-check.py
 
       - name: Regenerate attestation law + verify deterministic
         run: |
