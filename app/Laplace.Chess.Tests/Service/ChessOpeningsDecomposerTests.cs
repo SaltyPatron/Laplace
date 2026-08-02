@@ -6,8 +6,7 @@ namespace Laplace.Chess.Service.Tests;
 
 public sealed class ChessOpeningsDecomposerTests
 {
-    private static readonly string OpeningsDir =
-        @"D:\Data\Ingest\Games\Chess\openings";
+    private static readonly string OpeningsDir = ChessCorpusPaths.Openings;
 
     [Fact]
     public void ParseRow_SkipsHeader()

@@ -197,20 +197,70 @@ public sealed class ChessSyzygyTests
         Assert.Empty(undeclared);
     }
 
+    /// <summary>
+    /// No tablebases ANYWHERE is the clean no-op. Both lookups have to be neutralised:
+    /// <c>SyzygyDir</c> now falls back to the corpus layout under LAPLACE_DATA_ROOT,
+    /// because the tables were downloaded to
+    /// <c>/vault/Data/Games/Chess/syzygy/3-4-5</c> and nobody exported LAPLACE_SYZYGY,
+    /// so this lane no-op'd on a host that had them. Pointing only the env at a missing
+    /// directory no longer proves "no tablebases" — it proves the env is unset, which is
+    /// a different statement and the one that used to silently pass here.
+    /// </summary>
     [Fact]
-    public void TryLoadProber_MissingDir_IsACleanNoOp()
+    public void TryLoadProber_NoTablebasesAnywhere_IsACleanNoOp()
     {
-        var prior = Environment.GetEnvironmentVariable("LAPLACE_SYZYGY");
+        var priorEnv = Environment.GetEnvironmentVariable("LAPLACE_SYZYGY");
+        var priorRoot = Environment.GetEnvironmentVariable("LAPLACE_DATA_ROOT");
+        string emptyRoot = Path.Combine(Path.GetTempPath(), $"no-syzygy-root-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(emptyRoot);
         Environment.SetEnvironmentVariable(
             "LAPLACE_SYZYGY", Path.Combine(Path.GetTempPath(), $"no-such-syzygy-{Guid.NewGuid():N}"));
+        Environment.SetEnvironmentVariable("LAPLACE_DATA_ROOT", emptyRoot);
         try
         {
             var d = new ChessSyzygyDecomposer();
             Assert.False(d.TryLoadProber(out _));
+            Assert.False(ChessLabPaths.SyzygyDir.Found);
         }
         finally
         {
-            Environment.SetEnvironmentVariable("LAPLACE_SYZYGY", prior);
+            Environment.SetEnvironmentVariable("LAPLACE_SYZYGY", priorEnv);
+            Environment.SetEnvironmentVariable("LAPLACE_DATA_ROOT", priorRoot);
+            try { Directory.Delete(emptyRoot, recursive: true); } catch (IOException) { }
+        }
+    }
+
+    /// <summary>
+    /// The corpus-layout fallback: tables under
+    /// <c>&lt;LAPLACE_DATA_ROOT&gt;/Games/Chess/syzygy/3-4-5</c> are found with no env set.
+    /// A directory with no <c>.rtbw</c> is NOT a tablebase directory — reporting it as one
+    /// would surface as "0 tables discovered" and read like operator misconfiguration.
+    /// </summary>
+    [Fact]
+    public void SyzygyDir_FallsBackToCorpusLayout_OnlyWhenTablesArePresent()
+    {
+        var priorEnv = Environment.GetEnvironmentVariable("LAPLACE_SYZYGY");
+        var priorRoot = Environment.GetEnvironmentVariable("LAPLACE_DATA_ROOT");
+        string root = Path.Combine(Path.GetTempPath(), $"syzygy-root-{Guid.NewGuid():N}");
+        string tables = Path.Combine(root, "Games", "Chess", "syzygy", "3-4-5");
+        Directory.CreateDirectory(tables);
+        Environment.SetEnvironmentVariable("LAPLACE_SYZYGY", null);
+        Environment.SetEnvironmentVariable("LAPLACE_DATA_ROOT", root);
+        try
+        {
+            Assert.False(ChessLabPaths.SyzygyDir.Found); // directory exists, holds no tables
+
+            File.WriteAllBytes(Path.Combine(tables, "KQvK.rtbw"), [0]);
+            var probe = ChessLabPaths.SyzygyDir;
+            Assert.True(probe.Found);
+            Assert.Equal(tables, probe.Path);
+            Assert.Equal("data-root", probe.Source);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LAPLACE_SYZYGY", priorEnv);
+            Environment.SetEnvironmentVariable("LAPLACE_DATA_ROOT", priorRoot);
+            try { Directory.Delete(root, recursive: true); } catch (IOException) { }
         }
     }
 

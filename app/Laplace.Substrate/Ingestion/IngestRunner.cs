@@ -468,6 +468,23 @@ public sealed class IngestRunner
         long declaredInput = inventory?.TotalInputUnits ?? 0;
         long declaredFiles = inventory?.FileCount ?? 0;
         bool emptySourceNoOp = result.UnitsApplied == 0 && (declaredInput > 0 || declaredFiles > 0);
+
+        // An empty run the decomposer can ACCOUNT FOR is not the failure this guard is
+        // for. See IIngestNoOpExplainer: idempotent re-ingest, a caught-up marker-gated
+        // backfill, and an unset optional dependency all applied zero and all failed the
+        // run. A decomposer that cannot explain itself still fails.
+        (string Status, string Detail)? explained = null;
+        if (emptySourceNoOp && decomposer is IIngestNoOpExplainer explainer)
+        {
+            explained = explainer.ExplainEmptyRun(declaredInput);
+            if (explained is { } e)
+            {
+                emptySourceNoOp = false;
+                log.LogInformation(
+                    "INGEST_EMPTY_EXPECTED source={Source} status={Status} detail={Detail}",
+                    decomposer.SourceName, e.Status, e.Detail);
+            }
+        }
         // 'capped' = a MaxInputUnits smoke run: it succeeded but deliberately did not
         // ingest the whole source, which is also why it never mints a completion marker —
         // the run journal must not let it masquerade as a full 'ok'.
@@ -475,12 +492,14 @@ public sealed class IngestRunner
         // Failed files emit file-failed/ instead of period-boundary/, so they do not
         // inflate files_done; a cut-off or partial run cannot report status=ok
         // (CONSOLIDATION Q5 / FrameNet 33/14900).
-        string status = DeriveRunStatus(
-            result.UnitsFailed,
-            emptySourceNoOp,
-            capped: options.DecomposerOptions.MaxInputUnits > 0,
-            filesDone: counters.FilesDone,
-            filesTotal: declaredFiles);
+        string status = explained is { } exp
+            ? exp.Status
+            : DeriveRunStatus(
+                result.UnitsFailed,
+                emptySourceNoOp,
+                capped: options.DecomposerOptions.MaxInputUnits > 0,
+                filesDone: counters.FilesDone,
+                filesTotal: declaredFiles);
         log.LogInformation(
             "INGEST_COMPLETE source={Source} layer={Layer} input_done={InputDone} input_total={InputTotal} "
             + "files_done={FilesDone} files_total={FilesTotal} intents={Applied}/{Produced} "

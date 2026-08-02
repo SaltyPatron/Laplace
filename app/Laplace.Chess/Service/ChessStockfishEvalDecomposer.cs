@@ -11,8 +11,14 @@ namespace Laplace.Chess.Service;
 // roundtrip, evaluate every position with stockfish, attest HAS_EVAL + eval-delta
 // MOVE_QUALITY under the ChessStockfish source.
 // Run: `laplace ingest chess-eval [--depth N | --nodes N]`  (no path — substrate is the source)
-public sealed class ChessStockfishEvalDecomposer : ComposeDecomposer<ChessStockfishEvalRecord>
+public sealed class ChessStockfishEvalDecomposer
+    : ComposeDecomposer<ChessStockfishEvalRecord>, IIngestNoOpExplainer
 {
+    // Marker-gated backfill: the denominator is every RECORDED line, the stream is only
+    // the lines still missing this pass's marker. A caught-up pass applies zero, which the
+    // runner's silent-no-op guard turned into a hard failure. See IIngestNoOpExplainer.
+    private long _candidatesStreamed;
+
     private readonly int _depth;
     private readonly long _nodes;
     private readonly StockfishEvaluatorPool _pool;
@@ -80,11 +86,23 @@ public sealed class ChessStockfishEvalDecomposer : ComposeDecomposer<ChessStockf
 
         var ws = IngestPipelineDefaults.ResolveWorkingSet(PipelineProfile, options, DefaultBatchSize);
         // LINE-grain stream (GH #736): a line shared by many playings is evaluated ONCE.
+        _candidatesStreamed = 0;
         await foreach (var witnessed in ChessWitnessHydrator.StreamUnanalyzedLinesAsync(
                            ds, ContainmentReader!, ws.Batch,
                            lineId => ChessStockfishEval.MarkerId(lineId, ChessStockfishEval.Version), ct))
+        {
+            _candidatesStreamed++;
             yield return new ChessStockfishEvalRecord(witnessed);
+        }
     }
+
+    /// <summary>Nothing streamed means every line already carries this version's eval.</summary>
+    public (string Status, string Detail)? ExplainEmptyRun(long declaredInputUnits)
+        => _candidatesStreamed == 0
+            ? ("already-complete",
+               $"ChessStockfishEval: every one of {declaredInputUnits} recorded line(s) already "
+               + $"carries the v{ChessStockfishEval.Version} eval marker — nothing left to evaluate.")
+            : null;
 
     protected override void Compose(ChessStockfishEvalRecord record, SubstrateChangeBuilder b)
     {

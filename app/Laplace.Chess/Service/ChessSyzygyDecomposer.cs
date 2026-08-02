@@ -12,10 +12,18 @@ namespace Laplace.Chess.Service;
 // LAPLACE_SYZYGY (native Fathom kernel — an in-process mmap lookup, never a
 // subprocess), attest HAS_WDL + HAS_DTZ under the ChessSyzygy source.
 // Run: `laplace ingest chess-syzygy`  (no path — substrate is the source)
-public sealed class ChessSyzygyDecomposer : ComposeDecomposer<ChessSyzygyRecord>
+public sealed class ChessSyzygyDecomposer : ComposeDecomposer<ChessSyzygyRecord>, IIngestNoOpExplainer
 {
     private readonly Func<ISyzygyProber>? _proberFactory;
     private ISyzygyProber? _prober;
+
+    // Why the last extraction produced nothing, so a zero-apply run can be told apart from
+    // a broken one. Both of these used to exit 1: EstimateUnitCountAsync declares every
+    // RECORDED line as the denominator while the stream yields only lines still missing
+    // this pass's marker, so a caught-up backfill always applied zero — and so did the
+    // documented "no tablebase directory" no-op.
+    private bool _proberUnavailable;
+    private long _candidatesStreamed;
 
     /// <summary>proberFactory overrides the native kernel for tests; the default
     /// initializes the process-global Fathom prober against <see cref="ChessLabPaths.SyzygyDir"/>.</summary>
@@ -50,8 +58,14 @@ public sealed class ChessSyzygyDecomposer : ComposeDecomposer<ChessSyzygyRecord>
                 "ChessSyzygy requires a live Postgres substrate (NpgsqlSubstrateReader). "
                 + "Record games first: laplace ingest chess <pgn>");
 
+        _proberUnavailable = false;
+        _candidatesStreamed = 0;
+
         if (!TryLoadProber(out var prober))
-            yield break; // clean no-op — the counted warning already fired
+        {
+            _proberUnavailable = true;
+            yield break; // clean no-op — ExplainEmptyRun accounts for it
+        }
 
         _prober = prober;
         var ws = IngestPipelineDefaults.ResolveWorkingSet(PipelineProfile, options, DefaultBatchSize);
@@ -60,7 +74,27 @@ public sealed class ChessSyzygyDecomposer : ComposeDecomposer<ChessSyzygyRecord>
         await foreach (var witnessed in ChessWitnessHydrator.StreamUnanalyzedLinesAsync(
                            ds, ContainmentReader!, ws.Batch,
                            lineId => ChessSyzygy.MarkerId(lineId, ChessSyzygy.Version), ct))
+        {
+            _candidatesStreamed++;
             yield return new ChessSyzygyRecord(witnessed);
+        }
+    }
+
+    /// <summary>
+    /// A zero-apply syzygy run is expected in two documented cases, and was a hard failure
+    /// in both. Anything else (candidates streamed, none applied) still fails.
+    /// </summary>
+    public (string Status, string Detail)? ExplainEmptyRun(long declaredInputUnits)
+    {
+        if (_proberUnavailable)
+            return ("dependency-unset",
+                "ChessSyzygy: no tablebase directory (env LAPLACE_SYZYGY or chess-lab.env) — "
+                + "probe pass is a documented no-op. Unattested is not attested-false.");
+        if (_candidatesStreamed == 0)
+            return ("already-complete",
+                $"ChessSyzygy: every one of {declaredInputUnits} recorded line(s) already "
+                + $"carries the v{ChessSyzygy.Version} probe marker — nothing left to probe.");
+        return null;
     }
 
     // Missing tablebase dir (or a dir holding no tables) is UNSET, not an error: the
