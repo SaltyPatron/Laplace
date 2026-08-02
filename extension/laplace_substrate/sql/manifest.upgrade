@@ -401,3 +401,4 @@ functions/converse/infer.sql.in
 functions/chess/chess_opening_preference.sql.in
 functions/lexical/sense_audit.sql.in
 functions/converse/prompt_language.sql.in
+functions/ops/geometry_audit.sql.in
