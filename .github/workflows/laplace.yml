@@ -79,7 +79,13 @@ on:
 
 concurrency:
   group: laplace-${{ github.ref }}
-  cancel-in-progress: true
+  # CANCEL ON BRANCHES, QUEUE ON MAIN. Superseding a branch gate run is free.
+  # Superseding a MAIN run is not: its install phase stops the API, replaces
+  # binaries in /opt/laplace and bounces PostgreSQL, and a cancel lands
+  # anywhere in that window -- half-installed tree, service down, or the
+  # MSB3027 poisoned-output state the build rules describe. Main pushes queue
+  # so each one completes its deploy.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read

@@ -120,6 +120,49 @@ jobs:
           chess="$root/Games/Chess"
           lum="$chess/Lumbras"
           slice="${{ inputs.slice }}"
+          src="${{ inputs.source }}"
+          corpus="${{ inputs.corpus }}"
+
+          # SOURCE DECIDES WHICH CORPORA ARE LEGAL. GitHub has no dependent
+          # dropdowns, so `source` and `corpus` are independent inputs and a
+          # user can pair a TSV decomposer with a PGN file. That is not
+          # hypothetical: run 30751844265 selected source=openings and left
+          # corpus at its default (lumbras-elite), which resolved to
+          # export_ELO2400.pgn -- a PGN handed to the openings TSV reader.
+          # It declared 19,308,489 input units, ingested 0, and only failed
+          # because the decomposer has a silent-no-op guard. Without that
+          # guard it would have reported success having stored nothing.
+          #
+          # So: each source declares its legal corpora. A source with exactly
+          # ONE legal corpus auto-corrects (with a notice) rather than making
+          # the operator match two dropdowns by hand -- that is the whole
+          # point of running this from the UI. A source with MANY legal
+          # corpora fails loudly and prints them, because there the choice is
+          # real and guessing would be wrong.
+          pgn_corpora="lumbras-elite chesscom-all magnus hikaru firouzja nihalsarin caruana gukesh pragg anish-giri owner-games twic lumbras-otb lumbras-online path-override"
+          case "$src" in
+            chess)       legal="$pgn_corpora" ;;
+            openings)    legal="openings-book path-override" ;;
+            chess-books) legal="books path-override" ;;
+            chess-eval)  legal="" ;;   # reads the substrate; no path at all
+            *) echo "::error::unknown source '$src'"; exit 1 ;;
+          esac
+
+          if [ -n "$legal" ]; then
+            ok=0
+            for c in $legal; do [ "$corpus" = "$c" ] && ok=1; done
+            if [ "$ok" -eq 0 ]; then
+              # shellcheck disable=SC2086
+              set -- $legal
+              if [ "$#" -eq 2 ] && [ "$2" = "path-override" ]; then
+                echo "::notice::corpus '$corpus' is not valid for source '$src' — using '$1', the only corpus this source reads."
+                corpus="$1"
+              else
+                echo "::error::corpus '$corpus' is not valid for source '$src'. Valid: $legal"
+                exit 1
+              fi
+            fi
+          fi
 
           # Era slice -> the unpacked PGN under Lumbras/otb or Lumbras/online.
           # The .7z siblings are the originals; the unpacked dirs are what the
@@ -150,7 +193,7 @@ jobs:
             esac
           }
 
-          case "${{ inputs.corpus }}" in
+          case "$corpus" in
             lumbras-elite)    p="$lum/pgn/export_ELO2400.pgn" ;;
             chesscom-all)     p="$chess" ;;
             magnus)           p="$chess/MagnusCarlsen_chesscom.pgn" ;;
@@ -168,7 +211,7 @@ jobs:
             books)            p="$root/test-data/text" ;;
             path-override)    p="${{ inputs.path }}" ;;
             lumbras-otb|lumbras-online)
-              venue="${{ inputs.corpus }}"; venue="${venue#lumbras-}"
+              venue="$corpus"; venue="${venue#lumbras-}"
               if [ "$slice" = "all" ]; then
                 p="$lum/$venue"
               else
@@ -176,20 +219,20 @@ jobs:
                 # lumbras-online (or vice versa) silently ingests the wrong era.
                 case "$slice" in
                   "$venue"-*) : ;;
-                  *) echo "::error::slice '$slice' does not belong to corpus '${{ inputs.corpus }}'"; exit 1 ;;
+                  *) echo "::error::slice '$slice' does not belong to corpus '$corpus'"; exit 1 ;;
                 esac
                 p="$(slice_file "$slice")"
                 [ -n "$p" ] || { echo "::error::unmapped slice '$slice'"; exit 1; }
               fi ;;
-            *) echo "::error::unknown corpus '${{ inputs.corpus }}'"; exit 1 ;;
+            *) echo "::error::unknown corpus '$corpus'"; exit 1 ;;
           esac
 
-          case "${{ inputs.corpus }}" in
+          case "$corpus" in
             lumbras-otb|lumbras-online) : ;;
-            *) [ "$slice" = "all" ] || echo "::notice::slice '$slice' ignored for corpus '${{ inputs.corpus }}'" ;;
+            *) [ "$slice" = "all" ] || echo "::notice::slice '$slice' ignored for corpus '$corpus'" ;;
           esac
           # chess-eval reads the substrate, not a file: it takes no path at all.
-          if [ "${{ inputs.source }}" = "chess-eval" ]; then
+          if [ "$src" = "chess-eval" ]; then
             echo "source=chess-eval — corpus ignored, no path passed"
             echo "path=" >> "$GITHUB_OUTPUT"
             exit 0
@@ -200,7 +243,7 @@ jobs:
           if [ ! -e "$p" ]; then
             echo "::error::$p does not exist on this runner"; exit 1
           fi
-          echo "resolved corpus '${{ inputs.corpus }}' -> $p"
+          echo "resolved corpus '$corpus' (source=$src) -> $p"
           echo "path=$p" >> "$GITHUB_OUTPUT"
 
   seed:

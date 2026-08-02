@@ -1,0 +1,82 @@
+-- sense_audit(term): why senses() returned what it returned.
+--
+-- Promoted 2026-08-02 from six ad-hoc queries run to diagnose a live
+-- regression, because a diagnostic run more than once is a missing surface,
+-- not a query. It answers, per candidate sense, the four questions that
+-- diagnosis needed and could not get from senses() alone:
+--
+--   WHAT IS IT      the target's ENTITY TYPE. senses() returns a `synset_id`
+--                   column, but bubble_up promotes any IS_SYNONYM_OF target
+--                   into that slot, so the value is frequently typed Word or
+--                   Sentence rather than WordNet_Synset. Measured on the
+--                   multilingual seed: 55 Word + 9 Sentence, ZERO synsets.
+--   HOW DID IT GET  the relation that admitted it. 63 of 64 candidates for
+--   HERE            'glacier' arrived via IS_SYNONYM_OF -- i.e. they are
+--                   TRANSLATIONS competing as senses, which is how an English
+--                   prompt elected the Icelandic 'jökull'.
+--   WHAT LANGUAGE   the attested HAS_LANGUAGE of the target. Present in the
+--                   data and consulted by no elector.
+--   HOW STRONG      denote_mu and witness count -- the numbers the election
+--                   actually ranks on. English 'glacier' lost to Galician
+--                   'glaciar' 1386 vs 1446 on witness count alone.
+--
+-- READ LAW. Ids until the end: the type, relation and language joins are all
+-- id-space, and every label resolves in ONE realize_batch over the collected
+-- ids, joined back by ordinal. No per-row realize, no string comparison, no
+-- lower(). A diagnostic that violated the read law while diagnosing the read
+-- path would be worth nothing.
+CREATE OR REPLACE FUNCTION sense_audit(p_term text, p_limit int DEFAULT 64)
+    RETURNS TABLE(sense text, sense_type text, via_relation text,
+                  language text, denote_mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+WITH w AS (SELECT word_id(p_term) AS id),
+cand AS (
+    SELECT s.synset_id, s.eff_mu, s.witnesses,
+           row_number() OVER (ORDER BY s.eff_mu DESC, s.synset_id) AS rk
+    FROM w CROSS JOIN LATERAL senses(w.id) s
+),
+capped AS (SELECT * FROM cand WHERE rk <= p_limit),
+-- The relation that admitted this candidate. A target reachable by several
+-- relations reports the strongest, which is the one that carried it.
+via AS (
+    SELECT c.object_id AS synset_id, c.type_id,
+           row_number() OVER (PARTITION BY c.object_id
+                              ORDER BY eff_mu(c.rating, c.rd) DESC, c.type_id) AS rk
+    FROM w CROSS JOIN consensus c
+    WHERE c.subject_id = w.id AND c.object_id IN (SELECT synset_id FROM capped)
+),
+lang AS (
+    SELECT c.subject_id AS synset_id, c.object_id AS lang_id,
+           row_number() OVER (PARTITION BY c.subject_id
+                              ORDER BY eff_mu(c.rating, c.rd) DESC, c.object_id) AS rk
+    FROM consensus c
+    WHERE c.type_id = relation_type_id('HAS_LANGUAGE')
+      AND c.subject_id IN (SELECT synset_id FROM capped)
+),
+rows AS (
+    SELECT c.rk, c.synset_id, e.type_id, v.type_id AS via_id, l.lang_id,
+           c.eff_mu, c.witnesses
+    FROM capped c
+    LEFT JOIN entities e ON e.id = c.synset_id
+    LEFT JOIN via  v ON v.synset_id = c.synset_id AND v.rk = 1
+    LEFT JOIN lang l ON l.synset_id = c.synset_id AND l.rk = 1
+),
+-- ONE render pass over every id this result needs, position-aligned.
+ids AS (
+    SELECT array_agg(x ORDER BY ord) AS arr
+    FROM (SELECT r.rk * 4 - 3 AS ord, r.synset_id AS x FROM rows r
+          UNION ALL SELECT r.rk * 4 - 2, r.type_id  FROM rows r
+          UNION ALL SELECT r.rk * 4 - 1, r.via_id   FROM rows r
+          UNION ALL SELECT r.rk * 4,     r.lang_id  FROM rows r) z
+),
+lbl AS (SELECT realize_batch(arr, NULL) AS l FROM ids)
+SELECT lbl.l[r.rk * 4 - 3],
+       lbl.l[r.rk * 4 - 2],
+       lbl.l[r.rk * 4 - 1],
+       lbl.l[r.rk * 4],
+       round(r.eff_mu::numeric, 0),
+       r.witnesses
+FROM rows r CROSS JOIN lbl
+ORDER BY r.rk
+$$;

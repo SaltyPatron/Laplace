@@ -28,10 +28,20 @@ on:
         options: [laplace]
         default: laplace
 
-concurrency:
-  # Serialize against every other ingest on this DB — one ingest at a time.
-  group: laplace-ingest-${{ inputs.database }}
-  cancel-in-progress: false
+# NO GITHUB CONCURRENCY GROUP -- deliberately. `cancel-in-progress: false`
+# reads like a queue and is not one: GitHub holds exactly ONE pending run per
+# group and CANCELS the previously-pending one when the next arrives.
+# Measured 2026-08-02, four knowledge seeds dispatched within 90 seconds:
+#   05:31:22 A  ran 4m, succeeded
+#   05:32:25 B  CANCELLED 15s in, when C arrived
+#   05:32:37 C  CANCELLED 17s in, when D arrived
+#   05:32:51 D  ran 1h05m, succeeded
+# Two of four died and needed manual re-runs hours later. A group that silently
+# discards queued work is worse than no group: the ingest never started, so
+# nothing warned anybody.
+#
+# Serialization now comes from the runner (one job at a time) plus the explicit
+# wait below, which BLOCKS instead of cancelling.
 
 permissions:
   contents: read

@@ -1,0 +1,182 @@
+name: Seed — chess games (PGN)
+
+# ONE COMPONENT, ONE WORKFLOW. `chess` records PGN games (ChessPgn) and runs
+# the substrate analyze pass in the same Compose (GH #600).
+#
+# Why this exists separately from seed-chess.yml: that workflow drives four
+# different decomposers from one shared input set, so a PGN corpus can be
+# selected for the TSV openings reader. Run 30751844265 did exactly that.
+# Here there is one source, so every input below is guaranteed relevant and
+# the invalid pairing is not expressible rather than merely validated.
+#
+# seed-chess.yml remains for batch/ladder runs. This is the explicit one.
+
+on:
+  workflow_dispatch:
+    inputs:
+      corpus:
+        # THE FAMILY. GitHub cannot do dependent dropdowns (`options` is static
+        # YAML rendered before you touch anything), so the workaround is one
+        # dropdown per AXIS: pick the family here, then use the dropdown that
+        # belongs to it. The other is ignored and the run says so.
+        #
+        # The axes are genuinely different: chess.com archives are indexed by
+        # PLAYER, Lumbras by YEAR. Forcing both into one list was the category
+        # error that made most options invalid for any given corpus.
+        description: "which family — then use that family's dropdown"
+        type: choice
+        required: true
+        default: lumbras-elite
+        options:
+          - lumbras-elite   # 751 MB — ELO 2400+ cut, single file. Best quality-per-byte.
+          - lumbras-otb     # 8.0 GB — OTB 1900→2026.   Use `era`.
+          - lumbras-online  # 5.8 GB — online 1995→2025. Use `era`.
+          - chesscom        # per-player archives.       Use `player`.
+          - twic            # 242 MB — The Week In Chess weekly archives
+      player:
+        # Default is "-" (not used). An irrelevant dropdown showing a real
+        # value like `all` reads as though it took effect; "-" reads as what
+        # it is. It also makes the ignored-axis notice meaningful: the run only
+        # warns you when you actually SET something that had no effect.
+        description: "which player — only when corpus = chesscom"
+        type: choice
+        required: false
+        default: "-"
+        options: ["-", all, magnus, hikaru, firouzja, nihalsarin, caruana, gukesh, pragg, anish-giri, owner]
+      era:
+        # Default is "-" (not used). An irrelevant dropdown showing a real
+        # value like `all` reads as though it took effect; "-" reads as what
+        # it is. It also makes the ignored-axis notice meaningful: the run only
+        # warns you when you actually SET something that had no effect.
+        description: "which year — only when corpus = lumbras-otb / lumbras-online"
+        type: choice
+        required: false
+        default: "-"
+        options:
+          - "-"
+          - all
+          - 1900-1949   # otb
+          - 1950-1969   # otb
+          - 1970-1989   # otb
+          - 1990-1999   # otb
+          - 1995-2009   # online
+          - 2000-2004   # otb
+          - 2005-2009   # otb
+          - 2010-2014   # otb + online
+          - 2015-2019   # otb + online
+          - 2020        # online
+          - 2020-2024   # otb
+          - 2021        # online
+          - 2022        # online
+          - 2023        # online
+          - 2024        # online
+          - 2025        # otb + online
+          - 2026        # otb (partial release)
+      path:
+        # The escape hatch, and why the dropdowns can stay short. They are a
+        # curated "what you usually want" and can never cover the disk. A path
+        # typed here WINS and the dropdowns are ignored, announced in the log.
+        description: "explicit file or folder — when set this WINS over the dropdowns"
+        type: string
+        required: false
+        default: ""
+      database:
+        description: "target DB (one database: laplace)"
+        type: choice
+        options: [laplace]
+        default: laplace
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 2
+    outputs:
+      path: ${{ steps.pick.outputs.path }}
+    steps:
+      - id: pick
+        run: |
+          root="${LAPLACE_DATA_ROOT:-/vault/Data}"
+          chess="$root/Games/Chess"
+          lum="$chess/Lumbras"
+          corpus="${{ inputs.corpus }}"
+          player="${{ inputs.player }}"
+          era="${{ inputs.era }}"
+          user_path="${{ inputs.path }}"
+
+          if [ -n "$user_path" ]; then
+            [ -e "$user_path" ] || { echo "::error::path '$user_path' does not exist on this runner"; exit 1; }
+            echo "::notice::path given — corpus/player/era ignored for this run."
+            echo "resolved by path -> $user_path"
+            echo "path=$user_path" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+
+          # Glob for the era file rather than carry a filename map: this job
+          # runs ON the runner, so it can look. A new era file resolves with no
+          # workflow change. A miss prints what IS there.
+          pick_in() {
+            hit="$(find "$1" -maxdepth 1 -type f -name "*$2*.pgn" 2>/dev/null | sort | head -1)"
+            [ -n "$hit" ] || {
+              echo "::error::no file matching '*$2*.pgn' in $1" >&2
+              echo "::error::available: $(find "$1" -maxdepth 1 -type f -name '*.pgn' -printf '%f ' 2>/dev/null)" >&2
+              return 1; }
+            echo "$hit"
+          }
+
+          used=""; detail=""
+          case "$corpus" in
+            lumbras-elite) p="$lum/pgn/export_ELO2400.pgn" ;;
+            twic)          p="$chess/twic" ;;
+            chesscom)
+              used=player; detail="player=$player"
+              case "$player" in
+                # `all` is top-level only — ChessPgnDecomposer is
+                # TopDirectoryOnly unless --recursive, so it cannot wander into
+                # the 18 GB Lumbras tree (ChessPgnDecomposer.cs:15-21).
+                all|-)      p="$chess" ;;
+                magnus)     p="$chess/MagnusCarlsen_chesscom.pgn" ;;
+                hikaru)     p="$chess/Hikaru_chesscom.pgn" ;;
+                firouzja)   p="$chess/Firouzja2003_chesscom.pgn" ;;
+                nihalsarin) p="$chess/nihalsarin_chesscom.pgn" ;;
+                caruana)    p="$chess/FabianoCaruana_chesscom.pgn" ;;
+                gukesh)     p="$chess/GukeshDommaraju_chesscom.pgn" ;;
+                pragg)      p="$chess/rpragchess_chesscom.pgn" ;;
+                anish-giri) p="$chess/AnishGiri_chesscom.pgn" ;;
+                owner)      p="$chess/Anthony-Hart_chesscom.pgn" ;;
+                *) echo "::error::unknown player '$player'"; exit 1 ;;
+              esac ;;
+            lumbras-otb|lumbras-online)
+              used=era; detail="era=$era"
+              venue="${corpus#lumbras-}"
+              if [ "$era" = all ] || [ "$era" = "-" ]; then p="$lum/$venue"
+              else p="$(pick_in "$lum/$venue" "$era")" || exit 1; fi ;;
+            *) echo "::error::unknown corpus '$corpus'"; exit 1 ;;
+          esac
+
+          # A non-default selection on the wrong axis is announced, not
+          # silently discarded.
+          # Only warn when a REAL value was set on the wrong axis. "-" is the
+          # not-used default and stays silent.
+          # Warn about an axis only when it was NOT used AND was actually set.
+          # These two conditions were crossed on first write -- the simulation
+          # caught it announcing "player ignored" on the very run that used the
+          # player, and staying silent when it really was ignored.
+          [ "$used" = era ]    || [ "$era" = "-" ]    || echo "::notice::era '$era' ignored — '$corpus' is not sliced by year."
+          [ "$used" = player ] || [ "$player" = "-" ] || echo "::notice::player '$player' ignored — '$corpus' is not indexed by player."
+
+          [ -e "$p" ] || { echo "::error::$p does not exist on this runner"; exit 1; }
+          echo "resolved: corpus=$corpus${detail:+ $detail} -> $p"
+          echo "path=$p" >> "$GITHUB_OUTPUT"
+
+  seed:
+    needs: resolve
+    uses: ./.github/workflows/_ingest.yml
+    with:
+      source: chess
+      path: ${{ needs.resolve.outputs.path }}
+      database: ${{ inputs.database }}
+      timeout_minutes: 720
+      run_gate: false
+      run_idempotency: false
