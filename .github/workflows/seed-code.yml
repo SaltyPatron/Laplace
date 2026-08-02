@@ -17,9 +17,41 @@ on:
         type: choice
         required: true
         options: [code, repo, stack, tiny-codes, tabular, recipe]
+      corpus:
+        # WHAT IS ACTUALLY ON THE RUNNER. `code`, `repo`, `tabular` and
+        # `recipe` have no DATA_ROOT default (unlike the knowledge sources,
+        # which resolve their own corpus), so before this the only way to run
+        # them was to remember and type a path.
+        #
+        # GitHub cannot generate options from the filesystem, so this is a
+        # curated shortlist; `path` below covers anything not listed and wins
+        # outright when set.
+        # Default is "-" (not used). An irrelevant dropdown showing a real
+        # value like `all` reads as though it took effect; "-" reads as what
+        # it is. It also makes the ignored-axis notice meaningful: the run only
+        # warns you when you actually SET something that had no effect.
+        description: "which corpus — not used by stack / tiny-codes"
+        type: choice
+        required: false
+        default: "-"
+        options:
+          - "-"
+          - cpython       # code-authority/cpython  — CPython source
+          - postgres      # code-authority/postgres — PostgreSQL source
+          - runtime       # code-authority/runtime  — .NET runtime
+          - docs          # code-authority/docs
+          - treesitter    # TreeSitter/ — the vendored grammars
+          - self          # THIS REPOSITORY. The substrate reading its own
+                          # source is what turns G4 (dead-canonical detection)
+                          # from a grep into an indexed CALLS in-degree read.
+                          # See docs/plan/W3_Self_Ingest_Call_Graph.md.
+          - path-only     # use `path` exclusively
       path:
-        description: "<path> — required for code/repo/tabular/recipe (e.g. /vault/Data/code-authority/cpython); optional for stack/tiny-codes"
+        # Wins outright over `corpus` when set — the escape hatch that lets the
+        # dropdown stay short.
+        description: "explicit path — when set this WINS over the corpus dropdown"
         type: string
+        required: false
         default: ""
       database:
         description: "target DB (one database: laplace)"
@@ -35,11 +67,50 @@ permissions:
   contents: read
 
 jobs:
+  resolve:
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 2
+    outputs:
+      path: ${{ steps.pick.outputs.path }}
+    steps:
+      - id: pick
+        run: |
+          root="${LAPLACE_DATA_ROOT:-/vault/Data}"
+          user_path="${{ inputs.path }}"
+          if [ -n "$user_path" ]; then
+            [ -e "$user_path" ] || { echo "::error::path '$user_path' does not exist"; exit 1; }
+            echo "::notice::path given — corpus dropdown ignored for this run."
+            echo "path=$user_path" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          case "${{ inputs.corpus }}" in
+            cpython)    p="$root/code-authority/cpython" ;;
+            postgres)   p="$root/code-authority/postgres" ;;
+            runtime)    p="$root/code-authority/runtime" ;;
+            docs)       p="$root/code-authority/docs" ;;
+            treesitter) p="$root/TreeSitter" ;;
+            self)       p="$GITHUB_WORKSPACE" ;;
+            path-only|-)
+              echo "::error::pick a corpus, or give a path. (source=stack / tiny-codes resolve their own.)"
+              exit 1 ;;
+            *) echo "::error::unknown corpus '${{ inputs.corpus }}'"; exit 1 ;;
+          esac
+          # stack / tiny-codes resolve their own DATA_ROOT default in
+          # IngestDataPaths, so an empty path is correct for them.
+          case "${{ inputs.source }}" in
+            stack|tiny-codes)
+              echo "::notice::source '${{ inputs.source }}' resolves its own corpus — corpus/path ignored."
+              echo "path=" >> "$GITHUB_OUTPUT"; exit 0 ;;
+          esac
+          [ -e "$p" ] || { echo "::error::$p does not exist on this runner"; exit 1; }
+          echo "resolved corpus '${{ inputs.corpus }}' -> $p"
+          echo "path=$p" >> "$GITHUB_OUTPUT"
+
   seed:
+    needs: resolve
     uses: ./.github/workflows/_ingest.yml
     with:
       source: ${{ inputs.source }}
-      path: ${{ inputs.path }}
+      path: ${{ needs.resolve.outputs.path }}
       database: ${{ inputs.database }}
       timeout_minutes: 720
       run_gate: false

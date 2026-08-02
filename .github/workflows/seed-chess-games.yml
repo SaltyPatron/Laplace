@@ -34,17 +34,26 @@ on:
           - chesscom        # per-player archives.       Use `player`.
           - twic            # 242 MB — The Week In Chess weekly archives
       player:
+        # Default is "-" (not used). An irrelevant dropdown showing a real
+        # value like `all` reads as though it took effect; "-" reads as what
+        # it is. It also makes the ignored-axis notice meaningful: the run only
+        # warns you when you actually SET something that had no effect.
         description: "which player — only when corpus = chesscom"
         type: choice
         required: false
-        default: all
-        options: [all, magnus, hikaru, firouzja, nihalsarin, caruana, gukesh, pragg, anish-giri, owner]
+        default: "-"
+        options: ["-", all, magnus, hikaru, firouzja, nihalsarin, caruana, gukesh, pragg, anish-giri, owner]
       era:
+        # Default is "-" (not used). An irrelevant dropdown showing a real
+        # value like `all` reads as though it took effect; "-" reads as what
+        # it is. It also makes the ignored-axis notice meaningful: the run only
+        # warns you when you actually SET something that had no effect.
         description: "which year — only when corpus = lumbras-otb / lumbras-online"
         type: choice
         required: false
-        default: all
+        default: "-"
         options:
+          - "-"
           - all
           - 1900-1949   # otb
           - 1950-1969   # otb
@@ -116,17 +125,17 @@ jobs:
             echo "$hit"
           }
 
-          used=""
+          used=""; detail=""
           case "$corpus" in
             lumbras-elite) p="$lum/pgn/export_ELO2400.pgn" ;;
             twic)          p="$chess/twic" ;;
             chesscom)
-              used=player
+              used=player; detail="player=$player"
               case "$player" in
                 # `all` is top-level only — ChessPgnDecomposer is
                 # TopDirectoryOnly unless --recursive, so it cannot wander into
                 # the 18 GB Lumbras tree (ChessPgnDecomposer.cs:15-21).
-                all)        p="$chess" ;;
+                all|-)      p="$chess" ;;
                 magnus)     p="$chess/MagnusCarlsen_chesscom.pgn" ;;
                 hikaru)     p="$chess/Hikaru_chesscom.pgn" ;;
                 firouzja)   p="$chess/Firouzja2003_chesscom.pgn" ;;
@@ -139,20 +148,26 @@ jobs:
                 *) echo "::error::unknown player '$player'"; exit 1 ;;
               esac ;;
             lumbras-otb|lumbras-online)
-              used=era
+              used=era; detail="era=$era"
               venue="${corpus#lumbras-}"
-              if [ "$era" = all ]; then p="$lum/$venue"
+              if [ "$era" = all ] || [ "$era" = "-" ]; then p="$lum/$venue"
               else p="$(pick_in "$lum/$venue" "$era")" || exit 1; fi ;;
             *) echo "::error::unknown corpus '$corpus'"; exit 1 ;;
           esac
 
           # A non-default selection on the wrong axis is announced, not
           # silently discarded.
-          [ "$used" = player ] || [ "$era" = all ]    || echo "::notice::era '$era' ignored — '$corpus' is not sliced by year."
-          [ "$used" = era ]    || [ "$player" = all ] || echo "::notice::player '$player' ignored — '$corpus' is not indexed by player."
+          # Only warn when a REAL value was set on the wrong axis. "-" is the
+          # not-used default and stays silent.
+          # Warn about an axis only when it was NOT used AND was actually set.
+          # These two conditions were crossed on first write -- the simulation
+          # caught it announcing "player ignored" on the very run that used the
+          # player, and staying silent when it really was ignored.
+          [ "$used" = era ]    || [ "$era" = "-" ]    || echo "::notice::era '$era' ignored — '$corpus' is not sliced by year."
+          [ "$used" = player ] || [ "$player" = "-" ] || echo "::notice::player '$player' ignored — '$corpus' is not indexed by player."
 
           [ -e "$p" ] || { echo "::error::$p does not exist on this runner"; exit 1; }
-          echo "resolved: corpus=$corpus${used:+ $used} -> $p"
+          echo "resolved: corpus=$corpus${detail:+ $detail} -> $p"
           echo "path=$p" >> "$GITHUB_OUTPUT"
 
   seed:
