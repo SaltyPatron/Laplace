@@ -13,5 +13,9 @@ CREATE OR REPLACE FUNCTION source_roster(p_source bytea, p_limit int DEFAULT 40)
            a.observation_count
     FROM v_attestation_readable a
     WHERE a.source_id = p_source
+      -- Every source bootstraps the shared relation law first. Those rows have
+      -- relation-type subjects and otherwise consume the whole bounded sample,
+      -- making every source appear to hold the same content.
+      AND relation_canonical(a.subject_id) IS NULL
     LIMIT p_limit
 $$;
