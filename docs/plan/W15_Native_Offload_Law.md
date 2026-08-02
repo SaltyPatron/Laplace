@@ -63,15 +63,33 @@ construction*, for a reason nobody chose per-function.
 The rule is right and its scope is wrong. It was learned from one incident and
 applied to one body while 218 others carry the same marking.
 
-**Why the `SET` is there:** it pins `search_path` so a caller cannot shadow
-`laplace.*` with their own schema — a real security practice, especially for
-`SECURITY DEFINER` code.
+**Why the `SET` is really there — measured, not assumed:**
 
-**The alternative that keeps both properties:** fully schema-qualify every
-reference inside the body (`laplace.foo(...)`, which most bodies already do via
-`@extschema@`) and drop the `SET`. Qualification defeats the same attack the
-`SET` defends against, without blinding the planner. This is a
-generated-template change, not 218 hand edits.
+| | count |
+|---|---|
+| function files | 337 |
+| carry `SET search_path` | 221 |
+| use `@extschema@.` qualification anywhere in the body | 68 |
+| **carry the `SET` and qualify NOTHING** | **190** |
+
+So the `SET` is **not** a deliberate security posture applied across the
+surface. For 190 functions it is **load-bearing**: the bodies reference
+`consensus`, `prompt_state`, `entities` bare, and without the `SET` they would
+not resolve. It is a crutch for unqualified bodies, and calling it a "template
+default nobody chose" — as an earlier draft of this document did — dresses up a
+code-quality defect as an unfortunate inheritance.
+
+The schema itself is not the problem and should not be blamed: an extension
+installs into its own schema via `@extschema@`, and putting 363 functions in
+`public` would collide with everything. **The unqualified bodies are the
+defect, and they are what forced the `SET`.**
+
+**The fix, in the honest order:** qualify the 190 unqualified bodies with
+`@extschema@.`, THEN drop the `SET`. Qualification defeats the same search_path
+attack the `SET` defends against, without blinding the planner. This is
+mechanical — a bounded edit per body, greppable, and verifiable by regress —
+but it is **190 bodies of real work**, not a one-line template change. Any plan
+that claims otherwise has not looked.
 
 **What it would buy, and the honest uncertainty:** inlining lets a predicate
 reach the index inside the function body. For a read like
@@ -263,8 +281,12 @@ gate exists to do.
 
 1. **Measure the `SET`-clause cost.** One hot read, `EXPLAIN` with and without.
    Nothing else here should be scheduled until this number exists.
-2. **If it is large: change the template.** Drop `SET`, schema-qualify bodies,
-   regenerate. 218 functions in one change, gated by regress.
+2. **If it is large: qualify the bodies, then drop the `SET`.** 190 bodies
+   reference substrate objects bare and depend on the `SET` to resolve; they
+   must be qualified FIRST or they break. Mechanical and greppable, but real
+   work — not a template flip. Gate with regress, and add a policy check that
+   fails any new body containing an unqualified substrate reference, or the
+   next 190 arrive the same way.
 3. **Audit parallel markings.** Mechanical for SQL; case-by-case for the 56 C
    functions, none of which may be marked safe while calling SPI unaudited.
 4. **`SPI_keepplan` on repeat-invoked native functions** — `prompt_coherence`,
