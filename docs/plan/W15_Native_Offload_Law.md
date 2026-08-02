@@ -63,6 +63,23 @@ construction*, for a reason nobody chose per-function.
 The rule is right and its scope is wrong. It was learned from one incident and
 applied to one body while 218 others carry the same marking.
 
+**There is exactly ONE distinct function-level `SET` in this schema.** Every
+occurrence across `extension/laplace_substrate/sql/`:
+
+| occurrences | usage |
+|---|---|
+| 190 | `SET search_path = @extschema@, public AS $$` |
+| 9 | `SET search_path = @extschema@, public` |
+| 4 | same string, different dollar-quote tags |
+| 1 | `SET search_path = public AS $$` (no `@extschema@` — verify: deliberate or bug) |
+| **204** | **total, all `search_path`** |
+| 4 | genuine `UPDATE … SET` (rating, rd, highway_mask) — DML, unrelated |
+
+No `work_mem`, no `enable_seqscan`, no `jit`, no per-function tuning of any
+kind. **One string, 204 times.** That is not a considered security posture whose
+cost was weighed against inlining — it is a template artifact, and its only job
+is making unqualified references resolve.
+
 **Why the `SET` is really there — measured, not assumed:**
 
 | | count |
