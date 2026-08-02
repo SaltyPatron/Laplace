@@ -31,7 +31,7 @@ namespace Laplace.Chess.Service;
 /// hash collision, never a resolution pass.
 /// </summary>
 public sealed partial class ChessBookDecomposer(bool recursive = false)
-    : ComposeDecomposer<ChessBookRecord>, IIngestInventoryProvider
+    : ComposeDecomposer<ChessBookRecord>, IIngestInventoryProvider, IIngestNoOpExplainer
 {
     private readonly SearchOption _scope =
         recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
@@ -43,6 +43,13 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
     protected override double SourceTrust => TC.AcademicCurated;
     protected override string BatchLabelPrefix => "chess/book";
     protected override int DefaultBatchSize => BatchConfigDefaults.ChessOpening;
+
+    /// <summary>
+    /// Drop reason: a prose move line that will not replay from the standard start. The
+    /// book is teaching from a diagram, and Gutenberg plain text carries the diagram as
+    /// <c>[Illustration: ...]</c> with no FEN, so there is no board to anchor to.
+    /// </summary>
+    internal const string DiagramAnchoredLine = "diagram-anchored-line";
 
     private const double BookWitnessWeight = 0.7;
     private const int MinProsePlies = 3;
@@ -59,18 +66,23 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
         string ecosystemPath, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        foreach (var file in EnumerateFiles(ecosystemPath, _scope))
+        ChessDropLedger.Reset();
+        try
         {
-            ct.ThrowIfCancellationRequested();
-            string text = await File.ReadAllTextAsync(file, Encoding.UTF8, ct);
-            var records = ExtractFromText(text, Path.GetFileNameWithoutExtension(file)).ToList();
-
-            foreach (var record in await GateNoveltyAsync(records, options.ReObservePresent, ct))
+            foreach (var file in EnumerateFiles(ecosystemPath, _scope))
             {
                 ct.ThrowIfCancellationRequested();
-                yield return record;
+                string text = await File.ReadAllTextAsync(file, Encoding.UTF8, ct);
+                var records = ExtractFromText(text, Path.GetFileNameWithoutExtension(file)).ToList();
+
+                foreach (var record in await GateNoveltyAsync(records, options.ReObservePresent, ct))
+                {
+                    ct.ThrowIfCancellationRequested();
+                    yield return record;
+                }
             }
         }
+        finally { ChessDropLedger.Report(SourceName); }
     }
 
     // Idempotent re-ingest: skip work already deposited, per layer. An embedded game whose
@@ -251,7 +263,8 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
         foreach (var (gameText, context) in pgnBlocks)
         {
             // Parse once, here; Compose derives from this in-memory parse — never a re-parse,
-            // never a database read-back. Unparseable blocks die at the gate.
+            // never a database read-back. Unparseable blocks die at the gate (TryParseGame
+            // records the reason in the drop ledger).
             if (ChessPgnDecomposer.TryParseGame(gameText) is not { } parsed) continue;
             yield return new ChessBookRecord(title, gameText, Array.Empty<string>(), context)
             {
@@ -271,7 +284,16 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
             {
                 if (titleContentId is null
                     || ChessPgnDecomposer.TryReplayLine(sans, startFen: null) is not { } positionIds)
+                {
+                    // The book's line does not ground from the standard start — almost
+                    // always an endgame/middlegame study quoted off a diagram the text
+                    // never gives as a FEN. Counted, not silent: this is the measurable
+                    // shape of GH #574 ("book decomposer under-extracts"), and the ratio
+                    // is what says whether a book is worth a diagram-anchored reader.
+                    ChessDropLedger.Drop(DiagramAnchoredLine, string.Join(' ', sans.Take(8)));
                     continue;
+                }
+                ChessDropLedger.Kept();
                 var lineId = ChessCompose.LineId(positionIds);
                 yield return new ChessBookRecord(title, null, sans, TrimContext(paragraph))
                 {
@@ -466,25 +488,82 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
         return string.Join(' ', words[..keep]);
     }
 
-    // Pre-ingest inventory (GH #492): lines via newline estimate per matched file.
+    /// <summary>
+    /// Pre-ingest inventory (GH #492), in the unit this lane actually yields: CANDIDATE
+    /// ASSERTIONS (embedded games + prose line anchors).
+    ///
+    /// This used to be <c>FromFiles("lines", …)</c> — a NEWLINE count. Measured on
+    /// <c>the-blue-book-of-chess.txt</c>, the run ended
+    /// <c>input_done=82 input_total=14961 … status=ok</c>: 0.5%, reported as success.
+    /// The numerator is records; the denominator was lines of the file. Two different
+    /// units in one ratio is not a slow lane, it is a meaningless number, and it is the
+    /// number an operator reads to decide whether a book was ingested. Anchors that fail
+    /// to ground are still counted here (they are candidates), and the exact shortfall is
+    /// reported by name in the CHESS_DROPPED line.
+    /// </summary>
     public Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
     {
-        var paths = EnumerateFiles(context.EcosystemPath, _scope).ToList();
-        return Task.FromResult(paths.Count == 0
-            ? null
-            : IngestInventory.FromFiles("lines", paths, options.MaxInputUnits, ct));
+        var paths = EnumerateFiles(context.EcosystemPath, _scope);
+        if (options.MaxInputUnits > 0)
+            return Task.FromResult(IngestInventory.FromFiles("assertions", paths, options.MaxInputUnits, ct));
+
+        var files = new List<IngestFileSpec>(paths.Count);
+        long total = 0;
+        foreach (var p in paths)
+        {
+            long n = CountCandidateAssertions(p, ct);
+            files.Add(new IngestFileSpec(Path.GetFileName(p), p, n));
+            total += n;
+        }
+        return Task.FromResult<IngestInventory?>(new IngestInventory("assertions", total, files));
     }
 
-    private static IEnumerable<string> EnumerateFiles(string path, SearchOption scope)
+    /// <summary>
+    /// The EXACT number of records this file will yield, by running the extraction and
+    /// counting it.
+    ///
+    /// A cheap proxy was tried and is not honest. Raw <c>LineAnchor</c> matches over
+    /// <c>the-blue-book-of-chess.txt</c> + Capablanca + Lasker give 2,392 against 166
+    /// records actually yielded — 7%, because an anchor is any "1." followed by a
+    /// move-shaped character, and the overwhelming majority are prose ("1. e4 is the
+    /// King's Pawn") that never reach <see cref="MinProsePlies"/>. Reporting 166/2392 as
+    /// a completed run is the same class of lie as the 82/14961 it replaced, just
+    /// smaller.
+    ///
+    /// The extra pass is affordable BECAUSE of what this lane reads: a book corpus is
+    /// hundreds of KB per file and hundreds of files, and the whole test-data/text tree
+    /// extracts in about nine seconds. That is the right trade for a denominator an
+    /// operator can act on. The PGN lane, whose inputs are gigabytes, keeps its sampled
+    /// byte estimate for exactly the same reason inverted.
+    /// </summary>
+    private static long CountCandidateAssertions(string path, CancellationToken ct)
     {
-        if (string.IsNullOrEmpty(path)) yield break;
-        if (File.Exists(path)) { yield return Path.GetFullPath(path); yield break; }
-        if (!Directory.Exists(path)) yield break;
-        foreach (var f in Directory.EnumerateFiles(path, "*.txt", scope)
-                                   .OrderBy(p => p, StringComparer.Ordinal))
-            yield return f;
+        try
+        {
+            string text = File.ReadAllText(path, Encoding.UTF8);
+            ct.ThrowIfCancellationRequested();
+            return ExtractFromText(text, Path.GetFileNameWithoutExtension(path)).LongCount();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            System.Diagnostics.Trace.TraceWarning(
+                $"ChessBookDecomposer: failed to inventory {path}: {ex.Message}");
+            return 0;
+        }
     }
+
+    /// <summary>
+    /// An empty run is expected when the novelty gate consumed every record it read —
+    /// see <see cref="ChessDropLedger.ExplainEmptyRun"/>. Re-ingesting an already-ingested
+    /// corpus used to exit 1 with "declares N input unit(s) but ingested 0".
+    /// </summary>
+    public (string Status, string Detail)? ExplainEmptyRun(long declaredInputUnits)
+        => ChessDropLedger.ExplainEmptyRun(SourceName, declaredInputUnits);
+
+    // Zero matches THROWS — see ChessInput.
+    private static IReadOnlyList<string> EnumerateFiles(string path, SearchOption scope)
+        => ChessInput.Resolve(path, scope, ChessInput.BookExtensions, "chess-books");
 
     [GeneratedRegex(@"^Title:\s*(.+)$", RegexOptions.Multiline)]
     private static partial Regex TitleLine();

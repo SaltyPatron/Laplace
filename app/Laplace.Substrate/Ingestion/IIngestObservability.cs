@@ -12,7 +12,8 @@ public interface IIngestObservability
     void OnIntentFailed(string sourceName, IngestFailure failure);
 
     /// <summary>Terminal success-shaped exit; <paramref name="status"/> is the same value
-    /// INGEST_COMPLETE logs (ok / failed / empty-noop / capped).</summary>
+    /// INGEST_COMPLETE logs (ok / failed / empty-noop / capped, or a decomposer-supplied
+    /// expected-empty status via IIngestNoOpExplainer: already-present, already-complete, …).</summary>
     void OnRunFinished(string sourceName, IngestRunResult result, string status);
 
     /// <summary>Terminal abnormal exit (exception or cancellation) — called when

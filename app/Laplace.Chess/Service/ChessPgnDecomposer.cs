@@ -15,7 +15,7 @@ namespace Laplace.Chess.Service;
 // corpus (Lumbras\otb, fetch outputs). Recursion is an explicit operator decision
 // (laplace ingest chess <dir> --recursive).
 public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInline = true)
-    : ComposeDecomposer<ChessGameRecord>, IIngestInventoryProvider
+    : ComposeDecomposer<ChessGameRecord>, IIngestInventoryProvider, IIngestNoOpExplainer
 {
     private readonly SearchOption _scope =
         recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
@@ -62,9 +62,19 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         [EnumeratorCancellation] CancellationToken ct)
     {
         var ws = IngestPipelineDefaults.ResolveWorkingSet(PipelineProfile, options, DefaultBatchSize);
-        await foreach (var game in StreamNovelGamesAsync(
-                           ecosystemPath, _scope, ContainmentReader, ws.Batch, options.ReObservePresent, ct))
-            yield return game;
+        ChessDropLedger.Reset();
+        try
+        {
+            await foreach (var game in StreamNovelGamesAsync(
+                               ecosystemPath, _scope, ContainmentReader, ws.Batch, options.ReObservePresent, ct))
+                yield return game;
+        }
+        finally
+        {
+            // Reported even on cancellation: a killed run's drop profile is exactly what
+            // the operator needs to decide whether to resume or fix the corpus first.
+            ChessDropLedger.Report(SourceName);
+        }
     }
 
     // ONE pass, ONE pipeline (GH #600): the witnessed record (ChessPgn source) AND the
@@ -157,8 +167,15 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         foreach (var file in EnumerateFiles(ecosystemPath, scope))
         {
             ct.ThrowIfCancellationRequested();
-            await foreach (var gameText in StreamGamesAsync(file, ct).WithCancellation(ct))
-                yield return gameText;
+            // One file can hold several members (a TWIC weekly .zip wraps one .pgn); the
+            // enumerator owns each reader's lifetime, so a member must be drained before
+            // the next is requested — which is exactly what this loop does.
+            foreach (var (_, reader) in ChessInput.OpenMembers(file))
+            {
+                ct.ThrowIfCancellationRequested();
+                await foreach (var gameText in StreamGamesAsync(reader, ct).WithCancellation(ct))
+                    yield return gameText;
+            }
         }
     }
 
@@ -168,10 +185,15 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         PgnMovetext.PgnWalkResult walk;
         using (var ast = GrammarDecomposer.Parse(gameBytes, "pgn"))
             walk = PgnMovetext.Walk(ast, gameBytes);
-        if (walk.Result is null || walk.Mainline.Count == 0) return null;
+        if (walk.Result is null || walk.Mainline.Count == 0)
+        {
+            ChessDropLedger.Drop(ChessDropLedger.NoResultOrMoves, Headline(gameText));
+            return null;
+        }
 
         var moves = walk.Mainline.Select(p => p.San).ToList();
         var result = walk.Result.Value;
+
         var (whiteName, blackName) = ParseNames(gameText);
         string date = PgnGames.TagStr(gameText, "Date");
 
@@ -188,8 +210,10 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         var positionIds = TryReplayLine(moves, startFen);
         if (positionIds is null)
         {
-            System.Diagnostics.Trace.TraceWarning(
-                $"ChessPgnDecomposer: unresolvable SAN, game dropped ({whiteName} vs {blackName} {date})");
+            ChessDropLedger.Drop(
+                DropReason(gameText, startFen),
+                $"{whiteName} vs {blackName} {date}"
+                + (startFen is null ? "" : $" [FEN {startFen}]"));
             return null;
         }
         var lineId = ChessCompose.LineId(positionIds);
@@ -197,7 +221,12 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         // The playing-event handle: Seven-Tag-Roster fields closed over the verbatim
         // movetext id — idempotent per record, collision-proof against garbage rosters.
         var movetextId = MovetextId(MovetextSection(gameText));
-        if (movetextId is null) return null;
+        if (movetextId is null)
+        {
+            ChessDropLedger.Drop(ChessDropLedger.NoMovetext, $"{whiteName} vs {blackName} {date}");
+            return null;
+        }
+        ChessDropLedger.Kept();
         var eventId = ChessVocabulary.PgnEventId(
             whiteName, blackName, date,
             PgnGames.TagStr(gameText, "Event"), PgnGames.TagStr(gameText, "Round"),
@@ -212,6 +241,31 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
             PositionIds = positionIds,
             MovetextId = movetextId.Value,
         };
+    }
+
+    /// <summary>
+    /// Which refusal this is. A game that failed to replay from a NON-standard start is
+    /// usually a variant, not a corrupt record, and the two want different responses:
+    /// "add the variant" versus "the source's data is bad". Chess.com tags every one of
+    /// these, so the tag is the evidence; a bare unreadable FEN with no Variant tag stays
+    /// <see cref="ChessDropLedger.UnreadableStartPosition"/>.
+    /// </summary>
+    private static string DropReason(string gameText, string? startFen)
+    {
+        if (startFen is null) return ChessDropLedger.UnreadableSan;
+        string variant = PgnGames.TagStr(gameText, "Variant");
+        return string.IsNullOrWhiteSpace(variant) || variant == "?"
+            ? ChessDropLedger.UnreadableStartPosition
+            : ChessDropLedger.UnmodelledVariant;
+    }
+
+    /// <summary>The first header line of a game, for a drop sample that identifies it.</summary>
+    private static string Headline(string gameText)
+    {
+        int nl = gameText.IndexOf('\n');
+        var head = nl < 0 ? gameText : gameText[..nl];
+        head = head.Trim();
+        return head.Length <= 120 ? head : head[..120];
     }
 
     /// <summary>
@@ -393,9 +447,8 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
     }
 
     private static async IAsyncEnumerable<string> StreamGamesAsync(
-        string path, [EnumeratorCancellation] CancellationToken ct)
+        TextReader reader, [EnumeratorCancellation] CancellationToken ct)
     {
-        using var reader = new StreamReader(path, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
         var sb = new StringBuilder(2048);
         var carry = new StringBuilder(256);
         bool inGame = false;
@@ -551,7 +604,9 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         {
             try
             {
-                games += CountEventHeaderLines(f, ct);
+                games += ChessInput.IsCompressed(f)
+                    ? EstimateCompressedGameCount(f)
+                    : CountEventHeaderLines(f, ct);
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
@@ -606,32 +661,52 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
     public Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
     {
-        var paths = EnumerateFiles(context.EcosystemPath, _scope).ToList();
-        if (paths.Count == 0) return Task.FromResult<IngestInventory?>(null);
+        var paths = EnumerateFiles(context.EcosystemPath, _scope);
         if (options.MaxInputUnits > 0)
-            return Task.FromResult(IngestInventory.FromFiles("games", paths, options.MaxInputUnits, ct));
+            return Task.FromResult(IngestInventory.FromFiles("games", paths.ToList(), options.MaxInputUnits, ct));
 
         var files = new List<IngestFileSpec>(paths.Count);
         long total = 0;
         foreach (var p in paths)
         {
             // Sample/exact byte estimate — StreamReader full decode blocked inventory on large PGNs.
-            long n = EtlInventory.EstimatePgnGameCount(p, ct);
+            // A compressed member cannot be byte-scanned in place; scale its uncompressed
+            // length by the density measured on the plain files, or by the corpus-wide
+            // average game size when the whole input is compressed.
+            long n = ChessInput.IsCompressed(p)
+                ? EstimateCompressedGameCount(p)
+                : EtlInventory.EstimatePgnGameCount(p, ct);
             files.Add(new IngestFileSpec(Path.GetFileName(p), p, n));
             total += n;
         }
         return Task.FromResult<IngestInventory?>(new IngestInventory("games", total, files));
     }
 
-    private static IEnumerable<string> EnumerateFiles(string path, SearchOption scope)
-    {
-        if (string.IsNullOrEmpty(path)) yield break;
-        if (File.Exists(path)) { yield return Path.GetFullPath(path); yield break; }
-        if (!Directory.Exists(path)) yield break;
-        foreach (var f in Directory.EnumerateFiles(path, "*.pgn", scope)
-                                   .OrderBy(p => p, StringComparer.Ordinal))
-            yield return f;
-    }
+    /// <summary>
+    /// Games in a compressed member, from its UNCOMPRESSED length over the measured mean
+    /// game size of this corpus family (~1.6 KiB across TWIC / Lumbras / chess.com — a
+    /// tagged game with clocks runs 1–3 KiB). Inventory is a progress denominator, not a
+    /// correctness gate: decompressing a 200 MB archive to count "[Event " before the first
+    /// batch would cost more than the ingest it is describing.
+    /// </summary>
+    private const long MeanCompressedGameBytes = 1_600;
+
+    private static long EstimateCompressedGameCount(string path)
+        => Math.Max(1, ChessInput.UncompressedLength(path) / MeanCompressedGameBytes);
+
+    /// <summary>
+    /// An empty run is expected when the novelty gate consumed every record it read —
+    /// see <see cref="ChessDropLedger.ExplainEmptyRun"/>. Re-ingesting an already-ingested
+    /// corpus used to exit 1 with "declares N input unit(s) but ingested 0".
+    /// </summary>
+    public (string Status, string Detail)? ExplainEmptyRun(long declaredInputUnits)
+        => ChessDropLedger.ExplainEmptyRun(SourceName, declaredInputUnits);
+
+    // Zero matches THROWS (ChessInput.Resolve). It used to yield nothing, which made
+    // `ingest chess <wrong-dir>` exit 0 having written not one row — a green that proved
+    // nothing, in CI as much as by hand.
+    private static IReadOnlyList<string> EnumerateFiles(string path, SearchOption scope)
+        => ChessInput.Resolve(path, scope, ChessInput.PgnExtensions, "chess");
 }
 
 /// <summary>

@@ -42,8 +42,15 @@ namespace Laplace.Chess.Service;
 /// Run: `laplace ingest chess-trajectory` (no path — the substrate is the source of truth)
 ///      `LAPLACE_WS_FLUSH_MB=32 laplace ingest chess-trajectory`  (frequent commits)
 /// </summary>
-public sealed class ChessTrajectoryDecomposer : ComposeDecomposer<ChessTrajectoryRecord>
+public sealed class ChessTrajectoryDecomposer
+    : ComposeDecomposer<ChessTrajectoryRecord>, IIngestNoOpExplainer
 {
+    // EstimateUnitCountAsync declares every RECORDED line; the stream yields only lines
+    // still missing this pass's marker. A caught-up backfill therefore applies zero, which
+    // the runner's silent-no-op guard turned into a hard failure — measured:
+    // `ingest chess-trajectory` on a current substrate exited 1.
+    private long _candidatesStreamed;
+
     /// <summary>
     /// Marker generation for THIS pass. Bump only when the trajectory encoding itself changes;
     /// deliberately distinct from ChessAnalyze.Version, which governs the testimony re-derive.
@@ -91,10 +98,22 @@ public sealed class ChessTrajectoryDecomposer : ComposeDecomposer<ChessTrajector
         // trajectory has already been COMMITTED is skipped before compose, so a second run
         // costs a bitmap probe per line rather than a replay. Composed-but-uncommitted work is
         // not skipped — see the commit-cadence note above.
+        _candidatesStreamed = 0;
         await foreach (var witnessed in ChessWitnessHydrator.StreamUnanalyzedLinesAsync(
                            ds, ContainmentReader!, ws.Batch, MarkerId, ct))
+        {
+            _candidatesStreamed++;
             yield return new ChessTrajectoryRecord(witnessed);
+        }
     }
+
+    /// <summary>Nothing streamed means the backfill has caught up, not that it broke.</summary>
+    public (string Status, string Detail)? ExplainEmptyRun(long declaredInputUnits)
+        => _candidatesStreamed == 0
+            ? ("already-complete",
+               $"ChessTrajectory: every one of {declaredInputUnits} recorded line(s) already "
+               + $"carries the v{TrajectoryVersion} trajectory marker — nothing left to backfill.")
+            : null;
 
     protected override void Compose(ChessTrajectoryRecord record, SubstrateChangeBuilder b)
         => Deposit(b, record.Game, SourceId);

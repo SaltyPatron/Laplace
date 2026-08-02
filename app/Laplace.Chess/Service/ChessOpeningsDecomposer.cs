@@ -11,7 +11,7 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 namespace Laplace.Chess.Service;
 
 public sealed class ChessOpeningsDecomposer(bool recursive = false)
-    : ComposeDecomposer<ChessOpeningRecord>, IIngestInventoryProvider
+    : ComposeDecomposer<ChessOpeningRecord>, IIngestInventoryProvider, IIngestNoOpExplainer
 {
     private readonly SearchOption _scope =
         recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
@@ -43,16 +43,26 @@ public sealed class ChessOpeningsDecomposer(bool recursive = false)
         string ecosystemPath, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        foreach (var file in EnumerateFiles(ecosystemPath, _scope))
+        ChessDropLedger.Reset();
+        try
         {
-            await foreach (var row in StreamRowsAsync(file, ct))
+            foreach (var file in EnumerateFiles(ecosystemPath, _scope))
             {
-                ct.ThrowIfCancellationRequested();
-                var sans = ExtractSans(row.Movetext);
-                if (sans.Count == 0) continue;
-                yield return new ChessOpeningRecord(row.Eco, row.Name, sans);
+                await foreach (var row in StreamRowsAsync(file, ct))
+                {
+                    ct.ThrowIfCancellationRequested();
+                    var sans = ExtractSans(row.Movetext);
+                    if (sans.Count == 0)
+                    {
+                        ChessDropLedger.Drop(ChessDropLedger.NoResultOrMoves, $"{row.Eco} {row.Name} :: {row.Movetext}");
+                        continue;
+                    }
+                    ChessDropLedger.Kept();
+                    yield return new ChessOpeningRecord(row.Eco, row.Name, sans);
+                }
             }
         }
+        finally { ChessDropLedger.Report(SourceName); }
     }
 
     protected override void Compose(ChessOpeningRecord record, SubstrateChangeBuilder b)
@@ -138,25 +148,59 @@ public sealed class ChessOpeningsDecomposer(bool recursive = false)
                 yield return row;
     }
 
-    // Pre-ingest inventory (GH #492): rows via newline estimate per matched file.
+    /// <summary>
+    /// Pre-ingest inventory (GH #492). Counts the rows this decomposer will actually
+    /// YIELD, not newlines.
+    ///
+    /// <c>FromFiles</c> newline-counts, which includes each TSV's <c>eco name pgn</c>
+    /// header — a row <see cref="ParseRow"/> deliberately skips. The run therefore
+    /// finished at <c>input_done=3733 input_total=3738</c> and pinned at 99.9%: five
+    /// header lines promised and never delivered. A denominator that counts something
+    /// the numerator cannot reach can never read 100%, so "did this finish?" stops being
+    /// answerable from the journal. Files here are catalogs (a few thousand rows), so an
+    /// exact pass costs milliseconds.
+    /// </summary>
     public Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
     {
-        var paths = EnumerateFiles(context.EcosystemPath, _scope).ToList();
-        return Task.FromResult(paths.Count == 0
-            ? null
-            : IngestInventory.FromFiles("rows", paths, options.MaxInputUnits, ct));
+        var paths = EnumerateFiles(context.EcosystemPath, _scope);
+        if (options.MaxInputUnits > 0)
+            return Task.FromResult(IngestInventory.FromFiles("rows", paths, options.MaxInputUnits, ct));
+
+        var files = new List<IngestFileSpec>(paths.Count);
+        long total = 0;
+        foreach (var p in paths)
+        {
+            long n = CountParsableRows(p, ct);
+            files.Add(new IngestFileSpec(Path.GetFileName(p), p, n));
+            total += n;
+        }
+        return Task.FromResult<IngestInventory?>(new IngestInventory("rows", total, files));
     }
 
-    private static IEnumerable<string> EnumerateFiles(string path, SearchOption scope)
+    private static long CountParsableRows(string path, CancellationToken ct)
     {
-        if (string.IsNullOrEmpty(path)) yield break;
-        if (File.Exists(path)) { yield return Path.GetFullPath(path); yield break; }
-        if (!Directory.Exists(path)) yield break;
-        foreach (var f in Directory.EnumerateFiles(path, "*.tsv", scope)
-                                   .OrderBy(p => p, StringComparer.Ordinal))
-            yield return f;
+        long n = 0;
+        foreach (var line in File.ReadLines(path))
+        {
+            ct.ThrowIfCancellationRequested();
+            if (ParseRow(line) is not null) n++;
+        }
+        return n;
     }
+
+    /// <summary>
+    /// An empty run is expected when the novelty gate consumed every record it read —
+    /// see <see cref="ChessDropLedger.ExplainEmptyRun"/>. Re-ingesting an already-ingested
+    /// corpus used to exit 1 with "declares N input unit(s) but ingested 0".
+    /// </summary>
+    public (string Status, string Detail)? ExplainEmptyRun(long declaredInputUnits)
+        => ChessDropLedger.ExplainEmptyRun(SourceName, declaredInputUnits);
+
+    // Zero matches THROWS — see ChessInput. `ingest openings <dir-with-no-tsv>` used to
+    // exit 0 with an empty substrate.
+    private static IReadOnlyList<string> EnumerateFiles(string path, SearchOption scope)
+        => ChessInput.Resolve(path, scope, ChessInput.OpeningsExtensions, "openings");
 }
 
 public readonly record struct ChessOpeningRecord(string Eco, string Name, List<string> Sans);
