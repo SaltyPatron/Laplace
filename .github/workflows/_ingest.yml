@@ -53,10 +53,20 @@ on:
         type: boolean
         default: false
 
-concurrency:
-  # Serialize every ingest against a given DB — one ingest at a time (substrate law).
-  group: laplace-ingest-${{ inputs.database }}
-  cancel-in-progress: false
+# NO GITHUB CONCURRENCY GROUP -- deliberately. `cancel-in-progress: false`
+# reads like a queue and is not one: GitHub holds exactly ONE pending run per
+# group and CANCELS the previously-pending one when the next arrives.
+# Measured 2026-08-02, four knowledge seeds dispatched within 90 seconds:
+#   05:31:22 A  ran 4m, succeeded
+#   05:32:25 B  CANCELLED 15s in, when C arrived
+#   05:32:37 C  CANCELLED 17s in, when D arrived
+#   05:32:51 D  ran 1h05m, succeeded
+# Two of four died and needed manual re-runs hours later. A group that silently
+# discards queued work is worse than no group: the ingest never started, so
+# nothing warned anybody.
+#
+# Serialization now comes from the runner (one job at a time) plus the explicit
+# wait below, which BLOCKS instead of cancelling.
 
 permissions:
   contents: read
@@ -88,6 +98,35 @@ jobs:
       - uses: actions/checkout@v4
         with: { submodules: false, clean: false }
       - uses: ./.github/actions/setup-laplace-env
+
+      - name: Wait for the substrate to be free
+        # THE QUEUE, done properly. This BLOCKS; it never discards work.
+        # One ingest at a time is substrate law (CLAUDE.md, Operations), and
+        # the GitHub concurrency group that used to enforce it silently
+        # cancelled queued seeds instead of queueing them -- see the comment at
+        # the top of this file.
+        #
+        # An active COPY on the target database means an ingest is running.
+        # Wait it out rather than fighting it: a second concurrent ingest
+        # contends on the same apply lock and index cycle, so it is slower for
+        # both AND violates the law. Timeout is generous because a real corpus
+        # ingest legitimately runs for hours.
+        timeout-minutes: 600
+        run: |
+          for i in $(seq 1 3600); do
+            busy=$(psql -h /var/run/postgresql -U laplace_admin -d "${{ inputs.database }}" -tAc \
+              "SELECT count(*) FROM pg_stat_activity
+                WHERE datname = current_database() AND state = 'active'
+                  AND query ILIKE 'COPY laplace.%'" 2>/dev/null || echo 0)
+            if [ "${busy:-0}" -eq 0 ]; then
+              [ "$i" -gt 1 ] && echo "substrate free after $((i*10))s"
+              exit 0
+            fi
+            [ $((i % 30)) -eq 1 ] && echo "waiting: $busy active COPY — another ingest holds the substrate (${i}0s elapsed)"
+            sleep 10
+          done
+          echo "::error::still busy after 10h — refusing to start a second concurrent ingest"
+          exit 1
 
       - name: Ingest
         id: run_ingest

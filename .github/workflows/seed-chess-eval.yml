@@ -1,0 +1,35 @@
+name: Seed — chess eval census
+
+# ONE COMPONENT, ONE WORKFLOW, AND NO INPUTS AT ALL.
+#
+# chess-eval (ChessStockfish) runs a Stockfish eval census over games ALREADY
+# RECORDED in the substrate. The substrate is its source, so it takes no path —
+# and in the grouped workflow that meant every corpus dropdown had to be
+# explained as "ignored for chess-eval". Here there is nothing to ignore.
+#
+# The calculated eval layer is DERIVED STATE: this step is what makes it
+# survive a db-reset, exactly as every other seed re-derives its layer. It is
+# marker-gated, so re-runs skip already-evaluated games.
+
+on:
+  workflow_dispatch:
+    inputs:
+      database:
+        description: "target DB (one database: laplace)"
+        type: choice
+        options: [laplace]
+        default: laplace
+
+permissions:
+  contents: read
+
+jobs:
+  seed:
+    uses: ./.github/workflows/_ingest.yml
+    with:
+      source: chess-eval
+      path: ""
+      database: ${{ inputs.database }}
+      timeout_minutes: 720
+      run_gate: false
+      run_idempotency: false

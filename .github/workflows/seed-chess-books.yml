@@ -1,0 +1,54 @@
+name: Seed — chess books
+
+# ONE COMPONENT, ONE WORKFLOW. annotated chess books (ChessBook) — a SECOND witness over the document corpus, extracting the games it can replay
+#
+# There is exactly one corpus for this source, so there is no corpus dropdown
+# and no way to hand it the wrong format. That is the point of splitting these
+# out of seed-chess.yml: run 30751844265 fed a PGN to the openings TSV reader
+# because one shared input set drove four different decomposers.
+#
+# seed-chess.yml remains for batch/ladder runs. This is the explicit one.
+
+on:
+  workflow_dispatch:
+    inputs:
+      path:
+        description: "override the default corpus ($LAPLACE_DATA_ROOT/test-data/text)"
+        type: string
+        required: false
+        default: ""
+      database:
+        description: "target DB (one database: laplace)"
+        type: choice
+        options: [laplace]
+        default: laplace
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 2
+    outputs:
+      path: ${{ steps.pick.outputs.path }}
+    steps:
+      - id: pick
+        run: |
+          root="${LAPLACE_DATA_ROOT:-/vault/Data}"
+          p="${{ inputs.path }}"
+          [ -n "$p" ] || p="$root/test-data/text"
+          [ -e "$p" ] || { echo "::error::$p does not exist on this runner"; exit 1; }
+          echo "resolved -> $p"
+          echo "path=$p" >> "$GITHUB_OUTPUT"
+
+  seed:
+    needs: resolve
+    uses: ./.github/workflows/_ingest.yml
+    with:
+      source: chess-books
+      path: ${{ needs.resolve.outputs.path }}
+      database: ${{ inputs.database }}
+      timeout_minutes: 720
+      run_gate: false
+      run_idempotency: false
