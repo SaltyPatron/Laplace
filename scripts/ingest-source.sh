@@ -75,8 +75,10 @@ ingest() {
         echo "elapsed_s=$elapsed" >> "$GITHUB_OUTPUT"
     fi
     if [[ "$rc" -eq 0 ]]; then
-        bash "$ROOT/scripts/verify-ingest-journal.sh" --cli-key "$source" \
-            || echo "WARN: journal verify skipped/failed for ${source} (gates may still run)"
+        # Pass/fail is the journal row when this source is in decomposer-gates.json.
+        if python3 -c "import json,sys; json.load(open('${ROOT}/scripts/decomposer-gates.json'))['sources'].get(sys.argv[1]) or sys.exit(1)" "$source" 2>/dev/null; then
+            bash "$ROOT/scripts/verify-ingest-journal.sh" --cli-key "$source" || return 1
+        fi
     fi
     return "$rc"
 }
