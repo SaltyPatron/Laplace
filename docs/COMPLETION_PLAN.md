@@ -179,14 +179,41 @@ every one by grep, because grep was the only instrument available); a
 signature change succeeds precisely because nothing *can* block it, so a
 missed caller fails on a user's prompt instead of at install; spec 37 §6's
 same-signature install-order arbitration is unenforceable by construction.
-The fix is `BEGIN ATOMIC` bodies (PG14+; this cluster runs PG18), which
-makes PostgreSQL record and enforce the graph — converting G4 from a text
-search into a catalog query. Blockers are known and real: strict install
+**The destination is a substrate read, not a catalog query and never a
+grep.** A grep gate string-matches source, which breaks L1 — rendering and
+text comparison inside the very check meant to enforce the laws — and it
+cannot see dynamic dispatch. A `pg_depend` query is better but still
+partial: it sees only *installed* objects, never the `.sql.in` templates
+that are the schema of record, nor C, nor C#. The substrate's own answer is
+the correct one: **ingest the source and read the graph.** `CALLS`
+(`relation_types.toml:124`) and `REFERENCES` (`:1134`) are already governed
+and `tree_sitter_sql` is already registered
+(`grammar_registry.c:74,132`); a dead canonical is then a function id with
+zero incoming `CALLS` edges — one indexed read in id space, perfcacheable
+per spec 33, rendering only the final list of dead names. It also makes a
+false positive *refutable*, folding like any other testimony.
+
+That path is measured blocked and is GH #765: `ingest code` over the
+converse family accepted **zero** files, because `Path.GetExtension`
+returns `.in` for `chat.sql.in` and `in` is not in the grammar map
+(`CodeDecomposer.cs:60-64`) — the substrate cannot read its own schema of
+record; and the same files renamed `*.sql` produced content DAG plus
+trajectories with **zero** attestations, so no `CALLS`/`DEFINES`/
+`REFERENCES` exist to query even once the file is accepted.
+
+`BEGIN ATOMIC` (GH #764) remains worth doing as the *in-database
+complement* — it makes PostgreSQL enforce what PostgreSQL can see, at
+install time, for free. Blockers there are known and real: strict install
 ordering with no forward references (which turns the §6
 `senses → bubble_up → lexical_peers → senses` cycle into a hard failure —
 break it first), creation-time name binding, and the `eff_mu` inlining law,
 which must be verified with `EXPLAIN` rather than assumed to survive.
-GH #764. **Phase 1, alongside the gates it makes real.**
+
+**Phase 1.** Sequence: land G4 as a grep with a shrink-only allowlist to
+stop the bleeding *now*, explicitly as scaffolding; fix the code lane
+(#765); replace the grep with the substrate read; adopt `BEGIN ATOMIC`
+(#764) alongside. Do not mistake the scaffolding for the destination —
+that mistake is the failure mode this whole document is written against.
 
 **R1 — Chat's generation lane is the unsteered one.**
 `chat(shape='walk')` → `converse_walk` → `steered_walk_raw`: seeded-random
@@ -303,11 +330,17 @@ build failures.
 Why first: every later phase's "done" is otherwise opinion; G4 alone would
 have prevented most of R1/R8.
 Items:
-0. **R0 — make the dependency graph real** (GH #764). Leaf-first `BEGIN
-   ATOMIC` conversion so PostgreSQL records and enforces the call graph.
-   Sequenced first among the gates because it decides whether G4 is a
-   catalog query or a grep, and a grep-based G4 cannot see dynamic
-   dispatch. Ship it incrementally: verify `eff_mu` inlining survives
+0. **R0 — make the call graph real, in the substrate** (GH #765, then
+   #764). First unblock the code lane so the system can read its own
+   source: compound extensions (`chat.sql.in` → `sql`) and SQL structural
+   extraction (`DEFINES`/`CALLS`/`REFERENCES`), declared in
+   `InitializeAsync` per the decomposer gate. Then G4 is an indexed read
+   on `CALLS` in-degree, perfcached, rendering only its final answer —
+   the form the read laws actually require. `BEGIN ATOMIC` (#764) lands
+   alongside as the in-database complement for what PostgreSQL can see.
+   A grep G4 may ship first as explicitly-labeled scaffolding with a
+   shrink-only allowlist; it is not the destination. Ship it
+   incrementally: verify `eff_mu` inlining survives
    before converting that family, break the §6 install cycle when reached,
    allowlist unconverted functions shrink-only. G4 can land as a grep in
    parallel and be reimplemented against `pg_depend` as coverage grows —
