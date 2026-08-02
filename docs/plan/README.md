@@ -32,7 +32,7 @@ point:
 | W1 | [The speaking loop](W1_Speaking_Loop.md) — wire the steered lane into chat | #751 | 2 | specified |
 | W2 | [The document lane](W2_Document_Lane.md) — Pillar 0, identity/names/typed edges | #754 | 4 | specified |
 | W3 | [Self-ingest call graph](W3_Self_Ingest_Call_Graph.md) — the substrate reads its own source | #765 | 1 | specified |
-| W4 | Tier-collision seam + sense priors | #752, #753 | 3 | in research |
+| W4 | [Sense-election ground](W4_Sense_Election_Ground.md) — tier seam + sense priors | #752, #753 | 3 | specified |
 | W5 | [Evaluation harness](W5_Evaluation_Harness.md) | #755 | 1 | specified |
 | W6 | [Architecture gates](W6_Architecture_Gates.md) — spec 37 G1–G10, elector invariant | #758 | 1 | specified |
 | W7 | [Questions route themselves](W7_Questions_Route_Themselves.md) — relation naming | #756 | 5 | specified |
@@ -63,10 +63,23 @@ appealing one:
    the scalar into a batch wrapper makes every remaining scalar caller **3.2×
    slower**. Two bodies is correct; the win comes from moving *callers* off the
    per-row shape, not from deleting a body.
+4. **The tier-collision seam is not the cause of the letter-A failure** it has
+   been credited with in two specs. Measured: `entities` holds exactly **one**
+   row for `word_id('a')`, at tier 0 — the UD lane that mints colliding rows was
+   never ingested here, yet the failure reproduces. `'a'` legitimately carries
+   seven `HAS_SENSE` edges, five of which **tie exactly**, because
+   `tag_cnt = 0` maps to a score of 0.5 — a draw. The seam is real but latent;
+   the priors are the live defect, which **inverts Phase 3's stated order**.
+   See [W4 §0](W4_Sense_Election_Ground.md).
+5. **"Filter `senses()` by tier" is not implementable.** `consensus` has no tier
+   column — tier exists only on `entities`, and edges attach to the id, which a
+   colliding pair shares. Both specs imply a read-side tier fix is available; it
+   is not.
 
 The pattern is worth naming: **every one of these was a plausible claim written
 by someone who had not run the measurement.** That is what these documents exist
-to stop.
+to stop — and #4 was found by a single `SELECT tier, count(*)` that two prior
+analyses had not run.
 
 ## How to use this directory
 
