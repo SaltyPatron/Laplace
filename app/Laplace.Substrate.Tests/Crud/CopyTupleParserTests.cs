@@ -186,4 +186,30 @@ public class CopyTupleParserTests
         Assert.Null(tier0Present);
         Assert.Equal(new[] { H(1), H(2), H(3) }, distinct.Select(i => parsed.Ids[i]));
     }
+
+    [Theory]
+    [InlineData(0ul)]
+    [InlineData(1ul)]
+    [InlineData(ulong.MaxValue)]
+    [InlineData(0x8000_0000_0000_0000ul)]
+    public void CopyGroupOf_SingleGroup_NeverNegative(ulong hiBe)
+    {
+        // groups==1 is the ResolveCopyGroups result for kept < 16_384. The old
+        // shift=64 path cast a full ulong HiBe to int and indexed counts[-N].
+        Assert.Equal(0, NpgsqlSubstrateWriter.CopyGroupOf(hiBe, groups: 1));
+        Assert.Equal(0, NpgsqlSubstrateWriter.CopyGroupOf(hiBe, groups: 0));
+    }
+
+    [Fact]
+    public void CopyGroupOf_MultiGroup_StaysInRange()
+    {
+        for (int groups = 2; groups <= 8; groups++)
+        {
+            Assert.InRange(NpgsqlSubstrateWriter.CopyGroupOf(0ul, groups), 0, groups - 1);
+            Assert.InRange(NpgsqlSubstrateWriter.CopyGroupOf(ulong.MaxValue, groups), 0, groups - 1);
+            Assert.InRange(
+                NpgsqlSubstrateWriter.CopyGroupOf(0x8000_0000_0000_0000ul, groups),
+                0, groups - 1);
+        }
+    }
 }
