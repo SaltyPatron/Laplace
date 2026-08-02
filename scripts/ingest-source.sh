@@ -152,7 +152,7 @@ case "$source" in
         fi
         ingest chess-eval
         ;;
-    chess-analyze|chess-trajectory|chess-syzygy)
+    chess-analyze|chess-trajectory|chess-syzygy|chess-opening-match)
         # Substrate-sourced calculated passes: no path, marker-gated, safe to re-run.
         # All three are routable from `laplace ingest` and listed in IngestDispatchTable,
         # but were absent from THIS script -- the entry point the seed workflows and the
@@ -165,6 +165,7 @@ case "$source" in
         echo "Unknown source: $source" >&2
         echo "Sources: ${FLOOR[*]} document ${KNOWLEDGE[*]} ${USAGE[*]} \\" >&2
         echo "         chess openings chess-books chess-analyze chess-trajectory chess-eval chess-syzygy \\" >&2
+    echo "         chess-opening-match \\" >&2
         echo "         code repo stack tiny-codes tabular recipe all safetensors" >&2
         exit 2
         ;;

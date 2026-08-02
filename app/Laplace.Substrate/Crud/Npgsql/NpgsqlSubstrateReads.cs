@@ -2152,6 +2152,77 @@ public static class NpgsqlSubstrateReads
         return scalar as string[];
     }
 
+    /// <summary>
+    /// The ORDERED CONSTITUENT SURFACES of composed documents, rejoined with a space —
+    /// one query for the whole batch.
+    ///
+    /// <c>render_text_batch</c> concatenates a composition's constituents with NO
+    /// separator, which is lossy for any content whose tokens were split ON a separator:
+    /// a chess movetext reads back as <c>1.d4d52.c4dxc43…</c> and no parser can tokenize
+    /// it. This returns each document rebuilt from its trajectory, the way its own
+    /// tokenizer split it, which is the only join that round-trips.
+    ///
+    /// BATCHED ON PURPOSE. The first cut took one round trip per document; hydrating a
+    /// 6,365-line corpus meant 6,365 queries and did not finish in ten minutes. The token
+    /// ids of every document in the chunk are gathered, realized ONCE over the DISTINCT
+    /// set — ply tokens repeat ferociously, there are only a few thousand distinct SAN
+    /// strings in all of chess — and rejoined per document. Render is the last operation
+    /// and it runs once.
+    /// </summary>
+    public static async Task<Dictionary<string, string>> TrajectoryTokenTextBatchAsync(
+        NpgsqlDataSource dataSource, byte[][] entityIds, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null)
+    {
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (entityIds.Length == 0) return result;
+
+        var rows = await NpgsqlRead.ReadRowsAsync(dataSource, """
+            WITH doc AS (
+                SELECT id FROM unnest(@ids) AS x(id)
+            ),
+            tok AS (
+                -- WITH ORDINALITY, not row_number() OVER (): the function ORDERs BY its
+                -- internal ordinal, but that ordering is not guaranteed to survive into an
+                -- outer window over a lateral join. Measured — the same document rebuilt to
+                -- 101 tokens on one run and 107 on the next.
+                --
+                -- run_length is RUN-LENGTH ENCODING, floored at 1: a token repeated N times
+                -- consecutively packs into ONE point. Dropping it silently shortens every
+                -- document that repeats a token — which a chess movetext does constantly.
+                SELECT d.id AS doc_id, p.entity_id, p.ord AS tord, rep.n AS repeat_ix
+                FROM doc d
+                CROSS JOIN LATERAL (
+                    SELECT t.entity_id, t.run_length, o AS ord
+                    FROM laplace.trajectory_unpacked_points(d.id) WITH ORDINALITY AS t(entity_id, run_length, ctier, o)
+                ) p
+                CROSS JOIN LATERAL generate_series(1, GREATEST(p.run_length, 1)) AS rep(n)
+            ),
+            distinct_ids AS (
+                SELECT COALESCE(array_agg(DISTINCT entity_id), '{}'::bytea[]) AS a FROM tok
+            ),
+            label AS (
+                SELECT p.id AS eid, t.txt
+                FROM distinct_ids b,
+                     LATERAL unnest(b.a) WITH ORDINALITY AS p(id, i),
+                     LATERAL unnest(laplace.realize_batch(b.a, NULL)) WITH ORDINALITY AS t(txt, j)
+                WHERE p.i = t.j
+            )
+            SELECT tok.doc_id, string_agg(label.txt, ' ' ORDER BY tok.tord, tok.repeat_ix)
+            FROM tok JOIN label ON label.eid = tok.entity_id
+            GROUP BY tok.doc_id
+            """,
+            r => (Id: Convert.ToHexString((byte[])r[0]), Text: r.IsDBNull(1) ? null : r.GetString(1)),
+            p =>
+            {
+                var parameter = p.AddWithValue("ids", entityIds);
+                parameter.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
+            },
+            ct: ct, label: "trajectory_token_text_batch", onError: onError).ConfigureAwait(false);
+        foreach (var (id, text) in rows)
+            if (text is not null) result[id] = text;
+        return result;
+    }
+
     /// <summary><c>laplace.recall_trajectories(word_id(w), k)</c> — first answer.</summary>
     public static Task<string?> RecallTrajectoryAnswerAsync(
         NpgsqlDataSource dataSource, string word, int k, CancellationToken ct,

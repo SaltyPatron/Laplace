@@ -1,0 +1,64 @@
+-- chess_opening_endgames(opening, limit): where an opening ACTUALLY ENDS UP, decided
+-- by the tablebase rather than by the scoresheet.
+--
+-- This is the openings-to-syzygy correlation, and the whole point of both lanes being
+-- content-addressed. Neither lane knows the other exists:
+--
+--   ChessOpenings  attests (final_position, OPENING_NAME, name)
+--   ChessPgn/Analysis attests (line, GAME_HAS_OPENING, name)   <- same content id
+--   ChessSyzygy    attests (position, HAS_WDL, verdict) ctx = line
+--
+-- so the chain opening -> line -> exact endgame verdict is TWO JOINS on ids that
+-- collided by construction. No resolution pass, no mapping table, nothing to
+-- maintain when a new opening or a new tablebase set lands.
+--
+-- WHAT THE ANSWER MEANS. A result token here is not "who won" — it is what the
+-- position was WORTH under perfect play at the moment the game reached a table.
+-- 'win'/'loss' are side-to-move POV. An opening whose lines reach 'draw' verdicts is
+-- one that steers into drawn endgames however the games were actually scored, which
+-- is a fact about the opening that no scoresheet aggregate can give you.
+--
+-- UNPROBED IS NOT DRAWN. Lines whose endgames never reached a loaded table return no
+-- rows here, and that is the correct silence: bool_or over zero rows is NULL, and a
+-- partial tablebase set (3-4-5 men on this host) covers a small fraction of play.
+-- Read `lines_probed` against chess_opening_record's `lines` before drawing a
+-- conclusion about the opening as a whole.
+CREATE OR REPLACE FUNCTION chess_opening_endgames(p_opening text,
+                                                  p_limit int DEFAULT 16)
+    RETURNS TABLE(wdl text, positions bigint, lines_probed bigint)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+WITH claim AS MATERIALIZED (
+    SELECT DISTINCT a.subject_id AS line
+    FROM attestations a
+    WHERE a.object_id = word_id(p_opening)
+      AND a.type_id = relation_type_id('GAME_HAS_OPENING')
+),
+verdict AS MATERIALIZED (
+    -- ctx = the line, so this rides attestations_context_btree once per line rather
+    -- than scanning the tablebase lane.
+    SELECT w.object_id AS wdl_id,
+           count(*)                       AS positions,
+           count(DISTINCT w.context_id)   AS lines_probed
+    FROM claim k
+    JOIN attestations w ON w.context_id = k.line
+                       AND w.type_id = relation_type_id('HAS_WDL')
+    GROUP BY w.object_id
+),
+ord AS MATERIALIZED (
+    SELECT v.*, row_number() OVER (ORDER BY v.positions DESC, v.wdl_id) AS ix
+    FROM verdict v
+    ORDER BY v.positions DESC, v.wdl_id
+    LIMIT p_limit
+),
+-- Render last and once. No DISTINCT wrapper needed here and that is not an oversight:
+-- wdl_id is a GROUP BY key upstream, so the page already holds each verdict exactly
+-- once (five possible values). Adding dedup machinery to a set that cannot contain a
+-- duplicate is cost with no saving.
+lbl AS MATERIALIZED (
+    SELECT realize_batch(array_agg(o.wdl_id ORDER BY o.ix), NULL) AS l FROM ord o
+)
+SELECT lbl.l[o.ix], o.positions::bigint, o.lines_probed::bigint
+FROM ord o CROSS JOIN lbl
+ORDER BY o.ix
+$$;

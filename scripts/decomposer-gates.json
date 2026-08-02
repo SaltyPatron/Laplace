@@ -472,6 +472,25 @@
       ],
       "consensus_gates": [],
       "marker_entities": "Chess_AnalysisMarker"
+    },
+    "chess-opening-match": {
+      "decomposer": "ChessOpeningMatch",
+      "layer": 21,
+      "prerequisites": [
+        "openings",
+        "chess"
+      ],
+      "marker_entities": "Chess_AnalysisMarker",
+      "consensus_gates": [
+        {
+          "relation": "GAME_HAS_OPENING",
+          "min": 1
+        },
+        {
+          "relation": "GAME_HAS_ECO",
+          "min": 1
+        }
+      ]
     }
   }
 }

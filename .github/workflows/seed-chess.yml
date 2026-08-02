@@ -11,6 +11,9 @@ name: Seed — chess
 #                  physicality upserts only, never testimony, so re-runs cannot
 #                  double-count. Both were reachable from `laplace ingest` and from
 #                  IngestDispatchTable but from no workflow at all.
+#   chess-opening-match — names each line's opening by BOARD IDENTITY against the
+#                  ingested catalog (ChessOpeningMatch). No path; needs `openings`
+#                  ingested first. Additive third witness, never a re-derivation.
 #   chess-eval   — stockfish eval census over recorded games (ChessStockfish): the
 #                  calculated eval layer is DERIVED STATE — this step is what makes it
 #                  survive a db-reset, exactly like every other seed re-derives its
@@ -28,7 +31,7 @@ on:
         description: "chess source (one per run)"
         type: choice
         required: true
-        options: [chess, openings, chess-books, chess-eval, chess-syzygy, chess-trajectory]
+        options: [chess, openings, chess-books, chess-eval, chess-syzygy, chess-trajectory, chess-opening-match]
       corpus:
         # Dropdown over what is actually on the runner. The chess corpus is
         # static (same filenames on re-download), so a literal list is durable;
@@ -241,7 +244,7 @@ jobs:
           esac
           # Substrate-sourced lanes read recorded games, not a file: no path at all.
           case "$src" in
-            chess-eval|chess-syzygy|chess-trajectory)
+            chess-eval|chess-syzygy|chess-trajectory|chess-opening-match)
               echo "source=$src reads the substrate — corpus ignored, no path passed"
               echo "path=" >> "$GITHUB_OUTPUT"
               exit 0 ;;
