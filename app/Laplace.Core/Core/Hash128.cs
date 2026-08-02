@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -49,23 +50,23 @@ public readonly record struct Hash128(ulong Hi, ulong Lo)
         return result;
     }
 
+    /// <summary>
+    /// memcmp of the 16-byte host layout — same order as <c>hash128_compare</c>.
+    /// On little-endian, that is unsigned compare of endian-reversed Hi then Lo
+    /// (no P/Invoke: COPY id-range sort paid ~600ms/500k rows on the native call).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public int CompareToBytewise(Hash128 other)
     {
-        unsafe
-        {
-            Hash128 a = this;
-            return NativeInterop.Hash128Compare(&a, &other);
-        }
+        int c = BinaryPrimitives.ReverseEndianness(Hi)
+            .CompareTo(BinaryPrimitives.ReverseEndianness(other.Hi));
+        if (c != 0) return c;
+        return BinaryPrimitives.ReverseEndianness(Lo)
+            .CompareTo(BinaryPrimitives.ReverseEndianness(other.Lo));
     }
 
-    public bool EqualsBytewise(Hash128 other)
-    {
-        unsafe
-        {
-            Hash128 a = this;
-            return NativeInterop.Hash128Equals(&a, &other) != 0;
-        }
-    }
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool EqualsBytewise(Hash128 other) => Hi == other.Hi && Lo == other.Lo;
 
     public byte[] ToBytes()
     {

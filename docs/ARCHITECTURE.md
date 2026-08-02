@@ -37,8 +37,10 @@ filter applied before or after it.
 | `attestations` | `(id, type_id, subject_id)` | LIST(`type_id`) | one row per assertion, with provenance |
 | `consensus` | `(id, type_id, subject_id)` | LIST(`type_id`) | the fold: `rating`, `rd`, `volatility`, `witness_count` |
 
-Plus `canonical_names`, `trajectory_pairs`, `trajectory_pairs_meta`, and three journals
+Plus `canonical_names`, `highway_mask_dirty`, and three journals
 (`ingest_run_journal`, `ingest_flush_journal`, `index_cycle_journal`).
+(`trajectory_pairs`/`trajectory_pairs_meta` were retired and dropped 2026-07-29 —
+`drop_retired_content_lane.sql.in`.)
 
 Three properties do the structural work:
 
@@ -92,8 +94,9 @@ There is no batch backfill or rebuild path, by construction.
 ## 4. Ingest
 
 A decomposer is a pure function from content to a stream of `SubstrateChange` records —
-`app/Laplace.Substrate/Abstractions/` (25 decomposers in `Laplace.Decomposers`, 6 in
-`Laplace.Chess`; see `docs/INVENTORY.md`). It contains no SQL. The shared spine owns
+`app/Laplace.Substrate/Abstractions/` (the decomposer roster and counts live in
+`docs/INVENTORY.md`, which is generated and CI-gated; counts written here go stale
+and then get used as gates — don't). It contains no SQL. The shared spine owns
 batching, dedup, the tier descent, the fold, and the COPY.
 
 `SubstrateChange` (`Crud/SubstrateChange.cs`) carries `Entities`, `Physicalities`,
@@ -118,15 +121,19 @@ client-side accumulation → one bulk tier descent → COPY of proven-novel rows
 
 ## 5. Relations
 
-`engine/manifest/relation_types.toml` governs 203 canonical relations plus 23 aliases
-(aliases resolve to a canonical and carry no bits of their own), across 13 salience
-bands: `mandate`, `definitional`, `taxonomic`, `equivalence`, `partitive`, `causal`,
-`oppositional`, `associative`, `tensor_calculation`, `lexical_glue`, `scalar_valued`,
-`standards_structural`, `probationary`.
+`engine/manifest/relation_types.toml` governs the canonical relations and their
+aliases (aliases resolve to a canonical and carry no bits of their own; live counts in
+`docs/INVENTORY.md`), across 13 salience bands: `mandate`, `definitional`, `taxonomic`,
+`equivalence`, `partitive`, `causal`, `oppositional`, `associative`,
+`tensor_calculation`, `lexical_glue`, `scalar_valued`, `standards_structural`,
+`probationary`.
 
 `scripts/codegen-attestation-law.py` compiles the manifest into generated C, including
-the highway bit table. **Bits are assigned alphabetically**, so adding a relation
-renumbers existing bits — a change that owes a reseed rather than a backfill.
+the highway bit table. **Bits are an explicit append-only registry** (`bit = N` in the
+TOML; ADR 0001 / GH #551): codegen validates and never reassigns — adding a relation
+appends a bit, never renumbers peers, and owes **no** reseed. (This corrects an earlier
+claim here that bits were alphabetical and additions owed a reseed — the law that
+statement described was repealed.)
 
 Dynamic relation families (`DEP_*`, `FEAT_*`, `EDEP_*`) are not in the manifest and land
 in the DEFAULT partition.
@@ -148,17 +155,18 @@ structure lives, since coordinate equality does not survive composition.
 
 ## 7. Read path
 
-The extension ships 29 SQL function families and 26 native sources
-(`extension/laplace_substrate/src/`). The hot paths are C:
+The extension ships its SQL function families and native sources
+(`extension/laplace_substrate/src/`; live counts in `docs/INVENTORY.md`). The hot
+paths are C:
 
 | Source | Entry points |
 |---|---|
 | `recall.c` | `recall_intent`, `recall`, `recall_session`, `define_fast`, `word_shape_peers_fast` |
-| `generate_walk.c` | `walk_branches`, `walk_strongest` — batched beam frontier over `consensus_walk_edges`, node budget 10⁶ |
+| `generate_walk.c` | `walk_branches` (batches natively against `consensus`), `walk_strongest` (steps via `consensus_walk_edges`), node budget 10⁶ |
 | `astar_path.c` | Dijkstra by default; opt-in admissible geometric A* heuristic |
 | `prompt_coherence.c` | joint sense/topic/relation election across a prompt's tokens |
 | `trajectory_generate.c`, `steered_walk.c` | n-gram descent and topic-steered walk |
-| `consensus_fold_step.c` | the server-side fold `ConsensusAccumulatingWriter` dispatches to |
+| `fold_route.c` | `consensus_upsert`, the server-side fold `ConsensusAccumulatingWriter` dispatches to (`consensus_fold_step.c` backs the `consensus_fold_result` aggregate) |
 | `highway_mask.c`, `perfcache.c` | perfcache-backed bit operations over mmap'd blobs |
 | `model_factor.c`, `graph_taxonomy/cascade/contrast.c`, `containers_of.c`, `realize_batch.c`, `geometry_successors.c` | model, graph and realization surfaces |
 
@@ -169,9 +177,9 @@ conservative estimate reads rank by.
 
 `SELECT * FROM api('<substring>')` introspects the installed surface.
 
-Two mmap'd perfcache blobs are required at runtime — `laplace_t0_perfcache.bin` and
-`laplace_highway_perfcache.bin` — located via the `laplace_substrate.perfcache_path`
-GUC (`extension/laplace_substrate/src/perfcache.c`).
+Two mmap'd perfcache blobs are required at runtime — `laplace_t0_perfcache.bin` via
+the `laplace_substrate.perfcache_path` GUC and `laplace_highway_perfcache.bin` via
+`laplace_substrate.highway_perfcache_path` (`extension/laplace_substrate/src/perfcache.c`).
 
 ## 8. Model lane
 

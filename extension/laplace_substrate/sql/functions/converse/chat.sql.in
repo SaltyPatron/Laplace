@@ -213,9 +213,27 @@ BEGIN
         -- Napoleon has no attested edge to "who" or "was" -- coherence is 0 for
         -- the right answer and nonzero for the wrong one. No pairwise statistic
         -- fixes that; it needs a per-token signal that does not exist yet.
+        --
+        -- 2026-08-01: the per-token signal is RECENCY AMONG SENSE-BEARING
+        -- CANDIDATES -- ord DESC, firing only when every fold-produced key is
+        -- zero. Two premises died by measurement first. denote_mu elected the
+        -- article ("What is a glacier?" answered about the letter A). INVERSE
+        -- own-mass (total_mass, now exposed from prompt_coherence.c) assumed
+        -- function words are wired to everything -- true on a UD-seeded box
+        -- (a = 4.28e16 in the superseded notes) and FALSE on foundation-only:
+        -- the article's elected sense is LATIN SMALL LETTER A at 5.85e12,
+        -- below glacier 1.39e13, dog 8.87e12, napoleon 8.85e12, so inverse
+        -- mass elected `a` for dog and WHO for napoleon. Mass DESC then fails
+        -- "what are the parts of a car" (parts 8.02e12 > car 7.10e12).
+        -- Measured across glacier/dog/napoleon/car/rain, ord DESC elects the
+        -- topic on all five: it is resolve_last_word's semantics -- already
+        -- this substrate's last resort -- restricted to tokens the graph
+        -- holds senses for. The durable fix for the silent regime is seeding,
+        -- which shrinks it; recency only breaks the tie the fold left blank.
         SELECT array_agg(y.synset_id ORDER BY y.specificity DESC NULLS LAST,
                                               y.rel_mass DESC NULLS LAST,
                                               y.peers DESC,
+                                              y.ord DESC,
                                               y.denote_mu DESC NULLS LAST,
                                               y.synset_id)
           INTO cands

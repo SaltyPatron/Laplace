@@ -57,8 +57,9 @@ only when the defect it guards against no longer applies.
 
 - `engine/manifest/relation_types.toml` is the source of truth; `scripts/codegen-attestation-law.py`
   compiles it. Never hand-edit generated C.
-- Highway bits are assigned alphabetically, so **adding a relation renumbers bits and
-  owes a reseed** — regenerate, never backfill.
+- Highway bits are an **explicit append-only registry** (`bit = N` in the TOML;
+  ADR 0001 / GH #551): codegen validates and never reassigns. Adding a relation
+  appends a bit and owes **no** reseed — regenerate, never backfill, never renumber.
 - `hot = true` is a physical partitioning decision that follows write traffic, not
   importance. It is independent of `rank`, and changing it costs no reseed.
 

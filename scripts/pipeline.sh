@@ -477,10 +477,18 @@ phase_sync_extension() {
     # old image (or build tree was never reinstalled).
     local so="$LAPLACE_INSTALL_PREFIX/lib/postgresql/18/laplace_substrate.so"
     if [[ -f "$so" ]] && command -v nm >/dev/null 2>&1; then
-      local sym
+      # ONE nm, buffered. The per-symbol `nm | grep -q` form under pipefail
+      # was a coin flip: grep -q exits on first match, nm takes SIGPIPE (141),
+      # and pipefail turns the successful match into a spurious "lacks
+      # <symbol>" — a DIFFERENT phantom symbol each run, observed twice on
+      # 2026-08-01 (consensus_fold_final, then highway_ready; both present in
+      # the image by hand-check). Buffering also spawns 2 processes instead
+      # of 2 per required symbol.
+      local sym nm_out
+      nm_out="$(nm -D "$so" 2>/dev/null || true)"
       while IFS= read -r sym; do
         [[ -z "$sym" ]] && continue
-        if ! nm -D "$so" 2>/dev/null | grep -q "T ${sym}\$"; then
+        if ! grep -q "T ${sym}\$" <<< "$nm_out"; then
           echo "::error::installed $so lacks $sym but $bridge requires it — rebuild+install (preload bounce) before sync-extension" >&2
           exit 1
         fi

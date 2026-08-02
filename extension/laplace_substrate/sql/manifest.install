@@ -6,7 +6,6 @@ schema/tables/ingest_flush_journal.sql.in
 schema/tables/index_cycle_journal.sql.in
 schema/tables/ingest_run_journal.sql.in
 indexes/entities_type_btree.sql.in
-indexes/entities_tier_type_btree.sql.in
 indexes/entities_first_observed_btree.sql.in
 indexes/entities_created_at_brin.sql.in
 indexes/physicalities_entity_btree.sql.in
@@ -397,3 +396,5 @@ functions/chess/chess_game_plies.sql.in
 functions/chess/chess_line.sql.in
 functions/chess/drop_retired_chess_aggregates.sql.in
 functions/readback/drop_retired_constituent_edges.sql.in
+functions/converse/infer.sql.in
+functions/chess/chess_opening_preference.sql.in

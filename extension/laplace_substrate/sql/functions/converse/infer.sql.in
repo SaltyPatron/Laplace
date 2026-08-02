@@ -1,0 +1,84 @@
+-- infer(prompt, limit): one forward pass over the substrate, installed.
+--
+-- Run by hand as three ad-hoc statements on 2026-08-01 ("the capital of
+-- California is" -> sacramento) and promoted to a surface the same night:
+-- an end user never runs SQL against the substrate, and an operator never
+-- re-derives this composition.
+--
+--   EMBED    prompt_coherence: surface tokens -> content ids, one call.
+--   ATTEND   the election seats the TOPIC -- one election, one key order,
+--            chat()'s verbatim; every other candidate becomes a BIAS head.
+--   READ     one indexed scan: the topic's consensus objects. This is the
+--            A->[...] distribution, and it is NOT collapsed here.
+--   REWEIGHT bias_hits counts each candidate's own edges into the bias
+--            family (bias synsets plus their one-hop in-edges), id space
+--            only -- no render, no string compare.
+--   EMIT     realize_batch ONCE over the ranked survivors, position-aligned;
+--            the single render, at the end, where rendering belongs.
+--
+-- KNOWN LIMITS, stated not hidden: forward direction only (the both-direction
+-- OR join belongs in C next to prompt_coherence, not rewritten here); one-hop
+-- bias family; single-step emission. On a single-witness seed the base
+-- weights are flat and bias_hits carries the whole signal -- measured: the
+-- California read returns 39 candidates all at eff_mu 1315.5, and exactly one
+-- (sacramento) carries a capital-family edge.
+CREATE OR REPLACE FUNCTION infer(p_prompt text, p_limit int DEFAULT 8)
+    RETURNS TABLE(prediction text, weight double precision, bias_hits bigint)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+WITH ranked AS (
+    SELECT y.tok, y.synset_id,
+           row_number() OVER (ORDER BY y.specificity DESC NULLS LAST,
+                                       y.rel_mass DESC NULLS LAST,
+                                       y.peers DESC,
+                                       y.ord DESC,
+                                       y.denote_mu DESC NULLS LAST,
+                                       y.synset_id) AS rk
+    FROM prompt_coherence(p_prompt) y
+),
+topic AS (SELECT r.synset_id FROM ranked r WHERE r.rk = 1),
+-- EVERY sense of every bias token, not the per-token argmax. Shipped first
+-- as prompt_coherence's elected sense per bias token and measured broken the
+-- same night: "capital"'s elected sense is the washington synset, so the
+-- capital-family intersection scored ZERO hits and sacramento ranked flat.
+-- The bias head is a DISTRIBUTION over the token's senses; collapsing it to
+-- one sense before the intersection is the KVP mistake this function exists
+-- to not make. senses() per bias token is a per-row SRF over 2-6 rows --
+-- tolerated here, ported to C with the rest when this graduates.
+bias AS (
+    SELECT DISTINCT s.synset_id
+    FROM ranked r
+    CROSS JOIN LATERAL senses(r.tok) s
+    WHERE r.rk > 1 AND s.synset_id IS NOT NULL
+),
+biasfam AS (
+    SELECT b.synset_id FROM bias b
+    UNION
+    SELECT c.subject_id FROM consensus c JOIN bias b ON c.object_id = b.synset_id
+),
+cand AS (
+    SELECT c.object_id AS id, eff_mu(c.rating, c.rd) AS m
+    FROM consensus c JOIN topic t ON c.subject_id = t.synset_id
+    WHERE c.object_id IS NOT NULL
+),
+scored AS (
+    SELECT d.id, d.m, count(f.synset_id) AS hits
+    FROM cand d
+    LEFT JOIN consensus c2 ON c2.subject_id = d.id
+    LEFT JOIN biasfam f ON f.synset_id = c2.object_id
+    GROUP BY d.id, d.m
+    ORDER BY count(f.synset_id) DESC, d.m DESC, d.id
+    LIMIT p_limit
+),
+ord AS (
+    SELECT s.id, s.m, s.hits,
+           row_number() OVER (ORDER BY s.hits DESC, s.m DESC, s.id) AS ix
+    FROM scored s
+),
+lbl AS (
+    SELECT realize_batch(array_agg(o.id ORDER BY o.ix), NULL) AS l FROM ord o
+)
+SELECT lbl.l[o.ix], o.m / 1e9, o.hits
+FROM ord o CROSS JOIN lbl
+ORDER BY o.ix
+$$;
