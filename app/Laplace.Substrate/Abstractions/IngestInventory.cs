@@ -69,6 +69,30 @@ public sealed record IngestInventory(
     }
 
     /// <summary>
+    /// One input unit per file (XML / document corpora). Do not use
+    /// <see cref="FromFiles"/> here — that newline-samples and invents a fake
+    /// 14M-unit denominator that pins <c>input_pct</c> at 0.0 for the whole run.
+    /// </summary>
+    public static IngestInventory? FromFileUnits(
+        string unitType,
+        IReadOnlyList<string> paths,
+        long maxInputUnits = 0,
+        bool tracksFileCompletion = true)
+    {
+        if (paths.Count == 0) return null;
+        if (maxInputUnits > 0)
+        {
+            int n = (int)Math.Min(paths.Count, maxInputUnits);
+            var capped = new List<IngestFileSpec>(n);
+            for (int i = 0; i < n; i++)
+                capped.Add(new IngestFileSpec(Path.GetFileName(paths[i]), paths[i], 1));
+            return new IngestInventory(unitType, n, capped, tracksFileCompletion);
+        }
+        var specs = paths.Select(p => new IngestFileSpec(Path.GetFileName(p), p, 1)).ToList();
+        return new IngestInventory(unitType, paths.Count, specs, tracksFileCompletion);
+    }
+
+    /// <summary>
     /// Multi-file CoNLL-U inventory — shared sample budget across the path list
     /// (same death-by-thousand-cuts guard as <see cref="FromFiles"/>).
     /// </summary>

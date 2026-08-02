@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Threading;
 using System.Threading.Channels;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
@@ -523,6 +524,10 @@ public static class IngestBatchPipeline
             }
         }, ct);
 
+        // Approximate total from the peek when the stream fit in it; else 0 (sample-only).
+        int knownFileTotal = exhaustedInPeek ? peeked.Count : 0;
+        int fileOrdinal = 0;
+
         var workerTasks = new Task[workers];
         for (int w = 0; w < workers; w++)
             workerTasks[w] = Task.Run(async () =>
@@ -535,14 +540,14 @@ public static class IngestBatchPipeline
                         ? MonolithSegmenter.ResolveSegments(config, segmentsPerFile)
                         : 1;
 
-                    // Per-file compose telemetry. Aggregate counters ("files=37/1226")
-                    // say how many finished but never WHICH, or how long one took —
-                    // so a single pathological file is invisible in the log.
+                    int ordinal = Interlocked.Increment(ref fileOrdinal);
                     int workerId = w;
                     var fileSw = System.Diagnostics.Stopwatch.StartNew();
-                    Console.Error.WriteLine(
-                        $"INGEST_FILE_START file={source.FileLabel} worker={workerId}"
-                        + (segments > 1 ? $" segments={segments}" : ""));
+                    bool logFile = MultiFileTelemetry.ShouldLogFileLine(ordinal, knownFileTotal);
+                    if (logFile)
+                        Console.Error.WriteLine(
+                            $"INGEST_FILE_START file={source.FileLabel} worker={workerId}"
+                            + (segments > 1 ? $" segments={segments}" : ""));
 
                     var changes = segments > 1
                         ? MonolithSegmenter.RunSegmentedAsync(
@@ -568,23 +573,23 @@ public static class IngestBatchPipeline
                     catch (OperationCanceledException) { throw; }
                     catch (Exception ex) when (isolateFileFailures)
                     {
-                        // One broken file must not sink the other N-1: surface it as a
-                        // counted failure (marker below) and keep the pool draining.
+                        // Failures always log — sampling must not hide a broken file.
                         Console.Error.WriteLine(
                             $"INGEST_FILE_FAILED file={source.FileLabel} worker={workerId} "
                             + $"error=[{ex.GetType().Name}] {ex.Message}");
                         fileFailure = BuildFileFailure(config.SourceId, source.FileLabel, ex);
                     }
-                    // Failure marker replaces the boundary: the file is neither counted
-                    // done nor marked complete, so a re-run retries exactly it.
                     await outCh.Writer.WriteAsync(
                         fileFailure ?? BuildPeriodBoundary(config.SourceId, source.FileLabel), ct);
                     if (fileFailure is not null) continue;
 
-                    double secs = Math.Max(1e-3, fileSw.Elapsed.TotalSeconds);
-                    Console.Error.WriteLine(
-                        $"INGEST_FILE_COMPOSED file={source.FileLabel} worker={workerId} "
-                        + $"records={fileUnits:N0} elapsed_s={secs:F1} rate_rec_s={fileUnits / secs:N0}");
+                    if (logFile)
+                    {
+                        double secs = Math.Max(1e-3, fileSw.Elapsed.TotalSeconds);
+                        Console.Error.WriteLine(
+                            $"INGEST_FILE_COMPOSED file={source.FileLabel} worker={workerId} "
+                            + $"records={fileUnits:N0} elapsed_s={secs:F1} rate_rec_s={fileUnits / secs:N0}");
+                    }
                 }
             }, ct);
 

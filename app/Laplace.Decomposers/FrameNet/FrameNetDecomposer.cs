@@ -10,7 +10,12 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.FrameNet;
 
-public sealed class FrameNetDecomposer : DecomposerMultiPhase<FrameNetSource, FullScope>, IIngestInventoryProvider
+/// <summary>
+/// FrameNet rides the multi-file spine — one pool, one open per path, compose
+/// whatever that file is (frame / LU / fulltext). Nested MultiFile phases inside
+/// MultiPhase were a reinvention that swept directories three times.
+/// </summary>
+public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.FnRecord, FrameNetSource, FullScope>, IIngestInventoryProvider
 {
     public static readonly Hash128 Source = FrameNetSource.SourceId;
     public static readonly Hash128 TrustClass = FrameNetSource.TrustClass;
@@ -18,10 +23,6 @@ public sealed class FrameNetDecomposer : DecomposerMultiPhase<FrameNetSource, Fu
     private static readonly Hash128 FrameTypeId = EntityTypeRegistry.FrameNetFrame;
     private static readonly Hash128 FeTypeId = EntityTypeRegistry.FrameNetFe;
     private static readonly Hash128 CorenessTypeId = EntityTypeRegistry.FrameNetCoreness;
-
-
-
-
 
     private static Hash128 CorenessId(string coreType) =>
         Hash128.OfCanonical($"framenet/coreness/{coreType}");
@@ -47,6 +48,8 @@ public sealed class FrameNetDecomposer : DecomposerMultiPhase<FrameNetSource, Fu
     private const string Ns = "http://framenet.icsi.berkeley.edu";
 
     public override int LayerOrder => 3;
+    public override bool PerFileCompletion => true;
+    protected override double SourceTrust => TC.AcademicCurated;
 
     protected override ConcurrentDictionary<string, byte>? VocabularyReadback => _vocabularyNames;
 
@@ -63,149 +66,63 @@ public sealed class FrameNetDecomposer : DecomposerMultiPhase<FrameNetSource, Fu
         await context.Writer.ApplyAsync(seed.Build(), ct);
     }
 
-    protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
-        IDecomposerContext context,
-        DecomposerOptions options,
-        [EnumeratorCancellation] CancellationToken ct = default)
+    protected override IReadOnlyList<(string Path, string Label)> ListFiles(
+        string ecosystemPath, DecomposerOptions options) =>
+        InputFilesLabeled(ecosystemPath);
+
+    protected override async IAsyncEnumerable<FnRecord> ExtractFileAsync(
+        string filePath, string fileLabel, DecomposerOptions options,
+        [EnumeratorCancellation] CancellationToken ct)
     {
-        int batch = IngestPipelineDefaults.ResolveBatch(IngestSourceProfile.FrameNet, options);
-        var uncapped = options with { MaxInputUnits = 0 };
-
-        await foreach (var change in RunPhaseAsync(new FramePhase(batch), context, options, ct))
-            yield return change;
-
-        await foreach (var change in RunPhaseAsync(new LuPhase(batch), context, uncapped, ct))
-            yield return change;
-
-        await foreach (var change in RunPhaseAsync(new FulltextPhase(batch), context, uncapped, ct))
-            yield return change;
-    }
-
-    /// <summary>
-    /// One XML file → records via <see cref="ExtractFileAsync"/>; multi-file pool
-    /// parallelizes across the directory. Same unit for frame / LU / fulltext.
-    /// </summary>
-    private abstract class FnMultiFilePhase<T> : DecomposerMultiFile<T>
-    {
-        private readonly int _batch;
-        private readonly string _phaseLabel;
-
-        protected FnMultiFilePhase(int batch, string phaseLabel)
+        ct.ThrowIfCancellationRequested();
+        if (fileLabel.StartsWith("framenet/frame/", StringComparison.Ordinal))
         {
-            _batch = batch;
-            _phaseLabel = phaseLabel;
-        }
-
-        public override Hash128 SourceId => Source;
-        public override string SourceName => "FrameNetDecomposer";
-        public override int LayerOrder => 3;
-        public override Hash128 TrustClassId => TrustClass;
-        protected override double SourceTrust => TC.AcademicCurated;
-        public override bool PerFileCompletion => true;
-
-        public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
-            => Task.CompletedTask;
-
-        public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
-            => Task.FromResult<long?>(null);
-
-        protected abstract void Compose(T record, SubstrateChangeBuilder builder);
-
-        protected sealed override IIngestRecordHandler<T> CreateHandlerForFile(string fileLabel) =>
-            new DirectComposeHandler<T>(Compose);
-
-        protected sealed override IngestBatchConfig ConfigForFile(
-            string fileLabel, ISubstrateReader? reader, DecomposerOptions options) =>
-            IngestPipelineDefaults.ApplyMaxInputUnits(
-                IngestPipelineDefaults.Compose(
-                    SourceId, $"FrameNetDecomposer/{_phaseLabel}", _batch, options, reader,
-                    PipelineProfile),
-                options);
-    }
-
-    private sealed class FramePhase : FnMultiFilePhase<Frame>
-    {
-        public FramePhase(int batch) : base(batch, "frame") { }
-
-        protected override void Compose(Frame frame, SubstrateChangeBuilder b)
-        {
-            EmitFrameEntities(b, frame);
-            EmitFrameAttestations(b, frame);
-        }
-
-        protected override IReadOnlyList<(string Path, string Label)> ListFiles(
-            string ecosystemPath, DecomposerOptions options)
-        {
-            string frameDir = Path.Combine(ecosystemPath, "frame");
-            if (!Directory.Exists(frameDir)) return [];
-            return SharedXmlFramesetReader.EnumerateXmlFiles(frameDir)
-                .Select(p => (p, $"framenet/frame/{Path.GetFileName(p)}"))
-                .ToList();
-        }
-
-        protected override async IAsyncEnumerable<Frame> ExtractFileAsync(
-            string filePath, string fileLabel, DecomposerOptions options,
-            [EnumeratorCancellation] CancellationToken ct)
-        {
-            ct.ThrowIfCancellationRequested();
             if (ParseFrame(filePath) is { } frame)
-                yield return frame;
-            await Task.CompletedTask;
+                yield return new FnFrame(frame);
         }
-    }
-
-    private sealed class LuPhase : FnMultiFilePhase<FrameNetLuIngest.LuDocument>
-    {
-        public LuPhase(int batch) : base(batch, "lu") { }
-
-        protected override void Compose(FrameNetLuIngest.LuDocument lu, SubstrateChangeBuilder b) =>
-            FrameNetLuIngest.EmitLu(b, lu, Source);
-
-        protected override IReadOnlyList<(string Path, string Label)> ListFiles(
-            string ecosystemPath, DecomposerOptions options)
+        else if (fileLabel.StartsWith("framenet/lu/", StringComparison.Ordinal))
         {
-            string luDir = Path.Combine(ecosystemPath, "lu");
-            if (!Directory.Exists(luDir)) return [];
-            return Directory.EnumerateFiles(luDir, "lu*.xml")
-                .OrderBy(p => p, StringComparer.Ordinal)
-                .Select(p => (p, $"framenet/lu/{Path.GetFileName(p)}"))
-                .ToList();
-        }
-
-        protected override async IAsyncEnumerable<FrameNetLuIngest.LuDocument> ExtractFileAsync(
-            string filePath, string fileLabel, DecomposerOptions options,
-            [EnumeratorCancellation] CancellationToken ct)
-        {
-            ct.ThrowIfCancellationRequested();
             if (FrameNetLuIngest.ParseLu(filePath) is { } lu)
-                yield return lu;
-            await Task.CompletedTask;
+                yield return new FnLu(lu);
         }
-    }
-
-    private sealed class FulltextPhase : FnMultiFilePhase<FulltextAnno>
-    {
-        public FulltextPhase(int batch) : base(batch, "fulltext") { }
-
-        protected override void Compose(FulltextAnno ann, SubstrateChangeBuilder b) =>
-            ComposeFulltextAnno(ann, b);
-
-        protected override IReadOnlyList<(string Path, string Label)> ListFiles(
-            string ecosystemPath, DecomposerOptions options)
-        {
-            string fulltextDir = Path.Combine(ecosystemPath, "fulltext");
-            if (!Directory.Exists(fulltextDir)) return [];
-            return SharedXmlFramesetReader.EnumerateXmlFiles(fulltextDir)
-                .Select(p => (p, $"framenet/fulltext/{Path.GetFileName(p)}"))
-                .ToList();
-        }
-
-        protected override async IAsyncEnumerable<FulltextAnno> ExtractFileAsync(
-            string filePath, string fileLabel, DecomposerOptions options,
-            [EnumeratorCancellation] CancellationToken ct)
+        else if (fileLabel.StartsWith("framenet/fulltext/", StringComparison.Ordinal))
         {
             await foreach (var ann in ParseFulltextAsync(filePath, ct))
-                yield return ann;
+                yield return new FnFulltext(ann);
+        }
+    }
+
+    protected override IIngestRecordHandler<FnRecord> CreateHandlerForFile(string fileLabel) =>
+        new DirectComposeHandler<FnRecord>(Compose);
+
+    protected override IngestBatchConfig ConfigForFile(
+        string fileLabel, ISubstrateReader? reader, DecomposerOptions options)
+    {
+        int batch = IngestPipelineDefaults.ResolveBatch(IngestSourceProfile.FrameNet, options);
+        string kind = fileLabel.StartsWith("framenet/lu/", StringComparison.Ordinal) ? "lu"
+            : fileLabel.StartsWith("framenet/fulltext/", StringComparison.Ordinal) ? "fulltext"
+            : "frame";
+        return IngestPipelineDefaults.ApplyMaxInputUnits(
+            IngestPipelineDefaults.Compose(
+                Source, $"FrameNetDecomposer/{kind}", batch, options, reader,
+                IngestSourceProfile.FrameNet),
+            options);
+    }
+
+    private static void Compose(FnRecord record, SubstrateChangeBuilder b)
+    {
+        switch (record)
+        {
+            case FnFrame(var frame):
+                EmitFrameEntities(b, frame);
+                EmitFrameAttestations(b, frame);
+                break;
+            case FnLu(var lu):
+                FrameNetLuIngest.EmitLu(b, lu, Source);
+                break;
+            case FnFulltext(var ann):
+                ComposeFulltextAnno(ann, b);
+                break;
         }
     }
 
@@ -213,40 +130,55 @@ public sealed class FrameNetDecomposer : DecomposerMultiPhase<FrameNetSource, Fu
     {
         var sentId = ContentEmitter.Emit(b, ann.Sentence, Source);
         var targetId = ContentEmitter.Emit(b, ann.TargetText, Source);
-        var frameId = CategoryAnchor.Emit(b, ann.FrameName, FrameTypeId, Source, SourceTrust.AcademicCurated);
+        var frameId = CategoryAnchor.Emit(b, ann.FrameName, FrameTypeId, Source, TC.AcademicCurated);
         if (sentId is not null && targetId is not null && frameId is not null)
             b.AddAttestation(NativeAttestation.Categorical(
                 targetId.Value, "EVOKES_FRAME", frameId.Value,
-                Source, SourceTrust.AcademicCurated, contextId: sentId.Value));
+                Source, TC.AcademicCurated, contextId: sentId.Value));
     }
 
-    // Phases are DecomposerMultiFile with PerFileCompletion — honest files_done.
     public Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
     {
-        var paths = InputFiles(context.EcosystemPath);
-        if (paths.Count == 0) return Task.FromResult<IngestInventory?>(null);
-        return Task.FromResult(IngestInventory.FromFiles(
-            "files", paths, options.MaxInputUnits, ct, tracksFileCompletion: true));
+        var paths = InputFilesLabeled(context.EcosystemPath).Select(x => x.Path).ToList();
+        return Task.FromResult(IngestInventory.FromFileUnits(
+            "files", paths, options.MaxInputUnits, tracksFileCompletion: true));
     }
 
     public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
-        => Task.FromResult<long?>(InputFiles(context.EcosystemPath).Count);
-
-    private static List<string> InputFiles(string ecosystemPath)
     {
-        var paths = new List<string>();
+        int n = InputFilesLabeled(context.EcosystemPath).Count;
+        return Task.FromResult<long?>(n == 0 ? null : n);
+    }
+
+    private static List<(string Path, string Label)> InputFilesLabeled(string ecosystemPath)
+    {
+        var paths = new List<(string, string)>();
         string frameDir = Path.Combine(ecosystemPath, "frame");
         string luDir = Path.Combine(ecosystemPath, "lu");
         string fulltextDir = Path.Combine(ecosystemPath, "fulltext");
         if (Directory.Exists(frameDir))
-            paths.AddRange(Directory.EnumerateFiles(frameDir, "*.xml"));
+        {
+            foreach (var p in SharedXmlFramesetReader.EnumerateXmlFiles(frameDir))
+                paths.Add((p, $"framenet/frame/{Path.GetFileName(p)}"));
+        }
         if (Directory.Exists(luDir))
-            paths.AddRange(Directory.EnumerateFiles(luDir, "lu*.xml"));
+        {
+            foreach (var p in Directory.EnumerateFiles(luDir, "lu*.xml").OrderBy(x => x, StringComparer.Ordinal))
+                paths.Add((p, $"framenet/lu/{Path.GetFileName(p)}"));
+        }
         if (Directory.Exists(fulltextDir))
-            paths.AddRange(Directory.EnumerateFiles(fulltextDir, "*.xml"));
+        {
+            foreach (var p in SharedXmlFramesetReader.EnumerateXmlFiles(fulltextDir))
+                paths.Add((p, $"framenet/fulltext/{Path.GetFileName(p)}"));
+        }
         return paths;
     }
+
+    public abstract record FnRecord;
+    public sealed record FnFrame(Frame Frame) : FnRecord;
+    public sealed record FnLu(FrameNetLuIngest.LuDocument Lu) : FnRecord;
+    public sealed record FnFulltext(FulltextAnno Ann) : FnRecord;
 
     public override IReadOnlyCollection<string> CanonicalNamesForReadback
     {
@@ -263,13 +195,13 @@ public sealed class FrameNetDecomposer : DecomposerMultiPhase<FrameNetSource, Fu
     {
 
 
-        CategoryAnchor.Emit(b, frame.Name, FrameTypeId, Source, SourceTrust.AcademicCurated);
+        CategoryAnchor.Emit(b, frame.Name, FrameTypeId, Source, TC.AcademicCurated);
         if (frame.Definition.Length > 0) ContentEmitter.Emit(b, frame.Definition, Source);
         foreach (var ex in frame.Examples) ContentEmitter.Emit(b, ex, Source);
 
         foreach (var fe in frame.Elements)
         {
-            CategoryAnchor.Emit(b, fe.Name, FeTypeId, Source, SourceTrust.AcademicCurated);
+            CategoryAnchor.Emit(b, fe.Name, FeTypeId, Source, TC.AcademicCurated);
             if (fe.Definition.Length > 0) ContentEmitter.Emit(b, fe.Definition, Source);
         }
 
@@ -297,14 +229,14 @@ public sealed class FrameNetDecomposer : DecomposerMultiPhase<FrameNetSource, Fu
             var defId = ContentEmitter.RootId(frame.Definition);
             if (defId is not null)
                 b.AddAttestation(NativeAttestation.Categorical(
-                    frameId, "HAS_DEFINITION", defId.Value, Source, SourceTrust.AcademicCurated));
+                    frameId, "HAS_DEFINITION", defId.Value, Source, TC.AcademicCurated));
         }
         foreach (var ex in frame.Examples)
         {
             var exId = ContentEmitter.RootId(ex);
             if (exId is not null)
                 b.AddAttestation(NativeAttestation.Categorical(
-                    frameId, "HAS_EXAMPLE", exId.Value, Source, SourceTrust.AcademicCurated));
+                    frameId, "HAS_EXAMPLE", exId.Value, Source, TC.AcademicCurated));
         }
 
         foreach (var fe in frame.Elements)
@@ -313,7 +245,7 @@ public sealed class FrameNetDecomposer : DecomposerMultiPhase<FrameNetSource, Fu
             if (feNameId is null) continue;
             Hash128? coreCtx = CorenessValues.Contains(fe.CoreType) ? CorenessId(fe.CoreType) : null;
             b.AddAttestation(NativeAttestation.Categorical(
-                frameId, "HAS_FRAME_ELEMENT", feNameId.Value, Source, SourceTrust.AcademicCurated,
+                frameId, "HAS_FRAME_ELEMENT", feNameId.Value, Source, TC.AcademicCurated,
                 contextId: coreCtx));
 
             if (fe.Definition.Length > 0)
@@ -322,18 +254,18 @@ public sealed class FrameNetDecomposer : DecomposerMultiPhase<FrameNetSource, Fu
                 if (feDefId is not null)
                     b.AddAttestation(NativeAttestation.Categorical(
                         feNameId.Value, "HAS_DEFINITION", feDefId.Value,
-                        Source, SourceTrust.AcademicCurated));
+                        Source, TC.AcademicCurated));
             }
 
 
             foreach (var reqName in fe.Requires)
                 if (CategoryAnchor.Id(reqName) is { } reqId)
                     b.AddAttestation(NativeAttestation.Categorical(
-                        feNameId.Value, "REQUIRES", reqId, Source, SourceTrust.AcademicCurated));
+                        feNameId.Value, "REQUIRES", reqId, Source, TC.AcademicCurated));
             foreach (var exName in fe.Excludes)
                 if (CategoryAnchor.Id(exName) is { } exId)
                     b.AddAttestation(NativeAttestation.Categorical(
-                        feNameId.Value, "EXCLUDES", exId, Source, SourceTrust.AcademicCurated));
+                        feNameId.Value, "EXCLUDES", exId, Source, TC.AcademicCurated));
         }
 
         foreach (var lu in frame.LexUnits)
@@ -342,9 +274,9 @@ public sealed class FrameNetDecomposer : DecomposerMultiPhase<FrameNetSource, Fu
             if (lemmaId is null) continue;
 
             PosReference.Attest(b, lemmaId.Value, lu.Pos, PosReference.PosTagset.FrameNet,
-                Source, null, SourceTrust.AcademicCurated, _vocabularyNames);
+                Source, null, TC.AcademicCurated, _vocabularyNames);
             b.AddAttestation(NativeAttestation.Categorical(
-                lemmaId.Value, "EVOKES_FRAME", frameId, Source, SourceTrust.AcademicCurated));
+                lemmaId.Value, "EVOKES_FRAME", frameId, Source, TC.AcademicCurated));
         }
 
         foreach (var rel in frame.Relations)
@@ -357,10 +289,10 @@ public sealed class FrameNetDecomposer : DecomposerMultiPhase<FrameNetSource, Fu
 
             if (rel.Type == "Subframe of")
                 b.AddAttestation(NativeAttestation.Categorical(
-                    tgt.Value, typeName, frameId, Source, SourceTrust.AcademicCurated));
+                    tgt.Value, typeName, frameId, Source, TC.AcademicCurated));
             else
                 b.AddAttestation(NativeAttestation.Categorical(
-                    frameId, typeName, tgt.Value, Source, SourceTrust.AcademicCurated));
+                    frameId, typeName, tgt.Value, Source, TC.AcademicCurated));
         }
     }
 
@@ -567,17 +499,17 @@ public sealed class FrameNetDecomposer : DecomposerMultiPhase<FrameNetSource, Fu
         return sb.ToString().Trim();
     }
 
-    internal sealed record Frame(
+    public sealed record Frame(
         string Name, string Definition, List<string> Examples,
         List<FrameElement> Elements, List<LexUnit> LexUnits, List<FrameRel> Relations);
 
-    internal sealed record FrameElement(
+    public sealed record FrameElement(
         string Name, string CoreType, string Definition,
         List<string> Requires, List<string> Excludes);
 
-    internal sealed record LexUnit(int Id, string Lemma, string Pos);
+    public sealed record LexUnit(int Id, string Lemma, string Pos);
 
-    internal sealed record FrameRel(string Type, string TargetFrame);
+    public sealed record FrameRel(string Type, string TargetFrame);
 
-    internal sealed record FulltextAnno(string Sentence, string TargetText, string FrameName);
+    public sealed record FulltextAnno(string Sentence, string TargetText, string FrameName);
 }

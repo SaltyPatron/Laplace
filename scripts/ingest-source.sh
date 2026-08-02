@@ -22,6 +22,17 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 export LD_LIBRARY_PATH="$ROOT/build/engine/synthesis:$ROOT/build/engine/core:$ROOT/build/engine/dynamics:${LD_LIBRARY_PATH:-}"
 DLL="$ROOT/app/Laplace.Cli/bin/Release/net10.0/Laplace.Cli.dll"
 
+# Durable progress lives in laplace.ingest_run_journal (+ ops CSV). Actions is not
+# a log warehouse — default CI/console to quiet unless the operator overrides.
+if [[ -n "${GITHUB_ACTIONS:-}${CI:-}" && -z "${LAPLACE_INGEST_CONSOLE:-}" ]]; then
+    export LAPLACE_INGEST_CONSOLE=ci
+fi
+# Detail log on disk when CI (journal still validates); keep job log short.
+if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+    LOGDIR="${INGEST_LOGDIR:-${RUNNER_TEMP:-/tmp}/laplace-ingest}"
+    mkdir -p "$LOGDIR"
+fi
+
 # Content-fingerprint gate for the CLI build (scripts/lib/fp.sh, stamp cli-build):
 # ensure-foundation's 10-rung ladder invokes this script once per rung, which was
 # up to 10 identical `dotnet build`s per foundation run. Skip only when app/
@@ -47,11 +58,27 @@ build_cli() {
 # INGEST_TIMING is machine-readable on purpose: it is what a throughput baseline parses.
 ingest() {
     local t0=$SECONDS rc=0
-    ( cd "$ROOT/app" && dotnet "$DLL" ingest "$@" ) || rc=$?
+    local detail="${LOGDIR:-}/laplace-ingest-${source}.log"
+    if [[ -n "${GITHUB_ACTIONS:-}" && -n "${LOGDIR:-}" ]]; then
+        # Job log: timing + journal. Full stderr → file on the runner.
+        ( cd "$ROOT/app" && dotnet "$DLL" ingest "$@" ) >"$detail" 2>&1 || rc=$?
+        if [[ "$rc" -ne 0 ]]; then
+            echo "::error::ingest ${source} failed rc=${rc} — last 80 lines of ${detail}"
+            tail -80 "$detail" >&2 || true
+        fi
+    else
+        ( cd "$ROOT/app" && dotnet "$DLL" ingest "$@" ) || rc=$?
+    fi
     local elapsed=$((SECONDS - t0))
     echo "INGEST_TIMING source=$source elapsed_s=$elapsed rc=$rc"
     if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
         echo "elapsed_s=$elapsed" >> "$GITHUB_OUTPUT"
+    fi
+    if [[ "$rc" -eq 0 ]]; then
+        # Pass/fail is the journal row when this source is in decomposer-gates.json.
+        if python3 -c "import json,sys; json.load(open('${ROOT}/scripts/decomposer-gates.json'))['sources'].get(sys.argv[1]) or sys.exit(1)" "$source" 2>/dev/null; then
+            bash "$ROOT/scripts/verify-ingest-journal.sh" --cli-key "$source" || return 1
+        fi
     fi
     return "$rc"
 }

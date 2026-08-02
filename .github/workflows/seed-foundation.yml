@@ -94,6 +94,8 @@ jobs:
       LAPLACE_DATA_ROOT: /vault/Data
       PGDATABASE: ${{ inputs.database }}
       LAPLACE_DBNAME: ${{ inputs.database }}
+      # Durable surface = ingest_run_journal; do not flood Actions with WS_APPLY/file lines.
+      LAPLACE_INGEST_CONSOLE: ci
       # Build-if-needed CLI runner (the up-front drop precedes the ladder's own build).
       CLI: "dotnet run --project app/Laplace.Cli/Laplace.Cli.csproj -c Release --"
     steps:
