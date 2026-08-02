@@ -84,7 +84,7 @@ reference algebra over a 7-row `VALUES` vector) and `realize_ladder_parity.sql`
 | **G4** dead canonical | not built; **`converse_tiered` would fire today** (one hit, its own `CREATE`) | destination is the substrate `CALLS` read — see [W3](W3_Self_Ingest_Call_Graph.md); grep is scaffolding |
 | **G5** shape parity | not built; **five** hand-written declarations | `query_shapes.sql.in:6`, `recall_route.c:64`, `recall.c:347`, `recall.c:1237,1245`, and — notably — **prose in an MCP tool description**, `SubstrateTools.cs:74` |
 | **G6** weight parity | **partial** — COMPLETE mode + constants pinned | `walk_edge_weight_parity.sql`; SALIENCE and STRENGTH unpinned |
-| **G7** roster parity | **partial** — shell/cmd rosters pinned | `validate-pipeline.py:260-321`; C#-side roster missing |
+| **G7** roster parity | **built** | `validate-pipeline.py:260-321` pins shell/cmd order; `IngestRosterParityTests` bidirectionally pins C# dispatch to the manifest plus 14 explicit operational/alias routes under a shrink-only ceiling |
 | **G8** band literalism | **built; 8 grandfathered sites in 3 files** | `chat.sql.in`, `converse_compose.sql.in`, `senses_with_context.sql.in`; exact expressions are shrink-only |
 | **G9** envelope | not built **and not buildable yet** | `chat.sql.in:35` is `RETURNS text`; needs an OP-level change first |
 | **G10** one mutex | not built | `evidence_count` verify logic appears in 6 script + 6 C# files; the ingest mutex may not exist under the names spec 37 assumes — **unverified** |
