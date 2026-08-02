@@ -25,7 +25,14 @@
 -- ids, joined back by ordinal. No per-row realize, no string comparison, no
 -- lower(). A diagnostic that violated the read law while diagnosing the read
 -- path would be worth nothing.
-CREATE OR REPLACE FUNCTION sense_audit(p_term text, p_limit int DEFAULT 64)
+DROP FUNCTION IF EXISTS sense_audit(text, int);
+
+-- p_lang_rel precedes p_limit: a non-defaulted parameter cannot follow a
+-- defaulted one, and it cannot BE defaulted without writing the literal G3
+-- forbids. The caller resolves it -- which is also what lets this audit any
+-- relation, not only language.
+CREATE OR REPLACE FUNCTION sense_audit(p_term text, p_lang_rel bytea,
+                                       p_limit int DEFAULT 64)
     RETURNS TABLE(sense text, sense_type text, via_relation text,
                   language text, denote_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE
@@ -50,8 +57,17 @@ via AS (
 -- diagnostic does not mint a new relation_type_id('HAS_LANGUAGE') literal
 -- (W6 G3 shrink-only). Same strongest-language pick as the prior CTE.
 lang AS (
-    SELECT c.synset_id, word_language(c.synset_id) AS lang_id, 1 AS rk
-    FROM capped c
+    -- ONE set-based scan, not word_language() per row. #787 fixed the same G3
+    -- violation by calling word_language(synset_id) per candidate; that helper
+    -- is STRICT and carries a SET clause, so it cannot inline, and each call is
+    -- its own consensus scan -- the per-row shape CLAUDE.md:75 sends to C and
+    -- W15 documents as a defect. Same G3 outcome, different cost.
+    SELECT c.subject_id AS synset_id, c.object_id AS lang_id,
+           row_number() OVER (PARTITION BY c.subject_id
+                              ORDER BY eff_mu(c.rating, c.rd) DESC, c.object_id) AS rk
+    FROM consensus c
+    WHERE c.type_id = p_lang_rel
+      AND c.subject_id IN (SELECT synset_id FROM capped)
 ),
 rows AS (
     SELECT c.rk, c.synset_id, e.type_id, v.type_id AS via_id, l.lang_id,

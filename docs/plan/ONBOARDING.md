@@ -35,7 +35,13 @@ reversible work that follows from the plan.
 ENVIRONMENT
 - Shell is zsh on Ubuntu. Build/test entry point is scripts/pipeline.sh
   (phases: build install sync-extension migrate test). The scripts/win/*.cmd
-  files are for a Windows box and are not yours.
+  files are a Windows toolchain -- not yours to run, but do not read them as
+  noise: 84 entry points including regress.cmd run the SAME pg_regress suite
+  as Linux, and five expected-output files pin LITERAL 128-bit content ids.
+  Both platforms must produce byte-identical output or the build fails, so
+  that suite is a continuous cross-platform proof that identity and the
+  fixed-point fold are bit-reproducible. It is the strongest single piece of
+  evidence in the repo.
 - Query the substrate directly with psql (verified working on this host):
     psql -h /var/run/postgresql -U laplace_admin -d laplace -c "SET search_path=laplace,public; <SQL>"
 - Introspect the installed SQL surface before assuming a helper is missing:

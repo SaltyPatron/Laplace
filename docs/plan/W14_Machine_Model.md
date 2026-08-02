@@ -130,9 +130,11 @@ Each is a missing property of the machine, not a defective function.
 ### G-A. No fallback addressing mode (tier descent)
 
 OP1 `RESOLVE` returns ids or abstains (spec 37 §1: *"Abstains (`NULL` id) rather
-than minting"*). Abstention is correct — minting would be a lie — but there is
-**no opcode and no addressing mode for "miss at tier N, descend to tier N−1,
-aggregate with tier-weighted confidence."**
+than minting"*). **The abstention is right and must stay** — minting would be a
+lie, and zero rows is how this machine tells the truth. What is missing is the
+*other* branch: **no opcode and no addressing mode for "miss at tier N, descend
+to tier N−1, aggregate with tier-weighted confidence."** Today a miss is a
+discard; it should be a descent that reports which tier answered.
 
 Consequence, measured: `prompt_language` reads `prompt_state()`, which is
 word-tier, so a highly inflected language loses its distinctive tokens to
@@ -165,11 +167,29 @@ pipeline register, not a return value that only the last stage reads. Every
 S1/S2 product (language tally, tier of resolution, abstention reasons) is
 context for S3.
 
-### G-C. No status register
+### G-C. Abstention fires and every caller discards it
 
-Spec 37 L5 requires every stage to report `ran | degraded | skipped` with a
-reason. `chat()` returns bare `text` (`chat.sql.in`, `RETURNS text`), so **G9 is
-listed as not buildable** in the gate table.
+**Correction to an earlier framing in this document: abstention is NOT
+missing.** It is structural. `senses()` on a sense-less entity returns zero
+rows; `RESOLVE` returns NULL rather than minting; a walk from an id with no
+edges has no edge to take. The substrate cannot fabricate a continuation
+because a continuation requires an edge and there is none. It dies there,
+correctly, every time.
+
+What is missing is **propagation**. Spec 37 L5 requires every stage to report
+`ran | degraded | skipped` with a reason; `chat()` returns bare `text`
+(`chat.sql.in`, `RETURNS text`), so **G9 is listed as not buildable** in the
+gate table — and a partial answer is indistinguishable from a complete one.
+
+Measured, via `resolve_audit('Kot śpi na stole w domu')`: TWO of six tokens
+returned zero senses. The substrate abstained twice. The election ranked among
+the four that answered and the reply rendered as though the prompt were
+understood. Nobody lied — the return type simply had no room to say "four of
+six", so nobody asked.
+
+That makes the fix far smaller than "build abstention". It is **stop dropping
+the signal that already fires**: count the dark tokens, carry the count, and
+let the reply say so.
 
 A CPU without flags cannot branch on the last operation's outcome. That is
 exactly why every failure this session was silent: an ingest that declared
@@ -177,9 +197,15 @@ exactly why every failure this session was silent: an ingest that declared
 seed runs cancelled 15 seconds in. Each was recoverable information that no
 stage was obliged to report.
 
-**What the ISA needs:** the response envelope of L5, which also unblocks the
-eval harness (W5) — a scorer cannot distinguish "elected correctly then rendered
-badly" from "elected wrongly" without per-stage status.
+**What the ISA needs:** a return type wide enough to carry what the stages
+already produce — the L5 response envelope. It also unblocks the eval harness
+(W5): a scorer cannot distinguish "elected correctly then rendered badly" from
+"elected wrongly" without per-stage status, and cannot distinguish either from
+"half the prompt was outside the frame".
+
+`resolve_audit` (`functions/converse/resolve_audit.sql.in`) is this signal made
+visible for one stage, and was built after six ad-hoc queries produced a WRONG
+diagnosis of the same failure. Its one call corrected three of them.
 
 ### G-D. Operands are immediates, not registers
 

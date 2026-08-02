@@ -1,0 +1,92 @@
+-- geometry_audit(): the S³ placement, per tier, as a standing surface.
+--
+-- Promoted 2026-08-02 from ad-hoc queries run while investigating Hilbert
+-- partition skew. A diagnostic that answers a recurring structural question is
+-- a surface, not a query typed twice.
+--
+-- WHAT IT ANSWERS, and why each column is here:
+--
+--   radius spread   THE GLOME IS A BALL, NOT JUST ITS SURFACE. Tier-0 atoms are
+--                   placed by super_fibonacci and land at radius EXACTLY 1 --
+--                   on S³. Composed entities are combinations of their
+--                   children, and a combination of unit vectors has norm < 1,
+--                   so they land INSIDE. Radius therefore encodes composition,
+--                   not just position: broader/flatter composition cancels more
+--                   and sits nearer the origin. Measured before this surface
+--                   existed: a spike at exactly 1.00 plus a broad population
+--                   around 0.39-0.51.
+--
+--   hilbert spread  physicalities is RANGE-partitioned on hilbert_index, a
+--                   space-filling curve over the enclosing 4-BOX. The occupied
+--                   region is the inscribed ball -- roughly 31% of that box in
+--                   4D -- so equal-width curve ranges cannot yield equal
+--                   populations. Measured: ~15x between the emptiest and
+--                   fullest prefix band. This column makes that visible instead
+--                   of leaving it to be rediscovered.
+--
+--   READS v_word_points, AND THAT IS THE POINT. The first draft hand-rolled
+--   `entities JOIN physicalities` and used the WRONG KEY -- physicalities has
+--   both `id` (its own identity) and `entity_id` (what it describes) -- so it
+--   returned ZERO rows silently, which reads as "no skew" rather than "wrong
+--   key". It also omitted the `type = 1` filter and was correct only because
+--   no other physicality type exists yet.
+--
+--   v_word_points already encoded both: `p.entity_id = e.id AND p.type = 1`.
+--   The wheel existed; re-deriving it introduced two defects in ten lines.
+--   Every entity-to-physicality read belongs on this view, not on a fresh
+--   join. (The view's name is misleading -- it carries EVERY tier, not just
+--   words -- which is its own defect, but the join it encodes is canonical.)
+--
+-- Cheap by construction: one grouped pass, no per-row function calls, no
+-- rendering. Sampling is the caller's choice via p_sample (percent); 0 = full
+-- scan, which on a large substrate is a deliberate act.
+-- Return-type change needs a DROP: CREATE OR REPLACE cannot alter a function's
+-- RETURNS TABLE. Adding avg_constituents to this surface failed the upgrade
+-- until this line existed -- the same trap prompt_coherence and infer hit.
+DROP FUNCTION IF EXISTS geometry_audit(double precision);
+
+CREATE OR REPLACE FUNCTION geometry_audit(p_sample double precision DEFAULT 0.3)
+    RETURNS TABLE(tier smallint, entities bigint,
+                  min_radius numeric, avg_radius numeric, max_radius numeric,
+                  on_sphere bigint, interior bigint, avg_constituents numeric,
+                  hilbert_bands int, min_band bigint, max_band bigint)
+    LANGUAGE plpgsql STABLE
+    SET search_path = @extschema@, public AS $$
+DECLARE
+    q text;
+BEGIN
+    -- TABLESAMPLE percent cannot be a bound parameter, so the sample clause is
+    -- built here. p_sample is forced numeric before interpolation: it is the
+    -- only user input that reaches the statement text, and it never reaches it
+    -- as a string.
+    q := format($f$
+        WITH j AS (
+            SELECT v.tier, v.radius_origin AS r,
+                   substring(encode(v.hilbert_index,'hex'),1,1) AS band,
+                   v.n_constituents AS nc
+            FROM v_word_points v %s
+        ),
+        bands AS (
+            SELECT tier, band, count(*) AS n FROM j GROUP BY tier, band
+        )
+        SELECT j.tier, count(*)::bigint,
+               round(min(j.r)::numeric,3), round(avg(j.r)::numeric,3),
+               round(max(j.r)::numeric,3),
+               count(*) FILTER (WHERE j.r >= 0.999)::bigint,
+               count(*) FILTER (WHERE j.r <  0.999)::bigint,
+               round(avg(j.nc)::numeric,1),
+               (SELECT count(*)::int FROM bands b WHERE b.tier = j.tier),
+               (SELECT min(b.n)::bigint FROM bands b WHERE b.tier = j.tier),
+               (SELECT max(b.n)::bigint FROM bands b WHERE b.tier = j.tier)
+        FROM j GROUP BY j.tier ORDER BY j.tier
+    $f$, CASE WHEN p_sample > 0 AND p_sample < 100
+              -- TABLESAMPLE cannot be applied to a view (0A000), and standing on
+              -- v_word_points is worth more than the cheaper sample: re-deriving
+              -- the join is what produced two defects in the first draft. A
+              -- Bernoulli filter costs a seq scan; this is a diagnostic, not a
+              -- hot path, and the caller chooses the fraction.
+              THEN format('WHERE random() < %s', (p_sample/100.0)::numeric)
+              ELSE '' END);
+    RETURN QUERY EXECUTE q;
+END;
+$$;
