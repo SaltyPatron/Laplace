@@ -1,0 +1,52 @@
+-- chess_opening_preference(player, tc_class, limit): which openings a player
+-- actually reaches for, per time-control class -- witnessed record only.
+--
+-- Promoted 2026-08-02 from a hand-run that took FOUR attempts to find the
+-- layer map, which is the argument for its existence: the layering (GH #736)
+-- is that the PLAYER is the OBJECT of HAS_WHITE/HAS_BLACK, whose subject is
+-- the shared LINE and whose context pins the PLAYING; HAS_ECO and
+-- HAS_TC_CLASS ride the same (line, context) pair. PLAYED_BY lives on a
+-- different layer and does NOT reach the headers -- three empty joins proved
+-- it. Nobody should have to rediscover that; this surface is the map.
+--
+-- p_tc_class filters in ID SPACE via the identity law (word_id of the class
+-- surface, e.g. 'bullet', 'blitz'), never by rendering and comparing text.
+-- Group by ids, realize ONCE over the page -- the read law's shape.
+CREATE OR REPLACE FUNCTION chess_opening_preference(p_player bytea,
+                                                    p_tc_class text DEFAULT NULL,
+                                                    p_limit int DEFAULT 12)
+    RETURNS TABLE(tc_class text, eco text, games bigint)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+WITH grouped AS (
+    SELECT tcc.object_id AS tc_id, e.object_id AS eco_id, count(*) AS games
+    FROM attestations a
+    JOIN attestations tcc ON tcc.subject_id = a.subject_id
+                         AND tcc.context_id = a.context_id
+                         AND tcc.type_id = relation_type_id('HAS_TC_CLASS')
+    JOIN attestations e ON e.subject_id = a.subject_id
+                       AND e.context_id = a.context_id
+                       AND e.type_id = relation_type_id('HAS_ECO')
+    WHERE a.object_id = p_player
+      AND a.context_id IS NOT NULL
+      AND a.type_id IN (relation_type_id('HAS_WHITE'),
+                        relation_type_id('HAS_BLACK'))
+      AND (p_tc_class IS NULL OR tcc.object_id = word_id(lower(p_tc_class)))
+    GROUP BY tcc.object_id, e.object_id
+    ORDER BY count(*) DESC, tcc.object_id, e.object_id
+    LIMIT p_limit
+),
+ord AS (
+    SELECT g.*, row_number() OVER (ORDER BY g.games DESC, g.tc_id, g.eco_id) AS ix
+    FROM grouped g
+),
+lbl AS (
+    SELECT realize_batch(array_agg(v.id ORDER BY v.ord), NULL) AS l
+    FROM (SELECT o.tc_id AS id, o.ix * 2 - 1 AS ord FROM ord o
+          UNION ALL
+          SELECT o.eco_id, o.ix * 2 FROM ord o) v
+)
+SELECT lbl.l[o.ix * 2 - 1], lbl.l[o.ix * 2], o.games
+FROM ord o CROSS JOIN lbl
+ORDER BY o.ix
+$$;
