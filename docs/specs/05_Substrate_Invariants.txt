@@ -61,18 +61,26 @@ different meaning, branch on tier before drawing any conclusion from a collision
 
 Rule #3: trajectory and coord are both GeometryZM but are not interchangeable, and mixing
 them up is exactly how Rule #1 gets violated.
-    - trajectory (composed entities) is an ORDERED, exactly-invertible sequence of the
-      constituents' points — order-sensitive by construction. This is why laplace_frechet_4d
-      (a path/shape metric, operates on trajectory) correctly discriminates cat vs act
-      (frechet=0.35) while laplace_angular_distance_4d (operates on coord) cannot (ang=0,
-      identical centroids).
-    - A function that needs "are these two composed entities actually similarly ordered/
-      shaped" must use an order-sensitive metric on trajectory. A function that needs "roughly
-      the same neighborhood in space" (a coarse locality pre-filter, NOT a similarity verdict)
-      may use coord/hilbert_index — but only to narrow a candidate set for a subsequent
-      order-sensitive check, never as the final admission criterion on its own. This is the
-      general form of the word_shape_peers bug, and applies to any future KNN-shaped function
-      written against coord.
+    - coord (every tier) is the real 4D placement: tier 0 is the atom on the glome
+      (super-Fibonacci, radius 1); tier > 0 is math4d_centroid of the children's live
+      coords, persisted at compose. Angular distance and Hilbert locality operate on coord.
+    - trajectory (composed entities) is an ORDERED, exactly-invertible PACKED MANIFEST of
+      constituent identities — mantissa-packed id / ordinal / run_length / flags
+      (mantissa.c / trajectory.c). It is NOT a path of positions. Dumping its XYZM and
+      feeding that to a geometric metric measures payload bits, not shape.
+    - Shape comparison (Fréchet / Hausdorff / word_shape_distance) MUST run on a REALIZED
+      curve: entity_curve(id) / word_curve(id) = ST_MakeLine(child.coord ORDER BY ordinal).
+      Measured 2026-08-02 on live data: cat vs act have ang=0 on coord (identical
+      centroids) but frechet≈1.78 on entity_curve — while frechet on packed
+      trajectory verts is a different number (~0.35) that formerly polluted this
+      doc as if it were the shape metric. Passing physicalities.trajectory into
+      laplace_frechet_4d is a Rule #3/#4 defect.
+    - A function that needs "are these two composed entities similarly ordered/shaped"
+      uses Frechet/Hausdorff on entity_curve. A function that needs "roughly the same
+      neighborhood in space" (coarse locality pre-filter, NOT a similarity verdict) may
+      use coord/hilbert_index — but only to narrow candidates for a subsequent
+      order-sensitive check on the realized curve, never as the final admission criterion
+      alone. This is the general form of the word_shape_peers bug.
 
 Rule #4: A mantissa-packed GeometryZM value is not geometry, and there is no crash to catch
 the mistake if you treat it as one.

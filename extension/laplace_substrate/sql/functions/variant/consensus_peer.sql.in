@@ -6,7 +6,7 @@ DECLARE
     v_result bytea;
     v_type   bytea;
     v_coord  geometry;
-    v_traj   geometry;
+    v_curve  geometry;
 BEGIN
     -- Relational election: entities of p_id's own type that share p_id's
     -- (relation, partner) edges, scored by min-shared confidence. Reads through
@@ -48,10 +48,10 @@ BEGIN
     -- FROM-subquery reference that could not drive the coord GiST index. Fetch
     -- the anchor into locals first so the ordering operand is a genuine bound
     -- parameter, and gate the whole branch behind the election miss.
-    -- word_anchor + v_word_points: one shared type=1 join, and the anchor
-    -- lands in locals so <<->> sees a bound parameter (Rule #4).
-    SELECT a.type_id, a.coord, a.trajectory
-      INTO v_type, v_coord, v_traj
+    -- Shape rank uses REALIZED curves (entity_curve), never packed trajectory
+    -- (Rule #3 / Issue 51).
+    SELECT a.type_id, a.coord, entity_curve(p_id)
+      INTO v_type, v_coord, v_curve
     FROM word_anchor(p_id) a;
     IF v_coord IS NULL THEN
         RETURN NULL;
@@ -61,13 +61,14 @@ BEGIN
     FROM (
         SELECT knn.id
         FROM (
-            SELECT w.id, w.trajectory AS t2
+            SELECT w.id, entity_curve(w.id) AS curve
             FROM v_word_points w
             WHERE w.type_id = v_type AND w.id <> p_id AND w.trajectory IS NOT NULL
             ORDER BY w.coord <<->> v_coord
             LIMIT 48
         ) knn
-        ORDER BY public.laplace_frechet_4d(knn.t2, v_traj) ASC
+        WHERE knn.curve IS NOT NULL AND v_curve IS NOT NULL
+        ORDER BY public.laplace_frechet_4d(knn.curve, v_curve) ASC
         LIMIT p_k
     ) z
     ORDER BY public.laplace_hash128_blake3(z.id || p_id)
