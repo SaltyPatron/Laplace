@@ -1429,14 +1429,29 @@ public sealed partial class NpgsqlSubstrateWriter
         return Math.Min(bySize, MeasuredPeakGroups);
     }
 
+    /// <summary>
+    /// Map a big-endian sort key into <c>[0, groups)</c> for parallel COPY.
+    /// <paramref name="groups"/> == 1 must short-circuit: C# masks ulong shifts
+    /// by 6 bits, so <c>hiBe &gt;&gt; 64</c> becomes <c>&gt;&gt; 0</c>, the cast to
+    /// int can be negative, and <c>counts[g]++</c> throws IndexOutOfRange.
+    /// Measured 2026-08-02: Unicode second working-set kept 3,580 entities
+    /// (groups=1) after the first mega-batch COPYed ~1.17M (groups=8).
+    /// </summary>
+    internal static int CopyGroupOf(ulong hiBe, int groups)
+    {
+        if (groups <= 1) return 0;
+        int bits = 0;
+        while ((1 << bits) < groups) bits++;
+        int g = (int)(hiBe >> (64 - bits));
+        if ((uint)g >= (uint)groups) g = groups - 1;
+        return g;
+    }
+
     private static byte[][] BuildSortedEntityPayloads(
         IReadOnlyList<(IntPtr Ptr, long Len)> blobs,
         CopyTupleParser.EntityRows ents, List<int> firstIdx, int groups)
     {
         int rowCount = firstIdx.Count;
-        int bits = 0;
-        while ((1 << bits) < groups) bits++;
-        int shift = 64 - bits;
         var groupOf = new int[rowCount];
         var keysAll = new CopySortKey[rowCount];
         var counts = new int[groups];
@@ -1445,8 +1460,7 @@ public sealed partial class NpgsqlSubstrateWriter
             int i = firstIdx[k];
             var key = CopySortKey.FromWire(ents.Ids[i]);
             keysAll[k] = key;
-            int g = (int)(key.HiBe >> shift);
-            if (g >= groups) g = groups - 1;
+            int g = CopyGroupOf(key.HiBe, groups);
             groupOf[k] = g;
             counts[g]++;
         }
@@ -1480,9 +1494,6 @@ public sealed partial class NpgsqlSubstrateWriter
         IReadOnlyList<(IntPtr Ptr, long Len)> blobs, List<KeptRow> kept, int groups)
     {
         int rowCount = kept.Count;
-        int bits = 0;
-        while ((1 << bits) < groups) bits++;
-        int shift = 64 - bits;
         var groupOf = new int[rowCount];
         var keysAll = new CopySortKey[rowCount];
         var counts = new int[groups];
@@ -1490,8 +1501,7 @@ public sealed partial class NpgsqlSubstrateWriter
         {
             var key = CopySortKey.FromWire(kept[i].SortKey.Wire);
             keysAll[i] = key;
-            int g = (int)(key.HiBe >> shift);
-            if (g >= groups) g = groups - 1;
+            int g = CopyGroupOf(key.HiBe, groups);
             groupOf[i] = g;
             counts[g]++;
         }
@@ -1596,7 +1606,36 @@ public sealed partial class NpgsqlSubstrateWriter
         if (kept.Count == 0) return 0;
         var sw = System.Diagnostics.Stopwatch.StartNew();
         int groups = ResolveCopyGroups(kept.Count, sharedSecondaryKeys);
-        var payloads = BuildSortedCopyPayloads(blobs, kept, groups);
+        // Bound StagedRowRef.Blob before pack — IndexOutOfRange inside
+        // BuildSortedCopyPayloads / PackFiltered has no table name on the stack
+        // (Release inlines the packer). Measured 2026-08-02: Unicode second
+        // working-set on laplace-dev died here after #776 dedup cleared 23505.
+        int blobCount = blobs.Count;
+        int minBlob = int.MaxValue, maxBlob = int.MinValue;
+        for (int i = 0; i < kept.Count; i++)
+        {
+            int b = kept[i].Row.Blob;
+            if (b < minBlob) minBlob = b;
+            if (b > maxBlob) maxBlob = b;
+            if ((uint)b >= (uint)blobCount)
+                throw new InvalidOperationException(
+                    $"COPY pack {tableName}: kept[{i}].Row.Blob={b} outside blobs[0..{blobCount}) "
+                    + $"(kept={kept.Count:N0}, groups={groups}, patch={kept[i].Patch}, "
+                    + $"len={kept[i].Row.Length}, off={kept[i].Row.Offset})");
+        }
+        byte[][] payloads;
+        try
+        {
+            payloads = BuildSortedCopyPayloads(blobs, kept, groups);
+        }
+        catch (IndexOutOfRangeException ex)
+        {
+            throw new InvalidOperationException(
+                $"COPY pack {tableName}: IndexOutOfRange in BuildSortedCopyPayloads "
+                + $"(kept={kept.Count:N0}, groups={groups}, blobs={blobCount}, "
+                + $"blobIndexRange=[{minBlob}..{maxBlob}], sharedSecondaryKeys={sharedSecondaryKeys})",
+                ex);
+        }
         long sortMs = sw.ElapsedMilliseconds;
         return await CopyPayloadsParallelAsync(
             tableName, table, kept.Count, groups, payloads, sortMs, ct);
