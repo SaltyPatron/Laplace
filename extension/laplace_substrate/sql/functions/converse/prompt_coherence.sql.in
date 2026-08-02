@@ -43,10 +43,11 @@
 -- article's elected sense is LATIN SMALL LETTER A, 5.85e12 -- BELOW glacier,
 -- dog and napoleon; the 4.28e16 article of the earlier notes was a UD-era
 -- token, not a law), and mass DESC fails "parts of a car" (parts > car). The
--- four electors instead break the all-silent case by ord DESC -- recency among
--- sense-bearing candidates, resolve_last_word's semantics restricted to tokens
--- the graph holds senses for. total_mass stays exposed: it is the signal that
--- refuted the premise, and the election diagnostic reads it.
+-- The elector sites declared and pinned by ElectorArchitectureGateTests instead
+-- break the all-silent case by ord DESC -- recency among sense-bearing candidates,
+-- resolve_last_word's semantics restricted to tokens the graph holds senses for.
+-- total_mass stays exposed: it is the signal that refuted the premise, and the
+-- election diagnostic reads it.
 DROP FUNCTION IF EXISTS prompt_coherence(text);
 
 CREATE OR REPLACE FUNCTION prompt_coherence(p_prompt text)
