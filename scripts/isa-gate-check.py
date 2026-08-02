@@ -343,14 +343,22 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    actual = current_violations()
+    if not MANIFEST.is_file():
+        print(f"ERROR: missing relation manifest: {MANIFEST}", file=sys.stderr)
+        return 2
+    if not args.print_current and not BASELINE.is_file():
+        print(f"ERROR: missing ISA gate baseline: {BASELINE}", file=sys.stderr)
+        return 2
+    try:
+        actual = current_violations()
+    except OSError as exc:
+        print(f"ERROR: ISA gate scan failed: {exc}", file=sys.stderr)
+        return 2
+
     if args.print_current:
         print(json.dumps(baseline_document(actual), indent=2, sort_keys=True))
         return 0
 
-    if not BASELINE.is_file():
-        print(f"ERROR: missing ISA gate baseline: {BASELINE}", file=sys.stderr)
-        return 2
     try:
         document = json.loads(BASELINE.read_text(encoding="utf-8"))
         allowed = document["violations"]
