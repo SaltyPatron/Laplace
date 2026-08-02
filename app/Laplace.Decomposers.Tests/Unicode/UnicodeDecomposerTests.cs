@@ -95,7 +95,8 @@ public sealed class UnicodeDecomposerTests
         var writer = new CapturingWriter();
         await dec.InitializeAsync(Context(writer));
 
-        Assert.Equal(3, writer.Captured.Count); // vocabulary + license deposit + UCD classifiers
+        // Classifiers ride ClassifierPhase on the spine — Initialize is vocab + license only.
+        Assert.Equal(2, writer.Captured.Count);
         var boot = writer.Captured[0];
 
         Assert.Contains(boot.Entities, e =>
@@ -117,17 +118,44 @@ public sealed class UnicodeDecomposerTests
     }
 
     [Fact]
-    public async Task Deterministic_Intent_Ids_Across_Runs()
+    public async Task PhaseOrder_Tier0Codepoints_Before_MappingAttestations()
     {
         var dec = NewDecomposer();
         var ctx = Context(new NullWriter());
+        // Cap so the test finishes in seconds; uncapped mapping is gated by MaxInputUnits=0 break.
+        var opts = DecomposerOptions.Default with { MaxInputUnits = 512 };
+
+        bool sawCodepointEntity = false;
+        bool sawMappingAttestation = false;
+        await foreach (var change in dec.DecomposeAsync(ctx, opts))
+        {
+            if (change.Entities.Any(e => e.TypeId == UnicodeDecomposer.CodepointType))
+                sawCodepointEntity = true;
+            // Cap run stops after tier-0 — mapping attestations must not appear.
+            if (change.Attestations.Length > 0
+                && change.Entities.All(e => e.TypeId != UnicodeDecomposer.CodepointType))
+                sawMappingAttestation = true;
+        }
+        Assert.True(sawCodepointEntity);
+        Assert.False(sawMappingAttestation,
+            "MaxInputUnits cap must stop after Tier0Phase; mapping phase must not run");
+    }
+
+    [Fact]
+    public async Task Deterministic_Intent_Ids_Across_Runs()
+    {
+        // Cap → serial spine (MonolithSegmenter.ResolveSegments → 1). Uncapped
+        // working-set segments merge unordered, so IntentId *order* is not a contract.
+        var dec = NewDecomposer();
+        var ctx = Context(new NullWriter());
+        var opts = DecomposerOptions.Default with { MaxInputUnits = 2048 };
 
         var first = new List<Hash128>();
-        await foreach (var c in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
+        await foreach (var c in dec.DecomposeAsync(ctx, opts))
             first.Add(c.Metadata.IntentId);
 
         var second = new List<Hash128>();
-        await foreach (var c in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
+        await foreach (var c in dec.DecomposeAsync(ctx, opts))
             second.Add(c.Metadata.IntentId);
 
         Assert.Equal(first, second);

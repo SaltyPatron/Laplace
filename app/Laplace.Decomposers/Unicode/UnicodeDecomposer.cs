@@ -6,11 +6,15 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Unicode;
 
+/// <summary>
+/// Tier-0 codepoint law on the ingest spine. Phase order is forced
+/// (classifiers → tier-0 entity+phys → mappings → aliases/confusables → bytes);
+/// orchestration is <see cref="RunPhaseAsync"/> over <see cref="ComposeDecomposerPhase{T}"/>,
+/// not a hand <c>yield return Build*</c> stream. Mapping targets resolve only —
+/// they never mint entity-only rows (<see cref="StageCodepointTarget"/>).
+/// </summary>
 public sealed class UnicodeDecomposer : DecomposerMultiPhase<UnicodeSource, FullScope>, IIngestInventoryProvider
 {
-
-
-
     public static readonly Hash128 Source = UnicodeSource.SourceId;
     public static readonly Hash128 TrustClass = UnicodeSource.TrustClass;
 
@@ -26,8 +30,6 @@ public sealed class UnicodeDecomposer : DecomposerMultiPhase<UnicodeSource, Full
         return ids;
     }
 
-    private const string UnicodeVersion = "17.0.0";
-
     private readonly string? _ucdxmlZip;
     private readonly string? _ducet;
     private CodepointRecord[]? _records;
@@ -41,21 +43,13 @@ public sealed class UnicodeDecomposer : DecomposerMultiPhase<UnicodeSource, Full
 
     public override int LayerOrder => 0;
 
-    protected override async Task OnInitializedAsync(IDecomposerContext context, CancellationToken ct)
+    protected override Task OnInitializedAsync(IDecomposerContext context, CancellationToken ct)
     {
+        // Precompute only — classifier rows ride ClassifierPhase on the spine.
+        // Do not hand-apply via the writer here (that was the bootstrap escape).
+        EnsureComputed(context);
         EnsureUcdProperties(context);
-        var ucdClassifierTypeId = EntityTypeRegistry.UcdClassifier;
-        var ordinalContextTypeId = EntityTypeRegistry.OrdinalContext;
-        var classifiers = new SubstrateChangeBuilder(
-            Source, "bootstrap/ucd-classifiers", null,
-            entityCapacity: 2048, physicalityCapacity: 0, attestationCapacity: 0);
-        foreach (var row in _ucd!.ClassificationEntities(Source))
-            classifiers.AddEntity(row);
-        classifiers.AddEntity(new EntityRow(UcdProperties.OrdinalCtx0, EntityTier.Word, ordinalContextTypeId, Source));
-        classifiers.AddEntity(new EntityRow(UcdProperties.OrdinalCtx1, EntityTier.Word, ordinalContextTypeId, Source));
-        for (int cc = 1; cc <= 254; cc++)
-            classifiers.AddEntity(new EntityRow(CombiningClassIds[cc], EntityTier.Word, ucdClassifierTypeId, Source));
-        await context.Writer.ApplyAsync(classifiers.Build(), ct);
+        return Task.CompletedTask;
     }
 
     protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
@@ -65,156 +59,35 @@ public sealed class UnicodeDecomposer : DecomposerMultiPhase<UnicodeSource, Full
     {
         EnsureComputed(context);
         EnsureUcdProperties(context);
-        IntentStage.ResetContentBank();
-        int total = _records!.Length;
+
+        var recs = _records!;
+        var ucd = _ucd!;
         int batch = IngestPipelineDefaults.ResolveBatch(IngestSourceProfile.Unicode, options);
 
-        // Tier-0 completeness precondition: bulk-write every codepoint's entity+physicality
-        // pair, unconditionally and atomically paired, BEFORE any batch below can reference a
-        // codepoint as a relation target. Unicode mappings (uppercase/lowercase/decomposition/
-        // mirror/confusables/name-aliases) are not monotonic in codepoint order, so without
-        // this preamble a forward reference from StageCodepointTarget could land in a batch
-        // that commits before the referenced codepoint's own primary entity+physicality pair
-        // does, leaving a real (if transient) entity-without-physicality row in the DB. Once
-        // this preamble has run, tier-0 existence is a guaranteed precondition for everything
-        // that follows -- StageCodepointTarget below asserts against it instead of defensively
-        // re-staging an entity-only row. Redundant re-emission of the same ids by BuildBatch's
-        // per-chunk pairing is absorbed first by the shared writer's cross-stage identity
-        // dedup, then by its in-transaction presence probe. COPY itself has no conflict lane.
-        for (int start = 0; start < total; start += batch)
-        {
-            ct.ThrowIfCancellationRequested();
-            int end = Math.Min(start + batch, total);
-            yield return BuildTier0Seed(start, end);
-            IntentStage.ResetContentBank();
-        }
+        await foreach (var c in RunPhaseAsync(
+                           new ClassifierPhase(ucd, batch), context, options, ct))
+            yield return c;
 
-        for (int start = 0; start < total; start += batch)
-        {
-            ct.ThrowIfCancellationRequested();
-            int end = Math.Min(start + batch, total);
-            yield return BuildBatch(start, end, options.DryRun ? 0 : end - start, commitEpoch: 0);
-            IntentStage.ResetContentBank();
-        }
+        await foreach (var c in RunPhaseAsync(
+                           new Tier0Phase(recs, batch), context, options, ct))
+            yield return c;
 
-        {
-            var recs = _records!;
-            var ucd = _ucd!;
-            var b = new SubstrateChangeBuilder(Source, "ucd/aliases-confusables/0", null,
-                entityCapacity: batch, physicalityCapacity: batch, attestationCapacity: batch)
-                .SetCommitEpoch(1);
-            int count = 0, bn = 0;
+        // Cap runs stop after tier-0 (same shape as WordNet data-then-rest).
+        if (options.MaxInputUnits > 0) yield break;
 
-            foreach (var (cp, aliases) in ucd.NameAliases)
-            {
-                ct.ThrowIfCancellationRequested();
-                if (cp >= (uint)recs.Length) continue;
-                foreach (var alias in aliases)
-                {
-                    var aliasId = ContentEmitter.Emit(b, alias, Source);
-                    if (aliasId is { } aid)
-                        b.AddAttestation(NativeAttestation.Categorical(
-                            StageCodepointTarget(recs, cp), "HAS_NAME_ALIAS", aid, Source, SourceTrust.StandardsDerived));
-                    count++;
-                }
-                if (count >= batch)
-                {
-                    b.SetInputUnitsConsumed(count);
-                    yield return b.Build();
-                    IntentStage.ResetContentBank();
-                    b = new SubstrateChangeBuilder(Source, $"ucd/aliases-confusables/{++bn}", null,
-                        entityCapacity: batch, physicalityCapacity: batch, attestationCapacity: batch)
-                        .SetCommitEpoch(1);
-                    count = 0;
-                }
-            }
+        var uncapped = options with { MaxInputUnits = 0 };
 
-            foreach (var (src, target) in ucd.Confusables)
-            {
-                ct.ThrowIfCancellationRequested();
-                if (src >= (uint)recs.Length || target.Length == 0) continue;
-                int first = char.ConvertToUtf32(target, 0);
-                int firstLen = char.IsSurrogatePair(target, 0) ? 2 : 1;
-                Hash128? targetId = target.Length == firstLen
-                    ? StageCodepointTarget(recs, (uint)first)
-                    : ContentEmitter.Emit(b, target, Source);
-                if (targetId is { } tid)
-                    b.AddAttestation(NativeAttestation.Categorical(
-                        StageCodepointTarget(recs, src), "CONFUSABLE_WITH", tid, Source, SourceTrust.StandardsDerived));
-                if (++count >= batch)
-                {
-                    b.SetInputUnitsConsumed(count);
-                    yield return b.Build();
-                    IntentStage.ResetContentBank();
-                    b = new SubstrateChangeBuilder(Source, $"ucd/aliases-confusables/{++bn}", null,
-                        entityCapacity: batch, physicalityCapacity: batch, attestationCapacity: batch)
-                        .SetCommitEpoch(1);
-                    count = 0;
-                }
-            }
-            if (count > 0)
-            {
-                b.SetInputUnitsConsumed(count);
-                yield return b.Build();
-                IntentStage.ResetContentBank();
-            }
-        }
+        await foreach (var c in RunPhaseAsync(
+                           new MappingPhase(recs, ucd, batch), context, uncapped, ct))
+            yield return c;
 
-        {
-            var recs = _records!;
-            var bb = new SubstrateChangeBuilder(Source, "bytes/atoms-and-encodings", null,
-                entityCapacity: 512, physicalityCapacity: 128, attestationCapacity: 512)
-                .SetCommitEpoch(1);
+        await foreach (var c in RunPhaseAsync(
+                           new AliasConfusablePhase(recs, ucd, batch), context, uncapped, ct))
+            yield return c;
 
-            var latin1 = SubstrateCanonicalIds.OfVersioned("encoding", "ISO-8859-1");
-            var cp1252 = SubstrateCanonicalIds.OfVersioned("encoding", "windows-1252");
-            var encType = EntityTypeRegistry.CharacterEncoding;
-            var roleType = EntityTypeRegistry.Utf8Role;
-            bb.AddEntity(new EntityRow(latin1, EntityTier.Word, encType, Source));
-            bb.AddEntity(new EntityRow(cp1252, EntityTier.Word, encType, Source));
-            var roleIds = new Dictionary<string, Hash128>(StringComparer.Ordinal);
-            foreach (var role in new[] { "continuation", "lead2", "lead3", "lead4", "invalid" })
-            {
-                var rid = Hash128.OfCanonical($"substrate/utf8/{role}/v1");
-                roleIds[role] = rid;
-                bb.AddEntity(new EntityRow(rid, EntityTier.Word, roleType, Source));
-            }
-
-            for (int v = ByteAtoms.First; v <= 0xFF; v++)
-            {
-                byte bv = (byte)v;
-                Hash128 byteId = ByteAtoms.Id(bv);
-                bb.AddEntity(byteId, tier: 0, ByteAtoms.TypeId, firstObservedBy: Source);
-
-                var coord = ByteAtoms.Coord(bv);
-                Hash128 physId = PhysicalityId.Compute(byteId, PhysicalityType.Content);
-                bb.AddPhysicality(new PhysicalityRow(
-                    Id: physId, EntityId: byteId, SourceId: Source,
-                    Type: PhysicalityType.Content,
-                    CoordX: coord[0], CoordY: coord[1], CoordZ: coord[2], CoordM: coord[3],
-                    HilbertIndex: ByteAtoms.Hilbert(bv),
-                    TrajectoryXyzm: null, NConstituents: 0,
-                    AlignmentResidual: null, SourceDim: null, ObservedAtUnixUs: 0));
-
-                bb.AddAttestation(NativeAttestation.Categorical(
-                    byteId, "HAS_UTF8_ROLE", roleIds[ByteAtoms.Utf8Role(bv)],
-                    Source, SourceTrust.StandardsDerived));
-
-                bb.AddAttestation(NativeAttestation.Categorical(
-                    byteId, "DECODES_TO", StageCodepointTarget(recs, (uint)v), Source,
-                    SourceTrust.StandardsDerived, contextId: latin1));
-
-                uint cp1252Target = bv <= 0x9F
-                    ? ByteAtoms.Cp1252High[bv - 0x80]
-                    : (uint)bv;
-                if (cp1252Target != 0)
-                    bb.AddAttestation(NativeAttestation.Categorical(
-                        byteId, "DECODES_TO", StageCodepointTarget(recs, cp1252Target), Source,
-                        SourceTrust.StandardsDerived, contextId: cp1252));
-            }
-            yield return bb.Build();
-            IntentStage.ResetContentBank();
-        }
+        await foreach (var c in RunPhaseAsync(
+                           new ByteEncodingPhase(recs, batch), context, uncapped, ct))
+            yield return c;
     }
 
     public Task<IngestInventory?> DescribeInputAsync(
@@ -260,29 +133,133 @@ public sealed class UnicodeDecomposer : DecomposerMultiPhase<UnicodeSource, Full
         return ValueTask.CompletedTask;
     }
 
-    private SubstrateChange BuildBatch(int start, int end, long inputUnitsConsumed = 0, int commitEpoch = 0)
+    /// <summary>
+    /// Resolves a codepoint referenced as a relation TARGET. Tier-0 entity+physicality
+    /// for every codepoint is seeded by <see cref="Tier0Phase"/> before any mapping
+    /// phase runs — this method never stages an entity row.
+    /// </summary>
+    internal static Hash128 StageCodepointTarget(CodepointRecord[] recs, uint targetCp)
     {
-        int n = end - start;
-        var b = new SubstrateChangeBuilder(
-            Source, $"codepoints/U+{start:X4}..U+{(end - 1):X4}", null,
-            entityCapacity: n * 4,
-            physicalityCapacity: n,
-            attestationCapacity: n * 12)
-            .SetCommitEpoch(commitEpoch);
-        if (inputUnitsConsumed > 0) b.SetInputUnitsConsumed(inputUnitsConsumed);
+        if (targetCp >= (uint)recs.Length)
+            throw new ArgumentOutOfRangeException(nameof(targetCp), targetCp,
+                "StageCodepointTarget: codepoint is outside the tier-0 seeded record set — "
+                + "Tier0Phase must complete before mapping phases reference targets.");
+        return recs[targetCp].Hash;
+    }
 
-        CodepointRecord[] recs = _records!;
-        UcdProperties ucd = _ucd!;
+    private void EnsureComputed(IDecomposerContext context)
+    {
+        if (_records is not null) return;
+        // Single-origin law: the DB seed computes from raw UCD, never from the
+        // perfcache blob. The blob is a sibling OUTPUT of this same compute
+        // (native laplace_unicode_seed_compute), not a seed input.
+        var (xml, duc) = ResolveSource(context);
+        _records = UnicodeSeed.Compute(xml, duc);
+    }
 
-        for (int cp = start; cp < end; cp++)
+    private void EnsureUcdProperties(IDecomposerContext context)
+    {
+        if (_ucd is not null) return;
+        string ucdDir = Path.Combine(context.EcosystemPath, "ucd");
+        _ucd = UcdProperties.Load(ucdDir);
+    }
+
+    private (string xml, string duc) ResolveSource(IDecomposerContext context)
+    {
+        string baseDir = context.EcosystemPath;
+        string xml = _ucdxmlZip ?? Path.Combine(baseDir, "ucdxml", "ucd.nounihan.flat.zip");
+        string duc = _ducet ?? Path.Combine(baseDir, "uca", "allkeys.txt");
+        return (xml, duc);
+    }
+
+    // ── Spine phases ──────────────────────────────────────────────────────────
+
+    private abstract class UnicodeComposePhase<T> : ComposeDecomposerPhase<T>
+    {
+        private readonly int _batch;
+        private readonly int _commitEpoch;
+        private readonly int? _attestationCapacity;
+
+        protected UnicodeComposePhase(int batch, int commitEpoch, int? attestationCapacity = null)
         {
-            ref readonly CodepointRecord r = ref recs[cp];
+            _batch = batch;
+            _commitEpoch = commitEpoch;
+            _attestationCapacity = attestationCapacity;
+        }
+
+        public override Hash128 SourceId => Source;
+        public override string SourceName => "UnicodeDecomposer";
+        public override int LayerOrder => 0;
+        public override Hash128 TrustClassId => TrustClass;
+        protected override double SourceTrust => TC.StandardsDerived;
+
+        public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
+            => Task.CompletedTask;
+
+        public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+            => Task.FromResult<long?>(null);
+
+        protected override IngestBatchConfig BuildPipelineConfig(
+            IDecomposerContext context, DecomposerOptions options) =>
+            IngestPipelineDefaults.ApplyMaxInputUnits(
+                IngestPipelineDefaults.Compose(
+                    SourceId, BatchLabelPrefix, _batch, options, context.Reader,
+                    IngestSourceProfile.Unicode,
+                    attestationCapacity: _attestationCapacity,
+                    commitEpoch: _commitEpoch),
+                options);
+    }
+
+    /// <summary>UCD classifier / ordinal / combining-class entities before tier-0.</summary>
+    private sealed class ClassifierPhase : UnicodeComposePhase<EntityRow>
+    {
+        private readonly UcdProperties _ucd;
+
+        public ClassifierPhase(UcdProperties ucd, int batch) : base(batch, commitEpoch: 0, attestationCapacity: 0)
+            => _ucd = ucd;
+
+        protected override string PhaseLabel => "classifiers";
+
+        protected override void Compose(EntityRow row, SubstrateChangeBuilder b) => b.AddEntity(row);
+
+        protected override async IAsyncEnumerable<EntityRow> ExtractRecordsAsync(
+            string ecosystemPath, DecomposerOptions options,
+            [EnumeratorCancellation] CancellationToken ct)
+        {
+            await Task.CompletedTask;
+            var ucdClassifierTypeId = EntityTypeRegistry.UcdClassifier;
+            var ordinalContextTypeId = EntityTypeRegistry.OrdinalContext;
+            foreach (var row in _ucd.ClassificationEntities(Source))
+            {
+                ct.ThrowIfCancellationRequested();
+                yield return row;
+            }
+            yield return new EntityRow(UcdProperties.OrdinalCtx0, EntityTier.Word, ordinalContextTypeId, Source);
+            yield return new EntityRow(UcdProperties.OrdinalCtx1, EntityTier.Word, ordinalContextTypeId, Source);
+            for (int cc = 1; cc <= 254; cc++)
+                yield return new EntityRow(CombiningClassIds[cc], EntityTier.Word, ucdClassifierTypeId, Source);
+        }
+    }
+
+    /// <summary>
+    /// Sole mint site for tier-0 codepoint entity+physicality pairs. Completes for the
+    /// whole (or MaxInputUnits-capped) space before mapping phases run.
+    /// </summary>
+    private sealed class Tier0Phase : UnicodeComposePhase<int>
+    {
+        private readonly CodepointRecord[] _recs;
+
+        public Tier0Phase(CodepointRecord[] recs, int batch)
+            : base(batch, commitEpoch: 0, attestationCapacity: 0) => _recs = recs;
+
+        protected override string PhaseLabel => "tier0";
+
+        protected override void Compose(int cp, SubstrateChangeBuilder b)
+        {
+            ref readonly CodepointRecord r = ref _recs[cp];
             Hash128 entityId = r.Hash;
-
             b.AddEntity(entityId, tier: 0, CodepointType, firstObservedBy: Source);
-
             Hash128 physId = PhysicalityId.Compute(entityId, PhysicalityType.Content);
-
             b.AddPhysicality(new PhysicalityRow(
                 Id: physId, EntityId: entityId, SourceId: Source,
                 Type: PhysicalityType.Content,
@@ -290,9 +267,43 @@ public sealed class UnicodeDecomposer : DecomposerMultiPhase<UnicodeSource, Full
                 HilbertIndex: r.Hilbert,
                 TrajectoryXyzm: null, NConstituents: 0,
                 AlignmentResidual: null, SourceDim: null, ObservedAtUnixUs: 0));
+        }
 
+        protected override async IAsyncEnumerable<int> ExtractRecordsAsync(
+            string ecosystemPath, DecomposerOptions options,
+            [EnumeratorCancellation] CancellationToken ct)
+        {
+            await Task.CompletedTask;
+            int total = _recs.Length;
+            if (options.MaxInputUnits > 0) total = (int)Math.Min(total, options.MaxInputUnits);
+            for (int cp = 0; cp < total; cp++)
+            {
+                ct.ThrowIfCancellationRequested();
+                yield return cp;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Property/mapping attestations. Never re-mints tier-0 rows — targets via
+    /// <see cref="StageCodepointTarget"/> only.
+    /// </summary>
+    private sealed class MappingPhase : UnicodeComposePhase<int>
+    {
+        private readonly CodepointRecord[] _recs;
+        private readonly UcdProperties _ucd;
+
+        public MappingPhase(CodepointRecord[] recs, UcdProperties ucd, int batch)
+            : base(batch, commitEpoch: 0) => (_recs, _ucd) = (recs, ucd);
+
+        protected override string PhaseLabel => "mappings";
+
+        protected override void Compose(int cp, SubstrateChangeBuilder b)
+        {
+            var recs = _recs;
+            var ucd = _ucd;
+            Hash128 entityId = recs[cp].Hash;
             uint ucp = (uint)cp;
-
 
             string? name = ucd.Name[cp];
             if (name != null)
@@ -300,55 +311,56 @@ public sealed class UnicodeDecomposer : DecomposerMultiPhase<UnicodeSource, Full
                 var nameId = ContentEmitter.Emit(b, name, Source);
                 if (nameId is { } nid)
                     b.AddAttestation(NativeAttestation.CategoricalResolved(entityId, UcdProperties.RelTypeHasName,
-                        nid, Source, null, RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
+                        nid, Source, null, RelationTypeRank.StandardsStructural * TC.StandardsDerived));
             }
 
             string? lb = ucd.LineBreakForCodepoint(ucp);
             if (lb != null && ucd.LineBreakEntityIds.TryGetValue(lb, out var lbId))
                 b.AddAttestation(NativeAttestation.CategoricalResolved(entityId, UcdProperties.RelTypeHasLineBreak,
-                    lbId, Source, null, RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
+                    lbId, Source, null, RelationTypeRank.StandardsStructural * TC.StandardsDerived));
 
             string? eaw = ucd.EastAsianWidthForCodepoint(ucp);
             if (eaw != null && ucd.EastAsianWidthEntityIds.TryGetValue(eaw, out var eawId))
                 b.AddAttestation(NativeAttestation.CategoricalResolved(entityId, UcdProperties.RelTypeHasEastAsianWidth,
-                    eawId, Source, null, RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
+                    eawId, Source, null, RelationTypeRank.StandardsStructural * TC.StandardsDerived));
 
             string? jt = ucd.JoiningTypeForCodepoint(ucp);
             if (jt != null && ucd.JoiningTypeEntityIds.TryGetValue(jt, out var jtId))
                 b.AddAttestation(NativeAttestation.CategoricalResolved(entityId, UcdProperties.RelTypeHasJoiningType,
-                    jtId, Source, null, RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
+                    jtId, Source, null, RelationTypeRank.StandardsStructural * TC.StandardsDerived));
 
             string? nt = ucd.NumericTypeForCodepoint(ucp);
             if (nt != null && ucd.NumericTypeEntityIds.TryGetValue(nt, out var ntId))
                 b.AddAttestation(NativeAttestation.CategoricalResolved(entityId, UcdProperties.RelTypeHasNumericType,
-                    ntId, Source, null, RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
+                    ntId, Source, null, RelationTypeRank.StandardsStructural * TC.StandardsDerived));
 
             string? cat = ucd.GeneralCategory[cp];
             if (cat != null && ucd.CategoryEntityIds.TryGetValue(cat, out var catId))
                 b.AddAttestation(NativeAttestation.CategoricalResolved(entityId, UcdProperties.RelTypeHasGeneralCategory,
-                    catId, Source, null, RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
+                    catId, Source, null, RelationTypeRank.StandardsStructural * TC.StandardsDerived));
 
             if (ucd.CombiningClass[cp] > 0)
                 b.AddAttestation(NativeAttestation.CategoricalResolved(entityId, UcdProperties.RelTypeHasCombiningClass,
                     CombiningClassIds[ucd.CombiningClass[cp]], Source, null,
-                    RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
+                    RelationTypeRank.StandardsStructural * TC.StandardsDerived));
 
             string? script = ucd.ScriptForCodepoint(ucp);
             if (script != null && ucd.ScriptEntityIds.TryGetValue(script, out var scriptId))
                 b.AddAttestation(NativeAttestation.CategoricalResolved(entityId, UcdProperties.RelTypeHasScript,
-                    scriptId, Source, null, RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
+                    scriptId, Source, null, RelationTypeRank.StandardsStructural * TC.StandardsDerived));
 
             string? block = ucd.BlockForCodepoint(ucp);
             if (block != null && ucd.BlockEntityIds.TryGetValue(block, out var blockId))
                 b.AddAttestation(NativeAttestation.CategoricalResolved(entityId, UcdProperties.RelTypeHasBlock,
-                    blockId, Source, null, RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
+                    blockId, Source, null, RelationTypeRank.StandardsStructural * TC.StandardsDerived));
 
             if (ucd.UppercaseMapping[cp] != 0)
             {
                 uint targetCp = ucd.UppercaseMapping[cp];
                 if (targetCp < (uint)recs.Length)
                     b.AddAttestation(NativeAttestation.CategoricalResolved(entityId, UcdProperties.RelTypeHasUppercaseMapping,
-                        StageCodepointTarget(recs, targetCp), Source, null, RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
+                        StageCodepointTarget(recs, targetCp), Source, null,
+                        RelationTypeRank.StandardsStructural * TC.StandardsDerived));
             }
 
             if (ucd.LowercaseMapping[cp] != 0)
@@ -356,7 +368,8 @@ public sealed class UnicodeDecomposer : DecomposerMultiPhase<UnicodeSource, Full
                 uint targetCp = ucd.LowercaseMapping[cp];
                 if (targetCp < (uint)recs.Length)
                     b.AddAttestation(NativeAttestation.CategoricalResolved(entityId, UcdProperties.RelTypeHasLowercaseMapping,
-                        StageCodepointTarget(recs, targetCp), Source, null, RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
+                        StageCodepointTarget(recs, targetCp), Source, null,
+                        RelationTypeRank.StandardsStructural * TC.StandardsDerived));
             }
 
             uint[]? decomp = ucd.CanonDecomp[cp];
@@ -371,7 +384,7 @@ public sealed class UnicodeDecomposer : DecomposerMultiPhase<UnicodeSource, Full
                         b.AddAttestation(NativeAttestation.CategoricalResolved(entityId,
                             UcdProperties.RelTypeCanonDecomposesTo,
                             StageCodepointTarget(recs, targetCp), Source, ctx,
-                            RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
+                            RelationTypeRank.StandardsStructural * TC.StandardsDerived));
                     }
                 }
             }
@@ -379,7 +392,7 @@ public sealed class UnicodeDecomposer : DecomposerMultiPhase<UnicodeSource, Full
             if (ucd.TitlecaseMapping[cp] != 0 && ucd.TitlecaseMapping[cp] < (uint)recs.Length)
                 b.AddAttestation(NativeAttestation.CategoricalResolved(entityId, UcdProperties.RelTypeHasTitlecaseMapping,
                     StageCodepointTarget(recs, ucd.TitlecaseMapping[cp]), Source, null,
-                    RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
+                    RelationTypeRank.StandardsStructural * TC.StandardsDerived));
 
             uint[]? compat = ucd.CompatDecomp[cp];
             if (compat != null)
@@ -393,7 +406,7 @@ public sealed class UnicodeDecomposer : DecomposerMultiPhase<UnicodeSource, Full
                         b.AddAttestation(NativeAttestation.CategoricalResolved(entityId,
                             UcdProperties.RelTypeCompatDecomposesTo,
                             StageCodepointTarget(recs, targetCp), Source, ctx,
-                            RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
+                            RelationTypeRank.StandardsStructural * TC.StandardsDerived));
                     }
                 }
             }
@@ -401,22 +414,22 @@ public sealed class UnicodeDecomposer : DecomposerMultiPhase<UnicodeSource, Full
             string? num = ucd.NumericValue[cp];
             if (num != null && ucd.NumericEntityIds.TryGetValue(num, out var numId))
                 b.AddAttestation(NativeAttestation.CategoricalResolved(entityId, UcdProperties.RelTypeHasNumericValue,
-                    numId, Source, null, RelationTypeRank.ScalarValued * SourceTrust.StandardsDerived));
+                    numId, Source, null, RelationTypeRank.ScalarValued * TC.StandardsDerived));
 
             string? bidi = ucd.BidiClass[cp];
             if (bidi != null && ucd.BidiClassEntityIds.TryGetValue(bidi, out var bidiId))
                 b.AddAttestation(NativeAttestation.CategoricalResolved(entityId, UcdProperties.RelTypeHasBidiClass,
-                    bidiId, Source, null, RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
+                    bidiId, Source, null, RelationTypeRank.StandardsStructural * TC.StandardsDerived));
 
             uint mir = ucd.BidiMirror[cp];
             if (mir != 0 && mir < (uint)recs.Length && cp <= mir)
                 b.AddAttestation(NativeAttestation.Categorical(
-                    entityId, "HAS_MIRROR", StageCodepointTarget(recs, mir), Source, null, SourceTrust.StandardsDerived));
+                    entityId, "HAS_MIRROR", StageCodepointTarget(recs, mir), Source, null, TC.StandardsDerived));
 
             string? age = ucd.AgeForCodepoint(ucp);
             if (age != null && ucd.AgeEntityIds.TryGetValue(age, out var ageId))
                 b.AddAttestation(NativeAttestation.CategoricalResolved(entityId, UcdProperties.RelTypeHasAge,
-                    ageId, Source, null, RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
+                    ageId, Source, null, RelationTypeRank.StandardsStructural * TC.StandardsDerived));
 
             byte eprops = ucd.EmojiProps[cp];
             if (eprops != 0)
@@ -424,101 +437,150 @@ public sealed class UnicodeDecomposer : DecomposerMultiPhase<UnicodeSource, Full
                     if ((eprops & (1 << bit)) != 0
                         && ucd.EmojiPropEntityIds.TryGetValue(UcdProperties.EmojiPropNames[bit], out var epId))
                         b.AddAttestation(NativeAttestation.CategoricalResolved(entityId, UcdProperties.RelTypeHasEmojiProperty,
-                            epId, Source, null, RelationTypeRank.StandardsStructural * SourceTrust.StandardsDerived));
+                            epId, Source, null, RelationTypeRank.StandardsStructural * TC.StandardsDerived));
         }
-        return b.Build();
-    }
 
-    /// <summary>
-    /// Resolves the entity id for a codepoint referenced as a relation TARGET (uppercase/
-    /// lowercase/decomposition/mirror/confusable/name-alias mapping, etc.), never as the
-    /// primary node being decomposed. Tier-0 existence is a guaranteed precondition here --
-    /// the entity+physicality pair for every codepoint is bulk-seeded, atomically paired, by
-    /// <see cref="BuildTier0Seed"/> before any batch that can call this method runs. This
-    /// method therefore does NOT stage an entity row (doing so would reintroduce the
-    /// entity-without-physicality window this precondition exists to close) -- it only
-    /// validates and resolves the id, failing loudly if the codepoint is out of range of the
-    /// seeded record set rather than silently trusting some other code path to backfill it.
-    /// </summary>
-    private static Hash128 StageCodepointTarget(CodepointRecord[] recs, uint targetCp)
-    {
-        if (targetCp >= (uint)recs.Length)
-            throw new ArgumentOutOfRangeException(nameof(targetCp), targetCp,
-                "StageCodepointTarget: codepoint is outside the tier-0 seeded record set -- " +
-                "every codepoint's entity+physicality pair must already exist (see BuildTier0Seed) " +
-                "before it can be referenced as a relation target.");
-        return recs[targetCp].Hash;
-    }
-
-    /// <summary>
-    /// Bulk-writes the entity+physicality pair for every codepoint in [start, end), sourced
-    /// directly from the precomputed <see cref="CodepointRecord"/> table (perfcache-backed
-    /// when available). Always emits entity and physicality together -- this is the ONLY
-    /// place in this decomposer that mints tier-0 rows, and it runs to completion for the
-    /// entire codepoint space before any attestation-bearing batch is yielded, so that
-    /// <see cref="StageCodepointTarget"/> can safely assume every codepoint it is asked to
-    /// resolve already has both rows committed.
-    /// </summary>
-    private SubstrateChange BuildTier0Seed(int start, int end)
-    {
-        int n = end - start;
-        var b = new SubstrateChangeBuilder(
-            Source, $"codepoints/tier0-seed/U+{start:X4}..U+{(end - 1):X4}", null,
-            entityCapacity: n,
-            physicalityCapacity: n,
-            attestationCapacity: 0)
-            .SetCommitEpoch(0);
-
-        CodepointRecord[] recs = _records!;
-
-        for (int cp = start; cp < end; cp++)
+        protected override async IAsyncEnumerable<int> ExtractRecordsAsync(
+            string ecosystemPath, DecomposerOptions options,
+            [EnumeratorCancellation] CancellationToken ct)
         {
-            ref readonly CodepointRecord r = ref recs[cp];
-            Hash128 entityId = r.Hash;
+            await Task.CompletedTask;
+            for (int cp = 0; cp < _recs.Length; cp++)
+            {
+                ct.ThrowIfCancellationRequested();
+                yield return cp;
+            }
+        }
+    }
 
-            b.AddEntity(entityId, tier: 0, CodepointType, firstObservedBy: Source);
+    /// <summary>Alias text set ⇒ name-alias row; ConfusableText set ⇒ confusable row.</summary>
+    private readonly record struct AliasConfusableRow(uint Cp, string? Alias, string? ConfusableText);
 
-            Hash128 physId = PhysicalityId.Compute(entityId, PhysicalityType.Content);
+    private sealed class AliasConfusablePhase : UnicodeComposePhase<AliasConfusableRow>
+    {
+        private readonly CodepointRecord[] _recs;
+        private readonly UcdProperties _ucd;
 
+        public AliasConfusablePhase(CodepointRecord[] recs, UcdProperties ucd, int batch)
+            : base(batch, commitEpoch: 1) => (_recs, _ucd) = (recs, ucd);
+
+        protected override string PhaseLabel => "aliases-confusables";
+
+        protected override void Compose(AliasConfusableRow row, SubstrateChangeBuilder b)
+        {
+            if (row.Alias is { } alias)
+            {
+                var aliasId = ContentEmitter.Emit(b, alias, Source);
+                if (aliasId is { } aid)
+                    b.AddAttestation(NativeAttestation.Categorical(
+                        StageCodepointTarget(_recs, row.Cp), "HAS_NAME_ALIAS", aid, Source,
+                        TC.StandardsDerived));
+                return;
+            }
+
+            if (row.ConfusableText is not { Length: > 0 } target) return;
+            int first = char.ConvertToUtf32(target, 0);
+            int firstLen = char.IsSurrogatePair(target, 0) ? 2 : 1;
+            Hash128? targetId = target.Length == firstLen
+                ? StageCodepointTarget(_recs, (uint)first)
+                : ContentEmitter.Emit(b, target, Source);
+            if (targetId is { } tid)
+                b.AddAttestation(NativeAttestation.Categorical(
+                    StageCodepointTarget(_recs, row.Cp), "CONFUSABLE_WITH", tid, Source,
+                    TC.StandardsDerived));
+        }
+
+        protected override async IAsyncEnumerable<AliasConfusableRow> ExtractRecordsAsync(
+            string ecosystemPath, DecomposerOptions options,
+            [EnumeratorCancellation] CancellationToken ct)
+        {
+            await Task.CompletedTask;
+            foreach (var (cp, aliases) in _ucd.NameAliases)
+            {
+                if (cp >= (uint)_recs.Length) continue;
+                foreach (var alias in aliases)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    yield return new AliasConfusableRow(cp, alias, null);
+                }
+            }
+            foreach (var (src, target) in _ucd.Confusables)
+            {
+                ct.ThrowIfCancellationRequested();
+                if (src >= (uint)_recs.Length || target.Length == 0) continue;
+                yield return new AliasConfusableRow(src, null, target);
+            }
+        }
+    }
+
+    private sealed class ByteEncodingPhase : UnicodeComposePhase<int>
+    {
+        private readonly CodepointRecord[] _recs;
+        // -1 = catalog (encodings + utf8 roles); 0..255 = byte atoms
+        public ByteEncodingPhase(CodepointRecord[] recs, int batch)
+            : base(batch, commitEpoch: 1) => _recs = recs;
+
+        protected override string PhaseLabel => "bytes";
+
+        protected override void Compose(int v, SubstrateChangeBuilder b)
+        {
+            var latin1 = SubstrateCanonicalIds.OfVersioned("encoding", "ISO-8859-1");
+            var cp1252 = SubstrateCanonicalIds.OfVersioned("encoding", "windows-1252");
+            if (v < 0)
+            {
+                var encType = EntityTypeRegistry.CharacterEncoding;
+                var roleType = EntityTypeRegistry.Utf8Role;
+                b.AddEntity(new EntityRow(latin1, EntityTier.Word, encType, Source));
+                b.AddEntity(new EntityRow(cp1252, EntityTier.Word, encType, Source));
+                foreach (var role in new[] { "continuation", "lead2", "lead3", "lead4", "invalid" })
+                {
+                    var rid = Hash128.OfCanonical($"substrate/utf8/{role}/v1");
+                    b.AddEntity(new EntityRow(rid, EntityTier.Word, roleType, Source));
+                }
+                return;
+            }
+
+            byte bv = (byte)v;
+            Hash128 byteId = ByteAtoms.Id(bv);
+            b.AddEntity(byteId, tier: 0, ByteAtoms.TypeId, firstObservedBy: Source);
+            var coord = ByteAtoms.Coord(bv);
+            Hash128 physId = PhysicalityId.Compute(byteId, PhysicalityType.Content);
             b.AddPhysicality(new PhysicalityRow(
-                Id: physId, EntityId: entityId, SourceId: Source,
+                Id: physId, EntityId: byteId, SourceId: Source,
                 Type: PhysicalityType.Content,
-                CoordX: r.CoordX, CoordY: r.CoordY, CoordZ: r.CoordZ, CoordM: r.CoordM,
-                HilbertIndex: r.Hilbert,
+                CoordX: coord[0], CoordY: coord[1], CoordZ: coord[2], CoordM: coord[3],
+                HilbertIndex: ByteAtoms.Hilbert(bv),
                 TrajectoryXyzm: null, NConstituents: 0,
                 AlignmentResidual: null, SourceDim: null, ObservedAtUnixUs: 0));
+
+            var roleId = Hash128.OfCanonical($"substrate/utf8/{ByteAtoms.Utf8Role(bv)}/v1");
+            b.AddAttestation(NativeAttestation.Categorical(
+                byteId, "HAS_UTF8_ROLE", roleId, Source, TC.StandardsDerived));
+
+            b.AddAttestation(NativeAttestation.Categorical(
+                byteId, "DECODES_TO", StageCodepointTarget(_recs, (uint)v), Source,
+                TC.StandardsDerived, contextId: latin1));
+
+            uint cp1252Target = bv <= 0x9F
+                ? ByteAtoms.Cp1252High[bv - 0x80]
+                : (uint)bv;
+            if (cp1252Target != 0)
+                b.AddAttestation(NativeAttestation.Categorical(
+                    byteId, "DECODES_TO", StageCodepointTarget(_recs, cp1252Target), Source,
+                    TC.StandardsDerived, contextId: cp1252));
         }
-        return b.Build();
-    }
 
-    private void EnsureComputed(IDecomposerContext context)
-    {
-        if (_records is not null) return;
-        // Single-origin law: the DB seed computes from raw UCD, never from the
-        // perfcache blob. The blob is a sibling OUTPUT of this same compute
-        // (native laplace_unicode_seed_compute), not a seed input — reading it back
-        // to seed would invert the calculated←witnessed dependency and make the DB
-        // only as trustworthy as the blob. The CLI supplies the UCD path
-        // (IngestUnicodeViaRunnerAsync → IngestDataPaths.Resolve("unicode")); both
-        // hosts carry the raw UCD, so there is no environment that needs the shortcut.
-        var (xml, duc) = ResolveSource(context);
-        _records = UnicodeSeed.Compute(xml, duc);
-    }
-
-    private void EnsureUcdProperties(IDecomposerContext context)
-    {
-        if (_ucd is not null) return;
-
-
-        string ucdDir = Path.Combine(context.EcosystemPath, "ucd");
-        _ucd = UcdProperties.Load(ucdDir);
-    }
-
-    private (string xml, string duc) ResolveSource(IDecomposerContext context)
-    {
-        string baseDir = context.EcosystemPath;
-        string xml = _ucdxmlZip ?? Path.Combine(baseDir, "ucdxml", "ucd.nounihan.flat.zip");
-        string duc = _ducet ?? Path.Combine(baseDir, "uca", "allkeys.txt");
-        return (xml, duc);
+        protected override async IAsyncEnumerable<int> ExtractRecordsAsync(
+            string ecosystemPath, DecomposerOptions options,
+            [EnumeratorCancellation] CancellationToken ct)
+        {
+            await Task.CompletedTask;
+            yield return -1;
+            for (int v = ByteAtoms.First; v <= 0xFF; v++)
+            {
+                ct.ThrowIfCancellationRequested();
+                yield return v;
+            }
+        }
     }
 }

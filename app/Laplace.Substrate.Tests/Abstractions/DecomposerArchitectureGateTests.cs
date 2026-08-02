@@ -546,6 +546,72 @@ public sealed class DecomposerArchitectureGateTests
         Assert.Empty(HandBuilderAllowlist);
     }
 
+    /// <summary>
+    /// MultiPhase orchestrators must call <c>RunPhaseAsync</c>. Hand
+    /// <c>new SubstrateChangeBuilder</c> / <c>Writer.ApplyAsync</c> /
+    /// <c>yield return Build*</c> inside <c>RunIngestAsync</c> reinvent the
+    /// wheel (Unicode #776/#779). Nested <see cref="ComposeDecomposerPhase{T}"/>
+    /// Compose callbacks are fine — the pipeline owns the builder.
+    /// Model still hand-builds inside RunIngestAsync; shrink this allowlist only.
+    /// </summary>
+    private static readonly HashSet<string> MultiPhaseRunIngestHandAllowlist = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Laplace.Decomposers/Model/ModelDecomposer.cs",
+    };
+
+    [Fact]
+    public void DecomposerMultiPhase_RunIngestAsync_DoesNotHandBuildOrApply()
+    {
+        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
+        var violations = new List<string>();
+        var runIngest = new Regex(
+            @"RunIngestAsync\s*\([\s\S]*?(?=\r?\n    (?:public |private |internal |protected |public override |public sealed override |private (?:sealed |abstract )?class |private readonly record))",
+            RegexOptions.Compiled);
+        var handBuild = new Regex(@"new\s+SubstrateChangeBuilder\s*\(", RegexOptions.Compiled);
+        var writerApply = new Regex(@"Writer\.ApplyAsync\s*\(", RegexOptions.Compiled);
+        var yieldBuild = new Regex(@"yield\s+return\s+Build\w+\s*\(", RegexOptions.Compiled);
+
+        foreach (var rel in MultiPhaseAllowlist)
+        {
+            var path = Path.Combine(repoRoot, "app", rel.Replace('/', Path.DirectorySeparatorChar));
+            Assert.True(File.Exists(path), $"missing MultiPhaseAllowlist entry: {rel}");
+            var text = File.ReadAllText(path);
+            var m = runIngest.Match(text);
+            if (!m.Success)
+            {
+                violations.Add($"{rel}: no RunIngestAsync body matched");
+                continue;
+            }
+            var body = m.Value;
+            if (!body.Contains("RunPhaseAsync", StringComparison.Ordinal))
+                violations.Add($"{rel}: RunIngestAsync never calls RunPhaseAsync");
+            if (MultiPhaseRunIngestHandAllowlist.Contains(rel)) continue;
+            if (handBuild.IsMatch(body))
+                violations.Add($"{rel}: RunIngestAsync constructs SubstrateChangeBuilder");
+            if (writerApply.IsMatch(body))
+                violations.Add($"{rel}: RunIngestAsync calls Writer.ApplyAsync");
+            if (yieldBuild.IsMatch(body))
+                violations.Add($"{rel}: RunIngestAsync yield-returns Build* helper");
+        }
+
+        Assert.True(violations.Count == 0,
+            "DecomposerMultiPhase.RunIngestAsync must only orchestrate RunPhaseAsync:\n"
+            + string.Join("\n", violations));
+    }
+
+    [Fact]
+    public void UnicodeDecomposer_HasNoHandBuilderOrWriterApply()
+    {
+        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
+        var path = Path.Combine(repoRoot, "app", "Laplace.Decomposers", "Unicode", "UnicodeDecomposer.cs");
+        var text = File.ReadAllText(path);
+        Assert.DoesNotContain("new SubstrateChangeBuilder", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Writer.ApplyAsync", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("IntentStage.ResetContentBank", text, StringComparison.Ordinal);
+        Assert.Contains("RunPhaseAsync", text, StringComparison.Ordinal);
+        Assert.Contains("ComposeDecomposerPhase", text, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void HandlerHotPaths_DoNotResolveFromContainer()
     {
