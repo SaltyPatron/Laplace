@@ -1,0 +1,79 @@
+-- resolve_audit(prompt): what the machine actually saw, and what it MISSED.
+--
+-- THE EDGE OF THE WINDOW, MADE VISIBLE. A bounded observer's characteristic
+-- failure is mistaking the edge of its window for the edge of the world. This
+-- surface exists so that edge is one call away instead of six ad-hoc queries.
+--
+-- Measured 2026-08-02, the failure this was built for: "Kot śpi na stole w
+-- domu" answered ENGLISH. Polish has 87,985 language-tagged senses in the
+-- substrate -- it was never a coverage gap. The Polish-SPECIFIC inflected
+-- forms (`śpi`, `domu`) did not resolve at word tier, so the read discarded
+-- them and judged the prompt on the residue: `kot` (also Slovenian), `na`
+-- (also Irish), `stole` (an English verb). The tokens carrying the signal were
+-- outside the frame, and NOTHING SAID SO.
+--
+-- Per prompt token this reports:
+--   resolved      did it reach an entity at all
+--   tier          WHICH tier answered (the floor is tier 0 and cannot miss;
+--                 anything above it can, and does)
+--   senses        how many candidate senses it carries
+--   top_language  its strongest attested HAS_LANGUAGE
+--   verdict       the honest word for what happened to this token
+--
+-- The verdict column is the point. `unresolved` is not a null to be swallowed;
+-- it is a finding. A prompt where the content words are unresolved and only
+-- function words survived is a prompt the machine cannot answer honestly, and
+-- this says so in a column rather than leaving a confident wrong answer as the
+-- only visible output.
+--
+-- READ LAW: ids until the end; one realize_batch over the collected ids joined
+-- back by ordinal. No per-row realize, no string comparison, no lower().
+CREATE OR REPLACE FUNCTION resolve_audit(p_prompt text)
+    RETURNS TABLE(ord int, token text, resolved boolean, tier smallint,
+                  senses bigint, top_language text, verdict text)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+WITH tok AS (
+    -- prompt_words is the UAX-29 segmentation with its entity lookup. It
+    -- returns one row per (ord, id) and an id living at two tiers appears
+    -- TWICE (GH #752), so DISTINCT ON keeps one row per position -- otherwise
+    -- a tier-collided token is double-counted in its own audit.
+    SELECT DISTINCT ON (w.ord) w.ord, w.word, w.id
+    FROM prompt_words(p_prompt) w
+    ORDER BY w.ord, w.id
+),
+enriched AS (
+    SELECT t.ord, t.word, t.id,
+           (SELECT min(e.tier) FROM entities e WHERE e.id = t.id) AS tier,
+           (SELECT count(*) FROM senses(t.id)) AS n_senses,
+           (SELECT c.object_id
+              FROM consensus c
+             WHERE c.subject_id = t.id
+               AND c.type_id = relation_type_id('HAS_LANGUAGE')
+             ORDER BY eff_mu(c.rating, c.rd) DESC, c.object_id
+             LIMIT 1) AS lang_id
+    FROM tok t
+),
+ord AS (
+    SELECT e.*, row_number() OVER (ORDER BY e.ord) AS ix FROM enriched e
+),
+lbl AS (
+    SELECT realize_batch(array_agg(o.lang_id ORDER BY o.ix), NULL) AS l
+    FROM ord o
+)
+SELECT o.ord,
+       o.word,
+       o.id IS NOT NULL,
+       o.tier,
+       COALESCE(o.n_senses, 0),
+       lbl.l[o.ix],
+       CASE
+         WHEN o.id IS NULL             THEN 'unresolved — outside the frame'
+         WHEN o.tier = 0               THEN 'floor only — codepoint, no word sense'
+         WHEN COALESCE(o.n_senses,0)=0 THEN 'resolved, no senses'
+         WHEN o.lang_id IS NULL        THEN 'resolved, no language attested'
+         ELSE 'resolved'
+       END
+FROM ord o CROSS JOIN lbl
+ORDER BY o.ord
+$$;
