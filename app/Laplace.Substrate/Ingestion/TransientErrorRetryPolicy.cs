@@ -49,10 +49,16 @@ public sealed record TransientErrorRetryPolicy(
 
         for (Exception? e = ex; e is not null; e = e.InnerException)
             if (e is global::Npgsql.PostgresException pg
-                && pg.SqlState is "40P01" or "40001" or "23505")
+                && IsConcurrencySqlState(pg.SqlState))
                 return true;
         return false;
     }
+
+    // A uniqueness violation is an internal novelty/dedup proof failure under
+    // the one-ingest + advisory-lock protocol. Replaying the identical working
+    // set cannot repair it; only deadlock/serialization conflicts are transient.
+    internal static bool IsConcurrencySqlState(string sqlState) =>
+        sqlState is "40P01" or "40001";
 
     public TimeSpan DelayBeforeAttempt(int attemptIndex, Random rng)
     {

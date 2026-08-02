@@ -36,6 +36,16 @@ public class WorkingSetApplyTests
         AttestationOutcome.Confirm, unixUs, games,
         1_000_000_000L, 30_000_000_000L);
 
+    private static SubstrateChange PrebuiltEntityChange(
+        Hash128 source, string unit, Hash128 entityId)
+    {
+        var stage = IntentStage.New(1);
+        stage.AddEntity(entityId, 2, H("type/word"), source);
+        return new SubstrateChangeBuilder(source, unit)
+            .AddIntentStage(stage)
+            .Build();
+    }
+
     private async Task<long> CountEntityAsync(Hash128 id)
     {
         await using var cmd = _pg.DataSource.CreateCommand(
@@ -108,6 +118,26 @@ public class WorkingSetApplyTests
                          + new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc).Ticks,
                          DateTimeKind.Utc),
             ts.ToUniversalTime());
+    }
+
+    [Fact]
+    public async Task WorkingSetApply_DeduplicatesEntitiesAcrossPrebuiltIntentStages()
+    {
+        var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
+        var src = H("source/prebuilt-dup");
+        var entityId = H("prebuilt-dup/entity");
+
+        // High-volume decomposers yield one native IntentStage per chunk.
+        // IngestRunner combines many chunks into one working-set apply, so the
+        // shared writer must enforce the same cross-change identity dedup that
+        // the managed-row aggregation already performs.
+        var a = PrebuiltEntityChange(src, "prebuilt-dup/a", entityId);
+        var b = PrebuiltEntityChange(src, "prebuilt-dup/b", entityId);
+
+        var result = await writer.ApplyWorkingSetAsync(new[] { a, b });
+
+        Assert.Equal(1, result.EntitiesInserted);
+        Assert.Equal(1L, await CountEntityAsync(entityId));
     }
 
     [Fact]

@@ -34,13 +34,11 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 /// client-side. During the unicode seed itself the marker is absent and
 /// every tier-0 row still flows through the probe + COPY lane.
 ///
-/// Attestation presence has a structural fast path: an attestation id is
-/// BLAKE3(subject‖type‖object‖source‖context), so a row whose subject,
-/// object, or context entity is NOVEL in this same batch cannot exist
-/// server-side (entities always finish COPY before attestations start, and
-/// the apply advisory lock serializes writers) — it skips the probe and goes
-/// straight to COPY. Only attestations whose id-embedded entities all
-/// already exist can be present, and only those are probed.
+/// Attestation presence is always verified. The former structural-novelty
+/// shortcut inferred that an attestation embedding a novel-looking entity
+/// could not already exist; live OMW ingest disproved that premise by millions
+/// of rows and COPY failed on 23505. The detailed evidence remains beside the
+/// attestation probe below.
 /// </summary>
 public sealed partial class NpgsqlSubstrateWriter
 {
@@ -186,46 +184,30 @@ public sealed partial class NpgsqlSubstrateWriter
         var atts = CopyTupleParser.ParseAttestations(attBlobs);
         long parseMs = prepSw.ElapsedMilliseconds;
 
-        // Distinct ids in first-seen order. Physicalities are verified by
+        // Distinct entity ids in first-seen order across EVERY staged intent.
+        // A builder/content bank deduplicates only its own stage; IngestRunner
+        // combines many changes into one working-set apply (Unicode's failed
+        // seed combined 627), so uniqueness never crosses this boundary unless
+        // the shared writer enforces it here. COPY has no ON CONFLICT: one
+        // duplicate in the claimed-novel set aborts the whole working set.
+        //
+        // Identity is the content id; tier is metadata, not part of identity,
+        // matching SubstrateChangeBuilder and the managed-stage aggregation.
+        // Preserve the first row exactly as those paths do.
+        //
+        // Physicalities are verified by
         // their OWN content-addressed id, never inferred from their entity:
         // a physicality legitimately arrives for an already-stored entity
         // (projections and building blocks land after identity content).
         // First-occurrence row indices only — probe id/tier lists are built
         // AFTER invert if any ids still need the bitmap path. MEASURED: copying
         // 500k ids into probe lists was ~110ms of the prep dedupe bucket.
-        var firstEntIdx = new List<int>(ents.Ids.Count);
         // Tier-0 gate (snapshot once per apply): with the unicode L0 layer
         // complete in the target DB, a tier-0 id is present by definition —
         // it never enters the probe and folds straight into the present set.
         bool tier0Gate = _tier0LayerComplete;
-        List<Hash128>? tier0Present = tier0Gate ? new List<Hash128>() : null;
-        // Open-addressed seen set on (Hi,Lo) — record HashSet<Hash128> paid
-        // ~120ms here vs ~30ms for a plain ulong-pair set in microbench.
         var dedupeSw = System.Diagnostics.Stopwatch.StartNew();
-        var idSpan = CollectionsMarshal.AsSpan(ents.Ids);
-        var tierSpan = CollectionsMarshal.AsSpan(ents.Tiers);
-        // No HashSet: IntentStage / content-bank staging is unique-by-construction
-        // (duplicate ids fail at COPY PK). MEASURED HashSet was ~117ms/500k with
-        // zero collisions on the throughput path — pure tax.
-        if (!tier0Gate)
-        {
-            CollectionsMarshal.SetCount(firstEntIdx, idSpan.Length);
-            var idxSpan = CollectionsMarshal.AsSpan(firstEntIdx);
-            for (int i = 0; i < idxSpan.Length; i++) idxSpan[i] = i;
-        }
-        else
-        {
-            firstEntIdx.Capacity = idSpan.Length;
-            for (int i = 0; i < idSpan.Length; i++)
-            {
-                if (tierSpan[i] == 0)
-                {
-                    tier0Present!.Add(idSpan[i]);
-                    continue;
-                }
-                firstEntIdx.Add(i);
-            }
-        }
+        var firstEntIdx = DistinctEntityRowIndices(ents, tier0Gate, out var tier0Present);
         int distinctStagedEntities = firstEntIdx.Count + (tier0Present?.Count ?? 0);
         long entDedupeMs = dedupeSw.ElapsedMilliseconds;
         // Materialized only when invert leaves a bitmap remainder.
@@ -284,9 +266,9 @@ public sealed partial class NpgsqlSubstrateWriter
 
         long prepMs = prepSw.ElapsedMilliseconds;
         _log.LogInformation(
-            "WS_APPLY prep: {Ms:N0}ms (blobs {BlobMs:N0} + parse {ParseMs:N0} + ent-dedupe {EntDedupeMs:N0} + rest {RestMs:N0}; {E:N0}e/{P:N0}p/{A:N0}a)",
+            "WS_APPLY prep: {Ms:N0}ms (blobs {BlobMs:N0} + parse {ParseMs:N0} + ent-dedupe {EntDedupeMs:N0} + rest {RestMs:N0}; {E:N0}e→{EDistinct:N0} distinct/{P:N0}p/{A:N0}a)",
             prepMs, blobMs, parseMs - blobMs, entDedupeMs, prepMs - parseMs - entDedupeMs,
-            ents.Ids.Count, phys.Ids.Count, atts.Ids.Count);
+            ents.Ids.Count, distinctStagedEntities, phys.Ids.Count, atts.Ids.Count);
 
         // Entity sort+pack before advisory lock / verify — overlaps
         // open+lock+invert. Contended pack-during-parse was a net loss.
@@ -1043,6 +1025,28 @@ public sealed partial class NpgsqlSubstrateWriter
         var seen = new HashSet<short>();
         for (int i = 0; i < tiers.Count; i++) seen.Add(tiers[i]);
         return seen.Count;
+    }
+
+    internal static List<int> DistinctEntityRowIndices(
+        CopyTupleParser.EntityRows ents, bool tier0Gate, out List<Hash128>? tier0Present)
+    {
+        var ids = CollectionsMarshal.AsSpan(ents.Ids);
+        var tiers = CollectionsMarshal.AsSpan(ents.Tiers);
+        var first = new List<int>(ids.Length);
+        var seen = new HashSet<Hash128>(ids.Length);
+        tier0Present = tier0Gate ? new List<Hash128>() : null;
+
+        for (int i = 0; i < ids.Length; i++)
+        {
+            if (!seen.Add(ids[i])) continue;
+            if (tier0Gate && tiers[i] == 0)
+            {
+                tier0Present!.Add(ids[i]);
+                continue;
+            }
+            first.Add(i);
+        }
+        return first;
     }
 
     /// <summary>
