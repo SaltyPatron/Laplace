@@ -34,6 +34,21 @@ reproduced repeatedly tonight.
 credited with.** The seam is a real code defect (§1) and it is *not* the thing
 standing between this substrate and correct elections.
 
+> **This finding is conditional on which lanes are seeded — re-check it after
+> every reseed.** `FOUNDATION` (`ensure-foundation.sh:41-51`) is unicode,
+> iso639, cili, wordnet, verbnet, propbank, framenet, mapnet, wordframenet,
+> semlink — **no UD**. `KNOWLEDGE` (`ingest-source.sh:11`) *does* include `ud`.
+> So on a foundation-only substrate the seam is latent and the priors are the
+> live defect; **the moment `seed-knowledge` runs, UD mints the colliding
+> tier-2 XPOS rows and the seam becomes live**, moving ahead of the priors
+> again. The one-line check, before trusting either ordering:
+>
+> ```sql
+> SELECT tier, count(*) FROM entities WHERE id = word_id('a') GROUP BY tier;
+> ```
+>
+> One row → priors first. Two rows → seam first.
+
 What actually produces the `a` sense set here — measured:
 
 ```sql

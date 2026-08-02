@@ -1,5 +1,19 @@
 # docs/plan — the work, specified
 
+## Scope — read this before treating the plan as complete
+
+`COMPLETION_PLAN.md` and this directory cover **one axis**: the conversational
+and inference path — election, generation, the lanes that feed it, and the gates
+that would keep it honest. That is roughly 15 of the repository's **214 open
+issues** (measured 2026-08-02).
+
+It is **not** a plan for the whole backlog. The rest has its own shape and is
+tracked in GitHub, not here: model-lane (31), ingest (36), perf (29),
+substrate-law (25), tracker-migration (25), engine (24), plus the chess surface
+work. An earlier framing of this directory as "current state → finish line"
+overstated it; the honest description is "current state → a system that
+converses, with the evidence to prove it."
+
 `docs/COMPLETION_PLAN.md` is the map: gap register, phases, sequencing. **This
 directory is the terrain** — one document per workstream, deep enough that an
 implementer (human or agent) can execute without re-deriving the analysis.
