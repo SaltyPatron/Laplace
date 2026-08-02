@@ -51,6 +51,12 @@ on:
           - lumbras-online      # 5.8 GB — online 1995→2025. Slice it with `slice`.
           - openings-book       # openings/ — ECO tsv (use with source=openings)
           - syzygy-tablebase    # syzygy/ — endgame tablebases
+          - books               # the DOCUMENT corpus, for source=chess-books.
+                                # A chess manual is a book like any other and lives with
+                                # the rest of them; ChessBook is a SECOND witness over the
+                                # same files that extracts the games it can replay. Ingest
+                                # them as documents too (seed-documents) — same content,
+                                # two witnesses, which is what the substrate is for.
           - path-override       # use the `path` input below
       slice:
         # Second dropdown: which era-file inside lumbras-otb / lumbras-online.
@@ -159,6 +165,7 @@ jobs:
             twic)             p="$chess/twic" ;;
             openings-book)    p="$chess/openings" ;;
             syzygy-tablebase) p="$chess/syzygy" ;;
+            books)            p="$root/test-data/text" ;;
             path-override)    p="${{ inputs.path }}" ;;
             lumbras-otb|lumbras-online)
               venue="${{ inputs.corpus }}"; venue="${venue#lumbras-}"

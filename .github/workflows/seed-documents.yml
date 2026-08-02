@@ -17,15 +17,21 @@ on:
         # be literal YAML — they cannot be enumerated from disk at dispatch
         # time — so this list is maintained against /vault/Data and `path`
         # below stays as the escape hatch for anything not listed.
+        # A book is a book. Britannica, Sherlock Holmes, a chess manual and a
+        # radio handbook are the same kind of content differing only in topic,
+        # so the default is ALL of them in one path — DocumentDecomposer
+        # recurses with a *.txt filter, so one root covers every subject
+        # folder. The subsets below exist for topic-targeted work, not because
+        # the lane treats them differently.
         description: "which corpus to ingest"
         type: choice
         required: true
-        default: all-text
+        default: all-books
         options:
-          - all-text          # DATA_ROOT/test-data/text — the whole 204-file corpus (~208 MB)
-          - electronics       # DATA_ROOT/test-data/electronics — ham radio, morse, wireless (~4.4 MB)
-          - smoke-alice       # one book. Use this to validate the lane in ~seconds.
-          - smoke-sherlock    # one book, prose-heavy
+          - all-books         # DATA_ROOT/test-data — every .txt, all subjects (209 files, ~212 MB)
+          - literature-etc    # test-data/text only — Britannica, literature, science, chess books (201)
+          - electronics       # test-data/electronics only — ham radio, morse, wireless (8)
+          - smoke-alice       # one book. Validates the lane in seconds.
           - path-override     # use the `path` input below
       path:
         description: "explicit <path>, used only when corpus = path-override (single file, dir, or corpus root)"
@@ -60,10 +66,10 @@ jobs:
         run: |
           root="${LAPLACE_DATA_ROOT:-/vault/Data}"
           case "${{ inputs.corpus }}" in
-            all-text)       p="$root/test-data/text" ;;
+            all-books)      p="$root/test-data" ;;
+            literature-etc) p="$root/test-data/text" ;;
             electronics)    p="$root/test-data/electronics" ;;
             smoke-alice)    p="$root/test-data/text/alice.txt" ;;
-            smoke-sherlock) p="$root/test-data/text/sherlock.txt" ;;
             path-override)  p="${{ inputs.path }}" ;;
             *) echo "::error::unknown corpus '${{ inputs.corpus }}'"; exit 1 ;;
           esac
