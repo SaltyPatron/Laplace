@@ -189,3 +189,17 @@ itself.
    (`SubstrateTools.cs:74`); generating that string is a code change, not a gate.
 4. Order: elector + G1 + G3 + G8 (mechanical, no code motion) → G4 grep → G2
    ratchet → G7 C# half → G5/G6/G9/G10 after their opcodes exist.
+
+## 9. Progress — 2026-08-02 checkpoint
+
+Landed on `main` (see [CHECKPOINT_2026-08-02.md](CHECKPOINT_2026-08-02.md)):
+
+- Elector invariant (#771) — acceptance items 1–2 and the D-note in §7.
+- G1 / G3 / G8 (#772) — policy-job ratchets; baselines in
+  `scripts/isa-gate-baseline.json`.
+- G7 C# half (#775) — `app/Laplace.Cli.Tests/IngestRosterParityTests.cs`.
+
+**Next on this workstream:** G4 scaffolding (labeled grep, shrink-only) in
+parallel with W3 structural extract; then G2 ratchet. Do not schedule G9
+here. Do not close #758 until G4's destination form (or an explicit
+scaffolding→destination handoff recorded on the issue) exists.

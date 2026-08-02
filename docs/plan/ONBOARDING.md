@@ -45,12 +45,14 @@ ENVIRONMENT
 READ IN THIS ORDER BEFORE TOUCHING ANYTHING
 1. CLAUDE.md — operating rules. They override your defaults.
 2. docs/ARCHITECTURE.md — the system, with file citations.
-3. docs/COMPLETION_PLAN.md — §0 (standard of evidence) is binding on you,
+3. docs/plan/CHECKPOINT_2026-08-02.md — dated resume stage (what landed on
+   main, live seed block, Phase 1 remainder). Do not skip this for "status."
+4. docs/COMPLETION_PLAN.md — §0 (standard of evidence) is binding on you,
    then the gap register R0-R11 and the phases.
-4. docs/plan/README.md — the workstream index, and its "Findings that changed
+5. docs/plan/README.md — the workstream index, and its "Findings that changed
    the plan" section. Read those five refuted claims carefully. Each was
    plausible, written down as fact, and false. They are your calibration.
-5. The specific docs/plan/W*.md for whatever you pick up.
+6. The specific docs/plan/W*.md for whatever you pick up.
 
 THE STANDARD OF EVIDENCE - this is the job, not a formality
 - The running system outranks all prose, including every doc above and every
@@ -133,13 +135,15 @@ YOUR WORK LOOP
    problem.
 4. Verify against the workstream's acceptance criteria. All of them. If you
    cannot demonstrate one, say which. Do not declare done.
-5. Gate before merging:
-     gh workflow run "Laplace — build, deploy, test" --ref <branch>
+5. Verify locally (focused tests / `scripts/pipeline.sh` phases as needed).
+   Prefer merge → one `main` CI run as the merge validation. Do not burn a
+   redundant `gh workflow run` on the feature branch unless something about
+   the change cannot be validated locally.
 6. Open a PR stating what you measured, what you did not, and what you got
-   wrong on the way. Merge on green.
-7. Update the issue and the W*.md if reality differed from the spec. A stale
-   spec nobody corrected is how this repo accumulated the drift you are
-   removing.
+   wrong on the way. Merge on green main CI.
+7. Update the issue, the W*.md, and the current CHECKPOINT if reality
+   differed from the spec. A stale spec nobody corrected is how this repo
+   accumulated the drift you are removing.
 
 HARD RULES - violating these destroys work or data
 - One ingest at a time. An unexplained COPY means an ingest is running; leave
@@ -156,11 +160,17 @@ HARD RULES - violating these destroys work or data
 - A push to main restarts PostgreSQL and kills any running ingest.
 
 WHERE TO START
-Check what this instance actually holds before trusting any measurement:
+Read docs/plan/CHECKPOINT_2026-08-02.md first — it may already answer "where
+are we." Then check what this instance actually holds:
   psql -h /var/run/postgresql -U laplace_admin -d laplace -c "SET search_path=laplace,public; SELECT source_name, status, attestations, ended_at FROM ingest_run_journal ORDER BY started_at DESC LIMIT 20;"
 
-If it is unseeded, seeding is the prerequisite for most verification. The
-seed-* workflows now have corpus dropdowns, so no paths to type:
+If a row is still status=running with no live ingest process, that is an
+orphan cut-off — clear it per the checkpoint ops sequence BEFORE starting
+another foundation seed. Do not stack a second ingest on a lying journal.
+
+If the box is unseeded or only holds thin residue after a failed Unicode
+apply, seeding is the prerequisite for most verification — but only after
+the orphan is cleared and main carries the #776 apply dedup. Then:
   gh workflow run seed-foundation.yml --ref main
 
 Then run this, because it decides the order of Phase 3 and two prior analyses
@@ -169,10 +179,11 @@ got it wrong:
 One row  -> sense priors first (W4 section 2).
 Two rows -> the tier seam first (W4 section 1).
 
-Highest leverage, in order: W6 (gates - especially G4, which mechanically
-kills the drift failure mode above), W5 (the eval harness - until it exists,
-every quality claim including yours is opinion), then W1 (the speaking loop -
-the machinery is built and simply never called).
+Highest leverage after ops unblock, in order: W5 (the eval harness - until
+it exists, every quality claim including yours is opinion), W6 remainder
+(G4 scaffolding then destination via W3), W3 structural SQL edges (#765),
+then W1 (the speaking loop - the machinery is built and simply never called).
+Elector + G1/G3/G7/G8 already landed — do not re-implement them.
 
 WHAT IS TRUE ABOUT THIS SYSTEM
 It ingests a 9,000-game PGN archive into folded, queryable consensus in

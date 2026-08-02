@@ -61,12 +61,15 @@ The grammar itself is present and registered: `tree_sitter_sql` at
 `engine/core/src/grammar_registry.c:74`, extension map `{"sql","sql"},
 {"ddl","sql"}, {"dml","sql"}` at `:132`.
 
-**Code-level correction (2026-08-02):** `ModalityOf` now strips the recognized
-templating suffix and re-resolves the preceding extension, so `.sql.in` reaches
-the existing SQL grammar without globally mapping arbitrary `.in` files to SQL.
-`CodeDecomposerTests` pins plain, templated, mixed-case, unknown and repeated
-suffixes. The live `input_units > 0` check remains owed after the empty
-substrate is seeded; §2.2 remains the structural blocker even when files parse.
+**Code-level correction (2026-08-02, PR #774):** `ModalityOf` now strips the
+recognized templating suffix and re-resolves the preceding extension, so
+`.sql.in` reaches the existing SQL grammar without globally mapping arbitrary
+`.in` files to SQL. `CodeDecomposerTests` pins plain, templated, mixed-case,
+unknown and repeated suffixes. The live `input_units > 0` check remains owed
+after foundation seed is healthy again (see
+[CHECKPOINT_2026-08-02.md](CHECKPOINT_2026-08-02.md) §2); §2.2 remains the
+structural blocker even when files parse. **W3 is not done until §2.2 emits
+typed edges.**
 
 ### 2.2 Even when accepted, SQL yields zero structural edges
 
@@ -155,7 +158,8 @@ exact failure mode this workstream exists to kill.
    (`converse_compose`, `converse_tiered`, and the others named in §1) **without
    any string matching** — id space until the final `realize_batch`.
 3. The query returns **no false positive** for a function known to be called
-   (spot-check `prompt_coherence`, which has four callers).
+   (spot-check `prompt_coherence`, which has five callers — gated by
+   `ElectorArchitectureGateTests`).
 4. A deliberately introduced dead function is detected on the next ingest.
 5. G4 (#758) is reimplemented against the graph and the grep scaffolding is
    deleted in the same PR — not left alongside.

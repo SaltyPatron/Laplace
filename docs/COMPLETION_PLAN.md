@@ -288,11 +288,14 @@ never passed; `walk_continuations`' "live frontier" is static
 (`trajectory_generate.c:220,232` vs its own header).
 
 **R9 — Ungated invariants.**
-The four-elector "one election, one key order" invariant is copy-paste
-discipline with no gate (edited twice this session with no net). No G1–G10
-gates from spec 37 exist yet in CI. `source_roster` returns the shared
-relation-law bootstrap rows for every source instead of that source's own
-content — verification tooling that lies is worse than none.
+*Partial as of 2026-08-02 (see `docs/plan/CHECKPOINT_2026-08-02.md`).* The
+five-elector key-order invariant is gated (`ElectorArchitectureGateTests`,
+#771). G1/G3/G8 shrink-only ratchets run in the policy job (#772). G7 has
+shell/cmd parity plus C# dispatch↔manifest (#775). `source_roster` excludes
+relation-type bootstrap subjects in SQL (#773) — live ChessPgn/ChessOpenings
+recheck still owed before calling R9 closed. Still ungated: G2, G4
+(destination = substrate `CALLS` read after #765; grep may scaffold), G5,
+G6 completion, G9, G10.
 
 **R10 — Operational fragility.**
 Pooled MCP connections die visibly at every postmaster bounce; CI runs green
@@ -318,11 +321,18 @@ on them except where marked.
 ### Phase 0 — Land this branch
 Goal: `main`, the live box, and the record agree.
 Why: the live extension is ahead of `main`; a `main` push reverts live chat.
-Consider: gate before merging without burning a PR run
-(`gh workflow run "Laplace — build, deploy, test" --ref <branch>`); a push
-restarts the service — check `ingest_run_journal`/`pg_stat_activity` first.
+Consider: prefer local verify → merge → one `main` CI run (do not burn a
+redundant feature-branch `workflow_dispatch` as the gate). A push restarts
+the service — check `ingest_run_journal`/`pg_stat_activity` first.
 Done when: branch merged, live behavior identical post-deploy, glacier
 probe answers glacier.
+
+**Checkpoint 2026-08-02:** completion-axis PRs #771–#776 are on `main` and
+CI-green. Live box is **not** agreed — orphan `UnicodeDecomposer`
+`status=running` journal row after a cancelled foundation seed, thin
+residue counts. Shared-writer COPY identity dedup (#776) is CI-proven, not
+yet foundation-ladder-proven. Resume ops sequence:
+`docs/plan/CHECKPOINT_2026-08-02.md` §2.
 
 ### Phase 1 — Gates and measurement before features
 Goal: make the drift failure mode and the quality regressions mechanical
@@ -345,16 +355,22 @@ Items:
    allowlist unconverted functions shrink-only. G4 can land as a grep in
    parallel and be reimplemented against `pg_depend` as coverage grows —
    do not block the gate on the migration.
+   *Progress 2026-08-02:* compound-extension discovery landed (#774).
+   Structural extraction still emits zero attestations — the W3 body remains.
 1. **G4 dead-canonical gate** (zero-caller opcode entry points and
-   supersession claims fail the build) — spec 37 §7.
-2. **Elector-invariant gate** (four ORDER BY key lists pinned identical).
+   supersession claims fail the build) — spec 37 §7. *Not built.*
+2. **Elector-invariant gate** (five ORDER BY key lists pinned identical).
+   *Done (#771).*
 3. **Generation smoke harness**: wire `prompts_smoke.txt` (and a widened
    probe set incl. held-out singles like glacier/trumpet) through a runner
    modeled on `verify-model-behavioral.py` detectors (on-topic rate,
    echo/hub collapse, flatness) + per-surface latency budget; run in CI
-   against a *seeded* fixture, not an empty DB.
+   against a *seeded* fixture, not an empty DB. *Not started (#755) — next
+   measurement workstream after ops unblock.*
 4. **G1/G2/G6 literalism + parity gates** (one WEIGHT, no render-in-select,
    C/SQL weight parity) — cheap greps + one fixed-vector test.
+   *Progress:* G1/G3/G8 ratchets (#772); G7 C# (#775). G2 and G6-complete
+   remain.
 Consider: gates land green by grandfathering current violations into an
 explicit allowlist that only shrinks.
 Done when: a PR that unwires a canonical, adds a per-row render, or degrades
@@ -452,8 +468,11 @@ latency budget across two consecutive waves.
 
 ## 6. For any agent picking this up
 
-Read §0 and obey it. Then: the drift failure mode in §2 is the thing you
-are most likely to recreate — before writing anything new, `grep` for the
-canonical that already exists and check its callers. Prefer wiring to
-writing. Report misses before hits. The owner has heard fourteen months of
-hits; the misses are where the trust is.
+Read §0 and obey it. Then read
+[`docs/plan/CHECKPOINT_2026-08-02.md`](plan/CHECKPOINT_2026-08-02.md) for the
+dated stage (what landed, live seed block, Phase 1 remainder) so you do not
+re-derive status from stale issue titles. The drift failure mode in §2 is
+the thing you are most likely to recreate — before writing anything new,
+`grep` for the canonical that already exists and check its callers. Prefer
+wiring to writing. Report misses before hits. The owner has heard fourteen
+months of hits; the misses are where the trust is.

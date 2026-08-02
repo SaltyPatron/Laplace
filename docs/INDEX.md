@@ -13,6 +13,10 @@ countable fact; prose docs cite it instead of embedding counts.
 - [CLAUDE.md](../CLAUDE.md) — the operating law: architecture, binding rules, build/seed tables
 - [AGENTS.md](../AGENTS.md) — agent conduct + PG service law + binding-doc pointers
 - [docs/INVENTIONS.md](INVENTIONS.md) — spec — the invention catalog, code-cited; 41 mechanisms enumerated in place, countable facts per [INVENTORY.md](INVENTORY.md) (2026-07-19)
+- [COMPLETION_PLAN.md](COMPLETION_PLAN.md) — conversation/inference completion axis (phases, gap register); not the whole backlog
+- [plan/README.md](plan/README.md) — workstream index (W1–W13) + onboarding pointer
+- [plan/CHECKPOINT_2026-08-02.md](plan/CHECKPOINT_2026-08-02.md) — dated resume stage after #771–#776 (2026-08-02)
+- [plan/ONBOARDING.md](plan/ONBOARDING.md) — pasteable agent start prompt for this host
 
 ## Specs — `docs/specs/` (binding, annotate-on-supersede)
 
