@@ -11,8 +11,30 @@ name: Seed — documents
 on:
   workflow_dispatch:
     inputs:
+      corpus:
+        # A dropdown of what is actually on the runner, because the corpus is
+        # static (same names on re-download). GitHub requires choice options to
+        # be literal YAML — they cannot be enumerated from disk at dispatch
+        # time — so this list is maintained against /vault/Data and `path`
+        # below stays as the escape hatch for anything not listed.
+        # A book is a book. Britannica, Sherlock Holmes, a chess manual and a
+        # radio handbook are the same kind of content differing only in topic,
+        # so the default is ALL of them in one path — DocumentDecomposer
+        # recurses with a *.txt filter, so one root covers every subject
+        # folder. The subsets below exist for topic-targeted work, not because
+        # the lane treats them differently.
+        description: "which corpus to ingest"
+        type: choice
+        required: true
+        default: all-books
+        options:
+          - all-books         # DATA_ROOT/test-data — every .txt, all subjects (209 files, ~212 MB)
+          - literature-etc    # test-data/text only — Britannica, literature, science, chess books (201)
+          - electronics       # test-data/electronics only — ham radio, morse, wireless (8)
+          - smoke-alice       # one book. Validates the lane in seconds.
+          - path-override     # use the `path` input below
       path:
-        description: "<path> — a single file (fast validate), a directory, or a corpus root (blank = DATA_ROOT/test-data/text)"
+        description: "explicit <path>, used only when corpus = path-override (single file, dir, or corpus root)"
         type: string
         default: ""
       database:
@@ -29,11 +51,43 @@ permissions:
   contents: read
 
 jobs:
+  # Resolve the dropdown to a path. A reusable workflow's `with:` cannot hold a
+  # multi-line expression, so the mapping lives in a job whose output feeds it.
+  # DATA_ROOT is the runner's LAPLACE_DATA_ROOT (default /vault/Data), matching
+  # scripts/ingest-source.sh:8 — kept in one place here rather than repeated per
+  # option.
+  resolve:
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 2
+    outputs:
+      path: ${{ steps.pick.outputs.path }}
+    steps:
+      - id: pick
+        run: |
+          root="${LAPLACE_DATA_ROOT:-/vault/Data}"
+          case "${{ inputs.corpus }}" in
+            all-books)      p="$root/test-data" ;;
+            literature-etc) p="$root/test-data/text" ;;
+            electronics)    p="$root/test-data/electronics" ;;
+            smoke-alice)    p="$root/test-data/text/alice.txt" ;;
+            path-override)  p="${{ inputs.path }}" ;;
+            *) echo "::error::unknown corpus '${{ inputs.corpus }}'"; exit 1 ;;
+          esac
+          if [ -z "$p" ]; then
+            echo "::error::corpus=path-override requires the path input"; exit 1
+          fi
+          if [ ! -e "$p" ]; then
+            echo "::error::$p does not exist on this runner"; exit 1
+          fi
+          echo "resolved corpus '${{ inputs.corpus }}' -> $p"
+          echo "path=$p" >> "$GITHUB_OUTPUT"
+
   seed:
+    needs: resolve
     uses: ./.github/workflows/_ingest.yml
     with:
       source: document
-      path: ${{ inputs.path }}
+      path: ${{ needs.resolve.outputs.path }}
       database: ${{ inputs.database }}
       timeout_minutes: 480
       run_gate: true

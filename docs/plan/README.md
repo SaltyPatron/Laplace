@@ -55,6 +55,7 @@ point:
 | W10 | `BEGIN ATOMIC` — in-database dependency enforcement | #764 | 1 | see W3 §1; specify when W3 lands |
 | W11 | Corpus seeding through finished lanes | #761 | 7 | pending W2 |
 | W12 | `source_roster` returns bootstrap rows, not source content | #760 | — | small, specify inline |
+| W13 | [Convergent identity](W13_Convergent_Identity.md) — why everything links to everything | #574 | — | thesis verified, unmeasured |
 
 ## Findings that changed the plan
 

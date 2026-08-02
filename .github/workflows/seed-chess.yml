@@ -21,8 +21,76 @@ on:
         type: choice
         required: true
         options: [chess, openings, chess-books, chess-eval]
+      corpus:
+        # Dropdown over what is actually on the runner. The chess corpus is
+        # static (same filenames on re-download), so a literal list is durable;
+        # GitHub cannot enumerate a directory at dispatch time. `path-override`
+        # is the escape hatch, and chess-eval ignores this entirely (it reads
+        # the substrate, not a file).
+        # Default is the ELO-2400 cut: one file, the strongest games, the best
+        # quality-per-byte in the corpus. Everything larger is a deliberate
+        # operator choice, because a seed run holds the one-ingest lock.
+        description: "which corpus (ignored for chess-eval)"
+        type: choice
+        required: true
+        default: lumbras-elite
+        options:
+          - lumbras-elite       # 751 MB — ELO 2400+ cut. BEST QUALITY-PER-BYTE; start here.
+          - chesscom-all        # ~600 MB — every top-level *_chesscom.pgn (non-recursive)
+          - magnus              # 28 MB  — MagnusCarlsen_chesscom.pgn
+          - hikaru              # 195 MB — Hikaru_chesscom.pgn
+          - firouzja            # 109 MB — Firouzja2003_chesscom.pgn
+          - nihalsarin          # 164 MB — nihalsarin_chesscom.pgn
+          - caruana             # 21 MB
+          - gukesh              # 16 MB
+          - pragg               # 28 MB
+          - anish-giri
+          - owner-games         # Anthony-Hart_chesscom.pgn
+          - twic                # 242 MB — The Week In Chess weekly archives
+          - lumbras-otb         # 8.0 GB — OTB 1900→2026. Slice it with `slice`.
+          - lumbras-online      # 5.8 GB — online 1995→2025. Slice it with `slice`.
+          - openings-book       # openings/ — ECO tsv (use with source=openings)
+          - syzygy-tablebase    # syzygy/ — endgame tablebases
+          - books               # the DOCUMENT corpus, for source=chess-books.
+                                # A chess manual is a book like any other and lives with
+                                # the rest of them; ChessBook is a SECOND witness over the
+                                # same files that extracts the games it can replay. Ingest
+                                # them as documents too (seed-documents) — same content,
+                                # two witnesses, which is what the substrate is for.
+          - path-override       # use the `path` input below
+      slice:
+        # Second dropdown: which era-file inside lumbras-otb / lumbras-online.
+        # GitHub has no dependent dropdowns, so this is independent and is
+        # IGNORED (with a notice) for every other corpus. `all` ingests the
+        # whole directory — hours, and a single run per the one-ingest rule.
+        description: "era slice — only used when corpus = lumbras-otb / lumbras-online"
+        type: choice
+        required: false
+        default: all
+        options:
+          - all
+          - otb-1900-1949
+          - otb-1950-1969
+          - otb-1970-1989
+          - otb-1990-1999
+          - otb-2000-2004
+          - otb-2005-2009
+          - otb-2010-2014
+          - otb-2015-2019
+          - otb-2020-2024
+          - otb-2025
+          - otb-2026-partial
+          - online-1995-2009
+          - online-2010-2014
+          - online-2015-2019
+          - online-2020
+          - online-2021
+          - online-2022
+          - online-2023
+          - online-2024
+          - online-2025
       path:
-        description: "corpus dir (e.g. /vault/Data/Games/Chess) — required for corpus sources, empty for chess-eval"
+        description: "explicit path, used only when corpus = path-override"
         type: string
         required: false
         default: ""
@@ -36,11 +104,111 @@ permissions:
   contents: read
 
 jobs:
+  # Resolve the dropdown to a path. Safe by construction: ChessPgnDecomposer is
+  # TopDirectoryOnly unless `--recursive` is passed (ChessPgnDecomposer.cs:15-21),
+  # so `chesscom-all` picks up the top-level player archives and does NOT descend
+  # into Lumbras/, twic/, syzygy/ or openings/. Each of those is its own option.
+  resolve:
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 2
+    outputs:
+      path: ${{ steps.pick.outputs.path }}
+    steps:
+      - id: pick
+        run: |
+          root="${LAPLACE_DATA_ROOT:-/vault/Data}"
+          chess="$root/Games/Chess"
+          lum="$chess/Lumbras"
+          slice="${{ inputs.slice }}"
+
+          # Era slice -> the unpacked PGN under Lumbras/otb or Lumbras/online.
+          # The .7z siblings are the originals; the unpacked dirs are what the
+          # PGN lane reads.
+          slice_file() {
+            case "$1" in
+              otb-1900-1949)    echo "$lum/otb/LumbrasGigaBase_OTB_1900-1949.pgn" ;;
+              otb-1950-1969)    echo "$lum/otb/LumbrasGigaBase_OTB_1950-1969.pgn" ;;
+              otb-1970-1989)    echo "$lum/otb/LumbrasGigaBase_OTB_1970-1989.pgn" ;;
+              otb-1990-1999)    echo "$lum/otb/LumbrasGigaBase_OTB_1990-1999.pgn" ;;
+              otb-2000-2004)    echo "$lum/otb/LumbrasGigaBase_OTB_2000-2004.pgn" ;;
+              otb-2005-2009)    echo "$lum/otb/LumbrasGigaBase_OTB_2005-2009.pgn" ;;
+              otb-2010-2014)    echo "$lum/otb/LumbrasGigaBase_OTB_2010-2014.pgn" ;;
+              otb-2015-2019)    echo "$lum/otb/LumbrasGigaBase_OTB_2015-2019.pgn" ;;
+              otb-2020-2024)    echo "$lum/otb/LumbrasGigaBase_OTB_2020-2024.pgn" ;;
+              otb-2025)         echo "$lum/otb/LumbrasGigaBase_OTB_2025.pgn" ;;
+              otb-2026-partial) echo "$lum/otb/LumbrasGigaBase_OTB_2026_partial_release.pgn" ;;
+              online-1995-2009) echo "$lum/online/LumbrasGigaBase_Online_1995-2009.pgn" ;;
+              online-2010-2014) echo "$lum/online/LumbrasGigaBase_Online_2010-2014.pgn" ;;
+              online-2015-2019) echo "$lum/online/LumbrasGigaBase_Online_2015-2019.pgn" ;;
+              online-2020)      echo "$lum/online/LumbrasGigaBase_Online_2020.pgn" ;;
+              online-2021)      echo "$lum/online/LumbrasGigaBase_Online_2021.pgn" ;;
+              online-2022)      echo "$lum/online/LumbrasGigaBase_Online_2022.pgn" ;;
+              online-2023)      echo "$lum/online/LumbrasGigaBase_Online_2023.pgn" ;;
+              online-2024)      echo "$lum/online/LumbrasGigaBase_Online_2024.pgn" ;;
+              online-2025)      echo "$lum/online/LumbrasGigaBase_Online_2025.pgn" ;;
+              *) echo "" ;;
+            esac
+          }
+
+          case "${{ inputs.corpus }}" in
+            lumbras-elite)    p="$lum/pgn/export_ELO2400.pgn" ;;
+            chesscom-all)     p="$chess" ;;
+            magnus)           p="$chess/MagnusCarlsen_chesscom.pgn" ;;
+            hikaru)           p="$chess/Hikaru_chesscom.pgn" ;;
+            firouzja)         p="$chess/Firouzja2003_chesscom.pgn" ;;
+            nihalsarin)       p="$chess/nihalsarin_chesscom.pgn" ;;
+            caruana)          p="$chess/FabianoCaruana_chesscom.pgn" ;;
+            gukesh)           p="$chess/GukeshDommaraju_chesscom.pgn" ;;
+            pragg)            p="$chess/rpragchess_chesscom.pgn" ;;
+            anish-giri)       p="$chess/AnishGiri_chesscom.pgn" ;;
+            owner-games)      p="$chess/Anthony-Hart_chesscom.pgn" ;;
+            twic)             p="$chess/twic" ;;
+            openings-book)    p="$chess/openings" ;;
+            syzygy-tablebase) p="$chess/syzygy" ;;
+            books)            p="$root/test-data/text" ;;
+            path-override)    p="${{ inputs.path }}" ;;
+            lumbras-otb|lumbras-online)
+              venue="${{ inputs.corpus }}"; venue="${venue#lumbras-}"
+              if [ "$slice" = "all" ]; then
+                p="$lum/$venue"
+              else
+                # Guard the independent-dropdown hazard: an otb-* slice with
+                # lumbras-online (or vice versa) silently ingests the wrong era.
+                case "$slice" in
+                  "$venue"-*) : ;;
+                  *) echo "::error::slice '$slice' does not belong to corpus '${{ inputs.corpus }}'"; exit 1 ;;
+                esac
+                p="$(slice_file "$slice")"
+                [ -n "$p" ] || { echo "::error::unmapped slice '$slice'"; exit 1; }
+              fi ;;
+            *) echo "::error::unknown corpus '${{ inputs.corpus }}'"; exit 1 ;;
+          esac
+
+          case "${{ inputs.corpus }}" in
+            lumbras-otb|lumbras-online) : ;;
+            *) [ "$slice" = "all" ] || echo "::notice::slice '$slice' ignored for corpus '${{ inputs.corpus }}'" ;;
+          esac
+          # chess-eval reads the substrate, not a file: it takes no path at all.
+          if [ "${{ inputs.source }}" = "chess-eval" ]; then
+            echo "source=chess-eval — corpus ignored, no path passed"
+            echo "path=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -z "$p" ]; then
+            echo "::error::corpus=path-override requires the path input"; exit 1
+          fi
+          if [ ! -e "$p" ]; then
+            echo "::error::$p does not exist on this runner"; exit 1
+          fi
+          echo "resolved corpus '${{ inputs.corpus }}' -> $p"
+          echo "path=$p" >> "$GITHUB_OUTPUT"
+
   seed:
+    needs: resolve
     uses: ./.github/workflows/_ingest.yml
     with:
       source: ${{ inputs.source }}
-      path: ${{ inputs.path }}
+      path: ${{ needs.resolve.outputs.path }}
       database: ${{ inputs.database }}
       timeout_minutes: 720
       run_gate: false
