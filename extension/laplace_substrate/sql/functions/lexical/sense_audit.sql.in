@@ -46,13 +46,12 @@ via AS (
     FROM w CROSS JOIN consensus c
     WHERE c.subject_id = w.id AND c.object_id IN (SELECT synset_id FROM capped)
 ),
+-- Language via word_language() — the existing HAS_LANGUAGE surface — so this
+-- diagnostic does not mint a new relation_type_id('HAS_LANGUAGE') literal
+-- (W6 G3 shrink-only). Same strongest-language pick as the prior CTE.
 lang AS (
-    SELECT c.subject_id AS synset_id, c.object_id AS lang_id,
-           row_number() OVER (PARTITION BY c.subject_id
-                              ORDER BY eff_mu(c.rating, c.rd) DESC, c.object_id) AS rk
-    FROM consensus c
-    WHERE c.type_id = relation_type_id('HAS_LANGUAGE')
-      AND c.subject_id IN (SELECT synset_id FROM capped)
+    SELECT c.synset_id, word_language(c.synset_id) AS lang_id, 1 AS rk
+    FROM capped c
 ),
 rows AS (
     SELECT c.rk, c.synset_id, e.type_id, v.type_id AS via_id, l.lang_id,

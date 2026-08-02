@@ -216,9 +216,9 @@ pg_laplace_prompt_language(PG_FUNCTION_ARGS)
                                             HASH_ENTER, &found);
                 if (!found)
                     e->mass = 0.0;
-                /* eff_mu = rating - 2*rd, the conservative estimate everything
-                 * ranks by -- computed here, not as a per-row SQL call. */
-                e->mass += (double) (rating - 2 * rd);
+                /* Conservative ranking key via the one native implementation
+                 * (laplace_effective_mu_fp) — not a per-row SQL eff_mu call. */
+                e->mass += (double) laplace_effective_mu_fp(rating, rd);
             }
             SPI_freetuptable(SPI_tuptable);
             CHECK_FOR_INTERRUPTS();
