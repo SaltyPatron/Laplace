@@ -96,6 +96,14 @@ by someone who had not run the measurement.** That is what these documents exist
 to stop — and #4 was found by a single `SELECT tier, count(*)` that two prior
 analyses had not run.
 
+## Starting an agent
+
+[ONBOARDING.md](ONBOARDING.md) holds the starting prompt — written for Cursor CLI
+on the Ubuntu host, with the psql invocations verified against this box. Paste
+it at the repo root. It deliberately tells the agent to distrust these
+documents and verify against the running system, because five claims written
+down here as fact have already turned out false.
+
 ## How to use this directory
 
 - **Starting work:** read the workstream document end to end before opening an
