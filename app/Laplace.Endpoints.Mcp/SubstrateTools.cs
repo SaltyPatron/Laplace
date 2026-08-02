@@ -268,7 +268,7 @@ internal sealed class SubstrateTools
     private (string, bool) SenseAudit(JsonObject? args)
     {
         using var cmd = _dbReadOnly.CreateCommand(
-            "SELECT sense, sense_type, via_relation, language, denote_mu, witnesses FROM laplace.sense_audit($1, $2)");
+            "SELECT sense, sense_type, via_relation, language, denote_mu, witnesses FROM laplace.sense_audit($1, laplace.relation_type_id('HAS_LANGUAGE'), $2)");
         cmd.Parameters.Add(new() { Value = Req(args, "term") });
         cmd.Parameters.Add(new() { Value = Int(args, "limit", 64) });
         using var rd = cmd.ExecuteReader();

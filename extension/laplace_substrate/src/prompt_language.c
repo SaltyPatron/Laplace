@@ -63,6 +63,7 @@
 #include "utils/memutils.h"
 #include "utils/numeric.h"
 
+#include "laplace/core/glicko2.h"
 #include "spi_common.h"
 #include "spi_nested.h"
 
@@ -216,9 +217,11 @@ pg_laplace_prompt_language(PG_FUNCTION_ARGS)
                                             HASH_ENTER, &found);
                 if (!found)
                     e->mass = 0.0;
-                /* eff_mu = rating - 2*rd, the conservative estimate everything
-                 * ranks by -- computed here, not as a per-row SQL call. */
-                e->mass += (double) (rating - 2 * rd);
+                /* The canonical conservative estimate, from glicko2.h --
+                 * NOT open-coded. G1 (weight literalism) forbids re-deriving
+                 * it, and W16 is about exactly this: a wheel gets reinvented
+                 * when nothing shows the original exists. It exists. */
+                e->mass += (double) laplace_effective_mu_fp(rating, rd);
             }
             SPI_freetuptable(SPI_tuptable);
             CHECK_FOR_INTERRUPTS();

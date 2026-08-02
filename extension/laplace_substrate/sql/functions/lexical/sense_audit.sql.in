@@ -25,7 +25,14 @@
 -- ids, joined back by ordinal. No per-row realize, no string comparison, no
 -- lower(). A diagnostic that violated the read law while diagnosing the read
 -- path would be worth nothing.
-CREATE OR REPLACE FUNCTION sense_audit(p_term text, p_limit int DEFAULT 64)
+DROP FUNCTION IF EXISTS sense_audit(text, int);
+
+-- p_lang_rel precedes p_limit: a non-defaulted parameter cannot follow a
+-- defaulted one, and it cannot BE defaulted without writing the literal G3
+-- forbids. The caller resolves it -- which is also what lets this audit any
+-- relation, not only language.
+CREATE OR REPLACE FUNCTION sense_audit(p_term text, p_lang_rel bytea,
+                                       p_limit int DEFAULT 64)
     RETURNS TABLE(sense text, sense_type text, via_relation text,
                   language text, denote_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE
@@ -51,7 +58,7 @@ lang AS (
            row_number() OVER (PARTITION BY c.subject_id
                               ORDER BY eff_mu(c.rating, c.rd) DESC, c.object_id) AS rk
     FROM consensus c
-    WHERE c.type_id = relation_type_id('HAS_LANGUAGE')
+    WHERE c.type_id = p_lang_rel
       AND c.subject_id IN (SELECT synset_id FROM capped)
 ),
 rows AS (

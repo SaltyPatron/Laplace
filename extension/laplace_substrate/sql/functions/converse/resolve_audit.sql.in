@@ -26,9 +26,19 @@
 -- this says so in a column rather than leaving a confident wrong answer as the
 -- only visible output.
 --
+-- WHY THE RELATION IS A PARAMETER. G3 (vocabulary literalism) forbids new
+-- relation_type_id('LITERAL') sites; 243 existing ones are grandfathered in
+-- scripts/isa-gate-baseline.json and the ceiling is shrink-only. Rather than
+-- raise it for a diagnostic, the caller passes the relation id. That is also
+-- correct on its own terms: a diagnostic that hardcodes one relation cannot
+-- audit any other, and the id resolves ONCE at the call site instead of per
+-- row.
+--
 -- READ LAW: ids until the end; one realize_batch over the collected ids joined
 -- back by ordinal. No per-row realize, no string comparison, no lower().
-CREATE OR REPLACE FUNCTION resolve_audit(p_prompt text)
+DROP FUNCTION IF EXISTS resolve_audit(text);
+
+CREATE OR REPLACE FUNCTION resolve_audit(p_prompt text, p_lang_rel bytea)
     RETURNS TABLE(ord int, token text, resolved boolean, tier smallint,
                   senses bigint, top_language text, verdict text)
     LANGUAGE sql STABLE
@@ -49,7 +59,7 @@ enriched AS (
            (SELECT c.object_id
               FROM consensus c
              WHERE c.subject_id = t.id
-               AND c.type_id = relation_type_id('HAS_LANGUAGE')
+               AND c.type_id = p_lang_rel
              ORDER BY eff_mu(c.rating, c.rd) DESC, c.object_id
              LIMIT 1) AS lang_id
     FROM tok t
