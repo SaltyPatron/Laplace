@@ -11,8 +11,24 @@ name: Seed — documents
 on:
   workflow_dispatch:
     inputs:
+      corpus:
+        # A dropdown of what is actually on the runner, because the corpus is
+        # static (same names on re-download). GitHub requires choice options to
+        # be literal YAML — they cannot be enumerated from disk at dispatch
+        # time — so this list is maintained against /vault/Data and `path`
+        # below stays as the escape hatch for anything not listed.
+        description: "which corpus to ingest"
+        type: choice
+        required: true
+        default: all-text
+        options:
+          - all-text          # DATA_ROOT/test-data/text — the whole 204-file corpus (~208 MB)
+          - electronics       # DATA_ROOT/test-data/electronics — ham radio, morse, wireless (~4.4 MB)
+          - smoke-alice       # one book. Use this to validate the lane in ~seconds.
+          - smoke-sherlock    # one book, prose-heavy
+          - path-override     # use the `path` input below
       path:
-        description: "<path> — a single file (fast validate), a directory, or a corpus root (blank = DATA_ROOT/test-data/text)"
+        description: "explicit <path>, used only when corpus = path-override (single file, dir, or corpus root)"
         type: string
         default: ""
       database:
@@ -29,11 +45,43 @@ permissions:
   contents: read
 
 jobs:
+  # Resolve the dropdown to a path. A reusable workflow's `with:` cannot hold a
+  # multi-line expression, so the mapping lives in a job whose output feeds it.
+  # DATA_ROOT is the runner's LAPLACE_DATA_ROOT (default /vault/Data), matching
+  # scripts/ingest-source.sh:8 — kept in one place here rather than repeated per
+  # option.
+  resolve:
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 2
+    outputs:
+      path: ${{ steps.pick.outputs.path }}
+    steps:
+      - id: pick
+        run: |
+          root="${LAPLACE_DATA_ROOT:-/vault/Data}"
+          case "${{ inputs.corpus }}" in
+            all-text)       p="$root/test-data/text" ;;
+            electronics)    p="$root/test-data/electronics" ;;
+            smoke-alice)    p="$root/test-data/text/alice.txt" ;;
+            smoke-sherlock) p="$root/test-data/text/sherlock.txt" ;;
+            path-override)  p="${{ inputs.path }}" ;;
+            *) echo "::error::unknown corpus '${{ inputs.corpus }}'"; exit 1 ;;
+          esac
+          if [ -z "$p" ]; then
+            echo "::error::corpus=path-override requires the path input"; exit 1
+          fi
+          if [ ! -e "$p" ]; then
+            echo "::error::$p does not exist on this runner"; exit 1
+          fi
+          echo "resolved corpus '${{ inputs.corpus }}' -> $p"
+          echo "path=$p" >> "$GITHUB_OUTPUT"
+
   seed:
+    needs: resolve
     uses: ./.github/workflows/_ingest.yml
     with:
       source: document
-      path: ${{ inputs.path }}
+      path: ${{ needs.resolve.outputs.path }}
       database: ${{ inputs.database }}
       timeout_minutes: 480
       run_gate: true
