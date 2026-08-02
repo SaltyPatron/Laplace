@@ -73,15 +73,27 @@ if [[ "$needs_work" -eq 0 ]]; then
 fi
 
 echo "==== ensure-foundation on $DB ===="
+# Journal is the pass/fail surface; keep Actions free of WS_APPLY / per-file spam.
+if [[ -n "${GITHUB_ACTIONS:-}${CI:-}" && -z "${LAPLACE_INGEST_CONSOLE:-}" ]]; then
+  export LAPLACE_INGEST_CONSOLE=ci
+fi
 
 for entry in "${FOUNDATION[@]}"; do
   IFS=':' read -r cli decomposer layer <<< "$entry"
   if [[ "$FORCE" -eq 1 ]] || ! layer_ok "$decomposer" "$layer"; then
     echo "==== ingest $cli ===="
     "$SCRIPTS/ingest-source.sh" "$cli"
+    bash "$SCRIPTS/verify-ingest-journal.sh" "$decomposer"
   else
     echo "==== skip $cli (layer complete) ===="
   fi
 done
+
+echo "==== foundation journal (latest per source) ===="
+psql -h "$PGHOST" -U "$PGUSER" -d "$DB" -v ON_ERROR_STOP=1 -c \
+  "SELECT DISTINCT ON (source_name) source_name, status, files_done, files_total,
+          entities, attestations, ended_at
+   FROM laplace.ingest_run_journal
+   ORDER BY source_name, started_at DESC;"
 
 echo "ENSURE-FOUNDATION COMPLETE: $DB"

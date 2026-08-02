@@ -63,6 +63,8 @@ permissions:
 
 env:
   LAPLACE_DATA_ROOT: /vault/Data
+  # Journal + ops CSV are the ingest record; keep the job log short.
+  LAPLACE_INGEST_CONSOLE: ci
   # Empty (the default) = no cycling: NpgsqlIndexCycle.Deferred reads only "1"/"true".
   # Only a campaign sets index_cycle_defer=true, and even then this phase merely refrains
   # from rebuilding the campaign's up-front drops — it never drops or rebuilds on its own.
@@ -95,11 +97,16 @@ jobs:
           langs="${{ inputs.langs }}"
           [ -n "$langs" ] && export LAPLACE_INGEST_LANGS="$langs"
           echo "source=${{ inputs.source }} db=${{ inputs.database }} path='${{ inputs.path }}' langs='${LAPLACE_INGEST_LANGS:-}' (empty=all)"
+          echo "validate via ingest_run_journal (LAPLACE_INGEST_CONSOLE=ci); detail log under RUNNER_TEMP"
           if [ -n "${{ inputs.path }}" ]; then
             scripts/ingest-source.sh "${{ inputs.source }}" "${{ inputs.path }}"
           else
             scripts/ingest-source.sh "${{ inputs.source }}"
           fi
+
+      - name: Journal proof
+        if: always() && steps.run_ingest.outcome == 'success'
+        run: scripts/verify-ingest-journal.sh --cli-key "${{ inputs.source }}"
 
   idempotency:
     name: "verify — re-ingest ${{ inputs.source }} does not double-count"

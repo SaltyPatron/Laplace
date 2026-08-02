@@ -32,11 +32,19 @@ public static class LaplaceLogging
 
     private static ILoggerFactory Factory(string role, bool console, LogEventLevel min)
     {
-        // The console deployables put their command output on stdout, so their diagnostics
-        // ride stderr (consoleToStdErr: true) — the same channel the old StderrLoggerProvider used.
+        // CSV file keeps full Information. Console in CI is Warning+ so WS_APPLY
+        // prep spam stays in laplace-cli.csv / ingest_run_journal, not Actions.
+        LogEventLevel consoleMin = min;
+        string? mode = Environment.GetEnvironmentVariable("LAPLACE_INGEST_CONSOLE");
+        bool ci = string.Equals(mode, "ci", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(mode, "quiet", StringComparison.OrdinalIgnoreCase)
+            || (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("GITHUB_ACTIONS"))
+                && string.IsNullOrEmpty(mode));
+        if (ci && console) consoleMin = LogEventLevel.Warning;
+
         var logger = new LoggerConfiguration()
             .MinimumLevel.Is(min)
-            .ApplyLaplaceSinks(role, console, consoleToStdErr: true)
+            .ApplyLaplaceSinks(role, console, consoleToStdErr: true, consoleMinLevel: consoleMin)
             .CreateLogger();
         return new SerilogLoggerFactory(logger, dispose: true);
     }
@@ -53,7 +61,8 @@ public static class LaplaceLogging
     /// WriteTo.Console() and is journald-captured all the same.
     /// </summary>
     public static LoggerConfiguration ApplyLaplaceSinks(
-        this LoggerConfiguration config, string role, bool console, bool consoleToStdErr = true)
+        this LoggerConfiguration config, string role, bool console, bool consoleToStdErr = true,
+        LogEventLevel consoleMinLevel = LogEventLevel.Verbose)
     {
         Directory.CreateDirectory(LaplaceInstall.OpsLogDirectory);
         var path = Path.Combine(LaplaceInstall.OpsLogDirectory, $"laplace-{role}.csv");
@@ -65,8 +74,13 @@ public static class LaplaceLogging
         {
             const string tmpl = "[{Timestamp:HH:mm:ss.fff} {Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}";
             config = consoleToStdErr
-                ? config.WriteTo.Console(standardErrorFromLevel: LogEventLevel.Verbose, outputTemplate: tmpl)
-                : config.WriteTo.Console(outputTemplate: tmpl);
+                ? config.WriteTo.Console(
+                    restrictedToMinimumLevel: consoleMinLevel,
+                    standardErrorFromLevel: LogEventLevel.Verbose,
+                    outputTemplate: tmpl)
+                : config.WriteTo.Console(
+                    restrictedToMinimumLevel: consoleMinLevel,
+                    outputTemplate: tmpl);
         }
 
         return config;

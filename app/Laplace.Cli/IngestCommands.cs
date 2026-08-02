@@ -508,10 +508,11 @@ internal static class IngestCommands
     {
         IngestTopology.EnsureReady();
         long lastMs = -10_000;
+        int progressIntervalMs = Laplace.Decomposers.Abstractions.IngestConsoleMode.ProgressMinIntervalMs;
         var progress = new Progress<Laplace.Ingestion.IngestProgress>(p =>
         {
             long now = sw.ElapsedMilliseconds;
-            if (now - lastMs < 2000) return;
+            if (now - lastMs < progressIntervalMs) return;
             lastMs = now;
             double secs = Math.Max(0.001, p.Elapsed.TotalSeconds);
             long rowsNew = p.EntitiesInserted + p.PhysicalitiesInserted + p.AttestationsInserted;

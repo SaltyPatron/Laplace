@@ -1,9 +1,9 @@
 namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
-/// Per-file START/COMPOSED/COMMITTED lines are useful when a source has dozens of
-/// files. At 14,900 files they are 99% of the Actions log and bury progress.
-/// Sample after <see cref="VerboseBelow"/>; always emit failures.
+/// Per-file START/COMPOSED/COMMITTED lines. Durable progress is
+/// <c>ingest_run_journal.files_done</c> — console lines are optional narration.
+/// CI (<see cref="IngestConsoleVerbosity.Ci"/>) emits none; failures always log.
 /// </summary>
 public static class MultiFileTelemetry
 {
@@ -15,6 +15,8 @@ public static class MultiFileTelemetry
     public static bool ShouldLogFileLine(int ordinal1Based, int knownTotal = 0)
     {
         if (ordinal1Based < 1) return false;
+        if (!IngestConsoleMode.LogPerFileLines) return false;
+        if (IngestConsoleMode.LogEveryFileLine) return true;
         if (knownTotal > 0 && knownTotal <= VerboseBelow) return true;
         if (ordinal1Based == 1) return true;
         if (knownTotal > 0 && ordinal1Based >= knownTotal) return true;
