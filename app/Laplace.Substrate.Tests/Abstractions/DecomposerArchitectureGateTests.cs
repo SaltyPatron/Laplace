@@ -44,7 +44,6 @@ public sealed class DecomposerArchitectureGateTests
     private static readonly HashSet<string> MultiPhaseAllowlist = new(StringComparer.OrdinalIgnoreCase)
     {
         "Laplace.Decomposers/CILI/CILIDecomposer.cs",
-        "Laplace.Decomposers/FrameNet/FrameNetDecomposer.cs",
         "Laplace.Decomposers/ISO/ISODecomposer.cs",
         "Laplace.Decomposers/Model/ModelDecomposer.cs",
         "Laplace.Decomposers/SemLink/SemLinkDecomposer.cs",
@@ -404,6 +403,48 @@ public sealed class DecomposerArchitectureGateTests
         Assert.True(stale.Count == 0,
             "Remove migrated sources from MultiPhaseAllowlist:\n"
             + string.Join("\n", stale));
+    }
+
+    /// <summary>
+    /// Multi-file is already file-major (<see cref="DecomposerMultiFile{TRecord}"/>).
+    /// Nesting it inside MultiPhase (FrameNet's old FnMultiFilePhase ×3) restarts the
+    /// file pool per phase — phase-outer, not file-outer. ComposeDecomposerPhase over
+    /// monolith streams is fine; MultiFile inside MultiPhase is not.
+    /// </summary>
+    [Fact]
+    public void MultiPhase_DoesNotNest_DecomposerMultiFile()
+    {
+        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
+        var nest = new Regex(
+            @":\s*DecomposerMultiFile\s*<",
+            RegexOptions.Compiled);
+        var violations = new List<string>();
+        foreach (var rel in MultiPhaseAllowlist)
+        {
+            var path = Path.Combine(repoRoot, "app", rel.Replace('/', Path.DirectorySeparatorChar));
+            Assert.True(File.Exists(path), $"missing MultiPhaseAllowlist entry: {rel}");
+            if (nest.IsMatch(File.ReadAllText(path)))
+                violations.Add(rel);
+        }
+        // Also scan any *Decomposer.cs that still declares MultiPhase (stale allowlist race).
+        foreach (var dir in DecomposerProjectRoots(repoRoot))
+        {
+            if (!Directory.Exists(dir)) continue;
+            foreach (var file in Directory.EnumerateFiles(dir, "*Decomposer.cs", SearchOption.AllDirectories))
+            {
+                if (file.Contains(".Tests", StringComparison.OrdinalIgnoreCase)) continue;
+                var text = File.ReadAllText(file);
+                if (!text.Contains(": DecomposerMultiPhase", StringComparison.Ordinal)) continue;
+                if (!nest.IsMatch(text)) continue;
+                var rel = Path.GetRelativePath(Path.Combine(repoRoot, "app"), file).Replace('\\', '/');
+                if (!violations.Contains(rel, StringComparer.OrdinalIgnoreCase))
+                    violations.Add(rel);
+            }
+        }
+
+        Assert.True(violations.Count == 0,
+            "DecomposerMultiFile is the file-major spine — do not nest it in MultiPhase:\n"
+            + string.Join("\n", violations));
     }
 
     [Fact]

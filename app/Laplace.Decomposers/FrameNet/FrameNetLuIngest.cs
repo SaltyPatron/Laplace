@@ -8,7 +8,7 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.FrameNet;
 
-internal static class FrameNetLuIngest
+public static class FrameNetLuIngest
 {
     private static readonly Hash128 LuTypeId = EntityTypeRegistry.FrameNetLu;
     private const string Ns = "http://framenet.icsi.berkeley.edu";
@@ -179,9 +179,9 @@ internal static class FrameNetLuIngest
         return $"{gf}/{pt}/{fe}";
     }
 
-    internal sealed record LuDocument(
+    public sealed record LuDocument(
         int Id, string FrameName, string LuName, string LuKey, string Lemma, string Pos, string Definition,
         List<string> ValencePatterns, List<LuSentence> Sentences);
 
-    internal sealed record LuSentence(string Text, string? TargetText);
+    public sealed record LuSentence(string Text, string? TargetText);
 }
