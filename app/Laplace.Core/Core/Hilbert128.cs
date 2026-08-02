@@ -28,10 +28,15 @@ public unsafe struct Hilbert128
         }
     }
 
+    /// <summary>memcmp of the 16 packed bytes — managed, no P/Invoke per compare.</summary>
     public int CompareToBytewise(Hilbert128 other)
     {
-        Hilbert128 a = this, b = other;
-        return NativeInterop.Hilbert128Compare(&a, &b);
+        for (int i = 0; i < 16; i++)
+        {
+            int d = Bytes[i] - other.Bytes[i];
+            if (d != 0) return d;
+        }
+        return 0;
     }
 
     public void WriteBytes(Span<byte> dest)

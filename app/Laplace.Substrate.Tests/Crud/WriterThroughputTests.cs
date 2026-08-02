@@ -1,12 +1,31 @@
+using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Diagnostics;
 using global::Npgsql;
+using Microsoft.Extensions.Logging;
 using Xunit;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
 using Laplace.SubstrateCRUD.Npgsql;
 
 namespace Laplace.SubstrateCRUD.Tests;
+
+/// <summary>Captures WS_APPLY phase lines so a failed 500k gate shows verify vs COPY.</summary>
+file sealed class WsApplyCaptureLog : ILogger<NpgsqlSubstrateWriter>
+{
+    private readonly ConcurrentQueue<string> _lines = new();
+    public string Join() => string.Join("\n", _lines);
+    public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+    public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Information;
+    public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+        Func<TState, Exception?, string> formatter)
+    {
+        if (!IsEnabled(logLevel)) return;
+        var msg = formatter(state, exception);
+        if (msg.Contains("WS_APPLY", StringComparison.Ordinal))
+            _lines.Enqueue(msg);
+    }
+}
 
 [Trait("Tier", "perf")]
 [Collection("substrate-pg-writer-throughput")]
@@ -32,7 +51,8 @@ public sealed class EntityWriterThroughputTests
         cmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, ThroughputTypeId.ToBytes());
         await cmd.ExecuteNonQueryAsync();
 
-        var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
+        var phases = new WsApplyCaptureLog();
+        var writer = new NpgsqlSubstrateWriter(_pg.DataSource, phases);
         const int totalRows = 500_000;
         var stage = IntentStage.New(totalRows);
         for (int i = 0; i < totalRows; i++)
@@ -52,7 +72,8 @@ public sealed class EntityWriterThroughputTests
         double rowsPerSec = result.EntitiesInserted / sw.Elapsed.TotalSeconds;
         Assert.True(rowsPerSec >= IngestBaselineGates.MinWriterRowsPerSecond,
             $"Entity apply {rowsPerSec:F0} rows/sec is below the {IngestBaselineGates.MinWriterRowsPerSecond:N0} gate "
-          + $"({result.EntitiesInserted:N0} inserted in {sw.Elapsed.TotalSeconds:F2}s, round_trips={result.RoundTrips})");
+          + $"({result.EntitiesInserted:N0} inserted in {sw.Elapsed.TotalSeconds:F2}s, round_trips={result.RoundTrips})\n"
+          + phases.Join());
     }
 }
 
