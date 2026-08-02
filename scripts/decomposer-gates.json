@@ -25,10 +25,7 @@
     "ud",
     "wiktionary",
     "tatoeba",
-    "opensubtitles",
-    "chess",
-    "openings",
-    "chess-books"
+    "opensubtitles"
   ],
   "sources": {
     "unicode": {
@@ -396,36 +393,24 @@
         }
       ]
     },
-
-    "chess": {
-      "decomposer": "ChessPgn",
-      "layer": 2,
-      "prerequisites": [],
-      "consensus_gates": [],
-      "skip_layer_complete": true
-    },
-    "openings": {
-      "decomposer": "ChessOpenings",
-      "layer": 2,
-      "prerequisites": [],
-      "consensus_gates": [],
-      "skip_layer_complete": true
-    },
-    "chess-books": {
-      "decomposer": "ChessBook",
-      "layer": 2,
-      "prerequisites": [],
-      "consensus_gates": [],
-      "skip_layer_complete": true
-    },
     "chess-eval": {
       "decomposer": "ChessStockfish",
-      "layer": 2,
-      "prerequisites": [],
-      "consensus_gates": [],
-      "skip_layer_complete": true
+      "layer": 22,
+      "prerequisites": [
+        "chess"
+      ],
+      "skip_layer_complete": true,
+      "consensus_gates": [
+        {
+          "relation": "MOVE_QUALITY",
+          "min": 1
+        },
+        {
+          "relation": "ANALYZED_AT",
+          "min": 1
+        }
+      ]
     },
-
     "code": {
       "decomposer": "CodeDecomposer",
       "layer": 2,
@@ -460,6 +445,33 @@
       "prerequisites": [],
       "consensus_gates": [],
       "skip_layer_complete": true
+    },
+    "chess-syzygy": {
+      "decomposer": "ChessSyzygy",
+      "layer": 23,
+      "prerequisites": [
+        "chess"
+      ],
+      "skip_layer_complete": true,
+      "consensus_gates": [
+        {
+          "relation": "HAS_WDL",
+          "min": 1
+        },
+        {
+          "relation": "HAS_DTZ",
+          "min": 1
+        }
+      ]
+    },
+    "chess-trajectory": {
+      "decomposer": "ChessTrajectory",
+      "layer": 21,
+      "prerequisites": [
+        "chess"
+      ],
+      "consensus_gates": [],
+      "marker_entities": "Chess_AnalysisMarker"
     }
   }
 }

@@ -85,6 +85,13 @@ internal static class ChessDropLedger
 
     internal static long KeptCount => Interlocked.Read(ref _kept);
 
+    internal static SortedDictionary<string, long> SnapshotCounts()
+    {
+        var d = new SortedDictionary<string, long>();
+        foreach (var kv in Counts) d[kv.Key] = kv.Value;
+        return d;
+    }
+
     /// <summary>
     /// One line naming what the lane refused and why, or null when it refused nothing.
     /// Emitted at the end of extraction so it lands next to INGEST_COMPLETE in the job log
@@ -139,4 +146,13 @@ internal static class ChessDropLedger
                 + "idempotent re-ingest, nothing to write.");
         return null;
     }
+}
+
+/// <summary>Read-only view of the ledger for the corpus drop-profile probe.</summary>
+internal static class ChessDropLedgerProbe
+{
+    internal static void Reset() => ChessDropLedger.Reset();
+
+    internal static (long Kept, SortedDictionary<string, long> Reasons) Snapshot()
+        => (ChessDropLedger.KeptCount, ChessDropLedger.SnapshotCounts());
 }
