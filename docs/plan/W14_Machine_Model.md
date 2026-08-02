@@ -75,6 +75,30 @@ identity law, the hash composer, or the fold cares how many rungs there are;
 only the partition seeding and the per-lane C# constants do, and the partition
 layout is explicitly greenfield (`db-reset` + reseed is its upgrade path).
 
+### Tier is CONTAINMENT, not classification — and dedup bounds its depth
+
+The header states it exactly: *"a node's order in its modality's **containment**
+DAG."* Composition, not kind. A species is not made of a genus, so Linnaean rank
+— however many intermediate levels it defines — is `IS_A` structure in the
+relation graph and never occupies a tier. Confusing the two inflates the
+apparent depth requirement and puts classification on the wrong axis.
+
+Depth is bounded twice over:
+
+1. **Only distinct compositional orders count.** Text has roughly a dozen —
+   codepoint, grapheme, morpheme, word, phrase, clause, sentence, paragraph,
+   page/section, chapter, volume, corpus.
+2. **Dedup collapses repetition.** Identical content is one id, so a composition
+   pattern that recurs does not add a rung — it reuses an existing node. You can
+   climb from a subatomic particle to the observable universe in far fewer than
+   256 steps because the structure repeats and repetition is shared, not
+   stacked.
+
+So `tier < 256` is not a generous ceiling anyone chose. It is **structurally
+unreachable**: the merkle DAG's own dedup property keeps composition depth
+small, and the byte matches the native `uint8_t` exactly. Capacity was never the
+design question. **Using more than five rungs is.**
+
 **Consequence for every tier-aware operation.** A descent policy cannot hardcode
 `word → grapheme → codepoint`, for two independent reasons: the ladder is
 per-lane, and its depth is not fixed. It must walk **the lane's ladder, however
