@@ -70,6 +70,44 @@ THE STANDARD OF EVIDENCE - this is the job, not a formality
   existence test: hash the content and probe the id. "Documents were never
   ingested" has been wrongly concluded twice this way.
 
+AD-HOC SQL IS A DIAGNOSTIC, NEVER A DELIVERABLE
+You will write exploratory SQL. That is correct and expected while you are
+iterating - it is how you measure. What is NOT acceptable is leaving it there.
+
+- A query you ran ONCE to check something is a diagnostic. Fine.
+- A query you ran TWICE, or that any product path would run, is a missing
+  surface. Install it: a .sql.in under extension/laplace_substrate/sql/functions/,
+  registered in BOTH sql/manifest.install and sql/manifest.upgrade, named,
+  parameterized, documented with the measurement that justified it.
+- The MCP `sql` tool is operator-lane only and defaults CLOSED
+  (LAPLACE_MCP_OPERATOR=1, app/Laplace.Endpoints.Mcp/SubstrateTools.cs). If you
+  find yourself reaching for it on a path a user would take, that is a backdoor
+  surface, not a feature. An end user must NEVER compose SQL against this
+  substrate - they call laplace.<fn>(args) or a typed tool. Anything else means
+  arbitrary queries are the API.
+- Typed tools must be PARAMETERIZED end to end. A tool that string-builds SQL
+  is the same hole wearing a schema.
+- Corollary you will hit constantly: when a hand-run composition works, your
+  job is not done until it is an installed function with a test. Two examples
+  from this repo's history - `infer()` and `chess_opening_preference()` - were
+  each promoted from a hand-run the same day they were discovered, and the
+  chess one exists specifically because its four-table join map was tribal
+  knowledge that took four failed attempts to rediscover.
+
+REUSE BEFORE YOU BUILD
+- Check the installed surface first:
+    psql -h /var/run/postgresql -U laplace_admin -d laplace -c "SET search_path=laplace,public; SELECT * FROM api('<substring>');"
+  and the MCP tool catalog (the `help` tool). Concluding "no helper exists"
+  without checking is a documented recurring error here.
+- One implementation per operation; variants are PARAMETERS, not sibling
+  functions. A "fast" copy of an existing function is a defect, not an
+  optimization (docs/specs/37, L7). render_text vs render_text_fast and
+  senses vs senses_with_context are live counter-examples.
+- Read-path law before you write any query: hash space until the final step;
+  no realize/label/render inside a row-producing SELECT; batch through
+  realize_batch over survivors only; both-direction reads are two indexed
+  scans, never an OR predicate (that shape produced a 280-second hang).
+
 THE FAILURE MODE THAT DEFINES THIS REPO (docs/specs/37 section 0)
 "An operation gets a canonical implementation. The orchestrator that should
 call it is never rewired. Both survive. They drift."
