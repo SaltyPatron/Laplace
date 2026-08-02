@@ -24,12 +24,18 @@
 --                   fullest prefix band. This column makes that visible instead
 --                   of leaving it to be rediscovered.
 --
---   JOIN KEY   physicalities has BOTH `id` (the physicality's own identity)
---              and `entity_id` (what it describes). Joining entities on `id`
---              returns ZERO rows, silently -- which is exactly what the first
---              draft of this function did, and exactly the failure an ad-hoc
---              query hides: an empty result reads as "no skew" rather than
---              "wrong key". A standing surface gets that debugged once.
+--   READS v_word_points, AND THAT IS THE POINT. The first draft hand-rolled
+--   `entities JOIN physicalities` and used the WRONG KEY -- physicalities has
+--   both `id` (its own identity) and `entity_id` (what it describes) -- so it
+--   returned ZERO rows silently, which reads as "no skew" rather than "wrong
+--   key". It also omitted the `type = 1` filter and was correct only because
+--   no other physicality type exists yet.
+--
+--   v_word_points already encoded both: `p.entity_id = e.id AND p.type = 1`.
+--   The wheel existed; re-deriving it introduced two defects in ten lines.
+--   Every entity-to-physicality read belongs on this view, not on a fresh
+--   join. (The view's name is misleading -- it carries EVERY tier, not just
+--   words -- which is its own defect, but the join it encodes is canonical.)
 --
 -- Cheap by construction: one grouped pass, no per-row function calls, no
 -- rendering. Sampling is the caller's choice via p_sample (percent); 0 = full
@@ -54,15 +60,11 @@ BEGIN
     -- only user input that reaches the statement text, and it never reaches it
     -- as a string.
     q := format($f$
-        WITH s AS (
-            SELECT p.entity_id, p.radius_origin, p.hilbert_index, p.n_constituents
-            FROM physicalities p %s
-        ),
-        j AS (
-            SELECT e.tier, s.radius_origin AS r,
-                   substring(encode(s.hilbert_index,'hex'),1,1) AS band,
-                   s.n_constituents AS nc
-            FROM s JOIN entities e ON e.id = s.entity_id
+        WITH j AS (
+            SELECT v.tier, v.radius_origin AS r,
+                   substring(encode(v.hilbert_index,'hex'),1,1) AS band,
+                   v.n_constituents AS nc
+            FROM v_word_points v %s
         ),
         bands AS (
             SELECT tier, band, count(*) AS n FROM j GROUP BY tier, band
@@ -77,8 +79,13 @@ BEGIN
                (SELECT min(b.n)::bigint FROM bands b WHERE b.tier = j.tier),
                (SELECT max(b.n)::bigint FROM bands b WHERE b.tier = j.tier)
         FROM j GROUP BY j.tier ORDER BY j.tier
-    $f$, CASE WHEN p_sample > 0
-              THEN format('TABLESAMPLE SYSTEM (%s)', p_sample::numeric)
+    $f$, CASE WHEN p_sample > 0 AND p_sample < 100
+              -- TABLESAMPLE cannot be applied to a view (0A000), and standing on
+              -- v_word_points is worth more than the cheaper sample: re-deriving
+              -- the join is what produced two defects in the first draft. A
+              -- Bernoulli filter costs a seq scan; this is a diagnostic, not a
+              -- hot path, and the caller chooses the fraction.
+              THEN format('WHERE random() < %s', (p_sample/100.0)::numeric)
               ELSE '' END);
     RETURN QUERY EXECUTE q;
 END;
