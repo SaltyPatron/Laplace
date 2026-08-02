@@ -17,6 +17,8 @@ const mockEntity: ExploreEntityResponse = {
     { sense_id_hex: 'b'.repeat(32), synset_id_hex: 'c'.repeat(32), synset_label: 'dog.n.01', eff_mu: 1900, witnesses: 15 },
   ],
   constituents: [],
+  packed_vertices: [],
+  realized_vertices: [],
   physicalities: [],
   consensus_out: [],
   consensus_in: [],

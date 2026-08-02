@@ -6820,6 +6820,8 @@
           "consensus_in",
           "senses",
           "constituents",
+          "packed_vertices",
+          "realized_vertices",
           "evidence"
         ],
         "type": "object",
@@ -6890,6 +6892,18 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/ExploreConstituentRow"
+            }
+          },
+          "packed_vertices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExplorePackedVertexRow"
+            }
+          },
+          "realized_vertices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExploreRealizedVertexRow"
             }
           },
           "evidence": {
@@ -7381,6 +7395,80 @@
           }
         }
       },
+      "ExplorePackedVertexRow": {
+        "required": [
+          "ordinal",
+          "x",
+          "y",
+          "z",
+          "m",
+          "child_id_hex",
+          "run_length",
+          "flags"
+        ],
+        "type": "object",
+        "properties": {
+          "ordinal": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "x": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "y": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "z": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "m": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "child_id_hex": {
+            "type": "string"
+          },
+          "run_length": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "flags": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          }
+        }
+      },
       "ExplorePeerRow": {
         "required": [
           "peer",
@@ -7529,6 +7617,75 @@
               "string"
             ],
             "format": "int32"
+          }
+        }
+      },
+      "ExploreRealizedVertexRow": {
+        "required": [
+          "ordinal",
+          "x",
+          "y",
+          "z",
+          "m",
+          "child_id_hex",
+          "child_label",
+          "radius"
+        ],
+        "type": "object",
+        "properties": {
+          "ordinal": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "x": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "y": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "z": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "m": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "child_id_hex": {
+            "type": "string"
+          },
+          "child_label": {
+            "type": "string"
+          },
+          "radius": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
           }
         }
       },

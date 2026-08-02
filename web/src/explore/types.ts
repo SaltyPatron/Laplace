@@ -141,6 +141,28 @@ export interface ExploreConstituentRow {
   run_length: number;
   flags: number;
 }
+/** Packed trajectory vertex — identity-space XYZ; M/RLE/flags are paint. */
+export interface ExplorePackedVertexRow {
+  ordinal: number;
+  x: number;
+  y: number;
+  z: number;
+  m: number;
+  child_id_hex: string;
+  run_length: number;
+  flags: number;
+}
+/** Realized curve vertex — child live coords (entity_curve). */
+export interface ExploreRealizedVertexRow {
+  ordinal: number;
+  x: number;
+  y: number;
+  z: number;
+  m: number;
+  child_id_hex: string;
+  child_label: string;
+  radius: number;
+}
 export interface LabeledEvidenceItem {
   type_id: string;
   type_label: string;
@@ -166,6 +188,8 @@ export interface ExploreEntityResponse {
   consensus_in: ExploreConsensusRow[];
   senses: ExploreSenseRow[];
   constituents: ExploreConstituentRow[];
+  packed_vertices: ExplorePackedVertexRow[];
+  realized_vertices: ExploreRealizedVertexRow[];
   evidence: LabeledEvidenceItem[];
 }
 export interface BillingReceipt {

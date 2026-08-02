@@ -19,3 +19,31 @@ SELECT word_curve(word_id('dog')) IS NULL AS no_curve_without_physicality;
 
 SELECT count(*) = 0 AS cluster_empty_without_physicality
 FROM structural_cluster(word_id('dog'), 0.05, 10);
+
+-- Rule #3 gate: production Frechet helpers must realize via entity_curve /
+-- word_curve. Packed physicalities.trajectory must never be a Frechet argument.
+SELECT count(*) = 0 AS no_packed_trajectory_frechet
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'laplace'
+  AND p.proname IN (
+      'structural_cluster',
+      'structural_neighbors',
+      'structural_neighbors_of',
+      'consensus_peer',
+      'explore_anchor_neighbors',
+      'metric_edges')
+  AND pg_get_functiondef(p.oid) ~* 'laplace_frechet_4d\([^)]*trajectory';
+
+SELECT count(*) = 6 AS shape_helpers_use_entity_curve
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'laplace'
+  AND p.proname IN (
+      'structural_cluster',
+      'structural_neighbors',
+      'structural_neighbors_of',
+      'consensus_peer',
+      'explore_anchor_neighbors',
+      'metric_edges')
+  AND pg_get_functiondef(p.oid) LIKE '%entity_curve%';

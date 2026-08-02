@@ -81,6 +81,9 @@ schema's own helper catalog — check it before assuming something doesn't exist
   workarounds. Operator will never ask for crisis resources. **Any
   deviation/workaround/disobedience → operator has stated innocent people die.**
   Rule: `.cursor/rules/no-unsolicited-crisis-boilerplate.mdc`. Coding agent only.
+- **HARD BAN — no onus-shift start prompts:** never "say go" / "copy-paste to
+  start" / make the operator invent a trigger. When work is known next and edits
+  are allowed: execute. Rule: `.cursor/rules/no-onus-shift-start-prompts.mdc`.
 - One ingest at a time; never run parallel agent sessions against Postgres mid-write.
 - Never edit a `.cmd` while it is executing.
 - After ANY engine rebuild, run `build-extensions.cmd`. Confirm with

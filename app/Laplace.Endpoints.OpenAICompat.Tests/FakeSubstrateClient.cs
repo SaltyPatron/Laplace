@@ -529,6 +529,8 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
         [],
         [],
         [],
+        [],
+        [],
         [
             new LabeledEvidenceItem(
                 IsAIdHex, "is a", CetaceanIdHex, "cetacean", "", "WordNetDecomposer", null, 2, 42, 1534.7m)

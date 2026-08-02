@@ -1,3 +1,5 @@
+-- Shape axis: Frechet over REALIZED curves (entity_curve), never packed
+-- physicalities.trajectory (Rule #3 / Issue 51).
 CREATE OR REPLACE FUNCTION structural_neighbors(p_word text, p_k integer DEFAULT 10)
     RETURNS TABLE(neighbor text, geodesic double precision, frechet double precision)
     LANGUAGE plpgsql STABLE
@@ -5,10 +7,10 @@ CREATE OR REPLACE FUNCTION structural_neighbors(p_word text, p_k integer DEFAULT
 DECLARE
     v_id    bytea;
     v_coord geometry;
-    v_traj  geometry;
+    v_curve geometry;
 BEGIN
-    SELECT w.id, w.coord, w.trajectory
-      INTO v_id, v_coord, v_traj
+    SELECT w.id, w.coord, entity_curve(w.id)
+      INTO v_id, v_coord, v_curve
     FROM v_word_points w
     JOIN prompt_state(p_word) s ON w.id = s.id
     WHERE w.coord IS NOT NULL
@@ -18,18 +20,18 @@ BEGIN
 
     RETURN QUERY
     WITH knn AS (
-        SELECT w.id AS entity_id, w.coord, w.trajectory
+        SELECT w.id AS entity_id, w.coord
         FROM v_word_points w
         WHERE w.coord IS NOT NULL
         ORDER BY w.coord <<->> v_coord
         LIMIT GREATEST(p_k * 20, 200)),
     dedup AS (
-        SELECT DISTINCT ON (k.entity_id) k.entity_id, k.trajectory,
+        SELECT DISTINCT ON (k.entity_id) k.entity_id,
                public.laplace_angular_distance_4d(k.coord, v_coord) AS geo
         FROM knn k
         ORDER BY k.entity_id, public.laplace_angular_distance_4d(k.coord, v_coord)),
     nearest AS (
-        SELECT entity_id, trajectory, geo
+        SELECT entity_id, geo
         FROM dedup
         WHERE entity_id <> v_id
         ORDER BY geo
@@ -41,15 +43,19 @@ BEGIN
         SELECT t.*, row_number() OVER (ORDER BY t.geo) AS ord
         FROM nearest t
     ),
-    labels AS (
-        SELECT realize_batch(array_agg(o.entity_id ORDER BY o.ord)) AS l
+    curves AS (
+        SELECT o.entity_id, o.geo, o.ord, entity_curve(o.entity_id) AS curve
         FROM ordered o
+    ),
+    labels AS (
+        SELECT realize_batch(array_agg(c.entity_id ORDER BY c.ord)) AS l
+        FROM curves c
     )
     SELECT r.lbl, r.geo, r.frechet FROM (
-        SELECT labels.l[o.ord] AS lbl, o.geo, o.ord,
-               CASE WHEN o.trajectory IS NOT NULL AND v_traj IS NOT NULL
-                    THEN public.laplace_frechet_4d(o.trajectory, v_traj) END AS frechet
-        FROM ordered o, labels
+        SELECT labels.l[c.ord] AS lbl, c.geo, c.ord,
+               CASE WHEN c.curve IS NOT NULL AND v_curve IS NOT NULL
+                    THEN public.laplace_frechet_4d(c.curve, v_curve) END AS frechet
+        FROM curves c, labels
     ) r
     WHERE r.lbl IS NOT NULL AND r.lbl <> ''
     ORDER BY r.ord;

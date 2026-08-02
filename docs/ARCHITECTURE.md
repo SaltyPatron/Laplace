@@ -150,8 +150,12 @@ Native support in `engine/core/src/`: `super_fibonacci.c` (S³ point placement),
 columns), `trajectory.c`, `tier_tree.c`, `merkle_dedup.c`, `hash128.c`.
 
 Geometry is an identity, ordering and serialization system. Point proximity is not the
-relatedness signal — the consensus rating is. Trajectory is where order-sensitive
-structure lives, since coordinate equality does not survive composition.
+relatedness signal — the consensus rating is. `coord` is the real 4D placement (centroid
+of child coords at compose). Stored `trajectory` is a mantissa-packed constituent
+manifest (ids/ordinals/RLE), not a path of positions — path metrics
+(`laplace_frechet_4d`, Hausdorff) must run on `entity_curve` / `word_curve` (realized
+`ST_MakeLine(child.coord ORDER BY ordinal)`). Coordinate equality does not survive
+composition; shape lives on the realized curve.
 
 ## 7. Read path
 

@@ -53,7 +53,15 @@ via AS (
     FROM w CROSS JOIN consensus c
     WHERE c.subject_id = w.id AND c.object_id IN (SELECT synset_id FROM capped)
 ),
+-- Language via word_language() — the existing HAS_LANGUAGE surface — so this
+-- diagnostic does not mint a new relation_type_id('HAS_LANGUAGE') literal
+-- (W6 G3 shrink-only). Same strongest-language pick as the prior CTE.
 lang AS (
+    -- ONE set-based scan, not word_language() per row. #787 fixed the same G3
+    -- violation by calling word_language(synset_id) per candidate; that helper
+    -- is STRICT and carries a SET clause, so it cannot inline, and each call is
+    -- its own consensus scan -- the per-row shape CLAUDE.md:75 sends to C and
+    -- W15 documents as a defect. Same G3 outcome, different cost.
     SELECT c.subject_id AS synset_id, c.object_id AS lang_id,
            row_number() OVER (PARTITION BY c.subject_id
                               ORDER BY eff_mu(c.rating, c.rd) DESC, c.object_id) AS rk
