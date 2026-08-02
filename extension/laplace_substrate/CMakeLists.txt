@@ -49,6 +49,7 @@ string(SUBSTRING ${_ext_sql_hash} 0 16 EXT_VERSION)
 set(EXT_C_SOURCES
     src/laplace_substrate.c
     src/prompt_coherence.c
+    src/prompt_language.c
     src/consensus_fold_step.c
     src/generate_walk.c
     src/steer_candidates.c
