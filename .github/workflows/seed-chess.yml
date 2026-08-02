@@ -11,7 +11,8 @@ name: Seed — chess
 #                  layer. No path (the substrate is the source); marker-gated, so
 #                  re-runs skip already-evaluated games.
 # Corpus sources take an explicit corpus dir (no DATA_ROOT default); chess-eval takes none.
-# Delegates to _ingest.yml; chess is not in decomposer-gates.json, so run_gate:false.
+# Delegates to _ingest.yml. CLI keys are in decomposer-gates.json for journal
+# name resolution; run_gate:false — no consensus thresholds for chess sources.
 
 on:
   workflow_dispatch:

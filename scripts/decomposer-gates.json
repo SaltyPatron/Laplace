@@ -170,6 +170,71 @@
       "consensus_gates": [
         { "relation": "IS_TRANSLATION_OF", "min": 1000000 }
       ]
+    },
+
+    "chess": {
+      "decomposer": "ChessPgn",
+      "layer": 2,
+      "prerequisites": [],
+      "consensus_gates": [],
+      "skip_layer_complete": true
+    },
+    "openings": {
+      "decomposer": "ChessOpenings",
+      "layer": 2,
+      "prerequisites": [],
+      "consensus_gates": [],
+      "skip_layer_complete": true
+    },
+    "chess-books": {
+      "decomposer": "ChessBook",
+      "layer": 2,
+      "prerequisites": [],
+      "consensus_gates": [],
+      "skip_layer_complete": true
+    },
+    "chess-eval": {
+      "decomposer": "ChessStockfish",
+      "layer": 2,
+      "prerequisites": [],
+      "consensus_gates": [],
+      "skip_layer_complete": true
+    },
+
+    "code": {
+      "decomposer": "CodeDecomposer",
+      "layer": 2,
+      "prerequisites": [],
+      "consensus_gates": [],
+      "skip_layer_complete": true
+    },
+    "repo": {
+      "decomposer": "RepoDecomposer",
+      "layer": 2,
+      "prerequisites": [],
+      "consensus_gates": [],
+      "skip_layer_complete": true
+    },
+    "stack": {
+      "decomposer": "StackDecomposer",
+      "layer": 2,
+      "prerequisites": [],
+      "consensus_gates": [],
+      "skip_layer_complete": true
+    },
+    "tiny-codes": {
+      "decomposer": "TinyCodesDecomposer",
+      "layer": 2,
+      "prerequisites": [],
+      "consensus_gates": [],
+      "skip_layer_complete": true
+    },
+    "tabular": {
+      "decomposer": "TabularDecomposer",
+      "layer": 2,
+      "prerequisites": [],
+      "consensus_gates": [],
+      "skip_layer_complete": true
     }
   }
 }
