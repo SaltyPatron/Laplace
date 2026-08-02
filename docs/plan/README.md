@@ -33,14 +33,40 @@ point:
 | W2 | [The document lane](W2_Document_Lane.md) — Pillar 0, identity/names/typed edges | #754 | 4 | specified |
 | W3 | [Self-ingest call graph](W3_Self_Ingest_Call_Graph.md) — the substrate reads its own source | #765 | 1 | specified |
 | W4 | Tier-collision seam + sense priors | #752, #753 | 3 | in research |
-| W5 | Evaluation harness | #755 | 1 | in research |
-| W6 | Architecture gates (spec 37 G1–G10, elector invariant) | #758 | 1 | in research |
-| W7 | Questions route themselves (relation-name attestation, `infer` rel_type) | #756 | 5 | in research |
-| W8 | `infer()` to C (both directions, n-hop bias, multi-step) | #757 | 5 | in research |
-| W9 | Discourse memory (witnessed turns into orientation) | #759 | 5 | in research |
-| W10 | `BEGIN ATOMIC` — in-database dependency enforcement | #764 | 1 | in research |
+| W5 | [Evaluation harness](W5_Evaluation_Harness.md) | #755 | 1 | specified |
+| W6 | [Architecture gates](W6_Architecture_Gates.md) — spec 37 G1–G10, elector invariant | #758 | 1 | specified |
+| W7 | [Questions route themselves](W7_Questions_Route_Themselves.md) — relation naming | #756 | 5 | specified |
+| W8 | [`infer()` to C](W8_Infer_To_C.md) — both directions, n-hop bias, multi-step | #757 | 5 | specified |
+| W9 | [Discourse memory](W9_Discourse_Memory.md) — witnessed turns into orientation | #759 | 5 | specified |
+| W10 | `BEGIN ATOMIC` — in-database dependency enforcement | #764 | 1 | see W3 §1; specify when W3 lands |
 | W11 | Corpus seeding through finished lanes | #761 | 7 | pending W2 |
 | W12 | `source_roster` returns bootstrap rows, not source content | #760 | — | small, specify inline |
+
+## Findings that changed the plan
+
+Research for these specs refuted three claims that were already written down —
+two of them mine, from earlier the same day. They are recorded in the specs
+rather than quietly corrected, because the wrong version is usually the
+appealing one:
+
+1. **"'opening' → `HAS_ECO` is attestations, not code."** Wrong twice over.
+   `prompt_coherence` consults no attested alias — name matching is pure C over
+   the manifest string — and even a perfect alias would not route that question,
+   because `HAS_ECO` hangs off a chess *position* entity that is never a prompt
+   token's synset. See [W7 §0](W7_Questions_Route_Themselves.md).
+2. **"The four electors."** There are **five** — `infer.sql.in` became one the
+   same night the invariant was documented, while the prose still said four.
+   The drift the gate is meant to catch, committed hours after it was described.
+   See [W6 §1](W6_Architecture_Gates.md).
+3. **Spec 37's OP9 prescription** ("`realize(id)` becomes
+   `realize(ARRAY[id])[1]`") is refuted by an in-tree measurement: collapsing
+   the scalar into a batch wrapper makes every remaining scalar caller **3.2×
+   slower**. Two bodies is correct; the win comes from moving *callers* off the
+   per-row shape, not from deleting a body.
+
+The pattern is worth naming: **every one of these was a plausible claim written
+by someone who had not run the measurement.** That is what these documents exist
+to stop.
 
 ## How to use this directory
 
