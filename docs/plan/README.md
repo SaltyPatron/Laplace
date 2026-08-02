@@ -63,6 +63,7 @@ start order. Read that before re-deriving status from older prose.
 | W12 | `source_roster` returns bootstrap rows, not source content | #760 | — | **code landed** (#773); close after live ChessPgn/ChessOpenings recheck |
 | — | Foundation seed / prove #776 on live ladder | #777 | 0 | **ops gate** — orphan Unicode journal; see checkpoint §2 |
 | W13 | [Convergent identity](W13_Convergent_Identity.md) — why everything links to everything | #574 | — | thesis verified, unmeasured |
+| W14 | [The machine model](W14_Machine_Model.md) — memory, ISA, and the operator that cycles it | — | 1 | binds specs 15/33/36/37; names four structural gaps |
 
 ## Findings that changed the plan
 
