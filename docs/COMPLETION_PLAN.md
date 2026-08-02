@@ -165,6 +165,29 @@ system.**
 Each entry: what/why/where. No counts. Citations are to code that proves the
 gap, gathered 2026-08-02.
 
+**R0 — The database cannot see its own call graph. This is the root of R8
+and of the drift failure mode in §2, and it is why every gate below has to
+be a grep.**
+Measured 2026-08-02: of the functions in the `laplace` schema — 247
+`LANGUAGE sql`, 32 plpgsql, 77 C — **zero** have parsed bodies
+(`prosqlbody IS NULL` for all of them), because every SQL body is a quoted
+string PostgreSQL treats as opaque text. The entire schema carries 9
+recorded function dependency edges, all from its 9 views. Consequences,
+each observed in this audit rather than hypothesized: a canonical can hold
+zero callers indefinitely and nothing objects (five live instances found,
+every one by grep, because grep was the only instrument available); a
+signature change succeeds precisely because nothing *can* block it, so a
+missed caller fails on a user's prompt instead of at install; spec 37 §6's
+same-signature install-order arbitration is unenforceable by construction.
+The fix is `BEGIN ATOMIC` bodies (PG14+; this cluster runs PG18), which
+makes PostgreSQL record and enforce the graph — converting G4 from a text
+search into a catalog query. Blockers are known and real: strict install
+ordering with no forward references (which turns the §6
+`senses → bubble_up → lexical_peers → senses` cycle into a hard failure —
+break it first), creation-time name binding, and the `eff_mu` inlining law,
+which must be verified with `EXPLAIN` rather than assumed to survive.
+GH #764. **Phase 1, alongside the gates it makes real.**
+
 **R1 — Chat's generation lane is the unsteered one.**
 `chat(shape='walk')` → `converse_walk` → `steered_walk_raw`: seeded-random
 trigram→bigram backoff over a topic-restricted stream with constant
@@ -280,6 +303,15 @@ build failures.
 Why first: every later phase's "done" is otherwise opinion; G4 alone would
 have prevented most of R1/R8.
 Items:
+0. **R0 — make the dependency graph real** (GH #764). Leaf-first `BEGIN
+   ATOMIC` conversion so PostgreSQL records and enforces the call graph.
+   Sequenced first among the gates because it decides whether G4 is a
+   catalog query or a grep, and a grep-based G4 cannot see dynamic
+   dispatch. Ship it incrementally: verify `eff_mu` inlining survives
+   before converting that family, break the §6 install cycle when reached,
+   allowlist unconverted functions shrink-only. G4 can land as a grep in
+   parallel and be reimplemented against `pg_depend` as coverage grows —
+   do not block the gate on the migration.
 1. **G4 dead-canonical gate** (zero-caller opcode entry points and
    supersession claims fail the build) — spec 37 §7.
 2. **Elector-invariant gate** (four ORDER BY key lists pinned identical).
