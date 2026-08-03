@@ -70,6 +70,8 @@ public sealed class DecomposerArchitectureGateTests
         // (WorkingSetBudgetBytes / per-layer buffer footprint, clamped to
         // ComposeWorkers). Migrates to the spine with Issue 45's remainder.
         "Laplace.Decomposers/Model/ModelTokenEdgeETL.cs",
+        // Catalog-dual Syzygy unpack: bounded board/product channels into Compose.
+        "Laplace.Chess/Service/SyzygyTableUnpack.cs",
     };
 
     private static readonly Regex ResolveFileWorkersCall = new(
