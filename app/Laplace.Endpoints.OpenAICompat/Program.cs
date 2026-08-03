@@ -113,6 +113,7 @@ app.MapPrometheusScrapingEndpoint();
 app.MapOpenApi();
 app.MapCoreEndpoints();
 app.MapQueryEndpoints();
+app.MapOpEndpoints();
 app.MapOpenAiCompatEndpoints();
 app.MapFoundryEndpoints();
 app.MapBillingEndpoints();

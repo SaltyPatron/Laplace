@@ -444,132 +444,25 @@ internal sealed class SubstrateTools
     {
         var name = Req(args, "name");
         var supplied = args?["args"] as JsonObject;
-
-        // api() is a SUBSTRING search; the exact-name filter is the allow-list check. A
-        // near-miss returns the substring hits as suggestions rather than a bare "unknown",
-        // because on a 358-function catalog a wrong name is far likelier than a missing one.
-        var catalog = NpgsqlSubstrateReads.ApiCatalogAsync(_dbReadOnly, name, default)
+        var dict = supplied?.ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
+        var result = InstalledOpInvoker.InvokeAsync(
+                _dbReadOnly, name, dict, Int(args, "max_rows", DefaultRowCap), default)
             .GetAwaiter().GetResult();
-        var overloads = catalog.Where(r => r.Name == name).ToArray();
-        if (overloads.Length == 0)
-            return (catalog.Count == 0
-                ? $"no installed operation named '{name}', and nothing in the catalog matches that substring — try api('<shorter substring>')"
-                : $"no installed operation named '{name}' — did you mean: {string.Join(", ", catalog.Select(r => r.Name).Distinct().Take(8))}", true);
+        if (result.Error is not null)
+            return (result.Error, true);
 
-        var keys = supplied?.Select(kv => kv.Key).ToHashSet(StringComparer.Ordinal) ?? [];
-        var candidates = overloads
-            .Select(o => (Row: o, Params: ParseSignature(o.Args)))
-            .Where(c => keys.All(k => c.Params.Any(p => p.Name == k))
-                        && c.Params.All(p => p.Optional || keys.Contains(p.Name)))
-            .ToArray();
-
-        if (candidates.Length == 0)
-            return ($"'{name}' has no overload matching arguments [{string.Join(", ", keys)}]. Signatures: "
-                    + string.Join(" | ", overloads.Select(o => $"{name}({o.Args})")), true);
-        if (candidates.Length > 1)
-            return ($"'{name}' is ambiguous for arguments [{string.Join(", ", keys)}] — name more of them. Signatures: "
-                    + string.Join(" | ", candidates.Select(c => $"{name}({c.Row.Args})")), true);
-
-        var chosen = candidates[0].Params;
-        // Named notation needs every SUPPLIED argument to have a name in the signature.
-        // pg_get_function_arguments omits names for unnamed params; rather than guess at
-        // positional order, refuse and show the signature.
-        if (chosen.Any(p => p.Name.Length == 0) && keys.Count > 0)
-            return ($"'{name}' has unnamed parameters and cannot be called by name: {name}({candidates[0].Row.Args})", true);
-
-        var bound = new List<(string Name, object? Value)>();
-        var call = new List<string>();
-        foreach (var p in chosen.Where(p => keys.Contains(p.Name)))
+        var rows = new JsonArray();
+        foreach (var row in result.Rows)
         {
-            var slot = $"a{bound.Count}";
-            // Bind as text and cast to the DECLARED type: the signature decides the type,
-            // never a guess from the JSON node's shape.
-            call.Add($"{QuoteIdent(p.Name)} => @{slot}::{p.Type}");
-            bound.Add((slot, OpValue(supplied![p.Name])));
+            var obj = new JsonObject();
+            foreach (var (k, v) in row)
+                obj[k] = ToJson(v ?? DBNull.Value);
+            rows.Add(obj);
         }
-
-        var rowCap = Math.Clamp(Int(args, "max_rows", DefaultRowCap), 1, 2000);
-        // LIMIT rowCap + 1 so the server stops early AND Rows() still sees the extra row it
-        // needs to report truncated_at — limiting to exactly rowCap would look complete.
-        var sql = $"SELECT * FROM laplace.{QuoteIdent(name)}({string.Join(", ", call)}) LIMIT {rowCap + 1}";
-        return Rows(_dbReadOnly, sql, rowCap, [.. bound]);
+        var payload = new JsonObject { ["rows"] = rows };
+        if (result.TruncatedAt is { } t) payload["truncated_at"] = t;
+        return (payload.ToJsonString(), false);
     }
-
-    /// <summary>
-    /// A JSON argument as text for the declared-type cast to consume. JSON null stays null
-    /// (an explicitly-passed null is a real value, distinct from not supplying the argument);
-    /// a JSON array becomes a PostgreSQL array literal, because "[1,2]" is not int[].
-    /// </summary>
-    private static object? OpValue(JsonNode? node) => node switch
-    {
-        null => null,
-        JsonValue v when v.TryGetValue<string>(out var s) => s,
-        JsonArray a => "{" + string.Join(",", a.Select(e => OpValue(e) as string ?? "NULL")) + "}",
-        _ => node.ToJsonString(),
-    };
-
-    /// <summary>One parameter of an installed signature, as api() reports it.</summary>
-    private readonly record struct OpParam(string Name, string Type, bool Optional);
-
-    /// <summary>
-    /// Parse a pg_get_function_arguments list — "p_source text DEFAULT NULL::text,
-    /// p_limit integer DEFAULT 24" — into named, typed, optional-or-not parameters.
-    /// DEFAULT is what makes a parameter optional; a type may itself contain commas
-    /// (numeric(10,2)) so the split respects nesting.
-    /// </summary>
-    private static List<OpParam> ParseSignature(string? args)
-    {
-        var result = new List<OpParam>();
-        if (string.IsNullOrWhiteSpace(args)) return result;
-
-        foreach (var part in SplitTopLevel(args))
-        {
-            var text = part.Trim();
-            if (text.Length == 0) continue;
-
-            var optional = false;
-            var d = text.IndexOf(" DEFAULT ", StringComparison.OrdinalIgnoreCase);
-            if (d >= 0) { optional = true; text = text[..d].Trim(); }
-
-            // Argument modes prefix the name: "VARIADIC ids text[]", "OUT n bigint".
-            foreach (var mode in (string[])["VARIADIC ", "INOUT ", "OUT ", "IN "])
-                if (text.StartsWith(mode, StringComparison.OrdinalIgnoreCase))
-                    text = text[mode.Length..].TrimStart();
-
-            var sp = text.IndexOf(' ');
-            result.Add(sp < 0
-                ? new OpParam(string.Empty, text, optional)   // unnamed: type only
-                : new OpParam(text[..sp], text[(sp + 1)..].Trim(), optional));
-        }
-        return result;
-    }
-
-    /// <summary>Split on commas at nesting depth zero, so numeric(10,2) survives.</summary>
-    private static List<string> SplitTopLevel(string text)
-    {
-        var parts = new List<string>();
-        var depth = 0;
-        var quoted = false;
-        var start = 0;
-        for (var i = 0; i < text.Length; i++)
-        {
-            var c = text[i];
-            if (c == '\'') quoted = !quoted;
-            else if (quoted) continue;
-            else if (c is '(' or '[') depth++;
-            else if (c is ')' or ']') depth--;
-            else if (c == ',' && depth == 0) { parts.Add(text[start..i]); start = i + 1; }
-        }
-        parts.Add(text[start..]);
-        return parts;
-    }
-
-    /// <summary>
-    /// Identifiers here come from the installed catalog, never from caller text — this is
-    /// belt-and-braces, not the safety property. The safety property is that the name had
-    /// to match a row in api() to get this far.
-    /// </summary>
-    private static string QuoteIdent(string ident) => '"' + ident.Replace("\"", "\"\"") + '"';
 
     private (string, bool) Translate(JsonObject? args)
     {
