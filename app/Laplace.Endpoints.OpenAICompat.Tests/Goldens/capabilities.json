@@ -51,6 +51,10 @@
       "status": "live",
       "backend": "foundry CLI export (writes GGUF; never loaded on chat path)",
       "billing": "synthesis"
+    },
+    "op": {
+      "status": "live",
+      "backend": "laplace.api catalog allow-list; named function call; no SQL text"
     }
   }
 }
