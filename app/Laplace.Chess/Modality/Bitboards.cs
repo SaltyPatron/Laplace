@@ -14,18 +14,10 @@ public readonly struct Bitboards
 
     private Bitboards(ulong[] bb) => _bb = bb;
 
-    public static Bitboards FromBoard(Board b)
-    {
-        var bb = new ulong[13];
-        for (int sq = 0; sq < 128; sq++)
-        {
-            if ((sq & 0x88) != 0) { sq += 7; continue; }
-            var p = b.Squares[sq];
-            if (p == Piece.Empty) continue;
-            bb[(int)p + 6] |= 1UL << Bit(sq);
-        }
-        return new Bitboards(bb);
-    }
+    /// <summary>Copy of <see cref="Board"/>'s maintained piece bitboards — no mailbox rescan.</summary>
+    public static Bitboards FromBoard(Board b) => b.CopyBitboards();
+
+    internal static Bitboards FromRaw(ulong[] bb) => new(bb);
 
     public static int Bit(int sq0x88) => (Board.RankOf(sq0x88) << 3) | Board.FileOf(sq0x88);
     public static int FileOfBit(int bit) => bit & 7;
