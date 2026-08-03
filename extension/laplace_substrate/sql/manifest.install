@@ -398,6 +398,10 @@ functions/chess/drop_retired_chess_aggregates.sql.in
 functions/readback/drop_retired_constituent_edges.sql.in
 functions/converse/infer.sql.in
 functions/chess/chess_opening_preference.sql.in
+functions/chess/chess_opening_games.sql.in
+functions/chess/chess_opening_record.sql.in
+functions/chess/chess_syzygy_line.sql.in
+functions/chess/chess_opening_endgames.sql.in
 functions/lexical/sense_audit.sql.in
 functions/converse/prompt_language.sql.in
 functions/ops/geometry_audit.sql.in
