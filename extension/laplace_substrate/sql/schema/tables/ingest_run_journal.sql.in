@@ -1,11 +1,28 @@
 -- Persistent per-run ingest ledger. One row per IngestRunner run, inserted as
--- 'running' at run start and driven to a terminal status on every exit path
--- (ok / failed / empty-noop / capped / cancelled), plus 'skipped-complete' for
--- runs short-circuited by a completion marker. A row still 'running' with no
--- live ingest process is the diagnosable signature of a cut-off run — the
--- counts and files_done say how far it got. Ops metadata, not substrate
--- content: rows are never folded, never walked, and (flush-journal precedent)
--- not preserved across dump/restore.
+-- 'running' at run start and driven to a terminal status on every exit path.
+-- A row still 'running' with no live ingest process is the diagnosable
+-- signature of a cut-off run — the counts and files_done say how far it got.
+-- Ops metadata, not substrate content: rows are never folded, never walked,
+-- and (flush-journal precedent) not preserved across dump/restore.
+--
+-- STATUS VOCABULARY. Ordinary terminal states are ok / failed / cancelled,
+-- plus capped (a deliberate MaxInputUnits smoke run), skipped-complete (a run
+-- short-circuited by a completion marker), and empty-noop (declared input,
+-- applied none, could not account for it — the runner throws on this one).
+--
+-- The last three come from IIngestNoOpExplainer: a decomposer accounting for
+-- a run that legitimately applied nothing.
+--   already-present   novelty gate proved every record already in the substrate
+--   already-complete  marker-gated backfill with nothing left to do
+--   dependency-unset  optional dependency absent (syzygy tablebases)
+--
+-- THIS CHECK IS A WRITE GATE, NOT DOCUMENTATION. A status the C# side emits
+-- and this list omits does not degrade to an unrecognised-but-stored value:
+-- the UPDATE raises 23514, the writer logs INGEST_RUN_JOURNAL_WRITE_FAILED and
+-- (correctly) does not abort the ingest, and the row stays 'running' forever —
+-- indistinguishable from a killed run, and the journal verifier then fails a
+-- run that succeeded. Adding a status to DeriveRunStatus or to an explainer
+-- means adding it here in the same change.
 CREATE TABLE IF NOT EXISTS ingest_run_journal (
     run_id             uuid         PRIMARY KEY,
     source_name        text         NOT NULL,
@@ -13,7 +30,8 @@ CREATE TABLE IF NOT EXISTS ingest_run_journal (
     layer              int          NOT NULL,
     status             text         NOT NULL DEFAULT 'running'
         CHECK (status IN ('running','ok','failed','empty-noop','capped',
-                          'cancelled','skipped-complete')),
+                          'cancelled','skipped-complete',
+                          'already-present','already-complete','dependency-unset')),
     started_at         timestamptz  NOT NULL DEFAULT now(),
     ended_at           timestamptz,
     units_attempted    bigint       NOT NULL DEFAULT 0,
@@ -32,3 +50,18 @@ CREATE TABLE IF NOT EXISTS ingest_run_journal (
 
 CREATE INDEX IF NOT EXISTS ingest_run_journal_source_started
     ON ingest_run_journal (source_name, started_at DESC);
+
+-- The CREATE TABLE above is IF NOT EXISTS, so on any database that already has this
+-- table the status list frozen at its creation is the list that is enforced — a new
+-- status added above would be rejected on every box except a freshly created one.
+-- Re-assert the constraint from the schema of record on every install. This is the
+-- .sql.in doing its job (idempotent, versioned, applied by install-extensions), not a
+-- hand-ALTER against a live database.
+DO $$
+BEGIN
+    ALTER TABLE ingest_run_journal DROP CONSTRAINT IF EXISTS ingest_run_journal_status_check;
+    ALTER TABLE ingest_run_journal ADD CONSTRAINT ingest_run_journal_status_check
+        CHECK (status IN ('running','ok','failed','empty-noop','capped',
+                          'cancelled','skipped-complete',
+                          'already-present','already-complete','dependency-unset'));
+END $$;

@@ -84,6 +84,12 @@ public static class ChessVocabulary
     // OWN source so source-grain eviction (evict_source, #508) never conflates it with
     // ChessAnalysis testimony. One lane = one source = one evictable unit.
     public static readonly Hash128 TrajectorySourceId = SubstrateCanonicalIds.Source("ChessTrajectory");
+
+    // GH #736 source split: the position-id opening matcher writes under its OWN source so
+    // its verdict can be read, trusted and evicted separately from the analyzer's
+    // SAN-prefix guess. Three witnesses name a game's opening; only this one does it by
+    // board identity.
+    public static readonly Hash128 OpeningMatchSourceId = SubstrateCanonicalIds.Source("ChessOpeningMatch");
     // Syzygy probe lane (campaign PR-8): an exact mathematical oracle rides the
     // StandardsDerived band — high witness weight, still one voice among many.
     public static readonly Hash128 SyzygyTrustClass = TrustClass("StandardsDerived");

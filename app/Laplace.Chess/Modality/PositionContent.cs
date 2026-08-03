@@ -7,9 +7,30 @@ public static class PositionContent
     public static bool IncludeFeatureTokens { get; set; }
 
     public static string Surface(Board b, string canonicalEp)
+        => Surface(b, canonicalEp, ChessVariantRules.Standard);
+
+    /// <summary>
+    /// The position's content surface, under a RULE SET.
+    ///
+    /// Rules are part of a position's identity and the starting arrangement is not. A
+    /// King-of-the-Hill position and a standard position with identical placement have
+    /// different legal futures and different values — sharing an id would let the fold mix
+    /// two games. A Chess960 middlegame that transposes into a standard-reachable position
+    /// IS that position and must collide, which it does, because the arrangement never
+    /// enters here.
+    ///
+    /// STANDARD APPENDS NOTHING. ChessVariantRules.Surface() returns empty for standard, so
+    /// every position id already in the substrate is untouched — the same discipline as
+    /// Board.CastleString emitting KQkq while the rooks are on a/h. A new rule axis whose
+    /// default matches standard also cannot move existing ids.
+    /// </summary>
+    public static string Surface(Board b, string canonicalEp, ChessVariantRules rules)
     {
         var bb = Bitboards.FromBoard(b);
         var sb = new StringBuilder(192);
+
+        string ruleSurface = rules.Surface();
+        if (ruleSurface.Length > 0) sb.Append("rules:").Append(ruleSurface).Append(' ');
 
         sb.Append("stm:").Append(b.WhiteToMove ? 'w' : 'b');
         sb.Append(" cr:").Append(b.CastleString());

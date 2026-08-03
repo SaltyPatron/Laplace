@@ -50,5 +50,11 @@ jobs:
       path: ${{ needs.resolve.outputs.path }}
       database: ${{ inputs.database }}
       timeout_minutes: 720
-      run_gate: false
-      run_idempotency: false
+      # Gates ON. These were `false` with the comment "chess is not in
+      # decomposer-gates.json" -- true at the time, and the reason every chess seed
+      # run was green on the ingest exit code alone. The entries exist now
+      # (chess / openings / chess-books / chess-syzygy), so the run proves the
+      # consensus cells landed, and re-ingest proves it does not double-count
+      # testimony (which re-ingest DOES, by design, if a lane is not idempotent).
+      run_gate: true
+      run_idempotency: true

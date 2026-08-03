@@ -77,15 +77,27 @@ on:
         type: boolean
         default: false
 
-concurrency:
-  group: laplace-${{ github.ref }}
-  # CANCEL ON BRANCHES, QUEUE ON MAIN. Superseding a branch gate run is free.
-  # Superseding a MAIN run is not: its install phase stops the API, replaces
-  # binaries in /opt/laplace and bounces PostgreSQL, and a cancel lands
-  # anywhere in that window -- half-installed tree, service down, or the
-  # MSB3027 poisoned-output state the build rules describe. Main pushes queue
-  # so each one completes its deploy.
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+# NO WORKFLOW-LEVEL CONCURRENCY -- it cannot say what this pipeline needs.
+#
+# Two different things happen in this workflow and they want opposite policies:
+#
+#   CHEAP AND PURE   policy, build, unit-test. Superseding these is free, and on
+#                    main it is better than free: a later merge means the running
+#                    build is already testing deprecated code. Cancel it.
+#   MUTATING         deploy, db-ops, publish, smoke, restore-api. These stop the
+#                    API, replace binaries in /opt/laplace and bounce PostgreSQL.
+#                    A cancel lands anywhere in that window -- half-installed
+#                    tree, service down, or the MSB3027 poisoned-output state.
+#                    Never cancel these.
+#
+# A workflow-level group cancels the WHOLE RUN, including a job mid-install, so it
+# cannot hold both policies at once. That is why the old config had to queue main
+# entirely: it was protecting the deploy by refusing to cancel the build. The groups
+# are per-job below instead.
+#
+# Cancelling the build is what protects against a stale deploy: every mutating job
+# is `needs:` the build, so a cancelled build takes its own deploy with it and no
+# superseded code can reach the box.
 
 permissions:
   contents: read
@@ -112,6 +124,11 @@ jobs:
     # self-hosted. These checks are pure python/bash/git (validate-pipeline, regenerate+verify
     # deterministic, banned-terms) — safe on the self-hosted runner, which already runs `deps`.
     runs-on: [self-hosted, laplace]
+    concurrency:
+      # Superseded builds die. A later merge means this one is testing code that is
+      # already history, and it costs ~90s to find that out again on the new commit.
+      group: laplace-build-${{ github.ref }}-policy
+      cancel-in-progress: true
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -303,6 +320,11 @@ jobs:
       github.event_name != 'workflow_dispatch' ||
       contains(fromJSON('["build", "test", "deploy", "integrate", "all"]'), inputs.stage)
     runs-on: [self-hosted, laplace]
+    concurrency:
+      # Superseded builds die. A later merge means this one is testing code that is
+      # already history, and it costs ~90s to find that out again on the new commit.
+      group: laplace-build-${{ github.ref }}-build
+      cancel-in-progress: true
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -337,6 +359,11 @@ jobs:
       github.event_name != 'workflow_dispatch' ||
       contains(fromJSON('["test", "deploy", "integrate", "all"]'), inputs.stage)
     runs-on: [self-hosted, laplace]
+    concurrency:
+      # Superseded builds die. A later merge means this one is testing code that is
+      # already history, and it costs ~90s to find that out again on the new commit.
+      group: laplace-build-${{ github.ref }}-unit-test
+      cancel-in-progress: true
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -360,8 +387,55 @@ jobs:
       github.event_name != 'workflow_dispatch' ||
       contains(fromJSON('["deploy", "integrate", "all"]'), inputs.stage)
     runs-on: [self-hosted, laplace]
+    concurrency:
+      # ONE LIFECYCLE OPERATION AT A TIME, and never cancelled. Deploy, db-ops and
+      # publish stop the API, replace binaries and bounce PostgreSQL; two of those
+      # overlapping is a half-installed tree.
+      #
+      # This group does NOT include seeds. Ingest-vs-ingest is a capacity question --
+      # many corpora can land at once and the apply path is built for it -- so
+      # serialising them here would freeze one dev box's limits into the pipeline.
+      # Exclusion against live ingest is enforced where it belongs, by the
+      # ingest_run_journal preflight on the deploy job, which is a real lock that
+      # works across every workflow and at any number of runners.
+      group: laplace-substrate-lifecycle
+      cancel-in-progress: false
     timeout-minutes: 15
     steps:
+      # WAIT FOR LIVE INGESTS BEFORE TOUCHING THE BOX.
+      #
+      # Deploy stops the API, replaces binaries and bounces PostgreSQL. Doing that under
+      # a running ingest kills it -- CLAUDE.md documents the symptom ("a push to main
+      # restarts laplace-postgresql and kills any running ingest") and mitigates it with
+      # operator discipline, which is not a mitigation.
+      #
+      # THE LOCK LIVES IN THE SUBSTRATE, NOT IN GITHUB. Concurrency groups cannot express
+      # reader-writer: many seeds may run at once (they are content-addressed writers and
+      # the apply path is built for it), but a PG bounce excludes all of them. Putting
+      # every seed in one group would serialise ingest against ingest, which is this
+      # box's capacity limit masquerading as architecture. ingest_run_journal already
+      # records exactly what is needed, across every workflow and every dispatcher.
+      #
+      # Bounded: a stuck 'running' row must not wedge deploys forever. On timeout this
+      # reports what it is waiting on and FAILS rather than deploying anyway -- killing an
+      # ingest silently is the thing being fixed.
+      - name: Wait for in-flight ingests (substrate lock)
+        timeout-minutes: 300
+        run: |
+          set -euo pipefail
+          q="SELECT count(*) FROM laplace.ingest_run_journal WHERE status = 'running';"
+          for _ in $(seq 1 600); do
+            n=$(psql -d "${PGDATABASE:-laplace}" -U laplace_admin -tAc "$q" 2>/dev/null || echo 0)
+            [ "${n:-0}" = "0" ] && { echo "no ingest in flight — safe to deploy"; exit 0; }
+            echo "::notice::waiting on ${n} in-flight ingest(s) before bouncing PostgreSQL"
+            psql -d "${PGDATABASE:-laplace}" -U laplace_admin -P pager=off -c \
+              "SELECT source_name, input_units_done, input_units_total, now()-started_at AS elapsed
+               FROM laplace.ingest_run_journal WHERE status='running' ORDER BY started_at;" || true
+            sleep 30
+          done
+          echo "::error::still waiting on in-flight ingests after 5h — refusing to deploy over them"
+          exit 1
+
       - uses: actions/checkout@v4
         with: { submodules: false, clean: false }
       - uses: ./.github/actions/setup-laplace-env
@@ -378,6 +452,19 @@ jobs:
       github.event_name != 'workflow_dispatch' ||
       contains(fromJSON('["deploy", "integrate", "all"]'), inputs.stage)
     runs-on: [self-hosted, laplace]
+    concurrency:
+      # ONE LIFECYCLE OPERATION AT A TIME, and never cancelled. Deploy, db-ops and
+      # publish stop the API, replace binaries and bounce PostgreSQL; two of those
+      # overlapping is a half-installed tree.
+      #
+      # This group does NOT include seeds. Ingest-vs-ingest is a capacity question --
+      # many corpora can land at once and the apply path is built for it -- so
+      # serialising them here would freeze one dev box's limits into the pipeline.
+      # Exclusion against live ingest is enforced where it belongs, by the
+      # ingest_run_journal preflight on the deploy job, which is a real lock that
+      # works across every workflow and at any number of runners.
+      group: laplace-substrate-lifecycle
+      cancel-in-progress: false
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -477,6 +564,19 @@ jobs:
       (github.event_name != 'workflow_dispatch' ||
        inputs.stage == 'all')
     runs-on: [self-hosted, laplace]
+    concurrency:
+      # ONE LIFECYCLE OPERATION AT A TIME, and never cancelled. Deploy, db-ops and
+      # publish stop the API, replace binaries and bounce PostgreSQL; two of those
+      # overlapping is a half-installed tree.
+      #
+      # This group does NOT include seeds. Ingest-vs-ingest is a capacity question --
+      # many corpora can land at once and the apply path is built for it -- so
+      # serialising them here would freeze one dev box's limits into the pipeline.
+      # Exclusion against live ingest is enforced where it belongs, by the
+      # ingest_run_journal preflight on the deploy job, which is a real lock that
+      # works across every workflow and at any number of runners.
+      group: laplace-substrate-lifecycle
+      cancel-in-progress: false
     timeout-minutes: 20
     outputs:
       # Whether the deployed API came up READY (substrate has data), as opposed to
@@ -564,6 +664,19 @@ jobs:
       !cancelled() && needs.publish.result == 'success' &&
       needs.publish.outputs.seeded == 'true'
     runs-on: [self-hosted, laplace]
+    concurrency:
+      # ONE LIFECYCLE OPERATION AT A TIME, and never cancelled. Deploy, db-ops and
+      # publish stop the API, replace binaries and bounce PostgreSQL; two of those
+      # overlapping is a half-installed tree.
+      #
+      # This group does NOT include seeds. Ingest-vs-ingest is a capacity question --
+      # many corpora can land at once and the apply path is built for it -- so
+      # serialising them here would freeze one dev box's limits into the pipeline.
+      # Exclusion against live ingest is enforced where it belongs, by the
+      # ingest_run_journal preflight on the deploy job, which is a real lock that
+      # works across every workflow and at any number of runners.
+      group: laplace-substrate-lifecycle
+      cancel-in-progress: false
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -593,6 +706,19 @@ jobs:
     if: always() && needs.deploy.result != 'skipped'
     needs: [deploy, publish, seed, smoke]
     runs-on: [self-hosted, laplace]
+    concurrency:
+      # ONE LIFECYCLE OPERATION AT A TIME, and never cancelled. Deploy, db-ops and
+      # publish stop the API, replace binaries and bounce PostgreSQL; two of those
+      # overlapping is a half-installed tree.
+      #
+      # This group does NOT include seeds. Ingest-vs-ingest is a capacity question --
+      # many corpora can land at once and the apply path is built for it -- so
+      # serialising them here would freeze one dev box's limits into the pipeline.
+      # Exclusion against live ingest is enforced where it belongs, by the
+      # ingest_run_journal preflight on the deploy job, which is a real lock that
+      # works across every workflow and at any number of runners.
+      group: laplace-substrate-lifecycle
+      cancel-in-progress: false
     timeout-minutes: 10
     steps:
       - name: Ensure API is running

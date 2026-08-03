@@ -257,6 +257,51 @@ def expected_audit_layer_map(knowledge: list[str]) -> dict[str, int]:
     return out
 
 
+def _seed_workflow_sources() -> set[str]:
+    """
+    Every source key a `.github/workflows/seed-*.yml` can hand to `_ingest.yml`.
+
+    Two forms reach it, and both count as dispatchable:
+      - a `source:` workflow_dispatch input whose `options:` the operator picks from
+      - a literal `source: <key>` in the `with:` block of a single-source workflow
+
+    Regex, not a YAML parse, because the rest of this validator carries no third-party
+    dependency and the runner's Python is not guaranteed to have one. The match is
+    anchored on the key's own indentation so it cannot drift into `description:` prose
+    or a sibling dropdown (`corpus:`, `player:`) — an earlier permissive cut pulled in
+    'magnus', 'twic' and whole description strings, which would have let a typo'd gate
+    key validate.
+    """
+    keys: set[str] = set()
+    wf_dir = ROOT / ".github" / "workflows"
+    if not wf_dir.is_dir():
+        return keys
+
+    # `source:` with a scalar on the same line (a `with:` call site).
+    inline = re.compile(r"^(\s+)source:[ \t]+(\S+)[ \t]*$", re.M)
+    # `source:` opening a block (the input definition); capture the block that follows.
+    block = re.compile(r"^(\s+)source:[ \t]*\n((?:\1\s+\S.*\n|\s*\n)*)", re.M)
+    option_line = re.compile(r"^\s*-\s*([A-Za-z0-9][\w.-]*)", re.M)
+
+    for path in sorted(wf_dir.glob("seed-*.yml")):
+        text = path.read_text(encoding="utf-8")
+
+        for _indent, value in inline.findall(text):
+            if value.startswith("${{"):        # forwarded from an input; the options cover it
+                continue
+            keys.add(value.strip("\"'"))
+
+        for _indent, body in block.findall(text):
+            m = re.search(r"^\s*options:[ \t]*(\[[^\]]*\])?[ \t]*$", body, re.M)
+            if not m:
+                continue
+            if m.group(1):                      # inline list: options: [a, b, c]
+                keys.update(v.strip().strip("\"'") for v in m.group(1)[1:-1].split(",") if v.strip())
+            else:                               # block list under options:
+                keys.update(option_line.findall(body[m.end():]))
+    return keys
+
+
 def validate_decomposer_matrix(manifest: dict, gates: dict) -> list[str]:
     errs: list[str] = []
     root = ROOT
@@ -294,19 +339,31 @@ def validate_decomposer_matrix(manifest: dict, gates: dict) -> list[str]:
         )
 
     # CLI keys used only for journal name resolution (verify-ingest-journal.sh
-    # --cli-key) may sit outside the foundation/knowledge ladder. Reject extras
-    # that claim consensus thresholds without being ladder sources — not mere
-    # name maps. Otherwise journal proof and this check fight each other.
+    # --cli-key) may sit outside the foundation/knowledge ladder.
+    #
+    # What this check is actually protecting against is an ORPHAN GATE: thresholds
+    # nothing ever runs, which rot silently and prove nothing. Ladder membership was
+    # the proxy for "something runs it", and for a foundation source it is the right
+    # proxy. It is the wrong proxy for a MODALITY lane: chess is not seeded by the
+    # foundation ladder and must not be added to it just to earn the right to be
+    # verified — that would put an 8 GB corpus in the floor sequence to satisfy a
+    # lint. Under the old rule the only way to keep Policy green was to leave every
+    # chess lane with empty consensus_gates, i.e. permanently unverifiable, which is
+    # how five chess seed workflows came to be green on the ingest exit code alone.
+    #
+    # So test reachability directly: a key is legitimate off-ladder when a seed
+    # workflow can dispatch it. Orphan thresholds still fail.
     sources_spec = gates.get("sources", {})
-    extra_consensus = sorted(
+    dispatchable = _seed_workflow_sources()
+    orphan_consensus = sorted(
         key
         for key in (gate_sources - manifest_sources)
-        if sources_spec.get(key, {}).get("consensus_gates")
+        if sources_spec.get(key, {}).get("consensus_gates") and key not in dispatchable
     )
-    if extra_consensus:
+    if orphan_consensus:
         errs.append(
-            "decomposer-gates.json: consensus_gates outside manifest ingest order: "
-            f"{extra_consensus}"
+            "decomposer-gates.json: consensus_gates on sources no ladder stage and no "
+            f"seed workflow can run: {orphan_consensus}"
         )
 
     manifest_order = gates.get("manifest_order", [])

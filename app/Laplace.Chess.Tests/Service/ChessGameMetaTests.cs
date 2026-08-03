@@ -38,17 +38,27 @@ public sealed class ChessGameMetaTests
         Assert.Null(ChessAnalyze.InitialState("not a real fen", m));
     }
 
-    // The case this actually costs: chess.com exports X-FEN/Shredder file-letter castling for
-    // every Chess960 game (GBgb, GDgd, GCgc ...). Board.FromFen used to map each unknown
-    // letter to CastleRights.None, so the game replayed as one whose rooks could not castle.
+    // chess.com exports X-FEN/Shredder file-letter castling for every Chess960 game (GBgb,
+    // GDgd, GCgc ...). Three behaviours have now existed here, and only the third is right:
+    //   1. map each unknown letter to CastleRights.None -> the game replayed as one whose
+    //      rooks could not castle. A wrong game, recorded and folded.
+    //   2. refuse the position outright -> honest, and cost 1,866 games.
+    //   3. model it. The rights are read, the rooks keep their files, the game replays.
     [Theory]
     [InlineData("qrbbnkrn/pppppppp/8/8/8/8/PPPPPPPP/QRBBNKRN w GBgb - 0 1")]
     [InlineData("nbbrknrq/pppppppp/8/8/8/8/PPPPPPPP/NBBRKNRQ w GDgd - 0 1")]
     [InlineData("nqrkbbrn/pppppppp/8/8/8/8/PPPPPPPP/NQRKBBRN w GCgc - 0 1")]
-    public void InitialState_Chess960XFenCastling_IsRefusedNotSilentlyStripped(string fen)
+    public void InitialState_Chess960XFenCastling_IsModelledNotStripped(string fen)
     {
         var m = new ChessModality();
-        Assert.Null(ChessAnalyze.InitialState(fen, m));
+        var start = ChessAnalyze.InitialState(fen, m);
+
+        Assert.NotNull(start);
+        // NOT the standard array — the whole failure mode this guards is replaying a
+        // Chess960 game from rnbqkbnr/... and calling it the same game.
+        Assert.False(start!.Value.StandardStart);
+        Assert.Equal(CastleRights.All, start.Value.Initial.Board.Castle);
+        Assert.False(start.Value.Initial.Board.StandardCastleFiles);
     }
 
     [Fact]
@@ -67,14 +77,32 @@ public sealed class ChessGameMetaTests
         Assert.Contains("fullmove number", ex.Message);
     }
 
+    /// <summary>
+    /// X-FEN castling is now READ, not refused — Chess960 is modelled. The concern the
+    /// original refusal protected is unchanged and still asserted here: the rights must
+    /// not be silently stripped, because a position that lost them mints a different id
+    /// than the one the source asserted. It used to throw; now it must parse EXACTLY.
+    /// </summary>
     [Fact]
-    public void FromFen_XFenCastlingLetter_ThrowsNotSilentZero()
+    public void FromFen_XFenCastlingLetter_ParsesRightsAndRookFiles()
     {
-        var ex = Assert.Throws<FormatException>(
-            () => Board.FromFen("qrbbnkrn/pppppppp/8/8/8/8/PPPPPPPP/QRBBNKRN w GBgb - 0 1"));
-        Assert.Contains("Unsupported castling", ex.Message);
-        Assert.Contains("X-FEN", ex.Message);
+        var b = Board.FromFen("qrbbnkrn/pppppppp/8/8/8/8/PPPPPPPP/QRBBNKRN w GBgb - 0 1");
+
+        Assert.Equal(CastleRights.All, b.Castle);          // nothing stripped
+        Assert.Equal(6, b.WhiteKingRookFile);              // G
+        Assert.Equal(1, b.WhiteQueenRookFile);             // B
+        Assert.Equal(6, b.BlackKingRookFile);
+        Assert.Equal(1, b.BlackQueenRookFile);
+        Assert.Equal("GBgb", b.CastleString());            // round-trips, not KQkq
+        Assert.False(b.StandardCastleFiles);
     }
+
+    /// <summary>A castling letter naming a file with no rook on it is still a hard error —
+    /// the refuse-not-invent law survives, it just applies to a smaller set now.</summary>
+    [Fact]
+    public void FromFen_CastlingRightWithNoRook_StillThrows()
+        => Assert.Throws<FormatException>(
+            () => Board.FromFen("4k3/8/8/8/8/8/8/4K3 w K - 0 1"));
 
     [Theory]
     [InlineData("60", "bullet")]

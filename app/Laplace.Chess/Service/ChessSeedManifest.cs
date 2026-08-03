@@ -13,15 +13,26 @@ public static class ChessSeedManifest
         "Chess_Concept", "Chess_BookLine",
     ];
 
+    // Named constants for the relation surfaces other chess code needs to NAME rather
+    // than merely declare. The literal stays where it always was — in this list, which
+    // is the chess lanes' canonical vocabulary — and callers reference the constant
+    // instead of retyping the string. The ISA literalism gate counts a retyped
+    // relation name in a new file as a new violation, and it is right to: a name typed
+    // in two places is a name that can disagree with itself.
+    internal const string OpeningName    = "OPENING_NAME";
+    internal const string HasEco         = "HAS_ECO";
+    internal const string GameHasOpening = "GAME_HAS_OPENING";
+    internal const string GameHasEco     = "GAME_HAS_ECO";
+
     public static readonly IReadOnlyList<string> Relations =
     [
-        "MOVE", "OUTCOME", "PLAYED_BY", "HAS_RATING", "OPENING_NAME", "HAS_ECO",
+        "MOVE", "OUTCOME", "PLAYED_BY", "HAS_RATING", OpeningName, HasEco,
         // GH #736: the event→line record edge; every chess lane that records playings emits it.
         "PLAYS_LINE",
         "HAS_MOVETEXT", "HAS_PLY", "HAS_SAN", "HAS_COMMENT", "HAS_SETUP", "ANALYZED_AT",
         "HAS_WHITE", "HAS_BLACK", "HAS_EVENT", "ON_DATE", "HAS_TIME_CONTROL", "HAS_TC_CLASS",
         "HAS_TERMINATION", "HAS_RESULT", "GAME_AT", "GAME_AT_PLY", "HAS_EVAL", "MOVE_QUALITY",
-        "HAS_CLOCK", "HAS_EVAL_TOKEN", "HAS_THINK_CLASS", "GAME_HAS_OPENING", "GAME_HAS_ECO",
+        "HAS_CLOCK", "HAS_EVAL_TOKEN", "HAS_THINK_CLASS", GameHasOpening, GameHasEco,
         // Syzygy probe lane (campaign PR-8): exact endgame verdicts on witnessed
         // positions — five-valued WDL token (STM POV) + distance-to-zeroing scalar.
         "HAS_WDL", "HAS_DTZ",

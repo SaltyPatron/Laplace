@@ -38,6 +38,17 @@ public static class San
 
         return Single(legal, m =>
         {
+            // A CASTLE IS ONLY EVER SPELLED O-O / O-O-O, so a piece-move SAN must never
+            // match one. In standard chess this could not bite: the king starts on e1, a
+            // castle lands it two squares away, and "Kc1"/"Kg1" from e1 is not a legal
+            // king move — so (from, to) never collided. Chess960 collides constantly.
+            //
+            // Measured on a real game (DenLaz_chesscom.pgn, FEN rbnkbrnq/... w FAfa):
+            // white king on d1, rooks a1/f1. At ply 17 the source writes "Kc1" meaning the
+            // ordinary king step d1->c1 — but the queen-side castle ALSO ends on c1, so
+            // both were candidates, Single() saw two and returned null, and a 58-ply game
+            // was dropped as unresolvable SAN.
+            if ((m.Flags & (MoveFlags.CastleKing | MoveFlags.CastleQueen)) != 0) return false;
             if (m.To != dest) return false;
             if (Board.TypeOf(b.Squares[m.From]) != pieceType) return false;
             if (promoType != Piece.Empty)

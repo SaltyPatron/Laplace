@@ -5,7 +5,7 @@ namespace Laplace.Chess.Service.Tests;
 [Trait("Tier", "fast")]
 public sealed class ChessBookDecomposerTests
 {
-    private static readonly string BooksDir = @"D:\Data\Ingest\test-data\text";
+    private static readonly string BooksDir = ChessCorpusPaths.Books;
 
     [Fact]
     public void ProseLine_InlineDescriptive()

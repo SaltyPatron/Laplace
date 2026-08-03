@@ -6,7 +6,7 @@
 #   scripts/verify-ingest-journal.sh --cli-key framenet    # resolve via decomposer-gates.json
 #
 # Exit 0 iff the latest ingest_run_journal row for that source is a successful
-# terminal status (ok / skipped-complete / capped / empty-noop).
+# terminal status — see the case block at the bottom for the list and why each is there.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -56,12 +56,26 @@ fi
 IFS='|' read -r status files_done files_total entities attestations error <<<"$row"
 echo "JOURNAL source=${SOURCE} db=${DB} status=${status} files=${files_done}/${files_total} entities=${entities} attestations=${attestations}"
 
+# Terminal statuses that mean the lane did its job.
+#
+#   ok                 wrote what it read
+#   skipped-complete   source completion marker already present
+#   capped             deliberate MaxInputUnits smoke run
+#   already-present    read records, novelty gate proved every one present (idempotent re-ingest)
+#   already-complete   marker-gated backfill with nothing left to do
+#   dependency-unset   optional dependency absent; documented no-op (syzygy tablebases)
+#
+# empty-noop is NOT here. The runner THROWS on it — it means the source declared input,
+# applied none, and could not account for it (IIngestNoOpExplainer). Accepting it as
+# success made this verifier contradict the process that wrote the row: the CLI exited 1
+# and the ledger check said the run was fine.
 case "$status" in
-  ok|skipped-complete|capped|empty-noop)
+  ok|skipped-complete|capped|already-present|already-complete|dependency-unset)
     exit 0
     ;;
   *)
-    echo "error: latest journal status for ${SOURCE} is '${status}' (want ok|skipped-complete|capped|empty-noop)" >&2
+    echo "error: latest journal status for ${SOURCE} is '${status}'" >&2
+    echo "       (want ok|skipped-complete|capped|already-present|already-complete|dependency-unset)" >&2
     [[ -n "$error" ]] && echo "error detail: $error" >&2
     exit 1
     ;;

@@ -49,7 +49,12 @@ concurrency:
   # One database, one lifecycle operation at a time. Queue rather than cancel:
   # cancelling mid-nuke leaves the box without a database, which is worse than
   # waiting.
-  group: laplace-db-ops
+  #
+  # Widened from a db-ops-only group to the shared LIFECYCLE group: a nuke/migrate
+  # and a deploy both bounce the box, and they were previously mutually invisible.
+  # Exclusion against running SEEDS is the deploy job's ingest_run_journal preflight,
+  # not this group -- seeds must stay parallel with each other.
+  group: laplace-substrate-lifecycle
   cancel-in-progress: false
 
 jobs:

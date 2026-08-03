@@ -31,5 +31,10 @@ jobs:
       path: ""
       database: ${{ inputs.database }}
       timeout_minutes: 720
-      run_gate: false
+      # Gates ON: 'chess-eval' is registered in decomposer-gates.json now, so the
+      # run proves MOVE_QUALITY / ANALYZED_AT landed instead of trusting the exit
+      # code. Idempotency stays OFF here alone -- a re-ingest of the eval census
+      # would re-run Stockfish over the whole corpus to prove a count, which costs
+      # hours of engine time to learn what the per-line markers already guarantee.
+      run_gate: true
       run_idempotency: false

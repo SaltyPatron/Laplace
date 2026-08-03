@@ -45,11 +45,49 @@ public static class ChessLabPaths
 
     /// <summary>
     /// Syzygy tablebase DIRECTORY (WDL <c>.rtbw</c> + DTZ <c>.rtbz</c> files) for the
-    /// ChessSyzygy probe lane. Env <c>LAPLACE_SYZYGY</c> or <c>chess-lab.env</c>;
-    /// hart-server: <c>/vault/Data/Games/Chess/syzygy/3-4-5/</c>. No default — the
-    /// lane is a clean no-op when unset (the tables are a ~1 GB opt-in download).
+    /// ChessSyzygy probe lane. Env <c>LAPLACE_SYZYGY</c> or <c>chess-lab.env</c> first;
+    /// then the corpus layout under <c>LAPLACE_DATA_ROOT</c>.
+    ///
+    /// The env lookup used to be the only lookup, and the tables were downloaded to
+    /// <c>/vault/Data/Games/Chess/syzygy/3-4-5</c> (290 files, ~1 GB, present on this
+    /// host since 2026-07-30). Nobody exported the variable, so <c>ingest chess-syzygy</c>
+    /// no-op'd on a box that had the tablebases sitting on disk the whole time. A
+    /// downloaded dependency the code cannot find is the same as one that was never
+    /// downloaded, and only one of those is the operator's problem to fix.
+    ///
+    /// Still a clean no-op when genuinely absent — the tables are an opt-in download.
     /// </summary>
-    public static Probe SyzygyDir => ResolveDirectory("LAPLACE_SYZYGY");
+    public static Probe SyzygyDir => ResolveSyzygyDir();
+
+    /// <summary>Corpus-layout locations, most specific first, under the ingest data root.</summary>
+    private static IEnumerable<string> DefaultSyzygyCandidates()
+    {
+        string root = Environment.GetEnvironmentVariable("LAPLACE_DATA_ROOT") is { Length: > 0 } r
+            ? r
+            : OperatingSystem.IsWindows() ? @"D:\Data\Ingest" : "/vault/Data";
+        string baseDir = Path.Combine(root, "Games", "Chess", "syzygy");
+        // A tablebase set is stored one directory per men-count bracket ("3-4-5", "6").
+        // Deepest set first so a box holding 6-man tables uses them.
+        yield return Path.Combine(baseDir, "6");
+        yield return Path.Combine(baseDir, "3-4-5");
+        yield return baseDir;
+    }
+
+    private static Probe ResolveSyzygyDir()
+    {
+        var configured = ResolveDirectory("LAPLACE_SYZYGY");
+        if (configured.Found) return configured;
+
+        foreach (var candidate in DefaultSyzygyCandidates())
+        {
+            if (!Directory.Exists(candidate)) continue;
+            // A directory holding no tables is not a tablebase directory — probing it
+            // would report "0 tables discovered" as though the operator misconfigured it.
+            if (!Directory.EnumerateFiles(candidate, "*.rtbw").Any()) continue;
+            return new Probe(candidate, true, "data-root");
+        }
+        return configured;
+    }
 
     public static IReadOnlyDictionary<string, Probe> Catalog => new Dictionary<string, Probe>(StringComparer.OrdinalIgnoreCase)
     {

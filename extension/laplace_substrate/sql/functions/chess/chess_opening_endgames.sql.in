@@ -1,0 +1,49 @@
+-- chess_opening_endgames(opening, limit): where an opening ACTUALLY ENDS UP, decided by
+-- the tablebase rather than by the scoresheet.
+--
+-- This is the openings-to-syzygy correlation, and the point of both lanes being
+-- content-addressed. Neither lane knows the other exists:
+--
+--   ChessOpenings      (final_position, OPENING_NAME, name)
+--   ChessPgn/Analysis  (line, GAME_HAS_OPENING, name)     <- same content id
+--   ChessSyzygy        (position, HAS_WDL, verdict) ctx = line
+--
+-- so opening -> line -> exact endgame verdict is two joins on ids that collided by
+-- construction. No resolution pass, no mapping table, nothing to maintain when a new
+-- opening or a new tablebase set lands.
+--
+-- COMPOSED, NOT REWRITTEN. It names no relation of its own: chess_opening_games already
+-- resolves an opening to its lines and chess_syzygy_line already reads a line's verdicts,
+-- so this is an aggregate over the two. That keeps one definition of each hop — and a
+-- function that re-derives what two neighbours already compute is the wheel-reinvention
+-- the ISA gate's vocabulary ratchet is aimed at.
+--
+-- WHAT THE ANSWER MEANS. A verdict here is not who won — it is what the position was
+-- WORTH under perfect play at the moment the game reached a table, side-to-move POV. An
+-- opening whose lines reach 'draw' verdicts steers into drawn endgames however the games
+-- were actually scored, which no scoresheet aggregate can tell you.
+--
+-- UNPROBED IS NOT DRAWN. Lines whose endgames never reached a loaded table return no rows,
+-- and that silence is correct: bool_or over zero rows is NULL, and a 3-4-5-man set covers
+-- a small fraction of play. Read lines_probed against chess_opening_record's lines before
+-- concluding anything about the opening as a whole.
+CREATE OR REPLACE FUNCTION chess_opening_endgames(p_opening text,
+                                                  p_limit int DEFAULT 16,
+                                                  p_scan_lines int DEFAULT 5000)
+    RETURNS TABLE(wdl text, positions bigint, lines_probed bigint)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+WITH lines AS MATERIALIZED (
+    SELECT DISTINCT g.line_id FROM chess_opening_games(p_opening, p_scan_lines) g
+),
+verdict AS MATERIALIZED (
+    SELECT s.wdl, count(*) AS positions, count(DISTINCT l.line_id) AS lines_probed
+    FROM lines l, LATERAL chess_syzygy_line(l.line_id) s
+    WHERE s.wdl IS NOT NULL
+    GROUP BY s.wdl
+)
+SELECT v.wdl, v.positions::bigint, v.lines_probed::bigint
+FROM verdict v
+ORDER BY v.positions DESC, v.wdl
+LIMIT p_limit
+$$;

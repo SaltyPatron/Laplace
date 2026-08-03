@@ -14,8 +14,15 @@ namespace Laplace.Chess.Service;
 // ingest never needs this pass; it exists to (a) analyze games recorded before the fusion landed
 // and (b) re-derive at a bumped ChessAnalyze.Version without re-recording.
 // Run: `laplace ingest chess-analyze`  (no path — substrate is the source of truth)
-public sealed class ChessAnalyzeDecomposer : ComposeDecomposer<ChessAnalyzeRecord>
+public sealed class ChessAnalyzeDecomposer
+    : ComposeDecomposer<ChessAnalyzeRecord>, IIngestNoOpExplainer
 {
+    // Marker-gated backfill over playings the fused ingest pass (GH #600) already derived.
+    // On a substrate seeded through that fused path there is nothing left to backfill, and
+    // the declared denominator is still every recorded playing — so a correct, complete
+    // run applied zero and the silent-no-op guard failed it. See IIngestNoOpExplainer.
+    private long _candidatesStreamed;
+
     private readonly int _engineDepth;
     /// <summary>engineDepth &gt; 0 runs the Laplace search per position for a calculated
     /// eval/quality signal; 0 (default) records only witnessed structure (fast ingest).</summary>
@@ -50,10 +57,23 @@ public sealed class ChessAnalyzeDecomposer : ComposeDecomposer<ChessAnalyzeRecor
                 + "Record games first: laplace ingest chess <pgn>");
 
         var ws = IngestPipelineDefaults.ResolveWorkingSet(PipelineProfile, options, DefaultBatchSize);
+        _candidatesStreamed = 0;
         await foreach (var witnessed in ChessWitnessHydrator.StreamUnanalyzedEventsAsync(
                            ds, ContainmentReader!, ws.Batch, ct))
+        {
+            _candidatesStreamed++;
             yield return new ChessAnalyzeRecord(witnessed);
+        }
     }
+
+    /// <summary>Nothing streamed means every playing already carries ANALYZED_AT.</summary>
+    public (string Status, string Detail)? ExplainEmptyRun(long declaredInputUnits)
+        => _candidatesStreamed == 0
+            ? ("already-complete",
+               $"ChessAnalysis: every one of {declaredInputUnits} recorded playing(s) already "
+               + $"carries the v{ChessAnalyze.Version} ANALYZED_AT marker — nothing to backfill "
+               + "(the fused ingest pass derives inline, GH #600).")
+            : null;
 
     protected override void Compose(ChessAnalyzeRecord record, SubstrateChangeBuilder b)
         => ChessAnalyze.DeriveFromWitnessed(b, record.Game, _engineDepth);

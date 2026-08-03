@@ -29,6 +29,34 @@ public sealed class Board
     public int HalfmoveClock;
     public int FullmoveNumber;
 
+    /// <summary>
+    /// The FILE each castling rook started on. Chess960 (chess.com "Freestyle") shuffles
+    /// the back rank, so "the h-rook" is not a constant — X-FEN/Shredder writes the files
+    /// into the castling field ("FCfc") precisely because KQkq cannot express them.
+    ///
+    /// IDENTITY IS UNAFFECTED FOR STANDARD CHESS, AND THAT IS LOAD-BEARING. These default
+    /// to the standard files, and <see cref="CastleString"/> emits the classic KQkq
+    /// whenever they hold — so a standard position's content surface
+    /// (PositionContent.Surface, which embeds CastleString) is byte-identical to what it
+    /// was before Chess960 existed here. Same surface, same content id, no reseed. Only
+    /// positions whose castling rooks are NOT on a/h get new ids, and those are exactly
+    /// the positions the substrate does not contain, because these games were refused.
+    /// </summary>
+    public sbyte WhiteKingRookFile = 7;
+    public sbyte WhiteQueenRookFile = 0;
+    public sbyte BlackKingRookFile = 7;
+    public sbyte BlackQueenRookFile = 0;
+
+    /// <summary>The file the castling rook for this side/flank started on.</summary>
+    public int CastleRookFile(bool white, bool kingSide) => white
+        ? (kingSide ? WhiteKingRookFile : WhiteQueenRookFile)
+        : (kingSide ? BlackKingRookFile : BlackQueenRookFile);
+
+    /// <summary>True when every castling rook is on its standard file — i.e. ordinary chess.</summary>
+    public bool StandardCastleFiles =>
+        WhiteKingRookFile == 7 && WhiteQueenRookFile == 0
+        && BlackKingRookFile == 7 && BlackQueenRookFile == 0;
+
     public Board Clone()
     {
         var b = new Board
@@ -38,6 +66,10 @@ public sealed class Board
             EpSquare = EpSquare,
             HalfmoveClock = HalfmoveClock,
             FullmoveNumber = FullmoveNumber,
+            WhiteKingRookFile = WhiteKingRookFile,
+            WhiteQueenRookFile = WhiteQueenRookFile,
+            BlackKingRookFile = BlackKingRookFile,
+            BlackQueenRookFile = BlackQueenRookFile,
         };
         Array.Copy(Squares, b.Squares, 128);
         return b;
@@ -88,29 +120,53 @@ public sealed class Board
 
         b.WhiteToMove = parts[1] == "w";
 
+        // CASTLING, INCLUDING CHESS960. Three forms appear in the wild and all three are
+        // read here:
+        //   KQkq   classic. Resolved to the OUTERMOST rook on that flank, which is the
+        //          X-FEN semantic and is a/h in ordinary chess — so nothing moves.
+        //   AHah   Shredder: the rook's own file, explicitly.
+        //   mixed  X-FEN uses KQkq when unambiguous and a file letter when not.
+        //
+        // This used to throw on anything but KQkq. That was the right call at the time —
+        // replaying a Chess960 game from the standard array records a game that was never
+        // played — but it refused 1,866 games (0.8% of the corpus, concentrated in the
+        // chess.com archives, every "Freestyle" game). Now they are read.
         b.Castle = CastleRights.None;
         if (parts[2] != "-")
         {
             foreach (char c in parts[2])
             {
-                // `_ => CastleRights.None` used to sit here. It silently discarded every
-                // castling character this parser does not model -- above all the X-FEN /
-                // Shredder file letters Chess960 uses (GBgb, GDgd, ...), which chess.com
-                // exports for every Chess960 game. A game whose rooks may castle then
-                // replayed as a game whose rooks may not: not a dropped game, a WRONG one,
-                // recorded and folded into consensus with nothing to show it happened.
-                // Refuse instead. The caller drops the game and counts it.
-                b.Castle |= c switch
+                bool white = char.IsUpper(c);
+                int rank = white ? 0 : 7;
+                char lower = char.ToLowerInvariant(c);
+                int kingFile = KingFileOnRank(b, rank);
+
+                int rookFile;
+                if (lower == 'k')      rookFile = OutermostRook(b, rank, kingFile, toward: +1, fen);
+                else if (lower == 'q') rookFile = OutermostRook(b, rank, kingFile, toward: -1, fen);
+                else if (lower >= 'a' && lower <= 'h') rookFile = lower - 'a';
+                else throw new FormatException(
+                    $"Unsupported castling availability '{c}' in FEN '{fen}'.");
+
+                if (kingFile < 0)
+                    throw new FormatException(
+                        $"Castling right '{c}' in FEN '{fen}' but no king on that rank.");
+
+                // Which flank a FILE letter names is decided by the king, not by the letter:
+                // a rook left of the king is queen-side however it is spelled.
+                bool kingSide = rookFile > kingFile;
+                if (white)
                 {
-                    'K' => CastleRights.WhiteKing,
-                    'Q' => CastleRights.WhiteQueen,
-                    'k' => CastleRights.BlackKing,
-                    'q' => CastleRights.BlackQueen,
-                    _ => throw new FormatException(
-                        $"Unsupported castling availability '{c}' in FEN '{fen}'. "
-                        + "X-FEN/Shredder file-letter castling (Chess960) is not modelled; "
-                        + "refusing rather than dropping the right silently."),
-                };
+                    b.Castle |= kingSide ? CastleRights.WhiteKing : CastleRights.WhiteQueen;
+                    if (kingSide) b.WhiteKingRookFile = (sbyte)rookFile;
+                    else          b.WhiteQueenRookFile = (sbyte)rookFile;
+                }
+                else
+                {
+                    b.Castle |= kingSide ? CastleRights.BlackKing : CastleRights.BlackQueen;
+                    if (kingSide) b.BlackKingRookFile = (sbyte)rookFile;
+                    else          b.BlackQueenRookFile = (sbyte)rookFile;
+                }
             }
         }
 
@@ -155,16 +211,57 @@ public sealed class Board
         return sb.ToString();
     }
 
+    /// <summary>
+    /// The castling field. KQkq while the rooks are on their standard files — which is
+    /// ALWAYS true of ordinary chess, so this is byte-identical to the pre-Chess960
+    /// output and position identity does not move. Shredder file letters otherwise.
+    /// </summary>
     public string CastleString()
     {
         if (Castle == CastleRights.None) return "-";
-        var sb = new StringBuilder();
-        if ((Castle & CastleRights.WhiteKing) != 0) sb.Append('K');
-        if ((Castle & CastleRights.WhiteQueen) != 0) sb.Append('Q');
-        if ((Castle & CastleRights.BlackKing) != 0) sb.Append('k');
-        if ((Castle & CastleRights.BlackQueen) != 0) sb.Append('q');
+        var sb = new StringBuilder(4);
+        bool std = StandardCastleFiles;
+        if ((Castle & CastleRights.WhiteKing) != 0)
+            sb.Append(std ? 'K' : char.ToUpperInvariant(FileChar(WhiteKingRookFile)));
+        if ((Castle & CastleRights.WhiteQueen) != 0)
+            sb.Append(std ? 'Q' : char.ToUpperInvariant(FileChar(WhiteQueenRookFile)));
+        if ((Castle & CastleRights.BlackKing) != 0)
+            sb.Append(std ? 'k' : FileChar(BlackKingRookFile));
+        if ((Castle & CastleRights.BlackQueen) != 0)
+            sb.Append(std ? 'q' : FileChar(BlackQueenRookFile));
         return sb.ToString();
     }
+
+    private static char FileChar(int file) => (char)('a' + file);
+
+    private static int KingFileOnRank(Board b, int rank)
+    {
+        Piece king = rank == 0 ? Piece.WKing : Piece.BKing;
+        for (int f = 0; f < 8; f++)
+            if (b.Squares[Sq(f, rank)] == king) return f;
+        return -1;
+    }
+
+    /// <summary>
+    /// The outermost rook of this colour on <paramref name="rank"/>, scanning away from the
+    /// king in <paramref name="toward"/>. This is what a bare K/Q means under X-FEN, and in
+    /// ordinary chess it lands on h/a — which is why classic FENs keep behaving exactly as
+    /// they did.
+    /// </summary>
+    private static int OutermostRook(Board b, int rank, int kingFile, int toward, string fen)
+    {
+        if (kingFile < 0) return toward > 0 ? 7 : 0;
+        Piece rook = rank == 0 ? Piece.WRook : Piece.BRook;
+        int found = -1;
+        for (int f = kingFile + toward; f >= 0 && f < 8; f += toward)
+            if (b.Squares[Sq(f, rank)] == rook) found = f;
+        if (found < 0)
+            throw new FormatException(
+                $"Castling right implies a rook {(toward > 0 ? "right" : "left")} of the king "
+                + $"on rank {rank + 1}, and there is none, in FEN '{fen}'.");
+        return found;
+    }
+
 
     public static Piece CharToPiece(char c) => c switch
     {

@@ -84,6 +84,20 @@ jobs:
   ingest:
     name: "ingest ${{ inputs.source }} → ${{ inputs.database }}"
     runs-on: [self-hosted, laplace]
+    concurrency:
+      # PER SOURCE, NOT GLOBAL. Ten different corpora ingesting at once is a capacity
+      # question, not a correctness one: the write path is built for concurrent COPY
+      # (apply partitions, id-range connections), rows are content-addressed, and
+      # consensus accumulates. Serialising every seed behind every other seed would be
+      # baking one dev box's limits into the architecture.
+      #
+      # Same source + same database DOES serialise: two concurrent runs of one source
+      # race on its completion marker and on the marker-gated novelty probes.
+      #
+      # Never cancelled. A seed is dispatched by hand -- explicitly wanted, often hours
+      # long -- and #784 already made this call for the same reason.
+      group: laplace-ingest-${{ inputs.source }}-${{ inputs.database }}
+      cancel-in-progress: false
     timeout-minutes: ${{ fromJSON(inputs.timeout_minutes) }}
     # Wall-clock, published so a throughput baseline has something to read. Before this
     # no seed run in CI history recorded its own duration -- timeout-minutes is a ceiling,
@@ -152,6 +166,20 @@ jobs:
     needs: ingest
     if: ${{ inputs.run_idempotency && needs.ingest.result == 'success' }}
     runs-on: [self-hosted, laplace]
+    concurrency:
+      # PER SOURCE, NOT GLOBAL. Ten different corpora ingesting at once is a capacity
+      # question, not a correctness one: the write path is built for concurrent COPY
+      # (apply partitions, id-range connections), rows are content-addressed, and
+      # consensus accumulates. Serialising every seed behind every other seed would be
+      # baking one dev box's limits into the architecture.
+      #
+      # Same source + same database DOES serialise: two concurrent runs of one source
+      # race on its completion marker and on the marker-gated novelty probes.
+      #
+      # Never cancelled. A seed is dispatched by hand -- explicitly wanted, often hours
+      # long -- and #784 already made this call for the same reason.
+      group: laplace-ingest-${{ inputs.source }}-${{ inputs.database }}
+      cancel-in-progress: false
     timeout-minutes: ${{ fromJSON(inputs.timeout_minutes) }}
     env:
       LAPLACE_DB: "Host=/var/run/postgresql;Username=laplace_admin;Database=${{ inputs.database }}"

@@ -44,13 +44,20 @@ public sealed class ChessPositionRefTests
         Assert.NotEqual(a, b);
     }
 
+    /// <summary>
+    /// A Chess960 position composes an id now, and — the part that matters — it is a
+    /// DIFFERENT id from the same board with its castling rights stripped. That was the
+    /// hazard the old refusal existed to prevent; modelling the rights removes the hazard
+    /// rather than dodging it.
+    /// </summary>
     [Fact]
-    public void TryComposeId_Chess960XFen_Refused()
+    public void TryComposeId_Chess960XFen_ComposesAndIsNotTheStrippedPosition()
     {
-        // Same refuse-not-invent law as Board.FromFen / InitialState — a silently
-        // stripped castling right would mint the wrong position id.
-        Assert.False(ChessPositionRef.TryComposeId(
-            "qrbbnkrn/pppppppp/8/8/8/8/PPPPPPPP/QRBBNKRN w GBgb - 0 1", out _));
+        Assert.True(ChessPositionRef.TryComposeId(
+            "qrbbnkrn/pppppppp/8/8/8/8/PPPPPPPP/QRBBNKRN w GBgb - 0 1", out var withRights));
+        Assert.True(ChessPositionRef.TryComposeId(
+            "qrbbnkrn/pppppppp/8/8/8/8/PPPPPPPP/QRBBNKRN w - - 0 1", out var stripped));
+        Assert.NotEqual(withRights, stripped);
     }
 
     [Fact]
