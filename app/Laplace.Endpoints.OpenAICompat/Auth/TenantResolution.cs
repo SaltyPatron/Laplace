@@ -124,13 +124,28 @@ internal sealed class ApiKeyEnforcementMiddleware
         _options = options.Value;
     }
 
+    /// <summary>
+    /// True when <paramref name="path"/> IS <paramref name="segment"/> or sits beneath it.
+    /// "/v1" and "/v1/models" match "/v1"; "/v10" and "/v1x" do not.
+    /// </summary>
+    private static bool IsUnder(string path, string segment) =>
+        path.Equals(segment, StringComparison.OrdinalIgnoreCase)
+        || (path.StartsWith(segment, StringComparison.OrdinalIgnoreCase)
+            && path.Length > segment.Length
+            && path[segment.Length] == '/');
+
     public async Task InvokeAsync(HttpContext context, ITenantResolver resolver)
     {
         var path = context.Request.Path.Value ?? "";
         // Playing surface sits at /chess/* (outside /v1); without this branch key mode
         // never sees it and C04 stays open (GH #489).
-        var governed = path.StartsWith("/v1", StringComparison.OrdinalIgnoreCase)
-            || path.StartsWith("/chess", StringComparison.OrdinalIgnoreCase);
+        //
+        // Match on a SEGMENT boundary, not a bare prefix. StartsWith("/v1") also matched
+        // /v10/*, and StartsWith("/chess") also matched /chessboard/* — this decides
+        // whether tenant governance applies at all, so a prefix collision is an
+        // authorization-surface bug, not a routing nicety. No such route exists today,
+        // which is exactly why nobody would notice when one is added.
+        var governed = IsUnder(path, "/v1") || IsUnder(path, "/chess");
         if (!governed)
         {
             await _next(context);

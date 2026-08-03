@@ -28,20 +28,34 @@ PSQL=(psql -h "${PGHOST:-/var/run/postgresql}" -U "${PGUSER:-laplace_admin}" -d 
 deadline=$(( SECONDS + BUDGET_SECONDS ))
 
 while :; do
+  # FAIL CLOSED. The previous form was `n=$(psql ... 2>/dev/null || echo 0)`, which
+  # collapsed "the database says zero" and "the probe did not run" into the same
+  # answer -- so an unreachable host, a bad PGUSER, a missing laplace schema or an
+  # exhausted connection cap all reported QUIET and let the caller bounce PostgreSQL
+  # over a live ingest. That is the one failure this script exists to prevent, and it
+  # was the only one it could not see. Quiet must now be PROVEN: rc 0 and a numeric
+  # count. Anything else is busy, and the wait budget still bounds the loop.
+  rc=0
   n=$("${PSQL[@]}" -tAc \
-      "SELECT count(*) FROM laplace.ingest_run_journal WHERE status = 'running';" 2>/dev/null || echo 0)
-  if [ "${n:-0}" -eq 0 ]; then
-    echo "substrate quiet — no ingest in flight"
-    exit 0
+      "SELECT count(*) FROM laplace.ingest_run_journal WHERE status = 'running';" 2>&1) || rc=$?
+
+  if [ "$rc" -eq 0 ] && [[ "$n" =~ ^[0-9]+$ ]]; then
+    if [ "$n" -eq 0 ]; then
+      echo "substrate quiet — no ingest in flight"
+      exit 0
+    fi
+
+    echo "::notice::waiting on ${n} in-flight ingest(s) before touching PostgreSQL"
+    "${PSQL[@]}" -P pager=off -c \
+      "SELECT source_name, input_units_done, input_units_total, now() - started_at AS elapsed
+       FROM laplace.ingest_run_journal WHERE status = 'running' ORDER BY started_at;" || true
+  else
+    echo "::warning::ingest-state probe failed (psql rc=${rc}): ${n//$'\n'/ }"
+    echo "::warning::treating as BUSY — an unreachable or misconfigured database is not proof of quiet"
   fi
 
-  echo "::notice::waiting on ${n} in-flight ingest(s) before touching PostgreSQL"
-  "${PSQL[@]}" -P pager=off -c \
-    "SELECT source_name, input_units_done, input_units_total, now() - started_at AS elapsed
-     FROM laplace.ingest_run_journal WHERE status = 'running' ORDER BY started_at;" || true
-
   if [ "$SECONDS" -ge "$deadline" ]; then
-    echo "::error::${n} ingest(s) still running after ${BUDGET_SECONDS}s — refusing to proceed over them"
+    echo "::error::substrate not PROVEN quiet after ${BUDGET_SECONDS}s — refusing to proceed"
     exit 1
   fi
   sleep "$INTERVAL"
