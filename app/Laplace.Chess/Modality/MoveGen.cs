@@ -303,56 +303,75 @@ public static class MoveGen
         moves.Add(new ChessMove(from, to, n, MoveFlags.Promotion));
     }
 
+    /// <summary>
+    /// Castling, Chess960 included. The king always ENDS on g/c and the rook on f/d — that
+    /// is true of ordinary chess too, which is why one routine covers both. What varies is
+    /// where they START, so nothing here may assume e1/a1/h1.
+    ///
+    /// Three Chess960 shapes have no standard-chess analogue and each is handled below:
+    ///   - the king may already stand on its destination, so it moves ZERO squares
+    ///   - the rook may stand on the king's destination, or the king on the rook's
+    ///   - the path may be blocked by the castling rook itself, which does not block
+    /// </summary>
     private static void GenCastle(Board b, int from, bool white, List<ChessMove> moves)
     {
+        int rank = white ? 0 : 7;
+        if (Board.RankOf(from) != rank) return;
         bool attackerWhite = !white;
-        if (white)
+        // In check is in check whatever the back rank looks like.
+        if (IsSquareAttacked(b, from, attackerWhite)) return;
+
+        var kingRight = white ? CastleRights.WhiteKing : CastleRights.BlackKing;
+        var queenRight = white ? CastleRights.WhiteQueen : CastleRights.BlackQueen;
+
+        if ((b.Castle & kingRight) != 0)
+            TryCastle(b, from, white, kingSide: true, MoveFlags.CastleKing, moves);
+        if ((b.Castle & queenRight) != 0)
+            TryCastle(b, from, white, kingSide: false, MoveFlags.CastleQueen, moves);
+    }
+
+    private static void TryCastle(
+        Board b, int kingFrom, bool white, bool kingSide, MoveFlags flag, List<ChessMove> moves)
+    {
+        int rank = white ? 0 : 7;
+        int rookFrom = Board.Sq(b.CastleRookFile(white, kingSide), rank);
+        Piece rook = white ? Piece.WRook : Piece.BRook;
+        if (b.Squares[rookFrom] != rook) return;
+
+        int kingTo = Board.Sq(kingSide ? 6 : 2, rank);
+        int rookTo = Board.Sq(kingSide ? 5 : 3, rank);
+
+        // Both paths must be clear of everything EXCEPT the two castling pieces, which are
+        // allowed to be standing in each other's way — they both move.
+        if (!PathClear(b, kingFrom, kingTo, kingFrom, rookFrom)) return;
+        if (!PathClear(b, rookFrom, rookTo, kingFrom, rookFrom)) return;
+
+        // The king may not pass through or land on an attacked square. Its own start is
+        // already known safe; when kingFrom == kingTo this loop checks that square alone.
+        bool attackerWhite = !white;
+        int step = kingTo > kingFrom ? 1 : kingTo < kingFrom ? -1 : 0;
+        for (int sq = kingFrom; ; sq += step)
         {
-            if (from != Board.Sq(4, 0)) return;
-            if (IsSquareAttacked(b, from, attackerWhite)) return;
-            if ((b.Castle & CastleRights.WhiteKing) != 0)
-            {
-                if (b.Squares[Board.Sq(5, 0)] == Piece.Empty &&
-                    b.Squares[Board.Sq(6, 0)] == Piece.Empty &&
-                    b.Squares[Board.Sq(7, 0)] == Piece.WRook &&
-                    !IsSquareAttacked(b, Board.Sq(5, 0), attackerWhite) &&
-                    !IsSquareAttacked(b, Board.Sq(6, 0), attackerWhite))
-                    moves.Add(new ChessMove(from, Board.Sq(6, 0), Piece.Empty, MoveFlags.CastleKing));
-            }
-            if ((b.Castle & CastleRights.WhiteQueen) != 0)
-            {
-                if (b.Squares[Board.Sq(3, 0)] == Piece.Empty &&
-                    b.Squares[Board.Sq(2, 0)] == Piece.Empty &&
-                    b.Squares[Board.Sq(1, 0)] == Piece.Empty &&
-                    b.Squares[Board.Sq(0, 0)] == Piece.WRook &&
-                    !IsSquareAttacked(b, Board.Sq(3, 0), attackerWhite) &&
-                    !IsSquareAttacked(b, Board.Sq(2, 0), attackerWhite))
-                    moves.Add(new ChessMove(from, Board.Sq(2, 0), Piece.Empty, MoveFlags.CastleQueen));
-            }
+            if (IsSquareAttacked(b, sq, attackerWhite)) return;
+            if (sq == kingTo || step == 0) break;
         }
-        else
+
+        moves.Add(new ChessMove(kingFrom, kingTo, Piece.Empty, flag));
+    }
+
+    /// <summary>
+    /// Every square strictly between <paramref name="a"/> and <paramref name="b2"/>, plus the
+    /// destination, is empty — ignoring the two squares the castling king and rook vacate.
+    /// </summary>
+    private static bool PathClear(Board b, int a, int b2, int ignore1, int ignore2)
+    {
+        int step = b2 > a ? 1 : b2 < a ? -1 : 0;
+        if (step == 0) return true;
+        for (int sq = a + step; ; sq += step)
         {
-            if (from != Board.Sq(4, 7)) return;
-            if (IsSquareAttacked(b, from, attackerWhite)) return;
-            if ((b.Castle & CastleRights.BlackKing) != 0)
-            {
-                if (b.Squares[Board.Sq(5, 7)] == Piece.Empty &&
-                    b.Squares[Board.Sq(6, 7)] == Piece.Empty &&
-                    b.Squares[Board.Sq(7, 7)] == Piece.BRook &&
-                    !IsSquareAttacked(b, Board.Sq(5, 7), attackerWhite) &&
-                    !IsSquareAttacked(b, Board.Sq(6, 7), attackerWhite))
-                    moves.Add(new ChessMove(from, Board.Sq(6, 7), Piece.Empty, MoveFlags.CastleKing));
-            }
-            if ((b.Castle & CastleRights.BlackQueen) != 0)
-            {
-                if (b.Squares[Board.Sq(3, 7)] == Piece.Empty &&
-                    b.Squares[Board.Sq(2, 7)] == Piece.Empty &&
-                    b.Squares[Board.Sq(1, 7)] == Piece.Empty &&
-                    b.Squares[Board.Sq(0, 7)] == Piece.BRook &&
-                    !IsSquareAttacked(b, Board.Sq(3, 7), attackerWhite) &&
-                    !IsSquareAttacked(b, Board.Sq(2, 7), attackerWhite))
-                    moves.Add(new ChessMove(from, Board.Sq(2, 7), Piece.Empty, MoveFlags.CastleQueen));
-            }
+            if (sq != ignore1 && sq != ignore2 && b.Squares[sq] != Piece.Empty) return false;
+            if (sq == b2) break;
         }
+        return true;
     }
 }

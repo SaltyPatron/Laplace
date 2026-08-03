@@ -27,17 +27,21 @@ internal static class ChessDropLedger
     internal const string UnreadableStartPosition = "unreadable-start-position";
 
     /// <summary>
-    /// A variant start position this modality does not model — in practice always
-    /// Chess960, whose X-FEN/Shredder castling field carries rook FILES ("FCfc") rather
-    /// than KQkq. <c>Board.FromFen</c> refuses it deliberately (replaying it from the
-    /// standard array would record a game that was never played), and modelling it means
-    /// keeping rook files on the board, which reaches <c>StateKey</c> and therefore the
-    /// content id of every position — a substrate-wide identity change that is its own
-    /// piece of work, not a side effect of a parser fix.
+    /// A variant start position this modality does not model.
     ///
-    /// Broken out from <see cref="UnreadableStartPosition"/> so the drop report
-    /// distinguishes "a variant we chose not to model" from "a corrupt FEN", which are
-    /// the same line of output but completely different decisions.
+    /// Chess960 USED to be counted here and no longer is — it is modelled (see
+    /// <see cref="Laplace.Modality.Chess.Chess960Positions"/>). The reasoning that kept it
+    /// out was wrong and is worth recording: modelling it was said to reach
+    /// <c>StateKey</c> and therefore the content id of every position, i.e. a reseed. It
+    /// does not. Identity embeds <c>Board.CastleString()</c>, the rook files default to the
+    /// standard ones, and CastleString emits the classic KQkq whenever they hold — so an
+    /// ordinary position's surface is byte-identical and only boards whose rooks are NOT on
+    /// a/h get new ids. Those are exactly the boards the substrate did not contain, because
+    /// the games were being refused. Additive, not a reseed.
+    ///
+    /// Kept as a distinct reason for the next variant along, and because the report should
+    /// separate "a variant we do not model" from "a corrupt FEN" — the same line of output,
+    /// completely different decisions.
     /// </summary>
     internal const string UnmodelledVariant = "unmodelled-variant";
     internal const string PgnBlockWithoutResult = "pgn-block-without-result";
