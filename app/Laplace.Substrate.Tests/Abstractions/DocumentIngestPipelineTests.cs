@@ -1,3 +1,4 @@
+using System.IO;
 using System.Text;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
@@ -117,6 +118,34 @@ public sealed class DocumentIngestPipelineTests
         // --force re-observes: files compose (content no-ops under the present bitmap)
         // and re-deposit their markers.
         Assert.Equal(records.Count, MarkerAttestationCount(changes));
+    }
+
+    // GH #596: invalid UTF-8 must not throw out of ResolveRoot / OpenAsync — one bad
+    // file in a directory ingest skips; the run continues.
+    [Fact]
+    public void ResolveRoot_InvalidUtf8_ReturnsNull()
+    {
+        Assert.Null(ContentTierSpine.ResolveRoot(new byte[] { 0xFF, 0xFE }));
+    }
+
+    [Fact]
+    public async Task DocumentFileExtract_InvalidUtf8_YieldsNoRecord()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "laplace596_" + Path.GetRandomFileName());
+        try
+        {
+            Directory.CreateDirectory(dir);
+            string file = Path.Combine(dir, "bad.txt");
+            await File.WriteAllBytesAsync(file, new byte[] { 0xFF, 0xFE, (byte)'a' });
+            var records = new List<ContentIngestRecord>();
+            await foreach (var r in DocumentFileExtract.OpenAsync(file, "bad.txt", default))
+                records.Add(r);
+            Assert.Empty(records);
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
     }
 
     [Fact]

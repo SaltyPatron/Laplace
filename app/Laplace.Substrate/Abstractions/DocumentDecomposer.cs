@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
@@ -101,11 +102,19 @@ public static class DocumentFileExtract
     {
         byte[] bytes = await ReadFileBytesAsync(file, ct);
         if (bytes.Length == 0) yield break;
-        Hash128 fileRoot = ContentTierSpine.ResolveRoot(bytes)
-            ?? throw new InvalidOperationException(
-                $"document '{relativePath}': content has no resolvable root");
+        // Match RepoDecomposer / GH #596: one malformed-encoding file must skip with a
+        // warning, not abort a multi-hundred-file document run (rc=1 for the process).
+        Hash128? fileRoot = ContentTierSpine.ResolveRoot(bytes);
+        if (fileRoot is null)
+        {
+            Trace.TraceWarning(
+                "DocumentFileExtract: skipping '{0}' — unresolvable content root " +
+                "(malformed encoding or native content_root_id rejection)",
+                relativePath);
+            yield break;
+        }
         yield return new ContentIngestRecord(
-            bytes, SourceId: fileRoot, Metadata: FileMetadata.FromPath(file, relativePath));
+            bytes, SourceId: fileRoot.Value, Metadata: FileMetadata.FromPath(file, relativePath));
     }
 
     private static async Task<byte[]> ReadFileBytesAsync(string file, CancellationToken ct)
