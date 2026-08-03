@@ -198,8 +198,8 @@ public class Chess960Tests
         }
     }
 
-    /// <summary>The eight Freestyle games in the corpus are real members of the set. A back
-    /// rank that is not in the 960 is a corrupt record, not a variant.</summary>
+    /// <summary>The eight Freestyle games in the corpus are members of the standard
+    /// enumeration, so each can be NAMED by its board number.</summary>
     [Theory]
     [InlineData("NBRKBRNQ", 376)]
     [InlineData("BBRNNKRQ", 464)]
@@ -213,8 +213,36 @@ public class Chess960Tests
         => Assert.Equal(expected, Chess960Positions.TryNumber(backRank));
 
     [Fact]
-    public void NonMemberBackRank_IsRejected()
+    public void NonMemberBackRank_HasNoNumber()
         => Assert.Null(Chess960Positions.TryNumber("RNBQKBNQ"));   // two queens, no king
+
+    /// <summary>
+    /// THE RULE IS THE AUTHORITY, NOT THE LIST. Double Fischer Random gives White and Black
+    /// different back ranks — legal under the format, and absent from Scharnagl's
+    /// enumeration, which only numbers symmetric arrays. Such a game must still PARSE,
+    /// still CASTLE, and simply carry no board number.
+    ///
+    /// The list is somebody else's; the rules are the format's. Refusing a position for
+    /// being unnumbered would be the EXISTS-collapses-the-distinction error again —
+    /// unattested is not attested-false.
+    /// </summary>
+    [Fact]
+    public void AsymmetricStart_PlaysFine_AndSimplyHasNoNumber()
+    {
+        // White NBRKBRNQ (#376), Black nqrkbbrn — different arrays, both legal.
+        const string dfrc = "nqrkbbrn/pppppppp/8/8/8/8/PPPPPPPP/NBRKBRNQ w FCgc - 0 1";
+        var b = Board.FromFen(dfrc);
+
+        Assert.Null(Chess960Positions.TryNumberOfStart(b));        // no name...
+        Assert.Equal(CastleRights.All, b.Castle);                  // ...but fully playable
+        Assert.Equal(dfrc, b.ToFen());
+
+        var pseudo = new List<ChessMove>();
+        var legal = new List<ChessMove>();
+        MoveGen.Legal(b, pseudo, legal);
+        Assert.NotEmpty(legal);
+        Assert.Equal(20, legal.Count);   // 16 pawn + 4 knight moves from any 960 array
+    }
 
     /// <summary>A START position reports its number; a MID-GAME one reports none, because it
     /// has none — which is why the engine keys on rook files, not on this.</summary>

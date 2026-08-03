@@ -6,17 +6,24 @@ namespace Laplace.Modality.Chess;
 /// The 960 Chess960 ("Freestyle") starting arrays, by their canonical SP number — the
 /// Scharnagl numbering chess.com, Lichess and FIDE all use. Standard chess is SP 518.
 ///
-/// WHY A TABLE AND NOT A PREDICATE. The set is fixed, small and computable, which makes it
-/// worth having in one place rather than re-deriving a legality rule (bishops on opposite
-/// colours, king between the rooks) at each call site. Two things fall out that a predicate
-/// does not give:
+/// THIS IS A NAMING TABLE, NOT A VALIDATOR, AND THE DIFFERENCE IS THE WHOLE POINT.
 ///
-///   VALIDATION. A back rank that is not in this set is not a Freestyle position. Without
-///   it a corrupt or hand-edited FEN replays happily as "some 960 game" and is recorded as
-///   fact. Membership is the existence test, the same way an id is everywhere else here.
+/// The 960 is SOMEBODY ELSE'S ENUMERATION — Scharnagl's, which chess.com, Lichess and FIDE
+/// adopted. What makes a Freestyle position legal is the RULES (bishops on opposite
+/// colours, king between the rooks), not membership of anyone's list. The two coincide for
+/// symmetric single-array Chess960, and they stop coinciding the moment a source ships
+/// something the list does not cover — Double Fischer Random, where White and Black get
+/// DIFFERENT back ranks, is legal under the format and has no SP number at all.
 ///
-///   PROVENANCE. The SP number is the game's variant, named. "Freestyle #376" is a fact
-///   about the game worth recording, and it is one number rather than a back-rank string.
+/// So membership decides whether we can NAME the variant, never whether we can play it.
+/// Nothing in the replay path consults this table; castling geometry comes off the board's
+/// rook files and works for any arrangement. A position outside the enumeration replays
+/// exactly the same and simply carries no board number — unattested, which is not
+/// attested-false. Treating a missing number as a corrupt record would be this codebase's
+/// own EXISTS-collapses-the-distinction mistake in a new place.
+///
+/// What it is for: PROVENANCE. "Freestyle #376" is the game's variant, named, in one
+/// number rather than a back-rank string — a fact worth attesting when it exists.
 ///
 /// DERIVED, NOT TYPED OUT. 960 literals would be 960 chances to fat-finger one, and the
 /// derivation is eight lines. Built once on first use and frozen; the reverse map is the
@@ -57,13 +64,17 @@ public static class Chess960Positions
         => Table.Value.ByRank.TryGetValue(backRank, out int n) ? n : null;
 
     /// <summary>
-    /// The SP number of a board that is a Chess960 STARTING array, or null when it is not
-    /// one — including when it is a mid-game position, which has no SP number at all.
+    /// The SP number of a board that is a Chess960 STARTING array, or null when there is no
+    /// number to give: a mid-game position, an asymmetric (Double Fischer Random) start, or
+    /// any legal arrangement outside the standard enumeration.
     ///
-    /// A starting array is: both back ranks the same arrangement, both pawn ranks full, and
-    /// nothing anywhere else. Checking the whole board rather than just rank 1 is the point
-    /// — otherwise a middlegame that happens to have an intact back rank reports a variant
-    /// it was never played under.
+    /// Null means "no name for this", not "reject this". The caller attests the number when
+    /// it exists and attests nothing when it does not.
+    ///
+    /// A numbered start is: both back ranks the SAME arrangement, both pawn ranks full,
+    /// nothing anywhere else. Checking the whole board rather than just rank 1 is
+    /// deliberate — otherwise a middlegame that happens to have an intact back rank reports
+    /// a variant it was never played under.
     /// </summary>
     public static int? TryNumberOfStart(Board b)
     {
