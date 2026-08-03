@@ -1,11 +1,9 @@
 -- chess_missed_finish(line): positions on the line where the closings catalog
--- says the side to move wins (HAS_WDL = 'win'), but the played MOVE leaves a
--- successor that is not also a win for the mover after the ply (i.e. the played
--- edge abandons a tablebase win). Provenance read — not logistic HAS_EVAL.
+-- says the side to move wins, but the played MOVE leaves a successor that is
+-- not a loss/blessed-loss for the opponent (tablebase win abandoned).
+-- Provenance read — not logistic HAS_EVAL.
 --
--- Requires: trajectory on the line + position-grain HAS_WDL deposits. MOVE edges
--- are the shared web (ctx null); the line's ordered positions define which edge
--- was played.
+-- Relation vocabulary via chess_has_wdl_type (ISA G3).
 DROP FUNCTION IF EXISTS chess_missed_finish(bytea, integer);
 
 CREATE OR REPLACE FUNCTION chess_missed_finish(p_line bytea, p_limit int DEFAULT 32)
@@ -17,10 +15,7 @@ CREATE OR REPLACE FUNCTION chess_missed_finish(p_line bytea, p_limit int DEFAULT
         to_wdl text)
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
-WITH rel AS MATERIALIZED (
-    SELECT relation_type_id('HAS_WDL') AS wdl
-),
-win_id AS MATERIALIZED (
+WITH win_id AS MATERIALIZED (
     SELECT word_id('win') AS id
 ),
 line AS MATERIALIZED (
@@ -36,7 +31,7 @@ steps AS MATERIALIZED (
 wdl AS MATERIALIZED (
     SELECT a.subject_id AS pos, a.object_id AS wdl_id
     FROM attestations a
-    JOIN rel r ON a.type_id = r.wdl
+    WHERE a.type_id = chess_has_wdl_type()
 ),
 missed AS MATERIALIZED (
     SELECT s.ply, s.from_pos, s.to_pos, fw.wdl_id AS from_wdl_id, tw.wdl_id AS to_wdl_id

@@ -149,17 +149,17 @@ public sealed class ChessOpeningsDecomposer(bool recursive = false)
         if (nameId is { } nid)
         {
             b.AddAttestation(NativeAttestation.Categorical(
-                lineId, "OPENING_NAME", nid, ChessVocabulary.OpeningsSourceId, null, TC.AcademicCurated));
+                lineId, ChessSeedManifest.OpeningName, nid, ChessVocabulary.OpeningsSourceId, null, TC.AcademicCurated));
             // Bridge: ChessOpeningIndex still keys boards for deepest-named-position match.
             b.AddAttestation(NativeAttestation.Categorical(
-                finalId, "OPENING_NAME", nid, ChessVocabulary.OpeningsSourceId, null, TC.AcademicCurated));
+                finalId, ChessSeedManifest.OpeningName, nid, ChessVocabulary.OpeningsSourceId, null, TC.AcademicCurated));
         }
         if (ecoId is { } eid)
         {
             b.AddAttestation(NativeAttestation.Categorical(
-                lineId, "HAS_ECO", eid, ChessVocabulary.OpeningsSourceId, null, TC.AcademicCurated));
+                lineId, ChessSeedManifest.HasEco, eid, ChessVocabulary.OpeningsSourceId, null, TC.AcademicCurated));
             b.AddAttestation(NativeAttestation.Categorical(
-                finalId, "HAS_ECO", eid, ChessVocabulary.OpeningsSourceId, null, TC.AcademicCurated));
+                finalId, ChessSeedManifest.HasEco, eid, ChessVocabulary.OpeningsSourceId, null, TC.AcademicCurated));
         }
     }
 
