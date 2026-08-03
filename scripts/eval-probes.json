@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "advisory_until": "2026-08-10",
+  "blocking_flip_date": null,
+  "latency_ceiling_s": 30.0,
+  "notes": "Retires prompts_smoke.txt. election expected_topic_surface is hand-written (W5 D8). held_out misses report before hits.",
+  "probes": [
+    {
+      "id": "election-pawn-chess",
+      "class": "election",
+      "surface": "sql",
+      "held_out": true,
+      "prompt": "What is a pawn in chess?",
+      "election_via": "prompt_coherence",
+      "expected_topic_surface": "pawn",
+      "notes": "Failure class: elects letter-A / unrelated synset instead of chess piece"
+    },
+    {
+      "id": "election-glacier",
+      "class": "election",
+      "surface": "sql",
+      "held_out": true,
+      "prompt": "What is a glacier?",
+      "election_via": "prompt_coherence",
+      "expected_topic_surface": "glacier",
+      "notes": "Failure class: elects the article / wrong sense"
+    },
+    {
+      "id": "election-dog",
+      "class": "election",
+      "surface": "sql",
+      "held_out": false,
+      "prompt": "dog",
+      "election_via": "resolve_topic",
+      "expected_topic_surface": "dog"
+    },
+    {
+      "id": "smoke-france",
+      "class": "smoke",
+      "surface": "sql",
+      "held_out": false,
+      "prompt": "The capital of France is",
+      "election_via": "prompt_coherence",
+      "expected_topic_surface": "france",
+      "notes": "from retired prompts_smoke.txt — election probe until HTTP generation wired"
+    },
+    {
+      "id": "smoke-water",
+      "class": "smoke",
+      "surface": "sql",
+      "held_out": false,
+      "prompt": "Water is made of",
+      "election_via": "prompt_coherence",
+      "expected_topic_surface": "water"
+    },
+    {
+      "id": "smoke-hot",
+      "class": "smoke",
+      "surface": "sql",
+      "held_out": false,
+      "prompt": "The opposite of hot is",
+      "election_via": "prompt_coherence",
+      "expected_topic_surface": "hot"
+    }
+  ]
+}
