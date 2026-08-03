@@ -1606,7 +1606,40 @@ public static class NpgsqlSubstrateReads
             p => p.AddWithValue("q", query),
             ct: ct, label: "api_catalog", onError: onError);
 
-    public readonly record struct HealthMetricRow(string Metric, string Value);
+    /// <summary>
+    /// A health metric. <paramref name="Value"/> is NULLABLE on purpose: a metric the
+    /// health pass did not measure reports null, which is a different fact from zero and
+    /// must survive to the caller rather than throwing or defaulting.
+    /// </summary>
+    public readonly record struct HealthMetricRow(string Metric, string? Value);
+
+    /// <summary>One source's ingest state — see <c>laplace.source_status()</c>.</summary>
+    public readonly record struct SourceStatusRow(
+        string Source, byte[] SourceId, bool Known, bool Ingested,
+        long EvidenceApprox, bool HasEntities, string? LastRunStatus, DateTime? LastRunAt);
+
+    /// <summary>
+    /// <c>laplace.source_status()</c> — is a source ingested, and how do we know.
+    ///
+    /// Exists so that no caller ever assembles this again. Every hand-rolled version got
+    /// it wrong differently: an evidence test reports the content-only document lane as
+    /// absent, a typed source name returns zero rows when the spelling is off, and the run
+    /// journal is ops metadata that does not survive a restore. Asking with a name always
+    /// returns exactly one row, so absence is an answer instead of an empty result.
+    /// </summary>
+    public static Task<IReadOnlyList<SourceStatusRow>> SourceStatusAsync(
+        NpgsqlDataSource dataSource, string? source, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource,
+            "SELECT source, source_id, known, ingested, evidence_approx, has_entities, "
+            + "last_run_status, last_run_at FROM laplace.source_status(@s)",
+            static r => new SourceStatusRow(
+                r.GetString(0), (byte[])r[1], r.GetBoolean(2), r.GetBoolean(3),
+                r.GetInt64(4), r.GetBoolean(5),
+                r.IsDBNull(6) ? null : r.GetString(6),
+                r.IsDBNull(7) ? null : r.GetDateTime(7)),
+            p => p.Add("s", NpgsqlDbType.Text).Value = (object?)source ?? DBNull.Value,
+            ct: ct, label: "source_status", onError: onError);
 
     /// <summary><c>laplace.substrate_health()</c> flattened to metric/value rows.</summary>
     public static Task<IReadOnlyList<HealthMetricRow>> SubstrateHealthAsync(
@@ -1618,9 +1651,19 @@ public static class NpgsqlSubstrateReads
                  LATERAL (VALUES ('ok', h.ok::text),
                                  ('fake_tier_bands', h.fake_tier_bands::text),
                                  ('identity_violations', h.identity_violations::text),
+                                 -- WITHOUT THIS, identity_violations IS UNREADABLE. It is NULL
+                                 -- whenever the deep pass was skipped, and a consumer that
+                                 -- cannot see deep_checked reads that NULL as "no violations".
+                                 -- That is unattested collapsed into attested-false, in the one
+                                 -- query that reports substrate integrity.
+                                 ('deep_checked', h.deep_checked::text),
                                  ('bootstrap_entities', h.bootstrap_entities::text)) x(metric, value)
             """,
-            static r => new HealthMetricRow(r.GetString(0), r.GetString(1)),
+            // GetString on a NULL column THROWS. identity_violations is null by design when
+            // deep_checked is false, so `laplace health` did not report a skipped deep check
+            // -- it died with "Column 'value' is null". A null metric is an answer ("not
+            // measured"), never an error.
+            static r => new HealthMetricRow(r.GetString(0), r.IsDBNull(1) ? null : r.GetString(1)),
             ct: ct, label: "substrate_health", onError: onError);
 
     public readonly record struct QueryShapeRow(
