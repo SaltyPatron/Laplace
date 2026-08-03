@@ -42,8 +42,6 @@
       "app/Laplace.Chess/Service/ChessLiveGameHost.cs::HAS_RESULT": 1,
       "app/Laplace.Chess/Service/ChessLiveGameHost.cs::HAS_WHITE": 1,
       "app/Laplace.Chess/Service/ChessMoveCommentary.cs::EXPLAINS": 1,
-      "app/Laplace.Chess/Service/ChessOpeningsDecomposer.cs::HAS_ECO": 1,
-      "app/Laplace.Chess/Service/ChessOpeningsDecomposer.cs::OPENING_NAME": 1,
       "app/Laplace.Chess/Service/ChessPgnDecomposer.cs::CORRESPONDS_TO": 1,
       "app/Laplace.Chess/Service/ChessPgnDecomposer.cs::GAME_HAS_ECO": 1,
       "app/Laplace.Chess/Service/ChessPgnDecomposer.cs::GAME_HAS_OPENING": 1,

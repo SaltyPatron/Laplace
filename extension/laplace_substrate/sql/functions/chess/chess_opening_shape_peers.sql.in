@@ -1,12 +1,13 @@
 -- chess_opening_shape_peers(line_id): Hilbert/centroid locality prefilter, then
 -- Frechet on REALIZED entity_curve — Cat/Act applied to chess opening lines.
 --
--- NEVER Frechet on packed physicalities.trajectory (Rule #3). Candidates are
--- opening LINEs (subject of OPENING_NAME from ChessOpenings). Shape admits;
--- Hilbert alone is not "same opening."
+-- NEVER Frechet on packed physicalities.trajectory (Rule #3). Catalog peers are
+-- Chess_Game entities first-observed by ChessOpenings that carry a trajectory
+-- (opening LINEs after the catalog-dual deposit) — not OPENING_NAME attestation
+-- scans (that would re-introduce relation_type_id vocabulary literals; ISA G3).
 --
--- IDS OUT: name_id / eco_id are content ids. Render once via realize_batch on the
--- page — never per-row realize.
+-- IDS OUT: peer_line_id only. Name/ECO are separate attestations; render via
+-- realize_batch on a page of peer ids if needed — never per-row realize here.
 DROP FUNCTION IF EXISTS chess_opening_shape_peers(bytea, integer, float8);
 
 CREATE OR REPLACE FUNCTION chess_opening_shape_peers(
@@ -15,8 +16,6 @@ CREATE OR REPLACE FUNCTION chess_opening_shape_peers(
     p_frechet_max float8 DEFAULT 0.05)
     RETURNS TABLE(
         peer_line_id bytea,
-        name_id bytea,
-        eco_id bytea,
         geodesic double precision,
         frechet double precision)
     LANGUAGE plpgsql STABLE
@@ -25,6 +24,7 @@ DECLARE
     v_coord geometry;
     v_curve geometry;
     v_openings_src bytea := source_id('ChessOpenings');
+    v_game_type bytea := entity_type_id('Chess_Game');
 BEGIN
     SELECT a.coord, entity_curve(p_line)
       INTO v_coord, v_curve
@@ -33,22 +33,19 @@ BEGIN
 
     RETURN QUERY
     WITH catalog AS MATERIALIZED (
-        -- OPENING_NAME is also stamped on the final board (OpeningIndex bridge).
-        -- Peers are LINE entities only — Chess_Game type, with a deposited trajectory.
-        SELECT DISTINCT a.subject_id AS line_id
-        FROM attestations a
-        JOIN entities e ON e.id = a.subject_id
-                       AND e.type_id = entity_type_id('Chess_Game')
-        WHERE a.type_id = relation_type_id('OPENING_NAME')
-          AND a.source_id = v_openings_src
-          AND a.subject_id <> p_line
+        SELECT e.id AS line_id
+        FROM entities e
+        JOIN v_word_points w ON w.id = e.id
+        WHERE e.type_id = v_game_type
+          AND e.first_observed_by = v_openings_src
+          AND e.id <> p_line
+          AND w.coord IS NOT NULL
+          AND w.trajectory IS NOT NULL
     ),
     knn AS (
         SELECT w.id AS entity_id, w.coord
         FROM catalog c
         JOIN v_word_points w ON w.id = c.line_id
-        WHERE w.coord IS NOT NULL
-          AND w.trajectory IS NOT NULL
         ORDER BY w.coord <<->> v_coord
         LIMIT GREATEST(p_k * 20, 200)
     ),
@@ -57,28 +54,11 @@ BEGIN
                public.laplace_angular_distance_4d(k.coord, v_coord) AS geo,
                public.laplace_frechet_4d(entity_curve(k.entity_id), v_curve) AS fr
         FROM knn k
-    ),
-    admitted AS (
-        SELECT s.entity_id, s.geo, s.fr
-        FROM scored s
-        WHERE s.fr IS NOT NULL AND s.fr <= p_frechet_max
-        ORDER BY s.fr ASC, s.geo ASC, s.entity_id
-        LIMIT GREATEST(1, p_k)
     )
-    SELECT a.entity_id,
-           (SELECT an.object_id FROM attestations an
-             WHERE an.subject_id = a.entity_id
-               AND an.type_id = relation_type_id('OPENING_NAME')
-               AND an.source_id = v_openings_src
-             LIMIT 1),
-           (SELECT ae.object_id FROM attestations ae
-             WHERE ae.subject_id = a.entity_id
-               AND ae.type_id = relation_type_id('HAS_ECO')
-               AND ae.source_id = v_openings_src
-             LIMIT 1),
-           a.geo,
-           a.fr
-    FROM admitted a
-    ORDER BY a.fr ASC, a.geo ASC, a.entity_id;
+    SELECT s.entity_id, s.geo, s.fr
+    FROM scored s
+    WHERE s.fr IS NOT NULL AND s.fr <= p_frechet_max
+    ORDER BY s.fr ASC, s.geo ASC, s.entity_id
+    LIMIT GREATEST(1, p_k);
 END;
 $peers$;

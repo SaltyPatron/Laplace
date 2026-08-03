@@ -50,7 +50,7 @@ CEILINGS = {
     "g1_weight_literalism": 25,
     "g3_sql_vocabulary_literalism": 250,
     "g3_c_vocabulary_literalism": 17,
-    "g3_csharp_vocabulary_literalism": 702,
+    "g3_csharp_vocabulary_literalism": 700,
     "g8_band_literalism": 8,
 }
 

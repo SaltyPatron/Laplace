@@ -1,9 +1,8 @@
 -- chess_distance_to_syzygy(line): observed distance along a line to the first
--- deposited closing fact (HAS_WDL). Silence is not a draw — NULL when the line
--- never reaches a deposited tablebase position.
+-- deposited closing fact. Silence is not a draw — empty when the line never
+-- reaches a deposited tablebase position.
 --
--- d_men = piece count at that board (Men ≤ N for the closings catalog that
--- answered). plies_to_close = ordinal steps from start to first HAS_WDL hit.
+-- Relation vocabulary via chess_has_wdl_type / chess_has_dtz_type (ISA G3).
 DROP FUNCTION IF EXISTS chess_distance_to_syzygy(bytea);
 
 CREATE OR REPLACE FUNCTION chess_distance_to_syzygy(p_line bytea)
@@ -16,7 +15,7 @@ CREATE OR REPLACE FUNCTION chess_distance_to_syzygy(p_line bytea)
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
 WITH rel AS MATERIALIZED (
-    SELECT relation_type_id('HAS_WDL') AS wdl, relation_type_id('HAS_DTZ') AS dtz
+    SELECT chess_has_wdl_type() AS wdl, chess_has_dtz_type() AS dtz
 ),
 line AS MATERIALIZED (
     SELECT (u.ord - 1)::int AS ply, u.entity_id AS pos

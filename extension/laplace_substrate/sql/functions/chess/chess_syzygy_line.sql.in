@@ -10,14 +10,31 @@
 -- WDL is five-valued and SIDE-TO-MOVE POV, not white POV: 'win' means the player to
 -- move in that position wins with perfect play. It is never mixed with the OUTCOME
 -- fold's white-POV eff_mu, which is why this returns the token rather than a number.
+--
+-- Typed accessors below own the single relation_type_id('…') literals for this
+-- vocabulary (ISA G3). New chess SQL must call these — never re-type the strings.
+DROP FUNCTION IF EXISTS chess_has_wdl_type();
+DROP FUNCTION IF EXISTS chess_has_dtz_type();
 DROP FUNCTION IF EXISTS chess_syzygy_line(bytea, integer);
+
+CREATE OR REPLACE FUNCTION chess_has_wdl_type() RETURNS bytea
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT relation_type_id('HAS_WDL')
+$$;
+
+CREATE OR REPLACE FUNCTION chess_has_dtz_type() RETURNS bytea
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT relation_type_id('HAS_DTZ')
+$$;
 
 CREATE OR REPLACE FUNCTION chess_syzygy_line(p_line bytea, p_limit int DEFAULT 64)
     RETURNS TABLE(position_id bytea, wdl text, dtz text)
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
 WITH rel AS MATERIALIZED (
-    SELECT relation_type_id('HAS_WDL') AS wdl, relation_type_id('HAS_DTZ') AS dtz
+    SELECT chess_has_wdl_type() AS wdl, chess_has_dtz_type() AS dtz
 ),
 line AS MATERIALIZED (
     SELECT u.ord AS ordinal, u.entity_id AS pos
