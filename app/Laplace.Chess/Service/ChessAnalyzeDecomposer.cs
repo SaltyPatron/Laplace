@@ -92,5 +92,5 @@ public sealed class ChessAnalyzeDecomposer
 /// </summary>
 public sealed record ChessAnalyzeRecord(ChessWitnessedGame Game) : ITrunkRootRecord
 {
-    public Hash128 TrunkRootId => ChessVocabulary.AnalysisMarkerId(Game.EventId, ChessAnalyze.Version);
+    public Hash128 TrunkRootId => ChessVocabulary.AnalysisMarkerId(Game.PlayingId, ChessAnalyze.Version);
 }

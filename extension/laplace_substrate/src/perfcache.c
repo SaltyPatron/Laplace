@@ -23,6 +23,7 @@
 #include "utils/guc.h"
 #include "utils/memutils.h"
 
+#include "laplace/core/chess_position_table.h"
 #include "laplace/core/codepoint_table.h"
 #include "laplace/core/content_witness_batch.h"
 #include "laplace/core/hash128.h"
@@ -32,6 +33,7 @@
 
 static char *perfcache_path = NULL;
 static char *highway_perfcache_path = NULL;
+static char *chess_position_perfcache_path = NULL;
 static int native_mkl_threads = 1;
 
 void
@@ -51,6 +53,16 @@ laplace_substrate_perfcache_init(void)
         "Path to the highway perfcache blob (laplace_highway_perfcache.bin).",
         "Empty disables highway plane-selection functions; they error until configured.",
         &highway_perfcache_path,
+        "",
+        PGC_SIGHUP,
+        0,
+        NULL, NULL, NULL);
+    DefineCustomStringVariable(
+        "laplace_substrate.chess_position_perfcache_path",
+        "Path to the chess compose-floor blob (laplace_chess_position_perfcache.bin).",
+        "Tier-1 piece×square vocab + catalog tier-2 positions (GH #822). "
+        "Empty disables chess floor lookups; compose falls back to t0 recomputation.",
+        &chess_position_perfcache_path,
         "",
         PGC_SIGHUP,
         0,
@@ -114,6 +126,38 @@ laplace_highway_ready(void)
                  errhint("Fix laplace_substrate.highway_perfcache_path or redeploy the "
                          "blob (install-extensions.cmd stages it).")));
     return true;
+}
+
+bool
+laplace_chess_position_ready(void)
+{
+    int rc;
+
+    if (chess_position_table_is_loaded())
+        return true;
+    if (chess_position_perfcache_path == NULL || chess_position_perfcache_path[0] == '\0')
+        return false;
+
+    rc = chess_position_table_load(chess_position_perfcache_path);
+    if (rc != 0)
+        ereport(ERROR,
+                (errcode(ERRCODE_CONFIG_FILE_ERROR),
+                 errmsg("laplace_substrate: failed to load chess position perfcache \"%s\" (rc=%d)",
+                        chess_position_perfcache_path, rc),
+                 errdetail("rc -1: open/stat/mmap; -2: bad magic/version; "
+                           "-3: record layout; -4: body CRC."),
+                 errhint("Fix laplace_substrate.chess_position_perfcache_path or redeploy "
+                         "laplace_chess_position_perfcache.bin.")));
+    return true;
+}
+
+PG_FUNCTION_INFO_V1(pg_laplace_chess_position_ready);
+
+/* () -> bool: whether the chess compose-floor blob is mmap'd (GH #822). */
+Datum
+pg_laplace_chess_position_ready(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_BOOL(laplace_chess_position_ready());
 }
 
 
@@ -193,6 +237,20 @@ laplace_substrate_perfcache_prewarm(void)
             ereport(WARNING,
                     (errmsg("laplace_substrate: highway prewarm failed (\"%s\"); "
                             "backends fall back to lazy load", highway_perfcache_path)));
+    }
+
+    if (chess_position_perfcache_path != NULL && chess_position_perfcache_path[0] != '\0')
+    {
+        rc = chess_position_table_load(chess_position_perfcache_path);
+        if (rc == 0)
+            ereport(LOG,
+                    (errmsg("laplace_substrate: chess position perfcache prewarmed (\"%s\")",
+                            chess_position_perfcache_path)));
+        else
+            ereport(WARNING,
+                    (errmsg("laplace_substrate: chess position perfcache prewarm failed "
+                            "(rc=%d, \"%s\"); backends fall back to lazy load",
+                            rc, chess_position_perfcache_path)));
     }
 }
 

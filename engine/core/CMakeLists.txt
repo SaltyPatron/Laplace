@@ -8,6 +8,8 @@ set(LAPLACE_CORE_HEADERS
     include/laplace/core/glicko2.h
     include/laplace/core/score.h
     include/laplace/core/codepoint_table.h
+    include/laplace/core/chess_perfcache_format.h
+    include/laplace/core/chess_position_table.h
     include/laplace/core/astar.h
     include/laplace/core/trajectory.h
     include/laplace/core/tier_tree.h
@@ -44,6 +46,7 @@ set(LAPLACE_CORE_SOURCES
     src/glicko2.c
     src/score.c
     src/codepoint_table.c
+    src/chess_position_table.c
     src/astar.cpp
     src/trajectory.c
     src/tier_tree.c
@@ -158,6 +161,66 @@ add_custom_command(
 
 add_custom_target(laplace_t0_perfcache       ALL DEPENDS ${LAPLACE_PERFCACHE_BIN})
 add_custom_target(laplace_highway_perfcache  ALL DEPENDS ${LAPLACE_HIGHWAY_BIN})
+
+# Chess compose floor (tier-1 vocab + catalog tier-2 positions) — GH #822 / spec 33.
+# Tier 0 remains codepoints (t0). Emit always packs the finite piece×square alphabet
+# in native code; catalog surfaces (openings/960/…) are additional tier-2 INPUT, peer
+# of UCDXML extract before ucd_tables_emit. Openings path: -D or env only — no host
+# path baked into this file.
+add_subdirectory(tools/chess_position_tables_emit)
+if(NOT LAPLACE_CHESS_OPENINGS AND DEFINED ENV{LAPLACE_CHESS_OPENINGS})
+    set(LAPLACE_CHESS_OPENINGS "$ENV{LAPLACE_CHESS_OPENINGS}")
+endif()
+set(LAPLACE_CHESS_OPENINGS "${LAPLACE_CHESS_OPENINGS}" CACHE PATH
+    "Optional ECO openings TSV dir for extra tier-2 catalog surfaces (sentences)")
+set(LAPLACE_CHESS_SURFACES "${LAPLACE_PERFCACHE_DIR}/chess_catalog_surfaces.txt")
+set(LAPLACE_CHESS_PERFCACHE_BIN "${LAPLACE_PERFCACHE_DIR}/laplace_chess_position_perfcache.bin"
+    CACHE FILEPATH "Built chess compose-floor blob" FORCE)
+find_program(LAPLACE_DOTNET NAMES dotnet)
+set(LAPLACE_CHESS_SURFACES_PROJ
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../app/ChessCatalogSurfaces/ChessCatalogSurfaces.csproj")
+
+# Tier-1 alphabet always emits (native). Catalog surfaces are optional coverage.
+set(_chess_emit_deps ${LAPLACE_PERFCACHE_BIN} $<TARGET_FILE:laplace_chess_position_tables_emit>)
+set(_chess_emit_cmd
+    COMMAND $<TARGET_FILE:laplace_chess_position_tables_emit>
+            --t0     ${LAPLACE_PERFCACHE_BIN}
+            --output ${LAPLACE_CHESS_PERFCACHE_BIN})
+
+if(LAPLACE_DOTNET AND EXISTS "${LAPLACE_CHESS_SURFACES_PROJ}")
+    if(LAPLACE_CHESS_OPENINGS AND EXISTS "${LAPLACE_CHESS_OPENINGS}")
+        set(_chess_openings_arg "${LAPLACE_CHESS_OPENINGS}")
+    else()
+        set(_chess_openings_arg "NONE")
+    endif()
+    add_custom_command(
+        OUTPUT ${LAPLACE_CHESS_SURFACES}
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${LAPLACE_PERFCACHE_DIR}"
+        COMMAND ${LAPLACE_DOTNET} run --project "${LAPLACE_CHESS_SURFACES_PROJ}"
+                -c Release --no-launch-profile --
+                "${_chess_openings_arg}" "${LAPLACE_CHESS_SURFACES}"
+        DEPENDS "${LAPLACE_CHESS_SURFACES_PROJ}"
+        COMMENT "Chess catalog tier-2 surfaces (emit input prep)"
+        VERBATIM
+    )
+    list(APPEND _chess_emit_deps ${LAPLACE_CHESS_SURFACES})
+    list(APPEND _chess_emit_cmd --surfaces ${LAPLACE_CHESS_SURFACES})
+endif()
+
+add_custom_command(
+    OUTPUT ${LAPLACE_CHESS_PERFCACHE_BIN}
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${LAPLACE_PERFCACHE_DIR}"
+    ${_chess_emit_cmd}
+    DEPENDS ${_chess_emit_deps}
+    COMMENT "Emitting chess compose-floor blob (tier-1 alphabet + catalog tier-2)"
+    VERBATIM
+)
+add_custom_target(laplace_chess_position_perfcache ALL DEPENDS ${LAPLACE_CHESS_PERFCACHE_BIN})
+install(FILES ${LAPLACE_CHESS_PERFCACHE_BIN}
+    DESTINATION share/laplace
+    RENAME "laplace_chess_position_perfcache.bin"
+    PERMISSIONS ${LAPLACE_INSTALL_FILE_PERMS}
+)
 
 set(LAPLACE_PERFCACHE_REFERENCE_BIN "${LAPLACE_PERFCACHE_DIR}/laplace_t0_perfcache.reference.bin")
 add_custom_target(laplace_verify_perfcache_determinism
