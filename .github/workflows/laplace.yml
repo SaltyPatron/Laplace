@@ -584,29 +584,25 @@ jobs:
             sleep 2
             if curl -fsS http://127.0.0.1:5187/health/ready >/dev/null 2>&1; then
               echo "laplace-api ready"
+              # #792: ready ≠ foundation floor. Entities>0 can be thin residue
+              # after a failed seed; fail loud before stamp / smoke.
+              bash scripts/check-substrate-floor.sh "${PGDATABASE:-laplace}"
               echo "seeded=true" >> "$GITHUB_OUTPUT"
               bash scripts/pipeline.sh publish-stamp
               exit 0
             fi
           done
 
-          # Not ready. "Deployed wrong" and "database is empty" are different
-          # states and only one is this job's business. Seeds are dispatch-only
-          # (operator decision), so after a manual drop NO push can ever satisfy
-          # a data-presence gate — every merge would go red on a condition the
-          # push is forbidden to fix. The readiness payload already separates
-          # them: reachable + perfcache loaded + zero consensus is a correctly
-          # deployed API against an unseeded substrate, which is exactly the
-          # state a fresh box is supposed to be in before its seed dispatch.
+          # Not ready. Named fail (#792) — never soft-exit and skip smoke.
+          # Seeds stay dispatch-only (no auto-reseed from this gate). Heal:
+          #   gh workflow run seed-foundation.yml --ref main
           detail=$(curl -sS http://127.0.0.1:5187/health/ready || true)
           echo "$detail"
           if python3 -c 'import json,sys; d=json.loads(sys.argv[1]); sys.exit(0 if (d.get("substrate_reachable") and d.get("perfcache_ready") and not d.get("consensus_relations")) else 1)' "$detail"
           then
-            echo "::warning::API deployed and reachable, substrate is UNSEEDED — not a deploy failure. Dispatch the seed workflow to make it ready."
+            echo "::error::UNSEEDED_SUBSTRATE: API reachable + perfcache loaded, but substrate has no consensus/entities. Heal via seed-foundation dispatch — this gate does not auto-reseed."
             echo "seeded=false" >> "$GITHUB_OUTPUT"
-            # Deliberately NOT stamped: readiness never passed, so the next push
-            # re-deploys and re-checks rather than trusting a skip.
-            exit 0
+            exit 1
           fi
 
           echo "::error::laplace-api not ready 60s after restart — readiness detail above"
@@ -644,6 +640,9 @@ jobs:
       - uses: actions/checkout@v4
         with: { submodules: false, clean: false }
       - uses: ./.github/actions/setup-laplace-env
+
+      - name: Substrate floor (fail loud — #792)
+        run: bash scripts/check-substrate-floor.sh "${PGDATABASE:-laplace}"
 
       - name: Live endpoint smoke
         run: |
