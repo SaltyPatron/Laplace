@@ -60,4 +60,48 @@ TEST(GrammarTags, InvalidQueryIsRejected)
     EXPECT_EQ(out, nullptr);
 }
 
+TEST(GrammarTags, SqlCreateFunctionAndCallCaptures)
+{
+    const TSLanguage* sql = laplace_grammar_lookup_by_id("sql");
+    ASSERT_NE(sql, nullptr);
+
+    const char* tags =
+        "(create_function\n"
+        "  (object_reference\n"
+        "    name: (identifier) @name)) @definition.function\n"
+        "(invocation\n"
+        "  (object_reference\n"
+        "    name: (identifier) @name)) @reference.call\n";
+    const char* code =
+        "CREATE OR REPLACE FUNCTION laplace.foo(x int) RETURNS int LANGUAGE sql AS $$\n"
+        "  SELECT laplace.bar(x);\n"
+        "$$;\n";
+
+    laplace_tag_t* out = nullptr;
+    size_t n = 0;
+    int rc = laplace_grammar_tags_run(
+        sql, tags, std::strlen(tags),
+        reinterpret_cast<const uint8_t*>(code), std::strlen(code), &out, &n);
+
+    ASSERT_EQ(rc, 0) << "SQL tags query must compile against tree-sitter-sql";
+    ASSERT_NE(out, nullptr);
+    ASSERT_GT(n, 0u);
+
+    bool defFn = false, refCall = false, name = false;
+    for (size_t i = 0; i < n; ++i) {
+        switch (out[i].capture_type) {
+            case LAPLACE_TAG_DEF_FUNCTION: defFn = true; break;
+            case LAPLACE_TAG_REF_CALL:     refCall = true; break;
+            case LAPLACE_TAG_NAME:         name = true; break;
+            default: break;
+        }
+        EXPECT_LE(out[i].start_byte, out[i].end_byte);
+    }
+    EXPECT_TRUE(defFn)   << "definition.function not captured on CREATE FUNCTION";
+    EXPECT_TRUE(refCall) << "reference.call not captured on laplace.bar(...)";
+    EXPECT_TRUE(name)    << "@name not captured";
+
+    laplace_grammar_tags_free(out);
+}
+
 }  
