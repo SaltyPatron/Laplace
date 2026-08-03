@@ -20,6 +20,17 @@ only when the defect it guards against no longer applies.
 - `SET search_path = laplace, public;` then `SELECT * FROM api('<substring>')` (or
   `SELECT * FROM laplace.api('<substring>')`) lists the installed SQL surface. Check it
   before concluding a helper doesn't exist.
+- **Query through the installed surface, not through ad-hoc SQL you just wrote.** Before
+  hand-writing a `SELECT` against substrate tables, `api()` for the thing you want. Ops
+  questions almost always have an answer already: `ingest_runs()` for run history,
+  `source_counts_approx()` for per-source volume, `source_counts()` only when exact counts
+  are worth the full scan, `evidence_count(p_source => source_id('X'))` for one source,
+  `substrate_health()`, `source_roster()`, `chess_*` for the chess reads. A hand-rolled
+  `GROUP BY` over `attestations` or `ingest_run_journal` is slower, unreviewed, and
+  duplicates a definition that already exists — the same reinvented-wheel defect W16
+  documents, in the read path.
+- Prefer the `_approx` variant when one exists. `source_counts()` scans; `source_counts_approx()`
+  reads statistics. Reach for the exact one only when the question actually needs exactness.
 - The extension is the deployment unit for substrate schema and functions. Do not add
   DbUp migrations for substrate objects, and do not hand-`ALTER` or hand-`INSERT` into a
   live database — `.sql.in` files are the schema of record.
