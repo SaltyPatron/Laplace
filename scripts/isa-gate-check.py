@@ -24,9 +24,31 @@ MANIFEST = ROOT / "engine" / "manifest" / "relation_types.toml"
 
 # Measured 2026-08-02. These constants may only decrease as literals migrate to
 # their canonical surfaces.
+#
+# ONE EXCEPTION, TAKEN DELIBERATELY AND VISIBLY (2026-08-03), which is what this
+# ceiling is for — "make an allowlist increase visible in executable policy rather
+# than hiding it in generated data."
+#
+# g3_sql 243 -> 250. The chess read surface gained four functions: the first join
+# from openings to games, and the first read of the syzygy lane at all (it had
+# written HAS_WDL/HAS_DTZ since campaign PR-8 with no way to read them). A read
+# function must NAME the relation it reads; there is no non-literal surface for
+# vocabulary in SQL, so every new one costs literals. The prior instance of this
+# choice (51843f46) refused the raise and parameterized instead — correct there,
+# because the relation was incidental to an audit. It is not incidental here: the
+# relation IS the subject of the query, and a chess_syzygy_line that takes HAS_WDL
+# as an argument is a worse function.
+#
+# The cost was minimized first, not after the fact — 22 new sites reduced to 7:
+#   -4  C#: named constants on ChessSeedManifest, which already owned the literals
+#   -5  chess_opening_games returns ids; chess_game(event) already reads the headers
+#   -2  chess_opening_endgames composes its two neighbours and names nothing
+#   -2  chess_syzygy_line binds both relation ids once in a CTE (also stops a
+#       STABLE function running per row)
+# The remaining 7 are one name per relation per function, which is the floor.
 CEILINGS = {
     "g1_weight_literalism": 25,
-    "g3_sql_vocabulary_literalism": 243,
+    "g3_sql_vocabulary_literalism": 250,
     "g3_c_vocabulary_literalism": 17,
     "g3_csharp_vocabulary_literalism": 702,
     "g8_band_literalism": 8,

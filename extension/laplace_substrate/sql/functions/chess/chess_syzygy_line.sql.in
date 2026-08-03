@@ -16,13 +16,19 @@ CREATE OR REPLACE FUNCTION chess_syzygy_line(p_line bytea, p_limit int DEFAULT 6
     RETURNS TABLE(position_id bytea, wdl text, dtz text)
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
-WITH probed AS MATERIALIZED (
+WITH rel AS MATERIALIZED (
+    -- Resolved ONCE, not per row. relation_type_id is STABLE, and a STABLE function in a
+    -- filter runs per row; naming each relation in both the IN list and its FILTER also
+    -- typed the vocabulary twice in one file, which is the thing the ISA ratchet counts.
+    SELECT relation_type_id('HAS_WDL') AS wdl, relation_type_id('HAS_DTZ') AS dtz
+),
+probed AS MATERIALIZED (
     SELECT a.subject_id AS pos,
-           max(a.object_id) FILTER (WHERE a.type_id = relation_type_id('HAS_WDL')) AS wdl_id,
-           max(a.object_id) FILTER (WHERE a.type_id = relation_type_id('HAS_DTZ')) AS dtz_id
-    FROM attestations a
+           max(a.object_id) FILTER (WHERE a.type_id = r.wdl) AS wdl_id,
+           max(a.object_id) FILTER (WHERE a.type_id = r.dtz) AS dtz_id
+    FROM rel r
+    JOIN attestations a ON a.type_id IN (r.wdl, r.dtz)
     WHERE a.context_id = p_line
-      AND a.type_id IN (relation_type_id('HAS_WDL'), relation_type_id('HAS_DTZ'))
     GROUP BY a.subject_id
     LIMIT p_limit
 ),

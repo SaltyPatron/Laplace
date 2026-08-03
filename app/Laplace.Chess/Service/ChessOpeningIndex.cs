@@ -114,6 +114,6 @@ internal sealed class ChessOpeningIndex : ChessOpeningIndexView
         return new ChessOpeningIndex(map);
     }
 
-    private static readonly Hash128 RelOpeningName = RelationTypeRegistry.RelationTypeId("OPENING_NAME");
-    private static readonly Hash128 RelHasEco = RelationTypeRegistry.RelationTypeId("HAS_ECO");
+    private static readonly Hash128 RelOpeningName = RelationTypeRegistry.RelationTypeId(ChessSeedManifest.OpeningName);
+    private static readonly Hash128 RelHasEco = RelationTypeRegistry.RelationTypeId(ChessSeedManifest.HasEco);
 }

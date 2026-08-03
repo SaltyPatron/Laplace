@@ -159,10 +159,10 @@ public sealed class ChessOpeningMatchDecomposer
         ChessDropLedger.Kept();
 
         b.AddAttestation(NativeAttestation.Categorical(
-            w.LineId, "GAME_HAS_OPENING", hit.NameId, sourceId, null, MatchWeight));
+            w.LineId, ChessSeedManifest.GameHasOpening, hit.NameId, sourceId, null, MatchWeight));
         if (hit.EcoId is { } ecoId)
             b.AddAttestation(NativeAttestation.Categorical(
-                w.LineId, "GAME_HAS_ECO", ecoId, sourceId, null, MatchWeight));
+                w.LineId, ChessSeedManifest.GameHasEco, ecoId, sourceId, null, MatchWeight));
     }
 
     /// <summary>
