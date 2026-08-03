@@ -15,7 +15,7 @@ namespace Laplace.Chess.Service;
 // corpus (Lumbras\otb, fetch outputs). Recursion is an explicit operator decision
 // (laplace ingest chess <dir> --recursive).
 public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInline = true)
-    : ComposeDecomposer<ChessGameRecord>, IIngestInventoryProvider, IIngestNoOpExplainer
+    : ComposeDecomposerMultiFile<ChessGameRecord>, IIngestInventoryProvider, IIngestNoOpExplainer
 {
     private readonly SearchOption _scope =
         recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
@@ -55,26 +55,56 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
             context.Writer, ChessVocabulary.AnalysisSourceId, "ChessAnalysis",
             ChessVocabulary.AnalysisTrustClass, ct);
         _canonicalNames = pgn.Concat(analysis).Distinct().ToArray();
+
+        // Ledger lifecycle moved here from ExtractRecordsAsync: with the file-worker pool there
+        // is no longer ONE record stream to bracket. Reset once per run at init, report once at
+        // dispose. The ledger is already concurrency-safe (ConcurrentDictionary + Interlocked),
+        // which is why per-file workers can all drop into it.
+        ChessDropLedger.Reset();
     }
 
-    protected override async IAsyncEnumerable<ChessGameRecord> ExtractRecordsAsync(
-        string ecosystemPath, DecomposerOptions options,
+    /// <summary>
+    /// Reported even on cancellation: a killed run's drop profile is exactly what the operator
+    /// needs to decide whether to resume or fix the corpus first.
+    /// </summary>
+    public override ValueTask DisposeAsync()
+    {
+        ChessDropLedger.Report(SourceName);
+        return base.DisposeAsync();
+    }
+
+    // The corpus is many PGN files (Lumbras OTB is 11, 0.07-1.48 GB each) and they carry no
+    // cross-file ordering — game identity is content-addressed, so the same game in two files
+    // collides by hash, not by arrival order. That is exactly the claim the multi-file worker
+    // pool already makes for every other multi-file source; chess simply was not on it and
+    // streamed all 11 through one thread (MEASURED: compose is the pipeline's ceiling at
+    // ~150 games/s, and the decompose side is a single pinned producer).
+    protected override IReadOnlyList<(string Path, string Label)> ListFiles(
+        string ecosystemPath, DecomposerOptions options)
+        => EnumerateFiles(ecosystemPath, _scope)
+            .Select(p => (p, $"{BatchLabelPrefix}/{Path.GetFileNameWithoutExtension(p)}"))
+            .ToArray();
+
+    // ONE file's games, novelty-gated in chunks exactly as before. The gate's proven-set lives
+    // on the shared reader (a ConcurrentDictionary, monotone: it only ever gains "present"), so
+    // two workers probing the same id race to the same answer.
+    protected override async IAsyncEnumerable<ChessGameRecord> ExtractFileAsync(
+        string filePath, string fileLabel, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
     {
         var ws = IngestPipelineDefaults.ResolveWorkingSet(PipelineProfile, options, DefaultBatchSize);
-        ChessDropLedger.Reset();
-        try
+        var chunk = new List<ChessGameRecord>(ws.Batch);
+
+        await foreach (var gameText in StreamFileGamesAsync(filePath, ct))
         {
-            await foreach (var game in StreamNovelGamesAsync(
-                               ecosystemPath, _scope, ContainmentReader, ws.Batch, options.ReObservePresent, ct))
-                yield return game;
+            if (TryParseGame(gameText) is { } parsed) chunk.Add(parsed);
+            if (chunk.Count < ws.Batch) continue;
+            await foreach (var g in YieldChunkAsync(chunk, ContainmentReader, options.ReObservePresent, ct))
+                yield return g;
+            chunk.Clear();
         }
-        finally
-        {
-            // Reported even on cancellation: a killed run's drop profile is exactly what
-            // the operator needs to decide whether to resume or fix the corpus first.
-            ChessDropLedger.Report(SourceName);
-        }
+        await foreach (var g in YieldChunkAsync(chunk, ContainmentReader, options.ReObservePresent, ct))
+            yield return g;
     }
 
     // ONE pass, ONE pipeline (GH #600): the witnessed record (ChessPgn source) AND the
@@ -161,21 +191,32 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
                 yield return chunk[i];
     }
 
+    /// <summary>
+    /// ONE file's games. This is the unit the multi-file worker pool claims, so it must not
+    /// reach outside its own path — StreamAllGamesAsync is now just this in a loop.
+    /// </summary>
+    internal static async IAsyncEnumerable<string> StreamFileGamesAsync(
+        string file, [EnumeratorCancellation] CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+            // One file can hold several members (a TWIC weekly .zip wraps one .pgn); the
+            // enumerator owns each reader's lifetime, so a member must be drained before
+            // the next is requested — which is exactly what this loop does.
+        foreach (var (_, reader) in ChessInput.OpenMembers(file))
+        {
+            ct.ThrowIfCancellationRequested();
+            await foreach (var gameText in StreamGamesAsync(reader, ct).WithCancellation(ct))
+                yield return gameText;
+        }
+    }
+
     internal static async IAsyncEnumerable<string> StreamAllGamesAsync(
         string ecosystemPath, SearchOption scope, [EnumeratorCancellation] CancellationToken ct)
     {
         foreach (var file in EnumerateFiles(ecosystemPath, scope))
         {
-            ct.ThrowIfCancellationRequested();
-            // One file can hold several members (a TWIC weekly .zip wraps one .pgn); the
-            // enumerator owns each reader's lifetime, so a member must be drained before
-            // the next is requested — which is exactly what this loop does.
-            foreach (var (_, reader) in ChessInput.OpenMembers(file))
-            {
-                ct.ThrowIfCancellationRequested();
-                await foreach (var gameText in StreamGamesAsync(reader, ct).WithCancellation(ct))
-                    yield return gameText;
-            }
+            await foreach (var gameText in StreamFileGamesAsync(file, ct).WithCancellation(ct))
+                yield return gameText;
         }
     }
 

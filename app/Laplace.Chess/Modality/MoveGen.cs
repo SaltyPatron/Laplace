@@ -1,3 +1,5 @@
+using System.Numerics;
+
 namespace Laplace.Modality.Chess;
 
 public static class MoveGen
@@ -23,8 +25,71 @@ public static class MoveGen
         BPawnCaps = new[] { -15, -17 };
     }
 
-    public static bool IsSquareAttacked(Board b, int sq, bool byWhite)
-        => IsSquareAttacked(b.Squares, sq, byWhite);
+    /// <summary>
+    /// Table-driven. Board maintains its bitboards through Board.Set, so the geometry is an
+    /// indexed load per piece class instead of a ray walk per direction. This is the hot path:
+    /// Legal() calls it once per pseudo move, ~35 per position, and it measured as the bulk of
+    /// replay (46.7% of compose time).
+    ///
+    /// The mailbox overload below is retained and still correct — See needs it to probe
+    /// hypothetical occupancies over a raw array with no Board to update. The two are pinned
+    /// equivalent by MoveGenBitboardEquivalenceTests.
+    /// </summary>
+    public static bool IsSquareAttacked(Board b, int sq0x88, bool byWhite)
+    {
+        int sq = (Board.RankOf(sq0x88) << 3) | Board.FileOf(sq0x88);
+        ulong occ = b.OccupiedBB;
+
+        // A white pawn attacks sq iff a black pawn ON sq would attack that pawn's square.
+        if ((ChessAttacks.Pawn(sq, !byWhite) & b.PieceBB(byWhite ? Piece.WPawn : Piece.BPawn)) != 0) return true;
+        if ((ChessAttacks.Knight(sq) & b.PieceBB(byWhite ? Piece.WKnight : Piece.BKnight)) != 0) return true;
+        if ((ChessAttacks.King(sq) & b.PieceBB(byWhite ? Piece.WKing : Piece.BKing)) != 0) return true;
+
+        ulong queens = b.PieceBB(byWhite ? Piece.WQueen : Piece.BQueen);
+        if ((ChessAttacks.Bishop(sq, occ) & (b.PieceBB(byWhite ? Piece.WBishop : Piece.BBishop) | queens)) != 0)
+            return true;
+        if ((ChessAttacks.Rook(sq, occ) & (b.PieceBB(byWhite ? Piece.WRook : Piece.BRook) | queens)) != 0)
+            return true;
+
+        return false;
+    }
+
+    /// <summary>
+    /// Table-driven form: no ray walking, no board scan. Attacks are symmetric, so "is square X
+    /// attacked by a rook/queen" is "does a rook placed on X see one" — one indexed load per
+    /// piece class instead of a loop per direction.
+    ///
+    /// Takes a Bitboards VALUE rather than a Board, for callers that already hold one and have
+    /// no Board to hand — PositionContent.Surface builds one every ply. Board itself now
+    /// maintains bitboards incrementally through Board.Set, so the Board overload of
+    /// IsSquareAttacked above is the one to reach for in the hot path; prefer it unless you
+    /// genuinely only have a Bitboards.
+    ///
+    /// ChessAttacksTests pins the tables; MoveGenBitboardEquivalenceTests pins this against the
+    /// mailbox walk on real positions and through real play.
+    ///
+    /// <paramref name="sq"/> is a 0-63 BIT index (Bitboards.Bit), not a 0x88 square.
+    /// </summary>
+    public static bool IsSquareAttackedBB(in Bitboards bb, int sq, bool byWhite)
+    {
+        ulong occ = bb.Occupied;
+
+        // Pawns: a white pawn attacks sq iff a BLACK pawn on sq would attack that pawn's square.
+        ulong pawns = byWhite ? bb.Of(Piece.WPawn) : bb.Of(Piece.BPawn);
+        if ((ChessAttacks.Pawn(sq, !byWhite) & pawns) != 0) return true;
+
+        if ((ChessAttacks.Knight(sq) & (byWhite ? bb.Of(Piece.WKnight) : bb.Of(Piece.BKnight))) != 0) return true;
+        if ((ChessAttacks.King(sq) & (byWhite ? bb.Of(Piece.WKing) : bb.Of(Piece.BKing))) != 0) return true;
+
+        ulong queens = byWhite ? bb.Of(Piece.WQueen) : bb.Of(Piece.BQueen);
+        ulong bishops = (byWhite ? bb.Of(Piece.WBishop) : bb.Of(Piece.BBishop)) | queens;
+        if ((ChessAttacks.Bishop(sq, occ) & bishops) != 0) return true;
+
+        ulong rooks = (byWhite ? bb.Of(Piece.WRook) : bb.Of(Piece.BRook)) | queens;
+        if ((ChessAttacks.Rook(sq, occ) & rooks) != 0) return true;
+
+        return false;
+    }
 
     // Array form: the same fact computed over a raw square array, so See's swap-off can
     // probe hypothetical occupancies without materializing Board instances.
@@ -180,14 +245,125 @@ public static class MoveGen
         Pseudo(b, pseudoBuf);
         legalBuf.Clear();
         bool mover = b.WhiteToMove;
+
+        // The mover's king is in ONE place for the whole pseudo list, so locate it once instead
+        // of once per candidate. InCheck -> FindKing was a linear 64-square scan per pseudo move:
+        // ~35 moves x ~70 plies = ~2,450 scans per game, ~157k square reads, to find a piece that
+        // moves at most once per ply. Rescan only when this move actually relocates the king.
+        //
+        // Castling MUST rescan rather than trusting m.To: the Chess960 path is atomic and the
+        // king can castle WITHOUT MOVING (king g1, rook h1 => To == From), and its destination
+        // can hold the castling rook, so m.To is not the king's resting square in general
+        // (MoveApply.MakeWithUndo, the isCastle branch). Castles are at most twice a game, so
+        // the fallback costs nothing measurable.
+        int kingSq = b.FindKing(mover);
+        const MoveFlags CastleAny = MoveFlags.CastleKing | MoveFlags.CastleQueen;
+
+        if (kingSq < 0)
+        {
+            // No king on the board (constructed test positions, some puzzles). Nothing can be
+            // pinned or checked, so every pseudo move is legal and the mask path is undefined.
+            for (int i = 0; i < pseudoBuf.Count; i++) legalBuf.Add(pseudoBuf[i]);
+            return;
+        }
+
+        // ONE checker/pin computation per position, replacing ~35 make/unmake round trips.
+        //
+        // A non-king move is legal iff it neither leaves an existing check standing nor opens a
+        // new line to the king. Both are decidable from two masks computed once:
+        //   checkers  enemy pieces attacking the king right now
+        //   pinned    own pieces that are the SOLE occupant between the king and an enemy slider
+        //
+        // King moves, castles and en passant keep the make/unmake path deliberately. The king
+        // moving changes the attack set it is being tested against (it can retreat along the
+        // checking ray and still be attacked); Chess960 castling can leave the king on its own
+        // square or land it on the rook's; and en passant removes a pawn from a DIFFERENT square
+        // than the destination, which can open a rank onto the king. Each is rare — at most a
+        // handful per position — and each is a classic source of silent move-generation bugs, so
+        // they stay on the path perft has always validated.
+        int kingBit = (Board.RankOf(kingSq) << 3) | Board.FileOf(kingSq);
+        ulong occ = b.OccupiedBB;
+        ulong ourOcc = mover ? b.WhiteBB : b.BlackBB;
+
+        ulong checkers = AttackersTo(b, kingBit, byWhite: !mover, occ);
+        int checkCount = BitOperations.PopCount(checkers);
+        ulong pinned = PinnedTo(b, kingBit, mover, occ, ourOcc);
+
+        // Under single check a non-king move must capture the checker or interpose on its ray.
+        ulong checkEvasion = ulong.MaxValue;
+        if (checkCount == 1)
+        {
+            int checkerBit = BitOperations.TrailingZeroCount(checkers);
+            checkEvasion = checkers | ChessAttacks.Between(kingBit, checkerBit);
+        }
+
         for (int i = 0; i < pseudoBuf.Count; i++)
         {
             var m = pseudoBuf[i];
-            var undo = MoveApply.MakeWithUndo(b, m);
-            if (!InCheck(b, mover))
-                legalBuf.Add(m);
-            MoveApply.Unmake(b, m, undo);
+            bool special = m.From == kingSq
+                        || (m.Flags & CastleAny) != 0
+                        || (m.Flags & MoveFlags.EnPassant) != 0;
+
+            if (special)
+            {
+                var undo = MoveApply.MakeWithUndo(b, m);
+                int k = (m.From == kingSq || (m.Flags & CastleAny) != 0) ? b.FindKing(mover) : kingSq;
+                if (k < 0 || !IsSquareAttacked(b, k, byWhite: !mover)) legalBuf.Add(m);
+                MoveApply.Unmake(b, m, undo);
+                continue;
+            }
+
+            if (checkCount > 1) continue;   // double check: only the king may move
+
+            int fromBit = (Board.RankOf(m.From) << 3) | Board.FileOf(m.From);
+            int toBit = (Board.RankOf(m.To) << 3) | Board.FileOf(m.To);
+
+            if ((checkEvasion & (1UL << toBit)) == 0) continue;
+
+            // A pinned piece may only move along the line it is pinned on — which includes
+            // capturing the pinner and retreating toward the king.
+            if ((pinned & (1UL << fromBit)) != 0
+                && (ChessAttacks.Line(kingBit, fromBit) & (1UL << toBit)) == 0) continue;
+
+            legalBuf.Add(m);
         }
+    }
+
+    /// <summary>Every piece of <paramref name="byWhite"/> attacking <paramref name="sq"/> (bit index).</summary>
+    private static ulong AttackersTo(Board b, int sq, bool byWhite, ulong occ)
+    {
+        ulong queens = b.PieceBB(byWhite ? Piece.WQueen : Piece.BQueen);
+        return (ChessAttacks.Pawn(sq, !byWhite) & b.PieceBB(byWhite ? Piece.WPawn : Piece.BPawn))
+             | (ChessAttacks.Knight(sq) & b.PieceBB(byWhite ? Piece.WKnight : Piece.BKnight))
+             | (ChessAttacks.King(sq) & b.PieceBB(byWhite ? Piece.WKing : Piece.BKing))
+             | (ChessAttacks.Bishop(sq, occ) & (b.PieceBB(byWhite ? Piece.WBishop : Piece.BBishop) | queens))
+             | (ChessAttacks.Rook(sq, occ) & (b.PieceBB(byWhite ? Piece.WRook : Piece.BRook) | queens));
+    }
+
+    /// <summary>
+    /// Own pieces that are the SOLE occupant between the king and an enemy slider aligned with
+    /// it. Snipers are found on an EMPTY board (occ = 0) so blockers do not hide them, then each
+    /// ray is re-checked against the real occupancy.
+    /// </summary>
+    private static ulong PinnedTo(Board b, int kingBit, bool mover, ulong occ, ulong ourOcc)
+    {
+        ulong queens = b.PieceBB(mover ? Piece.BQueen : Piece.WQueen);
+        ulong theirRooks = b.PieceBB(mover ? Piece.BRook : Piece.WRook) | queens;
+        ulong theirBishops = b.PieceBB(mover ? Piece.BBishop : Piece.WBishop) | queens;
+
+        ulong snipers = (ChessAttacks.Rook(kingBit, 0) & theirRooks)
+                      | (ChessAttacks.Bishop(kingBit, 0) & theirBishops);
+
+        ulong pinned = 0;
+        while (snipers != 0)
+        {
+            int s = BitOperations.TrailingZeroCount(snipers);
+            snipers &= snipers - 1;
+            ulong between = ChessAttacks.Between(kingBit, s) & occ;
+            if (between != 0 && (between & (between - 1)) == 0 && (between & ourOcc) != 0)
+                pinned |= between;
+        }
+        return pinned;
     }
 
     public static void Pseudo(Board b, List<ChessMove> moves)

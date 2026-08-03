@@ -166,6 +166,10 @@ public sealed class IngestBatchConfig
             .SetCommitEpoch(CommitEpoch);
         if (EnableDeferredContentOnBuilder && ContainmentReader is not null)
             b.EnableDeferredContent(ContainmentReader);
+        // Presence oracle unconditionally when a reader exists — independent of deferred content,
+        // which is a separate opt-in. A composer that can ask "already deposited?" can skip
+        // STAGING a subtree instead of building it and having apply dedup it away.
+        b.SetPresenceOracle(ContainmentReader);
         return b;
     }
 

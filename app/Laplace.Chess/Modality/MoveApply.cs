@@ -49,17 +49,17 @@ public static class MoveApply
         }
         else
         {
-            b.Squares[m.To] = moving;
-            b.Squares[m.From] = Piece.Empty;
+            b.Set(m.To, moving);
+            b.Set(m.From, Piece.Empty);
         }
 
         if ((m.Flags & MoveFlags.EnPassant) != 0)
-            b.Squares[capturedSquare] = Piece.Empty;
+            b.Set(capturedSquare, Piece.Empty);
 
         if (m.IsPromotion)
         {
             Piece promo = white ? m.Promotion : (Piece)(-(sbyte)Board.TypeOf(m.Promotion));
-            b.Squares[m.To] = promo;
+            b.Set(m.To, promo);
         }
 
         // The mover leaving a square that matters, and the CAPTURED piece on the square it
@@ -95,11 +95,11 @@ public static class MoveApply
             if (m.IsPromotion)
                 moved = white ? Piece.WPawn : Piece.BPawn;
 
-            b.Squares[m.From] = moved;
-            b.Squares[m.To] = Piece.Empty;
+            b.Set(m.From, moved);
+            b.Set(m.To, Piece.Empty);
 
             if (u.CapturedPiece != Piece.Empty)
-                b.Squares[u.CapturedSquare] = u.CapturedPiece;
+                b.Set(u.CapturedSquare, u.CapturedPiece);
         }
 
         b.Castle = u.Castle;
@@ -128,10 +128,10 @@ public static class MoveApply
 
         if (undo) { (kingFrom, kingTo) = (kingTo, kingFrom); (rookFrom, rookTo) = (rookTo, rookFrom); }
 
-        b.Squares[kingFrom] = Piece.Empty;
-        b.Squares[rookFrom] = Piece.Empty;
-        b.Squares[kingTo] = king;
-        b.Squares[rookTo] = rook;
+        b.Set(kingFrom, Piece.Empty);
+        b.Set(rookFrom, Piece.Empty);
+        b.Set(kingTo, king);
+        b.Set(rookTo, rook);
     }
 
     /// <summary>
