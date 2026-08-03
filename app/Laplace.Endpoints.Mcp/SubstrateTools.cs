@@ -135,8 +135,11 @@ internal sealed class SubstrateTools
                          ("entity", "string", "hex entity id to read from, e.g. from bubble", false),
                          ("limit", "integer", "max facts, default 24", false))),
         new("health", "Substrate health and row-count inventory.",
-            "Substrate health and inventory: laplace.substrate_health() plus laplace.substrate_counts().",
+            "Substrate health and inventory: laplace.substrate_health() plus laplace.substrate_counts(). Metric values are NULLABLE: a metric the health pass did not measure reports null, which is a different fact from zero. identity_violations is null whenever deep_checked is false — read them together or a skipped deep pass looks like a clean one.",
             () => Schema()),
+        new("source_status", "Is a source ingested, and how do we know.",
+            "Ingest state per source (laplace.source_status): known, ingested, approximate evidence, whether it observed entities, and the last run's status. Call this instead of assembling an answer — every hand-rolled version of this question is wrong in a specific way. An evidence>0 test reports the DOCUMENT lane as absent, because it is content-only by design (entities and geometry, zero distributional attestations); a source name you typed returns nothing when the spelling differs from the decomposer's declared SourceName; and ingest_run_journal is ops metadata that does not survive a dump/restore, so a missing row is not absence. Asking with a name ALWAYS returns exactly one row: `ingested=false` means the source wrote nothing, and `known=false` means this substrate has no record of that source id at all — which on a mesh this dense usually means the name is wrong rather than the corpus missing. Absence is an answer here, never an empty result set.",
+            () => Schema(("source", "string", "declared source name, e.g. WordNetDecomposer; omit for every source", false))),
         new("ingest", "Run a corpus ingest through the CLI's tested pipeline.",
             "Run a corpus ingest through the CLI's own tested pipeline (unpack -> records -> client-side dedup/fold -> COPY) -- the exact 'laplace ingest <source> <path>' entrypoint a terminal run uses, so results are identical either way. Substrate-wide only one ingest runs at a time (a global advisory lock); if another is active this call waits for it rather than fighting the lock, up to timeout_seconds, and is killed (not left running) on timeout. Returns the process exit code and captured output so a stalled or failed run is visible, never silently swallowed. For the live source list run `laplace ingest` with no arguments, or pass an unknown source here -- the CLI answers with its own registry rather than a copy kept in this process.",
             () => Schema(("source", "string", "registered ingest source name (code, repo, wordnet, tabular, ...)", true),
@@ -163,6 +166,7 @@ internal sealed class SubstrateTools
                         Req(args, "query"),
                         Int(args, "max_rows", DefaultRowCap))
                     : ("sql is operator-lane only (launch with LAPLACE_MCP_OPERATOR=1); product reads go through the typed tools", true),
+                "source_status" => SourceStatus(args),
                 "infer" => Infer(args),
                 "sense_audit" => SenseAudit(args),
                 "prompt_language" => PromptLanguage(args),
@@ -459,6 +463,32 @@ internal sealed class SubstrateTools
             })
             .Concat(counts.Select(c => new JsonObject { ["metric"] = c.Metric, ["value"] = c.Value.ToString() }));
         return JsonRows(rows);
+    }
+
+    /// <summary>
+    /// Ingest state per source. Typed, so nobody has to compose this question in SQL —
+    /// which is how it kept getting answered wrongly, including by this assistant, three
+    /// times in one session.
+    /// </summary>
+    private (string, bool) SourceStatus(JsonObject? args)
+    {
+        var rows = NpgsqlSubstrateReads
+            .SourceStatusAsync(_dbReadOnly, Opt(args, "source"), default)
+            .GetAwaiter().GetResult();
+        return JsonRows(rows.Select(s => new JsonObject
+        {
+            ["source"] = s.Source,
+            ["source_id"] = Convert.ToHexString(s.SourceId).ToLowerInvariant(),
+            // known=false says "no record of this source id here", which is a different
+            // answer from ingested=false ("declared, wrote nothing"). Collapsing them is
+            // how a misspelled name reads as a missing corpus.
+            ["known"] = s.Known,
+            ["ingested"] = s.Ingested,
+            ["evidence_approx"] = s.EvidenceApprox,
+            ["has_entities"] = s.HasEntities,
+            ["last_run_status"] = s.LastRunStatus is null ? null : JsonValue.Create(s.LastRunStatus),
+            ["last_run_at"] = s.LastRunAt is null ? null : JsonValue.Create(s.LastRunAt.Value),
+        }));
     }
 
     private static (string, bool) JsonRows(IEnumerable<JsonObject> rows)

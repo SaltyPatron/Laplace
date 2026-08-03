@@ -5,10 +5,31 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 
-# Repo-local launches are the OPERATOR lane: the raw-SQL escape hatch stays
-# available here. The gate defaults CLOSED in code — any client deployment that
-# does not export this gets the typed tool surface only.
-export LAPLACE_MCP_OPERATOR="${LAPLACE_MCP_OPERATOR:-1}"
+# RAW-SQL ESCAPE HATCH: OFF UNLESS EXPLICITLY ASKED FOR.
+#
+# The C# gate is correct and always was — OperatorLane requires
+# LAPLACE_MCP_OPERATOR == "1" and defaults false. This line used to read
+#
+#     export LAPLACE_MCP_OPERATOR="${LAPLACE_MCP_OPERATOR:-1}"
+#
+# under a comment stating "the gate defaults CLOSED in code". Both halves were
+# individually true and the combination was a backdoor: the C# default never
+# applied, because the launcher every client actually starts through (.mcp.json
+# registers this script) set the variable to 1 first. Arbitrary SELECT against the
+# production substrate, on by default, described in the file as off by default.
+#
+# Read-only is not harmless. It is an exfiltration surface, and a denial-of-service
+# one — an unbounded query on a 214 GB substrate holds backends and starves the
+# ingest path, which is not hypothetical: it happened repeatedly while this session
+# was probing with hand-written SQL.
+#
+# Opt in deliberately when you need it, per invocation:
+#
+#     LAPLACE_MCP_OPERATOR=1 scripts/laplace-mcp
+#
+# Everything else gets the typed tool surface, which is the point: a question the
+# typed tools cannot answer is a missing tool, not a reason to reach past them.
+export LAPLACE_MCP_OPERATOR="${LAPLACE_MCP_OPERATOR:-0}"
 
 # Prefer repo-local builds (dev freshest), then the published apphost.
 # app/Directory.Build.props redirects BaseOutputPath to $LAPLACE_BUILD_ROOT/app/bin

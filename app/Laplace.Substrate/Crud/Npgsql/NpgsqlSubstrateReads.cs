@@ -1613,6 +1613,34 @@ public static class NpgsqlSubstrateReads
     /// </summary>
     public readonly record struct HealthMetricRow(string Metric, string? Value);
 
+    /// <summary>One source's ingest state — see <c>laplace.source_status()</c>.</summary>
+    public readonly record struct SourceStatusRow(
+        string Source, byte[] SourceId, bool Known, bool Ingested,
+        long EvidenceApprox, bool HasEntities, string? LastRunStatus, DateTime? LastRunAt);
+
+    /// <summary>
+    /// <c>laplace.source_status()</c> — is a source ingested, and how do we know.
+    ///
+    /// Exists so that no caller ever assembles this again. Every hand-rolled version got
+    /// it wrong differently: an evidence test reports the content-only document lane as
+    /// absent, a typed source name returns zero rows when the spelling is off, and the run
+    /// journal is ops metadata that does not survive a restore. Asking with a name always
+    /// returns exactly one row, so absence is an answer instead of an empty result.
+    /// </summary>
+    public static Task<IReadOnlyList<SourceStatusRow>> SourceStatusAsync(
+        NpgsqlDataSource dataSource, string? source, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource,
+            "SELECT source, source_id, known, ingested, evidence_approx, has_entities, "
+            + "last_run_status, last_run_at FROM laplace.source_status(@s)",
+            static r => new SourceStatusRow(
+                r.GetString(0), (byte[])r[1], r.GetBoolean(2), r.GetBoolean(3),
+                r.GetInt64(4), r.GetBoolean(5),
+                r.IsDBNull(6) ? null : r.GetString(6),
+                r.IsDBNull(7) ? null : r.GetDateTime(7)),
+            p => p.Add("s", NpgsqlDbType.Text).Value = (object?)source ?? DBNull.Value,
+            ct: ct, label: "source_status", onError: onError);
+
     /// <summary><c>laplace.substrate_health()</c> flattened to metric/value rows.</summary>
     public static Task<IReadOnlyList<HealthMetricRow>> SubstrateHealthAsync(
         NpgsqlDataSource dataSource, CancellationToken ct,

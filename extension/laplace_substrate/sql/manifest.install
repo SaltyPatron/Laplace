@@ -344,6 +344,7 @@ functions/ops/substrate_pulse.sql.in
 functions/ops/ingest_runs.sql.in
 functions/ops/modality_counts.sql.in
 functions/ops/source_roster.sql.in
+functions/ops/source_status.sql.in
 functions/ops/mesh_position.sql.in
 functions/ops/taxonomy_tree.sql.in
 functions/ops/band_leaders.sql.in
