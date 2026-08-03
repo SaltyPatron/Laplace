@@ -8,34 +8,40 @@ PGHOST="${PGHOST:-/var/run/postgresql}"
 PGUSER="${PGUSER:-laplace_admin}"
 DB="${LAPLACE_DBNAME:-${PGDATABASE:-laplace}}"
 FORCE=0
+CHECK_ONLY=0
 
 usage() {
-  echo "Usage: $0 [--force]" >&2
-  echo "  --force  always re-ingest foundation sources (fresh_db path)" >&2
+  echo "Usage: $0 [--force|--check-only]" >&2
+  echo "  --force       always re-ingest foundation sources (fresh_db path)" >&2
+  echo "  --check-only  fail loud if any foundation layer is incomplete (no ingest; #792)" >&2
   exit 2
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --force) FORCE=1; shift ;;
+    --check-only) CHECK_ONLY=1; shift ;;
     -h|--help) usage ;;
     *) echo "unknown argument: $1" >&2; usage ;;
   esac
 done
 
-PSQL=(psql -h "$PGHOST" -U "$PGUSER" -v ON_ERROR_STOP=1 -tAc)
+# -d MUST precede -c. `psql -tAc -d DB SQL` makes -c consume "-d" as the
+# query string (PG 18); layer markers then always look missing.
+PSQL=(psql -h "$PGHOST" -U "$PGUSER" -v ON_ERROR_STOP=1)
 
 db_exists() {
-  "${PSQL[@]}" -d postgres \
+  "${PSQL[@]}" -d postgres -tAc \
     "SELECT 1 FROM pg_database WHERE datname='${DB}'" 2>/dev/null | grep -q 1
 }
 
 layer_ok() {
   local decomposer="$1" layer="$2"
   db_exists || return 1
-  "${PSQL[@]}" -d "$DB" \
+  # psql -tA prints bool as t/f, not true/false.
+  "${PSQL[@]}" -d "$DB" -tAc \
     "SELECT laplace.evidence_count(p_type => laplace.canonical_id('substrate/type/HasLayerCompleted/${layer}/v1'), p_source => laplace.source_id('${decomposer}')) > 0;" \
-    | grep -qi true
+    | grep -qiE '^(t|true)$'
 }
 
 FOUNDATION=(
@@ -70,6 +76,18 @@ fi
 if [[ "$needs_work" -eq 0 ]]; then
   echo "foundation layers OK on $DB"
   exit 0
+fi
+
+if [[ "$CHECK_ONLY" -eq 1 ]]; then
+  echo "::error::THIN_SUBSTRATE: foundation HasLayerCompleted markers incomplete on $DB"
+  for entry in "${FOUNDATION[@]}"; do
+    IFS=':' read -r cli decomposer layer <<< "$entry"
+    if ! layer_ok "$decomposer" "$layer"; then
+      echo "  missing: ${cli} (source=${decomposer} layer=${layer})"
+    fi
+  done
+  echo "Heal: dispatch seed-foundation / run scripts/ensure-foundation.sh — this check does not auto-reseed."
+  exit 1
 fi
 
 echo "==== ensure-foundation on $DB ===="
