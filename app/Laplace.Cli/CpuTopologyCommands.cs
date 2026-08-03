@@ -97,7 +97,40 @@ internal static class CpuTopologyCommands
         // CPU; index builds keep full maintenance parallelism, but scans get
         // half (2026-07-15 incident, doc 28).
         int gather = Math.Max(2, pcores / 4);
-        int workers = CpuTopology.LogicalProcessorCount;
+        int logical = CpuTopology.LogicalProcessorCount;
+
+        // I/O WORKERS ARE NOT PARALLEL-QUERY WORKERS, AND SIZING THEM AS IF THEY WERE CAPPED
+        // THE STORAGE LAYER AT ~6% OF THE DEVICE.
+        //
+        // io_workers used to be set to `gather`. `gather` is deliberately SMALL: it is a
+        // per-QUERY burst multiplier where every worker allocates work_mem, and it was
+        // halved after the 2026-07-15 memory incident (doc 28). None of that applies to
+        // io_workers, which allocate no work_mem and never compute — under
+        // io_method = worker they exist purely to hold asynchronous reads outstanding
+        // against the device.
+        //
+        // MEASURED 2026-08-03 during the chess ingest, pgdata on a Samsung 970 EVO Plus:
+        //   effective_io_concurrency = 256   (a promise)
+        //   io_workers               = 3     (the actual ceiling: gather on this host)
+        //   r/s 30,589   r_await 0.29ms   aqu-sz 11.92
+        // By Little's law 11.92 / 0.29ms = ~41k IOPS, i.e. the drive delivered exactly what
+        // the queue depth allowed while %util read 100% — a metric that means "at least one
+        // request in flight" on a device with hardware queues and is NOT saturation. The
+        // pool, not the disk, was the limit.
+        //
+        // Sized off logical processors as a proxy for concurrent I/O-issuing backends, with
+        // a floor because 3 is never enough for NVMe and a ceiling because these are real
+        // processes. Storage type is not discoverable here, so the floor is what makes the
+        // default safe on flash; a spinning-disk host would want it lower and has none.
+        int ioWorkers = Math.Clamp(logical, 8, 32);
+
+        // max_worker_processes is the SHARED pool that parallel query AND the io_worker pool
+        // both draw from. It was set to the logical count while max_parallel_workers alone
+        // already claimed pcores — so the cluster was oversubscribed before io_workers took
+        // its cut, and raising the I/O pool without this would starve parallel query instead.
+        // Shape mirrors pg-machine-tuning.sh's `mwp=$(( pcores + pdeg + iow + 8 ))` so the
+        // bootstrap fallback and this emitter do not hand a host two different pool sizes.
+        int workers = pcores + maint + ioWorkers + 8;
         var w = Console.Out;
 
         // Machine-derived (RAM + P/E topology) — the single source of truth.
@@ -110,11 +143,14 @@ internal static class CpuTopologyCommands
         w.WriteLine($"ALTER SYSTEM SET max_parallel_workers = {pcores};");
         w.WriteLine($"ALTER SYSTEM SET max_parallel_workers_per_gather = {gather};");
         w.WriteLine($"ALTER SYSTEM SET max_parallel_maintenance_workers = {maint};");
-        w.WriteLine($"ALTER SYSTEM SET io_workers = {gather};");
+        w.WriteLine($"ALTER SYSTEM SET io_workers = {ioWorkers};");
 
         // Workload POLICY — deliberate, machine-independent (durability/checkpoint/IO shape).
         w.WriteLine("ALTER SYSTEM SET synchronous_commit = off;");
-        w.WriteLine("ALTER SYSTEM SET wal_compression = on;");
+        // wal_compression is deliberately NOT emitted here: `on` resolves to pglz, the slowest
+        // codec, and this emitter cannot probe enumvals (it writes SQL with no connection).
+        // The applier picks lz4 > zstd > pglz from what the binary actually has — see
+        // pg_apply_wal_compression in scripts/pg-machine-tuning.sh.
         w.WriteLine("ALTER SYSTEM SET checkpoint_timeout = '30min';");
         w.WriteLine("ALTER SYSTEM SET checkpoint_completion_target = 0.9;");
         w.WriteLine("ALTER SYSTEM SET max_wal_size = '32GB';");

@@ -302,4 +302,79 @@ public class PgTuningParityTests
         Assert.Equal(512, long.Parse(m.Groups["lo"].Value, CultureInfo.InvariantCulture));
         Assert.Equal(96L * 1024, long.Parse(m.Groups["hi"].Value, CultureInfo.InvariantCulture));
     }
+
+    /// <summary>
+    /// io_workers MUST NOT be derived from a parallel-QUERY degree.
+    ///
+    /// It was: the emitter set `io_workers = {gather}` and the shell set it from
+    /// $PG_TUNE_PDEG. `gather` is a per-query burst multiplier where every worker allocates
+    /// work_mem, and it is deliberately kept SMALL — it was halved after the 2026-07-15
+    /// memory incident. io_workers allocate no work_mem and never compute; under
+    /// io_method=worker they exist only to hold asynchronous reads outstanding, and the pool
+    /// bounds achievable queue depth for the whole cluster.
+    ///
+    /// MEASURED 2026-08-03 with pgdata on a Samsung 970 EVO Plus, mid chess ingest:
+    /// effective_io_concurrency=256 while io_workers=3, giving aqu-sz 11.92 at r_await
+    /// 0.29ms — by Little's law ~41k IOPS, about 6% of the device, while %util read 100%
+    /// (which on a queued device means "at least one request in flight", not saturation).
+    ///
+    /// This gate exists because the same class of silent divergence already happened once:
+    /// max_wal_size was changed in the shell alone and the cluster stayed on the emitter's
+    /// value for a day with nothing to contradict it.
+    /// </summary>
+    [Fact]
+    public void IoWorkers_IsNotTiedToParallelQueryDegree()
+    {
+        var emitter = File.ReadAllText(Path.Combine(TypeIdLawTests.FindRepoRootPublic(),
+            "app", "Laplace.Cli", "CpuTopologyCommands.cs"));
+        var shell = TuningScript();
+
+        var em = Regex.Match(emitter, @"io_workers = \{(?<expr>[A-Za-z0-9_]+)\}");
+        Assert.True(em.Success, "emitter no longer emits an interpolated io_workers value");
+        Assert.False(em.Groups["expr"].Value is "gather" or "maint" or "pcores",
+            $"io_workers is derived from '{em.Groups["expr"].Value}', a CPU parallelism value. "
+            + "I/O workers block on the device and allocate no work_mem — sizing them by a "
+            + "number kept small for memory pressure caps the storage layer.");
+
+        var sm = Regex.Match(shell, @"ALTER SYSTEM SET io_workers = \$(?<var>[A-Z_]+)");
+        Assert.True(sm.Success, "pg-machine-tuning.sh no longer sets io_workers");
+        Assert.NotEqual("PG_TUNE_PDEG", sm.Groups["var"].Value);
+
+        // Both sides clamp to the same band: a floor because 3 is never right for flash, a
+        // ceiling because these are real processes out of max_worker_processes.
+        Assert.Matches(@"Math\.Clamp\(logical, 8, 32\)", emitter);
+        Assert.Matches(@"iow=\$cores;\s*\(\(\s*iow\s*<\s*8\s*\)\).*?\(\(\s*iow\s*>\s*32\s*\)\)", shell);
+    }
+
+    /// <summary>
+    /// max_worker_processes is the SHARED pool parallel query and the io_worker pool both
+    /// draw from, so it must account for the I/O pool. It previously did not — it was the
+    /// logical count while max_parallel_workers alone already claimed pcores, leaving the
+    /// cluster oversubscribed before io_workers took any share.
+    /// </summary>
+    [Fact]
+    public void MaxWorkerProcesses_AccountsForTheIoWorkerPool()
+    {
+        var emitter = File.ReadAllText(Path.Combine(TypeIdLawTests.FindRepoRootPublic(),
+            "app", "Laplace.Cli", "CpuTopologyCommands.cs"));
+        Assert.Matches(@"int workers = pcores \+ maint \+ ioWorkers \+ 8;", emitter);
+        Assert.Matches(@"mwp=\$\(\(\s*pcores \+ pdeg \+ iow \+ 8\s*\)\)", TuningScript());
+    }
+
+    /// <summary>
+    /// The io_method probe must run on the PRIMARY path, not only in the bootstrap fallback.
+    /// It used to live in pg_apply_machine_tuning_fallback alone, so on every host where the
+    /// CLI is built — i.e. normal operation — the emitter's hardcoded io_method=worker stood
+    /// and the probe never executed. io_uring removes the io_workers ceiling entirely by
+    /// letting each backend submit directly to the kernel, which is the point on NVMe.
+    /// </summary>
+    [Fact]
+    public void IoMethodProbe_RunsOnThePrimaryApplyPath()
+    {
+        var shell = TuningScript();
+        Assert.Contains("pg_apply_io_method()", shell, StringComparison.Ordinal);
+        Assert.Matches(
+            @"pg_apply_machine_tuning\(\)\s*\{(?:[^{}]|\{[^{}]*\})*pg_apply_io_method",
+            shell);
+    }
 }

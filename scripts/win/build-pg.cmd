@@ -101,8 +101,8 @@ if "%RECONF%"=="1" (
     --prefix=%LAPLACE_PG_PREFIX:\=/% ^
     --buildtype=%LAPLACE_PG_BUILDTYPE% ^
     -Dcassert=%LAPLACE_PG_CASSERT% ^
-    -Dssl=none -Dicu=disabled -Dzlib=disabled -Dlibxml=disabled -Dlz4=disabled ^
-    -Dzstd=disabled -Dldap=disabled -Dnls=disabled -Dreadline=disabled ^
+    -Dssl=none -Dicu=disabled -Dzlib=disabled -Dlibxml=disabled -Dlz4=enabled ^
+    -Dzstd=enabled -Dldap=disabled -Dnls=disabled -Dreadline=disabled ^
     -Dgssapi=disabled -Dpam=disabled -Duuid=none -Dbonjour=disabled ^
     -Dplperl=disabled -Dplpython=disabled -Dpltcl=disabled ^
     -Dtap_tests=disabled -Ddocs=disabled ^

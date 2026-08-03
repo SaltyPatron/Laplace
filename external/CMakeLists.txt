@@ -146,6 +146,26 @@ ExternalProject_Add(postgresql
         "--with-uuid=e2fs"
         "--with-libxml"
         "--without-readline"
+        # WRITE-PATH CODECS AND ASYNC I/O. PostgreSQL's configure does NOT auto-detect any of
+        # these — omit the flag and the feature is silently absent. No warning, no error; the
+        # only symptom is a shorter enumvals list on a GUC nobody reads.
+        #
+        # MEASURED 2026-08-03 on the live cluster, mid chess ingest:
+        #   wal_compression enumvals {pglz,on,off}   -- lz4/zstd missing, pglz is the SLOWEST
+        #                                               codec (~100-200 MB/s vs lz4 ~500+)
+        #   io_method       enumvals {sync,worker}   -- io_uring missing, so async I/O is
+        #                                               capped by the io_workers pool
+        #   checkpointer    num_timed=0 num_requested=5, write_time 415s of a 712s ingest,
+        #                   6,043,303 buffers = 48.3 GB at ~116 MB/s on a drive that does ~3 GB/s
+        # liblz4-dev and libzstd-dev were ALREADY INSTALLED with headers present the whole
+        # time. The flags were simply never passed.
+        #
+        # Mandatory, not opportunistic: `--with-lz4` fails configure loudly if the library is
+        # absent, which is the correct outcome. Silent omission is what produced a cluster
+        # compressing WAL with pglz on NVMe for months.
+        "--with-lz4"
+        "--with-zstd"
+        "--with-liburing"
     BUILD_COMMAND   env -u PGXS MAKELEVEL=0 make submake-generated-headers
             COMMAND env -u PGXS make -j ${_NPROC}
     INSTALL_COMMAND env -u PGXS MAKELEVEL=0 make install
