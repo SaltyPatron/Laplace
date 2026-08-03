@@ -449,9 +449,7 @@
     "chess-syzygy": {
       "decomposer": "ChessSyzygy",
       "layer": 23,
-      "prerequisites": [
-        "chess"
-      ],
+      "prerequisites": [],
       "skip_layer_complete": true,
       "consensus_gates": [
         {

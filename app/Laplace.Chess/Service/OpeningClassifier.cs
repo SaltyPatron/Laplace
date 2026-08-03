@@ -3,6 +3,13 @@ using Laplace.Modality.Chess;
 
 namespace Laplace.Chess.Service;
 
+/// <summary>
+/// Deprecated SAN-string prefix matcher against ECO TSV. Not the matching law —
+/// board id / opening-line trajectory prefix is
+/// (<see cref="ChessOpeningIndex"/> / <see cref="ChessOpeningMatchDecomposer"/>).
+/// Retained only as the weak ChessAnalysis peer until that witness is retired from
+/// the analyzer deposit path.
+/// </summary>
 public static class OpeningClassifier
 {
     public readonly record struct OpeningMatch(string? Name, string? Eco);
@@ -11,10 +18,8 @@ public static class OpeningClassifier
     private static Dictionary<string, (string Eco, string Name)>? _byLine;
     private static int _maxLineLen;
 
-    // Longest-prefix lookup over the ECO table: the game's SAN prefix joined with spaces
-    // is the key, probed from the longest possible line length downward. O(maxLineLen)
-    // dictionary probes per game instead of the old scan over all ~3,733 ECO lines per
-    // game (the per-game analyzer hot spot GH #450 measured).
+    // Longest SAN-prefix over the ECO table (transposition-blind). Kept for the
+    // ChessAnalysis peer only — do not treat as catalog authority.
     public static OpeningMatch Classify(IReadOnlyList<string> sans, ChessModality? modality = null)
     {
         EnsureLoaded();

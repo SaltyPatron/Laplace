@@ -85,13 +85,11 @@ public static class ChessVocabulary
     // ChessAnalysis testimony. One lane = one source = one evictable unit.
     public static readonly Hash128 TrajectorySourceId = SubstrateCanonicalIds.Source("ChessTrajectory");
 
-    // GH #736 source split: the position-id opening matcher writes under its OWN source so
-    // its verdict can be read, trusted and evicted separately from the analyzer's
-    // SAN-prefix guess. Three witnesses name a game's opening; only this one does it by
-    // board identity.
+    // GH #736: board-identity opening matcher under its own source so the verdict
+    // can be read/trusted/evicted apart from the deprecated ChessAnalysis SAN-prefix peer.
     public static readonly Hash128 OpeningMatchSourceId = SubstrateCanonicalIds.Source("ChessOpeningMatch");
-    // Syzygy probe lane (campaign PR-8): an exact mathematical oracle rides the
-    // StandardsDerived band — high witness weight, still one voice among many.
+    // Closings catalog (Syzygy unpack → position-grain HAS_WDL/HAS_DTZ). StandardsDerived
+    // band — high witness weight, still one voice; Fathom is extract codec only.
     public static readonly Hash128 SyzygyTrustClass = TrustClass("StandardsDerived");
 
     // Deterministic per-(EVENT, analysis version) marker (GH #736: the analyzer deposits

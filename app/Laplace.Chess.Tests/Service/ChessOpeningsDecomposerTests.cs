@@ -1,4 +1,5 @@
 using System.Text;
+using Laplace.Engine.Core;
 using Laplace.Modality.Chess;
 using Xunit;
 
@@ -50,6 +51,49 @@ public sealed class ChessOpeningsDecomposerTests
         Assert.Equal(
             "r1bqkbnr/pppp1ppp/2n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3",
             Replay(sans));
+    }
+
+    [Fact]
+    public void CatalogLine_CollidesWithTryReplayLine_AndCarriesTrajectory()
+    {
+        var sans = ChessOpeningsDecomposer.ExtractSans("1. e4 e5 2. Nf3 Nc6 3. Bb5");
+        var change = ChessOpeningsDecomposer.ComposeLineForTest("C60", "Ruy Lopez", sans);
+
+        var replayed = ChessPgnDecomposer.TryReplayLine(sans, startFen: null);
+        Assert.NotNull(replayed);
+        var expectedLine = ChessCompose.LineId(replayed!);
+
+        var lineEntity = Assert.Single(change.Entities, e => e.TypeId == ChessVocabulary.GameType);
+        Assert.Equal(expectedLine, lineEntity.Id);
+
+        var traj = Assert.Single(change.Physicalities, p => p.EntityId == expectedLine);
+        Assert.NotNull(traj.TrajectoryXyzm);
+        Assert.Equal(sans.Count + 1, traj.NConstituents);
+
+        Assert.Contains(change.Attestations,
+            a => a.TypeId == ChessVocabulary.OpeningNameType && a.SubjectId == expectedLine);
+        Assert.Contains(change.Attestations,
+            a => a.TypeId == ChessVocabulary.EcoCodeType && a.SubjectId == expectedLine);
+        // Bridge stamp on final board for ChessOpeningIndex.
+        Assert.Contains(change.Attestations,
+            a => a.TypeId == ChessVocabulary.OpeningNameType && a.SubjectId == replayed![^1]);
+    }
+
+    [Fact]
+    public void Transposition_DifferentOpeningLines_SameFinalBoard()
+    {
+        var direct = ChessOpeningsDecomposer.ComposeLineForTest(
+            "D30", "Queen's Gambit Declined", ["d4", "d5", "c4", "e6"]);
+        var transposed = ChessOpeningsDecomposer.ComposeLineForTest(
+            "A13", "English Opening: Agincourt Defense", ["c4", "e6", "d4", "d5"]);
+
+        var lineA = Assert.Single(direct.Entities, e => e.TypeId == ChessVocabulary.GameType).Id;
+        var lineB = Assert.Single(transposed.Entities, e => e.TypeId == ChessVocabulary.GameType).Id;
+        Assert.NotEqual(lineA, lineB);
+
+        var finalA = ChessPgnDecomposer.TryReplayLine(["d4", "d5", "c4", "e6"], null)![^1];
+        var finalB = ChessPgnDecomposer.TryReplayLine(["c4", "e6", "d4", "d5"], null)![^1];
+        Assert.Equal(finalA, finalB);
     }
 
     [SkippableFact]
