@@ -64,10 +64,6 @@ on:
         description: "nuke + re-migrate + force-reseed foundation (destructive schema changes only)"
         type: boolean
         default: false
-      seed:
-        description: "run the foundation seed ladder (seeds never run on push; fresh_db forces this)"
-        type: boolean
-        default: false
       serial_tests:
         description: "force serial ctest/regress (LAPLACE_TEST_SERIAL=1)"
         type: boolean
@@ -420,22 +416,8 @@ jobs:
       # reports what it is waiting on and FAILS rather than deploying anyway -- killing an
       # ingest silently is the thing being fixed.
       - name: Wait for in-flight ingests (substrate lock)
-        timeout-minutes: 300
-        run: |
-          set -euo pipefail
-          q="SELECT count(*) FROM laplace.ingest_run_journal WHERE status = 'running';"
-          for _ in $(seq 1 600); do
-            n=$(psql -d "${PGDATABASE:-laplace}" -U laplace_admin -tAc "$q" 2>/dev/null || echo 0)
-            [ "${n:-0}" = "0" ] && { echo "no ingest in flight — safe to deploy"; exit 0; }
-            echo "::notice::waiting on ${n} in-flight ingest(s) before bouncing PostgreSQL"
-            psql -d "${PGDATABASE:-laplace}" -U laplace_admin -P pager=off -c \
-              "SELECT source_name, input_units_done, input_units_total, now()-started_at AS elapsed
-               FROM laplace.ingest_run_journal WHERE status='running' ORDER BY started_at;" || true
-            sleep 30
-          done
-          echo "::error::still waiting on in-flight ingests after 5h — refusing to deploy over them"
-          exit 1
-
+        timeout-minutes: 305
+        run: bash scripts/wait-for-quiet-substrate.sh "${PGDATABASE:-laplace}"
       - uses: actions/checkout@v4
         with: { submodules: false, clean: false }
       - uses: ./.github/actions/setup-laplace-env
@@ -484,10 +466,9 @@ jobs:
     # Seed is dispatch-only; on push it skips instantly and tests run against
     # the standing (already seeded) substrate with the freshly installed
     # extension — the layer the tests are supposed to validate.
-    needs: [db-ops, seed]
+    needs: db-ops
     if: >-
       !cancelled() && needs.db-ops.result == 'success' &&
-      (needs.seed.result == 'success' || needs.seed.result == 'skipped') &&
       (github.event_name != 'workflow_dispatch' ||
        contains(fromJSON('["integrate", "all"]'), inputs.stage))
     runs-on: [self-hosted, laplace]
@@ -524,28 +505,6 @@ jobs:
             cat "$f"
             echo "::endgroup::"
           done
-
-  seed:
-    name: Seed — foundation ladder (dispatch-only; idempotent, no-op when present)
-    needs: db-ops
-    if: >-
-      github.event_name == 'workflow_dispatch' &&
-      (inputs.seed == true || inputs.fresh_db == true) &&
-      contains(fromJSON('["integrate", "all"]'), inputs.stage)
-    runs-on: [self-hosted, laplace]
-    timeout-minutes: 240
-    steps:
-      - uses: actions/checkout@v4
-        with: { submodules: false, clean: false }
-      - uses: ./.github/actions/setup-laplace-env
-
-      - name: Ensure foundation
-        run: |
-          args=()
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.fresh_db }}" = "true" ]; then
-            args+=(--force)
-          fi
-          bash scripts/pipeline.sh "${args[@]}" foundation
 
   publish:
     name: Publish — API + SPA, restart service
@@ -704,7 +663,7 @@ jobs:
   restore-api:
     name: Restore API (always — even after failed stages)
     if: always() && needs.deploy.result != 'skipped'
-    needs: [deploy, publish, seed, smoke]
+    needs: [deploy, publish, smoke]
     runs-on: [self-hosted, laplace]
     concurrency:
       # ONE LIFECYCLE OPERATION AT A TIME, and never cancelled. Deploy, db-ops and

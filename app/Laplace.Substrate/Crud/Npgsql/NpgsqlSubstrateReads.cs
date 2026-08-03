@@ -2153,6 +2153,39 @@ public static class NpgsqlSubstrateReads
     }
 
     /// <summary>
+    /// Every (position, name, eco) the openings catalog attests, for the board-identity
+    /// opening matcher. One bounded read of a few thousand rows at Initialize, not a query
+    /// per record — the caller probes the result in memory.
+    ///
+    /// Lives here rather than in the chess lane because ReadPathArchitectureGateTests
+    /// forbids hand-written SQL in a consumer, and it is right to: one implementation, one
+    /// place, every caller the same. It caught this exact query inline in
+    /// ChessOpeningIndex.cs.
+    /// </summary>
+    public static Task<IReadOnlyList<(byte[] Position, byte[] Name, byte[]? Eco)>>
+        OpeningCatalogAsync(
+            NpgsqlDataSource dataSource, byte[] openingNameType, byte[] hasEcoType,
+            byte[] sourceId, CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT n.subject_id, n.object_id, e.object_id
+            FROM laplace.attestations n
+            LEFT JOIN laplace.attestations e
+                   ON e.subject_id = n.subject_id
+                  AND e.type_id    = @eco
+                  AND e.source_id  = @src
+            WHERE n.type_id   = @name
+              AND n.source_id = @src
+            """,
+            r => ((byte[])r[0], (byte[])r[1], r.IsDBNull(2) ? null : (byte[])r[2]),
+            p =>
+            {
+                p.Add("name", NpgsqlDbType.Bytea).Value = openingNameType;
+                p.Add("eco", NpgsqlDbType.Bytea).Value = hasEcoType;
+                p.Add("src", NpgsqlDbType.Bytea).Value = sourceId;
+            },
+            ct: ct, label: "opening_catalog", onError: onError);
+
+    /// <summary>
     /// The ORDERED CONSTITUENT SURFACES of composed documents, rejoined with a space —
     /// one query for the whole batch.
     ///
