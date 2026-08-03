@@ -255,4 +255,35 @@ public class Chess960Tests
         Assert.Null(Chess960Positions.TryNumberOfStart(
             Board.FromFen("rnbqkbnr/pppppppp/8/8/8/4P3/PPPP1PPP/RNBQKBNR b KQkq e3 0 1")));
     }
+
+    /// <summary>
+    /// In Chess960 a CASTLE and an ordinary king move can share (from, to). Found on a real
+    /// game — DenLaz_chesscom.pgn, white king d1, rooks a1/f1 — where the source writes
+    /// "Kc1" for the ordinary step d1->c1, and the queen-side castle also ends on c1. The
+    /// resolver matched both, called it ambiguous, and dropped a 58-ply game.
+    ///
+    /// Standard chess cannot produce this: the king starts on e1, castling lands it two
+    /// squares away, and "Kc1" from e1 is not a legal king move. A castle is only ever
+    /// spelled O-O / O-O-O, so a piece-move SAN must never match one.
+    /// </summary>
+    [Fact]
+    public void KingMove_SharingItsSquareWithACastle_IsNotAmbiguous()
+    {
+        var b = Board.FromFen("rb1k1r1q/1p1bpp1p/2p2np1/p2p4/P1n2PP1/1NP4P/1PBPP1Q1/R2KBRN1 w FAfa - 1 9");
+        var pseudo = new List<ChessMove>();
+        var legal = new List<ChessMove>();
+        MoveGen.Legal(b, pseudo, legal);
+
+        // Both really are legal and both really do land on c1.
+        Assert.Contains(legal, m => m.To == Board.Sq(2, 0) && (m.Flags & MoveFlags.CastleQueen) != 0);
+        Assert.Contains(legal, m => m.To == Board.Sq(2, 0) && (m.Flags & MoveFlags.CastleQueen) == 0);
+
+        var king = San.Resolve(b, legal, "Kc1");
+        Assert.NotNull(king);
+        Assert.Equal(MoveFlags.None, king!.Value.Flags & (MoveFlags.CastleKing | MoveFlags.CastleQueen));
+
+        var castle = San.Resolve(b, legal, "O-O-O");
+        Assert.NotNull(castle);
+        Assert.NotEqual(MoveFlags.None, castle!.Value.Flags & MoveFlags.CastleQueen);
+    }
 }
