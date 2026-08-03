@@ -20,8 +20,14 @@ public interface ISyzygyProber
     /// <summary>Largest man count the loaded table set covers (0 = nothing loaded).</summary>
     int Largest { get; }
 
-    /// <summary>Exact verdict for the board, or null when no table answers (terminal
-    /// position, missing table, castling rights).</summary>
+    /// <summary>
+    /// Thread-safe WDL-only probe (Fathom <c>tb_probe_wdl</c>). Null when no table answers.
+    /// Prefer this in the parallel unpack fan-out.
+    /// </summary>
+    int? ProbeWdl(Board board);
+
+    /// <summary>WDL+DTZ root probe (process-locked — Fathom root is not thread-safe).
+    /// Null when no table answers or the position is terminal.</summary>
     SyzygyVerdict? Probe(Board board);
 }
 
@@ -29,6 +35,15 @@ public interface ISyzygyProber
 public sealed class SyzygyNativeProber : ISyzygyProber
 {
     public int Largest => SyzygyNative.Largest();
+
+    public int? ProbeWdl(Board board)
+    {
+        var bb = ChessSyzygy.ToBitboards(board);
+        int wdl = SyzygyNative.ProbeWdl(
+            bb.White, bb.Black, bb.Kings, bb.Queens, bb.Rooks,
+            bb.Bishops, bb.Knights, bb.Pawns, bb.Ep, board.WhiteToMove);
+        return wdl < 0 ? null : wdl;
+    }
 
     public SyzygyVerdict? Probe(Board board)
     {
@@ -43,19 +58,17 @@ public sealed class SyzygyNativeProber : ISyzygyProber
 }
 
 /// <summary>
-/// CALCULATED Syzygy probe pass (campaign PR-8): replay a witnessed line, probe every
-/// non-terminal position the loaded table set covers (men ≤ largest, no castling
-/// rights), attest the exact endgame oracle facts under the ChessSyzygy source:
-/// (position, HAS_WDL, token) — five-valued, side-to-move POV — and
-/// (position, HAS_DTZ, scalar content), both ctx = the LINE. GH #736: a tablebase
-/// verdict is a pure function of the position, so the unit is the LINE — marker
-/// chess/syzygy/{lineId}/{v}, exactly the stockfish-eval grain. Trust class
-/// StandardsDerived: a mathematically exact oracle is a high-weight witness, still one
-/// voice — phi does the rest. Versioned and evictable (evict_source, #508).
+/// Syzygy tablebase as an ingest source: packaging (<c>.rtbw</c>/<c>.rtbz</c>) is opened
+/// by <see cref="SyzygyTableUnpack"/> (Fathom = codec, tree-sitter slot for this file type),
+/// and each board state's WDL/DTZ is composed as a <b>position-grain</b> substrate record.
+/// Context is null — a tablebase verdict is a pure function of the board. Later games that
+/// compose the same surface hit the same position id and find the attestations already
+/// there (identity collision / dupe), not a vault mmap peek.
+/// Version 2: position-grain (v1 wrongly pinned ctx to the LINE).
 /// </summary>
 public static class ChessSyzygy
 {
-    public const int Version = 1;
+    public const int Version = 2;
 
     public const string SourceName = "ChessSyzygy";
     public static readonly Hash128 SourceId = SubstrateCanonicalIds.Source(SourceName);
@@ -64,8 +77,9 @@ public static class ChessSyzygy
     /// <summary>Witness weight of the oracle's testimony (the StandardsDerived trust band).</summary>
     public const double Weight = TC.StandardsDerived;
 
-    public static Hash128 MarkerId(Hash128 lineId, int version)
-        => Hash128.OfCanonical($"chess/syzygy/{lineId}/{version}");
+    /// <summary>Versioned per-POSITION marker — each board state is probed/deposited once.</summary>
+    public static Hash128 MarkerId(Hash128 positionId, int version)
+        => Hash128.OfCanonical($"chess/syzygy/{positionId}/{version}");
 
     /// <summary>Five-valued WDL content token, side-to-move POV (Fathom order 0..4).</summary>
     public static string WdlToken(int wdl) => wdl switch
@@ -124,47 +138,56 @@ public static class ChessSyzygy
         return men;
     }
 
+    /// <summary>
+    /// Compose one unpacked product: position entity + HAS_WDL + HAS_DTZ (ctx null) +
+    /// versioned position marker.
+    /// </summary>
+    public static void DeriveProduct(SubstrateChangeBuilder b, SyzygyProduct product)
+    {
+        var node = ChessGraph.EmitComposed(b, product.Surface, SourceId);
+        if (ContentEmitter.Emit(b, WdlToken(product.Wdl), SourceId) is { } wdlId)
+            b.AddAttestation(NativeAttestation.Categorical(
+                node.Position.Id, "HAS_WDL", wdlId, SourceId, contextId: null, Weight));
+        if (ContentEmitter.Emit(b, product.Dtz.ToString(), SourceId) is { } dtzId)
+            b.AddAttestation(NativeAttestation.Categorical(
+                node.Position.Id, "HAS_DTZ", dtzId, SourceId, contextId: null, Weight));
+
+        b.AddEntity(MarkerId(product.PositionId, Version), EntityTier.Document,
+            ChessVocabulary.AnalysisMarkerType, SourceId);
+        if (ContentEmitter.Emit(b, Version.ToString(), SourceId) is { } vId)
+            b.AddAttestation(NativeAttestation.Categorical(
+                product.PositionId, "ANALYZED_AT", vId, SourceId, null, Weight));
+    }
+
+    /// <summary>
+    /// Test/helper: replay a witnessed line and deposit every probeable position as a
+    /// position-grain product. Ingest itself unpacks the table directory — it does not
+    /// sample games against a vault mmap.
+    /// </summary>
     public static void DeriveGame(SubstrateChangeBuilder b, ChessWitnessedGame game, ISyzygyProber prober)
     {
         var m = new ChessModality();
-        // Unreadable start: probe nothing rather than probe a board the game never had.
         if (ChessAnalyze.InitialState(game.StartFen, m) is not { } start) return;
-        var state = start.Initial;
+        var cur = start.Initial;
         int largest = prober.Largest;
-
-        var cur = state;
         int n = game.Moves.Count;
         for (int ply = 0; ply <= n; ply++)
         {
-            // Terminal positions need no oracle (the game record already witnesses the
-            // result); castling rights are outside every tablebase's domain.
             if (largest > 0
                 && m.Terminal(cur) is null
                 && cur.Board.Castle == CastleRights.None
                 && MenCount(cur.Board) <= largest
                 && prober.Probe(cur.Board) is { } verdict)
             {
-                var node = ChessGraph.EmitComposed(b, m.StateKey(cur), SourceId);
-                // ctx = the LINE: exact-oracle testimony on the position reached along
-                // it — line-grain, never per-playing provenance (stockfish-eval parity).
-                if (ContentEmitter.Emit(b, WdlToken(verdict.Wdl), SourceId) is { } wdlId)
-                    b.AddAttestation(NativeAttestation.Categorical(
-                        node.Position.Id, "HAS_WDL", wdlId, SourceId, game.LineId, Weight));
-                if (ContentEmitter.Emit(b, verdict.Dtz.ToString(), SourceId) is { } dtzId)
-                    b.AddAttestation(NativeAttestation.Categorical(
-                        node.Position.Id, "HAS_DTZ", dtzId, SourceId, game.LineId, Weight));
+                string surface = m.StateKey(cur);
+                DeriveProduct(b, new SyzygyProduct(
+                    surface, ChessCompose.PositionId(surface), verdict.Wdl, verdict.Dtz));
             }
 
             if (ply == n) break;
             var mv = San.Resolve(cur.Board, m.LegalActions(cur), game.Moves[ply]);
-            if (mv is null) break; // unreplayable movetext — stop; partial probes stand
+            if (mv is null) break;
             cur = m.Apply(cur, mv.Value);
         }
-
-        b.AddEntity(MarkerId(game.LineId, Version), EntityTier.Document,
-            ChessVocabulary.AnalysisMarkerType, SourceId);
-        if (ContentEmitter.Emit(b, Version.ToString(), SourceId) is { } vId)
-            b.AddAttestation(NativeAttestation.Categorical(
-                game.LineId, "ANALYZED_AT", vId, SourceId, null, Weight));
     }
 }

@@ -92,32 +92,85 @@ public sealed class ChessOpeningsDecomposer(bool recursive = false)
         return lines == 0 ? null : lines;
     }
 
+    /// <summary>
+    /// Catalog unit is the LINE (GH #736 / Chess catalog dual): Merkle of ordered position
+    /// ids, trajectory physicality, OPENING_NAME / HAS_ECO on the line. MOVE edges remain
+    /// on the shared position web (existence witness only — games=1 Draw, light weight).
+    /// Final-position name stamps stay as a temporary bridge for
+    /// <see cref="ChessOpeningIndex"/> until readers are fully line-aware.
+    /// </summary>
     private static void AppendLine(SubstrateChangeBuilder b, ChessModality m, List<string> sans, string eco, string name)
     {
         long games = OpeningGames;
         var state = m.Initial();
-        bool any = false;
-        foreach (var san in sans)
+        var line = new List<ChessNode>(sans.Count + 1);
+        var keys = new List<string>(sans.Count + 1);
+        long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
+
+        lock (ChessCompose.Gate)
         {
-            var mv = San.Resolve(state.Board, m.LegalActions(state), san);
-            if (mv is null) return;
-            var next = m.Apply(state, mv.Value);
-
-            ChessGraph.AppendMoveEdge(
-                b, m.StateKey(state), m.StateKey(next), PlyOutcome.Draw, games, OpeningWitnessWeight,
-                sourceId: ChessVocabulary.OpeningsSourceId);
-            state = next;
-            any = true;
+            keys.Add(m.StateKey(state));
+            line.Add(ChessCompose.Position(keys[^1]).Position);
+            foreach (var san in sans)
+            {
+                var mv = San.Resolve(state.Board, m.LegalActions(state), san);
+                if (mv is null) return;
+                state = m.Apply(state, mv.Value);
+                keys.Add(m.StateKey(state));
+                line.Add(ChessCompose.Position(keys[^1]).Position);
+            }
         }
-        if (!any) return;
+        if (line.Count < 2) return;
 
-        var finalId = ChessCompose.PositionId(m.StateKey(state));
-        if (!string.IsNullOrWhiteSpace(name) && ContentEmitter.Emit(b, name, ChessVocabulary.OpeningsSourceId) is { } nameId)
+        var ids = new Hash128[line.Count];
+        for (int i = 0; i < line.Count; i++) ids[i] = line[i].Id;
+        var lineId = ChessCompose.LineId(ids);
+
+        // Shared Game/line type — identity is the merkle; do not mint a parallel id space.
+        b.AddEntity(lineId, EntityTier.Document, ChessVocabulary.GameType, ChessVocabulary.OpeningsSourceId);
+        ChessGraph.AppendGameTrajectory(b, lineId, line, ChessVocabulary.OpeningsSourceId, nowUs);
+
+        // MOVE web: existence only. Fabricated draw mass is not the opening's identity.
+        for (int i = 0; i < keys.Count - 1; i++)
+        {
+            ChessGraph.AppendMoveEdge(
+                b, keys[i], keys[i + 1], PlyOutcome.Draw, games, OpeningWitnessWeight,
+                sourceId: ChessVocabulary.OpeningsSourceId);
+        }
+
+        var finalId = ids[^1];
+        Hash128? nameId = null;
+        Hash128? ecoId = null;
+        if (!string.IsNullOrWhiteSpace(name))
+            nameId = ContentEmitter.Emit(b, name, ChessVocabulary.OpeningsSourceId);
+        if (!string.IsNullOrWhiteSpace(eco))
+            ecoId = ContentEmitter.Emit(b, eco, ChessVocabulary.OpeningsSourceId);
+
+        if (nameId is { } nid)
+        {
             b.AddAttestation(NativeAttestation.Categorical(
-                finalId, "OPENING_NAME", nameId, ChessVocabulary.OpeningsSourceId, null, TC.AcademicCurated));
-        if (!string.IsNullOrWhiteSpace(eco) && ContentEmitter.Emit(b, eco, ChessVocabulary.OpeningsSourceId) is { } ecoId)
+                lineId, "OPENING_NAME", nid, ChessVocabulary.OpeningsSourceId, null, TC.AcademicCurated));
+            // Bridge: ChessOpeningIndex still keys boards for deepest-named-position match.
             b.AddAttestation(NativeAttestation.Categorical(
-                finalId, "HAS_ECO", ecoId, ChessVocabulary.OpeningsSourceId, null, TC.AcademicCurated));
+                finalId, "OPENING_NAME", nid, ChessVocabulary.OpeningsSourceId, null, TC.AcademicCurated));
+        }
+        if (ecoId is { } eid)
+        {
+            b.AddAttestation(NativeAttestation.Categorical(
+                lineId, "HAS_ECO", eid, ChessVocabulary.OpeningsSourceId, null, TC.AcademicCurated));
+            b.AddAttestation(NativeAttestation.Categorical(
+                finalId, "HAS_ECO", eid, ChessVocabulary.OpeningsSourceId, null, TC.AcademicCurated));
+        }
+    }
+
+    /// <summary>
+    /// Pure compose for tests: same product as <see cref="AppendLine"/> without a live writer.
+    /// </summary>
+    internal static SubstrateChange ComposeLineForTest(string eco, string name, IReadOnlyList<string> sans)
+    {
+        var b = new SubstrateChangeBuilder(ChessVocabulary.OpeningsSourceId, "test/openings");
+        AppendLine(b, new ChessModality(), sans.ToList(), eco, name);
+        return b.SetInputUnitsConsumed(1).Build();
     }
 
     internal static List<string> ExtractSans(string movetext)

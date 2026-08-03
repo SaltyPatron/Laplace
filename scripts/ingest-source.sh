@@ -152,12 +152,18 @@ case "$source" in
         fi
         ingest chess-eval
         ;;
-    chess-analyze|chess-trajectory|chess-syzygy|chess-opening-match)
+    chess-syzygy)
+        # Tablebase packaging dir → position-grain WDL/DTZ records (Fathom = unpack codec).
+        # Path optional: falls back to LAPLACE_SYZYGY / data-root Games/Chess/syzygy/….
+        build_cli
+        if [[ -n "$path" ]]; then
+            ingest chess-syzygy "$path"
+        else
+            ingest chess-syzygy
+        fi
+        ;;
+    chess-analyze|chess-trajectory|chess-opening-match)
         # Substrate-sourced calculated passes: no path, marker-gated, safe to re-run.
-        # All three are routable from `laplace ingest` and listed in IngestDispatchTable,
-        # but were absent from THIS script -- the entry point the seed workflows and the
-        # ensure-foundation ladder actually call. `ingest-source.sh chess-syzygy` died on
-        # "Unknown source" for three lanes that exist and work.
         build_cli
         ingest "$source"
         ;;

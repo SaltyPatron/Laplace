@@ -1,9 +1,10 @@
 # Syzygy tablebase test fixtures
 
 The two smallest 3-men Syzygy endgame tables (WDL `.rtbw` + DTZ `.rtbz`,
-~14 KB total), committed so the probe kernel (`engine/core/src/syzygy.c`, via
-the vendored Fathom prober at `external/fathom`) and the `ChessSyzygy` lane
-tests run without any external download.
+~14 KB total), committed so closings-catalog ingest (`chess-syzygy`) and its
+extract codec (Fathom via `engine/core/src/syzygy.c` / `external/fathom`) can
+be tested without any external download. After ingest, `HAS_WDL` / `HAS_DTZ`
+rows are substrate authority — reads must not require a vault mmap.
 
 | File | Bytes | MD5 |
 |---|---|---|
@@ -22,5 +23,7 @@ tablebase generator and redistributed freely by the community mirrors
 (lichess.org among them). The files carry no license text of their own; the
 probing CODE (Fathom) is MIT and pinned at `external/fathom`.
 
-The full 3-4-5 set (~1 GB) lives outside the repo — `LAPLACE_SYZYGY` points
-at its directory (hart-server: `/vault/Data/Games/Chess/syzygy/3-4-5/`).
+The full 3-4-5 set (~1 GB) lives outside the repo — packaging directory for
+`laplace ingest chess-syzygy <dir>` (also `LAPLACE_SYZYGY` /
+`Games/Chess/syzygy/3-4-5` under the data root). Fathom is the extract codec
+only; each board product becomes a position-grain substrate record.

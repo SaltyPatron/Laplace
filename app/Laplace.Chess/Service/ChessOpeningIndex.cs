@@ -30,9 +30,10 @@ namespace Laplace.Chess.Service;
 /// The first three are transpositions the string key cannot see; the rest are the key
 /// stopping short of the deeper book line because its move order differed.
 ///
-/// The substrate already had the right answer. Openings are ingested BEFORE games, and
-/// the openings lane attests (final_position, OPENING_NAME, name) on a CONTENT-ADDRESSED
-/// position — the identical id a game mints when it reaches that board, whatever order
+/// The substrate already had the right answer. Openings are ingested BEFORE games.
+/// Catalog dual: each ECO row is a LINE (LineId + trajectory + OPENING_NAME on the
+/// line) and still stamps the final board for this deepest-named-position index —
+/// the identical position id a game mints when it reaches that board, whatever order
 /// it got there in. Measured: 1,625 of 3,733 named book positions are reached by games
 /// in a 6,365-line sample. The join was sitting there; nothing read it.
 ///

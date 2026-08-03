@@ -402,6 +402,9 @@ functions/chess/chess_opening_preference.sql.in
 functions/chess/chess_opening_games.sql.in
 functions/chess/chess_opening_record.sql.in
 functions/chess/chess_syzygy_line.sql.in
+functions/chess/chess_opening_shape_peers.sql.in
+functions/chess/chess_distance_to_syzygy.sql.in
+functions/chess/chess_missed_finish.sql.in
 functions/chess/chess_opening_endgames.sql.in
 functions/lexical/sense_audit.sql.in
 functions/converse/prompt_language.sql.in

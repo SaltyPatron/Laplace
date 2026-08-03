@@ -1,0 +1,72 @@
+-- chess_missed_finish(line): positions on the line where the closings catalog
+-- says the side to move wins (HAS_WDL = 'win'), but the played MOVE leaves a
+-- successor that is not also a win for the mover after the ply (i.e. the played
+-- edge abandons a tablebase win). Provenance read — not logistic HAS_EVAL.
+--
+-- Requires: trajectory on the line + position-grain HAS_WDL deposits. MOVE edges
+-- are the shared web (ctx null); the line's ordered positions define which edge
+-- was played.
+DROP FUNCTION IF EXISTS chess_missed_finish(bytea, integer);
+
+CREATE OR REPLACE FUNCTION chess_missed_finish(p_line bytea, p_limit int DEFAULT 32)
+    RETURNS TABLE(
+        from_position bytea,
+        to_position bytea,
+        ply integer,
+        from_wdl text,
+        to_wdl text)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+WITH rel AS MATERIALIZED (
+    SELECT relation_type_id('HAS_WDL') AS wdl
+),
+win_id AS MATERIALIZED (
+    SELECT word_id('win') AS id
+),
+line AS MATERIALIZED (
+    SELECT (u.ord - 1)::int AS ply, u.entity_id AS pos
+    FROM LATERAL trajectory_unpacked_points(p_line)
+         WITH ORDINALITY AS u(entity_id, run_length, ctier, ord)
+),
+steps AS MATERIALIZED (
+    SELECT a.ply, a.pos AS from_pos, b.pos AS to_pos
+    FROM line a
+    JOIN line b ON b.ply = a.ply + 1
+),
+wdl AS MATERIALIZED (
+    SELECT a.subject_id AS pos, a.object_id AS wdl_id
+    FROM attestations a
+    JOIN rel r ON a.type_id = r.wdl
+),
+missed AS MATERIALIZED (
+    SELECT s.ply, s.from_pos, s.to_pos, fw.wdl_id AS from_wdl_id, tw.wdl_id AS to_wdl_id
+    FROM steps s
+    JOIN wdl fw ON fw.pos = s.from_pos
+    JOIN win_id w ON w.id = fw.wdl_id
+    LEFT JOIN wdl tw ON tw.pos = s.to_pos
+    -- After a winning move under optimal play, the successor (opponent to move)
+    -- is a loss for the side then to move (= win preserved for the previous mover).
+    -- Any other deposited WDL, or no deposit, is a missed finish signal.
+    WHERE tw.wdl_id IS DISTINCT FROM word_id('loss')
+      AND tw.wdl_id IS DISTINCT FROM word_id('blessed-loss')
+    ORDER BY s.ply
+    LIMIT p_limit
+),
+surfaces AS MATERIALIZED (
+    SELECT COALESCE(array_agg(DISTINCT s), '{}'::bytea[]) AS ids
+    FROM missed m, LATERAL (VALUES (m.from_wdl_id), (m.to_wdl_id)) v(s)
+    WHERE s IS NOT NULL
+),
+label AS MATERIALIZED (
+    SELECT p.id, t.txt
+    FROM surfaces b,
+         LATERAL unnest(b.ids) WITH ORDINALITY AS p(id, i),
+         LATERAL unnest(realize_batch(b.ids, NULL)) WITH ORDINALITY AS t(txt, j)
+    WHERE p.i = t.j
+)
+SELECT m.from_pos, m.to_pos, m.ply, f.txt, t.txt
+FROM missed m
+LEFT JOIN label f ON f.id = m.from_wdl_id
+LEFT JOIN label t ON t.id = m.to_wdl_id
+ORDER BY m.ply
+$$;
