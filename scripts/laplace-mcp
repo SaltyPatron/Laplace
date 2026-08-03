@@ -29,6 +29,13 @@ ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 #
 # Everything else gets the typed tool surface, which is the point: a question the
 # typed tools cannot answer is a missing tool, not a reason to reach past them.
+#
+# CHANGING THIS LINE DOES NOT AFFECT ANY RUNNING SERVER, AND CI CANNOT MAKE IT.
+# The MCP server is a stdio CHILD OF THE CLIENT that launched it (.mcp.json), not a
+# systemd service — there is no unit, and the publish step restarts laplace-api only.
+# OperatorLane is read once at type init, so a server started before this edit keeps
+# serving raw SQL until its client restarts it, and nothing in the protocol reports
+# which lane it is in. Do not read a deploy as having applied this. See GH #809.
 export LAPLACE_MCP_OPERATOR="${LAPLACE_MCP_OPERATOR:-0}"
 
 # Prefer repo-local builds (dev freshest), then the published apphost.
