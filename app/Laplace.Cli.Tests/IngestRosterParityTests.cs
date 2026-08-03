@@ -19,6 +19,7 @@ public sealed class IngestRosterParityTests
             "chess-analyze",
             "chess-books",
             "chess-eval",
+            "chess-opening-match",
             "chess-syzygy",
             "chess-trajectory",
             "code",
@@ -31,7 +32,12 @@ public sealed class IngestRosterParityTests
             "tabular",
         };
 
-    private const int OperationalOnlyRouteCeiling = 14;
+    // 14 -> 15 for chess-opening-match, taken visibly as this shrink-only ceiling
+    // requires. It is an operational lane of exactly the shape already listed here:
+    // substrate-sourced, marker-gated, no manifest entry because the witness manifest
+    // describes the foundation/knowledge ladder and this is a chess-modality pass, like
+    // chess-syzygy and chess-trajectory beside it.
+    private const int OperationalOnlyRouteCeiling = 15;
 
     [Fact]
     public void RuntimeRoutes_MatchManifestPlusExplicitOperationalRoutes()

@@ -80,36 +80,25 @@ internal sealed class ChessOpeningIndex : ChessOpeningIndexView
     {
         var map = new Dictionary<Hash128, (Hash128, Hash128?)>(4096);
 
-        // One pass over the openings lane's own rows. The catalog is a few thousand rows,
-        // so this is a bounded read at Initialize, not a per-record query — the read law's
-        // "aggregate ids, then batch" applied to a lookup table: load once, probe in memory.
-        const string sql = """
-            SELECT n.subject_id, n.object_id, e.object_id
-            FROM laplace.attestations n
-            LEFT JOIN laplace.attestations e
-                   ON e.subject_id = n.subject_id
-                  AND e.type_id    = $2
-                  AND e.source_id  = $3
-            WHERE n.type_id   = $1
-              AND n.source_id = $3
-            """;
+        // One bounded read of the openings lane's own rows at Initialize — a few thousand
+        // — then probed in memory. The read law's "aggregate ids, then batch" applied to a
+        // lookup table: load once, never a query per record.
+        //
+        // The SQL lives in NpgsqlSubstrateReads, not here. ReadPathArchitectureGateTests
+        // caught it inline in this file and was right: hand-written SQL in a consumer is
+        // one more implementation for every caller to disagree with.
+        var rows = await NpgsqlSubstrateReads.OpeningCatalogAsync(
+            ds, RelOpeningName.ToBytes(), RelHasEco.ToBytes(),
+            ChessVocabulary.OpeningsSourceId.ToBytes(), ct).ConfigureAwait(false);
 
-        await using var cmd = ds.CreateCommand(sql);
-        cmd.Parameters.Add(new NpgsqlParameter { Value = RelOpeningName.ToBytes() });
-        cmd.Parameters.Add(new NpgsqlParameter { Value = RelHasEco.ToBytes() });
-        cmd.Parameters.Add(new NpgsqlParameter { Value = ChessVocabulary.OpeningsSourceId.ToBytes() });
-
-        await using var r = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        while (await r.ReadAsync(ct).ConfigureAwait(false))
+        foreach (var (pos, name, eco) in rows)
         {
-            var pos = Hash128.FromBytes((byte[])r[0]);
-            var name = Hash128.FromBytes((byte[])r[1]);
-            Hash128? eco = r.IsDBNull(2) ? null : Hash128.FromBytes((byte[])r[2]);
-            // A position can carry more than one catalog name (the same board reached by
-            // two catalogued lines). First wins, deterministically by scan order — the
-            // names are synonyms for the same board, so which one is a labelling choice,
-            // not a correctness one.
-            map.TryAdd(pos, (name, eco));
+            // A position can carry more than one catalog name (the same board reached by two
+            // catalogued lines). First wins, deterministically by scan order — the names are
+            // synonyms for one board, so which one is a labelling choice, not a correctness
+            // one.
+            map.TryAdd(Hash128.FromBytes(pos),
+                       (Hash128.FromBytes(name), eco is null ? null : Hash128.FromBytes(eco)));
         }
         return new ChessOpeningIndex(map);
     }

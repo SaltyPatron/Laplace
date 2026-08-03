@@ -87,19 +87,13 @@ jobs:
           esac
 
       - name: Guard — refuse to drop the database out from under a running ingest
-        # An ingest holds the substrate mutex and streams COPY. Dropping the
-        # database beneath it destroys hours of work and leaves a half-folded
-        # corpus. Cheap to check, so check.
+        # Was an inline `pg_stat_activity ... query ILIKE 'COPY %'` probe, which only
+        # sees an ingest during its COPY bursts and reports "clear" through the minutes
+        # of in-memory compose between them. Same check as the deploy job now, and the
+        # sound one — see the script.
         if: inputs.operation == 'recreate' || inputs.operation == 'remigrate'
-        run: |
-          busy=$(psql -h /var/run/postgresql -U laplace_admin -d "${{ inputs.database }}" -tAc \
-            "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND state = 'active' AND query ILIKE 'COPY %'" 2>/dev/null || echo 0)
-          if [ "${busy:-0}" -gt 0 ]; then
-            echo "::error::$busy active COPY statement(s) — an ingest is running. Refusing to touch the database."
-            exit 1
-          fi
-          echo "no active ingest"
-
+        timeout-minutes: 305
+        run: bash scripts/wait-for-quiet-substrate.sh "${{ inputs.database }}"
       - name: Status (read-only)
         if: inputs.operation == 'status'
         run: |
