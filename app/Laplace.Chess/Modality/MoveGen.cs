@@ -59,13 +59,14 @@ public static class MoveGen
     /// attacked by a rook/queen" is "does a rook placed on X see one" — one indexed load per
     /// piece class instead of a loop per direction.
     ///
-    /// Takes bitboards rather than the 0x88 array because that is the whole point: the mailbox
-    /// form re-derives geometry per call, which measured as the bulk of replay (46.7% of compose
-    /// time). Board does not yet MAINTAIN bitboards incrementally — every Squares[] mutation
-    /// site would have to update them, and a missed site desynchronises silently — so this is
-    /// used where the caller already holds them (PositionContent.Surface builds them every ply
-    /// and throws them away). ChessAttacksTests pins the tables; MoveGenBitboardEquivalenceTests
-    /// pins this against the mailbox walk on real positions.
+    /// Takes a Bitboards VALUE rather than a Board, for callers that already hold one and have
+    /// no Board to hand — PositionContent.Surface builds one every ply. Board itself now
+    /// maintains bitboards incrementally through Board.Set, so the Board overload of
+    /// IsSquareAttacked above is the one to reach for in the hot path; prefer it unless you
+    /// genuinely only have a Bitboards.
+    ///
+    /// ChessAttacksTests pins the tables; MoveGenBitboardEquivalenceTests pins this against the
+    /// mailbox walk on real positions and through real play.
     ///
     /// <paramref name="sq"/> is a 0-63 BIT index (Bitboards.Bit), not a 0x88 square.
     /// </summary>

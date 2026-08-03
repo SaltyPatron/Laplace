@@ -59,8 +59,16 @@ internal static class ChessVocabularyCache
 
     /// <summary>
     /// Compose the whole finite piece-square alphabet once. Idempotent and safe to call from
-    /// any thread; callers must invoke it before <see cref="TryGet"/> (ChessCompose does so
-    /// from EnsureLoaded, after the codepoint perfcache is available — composition reads it).
+    /// any thread.
+    ///
+    /// WHO PRIMES, exactly — the two TryGet overloads deliberately differ:
+    ///   * production: ChessCompose.EnsureLoaded calls Prime AFTER loading the codepoint
+    ///     perfcache (composition reads it), so both overloads are primed before first use.
+    ///   * span overload: a pure read. If somehow unprimed it returns FALSE rather than
+    ///     composing, and the caller falls through to the general path — correct, just slower.
+    ///     It never composes because it has no string to hand the composer.
+    ///   * string overload: self-primes, for direct unit-test entry where no ChessCompose call
+    ///     has run. That path is single-threaded by construction.
     /// </summary>
     internal static void Prime(Func<string, ChessNode> compose)
     {
