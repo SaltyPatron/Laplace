@@ -1606,7 +1606,12 @@ public static class NpgsqlSubstrateReads
             p => p.AddWithValue("q", query),
             ct: ct, label: "api_catalog", onError: onError);
 
-    public readonly record struct HealthMetricRow(string Metric, string Value);
+    /// <summary>
+    /// A health metric. <paramref name="Value"/> is NULLABLE on purpose: a metric the
+    /// health pass did not measure reports null, which is a different fact from zero and
+    /// must survive to the caller rather than throwing or defaulting.
+    /// </summary>
+    public readonly record struct HealthMetricRow(string Metric, string? Value);
 
     /// <summary><c>laplace.substrate_health()</c> flattened to metric/value rows.</summary>
     public static Task<IReadOnlyList<HealthMetricRow>> SubstrateHealthAsync(
@@ -1618,9 +1623,19 @@ public static class NpgsqlSubstrateReads
                  LATERAL (VALUES ('ok', h.ok::text),
                                  ('fake_tier_bands', h.fake_tier_bands::text),
                                  ('identity_violations', h.identity_violations::text),
+                                 -- WITHOUT THIS, identity_violations IS UNREADABLE. It is NULL
+                                 -- whenever the deep pass was skipped, and a consumer that
+                                 -- cannot see deep_checked reads that NULL as "no violations".
+                                 -- That is unattested collapsed into attested-false, in the one
+                                 -- query that reports substrate integrity.
+                                 ('deep_checked', h.deep_checked::text),
                                  ('bootstrap_entities', h.bootstrap_entities::text)) x(metric, value)
             """,
-            static r => new HealthMetricRow(r.GetString(0), r.GetString(1)),
+            // GetString on a NULL column THROWS. identity_violations is null by design when
+            // deep_checked is false, so `laplace health` did not report a skipped deep check
+            // -- it died with "Column 'value' is null". A null metric is an answer ("not
+            // measured"), never an error.
+            static r => new HealthMetricRow(r.GetString(0), r.IsDBNull(1) ? null : r.GetString(1)),
             ct: ct, label: "substrate_health", onError: onError);
 
     public readonly record struct QueryShapeRow(

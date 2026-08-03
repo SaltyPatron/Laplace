@@ -449,7 +449,14 @@ internal sealed class SubstrateTools
             .GetAwaiter().GetResult();
         var counts = NpgsqlSubstrateReads.SubstrateCountsAsync(_dbReadOnly, default)
             .GetAwaiter().GetResult();
-        var rows = health.Select(h => new JsonObject { ["metric"] = h.Metric, ["value"] = h.Value })
+        // JsonValue.Create(null) emits JSON null, which is the honest rendering of a metric
+        // that was not measured. Rendering it as "0" or "" would make a skipped deep check
+        // read as a clean one.
+        var rows = health.Select(h => new JsonObject
+            {
+                ["metric"] = h.Metric,
+                ["value"] = h.Value is null ? null : JsonValue.Create(h.Value),
+            })
             .Concat(counts.Select(c => new JsonObject { ["metric"] = c.Metric, ["value"] = c.Value.ToString() }));
         return JsonRows(rows);
     }
