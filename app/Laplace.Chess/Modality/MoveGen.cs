@@ -338,40 +338,28 @@ public static class MoveGen
         Piece rook = white ? Piece.WRook : Piece.BRook;
         if (b.Squares[rookFrom] != rook) return;
 
-        int kingTo = Board.Sq(kingSide ? 6 : 2, rank);
-        int rookTo = Board.Sq(kingSide ? 5 : 3, rank);
+        int kingFile = Board.FileOf(kingFrom);
+        int rookFile = Board.FileOf(rookFrom);
+        int kingTo = Board.Sq(kingSide ? CastlePaths.KingSideKingFile : CastlePaths.QueenSideKingFile, rank);
 
-        // Both paths must be clear of everything EXCEPT the two castling pieces, which are
-        // allowed to be standing in each other's way — they both move.
-        if (!PathClear(b, kingFrom, kingTo, kingFrom, rookFrom)) return;
-        if (!PathClear(b, rookFrom, rookTo, kingFrom, rookFrom)) return;
+        // Emptiness in ONE AND. Which squares must be clear is a pure function of where the
+        // king and rook start — destinations are fixed — so it is a precomputed file mask
+        // rather than two walks per generated move. The castling pair's own squares are
+        // already excluded from the mask, because they both move and cannot block each other.
+        if ((CastlePaths.OccupiedFiles(b, rank) & CastlePaths.EmptyMask(kingFile, rookFile)) != 0)
+            return;
 
-        // The king may not pass through or land on an attacked square. Its own start is
-        // already known safe; when kingFrom == kingTo this loop checks that square alone.
+        // The king may not start in, pass through, or land on check. The square set is
+        // precomputed too; only the attack test itself is per-square, because that depends
+        // on the whole position rather than on the geometry.
         bool attackerWhite = !white;
-        int step = kingTo > kingFrom ? 1 : kingTo < kingFrom ? -1 : 0;
-        for (int sq = kingFrom; ; sq += step)
+        for (byte path = CastlePaths.KingPathMask(kingFile, rookFile); path != 0; path &= (byte)(path - 1))
         {
-            if (IsSquareAttacked(b, sq, attackerWhite)) return;
-            if (sq == kingTo || step == 0) break;
+            int f = System.Numerics.BitOperations.TrailingZeroCount(path);
+            if (IsSquareAttacked(b, Board.Sq(f, rank), attackerWhite)) return;
         }
 
         moves.Add(new ChessMove(kingFrom, kingTo, Piece.Empty, flag));
     }
 
-    /// <summary>
-    /// Every square strictly between <paramref name="a"/> and <paramref name="b2"/>, plus the
-    /// destination, is empty — ignoring the two squares the castling king and rook vacate.
-    /// </summary>
-    private static bool PathClear(Board b, int a, int b2, int ignore1, int ignore2)
-    {
-        int step = b2 > a ? 1 : b2 < a ? -1 : 0;
-        if (step == 0) return true;
-        for (int sq = a + step; ; sq += step)
-        {
-            if (sq != ignore1 && sq != ignore2 && b.Squares[sq] != Piece.Empty) return false;
-            if (sq == b2) break;
-        }
-        return true;
-    }
 }

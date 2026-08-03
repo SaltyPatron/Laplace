@@ -286,4 +286,66 @@ public class Chess960Tests
         Assert.NotNull(castle);
         Assert.NotEqual(MoveFlags.None, castle!.Value.Flags & MoveFlags.CastleQueen);
     }
+
+    // ---- the collision, enumerated rather than stumbled on --------------------------
+
+    /// <summary>
+    /// Half the arrays can spell a castle and a king move with the same (from, to). This is
+    /// the census; the resolver rule is tested above on the real game that exposed it.
+    /// </summary>
+    [Fact]
+    public void HalfOfAllArraysCanCollideACastleWithAKingMove()
+    {
+        int kingSide = 0, queenSide = 0, either = 0;
+        for (int n = 0; n < Chess960Positions.Count; n++)
+        {
+            var g = Chess960Positions.Geometry(n);
+            if (g.KingSideSharesDestinationWithKingMove) kingSide++;
+            if (g.QueenSideSharesDestinationWithKingMove) queenSide++;
+            if (g.CanCollideWithKingMove) either++;
+        }
+        Assert.Equal(168, kingSide);
+        Assert.Equal(312, queenSide);
+        Assert.Equal(480, either);          // exactly half of 960
+    }
+
+    /// <summary>Ordinary chess cannot produce it — both destinations are two squares from
+    /// e1, so no legal king move reaches them. That is why it went unseen.</summary>
+    [Fact]
+    public void StandardChessCannotCollide()
+    {
+        var g = Chess960Positions.Geometry(Chess960Positions.StandardNumber);
+        Assert.Equal(4, g.KingFile);        // e1
+        Assert.Equal(7, g.KingRookFile);    // h1
+        Assert.Equal(0, g.QueenRookFile);   // a1
+        Assert.False(g.CanCollideWithKingMove);
+    }
+
+    /// <summary>The array from the game that actually broke: SP 664, king on d1.</summary>
+    [Fact]
+    public void TheArrayThatExposedIt_IsFlagged()
+    {
+        Assert.Equal(664, Chess960Positions.TryNumber("RBNKBRNQ"));
+        var g = Chess960Positions.Geometry(664);
+        Assert.Equal(3, g.KingFile);                                   // d1
+        Assert.True(g.QueenSideSharesDestinationWithKingMove);         // d1 -> c1
+        Assert.False(g.KingSideSharesDestinationWithKingMove);
+    }
+
+    /// <summary>Geometry agrees with what FromFen derives, for every one of the 960 — the
+    /// table and the parser must not drift.</summary>
+    [Fact]
+    public void GeometryMatchesWhatTheParserDerives_ForAll960()
+    {
+        for (int n = 0; n < Chess960Positions.Count; n++)
+        {
+            string rank = Chess960Positions.BackRank(n);
+            var b = Board.FromFen($"{rank.ToLowerInvariant()}/pppppppp/8/8/8/8/PPPPPPPP/{rank} w KQkq - 0 1");
+            var g = Chess960Positions.Geometry(n);
+            Assert.Equal(g.KingRookFile, b.WhiteKingRookFile);
+            Assert.Equal(g.QueenRookFile, b.WhiteQueenRookFile);
+            Assert.Equal(g.KingRookFile, b.BlackKingRookFile);
+            Assert.Equal(g.QueenRookFile, b.BlackQueenRookFile);
+        }
+    }
 }

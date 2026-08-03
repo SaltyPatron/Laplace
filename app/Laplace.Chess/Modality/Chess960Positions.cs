@@ -95,6 +95,58 @@ public static class Chess960Positions
         return TryNumber(new string(white));
     }
 
+    /// <summary>
+    /// The castling geometry of a starting array: where the king and its two rooks begin,
+    /// and — the reason this is cached rather than recomputed — whether a castle on either
+    /// flank SHARES ITS KING DESTINATION with an ordinary one-square king move.
+    ///
+    /// That last pair is a real hazard, not a curiosity. A castle is spelled O-O / O-O-O
+    /// and a king step is spelled Kc1 / Kg1, but they can be the same (from, to): a king
+    /// starting on d1 steps to c1, and the queen-side castle also ends on c1. A resolver
+    /// matching a piece-move SAN by destination sees two candidates and either picks the
+    /// wrong one or refuses the game. It cost a 58-ply game before it was found, on ONE
+    /// archive, by accident.
+    ///
+    /// It is not rare: 480 of the 960 arrays — exactly half — can produce it. Enumerating
+    /// it here turns "we hit this once" into "we know which boards do this", and gives the
+    /// SAN tests an oracle instead of an anecdote.
+    ///
+    /// Ordinary chess is not among them, which is why this never surfaced before: the king
+    /// starts on e1, both castle destinations are two squares away, and no legal king move
+    /// reaches them.
+    /// </summary>
+    public readonly record struct CastleGeometry(
+        int KingFile,
+        int KingRookFile,
+        int QueenRookFile,
+        bool KingSideSharesDestinationWithKingMove,
+        bool QueenSideSharesDestinationWithKingMove)
+    {
+        /// <summary>Either flank can be confused with a plain king move on this array.</summary>
+        public bool CanCollideWithKingMove
+            => KingSideSharesDestinationWithKingMove || QueenSideSharesDestinationWithKingMove;
+    }
+
+    /// <summary>King destination when castling — fixed at g/c for Chess960 and for chess.</summary>
+    public const int KingSideKingFile = 6;
+    public const int QueenSideKingFile = 2;
+
+    /// <summary>Castling geometry of a position number. O(1) over the frozen table.</summary>
+    public static CastleGeometry Geometry(int number)
+    {
+        string rank = BackRank(number);
+        int king = rank.IndexOf('K');
+        int qRook = rank.IndexOf('R');                 // the rook left of the king
+        int kRook = rank.LastIndexOf('R');             // the rook right of the king
+        return new CastleGeometry(
+            king, kRook, qRook,
+            // A king ADJACENT to the destination can step onto it. A king already ON it
+            // castles without moving, so "Kg1"/"Kc1" is not a legal move and nothing
+            // collides — hence == 1, not <= 1.
+            Math.Abs(king - KingSideKingFile) == 1,
+            Math.Abs(king - QueenSideKingFile) == 1);
+    }
+
     private static (string[], FrozenDictionary<string, int>) Build()
     {
         var byNumber = new string[Count];
