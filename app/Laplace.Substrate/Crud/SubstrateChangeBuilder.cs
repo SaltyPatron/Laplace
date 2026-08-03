@@ -56,14 +56,37 @@ public sealed class SubstrateChangeBuilder
         return this;
     }
 
+    // Dedup BEFORE constructing the row. The id is the whole dedup key, so the EntityRow only
+    // needs to exist on a miss — and misses are the minority by an order of magnitude.
+    // MEASURED (IngestThroughputProbe, 400 games / 28,149 plies): the chess lane issues ~2,380
+    // AddNode calls per game and keeps 227 entities / 222 physicalities. ~90% of the row objects
+    // were allocated and immediately dropped by the HashSet test below, and "row building" was
+    // 49.9% of full record+analyze — the single largest cost in the compose path.
     public SubstrateChangeBuilder AddEntity(
         Hash128 id, byte tier, Hash128 typeId, Hash128? firstObservedBy = null)
-        => AddEntity(new EntityRow(id, tier, typeId, firstObservedBy));
+    {
+        if (_seenEntities.Add(id)) _entities.Add(new EntityRow(id, tier, typeId, firstObservedBy));
+        return this;
+    }
 
     public SubstrateChangeBuilder AddPhysicality(PhysicalityRow row)
     {
         ArgumentNullException.ThrowIfNull(row);
         if (_seenPhysicalities.Add(row.Id)) _physicalities.Add(row);
+        return this;
+    }
+
+    /// <summary>
+    /// Stage a physicality whose id the caller has ALREADY claimed through
+    /// <see cref="TrySeePhysicality"/>. Lets a hot path skip constructing the row at all when the
+    /// id is a repeat, instead of building it and discarding it here. Calling this without having
+    /// claimed the id first bypasses dedup and can stage a duplicate — pair the two, always:
+    /// <c>if (b.TrySeePhysicality(id)) b.AddPhysicalityPreSeen(new PhysicalityRow(id, ...));</c>
+    /// </summary>
+    public SubstrateChangeBuilder AddPhysicalityPreSeen(PhysicalityRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        _physicalities.Add(row);
         return this;
     }
 
@@ -82,6 +105,25 @@ public sealed class SubstrateChangeBuilder
     private ContentBatch? _deferredContent;
 
     public ContentBatch? DeferredContent => _deferredContent;
+
+    /// <summary>
+    /// Read-only presence oracle for the batch being composed: "has this id already been proven
+    /// present by a COMMITTED apply?" Populated from the pipeline's containment reader.
+    ///
+    /// This is what lets a composer skip STAGING a subtree it knows is already deposited — the
+    /// trunk short-circuit the shared content path has had all along (ContentTierSpine +
+    /// ContentLadderLedger) and that the chess lane never joined. It answers false for anything
+    /// not yet probed, so it can only ever cause work, never skip something absent: staging an
+    /// already-present row is deduped at apply anyway, so a false negative costs exactly what
+    /// today costs and a false positive is impossible.
+    /// </summary>
+    public ISubstrateReader? PresenceOracle { get; private set; }
+
+    public SubstrateChangeBuilder SetPresenceOracle(ISubstrateReader? reader)
+    {
+        PresenceOracle = reader;
+        return this;
+    }
 
     public SubstrateChangeBuilder EnableDeferredContent(ISubstrateReader? reader)
     {

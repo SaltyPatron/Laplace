@@ -233,6 +233,23 @@ public static class ChessGraph
     private static ChessComposed EmitNodes(SubstrateChangeBuilder b, string surface, long nowUs, Hash128 src)
     {
         var c = ChessCompose.Position(surface);
+
+        // TRUNK SHORT-CIRCUIT. A position whose id is already proven deposited implies its whole
+        // substructure subtree is too — they were staged together the first time, and the id is a
+        // Merkle over exactly those constituents, so the trunk cannot exist without them. Staging
+        // them again produces byte-identical rows that apply then dedups away: pure cost.
+        //
+        // This is the law the shared content path has always followed (ContentTierSpine.cs:127-133
+        // asks ContentLadderLedger.IsPersisted before staging anything) and that the chess lane
+        // never joined. MEASURED: the compose probe stages 227 entities per game where the live
+        // run keeps ~65, and row building is 56.2% of record+analyze.
+        //
+        // The oracle answers false for anything not yet probed, so this can only ever skip work
+        // that was provably redundant — never something absent. Ids are still COMPOSED (callers
+        // need them for the attestations below); only the staging is skipped, so the fold is
+        // untouched.
+        if (b.PresenceOracle?.IsProvenPresent(c.Position.Id) == true) return c;
+
         foreach (var s in c.Substructures) AddNode(b, s, ChessVocabulary.SubstructureType, nowUs, src);
         AddNode(b, c.Position, ChessVocabulary.PositionType, nowUs, src);
         return c;
@@ -290,10 +307,14 @@ public static class ChessGraph
             ObservedAtUnixUs: nowUs));
     }
 
+    // Staged once per DISTINCT node per batch, not once per ply. A position's ~34 substructure
+    // tokens recur in nearly every position of the same game, so this is called ~2,380 times per
+    // game to keep ~222 physicalities — claim the id first and construct the row only on a miss.
     private static void AddNode(SubstrateChangeBuilder b, in ChessNode n, Hash128 typeId, long nowUs, Hash128 src)
     {
         b.AddEntity(n.Id, n.Tier, typeId, src);
-        b.AddPhysicality(new PhysicalityRow(
+        if (!b.TrySeePhysicality(n.PhysId)) return;
+        b.AddPhysicalityPreSeen(new PhysicalityRow(
             Id: n.PhysId,
             EntityId: n.Id,
             SourceId: src,
