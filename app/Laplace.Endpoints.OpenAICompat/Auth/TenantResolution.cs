@@ -94,9 +94,10 @@ internal sealed class ApiKeyTenantResolver : ITenantResolver
 }
 
 /// <summary>
-/// In key mode, /v1/* requires a valid API key except for the anonymous surface a
-/// not-yet-customer needs to sign up: discovery, billing catalog/plans/preflight,
-/// checkout redemption, and Stripe webhooks. Header mode enforces nothing.
+/// In key mode, /v1/* and /chess/* require a valid API key except for the anonymous
+/// /v1 surface a not-yet-customer needs to sign up: discovery, billing
+/// catalog/plans/preflight, checkout redemption, and Stripe webhooks. Header mode
+/// enforces nothing. /chess/* has no anonymous prefixes — GH #489 / C04.
 /// </summary>
 internal sealed class ApiKeyEnforcementMiddleware
 {
@@ -126,7 +127,11 @@ internal sealed class ApiKeyEnforcementMiddleware
     public async Task InvokeAsync(HttpContext context, ITenantResolver resolver)
     {
         var path = context.Request.Path.Value ?? "";
-        if (!path.StartsWith("/v1", StringComparison.OrdinalIgnoreCase))
+        // Playing surface sits at /chess/* (outside /v1); without this branch key mode
+        // never sees it and C04 stays open (GH #489).
+        var governed = path.StartsWith("/v1", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith("/chess", StringComparison.OrdinalIgnoreCase);
+        if (!governed)
         {
             await _next(context);
             return;

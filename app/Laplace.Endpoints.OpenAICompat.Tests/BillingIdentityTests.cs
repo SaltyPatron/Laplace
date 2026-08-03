@@ -90,6 +90,16 @@ public sealed class KeyModeEnforcementTests : IClassFixture<KeyModeFactory>
         Assert.Contains("api_key_required", body);
     }
 
+    // GH #489 / C04: /chess/* sits outside /v1 and was skipped by the middleware.
+    [Fact]
+    public async Task Chess_Playing_Surface_Requires_Key()
+    {
+        using var client = _factory.CreateClient();
+        using var response = await client.GetAsync("/chess/new");
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Contains("api_key_required", await response.Content.ReadAsStringAsync());
+    }
+
     [Fact]
     public async Task Anonymous_Signup_Surface_Stays_Open()
     {
