@@ -256,11 +256,21 @@ phase_build() {
   echo "===== PHASE — BUILD ENGINE + EXTENSIONS ====="
   local native_fp
   native_fp=$(fp_native)
+  # Corpus paths are declared OUTSIDE the configure branch: the perfcache existence gates
+  # below read $chess_openings unconditionally, and under `set -u` a cached-fingerprint run
+  # (configure skipped) would abort on an unbound variable.
+  local data_root="${LAPLACE_DATA_ROOT:-/vault/Data}"
+  local ucd="${LAPLACE_UCD_PATH:-$data_root/UCD/Public/UCD/latest}"
+  # Chess openings corpus, declared exactly like the UCD corpus above. engine/core
+  # deliberately carries NO default path (a hardcoded /vault in CMake was removed), so if
+  # nothing passes this the chess position perfcache target silently disappears — its guard
+  # is an `if(LAPLACE_CHESS_OPENINGS ...)` whose else branch is only a message(STATUS).
+  # That is why the blob in share/laplace was a hand copy (owner ahart:ahart) instead of an
+  # install product (laplace-runner group, install perms) like t0 and highway.
+  local chess_openings="${LAPLACE_CHESS_OPENINGS:-$data_root/Games/Chess/openings}"
   if [[ "$CLEAN_FIRST" -eq 0 && -d "$ROOT/build" ]] && fp_check build-native "$native_fp"; then
     echo "engine up-to-date — cmake configure/build skipped (fp ${native_fp:0:12})"
   else
-    local data_root="${LAPLACE_DATA_ROOT:-/vault/Data}"
-    local ucd="${LAPLACE_UCD_PATH:-$data_root/UCD/Public/UCD/latest}"
     local build_flags=()
     [[ "$CLEAN_FIRST" -eq 1 ]] && build_flags+=(--clean-first)
     cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
@@ -273,7 +283,8 @@ phase_build() {
       -DLAPLACE_UCD_PATH="$ucd" \
       -DLAPLACE_UCDXML_ZIP="$ucd/ucdxml/ucd.nounihan.flat.zip" \
       -DLAPLACE_DUCET_FILE="$ucd/uca/allkeys.txt" \
-      -DLAPLACE_UCD_CONFORMANCE_DIR="$ucd/ucd"
+      -DLAPLACE_UCD_CONFORMANCE_DIR="$ucd/ucd" \
+      -DLAPLACE_CHESS_OPENINGS="$chess_openings"
     LD_LIBRARY_PATH="$ROOT/build/engine/core:$ROOT/build/engine/dynamics:$ROOT/build/engine/synthesis:${LD_LIBRARY_PATH:-}" \
       cmake --build build "${build_flags[@]}"
     fp_record build-native "$native_fp"
@@ -288,6 +299,28 @@ phase_build() {
   fi
   echo "T0 perfcache ready: $t0"
   echo "highway perfcache ready: $hw"
+  # Chess position blob (tier-2 geometry, spec 33 / GH #822) gets the SAME existence gate,
+  # but it SELF-ARMS. The producing target lives in engine/core/CMakeLists.txt and is landing
+  # on a separate branch; gating on it before that merges would fail every build on a host
+  # that happens to have the corpus. `LAPLACE_CHESS_OPENINGS` is declared `CACHE PATH` by that
+  # CMake, so its presence in CMakeCache.txt is exactly "the producing target exists in this
+  # configure" — the gate turns itself on when the target lands and needs no second edit here.
+  local chess_bin chess_target_declared=0
+  if [[ -f "$ROOT/build/CMakeCache.txt" ]] && grep -q '^LAPLACE_CHESS_OPENINGS:' "$ROOT/build/CMakeCache.txt"; then
+    chess_target_declared=1
+  fi
+  if [[ "$chess_target_declared" -eq 0 ]]; then
+    echo "chess position perfcache: target not declared by this configure (LAPLACE_CHESS_OPENINGS absent from CMakeCache) — gate inactive"
+  elif [[ -d "$chess_openings" ]]; then
+    chess_bin=$(find "$ROOT/build" -name 'laplace_chess_position_perfcache*.bin' 2>/dev/null | head -1 || true)
+    if [[ -z "$chess_bin" ]]; then
+      echo "::error::chess position perfcache missing after ALL build, but the openings corpus EXISTS at $chess_openings — the CMake target was skipped (LAPLACE_CHESS_OPENINGS not reaching engine/core, or ChessCatalogSurfaces missing)"
+      exit 1
+    fi
+    echo "chess position perfcache ready: $chess_bin"
+  else
+    echo "chess position perfcache: openings corpus absent at $chess_openings — target not expected"
+  fi
   echo "===== PHASE — BUILD APP ====="
   phase_build_app
 }

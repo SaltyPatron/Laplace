@@ -140,6 +140,7 @@ bootstrap_build_environment() {
         sqlite3 \
         libssl-dev zlib1g-dev libreadline-dev uuid-dev \
         libxml2-dev libjson-c-dev libicu-dev \
+        liblz4-dev libzstd-dev liburing-dev \
         libsqlite3-dev libtiff-dev libcurl4-openssl-dev \
         libpcre2-dev libgeotiff-dev libpng-dev libwebp-dev \
         libjpeg-turbo8-dev libnetcdf-dev libhdf5-dev libexpat1-dev \

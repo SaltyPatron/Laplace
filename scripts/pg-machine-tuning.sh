@@ -12,7 +12,7 @@
 # NO hardcoded GB literals for RAM-derived knobs.
 
 pg_compute_machine_tuning() {
-  local mem_kb cores pcores pdeg mwp avw mwm wm wb
+  local mem_kb cores pcores pdeg mwp avw mwm wm wb iow
   mem_kb=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
   cores=$(nproc)
   pcores=$cores
@@ -23,7 +23,24 @@ pg_compute_machine_tuning() {
     (( pcores < 1 )) && pcores=$cores
   fi
   pdeg=$(( (pcores + 1) / 2 ))
-  mwp=$(( pcores + pdeg + 8 ))
+  # I/O WORKERS ARE NOT PARALLEL-QUERY WORKERS. Under io_method=worker every asynchronous
+  # read for the whole cluster is dispatched through this pool, so it bounds the achievable
+  # queue depth no matter what effective_io_concurrency claims. It used to be set to $pdeg
+  # -- a CPU parallel-degree heuristic, where each worker allocates work_mem and which was
+  # deliberately kept small for memory pressure. io_workers allocate no work_mem and never
+  # compute; they block on the device.
+  #
+  # MEASURED 2026-08-03, pgdata on a Samsung 970 EVO Plus, mid chess ingest:
+  #   effective_io_concurrency=256 (a promise), io_workers=3 (the real ceiling)
+  #   r/s 30,589   r_await 0.29ms   aqu-sz 11.92
+  # Little's law: 11.92/0.29ms ~= 41k IOPS -- the drive delivered exactly what the queue
+  # depth allowed, at roughly 6% of what it can do, while %util read 100%. On a device with
+  # hardware queues %util means "at least one request in flight", not saturation.
+  #
+  # Floor 8 because 3 is never right for flash; ceiling 32 because these are real processes.
+  iow=$cores; (( iow < 8 )) && iow=8; (( iow > 32 )) && iow=32
+  # max_worker_processes is the SHARED pool parallel query AND the io_worker pool draw from.
+  mwp=$(( pcores + pdeg + iow + 8 ))
   avw=$(( cores / 4 )); (( avw < 3 )) && avw=3; (( avw > 6 )) && avw=6
   # These MUST stay bytes-equal with MemoryTopology.cs (SharedBuffersBytes,
   # EffectiveCacheSizeBytes, MaintenanceWorkMemBytes, WorkMemBytes, WalBuffersBytes) —
@@ -52,6 +69,7 @@ pg_compute_machine_tuning() {
   PG_TUNE_PCORES=$pcores
   PG_TUNE_PDEG=$pdeg
   PG_TUNE_MWP=$mwp
+  PG_TUNE_IOW=$iow
   PG_TUNE_AVW=$avw
   # MUST equal CpuTopologyCommands.EmitPgTuning's literal. That emitter is the
   # AUTHORITY -- pg_apply_machine_tuning runs `cpu-topology --pg-tuning` first and only
@@ -107,11 +125,61 @@ pg_tune_cli_dll() {
 # emitter; the bash formulas below survive ONLY as the bare-host bootstrap fallback
 # (setup-host tunes the cluster before the app is ever built) and are pinned
 # bytes-equal to MemoryTopology by PgTuningParityTests.
+# io_method is probed, never assumed: io_uring only appears in enumvals when PG was built
+# with liburing. This USED TO LIVE IN THE FALLBACK ONLY, so on every host where the CLI is
+# built -- i.e. normal operation -- the emitter's hardcoded `io_method = worker` stood and
+# the probe never ran. io_uring lets each backend submit directly to the kernel with no
+# worker pool and therefore no io_workers ceiling at all, which is the whole point on NVMe.
+# wal_compression is probed for the same reason io_method is: PostgreSQL's configure does
+# NOT auto-detect lz4/zstd, so a build without them silently offers only pglz -- the SLOWEST
+# codec (~100-200 MB/s vs lz4 ~500+). `wal_compression = on` RESOLVES TO pglz, so the old
+# unconditional `SET wal_compression = on` looked like a tuning decision and was really a
+# default. MEASURED 2026-08-03: enumvals {pglz,on,off} on a cluster ingesting to NVMe with
+# ~20x WAL amplification. Prefer lz4, then zstd, then pglz only if that is all there is.
+# Single reload point. io_method and wal_compression are probed from a LIVE connection, so
+# they are necessarily ALTER SYSTEMed after the bulk settings; a reload issued before that
+# leaves both sitting in postgresql.auto.conf unapplied until some unrelated restart. Every
+# apply path ends here, after the last ALTER SYSTEM it will issue.
+pg_tune_reload() {
+  pg_tune_psql -v ON_ERROR_STOP=1 -c "SELECT pg_reload_conf()" >/dev/null
+}
+
+pg_apply_wal_compression() {
+  local wc
+  wc=$(pg_tune_psql -tAc \
+    "SELECT CASE WHEN 'lz4' = ANY(enumvals) THEN 'lz4' WHEN 'zstd' = ANY(enumvals) THEN 'zstd' ELSE 'pglz' END FROM pg_settings WHERE name = 'wal_compression'")
+  pg_tune_psql -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET wal_compression = $wc"
+  echo "pg-machine-tuning: wal_compression=$wc"
+  if [[ "$wc" == "pglz" ]]; then
+    echo "pg-machine-tuning: NOTE pg built without lz4/zstd -- WAL uses the slowest codec." >&2
+    echo "  external/CMakeLists.txt passes --with-lz4/--with-zstd; rebuild pg to pick them up" >&2
+    echo "  (scripts/check-prereqs.sh reports the gap)." >&2
+  fi
+}
+
+pg_apply_io_method() {
+  local io
+  io=$(pg_tune_psql -tAc \
+    "SELECT CASE WHEN 'io_uring' = ANY(enumvals) THEN 'io_uring' ELSE 'worker' END FROM pg_settings WHERE name = 'io_method'")
+  pg_tune_psql -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET io_method = $io"
+  echo "pg-machine-tuning: io_method=$io"
+  if [[ "$io" != "io_uring" ]]; then
+    echo "pg-machine-tuning: NOTE this PostgreSQL was built without liburing, so async I/O" >&2
+    echo "  is capped by the io_workers pool. Rebuilding with --with-liburing removes that" >&2
+    echo "  ceiling entirely (scripts/win/build-pg.cmd / the pg build recipe)." >&2
+  fi
+}
+
 pg_apply_machine_tuning() {
   local dll
   if dll="$(pg_tune_cli_dll)"; then
     if dotnet "$dll" cpu-topology --pg-tuning | pg_tune_psql -v ON_ERROR_STOP=1 -f -; then
       pg_compute_machine_tuning
+      # The emitter cannot probe -- it writes SQL with no connection -- so it hardcodes
+      # io_method=worker. Correct it here, on the path that actually runs.
+      pg_apply_io_method
+      pg_apply_wal_compression
+      pg_tune_reload
       echo "pg-machine-tuning: applied from cpu-topology --pg-tuning (authoritative emitter)"
       return 0
     fi
@@ -136,7 +204,6 @@ pg_apply_machine_tuning_fallback() {
     -c "ALTER SYSTEM SET work_mem = '$PG_TUNE_WM'" \
     -c "ALTER SYSTEM SET max_wal_size = '$PG_TUNE_MAX_WAL'" \
     -c "ALTER SYSTEM SET min_wal_size = '$PG_TUNE_MIN_WAL'" \
-    -c "ALTER SYSTEM SET wal_compression = on" \
     -c "ALTER SYSTEM SET wal_buffers = '$PG_TUNE_WB'" \
     -c "ALTER SYSTEM SET wal_level = minimal" \
     -c "ALTER SYSTEM SET max_wal_senders = 0" \
@@ -154,15 +221,13 @@ pg_apply_machine_tuning_fallback() {
     -c "ALTER SYSTEM SET autovacuum_vacuum_cost_delay = 0" \
     -c "ALTER SYSTEM SET huge_pages = try" \
     -c "ALTER SYSTEM SET synchronous_commit = off" \
-    -c "ALTER SYSTEM SET io_workers = $PG_TUNE_PDEG" \
-    -c "ALTER SYSTEM SET max_locks_per_transaction = 1024" \
-    -c "SELECT pg_reload_conf()"
+    -c "ALTER SYSTEM SET io_workers = $PG_TUNE_IOW" \
+    -c "ALTER SYSTEM SET max_locks_per_transaction = 1024"
 
-  local io
-  io=$(pg_tune_psql -tAc \
-    "SELECT CASE WHEN 'io_uring' = ANY(enumvals) THEN 'io_uring' ELSE 'worker' END FROM pg_settings WHERE name = 'io_method'")
-  pg_tune_psql -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET io_method = $io"
-  echo "pg-machine-tuning: io_method=$io shared_buffers=$PG_TUNE_SB effective_cache_size=$PG_TUNE_ECS maintenance_work_mem=$PG_TUNE_MWM work_mem=$PG_TUNE_WM wal_buffers=$PG_TUNE_WB pcores=$PG_TUNE_PCORES pdeg=$PG_TUNE_PDEG"
+  pg_apply_io_method
+  pg_apply_wal_compression
+  pg_tune_reload
+  echo "pg-machine-tuning: shared_buffers=$PG_TUNE_SB effective_cache_size=$PG_TUNE_ECS maintenance_work_mem=$PG_TUNE_MWM work_mem=$PG_TUNE_WM wal_buffers=$PG_TUNE_WB pcores=$PG_TUNE_PCORES pdeg=$PG_TUNE_PDEG"
 }
 
 # Returns 0 if live settings match computed machine tuning and nothing pending_restart.
