@@ -141,6 +141,17 @@ ingest source path="": build-app
 e2e *models: build-app
     scripts/e2e-substrate.sh {{models}}
 
+# W5 / GH #755 — election-first quality harness (exit 0/1/2).
+eval:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p .eval-proof
+    python3 scripts/eval-generation.py \
+      --db "host=${PGHOST:-/var/run/postgresql} user=${PGUSER:-laplace_admin} dbname=${PGDATABASE:-laplace}" \
+      --probes scripts/eval-probes.json \
+      --baseline scripts/eval-baselines.json \
+      --report .eval-proof/generation.json
+
 ingest-all: build-app
     scripts/ingest-source.sh all
 

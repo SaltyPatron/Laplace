@@ -154,7 +154,10 @@ jobs:
             scripts/ingest-source.sh \
             scripts/isa-gate-check.py \
             scripts/isa-gate-baseline.json \
-            scripts/ensure-foundation.sh; do
+            scripts/ensure-foundation.sh \
+            scripts/eval-generation.py \
+            scripts/eval-probes.json \
+            scripts/eval-baselines.json; do
             [ -f "$f" ] || { echo "::error file=$f::CI-critical file missing"; fail=1; }
           done
           exit "$fail"
@@ -660,10 +663,38 @@ jobs:
           dotnet test Laplace.slnx -c Release --no-build --nologo --verbosity minimal \
             --filter 'Tier!=perf & Tier!=db & FullyQualifiedName~Endpoints.OpenAICompat'
 
+  eval:
+    name: Eval — generation / election quality (advisory)
+    needs: [publish, smoke]
+    # Same seeded guard as smoke. continue-on-error: advisory week (W5 D7);
+    # blocking_flip_date in scripts/eval-baselines.json records when this flips.
+    if: >-
+      !cancelled() && needs.publish.result == 'success' &&
+      needs.publish.outputs.seeded == 'true' &&
+      needs.smoke.result == 'success'
+    runs-on: [self-hosted, laplace]
+    continue-on-error: true
+    concurrency:
+      group: laplace-substrate-lifecycle
+      cancel-in-progress: false
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/setup-laplace-env
+      - name: Election + generation quality harness
+        run: |
+          mkdir -p .eval-proof
+          python3 scripts/eval-generation.py \
+            --db "host=/var/run/postgresql user=laplace_admin dbname=laplace" \
+            --probes scripts/eval-probes.json \
+            --baseline scripts/eval-baselines.json \
+            --report .eval-proof/generation.json
+
   restore-api:
     name: Restore API (always — even after failed stages)
     if: always() && needs.deploy.result != 'skipped'
-    needs: [deploy, publish, smoke]
+    needs: [deploy, publish, smoke, eval]
     runs-on: [self-hosted, laplace]
     concurrency:
       # ONE LIFECYCLE OPERATION AT A TIME, and never cancelled. Deploy, db-ops and

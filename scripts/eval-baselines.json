@@ -1,0 +1,12 @@
+{
+  "recorded_at": null,
+  "advisory_until": "2026-08-10",
+  "blocking_flip_date": null,
+  "fingerprint": null,
+  "election": {
+    "require_exact": true,
+    "notes": "No baseline recorded yet. Run: python3 scripts/eval-generation.py --record once election_correctness is green on a seeded box, or record a known-red advisory snapshot deliberately."
+  },
+  "latency_ceiling_s": 30.0,
+  "notes": "Skeleton — check without --record exits 1 with explicit refusal until fingerprint+election are filled by --record."
+}
