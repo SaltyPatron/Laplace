@@ -74,6 +74,12 @@ public static unsafe class GrammarTags
         var root = LaplaceInstall.TryRepoRoot(out var repo) ? repo : null;
         if (root is not null)
         {
+            // Laplace-owned queries (SQL/Swift parsers are generated copies under
+            // engine/core/grammars/ — upstream submodules often ship no tags.scm).
+            string owned = Path.Combine(Path.GetFullPath(root), "engine", "core", "grammars",
+                                        modality, "queries", "tags.scm");
+            if (File.Exists(owned)) return owned;
+
             string rootRepo = Path.Combine(Path.GetFullPath(root), "external", "tree-sitter-grammars",
                                            $"tree-sitter-{modality}");
             string rp = sub is not null
@@ -83,6 +89,10 @@ public static unsafe class GrammarTags
         }
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
         {
+            string owned = Path.Combine(dir.FullName, "engine", "core", "grammars",
+                                        modality, "queries", "tags.scm");
+            if (File.Exists(owned)) return owned;
+
             string repoDir = Path.Combine(dir.FullName, "external", "tree-sitter-grammars",
                                           $"tree-sitter-{modality}");
             string p = sub is not null

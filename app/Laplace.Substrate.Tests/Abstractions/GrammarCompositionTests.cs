@@ -77,4 +77,33 @@ public sealed class GrammarCompositionTests
 
         Assert.Contains(codeEnts, e => e.Id == proseWord.Id);
     }
+
+    [Fact]
+    public void Sql_DefinesAndCalls_EmitAttestations()
+    {
+        // LANGUAGE sql body so tree-sitter-sql builds an `invocation` node
+        // (plpgsql dollar bodies are only partially parsed).
+        const string src =
+            "CREATE OR REPLACE FUNCTION laplace.foo(x int) RETURNS int LANGUAGE sql AS $$\n" +
+            "  SELECT laplace.bar(x);\n" +
+            "$$;\n";
+
+        byte[] bytes = Encoding.UTF8.GetBytes(src);
+        var recipe = GrammarDecomposer.LookupById("sql");
+        Assert.NotEqual(IntPtr.Zero, recipe);
+        var tags = GrammarTags.TagsSource("sql");
+        Assert.NotNull(tags);
+        Assert.True(tags!.Length > 0, "engine/core/grammars/sql/queries/tags.scm must resolve");
+
+        using var ast = GrammarDecomposer.Parse(bytes, recipe);
+        var geb = new GrammarEntityBuilder(bytes, ast, Src, "sql", recipe, tags);
+        var (_, _, atts, root) = geb.Build(witnessWeight: 0.7);
+
+        Assert.NotEqual(default, root);
+        // DEFINES is an alias of HAS_DEFINITION — Resolve, not RelationTypeId(literal).
+        var defines = RelationTypeRegistry.Resolve("DEFINES").Id;
+        var calls = RelationTypeRegistry.Resolve("CALLS").Id;
+        Assert.Contains(atts, a => a.TypeId == defines);
+        Assert.Contains(atts, a => a.TypeId == calls);
+    }
 }

@@ -30,6 +30,12 @@ declared for the build.
    `src/parser.c` + `src/scanner.c` + `src/tree_sitter/` headers here). The submodules stay
    registered because they are the source of truth (`grammar.js`) for these copies.
 
+   **Structural tags (`tags.scm`):** Laplace-owned queries live at
+   `engine/core/grammars/<modality>/queries/tags.scm` (e.g. `sql/queries/tags.scm`).
+   `GrammarTags.LocateTagsScm` prefers that path before the upstream submodule
+   `queries/` tree — SQL upstream ships highlights/indents but no tags, and W3/#765
+   needs DEFINES/CALLS captures on the generated SQL parser.
+
 3. **`generated/pgn` (homegrown grammar).** Chess PGN has no vendored upstream — the
    `grammar.js` here is Laplace's own, kept alongside its generated parser. PGN game
    results are a first-class attestation source (chess outcomes share the
