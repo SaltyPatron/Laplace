@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using Laplace.Api.Contracts;
 using Laplace.Chess.Service;
 using Laplace.Engine.Core;
@@ -10,9 +11,19 @@ namespace Laplace.Endpoints.OpenAICompat;
 internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposable
 {
     private readonly NpgsqlDataSource _dataSource;
+    private readonly NpgsqlDataSource _dataSourceReadOnly;
 
     public SubstrateClient()
-        => _dataSource = LaplaceDataSource.Create(SubstrateAccess.Serving);
+    {
+        _dataSource = LaplaceDataSource.Create(SubstrateAccess.Serving);
+        // Same posture as MCP op: server-enforced read-only + statement timeout.
+        _dataSourceReadOnly = LaplaceDataSource.Create(SubstrateAccess.Serving, dsb =>
+        {
+            dsb.ConnectionStringBuilder.CommandTimeout = 20;
+            dsb.ConnectionStringBuilder.Options =
+                "-c default_transaction_read_only=on -c statement_timeout=15000";
+        });
+    }
 
     internal NpgsqlDataSource DataSource => _dataSource;
 
@@ -553,8 +564,22 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         }
     }
 
+    public Task<InstalledOpInvoker.OpResult> InvokeOpAsync(
+        string name, IReadOnlyDictionary<string, JsonNode?>? args, int maxRows, CancellationToken ct)
+    {
+        try
+        {
+            return InstalledOpInvoker.InvokeAsync(_dataSourceReadOnly, name, args, maxRows, ct);
+        }
+        catch (Exception ex) when (ex is NpgsqlException or TimeoutException or PostgresException)
+        {
+            throw new SubstrateUnavailableException("Substrate is unreachable for op.", ex);
+        }
+    }
+
     public async ValueTask DisposeAsync()
     {
+        await _dataSourceReadOnly.DisposeAsync();
         await _dataSource.DisposeAsync();
     }
 

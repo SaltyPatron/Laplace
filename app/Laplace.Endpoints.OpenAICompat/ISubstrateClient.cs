@@ -1,4 +1,6 @@
+using System.Text.Json.Nodes;
 using Laplace.Api.Contracts;
+using Laplace.SubstrateCRUD.Npgsql;
 
 namespace Laplace.Endpoints.OpenAICompat;
 
@@ -118,4 +120,8 @@ internal interface ISubstrateClient
 
     Task<ExploreGraphResponse?> ExploreConsensusGraphAsync(
         string idHex, int hops, int fanout, CancellationToken ct);
+
+    /// <summary>Installed-catalog op invoker — MCP <c>op</c> / HTTP <c>POST /v1/op</c> (GH #812).</summary>
+    Task<InstalledOpInvoker.OpResult> InvokeOpAsync(
+        string name, IReadOnlyDictionary<string, JsonNode?>? args, int maxRows, CancellationToken ct);
 }
