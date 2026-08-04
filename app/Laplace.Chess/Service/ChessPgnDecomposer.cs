@@ -903,6 +903,15 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
 
     private const double PgnWitnessWeight = 0.7;
 
+    /// <summary>
+    /// Surface relation name for both the playing→event edge and the line's event Meta
+    /// row. Named once because <c>NativeAttestation.Categorical</c> and <c>Meta</c> both
+    /// take the relation as a string, and a second spelled-out "HAS_EVENT" in this file is
+    /// a governed-vocabulary literal the ISA g3 ratchet counts — it is shrink-only, so the
+    /// second occurrence failed the build on main.
+    /// </summary>
+    private const string HasEventRelation = "HAS_EVENT";
+
     private static void EmitGame(
         SubstrateChangeBuilder b, Hash128 lineId, Hash128 eventId, Hash128 playingId,
         string gameText, string date,
@@ -928,7 +937,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
 
         // Playing → event (this game belongs to the tournament/named event).
         b.AddAttestation(NativeAttestation.Categorical(
-            playingId, "HAS_EVENT", eventId, src, null, PgnWitnessWeight));
+            playingId, HasEventRelation, eventId, src, null, PgnWitnessWeight));
 
         // Line fold: one witness per playing; ctx = playing (not the tournament event).
         ChessGraph.AppendLineOutcome(b, lineId, result.ForMover(0), PgnWitnessWeight, src, playingId);
@@ -941,7 +950,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         if (blackPlayer is { } b2)
             ChessGraph.AppendPlayerResult(b, b2, whitePlayer, result.ForMover(1), PgnWitnessWeight, src, playingId);
 
-        Meta(b, lineId, "HAS_EVENT", PgnGames.TagStr(gameText, "Event"), src, playingId);
+        Meta(b, lineId, HasEventRelation, PgnGames.TagStr(gameText, "Event"), src, playingId);
         Meta(b, lineId, "ON_DATE", date, src, playingId);
         Meta(b, lineId, "HAS_ECO", PgnGames.TagStr(gameText, "ECO"), src, playingId);
         Meta(b, lineId, "HAS_TERMINATION", PgnGames.TagStr(gameText, "Termination"), src, playingId);
