@@ -62,10 +62,14 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
     public static Hash128 LichessGameId(string lichessGameId)
         => Hash128.OfCanonical($"chess/lichess/{lichessGameId}");
 
-    // GH #736: the handle a live game is opened under is the playing EVENT — lichess games
-    // keep their source-asserted external id (LichessGameId), lab/learn sessions mint a
-    // PlayEventId from a GUID at session open. The line (the game CONTENT) does not exist
-    // until the game is over; CompleteGameAsync mints it.
+    // GH #736: the handle a live game is opened under is a ROUTING KEY — it maps plies to a
+    // session and never becomes an entity. Neither the line nor the playing exists yet;
+    // CompleteGameAsync mints both from what was actually played.
+    //
+    // This used to be the playing's identity, drawn from a GUID, which meant the same game
+    // replayed minted a different entity every time and re-ingest could never dedupe it —
+    // the one id in the chess lane that was not a function of what it identifies. It is now
+    // content-derived at completion (ChessVocabulary.LivePlayingId).
     public Task OpenGameAsync(
         Hash128 eventId, string learnContext, Hash128? whitePlayerId = null, Hash128? blackPlayerId = null,
         CancellationToken ct = default)
@@ -92,17 +96,19 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
                 session.PositionIds.Add(ChessCompose.PositionId(fromKey));
             session.PositionIds.Add(ChessCompose.PositionId(toKey));
 
-            var b = new SubstrateChangeBuilder(ChessVocabulary.SourceId, session.LearnContext);
-            EnsureEventEntity(b, eventId, session);
-
-            ChessGraph.AppendMoveEdge(
-                b, fromKey, toKey, PlyOutcome.Draw, games: 1, WitnessWeight,
-                sourceId: ChessVocabulary.SourceId,
-                contextId: eventId);
-
-            var change = await b.BuildAsync(ct);
-            await _writer.ApplyAsync(change, ct);
-            InvalidateLearnedPst();
+            // NO SUBSTRATE WRITE HERE. Two reasons, both load-bearing.
+            //
+            // Identity: the playing is the attestation context for everything this game
+            // deposits, and it is content-derived (ChessVocabulary.LivePlayingId) from the
+            // line, which does not exist until the last ply. Writing mid-game forced a
+            // random session id into the substrate as if it were an entity.
+            //
+            // Testimony: CompleteGameAsync already re-emits EVERY ply from session.Plies
+            // with the real per-mover outcome and the checkmate games weight. The write
+            // that used to stand here emitted the same edges with PlyOutcome.Draw first,
+            // and testimony does not retract — so every live game deposited a spurious
+            // draw witness per ply underneath its own correct one, biasing the fold toward
+            // draws in exactly the lane that learns from live play.
         }
         finally
         {
@@ -124,17 +130,31 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
             // GH #736: completion mints the LINE — the content entity of what was played —
             // from the ordered position ids the session accumulated. An abandoned playing
             // asserted no completed line, which is why none of this happens at open.
+            Hash128 playingId = default;
             if (session.PositionIds.Count > 0)
             {
                 var lineId = ChessCompose.LineId(
                     System.Runtime.InteropServices.CollectionsMarshal.AsSpan(session.PositionIds));
                 b.AddEntity(lineId, EntityTier.Document, ChessVocabulary.GameType, ChessVocabulary.SourceId);
-                EnsureEventEntity(b, eventId, session);
 
-                // The one record edge whose subject is the event, carrying this playing's
-                // outcome (white POV) — the event→line join the read side navigates by.
+                // The playing exists now, and only now. LivePlayingId closes over the line
+                // — itself the Merkle of every position passed through, so the whole move
+                // sequence — plus the players, the learn context and the result. Same game
+                // played twice mints ONE playing and folds a second witness onto it, which
+                // is what content addressing is for; the session handle this method was
+                // called with is a routing key and never becomes an entity.
+                playingId = ChessVocabulary.LivePlayingId(
+                    session.WhitePlayerId, session.BlackPlayerId, session.LearnContext,
+                    lineId, result.IsDraw ? "1/2-1/2" : result.Winner == 0 ? "1-0" : "0-1");
+                EnsurePlayingEntity(b, playingId, session);
+
+                // The one record edge whose subject is the PLAYING, carrying its outcome
+                // (white POV) — the playing→line join the read side navigates by. Subjecting
+                // it on a tournament event would be wrong twice: an event spans many games,
+                // so it cannot carry one game's result, and ChessPgnDecomposer.EmitGame
+                // already subjects this edge on the playing.
                 b.AddAttestation(NativeAttestation.Aggregated(
-                    subject: eventId,
+                    subject: playingId,
                     typeId: ChessVocabulary.PlaysLineType,
                     obj: lineId,
                     sourceId: ChessVocabulary.SourceId,
@@ -147,27 +167,27 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
                 // completion (not a growing per-ply prefix — that minted N single-witness
                 // HAS_MOVETEXT rows per game), plus the result and colour facts — all
                 // subjected on the line with ctx = this playing.
-                WitnessMovetext(b, lineId, eventId, session.Moves);
-                WitnessResult(b, lineId, eventId, result);
+                WitnessMovetext(b, lineId, playingId, session.Moves);
+                WitnessResult(b, lineId, playingId, result);
                 if (session.WhitePlayerId is { } wp)
                     b.AddAttestation(NativeAttestation.Categorical(
-                        lineId, "HAS_WHITE", wp, ChessVocabulary.SourceId, eventId, WitnessWeight));
+                        lineId, "HAS_WHITE", wp, ChessVocabulary.SourceId, playingId, WitnessWeight));
                 if (session.BlackPlayerId is { } bp)
                     b.AddAttestation(NativeAttestation.Categorical(
-                        lineId, "HAS_BLACK", bp, ChessVocabulary.SourceId, eventId, WitnessWeight));
+                        lineId, "HAS_BLACK", bp, ChessVocabulary.SourceId, playingId, WitnessWeight));
 
                 // Aggregating lanes: the line's own fold cell (witness_count = times played)
                 // and the players' records, both carrying this playing's result.
                 ChessGraph.AppendLineOutcome(
-                    b, lineId, result.ForMover(0), WitnessWeight, ChessVocabulary.SourceId, eventId);
+                    b, lineId, result.ForMover(0), WitnessWeight, ChessVocabulary.SourceId, playingId);
                 if (session.WhitePlayerId is { } w2)
                     ChessGraph.AppendPlayerResult(
                         b, w2, session.BlackPlayerId, result.ForMover(0), WitnessWeight,
-                        ChessVocabulary.SourceId, eventId);
+                        ChessVocabulary.SourceId, playingId);
                 if (session.BlackPlayerId is { } b2)
                     ChessGraph.AppendPlayerResult(
                         b, b2, session.WhitePlayerId, result.ForMover(1), WitnessWeight,
-                        ChessVocabulary.SourceId, eventId);
+                        ChessVocabulary.SourceId, playingId);
             }
 
             bool hasWin = session.Plies.Any(p => result.ForMover(p.MoverSide) == PlyOutcome.Win);
@@ -180,7 +200,7 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
                 ChessGraph.AppendMoveEdge(
                     b, rp.FromKey, rp.ToKey, moverOutcome, games, WitnessWeight,
                     sourceId: ChessVocabulary.SourceId,
-                    contextId: eventId);
+                    contextId: playingId);
             }
 
             var change = await b.BuildAsync(ct);
@@ -215,7 +235,7 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
         // GH #736: a live occurrence is unique by construction, so the event handle is a
         // fresh GUID per call — never a hash of mutable session state (the old
         // {learnContext}/{GamesCompleted}/{edges.Count} shape collided across restarts).
-        var eventId = ChessVocabulary.PlayEventId(Guid.NewGuid());
+        var eventId = ChessVocabulary.PlaySessionHandle(Guid.NewGuid());
         await OpenGameAsync(eventId, learnContext, ct: ct);
         for (int i = 0; i < edges.Count; i++)
         {
@@ -274,9 +294,9 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
             throw new ArgumentException($"user '{userId}' is not a valid identifier", nameof(userId));
 
         var id = Guid.NewGuid();
-        // GH #736: the session GUID IS the playing-event identity (PlayEventId) — minted
-        // once at session open; the line is minted at completion from what was played.
-        var eventId = ChessVocabulary.PlayEventId(id);
+        // Routing key only. The playing entity is minted from content at completion
+        // (ChessVocabulary.LivePlayingId); this handle never reaches the substrate.
+        var eventId = ChessVocabulary.PlaySessionHandle(id);
         _playSessions[id] = new PlaySession(eventId, learnContext, recordToSubstrate, tenantId, userId);
         if (recordToSubstrate)
             _ = OpenGameAsync(eventId, learnContext);
@@ -323,10 +343,15 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
     // GH #736: the event entity is a slim provenance handle — no content facts hang off it
     // (colour facts moved to CompleteGameAsync, subjected on the line). It exists as a row
     // solely so the novelty gate can bitmap-probe it.
-    private static void EnsureEventEntity(SubstrateChangeBuilder b, Hash128 eventId, LiveGameSession session)
+    // Chess_PLAYING, not Chess_Event. The id passed here is the content-derived playing
+    // (LivePlayingId), and it is the subject of PLAYS_LINE and the context on every witness
+    // — the playing's role, not the tournament's. Typing it Chess_Event made it invisible
+    // to ChessWitnessHydrator once that paged playings, so lab games never reached the
+    // analyzer.
+    private static void EnsurePlayingEntity(SubstrateChangeBuilder b, Hash128 playingId, LiveGameSession session)
     {
         if (session.EntityEmitted) return;
-        b.AddEntity(eventId, EntityTier.Document, ChessVocabulary.EventType, ChessVocabulary.SourceId);
+        b.AddEntity(playingId, EntityTier.Document, ChessVocabulary.PlayingType, ChessVocabulary.SourceId);
         session.EntityEmitted = true;
     }
 
@@ -368,7 +393,10 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
 public sealed class PlaySession(Hash128 eventId, string learnContext, bool recordToSubstrate,
     string tenantId = "public", string? userId = null)
 {
-    /// <summary>GH #736: the playing-event handle (PlayEventId of the session GUID).</summary>
+    /// <summary>
+    /// Session ROUTING KEY (PlaySessionHandle of the session GUID) — not an entity id.
+    /// The playing is minted from content at completion by LivePlayingId.
+    /// </summary>
     public Hash128 EventId { get; } = eventId;
     public string LearnContext { get; } = learnContext;
     public bool RecordToSubstrate { get; } = recordToSubstrate;

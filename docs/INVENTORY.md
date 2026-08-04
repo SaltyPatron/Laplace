@@ -139,5 +139,7 @@ range; adding a relation takes the next free bit and does not renumber peers.
 
 ## Perfcache blobs referenced in source
 
+- `laplace_chess_position_perfcache.bin`
+- `laplace_chess_transition_perfcache.bin`
 - `laplace_highway_perfcache.bin`
 - `laplace_t0_perfcache.bin`

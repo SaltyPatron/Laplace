@@ -56,6 +56,23 @@ BEGIN
     IF to_regclass(current_schema() || '.physicalities_h00') IS NOT NULL THEN
         RETURN;  -- buckets already exist
     END IF;
+    -- A pre-repartition database still has the RANGE(hilbert_index) parent and its
+    -- physicalities_b* bands. CREATE TABLE IF NOT EXISTS above no-ops against it, so
+    -- without this check the loop below hangs MODULUS/REMAINDER bounds off a RANGE
+    -- parent and PostgreSQL answers "invalid bound specification for a range
+    -- partition" — which names neither the table nor the remedy, and fails the whole
+    -- extension UPDATE. Say what is actually wrong. The upgrade path is a reset:
+    -- repartitioning in place would mean rewriting 95 GB under an ALTER.
+    IF (SELECT p.partstrat FROM pg_partitioned_table p
+        WHERE p.partrelid = (current_schema() || '.physicalities')::regclass) <> 'h' THEN
+        RAISE EXCEPTION
+            'physicalities is not HASH-partitioned in this database (found strategy %). '
+            'This extension version partitions it HASH(id); the bands it still carries are '
+            'the old RANGE(hilbert_index) layout. Recreate the database (DB — lifecycle ops, '
+            'operation=recreate) and reseed — see the GREENFIELD note at the top of this file.',
+            (SELECT p.partstrat FROM pg_partitioned_table p
+             WHERE p.partrelid = (current_schema() || '.physicalities')::regclass);
+    END IF;
     FOR b IN 0..63 LOOP
         suffix := lpad(to_hex(b), 2, '0');
         EXECUTE format('CREATE TABLE physicalities_h%s PARTITION OF physicalities'
