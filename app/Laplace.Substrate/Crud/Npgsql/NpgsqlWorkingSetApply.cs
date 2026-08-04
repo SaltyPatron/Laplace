@@ -216,13 +216,9 @@ public sealed partial class NpgsqlSubstrateWriter
 
         var physIdSet = new HashSet<Hash128>(phys.Ids.Count);
         var probePhysIds = new List<Hash128>(phys.Ids.Count);
-        var probePhysHilberts = new List<Hilbert128>(phys.Ids.Count);
         for (int i = 0; i < phys.Ids.Count; i++)
             if (physIdSet.Add(phys.Ids[i]))
-            {
                 probePhysIds.Add(phys.Ids[i]);
-                probePhysHilberts.Add(phys.HilbertKeys[i]);
-            }
 
         // Attestation duplicate collapse, exactly apply_batch's semantics:
         // representative = latest-ts staged row, observation counts sum, and
@@ -347,15 +343,13 @@ public sealed partial class NpgsqlSubstrateWriter
                 entVerifyIdx = kept;
             }
             var probePhysIdsUse = probePhysIds;
-            var probePhysHilbertsUse = probePhysHilberts;
             long physCacheSkip = 0;
             if (persistedPhys is { Count: > 0 })
             {
                 probePhysIdsUse = new List<Hash128>(probePhysIds.Count);
-                probePhysHilbertsUse = new List<Hilbert128>(probePhysIds.Count);
                 for (int i = 0; i < probePhysIds.Count; i++)
                     if (persistedPhys.Contains(probePhysIds[i])) physCacheSkip++;
-                    else { probePhysIdsUse.Add(probePhysIds[i]); probePhysHilbertsUse.Add(probePhysHilberts[i]); }
+                    else probePhysIdsUse.Add(probePhysIds[i]);
             }
 
             // Probes fan out across pooled connections. Correct under the
@@ -424,13 +418,12 @@ public sealed partial class NpgsqlSubstrateWriter
                 {
                     physEmptySkip = probePhysIdsUse.Count;
                     probePhysIdsUse = new List<Hash128>();
-                    probePhysHilbertsUse = new List<Hilbert128>();
                 }
             }
 
             // I/O locality — the load-bearing fix for large-DB probes. The native existence
             // bitmaps do keyed lookups into the PARTITIONED tables (entities LIST(tier),
-            // physicalities RANGE(hilbert), attestations LIST(type_id)->HASH(subject)). Probing
+            // physicalities HASH(id), attestations LIST(type_id)->HASH(subject)). Probing
             // in staged (content-hash-random) order scatters each 131k chunk across every
             // partition leaf and heap page — fine while the table fits cache, catastrophic once
             // it doesn't (MEASURED on Wiktionary: a single verify grew to 37-53 min of cache-cold
@@ -451,10 +444,15 @@ public sealed partial class NpgsqlSubstrateWriter
             }
             if (probePhysIdsUse.Count > 1)
             {
+                // Sorted by ID since physicalities became HASH(id)/PK(id). Hash
+                // routing is not monotonic in id, so a chunk is not one contiguous
+                // partition — but within each of the 64 buckets the probed ids are
+                // still ascending, so every bucket's PK index is walked forward
+                // instead of randomly. Same property attestations gets from
+                // HASH(subject_id) probed in subject order.
                 var perm = BuildProbePermutation(probePhysIdsUse.Count,
-                    (a, b) => probePhysHilbertsUse[a].CompareToBytewise(probePhysHilbertsUse[b]));
+                    (a, b) => probePhysIdsUse[a].CompareToBytewise(probePhysIdsUse[b]));
                 probePhysIdsUse = ApplyProbePermutation(probePhysIdsUse, perm);
-                probePhysHilbertsUse = ApplyProbePermutation(probePhysHilbertsUse, perm);
             }
             // Entities and physicalities probe concurrently. The attestation
             // probe waits on the ENTITY result only for ordering; every staged
@@ -484,8 +482,14 @@ public sealed partial class NpgsqlSubstrateWriter
             var entProbeTask = ProbePresentTieredParallelAsync(
                 "laplace.entities_stored_bitmap", probeEntIdsUse, probeEntTiersUse,
                 r => Interlocked.Add(ref rtProbe, r), ct);
-            var physProbeTask = ProbePresentPairKeyedParallelAsync(
-                "laplace.physicalities_exist_bitmap", probePhysIdsUse, probePhysHilbertsUse,
+            // Id-only overload. The hilbert-keyed variant routed each probe to the
+            // RANGE(hilbert) band that held the row; under HASH(id) that routing
+            // names the wrong partition, and a probe that answers "absent" for a
+            // stored row is not slow but fatal — COPY has no ON CONFLICT (see the
+            // novel-by-construction post-mortem above).
+            var physProbeTask = ProbePresentCoreAsync(
+                "SELECT laplace.physicalities_exist_bitmap($1)", probePhysIdsUse,
+                static (_, _, _) => { },
                 r => Interlocked.Add(ref rtProbe, r), ct);
 
             var presentEntities = await entProbeTask;
@@ -594,6 +598,7 @@ public sealed partial class NpgsqlSubstrateWriter
                         int i = firstEntIdx[k];
                         if (presentEntities.Contains(ents.Ids[i])) { eSkip++; continue; }
                         keptEnts.Add(new KeptRow(
+                            CopyPartitionKey.ForEntityId(ents.Ids[i]),
                             CopyPartitionKey.ForEntityId(ents.Ids[i]), ents.Rows[i], -1, 0));
                         novelEntIds?.Add(ents.Ids[i]);
                         if (i < ents.TypeIds.Count) keptEntTypes.Add(ents.TypeIds[i]);
@@ -613,28 +618,37 @@ public sealed partial class NpgsqlSubstrateWriter
                 {
                     int i = firstEntIdx[k];
                     if (presentEntities.Contains(ents.Ids[i])) { eSkip++; continue; }
-                    keptEnts.Add(new KeptRow(CopyPartitionKey.ForEntityId(ents.Ids[i]), ents.Rows[i], -1, 0));
+                    keptEnts.Add(new KeptRow(
+                        CopyPartitionKey.ForEntityId(ents.Ids[i]),
+                        CopyPartitionKey.ForEntityId(ents.Ids[i]), ents.Rows[i], -1, 0));
                     novelEntIds?.Add(ents.Ids[i]);
                     if (i < ents.TypeIds.Count) keptEntTypes.Add(ents.TypeIds[i]);
                 }
             }
 
             // Physicalities: first occurrence of each id, minus stored rows.
-            // Sort key = HILBERT INDEX, not id: the contended index here is
-            // the coord GiST, and hilbert order is its spatial locality —
-            // range-partitioned groups land in disjoint GiST subtrees the
-            // way id-sorted groups land in disjoint btree leaf ranges.
+            // Sort key = ID, matching physicalities' HASH(id) partitioning and its
+            // PK(id). It was the hilbert index while the table was RANGE(hilbert),
+            // for coord-GiST spatial locality — but hilbert is a curve position,
+            // not a hash, so uniform bands over a clustered distribution sent
+            // 58.96% of the table (and of every batch) into one partition and
+            // collapsed these 8 lanes to 1: 527 rows/s with one backend working
+            // and 21 idle at COMMIT. Ids are content hashes, so id-range groups
+            // are equal-sized by construction and land in disjoint PK leaf ranges.
+            // The GiST gives up insert locality it was not being paid for: no
+            // installed read prunes on hilbert, so no KNN ever used the bands.
             var keptPhys = new List<KeptRow>(phys.Rows.Count);
             var seenPhys = new HashSet<Hash128>(phys.Ids.Count);
-            // Physicality KeptRow.SortKey is the hilbert index (GiST locality), not the id,
-            // so novel ids are collected here explicitly rather than recovered post-sort.
             var novelPhysIds = persistedPhys is null ? null : new List<Hash128>(keptPhys.Capacity);
             for (int i = 0; i < phys.Ids.Count; i++)
             {
                 if (!seenPhys.Add(phys.Ids[i])) continue;
                 if (presentPhys.Contains(phys.Ids[i])) { pSkip++; continue; }
+                // Lane by id (uniform), ORDER by hilbert (coord GiST locality).
                 keptPhys.Add(new KeptRow(
-                    CopyPartitionKey.ForHilbertIndex(phys.HilbertKeys[i]), phys.Rows[i], -1, 0));
+                    CopyPartitionKey.ForEntityId(phys.Ids[i]),
+                    CopyPartitionKey.ForHilbertIndex(phys.HilbertKeys[i]),
+                    phys.Rows[i], -1, 0));
                 novelPhysIds?.Add(phys.Ids[i]);
             }
 
@@ -668,6 +682,7 @@ public sealed partial class NpgsqlSubstrateWriter
                 var group = attGroups[atts.Ids[i]];
                 bool collapsed = group.Games != atts.Counts[i] || group.Sum != atts.SumScores[i];
                 keptAtts.Add(new KeptRow(
+                    CopyPartitionKey.ForEntityId(atts.Ids[i]),
                     CopyPartitionKey.ForEntityId(atts.Ids[i]), atts.Rows[i],
                     collapsed ? group.Games : -1,
                     atts.CountValueOffsets[i],
@@ -941,14 +956,31 @@ public sealed partial class NpgsqlSubstrateWriter
             // COPY sub-txns commit their rows independently, so a control-tx failure after
             // that point still leaves the rows present and a later probe will catch them —
             // the cache is a pure optimization, never a correctness input.)
-            // Run-cache / ledger fill is for small incremental applies.
-            // MEASURED: 500k Hash128 adds after COPY cost ~100ms+ on the gate.
-            if (persistedEnt is not null && novelEntIds is not null
-                && novelEntIds.Count <= MaxRunCacheFillIds)
-                foreach (var id in novelEntIds) persistedEnt.Add(id);
-            if (persistedPhys is not null && novelPhysIds is not null
-                && novelPhysIds.Count <= MaxRunCacheFillIds)
-                foreach (var id in novelPhysIds) persistedPhys.Add(id);
+            //
+            // Fill the probe-skip cache with EVERY distinct entity/phys this working set
+            // staged — not only the novel COPYed subset, and not gated on MaxRunCacheFillIds.
+            // After commit, present-at-probe and newly-COPYed rows are equally durable under
+            // append-only law. MEASURED 2026-08-04 ChessPgn (OTB year on a DB that already
+            // holds another OTB year): first WS staged ~360k distinct entities, verify paid
+            // ~34s with present≈346k, and because firstEntIdx.Count > MaxRunCacheFillIds the
+            // old novel-only fill left novelEntIds=null → cache stayed empty → every later
+            // WS re-probed the same shared position graph with "skipped 0e cached". HashSet
+            // add of ~360k ids is ~100ms; repeating a 34s bitmap is the gate killer.
+            // ContentLadderLedger stays novel/staged-gated below (provenance across sources).
+            if (persistedEnt is not null && firstEntIdx.Count > 0)
+            {
+                var ids = CollectionsMarshal.AsSpan(ents.Ids);
+                var idx = CollectionsMarshal.AsSpan(firstEntIdx);
+                for (int k = 0; k < idx.Length; k++)
+                    persistedEnt.Add(ids[idx[k]]);
+                if (tier0Present is not null)
+                    foreach (var id in tier0Present) persistedEnt.Add(id);
+            }
+            if (persistedPhys is not null && probePhysIds.Count > 0)
+            {
+                for (int i = 0; i < probePhysIds.Count; i++)
+                    persistedPhys.Add(probePhysIds[i]);
+            }
 
             // Same commit boundary, same reason: a root may only answer "ladder already
             // deposited" once it is durably in the target.
@@ -1273,27 +1305,6 @@ public sealed partial class NpgsqlSubstrateWriter
             }, addRoundTrips, ct);
     }
 
-    /// <summary>Pair-keyed presence probe (physicalities:
-    /// RANGE(hilbert_index)). The write lane stages every row's hilbert index
-    /// (it is the parallel-COPY sort key already), so the probe prunes
-    /// per row instead of descending every leaf per id.</summary>
-    private Task<HashSet<Hash128>> ProbePresentPairKeyedParallelAsync(
-        string function, IReadOnlyList<Hash128> ids, IReadOnlyList<Hilbert128> hilbertIndexes,
-        Action<int> addRoundTrips, CancellationToken ct)
-    {
-        if (hilbertIndexes.Count != ids.Count)
-            throw new InvalidOperationException(
-                $"keyed probe arrays misaligned: {ids.Count} ids / {hilbertIndexes.Count} hilbert indexes");
-        return ProbePresentCoreAsync($"SELECT {function}($1, $2)", ids,
-            (parameters, start, n) =>
-            {
-                var chunk = new byte[n][];
-                for (int i = 0; i < n; i++) chunk[i] = hilbertIndexes[start + i].ToByteArray();
-                parameters.Add(new NpgsqlParameter
-                { Value = chunk, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
-            }, addRoundTrips, ct);
-    }
-
     /// <summary>Triple-keyed presence probe (attestations: LIST(type_id) ->
     /// HASH(subject_id); an id-only probe pays one index descent per leaf —
     /// ~145x).</summary>
@@ -1374,13 +1385,33 @@ public sealed partial class NpgsqlSubstrateWriter
         }
     }
 
-    /// <summary>SortKey partitions parallel COPY groups into disjoint index
-    /// keyspaces: the row id for btree-indexed tables, the hilbert index for
-    /// physicalities (coord GiST locality). Patch/PatchSum carry a
-    /// duplicate-collapsed group's summed games/sum_score for the
-    /// representative row (Patch = -1 means unpatched).</summary>
+    /// <summary>
+    /// TWO keys, because lane assignment and insert order want different things.
+    ///
+    /// <para><b>LaneKey</b> picks which parallel COPY connection a row rides. It must be
+    /// UNIFORM or the lanes come out uneven and the widest one becomes the wall clock.
+    /// Always the row id: ids are content hashes, uniform by construction.</para>
+    ///
+    /// <para><b>OrderKey</b> is the sort within a lane, which decides the order index
+    /// pages are touched. For btree-indexed tables that is the id again — sorted ids walk
+    /// PK leaves forward instead of randomly. For physicalities it is the HILBERT INDEX,
+    /// because the contended index there is the coord GiST and hilbert order is its
+    /// spatial locality.</para>
+    ///
+    /// <para>These were one key until 2026-08-04 and the collapse cost something either
+    /// way. Keyed on hilbert, lanes inherited hilbert's distribution — and hilbert is
+    /// locality-PRESERVING, so range-splitting it splits by region of space, and content
+    /// piles at the centroid rather than spreading: one band held 60.67% of the table.
+    /// Keyed on id, lanes balanced but every GiST insert became a random descent. The
+    /// same property that makes hilbert a bad partition key makes it a good sort key, so
+    /// the fix is to stop making it be both.</para>
+    ///
+    /// <para>Patch/PatchSum carry a duplicate-collapsed group's summed games/sum_score for
+    /// the representative row (Patch = -1 means unpatched).</para>
+    /// </summary>
     private readonly record struct KeptRow(
-        CopyPartitionKey SortKey, StagedRowRef Row, long Patch, int CountOff, long PatchSum = 0, int SumOff = 0);
+        CopyPartitionKey LaneKey, CopyPartitionKey OrderKey, StagedRowRef Row,
+        long Patch, int CountOff, long PatchSum = 0, int SumOff = 0);
 
     private static async Task CopyKeptAsync(
         NpgsqlConnection conn, string tableName, IntentStageTable table,
@@ -1419,7 +1450,7 @@ public sealed partial class NpgsqlSubstrateWriter
 
     private static int ResolveCopyGroups(int rowCount, int sharedSecondaryKeys)
     {
-        // Id-range groups own disjoint PK leaves after SortKey order. MEASURED
+        // Id-range groups own disjoint PK leaves after LaneKey order. MEASURED
         // (Npgsql binary COPY into live entities, indexes UP, this host): 8-way
         // peaked ~591k rows/s; 12-way fell to ~534k (type-btree contention).
         // Cap at that measured peak — not the old homogeneous-2 scar.
@@ -1499,9 +1530,13 @@ public sealed partial class NpgsqlSubstrateWriter
         var counts = new int[groups];
         for (int i = 0; i < rowCount; i++)
         {
-            var key = CopySortKey.FromWire(kept[i].SortKey.Wire);
+            // LANE from LaneKey, ORDER from OrderKey — two different keys on purpose.
+            // The lane must be uniform (id) or one connection carries the batch; the
+            // order should follow the contended index (hilbert for physicalities, id
+            // for the btree tables). Collapsing them forces one to lose.
+            var key = CopySortKey.FromWire(kept[i].OrderKey.Wire);
             keysAll[i] = key;
-            int g = CopyGroupOf(key.HiBe, groups);
+            int g = CopyGroupOf(CopySortKey.FromWire(kept[i].LaneKey.Wire).HiBe, groups);
             groupOf[i] = g;
             counts[g]++;
         }

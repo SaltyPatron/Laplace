@@ -1,6 +1,8 @@
 using System.Runtime.CompilerServices;
+using System.Text.Json.Nodes;
 using Laplace.Api.Contracts;
 using Laplace.Endpoints.OpenAICompat;
+using Laplace.SubstrateCRUD.Npgsql;
 
 namespace Laplace.Endpoints.OpenAICompat.Tests;
 
@@ -97,6 +99,10 @@ internal sealed class UnreachableSubstrateClient : ISubstrateClient
 
     public Task<ExploreGraphResponse?> ExploreConsensusGraphAsync(
         string idHex, int hops, int fanout, CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
+    public Task<InstalledOpInvoker.OpResult> InvokeOpAsync(
+        string name, IReadOnlyDictionary<string, JsonNode?>? args, int maxRows, CancellationToken ct) =>
         throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
 
     public Task<IReadOnlyList<QueryShape>> QueryShapesAsync(CancellationToken ct) =>
@@ -419,6 +425,23 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
             ],
             Truncated: false,
             MaxNodes: 160));
+
+    public Task<InstalledOpInvoker.OpResult> InvokeOpAsync(
+        string name, IReadOnlyDictionary<string, JsonNode?>? args, int maxRows, CancellationToken ct)
+    {
+        if (name == "source_status")
+        {
+            var row = new Dictionary<string, object?>
+            {
+                ["source"] = "WordNetDecomposer",
+                ["known"] = true,
+                ["ingested"] = true,
+            };
+            return Task.FromResult(new InstalledOpInvoker.OpResult([row], null, null));
+        }
+        return Task.FromResult(new InstalledOpInvoker.OpResult(
+            [], null, $"no installed operation named '{name}'"));
+    }
 
     public Task<IReadOnlyList<QueryShape>> QueryShapesAsync(CancellationToken ct) =>
         Task.FromResult<IReadOnlyList<QueryShape>>(

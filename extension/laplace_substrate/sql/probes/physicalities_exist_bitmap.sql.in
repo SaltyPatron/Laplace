@@ -3,10 +3,11 @@ CREATE OR REPLACE FUNCTION physicalities_exist_bitmap(ids bytea[])
     AS 'MODULE_PATHNAME', 'pg_laplace_physicalities_exist_bitmap'
     LANGUAGE C STABLE;
 
--- KEYED overload (additive — no version skew break): the write lane stages
--- every physicality's hilbert key (RANGE partition key), so the probe
--- prunes per row instead of descending every leaf per id.
-CREATE OR REPLACE FUNCTION physicalities_exist_bitmap(ids bytea[], hilberts bytea[])
-    RETURNS bytea
-    AS 'MODULE_PATHNAME', 'pg_laplace_physicalities_exist_bitmap_keyed'
-    LANGUAGE C STABLE;
+-- The (ids, hilberts) keyed overload is GONE (2026-08-04). It pruned each probe
+-- to the RANGE(hilbert_index) band holding the row; physicalities is now
+-- HASH(id), where a hilbert key names no partition at all. A probe that reports
+-- a stored row absent is not a slow path — COPY has no ON CONFLICT, so it aborts
+-- the ingest (see the novel-by-construction post-mortem in NpgsqlWorkingSetApply).
+-- The id-only probe above needs no partition hint: HASH(id) routes on the id it
+-- is already given.
+DROP FUNCTION IF EXISTS physicalities_exist_bitmap(bytea[], bytea[]);

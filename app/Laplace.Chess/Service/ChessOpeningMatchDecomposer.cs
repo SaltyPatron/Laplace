@@ -15,28 +15,22 @@ namespace Laplace.Chess.Service;
 ///
 /// Run: <c>laplace ingest chess-opening-match</c>  (no path — the substrate is the source)
 ///
-/// WHY A SEPARATE LANE AND NOT A FIX TO ChessAnalyze. The analyzer already stamps
-/// GAME_HAS_OPENING from <see cref="OpeningClassifier"/>'s SAN-string prefix match, which
-/// is transposition-blind and wrong or short on 38.7% of lines measured here (see
-/// <see cref="ChessOpeningIndex"/> for the numbers and examples). Correcting it in place
-/// would mean bumping ChessAnalyze.Version to re-derive, and attestation merge
-/// ACCUMULATES observation_count — re-deriving the calculated layer over a standing
-/// corpus doubles every witness count in it. The same reasoning that made the trajectory
-/// backfill its own pass applies here, and harder: this lane writes TESTIMONY, so it must
-/// be additive or not exist.
+/// Matching law (catalog dual): deepest named board on the game path (id collision
+/// with the openings catalog), or trajectory-prefix equality with an opening LINE.
+/// SAN-prefix (<see cref="OpeningClassifier"/>) is retired as architecture — measured
+/// 38.7% wrong/short (see <see cref="ChessOpeningIndex"/>); keep only as a weak
+/// ChessAnalysis peer until consensus shows board/prefix wins.
 ///
-/// So it is a THIRD WITNESS, under its own source, marker-gated per line:
+/// Additive lane (not an in-place ChessAnalyze fix): attestation merge accumulates
+/// observation_count, so re-deriving the calculated layer would double every witness.
+/// Witnesses under separate sources:
 ///
-///   ChessPgn          what the PGN's Opening header claimed (whatever the site wrote)
-///   ChessAnalysis     SAN-prefix match against the ECO table on disk
-///   ChessOpeningMatch this lane — exact board identity against the ingested catalog
+///   ChessPgn          PGN Opening header (site claim)
+///   ChessAnalysis     deprecated SAN-prefix peer against ECO TSV
+///   ChessOpeningMatch board-identity / line-prefix against the ingested catalog
 ///
-/// Where they agree the cells merge and the opening gains a witness, which is the point
-/// of a fold. Where they disagree they are competing objects on the same (line,
-/// GAME_HAS_OPENING) subject and consensus decides, weighted by trust. This lane carries
-/// StandardsDerived: a board id collision is exact, not a heuristic, and it should
-/// outweigh a prefix guess — but it is still one witness, never an overwrite. Readers
-/// that want only this verdict pass p_source to chess_opening_games.
+/// StandardsDerived: a board id collision is exact. Readers that want only this
+/// verdict pass p_source to chess_opening_games.
 ///
 /// PREREQUISITE, AND IT IS LOAD-BEARING: openings must be ingested before this runs.
 /// They already are (openings is the cheap catalog lane, games are the expensive one), and

@@ -1,0 +1,60 @@
+-- chess_distance_to_syzygy(line): observed distance along a line to the first
+-- deposited closing fact. Silence is not a draw — empty when the line never
+-- reaches a deposited tablebase position.
+--
+-- Relation vocabulary via chess_has_wdl_type / chess_has_dtz_type (ISA G3).
+DROP FUNCTION IF EXISTS chess_distance_to_syzygy(bytea);
+
+CREATE OR REPLACE FUNCTION chess_distance_to_syzygy(p_line bytea)
+    RETURNS TABLE(
+        position_id bytea,
+        plies_to_close integer,
+        d_men integer,
+        wdl text,
+        dtz text)
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+WITH rel AS MATERIALIZED (
+    SELECT chess_has_wdl_type() AS wdl, chess_has_dtz_type() AS dtz
+),
+line AS MATERIALIZED (
+    SELECT (u.ord - 1)::int AS ply, u.entity_id AS pos
+    FROM LATERAL trajectory_unpacked_points(p_line)
+         WITH ORDINALITY AS u(entity_id, run_length, ctier, ord)
+),
+hit AS MATERIALIZED (
+    SELECT l.ply, l.pos,
+           max(a.object_id) FILTER (WHERE a.type_id = r.wdl) AS wdl_id,
+           max(a.object_id) FILTER (WHERE a.type_id = r.dtz) AS dtz_id
+    FROM line l
+    JOIN rel r ON true
+    JOIN attestations a ON a.subject_id = l.pos
+                       AND a.type_id IN (r.wdl, r.dtz)
+    GROUP BY l.ply, l.pos
+    HAVING max(a.object_id) FILTER (WHERE a.type_id = r.wdl) IS NOT NULL
+    ORDER BY l.ply
+    LIMIT 1
+),
+surfaces AS MATERIALIZED (
+    SELECT COALESCE(array_agg(DISTINCT s), '{}'::bytea[]) AS ids
+    FROM hit h, LATERAL (VALUES (h.wdl_id), (h.dtz_id)) v(s)
+    WHERE s IS NOT NULL
+),
+label AS MATERIALIZED (
+    SELECT p.id, t.txt
+    FROM surfaces b,
+         LATERAL unnest(b.ids) WITH ORDINALITY AS p(id, i),
+         LATERAL unnest(realize_batch(b.ids, NULL)) WITH ORDINALITY AS t(txt, j)
+    WHERE p.i = t.j
+)
+SELECT h.pos,
+       h.ply,
+       -- Exact men is a board fact (compose-time). Not stored on physicalities;
+       -- NULL here rather than lying with n_constituents (substructure count).
+       NULL::integer,
+       w.txt,
+       d.txt
+FROM hit h
+LEFT JOIN label w ON w.id = h.wdl_id
+LEFT JOIN label d ON d.id = h.dtz_id
+$$;

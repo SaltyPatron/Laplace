@@ -5,8 +5,9 @@ name: Seed — chess
 #   chess        — PGN games: record (ChessPgn) + substrate analyze pass
 #   openings     — opening book (ChessOpenings)
 #   chess-books  — annotated chess books (ChessBook): record + derive in one pass
-#   chess-syzygy — exact endgame WDL/DTZ from the tablebases (ChessSyzygy). No path;
-#                  the substrate is the source. A no-op with no tablebases on the box.
+#   chess-syzygy — ingest Syzygy packaging (.rtbw/.rtbz) as position-grain HAS_WDL/HAS_DTZ
+#                  substrate records (ChessSyzygy). Corpus syzygy-tablebase supplies the
+#                  directory; empty/missing tables = documented no-op.
 #   chess-trajectory — game-trajectory geometry backfill (ChessTrajectory). No path;
 #                  physicality upserts only, never testimony, so re-runs cannot
 #                  double-count. Both were reachable from `laplace ingest` and from
@@ -218,7 +219,11 @@ jobs:
             owner-games)      p="$chess/Anthony-Hart_chesscom.pgn" ;;
             twic)             p="$chess/twic" ;;
             openings-book)    p="$chess/openings" ;;
-            syzygy-tablebase) p="$chess/syzygy" ;;
+            syzygy-tablebase)
+              p="$chess/syzygy"
+              if [ -d "$p/3-4-5" ] && ls "$p/3-4-5"/*.rtbw >/dev/null 2>&1; then
+                p="$p/3-4-5"
+              fi ;;
             books)            p="$root/test-data/text" ;;
             path-override)    p="${{ inputs.path }}" ;;
             lumbras-otb|lumbras-online)
@@ -243,11 +248,26 @@ jobs:
             *) [ "$slice" = "all" ] || echo "::notice::slice '$slice' ignored for corpus '$corpus'" ;;
           esac
           # Substrate-sourced lanes read recorded games, not a file: no path at all.
+          # chess-syzygy is the opposite: the corpus IS the packaging directory.
           case "$src" in
-            chess-eval|chess-syzygy|chess-trajectory|chess-opening-match)
+            chess-eval|chess-trajectory|chess-opening-match)
               echo "source=$src reads the substrate — corpus ignored, no path passed"
               echo "path=" >> "$GITHUB_OUTPUT"
               exit 0 ;;
+            chess-syzygy)
+              if [ "$corpus" = "syzygy-tablebase" ] || [ "$corpus" = "path-override" ]; then
+                : # fall through to path resolution below
+              else
+                # Default the packaging dir when the operator picks chess-syzygy
+                # without explicitly choosing syzygy-tablebase.
+                p="$chess/syzygy"
+                if [ -d "$p/3-4-5" ] && ls "$p/3-4-5"/*.rtbw >/dev/null 2>&1; then
+                  p="$p/3-4-5"
+                fi
+                echo "source=chess-syzygy packaging dir -> $p"
+                echo "path=$p" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi ;;
           esac
           if [ -z "$p" ]; then
             echo "::error::corpus=path-override requires the path input"; exit 1

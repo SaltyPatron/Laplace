@@ -1,11 +1,30 @@
--- physicalities: RANGE-partitioned along the Hilbert space-filling curve — the
--- spatial-grid axis. 64 fixed prefix bands on the leading byte of the stored
--- 16-byte hilbert_index (4 first-byte values per band): each band is a
--- contiguous region of S³, so every per-partition coord GiST gets tight,
--- non-overlapping bounding boxes (fast R-tree, parallel sorted builds) and KNN
--- prunes to the bands its query region spans. Deterministic DDL — no
--- data-dependent bounds. PK leads with hilbert_index (the partition key);
--- entity_id lookups use physicalities_entity_btree per band (cheap probes).
+-- physicalities: HASH-partitioned on id — 64 uniform buckets.
+--
+-- Was RANGE(hilbert_index), 64 fixed bands on the leading byte, justified as
+-- "KNN prunes to the bands its query region spans". MEASURED 2026-08-04: no
+-- installed read supplies a hilbert_index range predicate, so no query has ever
+-- pruned — structural_neighbors orders by `coord <<->> $1` with no partition-key
+-- filter, and every KNN already descends all 64 bands. The claimed benefit was
+-- never collected.
+--
+-- What the band split did produce is skew. hilbert_index is a space-filling-curve
+-- POSITION, not a hash: uniform byte boundaries over a clustered distribution put
+-- 58.96% of 70M rows and 56 of 95 GB into physicalities_ba0 alone (48.81% on
+-- 2026-08-03 — the skew grows with the seed). The apply path splits its parallel
+-- COPY lanes on the partition key, so 8 lanes degenerated to 1: measured 212,125
+-- rows in 402,196ms (527 rows/s) with one backend working and 21 idle at COMMIT,
+-- against 27,315 rows/s on id-keyed entities in the same batch.
+--
+-- HASH(id) makes every lane 1/64 of the write. Ids are content hashes — uniform by
+-- construction, which is the property the band boundaries wrongly assumed of the
+-- hilbert index. attestations already partitions HASH(subject_id); this table was
+-- the only RANGE-partitioned table in the schema.
+--
+-- PK is (id) alone: a hash partition key must be a subset of every unique
+-- constraint, and (id) subsumes the old physicalities_id_btree — which existed
+-- solely because the PK led with hilbert_index. One fewer index insert per row.
+-- Deterministic DDL — no data-dependent bounds. entity_id lookups use
+-- physicalities_entity_btree per bucket (cheap probes).
 -- FK to entities dropped (see consensus.sql.in).
 -- GREENFIELD: db-reset + reseed is the upgrade path.
 CREATE TABLE IF NOT EXISTS physicalities (
@@ -22,40 +41,53 @@ CREATE TABLE IF NOT EXISTS physicalities (
     alignment_residual double precision,
     source_dim         integer          CHECK (source_dim IS NULL OR source_dim > 0),
     observed_at        timestamptz      NOT NULL DEFAULT now(),
-    PRIMARY KEY (hilbert_index, id)
-) PARTITION BY RANGE (hilbert_index);
+    PRIMARY KEY (id)
+) PARTITION BY HASH (id);
 
 DO $$
 DECLARE
     b int;
-    lo text;
-    hi text;
+    suffix text;
 BEGIN
     IF (SELECT c.relkind FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE n.nspname = current_schema() AND c.relname = 'physicalities') <> 'p' THEN
         RETURN;  -- legacy plain table
     END IF;
-    IF to_regclass(current_schema() || '.physicalities_b00') IS NOT NULL THEN
-        RETURN;  -- bands already exist
+    IF to_regclass(current_schema() || '.physicalities_h00') IS NOT NULL THEN
+        RETURN;  -- buckets already exist
+    END IF;
+    -- A pre-repartition database still has the RANGE(hilbert_index) parent and its
+    -- physicalities_b* bands. CREATE TABLE IF NOT EXISTS above no-ops against it, so
+    -- without this check the loop below hangs MODULUS/REMAINDER bounds off a RANGE
+    -- parent and PostgreSQL answers "invalid bound specification for a range
+    -- partition" — which names neither the table nor the remedy, and fails the whole
+    -- extension UPDATE. Say what is actually wrong. The upgrade path is a reset:
+    -- repartitioning in place would mean rewriting 95 GB under an ALTER.
+    IF (SELECT p.partstrat FROM pg_partitioned_table p
+        WHERE p.partrelid = (current_schema() || '.physicalities')::regclass) <> 'h' THEN
+        RAISE EXCEPTION
+            'physicalities is not HASH-partitioned in this database (found strategy %). '
+            'This extension version partitions it HASH(id); the bands it still carries are '
+            'the old RANGE(hilbert_index) layout. Recreate the database (DB — lifecycle ops, '
+            'operation=recreate) and reseed — see the GREENFIELD note at the top of this file.',
+            (SELECT p.partstrat FROM pg_partitioned_table p
+             WHERE p.partrelid = (current_schema() || '.physicalities')::regclass);
     END IF;
     FOR b IN 0..63 LOOP
-        lo := CASE WHEN b = 0  THEN 'MINVALUE'
-                   ELSE format('%L', decode(lpad(to_hex(b * 4), 2, '0'), 'hex')) END;
-        hi := CASE WHEN b = 63 THEN 'MAXVALUE'
-                   ELSE format('%L', decode(lpad(to_hex((b + 1) * 4), 2, '0'), 'hex')) END;
-        EXECUTE format('CREATE TABLE physicalities_b%s PARTITION OF physicalities'
-                       || ' FOR VALUES FROM (%s) TO (%s)',
-                       lpad(to_hex(b * 4), 2, '0'), lo, hi);
+        suffix := lpad(to_hex(b), 2, '0');
+        EXECUTE format('CREATE TABLE physicalities_h%s PARTITION OF physicalities'
+                       || ' FOR VALUES WITH (MODULUS 64, REMAINDER %s)',
+                       suffix, b);
         -- Per-LEAF tuning (PG forbids storage params on partitioned parents):
         -- skip the expensive PostGIS ND-stats on the geometry columns (the
         -- pipeline reaches them via the GiST KNN, never via histograms — the
         -- measured 160x ANALYZE win), and fire autoanalyze at 2% / 100k changes.
-        EXECUTE format('ALTER TABLE physicalities_b%s ALTER COLUMN coord SET STATISTICS 0,'
+        EXECUTE format('ALTER TABLE physicalities_h%s ALTER COLUMN coord SET STATISTICS 0,'
                        || ' ALTER COLUMN trajectory SET STATISTICS 0',
-                       lpad(to_hex(b * 4), 2, '0'));
-        EXECUTE format('ALTER TABLE physicalities_b%s SET (autovacuum_analyze_scale_factor'
+                       suffix);
+        EXECUTE format('ALTER TABLE physicalities_h%s SET (autovacuum_analyze_scale_factor'
                        || ' = 0.02, autovacuum_analyze_threshold = 100000)',
-                       lpad(to_hex(b * 4), 2, '0'));
+                       suffix);
     END LOOP;
 END $$;
 

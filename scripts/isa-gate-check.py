@@ -50,9 +50,19 @@ CEILINGS = {
     "g1_weight_literalism": 25,
     "g3_sql_vocabulary_literalism": 250,
     "g3_c_vocabulary_literalism": 17,
-    "g3_csharp_vocabulary_literalism": 702,
+    "g3_csharp_vocabulary_literalism": 700,
     "g8_band_literalism": 8,
+    # G4 scaffolding (W6 D3): grep for CREATE FUNCTION with zero callers outside
+    # its own CREATE line. Destination form is substrate CALLS in-degree after W3
+    # (#765); this allowlist is shrink-only until that replace lands.
+    "g4_dead_canonical": 72,
 }
+
+CREATE_FUNCTION = re.compile(
+    r"CREATE\s+OR\s+REPLACE\s+FUNCTION\s+(?:@extschema@\.)?([A-Za-z_][A-Za-z0-9_]*)\s*\(",
+    re.IGNORECASE,
+)
+CALL_TOKEN = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 
 G1_FORMULA = re.compile(
     r"\b(?P<rating>(?:[A-Za-z_][A-Za-z0-9_]*\.)?(?:p_)?rating)"
@@ -308,6 +318,55 @@ def scan_g8() -> Counter[str]:
     return found
 
 
+def scan_g4_dead_canonical() -> Counter[str]:
+    """Scaffolding for ISA G4 — zero-caller installed functions (W6 D3).
+
+    A function is dead when its only mention is its own CREATE OR REPLACE
+    FUNCTION line after comment strip. Call sites in SQL / extension C /
+    production C# count. MCP ``op`` / HTTP ``/v1/op`` are not textual callers
+    — the destination gate is substrate CALLS after W3 (#765).
+    """
+    functions_root = ROOT / "extension" / "laplace_substrate" / "sql" / "functions"
+    defined: dict[str, str] = {}
+    corpus: list[tuple[str, str]] = []
+
+    for path in production_files(functions_root, (".sql.in",)):
+        rel = relative(path)
+        text = strip_sql_comments(path.read_text(encoding="utf-8", errors="replace"))
+        corpus.append((rel, text))
+        for match in CREATE_FUNCTION.finditer(text):
+            defined[match.group(1).lower()] = rel
+
+    for path in production_files(ROOT / "extension" / "laplace_substrate" / "src", (".c", ".h")):
+        corpus.append(
+            (relative(path), strip_c_comments(path.read_text(encoding="utf-8", errors="replace")))
+        )
+    for path in production_files(ROOT / "app", (".cs",)):
+        if any(".Tests" in part for part in path.parts):
+            continue
+        corpus.append(
+            (relative(path), strip_c_comments(path.read_text(encoding="utf-8", errors="replace")))
+        )
+
+    calls: Counter[str] = Counter()
+    for rel, text in corpus:
+        for match in CALL_TOKEN.finditer(text):
+            name = match.group(1).lower()
+            if name not in defined:
+                continue
+            if rel == defined[name]:
+                window = text[max(0, match.start() - 50) : match.start()].lower()
+                if "function" in window and "create" in window:
+                    continue
+            calls[name] += 1
+
+    found: Counter[str] = Counter()
+    for name, def_path in defined.items():
+        if calls[name] == 0:
+            found[f"{def_path}::{name}"] = 1
+    return found
+
+
 def current_violations() -> dict[str, dict[str, int]]:
     scans = {
         "g1_weight_literalism": scan_g1(),
@@ -315,6 +374,7 @@ def current_violations() -> dict[str, dict[str, int]]:
         "g3_c_vocabulary_literalism": scan_g3_c(),
         "g3_csharp_vocabulary_literalism": scan_g3_csharp(),
         "g8_band_literalism": scan_g8(),
+        "g4_dead_canonical": scan_g4_dead_canonical(),
     }
     return {
         gate: dict(sorted(counter.items()))
@@ -324,8 +384,8 @@ def current_violations() -> dict[str, dict[str, int]]:
 
 def baseline_document(violations: dict[str, dict[str, int]]) -> dict:
     return {
-        "measured": "2026-08-02",
-        "law": "W6 G1/G3/G8; entries and ceilings may only shrink",
+        "measured": "2026-08-03",
+        "law": "W6 G1/G3/G4(scaffolding)/G8; entries and ceilings may only shrink",
         "violations": violations,
     }
 

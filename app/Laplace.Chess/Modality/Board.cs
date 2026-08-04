@@ -43,6 +43,14 @@ public sealed class Board
                           | _bb[(int)Piece.BRook + 6] | _bb[(int)Piece.BQueen + 6] | _bb[(int)Piece.BKing + 6];
     public ulong OccupiedBB => WhiteBB | BlackBB;
 
+    /// <summary>Snapshot of maintained piece bitboards (13 slots). Hot path for compose identity.</summary>
+    public Bitboards CopyBitboards()
+    {
+        var bb = new ulong[13];
+        Array.Copy(_bb, bb, 13);
+        return Bitboards.FromRaw(bb);
+    }
+
     /// <summary>
     /// THE only sanctioned way to change a square. Clears the outgoing piece's bit and sets the
     /// incoming one, so Squares and the bitboards move together.

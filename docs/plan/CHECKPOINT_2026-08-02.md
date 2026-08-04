@@ -30,29 +30,25 @@ branch when merge-to-main is the validation that matters.
 
 ## 2. Live box — blocked for seed verification
 
-Measured (read-only) after the cancelled foundation seed:
+**2026-08-03 update:** foundation `HasLayerCompleted` markers are all present on
+the standing `laplace` DB; a long `ChessPgn` seed is `status=running` (do not
+bounce PG / do not start a second ingest). #792 fail-loud floor
+(`scripts/check-substrate-floor.sh`) names `INGEST_JOURNAL_NONTERMINAL` /
+`THIN_SUBSTRATE` / `UNSEEDED_SUBSTRATE` — publish no longer soft-exits on empty
+and skips smoke. Heal remains seed-foundation dispatch; no auto-reseed.
 
-```text
-ingest_run_journal: UnicodeDecomposer status=running, entities=0, attestations=0
-entities ≈ 1587 · attestations ≈ 287
-```
-
-That is **not** a healthy foundation. A prior Unicode apply claimed ~1.17M
-novel entities from a multi-change working set and COPY failed with `23505`
-on `entities_t2_*_pkey` (duplicate identity inside one apply). #776 is the
-shared-writer fix for that class of failure; it is **CI-green on main** and
-**not yet proven by a live foundation ladder**.
+Historical note (checkpoint write time): after the cancelled foundation seed the
+box had been thin residue + orphan Unicode `running` — that class of state is
+exactly what #792 must fail loud on. #776 (shared-writer identity dedup) is
+CI-green on main and still owed a clean foundation-ladder prove when the box
+is quiet (#777).
 
 ### Ops sequence before any new foundation seed
 
-1. Confirm no live ingest: `pg_stat_activity` / no `Laplace.Cli` you did not start.
-2. Mark the orphan journal row terminal (`failed` or `cancelled`) with an
-   error noting the cut-off — do not leave `status=running` forever. Schema
-   allows: `running|ok|failed|empty-noop|capped|cancelled|skipped-complete`.
-3. Decide whether the partial Unicode residue (~1.5k entities) is acceptable
-   for a resume vs needs a controlled reset **only if the operator orders
-   `db-reset` / DROP** — agents must not invent that.
-4. Re-run **one** foundation seed: `gh workflow run seed-foundation.yml --ref main`
+1. Confirm no live ingest: `ingest_run_journal status='running'` / no `Laplace.Cli` you did not start.
+2. Mark a true orphan journal row terminal (`failed` or `cancelled`) — do not leave `status=running` forever. Schema allows: `running|ok|failed|empty-noop|capped|cancelled|skipped-complete`.
+3. Controlled reset **only if the operator orders `db-reset` / DROP** — agents must not invent that.
+4. Re-run **one** foundation seed when owed: `gh workflow run seed-foundation.yml --ref main`
 5. Re-check #760 live on ChessPgn / ChessOpenings after those sources exist.
 6. Re-check #765 live `input_units > 0` on `ingest code` over converse SQL
    after the substrate can accept that ingest (still blocked on §3 W3 structural).

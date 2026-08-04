@@ -1,43 +1,63 @@
 -- chess_syzygy_line(line): the exact endgame oracle along one line.
 --
--- The ChessSyzygy lane has written HAS_WDL / HAS_DTZ since campaign PR-8 and had NO
--- read surface at all — `api('chess')` listed fourteen functions and not one of them
--- mentioned a tablebase. Verdicts that cannot be read are verdicts nobody probed.
---
--- LAYERING (GH #736). A tablebase verdict is a pure function of the POSITION, so the
--- subject is the position and the context is the LINE it was reached along — the same
--- grain as stockfish-eval. Reading "the endgame of this game" is therefore a
--- context-pinned scan, riding attestations_context_btree, not a walk of the trajectory.
+-- Syzygy deposits are POSITION-GRAIN (ctx null): a tablebase verdict is a pure
+-- function of the board. Packaging was unpacked into substrate records; a later
+-- game that composes the same surface hits the same position id and finds
+-- HAS_WDL / HAS_DTZ already there. Reading "the endgame of this line" is therefore
+-- the line's trajectory positions joined to those subject-keyed facts — not a
+-- context-pinned scan of line-scoped probes (that was the vault-sidecar mistake).
 --
 -- WDL is five-valued and SIDE-TO-MOVE POV, not white POV: 'win' means the player to
 -- move in that position wins with perfect play. It is never mixed with the OUTCOME
 -- fold's white-POV eff_mu, which is why this returns the token rather than a number.
+--
+-- Typed accessors below own the single relation_type_id('…') literals for this
+-- vocabulary (ISA G3). New chess SQL must call these — never re-type the strings.
+DROP FUNCTION IF EXISTS chess_has_wdl_type();
+DROP FUNCTION IF EXISTS chess_has_dtz_type();
+DROP FUNCTION IF EXISTS chess_syzygy_line(bytea, integer);
+
+CREATE OR REPLACE FUNCTION chess_has_wdl_type() RETURNS bytea
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT relation_type_id('HAS_WDL')
+$$;
+
+CREATE OR REPLACE FUNCTION chess_has_dtz_type() RETURNS bytea
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT relation_type_id('HAS_DTZ')
+$$;
+
 CREATE OR REPLACE FUNCTION chess_syzygy_line(p_line bytea, p_limit int DEFAULT 64)
     RETURNS TABLE(position_id bytea, wdl text, dtz text)
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
 WITH rel AS MATERIALIZED (
-    -- Resolved ONCE, not per row. relation_type_id is STABLE, and a STABLE function in a
-    -- filter runs per row; naming each relation in both the IN list and its FILTER also
-    -- typed the vocabulary twice in one file, which is the thing the ISA ratchet counts.
-    SELECT relation_type_id('HAS_WDL') AS wdl, relation_type_id('HAS_DTZ') AS dtz
+    SELECT chess_has_wdl_type() AS wdl, chess_has_dtz_type() AS dtz
+),
+line AS MATERIALIZED (
+    SELECT u.ord AS ordinal, u.entity_id AS pos
+    FROM LATERAL trajectory_unpacked_points(p_line)
+         WITH ORDINALITY AS u(entity_id, run_length, ctier, ord)
 ),
 probed AS MATERIALIZED (
-    SELECT a.subject_id AS pos,
+    SELECT l.pos,
            max(a.object_id) FILTER (WHERE a.type_id = r.wdl) AS wdl_id,
-           max(a.object_id) FILTER (WHERE a.type_id = r.dtz) AS dtz_id
-    FROM rel r
-    JOIN attestations a ON a.type_id IN (r.wdl, r.dtz)
-    WHERE a.context_id = p_line
-    GROUP BY a.subject_id
+           max(a.object_id) FILTER (WHERE a.type_id = r.dtz) AS dtz_id,
+           min(l.ordinal) AS ord
+    FROM line l
+    JOIN rel r ON true
+    JOIN attestations a ON a.subject_id = l.pos
+                       AND a.type_id IN (r.wdl, r.dtz)
+    GROUP BY l.pos
+    HAVING max(a.object_id) FILTER (WHERE a.type_id = r.wdl) IS NOT NULL
+    ORDER BY min(l.ordinal)
     LIMIT p_limit
 ),
 ord AS MATERIALIZED (
-    SELECT p.*, row_number() OVER (ORDER BY p.pos) AS ix FROM probed p
+    SELECT p.*, row_number() OVER (ORDER BY p.ord) AS ix FROM probed p
 ),
--- Render last, once, over DISTINCT ids. A tablebase page repeats itself harder than
--- any other read here: WDL is five-valued and DTZ is a small integer, so a 64-position
--- endgame carries maybe eight distinct surfaces between 128 id slots.
 surfaces AS MATERIALIZED (
     SELECT COALESCE(array_agg(DISTINCT s), '{}'::bytea[]) AS ids
     FROM ord o, LATERAL (VALUES (o.wdl_id), (o.dtz_id)) v(s)

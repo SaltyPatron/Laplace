@@ -37,6 +37,14 @@
 -- comment claiming it was fast by construction. It timed out at 15s through MCP. A
 -- standardized operation that cannot answer inside the caller's timeout is not
 -- standardized, it is a slow query with a nicer name.
+--
+-- DROP first: an ad-hoc / pre-membership install of this function is not owned
+-- by the extension. CREATE OR REPLACE then fails ALTER EXTENSION UPDATE with
+-- "function source_status(text) is not a member of extension laplace_substrate"
+-- (CI 2026-08-03 runs 30788596381 / 30791014736). Same trap as geometry_audit /
+-- sense_audit / prompt_language.
+DROP FUNCTION IF EXISTS source_status(text);
+
 CREATE OR REPLACE FUNCTION source_status(p_source text DEFAULT NULL)
     RETURNS TABLE(source            text,
                   source_id         bytea,

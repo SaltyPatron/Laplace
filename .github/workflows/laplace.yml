@@ -154,7 +154,10 @@ jobs:
             scripts/ingest-source.sh \
             scripts/isa-gate-check.py \
             scripts/isa-gate-baseline.json \
-            scripts/ensure-foundation.sh; do
+            scripts/ensure-foundation.sh \
+            scripts/eval-generation.py \
+            scripts/eval-probes.json \
+            scripts/eval-baselines.json; do
             [ -f "$f" ] || { echo "::error file=$f::CI-critical file missing"; fail=1; }
           done
           exit "$fail"
@@ -201,9 +204,23 @@ jobs:
       - name: Docs inventory drift gate
         # docs/INVENTORY.md is generated (scripts/docs-inventory.py): the counted
         # facts prose docs cite (projects, decomposers, SQL families, relations).
-        # The 2026-07-18 audit found every count embedded in prose had drifted;
-        # this gate makes committed counts a function of the tree, like the
-        # codegen determinism gate above.
+        # The 2026-07-18 audit found every count embedded in prose had drifted, so
+        # prose carries NO counts and points here instead — README, ARCHITECTURE,
+        # INDEX, COMPLETION_PLAN, INVENTIONS and the doc-reconciler agent all
+        # depend on that. The file therefore has to be true at every commit, which
+        # is why it is committed and why this stays BLOCKING.
+        #
+        # What changed is that keeping it true is no longer a human step.
+        # scripts/githooks/pre-commit regenerates and stages this file on every
+        # commit; scripts/install-githooks.sh points core.hooksPath at it and is
+        # invoked by scripts/check-prereqs.sh and scripts/agent-worktree.sh, so any
+        # checkout that has been set up at all has it. This gate is now a backstop
+        # for a checkout that skipped setup, not the mechanism.
+        #
+        # It blocked main twice on 2026-08-04 because the mechanism WAS a human
+        # remembering. Making the gate advisory would have been the wrong fix: it
+        # would keep the drift and hide it. The fix is upstream — nobody has to
+        # remember anything.
         run: python3 scripts/docs-inventory.py --check
 
       - name: Forbid C# attestation policy in decomposers
@@ -581,28 +598,43 @@ jobs:
             sleep 2
             if curl -fsS http://127.0.0.1:5187/health/ready >/dev/null 2>&1; then
               echo "laplace-api ready"
+              # #792: ready ≠ foundation floor. Entities>0 can be thin residue
+              # after a failed seed; fail loud before stamp / smoke.
+              bash scripts/check-substrate-floor.sh "${PGDATABASE:-laplace}"
               echo "seeded=true" >> "$GITHUB_OUTPUT"
               bash scripts/pipeline.sh publish-stamp
               exit 0
             fi
           done
 
-          # Not ready. "Deployed wrong" and "database is empty" are different
-          # states and only one is this job's business. Seeds are dispatch-only
-          # (operator decision), so after a manual drop NO push can ever satisfy
-          # a data-presence gate — every merge would go red on a condition the
-          # push is forbidden to fix. The readiness payload already separates
-          # them: reachable + perfcache loaded + zero consensus is a correctly
-          # deployed API against an unseeded substrate, which is exactly the
-          # state a fresh box is supposed to be in before its seed dispatch.
+          # Not ready. Named fail (#792) — never soft-exit and skip smoke.
+          # Seeds stay dispatch-only (no auto-reseed from this gate). Heal:
+          #   gh workflow run seed-foundation.yml --ref main
           detail=$(curl -sS http://127.0.0.1:5187/health/ready || true)
           echo "$detail"
           if python3 -c 'import json,sys; d=json.loads(sys.argv[1]); sys.exit(0 if (d.get("substrate_reachable") and d.get("perfcache_ready") and not d.get("consensus_relations")) else 1)' "$detail"
           then
-            echo "::warning::API deployed and reachable, substrate is UNSEEDED — not a deploy failure. Dispatch the seed workflow to make it ready."
+            # An EMPTY substrate is not a broken deploy. The service is up, the perfcache
+            # loaded, the extension installed — publish did its job. What is missing is
+            # DATA, which publish does not own and cannot heal (seeds stay dispatch-only).
+            #
+            # This used to write seeded=false and then exit 1, which contradicted itself:
+            # smoke and eval already gate on `needs.publish.outputs.seeded == 'true'`, so
+            # the output published here is exactly what makes them skip cleanly — and
+            # failing the job meant that guard could never be reached. /health/ready
+            # reports ready:false while unseeded, so the poll above can never succeed on a
+            # fresh database, which made main structurally red for the entire window
+            # between a recreate and a seed. That window is now normal: HASH(id)
+            # repartitioning made drop-then-recreate the upgrade path.
+            #
+            # #792 is preserved. That defect was a STALE deploy silently skipping smoke;
+            # every not-ready-for-any-other-reason path below still fails loudly. The one
+            # case softened here is the one the substrate itself reports as merely empty.
+            echo "::warning::UNSEEDED_SUBSTRATE: API reachable + perfcache loaded, but substrate has no consensus/entities. Downstream smoke/eval will skip. Heal via: gh workflow run \"Seed — foundation\" -f source=ladder"
             echo "seeded=false" >> "$GITHUB_OUTPUT"
-            # Deliberately NOT stamped: readiness never passed, so the next push
-            # re-deploys and re-checks rather than trusting a skip.
+            # Deliberately NOT stamped: the stamp lets a later run skip publish on an
+            # unchanged domain, and this box has not served a ready check. Re-publishing
+            # is idempotent; skipping one that was never verified is not.
             exit 0
           fi
 
@@ -642,6 +674,9 @@ jobs:
         with: { submodules: false, clean: false }
       - uses: ./.github/actions/setup-laplace-env
 
+      - name: Substrate floor (fail loud — #792)
+        run: bash scripts/check-substrate-floor.sh "${PGDATABASE:-laplace}"
+
       - name: Live endpoint smoke
         run: |
           curl -fsS http://127.0.0.1:5187/v1/capabilities | grep -q '"chat_completions"'
@@ -660,10 +695,38 @@ jobs:
           dotnet test Laplace.slnx -c Release --no-build --nologo --verbosity minimal \
             --filter 'Tier!=perf & Tier!=db & FullyQualifiedName~Endpoints.OpenAICompat'
 
+  eval:
+    name: Eval — generation / election quality (advisory)
+    needs: [publish, smoke]
+    # Same seeded guard as smoke. continue-on-error: advisory week (W5 D7);
+    # blocking_flip_date in scripts/eval-baselines.json records when this flips.
+    if: >-
+      !cancelled() && needs.publish.result == 'success' &&
+      needs.publish.outputs.seeded == 'true' &&
+      needs.smoke.result == 'success'
+    runs-on: [self-hosted, laplace]
+    continue-on-error: true
+    concurrency:
+      group: laplace-substrate-lifecycle
+      cancel-in-progress: false
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/setup-laplace-env
+      - name: Election + generation quality harness
+        run: |
+          mkdir -p .eval-proof
+          python3 scripts/eval-generation.py \
+            --db "host=/var/run/postgresql user=laplace_admin dbname=laplace" \
+            --probes scripts/eval-probes.json \
+            --baseline scripts/eval-baselines.json \
+            --report .eval-proof/generation.json
+
   restore-api:
     name: Restore API (always — even after failed stages)
     if: always() && needs.deploy.result != 'skipped'
-    needs: [deploy, publish, smoke]
+    needs: [deploy, publish, smoke, eval]
     runs-on: [self-hosted, laplace]
     concurrency:
       # ONE LIFECYCLE OPERATION AT A TIME, and never cancelled. Deploy, db-ops and

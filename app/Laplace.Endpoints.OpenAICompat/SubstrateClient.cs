@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using Laplace.Api.Contracts;
 using Laplace.Chess.Service;
 using Laplace.Engine.Core;
@@ -10,9 +11,19 @@ namespace Laplace.Endpoints.OpenAICompat;
 internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposable
 {
     private readonly NpgsqlDataSource _dataSource;
+    private readonly NpgsqlDataSource _dataSourceReadOnly;
 
     public SubstrateClient()
-        => _dataSource = LaplaceDataSource.Create(SubstrateAccess.Serving);
+    {
+        _dataSource = LaplaceDataSource.Create(SubstrateAccess.Serving);
+        // Same posture as MCP op: server-enforced read-only + statement timeout.
+        _dataSourceReadOnly = LaplaceDataSource.Create(SubstrateAccess.Serving, dsb =>
+        {
+            dsb.ConnectionStringBuilder.CommandTimeout = 20;
+            dsb.ConnectionStringBuilder.Options =
+                "-c default_transaction_read_only=on -c statement_timeout=15000";
+        });
+    }
 
     internal NpgsqlDataSource DataSource => _dataSource;
 
@@ -337,8 +348,7 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
     /// <summary>
     /// multi_source_entity_count() is a GROUP BY over ALL attestations with a
     /// count(DISTINCT source_id) — 169M rows and growing, with no bound and no index that
-    /// helps. Its own docstring called it unbounded; the durable fix is a calculated-layer
-    /// stat maintained post-ingest (doc 02, Issue 52).
+    /// helps. Durable fix is a calculated-layer stat maintained post-ingest (doc 02, Issue 52).
     ///
     /// OFF BY DEFAULT ON THE SERVING PATH. A budget is not a bound: the query still burns
     /// its FULL budget of cache-cold random I/O before being cancelled, and then returns
@@ -348,8 +358,7 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
     ///
     /// Null already means "not computed" and every response contract tolerates it, so
     /// declining costs the caller a field it was going to lose on timeout regardless.
-    /// Set LAPLACE_AUDIT_MULTISOURCE=1 to opt in when the substrate is idle and the number
-    /// is actually wanted.
+    /// Set LAPLACE_AUDIT_MULTISOURCE=1 to opt in when the substrate is idle.
     /// </summary>
     private static bool MultiSourceCountEnabled =>
         Environment.GetEnvironmentVariable("LAPLACE_AUDIT_MULTISOURCE") == "1";
@@ -568,8 +577,22 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         }
     }
 
+    public Task<InstalledOpInvoker.OpResult> InvokeOpAsync(
+        string name, IReadOnlyDictionary<string, JsonNode?>? args, int maxRows, CancellationToken ct)
+    {
+        try
+        {
+            return InstalledOpInvoker.InvokeAsync(_dataSourceReadOnly, name, args, maxRows, ct);
+        }
+        catch (Exception ex) when (ex is NpgsqlException or TimeoutException or PostgresException)
+        {
+            throw new SubstrateUnavailableException("Substrate is unreachable for op.", ex);
+        }
+    }
+
     public async ValueTask DisposeAsync()
     {
+        await _dataSourceReadOnly.DisposeAsync();
         await _dataSource.DisposeAsync();
     }
 

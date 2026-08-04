@@ -56,6 +56,52 @@ public static class NpgsqlIngestOps
             ANALYZE laplace.consensus (subject_id, type_id, object_id, rating, rd)
             """, timeoutSeconds: 0, ct: ct, label: "analyze_post_ingest_validation");
 
+    /// <summary>
+    /// Drain every GIN pending list once the write burst is over.
+    /// <para>
+    /// GIN with <c>fastupdate</c> buffers inserts into an unordered pending list and
+    /// merges it into the main structure only when it exceeds
+    /// <c>gin_pending_list_limit</c> — in the FOREGROUND of whichever backend crosses
+    /// the threshold. A large limit is what makes a bulk seed cheap, because merges
+    /// batch and same-key entries combine into one posting list update. But the
+    /// pending list is scanned LINEARLY on every search until it is flushed, so
+    /// whatever is left sitting there after an ingest is a tax on exactly the probes
+    /// these indexes exist to serve — and the containment probe on
+    /// physicalities_constituents_gin is the read model's hot path.
+    /// </para>
+    /// <para>
+    /// Flushing here removes the trade-off instead of splitting it: the limit can be
+    /// sized for write batching, and readers never scan a populated list, because the
+    /// burst always ends with this. Explicit rather than left to autovacuum, which
+    /// also cleans pending lists but on its own schedule — the first query after a
+    /// seed should not be the thing that pays.
+    /// </para>
+    /// </summary>
+    public static Task CleanGinPendingListsAsync(
+        NpgsqlConnection conn, CancellationToken ct = default) =>
+        NpgsqlRead.ExecuteNonQueryAsync(conn, """
+            DO $$
+            DECLARE r record;
+            BEGIN
+                FOR r IN
+                    SELECT i.indexrelid::regclass AS idx
+                    FROM pg_index i
+                    JOIN pg_class c  ON c.oid = i.indexrelid
+                    JOIN pg_am    am ON am.oid = c.relam
+                    JOIN pg_namespace n ON n.oid = c.relnamespace
+                    WHERE am.amname = 'gin' AND n.nspname = 'laplace'
+                LOOP
+                    -- Per-index and tolerant: a partition dropped concurrently, or an
+                    -- index built without fastupdate, must not abort the sweep.
+                    BEGIN
+                        PERFORM gin_clean_pending_list(r.idx);
+                    EXCEPTION WHEN OTHERS THEN
+                        NULL;
+                    END;
+                END LOOP;
+            END $$;
+            """, timeoutSeconds: 0, ct: ct, label: "gin_clean_pending_lists");
+
     public static Task<long> EvidenceCountForSourceNameAsync(
         NpgsqlConnection conn, string sourceKey, CancellationToken ct = default) =>
         ScalarLongAsync(conn, """

@@ -8,6 +8,8 @@ set(LAPLACE_CORE_HEADERS
     include/laplace/core/glicko2.h
     include/laplace/core/score.h
     include/laplace/core/codepoint_table.h
+    include/laplace/core/chess_perfcache_format.h
+    include/laplace/core/chess_position_table.h
     include/laplace/core/astar.h
     include/laplace/core/trajectory.h
     include/laplace/core/tier_tree.h

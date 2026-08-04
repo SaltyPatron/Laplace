@@ -70,6 +70,17 @@ public sealed class DecomposerArchitectureGateTests
         // (WorkingSetBudgetBytes / per-layer buffer footprint, clamped to
         // ComposeWorkers). Migrates to the spine with Issue 45's remainder.
         "Laplace.Decomposers/Model/ModelTokenEdgeETL.cs",
+        // Catalog-dual Syzygy unpack: bounded board/product channels into Compose.
+        "Laplace.Chess/Service/SyzygyTableUnpack.cs",
+        // Reviewed 2026-08-04: PGN throughput lane. Two bounded channels, each a
+        // single-reader fan-in so the async-enumerator contract the runner depends on
+        // is preserved: game text -> full parse, and game text -> ChessPlayingPeek for
+        // the novelty gate (headers + movetext id only, so a re-ingest pays a peek
+        // instead of a full parse per already-present playing). Widths derive from the
+        // machine (workers * 8), not a tuned constant. The work is CPU-bound parsing
+        // ahead of Compose, not substrate I/O — the spine still owns batching, dedup,
+        // descent, fold and COPY. Migrates to the spine with the other three.
+        "Laplace.Chess/Service/ChessPgnDecomposer.cs",
     };
 
     private static readonly Regex ResolveFileWorkersCall = new(
@@ -261,7 +272,11 @@ public sealed class DecomposerArchitectureGateTests
 
                 var text = File.ReadAllText(file);
                 bool inheritsBase =
-                    Regex.IsMatch(text, @":\s*(?:\w+\s*,\s*)*(?:RelationTripleMultiFileDecomposerBase|RelationTripleDecomposerBase|RelationTripleDecomposer|ComposeDecomposer<|GrammarComposeDecomposer|GrammarIngestDecomposer|CategoryCorrespondenceDecomposer|DecomposerMultiFile<|DecomposerPhase<|DecomposerMultiPhase|Decomposer<)")
+                    // ComposeDecomposerMultiFile< must be listed EXPLICITLY. `ComposeDecomposer<`
+                    // does not cover it — "MultiFile" sits between the name and the angle
+                    // bracket, so the alternative never matches and a legitimate base class
+                    // reads as no base class at all.
+                    Regex.IsMatch(text, @":\s*(?:\w+\s*,\s*)*(?:RelationTripleMultiFileDecomposerBase|RelationTripleDecomposerBase|RelationTripleDecomposer|ComposeDecomposerMultiFile<|ComposeDecomposer<|GrammarComposeDecomposer|GrammarIngestDecomposer|CategoryCorrespondenceDecomposer|DecomposerMultiFile<|DecomposerPhase<|DecomposerMultiPhase|Decomposer<)")
                     || text.Contains(": Decomposer<", StringComparison.Ordinal);
                 if (!inheritsBase)
                     violations.Add($"{projectRel}/{rel}");

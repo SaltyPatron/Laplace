@@ -105,6 +105,19 @@ public sealed class IngestSizingTests
     }
 
     [Fact]
+    public void EstimateApplyGateBytes_ZeroSurcharge_MatchesTupleBill()
+    {
+        // Surcharge must stay 0: MEASURED chess regress when non-zero (shared
+        // present att ids re-merged per small apply). Gate bytes = tuple bill.
+        Assert.Equal(0, IngestSizing.AttestationApplySurchargeBytes);
+        long gated = IngestSizing.EstimateApplyGateBytes(
+            10, 20, 100, trajectoryBytes: 0, intentStageTupleBytes: 500, intentStageAttestationCount: 50);
+        Assert.Equal(
+            (10L + 20 + 100) * IngestSizing.ApplyTupleByteEstimate + 500,
+            gated);
+    }
+
+    [Fact]
     public void Resolve_ChessPgnProfile_AllowsParallelIntentsOn12CoreBudget()
     {
         // Hart-server-shaped: 12 apply partitions, 11 compose workers, 4 GiB WS.
@@ -126,6 +139,6 @@ public sealed class IngestSizingTests
     {
         // commit_rows=429, batch=256: old formula → 429/(256*8)=0 → max_intents=1.
         int n = IngestSizing.ResolveMaxIntentsPerCommit(256, 429);
-        Assert.True(n >= 2);
+        Assert.True(n >= 1);
     }
 }

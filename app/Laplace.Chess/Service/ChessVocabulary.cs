@@ -95,12 +95,17 @@ public static class ChessVocabulary
     // StandardsDerived band — high witness weight, still one voice among many.
     public static readonly Hash128 SyzygyTrustClass = TrustClass("StandardsDerived");
 
-    // Deterministic per-(EVENT, analysis version) marker (GH #736: the analyzer deposits
+    // Deterministic per-(PLAYING, analysis version) marker (GH #736). The analyzer deposits
     // per-playing testimony — outcome/clock/think/eval contexts — so its unit is the
-    // event; two playings of one line each fold their own outcome). The scan bulk-probes
-    // these (EntitiesExistBitmapAsync) to skip events already derived at this version.
-    public static Hash128 AnalysisMarkerId(Hash128 eventId, int version)
-        => Hash128.OfCanonical($"chess/analyzed/{eventId}/{version}");
+    // PLAYING, not the tournament event: two playings of one line each fold their own
+    // outcome, and one event holds many playings. The scan bulk-probes these
+    // (EntitiesExistBitmapAsync) to skip playings already derived at this version.
+    //
+    // The argument must be the same id ChessAnalyze stamps with, or the probe silently
+    // never matches and the watermark stops skipping — every re-run re-analyzes the whole
+    // corpus at full cost while still looking correct.
+    public static Hash128 AnalysisMarkerId(Hash128 playingId, int version)
+        => Hash128.OfCanonical($"chess/analyzed/{playingId}/{version}");
     public static readonly Hash128 HasWhiteType = EntityTypeRegistry.Id("HAS_WHITE");
     public static readonly Hash128 HasBlackType = EntityTypeRegistry.Id("HAS_BLACK");
     public static readonly Hash128 HasEventType = EntityTypeRegistry.Id("HAS_EVENT");
@@ -156,11 +161,31 @@ public static class ChessVocabulary
         Hash128 movetextId)
         => Hash128.OfCanonical($"chess/playing/{white}|{black}|{date}|{@event}|{round}|{site}|{movetextId}");
 
-    // Live/lab playing-event handle: a live occurrence is unique by construction, so the
-    // session GUID is the whole identity (determinism-for-re-ingest does not apply — the
-    // cutechess PGN written afterwards is the replayable record). Lichess games keep their
-    // source-asserted external id (ChessLiveGameHost.LichessGameId).
-    public static Hash128 PlayEventId(Guid sessionGame)
+    /// <summary>
+    /// One playing of a live/lab game. Content-derived exactly like <see cref="PgnPlayingId"/>:
+    /// the line is the Merkle of the ordered position ids, so it already carries the whole
+    /// move sequence; players, learn context and result close over the rest. Two identical
+    /// self-plays therefore mint ONE playing whose observation count folds, which is the
+    /// designed behaviour — testimony accumulates, rows do not duplicate.
+    ///
+    /// Replaces minting the playing from a session GUID. A random id is not a function of
+    /// what it identifies: the same game replayed produced a different entity every time, so
+    /// re-ingest could never dedupe it and the substrate accumulated a fresh playing per run.
+    /// There was no speed argument either — OfCanonical stack-allocates the UTF-8 and calls
+    /// the native SIMD blake3 (NativeInterop.Hash128Blake3), which beats Guid.NewGuid().
+    /// </summary>
+    public static Hash128 LivePlayingId(
+        Hash128? whitePlayer, Hash128? blackPlayer, string learnContext,
+        Hash128 lineId, string resultToken)
+        => Hash128.OfCanonical(
+            $"chess/playing/live/{whitePlayer}|{blackPlayer}|{learnContext}|{lineId}|{resultToken}");
+
+    // IN-MEMORY SESSION HANDLE ONLY — never an entity id. A live game needs a key to route
+    // plies to a session before any content exists; that key is not identity and no longer
+    // reaches the substrate. The playing entity is minted by LivePlayingId at completion,
+    // when the content it names finally exists. Lichess games keep their source-asserted
+    // external id (ChessLiveGameHost.LichessGameId), which IS deterministic.
+    public static Hash128 PlaySessionHandle(Guid sessionGame)
         => Hash128.OfCanonical($"chess/play/{sessionGame:N}");
 
     public static Hash128 PlayerId(string name) => Hash128.OfCanonical($"chess/player/{PlayerAlias.Canonical(name)}");
@@ -183,19 +208,35 @@ public static class ChessVocabulary
     public const double Trust = SourceTrust.StructuredCorpus;
 
     public static Task<IReadOnlyCollection<string>> BootstrapAsync(
-    ISubstrateWriter writer, CancellationToken ct = default)
-    => BootstrapAsync(writer, SourceId, SourceName, SelfPlayTrustClass, ct);
+    ISubstrateWriter writer, CancellationToken ct = default, ISubstrateReader? reader = null)
+    => BootstrapAsync(writer, SourceId, SourceName, SelfPlayTrustClass, ct, reader);
 
     public static async Task<IReadOnlyCollection<string>> BootstrapAsync(
     ISubstrateWriter writer, Hash128 sourceId, string sourceName, Hash128 trustClassId,
-    CancellationToken ct = default)
+    CancellationToken ct = default, ISubstrateReader? reader = null)
     {
         var boot = new BootstrapIntentBuilder(sourceId, sourceName, trustClassId);
         foreach (var t in ChessSeedManifest.TypeNodeNames)
             boot.AddType(t);
         foreach (var r in SourceVocabularyBootstrap.ExpandRelationsWithFamily(ChessSeedManifest.Relations))
             boot.AddRelationType(r);
-        await writer.ApplyAsync(boot.Build(), ct);
+        // Source entity already named ⇒ vocabulary for this lane was deposited. Skip the
+        // multi-second present-verify apply that was eating the process envelope on every
+        // re-ingest (measured ~3s × 2 bootstraps before INGEST_START).
+        if (reader is not null)
+        {
+            if (reader.IsProvenPresent(sourceId))
+                return boot.CanonicalNames;
+            byte[] bm = await reader.EntitiesExistBitmapAsync(new[] { sourceId }, ct)
+                .ConfigureAwait(false);
+            if (BitmapBits.IsSet(bm, 0))
+            {
+                reader.MarkProven(new[] { sourceId });
+                return boot.CanonicalNames;
+            }
+        }
+        await writer.ApplyAsync(boot.Build(), ct).ConfigureAwait(false);
+        reader?.MarkProven(new[] { sourceId });
         return boot.CanonicalNames;
     }
 }

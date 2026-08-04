@@ -175,48 +175,33 @@ public static class ChessAnalyze
         // Reused across plies so the TT warms; only built when engine-eval is requested.
         var engine = engineDepth > 0 ? new Search(EvalTerm.All) : null;
 
+        // Directed SAN resolve (same as LineId replay) — full Legal() per ply was ~46% of
+        // analyze time. Apply still owns repetition history for the motif window boards.
         var state = initial;
-        // Each distinct position is composed + staged ONCE per ply (the builder dedups by id,
-        // so re-staging in every Append* helper was pure waste). This ply's `to` nodes carry
-        // forward as the next ply's `from`, so its StateKey/compose is never redone either.
         ChessComposed? carried = null;
-        // The game's own line, collected as we walk it: start position then one vertex per ply.
-        // Free — these are the nodes the loop already composed — and it becomes the game
-        // trajectory below.
         var line = new List<ChessNode>(sans.Count + 1);
-        // The replay window for the multi-ply motif detectors. Free: Apply clones a fresh
-        // Board per ply, so these are references to boards the loop already built.
         var boards = new List<Board>(sans.Count + 1) { initial.Board };
         var played = new List<ChessMove>(sans.Count);
-
-        // Move generation is ~46% of analyze time, and ChessModality.LegalActions allocates a
-        // fresh pseudo AND legal list on EVERY ply — ~12.8M plies per corpus, so ~25M list
-        // allocations that exist for microseconds. #651 added buffered MoveGen overloads for
-        // exactly this and the ingest hot loop never adopted them. Two buffers per GAME,
-        // reused across its plies, instead of two per ply.
-        var pseudoBuf = new List<ChessMove>(64);
-        var legalBuf = new List<ChessMove>(64);
+        var scratch = new List<ChessMove>(16);
         for (int ply = 0; ply < sans.Count; ply++)
         {
-            MoveGen.Legal(state.Board, pseudoBuf, legalBuf);
-            var mv = San.Resolve(state.Board, legalBuf, sans[ply]);
+            var mv = San.Resolve(state.Board, sans[ply], scratch);
             if (mv is null) return;
             int mover = m.SideToMove(state);
-            var next = m.Apply(state, mv.Value);
-            var from = carried ?? ChessGraph.EmitComposed(b, m.StateKey(state), src);
-            var to = ChessGraph.EmitComposed(b, m.StateKey(next), src);
-            if (line.Count == 0) line.Add(from.Position);
-            line.Add(to.Position);
-            boards.Add(next.Board);
-            played.Add(mv.Value);
-
             // Our OWN eval (high-trust ChessAnalysis witness) competes on (position, HAS_EVAL) with
             // the PGN's eval (lower-trust EvalPgn, emitted below). Score is side-to-move cp.
+            var from = carried ?? ChessGraph.EmitComposed(b, m.StateKey(state), src);
             if (engine is not null)
             {
                 int ourCp = engine.Think(state.Board, new Search.Limits(MaxDepth: engineDepth)).Score;
                 ChessGraph.AppendEval(b, from, ourCp, games: 1, witnessWeight: 0.9, src, eventId);
             }
+            var next = m.Apply(state, mv.Value);
+            var to = ChessGraph.EmitComposed(b, m.StateKey(next), src);
+            if (line.Count == 0) line.Add(from.Position);
+            line.Add(to.Position);
+            boards.Add(next.Board);
+            played.Add(mv.Value);
 
             long games = 1;
             if (mate && winner == mover) games += 1;

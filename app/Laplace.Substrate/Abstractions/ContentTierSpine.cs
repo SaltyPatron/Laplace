@@ -31,12 +31,26 @@ public static class ContentTierSpine
         IntentStage.BuildContentTree(canonicalUtf8);
 
     /// <summary>Root id without building a full tree when the native fast path applies.</summary>
+    /// <remarks>
+    /// Contract is nullable success — never throw for content the native path rejects
+    /// (malformed encoding / rc&lt;0). Callers that must skip a bad file (document extract,
+    /// GH #596) depend on null rather than an exception killing the batch.
+    /// </remarks>
     public static Hash128? ResolveRoot(ReadOnlySpan<byte> canonicalUtf8)
     {
         if (canonicalUtf8.IsEmpty) return null;
         var key = Hash128.Blake3(canonicalUtf8);
         if (RootMemo.TryGetValue(key, out var cached)) return cached;
-        Hash128? cheap = TextDecomposer.ContentRootId(canonicalUtf8);
+        Hash128? cheap;
+        try
+        {
+            cheap = TextDecomposer.ContentRootId(canonicalUtf8);
+        }
+        catch (InvalidOperationException)
+        {
+            // Native rc=-5 (decomposer failure) and kin — not a cacheable root.
+            cheap = null;
+        }
         if (cheap is not null)
         {
             if (Volatile.Read(ref _rootMemoCount) < RootMemoCap && RootMemo.TryAdd(key, cheap))

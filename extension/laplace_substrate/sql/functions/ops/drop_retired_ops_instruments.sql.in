@@ -1,0 +1,30 @@
+-- Retired: entity_type_counts_approx(), partition_pressure(text),
+-- index_usage_report(bigint) and index_usage_detail(text, integer).
+--
+-- These four shipped installed with ZERO callers — not from SQL, not from the extension C,
+-- not from production C#. g4_dead_canonical caught that on merge and turned main red, which
+-- is the gate working exactly as designed: its ceiling sits at the count it was frozen at,
+-- meaning no further uncalled surface, and these were four more.
+--
+-- WHY A DROP MODULE AND NOT JUST DELETING THE .sql.in FILES. Removing a file from the
+-- manifests stops FUTURE installs from creating the function. It does nothing to a database
+-- that already ran an upgrade carrying it — ALTER EXTENSION ... UPDATE has no mechanism to
+-- retract a CREATE that a previous version performed. Those catalogs would keep all four
+-- indefinitely, and the gate would never flag them again because the gate scans SOURCE, not
+-- pg_proc. The result is uncalled surface that has become invisible: strictly worse than the
+-- state that failed CI, because nothing is left pointing at it.
+--
+-- These are not deleted ideas. entity_type_counts_approx measured the 15,150,442 distinct
+-- Chess_Position figure in ~20ms where the exact variant times out, partition_pressure is the
+-- op that would have surfaced the 48.81% Hilbert skew years earlier, and index_usage_report
+-- makes 64 GB of never-scanned index a substrate fact. They come back when something calls
+-- them — consensus_partition_pressure (functions/inspect/) is the natural first caller, since
+-- partition_pressure was written to generalize exactly what it does by hand today. A drop is
+-- not a verdict on the instrument; it is a refusal to keep installed surface that nothing
+-- reaches.
+--
+-- IF EXISTS throughout: a fresh install never created these, and this module runs there too.
+DROP FUNCTION IF EXISTS entity_type_counts_approx();
+DROP FUNCTION IF EXISTS partition_pressure(text);
+DROP FUNCTION IF EXISTS index_usage_report(bigint);
+DROP FUNCTION IF EXISTS index_usage_detail(text, integer);

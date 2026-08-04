@@ -1,0 +1,23 @@
+-- hilbert_index equality lookups. NOT optional, and not a partitioning artefact.
+--
+-- anagrams_of() is the caller that proves it:
+--     JOIN v_word_points w2 ON w2.hilbert_index = w1.hilbert_index
+--     WHERE w1.id = word_id(p_word)
+-- Anagrams share a letter multiset, so they compose to the same coordinate and
+-- therefore the same hilbert index — the equality join IS the anagram test. It
+-- resolves w1 by id and then needs every row carrying that hilbert value.
+--
+-- This index did not exist before 2026-08-04 because it did not need to: the
+-- primary key was (hilbert_index, id), so hilbert was the leading column and a
+-- separate btree would have been redundant. Repartitioning physicalities to
+-- HASH(id) moved the PK to (id) — a hash partition key must be a subset of every
+-- unique constraint — and that silently removed the only index covering
+-- hilbert_index. The join kept returning correct answers while degrading to a
+-- sequential scan of all 64 partitions, which is the failure mode that shows up
+-- as "still works, mysteriously slower".
+--
+-- Losing an index because a DIFFERENT index changed shape is the hazard of
+-- relying on a compound key's prefix. Named explicitly here so the coverage no
+-- longer depends on the PK's leading column staying what it happens to be.
+CREATE INDEX IF NOT EXISTS physicalities_hilbert_btree
+    ON physicalities USING btree (hilbert_index);

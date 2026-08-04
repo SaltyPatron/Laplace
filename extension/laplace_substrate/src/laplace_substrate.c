@@ -568,15 +568,16 @@ pg_laplace_tier_batch_existence_probe_keyed(PG_FUNCTION_ARGS)
                                         laplace_tier_batch_existence_probe_keyed);
 }
 
-PG_FUNCTION_INFO_V1(pg_laplace_physicalities_exist_bitmap_keyed);
-
-Datum
-pg_laplace_physicalities_exist_bitmap_keyed(PG_FUNCTION_ARGS)
-{
-    return presence_bitmap_datum_keyed(fcinfo, "physicalities_exist_bitmap",
-                                        BYTEAOID, "hilberts",
-                                        laplace_physicalities_present_bitmap_keyed);
-}
+/*
+ * pg_laplace_physicalities_exist_bitmap_keyed is GONE (2026-08-04).
+ *
+ * It took a parallel "hilberts" array and pruned each probe to the
+ * RANGE(hilbert_index) band that held the row. physicalities is now
+ * HASH(id): a hilbert key selects no partition, so the keyed probe would
+ * answer "absent" for stored rows -- and COPY has no ON CONFLICT, so that
+ * aborts the ingest rather than slowing it. The id-only entry point below
+ * needs no partition hint; HASH(id) routes on the id it already has.
+ */
 
 PG_FUNCTION_INFO_V1(pg_laplace_physicalities_exist_bitmap);
 

@@ -12,7 +12,7 @@
 # NO hardcoded GB literals for RAM-derived knobs.
 
 pg_compute_machine_tuning() {
-  local mem_kb cores pcores pdeg mwp avw mwm wm wb
+  local mem_kb cores pcores pdeg mwp avw mwm wm wb iow
   mem_kb=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
   cores=$(nproc)
   pcores=$cores
@@ -136,6 +136,14 @@ pg_tune_cli_dll() {
 # unconditional `SET wal_compression = on` looked like a tuning decision and was really a
 # default. MEASURED 2026-08-03: enumvals {pglz,on,off} on a cluster ingesting to NVMe with
 # ~20x WAL amplification. Prefer lz4, then zstd, then pglz only if that is all there is.
+# Single reload point. io_method and wal_compression are probed from a LIVE connection, so
+# they are necessarily ALTER SYSTEMed after the bulk settings; a reload issued before that
+# leaves both sitting in postgresql.auto.conf unapplied until some unrelated restart. Every
+# apply path ends here, after the last ALTER SYSTEM it will issue.
+pg_tune_reload() {
+  pg_tune_psql -v ON_ERROR_STOP=1 -c "SELECT pg_reload_conf()" >/dev/null
+}
+
 pg_apply_wal_compression() {
   local wc
   wc=$(pg_tune_psql -tAc \
@@ -171,6 +179,7 @@ pg_apply_machine_tuning() {
       # io_method=worker. Correct it here, on the path that actually runs.
       pg_apply_io_method
       pg_apply_wal_compression
+      pg_tune_reload
       echo "pg-machine-tuning: applied from cpu-topology --pg-tuning (authoritative emitter)"
       return 0
     fi
@@ -213,11 +222,11 @@ pg_apply_machine_tuning_fallback() {
     -c "ALTER SYSTEM SET huge_pages = try" \
     -c "ALTER SYSTEM SET synchronous_commit = off" \
     -c "ALTER SYSTEM SET io_workers = $PG_TUNE_IOW" \
-    -c "ALTER SYSTEM SET max_locks_per_transaction = 1024" \
-    -c "SELECT pg_reload_conf()"
+    -c "ALTER SYSTEM SET max_locks_per_transaction = 1024"
 
   pg_apply_io_method
   pg_apply_wal_compression
+  pg_tune_reload
   echo "pg-machine-tuning: shared_buffers=$PG_TUNE_SB effective_cache_size=$PG_TUNE_ECS maintenance_work_mem=$PG_TUNE_MWM work_mem=$PG_TUNE_WM wal_buffers=$PG_TUNE_WB pcores=$PG_TUNE_PCORES pdeg=$PG_TUNE_PDEG"
 }
 

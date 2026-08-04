@@ -115,12 +115,11 @@ internal static class IngestDispatchTable
                 cli.AnalyzeNodes), "",
             skipLayerCheck: true, cli, skipSourceCompletion: true)),
 
-        // Syzygy tablebase probe pass over recorded lines (campaign PR-8): exact
-        // WDL/DTZ verdicts on every witnessed ≤N-men position, via the in-process
-        // native Fathom kernel against the tables under LAPLACE_SYZYGY (env or
-        // chess-lab.env). Missing dir = clean no-op with a counted warning.
+        // Syzygy tablebase ingest: path = packaging dir (.rtbw/.rtbz). Unpack via
+        // Fathom codec → position-grain HAS_WDL/HAS_DTZ substrate records. Empty path
+        // falls back to ChessLabPaths.SyzygyDir. Missing dir = clean no-op.
         ("chess-syzygy", cli => IngestCommands.IngestViaRunnerAsync(
-            new Laplace.Chess.Service.ChessSyzygyDecomposer(), "",
+            new Laplace.Chess.Service.ChessSyzygyDecomposer(), cli.Path ?? "",
             skipLayerCheck: true, cli, skipSourceCompletion: true)),
 
         // Names each recorded line's opening by BOARD IDENTITY -- the deepest position

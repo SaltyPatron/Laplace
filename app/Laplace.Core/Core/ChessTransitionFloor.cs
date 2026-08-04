@@ -25,6 +25,40 @@ public static unsafe class ChessTransitionFloor
     private static long _count;
     private static readonly ConcurrentDictionary<Hash128, Hash128> Novel = new();
 
+    static ChessTransitionFloor()
+    {
+        // Release the mapping before the runtime tears itself down. Load() holds an
+        // AcquirePointer for the life of the process and only ReleasePointer()s in
+        // Unload(), which the compose path never calls — it loads the ROM once and keeps
+        // it. That leaves the SafeMemoryMappedViewHandle to be finalized at exit with an
+        // outstanding pointer reference, which is not a supported state to finalize from.
+        // Defensive, not a diagnosed fix: the Chess.Tests host crash was traced to
+        // unsynchronized Fathom first-touch (fixed in #849), NOT to this. Unload() is
+        // idempotent, so running it here is safe whether or not a caller already did.
+        AppDomain.CurrentDomain.ProcessExit += static (_, _) => Unload();
+    }
+
+    /// <summary>
+    /// Body length as the <see cref="ReadOnlySpan{T}"/> length the CRC covers, or a clear
+    /// throw. <c>body</c> is a <see cref="long"/> — <c>HeaderSize + count * RecordSize</c> —
+    /// so an unchecked <c>(int)</c> cast wraps once the blob passes int.MaxValue
+    /// (~67.1M transitions at RecordSize 32). That failure is silent and the wrong shape:
+    /// the span would cover a PREFIX of the body, the CRC would be computed over that
+    /// prefix on both the write and the load path, and the blob would verify clean while
+    /// every record past the wrap went unchecked. Refuse instead — the ceiling is real
+    /// (671k games at ~80 plies is already ~53M transitions), so it must announce itself.
+    /// </summary>
+    private static int BodySpanLength(long body)
+    {
+        if (body < HeaderSize || body > int.MaxValue)
+            throw new InvalidOperationException(
+                $"chess transition floor body is {body} bytes ("
+                + $"{(body - HeaderSize) / RecordSize} records), outside the addressable "
+                + $"range [{HeaderSize}, {int.MaxValue}] of one ReadOnlySpan<byte>. "
+                + "Split the floor rather than CRC a prefix.");
+        return (int)body;
+    }
+
     public static void Load(string path)
     {
         ArgumentException.ThrowIfNullOrEmpty(path);
@@ -52,7 +86,7 @@ public static unsafe class ChessTransitionFloor
             Unload();
             throw new InvalidOperationException("chess transition floor record layout mismatch");
         }
-        var crc = Hash128.Blake3(new ReadOnlySpan<byte>(_base, (int)body));
+        var crc = Hash128.Blake3(new ReadOnlySpan<byte>(_base, BodySpanLength(body)));
         var stored = *(Hash128*)(_base + body);
         if (crc != stored)
         {
@@ -152,7 +186,7 @@ public static unsafe class ChessTransitionFloor
                 rec->Key = sortedUnique[i].Key;
                 rec->To = sortedUnique[i].To;
             }
-            var crc = Hash128.Blake3(new ReadOnlySpan<byte>(ptr, (int)body));
+            var crc = Hash128.Blake3(new ReadOnlySpan<byte>(ptr, BodySpanLength(body)));
             *(Hash128*)(ptr + body) = crc;
         }
         finally

@@ -218,8 +218,14 @@ internal static class ChessWitnessHydrator
     private static async Task<List<Hash128>> FetchRecordedEventIdPageAsync(
         NpgsqlDataSource ds, byte[] afterId, int limit, CancellationToken ct)
     {
+        // Chess_PLAYING, not Chess_Event. EmitGame makes the PLAYING the subject of
+        // PLAYS_LINE (GH #736: one event holds many playings, so the event cannot carry a
+        // per-game outcome). Paging Chess_Event here found rows only because the live
+        // database still holds pre-split rows that subjected the edge on the event; on a
+        // clean reseed it matches nothing and this lane silently streams zero games —
+        // the analyzer would look caught-up while having derived nothing.
         var rows = await NpgsqlSubstrateReads.ChessEventIdPageAsync(
-            ds, ChessVocabulary.EventType.ToBytes(), RelPlaysLine.ToBytes(), WitnessSources(),
+            ds, ChessVocabulary.PlayingType.ToBytes(), RelPlaysLine.ToBytes(), WitnessSources(),
             afterId.Length == 0 ? Array.Empty<byte>() : afterId, limit, ct).ConfigureAwait(false);
         return rows.Select(static b => Hash128.FromBytes(b)).ToList();
     }

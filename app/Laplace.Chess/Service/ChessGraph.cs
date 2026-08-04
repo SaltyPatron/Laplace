@@ -233,7 +233,6 @@ public static class ChessGraph
     private static ChessComposed EmitNodes(SubstrateChangeBuilder b, string surface, long nowUs, Hash128 src)
     {
         var c = ChessCompose.Position(surface);
-
         // TRUNK SHORT-CIRCUIT. A position whose id is already proven deposited implies its whole
         // substructure subtree is too — they were staged together the first time, and the id is a
         // Merkle over exactly those constituents, so the trunk cannot exist without them. Staging

@@ -181,11 +181,13 @@ public static class MatchRunner
             bool aWhite = (g % 2 == 0);
             var start = book ? m.FromFen(openingFens![(g / 2) % openingFens.Count]) : m.Initial();
             var pgnMoves = pgnSink is not null ? new List<ChessMove>() : null;
-            // GH #736: the lab playing's event handle — a live occurrence is unique by
-            // construction, so it is a fresh GUID-derived PlayEventId, never a hash of
-            // (context, seed, game index) that would collide re-runs of the same match.
+            // Routing key for this game's plies, not identity: it never reaches the
+            // substrate. ChessLiveGameHost mints the playing entity from content at
+            // completion (ChessVocabulary.LivePlayingId), so two runs of the same match
+            // producing the same game now converge on one playing and fold a second
+            // witness — which the old GUID-per-occurrence handle made impossible.
             Hash128? gameId = liveHost is not null || onPly is not null
-                ? ChessVocabulary.PlayEventId(Guid.NewGuid())
+                ? ChessVocabulary.PlaySessionHandle(Guid.NewGuid())
                 : null;
             if (liveHost is not null && gameId is { } gidOpen)
                 liveHost.OpenGameAsync(gidOpen, learnCtx, ct: ct).GetAwaiter().GetResult();

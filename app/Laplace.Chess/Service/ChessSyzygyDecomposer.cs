@@ -6,27 +6,22 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Chess.Service;
 
-// CALCULATED Syzygy probe pass (campaign PR-8): scan witnessed LINES (GH #736 —
-// distinct PLAYS_LINE objects) lacking the ChessSyzygy marker, hydrate via content
-// roundtrip, replay, probe every ≤N-men position against the tablebase set under
-// LAPLACE_SYZYGY (native Fathom kernel — an in-process mmap lookup, never a
-// subprocess), attest HAS_WDL + HAS_DTZ under the ChessSyzygy source.
-// Run: `laplace ingest chess-syzygy`  (no path — substrate is the source)
-public sealed class ChessSyzygyDecomposer : ComposeDecomposer<ChessSyzygyRecord>, IIngestNoOpExplainer
+/// <summary>
+/// Ingest Syzygy tablebases as substrate records via the multi-file spine.
+/// Each <c>.rtbw</c> is one packaging unit (material table) — file workers unpack
+/// materials in parallel; within a material, WDL probes fan out (thread-safe Fathom
+/// <c>tb_probe_wdl</c>). Path resolution is <see cref="ChessInput.ResolveSyzygyPackagingDir"/>.
+/// Run: <c>laplace ingest chess-syzygy [&lt;syzygy-dir&gt;]</c>
+/// </summary>
+public sealed class ChessSyzygyDecomposer
+    : DecomposerMultiFile<ChessSyzygyRecord>, IIngestNoOpExplainer, IIngestInventoryProvider
 {
     private readonly Func<ISyzygyProber>? _proberFactory;
     private ISyzygyProber? _prober;
+    private bool _packagingMissing;
+    private bool _initFailed;
+    private string? _resolvedDir;
 
-    // Why the last extraction produced nothing, so a zero-apply run can be told apart from
-    // a broken one. Both of these used to exit 1: EstimateUnitCountAsync declares every
-    // RECORDED line as the denominator while the stream yields only lines still missing
-    // this pass's marker, so a caught-up backfill always applied zero — and so did the
-    // documented "no tablebase directory" no-op.
-    private bool _proberUnavailable;
-    private long _candidatesStreamed;
-
-    /// <summary>proberFactory overrides the native kernel for tests; the default
-    /// initializes the process-global Fathom prober against <see cref="ChessLabPaths.SyzygyDir"/>.</summary>
     public ChessSyzygyDecomposer(Func<ISyzygyProber>? proberFactory = null)
         => _proberFactory = proberFactory;
 
@@ -34,6 +29,7 @@ public sealed class ChessSyzygyDecomposer : ComposeDecomposer<ChessSyzygyRecord>
     public override string SourceName => ChessSyzygy.SourceName;
     public override int LayerOrder => 23;
     public override Hash128 TrustClassId => ChessSyzygy.TrustClassId;
+    public override bool PerFileCompletion => true;
     protected override double SourceTrust => TC.StandardsDerived;
     protected override string BatchLabelPrefix => "chess/syzygy";
     protected override int DefaultBatchSize => BatchConfigDefaults.Chess;
@@ -45,108 +41,143 @@ public sealed class ChessSyzygyDecomposer : ComposeDecomposer<ChessSyzygyRecord>
     public override IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
 
     public override async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
-        => _canonicalNames = await ChessVocabulary.BootstrapAsync(
-            context.Writer, ChessSyzygy.SourceId, SourceName, ChessSyzygy.TrustClassId, ct);
-
-    protected override async IAsyncEnumerable<ChessSyzygyRecord> ExtractRecordsAsync(
-        string ecosystemPath, DecomposerOptions options,
-        [EnumeratorCancellation] CancellationToken ct)
     {
-        if (ContainmentReader is null
-            || ChessWitnessHydrator.TryResolveDataSource(ContainmentReader) is not { } ds)
-            throw new InvalidOperationException(
-                "ChessSyzygy requires a live Postgres substrate (NpgsqlSubstrateReader). "
-                + "Record games first: laplace ingest chess <pgn>");
-
-        _proberUnavailable = false;
-        _candidatesStreamed = 0;
-
-        if (!TryLoadProber(out var prober))
+        _canonicalNames = await ChessVocabulary.BootstrapAsync(
+            context.Writer, ChessSyzygy.SourceId, SourceName, ChessSyzygy.TrustClassId, ct);
+        _packagingMissing = false;
+        _initFailed = false;
+        _resolvedDir = ChessInput.ResolveSyzygyPackagingDir(context.EcosystemPath);
+        if (_resolvedDir is null)
         {
-            _proberUnavailable = true;
-            yield break; // clean no-op — ExplainEmptyRun accounts for it
+            _packagingMissing = true;
+            return;
         }
 
-        _prober = prober;
-        var ws = IngestPipelineDefaults.ResolveWorkingSet(PipelineProfile, options, DefaultBatchSize);
-        // LINE-grain stream (GH #736): a verdict is a pure function of the position, so
-        // a line shared by many playings is probed ONCE.
-        await foreach (var witnessed in ChessWitnessHydrator.StreamUnanalyzedLinesAsync(
-                           ds, ContainmentReader!, ws.Batch,
-                           lineId => ChessSyzygy.MarkerId(lineId, ChessSyzygy.Version), ct))
+        if (_proberFactory is not null)
         {
-            _candidatesStreamed++;
-            yield return new ChessSyzygyRecord(witnessed);
+            _prober = _proberFactory();
+            return;
+        }
+
+        int largest = SyzygyNative.Init(_resolvedDir);
+        if (largest <= 0)
+        {
+            _initFailed = true;
+            System.Diagnostics.Trace.TraceWarning(
+                "ChessSyzygy: no tables discovered under {0} (init={1})", _resolvedDir, largest);
+            return;
+        }
+
+        _prober = new SyzygyNativeProber();
+    }
+
+    protected override IReadOnlyList<(string Path, string Label)> ListFiles(
+        string ecosystemPath, DecomposerOptions options)
+    {
+        _resolvedDir ??= ChessInput.ResolveSyzygyPackagingDir(ecosystemPath);
+        if (_resolvedDir is null || _prober is null)
+            return Array.Empty<(string, string)>();
+
+        // Prefer ChessInput.Resolve so empty/mis-pointed dirs fail loudly when tables
+        // were expected; packaging-missing no-op uses the empty list + ExplainEmptyRun.
+        try
+        {
+            return ChessInput.Resolve(
+                    _resolvedDir, SearchOption.TopDirectoryOnly,
+                    ChessInput.SyzygyExtensions, "chess-syzygy")
+                .OrderBy(p => SyzygyTableUnpack.ParseMen(
+                    Path.GetFileNameWithoutExtension(p)!))
+                .ThenBy(p => p, StringComparer.Ordinal)
+                .Select(p => (p, Path.GetFileNameWithoutExtension(p)!))
+                .ToArray();
+        }
+        catch (ChessInputException) when (_packagingMissing || _initFailed)
+        {
+            return Array.Empty<(string, string)>();
         }
     }
 
-    /// <summary>
-    /// A zero-apply syzygy run is expected in two documented cases, and was a hard failure
-    /// in both. Anything else (candidates streamed, none applied) still fails.
-    /// </summary>
+    protected override async IAsyncEnumerable<ChessSyzygyRecord> ExtractFileAsync(
+        string filePath, string fileLabel, DecomposerOptions options,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        if (_prober is null) yield break;
+        long cap = options.MaxInputUnits;
+        long n = 0;
+        await foreach (var product in SyzygyTableUnpack.ExtractMaterialAsync(
+                           fileLabel, _prober, workers: 0, ct).ConfigureAwait(false))
+        {
+            yield return new ChessSyzygyRecord(product);
+            if (cap > 0 && ++n >= cap) yield break;
+        }
+    }
+
+    protected override IIngestRecordHandler<ChessSyzygyRecord> CreateHandlerForFile(string fileLabel) =>
+        new DirectComposeHandler<ChessSyzygyRecord>(static (r, b) => ChessSyzygy.DeriveProduct(b, r.Product));
+
+    protected override IngestBatchConfig ConfigForFile(
+        string fileLabel, ISubstrateReader? reader, DecomposerOptions options) =>
+        IngestPipelineDefaults.Compose(
+            SourceId, $"{BatchLabelPrefix}/{fileLabel}", DefaultBatchSize, options, reader, PipelineProfile);
+
     public (string Status, string Detail)? ExplainEmptyRun(long declaredInputUnits)
     {
-        if (_proberUnavailable)
+        if (_packagingMissing)
             return ("dependency-unset",
-                "ChessSyzygy: no tablebase directory (env LAPLACE_SYZYGY or chess-lab.env) — "
-                + "probe pass is a documented no-op. Unattested is not attested-false.");
-        if (_candidatesStreamed == 0)
-            return ("already-complete",
-                $"ChessSyzygy: every one of {declaredInputUnits} recorded line(s) already "
-                + $"carries the v{ChessSyzygy.Version} probe marker — nothing left to probe.");
+                "ChessSyzygy: no tablebase packaging directory (path, LAPLACE_SYZYGY, or "
+                + "data-root Games/Chess/syzygy/…) — unpack is a documented no-op.");
+        if (_initFailed)
+            return ("dependency-unset",
+                $"ChessSyzygy: Fathom found no tables under {_resolvedDir} — unpack no-op.");
+        if (declaredInputUnits == 0)
+            return ("dependency-unset",
+                "ChessSyzygy: packaging directory resolved but contained no .rtbw files.");
         return null;
     }
 
-    // Missing tablebase dir (or a dir holding no tables) is UNSET, not an error: the
-    // lane no-ops with a counted warning so `seed-everything` style runs stay green on
-    // boxes that never downloaded the ~1 GB set (unattested != attested-false).
+    /// <summary>Test hook: packaging + prober resolvable.</summary>
     internal bool TryLoadProber(out ISyzygyProber prober)
     {
+        prober = default!;
+        var dir = ChessInput.ResolveSyzygyPackagingDir("");
+        if (dir is null) return false;
         if (_proberFactory is not null)
         {
             prober = _proberFactory();
             return true;
         }
-
-        prober = default!;
-        var dir = ChessLabPaths.SyzygyDir;
-        if (!dir.Found)
-        {
-            System.Diagnostics.Trace.TraceWarning(
-                "ChessSyzygy: tablebase directory not found (env LAPLACE_SYZYGY or "
-                + "chess-lab.env; probed {0}) — probe pass is a no-op", dir.Path ?? "<unset>");
-            return false;
-        }
-
-        int largest = SyzygyNative.Init(dir.Path!);
-        if (largest <= 0)
-        {
-            System.Diagnostics.Trace.TraceWarning(
-                "ChessSyzygy: no tables discovered under {0} (init={1}) — "
-                + "probe pass is a no-op", dir.Path, largest);
-            return false;
-        }
-
+        if (SyzygyNative.Init(dir) <= 0) return false;
         prober = new SyzygyNativeProber();
         return true;
     }
 
-    protected override void Compose(ChessSyzygyRecord record, SubstrateChangeBuilder b)
-        => ChessSyzygy.DeriveGame(b, record.Game, _prober!);
-
-    public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+    public override Task<long?> EstimateUnitCountAsync(
+        IDecomposerContext context, CancellationToken ct = default)
     {
-        if (ChessWitnessHydrator.TryResolveDataSource(context.Reader) is not { } ds)
-            return Task.FromResult<long?>(null);
-        return ChessWitnessHydrator.CountRecordedLinesAsync(ds, ct);
+        var dir = ChessInput.ResolveSyzygyPackagingDir(context.EcosystemPath);
+        if (dir is null) return Task.FromResult<long?>(null);
+        long n = ListFiles(dir, DecomposerOptions.Default).Count;
+        if (DecomposerOptions.Default.MaxInputUnits > 0)
+            n = Math.Min(n, DecomposerOptions.Default.MaxInputUnits);
+        return Task.FromResult<long?>(n == 0 ? null : n);
+    }
+
+    public Task<IngestInventory?> DescribeInputAsync(
+        IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
+    {
+        var dir = ChessInput.ResolveSyzygyPackagingDir(context.EcosystemPath);
+        if (dir is null)
+            return Task.FromResult<IngestInventory?>(null);
+        var paths = ListFiles(dir, options).Select(t => t.Path).ToList();
+        return Task.FromResult(IngestInventory.FromFileUnits(
+            "tables", paths, options.MaxInputUnits, tracksFileCompletion: true));
     }
 }
 
 /// <summary>
-/// Syzygy pipeline record; trunk root is the versioned per-LINE marker so re-runs
-/// dedup against the marker, never against the line.
+/// One unpacked board-state product; trunk root is the versioned per-POSITION marker.
 /// </summary>
-public sealed record ChessSyzygyRecord(ChessWitnessedGame Game) : ITrunkRootRecord
+public sealed record ChessSyzygyRecord(SyzygyProduct Product) : ITrunkRootRecord
 {
-    public Hash128 TrunkRootId => ChessSyzygy.MarkerId(Game.LineId, ChessSyzygy.Version);
+    public Hash128 TrunkRootId => ChessSyzygy.MarkerId(Product.PositionId, ChessSyzygy.Version);
 }

@@ -40,6 +40,12 @@
 -- Cheap by construction: one grouped pass, no per-row function calls, no
 -- rendering. Sampling is the caller's choice via p_sample (percent); 0 = full
 -- scan, which on a large substrate is a deliberate act.
+-- VOLATILE, not STABLE (#844). The sampled mode builds `WHERE random() < ...`
+-- into the executed statement, so this function does NOT return the same rows
+-- for the same argument within a single statement -- which is exactly what
+-- STABLE promises and what the planner is entitled to act on (folding repeated
+-- calls, hoisting it out of a scan). It was declared STABLE when it landed;
+-- p_sample = 0 happens to satisfy the promise, the default 0.3 does not.
 -- Return-type change needs a DROP: CREATE OR REPLACE cannot alter a function's
 -- RETURNS TABLE. Adding avg_constituents to this surface failed the upgrade
 -- until this line existed -- the same trap prompt_coherence and infer hit.
@@ -50,7 +56,7 @@ CREATE OR REPLACE FUNCTION geometry_audit(p_sample double precision DEFAULT 0.3)
                   min_radius numeric, avg_radius numeric, max_radius numeric,
                   on_sphere bigint, interior bigint, avg_constituents numeric,
                   hilbert_bands int, min_band bigint, max_band bigint)
-    LANGUAGE plpgsql STABLE
+    LANGUAGE plpgsql VOLATILE
     SET search_path = @extschema@, public AS $$
 DECLARE
     q text;

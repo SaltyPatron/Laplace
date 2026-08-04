@@ -86,6 +86,18 @@ public sealed class SubstrateChangeBuilder
     public SubstrateChangeBuilder AddPhysicalityPreSeen(PhysicalityRow row)
     {
         ArgumentNullException.ThrowIfNull(row);
+        // The precondition is unenforceable at zero cost in release — the whole point of this
+        // overload is to skip the hash lookup AddPhysicality would do. But a mistaken call site
+        // stages a duplicate SILENTLY, and a duplicate physicality is exactly the class of bug
+        // that surfaces later as a COPY dying on 23505 with no pointer to who staged it
+        // (NpgsqlWorkingSetApply:468 records that failure mode costing a whole batch retry).
+        // So assert it in DEBUG, where tests run: _seenPhysicalities is authoritative and the
+        // check is exact.
+        System.Diagnostics.Debug.Assert(
+            _seenPhysicalities.Contains(row.Id),
+            "AddPhysicalityPreSeen called without a prior TrySeePhysicality(row.Id) claim — "
+            + "this bypasses dedup and stages a duplicate. Pair them: "
+            + "if (b.TrySeePhysicality(id)) b.AddPhysicalityPreSeen(new PhysicalityRow(id, ...));");
         _physicalities.Add(row);
         return this;
     }
