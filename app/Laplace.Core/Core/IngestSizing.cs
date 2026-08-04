@@ -70,12 +70,55 @@ public static class IngestSizing
 
     public const int ApplyWavesPerCommit = 2;
 
-    public const int MaxIntentsPerCommitCap = 8;
+    public const int MaxIntentsPerCommitCap = 32;
 
     /// <summary>
     /// Staged-byte estimate under-counts true resident cost ~2.5× (WorkingSetMode).
     /// </summary>
     public const double WorkingSetResidentSlack = 2.5;
+
+    /// <summary>
+    /// Per-tuple byte estimate used by the ingest runner's apply gate
+    /// (<c>IngestRunner.BytesOf</c>) for entities / physicalities / attestations.
+    /// </summary>
+    public const int ApplyTupleByteEstimate = 152;
+
+    /// <summary>
+    /// Extra apply-cost billed per attestation on top of staged/COPY tuple bytes.
+    ///
+    /// MUST stay 0 for chess-shaped traffic. MEASURED 2026-08-04: surcharge 2048
+    /// shrunk applies to ~220k present merges each and cut committed rate
+    /// ~63 g/s → ~21 g/s. Cause: present attestation ids are content-addressed and
+    /// shared across games; one large apply collapses duplicate ids to a single
+    /// <c>attestation_merge</c> with summed observations, while many small applies
+    /// re-merge the same id once per apply — more total merge work, same merge
+    /// rows/s (~10–25k/s). Wall-clock needs fewer applies (coalesce), not a
+    /// tighter envelope. Speedup belongs in merge throughput / run-scoped fold,
+    /// not BytesOf inflation.
+    /// </summary>
+    public const int AttestationApplySurchargeBytes = 0;
+
+    /// <summary>
+    /// Apply-gate byte estimate: staged/COPY bytes plus attestation merge surcharge
+    /// so <see cref="MemoryTopology.WorkingSetFlushEnvelopeBytes"/> bounds merge work.
+    /// </summary>
+    public static long EstimateApplyGateBytes(
+        int entityCount,
+        int physicalityCount,
+        int attestationCount,
+        long trajectoryBytes,
+        long intentStageTupleBytes,
+        int intentStageAttestationCount)
+    {
+        long att = (long)attestationCount + intentStageAttestationCount;
+        long bytes =
+            ((long)entityCount + physicalityCount + attestationCount) * ApplyTupleByteEstimate
+            + Math.Max(0, trajectoryBytes)
+            + Math.Max(0, intentStageTupleBytes);
+        if (att > 0)
+            bytes += att * AttestationApplySurchargeBytes;
+        return bytes;
+    }
 
     public sealed record Plan(
         int RecordBatchSize,
@@ -313,13 +356,23 @@ public static class IngestSizing
         long? workingSetBudgetBytes = null)
     {
         long budget = workingSetBudgetBytes ?? ResolveWorkingSetBudgetBytes();
-        int workingBytes = profile.WorkingSetBytesPerRecord;
+        // Fat input units (chess PGN games) use a large EstBytes solely so
+        // ResolveRecordBatch takes the fat-batch lane. That same number must NOT
+        // shrink commit_rows to ~6k — measured apply then pays ~80s/batch for
+        // ~0.9M rows (~11k rows/s) and the 20s/250MB gate is impossible.
+        // Commit sizing uses a staged-row estimate (~32 KiB/game working set).
+        int workingBytes = profile.EstBytesPerRecord > 256_000
+            ? 32_768 * Math.Max(1, profile.EstComposeUnitsPerRecord)
+            : profile.WorkingSetBytesPerRecord;
 
         long maxByBudget = (long)(budget / (workingBytes * WorkingSetResidentSlack));
         int budgetCap = (int)Math.Clamp(maxByBudget, recordBatch, int.MaxValue);
 
         int derived = recordBatch * applyPartitions * ApplyWavesPerCommit;
-        int commit = Math.Min(derived, budgetCap);
+        // Fat sources: do not cap commit at the tiny wave product (batch×parts×2).
+        int commit = profile.EstBytesPerRecord > 256_000
+            ? budgetCap
+            : Math.Min(derived, budgetCap);
 
         int floor = Math.Min(Math.Max(recordBatch, 1_024), budgetCap);
         return Math.Clamp(commit, floor, budgetCap);
@@ -356,6 +409,18 @@ public static class IngestSizing
         int heapCap = budget >= 100_000
             ? Math.Clamp(budget / 25_000, MaxIntentsPerCommitCap, 48)
             : MaxIntentsPerCommitCap;
+
+        // Fat-record sources (chess) can resolve a commit_rows just above
+        // recordBatch but below batch*8 — the estRowsPerIntent heuristic then
+        // forces max_intents=1 and serializes apply on a multi-core box
+        // (measured 2026-08-03: ChessPgn 4MiB estimate → commit_rows=429,
+        // max_intents=1, ~50% of one core). When the budget clearly holds more
+        // than one batch, allow parallel intents up to the heap cap.
+        if (byRowBudget == 1 && budget >= recordBatch)
+        {
+            int byBatch = (budget + recordBatch - 1) / recordBatch;
+            byRowBudget = Math.Min(heapCap, Math.Max(2, byBatch));
+        }
 
         return Math.Max(1, Math.Min(byRowBudget, heapCap));
     }

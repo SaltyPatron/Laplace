@@ -7,11 +7,12 @@ using Laplace.SubstrateCRUD;
 
 /// <summary>
 /// Timer A: PGN → parse → Compose into SubstrateChange in RAM. Zero Postgres.
-/// Operator budget: process envelope (default 20s), not a fake wall-clock checkbox
-/// conflated with Timer B (rows × B/row ÷ drive).
+/// Hard gate: 20s. At 20s the run cancels and exits FAIL — 21s is already a fail.
 /// </summary>
 static class Program
 {
+    const double ProcessBudgetS = 20.0;
+
     static async Task<int> Main(string[] args)
     {
         string path = args.ElementAtOrDefault(0)
@@ -21,6 +22,7 @@ static class Program
                 or "--serial" or "--workers"))
             _ = int.TryParse(args[1], out limit);
         bool analyze = !args.Contains("--no-analyze");
+        bool peekOnly = args.Contains("--peek-only");
         bool serial = args.Contains("--serial");
         int workers = serial ? 1 : Math.Max(1, Environment.ProcessorCount);
         for (int i = 0; i < args.Length - 1; i++)
@@ -28,7 +30,6 @@ static class Program
                 workers = Math.Max(1, w);
 
         const int reportEvery = 10_000;
-        const double processBudgetS = 20.0;
 
         if (!File.Exists(path) && !Directory.Exists(path))
         {
@@ -36,14 +37,16 @@ static class Program
             return 2;
         }
 
-        // Prime t0 + vocabulary + floor once on the calling thread before workers race in.
         _ = ChessCompose.PositionId(
             Laplace.Modality.Chess.Board.FromFen(Laplace.Modality.Chess.ChessModality.StartFen));
+
+        using var gateCts = new CancellationTokenSource(TimeSpan.FromSeconds(ProcessBudgetS));
+        var ct = gateCts.Token;
 
         Console.WriteLine(
             $"chess-compose-bench path={path} limit={(limit == 0 ? "ALL" : limit.ToString())} "
             + $"analyzeInline={analyze} workers={workers} db=NONE "
-            + $"timer_a_budget_s={processBudgetS:F0} "
+            + $"timer_a_budget_s={ProcessBudgetS:F0} hard_cancel=true "
             + "ids=EventId(tournament)+PlayingId(novelty)+LineId(content)");
 
         var swTotal = Stopwatch.StartNew();
@@ -53,83 +56,130 @@ static class Program
         var eventIds = new ConcurrentDictionary<Hash128, byte>();
         var playingIds = new ConcurrentDictionary<Hash128, byte>();
         var lineIds = new ConcurrentDictionary<Hash128, byte>();
+        bool timedOut = false;
 
-        if (workers == 1)
+        try
         {
-            await foreach (var gameText in ChessPgnDecomposer.StreamAllGamesAsync(
-                               path, SearchOption.TopDirectoryOnly, CancellationToken.None))
+            if (workers == 1)
             {
-                if (ChessPgnDecomposer.TryParseGame(gameText) is not { } parsed)
-                {
-                    Interlocked.Increment(ref parseFail);
-                    continue;
-                }
-                Accumulate(parsed, analyze, ref entities, ref physicalities, ref attestations,
-                    eventIds, playingIds, lineIds);
-                long g = Interlocked.Increment(ref games);
-                Report(g, parseFail, eventIds, playingIds, lineIds,
-                    entities, physicalities, attestations, swTotal, ref peakWorkingSet, reportEvery);
-                if (limit > 0 && g >= limit) break;
-            }
-        }
-        else
-        {
-            var texts = Channel.CreateBounded<string>(new BoundedChannelOptions(workers * 8)
-            {
-                FullMode = BoundedChannelFullMode.Wait,
-                SingleWriter = true,
-                SingleReader = false,
-            });
-            var feeder = Task.Run(async () =>
-            {
-                long fed = 0;
                 await foreach (var gameText in ChessPgnDecomposer.StreamAllGamesAsync(
-                                   path, SearchOption.TopDirectoryOnly, CancellationToken.None))
+                                   path, SearchOption.TopDirectoryOnly, ct))
                 {
-                    await texts.Writer.WriteAsync(gameText);
-                    fed++;
-                    if (limit > 0 && fed >= limit) break;
-                }
-                texts.Writer.Complete();
-            });
-
-            var workersTasks = new Task[workers];
-            for (int w = 0; w < workers; w++)
-            {
-                workersTasks[w] = Task.Run(async () =>
-                {
-                    await foreach (var gameText in texts.Reader.ReadAllAsync())
+                    if (peekOnly)
                     {
-                        if (ChessPgnDecomposer.TryParseGame(gameText) is not { } parsed)
+                        if (ChessPgnDecomposer.TryPeekPlaying(gameText) is not { } peek)
                         {
                             Interlocked.Increment(ref parseFail);
                             continue;
                         }
-                        long e = 0, p = 0, a = 0;
-                        Accumulate(parsed, analyze, ref e, ref p, ref a,
-                            eventIds, playingIds, lineIds);
-                        Interlocked.Add(ref entities, e);
-                        Interlocked.Add(ref physicalities, p);
-                        Interlocked.Add(ref attestations, a);
-                        long g = Interlocked.Increment(ref games);
-                        Report(g, parseFail, eventIds, playingIds, lineIds,
-                            Interlocked.Read(ref entities),
-                            Interlocked.Read(ref physicalities),
-                            Interlocked.Read(ref attestations),
-                            swTotal, ref peakWorkingSet, reportEvery);
+                        playingIds.TryAdd(peek.PlayingId, 0);
+                        long gPeek = Interlocked.Increment(ref games);
+                        Report(gPeek, parseFail, eventIds, playingIds, lineIds,
+                            0, 0, 0, swTotal, ref peakWorkingSet, reportEvery);
+                        if (limit > 0 && gPeek >= limit) break;
+                        continue;
                     }
-                });
+                    if (ChessPgnDecomposer.TryParseGame(gameText) is not { } parsed)
+                    {
+                        Interlocked.Increment(ref parseFail);
+                        continue;
+                    }
+                    Accumulate(parsed, analyze, ref entities, ref physicalities, ref attestations,
+                        eventIds, playingIds, lineIds);
+                    long g = Interlocked.Increment(ref games);
+                    Report(g, parseFail, eventIds, playingIds, lineIds,
+                        entities, physicalities, attestations, swTotal, ref peakWorkingSet, reportEvery);
+                    if (limit > 0 && g >= limit) break;
+                }
             }
+            else
+            {
+                var texts = Channel.CreateBounded<string>(new BoundedChannelOptions(workers * 8)
+                {
+                    FullMode = BoundedChannelFullMode.Wait,
+                    SingleWriter = true,
+                    SingleReader = false,
+                });
+                var feeder = Task.Run(async () =>
+                {
+                    long fed = 0;
+                    try
+                    {
+                        await foreach (var gameText in ChessPgnDecomposer.StreamAllGamesAsync(
+                                           path, SearchOption.TopDirectoryOnly, ct))
+                        {
+                            await texts.Writer.WriteAsync(gameText, ct);
+                            fed++;
+                            if (limit > 0 && fed >= limit) break;
+                        }
+                    }
+                    catch (OperationCanceledException) { /* gate */ }
+                    finally { texts.Writer.TryComplete(); }
+                }, ct);
 
-            await feeder;
-            await Task.WhenAll(workersTasks);
+                var workersTasks = new Task[workers];
+                for (int w = 0; w < workers; w++)
+                {
+                    workersTasks[w] = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await foreach (var gameText in texts.Reader.ReadAllAsync(ct))
+                            {
+                                if (peekOnly)
+                                {
+                                    if (ChessPgnDecomposer.TryPeekPlaying(gameText) is not { } peek)
+                                    {
+                                        Interlocked.Increment(ref parseFail);
+                                        continue;
+                                    }
+                                    playingIds.TryAdd(peek.PlayingId, 0);
+                                    long gPeek = Interlocked.Increment(ref games);
+                                    Report(gPeek, parseFail, eventIds, playingIds, lineIds,
+                                        0, 0, 0, swTotal, ref peakWorkingSet, reportEvery);
+                                    if (limit > 0 && gPeek >= limit) break;
+                                    continue;
+                                }
+                                if (ChessPgnDecomposer.TryParseGame(gameText) is not { } parsed)
+                                {
+                                    Interlocked.Increment(ref parseFail);
+                                    continue;
+                                }
+                                long e = 0, p = 0, a = 0;
+                                Accumulate(parsed, analyze, ref e, ref p, ref a,
+                                    eventIds, playingIds, lineIds);
+                                Interlocked.Add(ref entities, e);
+                                Interlocked.Add(ref physicalities, p);
+                                Interlocked.Add(ref attestations, a);
+                                long g = Interlocked.Increment(ref games);
+                                Report(g, parseFail, eventIds, playingIds, lineIds,
+                                    Interlocked.Read(ref entities),
+                                    Interlocked.Read(ref physicalities),
+                                    Interlocked.Read(ref attestations),
+                                    swTotal, ref peakWorkingSet, reportEvery);
+                            }
+                        }
+                        catch (OperationCanceledException) { /* gate */ }
+                    }, ct);
+                }
+
+                try { await feeder; await Task.WhenAll(workersTasks); }
+                catch (OperationCanceledException) { timedOut = true; }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            timedOut = true;
         }
 
         swTotal.Stop();
         double secs = Math.Max(1e-6, swTotal.Elapsed.TotalSeconds);
-        bool pass = secs <= processBudgetS && games > 0;
+        if (ct.IsCancellationRequested) timedOut = true;
+        bool finished = limit > 0 ? games >= limit : !timedOut && games > 0;
+        // Whole-file / limit must finish inside 20s. Partial at timeout = FAIL.
+        bool pass = finished && secs <= ProcessBudgetS && games > 0 && !timedOut;
         Console.WriteLine(
-            $"DONE games={games:N0} parse_fail={parseFail} "
+            $"DONE games={games:N0} parse_fail={parseFail} timed_out={timedOut} finished={finished} "
             + $"uniq_event={eventIds.Count:N0} uniq_playing={playingIds.Count:N0} "
             + $"uniq_line={lineIds.Count:N0} "
             + $"(event=tournament, playing=novelty, line=content Merkle) "
@@ -137,8 +187,8 @@ static class Program
             + $"wall_s={secs:F2} games_per_s={games / secs:F1} "
             + $"rows_per_game={(double)(entities + physicalities + attestations) / Math.Max(1, games):F0} "
             + $"peak_ws_mb={peakWorkingSet / (1024 * 1024)} "
-            + $"TIMER_A_PROCESS_{(pass ? "PASS" : "FAIL")}_budget_s={processBudgetS:F0}");
-        return games > 0 ? 0 : 1;
+            + $"TIMER_A_PROCESS_{(pass ? "PASS" : "FAIL")}_budget_s={ProcessBudgetS:F0}");
+        return pass ? 0 : 1;
     }
 
     static void Accumulate(

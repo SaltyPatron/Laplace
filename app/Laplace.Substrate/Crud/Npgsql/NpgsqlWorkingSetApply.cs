@@ -941,14 +941,31 @@ public sealed partial class NpgsqlSubstrateWriter
             // COPY sub-txns commit their rows independently, so a control-tx failure after
             // that point still leaves the rows present and a later probe will catch them —
             // the cache is a pure optimization, never a correctness input.)
-            // Run-cache / ledger fill is for small incremental applies.
-            // MEASURED: 500k Hash128 adds after COPY cost ~100ms+ on the gate.
-            if (persistedEnt is not null && novelEntIds is not null
-                && novelEntIds.Count <= MaxRunCacheFillIds)
-                foreach (var id in novelEntIds) persistedEnt.Add(id);
-            if (persistedPhys is not null && novelPhysIds is not null
-                && novelPhysIds.Count <= MaxRunCacheFillIds)
-                foreach (var id in novelPhysIds) persistedPhys.Add(id);
+            //
+            // Fill the probe-skip cache with EVERY distinct entity/phys this working set
+            // staged — not only the novel COPYed subset, and not gated on MaxRunCacheFillIds.
+            // After commit, present-at-probe and newly-COPYed rows are equally durable under
+            // append-only law. MEASURED 2026-08-04 ChessPgn (OTB year on a DB that already
+            // holds another OTB year): first WS staged ~360k distinct entities, verify paid
+            // ~34s with present≈346k, and because firstEntIdx.Count > MaxRunCacheFillIds the
+            // old novel-only fill left novelEntIds=null → cache stayed empty → every later
+            // WS re-probed the same shared position graph with "skipped 0e cached". HashSet
+            // add of ~360k ids is ~100ms; repeating a 34s bitmap is the gate killer.
+            // ContentLadderLedger stays novel/staged-gated below (provenance across sources).
+            if (persistedEnt is not null && firstEntIdx.Count > 0)
+            {
+                var ids = CollectionsMarshal.AsSpan(ents.Ids);
+                var idx = CollectionsMarshal.AsSpan(firstEntIdx);
+                for (int k = 0; k < idx.Length; k++)
+                    persistedEnt.Add(ids[idx[k]]);
+                if (tier0Present is not null)
+                    foreach (var id in tier0Present) persistedEnt.Add(id);
+            }
+            if (persistedPhys is not null && probePhysIds.Count > 0)
+            {
+                for (int i = 0; i < probePhysIds.Count; i++)
+                    persistedPhys.Add(probePhysIds[i]);
+            }
 
             // Same commit boundary, same reason: a root may only answer "ladder already
             // deposited" once it is durably in the target.

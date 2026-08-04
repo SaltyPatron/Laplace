@@ -377,17 +377,80 @@ public static class MoveGen
             var p = b.Squares[sq];
             if (p == Piece.Empty) continue;
             if (Board.IsWhite(p) != white) continue;
-
-            switch (Board.TypeOf(p))
-            {
-                case Piece.WPawn: GenPawn(b, sq, white, moves); break;
-                case Piece.WKnight: GenLeaper(b, sq, white, KnightDeltas, moves); break;
-                case Piece.WBishop: GenSlider(b, sq, white, BishopDeltas, moves); break;
-                case Piece.WRook: GenSlider(b, sq, white, RookDeltas, moves); break;
-                case Piece.WQueen: GenSlider(b, sq, white, QueenDeltas, moves); break;
-                case Piece.WKing: GenLeaper(b, sq, white, KingDeltas, moves); GenCastle(b, sq, white, moves); break;
-            }
+            GenFrom(b, sq, p, white, moves);
         }
+    }
+
+    /// <summary>Pseudo-legal moves from one occupied square (PGN SAN resolve hot path).</summary>
+    public static void PseudoFrom(Board b, int from, List<ChessMove> moves)
+    {
+        moves.Clear();
+        var p = b.Squares[from];
+        if (p == Piece.Empty) return;
+        bool white = Board.IsWhite(p);
+        if (white != b.WhiteToMove) return;
+        GenFrom(b, from, p, white, moves);
+    }
+
+    private static void GenFrom(Board b, int sq, Piece p, bool white, List<ChessMove> moves)
+    {
+        switch (Board.TypeOf(p))
+        {
+            case Piece.WPawn: GenPawn(b, sq, white, moves); break;
+            case Piece.WKnight: GenLeaper(b, sq, white, KnightDeltas, moves); break;
+            case Piece.WBishop: GenSlider(b, sq, white, BishopDeltas, moves); break;
+            case Piece.WRook: GenSlider(b, sq, white, RookDeltas, moves); break;
+            case Piece.WQueen: GenSlider(b, sq, white, QueenDeltas, moves); break;
+            case Piece.WKing: GenLeaper(b, sq, white, KingDeltas, moves); GenCastle(b, sq, white, moves); break;
+        }
+    }
+
+    /// <summary>
+    /// Single-move legality for SAN-directed resolve. Uses the same pin/check masks as
+    /// <see cref="Legal"/> for ordinary moves; make/unmake only for king/castle/EP.
+    /// </summary>
+    public static bool IsLegal(Board b, ChessMove m)
+    {
+        bool mover = b.WhiteToMove;
+        int kingSq = b.FindKing(mover);
+        const MoveFlags CastleAny = MoveFlags.CastleKing | MoveFlags.CastleQueen;
+        if (kingSq < 0) return true;
+
+        bool special = m.From == kingSq
+                    || (m.Flags & CastleAny) != 0
+                    || (m.Flags & MoveFlags.EnPassant) != 0;
+        if (special)
+        {
+            var undo = MoveApply.MakeWithUndo(b, m);
+            int k = (m.From == kingSq || (m.Flags & CastleAny) != 0) ? b.FindKing(mover) : kingSq;
+            bool ok = k >= 0 && !IsSquareAttacked(b, k, byWhite: !mover);
+            MoveApply.Unmake(b, m, undo);
+            return ok;
+        }
+
+        int kingBit = (Board.RankOf(kingSq) << 3) | Board.FileOf(kingSq);
+        ulong occ = b.OccupiedBB;
+        ulong ourOcc = mover ? b.WhiteBB : b.BlackBB;
+        ulong checkers = AttackersTo(b, kingBit, byWhite: !mover, occ);
+        int checkCount = BitOperations.PopCount(checkers);
+        if (checkCount > 1) return false;
+
+        ulong checkEvasion = ulong.MaxValue;
+        if (checkCount == 1)
+        {
+            int checkerBit = BitOperations.TrailingZeroCount(checkers);
+            checkEvasion = checkers | ChessAttacks.Between(kingBit, checkerBit);
+        }
+
+        int fromBit = (Board.RankOf(m.From) << 3) | Board.FileOf(m.From);
+        int toBit = (Board.RankOf(m.To) << 3) | Board.FileOf(m.To);
+        if ((checkEvasion & (1UL << toBit)) == 0) return false;
+
+        ulong pinned = PinnedTo(b, kingBit, mover, occ, ourOcc);
+        if ((pinned & (1UL << fromBit)) != 0
+            && (ChessAttacks.Line(kingBit, fromBit) & (1UL << toBit)) == 0)
+            return false;
+        return true;
     }
 
     private static void GenLeaper(Board b, int from, bool white, int[] deltas, List<ChessMove> moves)

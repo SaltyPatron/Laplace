@@ -637,9 +637,17 @@ internal static class IngestCommands
         Console.WriteLine($"consensus: {accumulator.CellsFolded:N0} cells folded inline at apply "
                         + $"from {accumulator.ObservationsAccumulated:N0} observations (nothing deferred)");
 
-        try { await PrintIngestValidationAsync(ds, dec); }
-        catch (Exception ex)
-        { Console.Error.WriteLine($"warn: ingest validation failed (ingest itself is complete): {ex.Message}"); }
+        // Zero-novel re-ingest: ANALYZE + validation counts are multi-second (or hang) on a
+        // populated box and are not part of the fold. Skip them so process exit matches the
+        // ingest envelope (measured hang after "done:" on OTB 2025 re-ingest).
+        long novelRows = result.EntitiesInserted + result.PhysicalitiesInserted
+            + result.AttestationsInserted;
+        if (novelRows > 0)
+        {
+            try { await PrintIngestValidationAsync(ds, dec); }
+            catch (Exception ex)
+            { Console.Error.WriteLine($"warn: ingest validation failed (ingest itself is complete): {ex.Message}"); }
+        }
         return 0;
     }
 

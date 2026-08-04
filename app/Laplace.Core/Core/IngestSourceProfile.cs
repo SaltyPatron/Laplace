@@ -39,6 +39,9 @@ public sealed record IngestSourceProfile(
     /// <summary>
     /// Chess PGN game — one input unit explodes into dozens–hundreds of substrate rows
     /// (per-ply board replay, geometry, attestations). Sized like a fat record, not a flat triple.
+    /// Apply-side attestation merge cost is billed via
+    /// <see cref="IngestSizing.AttestationApplySurchargeBytes"/> so the MemoryTopology
+    /// flush envelope closes merge storms; do not reinvent that with EstComposeUnits dials.
     /// </summary>
     public static readonly IngestSourceProfile ChessPgn = new(4_000_000, 1);
 

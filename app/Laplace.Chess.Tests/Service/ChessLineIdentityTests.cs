@@ -113,14 +113,14 @@ public sealed class ChessLineIdentityTests
         var change = b.SetInputUnitsConsumed(1).Build();
 
         var plays = Assert.Single(change.Attestations, a => a.TypeId == ChessVocabulary.PlaysLineType);
-        Assert.Equal(parsed.EventId, plays.SubjectId);
+        Assert.Equal(parsed.PlayingId, plays.SubjectId);
         Assert.Equal(parsed.LineId, plays.ObjectId);
         Assert.Equal(Glicko2.ScoreWin, plays.SumScoreFp1e9); // 1-0, white POV
         Assert.Equal(1, plays.ObservationCount);
 
         var lineOutcome = Assert.Single(change.Attestations,
             a => a.TypeId == ChessVocabulary.OutcomeType && a.SubjectId == parsed.LineId);
-        Assert.Equal(parsed.EventId, lineOutcome.ContextId);
+        Assert.Equal(parsed.PlayingId, lineOutcome.ContextId);
         Assert.Equal(Glicko2.ScoreWin, lineOutcome.SumScoreFp1e9);
         Assert.Equal(1, lineOutcome.ObservationCount);
 
@@ -139,7 +139,7 @@ public sealed class ChessLineIdentityTests
         var first = ChessPgnDecomposer.TryParseGame(GameCanonical)!;
         var second = ChessPgnDecomposer.TryParseGame(GameVariantNotation)!; // same line, new event
         var reader = new FakeReader();
-        reader.Present.Add(first.EventId);
+        reader.Present.Add(first.PlayingId);
 
         var novel = new List<ChessGameRecord>();
         await foreach (var g in ChessPgnDecomposer.FilterNovelAsync(
@@ -147,7 +147,7 @@ public sealed class ChessLineIdentityTests
             novel.Add(g);
 
         var kept = Assert.Single(novel);
-        Assert.Equal(second.EventId, kept.EventId);
+        Assert.Equal(second.PlayingId, kept.PlayingId);
         Assert.Equal(first.LineId, kept.LineId); // the shared line did not block the new playing
     }
 

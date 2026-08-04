@@ -13,53 +13,116 @@ public static class San
         if (t is "O-O" or "0-0")
             return Single(legal, m => (m.Flags & MoveFlags.CastleKing) != 0);
 
-        Piece promoType = Piece.Empty;
+        if (!TryParsePieceMove(t, out var pieceType, out int dest, out int fromFile, out int fromRank,
+                out var promoType))
+            return null;
+
+        return Single(legal, m => MatchesPieceMove(b, m, pieceType, dest, fromFile, fromRank, promoType));
+    }
+
+    /// <summary>
+    /// PGN replay path: resolve SAN without generating the full legal list.
+    /// Scans only pieces of the SAN type, generates from those squares, legality via
+    /// <see cref="MoveGen.IsLegal"/>.
+    /// </summary>
+    public static ChessMove? Resolve(Board b, string san, List<ChessMove> scratch)
+    {
+        if (string.IsNullOrWhiteSpace(san)) return null;
+        string t = Strip(san.Trim());
+        if (t.Length == 0) return null;
+
+        bool white = b.WhiteToMove;
+        if (t is "O-O-O" or "0-0-0" or "O-O" or "0-0")
+        {
+            int kingSq = b.FindKing(white);
+            if (kingSq < 0) return null;
+            MoveGen.PseudoFrom(b, kingSq, scratch);
+            MoveFlags want = t is "O-O-O" or "0-0-0" ? MoveFlags.CastleQueen : MoveFlags.CastleKing;
+            ChessMove? hit = null;
+            for (int i = 0; i < scratch.Count; i++)
+            {
+                var m = scratch[i];
+                if ((m.Flags & want) == 0) continue;
+                if (!MoveGen.IsLegal(b, m)) continue;
+                if (hit is not null) return null;
+                hit = m;
+            }
+            return hit;
+        }
+
+        if (!TryParsePieceMove(t, out var pieceType, out int dest, out int fromFile, out int fromRank,
+                out var promoType))
+            return null;
+
+        Piece colored = white ? pieceType : (Piece)(-(sbyte)pieceType);
+        ulong bb = b.PieceBB(colored);
+        ChessMove? unique = null;
+        while (bb != 0)
+        {
+            int bit = System.Numerics.BitOperations.TrailingZeroCount(bb);
+            bb &= bb - 1;
+            int from = Board.Sq(bit & 7, bit >> 3);
+            if (fromFile >= 0 && Board.FileOf(from) != fromFile) continue;
+            if (fromRank >= 0 && Board.RankOf(from) != fromRank) continue;
+            MoveGen.PseudoFrom(b, from, scratch);
+            for (int i = 0; i < scratch.Count; i++)
+            {
+                var m = scratch[i];
+                if (!MatchesPieceMove(b, m, pieceType, dest, fromFile, fromRank, promoType)) continue;
+                if (!MoveGen.IsLegal(b, m)) continue;
+                if (unique is not null) return null;
+                unique = m;
+            }
+        }
+        return unique;
+    }
+
+    private static bool TryParsePieceMove(string t, out Piece pieceType, out int dest,
+        out int fromFile, out int fromRank, out Piece promoType)
+    {
+        pieceType = Piece.WPawn;
+        dest = -1;
+        fromFile = fromRank = -1;
+        promoType = Piece.Empty;
+
         int eq = t.IndexOf('=');
         if (eq >= 0 && eq + 1 < t.Length) { promoType = PieceFromChar(t[eq + 1]); t = t[..eq]; }
 
-        Piece pieceType = Piece.WPawn;
         int i = 0;
         if (t.Length > 0 && "NBRQK".IndexOf(t[0]) >= 0) { pieceType = PieceFromChar(t[0]); i = 1; }
 
         string body = t[i..].Replace("x", "");
-        if (body.Length < 2) return null;
+        if (body.Length < 2) return false;
 
         string destAlg = body[^2..];
-        if (destAlg[0] < 'a' || destAlg[0] > 'h' || destAlg[1] < '1' || destAlg[1] > '8') return null;
-        int dest = Board.AlgebraicToSquare(destAlg);
+        if (destAlg[0] < 'a' || destAlg[0] > 'h' || destAlg[1] < '1' || destAlg[1] > '8') return false;
+        dest = Board.AlgebraicToSquare(destAlg);
 
         string disamb = body[..^2];
-        int fromFile = -1, fromRank = -1;
         foreach (char c in disamb)
         {
             if (c >= 'a' && c <= 'h') fromFile = c - 'a';
             else if (c >= '1' && c <= '8') fromRank = c - '1';
         }
+        return true;
+    }
 
-        return Single(legal, m =>
+    private static bool MatchesPieceMove(Board b, ChessMove m, Piece pieceType, int dest,
+        int fromFile, int fromRank, Piece promoType)
+    {
+        // A CASTLE IS ONLY EVER SPELLED O-O / O-O-O, so a piece-move SAN must never
+        // match one. Chess960 collides (e.g. "Kc1" vs queen-side castle ending on c1).
+        if ((m.Flags & (MoveFlags.CastleKing | MoveFlags.CastleQueen)) != 0) return false;
+        if (m.To != dest) return false;
+        if (Board.TypeOf(b.Squares[m.From]) != pieceType) return false;
+        if (promoType != Piece.Empty)
         {
-            // A CASTLE IS ONLY EVER SPELLED O-O / O-O-O, so a piece-move SAN must never
-            // match one. In standard chess this could not bite: the king starts on e1, a
-            // castle lands it two squares away, and "Kc1"/"Kg1" from e1 is not a legal
-            // king move — so (from, to) never collided. Chess960 collides constantly.
-            //
-            // Measured on a real game (DenLaz_chesscom.pgn, FEN rbnkbrnq/... w FAfa):
-            // white king on d1, rooks a1/f1. At ply 17 the source writes "Kc1" meaning the
-            // ordinary king step d1->c1 — but the queen-side castle ALSO ends on c1, so
-            // both were candidates, Single() saw two and returned null, and a 58-ply game
-            // was dropped as unresolvable SAN.
-            if ((m.Flags & (MoveFlags.CastleKing | MoveFlags.CastleQueen)) != 0) return false;
-            if (m.To != dest) return false;
-            if (Board.TypeOf(b.Squares[m.From]) != pieceType) return false;
-            if (promoType != Piece.Empty)
-            {
-                if (!m.IsPromotion || Board.TypeOf(m.Promotion) != promoType) return false;
-            }
-            else if (m.IsPromotion) return false;
-            if (fromFile >= 0 && Board.FileOf(m.From) != fromFile) return false;
-            if (fromRank >= 0 && Board.RankOf(m.From) != fromRank) return false;
-            return true;
-        });
+            if (!m.IsPromotion || Board.TypeOf(m.Promotion) != promoType) return false;
+        }
+        else if (m.IsPromotion) return false;
+        if (fromFile >= 0 && Board.FileOf(m.From) != fromFile) return false;
+        if (fromRank >= 0 && Board.RankOf(m.From) != fromRank) return false;
+        return true;
     }
 
     public static string ToSan(Board b, ChessMove m)

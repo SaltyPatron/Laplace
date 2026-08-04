@@ -183,19 +183,35 @@ public static class ChessVocabulary
     public const double Trust = SourceTrust.StructuredCorpus;
 
     public static Task<IReadOnlyCollection<string>> BootstrapAsync(
-    ISubstrateWriter writer, CancellationToken ct = default)
-    => BootstrapAsync(writer, SourceId, SourceName, SelfPlayTrustClass, ct);
+    ISubstrateWriter writer, CancellationToken ct = default, ISubstrateReader? reader = null)
+    => BootstrapAsync(writer, SourceId, SourceName, SelfPlayTrustClass, ct, reader);
 
     public static async Task<IReadOnlyCollection<string>> BootstrapAsync(
     ISubstrateWriter writer, Hash128 sourceId, string sourceName, Hash128 trustClassId,
-    CancellationToken ct = default)
+    CancellationToken ct = default, ISubstrateReader? reader = null)
     {
         var boot = new BootstrapIntentBuilder(sourceId, sourceName, trustClassId);
         foreach (var t in ChessSeedManifest.TypeNodeNames)
             boot.AddType(t);
         foreach (var r in SourceVocabularyBootstrap.ExpandRelationsWithFamily(ChessSeedManifest.Relations))
             boot.AddRelationType(r);
-        await writer.ApplyAsync(boot.Build(), ct);
+        // Source entity already named ⇒ vocabulary for this lane was deposited. Skip the
+        // multi-second present-verify apply that was eating the process envelope on every
+        // re-ingest (measured ~3s × 2 bootstraps before INGEST_START).
+        if (reader is not null)
+        {
+            if (reader.IsProvenPresent(sourceId))
+                return boot.CanonicalNames;
+            byte[] bm = await reader.EntitiesExistBitmapAsync(new[] { sourceId }, ct)
+                .ConfigureAwait(false);
+            if (BitmapBits.IsSet(bm, 0))
+            {
+                reader.MarkProven(new[] { sourceId });
+                return boot.CanonicalNames;
+            }
+        }
+        await writer.ApplyAsync(boot.Build(), ct).ConfigureAwait(false);
+        reader?.MarkProven(new[] { sourceId });
         return boot.CanonicalNames;
     }
 }
