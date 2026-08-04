@@ -176,6 +176,23 @@ if [ -x "$LAPLACE_PGC" ]; then
 fi
 echo
 
+# The INVENTORY pre-commit hook. docs/INVENTORY.md is generated and CI-gated, and
+# prose across README / ARCHITECTURE / INDEX / COMPLETION_PLAN / INVENTIONS carries
+# no counts at all — it points there. Keeping it true used to be a human step, and
+# forgetting it blocked main twice on 2026-08-04 at the FIRST job in the pipeline.
+# The hook removes the step; this reports a checkout where it was never installed.
+# A check, not an install: setting it is agent-anchor.sh / agent-worktree.sh's job.
+hooks_path="$(git config --get core.hooksPath 2>/dev/null || true)"
+if [ "$hooks_path" = "scripts/githooks" ]; then
+    printf "${green}✓${reset} %-30s → %s\n" "git core.hooksPath" "$hooks_path"
+    ok=$((ok + 1))
+else
+    printf "${yellow}!${reset} %-30s run scripts/install-githooks.sh (INVENTORY auto-regen)\n" \
+        "git core.hooksPath"
+    warnings=$((warnings + 1))
+fi
+echo
+
 echo "=== Summary ==="
 printf "${green}%d OK${reset}, ${yellow}%d warning(s)${reset}, ${red}%d error(s)${reset}\n" "$ok" "$warnings" "$errors"
 [ "$errors" -eq 0 ]

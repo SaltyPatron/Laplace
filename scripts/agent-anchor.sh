@@ -63,6 +63,16 @@ cat <<'EOF'
 EOF
 echo
 
+# Install the INVENTORY pre-commit hook before anything else runs. docs/INVENTORY.md
+# is generated and CI-gated, and every prose doc points at it instead of carrying
+# counts — so it has to be true at each commit. Keeping it true was a human step
+# until now, and forgetting it blocked main twice on 2026-08-04 at the first job in
+# the pipeline. core.hooksPath is per-.git, so this covers every worktree at once and
+# is idempotent.
+if [[ -x scripts/install-githooks.sh ]]; then
+  bash scripts/install-githooks.sh >/dev/null 2>&1 || true
+fi
+
 echo "=== Prereqs (summary) ==="
 if [[ -x scripts/check-prereqs.sh ]]; then
   ( scripts/check-prereqs.sh 2>&1 | tail -n 3 ) || true
