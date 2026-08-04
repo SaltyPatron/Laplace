@@ -15,6 +15,9 @@ using Microsoft.Extensions.Logging;
 using var loggerFactory = LaplaceLogging.FileOnly("mcp");
 var log = loggerFactory.CreateLogger("server");
 
+Console.Error.WriteLine($"[mcp] starting server — operator_lane={SubstrateTools.OperatorLane}, binary={Environment.ProcessPath ?? AppContext.BaseDirectory}");
+log.LogInformation("starting mcp server, operator_lane={OperatorLane}, binary={BinaryPath}", SubstrateTools.OperatorLane, Environment.ProcessPath ?? AppContext.BaseDirectory);
+
 var server = new McpServer(new SubstrateTools());
 string? line;
 while ((line = Console.ReadLine()) is not null)

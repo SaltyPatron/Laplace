@@ -54,7 +54,7 @@ internal sealed class SubstrateTools
     /// client should hold that. Closed by default; scripts/laplace-mcp opts the
     /// local operator in. A client deployment that wants it must say so out loud.
     /// </summary>
-    private static readonly bool OperatorLane =
+    internal static readonly bool OperatorLane =
         Environment.GetEnvironmentVariable("LAPLACE_MCP_OPERATOR") == "1";
 
     private static readonly ToolSpec[] ToolCatalog =
@@ -150,6 +150,9 @@ internal sealed class SubstrateTools
             () => Schema(("name", "string", "installed function name, exactly as api() reports it", true),
                          ("args", "object", "argument name -> value, e.g. {\"p_source\": \"WordNetDecomposer\"}", false),
                          ("max_rows", "integer", "row cap, default 200", false))),
+        new("pipeline", "Inspect Laplace pipeline build stamps and deployment status.",
+            "Inspect Laplace pipeline build stamps, deployed binary directory (/opt/laplace/app), and component readiness.",
+            () => Schema()),
         new("help", "List every tool (one-line each), or full detail for one name.",
             "Catalog introspection for THIS tool surface, same idea as laplace.api('substring') for the SQL catalog: with no name, lists every tool's one-line summary; with name, returns the full rationale and input schema for that one tool. Call this before guessing at a tool's arguments from its one-line summary alone.",
             () => Schema(("name", "string", "tool name for full detail; omit to list every tool", false))),
@@ -167,10 +170,9 @@ internal sealed class SubstrateTools
             {
                 "api" => Api(args),
                 "op" => Op(args),
+                "pipeline" => PipelineStatus(args),
                 "sql" => OperatorLane
-                    ? Rows(_dbReadOnly,
-                        Req(args, "query"),
-                        Int(args, "max_rows", DefaultRowCap))
+                    ? ExecuteSql(args)
                     : ("sql is operator-lane only (launch with LAPLACE_MCP_OPERATOR=1); product reads go through the typed tools", true),
                 "source_status" => SourceStatus(args),
                 "infer" => Infer(args),
@@ -616,7 +618,12 @@ internal sealed class SubstrateTools
                 ["metric"] = h.Metric,
                 ["value"] = h.Value is null ? null : JsonValue.Create(h.Value),
             })
-            .Concat(counts.Select(c => new JsonObject { ["metric"] = c.Metric, ["value"] = c.Value.ToString() }));
+            .Concat(counts.Select(c => new JsonObject { ["metric"] = c.Metric, ["value"] = c.Value.ToString() }))
+            .Concat(new[]
+            {
+                new JsonObject { ["metric"] = "operator_lane", ["value"] = OperatorLane.ToString().ToLowerInvariant() },
+                new JsonObject { ["metric"] = "binary_path", ["value"] = Environment.ProcessPath ?? AppContext.BaseDirectory },
+            });
         return JsonRows(rows);
     }
 
@@ -930,7 +937,12 @@ internal sealed class SubstrateTools
         {
             var listing = new JsonArray(
                 ToolCatalog.Select(t => (JsonNode)new JsonObject { ["name"] = t.Name, ["summary"] = t.Summary }).ToArray());
-            return (new JsonObject { ["rows"] = listing }.ToJsonString(), false);
+            return (new JsonObject
+            {
+                ["operator_lane"] = OperatorLane,
+                ["binary_path"] = Environment.ProcessPath ?? AppContext.BaseDirectory,
+                ["rows"] = listing,
+            }.ToJsonString(), false);
         }
 
         var hit = ToolCatalog.FirstOrDefault(t => string.Equals(t.Name, name, StringComparison.Ordinal));
@@ -939,6 +951,8 @@ internal sealed class SubstrateTools
 
         var result = new JsonObject
         {
+            ["operator_lane"] = OperatorLane,
+            ["binary_path"] = Environment.ProcessPath ?? AppContext.BaseDirectory,
             ["rows"] = new JsonArray(new JsonObject
             {
                 ["name"] = hit.Name,
@@ -1039,6 +1053,54 @@ internal sealed class SubstrateTools
         if (text is not null) return text;
         if (Opt(args, "entity") is not null) return null;
         throw new ArgumentException($"missing required argument: {name} (or entity)");
+    }
+
+    private (string, bool) PipelineStatus(JsonObject? args)
+    {
+        var appDir = Environment.GetEnvironmentVariable("LAPLACE_APP_DIR") ?? "/opt/laplace/app";
+        var buildDir = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "build");
+        var stampsDir = Path.Combine(buildDir, ".stamps");
+
+        var stampsObj = new JsonObject();
+        if (Directory.Exists(stampsDir))
+        {
+            foreach (var file in Directory.GetFiles(stampsDir, "*.stamp"))
+            {
+                stampsObj[Path.GetFileNameWithoutExtension(file)] = File.ReadAllText(file).Trim();
+            }
+        }
+
+        var result = new JsonObject
+        {
+            ["app_directory"] = appDir,
+            ["app_directory_exists"] = Directory.Exists(appDir),
+            ["mcp_binary_exists"] = File.Exists(Path.Combine(appDir, "laplace-mcp")),
+            ["uci_binary_exists"] = File.Exists(Path.Combine(appDir, "laplace-uci")),
+            ["stamps_directory"] = stampsDir,
+            ["stamps"] = stampsObj,
+        };
+
+        return (result.ToJsonString(), false);
+    }
+
+    private (string, bool) ExecuteSql(JsonObject? args)
+    {
+        var query = Req(args, "query");
+
+        // Issue #814: Refuse queries over tables covered by installed operations
+        if (query.Contains("ingest_run_journal", StringComparison.OrdinalIgnoreCase))
+        {
+            return ("refused: ingest_run_journal is covered by an installed operation. Use ingest_runs or op('ingest_runs') instead.", true);
+        }
+
+        var sw = Stopwatch.StartNew();
+        var (text, isErr) = Rows(_dbReadOnly, query, Int(args, "max_rows", DefaultRowCap));
+        sw.Stop();
+
+        // Issue #814: Log accepted sql calls as gap report
+        Console.Error.WriteLine($"[mcp-sql-gap] duration_ms={sw.ElapsedMilliseconds} query=\"{query.Replace('\r', ' ').Replace('\n', ' ')}\"");
+
+        return (text, isErr);
     }
 
     private static int Int(JsonObject? args, string name, int fallback) =>

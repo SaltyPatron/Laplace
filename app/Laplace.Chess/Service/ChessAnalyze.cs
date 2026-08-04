@@ -32,7 +32,7 @@ public static class ChessAnalyze
     /// <summary>Derive from substrate-hydrated witnessed inputs (no PGN re-parse).</summary>
     internal static void DeriveFromWitnessed(SubstrateChangeBuilder b, ChessWitnessedGame witnessed, int engineDepth = 0)
     {
-        var (lineId, eventId, moves, result, wp, bp, startFen, clockTokens, evalTokens, qualityTokens, spentSeconds) = witnessed;
+        var (lineId, playingId, moves, result, wp, bp, startFen, clockTokens, evalTokens, qualityTokens, spentSeconds) = witnessed;
 
         var clocks = clockTokens is not null
             ? clockTokens.Select(t => t is null ? 0.0 : ParseClockSeconds(t)).ToArray()
@@ -42,20 +42,18 @@ public static class ChessAnalyze
             ? evalTokens.Select(t => t is null ? 0 : PgnEvals.ParseToken(t)).ToArray()
             : null;
 
-        DeriveGame(b, lineId, eventId, result, moves, startFen, wp, bp,
+        DeriveGame(b, lineId, playingId, result, moves, startFen, wp, bp,
                    clocks, medianDrop, clockTokens, evalTokens, evals, qualityTokens, engineDepth,
                    spentSeconds);
 
-        // GH #736: the analyzer's unit is the PLAYING — its deposits carry this playing's
-        // outcome/clock/think/eval contexts — so the skip marker is per EVENT. Two playings
-        // of one line each fold their own testimony; neither is skipped.
-        b.AddEntity(ChessVocabulary.AnalysisMarkerId(eventId, Version), EntityTier.Document,
+        // Analyzer unit = PLAYING (not tournament Chess_Event). Marker per playing.
+        b.AddEntity(ChessVocabulary.AnalysisMarkerId(playingId, Version), EntityTier.Document,
                     ChessVocabulary.AnalysisMarkerType, SourceId);
     }
 
     internal static ChessWitnessedGame WitnessedFromParsed(ChessGameRecord parsed)
     {
-        var (gameText, moves, result, lineId, eventId) = parsed;
+        var (gameText, moves, result, lineId, _, playingId) = parsed;
         var walk = parsed.Walk;
         string whiteName = PgnGames.TagStr(gameText, "White");
         string blackName = PgnGames.TagStr(gameText, "Black");
@@ -74,7 +72,7 @@ public static class ChessAnalyze
             qualityTokens[i] = MoveQuality.FromStream(walk.Mainline[i]);
 
         return new ChessWitnessedGame(
-            lineId, eventId, moves, result, wp, bp, startFen, clockTokens, evalTokens, qualityTokens,
+            lineId, playingId, moves, result, wp, bp, startFen, clockTokens, evalTokens, qualityTokens,
             spentSeconds);
     }
 

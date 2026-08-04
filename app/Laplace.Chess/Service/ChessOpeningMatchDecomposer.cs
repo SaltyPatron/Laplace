@@ -167,9 +167,8 @@ public sealed class ChessOpeningMatchDecomposer
 
     /// <summary>
     /// The ordered content ids of the boards this line passes through, start included, or
-    /// null when a SAN will not resolve. Composition is memoized (ChessCompose), so on a
-    /// box that already ran the analyzer this is id arithmetic over a warm memo rather
-    /// than a second engine pass.
+    /// null when a SAN will not resolve. Ids only via <see cref="ChessCompose.PositionId"/> —
+    /// not <see cref="ChessCompose.Position"/> / PositionMemo (heap stand-in; #822 is ROM).
     /// </summary>
     internal static List<Hash128>? ReplayPositionIds(ChessWitnessedGame w)
     {
@@ -179,13 +178,13 @@ public sealed class ChessOpeningMatchDecomposer
         var ids = new List<Hash128>(w.Moves.Count + 1);
         lock (ChessCompose.Gate)
         {
-            ids.Add(ChessCompose.Position(m.StateKey(state)).Position.Id);
+            ids.Add(ChessCompose.PositionId(m.StateKey(state)));
             foreach (var san in w.Moves)
             {
                 var mv = San.Resolve(state.Board, m.LegalActions(state), san);
                 if (mv is null) return null;
                 state = m.Apply(state, mv.Value);
-                ids.Add(ChessCompose.Position(m.StateKey(state)).Position.Id);
+                ids.Add(ChessCompose.PositionId(m.StateKey(state)));
             }
         }
         return ids;

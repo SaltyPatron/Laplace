@@ -74,6 +74,32 @@ echo "sharedir: $("${PREFIX}/bin/pg_config" --sharedir)"
 echo "pkglibdir: $("${PREFIX}/bin/pg_config" --pkglibdir)"
 
 echo
+# WRITE-PATH BUILD FEATURES — FAIL, do not warn.
+#
+# PostgreSQL's configure does NOT auto-detect lz4, zstd or liburing: omit the flag and the
+# feature is silently absent with no warning and no error, and the only symptom is a shorter
+# enumvals list on a GUC nobody reads. That is exactly how this cluster ran for months with
+# wal_compression stuck on pglz (the slowest codec) and io_method capped by a 3-process
+# worker pool, on NVMe.
+#
+# MEASURED 2026-08-03 mid chess ingest: checkpointer wrote 6,043,303 buffers (48.3 GB) in
+# 415 s = ~116 MB/s on a drive that does ~3 GB/s, with num_timed=0 / num_requested=5.
+#
+# external/CMakeLists.txt now passes all three as MANDATORY flags (configure fails loudly if
+# a library is missing), so their absence here means the installed binary predates that
+# change or was built on a host without the headers. Failing is the point: a warning in CI
+# output is invisible, and this defect is only ever visible as "the ingest is slow".
+echo "=== PostgreSQL write-path build features ==="
+for feat in lz4 zstd liburing; do
+    if "${PREFIX}/bin/pg_config" --configure 2>/dev/null | grep -q -- "--with-${feat}"; then
+        ok "pg built --with-${feat}"
+    else
+        fail "pg NOT built --with-${feat} — rebuild deps (external/CMakeLists.txt passes it; \
+apt install liblz4-dev libzstd-dev liburing-dev if the header is missing)"
+    fi
+done
+echo
+
 echo "=== Cluster smoke (optional) ==="
 export PGHOST="${SOCKET_DIR}"
 export PGPORT

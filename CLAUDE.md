@@ -135,3 +135,49 @@ Two agents in one working tree is a data-loss problem, not a merge problem: an
 uncommitted edit is destroyed by the other agent's `checkout` or `stash` with no
 conflict and nothing in reflog. Stage explicit paths — never `git add -A`, which sweeps
 another agent's files into your commit. Commit early.
+
+### NEVER `git checkout`. No exceptions.
+
+`git checkout <branch>`, `git checkout <branch> -- <path>`, `git switch`, `git restore`,
+`git stash`, `git reset --hard`, `git clean` — **do not run any of them.** They destroy
+uncommitted work silently: no conflict, no prompt, nothing in reflog to recover from. Other
+agents and the operator have pending edits in this tree at all times. Assume it.
+
+This is not theoretical and not a rule about other agents' carelessness. On 2026-08-03 a
+`git checkout <branch> -- app/Laplace.Endpoints.Mcp/SubstrateTools.cs` destroyed a completed,
+building, *uncommitted* `op` implementation in this repo, and `git checkout main` was
+attempted as the opening move of the very next task.
+
+**To read another ref, read it — do not switch to it:**
+
+```
+git show origin/main:path/to/file
+git diff origin/main -- path/to/file
+git log origin/main --oneline -- path/to/file
+```
+
+`git show <ref>:<path>` answers every "what does main have" question with zero effect on the
+working tree. There is no question about another branch that requires checking it out.
+
+**To start a branch, use a worktree** (`scripts/agent-worktree.sh`), which is a new directory
+and touches nothing that exists. Never `git checkout -b` in a tree that has pending work —
+which is every tree, always.
+
+If a task appears to require a checkout, the task is wrong. Say so and stop.
+
+### NEVER edit or read files through the shell.
+
+`python3 - <<'PY'`, `sed -i`, `awk`, `perl -pi`, `cat > file`, `tee`, heredocs — **do not author or
+inspect file content with any of them.** Use the agent's own file tools: `Edit` / `MultiEdit` /
+`Write` to change a file, `Read` to read one.
+
+A shell-based edit costs the full match string, the full replacement string, AND the interpreter
+scaffolding, then prints nothing back. `Edit` performs the same substitution for a fraction of the
+tokens, renders a diff the operator can see, and keeps the harness's file-state tracking correct.
+Doing it in Bash makes the change invisible to the person paying for the session and unreviewable
+in the transcript. On 2026-08-03 a single session did this a dozen-plus times and burned a large
+share of the operator's limits on it.
+
+Bash is for RUNNING things — builds, tests, `git`, `psql`, `gh`. Not for writing or reading source.
+`Read` instead of `cat`/`head`/`tail`/`sed -n`. If an edit feels too repetitive for `Edit`, reach
+for `MultiEdit` or rethink the change; that is never a reason to drop into a shell.

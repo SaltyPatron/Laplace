@@ -6,11 +6,38 @@ graph. The full modality reference — identity law, the three lanes, the
 census, the closed loop — is [chess.md](chess.md). Written 2026-07-23; verify
 commands against `api('chess')` and `/chess/lab/catalog` if this drifts.
 
+## How to measure Laplace (read this before cutechess)
+
+**Primary protocol — does the SoR help?** In-process guided vs pure at matched
+depth, on positions the corpus actually covers:
+
+```sh
+laplace chess substrate-test --mode fold --openings --learned --games 200 --depth 4
+```
+
+- `fold` = substructure OUTCOME generalization (default UCI `Substrate`); `edge`
+  = raw MOVE-edge μ (poisoned at startpos — Na3 can outrank e4; see #447 / #834).
+- `--openings` seeds from ECO TSV under the chess games dir (this host:
+  `/vault/Data/Games/Chess/openings/`).
+- `--learned` blends corpus PST (UCI always does this; CLI does not unless flagged).
+- Tune STEER straw: `--cp-per-point` / `--cap` (UCI hardcodes 8 / 150 today).
+
+**Preflight the eyes:** `POST /chess/explore` with the FEN (and optional
+`player`) before trusting any Elo number — you are reading SCAN/WEIGHT, not
+guessing. Syzygy / shape / motifs / think-class are queryable (`api('chess')`)
+but **not yet wired into UCI STEER** (#833).
+
+**cutechess vs Stockfish** (`st=1`, `UCI_Elo=2000`) is a **watchable external
+demo**, not the scientific floor. It does not pass an openings book, does not
+expose cp/cap, and is easy to misread as “Laplace is weak” when the recipe never
+took advantage of fold+openings+explore. Tracked: #834. Framing:
+`.scratchpad/44` §8.
+
 ## The UCI engine (`laplace-uci`)
 
-`app/Laplace.Chess.Uci` builds a standalone UCI engine. It is an alpha-beta
-search whose root move ordering is biased by live substrate consensus, with a
-learned PST overlay folded from recorded games. Any UCI GUI (cutechess, Arena,
+`app/Laplace.Chess.Uci` builds a standalone UCI engine. Truncated Chess Forward
+Pass: classical alpha-beta (`PROPOSE`) with root consensus STEER (`Substrate`
+fold/edge/off) and learned PST overlay. Any UCI GUI (cutechess, Arena,
 BanksiaGUI) or `cutechess-cli` can drive it — point the GUI at the binary, no
 arguments needed.
 

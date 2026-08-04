@@ -33,7 +33,7 @@ public static class ChessReviewIngest
         // mainline and mints the line/event pair; the review's per-position judgments
         // carry the PLAYING (the event) as provenance context.
         if (ChessPgnDecomposer.TryParseGame(gameText) is not { } parsed) return;
-        var eventId = parsed.EventId;
+        var eventId = parsed.PlayingId;
         var src = ChessVocabulary.ReviewSourceId;
 
         var state = m.Initial();

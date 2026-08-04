@@ -100,10 +100,14 @@ Web (SPA, chess tabs): **Play** — board vs engine with the Explore panel
 **Chess Lab** — job runner with a live spectator board streaming every ply of
 cutechess and in-process self-play games.
 
-UCI: `laplace-uci` is a standalone engine any GUI can drive — alpha-beta whose
-root ordering is biased by live consensus (`Substrate` option: `fold` /
-`edge` / `off`), with a learned piece-square overlay folded from recorded
-games. Degrades to pure search if the DB is unreachable.
+UCI: `laplace-uci` is a standalone engine any GUI can drive. Under the Chess
+Forward Pass framing (`.scratchpad/44`, GH #833 / #818), industry “compute a
+move” is the `PROPOSE` stage only; today’s binary runs a truncated pass —
+compose → classical alpha-beta (`PROPOSE`) → thin root consensus STEER
+(`Substrate` option: `fold` / `edge` / `off`, ±150cp cap) → realize — with a
+learned piece-square overlay folded from recorded games. Degrades to pure
+search if the DB is unreachable. Superhuman on this project is finishing that
+pass (live STEER over the observational SoR + WITNESS), not cloning Stockfish.
 
 ## Feeding it (CLI; on Linux `scripts/ingest-source.sh <source> [path]`)
 
@@ -152,18 +156,27 @@ Evaluation IS ingestion; every match played teaches the next one.
 
 ## Known gaps (tracked; do not rediscover)
 
+- **Chess Forward Pass composition** — UCI/Play still a truncated pass; STEER
+  is a ±150cp straw into MOVE consensus, not a full re-rank over the
+  observational frontier (#833). Industry technique encyclopedia (Gemini 2026)
+  filters as PROPOSE accelerators vs memory substitutes — see `.scratchpad/44`.
+  Catalog/ISA compose epic: #818. Processor/firmware docs: #823.
+- **Drive/measure protocol** — do not treat cutechess `st=1` / SF Elo 2000
+  defaults as the strength floor; primary test is substrate-test
+  fold+openings+learned + explore preflight (#834).
 - Board geometry ladder + mantissa game trajectories are unbuilt — positions
   ride codepoint geometry (#512, #547). Blocks true position-similarity reads.
 - Consensus modeling questions — self-play trust weight, adjudicated-draw
-  testimony, drawish-book poisoning (#447, #449). This is why raw μ from the
-  start position ranks offbeat first moves above 1.e4: the fold is dominated
-  by self-play/blitz outcome testimony. Operator ruling needed before changing
-  testimony semantics.
+  testimony, drawish-book poisoning (#447, #449). Dual-critical for STEER
+  honesty. This is why raw μ from the start position ranks offbeat first moves
+  above 1.e4: the fold is dominated by self-play/blitz outcome testimony.
+  Operator ruling needed before changing testimony semantics.
 - Books: diagram/OCR extraction and a document-containment read for prose
   (#574); the 12 GM books are resident whole in the document lane, with only
   parseable games/lines attested (the `EXPLAINS` bridge).
 - Chess is not reachable from converse/chat/MCP — FEN-shaped prompts don't
-  resolve to position entities yet (#575). Read phase 2 (motif queries,
-  book-vs-practice contrast, geometry similarity) is #576.
+  resolve to position entities yet (#575 = RESOLVE into the mesh). Read phase 2
+  (motif queries, book-vs-practice contrast, geometry similarity) is #576 →
+  compose via #820, not a third Frechet engine.
 - `/chess/*` is unauthenticated (#489); write-path throughput at live DB scale
   is under investigation (#588).

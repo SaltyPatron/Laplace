@@ -335,14 +335,29 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
     }
 
     /// <summary>
-    /// multi_source_entity_count() groups ALL attestations by subject — unbounded at
-    /// 135M rows. Attempt within a budget; null means "not computed", which the
-    /// response contracts already tolerate. Durable fix is a calculated-layer stat
-    /// maintained post-ingest (doc 02, Issue 52).
+    /// multi_source_entity_count() is a GROUP BY over ALL attestations with a
+    /// count(DISTINCT source_id) — 169M rows and growing, with no bound and no index that
+    /// helps. Its own docstring called it unbounded; the durable fix is a calculated-layer
+    /// stat maintained post-ingest (doc 02, Issue 52).
+    ///
+    /// OFF BY DEFAULT ON THE SERVING PATH. A budget is not a bound: the query still burns
+    /// its FULL budget of cache-cold random I/O before being cancelled, and then returns
+    /// null anyway. MEASURED 2026-08-03: observed running 6m31s in DataFileRead against a
+    /// live ingest on a disk that was already the constraint, then discarded. Paying that
+    /// to compute nothing is strictly worse than not asking.
+    ///
+    /// Null already means "not computed" and every response contract tolerates it, so
+    /// declining costs the caller a field it was going to lose on timeout regardless.
+    /// Set LAPLACE_AUDIT_MULTISOURCE=1 to opt in when the substrate is idle and the number
+    /// is actually wanted.
     /// </summary>
+    private static bool MultiSourceCountEnabled =>
+        Environment.GetEnvironmentVariable("LAPLACE_AUDIT_MULTISOURCE") == "1";
+
     private static async Task<long?> TryReadMultiSourceCountAsync(
         NpgsqlConnection conn, int budgetSeconds, CancellationToken ct)
     {
+        if (!MultiSourceCountEnabled) return null;
         try
         {
             return await NpgsqlSubstrateReads.MultiSourceEntityCountAsync(

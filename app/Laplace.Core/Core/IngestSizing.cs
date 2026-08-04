@@ -357,6 +357,19 @@ public static class IngestSizing
             ? Math.Clamp(budget / 25_000, MaxIntentsPerCommitCap, 48)
             : MaxIntentsPerCommitCap;
 
+        // Fat-record sources (chess) can resolve a commit_rows just above
+        // recordBatch but below batch*8 — the estRowsPerIntent heuristic then
+        // forces max_intents=1 and serializes apply on a multi-core box
+        // (measured 2026-08-03: ChessPgn 4MiB estimate → commit_rows=429,
+        // max_intents=1, ~50% of one core). When the budget clearly holds more
+        // than one batch, allow parallel intents up to the heap cap.
+        if (byRowBudget == 1 && budget >= recordBatch)
+        {
+            // Ceiling division: how many recordBatch-sized intents fit in the budget.
+            int byBatch = (budget + recordBatch - 1) / recordBatch;
+            byRowBudget = Math.Min(heapCap, Math.Max(2, byBatch));
+        }
+
         return Math.Max(1, Math.Min(byRowBudget, heapCap));
     }
 

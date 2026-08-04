@@ -9,8 +9,8 @@ public static class ChessSeedManifest
     public static readonly IReadOnlyList<string> TypeNodeNames =
     [
         "Chess_Position", "Chess_Substructure", "Chess_Result", "Chess_Player",
-        "Chess_Game", "Chess_Event", "Chess_Movetext", "Chess_AnalysisMarker", "Chess_Eval",
-        "Chess_Concept", "Chess_BookLine",
+        "Chess_Game", "Chess_Event", "Chess_Playing", "Chess_Movetext", "Chess_AnalysisMarker",
+        "Chess_Eval", "Chess_Concept", "Chess_BookLine",
     ];
 
     // Named constants for the relation surfaces other chess code needs to NAME rather

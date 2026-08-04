@@ -70,8 +70,10 @@ countable fact; prose docs cite it instead of embedding counts.
 - [34_Ops_Logging_CLI_Chess_Tooling_Campaign.md](../.scratchpad/34_Ops_Logging_CLI_Chess_Tooling_Campaign.md) — log — ops logging / CLI foundation / chess pipeline-fusion campaign; workstreams drained to GH 2026-07-23; #590 correction block in-file (2026-07-23)
 - [35_Tech_Debt_Refactor_Campaign_2026-07-24.md](../.scratchpad/35_Tech_Debt_Refactor_Campaign_2026-07-24.md) — log — tech-debt/refactor campaign; 9 PRs across #620–#627, three documented mirages, remainder is research/profile-gated (2026-07-25)
 - [36_LSP_Semantic_Decomposer_Design_GH593.md](../.scratchpad/36_LSP_Semantic_Decomposer_Design_GH593.md) — log — design proposal for the LSP-backed semantic decomposer (#593) (2026-07-25)
-- [37_State_Of_The_Build_And_Path_To_Finish.md](../.scratchpad/37_State_Of_The_Build_And_Path_To_Finish.md) — log — whole-project audit: live state, spec-36 ladder re-measured, 200-issue triage, P0–P5 prioritization, proposed definition of finished-v1 (2026-07-26)
+- [37_State_Of_The_Build_And_Path_To_Finish.md](../.scratchpad/37_State_Of_The_Build_And_Path_To_Finish.md) — log — HISTORICAL whole-project audit (2026-07-26); P0–P5 + finished-v1 proposal — **drift baseline only**, not status authority (2026-08-02)
 - [38_Chess_Player_Move_Overlay_Design.md](../.scratchpad/38_Chess_Player_Move_Overlay_Design.md) — log — design proposal, PROPOSED/unimplemented: top-roster "who plays what here" board overlay; rides `chess_player_moves`/`chess_ranked`; corpus (full OTB since 1900 + online since 1995) is in hand; scale path is #451 evidence virtualization, NOT per-ply row materialization — record-first, derive under the law in force (2026-08-01)
+- [42_Issue_Backlog_Triage_2026-08-02.md](../.scratchpad/42_Issue_Backlog_Triage_2026-08-02.md) — log — **current backlog ledger**: doc37 drift, `triage:*` dispositions, campaign umbrellas (#791/#792/#793), priority:high ≤12, stop-loss for new issues (2026-08-02)
+- [44_Chess_Forward_Pass_And_Industry_Filter_2026-08-03.md](../.scratchpad/44_Chess_Forward_Pass_And_Industry_Filter_2026-08-03.md) — log — chess = ISA program / forward pass; Gemini industry encyclopedia filtered as PROPOSE accelerators vs memory substitutes; validity≠completeness; unique observational metrics; issue map under #818 (2026-08-03)
 - [session-tasks.md](../.scratchpad/session-tasks.md) — log — HISTORICAL ingest-lane task list; unfinished rows → GH #429–#434 (2026-07-18)
 
 ## `docs/invention/` (agent onboarding)
@@ -83,7 +85,7 @@ countable fact; prose docs cite it instead of embedding counts.
 
 ## Decisions — `docs/decisions/`
 
-- [0001-highway-bit-order.md](decisions/0001-highway-bit-order.md) — PROPOSED — explicit bit field vs alphabetical codegen + recurring reseed; operator decision pending (2026-07-18)
+- [0001-highway-bit-order.md](decisions/0001-highway-bit-order.md) — ACCEPTED 2026-07-20 — explicit `bit = N` append-only registry; implemented #551 (closed 2026-08-02)
 
 Renumbering note: `22_Patent_Portfolio_Audit` → `32` and the four `27_*` files →
 `27a`–`27d` (2026-07-18) resolved filename collisions; prose citations of "doc 22"/

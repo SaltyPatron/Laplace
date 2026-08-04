@@ -131,6 +131,51 @@ check_path "tree-sitter runtime"  "/usr/local/lib/libtree-sitter.so" no
 check_path "tree-sitter grammars" "/vault/Data/TreeSitter" no
 echo
 
+# POSTGRESQL WRITE-PATH FEATURES. configure does NOT auto-detect any of these: omit the
+# flag or the header and the feature is silently absent, with no warning and no error. The
+# only symptom is a shorter enumvals list on a GUC nobody reads.
+#
+# MEASURED 2026-08-03 on the live cluster: wal_compression enumvals {pglz,on,off} and
+# io_method enumvals {sync,worker}, i.e. WAL compressed with the SLOWEST available codec
+# and async I/O capped by the io_workers pool, on NVMe. liblz4-dev and libzstd-dev were
+# already installed the whole time -- external/CMakeLists.txt simply never passed the flags.
+# Checked here so a host is caught BEFORE a 12-minute ingest measures the consequence.
+echo "=== PostgreSQL build features (external/CMakeLists.txt passes --with-lz4/zstd/liburing) ==="
+check_header() {
+    local label="$1" header="$2" pkg="$3"
+    if [ -f "$header" ]; then
+        printf "${green}\u2713${reset} %-30s \u2192 %s\n" "$label" "$header"
+        ok=$((ok + 1))
+    else
+        printf "${red}\u2717${reset} %-30s MISSING (apt install %s)\n" "$label" "$pkg"
+        errors=$((errors + 1))
+    fi
+}
+check_header "lz4 (WAL compression)"   "/usr/include/lz4.h"      "liblz4-dev"
+check_header "zstd (WAL compression)"  "/usr/include/zstd.h"     "libzstd-dev"
+check_header "liburing (io_method)"    "/usr/include/liburing.h" "liburing-dev"
+
+# A built cluster proves it better than a header does: enumvals is the ground truth.
+# MUST interrogate the LAPLACE build, never whatever pg_config is first on PATH. A distro
+# PG18 from PGDG ships --with-lz4/zstd/liburing, so `command -v pg_config` reports the
+# features as present while the cluster that actually runs (/opt/laplace/pgsql-18, built
+# from external/CMakeLists.txt) has none of them. Checking the wrong binary is how this
+# stayed invisible.
+LAPLACE_PGC="${LAPLACE_PG_PREFIX:-/opt/laplace/pgsql-18}/bin/pg_config"
+if [ -x "$LAPLACE_PGC" ]; then
+    PGC="$LAPLACE_PGC"
+    for feat in lz4 zstd liburing; do
+        if "$PGC" --configure 2>/dev/null | grep -q -- "--with-$feat"; then
+            printf "${green}\u2713${reset} %-30s \u2192 compiled in\n" "pg --with-$feat"
+            ok=$((ok + 1))
+        else
+            printf "${yellow}!${reset} %-30s not in %s (rebuild pg)\n" "pg --with-$feat" "$PGC"
+            warnings=$((warnings + 1))
+        fi
+    done
+fi
+echo
+
 echo "=== Summary ==="
 printf "${green}%d OK${reset}, ${yellow}%d warning(s)${reset}, ${red}%d error(s)${reset}\n" "$ok" "$warnings" "$errors"
 [ "$errors" -eq 0 ]

@@ -37,13 +37,31 @@ public sealed class ChessLineIdentityTests
         + "1. c4 e6 2. d4 d5 1/2-1/2\n";
 
     [Fact]
-    public void SameMainline_DifferentNotationAndProvenance_SameLine_DifferentEvents()
+    public void SameMainline_DifferentNotationAndProvenance_SameLine_DifferentPlayings()
     {
         var a = ChessPgnDecomposer.TryParseGame(GameCanonical)!;
         var b = ChessPgnDecomposer.TryParseGame(GameVariantNotation)!;
 
         Assert.Equal(a.LineId, b.LineId);       // one PLAY, one content entity
-        Assert.NotEqual(a.EventId, b.EventId);  // two playings, two provenance handles
+        Assert.NotEqual(a.PlayingId, b.PlayingId);  // two playings, two provenance handles
+        Assert.NotEqual(a.EventId, b.EventId);      // different [Event] tags → different tournaments
+    }
+
+    [Fact]
+    public void SameTournamentTags_ShareEventId_DistinctPlayingsAndLines()
+    {
+        const string g1 =
+            "[Event \"Open\"]\n[Site \"Oslo\"]\n[Date \"2025.01.01\"]\n"
+            + "[White \"A\"]\n[Black \"B\"]\n[Round \"1\"]\n[Result \"1-0\"]\n\n1. e4 e5 1-0\n";
+        const string g2 =
+            "[Event \"Open\"]\n[Site \"Oslo\"]\n[Date \"2025.01.01\"]\n"
+            + "[White \"C\"]\n[Black \"D\"]\n[Round \"1\"]\n[Result \"0-1\"]\n\n1. d4 d5 0-1\n";
+        var a = ChessPgnDecomposer.TryParseGame(g1)!;
+        var b = ChessPgnDecomposer.TryParseGame(g2)!;
+
+        Assert.Equal(a.EventId, b.EventId); // one tournament, many games
+        Assert.NotEqual(a.PlayingId, b.PlayingId);
+        Assert.NotEqual(a.LineId, b.LineId);
     }
 
     [Fact]
@@ -113,20 +131,20 @@ public sealed class ChessLineIdentityTests
         var change = b.SetInputUnitsConsumed(1).Build();
 
         var plays = Assert.Single(change.Attestations, a => a.TypeId == ChessVocabulary.PlaysLineType);
-        Assert.Equal(parsed.EventId, plays.SubjectId);
+        Assert.Equal(parsed.PlayingId, plays.SubjectId);
         Assert.Equal(parsed.LineId, plays.ObjectId);
         Assert.Equal(Glicko2.ScoreWin, plays.SumScoreFp1e9); // 1-0, white POV
         Assert.Equal(1, plays.ObservationCount);
 
         var lineOutcome = Assert.Single(change.Attestations,
             a => a.TypeId == ChessVocabulary.OutcomeType && a.SubjectId == parsed.LineId);
-        Assert.Equal(parsed.EventId, lineOutcome.ContextId);
+        Assert.Equal(parsed.PlayingId, lineOutcome.ContextId);
         Assert.Equal(Glicko2.ScoreWin, lineOutcome.SumScoreFp1e9);
         Assert.Equal(1, lineOutcome.ObservationCount);
 
-        // Both entities exist for the novelty gate: the line as content, the event as
-        // the slim provenance handle.
+        // Line = content; playing = novelty/attestation handle; tournament Event is separate.
         Assert.Contains(change.Entities, e => e.Id == parsed.LineId && e.TypeId == ChessVocabulary.GameType);
+        Assert.Contains(change.Entities, e => e.Id == parsed.PlayingId && e.TypeId == ChessVocabulary.PlayingType);
         Assert.Contains(change.Entities, e => e.Id == parsed.EventId && e.TypeId == ChessVocabulary.EventType);
     }
 
@@ -139,7 +157,7 @@ public sealed class ChessLineIdentityTests
         var first = ChessPgnDecomposer.TryParseGame(GameCanonical)!;
         var second = ChessPgnDecomposer.TryParseGame(GameVariantNotation)!; // same line, new event
         var reader = new FakeReader();
-        reader.Present.Add(first.EventId);
+        reader.Present.Add(first.PlayingId);
 
         var novel = new List<ChessGameRecord>();
         await foreach (var g in ChessPgnDecomposer.FilterNovelAsync(
@@ -147,7 +165,7 @@ public sealed class ChessLineIdentityTests
             novel.Add(g);
 
         var kept = Assert.Single(novel);
-        Assert.Equal(second.EventId, kept.EventId);
+        Assert.Equal(second.PlayingId, kept.PlayingId);
         Assert.Equal(first.LineId, kept.LineId); // the shared line did not block the new playing
     }
 

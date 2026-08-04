@@ -103,4 +103,29 @@ public sealed class IngestSizingTests
         Assert.Equal(4096, plan.RecordBatchSize);
         Assert.Equal(8192, plan.CommitRows);
     }
+
+    [Fact]
+    public void Resolve_ChessPgnProfile_AllowsParallelIntentsOn12CoreBudget()
+    {
+        // Hart-server-shaped: 12 apply partitions, 11 compose workers, 4 GiB WS.
+        // The retired 4_000_000 EstBytesPerRecord collapsed this to max_intents=1.
+        var plan = IngestSizing.Resolve(
+            performanceCoreCount: 12,
+            fileWorkers: 10,
+            applyPartitions: 12,
+            profile: IngestSourceProfile.ChessPgn,
+            workingSetBudgetBytes: 4L << 30,
+            composeWorkers: 11);
+        Assert.Equal(256, plan.RecordBatchSize);
+        Assert.True(plan.CommitRows >= plan.RecordBatchSize * 2);
+        Assert.True(plan.MaxIntentsPerCommit >= 3);
+    }
+
+    [Fact]
+    public void ResolveMaxIntentsPerCommit_SmallCommitAboveTwoBatches_NotSerializedToOne()
+    {
+        // commit_rows=429, batch=256: old formula → 429/(256*8)=0 → max_intents=1.
+        int n = IngestSizing.ResolveMaxIntentsPerCommit(256, 429);
+        Assert.True(n >= 2);
+    }
 }

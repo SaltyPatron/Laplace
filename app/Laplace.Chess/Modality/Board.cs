@@ -23,6 +23,68 @@ public enum CastleRights : byte
 public sealed class Board
 {
     public readonly Piece[] Squares = new Piece[128];
+
+    // Piece bitboards, kept in step with Squares so the attack tables (ChessAttacks) have
+    // something to index. Layout matches Bitboards.Of: slot = (int)piece + 6, bit =
+    // (rank << 3) | file. Occupied is derived on read rather than stored, so it can never be
+    // the thing that goes stale.
+    //
+    // MAINTAINED ONLY THROUGH Set(). Squares stays public for reads (See probes hypothetical
+    // occupancies over the raw array, and the mailbox generator still walks it), but every WRITE
+    // must go through Set or the two representations diverge SILENTLY — no exception, just wrong
+    // move generation. BoardBitboardConsistencyTests walks perft and re-checks after every
+    // make and unmake, which is what actually enforces this.
+    private readonly ulong[] _bb = new ulong[13];
+
+    public ulong PieceBB(Piece p) => _bb[(int)p + 6];
+    public ulong WhiteBB => _bb[(int)Piece.WPawn + 6] | _bb[(int)Piece.WKnight + 6] | _bb[(int)Piece.WBishop + 6]
+                          | _bb[(int)Piece.WRook + 6] | _bb[(int)Piece.WQueen + 6] | _bb[(int)Piece.WKing + 6];
+    public ulong BlackBB => _bb[(int)Piece.BPawn + 6] | _bb[(int)Piece.BKnight + 6] | _bb[(int)Piece.BBishop + 6]
+                          | _bb[(int)Piece.BRook + 6] | _bb[(int)Piece.BQueen + 6] | _bb[(int)Piece.BKing + 6];
+    public ulong OccupiedBB => WhiteBB | BlackBB;
+
+    /// <summary>
+    /// THE only sanctioned way to change a square. Clears the outgoing piece's bit and sets the
+    /// incoming one, so Squares and the bitboards move together.
+    /// </summary>
+    public void Set(int sq0x88, Piece p)
+    {
+        Piece old = Squares[sq0x88];
+        if (old == p) return;
+        int bit = (RankOf(sq0x88) << 3) | FileOf(sq0x88);
+        ulong m = 1UL << bit;
+        if (old != Piece.Empty) _bb[(int)old + 6] &= ~m;
+        if (p != Piece.Empty) _bb[(int)p + 6] |= m;
+        Squares[sq0x88] = p;
+    }
+
+    /// <summary>Rebuild the bitboards from Squares. For construction paths and consistency checks.</summary>
+    public void RebuildBitboards()
+    {
+        Array.Clear(_bb, 0, _bb.Length);
+        for (int sq = 0; sq < 128; sq++)
+        {
+            if ((sq & 0x88) != 0) { sq += 7; continue; }
+            var p = Squares[sq];
+            if (p == Piece.Empty) continue;
+            _bb[(int)p + 6] |= 1UL << ((RankOf(sq) << 3) | FileOf(sq));
+        }
+    }
+
+    /// <summary>True when the maintained bitboards still agree with Squares. Test-facing.</summary>
+    public bool BitboardsConsistent()
+    {
+        var expect = new ulong[13];
+        for (int sq = 0; sq < 128; sq++)
+        {
+            if ((sq & 0x88) != 0) { sq += 7; continue; }
+            var p = Squares[sq];
+            if (p == Piece.Empty) continue;
+            expect[(int)p + 6] |= 1UL << ((RankOf(sq) << 3) | FileOf(sq));
+        }
+        for (int i = 0; i < 13; i++) if (expect[i] != _bb[i]) return false;
+        return true;
+    }
     public bool WhiteToMove;
     public CastleRights Castle;
     public int EpSquare;
@@ -72,6 +134,10 @@ public sealed class Board
             BlackQueenRookFile = BlackQueenRookFile,
         };
         Array.Copy(Squares, b.Squares, 128);
+        // Copy the maintained bitboards too. Array.Copy of Squares alone would leave the clone's
+        // bitboards empty while its Squares were full — the exact silent divergence Set() exists
+        // to prevent, arriving through the back door.
+        Array.Copy(_bb, b._bb, _bb.Length);
         return b;
     }
 
@@ -112,7 +178,7 @@ public sealed class Board
             foreach (char c in ranks[r])
             {
                 if (char.IsDigit(c)) { file += c - '0'; continue; }
-                b.Squares[Sq(file, rank)] = CharToPiece(c);
+                b.Set(Sq(file, rank), CharToPiece(c));
                 file++;
             }
             if (file != 8) throw new FormatException($"Invalid FEN rank width: {fen}");

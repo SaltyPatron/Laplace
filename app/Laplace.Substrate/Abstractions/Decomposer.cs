@@ -406,6 +406,35 @@ public abstract class ComposeDecomposer<TRecord> : Decomposer<TRecord>
             SourceId, BatchLabelPrefix, DefaultBatchSize, options, context.Reader, PipelineProfile);
 }
 
+/// <summary>
+/// Imperative-compose source spread across MANY files: the multi-file worker pool AND the
+/// <see cref="DirectComposeHandler{TRecord}"/>, which nothing joined before.
+///
+/// A compose-shaped source with more than one input file previously had to choose between
+/// <see cref="ComposeDecomposer{TRecord}"/> — which gives you Compose() but drives ONE serial
+/// record stream — and <see cref="DecomposerMultiFile{TRecord}"/>, which gives you the parallel
+/// pool but no compose handler. ChessPgnDecomposer chose the first and streamed 11 PGN files
+/// through a single thread, on a box whose other multi-file sources fan out by default.
+/// The missing base is the whole reason; there is nothing chess-specific about it.
+///
+/// Files carry no cross-file ordering (references resolve content-addressed), so parallelism
+/// here is the same claim the multi-file pool already makes for every other source.
+/// </summary>
+public abstract class ComposeDecomposerMultiFile<TRecord> : DecomposerMultiFile<TRecord>
+{
+    protected abstract void Compose(TRecord record, SubstrateChangeBuilder builder);
+
+    protected sealed override IIngestRecordHandler<TRecord> CreateHandlerForFile(string fileLabel) =>
+        new DirectComposeHandler<TRecord>(Compose);
+
+    // Per-FILE label, not BatchLabelPrefix: with workers running concurrently the batch label is
+    // the only thing attributing a batch to its input file in the run journal.
+    protected override IngestBatchConfig ConfigForFile(
+        string fileLabel, ISubstrateReader? reader, DecomposerOptions options) =>
+        IngestPipelineDefaults.Compose(
+            SourceId, fileLabel, DefaultBatchSize, options, reader, PipelineProfile);
+}
+
 public abstract class RelationTripleDecomposer : Decomposer<RelationTripleRecord>
 {
     public override int EstimatedBytesPerRecord => IngestSourceProfile.RelationTriple.EstBytesPerRecord;

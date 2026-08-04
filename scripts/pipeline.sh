@@ -261,6 +261,13 @@ phase_build() {
   else
     local data_root="${LAPLACE_DATA_ROOT:-/vault/Data}"
     local ucd="${LAPLACE_UCD_PATH:-$data_root/UCD/Public/UCD/latest}"
+    # Chess openings corpus, declared exactly like the UCD corpus above. engine/core
+    # deliberately carries NO default path (a hardcoded /vault in CMake was removed), so if
+    # nothing passes this the chess position perfcache target silently disappears — its guard
+    # is an `if(LAPLACE_CHESS_OPENINGS ...)` whose else branch is only a message(STATUS).
+    # That is why the blob in share/laplace was a hand copy (owner ahart:ahart) instead of an
+    # install product (laplace-runner group, install perms) like t0 and highway.
+    local chess_openings="${LAPLACE_CHESS_OPENINGS:-$data_root/Games/Chess/openings}"
     local build_flags=()
     [[ "$CLEAN_FIRST" -eq 1 ]] && build_flags+=(--clean-first)
     cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
@@ -273,7 +280,8 @@ phase_build() {
       -DLAPLACE_UCD_PATH="$ucd" \
       -DLAPLACE_UCDXML_ZIP="$ucd/ucdxml/ucd.nounihan.flat.zip" \
       -DLAPLACE_DUCET_FILE="$ucd/uca/allkeys.txt" \
-      -DLAPLACE_UCD_CONFORMANCE_DIR="$ucd/ucd"
+      -DLAPLACE_UCD_CONFORMANCE_DIR="$ucd/ucd" \
+      -DLAPLACE_CHESS_OPENINGS="$chess_openings"
     LD_LIBRARY_PATH="$ROOT/build/engine/core:$ROOT/build/engine/dynamics:$ROOT/build/engine/synthesis:${LD_LIBRARY_PATH:-}" \
       cmake --build build "${build_flags[@]}"
     fp_record build-native "$native_fp"
@@ -288,6 +296,20 @@ phase_build() {
   fi
   echo "T0 perfcache ready: $t0"
   echo "highway perfcache ready: $hw"
+  # Chess position blob (tier-2 geometry, spec 33 / GH #822) gets the SAME existence gate.
+  # Only conditional on the corpus being present: absent corpus is a legitimate host state
+  # (a build box with no /vault), a present corpus with no blob is a skipped target.
+  local chess_bin
+  if [[ -d "$chess_openings" ]]; then
+    chess_bin=$(find "$ROOT/build" -name 'laplace_chess_position_perfcache*.bin' 2>/dev/null | head -1 || true)
+    if [[ -z "$chess_bin" ]]; then
+      echo "::error::chess position perfcache missing after ALL build, but the openings corpus EXISTS at $chess_openings — the CMake target was skipped (LAPLACE_CHESS_OPENINGS not reaching engine/core, or ChessCatalogSurfaces missing)"
+      exit 1
+    fi
+    echo "chess position perfcache ready: $chess_bin"
+  else
+    echo "chess position perfcache: openings corpus absent at $chess_openings — target not expected"
+  fi
   echo "===== PHASE — BUILD APP ====="
   phase_build_app
 }

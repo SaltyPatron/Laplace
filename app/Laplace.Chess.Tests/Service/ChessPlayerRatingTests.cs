@@ -79,7 +79,7 @@ public sealed class ChessPlayerRatingTests
     {
         var change = Compose(WhiteWins);
         // GH #736: provenance context is the PLAYING (the event handle), never the line.
-        var eventId = ChessPgnDecomposer.TryParseGame(WhiteWins)!.EventId;
+        var eventId = ChessPgnDecomposer.TryParseGame(WhiteWins)!.PlayingId;
         // The consensus cell aggregates; the evidence row still says which playing it came
         // from, so a rating can always be walked back to the games that made it.
         Assert.Equal(eventId, Single(change, Alice, Outcome).ContextId);
