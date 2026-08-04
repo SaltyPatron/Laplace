@@ -53,12 +53,20 @@ steps AS MATERIALIZED (
 -- Subject-restricted: the line's positions drive, attestations is probed by
 -- subject_id. Both endpoints of every step are line points, so this covers the
 -- from_pos join and the to_pos outer join alike.
+-- One row per position. attestations is keyed by (subject, type, object, source,
+-- context), so a position carrying Syzygy WDL from more than one source yields
+-- several rows per pos. Left uncollapsed that is not merely duplication: the
+-- to_pos join below tests `IS DISTINCT FROM loss`, so a position with both a
+-- `loss` deposit and any other deposit would keep the non-loss row and report a
+-- missed finish that is not one — and the duplicates then consume p_limit.
+-- max(object_id) is the same deterministic collapse chess_syzygy_line uses.
 wdl AS MATERIALIZED (
-    SELECT a.subject_id AS pos, a.object_id AS wdl_id
+    SELECT l.pos AS pos, max(a.object_id) AS wdl_id
     FROM line l
     JOIN rel r ON true
     JOIN attestations a ON a.subject_id = l.pos
                        AND a.type_id = r.wdl
+    GROUP BY l.pos
 ),
 missed AS MATERIALIZED (
     SELECT s.ply, s.from_pos, s.to_pos, fw.wdl_id AS from_wdl_id, tw.wdl_id AS to_wdl_id
