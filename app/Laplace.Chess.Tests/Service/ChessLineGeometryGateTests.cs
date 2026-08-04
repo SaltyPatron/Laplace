@@ -14,7 +14,13 @@ namespace Laplace.Chess.Service.Tests;
 /// polyline (what <c>entity_curve(line)</c> builds once a trajectory is deposited).
 /// Never Frechet on packed <c>physicalities.trajectory</c>.
 /// </summary>
-[Trait("Tier", "integration")]
+// Tier=db, not "integration". EVERY test here needs a live PostgreSQL: the Frechet and
+// angular-distance helpers take an NpgsqlConnection and the geometry they assert is
+// computed server-side. CI's unit filter is `Tier!=perf & Tier!=db`, which "integration"
+// passes — so this class ran in the unit lane and failed with 3D000 "database laplace does
+// not exist" the moment the box was legitimately empty between a recreate and a seed.
+// A test that cannot run without production data is not a unit test and must not gate one.
+[Trait("Tier", "db")]
 public sealed class ChessLineGeometryGateTests
 {
     // Same QGD pair as ChessLineIdentityTests — path identity vs destination collision.

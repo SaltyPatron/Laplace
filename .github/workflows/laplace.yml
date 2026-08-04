@@ -600,9 +600,28 @@ jobs:
           echo "$detail"
           if python3 -c 'import json,sys; d=json.loads(sys.argv[1]); sys.exit(0 if (d.get("substrate_reachable") and d.get("perfcache_ready") and not d.get("consensus_relations")) else 1)' "$detail"
           then
-            echo "::error::UNSEEDED_SUBSTRATE: API reachable + perfcache loaded, but substrate has no consensus/entities. Heal via seed-foundation dispatch — this gate does not auto-reseed."
+            # An EMPTY substrate is not a broken deploy. The service is up, the perfcache
+            # loaded, the extension installed — publish did its job. What is missing is
+            # DATA, which publish does not own and cannot heal (seeds stay dispatch-only).
+            #
+            # This used to write seeded=false and then exit 1, which contradicted itself:
+            # smoke and eval already gate on `needs.publish.outputs.seeded == 'true'`, so
+            # the output published here is exactly what makes them skip cleanly — and
+            # failing the job meant that guard could never be reached. /health/ready
+            # reports ready:false while unseeded, so the poll above can never succeed on a
+            # fresh database, which made main structurally red for the entire window
+            # between a recreate and a seed. That window is now normal: HASH(id)
+            # repartitioning made drop-then-recreate the upgrade path.
+            #
+            # #792 is preserved. That defect was a STALE deploy silently skipping smoke;
+            # every not-ready-for-any-other-reason path below still fails loudly. The one
+            # case softened here is the one the substrate itself reports as merely empty.
+            echo "::warning::UNSEEDED_SUBSTRATE: API reachable + perfcache loaded, but substrate has no consensus/entities. Downstream smoke/eval will skip. Heal via: gh workflow run \"Seed — foundation\" -f source=ladder"
             echo "seeded=false" >> "$GITHUB_OUTPUT"
-            exit 1
+            # Deliberately NOT stamped: the stamp lets a later run skip publish on an
+            # unchanged domain, and this box has not served a ready check. Re-publishing
+            # is idempotent; skipping one that was never verified is not.
+            exit 0
           fi
 
           echo "::error::laplace-api not ready 60s after restart — readiness detail above"

@@ -106,7 +106,7 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
                 // event — the marker gates derivation, the event entity gates the record.
                 offsets[i] = (probeIds.Count, probeIds.Count + 1);
                 probeIds.Add(ChessVocabulary.AnalysisMarkerId(parsed.PlayingId, ChessAnalyze.Version));
-                probeIds.Add(parsed.EventId);
+                probeIds.Add(parsed.PlayingId);
             }
             else
             {
@@ -200,7 +200,7 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
                 var posId = ChessGraph.EmitPosition(b, m.StateKey(state), src);
                 if (ContentEmitter.Emit(b, comment.Trim(), src) is { } commentId)
                     b.AddAttestation(NativeAttestation.Categorical(
-                        commentId, "EXPLAINS", posId, src, parsed.EventId, BookWitnessWeight));
+                        commentId, "EXPLAINS", posId, src, parsed.PlayingId, BookWitnessWeight));
             }
         }
 
@@ -269,7 +269,7 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
             yield return new ChessBookRecord(title, gameText, Array.Empty<string>(), context)
             {
                 Parsed = parsed,
-                RootId = parsed.EventId,
+                RootId = parsed.PlayingId,
             };
         }
 
