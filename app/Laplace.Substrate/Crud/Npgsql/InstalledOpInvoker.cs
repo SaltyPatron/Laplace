@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Npgsql;
+using NpgsqlTypes;
 
 namespace Laplace.SubstrateCRUD.Npgsql;
 
@@ -79,12 +80,7 @@ public static class InstalledOpInvoker
         var sql = $"SELECT * FROM laplace.{QuoteIdent(name)}({string.Join(", ", call)}) LIMIT {rowCap + 1}";
         await using var cmd = readOnlyDb.CreateCommand(sql);
         foreach (var (slot, value) in bound)
-        {
-            if (value is null)
-                cmd.Parameters.Add(new NpgsqlParameter(slot, NpgsqlTypes.NpgsqlDbType.Text) { Value = DBNull.Value });
-            else
-                cmd.Parameters.AddWithValue(slot, value);
-        }
+            cmd.Parameters.Add(BindArg(slot, value));
 
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         var rows = new List<IReadOnlyDictionary<string, object?>>();
@@ -130,6 +126,20 @@ public static class InstalledOpInvoker
         return result;
     }
 
+    /// <summary>
+    /// Split an argument list on top-level commas.
+    ///
+    /// The plain toggle handles a doubled quote (<c>''</c>) correctly and needs no
+    /// escape case — reviewers have flagged it twice (GH #843) on the theory that
+    /// <c>DEFAULT 'a''b, c'</c> splits at the inner comma. It does not. The pair
+    /// toggles twice with no character between the quotes, so the momentary
+    /// unquoted state is never observed by any other branch; an explicit
+    /// doubled-quote arm is byte-for-byte equivalent on every input. Pinned by
+    /// <c>ParseSignature_DoubledQuoteInDefaultDoesNotSplitTheParameter</c>.
+    ///
+    /// What this does NOT handle: dollar-quoting and <c>E'\''</c> backslash escapes.
+    /// <c>pg_get_function_arguments</c> emits neither, so neither reaches here.
+    /// </summary>
     private static List<string> SplitTopLevel(string text)
     {
         var parts = new List<string>();
@@ -151,12 +161,46 @@ public static class InstalledOpInvoker
 
     private static string QuoteIdent(string ident) => '"' + ident.Replace("\"", "\"\"") + '"';
 
-    private static object? OpValue(JsonNode? node) => node switch
+    /// <summary>
+    /// Map one JSON argument to a value Npgsql can bind. A JSON array becomes a
+    /// <see cref="string"/> array, which <see cref="BindArg"/> binds as a typed
+    /// <c>text[]</c> — never a hand-composed <c>{a,b}</c> literal. Composing the
+    /// literal mis-parses <em>silently</em>: an element holding a comma splits into
+    /// two members, and braces, quotes, backslashes or edge whitespace shift the
+    /// parse with no error. It also cannot express SQL NULL apart from the
+    /// four-character string <c>NULL</c>. Binding removes the quoting question
+    /// rather than answering it (GH #843).
+    /// </summary>
+    public static object? OpValue(JsonNode? node) => node switch
     {
         null => null,
         JsonValue v when v.TryGetValue<string>(out var s) => s,
-        JsonArray a => "{" + string.Join(",", a.Select(e => OpValue(e) as string ?? "NULL")) + "}",
+        JsonArray a => a.Select(ElementText).ToArray(),
         _ => node.ToJsonString(),
+    };
+
+    /// <summary>
+    /// One array element as text. JSON null stays <see langword="null"/> so it reaches
+    /// the server as SQL NULL, distinct from the string <c>"NULL"</c>.
+    /// </summary>
+    private static string? ElementText(JsonNode? node) => node switch
+    {
+        null => null,
+        JsonValue v when v.TryGetValue<string>(out var s) => s,
+        _ => node.ToJsonString(),
+    };
+
+    /// <summary>
+    /// Bind one argument. Arrays carry an explicit element type so the server parses
+    /// the array from the binary protocol; nulls carry <c>text</c> because an untyped
+    /// <c>DBNull</c> leaves the parameter undeclared at the server (42P08). The
+    /// declared-type cast in the call text converts from there.
+    /// </summary>
+    public static NpgsqlParameter BindArg(string slot, object? value) => value switch
+    {
+        null => new NpgsqlParameter(slot, NpgsqlDbType.Text) { Value = DBNull.Value },
+        string?[] items => new NpgsqlParameter(slot, NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = items },
+        _ => new NpgsqlParameter(slot, value),
     };
 
     private static object? Normalize(object value) => value switch
