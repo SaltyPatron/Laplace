@@ -9,10 +9,10 @@ indexes/entities_type_btree.sql.in
 indexes/entities_tier_type_btree.sql.in
 indexes/drop_entities_tier_btree.sql.in
 indexes/drop_entities_tier_type_btree.sql.in
+indexes/drop_undiscriminating_indexes.sql.in
 indexes/entities_first_observed_btree.sql.in
 indexes/entities_created_at_brin.sql.in
 indexes/physicalities_entity_btree.sql.in
-indexes/physicalities_type_btree.sql.in
 indexes/physicalities_coord_gist.sql.in
 indexes/physicalities_radius_btree.sql.in
 indexes/physicalities_residual_btree.sql.in
@@ -47,8 +47,6 @@ functions/glicko2/laplace_glicko2_accumulate_games.sql.in
 functions/cascade/astar_path_raw.sql.in
 functions/trajectory/trajectory_point_count.sql.in
 functions/trajectory/trajectory_prefix_distance.sql.in
-indexes/entities_tier_brin.sql.in
-indexes/entities_tier_type_brin.sql.in
 schema/tables/consensus.sql.in
 indexes/consensus_object_btree.sql.in
 indexes/consensus_type_btree.sql.in
