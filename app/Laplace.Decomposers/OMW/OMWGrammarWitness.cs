@@ -52,14 +52,31 @@ internal sealed class OMWGrammarWitness(string fileLang) : IGrammarWitness
 
 
 
+                // contextId = langId. OMW reads one file per language, so the
+                // language of every lemma->synset membership is known here and was
+                // being discarded. HAS_DEFINITION and HAS_EXAMPLE below already pass
+                // langId; these two did not, and the cross-lingual edge is the one
+                // that most needs the scope.
+                //
+                // MEASURED 2026-08-04, before this fix: the surface "is" gained
+                // IS_SYNONYM_OF -> "ice" with 9 witnesses (Danish/Norwegian/Dutch for
+                // ice) against 1 witness for English "is". With a NULL context no
+                // reader could tell which language attested the edge — the language
+                // lives on the surface but not on the sense and not on the edge — so
+                // the English copula elected "ice" and election_correctness fell from
+                // 5/6 to 2/6, with four of six probes answering "ice". GH #867.
                 b.AddAttestation(NativeAttestation.Categorical(
-                    root, "IS_SYNONYM_OF", synId, OMWDecomposer.Source, null, TC.AcademicCurated));
+                    root, "IS_SYNONYM_OF", synId, OMWDecomposer.Source, langId, TC.AcademicCurated));
+                // HAS_LANGUAGE keeps a null context: the object IS the language, so a
+                // language context would be circular.
                 b.AddAttestation(NativeAttestation.Categorical(
                     root, "HAS_LANGUAGE", langId, OMWDecomposer.Source, null, TC.AcademicCurated));
 
-
+                // Part of speech is per-language too — the tagset is WordNet's, but
+                // the claim "this surface is a noun" holds in the language the file
+                // was written for, not universally.
                 PosReference.Attest(b, root, row.SsType.ToString(), PosReference.PosTagset.WordNet,
-                    OMWDecomposer.Source, null, TC.AcademicCurated);
+                    OMWDecomposer.Source, langId, TC.AcademicCurated);
                 break;
             case OmwType.Def:
                 b.AddAttestation(NativeAttestation.Categorical(
