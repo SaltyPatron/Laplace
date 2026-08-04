@@ -1,43 +1,65 @@
--- Band-masked attention centroid: the weighted 4D centre of everything an
--- entity attends to through a given band. This is the "general area" a concept
--- occupies, as opposed to its own coordinate, which is a function of its
--- content (the composition of its codepoints) and therefore says nothing about
--- meaning — 'dog' and its translations have unrelated coordinates by
--- construction. The centroid over a semantic band is where they converge.
+-- Band-masked attention centroid: where an entity's attention through a given
+-- band lands on S³. This is the "general area" a concept occupies, as opposed
+-- to its own coord, which is a function of its content (the composition of its
+-- codepoints) and therefore says nothing about meaning — 'dog' and its
+-- translations have unrelated coords by construction. The centroid over a
+-- semantic band is where they converge.
 --
--- BUG FIXED 2026-08-04 — this function returned NULL on every call it had ever
--- served, silently. The band filter was:
+-- Signature changed 2026-08-04: `concentration` added, so DROP before CREATE.
+-- CREATE OR REPLACE cannot alter a return type.
+DROP FUNCTION IF EXISTS laplace_attention_centroid(bytea, bytea);
+
+-- FIX 1 (2026-08-04) — the band filter used to ask `entities` which band a
+-- RELATION TYPE belongs to:
 --
 --     SELECT e.id FROM entities e
 --     WHERE e.highway_mask IS NOT NULL
 --       AND laplace_highway_mask_bits(e.highway_mask)
 --           && laplace_highway_mask_bits(p_band_mask)
 --
--- which asks for ENTITIES whose own highway mask overlaps the band, then joins
--- that set to consensus.type_id. But a highway mask records which bands an
--- entity has EDGES IN; it is not a statement about which band a relation type
--- BELONGS TO. That is relation_highway_bit(type_id), straight from the
--- manifest. Measured on the foundation ladder: the CTE matched 0 rows for
--- word_id('dog') against band 3, while dog demonstrably carries 8
--- IS_SYNONYM_OF edges (bit 153, band 3) and 9 HAS_SENSE (bit 112, band 3).
--- Zero rows in, NULL out, no error.
+-- then joined that to consensus.type_id. A highway mask records which bands an
+-- entity has EDGES IN; it is not a statement about which band a type BELONGS
+-- TO. That is relation_highway_bit(type_id), from the manifest. Measured: the
+-- CTE matched 0 rows for word_id('dog') against band 3 while dog carries 9
+-- HAS_SENSE (bit 112) and 8 IS_SYNONYM_OF (bit 153), both band 3. Zero rows in,
+-- NULL out, no error — on every call this function had ever served. It was also
+-- a full scan of 4.34M entities with a set-returning function evaluated per row,
+-- to build a set the manifest already determines and that has at most 233
+-- members. GH #866.
 --
--- It was also a full scan of every entity (4.34M) with a set-returning
--- function evaluated per row — the per-row SRF shape the architecture rules
--- name explicitly — to produce a set that is fully determined by the manifest
--- and has at most 233 members.
+-- FIX 2 (2026-08-04) — the mean is now projected back onto the sphere.
+-- SUM(coord*w)/SUM(w) is the arithmetic mean of unit vectors, which is NOT a
+-- unit vector: it lies strictly inside S³, and at the exact origin for an
+-- antipodal pair. Measured immediately after FIX 1 landed, word_id('dog') band 3:
 --
--- The mask is expanded to its bit list ONCE, in the scalar subquery, and each
--- candidate edge is then an integer membership test against that array. No
--- entities scan, no per-row SRF.
+--     cx -0.00488  cy 0.03184  cz -0.22988  cm 0.15099   ||c|| = 0.27691
 --
--- No SET search_path: it blocks SQL inlining, which costs the planner the
--- consensus (subject_id, type_id) index path through this body. Every
--- reference is @extschema@-qualified instead. See GH #860.
+-- 0.277, not 1.0 — so every angular distance taken to that point was not an
+-- angle, and laplace_forward_step was feeding it to a KNN over points that DO
+-- lie on the sphere. The correct object is the Fréchet/Karcher mean under
+-- geodesic distance; normalizing the weighted Euclidean sum is its standard
+-- cheap approximation, exact for tightly clustered inputs and monotone
+-- elsewhere.
+--
+-- The discarded norm is not noise — it is CONCENTRATION. 1.0 means every
+-- attended point coincides; ~0 means they cancel, i.e. the entity attends in
+-- every direction at once and its centroid carries no information. Returned
+-- rather than thrown away, because "the centroid is meaningless here" is a
+-- distinct answer from "the centroid is over there" and callers must be able to
+-- tell them apart.
+--
+-- Degenerate case: norm = 0 (perfect cancellation, or a single antipodal pair)
+-- has NO defined direction. Coordinates come back NULL with concentration 0 —
+-- never a fabricated direction, and never a silent division by zero.
+--
+-- No SET search_path: it blocks inlining (pg_proc.proconfig, checked at
+-- clauses.c:5168 for the set-returning path). Every reference is
+-- @extschema@-qualified instead. GH #860.
 CREATE OR REPLACE FUNCTION laplace_attention_centroid(
     p_entity   bytea,
     p_band_mask bytea)
-RETURNS TABLE(cx float8, cy float8, cz float8, cm float8, total_weight float8)
+RETURNS TABLE(cx float8, cy float8, cz float8, cm float8,
+              total_weight float8, concentration float8)
 LANGUAGE sql STABLE PARALLEL RESTRICTED AS $$
     WITH band_bits AS MATERIALIZED (
         SELECT @extschema@.laplace_highway_mask_bits(p_band_mask) AS bits
@@ -57,12 +79,24 @@ LANGUAGE sql STABLE PARALLEL RESTRICTED AS $$
         FROM attended a
         JOIN @extschema@.v_word_points w ON w.id = a.object_id
         WHERE w.coord IS NOT NULL
+    ),
+    summed AS (
+        SELECT SUM(ST_X(coord) * w) / NULLIF(SUM(w), 0) AS mx,
+               SUM(ST_Y(coord) * w) / NULLIF(SUM(w), 0) AS my,
+               SUM(ST_Z(coord) * w) / NULLIF(SUM(w), 0) AS mz,
+               SUM(ST_M(coord) * w) / NULLIF(SUM(w), 0) AS mm,
+               SUM(w)                                   AS tw
+        FROM weighted
+    ),
+    normed AS (
+        SELECT s.*, sqrt(s.mx*s.mx + s.my*s.my + s.mz*s.mz + s.mm*s.mm) AS n
+        FROM summed s
     )
-    SELECT
-        SUM(ST_X(coord) * w) / NULLIF(SUM(w), 0),
-        SUM(ST_Y(coord) * w) / NULLIF(SUM(w), 0),
-        SUM(ST_Z(coord) * w) / NULLIF(SUM(w), 0),
-        SUM(ST_M(coord) * w) / NULLIF(SUM(w), 0),
-        SUM(w)
-    FROM weighted
+    SELECT CASE WHEN n > 0 THEN mx / n END,
+           CASE WHEN n > 0 THEN my / n END,
+           CASE WHEN n > 0 THEN mz / n END,
+           CASE WHEN n > 0 THEN mm / n END,
+           tw,
+           COALESCE(n, 0)
+    FROM normed
 $$;
