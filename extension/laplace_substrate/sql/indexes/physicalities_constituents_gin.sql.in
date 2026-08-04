@@ -21,13 +21,16 @@
 -- more efficient in bulk because entries for the same key combine into one posting
 -- list update.
 --
--- THE TRADE-OFF POINTS THE OTHER WAY ON READS: the pending list is scanned linearly
--- on every search of this index until it is flushed, so an oversized list taxes
--- exactly the probe the index exists to serve. 32 MB is chosen because the write
--- burst is a bulk seed (nothing is querying) while steady state is read-heavy with
--- sparse writes, which keeps the list near-empty when it would otherwise be scanned.
--- A CONSIDERED STARTING POINT, NOT A MEASURED OPTIMUM — re-measure on the next full
--- seed and move it.
+-- The pending list is scanned LINEARLY on every search until it is flushed, so left
+-- alone a raised limit would simply move the cost onto the probe this index exists to
+-- serve. It is not left alone: NpgsqlIngestOps.CleanGinPendingListsAsync drains every
+-- laplace GIN at the end of an ingest, right after the post-ingest ANALYZE, so the
+-- limit is sized for write batching and readers never scan a populated list. That is
+-- the whole trade-off removed rather than split — do not raise this without keeping
+-- that flush, or the read path pays for the write path.
+--
+-- 32 MB (8x the default) is a CONSIDERED STARTING POINT, NOT A MEASURED OPTIMUM.
+-- Re-measure on the next full seed and move it.
 CREATE INDEX IF NOT EXISTS physicalities_constituents_gin
     ON physicalities USING gin (public.laplace_trajectory_constituent_ids(trajectory))
     WITH (fastupdate = on, gin_pending_list_limit = 32768)
