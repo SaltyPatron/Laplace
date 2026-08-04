@@ -52,8 +52,9 @@ public sealed class ChessAnalyzerTests
     {
         var change = Analyze(Game);
         var parsed = ChessPgnDecomposer.TryParseGame(Game)!;
-        // GH #736: the analyzer's unit is the PLAYING, so the marker keys on the event.
-        var marker = ChessVocabulary.AnalysisMarkerId(parsed.EventId, ChessAnalyze.Version);
+        // GH #736: the analyzer's unit is the PLAYING, so the marker keys on the playing —
+        // the same id ChessAnalyze stamps. Keying it on the event made this probe miss.
+        var marker = ChessVocabulary.AnalysisMarkerId(parsed.PlayingId, ChessAnalyze.Version);
         Assert.Contains(change.Entities, e => e.Id == marker && e.TypeId == ChessVocabulary.AnalysisMarkerType);
     }
 }

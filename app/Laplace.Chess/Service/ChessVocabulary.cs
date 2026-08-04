@@ -95,12 +95,17 @@ public static class ChessVocabulary
     // StandardsDerived band — high witness weight, still one voice among many.
     public static readonly Hash128 SyzygyTrustClass = TrustClass("StandardsDerived");
 
-    // Deterministic per-(EVENT, analysis version) marker (GH #736: the analyzer deposits
+    // Deterministic per-(PLAYING, analysis version) marker (GH #736). The analyzer deposits
     // per-playing testimony — outcome/clock/think/eval contexts — so its unit is the
-    // event; two playings of one line each fold their own outcome). The scan bulk-probes
-    // these (EntitiesExistBitmapAsync) to skip events already derived at this version.
-    public static Hash128 AnalysisMarkerId(Hash128 eventId, int version)
-        => Hash128.OfCanonical($"chess/analyzed/{eventId}/{version}");
+    // PLAYING, not the tournament event: two playings of one line each fold their own
+    // outcome, and one event holds many playings. The scan bulk-probes these
+    // (EntitiesExistBitmapAsync) to skip playings already derived at this version.
+    //
+    // The argument must be the same id ChessAnalyze stamps with, or the probe silently
+    // never matches and the watermark stops skipping — every re-run re-analyzes the whole
+    // corpus at full cost while still looking correct.
+    public static Hash128 AnalysisMarkerId(Hash128 playingId, int version)
+        => Hash128.OfCanonical($"chess/analyzed/{playingId}/{version}");
     public static readonly Hash128 HasWhiteType = EntityTypeRegistry.Id("HAS_WHITE");
     public static readonly Hash128 HasBlackType = EntityTypeRegistry.Id("HAS_BLACK");
     public static readonly Hash128 HasEventType = EntityTypeRegistry.Id("HAS_EVENT");

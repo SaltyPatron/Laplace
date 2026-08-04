@@ -61,13 +61,25 @@ public static class ChessCompose
         return Hash128.Blake3(buf);
     }
 
+    /// <summary>
+    /// Domain separator for the transition key — NOT a containment tier, despite sharing
+    /// the value <see cref="SegmentTier"/> holds today. It is spelled separately because
+    /// the two are free to diverge and must not drag each other: SegmentTier is a reserved
+    /// rung waiting for a real phase/motif order to be defined, and moving it is expected
+    /// work. If TransitionKey read that constant, defining SegmentTier would silently
+    /// re-mint every transition key and invalidate every persisted ChessTransitionFloor
+    /// blob — a content-addressed store answering for keys that no longer exist. The value
+    /// is pinned here so today's blobs keep their identity and tomorrow's tier work is free.
+    /// </summary>
+    public const byte TransitionKeyDomain = 3;
+
     /// <summary>Lookup key for (from_position, move) → to_position transition floor.</summary>
     public static Hash128 TransitionKey(Hash128 fromPositionId, Hash128 moveId)
     {
         Span<Hash128> kids = stackalloc Hash128[2];
         kids[0] = fromPositionId;
         kids[1] = moveId;
-        return Hash128.Merkle(SegmentTier, kids);
+        return Hash128.Merkle(TransitionKeyDomain, kids);
     }
 
     public static object Gate => LaplaceCoreGate.Native;
@@ -85,21 +97,37 @@ public static class ChessCompose
     public static ChessComposed Position(string surface)
     {
         EnsureLoaded();
-        var tokens = surface.Split(Sep, StringSplitOptions.RemoveEmptyEntries);
-        if (tokens.Length == 0) throw new ArgumentException("empty position surface", nameof(surface));
+        // Span scan, not Split: Split allocates a string[] plus one string PER TOKEN, on a
+        // path that runs once per position composed. The finite piece/square alphabet is
+        // served by ChessVocabularyCache from a ReadOnlySpan<char> with no string at all;
+        // only a token outside that alphabet has to be materialised for the TokenMemo key.
+        // Same two-pass shape as PositionId(string), which never regressed to Split.
+        int tokenCount = 0;
+        for (int i = 0; i < surface.Length; i++)
+            if (surface[i] != ' ' && (i == 0 || surface[i - 1] == ' ')) tokenCount++;
+        if (tokenCount == 0) throw new ArgumentException("empty position surface", nameof(surface));
 
-        var subs = new ChessNode[tokens.Length];
-        var ids = new Hash128[tokens.Length];
-        var childCoords = new double[(long)tokens.Length * 4];
-        for (int i = 0; i < tokens.Length; i++)
+        var subs = new ChessNode[tokenCount];
+        var ids = new Hash128[tokenCount];
+        var childCoords = new double[(long)tokenCount * 4];
+        int t = 0;
+        int start = -1;
+        for (int i = 0; i <= surface.Length; i++)
         {
-            var s = ChessVocabularyCache.TryGet(tokens[i], ComposeToken, out var vocab)
+            bool end = i == surface.Length || surface[i] == ' ';
+            if (!end) { if (start < 0) start = i; continue; }
+            if (start < 0) continue;
+            var tok = surface.AsSpan(start, i - start);
+            start = -1;
+
+            var s = ChessVocabularyCache.TryGet(tok, out var vocab)
                 ? vocab
-                : TokenMemo.GetOrAdd(tokens[i], ComposeToken);
-            subs[i] = s;
-            ids[i] = s.Id;
-            childCoords[i * 4 + 0] = s.Coord[0]; childCoords[i * 4 + 1] = s.Coord[1];
-            childCoords[i * 4 + 2] = s.Coord[2]; childCoords[i * 4 + 3] = s.Coord[3];
+                : TokenMemo.GetOrAdd(new string(tok), ComposeToken);
+            subs[t] = s;
+            ids[t] = s.Id;
+            childCoords[t * 4 + 0] = s.Coord[0]; childCoords[t * 4 + 1] = s.Coord[1];
+            childCoords[t * 4 + 2] = s.Coord[2]; childCoords[t * 4 + 3] = s.Coord[3];
+            t++;
         }
 
         Hash128 id = Hash128.Merkle(PositionTier, ids);
@@ -114,7 +142,7 @@ public static class ChessCompose
                 new ChessNode(id, coord, hb, traj, physId, (int)n, tier), subs);
         }
 
-        return new ChessComposed(ComposeOver(ids, childCoords, tokens.Length, PositionTier), subs);
+        return new ChessComposed(ComposeOver(ids, childCoords, tokenCount, PositionTier), subs);
     }
 
     internal static ChessNode TokenNode(string token)
@@ -317,14 +345,27 @@ public static class ChessCompose
     }
 
     private static volatile bool _composeReady;
+    private static readonly object ComposeReadyGate = new();
 
+    /// <summary>
+    /// One-time compose warmup. The <c>_composeReady</c> read is the fast path, but it
+    /// only suppresses REPEAT work once someone has finished — it does not stop N compose
+    /// workers entering together on a cold start and racing through Prime() and the two
+    /// floor loads. ChessTransitionFloor carries no internal gate of its own, so that race
+    /// is concurrent mmap setup over the same static fields, not merely duplicated effort.
+    /// Lock and re-check inside.
+    /// </summary>
     private static void EnsureLoaded()
     {
         if (_composeReady) return;
-        if (!CodepointPerfcache.IsLoaded) CodepointPerfcache.LoadDefault();
-        ChessVocabularyCache.Prime(ComposeToken);
-        ChessPositionFloor.LoadDefault();
-        ChessTransitionFloor.LoadDefault();
-        _composeReady = true;
+        lock (ComposeReadyGate)
+        {
+            if (_composeReady) return;
+            if (!CodepointPerfcache.IsLoaded) CodepointPerfcache.LoadDefault();
+            ChessVocabularyCache.Prime(ComposeToken);
+            ChessPositionFloor.LoadDefault();
+            ChessTransitionFloor.LoadDefault();
+            _composeReady = true;
+        }
     }
 }
