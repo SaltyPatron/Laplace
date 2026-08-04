@@ -171,7 +171,7 @@ public static class InstalledOpInvoker
     /// four-character string <c>NULL</c>. Binding removes the quoting question
     /// rather than answering it (GH #843).
     /// </summary>
-    public static object? OpValue(JsonNode? node) => node switch
+    internal static object? OpValue(JsonNode? node) => node switch
     {
         null => null,
         JsonValue v when v.TryGetValue<string>(out var s) => s,
@@ -196,7 +196,7 @@ public static class InstalledOpInvoker
     /// <c>DBNull</c> leaves the parameter undeclared at the server (42P08). The
     /// declared-type cast in the call text converts from there.
     /// </summary>
-    public static NpgsqlParameter BindArg(string slot, object? value) => value switch
+    internal static NpgsqlParameter BindArg(string slot, object? value) => value switch
     {
         null => new NpgsqlParameter(slot, NpgsqlDbType.Text) { Value = DBNull.Value },
         string?[] items => new NpgsqlParameter(slot, NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = items },
