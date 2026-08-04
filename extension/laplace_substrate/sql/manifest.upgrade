@@ -337,6 +337,7 @@ functions/corpus/corpus_trajectory_probe.sql.in
 functions/corpus/separator_ids.sql.in
 functions/corpus/corpus_whitespace_vocab_indices.sql.in
 functions/geometry/entity_physicality_coord.sql.in
+functions/geometry/entity_container_degree.sql.in
 functions/geometry/structural_cluster.sql.in
 functions/geometry/structural_cluster_batch.sql.in
 functions/highway/laplace_highway_match.sql.in

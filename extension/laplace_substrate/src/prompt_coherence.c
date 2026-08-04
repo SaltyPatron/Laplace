@@ -101,6 +101,7 @@ typedef struct PcTokEntry
 {
     uint8   key[16];
     uint64  ord_mask;
+    double  icf;               /* inverse container frequency; see pc_load_icf */
 } PcTokEntry;
 
 typedef struct PcTypeEntry
@@ -239,6 +240,103 @@ pc_scan_edges(HTAB *syn_h, HTAB *type_h, PcCand *cands, ArrayType *syn_arr,
         CHECK_FOR_INTERRUPTS();
     }
     SPI_cursor_close(portal);
+}
+
+/* ---- inverse container frequency: the specificity prior ----
+ *
+ * coherence is rated mass between one token's candidates and the OTHER tokens'
+ * candidates. It requires a DIRECT consensus edge to exist between two
+ * candidate sets, and at one hop the graph is sparse: measured 2026-08-04 on
+ * the full foundation ladder, coherence was 0 on every token of "hot", "dog"
+ * and "Water is made of", and fired on only 2 of 4 tokens of "What is a pawn
+ * in chess". specificity is coherence/total_mass, so it was 0 too, and the
+ * election fell through to ord DESC — a subject-verb-object word-order prior
+ * sitting inside a substrate that is language- and modality-agnostic. It is
+ * right for "What is a glacier?" and wrong for "Water is made of", for SOV and
+ * VSO languages, for a chess position, and for an image.
+ *
+ * Containment is the signal that is always defined, because it is structural:
+ * how many higher-tier entities contain this id. A token inside nearly every
+ * trajectory says almost nothing about which trajectory you meant. This is IDF
+ * derived from the composition hierarchy rather than from a stop-word list, so
+ * it carries across languages and modalities by construction.
+ *
+ * One batched call to the installed entity_container_degree() operation — the
+ * same body diagnostics use, never a second copy of the read. Bounded by its
+ * p_cap, so cost does not scale with how ubiquitous the floor is.
+ *
+ * Rejected alternatives, all measured on the same probe set rather than
+ * reasoned about: highway popcount (the tier-0 floor scores HIGHEST — 'a' at 19
+ * bands — because an atom participates in every band; that is degree, not
+ * specificity), total_mass (elects 'chess' over 'pawn'; rewards volume), and
+ * band-rank sum (better, but still a single hand-picked scalar). */
+static void
+pc_load_icf(HTAB *tok_h, MemoryContext work)
+{
+    HASH_SEQ_STATUS seq;
+    PcTokEntry     *tk;
+    Datum          *ids;
+    int             n = 0;
+    MemoryContext   old;
+    Oid             argtypes[1] = { BYTEAARRAYOID };
+    Datum           args[1];
+    ArrayType      *arr;
+    int             rc;
+
+    old = MemoryContextSwitchTo(work);
+    ids = (Datum *) palloc(sizeof(Datum) * (PC_MAX_ORD + 1));
+    MemoryContextSwitchTo(old);
+
+    hash_seq_init(&seq, tok_h);
+    while ((tk = (PcTokEntry *) hash_seq_search(&seq)) != NULL)
+    {
+        /* Neutral default set for EVERY token before anything can fail: an
+         * unmeasured id must not be silently ranked as maximally specific. */
+        tk->icf = 1.0;
+        if (n > PC_MAX_ORD)
+            continue;
+        old = MemoryContextSwitchTo(work);
+        {
+            bytea *b = (bytea *) palloc(VARHDRSZ + 16);
+
+            SET_VARSIZE(b, VARHDRSZ + 16);
+            memcpy(VARDATA(b), tk->key, 16);
+            ids[n++] = PointerGetDatum(b);
+        }
+        MemoryContextSwitchTo(old);
+    }
+    if (n == 0)
+        return;
+
+    old = MemoryContextSwitchTo(work);
+    arr = construct_array(ids, n, BYTEAOID, -1, false, TYPALIGN_INT);
+    MemoryContextSwitchTo(old);
+    args[0] = PointerGetDatum(arr);
+
+    rc = SPI_execute_with_args(
+        "SELECT entity_id, icf FROM laplace.entity_container_degree($1)",
+        1, argtypes, args, NULL, true, 0);
+    if (rc != SPI_OK_SELECT)
+        return;                 /* neutral priors already in place */
+
+    for (uint64 r = 0; r < SPI_processed; r++)
+    {
+        HeapTuple   tup = SPI_tuptable->vals[r];
+        TupleDesc   td = SPI_tuptable->tupdesc;
+        bool        isnull;
+        bytea      *eid;
+        double      icf;
+        PcTokEntry *e;
+
+        eid = DatumGetByteaPP(SPI_getbinval(tup, td, 1, &isnull));
+        if (isnull || VARSIZE_ANY_EXHDR(eid) != 16) continue;
+        icf = DatumGetFloat8(SPI_getbinval(tup, td, 2, &isnull));
+        if (isnull) continue;
+        e = (PcTokEntry *) hash_search(tok_h, VARDATA_ANY(eid), HASH_FIND, NULL);
+        if (e != NULL)
+            e->icf = icf;
+    }
+    SPI_freetuptable(SPI_tuptable);
 }
 
 Datum
@@ -388,6 +486,10 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
     /* ---- coherence: two indexed range reads, O(1) probe per edge ---- */
     pc_scan_edges(syn_h, type_h, cands, syn_arr, true, work);
     pc_scan_edges(syn_h, type_h, cands, syn_arr, false, work);
+
+    /* The specificity prior. One batched call; see pc_load_icf for why the
+     * graph alone cannot carry this key. */
+    pc_load_icf(tok_h, work);
 
     /* ---- which of those types does a prompt token NAME? Canonical name and
      * rank come from the manifest in C; the name's object token becomes a
@@ -773,6 +875,32 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
                  * knob: it is the share of a candidate's OWN witnessed mass that
                  * reaches the rest of the prompt, and it is scale-free, so it
                  * does not drift as seeds land. */
+                /* ...and the containment prior, which is what makes this key
+                 * DEFINED when the graph is silent. The share above needs a
+                 * direct edge between two candidate sets to be non-zero, and at
+                 * one hop the graph is sparse enough that it was 0 on every
+                 * token of most prompts — which is what pushed the election onto
+                 * ord DESC, an SVO word-order assumption in a substrate that is
+                 * language- and modality-agnostic. Additive because both terms
+                 * are already normalized to (0, 1]: share is the fraction of a
+                 * candidate's own mass that reaches the prompt, icf is the
+                 * inverse containment frequency of its token. Neither can
+                 * annihilate the other, and ties still fall through to rel_mass
+                 * exactly as before.
+                 *
+                 * NOT YET SUMMED INTO THE KEY. The prior is loaded and correct
+                 * (pc_load_icf), and on its own it is measurably WORSE than what
+                 * it replaces: election_correctness 5/6 -> 4/6 on the six probes,
+                 * 2026-08-04. It elects `opposite` over `hot` purely because
+                 * `opposite` is rarer (~517 containers vs ~1050), which is the
+                 * same single-scalar failure as every other key tried here.
+                 * Shipping it wired would trade a language-specific prior for a
+                 * frequency-specific one and call it progress.
+                 *
+                 * It becomes the key when it is weighed against what the fold
+                 * already says per candidate -- rating, rd as trust, witness
+                 * count -- so a rare token with thin evidence cannot outrank a
+                 * common token with strong evidence. GH #865. */
                 values[8] = Float8GetDatum(best->total_mass > 0.0
                                            ? best->coherence / best->total_mass
                                            : 0.0);

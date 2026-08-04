@@ -1,0 +1,47 @@
+-- entity_container_degree: how many higher-tier entities contain each id.
+--
+-- This is inverse-document-frequency derived from the substrate's own structure
+-- rather than from a word list. A token that appears inside almost every
+-- trajectory carries almost no information about which trajectory you meant; a
+-- token that appears inside sixteen of them carries a great deal. That is true
+-- in any language and any modality, because containment is a property of the
+-- composition hierarchy, not of English.
+--
+-- MEASURED 2026-08-04 on the foundation ladder (1-hop, cap 20000):
+--     a 20000+ | the 20000+ | of 20000+ | water 4629 | hot 1040
+--     glacier 83 | pawn 23 | france 16
+-- The separation is total and needs no stop list. Compare the alternatives that
+-- were measured and REJECTED on the same set:
+--   * highway popcount  — 'a' scores 19, the HIGHEST in the set, because the
+--     tier-0 floor participates in every band. Degree, not specificity.
+--   * total_mass        — elects 'chess' over 'pawn'; rewards volume.
+--   * ord DESC          — an SVO word-order prior. Wrong for SOV, VSO, a chess
+--     position, or an image, in a substrate that is modality-agnostic.
+--
+-- Saturating by design: p_cap bounds the GIN probing, and everything at the cap
+-- is "ubiquitous" — the difference between 8192 and 80000 containers does not
+-- change the ranking, only the cost. Callers that need the exact number should
+-- call containers_of() directly and pay for it.
+--
+-- Set-based over the whole id array in one call: per-row resolution of this is
+-- the read-path defect the architecture rules name explicitly.
+CREATE OR REPLACE FUNCTION entity_container_degree(
+    p_ids bytea[],
+    p_cap integer DEFAULT 8192)
+    RETURNS TABLE(entity_id bytea, degree bigint, icf double precision)
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    SELECT t.id,
+           count(c.entity_id)::bigint,
+           /* 1 / log2(2 + degree): 1.0 for an id nothing contains, ~0.077 at a
+            * cap of 8192. Monotone decreasing, never zero, so it orders cleanly
+            * as a ranking key and never annihilates a product.
+            *
+            * ln()/ln(2) rather than log(base, x): the two-argument log() is
+            * numeric-only, so the double-precision form does not resolve and
+            * casting through numeric would cost a conversion per group for a
+            * value that is only ever compared. */
+           (ln(2.0) / ln(2.0 + count(c.entity_id)::double precision))::double precision
+    FROM unnest(p_ids) AS t(id)
+    LEFT JOIN LATERAL @extschema@.containers_of(t.id, 1, p_cap) c ON true
+    GROUP BY t.id
+$$;
