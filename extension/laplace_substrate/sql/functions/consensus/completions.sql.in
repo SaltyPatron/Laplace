@@ -1,9 +1,10 @@
 CREATE OR REPLACE FUNCTION completions(p_subject bytea, p_limit integer DEFAULT 40)
     RETURNS TABLE(object_id bytea, type_id bytea, eff_mu numeric, witnesses bigint)
-    LANGUAGE sql STABLE SET search_path = @extschema@, public AS $$
+-- No SET search_path — blocks inlining, costs the consensus index path. GH #860.
+    LANGUAGE sql STABLE AS $$
     SELECT c.object_id, c.type_id, c.eff_mu, c.witness_count
-    FROM v_consensus_resolved c
+    FROM @extschema@.v_consensus_resolved c
     WHERE c.subject_id = p_subject AND c.object_id IS NOT NULL
-    ORDER BY edge_rank(c.type_id, c.eff_mu_raw) DESC
+    ORDER BY @extschema@.edge_rank(c.type_id, c.eff_mu_raw) DESC
     LIMIT p_limit
 $$;

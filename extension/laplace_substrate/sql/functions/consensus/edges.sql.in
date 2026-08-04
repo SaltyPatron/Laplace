@@ -39,8 +39,9 @@ CREATE OR REPLACE FUNCTION edges(
         p_lang      bytea   DEFAULT NULL)
     RETURNS TABLE(direction text, relation text, neighbour_id bytea,
                   neighbour text, eff_mu numeric, witnesses bigint)
-    LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+-- No SET search_path — it blocks inlining and this body wraps edges_raw(), the
+-- one consensus scan. Every reference is @extschema@-qualified instead. GH #860.
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
     WITH ranked AS MATERIALIZED (
         -- The scan is edges_raw() — the one consensus scan. This function is its
         -- LABELING layer and nothing else: rank/limit happen in the core, labels
@@ -48,22 +49,23 @@ CREATE OR REPLACE FUNCTION edges(
         SELECT e.direction AS dir, e.type_id, e.neighbour_id AS nid,
                e.rating, e.rd, e.witness_count,
                row_number() OVER () AS ord
-        FROM edges_raw(p_subject, p_direction, p_types, p_limit, p_refuted, 'edge_rank') e
+        FROM @extschema@.edges_raw(p_subject, p_direction, p_types, p_limit, p_refuted, 'edge_rank') e
     ),
     rel AS MATERIALIZED (
         -- Relation names come from the manifest, once per DISTINCT type — a
         -- governed vocabulary of ~189, so a subject spans a handful.
         SELECT t.type_id,
-               COALESCE(NULLIF(relation_canonical(t.type_id), ''), label(t.type_id)) AS relation
+               COALESCE(NULLIF(@extschema@.relation_canonical(t.type_id), ''),
+                        @extschema@.label(t.type_id)) AS relation
         FROM (SELECT DISTINCT k.type_id FROM ranked k) t
     ),
     lbl AS MATERIALIZED (
-        SELECT realize_batch(array_agg(k.nid ORDER BY k.ord), p_lang) AS l
+        SELECT @extschema@.realize_batch(array_agg(k.nid ORDER BY k.ord), p_lang) AS l
         FROM ranked k
     )
     SELECT k.dir, rel.relation, k.nid,
-           COALESCE(lbl.l[k.ord], label(k.nid)),
-           eff_mu_display(k.rating, k.rd),
+           COALESCE(lbl.l[k.ord], @extschema@.label(k.nid)),
+           @extschema@.eff_mu_display(k.rating, k.rd),
            k.witness_count
     FROM ranked k
     JOIN rel ON rel.type_id = k.type_id
@@ -81,9 +83,9 @@ CREATE OR REPLACE FUNCTION edges(
         p_refuted   boolean DEFAULT false)
     RETURNS TABLE(direction text, relation text, neighbour_id bytea,
                   neighbour text, eff_mu numeric, witnesses bigint)
-    LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
     SELECT e.direction, e.relation, e.neighbour_id, e.neighbour, e.eff_mu, e.witnesses
-    FROM edges(word_id(p_word), p_direction, NULL::bytea[], p_limit, p_refuted,
-               word_language(word_id(p_word))) e
+    FROM @extschema@.edges(@extschema@.word_id(p_word), p_direction, NULL::bytea[],
+                           p_limit, p_refuted,
+                           @extschema@.word_language(@extschema@.word_id(p_word))) e
 $$;

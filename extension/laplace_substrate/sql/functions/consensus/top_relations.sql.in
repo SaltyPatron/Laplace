@@ -1,6 +1,7 @@
 CREATE OR REPLACE FUNCTION top_relations(p_limit integer DEFAULT 50, p_type bytea DEFAULT NULL)
     RETURNS TABLE(subject_id bytea, type_id bytea, object_id bytea, eff_mu numeric, witnesses bigint)
-    LANGUAGE sql STABLE SET search_path = @extschema@, public AS $$
+-- No SET search_path — blocks inlining, costs the consensus index path. GH #860.
+    LANGUAGE sql STABLE AS $$
     -- Issue 52: edge_rank() per row over ALL consensus before LIMIT measured >9min at
     -- 124M rows and killed three endpoints. Bounded-candidate form, same ranking law:
     -- consensus_eff_mu_btree serves a top-M head by raw eff_mu; edge_rank (salience
@@ -12,7 +13,7 @@ CREATE OR REPLACE FUNCTION top_relations(p_limit integer DEFAULT 50, p_type byte
     WITH pool AS (
         SELECT c.subject_id, c.type_id, c.object_id,
                c.eff_mu, c.eff_mu_raw, c.witness_count
-        FROM v_consensus_resolved c
+        FROM @extschema@.v_consensus_resolved c
         WHERE p_type IS NULL AND c.object_id IS NOT NULL
         ORDER BY c.eff_mu_raw DESC
         LIMIT GREATEST(5000, p_limit * 25)
@@ -20,13 +21,13 @@ CREATE OR REPLACE FUNCTION top_relations(p_limit integer DEFAULT 50, p_type byte
     typed AS (
         SELECT c.subject_id, c.type_id, c.object_id,
                c.eff_mu, c.eff_mu_raw, c.witness_count
-        FROM v_consensus_resolved c
+        FROM @extschema@.v_consensus_resolved c
         WHERE p_type IS NOT NULL AND c.type_id = p_type AND c.object_id IS NOT NULL
         ORDER BY c.eff_mu_raw DESC
         LIMIT p_limit
     )
     SELECT u.subject_id, u.type_id, u.object_id, u.eff_mu, u.witness_count
     FROM (SELECT * FROM pool UNION ALL SELECT * FROM typed) u
-    ORDER BY edge_rank(u.type_id, u.eff_mu_raw) DESC, u.witness_count DESC
+    ORDER BY @extschema@.edge_rank(u.type_id, u.eff_mu_raw) DESC, u.witness_count DESC
     LIMIT p_limit
 $$;

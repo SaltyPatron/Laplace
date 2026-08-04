@@ -4,7 +4,7 @@
 CREATE OR REPLACE FUNCTION consensus_in(p_id bytea, p_limit integer DEFAULT 40)
     RETURNS TABLE(subject_id bytea, type_id bytea, rating bigint, rd bigint,
                   volatility bigint, witness_count bigint)
-    LANGUAGE sql STABLE SET search_path = @extschema@, public AS $$
+    LANGUAGE sql STABLE AS $$
     SELECT e.neighbour_id, e.type_id, e.rating, e.rd, e.volatility, e.witness_count
-    FROM edges_raw(p_id, 'in', NULL, p_limit, true, 'edge_rank') e
+    FROM @extschema@.edges_raw(p_id, 'in', NULL, p_limit, true, 'edge_rank') e
 $$;

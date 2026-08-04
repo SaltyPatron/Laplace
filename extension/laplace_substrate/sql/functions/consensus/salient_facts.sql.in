@@ -1,10 +1,13 @@
 CREATE OR REPLACE FUNCTION salient_facts(p_word bytea, p_lang bytea DEFAULT NULL,
                                     p_limit int DEFAULT 24)
     RETURNS TABLE(type text, fact text, eff_mu numeric, witnesses bigint)
-    LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+-- No SET search_path — blocks inlining, costs the consensus index path. The
+-- workaround below (fencing relation_in_family ONCE because its own SET clause
+-- makes it uninlinable) is the same defect one level down. GH #860.
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
     WITH reltypes AS MATERIALIZED (
-        SELECT id FROM entities WHERE type_id = entity_type_id('RelationType')
+        SELECT id FROM @extschema@.entities
+        WHERE type_id = @extschema@.entity_type_id('RelationType')
     ), feat_dynamic AS MATERIALIZED (
         -- Dynamic HAS_FEATURE children (FEAT_case, FEAT_number, ...) carry an
         -- IS_A -> family-root edge in consensus (RelationTypeRegistry.SeedDynamic).
