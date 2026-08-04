@@ -129,7 +129,13 @@ public static class SyzygyNative
     {
         int largest = _mappedLargest;
         if (largest <= 0) return false;
-        return System.Numerics.BitOperations.PopCount(white | black) <= largest;
+        int men = System.Numerics.BitOperations.PopCount(white | black);
+        // A tablebase position has at least two kings. Fewer than two occupied squares means
+        // the caller handed us an empty or half-built board — which a man-count ceiling alone
+        // waves through, since 0 <= largest. That is exactly how a board whose bitboards were
+        // never populated reached Fathom and faulted in gen_captures.
+        if (men < 2) return false;
+        return men <= largest;
     }
 
     /// <summary>
