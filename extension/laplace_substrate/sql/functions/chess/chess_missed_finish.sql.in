@@ -4,6 +4,23 @@
 -- Provenance read — not logistic HAS_EVAL.
 --
 -- Relation vocabulary via chess_has_wdl_type (ISA G3).
+--
+-- Both id lookups are bound ONCE, in CTEs, and the WDL scan is restricted to the
+-- line's own positions -- the two defects this function shipped with (#844, #817):
+--
+--   per-row STABLE call   `WHERE a.type_id = chess_has_wdl_type()` put a
+--                         `LANGUAGE sql STABLE` function inside a filter, so it ran
+--                         once per attestation row instead of once per statement.
+--                         The same held for word_id('loss') / word_id('blessed-loss')
+--                         in the missed-finish predicate. chess_syzygy_line already
+--                         binds its relation ids in a `rel` CTE; this follows it.
+--
+--   unbounded WDL scan    the `wdl` CTE selected EVERY HAS_WDL attestation in the
+--                         database and discarded the non-line ones by join afterwards,
+--                         so cost scaled with total Syzygy testimony rather than with
+--                         the line being asked about. The subject restriction now
+--                         lives inside the CTE: `line` drives, attestations is probed
+--                         by subject_id.
 DROP FUNCTION IF EXISTS chess_missed_finish(bytea, integer);
 
 CREATE OR REPLACE FUNCTION chess_missed_finish(p_line bytea, p_limit int DEFAULT 32)
@@ -15,8 +32,13 @@ CREATE OR REPLACE FUNCTION chess_missed_finish(p_line bytea, p_limit int DEFAULT
         to_wdl text)
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
-WITH win_id AS MATERIALIZED (
-    SELECT word_id('win') AS id
+WITH rel AS MATERIALIZED (
+    SELECT chess_has_wdl_type() AS wdl
+),
+verdict AS MATERIALIZED (
+    SELECT word_id('win')           AS win,
+           word_id('loss')          AS loss,
+           word_id('blessed-loss')  AS blessed_loss
 ),
 line AS MATERIALIZED (
     SELECT (u.ord - 1)::int AS ply, u.entity_id AS pos
@@ -28,22 +50,35 @@ steps AS MATERIALIZED (
     FROM line a
     JOIN line b ON b.ply = a.ply + 1
 ),
+-- Subject-restricted: the line's positions drive, attestations is probed by
+-- subject_id. Both endpoints of every step are line points, so this covers the
+-- from_pos join and the to_pos outer join alike.
+-- One row per position. attestations is keyed by (subject, type, object, source,
+-- context), so a position carrying Syzygy WDL from more than one source yields
+-- several rows per pos. Left uncollapsed that is not merely duplication: the
+-- to_pos join below tests `IS DISTINCT FROM loss`, so a position with both a
+-- `loss` deposit and any other deposit would keep the non-loss row and report a
+-- missed finish that is not one — and the duplicates then consume p_limit.
+-- max(object_id) is the same deterministic collapse chess_syzygy_line uses.
 wdl AS MATERIALIZED (
-    SELECT a.subject_id AS pos, a.object_id AS wdl_id
-    FROM attestations a
-    WHERE a.type_id = chess_has_wdl_type()
+    SELECT l.pos AS pos, max(a.object_id) AS wdl_id
+    FROM line l
+    JOIN rel r ON true
+    JOIN attestations a ON a.subject_id = l.pos
+                       AND a.type_id = r.wdl
+    GROUP BY l.pos
 ),
 missed AS MATERIALIZED (
     SELECT s.ply, s.from_pos, s.to_pos, fw.wdl_id AS from_wdl_id, tw.wdl_id AS to_wdl_id
     FROM steps s
     JOIN wdl fw ON fw.pos = s.from_pos
-    JOIN win_id w ON w.id = fw.wdl_id
+    JOIN verdict v ON v.win = fw.wdl_id
     LEFT JOIN wdl tw ON tw.pos = s.to_pos
     -- After a winning move under optimal play, the successor (opponent to move)
     -- is a loss for the side then to move (= win preserved for the previous mover).
     -- Any other deposited WDL, or no deposit, is a missed finish signal.
-    WHERE tw.wdl_id IS DISTINCT FROM word_id('loss')
-      AND tw.wdl_id IS DISTINCT FROM word_id('blessed-loss')
+    WHERE tw.wdl_id IS DISTINCT FROM v.loss
+      AND tw.wdl_id IS DISTINCT FROM v.blessed_loss
     ORDER BY s.ply
     LIMIT p_limit
 ),
