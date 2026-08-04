@@ -737,22 +737,27 @@ internal static class IngestCommands
     // extension — it is the deployment unit and the authority. radius_origin and
     // alignment_residual were removed 2026-07-28 (0 scans; see those .sql.in files).
     //
-    // This list had DRIFTED from the extension in both directions, and drift here is not
-    // cosmetic: the command exists to restore the schema's index set, so anything wrong in
-    // it gets written to a live database as if it were the schema.
-    //   - physicalities_type_btree: retired 2026-08-04. `type` holds ONE value across the
-    //     seeded corpus (4,327,399 rows, all type 1), so a btree over it is never
-    //     selective; the predicates that matter are carried by the partial indexes below,
-    //     which encode `type = 1` in their own WHERE clauses.
-    //   - physicalities_hilbert_btree: the extension has no such index and has not for some
-    //     time — a leftover from RANGE(hilbert_index) partitioning, which physicalities no
-    //     longer uses. This command was recreating it on every recovery run.
-    //   - physicalities_traj_first_id_btree was MISSING here while the extension declares
-    //     it, so a recovery run left the database short an index it is supposed to have.
+    // physicalities_hilbert_btree belongs here. It was in this list before the schema had
+    // a .sql.in for it, and that was CORRECT rather than drift: the primary key used to be
+    // (hilbert_index, id), so hilbert was covered by the PK's leading column and a separate
+    // btree would have been redundant in the schema while this recovery path still had to
+    // create it. Repartitioning to HASH(id) forced the PK to (id) and silently removed the
+    // only hilbert coverage, which broke anagrams_of()'s equality join into a sequential
+    // scan of all 64 partitions. The index is now declared in the schema too
+    // (indexes/physicalities_hilbert_btree.sql.in), so both agree.
+    //
+    // physicalities_traj_first_id_btree IS in the schema and was missing here, so a
+    // recovery run left the database short an index it is supposed to have.
+    //
+    // Drift in this list is not cosmetic: the command exists to restore the schema's index
+    // set, so whatever is wrong here gets written to a live database as if it were the
+    // schema.
     private static readonly string[] SchemaPhysIndexDefs =
     [
         "CREATE INDEX IF NOT EXISTS physicalities_entity_btree ON laplace.physicalities USING btree (entity_id)",
+        "CREATE INDEX IF NOT EXISTS physicalities_type_btree ON laplace.physicalities USING btree (type)",
         "CREATE INDEX IF NOT EXISTS physicalities_coord_gist ON laplace.physicalities USING gist (coord gist_geometry_ops_nd)",
+        "CREATE INDEX IF NOT EXISTS physicalities_hilbert_btree ON laplace.physicalities USING btree (hilbert_index)",
         "CREATE INDEX IF NOT EXISTS physicalities_observed_brin ON laplace.physicalities USING brin (observed_at)",
         "CREATE INDEX IF NOT EXISTS physicalities_traj_probe ON laplace.physicalities USING btree (observed_at) WHERE type = 1 AND trajectory IS NOT NULL",
         "CREATE INDEX IF NOT EXISTS physicalities_traj_first_id_btree ON laplace.physicalities USING btree ((public.laplace_trajectory_constituent_ids(trajectory))[1]) WHERE trajectory IS NOT NULL AND type = 1",
