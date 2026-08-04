@@ -79,6 +79,57 @@ def substrate_fingerprint(db: str) -> dict:
     return fp
 
 
+def seeded_sources(db: str) -> list[str]:
+    """Which sources are ingested. THIS is what decides comparability."""
+    rows = psql_rows(
+        db,
+        "SET search_path=laplace,public; "
+        "SELECT source FROM source_status() WHERE ingested ORDER BY source;",
+    )
+    return [r.strip() for r in rows if r.strip()]
+
+
+# How far the row estimates may move before a baseline is considered
+# incomparable. Nothing about a 5% drift in a planner estimate invalidates a
+# hand-written expected-topic list.
+FINGERPRINT_TOLERANCE = 0.25
+
+
+def fingerprint_drift(baseline: dict, fp: dict, sources: list[str]) -> str | None:
+    """Return a human reason the baseline is incomparable, or None.
+
+    The previous rule was `baseline["fingerprint"] != fp` — exact dictionary
+    equality against substrate_counts(), whose rows are `(ESTIMATE)` values
+    read from pg_class.reltuples. Those are SAMPLED PLANNER STATISTICS: they
+    move on autovacuum with zero data change, so the check failed on
+    background maintenance and demanded a manual re-record every time. A gate
+    that fires on noise teaches people to ignore it (ingest-baseline.py:34-37
+    says exactly this in the repo's own words).
+
+    What actually decides whether two runs are comparable is WHICH SOURCES ARE
+    SEEDED — a baseline recorded on foundation-only cannot judge a run that
+    also has OMW, and no row count expresses that. Counts stay, as a wide
+    tolerance band, to catch a truncated or half-loaded substrate.
+    """
+    base_sources = baseline.get("sources")
+    if base_sources is not None and sorted(base_sources) != sorted(sources):
+        added = sorted(set(sources) - set(base_sources))
+        removed = sorted(set(base_sources) - set(sources))
+        return f"seeded sources changed (added={added}, removed={removed})"
+
+    base_fp = baseline.get("fingerprint") or {}
+    for metric, base_val in base_fp.items():
+        cur = fp.get(metric)
+        if cur is None:
+            return f"metric {metric!r} no longer reported"
+        if base_val <= 0:
+            continue
+        if abs(cur - base_val) / base_val > FINGERPRINT_TOLERANCE:
+            pct = 100.0 * (cur - base_val) / base_val
+            return f"{metric} moved {pct:+.1f}% ({base_val} -> {cur})"
+    return None
+
+
 def entities_estimate(fp: dict) -> int:
     for k, v in fp.items():
         if k.startswith("entities"):
@@ -189,6 +240,7 @@ def main() -> None:
 
     try:
         fp = substrate_fingerprint(args.db)
+        sources = seeded_sources(args.db)
     except SystemExit:
         raise
     except Exception as ex:  # noqa: BLE001 — harness boundary
@@ -255,6 +307,7 @@ def main() -> None:
 
     report = {
         "fingerprint": fp,
+        "sources": sources,
         "verdicts": verdicts,
         "probes": results,
         "misses_first": True,
@@ -265,6 +318,9 @@ def main() -> None:
             "recorded_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "advisory_until": probes_doc.get("advisory_until", "2026-08-10"),
             "blocking_flip_date": probes_doc.get("blocking_flip_date"),
+            # WHICH SOURCES ARE SEEDED is what decides comparability; the row
+            # estimates below are a tolerance band, not an equality check.
+            "sources": sources,
             "fingerprint": fp,
             "election": {
                 "passed": len(election_ok),
@@ -273,7 +329,13 @@ def main() -> None:
                 "require_exact": True,
             },
             "latency_ceiling_s": latency_ceiling,
-            "notes": "election_correctness is exact; fingerprint change requires re-record",
+            "notes": (
+                "election_correctness is exact. Comparability is decided by the seeded "
+                "source set; row estimates are a "
+                f"{int(FINGERPRINT_TOLERANCE * 100)}% tolerance band, not an equality "
+                "check — substrate_counts() reports sampled planner estimates that move "
+                "on autovacuum with no data change."
+            ),
         }
         baseline_path.write_text(json.dumps(baseline, indent=2) + "\n", encoding="utf-8")
         report["recorded_baseline"] = str(baseline_path)
@@ -284,11 +346,12 @@ def main() -> None:
             "recorded_at": baseline.get("recorded_at"),
             "advisory_until": baseline.get("advisory_until"),
         }
-        # Fingerprint drift → re-record required (not a silent pass).
-        if baseline["fingerprint"] != fp:
-            verdicts["fingerprint_drift"] = True
+        # Incomparable substrate → re-record required (not a silent pass).
+        drift = fingerprint_drift(baseline, fp, sources)
+        if drift is not None:
+            verdicts["fingerprint_drift"] = drift
             sys.stderr.write(
-                "substrate fingerprint changed vs baseline — re-record required (exit 1)\n"
+                f"substrate incomparable to baseline: {drift} — re-record required (exit 1)\n"
             )
             if args.report:
                 args.report.parent.mkdir(parents=True, exist_ok=True)
