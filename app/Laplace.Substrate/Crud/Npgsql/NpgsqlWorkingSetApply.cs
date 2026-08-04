@@ -216,13 +216,9 @@ public sealed partial class NpgsqlSubstrateWriter
 
         var physIdSet = new HashSet<Hash128>(phys.Ids.Count);
         var probePhysIds = new List<Hash128>(phys.Ids.Count);
-        var probePhysHilberts = new List<Hilbert128>(phys.Ids.Count);
         for (int i = 0; i < phys.Ids.Count; i++)
             if (physIdSet.Add(phys.Ids[i]))
-            {
                 probePhysIds.Add(phys.Ids[i]);
-                probePhysHilberts.Add(phys.HilbertKeys[i]);
-            }
 
         // Attestation duplicate collapse, exactly apply_batch's semantics:
         // representative = latest-ts staged row, observation counts sum, and
@@ -347,15 +343,13 @@ public sealed partial class NpgsqlSubstrateWriter
                 entVerifyIdx = kept;
             }
             var probePhysIdsUse = probePhysIds;
-            var probePhysHilbertsUse = probePhysHilberts;
             long physCacheSkip = 0;
             if (persistedPhys is { Count: > 0 })
             {
                 probePhysIdsUse = new List<Hash128>(probePhysIds.Count);
-                probePhysHilbertsUse = new List<Hilbert128>(probePhysIds.Count);
                 for (int i = 0; i < probePhysIds.Count; i++)
                     if (persistedPhys.Contains(probePhysIds[i])) physCacheSkip++;
-                    else { probePhysIdsUse.Add(probePhysIds[i]); probePhysHilbertsUse.Add(probePhysHilberts[i]); }
+                    else probePhysIdsUse.Add(probePhysIds[i]);
             }
 
             // Probes fan out across pooled connections. Correct under the
@@ -424,13 +418,12 @@ public sealed partial class NpgsqlSubstrateWriter
                 {
                     physEmptySkip = probePhysIdsUse.Count;
                     probePhysIdsUse = new List<Hash128>();
-                    probePhysHilbertsUse = new List<Hilbert128>();
                 }
             }
 
             // I/O locality — the load-bearing fix for large-DB probes. The native existence
             // bitmaps do keyed lookups into the PARTITIONED tables (entities LIST(tier),
-            // physicalities RANGE(hilbert), attestations LIST(type_id)->HASH(subject)). Probing
+            // physicalities HASH(id), attestations LIST(type_id)->HASH(subject)). Probing
             // in staged (content-hash-random) order scatters each 131k chunk across every
             // partition leaf and heap page — fine while the table fits cache, catastrophic once
             // it doesn't (MEASURED on Wiktionary: a single verify grew to 37-53 min of cache-cold
@@ -451,10 +444,15 @@ public sealed partial class NpgsqlSubstrateWriter
             }
             if (probePhysIdsUse.Count > 1)
             {
+                // Sorted by ID since physicalities became HASH(id)/PK(id). Hash
+                // routing is not monotonic in id, so a chunk is not one contiguous
+                // partition — but within each of the 64 buckets the probed ids are
+                // still ascending, so every bucket's PK index is walked forward
+                // instead of randomly. Same property attestations gets from
+                // HASH(subject_id) probed in subject order.
                 var perm = BuildProbePermutation(probePhysIdsUse.Count,
-                    (a, b) => probePhysHilbertsUse[a].CompareToBytewise(probePhysHilbertsUse[b]));
+                    (a, b) => probePhysIdsUse[a].CompareToBytewise(probePhysIdsUse[b]));
                 probePhysIdsUse = ApplyProbePermutation(probePhysIdsUse, perm);
-                probePhysHilbertsUse = ApplyProbePermutation(probePhysHilbertsUse, perm);
             }
             // Entities and physicalities probe concurrently. The attestation
             // probe waits on the ENTITY result only for ordering; every staged
@@ -484,8 +482,14 @@ public sealed partial class NpgsqlSubstrateWriter
             var entProbeTask = ProbePresentTieredParallelAsync(
                 "laplace.entities_stored_bitmap", probeEntIdsUse, probeEntTiersUse,
                 r => Interlocked.Add(ref rtProbe, r), ct);
-            var physProbeTask = ProbePresentPairKeyedParallelAsync(
-                "laplace.physicalities_exist_bitmap", probePhysIdsUse, probePhysHilbertsUse,
+            // Id-only overload. The hilbert-keyed variant routed each probe to the
+            // RANGE(hilbert) band that held the row; under HASH(id) that routing
+            // names the wrong partition, and a probe that answers "absent" for a
+            // stored row is not slow but fatal — COPY has no ON CONFLICT (see the
+            // novel-by-construction post-mortem above).
+            var physProbeTask = ProbePresentCoreAsync(
+                "SELECT laplace.physicalities_exist_bitmap($1)", probePhysIdsUse,
+                static (_, _, _) => { },
                 r => Interlocked.Add(ref rtProbe, r), ct);
 
             var presentEntities = await entProbeTask;
@@ -620,21 +624,25 @@ public sealed partial class NpgsqlSubstrateWriter
             }
 
             // Physicalities: first occurrence of each id, minus stored rows.
-            // Sort key = HILBERT INDEX, not id: the contended index here is
-            // the coord GiST, and hilbert order is its spatial locality —
-            // range-partitioned groups land in disjoint GiST subtrees the
-            // way id-sorted groups land in disjoint btree leaf ranges.
+            // Sort key = ID, matching physicalities' HASH(id) partitioning and its
+            // PK(id). It was the hilbert index while the table was RANGE(hilbert),
+            // for coord-GiST spatial locality — but hilbert is a curve position,
+            // not a hash, so uniform bands over a clustered distribution sent
+            // 58.96% of the table (and of every batch) into one partition and
+            // collapsed these 8 lanes to 1: 527 rows/s with one backend working
+            // and 21 idle at COMMIT. Ids are content hashes, so id-range groups
+            // are equal-sized by construction and land in disjoint PK leaf ranges.
+            // The GiST gives up insert locality it was not being paid for: no
+            // installed read prunes on hilbert, so no KNN ever used the bands.
             var keptPhys = new List<KeptRow>(phys.Rows.Count);
             var seenPhys = new HashSet<Hash128>(phys.Ids.Count);
-            // Physicality KeptRow.SortKey is the hilbert index (GiST locality), not the id,
-            // so novel ids are collected here explicitly rather than recovered post-sort.
             var novelPhysIds = persistedPhys is null ? null : new List<Hash128>(keptPhys.Capacity);
             for (int i = 0; i < phys.Ids.Count; i++)
             {
                 if (!seenPhys.Add(phys.Ids[i])) continue;
                 if (presentPhys.Contains(phys.Ids[i])) { pSkip++; continue; }
                 keptPhys.Add(new KeptRow(
-                    CopyPartitionKey.ForHilbertIndex(phys.HilbertKeys[i]), phys.Rows[i], -1, 0));
+                    CopyPartitionKey.ForEntityId(phys.Ids[i]), phys.Rows[i], -1, 0));
                 novelPhysIds?.Add(phys.Ids[i]);
             }
 
@@ -1270,27 +1278,6 @@ public sealed partial class NpgsqlSubstrateWriter
                 for (int i = 0; i < n; i++) chunk[i] = tiers[start + i];
                 parameters.Add(new NpgsqlParameter
                 { Value = chunk, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Smallint });
-            }, addRoundTrips, ct);
-    }
-
-    /// <summary>Pair-keyed presence probe (physicalities:
-    /// RANGE(hilbert_index)). The write lane stages every row's hilbert index
-    /// (it is the parallel-COPY sort key already), so the probe prunes
-    /// per row instead of descending every leaf per id.</summary>
-    private Task<HashSet<Hash128>> ProbePresentPairKeyedParallelAsync(
-        string function, IReadOnlyList<Hash128> ids, IReadOnlyList<Hilbert128> hilbertIndexes,
-        Action<int> addRoundTrips, CancellationToken ct)
-    {
-        if (hilbertIndexes.Count != ids.Count)
-            throw new InvalidOperationException(
-                $"keyed probe arrays misaligned: {ids.Count} ids / {hilbertIndexes.Count} hilbert indexes");
-        return ProbePresentCoreAsync($"SELECT {function}($1, $2)", ids,
-            (parameters, start, n) =>
-            {
-                var chunk = new byte[n][];
-                for (int i = 0; i < n; i++) chunk[i] = hilbertIndexes[start + i].ToByteArray();
-                parameters.Add(new NpgsqlParameter
-                { Value = chunk, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
             }, addRoundTrips, ct);
     }
 
