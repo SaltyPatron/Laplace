@@ -45,8 +45,26 @@ CREATE OR REPLACE FUNCTION trajectory_continuations(
         SELECT w.id AS entity_id, c.ordinal, c.entity_id AS tok
         FROM v_word_points w
         CROSS JOIN LATERAL public.laplace_trajectory_constituents(w.trajectory) c
+        -- Containment on the WHOLE context, not just its last token. The final
+        -- predicate is `win = p_ctx`, an exact match on the trailing k content
+        -- tokens, so EVERY element of p_ctx must appear in a matching trajectory —
+        -- `@> p_ctx` is therefore sound, and strictly more selective than
+        -- `@> ARRAY[p_ctx[last]]`. GIN intersects the posting lists instead of
+        -- returning one token's entire list.
+        --
+        -- The single-token form made this cost the DEGREE OF ONE TOKEN. For a rare
+        -- word that is nothing; for a function word like `the` the candidate set is
+        -- most of the corpus, and every candidate was then fully unpacked by the
+        -- LATERAL below and run through four window functions. Bounding by the
+        -- rarest constituent instead of an arbitrary one is what makes the cost
+        -- track the path rather than the corpus, which is the requirement this
+        -- function exists to satisfy.
+        --
+        -- Containment ignores multiplicity and separator interleaving; neither
+        -- matters here because it is a FILTER — adjacency and exact order are still
+        -- decided by `win = p_ctx` after the unpack.
         WHERE public.laplace_trajectory_constituent_ids(w.trajectory)
-              @> ARRAY[p_ctx[array_length(p_ctx, 1)]]::bytea[]
+              @> p_ctx
     ),
     marked AS (
         SELECT c.entity_id, c.ordinal, c.tok,

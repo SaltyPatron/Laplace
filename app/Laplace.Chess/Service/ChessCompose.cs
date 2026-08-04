@@ -226,42 +226,16 @@ public static class ChessCompose
                 ids[n++] = TokenId($"{pc}{(char)('a' + f)}{(char)('1' + r)}".AsSpan());
         }
 
-        var sb = RentSb();
-        try
-        {
-            AppendPawnToken(sb, "wpawns:", bb.Of(Piece.WPawn));
-            ids[n++] = TokenId(sb.ToString().AsSpan());
-            sb.Clear();
-            AppendPawnToken(sb, "bpawns:", bb.Of(Piece.BPawn));
-            ids[n++] = TokenId(sb.ToString().AsSpan());
-            sb.Clear();
-
-            ulong wp = bb.Of(Piece.WPawn), bp = bb.Of(Piece.BPawn);
-            sb.Append("wpf:d").Append(Bitboards.Doubled(wp))
-              .Append('i').Append(Bitboards.Isolated(wp))
-              .Append('p').Append(Bitboards.Passed(wp, bp, white: true));
-            ids[n++] = TokenId(sb.ToString().AsSpan());
-            sb.Clear();
-            sb.Append("bpf:d").Append(Bitboards.Doubled(bp))
-              .Append('i').Append(Bitboards.Isolated(bp))
-              .Append('p').Append(Bitboards.Passed(bp, wp, white: false));
-            ids[n++] = TokenId(sb.ToString().AsSpan());
-            sb.Clear();
-
-            sb.Append("mat:")
-              .Append('P').Append(Bitboards.Count(bb.Of(Piece.WPawn)))
-              .Append('N').Append(Bitboards.Count(bb.Of(Piece.WKnight)))
-              .Append('B').Append(Bitboards.Count(bb.Of(Piece.WBishop)))
-              .Append('R').Append(Bitboards.Count(bb.Of(Piece.WRook)))
-              .Append('Q').Append(Bitboards.Count(bb.Of(Piece.WQueen)))
-              .Append('p').Append(Bitboards.Count(bb.Of(Piece.BPawn)))
-              .Append('n').Append(Bitboards.Count(bb.Of(Piece.BKnight)))
-              .Append('b').Append(Bitboards.Count(bb.Of(Piece.BBishop)))
-              .Append('r').Append(Bitboards.Count(bb.Of(Piece.BRook)))
-              .Append('q').Append(Bitboards.Count(bb.Of(Piece.BQueen)));
-            ids[n++] = TokenId(sb.ToString().AsSpan());
-        }
-        finally { ReturnSb(sb); }
+        // The wpawns:/bpawns:/wpf:/bpf:/mat: tokens USED TO BE EMITTED HERE, and this is
+        // the other half of removing them from the identity surface (PositionContent.Surface,
+        // plan item 6b). This path must stay bit-identical to PositionId(surface), and the
+        // block was dead under BOTH settings of the flag: with IncludeFeatureTokens false the
+        // surface no longer carries them, so emitting them here diverged the two paths; with
+        // it true the branch below re-derives the id from the surface string and discards
+        // `ids` entirely. Emitting them was therefore never right, only unnoticed — the
+        // surface half shipped without this and left
+        // ChessComposeBoardPositionIdTests.BoardPositionId_MatchesSurfacePath_StartAndPlies
+        // failing, which is why it never landed.
 
         if (PositionContent.IncludeFeatureTokens)
         {

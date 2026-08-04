@@ -37,18 +37,33 @@ public sealed record IngestSourceProfile(
     public static readonly IngestSourceProfile Document = new(64_000, 1);
 
     /// <summary>
-    /// Chess PGN game — one input unit explodes into dozens–hundreds of substrate rows
-    /// (per-ply board replay, geometry, attestations). Sized like a fat record, not a flat triple.
+    /// Chess PGN game — one input unit explodes into hundreds of substrate rows
+    /// (per-ply board replay, geometry, attestations). Fat enough to skip the
+    /// cheap-record coreFloor in <see cref="IngestSizing.ResolveRecordBatch"/>,
+    /// but not so fat that commit_rows collapses below <c>3 × batch × 8</c> and
+    /// <see cref="IngestSizing.ResolveMaxIntentsPerCommit"/> returns 1.
+    ///
     /// Apply-side attestation merge cost is billed via
     /// <see cref="IngestSizing.AttestationApplySurchargeBytes"/> so the MemoryTopology
     /// flush envelope closes merge storms; do not reinvent that with EstComposeUnits dials.
+    ///
+    /// MEASURED 2026-08-03 on Seed — chess games OTB-2025 (run 30850033122):
+    /// the previous 4_000_000 estimate resolved to
+    /// <c>record_batch=256 commit_rows=429 max_intents=1</c> on a 12-core /
+    /// 4 GiB working-set box — one intent per commit, CLI ~50% of one core,
+    /// multi-minute single <c>COPY physicalities</c>, progress frozen after
+    /// ~4k/224k games. Live throughput before the choke: ~16 games/s and
+    /// ~291 novel rows/game. 256001 keeps the fat path (batch 256, above the
+    /// 256 KiB coreFloor cut) and yields <c>commit_rows≈6144 max_intents≥3</c>
+    /// under the same budget.
     /// </summary>
-    public static readonly IngestSourceProfile ChessPgn = new(4_000_000, 1);
+    public static readonly IngestSourceProfile ChessPgn = new(256_001, 1);
 
     /// <summary>
-    /// Chess analysis derive — replays witnessed movetext into positions/geometry per game.
+    /// Chess analysis derive — same working-set class as <see cref="ChessPgn"/>
+    /// (fused Compose and standalone chess-analyze share the explosion shape).
     /// </summary>
-    public static readonly IngestSourceProfile ChessAnalyze = new(4_000_000, 1);
+    public static readonly IngestSourceProfile ChessAnalyze = new(256_001, 1);
 
     /// <summary>WordNet synset/sense line — small text, many emitted rows per line.</summary>
     public static readonly IngestSourceProfile WordNet = new(4_096, 4);

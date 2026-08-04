@@ -204,9 +204,23 @@ jobs:
       - name: Docs inventory drift gate
         # docs/INVENTORY.md is generated (scripts/docs-inventory.py): the counted
         # facts prose docs cite (projects, decomposers, SQL families, relations).
-        # The 2026-07-18 audit found every count embedded in prose had drifted;
-        # this gate makes committed counts a function of the tree, like the
-        # codegen determinism gate above.
+        # The 2026-07-18 audit found every count embedded in prose had drifted, so
+        # prose carries NO counts and points here instead — README, ARCHITECTURE,
+        # INDEX, COMPLETION_PLAN, INVENTIONS and the doc-reconciler agent all
+        # depend on that. The file therefore has to be true at every commit, which
+        # is why it is committed and why this stays BLOCKING.
+        #
+        # What changed is that keeping it true is no longer a human step.
+        # scripts/githooks/pre-commit regenerates and stages this file on every
+        # commit; scripts/install-githooks.sh points core.hooksPath at it and is
+        # invoked by scripts/check-prereqs.sh and scripts/agent-worktree.sh, so any
+        # checkout that has been set up at all has it. This gate is now a backstop
+        # for a checkout that skipped setup, not the mechanism.
+        #
+        # It blocked main twice on 2026-08-04 because the mechanism WAS a human
+        # remembering. Making the gate advisory would have been the wrong fix: it
+        # would keep the drift and hide it. The fix is upstream — nobody has to
+        # remember anything.
         run: python3 scripts/docs-inventory.py --check
 
       - name: Forbid C# attestation policy in decomposers
@@ -600,9 +614,28 @@ jobs:
           echo "$detail"
           if python3 -c 'import json,sys; d=json.loads(sys.argv[1]); sys.exit(0 if (d.get("substrate_reachable") and d.get("perfcache_ready") and not d.get("consensus_relations")) else 1)' "$detail"
           then
-            echo "::error::UNSEEDED_SUBSTRATE: API reachable + perfcache loaded, but substrate has no consensus/entities. Heal via seed-foundation dispatch — this gate does not auto-reseed."
+            # An EMPTY substrate is not a broken deploy. The service is up, the perfcache
+            # loaded, the extension installed — publish did its job. What is missing is
+            # DATA, which publish does not own and cannot heal (seeds stay dispatch-only).
+            #
+            # This used to write seeded=false and then exit 1, which contradicted itself:
+            # smoke and eval already gate on `needs.publish.outputs.seeded == 'true'`, so
+            # the output published here is exactly what makes them skip cleanly — and
+            # failing the job meant that guard could never be reached. /health/ready
+            # reports ready:false while unseeded, so the poll above can never succeed on a
+            # fresh database, which made main structurally red for the entire window
+            # between a recreate and a seed. That window is now normal: HASH(id)
+            # repartitioning made drop-then-recreate the upgrade path.
+            #
+            # #792 is preserved. That defect was a STALE deploy silently skipping smoke;
+            # every not-ready-for-any-other-reason path below still fails loudly. The one
+            # case softened here is the one the substrate itself reports as merely empty.
+            echo "::warning::UNSEEDED_SUBSTRATE: API reachable + perfcache loaded, but substrate has no consensus/entities. Downstream smoke/eval will skip. Heal via: gh workflow run \"Seed — foundation\" -f source=ladder"
             echo "seeded=false" >> "$GITHUB_OUTPUT"
-            exit 1
+            # Deliberately NOT stamped: the stamp lets a later run skip publish on an
+            # unchanged domain, and this box has not served a ready check. Re-publishing
+            # is idempotent; skipping one that was never verified is not.
+            exit 0
           fi
 
           echo "::error::laplace-api not ready 60s after restart — readiness detail above"

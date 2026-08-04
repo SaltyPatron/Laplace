@@ -256,14 +256,32 @@ internal static class QueryCommands
     }
 
     /// <summary>
-    /// The CLI's conversational identity. One tenant for the lane, one session per
-    /// process, minted through the same canonical id law the MCP tool and the HTTP
-    /// surface use — so a CLI session and an endpoint session with the same
-    /// tenant+key are the SAME context entity, not two.
+    /// The CLI's conversational identity. One tenant for the lane, minted through the
+    /// same canonical id law the MCP tool and the HTTP surface use — so a CLI session
+    /// and an endpoint session with the same tenant+key are the SAME context entity,
+    /// not two.
+    ///
+    /// The key is DETERMINISTIC. It used to be <c>$"s-{Guid.NewGuid():N}"</c>, which
+    /// broke the guarantee the paragraph above states: a random key cannot match any
+    /// other surface's key, so the CLI could never share a session with an endpoint,
+    /// and every invocation minted a fresh context entity in the substrate. Ids are
+    /// content hashes and are never constructed outside the system — a GUID is an id
+    /// that is not a function of what it identifies, so re-running the same command
+    /// could never dedupe. Every other caller already passes a client-supplied key
+    /// (EndpointMappings.Inference, SubstrateTools); the CLI was the outlier.
+    ///
+    /// LAPLACE_SESSION_KEY names a session explicitly — that is how a CLI invocation
+    /// joins an endpoint or MCP conversation, and how two CLI lanes stay distinct.
+    /// Unset, the CLI is one stable context, which is what "same tenant+key is the
+    /// same entity" means when the key is the lane itself.
     /// </summary>
     private const string CliTenant = "cli-local";
-    private static readonly Hash128 SessionId =
-        ConversationContent.SessionId(CliTenant, $"s-{Guid.NewGuid():N}");
+    private static readonly Hash128 SessionId = ConversationContent.SessionId(
+        CliTenant,
+        Environment.GetEnvironmentVariable("LAPLACE_SESSION_KEY") is { Length: > 0 } k
+            && ConversationContent.IsValidIdentifier(k)
+            ? k
+            : "cli");
 
 
 

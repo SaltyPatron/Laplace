@@ -736,14 +736,26 @@ internal static class IngestCommands
     // that rebuilds physicalities indexes on an existing database. Keep in sync with the
     // extension — it is the deployment unit and the authority. radius_origin and
     // alignment_residual were removed 2026-07-28 (0 scans; see those .sql.in files).
+    //
+    // This list had DRIFTED from the extension in both directions, and drift here is not
+    // cosmetic: the command exists to restore the schema's index set, so anything wrong in
+    // it gets written to a live database as if it were the schema.
+    //   - physicalities_type_btree: retired 2026-08-04. `type` holds ONE value across the
+    //     seeded corpus (4,327,399 rows, all type 1), so a btree over it is never
+    //     selective; the predicates that matter are carried by the partial indexes below,
+    //     which encode `type = 1` in their own WHERE clauses.
+    //   - physicalities_hilbert_btree: the extension has no such index and has not for some
+    //     time — a leftover from RANGE(hilbert_index) partitioning, which physicalities no
+    //     longer uses. This command was recreating it on every recovery run.
+    //   - physicalities_traj_first_id_btree was MISSING here while the extension declares
+    //     it, so a recovery run left the database short an index it is supposed to have.
     private static readonly string[] SchemaPhysIndexDefs =
     [
         "CREATE INDEX IF NOT EXISTS physicalities_entity_btree ON laplace.physicalities USING btree (entity_id)",
-        "CREATE INDEX IF NOT EXISTS physicalities_type_btree ON laplace.physicalities USING btree (type)",
         "CREATE INDEX IF NOT EXISTS physicalities_coord_gist ON laplace.physicalities USING gist (coord gist_geometry_ops_nd)",
-        "CREATE INDEX IF NOT EXISTS physicalities_hilbert_btree ON laplace.physicalities USING btree (hilbert_index)",
         "CREATE INDEX IF NOT EXISTS physicalities_observed_brin ON laplace.physicalities USING brin (observed_at)",
         "CREATE INDEX IF NOT EXISTS physicalities_traj_probe ON laplace.physicalities USING btree (observed_at) WHERE type = 1 AND trajectory IS NOT NULL",
+        "CREATE INDEX IF NOT EXISTS physicalities_traj_first_id_btree ON laplace.physicalities USING btree ((public.laplace_trajectory_constituent_ids(trajectory))[1]) WHERE trajectory IS NOT NULL AND type = 1",
         "CREATE INDEX IF NOT EXISTS physicalities_constituents_gin ON laplace.physicalities USING gin (public.laplace_trajectory_constituent_ids(trajectory)) WHERE type = 1 AND trajectory IS NOT NULL",
     ];
 
@@ -771,6 +783,12 @@ internal static class IngestCommands
         // column-list ANALYZE still refreshes pg_class.reltuples, which is the estimate that
         // matters here.
         await NpgsqlIngestOps.AnalyzePostIngestValidationAsync(conn);
+
+        // The write burst is over: drain the GIN pending lists so the first reader
+        // after a seed does not scan them linearly. See CleanGinPendingListsAsync —
+        // this is what lets gin_pending_list_limit be sized for bulk-load batching
+        // without taxing the containment probe the read model runs on.
+        await NpgsqlIngestOps.CleanGinPendingListsAsync(conn);
 
         Task<long> EvidenceForSource(string sourceKey) =>
             NpgsqlIngestOps.EvidenceCountForSourceNameAsync(conn, sourceKey);

@@ -44,9 +44,42 @@ public static class PositionContent
         }
 
 
-        AppendPawns(sb, " wpawns:", bb.Of(Piece.WPawn));
-        AppendPawns(sb, " bpawns:", bb.Of(Piece.BPawn));
+        // wpawns:/bpawns:/wpf:/bpf:/mat: USED TO BE APPENDED HERE. They are gone from the
+        // identity surface deliberately (plan item 6b).
+        //
+        // Every one is a pure function of the piece placement emitted by the occupancy loop
+        // directly above: pawn file lists, doubled/isolated/passed counts and the material
+        // vector are all recoverable from the squares. They therefore contribute ZERO
+        // distinguishing power to the hash — two positions agreeing on placement agree on all
+        // of them by construction — while costing roughly a third of the surface string, a
+        // substructure entity per token, a 33-byte trajectory vertex per token, and a per-ply
+        // OUTCOME deposit each (~5 of 25-36 constituents).
+        //
+        // The concepts are NOT being discarded. "How do doubled-pawn positions fare" is a real
+        // question and its consensus cell should saturate across every position sharing the
+        // structure — which is exactly what it CANNOT do while the feature is welded into the
+        // identity of one specific placement. As a hash token it fragments per position; as an
+        // attestation on the position it accumulates. DerivedFeatureSurface() below keeps the
+        // computation for that path.
+        //
+        // This changes Chess_Position ids. It lands with the rest of the identity work, not on
+        // its own — one reseed, not three.
+        if (IncludeFeatureTokens)
+            AppendFeatureTokens(sb, b, bb);
 
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// The derived structural features, as a surface for ATTESTATION rather than identity.
+    /// Same bytes that used to sit in the hash; emitted against the position id so the cells
+    /// saturate across every position sharing the structure instead of fragmenting per board.
+    /// </summary>
+    public static string DerivedFeatureSurface(Bitboards bb)
+    {
+        var sb = new StringBuilder(96);
+        AppendPawns(sb, "wpawns:", bb.Of(Piece.WPawn));
+        AppendPawns(sb, " bpawns:", bb.Of(Piece.BPawn));
 
         ulong wp = bb.Of(Piece.WPawn), bp = bb.Of(Piece.BPawn);
         sb.Append(" wpf:d").Append(Bitboards.Doubled(wp))
@@ -55,7 +88,6 @@ public static class PositionContent
         sb.Append(" bpf:d").Append(Bitboards.Doubled(bp))
           .Append('i').Append(Bitboards.Isolated(bp))
           .Append('p').Append(Bitboards.Passed(bp, wp, white: false));
-
 
         sb.Append(" mat:")
           .Append('P').Append(Bitboards.Count(bb.Of(Piece.WPawn)))
@@ -68,9 +100,6 @@ public static class PositionContent
           .Append('b').Append(Bitboards.Count(bb.Of(Piece.BBishop)))
           .Append('r').Append(Bitboards.Count(bb.Of(Piece.BRook)))
           .Append('q').Append(Bitboards.Count(bb.Of(Piece.BQueen)));
-
-        if (IncludeFeatureTokens)
-            AppendFeatureTokens(sb, b, bb);
 
         return sb.ToString();
     }
