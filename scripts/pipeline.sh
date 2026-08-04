@@ -300,17 +300,24 @@ phase_build() {
   echo "T0 perfcache ready: $t0"
   echo "highway perfcache ready: $hw"
   # Chess position blob (tier-2 geometry, spec 33 / GH #822) gets the SAME existence gate,
-  # but it SELF-ARMS. The producing target lives in engine/core/CMakeLists.txt and is landing
-  # on a separate branch; gating on it before that merges would fail every build on a host
-  # that happens to have the corpus. `LAPLACE_CHESS_OPENINGS` is declared `CACHE PATH` by that
-  # CMake, so its presence in CMakeCache.txt is exactly "the producing target exists in this
-  # configure" — the gate turns itself on when the target lands and needs no second edit here.
+  # but it SELF-ARMS off the PRODUCING TARGET, not off a variable.
+  #
+  # The first version of this armed on `LAPLACE_CHESS_OPENINGS:` appearing in CMakeCache.txt.
+  # That was wrong and red-lit every build: THIS SCRIPT passes -DLAPLACE_CHESS_OPENINGS on
+  # every configure, so the cache always contains it whether or not engine/core declares a
+  # target that consumes it. The variable proves the input was offered, never that a producer
+  # exists to accept it.
+  #
+  # `add_custom_target(laplace_chess_position_perfcache ...)` in engine/core/CMakeLists.txt IS
+  # the producer. Grepping for it is exact: absent -> nothing can emit the blob and the gate
+  # must stay quiet; present -> a missing blob is a real skipped target. It arms itself the
+  # commit that target lands and needs no second edit here.
   local chess_bin chess_target_declared=0
-  if [[ -f "$ROOT/build/CMakeCache.txt" ]] && grep -q '^LAPLACE_CHESS_OPENINGS:' "$ROOT/build/CMakeCache.txt"; then
+  if grep -q 'add_custom_target(laplace_chess_position_perfcache' "$ROOT/engine/core/CMakeLists.txt" 2>/dev/null; then
     chess_target_declared=1
   fi
   if [[ "$chess_target_declared" -eq 0 ]]; then
-    echo "chess position perfcache: target not declared by this configure (LAPLACE_CHESS_OPENINGS absent from CMakeCache) — gate inactive"
+    echo "chess position perfcache: no laplace_chess_position_perfcache target in engine/core/CMakeLists.txt — gate inactive"
   elif [[ -d "$chess_openings" ]]; then
     chess_bin=$(find "$ROOT/build" -name 'laplace_chess_position_perfcache*.bin' 2>/dev/null | head -1 || true)
     if [[ -z "$chess_bin" ]]; then

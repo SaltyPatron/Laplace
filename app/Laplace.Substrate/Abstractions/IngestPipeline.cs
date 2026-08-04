@@ -534,6 +534,12 @@ public static class IngestBatchPipeline
 
         var workerTasks = new Task[workers];
         for (int w = 0; w < workers; w++)
+        {
+            // Captured OUTSIDE Task.Run. `for` does not give per-iteration capture the way
+            // `foreach` does, so a `int workerId = w;` inside the lambda reads the one shared
+            // loop variable at RUN time — racing the loop thread and usually yielding the exit
+            // value for every worker. That silently made per-worker ingest telemetry useless.
+            int workerId = w;
             workerTasks[w] = Task.Run(async () =>
             {
                 await foreach (var source in sources.Reader.ReadAllAsync(ct))
@@ -545,7 +551,6 @@ public static class IngestBatchPipeline
                         : 1;
 
                     int ordinal = Interlocked.Increment(ref fileOrdinal);
-                    int workerId = w;
                     var fileSw = System.Diagnostics.Stopwatch.StartNew();
                     bool logFile = MultiFileTelemetry.ShouldLogFileLine(ordinal, knownFileTotal);
                     if (logFile)
@@ -596,6 +601,7 @@ public static class IngestBatchPipeline
                     }
                 }
             }, ct);
+        }
 
         _ = Task.Run(async () =>
         {

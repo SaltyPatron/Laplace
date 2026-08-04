@@ -2209,6 +2209,14 @@ public static class NpgsqlSubstrateReads
         OpeningCatalogAsync(
             NpgsqlDataSource dataSource, byte[] openingNameType, byte[] hasEcoType,
             byte[] sourceId, CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null) =>
+        // ORDER BY is load-bearing, not cosmetic. The consumer takes FIRST-WINS when a
+        // position carries several names, so without an ordering the name a position gets
+        // is whatever the plan happened to emit — it could change after a replan, a vacuum
+        // or a parallel scan, which is non-deterministic naming in a content-addressed
+        // system. Rank by what the fold produced (eff_mu over the name cell), with the
+        // object id as a total tiebreak so the result is reproducible even for unattested
+        // names. eff_mu() is called, never inlined as `rating - 2*rd` — that literal is
+        // what g1_weight_literalism exists to reject.
         NpgsqlRead.ReadRowsAsync(dataSource, """
             SELECT n.subject_id, n.object_id, e.object_id
             FROM laplace.attestations n
@@ -2216,8 +2224,15 @@ public static class NpgsqlSubstrateReads
                    ON e.subject_id = n.subject_id
                   AND e.type_id    = @eco
                   AND e.source_id  = @src
+            LEFT JOIN laplace.consensus c
+                   ON c.subject_id = n.subject_id
+                  AND c.type_id    = n.type_id
+                  AND c.object_id  = n.object_id
             WHERE n.type_id   = @name
               AND n.source_id = @src
+            ORDER BY n.subject_id,
+                     laplace.eff_mu(c.rating, c.rd) DESC NULLS LAST,
+                     n.object_id
             """,
             r => ((byte[])r[0], (byte[])r[1], r.IsDBNull(2) ? null : (byte[])r[2]),
             p =>
