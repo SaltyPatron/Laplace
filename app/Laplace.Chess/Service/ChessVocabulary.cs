@@ -161,11 +161,31 @@ public static class ChessVocabulary
         Hash128 movetextId)
         => Hash128.OfCanonical($"chess/playing/{white}|{black}|{date}|{@event}|{round}|{site}|{movetextId}");
 
-    // Live/lab playing-event handle: a live occurrence is unique by construction, so the
-    // session GUID is the whole identity (determinism-for-re-ingest does not apply — the
-    // cutechess PGN written afterwards is the replayable record). Lichess games keep their
-    // source-asserted external id (ChessLiveGameHost.LichessGameId).
-    public static Hash128 PlayEventId(Guid sessionGame)
+    /// <summary>
+    /// One playing of a live/lab game. Content-derived exactly like <see cref="PgnPlayingId"/>:
+    /// the line is the Merkle of the ordered position ids, so it already carries the whole
+    /// move sequence; players, learn context and result close over the rest. Two identical
+    /// self-plays therefore mint ONE playing whose observation count folds, which is the
+    /// designed behaviour — testimony accumulates, rows do not duplicate.
+    ///
+    /// Replaces minting the playing from a session GUID. A random id is not a function of
+    /// what it identifies: the same game replayed produced a different entity every time, so
+    /// re-ingest could never dedupe it and the substrate accumulated a fresh playing per run.
+    /// There was no speed argument either — OfCanonical stack-allocates the UTF-8 and calls
+    /// the native SIMD blake3 (NativeInterop.Hash128Blake3), which beats Guid.NewGuid().
+    /// </summary>
+    public static Hash128 LivePlayingId(
+        Hash128? whitePlayer, Hash128? blackPlayer, string learnContext,
+        Hash128 lineId, string resultToken)
+        => Hash128.OfCanonical(
+            $"chess/playing/live/{whitePlayer}|{blackPlayer}|{learnContext}|{lineId}|{resultToken}");
+
+    // IN-MEMORY SESSION HANDLE ONLY — never an entity id. A live game needs a key to route
+    // plies to a session before any content exists; that key is not identity and no longer
+    // reaches the substrate. The playing entity is minted by LivePlayingId at completion,
+    // when the content it names finally exists. Lichess games keep their source-asserted
+    // external id (ChessLiveGameHost.LichessGameId), which IS deterministic.
+    public static Hash128 PlaySessionHandle(Guid sessionGame)
         => Hash128.OfCanonical($"chess/play/{sessionGame:N}");
 
     public static Hash128 PlayerId(string name) => Hash128.OfCanonical($"chess/player/{PlayerAlias.Canonical(name)}");
