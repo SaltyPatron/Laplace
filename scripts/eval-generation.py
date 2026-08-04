@@ -96,15 +96,37 @@ def resolve_topic_surface(db: str, phrase: str) -> str | None:
     return rows[0] if rows else None
 
 
+# The six-key elector invariant, verbatim from the five production sites
+# (converse/chat, converse, converse_walk, resolve_topic, infer) and pinned by
+# ElectorArchitectureGateTests. This harness MUST rank the way the system ranks;
+# anything else measures a fiction.
+#
+# It previously used `ORDER BY ord LIMIT 1`, which takes the EARLIEST token
+# rather than the best-ranked candidate — the exact inverse of the invariant's
+# `ord DESC` tiebreak, which exists so the later, more specific token wins when
+# the discriminating keys tie. Measured 2026-08-04 on "What is a glacier":
+# specificity/rel_mass/peers all tie at 0, ord 2 = "a", ord 3 = "glacier", so
+# ord ASC elected the article and scored the elector wrong. Two of the six
+# probes ("glacier", "pawn") were failing on that alone.
+ELECTOR_ORDER = (
+    "specificity DESC NULLS LAST, "
+    "rel_mass DESC NULLS LAST, "
+    "peers DESC, "
+    "ord DESC, "
+    "denote_mu DESC NULLS LAST, "
+    "synset_id"
+)
+
+
 def prompt_coherence_rank1(db: str, prompt: str) -> tuple[str | None, float | None, float]:
-    """Return (synset_surface, specificity, latency_s) for ord=1 / first row."""
+    """Return (synset_surface, specificity, latency_s) for the elected candidate."""
     q = prompt.replace("'", "''")
     t0 = time.perf_counter()
     rows = psql_rows(
         db,
         "SET search_path=laplace,public; "
         "SELECT render(synset_id), specificity "
-        f"FROM prompt_coherence('{q}') ORDER BY ord LIMIT 1;",
+        f"FROM prompt_coherence('{q}') ORDER BY {ELECTOR_ORDER} LIMIT 1;",
     )
     latency = time.perf_counter() - t0
     if not rows:

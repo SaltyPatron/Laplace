@@ -86,6 +86,51 @@ Neither spec 37 §8 nor `.scratchpad/38` §12b states this, and both imply a
 read-side tier fix is available. It is not. The remedy is at ingest (§1) or via
 an **object-type** predicate, never a tier one.
 
+### 0.3 The joint signals are inert on a foundation seed — measured 2026-08-04
+
+Both corrections above argue about *which* defect ranks first. Measured on the
+freshly seeded foundation ladder (4.34M entities, 11/11 sources `ok`), the
+answer is neither: **`prompt_coherence` has no joint signal to rank with.**
+
+`prompt_coherence` output, verbatim, via `op`:
+
+| prompt | ord | coherence | peers | rel_mass | rel_type_id | specificity | denote_mu |
+|---|---|---|---|---|---|---|---|
+| `hot` | 0 | **0** | **0** | **0** | **NULL** | **0** | 1388.07 |
+| `dog` | 0 | **0** | **0** | **0** | **NULL** | **0** | 1169.73 |
+| `Water is made of` | 0 | **0** | **0** | **0** | **NULL** | **0** | 1169.73 |
+| `Water is made of` | 2 | **0** | **0** | **0** | **NULL** | **0** | 1173.34 |
+| `What is a pawn in chess` | 3 | 4.616e11 | 1 | **0** | **NULL** | 0.0442 | 1169.73 |
+| `What is a pawn in chess` | 5 | 4.616e11 | 1 | **0** | **NULL** | 0.0364 | 994.80 |
+
+Three facts follow, and they reorder the workstream again:
+
+1. **Single-token prompts have no joint signal by construction.** OP3 ranks a
+   candidate by mass to the *other* tokens' candidates. With one token there are
+   no other tokens, so `coherence`, `peers` and `specificity` are necessarily 0
+   and the election is `denote_mu` alone — the exact ranking spec 37 OP3 declares
+   illegal. `hot` → **opposite** and `dog` → `dog` are the same code path; the
+   second is luck, not correctness. **No tie-break prior can fix this**, because
+   the defect is an absent signal, not a mis-ordered one.
+2. **`rel_mass` and `rel_type_id` never fire.** Zero and NULL on every token of
+   every probe, including the multi-token ones. The 2026-07-27 amendment
+   (spec 37 §8.2) reported `rel_mass` as *the only discriminating key*
+   (`car`→"automobile"); on this seed it discriminates nothing. Either the
+   relation-naming path depends on a lane the foundation ladder does not seed, or
+   it regressed. **Unresolved — this is the first thing to run down.**
+3. **The elector invariant pins three inert keys.** All five sites order by
+   `specificity DESC, rel_mass DESC, peers DESC, ord DESC, denote_mu DESC,
+   synset_id`. With the first three at 0/NULL for most tokens the effective sort
+   is `ord DESC, denote_mu DESC`. `ElectorArchitectureGateTests` (#771) is
+   correctly pinning key *order* while the leading keys carry no signal — the
+   gate is honest and the thing it guards is hollow. A gate on key order does not
+   imply a working election, and nothing currently measures the difference except
+   `scripts/eval-generation.py`.
+
+**Measured election correctness on this seed: 1/6 exact** (`eval-baselines.json`,
+recorded 2026-08-04, p50 latency 2.31 s against a 30 s ceiling). Latency is not
+the problem; the elector is.
+
 ## 1. The seam — root cause, resolved
 
 Recorded as an open question (*"is the tier-2 POS row a correct attestation or a

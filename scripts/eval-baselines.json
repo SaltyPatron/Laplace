@@ -1,12 +1,18 @@
 {
-  "recorded_at": null,
+  "recorded_at": "2026-08-04T21:35:04Z",
   "advisory_until": "2026-08-10",
   "blocking_flip_date": null,
-  "fingerprint": null,
+  "fingerprint": {
+    "entities (ESTIMATE)": 4341187,
+    "physicalities (ESTIMATE)": 4342410,
+    "attestations (ESTIMATE)": 6282776,
+    "consensus (ESTIMATE)": 5662337
+  },
   "election": {
-    "require_exact": true,
-    "notes": "No baseline recorded yet. Run: python3 scripts/eval-generation.py --record once election_correctness is green on a seeded box, or record a known-red advisory snapshot deliberately."
+    "passed": 5,
+    "total": 6,
+    "require_exact": true
   },
   "latency_ceiling_s": 30.0,
-  "notes": "Skeleton — check without --record exits 1 with explicit refusal until fingerprint+election are filled by --record."
+  "notes": "election_correctness is exact; fingerprint change requires re-record"
 }

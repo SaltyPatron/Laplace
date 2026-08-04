@@ -421,11 +421,50 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
             if (name == NULL)
                 continue;
 
-            last = strrchr(name, '_');
-            last = last ? last + 1 : name;
-            len = strlen(last);
-            if (len < 3)
-                continue;               /* identifier fragment, not a concept */
+            /* Pick the LONGEST underscore-delimited segment, not the last one.
+             * `strrchr(name, '_') + 1` grabs the trailing preposition for every
+             * *_OF / *_TO / *_ON / *_BY name: "IS_SYNONYM_OF" yields "OF",
+             * which the len < 3 guard then discarded, leaving the relation
+             * unnameable from a prompt that names it in so many words.
+             *
+             * MEASURED 2026-08-04 against engine/manifest/relation_types.toml:
+             * 56 of 233 canonical names lost their concept that way, including
+             * IS_A, IS_SYNONYM_OF, IS_ANTONYM_OF, IS_TRANSLATION_OF,
+             * IS_INSTANCE_OF, MADE_UP_OF, RELATED_TO, CAPABLE_OF and
+             * DEPENDS_ON — i.e. most of the relations a question actually
+             * names. rel_mass was measured 0 and rel_type_id NULL on every
+             * token of every probe, so the elector's only discriminating key
+             * was inert and every election fell through to denote_mu, the
+             * single-token scalar spec 37 OP3 forbids ranking on.
+             *
+             * The longest segment is the concept in every manifest name; ties
+             * keep the earlier segment. Names with no segment >= 3 chars
+             * (IS_A -> "IS"/"A") stay skipped: those are stopwords, and a
+             * prompt token matching them would name nothing. */
+            {
+                const char *seg = name;
+                const char *best_seg = NULL;
+                size_t      best_len = 0;
+
+                for (;;)
+                {
+                    const char *us = strchr(seg, '_');
+                    size_t      slen = us ? (size_t) (us - seg) : strlen(seg);
+
+                    if (slen > best_len)
+                    {
+                        best_seg = seg;
+                        best_len = slen;
+                    }
+                    if (us == NULL)
+                        break;
+                    seg = us + 1;
+                }
+                if (best_seg == NULL || best_len < 3)
+                    continue;           /* identifier fragment, not a concept */
+                last = best_seg;
+                len = best_len;
+            }
 
             {
                 char *lower = pnstrdup(last, len);
