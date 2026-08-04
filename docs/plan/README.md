@@ -65,6 +65,7 @@ start order. Read that before re-deriving status from older prose.
 | — | Foundation seed / prove #776 on live ladder | #777 | 0 | **ops gate** — orphan Unicode journal; see checkpoint §2 |
 | W13 | [Convergent identity](W13_Convergent_Identity.md) — why everything links to everything | #574 | — | thesis verified, unmeasured |
 | W14 | [The machine model](W14_Machine_Model.md) — memory, ISA, and the operator that cycles it | — | 1 | binds specs 15/33/36/37; names four structural gaps |
+| W15 | [Election fan-out axes](W15_Election_Fanout_Axes.md) — what an election may rank on | #861, #865 | 3 | **axis inventory measured**; independence classes proposed, remedy unmeasured |
 
 ## Findings that changed the plan
 
