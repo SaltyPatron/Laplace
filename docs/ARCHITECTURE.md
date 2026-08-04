@@ -33,7 +33,7 @@ filter applied before or after it.
 | Table | Primary key | Partitioning | Role |
 |---|---|---|---|
 | `entities` | `(id, tier)` | LIST(`tier`) — 0…4 + DEFAULT; tier 2 sub-partitioned HASH(`id`)×8 | one row per distinct content |
-| `physicalities` | `(hilbert_index, id)` | RANGE(`hilbert_index`) | geometry: `coord geometry(PointZM)`, `trajectory geometry(GeometryZM)` |
+| `physicalities` | `(id)` | HASH(`id`) × 64 | geometry: `coord geometry(PointZM)`, `trajectory geometry(GeometryZM)` |
 | `attestations` | `(id, type_id, subject_id)` | LIST(`type_id`) | one row per assertion, with provenance |
 | `consensus` | `(id, type_id, subject_id)` | LIST(`type_id`) | the fold: `rating`, `rd`, `volatility`, `witness_count` |
 
@@ -144,6 +144,14 @@ in the DEFAULT partition.
 `hilbert_index`, an optional `trajectory geometry(GeometryZM)`, `n_constituents`,
 `alignment_residual`, and `source_dim`. `radius_origin` is a generated stored column
 computed from the four coordinates.
+
+`hilbert_index` equality lookups are served by an explicit
+`physicalities_hilbert_btree`, not by the primary key. Before the 2026-08-04
+repartition the PK was `(hilbert_index, id)` and hilbert was its leading column, so no
+separate index was needed; HASH(`id`) requires the PK to be `(id)`, which removed that
+coverage silently. `anagrams_of()` is the caller that proves the index is required —
+it joins `w2.hilbert_index = w1.hilbert_index`, because anagrams share a letter
+multiset and therefore compose to the same coordinate.
 
 Native support in `engine/core/src/`: `super_fibonacci.c` (S³ point placement),
 `hilbert4d.c`, `math4d.c`, `mantissa.c` (bit-packing ids/scores/counts through the ZM
