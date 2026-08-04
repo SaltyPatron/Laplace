@@ -14,6 +14,7 @@ indexes/entities_created_at_brin.sql.in
 indexes/physicalities_entity_btree.sql.in
 indexes/physicalities_type_btree.sql.in
 indexes/physicalities_coord_gist.sql.in
+indexes/physicalities_hilbert_btree.sql.in
 indexes/physicalities_radius_btree.sql.in
 indexes/physicalities_residual_btree.sql.in
 indexes/physicalities_observed_brin.sql.in

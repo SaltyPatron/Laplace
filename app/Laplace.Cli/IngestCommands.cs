@@ -736,6 +736,22 @@ internal static class IngestCommands
     // that rebuilds physicalities indexes on an existing database. Keep in sync with the
     // extension — it is the deployment unit and the authority. radius_origin and
     // alignment_residual were removed 2026-07-28 (0 scans; see those .sql.in files).
+    //
+    // physicalities_hilbert_btree belongs here. It was in this list before the schema had
+    // a .sql.in for it, and that was CORRECT rather than drift: the primary key used to be
+    // (hilbert_index, id), so hilbert was covered by the PK's leading column and a separate
+    // btree would have been redundant in the schema while this recovery path still had to
+    // create it. Repartitioning to HASH(id) forced the PK to (id) and silently removed the
+    // only hilbert coverage, which broke anagrams_of()'s equality join into a sequential
+    // scan of all 64 partitions. The index is now declared in the schema too
+    // (indexes/physicalities_hilbert_btree.sql.in), so both agree.
+    //
+    // physicalities_traj_first_id_btree IS in the schema and was missing here, so a
+    // recovery run left the database short an index it is supposed to have.
+    //
+    // Drift in this list is not cosmetic: the command exists to restore the schema's index
+    // set, so whatever is wrong here gets written to a live database as if it were the
+    // schema.
     private static readonly string[] SchemaPhysIndexDefs =
     [
         "CREATE INDEX IF NOT EXISTS physicalities_entity_btree ON laplace.physicalities USING btree (entity_id)",
@@ -744,6 +760,7 @@ internal static class IngestCommands
         "CREATE INDEX IF NOT EXISTS physicalities_hilbert_btree ON laplace.physicalities USING btree (hilbert_index)",
         "CREATE INDEX IF NOT EXISTS physicalities_observed_brin ON laplace.physicalities USING brin (observed_at)",
         "CREATE INDEX IF NOT EXISTS physicalities_traj_probe ON laplace.physicalities USING btree (observed_at) WHERE type = 1 AND trajectory IS NOT NULL",
+        "CREATE INDEX IF NOT EXISTS physicalities_traj_first_id_btree ON laplace.physicalities USING btree ((public.laplace_trajectory_constituent_ids(trajectory))[1]) WHERE trajectory IS NOT NULL AND type = 1",
         "CREATE INDEX IF NOT EXISTS physicalities_constituents_gin ON laplace.physicalities USING gin (public.laplace_trajectory_constituent_ids(trajectory)) WHERE type = 1 AND trajectory IS NOT NULL",
     ];
 
