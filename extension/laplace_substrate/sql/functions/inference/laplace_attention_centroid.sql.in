@@ -1,25 +1,61 @@
+-- Band-masked attention centroid: the weighted 4D centre of everything an
+-- entity attends to through a given band. This is the "general area" a concept
+-- occupies, as opposed to its own coordinate, which is a function of its
+-- content (the composition of its codepoints) and therefore says nothing about
+-- meaning — 'dog' and its translations have unrelated coordinates by
+-- construction. The centroid over a semantic band is where they converge.
+--
+-- BUG FIXED 2026-08-04 — this function returned NULL on every call it had ever
+-- served, silently. The band filter was:
+--
+--     SELECT e.id FROM entities e
+--     WHERE e.highway_mask IS NOT NULL
+--       AND laplace_highway_mask_bits(e.highway_mask)
+--           && laplace_highway_mask_bits(p_band_mask)
+--
+-- which asks for ENTITIES whose own highway mask overlaps the band, then joins
+-- that set to consensus.type_id. But a highway mask records which bands an
+-- entity has EDGES IN; it is not a statement about which band a relation type
+-- BELONGS TO. That is relation_highway_bit(type_id), straight from the
+-- manifest. Measured on the foundation ladder: the CTE matched 0 rows for
+-- word_id('dog') against band 3, while dog demonstrably carries 8
+-- IS_SYNONYM_OF edges (bit 153, band 3) and 9 HAS_SENSE (bit 112, band 3).
+-- Zero rows in, NULL out, no error.
+--
+-- It was also a full scan of every entity (4.34M) with a set-returning
+-- function evaluated per row — the per-row SRF shape the architecture rules
+-- name explicitly — to produce a set that is fully determined by the manifest
+-- and has at most 233 members.
+--
+-- The mask is expanded to its bit list ONCE, in the scalar subquery, and each
+-- candidate edge is then an integer membership test against that array. No
+-- entities scan, no per-row SRF.
+--
+-- No SET search_path: it blocks SQL inlining, which costs the planner the
+-- consensus (subject_id, type_id) index path through this body. Every
+-- reference is @extschema@-qualified instead. See GH #860.
 CREATE OR REPLACE FUNCTION laplace_attention_centroid(
     p_entity   bytea,
     p_band_mask bytea)
 RETURNS TABLE(cx float8, cy float8, cz float8, cm float8, total_weight float8)
-LANGUAGE sql STABLE PARALLEL RESTRICTED SET search_path = @extschema@, public AS $$
-    WITH band_types AS (
-        SELECT e.id FROM entities e
-        WHERE e.highway_mask IS NOT NULL
-          AND laplace_highway_mask_bits(e.highway_mask) && laplace_highway_mask_bits(p_band_mask)
+LANGUAGE sql STABLE PARALLEL RESTRICTED AS $$
+    WITH band_bits AS MATERIALIZED (
+        SELECT @extschema@.laplace_highway_mask_bits(p_band_mask) AS bits
     ),
     attended AS (
-        SELECT c.object_id, eff_mu(c.rating, c.rd)::float8 AS w
-        FROM consensus c
-        JOIN band_types bt ON bt.id = c.type_id
+        SELECT c.object_id,
+               @extschema@.eff_mu(c.rating, c.rd)::float8 AS w
+        FROM @extschema@.consensus c
+        CROSS JOIN band_bits b
         WHERE c.subject_id = p_entity
           AND c.object_id IS NOT NULL
-          AND eff_mu(c.rating, c.rd) > 0
+          AND @extschema@.relation_highway_bit(c.type_id) = ANY (b.bits)
+          AND @extschema@.eff_mu(c.rating, c.rd) > 0
     ),
     weighted AS (
         SELECT w.coord, a.w
         FROM attended a
-        JOIN v_word_points w ON w.id = a.object_id
+        JOIN @extschema@.v_word_points w ON w.id = a.object_id
         WHERE w.coord IS NOT NULL
     )
     SELECT
