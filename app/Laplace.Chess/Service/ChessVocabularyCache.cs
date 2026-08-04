@@ -3,26 +3,15 @@ using Laplace.Engine.Core;
 namespace Laplace.Chess.Service;
 
 /// <summary>
-/// The T0-EQUIVALENT for chess: the modality's tier-1 vocabulary, precomputed once and
-/// indexed by structure instead of by string.
+/// In-process index of the finite chess tier-1 alphabet (12 piece kinds × 64 squares).
+/// Tier 0 remains codepoints (<c>laplace_t0_perfcache</c>) — this is not a second t0.
+/// The durable ROM for these units (+ catalog tier-2 positions) is
+/// <c>laplace_chess_position_perfcache.bin</c> (GH #822); this array is the app-side
+/// structural index so "Pe2" resolves without string hashing.
 ///
-/// Chess has a finite, deterministic tier-1 alphabet — 12 piece kinds x 64 squares, plus
-/// side-to-move, castling rights and en-passant. Under 900 entries, identical on every
-/// machine and every run, exactly the shape laplace_t0_perfcache exists for at the codepoint
-/// tier. It was being resolved through a ConcurrentDictionary keyed by STRING: measured at
-/// 33.8 lookups per position and 68.1% of all position-composition time, which is ~28% of
-/// the whole analyze pass, spent re-deriving ~900 constants hundreds of millions of times.
-///
-/// This holds them in a flat array. A token like "Pe2" resolves by parsing two characters
-/// and indexing, with no hashing and no allocation.
-///
-/// IDS ARE BIT-IDENTICAL to the dictionary path. Entries are produced by the same
-/// ComposeToken over the same tier-0 perfcache records, so a position composed through this
-/// cache hashes exactly as before — the corpus stays valid. That is the whole constraint:
-/// this is a lookup change, never an identity change.
-///
-/// Tokens outside the finite alphabet (the pawn-structure aggregates, which are
-/// position-specific strings) fall through to the general path. They are ~5 of 33.8.
+/// Measured waste without a floor: 33.8 lookups/position and 68.1% of position-compose
+/// time re-deriving ~900 deterministic constants. Ids stay bit-identical to ComposeToken
+/// over t0 — lookup change, never identity change. Tokens outside the alphabet fall through.
 /// </summary>
 internal static class ChessComposeProbe
 {
@@ -59,16 +48,8 @@ internal static class ChessVocabularyCache
 
     /// <summary>
     /// Compose the whole finite piece-square alphabet once. Idempotent and safe to call from
-    /// any thread.
-    ///
-    /// WHO PRIMES, exactly — the two TryGet overloads deliberately differ:
-    ///   * production: ChessCompose.EnsureLoaded calls Prime AFTER loading the codepoint
-    ///     perfcache (composition reads it), so both overloads are primed before first use.
-    ///   * span overload: a pure read. If somehow unprimed it returns FALSE rather than
-    ///     composing, and the caller falls through to the general path — correct, just slower.
-    ///     It never composes because it has no string to hand the composer.
-    ///   * string overload: self-primes, for direct unit-test entry where no ChessCompose call
-    ///     has run. That path is single-threaded by construction.
+    /// any thread; callers must invoke it before <see cref="TryGet"/> (ChessCompose does so
+    /// from EnsureLoaded, after the codepoint perfcache is available — composition reads it).
     /// </summary>
     internal static void Prime(Func<string, ChessNode> compose)
     {
@@ -137,6 +118,20 @@ internal static class ChessVocabularyCache
         // hot path stays a bounds-checked array read with no branch on per-slot state.
         if (!_primed) Prime(compose);
         node = PieceSquare[i];
+        return true;
+    }
+
+    /// <summary>
+    /// Structural piece×square lookup without a token string. Same index as
+    /// <see cref="TryGet(ReadOnlySpan{char}, out ChessNode)"/>.
+    /// </summary>
+    internal static bool TryGetPieceSquare(char pieceChar, int file, int rank, out ChessNode node)
+    {
+        node = default;
+        if (!_primed) return false;
+        int piece = PieceChars.IndexOf(pieceChar);
+        if (piece < 0 || (uint)file >= 8 || (uint)rank >= 8) return false;
+        node = PieceSquare[Index(piece, file, rank)];
         return true;
     }
 }

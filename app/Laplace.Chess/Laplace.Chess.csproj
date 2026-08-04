@@ -8,6 +8,8 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Laplace.Chess.Tests" />
+    <InternalsVisibleTo Include="ChessCatalogSurfaces" />
+    <InternalsVisibleTo Include="ChessComposeBench" />
   </ItemGroup>
 
   <ItemGroup>

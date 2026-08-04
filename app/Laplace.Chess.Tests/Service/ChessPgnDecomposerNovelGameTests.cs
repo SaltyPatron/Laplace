@@ -39,9 +39,11 @@ public sealed class ChessPgnDecomposerNovelGameTests
     {
         var g = ChessPgnDecomposer.TryParseGame(GameA)!;
         Assert.IsAssignableFrom<ITrunkRootRecord>(g);
-        // GH #736: the novelty gate keys on the PLAYING (event) — re-ingesting the same
-        // record skips, while a new playing of a known line still records its witnesses.
-        Assert.Equal(g.EventId, ((ITrunkRootRecord)g).TrunkRootId);
+        // GH #736: the novelty gate keys on the PLAYING — re-ingesting the same record
+        // skips, while a new playing of a known line still records its witnesses. The
+        // playing is NOT the tournament EventId: one event holds many playings, so
+        // gating on the event would swallow every game after the first.
+        Assert.Equal(g.PlayingId, ((ITrunkRootRecord)g).TrunkRootId);
     }
 
     [Fact]
@@ -50,14 +52,14 @@ public sealed class ChessPgnDecomposerNovelGameTests
         var a = ChessPgnDecomposer.TryParseGame(GameA)!;
         var b = ChessPgnDecomposer.TryParseGame(GameB)!;
         var reader = new FakeReader();
-        reader.Present.Add(a.EventId);
+        reader.Present.Add(a.PlayingId);
 
         var novel = new List<ChessGameRecord>();
         await foreach (var g in ChessPgnDecomposer.FilterNovelAsync(new List<ChessGameRecord> { a, b }, reader, CancellationToken.None))
             novel.Add(g);
 
         Assert.Single(novel);
-        Assert.Equal(b.EventId, novel[0].EventId);
+        Assert.Equal(b.PlayingId, novel[0].PlayingId);
         Assert.Equal(1, reader.BitmapProbeCalls);
     }
 

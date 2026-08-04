@@ -105,7 +105,7 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
                 // GH #736: the analyzer's unit is the PLAYING, so both probes key on the
                 // event — the marker gates derivation, the event entity gates the record.
                 offsets[i] = (probeIds.Count, probeIds.Count + 1);
-                probeIds.Add(ChessVocabulary.AnalysisMarkerId(parsed.EventId, ChessAnalyze.Version));
+                probeIds.Add(ChessVocabulary.AnalysisMarkerId(parsed.PlayingId, ChessAnalyze.Version));
                 probeIds.Add(parsed.EventId);
             }
             else

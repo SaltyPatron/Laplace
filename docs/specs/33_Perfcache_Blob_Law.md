@@ -52,6 +52,8 @@ inherits it instead of re-fighting it.
 | `laplace_highway_perfcache.bin` | relation manifest codegen | highway mask bit ops, zero-SQL gating | live |
 | factor blob (name TBD at build) | deposited factor trajectories (DB) | model-lane pair scoring / row top-k / forward walk (pointer arithmetic instead of varlena SPI fetches) | designed — GH #526 (was `.scratchpad/26` item B, drained 2026-07-20) |
 | GenCorpus blob (name TBD at build) | generation corpus (DB) | `walk_text` / generation lane (kills the >240 s cold build) | prescribed — GH #409 |
+| `laplace_chess_position_perfcache.bin` (GH #822) | t0 + native tier-1 piece×square alphabet (+ optional catalog tier-2 surfaces: openings/960/… as sentences) → `laplace_chess_position_tables_emit`. **Not** testimony/Glicko dump; **not** managed `File.ReadLines` as ROM; tier 0 remains codepoints | `id → coord/hilbert/n/tier` (tier 1 vocab + tier 2 positions); `chess_position_table_load` + `laplace_substrate.chess_position_perfcache_path` | landing — format, native emit (alphabet + catalog), app load, GUC/prewarm stubs; CI install wired via pipeline when openings corpus present |
+| `laplace_chess_transition_perfcache.bin` (GH #822 companion) | catalog state→state walks (openings/…) → `ChessCatalogSurfaces` / `ChessTransitionFloor.WriteBlob`. Deterministic **(from_id, move_id) → to_id** ROM — chess dedupe for replay. **Not** attestation/Glicko dump | `TransitionKey(from, move) → to_position_id`; mmap binary search + process novel Remember | landing — app mmap floor wired into `TryReplayLine`; catalog emit writes blob beside position floor |
 
 ## Rule of engagement for new blobs
 

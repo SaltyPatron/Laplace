@@ -2,6 +2,11 @@ namespace Laplace.Engine.Core;
 
 public static unsafe class CodepointPerfcache
 {
+    // Immutable mmap after load — cache base/count so hot readers skip the native gate.
+    private static volatile bool _ready;
+    private static CodepointRecord* _recs;
+    private static int _count;
+
     public static void Load(string path)
     {
         ArgumentException.ThrowIfNullOrEmpty(path);
@@ -21,14 +26,17 @@ public static unsafe class CodepointPerfcache
                 throw new InvalidOperationException(
                     $"codepoint_table_load_perfcache(\"{path}\") failed (rc={rc}): {why}");
             }
+            PublishRecordsUnlocked();
         }
     }
 
     public static void LoadDefault()
     {
+        if (_ready) return;
         lock (LaplaceCoreGate.Native)
         {
-            if (IsLoadedUnlocked()) return;
+            if (_ready) return;
+            if (IsLoadedUnlocked()) { PublishRecordsUnlocked(); return; }
             Load(ResolveDefaultPath());
         }
     }
@@ -38,34 +46,38 @@ public static unsafe class CodepointPerfcache
     public static void Unload()
     {
         lock (LaplaceCoreGate.Native)
-            NativeInterop.CodepointTableUnload();
-    }
-
-    public static bool IsLoaded
-    {
-        get
         {
-            lock (LaplaceCoreGate.Native)
-                return IsLoadedUnlocked();
+            NativeInterop.CodepointTableUnload();
+            _recs = null;
+            _count = 0;
+            _ready = false;
         }
     }
 
+    public static bool IsLoaded => _ready;
+
     private static bool IsLoadedUnlocked() => NativeInterop.CodepointTableIsLoaded() != 0;
+
+    private static void PublishRecordsUnlocked()
+    {
+        CodepointRecord* recs;
+        ulong count;
+        int rc = NativeInterop.CodepointTableRecords(&recs, &count);
+        if (rc != 0)
+            throw new InvalidOperationException(
+                "codepoint perf-cache not loaded; call CodepointPerfcache.Load first");
+        _recs = recs;
+        _count = checked((int)count);
+        _ready = true;
+    }
 
     public static ReadOnlySpan<CodepointRecord> Records
     {
         get
         {
-            lock (LaplaceCoreGate.Native)
-            {
-                CodepointRecord* recs;
-                ulong count;
-                int rc = NativeInterop.CodepointTableRecords(&recs, &count);
-                if (rc != 0)
-                    throw new InvalidOperationException(
-                        "codepoint perf-cache not loaded; call CodepointPerfcache.Load first");
-                return new ReadOnlySpan<CodepointRecord>(recs, checked((int)count));
-            }
+            if (!_ready) throw new InvalidOperationException(
+                "codepoint perf-cache not loaded; call CodepointPerfcache.Load first");
+            return new ReadOnlySpan<CodepointRecord>(_recs, _count);
         }
     }
 
@@ -73,32 +85,19 @@ public static unsafe class CodepointPerfcache
     {
         get
         {
-            lock (LaplaceCoreGate.Native)
-            {
-                CodepointRecord* recs;
-                ulong count;
-                int rc = NativeInterop.CodepointTableRecords(&recs, &count);
-                if (rc != 0)
-                    throw new InvalidOperationException(
-                        "codepoint perf-cache not loaded; call CodepointPerfcache.Load first");
-                return checked((int)count);
-            }
+            if (!_ready) throw new InvalidOperationException(
+                "codepoint perf-cache not loaded; call CodepointPerfcache.Load first");
+            return _count;
         }
     }
 
     public static bool TryLookupCodepoint(Hash128 id, out uint codepoint)
     {
         codepoint = 0;
-        lock (LaplaceCoreGate.Native)
-        {
-            if (!IsLoadedUnlocked()) return false;
-            unsafe
-            {
-                Hash128 h = id;
-                fixed (uint* pCp = &codepoint)
-                    return NativeInterop.CodepointTableLookupId(&h, pCp) == 0;
-            }
-        }
+        if (!_ready) return false;
+        Hash128 h = id;
+        fixed (uint* pCp = &codepoint)
+            return NativeInterop.CodepointTableLookupId(&h, pCp) == 0;
     }
 
     public static bool IsKnownCodepointId(Hash128 id) => TryLookupCodepoint(id, out _);

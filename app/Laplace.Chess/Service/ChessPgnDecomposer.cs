@@ -2,6 +2,7 @@ using System.Linq;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Threading.Channels;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.Modality;
@@ -50,16 +51,17 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         // substrate, anonymous. A source that writes must be a source that is named, or its
         // volume is invisible to source_counts and every audit that reads it.
         var pgn = await ChessVocabulary.BootstrapAsync(
-            context.Writer, ChessVocabulary.PgnSourceId, SourceName, ChessVocabulary.PgnTrustClass, ct);
+            context.Writer, ChessVocabulary.PgnSourceId, SourceName, ChessVocabulary.PgnTrustClass, ct,
+            context.Reader);
         var analysis = await ChessVocabulary.BootstrapAsync(
             context.Writer, ChessVocabulary.AnalysisSourceId, "ChessAnalysis",
-            ChessVocabulary.AnalysisTrustClass, ct);
+            ChessVocabulary.AnalysisTrustClass, ct, context.Reader);
         _canonicalNames = pgn.Concat(analysis).Distinct().ToArray();
 
         // Ledger lifecycle moved here from ExtractRecordsAsync: with the file-worker pool there
         // is no longer ONE record stream to bracket. Reset once per run at init, report once at
-        // dispose. The ledger is already concurrency-safe (ConcurrentDictionary + Interlocked),
-        // which is why per-file workers can all drop into it.
+        // dispose. The ledger itself is already concurrency-safe (ConcurrentDictionary +
+        // Interlocked), which is why per-file workers can all drop into it.
         ChessDropLedger.Reset();
     }
 
@@ -74,37 +76,355 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
     }
 
     // The corpus is many PGN files (Lumbras OTB is 11, 0.07-1.48 GB each) and they carry no
-    // cross-file ordering — game identity is content-addressed, so the same game in two files
-    // collides by hash, not by arrival order. That is exactly the claim the multi-file worker
-    // pool already makes for every other multi-file source; chess simply was not on it and
-    // streamed all 11 through one thread (MEASURED: compose is the pipeline's ceiling at
-    // ~150 games/s, and the decompose side is a single pinned producer).
+    // cross-file ordering — game identity is content-addressed, so a game in the 1990s file and
+    // the same game in the 2000s file collide by hash, not by arrival order. That is exactly the
+    // claim the multi-file worker pool already makes for every other multi-file source; chess
+    // simply was not on it, and streamed all 11 through one thread (MEASURED: compose is the
+    // pipeline's ceiling at ~150 games/s, and the decompose side is a single pinned producer).
     protected override IReadOnlyList<(string Path, string Label)> ListFiles(
         string ecosystemPath, DecomposerOptions options)
         => EnumerateFiles(ecosystemPath, _scope)
             .Select(p => (p, $"{BatchLabelPrefix}/{Path.GetFileNameWithoutExtension(p)}"))
             .ToArray();
 
-    // ONE file's games, novelty-gated in chunks exactly as before. The gate's proven-set lives
-    // on the shared reader (a ConcurrentDictionary, monotone: it only ever gains "present"), so
-    // two workers probing the same id race to the same answer.
+    // ONE file's games, novelty-gated in chunks exactly as before. The gate's proven-set lives on
+    // the shared reader (a ConcurrentDictionary, monotone: it only ever gains "present"), so two
+    // workers probing the same id race to the same answer. ChessDropLedger is likewise concurrent
+    // by construction — its own comment says the parse sites are static and run concurrently.
     protected override async IAsyncEnumerable<ChessGameRecord> ExtractFileAsync(
         string filePath, string fileLabel, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
     {
         var ws = IngestPipelineDefaults.ResolveWorkingSet(PipelineProfile, options, DefaultBatchSize);
-        var chunk = new List<ChessGameRecord>(ws.Batch);
+        int workers = Math.Max(1, IngestTopology.Current.ComposeWorkers);
+        // --force / ReObservePresent: every game must be fully parsed+composed. Peek+probe
+        // before that is pure double tax (measured: 16s kill still on FILE_START).
+        if (options.ReObservePresent)
+        {
+            await foreach (var g in ExtractFileParseDirectAsync(filePath, ws.Batch, workers, ct))
+                yield return g;
+            yield break;
+        }
 
+        // Idempotent path: PlayingId peek+probe, full parse only for novel playings.
+        // MEASURED 2026-08-04: 32_768 peeks → parse-all-novel then one giant PositionIds
+        // HashSet ballooned RSS to ~7.7GB and wedged ~220s at 0 journal units (futex,
+        // no PG). Keep peek batches modest; ProbeLinePositionsAsync slices further.
+        const int noveltyProbeBatch = 2_048;
+        if (workers == 1)
+        {
+            await foreach (var g in ExtractFileSerialPeekAsync(
+                               filePath, noveltyProbeBatch, reObservePresent: false, ct))
+                yield return g;
+            yield break;
+        }
+
+        await foreach (var g in ExtractFileParallelAsync(
+                           filePath, noveltyProbeBatch, workers, reObservePresent: false, ct))
+            yield return g;
+    }
+
+    /// <summary>Full TryParseGame fan-out — no PlayingId peek (re-observe / force path).</summary>
+    private async IAsyncEnumerable<ChessGameRecord> ExtractFileParseDirectAsync(
+        string filePath, int batch, int workers,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        if (workers == 1)
+        {
+            var chunk = new List<ChessGameRecord>(batch);
+            await foreach (var gameText in StreamFileGamesAsync(filePath, ct))
+            {
+                if (TryParseGame(gameText) is { } parsed) chunk.Add(parsed);
+                if (chunk.Count < batch) continue;
+                foreach (var g in chunk) yield return g;
+                chunk.Clear();
+            }
+            foreach (var g in chunk) yield return g;
+            yield break;
+        }
+
+        var texts = Channel.CreateBounded<string>(new BoundedChannelOptions(workers * 8)
+        {
+            FullMode = BoundedChannelFullMode.Wait,
+            SingleWriter = true,
+            SingleReader = false,
+        });
+        var parsedCh = Channel.CreateBounded<ChessGameRecord>(new BoundedChannelOptions(workers * 8)
+        {
+            FullMode = BoundedChannelFullMode.Wait,
+            SingleWriter = false,
+            SingleReader = true,
+        });
+
+        var feeder = Task.Run(async () =>
+        {
+            try
+            {
+                await foreach (var gameText in StreamFileGamesAsync(filePath, ct).ConfigureAwait(false))
+                    await texts.Writer.WriteAsync(gameText, ct).ConfigureAwait(false);
+                texts.Writer.Complete();
+            }
+            catch (Exception ex) { texts.Writer.TryComplete(ex); throw; }
+        }, ct);
+
+        var parsers = new Task[workers];
+        for (int w = 0; w < workers; w++)
+        {
+            parsers[w] = Task.Run(async () =>
+            {
+                await foreach (var gameText in texts.Reader.ReadAllAsync(ct).ConfigureAwait(false))
+                {
+                    if (TryParseGame(gameText) is { } rec)
+                        await parsedCh.Writer.WriteAsync(rec, ct).ConfigureAwait(false);
+                }
+            }, ct);
+        }
+
+        var closer = Task.Run(async () =>
+        {
+            try
+            {
+                await feeder.ConfigureAwait(false);
+                await Task.WhenAll(parsers).ConfigureAwait(false);
+                parsedCh.Writer.Complete();
+            }
+            catch (Exception ex) { parsedCh.Writer.TryComplete(ex); }
+        }, ct);
+
+        await foreach (var rec in parsedCh.Reader.ReadAllAsync(ct).ConfigureAwait(false))
+            yield return rec;
+        await closer.ConfigureAwait(false);
+    }
+
+    private async IAsyncEnumerable<ChessGameRecord> ExtractFileSerialPeekAsync(
+        string filePath, int batch, bool reObservePresent,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        var peeks = new List<ChessPlayingPeek>(batch);
+        Task<List<ChessGameRecord>>? pending = null;
         await foreach (var gameText in StreamFileGamesAsync(filePath, ct))
         {
-            if (TryParseGame(gameText) is { } parsed) chunk.Add(parsed);
-            if (chunk.Count < ws.Batch) continue;
-            await foreach (var g in YieldChunkAsync(chunk, ContainmentReader, options.ReObservePresent, ct))
-                yield return g;
-            chunk.Clear();
+            if (TryPeekPlaying(gameText) is { } peek) peeks.Add(peek);
+            if (peeks.Count < batch) continue;
+            var handoff = peeks;
+            peeks = new List<ChessPlayingPeek>(batch);
+            // Start probe BEFORE awaiting the prior — peek of the next batch overlaps the
+            // EntitiesExistBitmap round-trip (serial await kept FILE_COMPOSED ~17–21s).
+            var next = MaterializeNovelAsync(handoff, ContainmentReader, reObservePresent, ct);
+            if (pending is not null)
+            {
+                foreach (var g in await pending.ConfigureAwait(false))
+                    yield return g;
+            }
+            pending = next;
         }
-        await foreach (var g in YieldChunkAsync(chunk, ContainmentReader, options.ReObservePresent, ct))
-            yield return g;
+        if (pending is not null)
+        {
+            foreach (var g in await pending.ConfigureAwait(false))
+                yield return g;
+        }
+        if (peeks.Count > 0)
+        {
+            foreach (var g in await MaterializeNovelAsync(
+                         peeks, ContainmentReader, reObservePresent, ct).ConfigureAwait(false))
+                yield return g;
+        }
+    }
+
+    private async IAsyncEnumerable<ChessGameRecord> ExtractFileParallelAsync(
+        string filePath, int batch, int workers, bool reObservePresent,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        var texts = Channel.CreateBounded<string>(new BoundedChannelOptions(workers * 8)
+        {
+            FullMode = BoundedChannelFullMode.Wait,
+            SingleWriter = true,
+            SingleReader = false,
+        });
+        var peeked = Channel.CreateBounded<ChessPlayingPeek>(new BoundedChannelOptions(workers * 8)
+        {
+            FullMode = BoundedChannelFullMode.Wait,
+            SingleWriter = false,
+            SingleReader = true,
+        });
+
+        var feeder = Task.Run(async () =>
+        {
+            try
+            {
+                await foreach (var gameText in StreamFileGamesAsync(filePath, ct).ConfigureAwait(false))
+                    await texts.Writer.WriteAsync(gameText, ct).ConfigureAwait(false);
+                texts.Writer.Complete();
+            }
+            catch (Exception ex) { texts.Writer.TryComplete(ex); throw; }
+        }, ct);
+
+        var peekers = new Task[workers];
+        for (int w = 0; w < workers; w++)
+        {
+            peekers[w] = Task.Run(async () =>
+            {
+                await foreach (var gameText in texts.Reader.ReadAllAsync(ct).ConfigureAwait(false))
+                {
+                    if (TryPeekPlaying(gameText) is { } peek)
+                        await peeked.Writer.WriteAsync(peek, ct).ConfigureAwait(false);
+                }
+            }, ct);
+        }
+
+        var closer = Task.Run(async () =>
+        {
+            try
+            {
+                await feeder.ConfigureAwait(false);
+                await Task.WhenAll(peekers).ConfigureAwait(false);
+                peeked.Writer.Complete();
+            }
+            catch (Exception ex) { peeked.Writer.TryComplete(ex); }
+        }, ct);
+
+        var peeks = new List<ChessPlayingPeek>(batch);
+        Task<List<ChessGameRecord>>? pending = null;
+        await foreach (var peek in peeked.Reader.ReadAllAsync(ct).ConfigureAwait(false))
+        {
+            peeks.Add(peek);
+            if (peeks.Count < batch) continue;
+            var handoff = peeks;
+            peeks = new List<ChessPlayingPeek>(batch);
+            var next = MaterializeNovelAsync(handoff, ContainmentReader, reObservePresent, ct);
+            if (pending is not null)
+            {
+                foreach (var g in await pending.ConfigureAwait(false))
+                    yield return g;
+            }
+            pending = next;
+        }
+        await closer.ConfigureAwait(false);
+        if (pending is not null)
+        {
+            foreach (var g in await pending.ConfigureAwait(false))
+                yield return g;
+        }
+        if (peeks.Count > 0)
+        {
+            foreach (var g in await MaterializeNovelAsync(
+                         peeks, ContainmentReader, reObservePresent, ct).ConfigureAwait(false))
+                yield return g;
+        }
+    }
+
+    private static async Task<List<ChessGameRecord>> MaterializeNovelAsync(
+        List<ChessPlayingPeek> peeks, ISubstrateReader? reader, bool reObservePresent,
+        CancellationToken ct)
+    {
+        var list = new List<ChessGameRecord>();
+        await foreach (var g in YieldNovelParsedAsync(peeks, reader, reObservePresent, ct)
+                           .ConfigureAwait(false))
+            list.Add(g);
+        // ChessGraph.EmitNodes already trunk-short-circuits on PresenceOracle, but nothing
+        // was proving position ids into that oracle — only PlayingIds. MEASURED 2026-08-04:
+        // novel OTB year on a DB holding another year staged ~390k entities/WS with ~96%
+        // already present at apply verify (~28–50s bitmap). Prove line positions here so
+        // compose skips staging the deposited subgraph (entities+phys); attestations still
+        // emit and fold. Same EntitiesExistBitmap path Playing novelty already uses.
+        await ProbeLinePositionsAsync(list, reader, ct).ConfigureAwait(false);
+        return list;
+    }
+
+    /// <summary>
+    /// Batch-prove <see cref="ChessGameRecord.PositionIds"/> into <paramref name="reader"/>
+    /// so <see cref="ChessGraph"/> trunk short-circuit can skip re-staging deposited positions.
+    /// </summary>
+    internal static async Task ProbeLinePositionsAsync(
+        List<ChessGameRecord> games, ISubstrateReader? reader, CancellationToken ct)
+    {
+        if (reader is null || games.Count == 0) return;
+        var unknown = new HashSet<Hash128>();
+        for (int g = 0; g < games.Count; g++)
+        {
+            var positions = games[g].PositionIds;
+            for (int i = 0; i < positions.Length; i++)
+            {
+                var id = positions[i];
+                if (!reader.IsProvenPresent(id)) unknown.Add(id);
+            }
+        }
+        if (unknown.Count == 0) return;
+        const int chunk = 4_096;
+        var ids = new Hash128[unknown.Count];
+        unknown.CopyTo(ids);
+        for (int i = 0; i < ids.Length; i += chunk)
+        {
+            int n = Math.Min(chunk, ids.Length - i);
+            var slice = new Hash128[n];
+            Array.Copy(ids, i, slice, 0, n);
+            // Bitmap path MarkProven-s hits; misses stay unproven and compose stages them.
+            _ = await reader.EntitiesExistBitmapAsync(slice, ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Novelty gate on <see cref="ChessPlayingPeek.PlayingId"/>, then full parse only for novel
+    /// games. Present playings are skipped without board replay (lawful idempotent re-ingest).
+    /// </summary>
+    private static async IAsyncEnumerable<ChessGameRecord> YieldNovelParsedAsync(
+        List<ChessPlayingPeek> peeks, ISubstrateReader? reader, bool reObservePresent,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        if (peeks.Count == 0) yield break;
+        if (reObservePresent || reader is null)
+        {
+            foreach (var p in peeks)
+                if (TryParseGame(p.GameText) is { } g) yield return g;
+            yield break;
+        }
+
+        var toProbe = new List<int>(peeks.Count);
+        for (int i = 0; i < peeks.Count; i++)
+        {
+            if (reader.IsProvenPresent(peeks[i].PlayingId)) continue;
+            toProbe.Add(i);
+        }
+
+        var present = new bool[peeks.Count];
+        if (toProbe.Count > 0)
+        {
+            var ids = new Hash128[toProbe.Count];
+            for (int k = 0; k < toProbe.Count; k++) ids[k] = peeks[toProbe[k]].PlayingId;
+            byte[] bm = await reader.EntitiesExistBitmapAsync(ids, ct).ConfigureAwait(false);
+            var proven = new List<Hash128>(toProbe.Count);
+            for (int k = 0; k < toProbe.Count; k++)
+            {
+                if (!BitmapBits.IsSet(bm, k)) continue;
+                present[toProbe[k]] = true;
+                proven.Add(ids[k]);
+            }
+            if (proven.Count > 0) reader.MarkProven(proven);
+        }
+
+        for (int i = 0; i < peeks.Count; i++)
+        {
+            if (present[i] || reader.IsProvenPresent(peeks[i].PlayingId)) continue;
+            if (TryParseGame(peeks[i].GameText) is { } g) yield return g;
+        }
+    }
+
+    /// <summary>
+    /// Headers + movetext token id only. Enough to mint <see cref="ChessVocabulary.PgnPlayingId"/>
+    /// for the novelty gate — no tree-sitter walk, no board replay.
+    /// </summary>
+    internal static ChessPlayingPeek? TryPeekPlaying(string gameText)
+    {
+        if (!TryMovetextTokens(MovetextSection(gameText), out _, out _, out var movetextId))
+            return null;
+        var (whiteName, blackName) = ParseNames(gameText);
+        string date = PgnGames.TagStr(gameText, "Date");
+        string eventTag = PgnGames.TagStr(gameText, "Event");
+        string siteTag = PgnGames.TagStr(gameText, "Site");
+        string roundTag = PgnGames.TagStr(gameText, "Round");
+        var playingId = ChessVocabulary.PgnPlayingId(
+            whiteName, blackName, date, eventTag, roundTag, siteTag, movetextId);
+        return new ChessPlayingPeek(gameText, playingId);
     }
 
     // ONE pass, ONE pipeline (GH #600): the witnessed record (ChessPgn source) AND the
@@ -166,7 +486,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         var toProbe = new List<int>(chunk.Count);
         for (int i = 0; i < chunk.Count; i++)
         {
-            if (reader.IsProvenPresent(chunk[i].EventId)) continue;
+            if (reader.IsProvenPresent(chunk[i].PlayingId)) continue;
             toProbe.Add(i);
         }
 
@@ -174,7 +494,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         if (toProbe.Count > 0)
         {
             var ids = new Hash128[toProbe.Count];
-            for (int k = 0; k < toProbe.Count; k++) ids[k] = chunk[toProbe[k]].EventId;
+            for (int k = 0; k < toProbe.Count; k++) ids[k] = chunk[toProbe[k]].PlayingId;
             byte[] bm = await reader.EntitiesExistBitmapAsync(ids, ct).ConfigureAwait(false);
             var proven = new List<Hash128>(toProbe.Count);
             for (int k = 0; k < toProbe.Count; k++)
@@ -187,21 +507,22 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         }
 
         for (int i = 0; i < chunk.Count; i++)
-            if (!present[i] && !reader.IsProvenPresent(chunk[i].EventId))
+            if (!present[i] && !reader.IsProvenPresent(chunk[i].PlayingId))
                 yield return chunk[i];
     }
 
     /// <summary>
     /// ONE file's games. This is the unit the multi-file worker pool claims, so it must not
-    /// reach outside its own path — StreamAllGamesAsync is now just this in a loop.
+    /// reach outside its own path — the serial directory walk lives in StreamAllGamesAsync,
+    /// which is now just this in a loop.
     /// </summary>
     internal static async IAsyncEnumerable<string> StreamFileGamesAsync(
         string file, [EnumeratorCancellation] CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-            // One file can hold several members (a TWIC weekly .zip wraps one .pgn); the
-            // enumerator owns each reader's lifetime, so a member must be drained before
-            // the next is requested — which is exactly what this loop does.
+        // One file can hold several members (a TWIC weekly .zip wraps one .pgn); the
+        // enumerator owns each reader's lifetime, so a member must be drained before
+        // the next is requested — which is exactly what this loop does.
         foreach (var (_, reader) in ChessInput.OpenMembers(file))
         {
             ct.ThrowIfCancellationRequested();
@@ -259,28 +580,31 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         }
         var lineId = ChessCompose.LineId(positionIds);
 
-        // The playing-event handle: Seven-Tag-Roster fields closed over the verbatim
-        // movetext id — idempotent per record, collision-proof against garbage rosters.
-        var movetextId = MovetextId(MovetextSection(gameText));
-        if (movetextId is null)
+        // One tokenize pass — tokens + ids reused by RecordMovetext (no second parse).
+        if (!TryMovetextTokens(MovetextSection(gameText), out var mtTokens, out var movetextTokenIds,
+                out var movetextId))
         {
             ChessDropLedger.Drop(ChessDropLedger.NoMovetext, $"{whiteName} vs {blackName} {date}");
             return null;
         }
         ChessDropLedger.Kept();
-        var eventId = ChessVocabulary.PgnEventId(
-            whiteName, blackName, date,
-            PgnGames.TagStr(gameText, "Event"), PgnGames.TagStr(gameText, "Round"),
-            PgnGames.TagStr(gameText, "Site"), movetextId.Value);
+        string eventTag = PgnGames.TagStr(gameText, "Event");
+        string siteTag = PgnGames.TagStr(gameText, "Site");
+        string roundTag = PgnGames.TagStr(gameText, "Round");
+        var eventId = ChessVocabulary.PgnEventId(eventTag, siteTag, date);
+        var playingId = ChessVocabulary.PgnPlayingId(
+            whiteName, blackName, date, eventTag, roundTag, siteTag, movetextId);
 
-        return new ChessGameRecord(gameText, moves, result, lineId, eventId)
+        return new ChessGameRecord(gameText, moves, result, lineId, eventId, playingId)
         {
             Walk = walk,
             WhiteName = whiteName,
             BlackName = blackName,
             Date = date,
             PositionIds = positionIds,
-            MovetextId = movetextId.Value,
+            MovetextId = movetextId,
+            MovetextTokenIds = movetextTokenIds,
+            MovetextTokens = mtTokens,
         };
     }
 
@@ -311,8 +635,12 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
 
     /// <summary>
     /// Id-only replay of a mainline: the ordered position ids (start position included),
-    /// or null when a SAN fails to resolve. Composition is memoized (ChessCompose
-    /// PositionMemo), so this shares cost with the fused analyze replay in the same pass.
+    /// or null when a SAN fails to resolve.
+    ///
+    /// Uses <see cref="ChessCompose.PositionId(Board, ChessVariantRules?)"/> — never
+    /// <see cref="ChessCompose.Position"/> and never <see cref="ChessModality.Apply"/> (Apply
+    /// rebuilds the full surface string for repetition history; LineId needs only ids).
+    /// Geometry is analyze/ROM.
     /// </summary>
     internal static Hash128[]? TryReplayLine(IReadOnlyList<string> sans, string? startFen)
     {
@@ -321,18 +649,29 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         // drops the game with a counted warning rather than replaying it from a board the PGN
         // never asserted.
         if (ChessAnalyze.InitialState(startFen, m) is not { } start) return null;
-        var state = start.Initial;
+        var board = start.Initial.Board.Clone();
         var ids = new Hash128[sans.Count + 1];
-        ids[0] = ChessCompose.Position(m.StateKey(state)).Position.Id;
-        var pseudoBuf = new List<ChessMove>(64);
-        var legalBuf = new List<ChessMove>(64);
+        ids[0] = ChessCompose.PositionId(board);
+        var scratch = new List<ChessMove>(16);
         for (int ply = 0; ply < sans.Count; ply++)
         {
-            MoveGen.Legal(state.Board, pseudoBuf, legalBuf);
-            var mv = San.Resolve(state.Board, legalBuf, sans[ply]);
+            var mv = San.Resolve(board, sans[ply], scratch);
             if (mv is null) return null;
-            state = m.Apply(state, mv.Value);
-            ids[ply + 1] = ChessCompose.Position(m.StateKey(state)).Position.Id;
+            Piece moving = board.Squares[mv.Value.From];
+            var moveId = ChessCompose.MoveId(moving, mv.Value);
+            var tKey = ChessCompose.TransitionKey(ids[ply], moveId);
+            MoveApply.Make(board, mv.Value);
+            if (ChessTransitionFloor.TryLookup(tKey, out var toId))
+            {
+                ids[ply + 1] = toId;
+            }
+            else
+            {
+                toId = ChessCompose.PositionId(board);
+                ids[ply + 1] = toId;
+                // Run saturation: next game through this transition is one lookup.
+                ChessTransitionFloor.Remember(tKey, toId);
+            }
         }
         return ids;
     }
@@ -355,7 +694,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
     // (deduped moves/positions carrying outcomes) remain the analyzer's job.
     internal static void RecordGame(ChessGameRecord parsed, SubstrateChangeBuilder b, Hash128? sourceId = null)
     {
-        var (gameText, _, result, lineId, eventId) = parsed;
+        var (gameText, _, result, lineId, eventId, playingId) = parsed;
         var src = sourceId ?? ChessVocabulary.PgnSourceId;
 
         var (whiteElo, blackElo) = ParseElos(gameText);
@@ -367,10 +706,11 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         var whitePlayer = EmitPlayer(b, whiteName, src);
         var blackPlayer = EmitPlayer(b, blackName, src);
 
-        EmitGame(b, lineId, eventId, gameText, date, result, whitePlayer, blackPlayer, whiteElo, blackElo, src);
-        RecordStartPosition(b, lineId, eventId, gameText, src);
+        EmitGame(b, lineId, eventId, playingId, gameText, date, result, whitePlayer, blackPlayer, whiteElo, blackElo, src);
+        RecordStartPosition(b, lineId, playingId, gameText, src);
         RecordOpeningHeaders(b, lineId, gameText, src);
-        RecordMovetext(b, lineId, eventId, gameText, src);
+        RecordMovetext(b, lineId, playingId, gameText, src,
+            parsed.MovetextTokens, parsed.MovetextTokenIds, parsed.MovetextId);
     }
 
     private static void RecordStartPosition(
@@ -410,24 +750,29 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
     // the trajectory carrying the sequence, so the record stays lossless and reconstructible
     // while every unit it is built from is one the corpus actually reuses.
     private static void RecordMovetext(
-        SubstrateChangeBuilder b, Hash128 lineId, Hash128 eventId, string gameText, Hash128 src)
+        SubstrateChangeBuilder b, Hash128 lineId, Hash128 eventId, string gameText, Hash128 src,
+        IReadOnlyList<string>? movetextTokens = null, Hash128[]? movetextTokenIds = null,
+        Hash128? movetextId = null)
     {
-        string movetext = MovetextSection(gameText);
-        if (movetext.Length == 0) return;
+        IReadOnlyList<string> tokens;
+        Hash128[] ids;
+        Hash128 mtId;
+        if (movetextTokens is { Count: > 0 } && movetextTokenIds is { Length: > 0 }
+            && movetextId is { } known)
+        {
+            tokens = movetextTokens;
+            ids = movetextTokenIds;
+            mtId = known;
+        }
+        else
+        {
+            string movetext = MovetextSection(gameText);
+            if (movetext.Length == 0) return;
+            if (!TryMovetextTokens(movetext, out tokens, out ids, out mtId)) return;
+        }
 
-        var tokens = MovetextTokens.Parse(movetext);
-        if (tokens.Count == 0) return;
-
-        // Each token through the shared content path: they are words, which is exactly what
-        // that path is for, and they dedup across the entire corpus.
-        var childIds = new List<Hash128>(tokens.Count);
-        foreach (var tok in tokens)
-            if (ContentEmitter.Emit(b, tok, src) is { } tid) childIds.Add(tid);
-        if (childIds.Count == 0) return;
-
-        var ids = childIds.ToArray();
-        var mtId = MovetextId(ids);
-        long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
+        for (int i = 0; i < tokens.Count && i < ids.Length; i++)
+            ContentEmitter.Emit(b, tokens[i], src);
 
         b.AddEntity(mtId, EntityTier.Document, ChessVocabulary.MovetextType, src);
         b.AddPhysicality(new PhysicalityRow(
@@ -441,11 +786,27 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
             NConstituents: ids.Length,
             AlignmentResidual: null,
             SourceDim: null,
-            ObservedAtUnixUs: nowUs));
+            ObservedAtUnixUs: 0));
 
-        // Subject = the LINE, ctx = this playing: two playings with different clock/comment
-        // annotations are two movetext documents on one line, distinguished by context.
         b.AddAttestation(NativeAttestation.Categorical(lineId, "HAS_MOVETEXT", mtId, src, eventId, PgnWitnessWeight));
+    }
+
+    private static bool TryMovetextTokens(
+        string movetext, out IReadOnlyList<string> tokens, out Hash128[] ids, out Hash128 mtId)
+    {
+        tokens = Array.Empty<string>();
+        ids = [];
+        mtId = default;
+        var parsed = MovetextTokens.Parse(movetext);
+        if (parsed.Count == 0) return false;
+        var list = new List<Hash128>(parsed.Count);
+        foreach (var tok in parsed)
+            if (ContentEmitter.RootId(tok) is { } tid) list.Add(tid);
+        if (list.Count == 0) return false;
+        tokens = parsed;
+        ids = list.ToArray();
+        mtId = MovetextId(ids);
+        return true;
     }
 
     // Document tier: a movetext is a whole document made of ply tokens.
@@ -543,21 +904,20 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
     private const double PgnWitnessWeight = 0.7;
 
     private static void EmitGame(
-        SubstrateChangeBuilder b, Hash128 lineId, Hash128 eventId, string gameText, string date,
+        SubstrateChangeBuilder b, Hash128 lineId, Hash128 eventId, Hash128 playingId,
+        string gameText, string date,
         GameOutcome result, Hash128? whitePlayer, Hash128? blackPlayer, int whiteElo, int blackElo,
         Hash128 src)
     {
-        // GH #736: two entities. The LINE is content (what was played — shared across every
-        // playing); the EVENT is provenance (this playing — who/when/where). Every fact of
-        // this playing subjects onto the line with ctx = event, so evidence stays
-        // per-playing while consensus cells aggregate across playings.
+        // LINE = game content (shared). EVENT = tournament/named event (many games).
+        // PLAYING = this PGN game record (novelty + attestation context).
         b.AddEntity(lineId, EntityTier.Document, ChessVocabulary.GameType, src);
         b.AddEntity(eventId, EntityTier.Document, ChessVocabulary.EventType, src);
+        b.AddEntity(playingId, EntityTier.Document, ChessVocabulary.PlayingType, src);
 
-        // The ONE record edge whose subject is the event: the event→line join the read
-        // side navigates by, carrying this playing's outcome (white POV) in aggregated form.
+        // Playing → line (this occurrence of the content). Context null on the join itself.
         b.AddAttestation(NativeAttestation.Aggregated(
-            subject: eventId,
+            subject: playingId,
             typeId: ChessVocabulary.PlaysLineType,
             obj: lineId,
             sourceId: src,
@@ -566,34 +926,33 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
             sumScoreFp1e9: ChessGraph.ScoreFp1e9(result.ForMover(0)),
             witnessWeight: PgnWitnessWeight));
 
-        // The line's own fold cell: (line, OUTCOME, Chess_Result), one witness per playing —
-        // witness_count IS "times played", eff_mu IS how the line fares (white POV).
-        ChessGraph.AppendLineOutcome(b, lineId, result.ForMover(0), PgnWitnessWeight, src, eventId);
+        // Playing → event (this game belongs to the tournament/named event).
+        b.AddAttestation(NativeAttestation.Categorical(
+            playingId, "HAS_EVENT", eventId, src, null, PgnWitnessWeight));
 
-        if (whitePlayer is { } wp) b.AddAttestation(NativeAttestation.Categorical(lineId, "HAS_WHITE", wp, src, eventId, PgnWitnessWeight));
-        if (blackPlayer is { } bp) b.AddAttestation(NativeAttestation.Categorical(lineId, "HAS_BLACK", bp, src, eventId, PgnWitnessWeight));
+        // Line fold: one witness per playing; ctx = playing (not the tournament event).
+        ChessGraph.AppendLineOutcome(b, lineId, result.ForMover(0), PgnWitnessWeight, src, playingId);
 
-        // The colour headers above are the RECORD: who sat where, one row per playing.
-        // These are the AGGREGATING lane — the same game result carried into the Glicko fold
-        // on the player himself, so his record is a consensus cell to be read rather than a
-        // 400k-row GROUP BY to be recomputed and cached. Both lanes, always, per the ply law.
+        if (whitePlayer is { } wp) b.AddAttestation(NativeAttestation.Categorical(lineId, "HAS_WHITE", wp, src, playingId, PgnWitnessWeight));
+        if (blackPlayer is { } bp) b.AddAttestation(NativeAttestation.Categorical(lineId, "HAS_BLACK", bp, src, playingId, PgnWitnessWeight));
+
         if (whitePlayer is { } w2)
-            ChessGraph.AppendPlayerResult(b, w2, blackPlayer, result.ForMover(0), PgnWitnessWeight, src, eventId);
+            ChessGraph.AppendPlayerResult(b, w2, blackPlayer, result.ForMover(0), PgnWitnessWeight, src, playingId);
         if (blackPlayer is { } b2)
-            ChessGraph.AppendPlayerResult(b, b2, whitePlayer, result.ForMover(1), PgnWitnessWeight, src, eventId);
+            ChessGraph.AppendPlayerResult(b, b2, whitePlayer, result.ForMover(1), PgnWitnessWeight, src, playingId);
 
-        Meta(b, lineId, "HAS_EVENT", PgnGames.TagStr(gameText, "Event"), src, eventId);
-        Meta(b, lineId, "ON_DATE", date, src, eventId);
-        Meta(b, lineId, "HAS_ECO", PgnGames.TagStr(gameText, "ECO"), src, eventId);
-        Meta(b, lineId, "HAS_TERMINATION", PgnGames.TagStr(gameText, "Termination"), src, eventId);
-        Meta(b, lineId, "HAS_RESULT", result.IsDraw ? "1/2-1/2" : result.Winner == 0 ? "1-0" : "0-1", src, eventId);
+        Meta(b, lineId, "HAS_EVENT", PgnGames.TagStr(gameText, "Event"), src, playingId);
+        Meta(b, lineId, "ON_DATE", date, src, playingId);
+        Meta(b, lineId, "HAS_ECO", PgnGames.TagStr(gameText, "ECO"), src, playingId);
+        Meta(b, lineId, "HAS_TERMINATION", PgnGames.TagStr(gameText, "Termination"), src, playingId);
+        Meta(b, lineId, "HAS_RESULT", result.IsDraw ? "1/2-1/2" : result.Winner == 0 ? "1-0" : "0-1", src, playingId);
 
         string tc = PgnGames.TagStr(gameText, "TimeControl");
-        Meta(b, lineId, "HAS_TIME_CONTROL", tc, src, eventId);
-        Meta(b, lineId, "HAS_TC_CLASS", TcClass(tc), src, eventId);
+        Meta(b, lineId, "HAS_TIME_CONTROL", tc, src, playingId);
+        Meta(b, lineId, "HAS_TC_CLASS", TcClass(tc), src, playingId);
 
-        if (whitePlayer is { } wp2 && whiteElo > 0) Rating(b, wp2, whiteElo, eventId, src);
-        if (blackPlayer is { } bp2 && blackElo > 0) Rating(b, bp2, blackElo, eventId, src);
+        if (whitePlayer is { } wp2 && whiteElo > 0) Rating(b, wp2, whiteElo, playingId, src);
+        if (blackPlayer is { } bp2 && blackElo > 0) Rating(b, bp2, blackElo, playingId, src);
     }
 
     private static void Meta(
@@ -750,35 +1109,33 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         => ChessInput.Resolve(path, scope, ChessInput.PgnExtensions, "chess");
 }
 
+/// <summary>Cheap novelty handle: PlayingId from headers+movetext, before board replay.</summary>
+internal readonly record struct ChessPlayingPeek(string GameText, Hash128 PlayingId);
+
 /// <summary>
-/// Parsed PGN game (GH #736): <see cref="LineId"/> is the CONTENT identity — the Merkle of
-/// the ordered position ids, identical for identical play regardless of who/when —
-/// and <see cref="EventId"/> is the PLAYING handle (provenance; the attestation context).
-/// The novelty gate keys on the event: re-ingesting the same record skips, while a new
-/// playing of an already-known line still records its witnesses.
+/// Parsed PGN game: <see cref="LineId"/> = content (Merkle of position ids);
+/// <see cref="EventId"/> = tournament/named event (many games share one);
+/// <see cref="PlayingId"/> = this game record (novelty + attestation context).
 /// </summary>
 public sealed record ChessGameRecord(
     string GameText,
     List<string> Moves,
     GameOutcome Result,
     Hash128 LineId,
-    Hash128 EventId)
+    Hash128 EventId,
+    Hash128 PlayingId)
     : ITrunkRootRecord
 {
     internal PgnMovetext.PgnWalkResult Walk { get; init; } = null!;
 
-    // Header tags TryParseGame already scanned, threaded through so RecordGame does not
-    // re-scan the full game text. Null when the record was built without a header pass.
     internal string? WhiteName { get; init; }
     internal string? BlackName { get; init; }
     internal string? Date { get; init; }
 
-    // The ordered position ids TryParseGame's identity replay produced (start position
-    // included) — LineId is their Merkle; the analyzer's full replay re-derives the same
-    // sequence with geometry.
     internal Hash128[] PositionIds { get; init; } = [];
-    // The verbatim movetext content id (also folded into EventId).
     internal Hash128 MovetextId { get; init; }
+    internal Hash128[] MovetextTokenIds { get; init; } = [];
+    internal IReadOnlyList<string> MovetextTokens { get; init; } = Array.Empty<string>();
 
-    public Hash128 TrunkRootId => EventId;
+    public Hash128 TrunkRootId => PlayingId;
 }

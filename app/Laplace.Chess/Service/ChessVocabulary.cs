@@ -62,11 +62,12 @@ public static class ChessVocabulary
     // ever played, no matter who played it or when. The type name stays Chess_Game: the
     // game-as-content IS the line.
     public static readonly Hash128 GameType = EntityTypeRegistry.Id("Chess_Game");
-    // GH #736: the playing EVENT — a slim provenance handle (who/when/where a line was
-    // played). Exists as an entity row solely so the novelty gate can bitmap-probe it;
-    // it is the attestation CONTEXT for every per-playing fact and the subject of
-    // exactly one record edge, (event, PLAYS_LINE, line).
+    // Chess_Event = the tournament / named event (PGN [Event], optionally Site/Date).
+    // ONE event contains MANY games. Never mint this from white|black|movetext — that
+    // conflates event with a single playing (operator law 2026-08-03).
     public static readonly Hash128 EventType = EntityTypeRegistry.Id("Chess_Event");
+    // Per-game playing occurrence (novelty / attestation context). Not Chess_Event.
+    public static readonly Hash128 PlayingType = EntityTypeRegistry.Id("Chess_Playing");
     public static readonly Hash128 PlaysLineType = EntityTypeRegistry.Id("PLAYS_LINE");
     public static readonly Hash128 HasMovetextType = EntityTypeRegistry.Id("HAS_MOVETEXT");
     /// <summary>Entity type of a composed movetext document — a game's verbatim token sequence.</summary>
@@ -85,19 +86,26 @@ public static class ChessVocabulary
     // ChessAnalysis testimony. One lane = one source = one evictable unit.
     public static readonly Hash128 TrajectorySourceId = SubstrateCanonicalIds.Source("ChessTrajectory");
 
-    // GH #736: board-identity opening matcher under its own source so the verdict
-    // can be read/trusted/evicted apart from the deprecated ChessAnalysis SAN-prefix peer.
+    // GH #736 source split: the position-id opening matcher writes under its OWN source so
+    // its verdict can be read, trusted and evicted separately from the analyzer's
+    // SAN-prefix guess. Three witnesses name a game's opening; only this one does it by
+    // board identity.
     public static readonly Hash128 OpeningMatchSourceId = SubstrateCanonicalIds.Source("ChessOpeningMatch");
-    // Closings catalog (Syzygy unpack → position-grain HAS_WDL/HAS_DTZ). StandardsDerived
-    // band — high witness weight, still one voice; Fathom is extract codec only.
+    // Syzygy probe lane (campaign PR-8): an exact mathematical oracle rides the
+    // StandardsDerived band — high witness weight, still one voice among many.
     public static readonly Hash128 SyzygyTrustClass = TrustClass("StandardsDerived");
 
-    // Deterministic per-(EVENT, analysis version) marker (GH #736: the analyzer deposits
+    // Deterministic per-(PLAYING, analysis version) marker (GH #736). The analyzer deposits
     // per-playing testimony — outcome/clock/think/eval contexts — so its unit is the
-    // event; two playings of one line each fold their own outcome). The scan bulk-probes
-    // these (EntitiesExistBitmapAsync) to skip events already derived at this version.
-    public static Hash128 AnalysisMarkerId(Hash128 eventId, int version)
-        => Hash128.OfCanonical($"chess/analyzed/{eventId}/{version}");
+    // PLAYING, not the tournament event: two playings of one line each fold their own
+    // outcome, and one event holds many playings. The scan bulk-probes these
+    // (EntitiesExistBitmapAsync) to skip playings already derived at this version.
+    //
+    // The argument must be the same id ChessAnalyze stamps with, or the probe silently
+    // never matches and the watermark stops skipping — every re-run re-analyzes the whole
+    // corpus at full cost while still looking correct.
+    public static Hash128 AnalysisMarkerId(Hash128 playingId, int version)
+        => Hash128.OfCanonical($"chess/analyzed/{playingId}/{version}");
     public static readonly Hash128 HasWhiteType = EntityTypeRegistry.Id("HAS_WHITE");
     public static readonly Hash128 HasBlackType = EntityTypeRegistry.Id("HAS_BLACK");
     public static readonly Hash128 HasEventType = EntityTypeRegistry.Id("HAS_EVENT");
@@ -137,17 +145,21 @@ public static class ChessVocabulary
     // a dictionary gloss for the same content-addressed term land on the same relation type.
     public static readonly Hash128 DefinesType = EntityTypeRegistry.Id("HAS_DEFINITION");
 
-    // GH #736: the playing-event handle for a PGN-corpus record — the Seven-Tag-Roster
-    // fields the source asserts, CLOSED OVER the verbatim movetext content id. Including
-    // movetextId makes the handle exactly "this record": re-ingesting the same file (or a
-    // second corpus carrying the byte-identical game) is idempotent — one event — while
-    // garbage tag rosters ("?", "-") cannot collide two different games, because their
-    // verbatim movetexts differ. This is PROVENANCE-shaped by design: it names an event,
-    // never content; it appears only as attestation context and as PLAYS_LINE's subject.
-    public static Hash128 PgnEventId(
+    /// <summary>
+    /// Tournament / named event id from PGN tags. Same [Event] (+ Site, Date) → one id
+    /// shared by every game in that event. Not a game id; not a playing id.
+    /// </summary>
+    public static Hash128 PgnEventId(string @event, string site, string date)
+        => Hash128.OfCanonical($"chess/event/{@event}|{site}|{date}");
+
+    /// <summary>
+    /// One playing of a line (one PGN game record). Novelty gate and attestation context.
+    /// Closed over movetext so byte-identical re-ingest is idempotent. Never Chess_Event.
+    /// </summary>
+    public static Hash128 PgnPlayingId(
         string white, string black, string date, string @event, string round, string site,
         Hash128 movetextId)
-        => Hash128.OfCanonical($"chess/event/{white}|{black}|{date}|{@event}|{round}|{site}|{movetextId}");
+        => Hash128.OfCanonical($"chess/playing/{white}|{black}|{date}|{@event}|{round}|{site}|{movetextId}");
 
     // Live/lab playing-event handle: a live occurrence is unique by construction, so the
     // session GUID is the whole identity (determinism-for-re-ingest does not apply — the
@@ -176,19 +188,35 @@ public static class ChessVocabulary
     public const double Trust = SourceTrust.StructuredCorpus;
 
     public static Task<IReadOnlyCollection<string>> BootstrapAsync(
-    ISubstrateWriter writer, CancellationToken ct = default)
-    => BootstrapAsync(writer, SourceId, SourceName, SelfPlayTrustClass, ct);
+    ISubstrateWriter writer, CancellationToken ct = default, ISubstrateReader? reader = null)
+    => BootstrapAsync(writer, SourceId, SourceName, SelfPlayTrustClass, ct, reader);
 
     public static async Task<IReadOnlyCollection<string>> BootstrapAsync(
     ISubstrateWriter writer, Hash128 sourceId, string sourceName, Hash128 trustClassId,
-    CancellationToken ct = default)
+    CancellationToken ct = default, ISubstrateReader? reader = null)
     {
         var boot = new BootstrapIntentBuilder(sourceId, sourceName, trustClassId);
         foreach (var t in ChessSeedManifest.TypeNodeNames)
             boot.AddType(t);
         foreach (var r in SourceVocabularyBootstrap.ExpandRelationsWithFamily(ChessSeedManifest.Relations))
             boot.AddRelationType(r);
-        await writer.ApplyAsync(boot.Build(), ct);
+        // Source entity already named ⇒ vocabulary for this lane was deposited. Skip the
+        // multi-second present-verify apply that was eating the process envelope on every
+        // re-ingest (measured ~3s × 2 bootstraps before INGEST_START).
+        if (reader is not null)
+        {
+            if (reader.IsProvenPresent(sourceId))
+                return boot.CanonicalNames;
+            byte[] bm = await reader.EntitiesExistBitmapAsync(new[] { sourceId }, ct)
+                .ConfigureAwait(false);
+            if (BitmapBits.IsSet(bm, 0))
+            {
+                reader.MarkProven(new[] { sourceId });
+                return boot.CanonicalNames;
+            }
+        }
+        await writer.ApplyAsync(boot.Build(), ct).ConfigureAwait(false);
+        reader?.MarkProven(new[] { sourceId });
         return boot.CanonicalNames;
     }
 }

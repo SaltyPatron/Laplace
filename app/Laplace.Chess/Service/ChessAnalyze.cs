@@ -32,7 +32,7 @@ public static class ChessAnalyze
     /// <summary>Derive from substrate-hydrated witnessed inputs (no PGN re-parse).</summary>
     internal static void DeriveFromWitnessed(SubstrateChangeBuilder b, ChessWitnessedGame witnessed, int engineDepth = 0)
     {
-        var (lineId, eventId, moves, result, wp, bp, startFen, clockTokens, evalTokens, qualityTokens, spentSeconds) = witnessed;
+        var (lineId, playingId, moves, result, wp, bp, startFen, clockTokens, evalTokens, qualityTokens, spentSeconds) = witnessed;
 
         var clocks = clockTokens is not null
             ? clockTokens.Select(t => t is null ? 0.0 : ParseClockSeconds(t)).ToArray()
@@ -42,20 +42,18 @@ public static class ChessAnalyze
             ? evalTokens.Select(t => t is null ? 0 : PgnEvals.ParseToken(t)).ToArray()
             : null;
 
-        DeriveGame(b, lineId, eventId, result, moves, startFen, wp, bp,
+        DeriveGame(b, lineId, playingId, result, moves, startFen, wp, bp,
                    clocks, medianDrop, clockTokens, evalTokens, evals, qualityTokens, engineDepth,
                    spentSeconds);
 
-        // GH #736: the analyzer's unit is the PLAYING — its deposits carry this playing's
-        // outcome/clock/think/eval contexts — so the skip marker is per EVENT. Two playings
-        // of one line each fold their own testimony; neither is skipped.
-        b.AddEntity(ChessVocabulary.AnalysisMarkerId(eventId, Version), EntityTier.Document,
+        // Analyzer unit = PLAYING (not tournament Chess_Event). Marker per playing.
+        b.AddEntity(ChessVocabulary.AnalysisMarkerId(playingId, Version), EntityTier.Document,
                     ChessVocabulary.AnalysisMarkerType, SourceId);
     }
 
     internal static ChessWitnessedGame WitnessedFromParsed(ChessGameRecord parsed)
     {
-        var (gameText, moves, result, lineId, eventId) = parsed;
+        var (gameText, moves, result, lineId, _, playingId) = parsed;
         var walk = parsed.Walk;
         string whiteName = PgnGames.TagStr(gameText, "White");
         string blackName = PgnGames.TagStr(gameText, "Black");
@@ -74,7 +72,7 @@ public static class ChessAnalyze
             qualityTokens[i] = MoveQuality.FromStream(walk.Mainline[i]);
 
         return new ChessWitnessedGame(
-            lineId, eventId, moves, result, wp, bp, startFen, clockTokens, evalTokens, qualityTokens,
+            lineId, playingId, moves, result, wp, bp, startFen, clockTokens, evalTokens, qualityTokens,
             spentSeconds);
     }
 
@@ -177,48 +175,33 @@ public static class ChessAnalyze
         // Reused across plies so the TT warms; only built when engine-eval is requested.
         var engine = engineDepth > 0 ? new Search(EvalTerm.All) : null;
 
+        // Directed SAN resolve (same as LineId replay) — full Legal() per ply was ~46% of
+        // analyze time. Apply still owns repetition history for the motif window boards.
         var state = initial;
-        // Each distinct position is composed + staged ONCE per ply (the builder dedups by id,
-        // so re-staging in every Append* helper was pure waste). This ply's `to` nodes carry
-        // forward as the next ply's `from`, so its StateKey/compose is never redone either.
         ChessComposed? carried = null;
-        // The game's own line, collected as we walk it: start position then one vertex per ply.
-        // Free — these are the nodes the loop already composed — and it becomes the game
-        // trajectory below.
         var line = new List<ChessNode>(sans.Count + 1);
-        // The replay window for the multi-ply motif detectors. Free: Apply clones a fresh
-        // Board per ply, so these are references to boards the loop already built.
         var boards = new List<Board>(sans.Count + 1) { initial.Board };
         var played = new List<ChessMove>(sans.Count);
-
-        // Move generation is ~46% of analyze time, and ChessModality.LegalActions allocates a
-        // fresh pseudo AND legal list on EVERY ply — ~12.8M plies per corpus, so ~25M list
-        // allocations that exist for microseconds. #651 added buffered MoveGen overloads for
-        // exactly this and the ingest hot loop never adopted them. Two buffers per GAME,
-        // reused across its plies, instead of two per ply.
-        var pseudoBuf = new List<ChessMove>(64);
-        var legalBuf = new List<ChessMove>(64);
+        var scratch = new List<ChessMove>(16);
         for (int ply = 0; ply < sans.Count; ply++)
         {
-            MoveGen.Legal(state.Board, pseudoBuf, legalBuf);
-            var mv = San.Resolve(state.Board, legalBuf, sans[ply]);
+            var mv = San.Resolve(state.Board, sans[ply], scratch);
             if (mv is null) return;
             int mover = m.SideToMove(state);
-            var next = m.Apply(state, mv.Value);
-            var from = carried ?? ChessGraph.EmitComposed(b, m.StateKey(state), src);
-            var to = ChessGraph.EmitComposed(b, m.StateKey(next), src);
-            if (line.Count == 0) line.Add(from.Position);
-            line.Add(to.Position);
-            boards.Add(next.Board);
-            played.Add(mv.Value);
-
             // Our OWN eval (high-trust ChessAnalysis witness) competes on (position, HAS_EVAL) with
             // the PGN's eval (lower-trust EvalPgn, emitted below). Score is side-to-move cp.
+            var from = carried ?? ChessGraph.EmitComposed(b, m.StateKey(state), src);
             if (engine is not null)
             {
                 int ourCp = engine.Think(state.Board, new Search.Limits(MaxDepth: engineDepth)).Score;
                 ChessGraph.AppendEval(b, from, ourCp, games: 1, witnessWeight: 0.9, src, eventId);
             }
+            var next = m.Apply(state, mv.Value);
+            var to = ChessGraph.EmitComposed(b, m.StateKey(next), src);
+            if (line.Count == 0) line.Add(from.Position);
+            line.Add(to.Position);
+            boards.Add(next.Board);
+            played.Add(mv.Value);
 
             long games = 1;
             if (mate && winner == mover) games += 1;

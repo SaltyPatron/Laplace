@@ -103,4 +103,17 @@ public sealed class IngestSizingTests
         Assert.Equal(4096, plan.RecordBatchSize);
         Assert.Equal(8192, plan.CommitRows);
     }
+
+    [Fact]
+    public void EstimateApplyGateBytes_ZeroSurcharge_MatchesTupleBill()
+    {
+        // Surcharge must stay 0: MEASURED chess regress when non-zero (shared
+        // present att ids re-merged per small apply). Gate bytes = tuple bill.
+        Assert.Equal(0, IngestSizing.AttestationApplySurchargeBytes);
+        long gated = IngestSizing.EstimateApplyGateBytes(
+            10, 20, 100, trajectoryBytes: 0, intentStageTupleBytes: 500, intentStageAttestationCount: 50);
+        Assert.Equal(
+            (10L + 20 + 100) * IngestSizing.ApplyTupleByteEstimate + 500,
+            gated);
+    }
 }

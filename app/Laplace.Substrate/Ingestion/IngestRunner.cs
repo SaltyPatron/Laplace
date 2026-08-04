@@ -164,16 +164,33 @@ public sealed class IngestRunner
         }
         static long BytesOf(SubstrateChange c)
         {
-            long bytes = ((long)c.Entities.Length + c.Physicalities.Length + c.Attestations.Length) * 152;
             // Trajectory payloads dwarf the fixed tuple estimate (a factor
             // deposit is tens-to-hundreds of MB in one row); count them or the
             // byte gates never fire and the working set buffers the whole run.
+            long traj = 0;
             foreach (var p in c.Physicalities)
-                if (p.TrajectoryXyzm is { Length: > 0 } t) bytes += (long)t.Length * 8;
+                if (p.TrajectoryXyzm is { Length: > 0 } t) traj += (long)t.Length * 8;
+            long stageBytes = 0;
+            int stageAtt = 0;
             if (!c.IntentStages.IsDefaultOrEmpty)
+            {
                 foreach (var s in c.IntentStages)
-                    if (!s.IsInvalid) bytes += s.TotalTupleBytes;
-            return bytes;
+                {
+                    if (s.IsInvalid) continue;
+                    stageBytes += s.TotalTupleBytes;
+                    stageAtt += s.AttestationCount;
+                }
+            }
+            // Attestation merge surcharge lives in IngestSizing so the
+            // MemoryTopology flush envelope closes on apply work (MEASURED
+            // ChessPgn: 2.43M present merges / ~103s under a 152 B/att bill).
+            return IngestSizing.EstimateApplyGateBytes(
+                c.Entities.Length,
+                c.Physicalities.Length,
+                c.Attestations.Length,
+                traj,
+                stageBytes,
+                stageAtt);
         }
 
         // Rule #8: the working set is the unit of write. Yielded changes
@@ -514,7 +531,11 @@ public sealed class IngestRunner
             SourceEntityIdConventions.SynsetHits, SourceEntityIdConventions.SynsetMisses,
             LanguageReference.ResolveMisses);
         _obs.OnRunFinished(decomposer.SourceName, result, status);
-        await ReportPartitionPressureAsync(log, ct);
+        // Zero-novel re-ingest did not add traffic — the default-partition scan is a
+        // multi-second catalog read on a populated box and must not sit on the process
+        // completion envelope after a no-op fold.
+        if (result.EntitiesInserted + result.PhysicalitiesInserted + result.AttestationsInserted > 0)
+            await ReportPartitionPressureAsync(log, ct);
         if (emptySourceNoOp)
             throw new InvalidOperationException(
                 $"{decomposer.SourceName}: source declares {declaredInput} input unit(s) / {declaredFiles} file(s) "

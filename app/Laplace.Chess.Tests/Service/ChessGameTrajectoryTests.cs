@@ -150,7 +150,7 @@ public sealed class ChessGameTrajectoryTests
         var parsed = ChessPgnDecomposer.TryParseGame(Game)!;
         var witnessed = new ChessWitnessedGame(
             LineId: parsed.LineId,
-            EventId: parsed.EventId,
+            PlayingId: parsed.PlayingId,
             Moves: ["e4", "e5", "Qh5", "Nc6", "Bc4", "Nf6", "Qxf7#"],
             Result: GameOutcome.WonBy(0),
             WhitePlayer: null, BlackPlayer: null, StartFen: null,
