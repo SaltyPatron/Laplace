@@ -103,11 +103,29 @@ twice, and the fold already distinguishes them — but no election reads it.
 | # | axis | read | status |
 |---|---|---|---|
 | 25 | `coord` on S³ | `entity_physicality_coords` | [S] derived from **content** — composition of codepoints |
-| 26 | `hilbert_index` | `entity_hilbert_keys` | [S] locality-preserving 1-D address; anagram equality *is* hilbert equality |
+| 26 | `hilbert_index` | `entity_hilbert_keys` | [S] **branch on tier before concluding anything.** Tier 0: a real identity signal (fixed UCA-seeded positions; a collision between distinct codepoints is a seeding bug). Tier > 0: certifies only "same constituent multiset, some order" — never same entity, never similar shape |
 | 27 | `radius_origin` | generated column | [S] |
 | 28 | angular / geodesic | `coord <<->>` KNN | [S] bound parameters only, or the planner loses the index |
-| 29 | trajectory | `physicalities.trajectory` | [S] the ordered sequence, losslessly |
-| 30 | Fréchet | `trajectory_prefix_distance`, `chess_opening_shape_peers` | [S] sequence-to-sequence similarity |
+| 29 | trajectory | `physicalities.trajectory` | [S] an ordered, exactly-invertible **packed manifest** of constituent identities — mantissa-packed id/ordinal/run_length/flags. **NOT a path of positions.** |
+| 30 | Fréchet / Hausdorff | `entity_curve(id)` → `ST_MakeLine(child.coord ORDER BY ordinal)` | [S] shape similarity — **only on the realized curve** |
+
+> **Rule #3/#4 landmine, and this table got it wrong in its first version.** Passing
+> `physicalities.trajectory` into a geometric function is a defect, not an
+> approximation. `trajectory` and `coord` are both `GeometryZM`, and `trajectory`
+> doubles as `mantissa.c`'s bit-packed payload channel — so `ST_Intersects`,
+> `<<->>`, `frechet`, `angular_distance` and `hilbert_encode` all return a
+> **numerically valid, semantically meaningless** number on it. No error, no
+> crash, nothing to signal the mistake.
+>
+> [M] `05_Substrate_Invariants.txt` Rule #3, measured 2026-08-02: `cat` vs `act`
+> give `ang = 0` on coord (identical centroids — Rule #1's averaging property) and
+> **frechet ≈ 1.78 on `entity_curve`**, while frechet over the packed trajectory
+> verts is **≈ 0.35** — a different number that "formerly polluted this doc as if
+> it were the shape metric."
+>
+> An earlier version of row 30 cited `trajectory_prefix_distance` beside
+> `trajectory` with no mention of `entity_curve`, reproducing the same conflation
+> the invariant doc had already caught and corrected once.
 
 **The trap that looks most like a good idea.** "Do `dog` and its translations
 cluster geometrically?" **No, and they cannot** — [S] a coordinate is a function

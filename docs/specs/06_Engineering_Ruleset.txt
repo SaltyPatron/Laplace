@@ -11,13 +11,51 @@ Rule #1: SQL/C# orchestrate; native C/C++/SPI does the heavy lifting.
     - Grounded in: define_fast/word_shape_peers_fast native rewrites of the define()/senses()/
       lexical_peers()/word_shape_peers() SQL chain — recall() went 48.7s -> ~470ms (~100x).
 
-Rule #2: A SQL function body containing a CTE (WITH clause) can never be inlined by Postgres's
-SQL-function inliner, regardless of STABLE/PARALLEL SAFE. This is a hard Postgres rule, not a
-tuning issue — verified against Postgres's own inlining documentation.
-    - Any function meant to be called from inside another function's hot path must avoid WITH,
-      or be moved to native C.
-    - Survey found 45+ CTE-bearing function files blocking inlining across the codebase —
-      systemic, not isolated. Not yet fully audited/triaged by priority; see open items below.
+Rule #2: There are TWO inliners with DIFFERENT disqualifier lists. Which one applies depends on
+whether the function RETURNS SETOF/TABLE. Read the right list before concluding a body cannot
+inline.
+    [AMENDED 2026-08-04 — verified against the vendored source, not against documentation:
+     external/postgresql/src/backend/optimizer/util/clauses.c. The prior text of this rule
+     ("a body containing a CTE can never be inlined, regardless of STABLE/PARALLEL SAFE")
+     is TRUE for the scalar inliner and FALSE for the set-returning one. It cited
+     "Postgres's own inlining documentation" — that documentation describes the scalar
+     path. The "45+ CTE-bearing function files blocking inlining" survey below inherits
+     the error: any of those files declared RETURNS SETOF/TABLE is NOT blocked by its CTE.]
+
+    (a) SCALAR — inline_function(), clauses.c. Body must be a single simple SELECT expression:
+        NO CTEs, NO FROM, NO subqueries, NO aggregates or window functions, NO GROUP BY /
+        HAVING / ORDER BY / DISTINCT / LIMIT / OFFSET / UNION / INTERSECT / EXCEPT, exactly
+        one output column. Plus: not SECURITY DEFINER, no SET clause, RETURNS neither SETOF
+        nor RECORD, volatility consistent, STRICT only if every construct is STRICT.
+
+    (b) SET-RETURNING — inline_set_returning_function(), clauses.c:5067. The COMPLETE bail-out
+        list, by line:
+          :5099    WITH ORDINALITY at the call site
+          :5103    more than one function in ROWS FROM
+          :5118    !funcretset
+          :5130-32 volatile functions or sub-selects IN THE ARGUMENTS (not the body)
+          :5139    a plugin hooks function entry/exit
+          :5160-68 prolang != SQL | prokind | proisstrict | provolatile == VOLATILE |
+                   returns VOID | prosecdef | !proretset | arg-count mismatch |
+                   proconfig IS NOT NULL   <-- THIS IS THE `SET` CLAUSE CHECK
+          :5241/48 more than one statement
+          :5272-74 commandType != CMD_SELECT ("The single command must be a plain SELECT")
+          :5289-96 composite result that is not a whole-tuple result
+        There is NO check of cteList, sortClause, limitCount, distinctClause, groupClause,
+        havingQual, setOperations, hasAggs, hasWindowFuncs, or hasSubLinks-in-the-body.
+        CTEs, ORDER BY, LIMIT, aggregates and UNION do NOT block set-returning inlining.
+
+    - Consequences that are easy to get backwards:
+        * `SET search_path` blocks BOTH paths (scalar: explicit; SRF: via proconfig).
+          Removing it from a RETURNS TABLE body with CTEs and ORDER BY DOES make it
+          inlinable. GH #860.
+        * STRICT and VOLATILE each kill the set-returning path outright and are absent
+          from most discussions of this, including earlier versions of this rule.
+        * A CTE-bearing scalar function still cannot inline. Move it to native C or make
+          it RETURNS TABLE if the caller shape allows.
+    - Verify with EXPLAIN, per Rule #4's discipline. "Function Scan on f" means the planner
+      could not see through f — but attributing that to the wrong disqualifier sends the fix
+      at the wrong file.
 
 Rule #3: Reduce result volume as early as possible in the query sequence; avoid cartesians.
     - Pre-filter on the most selective predicate before joining/computing on broad, low-
@@ -196,6 +234,10 @@ L12 An expensive STABLE function in a filter is executed PER ROW — Postgres
     (the array becomes the index condition, forced one-shot); `<> ALL(fn())`
     and plain WHERE-clause calls are not. A simple one-row subselect does NOT
     fix it (pulled up and re-pushed); a MATERIALIZED CTE does. Grounded: Issue
-    47, 65.3s → 349ms. Related fence: SQL functions that fail inlining (STRICT,
-    ORDER BY, CTEs — Rule #2) appear as opaque Function Scans the planner
-    cannot see through; chains of them compound. (Standing candidate Rule #13.)
+    47, 65.3s → 349ms. Related fence: SQL functions that fail inlining appear as
+    opaque Function Scans the planner cannot see through; chains of them compound.
+    [AMENDED 2026-08-04: this line used to read "(STRICT, ORDER BY, CTEs — Rule #2)",
+    which mixes the two inliners. ORDER BY and CTEs disqualify only the SCALAR path;
+    STRICT disqualifies both. For RETURNS SETOF/TABLE the disqualifiers are the
+    pg_proc properties plus "one plain SELECT" — see the amended Rule #2.]
+    (Standing candidate Rule #13.)
