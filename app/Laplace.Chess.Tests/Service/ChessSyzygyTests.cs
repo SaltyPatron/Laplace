@@ -199,24 +199,40 @@ public sealed class ChessSyzygyTests
     }
 }
 
-[Trait("Tier", "fast")]
-public sealed class SyzygyNativeFixtureTests : IDisposable
+/// <summary>
+/// ONE init/free for the whole class, not one per test method.
+///
+/// xUnit constructs a fresh instance of a test class for EVERY test method, so a ctor that
+/// called SyzygyNative.Init and a Dispose that called SyzygyNative.Free cycled the tablebase
+/// mapping once per [InlineData] case. That state is process-global by design — the
+/// SyzygyNative doc says "one loaded table set at a time" — and the vendored Fathom prober
+/// does not fully reset its statics in tb_free, so a subsequent tb_init leaves stale pointers
+/// behind. The next probe walks them and the process takes a SIGSEGV inside gen_captures:
+/// no managed exception, nothing catchable, and a crash position that moves between runs
+/// because it depends on how many map/unmap cycles ran first.
+///
+/// IClassFixture gives exactly one instance for the class, which is what process-global state
+/// requires. If another test class ever needs the tablebases, promote this to a collection
+/// fixture rather than re-adding a per-test Init.
+/// </summary>
+public sealed class SyzygyTablebaseFixture : IDisposable
 {
-    private static string FixtureDir()
+    public SyzygyTablebaseFixture()
     {
         Assert.True(LaplaceInstall.TryRepoRoot(out var root), "repo root not resolvable");
         var dir = Path.Combine(root, "test-data", "syzygy");
         Assert.True(Directory.Exists(dir), $"fixture dir missing: {dir}");
-        return dir;
-    }
-
-    public SyzygyNativeFixtureTests()
-    {
-        Assert.Equal(3, SyzygyNative.Init(FixtureDir()));
+        Assert.Equal(3, SyzygyNative.Init(dir));
         Assert.Equal(3, SyzygyNative.Largest());
     }
 
     public void Dispose() => SyzygyNative.Free();
+}
+
+[Trait("Tier", "fast")]
+public sealed class SyzygyNativeFixtureTests : IClassFixture<SyzygyTablebaseFixture>
+{
+    public SyzygyNativeFixtureTests(SyzygyTablebaseFixture fixture) => _ = fixture;
 
     [Theory]
     [InlineData("4k3/8/8/8/8/8/8/3QK3 w - - 0 1", SyzygyNative.Win)]

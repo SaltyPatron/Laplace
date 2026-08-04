@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Collections.Concurrent;
+using System.Threading;
 
 namespace Laplace.Chess.Service;
 
@@ -106,18 +107,33 @@ public sealed class StockfishProcessEvaluator : IPositionEvaluator, IDisposable
         throw new InvalidOperationException($"stockfish never answered '{marker}'");
     }
 
+    private int _disposed;
+
     public void Dispose()
     {
+        // Idempotent. Dispose reaches this object from three directions — an explicit call,
+        // the pool's ProcessExit handler, and (previously) the finalizer — and at shutdown
+        // more than one of them fires.
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         try { if (!_proc.HasExited) Send("quit"); } catch { }
         try { if (!_proc.WaitForExit(1000)) _proc.Kill(entireProcessTree: true); } catch { }
         _proc.Dispose();
-        GC.SuppressFinalize(this);
     }
 
-    ~StockfishProcessEvaluator()
-    {
-        try { if (!_proc.HasExited) _proc.Kill(entireProcessTree: true); } catch { }
-    }
+    // NO FINALIZER. There used to be one, and it called _proc.HasExited / _proc.Kill().
+    //
+    // A finalizer must never touch another FINALIZABLE managed object. System.Diagnostics.Process
+    // has its own finalizer and the runtime does not order finalization, so by the time this one
+    // ran _proc could already be finalized — its SafeProcessHandle closed underneath it. Reading
+    // HasExited or calling Kill through that handle faults in native code, which is precisely the
+    // observed failure: every test passes, then the test host dies during teardown with no
+    // managed exception and no failing assertion. `catch { }` cannot help; the fault is below the
+    // CLR, not an exception.
+    //
+    // Nothing is leaked by dropping it. Process carries its own finalizer for the handle, the
+    // pool's ProcessExit hook still quits engines on a normal exit, and any child that outlives
+    // the parent is reaped by the OS. A finalizer was the one mechanism here that could not be
+    // made safe.
 }
 
 /// <summary>
