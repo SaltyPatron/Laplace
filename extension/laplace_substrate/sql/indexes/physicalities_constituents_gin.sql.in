@@ -1,1 +1,34 @@
-CREATE INDEX IF NOT EXISTS physicalities_constituents_gin ON physicalities USING gin (public.laplace_trajectory_constituent_ids(trajectory)) WHERE type = 1 AND trajectory IS NOT NULL;
+-- Containment index over a trajectory's constituent ids. THE read model stands on
+-- this: compose a point locally from content (a hash, no round-trip), then ask which
+-- trajectories CONTAIN it — constituent_ids(trajectory) @> ARRAY[point]. Precedes,
+-- follows, contains, part-of and co-occurrence are that same probe read at different
+-- offsets, and trajectory_continuations() serves generation from it. Without this it
+-- is a sequential scan of every trajectory in the substrate.
+--
+-- It is also the most expensive index here to maintain: GIN writes one entry per
+-- array element and chess trajectories average 137 constituents, so it takes roughly
+-- 96% of index-entry writes on this table. That is the price of the capability, not
+-- waste. It cannot be narrowed by predicate — the only discriminator that would help
+-- (entity type) lives on `entities`, not here.
+--
+-- fastupdate + the pending list are the lever that IS available. With fastupdate on
+-- (the default) inserts land in an unordered pending list, and a backend flushes it
+-- into the main structure once it exceeds the limit — in the FOREGROUND of whichever
+-- backend crosses the threshold. At the 4 MB default and ~137 entries per row a bulk
+-- seed crosses it constantly, so that stall recurs throughout the load; this is the
+-- random-write behaviour behind the measured 50 MB/s of WAL producing 2.5 MB/s of net
+-- data growth. A larger list batches more entries per merge, and GIN merges are much
+-- more efficient in bulk because entries for the same key combine into one posting
+-- list update.
+--
+-- THE TRADE-OFF POINTS THE OTHER WAY ON READS: the pending list is scanned linearly
+-- on every search of this index until it is flushed, so an oversized list taxes
+-- exactly the probe the index exists to serve. 32 MB is chosen because the write
+-- burst is a bulk seed (nothing is querying) while steady state is read-heavy with
+-- sparse writes, which keeps the list near-empty when it would otherwise be scanned.
+-- A CONSIDERED STARTING POINT, NOT A MEASURED OPTIMUM — re-measure on the next full
+-- seed and move it.
+CREATE INDEX IF NOT EXISTS physicalities_constituents_gin
+    ON physicalities USING gin (public.laplace_trajectory_constituent_ids(trajectory))
+    WITH (fastupdate = on, gin_pending_list_limit = 32768)
+    WHERE type = 1 AND trajectory IS NOT NULL;
