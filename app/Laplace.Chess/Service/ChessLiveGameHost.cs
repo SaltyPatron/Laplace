@@ -62,10 +62,17 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
     public static Hash128 LichessGameId(string lichessGameId)
         => Hash128.OfCanonical($"chess/lichess/{lichessGameId}");
 
-    // GH #736: the handle a live game is opened under is the playing EVENT — lichess games
-    // keep their source-asserted external id (LichessGameId), lab/learn sessions mint a
-    // PlayEventId from a GUID at session open. The line (the game CONTENT) does not exist
-    // until the game is over; CompleteGameAsync mints it.
+    // GH #736: the handle a live game is opened under is the PLAYING — lichess games keep
+    // their source-asserted external id (LichessGameId), lab/learn sessions mint a
+    // PlayEventId at session open. The line (the game CONTENT) does not exist until the
+    // game is over; CompleteGameAsync mints it.
+    //
+    // The lab/learn id is drawn from a GUID rather than derived from content, so replaying
+    // the same self-play mints a different playing and re-ingest cannot dedupe it. That is
+    // deliberate (see ChessVocabulary.PlayEventId — the cutechess PGN written afterwards is
+    // the replayable record), but it is the one id in the chess lane that is not a function
+    // of what it identifies, and content cannot be hashed here because the playing has no
+    // content until the last ply lands.
     public Task OpenGameAsync(
         Hash128 eventId, string learnContext, Hash128? whitePlayerId = null, Hash128? blackPlayerId = null,
         CancellationToken ct = default)
@@ -93,7 +100,7 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
             session.PositionIds.Add(ChessCompose.PositionId(toKey));
 
             var b = new SubstrateChangeBuilder(ChessVocabulary.SourceId, session.LearnContext);
-            EnsureEventEntity(b, eventId, session);
+            EnsurePlayingEntity(b, eventId, session);
 
             ChessGraph.AppendMoveEdge(
                 b, fromKey, toKey, PlyOutcome.Draw, games: 1, WitnessWeight,
@@ -129,10 +136,13 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
                 var lineId = ChessCompose.LineId(
                     System.Runtime.InteropServices.CollectionsMarshal.AsSpan(session.PositionIds));
                 b.AddEntity(lineId, EntityTier.Document, ChessVocabulary.GameType, ChessVocabulary.SourceId);
-                EnsureEventEntity(b, eventId, session);
+                EnsurePlayingEntity(b, eventId, session);
 
-                // The one record edge whose subject is the event, carrying this playing's
-                // outcome (white POV) — the event→line join the read side navigates by.
+                // The one record edge whose subject is the PLAYING, carrying its outcome
+                // (white POV) — the playing→line join the read side navigates by. Subjecting
+                // it on a tournament event would be wrong twice: an event spans many games,
+                // so it cannot carry one game's result, and ChessPgnDecomposer.EmitGame
+                // already subjects this edge on the playing.
                 b.AddAttestation(NativeAttestation.Aggregated(
                     subject: eventId,
                     typeId: ChessVocabulary.PlaysLineType,
@@ -323,10 +333,15 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
     // GH #736: the event entity is a slim provenance handle — no content facts hang off it
     // (colour facts moved to CompleteGameAsync, subjected on the line). It exists as a row
     // solely so the novelty gate can bitmap-probe it.
-    private static void EnsureEventEntity(SubstrateChangeBuilder b, Hash128 eventId, LiveGameSession session)
+    // Chess_PLAYING, not Chess_Event. The handle a live game runs under is one playing —
+    // PlayEventId mints a fresh id per session, and it is the subject of PLAYS_LINE and the
+    // context on every witness below, which is the playing's role, not the tournament's.
+    // Typing it Chess_Event made it invisible to ChessWitnessHydrator once that paged
+    // playings, so lab games would never reach the analyzer.
+    private static void EnsurePlayingEntity(SubstrateChangeBuilder b, Hash128 playingId, LiveGameSession session)
     {
         if (session.EntityEmitted) return;
-        b.AddEntity(eventId, EntityTier.Document, ChessVocabulary.EventType, ChessVocabulary.SourceId);
+        b.AddEntity(playingId, EntityTier.Document, ChessVocabulary.PlayingType, ChessVocabulary.SourceId);
         session.EntityEmitted = true;
     }
 
