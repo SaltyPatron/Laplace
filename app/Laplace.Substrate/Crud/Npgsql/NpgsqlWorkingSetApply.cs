@@ -598,6 +598,7 @@ public sealed partial class NpgsqlSubstrateWriter
                         int i = firstEntIdx[k];
                         if (presentEntities.Contains(ents.Ids[i])) { eSkip++; continue; }
                         keptEnts.Add(new KeptRow(
+                            CopyPartitionKey.ForEntityId(ents.Ids[i]),
                             CopyPartitionKey.ForEntityId(ents.Ids[i]), ents.Rows[i], -1, 0));
                         novelEntIds?.Add(ents.Ids[i]);
                         if (i < ents.TypeIds.Count) keptEntTypes.Add(ents.TypeIds[i]);
@@ -617,7 +618,9 @@ public sealed partial class NpgsqlSubstrateWriter
                 {
                     int i = firstEntIdx[k];
                     if (presentEntities.Contains(ents.Ids[i])) { eSkip++; continue; }
-                    keptEnts.Add(new KeptRow(CopyPartitionKey.ForEntityId(ents.Ids[i]), ents.Rows[i], -1, 0));
+                    keptEnts.Add(new KeptRow(
+                        CopyPartitionKey.ForEntityId(ents.Ids[i]),
+                        CopyPartitionKey.ForEntityId(ents.Ids[i]), ents.Rows[i], -1, 0));
                     novelEntIds?.Add(ents.Ids[i]);
                     if (i < ents.TypeIds.Count) keptEntTypes.Add(ents.TypeIds[i]);
                 }
@@ -641,8 +644,11 @@ public sealed partial class NpgsqlSubstrateWriter
             {
                 if (!seenPhys.Add(phys.Ids[i])) continue;
                 if (presentPhys.Contains(phys.Ids[i])) { pSkip++; continue; }
+                // Lane by id (uniform), ORDER by hilbert (coord GiST locality).
                 keptPhys.Add(new KeptRow(
-                    CopyPartitionKey.ForEntityId(phys.Ids[i]), phys.Rows[i], -1, 0));
+                    CopyPartitionKey.ForEntityId(phys.Ids[i]),
+                    CopyPartitionKey.ForHilbertIndex(phys.HilbertKeys[i]),
+                    phys.Rows[i], -1, 0));
                 novelPhysIds?.Add(phys.Ids[i]);
             }
 
@@ -676,6 +682,7 @@ public sealed partial class NpgsqlSubstrateWriter
                 var group = attGroups[atts.Ids[i]];
                 bool collapsed = group.Games != atts.Counts[i] || group.Sum != atts.SumScores[i];
                 keptAtts.Add(new KeptRow(
+                    CopyPartitionKey.ForEntityId(atts.Ids[i]),
                     CopyPartitionKey.ForEntityId(atts.Ids[i]), atts.Rows[i],
                     collapsed ? group.Games : -1,
                     atts.CountValueOffsets[i],
@@ -1378,13 +1385,33 @@ public sealed partial class NpgsqlSubstrateWriter
         }
     }
 
-    /// <summary>SortKey partitions parallel COPY groups into disjoint index
-    /// keyspaces: the row id for btree-indexed tables, the hilbert index for
-    /// physicalities (coord GiST locality). Patch/PatchSum carry a
-    /// duplicate-collapsed group's summed games/sum_score for the
-    /// representative row (Patch = -1 means unpatched).</summary>
+    /// <summary>
+    /// TWO keys, because lane assignment and insert order want different things.
+    ///
+    /// <para><b>LaneKey</b> picks which parallel COPY connection a row rides. It must be
+    /// UNIFORM or the lanes come out uneven and the widest one becomes the wall clock.
+    /// Always the row id: ids are content hashes, uniform by construction.</para>
+    ///
+    /// <para><b>OrderKey</b> is the sort within a lane, which decides the order index
+    /// pages are touched. For btree-indexed tables that is the id again — sorted ids walk
+    /// PK leaves forward instead of randomly. For physicalities it is the HILBERT INDEX,
+    /// because the contended index there is the coord GiST and hilbert order is its
+    /// spatial locality.</para>
+    ///
+    /// <para>These were one key until 2026-08-04 and the collapse cost something either
+    /// way. Keyed on hilbert, lanes inherited hilbert's distribution — and hilbert is
+    /// locality-PRESERVING, so range-splitting it splits by region of space, and content
+    /// piles at the centroid rather than spreading: one band held 60.67% of the table.
+    /// Keyed on id, lanes balanced but every GiST insert became a random descent. The
+    /// same property that makes hilbert a bad partition key makes it a good sort key, so
+    /// the fix is to stop making it be both.</para>
+    ///
+    /// <para>Patch/PatchSum carry a duplicate-collapsed group's summed games/sum_score for
+    /// the representative row (Patch = -1 means unpatched).</para>
+    /// </summary>
     private readonly record struct KeptRow(
-        CopyPartitionKey SortKey, StagedRowRef Row, long Patch, int CountOff, long PatchSum = 0, int SumOff = 0);
+        CopyPartitionKey LaneKey, CopyPartitionKey OrderKey, StagedRowRef Row,
+        long Patch, int CountOff, long PatchSum = 0, int SumOff = 0);
 
     private static async Task CopyKeptAsync(
         NpgsqlConnection conn, string tableName, IntentStageTable table,
@@ -1423,7 +1450,7 @@ public sealed partial class NpgsqlSubstrateWriter
 
     private static int ResolveCopyGroups(int rowCount, int sharedSecondaryKeys)
     {
-        // Id-range groups own disjoint PK leaves after SortKey order. MEASURED
+        // Id-range groups own disjoint PK leaves after LaneKey order. MEASURED
         // (Npgsql binary COPY into live entities, indexes UP, this host): 8-way
         // peaked ~591k rows/s; 12-way fell to ~534k (type-btree contention).
         // Cap at that measured peak — not the old homogeneous-2 scar.
@@ -1503,9 +1530,13 @@ public sealed partial class NpgsqlSubstrateWriter
         var counts = new int[groups];
         for (int i = 0; i < rowCount; i++)
         {
-            var key = CopySortKey.FromWire(kept[i].SortKey.Wire);
+            // LANE from LaneKey, ORDER from OrderKey — two different keys on purpose.
+            // The lane must be uniform (id) or one connection carries the batch; the
+            // order should follow the contended index (hilbert for physicalities, id
+            // for the btree tables). Collapsing them forces one to lose.
+            var key = CopySortKey.FromWire(kept[i].OrderKey.Wire);
             keysAll[i] = key;
-            int g = CopyGroupOf(key.HiBe, groups);
+            int g = CopyGroupOf(CopySortKey.FromWire(kept[i].LaneKey.Wire).HiBe, groups);
             groupOf[i] = g;
             counts[g]++;
         }
