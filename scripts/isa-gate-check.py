@@ -46,8 +46,13 @@ MANIFEST = ROOT / "engine" / "manifest" / "relation_types.toml"
 #   -2  chess_syzygy_line binds both relation ids once in a CTE (also stops a
 #       STABLE function running per row)
 # The remaining 7 are one name per relation per function, which is the floor.
+#
+# g1 25 -> 23 (2026-08-04). related_objects stopped hand-rolling the consensus
+# scan and now wraps edges_raw(), which computes the fold value through eff_mu();
+# its two open-coded `rating - 2*rd` sites went with the body. Shrink, not an
+# exception.
 CEILINGS = {
-    "g1_weight_literalism": 25,
+    "g1_weight_literalism": 23,
     "g3_sql_vocabulary_literalism": 250,
     "g3_c_vocabulary_literalism": 17,
     "g3_csharp_vocabulary_literalism": 700,

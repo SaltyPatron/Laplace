@@ -3,7 +3,6 @@
   "measured": "2026-08-03",
   "violations": {
     "g1_weight_literalism": {
-      "extension/laplace_substrate/sql/functions/consensus/related_objects.sql.in::g.rating-2*g.rd": 2,
       "extension/laplace_substrate/sql/functions/converse/chat.sql.in::c.rating-2*c.rd": 6,
       "extension/laplace_substrate/sql/functions/converse/converse_facts.sql.in::c.rating-2*c.rd": 6,
       "extension/laplace_substrate/src/highway_mask.c::rating-2*rd": 3,
