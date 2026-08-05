@@ -190,6 +190,36 @@ internal sealed class StatsCommand : ForwardCommand<TailSettings>
         => IngestCommands.StatsAsync();
 }
 
+[Description("Close a cut-off ingest journal row: close-run <run_id> [cancelled|failed].")]
+internal sealed class CloseRunCommand : ForwardCommand<TailSettings>
+{
+    protected override Task<int> ExecuteAsync(CommandContext ctx, TailSettings s, CancellationToken ct)
+    {
+        var raw = Raw(ctx);
+        if (raw.Length is not (1 or 2))
+        {
+            Console.Error.WriteLine("usage: close-run <run_id> [cancelled|failed]");
+            return Task.FromResult(2);
+        }
+        return IngestCommands.CloseRunAsync(raw[0], raw.Length == 2 ? raw[1] : "cancelled");
+    }
+}
+
+[Description("Verify a source's relation-law bootstrap rows landed (#760 positive control). The law relation name is the operator's declaration, e.g. the name-alias relation.")]
+internal sealed class SourceBootstrapCommand : ForwardCommand<TailSettings>
+{
+    protected override Task<int> ExecuteAsync(CommandContext ctx, TailSettings s, CancellationToken ct)
+    {
+        var raw = Raw(ctx);
+        if (raw.Length != 2)
+        {
+            Console.Error.WriteLine("usage: source-bootstrap <SourceName> <LAW_RELATION>");
+            return Task.FromResult(2);
+        }
+        return IngestCommands.SourceBootstrapAsync(raw[0], raw[1]);
+    }
+}
+
 [Description("Prove tensor_svd_truncate is fp-exact on a real tensor (no DB).")]
 internal sealed class SvdExactBenchCommand : ForwardCommand<TailSettings>
 {

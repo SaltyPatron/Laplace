@@ -101,6 +101,8 @@ internal static class Program
             config.AddCommand<RebuildPhysIndexesCommand>("rebuild-phys-indexes");
             config.AddCommand<DropIndexesCommand>("drop-indexes");
             config.AddCommand<RecoverIndexesCommand>("recover-indexes");
+            config.AddCommand<CloseRunCommand>("close-run");
+            config.AddCommand<SourceBootstrapCommand>("source-bootstrap");
             config.AddCommand<CpuTopologyCommand>("cpu-topology");
             config.AddCommand<SvdExactBenchCommand>("svd-exact-bench");
             config.AddCommand<ModelBenchCommand>("model-bench");

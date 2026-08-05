@@ -144,6 +144,41 @@ public static class NpgsqlIngestOps
                 p.Add("src", NpgsqlDbType.Bytea).Value = sourceId;
             }, ct, "evidence_count_relation_source_id");
 
+    // Close an orphaned journal row through the installed op. The op refuses
+    // rows not in status='running'; the CALLER owes the liveness proof — the
+    // sanctioned moment is while holding the global ingest mutex, when no other
+    // ingest can be alive by construction.
+    public static Task<long> CloseIngestRunAsync(
+        NpgsqlConnection conn, Guid runId, string status,
+        CancellationToken ct = default) =>
+        ScalarLongAsync(conn, """
+            SELECT count(*) FROM laplace.ingest_run_close(@run, @status)
+            """,
+            p =>
+            {
+                p.AddWithValue("run", runId);
+                p.AddWithValue("status", status);
+            }, ct, "ingest_run_close");
+
+    // Positive control for the roster's bootstrap filter (#760): the relation
+    // vocabulary is declared here, at the caller, and resolved to an id before
+    // it reaches SQL — the installed op takes ids only.
+    public static async Task<bool> SourceBootstrapPresentAsync(
+        NpgsqlConnection conn, string sourceKey, string lawRelation,
+        CancellationToken ct = default)
+    {
+        var v = await NpgsqlRead.ExecuteScalarAsync<object>(conn, """
+            SELECT laplace.source_bootstrap_present(
+                laplace.source_id(@src), laplace.relation_type_id(@rel))
+            """,
+            p =>
+            {
+                p.AddWithValue("src", sourceKey);
+                p.AddWithValue("rel", lawRelation);
+            }, timeoutSeconds: 0, ct: ct, label: "source_bootstrap_present").ConfigureAwait(false);
+        return v is bool b && b;
+    }
+
     public static async Task<bool> LayerMarkedCompleteAsync(
         NpgsqlConnection conn, int layer, string sourceKey, CancellationToken ct = default)
     {

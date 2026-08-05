@@ -61,8 +61,10 @@ VALUES
      relation_type_id('IS_A'), relation_type_id('HAS_NAME_ALIAS'), word_id('is-a'),
      laplace_hash128_blake3('test/ops/source'), NULL, 2,
      statement_timestamp(), 1, 1000000000, 350000000000, NULL);
-SELECT source_bootstrap_present(laplace_hash128_blake3('test/ops/source')) AS bootstrap_present,
-       NOT source_bootstrap_present(laplace_hash128_blake3('test/ops/source-unwitnessed')) AS absent_on_unwitnessed;
+SELECT source_bootstrap_present(laplace_hash128_blake3('test/ops/source'),
+                                relation_type_id('HAS_NAME_ALIAS')) AS bootstrap_present,
+       NOT source_bootstrap_present(laplace_hash128_blake3('test/ops/source-unwitnessed'),
+                                    relation_type_id('HAS_NAME_ALIAS')) AS absent_on_unwitnessed;
 
 -- ingest_run_close: drives a running row terminal, refuses non-running rows.
 INSERT INTO ingest_run_journal (run_id, source_name, layer)

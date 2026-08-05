@@ -658,6 +658,44 @@ internal static class IngestCommands
         return 0;
     }
 
+    // Close a cut-off journal row ('running' with no live process) through the
+    // installed op. The op refuses non-running rows; the operator owes the
+    // liveness check first — never close a run another process still owns.
+    public static async Task<int> CloseRunAsync(string runId, string status)
+    {
+        if (!Guid.TryParse(runId, out var run))
+        { Console.Error.WriteLine($"close-run: '{runId}' is not a run_id (uuid)"); return 2; }
+        if (status is not ("cancelled" or "failed"))
+        { Console.Error.WriteLine($"close-run: status must be cancelled|failed, got '{status}'"); return 2; }
+        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
+        await using var conn = await ds.OpenConnectionAsync();
+        try
+        {
+            await NpgsqlIngestOps.CloseIngestRunAsync(conn, run, status);
+        }
+        catch (PostgresException ex)
+        {
+            Console.Error.WriteLine($"close-run: {ex.MessageText}");
+            return 1;
+        }
+        Console.WriteLine($"closed run {run} -> {status}");
+        return 0;
+    }
+
+    // Verify a source's relation-law bootstrap rows landed (#760's positive
+    // control) through the installed op. The law relation is the OPERATOR's
+    // declaration, supplied at invocation (G3: production code embeds no
+    // governed vocabulary). Exit 0 present, 1 absent.
+    public static async Task<int> SourceBootstrapAsync(string sourceName, string lawRelation)
+    {
+        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
+        await using var conn = await ds.OpenConnectionAsync();
+        bool present = await NpgsqlIngestOps.SourceBootstrapPresentAsync(
+            conn, sourceName, lawRelation);
+        Console.WriteLine($"{sourceName}: bootstrap_present={(present ? "true" : "false")}");
+        return present ? 0 : 1;
+    }
+
     // Restore secondary indexes a killed or crashed bulk ingest left dropped (journaled in
     // laplace.index_cycle_journal by NpgsqlIndexCycle). The pipeline recovers automatically at
     // the START of the next bulk run — this is the ops entry for the window in between, when
