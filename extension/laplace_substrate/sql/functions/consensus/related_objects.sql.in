@@ -1,21 +1,34 @@
--- The one relation-select primitive. Every realizer that used to hand-roll
---   SELECT object_id FROM (v_)consensus WHERE subject_id=X
---     AND type_id=relation_type_id('REL') ORDER BY eff_mu DESC LIMIT N
--- now calls this. One implementation per fact (06 Rule #6): a relation-name
--- typo (the DEFINES/HAS_DEFINITION bug) can only exist in the CALLER's name
--- argument, never re-copied across a dozen bodies. Unrefuted view + eff_mu
--- ranking are fixed here so the whole realizer layer ranks identically.
+-- The relation-select primitive, addressed BY RELATION NAME: a caller that knows
+-- it wants HAS_DEFINITION says so in text and never open-codes the scan. One
+-- implementation per fact (06 Rule #6) — a relation-name typo (the
+-- DEFINES/HAS_DEFINITION bug) can only exist in the CALLER's name argument.
+--
+-- The name resolution is all this adds. The scan underneath is edges_raw() —
+-- the one consensus scan — with the axes this signature has always pinned:
+-- outbound, one relation type, unrefuted, eff_mu order, p_limit as a query
+-- limit. The body used to hand-roll that scan and open-code `rating - 2*rd`
+-- instead of eff_mu(); the two are the same expression, now stated once.
+--
+-- Two deliberate changes came with the delegation:
+--   * ties on eff_mu now break on neighbour_id, so the cap is deterministic
+--     rather than plan-dependent.
+--   * edges_raw's outbound arm requires object_id IS NOT NULL, so a unary
+--     attestation of p_relation can no longer surface here as a row whose
+--     object_id is NULL. This function returns objects; a NULL one was never an
+--     answer a caller could use.
+--
+-- No SET search_path and no STRICT — either blocks inlining and costs the
+-- consensus index path (#617, #860). NULL-safety without STRICT: a NULL
+-- p_subject matches no subject_id, and relation_type_id(NULL) matches no
+-- type_id, so both still return zero rows.
 CREATE OR REPLACE FUNCTION related_objects(
         p_subject bytea, p_relation text, p_limit int DEFAULT 8)
     RETURNS TABLE(object_id bytea, eff_mu bigint, witnesses bigint)
-    LANGUAGE sql STABLE PARALLEL SAFE STRICT
-    SET search_path = @extschema@, public AS $$
-    SELECT g.object_id,
-           (g.rating - 2 * g.rd) AS eff_mu,
-           g.witness_count       AS witnesses
-    FROM v_consensus_unrefuted g
-    WHERE g.subject_id = p_subject
-      AND g.type_id = relation_type_id(p_relation)
-    ORDER BY (g.rating - 2 * g.rd) DESC
-    LIMIT p_limit
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    SELECT e.neighbour_id,
+           @extschema@.eff_mu(e.rating, e.rd) AS eff_mu,
+           e.witness_count                    AS witnesses
+    FROM @extschema@.edges_raw(p_subject, 'out',
+                               ARRAY[@extschema@.relation_type_id(p_relation)],
+                               p_limit, false, 'eff_mu') e
 $$;
