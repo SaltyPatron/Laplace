@@ -103,12 +103,16 @@ permissions:
 # build job cancel-and-rewipe _work/ while the OLD run's test jobs were still
 # executing in it — measured 2026-08-05: two consecutive runs failed with
 # ctest "Failed to change working directory to .../build: No such file or
-# directory" while a solo run of the same tree passed. One run at a time,
-# and a newer push supersedes the ENTIRE older run atomically, preserving
-# the superseded-builds-die intent the per-job groups were written for.
+# directory" while a solo run of the same tree passed.
+#
+# Runs QUEUE, never cancel: cancel-in-progress would kill deploy/db-ops/
+# publish mid-install (the "never cancelled" jobs below — half-installed
+# tree), so a superseded run finishes wastefully-but-safely instead. And the
+# group is REF-INDEPENDENT: the wipe race is on the one shared _work/, which
+# a workflow_dispatch from another ref hits just the same.
 concurrency:
-  group: laplace-main-${{ github.ref }}
-  cancel-in-progress: true
+  group: laplace-shared-workspace
+  cancel-in-progress: false
 
 env:
   LAPLACE_EXTERNAL:       ${{ vars.LAPLACE_EXTERNAL       || '/opt/laplace/external' }}
