@@ -92,6 +92,12 @@ convenient.”
    replay is an input-array property: starts_n==1 and/or weights peaked past
    the 1e5 hash range. Wiring the ratchet forward: compose's revival as a
    called canonical shrank the G4 baseline (72→71).
+   **Phase 2 item 2 re-evaluation (2026-08-05, GH #878):** converse_tiered
+   hangs are fixed (ceef97d; dog 3.7s / pawn 1.4s) but content regressed to
+   pure topic echo on every probe including pawn, and it runs CREATE TABLE
+   internally (unrunnable read-only, 25006 via MCP op). Verdict: do NOT
+   wire; stale chat.sql.in:429-436 hotfix comment replaced with measured
+   state.
 3. **W6 remainder / #758** — still open:
    - G4 dead-canonical (**destination** = substrate `CALLS` in-degree after
      W3; **scaffolding** = labeled grep + shrink-only allowlist may ship first)

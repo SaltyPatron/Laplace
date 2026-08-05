@@ -419,21 +419,14 @@ BEGIN
             -- yields "Pawn is it can be promoted to a more powerful piece if it
             -- reaches the 8th rank." (observed live 2026-07-26).
             --
-            -- The gate converse_compose is held to is now met for
-            -- converse_tiered -- run on the deployed extension, same date:
-            --   "it can be promoted to a more powerful piece if it reaches the
-            --    8th rank. change a pawn for a better piece by advancing it to
-            --    the eighth row... (chess) the least powerful piece."
-            -- Four separately-witnessed clauses, stepped by concept adjacency,
-            -- on topic, each traceable to its witnesses.
-            -- HOTFIX 2026-07-27: converse_tiered() is NOT called from the hot
-            -- path either. Two unbounded reads inside it, both measured on `dog`:
-            -- a containers_of() arm over every sense-subject of the topic
-            -- (>100s, never returned) and a per-word top_synset() concept lift
-            -- (73s, because top_synset is bubble_up per constituent). It answered
-            -- only for `pawn`, which has few senses and few usages -- the single
-            -- topic it was verified on before being wired in. Fixes for both
-            -- exist on perf/content-ladder-ledger and did NOT make this merge.
+            -- converse_tiered() is NOT called from the hot path. Measured
+            -- 2026-08-05 (GH #878): the 2026-07-27 hangs are FIXED (ceef97d
+            -- landed; dog 3.7s, pawn 1.4s), but content REGRESSED to a
+            -- degenerate topic echo ("dog. dog. dog. dog." — including pawn,
+            -- its one historically verified topic), and it executes CREATE
+            -- TABLE internally, which no read-only lane can run (25006 via
+            -- the MCP op surface). Unfit for wiring on content and on
+            -- transaction mode; latency is no longer the blocker.
             --
             -- converse_about is the pre-existing path and is fast and correct-ish
             -- ("Dog is a member of the genus Canis (probably descended from the
