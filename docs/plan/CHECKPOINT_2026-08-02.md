@@ -106,11 +106,19 @@ convenient.”
    (op-queryable gap log) recorded on-issue as a two-path design decision.
    #878 filed: converse_tiered echo regression + CREATE TABLE read-only
    violation, chat.sql.in stale comment replaced with measured state.
-   **Next owed: #765 live prove** — `ingest code` over
-   extension/laplace_substrate/sql via MCP ingest tool on a quiet box (after
-   CI deploys settle), then verify DEFINES/CALLS evidence exists and the G4
-   destination read becomes possible. #660 blocked on #805 source-kind
-   decision; #847 shellcheck gate not built.
+   **#765 live prove DONE (2026-08-05 23:00):** `ingest code` over
+   extension/laplace_substrate/sql via MCP ingest — 428/428 units ok, 47s,
+   19,255e+19,228p+1,114a novel. CALLS = 774 evidence rows for
+   CodeDecomposer; HAS_DEFINITION per function (body→name). **G4's
+   destination read (zero incoming CALLS) is now queryable against real
+   data.** Open discrepancy recorded on-issue: DEFINES evidence = 0 (the
+   @definition.function tag path; span-lookup suspect), REFERENCES
+   unverified. Side effects: HAS_MOTIF partition pressure (19.1%) →
+   hot=true + codegen on PR #879; #809 closed on in-tree evidence; CI
+   cross-run workspace wipe race diagnosed (two cd-failures vs solo green)
+   → whole-run queueing concurrency, PR #879, Copilot review addressed
+   (no cancel — deploy safety; ref-independent group). #660 blocked on
+   #805 source-kind decision; #847 shellcheck gate not built.
 3. **W6 remainder / #758** — still open:
    - G4 dead-canonical (**destination** = substrate `CALLS` in-degree after
      W3; **scaffolding** = labeled grep + shrink-only allowlist may ship first)
