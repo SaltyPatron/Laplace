@@ -12,9 +12,16 @@ CREATE OR REPLACE FUNCTION translate_to(p_word bytea, p_lang text DEFAULT NULL,
     -- DISTINCT candidate language is matched once against the reference (by
     -- label or definition surface), instead of re-rendering per member row.
     -- render_text runs above the sort, streaming until p_limit rows survive.
+    -- object_id IS NOT NULL is load-bearing, not defensive: src_langs feeds a
+    -- NOT IN below, and SQL NOT IN against a set containing one NULL evaluates
+    -- to NULL for every row, dropping the entire result. HAS_LANGUAGE is emitted
+    -- unary (null object) in some paths, so a single such row silently zeroes
+    -- every translate_to call while language_coverage — same synset_members
+    -- source, no NOT IN — keeps working.
     WITH src_langs AS (
         SELECT c.object_id AS id FROM consensus c
         WHERE c.subject_id = p_word AND c.type_id = relation_type_id('HAS_LANGUAGE')
+          AND c.object_id IS NOT NULL
     ),
     want AS (SELECT NULLIF(btrim(lower(COALESCE(p_lang, ''))), '') AS name),
     agg AS (
