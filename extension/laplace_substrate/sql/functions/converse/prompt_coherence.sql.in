@@ -54,6 +54,7 @@ CREATE OR REPLACE FUNCTION prompt_coherence(p_prompt text)
     RETURNS TABLE(ord int, tok bytea, synset_id bytea,
                   coherence double precision, denote_mu numeric, peers bigint,
                   rel_type_id bytea, rel_mass double precision,
-                  specificity double precision, total_mass double precision)
+                  specificity double precision, total_mass double precision,
+                  witnesses bigint, lang_agree int)
     AS 'MODULE_PATHNAME', 'pg_laplace_prompt_coherence'
     LANGUAGE C STABLE;
