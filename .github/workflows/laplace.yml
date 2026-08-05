@@ -387,6 +387,13 @@ jobs:
         env:
           LAPLACE_TEST_SERIAL: ${{ github.event_name == 'workflow_dispatch' && inputs.serial_tests == true && '1' || '' }}
         run: |
+          # Tripwire (#880): this job needs the build tree the build job is
+          # expected to leave behind; if it is absent, name that directly
+          # instead of failing as a bare `cd` three theories deep.
+          if [ ! -d build ]; then
+            echo "::error::build/ absent at ctest start — expected from the build job this run depends on. Either it was removed between jobs or the build phase did not produce it; see #880 for the measured 2026-08-05 timeline. Re-run the workflow."
+            exit 1
+          fi
           chmod +x scripts/test-parallel.sh
           if [ "${LAPLACE_TEST_SERIAL:-}" = "1" ]; then
             bash scripts/test-parallel.sh --serial --engine
