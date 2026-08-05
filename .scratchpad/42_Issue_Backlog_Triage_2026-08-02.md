@@ -380,3 +380,8 @@ priority:high held at 12.
 - Rewrote #818 body + comments on #823/#605/#447/#575; #823 body tightened (validity≠completeness, scratchpad 44 cite).
 - Cutechess remeasure vs SF14.1 Elo2000 running → `/tmp/laplace-vs-sf2000` (mid-run not stamped).
 - **#834** opened: drive/measure protocol gap — naive cutechess defaults are not using Laplace; live explore shows Na3 over e4 on raw μ (#447); fold UCI still played e4 @ movetime 2s; chess-lab.md primary protocol section added.
+
+
+## Drift note — 2026-08-05 (append)
+
+Re-measured: **232** open issues (was 195 at end of this pass). `priority:high` = 9. Stop-loss failed; see `docs/plan/CHECKPOINT_2026-08-05.md`.

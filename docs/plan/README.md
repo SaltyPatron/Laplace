@@ -4,8 +4,8 @@
 
 `COMPLETION_PLAN.md` and this directory cover **one axis**: the conversational
 and inference path — election, generation, the lanes that feed it, and the gates
-that would keep it honest. That is roughly 15 of the repository's **214 open
-issues** (measured 2026-08-02).
+that would keep it honest. That is roughly 15 of the repository's **232 open
+issues** (measured 2026-08-05; ledger 42's end count of 195 is stale).
 
 It is **not** a plan for the whole backlog. The rest has its own shape and is
 tracked in GitHub, not here. Full-backlog dispositions (stale/current/done,
@@ -42,9 +42,10 @@ point:
 
 ## Resume checkpoint
 
-**Current stage:** [CHECKPOINT_2026-08-02.md](CHECKPOINT_2026-08-02.md) —
-what landed (#771–#776), live-box seed block, Phase 1 remainder, next-session
-start order. Read that before re-deriving status from older prose.
+**Current stage:** [CHECKPOINT_2026-08-05.md](CHECKPOINT_2026-08-05.md) —
+live box re-measured empty (THIN_SUBSTRATE), tracker drift 195→232, W5/W6
+status corrected against code/GH, ranked next work. Historical landing record
+for #771–#776 remains in [CHECKPOINT_2026-08-02.md](CHECKPOINT_2026-08-02.md).
 
 ## The workstreams
 
@@ -54,15 +55,15 @@ start order. Read that before re-deriving status from older prose.
 | W2 | [The document lane](W2_Document_Lane.md) — Pillar 0, identity/names/typed edges | #754 | 4 | specified |
 | W3 | [Self-ingest call graph](W3_Self_Ingest_Call_Graph.md) — the substrate reads its own source | #765 | 1 | **partial** — `.sql.in` discovery (#774); structural `CALLS`/`DEFINES` still zero |
 | W4 | [Sense-election ground](W4_Sense_Election_Ground.md) — tier seam + sense priors | #752, #753 | 3 | specified |
-| W5 | [Evaluation harness](W5_Evaluation_Harness.md) | #755 | 1 | specified — **next ungated measurement workstream** |
-| W6 | [Architecture gates](W6_Architecture_Gates.md) — spec 37 G1–G10, elector invariant | #758 | 1 | **partial** — elector + G1/G3/G7/G8 landed (#771/#772/#775); G4/G2/G5/G6/G9/G10 remain |
+| W5 | [Evaluation harness](W5_Evaluation_Harness.md) | #755 | 1 | **partial** — runner + probes + CI wire landed (`eval-generation.py`); issue body still claims none; needs seeded box + remaining acceptance |
+| W6 | [Architecture gates](W6_Architecture_Gates.md) — spec 37 G1–G10, elector invariant | #758 | 1 | **#758 CLOSED** (#829); G2/G5/G10 landed (#876, grandfathered); G4 destination still #765 `CALLS` in-degree |
 | W7 | [Questions route themselves](W7_Questions_Route_Themselves.md) — relation naming | #756 | 5 | specified |
 | W8 | [`infer()` to C](W8_Infer_To_C.md) — both directions, n-hop bias, multi-step | #757 | 5 | specified |
 | W9 | [Discourse memory](W9_Discourse_Memory.md) — witnessed turns into orientation | #759 | 5 | specified |
 | W10 | `BEGIN ATOMIC` — in-database dependency enforcement | #764 | 1 | see W3 §1; specify when W3 lands |
 | W11 | Corpus seeding through finished lanes | #761 | 7 | pending W2 |
 | W12 | `source_roster` returns bootstrap rows, not source content | #760 | — | **code landed** (#773); close after live ChessPgn/ChessOpenings recheck |
-| — | Foundation seed / prove #776 on live ladder | #777 | 0 | **ops gate** — orphan Unicode journal; see checkpoint §2 |
+| — | Foundation seed / prove #776 on live ladder | #777 | 0 | **ops gate** — this host is unseeded (0 journal rows, 41 entities), not orphan-Unicode; see CHECKPOINT_2026-08-05 §1 |
 | W13 | [Convergent identity](W13_Convergent_Identity.md) — why everything links to everything | #574 | — | thesis verified, unmeasured |
 | W14 | [The machine model](W14_Machine_Model.md) — memory, ISA, and the operator that cycles it | — | 1 | binds specs 15/33/36/37; names four structural gaps |
 | W15 | [Election fan-out axes](W15_Election_Fanout_Axes.md) — what an election may rank on | #861, #865 | 3 | **axis inventory measured**; independence classes proposed, remedy unmeasured |
