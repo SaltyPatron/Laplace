@@ -1,7 +1,7 @@
 CREATE OR REPLACE FUNCTION grapheme_order(p_vocab bytea[], p_words int DEFAULT 50000, p_gap int DEFAULT 1)
     RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
     LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+    AS $$
     
     
     
@@ -21,8 +21,8 @@ CREATE OR REPLACE FUNCTION grapheme_order(p_vocab bytea[], p_words int DEFAULT 5
         -- Ranked by length rather than content hash (an arbitrary LIMIT is a missing
         -- ranking); DISTINCT ON dropped, since (entity_id, type) is already unique.
         SELECT w.id AS wid, w.trajectory
-        FROM v_word_points w
-        WHERE w.type_id = canonical_id('Word')
+        FROM @extschema@.v_word_points w
+        WHERE w.type_id = @extschema@.canonical_id('Word')
           AND w.trajectory IS NOT NULL
         -- Sampling is by content hash, which is ARBITRARY -- an arbitrary LIMIT without
         -- an ordering is a missing ranking. The honest ranking is by trajectory length,
@@ -39,7 +39,7 @@ CREATE OR REPLACE FUNCTION grapheme_order(p_vocab bytea[], p_words int DEFAULT 5
         
         
         SELECT t.wid, tc.ordinal AS ord, gs.i AS sub, tc.entity_id AS ch
-        FROM t CROSS JOIN LATERAL laplace_trajectory_constituents(t.trajectory) tc
+        FROM t CROSS JOIN LATERAL public.laplace_trajectory_constituents(t.trajectory) tc
         CROSS JOIN LATERAL generate_series(1, GREATEST(tc.run_length, 1)) gs(i)
     ),
     bg AS (

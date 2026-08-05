@@ -2,19 +2,19 @@ CREATE OR REPLACE FUNCTION consensus_layer_plane_masked(
         p_vocab bytea[], p_band_mask bytea, p_degree_cap int DEFAULT 48)
     RETURNS TABLE(subject_id bytea, object_id bytea, w double precision, layer_rank double precision)
     LANGUAGE sql STABLE PARALLEL RESTRICTED
-    SET search_path = @extschema@, public AS $$
+    AS $$
     WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
          band_types AS (
-             SELECT e.id, relation_rank_resolved(e.id) AS rank
-             FROM entities e
+             SELECT e.id, @extschema@.relation_rank_resolved(e.id) AS rank
+             FROM @extschema@.entities e
              WHERE e.highway_mask IS NOT NULL
-               AND laplace_highway_mask_bits(e.highway_mask) && laplace_highway_mask_bits(p_band_mask)
+               AND @extschema@.laplace_highway_mask_bits(e.highway_mask) && @extschema@.laplace_highway_mask_bits(p_band_mask)
          ),
          edges AS (
              SELECT c.subject_id, c.object_id, c.rating, c.rd, c.witness_count, c.type_id,
                     bt.rank
              FROM v
-             JOIN consensus c ON c.subject_id = v.id
+             JOIN @extschema@.consensus c ON c.subject_id = v.id
              JOIN v vo        ON vo.id = c.object_id
              JOIN band_types bt ON bt.id = c.type_id
              WHERE bt.rank IS NOT NULL
@@ -22,10 +22,10 @@ CREATE OR REPLACE FUNCTION consensus_layer_plane_masked(
          -- P5 Glicko-complete weight (doc 14 M5): signed, rd-discounted,
          -- witness-saturated. walk_edge_weight IS the law; kappa resolved once
          -- rather than per row.
-         kappa(k) AS (SELECT foundry_rd_kappa()),
+         kappa(k) AS (SELECT @extschema@.foundry_rd_kappa()),
          ranked AS (
              SELECT e.subject_id, e.object_id,
-                    walk_edge_weight(e.rating, e.rd, e.witness_count,
+                    @extschema@.walk_edge_weight(e.rating, e.rd, e.witness_count,
                                      (SELECT k FROM kappa)) AS w,
                     e.rank AS rk
              FROM edges e

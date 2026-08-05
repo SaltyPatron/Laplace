@@ -36,12 +36,12 @@ CREATE OR REPLACE FUNCTION sense_audit(p_term text, p_lang_rel bytea,
     RETURNS TABLE(sense text, sense_type text, via_relation text,
                   language text, denote_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE
-    SET search_path = @extschema@, public AS $$
-WITH w AS (SELECT word_id(p_term) AS id),
+    AS $$
+WITH w AS (SELECT @extschema@.word_id(p_term) AS id),
 cand AS (
     SELECT s.synset_id, s.eff_mu, s.witnesses,
            row_number() OVER (ORDER BY s.eff_mu DESC, s.synset_id) AS rk
-    FROM w CROSS JOIN LATERAL senses(w.id) s
+    FROM w CROSS JOIN LATERAL @extschema@.senses(w.id) s
 ),
 capped AS (SELECT * FROM cand WHERE rk <= p_limit),
 -- The relation that admitted this candidate. A target reachable by several
@@ -49,8 +49,8 @@ capped AS (SELECT * FROM cand WHERE rk <= p_limit),
 via AS (
     SELECT c.object_id AS synset_id, c.type_id,
            row_number() OVER (PARTITION BY c.object_id
-                              ORDER BY eff_mu(c.rating, c.rd) DESC, c.type_id) AS rk
-    FROM w CROSS JOIN consensus c
+                              ORDER BY @extschema@.eff_mu(c.rating, c.rd) DESC, c.type_id) AS rk
+    FROM w CROSS JOIN @extschema@.consensus c
     WHERE c.subject_id = w.id AND c.object_id IN (SELECT synset_id FROM capped)
 ),
 -- Language via word_language() — the existing HAS_LANGUAGE surface — so this
@@ -64,8 +64,8 @@ lang AS (
     -- W15 documents as a defect. Same G3 outcome, different cost.
     SELECT c.subject_id AS synset_id, c.object_id AS lang_id,
            row_number() OVER (PARTITION BY c.subject_id
-                              ORDER BY eff_mu(c.rating, c.rd) DESC, c.object_id) AS rk
-    FROM consensus c
+                              ORDER BY @extschema@.eff_mu(c.rating, c.rd) DESC, c.object_id) AS rk
+    FROM @extschema@.consensus c
     WHERE c.type_id = p_lang_rel
       AND c.subject_id IN (SELECT synset_id FROM capped)
 ),
@@ -73,7 +73,7 @@ rows AS (
     SELECT c.rk, c.synset_id, e.type_id, v.type_id AS via_id, l.lang_id,
            c.eff_mu, c.witnesses
     FROM capped c
-    LEFT JOIN entities e ON e.id = c.synset_id
+    LEFT JOIN @extschema@.entities e ON e.id = c.synset_id
     LEFT JOIN via  v ON v.synset_id = c.synset_id AND v.rk = 1
     LEFT JOIN lang l ON l.synset_id = c.synset_id AND l.rk = 1
 ),
@@ -85,7 +85,7 @@ ids AS (
           UNION ALL SELECT r.rk * 4 - 1, r.via_id   FROM rows r
           UNION ALL SELECT r.rk * 4,     r.lang_id  FROM rows r) z
 ),
-lbl AS (SELECT realize_batch(arr, NULL) AS l FROM ids)
+lbl AS (SELECT @extschema@.realize_batch(arr, NULL) AS l FROM ids)
 SELECT lbl.l[r.rk * 4 - 3],
        lbl.l[r.rk * 4 - 2],
        lbl.l[r.rk * 4 - 1],

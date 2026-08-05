@@ -5,9 +5,9 @@
 CREATE OR REPLACE FUNCTION entity_hilbert_keys(p_vocab bytea[])
     RETURNS TABLE(entity_id bytea, hilbert_index bytea)
     LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+    AS $$
     SELECT DISTINCT ON (w.id) w.id, w.hilbert_index
-    FROM v_word_points w
+    FROM @extschema@.v_word_points w
     JOIN unnest(p_vocab) AS u(id) ON u.id = w.id
     WHERE w.hilbert_index IS NOT NULL
     ORDER BY w.id, w.physicality_id

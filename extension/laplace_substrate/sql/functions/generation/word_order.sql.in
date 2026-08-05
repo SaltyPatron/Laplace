@@ -11,7 +11,7 @@
 CREATE OR REPLACE FUNCTION word_order(p_vocab bytea[], p_trajs int DEFAULT 100000, p_gap int DEFAULT 1)
     RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
     LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+    AS $$
     WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
     t AS (
         -- Role by TYPE, not by tier. tier is a floor in the containment DAG, not a kind:
@@ -26,8 +26,8 @@ CREATE OR REPLACE FUNCTION word_order(p_vocab bytea[], p_trajs int DEFAULT 10000
         -- DISTINCT ON is gone: physicality identity is (entity_id, type) and type is
         -- pinned below, so there is at most one row per entity already.
         SELECT w.id AS entity_id, w.trajectory
-        FROM v_word_points w
-        WHERE w.type_id IN (canonical_id('Sentence'), canonical_id('Document'))
+        FROM @extschema@.v_word_points w
+        WHERE w.type_id IN (@extschema@.canonical_id('Sentence'), @extschema@.canonical_id('Document'))
           AND w.trajectory IS NOT NULL
         -- Sampling is by content hash, which is ARBITRARY -- an arbitrary LIMIT without
         -- an ordering is a missing ranking. The honest ranking is by trajectory length,
@@ -45,7 +45,7 @@ CREATE OR REPLACE FUNCTION word_order(p_vocab bytea[], p_trajs int DEFAULT 10000
         -- has always filtered after counting. The vocab restriction now applies to the
         -- finished counts below, where it selects rows instead of inventing them.
         SELECT t.sid, tc.ordinal AS ord, tc.entity_id AS wid
-        FROM t CROSS JOIN LATERAL laplace_trajectory_constituents(t.trajectory) tc
+        FROM t CROSS JOIN LATERAL public.laplace_trajectory_constituents(t.trajectory) tc
     ),
     bg AS (
         SELECT wid AS cur, lead(wid, p_gap) OVER (PARTITION BY sid ORDER BY ord) AS nxt FROM g

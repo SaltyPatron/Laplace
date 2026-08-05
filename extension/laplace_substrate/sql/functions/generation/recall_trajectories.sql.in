@@ -1,17 +1,17 @@
 CREATE OR REPLACE FUNCTION recall_trajectories(p_word text, p_limit int DEFAULT 6)
     RETURNS TABLE(answer text)
     LANGUAGE sql STABLE
-    SET search_path = @extschema@, public AS $$
-  WITH wid AS (SELECT word_id(p_word) AS id),
+    AS $$
+  WITH wid AS (SELECT @extschema@.word_id(p_word) AS id),
   ids AS (
     SELECT w.id AS entity_id
     FROM wid
-    JOIN v_word_points w
+    JOIN @extschema@.v_word_points w
       ON w.trajectory IS NOT NULL
-     AND w.type_id = canonical_id('Sentence')
+     AND w.type_id = @extschema@.canonical_id('Sentence')
      AND public.laplace_trajectory_constituent_ids(w.trajectory) @> ARRAY[wid.id]
     ORDER BY abs(w.n_constituents - 7)
     LIMIT p_limit
   )
-  SELECT left(replace(render_text(entity_id, 300), chr(10), ' '), 180) FROM ids
+  SELECT left(replace(@extschema@.render_text(entity_id, 300), chr(10), ' '), 180) FROM ids
 $$;

@@ -25,7 +25,6 @@ RETURNS TABLE(
 )
 LANGUAGE sql
 STABLE
-SET search_path = @extschema@, public
 AS $$
     -- Each verification scan runs exactly once: the planner does not
     -- common-subexpression-eliminate independent scalar subqueries in one

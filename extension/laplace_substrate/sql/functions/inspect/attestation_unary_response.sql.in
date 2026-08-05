@@ -11,20 +11,19 @@ RETURNS TABLE(
     rd_fp1e9         bigint
 )
 LANGUAGE sql STABLE
-SET search_path = @extschema@, public
 AS $$
-    SELECT (eff_mu(c.rating, c.rd) / 1e9)::double precision,
+    SELECT (@extschema@.eff_mu(c.rating, c.rd) / 1e9)::double precision,
            c.witness_count::integer,
            c.rating,
            c.rd
-    FROM consensus c
+    FROM @extschema@.consensus c
     WHERE c.subject_id = p_subject_id
       AND c.type_id    = p_relation_type_id
       AND c.object_id IS NULL
       AND (
             (p_source_scope IS NULL AND p_context_id IS NULL)
          OR EXISTS (
-                SELECT 1 FROM attestations a
+                SELECT 1 FROM @extschema@.attestations a
                 WHERE a.subject_id = c.subject_id
                   AND a.type_id    = c.type_id
                   AND a.object_id IS NULL

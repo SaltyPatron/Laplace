@@ -5,16 +5,16 @@ CREATE OR REPLACE FUNCTION metric_edges(
         p_vocab bytea[], p_metric text DEFAULT 'frechet', p_k int DEFAULT 16, p_probe int DEFAULT 64)
     RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
     LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+    AS $$
     WITH v AS (
-        SELECT DISTINCT ON (w.id) w.id, w.coord, entity_curve(w.id) AS curve
-        FROM v_word_points w
+        SELECT DISTINCT ON (w.id) w.id, w.coord, @extschema@.entity_curve(w.id) AS curve
+        FROM @extschema@.v_word_points w
         JOIN unnest(p_vocab) AS u(id) ON u.id = w.id
         ORDER BY w.id, w.physicality_id
     ),
     cand AS (
         SELECT a.id AS aid, b.id AS bid, a.curve AS ac, b.curve AS bc,
-               laplace_angular_distance_4d(a.coord, b.coord) AS ang
+               public.laplace_angular_distance_4d(a.coord, b.coord) AS ang
         FROM v a JOIN v b ON a.id <> b.id
     ),
     pruned AS (
@@ -26,8 +26,8 @@ CREATE OR REPLACE FUNCTION metric_edges(
         SELECT aid, bid,
             CASE p_metric
                 WHEN 'angular'   THEN ang
-                WHEN 'frechet'   THEN coalesce(laplace_frechet_4d(ac, bc), ang)
-                WHEN 'hausdorff' THEN coalesce(laplace_hausdorff_4d(ac, bc), ang)
+                WHEN 'frechet'   THEN coalesce(public.laplace_frechet_4d(ac, bc), ang)
+                WHEN 'hausdorff' THEN coalesce(public.laplace_hausdorff_4d(ac, bc), ang)
                 ELSE ang
             END AS d
         FROM pruned

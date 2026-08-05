@@ -6,15 +6,15 @@
 CREATE OR REPLACE FUNCTION sentence_order(p_docs int DEFAULT 100000, p_gap int DEFAULT 1)
     RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
     LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+    AS $$
     WITH t AS (
         -- Role by TYPE, not tier: `tier = 4` misses a single-sentence document, and tier
         -- is a containment floor rather than a kind. Ranked by trajectory length instead
         -- of by content hash -- ordering by p.id sampled arbitrarily. DISTINCT ON dropped:
         -- physicality identity is (entity_id, type), so type = 1 already yields one row.
         SELECT w.id AS did, w.trajectory
-        FROM v_word_points w
-        WHERE w.type_id = canonical_id('Document')
+        FROM @extschema@.v_word_points w
+        WHERE w.type_id = @extschema@.canonical_id('Document')
           AND w.trajectory IS NOT NULL
         -- Sampling is by content hash, which is ARBITRARY -- an arbitrary LIMIT without
         -- an ordering is a missing ranking. The honest ranking is by trajectory length,
@@ -27,7 +27,7 @@ CREATE OR REPLACE FUNCTION sentence_order(p_docs int DEFAULT 100000, p_gap int D
     ),
     g AS (
         SELECT t.did, tc.ordinal AS ord, tc.entity_id AS sid
-        FROM t CROSS JOIN LATERAL laplace_trajectory_constituents(t.trajectory) tc
+        FROM t CROSS JOIN LATERAL public.laplace_trajectory_constituents(t.trajectory) tc
     ),
     bg AS (
         SELECT sid AS cur, lead(sid, p_gap) OVER (PARTITION BY did ORDER BY ord) AS nxt FROM g

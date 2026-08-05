@@ -13,26 +13,26 @@ CREATE OR REPLACE FUNCTION pos_transition_plane(
         p_degree_cap int DEFAULT 512)
     RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
     LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+    AS $$
     WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
     -- dominant POS per vocab word: strongest unrefuted HAS_POS object
     word_pos AS (
         SELECT DISTINCT ON (c.subject_id)
                c.subject_id AS wid, c.object_id AS pos
         FROM v
-        JOIN v_consensus_unrefuted c ON c.subject_id = v.id
-            AND c.type_id = relation_type_id('HAS_POS')
+        JOIN @extschema@.v_consensus_unrefuted c ON c.subject_id = v.id
+            AND c.type_id = @extschema@.relation_type_id('HAS_POS')
             AND c.object_id IS NOT NULL
-        ORDER BY c.subject_id, eff_mu(c.rating, c.rd) DESC
+        ORDER BY c.subject_id, @extschema@.eff_mu(c.rating, c.rd) DESC
     ),
     nclasses AS (SELECT count(DISTINCT pos)::float8 AS n FROM word_pos),
     -- fused word-adjacency counts (same evidence as the conditional plane)
     -- Pillar 5 (2026-07-20): PRECEDES-consensus leg removed; word_order already
     -- reads the ordered sequence from physicalities.trajectory via
-    -- laplace_trajectory_constituents (Pillar 3a, e5e1b42).
+    -- public.laplace_trajectory_constituents (Pillar 3a, e5e1b42).
     pairs AS (
         SELECT subject_id AS x, object_id AS y, w AS c
-        FROM word_order(p_vocab, p_trajs, 1)
+        FROM @extschema@.word_order(p_vocab, p_trajs, 1)
     ),
     class_pairs AS (
         SELECT wx.pos AS px, wy.pos AS py, sum(p.c) AS c

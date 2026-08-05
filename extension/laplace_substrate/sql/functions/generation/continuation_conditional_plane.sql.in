@@ -23,16 +23,16 @@ CREATE OR REPLACE FUNCTION continuation_conditional_plane(
         p_degree_cap int DEFAULT 512)
     RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
     LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+    AS $$
     WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
     vsize AS (SELECT count(*)::float8 AS n FROM v),
     corpus_pairs AS (
         SELECT subject_id AS x, object_id AS y, w AS c
-        FROM word_order(p_vocab, p_trajs, 1)
+        FROM @extschema@.word_order(p_vocab, p_trajs, 1)
     ),
     bridge_pairs AS (
         SELECT subject_id AS x, object_id AS y, w AS c
-        FROM sentence_order_word_bridge(p_vocab, p_trajs)
+        FROM @extschema@.sentence_order_word_bridge(p_vocab, p_trajs)
     ),
     fused AS (
         SELECT x, y, sum(c) AS c

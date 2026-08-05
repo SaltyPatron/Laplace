@@ -5,9 +5,9 @@ CREATE OR REPLACE FUNCTION laplace_astar_path(
     p_max_depth integer DEFAULT 20,
     p_use_geometry bool DEFAULT false)
 RETURNS TABLE(step integer, entity_id bytea, g float8)
-LANGUAGE sql STABLE SET search_path = @extschema@, public AS $$
+LANGUAGE sql STABLE  AS $$
     SELECT step, entity_id, g
-    FROM astar_path_raw(
+    FROM @extschema@.astar_path_raw(
         p_source,
         ARRAY[p_target],
         p_type_ids,

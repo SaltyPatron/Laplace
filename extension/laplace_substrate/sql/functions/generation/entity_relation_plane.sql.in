@@ -2,16 +2,16 @@ CREATE OR REPLACE FUNCTION entity_relation_plane(
         p_vocab bytea[], p_rel_names text[], p_degree_cap int DEFAULT 48)
     RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
     LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+    AS $$
     WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
-         t(tid) AS (SELECT relation_type_id(n) FROM unnest(p_rel_names) AS n),
+         t(tid) AS (SELECT @extschema@.relation_type_id(n) FROM unnest(p_rel_names) AS n),
          edges AS (
              -- P5 Glicko-complete weight (doc 14 M5): already neutral-centered
              -- (signed); adds rd-uncertainty discount + witness-mass saturation.
              SELECT c.subject_id, c.object_id,
-                    walk_edge_weight(c.rating, c.rd, c.witness_count) AS w
+                    @extschema@.walk_edge_weight(c.rating, c.rd, c.witness_count) AS w
              FROM v
-             JOIN consensus c ON c.subject_id = v.id
+             JOIN @extschema@.consensus c ON c.subject_id = v.id
              JOIN t           ON t.tid = c.type_id
              JOIN v vo        ON vo.id = c.object_id
 
