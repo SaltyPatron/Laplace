@@ -26,20 +26,31 @@
 -- unchanged. It is a SCOPE, not a floor — spec 37 L6 forbids operator thresholds
 -- and this adds none.
 --
--- DISTANCE / RANK AGREEMENT. The SELECT used to report laplace_l2_sq() against an
--- SRID-less point while the ORDER BY ranked on <<->> against ST_SetSRID(...,0):
--- two different expressions on two different scales (squared vs not), so the
--- reported number did not explain the order. Both now use the same operator, so
--- `distance` is the quantity the row was ranked by.
+-- CHORD PREFILTER, TRUE-METRIC RE-RANK. Previously the SELECT reported
+-- laplace_l2_sq() against an SRID-less point while the ORDER BY ranked on <<->>
+-- against ST_SetSRID(...,0) — two expressions on two scales, so the number
+-- returned did not explain the order.
 --
--- The operator is Euclidean n-D — a CHORD, not a geodesic. On the unit sphere
--- chord d and geodesic theta satisfy d = 2*sin(theta/2), strictly monotone on
--- [0, pi], so the ORDER is correct. The column is named `distance` and not
--- `geodesic` for exactly that reason; do not threshold on it as an angle.
+-- Reporting <<->> for both would agree, but would still be wrong as a metric.
+-- <<->> is Euclidean — a CHORD. On the unit sphere chord and geodesic satisfy
+-- d = 2*sin(theta/2), monotone in theta, so ordering by chord ORDERS BY ANGLE
+-- **only when every candidate has the same radius**. They do not: tier 0 sits at
+-- radius exactly 1 (super_fibonacci places codepoints on the sphere) while every
+-- composed coord is a centroid and therefore interior. Across mixed radii, chord
+-- order is a blend of angle and radius, and the radius half is dispersion of
+-- constituents rather than anything semantic.
+--
+-- So this now does what explore_anchor_neighbors already does and documents:
+-- over-fetch on the index-ordered <<->> (GiST-eligible, cheap, correct as a
+-- PREFILTER) and then re-rank the bounded pool by laplace_angular_distance_4d,
+-- the true metric. `distance` is that angle, and it is the quantity the row was
+-- ranked by. The over-fetch factor is a candidate-pool width, not a floor or a
+-- top-k on the answer — spec 37 L6 is about cutting results, and nothing is cut.
 --
 -- Rule #4 / L2: the comparison point must reach the planner as a bound parameter
--- or the GiST KNN silently degrades to a scan. A caller passing a correlated
--- LATERAL reference does NOT satisfy that — EXPLAIN before trusting the index.
+-- or the GiST prefilter silently degrades to a scan. A caller passing a
+-- correlated LATERAL reference does NOT satisfy that — EXPLAIN before trusting
+-- the index.
 CREATE OR REPLACE FUNCTION laplace_nearest_entity(
     p_cx float8, p_cy float8, p_cz float8, p_cm float8,
     p_k integer DEFAULT 1,
@@ -47,14 +58,23 @@ CREATE OR REPLACE FUNCTION laplace_nearest_entity(
     p_tiers smallint[] DEFAULT NULL)
 RETURNS TABLE(entity_id bytea, distance float8)
 LANGUAGE sql STABLE PARALLEL RESTRICTED AS $$
-    SELECT w.id AS entity_id,
-           w.coord <<->> public.ST_SetSRID(
-               public.ST_MakePoint(p_cx, p_cy, p_cz, p_cm), 0)::geometry AS distance
-    FROM @extschema@.v_word_points w
-    WHERE w.coord IS NOT NULL
-      AND (p_band_mask IS NULL OR @extschema@.laplace_highway_match(w.highway_mask, p_band_mask))
-      AND (p_tiers IS NULL OR w.tier = ANY (p_tiers))
-    ORDER BY w.coord <<->> public.ST_SetSRID(
-        public.ST_MakePoint(p_cx, p_cy, p_cz, p_cm), 0)::geometry
+    WITH anchor AS MATERIALIZED (
+        SELECT public.ST_SetSRID(
+                   public.ST_MakePoint(p_cx, p_cy, p_cz, p_cm), 0) AS pt
+    ),
+    pre AS (
+        SELECT w.id, w.coord
+        FROM @extschema@.v_word_points w, anchor a
+        WHERE w.coord IS NOT NULL
+          AND (p_band_mask IS NULL
+               OR @extschema@.laplace_highway_match(w.highway_mask, p_band_mask))
+          AND (p_tiers IS NULL OR w.tier = ANY (p_tiers))
+        ORDER BY w.coord <<->> a.pt
+        LIMIT GREATEST(p_k * 6, 60)
+    )
+    SELECT pre.id,
+           public.laplace_angular_distance_4d(pre.coord, a.pt) AS distance
+    FROM pre, anchor a
+    ORDER BY public.laplace_angular_distance_4d(pre.coord, a.pt)
     LIMIT p_k
 $$;
