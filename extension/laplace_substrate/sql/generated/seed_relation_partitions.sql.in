@@ -16,6 +16,7 @@ DECLARE
         'HAS_DEFINITION',
         'HAS_EXTERNAL_ID',
         'HAS_LANGUAGE',
+        'HAS_MOTIF',
         'HAS_POS',
         'HAS_SENSE',
         'HAS_SYNSET_KEY',
