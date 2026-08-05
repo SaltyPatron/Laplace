@@ -143,7 +143,14 @@ public sealed class LanguageScopeGateTests
                 continue;
 
             string text = StripComments(File.ReadAllText(file));
-            if (Regex.IsMatch(text, @"""HAS_LANGUAGE""")) return true;
+            // Either spelling counts: the quoted literal, or the shared constant.
+            // G3 counts governed relation names literal-by-literal in C#, so the
+            // right way to emit from a new site is EtlSource.LanguageScopeRelation
+            // rather than a fresh literal — and a gate that only recognised the
+            // literal would punish exactly that. It did, on this very change.
+            if (Regex.IsMatch(text, @"""" + EtlSource.LanguageScopeRelation + @"""")) return true;
+            if (text.Contains(nameof(EtlSource.LanguageScopeRelation), StringComparison.Ordinal))
+                return true;
         }
         return false;
     }

@@ -50,7 +50,19 @@ CEILINGS = {
     "g1_weight_literalism": 25,
     "g3_sql_vocabulary_literalism": 250,
     "g3_c_vocabulary_literalism": 17,
-    "g3_csharp_vocabulary_literalism": 700,
+    # 700 -> 701 (2026-08-05): the language-scope declaration. Nine monolingual
+    # sources emitted no HAS_LANGUAGE at all, so every English sense read back as
+    # language-UNATTESTED and word_language() inferred at read time a fact the
+    # source states for free.
+    #
+    # Cost minimized first, per the note above — 3 literals across 2 files reduced
+    # to 1:
+    #   -2  WordNetDecomposer's two emit sites now read EtlSource.LanguageScopeRelation
+    #   -1  EtlSource.LanguageScopeRelations is built from that same constant
+    # The remaining 1 is the floor: the name has to exist once in C#, and this is
+    # the single place the feature owns it. A scoped source that spelled it again
+    # locally would be the per-source hand-roll that caused the defect.
+    "g3_csharp_vocabulary_literalism": 701,
     "g8_band_literalism": 8,
     # G4 scaffolding (W6 D3): grep for CREATE FUNCTION with zero callers outside
     # its own CREATE line. Destination form is substrate CALLS in-degree after W3

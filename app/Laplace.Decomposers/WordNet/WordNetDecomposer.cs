@@ -346,9 +346,11 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
         if (LanguageScopeId is { } langId)
         {
             b.AddAttestation(NativeAttestation.Categorical(
-                lemmaId.Value, "HAS_LANGUAGE", langId, Source, SourceTrust.StandardsDerived));
+                lemmaId.Value, EtlSource.LanguageScopeRelation, langId, Source,
+                SourceTrust.StandardsDerived));
             b.AddAttestation(NativeAttestation.Categorical(
-                senseId.Value, "HAS_LANGUAGE", langId, Source, SourceTrust.StandardsDerived));
+                senseId.Value, EtlSource.LanguageScopeRelation, langId, Source,
+                SourceTrust.StandardsDerived));
         }
         b.AddAttestation(NativeAttestation.Categorical(
             lemmaId.Value, "HAS_SENSE", senseId.Value, Source, SourceTrust.StandardsDerived,

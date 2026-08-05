@@ -86,9 +86,20 @@ public sealed record EtlSource(
         LanguageScope is null ? null : LanguageReference.IdForResolvedCode(LanguageScope);
 
     /// <summary>
-    /// Relation types the declared scope obliges the source to emit. Folded into the
-    /// decomposer's InitializeAsync declaration so a scoped source cannot fault the native
-    /// attestation path by emitting HAS_LANGUAGE it never declared.
+    /// The relation a declared scope obliges the source to emit.
+    ///
+    /// THE ONLY place this vocabulary word appears for the language-scope feature —
+    /// declaration, InitializeAsync, and every emit site read it from here. G3 counts
+    /// governed relation names literal-by-literal in C#, and it is right to: the first
+    /// draft of this change spelled HAS_LANGUAGE three times across two files, which is
+    /// exactly the per-source hand-roll that left nine sources silent in the first place.
+    /// One name, one home.
     /// </summary>
-    public static readonly string[] LanguageScopeRelations = { "HAS_LANGUAGE" };
+    public const string LanguageScopeRelation = "HAS_LANGUAGE";
+
+    /// <summary>
+    /// Folded into a scoped decomposer's InitializeAsync declaration so it cannot fault
+    /// the native attestation path by emitting a relation it never declared.
+    /// </summary>
+    public static readonly string[] LanguageScopeRelations = { LanguageScopeRelation };
 }
