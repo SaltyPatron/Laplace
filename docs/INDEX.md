@@ -15,7 +15,8 @@ countable fact; prose docs cite it instead of embedding counts.
 - [docs/INVENTIONS.md](INVENTIONS.md) — spec — the invention catalog, code-cited; 41 mechanisms enumerated in place, countable facts per [INVENTORY.md](INVENTORY.md) (2026-07-19)
 - [COMPLETION_PLAN.md](COMPLETION_PLAN.md) — conversation/inference completion axis (phases, gap register); not the whole backlog
 - [plan/README.md](plan/README.md) — workstream index (W1–W13) + onboarding pointer
-- [plan/CHECKPOINT_2026-08-02.md](plan/CHECKPOINT_2026-08-02.md) — dated resume stage after #771–#776 (2026-08-02)
+- [plan/CHECKPOINT_2026-08-05.md](plan/CHECKPOINT_2026-08-05.md) — **current resume** — empty-box re-measure, tracker drift, ranked next work (2026-08-05)
+- [plan/CHECKPOINT_2026-08-02.md](plan/CHECKPOINT_2026-08-02.md) — historical resume after #771–#776 (2026-08-02; superseded for status)
 - [plan/ONBOARDING.md](plan/ONBOARDING.md) — pasteable agent start prompt for this host
 
 ## Specs — `docs/specs/` (binding, annotate-on-supersede)
@@ -72,8 +73,15 @@ countable fact; prose docs cite it instead of embedding counts.
 - [36_LSP_Semantic_Decomposer_Design_GH593.md](../.scratchpad/36_LSP_Semantic_Decomposer_Design_GH593.md) — log — design proposal for the LSP-backed semantic decomposer (#593) (2026-07-25)
 - [37_State_Of_The_Build_And_Path_To_Finish.md](../.scratchpad/37_State_Of_The_Build_And_Path_To_Finish.md) — log — HISTORICAL whole-project audit (2026-07-26); P0–P5 + finished-v1 proposal — **drift baseline only**, not status authority (2026-08-02)
 - [38_Chess_Player_Move_Overlay_Design.md](../.scratchpad/38_Chess_Player_Move_Overlay_Design.md) — log — design proposal, PROPOSED/unimplemented: top-roster "who plays what here" board overlay; rides `chess_player_moves`/`chess_ranked`; corpus (full OTB since 1900 + online since 1995) is in hand; scale path is #451 evidence virtualization, NOT per-ply row materialization — record-first, derive under the law in force (2026-08-01)
-- [42_Issue_Backlog_Triage_2026-08-02.md](../.scratchpad/42_Issue_Backlog_Triage_2026-08-02.md) — log — **current backlog ledger**: doc37 drift, `triage:*` dispositions, campaign umbrellas (#791/#792/#793), priority:high ≤12, stop-loss for new issues (2026-08-02)
+- [38_Operation_ISA_Audit.md](../.scratchpad/38_Operation_ISA_Audit.md) — log — Operation ISA audit (on disk; was missing from INDEX)
+- [39_Ingest_Write_Path_Campaign_2026-07-28.md](../.scratchpad/39_Ingest_Write_Path_Campaign_2026-07-28.md) — log — ingest write-path campaign (on disk; was missing from INDEX)
+- [40_Chess_Backlog_MCP_Campaign_2026-07-30.md](../.scratchpad/40_Chess_Backlog_MCP_Campaign_2026-07-30.md) — log — chess backlog / MCP campaign (on disk; was missing from INDEX)
+- [41_SQL_Standardization_Inventory.md](../.scratchpad/41_SQL_Standardization_Inventory.md) — log — SQL standardization inventory (on disk; was missing from INDEX)
+- [42_Issue_Backlog_Triage_2026-08-02.md](../.scratchpad/42_Issue_Backlog_Triage_2026-08-02.md) — log — backlog ledger at 2026-08-02 (**counts stale**: end pass 195 open; measured 232 open on 2026-08-05 — see CHECKPOINT_2026-08-05)
+- [43_Chess_Line_Geometry_Gate_2026-08-03.md](../.scratchpad/43_Chess_Line_Geometry_Gate_2026-08-03.md) — log — chess line geometry gate (on disk; was missing from INDEX)
+- [43_PR_Review_Comment_Sweep_2026-08-03.md](../.scratchpad/43_PR_Review_Comment_Sweep_2026-08-03.md) — log — PR review comment sweep (on disk; was missing from INDEX)
 - [44_Chess_Forward_Pass_And_Industry_Filter_2026-08-03.md](../.scratchpad/44_Chess_Forward_Pass_And_Industry_Filter_2026-08-03.md) — log — chess = ISA program / forward pass; Gemini industry encyclopedia filtered as PROPOSE accelerators vs memory substitutes; validity≠completeness; unique observational metrics; issue map under #818 (2026-08-03)
+- [44_G4_Dead_Canonical_Triage.md](../.scratchpad/44_G4_Dead_Canonical_Triage.md) — log — G4 dead-canonical triage of baseline entries (on disk; was missing from INDEX)
 - [session-tasks.md](../.scratchpad/session-tasks.md) — log — HISTORICAL ingest-lane task list; unfinished rows → GH #429–#434 (2026-07-18)
 
 ## `docs/invention/` (agent onboarding)
