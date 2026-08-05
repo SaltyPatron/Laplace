@@ -662,7 +662,27 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
                         break;
                     seg = us + 1;
                 }
-                if (best_seg == NULL || best_len < 3)
+                /* Floor 2, not 3. The 3 existed because "A" named IS_A and wrecked
+                 * every election (W7:41-44) -- a ONE-character segment matches a
+                 * token that is in essentially every prompt. Two characters does
+                 * not have that property, and 3 excluded the single most damaging
+                 * function word in the set.
+                 *
+                 * MEASURED 2026-08-05, after the OMW seed: "is" segments IS_A to
+                 * IS/A, longest "IS" at 2, so it named nothing, stayed a full topic
+                 * candidate, and won four probes outright -- glacier, france, hot
+                 * and water all elected "ice", the Danish/Norwegian/Dutch synonym
+                 * that OMW attaches to the surface "is" with 9 witnesses against
+                 * English "is" with 1 (GH #867). Election correctness 5/6 -> 2/6.
+                 *
+                 * The demotion is precise, not a stopword list: longest-segment
+                 * means "is" names IS_A and nothing else (IS_PART_OF yields PART,
+                 * IS_SENSE_OF yields SENSE), and "a" stays excluded at length 1,
+                 * which is what the original incident requires. It also fixes
+                 * "parts of a car" for the same reason PART is a segment of
+                 * HAS_PART -- the header at prompt_coherence.sql.in:45 records that
+                 * probe failing because `parts` outmassed `car`. */
+                if (best_seg == NULL || best_len < 2)
                     continue;           /* identifier fragment, not a concept */
                 last = best_seg;
                 len = best_len;
