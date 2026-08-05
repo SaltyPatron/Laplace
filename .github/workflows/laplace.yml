@@ -98,6 +98,22 @@ on:
 permissions:
   contents: read
 
+# Whole-RUN serialization on the shared self-hosted workspace. The per-job
+# groups this replaces (-policy/-build/-unit-test suffixes) let a NEW run's
+# build job cancel-and-rewipe _work/ while the OLD run's test jobs were still
+# executing in it — measured 2026-08-05: two consecutive runs failed with
+# ctest "Failed to change working directory to .../build: No such file or
+# directory" while a solo run of the same tree passed.
+#
+# Runs QUEUE, never cancel: cancel-in-progress would kill deploy/db-ops/
+# publish mid-install (the "never cancelled" jobs below — half-installed
+# tree), so a superseded run finishes wastefully-but-safely instead. And the
+# group is REF-INDEPENDENT: the wipe race is on the one shared _work/, which
+# a workflow_dispatch from another ref hits just the same.
+concurrency:
+  group: laplace-shared-workspace
+  cancel-in-progress: false
+
 env:
   LAPLACE_EXTERNAL:       ${{ vars.LAPLACE_EXTERNAL       || '/opt/laplace/external' }}
   LAPLACE_INSTALL_PREFIX: ${{ vars.LAPLACE_INSTALL_PREFIX || '/opt/laplace' }}
@@ -120,11 +136,6 @@ jobs:
     # self-hosted. These checks are pure python/bash/git (validate-pipeline, regenerate+verify
     # deterministic, banned-terms) — safe on the self-hosted runner, which already runs `deps`.
     runs-on: [self-hosted, laplace]
-    concurrency:
-      # Superseded builds die. A later merge means this one is testing code that is
-      # already history, and it costs ~90s to find that out again on the new commit.
-      group: laplace-build-${{ github.ref }}-policy
-      cancel-in-progress: true
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -333,11 +344,6 @@ jobs:
       github.event_name != 'workflow_dispatch' ||
       contains(fromJSON('["build", "test", "deploy", "integrate", "all"]'), inputs.stage)
     runs-on: [self-hosted, laplace]
-    concurrency:
-      # Superseded builds die. A later merge means this one is testing code that is
-      # already history, and it costs ~90s to find that out again on the new commit.
-      group: laplace-build-${{ github.ref }}-build
-      cancel-in-progress: true
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -372,11 +378,6 @@ jobs:
       github.event_name != 'workflow_dispatch' ||
       contains(fromJSON('["test", "deploy", "integrate", "all"]'), inputs.stage)
     runs-on: [self-hosted, laplace]
-    concurrency:
-      # Superseded builds die. A later merge means this one is testing code that is
-      # already history, and it costs ~90s to find that out again on the new commit.
-      group: laplace-build-${{ github.ref }}-unit-test
-      cancel-in-progress: true
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
