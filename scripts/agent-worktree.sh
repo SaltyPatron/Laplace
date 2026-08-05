@@ -46,13 +46,6 @@ fi
 git -C "$ROOT" fetch origin --quiet
 mkdir -p "$ROOT/.worktrees"
 
-# Shared .git config: the inventory pre-commit hook heals docs/INVENTORY.md so an
-# agent cannot leave the shrink-only docs-inventory CI gate red by forgetting to
-# regenerate it. Not hypothetical — that gate failed the push of #853 to main and
-# held main red until it was found by hand, while this hook already existed.
-# core.hooksPath is per-.git, so installing it here covers every worktree.
-bash "$ROOT/scripts/install-githooks.sh" >/dev/null
-
 # An EXISTING branch is checked out, never re-created. `worktree add -b <branch>
 # ... origin/main` unconditionally minted a new branch at main, so asking for a
 # branch that already exists on the remote silently produced a LOCAL branch of the
