@@ -1,14 +1,59 @@
+-- Nearest entities to a 4D point, optionally scoped by relation band and tier.
+--
+-- TIER SCOPE (added 2026-08-05, GH #868). v_word_points spans every tier and
+-- exposes `tier`; this read had no tier predicate, so a step from a word could
+-- land on a codepoint, a sentence or a document with nothing saying which was
+-- meant.
+--
+-- Scope MUST come from entities.tier, never from a radius band. Two structural
+-- facts, both from the code rather than from any seed:
+--
+--   * tier 0 coords are placed by super_fibonacci directly ON the unit sphere.
+--     Every codepoint sits at radius exactly 1, and they are the only inhabitants
+--     of that shell.
+--   * tier > 0 coord is math4d_centroid of the constituents — a weighted mean of
+--     unit vectors, which is not a unit vector. Composed entities are interior,
+--     and how far interior tracks how DISPERSED their constituents are, not how
+--     deep the tier is.
+--
+-- So radius reveals dispersion, not depth: the composed tiers overlap each other
+-- across essentially the whole interval and cannot be separated by it. The single
+-- clean consequence is that any comparison point lying on the shell is searching a
+-- neighbourhood only tier 0 occupies — which is how a normalized attention
+-- centroid started returning a two-character entity for a step from 'dog'.
+--
+-- p_tiers NULL keeps the previous behaviour (every tier), so existing callers are
+-- unchanged. It is a SCOPE, not a floor — spec 37 L6 forbids operator thresholds
+-- and this adds none.
+--
+-- DISTANCE / RANK AGREEMENT. The SELECT used to report laplace_l2_sq() against an
+-- SRID-less point while the ORDER BY ranked on <<->> against ST_SetSRID(...,0):
+-- two different expressions on two different scales (squared vs not), so the
+-- reported number did not explain the order. Both now use the same operator, so
+-- `distance` is the quantity the row was ranked by.
+--
+-- The operator is Euclidean n-D — a CHORD, not a geodesic. On the unit sphere
+-- chord d and geodesic theta satisfy d = 2*sin(theta/2), strictly monotone on
+-- [0, pi], so the ORDER is correct. The column is named `distance` and not
+-- `geodesic` for exactly that reason; do not threshold on it as an angle.
+--
+-- Rule #4 / L2: the comparison point must reach the planner as a bound parameter
+-- or the GiST KNN silently degrades to a scan. A caller passing a correlated
+-- LATERAL reference does NOT satisfy that — EXPLAIN before trusting the index.
 CREATE OR REPLACE FUNCTION laplace_nearest_entity(
     p_cx float8, p_cy float8, p_cz float8, p_cm float8,
-    p_k integer DEFAULT 1, p_band_mask bytea DEFAULT NULL)
+    p_k integer DEFAULT 1,
+    p_band_mask bytea DEFAULT NULL,
+    p_tiers smallint[] DEFAULT NULL)
 RETURNS TABLE(entity_id bytea, distance float8)
 LANGUAGE sql STABLE PARALLEL RESTRICTED AS $$
     SELECT w.id AS entity_id,
-           @extschema@.laplace_l2_sq(w.coord,
-               public.ST_MakePoint(p_cx, p_cy, p_cz, p_cm)::geometry) AS dist
+           w.coord <<->> public.ST_SetSRID(
+               public.ST_MakePoint(p_cx, p_cy, p_cz, p_cm), 0)::geometry AS distance
     FROM @extschema@.v_word_points w
     WHERE w.coord IS NOT NULL
       AND (p_band_mask IS NULL OR @extschema@.laplace_highway_match(w.highway_mask, p_band_mask))
+      AND (p_tiers IS NULL OR w.tier = ANY (p_tiers))
     ORDER BY w.coord <<->> public.ST_SetSRID(
         public.ST_MakePoint(p_cx, p_cy, p_cz, p_cm), 0)::geometry
     LIMIT p_k

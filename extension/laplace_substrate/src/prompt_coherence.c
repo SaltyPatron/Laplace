@@ -69,7 +69,12 @@
 PG_FUNCTION_INFO_V1(pg_laplace_prompt_coherence);
 
 #define PC_MAX_ORD 63          /* peers ride a uint64 mask; ords beyond this still
-                                * contribute mass, just not a distinct peer bit. */
+                                * contribute mass and still RECEIVE peer credit
+                                * from trackable tokens, but cannot BE a peer for
+                                * anyone — they never set a bit. Two tokens both
+                                * past 63 score no coherence between them. That is
+                                * a stated ceiling, not a silent degradation; see
+                                * the self-bit comment in pc_scan_edges. */
 
 typedef struct PcCand
 {
@@ -228,10 +233,35 @@ pc_scan_edges(HTAB *syn_h, HTAB *type_h, PcCand *cands, ArrayType *syn_arr,
             for (int i = 0; i < me->n_idx; i++)
             {
                 PcCand *c = &cands[me->idx[i]];
-                uint64  others = peer->ord_mask & ~((uint64) 1 << (c->ord & 63));
+                uint64  self_bit;
+                uint64  others;
 
-                if (c->ord <= PC_MAX_ORD && others == 0)
-                    continue;           /* same token only: not a peer */
+                /* Self-exclusion must clear THIS token's bit or nothing at all.
+                 * `1 << (c->ord & 63)` wrapped: ord 64 cleared bit 0, i.e. some
+                 * OTHER token's bit, silently removing a real peer. And the
+                 * `others == 0` guard below was itself gated on ord <= PC_MAX_ORD,
+                 * so past 63 coherence was credited unconditionally — including
+                 * when the peer had no attesting token at all.
+                 *
+                 * A token beyond PC_MAX_ORD never sets a bit (the ord_mask write
+                 * is guarded at load), so it has no self-bit to clear and clearing
+                 * anything for it is always wrong. Clearing nothing is correct.
+                 *
+                 * Stated limit, not a silent one: past ord 63 a token still
+                 * contributes and receives mass, and is still credited whenever
+                 * ANY trackable token attests the same peer. What it cannot do is
+                 * be counted as a peer FOR another token. Two tokens both beyond
+                 * 63 therefore see each other as no peer and score 0 coherence
+                 * between them — conservative and wrong-in-one-direction only,
+                 * where the previous behaviour was wrong in both. Widening the
+                 * mask past 64 ords is the real fix; GH #23 in the task list. */
+                self_bit = (c->ord >= 0 && c->ord <= PC_MAX_ORD)
+                           ? ((uint64) 1 << c->ord)
+                           : 0;
+                others = peer->ord_mask & ~self_bit;
+
+                if (others == 0)
+                    continue;           /* no OTHER token attests this peer */
                 c->coherence += rank * eff;
                 c->peer_mask |= others;
             }
