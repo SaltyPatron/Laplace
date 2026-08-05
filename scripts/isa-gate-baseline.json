@@ -626,6 +626,7 @@
       "app/Laplace.Substrate/Abstractions/EtlManifest.cs::MANNER_OF": 1,
       "app/Laplace.Substrate/Abstractions/EtlManifest.cs::RELATED_TO": 1,
       "app/Laplace.Substrate/Abstractions/EtlManifest.cs::TRANSCRIBES_AS": 1,
+      "app/Laplace.Substrate/Abstractions/EtlSource.cs::HAS_LANGUAGE": 1,
       "app/Laplace.Substrate/Abstractions/FeedbackContent.cs::PRECEDES": 1,
       "app/Laplace.Substrate/Abstractions/GrammarComposeIngest.cs::CONTAINS": 1,
       "app/Laplace.Substrate/Abstractions/GrammarComposeIngest.cs::HAS_DEFINITION": 1,
