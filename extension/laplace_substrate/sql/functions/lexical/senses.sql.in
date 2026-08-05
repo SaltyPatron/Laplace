@@ -8,5 +8,24 @@ CREATE OR REPLACE FUNCTION senses(p_word bytea)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
     SELECT b.sense_id, b.synset_id, b.base_eff_mu, b.witnesses
     FROM @extschema@.bubble_up(p_word, NULL::bytea[], 64) b
-    ORDER BY b.score DESC
+    -- EVIDENCE BEFORE ADJUDICATED STRENGTH — see the matching note in
+    -- bubble_up.sql.in. This ORDER BY is the one that decides what callers see:
+    -- bubble_up's own ordering only selects which 64 candidates survive its
+    -- LIMIT, and this re-sorts them.
+    --
+    -- Measured on the foundation ladder before the change,
+    -- senses(word_id('water')):
+    --     urine   1 witness   1169.73   <- elected
+    --     water   1 witness   1169.73
+    --     water   1 witness   1169.73
+    --     water   2 witnesses 1168.45
+    --     water   2 witnesses 1165.57
+    -- Three senses tie exactly at the top on one witness each, so the id memcmp
+    -- decided, and it chose urine over water for the word "water". Senses with
+    -- twice the evidence sat below, losing by 1.28 on a quantity whose
+    -- uncertainty term exceeds its signal — W16 3.2 measured mean
+    -- |rating - neutral| 192.85 against mean rd 262.24 across 447,145 consensus
+    -- rows, so 2*rd runs ~2.7x the signal and eff_mu sorts substantially by how
+    -- little rd has shrunk.
+    ORDER BY b.witnesses DESC, b.score DESC
 $$;

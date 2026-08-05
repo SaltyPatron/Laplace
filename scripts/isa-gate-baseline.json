@@ -2,6 +2,18 @@
   "law": "W6 G1/G3/G4(scaffolding)/G8; entries and ceilings may only shrink",
   "measured": "2026-08-03",
   "violations": {
+    "g11_unqualified_in_setless_body": {
+      "extension/laplace_substrate/sql/functions/highway/entities_has_highway.sql.in::entities": 1,
+      "extension/laplace_substrate/sql/functions/model/model_factor.sql.in::attestations": 7,
+      "extension/laplace_substrate/sql/functions/model/model_factor.sql.in::canonical_id": 2,
+      "extension/laplace_substrate/sql/functions/model/model_factor.sql.in::consensus": 2,
+      "extension/laplace_substrate/sql/functions/model/model_factor.sql.in::relation_type_id": 7,
+      "extension/laplace_substrate/sql/functions/model/model_factor.sql.in::render_text": 1,
+      "extension/laplace_substrate/sql/functions/model/model_factor.sql.in::word_id": 6,
+      "extension/laplace_substrate/sql/functions/readback/canonical_names.sql.in::canonical_names": 1,
+      "extension/laplace_substrate/sql/functions/readback/register_canonical.sql.in::canonical_names": 1,
+      "extension/laplace_substrate/sql/functions/readback/register_canonicals.sql.in::canonical_names": 1
+    },
     "g1_weight_literalism": {
       "extension/laplace_substrate/sql/functions/consensus/related_objects.sql.in::g.rating-2*g.rd": 2,
       "extension/laplace_substrate/sql/functions/converse/chat.sql.in::c.rating-2*c.rd": 6,
@@ -846,14 +858,6 @@
       "extension/laplace_substrate/sql/inference/translations.sql.in::HAS_LANGUAGE": 1,
       "extension/laplace_substrate/sql/views/v_word_senses.sql.in::HAS_SENSE": 1
     },
-    "g8_band_literalism": {
-      "extension/laplace_substrate/sql/functions/converse/chat.sql.in::RELATION_HIGHWAY_BAND(C.TYPE_ID)=2": 1,
-      "extension/laplace_substrate/sql/functions/converse/chat.sql.in::RELATION_HIGHWAY_BAND(C.TYPE_ID)=4": 1,
-      "extension/laplace_substrate/sql/functions/converse/chat.sql.in::RELATION_HIGHWAY_BAND(C.TYPE_ID)=7": 1,
-      "extension/laplace_substrate/sql/functions/converse/converse_compose.sql.in::RELATION_HIGHWAY_BAND(C.TYPE_ID)IN(1,2,4,7)": 2,
-      "extension/laplace_substrate/sql/functions/lexical/senses_with_context.sql.in::RELATION_HIGHWAY_BAND(C.TYPE_ID)IN(1,7)": 1,
-      "extension/laplace_substrate/sql/functions/lexical/senses_with_context.sql.in::RELATION_HIGHWAY_BAND(C.TYPE_ID)IN(2,4,7)": 2
-    },
     "g4_dead_canonical": {
       "extension/laplace_substrate/sql/functions/analysis/laplace_ancestry.sql.in::laplace_ancestry": 1,
       "extension/laplace_substrate/sql/functions/analysis/laplace_entities_at_depth.sql.in::laplace_entities_at_depth": 1,
@@ -903,8 +907,8 @@
       "extension/laplace_substrate/sql/functions/model/model_factor.sql.in::model_attention_row": 1,
       "extension/laplace_substrate/sql/functions/model/model_factor.sql.in::model_forward": 1,
       "extension/laplace_substrate/sql/functions/model/model_factor.sql.in::model_pair_cos": 1,
+      "extension/laplace_substrate/sql/functions/converse/election_token_profile.sql.in::election_token_profile": 1,
       "extension/laplace_substrate/sql/functions/mu/effective_mu.sql.in::effective_mu": 1,
-      "extension/laplace_substrate/sql/functions/mu/foundry_witness_sat.sql.in::foundry_witness_sat": 1,
       "extension/laplace_substrate/sql/functions/ops/arena_counts.sql.in::arena_counts": 1,
       "extension/laplace_substrate/sql/functions/ops/consensus_count.sql.in::consensus_count": 1,
       "extension/laplace_substrate/sql/functions/ops/consensus_tier_distribution.sql.in::consensus_tier_distribution": 1,
@@ -927,6 +931,14 @@
       "extension/laplace_substrate/sql/functions/taxonomy/retrieve_grounded.sql.in::retrieve_grounded": 1,
       "extension/laplace_substrate/sql/functions/trajectory/trajectory_point_count.sql.in::trajectory_point_count": 1,
       "extension/laplace_substrate/sql/functions/trajectory/trajectory_prefix_distance.sql.in::trajectory_prefix_distance": 1
+    },
+    "g8_band_literalism": {
+      "extension/laplace_substrate/sql/functions/converse/chat.sql.in::RELATION_HIGHWAY_BAND(C.TYPE_ID)=2": 1,
+      "extension/laplace_substrate/sql/functions/converse/chat.sql.in::RELATION_HIGHWAY_BAND(C.TYPE_ID)=4": 1,
+      "extension/laplace_substrate/sql/functions/converse/chat.sql.in::RELATION_HIGHWAY_BAND(C.TYPE_ID)=7": 1,
+      "extension/laplace_substrate/sql/functions/converse/converse_compose.sql.in::RELATION_HIGHWAY_BAND(C.TYPE_ID)IN(1,2,4,7)": 2,
+      "extension/laplace_substrate/sql/functions/lexical/senses_with_context.sql.in::RELATION_HIGHWAY_BAND(C.TYPE_ID)IN(1,7)": 1,
+      "extension/laplace_substrate/sql/functions/lexical/senses_with_context.sql.in::RELATION_HIGHWAY_BAND(C.TYPE_ID)IN(2,4,7)": 2
     }
   }
 }

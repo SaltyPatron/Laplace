@@ -82,6 +82,10 @@ typedef struct PcCand
     uint8   tok[16];
     uint8   syn[16];
     double  denote_mu;
+    int64   witnesses;         /* evidence behind this sense, from senses() */
+    int32   lang_agree;        /* +1 agrees with the token's language, 0 unknown,
+                                * -1 disagrees. Tri-state on purpose: an
+                                * unattested language is NOT a mismatch. */
     double  coherence;
     double  total_mass;        /* ALL rated mass on this candidate, peers or not */
     uint64  peer_mask;
@@ -377,6 +381,11 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
     MemoryContext  work, old;
     HASHCTL        ctl;
     HTAB          *syn_h, *tok_h, *type_h;
+    /* Ords whose token NAMES a relation. A namer is the operator the prompt is
+     * asking with, not the subject it is asking about — spec 37 OP3. The scan
+     * already refuses to let a namer score itself (pc_scan_edges' namer_mask
+     * exclusion); this carries the same principle to topic candidacy. */
+    uint64         namer_ords = 0;
     PcCand        *cands = NULL;
     int            n_cand = 0, cap_cand = 0;
     Datum         *syn_datums = NULL;
@@ -425,7 +434,15 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
         args[0] = PointerGetDatum(prompt);
         portal = SPI_cursor_open_with_args(
             "pc_cand",
-            "SELECT p.ord, p.id, s.synset_id, s.eff_mu::float8 "
+            /* p.language is computed by prompt_state and was DISCARDED here --
+             * W14 G-B. The substrate resolved the prompt's language correctly at
+             * fetch time and the elector could not see it, which is how a Polish
+             * prompt gets answered from English senses while 87,985 Polish senses
+             * sit in the substrate (W14 G-A, measured). Selecting both sides of
+             * the comparison; neither is ever named in code. */
+            "SELECT p.ord, p.id, s.synset_id, s.eff_mu::float8, "
+            "       s.witnesses::bigint, p.language, "
+            "       laplace.word_language(s.sense_id) "
             "FROM laplace.prompt_state($1) p "
             "CROSS JOIN LATERAL laplace.senses(p.id) s "
             "WHERE p.id IS NOT NULL AND s.synset_id IS NOT NULL",
@@ -445,6 +462,8 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
                 int32     ord;
                 bytea    *tok, *syn;
                 double    mu;
+                int64     wit;
+                int32     lang_agree;
                 PcTokEntry *tk;
                 bool      found;
 
@@ -456,6 +475,30 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
                 if (isnull || VARSIZE_ANY_EXHDR(syn) != 16) continue;
                 mu = DatumGetFloat8(SPI_getbinval(tup, td, 4, &isnull));
                 if (isnull) mu = 0.0;
+                wit = DatumGetInt64(SPI_getbinval(tup, td, 5, &isnull));
+                if (isnull) wit = 0;
+                {
+                    Datum  d_tl, d_sl;
+                    bool   tl_null, sl_null;
+
+                    d_tl = SPI_getbinval(tup, td, 6, &tl_null);
+                    d_sl = SPI_getbinval(tup, td, 7, &sl_null);
+                    /* Absence law: either side unattested leaves this 0. Only two
+                     * ATTESTED languages can agree or disagree. */
+                    if (tl_null || sl_null)
+                        lang_agree = 0;
+                    else
+                    {
+                        bytea *tl = DatumGetByteaPP(d_tl);
+                        bytea *sl = DatumGetByteaPP(d_sl);
+
+                        if (VARSIZE_ANY_EXHDR(tl) != 16 || VARSIZE_ANY_EXHDR(sl) != 16)
+                            lang_agree = 0;
+                        else
+                            lang_agree = (memcmp(VARDATA_ANY(tl), VARDATA_ANY(sl), 16) == 0)
+                                         ? 1 : -1;
+                    }
+                }
 
                 old = MemoryContextSwitchTo(work);
                 if (n_cand == cap_cand)
@@ -471,6 +514,8 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
                 memcpy(cands[n_cand].tok, VARDATA_ANY(tok), 16);
                 memcpy(cands[n_cand].syn, VARDATA_ANY(syn), 16);
                 cands[n_cand].denote_mu = mu;
+                cands[n_cand].witnesses = wit;
+                cands[n_cand].lang_agree = lang_agree;
 
                 if (hash_search(syn_h, VARDATA_ANY(syn), HASH_FIND, NULL) == NULL)
                 {
@@ -527,7 +572,6 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
      * match is exact id equality -- or an attested IS_LEMMA_OF edge, which is
      * the hop that makes an inflected prompt word ("parts") reach its lemma. ---- */
     {
-        HASH_SEQ_STATUS  seq;
         PcTypeEntry     *te;
         Datum           *nw_datums = NULL;
         int              n_nw = 0;
@@ -538,20 +582,46 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
         nw_owner = (PcTypeEntry **) palloc(sizeof(PcTypeEntry *) * 1024);
         MemoryContextSwitchTo(old);
 
-        hash_seq_init(&seq, type_h);
-        while ((te = (PcTypeEntry *) hash_seq_search(&seq)) != NULL)
+        /* Iterate the WHOLE MANIFEST, not type_h.
+         *
+         * type_h is populated by pc_scan_edges from the relation types the
+         * CANDIDATES ALREADY CARRY EDGES OF. Walking it here asked "which of the
+         * types already present does a token name" — so naming was conditional on
+         * the answer being present, which inverts the intent: naming exists to
+         * SELECT which relation to traverse.
+         *
+         * MEASURED 2026-08-04: 'synonym of dog' fired (dog's candidates carry
+         * IS_SYNONYM_OF) while 'The opposite of hot is' returned rel_type_id NULL
+         * and rel_mass 0 on every token, because nothing in that prompt's
+         * candidate set happened to carry an oppositional edge. The prompt named
+         * the relation and the elector could not see it.
+         *
+         * The manifest is bounded and static — laplace_relation_table_count is
+         * the relation count, not a function of graph degree — so this is a fixed
+         * cost per call, not a scan. Types the candidates do not carry simply
+         * find no rel_mass in the scan below; they are no longer invisible to it.
+         *
+         * A type first seen here is ENTERED into type_h so the rel_mass pass can
+         * reach it. GH #864. */
+        for (size_t ri = 0; ri < laplace_relation_table_count; ri++)
         {
-            const laplace_relation_def_t *def = NULL;
+            const laplace_relation_def_t *def = &laplace_relation_table[ri];
             const char *name, *last;
             size_t      len;
             hash128_t   wid;
             PcTokEntry *tk;
+            bool        found;
 
-            if (laplace_relation_lookup((const hash128_t *) te->key, &def) != 0 || def == NULL)
-                continue;
             name = def->canonical;
             if (name == NULL)
                 continue;
+
+            te = (PcTypeEntry *) hash_search(type_h, &def->type_id, HASH_ENTER, &found);
+            if (!found)
+            {
+                te->namer_mask = 0;
+                te->named = false;
+            }
 
             /* Pick the LONGEST underscore-delimited segment, not the last one.
              * `strrchr(name, '_') + 1` grabs the trailing preposition for every
@@ -592,7 +662,27 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
                         break;
                     seg = us + 1;
                 }
-                if (best_seg == NULL || best_len < 3)
+                /* Floor 2, not 3. The 3 existed because "A" named IS_A and wrecked
+                 * every election (W7:41-44) -- a ONE-character segment matches a
+                 * token that is in essentially every prompt. Two characters does
+                 * not have that property, and 3 excluded the single most damaging
+                 * function word in the set.
+                 *
+                 * MEASURED 2026-08-05, after the OMW seed: "is" segments IS_A to
+                 * IS/A, longest "IS" at 2, so it named nothing, stayed a full topic
+                 * candidate, and won four probes outright -- glacier, france, hot
+                 * and water all elected "ice", the Danish/Norwegian/Dutch synonym
+                 * that OMW attaches to the surface "is" with 9 witnesses against
+                 * English "is" with 1 (GH #867). Election correctness 5/6 -> 2/6.
+                 *
+                 * The demotion is precise, not a stopword list: longest-segment
+                 * means "is" names IS_A and nothing else (IS_PART_OF yields PART,
+                 * IS_SENSE_OF yields SENSE), and "a" stays excluded at length 1,
+                 * which is what the original incident requires. It also fixes
+                 * "parts of a car" for the same reason PART is a segment of
+                 * HAS_PART -- the header at prompt_coherence.sql.in:45 records that
+                 * probe failing because `parts` outmassed `car`. */
+                if (best_seg == NULL || best_len < 2)
                     continue;           /* identifier fragment, not a concept */
                 last = best_seg;
                 len = best_len;
@@ -616,6 +706,7 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
             {
                 te->named = true;
                 te->namer_mask |= tk->ord_mask;
+                namer_ords |= tk->ord_mask;
                 continue;
             }
             /* No direct hit: queue the name id for the lemma probe. */
@@ -677,6 +768,7 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
                         {
                             nw_owner[i]->named = true;
                             nw_owner[i]->namer_mask |= tk->ord_mask;
+                            namer_ords |= tk->ord_mask;
                         }
                     }
                 }
@@ -846,14 +938,65 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
                  * railway carriage, both by id order. The sense that carries
                  * more witnessed mass is the dominant sense, and mass is
                  * fold-produced; the id stays only as the determinism anchor. */
+                /* EVIDENCE BEFORE ADJUDICATED STRENGTH, third site. senses() and
+                 * bubble_up() were corrected the same way on 2026-08-05; this
+                 * comparator is a SEPARATE election and did not inherit either
+                 * fix, because it re-ranks the rows senses() returns rather than
+                 * taking its order. Correcting only the SQL left the C picking
+                 * `urine` for the word "water" in "Water is made of" -- the exact
+                 * row the SQL fix had just demoted.
+                 *
+                 * Placement: after the two PROMPT-LOCAL signals (share, rel_mass),
+                 * which are joint evidence from this prompt and outrank any global
+                 * count; before denote_mu, which is eff_mu = rating - 2*rd and
+                 * therefore orders substantially by how little rd has shrunk (W16
+                 * 3.2: mean |rating - neutral| 192.85 vs mean rd 262.24 across
+                 * 447,145 rows -- 2*rd runs ~2.7x the signal). Two witnesses
+                 * losing to one on 1.28 of eff_mu is reading the evidence
+                 * backwards through the uncertainty term.
+                 *
+                 * Nothing is excluded and no threshold is introduced; the sort key
+                 * order changes. Spec 37 L6 untouched. */
+                /* LANGUAGE AGREEMENT, ranked above every global quantity.
+                 *
+                 * A sense in a language the prompt is not written in is the wrong
+                 * sense however well attested it is -- W14 G-A measured
+                 * "Kot spi na stole w domu" answered in English while 87,985
+                 * Polish senses sat in the substrate. That is an ADDRESSING
+                 * failure, and no amount of witness count fixes it, so agreement
+                 * has to outrank witnesses rather than break ties under them.
+                 *
+                 * It sits BELOW share and rel_mass because those are joint
+                 * evidence from this prompt -- a direct edge between two
+                 * candidates outranks a provenance match.
+                 *
+                 * Tri-state, not boolean: an unattested language scores 0 and
+                 * therefore beats a DISAGREEING one while losing to an agreeing
+                 * one. `EXISTS`-style collapse of unattested into false is the
+                 * exact defect the read laws name; a sense whose language nobody
+                 * recorded has not been shown to be foreign.
+                 *
+                 * No language is named anywhere in this comparison. Both sides are
+                 * ids the substrate resolved. */
                 if (o_share > best_share
                     || (o_share == best_share && o->rel_mass > best->rel_mass)
                     || (o_share == best_share && o->rel_mass == best->rel_mass
+                        && o->lang_agree > best->lang_agree)
+                    || (o_share == best_share && o->rel_mass == best->rel_mass
+                        && o->lang_agree == best->lang_agree
+                        && o->witnesses > best->witnesses)
+                    || (o_share == best_share && o->rel_mass == best->rel_mass
+                        && o->lang_agree == best->lang_agree
+                        && o->witnesses == best->witnesses
                         && o->denote_mu > best->denote_mu)
                     || (o_share == best_share && o->rel_mass == best->rel_mass
+                        && o->lang_agree == best->lang_agree
+                        && o->witnesses == best->witnesses
                         && o->denote_mu == best->denote_mu
                         && o->total_mass > best->total_mass)
                     || (o_share == best_share && o->rel_mass == best->rel_mass
+                        && o->lang_agree == best->lang_agree
+                        && o->witnesses == best->witnesses
                         && o->denote_mu == best->denote_mu
                         && o->total_mass == best->total_mass
                         && memcmp(o->syn, best->syn, 16) < 0))
@@ -866,8 +1009,8 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
                 continue;
 
             {
-                Datum values[10];
-                bool  nulls[10];
+                Datum values[12];
+                bool  nulls[12];
                 bytea *tokb = (bytea *) palloc(VARHDRSZ + 16);
                 bytea *synb = (bytea *) palloc(VARHDRSZ + 16);
 
@@ -931,15 +1074,62 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
                  * already says per candidate -- rating, rd as trust, witness
                  * count -- so a rare token with thin evidence cannot outrank a
                  * common token with strong evidence. GH #865. */
-                values[8] = Float8GetDatum(best->total_mass > 0.0
-                                           ? best->coherence / best->total_mass
-                                           : 0.0);
+                /* A NAMER IS NOT A TOPIC (2026-08-05).
+                 *
+                 * Spec 37 OP3: a token that names a relation selects WHICH
+                 * relation to traverse. It is the operator the question is asked
+                 * with, not the subject it is asked about. pc_scan_edges already
+                 * acts on this — a type's namer_mask excludes the naming ord from
+                 * receiving its own rel_mass — but the namer stayed a full topic
+                 * candidate, and with every discriminating key at 0 it won on
+                 * `ord DESC` whenever it sat later in the prompt.
+                 *
+                 * MEASURED: "Water is made of" elected `made`. Both tokens carry
+                 * specificity 0, rel_mass 0, coherence 0, peers 0, so ord DESC
+                 * decided and `made` is later. `made` is the longest segment of
+                 * MADE_UP_OF, so it names a relation; `Water` names none. The
+                 * question is what water is made OF, and the elector answered
+                 * with the preposition's relation.
+                 *
+                 * -1 rather than exclusion: a namer stays in the result and stays
+                 * orderable, so a prompt made entirely of relation words still
+                 * elects something instead of returning nothing. It sorts below
+                 * any non-namer, including one with no signal at all — which is
+                 * correct, because "I have nothing to say about this token" still
+                 * beats "this token is the verb".
+                 *
+                 * Deliberately NOT symmetric with the ICF prior below: this is a
+                 * ROLE distinction the manifest already encodes, not a frequency
+                 * heuristic. "The opposite of hot is" is unaffected — the
+                 * oppositional relation is IS_ANTONYM_OF, whose concept segment
+                 * is `antonym`, so `opposite` names nothing and `hot` keeps
+                 * winning as it already did. */
+                {
+                    double share = best->total_mass > 0.0
+                                   ? best->coherence / best->total_mass
+                                   : 0.0;
+                    bool   is_namer = (best->ord >= 0 && best->ord <= PC_MAX_ORD)
+                                      && ((namer_ords >> best->ord) & 1) != 0;
+
+                    values[8] = Float8GetDatum(is_namer ? -1.0 : share);
+                }
                 /* The denominator, exposed raw. Computed here all along and
                  * discarded; returning it is what let the electors' first
                  * fallback premise (inverse own-mass) be refuted by
                  * measurement on the foundation-only seed -- see
                  * prompt_coherence.sql.in for the ledger. */
                 values[9] = Float8GetDatum(best->total_mass);
+                /* The evidence behind the elected sense, exposed for the same
+                 * reason total_mass is: it is now a SORT KEY in the comparator
+                 * above, and a key that cannot be read cannot be refuted. The
+                 * comparator's first version was debugged by guessing at this
+                 * value; that is the cost of an unobservable rank key. */
+                values[10] = Int64GetDatum(best->witnesses);
+                /* +1 agrees / 0 unattested / -1 disagrees. Exposed so the
+                 * abstention is visible: 0 across every token means the substrate
+                 * has no language for this prompt, which is a different statement
+                 * from "the languages matched" and must not read as one. */
+                values[11] = Int32GetDatum(best->lang_agree);
 
                 tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
             }

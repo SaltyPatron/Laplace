@@ -11,6 +11,15 @@ namespace Laplace.Decomposers.WordNet;
 public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, FullScope>, IIngestInventoryProvider
 {
     public static readonly Hash128 Source = WordNetSource.SourceId;
+
+    /// <summary>
+    /// The language this source asserts for its lexical surfaces, from the manifest.
+    /// Read here rather than written here so the fact has ONE home: a literal "eng" in a
+    /// decomposer is the per-source hand-roll that left nine English sources emitting no
+    /// language at all. Null when the manifest declares no scope.
+    /// </summary>
+    private static readonly Hash128? LanguageScopeId =
+        EtlManifest.TryGet("wordnet", out var _wnRow) ? _wnRow.LanguageScopeId : null;
     public static readonly Hash128 TrustClass = WordNetSource.TrustClass;
 
     private static Dictionary<string, string> PointerTypes => WordNetSource.PointerTypes;
@@ -327,6 +336,20 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
         if (senseId is null || lemmaId is null || synAnchor is null) return;
 
         SenseAnchor.AttestSenseCategory(b, senseId.Value, Source, SourceTrust.StandardsDerived);
+        // The source's declared language scope, recorded rather than inferred. Emitted on
+        // the LEMMA and the SENSE and deliberately not on the synset: a synset is
+        // ILI-shared across every wordnet, so it is language-neutral and this source does
+        // not assert otherwise. senses() returns sense_id, and that is the id the elector
+        // compares against the prompt's language, so the sense edge is the load-bearing one.
+        // Null context, matching OMW: the object IS the language, so a language context
+        // would be circular.
+        if (LanguageScopeId is { } langId)
+        {
+            b.AddAttestation(NativeAttestation.Categorical(
+                lemmaId.Value, "HAS_LANGUAGE", langId, Source, SourceTrust.StandardsDerived));
+            b.AddAttestation(NativeAttestation.Categorical(
+                senseId.Value, "HAS_LANGUAGE", langId, Source, SourceTrust.StandardsDerived));
+        }
         b.AddAttestation(NativeAttestation.Categorical(
             lemmaId.Value, "HAS_SENSE", senseId.Value, Source, SourceTrust.StandardsDerived,
             magnitude: s.TagCount, arenaScale: 1.0));
