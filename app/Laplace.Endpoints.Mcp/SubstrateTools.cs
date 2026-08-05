@@ -976,22 +976,39 @@ internal sealed class SubstrateTools
         return (result.ToJsonString(), false);
     }
 
+    // Issue #814: the covered set — hand SQL over these tables is refused
+    // outright, naming the typed surface instead. A cheap substring match,
+    // biased toward refusing (false refusals name the right tool, which is
+    // the desired outcome anyway; never parse SQL to prove safety).
+    private static readonly (string Table, string UseInstead)[] CoveredTables =
+    [
+        ("ingest_run_journal", "ingest_runs / ingest_run_close via op()"),
+        ("ingest_flush_journal", "ingest_runs / substrate_health via op()"),
+        ("attestations", "evidence_count / source_counts_approx / source_roster / source_bootstrap_present via op()"),
+        ("consensus", "consensus_count / top_relations / arena_counts / consensus_stats_approx via op()"),
+        ("entities", "content_count / entity_type_counts_approx / substrate_counts via op()"),
+        ("physicalities", "substrate_counts / geometry_audit via op()"),
+    ];
+
     private (string, bool) ExecuteSql(JsonObject? args)
     {
         var query = Req(args, "query");
 
-        // Issue #814: Refuse queries over tables covered by installed operations
-        if (query.Contains("ingest_run_journal", StringComparison.OrdinalIgnoreCase))
+        foreach (var (table, useInstead) in CoveredTables)
         {
-            return ("refused: ingest_run_journal is covered by an installed operation. Use ingest_runs or op('ingest_runs') instead.", true);
+            if (query.Contains(table, StringComparison.OrdinalIgnoreCase))
+                return ($"refused: {table} is covered by installed operations. Use {useInstead} — "
+                    + "and if none answers your question, that is a missing operation: file it (#813).", true);
         }
 
         var sw = Stopwatch.StartNew();
         var (text, isErr) = Rows(_dbReadOnly, query, Int(args, "max_rows", DefaultRowCap));
         sw.Stop();
 
-        // Issue #814: Log accepted sql calls as gap report
-        Console.Error.WriteLine($"[mcp-sql-gap] duration_ms={sw.ElapsedMilliseconds} query=\"{query.Replace('\r', ' ').Replace('\n', ' ')}\"");
+        // Issue #814: every accepted use is a gap report with its cost.
+        Console.Error.WriteLine(
+            $"[mcp-sql-gap] duration_ms={sw.ElapsedMilliseconds} result_chars={text.Length} "
+            + $"error={isErr} query=\"{query.Replace('\r', ' ').Replace('\n', ' ')}\"");
 
         return (text, isErr);
     }
