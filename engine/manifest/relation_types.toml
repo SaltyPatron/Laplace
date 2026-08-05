@@ -1670,6 +1670,11 @@ rank = "associative"
 symmetry = "asymmetric"
 parent = "GAME_HAS_MOTIF"
 family_root = "GAME_HAS_MOTIF"
+# INGEST_PARTITION_PRESSURE 2026-08-05: 2.43M rows = 19.1% of consensus_rdefault
+# (a single shared heap+btree). hot = true is a physical partitioning decision
+# following write traffic (independent of rank, no reseed): the partition seed
+# adopts existing rows in place.
+hot = true
 
 [[relation]]
 canonical = "EXPLAINS"
