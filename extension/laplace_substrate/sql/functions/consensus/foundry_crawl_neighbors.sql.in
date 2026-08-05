@@ -7,9 +7,9 @@ CREATE OR REPLACE FUNCTION foundry_crawl_neighbors(
     p_limit   int,
     p_types   bytea[] DEFAULT NULL)
     RETURNS TABLE(object_id bytea, tier smallint, rating bigint, rd bigint)
-    LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+-- Class A per GH #860: RETURNS TABLE, not STRICT, not VOLATILE, single SELECT.
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
     SELECT e.neighbour_id, en.tier, e.rating, e.rd
-    FROM edges_raw(p_subject, 'out', p_types, p_limit, true, 'eff_mu') e
-    JOIN entities en ON en.id = e.neighbour_id
+    FROM @extschema@.edges_raw(p_subject, 'out', p_types, p_limit, true, 'eff_mu') e
+    JOIN @extschema@.entities en ON en.id = e.neighbour_id
 $$;

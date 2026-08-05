@@ -1,12 +1,44 @@
+-- One hop of the forward pass: from an entity, through a relation band, to the
+-- entity nearest that band's attention centroid.
+--
+-- TIER SCOPE (2026-08-05, GH #868). The step now stays at the subject's own tier.
+-- A forward step is a move among peers — word to word, sentence to sentence.
+-- Previously the KNN ran over every tier in v_word_points with no tier predicate,
+-- so a step from a word could land on a codepoint, a sentence or a document.
+--
+-- That was not theoretical. This function could never return a row at all: its
+-- `WHERE c.total_weight > 0` was evaluated against a centroid that was NULL on
+-- every call (GH #866), so the forward path was dead from the day it was written.
+-- When #866 made the centroid real and c2bc4c55 projected it back onto S³ as a
+-- proper Fréchet/Karcher mean, the comparison point moved from the interior onto
+-- the unit shell — the one neighbourhood tier 0 occupies exclusively, since
+-- super_fibonacci seeds codepoints at radius exactly 1 while every composed coord
+-- is a centroid and therefore interior. The first thing this ever returned for
+-- 'dog' was a two-character entity.
+--
+-- NO THRESHOLD. laplace_attention_centroid now also returns `concentration` — 1.0
+-- when every attended point coincides, approaching 0 when they cancel and the
+-- centroid has no direction at all. It is deliberately NOT used here as a cutoff:
+-- spec 37 L6 forbids operator floors, and "abstain below 0.3" would be exactly
+-- that. The one case handled is the genuinely degenerate one — concentration 0
+-- yields NULL coordinates, because a cancelled sum has no direction to point in,
+-- and abstaining there is a fact about the data rather than a tuned threshold.
+--
+-- No SET search_path (GH #860). This body is scalar and carries a FROM clause, so
+-- the scalar inliner rejects it either way; the clause is unjustified regardless
+-- and its presence would be one more site for the sweep.
 CREATE OR REPLACE FUNCTION laplace_forward_step(
     p_entity   bytea,
     p_band_mask bytea)
 RETURNS bytea
-LANGUAGE sql STABLE PARALLEL RESTRICTED SET search_path = @extschema@, public AS $$
+LANGUAGE sql STABLE PARALLEL RESTRICTED AS $$
     SELECT n.entity_id
-    FROM laplace_attention_centroid(p_entity, p_band_mask) c
-    JOIN LATERAL laplace_nearest_entity(c.cx, c.cy, c.cz, c.cm, 1, p_band_mask) n ON TRUE
+    FROM @extschema@.laplace_attention_centroid(p_entity, p_band_mask) c
+    JOIN LATERAL @extschema@.laplace_nearest_entity(
+             c.cx, c.cy, c.cz, c.cm, 1, p_band_mask,
+             ARRAY[@extschema@.entity_tier_of(p_entity)::smallint]) n ON TRUE
     WHERE c.total_weight > 0
+      AND c.cx IS NOT NULL          -- concentration 0 => no direction => abstain
       AND n.entity_id IS NOT NULL
       AND n.entity_id <> p_entity
     LIMIT 1

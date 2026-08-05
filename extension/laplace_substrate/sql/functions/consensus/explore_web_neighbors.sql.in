@@ -12,9 +12,9 @@ CREATE OR REPLACE FUNCTION explore_web_neighbors(
         rd bigint,
         witness_count bigint,
         outbound boolean)
-    LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+-- Class A per GH #860: RETURNS TABLE, not STRICT, not VOLATILE, single SELECT.
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
     SELECT e.neighbour_id, e.type_id, e.rating, e.rd, e.witness_count,
            (e.direction = 'out')
-    FROM edges_raw(p_subject, 'both', NULL, GREATEST(1, p_limit), true, 'eff_mu') e
+    FROM @extschema@.edges_raw(p_subject, 'both', NULL, GREATEST(1, p_limit), true, 'eff_mu') e
 $$;
