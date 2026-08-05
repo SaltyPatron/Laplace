@@ -1,0 +1,16 @@
+-- Positive control for the roster's bootstrap filter (#760): does this source
+-- carry its relation-law bootstrap rows? The writer emits HAS_NAME_ALIAS rows
+-- whose subjects are relation-type ids, so the probe prunes to that type's
+-- partition and walks only the source's rows there — EXISTS short-circuits on
+-- the first bootstrap row; no renders, no per-row scan of content partitions.
+CREATE OR REPLACE FUNCTION source_bootstrap_present(p_source bytea)
+    RETURNS boolean
+    LANGUAGE sql STABLE
+    SET search_path = @extschema@, public AS $$
+    SELECT EXISTS (
+        SELECT 1
+        FROM attestations
+        WHERE type_id = relation_type_id('HAS_NAME_ALIAS')
+          AND source_id = p_source
+          AND relation_canonical(subject_id) IS NOT NULL)
+$$;

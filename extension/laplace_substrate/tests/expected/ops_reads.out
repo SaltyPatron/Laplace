@@ -85,4 +85,39 @@ SELECT eff_mu_display(1500000000000::bigint) = 1500.000 AS fp_display_scales;
  t
 (1 row)
 
+-- source_bootstrap_present: true once relation-law rows exist (writer shape:
+-- HAS_NAME_ALIAS with a relation-type subject), false for an unwitnessed source.
+INSERT INTO attestations (
+    id, subject_id, type_id, object_id, source_id, context_id, outcome,
+    last_observed_at, observation_count, sum_score_fp1e9, opponent_rd_fp1e9, highway_mask)
+VALUES
+    (laplace_hash128_blake3('test/ops/bootstrap/law'),
+     relation_type_id('IS_A'), relation_type_id('HAS_NAME_ALIAS'), word_id('is-a'),
+     laplace_hash128_blake3('test/ops/source'), NULL, 2,
+     statement_timestamp(), 1, 1000000000, 350000000000, NULL);
+SELECT source_bootstrap_present(laplace_hash128_blake3('test/ops/source')) AS bootstrap_present,
+       NOT source_bootstrap_present(laplace_hash128_blake3('test/ops/source-unwitnessed')) AS absent_on_unwitnessed;
+ bootstrap_present | absent_on_unwitnessed 
+-------------------+-----------------------
+ t                 | t
+(1 row)
+
+-- ingest_run_close: drives a running row terminal, refuses non-running rows.
+INSERT INTO ingest_run_journal (run_id, source_name, layer)
+VALUES ('00000000-0000-0000-0000-000000000001', 'test/ops/run', 0);
+SELECT status = 'cancelled' AS closed_cancelled, ended_at IS NOT NULL AS closed_stamped
+FROM ingest_run_close('00000000-0000-0000-0000-000000000001');
+ closed_cancelled | closed_stamped 
+------------------+----------------
+ t                | t
+(1 row)
+
+DO $$
+BEGIN
+    PERFORM ingest_run_close('00000000-0000-0000-0000-000000000001');
+    RAISE EXCEPTION 'ingest_run_close accepted a non-running row';
+EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM LIKE 'ingest_run_close: run%' THEN NULL;
+    ELSE RAISE; END IF;
+END $$;
 ROLLBACK;

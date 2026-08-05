@@ -1,0 +1,25 @@
+-- Drive an orphaned journal row terminal: the typed form of the checkpoint
+-- ops step ("mark a true orphan failed/cancelled — never leave 'running'
+-- forever"). SQL cannot verify process liveness: the CALLER owes the check
+-- that no live ingest owns the run (no active backend, no Laplace.Cli you did
+-- not start) before closing. Refuses rows not currently 'running' and
+-- statuses outside the cut-off terminal vocabulary.
+CREATE OR REPLACE FUNCTION ingest_run_close(p_run_id uuid, p_status text DEFAULT 'cancelled')
+    RETURNS ingest_run_journal
+    LANGUAGE plpgsql VOLATILE
+    SET search_path = @extschema@, public AS $$
+DECLARE
+    r ingest_run_journal;
+BEGIN
+    IF p_status NOT IN ('failed', 'cancelled') THEN
+        RAISE EXCEPTION 'ingest_run_close: % is not a cut-off terminal status (failed|cancelled)', p_status;
+    END IF;
+    UPDATE ingest_run_journal
+       SET status = p_status, ended_at = now()
+     WHERE run_id = p_run_id AND status = 'running'
+    RETURNING * INTO r;
+    IF r.run_id IS NULL THEN
+        RAISE EXCEPTION 'ingest_run_close: run % has no row in status=running', p_run_id;
+    END IF;
+    RETURN r;
+END $$;
