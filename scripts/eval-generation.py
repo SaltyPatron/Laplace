@@ -206,6 +206,15 @@ def prompt_coherence_rank1(db: str, prompt: str) -> tuple[str | None, float | No
 # leaks of the substrate's own bookkeeping into the reply.
 OFFSET_KEY_RE = re.compile(r"^\d{6,10}-[nvasr]$")
 ILI_KEY_RE = re.compile(r"^i\d+$")
+# The content hash itself, rendered as a word. realize()'s last arm is
+# _realize_canonical, which prints the id when every naming arm abstains --
+# measured 2026-08-05 on the ice synset's IS_SYNONYM_OF neighbours:
+#     b6b080e5de7a4654728bb8519930859c...
+#     b9e2f3c9ceacc91f94d8ba386ff7fba0...
+# "Hubs are ADDRESSES, not names." A reply that cannot name a thing must say so,
+# not print where the thing lives. Trailing ellipsis because render_text
+# truncates.
+HEX_ID_RE = re.compile(r"^[0-9a-f]{16,32}\W*$")
 
 
 def entity_type_names(db: str) -> set[str]:
@@ -243,6 +252,8 @@ def run_forward(db: str, probe: dict, type_names: set[str]) -> dict:
             leaks.append(f"entity-type:{p}")
         elif OFFSET_KEY_RE.match(p) or ILI_KEY_RE.match(p):
             leaks.append(f"internal-key:{p}")
+        elif HEX_ID_RE.match(p):
+            leaks.append(f"rendered-id:{p}")
 
     answered = None
     if expected is not None:
