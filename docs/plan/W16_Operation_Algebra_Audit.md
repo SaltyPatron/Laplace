@@ -235,11 +235,31 @@ never exercised.)
 PostGIS `<<->>` is Euclidean n-D. On the unit sphere the chord `d` and the
 geodesic `θ` satisfy `d = 2·sin(θ/2)`, strictly monotone on `[0, π]`. [S]
 
-So **KNN ordering is correct** — this is not a retrieval bug. But `d` is not
-`θ`: any threshold, any averaged distance, any ratio of distances, and any
-mixing of a "geodesic" with a Fréchet value is comparing different units.
-`explore_anchor_neighbors` returns a column named `geodesic` alongside
-`frechet`; if that column carries a chord it is mislabeled.
+**Half refuted, half worse — 2026-08-05.**
+
+*Refuted:* `explore_anchor_neighbors` was named here as the suspect and it is
+**correct**. It returns `laplace_angular_distance_4d` and uses `<<->>` only as an
+index-ordered *prefilter*, re-ranking the over-fetched pool by the true angle —
+and its own header says so. It also uses `entity_curve` for Fréchet, never the
+packed trajectory, citing Rule #3 by name. The pattern it establishes — **chord
+prefilter, true-metric re-rank** — is the right one, and `structural_locale`,
+`relation_summary` and `chess_opening_shape_peers` follow it too.
+
+*Worse:* the monotonicity above holds **only when every candidate has the same
+radius**. In general `d² = r₁² + r₂² − 2·r₁·r₂·cos θ`, so with unequal radii the
+chord ordering mixes angle and radius. And radii are systematically unequal by
+construction: tier 0 sits at radius exactly 1 — `super_fibonacci` places
+codepoints *on* the sphere — while every composed coord is a `math4d_centroid`
+and therefore interior, at a depth that tracks how **dispersed** its constituents
+are.
+
+So "KNN ordering is correct" is **false for any read spanning tiers**. `<<->>`
+over a mixed-radius candidate set orders by a blend of angle and constituent
+dispersion, and the dispersion half is not a semantic quantity at all.
+
+`laplace_nearest_entity` was the actual instance — it ranked *and* reported on
+`<<->>` directly, over every tier. Fixed by adopting the prefilter/re-rank
+pattern and returning the angle.
 
 ### 3.5 One quantity, three numeric types
 

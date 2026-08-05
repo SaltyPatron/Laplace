@@ -79,15 +79,15 @@ reference algebra over a 7-row `VALUES` vector) and `realize_ladder_parity.sql`
 | Gate | Status | Evidence |
 |---|---|---|
 | **G1** weight literalism | **built; 25 grandfathered violations** | `isa-gate-check.py` strips comments and finds 19 production-path expressions plus 6 in `scripts/sql/model-planes-audit.sql`. The earlier total of 19 omitted those 6 despite listing them. Exempt per spec: `mu/eff_mu.sql.in`, `glicko2.c:435`, the three `sql/indexes/*eff_mu*` |
-| **G2** render-before-select | not built; 66 `.sql.in` call a scalar realizer at all | naive regex is not decidable — see §5 D4 |
+| **G2** render-before-select | **built; 54 files / 111 call sites grandfathered** | `RenderBeforeSelectGateTests`; ratchet over the hand-drawn list, excluding `realize/`, `readback/`, `lexical/type_label.sql.in`, `converse/label*.sql.in`. D4's "~30 files" was an estimate; the comment-stripped measurement over those exclusions is 54/111 |
 | **G3** vocabulary literalism | **built; 243 executable SQL sites, 17 C sites, 702 production C# sites** | the earlier raw SQL count of 245 included 2 comments; C# is checked against canonical + alias names parsed from the manifest. Exact path/literal/count baselines ratchet all three |
 | **G4** dead canonical | not built; **`converse_tiered` would fire today** (one hit, its own `CREATE`) | destination is the substrate `CALLS` read — see [W3](W3_Self_Ingest_Call_Graph.md); grep is scaffolding |
-| **G5** shape parity | not built; **five** hand-written declarations | `query_shapes.sql.in:6`, `recall_route.c:64`, `recall.c:347`, `recall.c:1237,1245`, and — notably — **prose in an MCP tool description**, `SubstrateTools.cs:74` |
+| **G5** shape parity | **built; zero violations** — the five declarations agree today | `ShapeParityGateTests` pins `query_shapes.sql.in:6`, `recall_route.c:64` (equal *in order*), `recall.c:347` (subset), `recall.c:1237,1245` (must point at the catalog, not enumerate), and the **prose in an MCP tool description**, `SubstrateTools.cs:74` — shape list *and* the three requirement clauses, derived from the catalog's boolean columns. Two further subset sites: `ROUTE_DEFAULT_INTENT`, `chat.sql.in` branch literals |
 | **G6** weight parity | **partial** — COMPLETE mode + constants pinned | `walk_edge_weight_parity.sql`; SALIENCE and STRENGTH unpinned |
 | **G7** roster parity | **built** | `validate-pipeline.py:260-321` pins shell/cmd order; `IngestRosterParityTests` bidirectionally pins C# dispatch to the manifest plus 14 explicit operational/alias routes under a shrink-only ceiling |
 | **G8** band literalism | **built; 8 grandfathered sites in 3 files** | `chat.sql.in`, `converse_compose.sql.in`, `senses_with_context.sql.in`; exact expressions are shrink-only |
 | **G9** envelope | not built **and not buildable yet** | `chat.sql.in:35` is `RETURNS text`; needs an OP-level change first |
-| **G10** one mutex | not built | `evidence_count` verify logic appears in 6 script + 6 C# files; the ingest mutex may not exist under the names spec 37 assumes — **unverified** |
+| **G10** one mutex | **built; 5 mutex copies + 11 verify implementations grandfathered** | `IngestMutexGateTests`. The mutex is now **verified** and spec 37 `:328`'s "6 ingest-mutex + 11 verify" is exact: 5 copies of the `Win32_Process … Laplace\.Cli` probe (4 byte-identical) + **1** database implementation. The database half is **already single** — `AdvisoryTxLock.BeginWithLockAsync`, one call site; `highway_mask_deposit`'s lock is a different lock. Verify destination is `laplace.source_status()`, whose own header argues this gate |
 
 ## 4. The elector invariant — ground truth and design
 
@@ -203,3 +203,30 @@ Landed on `main` (see [CHECKPOINT_2026-08-02.md](CHECKPOINT_2026-08-02.md)):
 parallel with W3 structural extract; then G2 ratchet. Do not schedule G9
 here. Do not close #758 until G4's destination form (or an explicit
 scaffolding→destination handoff recorded on the issue) exists.
+
+## 10. Progress — 2026-08-05 checkpoint
+
+G2, G10 and G5 landed as C# ratchets in
+`app/Laplace.Substrate.Tests/Abstractions/`, all green on merge day per §5's trap
+note. Ceilings are `const int` (D2); no ceiling moved to JSON.
+
+| Gate | File | Grandfathered |
+|---|---|---|
+| G2 | `RenderBeforeSelectGateTests.cs` | 54 files / 111 scalar-realizer call sites |
+| G10 | `IngestMutexGateTests.cs` | 5 process-mutex copies, 1 non-ingest advisory lock, 11 verify files / 13 sites |
+| G5 | `ShapeParityGateTests.cs` | none — the five declarations agree |
+
+**Three things §3 recorded as open that measurement found already true:**
+
+1. **The database-level ingest mutex is already one implementation.** §3 called the
+   mutex "unverified"; `AdvisoryTxLock.BeginWithLockAsync` is the single
+   implementation with a single call site (`NpgsqlWorkingSetApply`). Only the
+   *process-level* half is duplicated, and only in the Windows seed scripts.
+2. **Spec 37 `:328`'s "6 ingest-mutex + 11 verify" was accurate**, not an estimate
+   in need of correction: 5 + 1 = 6, and 11 verify files.
+3. **G5's five declarations already agree** — including the MCP prose. §3 listed
+   the five as a drift risk; measured on 2026-08-05 there is no drift to
+   grandfather, so G5 landed with no allowlist at all.
+
+**Correction to §5 D4:** the "~30 files" estimate for G2 is wrong. Over exactly the
+exclusions D4 names, comment-stripped, it is **54 files / 111 sites**.

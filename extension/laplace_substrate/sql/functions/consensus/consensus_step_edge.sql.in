@@ -1,16 +1,49 @@
+-- The single strongest unrefuted edge between two ids, either way round.
+--
 -- No SET search_path so it inlines into callers (#617) — graph_cascade
 -- executes this once per step; non-inlined, each step paid a full function
 -- execution.
+--
+-- BOTH is two direction-pinned reads unioned, never an OR predicate (GH #871,
+-- spec 37 OP5, and CLAUDE.md's read rules all say the same thing). The old body
+-- asked for
+--     (subject_id = p_from AND object_id = p_to)
+--  OR (subject_id = p_to   AND object_id = p_from)
+-- in one WHERE. A disjunction is not an index qual: the planner's only options
+-- are a BitmapOr of two scans it must then sort in full, or a seq scan — the
+-- shape spec 37 blames for the 280s hang. Neither can walk
+-- consensus_subject_eff_mu_btree (subject_id, (rating - 2*rd) DESC) in order and
+-- stop at the first row.
+--
+-- Split into two arms, each arm is a single subject_id equality against that
+-- index, ordered by the index's own second column, LIMIT 1 — so each stops at
+-- its first match. The outer LIMIT 1 then picks between at most two rows, which
+-- is the same answer: the maximum over a union is the maximum of the per-arm
+-- maxima. This is exactly the UNION ALL shape edges_raw() uses for 'both'; the
+-- reason this body cannot simply delegate to edges_raw is that edges_raw takes
+-- no neighbour filter, so it would apply its cap to the whole fan-out of p_from
+-- before p_to could be selected out of it.
 CREATE OR REPLACE FUNCTION consensus_step_edge(
     p_from bytea,
     p_to   bytea)
     RETURNS TABLE(type_id bytea, subject_id bytea, rating bigint, rd bigint, witness_count bigint)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
-    SELECT c.type_id, c.subject_id, c.rating, c.rd, c.witness_count
-    FROM @extschema@.v_consensus_unrefuted c
-    WHERE (
-          (c.subject_id = p_from AND c.object_id = p_to)
-          OR (c.subject_id = p_to AND c.object_id = p_from))
-    ORDER BY @extschema@.eff_mu(c.rating, c.rd) DESC
+    SELECT e.type_id, e.subject_id, e.rating, e.rd, e.witness_count
+    FROM (
+        (SELECT c.type_id, c.subject_id, c.rating, c.rd, c.witness_count
+         FROM @extschema@.v_consensus_unrefuted c
+         WHERE c.subject_id = p_from
+           AND c.object_id = p_to
+         ORDER BY @extschema@.eff_mu(c.rating, c.rd) DESC
+         LIMIT 1)
+        UNION ALL
+        (SELECT c.type_id, c.subject_id, c.rating, c.rd, c.witness_count
+         FROM @extschema@.v_consensus_unrefuted c
+         WHERE c.subject_id = p_to
+           AND c.object_id = p_from
+         ORDER BY @extschema@.eff_mu(c.rating, c.rd) DESC
+         LIMIT 1)
+    ) e
+    ORDER BY @extschema@.eff_mu(e.rating, e.rd) DESC
     LIMIT 1
 $$;

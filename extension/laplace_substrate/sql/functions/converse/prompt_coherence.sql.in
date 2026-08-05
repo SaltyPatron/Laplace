@@ -55,5 +55,21 @@ CREATE OR REPLACE FUNCTION prompt_coherence(p_prompt text)
                   coherence double precision, denote_mu numeric, peers bigint,
                   rel_type_id bytea, rel_mass double precision,
                   specificity double precision, total_mass double precision)
+-- witnesses + lang_agree ARE computed and ARE the comparator's new sort keys
+-- (src/prompt_coherence.c), but they are NOT declared here yet, deliberately.
+--
+-- laplace_substrate is in shared_preload_libraries, so the postmaster pins the
+-- image and every backend inherits it by fork; an installed .so is inert until
+-- PostgreSQL restarts. Widening this TABLE without that restart puts a 12-column
+-- descriptor in front of a 10-column C function, and tuplestore_putvalues then
+-- reads two Datums past the end of its stack arrays -- an overread on the live
+-- converse path, observed 2026-08-05 returning NULLs for both columns.
+--
+-- The C symbol-integrity gate does NOT catch this: every symbol resolves. Symbol
+-- existence is not signature agreement, and nothing in the sync path compares
+-- returned column counts across the image boundary.
+--
+-- Re-add both columns in the same change that bounces PostgreSQL. Until then the
+-- keys still rank -- they live in the comparator, not in the output.
     AS 'MODULE_PATHNAME', 'pg_laplace_prompt_coherence'
     LANGUAGE C STABLE;

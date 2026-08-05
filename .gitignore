@@ -434,3 +434,9 @@ deploy/**/migrations/
 
 # per-agent worktrees (scripts/agent-worktree.sh)
 .worktrees/
+
+# Golden-comparison failure artifacts. GoldenJson.cs writes "<name>.actual.json"
+# beside the golden ONLY when a wire shape drifts, so the assertion can tell you
+# what to diff and bless. It is output, never source — one was tracked by
+# accident in bbb7b4fb and then showed as a pending deletion for months.
+**/Goldens/*.actual.json

@@ -61,6 +61,40 @@
       "prompt": "The opposite of hot is",
       "election_via": "prompt_coherence",
       "expected_topic_surface": "hot"
+    },
+
+    {
+      "id": "forward-hot-opposite",
+      "class": "forward",
+      "surface": "forward",
+      "held_out": false,
+      "prompt": "The opposite of hot is",
+      "expected_answer_surface": "cold",
+      "notes": "PRODUCTION path (infer), not the elector behind it. The edge exists and is one hop: cold --IS_ANTONYM_OF--> hot, verified 2026-08-05 on the lemma (NOT the synset -- WordNet attaches antonymy to the sense, and bubble_up's DISTINCT ON (synset_id) collapses the attachment point). The axis is also recorded: cold synset --HAS_ATTRIBUTE--> temperature. Reaching none of it is addressing, not coverage."
+    },
+    {
+      "id": "forward-water",
+      "class": "forward",
+      "surface": "forward",
+      "held_out": false,
+      "prompt": "Water is made of",
+      "notes": "Hygiene only, no hand-written answer: asserts the reply carries no entity TYPE and no internal key. Deliberately un-answered so the probe cannot be satisfied by tuning one expected string."
+    },
+    {
+      "id": "forward-glacier",
+      "class": "forward",
+      "surface": "forward",
+      "held_out": true,
+      "prompt": "What is a glacier?",
+      "notes": "Held out. Hygiene only."
+    },
+    {
+      "id": "forward-pawn-chess",
+      "class": "forward",
+      "surface": "forward",
+      "held_out": true,
+      "prompt": "What is a pawn in chess?",
+      "notes": "Held out. Hygiene only -- the chess lane is the one surface with its own seeded corpus, so a leak here is not attributable to a thin lexical seed."
     }
   ]
 }

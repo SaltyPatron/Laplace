@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 import time
@@ -188,6 +189,93 @@ def prompt_coherence_rank1(db: str, prompt: str) -> tuple[str | None, float | No
     return syn, spec, latency
 
 
+# Rendering hygiene for the FORWARD PASS. These need no hand-written expected
+# answer, which is the point: they fail on output that is structurally wrong
+# regardless of whether the topic was right.
+#
+# GROUNDED 2026-08-05, infer('The opposite of hot is') in production:
+#     WordNet_Synset   2264.2   <- rank 1, an entity TYPE as a prediction
+#     buz              1501.9
+#     jaa              1499.8
+#     lod              1455.2
+#     14915184-n       1373.3   <- a raw WordNet offset key as a prediction
+# The harness scored the run GREEN, because it only ever asked
+# prompt_coherence for a topic and never called the forward pass at all.
+#
+# A type is not an answer and an internal address is not an answer. Both are
+# leaks of the substrate's own bookkeeping into the reply.
+OFFSET_KEY_RE = re.compile(r"^\d{6,10}-[nvasr]$")
+ILI_KEY_RE = re.compile(r"^i\d+$")
+# The content hash itself, rendered as a word. realize()'s last arm is
+# _realize_canonical, which prints the id when every naming arm abstains --
+# measured 2026-08-05 on the ice synset's IS_SYNONYM_OF neighbours:
+#     b6b080e5de7a4654728bb8519930859c...
+#     b9e2f3c9ceacc91f94d8ba386ff7fba0...
+# "Hubs are ADDRESSES, not names." A reply that cannot name a thing must say so,
+# not print where the thing lives. Trailing ellipsis because render_text
+# truncates.
+HEX_ID_RE = re.compile(r"^[0-9a-f]{16,32}\W*$")
+
+
+def entity_type_names(db: str) -> set[str]:
+    """The substrate's own entity-type roster, so the leak check is not a
+    hardcoded list that drifts the moment a type is added."""
+    rows = psql_rows(
+        db,
+        "SET search_path=laplace,public; SELECT type FROM entity_type_counts();",
+    )
+    return {r.strip() for r in rows if r.strip()}
+
+
+def infer_predictions(db: str, prompt: str, limit: int = 8) -> tuple[list[str], float]:
+    q = prompt.replace("'", "''")
+    t0 = time.perf_counter()
+    rows = psql_rows(
+        db,
+        "SET search_path=laplace,public; "
+        f"SELECT prediction FROM infer('{q}', {int(limit)});",
+    )
+    return [r.strip() for r in rows if r.strip()], time.perf_counter() - t0
+
+
+def run_forward(db: str, probe: dict, type_names: set[str]) -> dict:
+    """The PRODUCTION entry point, not the elector behind it. A probe passes only
+    if the forward pass emits no leaked bookkeeping AND, when an answer is
+    specified, actually reaches it."""
+    prompt = probe["prompt"]
+    expected = probe.get("expected_answer_surface")
+    preds, latency = infer_predictions(db, prompt, probe.get("limit", 8))
+
+    leaks = []
+    for p in preds:
+        if p in type_names:
+            leaks.append(f"entity-type:{p}")
+        elif OFFSET_KEY_RE.match(p) or ILI_KEY_RE.match(p):
+            leaks.append(f"internal-key:{p}")
+        elif HEX_ID_RE.match(p):
+            leaks.append(f"rendered-id:{p}")
+
+    answered = None
+    if expected is not None:
+        answered = any(p.lower() == expected.lower() for p in preds)
+
+    ok = not leaks and (answered is not False)
+    return {
+        "id": probe.get("id"),
+        "surface": "forward",
+        "class": "forward",
+        "held_out": bool(probe.get("held_out", False)),
+        "prompt": prompt,
+        "expected_answer_surface": expected,
+        "predictions": preds,
+        "leaks": leaks,
+        "answer_reached": answered,
+        "latency_s": round(latency, 4),
+        "forward_clean": ok,
+        "miss": not ok,
+    }
+
+
 def run_sql_election(db: str, probe: dict) -> dict:
     prompt = probe["prompt"]
     expected = probe.get("expected_topic_surface")
@@ -229,8 +317,11 @@ def main() -> None:
     ap.add_argument("--record", action="store_true", help="write baseline from this run")
     ap.add_argument(
         "--surfaces",
-        default="sql",
-        help="comma list: sql[,http] — http deferred until API path wired",
+        # `forward` is ON by default deliberately. It is the production entry
+        # point; leaving it opt-in is how a green board coexisted with a forward
+        # pass emitting an entity type as its rank-1 answer.
+        default="sql,forward",
+        help="comma list: sql,forward[,http] — http deferred until API path wired",
     )
     args = ap.parse_args()
 
@@ -272,7 +363,17 @@ def main() -> None:
     surfaces = {s.strip() for s in args.surfaces.split(",") if s.strip()}
 
     results: list[dict] = []
+    # Fetched once, not per probe: the roster is the substrate's own, so a new
+    # entity type is covered the moment it exists.
+    type_names: set[str] = set()
+    if any(p.get("class") == "forward" for p in probes) and "forward" in surfaces:
+        type_names = entity_type_names(args.db)
+
     for probe in probes:
+        if probe.get("class") == "forward":
+            if "forward" in surfaces:
+                results.append(run_forward(args.db, probe, type_names))
+            continue
         if "sql" in surfaces and probe.get("surface", "sql") in ("sql", "both"):
             if probe.get("class") == "election" or probe.get("expected_topic_surface"):
                 results.append(run_sql_election(args.db, probe))
@@ -302,6 +403,25 @@ def main() -> None:
         },
         "glue_words_imported": len(GLUE_WORDS),
     }
+
+    # The forward pass, scored separately from the elector behind it. An election
+    # verdict says the right topic was CHOSEN; it says nothing about what the
+    # system then emits, and the two came apart measurably on 2026-08-05.
+    forward = [r for r in results if r.get("surface") == "forward"]
+    if forward:
+        leaked = [r for r in forward if r.get("leaks")]
+        unreached = [r for r in forward if r.get("answer_reached") is False]
+        verdicts["forward_hygiene"] = {
+            "passed": len(forward) - len(leaked),
+            "total": len(forward),
+            "clean": len(leaked) == 0,
+            "leaks": sorted({leak for r in leaked for leak in r["leaks"]}),
+        }
+        verdicts["forward_answer"] = {
+            "passed": len([r for r in forward if r.get("answer_reached") is True]),
+            "total": len([r for r in forward if r.get("answer_reached") is not None]),
+            "unreached": [r["id"] for r in unreached],
+        }
     if not election:
         verdicts["no_scorable_probes"] = True
 
@@ -365,6 +485,10 @@ def main() -> None:
         and latency_budget_ok
         and "fingerprint_drift" not in verdicts
         and "no_scorable_probes" not in verdicts
+        # Forward hygiene is BLOCKING. A leaked entity type or internal key is a
+        # structural defect in the reply, not a ranking preference, so it fails
+        # the run outright rather than reporting alongside a PASS.
+        and verdicts.get("forward_hygiene", {"clean": True})["clean"]
     )
     report["ok"] = ok
 
@@ -376,6 +500,9 @@ def main() -> None:
     print(
         f"\nEVAL {'PASS' if ok else 'FAIL'}: election "
         f"{len(election_ok)}/{len(election)} exact; "
+        f"forward_hygiene "
+        f"{verdicts.get('forward_hygiene', {}).get('passed', 0)}/"
+        f"{verdicts.get('forward_hygiene', {}).get('total', 0)} clean; "
         f"p50_latency={p50}s ceiling={latency_ceiling}s"
     )
     sys.exit(0 if ok else 1)

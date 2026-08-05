@@ -1,0 +1,189 @@
+-- Every function that dropped `SET search_path` must resolve WITHOUT the
+-- extension schema on the caller's path.
+--
+-- Dropping the clause is what makes a body inlinable —
+-- inline_set_returning_function refuses when proconfig IS NOT NULL
+-- (clauses.c:5168) — but the removal is only CORRECT if every substrate name in
+-- the body is @extschema@-qualified. A miss is caught by nothing else:
+--
+--   * the build never parses SQL function bodies; they are strings.
+--   * CREATE FUNCTION parse-checks under check_function_bodies, but during
+--     extension install the extension schema IS on the search_path, so an
+--     unqualified name resolves cleanly right there.
+--   * it fails only at RUNTIME, for a caller whose search_path excludes laplace.
+--
+-- GROUNDED: 22c3d98b removed SET from salient_facts and qualified only its first
+-- CTE, leaving eleven bare references. It built clean, installed clean, and
+-- merged. G11 now catches that statically; this catches it dynamically, which is
+-- the half a grep cannot do — a name can be @extschema@-qualified and still
+-- resolve to nothing.
+--
+-- DELIBERATELY NO SEED. Every call below is wrapped so that a zero-row result
+-- PASSES and an unresolved name FAILS. The regress database is fresh and
+-- unseeded (tests/CMakeLists.txt does dropdb && createdb), and that is exactly
+-- right here: the assertion is NAME RESOLUTION, not data. Compare
+-- realize_ladder_parity.sql, which mints every id through word_id() for the same
+-- reason.
+--
+-- NOTE the search_path below: `public` only. laplace is deliberately absent.
+BEGIN;
+SET search_path = public;
+-- Helper: run a query text and report only whether it RESOLVED. Any error
+-- mentioning a missing function/relation/column is a qualification defect and is
+-- re-raised with the function's name; anything else (no rows, empty tables) is a
+-- pass, because this file asserts resolution and not results.
+CREATE OR REPLACE FUNCTION pg_temp.resolves(p_label text, p_sql text)
+RETURNS text LANGUAGE plpgsql AS $fn$
+BEGIN
+    EXECUTE p_sql;
+    RETURN p_label || ': ok';
+EXCEPTION
+    WHEN undefined_function OR undefined_table OR undefined_column
+      OR invalid_schema_name THEN
+        RETURN p_label || ': UNQUALIFIED -> ' || SQLERRM;
+END;
+$fn$;
+-- The consensus read path (22c3d98b, ea8e9066, 9f72cc86).
+SELECT pg_temp.resolves('consensus_out',
+    'SELECT * FROM laplace.consensus_out(laplace.word_id(''dog''), 1)');
+     resolves      
+-------------------
+ consensus_out: ok
+(1 row)
+
+SELECT pg_temp.resolves('consensus_in',
+    'SELECT * FROM laplace.consensus_in(laplace.word_id(''dog''), 1)');
+     resolves     
+------------------
+ consensus_in: ok
+(1 row)
+
+SELECT pg_temp.resolves('edges_raw',
+    'SELECT * FROM laplace.edges_raw(laplace.word_id(''dog''), ''both'', NULL, 1, false, ''edge_rank'')');
+   resolves    
+---------------
+ edges_raw: ok
+(1 row)
+
+SELECT pg_temp.resolves('edges(bytea)',
+    'SELECT * FROM laplace.edges(laplace.word_id(''dog''), ''both'', NULL, 1, false, NULL)');
+     resolves     
+------------------
+ edges(bytea): ok
+(1 row)
+
+SELECT pg_temp.resolves('edges(text)',
+    'SELECT * FROM laplace.edges(''dog'', ''both'', 1, false)');
+    resolves     
+-----------------
+ edges(text): ok
+(1 row)
+
+SELECT pg_temp.resolves('related',
+    'SELECT * FROM laplace.related(laplace.word_id(''dog''), laplace.relation_type_id(''IS_A''), NULL, 1)');
+  resolves   
+-------------
+ related: ok
+(1 row)
+
+SELECT pg_temp.resolves('related_in',
+    'SELECT * FROM laplace.related_in(laplace.word_id(''dog''), laplace.relation_type_id(''IS_A''), NULL, 1)');
+    resolves    
+----------------
+ related_in: ok
+(1 row)
+
+SELECT pg_temp.resolves('completions',
+    'SELECT * FROM laplace.completions(laplace.word_id(''dog''), 1)');
+    resolves     
+-----------------
+ completions: ok
+(1 row)
+
+SELECT pg_temp.resolves('top_relations',
+    'SELECT * FROM laplace.top_relations(1, NULL)');
+     resolves      
+-------------------
+ top_relations: ok
+(1 row)
+
+SELECT pg_temp.resolves('salient_facts',
+    'SELECT * FROM laplace.salient_facts(laplace.word_id(''dog''), NULL, 1)');
+     resolves      
+-------------------
+ salient_facts: ok
+(1 row)
+
+SELECT pg_temp.resolves('consensus_neighbors_directed',
+    'SELECT * FROM laplace.consensus_neighbors_directed(laplace.word_id(''dog''), NULL, 1)');
+             resolves             
+----------------------------------
+ consensus_neighbors_directed: ok
+(1 row)
+
+SELECT pg_temp.resolves('consensus_neighbors_undirected',
+    'SELECT * FROM laplace.consensus_neighbors_undirected(laplace.word_id(''dog''), NULL, 1)');
+              resolves              
+------------------------------------
+ consensus_neighbors_undirected: ok
+(1 row)
+
+SELECT pg_temp.resolves('explore_web_neighbors',
+    'SELECT * FROM laplace.explore_web_neighbors(laplace.word_id(''dog''), 1)');
+         resolves          
+---------------------------
+ explore_web_neighbors: ok
+(1 row)
+
+SELECT pg_temp.resolves('foundry_crawl_neighbors',
+    'SELECT * FROM laplace.foundry_crawl_neighbors(laplace.word_id(''dog''), 1, NULL)');
+          resolves           
+-----------------------------
+ foundry_crawl_neighbors: ok
+(1 row)
+
+SELECT pg_temp.resolves('shared_objects',
+    'SELECT * FROM laplace.shared_objects(ARRAY[laplace.word_id(''dog'')], NULL, 1)');
+      resolves      
+--------------------
+ shared_objects: ok
+(1 row)
+
+-- The inference path (945299b7, c2bc4c55, 01bc76ee, 522714cf).
+SELECT pg_temp.resolves('laplace_attention_centroid',
+    'SELECT * FROM laplace.laplace_attention_centroid(laplace.word_id(''dog''), laplace.laplace_highway_band_mask(3))');
+            resolves            
+--------------------------------
+ laplace_attention_centroid: ok
+(1 row)
+
+SELECT pg_temp.resolves('laplace_nearest_entity',
+    'SELECT * FROM laplace.laplace_nearest_entity(0, 0, 0, 1, 1, NULL, NULL)');
+          resolves          
+----------------------------
+ laplace_nearest_entity: ok
+(1 row)
+
+SELECT pg_temp.resolves('laplace_forward_step',
+    'SELECT laplace.laplace_forward_step(laplace.word_id(''dog''), laplace.laplace_highway_band_mask(3))');
+         resolves         
+--------------------------
+ laplace_forward_step: ok
+(1 row)
+
+-- The new operations added alongside them.
+SELECT pg_temp.resolves('entity_container_degree',
+    'SELECT * FROM laplace.entity_container_degree(ARRAY[laplace.word_id(''dog'')])');
+          resolves           
+-----------------------------
+ entity_container_degree: ok
+(1 row)
+
+SELECT pg_temp.resolves('election_token_profile',
+    'SELECT * FROM laplace.election_token_profile(ARRAY[''dog''])');
+          resolves          
+----------------------------
+ election_token_profile: ok
+(1 row)
+
+ROLLBACK;

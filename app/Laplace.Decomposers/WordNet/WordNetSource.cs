@@ -60,6 +60,11 @@ public readonly struct WordNetSource : ISeedSource
             "HAS_DOMAIN_TOPIC", "HAS_VERB_FRAME", "IS_LEMMA_OF", "HAS_SENSE", "IS_SENSE_OF",
             "HAS_NAME_ALIAS", "MANNER_OF",
         };
+        // From the manifest's declared language scope, not a literal here: the source
+        // states the language, this only obliges the declaration to match what the
+        // decomposer emits. DecomposerArchitectureGateTests faults an undeclared emit.
+        foreach (var name in EtlSource.LanguageScopeRelations)
+            set.Add(name);
         foreach (var name in PointerTypes.Values)
             set.Add(name);
         return set.OrderBy(n => n, StringComparer.Ordinal).ToList();

@@ -1,15 +1,80 @@
+-- Nearest entities to a 4D point, optionally scoped by relation band and tier.
+--
+-- TIER SCOPE (added 2026-08-05, GH #868). v_word_points spans every tier and
+-- exposes `tier`; this read had no tier predicate, so a step from a word could
+-- land on a codepoint, a sentence or a document with nothing saying which was
+-- meant.
+--
+-- Scope MUST come from entities.tier, never from a radius band. Two structural
+-- facts, both from the code rather than from any seed:
+--
+--   * tier 0 coords are placed by super_fibonacci directly ON the unit sphere.
+--     Every codepoint sits at radius exactly 1, and they are the only inhabitants
+--     of that shell.
+--   * tier > 0 coord is math4d_centroid of the constituents — a weighted mean of
+--     unit vectors, which is not a unit vector. Composed entities are interior,
+--     and how far interior tracks how DISPERSED their constituents are, not how
+--     deep the tier is.
+--
+-- So radius reveals dispersion, not depth: the composed tiers overlap each other
+-- across essentially the whole interval and cannot be separated by it. The single
+-- clean consequence is that any comparison point lying on the shell is searching a
+-- neighbourhood only tier 0 occupies — which is how a normalized attention
+-- centroid started returning a two-character entity for a step from 'dog'.
+--
+-- p_tiers NULL keeps the previous behaviour (every tier), so existing callers are
+-- unchanged. It is a SCOPE, not a floor — spec 37 L6 forbids operator thresholds
+-- and this adds none.
+--
+-- CHORD PREFILTER, TRUE-METRIC RE-RANK. Previously the SELECT reported
+-- laplace_l2_sq() against an SRID-less point while the ORDER BY ranked on <<->>
+-- against ST_SetSRID(...,0) — two expressions on two scales, so the number
+-- returned did not explain the order.
+--
+-- Reporting <<->> for both would agree, but would still be wrong as a metric.
+-- <<->> is Euclidean — a CHORD. On the unit sphere chord and geodesic satisfy
+-- d = 2*sin(theta/2), monotone in theta, so ordering by chord ORDERS BY ANGLE
+-- **only when every candidate has the same radius**. They do not: tier 0 sits at
+-- radius exactly 1 (super_fibonacci places codepoints on the sphere) while every
+-- composed coord is a centroid and therefore interior. Across mixed radii, chord
+-- order is a blend of angle and radius, and the radius half is dispersion of
+-- constituents rather than anything semantic.
+--
+-- So this now does what explore_anchor_neighbors already does and documents:
+-- over-fetch on the index-ordered <<->> (GiST-eligible, cheap, correct as a
+-- PREFILTER) and then re-rank the bounded pool by laplace_angular_distance_4d,
+-- the true metric. `distance` is that angle, and it is the quantity the row was
+-- ranked by. The over-fetch factor is a candidate-pool width, not a floor or a
+-- top-k on the answer — spec 37 L6 is about cutting results, and nothing is cut.
+--
+-- Rule #4 / L2: the comparison point must reach the planner as a bound parameter
+-- or the GiST prefilter silently degrades to a scan. A caller passing a
+-- correlated LATERAL reference does NOT satisfy that — EXPLAIN before trusting
+-- the index.
 CREATE OR REPLACE FUNCTION laplace_nearest_entity(
     p_cx float8, p_cy float8, p_cz float8, p_cm float8,
-    p_k integer DEFAULT 1, p_band_mask bytea DEFAULT NULL)
+    p_k integer DEFAULT 1,
+    p_band_mask bytea DEFAULT NULL,
+    p_tiers smallint[] DEFAULT NULL)
 RETURNS TABLE(entity_id bytea, distance float8)
 LANGUAGE sql STABLE PARALLEL RESTRICTED AS $$
-    SELECT w.id AS entity_id,
-           @extschema@.laplace_l2_sq(w.coord,
-               public.ST_MakePoint(p_cx, p_cy, p_cz, p_cm)::geometry) AS dist
-    FROM @extschema@.v_word_points w
-    WHERE w.coord IS NOT NULL
-      AND (p_band_mask IS NULL OR @extschema@.laplace_highway_match(w.highway_mask, p_band_mask))
-    ORDER BY w.coord <<->> public.ST_SetSRID(
-        public.ST_MakePoint(p_cx, p_cy, p_cz, p_cm), 0)::geometry
+    WITH anchor AS MATERIALIZED (
+        SELECT public.ST_SetSRID(
+                   public.ST_MakePoint(p_cx, p_cy, p_cz, p_cm), 0) AS pt
+    ),
+    pre AS (
+        SELECT w.id, w.coord
+        FROM @extschema@.v_word_points w, anchor a
+        WHERE w.coord IS NOT NULL
+          AND (p_band_mask IS NULL
+               OR @extschema@.laplace_highway_match(w.highway_mask, p_band_mask))
+          AND (p_tiers IS NULL OR w.tier = ANY (p_tiers))
+        ORDER BY w.coord <<->> a.pt
+        LIMIT GREATEST(p_k * 6, 60)
+    )
+    SELECT pre.id,
+           public.laplace_angular_distance_4d(pre.coord, a.pt) AS distance
+    FROM pre, anchor a
+    ORDER BY public.laplace_angular_distance_4d(pre.coord, a.pt)
     LIMIT p_k
 $$;
