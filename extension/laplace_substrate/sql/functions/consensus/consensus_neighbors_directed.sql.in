@@ -4,8 +4,10 @@ DROP FUNCTION IF EXISTS consensus_neighbors_directed(bytea, bytea[], int);
 CREATE OR REPLACE FUNCTION consensus_neighbors_directed(
     p_subject bytea, p_types bytea[], p_limit int)
     RETURNS TABLE(nbr bytea, rating bigint, rd bigint, witness_count bigint)
-    LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+-- Class A per GH #860: RETURNS TABLE, not STRICT, not VOLATILE, single SELECT.
+-- Dropping SET is sufficient to make it inlinable (proconfig is the check at
+-- clauses.c:5168) and every reference is @extschema@-qualified instead.
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
     SELECT e.neighbour_id, e.rating, e.rd, e.witness_count
-    FROM edges_raw(p_subject, 'out', p_types, p_limit, false, 'eff_mu') e
+    FROM @extschema@.edges_raw(p_subject, 'out', p_types, p_limit, false, 'eff_mu') e
 $$;
