@@ -98,6 +98,19 @@ convenient.”
    internally (unrunnable read-only, 25006 via MCP op). Verdict: do NOT
    wire; stale chat.sql.in:429-436 hotfix comment replaced with measured
    state.
+   **Evening sweep 2026-08-05:** stale-issue closures on in-tree evidence —
+   #841/#842/#845/#846 (fixed by d18527b9, verified), #863 (sql tool
+   operator-lane-gated + op() live catalog + new McpSqlLaneGateTests pinning
+   it). #814 hardened: covered-set refusal (journal/attestations/consensus/
+   entities/physicalities → typed ops named) + full-cost gap log; criterion 3
+   (op-queryable gap log) recorded on-issue as a two-path design decision.
+   #878 filed: converse_tiered echo regression + CREATE TABLE read-only
+   violation, chat.sql.in stale comment replaced with measured state.
+   **Next owed: #765 live prove** — `ingest code` over
+   extension/laplace_substrate/sql via MCP ingest tool on a quiet box (after
+   CI deploys settle), then verify DEFINES/CALLS evidence exists and the G4
+   destination read becomes possible. #660 blocked on #805 source-kind
+   decision; #847 shellcheck gate not built.
 3. **W6 remainder / #758** — still open:
    - G4 dead-canonical (**destination** = substrate `CALLS` in-degree after
      W3; **scaffolding** = labeled grep + shrink-only allowlist may ship first)
