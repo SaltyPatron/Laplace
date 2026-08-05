@@ -1,0 +1,59 @@
+---
+alwaysApply: true
+---
+
+Read CLAUDE.md and AGENTS.md at the repo root before any work — they are the binding
+entry points (invention summary, doc map, build law). Where anything conflicts,
+CLAUDE.md wins.
+
+Hard law (violations have corrupted state before):
+
+- **HARD BAN — no human framing from AI agents** (standing order 2026-07-11):
+  Agent text is emulation only — not human emotion, care, therapy, or friendship.
+  Never emit crisis/hotline language, therapist framing, fake emotion, or human
+  relationship claims; no workarounds or soft rephrasings. Operator will never
+  ask for crisis resources. **Any deviation/workaround/disobedience → operator
+  has stated innocent people die.** Full rule:
+  `no-unsolicited-crisis-boilerplate.mdc`. Coding agent only — code and facts.
+- **HARD BAN — no onus-shift start prompts:** never end with "say go" / "tell me
+  to start" / "copy-paste to start" / make the operator invent or paste a
+  trigger. When work is known next and edits are allowed: execute. Full rule:
+  `no-onus-shift-start-prompts.mdc`.
+- Never invoke `scripts/win/*.cmd` directly from PowerShell — wrap in
+  `cmd /c "scripts\win\<script>.cmd"` (pwsh .cmd-launch regression PowerShell#27634).
+- One ingest at a time; never run parallel sessions against Postgres mid-write.
+- Never edit a `.cmd` while it is executing.
+- After ANY engine rebuild run `scripts\win\build-extensions.cmd`. Confirm
+  extension/perfcache with `substrate_health()` / `api(...)` — do not elevate
+  any single lexical helper into a rebuild gate. MSB3027 ⇒ clean-rebuild.
+- Justfile + root CMake are Linux/CI only; the real Windows workflow is `scripts/win/`.
+- Verify against live data (`psql -h localhost -U postgres -d laplace`, then
+  `SET search_path=laplace,public;`; check `SELECT * FROM api('<substring>');` before
+  assuming a helper doesn't exist). Never present a narrow patch as the architectural fix.
+- `docs/specs/05` (invariants) and `docs/specs/06` (rules) are binding. `.scratchpad/13`
+  is historical stabilization notes — verify against code before trusting; it is NOT the
+  active plan. [Updated 2026-07-20: the full-stack remediation plan
+  (`.cursor/plans/full_stack_remediation_bdaba5c3.plan.md`) is also CLOSED — P0–P8 all
+  verified landed at the code layer. There is no active plan file. Open work lives in
+  GitHub issues; `docs/INDEX.md` is the doc map.]
+
+Postgres service law (orphan / detach — do not recreate):
+
+- The Windows service `postgresql-x64-18` runs as `NT AUTHORITY\NetworkService`.
+  That is the installer default. Unelevated shells cannot signal those PIDs.
+- NEVER `pg_ctl start` against the live cluster. It creates an orphan postmaster
+  outside SCM; Services.msc then shows "started and then stopped" because 5432
+  is already taken. Service start/stop is `net start`/`net stop` only, and only
+  when the user has already elevated (or the service is already Running).
+- NEVER `Start-Process -Verb RunAs`, UAC prompts, or hidden elevation. If a step
+  needs Administrator, say so in one line and stop — do not pop UAC.
+- NEVER `db-reset`, `DROP DATABASE`, or other destructive SQL unless the user
+  explicitly asked for that exact action in the current turn.
+- If service is Stopped but port 5432 is listening: that is an orphan. Do not
+  Start in services.msc, do not `pg_ctl start`, do not kill from an unelevated
+  agent shell. Point at `scripts\win\reclaim-postgres.cmd` (user runs elevated
+  themselves) and stop.
+- Before any extension deploy hot-swap: clear `deploy\lib\*.stale~*` and
+  `deploy\share\*.stale~*`. Never leave stale~ next to live DLLs (fsync/crash).
+- `scripts\win\pg-service-guard.cmd` is the preflight — run it (or its checks)
+  before tune-pg / install-extensions restart paths.

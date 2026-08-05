@@ -1,0 +1,28 @@
+name: _build-deploy (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      database:
+        type: string
+        default: "laplace"
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: "build + install + migrate (${{ inputs.database }})"
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: false, clean: false }
+      - uses: ./.github/actions/setup-laplace-env
+      - name: build + install + migrate + sync
+        env:
+          PGDATABASE: ${{ inputs.database }}
+          LAPLACE_DBNAME: ${{ inputs.database }}
+        run: |
+          bash scripts/pipeline.sh --mode build-only
+          bash scripts/pipeline.sh --mode provision

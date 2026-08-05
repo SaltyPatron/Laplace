@@ -1,0 +1,55 @@
+# Keep AI context on Laplace source (app/, engine/, extension/, scripts/, .scratchpad/).
+# gitignore syntax. Submodules live under external/ but are not Laplace code.
+
+# External dependencies (git submodules — tens of thousands of files when checked out)
+/external/
+
+# Local build / publish trees (gitignored but usually present on dev machines)
+/build-win/
+/build-win-ext/
+/build-cutechess/
+/out/
+/engine/build/
+/build/
+/extension/results/
+/extension/tmp_check/
+/extension/regression.diffs
+/extension/regression.out
+
+# Web toolchain + copied static assets
+/web/node_modules/
+/web/dist/
+/web/storybook-static/
+/app/Laplace.Endpoints.OpenAICompat/wwwroot/
+
+# Generated artifacts (some are committed for deterministic builds)
+/engine/core/grammars/generated/
+/engine/core/src/generated/
+/engine/core/include/laplace/core/*_law.h
+/extension/laplace_substrate/sql/generated/
+/web/openapi/
+
+# Binaries, caches, model weights
+*.dll
+*.exe
+*.pdb
+*.so
+*.so.*
+*.dylib
+*.map
+*.tsbuildinfo
+*.perfcache
+*.gguf
+*.safetensors
+*.onnx
+*.bin
+!engine/test/fixtures/*.bin
+
+# Runtime data / session / agent-local dirs
+/data/
+/.ingest-proof/
+/.claude/
+/.laplace-session/
+
+# Historical CI configs (rarely edited)
+/.github/archive/

@@ -1,0 +1,100 @@
+# Doc index
+
+Two classes. **spec** = living law: kept current, superseded statements annotated in
+place with a date, never silently rewritten. **log** = historical session/campaign
+record: append-only, never "fixed" — verify any claim against code before trusting.
+Dates are last-substantive-edit (git). The generated inventory
+([docs/INVENTORY.md](INVENTORY.md), `scripts/docs-inventory.py`, CI-gated) owns every
+countable fact; prose docs cite it instead of embedding counts.
+
+## Entry points
+
+- [README.md](../README.md) — what Laplace is, the epistemic map (2026-07-23)
+- [CLAUDE.md](../CLAUDE.md) — the operating law: architecture, binding rules, build/seed tables
+- [AGENTS.md](../AGENTS.md) — agent conduct + PG service law + binding-doc pointers
+- [docs/INVENTIONS.md](INVENTIONS.md) — spec — the invention catalog, code-cited; 41 mechanisms enumerated in place, countable facts per [INVENTORY.md](INVENTORY.md) (2026-07-19)
+- [COMPLETION_PLAN.md](COMPLETION_PLAN.md) — conversation/inference completion axis (phases, gap register); not the whole backlog
+- [plan/README.md](plan/README.md) — workstream index (W1–W13) + onboarding pointer
+- [plan/CHECKPOINT_2026-08-05.md](plan/CHECKPOINT_2026-08-05.md) — **current resume** — empty-box re-measure, tracker drift, ranked next work (2026-08-05)
+- [plan/CHECKPOINT_2026-08-02.md](plan/CHECKPOINT_2026-08-02.md) — historical resume after #771–#776 (2026-08-02; superseded for status)
+- [plan/ONBOARDING.md](plan/ONBOARDING.md) — pasteable agent start prompt for this host
+
+## Specs — `docs/specs/` (binding, annotate-on-supersede)
+
+- [05_Substrate_Invariants.txt](specs/05_Substrate_Invariants.txt) — spec — the axioms; identity/tier/geometry law (2026-07-02)
+- [06_Engineering_Ruleset.txt](specs/06_Engineering_Ruleset.txt) — spec — Rules #1–#12; Rule #8 is the ingest sequence (2026-07-19)
+- [08_Record_vs_Calculate_Spec.txt](specs/08_Record_vs_Calculate_Spec.txt) — spec — witnessed vs calculated layers; analyzer versioning (2026-07-04)
+- [09_Substrate_LM_Synthesis.txt](specs/09_Substrate_LM_Synthesis.txt) — spec — construct-don't-train thesis; the open routing question (2026-07-19)
+- [11_Chess_Provenance_Consensus_Spec.txt](specs/11_Chess_Provenance_Consensus_Spec.txt) — spec — three-layer provenance/consensus + the chess board ladder (2026-07-04)
+- [12_Mold_A_Model_Synthesis_Map.txt](specs/12_Mold_A_Model_Synthesis_Map.txt) — spec — substrate primitive → transformer slot bijection (2026-07-10)
+- [14_Foundry_Root_Cause_and_Research.txt](specs/14_Foundry_Root_Cause_and_Research.txt) — spec — foundry working doc: mechanisms M1–M5, prescriptions P1–P10 (2026-07-19)
+- [15_Godel_Engine_OODA_Loop.txt](specs/15_Godel_Engine_OODA_Loop.txt) — spec — the closed loop: walk/deposit/feedback/fold; §3C richer forward pass (2026-07-23)
+- [16_tier_correct_attestation_and_hub_unification.md](specs/16_tier_correct_attestation_and_hub_unification.md) — spec — tier-correct attestation; ILI hub mesh fixes P1–P7 (2026-07-19)
+- [18_Typed_Residual_Stream_and_Mesh.md](specs/18_Typed_Residual_Stream_and_Mesh.md) — spec — typed strata replacing the anonymous residual; mesh factorization (2026-07-19)
+- [19_Factor_Storage_Research.md](specs/19_Factor_Storage_Research.md) — spec — factor/projection record law; mantissa FACTOR vertices; blob candidate (2026-07-19)
+- [33_Perfcache_Blob_Law.md](specs/33_Perfcache_Blob_Law.md) — spec — the two-tier storage contract: PG system-of-record, blobs derived/one-way/CRC'd/staleness-gated (2026-07-18)
+- [34_Conversational_Provenance.md](specs/34_Conversational_Provenance.md) — spec — conversational provenance: tenant→source, session→context, attribution on every turn; ConversationContent is the authority (2026-07-23)
+- [36_Laplace_Forward_Pass.md](specs/36_Laplace_Forward_Pass.md) — spec — the canonical forward pass S0→S10 paired stage-for-stage against the transformer; ingestion-vs-gradient-descent map; live isolation of the conversational gap; standardization contract (2026-07-25)
+- [37_Substrate_Operation_ISA.md](specs/37_Substrate_Operation_ISA.md) — spec — the ten opcodes every read/generate/export path is a program over; their contracts, the one legal order, the disposition of all 332 SQL functions, the sequence-vs-consensus epistemology ruling, and the ten CI gates (2026-07-27)
+
+## Guides — `docs/guides/` (operational how-tos; verify against the live surface)
+
+- [guides/chess.md](guides/chess.md) — guide — the chess modality reference: identity law, the three lanes, read surface, census, the closed loop, tracked gaps (2026-07-23)
+- [guides/chess-lab.md](guides/chess-lab.md) — guide — driving laplace-uci/cutechess, watching lab games live, chess read surface (2026-07-23)
+
+## Logs and campaigns — `.scratchpad/` (historical, append-only)
+
+- [01_Initial_review.txt](../.scratchpad/01_Initial_review.txt) — log — first whole-repo review (2026-07-01)
+- [02_Identified_Issues.txt](../.scratchpad/02_Identified_Issues.txt) — log — CLOSED tracker; open work migrated to GH issues #396–#434, lessons promoted to specs/06 (2026-07-18)
+- [03_Chess.txt](../.scratchpad/03_Chess.txt) — log — chess domain review; C-number statuses DRAINED to GH 2026-07-20 (2026-07-01)
+- [04_Chess_Fixes.txt](../.scratchpad/04_Chess_Fixes.txt) — log — chess fix sagas (2026-07-10)
+- [07_SQL_Surface_Audit.txt](../.scratchpad/07_SQL_Surface_Audit.txt) — log — SQL surface audit; P-roadmap DRAINED to GH 2026-07-20, census retained (2026-07-05)
+- [10_SQL_Consolidation_Reconciliation.txt](../.scratchpad/10_SQL_Consolidation_Reconciliation.txt) — log — manifest lockdown reconciliation (2026-07-04)
+- [13_Stabilization_Audit_and_Plan.txt](../.scratchpad/13_Stabilization_Audit_and_Plan.txt) — log — historical stabilization notes; NOT the active plan (2026-07-08)
+- [17_Decomposer_Full_Stack_Audit.md](../.scratchpad/17_Decomposer_Full_Stack_Audit.md) — log — decomposer/spine audit, code-verified (2026-07-18)
+- [20_Session_Violation_Ledger_2026-07-09.md](../.scratchpad/20_Session_Violation_Ledger_2026-07-09.md) — log — session violation ledger (2026-07-12)
+- [22_Conversational_Engine_Plan.md](../.scratchpad/22_Conversational_Engine_Plan.md) — log — DRAINED to GH 2026-07-20 (phases A–F → #358–#361); design rationale only (2026-07-18)
+- [23_Perfcache_Codegen_Valet.md](../.scratchpad/23_Perfcache_Codegen_Valet.md) — log — DRAINED to GH 2026-07-20 (residual → #382, #524) (2026-07-12)
+- [24_Campaign_Reseed_Queue.md](../.scratchpad/24_Campaign_Reseed_Queue.md) — log — DRAINED to GH 2026-07-20 (#413, #505, #527); reseed runbook retained; do NOT execute until the operator orders the full reseed (2026-07-12)
+- [25_Refactor_Audit_Inventory.md](../.scratchpad/25_Refactor_Audit_Inventory.md) — log — findings DRAINED to GH 2026-07-20; labeling census + latency table retained (2026-07-15)
+- [26_Uncracked_List_Campaign.md](../.scratchpad/26_Uncracked_List_Campaign.md) — log — DRAINED to GH 2026-07-20 (A–J → #368–#375 et al.); gate taxonomy + while-hot law retained as rationale (2026-07-15)
+- [27a_Primitive_Index_Attention.md](../.scratchpad/27a_Primitive_Index_Attention.md) — log — transformer primitive index: attention (2026-07-15; status column STALE — GH issues are authority, 2026-07-20)
+- [27b_Primitive_Index_Containers_Gates.md](../.scratchpad/27b_Primitive_Index_Containers_Gates.md) — log — primitive index: containers/gates (2026-07-15; status column STALE — GH issues are authority, 2026-07-20)
+- [27c_Primitive_Index_FFN_Norms_Embeddings.md](../.scratchpad/27c_Primitive_Index_FFN_Norms_Embeddings.md) — log — primitive index: FFN/norms/embeddings (2026-07-15; status column STALE — GH issues are authority, 2026-07-20)
+- [27d_Primitive_Index_Local_Inventory.md](../.scratchpad/27d_Primitive_Index_Local_Inventory.md) — log — primitive index: local model inventory (2026-07-15; status column STALE — GH issues are authority, 2026-07-20)
+- [28_Model_Lane_Perf_Ledger.md](../.scratchpad/28_Model_Lane_Perf_Ledger.md) — log — model-lane perf ledger (2026-07-15)
+- [29_Witness_Trajectory_Evidence.md](../.scratchpad/29_Witness_Trajectory_Evidence.md) — log — DRAINED to GH 2026-07-20 (fully carried by #451, #535) (2026-07-15)
+- [30_Git_Object_Witnessing_Repo_Decomposer.md](../.scratchpad/30_Git_Object_Witnessing_Repo_Decomposer.md) — log — DRAINED to GH 2026-07-20 (#452, #504; §6 folded into #452) (2026-07-17)
+- [31_Waste_Audit_Repo_Wide.md](../.scratchpad/31_Waste_Audit_Repo_Wide.md) — log — five-auditor waste audit, tiered findings + status (2026-07-17)
+- [32_Patent_Portfolio_Audit.md](../.scratchpad/32_Patent_Portfolio_Audit.md) — log — patent portfolio audit (2026-07-11; renumbered from 22 to fix collision)
+- [33_Walk_Sign_Law_And_Read_Path_Audit.md](../.scratchpad/33_Walk_Sign_Law_And_Read_Path_Audit.md) — log — walk sign law + read-path audit; fix merged via fix/walk-sign-law-and-mask-queue (2026-07-21)
+- [34_Ops_Logging_CLI_Chess_Tooling_Campaign.md](../.scratchpad/34_Ops_Logging_CLI_Chess_Tooling_Campaign.md) — log — ops logging / CLI foundation / chess pipeline-fusion campaign; workstreams drained to GH 2026-07-23; #590 correction block in-file (2026-07-23)
+- [35_Tech_Debt_Refactor_Campaign_2026-07-24.md](../.scratchpad/35_Tech_Debt_Refactor_Campaign_2026-07-24.md) — log — tech-debt/refactor campaign; 9 PRs across #620–#627, three documented mirages, remainder is research/profile-gated (2026-07-25)
+- [36_LSP_Semantic_Decomposer_Design_GH593.md](../.scratchpad/36_LSP_Semantic_Decomposer_Design_GH593.md) — log — design proposal for the LSP-backed semantic decomposer (#593) (2026-07-25)
+- [37_State_Of_The_Build_And_Path_To_Finish.md](../.scratchpad/37_State_Of_The_Build_And_Path_To_Finish.md) — log — HISTORICAL whole-project audit (2026-07-26); P0–P5 + finished-v1 proposal — **drift baseline only**, not status authority (2026-08-02)
+- [38_Chess_Player_Move_Overlay_Design.md](../.scratchpad/38_Chess_Player_Move_Overlay_Design.md) — log — design proposal, PROPOSED/unimplemented: top-roster "who plays what here" board overlay; rides `chess_player_moves`/`chess_ranked`; corpus (full OTB since 1900 + online since 1995) is in hand; scale path is #451 evidence virtualization, NOT per-ply row materialization — record-first, derive under the law in force (2026-08-01)
+- [38_Operation_ISA_Audit.md](../.scratchpad/38_Operation_ISA_Audit.md) — log — Operation ISA audit (on disk; was missing from INDEX)
+- [39_Ingest_Write_Path_Campaign_2026-07-28.md](../.scratchpad/39_Ingest_Write_Path_Campaign_2026-07-28.md) — log — ingest write-path campaign (on disk; was missing from INDEX)
+- [40_Chess_Backlog_MCP_Campaign_2026-07-30.md](../.scratchpad/40_Chess_Backlog_MCP_Campaign_2026-07-30.md) — log — chess backlog / MCP campaign (on disk; was missing from INDEX)
+- [41_SQL_Standardization_Inventory.md](../.scratchpad/41_SQL_Standardization_Inventory.md) — log — SQL standardization inventory (on disk; was missing from INDEX)
+- [42_Issue_Backlog_Triage_2026-08-02.md](../.scratchpad/42_Issue_Backlog_Triage_2026-08-02.md) — log — backlog ledger at 2026-08-02 (**counts stale**: end pass 195 open; measured 232 open on 2026-08-05 — see CHECKPOINT_2026-08-05)
+- [43_Chess_Line_Geometry_Gate_2026-08-03.md](../.scratchpad/43_Chess_Line_Geometry_Gate_2026-08-03.md) — log — chess line geometry gate (on disk; was missing from INDEX)
+- [43_PR_Review_Comment_Sweep_2026-08-03.md](../.scratchpad/43_PR_Review_Comment_Sweep_2026-08-03.md) — log — PR review comment sweep (on disk; was missing from INDEX)
+- [44_Chess_Forward_Pass_And_Industry_Filter_2026-08-03.md](../.scratchpad/44_Chess_Forward_Pass_And_Industry_Filter_2026-08-03.md) — log — chess = ISA program / forward pass; Gemini industry encyclopedia filtered as PROPOSE accelerators vs memory substitutes; validity≠completeness; unique observational metrics; issue map under #818 (2026-08-03)
+- [44_G4_Dead_Canonical_Triage.md](../.scratchpad/44_G4_Dead_Canonical_Triage.md) — log — G4 dead-canonical triage of baseline entries (on disk; was missing from INDEX)
+- [session-tasks.md](../.scratchpad/session-tasks.md) — log — HISTORICAL ingest-lane task list; unfinished rows → GH #429–#434 (2026-07-18)
+
+## `docs/invention/` (agent onboarding)
+
+- [00-CONTINUITY.md](invention/00-CONTINUITY.md) — onboarding — pointer + verified traps; rewritten 2026-07-18
+- [05-synthesis-layers-heads.md](invention/05-synthesis-layers-heads.md) — notes — synthesis layers/heads; verify-or-annotate pass done, rank ladder annotated 2026-07-18
+- [modality-ladder-law.md](invention/modality-ladder-law.md) — notes — modality ladder law; verified clean 2026-07-19 (all cited relation names present in `engine/manifest/relation_types.toml`)
+- [recipe-schema.md](invention/recipe-schema.md) — notes — model recipe schema; verify-or-annotate pass done, rank-ladder note 2026-07-18
+
+## Decisions — `docs/decisions/`
+
+- [0001-highway-bit-order.md](decisions/0001-highway-bit-order.md) — ACCEPTED 2026-07-20 — explicit `bit = N` append-only registry; implemented #551 (closed 2026-08-02)
+
+Renumbering note: `22_Patent_Portfolio_Audit` → `32` and the four `27_*` files →
+`27a`–`27d` (2026-07-18) resolved filename collisions; prose citations of "doc 22"/
+"doc 27" in older logs predate the rename.

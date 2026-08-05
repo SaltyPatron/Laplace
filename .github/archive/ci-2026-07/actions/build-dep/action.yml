@@ -1,0 +1,35 @@
+name: Build a system dependency
+description: >
+  Configure build/deps (idempotent), build one ExternalProject target, and verify
+  its installed artifacts. Replaces the near-identical per-dep job bodies
+  (proj/geos/gdal/postgresql/postgis/tree-sitter). Reads $LAPLACE_EXTERNAL from env.
+
+inputs:
+  target:
+    description: ExternalProject target (proj | geos | gdal | postgresql | postgis | tree-sitter)
+    required: true
+  verify:
+    description: Newline-separated absolute paths that MUST exist after install.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: cmake configure build/deps (idempotent)
+      shell: bash
+      run: cmake -B build/deps -S external -DLAPLACE_EXTERNAL="$LAPLACE_EXTERNAL"
+
+    - name: cmake --build --target ${{ inputs.target }}
+      shell: bash
+      run: umask 0002 && cmake --build build/deps --target ${{ inputs.target }} -j
+
+    - name: Verify ${{ inputs.target }} install
+      shell: bash
+      run: |
+        miss=0
+        while IFS= read -r f; do
+          [ -z "$f" ] && continue
+          if [ -e "$f" ]; then echo "  Γ£ô $f"; else echo "::error::missing artifact: $f"; miss=1; fi
+        done <<< "${{ inputs.verify }}"
+        [ "$miss" -eq 0 ] || exit 1
+        echo "Γ£ô ${{ inputs.target }} installed"
