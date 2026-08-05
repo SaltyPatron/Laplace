@@ -16,38 +16,38 @@ CREATE OR REPLACE FUNCTION salient_facts(p_word bytea, p_lang bytea DEFAULT NULL
         -- probe would run per candidate row. (relation_type_in_family below is the
         -- C IMMUTABLE static check — cheap per row, unaffected.) Same truth table:
         -- static family via the C check, dynamic membership via this set.
-        SELECT c.subject_id AS id FROM consensus c
-        WHERE c.type_id = relation_type_id('IS_A')
-          AND c.object_id = relation_type_id('HAS_FEATURE')
+        SELECT c.subject_id AS id FROM @extschema@.consensus c
+        WHERE c.type_id = @extschema@.relation_type_id('IS_A')
+          AND c.object_id = @extschema@.relation_type_id('HAS_FEATURE')
     ), lang AS (
         -- Resolved ONCE, not per candidate row. When p_lang is supplied COALESCE
         -- short-circuits and word_language() is never evaluated.
-        SELECT COALESCE(p_lang, word_language(p_word)) AS l
+        SELECT COALESCE(p_lang, @extschema@.word_language(p_word)) AS l
     ), subj(id) AS (
-        SELECT p_word UNION SELECT sn.synset_id FROM senses(p_word) sn
+        SELECT p_word UNION SELECT sn.synset_id FROM @extschema@.senses(p_word) sn
     ), top AS (
         SELECT cc.type_id, cc.object_id, cc.rating, cc.rd, cc.witness_count
         FROM subj s CROSS JOIN LATERAL (
             SELECT c.type_id, c.object_id, c.rating, c.rd, c.witness_count
-            FROM v_consensus_unrefuted c
+            FROM @extschema@.v_consensus_unrefuted c
             LEFT JOIN reltypes obj_rt ON obj_rt.id = c.object_id
             WHERE c.subject_id = s.id AND c.object_id IS NOT NULL
               AND c.type_id IN (SELECT id FROM reltypes)
-              AND NOT relation_type_in_family(c.type_id, 'HAS_POS')
-              AND NOT relation_type_in_family(c.type_id, 'HAS_FEATURE')
+              AND NOT @extschema@.relation_type_in_family(c.type_id, 'HAS_POS')
+              AND NOT @extschema@.relation_type_in_family(c.type_id, 'HAS_FEATURE')
               AND c.type_id NOT IN (SELECT id FROM feat_dynamic)
               AND c.type_id NOT IN (
-                relation_type_id('HAS_SENSE'), relation_type_id('IS_SENSE_OF'),
-                relation_type_id('HAS_LANGUAGE'), relation_type_id('PRECEDES'),
-                relation_type_id('FOLLOWS'), relation_type_id('CO_OCCURS_WITH'),
-                relation_type_id('OCCURS_IN_CONTEXT'), relation_type_id('HAS_LEX_CATEGORY'),
-                relation_type_id('HAS_VERB_FRAME'),
-                relation_type_id('IS_LEMMA_OF'), relation_type_id('IS_TRANSLATION_OF'),
-                relation_type_id('HAS_EXAMPLE'), relation_type_id('EVOKES_FRAME'),
-                relation_type_id('HAS_SYNSET_KEY'), relation_type_id('IS_TYPED_AS'),
-                relation_type_id('HAS_NAME_ALIAS'))
+                @extschema@.relation_type_id('HAS_SENSE'), @extschema@.relation_type_id('IS_SENSE_OF'),
+                @extschema@.relation_type_id('HAS_LANGUAGE'), @extschema@.relation_type_id('PRECEDES'),
+                @extschema@.relation_type_id('FOLLOWS'), @extschema@.relation_type_id('CO_OCCURS_WITH'),
+                @extschema@.relation_type_id('OCCURS_IN_CONTEXT'), @extschema@.relation_type_id('HAS_LEX_CATEGORY'),
+                @extschema@.relation_type_id('HAS_VERB_FRAME'),
+                @extschema@.relation_type_id('IS_LEMMA_OF'), @extschema@.relation_type_id('IS_TRANSLATION_OF'),
+                @extschema@.relation_type_id('HAS_EXAMPLE'), @extschema@.relation_type_id('EVOKES_FRAME'),
+                @extschema@.relation_type_id('HAS_SYNSET_KEY'), @extschema@.relation_type_id('IS_TYPED_AS'),
+                @extschema@.relation_type_id('HAS_NAME_ALIAS'))
               AND obj_rt.id IS NULL
-            ORDER BY eff_mu(c.rating, c.rd) DESC LIMIT p_limit * 3
+            ORDER BY @extschema@.eff_mu(c.rating, c.rd) DESC LIMIT p_limit * 3
         ) cc
     ), ranked AS (
         -- Rank BEFORE labeling (mirrors evidence_receipt's Issue 52). The old
@@ -59,9 +59,9 @@ CREATE OR REPLACE FUNCTION salient_facts(p_word bytea, p_lang bytea DEFAULT NULL
         -- (3x + 8 keeps top-N starvation implausible after the empty/ellipsis
         -- filters below drop rows). Same eff_mu order, same result set.
         SELECT t.type_id, t.object_id, t.rating, t.rd, t.witness_count,
-               eff_mu(t.rating, t.rd) AS sort_mu
+               @extschema@.eff_mu(t.rating, t.rd) AS sort_mu
         FROM top t
-        ORDER BY eff_mu(t.rating, t.rd) DESC
+        ORDER BY @extschema@.eff_mu(t.rating, t.rd) DESC
         LIMIT p_limit * 3 + 8
     )
     , ordered AS (
@@ -69,14 +69,14 @@ CREATE OR REPLACE FUNCTION salient_facts(p_word bytea, p_lang bytea DEFAULT NULL
         FROM ranked r
     ), labels AS (
         -- ONE realize_batch over the ranked pool (was: scalar realize per row).
-        SELECT realize_batch(array_agg(o.object_id ORDER BY o.ord),
+        SELECT @extschema@.realize_batch(array_agg(o.object_id ORDER BY o.ord),
                              (SELECT l FROM lang)) AS l
         FROM ordered o
     )
     SELECT d.type, d.fact, d.eff_mu, d.witnesses FROM (
-        SELECT type_label(o.type_id) AS type,
+        SELECT @extschema@.type_label(o.type_id) AS type,
                labels.l[o.ord] AS fact,
-               eff_mu_display(o.rating, o.rd) AS eff_mu, o.witness_count AS witnesses,
+               @extschema@.eff_mu_display(o.rating, o.rd) AS eff_mu, o.witness_count AS witnesses,
                o.sort_mu
         FROM ordered o, labels
     ) d
