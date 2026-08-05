@@ -82,6 +82,16 @@ convenient.”
    acceptance criteria are opinion.
 2. **W5 / #755** — generation-quality harness (`prompts_smoke.txt` runner +
    seeded fixture). Until this exists, quality claims remain ungated.
+   **Progress 2026-08-05:** `generation_probe(prompt, seeds[], steps, lang)`
+   installed (both lanes, one row per lane×seed; regress shape-pin) +
+   `laplace eval generation` CLI verb through the shared read surface. First
+   live measurement recorded on #751: converse_compose REPLAYS (byte-identical
+   across seeds 7/991/12345 on 'dog') — fails its own wiring gate; converse_walk
+   varies with seed but emits cross-language splice (no p_lang). steered_walk.c
+   proven seed-alive (LCG feeds start pick + per-step score), so compose's
+   replay is an input-array property: starts_n==1 and/or weights peaked past
+   the 1e5 hash range. Wiring the ratchet forward: compose's revival as a
+   called canonical shrank the G4 baseline (72→71).
 3. **W6 remainder / #758** — still open:
    - G4 dead-canonical (**destination** = substrate `CALLS` in-degree after
      W3; **scaffolding** = labeled grep + shrink-only allowlist may ship first)

@@ -872,7 +872,6 @@
       "extension/laplace_substrate/sql/functions/chess/chess_time_pressure_outcome.sql.in::chess_time_pressure_outcome": 1,
       "extension/laplace_substrate/sql/functions/consensus/related_objects.sql.in::related_objects": 1,
       "extension/laplace_substrate/sql/functions/consensus/shared_objects.sql.in::shared_objects": 1,
-      "extension/laplace_substrate/sql/functions/converse/converse_compose.sql.in::converse_compose": 1,
       "extension/laplace_substrate/sql/functions/converse/converse_tiered.sql.in::converse_tiered": 1,
       "extension/laplace_substrate/sql/functions/converse/correlate.sql.in::correlate": 1,
       "extension/laplace_substrate/sql/functions/converse/links.sql.in::links": 1,

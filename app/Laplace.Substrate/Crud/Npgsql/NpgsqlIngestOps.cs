@@ -179,6 +179,27 @@ public static class NpgsqlIngestOps
         return v is bool b && b;
     }
 
+    // W5 seed-variance probe through the installed op (laplace.generation_probe):
+    // both generation lanes over one prompt and a seed set, one row per
+    // (lane, seed). Replay — the failure converse_compose's header gates wiring
+    // on — is distinct-reply-count == 1 for a lane across multiple seeds.
+    public static async Task<List<(string Lane, long Seed, string? Reply)>> GenerationProbeAsync(
+        NpgsqlConnection conn, string prompt, long[] seeds, int steps,
+        CancellationToken ct = default)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT lane, seed, reply FROM laplace.generation_probe(@p, @s, @n)";
+        cmd.CommandTimeout = 0;
+        cmd.Parameters.AddWithValue("p", prompt);
+        cmd.Parameters.Add("s", NpgsqlDbType.Array | NpgsqlDbType.Bigint).Value = seeds;
+        cmd.Parameters.AddWithValue("n", steps);
+        var rows = new List<(string, long, string?)>();
+        await using var r = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await r.ReadAsync(ct).ConfigureAwait(false))
+            rows.Add((r.GetString(0), r.GetInt64(1), r.IsDBNull(2) ? null : r.GetString(2)));
+        return rows;
+    }
+
     public static async Task<bool> LayerMarkedCompleteAsync(
         NpgsqlConnection conn, int layer, string sourceKey, CancellationToken ct = default)
     {

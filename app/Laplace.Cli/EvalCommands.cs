@@ -7,8 +7,10 @@ internal static class EvalCommands
 {
     public static async Task<int> RunAsync(string[] args)
     {
+        if (args.Length > 0 && args[0] == "generation")
+            return await GenerationAsync(args);
         if (args.Length == 0 || args[0] != "ingest-fidelity")
-            return Fail("usage: laplace eval ingest-fidelity [relation] [ground-truth] [n]");
+            return Fail("usage: laplace eval ingest-fidelity [relation] [ground-truth] [n] | laplace eval generation [prompt] [steps] [seeds-csv]");
 
         string relation = args.Length > 1 ? args[1] : "SIMILAR_TO";
         string gt = args.Length > 2 ? args[2] : "IS_SYNONYM_OF";
@@ -33,6 +35,43 @@ internal static class EvalCommands
         Console.WriteLine($"  negatives: n={neg.Count}  mean μ={Mean(neg):F4}  nonzero={neg.Count(x => x > 0)}");
         Console.WriteLine($"  ROC-AUC          = {auc:F4}   (0.5 = chance; higher = plane recovers '{gt}')");
         Console.WriteLine($"  precision@|P|    = {pAtK:F4}");
+        return 0;
+    }
+
+    // W5 seed-variance measurement through the installed surface
+    // (laplace.generation_probe): both lanes over one prompt and a seed set,
+    // one row per (lane, seed). Replay — the failure converse_compose's header
+    // gates wiring on — shows up mechanically as distinct==1 for a lane.
+    private static async Task<int> GenerationAsync(string[] args)
+    {
+        string prompt = args.Length > 1 ? args[1] : "dog";
+        int steps = args.Length > 2 && int.TryParse(args[2], out var st) && st > 0 ? st : 30;
+        long[] seeds;
+        try
+        {
+            seeds = (args.Length > 3 ? args[3] : "7,991,12345")
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(long.Parse).ToArray();
+        }
+        catch (FormatException)
+        {
+            return Fail("eval generation: seeds must be a comma-separated list of integers");
+        }
+
+        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
+        await using var conn = await ds.OpenConnectionAsync();
+        var rows = await NpgsqlIngestOps.GenerationProbeAsync(conn, prompt, seeds, steps);
+
+        var replies = new Dictionary<string, HashSet<string>>();
+        foreach (var (lane, seed, reply) in rows)
+        {
+            if (!replies.TryGetValue(lane, out var set)) replies[lane] = set = new();
+            set.Add(reply ?? "");
+            Console.WriteLine($"  [{lane} seed={seed}] {reply}");
+        }
+        foreach (var (lane, set) in replies)
+            Console.WriteLine($"  {lane}: distinct={set.Count}/{seeds.Length}"
+                + (set.Count == 1 && seeds.Length > 1 ? "  REPLAY" : ""));
         return 0;
     }
 

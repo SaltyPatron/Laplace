@@ -104,6 +104,15 @@ SELECT source_bootstrap_present(laplace_hash128_blake3('test/ops/source'),
  t                 | t
 (1 row)
 
+-- generation_probe: both lanes over the seed set, one row per (lane, seed) —
+-- shape pin only; reply content needs a seeded box.
+SELECT count(*) = 4 AS probe_shape
+FROM generation_probe('x', ARRAY[1,2]::bigint[], 5);
+ probe_shape 
+-------------
+ t
+(1 row)
+
 -- ingest_run_close: drives a running row terminal, refuses non-running rows.
 INSERT INTO ingest_run_journal (run_id, source_name, layer)
 VALUES ('00000000-0000-0000-0000-000000000001', 'test/ops/run', 0);
