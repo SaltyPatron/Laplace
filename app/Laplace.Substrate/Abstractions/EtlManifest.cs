@@ -14,7 +14,7 @@ public static class EtlManifest
         AnchorResolver anchor = AnchorResolver.None, string? glob = null,
         string[]? bootstrapRelations = null, bool acceptCommentRows = true,
         Func<string, Hash128?>? contextIdFromFile = null, bool requireIliMap = false,
-        bool hasDedicatedDecomposer = false) =>
+        bool hasDedicatedDecomposer = false, string? languageScope = null) =>
         new(
             Name: decomposerName,
             SourceId: Src(decomposerName),
@@ -30,7 +30,8 @@ public static class EtlManifest
             AcceptCommentRows: acceptCommentRows,
             ContextIdFromFile: contextIdFromFile,
             RequireIliMap: requireIliMap,
-            HasDedicatedDecomposer: hasDedicatedDecomposer);
+            HasDedicatedDecomposer: hasDedicatedDecomposer,
+            LanguageScope: languageScope);
 
     private static readonly Dictionary<string, EtlSource> _rows = Build();
 
@@ -112,8 +113,13 @@ public static class EtlManifest
 
 
 
+            // languageScope "eng" below: these sources are monolingual English by
+            // construction and each asserts it implicitly. CILI and MapNet are NOT scoped —
+            // an ILI concept and a cross-resource mapping are language-neutral, and
+            // stamping them English would attest something the source does not say.
             ["wordnet"] = Row("wordnet", "WordNetDecomposer", 2, "AcademicCurated", TC.AcademicCurated,
-                "wordnet", new EtlModality("wndb", GrammarReady: false), anchor: AnchorResolver.IliSynset),
+                "wordnet", new EtlModality("wndb", GrammarReady: false), anchor: AnchorResolver.IliSynset,
+                languageScope: "eng"),
 
 
             ["cili"] = Row("cili", "CILIDecomposer", 2, "AcademicCurated", TC.AcademicCurated,
@@ -123,29 +129,29 @@ public static class EtlManifest
 
             ["framenet"] = Row("framenet", "FrameNetDecomposer", 3, "AcademicCurated", TC.AcademicCurated,
                 "framenet", new EtlModality("xml", Glob: "*.xml", GrammarReady: false),
-                anchor: AnchorResolver.FrameCategory),
+                anchor: AnchorResolver.FrameCategory, languageScope: "eng"),
             ["propbank"] = Row("propbank", "PropBankDecomposer", 2, "AcademicCurated", TC.AcademicCurated,
                 "propbank", new EtlModality("xml", Glob: "*.xml", GrammarReady: false),
-                anchor: AnchorResolver.SenseKey),
+                anchor: AnchorResolver.SenseKey, languageScope: "eng"),
             ["verbnet"] = Row("verbnet", "VerbNetDecomposer", 2, "AcademicCurated", TC.AcademicCurated,
                 "verbnet", new EtlModality("xml", Glob: "*.xml", GrammarReady: false),
-                anchor: AnchorResolver.SenseKey),
+                anchor: AnchorResolver.SenseKey, languageScope: "eng"),
 
 
             ["semlink"] = Row("semlink", "SemLinkDecomposer", 3, "AcademicCurated", TC.AcademicCurated,
                 "semlink", new EtlModality("json", Glob: "*.json", GrammarReady: false),
-                anchor: AnchorResolver.IliSynset),
+                anchor: AnchorResolver.IliSynset, languageScope: "eng"),
             ["mapnet"] = Row("mapnet", "MapNetDecomposer", 3, "AcademicCurated", TC.AcademicCurated,
                 "mapnet", new EtlModality("tsv", Glob: "*.tsv", GrammarReady: false,
                     RecordFraming: GrammarRecordFraming.Line),
                 anchor: AnchorResolver.IliSynset),
             ["wordframenet"] = Row("wordframenet", "WordFrameNetDecomposer", 3, "AcademicCurated", TC.AcademicCurated,
                 "wordframenet", new EtlModality("text", GrammarReady: false),
-                anchor: AnchorResolver.FrameCategory),
+                anchor: AnchorResolver.FrameCategory, languageScope: "eng"),
             ["predicatematrix"] = Row("predicatematrix", "PredicateMatrixDecomposer", 3, "AcademicCurated", TC.AcademicCurated,
                 "predicatematrix", new EtlModality("tsv", Glob: "*.txt", GrammarReady: false,
                     RecordFraming: GrammarRecordFraming.Line),
-                anchor: AnchorResolver.IliSynset),
+                anchor: AnchorResolver.IliSynset, languageScope: "eng"),
         };
         return m;
     }
