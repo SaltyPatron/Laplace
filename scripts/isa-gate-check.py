@@ -56,6 +56,11 @@ CEILINGS = {
     # its own CREATE line. Destination form is substrate CALLS in-degree after W3
     # (#765); this allowlist is shrink-only until that replace lands.
     "g4_dead_canonical": 72,
+    # Measured 2026-08-05, landing with its violations enumerated per W6's trap
+    # note ("a gate that goes red on merge-day teaches people to ignore it").
+    # 29 occurrences across 10 sites, all pre-existing: model_factor (6 names),
+    # entities_has_highway, and the three canonical_names writers.
+    "g11_unqualified_in_setless_body": 29,
 }
 
 CREATE_FUNCTION = re.compile(
@@ -81,6 +86,24 @@ CSHARP_STRING_LITERAL = re.compile(r'"(?P<literal>[A-Z][A-Z0-9_]*)"')
 G8_BAND_LITERAL = re.compile(
     r"\brelation_highway_band\s*\([^)]*\)\s*"
     r"(?:=\s*\d+|IN\s*\(\s*\d+(?:\s*,\s*\d+)*\s*\))",
+    re.IGNORECASE,
+)
+
+CREATE_RELATION = re.compile(
+    r"CREATE\s+(?:OR\s+REPLACE\s+)?(?:TABLE|VIEW|MATERIALIZED\s+VIEW)\s+"
+    r"(?:IF\s+NOT\s+EXISTS\s+)?(?:@extschema@\.)?([A-Za-z_][A-Za-z0-9_]*)",
+    re.IGNORECASE,
+)
+DROP_FUNCTION = re.compile(
+    r"DROP\s+FUNCTION\s+(?:IF\s+EXISTS\s+)?(?:@extschema@\.)?([A-Za-z_][A-Za-z0-9_]*)",
+    re.IGNORECASE,
+)
+SET_SEARCH_PATH = re.compile(r"\bSET\s+search_path\b", re.IGNORECASE)
+# A substrate name used as a call or as a FROM/JOIN target, with no qualifier in
+# front of it. `(?<![.\w@])` rejects `@extschema@.x`, `a.x` and `xy` alike.
+UNQUALIFIED_REF = re.compile(
+    r"(?<![.\w@])(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*\("
+    r"|(?:\bFROM|\bJOIN)\s+(?![@\w]*\.)(?P<t>[A-Za-z_][A-Za-z0-9_]*)",
     re.IGNORECASE,
 )
 
@@ -318,6 +341,65 @@ def scan_g8() -> Counter[str]:
     return found
 
 
+def scan_g11_unqualified_in_setless_body() -> Counter[str]:
+    """A body without SET search_path must qualify every substrate reference.
+
+    Removing ``SET search_path`` is what makes a SQL function inlinable —
+    ``inline_set_returning_function`` refuses when ``proconfig IS NOT NULL``
+    (clauses.c:5168), and the scalar inliner refuses on any SET clause. But the
+    removal is only correct if EVERY substrate name in the body carries the
+    ``@extschema@.`` prefix, and a miss is caught by nothing else in the
+    pipeline:
+
+      * the build never parses SQL function bodies — they are strings;
+      * ``CREATE FUNCTION`` does parse-check under ``check_function_bodies``,
+        but during extension install the extension schema is ON the
+        search_path, so an unqualified name resolves cleanly right there;
+      * it fails only at RUNTIME, for a caller whose search_path excludes the
+        extension schema.
+
+    Grounded: 22c3d98b removed SET from ``salient_facts`` and qualified only its
+    first CTE, leaving eleven bare references. It built clean, installed clean,
+    and merged. Found afterwards by hand; this gate is that inspection made
+    mechanical.
+
+    Only names the substrate actually defines are considered, so CTE aliases and
+    column names cannot false-positive unless they shadow a real object.
+    """
+    sql_root = ROOT / "extension" / "laplace_substrate" / "sql"
+    functions_root = sql_root / "functions"
+
+    defined: set[str] = set()
+    for path in production_files(functions_root, (".sql.in",)):
+        text = strip_sql_comments(path.read_text(encoding="utf-8", errors="replace"))
+        for match in CREATE_FUNCTION.finditer(text):
+            defined.add(match.group(1).lower())
+    for path in production_files(sql_root, (".sql.in",)):
+        text = strip_sql_comments(path.read_text(encoding="utf-8", errors="replace"))
+        for match in CREATE_RELATION.finditer(text):
+            defined.add(match.group(1).lower())
+
+    found: Counter[str] = Counter()
+    for path in production_files(functions_root, (".sql.in",)):
+        raw = path.read_text(encoding="utf-8", errors="replace")
+        text = strip_sql_comments(raw)
+        if SET_SEARCH_PATH.search(text):
+            continue                      # still gated by SET; not this gate's business
+        rel = relative(path)
+        own = {m.group(1).lower() for m in CREATE_FUNCTION.finditer(text)}
+        own |= {m.group(1).lower() for m in DROP_FUNCTION.finditer(text)}
+
+        for match in UNQUALIFIED_REF.finditer(text):
+            raw_name = match.group("name") or match.group("t")
+            if raw_name is None:
+                continue
+            name = raw_name.lower()
+            if name not in defined or name in own:
+                continue
+            found[f"{rel}::{name}"] += 1
+    return found
+
+
 def scan_g4_dead_canonical() -> Counter[str]:
     """Scaffolding for ISA G4 — zero-caller installed functions (W6 D3).
 
@@ -373,6 +455,7 @@ def current_violations() -> dict[str, dict[str, int]]:
         "g3_sql_vocabulary_literalism": scan_g3_sql(),
         "g3_c_vocabulary_literalism": scan_g3_c(),
         "g3_csharp_vocabulary_literalism": scan_g3_csharp(),
+        "g11_unqualified_in_setless_body": scan_g11_unqualified_in_setless_body(),
         "g8_band_literalism": scan_g8(),
         "g4_dead_canonical": scan_g4_dead_canonical(),
     }
