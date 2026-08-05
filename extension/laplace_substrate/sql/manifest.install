@@ -379,7 +379,6 @@ functions/analysis/laplace_entities_at_depth.sql.in
 functions/analysis/laplace_ancestry.sql.in
 functions/analysis/model_jitter_catalog.sql.in
 functions/analysis/laplace_translations.sql.in
-functions/inference/laplace_l2_sq.sql.in
 functions/inference/laplace_attention_centroid.sql.in
 functions/inference/laplace_nearest_entity.sql.in
 functions/inference/laplace_astar_path.sql.in
