@@ -42,25 +42,25 @@ CREATE OR REPLACE FUNCTION resolve_audit(p_prompt text, p_lang_rel bytea)
     RETURNS TABLE(ord int, token text, resolved boolean, tier smallint,
                   senses bigint, top_language text, verdict text)
     LANGUAGE sql STABLE
-    SET search_path = @extschema@, public AS $$
+    AS $$
 WITH tok AS (
     -- prompt_words is the UAX-29 segmentation with its entity lookup. It
     -- returns one row per (ord, id) and an id living at two tiers appears
     -- TWICE (GH #752), so DISTINCT ON keeps one row per position -- otherwise
     -- a tier-collided token is double-counted in its own audit.
     SELECT DISTINCT ON (w.ord) w.ord, w.word, w.id
-    FROM prompt_words(p_prompt) w
+    FROM @extschema@.prompt_words(p_prompt) w
     ORDER BY w.ord, w.id
 ),
 enriched AS (
     SELECT t.ord, t.word, t.id,
-           (SELECT min(e.tier) FROM entities e WHERE e.id = t.id) AS tier,
-           (SELECT count(*) FROM senses(t.id)) AS n_senses,
+           (SELECT min(e.tier) FROM @extschema@.entities e WHERE e.id = t.id) AS tier,
+           (SELECT count(*) FROM @extschema@.senses(t.id)) AS n_senses,
            (SELECT c.object_id
-              FROM consensus c
+              FROM @extschema@.consensus c
              WHERE c.subject_id = t.id
                AND c.type_id = p_lang_rel
-             ORDER BY eff_mu(c.rating, c.rd) DESC, c.object_id
+             ORDER BY @extschema@.eff_mu(c.rating, c.rd) DESC, c.object_id
              LIMIT 1) AS lang_id
     FROM tok t
 ),
@@ -68,7 +68,7 @@ ord AS (
     SELECT e.*, row_number() OVER (ORDER BY e.ord) AS ix FROM enriched e
 ),
 lbl AS (
-    SELECT realize_batch(array_agg(o.lang_id ORDER BY o.ix), NULL) AS l
+    SELECT @extschema@.realize_batch(array_agg(o.lang_id ORDER BY o.ix), NULL) AS l
     FROM ord o
 )
 SELECT o.ord,

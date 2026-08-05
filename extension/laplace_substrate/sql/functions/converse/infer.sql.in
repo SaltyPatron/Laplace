@@ -25,7 +25,7 @@
 CREATE OR REPLACE FUNCTION infer(p_prompt text, p_limit int DEFAULT 8)
     RETURNS TABLE(prediction text, weight double precision, bias_hits bigint)
     LANGUAGE sql STABLE
-    SET search_path = @extschema@, public AS $$
+    AS $$
 WITH ranked AS (
     SELECT y.tok, y.synset_id,
            row_number() OVER (ORDER BY y.specificity DESC NULLS LAST,
@@ -34,7 +34,7 @@ WITH ranked AS (
                                        y.ord DESC,
                                        y.denote_mu DESC NULLS LAST,
                                        y.synset_id) AS rk
-    FROM prompt_coherence(p_prompt) y
+    FROM @extschema@.prompt_coherence(p_prompt) y
 ),
 topic AS (SELECT r.synset_id FROM ranked r WHERE r.rk = 1),
 -- EVERY sense of every bias token, not the per-token argmax. Shipped first
@@ -48,23 +48,23 @@ topic AS (SELECT r.synset_id FROM ranked r WHERE r.rk = 1),
 bias AS (
     SELECT DISTINCT s.synset_id
     FROM ranked r
-    CROSS JOIN LATERAL senses(r.tok) s
+    CROSS JOIN LATERAL @extschema@.senses(r.tok) s
     WHERE r.rk > 1 AND s.synset_id IS NOT NULL
 ),
 biasfam AS (
     SELECT b.synset_id FROM bias b
     UNION
-    SELECT c.subject_id FROM consensus c JOIN bias b ON c.object_id = b.synset_id
+    SELECT c.subject_id FROM @extschema@.consensus c JOIN bias b ON c.object_id = b.synset_id
 ),
 cand AS (
-    SELECT c.object_id AS id, eff_mu(c.rating, c.rd) AS m
-    FROM consensus c JOIN topic t ON c.subject_id = t.synset_id
+    SELECT c.object_id AS id, @extschema@.eff_mu(c.rating, c.rd) AS m
+    FROM @extschema@.consensus c JOIN topic t ON c.subject_id = t.synset_id
     WHERE c.object_id IS NOT NULL
 ),
 scored AS (
     SELECT d.id, d.m, count(f.synset_id) AS hits
     FROM cand d
-    LEFT JOIN consensus c2 ON c2.subject_id = d.id
+    LEFT JOIN @extschema@.consensus c2 ON c2.subject_id = d.id
     LEFT JOIN biasfam f ON f.synset_id = c2.object_id
     GROUP BY d.id, d.m
     ORDER BY count(f.synset_id) DESC, d.m DESC, d.id
@@ -76,7 +76,7 @@ ord AS (
     FROM scored s
 ),
 lbl AS (
-    SELECT realize_batch(array_agg(o.id ORDER BY o.ix), NULL) AS l FROM ord o
+    SELECT @extschema@.realize_batch(array_agg(o.id ORDER BY o.ix), NULL) AS l FROM ord o
 )
 SELECT lbl.l[o.ix], o.m / 1e9, o.hits
 FROM ord o CROSS JOIN lbl

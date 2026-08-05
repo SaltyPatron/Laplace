@@ -36,24 +36,24 @@
 CREATE OR REPLACE FUNCTION links(p_word text)
     RETURNS TABLE(relation text, target text, strength double precision)
     LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+    AS $$
     WITH base AS MATERIALIZED (
         SELECT c.type_id, c.object_id,
-               eff_mu(c.rating, c.rd) AS emu
-        FROM consensus c
-        WHERE c.subject_id = word_id(p_word)
+               @extschema@.eff_mu(c.rating, c.rd) AS emu
+        FROM @extschema@.consensus c
+        WHERE c.subject_id = @extschema@.word_id(p_word)
     ),
     rel AS MATERIALIZED (
         -- One row per DISTINCT relation type present on this subject.
         SELECT t.type_id,
-               COALESCE(NULLIF(relation_canonical(t.type_id), ''), label(t.type_id)) AS relation
+               COALESCE(NULLIF(@extschema@.relation_canonical(t.type_id), ''), @extschema@.label(t.type_id)) AS relation
         FROM (SELECT DISTINCT b.type_id FROM base b) t
     )
     SELECT r.relation,
-           label(b.object_id) AS target,
+           @extschema@.label(b.object_id) AS target,
            (b.emu)::float8 / 1e9 AS strength
     FROM base b
     JOIN rel r ON r.type_id = b.type_id
-    ORDER BY edge_rank(b.type_id, b.emu) DESC,
+    ORDER BY @extschema@.edge_rank(b.type_id, b.emu) DESC,
              strength DESC, r.relation
 $$;

@@ -32,12 +32,12 @@ CREATE OR REPLACE FUNCTION relation_bands()
     RETURNS TABLE(band integer, name text, rank double precision,
                   relation_types bigint, consensus_rows bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+    AS $$
     WITH live AS (
-        SELECT relation_highway_band(c.type_id) AS band,
+        SELECT @extschema@.relation_highway_band(c.type_id) AS band,
                c.type_id,
                count(*) AS rows
-        FROM consensus c
+        FROM @extschema@.consensus c
         GROUP BY 1, 2
     )
     SELECT b.band,
@@ -45,7 +45,7 @@ CREATE OR REPLACE FUNCTION relation_bands()
            b.rank,
            count(live.type_id)::bigint,
            COALESCE(sum(live.rows), 0)::bigint
-    FROM relation_band_catalog() b
+    FROM @extschema@.relation_band_catalog() b
     LEFT JOIN live ON live.band = b.band
     GROUP BY b.band, b.name, b.rank
     ORDER BY b.band

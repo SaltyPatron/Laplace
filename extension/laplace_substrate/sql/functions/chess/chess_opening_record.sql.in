@@ -19,13 +19,13 @@ CREATE OR REPLACE FUNCTION chess_opening_record(p_limit int DEFAULT 25,
     RETURNS TABLE(opening text, lines bigint, playings bigint,
                   eff_mu double precision)
     LANGUAGE sql STABLE
-    SET search_path = @extschema@, public AS $$
+    AS $$
 WITH claim AS MATERIALIZED (
     -- (opening name id, line) pairs. DISTINCT because ChessPgn and ChessAnalysis both
     -- assert the opening for the same line — two witnesses, one line.
     SELECT DISTINCT a.object_id AS name_id, a.subject_id AS line
-    FROM attestations a
-    WHERE a.type_id = relation_type_id('GAME_HAS_OPENING')
+    FROM @extschema@.attestations a
+    WHERE a.type_id = @extschema@.relation_type_id('GAME_HAS_OPENING')
       AND (p_source IS NULL OR a.source_id = p_source)
 ),
 scored AS MATERIALIZED (
@@ -33,11 +33,11 @@ scored AS MATERIALIZED (
            count(*)                                          AS lines,
            COALESCE(sum(c.witness_count), 0)                 AS playings,
            -- Witness-weighted mean of the per-line conservative estimate.
-           sum(eff_mu(c.rating, c.rd) * c.witness_count)
+           sum(@extschema@.eff_mu(c.rating, c.rd) * c.witness_count)
              / NULLIF(sum(c.witness_count), 0)               AS mu
     FROM claim k
-    LEFT JOIN consensus c ON c.subject_id = k.line
-                         AND c.type_id = relation_type_id('OUTCOME')
+    LEFT JOIN @extschema@.consensus c ON c.subject_id = k.line
+                         AND c.type_id = @extschema@.relation_type_id('OUTCOME')
     GROUP BY k.name_id
 ),
 ord AS MATERIALIZED (
@@ -49,7 +49,7 @@ ord AS MATERIALIZED (
 -- Render last and once, after LIMIT/OFFSET. name_id is the GROUP BY key upstream, so
 -- the page is already distinct by construction — one realize call, p_limit ids.
 lbl AS MATERIALIZED (
-    SELECT realize_batch(array_agg(o.name_id ORDER BY o.ix), NULL) AS l FROM ord o
+    SELECT @extschema@.realize_batch(array_agg(o.name_id ORDER BY o.ix), NULL) AS l FROM ord o
 )
 SELECT lbl.l[o.ix], o.lines::bigint, o.playings::bigint,
        round((o.mu / 1e9)::numeric, 3)::double precision

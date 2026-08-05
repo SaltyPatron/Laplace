@@ -40,7 +40,7 @@
 CREATE OR REPLACE FUNCTION corpus_whitespace_vocab_indices(p_vocab bytea[])
     RETURNS TABLE(vocab_idx int)
     LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+    AS $$
     SELECT (v.ord::int4 - 1) AS vocab_idx
     FROM unnest(p_vocab) WITH ORDINALITY v(id, ord)
     LEFT JOIN LATERAL (
@@ -48,10 +48,10 @@ CREATE OR REPLACE FUNCTION corpus_whitespace_vocab_indices(p_vocab bytea[])
                                    'unicode/category/Zl/v1',
                                    'unicode/category/Zp/v1',
                                    'unicode/category/Cc/v1')) AS is_sep
-        FROM attestations a
-        JOIN canonical_names cn ON cn.id = a.object_id
+        FROM @extschema@.attestations a
+        JOIN @extschema@.canonical_names cn ON cn.id = a.object_id
         WHERE a.subject_id = v.id
-          AND a.type_id = relation_type_id('HAS_GENERAL_CATEGORY')
+          AND a.type_id = @extschema@.relation_type_id('HAS_GENERAL_CATEGORY')
     ) g ON true
-    WHERE COALESCE(g.is_sep, is_all_whitespace(render_text_fast(v.id, 8)))
+    WHERE COALESCE(g.is_sep, @extschema@.is_all_whitespace(@extschema@.render_text_fast(v.id, 8)))
 $$;

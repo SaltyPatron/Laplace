@@ -32,13 +32,13 @@ CREATE OR REPLACE FUNCTION chess_opening_endgames(p_opening text,
                                                   p_scan_lines int DEFAULT 5000)
     RETURNS TABLE(wdl text, positions bigint, lines_probed bigint)
     LANGUAGE sql STABLE
-    SET search_path = @extschema@, public AS $$
+    AS $$
 WITH lines AS MATERIALIZED (
-    SELECT DISTINCT g.line_id FROM chess_opening_games(p_opening, p_scan_lines) g
+    SELECT DISTINCT g.line_id FROM @extschema@.chess_opening_games(p_opening, p_scan_lines) g
 ),
 verdict AS MATERIALIZED (
     SELECT s.wdl, count(*) AS positions, count(DISTINCT l.line_id) AS lines_probed
-    FROM lines l, LATERAL chess_syzygy_line(l.line_id) s
+    FROM lines l, LATERAL @extschema@.chess_syzygy_line(l.line_id) s
     WHERE s.wdl IS NOT NULL
     GROUP BY s.wdl
 )

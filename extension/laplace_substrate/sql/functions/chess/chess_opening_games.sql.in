@@ -38,7 +38,7 @@ CREATE OR REPLACE FUNCTION chess_opening_games(p_opening text,
     RETURNS TABLE(line_id bytea, event_id bytea, times_played bigint,
                   eff_mu double precision)
     LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+    AS $$
 WITH claim AS MATERIALIZED (
     -- Line-grain, context_id NULL by design: every playing asserting the same opening for
     -- the same line MERGES into one evidence row whose observation count accumulates
@@ -46,32 +46,32 @@ WITH claim AS MATERIALIZED (
     -- row — an earlier cut tried and returned a page of games with no date, no result and
     -- no players. PLAYS_LINE is the one record edge whose subject IS the event.
     SELECT DISTINCT a.subject_id AS line
-    FROM attestations a
-    WHERE a.object_id = word_id(p_opening)
-      AND a.type_id = relation_type_id('GAME_HAS_OPENING')
+    FROM @extschema@.attestations a
+    WHERE a.object_id = @extschema@.word_id(p_opening)
+      AND a.type_id = @extschema@.relation_type_id('GAME_HAS_OPENING')
       AND (p_source IS NULL OR a.source_id = p_source)
 ),
 played AS MATERIALIZED (
     SELECT k.line, pl.subject_id AS event
     FROM claim k
-    JOIN attestations pl ON pl.object_id = k.line
-                        AND pl.type_id = relation_type_id('PLAYS_LINE')
+    JOIN @extschema@.attestations pl ON pl.object_id = k.line
+                        AND pl.type_id = @extschema@.relation_type_id('PLAYS_LINE')
 ),
 fold AS MATERIALIZED (
     -- LEFT-joined below: a line recorded before the fold ran returns with NULL rather
     -- than vanishing (unattested is not attested-false).
     SELECT c.subject_id AS line, c.witness_count, c.rating, c.rd
-    FROM consensus c
+    FROM @extschema@.consensus c
     JOIN claim k ON k.line = c.subject_id
-    WHERE c.type_id = relation_type_id('OUTCOME')
+    WHERE c.type_id = @extschema@.relation_type_id('OUTCOME')
 )
 SELECT g.line, g.event,
        f.witness_count::bigint,
-       eff_mu_display(f.rating, f.rd)::double precision
+       @extschema@.eff_mu_display(f.rating, f.rd)::double precision
 FROM played g
 LEFT JOIN fold f ON f.line = g.line
 ORDER BY f.witness_count DESC NULLS LAST,
-         eff_mu(f.rating, f.rd) DESC NULLS LAST,
+         @extschema@.eff_mu(f.rating, f.rd) DESC NULLS LAST,
          g.line, g.event
 LIMIT p_limit OFFSET p_offset
 $$;
