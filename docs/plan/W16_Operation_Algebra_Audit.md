@@ -174,10 +174,42 @@ Note `eff_mu = rating − 2·rd` is a **quantile, not a symmetric magnitude** �
 is not centred on neutral, so `|eff_mu|` is not `|Δ|`. Whichever is chosen, the
 mass term and the ranking term must not silently be different objects.
 
-**[C] — not yet measured.** Falsifying query: distribution of `total_mass` per
-candidate on a seeded box, the fraction of candidates whose signed and absolute
-sums differ materially, and how many carry any sub-neutral contribution at all.
-Run before trusting `specificity` anywhere.
+### MEASURED 2026-08-05 — and the answer is not what this section predicted
+
+447,145 consensus rows (`TABLESAMPLE SYSTEM (2)`) on the OMW-seeded substrate:
+
+| | |
+|---|---|
+| above neutral | 444,081 (99.3%) |
+| at neutral | 3,064 |
+| **below neutral** | **0** |
+| within 1·rd of neutral | **355,893 (79.6%)** |
+| `eff_mu` below neutral | **427,955 (95.7%)** |
+| `eff_mu` negative | **0** |
+| mean \|Δ\| | **192.85** |
+| mean `rd` | **262.24** |
+| mean witnesses | **2.51** |
+
+**The signed-vs-absolute question is moot on this substrate.** Nothing is below
+neutral, so `Σ Δ` and `Σ|Δ|` are the same number and the denominator cannot flip
+sign or cancel. `eff_mu` never goes negative either. The concern above is
+**latent, not live** — it becomes live the first time a source refutes anything.
+
+**The live defect is different and larger: the fold is uncertainty-dominated.**
+Mean `|Δ|` is 192.85 against mean `rd` of 262.24, so the `2·rd` term is **2.7×
+the signal**. `eff_mu = rating − 2·rd` therefore places 95.7% of edges below
+neutral even though 99.3% of *ratings* sit above it. At 2.51 witnesses per edge,
+`rd` has had almost nothing to shrink against.
+
+Consequence for every ranking key in the system: **on this seed `eff_mu` orders
+predominantly by how much evidence exists, not by what the evidence says.** Two
+edges whose ratings differ by 100 but whose `rd` differ by 50 are separated
+mostly by the `rd` term. That is defensible as a conservative bound and it is
+*not* what the callers ranking by `eff_mu` believe they are ranking by.
+
+This also sharpens §3.1: on a substrate this thin, the choice between the linear
+discount (`μ − 2σ`) and the exponential one (`e^{−κ·rd}`) is not a refinement —
+it selects which of the two quantities dominates the order.
 
 ### 3.3 Euclidean mean on a sphere
 
