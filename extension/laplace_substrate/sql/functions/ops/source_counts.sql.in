@@ -1,7 +1,7 @@
 CREATE OR REPLACE FUNCTION source_counts()
     RETURNS TABLE(source text, source_id bytea, evidence bigint, content bigint)
     LANGUAGE sql STABLE
-    SET search_path = @extschema@, public AS $$
+    AS $$
     
     
     

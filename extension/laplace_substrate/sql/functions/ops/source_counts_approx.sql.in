@@ -1,7 +1,7 @@
 CREATE OR REPLACE FUNCTION source_counts_approx()
     RETURNS TABLE(source text, source_id bytea, evidence_approx bigint)
     LANGUAGE sql STABLE
-    SET search_path = @extschema@, public AS $$
+    AS $$
     -- Issue 52: source_counts() full-scans attestations twice (GROUP BY everything
     -- plus a count(DISTINCT) join) — minutes at 135M rows, killed the catalog
     -- endpoints. This is the planner-statistics form, the same sanctioned pattern
@@ -23,7 +23,7 @@ CREATE OR REPLACE FUNCTION source_counts_approx()
         JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE n.nspname = '@extschema@' AND c.relname = 'attestations'
     )
-    SELECT render(m.sid)                        AS source,
+    SELECT @extschema@.render(m.sid)                        AS source,
            m.sid                                AS source_id,
            (m.freq * rt.reltuples)::bigint      AS evidence_approx
     FROM st, rt, LATERAL unnest(st.vals, st.freqs) AS m(sid, freq)

@@ -28,9 +28,9 @@
 CREATE OR REPLACE FUNCTION recall_walk_response(p_topic bytea, p_mode text)
     RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+    AS $$
     WITH complete_branches AS (
-        SELECT * FROM walk_branches(p_topic, relation_type_id('COMPLETES_TO'), 8, 5)
+        SELECT * FROM @extschema@.walk_branches(p_topic, @extschema@.relation_type_id('COMPLETES_TO'), 8, 5)
         WHERE p_mode = 'complete'
     ),
     complete_winner AS (
@@ -43,10 +43,10 @@ CREATE OR REPLACE FUNCTION recall_walk_response(p_topic bytea, p_mode text)
         FROM complete_winner w, generate_series(1, w.depth) AS i
     ),
     complete_reply AS (
-        SELECT (SELECT COALESCE(realize(p_topic, word_language(p_topic)), label(p_topic)))
-               || string_agg(' —' || COALESCE(type_label(s.type_id), '?') || E'→ '
-                             || COALESCE(realize(s.entity_id, word_language(p_topic)),
-                                         label(s.entity_id)), '' ORDER BY s.i) AS reply,
+        SELECT (SELECT COALESCE(@extschema@.realize(p_topic, @extschema@.word_language(p_topic)), @extschema@.label(p_topic)))
+               || string_agg(' —' || COALESCE(@extschema@.type_label(s.type_id), '?') || E'→ '
+                             || COALESCE(@extschema@.realize(s.entity_id, @extschema@.word_language(p_topic)),
+                                         @extschema@.label(s.entity_id)), '' ORDER BY s.i) AS reply,
                min(b.eff_mu) AS eff_mu,
                (SELECT w.witnesses FROM complete_winner w) AS witnesses
         FROM complete_steps s
@@ -54,13 +54,13 @@ CREATE OR REPLACE FUNCTION recall_walk_response(p_topic bytea, p_mode text)
         HAVING count(*) > 0
     ),
     walk_reply AS (
-        SELECT COALESCE(realize(p_topic, word_language(p_topic)), label(p_topic))
-               || string_agg(' —' || COALESCE(type_label(g.type_id), '?') || E'→ '
-                             || COALESCE(realize(g.entity_id, word_language(p_topic)),
-                                         label(g.entity_id)), '' ORDER BY g.step) AS reply,
+        SELECT COALESCE(@extschema@.realize(p_topic, @extschema@.word_language(p_topic)), @extschema@.label(p_topic))
+               || string_agg(' —' || COALESCE(@extschema@.type_label(g.type_id), '?') || E'→ '
+                             || COALESCE(@extschema@.realize(g.entity_id, @extschema@.word_language(p_topic)),
+                                         @extschema@.label(g.entity_id)), '' ORDER BY g.step) AS reply,
                min(g.eff_mu) AS eff_mu,
                NULL::bigint AS witnesses
-        FROM walk_strongest(p_topic, NULL, 8) g
+        FROM @extschema@.walk_strongest(p_topic, NULL, 8) g
         WHERE p_mode <> 'complete'
         HAVING count(*) > 0
     )

@@ -8,7 +8,7 @@ CREATE OR REPLACE FUNCTION partition_pressure(p_table text DEFAULT NULL)
         total_size    text,
         bounds        text)
     LANGUAGE sql STABLE
-    SET search_path = @extschema@, public AS $$
+    AS $$
     -- Partition SKEW detector, for every partitioned substrate table.
     --
     -- consensus_partition_pressure() answers a narrower question (which relations are piling

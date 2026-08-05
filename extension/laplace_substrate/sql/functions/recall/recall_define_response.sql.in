@@ -6,7 +6,7 @@ DROP FUNCTION IF EXISTS recall_define_response(text, bytea);
 CREATE OR REPLACE FUNCTION recall_define_response(p_topic bytea, p_context_ids bytea[] DEFAULT NULL)
     RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+    AS $$
     SELECT d.definition, d.eff_mu, d.witnesses
-    FROM define_fast(p_topic, COALESCE(p_context_ids, ARRAY[]::bytea[])) d
+    FROM @extschema@.define_fast(p_topic, COALESCE(p_context_ids, ARRAY[]::bytea[])) d
 $$;

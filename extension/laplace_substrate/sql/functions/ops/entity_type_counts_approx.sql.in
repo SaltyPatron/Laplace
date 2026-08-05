@@ -1,7 +1,7 @@
 CREATE OR REPLACE FUNCTION entity_type_counts_approx()
     RETURNS TABLE(type text, type_id bytea, entities_approx bigint)
     LANGUAGE sql STABLE
-    SET search_path = @extschema@, public AS $$
+    AS $$
     -- entity_type_counts() GROUP BYs the whole of entities (44M rows and climbing).
     -- It cannot return under the 15s statement timeout the serving boundary enforces
     -- (SubstrateTools.cs), so the ONE operation that answers "what is actually in the
@@ -40,7 +40,7 @@ CREATE OR REPLACE FUNCTION entity_type_counts_approx()
         JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE n.nspname = '@extschema@' AND c.relname = 'entities'
     )
-    SELECT render(m.tid)                        AS type,
+    SELECT @extschema@.render(m.tid)                        AS type,
            m.tid                                AS type_id,
            (m.freq * rt.reltuples)::bigint      AS entities_approx
     FROM st, rt, LATERAL unnest(st.vals, st.freqs) AS m(tid, freq)
