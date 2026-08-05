@@ -119,6 +119,14 @@ convenient.”
    → whole-run queueing concurrency, PR #879, Copilot review addressed
    (no cancel — deploy safety; ref-independent group). #660 blocked on
    #805 source-kind decision; #847 shellcheck gate not built.
+   **Late 2026-08-05, all CI-green on main:** PR #879 merged (whole-run
+   queueing + HAS_MOTIF hot=true/codegen); PR #881 merged (ctest tripwire
+   naming the missing-build/ failure). #880 carries the measured timeline;
+   the ORIGINAL build/-deleter on the runner is unidentified — the tripwire
+   names any recurrence. Next session's ordered picks: (1) DEFINES
+   span-lookup gap (#765 comment has the suspect), (2) W5 runner over
+   generation_probe + prompts_smoke with the R6 detectors, (3)
+   converse_compose input-array diagnosis (#751: starts_n / weight peaking).
 3. **W6 remainder / #758** — still open:
    - G4 dead-canonical (**destination** = substrate `CALLS` in-degree after
      W3; **scaffolding** = labeled grep + shrink-only allowlist may ship first)
