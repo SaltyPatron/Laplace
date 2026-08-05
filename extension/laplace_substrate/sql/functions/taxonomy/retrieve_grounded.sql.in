@@ -14,9 +14,9 @@ RETURNS TABLE(
     witnesses bigint
 )
 LANGUAGE sql STABLE PARALLEL SAFE
-SET search_path = @extschema@, public AS $$
+AS $$
 WITH term AS (
-    SELECT word_id(p_term) AS id
+    SELECT @extschema@.word_id(p_term) AS id
 ),
 frontier AS (
     SELECT b.sense_id,
@@ -24,7 +24,7 @@ frontier AS (
            b.score,
            b.witnesses
     FROM term t
-    CROSS JOIN LATERAL bubble_up(t.id, p_domain_context, p_k) b
+    CROSS JOIN LATERAL @extschema@.bubble_up(t.id, p_domain_context, p_k) b
     WHERE t.id IS NOT NULL
 ),
 glossed AS (
@@ -33,17 +33,17 @@ glossed AS (
            f.score,
            f.witnesses,
            (
-               SELECT render_text(g.object_id, 48)
-               FROM consensus g
+               SELECT @extschema@.render_text(g.object_id, 48)
+               FROM @extschema@.consensus g
                WHERE g.subject_id = f.synset_id
-                 AND g.type_id = relation_type_id('HAS_DEFINITION')
-               ORDER BY eff_mu(g.rating, g.rd) DESC
+                 AND g.type_id = @extschema@.relation_type_id('HAS_DEFINITION')
+               ORDER BY @extschema@.eff_mu(g.rating, g.rd) DESC
                LIMIT 1
            ) AS definition
     FROM frontier f
 )
 SELECT entity_id,
-       COALESCE(NULLIF(render_text(entity_id, 32), ''), p_term) AS surface,
+       COALESCE(NULLIF(@extschema@.render_text(entity_id, 32), ''), p_term) AS surface,
        synset_id,
        definition,
        score,

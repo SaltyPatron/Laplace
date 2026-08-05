@@ -1,14 +1,14 @@
 CREATE OR REPLACE FUNCTION anagrams_of(p_word text)
     RETURNS TABLE(word text, entity_id bytea)
     LANGUAGE sql STABLE
-    SET search_path = @extschema@, public AS $$
-    SELECT render(d.entity_id), d.entity_id
+    AS $$
+    SELECT @extschema@.render(d.entity_id), d.entity_id
     FROM (
         SELECT DISTINCT w2.id AS entity_id
-        FROM v_word_points w1
-        JOIN v_word_points w2 ON w2.hilbert_index = w1.hilbert_index
-        WHERE w1.id = word_id(p_word)
-          AND w2.type_id = canonical_id('Word')
+        FROM @extschema@.v_word_points w1
+        JOIN @extschema@.v_word_points w2 ON w2.hilbert_index = w1.hilbert_index
+        WHERE w1.id = @extschema@.word_id(p_word)
+          AND w2.type_id = @extschema@.canonical_id('Word')
           AND w2.id <> w1.id
     ) d
     ORDER BY d.entity_id
