@@ -92,6 +92,13 @@ convenient.”
 5. **W10 / #764** — `BEGIN ATOMIC` complement; do not confuse with W3.
 6. **#760 close criteria** — code filter merged; **close only after** live
    ChessPgn / ChessOpenings rosters show source-distinct content.
+   **CLOSED 2026-08-05:** positive control proven on both sources (relation-law
+   HAS_NAME_ALIAS rows with relation-type subjects present), filter verified at
+   its semantics, recheck made repeatable via new `source_bootstrap_present()`
+   op with regress coverage. Ops §2.2 executed the same day: orphan ChessPgn
+   run 183d8507 closed via new `ingest_run_close()` op (both ops: commit
+   92333549). ChessPgn remains a ~2.3% partial seed — reseed NOT started, on
+   operator's explicit hold.
 
 Architectural debt called out during the seed failure (do not pretend #776
 finished it): **Unicode still uses a hand `DecomposerMultiPhase` /
