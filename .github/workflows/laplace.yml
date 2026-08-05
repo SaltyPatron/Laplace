@@ -387,6 +387,13 @@ jobs:
         env:
           LAPLACE_TEST_SERIAL: ${{ github.event_name == 'workflow_dispatch' && inputs.serial_tests == true && '1' || '' }}
         run: |
+          # Tripwire (#880): the build job ended with build/ populated and stamped;
+          # if it is gone HERE, something removed it between jobs — name that
+          # directly instead of failing as a bare `cd` three theories deep.
+          if [ ! -d build ]; then
+            echo "::error::build/ absent at ctest start — it existed (stamped) when the build job completed. Something removed it between jobs; see #880 for the measured timeline. Re-run the workflow."
+            exit 1
+          fi
           chmod +x scripts/test-parallel.sh
           if [ "${LAPLACE_TEST_SERIAL:-}" = "1" ]; then
             bash scripts/test-parallel.sh --serial --engine
