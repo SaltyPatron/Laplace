@@ -527,7 +527,6 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
      * match is exact id equality -- or an attested IS_LEMMA_OF edge, which is
      * the hop that makes an inflected prompt word ("parts") reach its lemma. ---- */
     {
-        HASH_SEQ_STATUS  seq;
         PcTypeEntry     *te;
         Datum           *nw_datums = NULL;
         int              n_nw = 0;
@@ -538,20 +537,46 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
         nw_owner = (PcTypeEntry **) palloc(sizeof(PcTypeEntry *) * 1024);
         MemoryContextSwitchTo(old);
 
-        hash_seq_init(&seq, type_h);
-        while ((te = (PcTypeEntry *) hash_seq_search(&seq)) != NULL)
+        /* Iterate the WHOLE MANIFEST, not type_h.
+         *
+         * type_h is populated by pc_scan_edges from the relation types the
+         * CANDIDATES ALREADY CARRY EDGES OF. Walking it here asked "which of the
+         * types already present does a token name" — so naming was conditional on
+         * the answer being present, which inverts the intent: naming exists to
+         * SELECT which relation to traverse.
+         *
+         * MEASURED 2026-08-04: 'synonym of dog' fired (dog's candidates carry
+         * IS_SYNONYM_OF) while 'The opposite of hot is' returned rel_type_id NULL
+         * and rel_mass 0 on every token, because nothing in that prompt's
+         * candidate set happened to carry an oppositional edge. The prompt named
+         * the relation and the elector could not see it.
+         *
+         * The manifest is bounded and static — laplace_relation_table_count is
+         * the relation count, not a function of graph degree — so this is a fixed
+         * cost per call, not a scan. Types the candidates do not carry simply
+         * find no rel_mass in the scan below; they are no longer invisible to it.
+         *
+         * A type first seen here is ENTERED into type_h so the rel_mass pass can
+         * reach it. GH #864. */
+        for (size_t ri = 0; ri < laplace_relation_table_count; ri++)
         {
-            const laplace_relation_def_t *def = NULL;
+            const laplace_relation_def_t *def = &laplace_relation_table[ri];
             const char *name, *last;
             size_t      len;
             hash128_t   wid;
             PcTokEntry *tk;
+            bool        found;
 
-            if (laplace_relation_lookup((const hash128_t *) te->key, &def) != 0 || def == NULL)
-                continue;
             name = def->canonical;
             if (name == NULL)
                 continue;
+
+            te = (PcTypeEntry *) hash_search(type_h, &def->type_id, HASH_ENTER, &found);
+            if (!found)
+            {
+                te->namer_mask = 0;
+                te->named = false;
+            }
 
             /* Pick the LONGEST underscore-delimited segment, not the last one.
              * `strrchr(name, '_') + 1` grabs the trailing preposition for every
