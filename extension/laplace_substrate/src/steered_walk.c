@@ -274,11 +274,25 @@ pg_laplace_steered_walk(PG_FUNCTION_ARGS)
         }
     }
 
-    /* ---- SEED ---- */
+    /* ---- SEED ----
+     * The core backbone anchors the opening, but the ENTRY OFFSET into it is
+     * the caller's rng's to choose. Seeding from core_elems[0],[1]
+     * unconditionally made every core-bearing prompt a deterministic replay
+     * of its gloss chain — byte-identical across seeds (GH #751: dog/water/
+     * king variance 1/3 while core-less prompts varied through the starts
+     * path below). One LCG advance, offset into the backbone: still anchored
+     * in the definitional material, but the seed decides where the walk
+     * enters it and therefore what it recombines toward. */
     if (core_n >= 2)
     {
-        a = sw_intern(vocab, &tok_datum, &next_tok, &datum_cap, core_elems[0]);
-        b = sw_intern(vocab, &tok_datum, &next_tok, &datum_cap, core_elems[1]);
+        int core_off;
+
+        rng = sw_lcg(rng);
+        core_off = (int) ((rng < 0 ? -rng : rng) % (int64) (core_n - 1));
+        a = sw_intern(vocab, &tok_datum, &next_tok, &datum_cap,
+                      core_elems[core_off]);
+        b = sw_intern(vocab, &tok_datum, &next_tok, &datum_cap,
+                      core_elems[core_off + 1]);
         have_b = true;
     }
     else

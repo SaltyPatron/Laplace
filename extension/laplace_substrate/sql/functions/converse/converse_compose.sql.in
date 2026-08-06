@@ -161,11 +161,21 @@ BEGIN
     )
     SELECT (SELECT array_agg(s.id ORDER BY s.is_core DESC, s.gid, s.rn) FROM seq s),
            (SELECT array_agg(s.wt ORDER BY s.is_core DESC, s.gid, s.rn) FROM seq s),
-           COALESCE(
-               (SELECT array_agg(k.entity_id ORDER BY k.gid) FROM kept k
-                 WHERE k.is_core AND k.rn = 1),
-               (SELECT array_agg(k.entity_id ORDER BY k.gid) FROM kept k
-                 WHERE k.rn = 1)),
+           -- STARTS: first token of EVERY kept gid, core first, capped. The
+           -- core-only version made single-gloss topics deterministic replays:
+           -- starts_n == 1, so the seed's start pick had nothing to choose and
+           -- the walk replayed the one gloss chain byte-identically for every
+           -- seed (GH #751 — 'dog'/'water'/'king' measured variance 1/3, while
+           -- multi-anchor prompts recombined fine). Usage-sentence starts were
+           -- already sanctioned as this column's own no-core fallback; widening
+           -- makes them unconditional, which is what "recombination rather
+           -- than replay" requires. Acceptance: the W5 lane detector printed by
+           -- every deploy flips variance 1/3 -> 3/3 on the probe topics.
+           (SELECT array_agg(k1.entity_id ORDER BY k1.is_core DESC, k1.gid)
+            FROM (SELECT k0.entity_id, k0.is_core, k0.gid
+                  FROM kept k0 WHERE k0.rn = 1
+                  ORDER BY k0.is_core DESC, k0.gid
+                  LIMIT 32) k1),
            (SELECT array_agg(k.entity_id ORDER BY k.rn) FROM kept k
              WHERE k.is_core AND k.gid = (
                  SELECT k2.gid FROM kept k2 WHERE k2.is_core
