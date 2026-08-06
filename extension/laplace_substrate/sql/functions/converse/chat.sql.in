@@ -387,27 +387,41 @@ BEGIN
               FROM recall_intent(shape, topic, topic2, p_type_name);
 
         ELSIF shape = 'walk' THEN
-            -- F5 (spec 36): converse_walk is the only component on this surface that
-            -- generates language instead of filling a frame, and it was bound to no
-            -- published shape -- `walk` fell through to the template below and returned
-            -- prose byte-identical to `describe`. This routes the shape to the engine.
+            -- Phase 2 wiring (#751, after PR #884): converse_compose is the
+            -- steered lane -- sequence proposes, the turn's semantic frontier
+            -- steers, and since #884 the seed picks the entry into the core
+            -- backbone, so it recombines instead of replaying. It realizes
+            -- LAST, honoring p_lang, which converse_walk cannot (no lang on
+            -- its signature -- the measured cross-language splice).
             --
-            -- NO TIMEOUT GUARD, deliberately. A SET LOCAL budget needs an exception
-            -- handler to degrade, and PostgreSQL reports a statement_timeout and a
-            -- client cancel with the same condition (query_canceled / 57014) -- so a
-            -- handler that catches our budget also eats the caller's Ctrl-C and makes
-            -- chat() un-cancellable for the duration. Masking cost is not worth taking
-            -- cancellation away from the operator.
+            -- SEED: session-derived, never NULL. Session id + prompt hashed
+            -- with the session's topic-turn count as the hash seed: asking
+            -- again in the same session moves the walk; the same first ask in
+            -- a fresh session is reproducible.
             --
-            -- The cost is real and stays visible: F6 measured converse_walk('dog', 40)
-            -- past the default statement timeout. `walk` is opt-in and today returns a
-            -- template, so a caller naming it is asking for the generator and can bound
-            -- it with their own statement_timeout. Making it fast is F6's problem;
-            -- making it reachable is this branch's.
+            -- FALLBACK: compose returns NULL when the topic yields no stream
+            -- (n < 3) or no starts -- the unsteered walker still answers
+            -- there, and empty output falls through to the shared prose
+            -- fallback below either way.
             --
-            -- Empty output falls through to the shared fallback below, so a silent
-            -- walk degrades to the prose that shape returns today rather than to ''.
-            out := converse_walk(p_prompt, 40, NULL);
+            -- NO TIMEOUT GUARD, deliberately. A SET LOCAL budget needs an
+            -- exception handler to degrade, and PostgreSQL reports a
+            -- statement_timeout and a client cancel with the same condition
+            -- (query_canceled / 57014) -- a handler that catches our budget
+            -- also eats the caller's Ctrl-C and makes chat() un-cancellable
+            -- for the duration. A caller naming `walk` is asking for the
+            -- generator and can bound it with their own statement_timeout.
+            -- max(ord) is the turn counter session_record_prompt maintains:
+            -- PK-indexed, no full per-session count, no bigint->int narrowing.
+            SELECT COALESCE(max(t.ord), 0) INTO depth FROM session_topics t
+              WHERE t.session_id = p_session;
+            out := converse_compose(
+                p_prompt, 40, lang,
+                hashtextextended(COALESCE(p_session::text, '') || p_prompt,
+                                 COALESCE(depth, 0)));
+            IF out IS NULL OR out = '' THEN
+                out := converse_walk(p_prompt, 40, NULL);
+            END IF;
 
         ELSE
             -- describe / what_is / fallback and the no-shape default.
