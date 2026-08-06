@@ -64,6 +64,38 @@ live with its behavior pinned by the deploy-printed detectors.
 | **Routing (which arena)** | **OPEN**: questions routing themselves (#756) — attested relation vocabulary wired into the election's rel_type_id and infer's typed read. |
 | **Depth (layer stack)** | **OPEN**: multi-step TRAVERSE with WITNESS between steps (#757's port payload) — step N's emission conditions step N+1's election. |
 
+## Vocabulary is a ladder; similarity is three declared planes
+
+**The tokenizer is tier 0 and only tier 0** — Unicode codepoints, universal
+across modalities since the codepoint-floor ruling (media reduces to
+digit-composed numbers). Everything above is a COMPOSED vocabulary that
+stays first-class at every altitude: codepoint, word, sentence, document —
+position, game — sample, window, track. There is no single token list;
+there is a ladder, and a conventional transformer's word/subword vocabulary
+is one *projection* of it, chosen at pour time by the vocab crawl exactly
+the way language is chosen at realize time. A codepoint-granularity pour is
+equally lawful (it is what byte-level models are); emission granularity in
+the live engine is likewise a per-step choice — realize a word, a clause,
+or a whole composed entity. Multi-granular attention and emission are
+capabilities the flat-vocab paradigm cannot express; the Embed slot above
+is therefore PER-TIER, and containment gives the cross-altitude edges.
+
+**Any attention-shaped score must declare its comparison plane.** There are
+three, and they answer different questions (the dual-engine law):
+
+| Plane | Instrument | Answers | Bounded by |
+|---|---|---|---|
+| Relational | consensus eff_mu | what testimony binds (whale–ship) | sign from rating; magnitude from RD/witnesses |
+| Angular | S³ coord / Hilbert key | same constituent multiset, any order (whale–while; anagrams) | NOT identity above tier 0 — candidate filter only |
+| Curve | Fréchet / Hausdorff over REALIZED trajectories (entity_curve / word_curve) | same order and shape | must realize from live coords; stored trajectory is identity cargo, not positions |
+
+A head that mixes planes without declaring it — or concludes identity from
+an angular collision above tier 0 — is the cosine-as-meaning defect
+reintroduced in this architecture's own vocabulary. Heads are typed by
+plane: meaning heads read relational, form heads read angular/curve, and
+their disagreement is generative (structurally near + relationally silent =
+hypothesis candidate — the system's own reading list).
+
 ## Order
 
 Concept streams (#751) → discourse readback (#759) → routing (#756) →
