@@ -78,6 +78,16 @@ domain byte followed by their ordered children's ids. Decomposition and reconstr
 exact operations, not statistical ones — a document rebuilds byte-for-byte from its id
 alone.
 
+**A file's metadata is a branch of its trunk, not a side channel.** The file node
+composes (at least) a content subtree and a metadata subtree: EXIF tags, OPF blocks,
+format headers, ID3 frames — parsed by format-native grammar into content entities like
+everything else, so the ten-thousandth file stamped with the same license string collides
+into one entity and pooling stays free. Typed edges (title, author, license) are then
+attestations derived from entities the DAG already holds — provenance is decomposed from
+bytes the file actually carries, never invented. Because the trunk hash covers headers
+and content together, the round-trip law recovers the original file byte-exact, not just
+its prose.
+
 **Tier is altitude, not category.** Compositional depth is a separate column and is never
 an input to the hash, so identical content is one id no matter what tier it was reached at
 or which source produced it. Single-child compositions collapse to the child's own id.
@@ -112,6 +122,14 @@ The trust ladder descends roughly: substrate mandate → standards-derived (Unic
 academically curated (WordNet, UD, VerbNet, PropBank, FrameNet, SemLink) → academically
 curated with user input (OMW, ConceptNet) → structured corpus (Tatoeba, Wiktionary,
 OpenSubtitles) → user-curated → user prompt → app-derived → AI model probe → adversarial.
+
+**Unattested text is prompt-grade by design.** A bare text file carries exactly a
+prompt's epistemic standing: words with no authority behind them beyond whoever supplied
+them, priced accordingly by the ladder. No correction is owed for corpus text riding the
+user-prompt trust position — re-attributing it to an invented "documents" authority would
+manufacture provenance, the exact thing the evidence law forbids. Text earns a stronger
+position only through what its own bytes prove (headers, licenses, authorship — the
+metadata branch of its trunk), never through which pipeline it entered.
 
 The deliberate inversion against the industry: **a transformer's testimony is admissible
 and outranked by the dictionary.** Models are witnesses to be cross-examined, never
@@ -201,7 +219,7 @@ There is no backfill or rebuild path. Consensus accumulates at ingest, inside th
 | catastrophic forgetting | impossible — old testimony is outvoted, never overwritten |
 | knowledge cutoff | last observation, per source |
 | alignment | trust-class policy |
-| unlearning | per-source eviction |
+| unlearning | adjudication: refuting testimony outvotes the claim |
 | train/serve fleets | one database, concurrent under MVCC |
 
 Learning is concurrent with serving: the system gets smarter while it answers.
@@ -223,7 +241,13 @@ building that, curated and attributed. Training discards all of it to re-derive 
 anonymous copy from scraped text.
 
 Every source is public and licensed, which is why the substrate records license and
-attribution per source, and why unlearning is eviction rather than retraining.
+attribution per source. Unlearning is not removal at all: a false claim that
+gets ingested sits as one weak witness, earns no confirmation, and is refuted
+into negative standing by stronger testimony when it matters — pruned from
+traversal, still visible on the record. Correction is more and better
+evidence, or a direct edit of the offending record; deletion is never the
+learning story. Source removal survives only as a compliance-grade
+administrative hatch (a licensing takedown), not an epistemic operation.
 
 **The document round-trip** is the storage/learning duality in one command: decompose to
 entities and trajectories, attest the sequence, fold consensus, then reconstruct the
@@ -405,12 +429,13 @@ win an argument against the dictionary.
 - **The black box.** Every answer decomposes into named witnesses, ratings, and paths — and
   black boxes can be held up to the light: audit, comparison, multi-model consensus,
   certifiable clean-room export.
-- **The provenance void.** Every source enumerated, licensed, attributed, evictable.
+- **The provenance void.** Every source enumerated, licensed, attributed — and every
+  claim correctable by evidence: refutation outvotes, it never erases.
 
 Capabilities that are unique in principle rather than in degree: proving a negative;
 runtime learning that is attributed and timestamped; naming the teachers of a specific
 claim; per-claim confidence with visible dissent; exact reconstruction of ingested content;
-witness removal; and identical answers across toolchains.
+outvoting a lie without deleting the record of it; and identical answers across toolchains.
 
 ---
 

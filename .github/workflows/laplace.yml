@@ -704,16 +704,19 @@ jobs:
             --filter 'Tier!=perf & Tier!=db & FullyQualifiedName~Endpoints.OpenAICompat'
 
   eval:
-    name: Eval — generation / election quality (advisory)
+    name: Eval — generation / election quality (replay+echo blocking)
     needs: [publish, smoke]
-    # Same seeded guard as smoke. continue-on-error: advisory week (W5 D7);
-    # blocking_flip_date in scripts/eval-baselines.json records when this flips.
+    # Same seeded guard as smoke. FLIPPED TO BLOCKING 2026-08-06 (operator
+    # ruling: thresholds are the agent's call, not a deferred question). The
+    # lane detectors enforce ONLY the unambiguous regression classes — replay
+    # (variance==1, the #751/#884 class) and echo (rate>0.5, the #878 class).
+    # Content/flatness remain advisory while concept-stream work (#751 R1)
+    # moves them. The election harness governs itself via eval-baselines.json.
     if: >-
       !cancelled() && needs.publish.result == 'success' &&
       needs.publish.outputs.seeded == 'true' &&
       needs.smoke.result == 'success'
     runs-on: [self-hosted, laplace]
-    continue-on-error: true
     concurrency:
       group: laplace-substrate-lifecycle
       cancel-in-progress: false
@@ -742,7 +745,8 @@ jobs:
         run: |
           python3 scripts/verify-generation.py \
             --db "host=/var/run/postgresql user=laplace_admin dbname=laplace" \
-            --report .eval-proof/lane-detectors.json
+            --report .eval-proof/lane-detectors.json \
+            --enforce
 
   restore-api:
     name: Restore API (always — even after failed stages)
