@@ -256,9 +256,13 @@ int laplace_image_tree_build(
     tier_tree_t* tree = NULL;
     int rc = laplace_image_decomposer_run(rgba, width, height, &tree);
     if (rc != 0 || !tree) return rc != 0 ? rc : -5;
-    if (compose_image_tree(tree) != 0) {
+    /* Propagate the compose failure code (offset to stay out of this
+     * function's own -1..-5 range) instead of flattening every cause to one
+     * value — managed callers surface this rc in their diagnostics. */
+    rc = compose_image_tree(tree);
+    if (rc != 0) {
         tier_tree_free(tree);
-        return -6;
+        return rc < 0 ? -100 + rc : -6;
     }
     *out_tree = tree;
     return 0;
@@ -270,9 +274,12 @@ int laplace_audio_tree_build(
     tier_tree_t* tree = NULL;
     int rc = laplace_audio_decomposer_run(pcm, n_samples, &tree);
     if (rc != 0 || !tree) return rc != 0 ? rc : -5;
-    if (compose_audio_tree(tree) != 0) {
+    /* Same propagation as the image twin: compose cause survives, offset out
+     * of this function's own -1..-5 range. */
+    rc = compose_audio_tree(tree);
+    if (rc != 0) {
         tier_tree_free(tree);
-        return -6;
+        return rc < 0 ? -100 + rc : -6;
     }
     *out_tree = tree;
     return 0;

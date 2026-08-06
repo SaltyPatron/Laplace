@@ -1,7 +1,10 @@
 # Vendored media packaging codecs
 
 Single-header / single-file unpack libraries used by `laplace_media_decode_*`.
-These are **packaging** only — modality identity is planar RGBA / mono int16 samples.
+These are **packaging** only: they recover planar RGBA / mono int16 buffers from
+containers. The recovered buffers are NOT identity — identity comes from the
+codepoint-floor ladder (digit → number → … compose per modality-ladder-law.md);
+no recovery buffer is ever hashed as a leaf.
 
 | File | Upstream | Role |
 |------|----------|------|

@@ -194,6 +194,18 @@ public sealed class AudioIngestHandler : IIngestRecordHandler<AudioIngestRecord>
 /// </summary>
 public sealed class VideoFrameIngestHandler : IIngestRecordHandler<VideoFrameIngestRecord>
 {
+    // Declaration roster (the architecture-gate pattern): relation names are
+    // spelled HERE once, resolved once, and emit sites below use resolved ids
+    // (CategoricalResolved) — no ad-hoc call-site literals (ISA G3-C#).
+    // Index coupling is deliberate and local: two entries, resolved on the
+    // next two lines.
+    private static readonly IReadOnlyList<string> DeclaredRelations =
+        ["HAS_FRAME", "PRECEDES_IN_TIME"];
+    private static readonly Hash128 HasFrameId =
+        RelationTypeRegistry.RelationTypeId(DeclaredRelations[0]);
+    private static readonly Hash128 PrecedesInTimeId =
+        RelationTypeRegistry.RelationTypeId(DeclaredRelations[1]);
+
     private readonly Hash128 _sourceId;
     private readonly int _layerOrder;
     private readonly Hash128 _videoRootId;
@@ -226,15 +238,15 @@ public sealed class VideoFrameIngestHandler : IIngestRecordHandler<VideoFrameIng
         // Deposit the video container entity once (content-addressed root over frame ids).
         builder.AddEntity(new EntityRow(
             _videoRootId, 4, EntityTypeRegistry.Video, _sourceId));
-        builder.AddAttestation(NativeAttestation.Categorical(
-            _videoRootId, "HAS_FRAME", frameRoot, _sourceId, SourceTrust.StructuredCorpus));
+        builder.AddAttestation(NativeAttestation.CategoricalResolved(
+            _videoRootId, HasFrameId, frameRoot, _sourceId, null, SourceTrust.StructuredCorpus));
         _frameRoots[record.FrameIndex] = frameRoot;
         if (_frameRoots.TryGetValue(record.FrameIndex - 1, out var prev))
-            builder.AddAttestation(NativeAttestation.Categorical(
-                prev, "PRECEDES_IN_TIME", frameRoot, _sourceId, SourceTrust.StructuredCorpus));
+            builder.AddAttestation(NativeAttestation.CategoricalResolved(
+                prev, PrecedesInTimeId, frameRoot, _sourceId, null, SourceTrust.StructuredCorpus));
         if (_frameRoots.TryGetValue(record.FrameIndex + 1, out var next))
-            builder.AddAttestation(NativeAttestation.Categorical(
-                frameRoot, "PRECEDES_IN_TIME", next, _sourceId, SourceTrust.StructuredCorpus));
+            builder.AddAttestation(NativeAttestation.CategoricalResolved(
+                frameRoot, PrecedesInTimeId, next, _sourceId, null, SourceTrust.StructuredCorpus));
 
         Laplace.Ingestion.LayerCompletion.EmitFileMarker(builder, frameRoot, _layerOrder);
         if (record.Metadata is { } metadata)

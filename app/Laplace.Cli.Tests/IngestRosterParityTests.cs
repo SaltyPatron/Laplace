@@ -23,13 +23,16 @@ public sealed class IngestRosterParityTests
             "chess-syzygy",
             "chess-trajectory",
             "code",
+            "frame-video",
             "model",
             "omw-probe",
             "openings",
             "parquet",
             "recipe",
+            "rgba-image",
             "safetensor",
             "tabular",
+            "track-audio",
         };
 
     // 14 -> 15 for chess-opening-match, taken visibly as this shrink-only ceiling
@@ -37,7 +40,12 @@ public sealed class IngestRosterParityTests
     // substrate-sourced, marker-gated, no manifest entry because the witness manifest
     // describes the foundation/knowledge ladder and this is a chess-modality pass, like
     // chess-syzygy and chess-trajectory beside it.
-    private const int OperationalOnlyRouteCeiling = 15;
+    // 15 -> 18 for the media-ladder lanes (frame-video / rgba-image / track-audio):
+    // generic media format lanes, deliberately OUTSIDE the seed-cadence manifest —
+    // no corpus seed is ordered for them (modality-ladder campaign law: identity
+    // locks land first, seeds only on operator order), so operational-only is the
+    // truthful classification until a media corpus enters the ladder.
+    private const int OperationalOnlyRouteCeiling = 18;
 
     [Fact]
     public void RuntimeRoutes_MatchManifestPlusExplicitOperationalRoutes()

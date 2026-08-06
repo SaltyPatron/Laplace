@@ -17,8 +17,11 @@ public readonly struct TrackAudioSource : ISeedSource
     public static IReadOnlyList<string> Relations { get; } =
         ["HAS_SPECTRAL_PEAK", "HAS_ONSET_SEGMENT"];
 
+    // Tier 2 is "Window" — the native audio ladder hashes blake3("Window")
+    // (laplace_modality_tier_type_id) and its tests pin it. "Frame" here was a
+    // C#/native identity split: two different type ids for one tier.
     public static IReadOnlyList<string>? TypeNodeNames =>
-        ["Sample", "Frame", "OnsetSegment", "Phrase", "Track"];
+        ["Sample", "Window", "OnsetSegment", "Phrase", "Track"];
 
     public static SourceLicense License => SourceLicense.Unknown;
 

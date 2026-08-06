@@ -58,6 +58,9 @@ public static class EntityTypeRegistry
     public static readonly Hash128 UdXpos = Id("UD_XPOS");
     public static readonly Hash128 Utf8Role = Id("Utf8Role");
     public static readonly Hash128 VerbNetClass = Id("VerbNet_Class");
+    // Audio ladder tier 2 — matches native laplace_modality_tier_type_id
+    // (blake3("Window")); the audio lanes' "Frame" registration was the split.
+    public static readonly Hash128 Window = Id("Window");
     public static readonly Hash128 Word = Id("Word");
     public static readonly Hash128 WordNetSense = Id("WordNet_Sense");
     public static readonly Hash128 WordNetSynset = Id("WordNet_Synset");
