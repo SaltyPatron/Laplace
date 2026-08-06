@@ -53,8 +53,21 @@ public static class ParallelLineParse
                     if (lineMem.IsEmpty) continue;
                     await rawLines.Writer.WriteAsync(lineMem.ToArray(), runCt);
                 }
+                rawLines.Writer.TryComplete();
             }
-            finally { rawLines.Writer.TryComplete(); }
+            catch (OperationCanceledException)
+            {
+                rawLines.Writer.TryComplete();
+            }
+            catch (Exception ex)
+            {
+                // An IO fault must ride the channel chain: completing rawLines WITH the
+                // fault makes every worker's WaitToReadAsync throw it, which completes
+                // `parsed` faulted and fails the consumer. Completing clean here (the
+                // old `finally`) made a truncated or unreadable file look like a
+                // successful ingest of its readable prefix.
+                rawLines.Writer.TryComplete(ex);
+            }
         }, runCt);
 
         var errors = new ConcurrentQueue<Exception>();
@@ -97,6 +110,11 @@ public static class ParallelLineParse
         }
         finally
         {
+            // A consumer that stops enumerating early leaves the feeder blocked on a
+            // full channel no one drains; awaiting it without cancelling first is a
+            // deadlock. Cancel unblocks feeder and workers; faults on the normal path
+            // have already propagated through the channel completions above.
+            linked.Cancel();
             try { await feeder; } catch { }
         }
     }

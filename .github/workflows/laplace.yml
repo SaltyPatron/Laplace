@@ -440,12 +440,14 @@ jobs:
       # Bounded: a stuck 'running' row must not wedge deploys forever. On timeout this
       # reports what it is waiting on and FAILS rather than deploying anyway -- killing an
       # ingest silently is the thing being fixed.
-      - name: Wait for in-flight ingests (substrate lock)
-        timeout-minutes: 305
-        run: bash scripts/wait-for-quiet-substrate.sh "${PGDATABASE:-laplace}"
+      # Checkout precedes the wait: the wait script comes FROM the checkout, so a
+      # fresh runner workspace has nothing to run until after it (Copilot, PR #797).
       - uses: actions/checkout@v4
         with: { submodules: false, clean: false }
       - uses: ./.github/actions/setup-laplace-env
+      - name: Wait for in-flight ingests (substrate lock)
+        timeout-minutes: 305
+        run: bash scripts/wait-for-quiet-substrate.sh "${PGDATABASE:-laplace}"
 
       - name: Install
         # pipeline.sh install owns the API stop/start around the install window
