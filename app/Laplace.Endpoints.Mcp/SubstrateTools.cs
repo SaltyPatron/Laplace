@@ -144,7 +144,7 @@ internal sealed class SubstrateTools
             () => Schema(("prompt", "string", "the prompt", true)),
             (s, a) => s.PromptLanguage(a)),
         new("bubble", "Bubble a surface term up the mesh to its concept hub.",
-            "Bubble a surface term up the mesh to the highway (laplace.bubble_up): surface -> sense -> synset (ranked by base_eff_mu x domain-log-boost from geometry adjacency, not consensus rows), then the hub above it (IS_INSTANCE_OF/IS_A) and every relation channel available there with edge counts. Returns entity ids, so the next step continues from where this one landed instead of re-entering from text. Use this before facts/walk when a term may resolve at the wrong layer — all three layers render with the SAME text, so a query aimed at the wrong one returns zero rows and looks like missing knowledge. There is no bubble_down (see the taxonomy tool for the closest, IS_A-specific, downward move). Note the render/label split: this tool's rows use render() (canonical name -> tier-0 codepoint -> resolve_name -> full recursive content rebuild -> hex fallback) because a sense/synset's actual gloss text is the point; most other tools (taxonomy, facts, walk, leaders) use label_or_hex() instead (resolve_name, else render() with internal canonical-key scaffolding regex-stripped for readability, else hex) because they want a short display tag, not content. Pick the wrong one and you get either a wall of text where a tag was wanted, or a stripped tag where the actual definition was wanted.",
+            "Bubble a surface term up the mesh (laplace.bubble_up): surface -> sense -> synset, ranked by base_eff_mu x domain-log-boost from geometry adjacency, not consensus rows. Each row is one candidate sense with its synset, the relation that admitted it, and the score/witness fields the election ranked on. It does NOT climb past the synset — no hub row, no per-channel edge counts; continue upward with the taxonomy tool from the returned synset id. Returns entity ids, so the next step continues from where this one landed instead of re-entering from text. Use this before facts/walk when a term may resolve at the wrong layer — all three layers render with the SAME text, so a query aimed at the wrong one returns zero rows and looks like missing knowledge. There is no bubble_down (see the taxonomy tool for the closest, IS_A-specific, downward move). Note the render/label split: this tool's rows use render() (canonical name -> tier-0 codepoint -> resolve_name -> full recursive content rebuild -> hex fallback) because a sense/synset's actual gloss text is the point; most other tools (taxonomy, facts, walk, leaders) use label_or_hex() instead (resolve_name, else render() with internal canonical-key scaffolding regex-stripped for readability, else hex) because they want a short display tag, not content. Pick the wrong one and you get either a wall of text where a tag was wanted, or a stripped tag where the actual definition was wanted.",
             () => Schema(("term", "string", "the surface word or phrase", true),
                          ("k", "integer", "sense frontier width, default 5", false)),
             (s, a) => s.Bubble(a)),
@@ -189,8 +189,9 @@ internal sealed class SubstrateTools
             .Select(t => (JsonNode)Tool(t.Name, t.Summary, t.BuildSchema())).ToArray());
 
     // Dispatch resolves through the catalog itself: a ToolSpec cannot be declared
-    // without a Handler, so the advertised list and the callable list are the same
-    // list by construction.
+    // without a Handler, so every advertised tool is callable by construction.
+    // The converse is not symmetric: `sql` stays callable-but-unadvertised outside
+    // the operator lane (ListTools filters it; its handler carries its own gate).
     public (string Text, bool IsError) Call(string name, JsonObject? args)
     {
         var spec = ToolCatalog.FirstOrDefault(t => string.Equals(t.Name, name, StringComparison.Ordinal));
