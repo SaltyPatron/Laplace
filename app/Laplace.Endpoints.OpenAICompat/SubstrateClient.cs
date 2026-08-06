@@ -104,6 +104,22 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         // One turn in, one read out. Conversation state is substrate-resident
         // (session context + session_topics carry) — clients never resend history,
         // and a resent history would be ignored here by construction (spec 34).
+        //
+        // laplace.chat() is the conversational entry point — orientation over the
+        // prompt's candidate senses, session carry, shape/band lenses, and its own
+        // internal fallbacks — the same lane the MCP chat tool and CLI ride. This
+        // endpoint predated chat() and was still reading recall_session directly,
+        // which treats the prompt as a phrase lookup: measured on the deployed box,
+        // "What is a dog?" answered "I hold \"a dog\" but no gloss or continuation
+        // witnessed yet" on this lane while chat() answered with the dog gloss.
+        // recall_session stays as the fallback when chat yields nothing, so the
+        // no-consensus case still reports truthfully instead of faking prose.
+        // Tenant scoping is unaffected: chat() reads `consensus` unqualified, so
+        // the pg_temp.consensus shadow on THIS connection governs it the same way.
+        var reply = await NpgsqlSubstrateReads.ChatAsync(conn, prompt, session, ct);
+        if (!string.IsNullOrWhiteSpace(reply))
+            return [new ConverseRow(reply, 0m, 0L)];
+
         var rows = await NpgsqlSubstrateReads.RecallSessionAsync(conn, prompt, session, ct);
         return [.. rows.Select(r => new ConverseRow(r.Reply, r.EffMu ?? 0m, r.Witnesses ?? 0L))];
     }
