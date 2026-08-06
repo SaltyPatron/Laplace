@@ -36,7 +36,9 @@ if pgrep -f "Runner\.Worker" >/dev/null 2>&1; then
 fi
 
 echo "guards passed: journal quiet, backends idle, no CLI, no worker"
-sudo -n systemctl restart "$UNIT" \
+# Absolute path: sudoers matches commands by full path, so a bare `systemctl`
+# resolving to /bin on some host would false-refuse against the installed rule.
+sudo -n /usr/bin/systemctl restart "$UNIT" \
     || fail "sudo -n restart failed — passwordless rule for $UNIT not installed"
 sleep 3
 systemctl is-active "$UNIT" >/dev/null || fail "$UNIT did not come back active"
