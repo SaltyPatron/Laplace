@@ -148,10 +148,20 @@ convenient.”
    replay. Fix target named on-issue: widen the starts/core derivation for
    single-anchor prompts; acceptance = W5 variance detector flips 1/3→3/3
    on dog/water/king, printed by every deploy.
-   Next session's ordered picks: (1) the #751 starts-widening fix — the
-   smallest speak-lane unblock, acceptance automated; (2) #755 threshold
-   flip once deploys accumulate; (3) G4 destination read as an installed op
-   (CALLS in-degree — data exists).
+   **REPLAY FIXED (PR #884 merged, 2026-08-06):** two layers — starts
+   widened to every kept gid (SQL) AND the root cause in steered_walk.c:
+   the core-backbone branch seeded from core_elems[0],[1] unconditionally,
+   rng never ran; now one LCG advance picks the entry offset (uint64
+   modulus per review). Diagnosis detour on record: a starts-only fix
+   passed local reasoning and failed acceptance — the CTE diagnostic showed
+   159 kept gids, which forced the C read that found the dead branch. The
+   MERGE'S OWN DEPLOY printed the proof: dog 3/3, water 2/3 (offset
+   collision), king 3/3, sentences 3/3, zero REPLAY flags.
+   Next session's ordered picks: (1) Phase 2 item 2 proper — wire the now
+   seed-responsive compose into chat(shape='walk') with p_seed/p_lang
+   threading (#751, the plan's own sequence); (2) #755 threshold flip once
+   deploys accumulate; (3) G4 destination read as an installed op (CALLS
+   in-degree — data exists).
 3. **W6 remainder / #758** — still open:
    - G4 dead-canonical (**destination** = substrate `CALLS` in-degree after
      W3; **scaffolding** = labeled grep + shrink-only allowlist may ship first)
