@@ -126,6 +126,38 @@ def warmup(db, word, steps):
         SELECT count(*) FROM generation_probe('{q(word)}', ARRAY[7]::bigint[], {int(steps)});""")
 
 
+def lang_pin(db, word, seeds, steps):
+    # LM-Head p_lang probe (advisory): compose the topic with a NON-English
+    # realization language pinned and measure the fraction of reply tokens the
+    # substrate itself attributes to that language. The pin language resolves
+    # through the installed surface (word_language of a known Bulgarian
+    # surface) rather than a hardcoded id. Expected ~0.0 until multilingual
+    # sense/usage data lands (#751 data gap — concept_map falls through to
+    # surfaces exactly where hopping is needed); the probe exists so the flip
+    # is MEASURED the day the seeds land, not asserted. Never enforced here.
+    total_hits = total_toks = 0
+    for seed in seeds:
+        rows = psql_rows(db, f"""
+            SET search_path = laplace, public;
+            SET statement_timeout = '300s';
+            WITH lang AS (SELECT word_language(word_id('животно')) AS lid),
+                 r AS (SELECT converse_compose('{q(word)}', {int(steps)},
+                                               (SELECT lid FROM lang),
+                                               {int(seed)}) AS reply),
+                 toks AS (SELECT w.id FROM r, prompt_words(r.reply) w
+                          WHERE r.reply IS NOT NULL AND w.id IS NOT NULL)
+            SELECT count(*) FILTER (WHERE word_language(t.id) = (SELECT lid FROM lang)),
+                   count(*)
+            FROM toks t;""")
+        for row in rows:
+            hits, toks = (row.split("\t") + ["0", "0"])[:2]
+            total_hits += int(hits or 0)
+            total_toks += int(toks or 0)
+    rate = round(total_hits / total_toks, 3) if total_toks else None
+    print(f"{word:>24} lang-pin: rate={rate} tokens={total_toks}  [advisory]")
+    return {"lang_pin_rate": rate, "lang_pin_tokens": total_toks}
+
+
 def score(prompt, replies, expected):
     toks = [t.lower() for r in replies for t in WORD_RE.findall(r)]
     if not toks:
@@ -181,6 +213,8 @@ def main():
         expected = expected_set(args.db, word, args.expected_per_probe) if is_topic else set()
         lanes = probe(args.db, word, seeds, args.steps)
         report[word] = {}
+        if is_topic:
+            report[word]["lang_pin"] = lang_pin(args.db, word, seeds[:2], args.steps)
         for lane, replies in sorted(lanes.items()):
             s = score(word, replies, expected)
             s["expected_n"] = len(expected)
@@ -208,6 +242,8 @@ def main():
         failures = []
         for word, lanes in report.items():
             for lane, s in lanes.items():
+                if lane == "lang_pin":  # advisory metric, never enforced
+                    continue
                 if s["seed_variance"] == 1 and len(seeds) > 1:
                     failures.append(f"{word}/{lane}: REPLAY (variance 1/{len(seeds)})")
                 if not s.get("empty") and s.get("echo_rate", 0) > 0.5:
