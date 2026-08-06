@@ -411,7 +411,9 @@ BEGIN
             -- also eats the caller's Ctrl-C and makes chat() un-cancellable
             -- for the duration. A caller naming `walk` is asking for the
             -- generator and can bound it with their own statement_timeout.
-            SELECT count(*) INTO depth FROM session_topics t
+            -- max(ord) is the turn counter session_record_prompt maintains:
+            -- PK-indexed, no full per-session count, no bigint->int narrowing.
+            SELECT COALESCE(max(t.ord), 0) INTO depth FROM session_topics t
               WHERE t.session_id = p_session;
             out := converse_compose(
                 p_prompt, 40, lang,
