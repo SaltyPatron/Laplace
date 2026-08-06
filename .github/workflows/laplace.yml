@@ -704,16 +704,19 @@ jobs:
             --filter 'Tier!=perf & Tier!=db & FullyQualifiedName~Endpoints.OpenAICompat'
 
   eval:
-    name: Eval — generation / election quality (advisory)
+    name: Eval — generation / election quality (replay+echo blocking)
     needs: [publish, smoke]
-    # Same seeded guard as smoke. continue-on-error: advisory week (W5 D7);
-    # blocking_flip_date in scripts/eval-baselines.json records when this flips.
+    # Same seeded guard as smoke. FLIPPED TO BLOCKING 2026-08-06 (operator
+    # ruling: thresholds are the agent's call, not a deferred question). The
+    # lane detectors enforce ONLY the unambiguous regression classes — replay
+    # (variance==1, the #751/#884 class) and echo (rate>0.5, the #878 class).
+    # Content/flatness remain advisory while concept-stream work (#751 R1)
+    # moves them. The election harness governs itself via eval-baselines.json.
     if: >-
       !cancelled() && needs.publish.result == 'success' &&
       needs.publish.outputs.seeded == 'true' &&
       needs.smoke.result == 'success'
     runs-on: [self-hosted, laplace]
-    continue-on-error: true
     concurrency:
       group: laplace-substrate-lifecycle
       cancel-in-progress: false
@@ -732,17 +735,18 @@ jobs:
             --report .eval-proof/generation.json
 
       - name: Lane detectors — seed variance / echo / flatness / content (W5 #755)
-        # Advisory with the job (continue-on-error): per-lane R6 detectors over
-        # the live seeded box. Thresholds ride the eval-baselines flip when the
-        # advisory week ends; until then the numbers land in the job log and
-        # .eval-proof so regressions are visible the day they happen instead of
-        # the month they get measured (converse_tiered, GH #878).
+        # BLOCKING as of 2026-08-06 on the two unambiguous regression classes
+        # only — replay (variance==1 across seeds, the #751/#884 class) and
+        # echo (rate>0.5, the #878 class) via --enforce; content/flatness stay
+        # advisory in the report while #751 R1 moves those numbers. Full table
+        # lands in the job log and .eval-proof every deploy.
         # Independent measurement: runs even when the harness step above fails.
         if: ${{ !cancelled() }}
         run: |
           python3 scripts/verify-generation.py \
             --db "host=/var/run/postgresql user=laplace_admin dbname=laplace" \
-            --report .eval-proof/lane-detectors.json
+            --report .eval-proof/lane-detectors.json \
+            --enforce
 
   restore-api:
     name: Restore API (always — even after failed stages)

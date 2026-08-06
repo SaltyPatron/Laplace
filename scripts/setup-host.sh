@@ -164,6 +164,36 @@ do_setup() {
     say "Layer 0b — runner, PG cluster, API unit, chess-lab, secrets seed"
     sudo "$BOOTSTRAP" bootstrap
 
+    say "Layer 0c — agent ops lever: guarded runner bounce (sudoers drop-in)"
+    # scripts/runner-bounce.sh refuses unless the ingest journal, database
+    # backends, CLI processes, and Runner.Worker ALL prove quiet — then and
+    # only then restarts the runner unit (the stale-busy wedge measured
+    # 2026-08-06 cost ~15min with no lever). This drop-in grants passwordless
+    # restart for exactly that one unit and nothing else. Idempotent:
+    # content-compared, visudo-validated, removed on validation failure.
+    RUNNER_UNIT="actions.runner.SaltyPatron-Laplace.hart-server.service"
+    # The rule targets whoever ran setup (SUDO_USER), never a hard-coded name —
+    # a hard-coded account grants the lever to the wrong user on another host.
+    BOUNCE_USER="${SUDO_USER:-}"
+    if [ -z "$BOUNCE_USER" ]; then
+        red "SUDO_USER unset — run via sudo so the bounce rule targets the operator account"
+        exit 1
+    fi
+    SUDOERS_LINE="$BOUNCE_USER ALL=(root) NOPASSWD: /usr/bin/systemctl restart $RUNNER_UNIT"
+    SUDOERS_FILE="/etc/sudoers.d/laplace-runner-bounce"
+    if [ ! -f "$SUDOERS_FILE" ] || [ "$(sudo cat "$SUDOERS_FILE")" != "$SUDOERS_LINE" ]; then
+        printf '%s\n' "$SUDOERS_LINE" | sudo tee "$SUDOERS_FILE" >/dev/null
+        sudo chmod 440 "$SUDOERS_FILE"
+        if ! sudo visudo -cf "$SUDOERS_FILE"; then
+            sudo rm -f "$SUDOERS_FILE"
+            red "sudoers drop-in failed validation — removed"
+            exit 1
+        fi
+        green "installed $SUDOERS_FILE"
+    else
+        green "runner-bounce sudoers already current"
+    fi
+
     # Billing is part of setup — not a separate human mode.
     seed_billing_from_operator_files
 
