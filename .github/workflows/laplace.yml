@@ -720,7 +720,14 @@ jobs:
     concurrency:
       group: laplace-substrate-lifecycle
       cancel-in-progress: false
-    timeout-minutes: 20
+    # 20 was sized to the pre-concept-stream compose and killed the battery at
+    # 20m15s on 2026-08-06 (all prior jobs green). The concept-stream compose
+    # pays senses() per distinct stream token — its documented tolerance until
+    # the #757 C port — and the battery runs on a COLD cache right after this
+    # run's own PostgreSQL restart: measured 2-3 min/probe cold vs 8.6s warm,
+    # I/O-bound. 45 bounds the cold worst case without loosening the per-
+    # statement 300s honesty inside verify-generation.py.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with: { submodules: false, clean: false }
