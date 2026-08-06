@@ -52,6 +52,10 @@ CREATE OR REPLACE FUNCTION converse_compose(p_prompt text,
     SET search_path = @extschema@, public AS $$
 DECLARE
     b_def  int := 1;
+    -- The compose frontier's content bands — definitional, taxonomic,
+    -- partitive, associative — named once; G8 forbids band literals at
+    -- relation_highway_band call sites.
+    content_bands int[] := ARRAY[1, 2, 4, 7];
     SENT   bytea := '\x00';
     MINLEN int := 5;
     syn    bytea;
@@ -96,11 +100,11 @@ BEGIN
     frontier AS MATERIALIZED (
         SELECT c.object_id AS cid, eff_mu(c.rating, c.rd) AS mu
         FROM consensus c
-        WHERE c.subject_id = syn AND relation_highway_band(c.type_id) IN (1,2,4,7)
+        WHERE c.subject_id = syn AND relation_highway_band(c.type_id) = ANY (content_bands)
         UNION ALL
         SELECT c.subject_id, eff_mu(c.rating, c.rd)
         FROM consensus c
-        WHERE c.object_id = syn AND relation_highway_band(c.type_id) IN (1,2,4,7)
+        WHERE c.object_id = syn AND relation_highway_band(c.type_id) = ANY (content_bands)
         UNION ALL
         SELECT syn, (SELECT max(eff_mu(c2.rating, c2.rd)) FROM consensus c2
                      WHERE c2.subject_id = syn)
@@ -122,13 +126,13 @@ BEGIN
         SELECT c.object_id, eff_mu(c.rating, c.rd) / (2 ^ x.dist)
         FROM unnest(COALESCE(p_ctx, ARRAY[]::bytea[])) WITH ORDINALITY x(cid, dist)
         JOIN consensus c ON c.subject_id = x.cid
-                        AND relation_highway_band(c.type_id) IN (1,2,4,7)
+                        AND relation_highway_band(c.type_id) = ANY (content_bands)
         WHERE x.cid <> syn
         UNION ALL
         SELECT c.subject_id, eff_mu(c.rating, c.rd) / (2 ^ x.dist)
         FROM unnest(COALESCE(p_ctx, ARRAY[]::bytea[])) WITH ORDINALITY x(cid, dist)
         JOIN consensus c ON c.object_id = x.cid
-                        AND relation_highway_band(c.type_id) IN (1,2,4,7)
+                        AND relation_highway_band(c.type_id) = ANY (content_bands)
         WHERE x.cid <> syn
         UNION ALL
         SELECT x.cid, (SELECT max(eff_mu(c2.rating, c2.rd)) FROM consensus c2

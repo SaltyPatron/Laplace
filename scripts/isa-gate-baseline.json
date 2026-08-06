@@ -750,7 +750,6 @@
       "extension/laplace_substrate/sql/functions/converse/chat.sql.in::RELATION_HIGHWAY_BAND(C.TYPE_ID)=2": 1,
       "extension/laplace_substrate/sql/functions/converse/chat.sql.in::RELATION_HIGHWAY_BAND(C.TYPE_ID)=4": 1,
       "extension/laplace_substrate/sql/functions/converse/chat.sql.in::RELATION_HIGHWAY_BAND(C.TYPE_ID)=7": 1,
-      "extension/laplace_substrate/sql/functions/converse/converse_compose.sql.in::RELATION_HIGHWAY_BAND(C.TYPE_ID)IN(1,2,4,7)": 2,
       "extension/laplace_substrate/sql/functions/lexical/senses_with_context.sql.in::RELATION_HIGHWAY_BAND(C.TYPE_ID)IN(1,7)": 1,
       "extension/laplace_substrate/sql/functions/lexical/senses_with_context.sql.in::RELATION_HIGHWAY_BAND(C.TYPE_ID)IN(2,4,7)": 2
     }
