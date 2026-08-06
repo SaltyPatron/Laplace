@@ -4,6 +4,7 @@ using Laplace.Decomposers.Code;
 using Laplace.Decomposers.ConceptNet;
 using Laplace.Decomposers.FrameNet;
 using Laplace.Decomposers.ISO;
+using Laplace.Decomposers.Media;
 using Laplace.Decomposers.Model;
 using Laplace.Decomposers.OMW;
 using Laplace.Decomposers.OpenSubtitles;
@@ -60,12 +61,17 @@ public static class SeedIngestComposition
         ("tiny-codes", typeof(TinyCodesDecomposer)),
         ("stack", typeof(StackDecomposer)),
         ("document", typeof(DocumentDecomposer)),
+        ("rgba-image", typeof(RgbaImageDecomposer)),
+        ("track-audio", typeof(TrackAudioDecomposer)),
+        ("frame-video", typeof(FrameVideoDecomposer)),
     ];
 
     public static IServiceCollection AddLaplaceSeedIngest(this IServiceCollection services)
     {
         services.AddSingleton<IContentRecordAdapter, TreeSitterTextAdapter>();
         services.AddSingleton<IContentRecordAdapter, SafetensorsContentAdapter>();
+        services.AddSingleton<IContentRecordAdapter, RgbaContentAdapter>();
+        services.AddSingleton<IContentRecordAdapter, WavContentAdapter>();
 
         foreach (var (_, decomposer) in Registry)
             services.AddTransient(decomposer);

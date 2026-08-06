@@ -92,6 +92,21 @@ public sealed record IngestSourceProfile(
     /// trees per record, so this is two compose units like a relation triple.</summary>
     public static readonly IngestSourceProfile FrameNet = new(4_096, 2);
 
+    /// <summary>
+    /// Image packaging → RGBA recovery buffer size dominates; one codepoint-floor
+    /// image ladder compose per file.
+    /// </summary>
+    public static readonly IngestSourceProfile MediaImage = new(256_000, 1);
+
+    /// <summary>
+    /// Audio packaging → PCM16 mono recovery size dominates; one codepoint-floor
+    /// audio ladder compose per file.
+    /// </summary>
+    public static readonly IngestSourceProfile MediaAudio = new(128_000, 1);
+
+    /// <summary>Video as ordered frame recoveries — one image ladder per frame record.</summary>
+    public static readonly IngestSourceProfile MediaVideo = new(256_000, 1);
+
     public int WorkingSetBytesPerRecord =>
         Math.Max(1, EstBytesPerRecord) * Math.Max(1, EstComposeUnitsPerRecord);
 }

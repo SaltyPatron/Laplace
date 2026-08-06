@@ -318,11 +318,11 @@ internal static class IngestExistenceGate
 /// Sentinel unit handed to <c>WalkWitness</c> when the existence gate short-circuits an
 /// already-present root — the discriminator handlers use to tell the present path from a
 /// real compose (do NOT infer it from <c>TreeForBatchProbe == null</c>, which other unit
-/// shapes legitimately return).
+/// shapes legitimately return). Public so decomposer assemblies can discriminate the same way.
 /// </summary>
-internal sealed class PresentRootDeferredUnit : IIngestDeferredUnit
+public sealed class PresentRootDeferredUnit : IIngestDeferredUnit
 {
-    internal static readonly PresentRootDeferredUnit Instance = new();
+    public static readonly PresentRootDeferredUnit Instance = new();
     public TierTree? TreeForBatchProbe => null;
     public Task<byte[]?> ProbeDescentAsync(ISubstrateReader reader, CancellationToken ct) =>
         Task.FromResult<byte[]?>(null);

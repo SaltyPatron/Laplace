@@ -8,12 +8,10 @@ namespace Laplace.Cli;
 /// is a logical key, identical to the CLI name in every manifest row) — this is
 /// the one place that records a source's directory layout.
 ///
-/// `image` and `audio` have no dispatch route yet. They are DECLARED MODALITY
-/// LANES, not dead entries: this substrate is omni-modal by construction (text,
-/// chess, code, AI models, each with its own tier ladder under one identity law),
-/// and their corpora are already staged under test-data/. Do not delete them
-/// because nothing calls them — "no caller" here means "not yet implemented", and
-/// removing a lane on that basis erases the intent instead of building it.
+/// Legacy `image` / `audio` path keys remain for staged corpora under test-data/.
+/// Live media dispatch: `rgba-image` / `track-audio` / `frame-video` (generic lanes;
+/// stub ImageDecomposer/AudioDecomposer names stay banned by integrity gates).
+/// Corpora (e.g. Tatoeba) are sources, not media format keys.
 /// </summary>
 internal static class IngestDataPaths
 {
@@ -41,6 +39,9 @@ internal static class IngestDataPaths
         ["tiny-codes"] = "tiny-codes",
         ["image"] = "test-data/images",
         ["audio"] = "test-data/audio",
+        ["rgba-image"] = "test-data/images",
+        ["track-audio"] = "test-data/audio",
+        ["frame-video"] = "test-data/video",
     };
 
     public static string Resolve(string cliSource, string? cliPath = null)

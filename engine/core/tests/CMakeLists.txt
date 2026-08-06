@@ -6,10 +6,13 @@ set(LAPLACE_CORE_TEST_SOURCES
     test_hilbert4d.cpp
     test_mantissa.cpp
     test_super_fibonacci.cpp
-    test_modality_atoms.cpp
+    test_image_decomposer.cpp
+    test_audio_decomposer.cpp
+    test_media_decode.cpp
     test_glicko2.cpp
     test_score.cpp
     test_codepoint_table.cpp
+    test_modality_number_table.cpp
     test_astar.cpp
     test_trajectory.cpp
     test_tier_tree.cpp
@@ -32,6 +35,8 @@ set(LAPLACE_CORE_TEST_SOURCES
 add_compile_definitions(LAPLACE_UCD_PATH_FOR_TESTS="${LAPLACE_UCD_CONFORMANCE_DIR}")
 
 add_compile_definitions(LAPLACE_PERFCACHE_PATH_FOR_TESTS="${LAPLACE_PERFCACHE_BIN}")
+add_compile_definitions(
+    LAPLACE_MODALITY_NUMBER_PERFCACHE_PATH_FOR_TESTS="${LAPLACE_MODALITY_NUMBER_PERFCACHE_BIN}")
 
 # Committed Syzygy fixture tables (KQvK/KRvK, ~14 KB) for the probe kernel.
 add_compile_definitions(
@@ -39,7 +44,7 @@ add_compile_definitions(
 
 add_executable(laplace_core_tests ${LAPLACE_CORE_TEST_SOURCES})
 
-add_dependencies(laplace_core_tests laplace_t0_perfcache)
+add_dependencies(laplace_core_tests laplace_t0_perfcache laplace_modality_number_perfcache)
 
 target_link_libraries(laplace_core_tests
     PRIVATE laplace_core GTest::gtest_main
