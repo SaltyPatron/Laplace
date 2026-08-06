@@ -40,8 +40,8 @@ public sealed record LaplaceChatMetadata(
 
 public sealed record ProvenanceLine(
     [property: JsonPropertyName("reply")] string Reply,
-    [property: JsonPropertyName("eff_mu")] decimal EffMu,
-    [property: JsonPropertyName("witnesses")] long Witnesses);
+    [property: JsonPropertyName("eff_mu"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] decimal? EffMu,
+    [property: JsonPropertyName("witnesses"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? Witnesses);
 
 
 public sealed record ChunkProvenance(

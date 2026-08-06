@@ -168,7 +168,11 @@ internal static class InferenceEndpoints
                 Choices: [new ChatChoice(0, new ChatResponseMessage("assistant", content), "stop")],
                 Billing: null,
                 Metadata: new ChatMetadata(
-                    Witnesses: rows.Sum(r => r.Witnesses),
+                    // Null when NO row carries a count (the chat() lane) — a sum of
+                    // absences is not 0, it is absence (same rule as bool_or over
+                    // zero rows in the read path).
+                    Witnesses: rows.Any(r => r.Witnesses is not null)
+                        ? rows.Sum(r => r.Witnesses ?? 0L) : null,
                     ReplyRows: rows.Count,
                     Session: scope.SessionKey,
                     Laplace: new LaplaceChatMetadata(

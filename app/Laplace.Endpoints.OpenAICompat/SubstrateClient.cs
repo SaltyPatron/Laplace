@@ -118,10 +118,10 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         // the pg_temp.consensus shadow on THIS connection governs it the same way.
         var reply = await NpgsqlSubstrateReads.ChatAsync(conn, prompt, session, ct);
         if (!string.IsNullOrWhiteSpace(reply))
-            return [new ConverseRow(reply, 0m, 0L)];
+            return [new ConverseRow(reply, null, null)];
 
         var rows = await NpgsqlSubstrateReads.RecallSessionAsync(conn, prompt, session, ct);
-        return [.. rows.Select(r => new ConverseRow(r.Reply, r.EffMu ?? 0m, r.Witnesses ?? 0L))];
+        return [.. rows.Select(r => new ConverseRow(r.Reply, r.EffMu, r.Witnesses))];
     }
 
 
