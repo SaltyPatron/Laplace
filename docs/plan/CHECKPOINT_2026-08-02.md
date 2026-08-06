@@ -123,10 +123,16 @@ convenient.”
    queueing + HAS_MOTIF hot=true/codegen); PR #881 merged (ctest tripwire
    naming the missing-build/ failure). #880 carries the measured timeline;
    the ORIGINAL build/-deleter on the runner is unidentified — the tripwire
-   names any recurrence. Next session's ordered picks: (1) DEFINES
-   span-lookup gap (#765 comment has the suspect), (2) W5 runner over
-   generation_probe + prompts_smoke with the R6 detectors, (3)
-   converse_compose input-array diagnosis (#751: starts_n / weight peaking).
+   names any recurrence.
+   **#765 CLOSED (late 2026-08-05):** the "DEFINES=0 gap" was a probe error —
+   DEFINES aliases HAS_DEFINITION; via relation_type_resolve the canonical
+   counts 340 DEFINES + 774 CALLS for CodeDecomposer. W3 extraction fully
+   working; REFERENCES zero by tags coverage (no @reference.type pattern
+   yet), not defect. Next session's ordered picks: (1) W5 runner over
+   generation_probe + prompts_smoke with the R6 detectors (#755),
+   (2) converse_compose input-array diagnosis (#751: starts_n / weight
+   peaking), (3) G4 destination read as an installed op (CALLS in-degree —
+   the data now exists).
 3. **W6 remainder / #758** — still open:
    - G4 dead-canonical (**destination** = substrate `CALLS` in-degree after
      W3; **scaffolding** = labeled grep + shrink-only allowlist may ship first)
