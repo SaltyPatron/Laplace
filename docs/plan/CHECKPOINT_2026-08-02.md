@@ -179,12 +179,31 @@ convenient.”
    setup-host once to install. Eval FLIPPED TO BLOCKING on replay+echo only
    (operator ruling: thresholds are the agent's call); content/flatness
    advisory while R1 moves them.
+   **EVAL GATE ARC CLOSED (PR #887 merged; production deploy printed EVAL
+   PASS — election 6/6 exact, hygiene 4/4 clean):** the flip's first day
+   found a dead baseline (pre-seed fingerprint — the election gate had
+   judged nothing for weeks under continue-on-error) and a real leak class
+   (raw WordNet offset keys as infer predictions). Fixed: nameable-only
+   candidates (word_language / concept_members via CASE, id-space, G3-clean)
+   + baseline re-recorded. forward-hot-opposite unreached = #757 reverse
+   direction, correctly non-blocking.
+   **MEDIA CAMPAIGN LANDED (PR #888 merged + deployed green, 2026-08-06):**
+   codepoint-floor image/audio/video ladders — T0 is ALWAYS Unicode
+   codepoints, media reduces to digit-composed numbers, forged packed-atom
+   alphabet ripped BEFORE any seed froze it. Cursor/Grok built it; this lane
+   gated, reviewed, and fixed it to land: Window/Frame C#/native type-id
+   split (identity bug caught pre-seed), compose-rc propagation, two
+   law-contradicting prose sites, G3-C# roster exemption (declare-by-name
+   gate vs literal ratchet conflict resolved at root; ceiling 701→506,
+   195 tighter), G7 routes classified operational-only (ceiling 15→18,
+   documented). NO media corpus seed ordered — identity locks only.
    Next session's ordered picks: (1) concept-level stream so p_lang bites
    (#751 — the last R1 blocker); (2) #814 criterion 3 once the operator
-   picks path (a) ops-table or (b) gaps-as-testimony; (3) G4 destination
-   read as an installed op; (4) Phase 2 items 3–5 (kappa/covered, pinned-
-   seed generation regress). Big seeds (UD/ConceptNet/Tatoeba/Wiktionary/
-   OpenSubtitles) parked pending decomposer rework — on disk, not blocking.
+   picks (a) ops-table or (b) gaps-as-testimony; (3) G4 destination read as
+   an installed op; (4) Phase 2 items 3–5 (kappa/covered, pinned-seed
+   generation regress); (5) media follow-ons per #888's own list (number-ROM
+   GUC/prewarm, live vault smoke, #803 Tatoeba bridge). Big text seeds
+   parked pending decomposer rework — on disk, not blocking.
 3. **W6 remainder / #758** — still open:
    - G4 dead-canonical (**destination** = substrate `CALLS` in-degree after
      W3; **scaffolding** = labeled grep + shrink-only allowlist may ship first)
