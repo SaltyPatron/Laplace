@@ -3,7 +3,11 @@ namespace Laplace.Endpoints.OpenAICompat;
 
 
 
-internal sealed record ConverseRow(string Reply, decimal EffectiveMu, long Witnesses);
+// Provenance is nullable because absence and zero are different claims: a chat()
+// reply is a composed answer whose per-row eff_mu/witnesses have no single value
+// (Copilot on PR #892 — reporting 0 there asserted "no evidence" for an
+// evidence-backed reply). recall_session rows keep their measured values.
+internal sealed record ConverseRow(string Reply, decimal? EffectiveMu, long? Witnesses);
 
 internal sealed record CompletionRow(
     string ObjectIdHex,

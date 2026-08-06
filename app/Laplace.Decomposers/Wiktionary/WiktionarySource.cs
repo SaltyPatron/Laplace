@@ -22,6 +22,9 @@ public readonly struct WiktionarySource : ISeedSource
         "IS_TRANSLATION_OF", "ETYMOLOGICALLY_DERIVED_FROM", "BORROWED_FROM",
         "INHERITED_FROM", "ETYMOLOGICALLY_RELATED_TO", "DERIVED_FROM",
         "FORM_OF", "HAS_FEATURE", "MANNER_OF",
+        // Emitted by WiktionaryEmit all along but never declared here (decomposers
+        // must declare every relation they emit — CLAUDE.md Writes).
+        "HAS_LANGUAGE", "CORRESPONDS_TO",
     ];
 
     public static IReadOnlyList<string>? TypeNodeNames => null;

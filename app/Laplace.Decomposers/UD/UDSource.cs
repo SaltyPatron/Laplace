@@ -15,7 +15,9 @@ public readonly struct UDSource : ISeedSource
 
     public static IReadOnlyList<string> Relations { get; } =
         ["HAS_DEFINITION", "TRANSCRIBES_AS", "ENHANCED_DEPENDS_ON",
-         "HAS_POS", "HAS_XPOS", "HAS_LANGUAGE", "IS_A"];
+         "HAS_POS", "HAS_XPOS", "HAS_LANGUAGE", "IS_A",
+         // Emitted by UdSentenceEmitter all along but never declared here.
+         "IS_LEMMA_OF", "HAS_PART"];
 
     public static IReadOnlyList<string>? TypeNodeNames { get; } =
         ["UD_Feature"];

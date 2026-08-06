@@ -100,17 +100,12 @@ BEGIN
         SELECT syn, (SELECT max(eff_mu(c2.rating, c2.rd)) FROM consensus c2
                      WHERE c2.subject_id = syn)
     ),
-    -- The frontier is concepts; the stream is word tokens. Project it down to the
-    -- SURFACE members of each frontier concept so a token can be matched directly:
-    -- one indexed join instead of top_synset() per distinct stream token.
-    frontier_words AS MATERIALIZED (
-        SELECT s.subject_id AS wid, max(f.mu) AS mu
-        FROM frontier f
-        JOIN consensus ss ON ss.object_id = f.cid
-                         AND ss.type_id = relation_type_id('IS_SENSE_OF')
-        JOIN consensus s ON s.object_id = ss.subject_id
-                        AND s.type_id = relation_type_id('HAS_SENSE')
-        GROUP BY s.subject_id
+    -- The frontier is concepts and — since the concept-stream change — so is
+    -- the stream: steering matches DIRECTLY in concept space (GH #751, slot
+    -- map: the stream is language-free). The old frontier_words projection
+    -- down to surface members is gone with the word-level stream it served.
+    frontier_agg AS MATERIALIZED (
+        SELECT f.cid, max(f.mu) AS mu FROM frontier f GROUP BY f.cid
     ),
     gids AS (
         SELECT DISTINCT g.gid, g.wt, g.is_core FROM (
@@ -146,15 +141,39 @@ BEGIN
             WHERE NOT ws.is_ws
         ) q WHERE q.cnt >= 2
     ),
+    -- CONCEPT STREAM (GH #751; slot map: Embed is per-tier, the stream is
+    -- language-free). Each distinct kept word maps to its best sense; words
+    -- with no sense (numbers, names, glue) keep their surface id, so
+    -- realization still has something to print. Election context is the
+    -- token alone — EVIDENCE BEFORE ADJUDICATED STRENGTH, mirroring
+    -- senses()'s own ORDER BY (witnesses, then eff_mu; the urine-over-water
+    -- election in senses.sql.in is why strength alone mis-elects on
+    -- one-witness exact ties). Contextual salience is Phase 3 (R3).
+    -- senses() per DISTINCT token rides the same documented tolerance as
+    -- the orientation above, until the C port (#757). The payoff is the
+    -- LM-Head slot: realize(concept, p_lang) finally gets to choose the
+    -- language member instead of parroting the witness's surface — p_lang
+    -- bites.
+    concept_map AS MATERIALIZED (
+        SELECT d.id AS wid,
+               COALESCE(
+                   (SELECT s.synset_id FROM senses(d.id) s
+                     ORDER BY s.witnesses DESC, s.eff_mu DESC NULLS LAST,
+                              s.synset_id LIMIT 1),
+                   d.id) AS cid
+        FROM (SELECT DISTINCT k.entity_id AS id FROM kept k) d
+    ),
     seq AS MATERIALIZED (
-        -- THE STEER. Provenance weight (which source) PLUS frontier salience (how
-        -- on-topic this turn), so an off-frontier token stays eligible but a token
-        -- whose concept the walk actually reached pulls harder.
+        -- THE STEER. Provenance weight (which source) PLUS frontier salience
+        -- (how on-topic this turn) — matched in concept space, no surface
+        -- projection. An off-frontier token stays eligible; a token whose
+        -- concept the frontier actually holds pulls harder.
         SELECT k.gid, k.is_core,
-               k.wt + COALESCE((fw.mu / 1e10)::bigint, 0) AS wt,
-               k.entity_id AS id, k.rn
+               k.wt + COALESCE((fa.mu / 1e10)::bigint, 0) AS wt,
+               cm.cid AS id, k.rn
         FROM kept k
-        LEFT JOIN frontier_words fw ON fw.wid = k.entity_id
+        JOIN concept_map cm ON cm.wid = k.entity_id
+        LEFT JOIN frontier_agg fa ON fa.cid = cm.cid
         UNION ALL
         SELECT DISTINCT k.gid, k.is_core, 0::bigint, SENT, 2147483647::bigint
         FROM kept k
@@ -171,12 +190,14 @@ BEGIN
            -- makes them unconditional, which is what "recombination rather
            -- than replay" requires. Acceptance: the W5 lane detector printed by
            -- every deploy flips variance 1/3 -> 3/3 on the probe topics.
-           (SELECT array_agg(k1.entity_id ORDER BY k1.is_core DESC, k1.gid)
-            FROM (SELECT k0.entity_id, k0.is_core, k0.gid
-                  FROM kept k0 WHERE k0.rn = 1
+           (SELECT array_agg(k1.cid ORDER BY k1.is_core DESC, k1.gid)
+            FROM (SELECT cm.cid, k0.is_core, k0.gid
+                  FROM kept k0 JOIN concept_map cm ON cm.wid = k0.entity_id
+                  WHERE k0.rn = 1
                   ORDER BY k0.is_core DESC, k0.gid
                   LIMIT 32) k1),
-           (SELECT array_agg(k.entity_id ORDER BY k.rn) FROM kept k
+           (SELECT array_agg(cm.cid ORDER BY k.rn)
+              FROM kept k JOIN concept_map cm ON cm.wid = k.entity_id
              WHERE k.is_core AND k.gid = (
                  SELECT k2.gid FROM kept k2 WHERE k2.is_core
                  GROUP BY k2.gid ORDER BY max(k2.cnt) DESC, k2.gid LIMIT 1))

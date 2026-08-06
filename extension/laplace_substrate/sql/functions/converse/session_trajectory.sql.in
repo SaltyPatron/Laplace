@@ -1,0 +1,30 @@
+-- session_trajectory: the session's discourse biography as a first-class read
+-- (R7 / GH #759, slot map: "Attention over context" — the context window is
+-- biography, not one carried topic id).
+--
+-- Provenance-scoped by construction: rows come only from THIS session's
+-- session_topics (the turn ladder — ord is the turn ordinal within the
+-- session; user/tenant scoping arrives when those identifiers exist, #791).
+-- Distinct resolved topics, most recent first, each carrying the evidence a
+-- discourse read ranks by: how often the session returned to the topic
+-- (mentions) and when it last did (last_ord). The PK (session_id, ord) makes
+-- this an indexed scan of one session's rows — no cross-session read exists
+-- here at all.
+--
+-- Deliberately NOT a ranking. Recency-primary and evidence-primary disagree
+-- about real discourse ("a digression then 'anyway...'"), so this surface
+-- returns the trajectory and the CALLER declares the ordering its read needs
+-- — chat()'s carry ranks by consensus adjacency to the current turn first,
+-- falling back to recency, which keeps session_last_resolved's semantics as
+-- the zero-evidence case.
+CREATE OR REPLACE FUNCTION session_trajectory(p_session bytea, p_k int DEFAULT 8)
+    RETURNS TABLE(topic_id bytea, last_ord int, mentions bigint)
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT t.resolved_id, max(t.ord), count(*)
+    FROM session_topics t
+    WHERE t.session_id = p_session AND t.resolved_id IS NOT NULL
+    GROUP BY t.resolved_id
+    ORDER BY max(t.ord) DESC
+    LIMIT p_k
+$$;
