@@ -258,3 +258,38 @@ box is still unseeded; prefer #760 live close + W3 structural extract once
 foundation is healthy.
 
 Report misses before hits. Do not declare Phase 1 done from this checkpoint.
+
+---
+
+## 7. 2026-08-06 — conversational campaign, slices 1–2 + pre-seed hardening
+
+Four PRs opened this session, ordered for merge **before** any seed dispatch
+(each merge deploys and bounces PG; no pushes to main once a seed runs):
+
+| PR | Slice | Fact |
+|---|---|---|
+| [#890](https://github.com/SaltyPatron/Laplace/pull/890) | Concept stream (#751, Embed slot) | Stream/starts/backbone carry concept ids, evidence-first sense election mirroring `senses()`; steering matches frontier in concept space. Code-complete, data-starved: `senses('животно')=0` vs `dog=9`; W5 battery zero-flag, variance 3/3. |
+| [#891](https://github.com/SaltyPatron/Laplace/pull/891) | Pre-seed decomposer fixes | ConceptNet lang ids no longer discarded (zero-alloc memo); Wiktionary relation edges get language context + word→synset `IS_SYNONYM_OF` (OMW post-#867 shape — its `CORRESPONDS_TO`-only links were invisible to `senses()`); five undeclared relations declared. Blocks the *jökull* defect at 34M-edge scale. |
+| [#892](https://github.com/SaltyPatron/Laplace/pull/892) | OpenAI-compat converse lane | Routed through `chat()` (was raw `recall_session` — measured phrase-lookup miss on the deployed box); nullable provenance (absence ≠ zero); gate pin in `ConversationProvenanceGateTests`. |
+| [#893](https://github.com/SaltyPatron/Laplace/pull/893) | Discourse readback (#759, R7 slice 1) | `session_trajectory()` + `chat()` carry as attention over biography. **Measured live differential**: session (animal, glass) + turn `животно???` elects *animal* via one witnessed edge where recency answers *glass*. Known limit recorded: sensed-but-zero-coherence turns never reach the branch. |
+
+Decomposer pre-seed review verdict (Explore agent, full table on #751):
+spine-compliant all four; **none resumable after a kill — a restart re-folds
+applied batches and inflates witness counts** (never kill a seed mid-run);
+Wiktionary JSON parse is single-threaded (post-seed fix); OMW per-row native
+AST for a 3-column TSV (post-seed).
+
+New ops lesson (memory + this doc): **CI is self-hosted on this box — a local
+`pipeline.sh install`/`sync-extension` restarts PostgreSQL under an
+in-progress CI run's pg_regress** (broke a gate run 2026-08-06; dirty-extension
+errors are the fingerprint). `gh run list` before any local install. Also:
+the workflow concurrency group holds ONE pending slot — dispatching two gates
+cancels the first pending one; dispatch strictly serially.
+
+#894 filed: code-as-player (novel code + toolchain outcomes as testimony) —
+deferred behind seeds + conversational slices.
+
+**Seed order once all four PRs are merged + deployed + health-checked:**
+UD → ConceptNet → Wiktionary, one at a time, via
+`gh workflow run seed-knowledge.yml -f source=<s>`; parallel work during
+seeds is read-only or in worktrees with no installs and no merges.
