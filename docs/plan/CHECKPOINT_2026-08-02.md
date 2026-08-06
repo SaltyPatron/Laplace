@@ -157,11 +157,20 @@ convenient.”
    159 kept gids, which forced the C read that found the dead branch. The
    MERGE'S OWN DEPLOY printed the proof: dog 3/3, water 2/3 (offset
    collision), king 3/3, sentences 3/3, zero REPLAY flags.
-   Next session's ordered picks: (1) Phase 2 item 2 proper — wire the now
-   seed-responsive compose into chat(shape='walk') with p_seed/p_lang
-   threading (#751, the plan's own sequence); (2) #755 threshold flip once
-   deploys accumulate; (3) G4 destination read as an installed op (CALLS
-   in-degree — data exists).
+   **PHASE 2 ITEM 2 LANDED (PR #885 merged, 2026-08-06):** chat(shape='walk')
+   speaks through converse_compose — frontier-steered, session-seeded
+   (session id + prompt hashed with max(ord) turn count), p_lang threaded,
+   walk as no-material fallback, query_shapes honest for both consumers.
+   Live proof through chat() itself: two sessions, same prompt, two
+   different coherent evidence-anchored replies. Honest limitation on
+   record: p_lang threads but cannot bite — streams are word-level; a
+   Bulgarian surface word has no English member to realize into. The
+   concept-level stream is the remaining R1 work (#751).
+   Next session's ordered picks: (1) concept-level stream so p_lang bites
+   (#751 — the last R1 blocker; multilingual output currently follows
+   witness language, OMW-dominant); (2) #755 threshold flip once deploys
+   accumulate; (3) G4 destination read as an installed op; (4) Phase 2
+   items 3–5 (kappa/covered, generation regress with pinned seed).
 3. **W6 remainder / #758** — still open:
    - G4 dead-canonical (**destination** = substrate `CALLS` in-degree after
      W3; **scaffolding** = labeled grep + shrink-only allowlist may ship first)
