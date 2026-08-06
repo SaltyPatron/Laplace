@@ -60,6 +60,19 @@ cand AS (
     SELECT c.object_id AS id, eff_mu(c.rating, c.rd) AS m
     FROM consensus c JOIN topic t ON c.subject_id = t.synset_id
     WHERE c.object_id IS NOT NULL
+      -- NAMEABLE ONLY (forward_hygiene gate; the GH #878 leak class): a
+      -- prediction must have a name — its own surface (words carry
+      -- HAS_LANGUAGE, so word_language() answers) or a realizable member
+      -- (concept_members()). A candidate failing both realizes through the
+      -- canonical arm as a raw key or hex address — internal bookkeeping
+      -- leaked as an answer ("hubs are ADDRESSES, not names"). Id space via
+      -- installed surfaces, no renders; the per-row cost rides the same
+      -- tolerance senses() already documents above, until the C port (#757).
+      -- CASE, not OR: PostgreSQL does not guarantee OR short-circuiting, so
+      -- the cheap word check must be forced to run first or every word
+      -- candidate also pays the concept_members() set-returning probe.
+      AND CASE WHEN word_language(c.object_id) IS NOT NULL THEN true
+               ELSE EXISTS (SELECT 1 FROM concept_members(c.object_id)) END
 ),
 scored AS (
     SELECT d.id, d.m, count(f.synset_id) AS hits

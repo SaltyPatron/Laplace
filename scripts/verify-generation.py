@@ -138,6 +138,12 @@ def main():
     ap.add_argument("--steps", type=int, default=30)
     ap.add_argument("--expected-per-probe", type=int, default=40)
     ap.add_argument("--report", default=None)
+    ap.add_argument("--enforce", action="store_true",
+                    help="exit 1 on the unambiguous regression classes: replay "
+                         "(variance==1 across >1 seeds — the GH #751/#884 class) "
+                         "and echo (echo_rate>0.5 — the GH #878 class). Content "
+                         "and flatness stay advisory: the concept-stream work "
+                         "(#751 R1) is still moving those numbers.")
     args = ap.parse_args()
 
     # Probe words get the full detector set (content_rate needs a topic's
@@ -178,6 +184,20 @@ def main():
         with open(args.report, "w", encoding="utf-8") as f:
             json.dump(report, f, indent=2, sort_keys=True)
         print(f"report -> {args.report}")
+
+    if args.enforce:
+        failures = []
+        for word, lanes in report.items():
+            for lane, s in lanes.items():
+                if s["seed_variance"] == 1 and len(seeds) > 1:
+                    failures.append(f"{word}/{lane}: REPLAY (variance 1/{len(seeds)})")
+                if not s.get("empty") and s.get("echo_rate", 0) > 0.5:
+                    failures.append(f"{word}/{lane}: ECHO (echo_rate {s['echo_rate']})")
+        if failures:
+            print("ENFORCED REGRESSION CLASSES FAILED:", file=sys.stderr)
+            for f_ in failures:
+                print(f"  {f_}", file=sys.stderr)
+            return 1
     return 0
 
 
