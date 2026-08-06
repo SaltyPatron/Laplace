@@ -61,7 +61,9 @@ CREATE OR REPLACE FUNCTION resolve_topic(p_phrase text, p_context bytea)
         -- Literal content id (incl. a FEN rewritten to hex by the app resolve
         -- hook, GH #575). Same arm resolve_ref already has — without it a
         -- hex prompt falls through to resolve_phrase and hashes the digits.
-        WHEN btrim(p_phrase) ~ '^[0-9a-f]{32}$' THEN decode(btrim(p_phrase), 'hex')
+        -- Case-insensitive: pasted ids arrive uppercase too, and decode()
+        -- accepts either; a lowercase-only class silently hashed A-F pastes.
+        WHEN btrim(p_phrase) ~ '^[0-9a-fA-F]{32}$' THEN decode(btrim(p_phrase), 'hex')
         WHEN p_context IS NOT NULL
              AND btrim(lower(p_phrase), ' ?.!') ~ '^(it|its|that|this|they|their|them|those|these|one|he|she|him|her)$'
             THEN p_context
