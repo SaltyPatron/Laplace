@@ -166,11 +166,25 @@ convenient.”
    record: p_lang threads but cannot bite — streams are word-level; a
    Bulgarian surface word has no English member to realize into. The
    concept-level stream is the remaining R1 work (#751).
+   **RULINGS SESSION (2026-08-06, PR #886 merged):** three operator rulings
+   now law-level in INVENTION.md — (1) unattested text is prompt-grade by
+   design (#808 CLOSED, no re-attribution); (2) file metadata is a Merkle
+   branch of the trunk (recorded on #806 for the parallel media-ladder
+   campaign — see ~/.cursor/plans 'Media modality ladders': Cursor/Grok
+   building image/audio/video infra, engine/core + new Substrate spines,
+   no file-space collision with this lane); (3) unlearning is adjudication,
+   eviction demoted to compliance hatch. Ops: runner-bounce.sh (four guards,
+   no force; first live run correctly REFUSED on active backends) + sudoers
+   via setup-host Layer 0c (SUDO_USER, visudo-validated) — operator runs
+   setup-host once to install. Eval FLIPPED TO BLOCKING on replay+echo only
+   (operator ruling: thresholds are the agent's call); content/flatness
+   advisory while R1 moves them.
    Next session's ordered picks: (1) concept-level stream so p_lang bites
-   (#751 — the last R1 blocker; multilingual output currently follows
-   witness language, OMW-dominant); (2) #755 threshold flip once deploys
-   accumulate; (3) G4 destination read as an installed op; (4) Phase 2
-   items 3–5 (kappa/covered, generation regress with pinned seed).
+   (#751 — the last R1 blocker); (2) #814 criterion 3 once the operator
+   picks path (a) ops-table or (b) gaps-as-testimony; (3) G4 destination
+   read as an installed op; (4) Phase 2 items 3–5 (kappa/covered, pinned-
+   seed generation regress). Big seeds (UD/ConceptNet/Tatoeba/Wiktionary/
+   OpenSubtitles) parked pending decomposer rework — on disk, not blocking.
 3. **W6 remainder / #758** — still open:
    - G4 dead-canonical (**destination** = substrate `CALLS` in-degree after
      W3; **scaffolding** = labeled grep + shrink-only allowlist may ship first)
