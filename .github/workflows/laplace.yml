@@ -731,6 +731,19 @@ jobs:
             --baseline scripts/eval-baselines.json \
             --report .eval-proof/generation.json
 
+      - name: Lane detectors — seed variance / echo / flatness / content (W5 #755)
+        # Advisory with the job (continue-on-error): per-lane R6 detectors over
+        # the live seeded box. Thresholds ride the eval-baselines flip when the
+        # advisory week ends; until then the numbers land in the job log and
+        # .eval-proof so regressions are visible the day they happen instead of
+        # the month they get measured (converse_tiered, GH #878).
+        # Independent measurement: runs even when the harness step above fails.
+        if: ${{ !cancelled() }}
+        run: |
+          python3 scripts/verify-generation.py \
+            --db "host=/var/run/postgresql user=laplace_admin dbname=laplace" \
+            --report .eval-proof/lane-detectors.json
+
   restore-api:
     name: Restore API (always — even after failed stages)
     if: always() && needs.deploy.result != 'skipped'
