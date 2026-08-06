@@ -32,13 +32,22 @@ internal static class WiktionaryEmit
     {
         if (!Stage(b, e.Word, out Hash128 wordId)) return;
 
+        // langCtx scopes every word->word relation edge and the synset memberships
+        // below. The language was already resolved here and then went NOWHERE except
+        // HAS_LANGUAGE on the word — the edges stayed language-free, which is the
+        // exact defect OMWGrammarWitness documents (GH #867): with no scope on the
+        // edge, cross-language IS_SYNONYM_OF candidates compete as senses and a
+        // reader cannot tell which language attested the claim.
+        Hash128? langCtx = null;
         if (e.LangCode is { Length: > 0 } lc)
         {
             Hash128 langEntity = LanguageReference.Resolve(lc);
             VocabularyNames.TrackLanguage(WiktionaryDecomposer.VocabularyNames, lc);
             b.AddEntity(new EntityRow(langEntity, EntityTier.Word, LanguageTypeId, WiktionaryDecomposer.Source));
+            // HAS_LANGUAGE keeps a null context: the object IS the language.
             b.AddAttestation(NativeAttestation.Categorical(
                 wordId, "HAS_LANGUAGE", langEntity, WiktionaryDecomposer.Source, Trust));
+            langCtx = langEntity;
         }
 
         Hash128? posCtx = null;
@@ -53,12 +62,12 @@ internal static class WiktionaryEmit
         if (e.Senses is { } senses)
             foreach (var s in senses)
             {
-                WalkSense(b, wordId, s, posCtx, isVerb);
-                RouteSynsetLinks(b, wordId, s, posCtx);
+                WalkSense(b, wordId, s, posCtx, isVerb, langCtx);
+                RouteSynsetLinks(b, wordId, s, posCtx, langCtx);
             }
 
         WalkSounds(b, wordId, e.Sounds);
-        WalkRelations(b, wordId, in e.Top, isVerb, context: null);
+        WalkRelations(b, wordId, in e.Top, isVerb, context: langCtx);
         if (e.IncludeTranslations && e.Translations is { } tr)
             foreach (var t in tr)
                 if (Stage(b, t, out var trId))
@@ -68,7 +77,8 @@ internal static class WiktionaryEmit
     }
 
     private static void WalkSense(
-        SubstrateChangeBuilder b, Hash128 wordId, WiktionaryEntry.Sense s, Hash128? posCtx, bool isVerb)
+        SubstrateChangeBuilder b, Hash128 wordId, WiktionaryEntry.Sense s, Hash128? posCtx, bool isVerb,
+        Hash128? langCtx)
     {
         if (s.Glosses is { } gl)
             foreach (var g in gl)
@@ -78,7 +88,10 @@ internal static class WiktionaryEmit
             foreach (var x in ex)
                 if (Stage(b, x, out var xId)) Attest(b, wordId, "HAS_EXAMPLE", xId, null);
 
-        WalkRelations(b, wordId, in s.Relations, isVerb, posCtx);
+        // Relation edges carry the LANGUAGE, not the POS: IS_SYNONYM_OF lives in the
+        // HAS_SENSE family, and an unscoped edge there is a translation competing as
+        // a sense (GH #867). POS remains attested on the word itself via HAS_POS.
+        WalkRelations(b, wordId, in s.Relations, isVerb, langCtx);
 
         if (s.Tags is { } tags)
             foreach (var tag in tags)
@@ -185,18 +198,33 @@ internal static class WiktionaryEmit
     }
 
     private static void RouteSynsetLinks(
-        SubstrateChangeBuilder b, Hash128 wordId, WiktionaryEntry.Sense s, Hash128? posCtx)
+        SubstrateChangeBuilder b, Hash128 wordId, WiktionaryEntry.Sense s, Hash128? posCtx,
+        Hash128? langCtx)
     {
         if (s.LinkTargets is { } links)
             foreach (var key in links)
             {
                 if (SourceEntityIdConventions.ResolveSynsetAnchor(key) is { } syn && syn != default)
-                    Attest(b, wordId, "CORRESPONDS_TO", syn, posCtx);
+                    LinkSynset(b, wordId, syn, posCtx, langCtx);
             }
 
         if (s.SynsetKey is { Length: > 0 } sk
             && SourceEntityIdConventions.ResolveSynsetAnchor(sk) is { } synId && synId != default)
-            Attest(b, wordId, "CORRESPONDS_TO", synId, posCtx);
+            LinkSynset(b, wordId, synId, posCtx, langCtx);
+    }
+
+    // Both edges on purpose. CORRESPONDS_TO is the cross-reference hub the CILI/
+    // WordNet routing reads — but it is NOT in the HAS_SENSE family, so before this
+    // change Wiktionary's word->synset links (the GOOD sense evidence) were invisible
+    // to senses()/bubble_up while its word->word synonyms (translation-shaped) were
+    // the only Wiktionary edges electing senses. IS_SYNONYM_OF word->synset with the
+    // language as context is exactly OMW's post-#867 shape, and it puts the synset-
+    // typed candidate in the family so election prefers it over word-typed ones.
+    private static void LinkSynset(
+        SubstrateChangeBuilder b, Hash128 wordId, Hash128 synId, Hash128? posCtx, Hash128? langCtx)
+    {
+        Attest(b, wordId, "CORRESPONDS_TO", synId, posCtx);
+        Attest(b, wordId, "IS_SYNONYM_OF", synId, langCtx);
     }
 
     private static bool Stage(SubstrateChangeBuilder b, string? surface, out Hash128 id)

@@ -14,7 +14,9 @@ public readonly struct OMWSource : ISeedSource
         SubstrateCanonicalIds.TrustClass("AcademicCurated");
 
     public static IReadOnlyList<string> Relations { get; } =
-        ["HAS_DEFINITION", "HAS_EXAMPLE", "IS_SYNONYM_OF", "HAS_LANGUAGE", "HAS_POS"];
+        ["HAS_DEFINITION", "HAS_EXAMPLE", "IS_SYNONYM_OF", "HAS_LANGUAGE", "HAS_POS",
+         // Emitted via ConceptAnchor.EmitAnchor's synset typing but never declared here.
+         "IS_TYPED_AS"];
 
     public static IReadOnlyList<string>? TypeNodeNames => null;
 

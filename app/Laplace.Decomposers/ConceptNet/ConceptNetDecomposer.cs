@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
+using System.Text;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Decomposers.Extractors;
 using Laplace.Engine.Core;
@@ -85,6 +86,17 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase<ConceptN
         if (langs?.MatchesAllUtf8(startLang, endLang) == false) return false;
         if (startTerm.IsEmpty || endTerm.IsEmpty) return false;
 
+        // Language scope. The URI's /c/<lang>/ segment was parsed and then DISCARDED,
+        // which left every edge language-free — most damagingly Synonym, which is
+        // cross-lingual by design and maps into the HAS_SENSE family, so unscoped
+        // translations competed as senses (the same defect OMWGrammarWitness fixed
+        // for GH #867: an English copula electing "ice" from Danish witnesses).
+        // The handler already emits HAS_LANGUAGE from these ids; the edge's context
+        // is the SUBJECT's language — the claim is made about the subject surface,
+        // exactly as OMW scopes lemma->synset by the file's language.
+        Hash128? startLangId = LangId(startLang);
+        Hash128? endLangId = LangId(endLang);
+
         // dbpedia's subject order is not the manifest's: it says (France, capital, Paris)
         // while AT_LOCATION reads "subject is located at object". Flipping HERE, at record
         // construction, keeps every downstream stage order-agnostic -- the alternative is a
@@ -93,20 +105,58 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase<ConceptN
         {
             record = new RelationTripleRecord(
                 UnderscoredUtf8Canonicalize.ToSpaces(endTerm), typeName, UnderscoredUtf8Canonicalize.ToSpaces(startTerm),
-                ContextId: null, Magnitude: ConceptNetUri.ParseWeight(meta),
+                ContextId: endLangId, Magnitude: ConceptNetUri.ParseWeight(meta),
                 SubjectPos: endPos, ObjectPos: startPos,
                 SubjectSynsetId: ConceptNetUri.ResolveSynsetFromWnSuffix(endWn, endPos),
-                ObjectSynsetId: ConceptNetUri.ResolveSynsetFromWnSuffix(startWn, startPos));
+                ObjectSynsetId: ConceptNetUri.ResolveSynsetFromWnSuffix(startWn, startPos),
+                SubjectLangId: endLangId, ObjectLangId: startLangId);
             return true;
         }
 
         record = new RelationTripleRecord(
             UnderscoredUtf8Canonicalize.ToSpaces(startTerm), typeName, UnderscoredUtf8Canonicalize.ToSpaces(endTerm),
-            ContextId: null, Magnitude: ConceptNetUri.ParseWeight(meta),
+            ContextId: startLangId, Magnitude: ConceptNetUri.ParseWeight(meta),
             SubjectPos: startPos, ObjectPos: endPos,
             SubjectSynsetId: ConceptNetUri.ResolveSynsetFromWnSuffix(startWn, startPos),
-            ObjectSynsetId: ConceptNetUri.ResolveSynsetFromWnSuffix(endWn, endPos));
+            ObjectSynsetId: ConceptNetUri.ResolveSynsetFromWnSuffix(endWn, endPos),
+            SubjectLangId: startLangId, ObjectLangId: endLangId);
         return true;
+    }
+
+    // Per-row language resolution with NO per-row allocation on the hot path: codes
+    // of <= 8 bytes (every ConceptNet code that matters — "en", "fr", "zh") pack into
+    // one ulong key, so the row cost is a span pack + one lock-free dictionary hit.
+    // Longer codes ("zh-classical") take the string-keyed memo. Either way the
+    // canonicalization walk (Trim/ToLower/alias in LanguageReference.ResolveCode)
+    // runs once per DISTINCT code (~300 in the corpus), not once per row, and the
+    // factory feeds the readback roster (fix for LanguageNames being declared and
+    // never populated). Unresolved codes map to "und" inside LanguageReference —
+    // never default — so null here means only an empty span.
+    private static readonly ConcurrentDictionary<ulong, Hash128> LangIdByPackedCode = new();
+    private static readonly ConcurrentDictionary<string, Hash128> LangIdByRawCode =
+        new(StringComparer.Ordinal);
+
+    private static Hash128? LangId(ReadOnlySpan<byte> langUtf8)
+    {
+        if (langUtf8.IsEmpty) return null;
+        if (langUtf8.Length <= 8)
+        {
+            ulong key = 0;
+            for (int i = 0; i < langUtf8.Length; i++)
+                key = (key << 8) | langUtf8[i];
+            if (LangIdByPackedCode.TryGetValue(key, out var hit)) return hit;
+            var resolved = ResolveAndTrack(Encoding.UTF8.GetString(langUtf8));
+            LangIdByPackedCode.TryAdd(key, resolved);
+            return resolved;
+        }
+        string raw = Encoding.UTF8.GetString(langUtf8);
+        return LangIdByRawCode.GetOrAdd(raw, static code => ResolveAndTrack(code));
+    }
+
+    private static Hash128 ResolveAndTrack(string code)
+    {
+        VocabularyNames.TrackLanguage(LanguageNames, code);
+        return LanguageReference.Resolve(code);
     }
 
     // assertion-uri \t relation \t start-concept \t end-concept \t {metadata-json}
