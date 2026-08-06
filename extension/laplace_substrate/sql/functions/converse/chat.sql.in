@@ -36,7 +36,7 @@ CREATE OR REPLACE FUNCTION chat(p_prompt text,
     LANGUAGE plpgsql VOLATILE
     SET search_path = @extschema@, public AS $$
 DECLARE
-    ctx   bytea; topic bytea; topic2 bytea;
+    topic bytea; topic2 bytea;
     cands bytea[];   -- topic orientation, ranked, computed ONCE per turn
     xl    text;
     depth int;
@@ -46,8 +46,6 @@ DECLARE
     lang  bytea := p_lang;   -- realization language; inferred below when absent
     out   text := '';
 BEGIN
-    IF p_session IS NOT NULL THEN ctx := session_last_resolved(p_session); END IF;
-
     -- ANSWER IN THE LANGUAGE THAT WAS ASKED. A concept's surfaces are a FAMILY
     -- spanning every language that witnesses it, and realize(id, NULL) is free to
     -- pick any member -- so with no language pinned, an English prompt can be
@@ -239,8 +237,60 @@ BEGIN
           INTO cands
         FROM prompt_coherence(p_prompt) y;
         topic := cands[1];
-        -- Nothing in this turn resolved: carry the session's standing topic.
-        IF topic IS NULL THEN topic := ctx; END IF;
+        -- Nothing in this turn resolved: read the session's BIOGRAPHY, not one
+        -- carried id (R7 / GH #759 slice 1). session_last_resolved() answered
+        -- "what did the last turn resolve"; the discourse question is "which of
+        -- the topics this session has witnessed is THIS turn about", and that is
+        -- an attention read — the turn's token senses are the query, the
+        -- session's trajectory topics are the keys, rated consensus mass between
+        -- them is the score. Both directions, written as two correlated indexed
+        -- probes per trajectory row (k <= 8) rather than an OR join; the senses
+        -- are collected ONCE. sum() over zero rows is NULL — an unwired topic is
+        -- unranked evidence, not evidence of zero — and COALESCE enters only in
+        -- the ORDER BY, where ranking needs a total order. With no adjacency
+        -- anywhere the ordering degrades to last_ord DESC, which is exactly
+        -- session_last_resolved's semantics: recency is the fallback, no longer
+        -- the whole read.
+        IF topic IS NULL AND p_session IS NOT NULL THEN
+            -- The query set is TOKEN IDS PLUS THEIR SENSES, not senses alone. In
+            -- the regime where this branch fires (topic NULL), no prompt token
+            -- resolved a sense — a senses-only key set is provably empty exactly
+            -- when this code runs. The token ids themselves still carry edges: the
+            -- measured data-starved case (senses('животно') = 0) has the word
+            -- wired to its synset by OMW's word->synset IS_SYNONYM_OF, and that
+            -- edge is precisely what links an unsensed surface to a discourse
+            -- topic. Senses stay in the set for the day partial resolution makes
+            -- this branch reachable with them present.
+            WITH ptok AS MATERIALIZED (
+                SELECT p.id FROM prompt_state(p_prompt) p WHERE p.id IS NOT NULL
+            ),
+            psense AS MATERIALIZED (
+                SELECT DISTINCT x.sid FROM (
+                    SELECT t.id AS sid FROM ptok t
+                    UNION ALL
+                    SELECT s.synset_id FROM ptok t
+                    CROSS JOIN LATERAL senses(t.id) s
+                    WHERE s.synset_id IS NOT NULL
+                ) x
+            ),
+            adj AS (
+                SELECT st.topic_id, st.last_ord,
+                       (SELECT sum(eff_mu(c.rating, c.rd))
+                        FROM psense ps
+                        JOIN consensus c ON c.subject_id = st.topic_id
+                                        AND c.object_id = ps.sid) AS m_out,
+                       (SELECT sum(eff_mu(c.rating, c.rd))
+                        FROM psense ps
+                        JOIN consensus c ON c.object_id = st.topic_id
+                                        AND c.subject_id = ps.sid) AS m_in
+                FROM session_trajectory(p_session, 8) st
+            )
+            SELECT a.topic_id INTO topic
+            FROM adj a
+            ORDER BY (COALESCE(a.m_out, 0) + COALESCE(a.m_in, 0)) DESC,
+                     a.last_ord DESC
+            LIMIT 1;
+        END IF;
     END IF;
 
     IF topic IS NULL THEN
