@@ -96,19 +96,24 @@ jobs:
         run: bash scripts/wait-for-quiet-substrate.sh "${{ inputs.database }}"
       - name: Status (read-only)
         if: inputs.operation == 'status'
+        # set +e so every section still prints when one fails; rc accumulates so
+        # the step FAILS afterward instead of reporting green over a broken build
+        # or unreachable database (Copilot, PR #778).
         run: |
           set +e
-          dotnet build app/Laplace.Migrations/Laplace.Migrations.csproj -c Release -v q --nologo
-          dotnet app/Laplace.Migrations/bin/Release/net10.0/Laplace.Migrations.dll status
+          rc=0
+          dotnet build app/Laplace.Migrations/Laplace.Migrations.csproj -c Release -v q --nologo || rc=1
+          dotnet app/Laplace.Migrations/bin/Release/net10.0/Laplace.Migrations.dll status || rc=1
           echo "----- extension -----"
           psql -h /var/run/postgresql -U laplace_admin -d "${{ inputs.database }}" -c \
-            "SELECT extname, extversion FROM pg_extension WHERE extname LIKE 'laplace%'"
+            "SELECT extname, extversion FROM pg_extension WHERE extname LIKE 'laplace%'" || rc=1
           echo "----- substrate -----"
           psql -h /var/run/postgresql -U laplace_admin -d "${{ inputs.database }}" -c \
-            "SET search_path=laplace,public; SELECT * FROM substrate_health()"
+            "SET search_path=laplace,public; SELECT * FROM substrate_health()" || rc=1
           echo "----- what has been ingested -----"
           psql -h /var/run/postgresql -U laplace_admin -d "${{ inputs.database }}" -c \
-            "SET search_path=laplace,public; SELECT source_name, status, attestations, ended_at FROM ingest_run_journal ORDER BY started_at DESC LIMIT 20"
+            "SET search_path=laplace,public; SELECT source_name, status, attestations, ended_at FROM ingest_run_journal ORDER BY started_at DESC LIMIT 20" || rc=1
+          exit $rc
 
       - name: Migrate
         if: inputs.operation == 'migrate'
