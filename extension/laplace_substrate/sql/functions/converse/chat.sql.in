@@ -37,6 +37,7 @@ CREATE OR REPLACE FUNCTION chat(p_prompt text,
     SET search_path = @extschema@, public AS $$
 DECLARE
     topic bytea; topic2 bytea;
+    ctx_arr bytea[];  -- biography for the walk branch (session_trajectory, recent-first)
     cands bytea[];   -- topic orientation, ranked, computed ONCE per turn
     xl    text;
     depth int;
@@ -468,10 +469,20 @@ BEGIN
             -- PK-indexed, no full per-session count, no bigint->int narrowing.
             SELECT COALESCE(max(t.ord), 0) INTO depth FROM session_topics t
               WHERE t.session_id = p_session;
+            -- BIOGRAPHY (R7 slice 2): recent session topics ride into the
+            -- compose frontier with recency decay — the turn's own topic is
+            -- already the frontier seed, so it is excluded here. Most-recent
+            -- first: session_trajectory's order IS the decay ordinality.
+            -- No session (or no history) passes NULL, which composes exactly
+            -- as a fresh turn.
+            SELECT array_agg(st.topic_id ORDER BY st.last_ord DESC) INTO ctx_arr
+              FROM session_trajectory(p_session, 4) st
+             WHERE st.topic_id <> topic;
             out := converse_compose(
                 p_prompt, 40, lang,
                 hashtextextended(COALESCE(p_session::text, '') || p_prompt,
-                                 COALESCE(depth, 0)));
+                                 COALESCE(depth, 0)),
+                ctx_arr);
             IF out IS NULL OR out = '' THEN
                 out := converse_walk(p_prompt, 40, NULL);
             END IF;
