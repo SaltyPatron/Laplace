@@ -324,6 +324,136 @@ public sealed class IntentStage : SafeHandle
         }
     }
 
+    /// <summary>
+    /// Compose planar RGBA recovery → image ladder above shared codepoint T0
+    /// (digit→number→channel→pixel→patch→region→image). Requires T0 perfcache.
+    /// </summary>
+    public static TierTree? BuildImageTree(ReadOnlySpan<byte> rgba, uint width, uint height)
+    {
+        if (rgba.IsEmpty || width == 0 || height == 0) return null;
+        long need = (long)width * height * 4;
+        if (rgba.Length < need) return null;
+        unsafe
+        {
+            IntPtr treePtr = IntPtr.Zero;
+            fixed (byte* p = rgba)
+            {
+                int rc = NativeInterop.ImageTreeBuild(p, width, height, &treePtr);
+                if (rc == -3) throw new InvalidOperationException(
+                    "image ladder requires the T0 perfcache — call CodepointPerfcache.LoadDefault() first");
+                if (rc != 0 || treePtr == IntPtr.Zero) return null;
+            }
+            return TierTree.FromExistingHandle(treePtr);
+        }
+    }
+
+    /// <summary>
+    /// Compose mono PCM16 recovery → audio ladder above shared codepoint T0
+    /// (digit→number→sample→window→onset→phrase→track). Requires T0 perfcache.
+    /// </summary>
+    public static TierTree? BuildAudioTree(ReadOnlySpan<short> pcm)
+    {
+        if (pcm.IsEmpty) return null;
+        unsafe
+        {
+            IntPtr treePtr = IntPtr.Zero;
+            fixed (short* p = pcm)
+            {
+                int rc = NativeInterop.AudioTreeBuild(p, (nuint)pcm.Length, &treePtr);
+                if (rc == -3) throw new InvalidOperationException(
+                    "audio ladder requires the T0 perfcache — call CodepointPerfcache.LoadDefault() first");
+                if (rc != 0 || treePtr == IntPtr.Zero) return null;
+            }
+            return TierTree.FromExistingHandle(treePtr);
+        }
+    }
+
+    public bool EmitImageTree(
+        TierTree tree, Hash128 sourceId, ReadOnlySpan<byte> existingBitmap, out Hash128 rootId) =>
+        EmitMediaLadderTree(tree, MediaLadderKind.Image, sourceId, existingBitmap, out rootId);
+
+    public bool EmitAudioTree(
+        TierTree tree, Hash128 sourceId, ReadOnlySpan<byte> existingBitmap, out Hash128 rootId) =>
+        EmitMediaLadderTree(tree, MediaLadderKind.Audio, sourceId, existingBitmap, out rootId);
+
+    /// <summary>
+    /// Emit a composed modality ladder. <paramref name="ladder"/> selects entity-type
+    /// floors only — not a private atom alphabet. Tier-0 leaves are codepoints.
+    /// </summary>
+    public bool EmitMediaLadderTree(
+        TierTree tree, MediaLadderKind ladder, Hash128 sourceId, ReadOnlySpan<byte> existingBitmap, out Hash128 rootId)
+    {
+        rootId = default;
+        ArgumentNullException.ThrowIfNull(tree);
+        ThrowIfDisposed();
+        unsafe
+        {
+            Hash128 src = sourceId;
+            Hash128 root = default;
+            int rc;
+            if (existingBitmap.IsEmpty)
+            {
+                rc = NativeInterop.ModalityWitnessEmitTree(
+                    handle, tree.DangerousNativeHandle, (int)ladder, &src, null, 0, &root);
+            }
+            else
+            {
+                fixed (byte* bm = existingBitmap)
+                {
+                    rc = NativeInterop.ModalityWitnessEmitTree(
+                        handle, tree.DangerousNativeHandle, (int)ladder, &src, bm, (nuint)tree.NodeCount, &root);
+                }
+            }
+            if (rc == -3) throw new InvalidOperationException(
+                "modality ladder emit requires the T0 perfcache — call CodepointPerfcache.LoadDefault() first");
+            if (rc != 0) return false;
+            rootId = root;
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Cheap image ladder root (compose + collapsed root). Not blake3(rgba).
+    /// </summary>
+    public static Hash128? ImageRootId(ReadOnlySpan<byte> rgba, uint width, uint height)
+    {
+        if (rgba.IsEmpty || width == 0 || height == 0) return null;
+        long need = (long)width * height * 4;
+        if (rgba.Length < need) return null;
+        unsafe
+        {
+            Hash128 root = default;
+            fixed (byte* p = rgba)
+            {
+                int rc = NativeInterop.ImageRootId(p, width, height, &root);
+                if (rc == -3) throw new InvalidOperationException(
+                    "image ladder requires the T0 perfcache — call CodepointPerfcache.LoadDefault() first");
+                if (rc != 0) return null;
+            }
+            return root;
+        }
+    }
+
+    /// <summary>
+    /// Cheap audio ladder root (compose + collapsed root). Not blake3(pcm).
+    /// </summary>
+    public static Hash128? AudioRootId(ReadOnlySpan<short> pcm)
+    {
+        if (pcm.IsEmpty) return null;
+        unsafe
+        {
+            Hash128 root = default;
+            fixed (short* p = pcm)
+            {
+                int rc = NativeInterop.AudioRootId(p, (nuint)pcm.Length, &root);
+                if (rc == -3) throw new InvalidOperationException(
+                    "audio ladder requires the T0 perfcache — call CodepointPerfcache.LoadDefault() first");
+                if (rc != 0) return null;
+            }
+            return root;
+        }
+    }
+
     public IntentStage[] Partition(int partCount)
     {
         ThrowIfDisposed();

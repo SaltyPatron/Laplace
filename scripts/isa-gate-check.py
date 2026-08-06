@@ -67,7 +67,7 @@ CEILINGS = {
     # The remaining 1 is the floor: the name has to exist once in C#, and this is
     # the single place the feature owns it. A scoped source that spelled it again
     # locally would be the per-source hand-roll that caused the defect.
-    "g3_csharp_vocabulary_literalism": 701,
+    "g3_csharp_vocabulary_literalism": 506,
     "g8_band_literalism": 8,
     # G4 scaffolding (W6 D3): grep for CREATE FUNCTION with zero callers outside
     # its own CREATE line. Destination form is substrate CALLS in-degree after W3
@@ -327,6 +327,21 @@ def scan_g3_c() -> Counter[str]:
     return found
 
 
+# Declaration rosters are EXEMPT from the C# literalism scan. Two gates were
+# in direct conflict: DecomposerArchitectureGateTests REQUIRES every source to
+# declare its emitted relations by name (the `Relations` roster is the only
+# API for it), while this ratchet banned the name literal — so every new
+# source failed one gate or the other (measured 2026-08-06: the media-ladder
+# sources' declaration rosters were this scan's only findings). The ratchet's
+# target is AD-HOC CALL-SITE literals — a relation name spelled at an emit or
+# query site instead of resolved through the registry — and those remain
+# ratcheted everywhere outside the declaration span.
+CSHARP_DECLARATION_ROSTER = re.compile(
+    r"(?:Relations|DeclaredRelations)\s*(?:\{\s*get;\s*\}\s*=|=>|=)\s*\[[^\]]*\]",
+    re.DOTALL,
+)
+
+
 def scan_g3_csharp() -> Counter[str]:
     found: Counter[str] = Counter()
     governed = governed_relation_names()
@@ -335,6 +350,7 @@ def scan_g3_csharp() -> Counter[str]:
         if any(".Tests" in part for part in path.parts):
             continue
         text = strip_c_comments(path.read_text(encoding="utf-8", errors="replace"))
+        text = CSHARP_DECLARATION_ROSTER.sub("", text)
         rel = relative(path)
         for match in CSHARP_STRING_LITERAL.finditer(text):
             literal = match.group("literal")

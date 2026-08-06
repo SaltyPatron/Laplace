@@ -29,10 +29,17 @@ public sealed class IngestIntegrityGateTests : IClassFixture<LocalPgFixture>, IA
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();
         var dispatch = Path.Combine(repoRoot, "app", "Laplace.Cli", "IngestDispatchTable.cs");
         var text = File.ReadAllText(dispatch);
+        // Stub class names / bare modality keys stay banned; real lanes use
+        // RgbaImageDecomposer / TrackAudioDecomposer / FrameVideoDecomposer.
         Assert.DoesNotContain("ImageDecomposer", text, StringComparison.Ordinal);
         Assert.DoesNotContain("AudioDecomposer", text, StringComparison.Ordinal);
         Assert.DoesNotContain("[\"image\"]", text, StringComparison.Ordinal);
         Assert.DoesNotContain("[\"audio\"]", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("tatoeba-audio", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("pcm-audio", text, StringComparison.Ordinal);
+        Assert.Contains("rgba-image", text, StringComparison.Ordinal);
+        Assert.Contains("track-audio", text, StringComparison.Ordinal);
+        Assert.Contains("frame-video", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -43,6 +50,35 @@ public sealed class IngestIntegrityGateTests : IClassFixture<LocalPgFixture>, IA
         var audio = Path.Combine(repoRoot, "app", "Laplace.Decomposers", "Audio", "AudioDecomposer.cs");
         Assert.False(File.Exists(image), "ImageDecomposer stub must be removed");
         Assert.False(File.Exists(audio), "AudioDecomposer stub must be removed");
+        Assert.False(File.Exists(Path.Combine(repoRoot, "app", "Laplace.Decomposers", "Media", "TatoebaAudioDecomposer.cs")),
+            "media lanes must not be corpus-specific");
+        Assert.True(File.Exists(Path.Combine(repoRoot, "app", "Laplace.Decomposers", "Media", "RgbaImageDecomposer.cs")));
+        Assert.True(File.Exists(Path.Combine(repoRoot, "app", "Laplace.Decomposers", "Media", "TrackAudioDecomposer.cs")));
+        Assert.True(File.Exists(Path.Combine(repoRoot, "app", "Laplace.Decomposers", "Media", "FrameVideoDecomposer.cs")));
+    }
+
+    [Fact]
+    public void ManagedPath_HasNoPrivateModalityAtomSurface()
+    {
+        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
+        Assert.False(File.Exists(Path.Combine(repoRoot, "app", "Laplace.Core", "Core", "LaplaceModality.cs")),
+            "LaplaceModality private-atom mirror must be ripped");
+        Assert.True(File.Exists(Path.Combine(repoRoot, "app", "Laplace.Core", "Core", "MediaLadderKind.cs")),
+            "MediaLadderKind (emit type-floor selector) must exist");
+
+        var interop = File.ReadAllText(Path.Combine(repoRoot, "app", "Laplace.Core", "Core", "NativeInterop.cs"));
+        Assert.DoesNotContain("laplace_modality_atom", interop, StringComparison.Ordinal);
+        Assert.DoesNotContain("ModalityAtomCacheReset", interop, StringComparison.Ordinal);
+
+        var imageSpine = File.ReadAllText(Path.Combine(repoRoot, "app", "Laplace.Substrate", "Abstractions", "ImageTierSpine.cs"));
+        Assert.Contains("IntentStage.ImageRootId", imageSpine, StringComparison.Ordinal);
+        Assert.Contains("EmitImageTree", imageSpine, StringComparison.Ordinal);
+        Assert.DoesNotContain("EmitModalityTree", imageSpine, StringComparison.Ordinal);
+
+        var audioSpine = File.ReadAllText(Path.Combine(repoRoot, "app", "Laplace.Substrate", "Abstractions", "AudioTierSpine.cs"));
+        Assert.Contains("IntentStage.AudioRootId", audioSpine, StringComparison.Ordinal);
+        Assert.Contains("EmitAudioTree", audioSpine, StringComparison.Ordinal);
+        Assert.DoesNotContain("EmitModalityTree", audioSpine, StringComparison.Ordinal);
     }
 
     [Fact]

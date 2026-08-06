@@ -533,6 +533,63 @@ public static unsafe partial class NativeInterop
         nuint len,
         Hash128* outRootId);
 
+    // --- Modality ladders above shared codepoint T0 (packaging buffers in, compose out) ---
+    // Identity is digit→number→… trajectories (docs/invention/modality-ladder-law.md).
+    // RGBA / PCM16 here are recovery inputs only — never forged T0 leaf mints.
+
+    [LibraryImport(Library, EntryPoint = "laplace_image_tree_build")]
+    internal static partial int ImageTreeBuild(
+        byte* rgba, uint width, uint height, IntPtr* outTree);
+
+    [LibraryImport(Library, EntryPoint = "laplace_audio_tree_build")]
+    internal static partial int AudioTreeBuild(
+        short* pcm, nuint nSamples, IntPtr* outTree);
+
+    [LibraryImport(Library, EntryPoint = "laplace_modality_witness_emit_tree")]
+    internal static partial int ModalityWitnessEmitTree(
+        IntPtr stage,
+        IntPtr tree,
+        int ladderKind,
+        Hash128* sourceId,
+        byte* existingBitmap,
+        nuint bitmapBits,
+        Hash128* outRootId);
+
+    [LibraryImport(Library, EntryPoint = "laplace_image_root_id")]
+    internal static partial int ImageRootId(
+        byte* rgba, uint width, uint height, Hash128* outRootId);
+
+    [LibraryImport(Library, EntryPoint = "laplace_audio_root_id")]
+    internal static partial int AudioRootId(
+        short* pcm, nuint nSamples, Hash128* outRootId);
+
+    // --- Packaging decode (JPEG/PNG/… → RGBA recovery; MP3/FLAC/Ogg/WAV → mono s16 recovery) ---
+
+    [LibraryImport(Library, EntryPoint = "laplace_media_free")]
+    internal static partial void MediaFree(IntPtr p);
+
+    [LibraryImport(Library, EntryPoint = "laplace_media_decode_image_file", StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial int MediaDecodeImageFile(string path, out MediaImageNative outImage);
+
+    [LibraryImport(Library, EntryPoint = "laplace_media_decode_audio_file", StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial int MediaDecodeAudioFile(string path, out MediaAudioNative outAudio);
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct MediaImageNative
+    {
+        public IntPtr Rgba;
+        public uint Width;
+        public uint Height;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct MediaAudioNative
+    {
+        public IntPtr Pcm;
+        public nuint NSamples;
+        public int SampleRate;
+    }
+
     [LibraryImport(Library, EntryPoint = "laplace_relation_resolve", StringMarshalling = StringMarshalling.Utf8)]
     internal static partial int RelationResolve(string surface, Hash128* outTypeId);
 

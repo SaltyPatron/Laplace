@@ -29,13 +29,14 @@ Test projects:
 - `Laplace.Endpoints.OpenAICompat.Tests`
 - `Laplace.Substrate.Tests`
 
-## Decomposers — 25 in `Laplace.Decomposers`, 8 in `Laplace.Chess`
+## Decomposers — 28 in `Laplace.Decomposers`, 8 in `Laplace.Chess`
 
 - `Atomic2020Decomposer`
 - `CILIDecomposer`
 - `CodeDecomposer`
 - `ConceptNetDecomposer`
 - `FrameNetDecomposer`
+- `FrameVideoDecomposer`
 - `ISODecomposer`
 - `MapNetDecomposer`
 - `ModelDecomposer`
@@ -45,11 +46,13 @@ Test projects:
 - `PropBankDecomposer`
 - `RecipeDecomposer`
 - `RepoDecomposer`
+- `RgbaImageDecomposer`
 - `SemLinkDecomposer`
 - `StackDecomposer`
 - `TabularDecomposer`
 - `TatoebaDecomposer`
 - `TinyCodesDecomposer`
+- `TrackAudioDecomposer`
 - `UDDecomposer`
 - `UnicodeDecomposer`
 - `VerbNetDecomposer`
@@ -144,4 +147,5 @@ range; adding a relation takes the next free bit and does not renumber peers.
 - `laplace_chess_position_perfcache.bin`
 - `laplace_chess_transition_perfcache.bin`
 - `laplace_highway_perfcache.bin`
+- `laplace_modality_number_perfcache.bin`
 - `laplace_t0_perfcache.bin`

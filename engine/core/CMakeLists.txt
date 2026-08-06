@@ -10,6 +10,8 @@ set(LAPLACE_CORE_HEADERS
     include/laplace/core/codepoint_table.h
     include/laplace/core/chess_perfcache_format.h
     include/laplace/core/chess_position_table.h
+    include/laplace/core/modality_number_perfcache_format.h
+    include/laplace/core/modality_number_table.h
     include/laplace/core/astar.h
     include/laplace/core/trajectory.h
     include/laplace/core/tier_tree.h
@@ -27,6 +29,12 @@ set(LAPLACE_CORE_HEADERS
     include/laplace/core/normalize_nfc.h
     include/laplace/core/text_decomposer.h
     include/laplace/core/content_witness_batch.h
+    include/laplace/core/modality_atoms.h
+    include/laplace/core/modality_decimal.h
+    include/laplace/core/modality_witness.h
+    include/laplace/core/image_decomposer.h
+    include/laplace/core/audio_decomposer.h
+    include/laplace/core/media_decode.h
     include/laplace/core/unicode_seed.h
     include/laplace/core/relation_law.h
     include/laplace/core/pos_law.h
@@ -42,11 +50,18 @@ set(LAPLACE_CORE_SOURCES
     src/hilbert4d.c
     src/mantissa.c
     src/super_fibonacci.c
-    src/modality_atoms.c
+    src/modality_decimal.c
+    src/modality_witness.c
+    src/image_decomposer.c
+    src/audio_decomposer.c
+    src/media_decode.c
+    src/media_decode_impl.c
+    src/media_decode_vorbis.c
     src/glicko2.c
     src/score.c
     src/codepoint_table.c
     src/chess_position_table.c
+    src/modality_number_table.c
     src/astar.cpp
     src/trajectory.c
     src/tier_tree.c
@@ -222,6 +237,32 @@ install(FILES ${LAPLACE_CHESS_PERFCACHE_BIN}
     PERMISSIONS ${LAPLACE_INSTALL_FILE_PERMS}
 )
 
+# Modality number compose floor (dense 0..255 channel-byte numbers) — spec 33 /
+# modality-ladder-law codepoint floor. Always emits from t0; no corpus path.
+# Shared by image (channel bytes) and audio (magnitudes in this range); signed
+# full-PCM and higher modality tiers (pixel/patch/…) are later ROM layers.
+add_subdirectory(tools/modality_number_tables_emit)
+set(LAPLACE_MODALITY_NUMBER_PERFCACHE_BIN
+    "${LAPLACE_PERFCACHE_DIR}/laplace_modality_number_perfcache.bin"
+    CACHE FILEPATH "Built modality number compose-floor blob" FORCE)
+add_custom_command(
+    OUTPUT ${LAPLACE_MODALITY_NUMBER_PERFCACHE_BIN}
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${LAPLACE_PERFCACHE_DIR}"
+    COMMAND $<TARGET_FILE:laplace_modality_number_tables_emit>
+            --t0     ${LAPLACE_PERFCACHE_BIN}
+            --output ${LAPLACE_MODALITY_NUMBER_PERFCACHE_BIN}
+    DEPENDS ${LAPLACE_PERFCACHE_BIN} $<TARGET_FILE:laplace_modality_number_tables_emit>
+    COMMENT "Emitting modality number compose-floor blob (0..255 channel bytes)"
+    VERBATIM
+)
+add_custom_target(laplace_modality_number_perfcache ALL
+    DEPENDS ${LAPLACE_MODALITY_NUMBER_PERFCACHE_BIN})
+install(FILES ${LAPLACE_MODALITY_NUMBER_PERFCACHE_BIN}
+    DESTINATION share/laplace
+    RENAME "laplace_modality_number_perfcache.bin"
+    PERMISSIONS ${LAPLACE_INSTALL_FILE_PERMS}
+)
+
 set(LAPLACE_PERFCACHE_REFERENCE_BIN "${LAPLACE_PERFCACHE_DIR}/laplace_t0_perfcache.reference.bin")
 add_custom_target(laplace_verify_perfcache_determinism
     COMMAND ${CMAKE_COMMAND} -E copy ${LAPLACE_PERFCACHE_BIN} ${LAPLACE_PERFCACHE_REFERENCE_BIN}
@@ -256,6 +297,10 @@ target_link_libraries(laplace_core
     PUBLIC  laplace_eigen
     PRIVATE blake3 ZLIB::ZLIB
 )
+if(NOT WIN32)
+    find_package(Threads REQUIRED)
+    target_link_libraries(laplace_core PRIVATE Threads::Threads)
+endif()
 
 # Syzygy probe kernel — its OWN library, deliberately NOT part of laplace_core.
 # laplace_core is linked into the laplace_substrate extension, i.e. loaded into

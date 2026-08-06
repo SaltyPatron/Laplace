@@ -109,11 +109,12 @@ case "$source" in
         build_cli
         ingest safetensors "$path"
         ;;
-    unicode|iso639|cili|document|omw|wordnet|ud|tatoeba|atomic2020|conceptnet|wiktionary|opensubtitles|verbnet|propbank|framenet|mapnet|wordframenet|semlink|stack|tiny-codes)
+    unicode|iso639|cili|document|omw|wordnet|ud|tatoeba|atomic2020|conceptnet|wiktionary|opensubtitles|verbnet|propbank|framenet|mapnet|wordframenet|semlink|stack|tiny-codes|rgba-image|track-audio|frame-video)
         # Default-path sources: IngestDataPaths resolves a DATA_ROOT-relative default
         # when no <path> is given (stack=stack-v2, tiny-codes=tiny-codes, document=text…).
         # An explicit <path> (single file, bare dir, or ecosystem root) always wins via
         # IngestInput.ResolveFiles — `ingest ud <one.conllu>` validates in seconds.
+        # Media lanes (generic): rgba-image, track-audio, frame-video — not corpus keys.
         build_cli
         if [[ "$source" == "document" && -z "$path" ]]; then
             path="${INGEST_DOCUMENT_PATH:-$DATA_ROOT/test-data/text}"

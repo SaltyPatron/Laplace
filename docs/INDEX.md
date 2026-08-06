@@ -88,7 +88,9 @@ countable fact; prose docs cite it instead of embedding counts.
 
 - [00-CONTINUITY.md](invention/00-CONTINUITY.md) — onboarding — pointer + verified traps; rewritten 2026-07-18
 - [05-synthesis-layers-heads.md](invention/05-synthesis-layers-heads.md) — notes — synthesis layers/heads; verify-or-annotate pass done, rank ladder annotated 2026-07-18
-- [modality-ladder-law.md](invention/modality-ladder-law.md) — notes — modality ladder law; verified clean 2026-07-19 (all cited relation names present in `engine/manifest/relation_types.toml`)
+- [modality-ladder-law.md](invention/modality-ladder-law.md) — binding — tier-0 is always Unicode codepoints; modalities are UAX#29-analogs above that floor; packaging ≠ identity (2026-08-06)
+- [modality-codepoint-floor-checklist.md](invention/modality-codepoint-floor-checklist.md) — checklist — rip forged T0 / rewire ladders (campaign tracker)
+- [modality-number-perfcache.md](invention/modality-number-perfcache.md) — notes — 0..255 number compose-floor ROM scaffold
 - [recipe-schema.md](invention/recipe-schema.md) — notes — model recipe schema; verify-or-annotate pass done, rank-ladder note 2026-07-18
 
 ## Decisions — `docs/decisions/`

@@ -64,6 +64,9 @@ internal static class IngestDispatchTable
     [
         "stack",
         "tiny-codes",
+        "rgba-image",
+        "track-audio",
+        "frame-video",
     ];
 
     private static IngestHandler Standard(string key, bool skipLayerCheck) =>
