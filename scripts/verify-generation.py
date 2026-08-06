@@ -92,22 +92,38 @@ def expected_set(db, word, limit):
 
 def probe(db, word, seeds, steps):
     # Through the installed surface (laplace.generation_probe): one row per
-    # (lane, seed), one psql spawn per prompt. An earlier per-call-isolation
+    # (lane, seed), one psql spawn per SEED. An earlier per-call-isolation
     # version here defended against a "statement interference" theory that
     # turned out to be an ASCII-tokenizer artifact (see WORD_RE) — the
     # installed op is the product surface and the measurement uses it.
+    # ONE SEED PER STATEMENT, deliberately: the all-seeds form put 3x compose
+    # + 3x walk in a single statement, and on the cold cache right after a
+    # deploy's PostgreSQL restart that breached the 300s statement bound (the
+    # 2026-08-06 eval failure — the same battery passes in seconds warm). The
+    # per-seed split keeps each statement a third of the work; the bound stays
+    # honest instead of being tripled away.
     # JSON aggregation because replies contain newlines.
-    seed_arr = ",".join(str(s) for s in seeds)
-    rows = psql_rows(db, f"""
-        SET search_path = laplace, public;
-        SET statement_timeout = '300s';
-        SELECT json_agg(json_build_object('lane', lane, 'seed', seed,
-                                          'reply', COALESCE(reply, '')))
-        FROM generation_probe('{q(word)}', ARRAY[{seed_arr}]::bigint[], {int(steps)});""")
     out = {}
-    for rec in json.loads("".join(rows) or "[]") or []:
-        out.setdefault(rec["lane"], []).append(rec["reply"])
+    for seed in seeds:
+        rows = psql_rows(db, f"""
+            SET search_path = laplace, public;
+            SET statement_timeout = '300s';
+            SELECT json_agg(json_build_object('lane', lane, 'seed', seed,
+                                              'reply', COALESCE(reply, '')))
+            FROM generation_probe('{q(word)}', ARRAY[{int(seed)}]::bigint[], {int(steps)});""")
+        for rec in json.loads("".join(rows) or "[]") or []:
+            out.setdefault(rec["lane"], []).append(rec["reply"])
     return out
+
+
+def warmup(db, word, steps):
+    # First touch after a deploy restart pays the whole cold cache; do it once,
+    # unscored, with its own generous bound, so the scored statements measure
+    # generation cost rather than buffer-pool priming.
+    psql_rows(db, f"""
+        SET search_path = laplace, public;
+        SET statement_timeout = '600s';
+        SELECT count(*) FROM generation_probe('{q(word)}', ARRAY[7]::bigint[], {int(steps)});""")
 
 
 def score(prompt, replies, expected):
@@ -156,6 +172,9 @@ def main():
     except OSError as e:
         print(f"note: smoke prompts skipped ({e})", file=sys.stderr)
     seeds = [int(s) for s in args.seeds.split(",")]
+
+    if probes:
+        warmup(args.db, probes[0][0], args.steps)
 
     report = {}
     for word, is_topic in probes:
