@@ -288,7 +288,9 @@ pg_laplace_steered_walk(PG_FUNCTION_ARGS)
         int core_off;
 
         rng = sw_lcg(rng);
-        core_off = (int) ((rng < 0 ? -rng : rng) % (int64) (core_n - 1));
+        /* uint64 modulus: no negation (UB at INT64_MIN), no signed math for
+         * an index pick. */
+        core_off = (int) ((uint64) rng % (uint64) (core_n - 1));
         a = sw_intern(vocab, &tok_datum, &next_tok, &datum_cap,
                       core_elems[core_off]);
         b = sw_intern(vocab, &tok_datum, &next_tok, &datum_cap,
