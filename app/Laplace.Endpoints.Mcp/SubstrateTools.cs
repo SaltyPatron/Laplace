@@ -45,7 +45,9 @@ internal sealed class SubstrateTools
     /// the mistake it fixed there (a verbose catalog nobody reads because it's
     /// expensive to hold in context every turn).
     /// </summary>
-    private sealed record ToolSpec(string Name, string Summary, string Description, Func<JsonObject> BuildSchema);
+    private sealed record ToolSpec(string Name, string Summary, string Description,
+        Func<JsonObject> BuildSchema,
+        Func<SubstrateTools, JsonObject?, (string Text, bool IsError)> Handler);
 
     /// <summary>
     /// The raw-SQL escape hatch is OPERATOR-LANE ONLY. It is server-enforced
@@ -61,138 +63,142 @@ internal sealed class SubstrateTools
     [
         new("api", "Search the installed SQL function catalog by substring.",
             "Search the substrate's installed SQL function catalog (laplace.api). Returns name, args, returns for every function matching the substring. Use before assuming a helper doesn't exist.",
-            () => Schema(("query", "string", "substring to match, '' lists everything", true))),
+            () => Schema(("query", "string", "substring to match, '' lists everything", true)),
+            (s, a) => s.Api(a)),
         new("sql", "Run a read-only SQL query against the substrate.",
             "Run a read-only SQL query against the substrate (schema laplace on the search_path). The whole api() catalog is callable. Enforced read-only with a 15s statement timeout; rows capped (default 200).",
             () => Schema(("query", "string", "SQL SELECT/WITH to execute", true),
-                         ("max_rows", "integer", "row cap, default 200", false))),
+                         ("max_rows", "integer", "row cap, default 200", false)),
+            (s, a) => OperatorLane
+                ? s.ExecuteSql(a)
+                : ("sql is operator-lane only (launch with LAPLACE_MCP_OPERATOR=1); product reads go through the typed tools", true)),
         new("recall", "Ask the substrate about a topic (default read, session-carried).",
             "Ask the substrate about a topic (laplace.recall_session). A bare prompt gets the default read — gloss then the strongest chain — with session topic carry. There is NO English question routing (the regex router was removed): for a specific read shape use the `query` tool instead. Returns reply rows with eff_mu (conservative Glicko-2 estimate) and witness counts.",
             () => Schema(("prompt", "string", "the topic (a word or phrase; phrasing is not parsed)", true),
-                         ("session", "string", "session key for topic carry across turns", false))),
+                         ("session", "string", "session key for topic carry across turns", false)),
+            (s, a) => s.Recall(a)),
         new("query", "A structural read naming an explicit shape (define, is_a, walk, ...).",
             "A structural read (laplace.recall_intent): the caller names the SHAPE — define, what_is, describe, synonyms, translate, languages, examples, related, related_in, is_a, reason, walk, complete, fallback (SELECT * FROM laplace.query_shapes() for the live list). Language-agnostic by construction: nothing is inferred from phrasing. related/related_in need relation_type (canonical, e.g. HAS_PART); is_a/reason need topic2; translate accepts lang.",
             () => Schema(("shape", "string", "the read shape (see query_shapes())", true),
                          ("topic", "string", "the subject — word, phrase, or hex entity id", true),
                          ("topic2", "string", "second topic for is_a / reason", false),
                          ("relation_type", "string", "canonical relation for related / related_in", false),
-                         ("lang", "string", "target language for translate", false))),
+                         ("lang", "string", "target language for translate", false)),
+            (s, a) => s.Query(a)),
         new("taxonomy", "The IS_A tree around a topic (up to root, or child kinds).",
             "The IS_A tree around a topic: dir='up' rows climb the parent chain to the root (via walk_strongest over the IS_A arena, from the topic's top synset — taxonomy lives on concepts, not spellings), dir='child' rows are the strongest sub-kinds. Every row carries the entity id to continue from. dir='child' is the closest thing to a \"bubble down\" the substrate has today (there is no general sense/synset -> every-surface primitive symmetric with bubble's surface -> sense -> synset climb) -- it is IS_A-specific, not a reverse of bubble. Rows use label_or_hex (a cleaned display name), not render (the actual content) -- see the bubble tool's note on that distinction.",
             () => Schema(("term", "string", "the topic (omit if entity given)", false),
-                         ("entity", "string", "hex entity id to root at", false))),
+                         ("entity", "string", "hex entity id to root at", false)),
+            (s, a) => s.Taxonomy(a)),
         new("translate", "Cross-lingual surfaces for a topic via the ILI hub.",
             "Cross-lingual surfaces for a topic (laplace.translations): the ILI hub meshing languages — OMW multilingual lemmas converging on the same concept ids. Each row is a surface + its language, rated.",
             () => Schema(("term", "string", "the topic", true),
-                         ("limit", "integer", "max rows, default 24", false))),
+                         ("limit", "integer", "max rows, default 24", false)),
+            (s, a) => s.Translate(a)),
         new("leaders", "Per-band leaderboards of the strongest consensus edges.",
             "Per-band leaderboards (laplace.consensus_band_edges): the strongest consensus edges in each salience band, fully labeled. Bands 0-12 (1 definitional, 2 taxonomic, 3 equivalence, 4 partitive, 5 causal, 6 oppositional, 7 associative, 9 lexical, 11 standards); SELECT * FROM laplace.relation_bands() for live counts.",
             () => Schema(("bands", "string", "comma-separated band numbers, default '1,2,4,5'", false),
-                         ("per_band", "integer", "rows per band, default 5", false))),
+                         ("per_band", "integer", "rows per band, default 5", false)),
+            (s, a) => s.Leaders(a)),
         new("chat", "One conversational turn; reply is walk-driven and self-witnessing.",
             "One conversational turn against the substrate (laplace.chat): walk-driven prose composed from rated consensus. Structural steering, no phrasing tricks: shape names the read, bands lenses it (e.g. '4' parts, '2' kinds, '5' causes), elaborate advances fact layers on a carried topic. Closes the loop: prompt and reply deposit as witnessed content (UserPrompt/Response trust classes) and fold, so the turn is visible to the next walk.",
             () => Schema(("prompt", "string", "the message", true),
                          ("session", "string", "session key for continuity", false),
                          ("shape", "string", "optional read shape (see query_shapes())", false),
                          ("bands", "string", "optional comma-separated salience bands to lens the reply", false),
-                         ("elaborate", "boolean", "advance to the next fact layer of the carried topic", false))),
+                         ("elaborate", "boolean", "advance to the next fact layer of the carried topic", false)),
+            (s, a) => s.ChatTurn(a)),
         new("witness", "Deposit a fact as witnessed content (the write lane).",
             "Deposit a fact into the substrate as witnessed content (the write lane). The text is minted as content-addressed entities through the writer spine under the UserPrompt trust class — outranked by curated sources BY DESIGN, one voice among many — and folds immediately, so the very next walk/recall can read it. Returns the minted root id. This is how an agent remembers something for every other agent.",
             () => Schema(("text", "string", "the fact/note to witness (plain prose)", true),
-                         ("origin", "string", "provenance tag, default 'agent/note'", false))),
+                         ("origin", "string", "provenance tag, default 'agent/note'", false)),
+            (s, a) => s.WitnessFact(a)),
         new("feedback", "Confirm or refute a claim (Glicko win/loss on an edge).",
             "Confirm or refute a claim (the Gödel-engine feedback lane, same implementation as the CLI attest). Terms resolve at the SURFACE/word layer — use bubble first when the claim lives on a synset/hub (same text renders at three layers; feedback lands where you aim it). Triple mode: subject + relation (canonical, e.g. IS_A, RELATED_TO) + object — a confirm is a Glicko win for the edge, a refute is a loss that can drive it signed-negative until walks drop it. Chain mode: tokens (comma-separated, 2+) attest PRECEDES pairs. Folds immediately; returns consensus before/after so you can watch the rating move.",
             () => Schema(("verdict", "string", "'confirm' or 'refute'", true),
                          ("subject", "string", "triple mode: subject term", false),
                          ("relation", "string", "triple mode: canonical relation type", false),
                          ("object", "string", "triple mode: object term", false),
-                         ("tokens", "string", "chain mode: comma-separated tokens (2+)", false))),
+                         ("tokens", "string", "chain mode: comma-separated tokens (2+)", false)),
+            (s, a) => s.Feedback(a)),
         new("walk", "Beam-walk the consensus graph from a prompt or entity.",
             "Beam-walk the consensus graph from a prompt (laplace.walk_branches), ranked by relation_rank x eff_mu x exp(-k*rd) x witness-saturation, gated by the highway mask when relation_type narrows it. UNFILTERED walk_branches (no relation_type) Append-scans every relation-type partition -- measured ~24s -- so pass relation_type whenever you have one; the `query` tool's `beam` shape falls back to the cheaper walk_strongest (relation_rank x eff_mu only, no highway gating) greedy chain when neither a relation type nor a band lens is given, and this tool should get the same treatment when speed matters. Pass entity (hex id from bubble) to start from a resolved node rather than re-resolving text. Paths render via realize_path (label_or_hex per step), not render -- see the bubble tool's render-vs-label note.",
             () => Schema(("prompt", "string", "starting content (omit if entity given)", false),
                          ("entity", "string", "hex entity id to start from, e.g. from bubble", false),
                          ("relation_type", "string", "canonical relation name to constrain the walk", false),
                          ("depth", "integer", "walk depth, default 4", false),
-                         ("breadth", "integer", "beam breadth, default 5", false))),
+                         ("breadth", "integer", "beam breadth, default 5", false)),
+            (s, a) => s.Walk(a)),
         new("infer", "One forward pass: the topic's distribution reweighted by the prompt's bias tokens.",
             "One forward pass over the substrate (laplace.infer): prompt_coherence elects the topic (attention), the topic's consensus objects are read as an uncollapsed ranked distribution, EVERY sense of every non-topic token reweights it by id-space intersection (the bias heads), and realize_batch renders once at the end. Returns prediction, weight (eff_mu/1e9), bias_hits — the whole ranked frontier, never just the argmax.",
             () => Schema(("prompt", "string", "the prompt to complete", true),
-                         ("limit", "integer", "max candidates, default 8", false))),
+                         ("limit", "integer", "max candidates, default 8", false)),
+            (s, a) => s.Infer(a)),
         new("sense_audit", "Why senses() returned what it returned — type, admitting relation, language, strength.",
             "Diagnose a term's candidate sense set (laplace.sense_audit). Per candidate: the target's ENTITY TYPE (bubble_up promotes any IS_SYNONYM_OF target into the synset slot, so the value is frequently typed Word or Sentence rather than WordNet_Synset), the RELATION that admitted it (a candidate arriving via IS_SYNONYM_OF is a TRANSLATION competing as a sense), its attested HAS_LANGUAGE, and the denote_mu + witness count the election actually ranks on. Use this when a reply is on the right concept in the wrong language, or on an unrelated sense.",
             () => Schema(("term", "string", "the surface word", true),
-                         ("limit", "integer", "max candidates, default 64", false))),
+                         ("limit", "integer", "max candidates, default 64", false)),
+            (s, a) => s.SenseAudit(a)),
         new("prompt_language", "Which language a prompt is written in, as a ranked tally.",
             "The request's language (laplace.prompt_language): a weighted tally of eff_mu over EVERY HAS_LANGUAGE edge carried by the prompt's entities, at every tier that has one. Deliberately not word_language() per token — that is LIMIT 1 and discards the distribution, making a token shared across languages look monolingual. Returns the ranked tally rather than just the winner, because an elector should BIAS toward a language, not hard-filter to it: a cross-lingual prompt must still work.",
-            () => Schema(("prompt", "string", "the prompt", true))),
+            () => Schema(("prompt", "string", "the prompt", true)),
+            (s, a) => s.PromptLanguage(a)),
         new("bubble", "Bubble a surface term up the mesh to its concept hub.",
             "Bubble a surface term up the mesh to the highway (laplace.bubble_up): surface -> sense -> synset (ranked by base_eff_mu x domain-log-boost from geometry adjacency, not consensus rows), then the hub above it (IS_INSTANCE_OF/IS_A) and every relation channel available there with edge counts. Returns entity ids, so the next step continues from where this one landed instead of re-entering from text. Use this before facts/walk when a term may resolve at the wrong layer — all three layers render with the SAME text, so a query aimed at the wrong one returns zero rows and looks like missing knowledge. There is no bubble_down (see the taxonomy tool for the closest, IS_A-specific, downward move). Note the render/label split: this tool's rows use render() (canonical name -> tier-0 codepoint -> resolve_name -> full recursive content rebuild -> hex fallback) because a sense/synset's actual gloss text is the point; most other tools (taxonomy, facts, walk, leaders) use label_or_hex() instead (resolve_name, else render() with internal canonical-key scaffolding regex-stripped for readability, else hex) because they want a short display tag, not content. Pick the wrong one and you get either a wall of text where a tag was wanted, or a stripped tag where the actual definition was wanted.",
             () => Schema(("term", "string", "the surface word or phrase", true),
-                         ("k", "integer", "sense frontier width, default 5", false))),
+                         ("k", "integer", "sense frontier width, default 5", false)),
+            (s, a) => s.Bubble(a)),
         new("facts", "Salient rated facts about a word or entity.",
             "Salient rated facts about a word (laplace.salient_facts): typed relations ranked by eff_mu with witness counts. Pass entity (hex id from bubble/walk) to read facts at a specific mesh layer instead of resolving text at the surface.",
             () => Schema(("term", "string", "the word (omit if entity given)", false),
                          ("entity", "string", "hex entity id to read from, e.g. from bubble", false),
-                         ("limit", "integer", "max facts, default 24", false))),
+                         ("limit", "integer", "max facts, default 24", false)),
+            (s, a) => s.Facts(a)),
         new("health", "Substrate health and row-count inventory.",
             "Substrate health and inventory: laplace.substrate_health() plus laplace.substrate_counts(). Metric values are NULLABLE: a metric the health pass did not measure reports null, which is a different fact from zero. identity_violations is null whenever deep_checked is false — read them together or a skipped deep pass looks like a clean one.",
-            () => Schema()),
+            () => Schema(),
+            (s, _) => s.Health()),
         new("source_status", "Is a source ingested, and how do we know.",
             "Ingest state per source (laplace.source_status): known, ingested, approximate evidence, whether it observed entities, and the last run's status. Call this instead of assembling an answer — every hand-rolled version of this question is wrong in a specific way. An evidence>0 test reports the DOCUMENT lane as absent, because it is content-only by design (entities and geometry, zero distributional attestations); a source name you typed returns nothing when the spelling differs from the decomposer's declared SourceName; and ingest_run_journal is ops metadata that does not survive a dump/restore, so a missing row is not absence. Asking with a name ALWAYS returns exactly one row: `ingested=false` means the source wrote nothing, and `known=false` means this substrate has no record of that source id at all — which on a mesh this dense usually means the name is wrong rather than the corpus missing. Absence is an answer here, never an empty result set.",
-            () => Schema(("source", "string", "declared source name, e.g. WordNetDecomposer; omit for every source", false))),
+            () => Schema(("source", "string", "declared source name, e.g. WordNetDecomposer; omit for every source", false)),
+            (s, a) => s.SourceStatus(a)),
         new("ingest", "Run a corpus ingest through the CLI's tested pipeline.",
             "Run a corpus ingest through the CLI's own tested pipeline (unpack -> records -> client-side dedup/fold -> COPY) -- the exact 'laplace ingest <source> <path>' entrypoint a terminal run uses, so results are identical either way. Substrate-wide only one ingest runs at a time (a global advisory lock); if another is active this call waits for it rather than fighting the lock, up to timeout_seconds, and is killed (not left running) on timeout. Returns the process exit code and captured output so a stalled or failed run is visible, never silently swallowed. For the live source list run `laplace ingest` with no arguments, or pass an unknown source here -- the CLI answers with its own registry rather than a copy kept in this process.",
             () => Schema(("source", "string", "registered ingest source name (code, repo, wordnet, tabular, ...)", true),
                          ("path", "string", "file or directory to ingest", true),
-                         ("timeout_seconds", "integer", "max seconds to wait before killing the child process, default 600", false))),
+                         ("timeout_seconds", "integer", "max seconds to wait before killing the child process, default 600", false)),
+            (_, a) => Ingest(a)),
         new("op", "Call an installed SQL operation by name, with bound arguments.",
             "Call any operation in the installed catalog BY NAME (laplace.api is the allow-list; nothing outside it is callable). Arguments are bound as parameters and cast to the signature's declared types -- no SQL text crosses this boundary in either direction, which is what makes this narrower than `sql` rather than a nicer spelling of it. Overloads resolve from the argument names you supply. Enforced read-only with a 15s statement timeout, rows capped (default 200). This exists because a per-function tool is written by hand and therefore forgotten (358 installed functions, 358 chances), and because a hand-written tool is invisible until the server restarts -- which nothing owns. `op` resolves against the LIVE catalog, so an operation is callable the moment it is installed. If you are about to hand-write a SELECT, the operation you want probably exists: api('<substring>') first.",
             () => Schema(("name", "string", "installed function name, exactly as api() reports it", true),
                          ("args", "object", "argument name -> value, e.g. {\"p_source\": \"WordNetDecomposer\"}", false),
-                         ("max_rows", "integer", "row cap, default 200", false))),
+                         ("max_rows", "integer", "row cap, default 200", false)),
+            (s, a) => s.Op(a)),
         new("pipeline", "Inspect Laplace pipeline build stamps and deployment status.",
             "Inspect Laplace pipeline build stamps, deployed binary directory (/opt/laplace/app), and component readiness.",
-            () => Schema()),
+            () => Schema(),
+            (s, a) => s.PipelineStatus(a)),
         new("help", "List every tool (one-line each), or full detail for one name.",
             "Catalog introspection for THIS tool surface, same idea as laplace.api('substring') for the SQL catalog: with no name, lists every tool's one-line summary; with name, returns the full rationale and input schema for that one tool. Call this before guessing at a tool's arguments from its one-line summary alone.",
-            () => Schema(("name", "string", "tool name for full detail; omit to list every tool", false))),
+            () => Schema(("name", "string", "tool name for full detail; omit to list every tool", false)),
+            (_, a) => Help(a)),
     ];
 
     public JsonArray ListTools() => new(
         ToolCatalog.Where(t => OperatorLane || t.Name != "sql")
             .Select(t => (JsonNode)Tool(t.Name, t.Summary, t.BuildSchema())).ToArray());
 
+    // Dispatch resolves through the catalog itself: a ToolSpec cannot be declared
+    // without a Handler, so the advertised list and the callable list are the same
+    // list by construction.
     public (string Text, bool IsError) Call(string name, JsonObject? args)
     {
+        var spec = ToolCatalog.FirstOrDefault(t => string.Equals(t.Name, name, StringComparison.Ordinal));
+        if (spec is null)
+            return ($"unknown tool: {name}", true);
         try
         {
-            return name switch
-            {
-                "api" => Api(args),
-                "op" => Op(args),
-                "pipeline" => PipelineStatus(args),
-                "sql" => OperatorLane
-                    ? ExecuteSql(args)
-                    : ("sql is operator-lane only (launch with LAPLACE_MCP_OPERATOR=1); product reads go through the typed tools", true),
-                "source_status" => SourceStatus(args),
-                "infer" => Infer(args),
-                "sense_audit" => SenseAudit(args),
-                "prompt_language" => PromptLanguage(args),
-                "recall" => Recall(args),
-                "chat" => ChatTurn(args),
-                "witness" => WitnessFact(args),
-                "feedback" => Feedback(args),
-                "query" => Query(args),
-                "taxonomy" => Taxonomy(args),
-                "translate" => Translate(args),
-                "leaders" => Leaders(args),
-                "walk" => Walk(args),
-                "facts" => Facts(args),
-                "health" => Health(),
-                "ingest" => Ingest(args),
-                "help" => Help(args),
-                _ => ($"unknown tool: {name}", true),
-            };
+            return spec.Handler(this, args);
         }
         catch (PostgresException ex)
         {
@@ -410,6 +416,42 @@ internal sealed class SubstrateTools
             ["eff_mu"] = Math.Round(r.EffMu, 1),
             ["witnesses"] = r.Witnesses,
         }));
+    }
+
+    // Surface -> sense -> synset via laplace.bubble_up. Renders sense and synset
+    // with render() — the gloss text is the point here, not a display tag (see
+    // the catalog's render-vs-label note) — and returns hex ids so the next call
+    // reads from the resolved layer instead of re-entering text.
+    private (string, bool) Bubble(JsonObject? args)
+    {
+        var id = NpgsqlSubstrateReads.ResolveRefAsync(
+                _dbReadOnly, ChessPositionRef.RewriteFenToHex(Req(args, "term"))!, default)
+            .GetAwaiter().GetResult();
+        if (id is null)
+            return JsonRows(Array.Empty<JsonObject>());
+
+        using var cmd = _dbReadOnly.CreateCommand(
+            "SELECT b.sense_id, laplace.render(b.sense_id), b.synset_id, laplace.render(b.synset_id), " +
+            "b.via_relation, b.score, b.base_eff_mu, b.domain_hits, b.witnesses " +
+            "FROM laplace.bubble_up($1, NULL::bytea[], $2) b");
+        cmd.Parameters.Add(new() { Value = id });
+        cmd.Parameters.Add(new() { Value = Int(args, "k", 5) });
+        using var rd = cmd.ExecuteReader();
+        var rows = new List<JsonObject>();
+        while (rd.Read())
+            rows.Add(new JsonObject
+            {
+                ["sense"] = rd.IsDBNull(0) ? null : Convert.ToHexStringLower(rd.GetFieldValue<byte[]>(0)),
+                ["sense_text"] = rd.IsDBNull(1) ? null : rd.GetString(1),
+                ["synset"] = rd.IsDBNull(2) ? null : Convert.ToHexStringLower(rd.GetFieldValue<byte[]>(2)),
+                ["synset_text"] = rd.IsDBNull(3) ? null : rd.GetString(3),
+                ["via_relation"] = rd.IsDBNull(4) ? null : rd.GetString(4),
+                ["score"] = rd.IsDBNull(5) ? null : (double)rd.GetDecimal(5),
+                ["base_eff_mu"] = rd.IsDBNull(6) ? null : (double)rd.GetDecimal(6),
+                ["domain_hits"] = rd.IsDBNull(7) ? null : rd.GetInt64(7),
+                ["witnesses"] = rd.IsDBNull(8) ? null : rd.GetInt64(8),
+            });
+        return JsonRows(rows);
     }
 
     private (string, bool) Api(JsonObject? args)
