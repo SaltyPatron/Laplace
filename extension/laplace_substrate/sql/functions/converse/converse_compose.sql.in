@@ -113,21 +113,28 @@ BEGIN
         -- four turns back is a whisper. Same bands, same fold-produced mu,
         -- same frontier_agg merge (max keeps the strongest claim on a
         -- concept two topics share). NULL/empty ctx contributes zero rows —
-        -- a fresh session composes exactly as before this change.
+        -- a fresh session composes exactly as before this change. The live
+        -- topic is excluded HERE, where syn is known — chat() filters its
+        -- own carried topic, but this function re-elects syn independently,
+        -- and a caller whose ctx happens to contain the elected topic would
+        -- double-count it at full-plus-decayed weight (Copilot, PR #896).
         UNION ALL
         SELECT c.object_id, eff_mu(c.rating, c.rd) / (2 ^ x.dist)
         FROM unnest(COALESCE(p_ctx, ARRAY[]::bytea[])) WITH ORDINALITY x(cid, dist)
         JOIN consensus c ON c.subject_id = x.cid
                         AND relation_highway_band(c.type_id) IN (1,2,4,7)
+        WHERE x.cid <> syn
         UNION ALL
         SELECT c.subject_id, eff_mu(c.rating, c.rd) / (2 ^ x.dist)
         FROM unnest(COALESCE(p_ctx, ARRAY[]::bytea[])) WITH ORDINALITY x(cid, dist)
         JOIN consensus c ON c.object_id = x.cid
                         AND relation_highway_band(c.type_id) IN (1,2,4,7)
+        WHERE x.cid <> syn
         UNION ALL
         SELECT x.cid, (SELECT max(eff_mu(c2.rating, c2.rd)) FROM consensus c2
                        WHERE c2.subject_id = x.cid) / (2 ^ x.dist)
         FROM unnest(COALESCE(p_ctx, ARRAY[]::bytea[])) WITH ORDINALITY x(cid, dist)
+        WHERE x.cid <> syn
     ),
     -- The frontier is concepts and — since the concept-stream change — so is
     -- the stream: steering matches DIRECTLY in concept space (GH #751, slot
