@@ -143,6 +143,26 @@ public sealed class ConversationProvenanceGateTests
         Assert.Contains("_plainWriterBroken", text);
     }
 
+    /// <summary>
+    /// The HTTP converse lane rides chat() — the one conversational entry point —
+    /// with recall_session only as the truthful-absence fallback (PR #892). Before
+    /// this pin the lane read recall_session directly and answered "What is a dog?"
+    /// with a phrase-lookup miss on the deployed box. Also pins the provenance rule:
+    /// a chat reply's eff_mu/witnesses are ABSENT, never fabricated as zero.
+    /// </summary>
+    [Fact]
+    public void HttpConverse_GoesThroughChatBeforeRecallFallback()
+    {
+        var text = Read("app/Laplace.Endpoints.OpenAICompat/SubstrateClient.cs");
+        var method = StripComments(ExtractMethod(text,
+            "private static async Task<IReadOnlyList<ConverseRow>> RecallSessionAsync"));
+        var chatIdx = method.IndexOf("NpgsqlSubstrateReads.ChatAsync(", StringComparison.Ordinal);
+        var recallIdx = method.IndexOf("NpgsqlSubstrateReads.RecallSessionAsync(", StringComparison.Ordinal);
+        Assert.True(chatIdx >= 0, "converse lane must consult NpgsqlSubstrateReads.ChatAsync");
+        Assert.True(recallIdx > chatIdx, "recall_session is the fallback, consulted after chat()");
+        Assert.Contains("ConverseRow(reply, null, null)", method);
+    }
+
     /// <summary>Drops // line comments so a pin tests the call sites, not the prose.</summary>
     private static string StripComments(string source) =>
         string.Join('\n', source.Split('\n')
