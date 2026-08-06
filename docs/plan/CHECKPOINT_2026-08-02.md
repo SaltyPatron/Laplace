@@ -137,11 +137,21 @@ convenient.”
    3/5 sentences but VARIES on 'The opposite of hot is' and 'Once upon a
    time' — replay is PROMPT-SHAPE-DEPENDENT (#751 hypothesis narrowed);
    walk varies everywhere, content 0–0.05 vs English expected sets (R1
-   p_lang gap quantified). Next session's ordered picks: (1) #755 second
-   half — thresholds + CI seeded-fixture job; (2) converse_compose
-   input-array diagnosis, now with the prompt-shape discriminator (#751);
-   (3) G4 destination read as an installed op (CALLS in-degree — data
-   exists).
+   p_lang gap quantified).
+   **#755 CI wiring LANDED (PR #883, 2026-08-06):** lane detectors run as an
+   independent advisory step in the eval job on every deploy — proven live
+   (the merge's own deploy printed the full table). Threshold flip via
+   eval-baselines remains.
+   **#751 diagnosis CONFIRMED (minimal pair):** 'hot water' varies across
+   seeds with English cross-witness recombination; single-anchor prompts
+   collapse compose's starts to the one max-cnt core gid → deterministic
+   replay. Fix target named on-issue: widen the starts/core derivation for
+   single-anchor prompts; acceptance = W5 variance detector flips 1/3→3/3
+   on dog/water/king, printed by every deploy.
+   Next session's ordered picks: (1) the #751 starts-widening fix — the
+   smallest speak-lane unblock, acceptance automated; (2) #755 threshold
+   flip once deploys accumulate; (3) G4 destination read as an installed op
+   (CALLS in-degree — data exists).
 3. **W6 remainder / #758** — still open:
    - G4 dead-canonical (**destination** = substrate `CALLS` in-degree after
      W3; **scaffolding** = labeled grep + shrink-only allowlist may ship first)
