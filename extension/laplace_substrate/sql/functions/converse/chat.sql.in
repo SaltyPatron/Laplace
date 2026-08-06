@@ -261,8 +261,11 @@ BEGIN
             -- edge is precisely what links an unsensed surface to a discourse
             -- topic. Senses stay in the set for the day partial resolution makes
             -- this branch reachable with them present.
+            -- prompt_words, not prompt_state: this branch only needs the token ids,
+            -- and prompt_state pays a word_language() consensus read per token for
+            -- a column nothing here reads (Copilot, PR #893).
             WITH ptok AS MATERIALIZED (
-                SELECT p.id FROM prompt_state(p_prompt) p WHERE p.id IS NOT NULL
+                SELECT p.id FROM prompt_words(p_prompt) p WHERE p.id IS NOT NULL
             ),
             psense AS MATERIALIZED (
                 SELECT DISTINCT x.sid FROM (
