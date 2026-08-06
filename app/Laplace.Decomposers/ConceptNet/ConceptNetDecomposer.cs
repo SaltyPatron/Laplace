@@ -123,24 +123,40 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase<ConceptN
         return true;
     }
 
-    // Per-row language resolution without per-row canonicalization cost: one memo keyed
-    // on the RAW /c/<lang> code (ConceptNet carries ~300 distinct codes), so Trim/
-    // ToLower/alias-walk in LanguageReference.ResolveCode runs once per distinct code,
-    // not once per row. The value factory also feeds the readback roster (fix for
-    // LanguageNames being declared and never populated). Unresolved codes map to "und"
-    // inside LanguageReference — never default — so null here means only an empty span.
+    // Per-row language resolution with NO per-row allocation on the hot path: codes
+    // of <= 8 bytes (every ConceptNet code that matters — "en", "fr", "zh") pack into
+    // one ulong key, so the row cost is a span pack + one lock-free dictionary hit.
+    // Longer codes ("zh-classical") take the string-keyed memo. Either way the
+    // canonicalization walk (Trim/ToLower/alias in LanguageReference.ResolveCode)
+    // runs once per DISTINCT code (~300 in the corpus), not once per row, and the
+    // factory feeds the readback roster (fix for LanguageNames being declared and
+    // never populated). Unresolved codes map to "und" inside LanguageReference —
+    // never default — so null here means only an empty span.
+    private static readonly ConcurrentDictionary<ulong, Hash128> LangIdByPackedCode = new();
     private static readonly ConcurrentDictionary<string, Hash128> LangIdByRawCode =
         new(StringComparer.Ordinal);
 
     private static Hash128? LangId(ReadOnlySpan<byte> langUtf8)
     {
         if (langUtf8.IsEmpty) return null;
-        string raw = Encoding.UTF8.GetString(langUtf8);
-        return LangIdByRawCode.GetOrAdd(raw, static code =>
+        if (langUtf8.Length <= 8)
         {
-            VocabularyNames.TrackLanguage(LanguageNames, code);
-            return LanguageReference.Resolve(code);
-        });
+            ulong key = 0;
+            for (int i = 0; i < langUtf8.Length; i++)
+                key = (key << 8) | langUtf8[i];
+            if (LangIdByPackedCode.TryGetValue(key, out var hit)) return hit;
+            var resolved = ResolveAndTrack(Encoding.UTF8.GetString(langUtf8));
+            LangIdByPackedCode.TryAdd(key, resolved);
+            return resolved;
+        }
+        string raw = Encoding.UTF8.GetString(langUtf8);
+        return LangIdByRawCode.GetOrAdd(raw, static code => ResolveAndTrack(code));
+    }
+
+    private static Hash128 ResolveAndTrack(string code)
+    {
+        VocabularyNames.TrackLanguage(LanguageNames, code);
+        return LanguageReference.Resolve(code);
     }
 
     // assertion-uri \t relation \t start-concept \t end-concept \t {metadata-json}
