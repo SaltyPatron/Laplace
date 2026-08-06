@@ -24,13 +24,13 @@ pour campaign, run in the only order that works.
 | **Hidden dim** | live: unbounded id space (hash space); rank-d exists only at export | — |
 | **Q** (query formation) | the election — the turn's frontier construction | consensus reads |
 | **K** | arena keys: (subject, type) indexes; positional keys are trajectory ordinals | consensus + trajectory |
-| **V** | consensus objects with their full rating tuples — eff_mu is the value magnitude | consensus |
+| **V** | consensus objects with their full rating tuples — `eff_mu` is the value magnitude | consensus |
 | **O** (output projection) | steer-merge + share normalization folding heads back into the stream | native walk |
 | **Gate** | highway-mask bits — which relation families fire for this entity | highway plane |
 | **Up** | expansion into the relation arenas — one head per band/family | consensus |
-| **Down** | the weighted fold back: walk_edge_weight, RD decay, witness saturation | native |
+| **Down** | the weighted fold back: `walk_edge_weight`, RD decay, witness saturation | native |
 | **Norms** | share normalization (÷ own total mass); RD as per-feature scale | fold |
-| **LM Head** | realize / realize_batch over the final distribution; at pour, the conditional-table factorization | realization |
+| **LM Head** | `realize` / `realize_batch` over the final distribution; at pour, the conditional-table factorization | realization |
 | **Positional (RoPE analog)** | **the physicality trajectory** — order lives in geometry, losslessly | trajectory |
 
 ## The trajectory law (restated as this table's rule)
@@ -85,7 +85,7 @@ three, and they answer different questions (the dual-engine law):
 
 | Plane | Instrument | Answers | Bounded by |
 |---|---|---|---|
-| Relational | consensus eff_mu | what testimony binds (whale–ship) | sign from rating; magnitude from RD/witnesses |
+| Relational | consensus `eff_mu` | what testimony binds (whale–ship) | sign from rating; magnitude from RD/witnesses |
 | Angular | S³ coord / Hilbert key | same constituent multiset, any order (whale–while; anagrams) | NOT identity above tier 0 — candidate filter only |
 | Curve | Fréchet / Hausdorff over REALIZED trajectories (entity_curve / word_curve) | same order and shape | must realize from live coords; stored trajectory is identity cargo, not positions |
 
