@@ -8,12 +8,14 @@ challenger) and scores each lane with the R6 detector set the plan names
 
   seed_variance   distinct replies across seeds (1 == the replay failure
                   converse_compose's header gates wiring on)
-  echo_rate       fraction of reply tokens that are the prompt token
+  echo_rate       fraction of reply tokens equal to the prompt token
                   (converse_tiered's "dog. dog. dog." class, GH #878)
-  flatness        distinct-token ratio inside a reply
+  flatness        1 - distinct/total tokens across a lane's replies —
+                  HIGHER means flatter (more internal repetition)
   content_rate    fraction of reply content words found in the topic's own
-                  expected-continuation set (consensus objects by eff_mu —
-                  the substrate's own evidence, per the behavioral harness)
+                  expected-continuation set (consensus objects by eff_mu,
+                  probe word and short tokens excluded, per the behavioral
+                  harness) — sentence-shaped smoke prompts skip this metric
 
 Exit codes: 0 measured (report printed), 2 harness/setup error. This half
 does NOT gate: thresholds and the CI seeded-fixture job are the second half
@@ -82,28 +84,29 @@ def expected_set(db, word, limit):
         LIMIT {int(limit)};""")
     out = set()
     for r in rows:
-        out.update(w.lower() for w in WORD_RE.findall(r))
-    return out - GLUE_WORDS
+        out.update(w.casefold() for w in WORD_RE.findall(r))
+    # Match verify-model-behavioral: the probe word itself and short tokens
+    # are not evidence of content transfer.
+    return {w for w in out if w != word.casefold() and len(w) > 2} - GLUE_WORDS
 
 
 def probe(db, word, seeds, steps):
-    # ONE call per psql invocation: measurement hygiene, not a proven
-    # requirement — an earlier "statement interference" theory here was an
-    # artifact of the ASCII-only tokenizer (see WORD_RE) scoring Cyrillic
-    # replies as empty. Per-call isolation stays because it makes each
-    # reply's cost and failure independently attributable. JSON wrapping
-    # because replies contain newlines.
+    # Through the installed surface (laplace.generation_probe): one row per
+    # (lane, seed), one psql spawn per prompt. An earlier per-call-isolation
+    # version here defended against a "statement interference" theory that
+    # turned out to be an ASCII-tokenizer artifact (see WORD_RE) — the
+    # installed op is the product surface and the measurement uses it.
+    # JSON aggregation because replies contain newlines.
+    seed_arr = ",".join(str(s) for s in seeds)
+    rows = psql_rows(db, f"""
+        SET search_path = laplace, public;
+        SET statement_timeout = '300s';
+        SELECT json_agg(json_build_object('lane', lane, 'seed', seed,
+                                          'reply', COALESCE(reply, '')))
+        FROM generation_probe('{q(word)}', ARRAY[{seed_arr}]::bigint[], {int(steps)});""")
     out = {}
-    for lane, call_t in (("walk", "converse_walk('{w}', {n}, {s})"),
-                         ("compose", "converse_compose('{w}', {n}, NULL, {s})")):
-        for seed in seeds:
-            call = call_t.format(w=q(word), n=int(steps), s=int(seed))
-            rows = psql_rows(db, f"""
-                SET search_path = laplace, public;
-                SET statement_timeout = '120s';
-                SELECT json_build_object('reply', COALESCE({call}, ''));""")
-            rec = json.loads("".join(rows) or "{}")
-            out.setdefault(lane, []).append(rec.get("reply", ""))
+    for rec in json.loads("".join(rows) or "[]") or []:
+        out.setdefault(rec["lane"], []).append(rec["reply"])
     return out
 
 
@@ -112,11 +115,14 @@ def score(prompt, replies, expected):
     if not toks:
         return {"empty": True, "seed_variance": len(set(replies))}
     content = [t for t in toks if t not in GLUE_WORDS]
-    p = prompt.lower()
+    # Echo = reply tokens that are prompt tokens; for a single-word probe this
+    # reduces to repeating the topic word, for sentence prompts it catches
+    # prompt-echo loops.
+    prompt_toks = {t.casefold() for t in WORD_RE.findall(prompt)}
     return {
         "empty": False,
         "seed_variance": len(set(replies)),
-        "echo_rate": round(sum(1 for t in toks if t == p) / len(toks), 3),
+        "echo_rate": round(sum(1 for t in toks if t in prompt_toks) / len(toks), 3),
         "flatness": round(1.0 - len(set(toks)) / len(toks), 3),
         "content_rate": round(
             (sum(1 for t in content if t in expected) / len(content)) if content else 0.0, 3),
@@ -134,14 +140,20 @@ def main():
     ap.add_argument("--report", default=None)
     args = ap.parse_args()
 
-    # Smoke prompts are sentence-shaped; probe words are single-topic. Both run;
-    # single words get the content_rate detector, sentences get echo/flatness only.
-    probes = [w.strip() for w in args.probes.split(",") if w.strip()]
+    # Probe words get the full detector set (content_rate needs a topic's
+    # expected-continuation set); sentence-shaped smoke prompts run with an
+    # empty expected set — variance/echo/flatness only.
+    probes = [(w.strip(), True) for w in args.probes.split(",") if w.strip()]
+    try:
+        with open(args.prompts, encoding="utf-8") as f:
+            probes += [(line.strip(), False) for line in f if line.strip()]
+    except OSError as e:
+        print(f"note: smoke prompts skipped ({e})", file=sys.stderr)
     seeds = [int(s) for s in args.seeds.split(",")]
 
     report = {}
-    for word in probes:
-        expected = expected_set(args.db, word, args.expected_per_probe)
+    for word, is_topic in probes:
+        expected = expected_set(args.db, word, args.expected_per_probe) if is_topic else set()
         lanes = probe(args.db, word, seeds, args.steps)
         report[word] = {}
         for lane, replies in sorted(lanes.items()):
@@ -155,10 +167,12 @@ def main():
                 flags.append("ECHO")
             if s["empty"]:
                 flags.append("EMPTY")
-            print(f"{word:>12} {lane:>8}: variance={s['seed_variance']}/{len(seeds)}"
-                  + (f" echo={s['echo_rate']} flat={s['flatness']} content={s['content_rate']}"
-                     if not s["empty"] else "")
-                  + (f"  [{' '.join(flags)}]" if flags else ""))
+            label = word if len(word) <= 24 else word[:21] + "..."
+            core = (f" echo={s['echo_rate']} flat={s['flatness']}"
+                    + (f" content={s['content_rate']}" if is_topic else "")
+                    if not s["empty"] else "")
+            print(f"{label:>24} {lane:>8}: variance={s['seed_variance']}/{len(seeds)}"
+                  + core + (f"  [{' '.join(flags)}]" if flags else ""))
 
     if args.report:
         with open(args.report, "w", encoding="utf-8") as f:
