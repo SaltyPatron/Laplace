@@ -737,6 +737,8 @@ jobs:
         # advisory week ends; until then the numbers land in the job log and
         # .eval-proof so regressions are visible the day they happen instead of
         # the month they get measured (converse_tiered, GH #878).
+        # Independent measurement: runs even when the harness step above fails.
+        if: ${{ !cancelled() }}
         run: |
           python3 scripts/verify-generation.py \
             --db "host=/var/run/postgresql user=laplace_admin dbname=laplace" \
