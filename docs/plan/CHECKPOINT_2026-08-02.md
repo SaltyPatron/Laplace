@@ -128,11 +128,20 @@ convenient.”
    DEFINES aliases HAS_DEFINITION; via relation_type_resolve the canonical
    counts 340 DEFINES + 774 CALLS for CodeDecomposer. W3 extraction fully
    working; REFERENCES zero by tags coverage (no @reference.type pattern
-   yet), not defect. Next session's ordered picks: (1) W5 runner over
-   generation_probe + prompts_smoke with the R6 detectors (#755),
-   (2) converse_compose input-array diagnosis (#751: starts_n / weight
-   peaking), (3) G4 destination read as an installed op (CALLS in-degree —
-   the data now exists).
+   yet), not defect.
+   **W5 measurement half LANDED (2026-08-06, PR #882 merged):**
+   scripts/verify-generation.py — R6 detectors over generation_probe +
+   prompts_smoke, Unicode tokenizer (the ASCII draft scored Cyrillic replies
+   as EMPTY and briefly bought a false interference theory — documented at
+   the regex). First full numbers: compose REPLAYS on all topic probes and
+   3/5 sentences but VARIES on 'The opposite of hot is' and 'Once upon a
+   time' — replay is PROMPT-SHAPE-DEPENDENT (#751 hypothesis narrowed);
+   walk varies everywhere, content 0–0.05 vs English expected sets (R1
+   p_lang gap quantified). Next session's ordered picks: (1) #755 second
+   half — thresholds + CI seeded-fixture job; (2) converse_compose
+   input-array diagnosis, now with the prompt-shape discriminator (#751);
+   (3) G4 destination read as an installed op (CALLS in-degree — data
+   exists).
 3. **W6 remainder / #758** — still open:
    - G4 dead-canonical (**destination** = substrate `CALLS` in-degree after
      W3; **scaffolding** = labeled grep + shrink-only allowlist may ship first)
