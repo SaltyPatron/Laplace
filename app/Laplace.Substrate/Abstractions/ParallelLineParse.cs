@@ -1,0 +1,103 @@
+using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
+using System.Threading.Channels;
+
+namespace Laplace.Decomposers.Abstractions;
+
+/// <summary>
+/// Fans a line-framed file's per-line parse across N workers — the spine-owned
+/// generalization of <see cref="ParallelGrammarFileRecordStream"/> for managed
+/// parsers (Utf8JsonReader lanes and kin). A feeder copies each line off
+/// <see cref="StreamingUtf8LineReader"/>'s REUSED buffer (handing that memory
+/// across threads without the copy is a data race — the copy is the price the
+/// grammar pool already pays), N workers run the supplied parse, and a bounded
+/// channel yields records with backpressure both ways. Record order is NOT
+/// preserved; callers whose downstream reads order have no business here.
+/// Decomposers must not hand-roll this shape —
+/// DecomposerArchitectureGateTests.DecomposerProjects_NoHandRolledParallelIngest
+/// bans Channel.CreateBounded in decomposer projects; this helper is the
+/// sanctioned home.
+/// </summary>
+public static class ParallelLineParse
+{
+    public static async IAsyncEnumerable<T> RecordsAsync<T>(
+        string filePath,
+        Func<byte[], T?> parseLine,
+        int workerCount,
+        [EnumeratorCancellation] CancellationToken ct = default)
+        where T : class
+    {
+        int workers = Math.Max(1, workerCount);
+        var rawLines = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(workers * 8)
+        {
+            SingleWriter = true,
+            SingleReader = false,
+            FullMode = BoundedChannelFullMode.Wait,
+        });
+        var parsed = Channel.CreateBounded<T>(new BoundedChannelOptions(workers * 4)
+        {
+            SingleWriter = false,
+            SingleReader = true,
+            FullMode = BoundedChannelFullMode.Wait,
+        });
+
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var runCt = linked.Token;
+
+        var feeder = Task.Run(async () =>
+        {
+            try
+            {
+                await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(filePath, runCt))
+                {
+                    if (lineMem.IsEmpty) continue;
+                    await rawLines.Writer.WriteAsync(lineMem.ToArray(), runCt);
+                }
+            }
+            finally { rawLines.Writer.TryComplete(); }
+        }, runCt);
+
+        var errors = new ConcurrentQueue<Exception>();
+        int workersLeft = workers;
+        for (int w = 0; w < workers; w++)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var reader = rawLines.Reader;
+                    while (await reader.WaitToReadAsync(runCt))
+                    {
+                        while (reader.TryRead(out byte[]? lineUtf8))
+                        {
+                            if (lineUtf8 is null || lineUtf8.Length == 0) continue;
+                            if (parseLine(lineUtf8) is { } record)
+                                await parsed.Writer.WriteAsync(record, runCt);
+                        }
+                    }
+                }
+                catch (OperationCanceledException) { }
+                catch (Exception ex)
+                {
+                    errors.Enqueue(ex);
+                    linked.Cancel();
+                }
+                finally
+                {
+                    if (Interlocked.Decrement(ref workersLeft) == 0)
+                        parsed.Writer.TryComplete(errors.TryPeek(out var first) ? first : null);
+                }
+            }, runCt);
+        }
+
+        try
+        {
+            await foreach (var record in parsed.Reader.ReadAllAsync(runCt))
+                yield return record;
+        }
+        finally
+        {
+            try { await feeder; } catch { }
+        }
+    }
+}

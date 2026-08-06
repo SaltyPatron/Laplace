@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Runtime.CompilerServices;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
@@ -39,32 +38,36 @@ public sealed class WiktionaryDecomposer
     protected override void Compose(WiktionaryEntry record, SubstrateChangeBuilder builder) =>
         WiktionaryEmit.Emit(record, builder);
 
-    protected override async IAsyncEnumerable<WiktionaryEntry> ExtractRecordsAsync(
-        string ecosystemPath, DecomposerOptions options,
-        [EnumeratorCancellation] CancellationToken ct)
+    // PARSE POOL, not a serial loop. The former `await foreach … Parse(span)` put
+    // 10.5M rows of full Utf8JsonReader object-graph construction on ONE core while
+    // MonolithSegmenter's compose fan sat downstream waiting on it — the pre-seed
+    // review measured the parse as the lane's binding stage on the multilingual
+    // corpus. The pool itself lives in the spine (ParallelLineParse — the managed
+    // sibling of ParallelGrammarFileRecordStream; decomposers hand-rolling channels
+    // is gate-banned); this lane only supplies the per-line function: byte-level
+    // language pre-filter, then WiktionaryEntry.Parse. Entry order is not
+    // preserved; nothing downstream reads it — records dedup and descend by
+    // content, and the segmenter partitions per record.
+    protected override IAsyncEnumerable<WiktionaryEntry> ExtractRecordsAsync(
+        string ecosystemPath, DecomposerOptions options, CancellationToken ct)
     {
         string? file = ResolveInput(ecosystemPath, options.Languages);
-        if (file is null) yield break;
+        if (file is null) return AsyncEnumerable.Empty<WiktionaryEntry>();
 
         LanguageFilter? langs = options.Languages;
         bool preFilter = WiktionaryJsonFilter.NeedsLanguagePreFilter(file, langs);
+        int workers = Math.Max(1, IngestSizing.ResolveForSource(IngestSourceProfile.Wiktionary).ComposeWorkers);
 
-        await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(file, ct))
-        {
-            ct.ThrowIfCancellationRequested();
-            var span = lineMem.Span;
-            if (span.IsEmpty) continue;
-
-            // Byte-level language pre-filter for the multilingual raw corpus — drop
-            // non-matching rows before parse (English-only corpus needs no pre-filter).
-            if (preFilter && langs is { IsActive: true } active
-                && !WiktionaryJsonFilter.MatchesLanguageFilter(span, active))
-                continue;
-
-            var entry = WiktionaryEntry.Parse(span, options);
-            if (entry is not null)
-                yield return entry;
-        }
+        return ParallelLineParse.RecordsAsync<WiktionaryEntry>(
+            file,
+            line =>
+            {
+                if (preFilter && langs is { IsActive: true } active
+                    && !WiktionaryJsonFilter.MatchesLanguageFilter(line, active))
+                    return null;
+                return WiktionaryEntry.Parse(line, options);
+            },
+            workers, ct);
     }
 
     public Task<IngestInventory?> DescribeInputAsync(
