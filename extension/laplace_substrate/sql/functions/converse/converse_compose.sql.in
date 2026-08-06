@@ -142,20 +142,24 @@ BEGIN
         ) q WHERE q.cnt >= 2
     ),
     -- CONCEPT STREAM (GH #751; slot map: Embed is per-tier, the stream is
-    -- language-free). Each distinct kept word maps to its strongest sense;
-    -- words with no sense (numbers, names, glue) keep their surface id, so
+    -- language-free). Each distinct kept word maps to its best sense; words
+    -- with no sense (numbers, names, glue) keep their surface id, so
     -- realization still has something to print. Election context is the
-    -- token alone — denote_mu picks the sense, id breaks ties; contextual
-    -- salience is Phase 3 (R3). senses() per DISTINCT token rides the same
-    -- documented tolerance as the orientation above, until the C port (#757).
-    -- The payoff is the LM-Head slot: realize(concept, p_lang) finally gets
-    -- to choose the language member instead of parroting the witness's
-    -- surface — p_lang bites.
+    -- token alone — EVIDENCE BEFORE ADJUDICATED STRENGTH, mirroring
+    -- senses()'s own ORDER BY (witnesses, then eff_mu; the urine-over-water
+    -- election in senses.sql.in is why strength alone mis-elects on
+    -- one-witness exact ties). Contextual salience is Phase 3 (R3).
+    -- senses() per DISTINCT token rides the same documented tolerance as
+    -- the orientation above, until the C port (#757). The payoff is the
+    -- LM-Head slot: realize(concept, p_lang) finally gets to choose the
+    -- language member instead of parroting the witness's surface — p_lang
+    -- bites.
     concept_map AS MATERIALIZED (
         SELECT d.id AS wid,
                COALESCE(
                    (SELECT s.synset_id FROM senses(d.id) s
-                     ORDER BY s.eff_mu DESC NULLS LAST, s.synset_id LIMIT 1),
+                     ORDER BY s.witnesses DESC, s.eff_mu DESC NULLS LAST,
+                              s.synset_id LIMIT 1),
                    d.id) AS cid
         FROM (SELECT DISTINCT k.entity_id AS id FROM kept k) d
     ),
