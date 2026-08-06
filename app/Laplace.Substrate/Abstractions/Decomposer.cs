@@ -326,6 +326,16 @@ public abstract class DecomposerMultiFile<TRecord> : Decomposer<TRecord>
     protected abstract IngestBatchConfig ConfigForFile(
         string fileLabel, ISubstrateReader? reader, DecomposerOptions options);
 
+    /// <summary>
+    /// Opt-in per-file resume (GH #898): each finished file's boundary deposits a
+    /// HasLayerCompleted marker on the file's content identity, and a restarted run
+    /// true-skips marker-complete files before opening them. Without this, a killed
+    /// multi-hour run restarts from record zero and RE-FOLDS the applied prefix —
+    /// testimony is not idempotent, so witness counts inflate corpus-wide. With it,
+    /// the blast radius of a kill is the one file that was mid-apply.
+    /// </summary>
+    public virtual bool PerFileResume => false;
+
     // Multi-file sources ingest PARALLEL BY DEFAULT across the file-worker pool. References resolve
     // content-addressed (hash of the canonical key), so files carry no cross-file ordering and no
     // phase concept is needed — cross-source agreement is a hash collision.
@@ -337,6 +347,12 @@ public abstract class DecomposerMultiFile<TRecord> : Decomposer<TRecord>
         ContainmentReader = context.Reader;
         if (options.DryRun) yield break;
 
+        IngestBatchPipeline.PerFileResumePlan? resume =
+            PerFileResume && context.Reader is { } rdr
+                ? new IngestBatchPipeline.PerFileResumePlan(
+                    rdr, LayerOrder, options.ReObservePresent)
+                : null;
+
         await foreach (var change in IngestBatchPipeline.RunMultiFileAsync(
                            CreateMultiFileStream(context.EcosystemPath, options),
                            CreateHandlerForFile,
@@ -344,6 +360,7 @@ public abstract class DecomposerMultiFile<TRecord> : Decomposer<TRecord>
                            maxTotalUnits: options.MaxInputUnits,
                            fileWorkers: IngestTopology.Current.FileWorkers,
                            isolateFileFailures: PerFileCompletion,
+                           resume: resume,
                            ct: ct))
             yield return change;
     }

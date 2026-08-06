@@ -21,6 +21,13 @@ public interface IFileRecordSource<TRecord>
 {
     string FileLabel { get; }
     IAsyncEnumerable<TRecord> RecordsAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Filesystem path when the source IS a plain file, else null (zip entries,
+    /// synthesized streams). Per-file resume (GH #898) needs the raw bytes to mint
+    /// the file's content identity; sources without a path simply never resume.
+    /// </summary>
+    string? FilePath => null;
 }
 
 public interface IMultiFileRecordStream<TRecord>
@@ -36,10 +43,12 @@ public interface IMultiFileRecordStream<TRecord>
 
 /// <summary>A file source whose reader is a lazy factory — the common "I have a path, open it on demand" case.</summary>
 public sealed class DelegateFileRecordSource<TRecord>(
-    string fileLabel, Func<CancellationToken, IAsyncEnumerable<TRecord>> open) : IFileRecordSource<TRecord>
+    string fileLabel, Func<CancellationToken, IAsyncEnumerable<TRecord>> open,
+    string? filePath = null) : IFileRecordSource<TRecord>
 {
     public string FileLabel => fileLabel;
     public IAsyncEnumerable<TRecord> RecordsAsync(CancellationToken ct = default) => open(ct);
+    public string? FilePath => filePath;
 }
 
 /// <summary>
@@ -62,7 +71,7 @@ public sealed class PathListMultiFileStream<TRecord>(
             string p = path;
             string l = label;
             yield return new DelegateFileRecordSource<TRecord>(
-                l, token => extractFile(p, l, options, token));
+                l, token => extractFile(p, l, options, token), filePath: p);
         }
         await Task.CompletedTask;
     }
@@ -219,6 +228,59 @@ public static class IngestBatchPipeline
         return new SubstrateChangeBuilder(
             sourceId, $"{PeriodBoundaryUnitPrefix}{stem}", null,
             entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: 0).Build();
+    }
+
+    /// <summary>
+    /// Per-file resume for multi-file sources (GH #898). A source-level completion
+    /// marker writes only at run end, so a killed multi-hour seed used to restart
+    /// from record zero and RE-FOLD everything already applied — testimony is not
+    /// idempotent, so the restart inflated witness counts on the whole applied
+    /// prefix. With this enabled, each finished file's boundary carries a
+    /// HasLayerCompleted marker on the FILE's content identity, and a restart
+    /// true-skips marker-complete files before opening them. Blast radius of a kill
+    /// shrinks from the whole corpus to the one file that was mid-apply.
+    /// </summary>
+    public readonly record struct PerFileResumePlan(
+        ISubstrateReader Reader,
+        int LayerOrder,
+        bool IgnoreCompletedFiles);
+
+    // File identity for resume = FileEntity.SourceId over the raw bytes — the file's
+    // content-DAG root, the ONE documented file-identity convention (same content =
+    // same file = same source; rename-proof; duplicate files true-skip each other).
+    // A name-keyed id was rejected deliberately: ids are content hashes by law, and
+    // FileEntity's own doc records why identity must never bake the path in.
+    // The read is sequential and native-hash cheap next to the compose it replaces;
+    // files above the cap opt out rather than balloon memory (span-based root).
+    private const long ResumeHashMaxBytes = 512L << 20;
+
+    internal static Hash128? TryResolveFileIdentity(string? filePath)
+    {
+        if (filePath is null) return null;
+        try
+        {
+            var info = new FileInfo(filePath);
+            if (!info.Exists || info.Length == 0 || info.Length > ResumeHashMaxBytes) return null;
+            return FileEntity.SourceId(File.ReadAllBytes(filePath));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            return null; // unreadable/degenerate file: no resume identity, never a crash
+        }
+    }
+
+    /// <summary>Boundary that ALSO deposits the file's completion marker (resume-enabled lanes).</summary>
+    public static SubstrateChange BuildFileCompletion(
+        Hash128 sourceId, string fileLabel, Hash128 fileRoot, int layerOrder)
+    {
+        string stem = fileLabel.Contains('/', StringComparison.Ordinal)
+            ? fileLabel[(fileLabel.LastIndexOf('/') + 1)..]
+            : fileLabel;
+        var builder = new SubstrateChangeBuilder(
+            sourceId, $"{PeriodBoundaryUnitPrefix}{stem}", null,
+            entityCapacity: 1, physicalityCapacity: 0, attestationCapacity: 1);
+        Laplace.Ingestion.LayerCompletion.EmitFileMarker(builder, fileRoot, layerOrder);
+        return builder.Build();
     }
 
     public static SubstrateChange BuildFileFailure(Hash128 sourceId, string fileLabel, Exception ex) =>
@@ -386,14 +448,32 @@ public static class IngestBatchPipeline
         long maxTotalUnits = 0,
         int fileWorkers = 0,
         bool isolateFileFailures = false,
+        PerFileResumePlan? resume = null,
         CancellationToken ct = default)
     {
         int workers = maxTotalUnits > 0 ? 1 : Math.Max(1, fileWorkers);
         return workers <= 1
             ? RunMultiFileSequentialAsync(
-                stream, handlerFactory, configFactory, maxTotalUnits, isolateFileFailures, ct)
+                stream, handlerFactory, configFactory, maxTotalUnits, isolateFileFailures, resume, ct)
             : RunMultiFileParallelAsync(
-                stream, handlerFactory, configFactory, workers, isolateFileFailures, ct);
+                stream, handlerFactory, configFactory, workers, isolateFileFailures, resume, ct);
+    }
+
+    /// <summary>
+    /// Resume decision for one file: resolve its content identity and consult the
+    /// marker. Returns the identity (null = lane opted out / no path / oversized)
+    /// and whether the file is already marker-complete.
+    /// </summary>
+    private static async Task<(Hash128? FileRoot, bool Skip)> ResolveResumeAsync(
+        PerFileResumePlan? resume, string? filePath, CancellationToken ct)
+    {
+        if (resume is not { } plan) return (null, false);
+        Hash128? root = TryResolveFileIdentity(filePath);
+        if (root is not { } r) return (null, false);
+        if (plan.IgnoreCompletedFiles) return (r, false); // --force: re-observe, still re-mark
+        bool done = await plan.Reader.HasSourceCompletedAsync(r, plan.LayerOrder, ct)
+            .ConfigureAwait(false);
+        return (r, done);
     }
 
     private static async IAsyncEnumerable<SubstrateChange> RunMultiFileSequentialAsync<TRecord>(
@@ -402,6 +482,7 @@ public static class IngestBatchPipeline
         Func<string, IngestBatchConfig> configFactory,
         long maxTotalUnits,
         bool isolateFileFailures,
+        PerFileResumePlan? resume,
         [EnumeratorCancellation] CancellationToken ct)
     {
         long unitsConsumed = 0;
@@ -410,6 +491,14 @@ public static class IngestBatchPipeline
             string label = source.FileLabel;
             var handler = handlerFactory(label);
             var config = configFactory(label);
+
+            var (fileRoot, skipComplete) = await ResolveResumeAsync(resume, source.FilePath, ct)
+                .ConfigureAwait(false);
+            if (skipComplete)
+            {
+                Console.Error.WriteLine($"INGEST_FILE_SKIPPED file={label} reason=marker-complete");
+                continue; // true skip: zero rows, zero testimony, no re-fold
+            }
 
             long fileCap = maxTotalUnits > 0 ? maxTotalUnits - unitsConsumed : 0;
             if (maxTotalUnits > 0 && fileCap <= 0)
@@ -455,7 +544,12 @@ public static class IngestBatchPipeline
 
             // A failed file emits its failure marker INSTEAD of a boundary: it is
             // neither counted done nor marked complete, so a re-run retries exactly it.
-            yield return fileFailure ?? BuildPeriodBoundary(config.SourceId, label);
+            // A capped file stopped mid-stream, which is the SAME resume situation as
+            // a kill — it must not be marked complete either.
+            yield return fileFailure
+                ?? (fileRoot is { } fr && !hitCap && resume is { } rp
+                    ? BuildFileCompletion(config.SourceId, label, fr, rp.LayerOrder)
+                    : BuildPeriodBoundary(config.SourceId, label));
 
             if (hitCap)
                 yield break;
@@ -468,6 +562,7 @@ public static class IngestBatchPipeline
         Func<string, IngestBatchConfig> configFactory,
         int workers,
         bool isolateFileFailures,
+        PerFileResumePlan? resume,
         [EnumeratorCancellation] CancellationToken ct)
     {
         // The dispatcher enumerates FILE SOURCES — cheap handles, reading NOTHING — into a bounded
@@ -545,6 +640,18 @@ public static class IngestBatchPipeline
                 await foreach (var source in sources.Reader.ReadAllAsync(ct))
                 {
                     var config = configFactory(source.FileLabel);
+
+                    // Per-file resume (GH #898): identity + marker check happen in the
+                    // WORKER, so skips parallelize with the ingest they replace.
+                    var (fileRoot, skipComplete) =
+                        await ResolveResumeAsync(resume, source.FilePath, ct).ConfigureAwait(false);
+                    if (skipComplete)
+                    {
+                        Console.Error.WriteLine(
+                            $"INGEST_FILE_SKIPPED file={source.FileLabel} worker={workerId} reason=marker-complete");
+                        continue;
+                    }
+
                     var records = new AsyncEnumerableRecordStream<TRecord>(source.RecordsAsync(ct));
                     int segments = segmentsPerFile > 1
                         ? MonolithSegmenter.ResolveSegments(config, segmentsPerFile)
@@ -589,7 +696,10 @@ public static class IngestBatchPipeline
                         fileFailure = BuildFileFailure(config.SourceId, source.FileLabel, ex);
                     }
                     await outCh.Writer.WriteAsync(
-                        fileFailure ?? BuildPeriodBoundary(config.SourceId, source.FileLabel), ct);
+                        fileFailure
+                            ?? (fileRoot is { } fr && resume is { } rp
+                                ? BuildFileCompletion(config.SourceId, source.FileLabel, fr, rp.LayerOrder)
+                                : BuildPeriodBoundary(config.SourceId, source.FileLabel)), ct);
                     if (fileFailure is not null) continue;
 
                     if (logFile)

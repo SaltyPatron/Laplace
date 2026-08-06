@@ -13,6 +13,9 @@ public sealed class OMWDecomposer : DecomposerMultiFile<GrammarIngestRecord, OMW
     public static readonly Hash128 TrustClass = OMWSource.TrustClass;
 
     public override int LayerOrder => 3;
+
+    // GH #898: 1,226 per-language files — same killed-run resume contract as UD.
+    public override bool PerFileResume => true;
     protected override double SourceTrust => TC.AcademicCurated;
 
     internal static readonly ConcurrentDictionary<string, byte> LanguageNames = new(StringComparer.Ordinal);
