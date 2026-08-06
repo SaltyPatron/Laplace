@@ -68,7 +68,7 @@ CEILINGS = {
     # the single place the feature owns it. A scoped source that spelled it again
     # locally would be the per-source hand-roll that caused the defect.
     "g3_csharp_vocabulary_literalism": 506,
-    "g8_band_literalism": 8,
+    "g8_band_literalism": 6,
     # G4 scaffolding (W6 D3): grep for CREATE FUNCTION with zero callers outside
     # its own CREATE line. Destination form is substrate CALLS in-degree after W3
     # (#765); this allowlist is shrink-only until that replace lands.
