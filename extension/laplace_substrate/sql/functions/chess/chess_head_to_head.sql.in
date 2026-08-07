@@ -20,11 +20,11 @@ CREATE OR REPLACE FUNCTION chess_head_to_head(p_player bytea, p_limit integer DE
                c.witness_count AS games,
                c.rating,
                c.rd
-        FROM @extschema@.consensus c
+        FROM laplace.consensus c
         WHERE c.subject_id = p_player
-          AND c.type_id = @extschema@.relation_type_id('PLAYED_BY')
+          AND c.type_id = laplace.relation_type_id('PLAYED_BY')
           AND c.object_id IS NOT NULL
-        ORDER BY @extschema@.eff_mu(c.rating, c.rd) DESC, c.object_id
+        ORDER BY laplace.eff_mu(c.rating, c.rd) DESC, c.object_id
         LIMIT p_limit
     ),
     batch AS MATERIALIZED (
@@ -35,7 +35,7 @@ CREATE OR REPLACE FUNCTION chess_head_to_head(p_player bytea, p_limit integer DE
         SELECT p.id, t.txt
         FROM batch b,
              LATERAL unnest(b.ids) WITH ORDINALITY AS p(id, i),
-             LATERAL unnest(@extschema@.realize_batch(b.ids)) WITH ORDINALITY AS t(txt, j)
+             LATERAL unnest(laplace.realize_batch(b.ids)) WITH ORDINALITY AS t(txt, j)
         WHERE p.i = t.j
     )
     SELECT rec.opponent,
@@ -45,8 +45,8 @@ CREATE OR REPLACE FUNCTION chess_head_to_head(p_player bytea, p_limit integer DE
            -- (functions/mu/eff_mu_display.sql.in), rating/rd take the same /1e9 round.
            round((rec.rating / 1e9)::numeric, 3)::double precision,
            round((rec.rd / 1e9)::numeric, 3)::double precision,
-           @extschema@.eff_mu_display(rec.rating, rec.rd)::double precision
+           laplace.eff_mu_display(rec.rating, rec.rd)::double precision
     FROM rec
     LEFT JOIN named n ON n.id = rec.opponent
-    ORDER BY @extschema@.eff_mu(rec.rating, rec.rd) DESC, rec.opponent
+    ORDER BY laplace.eff_mu(rec.rating, rec.rd) DESC, rec.opponent
 $$;

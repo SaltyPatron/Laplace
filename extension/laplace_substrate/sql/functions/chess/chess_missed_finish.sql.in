@@ -31,18 +31,18 @@ CREATE OR REPLACE FUNCTION chess_missed_finish(p_line bytea, p_limit int DEFAULT
         from_wdl text,
         to_wdl text)
     LANGUAGE sql STABLE
-    SET search_path = @extschema@, public AS $$
+ AS $$
 WITH rel AS MATERIALIZED (
-    SELECT chess_has_wdl_type() AS wdl
+    SELECT laplace.chess_has_wdl_type() AS wdl
 ),
 verdict AS MATERIALIZED (
-    SELECT word_id('win')           AS win,
-           word_id('loss')          AS loss,
-           word_id('blessed-loss')  AS blessed_loss
+    SELECT laplace.word_id('win')           AS win,
+           laplace.word_id('loss')          AS loss,
+           laplace.word_id('blessed-loss')  AS blessed_loss
 ),
 line AS MATERIALIZED (
     SELECT (u.ord - 1)::int AS ply, u.entity_id AS pos
-    FROM LATERAL trajectory_unpacked_points(p_line)
+    FROM LATERAL laplace.trajectory_unpacked_points(p_line)
          WITH ORDINALITY AS u(entity_id, run_length, ctier, ord)
 ),
 steps AS MATERIALIZED (
@@ -64,7 +64,7 @@ wdl AS MATERIALIZED (
     SELECT l.pos AS pos, max(a.object_id) AS wdl_id
     FROM line l
     JOIN rel r ON true
-    JOIN attestations a ON a.subject_id = l.pos
+    JOIN laplace.attestations a ON a.subject_id = l.pos
                        AND a.type_id = r.wdl
     GROUP BY l.pos
 ),
@@ -91,7 +91,7 @@ label AS MATERIALIZED (
     SELECT p.id, t.txt
     FROM surfaces b,
          LATERAL unnest(b.ids) WITH ORDINALITY AS p(id, i),
-         LATERAL unnest(realize_batch(b.ids, NULL)) WITH ORDINALITY AS t(txt, j)
+         LATERAL unnest(laplace.realize_batch(b.ids, NULL)) WITH ORDINALITY AS t(txt, j)
     WHERE p.i = t.j
 )
 SELECT m.from_pos, m.to_pos, m.ply, f.txt, t.txt

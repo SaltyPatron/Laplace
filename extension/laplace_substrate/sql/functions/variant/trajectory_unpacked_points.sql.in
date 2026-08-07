@@ -1,17 +1,17 @@
 CREATE OR REPLACE FUNCTION trajectory_unpacked_points(p_entity bytea)
     RETURNS TABLE(entity_id bytea, run_length int, ctier int)
     LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+ AS $$
     SELECT u.entity_id,
            GREATEST(u.run_length, 1)::int AS run_length,
            COALESCE(
                -- tier is a FLOOR, not identity: one id may hold rows at several
                -- tiers (UD mints single-word sentences), so a bare scalar lookup
                -- multi-rows (21000). The floor IS min(tier).
-               (SELECT min(e.tier) FROM entities e WHERE e.id = u.entity_id),
-               CASE WHEN @extschema@.codepoint_for_id(u.entity_id) IS NOT NULL THEN 0 END
+               (SELECT min(e.tier) FROM laplace.entities e WHERE e.id = u.entity_id),
+               CASE WHEN laplace.codepoint_for_id(u.entity_id) IS NOT NULL THEN 0 END
            ) AS ctier
-    FROM v_word_points w,
+    FROM laplace.v_word_points w,
     LATERAL public.ST_DumpPoints(w.trajectory) dp,
     LATERAL public.laplace_mantissa_unpack(dp.geom) u
     WHERE w.id = p_entity AND w.trajectory IS NOT NULL

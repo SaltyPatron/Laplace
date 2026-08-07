@@ -1,10 +1,10 @@
 CREATE OR REPLACE FUNCTION entities_present_ordinals(p_ids bytea[])
     RETURNS TABLE(idx int)
     LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+ AS $$
     SELECT (u.ord - 1)::int
     FROM unnest(p_ids) WITH ORDINALITY u(id, ord)
-    INNER JOIN entities e ON e.id = u.id
+    INNER JOIN laplace.entities e ON e.id = u.id
 $$;
 
 -- KEYED overload: entities are partitioned LIST(tier) (t2 further HASH(id)),
@@ -35,7 +35,7 @@ $$;
 CREATE OR REPLACE FUNCTION entities_present_ordinals(p_ids bytea[], p_tiers smallint[])
     RETURNS TABLE(idx int)
     LANGUAGE plpgsql VOLATILE
-    SET search_path = @extschema@, public AS $$
+ AS $$
 DECLARE
     v_tier smallint;
 BEGIN
@@ -54,7 +54,7 @@ BEGIN
         RETURN QUERY
         SELECT b.idx
         FROM _epo_batch b
-        JOIN entities e
+        JOIN laplace.entities e
           ON e.tier = v_tier               -- variable -> planner partition prune
          AND e.id = b.id                   -- HASH(id) leaf prune per row (t2)
         WHERE b.t = v_tier;

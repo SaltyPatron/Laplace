@@ -29,8 +29,8 @@ CREATE OR REPLACE FUNCTION geometry_predecessors(
         p_window int DEFAULT 8)
     RETURNS TABLE(predecessor_id bytea, seen bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
-    SELECT successor_id, seen FROM geometry_successors(p_point, p_limit, p_window, true)
+ AS $$
+    SELECT successor_id, seen FROM laplace.geometry_successors(p_point, p_limit, p_window, true)
 $$;
 
 -- Both directions at once, for the symmetric questions (shared-usage overlap,
@@ -41,12 +41,12 @@ CREATE OR REPLACE FUNCTION geometry_neighbours(
         p_window int DEFAULT 8)
     RETURNS TABLE(neighbour_id bytea, seen bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+ AS $$
     SELECT n.id, sum(n.seen)::bigint
     FROM (
-        SELECT successor_id AS id, seen FROM geometry_successors(p_point, p_limit, p_window, false)
+        SELECT successor_id AS id, seen FROM laplace.geometry_successors(p_point, p_limit, p_window, false)
         UNION ALL
-        SELECT successor_id AS id, seen FROM geometry_successors(p_point, p_limit, p_window, true)
+        SELECT successor_id AS id, seen FROM laplace.geometry_successors(p_point, p_limit, p_window, true)
     ) n
     GROUP BY n.id
     ORDER BY 2 DESC

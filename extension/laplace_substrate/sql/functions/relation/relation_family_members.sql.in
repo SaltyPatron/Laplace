@@ -17,7 +17,7 @@ CREATE OR REPLACE FUNCTION relation_family_members(p_family text)
     RETURNS TABLE(id bytea)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
     SELECT et.id
-    FROM @extschema@.entities et
-    WHERE et.type_id = @extschema@.entity_type_id('RelationType')
-      AND @extschema@.relation_type_in_family(et.id, p_family)
+    FROM laplace.entities et
+    WHERE et.type_id = laplace.entity_type_id('RelationType')
+      AND laplace.relation_type_in_family(et.id, p_family)
 $$;

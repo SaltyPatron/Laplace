@@ -22,12 +22,12 @@ CREATE OR REPLACE FUNCTION chess_players_by_initial(
     WITH target AS MATERIALIZED (
         -- The tier-0 codepoint for the requested initial. Single-character content IS its
         -- codepoint entity, so this needs no separate lookup table.
-        SELECT @extschema@.word_id(left(btrim(p_initial), 1)) AS cp
+        SELECT laplace.word_id(left(btrim(p_initial), 1)) AS cp
     ),
     named AS MATERIALIZED (
         -- Name entities whose FIRST constituent is that codepoint -- index range scan.
         SELECT w.id AS name_id
-        FROM @extschema@.v_word_points w, target t
+        FROM laplace.v_word_points w, target t
         WHERE w.trajectory IS NOT NULL
           AND (public.laplace_trajectory_constituent_ids(w.trajectory))[1] = t.cp
     ),
@@ -36,18 +36,18 @@ CREATE OR REPLACE FUNCTION chess_players_by_initial(
         -- decomposer writes; the join is on the consensus cell, so an unnamed or refuted
         -- alias never surfaces a player.
         SELECT DISTINCT c.subject_id AS player
-        FROM @extschema@.consensus c
+        FROM laplace.consensus c
         JOIN named n ON n.name_id = c.object_id
-        WHERE c.type_id = @extschema@.relation_type_id('HAS_NAME_ALIAS')
+        WHERE c.type_id = laplace.relation_type_id('HAS_NAME_ALIAS')
     ),
     rated AS MATERIALIZED (
         -- Only players the fold has actually rated, ranked by the conservative estimate.
         SELECT p.player, o.witness_count AS games, o.rating, o.rd
         FROM players p
-        JOIN @extschema@.consensus o
+        JOIN laplace.consensus o
           ON o.subject_id = p.player
-         AND o.type_id = @extschema@.relation_type_id('OUTCOME')
-        ORDER BY @extschema@.eff_mu(o.rating, o.rd) DESC, p.player
+         AND o.type_id = laplace.relation_type_id('OUTCOME')
+        ORDER BY laplace.eff_mu(o.rating, o.rd) DESC, p.player
         LIMIT p_limit OFFSET p_offset
     ),
     batch AS MATERIALIZED (
@@ -58,7 +58,7 @@ CREATE OR REPLACE FUNCTION chess_players_by_initial(
         SELECT q.id, t.txt
         FROM batch b,
              LATERAL unnest(b.ids) WITH ORDINALITY AS q(id, i),
-             LATERAL unnest(@extschema@.realize_batch(b.ids)) WITH ORDINALITY AS t(txt, j)
+             LATERAL unnest(laplace.realize_batch(b.ids)) WITH ORDINALITY AS t(txt, j)
         WHERE q.i = t.j
     )
     SELECT rated.player,
@@ -68,8 +68,8 @@ CREATE OR REPLACE FUNCTION chess_players_by_initial(
            -- (functions/mu/eff_mu_display.sql.in), rating/rd take the same /1e9 round.
            round((rated.rating / 1e9)::numeric, 3)::double precision,
            round((rated.rd / 1e9)::numeric, 3)::double precision,
-           @extschema@.eff_mu_display(rated.rating, rated.rd)::double precision
+           laplace.eff_mu_display(rated.rating, rated.rd)::double precision
     FROM rated
     LEFT JOIN surfaced s ON s.id = rated.player
-    ORDER BY @extschema@.eff_mu(rated.rating, rated.rd) DESC, rated.player
+    ORDER BY laplace.eff_mu(rated.rating, rated.rd) DESC, rated.player
 $$;

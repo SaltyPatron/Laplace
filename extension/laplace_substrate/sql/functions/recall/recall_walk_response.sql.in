@@ -26,11 +26,11 @@
 -- path length, so a short high-confidence chain beats a long chain diluted
 -- by merely-adequate hops.
 CREATE OR REPLACE FUNCTION recall_walk_response(p_topic bytea, p_mode text)
-    RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
+    RETURNS TABLE(reply text, laplace.eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+ AS $$
     WITH complete_branches AS (
-        SELECT * FROM walk_branches(p_topic, relation_type_id('COMPLETES_TO'), 8, 5)
+        SELECT * FROM laplace.walk_branches(p_topic, laplace.relation_type_id('COMPLETES_TO'), 8, 5)
         WHERE p_mode = 'complete'
     ),
     complete_winner AS (
@@ -43,11 +43,11 @@ CREATE OR REPLACE FUNCTION recall_walk_response(p_topic bytea, p_mode text)
         FROM complete_winner w, generate_series(1, w.depth) AS i
     ),
     complete_reply AS (
-        SELECT (SELECT COALESCE(realize.realize(p_topic, converse.word_language(p_topic)), realize.label(p_topic)))
-               || string_agg(' —' || COALESCE(type_label(s.type_id), '?') || E'→ '
-                             || COALESCE(realize.realize(s.entity_id, converse.word_language(p_topic)),
+        SELECT (SELECT COALESCE(realize.realize(p_topic, laplace.converse.word_language(p_topic)), realize.label(p_topic)))
+               || string_agg(' —' || COALESCE(laplace.type_label(s.type_id), '?') || E'→ '
+                             || COALESCE(realize.realize(s.entity_id, laplace.converse.word_language(p_topic)),
                                          realize.label(s.entity_id)), '' ORDER BY s.i) AS reply,
-               min(b.eff_mu) AS eff_mu,
+               min(b.eff_mu) AS laplace.eff_mu,
                (SELECT w.witnesses FROM complete_winner w) AS witnesses
         FROM complete_steps s
         JOIN complete_branches b ON b.entity_id = s.entity_id AND b.depth = s.i
@@ -60,7 +60,7 @@ CREATE OR REPLACE FUNCTION recall_walk_response(p_topic bytea, p_mode text)
     walk_reply AS (
         SELECT r.reply, r.eff_mu, r.witnesses
         FROM (SELECT 1 WHERE p_mode <> 'complete') gate
-        CROSS JOIN LATERAL recall_fallback_walk(p_topic, 8) r
+        CROSS JOIN LATERAL laplace.recall_fallback_walk(p_topic, 8) r
     )
     SELECT * FROM complete_reply
     UNION ALL

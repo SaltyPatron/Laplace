@@ -1,7 +1,7 @@
 CREATE OR REPLACE FUNCTION recall_related_response(p_topic bytea, p_type_name text)
-    RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
+    RETURNS TABLE(reply text, laplace.eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+ AS $$
     SELECT replace(f.fact, '%s', realize.label(p_topic)), f.eff_mu, f.witnesses
-    FROM related(p_topic, relation_type_id(p_type_name), converse.word_language(p_topic)) f
+    FROM laplace.related(p_topic, laplace.relation_type_id(p_type_name), laplace.converse.word_language(p_topic)) f
 $$;

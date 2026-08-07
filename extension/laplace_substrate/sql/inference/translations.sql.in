@@ -2,33 +2,33 @@
 
 
 CREATE OR REPLACE FUNCTION translations(p_word bytea, p_limit int DEFAULT 24)
-    RETURNS TABLE(translation text, language text, eff_mu numeric, witnesses bigint)
+    RETURNS TABLE(translation text, language text, laplace.eff_mu numeric, witnesses bigint)
     LANGUAGE sql LAPLACE_STABLE_STRICT
-    SET search_path = @extschema@, public AS $$
+ AS $$
     -- Dedup and rank by (member, lang) id pair, never by rendered surface: the
     -- old DISTINCT ON (render_text(member)) collapsed distinct translations --
     -- even across different languages -- whenever their surfaces coincided.
     -- render_text/label run above the sort, streaming off the ranked candidates
     -- only until p_limit rows survive the empty-surface filter.
     WITH src_langs AS (
-        SELECT c.object_id AS id FROM consensus c
-        WHERE c.subject_id = p_word AND c.type_id = relation_type_id('HAS_LANGUAGE')
+        SELECT c.object_id AS id FROM laplace.consensus c
+        WHERE c.subject_id = p_word AND c.type_id = laplace.relation_type_id('HAS_LANGUAGE')
     ),
     agg AS (
         SELECT sm.member, sm.lang, max(sm.mu) AS mu, max(sm.witnesses) AS witnesses,
                max(sm.sense_mu) AS sense_mu
-        FROM synset_members(p_word) sm
+        FROM laplace.synset_members(p_word) sm
         WHERE sm.lang IS NOT NULL
           AND sm.lang NOT IN (SELECT id FROM src_langs)
         GROUP BY sm.member, sm.lang
     )
     -- a.mu is fp1e9 (synset_members) — convert through the one display definition
-    SELECT r.txt AS translation, realize.label(a.lang) AS language, eff_mu_display(a.mu), a.witnesses
+    SELECT r.txt AS translation, realize.label(a.lang) AS language, laplace.eff_mu_display(a.mu), a.witnesses
     FROM (
         SELECT member, lang, mu, witnesses FROM agg
         ORDER BY sense_mu DESC NULLS LAST, mu DESC, witnesses DESC, lang, member
     ) a
-    CROSS JOIN LATERAL (SELECT render_text(a.member, 64) AS txt) r
+    CROSS JOIN LATERAL (SELECT laplace.render_text(a.member, 64) AS txt) r
     WHERE NULLIF(btrim(r.txt), '') IS NOT NULL
     LIMIT p_limit
 $$;

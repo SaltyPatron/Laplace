@@ -12,7 +12,7 @@
 -- With purpose schemas a cross-family call MUST qualify, because no search_path
 -- brings a sibling schema into scope. Correctness becomes structural instead of 232
 -- copies of a clause, and `consensus.eff_mu(...)` says where the thing lives instead
--- of `@extschema@.` deferring the question to install time.
+-- of `laplace.` deferring the question to install time.
 --
 -- The names come from the directory layout, which already encodes the intent, and
 -- from spec 37's opcode families:

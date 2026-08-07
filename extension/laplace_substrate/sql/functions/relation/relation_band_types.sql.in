@@ -25,9 +25,9 @@ CREATE OR REPLACE FUNCTION relation_band_types(p_band int)
     RETURNS bytea[]
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
     SELECT COALESCE(array_agg(e.id), '{}'::bytea[])
-    FROM @extschema@.entities e
-    WHERE e.type_id = @extschema@.entity_type_id('RelationType')
-      AND @extschema@.relation_highway_band(e.id) = p_band
+    FROM laplace.entities e
+    WHERE e.type_id = laplace.entity_type_id('RelationType')
+      AND laplace.relation_highway_band(e.id) = p_band
 $$;
 
 -- Multi-band form. Callers testing several bands (the content bands 1/2/4/7 are
@@ -37,9 +37,9 @@ CREATE OR REPLACE FUNCTION relation_band_types(p_bands int[])
     RETURNS bytea[]
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
     SELECT COALESCE(array_agg(e.id), '{}'::bytea[])
-    FROM @extschema@.entities e
-    WHERE e.type_id = @extschema@.entity_type_id('RelationType')
-      AND @extschema@.relation_highway_band(e.id) = ANY (p_bands)
+    FROM laplace.entities e
+    WHERE e.type_id = laplace.entity_type_id('RelationType')
+      AND laplace.relation_highway_band(e.id) = ANY (p_bands)
 $$;
 
 -- Family form, same reasoning. relation_type_in_family is IMMUTABLE and cheap per
@@ -50,5 +50,5 @@ CREATE OR REPLACE FUNCTION relation_family_type_ids(p_family text)
     RETURNS bytea[]
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
     SELECT COALESCE(array_agg(m.id), '{}'::bytea[])
-    FROM @extschema@.relation_family_members(p_family) m
+    FROM laplace.relation_family_members(p_family) m
 $$;

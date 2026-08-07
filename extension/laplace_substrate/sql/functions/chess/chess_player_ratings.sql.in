@@ -16,9 +16,9 @@ CREATE OR REPLACE FUNCTION chess_player_ratings(p_player bytea)
     -- an unreadable witness, not a zero.
     WITH raw AS MATERIALIZED (
         SELECT a.object_id AS rating_id, count(*)::bigint AS games
-        FROM @extschema@.attestations a
+        FROM laplace.attestations a
         WHERE a.subject_id = p_player
-          AND a.type_id = @extschema@.relation_type_id('HAS_RATING')
+          AND a.type_id = laplace.relation_type_id('HAS_RATING')
         GROUP BY a.object_id
     ),
     batch AS MATERIALIZED (
@@ -28,7 +28,7 @@ CREATE OR REPLACE FUNCTION chess_player_ratings(p_player bytea)
         SELECT p.id, t.txt
         FROM batch b,
              LATERAL unnest(b.ids) WITH ORDINALITY AS p(id, i),
-             LATERAL unnest(@extschema@.realize_batch(b.ids)) WITH ORDINALITY AS t(txt, j)
+             LATERAL unnest(laplace.realize_batch(b.ids)) WITH ORDINALITY AS t(txt, j)
         WHERE p.i = t.j
     )
     SELECT n.txt::integer, raw.games

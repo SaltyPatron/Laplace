@@ -15,7 +15,8 @@ countable fact; prose docs cite it instead of embedding counts.
 - [docs/INVENTIONS.md](INVENTIONS.md) — spec — the invention catalog, code-cited; 41 mechanisms enumerated in place, countable facts per [INVENTORY.md](INVENTORY.md) (2026-07-19)
 - [COMPLETION_PLAN.md](COMPLETION_PLAN.md) — conversation/inference completion axis (phases, gap register); not the whole backlog
 - [plan/README.md](plan/README.md) — workstream index (W1–W13) + onboarding pointer
-- [plan/CHECKPOINT_2026-08-05.md](plan/CHECKPOINT_2026-08-05.md) — **current resume** — empty-box re-measure, tracker drift, ranked next work (2026-08-05)
+- [plan/BACKLOG_KILL_LIST_2026-08-06.md](plan/BACKLOG_KILL_LIST_2026-08-06.md) — **full-backlog kill order** — all open issues invention-ranked; verified against code + live DB (2026-08-06); Phase 0 closes landed same day
+- [plan/CHECKPOINT_2026-08-05.md](plan/CHECKPOINT_2026-08-05.md) — resume notes (2026-08-05); **do not trust empty-box claims** — re-measure (`substrate_health` / journal / entities); superseded for backlog order by the kill list above
 - [plan/CHECKPOINT_2026-08-02.md](plan/CHECKPOINT_2026-08-02.md) — historical resume after #771–#776 (2026-08-02; superseded for status)
 - [plan/ONBOARDING.md](plan/ONBOARDING.md) — pasteable agent start prompt for this host
 
@@ -53,6 +54,7 @@ countable fact; prose docs cite it instead of embedding counts.
 - [13_Stabilization_Audit_and_Plan.txt](../.scratchpad/13_Stabilization_Audit_and_Plan.txt) — log — historical stabilization notes; NOT the active plan (2026-07-08)
 - [17_Decomposer_Full_Stack_Audit.md](../.scratchpad/17_Decomposer_Full_Stack_Audit.md) — log — decomposer/spine audit, code-verified (2026-07-18)
 - [20_Session_Violation_Ledger_2026-07-09.md](../.scratchpad/20_Session_Violation_Ledger_2026-07-09.md) — log — session violation ledger (2026-07-12)
+- [45_Session_Violation_Ledger_Wiktionary_Gate_2026-08-06.md](../.scratchpad/45_Session_Violation_Ledger_Wiktionary_Gate_2026-08-06.md) — log — Wiktionary gate session violation ledger: stall, false proof, monolith patch-fear, failed 5‑min full-file proof (2026-08-06)
 - [22_Conversational_Engine_Plan.md](../.scratchpad/22_Conversational_Engine_Plan.md) — log — DRAINED to GH 2026-07-20 (phases A–F → #358–#361); design rationale only (2026-07-18)
 - [23_Perfcache_Codegen_Valet.md](../.scratchpad/23_Perfcache_Codegen_Valet.md) — log — DRAINED to GH 2026-07-20 (residual → #382, #524) (2026-07-12)
 - [24_Campaign_Reseed_Queue.md](../.scratchpad/24_Campaign_Reseed_Queue.md) — log — DRAINED to GH 2026-07-20 (#413, #505, #527); reseed runbook retained; do NOT execute until the operator orders the full reseed (2026-07-12)

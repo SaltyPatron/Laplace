@@ -8,16 +8,16 @@ DROP FUNCTION IF EXISTS recall_fallback_walk(bytea);
 -- The render itself goes through realize_path (GH #906 item 2) instead of a third
 -- hand-rolled arrow join. walk_strongest walks forward, so every direction is 1.
 CREATE OR REPLACE FUNCTION recall_fallback_walk(p_topic bytea, p_depth int DEFAULT 6)
-    RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
+    RETURNS TABLE(reply text, laplace.eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+ AS $$
     SELECT realize.path(
                p_topic || array_agg(g.entity_id ORDER BY g.step),
                array_agg(g.type_id ORDER BY g.step),
                array_fill(1, ARRAY[count(*)::int]),
-               converse.word_language(p_topic)),
+               laplace.converse.word_language(p_topic)),
            min(g.eff_mu),
            NULL::bigint
-    FROM walk_strongest(p_topic, NULL::bytea, p_depth) g
+    FROM laplace.walk_strongest(p_topic, NULL::bytea, p_depth) g
     HAVING count(*) > 0
 $$;

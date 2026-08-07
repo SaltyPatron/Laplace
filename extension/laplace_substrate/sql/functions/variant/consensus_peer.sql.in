@@ -1,7 +1,7 @@
 CREATE OR REPLACE FUNCTION consensus_peer(p_id bytea, p_k int DEFAULT 6)
     RETURNS bytea
     LANGUAGE plpgsql STABLE PARALLEL RESTRICTED
-    SET search_path = @extschema@, public AS $$
+ AS $$
 DECLARE
     v_result bytea;
     v_type   bytea;
@@ -44,15 +44,15 @@ BEGIN
             -- OUTBOUND: p_id -> partner. A peer is another SUBJECT asserting the
             -- same (relation, object).
             SELECT c2.subject_id AS peer,
-                   LEAST(m.mu, eff_mu(c2.rating, c2.rd)) AS contrib
+                   LEAST(m.mu, laplace.eff_mu(c2.rating, c2.rd)) AS contrib
             FROM (
                 SELECT c.type_id AS rel, c.object_id AS partner,
-                       eff_mu(c.rating, c.rd) AS mu
-                FROM v_consensus_unrefuted c
+                       laplace.eff_mu(c.rating, c.rd) AS mu
+                FROM laplace.v_consensus_unrefuted c
                 WHERE c.subject_id = p_id
                   AND c.object_id IS NOT NULL
             ) m
-            JOIN v_consensus_unrefuted c2
+            JOIN laplace.v_consensus_unrefuted c2
               ON c2.type_id = m.rel
              AND c2.object_id = m.partner
              AND c2.subject_id <> p_id
@@ -61,21 +61,21 @@ BEGIN
             -- asserts under that relation. `subject_id IS DISTINCT FROM p_id`
             -- keeps a self-loop one row, exactly as the CASE did.
             SELECT c2.object_id AS peer,
-                   LEAST(m.mu, eff_mu(c2.rating, c2.rd))
+                   LEAST(m.mu, laplace.eff_mu(c2.rating, c2.rd))
             FROM (
                 SELECT c.type_id AS rel, c.subject_id AS partner,
-                       eff_mu(c.rating, c.rd) AS mu
-                FROM v_consensus_unrefuted c
+                       laplace.eff_mu(c.rating, c.rd) AS mu
+                FROM laplace.v_consensus_unrefuted c
                 WHERE c.object_id = p_id
                   AND c.subject_id IS DISTINCT FROM p_id
             ) m
-            JOIN v_consensus_unrefuted c2
+            JOIN laplace.v_consensus_unrefuted c2
               ON c2.type_id = m.rel
              AND c2.subject_id = m.partner
              AND c2.object_id <> p_id
         ) arms
-        JOIN entities x ON x.id = arms.peer
-        JOIN entities self ON self.id = p_id AND x.type_id = self.type_id
+        JOIN laplace.entities x ON x.id = arms.peer
+        JOIN laplace.entities self ON self.id = p_id AND x.type_id = self.type_id
         GROUP BY x.id
         ORDER BY score DESC
         LIMIT p_k
@@ -95,9 +95,9 @@ BEGIN
     -- parameter, and gate the whole branch behind the election miss.
     -- Shape rank uses REALIZED curves (entity_curve), never packed trajectory
     -- (Rule #3 / Issue 51).
-    SELECT a.type_id, a.coord, entity_curve(p_id)
+    SELECT a.type_id, a.coord, laplace.entity_curve(p_id)
       INTO v_type, v_coord, v_curve
-    FROM word_anchor(p_id) a;
+    FROM laplace.word_anchor(p_id) a;
     IF v_coord IS NULL THEN
         RETURN NULL;
     END IF;
@@ -106,8 +106,8 @@ BEGIN
     FROM (
         SELECT knn.id
         FROM (
-            SELECT w.id, entity_curve(w.id) AS curve
-            FROM v_word_points w
+            SELECT w.id, laplace.entity_curve(w.id) AS curve
+            FROM laplace.v_word_points w
             WHERE w.type_id = v_type AND w.id <> p_id AND w.trajectory IS NOT NULL
             ORDER BY w.coord <<->> v_coord
             LIMIT 48

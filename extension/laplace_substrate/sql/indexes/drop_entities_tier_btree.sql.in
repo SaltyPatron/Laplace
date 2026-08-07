@@ -6,10 +6,10 @@ BEGIN
     -- Release extension membership first (no-op on a fresh install where the index
     -- was never created / never a member); the guarded DROP then removes the object.
     BEGIN
-        EXECUTE format('ALTER EXTENSION %I DROP INDEX @extschema@.entities_tier_btree',
+        EXECUTE format('ALTER EXTENSION %I DROP INDEX laplace.entities_tier_btree',
                        'laplace_substrate');
     EXCEPTION WHEN OTHERS THEN
         NULL;  -- not a member (fresh install or already released) — nothing to detach
     END;
-    EXECUTE 'DROP INDEX IF EXISTS @extschema@.entities_tier_btree';
+    EXECUTE 'DROP INDEX IF EXISTS laplace.entities_tier_btree';
 END $do$;
