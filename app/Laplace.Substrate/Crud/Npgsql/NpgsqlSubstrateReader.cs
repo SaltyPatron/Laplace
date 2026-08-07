@@ -51,7 +51,7 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
     public async Task<long> CountEntitiesByTypeAsync(Hash128 typeId, CancellationToken ct = default)
     {
         await using var cmd = _ds.CreateCommand(
-            "SELECT count(*) FROM laplace.entities WHERE type_id = $1");
+            "SELECT laplace.entity_count($1)");
         cmd.Parameters.AddWithValue(NpgsqlDbType.Bytea, typeId.ToBytes());
         var result = await cmd.ExecuteScalarAsync(ct);
         return result is long l ? l : 0L;
@@ -358,7 +358,7 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
     public async Task<long> CountEvidenceBySourceAsync(Hash128 sourceId, CancellationToken ct = default)
     {
         await using var cmd = _ds.CreateCommand(
-            "SELECT count(*) FROM laplace.attestations WHERE source_id = $1");
+            "SELECT laplace.evidence_count(p_source => $1)");
         cmd.CommandTimeout = 0;
         cmd.Parameters.AddWithValue(NpgsqlDbType.Bytea, sourceId.ToBytes());
         return (long)(await cmd.ExecuteScalarAsync(ct) ?? 0L);

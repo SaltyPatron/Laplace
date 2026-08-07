@@ -49,7 +49,7 @@ BEGIN
            ARRAY[c.type_id]
     FROM consensus c
     WHERE c.subject_id = p_syn AND relation_highway_band(c.type_id) = b_def
-    ORDER BY (c.rating - 2*c.rd) DESC
+    ORDER BY eff_mu(c.rating, c.rd) DESC
     LIMIT 1;
 
     -- taxonomy: multi-hop beam walk up the topic's strongest HYPERNYMY relation.
@@ -63,7 +63,7 @@ BEGIN
     FROM consensus c
     WHERE c.subject_id = p_syn
       AND c.type_id IN (SELECT id FROM relation_family_members('IS_A'))
-    ORDER BY (c.rating - 2*c.rd) DESC
+    ORDER BY eff_mu(c.rating, c.rd) DESC
     LIMIT 1;
     -- NO band fallback. An earlier revision fell back to the taxonomic BAND when the
     -- topic had no IS_A-family edge, "so it still says something rather than going
@@ -119,12 +119,12 @@ BEGIN
            NULL::bytea[], NULL::bytea[]
     FROM (
         SELECT realize(c.object_id, p_lang) AS lbl,
-               (c.rating - 2*c.rd) AS mu,
+               eff_mu(c.rating, c.rd) AS mu,
                eff_mu_display(c.rating, c.rd) AS mu_disp,
                c.witness_count AS wc
         FROM consensus c
         WHERE c.subject_id = p_syn AND relation_highway_band(c.type_id) = b_part
-        ORDER BY (c.rating - 2*c.rd) DESC
+        ORDER BY eff_mu(c.rating, c.rd) DESC
         LIMIT 6
     ) x
     WHERE x.lbl IS NOT NULL
@@ -152,14 +152,14 @@ BEGIN
            NULL::bytea[], NULL::bytea[]
     FROM (
         SELECT realize(c.object_id, p_lang) AS lbl,
-               (c.rating - 2*c.rd) AS mu,
+               eff_mu(c.rating, c.rd) AS mu,
                eff_mu_display(c.rating, c.rd) AS mu_disp,
                c.witness_count AS wc
         FROM consensus c
         WHERE c.subject_id = p_syn
           AND relation_highway_band(c.type_id) = b_assoc
           AND c.type_id NOT IN (SELECT id FROM non_kin_assoc_types())
-        ORDER BY (c.rating - 2*c.rd) DESC
+        ORDER BY eff_mu(c.rating, c.rd) DESC
         LIMIT 8
     ) x
     WHERE label_is_content(x.lbl)

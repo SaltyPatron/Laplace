@@ -6,5 +6,11 @@ CREATE OR REPLACE FUNCTION first_placed_topic(p_text text)
     FROM v_word_points w
     JOIN prompt_state(p_text) s ON w.id = s.id
     WHERE w.coord IS NOT NULL
+    -- "first" is a claim about prompt order, so it has to be stated. Without this
+    -- the LIMIT took an arbitrary placed token out of a multi-token prompt and the
+    -- answer could change between identical calls. Same ranking the structural
+    -- siblings use (structural_locale, structural_neighbors): prompt ordinal, then
+    -- physicality_id to break the tie a repeated surface would otherwise leave open.
+    ORDER BY s.ord, w.physicality_id
     LIMIT 1
 $$;

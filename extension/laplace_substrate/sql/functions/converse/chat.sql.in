@@ -316,23 +316,86 @@ BEGIN
 
         IF p_elaborate AND p_session IS NOT NULL THEN
             -- ELABORATE: advance through NON-EMPTY fact layers by prior mentions.
-            layers := ARRAY[]::text[];
-            SELECT initcap(xl)||' has parts such as '||string_agg(l,', ' ORDER BY m DESC)||'.'
-              INTO s FROM (SELECT realize(c.object_id,lang) l,(c.rating-2*c.rd) m
-                FROM consensus c WHERE c.subject_id=topic AND relation_highway_band(c.type_id)=4
-                ORDER BY (c.rating-2*c.rd) DESC LIMIT 6) z WHERE l IS NOT NULL;
-            IF s IS NOT NULL THEN layers := layers||s; END IF;
-            SELECT 'Kinds of '||xl||' include '||string_agg(l,', ' ORDER BY m DESC)||'.'
-              INTO s FROM (SELECT realize(c.subject_id,lang) l,(c.rating-2*c.rd) m
-                FROM consensus c WHERE c.object_id=topic AND relation_highway_band(c.type_id)=2
-                ORDER BY (c.rating-2*c.rd) DESC LIMIT 8) z WHERE l IS NOT NULL;
-            IF s IS NOT NULL THEN layers := layers||s; END IF;
-            SELECT initcap(xl)||' is related to '||string_agg(l,' and ' ORDER BY m DESC)||'.'
-              INTO s FROM (SELECT realize(c.object_id,lang) l,(c.rating-2*c.rd) m
-                FROM consensus c WHERE c.subject_id=topic AND relation_highway_band(c.type_id)=7
-                ORDER BY (c.rating-2*c.rd) DESC LIMIT 8) z
-               WHERE label_is_content(l) LIMIT 3;
-            IF s IS NOT NULL THEN layers := layers||s; END IF;
+            -- Built ON the band-lens pattern below, not beside it. Four defects the
+            -- scalar form carried, all fixed here and none of them a law change:
+            --   * (c.rating-2*c.rd) open-coded three times -- a SECOND definition of
+            --     edge strength inside a function whose other branches call eff_mu().
+            --     If eff_mu's definition moves, this branch silently diverges.
+            --   * realize() PER ROW before the cut, in the same file whose band lens
+            --     measures that at ~7 ms/id against ~0.3 ms/id batched.
+            --   * bare band literals 4/2/7 -- relation_band_catalog() rows restated
+            --     as magic numbers.
+            --   * the associative band read RAW, without non_kin_assoc_types(): the
+            --     etymology/usage/register families converse_facts excludes in id
+            --     space were being rendered as things the topic "is related to".
+            -- A dead `LIMIT 3` on a single-row aggregate is dropped with them.
+            WITH bands AS (
+                SELECT b.band,
+                       CASE b.name WHEN 'partitive'   THEN 1
+                                   WHEN 'taxonomic'   THEN 2
+                                   WHEN 'associative' THEN 3 END AS layer
+                FROM relation_band_catalog() b
+                WHERE b.name IN ('partitive', 'taxonomic', 'associative')
+            ),
+            sel AS MATERIALIZED (
+                -- Types resolved ONCE, structural families removed in ID SPACE.
+                -- relation_highway_band() is a C STABLE call; in the edge predicate
+                -- it runs per EDGE and makes the scan unsargable.
+                SELECT e.id AS type_id, bd.layer
+                FROM entities e
+                JOIN bands bd ON bd.band = relation_highway_band(e.id)
+                WHERE e.type_id = entity_type_id('RelationType')
+                  AND e.id NOT IN (SELECT id FROM non_kin_assoc_types())
+            ),
+            edges AS MATERIALIZED (
+                -- parts and kin read forward (topic -> object); kinds reads backward,
+                -- because the kinds OF a topic are the subjects whose hypernym it is.
+                SELECT s.layer, c.object_id AS nid, eff_mu(c.rating, c.rd) AS m
+                FROM sel s
+                JOIN consensus c ON c.type_id = s.type_id AND c.subject_id = topic
+                WHERE s.layer IN (1, 3) AND c.object_id IS NOT NULL
+                UNION ALL
+                SELECT s.layer, c.subject_id, eff_mu(c.rating, c.rd)
+                FROM sel s
+                JOIN consensus c ON c.type_id = s.type_id AND c.object_id = topic
+                WHERE s.layer = 2
+            ),
+            ranked AS MATERIALIZED (
+                SELECT layer, nid, m,
+                       row_number() OVER (PARTITION BY layer ORDER BY m DESC, nid) AS rn
+                FROM edges
+            ),
+            -- MATERIALIZED and TOTALLY ORDERED: `ix` indexes the realize_batch array
+            -- and this CTE is read twice, so an unfenced re-evaluation in a different
+            -- physical order would pair every label with the wrong edge.
+            ord AS MATERIALIZED (
+                SELECT layer, nid, m,
+                       row_number() OVER (ORDER BY layer, m DESC, nid) AS ix
+                FROM ranked
+                WHERE rn <= CASE layer WHEN 1 THEN 6 ELSE 8 END  -- caps as before
+            ),
+            lbl AS MATERIALIZED (
+                SELECT realize_batch(array_agg(o.nid ORDER BY o.ix), lang) AS l
+                FROM ord o
+            )
+            SELECT array_agg(q.line ORDER BY q.layer) INTO layers FROM (
+                SELECT o.layer,
+                       CASE o.layer
+                         WHEN 1 THEN initcap(xl) || ' has parts such as '
+                                     || string_agg(lbl.l[o.ix], ', ' ORDER BY o.m DESC) || '.'
+                         WHEN 2 THEN 'Kinds of ' || xl || ' include '
+                                     || string_agg(lbl.l[o.ix], ', ' ORDER BY o.m DESC) || '.'
+                         ELSE        initcap(xl) || ' is related to '
+                                     || string_agg(lbl.l[o.ix], ' and ' ORDER BY o.m DESC) || '.'
+                       END AS line
+                FROM ord o
+                CROSS JOIN lbl
+                WHERE lbl.l[o.ix] IS NOT NULL
+                  -- last-resort render guard, kin layer only (as converse_facts keeps it)
+                  AND (o.layer <> 3 OR label_is_content(lbl.l[o.ix]))
+                GROUP BY o.layer
+            ) q;
+            layers := COALESCE(layers, ARRAY[]::text[]);
             SELECT count(*) INTO depth FROM session_topics t
               WHERE t.session_id=p_session AND t.resolved_id=topic;
             out := CASE WHEN depth BETWEEN 1 AND COALESCE(array_length(layers,1),0)
