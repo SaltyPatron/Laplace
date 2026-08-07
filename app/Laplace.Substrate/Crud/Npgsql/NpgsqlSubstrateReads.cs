@@ -164,6 +164,49 @@ public static class NpgsqlSubstrateReads
                 p.AddWithValue("limit", limit);
             }, ct: ct, label: "surface_sample", onError: onError);
 
+    /// <summary><c>laplace.arena_counts()</c> — per-relation consensus mass (GH #764 callers).</summary>
+    public static Task<IReadOnlyList<(string Type, long Relations, long Witnesses)>> ArenaCountsAsync(
+        NpgsqlDataSource dataSource, CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT type, relations, witnesses
+            FROM laplace.arena_counts()
+            LIMIT 64
+            """,
+            static r => (
+                r.IsDBNull(0) ? "" : r.GetString(0),
+                r.IsDBNull(1) ? 0L : r.GetInt64(1),
+                r.IsDBNull(2) ? 0L : r.GetInt64(2)),
+            ct: ct, label: "arena_counts", onError: onError);
+
+    /// <summary><c>laplace.ingest_runs(limit)</c> — recent ingest journal rows.</summary>
+    public static Task<IReadOnlyList<(string Source, string Status, DateTimeOffset Started)>> IngestRunsAsync(
+        NpgsqlDataSource dataSource, int limit, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT source_name, status, started_at
+            FROM laplace.ingest_runs(@limit)
+            """,
+            static r => (
+                r.IsDBNull(0) ? "" : r.GetString(0),
+                r.IsDBNull(1) ? "" : r.GetString(1),
+                r.GetFieldValue<DateTimeOffset>(2)),
+            p => p.AddWithValue("limit", limit),
+            ct: ct, label: "ingest_runs", onError: onError);
+
+    /// <summary><c>laplace.consensus_count(type)</c> — consensus row count, optional type filter.</summary>
+    public static async Task<long> ConsensusCountAsync(
+        NpgsqlDataSource dataSource, byte[]? typeId, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null)
+    {
+        var rows = await NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT laplace.consensus_count(@type)
+            """,
+            static r => r.IsDBNull(0) ? 0L : r.GetInt64(0),
+            p => p.AddWithValue("type", (object?)typeId ?? DBNull.Value),
+            ct: ct, label: "consensus_count", onError: onError).ConfigureAwait(false);
+        return rows.Count == 0 ? 0L : rows[0];
+    }
+
     public readonly record struct BandLeaderRow(
         int Band, string SubjectIdHex, string Subject, string Relation,
         string ObjectIdHex, string Object, decimal EffMu, long Witnesses);
