@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Text;
-using Laplace.Core;
+using Laplace.Engine.Core;
 
 namespace Laplace.Chess.Service;
 
