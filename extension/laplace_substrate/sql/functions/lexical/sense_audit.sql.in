@@ -41,7 +41,7 @@ WITH w AS (SELECT word_id(p_term) AS id),
 cand AS (
     SELECT s.synset_id, s.eff_mu, s.witnesses,
            row_number() OVER (ORDER BY s.eff_mu DESC, s.synset_id) AS rk
-    FROM w CROSS JOIN LATERAL senses(w.id) s
+    FROM w CROSS JOIN LATERAL lexical.senses(w.id) s
 ),
 capped AS (SELECT * FROM cand WHERE rk <= p_limit),
 -- The relation that admitted this candidate. A target reachable by several

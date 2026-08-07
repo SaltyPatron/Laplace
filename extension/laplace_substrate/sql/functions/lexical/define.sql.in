@@ -20,7 +20,7 @@ CREATE OR REPLACE FUNCTION define(p_word bytea, p_limit int DEFAULT 5)
                    @extschema@.eff_mu_display(g.rating, g.rd) AS eff_mu,
                    g.witness_count AS witnesses,
                    sn.eff_mu AS sense_rank
-            FROM @extschema@.senses(p_word) sn
+            FROM lexical.senses(p_word) sn
             JOIN @extschema@.consensus g ON g.subject_id = sn.synset_id
                             AND g.type_id = @extschema@.relation_type_id('HAS_DEFINITION')
             UNION ALL
@@ -28,7 +28,7 @@ CREATE OR REPLACE FUNCTION define(p_word bytea, p_limit int DEFAULT 5)
                    @extschema@.eff_mu_display(g.rating, g.rd),
                    g.witness_count,
                    NULL::numeric
-            FROM unnest(@extschema@.lexical_peers(p_word)) AS peer(id)
+            FROM unnest(lexical.lexical_peers(p_word)) AS peer(id)
             JOIN @extschema@.consensus g ON g.subject_id = peer.id
                             AND g.type_id = @extschema@.relation_type_id('HAS_DEFINITION')
         ) u

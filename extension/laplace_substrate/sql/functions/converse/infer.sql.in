@@ -48,7 +48,7 @@ topic AS (SELECT r.synset_id FROM ranked r WHERE r.rk = 1),
 bias AS (
     SELECT DISTINCT s.synset_id
     FROM ranked r
-    CROSS JOIN LATERAL senses(r.tok) s
+    CROSS JOIN LATERAL lexical.senses(r.tok) s
     WHERE r.rk > 1 AND s.synset_id IS NOT NULL
 ),
 biasfam AS (

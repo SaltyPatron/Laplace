@@ -3,11 +3,15 @@
 -- No SET search_path and no STRICT so it inlines into callers (both block
 -- inlining; #617). NULL-safety is preserved without STRICT: bubble_up(NULL)
 -- yields zero rows (lexical_peers is STRICT -> NULL array -> empty unnest).
-CREATE OR REPLACE FUNCTION senses(p_word bytea)
+-- lexical.senses — GH #862. Every call site moves in this same commit; a rename
+-- with a live caller is a tree that does not install.
+DROP FUNCTION IF EXISTS laplace.senses(bytea);
+
+CREATE OR REPLACE FUNCTION lexical.senses(p_word bytea)
     RETURNS TABLE(sense_id bytea, synset_id bytea, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
     SELECT b.sense_id, b.synset_id, b.base_eff_mu, b.witnesses
-    FROM @extschema@.bubble_up(p_word, NULL::bytea[], 64) b
+    FROM taxonomy.bubble_up(p_word, NULL::bytea[], 64) b
     -- EVIDENCE BEFORE ADJUDICATED STRENGTH — see the matching note in
     -- bubble_up.sql.in. This ORDER BY is the one that decides what callers see:
     -- bubble_up's own ordering only selects which 64 candidates survive its

@@ -1,7 +1,11 @@
-CREATE OR REPLACE FUNCTION lexical_peers(p_word bytea)
+-- lexical.lexical_peers — GH #862 / #860. No SET (it blocks plan caching and SQL
+-- inlining, so the body re-plans per call); real schema names, no build-time
+-- placeholder.
+DROP FUNCTION IF EXISTS laplace.lexical_peers(bytea);
+
+CREATE OR REPLACE FUNCTION lexical.lexical_peers(p_word bytea)
     RETURNS bytea[]
-    LANGUAGE sql STABLE STRICT PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$
     -- Orthographic identity peers only: the word itself + its case variants
     -- (dog/Dog/DOG share senses). The frechet-shape scan that used to live
     -- here (word_shape_peers_fast) is a native buffer scan costing 0.3-2.4s
@@ -11,7 +15,7 @@ CREATE OR REPLACE FUNCTION lexical_peers(p_word bytea)
     -- it does NOT belong on the exact sense-lookup hot path.
     WITH merged AS (
         SELECT p_word AS id
-        UNION SELECT unnest(word_case_variant_ids(p_word)) AS id
+        UNION SELECT unnest(laplace.word_case_variant_ids(p_word)) AS id
     )
     SELECT COALESCE(array_agg(DISTINCT id ORDER BY id), ARRAY[p_word])
     FROM merged

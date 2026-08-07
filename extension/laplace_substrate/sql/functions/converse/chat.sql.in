@@ -246,7 +246,7 @@ BEGIN
                     SELECT t.id AS sid FROM ptok t
                     UNION ALL
                     SELECT s.synset_id FROM ptok t
-                    CROSS JOIN LATERAL senses(t.id) s
+                    CROSS JOIN LATERAL lexical.senses(t.id) s
                     WHERE s.synset_id IS NOT NULL
                 ) x
             ),

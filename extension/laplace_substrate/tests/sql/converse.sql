@@ -100,9 +100,9 @@ SELECT resolve_phrase('what is a dog') = word_id('dog') AS phrase_finds_dog;
 SELECT resolve_last_word('what is a dog') = word_id('dog') AS last_word_is_dog;
 SELECT resolve_last_word('zzzunknownzzz') IS NULL AS unknown_is_null;
 
-SELECT word_id('dog') = ANY(lexical_peers(word_id('dog'))) AS peer_includes_self;
+SELECT word_id('dog') = ANY(lexical.lexical_peers(word_id('dog'))) AS peer_includes_self;
 
-SELECT count(*) AS dog_senses FROM senses(word_id('dog'));
+SELECT count(*) AS dog_senses FROM lexical.senses(word_id('dog'));
 
 SELECT definition, witnesses FROM define(word_id('dog'));
 
@@ -137,9 +137,9 @@ SELECT support,
 FROM shared_objects(ARRAY[word_id('dog'), word_id('p')])
 LIMIT 1;
 
-SELECT (SELECT sn.synset_id FROM senses(word_id('dog')) sn LIMIT 1)
+SELECT (SELECT sn.synset_id FROM lexical.senses(word_id('dog')) sn LIMIT 1)
        = laplace_hash128_blake3('test/converse/synset_b') AS plain_top_is_b;
-SELECT (SELECT sn.synset_id FROM senses(word_id('dog'), ARRAY[word_id('h')]) sn LIMIT 1)
+SELECT (SELECT sn.synset_id FROM lexical.senses(word_id('dog'), ARRAY[word_id('h')]) sn LIMIT 1)
        = laplace_hash128_blake3('test/converse/synset1') AS context_flips_to_1;
 
 SELECT realize(word_id('p'), NULL) AS leaf_realizes;

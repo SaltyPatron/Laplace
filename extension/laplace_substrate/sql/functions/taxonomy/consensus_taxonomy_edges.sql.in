@@ -1,4 +1,8 @@
-CREATE OR REPLACE FUNCTION consensus_taxonomy_edges(p_subject bytea, p_types bytea[])
+-- taxonomy.consensus_taxonomy_edges — GH #862. Real schema names, no @extschema@
+-- placeholder (schema = 'laplace', relocatable = false: one possible expansion).
+DROP FUNCTION IF EXISTS laplace.consensus_taxonomy_edges(bytea, bytea[]);
+
+CREATE OR REPLACE FUNCTION taxonomy.consensus_taxonomy_edges(p_subject bytea, p_types bytea[])
     RETURNS TABLE(object_id bytea, type_id bytea, rating bigint, rd bigint)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
     -- No SET search_path so it inlines into the caller's FROM (the
@@ -10,12 +14,12 @@ CREATE OR REPLACE FUNCTION consensus_taxonomy_edges(p_subject bytea, p_types byt
     -- node set, and completes run's 11,924-node closure where the non-inlined
     -- form timed out.
     SELECT c.object_id, c.type_id, c.rating, c.rd
-    FROM @extschema@.v_consensus_unrefuted c
+    FROM laplace.v_consensus_unrefuted c
     WHERE c.subject_id = p_subject
       AND c.type_id = ANY (p_types)
       AND c.object_id IS NOT NULL
       AND NOT EXISTS (
-          SELECT 1 FROM @extschema@.entities et
+          SELECT 1 FROM laplace.entities et
           WHERE et.id = c.object_id
-            AND et.type_id = @extschema@.entity_type_id('RelationType'))
+            AND et.type_id = laplace.entity_type_id('RelationType'))
 $$;

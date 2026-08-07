@@ -55,7 +55,7 @@ WITH tok AS (
 enriched AS (
     SELECT t.ord, t.word, t.id,
            (SELECT min(e.tier) FROM entities e WHERE e.id = t.id) AS tier,
-           (SELECT count(*) FROM senses(t.id)) AS n_senses,
+           (SELECT count(*) FROM lexical.senses(t.id)) AS n_senses,
            (SELECT c.object_id
               FROM consensus c
              WHERE c.subject_id = t.id

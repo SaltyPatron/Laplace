@@ -7,7 +7,7 @@ CREATE OR REPLACE FUNCTION concept_peers(p_word bytea, p_limit int DEFAULT 24)
     -- because the bridge is the anchor id, not any rendered string: two words
     -- link iff they attach to the same anchor entity. Ranking is pure id/mu;
     -- label() runs once per surviving row, past the LIMIT, at the boundary.
-    WITH me AS (SELECT lexical_peers(p_word) AS ids),
+    WITH me AS (SELECT lexical.lexical_peers(p_word) AS ids),
     self AS (SELECT unnest(ids) AS id FROM me),
     anchors AS (
         SELECT DISTINCT c.object_id AS anchor

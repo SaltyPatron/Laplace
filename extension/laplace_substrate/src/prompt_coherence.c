@@ -444,7 +444,7 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
             "       s.witnesses::bigint, p.language, "
             "       laplace.word_language(s.sense_id) "
             "FROM laplace.prompt_state($1) p "
-            "CROSS JOIN LATERAL laplace.senses(p.id) s "
+            "CROSS JOIN LATERAL lexical.senses(p.id) s "
             "WHERE p.id IS NOT NULL AND s.synset_id IS NOT NULL",
             1, argtypes, args, NULL, true, 0);
 

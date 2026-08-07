@@ -136,7 +136,7 @@ SELECT resolve_last_word('zzzunknownzzz') IS NULL AS unknown_is_null;
  t
 (1 row)
 
-SELECT word_id('dog') = ANY(lexical_peers(word_id('dog'))) AS peer_includes_self;
+SELECT word_id('dog') = ANY(lexical.lexical_peers(word_id('dog'))) AS peer_includes_self;
  peer_includes_self 
 --------------------
  t
