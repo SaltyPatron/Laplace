@@ -120,15 +120,17 @@ public static class NpgsqlSubstrateReads
             ct: ct, label: "partition_pressure", onError: onError);
 
     /// <summary><c>laplace.atom_census()</c> — tier-0 window invariant (GH #813).</summary>
-    public static Task<(long Tier0, long Window, long Over, long Unresolvable)?> AtomCensusAsync(
-        NpgsqlDataSource dataSource, CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null) =>
-        NpgsqlRead.ReadFirstOrDefaultAsync(dataSource, """
+    public static async Task<(long Tier0, long Window, long Over, long Unresolvable)?> AtomCensusAsync(
+        NpgsqlDataSource dataSource, CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null)
+    {
+        var rows = await NpgsqlRead.ReadRowsAsync(dataSource, """
             SELECT tier0_count, atom_window, over_window, unresolvable_ids
             FROM laplace.atom_census()
             """,
-            static r => (
-                r.GetInt64(0), r.GetInt64(1), r.GetInt64(2), r.GetInt64(3)),
-            ct: ct, label: "atom_census", onError: onError);
+            static r => (r.GetInt64(0), r.GetInt64(1), r.GetInt64(2), r.GetInt64(3)),
+            ct: ct, label: "atom_census", onError: onError).ConfigureAwait(false);
+        return rows.Count == 0 ? null : rows[0];
+    }
 
     /// <summary><c>laplace.source_tier_census(source)</c> — entities by tier for a lane (GH #813).</summary>
     public static Task<IReadOnlyList<(short Tier, long Entities)>> SourceTierCensusAsync(

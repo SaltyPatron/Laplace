@@ -576,6 +576,7 @@
       "extension/laplace_substrate/sql/functions/lexical/define.sql.in::HAS_DEFINITION": 2,
       "extension/laplace_substrate/sql/functions/lexical/define_with_context.sql.in::HAS_DEFINITION": 2,
       "extension/laplace_substrate/sql/functions/lexical/examples.sql.in::HAS_EXAMPLE": 1,
+      "extension/laplace_substrate/sql/functions/lexical/senses_with_context.sql.in::HAS_DOMAIN_TOPIC": 1,
       "extension/laplace_substrate/sql/functions/lexical/senses_with_context.sql.in::IS_SENSE_OF": 1,
       "extension/laplace_substrate/sql/functions/lexical/synset_members.sql.in::HAS_LANGUAGE": 1,
       "extension/laplace_substrate/sql/functions/lexical/synset_members.sql.in::IS_INSTANCE_OF": 1,
