@@ -122,24 +122,33 @@ BEGIN
     END IF;
 
     -- parts: partitive-band ranked listing (1-hop by nature).
+    -- Rank in id space, then ONE realize.batch over survivors — not per-edge
+    -- realize() ahead of LIMIT (#903; same pattern chat.sql.in band lens).
     RETURN QUERY
-    SELECT 'parts'::text,
-           initcap(v_lbl) || ' has parts such as '
-             || string_agg(x.lbl, ', ' ORDER BY x.mu DESC) || '.',
-           min(x.mu_disp),
-           sum(x.wc)::bigint,
-           NULL::bytea[], NULL::bytea[]
-    FROM (
-        SELECT realize.realize(c.object_id, p_lang) AS lbl,
+    WITH ranked AS MATERIALIZED (
+        SELECT c.object_id AS nid,
                laplace.eff_mu(c.rating, c.rd) AS mu,
                laplace.eff_mu_display(c.rating, c.rd) AS mu_disp,
-               c.witness_count AS wc
+               c.witness_count AS wc,
+               row_number() OVER (
+                   ORDER BY laplace.eff_mu(c.rating, c.rd) DESC, c.object_id) AS ix
         FROM laplace.consensus c
         WHERE c.subject_id = p_syn AND c.type_id = ANY (t_part)
-        ORDER BY laplace.eff_mu(c.rating, c.rd) DESC
+        ORDER BY laplace.eff_mu(c.rating, c.rd) DESC, c.object_id
         LIMIT 6
-    ) x
-    WHERE x.lbl IS NOT NULL
+    ),
+    lbl AS MATERIALIZED (
+        SELECT realize.batch(array_agg(r.nid ORDER BY r.ix), p_lang) AS l
+        FROM ranked r
+    )
+    SELECT 'parts'::text,
+           initcap(v_lbl) || ' has parts such as '
+             || string_agg(lbl.l[r.ix], ', ' ORDER BY r.mu DESC) || '.',
+           min(r.mu_disp),
+           sum(r.wc)::bigint,
+           NULL::bytea[], NULL::bytea[]
+    FROM ranked r CROSS JOIN lbl
+    WHERE lbl.l[r.ix] IS NOT NULL
     HAVING count(*) > 0;
 
     -- kin: associative-band ranked listing, MINUS the associative families that are
@@ -155,26 +164,35 @@ BEGIN
     -- a stoplist in disguise, and a laplace.render call in the middle of a hash-space
     -- operation. Selecting families up front removes the reason it existed; it is
     -- retained only as a last-resort guard at the point of rendering.
+    -- Rank in id space, exclude non-kin families in id space, then ONE
+    -- realize.batch — label_is_content stays a last-resort guard on survivors (#903).
     RETURN QUERY
-    SELECT 'kin'::text,
-           initcap(v_lbl) || ' is related to '
-             || string_agg(x.lbl, ' and ' ORDER BY x.mu DESC) || '.',
-           min(x.mu_disp),
-           sum(x.wc)::bigint,
-           NULL::bytea[], NULL::bytea[]
-    FROM (
-        SELECT realize.realize(c.object_id, p_lang) AS lbl,
+    WITH ranked AS MATERIALIZED (
+        SELECT c.object_id AS nid,
                laplace.eff_mu(c.rating, c.rd) AS mu,
                laplace.eff_mu_display(c.rating, c.rd) AS mu_disp,
-               c.witness_count AS wc
+               c.witness_count AS wc,
+               row_number() OVER (
+                   ORDER BY laplace.eff_mu(c.rating, c.rd) DESC, c.object_id) AS ix
         FROM laplace.consensus c
         WHERE c.subject_id = p_syn
           AND c.type_id = ANY (t_assoc)
           AND c.type_id NOT IN (SELECT id FROM converse.non_kin_assoc_types())
-        ORDER BY laplace.eff_mu(c.rating, c.rd) DESC
+        ORDER BY laplace.eff_mu(c.rating, c.rd) DESC, c.object_id
         LIMIT 8
-    ) x
-    WHERE converse.label_is_content(x.lbl)
+    ),
+    lbl AS MATERIALIZED (
+        SELECT realize.batch(array_agg(r.nid ORDER BY r.ix), p_lang) AS l
+        FROM ranked r
+    )
+    SELECT 'kin'::text,
+           initcap(v_lbl) || ' is related to '
+             || string_agg(lbl.l[r.ix], ' and ' ORDER BY r.mu DESC) || '.',
+           min(r.mu_disp),
+           sum(r.wc)::bigint,
+           NULL::bytea[], NULL::bytea[]
+    FROM ranked r CROSS JOIN lbl
+    WHERE converse.label_is_content(lbl.l[r.ix])
     HAVING count(*) > 0;
 
     -- web: the strongest chain across ALL relations -- the explicit
