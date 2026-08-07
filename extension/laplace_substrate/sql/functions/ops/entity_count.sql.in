@@ -1,7 +1,8 @@
+-- BEGIN ATOMIC: GH #764.
 CREATE OR REPLACE FUNCTION entity_count(p_type bytea)
     RETURNS bigint
-    LANGUAGE sql STABLE 
-    AS $$
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
     -- Scalar counterpart to entity_type_counts(). That function aggregates every
     -- type in the substrate; a caller that wants one type's count should not pay
     -- a full GROUP BY over entities to read a single row. Here p_type arrives as
@@ -10,13 +11,13 @@ CREATE OR REPLACE FUNCTION entity_count(p_type bytea)
     -- NULL p_type counts nothing, not everything: `type_id = NULL` matches no
     -- rows, and an unspecified type is not a wildcard. Callers that want the
     -- whole-table count already have substrate_counts().
-    SELECT count(*) FROM @extschema@.entities e WHERE e.type_id = p_type
-$$;
+    SELECT count(*) FROM @extschema@.entities e WHERE e.type_id = p_type;
+END;
 
 CREATE OR REPLACE FUNCTION entity_counts_by_types(p_types bytea[])
     RETURNS TABLE(type_id bytea, entities bigint)
-    LANGUAGE sql STABLE 
-    AS $$
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
     -- Batch form: one round trip for N types, and every requested type comes back
     -- whether or not it has rows. A LEFT JOIN, not an inner one -- a type with no
     -- entities is a 0, and dropping it would make "absent from the result" and
@@ -25,5 +26,5 @@ CREATE OR REPLACE FUNCTION entity_counts_by_types(p_types bytea[])
     SELECT t.type_id, count(e.id)
     FROM unnest(p_types) AS t(type_id)
     LEFT JOIN @extschema@.entities e ON e.type_id = t.type_id
-    GROUP BY t.type_id
-$$;
+    GROUP BY t.type_id;
+END;

@@ -4,6 +4,7 @@
 -- structurally via entity_count, not by attestation source. Chess arrived as
 -- ChessAnalysis/ChessPgn/ChessOpenings; OMW meshes languages through the ILI
 -- hub; models count on their plane relation until a checkpoint ingests.
+-- BEGIN ATOMIC: GH #764.
 DROP FUNCTION IF EXISTS laplace.modality_counts();
 CREATE OR REPLACE FUNCTION modality_counts()
     RETURNS TABLE(
@@ -14,7 +15,7 @@ CREATE OR REPLACE FUNCTION modality_counts()
         documents bigint)
     LANGUAGE sql
     STABLE
-AS $$
+BEGIN ATOMIC
     WITH s AS (SELECT source, evidence_approx FROM laplace.source_counts_approx()),
     parts AS (
       SELECT
@@ -27,5 +28,5 @@ AS $$
         COALESCE(laplace.entity_count(laplace.entity_type_id('Document')), 0)::bigint AS documents)
     SELECT greatest(0, p.total - p.chess - p.models - p.multilingual),
            p.chess, p.models, p.multilingual, p.documents
-    FROM parts p
-$$;
+    FROM parts p;
+END;

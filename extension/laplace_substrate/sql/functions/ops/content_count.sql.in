@@ -1,7 +1,8 @@
+-- BEGIN ATOMIC: GH #764.
 CREATE OR REPLACE FUNCTION content_count(p_source bytea DEFAULT NULL)
     RETURNS bigint
-    LANGUAGE sql STABLE 
-    AS $$
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
     SELECT CASE
         WHEN p_source IS NULL THEN
             (SELECT count(*) FROM @extschema@.v_word_points)
@@ -19,5 +20,5 @@ CREATE OR REPLACE FUNCTION content_count(p_source bytea DEFAULT NULL)
                    WHERE a.source_id = p_source) s
              WHERE EXISTS (SELECT 1 FROM @extschema@.v_word_points w
                            WHERE w.id = s.subject_id))
-    END
-$$;
+    END;
+END;
