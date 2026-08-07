@@ -3,12 +3,19 @@ CREATE OR REPLACE FUNCTION realize_path(p_path bytea[], p_types bytea[], p_dirs 
     RETURNS text
     LANGUAGE sql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
+    -- label() before '?': an id with no realization in p_lang usually still has a
+    -- name, and printing '?' for it threw that away. The walk responders open-coded
+    -- this whole render specifically because they needed the label tier
+    -- (GH #906 item 2); with it here they can route through the one definition.
+    -- Strictly additive -- the only rows this changes are the ones that used to
+    -- print '?'.
     SELECT string_agg(
-               CASE WHEN i = 1 THEN COALESCE(realize(p_path[i], p_lang), '?')
+               CASE WHEN i = 1
+                    THEN COALESCE(realize(p_path[i], p_lang), label(p_path[i]), '?')
                     ELSE CASE WHEN p_dirs[i-1] = -1
                               THEN ' ←' || COALESCE(type_label(p_types[i-1]), '?') || '— '
                               ELSE ' —' || COALESCE(type_label(p_types[i-1]), '?') || '→ '
-                         END || COALESCE(realize(p_path[i], p_lang), '?')
+                         END || COALESCE(realize(p_path[i], p_lang), label(p_path[i]), '?')
                END, '' ORDER BY i)
     FROM generate_subscripts(p_path, 1) AS i
 $$;

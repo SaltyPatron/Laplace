@@ -80,6 +80,19 @@ LANGUAGE sql STABLE PARALLEL RESTRICTED AS $$
         JOIN @extschema@.v_word_points w ON w.id = a.object_id
         WHERE w.coord IS NOT NULL
     ),
+    -- THIRD centroid path in this system, kept deliberately (GH #906 item 4).
+    -- public.laplace_centroid_4d and the composer's math4d_centroid both exist and
+    -- neither answers this: they take unweighted point sets, and this is a
+    -- CONSENSUS-WEIGHTED mean -- each coordinate scaled by its edge's rated mass,
+    -- normalized by total weight, then projected back onto the unit 3-sphere.
+    -- Substituting either would silently drop the weighting, which IS the operation.
+    --
+    -- The parity that DOES hold, and the one a reader should check if this moves:
+    -- with all weights equal this reduces exactly to math4d_centroid's arithmetic
+    -- mean followed by its normalize step. Equal weights are the degenerate case, so
+    -- any divergence there is a defect in one of the two, not a semantic difference.
+    -- Unpinned by a test because no fixture yet builds an equal-weight attended set;
+    -- that fixture is the missing gate, not a different centroid.
     summed AS (
         SELECT SUM(ST_X(coord) * w) / NULLIF(SUM(w), 0) AS mx,
                SUM(ST_Y(coord) * w) / NULLIF(SUM(w), 0) AS my,

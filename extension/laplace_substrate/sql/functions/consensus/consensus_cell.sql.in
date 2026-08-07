@@ -1,0 +1,64 @@
+-- The RAW Glicko cell for one triple, and the batch form for many (GH #909).
+--
+-- consensus_by_ids answers the DISPLAY axis (eff_mu); this answers the bookkeeping
+-- axis -- rating, rd, witness_count as stored. Feedback and fold-audit callers need
+-- the untransformed numbers, and lacking an installed surface for that shape they
+-- hand-wrote `SELECT rating, rd, witness_count FROM consensus WHERE id = ...`
+-- against the table (NpgsqlConsensusCell.cs, whose own header records the gap and
+-- calls itself the one sanctioned reader "until that lands"). This is that landing.
+--
+-- Keyed by primary id through consensus_id(), never a three-column triple scan: the
+-- id IS blake3(subject || type || object), so the lookup is one index probe on the
+-- PK and the partition keys come along in the same expression.
+CREATE OR REPLACE FUNCTION consensus_cell(
+    p_subject bytea, p_type bytea, p_object bytea)
+    RETURNS TABLE(rating bigint, rd bigint, witness_count bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT c.rating, c.rd, c.witness_count
+    FROM @extschema@.consensus c
+    WHERE c.id = @extschema@.consensus_id(p_subject, p_type, p_object)
+$$;
+
+-- Batch pair scoring for ONE relation type over aligned subject/object arrays.
+--
+-- UNATTESTED SCORES 0 HERE, BY CONTRACT, and that is why this is not a call to
+-- consensus_by_ids (GH #909 item 5): the caller ranks pairs and needs a dense
+-- score vector aligned to its input, so a missing edge has to arrive as a number
+-- rather than as an absent row. That collapses the tri-state ON PURPOSE and at the
+-- caller's request -- it is a scoring surface, not a presence probe. Anything
+-- asking whether an edge EXISTS must use consensus_cell or a presence probe, where
+-- absent stays absent.
+--
+-- LEFT JOIN on the computed id, ordinal-aligned: one row out per row in, in input
+-- order, so the caller indexes the result by position without a second pass.
+CREATE OR REPLACE FUNCTION consensus_pair_scores(
+    p_subjects bytea[], p_type bytea, p_objects bytea[])
+    RETURNS TABLE(ord int, score float8)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT s.ord::int,
+           COALESCE(@extschema@.eff_mu_display(c.rating, c.rd), 0)::float8
+    FROM unnest(p_subjects) WITH ORDINALITY AS s(sid, ord)
+    JOIN unnest(p_objects) WITH ORDINALITY AS o(oid, ord) USING (ord)
+    LEFT JOIN @extschema@.consensus c
+      ON c.id = @extschema@.consensus_id(s.sid, p_type, o.oid)
+    ORDER BY s.ord
+$$;
+
+-- Trajectory count for a circuit-bearing entity type (GH #909, missing helper).
+-- NpgsqlIngestOps joined physicalities x entities by hand for this because nothing
+-- installed answered it. p_type is the entity type id; p_physicality_type selects
+-- the physicality kind (3 = trajectory), named rather than left as a bare literal
+-- at the call site.
+CREATE OR REPLACE FUNCTION entity_physicality_count(
+    p_type bytea, p_physicality_type int DEFAULT 3)
+    RETURNS bigint
+    LANGUAGE sql STABLE PARALLEL SAFE
+    SET search_path = @extschema@, public AS $$
+    SELECT count(*)::bigint
+    FROM @extschema@.physicalities p
+    JOIN @extschema@.entities e ON e.id = p.entity_id
+    WHERE p.type = p_physicality_type
+      AND e.type_id = p_type
+$$;

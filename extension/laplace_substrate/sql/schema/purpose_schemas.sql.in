@@ -1,0 +1,72 @@
+-- PURPOSE-DRIVEN SCHEMAS (GH #862, and the structural cause of #860).
+--
+-- Everything installed into one flat `laplace` namespace. That is not cosmetic: it
+-- is the reason 232 of 351 function bodies carry `SET search_path`. With a single
+-- namespace an unqualified reference APPEARS to work, so nobody qualified anything,
+-- and each body then needed the clause to resolve at runtime -- which costs the
+-- planner SQL inlining and, in a WHERE or ORDER BY, the index path (#860, measured:
+-- a SET-carrying function plans as one opaque `Function Scan`, its clause-free
+-- sibling inlines to an Index Scan). The clause was never security: zero of the 232
+-- are SECURITY DEFINER.
+--
+-- With purpose schemas a cross-family call MUST qualify, because no search_path
+-- brings a sibling schema into scope. Correctness becomes structural instead of 232
+-- copies of a clause, and `consensus.eff_mu(...)` says where the thing lives instead
+-- of `@extschema@.` deferring the question to install time.
+--
+-- The names come from the directory layout, which already encodes the intent, and
+-- from spec 37's opcode families:
+--
+--   consensus   the fold and its edge reads          (WEIGHT, SCAN)
+--   converse    the speaking loop                    (SEQUENCE)
+--   lexical     words, senses, definitions           (SENSE, RESOLVE)
+--   taxonomy    hierarchy traversal                  (TRAVERSE)
+--   generation  synthesis and the forward pass       (ELECT)
+--   structural  geometry, coordinates, trajectories
+--   chess       the chess modality
+--   realize     rendering and readback               (REALIZE)
+--   ops         diagnostics, census, health          (WITNESS)
+--
+-- WHY THIS IS SAFE TO ADD BEFORE ANY FUNCTION MOVES: creating the schemas changes
+-- nothing about where existing objects live. `laplace` stays the extension's own
+-- schema and keeps every object it has; these are empty namespaces that families
+-- migrate into one at a time, each migration a self-contained change that can be
+-- verified on its own. The alternative -- moving 351 files in one commit -- is
+-- unreviewable and unbisectable.
+--
+-- Objects a script creates inside an extension become extension members
+-- automatically, so these schemas are dropped with the extension and need no
+-- separate teardown. They are NOT added to any search_path: that omission is the
+-- entire point.
+
+CREATE SCHEMA IF NOT EXISTS consensus;
+CREATE SCHEMA IF NOT EXISTS converse;
+CREATE SCHEMA IF NOT EXISTS lexical;
+CREATE SCHEMA IF NOT EXISTS taxonomy;
+CREATE SCHEMA IF NOT EXISTS generation;
+CREATE SCHEMA IF NOT EXISTS structural;
+CREATE SCHEMA IF NOT EXISTS chess;
+CREATE SCHEMA IF NOT EXISTS realize;
+
+COMMENT ON SCHEMA consensus  IS 'Laplace: the fold and its edge reads (spec 37 WEIGHT, SCAN).';
+COMMENT ON SCHEMA converse   IS 'Laplace: the speaking loop (spec 37 SEQUENCE).';
+COMMENT ON SCHEMA lexical    IS 'Laplace: words, senses, definitions (spec 37 SENSE, RESOLVE).';
+COMMENT ON SCHEMA taxonomy   IS 'Laplace: hierarchy traversal (spec 37 TRAVERSE).';
+COMMENT ON SCHEMA generation IS 'Laplace: synthesis and the forward pass (spec 37 ELECT).';
+COMMENT ON SCHEMA structural IS 'Laplace: geometry, coordinates, trajectories.';
+COMMENT ON SCHEMA chess      IS 'Laplace: the chess modality.';
+COMMENT ON SCHEMA realize    IS 'Laplace: rendering and readback (spec 37 REALIZE).';
+
+-- Same grants the extension schema carries. A reader that can call laplace.* can
+-- call these; the split is about structure and planning, never about privilege.
+DO $purpose$
+DECLARE
+    s text;
+BEGIN
+    FOREACH s IN ARRAY ARRAY['consensus','converse','lexical','taxonomy',
+                             'generation','structural','chess','realize']
+    LOOP
+        EXECUTE format('GRANT USAGE ON SCHEMA %I TO PUBLIC', s);
+    END LOOP;
+END
+$purpose$;

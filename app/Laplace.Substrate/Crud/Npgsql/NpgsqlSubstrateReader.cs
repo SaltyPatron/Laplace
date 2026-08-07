@@ -281,12 +281,12 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
 
 
 
-        await using var cmd = _ds.CreateCommand(@"
-            SELECT COALESCE(laplace.eff_mu_display(c.rating, c.rd), 0)::float8
-            FROM unnest($1::bytea[]) WITH ORDINALITY AS s(sid, ord)
-            JOIN unnest($2::bytea[]) WITH ORDINALITY AS o(oid, ord) USING (ord)
-            LEFT JOIN laplace.consensus c ON c.id = laplace.consensus_id(s.sid, $3, o.oid)
-            ORDER BY s.ord");
+        // Installed pair-scoring surface, not a hand-rolled join over the consensus
+        // table. The unattested->0 COALESCE this caller depends on is part of that
+        // function's contract and documented there as a deliberate tri-state collapse
+        // for scoring; presence questions use consensus_cell instead.
+        await using var cmd = _ds.CreateCommand(
+            "SELECT score FROM laplace.consensus_pair_scores($1, $3, $2) ORDER BY ord");
         var p1 = cmd.Parameters.AddWithValue(subj); p1.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
         var p2 = cmd.Parameters.AddWithValue(obj); p2.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
         var p3 = cmd.Parameters.AddWithValue(typeId.ToBytes()); p3.NpgsqlDbType = NpgsqlDbType.Bytea;
