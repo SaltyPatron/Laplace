@@ -1,12 +1,20 @@
--- Honest per-modality resident counts, by SOURCE FAMILY from the fast approx
--- catalog (~200ms) — never the unbounded exact aggregate. Chess arrived as
+-- Honest per-modality resident counts. Evidence modalities use the fast approx
+-- catalog (~200ms) — never the unbounded exact aggregate. Documents ride the
+-- document entity type with ~zero attestations (GH #660), so they are counted
+-- structurally via entity_count, not by attestation source. Chess arrived as
 -- ChessAnalysis/ChessPgn/ChessOpenings; OMW meshes languages through the ILI
--- hub and mints no HAS_TRANSLATION edges, so source presence is the residency
--- signal. Models count on their plane relation until a checkpoint ingests.
+-- hub; models count on their plane relation until a checkpoint ingests.
+DROP FUNCTION IF EXISTS laplace.modality_counts();
 CREATE OR REPLACE FUNCTION modality_counts()
-    RETURNS TABLE(text_evidence bigint, chess bigint, models bigint, multilingual bigint)
-    LANGUAGE sql STABLE 
-    AS $$
+    RETURNS TABLE(
+        text_evidence bigint,
+        chess bigint,
+        models bigint,
+        multilingual bigint,
+        documents bigint)
+    LANGUAGE sql
+    STABLE
+AS $$
     WITH s AS (SELECT source, evidence_approx FROM laplace.source_counts_approx()),
     parts AS (
       SELECT
@@ -15,8 +23,9 @@ CREATE OR REPLACE FUNCTION modality_counts()
         (SELECT count(*) FROM laplace.consensus c
            WHERE c.type_id = laplace.relation_type_id('ATTENDS'))::bigint AS models,
         COALESCE((SELECT sum(evidence_approx) FROM s
-           WHERE source ILIKE '%OMWDecomposer%' OR source ILIKE '%tatoeba%'), 0)::bigint AS multilingual)
+           WHERE source ILIKE '%OMWDecomposer%' OR source ILIKE '%tatoeba%'), 0)::bigint AS multilingual,
+        COALESCE(laplace.entity_count(laplace.entity_type_id('Document')), 0)::bigint AS documents)
     SELECT greatest(0, p.total - p.chess - p.models - p.multilingual),
-           p.chess, p.models, p.multilingual
+           p.chess, p.models, p.multilingual, p.documents
     FROM parts p
 $$;

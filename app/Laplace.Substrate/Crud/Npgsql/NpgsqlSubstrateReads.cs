@@ -60,14 +60,14 @@ public static class NpgsqlSubstrateReads
             timeoutSeconds: 30, ct: ct, label: "taxonomy_tree", onError: onError);
 
     /// <summary><c>laplace.modality_counts()</c> — corpus modality breakdown, one row.</summary>
-    public static async Task<(long TextEvidence, long Chess, long Models, long Multilingual)> ModalityCountsAsync(
+    public static async Task<(long TextEvidence, long Chess, long Models, long Multilingual, long Documents)> ModalityCountsAsync(
         NpgsqlDataSource dataSource, CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null)
     {
         var rows = await NpgsqlRead.ReadRowsAsync(dataSource,
-            "SELECT text_evidence, chess, models, multilingual FROM laplace.modality_counts()",
-            static r => (r.GetInt64(0), r.GetInt64(1), r.GetInt64(2), r.GetInt64(3)),
+            "SELECT text_evidence, chess, models, multilingual, documents FROM laplace.modality_counts()",
+            static r => (r.GetInt64(0), r.GetInt64(1), r.GetInt64(2), r.GetInt64(3), r.GetInt64(4)),
             timeoutSeconds: 20, ct: ct, label: "modality_counts", onError: onError).ConfigureAwait(false);
-        return rows.Count == 0 ? (0, 0, 0, 0) : rows[0];
+        return rows.Count == 0 ? (0, 0, 0, 0, 0) : rows[0];
     }
 
     /// <summary><c>laplace.substrate_pulse()</c> — the live scoreboard, one row.</summary>
