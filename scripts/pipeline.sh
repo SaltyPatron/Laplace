@@ -768,6 +768,27 @@ phase_api_env() {
     printf '\n%s\n' "$api_db" >> "$env_file"
   fi
   echo "LAPLACE_DB -> Database=${PGDATABASE:-laplace}"
+
+  # GH #657: shared ops CSV dir + file_fdw repoint so ops.app_log() is live.
+  local ops_log_dir="${LAPLACE_OPS_LOG_DIR:-$LAPLACE_INSTALL_PREFIX/app/logs}"
+  mkdir -p "$ops_log_dir"
+  chmod 2775 "$ops_log_dir" 2>/dev/null || true
+  if grep -q '^LAPLACE_OPS_LOG_DIR=' "$env_file"; then
+    sed -i "s|^LAPLACE_OPS_LOG_DIR=.*|LAPLACE_OPS_LOG_DIR=$ops_log_dir|" "$env_file"
+  else
+    printf '\nLAPLACE_OPS_LOG_DIR=%s\n' "$ops_log_dir" >> "$env_file"
+  fi
+  # Drop the misnamed LAPLACE_LOG_DIR if present — the code never reads it.
+  if grep -q '^LAPLACE_LOG_DIR=' "$env_file"; then
+    sed -i '/^LAPLACE_LOG_DIR=/d' "$env_file"
+  fi
+  echo "LAPLACE_OPS_LOG_DIR -> $ops_log_dir"
+  if command -v psql >/dev/null 2>&1; then
+    PGPASSWORD="${PGPASSWORD:-postgres}" psql -h "${PGHOST:-localhost}" -U "${PGUSER:-postgres}" \
+      -d "${PGDATABASE:-laplace}" -v ON_ERROR_STOP=1 \
+      -c "SELECT ops.repoint_app_log('$ops_log_dir');" \
+      || echo "::warning::ops.repoint_app_log failed — ops.app_log() stays unpointed until next successful api-env"
+  fi
 }
 
 phase_chess_lab() {
