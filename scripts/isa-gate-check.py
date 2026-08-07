@@ -80,7 +80,7 @@ CEILINGS = {
     "g11_unqualified_in_setless_body": 0,
     # GH #764 step 3: LANGUAGE sql with quoted-string bodies (AS $$) — PostgreSQL
     # records no pg_depend. Shrink-only allowlist; new SQL must use BEGIN ATOMIC.
-    "g12_string_sql_bodies": 227,
+    "g12_string_sql_bodies": 217,
 }
 
 CREATE_FUNCTION = re.compile(

@@ -2,11 +2,13 @@
 -- foundry's content-dependent FFN gate — which relation families a token
 -- participates in is a genuine step function of content, synthesized, not learned.
 DROP FUNCTION IF EXISTS laplace.entity_highway_masks(bytea[]);
+-- BEGIN ATOMIC: GH #764.
 CREATE OR REPLACE FUNCTION generation.entity_highway_masks(p_vocab bytea[])
     RETURNS TABLE(entity_id bytea, highway_mask bytea)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     SELECT e.id, e.highway_mask
     FROM laplace.entities e
     JOIN unnest(p_vocab) AS u(id) ON u.id = e.id
-    WHERE e.highway_mask IS NOT NULL
-$$;
+    WHERE e.highway_mask IS NOT NULL;
+END;
