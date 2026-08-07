@@ -756,13 +756,10 @@ internal static class IngestCommands
     public static async Task<int> RebuildPhysIndexesAsync()
     {
         await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
-        var indexPolicy = new SecondaryIndexPolicy(ds);
-        if (await indexPolicy.SecondaryIndexesPresentAsync("physicalities", CancellationToken.None))
-        {
-            Console.WriteLine("physicalities secondary indexes already present");
-            return 0;
-        }
-        Console.WriteLine("creating missing physicalities indexes (CREATE IF NOT EXISTS) ...");
+        // Always EnsureIndexesAsync (Copilot #859): an early return on "any
+        // secondary index exists" skips newly-added defs on a partially-recovered
+        // database. DDL is CREATE INDEX IF NOT EXISTS, so re-running is cheap.
+        Console.WriteLine("ensuring physicalities indexes (CREATE IF NOT EXISTS) ...");
         var sw = Stopwatch.StartNew();
         await SecondaryIndexPolicy.EnsureIndexesAsync(ds, SchemaPhysIndexDefs, CancellationToken.None);
         sw.Stop();

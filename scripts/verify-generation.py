@@ -163,7 +163,18 @@ def lang_pin(db, word, seeds, steps):
             total_toks += int(toks or 0)
     rate = round(total_hits / total_toks, 3) if total_toks else None
     print(f"{word:>24} lang-pin: rate={rate} tokens={total_toks}  [advisory]")
-    return {"lang_pin_rate": rate, "lang_pin_tokens": total_toks, "pin_surface": pin_surface}
+    # Same top-level shape as score() (Copilot #897): consumers can treat every
+    # report[word][*] entry as a metrics dict without special-casing lang_pin.
+    return {
+        "empty": total_toks == 0,
+        "seed_variance": None,
+        "echo_rate": None,
+        "flatness": None,
+        "content_rate": rate,
+        "lang_pin_rate": rate,
+        "lang_pin_tokens": total_toks,
+        "pin_surface": pin_surface,
+    }
 
 
 def score(prompt, replies, expected):

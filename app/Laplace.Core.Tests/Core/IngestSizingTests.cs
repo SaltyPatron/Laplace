@@ -138,7 +138,8 @@ public sealed class IngestSizingTests
     public void ResolveMaxIntentsPerCommit_SmallCommitAboveTwoBatches_NotSerializedToOne()
     {
         // commit_rows=429, batch=256: old formula → 429/(256*8)=0 → max_intents=1.
+        // Pin the post-fix floor: a commit that holds ≥2 batches must not serialize to 1.
         int n = IngestSizing.ResolveMaxIntentsPerCommit(256, 429);
-        Assert.True(n >= 1);
+        Assert.True(n >= 2);
     }
 }

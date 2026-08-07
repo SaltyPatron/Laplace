@@ -49,7 +49,7 @@ while :; do
     "${PSQL[@]}" -P pager=off -c \
       "SELECT source_name, input_units_done, input_units_total, now() - started_at AS elapsed
        FROM laplace.ingest_run_journal WHERE status = 'running' ORDER BY started_at;" || true
-  elif [[ "$n" == *"3D000"* || "$n" == *"does not exist"* ]]; then
+  elif [[ "$n" == *"3D000"* || "$n" == *"database \"$DB\" does not exist"* || "$n" == *"database $DB does not exist"* ]]; then
     # A database that DOES NOT EXIST is quiet, and it is the one non-answer that
     # proves it: SQLSTATE 3D000 means the server answered, authentication passed,
     # and there is no such database — so nothing can be ingesting into it. Failing
@@ -59,10 +59,10 @@ while :; do
     # rebuild it sits behind this gate. Reached the moment physicalities went
     # HASH(id), since that upgrade path IS drop-then-recreate.
     #
-    # This does not weaken the guard. The failure this script exists to prevent is
-    # bouncing PostgreSQL over a LIVE ingest; a refused connection, a bad PGUSER,
-    # an exhausted connection cap or a missing laplace schema all still fall
-    # through to BUSY below, because none of them prove the absence of one.
+    # Narrow match only (Copilot #855): a missing schema/table/function that
+    # happens to contain "does not exist" is NOT proof of quiet — those still
+    # fall through to BUSY below. Only 3D000 / the database-missing phrasing
+    # counts.
     echo "substrate quiet — database \"$DB\" does not exist, so no ingest can be running in it"
     exit 0
   else

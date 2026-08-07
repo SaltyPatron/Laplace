@@ -231,7 +231,7 @@ def entity_type_names(db: str) -> set[str]:
     hardcoded list that drifts the moment a type is added."""
     rows = psql_rows(
         db,
-        "SET search_path=laplace,public; SELECT type FROM entity_type_counts();",
+        "SET search_path=laplace,public; SELECT type FROM entity_type_counts_approx();",
     )
     return {r.strip() for r in rows if r.strip()}
 
