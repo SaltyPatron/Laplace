@@ -1,4 +1,7 @@
 using System.Diagnostics;
+using System.Globalization;
+using System.Text;
+using Laplace.Core;
 
 namespace Laplace.Chess.Service;
 
@@ -127,6 +130,49 @@ internal static class ChessDropLedger
         if (Summary(lane) is not { } s) return;
         Console.Out.WriteLine(s);
         Trace.TraceWarning(s);
+        AppendOpsCsv(lane);
+    }
+
+    /// <summary>
+    /// Persist per-reason tallies for <c>ops.chess_drops()</c> (GH #813). One CSV
+    /// row per reason so the drop profile is queryable without grepping job logs.
+    /// Best-effort: a ledger write must never fail the ingest.
+    /// </summary>
+    private static void AppendOpsCsv(string lane)
+    {
+        try
+        {
+            long kept = KeptCount;
+            long total = Total;
+            long seen = kept + total;
+            double dropPct = seen == 0 ? 0.0 : 100.0 * total / seen;
+            var dir = LaplaceInstall.OpsLogDirectory;
+            Directory.CreateDirectory(dir);
+            var path = Path.Combine(dir, "laplace-chess-drops.csv");
+            var needHeader = !File.Exists(path) || new FileInfo(path).Length == 0;
+            using var fs = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+            using var w = new StreamWriter(fs, Encoding.UTF8);
+            if (needHeader)
+                w.WriteLine("log_time,source_name,reason,dropped,kept,seen,drop_pct");
+            static string Csv(string s) =>
+                "\"" + s.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
+            var when = DateTimeOffset.UtcNow.ToString("o");
+            foreach (var kv in SnapshotCounts())
+            {
+                w.WriteLine(string.Join(',',
+                    when,
+                    Csv(lane),
+                    Csv(kv.Key),
+                    kv.Value.ToString(CultureInfo.InvariantCulture),
+                    kept.ToString(CultureInfo.InvariantCulture),
+                    seen.ToString(CultureInfo.InvariantCulture),
+                    dropPct.ToString("F2", CultureInfo.InvariantCulture)));
+            }
+        }
+        catch
+        {
+            // Ops ledger is diagnostic; stdout CHESS_DROPPED remains the primary signal.
+        }
     }
 
     /// <summary>

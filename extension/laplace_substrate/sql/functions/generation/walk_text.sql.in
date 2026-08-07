@@ -9,12 +9,6 @@ CREATE OR REPLACE FUNCTION generation.walk_text(
         SELECT array_agg(id ORDER BY ord) AS ids
         FROM converse.prompt_state(p_prompt) WHERE id IS NOT NULL
     )
-    
-    
-    
-    
-    
-    
     SELECT g.step,
            laplace.render_text(g.entity, 64) || COALESCE(laplace.render_text(g.sep_entity, 8), ''),
            g.stride_used

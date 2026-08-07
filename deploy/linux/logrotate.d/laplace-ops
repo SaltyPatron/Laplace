@@ -2,7 +2,8 @@
 # copytruncate keeps the inode so the open sink handle and file_fdw keep the
 # same path after rotation.
 /opt/laplace/app/logs/laplace-*.csv
-/opt/laplace/app/logs/laplace-sql-gap.csv {
+/opt/laplace/app/logs/laplace-sql-gap.csv
+/opt/laplace/app/logs/laplace-chess-drops.csv {
     weekly
     rotate 8
     missingok

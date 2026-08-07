@@ -158,6 +158,10 @@ internal sealed class SubstrateTools
             "Substrate health and inventory: laplace.substrate_health() plus laplace.substrate_counts(). Metric values are NULLABLE: a metric the health pass did not measure reports null, which is a different fact from zero. identity_violations is null whenever deep_checked is false — read them together or a skipped deep pass looks like a clean one.",
             () => Schema(),
             (s, _) => s.Health()),
+        new("mcp_lane", "Which MCP lane is this process in (operator vs product).",
+            "Answer 'what am I talking to?' for this MCP process (GH #813 / #809): operator_lane (LAPLACE_MCP_OPERATOR=1), binary_path, process id, and start time. The lane is fixed at type init for the life of the process — Postgres cannot know it; this tool is the operation. health/help also surface operator_lane; this is the dedicated read so clients do not scrape those catalogs.",
+            () => Schema(),
+            (_, _) => McpLane()),
         new("source_status", "Is a source ingested, and how do we know.",
             "Ingest state per source (laplace.source_status): known, ingested, approximate evidence, whether it observed entities, and the last run's status. Call this instead of assembling an answer — every hand-rolled version of this question is wrong in a specific way. An evidence>0 test reports the DOCUMENT lane as absent, because it is content-only by design (entities and geometry, zero distributional attestations); a source name you typed returns nothing when the spelling differs from the decomposer's declared SourceName; and ingest_run_journal is ops metadata that does not survive a dump/restore, so a missing row is not absence. Asking with a name ALWAYS returns exactly one row: `ingested=false` means the source wrote nothing, and `known=false` means this substrate has no record of that source id at all — which on a mesh this dense usually means the name is wrong rather than the corpus missing. Absence is an answer here, never an empty result set.",
             () => Schema(("source", "string", "declared source name, e.g. WordNetDecomposer; omit for every source", false)),
@@ -561,6 +565,18 @@ internal sealed class SubstrateTools
                 new JsonObject { ["metric"] = "binary_path", ["value"] = Environment.ProcessPath ?? AppContext.BaseDirectory },
             });
         return JsonRows(rows);
+    }
+
+    private static (string, bool) McpLane()
+    {
+        var started = Process.GetCurrentProcess().StartTime.ToUniversalTime();
+        return (new JsonObject
+        {
+            ["operator_lane"] = OperatorLane,
+            ["binary_path"] = Environment.ProcessPath ?? AppContext.BaseDirectory,
+            ["pid"] = Environment.ProcessId,
+            ["started_utc"] = started.ToString("o"),
+        }.ToJsonString(), false);
     }
 
     /// <summary>
