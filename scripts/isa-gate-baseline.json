@@ -668,10 +668,7 @@
       "extension/laplace_substrate/sql/functions/inspect/attestation_unary_response_type.sql.in::attestation_unary_response_type": 1,
       "extension/laplace_substrate/sql/functions/mu/effective_mu.sql.in::effective_mu": 1,
       "extension/laplace_substrate/sql/functions/readback/register_canonical.sql.in::register_canonical": 1,
-      "extension/laplace_substrate/sql/functions/readback/vertex_atom.sql.in::vertex_atom": 1,
-      "extension/laplace_substrate/sql/functions/readback/vertex_tier.sql.in::vertex_tier": 1,
       "extension/laplace_substrate/sql/functions/relation/relation_band_types.sql.in::relation_family_type_ids": 1,
-      "extension/laplace_substrate/sql/functions/relation/relation_rank.sql.in::relation_rank": 1,
       "extension/laplace_substrate/sql/functions/relation/relation_type_resolve.sql.in::relation_type_resolve": 1
     },
     "g8_band_literalism": {

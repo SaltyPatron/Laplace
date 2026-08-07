@@ -280,6 +280,34 @@ public static class NpgsqlSubstrateReads
             p => p.AddWithValue("limit", limit),
             ct: ct, label: "top_relations_readable", onError: onError);
 
+    /// <summary><c>laplace.relation_rank(type_id)</c> — highway rank weight.</summary>
+    public static async Task<double> RelationRankAsync(
+        NpgsqlDataSource dataSource, byte[] typeId, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null)
+    {
+        var rows = await NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT laplace.relation_rank(@type)
+            """,
+            static r => r.IsDBNull(0) ? 0d : r.GetDouble(0),
+            p => p.AddWithValue("type", typeId),
+            ct: ct, label: "relation_rank", onError: onError).ConfigureAwait(false);
+        return rows.Count == 0 ? 0d : rows[0];
+    }
+
+    /// <summary><c>laplace.vertex_tier(flags)</c> / <c>laplace.vertex_atom(flags)</c>.</summary>
+    public static async Task<(short Tier, int Atom)> VertexDecodeAsync(
+        NpgsqlDataSource dataSource, long flags, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null)
+    {
+        var rows = await NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT laplace.vertex_tier(@flags), laplace.vertex_atom(@flags)
+            """,
+            static r => (r.GetInt16(0), r.GetInt32(1)),
+            p => p.AddWithValue("flags", flags),
+            ct: ct, label: "vertex_tier", onError: onError).ConfigureAwait(false);
+        return rows.Count == 0 ? ((short)0, 0) : rows[0];
+    }
+
     public readonly record struct BandLeaderRow(
         int Band, string SubjectIdHex, string Subject, string Relation,
         string ObjectIdHex, string Object, decimal EffMu, long Witnesses);
