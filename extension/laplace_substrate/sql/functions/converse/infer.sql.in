@@ -61,7 +61,7 @@ biasfam AS (
     SELECT c.subject_id FROM laplace.consensus c JOIN bias b ON c.object_id = b.synset_id
 ),
 cand AS (
-    SELECT c.object_id AS id, laplace.eff_mu(c.rating, c.rd) AS m
+    SELECT c.object_id AS id, max(laplace.eff_mu(c.rating, c.rd)) AS m
     FROM topic t
     -- WordNet antonymy (and similar) lands on the WORD id; election seats a
     -- synset. Read both subjects or a typed antonym prompt returns empty
@@ -84,6 +84,7 @@ cand AS (
       -- candidate also pays the lexical.concept_members() set-returning probe.
       AND CASE WHEN converse.word_language(c.object_id) IS NOT NULL THEN true
                ELSE EXISTS (SELECT 1 FROM lexical.concept_members(c.object_id)) END
+    GROUP BY c.object_id
 ),
 scored AS (
     SELECT d.id, d.m, count(f.synset_id) AS hits
@@ -101,8 +102,15 @@ ord AS (
 ),
 lbl AS (
     SELECT realize.batch(array_agg(o.id ORDER BY o.ix), NULL) AS l FROM ord o
+),
+named AS (
+    SELECT lbl.l[o.ix] AS prediction, o.m / 1e9 AS weight, o.hits AS bias_hits, o.ix
+    FROM ord o CROSS JOIN lbl
 )
-SELECT lbl.l[o.ix], o.m / 1e9, o.hits
-FROM ord o CROSS JOIN lbl
-ORDER BY o.ix
+-- Two synset ids can realize to the same surface (hot→cold×2). Keep the
+-- strongest row per label so typed antonym reads don't double-emit.
+SELECT DISTINCT ON (n.prediction) n.prediction, n.weight, n.bias_hits
+FROM named n
+WHERE n.prediction IS NOT NULL AND n.prediction <> ''
+ORDER BY n.prediction, n.bias_hits DESC, n.weight DESC, n.ix
 $$;
