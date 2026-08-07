@@ -125,6 +125,21 @@ CREATE OR REPLACE FUNCTION lexical.senses(p_word bytea, p_context bytea[])
         ) x
         GROUP BY x.sid
     ),
+    -- DOMAIN (GH #785): a candidate synset HAS_DOMAIN_TOPIC D and a context
+    -- token is (or senses to) D. "pawn" + "chess" elects the chess-piece sense
+    -- because WordNet attached HAS_DOMAIN_TOPIC→chess; the USAGE lane also
+    -- catches "(chess) the least powerful piece" in the gloss, but domain is
+    -- the explicit discourse prior and works when the gloss spelling differs
+    -- from the prompt token. Weighted by the domain edge's laplace.eff_mu.
+    lane_domain AS (
+        SELECT c.subject_id AS sid, sum(@extschema@.eff_mu(c.rating, c.rd)) AS boost
+        FROM @extschema@.consensus c
+        WHERE c.subject_id IN (SELECT synset_id FROM cand)
+          AND c.type_id = @extschema@.relation_type_id('HAS_DOMAIN_TOPIC')
+          AND (c.object_id IN (SELECT id FROM ctx)
+               OR c.object_id IN (SELECT sid FROM ctx_syn))
+        GROUP BY c.subject_id
+    ),
     -- DIRECT: a context ENTITY has an attested edge to a candidate synset, either
     -- direction, any relation. This is the lane the previous implementation had, and
     -- dropping it was a regression -- the converse regress fixture wires
@@ -167,11 +182,13 @@ CREATE OR REPLACE FUNCTION lexical.senses(p_word bytea, p_context bytea[])
                    + COALESCE(lu.boost, 0)
                    + COALESCE(lf.boost, 0)
                    + COALESCE(lt.boost, 0)
+                   + COALESCE(ldo.boost, 0)
                    + COALESCE(ld.boost, 0)) / 1e9)::numeric, 3)
     FROM cand
-    LEFT JOIN lane_usage  lu ON lu.sid = cand.synset_id
-    LEFT JOIN lane_frame  lf ON lf.sid = cand.synset_id
-    LEFT JOIN lane_taxon  lt ON lt.sid = cand.synset_id
-    LEFT JOIN lane_direct ld ON ld.sid = cand.synset_id
+    LEFT JOIN lane_usage  lu  ON lu.sid  = cand.synset_id
+    LEFT JOIN lane_frame  lf  ON lf.sid  = cand.synset_id
+    LEFT JOIN lane_taxon  lt  ON lt.sid  = cand.synset_id
+    LEFT JOIN lane_domain ldo ON ldo.sid = cand.synset_id
+    LEFT JOIN lane_direct ld  ON ld.sid  = cand.synset_id
     ORDER BY 5 DESC
 $$;

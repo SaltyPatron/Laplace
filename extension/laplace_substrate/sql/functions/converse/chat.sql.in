@@ -22,22 +22,13 @@
 -- inline regexes over the prompt) is gone from the PARSE side. It answered only
 -- English, in a substrate whose identity law is language-agnostic by construction.
 --
--- IT IS NOT GONE FROM THE RENDER SIDE, and this header used to claim otherwise
--- (GH #901). The body still glues realized labels together with hardcoded English
--- connectives -- ' has parts such as ', 'Kinds of X include ', ' is related to ',
--- 'That is the core of what I hold about ', 'I hold no witnessed edges for ' --
--- and the band lens prefixes each line with converse.relation_band_catalog()'s names, which
--- are English strings. A Bulgarian prompt whose lang resolves correctly gets
--- Bulgarian labels inside English scaffolding: the same defect as the 2026-07-25
--- Bulgarian-dog incident that the language-inference block below exists to fix,
--- one layer down from where that block operates.
---
--- Recorded, not fixed. The three candidate fixes (connectives as realized laplace.entities
--- per language through consensus; a per-language template table keyed on the
--- resolved lang; or accepting English scaffolding as an S9 fallback-tier limit)
--- are a design decision, not a cleanup. What was NOT defensible was a header
--- asserting the ladder was gone while six English templates shipped in the body,
--- so the header now says what the body does.
+-- RENDER-SIDE CONNECTIVES (GH #901): every English glue string that used to
+-- live inline here now goes through converse.chat_scaffold(lang, key, …) — a
+-- per-language template table keyed on the resolved lang id. English and
+-- Bulgarian ship; other langs get a typographic form with no English verbs.
+-- Connectives-as-realized-entities through consensus remains the longer path;
+-- the scaffold stops the mixed-language lie the 2026-07-25 Bulgarian-dog
+-- incident exposed one layer down from the language tally below.
 DROP FUNCTION IF EXISTS laplace.chat(text, bytea, bytea, text, int[], bytea, bytea, text, boolean);
 CREATE OR REPLACE FUNCTION converse.chat(p_prompt text,
                                 p_session bytea DEFAULT NULL,
@@ -351,14 +342,13 @@ BEGIN
             )
             SELECT array_agg(q.line ORDER BY q.layer) INTO layers FROM (
                 SELECT o.layer,
-                       CASE o.layer
-                         WHEN 1 THEN initcap(xl) || ' has parts such as '
-                                     || string_agg(lbl.l[o.ix], ', ' ORDER BY o.m DESC) || '.'
-                         WHEN 2 THEN 'Kinds of ' || xl || ' include '
-                                     || string_agg(lbl.l[o.ix], ', ' ORDER BY o.m DESC) || '.'
-                         ELSE        initcap(xl) || ' is related to '
-                                     || string_agg(lbl.l[o.ix], ' and ' ORDER BY o.m DESC) || '.'
-                       END AS line
+                       converse.chat_scaffold(
+                           lang,
+                           CASE o.layer WHEN 1 THEN 'parts' WHEN 2 THEN 'kinds' ELSE 'related' END,
+                           xl,
+                           string_agg(lbl.l[o.ix],
+                                      CASE WHEN o.layer = 3 THEN ' and ' ELSE ', ' END
+                                      ORDER BY o.m DESC)) AS line
                 FROM ord o
                 CROSS JOIN lbl
                 WHERE lbl.l[o.ix] IS NOT NULL
@@ -371,7 +361,7 @@ BEGIN
               WHERE t.session_id=p_session AND t.resolved_id=topic;
             out := CASE WHEN depth BETWEEN 1 AND COALESCE(array_length(layers,1),0)
                         THEN layers[depth]
-                        ELSE 'That is the core of what I hold about '||xl||'.' END;
+                        ELSE converse.chat_scaffold(lang, 'core', xl) END;
 
         ELSIF p_bands IS NOT NULL AND array_length(p_bands, 1) > 0 THEN
             -- BAND LENS: every edge of the topic inside the selected bands, both
@@ -445,7 +435,10 @@ BEGIN
                 FROM ord o
             )
             SELECT string_agg(q.line, ' ') INTO out FROM (
-                SELECT b.name || ': ' || string_agg(lbl.l[o.ix], ', ' ORDER BY o.m DESC) || '.' AS line,
+                SELECT converse.chat_scaffold(
+                           lang, 'band', xl,
+                           string_agg(lbl.l[o.ix], ', ' ORDER BY o.m DESC),
+                           b.name) AS line,
                        b.band
                 FROM ord o
                 JOIN converse.relation_band_catalog() b ON b.band = o.band
@@ -455,7 +448,7 @@ BEGIN
                 ORDER BY b.band
             ) q;
             IF out IS NULL OR out = '' THEN
-                out := 'I hold no witnessed edges for '||xl||' in the selected bands yet.';
+                out := converse.chat_scaffold(lang, 'no_edges', xl);
             END IF;
 
         ELSIF shape = 'reason' AND topic2 IS NOT NULL THEN
@@ -466,7 +459,7 @@ BEGIN
             SELECT string_agg(reply, ' ') INTO out
               FROM converse.recall_intent(shape, topic, NULL, p_type_name);
             IF out IS NULL OR out = '' THEN
-                out := 'I hold no witnessed '||lower(p_type_name)||' for '||xl||' yet.';
+                out := converse.chat_scaffold(lang, 'no_type', xl, NULL, p_type_name);
             END IF;
 
         ELSIF shape IS NOT NULL AND shape NOT IN ('describe','fallback','walk','what_is') THEN

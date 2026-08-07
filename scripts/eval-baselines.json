@@ -1,38 +1,25 @@
 {
-  "recorded_at": "2026-08-06T05:56:39Z",
+  "recorded_at": "2026-08-07T11:01:26Z",
   "advisory_until": "2026-08-10",
   "blocking_flip_date": null,
   "sources": [
-    "Atomic2020Decomposer",
     "CILIDecomposer",
-    "ChessAnalysis",
-    "ChessBook",
-    "ChessOpenings",
-    "ChessPgn",
-    "CodeDecomposer",
     "FrameNetDecomposer",
-    "FrameVideoDecomposer",
     "ISO639Decomposer",
     "MapNetDecomposer",
-    "OMWDecomposer",
-    "PcmAudioDecomposer",
     "PredicateMatrixDecomposer",
     "PropBankDecomposer",
-    "RgbaImageDecomposer",
     "SemLinkDecomposer",
-    "TatoebaAudioDecomposer",
-    "TrackAudioDecomposer",
     "UnicodeDecomposer",
-    "UserPrompt",
     "VerbNetDecomposer",
     "WordFrameNetDecomposer",
     "WordNetDecomposer"
   ],
   "fingerprint": {
-    "entities (ESTIMATE)": 29446612,
-    "physicalities (ESTIMATE)": 29387458,
-    "attestations (ESTIMATE)": 50847480,
-    "consensus (ESTIMATE)": 48006376
+    "laplace.entities(ESTIMATE)": 4344127,
+    "laplace.physicalities(ESTIMATE)": 4338830,
+    "laplace.attestations(ESTIMATE)": 6631328,
+    "laplace.consensus(ESTIMATE)": 5994192
   },
   "election": {
     "passed": 6,

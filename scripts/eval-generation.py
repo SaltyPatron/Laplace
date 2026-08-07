@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
@@ -42,6 +43,7 @@ GLUE_WORDS, WORD_RE = _load_glue_words()
 
 def psql_rows(db: str, sql: str) -> list[str]:
     cmd = ["psql", "-X", "-q", "-t", "-A", "-F", "\t"]
+    env = None
     for part in db.split():
         k, _, v = part.partition("=")
         if k == "host":
@@ -52,12 +54,17 @@ def psql_rows(db: str, sql: str) -> list[str]:
             cmd += ["-d", v]
         elif k == "port":
             cmd += ["-p", v]
+        elif k == "password":
+            # psql does not take password on the argv; thread via env so
+            # `--db "… password=…"` works the same as PGPASSWORD outside.
+            env = {**os.environ, "PGPASSWORD": v}
     r = subprocess.run(
         cmd + ["-c", sql],
         capture_output=True,
         text=True,
         encoding="utf-8",
         errors="replace",
+        env=env,
     )
     if r.returncode != 0:
         sys.stderr.write(r.stderr or r.stdout or "psql failed\n")
@@ -132,8 +139,10 @@ def fingerprint_drift(baseline: dict, fp: dict, sources: list[str]) -> str | Non
 
 
 def entities_estimate(fp: dict) -> int:
+    # substrate_counts() metrics are schema-qualified, e.g.
+    # `laplace.entities(ESTIMATE)` — not a bare `entities` prefix.
     for k, v in fp.items():
-        if k.startswith("entities"):
+        if "entities" in k:
             return v
     return 0
 
@@ -143,7 +152,7 @@ def resolve_topic_surface(db: str, phrase: str) -> str | None:
     rows = psql_rows(
         db,
         "SET search_path=laplace,public; "
-        f"SELECT render(resolve_topic('{q}', NULL));",
+        f"SELECT render(converse.resolve_topic('{q}', NULL));",
     )
     return rows[0] if rows else None
 
@@ -178,7 +187,7 @@ def prompt_coherence_rank1(db: str, prompt: str) -> tuple[str | None, float | No
         db,
         "SET search_path=laplace,public; "
         "SELECT render(synset_id), specificity "
-        f"FROM prompt_coherence('{q}') ORDER BY {ELECTOR_ORDER} LIMIT 1;",
+        f"FROM converse.prompt_coherence('{q}') ORDER BY {ELECTOR_ORDER} LIMIT 1;",
     )
     latency = time.perf_counter() - t0
     if not rows:
@@ -233,7 +242,7 @@ def infer_predictions(db: str, prompt: str, limit: int = 8) -> tuple[list[str], 
     rows = psql_rows(
         db,
         "SET search_path=laplace,public; "
-        f"SELECT prediction FROM infer('{q}', {int(limit)});",
+        f"SELECT prediction FROM converse.infer('{q}', {int(limit)});",
     )
     return [r.strip() for r in rows if r.strip()], time.perf_counter() - t0
 

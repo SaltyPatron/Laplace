@@ -1,0 +1,78 @@
+-- converse.chat_scaffold — per-language connective templates for converse.chat.
+--
+-- GH #901: chat()'s render side was gluing realized labels with hardcoded English
+-- connectives while the parse side and language tally were language-agnostic.
+-- A Bulgarian prompt correctly resolved lang, then wrapped Bulgarian labels in
+-- English scaffolding — the 2026-07-25 Bulgarian-dog defect one layer down.
+--
+-- This is the minimal per-language template table (keyed on the resolved lang
+-- id). English and Bulgarian ship as first citizens (the two languages that
+-- exposed the defect). Every other lang falls back to a typographic form that
+-- carries no English verbs: "Topic: labels." That is honest S9 fallback, not a
+-- pretend translation. Connectives-as-realized-entities through consensus remains
+-- the longer inventively-correct path; this stops the lie now.
+--
+-- p_key is a fixed slot name (parts / kinds / related / core / no_edges / no_type /
+-- band). p_topic and p_labels / p_extra fill the slots. Missing pieces yield NULL
+-- so the caller can decide, not empty-string silence.
+DROP FUNCTION IF EXISTS laplace.chat_scaffold(bytea, text, text, text, text);
+CREATE OR REPLACE FUNCTION converse.chat_scaffold(
+        p_lang   bytea,
+        p_key    text,
+        p_topic  text DEFAULT NULL,
+        p_labels text DEFAULT NULL,
+        p_extra  text DEFAULT NULL)
+    RETURNS text
+    LANGUAGE plpgsql STABLE PARALLEL SAFE AS $$
+DECLARE
+    en bytea := laplace.canonical_id('language:eng');
+    bg bytea := laplace.canonical_id('language:bul');
+    t  text := COALESCE(p_topic, '');
+    l  text := COALESCE(p_labels, '');
+    x  text := COALESCE(p_extra, '');
+BEGIN
+    IF p_key IS NULL THEN RETURN NULL; END IF;
+
+    -- English (explicit eng id, or NULL lang — today's chat leaves lang NULL when
+    -- the prompt carries no HAS_LANGUAGE evidence; English templates remain the
+    -- S9 default for that case, matching prior behaviour).
+    IF p_lang IS NULL OR p_lang = en THEN
+        RETURN CASE p_key
+            WHEN 'parts'    THEN initcap(t) || ' has parts such as ' || l || '.'
+            WHEN 'kinds'    THEN 'Kinds of ' || t || ' include ' || l || '.'
+            WHEN 'related'  THEN initcap(t) || ' is related to ' || l || '.'
+            WHEN 'core'     THEN 'That is the core of what I hold about ' || t || '.'
+            WHEN 'no_edges' THEN 'I hold no witnessed edges for ' || t || ' in the selected bands yet.'
+            WHEN 'no_type'  THEN 'I hold no witnessed ' || lower(x) || ' for ' || t || ' yet.'
+            WHEN 'band'     THEN x || ': ' || l || '.'
+            ELSE NULL
+        END;
+    END IF;
+
+    IF p_lang = bg THEN
+        RETURN CASE p_key
+            WHEN 'parts'    THEN initcap(t) || ' има части като ' || l || '.'
+            WHEN 'kinds'    THEN 'Видове ' || t || ' включват ' || l || '.'
+            WHEN 'related'  THEN initcap(t) || ' е свързано с ' || l || '.'
+            WHEN 'core'     THEN 'Това е същността на това, което знам за ' || t || '.'
+            WHEN 'no_edges' THEN 'Нямам засвидетелствани връзки за ' || t || ' в избраните ленти още.'
+            WHEN 'no_type'  THEN 'Нямам засвидетелствано ' || lower(x) || ' за ' || t || ' още.'
+            WHEN 'band'     THEN x || ': ' || l || '.'
+            ELSE NULL
+        END;
+    END IF;
+
+    -- Other languages: no English verbs. Band name (still English from the
+    -- catalog) is omitted so the line is not a mixed-language lie.
+    RETURN CASE p_key
+        WHEN 'parts'    THEN initcap(t) || ': ' || l || '.'
+        WHEN 'kinds'    THEN initcap(t) || ': ' || l || '.'
+        WHEN 'related'  THEN initcap(t) || ': ' || l || '.'
+        WHEN 'core'     THEN initcap(t) || '.'
+        WHEN 'no_edges' THEN initcap(t) || '.'
+        WHEN 'no_type'  THEN initcap(t) || '.'
+        WHEN 'band'     THEN l || '.'
+        ELSE NULL
+    END;
+END;
+$$;
