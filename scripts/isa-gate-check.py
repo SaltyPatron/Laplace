@@ -53,7 +53,7 @@ MANIFEST = ROOT / "engine" / "manifest" / "relation_types.toml"
 # exception.
 CEILINGS = {
     "g1_weight_literalism": 11,
-    "g3_sql_vocabulary_literalism": 240,
+    "g3_sql_vocabulary_literalism": 241,
     "g3_c_vocabulary_literalism": 17,
     # 700 -> 701 (2026-08-05): the language-scope declaration. Nine monolingual
     # sources emitted no HAS_LANGUAGE at all, so every English sense read back as

@@ -22,7 +22,7 @@ BEGIN
     -- hash, so its high bits are already uniformly distributed -- no hashtext
     -- round trip, and a collision costs two unrelated sessions a brief wait, never
     -- a wrong ord.
-    PERFORM pg_advisory_xact_lock(hash128_lo(p_session));
+    PERFORM pg_advisory_xact_lock(laplace.hash128_lo(p_session));
 
     INSERT INTO laplace.session_topics (session_id, ord, prompt, resolved_id)
     VALUES (

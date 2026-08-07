@@ -13,8 +13,8 @@ CREATE OR REPLACE FUNCTION atom_census()
     LANGUAGE sql
     STABLE
 BEGIN ATOMIC
-    WITH w AS (SELECT atom_window() AS n),
-         t AS (SELECT entity_count(entity_type_id('Codepoint')) AS n)
+    WITH w AS (SELECT laplace.atom_window() AS n),
+         t AS (SELECT laplace.entity_count(laplace.entity_type_id('Codepoint')) AS n)
     SELECT t.n,
            w.n,
            greatest(0, t.n - w.n),
