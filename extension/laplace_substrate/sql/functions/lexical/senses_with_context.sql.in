@@ -17,7 +17,7 @@
 -- sense. It is restored below as a fourth lane. Adding lanes is the fix; removing
 -- the one that existed was not.
 --
--- Four lanes now, all in ID SPACE (no realize/laplace.render/label anywhere -- rendering is
+-- Five lanes now, all in ID SPACE (no realize/laplace.render/label anywhere -- rendering is
 -- the caller's final step, never a mid-operation string compare):
 --
 --   USAGE   the candidate synset OWNS a gloss or example whose word laplace.constituents
@@ -27,6 +27,8 @@
 --           This is the lane that actually discriminates.
 --   FRAME   a context sense EVOKES_FRAME F and the candidate corresponds to F.
 --           Frames unify across languages, so this lane is language-agnostic.
+--   DOMAIN  candidate HAS_DOMAIN_TOPIC D and a context token is (or senses to) D
+--           (GH #785 discourse prior — e.g. pawn+chess).
 --   DIRECT  a context ENTITY has an attested edge straight to a candidate synset.
 --           Usually absent on real data, but where present it is the strongest
 --           statement that a context term bears on a sense.
