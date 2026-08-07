@@ -663,13 +663,9 @@
       "extension/laplace_substrate/sql/functions/glicko2/laplace_glicko2_sfunc.sql.in::laplace_glicko2_sfunc": 1,
       "extension/laplace_substrate/sql/functions/glicko2/laplace_score.sql.in::laplace_score": 1,
       "extension/laplace_substrate/sql/functions/glicko2/laplace_score_inverse.sql.in::laplace_score_inverse": 1,
-      "extension/laplace_substrate/sql/functions/ingest/intent_preflight.sql.in::intent_preflight": 1,
       "extension/laplace_substrate/sql/functions/inspect/attestation_response_type.sql.in::attestation_response_type": 1,
       "extension/laplace_substrate/sql/functions/inspect/attestation_unary_response_type.sql.in::attestation_unary_response_type": 1,
-      "extension/laplace_substrate/sql/functions/mu/effective_mu.sql.in::effective_mu": 1,
-      "extension/laplace_substrate/sql/functions/readback/register_canonical.sql.in::register_canonical": 1,
-      "extension/laplace_substrate/sql/functions/relation/relation_band_types.sql.in::relation_family_type_ids": 1,
-      "extension/laplace_substrate/sql/functions/relation/relation_type_resolve.sql.in::relation_type_resolve": 1
+      "extension/laplace_substrate/sql/functions/relation/relation_band_types.sql.in::relation_family_type_ids": 1
     },
     "g8_band_literalism": {
       "extension/laplace_substrate/sql/functions/lexical/senses_with_context.sql.in::RELATION_HIGHWAY_BAND(C.TYPE_ID)IN(1,7)": 1,

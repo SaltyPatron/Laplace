@@ -294,6 +294,65 @@ public static class NpgsqlSubstrateReads
         return rows.Count == 0 ? 0d : rows[0];
     }
 
+    /// <summary><c>laplace.effective_mu(rating, rd)</c> — integer μ−2·RD.</summary>
+    public static async Task<long> EffectiveMuAsync(
+        NpgsqlDataSource dataSource, long rating, long rd, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null)
+    {
+        var rows = await NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT laplace.effective_mu(@rating, @rd)
+            """,
+            static r => r.IsDBNull(0) ? 0L : r.GetInt64(0),
+            p =>
+            {
+                p.AddWithValue("rating", rating);
+                p.AddWithValue("rd", rd);
+            }, ct: ct, label: "effective_mu", onError: onError).ConfigureAwait(false);
+        return rows.Count == 0 ? 0L : rows[0];
+    }
+
+    /// <summary><c>laplace.relation_type_resolve(surface)</c> — name/alias → type id.</summary>
+    public static async Task<byte[]?> RelationTypeResolveAsync(
+        NpgsqlDataSource dataSource, string surface, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null)
+    {
+        var rows = await NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT laplace.relation_type_resolve(@surface)
+            """,
+            static r => r.IsDBNull(0) ? null : r.GetFieldValue<byte[]>(0),
+            p => p.AddWithValue("surface", surface),
+            ct: ct, label: "relation_type_resolve", onError: onError).ConfigureAwait(false);
+        return rows.Count == 0 ? null : rows[0];
+    }
+
+    /// <summary><c>laplace.register_canonical(name)</c></summary>
+    public static async Task<byte[]?> RegisterCanonicalAsync(
+        NpgsqlDataSource dataSource, string name, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null)
+    {
+        var rows = await NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT laplace.register_canonical(@name)
+            """,
+            static r => r.IsDBNull(0) ? null : r.GetFieldValue<byte[]>(0),
+            p => p.AddWithValue("name", name),
+            ct: ct, label: "register_canonical", onError: onError).ConfigureAwait(false);
+        return rows.Count == 0 ? null : rows[0];
+    }
+
+    /// <summary><c>laplace.intent_preflight(entity_ids, phys_ids, att_ids)</c></summary>
+    public static async Task<long> IntentPreflightNoveltyAsync(
+        NpgsqlDataSource dataSource, byte[][] entityIds, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null)
+    {
+        var rows = await NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT (laplace.intent_preflight(@entities, ARRAY[]::bytea[], ARRAY[]::bytea[])).novel_entities
+            """,
+            static r => r.IsDBNull(0) ? 0L : r.GetInt64(0),
+            p => p.AddWithValue("entities", entityIds),
+            ct: ct, label: "intent_preflight", onError: onError).ConfigureAwait(false);
+        return rows.Count == 0 ? 0L : rows[0];
+    }
+
     /// <summary><c>laplace.vertex_tier(flags)</c> / <c>laplace.vertex_atom(flags)</c>.</summary>
     public static async Task<(short Tier, int Atom)> VertexDecodeAsync(
         NpgsqlDataSource dataSource, long flags, CancellationToken ct,
