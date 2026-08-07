@@ -138,6 +138,7 @@ for %%P in (
   "%DEPLOY%\lib\svml_dispmd.dll"
   "%T0_DST%"
   "%HW_DST%"
+  "%CHESS_DST%"
 ) do (
   if not exist "%%~P" (
     echo ERROR: deploy verify missing %%~P
@@ -153,8 +154,13 @@ fc /b "%HW_SRC%" "%HW_DST%" >nul 2>&1 || (
   echo ERROR: deployed highway perfcache does not match build output
   exit /b 1
 )
+fc /b "%CHESS_SRC%" "%CHESS_DST%" >nul 2>&1 || (
+  echo ERROR: deployed chess position perfcache does not match build output
+  exit /b 1
+)
 for %%F in ("%T0_DST%") do echo   T0 perfcache: %%~zF bytes
 for %%F in ("%HW_DST%") do echo   highway perfcache: %%~zF bytes
+for %%F in ("%CHESS_DST%") do echo   chess position perfcache: %%~zF bytes
 exit /b 0
 
 :swapcopy
