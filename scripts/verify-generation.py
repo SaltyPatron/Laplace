@@ -135,18 +135,26 @@ def lang_pin(db, word, seeds, steps):
     # sense/usage data lands (#751 data gap — concept_map falls through to
     # surfaces exactly where hopping is needed); the probe exists so the flip
     # is MEASURED the day the seeds land, not asserted. Never enforced here.
+    # Pin surface is a named constant (Copilot #897) — not buried only in SQL.
+    # word_id never raises on a missing seed (content hash); if word_language
+    # returns NULL the rate stays None rather than aborting the harness.
+    pin_surface = os.environ.get("LAPLACE_LANG_PIN_SURFACE", "животно")
     total_hits = total_toks = 0
     for seed in seeds:
         rows = psql_rows(db, f"""
             SET search_path = laplace, public;
             SET statement_timeout = '300s';
-            WITH lang AS (SELECT word_language(word_id('животно')) AS lid),
-                 r AS (SELECT converse_compose('{q(word)}', {int(steps)},
+            WITH lang AS (
+                SELECT converse.word_language(laplace.word_id('{q(pin_surface)}')) AS lid
+            ),
+                 r AS (SELECT converse.converse_compose('{q(word)}', {int(steps)},
                                                (SELECT lid FROM lang),
-                                               {int(seed)}) AS reply),
-                 toks AS (SELECT w.id FROM r, prompt_words(r.reply) w
+                                               {int(seed)}) AS reply
+                       WHERE (SELECT lid FROM lang) IS NOT NULL),
+                 toks AS (SELECT w.id FROM r, converse.prompt_words(r.reply) w
                           WHERE r.reply IS NOT NULL AND w.id IS NOT NULL)
-            SELECT count(*) FILTER (WHERE word_language(t.id) = (SELECT lid FROM lang)),
+            SELECT count(*) FILTER (
+                       WHERE converse.word_language(t.id) = (SELECT lid FROM lang)),
                    count(*)
             FROM toks t;""")
         for row in rows:
@@ -155,7 +163,7 @@ def lang_pin(db, word, seeds, steps):
             total_toks += int(toks or 0)
     rate = round(total_hits / total_toks, 3) if total_toks else None
     print(f"{word:>24} lang-pin: rate={rate} tokens={total_toks}  [advisory]")
-    return {"lang_pin_rate": rate, "lang_pin_tokens": total_toks}
+    return {"lang_pin_rate": rate, "lang_pin_tokens": total_toks, "pin_surface": pin_surface}
 
 
 def score(prompt, replies, expected):

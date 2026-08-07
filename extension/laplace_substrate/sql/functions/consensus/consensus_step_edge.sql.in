@@ -35,6 +35,9 @@ CREATE OR REPLACE FUNCTION consensus.step_edge(
          FROM @extschema@.v_consensus_unrefuted c
          WHERE c.subject_id = p_from
            AND c.object_id = p_to
+           -- Explicit IS NOT NULL so the planner can match the partial
+           -- consensus_subject_eff_mu_btree (WHERE object_id IS NOT NULL).
+           AND c.object_id IS NOT NULL
          ORDER BY @extschema@.eff_mu(c.rating, c.rd) DESC
          LIMIT 1)
         UNION ALL
@@ -42,6 +45,7 @@ CREATE OR REPLACE FUNCTION consensus.step_edge(
          FROM @extschema@.v_consensus_unrefuted c
          WHERE c.subject_id = p_to
            AND c.object_id = p_from
+           AND c.object_id IS NOT NULL
          ORDER BY @extschema@.eff_mu(c.rating, c.rd) DESC
          LIMIT 1)
     ) e

@@ -3,9 +3,9 @@
 -- attestations (fold input), not LIMIT-without-ORDER over entities.
 --
 -- Attestation-first: GROUP BY subject on the source_id index, oversample, then
--- keep rows whose entity is first-observed by the source at p_tier. Rendering
--- runs only on the LIMIT survivors (render-before-rank blows the 15s serving cap
--- on WordNet-sized tiers). BEGIN ATOMIC: GH #764 beachhead.
+-- keep rows whose entity is first-observed by the source at p_tier. Labels via
+-- ONE realize.batch over survivors (not per-row render ahead of LIMIT).
+-- BEGIN ATOMIC: GH #764 beachhead.
 CREATE OR REPLACE FUNCTION surface_sample(
         p_source bytea,
         p_tier smallint,
@@ -31,18 +31,30 @@ BEGIN ATOMIC
     kept AS (
         SELECT t.subject_id AS id,
                e.type_id,
-               t.observations
+               t.observations,
+               row_number() OVER (ORDER BY t.observations DESC, t.subject_id) AS ix
         FROM top_subj t
         JOIN laplace.entities e ON e.id = t.subject_id
         WHERE e.tier = p_tier
           AND e.first_observed_by = p_source
         ORDER BY t.observations DESC, t.subject_id
         LIMIT greatest(p_limit, 1)
+    ),
+    ids AS (
+        SELECT array_agg(v.id ORDER BY v.ord) AS a
+        FROM (
+            SELECT k.id, k.ix * 2 - 1 AS ord FROM kept k
+            UNION ALL
+            SELECT k.type_id, k.ix * 2 FROM kept k
+        ) v
+    ),
+    lbl AS (
+        SELECT realize.batch(i.a, NULL) AS l FROM ids i
     )
     SELECT k.id,
-           laplace.render_text(k.id, 96),
-           laplace.render(k.type_id),
+           COALESCE(NULLIF(lbl.l[k.ix * 2 - 1], ''), left(encode(k.id, 'hex'), 16)),
+           COALESCE(NULLIF(lbl.l[k.ix * 2], ''), left(encode(k.type_id, 'hex'), 16)),
            k.observations
-    FROM kept k
+    FROM kept k CROSS JOIN lbl
     ORDER BY k.observations DESC, k.id;
 END;

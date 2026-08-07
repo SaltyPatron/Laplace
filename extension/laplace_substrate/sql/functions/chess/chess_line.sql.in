@@ -46,6 +46,9 @@ CREATE OR REPLACE FUNCTION chess.line(p_line bytea)
         FROM laplace.consensus c
         WHERE c.subject_id = p_line
           AND c.type_id = laplace.relation_type_id('OUTCOME')
+          -- Standing fold only (Copilot #918): a fully-refuted OUTCOME is not
+          -- the line's result.
+          AND laplace.eff_mu(c.rating, c.rd) > 0
         ORDER BY laplace.eff_mu(c.rating, c.rd) DESC, c.object_id
         LIMIT 1
     ),

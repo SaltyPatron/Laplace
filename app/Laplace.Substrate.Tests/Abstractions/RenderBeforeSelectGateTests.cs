@@ -93,7 +93,6 @@ public sealed class RenderBeforeSelectGateTests
         // --- recall: the responder family. Each response renders the reply it returns.
         "recall/recall_examples_response.sql.in",      // 1x label @ 5
         "recall/recall_fallback_gloss.sql.in",         // 1x label @ 8
-        "recall/recall_fallback_walk.sql.in",          // 5x label/realize/type_label @ 5,5,6,7,8
         "recall/recall_interaction_response.sql.in",   // 2x label/render_text @ 51,51
         "recall/recall_is_a_no_reply.sql.in",          // 4x label/realize @ 6,6,8,8
         "recall/recall_related_response.sql.in",       // 1x label @ 5
@@ -114,9 +113,7 @@ public sealed class RenderBeforeSelectGateTests
 
         // --- lexical: one gloss per answered question. Bounded; likely permanent.
         "lexical/define.sql.in",                       // 1x render_text @ 5
-        "lexical/define_bootstrap.sql.in",             // 1x render_text @ 5
         "lexical/define_with_context.sql.in",          // 1x render_text @ 5
-        "lexical/define_with_context_bootstrap.sql.in",// 1x render_text @ 5
         "lexical/examples.sql.in",                     // 1x render_text @ 5
 
         // --- inspect: operator-facing readable views.
@@ -154,7 +151,7 @@ public sealed class RenderBeforeSelectGateTests
     /// <c>realize_batch</c>; never raise. Compile-time consts on purpose (W6 D2): a
     /// ceiling in generated data is a ceiling nobody reviews.
     /// </summary>
-    private const int ScalarRealizerFileCeiling = 54;
+    private const int ScalarRealizerFileCeiling = 51;
 
     /// <inheritdoc cref="ScalarRealizerFileCeiling"/>
     /// <remarks>

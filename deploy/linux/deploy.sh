@@ -26,6 +26,23 @@ done
 
 trap 'rm -rf "$STAGE"' EXIT
 
+ensure_app_dir_access() {
+  local owner group mode
+  if [[ ! -d "$APP_DIR" ]]; then
+    echo "::error::$APP_DIR missing — run: sudo bash scripts/setup-host.sh"
+    exit 1
+  fi
+  owner="$(stat -c '%U' "$APP_DIR")"
+  group="$(stat -c '%G' "$APP_DIR")"
+  mode="$(stat -c '%a' "$APP_DIR")"
+  if [[ "$owner" != "laplace-runner" || "$group" != "laplace-runner" || "$mode" != "2775" ]]; then
+    echo "::error::$APP_DIR permissions drifted: ${owner}:${group} mode ${mode}; expected laplace-runner:laplace-runner mode 2775. Run: sudo bash scripts/setup-host.sh"
+    exit 1
+  fi
+}
+
+ensure_app_dir_access
+
 echo "==> [1/4] build front-end (web/ -> dist)"
 pushd "$REPO_ROOT/web" >/dev/null
 stamp="node_modules/.laplace-npm-ci.stamp"
