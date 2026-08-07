@@ -1,4 +1,5 @@
 -- BEGIN ATOMIC: GH #764.
+-- Dedup subjects first, then probe v_word_points (JOIN shape exploded on UD).
 CREATE OR REPLACE FUNCTION content_count(p_source bytea DEFAULT NULL)
     RETURNS bigint
     LANGUAGE sql STABLE
@@ -7,13 +8,6 @@ BEGIN ATOMIC
         WHEN p_source IS NULL THEN
             (SELECT count(*) FROM @extschema@.v_word_points)
         ELSE
-            -- Dedup the source's subjects FIRST (single hash-aggregate pass), THEN probe
-            -- v_word_points by id. The prior JOIN nested-looped every source attestation
-            -- into laplace.physicalities: on UD (51.9M source attestations) that built a
-            -- ~1.9-BILLION-row intermediate before count(DISTINCT) — 16 min, seq-scan-
-            -- bound, and no amount of ANALYZE fixes it (it's the query shape, not stats).
-            -- Collapsing to distinct subjects before the probe is a ~17x cheaper plan
-            -- (EXPLAIN cost 33.1M -> 1.98M) with no row explosion.
             (SELECT count(*)
              FROM (SELECT DISTINCT a.subject_id
                    FROM @extschema@.attestations a

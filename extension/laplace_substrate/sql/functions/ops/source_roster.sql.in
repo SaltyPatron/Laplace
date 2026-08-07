@@ -1,21 +1,18 @@
 -- A source's roster: a bounded SAMPLE of what this witness asserts, fully
 -- labeled. By id (the per-leaf source_id indexes make it ~1s cold); "top"
 -- would demand an unbounded sort over millions of rows — a sample is the
--- honest bounded read.
+-- honest bounded read. BEGIN ATOMIC: GH #764.
 CREATE OR REPLACE FUNCTION source_roster(p_source bytea, p_limit int DEFAULT 40)
     RETURNS TABLE(subject_id bytea, subject text, relation text,
                   object_id bytea, object text, observations bigint)
-    LANGUAGE sql STABLE 
-    AS $$
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
     SELECT a.subject_id, a.subject_label,
            laplace.relation_canonical(a.type_id),
            a.object_id, a.object_label,
            a.observation_count
     FROM laplace.v_attestation_readable a
     WHERE a.source_id = p_source
-      -- Every source bootstraps the shared relation law first. Those rows have
-      -- relation-type subjects and otherwise consume the whole bounded sample,
-      -- making every source appear to hold the same content.
       AND laplace.relation_canonical(a.subject_id) IS NULL
-    LIMIT p_limit
-$$;
+    LIMIT p_limit;
+END;
