@@ -124,7 +124,7 @@ CREATE OR REPLACE FUNCTION evidence_receipt(p_id bytea, p_limit integer DEFAULT 
         -- HAS_NAME/translation/canonical/gloss arms; hex stays the genuine
         -- last resort so every claim still shows. Approved behavior change.
         SELECT realize_batch(array_agg(o.object_id ORDER BY o.ord),
-                             word_language(p_id)) AS l
+                             converse.word_language(p_id)) AS l
         FROM ordered o
     ), labeled AS (
         SELECT o.type_id, o.object_id, o.witness_count, o.source_labels,

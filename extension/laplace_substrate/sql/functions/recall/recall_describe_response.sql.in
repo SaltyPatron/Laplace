@@ -3,5 +3,5 @@ CREATE OR REPLACE FUNCTION recall_describe_response(p_topic bytea)
     LANGUAGE sql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
     SELECT d.type || ': ' || COALESCE(d.fact, '?'), d.eff_mu, d.witnesses
-    FROM salient_facts(p_topic, word_language(p_topic)) d
+    FROM salient_facts(p_topic, converse.word_language(p_topic)) d
 $$;

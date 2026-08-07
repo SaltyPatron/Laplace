@@ -71,7 +71,7 @@ cand AS (
       -- CASE, not OR: PostgreSQL does not guarantee OR short-circuiting, so
       -- the cheap word check must be forced to run first or every word
       -- candidate also pays the concept_members() set-returning probe.
-      AND CASE WHEN word_language(c.object_id) IS NOT NULL THEN true
+      AND CASE WHEN converse.word_language(c.object_id) IS NOT NULL THEN true
                ELSE EXISTS (SELECT 1 FROM concept_members(c.object_id)) END
 ),
 scored AS (

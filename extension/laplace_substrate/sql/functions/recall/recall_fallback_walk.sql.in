@@ -15,7 +15,7 @@ CREATE OR REPLACE FUNCTION recall_fallback_walk(p_topic bytea, p_depth int DEFAU
                p_topic || array_agg(g.entity_id ORDER BY g.step),
                array_agg(g.type_id ORDER BY g.step),
                array_fill(1, ARRAY[count(*)::int]),
-               word_language(p_topic)),
+               converse.word_language(p_topic)),
            min(g.eff_mu),
            NULL::bigint
     FROM walk_strongest(p_topic, NULL::bytea, p_depth) g

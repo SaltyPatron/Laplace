@@ -25,7 +25,7 @@ CREATE OR REPLACE FUNCTION related(p_word bytea, p_type bytea, p_lang bytea DEFA
     ), labels AS (
         -- ONE realize_batch over exactly the returned rows, position-aligned.
         SELECT @extschema@.realize_batch(array_agg(r.object_id ORDER BY r.ord),
-                             COALESCE(p_lang, @extschema@.word_language(p_word))) AS l
+                             COALESCE(p_lang, converse.word_language(p_word))) AS l
         FROM ranked r
     )
     SELECT labels.l[r.ord], @extschema@.eff_mu_display(r.rating, r.rd), r.witness_count

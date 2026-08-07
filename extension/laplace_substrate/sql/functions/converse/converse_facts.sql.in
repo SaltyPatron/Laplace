@@ -170,7 +170,7 @@ BEGIN
         FROM consensus c
         WHERE c.subject_id = p_syn
           AND c.type_id = ANY (t_assoc)
-          AND c.type_id NOT IN (SELECT id FROM non_kin_assoc_types())
+          AND c.type_id NOT IN (SELECT id FROM converse.non_kin_assoc_types())
         ORDER BY eff_mu(c.rating, c.rd) DESC
         LIMIT 8
     ) x

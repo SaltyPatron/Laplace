@@ -318,7 +318,7 @@ BEGIN
                 FROM entities e
                 JOIN bands bd ON bd.band = relation_highway_band(e.id)
                 WHERE e.type_id = entity_type_id('RelationType')
-                  AND e.id NOT IN (SELECT id FROM non_kin_assoc_types())
+                  AND e.id NOT IN (SELECT id FROM converse.non_kin_assoc_types())
             ),
             edges AS MATERIALIZED (
                 -- parts and kin read forward (topic -> object); kinds reads backward,
@@ -408,7 +408,7 @@ BEGIN
                 FROM entities e
                 WHERE e.type_id = entity_type_id('RelationType')
                   AND relation_highway_band(e.id) = ANY(p_bands)
-                  AND e.id NOT IN (SELECT id FROM non_kin_assoc_types())
+                  AND e.id NOT IN (SELECT id FROM converse.non_kin_assoc_types())
             ),
             edges AS MATERIALIZED (
                 SELECT s.band, c.object_id AS nid, eff_mu(c.rating, c.rd) AS m
