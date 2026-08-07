@@ -14,9 +14,9 @@ CREATE OR REPLACE FUNCTION relate_path(p_x bytea, p_y bytea, p_depth int DEFAULT
         'HAS_SUBSTANCE','DERIVATIONALLY_RELATED','PERTAINS_TO','ALSO_SEE',
         'IN_VERB_GROUP_WITH','HAS_ATTRIBUTE']) n),
     up_k(k) AS (SELECT relation_type_id(n) FROM unnest(ARRAY['IS_A','IS_INSTANCE_OF']) n),
-    x_top AS (SELECT sn.synset_id FROM senses(p_x) sn
+    x_top AS (SELECT sn.synset_id FROM lexical.senses(p_x) sn
               ORDER BY sn.eff_mu DESC NULLS LAST LIMIT 1),
-    y_top AS (SELECT sn.synset_id FROM senses(p_y) sn
+    y_top AS (SELECT sn.synset_id FROM lexical.senses(p_y) sn
               ORDER BY sn.eff_mu DESC NULLS LAST LIMIT 1),
     xset(id) AS (SELECT p_x UNION SELECT synset_id FROM x_top),
     yset(id) AS (SELECT p_y UNION SELECT synset_id FROM y_top),

@@ -5,7 +5,7 @@ CREATE OR REPLACE FUNCTION synset_members(p_word bytea)
     SET search_path = @extschema@, public AS $$
     WITH syn AS (
         SELECT s.synset_id AS id, max(s.eff_mu) AS sense_mu
-        FROM senses(p_word) s
+        FROM lexical.senses(p_word) s
         -- Instance synsets (proper nouns) are excluded, but only on a STANDING
         -- instance edge. Bare row presence also excluded synsets whose
         -- IS_INSTANCE_OF was witnessed and REFUTED -- the fold said "not an
@@ -38,7 +38,7 @@ CREATE OR REPLACE FUNCTION synset_members(p_word bytea)
     -- indexed ANY becomes the index condition itself, which forces one-shot
     -- evaluation of the array.
     peers AS MATERIALIZED (
-        SELECT lexical_peers(p_word) AS arr
+        SELECT lexical.lexical_peers(p_word) AS arr
     ),
     agg AS (
         SELECT m.w,

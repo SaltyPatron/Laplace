@@ -642,7 +642,7 @@ define_fast_impl(Datum p_word, ArrayType *p_context_arr, int p_limit, ReplyBuf *
         Datum args[1] = { p_word };
 
         rc = SPI_execute_with_args(
-            "SELECT laplace.lexical_peers($1)", 1, types, args, NULL, true, 1);
+            "SELECT lexical.lexical_peers($1)", 1, types, args, NULL, true, 1);
         if (rc != SPI_OK_SELECT || SPI_processed == 0)
             return;
         peers_arr = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &peers_null);

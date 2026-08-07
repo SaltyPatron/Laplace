@@ -52,7 +52,7 @@ ensure_tax_edges_plan(void)
         SPIPlanPtr plan = SPI_prepare(
             "SELECT u.ord, e.object_id, e.type_id, e.rating, e.rd "
             "FROM unnest($1) WITH ORDINALITY AS u(id, ord) "
-            "CROSS JOIN LATERAL laplace.consensus_taxonomy_edges(u.id, $2) e "
+            "CROSS JOIN LATERAL taxonomy.consensus_taxonomy_edges(u.id, $2) e "
             "ORDER BY u.ord",
             2, argtypes);
         if (plan == NULL)
@@ -101,7 +101,7 @@ spi_top_synset(Datum word)
     int   rc;
 
     rc = SPI_execute_with_args(
-        "SELECT laplace.top_synset($1)",
+        "SELECT taxonomy.top_synset($1)",
         1, argtypes, args, NULL, true, 1);
     if (rc != SPI_OK_SELECT || SPI_processed == 0)
         return (Datum) 0;
@@ -404,7 +404,7 @@ pg_laplace_hypernyms(PG_FUNCTION_ARGS)
                                   &labels, &label_nulls, &n_labels);
 
             rc2 = SPI_execute_with_args(
-                "SELECT array_agg(laplace.synset_gloss(u.id) ORDER BY u.ord) "
+                "SELECT array_agg(taxonomy.synset_gloss(u.id) ORDER BY u.ord) "
                 "FROM unnest($1) WITH ORDINALITY AS u(id, ord)",
                 1, rtypes, rargs, NULL, true, 1);
             if (rc2 == SPI_OK_SELECT && SPI_processed > 0)
@@ -502,7 +502,7 @@ pg_laplace_isa_path(PG_FUNCTION_ARGS)
                 Oid       argtypes[1] = { BYTEAOID };
                 Datum     args[1] = { y };
                 int       rc = SPI_execute_with_args(
-                    "SELECT subject_id FROM laplace.translation_sources($1)",
+                    "SELECT subject_id FROM taxonomy.translation_sources($1)",
                     1, argtypes, args, NULL, true, 0);
                 if (rc != SPI_OK_SELECT)
                     elog(ERROR, "isa_path: translation targets query failed");

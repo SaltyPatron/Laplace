@@ -1,10 +1,21 @@
-CREATE OR REPLACE FUNCTION top_synset(p_word bytea)
+-- taxonomy.top_synset — GH #862, first family migrated out of the flat namespace.
+--
+-- The schema says what this DOES (hierarchy traversal, spec 37 TRAVERSE) instead of
+-- what project owns it. Cross-schema calls must qualify, so correctness is enforced
+-- by structure rather than by a SET clause repeated in 186 files -- and the SET is
+-- gone here, which is what lets the plan cache.
+--
+-- The old laplace.top_synset is dropped rather than left as a shim: two names for
+-- one function is the dual-definition defect (GH #532), and a caller still on the
+-- old name should fail loudly at install rather than silently diverge later.
+DROP FUNCTION IF EXISTS laplace.top_synset(bytea);
+
+CREATE OR REPLACE FUNCTION taxonomy.top_synset(p_word bytea)
     RETURNS bytea
-    LANGUAGE sql STABLE STRICT PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$
     -- p_k = 1 IS the cap, and bubble_up ranks before it cuts. The LIMIT 1 that used
     -- to sit here added nothing and read as a safeguard over an unordered pick,
     -- which is the opposite of what this call does.
     SELECT b.synset_id
-    FROM bubble_up(p_word, NULL::bytea[], 1) b
+    FROM taxonomy.bubble_up(p_word, NULL::bytea[], 1) b
 $$;

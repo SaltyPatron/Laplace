@@ -1293,7 +1293,7 @@ public static class NpgsqlSubstrateReads
                        NULLIF(laplace.render_text_fast(s.synset_id, 8), ''),
                        left(encode(s.synset_id, 'hex'), 16)),
                    s.eff_mu, s.witnesses
-            FROM laplace.senses(@id) s
+            FROM lexical.senses(@id) s
             """,
             static r => new MatchupSenseRow(r.GetString(0), r.GetString(1), r.GetString(2), r.GetDecimal(3), r.GetInt64(4)),
             p => p.Add("id", NpgsqlDbType.Bytea).Value = id,

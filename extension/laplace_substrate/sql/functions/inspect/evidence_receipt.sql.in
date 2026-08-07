@@ -12,7 +12,7 @@ CREATE OR REPLACE FUNCTION evidence_receipt(p_id bytea, p_limit integer DEFAULT 
     WITH subj(id) AS (
         SELECT p_id
         UNION
-        SELECT sn.synset_id FROM senses(p_id) sn
+        SELECT sn.synset_id FROM lexical.senses(p_id) sn
     ), feat_dynamic AS MATERIALIZED (
         -- Dynamic HAS_FEATURE children fenced once; relation_in_family() never
         -- inlines (SET search_path), so calling it per attestation row ran its

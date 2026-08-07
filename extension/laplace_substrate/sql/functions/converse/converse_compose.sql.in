@@ -84,7 +84,7 @@ BEGIN
                    max(laplace_highway_popcount(e.highway_mask))
                        OVER (PARTITION BY p.id) AS tok_breadth
             FROM prompt_state(p_prompt) p
-            CROSS JOIN LATERAL senses(p.id) s
+            CROSS JOIN LATERAL lexical.senses(p.id) s
             LEFT JOIN entities e ON e.id = s.synset_id
             WHERE p.id IS NOT NULL AND s.synset_id IS NOT NULL
         ) x
@@ -223,7 +223,7 @@ BEGIN
     concept_map AS MATERIALIZED (
         SELECT d.id AS wid,
                COALESCE(
-                   (SELECT s.synset_id FROM senses(d.id) s
+                   (SELECT s.synset_id FROM lexical.senses(d.id) s
                      ORDER BY s.witnesses DESC, s.eff_mu DESC NULLS LAST,
                               s.synset_id LIMIT 1),
                    d.id) AS cid

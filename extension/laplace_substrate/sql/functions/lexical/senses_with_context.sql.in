@@ -48,7 +48,9 @@
 -- this overload is on the same read path and was still paying it. Every reference is
 -- `@extschema@.`-qualified instead, which is what the clause was doing and costs
 -- nothing at plan time.
-CREATE OR REPLACE FUNCTION senses(p_word bytea, p_context bytea[])
+DROP FUNCTION IF EXISTS laplace.senses(bytea, bytea[]);
+
+CREATE OR REPLACE FUNCTION lexical.senses(p_word bytea, p_context bytea[])
     RETURNS TABLE(sense_id bytea, synset_id bytea, eff_mu numeric, witnesses bigint,
                   score numeric)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
@@ -60,7 +62,7 @@ CREATE OR REPLACE FUNCTION senses(p_word bytea, p_context bytea[])
     -- context words resolved to their own senses: the comparison is synset<->synset.
     ctx_syn AS MATERIALIZED (
         SELECT DISTINCT s.synset_id AS sid
-        FROM ctx CROSS JOIN LATERAL @extschema@.senses(ctx.id) s
+        FROM ctx CROSS JOIN LATERAL lexical.senses(ctx.id) s
         WHERE s.synset_id IS NOT NULL
     ),
     frame_t AS MATERIALIZED (
@@ -73,7 +75,7 @@ CREATE OR REPLACE FUNCTION senses(p_word bytea, p_context bytea[])
         FROM @extschema@.v_word_senses s
         JOIN @extschema@.consensus ss ON ss.subject_id = s.sense_id
                          AND ss.type_id = @extschema@.relation_type_id('IS_SENSE_OF')
-        WHERE s.word_id = ANY(@extschema@.lexical_peers(p_word))
+        WHERE s.word_id = ANY(lexical.lexical_peers(p_word))
     ),
     -- USAGE: candidate owns a sentence (gloss band 1 / example band 7) whose
     -- word-tier constituents include a context token.

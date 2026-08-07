@@ -313,7 +313,7 @@ spi_fetch_synset_ids(Datum word, Datum **out_ids, int *out_n)
     *out_ids = NULL;
     *out_n = 0;
     rc = SPI_execute_with_args(
-        "SELECT sn.synset_id FROM laplace.senses($1) sn",
+        "SELECT sn.synset_id FROM lexical.senses($1) sn",
         1, argtypes, args, NULL, true, 0);
     if (rc != SPI_OK_SELECT)
         elog(ERROR, "laplace_substrate: senses query failed: %s",

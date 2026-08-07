@@ -24,7 +24,7 @@ CREATE OR REPLACE FUNCTION salient_facts(p_word bytea, p_lang bytea DEFAULT NULL
         -- short-circuits and word_language() is never evaluated.
         SELECT COALESCE(p_lang, @extschema@.word_language(p_word)) AS l
     ), subj(id) AS (
-        SELECT p_word UNION SELECT sn.synset_id FROM @extschema@.senses(p_word) sn
+        SELECT p_word UNION SELECT sn.synset_id FROM lexical.senses(p_word) sn
     ), top AS (
         SELECT cc.type_id, cc.object_id, cc.rating, cc.rd, cc.witness_count
         FROM subj s CROSS JOIN LATERAL (

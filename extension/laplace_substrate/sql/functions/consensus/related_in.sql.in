@@ -4,7 +4,7 @@ CREATE OR REPLACE FUNCTION related_in(p_word bytea, p_type bytea, p_lang bytea D
 -- No SET search_path — blocks inlining, costs the consensus index path. GH #860.
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
     WITH subj(id) AS (
-        SELECT p_word UNION SELECT sn.synset_id FROM @extschema@.senses(p_word) sn
+        SELECT p_word UNION SELECT sn.synset_id FROM lexical.senses(p_word) sn
     ), top AS (
         SELECT cc.subject_id, cc.rating, cc.rd, cc.witness_count
         FROM subj s CROSS JOIN LATERAL (

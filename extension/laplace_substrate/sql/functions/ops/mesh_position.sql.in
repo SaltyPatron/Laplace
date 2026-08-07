@@ -18,7 +18,7 @@ CREATE OR REPLACE FUNCTION mesh_position(p_id bytea)
     UNION ALL
     (SELECT 'up', s.synset_id, label_or_hex(s.synset_id), 'has sense',
             'WordNet_Synset', s.eff_mu, s.witnesses
-     FROM senses(p_id) s
+     FROM lexical.senses(p_id) s
      -- Gate on a STANDING typing. Bare row presence let a REFUTED IS_TYPED_AS
      -- suppress this whole arm: the fold said "not typed as that" and the gate read
      -- it as "typed", silently dropping the node's senses.

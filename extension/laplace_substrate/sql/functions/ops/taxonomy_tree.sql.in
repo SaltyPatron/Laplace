@@ -6,7 +6,7 @@ CREATE OR REPLACE FUNCTION taxonomy_tree(p_id bytea)
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
     WITH root AS MATERIALIZED (
-        SELECT COALESCE(top_synset(p_id), p_id) AS id)
+        SELECT COALESCE(taxonomy.top_synset(p_id), p_id) AS id)
     SELECT 'self', 0, root.id, label_or_hex(root.id), NULL::numeric FROM root
     UNION ALL
     SELECT 'up', w.step, w.entity_id, label_or_hex(w.entity_id), w.eff_mu
