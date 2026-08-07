@@ -560,17 +560,17 @@ public static class NpgsqlSubstrateReads
         NpgsqlConnection conn, string prompt, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(conn,
-            "SELECT missing_arena FROM consensus.gaps(laplace.resolve_last_word(@p))",
+            "SELECT missing_arena FROM consensus.gaps(converse.resolve_last_word(@p))",
             static r => r.IsDBNull(0) ? "" : r.GetString(0),
             p => p.AddWithValue("p", prompt),
             ct: ct, label: "gaps", onError: onError);
 
-    /// <summary><c>laplace.first_placed_topic(word)</c>.</summary>
+    /// <summary><c>converse.first_placed_topic(word)</c>.</summary>
     public static Task<byte[]?> FirstPlacedTopicAsync(
         NpgsqlConnection conn, string word, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ExecuteScalarAsync<byte[]>(conn,
-            "SELECT laplace.first_placed_topic(@w)",
+            "SELECT converse.first_placed_topic(@w)",
             p => p.AddWithValue("w", word),
             ct: ct, label: "first_placed_topic", onError: onError);
 
@@ -843,7 +843,7 @@ public static class NpgsqlSubstrateReads
         NpgsqlRead.ReadRowsAsync(conn, """
             SELECT encode(n.neighbor_id, 'hex'), n.neighbor,
                    n.geodesic, n.frechet, n.x, n.y, n.z, n.m, n.radius
-            FROM laplace.structural_neighbors_of(@id, @k) n
+            FROM structural.neighbors_of(@id, @k) n
             """,
             static r => new StructuralNeighborRow(
                 r.IsDBNull(0) ? null : r.GetString(0), r.IsDBNull(1) ? null : r.GetString(1),
@@ -928,7 +928,7 @@ public static class NpgsqlSubstrateReads
                 c.eff_mu,
                 c.witnesses,
                 laplace.label_or_hex(c.object_id) AS object_label
-            FROM laplace.completions(laplace.resolve(@prompt), @limit) c
+            FROM laplace.completions(converse.resolve(@prompt), @limit) c
             ORDER BY c.eff_mu DESC
             """,
             static r => new CompletionRow(
@@ -1004,7 +1004,7 @@ public static class NpgsqlSubstrateReads
                 gt.eff_mu,
                 gt.path_mu,
                 gt.witnesses
-            FROM laplace.walk_branches(laplace.resolve(@prompt), NULL, @depth, @beam) gt
+            FROM laplace.walk_branches(converse.resolve(@prompt), NULL, @depth, @beam) gt
             ORDER BY gt.depth, gt.path_mu DESC
             """,
             static r => new WalkBranchStepRow(
@@ -1289,7 +1289,7 @@ public static class NpgsqlSubstrateReads
         NpgsqlRead.ReadRowsAsync(conn, """
             SELECT encode(s.sense_id, 'hex'), encode(s.synset_id, 'hex'),
                    COALESCE(
-                       NULLIF(realize._synset_lemma(s.synset_id, laplace.word_language(@id)), ''),
+                       NULLIF(realize._synset_lemma(s.synset_id, converse.word_language(@id)), ''),
                        NULLIF(laplace.render_text_fast(s.synset_id, 8), ''),
                        left(encode(s.synset_id, 'hex'), 16)),
                    s.eff_mu, s.witnesses
@@ -1396,7 +1396,7 @@ public static class NpgsqlSubstrateReads
             SELECT encode(c.subject_id, 'hex'),
                    laplace.type_label(c.type_id),
                    COALESCE(
-                       NULLIF(realize._synset_lemma(c.subject_id, laplace.word_language(@id)), ''),
+                       NULLIF(realize._synset_lemma(c.subject_id, converse.word_language(@id)), ''),
                        NULLIF(laplace.render_text_fast(c.subject_id, 8), ''),
                        left(encode(c.subject_id, 'hex'), 16)),
                    laplace.eff_mu_display(c.rating, c.rd), c.witness_count
@@ -1551,10 +1551,10 @@ public static class NpgsqlSubstrateReads
         int depth, int breadth, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
-            WITH node AS (SELECT CASE WHEN @e IS NULL THEN laplace.resolve(@p)
+            WITH node AS (SELECT CASE WHEN @e IS NULL THEN converse.resolve(@p)
                                       ELSE decode(@e, 'hex') END AS id)
             SELECT w.depth,
-                   laplace.realize_path(w.path, w.types) AS path,
+                   realize.path(w.path, w.types) AS path,
                    w.eff_mu, w.path_mu, w.witnesses
             FROM node, laplace.walk_branches(
                      node.id,
@@ -1667,13 +1667,13 @@ public static class NpgsqlSubstrateReads
     public readonly record struct RelationBandRow(
         int Band, string Name, double Rank, long RelationTypes, long ConsensusRows);
 
-    /// <summary><c>laplace.relation_bands()</c> — salience bands with live consensus counts.</summary>
+    /// <summary><c>converse.relation_bands()</c> — salience bands with live consensus counts.</summary>
     public static Task<IReadOnlyList<RelationBandRow>> RelationBandsAsync(
         NpgsqlDataSource dataSource, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
             SELECT band, name, rank, relation_types, consensus_rows
-            FROM laplace.relation_bands()
+            FROM converse.relation_bands()
             """,
             static r => new RelationBandRow(
                 r.GetInt32(0), r.GetString(1), r.GetDouble(2), r.GetInt64(3), r.GetInt64(4)),
@@ -1703,7 +1703,7 @@ public static class NpgsqlSubstrateReads
                 @topic, 'both', bt.ids,
                 GREATEST(@limit * 4, 40),
                 true, 'eff_mu') z
-            JOIN laplace.relation_band_catalog() b
+            JOIN converse.relation_band_catalog() b
               ON b.band = laplace.relation_highway_band(z.type_id)
             ORDER BY b.rank DESC, laplace.eff_mu(z.rating, z.rd) DESC
             LIMIT @limit
@@ -1752,7 +1752,7 @@ public static class NpgsqlSubstrateReads
                                                laplace.laplace_highway_band_mask(b.band))) AS t(bit)))
                        END AS m
             )
-            SELECT repeat('  ', w.depth) || laplace.realize_path(w.path, w.types) AS reply,
+            SELECT repeat('  ', w.depth) || realize.path(w.path, w.types) AS reply,
                    w.path_mu, w.witnesses
             FROM mask, laplace.walk_branches(
                      @topic,
@@ -1825,7 +1825,7 @@ public static class NpgsqlSubstrateReads
         NpgsqlRead.ReadRowsAsync(dataSource, """
             SELECT encode(n.neighbor_id, 'hex'), n.neighbor,
                    n.geodesic, n.frechet, n.x, n.y, n.z, n.m, n.radius
-            FROM laplace.structural_neighbors_of(@id, @k) n
+            FROM structural.neighbors_of(@id, @k) n
             """,
             static r => new StructuralNeighborRow(
                 r.IsDBNull(0) ? null : r.GetString(0), r.IsDBNull(1) ? null : r.GetString(1),

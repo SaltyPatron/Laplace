@@ -14,7 +14,9 @@
 -- counts. One deliberate spine alignment: laplace_witness seeded a NOVEL cell at
 -- neutral WITHOUT folding its first game (the first outcome was dropped);
 -- consensus_upsert's novel arm folds every game -- no signal is discarded.
-CREATE OR REPLACE FUNCTION witness_precedes_chain(p_text text, p_source bytea)
+DROP FUNCTION IF EXISTS laplace.witness_precedes_chain(text, bytea);
+
+CREATE OR REPLACE FUNCTION converse.witness_precedes_chain(p_text text, p_source bytea)
     RETURNS int
     LANGUAGE plpgsql VOLATILE
     SET search_path = @extschema@, public AS $$
@@ -28,7 +30,7 @@ DECLARE
     sums   bigint[];
 BEGIN
     SELECT array_agg(id ORDER BY ord) INTO ids
-    FROM prompt_state(p_text) WHERE id IS NOT NULL;
+    FROM converse.prompt_state(p_text) WHERE id IS NOT NULL;
     n := COALESCE(array_length(ids, 1), 0);
     IF n < 2 THEN RETURN 0; END IF;
 

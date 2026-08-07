@@ -1,10 +1,12 @@
-CREATE OR REPLACE FUNCTION first_placed_topic(p_text text)
+-- converse.first_placed_topic — GH #862 / #860. No SET, real schema names.
+DROP FUNCTION IF EXISTS laplace.first_placed_topic(text);
+
+CREATE OR REPLACE FUNCTION converse.first_placed_topic(p_text text)
     RETURNS bytea
-    LANGUAGE sql LAPLACE_STABLE_STRICT
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE sql LAPLACE_STABLE_STRICT AS $$
     SELECT w.id
-    FROM v_word_points w
-    JOIN prompt_state(p_text) s ON w.id = s.id
+    FROM laplace.v_word_points w
+    JOIN converse.prompt_state(p_text) s ON w.id = s.id
     WHERE w.coord IS NOT NULL
     -- "first" is a claim about prompt order, so it has to be stated. Without this
     -- the LIMIT took an arbitrary placed token out of a multi-token prompt and the

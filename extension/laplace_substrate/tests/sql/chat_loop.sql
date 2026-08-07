@@ -93,17 +93,17 @@ END $$;
 -- 1. The walk-driven fact engine: every fact family present, taxonomy multi-hop,
 --    the refuted IS_A branch absent, provenance columns populated.
 SELECT fact_kind, sentence, witnesses
-FROM converse_facts(laplace_hash128_blake3('test/chat_loop/synset1'));
+FROM converse.facts(laplace_hash128_blake3('test/chat_loop/synset1'));
 
 SELECT fact_kind, cardinality(path) AS path_len, cardinality(types) AS type_len
-FROM converse_facts(laplace_hash128_blake3('test/chat_loop/synset1'))
+FROM converse.facts(laplace_hash128_blake3('test/chat_loop/synset1'))
 WHERE fact_kind IN ('definition', 'taxonomy');
 
 SELECT bool_and(sentence !~* 'synset_bad') AS refuted_branch_excluded
-FROM converse_facts(laplace_hash128_blake3('test/chat_loop/synset1'));
+FROM converse.facts(laplace_hash128_blake3('test/chat_loop/synset1'));
 
 -- 2. The prose wrapper weaves the fact rows (web drill-down row excluded).
-SELECT converse_about(laplace_hash128_blake3('test/chat_loop/synset1')) AS about;
+SELECT converse.about(laplace_hash128_blake3('test/chat_loop/synset1')) AS about;
 
 -- 3. A full chat turn lands on the walk-driven answer.
 SELECT chat('what is a dog?') AS chat_reply;
@@ -141,7 +141,7 @@ WHERE c1.id = consensus_id(laplace_hash128_blake3('test/chat_loop/synset1'),
 
 -- ...and the ANSWER CHANGES: the next walk reads the updated consensus.
 SELECT sentence AS definition_after_refute
-FROM converse_facts(laplace_hash128_blake3('test/chat_loop/synset1'))
+FROM converse.facts(laplace_hash128_blake3('test/chat_loop/synset1'))
 WHERE fact_kind = 'definition';
 
 SELECT chat('what is a dog?') AS chat_reply_after_refute;

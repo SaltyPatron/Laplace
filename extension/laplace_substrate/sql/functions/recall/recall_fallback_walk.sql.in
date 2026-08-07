@@ -11,7 +11,7 @@ CREATE OR REPLACE FUNCTION recall_fallback_walk(p_topic bytea, p_depth int DEFAU
     RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
-    SELECT realize_path(
+    SELECT realize.path(
                p_topic || array_agg(g.entity_id ORDER BY g.step),
                array_agg(g.type_id ORDER BY g.step),
                array_fill(1, ARRAY[count(*)::int]),

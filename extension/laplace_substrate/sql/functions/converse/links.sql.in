@@ -33,15 +33,17 @@
 -- Semantics here are unchanged by construction: same function, same argument,
 -- same COALESCE(NULLIF(relation_canonical, ''), label) ladder. Only the number of
 -- evaluations changes.
-CREATE OR REPLACE FUNCTION links(p_word text)
+DROP FUNCTION IF EXISTS laplace.links(text);
+
+CREATE OR REPLACE FUNCTION converse.links(p_word text)
     RETURNS TABLE(relation text, target text, strength double precision)
     LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+    AS $$
     WITH base AS MATERIALIZED (
         SELECT c.type_id, c.object_id,
-               eff_mu(c.rating, c.rd) AS emu
-        FROM consensus c
-        WHERE c.subject_id = word_id(p_word)
+               laplace.eff_mu(c.rating, c.rd) AS emu
+        FROM laplace.consensus c
+        WHERE c.subject_id = laplace.word_id(p_word)
     ),
     rel AS MATERIALIZED (
         -- One row per DISTINCT relation type present on this subject.
@@ -54,6 +56,6 @@ CREATE OR REPLACE FUNCTION links(p_word text)
            (b.emu)::float8 / 1e9 AS strength
     FROM base b
     JOIN rel r ON r.type_id = b.type_id
-    ORDER BY edge_rank(b.type_id, b.emu) DESC,
+    ORDER BY laplace.edge_rank(b.type_id, b.emu) DESC,
              strength DESC, r.relation
 $$;

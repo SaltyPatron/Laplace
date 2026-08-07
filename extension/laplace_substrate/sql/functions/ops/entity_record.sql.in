@@ -9,5 +9,5 @@ CREATE OR REPLACE FUNCTION entity_record(p_id bytea)
            count(*) FILTER (WHERE s.status = 'contested'),
            count(*) FILTER (WHERE s.status = 'refuted'),
            count(*) FILTER (WHERE s.status = 'thin')
-    FROM epistemic_status(p_id, NULL, 500) s
+    FROM converse.epistemic_status(p_id, NULL, 500) s
 $$;

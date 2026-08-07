@@ -52,7 +52,9 @@
 -- NOT PARALLEL SAFE: prompt_coherence() is `LANGUAGE C STABLE` with no parallel
 -- marking, so this body cannot claim more than its callee. recall.c invokes this
 -- as a single scalar SPI select, where parallelism was never in play.
-CREATE OR REPLACE FUNCTION resolve_topic(p_phrase text, p_context bytea)
+DROP FUNCTION IF EXISTS laplace.resolve_topic(text, bytea);
+
+CREATE OR REPLACE FUNCTION converse.resolve_topic(p_phrase text, p_context bytea)
     RETURNS bytea
     LANGUAGE sql STABLE
     SET search_path = @extschema@, public AS $$
@@ -78,6 +80,6 @@ CREATE OR REPLACE FUNCTION resolve_topic(p_phrase text, p_context bytea)
                        y.synset_id
               LIMIT 1),
             @extschema@.resolve_phrase(p_phrase),
-            @extschema@.resolve_last_word(p_phrase))
+            converse.resolve_last_word(p_phrase))
     END
 $$;

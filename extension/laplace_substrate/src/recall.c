@@ -150,7 +150,7 @@ spi_resolve_topic(const char *phrase, Datum context, bool ctx_null)
         nulls[1] = 'n';
 
     rc = SPI_execute_with_args(
-        "SELECT laplace.resolve_topic($1, $2)",
+        "SELECT converse.resolve_topic($1, $2)",
         2, types, args, nulls, true, 1);
     if (rc != SPI_OK_SELECT || SPI_processed == 0)
         return (Datum) 0;

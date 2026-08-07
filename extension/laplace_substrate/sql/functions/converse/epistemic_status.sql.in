@@ -1,35 +1,38 @@
-CREATE OR REPLACE FUNCTION epistemic_status(p_word bytea, p_lang bytea DEFAULT NULL,
+-- converse.epistemic_status — GH #862 / #860. No SET, real schema names.
+DROP FUNCTION IF EXISTS laplace.epistemic_status(bytea, bytea, int);
+
+CREATE OR REPLACE FUNCTION converse.epistemic_status(p_word bytea, p_lang bytea DEFAULT NULL,
                                             p_limit int DEFAULT 30)
     RETURNS TABLE(type text, fact text, status text, mu numeric,
                   volatility numeric, witnesses bigint)
-    LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
     WITH subj(id) AS (SELECT p_word UNION SELECT sn.synset_id FROM lexical.senses(p_word) sn),
          rels AS (
             SELECT c.type_id, c.object_id, c.rating, c.rd, c.volatility, c.witness_count
-            FROM consensus c JOIN subj s ON c.subject_id = s.id
+            FROM laplace.consensus c JOIN subj s ON c.subject_id = s.id
             WHERE c.object_id IS NOT NULL
-              AND c.type_id NOT IN (relation_type_id('HAS_SENSE'), relation_type_id('IS_SENSE_OF'),
-                                    relation_type_id('HAS_LANGUAGE'))
-            ORDER BY edge_rank(c.type_id, eff_mu(c.rating, c.rd)) DESC
+              AND c.type_id NOT IN (laplace.relation_type_id('HAS_SENSE'),
+                                    laplace.relation_type_id('IS_SENSE_OF'),
+                                    laplace.relation_type_id('HAS_LANGUAGE'))
+            ORDER BY laplace.edge_rank(c.type_id, laplace.eff_mu(c.rating, c.rd)) DESC
             LIMIT p_limit),
          lang(id) AS (SELECT COALESCE(p_lang, converse.word_language(p_word))),
          objs(a) AS (SELECT array_agg(DISTINCT object_id) FROM rels),
          rendered AS (
             SELECT u.object_id, NULLIF(u.s, '') AS s
-            FROM objs CROSS JOIN LATERAL unnest(objs.a, render_text_batch(objs.a, 32)) AS u(object_id, s)
+            FROM objs CROSS JOIN LATERAL unnest(objs.a, laplace.render_text_batch(objs.a, 32)) AS u(object_id, s)
             WHERE objs.a IS NOT NULL
          )
-    SELECT type_label(r.type_id),
+    SELECT laplace.type_label(r.type_id),
            COALESCE(rd.s, realize.realize(r.object_id, l.id)),
-           CASE WHEN refuted(r.rating, r.rd) THEN 'refuted'
-                WHEN eff_mu(r.rating, r.rd) > glicko2_neutral_mu() THEN 'confirmed'
-                WHEN r.volatility::numeric > glicko2_initial_volatility() * 1.5 THEN 'contested'
+           CASE WHEN laplace.refuted(r.rating, r.rd) THEN 'refuted'
+                WHEN laplace.eff_mu(r.rating, r.rd) > laplace.glicko2_neutral_mu() THEN 'confirmed'
+                WHEN r.volatility::numeric > laplace.glicko2_initial_volatility() * 1.5 THEN 'contested'
                 ELSE 'thin' END,
-           eff_mu_display(r.rating, r.rd),
+           laplace.eff_mu_display(r.rating, r.rd),
            round(r.volatility / 1e9, 4), r.witness_count
     FROM rels r
     CROSS JOIN lang l
     LEFT JOIN rendered rd ON rd.object_id = r.object_id
-    ORDER BY edge_rank(r.type_id, eff_mu(r.rating, r.rd)) DESC
+    ORDER BY laplace.edge_rank(r.type_id, laplace.eff_mu(r.rating, r.rd)) DESC
 $$;

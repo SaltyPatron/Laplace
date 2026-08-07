@@ -442,8 +442,8 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
              * the comparison; neither is ever named in code. */
             "SELECT p.ord, p.id, s.synset_id, s.eff_mu::float8, "
             "       s.witnesses::bigint, p.language, "
-            "       laplace.word_language(s.sense_id) "
-            "FROM laplace.prompt_state($1) p "
+            "       converse.word_language(s.sense_id) "
+            "FROM converse.prompt_state($1) p "
             "CROSS JOIN LATERAL lexical.senses(p.id) s "
             "WHERE p.id IS NOT NULL AND s.synset_id IS NOT NULL",
             1, argtypes, args, NULL, true, 0);

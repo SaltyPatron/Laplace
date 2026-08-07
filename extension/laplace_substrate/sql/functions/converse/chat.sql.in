@@ -96,7 +96,7 @@ BEGIN
     -- genuinely does not say.
     IF lang IS NULL THEN
         SELECT c.object_id INTO lang
-        FROM prompt_state(p_prompt) p
+        FROM converse.prompt_state(p_prompt) p
         JOIN consensus c ON c.subject_id = p.id
                         AND c.type_id = relation_type_id('HAS_LANGUAGE')
         WHERE p.id IS NOT NULL AND c.object_id IS NOT NULL
@@ -239,7 +239,7 @@ BEGIN
             -- and prompt_state pays a word_language() consensus read per token for
             -- a column nothing here reads (Copilot, PR #893).
             WITH ptok AS MATERIALIZED (
-                SELECT p.id FROM prompt_words(p_prompt) p WHERE p.id IS NOT NULL
+                SELECT p.id FROM converse.prompt_words(p_prompt) p WHERE p.id IS NOT NULL
             ),
             psense AS MATERIALIZED (
                 SELECT DISTINCT x.sid FROM (
@@ -260,7 +260,7 @@ BEGIN
                         FROM psense ps
                         JOIN consensus c ON c.object_id = st.topic_id
                                         AND c.subject_id = ps.sid) AS m_in
-                FROM session_trajectory(p_session, 8) st
+                FROM converse.session_trajectory(p_session, 8) st
             )
             SELECT a.topic_id INTO topic
             FROM adj a
@@ -271,7 +271,7 @@ BEGIN
     END IF;
 
     IF topic IS NULL THEN
-        out := converse(p_prompt);
+        out := converse.converse(p_prompt);
     ELSE
         resolved := topic;  xl := realize.realize(topic, lang);
         topic2 := p_topic2;
@@ -307,7 +307,7 @@ BEGIN
                        CASE b.name WHEN 'partitive'   THEN 1
                                    WHEN 'taxonomic'   THEN 2
                                    WHEN 'associative' THEN 3 END AS layer
-                FROM relation_band_catalog() b
+                FROM converse.relation_band_catalog() b
                 WHERE b.name IN ('partitive', 'taxonomic', 'associative')
             ),
             sel AS MATERIALIZED (
@@ -450,7 +450,7 @@ BEGIN
                 SELECT b.name || ': ' || string_agg(lbl.l[o.ix], ', ' ORDER BY o.m DESC) || '.' AS line,
                        b.band
                 FROM ord o
-                JOIN relation_band_catalog() b ON b.band = o.band
+                JOIN converse.relation_band_catalog() b ON b.band = o.band
                 CROSS JOIN lbl
                 WHERE lbl.l[o.ix] IS NOT NULL
                 GROUP BY b.band, b.name
@@ -512,7 +512,7 @@ BEGIN
             -- No session (or no history) passes NULL, which composes exactly
             -- as a fresh turn.
             SELECT array_agg(st.topic_id ORDER BY st.last_ord DESC) INTO ctx_arr
-              FROM session_trajectory(p_session, 4) st
+              FROM converse.session_trajectory(p_session, 4) st
              WHERE st.topic_id <> topic;
             out := converse_compose(
                 p_prompt, 40, lang,
@@ -546,13 +546,13 @@ BEGIN
             -- ("Dog is a member of the genus Canis (probably descended from the
             -- common wolf)..."), so it carries the describe shape until the
             -- sentence-tier composer is fast enough to sit in front of it.
-            out := CASE WHEN xl IS NOT NULL THEN converse_about(topic, lang)
-                        ELSE converse(p_prompt) END;
+            out := CASE WHEN xl IS NOT NULL THEN converse.about(topic, lang)
+                        ELSE converse.converse(p_prompt) END;
         END IF;
 
         IF out IS NULL OR out = '' THEN
-            out := CASE WHEN xl IS NOT NULL THEN converse_about(topic, lang)
-                        ELSE converse(p_prompt) END;
+            out := CASE WHEN xl IS NOT NULL THEN converse.about(topic, lang)
+                        ELSE converse.converse(p_prompt) END;
         END IF;
     END IF;
 

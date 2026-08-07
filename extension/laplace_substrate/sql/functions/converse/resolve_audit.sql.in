@@ -38,7 +38,9 @@
 -- back by ordinal. No per-row realize, no string comparison, no lower().
 DROP FUNCTION IF EXISTS resolve_audit(text);
 
-CREATE OR REPLACE FUNCTION resolve_audit(p_prompt text, p_lang_rel bytea)
+DROP FUNCTION IF EXISTS laplace.resolve_audit(text, bytea);
+
+CREATE OR REPLACE FUNCTION converse.resolve_audit(p_prompt text, p_lang_rel bytea)
     RETURNS TABLE(ord int, token text, resolved boolean, tier smallint,
                   senses bigint, top_language text, verdict text)
     LANGUAGE sql STABLE
@@ -49,7 +51,7 @@ WITH tok AS (
     -- TWICE (GH #752), so DISTINCT ON keeps one row per position -- otherwise
     -- a tier-collided token is double-counted in its own audit.
     SELECT DISTINCT ON (w.ord) w.ord, w.word, w.id
-    FROM prompt_words(p_prompt) w
+    FROM converse.prompt_words(p_prompt) w
     ORDER BY w.ord, w.id
 ),
 enriched AS (

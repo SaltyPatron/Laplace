@@ -46,7 +46,7 @@ AS $$
     )
     SELECT
         agg.tbl,
-        @extschema@.label(agg.type_id) AS relation,
+        realize.label(agg.type_id) AS relation,
         agg.type_id,
         agg.rows,
         round(100.0 * agg.rows / NULLIF(tot.total, 0), 2) AS pct_of_default

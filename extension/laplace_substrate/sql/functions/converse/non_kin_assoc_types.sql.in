@@ -19,7 +19,7 @@
 -- Naming the roots keeps this correct when a new child is added to the manifest --
 -- the exclusion follows automatically instead of silently regressing.
 --
--- Resolved through relation_family_members(), so an unknown or not-yet-seeded name
+-- Resolved through laplace.relation_family_members(), so an unknown or unseeded name
 -- contributes nothing rather than raising. Returns ids only: this is consumed inside
 -- WHERE clauses in hash space, never rendered.
 -- converse.non_kin_assoc_types — GH #862 / #860. No SET, real schema names.

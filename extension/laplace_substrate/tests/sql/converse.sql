@@ -93,12 +93,12 @@ BEGIN
       (consensus_id(w_h,   k_lang, lang_de),     w_h,    k_lang, lang_de,    neutral + 250000000000, sharp_rd, 60000000, 5, now());
 END $$;
 
-SELECT word, (id IS NOT NULL) AS resolved FROM prompt_words('what is a Dog') ORDER BY ord;
+SELECT word, (id IS NOT NULL) AS resolved FROM converse.prompt_words('what is a Dog') ORDER BY ord;
 
 SELECT resolve_phrase('sort a list') = word_id('sort') AS phrase_prefers_leftmost;
 SELECT resolve_phrase('what is a dog') = word_id('dog') AS phrase_finds_dog;
-SELECT resolve_last_word('what is a dog') = word_id('dog') AS last_word_is_dog;
-SELECT resolve_last_word('zzzunknownzzz') IS NULL AS unknown_is_null;
+SELECT converse.resolve_last_word('what is a dog') = word_id('dog') AS last_word_is_dog;
+SELECT converse.resolve_last_word('zzzunknownzzz') IS NULL AS unknown_is_null;
 
 SELECT word_id('dog') = ANY(lexical.lexical_peers(word_id('dog'))) AS peer_includes_self;
 
@@ -146,7 +146,7 @@ SELECT realize.realize(word_id('p'), NULL) AS leaf_realizes;
 SELECT realize.realize(laplace_hash128_blake3('test/converse/synset1'),
                laplace_hash128_blake3('test/converse/lang_en')) AS synset_realizes_member;
 SELECT type_label(relation_type_id('IS_A')) AS isa_label;
-SELECT realize_path(ARRAY[laplace_hash128_blake3('test/converse/synset1'),
+SELECT realize.path(ARRAY[laplace_hash128_blake3('test/converse/synset1'),
                           laplace_hash128_blake3('test/converse/synset2')],
                     ARRAY[relation_type_id('IS_A')],
                     laplace_hash128_blake3('test/converse/lang_en')) AS realized_path;

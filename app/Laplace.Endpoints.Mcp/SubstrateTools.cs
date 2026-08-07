@@ -86,7 +86,7 @@ internal sealed class SubstrateTools
             () => Schema(("term", "string", "the topic", true),
                          ("limit", "integer", "max rows, default 24", false))),
         new("leaders", "Per-band leaderboards of the strongest consensus edges.",
-            "Per-band leaderboards (laplace.consensus_band_edges): the strongest consensus edges in each salience band, fully labeled. Bands 0-12 (1 definitional, 2 taxonomic, 3 equivalence, 4 partitive, 5 causal, 6 oppositional, 7 associative, 9 lexical, 11 standards); SELECT * FROM laplace.relation_bands() for live counts.",
+            "Per-band leaderboards (laplace.consensus_band_edges): the strongest consensus edges in each salience band, fully labeled. Bands 0-12 (1 definitional, 2 taxonomic, 3 equivalence, 4 partitive, 5 causal, 6 oppositional, 7 associative, 9 lexical, 11 standards); SELECT * FROM converse.relation_bands() for live counts.",
             () => Schema(("bands", "string", "comma-separated band numbers, default '1,2,4,5'", false),
                          ("per_band", "integer", "rows per band, default 5", false))),
         new("chat", "One conversational turn; reply is walk-driven and self-witnessing.",

@@ -41,7 +41,9 @@
 -- on SPECIFICITY (coherence / the candidate's own total rated mass) exactly as
 -- chat() does -- same function, same key order, so the two can no longer disagree
 -- about what a prompt is about.
-CREATE OR REPLACE FUNCTION converse(p_prompt text, p_lang bytea DEFAULT NULL)
+DROP FUNCTION IF EXISTS laplace.converse(text, bytea);
+
+CREATE OR REPLACE FUNCTION converse.converse(p_prompt text, p_lang bytea DEFAULT NULL)
     RETURNS text
     LANGUAGE plpgsql STABLE
     SET search_path = @extschema@, public AS $$

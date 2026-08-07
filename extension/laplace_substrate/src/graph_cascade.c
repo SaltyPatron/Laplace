@@ -78,7 +78,7 @@ pg_laplace_cascade(PG_FUNCTION_ARGS)
 
         args[0] = PointerGetDatum(x_txt);
         rc = SPI_execute_with_args(
-            "SELECT laplace.resolve_last_word($1)", 1, argtypes, args, NULL, true, 1);
+            "SELECT converse.resolve_last_word($1)", 1, argtypes, args, NULL, true, 1);
         if (rc != SPI_OK_SELECT || SPI_processed == 0)
         {
             laplace_spi_finish(spi_top);
@@ -94,7 +94,7 @@ pg_laplace_cascade(PG_FUNCTION_ARGS)
 
         args[0] = PointerGetDatum(y_txt);
         rc = SPI_execute_with_args(
-            "SELECT laplace.resolve_last_word($1)", 1, argtypes, args, NULL, true, 1);
+            "SELECT converse.resolve_last_word($1)", 1, argtypes, args, NULL, true, 1);
         if (rc != SPI_OK_SELECT || SPI_processed == 0)
         {
             laplace_spi_finish(spi_top);
@@ -214,7 +214,7 @@ pg_laplace_cascade(PG_FUNCTION_ARGS)
             nulls[3] = 'n';
 
         rc = SPI_execute_with_args(
-            "SELECT laplace.realize_path($1::bytea[], $2::bytea[], $3::int[], $4)",
+            "SELECT realize.path($1::bytea[], $2::bytea[], $3::int[], $4)",
             4, argtypes, args, nulls, true, 1);
 
         if (rc == SPI_OK_SELECT && SPI_processed > 0)
