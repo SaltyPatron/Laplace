@@ -168,10 +168,16 @@ jobs:
             scripts/ensure-foundation.sh \
             scripts/eval-generation.py \
             scripts/eval-probes.json \
-            scripts/eval-baselines.json; do
+            scripts/eval-baselines.json \
+            scripts/shellcheck-gate.sh; do
             [ -f "$f" ] || { echo "::error file=$f::CI-critical file missing"; fail=1; }
           done
           exit "$fail"
+
+      - name: Shellcheck gate (severity error)
+        # GH #847 — catch quote/array bugs and swallowed-failure patterns that
+        # turn into false "all clear". Severity error only; style is out of scope.
+        run: bash scripts/shellcheck-gate.sh
 
       - name: Validate witness-manifest vs orchestration scripts
         run: python3 scripts/validate-pipeline.py

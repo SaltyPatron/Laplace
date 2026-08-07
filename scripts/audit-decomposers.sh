@@ -100,10 +100,15 @@ counts
 if [[ $FRESH -eq 1 ]]; then
   run_just "db-fresh" just db-fresh || exit 1
 elif [[ -z "$FROM" ]]; then
-  run_just "seed-t0 (if needed)" bash -c '
-    n=$('"${PSQL[@]}"' -t -A -c "SELECT count(*) FROM laplace.entities" | tr -d "[:space:]")
-    if [[ "$n" -lt 1000000 ]]; then just seed-t0; else echo "T0 already present ($n entities)"; fi
-  ' || true
+  # GH #847 / shellcheck SC2145: do not nest "${PSQL[@]}" inside a single-quoted
+  # bash -c string — the array cannot expand there and the quote salad is an error.
+  section "seed-t0 (if needed)"
+  n=$("${PSQL[@]}" -t -A -c "SELECT count(*) FROM laplace.entities" | tr -d '[:space:]')
+  if [[ "$n" -lt 1000000 ]]; then
+    run_just "seed-t0" just seed-t0 || true
+  else
+    echo "T0 already present ($n entities)"
+  fi
 fi
 
 should_run() {
