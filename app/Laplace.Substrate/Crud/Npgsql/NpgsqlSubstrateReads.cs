@@ -92,6 +92,33 @@ public static class NpgsqlSubstrateReads
         return rows.Count == 0 ? null : rows[0];
     }
 
+    /// <summary><c>laplace.entity_type_counts_approx()</c> — MCV×reltuples type census (GH #813).</summary>
+    public static Task<IReadOnlyList<(string Type, long EntitiesApprox)>> EntityTypeCountsApproxAsync(
+        NpgsqlDataSource dataSource, CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT type, entities_approx
+            FROM laplace.entity_type_counts_approx()
+            ORDER BY entities_approx DESC
+            LIMIT 32
+            """,
+            static r => (r.IsDBNull(0) ? "" : r.GetString(0), r.IsDBNull(1) ? 0L : r.GetInt64(1)),
+            ct: ct, label: "entity_type_counts_approx", onError: onError);
+
+    /// <summary><c>laplace.partition_pressure()</c> — partition skew via reltuples (GH #813).</summary>
+    public static Task<IReadOnlyList<(string Parent, string Partition, decimal? Pct)>> PartitionPressureAsync(
+        NpgsqlDataSource dataSource, CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT parent, partition, pct_of_parent
+            FROM laplace.partition_pressure(NULL)
+            ORDER BY pct_of_parent DESC NULLS LAST
+            LIMIT 32
+            """,
+            static r => (
+                r.IsDBNull(0) ? "" : r.GetString(0),
+                r.IsDBNull(1) ? "" : r.GetString(1),
+                r.IsDBNull(2) ? (decimal?)null : r.GetDecimal(2)),
+            ct: ct, label: "partition_pressure", onError: onError);
+
     public readonly record struct BandLeaderRow(
         int Band, string SubjectIdHex, string Subject, string Relation,
         string ObjectIdHex, string Object, decimal EffMu, long Witnesses);
