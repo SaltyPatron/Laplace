@@ -1,7 +1,8 @@
+-- BEGIN ATOMIC: GH #764.
 CREATE OR REPLACE FUNCTION source_counts_approx()
     RETURNS TABLE(source text, source_id bytea, evidence_approx bigint)
-    LANGUAGE sql STABLE 
-    AS $$
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
     -- Issue 52: source_counts() full-scans attestations twice (GROUP BY everything
     -- plus a count(DISTINCT) join) — minutes at 135M rows, killed the catalog
     -- endpoints. This is the planner-statistics form, the same sanctioned pattern
@@ -27,5 +28,5 @@ CREATE OR REPLACE FUNCTION source_counts_approx()
            m.sid                                AS source_id,
            (m.freq * rt.reltuples)::bigint      AS evidence_approx
     FROM st, rt, LATERAL unnest(st.vals, st.freqs) AS m(sid, freq)
-    ORDER BY evidence_approx DESC
-$$;
+    ORDER BY evidence_approx DESC;
+END;

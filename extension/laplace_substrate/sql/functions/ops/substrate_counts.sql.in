@@ -1,7 +1,8 @@
+-- BEGIN ATOMIC: GH #764.
 CREATE OR REPLACE FUNCTION substrate_counts()
     RETURNS TABLE(metric text, value bigint)
-    LANGUAGE sql STABLE 
-    AS $$
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
     -- Planner estimates (pg_class.reltuples), NOT count(*). Full scans on 100M+ unvacuumed
     -- tables hung every ingest tail; these numbers are directionally correct post-ingest.
     -- Run ANALYZE for exact counts, or evidence_count()/laplace.source_id() for source precision.
@@ -11,5 +12,5 @@ CREATE OR REPLACE FUNCTION substrate_counts()
     UNION ALL
     SELECT 'laplace.attestations(ESTIMATE)',  GREATEST(0, (SELECT reltuples FROM pg_class WHERE oid = '@extschema@.attestations'::regclass))::bigint
     UNION ALL
-    SELECT 'laplace.consensus(ESTIMATE)',     GREATEST(0, (SELECT reltuples FROM pg_class WHERE oid = '@extschema@.consensus'::regclass))::bigint
-$$;
+    SELECT 'laplace.consensus(ESTIMATE)',     GREATEST(0, (SELECT reltuples FROM pg_class WHERE oid = '@extschema@.consensus'::regclass))::bigint;
+END;
