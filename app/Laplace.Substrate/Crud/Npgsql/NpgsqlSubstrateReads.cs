@@ -421,6 +421,85 @@ public static class NpgsqlSubstrateReads
         return rows.Count == 0 ? (0L, 0d) : rows[0];
     }
 
+    /// <summary><c>laplace.laplace_entities_at_depth(tier)</c>.</summary>
+    public static async Task<long> EntitiesAtDepthCountAsync(
+        NpgsqlDataSource dataSource, short depth, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null)
+    {
+        var rows = await NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT count(*)::bigint FROM laplace.laplace_entities_at_depth(@d)
+            """,
+            static r => r.IsDBNull(0) ? 0L : r.GetInt64(0),
+            p => p.AddWithValue("d", depth),
+            ct: ct, label: "laplace_entities_at_depth", onError: onError).ConfigureAwait(false);
+        return rows.Count == 0 ? 0L : rows[0];
+    }
+
+    /// <summary><c>laplace.laplace_entity_attestations(subject)</c>.</summary>
+    public static Task<IReadOnlyList<(string TypeHex, string ObjectHex, long EffMuRaw)>> EntityAttestationsAsync(
+        NpgsqlDataSource dataSource, byte[] subjectId, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT encode(type_id, 'hex'), encode(object_id, 'hex'), eff_mu_raw
+            FROM laplace.laplace_entity_attestations(@subject, 0)
+            """,
+            static r => (
+                r.IsDBNull(0) ? "" : r.GetString(0),
+                r.IsDBNull(1) ? "" : r.GetString(1),
+                r.IsDBNull(2) ? 0L : r.GetInt64(2)),
+            p => p.AddWithValue("subject", subjectId),
+            ct: ct, label: "laplace_entity_attestations", onError: onError);
+
+    /// <summary><c>laplace.laplace_ancestry(entity, band_mask)</c>.</summary>
+    public static Task<IReadOnlyList<(string AncestorHex, int Depth)>> AncestryAsync(
+        NpgsqlDataSource dataSource, byte[] entityId, byte[] bandMask, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT encode(ancestor_id, 'hex'), depth
+            FROM laplace.laplace_ancestry(@entity, @band, 4)
+            """,
+            static r => (
+                r.IsDBNull(0) ? "" : r.GetString(0),
+                r.IsDBNull(1) ? 0 : r.GetInt32(1)),
+            p =>
+            {
+                p.AddWithValue("entity", entityId);
+                p.AddWithValue("band", bandMask);
+            }, ct: ct, label: "laplace_ancestry", onError: onError);
+
+    /// <summary><c>laplace.laplace_translations(entity, band_mask)</c>.</summary>
+    public static Task<IReadOnlyList<(string TranslationHex, string SharedObjectHex)>> TranslationsAsync(
+        NpgsqlDataSource dataSource, byte[] entityId, byte[] bandMask, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT encode(translation_id, 'hex'), encode(shared_object_id, 'hex')
+            FROM laplace.laplace_translations(@entity, @band)
+            """,
+            static r => (
+                r.IsDBNull(0) ? "" : r.GetString(0),
+                r.IsDBNull(1) ? "" : r.GetString(1)),
+            p =>
+            {
+                p.AddWithValue("entity", entityId);
+                p.AddWithValue("band", bandMask);
+            }, ct: ct, label: "laplace_translations", onError: onError);
+
+    /// <summary><c>laplace.model_jitter_catalog(relation)</c>.</summary>
+    public static Task<IReadOnlyList<(string SubjectHex, string TypeHex, long WitnessCount)>> ModelJitterCatalogAsync(
+        NpgsqlDataSource dataSource, string? relation, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT encode(subject_id, 'hex'), encode(type_id, 'hex'), witness_count
+            FROM laplace.model_jitter_catalog(@rel, 150000000000)
+            LIMIT 32
+            """,
+            static r => (
+                r.IsDBNull(0) ? "" : r.GetString(0),
+                r.IsDBNull(1) ? "" : r.GetString(1),
+                r.IsDBNull(2) ? 0L : r.GetInt64(2)),
+            p => p.AddWithValue("rel", (object?)relation ?? DBNull.Value),
+            ct: ct, label: "model_jitter_catalog", onError: onError);
+
     /// <summary><c>laplace.vertex_tier(flags)</c> / <c>laplace.vertex_atom(flags)</c>.</summary>
     public static async Task<(short Tier, int Atom)> VertexDecodeAsync(
         NpgsqlDataSource dataSource, long flags, CancellationToken ct,

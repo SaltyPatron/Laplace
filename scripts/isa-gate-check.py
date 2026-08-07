@@ -72,7 +72,7 @@ CEILINGS = {
     # G4 scaffolding (W6 D3): grep for CREATE FUNCTION with zero callers outside
     # its own CREATE line. Destination form is substrate CALLS in-degree after W3
     # (#765); this allowlist is shrink-only until that replace lands.
-    "g4_dead_canonical": 7,
+    "g4_dead_canonical": 0,
     # Measured 2026-08-05, landing with its violations enumerated per W6's trap
     # note ("a gate that goes red on merge-day teaches people to ignore it").
     # 29 occurrences across 10 sites, all pre-existing: model_factor (6 names),
@@ -85,6 +85,12 @@ CREATE_FUNCTION = re.compile(
     re.IGNORECASE,
 )
 CALL_TOKEN = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+# CREATE AGGREGATE ... SFUNC = foo / FINALFUNC = bar — real callers without '('.
+AGGREGATE_FUNC_REF = re.compile(
+    r"\b(?:SFUNC|FINALFUNC|MSFUNC|MINVFUNC|COMBINEFUNC|SERIALFUNC|DESERIALFUNC)\s*=\s*"
+    r"(?:[A-Za-z_][A-Za-z0-9_]*\.)?([A-Za-z_][A-Za-z0-9_]*)\b",
+    re.IGNORECASE,
+)
 
 G1_FORMULA = re.compile(
     r"\b(?P<rating>(?:[A-Za-z_][A-Za-z0-9_]*\.)?(?:p_)?rating)"
@@ -474,6 +480,10 @@ def scan_g4_dead_canonical() -> Counter[str]:
                 if "function" in window and "create" in window:
                     continue
             calls[name] += 1
+        for match in AGGREGATE_FUNC_REF.finditer(text):
+            name = match.group(1).lower()
+            if name in defined and rel != defined[name]:
+                calls[name] += 1
 
     found: Counter[str] = Counter()
     for name, def_path in defined.items():

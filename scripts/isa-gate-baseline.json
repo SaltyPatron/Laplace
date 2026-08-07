@@ -653,15 +653,7 @@
       "extension/laplace_substrate/sql/inference/translations.sql.in::HAS_LANGUAGE": 1,
       "extension/laplace_substrate/sql/views/v_word_senses.sql.in::HAS_SENSE": 1
     },
-    "g4_dead_canonical": {
-      "extension/laplace_substrate/sql/functions/analysis/laplace_ancestry.sql.in::laplace_ancestry": 1,
-      "extension/laplace_substrate/sql/functions/analysis/laplace_entities_at_depth.sql.in::laplace_entities_at_depth": 1,
-      "extension/laplace_substrate/sql/functions/analysis/laplace_entity_attestations.sql.in::laplace_entity_attestations": 1,
-      "extension/laplace_substrate/sql/functions/analysis/laplace_translations.sql.in::laplace_translations": 1,
-      "extension/laplace_substrate/sql/functions/analysis/model_jitter_catalog.sql.in::model_jitter_catalog": 1,
-      "extension/laplace_substrate/sql/functions/glicko2/laplace_glicko2_finalfunc.sql.in::laplace_glicko2_finalfunc": 1,
-      "extension/laplace_substrate/sql/functions/glicko2/laplace_glicko2_sfunc.sql.in::laplace_glicko2_sfunc": 1
-    },
+    "g4_dead_canonical": {},
     "g8_band_literalism": {
       "extension/laplace_substrate/sql/functions/lexical/senses_with_context.sql.in::RELATION_HIGHWAY_BAND(C.TYPE_ID)IN(1,7)": 1,
       "extension/laplace_substrate/sql/functions/lexical/senses_with_context.sql.in::RELATION_HIGHWAY_BAND(C.TYPE_ID)IN(2,4,7)": 2
