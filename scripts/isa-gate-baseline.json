@@ -660,12 +660,7 @@
       "extension/laplace_substrate/sql/functions/analysis/laplace_translations.sql.in::laplace_translations": 1,
       "extension/laplace_substrate/sql/functions/analysis/model_jitter_catalog.sql.in::model_jitter_catalog": 1,
       "extension/laplace_substrate/sql/functions/glicko2/laplace_glicko2_finalfunc.sql.in::laplace_glicko2_finalfunc": 1,
-      "extension/laplace_substrate/sql/functions/glicko2/laplace_glicko2_sfunc.sql.in::laplace_glicko2_sfunc": 1,
-      "extension/laplace_substrate/sql/functions/glicko2/laplace_score.sql.in::laplace_score": 1,
-      "extension/laplace_substrate/sql/functions/glicko2/laplace_score_inverse.sql.in::laplace_score_inverse": 1,
-      "extension/laplace_substrate/sql/functions/inspect/attestation_response_type.sql.in::attestation_response_type": 1,
-      "extension/laplace_substrate/sql/functions/inspect/attestation_unary_response_type.sql.in::attestation_unary_response_type": 1,
-      "extension/laplace_substrate/sql/functions/relation/relation_band_types.sql.in::relation_family_type_ids": 1
+      "extension/laplace_substrate/sql/functions/glicko2/laplace_glicko2_sfunc.sql.in::laplace_glicko2_sfunc": 1
     },
     "g8_band_literalism": {
       "extension/laplace_substrate/sql/functions/lexical/senses_with_context.sql.in::RELATION_HIGHWAY_BAND(C.TYPE_ID)IN(1,7)": 1,

@@ -340,17 +340,85 @@ public static class NpgsqlSubstrateReads
     }
 
     /// <summary><c>laplace.intent_preflight(entity_ids, phys_ids, att_ids)</c></summary>
-    public static async Task<long> IntentPreflightNoveltyAsync(
+    public static async Task<byte[]?> IntentPreflightEntityBitmapAsync(
         NpgsqlDataSource dataSource, byte[][] entityIds, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null)
     {
         var rows = await NpgsqlRead.ReadRowsAsync(dataSource, """
-            SELECT (laplace.intent_preflight(@entities, ARRAY[]::bytea[], ARRAY[]::bytea[])).novel_entities
+            SELECT (laplace.intent_preflight(@entities, ARRAY[]::bytea[], ARRAY[]::bytea[])).entity_exists
             """,
-            static r => r.IsDBNull(0) ? 0L : r.GetInt64(0),
+            static r => r.IsDBNull(0) ? null : r.GetFieldValue<byte[]>(0),
             p => p.AddWithValue("entities", entityIds),
             ct: ct, label: "intent_preflight", onError: onError).ConfigureAwait(false);
-        return rows.Count == 0 ? 0L : rows[0];
+        return rows.Count == 0 ? null : rows[0];
+    }
+
+    /// <summary><c>laplace.relation_family_type_ids(family)</c> / <c>relation_band_types(band)</c>.</summary>
+    public static async Task<byte[][]> RelationFamilyTypeIdsAsync(
+        NpgsqlDataSource dataSource, string family, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null)
+    {
+        var rows = await NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT laplace.relation_family_type_ids(@family)
+            """,
+            static r => r.IsDBNull(0) ? Array.Empty<byte[]>() : r.GetFieldValue<byte[][]>(0),
+            p => p.AddWithValue("family", family),
+            ct: ct, label: "relation_family_type_ids", onError: onError).ConfigureAwait(false);
+        return rows.Count == 0 ? [] : rows[0];
+    }
+
+    /// <summary><c>laplace.attestation_response_type(...)</c> — typed attestation frontier.</summary>
+    public static Task<IReadOnlyList<(string ObjectHex, double CombinedEffMu, int SourceCount)>> AttestationResponseTypeAsync(
+        NpgsqlDataSource dataSource, byte[] subjectId, byte[] relationTypeId, int topK, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT encode(object_id, 'hex'), combined_eff_mu, source_count
+            FROM laplace.attestation_response_type(@subject, @rel, NULL, NULL, @k)
+            """,
+            static r => (
+                r.IsDBNull(0) ? "" : r.GetString(0),
+                r.IsDBNull(1) ? 0d : r.GetDouble(1),
+                r.IsDBNull(2) ? 0 : r.GetInt32(2)),
+            p =>
+            {
+                p.AddWithValue("subject", subjectId);
+                p.AddWithValue("rel", relationTypeId);
+                p.AddWithValue("k", topK);
+            }, ct: ct, label: "attestation_response_type", onError: onError);
+
+    /// <summary><c>laplace.attestation_unary_response_type(...)</c></summary>
+    public static Task<IReadOnlyList<(double CombinedEffMu, int SourceCount)>> AttestationUnaryResponseTypeAsync(
+        NpgsqlDataSource dataSource, byte[] subjectId, byte[] relationTypeId, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT combined_eff_mu, source_count
+            FROM laplace.attestation_unary_response_type(@subject, @rel, NULL, NULL)
+            """,
+            static r => (
+                r.IsDBNull(0) ? 0d : r.GetDouble(0),
+                r.IsDBNull(1) ? 0 : r.GetInt32(1)),
+            p =>
+            {
+                p.AddWithValue("subject", subjectId);
+                p.AddWithValue("rel", relationTypeId);
+            }, ct: ct, label: "attestation_unary_response_type", onError: onError);
+
+    /// <summary><c>laplace.laplace_score(v, m)</c> / <c>laplace_score_inverse(score, m)</c>.</summary>
+    public static async Task<(long Score, double Inverse)> LaplaceScorePairAsync(
+        NpgsqlDataSource dataSource, double v, double m, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null)
+    {
+        var rows = await NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT s.score, laplace.laplace_score_inverse(s.score, @m)
+            FROM (SELECT laplace.laplace_score(@v, @m) AS score) s
+            """,
+            static r => (r.IsDBNull(0) ? 0L : r.GetInt64(0), r.IsDBNull(1) ? 0d : r.GetDouble(1)),
+            p =>
+            {
+                p.AddWithValue("v", v);
+                p.AddWithValue("m", m);
+            }, ct: ct, label: "laplace_score", onError: onError).ConfigureAwait(false);
+        return rows.Count == 0 ? (0L, 0d) : rows[0];
     }
 
     /// <summary><c>laplace.vertex_tier(flags)</c> / <c>laplace.vertex_atom(flags)</c>.</summary>
