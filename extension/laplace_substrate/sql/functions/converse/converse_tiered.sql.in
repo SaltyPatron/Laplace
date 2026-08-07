@@ -140,8 +140,8 @@ BEGIN
     -- taking each word's best-rated sense, is 2.67s and yields the identical
     -- concept set (66 concepts, both ways). Never resolve per row what the
     -- planner can resolve as a set.
-    -- Fence HAS_SENSE family once — relation_in_family() as a join qual is an
-    -- uninlinable per-edge probe and timed out the concept lift (#878 / #908).
+    -- Fence HAS_SENSE family once (incl. dynamic children via relation_in_family).
+    -- Per-edge relation_in_family() as a join qual timed out the concept lift (#878).
     INSERT INTO _ct_concept (unit, concept)
     SELECT DISTINCT ON (q.id, q.entity_id) q.id, sc.object_id
     FROM (
@@ -151,7 +151,12 @@ BEGIN
         WHERE tp.ctier = 2
     ) q
     JOIN laplace.consensus sc ON sc.subject_id = q.entity_id
-    JOIN laplace.relation_family_members('HAS_SENSE') fam ON fam.id = sc.type_id
+    JOIN (
+        SELECT e.id
+        FROM laplace.entities e
+        WHERE e.type_id = laplace.entity_type_id('RelationType')
+          AND laplace.relation_in_family(e.id, 'HAS_SENSE')
+    ) fam ON fam.id = sc.type_id
     ORDER BY q.id, q.entity_id, laplace.eff_mu(sc.rating, sc.rd) DESC, sc.object_id;
 
     CREATE INDEX IF NOT EXISTS _ct_concept_unit ON _ct_concept (unit);
