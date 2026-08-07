@@ -698,7 +698,7 @@ SQL
 
 phase_perfcache_guc() {
   echo "===== PHASE — PERFCACHE GUC ====="
-  local bin hwbin
+  local bin hwbin chessbin
   bin=$(find "$LAPLACE_INSTALL_PREFIX/share/laplace" -name 'laplace_t0_perfcache*.bin' 2>/dev/null | sort -V | tail -1)
   test -n "$bin" || { echo "::error::t0 perfcache blob not installed under $LAPLACE_INSTALL_PREFIX/share/laplace"; exit 1; }
   # The highway perfcache is built + installed (engine/core/CMakeLists.txt:206) and required
@@ -707,13 +707,20 @@ phase_perfcache_guc() {
   # hart-server and the band-mask path never used its perfcache. Wire it here too.
   hwbin=$(find "$LAPLACE_INSTALL_PREFIX/share/laplace" -name 'laplace_highway_perfcache*.bin' 2>/dev/null | sort -V | tail -1)
   test -n "$hwbin" || { echo "::error::highway perfcache blob not installed under $LAPLACE_INSTALL_PREFIX/share/laplace"; exit 1; }
+  # GH #822 — chess position_id → coord floor. Same class of omission as highway:
+  # the blob was built/installed and chess.position_ready() stayed false because
+  # the GUC was never pointed at it.
+  chessbin=$(find "$LAPLACE_INSTALL_PREFIX/share/laplace" -name 'laplace_chess_position_perfcache*.bin' 2>/dev/null | sort -V | tail -1)
+  test -n "$chessbin" || { echo "::error::chess position perfcache blob not installed under $LAPLACE_INSTALL_PREFIX/share/laplace"; exit 1; }
   psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 \
     -c "LOAD 'laplace_substrate'" \
     -c "ALTER SYSTEM SET laplace_substrate.perfcache_path = '$bin'" \
     -c "ALTER SYSTEM SET laplace_substrate.highway_perfcache_path = '$hwbin'" \
+    -c "ALTER SYSTEM SET laplace_substrate.chess_position_perfcache_path = '$chessbin'" \
     -c "SELECT pg_reload_conf()"
   echo "perfcache_path -> $bin"
   echo "highway_perfcache_path -> $hwbin"
+  echo "chess_position_perfcache_path -> $chessbin"
   # Preload the extension in the postmaster so every forked backend inherits
   # the mmap'd perfcache + reverse index copy-on-write (_PG_init prewarm)
   # instead of paying a multi-second lazy load on its first substrate call.
