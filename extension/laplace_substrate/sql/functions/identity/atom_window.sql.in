@@ -1,0 +1,9 @@
+-- Configured tier-0 atom window N (GH #813). Never a SQL literal — the C
+-- binding reads LAPLACE_PERFCACHE_RECORD_COUNT from the perfcache format header.
+DROP FUNCTION IF EXISTS laplace.atom_window();
+CREATE OR REPLACE FUNCTION atom_window()
+    RETURNS bigint
+    LANGUAGE C
+    IMMUTABLE
+    PARALLEL SAFE
+    AS 'MODULE_PATHNAME', 'pg_laplace_atom_window';

@@ -244,6 +244,8 @@ functions/identity/is_compositional_type.sql.in
 functions/identity/compositional_tier_distribution.sql.in
 functions/identity/substrate_health.sql.in
 functions/identity/hash128_lo.sql.in
+functions/identity/atom_window.sql.in
+functions/identity/atom_census.sql.in
 functions/ingest/intent_preflight_result.sql.in
 functions/ingest/intent_preflight.sql.in
 functions/generation/drop_retired_content_lane.sql.in
