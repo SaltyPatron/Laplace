@@ -273,7 +273,7 @@ BEGIN
     IF topic IS NULL THEN
         out := converse(p_prompt);
     ELSE
-        resolved := topic;  xl := realize(topic, lang);
+        resolved := topic;  xl := realize.realize(topic, lang);
         topic2 := p_topic2;
 
         -- Second topic for the two-topic shapes: the caller's, else the next

@@ -242,7 +242,7 @@ BEGIN
     -- the witnessed bytes are unchanged and still reconstruct, this only marks
     -- the seam between two separately-witnessed clauses.
     FOR i IN 1..COALESCE(array_length(said, 1), 0) LOOP
-        s := btrim(COALESCE(realize(said[i], p_lang), render_text(said[i], 512)));
+        s := btrim(COALESCE(realize.realize(said[i], p_lang), render_text(said[i], 512)));
         IF s IS NOT NULL AND s <> '' THEN
             IF s !~ '[.!?;:,]$' THEN s := s || '.'; END IF;
             parts := parts || s;

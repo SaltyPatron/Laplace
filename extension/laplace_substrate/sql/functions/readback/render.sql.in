@@ -17,7 +17,7 @@ CREATE OR REPLACE FUNCTION render(p_id bytea) RETURNS text
         -- abstains (NULL) when there is no grounded name, letting the fallbacks
         -- below run. It is reached only after the canonical-name and codepoint
         -- fast paths above, so tier-0 glyph reconstruction is unchanged.
-        @extschema@.resolve_name(p_id),
+        realize.resolve_name(p_id),
         render_text(p_id),
         encode(p_id, 'hex') || '…')
 $$;

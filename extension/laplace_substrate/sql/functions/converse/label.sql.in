@@ -15,7 +15,7 @@ CREATE OR REPLACE FUNCTION label(p_id bytea)
     -- follow-up once label_or_hex() owns the id-display decision and the goldens
     -- are regenerated on a live DB.)
     SELECT COALESCE(
-        resolve_name(p_id),
+        realize.resolve_name(p_id),
         NULLIF(
             regexp_replace(
             regexp_replace(

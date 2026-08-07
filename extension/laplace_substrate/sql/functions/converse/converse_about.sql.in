@@ -28,7 +28,7 @@ BEGIN
     WHERE f.fact_kind <> 'web';
 
     IF prose IS NULL THEN
-        lbl := realize(p_syn, p_lang);
+        lbl := realize.realize(p_syn, p_lang);
         IF lbl IS NOT NULL THEN
             prose := 'The concept ' || lbl || ' is one I hold.';
         END IF;
