@@ -31,7 +31,14 @@ RETURNS TABLE(
     flags bigint
 )
 LANGUAGE sql STABLE PARALLEL SAFE
-SET search_path = @extschema@, public AS $$
+-- NO `SET search_path`. MEASURED 2026-08-07: this function was 59 ms to return
+-- three rows, of which ~30 ms was PLANNING. A SET clause invalidates plan caching --
+-- the body is re-planned on every invocation because the search_path in effect can
+-- change what an unqualified name resolves to. Without it the plan is cached for the
+-- session, and this is the most-called query in the system (1,496,183 calls), so 30 ms
+-- of planner work was being paid a million and a half times for a walk that executes
+-- in 5 ms.
+AS $$
 WITH RECURSIVE reach(entity_id, depth) AS (
     SELECT r.id, 0
     FROM unnest(COALESCE(p_roots, ARRAY[]::bytea[])) AS r(id)
@@ -41,7 +48,7 @@ WITH RECURSIVE reach(entity_id, depth) AS (
     FROM reach rc
     CROSS JOIN LATERAL (
         SELECT w.trajectory
-        FROM v_word_points w
+        FROM @extschema@.v_word_points w
         WHERE w.id = rc.entity_id AND w.trajectory IS NOT NULL
         ORDER BY w.physicality_id
         LIMIT 1
@@ -80,10 +87,38 @@ picked AS (
     -- sharing a physicality id means that id is not a function of what it holds,
     -- and the tier-2/tier-3 pair means collapse_idx did not fire for content that
     -- is span-identical to its own single child. Both are upstream of here.
+    -- ST_NPoints IS PAID ONLY WHERE IT DECIDES ANYTHING (measured 2026-08-07).
+    --
+    -- The tiebreak above is correct and load-bearing, but it was in the sort key,
+    -- so every id paid a PostGIS call per candidate row to break a tie that only
+    -- 5,063 entities in the whole substrate actually have. Measured on this box:
+    -- the DISTINCT ON is 2.7 ms without ST_NPoints in the ORDER BY and 14.1 ms with
+    -- it -- 11.4 ms of PostGIS per call, and this function is the single most-called
+    -- query in the system (1,496,183 calls).
+    --
+    -- Split: entities with ONE candidate row need no tiebreak at all and take the
+    -- cheap path; only the genuinely ambiguous ones evaluate ST_NPoints. Identical
+    -- output -- for a single-row group every ORDER BY suffix is a no-op, so the row
+    -- chosen is the same row.
+    SELECT p.entity_id, p.trajectory
+    FROM (
+        SELECT w.id AS entity_id, w.trajectory,
+               count(*)      OVER (PARTITION BY w.id) AS n_cand,
+               row_number()  OVER (PARTITION BY w.id ORDER BY w.physicality_id) AS rn
+        FROM @extschema@.v_word_points w
+        JOIN node n ON n.entity_id = w.id
+        WHERE w.trajectory IS NOT NULL
+    ) p
+    WHERE p.n_cand = 1 AND p.rn = 1
+    UNION ALL
     SELECT DISTINCT ON (w.id) w.id AS entity_id, w.trajectory
-    FROM v_word_points w
+    FROM @extschema@.v_word_points w
     JOIN node n ON n.entity_id = w.id
     WHERE w.trajectory IS NOT NULL
+      AND EXISTS (
+          SELECT 1 FROM @extschema@.v_word_points w2
+          WHERE w2.id = w.id AND w2.trajectory IS NOT NULL
+            AND w2.physicality_id IS DISTINCT FROM w.physicality_id)
     ORDER BY w.id, w.physicality_id, public.ST_NPoints(w.trajectory) DESC
 )
 SELECT pk.entity_id AS parent_id, u.ordinal, u.entity_id AS child_id, u.run_length, u.flags

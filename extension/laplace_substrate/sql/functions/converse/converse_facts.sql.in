@@ -30,9 +30,21 @@ DECLARE
     b_tax  int := 2;   -- taxonomic band (is-a / hypernym)
     b_part int := 4;   -- partitive band (parts)
     b_assoc int := 7;  -- associative band (related)
+    -- Band -> relation-type ids, resolved ONCE per call. The predicates below used
+    -- `relation_highway_band(c.type_id) = b_*` directly against consensus, which is
+    -- LIST-partitioned by type_id over ~48M rows: a function on the partition key
+    -- prunes nothing, indexes nothing, and runs per edge scanned. The band is a
+    -- property of ~221 relation types, so it is resolved here and each read becomes
+    -- an indexed (subject_id, type_id) probe against a bound array.
+    t_def   bytea[];
+    t_part  bytea[];
+    t_assoc bytea[];
     v_lbl    text;
     tax_type bytea;
 BEGIN
+    t_def   := relation_band_types(b_def);
+    t_part  := relation_band_types(b_part);
+    t_assoc := relation_band_types(b_assoc);
     IF p_syn IS NULL THEN
         RETURN;
     END IF;
@@ -48,7 +60,7 @@ BEGIN
            ARRAY[c.subject_id, c.object_id],
            ARRAY[c.type_id]
     FROM consensus c
-    WHERE c.subject_id = p_syn AND relation_highway_band(c.type_id) = b_def
+    WHERE c.subject_id = p_syn AND c.type_id = ANY (t_def)
     ORDER BY eff_mu(c.rating, c.rd) DESC
     LIMIT 1;
 
@@ -123,7 +135,7 @@ BEGIN
                eff_mu_display(c.rating, c.rd) AS mu_disp,
                c.witness_count AS wc
         FROM consensus c
-        WHERE c.subject_id = p_syn AND relation_highway_band(c.type_id) = b_part
+        WHERE c.subject_id = p_syn AND c.type_id = ANY (t_part)
         ORDER BY eff_mu(c.rating, c.rd) DESC
         LIMIT 6
     ) x
@@ -157,7 +169,7 @@ BEGIN
                c.witness_count AS wc
         FROM consensus c
         WHERE c.subject_id = p_syn
-          AND relation_highway_band(c.type_id) = b_assoc
+          AND c.type_id = ANY (t_assoc)
           AND c.type_id NOT IN (SELECT id FROM non_kin_assoc_types())
         ORDER BY eff_mu(c.rating, c.rd) DESC
         LIMIT 8

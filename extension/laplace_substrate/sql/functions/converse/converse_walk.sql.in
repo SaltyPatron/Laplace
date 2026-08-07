@@ -29,6 +29,9 @@ DECLARE
     -- integers duplicated across this file, converse() and converse_facts() anyway
     -- -- relation_band_catalog() is the published surface for band identity.
     b_def  int := 1;   -- definitional band (gloss)
+    -- Resolved once (see converse_facts): a function on consensus.type_id is a
+    -- function on the partition key, so it prunes nothing and runs per edge.
+    t_def  bytea[];
     SENT   bytea := '\x00';
     MINLEN int := 5;
     syn    bytea;
@@ -41,6 +44,7 @@ DECLARE
     rng    bigint;
     out_ids bytea[];
 BEGIN
+    t_def := relation_band_types(b_def);
     -- ORIENT: the same native election chat() and converse() run — one election,
     -- one key order, so the three cannot disagree about what a prompt is about.
     -- prompt_coherence returns the elected TOKEN alongside its synset, which is
@@ -102,7 +106,7 @@ BEGIN
             SELECT c.object_id AS gid, 50::bigint AS wt, true AS is_core,
                    eff_mu(c.rating, c.rd) AS mu
             FROM consensus c
-            WHERE c.subject_id = syn AND relation_highway_band(c.type_id) = b_def
+            WHERE c.subject_id = syn AND c.type_id = ANY (t_def)
             UNION ALL
             SELECT co.entity_id, 40, false,
                    COALESCE(MAX(eff_mu(k.rating, k.rd)), glicko2_neutral_mu())
