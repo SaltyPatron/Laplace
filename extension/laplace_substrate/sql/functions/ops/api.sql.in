@@ -21,7 +21,9 @@ AS $$
                 'laplace_hilbert_encode',
                 'laplace_radius_origin',
                 'laplace_hash128_blake3',
-                'laplace_mantissa_unpack'
+                'laplace_mantissa_unpack',
+                'laplace_distance_4d',
+                'laplace_angular_distance_4d'
             ]))
           )
       AND (p_like IS NULL
