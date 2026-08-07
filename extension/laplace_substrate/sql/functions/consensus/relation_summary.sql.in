@@ -13,7 +13,11 @@ CREATE OR REPLACE FUNCTION relation_summary(p_x bytea, p_y bytea)
              CASE WHEN g.geo IS NOT NULL AND g.geo < 0.4 THEN '; structurally near'
                   ELSE '' END)
     FROM (SELECT 1) one
-    LEFT JOIN LATERAL (SELECT * FROM relate_path(p_x, p_y) LIMIT 1) r ON true
+    -- No LIMIT: relate_path already picks its single winner on (len, mu) before it
+    -- renders anything, so it returns at most one row. The LIMIT that used to sit
+    -- here read as a guard over an unordered pick and would have silently masked a
+    -- real regression if that internal ranking were ever dropped.
+    LEFT JOIN LATERAL (SELECT * FROM relate_path(p_x, p_y)) r ON true
     LEFT JOIN LATERAL (SELECT usage_overlap(p_x, p_y) AS n) u ON true
     LEFT JOIN LATERAL (
         SELECT public.laplace_angular_distance_4d(
