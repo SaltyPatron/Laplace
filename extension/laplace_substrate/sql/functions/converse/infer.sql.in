@@ -39,7 +39,7 @@ WITH ranked AS (
     FROM converse.prompt_coherence(p_prompt) y
 ),
 topic AS (
-    SELECT r.synset_id, r.rel_type_id FROM ranked r WHERE r.rk = 1
+    SELECT r.synset_id, r.rel_type_id, r.tok FROM ranked r WHERE r.rk = 1
 ),
 -- EVERY sense of every bias token, not the per-token argmax. Shipped first
 -- as prompt_coherence's elected sense per bias token and measured broken the
@@ -62,7 +62,11 @@ biasfam AS (
 ),
 cand AS (
     SELECT c.object_id AS id, laplace.eff_mu(c.rating, c.rd) AS m
-    FROM laplace.consensus c JOIN topic t ON c.subject_id = t.synset_id
+    FROM topic t
+    -- WordNet antonymy (and similar) lands on the WORD id; election seats a
+    -- synset. Read both subjects or a typed antonym prompt returns empty
+    -- while untyped still sees the synset's other edges (GH #756.3).
+    JOIN laplace.consensus c ON c.subject_id IN (t.synset_id, t.tok)
     WHERE c.object_id IS NOT NULL
       -- Typed scan when the election named a relation; full distribution otherwise
       -- (GH #756.3 — prompt_coherence already returns rel_type_id).
