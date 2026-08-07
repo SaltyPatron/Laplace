@@ -207,6 +207,39 @@ public static class NpgsqlSubstrateReads
         return rows.Count == 0 ? 0L : rows[0];
     }
 
+    /// <summary><c>laplace.compositional_tier_distribution()</c></summary>
+    public static Task<IReadOnlyList<(short Tier, long N)>> CompositionalTierDistributionAsync(
+        NpgsqlDataSource dataSource, CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT tier, n FROM laplace.compositional_tier_distribution() ORDER BY tier
+            """,
+            static r => (r.GetInt16(0), r.GetInt64(1)),
+            ct: ct, label: "compositional_tier_distribution", onError: onError);
+
+    /// <summary><c>laplace.consensus_tier_distribution()</c></summary>
+    public static Task<IReadOnlyList<(short Tier, long Relations)>> ConsensusTierDistributionAsync(
+        NpgsqlDataSource dataSource, CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT subject_tier, relations FROM laplace.consensus_tier_distribution() ORDER BY subject_tier
+            """,
+            static r => (r.GetInt16(0), r.GetInt64(1)),
+            ct: ct, label: "consensus_tier_distribution", onError: onError);
+
+    /// <summary><c>laplace.render_gaps(limit)</c> — ids that consensus references but cannot render.</summary>
+    public static Task<IReadOnlyList<(string IdHex, string Roles, long Refs)>> RenderGapsAsync(
+        NpgsqlDataSource dataSource, int limit, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT encode(id, 'hex'), roles, refs
+            FROM laplace.render_gaps(@limit)
+            """,
+            static r => (
+                r.IsDBNull(0) ? "" : r.GetString(0),
+                r.IsDBNull(1) ? "" : r.GetString(1),
+                r.IsDBNull(2) ? 0L : r.GetInt64(2)),
+            p => p.AddWithValue("limit", limit),
+            ct: ct, label: "render_gaps", onError: onError);
+
     public readonly record struct BandLeaderRow(
         int Band, string SubjectIdHex, string Subject, string Relation,
         string ObjectIdHex, string Object, decimal EffMu, long Witnesses);
