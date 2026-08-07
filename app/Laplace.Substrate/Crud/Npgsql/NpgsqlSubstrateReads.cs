@@ -466,30 +466,8 @@ public static class NpgsqlSubstrateReads
     public static Task<IReadOnlyList<double>> IngestFidelityPositiveScoresAsync(
         NpgsqlDataSource dataSource, string relation, string groundTruth, int n,
         CancellationToken ct = default, NpgsqlRead.ErrorTranslator? onError = null) =>
-        NpgsqlRead.ReadRowsAsync(dataSource, """
-            WITH vocab AS (
-              SELECT subject_id AS id FROM laplace.subjects_of_type(@rel)
-            ),
-            syn AS (
-              SELECT c.subject_id AS w, c.object_id AS sense
-              FROM laplace.consensus c
-              WHERE c.type_id = laplace.relation_type_id(@gt)
-                AND c.subject_id IN (SELECT id FROM vocab)
-                AND c.object_id IS NOT NULL
-            ),
-            pairs AS (
-              SELECT DISTINCT a.w AS w1, b.w AS w2
-              FROM syn a JOIN syn b ON a.sense = b.sense AND a.w < b.w
-            )
-            SELECT GREATEST(
-              COALESCE((SELECT laplace.eff_mu_display(c.rating, c.rd)
-                        FROM laplace.consensus c
-                        WHERE c.id = laplace.consensus_id(p.w1, laplace.relation_type_id(@rel), p.w2)), 0),
-              COALESCE((SELECT laplace.eff_mu_display(c.rating, c.rd)
-                        FROM laplace.consensus c
-                        WHERE c.id = laplace.consensus_id(p.w2, laplace.relation_type_id(@rel), p.w1)), 0))::float8
-            FROM (SELECT w1, w2 FROM pairs ORDER BY random() LIMIT @n) p
-            """,
+        NpgsqlRead.ReadRowsAsync(dataSource,
+            "SELECT score FROM laplace.eval_ingest_fidelity_positives(@rel, @gt, @n)",
             static r => r.GetDouble(0),
             p =>
             {
@@ -502,30 +480,12 @@ public static class NpgsqlSubstrateReads
     public static Task<IReadOnlyList<double>> IngestFidelityNegativeScoresAsync(
         NpgsqlDataSource dataSource, string relation, string groundTruth, int n,
         CancellationToken ct = default, NpgsqlRead.ErrorTranslator? onError = null) =>
-        NpgsqlRead.ReadRowsAsync(dataSource, """
-            WITH vocab AS (
-              SELECT subject_id AS id FROM laplace.subjects_of_type(@rel)
-            ),
-            samp AS (SELECT id, row_number() OVER (ORDER BY random()) AS rn FROM vocab),
-            cnt  AS (SELECT count(*) AS c FROM samp),
-            neg  AS (
-              SELECT a.id AS w1, b.id AS w2
-              FROM samp a JOIN samp b ON b.rn = a.rn + (SELECT c/2 FROM cnt)
-            )
-            SELECT GREATEST(
-              COALESCE((SELECT laplace.eff_mu_display(c.rating, c.rd)
-                        FROM laplace.consensus c
-                        WHERE c.id = laplace.consensus_id(p.w1, laplace.relation_type_id(@rel), p.w2)), 0),
-              COALESCE((SELECT laplace.eff_mu_display(c.rating, c.rd)
-                        FROM laplace.consensus c
-                        WHERE c.id = laplace.consensus_id(p.w2, laplace.relation_type_id(@rel), p.w1)), 0))::float8
-            FROM (SELECT w1, w2 FROM neg ORDER BY random() LIMIT @n) p
-            """,
+        NpgsqlRead.ReadRowsAsync(dataSource,
+            "SELECT score FROM laplace.eval_ingest_fidelity_negatives(@rel, @n)",
             static r => r.GetDouble(0),
             p =>
             {
                 p.AddWithValue("rel", relation);
-                p.AddWithValue("gt", groundTruth);
                 p.AddWithValue("n", n);
             }, ct: ct, label: "eval_ingest_fidelity_neg", onError: onError);
 
@@ -1228,32 +1188,55 @@ public static class NpgsqlSubstrateReads
         string ObjectIdHex, string Object, decimal EffMu, long Witnesses);
 
     /// <summary>
-    /// The bounded top-M edges by salience band x eff_mu — supersedes
-    /// <c>laplace.top_relations</c> for API reads (full-table edge_rank() measured
-    /// &gt;9 minutes live) until a calculated-layer variant lands extension-side.
+    /// The bounded top-M edges by salience band x eff_mu. This is the LABELING layer
+    /// over <c>laplace.top_relations</c> and nothing else.
+    ///
+    /// It used to hand-roll the ranking instead, on the stated grounds that
+    /// top_relations ran "full-table edge_rank() measured &gt;9 minutes live". That
+    /// defect was fixed extension-side (Issue 52: bounded-candidate form, raw-eff_mu
+    /// head via consensus_eff_mu_btree, measured 0.5s at 124M) and the copy here was
+    /// never retired — so the API kept serving the superseded shape, with a scalar
+    /// label_or_hex per row on top of it. On 2026-08-06 that query held AccessShareLock
+    /// for 2h08m, queued an ALTER EXTENSION behind it, and wedged the whole read
+    /// surface. Rank in the installed core, label ONCE after the limit — the same
+    /// rank-then-label rule edges() follows.
     /// </summary>
     public static Task<IReadOnlyList<TopRelationEdgeRow>> TopRelationsAsync(
         NpgsqlConnection conn, int limit, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(conn, """
+            WITH t AS MATERIALIZED (
+                SELECT r.subject_id, r.type_id, r.object_id, r.eff_mu, r.witnesses,
+                       row_number() OVER () AS ord
+                FROM laplace.top_relations(@limit) r
+            ),
+            ids AS MATERIALIZED (
+                SELECT array_agg(v.id ORDER BY t.ord, v.slot) AS a
+                FROM t
+                CROSS JOIN LATERAL (VALUES (t.subject_id, 1), (t.object_id, 2)) AS v(id, slot)
+            ),
+            rel AS MATERIALIZED (
+                SELECT d.type_id,
+                       COALESCE(NULLIF(laplace.relation_canonical(d.type_id), ''),
+                                laplace.label_or_hex(d.type_id)) AS relation
+                FROM (SELECT DISTINCT t.type_id FROM t) d
+            ),
+            lbl AS MATERIALIZED (
+                SELECT laplace.realize_batch(ids.a, NULL) AS l FROM ids
+            )
             SELECT
                 encode(t.subject_id, 'hex') AS subject_id_hex,
-                laplace.label_or_hex(t.subject_id) AS subject_label,
+                COALESCE(lbl.l[(t.ord - 1) * 2 + 1], laplace.label_or_hex(t.subject_id)) AS subject_label,
                 encode(t.type_id, 'hex') AS type_id_hex,
-                laplace.label_or_hex(t.type_id) AS type_label,
+                rel.relation AS type_label,
                 encode(t.object_id, 'hex') AS object_id_hex,
-                laplace.label_or_hex(t.object_id) AS object_label,
+                COALESCE(lbl.l[(t.ord - 1) * 2 + 2], laplace.label_or_hex(t.object_id)) AS object_label,
                 t.eff_mu,
-                t.witness_count AS witnesses
-            FROM (
-                SELECT c.subject_id, c.type_id, c.object_id, c.eff_mu, c.eff_mu_raw, c.witness_count
-                FROM laplace.v_consensus_resolved c
-                WHERE c.object_id IS NOT NULL
-                ORDER BY c.eff_mu_raw DESC
-                LIMIT GREATEST(5000, @limit * 25)
-            ) t
-            ORDER BY laplace.edge_rank(t.type_id, t.eff_mu_raw::numeric) DESC, t.witness_count DESC
-            LIMIT @limit
+                t.witnesses
+            FROM t
+            JOIN rel ON rel.type_id = t.type_id
+            CROSS JOIN lbl
+            ORDER BY t.ord
             """,
             static r => new TopRelationEdgeRow(
                 r.GetString(0), r.GetString(1), r.GetString(2), r.GetString(3),
@@ -2072,16 +2055,16 @@ public static class NpgsqlSubstrateReads
     public readonly record struct EntityTypeCountRow(byte[] TypeId, long Count);
 
     /// <summary>
-    /// Count entities grouped by type_id for an ANY filter. No installed
-    /// <c>entity_counts_by_types</c> yet — centralized so hosts do not hand-write it.
+    /// Count entities per requested type_id through the installed
+    /// <c>entity_counts_by_types</c>. Every requested type comes back, including
+    /// the ones with no rows — a 0 count and an absent row are different answers
+    /// and the installed function keeps them apart.
     /// </summary>
     public static Task<IReadOnlyList<EntityTypeCountRow>> EntityCountsByTypesAsync(
         NpgsqlDataSource dataSource, byte[][] typeIds, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
-            SELECT type_id, count(*) FROM laplace.entities
-            WHERE type_id = ANY(@types)
-            GROUP BY type_id
+            SELECT type_id, entities FROM laplace.entity_counts_by_types(@types)
             """,
             static r => new EntityTypeCountRow((byte[])r[0], r.GetInt64(1)),
             p =>

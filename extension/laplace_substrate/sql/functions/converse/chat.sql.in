@@ -19,8 +19,25 @@
 --           write is session_topics app-state.
 --
 -- The English pattern ladder this function used to run on (parse_ask, plus five
--- inline regexes over the prompt) is gone. It answered only English, in a
--- substrate whose identity law is language-agnostic by construction.
+-- inline regexes over the prompt) is gone from the PARSE side. It answered only
+-- English, in a substrate whose identity law is language-agnostic by construction.
+--
+-- IT IS NOT GONE FROM THE RENDER SIDE, and this header used to claim otherwise
+-- (GH #901). The body still glues realized labels together with hardcoded English
+-- connectives -- ' has parts such as ', 'Kinds of X include ', ' is related to ',
+-- 'That is the core of what I hold about ', 'I hold no witnessed edges for ' --
+-- and the band lens prefixes each line with relation_band_catalog()'s names, which
+-- are English strings. A Bulgarian prompt whose lang resolves correctly gets
+-- Bulgarian labels inside English scaffolding: the same defect as the 2026-07-25
+-- Bulgarian-dog incident that the language-inference block below exists to fix,
+-- one layer down from where that block operates.
+--
+-- Recorded, not fixed. The three candidate fixes (connectives as realized entities
+-- per language through consensus; a per-language template table keyed on the
+-- resolved lang; or accepting English scaffolding as an S9 fallback-tier limit)
+-- are a design decision, not a cleanup. What was NOT defensible was a header
+-- asserting the ladder was gone while six English templates shipped in the body,
+-- so the header now says what the body does.
 DROP FUNCTION IF EXISTS chat(text, bytea, bytea);
 
 CREATE OR REPLACE FUNCTION chat(p_prompt text,
@@ -120,76 +137,32 @@ BEGIN
         -- topic resolution, and it scales with candidates instead of with edges.
         --
         -- popcount is BREADTH (how many distinct relation types this concept
-        -- participates in), not edge count -- deliberately. For "which prompt token is
-        -- the topic", a concept wired into many kinds of relation is the better
-        -- answer than one with many edges of a single type, and the primary key
-        -- (denote_mu) already carries strength. Not a cheaper approximation of the
-        -- old number: a better-shaped one that happens to be cheap.
-        --
+        -- participates in), not edge count. NULL mask (entity folded but not yet
+        -- drained) sorts last via NULLS LAST rather than reading as zero-breadth.
         -- No bytea &/| in Postgres and no popcount-of-intersection is published, so
-        -- this counts the whole mask rather than masking to the content bands first.
-        -- If that intersection is wanted, it belongs in C next to
-        -- laplace_highway_popcount, not rebuilt as a consensus scan here.
-        -- NULL mask (entity folded but not yet drained) sorts last via NULLS LAST
-        -- rather than being treated as zero-breadth.
-        -- BREADTH FIRST, denote_mu only as the tiebreak. Measured on
-        -- "What are the parts of a car?" (2026-07-25, seeded corpus):
+        -- this counts the whole mask rather than masking to content bands first; if
+        -- that intersection is wanted it belongs in C next to
+        -- laplace_highway_popcount, never rebuilt as a consensus scan here.
         --
-        --   token  denote_mu  breadth  band_mass
-        --   a         1747.8        8         11
-        --   are       1631.1        8         17
-        --   car       1456.1       25         74
-        --   of        1311.4       10          9
+        -- DEAD RANKINGS, one line each. Each was live, each was replaced after a
+        -- measured failure; the post-mortems are in git history at the commit that
+        -- removed them, and GH #902 is why they are no longer inlined here. They are
+        -- listed so the next reader does not re-propose one, not to be reasoned from.
+        --   surface match       (pre-2026-07-25) rendered each candidate and compared
+        --                       strings -- render-to-classify, English-shaped, and it
+        --                       oriented "parts of a car" onto `parts`.
+        --   denote_mu first     elected articles: "What is a dog?" -> the letter A.
+        --   breadth first       (2026-07-25) picked obscure senses -- SIRE for dog,
+        --                       WHIP for car -- because slang senses are wired widely.
+        --   breadth, then       (2026-07-26) ties a with pawn at 13 and the tiebreak
+        --   denote_mu           takes the article.
+        --   raw coherence       put is/of/was first on every prompt measured.
+        --   inverse own-mass    (2026-08-01) assumed function words are wired to
+        --                       everything -- true UD-seeded, FALSE foundation-only.
+        -- One outcome across all six: no single-token scalar separates a topic from a
+        -- function word. The discriminating information is not in any one token.
         --
-        -- denote_mu is how strongly a surface DENOTES a sense, and function words
-        -- denote their senses very strongly -- "a" is an unambiguous article. Ranking
-        -- on it puts articles and copulas first: with denote_mu primary this function
-        -- answered "What is a dog?" with "A is the 1st letter of the Roman alphabet."
-        -- Breadth (distinct relation types the concept participates in) separates
-        -- content from function words cleanly and without a stoplist -- content words
-        -- are wired into many KINDS of relation, function words into few, in any
-        -- language. denote_mu still decides WHICH sense of the winning concept.
-        -- TWO LEVELS, TWO DIFFERENT QUESTIONS. Flattening every (token, sense) pair
-        -- into one breadth-ordered list conflated them and shipped a live regression:
-        -- "What is a dog?" answered about SIRE ("a male animal that has fathered a
-        -- particular offspring... a kind of horse") and "What are the parts of a car?"
-        -- answered about WHIP (the lash; `whip` is attested slang for car). Breadth
-        -- ranks how many KINDS of relation a concept participates in, and an obscure
-        -- or slang sense can be wired into more of them than the ordinary one, so used
-        -- as the outer sort it selects exactly the wrong sense.
-        --
-        --   WHICH TOKEN is the topic  -> breadth. Content words are wired into many
-        --       relation types, function words into few, in any language and with no
-        --       stoplist. Measured: car 24, are 24, a 20, of 19, parts 8.
-        --   WHICH SENSE of that token -> denote_mu, how strongly the surface denotes
-        --       the sense. Never breadth: that is what picked sire and whip.
-        --
-        -- So collapse to the best sense PER TOKEN first (DISTINCT ON the token,
-        -- ordered by denote_mu), carry that token's breadth as a window aggregate, and
-        -- only then rank tokens. denote_mu breaks breadth ties, which is what separates
-        -- car (24, denote 1458.9) from are (24, denote 1169.7).
-        -- SUPERSEDED 2026-07-26: breadth-then-denote_mu, both computed per token
-        -- in isolation. It ties (a 13, pawn 13) and denote_mu breaks the tie
-        -- toward the article, so "What is a pawn in chess?" answered "A is the
-        -- 1st letter of the Roman alphabet." and "is" resolved to the sense ICE.
-        -- Every commentary block above about breadth-vs-denote_mu describes that
-        -- superseded ranking and is kept only as the record of why neither scalar
-        -- works: the discriminating information is not in any single token.
-        --
-        -- prompt_coherence() ranks a candidate by rated consensus mass between it
-        -- and the OTHER tokens' candidates, which resolves the sense and elects
-        -- the topic in one read. peers (how many distinct prompt tokens a
-        -- candidate is actually wired to) leads, so a concept the whole prompt
-        -- agrees on beats one with a single heavy edge; coherence mass and then
-        -- denote_mu break ties. Still no stoplist and no surface compare.
         -- ELECT ON SPECIFICITY (prompt_coherence, native src/prompt_coherence.c).
-        --
-        -- Every MASS-shaped scalar tried in this slot elected a function word,
-        -- because function words are wired to everything. denote_mu answered
-        -- "What is a pawn in chess?" with "A is the 1st letter of the Roman
-        -- alphabet" and resolved "car" to TZAR; highway breadth tied "a" with
-        -- "pawn" at 13 and lost on the tiebreak; raw coherence put `is`/`of`/
-        -- `was` first on every prompt measured. Three scalars, one outcome.
         --
         -- specificity = coherence / the candidate's OWN total rated mass: the
         -- share of what a concept has witnessed that reaches the rest of this

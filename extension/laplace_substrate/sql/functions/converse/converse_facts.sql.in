@@ -168,10 +168,17 @@ BEGIN
     -- web: the strongest chain across ALL relations -- the explicit
     -- pull-one-strand answer, rendered with its relation arrows.
     RETURN QUERY
+    -- Third hand-rolled arrow render, now the installed one (GH #906 item 2).
+    -- walk_strongest walks forward, so every direction is 1. This also unifies the
+    -- glyphs: this copy drew ASCII ' -type-> ' where realize_path and both walk
+    -- responders draw ' —type→ ', so one substrate spoke two arrow dialects
+    -- depending on which surface answered.
     SELECT 'web'::text,
-           v_lbl || string_agg(' -' || COALESCE(type_label(g.type_id), '?') || '-> '
-                             || COALESCE(realize(g.entity_id, p_lang), label(g.entity_id)),
-                             '' ORDER BY g.step),
+           realize_path(
+               p_syn || array_agg(g.entity_id ORDER BY g.step),
+               array_agg(g.type_id ORDER BY g.step),
+               array_fill(1, ARRAY[count(*)::int]),
+               p_lang),
            min(g.eff_mu),
            NULL::bigint,
            NULL::bytea[], NULL::bytea[]

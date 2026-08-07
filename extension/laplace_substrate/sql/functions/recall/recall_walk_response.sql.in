@@ -53,16 +53,14 @@ CREATE OR REPLACE FUNCTION recall_walk_response(p_topic bytea, p_mode text)
         JOIN complete_branches b ON b.entity_id = s.entity_id AND b.depth = s.i
         HAVING count(*) > 0
     ),
+    -- ONE responder, called at this branch's depth. This block used to be a
+    -- byte-for-byte copy of recall_fallback_walk differing only in depth and in
+    -- how '→' was spelled (GH #906 item 1). The gate stays a short-circuit: the
+    -- LATERAL is not evaluated at all when the mode is 'complete'.
     walk_reply AS (
-        SELECT COALESCE(realize(p_topic, word_language(p_topic)), label(p_topic))
-               || string_agg(' —' || COALESCE(type_label(g.type_id), '?') || E'→ '
-                             || COALESCE(realize(g.entity_id, word_language(p_topic)),
-                                         label(g.entity_id)), '' ORDER BY g.step) AS reply,
-               min(g.eff_mu) AS eff_mu,
-               NULL::bigint AS witnesses
-        FROM walk_strongest(p_topic, NULL, 8) g
-        WHERE p_mode <> 'complete'
-        HAVING count(*) > 0
+        SELECT r.reply, r.eff_mu, r.witnesses
+        FROM (SELECT 1 WHERE p_mode <> 'complete') gate
+        CROSS JOIN LATERAL recall_fallback_walk(p_topic, 8) r
     )
     SELECT * FROM complete_reply
     UNION ALL

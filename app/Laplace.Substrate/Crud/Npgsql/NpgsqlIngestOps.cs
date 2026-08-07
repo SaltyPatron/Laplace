@@ -219,10 +219,8 @@ public static class NpgsqlIngestOps
     public static Task<long> ModelCircuitTrajectoryCountAsync(
         NpgsqlConnection conn, CancellationToken ct = default) =>
         ScalarLongAsync(conn, """
-            SELECT count(*)::bigint
-            FROM laplace.physicalities p
-            JOIN laplace.entities e ON e.id = p.entity_id
-            WHERE p.type = 3 AND e.type_id = laplace.canonical_id('Model_Circuit')
+            SELECT laplace.entity_physicality_count(
+                       laplace.canonical_id('Model_Circuit'), 3)
             """, null, ct, "model_circuit_trajectory_count");
 
     public readonly record struct SourceEvidenceRow(string Source, long Evidence);

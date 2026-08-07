@@ -1,10 +1,21 @@
+-- NEITHER `SET search_path` NOR `STRICT` (GH #617 item 5). Both block SQL inlining,
+-- and this runs PER ROW inside lexical_case.c's batched unnest query and
+-- WitnessedWordsAsync's WHERE -- so each row paid a full function execution instead
+-- of the body being folded into the caller's plan.
+--
+-- Dropping STRICT is safe here because the body is already null-safe and gives the
+-- same answer: `e.id = NULL` matches nothing, EXISTS over that is false, and
+-- codepoint_for_id(NULL) is NULL, so a NULL argument returns false either way --
+-- where STRICT short-circuited to NULL. That is a change from NULL to false on a
+-- NULL input, and it is the correct one: "does this id exist" for a non-existent id
+-- is false. No caller passes NULL expecting to distinguish those; the presence
+-- probes pass ids they just computed.
 CREATE OR REPLACE FUNCTION entity_exists(p_id bytea)
     RETURNS boolean
-    LANGUAGE sql STABLE PARALLEL SAFE STRICT
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
     -- A valid tier-0 codepoint is real via the perfcache alone (see codepoint_for_id());
     -- it must resolve true here even before/without its own entities row being written,
     -- so callers can't mistake "orphaned tier-0" for "genuinely missing".
-    SELECT EXISTS (SELECT 1 FROM entities e WHERE e.id = p_id)
-        OR codepoint_for_id(p_id) IS NOT NULL
+    SELECT EXISTS (SELECT 1 FROM @extschema@.entities e WHERE e.id = p_id)
+        OR @extschema@.codepoint_for_id(p_id) IS NOT NULL
 $$;

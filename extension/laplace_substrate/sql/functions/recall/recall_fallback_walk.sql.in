@@ -1,12 +1,23 @@
-CREATE OR REPLACE FUNCTION recall_fallback_walk(p_topic bytea)
+DROP FUNCTION IF EXISTS recall_fallback_walk(bytea);
+-- THE walk responder. recall_walk_response's walk_reply branch used to carry a
+-- byte-for-byte second copy of this body (GH #906 item 1) -- same walk_strongest
+-- call, same arrow render, same min(eff_mu) -- differing only in depth and in how
+-- the arrow character was spelled (E'→' against a literal). Two maintained
+-- copies of one render; the depth is now the parameter that separated them.
+--
+-- The render itself goes through realize_path (GH #906 item 2) instead of a third
+-- hand-rolled arrow join. walk_strongest walks forward, so every direction is 1.
+CREATE OR REPLACE FUNCTION recall_fallback_walk(p_topic bytea, p_depth int DEFAULT 6)
     RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
-    SELECT COALESCE(realize(p_topic, word_language(p_topic)), label(p_topic))
-           || string_agg(' —' || COALESCE(type_label(g.type_id), '?') || E'\u2192 '
-                         || COALESCE(realize(g.entity_id, word_language(p_topic)),
-                                     label(g.entity_id)), '' ORDER BY g.step),
-           min(g.eff_mu), NULL::bigint
-    FROM walk_strongest(p_topic, NULL::bytea, 6) g
+    SELECT realize_path(
+               p_topic || array_agg(g.entity_id ORDER BY g.step),
+               array_agg(g.type_id ORDER BY g.step),
+               array_fill(1, ARRAY[count(*)::int]),
+               word_language(p_topic)),
+           min(g.eff_mu),
+           NULL::bigint
+    FROM walk_strongest(p_topic, NULL::bytea, p_depth) g
     HAVING count(*) > 0
 $$;

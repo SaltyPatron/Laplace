@@ -14,20 +14,49 @@ $$;
 -- HASH(id) leaves per row. One descent per id instead of one per leaf.
 -- The 1-arg form above stays for callers that genuinely don't know the tier
 -- (ad-hoc resolvability checks, table_present_ordinals).
+-- The per-tier loop UNNESTS ONCE (GH #911 item 1). It used to re-unnest the full
+-- p_ids/p_tiers pair inside every iteration and filter with `WHERE u.t = v_tier`,
+-- which is O(N_ids x N_tiers) materializations -- the identical shape the sibling
+-- probe records as "FAILED FORM (1)" after it pinned a core at 100% for 5m28s /
+-- 4.1 GB RSS on the OMW seed. Bounded tiers (LIST 0..4) cap the factor near 5x
+-- here rather than letting it run with type diversity, so this was latent cost
+-- and not a live blow-up -- but the fix already existed one file away, unused.
+--
+-- Same idiom as attestations_present_ordinals / consensus_upsert / attestation_merge:
+-- materialize the batch once into an indexed temp table, then each iteration reads
+-- only its slice through the (t) index. The tier still binds to a plpgsql variable,
+-- which is the whole point of the keyed overload -- a bound literal prunes the LIST
+-- parent at plan time, where a column reference cannot.
+--
+-- VOLATILE, not STABLE: CREATE TABLE AS is forbidden in a non-volatile function and
+-- throws 0A000 on the FIRST CALL, at execution, not at definition -- which is how a
+-- STABLE marking survives pg_regress (it only loads the SQL) and dies in the ingest.
+-- The sibling records that trap; this is the same one.
 CREATE OR REPLACE FUNCTION entities_present_ordinals(p_ids bytea[], p_tiers smallint[])
     RETURNS TABLE(idx int)
-    LANGUAGE plpgsql STABLE PARALLEL SAFE
+    LANGUAGE plpgsql VOLATILE
     SET search_path = @extschema@, public AS $$
 DECLARE
     v_tier smallint;
 BEGIN
-    FOR v_tier IN SELECT DISTINCT t FROM unnest(p_tiers) AS t LOOP
+    -- ON COMMIT DROP owns cleanup; the to_regclass guard handles repeated calls
+    -- inside one control transaction (chunked probes share it) without DROP IF
+    -- EXISTS's NOTICE noise.
+    IF to_regclass('pg_temp._epo_batch') IS NOT NULL THEN
+        DROP TABLE _epo_batch;
+    END IF;
+    CREATE TEMP TABLE _epo_batch ON COMMIT DROP AS
+        SELECT u.id, u.t, (u.ord - 1)::int AS idx
+        FROM unnest(p_ids, p_tiers) WITH ORDINALITY u(id, t, ord);
+    CREATE INDEX ON _epo_batch (t);
+
+    FOR v_tier IN SELECT DISTINCT b.t FROM _epo_batch b LOOP
         RETURN QUERY
-        SELECT (u.ord - 1)::int
-        FROM unnest(p_ids, p_tiers) WITH ORDINALITY u(id, t, ord)
+        SELECT b.idx
+        FROM _epo_batch b
         JOIN entities e
           ON e.tier = v_tier               -- variable -> planner partition prune
-         AND e.id = u.id                   -- HASH(id) leaf prune per row (t2)
-        WHERE u.t = v_tier;
+         AND e.id = b.id                   -- HASH(id) leaf prune per row (t2)
+        WHERE b.t = v_tier;
     END LOOP;
 END $$;
