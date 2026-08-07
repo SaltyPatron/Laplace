@@ -98,7 +98,7 @@ FROM converse_facts(laplace_hash128_blake3('test/chat_loop/synset1'));
  taxonomy   | D is a kind of c, which is a kind of h. |         2
  parts      | D has parts such as h, p.               |         4
  kin        | D is related to c.                      |         2
- web        | d —has definition→ G                    |
+ web        | d —has definition→ G                    |          
 (5 rows)
 
 SELECT fact_kind, cardinality(path) AS path_len, cardinality(types) AS type_len
