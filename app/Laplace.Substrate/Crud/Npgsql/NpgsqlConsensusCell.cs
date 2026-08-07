@@ -18,7 +18,7 @@ public static class NpgsqlConsensusCell
     public readonly record struct Row(long Rating, long Rd, long WitnessCount);
 
     private const string Sql =
-        "SELECT rating, rd, witness_count FROM laplace.consensus_cell($1, $2, $3)";
+        "SELECT rating, rd, witness_count FROM consensus.cell($1, $2, $3)";
 
     public static async Task<Row?> ReadAsync(
         NpgsqlDataSource dataSource, Hash128 subject, Hash128 typeId, Hash128 obj,

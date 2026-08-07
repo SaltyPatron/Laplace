@@ -286,7 +286,7 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         // function's contract and documented there as a deliberate tri-state collapse
         // for scoring; presence questions use consensus_cell instead.
         await using var cmd = _ds.CreateCommand(
-            "SELECT score FROM laplace.consensus_pair_scores($1, $3, $2) ORDER BY ord");
+            "SELECT score FROM consensus.pair_scores($1, $3, $2) ORDER BY ord");
         var p1 = cmd.Parameters.AddWithValue(subj); p1.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
         var p2 = cmd.Parameters.AddWithValue(obj); p2.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
         var p3 = cmd.Parameters.AddWithValue(typeId.ToBytes()); p3.NpgsqlDbType = NpgsqlDbType.Bytea;

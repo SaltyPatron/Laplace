@@ -10,14 +10,15 @@
 -- Keyed by primary id through consensus_id(), never a three-column triple scan: the
 -- id IS blake3(subject || type || object), so the lookup is one index probe on the
 -- PK and the partition keys come along in the same expression.
-CREATE OR REPLACE FUNCTION consensus_cell(
+DROP FUNCTION IF EXISTS laplace.consensus_cell(bytea, bytea, bytea);
+
+CREATE OR REPLACE FUNCTION consensus.cell(
     p_subject bytea, p_type bytea, p_object bytea)
     RETURNS TABLE(rating bigint, rd bigint, witness_count bigint)
-    LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
     SELECT c.rating, c.rd, c.witness_count
-    FROM @extschema@.consensus c
-    WHERE c.id = @extschema@.consensus_id(p_subject, p_type, p_object)
+    FROM laplace.consensus c
+    WHERE c.id = laplace.consensus_id(p_subject, p_type, p_object)
 $$;
 
 -- Batch pair scoring for ONE relation type over aligned subject/object arrays.
@@ -32,17 +33,18 @@ $$;
 --
 -- LEFT JOIN on the computed id, ordinal-aligned: one row out per row in, in input
 -- order, so the caller indexes the result by position without a second pass.
-CREATE OR REPLACE FUNCTION consensus_pair_scores(
+DROP FUNCTION IF EXISTS laplace.consensus_pair_scores(bytea[], bytea, bytea[]);
+
+CREATE OR REPLACE FUNCTION consensus.pair_scores(
     p_subjects bytea[], p_type bytea, p_objects bytea[])
     RETURNS TABLE(ord int, score float8)
-    LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
     SELECT s.ord::int,
-           COALESCE(@extschema@.eff_mu_display(c.rating, c.rd), 0)::float8
+           COALESCE(laplace.eff_mu_display(c.rating, c.rd), 0)::float8
     FROM unnest(p_subjects) WITH ORDINALITY AS s(sid, ord)
     JOIN unnest(p_objects) WITH ORDINALITY AS o(oid, ord) USING (ord)
-    LEFT JOIN @extschema@.consensus c
-      ON c.id = @extschema@.consensus_id(s.sid, p_type, o.oid)
+    LEFT JOIN laplace.consensus c
+      ON c.id = laplace.consensus_id(s.sid, p_type, o.oid)
     ORDER BY s.ord
 $$;
 
@@ -51,14 +53,15 @@ $$;
 -- installed answered it. p_type is the entity type id; p_physicality_type selects
 -- the physicality kind (3 = trajectory), named rather than left as a bare literal
 -- at the call site.
-CREATE OR REPLACE FUNCTION entity_physicality_count(
+DROP FUNCTION IF EXISTS laplace.entity_physicality_count(bytea, int);
+
+CREATE OR REPLACE FUNCTION consensus.entity_physicality_count(
     p_type bytea, p_physicality_type int DEFAULT 3)
     RETURNS bigint
-    LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
     SELECT count(*)::bigint
-    FROM @extschema@.physicalities p
-    JOIN @extschema@.entities e ON e.id = p.entity_id
+    FROM laplace.physicalities p
+    JOIN laplace.entities e ON e.id = p.entity_id
     WHERE p.type = p_physicality_type
       AND e.type_id = p_type
 $$;

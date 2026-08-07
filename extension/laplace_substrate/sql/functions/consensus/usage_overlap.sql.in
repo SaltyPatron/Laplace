@@ -1,7 +1,10 @@
-CREATE OR REPLACE FUNCTION usage_overlap(p_x bytea, p_y bytea)
+-- consensus.usage_overlap — GH #862 / #860. No SET (it invalidates plan caching and
+-- blocks inlining), real schema names, no build-time placeholder.
+DROP FUNCTION IF EXISTS laplace.usage_overlap(bytea, bytea);
+
+CREATE OR REPLACE FUNCTION consensus.usage_overlap(p_x bytea, p_y bytea)
     RETURNS bigint
-    LANGUAGE sql STABLE PARALLEL SAFE STRICT
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE STRICT AS $$
     -- Pillar 5 (2026-07-20): shared-usage is read from the GEOMETRY. The usage
     -- neighbourhood of a point is the adjacent content constituent in every
     -- trajectory containing it -- the same knowledge PRECEDES materialised as
@@ -9,9 +12,9 @@ CREATE OR REPLACE FUNCTION usage_overlap(p_x bytea, p_y bytea)
     -- consensus form was: the trajectory holds the exact sequence, so both
     -- directions are readable and the measure is never truncated to fit the walk.
     WITH xn(n) AS (
-        SELECT neighbour_id FROM geometry_neighbours(p_x, 200, 8)
+        SELECT neighbour_id FROM laplace.geometry_neighbours(p_x, 200, 8)
     ), yn(n) AS (
-        SELECT neighbour_id FROM geometry_neighbours(p_y, 200, 8)
+        SELECT neighbour_id FROM laplace.geometry_neighbours(p_y, 200, 8)
     )
     SELECT count(*)::bigint FROM xn JOIN yn USING (n)
 $$;

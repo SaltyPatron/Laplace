@@ -174,17 +174,17 @@ SELECT reply, witnesses FROM recall_session('dog', convert_to('s1', 'UTF8'));
 SELECT ord, prompt, resolved_id = word_id('dog') AS topic_is_dog
 FROM session_topics WHERE session_id = convert_to('s1', 'UTF8') ORDER BY ord;
 
-SELECT plane AS reason_plane FROM relate_path(word_id('dog'), word_id('h'));
+SELECT plane AS reason_plane FROM consensus.relate_path(word_id('dog'), word_id('h'));
 
 SELECT count(*) AS band_rows FROM relation_bands();
 SELECT bool_and(consensus_rows >= 0) AS bands_counted FROM relation_bands();
 
-SELECT array_agg(missing_arena ORDER BY missing_arena) AS dog_gaps FROM gaps(word_id('dog'));
+SELECT array_agg(missing_arena ORDER BY missing_arena) AS dog_gaps FROM consensus.gaps(word_id('dog'));
 
 SELECT bool_and(status = 'confirmed') AS isa_confirmed
 FROM epistemic_status(word_id('dog')) WHERE type = 'is a';
 
-SELECT plane AS rel_plane, usage AS rel_usage FROM relation_summary(word_id('dog'), word_id('h'));
+SELECT plane AS rel_plane, usage AS rel_usage FROM consensus.relation_summary(word_id('dog'), word_id('h'));
 
 SELECT reply LIKE '%antonym%' AS related_reply_mentions_antonym
 FROM recall_intent('reason', word_id('dog'), word_id('h'));

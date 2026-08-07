@@ -1,7 +1,13 @@
-CREATE OR REPLACE FUNCTION relate_path(p_x bytea, p_y bytea, p_depth int DEFAULT 7)
+-- consensus.relate_path — GH #862.
+DROP FUNCTION IF EXISTS laplace.relate_path(bytea, bytea, int);
+
+CREATE OR REPLACE FUNCTION consensus.relate_path(p_x bytea, p_y bytea, p_depth int DEFAULT 7)
     RETURNS TABLE(chain text, path_mu numeric, plane text)
     LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+    -- SET NOT YET REMOVED (GH #860). The body has ~30 unqualified references and
+    -- dropping the clause without qualifying every one of them fails at install,
+    -- not at runtime. The placeholder is gone; the clause is the remaining work.
+    SET search_path = laplace, public AS $$
     -- Candidate discovery is id/attestation logic only: every candidate carries
     -- its node/type/direction arrays and numeric score, and the single winner is
     -- picked on (len, mu) before any rendering. realize_path/type_label run
