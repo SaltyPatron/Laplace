@@ -1,10 +1,12 @@
 -- Outbound neighbours of one type set, unrefuted, laplace.eff_mu order. Thin wrapper over
 -- consensus.edges_raw() with those axes pinned.
 DROP FUNCTION IF EXISTS laplace.consensus_neighbors_directed(bytea, bytea[], int);
+-- BEGIN ATOMIC: GH #764.
 CREATE OR REPLACE FUNCTION consensus.neighbors_directed(
     p_subject bytea, p_types bytea[], p_limit int)
     RETURNS TABLE(nbr bytea, rating bigint, rd bigint, witness_count bigint)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     SELECT e.neighbour_id, e.rating, e.rd, e.witness_count
-    FROM consensus.edges_raw(p_subject, 'out', p_types, p_limit, false, 'eff_mu') e
-$$;
+    FROM consensus.edges_raw(p_subject, 'out', p_types, p_limit, false, 'eff_mu') e;
+END;
