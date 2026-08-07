@@ -1,8 +1,10 @@
 DROP FUNCTION IF EXISTS laplace.consensus_stats();
+-- BEGIN ATOMIC: GH #764.
 CREATE OR REPLACE FUNCTION consensus.stats()
     RETURNS TABLE(evidence_rows bigint, consensus_rows bigint, dedup_ratio numeric,
                   avg_witnesses numeric, max_witnesses bigint)
-    LANGUAGE sql STABLE AS $$
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
     SELECT a.cnt, c.cnt,
            round(a.cnt::numeric / NULLIF(c.cnt, 0), 3),
            c.avg_w, c.max_w
@@ -10,5 +12,5 @@ CREATE OR REPLACE FUNCTION consensus.stats()
          (SELECT count(*)::bigint AS cnt,
                  round(avg(witness_count), 3) AS avg_w,
                  max(witness_count)::bigint AS max_w
-          FROM laplace.consensus) c
-$$;
+          FROM laplace.consensus) c;
+END;

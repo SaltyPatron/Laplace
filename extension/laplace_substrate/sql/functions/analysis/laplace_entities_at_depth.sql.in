@@ -1,6 +1,7 @@
+-- BEGIN ATOMIC: GH #764.
 CREATE OR REPLACE FUNCTION laplace_entities_at_depth(p_depth smallint)
 RETURNS SETOF entities
-LANGUAGE sql STABLE 
-    AS $$
-    SELECT * FROM laplace.entities WHERE tier = p_depth
-$$;
+LANGUAGE sql STABLE
+BEGIN ATOMIC
+    SELECT * FROM laplace.entities WHERE tier = p_depth;
+END;

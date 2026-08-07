@@ -1,6 +1,8 @@
 DROP FUNCTION IF EXISTS laplace.physicality_count(bytea);
+-- BEGIN ATOMIC: GH #764.
 CREATE OR REPLACE FUNCTION converse.physicality_count(p_entity bytea)
     RETURNS bigint
-    LANGUAGE sql STABLE PARALLEL SAFE STRICT AS $$
-    SELECT count(*)::bigint FROM laplace.physicalities pp WHERE pp.entity_id = p_entity
-$$;
+    LANGUAGE sql STABLE PARALLEL SAFE STRICT
+BEGIN ATOMIC
+    SELECT count(*)::bigint FROM laplace.physicalities pp WHERE pp.entity_id = p_entity;
+END;

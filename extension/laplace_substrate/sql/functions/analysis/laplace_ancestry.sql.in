@@ -1,10 +1,11 @@
+-- BEGIN ATOMIC: GH #764.
 CREATE OR REPLACE FUNCTION laplace_ancestry(
     p_entity_id bytea,
     p_band_mask  bytea,
     p_max_depth  integer DEFAULT 10)
 RETURNS TABLE(ancestor_id bytea, depth integer, best_eff_mu numeric)
-LANGUAGE sql STABLE 
-    AS $$
+LANGUAGE sql STABLE
+BEGIN ATOMIC
     WITH RECURSIVE
         band_types AS (
             SELECT e.id FROM laplace.entities e
@@ -32,5 +33,5 @@ LANGUAGE sql STABLE
         )
     SELECT ancestor_id, min(depth)::integer, laplace.eff_mu_display(max(eff_mu_raw), 0)
     FROM ancestry
-    GROUP BY ancestor_id
-$$;
+    GROUP BY ancestor_id;
+END;

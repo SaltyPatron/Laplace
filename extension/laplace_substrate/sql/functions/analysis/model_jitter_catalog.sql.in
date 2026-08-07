@@ -7,6 +7,7 @@
 -- witnesses; per-run noise cannot. p_rd_floor is the "still uncertain"
 -- bound (fp1e9 Glicko-1 scale). Set-returning; the LIMIT belongs to the
 -- caller (top-k is only ever a query LIMIT).
+-- BEGIN ATOMIC: GH #764.
 CREATE OR REPLACE FUNCTION model_jitter_catalog(
         p_relation text DEFAULT NULL,
         p_rd_floor bigint DEFAULT 150000000000)
@@ -14,8 +15,8 @@ CREATE OR REPLACE FUNCTION model_jitter_catalog(
         subject_id bytea, type_id bytea, object_id bytea,
         source_id bytea, outcome smallint, observations bigint,
         rating bigint, rd bigint, eff_mu bigint, witness_count bigint)
-    LANGUAGE sql STABLE PARALLEL SAFE 
-    AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     WITH model_rels(tid) AS (
         SELECT laplace.relation_type_id(r)
         FROM unnest(CASE WHEN p_relation IS NULL
@@ -34,5 +35,5 @@ CREATE OR REPLACE FUNCTION model_jitter_catalog(
      AND a.object_id  = c.object_id
     WHERE c.witness_count = 1
       AND c.rd >= p_rd_floor
-      AND a.outcome = 2
-$$;
+      AND a.outcome = 2;
+END;

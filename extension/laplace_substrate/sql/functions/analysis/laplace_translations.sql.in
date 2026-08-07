@@ -1,8 +1,9 @@
+-- BEGIN ATOMIC: GH #764.
 CREATE OR REPLACE FUNCTION laplace_translations(
     p_entity_id bytea, p_band_mask bytea)
 RETURNS TABLE(translation_id bytea, shared_object_id bytea, eff_mu numeric)
-LANGUAGE sql STABLE 
-    AS $$
+LANGUAGE sql STABLE
+BEGIN ATOMIC
     WITH band_types AS (
         SELECT e.id FROM laplace.entities e
         WHERE e.highway_mask IS NOT NULL
@@ -19,5 +20,5 @@ LANGUAGE sql STABLE
     WHERE a1.subject_id = p_entity_id
       AND a1.object_id IS NOT NULL
       AND laplace.eff_mu(a1.rating, a1.rd) > 0
-      AND laplace.eff_mu(a2.rating, a2.rd) > 0
-$$;
+      AND laplace.eff_mu(a2.rating, a2.rd) > 0;
+END;
