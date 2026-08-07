@@ -59,6 +59,12 @@ CREATE OR REPLACE FUNCTION model_circuit_slices(
                     WHERE p3.type_id = p1.type_id
                       AND p3.context_id = p1.context_id
                       AND p3.subject_id = word_id(p_layer::text)))
+            -- (plane, layer, head) is expected to name ONE context, but nothing in
+            -- the schema enforces it, and a partial or double model ingest produces
+            -- two. Unordered the LIMIT returned whichever row the scan reached
+            -- first, so the same call could answer differently across runs. The id
+            -- is not a ranking -- it is the tie-break that makes the pick stable.
+            ORDER BY p1.context_id
             LIMIT 1
         ) lh ON p_layer IS NOT NULL
         WHERE p_layer IS NULL OR lh.ctx IS NOT NULL
@@ -119,7 +125,10 @@ CREATE OR REPLACE FUNCTION model_forward(
                         AND a.type_id = relation_type_id('APPEARS_IN')
                         AND a.source_id = p_source)
     ),
-    emb AS (SELECT slice_id FROM src_slice LIMIT 1),
+    -- One slice per (source, plane) is the ingest convention, not a constraint the
+    -- schema holds; a re-ingest or a partial model seed leaves two. ORDER BY makes
+    -- the pick reproducible instead of scan-order dependent. Same for lm below.
+    emb AS (SELECT slice_id FROM src_slice ORDER BY slice_id LIMIT 1),
     lm AS (
         SELECT s.slice_id
         FROM model_circuit_slices('lm') s
@@ -127,6 +136,7 @@ CREATE OR REPLACE FUNCTION model_forward(
                       WHERE a.subject_id = s.slice_id
                         AND a.type_id = relation_type_id('APPEARS_IN')
                         AND a.source_id = p_source)
+        ORDER BY s.slice_id
         LIMIT 1
     ),
     mlp AS (

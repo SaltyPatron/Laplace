@@ -32,6 +32,25 @@ CREATE OR REPLACE FUNCTION translate_to(p_word bytea, p_lang text DEFAULT NULL,
           AND sm.lang NOT IN (SELECT id FROM src_langs)
         GROUP BY sm.member, sm.lang
     ),
+    -- Definition surfaces for the CANDIDATE languages, rendered ONCE in a fenced
+    -- CTE. This used to sit inside the lang_match predicate as
+    -- `lower(render_text(d.object_id, 32)) = w.name`, i.e. a render evaluated per
+    -- probed edge purely to classify it -- the render-to-classify defect the read
+    -- law names, in the one position the law calls out. Same accept set, rendered
+    -- a bounded number of times.
+    --
+    -- eff_mu > 0 is the tri-state guard: the old EXISTS matched on bare row
+    -- presence, so a HAS_DEFINITION edge the fold had REFUTED still admitted the
+    -- language. consensus carries no outcome column; refutation is a non-positive
+    -- fold, the same test the walk uses to dead-end an edge.
+    lang_def_names AS MATERIALIZED (
+        SELECT d.subject_id AS lang, lower(render_text(d.object_id, 32)) AS dname
+        FROM consensus d, want w0
+        WHERE w0.name IS NOT NULL
+          AND d.subject_id IN (SELECT DISTINCT lang FROM agg)
+          AND d.type_id = relation_type_id('HAS_DEFINITION')
+          AND eff_mu(d.rating, d.rd) > 0
+    ),
     lang_match AS (
         -- No-filter call (name IS NULL): pass every candidate language through with
         -- ZERO rendering — Postgres does not guarantee OR short-circuit, so the old
@@ -52,10 +71,7 @@ CREATE OR REPLACE FUNCTION translate_to(p_word bytea, p_lang text DEFAULT NULL,
             WHERE w0.name IS NOT NULL
         ) s, want w
         WHERE s.lbl = w.name
-           OR EXISTS (SELECT 1 FROM consensus d
-                      WHERE d.subject_id = s.lang
-                        AND d.type_id = relation_type_id('HAS_DEFINITION')
-                        AND lower(render_text(d.object_id, 32)) = w.name)
+           OR s.lang IN (SELECT ld.lang FROM lang_def_names ld WHERE ld.dname = w.name)
     )
     -- a.mu is fp1e9 (synset_members) — convert through the one display definition
     SELECT r.txt AS translation, label(a.lang) AS language, eff_mu_display(a.mu), a.witnesses

@@ -163,9 +163,21 @@ BEGIN
              WITH ORDINALITY AS u(entity_id, run_length, ctier, ord)
         WHERE u.ctier = 2
     ),
+    -- Whitespace-ness through the ONE installed definition, on the fast renderer.
+    -- The inline `~ '^\s*$'` was a second definition of "is whitespace" living in
+    -- a read path, and it rendered to depth 64 to answer a question about the
+    -- first character.
+    --
+    -- NOT converted to the id-space HAS_GENERAL_CATEGORY classification that
+    -- corpus_whitespace_vocab_indices uses: that reads Unicode general category,
+    -- which is attested on CODEPOINTS, and toks is filtered to ctier = 2 (words).
+    -- Every probe would miss, return NULL, and fall through to this same render
+    -- with an extra join paid first. Classification on ids is right where the ids
+    -- carry the class; here they do not, and pretending otherwise buys a slower
+    -- query with identical output.
     ws AS MATERIALIZED (
         SELECT d.entity_id AS id,
-               COALESCE(render_text(d.entity_id, 64), ' ') ~ '^\s*$' AS is_ws
+               is_all_whitespace(COALESCE(render_text_fast(d.entity_id, 8), ' ')) AS is_ws
         FROM (SELECT DISTINCT t.entity_id FROM toks t) d
     ),
     kept AS MATERIALIZED (

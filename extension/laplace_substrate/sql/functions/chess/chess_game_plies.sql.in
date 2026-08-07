@@ -35,6 +35,10 @@ CREATE OR REPLACE FUNCTION chess_game_plies(p_event bytea)
         FROM @extschema@.attestations pl
         WHERE pl.subject_id = p_event
           AND pl.type_id = @extschema@.relation_type_id('PLAYS_LINE')
+        -- Same pick as chess_game: event -> line is a convention, not a
+        -- constraint, and a second source re-ingesting the PGN adds a row.
+        -- Ordered so both surfaces resolve the SAME line for the same event.
+        ORDER BY pl.object_id
         LIMIT 1
     ),
     line AS MATERIALIZED (
