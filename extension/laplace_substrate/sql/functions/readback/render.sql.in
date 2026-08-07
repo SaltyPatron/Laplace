@@ -1,6 +1,6 @@
 CREATE OR REPLACE FUNCTION render(p_id bytea) RETURNS text
     LANGUAGE sql STABLE 
-    SET search_path = @extschema@, public AS $$
+    AS $$
     SELECT COALESCE(
         (SELECT n.name FROM @extschema@.canonical_names n WHERE n.id = p_id),
         -- Perfcache-backed: authoritative for a valid tier-0 codepoint on its own
@@ -18,6 +18,6 @@ CREATE OR REPLACE FUNCTION render(p_id bytea) RETURNS text
         -- below run. It is reached only after the canonical-name and codepoint
         -- fast paths above, so tier-0 glyph reconstruction is unchanged.
         realize.resolve_name(p_id),
-        render_text(p_id),
+        laplace.render_text(p_id),
         encode(p_id, 'hex') || '…')
 $$;

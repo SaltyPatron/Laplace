@@ -11,8 +11,8 @@ RETURNS TABLE(
     rd_fp1e9         bigint
 )
 LANGUAGE sql STABLE
-    SET search_path = @extschema@, public AS $$
-    SELECT (eff_mu(c.rating, c.rd) / 1e9)::double precision,
+    AS $$
+    SELECT (laplace.eff_mu(c.rating, c.rd) / 1e9)::double precision,
            c.witness_count::integer,
            c.rating,
            c.rd

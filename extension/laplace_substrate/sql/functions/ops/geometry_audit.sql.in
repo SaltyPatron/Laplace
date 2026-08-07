@@ -57,7 +57,7 @@ CREATE OR REPLACE FUNCTION geometry_audit(p_sample double precision DEFAULT 0.3)
                   on_sphere bigint, interior bigint, avg_constituents numeric,
                   hilbert_bands int, min_band bigint, max_band bigint)
     LANGUAGE plpgsql VOLATILE 
-    SET search_path = @extschema@, public AS $$
+    AS $$
 DECLARE
     q text;
 BEGIN
@@ -70,7 +70,7 @@ BEGIN
             SELECT v.tier, v.radius_origin AS r,
                    substring(encode(v.hilbert_index,'hex'),1,1) AS band,
                    v.n_constituents AS nc
-            FROM v_word_points v %s
+            FROM laplace.v_word_points v %s
         ),
         bands AS (
             SELECT tier, band, count(*) AS n FROM j GROUP BY tier, band

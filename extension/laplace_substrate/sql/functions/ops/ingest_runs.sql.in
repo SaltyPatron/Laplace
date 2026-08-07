@@ -5,7 +5,7 @@
 CREATE OR REPLACE FUNCTION ingest_runs(p_limit int DEFAULT 20)
     RETURNS SETOF ingest_run_journal
     LANGUAGE sql STABLE 
-    SET search_path = @extschema@, public AS $$
+    AS $$
     SELECT *
     FROM laplace.ingest_run_journal
     ORDER BY started_at DESC

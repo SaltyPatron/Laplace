@@ -75,8 +75,20 @@ DECLARE
     parts    text[]  := ARRAY[]::text[];
     s        text;
     i        int;
+    v_syn    bytea;
 BEGIN
     IF p_topic IS NULL THEN RETURN NULL; END IF;
+
+    -- Topic may arrive as a word id (chat/MCP). Gloss/example edges hang on the
+    -- synset; walking the word as subject empties the unit pool and degenerates
+    -- to topic-echo (#878). Elect the best sense when one exists.
+    SELECT s.synset_id INTO v_syn
+    FROM lexical.senses(p_topic) s
+    ORDER BY s.witnesses DESC, s.eff_mu DESC NULLS LAST, s.synset_id
+    LIMIT 1;
+    IF v_syn IS NOT NULL THEN
+        p_topic := v_syn;
+    END IF;
 
     -- UNITS + their weight. The topic's own attested sentences, both the ones it
     -- points at (gloss, examples) and the ones that contain its surface.
@@ -128,6 +140,8 @@ BEGIN
     -- taking each word's best-rated sense, is 2.67s and yields the identical
     -- concept set (66 concepts, both ways). Never resolve per row what the
     -- planner can resolve as a set.
+    -- Fence HAS_SENSE family once — relation_in_family() as a join qual is an
+    -- uninlinable per-edge probe and timed out the concept lift (#878 / #908).
     INSERT INTO _ct_concept (unit, concept)
     SELECT DISTINCT ON (q.id, q.entity_id) q.id, sc.object_id
     FROM (
@@ -137,7 +151,7 @@ BEGIN
         WHERE tp.ctier = 2
     ) q
     JOIN laplace.consensus sc ON sc.subject_id = q.entity_id
-                     AND laplace.relation_in_family(sc.type_id, 'HAS_SENSE')
+    JOIN laplace.relation_family_members('HAS_SENSE') fam ON fam.id = sc.type_id
     ORDER BY q.id, q.entity_id, laplace.eff_mu(sc.rating, sc.rd) DESC, sc.object_id;
 
     CREATE INDEX IF NOT EXISTS _ct_concept_unit ON _ct_concept (unit);
@@ -212,16 +226,29 @@ BEGIN
         -- Edge mass stays as the tiebreak, so a genuinely linked continuation
         -- still outranks a merely overlapping one. Measured: dog goes from 1
         -- clause to 4, in 5.3s.
+        -- Shared = concept intersection (always available). Pull = edge mass via
+        -- two direction-pinned reads UNION ALL — never an OR join (#871 / #878).
         SELECT n.unit INTO cur
         FROM (
             SELECT k.unit,
                    count(*) AS shared,
-                   COALESCE(sum(laplace.relation_rank_resolved(c.type_id)
-                                * laplace.eff_mu(c.rating, c.rd)::float8), 0) AS pull
+                   COALESCE((
+                       SELECT sum(laplace.relation_rank_resolved(c.type_id)
+                                  * laplace.eff_mu(c.rating, c.rd)::float8)
+                       FROM laplace.consensus c
+                       WHERE c.subject_id = ANY (ARRAY(
+                                 SELECT concept FROM _ct_concept WHERE unit = k.unit))
+                         AND c.object_id = ANY(seen)
+                   ), 0)
+                   + COALESCE((
+                       SELECT sum(laplace.relation_rank_resolved(c.type_id)
+                                  * laplace.eff_mu(c.rating, c.rd)::float8)
+                       FROM laplace.consensus c
+                       WHERE c.object_id = ANY (ARRAY(
+                                 SELECT concept FROM _ct_concept WHERE unit = k.unit))
+                         AND c.subject_id = ANY(seen)
+                   ), 0) AS pull
             FROM _ct_concept k
-            LEFT JOIN laplace.consensus c
-              ON ((c.subject_id = k.concept AND c.object_id = ANY(seen))
-               OR (c.object_id = k.concept AND c.subject_id = ANY(seen)))
             WHERE NOT (k.unit = ANY(said))
               AND k.concept = ANY(seen)
               AND EXISTS (SELECT 1 FROM _ct_concept nk

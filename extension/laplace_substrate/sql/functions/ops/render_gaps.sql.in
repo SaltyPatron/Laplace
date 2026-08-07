@@ -1,7 +1,7 @@
 CREATE OR REPLACE FUNCTION render_gaps(p_limit integer DEFAULT 50)
     RETURNS TABLE(id bytea, roles text, refs bigint)
     LANGUAGE sql STABLE 
-    SET search_path = @extschema@, public AS $$
+    AS $$
     WITH refs AS (
         SELECT c.type_id AS id, 'type' AS role FROM @extschema@.consensus c
         UNION ALL

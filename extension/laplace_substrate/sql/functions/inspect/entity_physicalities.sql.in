@@ -4,7 +4,7 @@ CREATE OR REPLACE FUNCTION entity_physicalities(p_id bytea)
                   radius double precision, n_constituents integer,
                   hilbert_index bytea)
     LANGUAGE sql STABLE 
-    SET search_path = @extschema@, public AS $$
+    AS $$
     SELECT p.type, ST_X(p.coord), ST_Y(p.coord), ST_Z(p.coord), ST_M(p.coord),
            p.radius_origin, p.n_constituents, p.hilbert_index
     FROM laplace.physicalities p

@@ -7,12 +7,12 @@ CREATE OR REPLACE FUNCTION substrate_pulse()
                   physicalities bigint, last_flush_at timestamptz,
                   flushes_last_min bigint, folding boolean)
     LANGUAGE sql STABLE 
-    SET search_path = @extschema@, public AS $$
+    AS $$
     SELECT
-      (SELECT value FROM substrate_counts() WHERE metric LIKE 'entities%'),
-      (SELECT value FROM substrate_counts() WHERE metric LIKE 'attestations%'),
-      (SELECT value FROM substrate_counts() WHERE metric LIKE 'consensus%'),
-      (SELECT value FROM substrate_counts() WHERE metric LIKE 'physicalities%'),
+      (SELECT value FROM laplace.substrate_counts() WHERE metric LIKE 'entities%'),
+      (SELECT value FROM laplace.substrate_counts() WHERE metric LIKE 'attestations%'),
+      (SELECT value FROM laplace.substrate_counts() WHERE metric LIKE 'consensus%'),
+      (SELECT value FROM laplace.substrate_counts() WHERE metric LIKE 'physicalities%'),
       (SELECT max(applied_at) FROM laplace.ingest_flush_journal),
       (SELECT count(*) FROM laplace.ingest_flush_journal
         WHERE applied_at > now() - interval '60 seconds'),

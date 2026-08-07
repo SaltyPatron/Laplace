@@ -4,7 +4,7 @@
 -- question in the system, so every caller assembled one, and every assembly was wrong in
 -- a different way:
 --
---   evidence_count(source_id('X')) > 0     says DOCUMENTS ARE NOT INGESTED. The document
+--   evidence_count(laplace.source_id('X')) > 0     says DOCUMENTS ARE NOT INGESTED. The document
 --                                          lane is content-only by design -- entities and
 --                                          geometry, zero distributional attestations --
 --                                          so the obvious test reports 3.6M entities of
@@ -55,7 +55,7 @@ CREATE OR REPLACE FUNCTION source_status(p_source text DEFAULT NULL)
                   last_run_status   text,
                   last_run_at       timestamptz)
     LANGUAGE sql STABLE 
-    SET search_path = @extschema@, public AS $$
+    AS $$
 WITH by_evidence AS (
     SELECT s.source_id, s.evidence_approx
     FROM @extschema@.source_counts_approx() s

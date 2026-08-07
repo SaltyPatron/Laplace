@@ -1,8 +1,8 @@
 CREATE OR REPLACE FUNCTION top_relations_readable(p_limit integer DEFAULT 10, p_type bytea DEFAULT NULL)
     RETURNS TABLE(subject text, type text, object text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE 
-    SET search_path = @extschema@, public AS $$
-    SELECT render(t.subject_id), render(t.type_id), render(t.object_id),
+    AS $$
+    SELECT laplace.render(t.subject_id), laplace.render(t.type_id), laplace.render(t.object_id),
            t.eff_mu, t.witnesses
-    FROM consensus.top_relations(p_limit, p_type) t
+    FROM laplace.consensus.top_relations(p_limit, p_type) t
 $$;

@@ -4,7 +4,7 @@ CREATE OR REPLACE FUNCTION laplace_ancestry(
     p_max_depth  integer DEFAULT 10)
 RETURNS TABLE(ancestor_id bytea, depth integer, best_eff_mu numeric)
 LANGUAGE sql STABLE 
-    SET search_path = @extschema@, public AS $$
+    AS $$
     WITH RECURSIVE
         band_types AS (
             SELECT e.id FROM laplace.entities e
@@ -12,25 +12,25 @@ LANGUAGE sql STABLE
               AND laplace.laplace_highway_mask_bits(e.highway_mask) && laplace.laplace_highway_mask_bits(p_band_mask)
         ),
         ancestry(ancestor_id, depth, eff_mu_raw, visited) AS (
-            SELECT c.object_id, 1, eff_mu(c.rating, c.rd),
+            SELECT c.object_id, 1, laplace.eff_mu(c.rating, c.rd),
                    ARRAY[p_entity_id, c.object_id]
             FROM laplace.consensus c
             JOIN band_types bt ON bt.id = c.type_id
             WHERE c.subject_id = p_entity_id
               AND c.object_id IS NOT NULL
-              AND eff_mu(c.rating, c.rd) > 0
+              AND laplace.eff_mu(c.rating, c.rd) > 0
             UNION ALL
-            SELECT c.object_id, anc.depth + 1, eff_mu(c.rating, c.rd),
+            SELECT c.object_id, anc.depth + 1, laplace.eff_mu(c.rating, c.rd),
                    anc.visited || c.object_id
             FROM ancestry anc
             JOIN laplace.consensus c ON c.subject_id = anc.ancestor_id
             JOIN band_types bt ON bt.id = c.type_id
             WHERE c.object_id IS NOT NULL
-              AND eff_mu(c.rating, c.rd) > 0
+              AND laplace.eff_mu(c.rating, c.rd) > 0
               AND anc.depth < p_max_depth
               AND NOT (c.object_id = ANY (anc.visited))
         )
-    SELECT ancestor_id, min(depth)::integer, eff_mu_display(max(eff_mu_raw), 0)
+    SELECT ancestor_id, min(depth)::integer, laplace.eff_mu_display(max(eff_mu_raw), 0)
     FROM ancestry
     GROUP BY ancestor_id
 $$;

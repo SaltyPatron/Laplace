@@ -8,19 +8,19 @@ CREATE OR REPLACE FUNCTION evidence_receipt(p_id bytea, p_limit integer DEFAULT 
         witness_count bigint,
         source_labels text)
     LANGUAGE sql STABLE 
-    SET search_path = @extschema@, public AS $$
+    AS $$
     WITH subj(id) AS (
         SELECT p_id
         UNION
         SELECT sn.synset_id FROM lexical.senses(p_id) sn
     ), feat_dynamic AS MATERIALIZED (
-        -- Dynamic HAS_FEATURE children fenced once; relation_in_family() never
+        -- Dynamic HAS_FEATURE children fenced once; laplace.relation_in_family() never
         -- inlines (SET search_path), so calling it per attestation row ran its
         -- EXISTS probe per row. Same truth table: static family via the C check
         -- below, dynamic membership via this set.
         SELECT c.subject_id AS id FROM laplace.consensus c
-        WHERE c.type_id = relation_type_id('IS_A')
-          AND c.object_id = relation_type_id('HAS_FEATURE')
+        WHERE c.type_id = laplace.relation_type_id('IS_A')
+          AND c.object_id = laplace.relation_type_id('HAS_FEATURE')
     ), filtered AS MATERIALIZED (
         -- Fenced: without the fence the downstream LIMIT flips the planner into
         -- a cheap-startup nested loop that seq-scans EVERY attestations partition
@@ -33,35 +33,35 @@ CREATE OR REPLACE FUNCTION evidence_receipt(p_id bytea, p_limit integer DEFAULT 
           AND a.object_id IS NOT NULL
           AND EXISTS (
               SELECT 1 FROM laplace.entities et
-              WHERE et.id = a.type_id AND et.type_id = entity_type_id('RelationType'))
-          AND NOT relation_type_in_family(a.type_id, 'HAS_POS')
-          AND NOT relation_type_in_family(a.type_id, 'HAS_FEATURE')
+              WHERE et.id = a.type_id AND et.type_id = laplace.entity_type_id('RelationType'))
+          AND NOT laplace.relation_type_in_family(a.type_id, 'HAS_POS')
+          AND NOT laplace.relation_type_in_family(a.type_id, 'HAS_FEATURE')
           AND a.type_id NOT IN (SELECT id FROM feat_dynamic)
           AND a.type_id NOT IN (
-              relation_type_id('HAS_SENSE'), relation_type_id('IS_SENSE_OF'),
-              relation_type_id('HAS_LANGUAGE'), relation_type_id('PRECEDES'),
-              relation_type_id('FOLLOWS'), relation_type_id('CO_OCCURS_WITH'),
-              relation_type_id('OCCURS_IN_CONTEXT'), relation_type_id('HAS_LEX_CATEGORY'),
-              relation_type_id('HAS_VERB_FRAME'),
-              relation_type_id('IS_LEMMA_OF'), relation_type_id('IS_TRANSLATION_OF'),
-              relation_type_id('HAS_EXAMPLE'), relation_type_id('EVOKES_FRAME'),
-              relation_type_id('HAS_SYNSET_KEY'), relation_type_id('IS_TYPED_AS'),
-              relation_type_id('HAS_NAME_ALIAS'))
+              laplace.relation_type_id('HAS_SENSE'), laplace.relation_type_id('IS_SENSE_OF'),
+              laplace.relation_type_id('HAS_LANGUAGE'), laplace.relation_type_id('PRECEDES'),
+              laplace.relation_type_id('FOLLOWS'), laplace.relation_type_id('CO_OCCURS_WITH'),
+              laplace.relation_type_id('OCCURS_IN_CONTEXT'), laplace.relation_type_id('HAS_LEX_CATEGORY'),
+              laplace.relation_type_id('HAS_VERB_FRAME'),
+              laplace.relation_type_id('IS_LEMMA_OF'), laplace.relation_type_id('IS_TRANSLATION_OF'),
+              laplace.relation_type_id('HAS_EXAMPLE'), laplace.relation_type_id('EVOKES_FRAME'),
+              laplace.relation_type_id('HAS_SYNSET_KEY'), laplace.relation_type_id('IS_TYPED_AS'),
+              laplace.relation_type_id('HAS_NAME_ALIAS'))
           AND NOT EXISTS (
               SELECT 1 FROM laplace.entities et
-              WHERE et.id = a.object_id AND et.type_id = entity_type_id('RelationType'))
+              WHERE et.id = a.object_id AND et.type_id = laplace.entity_type_id('RelationType'))
           AND NOT (
-              a.type_id = relation_type_id('IS_SYNONYM_OF')
+              a.type_id = laplace.relation_type_id('IS_SYNONYM_OF')
               AND a.object_id IN (SELECT id FROM subj))
         GROUP BY a.type_id, a.object_id, a.source_id
     ), src_labels AS MATERIALIZED (
         -- Label each DISTINCT source ONCE (sources number in the dozens), fenced
-        -- so render() cannot be pushed back down to run per (type, object, source)
+        -- so laplace.render() cannot be pushed back down to run per (type, object, source)
         -- group (~3,129 renders for one entity before this map existed). The
         -- string_agg below keeps the exact DISTINCT + ORDER BY label semantics of
         -- the old inline expression, so output is byte-identical.
         SELECT s.source_id,
-               regexp_replace(render(s.source_id),
+               regexp_replace(laplace.render(s.source_id),
                    '^substrate/source/([^/]+)(?:/v[0-9]+)?$', '\1') AS label
         FROM (SELECT DISTINCT f.source_id FROM filtered f) s
     ), folded AS (
@@ -80,12 +80,12 @@ CREATE OR REPLACE FUNCTION evidence_receipt(p_id bytea, p_limit integer DEFAULT 
         -- "single best row by eff_mu" semantics of the old ORDER BY ... LIMIT 1.
         SELECT DISTINCT ON (c.type_id, c.object_id)
                c.type_id, c.object_id,
-               eff_mu(c.rating, c.rd) AS mu_raw,
-               eff_mu_display(c.rating, c.rd) AS mu_disp
+               laplace.eff_mu(c.rating, c.rd) AS mu_raw,
+               laplace.eff_mu_display(c.rating, c.rd) AS mu_disp
         FROM laplace.consensus c
         WHERE c.subject_id IN (SELECT id FROM subj)
           AND c.object_id IS NOT NULL
-        ORDER BY c.type_id, c.object_id, eff_mu(c.rating, c.rd) DESC
+        ORDER BY c.type_id, c.object_id, laplace.eff_mu(c.rating, c.rd) DESC
     ), ranked AS (
         -- Issue 52: rank BEFORE labeling. The old shape labeled every folded claim
         -- (type_label + _realize_synset_lemma/render_text, ~6ms/row — 3,129 labels
@@ -101,12 +101,12 @@ CREATE OR REPLACE FUNCTION evidence_receipt(p_id bytea, p_limit integer DEFAULT 
         LEFT JOIN best b
                ON b.type_id = fo.type_id AND b.object_id = fo.object_id
         WHERE fo.source_labels IS NOT NULL AND fo.source_labels <> ''
-        ORDER BY edge_rank(fo.type_id, COALESCE(b.mu_raw, 0)) DESC,
+        ORDER BY laplace.edge_rank(fo.type_id, COALESCE(b.mu_raw, 0)) DESC,
                  fo.witness_count DESC
         LIMIT GREATEST(1, p_limit) * 3 + 8
     ), ordered AS (
         SELECT rk.*, row_number() OVER (
-                   ORDER BY edge_rank(rk.type_id, rk.mu_raw) DESC,
+                   ORDER BY laplace.edge_rank(rk.type_id, rk.mu_raw) DESC,
                             rk.witness_count DESC) AS ord
         FROM ranked rk
     ), labels AS MATERIALIZED (
@@ -142,7 +142,7 @@ CREATE OR REPLACE FUNCTION evidence_receipt(p_id bytea, p_limit integer DEFAULT 
     WHERE lb.obj IS NOT NULL AND lb.obj <> ''
       AND right(lb.obj, 1) <> U&'\2026'
       AND right(lb.rel, 1) <> U&'\2026'
-    ORDER BY edge_rank(lb.type_id, lb.mu_raw) DESC,
+    ORDER BY laplace.edge_rank(lb.type_id, lb.mu_raw) DESC,
              lb.witness_count DESC
     LIMIT GREATEST(1, p_limit)
 $$;

@@ -7,7 +7,7 @@
 CREATE OR REPLACE FUNCTION ingest_run_close(p_run_id uuid, p_status text DEFAULT 'cancelled')
     RETURNS ingest_run_journal
     LANGUAGE plpgsql VOLATILE 
-    SET search_path = @extschema@, public AS $$
+    AS $$
 DECLARE
     r ingest_run_journal;
 BEGIN

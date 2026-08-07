@@ -13,9 +13,9 @@ RETURNS TABLE(
     rd_fp1e9         bigint
 )
 LANGUAGE sql STABLE
-    SET search_path = @extschema@, public AS $$
+    AS $$
     SELECT c.object_id,
-           (eff_mu(c.rating, c.rd) / 1e9)::double precision,
+           (laplace.eff_mu(c.rating, c.rd) / 1e9)::double precision,
            c.witness_count::integer,
            c.rating,
            c.rd
@@ -34,6 +34,6 @@ LANGUAGE sql STABLE
                   AND (p_context_id   IS NULL OR a.context_id IS NOT DISTINCT FROM p_context_id)
             )
           )
-    ORDER BY eff_mu(c.rating, c.rd) DESC
+    ORDER BY laplace.eff_mu(c.rating, c.rd) DESC
     LIMIT GREATEST(1, p_top_k)
 $$;

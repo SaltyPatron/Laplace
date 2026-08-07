@@ -1,7 +1,7 @@
 CREATE OR REPLACE FUNCTION api(p_like text DEFAULT NULL)
     RETURNS TABLE(name text, args text, returns text)
     LANGUAGE sql STABLE 
-    SET search_path = @extschema@, public AS $$
+    AS $$
     SELECT CASE WHEN n.nspname = 'laplace' THEN p.proname::text
                 ELSE n.nspname || '.' || p.proname END,
            pg_get_function_arguments(p.oid),
