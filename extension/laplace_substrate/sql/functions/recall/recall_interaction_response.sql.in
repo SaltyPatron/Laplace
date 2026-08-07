@@ -48,7 +48,7 @@ CREATE OR REPLACE FUNCTION recall_interaction_response(p_topic bytea, p_limit in
         ORDER BY f.rank DESC, f.mu DESC
         LIMIT p_limit
     )
-    SELECT label(p_topic) || ' — ' || r.phrase || ' ' || render_text(r.object_id, 96) AS reply,
+    SELECT realize.label(p_topic) || ' — ' || r.phrase || ' ' || render_text(r.object_id, 96) AS reply,
            r.mu AS eff_mu,
            r.witnesses
     FROM ranked r

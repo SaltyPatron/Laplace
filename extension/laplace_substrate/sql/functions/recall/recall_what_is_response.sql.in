@@ -5,7 +5,7 @@ CREATE OR REPLACE FUNCTION recall_what_is_response(p_topic bytea, p_context_ids 
     RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
-    SELECT label(p_topic) || ': ' || d.definition, d.eff_mu, d.witnesses
+    SELECT realize.label(p_topic) || ': ' || d.definition, d.eff_mu, d.witnesses
     FROM define_fast(p_topic, COALESCE(p_context_ids, ARRAY[]::bytea[]), 3) d
     UNION ALL
     SELECT repeat('  ', h.depth) || E'→ is ' || COALESCE(h.hypernym, '?')

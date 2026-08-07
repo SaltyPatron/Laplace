@@ -11,11 +11,11 @@ CREATE OR REPLACE FUNCTION realize_path(p_path bytea[], p_types bytea[], p_dirs 
     -- print '?'.
     SELECT string_agg(
                CASE WHEN i = 1
-                    THEN COALESCE(realize.realize(p_path[i], p_lang), label(p_path[i]), '?')
+                    THEN COALESCE(realize.realize(p_path[i], p_lang), realize.label(p_path[i]), '?')
                     ELSE CASE WHEN p_dirs[i-1] = -1
                               THEN ' ←' || COALESCE(type_label(p_types[i-1]), '?') || '— '
                               ELSE ' —' || COALESCE(type_label(p_types[i-1]), '?') || '→ '
-                         END || COALESCE(realize.realize(p_path[i], p_lang), label(p_path[i]), '?')
+                         END || COALESCE(realize.realize(p_path[i], p_lang), realize.label(p_path[i]), '?')
                END, '' ORDER BY i)
     FROM generate_subscripts(p_path, 1) AS i
 $$;

@@ -1,10 +1,11 @@
--- GH #862: belongs in realize (a label is a rendering decision), NOT yet moved --
--- label() has 30+ call sites and they must move in the same commit or the
--- extension does not install. The SET is likewise still here for that reason.
-CREATE OR REPLACE FUNCTION label(p_id bytea)
+-- realize.label — GH #862 / #860. A label is a rendering decision, so it lives with
+-- the realize family. No SET (it invalidates plan caching and this is per-row on the
+-- render path); real schema names.
+DROP FUNCTION IF EXISTS laplace.label(bytea);
+
+CREATE OR REPLACE FUNCTION realize.label(p_id bytea)
     RETURNS text
-    LANGUAGE sql LAPLACE_STABLE_STRICT
-    SET search_path = laplace, public AS $$
+    LANGUAGE sql LAPLACE_STABLE_STRICT AS $$
     -- A label is a NAME/surface, never a definition. Order: the entity's
     -- resolved name, else its own rendered+cleaned surface, else a stable hex id.
     -- The name lookup now goes through resolve_name() -- the single, family-aware

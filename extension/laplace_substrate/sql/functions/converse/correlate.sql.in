@@ -16,8 +16,8 @@ CREATE OR REPLACE FUNCTION correlate(p_words text[])
                (max(eff_mu(c.rating, c.rd)))::float8 / 1e9 AS strength
         FROM v JOIN consensus c ON c.subject_id = v.id
         GROUP BY c.type_id, c.object_id)
-    SELECT COALESCE(NULLIF(relation_canonical(g.type_id), ''), label(g.type_id)) AS relation,
-           label(g.object_id) AS target, g.words, g.strength
+    SELECT COALESCE(NULLIF(relation_canonical(g.type_id), ''), realize.label(g.type_id)) AS relation,
+           realize.label(g.object_id) AS target, g.words, g.strength
     FROM g
     ORDER BY g.nwords DESC, g.strength DESC, 1
 $$;
