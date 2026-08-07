@@ -5,5 +5,5 @@ CREATE OR REPLACE FUNCTION top_relations_readable(p_limit integer DEFAULT 10, p_
 BEGIN ATOMIC
     SELECT laplace.render(t.subject_id), laplace.render(t.type_id), laplace.render(t.object_id),
            t.eff_mu, t.witnesses
-    FROM laplace.consensus.top_relations(p_limit, p_type) t;
+    FROM consensus.top_relations(p_limit, p_type) t;
 END;

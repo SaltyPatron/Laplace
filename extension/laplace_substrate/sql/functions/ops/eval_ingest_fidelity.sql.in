@@ -35,7 +35,7 @@ CREATE OR REPLACE FUNCTION eval_ingest_fidelity_positives(
     LANGUAGE sql STABLE 
     AS $$
     WITH vocab AS (
-        SELECT subject_id AS id FROM laplace.consensus.subjects_of_type(p_relation)
+        SELECT subject_id AS id FROM consensus.subjects_of_type(p_relation)
     ),
     syn AS (
         SELECT c.subject_id AS w, c.object_id AS sense
@@ -67,7 +67,7 @@ CREATE OR REPLACE FUNCTION eval_ingest_fidelity_negatives(
     LANGUAGE sql STABLE 
     AS $$
     WITH vocab AS (
-        SELECT subject_id AS id FROM laplace.consensus.subjects_of_type(p_relation)
+        SELECT subject_id AS id FROM consensus.subjects_of_type(p_relation)
     ),
     samp AS (SELECT id, row_number() OVER (ORDER BY random()) AS rn FROM vocab),
     cnt  AS (SELECT count(*) AS c FROM samp),
