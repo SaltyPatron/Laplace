@@ -182,7 +182,7 @@ public static class NpgsqlSubstrateReads
     {
         var rows = await NpgsqlRead.ReadRowsAsync(dataSource, """
             SELECT s.relation, s.plane, s.mu, s.usage, s.geodesic, s.verdict
-            FROM laplace.relation_summary(@x, @y) s
+            FROM consensus.relation_summary(@x, @y) s
             """,
             static r => new RelationSummaryRow(
                 r.IsDBNull(0) ? null : r.GetString(0),
@@ -560,7 +560,7 @@ public static class NpgsqlSubstrateReads
         NpgsqlConnection conn, string prompt, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(conn,
-            "SELECT missing_arena FROM laplace.gaps(laplace.resolve_last_word(@p))",
+            "SELECT missing_arena FROM consensus.gaps(laplace.resolve_last_word(@p))",
             static r => r.IsDBNull(0) ? "" : r.GetString(0),
             p => p.AddWithValue("p", prompt),
             ct: ct, label: "gaps", onError: onError);

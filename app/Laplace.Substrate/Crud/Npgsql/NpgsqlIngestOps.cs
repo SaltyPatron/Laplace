@@ -219,7 +219,7 @@ public static class NpgsqlIngestOps
     public static Task<long> ModelCircuitTrajectoryCountAsync(
         NpgsqlConnection conn, CancellationToken ct = default) =>
         ScalarLongAsync(conn, """
-            SELECT laplace.entity_physicality_count(
+            SELECT consensus.entity_physicality_count(
                        laplace.canonical_id('Model_Circuit'), 3)
             """, null, ct, "model_circuit_trajectory_count");
 

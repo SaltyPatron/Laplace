@@ -6,5 +6,5 @@ CREATE OR REPLACE FUNCTION recall_relation_summary_response(p_topic bytea, p_top
                 THEN rs.relation || '  [' || rs.verdict || ']'
                 ELSE rs.verdict END,
            rs.mu, rs.usage
-    FROM relation_summary(p_topic, p_topic2) rs
+    FROM consensus.relation_summary(p_topic, p_topic2) rs
 $$;
