@@ -1,7 +1,7 @@
 {
   "recorded_at": "2026-08-07T11:01:26Z",
   "advisory_until": "2026-08-10",
-  "blocking_flip_date": null,
+  "blocking_flip_date": "2026-08-10",
   "sources": [
     "CILIDecomposer",
     "FrameNetDecomposer",

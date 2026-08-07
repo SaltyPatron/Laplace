@@ -199,6 +199,13 @@ batch form exists — that is the converse_compose defect class (#907). New TABL
 returns must pick one of the two shapes deliberately; mixed columns without a label
 column are "id instead of label".
 
+Rule #15: Every CTE in a serving SQL body must declare MATERIALIZED or NOT MATERIALIZED
+explicitly (GH #470). Silence is not a decision — Postgres 12+ defaults change meaning
+across versions and the planner's pull-up of one-row fences is exactly the STABLE-in-filter
+class Rule #13 names. Prefer MATERIALIZED for once-fenced sets that must not re-execute
+(relation-family membership, lang resolution, batch realize inputs); NOT MATERIALIZED when
+the CTE is a pure rename the planner should inline. Audit new WITH clauses in review.
+
 Open items surfaced by the 2026-07-01 survey, not yet actioned:
     - materialize_period_partition / materialize_period_partition_fresh differ only by whether
       the LEFT JOIN reads prior consensus state — candidate to merge into one parameterized
