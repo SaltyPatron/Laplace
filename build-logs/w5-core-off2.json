@@ -1,0 +1,146 @@
+{
+  "2 + 2 =": {
+    "compose": {
+      "content_rate": 0.0,
+      "echo_rate": 0.0,
+      "empty": false,
+      "expected_n": 0,
+      "flatness": 0.619,
+      "seed_variance": 3
+    },
+    "walk": {
+      "content_rate": 0.0,
+      "echo_rate": 0.0,
+      "empty": false,
+      "expected_n": 0,
+      "flatness": 0.2,
+      "seed_variance": 3
+    }
+  },
+  "Once upon a time": {
+    "compose": {
+      "content_rate": 0.0,
+      "echo_rate": 0.0,
+      "empty": false,
+      "expected_n": 0,
+      "flatness": 0.4,
+      "seed_variance": 3
+    },
+    "walk": {
+      "content_rate": 0.0,
+      "echo_rate": 0.027,
+      "empty": false,
+      "expected_n": 0,
+      "flatness": 0.108,
+      "seed_variance": 3
+    }
+  },
+  "The capital of France is": {
+    "compose": {
+      "content_rate": 0.0,
+      "echo_rate": 0.0,
+      "empty": false,
+      "expected_n": 0,
+      "flatness": 0.673,
+      "seed_variance": 3
+    },
+    "walk": {
+      "content_rate": 0.0,
+      "echo_rate": 0.062,
+      "empty": false,
+      "expected_n": 0,
+      "flatness": 0.219,
+      "seed_variance": 3
+    }
+  },
+  "The opposite of hot is": {
+    "compose": {
+      "content_rate": 0.0,
+      "echo_rate": 0.25,
+      "empty": false,
+      "expected_n": 0,
+      "flatness": 0.354,
+      "seed_variance": 3
+    },
+    "walk": {
+      "content_rate": 0.0,
+      "echo_rate": 0.133,
+      "empty": false,
+      "expected_n": 0,
+      "flatness": 0.067,
+      "seed_variance": 3
+    }
+  },
+  "Water is made of": {
+    "compose": {
+      "content_rate": 0.0,
+      "echo_rate": 0.0,
+      "empty": false,
+      "expected_n": 0,
+      "flatness": 0.636,
+      "seed_variance": 3
+    },
+    "walk": {
+      "content_rate": 0.0,
+      "echo_rate": 0.0,
+      "empty": false,
+      "expected_n": 0,
+      "flatness": 0.381,
+      "seed_variance": 3
+    }
+  },
+  "dog": {
+    "compose": {
+      "content_rate": 0.0,
+      "echo_rate": 0.0,
+      "empty": false,
+      "expected_n": 52,
+      "flatness": 0.581,
+      "seed_variance": 3
+    },
+    "walk": {
+      "content_rate": 0.129,
+      "echo_rate": 0.028,
+      "empty": false,
+      "expected_n": 52,
+      "flatness": 0.306,
+      "seed_variance": 3
+    }
+  },
+  "king": {
+    "compose": {
+      "content_rate": 0.0,
+      "echo_rate": 0.0,
+      "empty": false,
+      "expected_n": 51,
+      "flatness": 0.5,
+      "seed_variance": 3
+    },
+    "walk": {
+      "content_rate": 0.0,
+      "echo_rate": 0.032,
+      "empty": false,
+      "expected_n": 51,
+      "flatness": 0.29,
+      "seed_variance": 3
+    }
+  },
+  "water": {
+    "compose": {
+      "content_rate": 0.0,
+      "echo_rate": 0.0,
+      "empty": false,
+      "expected_n": 32,
+      "flatness": 0.5,
+      "seed_variance": 2
+    },
+    "walk": {
+      "content_rate": 0.0,
+      "echo_rate": 0.0,
+      "empty": false,
+      "expected_n": 32,
+      "flatness": 0.231,
+      "seed_variance": 3
+    }
+  }
+}

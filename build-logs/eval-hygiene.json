@@ -1,0 +1,243 @@
+{
+  "fingerprint": {
+    "entities (ESTIMATE)": 29411654,
+    "physicalities (ESTIMATE)": 29317036,
+    "attestations (ESTIMATE)": 50860720,
+    "consensus (ESTIMATE)": 48066588
+  },
+  "sources": [
+    "Atomic2020Decomposer",
+    "CILIDecomposer",
+    "ChessAnalysis",
+    "ChessBook",
+    "ChessOpenings",
+    "ChessPgn",
+    "CodeDecomposer",
+    "FrameNetDecomposer",
+    "ISO639Decomposer",
+    "MapNetDecomposer",
+    "OMWDecomposer",
+    "PcmAudioDecomposer",
+    "PredicateMatrixDecomposer",
+    "PropBankDecomposer",
+    "RgbaImageDecomposer",
+    "SemLinkDecomposer",
+    "TatoebaAudioDecomposer",
+    "UnicodeDecomposer",
+    "UserPrompt",
+    "VerbNetDecomposer",
+    "WordFrameNetDecomposer",
+    "WordNetDecomposer"
+  ],
+  "verdicts": {
+    "election_correctness": {
+      "passed": 6,
+      "total": 6,
+      "exact": true
+    },
+    "latency_budget": {
+      "p50_s": 2.4235,
+      "ceiling_s": 30.0,
+      "ok": true
+    },
+    "glue_words_imported": 90,
+    "forward_hygiene": {
+      "passed": 2,
+      "total": 4,
+      "clean": false,
+      "leaks": [
+        "internal-key:03901750-n",
+        "internal-key:09289331-n"
+      ]
+    },
+    "forward_answer": {
+      "passed": 0,
+      "total": 1,
+      "unreached": [
+        "forward-hot-opposite"
+      ]
+    }
+  },
+  "probes": [
+    {
+      "id": "forward-glacier",
+      "surface": "forward",
+      "class": "forward",
+      "held_out": true,
+      "prompt": "What is a glacier?",
+      "expected_answer_surface": null,
+      "predictions": [
+        "WordNet_Synset",
+        "glacier",
+        "glaciar",
+        "gletsjer",
+        "a slowly moving mass of ice",
+        "ghiacciaio",
+        "gletser",
+        "09289331-n"
+      ],
+      "leaks": [
+        "internal-key:09289331-n"
+      ],
+      "answer_reached": null,
+      "latency_s": 2.4628,
+      "forward_clean": false,
+      "miss": true
+    },
+    {
+      "id": "forward-hot-opposite",
+      "surface": "forward",
+      "class": "forward",
+      "held_out": false,
+      "prompt": "The opposite of hot is",
+      "expected_answer_surface": "cold",
+      "predictions": [
+        "WordNet_Synset",
+        "characterized by violent and forceful activity or movement",
+        "very intense",
+        "hot",
+        "raging",
+        "bergelora",
+        "membadai",
+        "memarak"
+      ],
+      "leaks": [],
+      "answer_reached": false,
+      "latency_s": 2.869,
+      "forward_clean": false,
+      "miss": true
+    },
+    {
+      "id": "forward-pawn-chess",
+      "surface": "forward",
+      "class": "forward",
+      "held_out": true,
+      "prompt": "What is a pawn in chess?",
+      "expected_answer_surface": null,
+      "predictions": [
+        "WordNet_Synset",
+        "03901750-n",
+        "chessman",
+        "it can be promoted to a more powerful piece if it reaches the 8th rank",
+        "moves only forward and captures only to the side",
+        "chess",
+        "(chess) the least powerful piece",
+        "8番目の列までいくと、より強い駒に昇格できる"
+      ],
+      "leaks": [
+        "internal-key:03901750-n"
+      ],
+      "answer_reached": null,
+      "latency_s": 3.2834,
+      "forward_clean": false,
+      "miss": true
+    },
+    {
+      "id": "election-dog",
+      "surface": "sql",
+      "class": "election",
+      "held_out": false,
+      "prompt": "dog",
+      "expected_topic_surface": "dog",
+      "got_topic_surface": "dog",
+      "specificity": null,
+      "latency_s": 0.7669,
+      "election_correctness": true,
+      "miss": false
+    },
+    {
+      "id": "election-glacier",
+      "surface": "sql",
+      "class": "election",
+      "held_out": true,
+      "prompt": "What is a glacier?",
+      "expected_topic_surface": "glacier",
+      "got_topic_surface": "glacier",
+      "specificity": 0.01047290372152554,
+      "latency_s": 2.1786,
+      "election_correctness": true,
+      "miss": false
+    },
+    {
+      "id": "election-pawn-chess",
+      "surface": "sql",
+      "class": "election",
+      "held_out": true,
+      "prompt": "What is a pawn in chess?",
+      "expected_topic_surface": "pawn",
+      "got_topic_surface": "pawn",
+      "specificity": 0.026486778825328045,
+      "latency_s": 2.9287,
+      "election_correctness": true,
+      "miss": false
+    },
+    {
+      "id": "forward-water",
+      "surface": "forward",
+      "class": "forward",
+      "held_out": false,
+      "prompt": "Water is made of",
+      "expected_answer_surface": null,
+      "predictions": [
+        "water",
+        "water",
+        "WordNet_Synset",
+        "voda",
+        "вода",
+        "agua",
+        "जल"
+      ],
+      "leaks": [],
+      "answer_reached": null,
+      "latency_s": 2.9338,
+      "forward_clean": true,
+      "miss": false
+    },
+    {
+      "id": "smoke-france",
+      "surface": "sql",
+      "class": "smoke",
+      "held_out": false,
+      "prompt": "The capital of France is",
+      "expected_topic_surface": "france",
+      "got_topic_surface": "france",
+      "specificity": 0.0,
+      "latency_s": 3.0712,
+      "election_correctness": true,
+      "miss": false
+    },
+    {
+      "id": "smoke-hot",
+      "surface": "sql",
+      "class": "smoke",
+      "held_out": false,
+      "prompt": "The opposite of hot is",
+      "expected_topic_surface": "hot",
+      "got_topic_surface": "hot",
+      "specificity": 0.0,
+      "latency_s": 2.4235,
+      "election_correctness": true,
+      "miss": false
+    },
+    {
+      "id": "smoke-water",
+      "surface": "sql",
+      "class": "smoke",
+      "held_out": false,
+      "prompt": "Water is made of",
+      "expected_topic_surface": "water",
+      "got_topic_surface": "water",
+      "specificity": 0.004733024555742711,
+      "latency_s": 2.3761,
+      "election_correctness": true,
+      "miss": false
+    }
+  ],
+  "misses_first": true,
+  "baseline": {
+    "path": "/home/ahart/Projects/Laplace/.worktrees/rulings/scripts/eval-baselines.json",
+    "recorded_at": "2026-08-06T05:46:23Z",
+    "advisory_until": "2026-08-10"
+  },
+  "ok": false
+}

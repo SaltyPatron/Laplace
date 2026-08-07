@@ -4,16 +4,17 @@
 
 `COMPLETION_PLAN.md` and this directory cover **one axis**: the conversational
 and inference path — election, generation, the lanes that feed it, and the gates
-that would keep it honest. That is roughly 15 of the repository's **232 open
-issues** (measured 2026-08-05; ledger 42's end count of 195 is stale).
+that would keep it honest. That is a slice of the open GitHub backlog, not the
+whole invention.
 
-It is **not** a plan for the whole backlog. The rest has its own shape and is
-tracked in GitHub, not here. Full-backlog dispositions (stale/current/done,
-`triage:*` labels, campaign umbrellas, `priority:high` ≤12) live in
-[`.scratchpad/42_Issue_Backlog_Triage_2026-08-02.md`](../../.scratchpad/42_Issue_Backlog_Triage_2026-08-02.md);
-doc 37 is the drift baseline only. An earlier framing of this directory as
-"current state → finish line" overstated it; the honest description is
-"current state → a system that converses, with the evidence to prove it."
+It is **not** a plan for the whole backlog. Full-backlog kill order (every open
+issue, invention-ranked, verified against code + live DB on 2026-08-06) lives in
+[BACKLOG_KILL_LIST_2026-08-06.md](BACKLOG_KILL_LIST_2026-08-06.md). Prior triage
+ledgers (including `.scratchpad/42`) are historical hypotheses — re-verify, do
+not shrink scope from them. Doc 37 is the drift baseline only. An earlier
+framing of this directory as "current state → finish line" overstated it; the
+honest description is "current state → a system that converses, with the
+evidence to prove it."
 
 `docs/COMPLETION_PLAN.md` is the map: gap register, phases, sequencing. **This
 directory is the terrain** — one document per workstream, deep enough that an

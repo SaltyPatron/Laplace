@@ -2,19 +2,19 @@
 
 
 CREATE OR REPLACE FUNCTION synonyms(p_word bytea, p_limit int DEFAULT 10)
-    RETURNS TABLE(synonym text, eff_mu numeric, witnesses bigint)
+    RETURNS TABLE(synonym text, laplace.eff_mu numeric, witnesses bigint)
     LANGUAGE sql LAPLACE_STABLE_STRICT
-    SET search_path = @extschema@, public AS $$
+ AS $$
     -- Dedup and rank by member id, never by rendered surface: identical content
     -- always hashes to the same id, so two members that render alike are
     -- DISTINCT content (homographs) and must stay distinct rows. render_text
     -- runs above the sort, streaming off the ranked candidates only until
     -- p_limit rows survive the empty-surface filter.
-    WITH src_lang AS (SELECT converse.word_language(p_word) AS id),
+    WITH src_lang AS (SELECT laplace.converse.word_language(p_word) AS id),
     agg AS (
         SELECT sm.member, max(sm.mu) AS mu, max(sm.witnesses) AS witnesses,
                max(sm.sense_mu) AS sense_mu
-        FROM synset_members(p_word) sm
+        FROM laplace.synset_members(p_word) sm
         WHERE sm.lang = (SELECT id FROM src_lang)
         GROUP BY sm.member
     )
@@ -22,12 +22,12 @@ CREATE OR REPLACE FUNCTION synonyms(p_word bytea, p_limit int DEFAULT 10)
     -- a raw ×1e9 eff_mu from synset_members; rd=0 => round(mu/1e9, 3)). Ordering
     -- above still runs on the raw mu, so ranking is unchanged. (Was the lone
     -- recall_*_response outlier leaking the raw fixed-point value.)
-    SELECT r.txt AS synonym, eff_mu_display(a.mu, 0) AS eff_mu, a.witnesses
+    SELECT r.txt AS synonym, laplace.eff_mu_display(a.mu, 0) AS laplace.eff_mu, a.witnesses
     FROM (
         SELECT member, mu, witnesses FROM agg
         ORDER BY sense_mu DESC NULLS LAST, mu DESC, witnesses DESC, member
     ) a
-    CROSS JOIN LATERAL (SELECT render_text(a.member, 64) AS txt) r
+    CROSS JOIN LATERAL (SELECT laplace.render_text(a.member, 64) AS txt) r
     WHERE NULLIF(btrim(r.txt), '') IS NOT NULL
     LIMIT p_limit
 $$;

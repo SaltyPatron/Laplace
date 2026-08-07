@@ -32,7 +32,7 @@ RETURNS TABLE(
     geodesic    float8,
     frechet     float8)
 LANGUAGE plpgsql STABLE PARALLEL SAFE
-SET search_path = @extschema@, public AS $$
+ AS $$
 DECLARE
     v_anchor geometry := public.ST_SetSRID(
         public.ST_MakePoint(p_cx, p_cy, p_cz, p_cm), 0);
@@ -48,7 +48,7 @@ BEGIN
     WITH g AS (
         SELECT w.id AS entity_id,
                public.laplace_angular_distance_4d(w.coord, v_anchor) AS geo
-        FROM v_word_points w
+        FROM laplace.v_word_points w
         WHERE w.coord IS NOT NULL
         ORDER BY w.coord <<->> v_anchor
         LIMIT GREATEST(p_geodesic_k * 6, 60)
@@ -63,9 +63,9 @@ BEGIN
     )
     SELECT 'geodesic'::text,
            n.entity_id,
-           COALESCE(NULLIF(render_text_fast(n.entity_id, 8), ''),
-                    label_or_hex(n.entity_id)),
-           (SELECT min(e.tier) FROM entities e WHERE e.id = n.entity_id),
+           COALESCE(NULLIF(laplace.render_text_fast(n.entity_id, 8), ''),
+                    laplace.label_or_hex(n.entity_id)),
+           (SELECT min(e.tier) FROM laplace.entities e WHERE e.id = n.entity_id),
            n.geo,
            NULL::float8
     FROM nearest n
@@ -77,7 +77,7 @@ BEGIN
         RETURN QUERY
         WITH pre AS (
             SELECT w.id AS entity_id
-            FROM v_word_points w
+            FROM laplace.v_word_points w
             WHERE w.tier = 2 AND w.trajectory IS NOT NULL
             ORDER BY w.coord <<->> v_anchor
             LIMIT 500
@@ -86,15 +86,15 @@ BEGIN
             SELECT c.entity_id,
                    public.laplace_frechet_4d(c.curve, v_traj) AS fr
             FROM (
-                SELECT pre.entity_id, entity_curve(pre.entity_id) AS curve
+                SELECT pre.entity_id, laplace.entity_curve(pre.entity_id) AS curve
                 FROM pre
             ) c
             WHERE c.curve IS NOT NULL
         )
         SELECT 'shape'::text,
                f.entity_id,
-               COALESCE(NULLIF(render_text_fast(f.entity_id, 8), ''),
-                        label_or_hex(f.entity_id)),
+               COALESCE(NULLIF(laplace.render_text_fast(f.entity_id, 8), ''),
+                        laplace.label_or_hex(f.entity_id)),
                2::smallint,
                NULL::float8,
                f.fr

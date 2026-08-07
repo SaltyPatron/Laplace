@@ -25,32 +25,32 @@ CREATE OR REPLACE FUNCTION chess_time_pressure_outcome()
     -- record-vs-calculate discipline. Tracked as the ingest-fold extension.
     WITH tc AS (
         SELECT c.subject_id AS position, c.object_id AS class_id
-        FROM @extschema@.consensus c
-        WHERE c.type_id = @extschema@.relation_type_id('HAS_THINK_CLASS')
+        FROM laplace.consensus c
+        WHERE c.type_id = laplace.relation_type_id('HAS_THINK_CLASS')
     ), mv AS (
         SELECT c.subject_id AS position,
-               @extschema@.eff_mu(c.rating, c.rd) AS mu,
+               laplace.eff_mu(c.rating, c.rd) AS mu,
                c.witness_count
-        FROM @extschema@.consensus c
-        WHERE c.type_id = @extschema@.relation_type_id('MOVE')
+        FROM laplace.consensus c
+        WHERE c.type_id = laplace.relation_type_id('MOVE')
     ), cls(id, label, ord) AS (
         VALUES
-            (@extschema@.word_id('rushed'), 'rushed', 1),
-            (@extschema@.word_id('normal'), 'normal', 2),
-            (@extschema@.word_id('deep'),   'deep',   3),
+            (laplace.word_id('rushed'), 'rushed', 1),
+            (laplace.word_id('normal'), 'normal', 2),
+            (laplace.word_id('deep'),   'deep',   3),
             -- Think-time lenses: phase × clock × spent refinements the analyzer
             -- deposits beside the base classes, thresholds from the game's own
             -- clock distribution (ChessCanonical.ThinkLens). Content values on
             -- the same HAS_THINK_CLASS cell shape — no relation change. The
             -- fourth lens (late + fast + low clock) IS the base 'rushed' cell.
-            (@extschema@.word_id('planned_quick'), 'planned_quick', 4),
-            (@extschema@.word_id('pressed_think'), 'pressed_think', 5),
-            (@extschema@.word_id('flagging'),      'flagging',      6)
+            (laplace.word_id('planned_quick'), 'planned_quick', 4),
+            (laplace.word_id('pressed_think'), 'pressed_think', 5),
+            (laplace.word_id('flagging'),      'flagging',      6)
     )
     SELECT cls.label,
            count(DISTINCT tc.position)::bigint                       AS positions,
            sum(mv.witness_count)::bigint                             AS plays,
-           round(@extschema@.eff_mu_display(
+           round(laplace.eff_mu_display(
                    avg(mv.mu)::bigint, 0)::numeric, 3)               AS avg_eff_mu
     FROM tc
     JOIN mv  ON mv.position = tc.position

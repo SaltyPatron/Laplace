@@ -16,23 +16,23 @@ CREATE OR REPLACE FUNCTION chess_line(p_line bytea)
     -- returns zero rows.
     WITH playings AS MATERIALIZED (
         SELECT pl.subject_id AS event
-        FROM @extschema@.attestations pl
+        FROM laplace.attestations pl
         WHERE pl.object_id = p_line
-          AND pl.type_id = @extschema@.relation_type_id('PLAYS_LINE')
+          AND pl.type_id = laplace.relation_type_id('PLAYS_LINE')
     ),
     hdr AS MATERIALIZED (
         -- The playings' headers off ONE scan of the line's subject rows, grouped
         -- by context: each playing's own date/result, never a sibling's.
         SELECT a.context_id AS event,
                max(a.object_id) FILTER (
-                   WHERE a.type_id = @extschema@.relation_type_id('ON_DATE')) AS date_id,
+                   WHERE a.type_id = laplace.relation_type_id('ON_DATE')) AS date_id,
                max(a.object_id) FILTER (
-                   WHERE a.type_id = @extschema@.relation_type_id('HAS_RESULT')) AS result_id
-        FROM @extschema@.attestations a
+                   WHERE a.type_id = laplace.relation_type_id('HAS_RESULT')) AS result_id
+        FROM laplace.attestations a
         WHERE a.subject_id = p_line
           AND a.context_id IS NOT NULL
-          AND a.type_id IN (@extschema@.relation_type_id('ON_DATE'),
-                            @extschema@.relation_type_id('HAS_RESULT'))
+          AND a.type_id IN (laplace.relation_type_id('ON_DATE'),
+                            laplace.relation_type_id('HAS_RESULT'))
         GROUP BY a.context_id
     ),
     fold AS MATERIALIZED (
@@ -42,10 +42,10 @@ CREATE OR REPLACE FUNCTION chess_line(p_line bytea)
         -- reached first. Strongest standing fold wins, object_id breaks the tie.
         -- No behaviour change where only one outcome is witnessed.
         SELECT c.witness_count, c.rating, c.rd
-        FROM @extschema@.consensus c
+        FROM laplace.consensus c
         WHERE c.subject_id = p_line
-          AND c.type_id = @extschema@.relation_type_id('OUTCOME')
-        ORDER BY @extschema@.eff_mu(c.rating, c.rd) DESC, c.object_id
+          AND c.type_id = laplace.relation_type_id('OUTCOME')
+        ORDER BY laplace.eff_mu(c.rating, c.rd) DESC, c.object_id
         LIMIT 1
     ),
     surface_batch AS MATERIALIZED (
@@ -58,7 +58,7 @@ CREATE OR REPLACE FUNCTION chess_line(p_line bytea)
         SELECT p.id, t.txt
         FROM surface_batch b,
              LATERAL unnest(b.ids) WITH ORDINALITY AS p(id, i),
-             LATERAL unnest(@extschema@.realize_batch(b.ids)) WITH ORDINALITY AS t(txt, j)
+             LATERAL unnest(laplace.realize_batch(b.ids)) WITH ORDINALITY AS t(txt, j)
         WHERE p.i = t.j
     )
     SELECT pg.event,
@@ -67,7 +67,7 @@ CREATE OR REPLACE FUNCTION chess_line(p_line bytea)
            f.witness_count::bigint,
            f.rating::double precision,
            f.rd::double precision,
-           @extschema@.eff_mu(f.rating, f.rd)::double precision
+           laplace.eff_mu(f.rating, f.rd)::double precision
     FROM playings pg
     LEFT JOIN hdr h ON h.event = pg.event
     LEFT JOIN surface_text d ON d.id = h.date_id

@@ -19,26 +19,26 @@ DROP FUNCTION IF EXISTS chess_syzygy_line(bytea, integer);
 
 CREATE OR REPLACE FUNCTION chess_has_wdl_type() RETURNS bytea
     LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
-    SELECT relation_type_id('HAS_WDL')
+ AS $$
+    SELECT laplace.relation_type_id('HAS_WDL')
 $$;
 
 CREATE OR REPLACE FUNCTION chess_has_dtz_type() RETURNS bytea
     LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
-    SELECT relation_type_id('HAS_DTZ')
+ AS $$
+    SELECT laplace.relation_type_id('HAS_DTZ')
 $$;
 
 CREATE OR REPLACE FUNCTION chess_syzygy_line(p_line bytea, p_limit int DEFAULT 64)
     RETURNS TABLE(position_id bytea, wdl text, dtz text)
     LANGUAGE sql STABLE
-    SET search_path = @extschema@, public AS $$
+ AS $$
 WITH rel AS MATERIALIZED (
-    SELECT chess_has_wdl_type() AS wdl, chess_has_dtz_type() AS dtz
+    SELECT laplace.chess_has_wdl_type() AS wdl, laplace.chess_has_dtz_type() AS dtz
 ),
 line AS MATERIALIZED (
     SELECT u.ord AS ordinal, u.entity_id AS pos
-    FROM LATERAL trajectory_unpacked_points(p_line)
+    FROM LATERAL laplace.trajectory_unpacked_points(p_line)
          WITH ORDINALITY AS u(entity_id, run_length, ctier, ord)
 ),
 probed AS MATERIALIZED (
@@ -48,7 +48,7 @@ probed AS MATERIALIZED (
            min(l.ordinal) AS ord
     FROM line l
     JOIN rel r ON true
-    JOIN attestations a ON a.subject_id = l.pos
+    JOIN laplace.attestations a ON a.subject_id = l.pos
                        AND a.type_id IN (r.wdl, r.dtz)
     GROUP BY l.pos
     HAVING max(a.object_id) FILTER (WHERE a.type_id = r.wdl) IS NOT NULL
@@ -67,7 +67,7 @@ label AS MATERIALIZED (
     SELECT p.id, t.txt
     FROM surfaces b,
          LATERAL unnest(b.ids) WITH ORDINALITY AS p(id, i),
-         LATERAL unnest(realize_batch(b.ids, NULL)) WITH ORDINALITY AS t(txt, j)
+         LATERAL unnest(laplace.realize_batch(b.ids, NULL)) WITH ORDINALITY AS t(txt, j)
     WHERE p.i = t.j
 )
 SELECT o.pos, w.txt, d.txt

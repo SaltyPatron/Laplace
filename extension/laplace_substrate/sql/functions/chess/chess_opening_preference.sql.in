@@ -17,21 +17,21 @@ CREATE OR REPLACE FUNCTION chess_opening_preference(p_player bytea,
                                                     p_limit int DEFAULT 12)
     RETURNS TABLE(tc_class text, eco text, games bigint)
     LANGUAGE sql STABLE
-    SET search_path = @extschema@, public AS $$
+ AS $$
 WITH grouped AS (
     SELECT tcc.object_id AS tc_id, e.object_id AS eco_id, count(*) AS games
-    FROM attestations a
-    JOIN attestations tcc ON tcc.subject_id = a.subject_id
+    FROM laplace.attestations a
+    JOIN laplace.attestations tcc ON tcc.subject_id = a.subject_id
                          AND tcc.context_id = a.context_id
-                         AND tcc.type_id = relation_type_id('HAS_TC_CLASS')
-    JOIN attestations e ON e.subject_id = a.subject_id
+                         AND tcc.type_id = laplace.relation_type_id('HAS_TC_CLASS')
+    JOIN laplace.attestations e ON e.subject_id = a.subject_id
                        AND e.context_id = a.context_id
-                       AND e.type_id = relation_type_id('HAS_ECO')
+                       AND e.type_id = laplace.relation_type_id('HAS_ECO')
     WHERE a.object_id = p_player
       AND a.context_id IS NOT NULL
-      AND a.type_id IN (relation_type_id('HAS_WHITE'),
-                        relation_type_id('HAS_BLACK'))
-      AND (p_tc_class IS NULL OR tcc.object_id = word_id(lower(p_tc_class)))
+      AND a.type_id IN (laplace.relation_type_id('HAS_WHITE'),
+                        laplace.relation_type_id('HAS_BLACK'))
+      AND (p_tc_class IS NULL OR tcc.object_id = laplace.word_id(lower(p_tc_class)))
     GROUP BY tcc.object_id, e.object_id
     ORDER BY count(*) DESC, tcc.object_id, e.object_id
     LIMIT p_limit
@@ -41,7 +41,7 @@ ord AS (
     FROM grouped g
 ),
 lbl AS (
-    SELECT realize_batch(array_agg(v.id ORDER BY v.ord), NULL) AS l
+    SELECT laplace.realize_batch(array_agg(v.id ORDER BY v.ord), NULL) AS l
     FROM (SELECT o.tc_id AS id, o.ix * 2 - 1 AS ord FROM ord o
           UNION ALL
           SELECT o.eco_id, o.ix * 2 FROM ord o) v

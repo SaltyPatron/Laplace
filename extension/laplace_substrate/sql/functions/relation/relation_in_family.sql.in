@@ -14,18 +14,18 @@
 CREATE OR REPLACE FUNCTION relation_in_family(p_type_id bytea, p_family text)
     RETURNS boolean
     LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
-    SELECT relation_type_in_family(p_type_id, p_family)
+ AS $$
+    SELECT laplace.relation_type_in_family(p_type_id, p_family)
         OR EXISTS (
-            SELECT 1 FROM consensus c
+            SELECT 1 FROM laplace.consensus c
             WHERE c.subject_id = p_type_id
-              AND c.type_id = relation_type_id('IS_A')
-              AND c.object_id = relation_type_id(p_family)
+              AND c.type_id = laplace.relation_type_id('IS_A')
+              AND c.object_id = laplace.relation_type_id(p_family)
               -- A REFUTED IS_A is not membership. consensus carries no outcome
               -- column -- refutation lives in the fold, and the walk's own law is
               -- that a non-positive score dead-ends rather than being walked. Bare
               -- row presence made "witnessed as NOT in this family" and "witnessed
               -- as in this family" the same answer.
-              AND eff_mu(c.rating, c.rd) > 0
+              AND laplace.eff_mu(c.rating, c.rd) > 0
         )
 $$;

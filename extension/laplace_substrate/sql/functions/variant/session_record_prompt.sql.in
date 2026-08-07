@@ -2,7 +2,7 @@ CREATE OR REPLACE FUNCTION session_record_prompt(
         p_session bytea, p_prompt text, p_resolved bytea DEFAULT NULL)
     RETURNS void
     LANGUAGE plpgsql VOLATILE
-    SET search_path = @extschema@, public AS $$
+ AS $$
 BEGIN
     -- GH #911 item 2. `COALESCE((SELECT max(ord) ...), 0) + 1` was an unlocked
     -- read-modify-write: two concurrent turns on one session read the same max and
@@ -24,10 +24,10 @@ BEGIN
     PERFORM pg_advisory_xact_lock(
         ('x' || substr(encode(p_session, 'hex'), 1, 16))::bit(64)::bigint);
 
-    INSERT INTO session_topics (session_id, ord, prompt, resolved_id)
+    INSERT INTO laplace.session_topics (session_id, ord, prompt, resolved_id)
     VALUES (
         p_session,
-        COALESCE((SELECT max(t.ord) FROM session_topics t WHERE t.session_id = p_session), 0) + 1,
+        COALESCE((SELECT max(t.ord) FROM laplace.session_topics t WHERE t.session_id = p_session), 0) + 1,
         p_prompt,
         p_resolved
     );

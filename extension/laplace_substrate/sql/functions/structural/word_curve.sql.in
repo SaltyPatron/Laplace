@@ -1,6 +1,6 @@
 CREATE OR REPLACE FUNCTION word_curve(p_word bytea) RETURNS geometry
     LANGUAGE sql STABLE AS $$
     SELECT public.ST_MakeLine(w.coord ORDER BY c.ordinal)
-    FROM @extschema@.constituents(p_word) c
-    JOIN @extschema@.v_word_points w ON w.id = c.child_id
+    FROM laplace.constituents(p_word) c
+    JOIN laplace.v_word_points w ON w.id = c.child_id
 $$;

@@ -32,9 +32,9 @@ CREATE OR REPLACE FUNCTION chess_game_plies(p_event bytea)
     -- replays the movetext for those.
     WITH played AS MATERIALIZED (
         SELECT pl.object_id AS line
-        FROM @extschema@.attestations pl
+        FROM laplace.attestations pl
         WHERE pl.subject_id = p_event
-          AND pl.type_id = @extschema@.relation_type_id('PLAYS_LINE')
+          AND pl.type_id = laplace.relation_type_id('PLAYS_LINE')
         -- Same pick as chess_game: event -> line is a convention, not a
         -- constraint, and a second source re-ingesting the PGN adds a row.
         -- Ordered so both surfaces resolve the SAME line for the same event.
@@ -48,33 +48,33 @@ CREATE OR REPLACE FUNCTION chess_game_plies(p_event bytea)
         -- a build and to a regress case that only exercised the no-trajectory branch.
         SELECT u.ord AS ordinal, u.entity_id AS pos
         FROM played p,
-             LATERAL @extschema@.trajectory_unpacked_points(p.line)
+             LATERAL laplace.trajectory_unpacked_points(p.line)
              WITH ORDINALITY AS u(entity_id, run_length, ctier, ord)
     ),
     facts AS MATERIALIZED (
         -- One indexed pass over this playing's per-ply evidence, both context grains.
         SELECT a.subject_id AS pos, a.type_id, a.object_id
-        FROM @extschema@.attestations a
+        FROM laplace.attestations a
         WHERE (a.context_id = p_event
                OR a.context_id = (SELECT p.line FROM played p))
-          AND a.type_id IN (@extschema@.relation_type_id('HAS_SAN'),
-                            @extschema@.relation_type_id('HAS_CLOCK'),
-                            @extschema@.relation_type_id('HAS_EVAL_TOKEN'),
-                            @extschema@.relation_type_id('HAS_THINK_CLASS'),
-                            @extschema@.relation_type_id('MOVE_QUALITY'))
+          AND a.type_id IN (laplace.relation_type_id('HAS_SAN'),
+                            laplace.relation_type_id('HAS_CLOCK'),
+                            laplace.relation_type_id('HAS_EVAL_TOKEN'),
+                            laplace.relation_type_id('HAS_THINK_CLASS'),
+                            laplace.relation_type_id('MOVE_QUALITY'))
     ),
     per_pos AS MATERIALIZED (
         SELECT f.pos,
                max(f.object_id) FILTER (
-                   WHERE f.type_id = @extschema@.relation_type_id('HAS_SAN')) AS san_id,
+                   WHERE f.type_id = laplace.relation_type_id('HAS_SAN')) AS san_id,
                max(f.object_id) FILTER (
-                   WHERE f.type_id = @extschema@.relation_type_id('HAS_CLOCK')) AS clock_id,
+                   WHERE f.type_id = laplace.relation_type_id('HAS_CLOCK')) AS clock_id,
                max(f.object_id) FILTER (
-                   WHERE f.type_id = @extschema@.relation_type_id('HAS_EVAL_TOKEN')) AS eval_id,
+                   WHERE f.type_id = laplace.relation_type_id('HAS_EVAL_TOKEN')) AS eval_id,
                max(f.object_id) FILTER (
-                   WHERE f.type_id = @extschema@.relation_type_id('HAS_THINK_CLASS')) AS think_id,
+                   WHERE f.type_id = laplace.relation_type_id('HAS_THINK_CLASS')) AS think_id,
                max(f.object_id) FILTER (
-                   WHERE f.type_id = @extschema@.relation_type_id('MOVE_QUALITY')) AS quality_id
+                   WHERE f.type_id = laplace.relation_type_id('MOVE_QUALITY')) AS quality_id
         FROM facts f
         GROUP BY f.pos
     ),
@@ -92,7 +92,7 @@ CREATE OR REPLACE FUNCTION chess_game_plies(p_event bytea)
         SELECT q.id, t.txt
         FROM surface_batch b,
              LATERAL unnest(b.ids) WITH ORDINALITY AS q(id, i),
-             LATERAL unnest(@extschema@.realize_batch(b.ids)) WITH ORDINALITY AS t(txt, j)
+             LATERAL unnest(laplace.realize_batch(b.ids)) WITH ORDINALITY AS t(txt, j)
         WHERE q.i = t.j
     )
     SELECT l.ordinal::integer,

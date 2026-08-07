@@ -1,0 +1,24 @@
+{
+  "dog": {
+    "compose": {
+      "content_rate": 0.0,
+      "echo_rate": 0.0,
+      "empty": false,
+      "expected_n": 59,
+      "flatness": 0.38,
+      "seed_variance": 2
+    },
+    "lang_pin": {
+      "lang_pin_rate": 0.06,
+      "lang_pin_tokens": 50
+    },
+    "walk": {
+      "content_rate": 0.1,
+      "echo_rate": 0.0,
+      "empty": false,
+      "expected_n": 59,
+      "flatness": 0.143,
+      "seed_variance": 2
+    }
+  }
+}

@@ -50,7 +50,7 @@ CREATE OR REPLACE FUNCTION attestations_present_ordinals(
     -- caller could depend on being stable across the statement, so VOLATILE costs
     -- nothing here -- it is a scan of committed rows, called once per probe chunk.
     LANGUAGE plpgsql VOLATILE
-    SET search_path = @extschema@, public AS $$
+ AS $$
 DECLARE
     v_type bytea;
 BEGIN
@@ -73,7 +73,7 @@ BEGIN
         RETURN QUERY
         SELECT b.idx
         FROM _apo_batch b
-        JOIN attestations a
+        JOIN laplace.attestations a
           ON a.type_id = v_type          -- variable -> LIST prune at plan time
          AND a.subject_id = b.s          -- HASH-leaf prune per row
          AND a.id = b.id

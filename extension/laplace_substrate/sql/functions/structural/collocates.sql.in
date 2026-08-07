@@ -1,7 +1,7 @@
 CREATE OR REPLACE FUNCTION collocates(p_word text, p_limit int DEFAULT 12)
     RETURNS TABLE(next_word text, mu numeric, witnesses bigint)
     LANGUAGE sql STABLE
-    SET search_path = @extschema@, public AS $$
+ AS $$
     -- Rank + LIMIT on ids first, render the ≤p_limit survivors (define/examples pattern) —
     -- render() was projected over every PRECEDES edge of the word before the cut.
     -- Pillar 5 (2026-07-20): collocates are read from the GEOMETRY --
@@ -10,10 +10,10 @@ CREATE OR REPLACE FUNCTION collocates(p_word text, p_limit int DEFAULT 12)
     -- no rated PRECEDES edge to read any more (Pillar 3a, e5e1b42), so `mu` is
     -- NULL: observed frequency is the signal, and inventing a rating here would
     -- fabricate a number the substrate never adjudicated.
-    SELECT render(s.successor_id), NULL::numeric, s.seen
+    SELECT laplace.render(s.successor_id), NULL::numeric, s.seen
     FROM (
         SELECT gs.successor_id, gs.seen
-        FROM geometry_successors(word_id(p_word), p_limit, 8) gs
+        FROM laplace.geometry_successors(laplace.word_id(p_word), p_limit, 8) gs
         ORDER BY gs.seen DESC
         LIMIT p_limit
     ) s
