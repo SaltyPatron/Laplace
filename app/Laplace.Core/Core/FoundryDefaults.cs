@@ -48,6 +48,12 @@ public static class FoundryDefaults
     /// Plan Phase 5 (doc 14 P7): scale of the hilbert content-PE written into the
     /// trailing capacity dims of the embedding (content dims are row-normalized to 1).
     public const double HilbertPeScale = 0.25;
+    /// Highway salience bands — the width of doc 18 §2's G stratum (relation-gate
+    /// signals: one indicator direction per band). COUNTED, not chosen: this is the
+    /// row count of relation_band_catalog() (mandate..probationary, bands 0..12), and
+    /// it moves only when the catalog does. Named here rather than inlined so the
+    /// stratum allocator and the catalog cannot silently disagree.
+    public const int HighwayBandCount = 13;
     /// 2026-07-08 rank-collapse fix (doc 14 M3 at the OPERATOR level): factored
     /// plane spectra are hub-dominated (observed 29:1 V-row ratio → effectively
     /// rank-1 operators → prompt-independent final states, logit corr 1.0000).

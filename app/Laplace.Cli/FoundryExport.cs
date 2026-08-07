@@ -1222,6 +1222,53 @@ internal static class FoundryExport
                 e[(long)i * dModel + d] = Gaussian(ref s) * capScale;
         }
 
+        // THE ANONYMOUS RESIDUAL STREAM, MEASURED (docs/specs/18 §2, GH #521).
+        //
+        // The loop above is the defect stated in one place: every dim between the
+        // spectral basis and the trailing PE/bias is Gaussian noise. It is capacity,
+        // not representation -- no head reads a named subspace because there are no
+        // named subspaces, which is exactly why `embed = I` was a defensible fallback.
+        // A composed representation needs somewhere to compose INTO.
+        //
+        // Doc 18 §2 allocates d_model into S (surface/positional), W (word/lemma),
+        // C (sense/ILI -- the internal lingua franca every relation plane is defined
+        // over), F (active frames + role bindings) and G (relation-gate signals).
+        // ResidualStrata computes that layout from a census; the widths are counted,
+        // never chosen.
+        //
+        // WHAT IS WIRED HERE: S and W are real -- the PE budget and the word-graph
+        // spectral rank. G is the band count. C is allocated but still noise-filled,
+        // and F is zero because neither a sense-graph eigenmap nor a witnessed-LU
+        // frame census is read on this path yet. So this reports the layout and the
+        // noise fraction rather than pretending the strata are populated: the number
+        // below is how anonymous the stream currently is, and it is the metric the
+        // C/F wiring has to move. Tensor values are unchanged by this block.
+        try
+        {
+            int peDimsPlanned = (hilbertKeys is not null && dModel > 24) ? Math.Min(8, dModel - 1 - k) : 0;
+            var strata = ResidualStrata.Allocate(new ResidualStrata.Census(
+                DModel: dModel,
+                PeDims: peDimsPlanned + 1,              // +1: the trailing bias dim is surface-side
+                WordSpectralRank: k,
+                SenseSpectralRank: Math.Max(2, dModel - 1 - k - peDimsPlanned - FoundryDefaults.HighwayBandCount),
+                FramesWithWitnessedLus: 0,
+                BandCount: FoundryDefaults.HighwayBandCount));
+
+            int named = strata.S.Width + strata.W.Width;
+            double anon = dModel <= 0 ? 0.0 : 1.0 - (double)named / dModel;
+            Console.WriteLine($"  {strata.Describe()}");
+            Console.WriteLine($"  residual: {named:N0}/{dModel:N0} dims carry substrate content "
+                            + $"(S+W); {anon:P1} is unallocated capacity noise — C awaits a sense-graph "
+                            + "eigenmap, F awaits a witnessed-LU frame census (doc 18 §2 / GH #521)");
+        }
+        catch (InvalidOperationException ex)
+        {
+            // Fail loud, not closed: the synthesis itself is unaffected (the layout is
+            // diagnostic today), but a d_model that cannot hold the counted ontology is
+            // a real finding and silently swallowing it is how it stays unfixed.
+            Console.WriteLine($"  strata: NOT ALLOCATABLE — {ex.Message}");
+        }
+
 
         for (int i = 0; i < vocab; i++)
         {

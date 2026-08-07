@@ -37,21 +37,60 @@
 -- and "never attested", so the text test runs ONLY for ids the substrate cannot
 -- answer for. Seeded, that is no ids and the fallback costs nothing; unseeded, it
 -- is exactly the pre-existing behaviour.
+-- ONE SET-BASED PASS, NOT A LATERAL PER CANDIDATE.
+--
+-- The previous body ran the category probe as a LEFT JOIN LATERAL correlated on
+-- v.id, so the whole subquery executed once PER VOCAB ENTRY. Worse, both partition
+-- keys arrived column-valued: `a.subject_id = v.id` is a column reference, and
+-- `a.type_id = relation_type_id(...)` is a STABLE call the planner will not fold to
+-- a literal. attestations is LIST(type_id) -> HASH(subject_id), and neither level
+-- can prune against a value that is not bound at plan time -- which is exactly
+-- FAILED FORM (2) recorded in probes/attestations_present_ordinals.sql.in, where
+-- the same shape Append-scanned every leaf.
+--
+-- MEASURED 2026-08-07 on the foundation seed: geometry_successors('king') took
+-- 8,148 ms, of which its containment+unpack query is 40 ms. The remaining ~8.1 s
+-- was this function, called once with the batch of 26,047 unpacked candidates. The
+-- foundry vocab crawl calls geometry_successors ~50 times (once per seed, then once
+-- per surviving order-1 row), so a 10-seed crawl spent over ten minutes here and
+-- never reached tensor synthesis at all.
+--
+-- The fix is the idiom the sibling probes already prove:
+--   * bind the type_id ONCE into a plpgsql variable, so the LIST parent prunes at
+--     plan time to the single HAS_GENERAL_CATEGORY partition;
+--   * probe with `subject_id = ANY(p_vocab)`, which becomes the index condition
+--     itself and prunes the HASH sublevel per element -- one descent per id;
+--   * GROUP BY subject_id once, then LEFT JOIN the result back to the ordinals.
+--
+-- The tri-state is preserved exactly. bool_or over zero rows is NULL, an id absent
+-- from the aggregate is also NULL, and both fall through to the text test -- so an
+-- unattested id is still never answered "not a separator" from silence. On a seeded
+-- substrate that fallback covers no ids and costs nothing; on the generation_corpus
+-- fixture (synthetic content, zero Unicode layer) it is the whole answer, which is
+-- the case that broke main on merge and is why the COALESCE is load-bearing.
 CREATE OR REPLACE FUNCTION corpus_whitespace_vocab_indices(p_vocab bytea[])
     RETURNS TABLE(vocab_idx int)
-    LANGUAGE sql STABLE PARALLEL SAFE
+    LANGUAGE plpgsql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
-    SELECT (v.ord::int4 - 1) AS vocab_idx
-    FROM unnest(p_vocab) WITH ORDINALITY v(id, ord)
-    LEFT JOIN LATERAL (
-        SELECT bool_or(cn.name IN ('unicode/category/Zs/v1',
+DECLARE
+    v_type bytea := relation_type_id('HAS_GENERAL_CATEGORY');
+BEGIN
+    RETURN QUERY
+    WITH cat AS MATERIALIZED (
+        SELECT a.subject_id AS id,
+               bool_or(cn.name IN ('unicode/category/Zs/v1',
                                    'unicode/category/Zl/v1',
                                    'unicode/category/Zp/v1',
                                    'unicode/category/Cc/v1')) AS is_sep
         FROM attestations a
         JOIN canonical_names cn ON cn.id = a.object_id
-        WHERE a.subject_id = v.id
-          AND a.type_id = relation_type_id('HAS_GENERAL_CATEGORY')
-    ) g ON true
-    WHERE COALESCE(g.is_sep, is_all_whitespace(render_text_fast(v.id, 8)))
+        WHERE a.type_id = v_type              -- bound literal -> LIST prune at plan time
+          AND a.subject_id = ANY (p_vocab)    -- index condition -> HASH prune per id
+        GROUP BY a.subject_id
+    )
+    SELECT (v.ord::int4 - 1)
+    FROM unnest(p_vocab) WITH ORDINALITY v(id, ord)
+    LEFT JOIN cat ON cat.id = v.id
+    WHERE COALESCE(cat.is_sep, is_all_whitespace(render_text_fast(v.id, 8)));
+END;
 $$;

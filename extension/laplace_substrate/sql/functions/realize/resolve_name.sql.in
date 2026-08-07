@@ -41,7 +41,33 @@ CREATE OR REPLACE FUNCTION resolve_name(
             -- preference stays AHEAD of the boost so a domain hint never overrides
             -- the caller's requested language; the boost only breaks ties the old
             -- global argmax broke blindly by popularity.
-            WITH ctx AS (
+            -- FAMILY TYPE IDS RESOLVED ONCE, AS ARRAYS.
+            --
+            -- consensus is LIST-partitioned by type_id, and the previous body filtered
+            -- with `relation_type_in_family(hs.type_id, 'HAS_SENSE')` -- a FUNCTION CALL
+            -- ON THE PARTITION KEY. The planner cannot prune against that, so the join
+            -- Append-scanned all ~221 relation partitions and ran the function once per
+            -- edge on top. Measured 2026-08-07: the context branch cost 5,706 ms, of
+            -- which ctx was 6.5 ms and the batched render ~140 ms -- the rest was here.
+            --
+            -- Resolved up front, `type_id = ANY(...)` is a bound array the planner prunes
+            -- with and serves from the (subject_id, type_id) index. Identical semantics:
+            -- relation_family_members is the same family rollup the predicate consulted.
+            -- This is the move chat.sql.in's band lens already documents for exactly the
+            -- same reason.
+            WITH fam AS MATERIALIZED (
+                SELECT COALESCE(array_agg(id) FILTER (WHERE fam = 'HAS_NAME'), '{}'::bytea[]) AS name_t,
+                       COALESCE(array_agg(id) FILTER (WHERE fam IN ('HAS_NAME','HAS_NAME_ALIAS')), '{}'::bytea[]) AS any_name_t,
+                       COALESCE(array_agg(id) FILTER (WHERE fam = 'HAS_SENSE'), '{}'::bytea[]) AS sense_t
+                FROM (
+                    SELECT 'HAS_NAME'::text AS fam, id FROM relation_family_members('HAS_NAME')
+                    UNION ALL
+                    SELECT 'HAS_NAME_ALIAS', id FROM relation_family_members('HAS_NAME_ALIAS')
+                    UNION ALL
+                    SELECT 'HAS_SENSE', id FROM relation_family_members('HAS_SENSE')
+                ) f
+            ),
+            ctx AS (
                 SELECT id, sum(boost) AS boost FROM (
                     SELECT c.object_id AS id, sum(eff_mu(c.rating, c.rd)) AS boost
                     FROM v_consensus_unrefuted c
@@ -54,46 +80,80 @@ CREATE OR REPLACE FUNCTION resolve_name(
                     GROUP BY c.subject_id
                 ) t GROUP BY id
             ),
-            cand AS (
+            -- CANDIDATES IN ID SPACE. No render here (GH #906/#907 idiom; CLAUDE.md's
+            -- "don't resolve names per row -- aggregate ids, then batch").
+            --
+            -- MEASURED 2026-08-07 via pg_stat_statements on the foundation seed: this
+            -- branch was 24,511 calls at a 2,380 ms mean, and the `render_text(...)`
+            -- inside it was a separate 24,512 calls at 2,372 ms -- i.e. essentially the
+            -- ENTIRE cost of resolving a name was rendering candidates that were then
+            -- discarded. render_text is a scalar: each call opens its own SPI connection
+            -- and runs its own constituents_closure recursion, and that recursion is the
+            -- single largest line item in the whole system (1,496,183 calls, 19.6 hours
+            -- cumulative). A name with 40 candidates paid 40 closure walks to return one
+            -- string.
+            --
+            -- render_text_batch runs ONE closure over every id at once -- the native
+            -- batch path already does exactly that (generate_walk.c fetch_constituents_
+            -- closure with n_roots), it was simply never reached from here.
+            cand AS MATERIALIZED (
                 -- HAS_NAME (primary) + HAS_NAME_ALIAS, as families.
-                SELECT render_text(nm.object_id, 24) AS surface,
-                       nm.object_id AS name_id,
-                       relation_type_in_family(nm.type_id, 'HAS_NAME') AS prim,
+                SELECT nm.object_id AS name_id,
+                       nm.type_id = ANY (fam.name_t) AS prim,
                        (lang.object_id IS NOT NULL) AS lp,
                        eff_mu(nm.rating, nm.rd) AS mu
-                FROM v_consensus_unrefuted nm
+                FROM fam CROSS JOIN v_consensus_unrefuted nm
                 LEFT JOIN consensus lang ON lang.subject_id = nm.object_id
                      AND lang.type_id = relation_type_id('HAS_LANGUAGE')
                      AND lang.object_id = p_lang
                 WHERE nm.subject_id = p_id
-                  AND (relation_type_in_family(nm.type_id, 'HAS_NAME')
-                    OR relation_type_in_family(nm.type_id, 'HAS_NAME_ALIAS'))
+                  AND nm.type_id = ANY (fam.any_name_t)
                 UNION ALL
                 -- synset lemma: word --[HAS_SENSE family]--> sense
                 --                    --[IS_SENSE_OF -> HAS_SENSE]--> p_id
-                SELECT render_text(hs.subject_id, 24) AS surface,
-                       hs.subject_id AS name_id,
+                SELECT hs.subject_id AS name_id,
                        false AS prim,
                        (lang.object_id IS NOT NULL) AS lp,
                        eff_mu(hs.rating, hs.rd) AS mu
-                FROM v_consensus_unrefuted io
+                -- CROSS JOIN, not a comma: a comma-list binds looser than an explicit
+                -- JOIN, so `fam` would not be visible from the ON clause below.
+                FROM fam CROSS JOIN v_consensus_unrefuted io
                 JOIN consensus hs ON hs.object_id = io.subject_id
-                     AND relation_type_in_family(hs.type_id, 'HAS_SENSE')
+                     AND hs.type_id = ANY (fam.sense_t)
                 LEFT JOIN consensus lang ON lang.subject_id = hs.subject_id
                      AND lang.type_id = relation_type_id('HAS_LANGUAGE')
                      AND lang.object_id = p_lang
                 WHERE io.object_id = p_id
-                  AND relation_type_in_family(io.type_id, 'HAS_SENSE')
+                  AND io.type_id = ANY (fam.sense_t)
+            ),
+            -- RANK FIRST, THEN RENDER. The ordering keys are all fold-side, so the
+            -- winner is decided in id space and only the survivors are realized.
+            -- Ranked in full (not capped) because the render filter below can reject
+            -- any prefix of them: an id with no renderable surface must fall through
+            -- to the next candidate, and a LIMIT here would turn "unrenderable" into
+            -- "no name" -- an abstention this function is explicit about not faking.
+            ranked AS MATERIALIZED (
+                SELECT c.name_id,
+                       row_number() OVER (
+                           ORDER BY c.lp DESC,
+                                    (ctx.boost IS NOT NULL) DESC,
+                                    c.prim DESC,
+                                    COALESCE(ctx.boost, 0) DESC,
+                                    c.mu DESC,
+                                    c.name_id) AS rn
+                FROM cand c
+                LEFT JOIN ctx ON ctx.id = c.name_id
+            ),
+            -- ONE closure walk for every candidate, position-aligned (the alignment is
+            -- pinned by tests/sql/realize_ladder_parity.sql).
+            lbl AS MATERIALIZED (
+                SELECT render_text_batch(array_agg(r.name_id ORDER BY r.rn), 24) AS s
+                FROM ranked r
             )
-            SELECT c.surface
-            FROM cand c
-            LEFT JOIN ctx ON ctx.id = c.name_id
-            WHERE c.surface IS NOT NULL AND c.surface <> ''
-            ORDER BY c.lp DESC,
-                     (ctx.boost IS NOT NULL) DESC,
-                     c.prim DESC,
-                     COALESCE(ctx.boost, 0) DESC,
-                     c.mu DESC
+            SELECT l.s[r.rn]
+            FROM ranked r CROSS JOIN lbl l
+            WHERE l.s[r.rn] IS NOT NULL AND l.s[r.rn] <> ''
+            ORDER BY r.rn
             LIMIT 1
         )
     END
