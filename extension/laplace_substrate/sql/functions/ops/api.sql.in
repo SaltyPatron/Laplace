@@ -1,17 +1,29 @@
 CREATE OR REPLACE FUNCTION api(p_like text DEFAULT NULL)
     RETURNS TABLE(name text, args text, returns text)
-    LANGUAGE sql STABLE 
-    AS $$
+    LANGUAGE sql STABLE
+AS $$
     SELECT CASE WHEN n.nspname = 'laplace' THEN p.proname::text
                 ELSE n.nspname || '.' || p.proname END,
            pg_get_function_arguments(p.oid),
            pg_get_function_result(p.oid)
     FROM pg_proc p
     JOIN pg_namespace n ON n.oid = p.pronamespace
-    WHERE n.nspname = ANY (ARRAY[
-            'laplace','consensus','converse','lexical','taxonomy',
-            'generation','structural','chess','realize','ops'
-        ])
+    WHERE (
+            n.nspname = ANY (ARRAY[
+                'laplace','consensus','converse','lexical','taxonomy',
+                'generation','structural','chess','realize','ops'
+            ])
+            -- Load-bearing public C helpers agents must find via api() before
+            -- inventing duplicates (GH #533). Not every public.* — only the
+            -- geometry/hash surface the substrate owns.
+            OR (n.nspname = 'public' AND p.proname = ANY (ARRAY[
+                'laplace_frechet_4d',
+                'laplace_hilbert_encode',
+                'laplace_radius_origin',
+                'laplace_hash128_blake3',
+                'laplace_mantissa_unpack'
+            ]))
+          )
       AND (p_like IS NULL
            OR p.proname ILIKE '%'||p_like||'%'
            OR (n.nspname || '.' || p.proname) ILIKE '%'||p_like||'%')
