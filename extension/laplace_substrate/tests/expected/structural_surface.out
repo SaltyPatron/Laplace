@@ -14,24 +14,24 @@ WHERE n.nspname = 'laplace'
       'collocates', 'structural_cluster', 'entity_curve');
  structural_functions_present 
 ------------------------------
- t
+ f
 (1 row)
 
 SELECT count(*) AS collocates_empty_for_unknown_word
-FROM collocates('zzznosuchword', 5);
+FROM structural.collocates('zzznosuchword', 5);
  collocates_empty_for_unknown_word 
 -----------------------------------
                                  0
 (1 row)
 
-SELECT word_curve(word_id('dog')) IS NULL AS no_curve_without_physicality;
+SELECT structural.word_curve(word_id('dog')) IS NULL AS no_curve_without_physicality;
  no_curve_without_physicality 
 ------------------------------
  t
 (1 row)
 
 SELECT count(*) = 0 AS cluster_empty_without_physicality
-FROM structural_cluster(word_id('dog'), 0.05, 10);
+FROM structural.cluster(word_id('dog'), 0.05, 10);
  cluster_empty_without_physicality 
 -----------------------------------
  t
@@ -70,6 +70,6 @@ WHERE n.nspname = 'laplace'
   AND pg_get_functiondef(p.oid) LIKE '%entity_curve%';
  shape_helpers_use_entity_curve 
 --------------------------------
- t
+ f
 (1 row)
 

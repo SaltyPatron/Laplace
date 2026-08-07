@@ -106,9 +106,9 @@ SELECT count(*) AS dog_senses FROM lexical.senses(word_id('dog'));
 
 SELECT definition, witnesses FROM lexical.define(word_id('dog'));
 
-SELECT synonym FROM synonyms(word_id('dog'));
+SELECT synonym FROM converse.synonyms(word_id('dog'));
 
-SELECT translation, language FROM translations(word_id('dog')) ORDER BY translation;
+SELECT translation, language FROM converse.translations(word_id('dog')) ORDER BY translation;
 
 -- The read shape is an ARGUMENT, never inferred from the phrasing. These same
 -- calls answer identically whatever language the caller thinks in.
