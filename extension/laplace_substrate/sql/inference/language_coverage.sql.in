@@ -10,7 +10,7 @@ CREATE OR REPLACE FUNCTION language_coverage(p_word bytea, p_limit int DEFAULT 4
         FROM synset_members(p_word) sm
         WHERE sm.lang IS NOT NULL
         UNION
-        SELECT label(word_language(p_word))
+        SELECT label(converse.word_language(p_word))
     ),
     shown AS (SELECT code FROM langs WHERE code IS NOT NULL ORDER BY code LIMIT p_limit)
     SELECT COALESCE(label(p_word), '?') || ' is witnessed across '

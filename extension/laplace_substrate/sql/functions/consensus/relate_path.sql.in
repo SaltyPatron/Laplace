@@ -83,7 +83,7 @@ CREATE OR REPLACE FUNCTION consensus.relate_path(p_x bytea, p_y bytea, p_depth i
         ) a ORDER BY a.len, a.mu DESC NULLS LAST LIMIT 1
     )
     SELECT realize_path(w.nodes, w.types, w.dirs,
-                        COALESCE(word_language(p_x), word_language(p_y))) AS chain,
+                        COALESCE(converse.word_language(p_x), converse.word_language(p_y))) AS chain,
            w.mu AS path_mu,
            CASE WHEN w.plane_type IS NULL THEN 'taxonomy'
                 ELSE type_label(w.plane_type) END AS plane

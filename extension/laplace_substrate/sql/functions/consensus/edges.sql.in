@@ -87,5 +87,5 @@ CREATE OR REPLACE FUNCTION edges(
     SELECT e.direction, e.relation, e.neighbour_id, e.neighbour, e.eff_mu, e.witnesses
     FROM @extschema@.edges(@extschema@.word_id(p_word), p_direction, NULL::bytea[],
                            p_limit, p_refuted,
-                           @extschema@.word_language(@extschema@.word_id(p_word))) e
+                           converse.word_language(laplace.word_id(p_word))) e
 $$;

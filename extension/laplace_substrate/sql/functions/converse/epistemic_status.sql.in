@@ -13,7 +13,7 @@ CREATE OR REPLACE FUNCTION epistemic_status(p_word bytea, p_lang bytea DEFAULT N
                                     relation_type_id('HAS_LANGUAGE'))
             ORDER BY edge_rank(c.type_id, eff_mu(c.rating, c.rd)) DESC
             LIMIT p_limit),
-         lang(id) AS (SELECT COALESCE(p_lang, word_language(p_word))),
+         lang(id) AS (SELECT COALESCE(p_lang, converse.word_language(p_word))),
          objs(a) AS (SELECT array_agg(DISTINCT object_id) FROM rels),
          rendered AS (
             SELECT u.object_id, NULLIF(u.s, '') AS s

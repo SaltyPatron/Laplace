@@ -3,5 +3,5 @@ CREATE OR REPLACE FUNCTION recall_related_in_response(p_topic bytea, p_type_name
     LANGUAGE sql STABLE PARALLEL SAFE
     SET search_path = @extschema@, public AS $$
     SELECT f.fact, f.eff_mu, f.witnesses
-    FROM related_in(p_topic, relation_type_id(p_type_name), word_language(p_topic)) f
+    FROM related_in(p_topic, relation_type_id(p_type_name), converse.word_language(p_topic)) f
 $$;

@@ -31,7 +31,7 @@ CREATE OR REPLACE FUNCTION consensus_out_labeled(p_id bytea, p_limit integer DEF
         -- HAS_NAME/translation/canonical/gloss arms; hex stays the genuine
         -- last resort so every edge still shows. Approved behavior change.
         SELECT realize_batch(array_agg(o.object_id ORDER BY o.ord),
-                             word_language(p_id)) AS l
+                             converse.word_language(p_id)) AS l
         FROM ordered o
     )
     SELECT o.type_id, o.object_id,

@@ -22,7 +22,7 @@ CREATE OR REPLACE FUNCTION salient_facts(p_word bytea, p_lang bytea DEFAULT NULL
     ), lang AS (
         -- Resolved ONCE, not per candidate row. When p_lang is supplied COALESCE
         -- short-circuits and word_language() is never evaluated.
-        SELECT COALESCE(p_lang, @extschema@.word_language(p_word)) AS l
+        SELECT COALESCE(p_lang, converse.word_language(p_word)) AS l
     ), subj(id) AS (
         SELECT p_word UNION SELECT sn.synset_id FROM lexical.senses(p_word) sn
     ), top AS (
