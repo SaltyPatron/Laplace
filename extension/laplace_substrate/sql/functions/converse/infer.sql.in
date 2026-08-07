@@ -106,11 +106,16 @@ lbl AS (
 named AS (
     SELECT lbl.l[o.ix] AS prediction, o.m / 1e9 AS weight, o.hits AS bias_hits, o.ix
     FROM ord o CROSS JOIN lbl
+),
+dedup AS (
+    -- Two synset ids can realize to the same surface (hot→cold×2). Keep the
+    -- strongest row per label so typed antonym reads don't double-emit.
+    SELECT DISTINCT ON (n.prediction) n.prediction, n.weight, n.bias_hits, n.ix
+    FROM named n
+    WHERE n.prediction IS NOT NULL AND n.prediction <> ''
+    ORDER BY n.prediction, n.bias_hits DESC, n.weight DESC, n.ix
 )
--- Two synset ids can realize to the same surface (hot→cold×2). Keep the
--- strongest row per label so typed antonym reads don't double-emit.
-SELECT DISTINCT ON (n.prediction) n.prediction, n.weight, n.bias_hits
-FROM named n
-WHERE n.prediction IS NOT NULL AND n.prediction <> ''
-ORDER BY n.prediction, n.bias_hits DESC, n.weight DESC, n.ix
+SELECT d.prediction, d.weight, d.bias_hits
+FROM dedup d
+ORDER BY d.bias_hits DESC, d.weight DESC, d.ix
 $$;
