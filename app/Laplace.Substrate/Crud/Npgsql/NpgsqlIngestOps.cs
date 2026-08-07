@@ -230,10 +230,9 @@ public static class NpgsqlIngestOps
     public static Task<IReadOnlyList<SourceEvidenceRow>> AttestationCountsBySourceAsync(
         NpgsqlConnection conn, int timeoutSeconds = 120, CancellationToken ct = default) =>
         NpgsqlRead.ReadRowsAsync(conn, """
-            SELECT laplace.render(a.source_id) AS source, count(*)::bigint AS evidence
-            FROM laplace.attestations a
-            GROUP BY a.source_id
-            ORDER BY evidence DESC
+            SELECT s.source, s.evidence
+            FROM laplace.source_counts() s
+            ORDER BY s.evidence DESC
             """,
             static r => new SourceEvidenceRow(r.GetString(0), r.GetInt64(1)),
             timeoutSeconds: timeoutSeconds, ct: ct, label: "attestation_counts_by_source");

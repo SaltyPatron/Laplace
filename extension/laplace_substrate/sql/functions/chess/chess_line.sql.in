@@ -36,10 +36,16 @@ CREATE OR REPLACE FUNCTION chess_line(p_line bytea)
         GROUP BY a.context_id
     ),
     fold AS MATERIALIZED (
+        -- Ranked, not arbitrary. object_id is unconstrained here, and consensus is
+        -- unique per (subject, type, OBJECT) -- so a line witnessed with more than
+        -- one OUTCOME has several rows and the bare LIMIT took whichever the scan
+        -- reached first. Strongest standing fold wins, object_id breaks the tie.
+        -- No behaviour change where only one outcome is witnessed.
         SELECT c.witness_count, c.rating, c.rd
         FROM @extschema@.consensus c
         WHERE c.subject_id = p_line
           AND c.type_id = @extschema@.relation_type_id('OUTCOME')
+        ORDER BY @extschema@.eff_mu(c.rating, c.rd) DESC, c.object_id
         LIMIT 1
     ),
     surface_batch AS MATERIALIZED (

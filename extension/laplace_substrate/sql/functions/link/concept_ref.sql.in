@@ -17,9 +17,14 @@ CREATE OR REPLACE FUNCTION concept_ref(p_ref text)
     SELECT CASE
         WHEN (SELECT r FROM norm) IS NULL THEN NULL
         WHEN (SELECT r FROM norm) ~ '^[0-9]{8}-[nvasr]$'
+            -- Ranked, not arbitrary: nothing forbids two anchors claiming one
+            -- offset-pos key (a partial or double seed produces exactly that), and
+            -- unordered this returned whichever the index reached first. Strongest
+            -- standing claim wins; the id breaks the tie so the answer is stable.
             THEN (SELECT c.subject_id FROM consensus c
                   WHERE c.object_id = word_id((SELECT r FROM norm))
                     AND c.type_id = relation_type_id('HAS_SYNSET_KEY')
+                  ORDER BY eff_mu(c.rating, c.rd) DESC, c.subject_id
                   LIMIT 1)
         ELSE word_id((SELECT r FROM norm))
     END

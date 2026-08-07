@@ -27,7 +27,20 @@ public sealed class McpSqlLaneGateTests
         var src = ToolsSource();
         Assert.Contains("LAPLACE_MCP_OPERATOR", src);          // the off-by-default flag exists
         Assert.Contains("OperatorLane || t.Name != \"sql\"", src); // hidden from listing off-lane
-        Assert.Contains("\"sql\" => OperatorLane", src);           // dispatch gated on the lane
+
+        // Dispatch is gated on the lane. Pinned as the INVARIANT (ExecuteSql is
+        // only reachable behind OperatorLane), not as one syntax for it: the
+        // previous pin was the literal switch arm `"sql" => OperatorLane`, and
+        // when #913 moved dispatch into a compile-enforced ToolSpec Handler the
+        // gate got STRONGER while the grep went red. A test that fails on a
+        // refactor it should be indifferent to is a false alarm, and a false
+        // alarm on a security gate is worse than no alarm.
+        var flat = new string(src.Where(c => !char.IsWhiteSpace(c)).ToArray());
+        Assert.True(
+            flat.Contains("OperatorLane?s.ExecuteSql(")   // ToolSpec handler ternary
+            || flat.Contains("\"sql\"=>OperatorLane"),    // legacy switch arm
+            "free-form SQL dispatch is no longer gated on OperatorLane — the `sql` "
+            + "hatch must stay operator-lane only (GH #863).");
     }
 
     [Fact]
