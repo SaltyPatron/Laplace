@@ -3,6 +3,7 @@
 -- over_window > 0 means non-atoms were minted at the atom layer.
 -- unresolvable_ids stays 0 here — a full codepoint_for_id sweep is O(window)
 -- and is a follow-on when a gate needs the NULL-label count.
+-- BEGIN ATOMIC: GH #764 beachhead.
 DROP FUNCTION IF EXISTS laplace.atom_census();
 CREATE OR REPLACE FUNCTION atom_census()
     RETURNS TABLE(
@@ -12,12 +13,12 @@ CREATE OR REPLACE FUNCTION atom_census()
         unresolvable_ids bigint)
     LANGUAGE sql
     STABLE
-AS $$
+BEGIN ATOMIC
     WITH w AS (SELECT atom_window() AS n),
          t AS (SELECT entity_count(entity_type_id('Codepoint')) AS n)
     SELECT t.n,
            w.n,
            greatest(0, t.n - w.n),
            0::bigint
-    FROM w, t
-$$;
+    FROM w, t;
+END;

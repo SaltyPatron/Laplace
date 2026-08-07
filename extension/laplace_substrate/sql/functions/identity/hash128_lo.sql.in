@@ -1,5 +1,7 @@
 -- Leading 64 bits of a content id as bigint. One shared lo64 helper so seed /
 -- advisory-lock / walk RNG sites do not open-code encode+bit casts (GH #468).
+-- BEGIN ATOMIC: body is parsed at create time so pg_depend records the call
+-- graph (GH #764 beachhead — string bodies record zero deps).
 DROP FUNCTION IF EXISTS laplace.hash128_lo(bytea);
 CREATE OR REPLACE FUNCTION hash128_lo(p_id bytea)
     RETURNS bigint
@@ -7,6 +9,6 @@ CREATE OR REPLACE FUNCTION hash128_lo(p_id bytea)
     IMMUTABLE
     STRICT
     PARALLEL SAFE
-AS $$
-    SELECT ('x' || encode(substring(p_id FOR 8), 'hex'))::bit(64)::bigint
-$$;
+BEGIN ATOMIC
+    SELECT ('x' || encode(substring(p_id FOR 8), 'hex'))::bit(64)::bigint;
+END;

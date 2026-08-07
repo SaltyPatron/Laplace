@@ -5,7 +5,7 @@
 -- Attestation-first: GROUP BY subject on the source_id index, oversample, then
 -- keep rows whose entity is first-observed by the source at p_tier. Rendering
 -- runs only on the LIMIT survivors (render-before-rank blows the 15s serving cap
--- on WordNet-sized tiers).
+-- on WordNet-sized tiers). BEGIN ATOMIC: GH #764 beachhead.
 DROP FUNCTION IF EXISTS laplace.surface_sample(bytea, smallint, int);
 CREATE OR REPLACE FUNCTION surface_sample(
         p_source bytea,
@@ -18,18 +18,15 @@ CREATE OR REPLACE FUNCTION surface_sample(
         observations bigint)
     LANGUAGE sql
     STABLE
-AS $$
+BEGIN ATOMIC
     WITH top_subj AS (
         SELECT a.subject_id,
                sum(a.observation_count)::bigint AS observations
         FROM laplace.attestations a
         WHERE a.source_id = p_source
-          -- Shared relation-law bootstrap subjects are not surfaces.
           AND laplace.relation_canonical(a.subject_id) IS NULL
         GROUP BY a.subject_id
         ORDER BY sum(a.observation_count) DESC
-        -- Oversample hard: high-obs subjects are often synsets (tier 3) or
-        -- first-observed by another lane; 40× emptied WordNet tier-2 at limit 5.
         LIMIT greatest(GREATEST(p_limit, 1) * 200, 4000)
     ),
     kept AS (
@@ -48,5 +45,5 @@ AS $$
            laplace.render(k.type_id),
            k.observations
     FROM kept k
-    ORDER BY k.observations DESC, k.id
-$$;
+    ORDER BY k.observations DESC, k.id;
+END;
