@@ -94,6 +94,7 @@ countable fact; prose docs cite it instead of embedding counts.
 - [modality-codepoint-floor-checklist.md](invention/modality-codepoint-floor-checklist.md) — checklist — rip forged T0 / rewire ladders (campaign tracker)
 - [modality-number-perfcache.md](invention/modality-number-perfcache.md) — notes — 0..255 number compose-floor ROM scaffold
 - [recipe-schema.md](invention/recipe-schema.md) — notes — model recipe schema; verify-or-annotate pass done, rank-ladder note 2026-07-18
+- [transformer-slot-map.md](invention/transformer-slot-map.md) — notes — substrate as digital processor / deterministic transformer-slot map (GH #823)
 
 ## Decisions — `docs/decisions/`
 

@@ -54,7 +54,9 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
         DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        SourceEntityIdConventions.WarnIfCiliMapMissing(context.Logger, SourceName);
+        // GH #520: same hard-fail as OMW/SemLink/MapNet — a missing CILI map
+        // silently drops synset anchors and leaves WordNet unmeshed.
+        SourceEntityIdConventions.EnsureCiliMapForIngest(context.Logger, SourceName);
 
         string dictDir = Path.Combine(context.EcosystemPath, "WordNet-3.0", "dict");
         int batch = IngestPipelineDefaults.ResolveBatch(IngestSourceProfile.WordNet, options);

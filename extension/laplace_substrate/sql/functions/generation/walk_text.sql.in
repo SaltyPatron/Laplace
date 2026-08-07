@@ -20,8 +20,7 @@ CREATE OR REPLACE FUNCTION generation.walk_text(
            g.stride_used
     FROM ctx, generation.walk_continuations(ctx.ids, p_steps, p_max_stride, p_spread, p_breadth,
                               COALESCE(p_seed,
-                                  ('x' || encode(substring(
-                                       public.laplace_hash128_blake3(convert_to(p_prompt, 'UTF8'))
-                                       for 8), 'hex'))::bit(64)::bigint)) g
+                                  hash128_lo(public.laplace_hash128_blake3(
+                                      convert_to(p_prompt, 'UTF8'))))) g
     WHERE ctx.ids IS NOT NULL
 $$;

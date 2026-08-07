@@ -1,0 +1,12 @@
+-- Leading 64 bits of a content id as bigint. One shared lo64 helper so seed /
+-- advisory-lock / walk RNG sites do not open-code encode+bit casts (GH #468).
+DROP FUNCTION IF EXISTS laplace.hash128_lo(bytea);
+CREATE OR REPLACE FUNCTION hash128_lo(p_id bytea)
+    RETURNS bigint
+    LANGUAGE sql
+    IMMUTABLE
+    STRICT
+    PARALLEL SAFE
+AS $$
+    SELECT ('x' || encode(substring(p_id FOR 8), 'hex'))::bit(64)::bigint
+$$;

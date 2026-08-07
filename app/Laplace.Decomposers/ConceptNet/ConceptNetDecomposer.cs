@@ -44,6 +44,14 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase<ConceptN
         return File.Exists(file) ? [file] : [];
     }
 
+    protected override Task OnBeforeRegisterAsync(IDecomposerContext context, CancellationToken ct)
+    {
+        // GH #520: hard-fail with the rest of the ILI mesh; warn-and-drop left
+        // ConceptNet synset anchors silently unmeshed.
+        SourceEntityIdConventions.EnsureCiliMapForIngest(context.Logger, SourceName);
+        return Task.CompletedTask;
+    }
+
     // Extraction only. assertions.csv is already
     // `assertion-uri <TAB> /r/Relation <TAB> /c/lang/start <TAB> /c/lang/end <TAB> {json}`
     // — no container to unpack, so no tree-sitter. Stream UTF-8 lines, tab-split managed,
@@ -53,7 +61,6 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase<ConceptN
         string filePath, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        SourceEntityIdConventions.WarnIfCiliMapMissing(null, SourceName);
         if (!File.Exists(filePath)) yield break;
 
         var langs = options.Languages;
