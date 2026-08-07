@@ -1,4 +1,4 @@
--- chess_opening_preference(player, tc_class, limit): which openings a player
+-- chess.opening_preference(player, tc_class, limit): which openings a player
 -- actually reaches for, per time-control class -- witnessed record only.
 --
 -- Promoted 2026-08-02 from a hand-run that took FOUR attempts to find the
@@ -9,10 +9,11 @@
 -- different layer and does NOT reach the headers -- three empty joins proved
 -- it. Nobody should have to rediscover that; this surface is the map.
 --
--- p_tc_class filters in ID SPACE via the identity law (word_id of the class
+-- p_tc_class filters in ID SPACE via the identity law (laplace.word_id of the class
 -- surface, e.g. 'bullet', 'blitz'), never by rendering and comparing text.
 -- Group by ids, realize ONCE over the page -- the read law's shape.
-CREATE OR REPLACE FUNCTION chess_opening_preference(p_player bytea,
+DROP FUNCTION IF EXISTS laplace.chess_opening_preference(bytea, text, int);
+CREATE OR REPLACE FUNCTION chess.opening_preference(p_player bytea,
                                                     p_tc_class text DEFAULT NULL,
                                                     p_limit int DEFAULT 12)
     RETURNS TABLE(tc_class text, eco text, games bigint)
@@ -41,7 +42,7 @@ ord AS (
     FROM grouped g
 ),
 lbl AS (
-    SELECT laplace.realize_batch(array_agg(v.id ORDER BY v.ord), NULL) AS l
+    SELECT realize.batch(array_agg(v.id ORDER BY v.ord), NULL) AS l
     FROM (SELECT o.tc_id AS id, o.ix * 2 - 1 AS ord FROM ord o
           UNION ALL
           SELECT o.eco_id, o.ix * 2 FROM ord o) v

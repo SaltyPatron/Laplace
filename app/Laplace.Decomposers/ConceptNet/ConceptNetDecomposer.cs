@@ -89,7 +89,7 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase<ConceptN
         // Language scope. The URI's /c/<lang>/ segment was parsed and then DISCARDED,
         // which left every edge language-free — most damagingly Synonym, which is
         // cross-lingual by design and maps into the HAS_SENSE family, so unscoped
-        // translations competed as senses (the same defect OMWGrammarWitness fixed
+        // translations competed as lexical.senses(the same defect OMWGrammarWitness fixed
         // for GH #867: an English copula electing "ice" from Danish witnesses).
         // The handler already emits HAS_LANGUAGE from these ids; the edge's context
         // is the SUBJECT's language — the claim is made about the subject surface,

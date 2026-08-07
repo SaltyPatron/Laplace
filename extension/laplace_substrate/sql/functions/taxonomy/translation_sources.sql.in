@@ -5,7 +5,6 @@
 -- placeholder has exactly one possible expansion and the indirection buys nothing
 -- but noise. Real schema names, written out.
 DROP FUNCTION IF EXISTS laplace.translation_sources(bytea);
-
 CREATE OR REPLACE FUNCTION taxonomy.translation_sources(p_object bytea)
     RETURNS TABLE(subject_id bytea)
     LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$

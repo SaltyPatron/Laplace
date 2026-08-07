@@ -19,7 +19,7 @@ public static class ChessGraph
     };
 
     // AGGREGATING lane only: deduped substructure/position outcome deposits + the MOVE edge.
-    // Game-specific record edges (GAME_AT: subject unique per game; GAME_AT_PLY, and PLAYED_BY
+    // Game-specific record consensus.edges(GAME_AT: subject unique per game; GAME_AT_PLY, and PLAYED_BY
     // AT PLY GRAIN: one near-unique row per ply) were deliberately removed — at that grain they
     // can never corroborate across games, so each was a permanently single-witness consensus
     // cell. The game's verbatim HAS_MOVETEXT plus replay reconstructs all of them; contextId

@@ -1,7 +1,7 @@
 -- The relation-type ids in a salience band, as an ARRAY the planner can prune with.
 --
 -- THE DEFECT THIS RETIRES. 25 sites across the read path wrote the band test as
--- `relation_highway_band(c.type_id) = N` directly against consensus. consensus is
+-- `laplace.relation_highway_band(c.type_id) = N` directly against consensus. consensus is
 -- LIST-partitioned by type_id and holds ~48M rows, so a function applied to the
 -- partition key means: no partition pruning (the planner cannot evaluate a C
 -- STABLE call at plan time), no index on the predicate, and one function

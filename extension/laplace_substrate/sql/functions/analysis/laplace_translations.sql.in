@@ -1,17 +1,18 @@
 CREATE OR REPLACE FUNCTION laplace_translations(
     p_entity_id bytea, p_band_mask bytea)
 RETURNS TABLE(translation_id bytea, shared_object_id bytea, eff_mu numeric)
-LANGUAGE sql STABLE SET search_path = @extschema@, public AS $$
+LANGUAGE sql STABLE 
+    SET search_path = @extschema@, public AS $$
     WITH band_types AS (
-        SELECT e.id FROM entities e
+        SELECT e.id FROM laplace.entities e
         WHERE e.highway_mask IS NOT NULL
-          AND laplace_highway_mask_bits(e.highway_mask) && laplace_highway_mask_bits(p_band_mask)
+          AND laplace.laplace_highway_mask_bits(e.highway_mask) && laplace.laplace_highway_mask_bits(p_band_mask)
     )
     SELECT DISTINCT a2.subject_id, a1.object_id,
            eff_mu_display(a2.rating, a2.rd)
-    FROM consensus a1
+    FROM laplace.consensus a1
     JOIN band_types bt ON bt.id = a1.type_id
-    JOIN consensus a2
+    JOIN laplace.consensus a2
       ON a2.object_id  = a1.object_id
      AND a2.subject_id != a1.subject_id
      AND a2.type_id    = a1.type_id

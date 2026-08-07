@@ -54,7 +54,7 @@ CREATE OR REPLACE FUNCTION source_status(p_source text DEFAULT NULL)
                   has_entities      boolean,
                   last_run_status   text,
                   last_run_at       timestamptz)
-    LANGUAGE sql STABLE
+    LANGUAGE sql STABLE 
     SET search_path = @extschema@, public AS $$
 WITH by_evidence AS (
     SELECT s.source_id, s.evidence_approx

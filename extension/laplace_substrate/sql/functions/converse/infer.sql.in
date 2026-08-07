@@ -1,4 +1,4 @@
--- infer(prompt, limit): one forward pass over the substrate, installed.
+-- converse.infer(prompt, limit): one forward pass over the substrate, installed.
 --
 -- Run by hand as three ad-hoc statements on 2026-08-01 ("the capital of
 -- California is" -> sacramento) and promoted to a surface the same night:
@@ -7,25 +7,25 @@
 --
 --   EMBED    prompt_coherence: surface tokens -> content ids, one call.
 --   ATTEND   the election seats the TOPIC -- one election, one key order,
---            chat()'s verbatim; every other candidate becomes a BIAS head.
+--            converse.chat()'s verbatim; every other candidate becomes a BIAS head.
 --   READ     one indexed scan: the topic's consensus objects. This is the
 --            A->[...] distribution, and it is NOT collapsed here.
 --   REWEIGHT bias_hits counts each candidate's own edges into the bias
 --            family (bias synsets plus their one-hop in-edges), id space
---            only -- no render, no string compare.
+--            only -- no laplace.render, no string compare.
 --   EMIT     realize_batch ONCE over the ranked survivors, position-aligned;
---            the single render, at the end, where rendering belongs.
+--            the single laplace.render, at the end, where rendering belongs.
 --
 -- KNOWN LIMITS, stated not hidden: forward direction only (the both-direction
 -- OR join belongs in C next to prompt_coherence, not rewritten here); one-hop
 -- bias family; single-step emission. On a single-witness seed the base
 -- weights are flat and bias_hits carries the whole signal -- measured: the
--- California read returns 39 candidates all at eff_mu 1315.5, and exactly one
+-- California read returns 39 candidates all at laplace.eff_mu 1315.5, and exactly one
 -- (sacramento) carries a capital-family edge.
-CREATE OR REPLACE FUNCTION infer(p_prompt text, p_limit int DEFAULT 8)
+DROP FUNCTION IF EXISTS laplace.infer(text, int);
+CREATE OR REPLACE FUNCTION converse.infer(p_prompt text, p_limit int DEFAULT 8)
     RETURNS TABLE(prediction text, weight double precision, bias_hits bigint)
-    LANGUAGE sql STABLE
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE sql STABLE AS $$
 WITH ranked AS (
     SELECT y.tok, y.synset_id,
            row_number() OVER (ORDER BY y.specificity DESC NULLS LAST,
@@ -34,7 +34,7 @@ WITH ranked AS (
                                        y.ord DESC,
                                        y.denote_mu DESC NULLS LAST,
                                        y.synset_id) AS rk
-    FROM prompt_coherence(p_prompt) y
+    FROM converse.prompt_coherence(p_prompt) y
 ),
 topic AS (SELECT r.synset_id FROM ranked r WHERE r.rk = 1),
 -- EVERY sense of every bias token, not the per-token argmax. Shipped first
@@ -43,7 +43,7 @@ topic AS (SELECT r.synset_id FROM ranked r WHERE r.rk = 1),
 -- capital-family intersection scored ZERO hits and sacramento ranked flat.
 -- The bias head is a DISTRIBUTION over the token's senses; collapsing it to
 -- one sense before the intersection is the KVP mistake this function exists
--- to not make. senses() per bias token is a per-row SRF over 2-6 rows --
+-- to not make. lexical.senses() per bias token is a per-row SRF over 2-6 rows --
 -- tolerated here, ported to C with the rest when this graduates.
 bias AS (
     SELECT DISTINCT s.synset_id
@@ -54,30 +54,30 @@ bias AS (
 biasfam AS (
     SELECT b.synset_id FROM bias b
     UNION
-    SELECT c.subject_id FROM consensus c JOIN bias b ON c.object_id = b.synset_id
+    SELECT c.subject_id FROM laplace.consensus c JOIN bias b ON c.object_id = b.synset_id
 ),
 cand AS (
-    SELECT c.object_id AS id, eff_mu(c.rating, c.rd) AS m
-    FROM consensus c JOIN topic t ON c.subject_id = t.synset_id
+    SELECT c.object_id AS id, laplace.eff_mu(c.rating, c.rd) AS m
+    FROM laplace.consensus c JOIN topic t ON c.subject_id = t.synset_id
     WHERE c.object_id IS NOT NULL
       -- NAMEABLE ONLY (forward_hygiene gate; the GH #878 leak class): a
       -- prediction must have a name — its own surface (words carry
-      -- HAS_LANGUAGE, so word_language() answers) or a realizable member
-      -- (concept_members()). A candidate failing both realizes through the
+      -- HAS_LANGUAGE, so converse.word_language() answers) or a realizable member
+      -- (lexical.concept_members()). A candidate failing both realizes through the
       -- canonical arm as a raw key or hex address — internal bookkeeping
       -- leaked as an answer ("hubs are ADDRESSES, not names"). Id space via
       -- installed surfaces, no renders; the per-row cost rides the same
-      -- tolerance senses() already documents above, until the C port (#757).
+      -- tolerance lexical.senses() already documents above, until the C port (#757).
       -- CASE, not OR: PostgreSQL does not guarantee OR short-circuiting, so
       -- the cheap word check must be forced to run first or every word
-      -- candidate also pays the concept_members() set-returning probe.
+      -- candidate also pays the lexical.concept_members() set-returning probe.
       AND CASE WHEN converse.word_language(c.object_id) IS NOT NULL THEN true
-               ELSE EXISTS (SELECT 1 FROM concept_members(c.object_id)) END
+               ELSE EXISTS (SELECT 1 FROM lexical.concept_members(c.object_id)) END
 ),
 scored AS (
     SELECT d.id, d.m, count(f.synset_id) AS hits
     FROM cand d
-    LEFT JOIN consensus c2 ON c2.subject_id = d.id
+    LEFT JOIN laplace.consensus c2 ON c2.subject_id = d.id
     LEFT JOIN biasfam f ON f.synset_id = c2.object_id
     GROUP BY d.id, d.m
     ORDER BY count(f.synset_id) DESC, d.m DESC, d.id
@@ -89,7 +89,7 @@ ord AS (
     FROM scored s
 ),
 lbl AS (
-    SELECT realize_batch(array_agg(o.id ORDER BY o.ix), NULL) AS l FROM ord o
+    SELECT realize.batch(array_agg(o.id ORDER BY o.ix), NULL) AS l FROM ord o
 )
 SELECT lbl.l[o.ix], o.m / 1e9, o.hits
 FROM ord o CROSS JOIN lbl

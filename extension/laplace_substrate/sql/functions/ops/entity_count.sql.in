@@ -1,6 +1,6 @@
 CREATE OR REPLACE FUNCTION entity_count(p_type bytea)
     RETURNS bigint
-    LANGUAGE sql STABLE
+    LANGUAGE sql STABLE 
     SET search_path = @extschema@, public AS $$
     -- Scalar counterpart to entity_type_counts(). That function aggregates every
     -- type in the substrate; a caller that wants one type's count should not pay
@@ -15,7 +15,7 @@ $$;
 
 CREATE OR REPLACE FUNCTION entity_counts_by_types(p_types bytea[])
     RETURNS TABLE(type_id bytea, entities bigint)
-    LANGUAGE sql STABLE
+    LANGUAGE sql STABLE 
     SET search_path = @extschema@, public AS $$
     -- Batch form: one round trip for N types, and every requested type comes back
     -- whether or not it has rows. A LEFT JOIN, not an inner one -- a type with no

@@ -348,7 +348,7 @@ pc_load_icf(HTAB *tok_h, MemoryContext work)
     args[0] = PointerGetDatum(arr);
 
     rc = SPI_execute_with_args(
-        "SELECT entity_id, icf FROM laplace.entity_container_degree($1)",
+        "SELECT entity_id, icf FROM structural.entity_container_degree($1)",
         1, argtypes, args, NULL, true, 0);
     if (rc != SPI_OK_SELECT)
         return;                 /* neutral priors already in place */

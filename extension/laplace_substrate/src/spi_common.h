@@ -183,7 +183,7 @@ spi_realize_batch(Datum ids_arr, Datum lang)
     if (lang == (Datum) 0)
         nulls[1] = 'n';
     rc = SPI_execute_with_args(
-        "SELECT laplace.realize_batch($1, $2)", 2, argtypes, args, nulls, true, 1);
+        "SELECT realize.batch($1, $2)", 2, argtypes, args, nulls, true, 1);
     if (rc != SPI_OK_SELECT || SPI_processed == 0)
         return (Datum) 0;
     d = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
@@ -216,7 +216,7 @@ spi_type_label(Datum type_id)
     int   rc;
 
     rc = SPI_execute_with_args(
-        "SELECT laplace.type_label($1)", 1, argtypes, args, NULL, true, 1);
+        "SELECT lexical.type_label($1)", 1, argtypes, args, NULL, true, 1);
     if (rc != SPI_OK_SELECT || SPI_processed == 0)
         return (Datum) 0;
     return SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);

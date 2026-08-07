@@ -27,8 +27,7 @@ RETURNS TABLE(
 )
 LANGUAGE sql
 STABLE
-SET search_path = @extschema@, public
-AS $$
+    SET search_path = @extschema@, public AS $$
     WITH d AS (
         SELECT 'consensus'::text AS tbl, c.type_id
           FROM @extschema@.consensus_rdefault c

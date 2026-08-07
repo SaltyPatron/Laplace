@@ -403,7 +403,7 @@ internal static class IngestCommands
         if (string.IsNullOrEmpty(cli.Path))
             return Fail("usage: laplace ingest recipe <recipe.json>\n"
                         + "  Deposits a Mold-A-Model recipe (the simulated UI POST) as a content-addressed\n"
-                        + "  Model_Recipe entity, fetchable by export via laplace.model_recipes() / --recipe-from.");
+                        + "  Model_Recipe entity, fetchable by export via structural.model_recipes() / --recipe-from.");
         if (!File.Exists(cli.Path))
             return Fail($"ingest recipe: file not found: {cli.Path}");
         return await IngestViaRunnerAsync(
@@ -780,7 +780,7 @@ internal static class IngestCommands
     // (hilbert_index, id), so hilbert was covered by the PK's leading column and a separate
     // btree would have been redundant in the schema while this recovery path still had to
     // create it. Repartitioning to HASH(id) forced the PK to (id) and silently removed the
-    // only hilbert coverage, which broke anagrams_of()'s equality join into a sequential
+    // only hilbert coverage, which broke structural.anagrams_of()'s equality join into a sequential
     // scan of all 64 partitions. The index is now declared in the schema too
     // (indexes/physicalities_hilbert_btree.sql.in), so both agree.
     //

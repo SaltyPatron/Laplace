@@ -14,7 +14,7 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 /// cost."</i> and <i>"Don't resolve names per row. Aggregate ids, then batch through
 /// realize_batch."</i> A SCALAR realizer in a row-producing SELECT is one text
 /// materialization per row; the sanctioned surface is the set-returning
-/// <c>realize_batch()</c> / <c>render_text_batch()</c>, which resolve a whole id array
+/// <c>realize.batch()</c> / <c>render_text_batch()</c>, which resolve a whole id array
 /// in one pass.</para>
 ///
 /// <para><b>Why this is a ratchet and not a ban.</b> W6 D4: G2 is <i>not</i> decidable by
@@ -26,7 +26,7 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 ///   <item><c>readback/</c> — <c>render()</c> / <c>render_text*()</c> are defined here;
 ///     a definition is not a per-row call.</item>
 ///   <item><c>lexical/type_label.sql.in</c> and <c>converse/label*.sql.in</c> — the label
-///     bodies. <c>label_is_content()</c> in particular takes ALREADY-RENDERED text and
+///     bodies. <c>converse.label_is_content()</c> in particular takes ALREADY-RENDERED text and
 ///     renders nothing, so every regex that names it is wrong about it.</item>
 /// </list>
 ///
@@ -45,7 +45,7 @@ public sealed class RenderBeforeSelectGateTests
     /// <summary>
     /// A SCALAR realizer call. <c>realize_batch</c> and <c>render_text_batch</c> do not
     /// match: <c>_</c> is a word character, so <c>\brealize\s*\(</c> cannot reach the
-    /// <c>(</c> of <c>realize_batch(</c>. <c>@extschema@.</c> qualification is optional
+    /// <c>(</c> of <c>realize.batch(</c>. <c>@extschema@.</c> qualification is optional
     /// because the tree writes both forms.
     /// </summary>
     private static readonly Regex ScalarRealizer = new(
@@ -66,7 +66,7 @@ public sealed class RenderBeforeSelectGateTests
     /// <summary>
     /// Files calling a scalar realizer per row, measured 2026-08-05 (54 files, 111 call
     /// sites). THIS LIST MAY ONLY SHRINK. The fix for an entry is to aggregate the ids
-    /// and join <c>realize_batch()</c> once.
+    /// and join <c>realize.batch()</c> once.
     ///
     /// <para>W6 §5 D4 estimated "~30 files" for this list. That estimate was not measured:
     /// the comment-stripped count over the same exclusions is 54 files / 111 sites.</para>
@@ -250,7 +250,7 @@ public sealed class RenderBeforeSelectGateTests
         var newcomers = Violators().Keys.Where(v => !ScalarRealizerAllowlist.Contains(v)).ToList();
         Assert.True(newcomers.Count == 0,
             "New per-row scalar realizer in a substrate function. Classification is an "
-            + "indexed read on the id, and names resolve through realize_batch() over an "
+            + "indexed read on the id, and names resolve through realize.batch() over an "
             + "aggregated id array — one pass, not one render per row. Instead of here:\n  "
             + string.Join("\n  ", newcomers));
     }
@@ -282,6 +282,6 @@ public sealed class RenderBeforeSelectGateTests
         Assert.True(sites <= ScalarRealizerSiteCeiling,
             $"{sites} scalar-realizer call sites across {Violators().Count} files; ceiling is "
             + $"{ScalarRealizerSiteCeiling}. An allowlisted file may not GROW its per-row "
-            + "renders — aggregate the ids and join realize_batch() instead.");
+            + "renders — aggregate the ids and join realize.batch() instead.");
     }
 }

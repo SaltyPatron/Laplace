@@ -1,9 +1,10 @@
-CREATE OR REPLACE FUNCTION entity_tier_of(p_entity bytea)
+DROP FUNCTION IF EXISTS laplace.entity_tier_of(bytea);
+CREATE OR REPLACE FUNCTION generation.entity_tier_of(p_entity bytea)
     RETURNS int
     LANGUAGE sql STABLE STRICT PARALLEL SAFE
  AS $$
     -- Fall back to the perfcache-backed codepoint lookup before giving up: a valid
-    -- tier-0 codepoint is tier 0 whether or not it has been given its own entities
+    -- tier-0 codepoint is tier 0 whether or not it has been given its own laplace.entities
     -- row yet. Only genuinely unresolvable ids (neither a real row nor a valid
     -- codepoint) should surface as NULL here.
     SELECT COALESCE(

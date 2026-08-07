@@ -1,6 +1,6 @@
 CREATE OR REPLACE FUNCTION source_counts_approx()
     RETURNS TABLE(source text, source_id bytea, evidence_approx bigint)
-    LANGUAGE sql STABLE
+    LANGUAGE sql STABLE 
     SET search_path = @extschema@, public AS $$
     -- Issue 52: source_counts() full-scans attestations twice (GROUP BY everything
     -- plus a count(DISTINCT) join) — minutes at 135M rows, killed the catalog

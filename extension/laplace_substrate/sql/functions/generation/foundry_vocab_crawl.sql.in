@@ -1,12 +1,12 @@
-CREATE OR REPLACE FUNCTION foundry_vocab_crawl(
+DROP FUNCTION IF EXISTS laplace.foundry_vocab_crawl(text[], int, int, int, float8);
+CREATE OR REPLACE FUNCTION generation.foundry_vocab_crawl(
         p_seeds text[], p_max int DEFAULT 32000, p_hops int DEFAULT 3, p_fanout int DEFAULT 64,
         p_rank_floor float8 DEFAULT 0.5)
     RETURNS TABLE(entity_id bytea, surface text, weight bigint)
-    LANGUAGE sql VOLATILE
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE sql VOLATILE AS $$
     WITH seed_ids AS (
         SELECT coalesce(array_agg(wid), '{}'::bytea[]) AS ids
-        FROM (SELECT word_id(s) AS wid FROM unnest(p_seeds) AS s) q
+        FROM (SELECT laplace.word_id(s) AS wid FROM unnest(p_seeds) AS s) q
         WHERE wid IS NOT NULL
     ),
     
@@ -22,15 +22,15 @@ CREATE OR REPLACE FUNCTION foundry_vocab_crawl(
 
 
         SELECT array_agg(e.id) AS ids
-        FROM entities e
-        WHERE e.type_id = canonical_id('RelationType')
-          AND relation_rank_resolved(e.id) >= p_rank_floor
+        FROM laplace.entities e
+        WHERE e.type_id = laplace.canonical_id('RelationType')
+          AND laplace.relation_rank_resolved(e.id) >= p_rank_floor
     ),
     crawled AS (
         SELECT c.entity_id, c.weight,
                row_number() OVER (ORDER BY c.weight DESC, c.entity_id) AS rn
         FROM seed_ids si, rel_types rt
-        CROSS JOIN LATERAL foundry_crawl(si.ids, p_max, p_hops, p_fanout, rt.ids) c
+        CROSS JOIN LATERAL generation.foundry_crawl(si.ids, p_max, p_hops, p_fanout, rt.ids) c
     ),
     
     
@@ -41,15 +41,15 @@ CREATE OR REPLACE FUNCTION foundry_vocab_crawl(
     -- next content constituent in every trajectory containing the point --
     -- not from PRECEDES consensus, which merely materialized the same sequence
     -- the trajectory already holds (Pillar 3a, e5e1b42). Weight is observed
-    -- frequency (seen), not eff_mu, because there is no rated edge to read.
+    -- frequency (seen), not laplace.eff_mu, because there is no rated edge to read.
     order1 AS (
         SELECT gs.successor_id AS entity_id,
                gs.seen::numeric AS w,
                row_number() OVER (PARTITION BY seed.wid ORDER BY gs.seen DESC, gs.successor_id) AS rn
         FROM seed_ids si
         CROSS JOIN unnest(si.ids) AS seed(wid)
-        CROSS JOIN LATERAL geometry_successors(seed.wid, p_fanout, 8) gs
-        JOIN entities e ON e.id = gs.successor_id AND e.type_id = canonical_id('Word')
+        CROSS JOIN LATERAL structural.geometry_successors(seed.wid, p_fanout, 8) gs
+        JOIN laplace.entities e ON e.id = gs.successor_id AND e.type_id = laplace.canonical_id('Word')
     ),
     order1_cut AS (
         SELECT entity_id, w, w::bigint AS weight FROM order1 WHERE rn <= p_fanout
@@ -59,8 +59,8 @@ CREATE OR REPLACE FUNCTION foundry_vocab_crawl(
                (o.w * gs.seen::numeric)::bigint AS weight,
                row_number() OVER (ORDER BY o.w * gs.seen DESC, gs.successor_id) AS rn
         FROM order1_cut o
-        CROSS JOIN LATERAL geometry_successors(o.entity_id, p_fanout, 8) gs
-        JOIN entities e ON e.id = gs.successor_id AND e.type_id = canonical_id('Word')
+        CROSS JOIN LATERAL structural.geometry_successors(o.entity_id, p_fanout, 8) gs
+        JOIN laplace.entities e ON e.id = gs.successor_id AND e.type_id = laplace.canonical_id('Word')
     ),
     order2_cut AS (
         SELECT entity_id, weight FROM order2 WHERE rn <= p_max
@@ -71,10 +71,10 @@ CREATE OR REPLACE FUNCTION foundry_vocab_crawl(
                   SELECT entity_id, weight FROM order1_cut
                   UNION ALL SELECT entity_id, weight FROM order2_cut
               ) u GROUP BY entity_id) o
-        JOIN v_consensus_unrefuted c ON c.subject_id = o.entity_id
-            AND c.type_id = relation_type_id('IS_LEMMA_OF')
+        JOIN laplace.v_consensus_unrefuted c ON c.subject_id = o.entity_id
+            AND c.type_id = laplace.relation_type_id('IS_LEMMA_OF')
             AND c.object_id IS NOT NULL
-        JOIN entities e ON e.id = c.object_id AND e.type_id = canonical_id('Word')
+        JOIN laplace.entities e ON e.id = c.object_id AND e.type_id = laplace.canonical_id('Word')
     ),
     order_closure AS (
         SELECT entity_id, max(weight) AS weight,
@@ -94,8 +94,8 @@ CREATE OR REPLACE FUNCTION foundry_vocab_crawl(
     
     
     scaffold AS (
-        -- Plan Phase 3b: rank by CONSENSUS TENSION (signed eff_mu, rd-discounted,
-        -- witness-saturated; refuted edges excluded), not raw degree count —
+        -- Plan Phase 3b: rank by CONSENSUS TENSION (signed laplace.eff_mu, rd-discounted,
+        -- witness-saturated; laplace.refuted edges excluded), not raw degree count —
         -- frequent-but-slack pairings stop outranking rare-but-taut terms.
         SELECT f.id AS entity_id, f.d::bigint AS weight,
                row_number() OVER (ORDER BY f.d DESC) AS rn
@@ -104,13 +104,13 @@ CREATE OR REPLACE FUNCTION foundry_vocab_crawl(
             SELECT tc.entity_id AS id, count(*)::bigint AS d
             FROM (
                 SELECT DISTINCT ON (w.id) w.id AS entity_id, w.trajectory
-                FROM v_word_points w
-                WHERE w.type_id IN (canonical_id('Sentence'), canonical_id('Document'))
+                FROM laplace.v_word_points w
+                WHERE w.type_id IN (laplace.canonical_id('Sentence'), laplace.canonical_id('Document'))
                   AND w.trajectory IS NOT NULL
                 ORDER BY w.id, w.physicality_id LIMIT 400000
             ) t
             CROSS JOIN LATERAL laplace_trajectory_constituents(t.trajectory) tc
-            JOIN entities e ON e.id = tc.entity_id AND e.type_id = canonical_id('Word')
+            JOIN laplace.entities e ON e.id = tc.entity_id AND e.type_id = laplace.canonical_id('Word')
             GROUP BY tc.entity_id
         ) f
     ),
@@ -134,14 +134,14 @@ CREATE OR REPLACE FUNCTION foundry_vocab_crawl(
     rendered AS (
         SELECT u.entity_id, u.s, a.ws[u.ord::int] AS weight, a.prs[u.ord::int] AS pri
         FROM ids_arr a
-        CROSS JOIN LATERAL unnest(a.ids, render_text_batch(a.ids, 8))
+        CROSS JOIN LATERAL unnest(a.ids, laplace.render_text_batch(a.ids, 8))
                    WITH ORDINALITY AS u(entity_id, s, ord)
         WHERE a.ids IS NOT NULL AND cardinality(a.ids) > 0
     ),
     clean AS (
         SELECT DISTINCT ON (n.s) n.entity_id, n.s, n.weight, n.pri
         FROM rendered n
-        WHERE n.s IS NOT NULL AND btrim(n.s) <> '' AND NOT is_all_whitespace(n.s)
+        WHERE n.s IS NOT NULL AND btrim(n.s) <> '' AND NOT laplace.is_all_whitespace(n.s)
           AND position(' ' IN n.s) = 0 AND char_length(n.s) <= 40
           -- 2026-07-09 (finish-line Phase 2): the old `~ '[[:alpha:]]'` gate made
           -- punctuation and numerals unrepresentable — no synthesized model could emit

@@ -1,6 +1,6 @@
 CREATE OR REPLACE FUNCTION content_count(p_source bytea DEFAULT NULL)
     RETURNS bigint
-    LANGUAGE sql STABLE
+    LANGUAGE sql STABLE 
     SET search_path = @extschema@, public AS $$
     SELECT CASE
         WHEN p_source IS NULL THEN
@@ -8,7 +8,7 @@ CREATE OR REPLACE FUNCTION content_count(p_source bytea DEFAULT NULL)
         ELSE
             -- Dedup the source's subjects FIRST (single hash-aggregate pass), THEN probe
             -- v_word_points by id. The prior JOIN nested-looped every source attestation
-            -- into physicalities: on UD (51.9M source attestations) that built a
+            -- into laplace.physicalities: on UD (51.9M source attestations) that built a
             -- ~1.9-BILLION-row intermediate before count(DISTINCT) — 16 min, seq-scan-
             -- bound, and no amount of ANALYZE fixes it (it's the query shape, not stats).
             -- Collapsing to distinct subjects before the probe is a ~17x cheaper plan

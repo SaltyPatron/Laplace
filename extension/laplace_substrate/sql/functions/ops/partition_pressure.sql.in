@@ -7,13 +7,13 @@ CREATE OR REPLACE FUNCTION partition_pressure(p_table text DEFAULT NULL)
         total_bytes   bigint,
         total_size    text,
         bounds        text)
-    LANGUAGE sql STABLE
+    LANGUAGE sql STABLE 
     SET search_path = @extschema@, public AS $$
     -- Partition SKEW detector, for every partitioned substrate table.
     --
     -- consensus_partition_pressure() answers a narrower question (which relations are piling
     -- into the LIST default) and cannot run at all on a populated database: it resolves
-    -- label() -> resolve_name() -> constituents_closure() per group, so it times out before
+    -- realize.label() -> realize.resolve_name() -> constituents_closure() per group, so it times out before
     -- reporting. An instrument that dies at the scale where the problem appears is the same
     -- as no instrument, and that is exactly how this went unseen:
     --

@@ -29,7 +29,7 @@ ensure_step_edge_plan(void)
         SPIPlanPtr plan = SPI_prepare(
             "SELECT type_id, "
             "       CASE WHEN subject_id = $1 THEN 1 ELSE -1 END AS dir "
-            "FROM laplace.consensus_step_edge($1, $2)",
+            "FROM consensus.step_edge($1, $2)",
             2, argtypes);
 
         if (plan == NULL)
@@ -132,7 +132,7 @@ pg_laplace_cascade(PG_FUNCTION_ARGS)
 
         rc = SPI_execute_with_args(
             "SELECT ap.step, ap.entity_id, ap.g "
-            "FROM laplace.astar_path($1, $2, $3) ap "
+            "FROM converse.astar_path($1, $2, $3) ap "
             "ORDER BY ap.step",
             3, argtypes, args, NULL, true, 0);
         pfree(DatumGetPointer(args[1]));

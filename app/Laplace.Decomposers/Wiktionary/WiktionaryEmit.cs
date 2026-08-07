@@ -215,8 +215,8 @@ internal static class WiktionaryEmit
 
     // Both edges on purpose. CORRESPONDS_TO is the cross-reference hub the CILI/
     // WordNet routing reads — but it is NOT in the HAS_SENSE family, so before this
-    // change Wiktionary's word->synset links (the GOOD sense evidence) were invisible
-    // to senses()/bubble_up while its word->word synonyms (translation-shaped) were
+    // change Wiktionary's word->synset converse.links(the GOOD sense evidence) were invisible
+    // to lexical.senses()/bubble_up while its word->word converse.synonyms(translation-shaped) were
     // the only Wiktionary edges electing senses. IS_SYNONYM_OF word->synset with the
     // language as context is exactly OMW's post-#867 shape, and it puts the synset-
     // typed candidate in the family so election prefers it over word-typed ones.

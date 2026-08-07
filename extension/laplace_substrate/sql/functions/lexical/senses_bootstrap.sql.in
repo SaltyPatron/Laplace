@@ -1,12 +1,13 @@
 -- FORWARD DECLARATION ONLY (GH #532). Not an implementation.
 --
--- Held a complete second body for senses(bytea) whose only claim to being the wrong
+-- Held a complete second body for lexical.senses(bytea) whose only claim to being the wrong
 -- one was that manifest.install lists the real file later. Two bodies for one
 -- signature drift silently: nothing errors, nothing warns, and the answer changes
 -- with load order.
 --
 -- The signature must match the final definition EXACTLY (name, argument types,
 -- return type) or the real CREATE OR REPLACE fails instead of replacing this.
+DROP FUNCTION IF EXISTS laplace.senses(bytea);
 CREATE OR REPLACE FUNCTION lexical.senses(p_word bytea)
     RETURNS TABLE(sense_id bytea, synset_id bytea, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$

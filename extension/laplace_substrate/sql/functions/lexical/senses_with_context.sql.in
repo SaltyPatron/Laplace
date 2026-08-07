@@ -1,9 +1,9 @@
--- senses(word, context[]): the senses of a word, ranked BY CONTEXT.
+-- lexical.senses(word, context[]): the senses of a word, ranked BY CONTEXT.
 --
 -- PRIOR VERSION WAS INERT ON REAL DATA. Its only lane boosted a synset by summing
--- eff_mu over consensus rows where `subject_id = ANY(p_context)` (or object_id),
+-- laplace.eff_mu over consensus rows where `subject_id = ANY(p_context)` (or object_id),
 -- i.e. it required a DIRECT edge from a context entity to the synset. p_context
--- carries WORD entities and words reach synsets through HAS_SENSE -> IS_SENSE_OF,
+-- carries WORD laplace.entities and words reach synsets through HAS_SENSE -> IS_SENSE_OF,
 -- so on a real corpus that join almost never matches and every boost was 0.
 -- Verified 2026-07-25: opposite contexts ({animal,pet,bark} vs
 -- {sausage,roll,beef}) returned byte-identical rankings AND byte-identical scores
@@ -17,10 +17,10 @@
 -- sense. It is restored below as a fourth lane. Adding lanes is the fix; removing
 -- the one that existed was not.
 --
--- Four lanes now, all in ID SPACE (no realize/render/label anywhere -- rendering is
+-- Four lanes now, all in ID SPACE (no realize/laplace.render/label anywhere -- rendering is
 -- the caller's final step, never a mid-operation string compare):
 --
---   USAGE   the candidate synset OWNS a gloss or example whose word constituents
+--   USAGE   the candidate synset OWNS a gloss or example whose word laplace.constituents
 --           include a context token. Sense-resolution here is by OWNERSHIP, not
 --           per-token tagging: a gloss/example hangs off exactly one synset, so a
 --           word occurring inside it is already sense-resolved on the owning side.
@@ -34,7 +34,7 @@
 --           bands -- the synset-to-synset comparison the old version was reaching
 --           for and getting wrong.
 --
--- Every lane is weighted by the eff_mu of the edges carrying it: trust enters
+-- Every lane is weighted by the laplace.eff_mu of the edges carrying it: trust enters
 -- through the rating math, never through an operator-chosen constant. No floors,
 -- no caps, no top-k -- ORDER BY only, LIMIT is the caller's.
 --
@@ -43,13 +43,12 @@
 -- the sense prior, which is the documented no-context behaviour.
 -- NO `SET search_path` (GH #860). The clause blocks SQL inlining -- the planner
 -- keeps the function as an opaque `Function Scan` rather than pulling the body into
--- the caller and pushing predicates through to the index. The 1-arg `senses()` this
+-- the caller and pushing predicates through to the index. The 1-arg `lexical.senses()` this
 -- overload sits beside dropped the clause under #617 and inlines to an index scan;
 -- this overload is on the same read path and was still paying it. Every reference is
 -- `@extschema@.`-qualified instead, which is what the clause was doing and costs
 -- nothing at plan time.
 DROP FUNCTION IF EXISTS laplace.senses(bytea, bytea[]);
-
 CREATE OR REPLACE FUNCTION lexical.senses(p_word bytea, p_context bytea[])
     RETURNS TABLE(sense_id bytea, synset_id bytea, eff_mu numeric, witnesses bigint,
                   score numeric)
@@ -78,18 +77,18 @@ CREATE OR REPLACE FUNCTION lexical.senses(p_word bytea, p_context bytea[])
         WHERE s.word_id = ANY(lexical.lexical_peers(p_word))
     ),
     -- USAGE: candidate owns a sentence (gloss band 1 / example band 7) whose
-    -- word-tier constituents include a context token.
+    -- word-tier laplace.constituents include a context token.
     own_sent AS (
         SELECT DISTINCT c.subject_id AS sid, c.object_id AS gid,
                @extschema@.eff_mu(c.rating, c.rd) AS w
         FROM @extschema@.consensus c
         WHERE c.subject_id IN (SELECT synset_id FROM cand)
-          AND @extschema@.relation_highway_band(c.type_id) IN (1, 7)
+          AND laplace.relation_highway_band(c.type_id) IN (1, 7)
     ),
     lane_usage AS (
         SELECT os.sid, sum(os.w) AS boost
         FROM own_sent os
-        CROSS JOIN LATERAL @extschema@.trajectory_unpacked_points(os.gid)
+        CROSS JOIN LATERAL generation.trajectory_unpacked_points(os.gid)
              WITH ORDINALITY AS u(entity_id, run_length, ctier, ord)
         WHERE u.ctier = 2 AND u.entity_id IN (SELECT id FROM ctx)
         GROUP BY os.sid
@@ -116,13 +115,13 @@ CREATE OR REPLACE FUNCTION lexical.senses(p_word bytea, p_context bytea[])
             FROM @extschema@.consensus c
             WHERE c.subject_id IN (SELECT synset_id FROM cand)
               AND c.object_id IN (SELECT sid FROM ctx_syn)
-              AND @extschema@.relation_highway_band(c.type_id) IN (2, 4, 7)
+              AND laplace.relation_highway_band(c.type_id) IN (2, 4, 7)
             UNION ALL
             SELECT c.object_id, @extschema@.eff_mu(c.rating, c.rd)
             FROM @extschema@.consensus c
             WHERE c.object_id IN (SELECT synset_id FROM cand)
               AND c.subject_id IN (SELECT sid FROM ctx_syn)
-              AND @extschema@.relation_highway_band(c.type_id) IN (2, 4, 7)
+              AND laplace.relation_highway_band(c.type_id) IN (2, 4, 7)
         ) x
         GROUP BY x.sid
     ),

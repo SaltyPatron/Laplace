@@ -52,8 +52,8 @@ MANIFEST = ROOT / "engine" / "manifest" / "relation_types.toml"
 # its two open-coded `rating - 2*rd` sites went with the body. Shrink, not an
 # exception.
 CEILINGS = {
-    "g1_weight_literalism": 23,
-    "g3_sql_vocabulary_literalism": 250,
+    "g1_weight_literalism": 11,
+    "g3_sql_vocabulary_literalism": 240,
     "g3_c_vocabulary_literalism": 17,
     # 700 -> 701 (2026-08-05): the language-scope declaration. Nine monolingual
     # sources emitted no HAS_LANGUAGE at all, so every English sense read back as
@@ -68,16 +68,16 @@ CEILINGS = {
     # the single place the feature owns it. A scoped source that spelled it again
     # locally would be the per-source hand-roll that caused the defect.
     "g3_csharp_vocabulary_literalism": 506,
-    "g8_band_literalism": 6,
+    "g8_band_literalism": 3,
     # G4 scaffolding (W6 D3): grep for CREATE FUNCTION with zero callers outside
     # its own CREATE line. Destination form is substrate CALLS in-degree after W3
     # (#765); this allowlist is shrink-only until that replace lands.
-    "g4_dead_canonical": 71,
+    "g4_dead_canonical": 28,
     # Measured 2026-08-05, landing with its violations enumerated per W6's trap
     # note ("a gate that goes red on merge-day teaches people to ignore it").
     # 29 occurrences across 10 sites, all pre-existing: model_factor (6 names),
     # entities_has_highway, and the three canonical_names writers.
-    "g11_unqualified_in_setless_body": 29,
+    "g11_unqualified_in_setless_body": 0,
 }
 
 CREATE_FUNCTION = re.compile(

@@ -42,7 +42,7 @@ public enum EdgeRoleKind
 /// This is a RECORD, not an inference. Princeton WordNet is English by construction and
 /// that construction is the source asserting it — spec 08's record-vs-calculate law.
 /// Nine monolingual sources declared no HAS_LANGUAGE at all (WordNet, FrameNet, PropBank,
-/// VerbNet, SemLink, WordFrameNet, PredicateMatrix among them), so `word_language()` was
+/// VerbNet, SemLink, WordFrameNet, PredicateMatrix among them), so `converse.word_language()` was
 /// built to INFER at read time a fact the source states for free, and every English sense
 /// in the substrate reads back as language-unattested.
 ///

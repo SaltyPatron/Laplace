@@ -1,11 +1,10 @@
 -- converse.prompt_words — GH #862 / #860. No SET, real schema names.
 DROP FUNCTION IF EXISTS laplace.prompt_words(text);
-
 CREATE OR REPLACE FUNCTION converse.prompt_words(p_text text)
     RETURNS TABLE(ord int, word text, id bytea)
     LANGUAGE sql LAPLACE_STABLE_STRICT AS $$
     SELECT ws.ord, ws.word, e.id
-    FROM laplace.word_segment(p_text) ws
+    FROM converse.word_segment(p_text) ws
     LEFT JOIN laplace.entities e ON e.id = ws.id
     ORDER BY ws.ord
 $$;

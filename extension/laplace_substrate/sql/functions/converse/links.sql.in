@@ -6,35 +6,34 @@
 --
 -- A relation type comes from a governed vocabulary of ~189, so one subject's
 -- edges span a handful — eight on `Self_motion`, the densest word in the
--- substrate (6,687 edges). Calling label() per ROW asked the same question 836
+-- substrate (6,687 edges). Calling realize.label() per ROW asked the same question 836
 -- times over on average. Fencing the distinct types turns 6,687 calls into 8, and
 -- the plan confirms it: `CTE rel` executes in 4.9 ms for 8 rows.
 --
--- IT DID NOT MAKE links() FASTER. Measured 2026-07-28, three runs each:
+-- IT DID NOT MAKE converse.links() FASTER. Measured 2026-07-28, three runs each:
 --   before  140.9 s
 --   after   147.0 / 148.4 / 146.7 s
 --
 -- The reason is a mis-measurement worth recording. Timing each arm ALONE gave
--- label(type_id) 75.9 s and label(object_id) 42.3 s, which looks additive against
+-- realize.label(type_id) 75.9 s and realize.label(object_id) 42.3 s, which looks additive against
 -- a 140.9 s total. It is not: both arms call resolve_name, which reads the same
 -- consensus pages, so whichever ran second found them warm. Removing the type arm
 -- freed almost no I/O — the object arm still faults the same pages in. Per-arm
 -- timings taken in isolation cannot be attributed to a combined query.
 --
 -- What the plan actually shows: 88.7 M shared buffer hits, essentially all of it
--- in the projection, i.e. label(object_id) at ~22 ms and ~13 k buffers PER CALL.
+-- in the projection, i.e. realize.label(object_id) at ~22 ms and ~13 k buffers PER CALL.
 -- Those 6,686 ids are nearly all distinct, so deduping cannot help — that arm
--- needs a BATCHED label, which does not exist. realize_batch() is batched but is a
--- DIFFERENT ladder: it abstains with NULL where label() falls back to a cleaned
--- render and finally to hex, so substituting it changes what every caller
+-- needs a BATCHED label, which does not exist. realize.batch() is batched but is a
+-- DIFFERENT ladder: it abstains with NULL where realize.label() falls back to a cleaned
+-- laplace.render and finally to hex, so substituting it changes what every caller
 -- receives. A label_batch() in C beside realize_batch is the real fix and is not
 -- in this change.
 --
 -- Semantics here are unchanged by construction: same function, same argument,
--- same COALESCE(NULLIF(relation_canonical, ''), label) ladder. Only the number of
+-- same COALESCE(NULLIF(laplace.relation_canonical, ''), label) ladder. Only the number of
 -- evaluations changes.
 DROP FUNCTION IF EXISTS laplace.links(text);
-
 CREATE OR REPLACE FUNCTION converse.links(p_word text)
     RETURNS TABLE(relation text, target text, strength double precision)
     LANGUAGE sql STABLE PARALLEL SAFE
@@ -48,7 +47,7 @@ CREATE OR REPLACE FUNCTION converse.links(p_word text)
     rel AS MATERIALIZED (
         -- One row per DISTINCT relation type present on this subject.
         SELECT t.type_id,
-               COALESCE(NULLIF(relation_canonical(t.type_id), ''), realize.label(t.type_id)) AS relation
+               COALESCE(NULLIF(laplace.relation_canonical(t.type_id), ''), realize.label(t.type_id)) AS relation
         FROM (SELECT DISTINCT b.type_id FROM base b) t
     )
     SELECT r.relation,

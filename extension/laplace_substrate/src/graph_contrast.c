@@ -40,7 +40,7 @@ ensure_subject_edges_plan(void)
         Oid        argtypes[1] = { BYTEAOID };
         SPIPlanPtr plan = SPI_prepare(
             "SELECT type_id, object_id, rating, rd "
-            "FROM laplace.consensus_subject_edges($1)",
+            "FROM converse.consensus_subject_edges($1)",
             1, argtypes);
         if (plan == NULL)
             elog(ERROR, "contrast: SPI_prepare failed: %s",
@@ -329,7 +329,7 @@ pg_laplace_contrast(PG_FUNCTION_ARGS)
 
             rargs[0] = PointerGetDatum(type_arr);
             rc2 = SPI_execute_with_args(
-                "SELECT array_agg(laplace.type_label(u.id) ORDER BY u.ord) "
+                "SELECT array_agg(lexical.type_label(u.id) ORDER BY u.ord) "
                 "FROM unnest($1) WITH ORDINALITY AS u(id, ord)",
                 1, rtypes, rargs, NULL, true, 1);
             if (rc2 == SPI_OK_SELECT && SPI_processed > 0)

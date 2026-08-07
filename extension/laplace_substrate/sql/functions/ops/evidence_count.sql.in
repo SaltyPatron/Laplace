@@ -1,7 +1,7 @@
 CREATE OR REPLACE FUNCTION evidence_count(
     p_type bytea DEFAULT NULL, p_source bytea DEFAULT NULL, p_object bytea DEFAULT NULL)
     RETURNS bigint
-    LANGUAGE sql STABLE
+    LANGUAGE sql STABLE 
     SET search_path = @extschema@, public AS $$
     -- Branch on which optional filters are present so each present filter is a
     -- plain equality the planner can index (attestations_type_btree /

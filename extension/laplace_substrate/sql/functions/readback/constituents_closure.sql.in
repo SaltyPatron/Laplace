@@ -76,7 +76,7 @@ picked AS (
     -- and NULL for the same id inside a 500-id array, because the two calls got
     -- different plans and therefore different trajectories. Every consumer of
     -- render_text_batch inherits that: realize_batch, and through it related,
-    -- related_in, salient_facts, chat()'s band lens and edges().
+    -- related_in, salient_facts, converse.chat()'s band lens and consensus.edges().
     --
     -- ST_NPoints DESC breaks the tie deterministically and prefers the FINER
     -- decomposition — the one that reaches the tier-0 floor and reconstructs the

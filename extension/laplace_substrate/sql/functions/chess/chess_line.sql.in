@@ -1,4 +1,5 @@
-CREATE OR REPLACE FUNCTION chess_line(p_line bytea)
+DROP FUNCTION IF EXISTS laplace.chess_line(bytea);
+CREATE OR REPLACE FUNCTION chess.line(p_line bytea)
     RETURNS TABLE(event_id bytea, played_on text, result text,
                   times_played bigint, rating double precision,
                   rd double precision, eff_mu double precision)
@@ -7,7 +8,7 @@ CREATE OR REPLACE FUNCTION chess_line(p_line bytea)
     -- line (the events that carry a PLAYS_LINE edge onto it), each with the
     -- headers that playing asserted (ON_DATE / HAS_RESULT, pinned by context),
     -- alongside the line's own fold cell -- (line, OUTCOME, Chess_Result) --
-    -- where witness_count IS "times this line was played" and eff_mu IS how the
+    -- where witness_count IS "times this line was played" and laplace.eff_mu IS how the
     -- line fares (white POV), already folded, never recomputed.
     --
     -- The fold columns are LEFT-joined and repeat per playing: a line recorded
@@ -58,7 +59,7 @@ CREATE OR REPLACE FUNCTION chess_line(p_line bytea)
         SELECT p.id, t.txt
         FROM surface_batch b,
              LATERAL unnest(b.ids) WITH ORDINALITY AS p(id, i),
-             LATERAL unnest(laplace.realize_batch(b.ids)) WITH ORDINALITY AS t(txt, j)
+             LATERAL unnest(realize.batch(b.ids)) WITH ORDINALITY AS t(txt, j)
         WHERE p.i = t.j
     )
     SELECT pg.event,

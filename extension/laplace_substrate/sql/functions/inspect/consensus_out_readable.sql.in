@@ -1,6 +1,6 @@
 CREATE OR REPLACE FUNCTION consensus_out_readable(p_id bytea, p_limit integer DEFAULT 40)
     RETURNS TABLE(type text, object text, eff_mu numeric, witnesses bigint)
-    LANGUAGE sql STABLE
+    LANGUAGE sql STABLE 
     SET search_path = @extschema@, public AS $$
     -- Rank + LIMIT on bare ids in the inner query, render only the survivors (the define/examples
     -- pattern). render() is a heavy non-inlinable call; at the same level as ORDER BY..LIMIT it was

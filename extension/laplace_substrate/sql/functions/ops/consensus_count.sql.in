@@ -1,6 +1,6 @@
 CREATE OR REPLACE FUNCTION consensus_count(p_type bytea DEFAULT NULL)
     RETURNS bigint
-    LANGUAGE sql STABLE
+    LANGUAGE sql STABLE 
     SET search_path = @extschema@, public AS $$
     -- Branch on the optional filter so the provided-type path carries a plain
     -- equality (consensus_type_btree index-only count) instead of the

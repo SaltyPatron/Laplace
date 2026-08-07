@@ -5,7 +5,7 @@
 CREATE OR REPLACE FUNCTION source_roster(p_source bytea, p_limit int DEFAULT 40)
     RETURNS TABLE(subject_id bytea, subject text, relation text,
                   object_id bytea, object text, observations bigint)
-    LANGUAGE sql STABLE
+    LANGUAGE sql STABLE 
     SET search_path = @extschema@, public AS $$
     SELECT a.subject_id, a.subject_label,
            relation_canonical(a.type_id),

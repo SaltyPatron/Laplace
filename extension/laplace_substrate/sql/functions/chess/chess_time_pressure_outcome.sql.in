@@ -1,4 +1,5 @@
-CREATE OR REPLACE FUNCTION chess_time_pressure_outcome()
+DROP FUNCTION IF EXISTS laplace.chess_time_pressure_outcome();
+CREATE OR REPLACE FUNCTION chess.time_pressure_outcome()
     RETURNS TABLE(
         think_class     text,
         positions       bigint,
@@ -13,8 +14,8 @@ CREATE OR REPLACE FUNCTION chess_time_pressure_outcome()
     -- ChessAnalysis pass, and MOVE(position -> next_position) whose Glicko
     -- rating IS the folded outcome of playing from that position (win=2 /
     -- draw=1 / loss=0 folded via consensus). So this joins two consensus sets
-    -- on position and reads eff_mu — the conservative folded outcome estimate.
-    -- The earlier evidence-layer form (joining 133M attestations by game
+    -- on position and reads laplace.eff_mu — the conservative folded outcome estimate.
+    -- The earlier evidence-layer form (joining 133M laplace.attestations by game
     -- context_id) timed out at 90s; this is the substrate's own answer: the
     -- adjudication already happened, the read is a lookup (GH #606).
     --

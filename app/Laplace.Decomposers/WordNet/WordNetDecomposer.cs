@@ -339,7 +339,7 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
         // The source's declared language scope, recorded rather than inferred. Emitted on
         // the LEMMA and the SENSE and deliberately not on the synset: a synset is
         // ILI-shared across every wordnet, so it is language-neutral and this source does
-        // not assert otherwise. senses() returns sense_id, and that is the id the elector
+        // not assert otherwise. lexical.senses() returns sense_id, and that is the id the elector
         // compares against the prompt's language, so the sense edge is the load-bearing one.
         // Null context, matching OMW: the object IS the language, so a language context
         // would be circular.

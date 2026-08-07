@@ -1,7 +1,7 @@
 -- GH #736 re-key: the input parameter was renamed (p_game -> p_event), which
 -- CREATE OR REPLACE cannot do on the upgrade path.
-DROP FUNCTION IF EXISTS chess_game(bytea);
-CREATE OR REPLACE FUNCTION chess_game(p_event bytea)
+DROP FUNCTION IF EXISTS laplace.chess_game(bytea);
+CREATE OR REPLACE FUNCTION chess.game(p_event bytea)
     RETURNS TABLE(white_id bytea, white text, black_id bytea, black text,
                   result text, played_on text, event text, eco text,
                   termination text, time_control text, tc_class text,
@@ -21,7 +21,7 @@ CREATE OR REPLACE FUNCTION chess_game(p_event bytea)
     -- not here.
     --
     -- All headers arrive in ONE index scan of the line's subject rows filtered
-    -- by this event's context, and the short surfaces render in ONE
+    -- by this event's context, and the short surfaces laplace.render in ONE
     -- realize_batch. The movetext is rendered on its own with the full depth
     -- budget: it is a tier-4 document whose constituent chain rebuilds the
     -- original PGN bytes exactly, so it is not a label lookup and must not be
@@ -33,7 +33,7 @@ CREATE OR REPLACE FUNCTION chess_game(p_event bytea)
           AND pl.type_id = laplace.relation_type_id('PLAYS_LINE')
         -- event -> line is expected to be unique, but nothing enforces it and a
         -- re-ingest of the same PGN under a second source deposits a second
-        -- testimony row. attestations carry no fold to rank by, so the id is the
+        -- testimony row. laplace.attestations carry no fold to rank by, so the id is the
         -- tie-break that keeps the pick reproducible instead of scan-ordered.
         ORDER BY pl.object_id
         LIMIT 1
@@ -86,7 +86,7 @@ CREATE OR REPLACE FUNCTION chess_game(p_event bytea)
         SELECT p.id, t.txt
         FROM surface_batch b,
              LATERAL unnest(b.ids) WITH ORDINALITY AS p(id, i),
-             LATERAL unnest(laplace.realize_batch(b.ids)) WITH ORDINALITY AS t(txt, j)
+             LATERAL unnest(realize.batch(b.ids)) WITH ORDINALITY AS t(txt, j)
         WHERE p.i = t.j
     )
     SELECT h.white_id,

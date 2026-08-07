@@ -1,4 +1,5 @@
-CREATE OR REPLACE FUNCTION contrast(p_x bytea, p_y bytea, p_lang bytea DEFAULT NULL,
+DROP FUNCTION IF EXISTS laplace.contrast(bytea, bytea, bytea, int);
+CREATE OR REPLACE FUNCTION converse.contrast(p_x bytea, p_y bytea, p_lang bytea DEFAULT NULL,
                                     p_limit int DEFAULT 80)
     RETURNS TABLE(holder text, type text, fact text, mu numeric)
     LANGUAGE C STABLE PARALLEL SAFE

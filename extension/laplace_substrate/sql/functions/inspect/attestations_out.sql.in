@@ -1,11 +1,11 @@
 CREATE OR REPLACE FUNCTION attestations_out(p_id bytea, p_limit integer DEFAULT 40)
     RETURNS TABLE(type_id bytea, object_id bytea, source_id bytea, context_id bytea,
                   outcome smallint, observation_count bigint)
-    LANGUAGE sql STABLE
+    LANGUAGE sql STABLE 
     SET search_path = @extschema@, public AS $$
     SELECT a.type_id, a.object_id, a.source_id, a.context_id,
            a.outcome, a.observation_count
-    FROM attestations a
+    FROM laplace.attestations a
     WHERE a.subject_id = p_id
     
     

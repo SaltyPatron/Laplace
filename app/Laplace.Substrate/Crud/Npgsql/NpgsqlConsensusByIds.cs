@@ -5,7 +5,7 @@ using Laplace.Engine.Core;
 namespace Laplace.SubstrateCRUD.Npgsql;
 
 /// <summary>
-/// <c>laplace.consensus_by_ids($1, $2)</c> — a batch consensus lookup keyed by a
+/// <c>consensus.by_ids($1, $2)</c> — a batch consensus lookup keyed by a
 /// caller-built edge-id array plus one relation type (the partition prune). Four
 /// Chess call sites (<c>LearnedPst</c>, <c>SubstrateRootBias</c>,
 /// <c>SubstrateStateValuer</c>, <c>SubstrateTurnHost</c>) each hand-wrote this exact
@@ -24,7 +24,7 @@ public static class NpgsqlConsensusByIds
     public readonly record struct Row(double EffMu, double Rd, double Witnesses);
 
     private const string Sql =
-        "SELECT id, eff_mu, rd, witness_count FROM laplace.consensus_by_ids($1, $2)";
+        "SELECT id, eff_mu, rd, witness_count FROM consensus.by_ids($1, $2)";
 
     /// <summary>Synchronous — for the engine search path, which is not async.</summary>
     public static Dictionary<Hash128, Row> Read(

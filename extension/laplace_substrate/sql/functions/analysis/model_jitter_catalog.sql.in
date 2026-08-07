@@ -14,7 +14,7 @@ CREATE OR REPLACE FUNCTION model_jitter_catalog(
         subject_id bytea, type_id bytea, object_id bytea,
         source_id bytea, outcome smallint, observations bigint,
         rating bigint, rd bigint, eff_mu bigint, witness_count bigint)
-    LANGUAGE sql STABLE PARALLEL SAFE
+    LANGUAGE sql STABLE PARALLEL SAFE 
     SET search_path = @extschema@, public AS $$
     WITH model_rels(tid) AS (
         SELECT relation_type_id(r)
@@ -26,9 +26,9 @@ CREATE OR REPLACE FUNCTION model_jitter_catalog(
     SELECT a.subject_id, a.type_id, a.object_id,
            a.source_id, a.outcome, a.observation_count,
            c.rating, c.rd, eff_mu(c.rating, c.rd), c.witness_count
-    FROM consensus c
+    FROM laplace.consensus c
     JOIN model_rels r ON r.tid = c.type_id
-    JOIN attestations a
+    JOIN laplace.attestations a
       ON a.subject_id = c.subject_id
      AND a.type_id    = c.type_id
      AND a.object_id  = c.object_id

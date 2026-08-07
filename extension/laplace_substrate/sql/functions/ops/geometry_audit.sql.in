@@ -25,7 +25,7 @@
 --                   of leaving it to be rediscovered.
 --
 --   READS v_word_points, AND THAT IS THE POINT. The first draft hand-rolled
---   `entities JOIN physicalities` and used the WRONG KEY -- physicalities has
+--   `entities JOIN laplace.physicalities` and used the WRONG KEY -- physicalities has
 --   both `id` (its own identity) and `entity_id` (what it describes) -- so it
 --   returned ZERO rows silently, which reads as "no skew" rather than "wrong
 --   key". It also omitted the `type = 1` filter and was correct only because
@@ -56,7 +56,7 @@ CREATE OR REPLACE FUNCTION geometry_audit(p_sample double precision DEFAULT 0.3)
                   min_radius numeric, avg_radius numeric, max_radius numeric,
                   on_sphere bigint, interior bigint, avg_constituents numeric,
                   hilbert_bands int, min_band bigint, max_band bigint)
-    LANGUAGE plpgsql VOLATILE
+    LANGUAGE plpgsql VOLATILE 
     SET search_path = @extschema@, public AS $$
 DECLARE
     q text;

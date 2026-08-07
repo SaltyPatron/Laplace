@@ -1,4 +1,5 @@
-CREATE OR REPLACE FUNCTION session_last_resolved(p_session bytea)
+DROP FUNCTION IF EXISTS laplace.session_last_resolved(bytea);
+CREATE OR REPLACE FUNCTION generation.session_last_resolved(p_session bytea)
     RETURNS bytea
     LANGUAGE sql STABLE STRICT PARALLEL SAFE
  AS $$

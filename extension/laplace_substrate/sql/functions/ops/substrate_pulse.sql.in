@@ -6,21 +6,21 @@ CREATE OR REPLACE FUNCTION substrate_pulse()
     RETURNS TABLE(entities bigint, attestations bigint, consensus bigint,
                   physicalities bigint, last_flush_at timestamptz,
                   flushes_last_min bigint, folding boolean)
-    LANGUAGE sql STABLE
+    LANGUAGE sql STABLE 
     SET search_path = @extschema@, public AS $$
     SELECT
       (SELECT value FROM substrate_counts() WHERE metric LIKE 'entities%'),
       (SELECT value FROM substrate_counts() WHERE metric LIKE 'attestations%'),
       (SELECT value FROM substrate_counts() WHERE metric LIKE 'consensus%'),
       (SELECT value FROM substrate_counts() WHERE metric LIKE 'physicalities%'),
-      (SELECT max(applied_at) FROM ingest_flush_journal),
-      (SELECT count(*) FROM ingest_flush_journal
+      (SELECT max(applied_at) FROM laplace.ingest_flush_journal),
+      (SELECT count(*) FROM laplace.ingest_flush_journal
         WHERE applied_at > now() - interval '60 seconds'),
       -- Folding = rows landed recently OR a fold/apply backend is active. The
       -- journal alone under-reports a slow-flush ingest mid-working-set.
       -- pg_backend_pid() is excluded: this query's own text contains the
       -- pattern strings and would otherwise match itself forever.
-      (SELECT (SELECT max(applied_at) FROM ingest_flush_journal) > now() - interval '20 seconds')
+      (SELECT (SELECT max(applied_at) FROM laplace.ingest_flush_journal) > now() - interval '20 seconds')
         OR EXISTS (
           SELECT 1 FROM pg_stat_activity a
           WHERE a.datname = current_database()

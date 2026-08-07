@@ -251,7 +251,7 @@ internal static class ProvenanceExtractor
         try
         {
             // edges_raw per subject (limit 1, eff_mu) — strongest ENCODES object, no
-            // hand-join on laplace.consensus. consensus_by_ids needs edge pks; we have
+            // hand-join on consensus. consensus_by_ids needs edge pks; we have
             // subject ids and discover the object here.
             var rows = await NpgsqlSubstrateReads.BestOutboundBySubjectsAsync(
                 ds, idBytes, encodesTypeId.ToBytes(), refuted: true, timeoutSeconds: 120, ct: ct);

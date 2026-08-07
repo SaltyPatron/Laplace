@@ -1,8 +1,9 @@
 -- Undirected consensus probe for the explore_web SPI beam. Thin wrapper over
--- edges_raw(); pins both directions, every type, eff_mu order and refuted edges
--- INCLUDED — the axes this lane has always used. `outbound` is the direction the
--- core already returns.
-CREATE OR REPLACE FUNCTION explore_web_neighbors(
+-- consensus.edges_raw(); pins both directions, every type, eff_mu order and
+-- refuted edges INCLUDED — the axes this lane has always used. outbound is the
+-- direction the core already returns.
+DROP FUNCTION IF EXISTS laplace.explore_web_neighbors(bytea, int);
+CREATE OR REPLACE FUNCTION consensus.explore_web_neighbors(
     p_subject bytea,
     p_limit   int)
     RETURNS TABLE(
@@ -12,9 +13,8 @@ CREATE OR REPLACE FUNCTION explore_web_neighbors(
         rd bigint,
         witness_count bigint,
         outbound boolean)
--- Class A per GH #860: RETURNS TABLE, not STRICT, not VOLATILE, single SELECT.
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
     SELECT e.neighbour_id, e.type_id, e.rating, e.rd, e.witness_count,
            (e.direction = 'out')
-    FROM @extschema@.edges_raw(p_subject, 'both', NULL, GREATEST(1, p_limit), true, 'eff_mu') e
+    FROM consensus.edges_raw(p_subject, 'both', NULL, GREATEST(1, p_limit), true, 'eff_mu') e
 $$;

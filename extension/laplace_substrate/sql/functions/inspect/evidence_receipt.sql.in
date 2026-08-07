@@ -7,7 +7,7 @@ CREATE OR REPLACE FUNCTION evidence_receipt(p_id bytea, p_limit integer DEFAULT 
         eff_mu numeric,
         witness_count bigint,
         source_labels text)
-    LANGUAGE sql STABLE
+    LANGUAGE sql STABLE 
     SET search_path = @extschema@, public AS $$
     WITH subj(id) AS (
         SELECT p_id
@@ -18,7 +18,7 @@ CREATE OR REPLACE FUNCTION evidence_receipt(p_id bytea, p_limit integer DEFAULT 
         -- inlines (SET search_path), so calling it per attestation row ran its
         -- EXISTS probe per row. Same truth table: static family via the C check
         -- below, dynamic membership via this set.
-        SELECT c.subject_id AS id FROM consensus c
+        SELECT c.subject_id AS id FROM laplace.consensus c
         WHERE c.type_id = relation_type_id('IS_A')
           AND c.object_id = relation_type_id('HAS_FEATURE')
     ), filtered AS MATERIALIZED (
@@ -28,11 +28,11 @@ CREATE OR REPLACE FUNCTION evidence_receipt(p_id bytea, p_limit integer DEFAULT 
         -- >180s for the "run" hub vs 991ms for this same CTE planned standalone).
         SELECT a.type_id, a.object_id, a.source_id,
                sum(a.observation_count) AS obs
-        FROM attestations a
+        FROM laplace.attestations a
         WHERE a.subject_id IN (SELECT id FROM subj)
           AND a.object_id IS NOT NULL
           AND EXISTS (
-              SELECT 1 FROM entities et
+              SELECT 1 FROM laplace.entities et
               WHERE et.id = a.type_id AND et.type_id = entity_type_id('RelationType'))
           AND NOT relation_type_in_family(a.type_id, 'HAS_POS')
           AND NOT relation_type_in_family(a.type_id, 'HAS_FEATURE')
@@ -48,7 +48,7 @@ CREATE OR REPLACE FUNCTION evidence_receipt(p_id bytea, p_limit integer DEFAULT 
               relation_type_id('HAS_SYNSET_KEY'), relation_type_id('IS_TYPED_AS'),
               relation_type_id('HAS_NAME_ALIAS'))
           AND NOT EXISTS (
-              SELECT 1 FROM entities et
+              SELECT 1 FROM laplace.entities et
               WHERE et.id = a.object_id AND et.type_id = entity_type_id('RelationType'))
           AND NOT (
               a.type_id = relation_type_id('IS_SYNONYM_OF')
@@ -82,7 +82,7 @@ CREATE OR REPLACE FUNCTION evidence_receipt(p_id bytea, p_limit integer DEFAULT 
                c.type_id, c.object_id,
                eff_mu(c.rating, c.rd) AS mu_raw,
                eff_mu_display(c.rating, c.rd) AS mu_disp
-        FROM consensus c
+        FROM laplace.consensus c
         WHERE c.subject_id IN (SELECT id FROM subj)
           AND c.object_id IS NOT NULL
         ORDER BY c.type_id, c.object_id, eff_mu(c.rating, c.rd) DESC
@@ -119,17 +119,17 @@ CREATE OR REPLACE FUNCTION evidence_receipt(p_id bytea, p_limit integer DEFAULT 
         -- cardinality-estimate shift flipped the inlining decision). Fenced, it
         -- runs exactly once. Output is byte-identical (proven run/emperor/king,
         -- both EXCEPT directions empty).
-        -- Full-mesh labels via ONE realize_batch (was: a shorter hand-rolled
+        -- Full-mesh labels via ONE realize.batch(was: a shorter hand-rolled
         -- synset-lemma -> render -> HEX ladder per row). Gains the
         -- HAS_NAME/translation/canonical/gloss arms; hex stays the genuine
         -- last resort so every claim still shows. Approved behavior change.
-        SELECT realize_batch(array_agg(o.object_id ORDER BY o.ord),
+        SELECT realize.batch(array_agg(o.object_id ORDER BY o.ord),
                              converse.word_language(p_id)) AS l
         FROM ordered o
     ), labeled AS (
         SELECT o.type_id, o.object_id, o.witness_count, o.source_labels,
                o.mu_raw, o.eff_mu_disp,
-               type_label(o.type_id) AS rel,
+               lexical.type_label(o.type_id) AS rel,
                COALESCE(NULLIF(labels.l[o.ord], ''),
                         left(encode(o.object_id, 'hex'), 16)) AS obj
         FROM ordered o, labels

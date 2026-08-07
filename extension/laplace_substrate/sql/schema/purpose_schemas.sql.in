@@ -34,6 +34,11 @@
 -- verified on its own. The alternative -- moving 351 files in one commit -- is
 -- unreviewable and unbisectable.
 --
+-- MIGRATION STATUS (2026-08-07): purpose families migrated (converse/lexical/
+-- taxonomy/realize/consensus/generation/structural/chess). Identity/μ/relation/
+-- readback/ops/inspect/highway-index helpers stay in laplace. api() lists all
+-- purpose schemas. Highway mask bits stay laplace (index expression deps).
+--
 -- Objects a script creates inside an extension become extension members
 -- automatically, so these schemas are dropped with the extension and need no
 -- separate teardown. They are NOT added to any search_path: that omission is the

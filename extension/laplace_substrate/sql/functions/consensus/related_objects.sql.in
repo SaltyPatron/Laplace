@@ -3,14 +3,14 @@
 -- implementation per fact (06 Rule #6) — a relation-name typo (the
 -- DEFINES/HAS_DEFINITION bug) can only exist in the CALLER's name argument.
 --
--- The name resolution is all this adds. The scan underneath is edges_raw() —
+-- The name resolution is all this adds. The scan underneath is consensus.edges_raw() —
 -- the one consensus scan — with the axes this signature has always pinned:
--- outbound, one relation type, unrefuted, eff_mu order, p_limit as a query
+-- outbound, one relation type, unrefuted, laplace.eff_mu order, p_limit as a query
 -- limit. The body used to hand-roll that scan and open-code `rating - 2*rd`
--- instead of eff_mu(); the two are the same expression, now stated once.
+-- instead of laplace.eff_mu(); the two are the same expression, now stated once.
 --
 -- Two deliberate changes came with the delegation:
---   * ties on eff_mu now break on neighbour_id, so the cap is deterministic
+--   * ties on laplace.eff_mu now break on neighbour_id, so the cap is deterministic
 --     rather than plan-dependent.
 --   * edges_raw's outbound arm requires object_id IS NOT NULL, so a unary
 --     attestation of p_relation can no longer surface here as a row whose
@@ -19,16 +19,17 @@
 --
 -- No SET search_path and no STRICT — either blocks inlining and costs the
 -- consensus index path (#617, #860). NULL-safety without STRICT: a NULL
--- p_subject matches no subject_id, and relation_type_id(NULL) matches no
+-- p_subject matches no subject_id, and laplace.relation_type_id(NULL) matches no
 -- type_id, so both still return zero rows.
-CREATE OR REPLACE FUNCTION related_objects(
+DROP FUNCTION IF EXISTS laplace.related_objects(bytea, text, int);
+CREATE OR REPLACE FUNCTION consensus.related_objects(
         p_subject bytea, p_relation text, p_limit int DEFAULT 8)
     RETURNS TABLE(object_id bytea, eff_mu bigint, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
     SELECT e.neighbour_id,
            @extschema@.eff_mu(e.rating, e.rd) AS eff_mu,
            e.witness_count                    AS witnesses
-    FROM @extschema@.edges_raw(p_subject, 'out',
+    FROM consensus.edges_raw(p_subject, 'out',
                                ARRAY[@extschema@.relation_type_id(p_relation)],
                                p_limit, false, 'eff_mu') e
 $$;

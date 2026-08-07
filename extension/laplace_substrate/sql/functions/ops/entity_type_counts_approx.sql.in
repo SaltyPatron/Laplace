@@ -1,6 +1,6 @@
 CREATE OR REPLACE FUNCTION entity_type_counts_approx()
     RETURNS TABLE(type text, type_id bytea, entities_approx bigint)
-    LANGUAGE sql STABLE
+    LANGUAGE sql STABLE 
     SET search_path = @extschema@, public AS $$
     -- entity_type_counts() GROUP BYs the whole of entities (44M rows and climbing).
     -- It cannot return under the 15s statement timeout the serving boundary enforces

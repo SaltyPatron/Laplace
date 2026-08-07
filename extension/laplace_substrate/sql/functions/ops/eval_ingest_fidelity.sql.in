@@ -15,7 +15,7 @@
 CREATE OR REPLACE FUNCTION eval_pair_plane_score(
     p_w1 bytea, p_w2 bytea, p_type bytea)
     RETURNS float8
-    LANGUAGE sql STABLE PARALLEL SAFE
+    LANGUAGE sql STABLE PARALLEL SAFE 
     SET search_path = @extschema@, public AS $$
     SELECT GREATEST(
         COALESCE((SELECT @extschema@.eff_mu_display(c.rating, c.rd)
@@ -32,10 +32,10 @@ $$;
 CREATE OR REPLACE FUNCTION eval_ingest_fidelity_positives(
     p_relation text, p_ground_truth text, p_limit int DEFAULT 200)
     RETURNS TABLE(score float8)
-    LANGUAGE sql STABLE
+    LANGUAGE sql STABLE 
     SET search_path = @extschema@, public AS $$
     WITH vocab AS (
-        SELECT subject_id AS id FROM @extschema@.subjects_of_type(p_relation)
+        SELECT subject_id AS id FROM consensus.subjects_of_type(p_relation)
     ),
     syn AS (
         SELECT c.subject_id AS w, c.object_id AS sense
@@ -64,10 +64,10 @@ $$;
 CREATE OR REPLACE FUNCTION eval_ingest_fidelity_negatives(
     p_relation text, p_limit int DEFAULT 200)
     RETURNS TABLE(score float8)
-    LANGUAGE sql STABLE
+    LANGUAGE sql STABLE 
     SET search_path = @extschema@, public AS $$
     WITH vocab AS (
-        SELECT subject_id AS id FROM @extschema@.subjects_of_type(p_relation)
+        SELECT subject_id AS id FROM consensus.subjects_of_type(p_relation)
     ),
     samp AS (SELECT id, row_number() OVER (ORDER BY random()) AS rn FROM vocab),
     cnt  AS (SELECT count(*) AS c FROM samp),
