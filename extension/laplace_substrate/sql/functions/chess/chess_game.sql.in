@@ -31,6 +31,11 @@ CREATE OR REPLACE FUNCTION chess_game(p_event bytea)
         FROM @extschema@.attestations pl
         WHERE pl.subject_id = p_event
           AND pl.type_id = @extschema@.relation_type_id('PLAYS_LINE')
+        -- event -> line is expected to be unique, but nothing enforces it and a
+        -- re-ingest of the same PGN under a second source deposits a second
+        -- testimony row. attestations carry no fold to rank by, so the id is the
+        -- tie-break that keeps the pick reproducible instead of scan-ordered.
+        ORDER BY pl.object_id
         LIMIT 1
     ),
     hdr AS MATERIALIZED (

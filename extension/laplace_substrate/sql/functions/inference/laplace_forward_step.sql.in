@@ -41,5 +41,9 @@ LANGUAGE sql STABLE PARALLEL RESTRICTED AS $$
       AND c.cx IS NOT NULL          -- concentration 0 => no direction => abstain
       AND n.entity_id IS NOT NULL
       AND n.entity_id <> p_entity
-    LIMIT 1
+    -- No LIMIT: the k argument to laplace_nearest_entity IS the cap (k = 1), and
+    -- the KNN ranks before it cuts. A trailing LIMIT 1 read as a safeguard over an
+    -- unordered pick, which is the opposite of what this call does -- and it could
+    -- not have guarded the one real edge case anyway, since the self-match filter
+    -- runs after the k = 1 pick and correctly yields no row.
 $$;
