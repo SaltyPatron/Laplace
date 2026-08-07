@@ -66,7 +66,7 @@ CREATE OR REPLACE FUNCTION translate_to(p_word bytea, p_lang text DEFAULT NULL,
         -- identical to the old matcher.
         SELECT s.lang
         FROM (
-            SELECT l.lang, lower(label(l.lang)) AS lbl
+            SELECT l.lang, lower(realize.label(l.lang)) AS lbl
             FROM (SELECT DISTINCT lang FROM agg) l, want w0
             WHERE w0.name IS NOT NULL
         ) s, want w
@@ -74,7 +74,7 @@ CREATE OR REPLACE FUNCTION translate_to(p_word bytea, p_lang text DEFAULT NULL,
            OR s.lang IN (SELECT ld.lang FROM lang_def_names ld WHERE ld.dname = w.name)
     )
     -- a.mu is fp1e9 (synset_members) — convert through the one display definition
-    SELECT r.txt AS translation, label(a.lang) AS language, eff_mu_display(a.mu), a.witnesses
+    SELECT r.txt AS translation, realize.label(a.lang) AS language, eff_mu_display(a.mu), a.witnesses
     FROM (
         SELECT member, lang, mu, witnesses FROM agg
         WHERE lang IN (SELECT lang FROM lang_match)

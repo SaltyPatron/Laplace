@@ -43,10 +43,10 @@ CREATE OR REPLACE FUNCTION recall_walk_response(p_topic bytea, p_mode text)
         FROM complete_winner w, generate_series(1, w.depth) AS i
     ),
     complete_reply AS (
-        SELECT (SELECT COALESCE(realize.realize(p_topic, converse.word_language(p_topic)), label(p_topic)))
+        SELECT (SELECT COALESCE(realize.realize(p_topic, converse.word_language(p_topic)), realize.label(p_topic)))
                || string_agg(' —' || COALESCE(type_label(s.type_id), '?') || E'→ '
                              || COALESCE(realize.realize(s.entity_id, converse.word_language(p_topic)),
-                                         label(s.entity_id)), '' ORDER BY s.i) AS reply,
+                                         realize.label(s.entity_id)), '' ORDER BY s.i) AS reply,
                min(b.eff_mu) AS eff_mu,
                (SELECT w.witnesses FROM complete_winner w) AS witnesses
         FROM complete_steps s

@@ -46,11 +46,11 @@ CREATE OR REPLACE FUNCTION links(p_word text)
     rel AS MATERIALIZED (
         -- One row per DISTINCT relation type present on this subject.
         SELECT t.type_id,
-               COALESCE(NULLIF(relation_canonical(t.type_id), ''), label(t.type_id)) AS relation
+               COALESCE(NULLIF(relation_canonical(t.type_id), ''), realize.label(t.type_id)) AS relation
         FROM (SELECT DISTINCT b.type_id FROM base b) t
     )
     SELECT r.relation,
-           label(b.object_id) AS target,
+           realize.label(b.object_id) AS target,
            (b.emu)::float8 / 1e9 AS strength
     FROM base b
     JOIN rel r ON r.type_id = b.type_id

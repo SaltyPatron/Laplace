@@ -34,7 +34,7 @@ CREATE OR REPLACE FUNCTION attention(p_word bytea, p_k int DEFAULT 12)
         CROSS JOIN qcoord qc
         ORDER BY attention DESC NULLS LAST, geodesic NULLS LAST
     ) r
-    CROSS JOIN LATERAL (SELECT label(r.nb) AS txt) l
+    CROSS JOIN LATERAL (SELECT realize.label(r.nb) AS txt) l
     WHERE NULLIF(btrim(l.txt), '') IS NOT NULL
     LIMIT p_k
 $$;

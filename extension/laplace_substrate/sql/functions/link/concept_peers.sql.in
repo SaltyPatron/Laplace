@@ -56,7 +56,7 @@ CREATE OR REPLACE FUNCTION concept_peers(p_word bytea, p_limit int DEFAULT 24)
     )
     SELECT l.txt AS peer, r.kind, (r.mu::double precision) AS strength
     FROM ranked r
-    CROSS JOIN LATERAL (SELECT label(r.member) AS txt) l
+    CROSS JOIN LATERAL (SELECT realize.label(r.member) AS txt) l
     WHERE r.rk <= p_limit
       AND NULLIF(btrim(l.txt), '') IS NOT NULL
     ORDER BY r.kind, r.mu DESC NULLS LAST, l.txt
