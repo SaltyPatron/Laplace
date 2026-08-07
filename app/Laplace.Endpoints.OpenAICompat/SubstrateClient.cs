@@ -497,9 +497,10 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
             long entities = 0, consensus = 0;
             foreach (var row in await NpgsqlSubstrateReads.SubstrateCountsAsync(conn, ct))
             {
-                if (row.Metric.StartsWith("entities", StringComparison.OrdinalIgnoreCase))
+                // Labels are schema.table(ESTIMATE) — see substrate_counts.sql.in.
+                if (row.Metric.Equals("laplace.entities(ESTIMATE)", StringComparison.Ordinal))
                     entities = Math.Max(entities, row.Value);
-                else if (row.Metric.StartsWith("consensus", StringComparison.OrdinalIgnoreCase))
+                else if (row.Metric.Equals("laplace.consensus(ESTIMATE)", StringComparison.Ordinal))
                     consensus = Math.Max(consensus, row.Value);
             }
 

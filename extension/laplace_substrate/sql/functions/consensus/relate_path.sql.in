@@ -3,9 +3,8 @@ DROP FUNCTION IF EXISTS laplace.relate_path(bytea, bytea, int);
 CREATE OR REPLACE FUNCTION consensus.relate_path(p_x bytea, p_y bytea, p_depth int DEFAULT 7)
     RETURNS TABLE(chain text, path_mu numeric, plane text)
     LANGUAGE sql STABLE PARALLEL SAFE
-    -- SET NOT YET REMOVED (GH #860). The body has ~30 unqualified references and
-    -- dropping the clause without qualifying every one of them fails at install,
-    -- not at runtime. The placeholder is gone; the clause is the remaining work.
+    -- No SET search_path (GH #860). Body is purpose-/laplace-qualified; CTE names
+    -- (xset/yset/lat/…) are local and need no schema.
 AS $$
     -- Candidate discovery is id/attestation logic only: every candidate carries
     -- its node/type/direction arrays and numeric score, and the single winner is

@@ -19,9 +19,8 @@ public sealed class SubstrateCountsExactTests
         Assert.Contains("(ESTIMATE)", text, StringComparison.Ordinal);
         Assert.Contains("pg_class.reltuples", text, StringComparison.Ordinal);
         Assert.DoesNotContain("'entities ~'", text, StringComparison.Ordinal);
-        // Label contract for substrate_pulse / readiness — not schema-qualified strings.
-        Assert.Contains("'entities(ESTIMATE)'", text, StringComparison.Ordinal);
-        Assert.DoesNotContain("'laplace.entities(ESTIMATE)'", text, StringComparison.Ordinal);
+        // Label = schema.table(ESTIMATE); consumers match exact (pulse / readiness).
+        Assert.Contains("'laplace.entities(ESTIMATE)'", text, StringComparison.Ordinal);
     }
 
     [Fact]

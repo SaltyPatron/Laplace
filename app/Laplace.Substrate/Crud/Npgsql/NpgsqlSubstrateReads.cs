@@ -1533,9 +1533,9 @@ public static class NpgsqlSubstrateReads
         bool entities = false, consensus = false;
         foreach (var r in rows)
         {
-            if (r.Metric.StartsWith("entities", StringComparison.OrdinalIgnoreCase))
+            if (r.Metric.Equals("laplace.entities(ESTIMATE)", StringComparison.Ordinal))
                 entities = r.Value > 0;
-            else if (r.Metric.StartsWith("consensus", StringComparison.OrdinalIgnoreCase))
+            else if (r.Metric.Equals("laplace.consensus(ESTIMATE)", StringComparison.Ordinal))
                 consensus = r.Value > 0;
         }
         return (entities, consensus);
