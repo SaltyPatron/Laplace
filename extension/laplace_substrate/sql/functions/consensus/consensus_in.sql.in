@@ -2,10 +2,12 @@
 -- laplace.edge_rank ordering, laplace.refuted edges INCLUDED — the axes this signature has
 -- always carried, now stated instead of inferred from the body.
 DROP FUNCTION IF EXISTS laplace.consensus_in(bytea, integer);
+-- BEGIN ATOMIC: GH #764.
 CREATE OR REPLACE FUNCTION consensus.consensus_in(p_id bytea, p_limit integer DEFAULT 40)
     RETURNS TABLE(subject_id bytea, type_id bytea, rating bigint, rd bigint,
                   volatility bigint, witness_count bigint)
-    LANGUAGE sql STABLE AS $$
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
     SELECT e.neighbour_id, e.type_id, e.rating, e.rd, e.volatility, e.witness_count
-    FROM consensus.edges_raw(p_id, 'in', NULL, p_limit, true, 'edge_rank') e
-$$;
+    FROM consensus.edges_raw(p_id, 'in', NULL, p_limit, true, 'edge_rank') e;
+END;

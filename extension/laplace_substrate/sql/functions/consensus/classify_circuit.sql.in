@@ -1,7 +1,9 @@
 DROP FUNCTION IF EXISTS laplace.classify_circuit(bytea[]);
+-- BEGIN ATOMIC: GH #764.
 CREATE OR REPLACE FUNCTION consensus.classify_circuit(p_pairs bytea[])
     RETURNS TABLE(subject_id bytea, object_id bytea, type_id bytea, eff_mu numeric, witnesses bigint)
-    LANGUAGE sql STABLE AS $$
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
     WITH pairs AS (
         SELECT substring(p FROM 1 FOR 16)  AS subj,
                substring(p FROM 17 FOR 16) AS obj
@@ -21,5 +23,5 @@ CREATE OR REPLACE FUNCTION consensus.classify_circuit(p_pairs bytea[])
     )
     SELECT subj, obj, type_id, emu, w
     FROM ranked
-    WHERE rn = 1
-$$;
+    WHERE rn = 1;
+END;

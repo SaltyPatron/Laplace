@@ -2,18 +2,21 @@
 -- the given relation type. consensus is LIST(type_id), so the type equality
 -- prunes to one partition; callers must not open-code that scan.
 DROP FUNCTION IF EXISTS laplace.subjects_of_type(bytea);
+-- BEGIN ATOMIC: GH #764.
 CREATE OR REPLACE FUNCTION consensus.subjects_of_type(p_type bytea)
     RETURNS TABLE(subject_id bytea)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     SELECT DISTINCT c.subject_id
     FROM @extschema@.consensus c
-    WHERE c.type_id = p_type
-$$;
+    WHERE c.type_id = p_type;
+END;
 
 DROP FUNCTION IF EXISTS laplace.subjects_of_type(text);
 CREATE OR REPLACE FUNCTION consensus.subjects_of_type(p_relation text)
     RETURNS TABLE(subject_id bytea)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     SELECT s.subject_id
-    FROM consensus.subjects_of_type(@extschema@.relation_type_id(p_relation)) s
-$$;
+    FROM consensus.subjects_of_type(@extschema@.relation_type_id(p_relation)) s;
+END;

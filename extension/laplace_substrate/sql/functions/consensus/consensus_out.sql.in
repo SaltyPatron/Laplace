@@ -4,10 +4,12 @@
 -- rather than implicit: pass through consensus.edges_raw(p_refuted => false) if you want
 -- only claims the fold has not rated below neutral.
 DROP FUNCTION IF EXISTS laplace.consensus_out(bytea, integer);
+-- BEGIN ATOMIC: GH #764.
 CREATE OR REPLACE FUNCTION consensus.consensus_out(p_id bytea, p_limit integer DEFAULT 40)
     RETURNS TABLE(type_id bytea, object_id bytea, rating bigint, rd bigint,
                   volatility bigint, witness_count bigint)
-    LANGUAGE sql STABLE AS $$
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
     SELECT e.type_id, e.neighbour_id, e.rating, e.rd, e.volatility, e.witness_count
-    FROM consensus.edges_raw(p_id, 'out', NULL, p_limit, true, 'edge_rank') e
-$$;
+    FROM consensus.edges_raw(p_id, 'out', NULL, p_limit, true, 'edge_rank') e;
+END;
