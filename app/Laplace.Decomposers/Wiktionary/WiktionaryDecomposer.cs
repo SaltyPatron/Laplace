@@ -56,7 +56,12 @@ public sealed class WiktionaryDecomposer
 
         LanguageFilter? langs = options.Languages;
         bool preFilter = WiktionaryJsonFilter.NeedsLanguagePreFilter(file, langs);
-        int workers = Math.Max(1, IngestSizing.ResolveForSource(IngestSourceProfile.Wiktionary).ComposeWorkers);
+        // Parse is ~50us/record; compose is the expensive stage. Sizing the parse pool
+        // to the FULL compose-worker count put 11 parse + 11 compose CPU-bound threads
+        // on 12 cores (measured on the 2026-08-06 full-file run), starving the stage
+        // that actually needed the cores. A few workers saturate the parse lane.
+        int workers = Math.Clamp(
+            IngestSizing.ResolveForSource(IngestSourceProfile.Wiktionary).ComposeWorkers / 4, 2, 4);
 
         return ParallelLineParse.RecordsAsync<WiktionaryEntry>(
             file,

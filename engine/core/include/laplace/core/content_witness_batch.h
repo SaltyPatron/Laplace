@@ -51,6 +51,13 @@ int content_witness_emit_tree(
     size_t             bitmap_bits,
     hash128_t*         out_root_id);
 
+/* Root id of an ALREADY-BUILT tree — the same collapse walk emit uses. Lets a
+ * caller derive once and answer "is this ladder persisted?" from the built tree
+ * instead of paying laplace_content_root_id's second full derivation. */
+int content_witness_tree_root_id(
+    const tier_tree_t* tree,
+    hash128_t*         out_root_id);
+
 void content_witness_reset(void);
 
 int laplace_content_root_id(

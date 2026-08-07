@@ -130,20 +130,34 @@ public static class ContentTierSpine
         if (canonicalUtf8.IsEmpty) return false;
 
         // Ask whether this surface's ladder is already deposited BEFORE deriving it.
-        // TryAddContentWitness -> content_witness_batch_add builds the whole tier tree
-        // and only then checks intent_stage_witness_seen (content_witness_batch.c:364),
-        // against a seen-set that lives one record batch — so a surface recurring across
-        // batches is re-derived AND re-emitted, and the re-emitted nodes land in the
-        // apply's merge lane because they already exist. ResolveRoot is the cheap half
-        // (native fast path, memoized); the ledger holds only roots proven present by a
-        // committed apply, so a hit is proof the ladder is there and a miss just costs
-        // what today already costs. See ContentLadderLedger for the measurement.
-        if (ContentLadderLedger.Armed
-            && ResolveRoot(canonicalUtf8) is { } known
-            && ContentLadderLedger.IsPersisted(known))
+        // A hit proves the ladder is persisted (ContentLadderLedger holds only roots
+        // from committed applies), so recurrences across batches skip derivation AND
+        // re-emission into the merge lane. The lookup key is the memo alone: the old
+        // shape called ResolveRoot here, which on a memo miss made a SECOND full
+        // native derivation under the process-global lock before TryAddContentWitness
+        // derived the same surface again — measured on the 2026-08-06 full-file run
+        // as 77 records/s with 11 compose workers serialized behind an armed-but-empty
+        // ledger. A memo miss now derives exactly once, in the same single native
+        // crossing that emits, and memoizes the root it returns for future hits.
+        if (ContentLadderLedger.Armed && ContentLadderLedger.HasEntries)
         {
-            rootId = known;
-            return true;
+            var key = Hash128.Blake3(canonicalUtf8);
+            if (RootMemo.TryGetValue(key, out var memo))
+            {
+                if (memo is { } m && ContentLadderLedger.IsPersisted(m))
+                {
+                    rootId = m;
+                    return true;
+                }
+            }
+            else if (builder.DeferredContent is null)
+            {
+                if (!builder.ContentStage.TryAddContentWitness(canonicalUtf8, sourceId, out rootId))
+                    return false;
+                if (Volatile.Read(ref _rootMemoCount) < RootMemoCap && RootMemo.TryAdd(key, rootId))
+                    Interlocked.Increment(ref _rootMemoCount);
+                return true;
+            }
         }
 
         if (builder.DeferredContent is { } cb)
