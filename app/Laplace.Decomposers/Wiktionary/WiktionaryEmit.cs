@@ -63,7 +63,7 @@ internal static class WiktionaryEmit
             foreach (var s in senses)
             {
                 WalkSense(b, wordId, s, posCtx, isVerb, langCtx);
-                RouteSynsetLinks(b, wordId, s, posCtx, langCtx);
+                RouteSynsetLinks(b, wordId, s, langCtx);
             }
 
         WalkSounds(b, wordId, e.Sounds);
