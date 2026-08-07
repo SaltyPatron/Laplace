@@ -1048,12 +1048,43 @@ internal sealed class SubstrateTools
         var (text, isErr) = Rows(_dbReadOnly, query, Int(args, "max_rows", DefaultRowCap));
         sw.Stop();
 
-        // Issue #814: every accepted use is a gap report with its cost.
+        // Issue #814: every accepted use is a gap report with its cost —
+        // stderr for the live console, and a durable CSV ledger queryable as
+        // ops.sql_gap() / op(name => 'sql_gap').
+        var flatQuery = query.Replace('\r', ' ').Replace('\n', ' ');
         Console.Error.WriteLine(
             $"[mcp-sql-gap] duration_ms={sw.ElapsedMilliseconds} result_chars={text.Length} "
-            + $"error={isErr} query=\"{query.Replace('\r', ' ').Replace('\n', ' ')}\"");
+            + $"error={isErr} query=\"{flatQuery}\"");
+        AppendSqlGap(sw.ElapsedMilliseconds, text.Length, isErr, flatQuery);
 
         return (text, isErr);
+    }
+
+    private static void AppendSqlGap(long durationMs, int resultChars, bool isErr, string query)
+    {
+        try
+        {
+            var dir = LaplaceInstall.OpsLogDirectory;
+            Directory.CreateDirectory(dir);
+            var path = Path.Combine(dir, "laplace-sql-gap.csv");
+            var needHeader = !File.Exists(path) || new FileInfo(path).Length == 0;
+            using var fs = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+            using var w = new StreamWriter(fs, Encoding.UTF8);
+            if (needHeader)
+                w.WriteLine("log_time,duration_ms,result_chars,is_error,query");
+            static string Csv(string s) =>
+                "\"" + s.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
+            w.WriteLine(string.Join(',',
+                DateTimeOffset.UtcNow.ToString("o"),
+                durationMs.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                resultChars.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                isErr ? "t" : "f",
+                Csv(query)));
+        }
+        catch
+        {
+            // Ledger is best-effort; refuse/log criteria must not fail the hatch.
+        }
     }
 
     private static int Int(JsonObject? args, string name, int fallback) =>
