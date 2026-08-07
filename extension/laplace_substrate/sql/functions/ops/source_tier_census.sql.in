@@ -1,0 +1,17 @@
+-- What shape did this lane write? (GH #813). Counts entities first-observed by
+-- the source, grouped by tier — the cheap index path on first_observed_by, not
+-- a join across attestations. Answers the chess-vs-vocabulary tier-2 question
+-- without hand-rolled GROUP BY.
+DROP FUNCTION IF EXISTS laplace.source_tier_census(bytea);
+CREATE OR REPLACE FUNCTION source_tier_census(p_source bytea)
+    RETURNS TABLE(tier smallint, entities bigint)
+    LANGUAGE sql
+    STABLE
+    PARALLEL SAFE
+AS $$
+    SELECT e.tier, count(*)::bigint
+    FROM laplace.entities e
+    WHERE e.first_observed_by = p_source
+    GROUP BY e.tier
+    ORDER BY e.tier
+$$;
