@@ -240,6 +240,46 @@ public static class NpgsqlSubstrateReads
             p => p.AddWithValue("limit", limit),
             ct: ct, label: "render_gaps", onError: onError);
 
+    /// <summary><c>laplace.entity_type_counts()</c> — exact (slow); prefer EntityTypeCountsApproxAsync.</summary>
+    public static Task<IReadOnlyList<(string Type, short Tier, long Entities)>> EntityTypeCountsAsync(
+        NpgsqlDataSource dataSource, CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT type, tier, entities FROM laplace.entity_type_counts() LIMIT 64
+            """,
+            static r => (r.IsDBNull(0) ? "" : r.GetString(0), r.GetInt16(1), r.GetInt64(2)),
+            ct: ct, label: "entity_type_counts", onError: onError);
+
+    /// <summary><c>laplace.is_compositional_type(type_id)</c></summary>
+    public static async Task<bool> IsCompositionalTypeAsync(
+        NpgsqlDataSource dataSource, byte[] typeId, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null)
+    {
+        var rows = await NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT laplace.is_compositional_type(@type)
+            """,
+            static r => !r.IsDBNull(0) && r.GetBoolean(0),
+            p => p.AddWithValue("type", typeId),
+            ct: ct, label: "is_compositional_type", onError: onError).ConfigureAwait(false);
+        return rows.Count > 0 && rows[0];
+    }
+
+    /// <summary><c>laplace.top_relations_readable(limit, type)</c></summary>
+    public static Task<IReadOnlyList<(string Subject, string Type, string Object, decimal EffMu, long Witnesses)>> TopRelationsReadableAsync(
+        NpgsqlDataSource dataSource, int limit, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT subject, type, object, eff_mu, witnesses
+            FROM laplace.top_relations_readable(@limit, NULL)
+            """,
+            static r => (
+                r.IsDBNull(0) ? "" : r.GetString(0),
+                r.IsDBNull(1) ? "" : r.GetString(1),
+                r.IsDBNull(2) ? "" : r.GetString(2),
+                r.IsDBNull(3) ? 0m : r.GetDecimal(3),
+                r.IsDBNull(4) ? 0L : r.GetInt64(4)),
+            p => p.AddWithValue("limit", limit),
+            ct: ct, label: "top_relations_readable", onError: onError);
+
     public readonly record struct BandLeaderRow(
         int Band, string SubjectIdHex, string Subject, string Relation,
         string ObjectIdHex, string Object, decimal EffMu, long Witnesses);
