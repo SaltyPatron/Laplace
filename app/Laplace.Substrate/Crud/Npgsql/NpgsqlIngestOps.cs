@@ -188,7 +188,7 @@ public static class NpgsqlIngestOps
         CancellationToken ct = default)
     {
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT lane, seed, reply FROM laplace.generation_probe(@p, @s, @n)";
+        cmd.CommandText = "SELECT lane, seed, reply FROM generation.probe(@p, @s, @n)";
         cmd.CommandTimeout = 0;
         cmd.Parameters.AddWithValue("p", prompt);
         cmd.Parameters.Add("s", NpgsqlDbType.Array | NpgsqlDbType.Bigint).Value = seeds;

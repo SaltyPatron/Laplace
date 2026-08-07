@@ -17,12 +17,13 @@
 -- — chat()'s carry ranks by consensus adjacency to the current turn first,
 -- falling back to recency, which keeps session_last_resolved's semantics as
 -- the zero-evidence case.
-CREATE OR REPLACE FUNCTION session_trajectory(p_session bytea, p_k int DEFAULT 8)
+DROP FUNCTION IF EXISTS laplace.session_trajectory(bytea, int);
+
+CREATE OR REPLACE FUNCTION converse.session_trajectory(p_session bytea, p_k int DEFAULT 8)
     RETURNS TABLE(topic_id bytea, last_ord int, mentions bigint)
-    LANGUAGE sql STABLE STRICT PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$
     SELECT t.resolved_id, max(t.ord), count(*)
-    FROM session_topics t
+    FROM laplace.session_topics t
     WHERE t.session_id = p_session AND t.resolved_id IS NOT NULL
     GROUP BY t.resolved_id
     ORDER BY max(t.ord) DESC

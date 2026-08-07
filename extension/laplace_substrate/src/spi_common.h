@@ -201,7 +201,7 @@ spi_label(Datum id)
     int   rc;
 
     rc = SPI_execute_with_args(
-        "SELECT laplace.label($1)", 1, argtypes, args, NULL, true, 1);
+        "SELECT realize.label($1)", 1, argtypes, args, NULL, true, 1);
     if (rc != SPI_OK_SELECT || SPI_processed == 0)
         return (Datum) 0;
     return SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
@@ -232,7 +232,7 @@ spi_word_language(Datum word)
     Datum d;
 
     rc = SPI_execute_with_args(
-        "SELECT laplace.word_language($1)", 1, argtypes, args, NULL, true, 1);
+        "SELECT converse.word_language($1)", 1, argtypes, args, NULL, true, 1);
     if (rc != SPI_OK_SELECT || SPI_processed == 0)
         return (Datum) 0;
     

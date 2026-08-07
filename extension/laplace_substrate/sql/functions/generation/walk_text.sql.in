@@ -7,7 +7,7 @@ CREATE OR REPLACE FUNCTION walk_text(
     SET search_path = @extschema@, public AS $$
     WITH ctx AS (
         SELECT array_agg(id ORDER BY ord) AS ids
-        FROM prompt_state(p_prompt) WHERE id IS NOT NULL
+        FROM converse.prompt_state(p_prompt) WHERE id IS NOT NULL
     )
     
     

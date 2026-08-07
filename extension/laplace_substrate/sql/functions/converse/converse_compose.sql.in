@@ -83,7 +83,7 @@ BEGIN
             SELECT p.id AS tok, s.synset_id AS syn, s.eff_mu AS denote_mu,
                    max(laplace_highway_popcount(e.highway_mask))
                        OVER (PARTITION BY p.id) AS tok_breadth
-            FROM prompt_state(p_prompt) p
+            FROM converse.prompt_state(p_prompt) p
             CROSS JOIN LATERAL lexical.senses(p.id) s
             LEFT JOIN entities e ON e.id = s.synset_id
             WHERE p.id IS NOT NULL AND s.synset_id IS NOT NULL

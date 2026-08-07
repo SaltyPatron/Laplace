@@ -265,7 +265,7 @@ SELECT type_label(relation_type_id('IS_A')) AS isa_label;
  is a
 (1 row)
 
-SELECT realize_path(ARRAY[laplace_hash128_blake3('test/converse/synset1'),
+SELECT realize.path(ARRAY[laplace_hash128_blake3('test/converse/synset1'),
                           laplace_hash128_blake3('test/converse/synset2')],
                     ARRAY[relation_type_id('IS_A')],
                     laplace_hash128_blake3('test/converse/lang_en')) AS realized_path;

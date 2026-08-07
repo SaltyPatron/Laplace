@@ -3,7 +3,10 @@
 --
 -- Shape axis: Frechet over REALIZED curves (entity_curve), never packed
 -- physicalities.trajectory (Rule #3 / Issue 51).
-CREATE OR REPLACE FUNCTION structural_neighbors_of(
+-- GH #862 / #860: structural.neighbors_of, no SET, real schema names.
+DROP FUNCTION IF EXISTS laplace.structural_neighbors_of(bytea, integer);
+
+CREATE OR REPLACE FUNCTION structural.neighbors_of(
     p_id bytea,
     p_k  integer DEFAULT 10)
     RETURNS TABLE(
@@ -17,12 +20,12 @@ CREATE OR REPLACE FUNCTION structural_neighbors_of(
         geodesic    double precision,
         frechet     double precision)
     LANGUAGE plpgsql STABLE
-    SET search_path = @extschema@, public AS $sn$
+    AS $sn$
 DECLARE
     v_coord geometry;
     v_curve geometry;
 BEGIN
-    SELECT a.coord, entity_curve(p_id)
+    SELECT a.coord, laplace.entity_curve(p_id)
       INTO v_coord, v_curve
     FROM word_anchor(p_id) a;
     IF v_coord IS NULL THEN RETURN; END IF;
@@ -30,7 +33,7 @@ BEGIN
     RETURN QUERY
     WITH knn AS (
         SELECT w.id AS entity_id, w.coord, w.radius_origin
-        FROM v_word_points w
+        FROM laplace.v_word_points w
         WHERE w.coord IS NOT NULL
         ORDER BY w.coord <<->> v_coord
         LIMIT GREATEST(p_k * 20, 200)),
@@ -53,7 +56,7 @@ BEGIN
     curves AS (
         -- Cache realized curves once per survivor (never rebuild inside Frechet).
         SELECT o.entity_id, o.coord, o.radius_origin, o.geo, o.ord,
-               entity_curve(o.entity_id) AS curve
+               laplace.entity_curve(o.entity_id) AS curve
         FROM ordered o
     ),
     labels AS (
@@ -61,7 +64,7 @@ BEGIN
         -- (was: scalar realize per neighbour): synset/ILI hubs resolve through
         -- the name/synset-lemma/translation arms to the real word; hex stays
         -- only as the genuine last resort so the node still plots.
-        SELECT realize_batch(array_agg(c.entity_id ORDER BY c.ord)) AS l
+        SELECT laplace.realize_batch(array_agg(c.entity_id ORDER BY c.ord)) AS l
         FROM curves c
     )
     SELECT c.entity_id,

@@ -56,7 +56,7 @@ CREATE OR REPLACE FUNCTION edges(
         -- governed vocabulary of ~189, so a subject spans a handful.
         SELECT t.type_id,
                COALESCE(NULLIF(@extschema@.relation_canonical(t.type_id), ''),
-                        @extschema@.label(t.type_id)) AS relation
+                        realize.label(t.type_id)) AS relation
         FROM (SELECT DISTINCT k.type_id FROM ranked k) t
     ),
     lbl AS MATERIALIZED (
@@ -64,7 +64,7 @@ CREATE OR REPLACE FUNCTION edges(
         FROM ranked k
     )
     SELECT k.dir, rel.relation, k.nid,
-           COALESCE(lbl.l[k.ord], @extschema@.label(k.nid)),
+           COALESCE(lbl.l[k.ord], realize.label(k.nid)),
            @extschema@.eff_mu_display(k.rating, k.rd),
            k.witness_count
     FROM ranked k
