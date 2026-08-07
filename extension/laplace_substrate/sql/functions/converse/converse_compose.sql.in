@@ -267,10 +267,40 @@ BEGIN
 
     -- REALIZE last, and only here. p_lang selects which member of each concept's
     -- surface family is emitted; everything above ran in ids.
+    -- BATCHED, over the DISTINCT emitted ids, re-expanded in emission order --
+    -- the form converse_walk already carries and MEASURED at ~15.8x on 1,645
+    -- tokens (1,895ms scalar against 15.6ms batched, comment at converse_walk
+    -- :210-217). This lane was written after that fix and never given it, while
+    -- being the one wired into chat()'s walk shape.
+    --
+    -- BOTH ladders batch, because both are needed and they answer different
+    -- questions: realize LABELS a concept in p_lang, render_text reconstructs
+    -- content bytes. The COALESCE order is unchanged -- label first, content as
+    -- the fallback for ids with no surface family.
+    --
+    -- string_agg now carries ORDER BY gg.o. The scalar form had none: unnest WITH
+    -- ORDINALITY names the position but does not oblige the aggregate to use it,
+    -- so token order in a generated sentence rested on the executor happening to
+    -- feed rows in scan order.
     RETURN btrim(regexp_replace(
         regexp_replace(
-            (SELECT string_agg(COALESCE(realize(t, p_lang), render_text(t,64), ''), ' ')
-             FROM unnest(out_ids) WITH ORDINALITY gg(t,o)),
+            (WITH ids AS MATERIALIZED (
+                 SELECT array_agg(DISTINCT u.t) AS a FROM unnest(out_ids) AS u(t)
+             ),
+             realized AS MATERIALIZED (
+                 SELECT i.a AS a,
+                        realize_batch(i.a, p_lang)  AS lbl,
+                        render_text_batch(i.a, 64)  AS txt
+                 FROM ids i
+             ),
+             m AS (
+                 SELECT (r.a)[k] AS id,
+                        COALESCE((r.lbl)[k], (r.txt)[k], '') AS s
+                 FROM realized r, generate_subscripts(r.a, 1) AS k
+             )
+             SELECT string_agg(COALESCE(m.s, ''), ' ' ORDER BY gg.o)
+             FROM unnest(out_ids) WITH ORDINALITY gg(t,o)
+             LEFT JOIN m ON m.id = gg.t),
             '\s*[();:]\s*', ' ', 'g'),
         '\s+', ' ', 'g'));
 END;
