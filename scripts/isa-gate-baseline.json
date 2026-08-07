@@ -60,8 +60,6 @@
       "app/Laplace.Chess/Service/ChessSyzygy.cs::HAS_DTZ": 1,
       "app/Laplace.Chess/Service/ChessSyzygy.cs::HAS_WDL": 1,
       "app/Laplace.Chess/Service/ChessVocabulary.cs::EXPLAINS": 1,
-      "app/Laplace.Chess/Service/ChessVocabulary.cs::GAME_AT": 1,
-      "app/Laplace.Chess/Service/ChessVocabulary.cs::GAME_AT_PLY": 1,
       "app/Laplace.Chess/Service/ChessVocabulary.cs::GAME_HAS_ECO": 1,
       "app/Laplace.Chess/Service/ChessVocabulary.cs::GAME_HAS_MOTIF": 1,
       "app/Laplace.Chess/Service/ChessVocabulary.cs::GAME_HAS_OPENING": 1,

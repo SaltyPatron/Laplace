@@ -2,7 +2,7 @@
 --
 -- entity_type_counts_approx / partition_pressure were retired here when they had
 -- zero callers (g4_dead_canonical). They are live again on PR #919 (GH #813/#764)
--- and called from substrate_pulse — do NOT re-drop them.
+-- and called from NpgsqlSubstrateReads — do NOT re-drop them.
 --
 -- WHY A DROP MODULE AND NOT JUST DELETING THE .sql.in FILES. Removing a file from the
 -- manifests stops FUTURE installs from creating the function. It does nothing to a database

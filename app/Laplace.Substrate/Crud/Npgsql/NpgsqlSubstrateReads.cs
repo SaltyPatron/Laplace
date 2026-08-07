@@ -119,6 +119,49 @@ public static class NpgsqlSubstrateReads
                 r.IsDBNull(2) ? (decimal?)null : r.GetDecimal(2)),
             ct: ct, label: "partition_pressure", onError: onError);
 
+    /// <summary><c>laplace.atom_census()</c> — tier-0 window invariant (GH #813).</summary>
+    public static Task<(long Tier0, long Window, long Over, long Unresolvable)?> AtomCensusAsync(
+        NpgsqlDataSource dataSource, CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadFirstOrDefaultAsync(dataSource, """
+            SELECT tier0_count, atom_window, over_window, unresolvable_ids
+            FROM laplace.atom_census()
+            """,
+            static r => (
+                r.GetInt64(0), r.GetInt64(1), r.GetInt64(2), r.GetInt64(3)),
+            ct: ct, label: "atom_census", onError: onError);
+
+    /// <summary><c>laplace.source_tier_census(source)</c> — entities by tier for a lane (GH #813).</summary>
+    public static Task<IReadOnlyList<(short Tier, long Entities)>> SourceTierCensusAsync(
+        NpgsqlDataSource dataSource, byte[] sourceId, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT tier, entities
+            FROM laplace.source_tier_census(@source)
+            ORDER BY tier
+            """,
+            static r => (r.GetInt16(0), r.GetInt64(1)),
+            p => p.AddWithValue("source", sourceId),
+            ct: ct, label: "source_tier_census", onError: onError);
+
+    /// <summary><c>laplace.surface_sample(source, tier, limit)</c> — ranked surfaces (GH #813).</summary>
+    public static Task<IReadOnlyList<(string Surface, string TypeName, long Observations)>> SurfaceSampleAsync(
+        NpgsqlDataSource dataSource, byte[] sourceId, short tier, int limit, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT surface, type_name, observations
+            FROM laplace.surface_sample(@source, @tier, @limit)
+            """,
+            static r => (
+                r.IsDBNull(0) ? "" : r.GetString(0),
+                r.IsDBNull(1) ? "" : r.GetString(1),
+                r.IsDBNull(2) ? 0L : r.GetInt64(2)),
+            p =>
+            {
+                p.AddWithValue("source", sourceId);
+                p.AddWithValue("tier", tier);
+                p.AddWithValue("limit", limit);
+            }, ct: ct, label: "surface_sample", onError: onError);
+
     public readonly record struct BandLeaderRow(
         int Band, string SubjectIdHex, string Subject, string Relation,
         string ObjectIdHex, string Object, decimal EffMu, long Witnesses);
