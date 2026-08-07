@@ -2,17 +2,19 @@
 -- enough to poll every few seconds (estimate counts + a PK scan of the tiny
 -- flush journal + one pg_stat_activity pass). Consolidated from the API's
 -- inline C# SQL — the HTTP /v1/pulse and any MCP caller read THIS.
-CREATE OR REPLACE FUNCTION substrate_pulse()
+DROP FUNCTION IF EXISTS laplace.substrate_pulse();
+
+CREATE OR REPLACE FUNCTION ops.substrate_pulse()
     RETURNS TABLE(entities bigint, attestations bigint, consensus bigint,
                   physicalities bigint, last_flush_at timestamptz,
                   flushes_last_min bigint, folding boolean)
-    LANGUAGE sql STABLE 
+    LANGUAGE sql STABLE
     AS $$
     SELECT
-      (SELECT value FROM laplace.substrate_counts() WHERE metric = 'laplace.entities(ESTIMATE)'),
-      (SELECT value FROM laplace.substrate_counts() WHERE metric = 'laplace.attestations(ESTIMATE)'),
-      (SELECT value FROM laplace.substrate_counts() WHERE metric = 'laplace.consensus(ESTIMATE)'),
-      (SELECT value FROM laplace.substrate_counts() WHERE metric = 'laplace.physicalities(ESTIMATE)'),
+      (SELECT value FROM ops.substrate_counts() WHERE metric = 'entities(ESTIMATE)'),
+      (SELECT value FROM ops.substrate_counts() WHERE metric = 'attestations(ESTIMATE)'),
+      (SELECT value FROM ops.substrate_counts() WHERE metric = 'consensus(ESTIMATE)'),
+      (SELECT value FROM ops.substrate_counts() WHERE metric = 'physicalities(ESTIMATE)'),
       (SELECT max(applied_at) FROM laplace.ingest_flush_journal),
       (SELECT count(*) FROM laplace.ingest_flush_journal
         WHERE applied_at > now() - interval '60 seconds'),

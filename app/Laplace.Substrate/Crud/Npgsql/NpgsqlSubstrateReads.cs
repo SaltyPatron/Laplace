@@ -70,7 +70,7 @@ public static class NpgsqlSubstrateReads
         return rows.Count == 0 ? (0, 0, 0, 0, 0) : rows[0];
     }
 
-    /// <summary><c>laplace.substrate_pulse()</c> — the live scoreboard, one row.</summary>
+    /// <summary><c>ops.substrate_pulse()</c> — the live scoreboard, one row.</summary>
     public static async Task<(long Entities, long Attestations, long Consensus, long Physicalities,
         long? LastFlushUnix, long FlushesLastMin, bool Folding)?> SubstratePulseAsync(
         NpgsqlDataSource dataSource, CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null)
@@ -78,7 +78,7 @@ public static class NpgsqlSubstrateReads
         var rows = await NpgsqlRead.ReadRowsAsync(dataSource, """
             SELECT entities, attestations, consensus, physicalities,
                    extract(epoch FROM last_flush_at)::bigint, flushes_last_min, folding
-            FROM laplace.substrate_pulse()
+            FROM ops.substrate_pulse()
             """,
             static r => (
                 r.IsDBNull(0) ? 0L : r.GetInt64(0),
@@ -649,12 +649,12 @@ public static class NpgsqlSubstrateReads
 
     public readonly record struct MetricCountRow(string Metric, long Value);
 
-    /// <summary><c>laplace.substrate_counts()</c> — inventory metrics (planner-labeled).</summary>
+    /// <summary><c>ops.substrate_counts()</c> — inventory metrics (planner-labeled).</summary>
     public static Task<IReadOnlyList<MetricCountRow>> SubstrateCountsAsync(
         NpgsqlConnection conn, CancellationToken ct,
         int timeoutSeconds = 0, NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(conn,
-            "SELECT metric, value FROM laplace.substrate_counts()",
+            "SELECT metric, value FROM ops.substrate_counts()",
             static r => new MetricCountRow(r.GetString(0), r.GetInt64(1)),
             timeoutSeconds: timeoutSeconds, ct: ct, label: "substrate_counts", onError: onError);
 
@@ -663,7 +663,7 @@ public static class NpgsqlSubstrateReads
         NpgsqlDataSource dataSource, CancellationToken ct,
         int timeoutSeconds = 0, NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource,
-            "SELECT metric, value FROM laplace.substrate_counts()",
+            "SELECT metric, value FROM ops.substrate_counts()",
             static r => new MetricCountRow(r.GetString(0), r.GetInt64(1)),
             timeoutSeconds: timeoutSeconds, ct: ct, label: "substrate_counts", onError: onError);
 
@@ -1522,7 +1522,7 @@ public static class NpgsqlSubstrateReads
             }, ct: ct, label: "evidence_for_target", onError: onError);
 
     /// <summary>
-    /// Readiness probe via <c>laplace.substrate_counts()</c> — no raw table EXISTS.
+    /// Readiness probe via <c>ops.substrate_counts()</c> — no raw table EXISTS.
     /// Estimates can lag; a freshly empty DB still reports zero.
     /// </summary>
     public static async Task<(bool EntitiesExist, bool ConsensusExist)> EntitiesAndConsensusExistAsync(
@@ -1533,9 +1533,9 @@ public static class NpgsqlSubstrateReads
         bool entities = false, consensus = false;
         foreach (var r in rows)
         {
-            if (r.Metric.Equals("laplace.entities(ESTIMATE)", StringComparison.Ordinal))
+            if (r.Metric.Equals("entities(ESTIMATE)", StringComparison.Ordinal))
                 entities = r.Value > 0;
-            else if (r.Metric.Equals("laplace.consensus(ESTIMATE)", StringComparison.Ordinal))
+            else if (r.Metric.Equals("consensus(ESTIMATE)", StringComparison.Ordinal))
                 consensus = r.Value > 0;
         }
         return (entities, consensus);

@@ -43,7 +43,7 @@ internal static class CoreEndpoints
                 ChatCompletions: new CapabilityStatus("live", Backend: "converse.recall_session", Billing: "preflight_quote_required"),
                 Completions: new CapabilityStatus("live", Backend: "consensus.completions", Billing: "preflight_quote_required"),
                 Embeddings: new CapabilityStatus("live", Backend: "laplace.entity_physicalities (form) + laplace.consensus_out_readable (meaning)", Billing: "embeddings"),
-                AuditReports: new CapabilityStatus("live", Backend: "laplace.substrate_counts + consensus.stats + consensus.top_relations", Billing: "audit.deep_report"),
+                AuditReports: new CapabilityStatus("live", Backend: "ops.substrate_counts + consensus.stats + consensus.top_relations", Billing: "audit.deep_report"),
                 Visualizations: new CapabilityStatus("live", Backend: "consensus.top_relations + laplace.entity_physicalities", Billing: "visualization.deep_export"),
                 ExplainabilityReports: new CapabilityStatus("live", Backend: "consensus.walk_branches + laplace.attestations_out", Billing: "explain.trace"),
                 Billing: new CapabilityStatus("live", Provider: "stripe_or_manual"),

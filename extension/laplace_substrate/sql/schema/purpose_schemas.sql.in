@@ -35,9 +35,10 @@
 -- unreviewable and unbisectable.
 --
 -- MIGRATION STATUS (2026-08-07): purpose families migrated (converse/lexical/
--- taxonomy/realize/consensus/generation/structural/chess). Identity/μ/relation/
--- readback/ops/inspect/highway-index helpers stay in laplace. api() lists all
--- purpose schemas. Highway mask bits stay laplace (index expression deps).
+-- taxonomy/realize/consensus/generation/structural/chess/ops census). Identity/μ/
+-- relation/readback/inspect/highway-index and remaining ops helpers still move.
+-- Hot tables stay in the extension schema until a table cut. api() lists all
+-- purpose schemas. Highway mask bits stay in the extension schema (index deps).
 --
 -- Objects a script creates inside an extension become extension members
 -- automatically, so these schemas are dropped with the extension and need no
@@ -52,6 +53,7 @@ CREATE SCHEMA IF NOT EXISTS generation;
 CREATE SCHEMA IF NOT EXISTS structural;
 CREATE SCHEMA IF NOT EXISTS chess;
 CREATE SCHEMA IF NOT EXISTS realize;
+CREATE SCHEMA IF NOT EXISTS ops;
 
 COMMENT ON SCHEMA consensus  IS 'Laplace: the fold and its edge reads (spec 37 WEIGHT, SCAN).';
 COMMENT ON SCHEMA converse   IS 'Laplace: the speaking loop (spec 37 SEQUENCE).';
@@ -61,6 +63,7 @@ COMMENT ON SCHEMA generation IS 'Laplace: synthesis and the forward pass (spec 3
 COMMENT ON SCHEMA structural IS 'Laplace: geometry, coordinates, trajectories.';
 COMMENT ON SCHEMA chess      IS 'Laplace: the chess modality.';
 COMMENT ON SCHEMA realize    IS 'Laplace: rendering and readback (spec 37 REALIZE).';
+COMMENT ON SCHEMA ops        IS 'Laplace: diagnostics, census, health (spec 37 WITNESS).';
 
 -- Same grants the extension schema carries. A reader that can call laplace.* can
 -- call these; the split is about structure and planning, never about privilege.
@@ -69,7 +72,7 @@ DECLARE
     s text;
 BEGIN
     FOREACH s IN ARRAY ARRAY['consensus','converse','lexical','taxonomy',
-                             'generation','structural','chess','realize']
+                             'generation','structural','chess','realize','ops']
     LOOP
         EXECUTE format('GRANT USAGE ON SCHEMA %I TO PUBLIC', s);
     END LOOP;

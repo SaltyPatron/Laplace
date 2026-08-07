@@ -155,7 +155,7 @@ internal sealed class SubstrateTools
                          ("limit", "integer", "max facts, default 24", false)),
             (s, a) => s.Facts(a)),
         new("health", "Substrate health and row-count inventory.",
-            "Substrate health and inventory: laplace.substrate_health() plus laplace.substrate_counts(). Metric values are NULLABLE: a metric the health pass did not measure reports null, which is a different fact from zero. identity_violations is null whenever deep_checked is false — read them together or a skipped deep pass looks like a clean one.",
+            "Substrate health and inventory: laplace.substrate_health() plus ops.substrate_counts(). Metric values are NULLABLE: a metric the health pass did not measure reports null, which is a different fact from zero. identity_violations is null whenever deep_checked is false — read them together or a skipped deep pass looks like a clean one.",
             () => Schema(),
             (s, _) => s.Health()),
         new("mcp_lane", "Which MCP lane is this process in (operator vs product).",
