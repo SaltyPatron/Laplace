@@ -28,7 +28,9 @@ AS $$
           AND laplace.relation_canonical(a.subject_id) IS NULL
         GROUP BY a.subject_id
         ORDER BY sum(a.observation_count) DESC
-        LIMIT greatest(GREATEST(p_limit, 1) * 40, 400)
+        -- Oversample hard: high-obs subjects are often synsets (tier 3) or
+        -- first-observed by another lane; 40× emptied WordNet tier-2 at limit 5.
+        LIMIT greatest(GREATEST(p_limit, 1) * 200, 4000)
     ),
     kept AS (
         SELECT t.subject_id AS id,
