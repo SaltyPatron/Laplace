@@ -217,7 +217,7 @@ BEGIN
     -- one-witness exact ties). Contextual salience is Phase 3 (R3).
     -- senses() per DISTINCT token rides the same documented tolerance as
     -- the orientation above, until the C port (#757). The payoff is the
-    -- LM-Head slot: realize(concept, p_lang) finally gets to choose the
+    -- LM-Head slot: realize.realize(concept, p_lang) finally gets to choose the
     -- language member instead of parroting the witness's surface — p_lang
     -- bites.
     concept_map AS MATERIALIZED (

@@ -3,11 +3,10 @@
 -- every reply. The clause made SQL inlining impossible, so each row paid a full
 -- function execution for what is a COALESCE over four cheap resolvers.
 --
--- Every reference is `@extschema@.`-qualified instead: same resolution, decided at
--- parse time, no per-row tax. (The durable fix for the qualification noise itself is
--- purpose schemas -- schema/purpose_schemas.sql.in, GH #862 -- where a family's own
--- members need no prefix at all and only cross-family calls carry one.)
-CREATE OR REPLACE FUNCTION realize(p_id bytea, p_lang bytea DEFAULT NULL)
+-- GH #862: realize.realize, with its five resolvers as same-schema siblings.
+DROP FUNCTION IF EXISTS laplace.realize(bytea, bytea);
+
+CREATE OR REPLACE FUNCTION realize.realize(p_id bytea, p_lang bytea DEFAULT NULL)
     RETURNS text
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
     -- resolve_name() is the single, referentially-correct name primitive: it
@@ -18,9 +17,9 @@ CREATE OR REPLACE FUNCTION realize(p_id bytea, p_lang bytea DEFAULT NULL)
     -- rendered self or a translation guess. The remaining arms stay as realize's
     -- own display fallbacks (raw render, translation, canonical id, gloss).
     SELECT COALESCE(
-        @extschema@.resolve_name(p_id, p_lang),
-        NULLIF(@extschema@.render_text(p_id, 24), ''),
-        @extschema@._realize_translation(p_id, p_lang),
-        @extschema@._realize_canonical(p_id),
-        @extschema@._realize_defines(p_id))
+        realize.resolve_name(p_id, p_lang),
+        NULLIF(laplace.render_text(p_id, 24), ''),
+        realize._translation(p_id, p_lang),
+        realize._canonical(p_id),
+        realize._defines(p_id))
 $$;

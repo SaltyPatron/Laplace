@@ -1289,7 +1289,7 @@ public static class NpgsqlSubstrateReads
         NpgsqlRead.ReadRowsAsync(conn, """
             SELECT encode(s.sense_id, 'hex'), encode(s.synset_id, 'hex'),
                    COALESCE(
-                       NULLIF(laplace._realize_synset_lemma(s.synset_id, laplace.word_language(@id)), ''),
+                       NULLIF(realize._synset_lemma(s.synset_id, laplace.word_language(@id)), ''),
                        NULLIF(laplace.render_text_fast(s.synset_id, 8), ''),
                        left(encode(s.synset_id, 'hex'), 16)),
                    s.eff_mu, s.witnesses
@@ -1396,7 +1396,7 @@ public static class NpgsqlSubstrateReads
             SELECT encode(c.subject_id, 'hex'),
                    laplace.type_label(c.type_id),
                    COALESCE(
-                       NULLIF(laplace._realize_synset_lemma(c.subject_id, laplace.word_language(@id)), ''),
+                       NULLIF(realize._synset_lemma(c.subject_id, laplace.word_language(@id)), ''),
                        NULLIF(laplace.render_text_fast(c.subject_id, 8), ''),
                        left(encode(c.subject_id, 'hex'), 16)),
                    laplace.eff_mu_display(c.rating, c.rd), c.witness_count

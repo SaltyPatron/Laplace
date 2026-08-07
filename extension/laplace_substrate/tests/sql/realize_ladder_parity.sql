@@ -47,7 +47,7 @@ SELECT count(*) = 8 AS probe_is_fixed_size FROM probe;
 WITH ids AS (SELECT array_agg(p.id ORDER BY p.ord) AS a FROM probe p),
      lbl AS (SELECT realize_batch((SELECT a FROM ids), NULL) AS l)
 SELECT count(*) = 8                                              AS compared_all,
-       bool_and(lbl.l[p.ord] IS NOT DISTINCT FROM realize(p.id, NULL))
+       bool_and(lbl.l[p.ord] IS NOT DISTINCT FROM realize.realize(p.id, NULL))
                                                                  AS batch_matches_scalar
 FROM probe p CROSS JOIN lbl;
 
@@ -64,8 +64,8 @@ WITH ids AS (SELECT array_agg(x.id ORDER BY x.ord) AS a
      lbl AS (SELECT realize_batch((SELECT a FROM ids), NULL) AS l)
 SELECT array_length(lbl.l, 1) = 4                     AS length_matches_input,
        lbl.l[1] IS NOT DISTINCT FROM lbl.l[3]         AS duplicate_id_not_collapsed,
-       lbl.l[1] IS NOT DISTINCT FROM realize(word_id('a'), NULL)   AS pos1_aligned,
-       lbl.l[4] IS NOT DISTINCT FROM realize(word_id('nine'), NULL) AS pos4_aligned
+       lbl.l[1] IS NOT DISTINCT FROM realize.realize(word_id('a'), NULL)   AS pos1_aligned,
+       lbl.l[4] IS NOT DISTINCT FROM realize.realize(word_id('nine'), NULL) AS pos4_aligned
 FROM lbl;
 
 -- 3. Abstention is preserved through the batch: unwitnessed content is NULL in
@@ -74,7 +74,7 @@ FROM lbl;
 -- a NULL element yields NULL, which would make `=` a silent pass.)
 SELECT (realize_batch(ARRAY[word_id('test/realize/never-witnessed-xyzzy')], NULL))[1] IS NULL
                                                                  AS batch_abstains,
-       realize(word_id('test/realize/never-witnessed-xyzzy'), NULL) IS NULL
+       realize.realize(word_id('test/realize/never-witnessed-xyzzy'), NULL) IS NULL
                                                                  AS scalar_abstains;
 
 -- 4. Degenerate inputs do not throw — the serving surface calls this with

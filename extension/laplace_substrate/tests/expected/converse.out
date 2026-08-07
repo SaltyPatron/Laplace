@@ -142,7 +142,7 @@ SELECT word_id('dog') = ANY(lexical.lexical_peers(word_id('dog'))) AS peer_inclu
  t
 (1 row)
 
-SELECT count(*) AS dog_senses FROM senses(word_id('dog'));
+SELECT count(*) AS dog_senses FROM lexical.senses(word_id('dog'));
  dog_senses 
 ------------
           2
@@ -232,27 +232,27 @@ LIMIT 1;
        2 | t
 (1 row)
 
-SELECT (SELECT sn.synset_id FROM senses(word_id('dog')) sn LIMIT 1)
+SELECT (SELECT sn.synset_id FROM lexical.senses(word_id('dog')) sn LIMIT 1)
        = laplace_hash128_blake3('test/converse/synset_b') AS plain_top_is_b;
  plain_top_is_b 
 ----------------
  t
 (1 row)
 
-SELECT (SELECT sn.synset_id FROM senses(word_id('dog'), ARRAY[word_id('h')]) sn LIMIT 1)
+SELECT (SELECT sn.synset_id FROM lexical.senses(word_id('dog'), ARRAY[word_id('h')]) sn LIMIT 1)
        = laplace_hash128_blake3('test/converse/synset1') AS context_flips_to_1;
  context_flips_to_1 
 --------------------
  t
 (1 row)
 
-SELECT realize(word_id('p'), NULL) AS leaf_realizes;
+SELECT realize.realize(word_id('p'), NULL) AS leaf_realizes;
  leaf_realizes 
 ---------------
  p
 (1 row)
 
-SELECT realize(laplace_hash128_blake3('test/converse/synset1'),
+SELECT realize.realize(laplace_hash128_blake3('test/converse/synset1'),
                laplace_hash128_blake3('test/converse/lang_en')) AS synset_realizes_member;
  synset_realizes_member 
 ------------------------

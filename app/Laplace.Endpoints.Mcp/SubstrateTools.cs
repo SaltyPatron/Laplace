@@ -301,7 +301,7 @@ internal sealed class SubstrateTools
     private (string, bool) PromptLanguage(JsonObject? args)
     {
         using var cmd = _dbReadOnly.CreateCommand(
-            "SELECT laplace.realize(lang_id) AS language, mass FROM laplace.prompt_language($1)");
+            "SELECT realize.realize(lang_id) AS language, mass FROM laplace.prompt_language($1)");
         cmd.Parameters.Add(new() { Value = Req(args, "prompt") });
         using var rd = cmd.ExecuteReader();
         var rows = new List<JsonObject>();

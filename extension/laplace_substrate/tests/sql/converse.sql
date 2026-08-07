@@ -142,8 +142,8 @@ SELECT (SELECT sn.synset_id FROM lexical.senses(word_id('dog')) sn LIMIT 1)
 SELECT (SELECT sn.synset_id FROM lexical.senses(word_id('dog'), ARRAY[word_id('h')]) sn LIMIT 1)
        = laplace_hash128_blake3('test/converse/synset1') AS context_flips_to_1;
 
-SELECT realize(word_id('p'), NULL) AS leaf_realizes;
-SELECT realize(laplace_hash128_blake3('test/converse/synset1'),
+SELECT realize.realize(word_id('p'), NULL) AS leaf_realizes;
+SELECT realize.realize(laplace_hash128_blake3('test/converse/synset1'),
                laplace_hash128_blake3('test/converse/lang_en')) AS synset_realizes_member;
 SELECT type_label(relation_type_id('IS_A')) AS isa_label;
 SELECT realize_path(ARRAY[laplace_hash128_blake3('test/converse/synset1'),

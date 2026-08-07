@@ -49,7 +49,7 @@ BEGIN
         RETURN;
     END IF;
 
-    v_lbl := COALESCE(realize(p_syn, p_lang), label(p_syn));
+    v_lbl := COALESCE(realize.realize(p_syn, p_lang), label(p_syn));
 
     -- definition: highest eff_mu edge in the definitional band.
     RETURN QUERY
@@ -109,7 +109,7 @@ BEGIN
                initcap(v_lbl)
                  || string_agg(CASE WHEN s.i = 1 THEN ' is a kind of '
                                     ELSE ', which is a kind of ' END
-                               || COALESCE(realize(s.entity_id, p_lang), label(s.entity_id)),
+                               || COALESCE(realize.realize(s.entity_id, p_lang), label(s.entity_id)),
                                '' ORDER BY s.i)
                  || '.',
                min(b.eff_mu),
@@ -130,7 +130,7 @@ BEGIN
            sum(x.wc)::bigint,
            NULL::bytea[], NULL::bytea[]
     FROM (
-        SELECT realize(c.object_id, p_lang) AS lbl,
+        SELECT realize.realize(c.object_id, p_lang) AS lbl,
                eff_mu(c.rating, c.rd) AS mu,
                eff_mu_display(c.rating, c.rd) AS mu_disp,
                c.witness_count AS wc
@@ -163,7 +163,7 @@ BEGIN
            sum(x.wc)::bigint,
            NULL::bytea[], NULL::bytea[]
     FROM (
-        SELECT realize(c.object_id, p_lang) AS lbl,
+        SELECT realize.realize(c.object_id, p_lang) AS lbl,
                eff_mu(c.rating, c.rd) AS mu,
                eff_mu_display(c.rating, c.rd) AS mu_disp,
                c.witness_count AS wc
