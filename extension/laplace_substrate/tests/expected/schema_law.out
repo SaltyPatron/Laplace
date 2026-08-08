@@ -22,6 +22,7 @@ WHERE d.classid = 'pg_catalog.pg_namespace'::regclass
  t
 (1 row)
 
+
 SELECT count(*) = 0 AS no_legacy_type_column
 FROM information_schema.columns
 WHERE table_schema = 'laplace'
