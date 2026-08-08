@@ -9,6 +9,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 APP_DIR="${LAPLACE_APP_DIR:-/opt/laplace/app}"
+source "$REPO_ROOT/deploy/linux/app-dir-contract.sh"
 STAGE="$(mktemp -d)"
 FORCE_NPM=0
 SERIAL=0
@@ -25,6 +26,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 trap 'rm -rf "$STAGE"' EXIT
+
+laplace_require_app_dir_contract "$APP_DIR"
 
 echo "==> [1/4] build front-end (web/ -> dist)"
 pushd "$REPO_ROOT/web" >/dev/null
@@ -98,7 +101,7 @@ else
   fi
 fi
 
-echo "==> [3/4] overlay SPA + UCI + MCP into staging"
+echo "==> [3/4] overlay SPA + UCI; prepare isolated MCP runtime"
 rm -rf "$STAGE/wwwroot"
 mkdir -p "$STAGE/wwwroot"
 cp -r "$REPO_ROOT/web/dist/." "$STAGE/wwwroot/"
@@ -113,29 +116,29 @@ else
   ls -la "$UCI_STAGE" || true
   exit 1
 fi
+MCP_RUNTIME_DIR="mcp-runtime"
+ln -s "../logs" "$MCP_STAGE/logs"
 if [[ -f "$MCP_STAGE/Laplace.Endpoints.Mcp" ]]; then
-  cp -f "$MCP_STAGE/Laplace.Endpoints.Mcp" "$STAGE/laplace-mcp"
-  chmod 0755 "$STAGE/laplace-mcp"
+  chmod 0755 "$MCP_STAGE/Laplace.Endpoints.Mcp"
+  ln -s "$MCP_RUNTIME_DIR/Laplace.Endpoints.Mcp" "$STAGE/laplace-mcp"
 elif [[ -f "$MCP_STAGE/Laplace.Endpoints.Mcp.exe" ]]; then
-  cp -f "$MCP_STAGE/Laplace.Endpoints.Mcp.exe" "$STAGE/laplace-mcp"
-  chmod 0755 "$STAGE/laplace-mcp"
+  chmod 0755 "$MCP_STAGE/Laplace.Endpoints.Mcp.exe"
+  ln -s "$MCP_RUNTIME_DIR/Laplace.Endpoints.Mcp.exe" "$STAGE/laplace-mcp"
 else
   echo "::error::Laplace.Endpoints.Mcp apphost missing from MCP publish output"
   ls -la "$MCP_STAGE" || true
   exit 1
 fi
-# The renamed apphost still resolves its embedded entry assembly by its original
-# name, so the entry trio rides along; dependency dlls are already a subset of
-# the API publish closure and land via $STAGE.
-cp -f "$MCP_STAGE/Laplace.Endpoints.Mcp.dll" \
-      "$MCP_STAGE/Laplace.Endpoints.Mcp.deps.json" \
-      "$MCP_STAGE/Laplace.Endpoints.Mcp.runtimeconfig.json" \
-      "$STAGE/"
 
-echo "==> [4/4] sync into $APP_DIR (preserve env + logs)"
+echo "==> [4/4] sync isolated MCP runtime + app into $APP_DIR"
+mkdir -p "$APP_DIR/$MCP_RUNTIME_DIR"
+rsync -a --delete "$MCP_STAGE/" "$APP_DIR/$MCP_RUNTIME_DIR/"
 rsync -a --delete \
   --exclude 'laplace-api.env' --exclude 'logs/' --exclude 'chess-lab-work/' \
+  --exclude "$MCP_RUNTIME_DIR/" --exclude 'mcp/' \
   "$STAGE/" "$APP_DIR/"
 test -x "$APP_DIR/laplace-uci" || { echo "::error::laplace-uci missing from $APP_DIR after sync"; exit 1; }
 test -x "$APP_DIR/laplace-mcp" || { echo "::error::laplace-mcp missing from $APP_DIR after sync"; exit 1; }
+test -f "$APP_DIR/$MCP_RUNTIME_DIR/Laplace.Endpoints.Mcp.dll" || { echo "::error::MCP managed entry assembly missing from $APP_DIR/$MCP_RUNTIME_DIR after sync"; exit 1; }
+timeout 10s "$APP_DIR/laplace-mcp" </dev/null || { echo "::error::deployed laplace-mcp failed its EOF startup smoke test"; exit 1; }
 echo "✓ published API + SPA + laplace-uci + laplace-mcp to $APP_DIR"

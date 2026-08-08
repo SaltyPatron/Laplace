@@ -853,6 +853,9 @@ fp_publish() {
 }
 
 phase_publish() {
+  local fp app_dir="${LAPLACE_APP_DIR:-/opt/laplace/app}"
+  source "$ROOT/deploy/linux/app-dir-contract.sh"
+  laplace_require_app_dir_contract "$app_dir"
   echo "===== PHASE — PUBLISH (full runtime contract) ====="
   # Publish owns the whole target: chess binaries, secrets, API+SPA+uci.
   phase_chess_lab
@@ -864,7 +867,6 @@ phase_publish() {
   # and the restart+readiness gate lives in the workflow, which records it via
   # `pipeline.sh publish-stamp` only after /health/ready passes. A deploy that
   # never went ready therefore re-deploys on the next run.
-  local fp app_dir="${LAPLACE_APP_DIR:-/opt/laplace/app}"
   fp=$(fp_publish)
   if fp_check publish "$fp" && [[ -x "$app_dir/laplace-uci" && -x "$app_dir/laplace-mcp" && -d "$app_dir/wwwroot" ]]; then
     echo "publish domain unchanged (app/ web/ deploy/) and $app_dir intact — skipping deploy"

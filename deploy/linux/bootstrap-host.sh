@@ -14,6 +14,8 @@ fi
 
 echo "==> app dir: $APP_DIR (owner $RUN_USER)"
 install -d -m 2775 -o "$RUN_USER" -g "$RUN_GROUP" "$APP_DIR" "$APP_DIR/logs"
+chown "$RUN_USER:$RUN_GROUP" "$APP_DIR" "$APP_DIR/logs"
+chmod 2775 "$APP_DIR" "$APP_DIR/logs"
 
 echo "==> secrets drop: /opt/laplace/secrets"
 # Seeded by setup-host from ~/.config/shell/secrets.env; systemd loads
