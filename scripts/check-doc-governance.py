@@ -52,6 +52,7 @@ DESIGN_ROOTS = (
     ROOT / "docs" / "guides",
     ROOT / "docs" / "plan" / "README.md",
     ROOT / "docs" / "plan" / "WORKSTREAMS.md",
+    ROOT / "docs" / "plan" / "REAL_CONVERSATION_AND_MODEL_CONSENSUS_FINISH_LINE.md",
 )
 
 INSTRUCTION_ROOTS = (
