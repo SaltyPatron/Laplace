@@ -231,7 +231,9 @@ jobs:
         run: python3 scripts/docs-inventory.py --check
 
       - name: Documentation authority drift gate
-        run: python3 scripts/check-doc-governance.py
+        run: |
+          python3 scripts/test-doc-governance.py
+          python3 scripts/check-doc-governance.py
 
       - name: Forbid C# attestation policy in decomposers
         run: |

@@ -115,6 +115,19 @@ def report(errors: list[str], path: Path, rule: str, match: re.Match[str]) -> No
     errors.append(f"{path.relative_to(ROOT)}:{line}: {rule}: {match.group(0)!r}")
 
 
+def resolve_repo_link(
+    source: Path, target: str, root: Path = ROOT
+) -> tuple[Path, bool]:
+    """Resolve a relative link and report whether it remains inside root."""
+    resolved_root = root.resolve(strict=False)
+    resolved = (source.parent / target).resolve(strict=False)
+    try:
+        resolved.relative_to(resolved_root)
+    except ValueError:
+        return resolved, False
+    return resolved, True
+
+
 def main() -> int:
     errors: list[str] = []
 
@@ -185,7 +198,10 @@ def main() -> int:
                 target = target.split("#", 1)[0]
                 if not target:
                     continue
-                resolved = (path.parent / target).resolve()
+                resolved, inside_repo = resolve_repo_link(path, target)
+                if not inside_repo:
+                    report(errors, path, "relative link escapes repository", match)
+                    continue
                 if not resolved.exists():
                     report(errors, path, "broken relative link", match)
 
