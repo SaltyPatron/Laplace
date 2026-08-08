@@ -91,3 +91,4 @@ SELECT to_regclass('laplace.v_word_points') IS NOT NULL AS has_v_word_points;
 SELECT to_regclass('laplace.v_word_senses') IS NOT NULL AS has_v_word_senses;
 SELECT to_regclass('laplace.v_attestation_readable') IS NOT NULL AS has_v_attestation_readable;
 SELECT to_regprocedure('structural.word_anchor(bytea)') IS NOT NULL AS has_word_anchor;
+-- Stable terminal marker keeps the final pg_regress result separator anchored.
