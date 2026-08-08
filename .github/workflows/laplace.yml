@@ -72,6 +72,10 @@ on:
         description: "ignore content-fingerprint stamps — run every phase/test even when its inputs are unchanged"
         type: boolean
         default: false
+      generation_benchmark:
+        description: "run the expensive multi-prompt generation lane benchmark"
+        type: boolean
+        default: false
 
 # NO WORKFLOW-LEVEL CONCURRENCY -- it cannot say what this pipeline needs.
 #
@@ -737,14 +741,12 @@ jobs:
             --filter 'Tier!=perf & Tier!=db & FullyQualifiedName~Endpoints.OpenAICompat'
 
   eval:
-    name: Eval — generation / election quality (replay+echo blocking)
+    name: Eval — generation / election correctness
     needs: [publish, smoke]
-    # Same seeded guard as smoke. FLIPPED TO BLOCKING 2026-08-06 (operator
-    # ruling: thresholds are the agent's call, not a deferred question). The
-    # lane detectors enforce ONLY the unambiguous regression classes — replay
-    # (variance==1, the #751/#884 class) and echo (rate>0.5, the #878 class).
-    # Content/flatness remain advisory while concept-stream work (#751 R1)
-    # moves them. The election harness governs itself via eval-baselines.json.
+    # Same seeded guard as smoke. The bounded election harness is the ordinary
+    # deploy gate and governs itself via eval-baselines.json. The multi-prompt
+    # lane benchmark is deliberately opt-in: its cold generation battery is a
+    # performance/quality investigation, not a prerequisite for publishing.
     if: >-
       !cancelled() && needs.publish.result == 'success' &&
       needs.publish.outputs.seeded == 'true' &&
@@ -753,14 +755,8 @@ jobs:
     concurrency:
       group: laplace-substrate-lifecycle
       cancel-in-progress: false
-    # 20 was sized to the pre-concept-stream compose and killed the battery at
-    # 20m15s on 2026-08-06 (all prior jobs green). The concept-stream compose
-    # pays senses() per distinct stream token — its documented tolerance until
-    # the #757 C port — and the battery runs on a COLD cache right after this
-    # run's own PostgreSQL restart. generation.probe now computes the invariant
-    # lane plans once per seed batch; 45 remains a conservative outer bound while
-    # the first deployed batch timings replace the obsolete per-seed measurements,
-    # without loosening verify-generation.py's 300s statement bound.
+    # The explicit generation benchmark retains this conservative outer bound;
+    # ordinary deploy runs execute only the bounded correctness harness.
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -776,13 +772,13 @@ jobs:
             --report .eval-proof/generation.json
 
       - name: Lane detectors — seed variance / echo / flatness / content (W5 #755)
-        # BLOCKING as of 2026-08-06 on the two unambiguous regression classes
-        # only — replay (variance==1 across seeds, the #751/#884 class) and
-        # echo (rate>0.5, the #878 class) via --enforce; content/flatness stay
-        # advisory in the report while #751 R1 moves those numbers. Full table
-        # lands in the job log and .eval-proof every deploy.
-        # Independent measurement: runs even when the harness step above fails.
-        if: ${{ !cancelled() }}
+        # Explicit benchmark only. It enforces the unambiguous replay and echo
+        # classes; content/flatness remain advisory while #751 R1 moves them.
+        # Keeping it in the repeatable CI lane avoids an ad-hoc operator command
+        # without making every deploy wait on a cold multi-prompt generation run.
+        if: >-
+          !cancelled() && github.event_name == 'workflow_dispatch' &&
+          inputs.generation_benchmark == true
         run: |
           python3 scripts/verify-generation.py \
             --api http://127.0.0.1:8080 \

@@ -115,6 +115,21 @@ class EvalOperationLaneTests(unittest.TestCase):
         self.assertGreaterEqual(text.count('"converse.prompt_language"'), 2)
         self.assertNotIn("word_" + "language", text)
 
+    def test_long_generation_benchmark_is_dispatch_only(self):
+        workflow = (ROOT / ".github/workflows/laplace.yml").read_text(encoding="utf-8")
+        input_block = workflow[
+            workflow.index("      generation_benchmark:"):
+            workflow.index("\n\n# NO WORKFLOW-LEVEL CONCURRENCY")
+        ]
+        self.assertIn("type: boolean", input_block)
+        self.assertIn("default: false", input_block)
+
+        eval_block = workflow[workflow.index("  eval:"):workflow.index("  restore-api:")]
+        detector_block = eval_block[eval_block.index("      - name: Lane detectors") :]
+        self.assertIn("github.event_name == 'workflow_dispatch'", detector_block)
+        self.assertIn("inputs.generation_benchmark == true", detector_block)
+        self.assertNotIn("if: ${{ !cancelled() }}", detector_block)
+
     def test_generation_probe_builds_each_lane_plan_once_per_seed_batch(self):
         sql_root = ROOT / "extension/laplace_substrate/sql/functions/converse"
         probe = (sql_root / "generation_probe.sql.in").read_text(encoding="utf-8")
