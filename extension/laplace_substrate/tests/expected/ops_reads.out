@@ -132,4 +132,3 @@ EXCEPTION WHEN raise_exception THEN
     ELSE RAISE; END IF;
 END $$;
 ROLLBACK;
-

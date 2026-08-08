@@ -160,5 +160,3 @@ SELECT to_regprocedure('structural.word_anchor(bytea)') IS NOT NULL AS has_word_
 -----------------
  t
 (1 row)
-
-
