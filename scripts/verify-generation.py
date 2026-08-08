@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """W5 generation-quality runner (#755) — measurement half.
 
-Runs the smoke prompts through BOTH generation lanes via the installed
-surface (laplace.generation_probe: converse_walk incumbent, converse_compose
+Runs the smoke prompts through BOTH generation lanes via the deployed
+operation surface (generation.probe: converse.walk incumbent, converse.compose
 challenger) and scores each lane with the R6 detector set the plan names
 (modeled on verify-model-behavioral.py):
 
@@ -23,7 +23,7 @@ of #755 and land with it. A measurement that exists beats a gate that
 doesn't; word salad is at least VISIBLE from tonight.
 
 Usage:
-  verify-generation.py [--db "host=localhost user=postgres dbname=laplace"]
+  verify-generation.py [--api http://127.0.0.1:8080]
       [--prompts scripts/prompts_smoke.txt] [--probes dog,water,king]
       [--seeds 7,991,12345] [--steps 30] [--expected-per-probe 40]
       [--report report.json]
@@ -33,8 +33,9 @@ import argparse
 import json
 import os
 import re
-import subprocess
 import sys
+
+from laplace_api import LaplaceApiError, op_rows
 
 GLUE_WORDS = frozenset("""
 the a an of to in on at by for with and or but nor so yet as if that this these
@@ -51,48 +52,29 @@ seem seems from into onto over under up down out off about after before between
 WORD_RE = re.compile(r"\w+", re.UNICODE)
 
 
-def psql_rows(db, sql):
-    cmd = ["psql", "-X", "-q", "-t", "-A", "-F", "\t"]
-    for part in db.split():
-        k, _, v = part.partition("=")
-        flag = {"host": "-h", "user": "-U", "dbname": "-d", "port": "-p"}.get(k)
-        if flag:
-            cmd += [flag, v]
-    r = subprocess.run(cmd + ["-c", sql], capture_output=True, text=True,
-                       encoding="utf-8", errors="replace")
-    if r.returncode != 0:
-        sys.stderr.write(r.stderr)
-        sys.exit(2)
-    if os.environ.get("LAPLACE_VG_DEBUG"):
-        sys.stderr.write(f"[vg-debug] rc={r.returncode} stdout_len={len(r.stdout)} "
-                         f"stderr={r.stderr.strip()[:200]!r}\n")
-    return [line for line in r.stdout.splitlines() if line.strip()]
-
-
-def q(s: str) -> str:
-    return s.replace("'", "''")
-
-
-def expected_set(db, word, limit):
-    rows = psql_rows(db, f"""
-        SET search_path = laplace, public;
-        SELECT lower(render(c.object_id))
-        FROM v_consensus_unrefuted c
-        WHERE c.subject_id = word_id('{q(word)}')
-          AND c.object_id IS NOT NULL
-        ORDER BY (c.rating - 2 * c.rd) DESC
-        LIMIT {int(limit)};""")
+def expected_set(api, word, limit):
+    rows = op_rows(
+        api,
+        "consensus.edges",
+        {
+            "p_word": word,
+            "p_direction": "out",
+            "p_limit": int(limit),
+            "p_refuted": False,
+        },
+        max_rows=limit,
+    )
     out = set()
-    for r in rows:
-        out.update(w.casefold() for w in WORD_RE.findall(r))
+    for row in rows:
+        out.update(w.casefold() for w in WORD_RE.findall(str(row.get("neighbour") or "")))
     # Match verify-model-behavioral: the probe word itself and short tokens
     # are not evidence of content transfer.
     return {w for w in out if w != word.casefold() and len(w) > 2} - GLUE_WORDS
 
 
-def probe(db, word, seeds, steps):
-    # Through the installed surface (laplace.generation_probe): one row per
-    # (lane, seed), one psql spawn per SEED. An earlier per-call-isolation
+def probe(api, word, seeds, steps):
+    # Through the deployed operation surface: one row per (lane, seed), one
+    # request per SEED. An earlier per-call-isolation
     # version here defended against a "statement interference" theory that
     # turned out to be an ASCII-tokenizer artifact (see WORD_RE) — the
     # installed op is the product surface and the measurement uses it.
@@ -102,77 +84,97 @@ def probe(db, word, seeds, steps):
     # 2026-08-06 eval failure — the same battery passes in seconds warm). The
     # per-seed split keeps each statement a third of the work; the bound stays
     # honest instead of being tripled away.
-    # JSON aggregation because replies contain newlines.
     out = {}
     for seed in seeds:
-        rows = psql_rows(db, f"""
-            SET search_path = laplace, public;
-            SET statement_timeout = '300s';
-            SELECT json_agg(json_build_object('lane', lane, 'seed', seed,
-                                              'reply', COALESCE(reply, '')))
-            FROM generation_probe('{q(word)}', ARRAY[{int(seed)}]::bigint[], {int(steps)});""")
-        for rec in json.loads("".join(rows) or "[]") or []:
-            out.setdefault(rec["lane"], []).append(rec["reply"])
+        rows = op_rows(
+            api,
+            "generation.probe",
+            {"p_prompt": word, "p_seeds": [int(seed)], "p_steps": int(steps)},
+            max_rows=4,
+            timeout_seconds=300,
+        )
+        for row in rows:
+            out.setdefault(str(row["lane"]), []).append(str(row.get("reply") or ""))
     return out
 
 
-def warmup(db, word, steps):
+def warmup(api, word, steps):
     # First touch after a deploy restart pays the whole cold cache; do it once,
     # unscored, with its own generous bound, so the scored statements measure
     # generation cost rather than buffer-pool priming.
-    psql_rows(db, f"""
-        SET search_path = laplace, public;
-        SET statement_timeout = '600s';
-        SELECT count(*) FROM generation_probe('{q(word)}', ARRAY[7]::bigint[], {int(steps)});""")
+    op_rows(
+        api,
+        "generation.probe",
+        {"p_prompt": word, "p_seeds": [7], "p_steps": int(steps)},
+        max_rows=4,
+        timeout_seconds=600,
+    )
 
 
-def lang_pin(db, word, seeds, steps):
+def lang_pin(api, word, seeds, steps):
     # LM-Head p_lang probe (advisory): compose the topic with a NON-English
-    # realization language pinned and measure the fraction of reply tokens the
-    # substrate itself attributes to that language. The pin language resolves
-    # through the installed surface (word_language of a known Bulgarian
-    # surface) rather than a hardcoded id. Expected ~0.0 until multilingual
+    # realization language pinned and measure the fraction of the reply's
+    # language-evidence mass attributed to that language. Both tallies use the
+    # native converse.prompt_language operation; no per-token SQL ladder exists
+    # in the harness. Expected ~0.0 until multilingual
     # sense/usage data lands (#751 data gap — concept_map falls through to
     # surfaces exactly where hopping is needed); the probe exists so the flip
     # is MEASURED the day the seeds land, not asserted. Never enforced here.
     # Pin surface is a named constant (Copilot #897) — not buried only in SQL.
-    # word_id never raises on a missing seed (content hash); if word_language
-    # returns NULL the rate stays None rather than aborting the harness.
+    # A missing language witness yields no score rather than aborting the harness.
     pin_surface = os.environ.get("LAPLACE_LANG_PIN_SURFACE", "животно")
-    total_hits = total_toks = 0
+    pin_rows = op_rows(
+        api,
+        "converse.prompt_language",
+        {"p_prompt": pin_surface},
+        max_rows=100,
+    )
+    pin = max(pin_rows, key=lambda row: float(row.get("mass") or 0), default=None)
+    pin_id = pin.get("lang_id") if pin else None
+    pinned_mass = total_mass = 0.0
     for seed in seeds:
-        rows = psql_rows(db, f"""
-            SET search_path = laplace, public;
-            SET statement_timeout = '300s';
-            WITH lang AS (
-                SELECT converse.word_language(laplace.word_id('{q(pin_surface)}')) AS lid
-            ),
-                 r AS (SELECT converse.converse_compose('{q(word)}', {int(steps)},
-                                               (SELECT lid FROM lang),
-                                               {int(seed)}) AS reply
-                       WHERE (SELECT lid FROM lang) IS NOT NULL),
-                 toks AS (SELECT w.id FROM r, converse.prompt_words(r.reply) w
-                          WHERE r.reply IS NOT NULL AND w.id IS NOT NULL)
-            SELECT count(*) FILTER (
-                       WHERE converse.word_language(t.id) = (SELECT lid FROM lang)),
-                   count(*)
-            FROM toks t;""")
-        for row in rows:
-            hits, toks = (row.split("\t") + ["0", "0"])[:2]
-            total_hits += int(hits or 0)
-            total_toks += int(toks or 0)
-    rate = round(total_hits / total_toks, 3) if total_toks else None
-    print(f"{word:>24} lang-pin: rate={rate} tokens={total_toks}  [advisory]")
+        if not pin_id:
+            break
+        rows = op_rows(
+            api,
+            "generation.probe",
+            {
+                "p_prompt": word,
+                "p_seeds": [int(seed)],
+                "p_steps": int(steps),
+                "p_lang": pin_id,
+            },
+            max_rows=4,
+            timeout_seconds=300,
+        )
+        compose = next((row for row in rows if row.get("lane") == "compose"), None)
+        reply = str(compose.get("reply") or "") if compose else ""
+        if not reply:
+            continue
+        reply_languages = op_rows(
+            api,
+            "converse.prompt_language",
+            {"p_prompt": reply},
+            max_rows=100,
+        )
+        for language in reply_languages:
+            mass = max(0.0, float(language.get("mass") or 0))
+            total_mass += mass
+            if language.get("lang_id") == pin_id:
+                pinned_mass += mass
+    rate = round(pinned_mass / total_mass, 3) if total_mass else None
+    print(f"{word:>24} lang-pin: rate={rate} mass={total_mass:.1f}  [advisory]")
     # Same top-level shape as score() (Copilot #897): consumers can treat every
     # report[word][*] entry as a metrics dict without special-casing lang_pin.
     return {
-        "empty": total_toks == 0,
+        "empty": total_mass == 0,
         "seed_variance": None,
         "echo_rate": None,
         "flatness": None,
         "content_rate": rate,
         "lang_pin_rate": rate,
-        "lang_pin_tokens": total_toks,
+        "lang_pin_evidence_mass": round(pinned_mass, 3),
+        "lang_pin_total_mass": round(total_mass, 3),
         "pin_surface": pin_surface,
     }
 
@@ -198,7 +200,7 @@ def score(prompt, replies, expected):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--db", default="host=localhost user=postgres dbname=laplace")
+    ap.add_argument("--api", default="http://127.0.0.1:8080")
     ap.add_argument("--prompts", default="scripts/prompts_smoke.txt")
     ap.add_argument("--probes", default="dog,water,king")
     ap.add_argument("--seeds", default="7,991,12345")
@@ -224,33 +226,37 @@ def main():
         print(f"note: smoke prompts skipped ({e})", file=sys.stderr)
     seeds = [int(s) for s in args.seeds.split(",")]
 
-    if probes:
-        warmup(args.db, probes[0][0], args.steps)
+    try:
+        if probes:
+            warmup(args.api, probes[0][0], args.steps)
 
-    report = {}
-    for word, is_topic in probes:
-        expected = expected_set(args.db, word, args.expected_per_probe) if is_topic else set()
-        lanes = probe(args.db, word, seeds, args.steps)
-        report[word] = {}
-        if is_topic:
-            report[word]["lang_pin"] = lang_pin(args.db, word, seeds[:2], args.steps)
-        for lane, replies in sorted(lanes.items()):
-            s = score(word, replies, expected)
-            s["expected_n"] = len(expected)
-            report[word][lane] = s
-            flags = []
-            if s["seed_variance"] == 1 and len(seeds) > 1:
-                flags.append("REPLAY")
-            if not s["empty"] and s["echo_rate"] > 0.5:
-                flags.append("ECHO")
-            if s["empty"]:
-                flags.append("EMPTY")
-            label = word if len(word) <= 24 else word[:21] + "..."
-            core = (f" echo={s['echo_rate']} flat={s['flatness']}"
-                    + (f" content={s['content_rate']}" if is_topic else "")
-                    if not s["empty"] else "")
-            print(f"{label:>24} {lane:>8}: variance={s['seed_variance']}/{len(seeds)}"
-                  + core + (f"  [{' '.join(flags)}]" if flags else ""))
+        report = {}
+        for word, is_topic in probes:
+            expected = expected_set(args.api, word, args.expected_per_probe) if is_topic else set()
+            lanes = probe(args.api, word, seeds, args.steps)
+            report[word] = {}
+            if is_topic:
+                report[word]["lang_pin"] = lang_pin(args.api, word, seeds[:2], args.steps)
+            for lane, replies in sorted(lanes.items()):
+                s = score(word, replies, expected)
+                s["expected_n"] = len(expected)
+                report[word][lane] = s
+                flags = []
+                if s["seed_variance"] == 1 and len(seeds) > 1:
+                    flags.append("REPLAY")
+                if not s["empty"] and s["echo_rate"] > 0.5:
+                    flags.append("ECHO")
+                if s["empty"]:
+                    flags.append("EMPTY")
+                label = word if len(word) <= 24 else word[:21] + "..."
+                core = (f" echo={s['echo_rate']} flat={s['flatness']}"
+                        + (f" content={s['content_rate']}" if is_topic else "")
+                        if not s["empty"] else "")
+                print(f"{label:>24} {lane:>8}: variance={s['seed_variance']}/{len(seeds)}"
+                      + core + (f"  [{' '.join(flags)}]" if flags else ""))
+    except (LaplaceApiError, KeyError, TypeError, ValueError) as ex:
+        print(f"generation verification failed: {ex}", file=sys.stderr)
+        return 2
 
     if args.report:
         with open(args.report, "w", encoding="utf-8") as f:

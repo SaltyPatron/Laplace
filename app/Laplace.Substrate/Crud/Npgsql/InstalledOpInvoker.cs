@@ -13,6 +13,8 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 public static class InstalledOpInvoker
 {
     public const int DefaultRowCap = 200;
+    public const int DefaultCommandTimeoutSeconds = 15;
+    public const int MaxCommandTimeoutSeconds = 600;
 
     public sealed record OpParam(string Name, string Type, bool Optional);
 
@@ -30,6 +32,7 @@ public static class InstalledOpInvoker
         string name,
         IReadOnlyDictionary<string, JsonNode?>? args,
         int maxRows = DefaultRowCap,
+        int commandTimeoutSeconds = DefaultCommandTimeoutSeconds,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
@@ -79,6 +82,7 @@ public static class InstalledOpInvoker
         // LIMIT rowCap + 1 so truncation is observable.
         var sql = $"SELECT * FROM {QualifiedCatalogName(name)}({string.Join(", ", call)}) LIMIT {rowCap + 1}";
         await using var cmd = readOnlyDb.CreateCommand(sql);
+        cmd.CommandTimeout = Math.Clamp(commandTimeoutSeconds, 1, MaxCommandTimeoutSeconds);
         foreach (var (slot, value) in bound)
             cmd.Parameters.Add(BindArg(slot, value));
 

@@ -166,7 +166,10 @@ jobs:
             scripts/isa-gate-check.py \
             scripts/isa-gate-baseline.json \
             scripts/ensure-foundation.sh \
+            scripts/laplace_api.py \
             scripts/eval-generation.py \
+            scripts/verify-generation.py \
+            scripts/test-eval-op-lane.py \
             scripts/eval-probes.json \
             scripts/eval-baselines.json \
             scripts/shellcheck-gate.sh; do
@@ -184,6 +187,9 @@ jobs:
 
       - name: Validate witness-manifest vs orchestration scripts
         run: python3 scripts/validate-pipeline.py
+
+      - name: Eval operation-lane architecture gate
+        run: python3 scripts/test-eval-op-lane.py
 
       - name: Enforce ISA literalism ratchets
         run: python3 scripts/isa-gate-check.py
@@ -763,7 +769,7 @@ jobs:
         run: |
           mkdir -p .eval-proof
           python3 scripts/eval-generation.py \
-            --db "host=/var/run/postgresql user=laplace_admin dbname=laplace" \
+            --api http://127.0.0.1:8080 \
             --probes scripts/eval-probes.json \
             --baseline scripts/eval-baselines.json \
             --report .eval-proof/generation.json
@@ -778,7 +784,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           python3 scripts/verify-generation.py \
-            --db "host=/var/run/postgresql user=laplace_admin dbname=laplace" \
+            --api http://127.0.0.1:8080 \
             --report .eval-proof/lane-detectors.json \
             --enforce
 

@@ -12,6 +12,7 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
 {
     private readonly NpgsqlDataSource _dataSource;
     private readonly NpgsqlDataSource _dataSourceReadOnly;
+    private readonly NpgsqlDataSource _dataSourceReadOnlyLong;
 
     public SubstrateClient()
     {
@@ -19,9 +20,20 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         // Same posture as MCP op: server-enforced read-only + statement timeout.
         _dataSourceReadOnly = LaplaceDataSource.Create(SubstrateAccess.Serving, dsb =>
         {
-            dsb.ConnectionStringBuilder.CommandTimeout = 20;
+            dsb.ConnectionStringBuilder.CommandTimeout =
+                InstalledOpInvoker.DefaultCommandTimeoutSeconds;
             dsb.ConnectionStringBuilder.Options =
                 "-c default_transaction_read_only=on -c statement_timeout=15000";
+        });
+        // Explicitly requested long-running installed operations (generation
+        // evals on a cold cache) remain read-only and server-bounded. Normal op
+        // traffic stays on the 15-second datasource above.
+        _dataSourceReadOnlyLong = LaplaceDataSource.Create(SubstrateAccess.Serving, dsb =>
+        {
+            dsb.ConnectionStringBuilder.CommandTimeout = InstalledOpInvoker.MaxCommandTimeoutSeconds;
+            dsb.ConnectionStringBuilder.MaxPoolSize = 2;
+            dsb.ConnectionStringBuilder.Options =
+                "-c default_transaction_read_only=on -c statement_timeout=600000";
         });
     }
 
@@ -594,12 +606,19 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         }
     }
 
-    public Task<InstalledOpInvoker.OpResult> InvokeOpAsync(
-        string name, IReadOnlyDictionary<string, JsonNode?>? args, int maxRows, CancellationToken ct)
+    public async Task<InstalledOpInvoker.OpResult> InvokeOpAsync(
+        string name, IReadOnlyDictionary<string, JsonNode?>? args, int maxRows,
+        int timeoutSeconds, CancellationToken ct)
     {
         try
         {
-            return InstalledOpInvoker.InvokeAsync(_dataSourceReadOnly, name, args, maxRows, ct);
+            var boundedTimeout = Math.Clamp(
+                timeoutSeconds, 1, InstalledOpInvoker.MaxCommandTimeoutSeconds);
+            var dataSource = boundedTimeout > InstalledOpInvoker.DefaultCommandTimeoutSeconds
+                ? _dataSourceReadOnlyLong
+                : _dataSourceReadOnly;
+            return await InstalledOpInvoker.InvokeAsync(
+                dataSource, name, args, maxRows, boundedTimeout, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is NpgsqlException or TimeoutException or PostgresException)
         {
@@ -609,6 +628,7 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
 
     public async ValueTask DisposeAsync()
     {
+        await _dataSourceReadOnlyLong.DisposeAsync();
         await _dataSourceReadOnly.DisposeAsync();
         await _dataSource.DisposeAsync();
     }

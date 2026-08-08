@@ -25,7 +25,10 @@ internal static class OpEndpoints
             try
             {
                 var result = await substrate.InvokeOpAsync(
-                    payload.Name.Trim(), args, payload.MaxRows ?? InstalledOpInvoker.DefaultRowCap, ct);
+                    payload.Name.Trim(), args,
+                    payload.MaxRows ?? InstalledOpInvoker.DefaultRowCap,
+                    payload.TimeoutSeconds ?? InstalledOpInvoker.DefaultCommandTimeoutSeconds,
+                    ct);
                 if (result.Error is not null)
                     return EndpointJson.BadRequest("invalid_request_error", result.Error);
 

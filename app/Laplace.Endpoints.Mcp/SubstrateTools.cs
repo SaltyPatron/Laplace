@@ -495,7 +495,7 @@ internal sealed class SubstrateTools
         var supplied = args?["args"] as JsonObject;
         var dict = supplied?.ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
         var result = InstalledOpInvoker.InvokeAsync(
-                _dbReadOnly, name, dict, Int(args, "max_rows", DefaultRowCap), default)
+                _dbReadOnly, name, dict, Int(args, "max_rows", DefaultRowCap), ct: default)
             .GetAwaiter().GetResult();
         if (result.Error is not null)
             return (result.Error, true);

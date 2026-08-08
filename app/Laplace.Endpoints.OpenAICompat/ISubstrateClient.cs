@@ -123,5 +123,6 @@ internal interface ISubstrateClient
 
     /// <summary>Installed-catalog op invoker — MCP <c>op</c> / HTTP <c>POST /v1/op</c> (GH #812).</summary>
     Task<InstalledOpInvoker.OpResult> InvokeOpAsync(
-        string name, IReadOnlyDictionary<string, JsonNode?>? args, int maxRows, CancellationToken ct);
+        string name, IReadOnlyDictionary<string, JsonNode?>? args, int maxRows,
+        int timeoutSeconds, CancellationToken ct);
 }
