@@ -17,7 +17,7 @@ WHERE d.classid = 'pg_catalog.pg_namespace'::regclass
   AND e.extname = 'laplace_substrate'
   AND n.nspname IN ('consensus','converse','lexical','taxonomy','generation',
                     'structural','chess','realize','ops');
- purpose_schemas_extension_owned
+ purpose_schemas_extension_owned 
 ---------------------------------
  t
 (1 row)
@@ -160,3 +160,5 @@ SELECT to_regprocedure('structural.word_anchor(bytea)') IS NOT NULL AS has_word_
 -----------------
  t
 (1 row)
+
+

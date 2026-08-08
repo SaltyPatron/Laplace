@@ -18,7 +18,7 @@
     },
     "audit_reports": {
       "status": "live",
-      "backend": "laplace.substrate_counts + consensus.stats + consensus.top_relations",
+      "backend": "ops.substrate_counts + consensus.stats + consensus.top_relations",
       "billing": "audit.deep_report"
     },
     "visualizations": {

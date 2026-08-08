@@ -4,3 +4,7 @@ scripts/laplace-mcp text eol=lf
 Justfile text eol=lf
 .github/workflows/*.yml text eol=lf
 .github/actions/**/*.yml text eol=lf
+
+# pg_regress captures psql's aligned table output verbatim. Header padding and
+# the final separator newline are test data, not whitespace damage.
+extension/*/tests/expected/*.out whitespace=-blank-at-eol,-blank-at-eof
