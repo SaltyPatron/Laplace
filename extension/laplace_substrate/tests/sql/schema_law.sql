@@ -4,6 +4,19 @@ CREATE EXTENSION laplace_substrate;
 
 SET search_path TO laplace, public;
 
+-- Purpose is a physical ownership boundary, not just a naming convention. The
+-- upgrade must also absorb a namespace created before the split (notably ops).
+SELECT count(*) = 9 AS purpose_schemas_extension_owned
+FROM pg_catalog.pg_depend d
+JOIN pg_catalog.pg_extension e ON e.oid = d.refobjid
+JOIN pg_catalog.pg_namespace n ON n.oid = d.objid
+WHERE d.classid = 'pg_catalog.pg_namespace'::regclass
+  AND d.refclassid = 'pg_catalog.pg_extension'::regclass
+  AND d.deptype = 'e'
+  AND e.extname = 'laplace_substrate'
+  AND n.nspname IN ('consensus','converse','lexical','taxonomy','generation',
+                    'structural','chess','realize','ops');
+
 
 SELECT count(*) = 0 AS no_legacy_type_column
 FROM information_schema.columns
