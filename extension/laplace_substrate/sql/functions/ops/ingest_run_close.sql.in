@@ -7,14 +7,14 @@
 CREATE OR REPLACE FUNCTION ingest_run_close(p_run_id uuid, p_status text DEFAULT 'cancelled')
     RETURNS ingest_run_journal
     LANGUAGE plpgsql VOLATILE
-    SET search_path = @extschema@, public AS $$
+    AS $$
 DECLARE
     r ingest_run_journal;
 BEGIN
     IF p_status NOT IN ('failed', 'cancelled') THEN
         RAISE EXCEPTION 'ingest_run_close: % is not a cut-off terminal status (failed|cancelled)', p_status;
     END IF;
-    UPDATE ingest_run_journal
+    UPDATE laplace.ingest_run_journal
        SET status = p_status, ended_at = now()
      WHERE run_id = p_run_id AND status = 'running'
     RETURNING * INTO r;

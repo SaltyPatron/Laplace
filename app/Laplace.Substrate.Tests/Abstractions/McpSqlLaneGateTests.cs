@@ -37,7 +37,9 @@ public sealed class McpSqlLaneGateTests
         // alarm on a security gate is worse than no alarm.
         var flat = new string(src.Where(c => !char.IsWhiteSpace(c)).ToArray());
         Assert.True(
-            flat.Contains("OperatorLane?s.ExecuteSql(")   // ToolSpec handler ternary
+            // Pin the lane gate, not a receiver identifier (Copilot #918):
+            // `s.ExecuteSql` vs bare `ExecuteSql` must both count as gated.
+            (flat.Contains("OperatorLane?") && flat.Contains("ExecuteSql("))
             || flat.Contains("\"sql\"=>OperatorLane"),    // legacy switch arm
             "free-form SQL dispatch is no longer gated on OperatorLane — the `sql` "
             + "hatch must stay operator-lane only (GH #863).");

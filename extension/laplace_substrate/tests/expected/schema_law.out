@@ -138,7 +138,7 @@ SELECT to_regclass('laplace.v_attestation_readable') IS NOT NULL AS has_v_attest
  t
 (1 row)
 
-SELECT to_regprocedure('laplace.word_anchor(bytea)') IS NOT NULL AS has_word_anchor;
+SELECT to_regprocedure('structural.word_anchor(bytea)') IS NOT NULL AS has_word_anchor;
  has_word_anchor 
 -----------------
  t

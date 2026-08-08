@@ -1,7 +1,6 @@
 -- realize._canonical — GH #862 / #860. No SET (blocks plan caching and inlining;
 -- this runs per row inside realize's COALESCE), real schema names.
 DROP FUNCTION IF EXISTS laplace._realize_canonical(bytea);
-
 CREATE OR REPLACE FUNCTION realize._canonical(p_id bytea)
     RETURNS text
     LANGUAGE sql STABLE PARALLEL SAFE STRICT AS $$

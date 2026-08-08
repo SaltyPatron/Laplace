@@ -1,7 +1,7 @@
 {
   "version": 1,
   "advisory_until": "2026-08-10",
-  "blocking_flip_date": null,
+  "blocking_flip_date": "2026-08-10",
   "latency_ceiling_s": 30.0,
   "notes": "Retires prompts_smoke.txt. election expected_topic_surface is hand-written (W5 D8). held_out misses report before hits.",
   "probes": [

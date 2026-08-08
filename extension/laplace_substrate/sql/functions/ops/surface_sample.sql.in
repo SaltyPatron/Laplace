@@ -1,0 +1,60 @@
+-- Ranked surface sample for a source×tier (GH #813). Census answers "how many";
+-- this answers "what do they look like?" — observation_count from that source's
+-- attestations (fold input), not LIMIT-without-ORDER over entities.
+--
+-- Attestation-first: GROUP BY subject on the source_id index, oversample, then
+-- keep rows whose entity is first-observed by the source at p_tier. Labels via
+-- ONE realize.batch over survivors (not per-row render ahead of LIMIT).
+-- BEGIN ATOMIC: GH #764 beachhead.
+CREATE OR REPLACE FUNCTION surface_sample(
+        p_source bytea,
+        p_tier smallint,
+        p_limit int DEFAULT 20)
+    RETURNS TABLE(
+        entity_id bytea,
+        surface text,
+        type_name text,
+        observations bigint)
+    LANGUAGE sql
+    STABLE
+BEGIN ATOMIC
+    WITH top_subj AS (
+        SELECT a.subject_id,
+               sum(a.observation_count)::bigint AS observations
+        FROM laplace.attestations a
+        WHERE a.source_id = p_source
+          AND laplace.relation_canonical(a.subject_id) IS NULL
+        GROUP BY a.subject_id
+        ORDER BY sum(a.observation_count) DESC
+        LIMIT greatest(GREATEST(p_limit, 1) * 200, 4000)
+    ),
+    kept AS (
+        SELECT t.subject_id AS id,
+               e.type_id,
+               t.observations,
+               row_number() OVER (ORDER BY t.observations DESC, t.subject_id) AS ix
+        FROM top_subj t
+        JOIN laplace.entities e ON e.id = t.subject_id
+        WHERE e.tier = p_tier
+          AND e.first_observed_by = p_source
+        ORDER BY t.observations DESC, t.subject_id
+        LIMIT greatest(p_limit, 1)
+    ),
+    ids AS (
+        SELECT array_agg(v.id ORDER BY v.ord) AS a
+        FROM (
+            SELECT k.id, k.ix * 2 - 1 AS ord FROM kept k
+            UNION ALL
+            SELECT k.type_id, k.ix * 2 FROM kept k
+        ) v
+    ),
+    lbl AS (
+        SELECT realize.batch(i.a, NULL) AS l FROM ids i
+    )
+    SELECT k.id,
+           COALESCE(NULLIF(lbl.l[k.ix * 2 - 1], ''), left(encode(k.id, 'hex'), 16)),
+           COALESCE(NULLIF(lbl.l[k.ix * 2], ''), left(encode(k.type_id, 'hex'), 16)),
+           k.observations
+    FROM kept k CROSS JOIN lbl
+    ORDER BY k.observations DESC, k.id;
+END;

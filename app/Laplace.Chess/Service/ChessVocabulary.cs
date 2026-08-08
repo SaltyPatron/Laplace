@@ -114,8 +114,6 @@ public static class ChessVocabulary
     public static readonly Hash128 HasTcClassType = EntityTypeRegistry.Id("HAS_TC_CLASS");
     public static readonly Hash128 HasTerminationType = EntityTypeRegistry.Id("HAS_TERMINATION");
     public static readonly Hash128 HasResultType = EntityTypeRegistry.Id("HAS_RESULT");
-    public static readonly Hash128 GameMoveType = EntityTypeRegistry.Id("GAME_AT");
-    public static readonly Hash128 GameAtPlyType = EntityTypeRegistry.Id("GAME_AT_PLY");
     public static readonly Hash128 HasEvalType = EntityTypeRegistry.Id("HAS_EVAL");
     public static readonly Hash128 HasEvalObject = EntityTypeRegistry.Id("Chess_Eval");
     public static readonly Hash128 MoveQualityType = EntityTypeRegistry.Id("MOVE_QUALITY");
@@ -129,7 +127,6 @@ public static class ChessVocabulary
     public static readonly Hash128 GameHasOpeningType = EntityTypeRegistry.Id("GAME_HAS_OPENING");
     public static readonly Hash128 GameHasEcoType = EntityTypeRegistry.Id("GAME_HAS_ECO");
     public static readonly Hash128 GameHasMotifType = EntityTypeRegistry.Id("GAME_HAS_MOTIF");
-    public static readonly Hash128 ConceptType = EntityTypeRegistry.Id("Chess_Concept");
     // GH #736: a book's grounded prose line IS the shared line entity (ChessCompose.LineId
     // of its replayed positions) — two books teaching the same trap collide, which is the
     // point. The idempotency the old (title|sans)-salted id provided moves to a MARKER,

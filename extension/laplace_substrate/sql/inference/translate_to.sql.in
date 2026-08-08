@@ -1,13 +1,14 @@
 
 
 
-CREATE OR REPLACE FUNCTION translate_to(p_word bytea, p_lang text DEFAULT NULL,
+DROP FUNCTION IF EXISTS laplace.translate_to(bytea, text, int);
+CREATE OR REPLACE FUNCTION converse.translate_to(p_word bytea, p_lang text DEFAULT NULL,
                                         p_limit int DEFAULT 24)
-    RETURNS TABLE(translation text, language text, laplace.eff_mu numeric, witnesses bigint)
+    RETURNS TABLE(translation text, language text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
  AS $$
     -- Dedup and rank by (member, lang) id pair, never by rendered surface (the
-    -- old GROUP BY render_text(member) conflated homographs). The user-supplied
+    -- old GROUP BY laplace.render_text(member) conflated homographs). The user-supplied
     -- language reference is text, so it is resolved at the INPUT boundary: each
     -- DISTINCT candidate language is matched once against the reference (by
     -- label or definition surface), instead of re-rendering per member row.
@@ -27,14 +28,14 @@ CREATE OR REPLACE FUNCTION translate_to(p_word bytea, p_lang text DEFAULT NULL,
     agg AS (
         SELECT sm.member, sm.lang, max(sm.mu) AS mu, max(sm.witnesses) AS witnesses,
                max(sm.sense_mu) AS sense_mu
-        FROM laplace.synset_members(p_word) sm
+        FROM lexical.synset_members(p_word) sm
         WHERE sm.lang IS NOT NULL
           AND sm.lang NOT IN (SELECT id FROM src_langs)
         GROUP BY sm.member, sm.lang
     ),
     -- Definition surfaces for the CANDIDATE languages, rendered ONCE in a fenced
     -- CTE. This used to sit inside the lang_match predicate as
-    -- `lower(render_text(d.object_id, 32)) = w.name`, i.e. a render evaluated per
+    -- `lower(laplace.render_text(d.object_id, 32)) = w.name`, i.e. a render evaluated per
     -- probed edge purely to classify it -- the render-to-classify defect the read
     -- law names, in the one position the law calls out. Same accept set, rendered
     -- a bounded number of times.
@@ -54,7 +55,7 @@ CREATE OR REPLACE FUNCTION translate_to(p_word bytea, p_lang text DEFAULT NULL,
     lang_match AS (
         -- No-filter call (name IS NULL): pass every candidate language through with
         -- ZERO rendering — Postgres does not guarantee OR short-circuit, so the old
-        -- single-WHERE shape could evaluate label()/render_text() even when no
+        -- single-WHERE shape could evaluate realize.label()/laplace.render_text() even when no
         -- language filter was supplied (the common call).
         SELECT l.lang
         FROM (SELECT DISTINCT lang FROM agg) l, want w

@@ -1,13 +1,14 @@
-CREATE OR REPLACE FUNCTION laplace_decay(
+DROP FUNCTION IF EXISTS laplace.laplace_decay(bytea, bytea, bytea, float8);
+CREATE OR REPLACE FUNCTION generation.laplace_decay(
     p_subject  bytea, p_type  bytea, p_object  bytea,
     p_decay_factor float8 DEFAULT 0.95)
 RETURNS void
-LANGUAGE plpgsql VOLATILE SET search_path = @extschema@, public AS $$
+LANGUAGE plpgsql VOLATILE AS $$
 DECLARE
-    v_id bytea := consensus_id(p_subject, p_type, p_object);
+    v_id bytea := laplace.consensus_id(p_subject, p_type, p_object);
 BEGIN
-    UPDATE consensus
-    SET rd = LEAST((rd / p_decay_factor)::bigint, glicko2_initial_rd())
+    UPDATE laplace.consensus
+    SET rd = LEAST((rd / p_decay_factor)::bigint, laplace.glicko2_initial_rd())
     WHERE id = v_id;
 END;
 $$;

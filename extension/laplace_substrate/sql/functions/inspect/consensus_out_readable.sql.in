@@ -1,15 +1,15 @@
 CREATE OR REPLACE FUNCTION consensus_out_readable(p_id bytea, p_limit integer DEFAULT 40)
     RETURNS TABLE(type text, object text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE
-    SET search_path = @extschema@, public AS $$
+    AS $$
     -- Rank + LIMIT on bare ids in the inner query, render only the survivors (the define/examples
-    -- pattern). render() is a heavy non-inlinable call; at the same level as ORDER BY..LIMIT it was
+    -- pattern). laplace.render() is a heavy non-inlinable call; at the same level as ORDER BY..LIMIT it was
     -- projected over EVERY out-edge of the subject before the cut — thousands of renders to return 40.
-    SELECT render(s.type_id), render(s.object_id), s.eff_mu, s.witness_count
+    SELECT laplace.render(s.type_id), laplace.render(s.object_id), s.eff_mu, s.witness_count
     FROM (
         SELECT c.type_id, c.object_id, c.eff_mu, c.witness_count,
-               edge_rank(c.type_id, c.eff_mu_raw) AS er
-        FROM v_consensus_resolved c
+               laplace.edge_rank(c.type_id, c.eff_mu_raw) AS er
+        FROM laplace.v_consensus_resolved c
         WHERE c.subject_id = p_id
         ORDER BY er DESC
         LIMIT p_limit

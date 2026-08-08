@@ -91,8 +91,8 @@ public sealed class ConversationProvenanceGateTests
     }
 
     /// <summary>
-    /// chat() is the ONLY conversational entry point (CLAUDE.md / spec 36): the CLI
-    /// used to call laplace.walk_text() directly with four hardcoded knobs, making it
+    /// converse.chat() is the ONLY conversational entry point (CLAUDE.md / spec 36): the CLI
+    /// used to call generation.walk_text() directly with four hardcoded knobs, making it
     /// a sibling entry point that skipped language inference, the specificity
     /// election, shape dispatch and the responder family.
     /// </summary>
@@ -106,7 +106,7 @@ public sealed class ConversationProvenanceGateTests
         var chat = StripComments(ExtractMethod(text, "public static async Task<int> ChatAsync"));
         // Chat SQL lives in NpgsqlSubstrateReads.ChatAsync; CLI must call that, not walk_text.
         Assert.Contains("ChatAsync(", chat);
-        Assert.DoesNotContain("laplace.walk_text(", chat);
+        Assert.DoesNotContain("generation.walk_text(", chat);
         Assert.Contains("closer.CloseAsync(", chat);
         // A CLI turn carries a real session, minted through the canonical id law.
         Assert.Contains("ConversationContent.SessionId(", text);
@@ -144,7 +144,7 @@ public sealed class ConversationProvenanceGateTests
     }
 
     /// <summary>
-    /// The HTTP converse lane rides chat() — the one conversational entry point —
+    /// The HTTP converse lane rides converse.chat() — the one conversational entry point —
     /// with recall_session only as the truthful-absence fallback (PR #892). Before
     /// this pin the lane read recall_session directly and answered "What is a dog?"
     /// with a phrase-lookup miss on the deployed box. Also pins the provenance rule:
@@ -159,7 +159,7 @@ public sealed class ConversationProvenanceGateTests
         var chatIdx = method.IndexOf("NpgsqlSubstrateReads.ChatAsync(", StringComparison.Ordinal);
         var recallIdx = method.IndexOf("NpgsqlSubstrateReads.RecallSessionAsync(", StringComparison.Ordinal);
         Assert.True(chatIdx >= 0, "converse lane must consult NpgsqlSubstrateReads.ChatAsync");
-        Assert.True(recallIdx > chatIdx, "recall_session is the fallback, consulted after chat()");
+        Assert.True(recallIdx > chatIdx, "recall_session is the fallback, consulted after converse.chat()");
         Assert.Contains("ConverseRow(reply, null, null)", method);
     }
 

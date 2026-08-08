@@ -1,10 +1,10 @@
 -- bubble_up: top-k sense frontier for the forward pass (R2).
--- Ranks HAS_SENSE-family edges by base eff_mu × domain co-occurrence.
+-- Ranks HAS_SENSE-family edges by base laplace.eff_mu × domain co-occurrence.
 -- Local 0 at a hop is a backtrack signal for the beam; this function seeds the
 -- open set. Abstain = zero rows (queue empty), never fabricate.
 --
 -- No SET search_path so it inlines into callers (#617); family membership is
--- joined against relation_family_members('HAS_SENSE') (fenced once) instead
+-- joined against laplace.relation_family_members('HAS_SENSE') (fenced once) instead
 -- of calling relation_type_in_family() per consensus row — the same static
 -- truth table, but sargable through the (subject_id, type_id) indexes.
 -- Row-set equivalence of the sargable family_out proven live 2026-07-24
@@ -13,7 +13,6 @@
 -- traversal, spec 37 TRAVERSE), not the project. Old name dropped rather than
 -- shimmed: two names for one function is the dual-definition defect (#532).
 DROP FUNCTION IF EXISTS laplace.bubble_up(bytea, bytea[], integer);
-
 CREATE OR REPLACE FUNCTION taxonomy.bubble_up(
     p_term bytea,
     p_domain_context bytea[] DEFAULT NULL,
@@ -98,9 +97,9 @@ members AS (
     -- Feeds domain_scores ONLY, whose sole output (domain_hits) is 0 for every
     -- synset when no domain context is supplied. The domain-presence gate below
     -- is a one-time filter on the p_domain_context parameter: when the caller
-    -- passes NULL/empty (the common senses()/define()/salient_facts() path) it
+    -- passes NULL/empty (the common lexical.senses()/lexical.define()/consensus.salient_facts() path) it
     -- makes `members` empty, so the geometry_neighbours lateral in domain_scores
-    -- is never evaluated. Without it, geometry_neighbours(member,200,8) runs once
+    -- is never evaluated. Without it, structural.geometry_neighbours(member,200,8) runs once
     -- per synset member of a high-frequency word -- 14s each for "dog", 37s total
     -- -- for a domain_hits of 0 that changes nothing (measured 2026-07-20; this is
     -- what CommandTimeout-cancelled the explore preview endpoint). Output-identical:
@@ -124,12 +123,12 @@ domain_scores AS (
            count(*)::bigint AS domain_hits
     -- Pillar 5 (2026-07-20): domain co-occurrence is read from the GEOMETRY.
     -- geometry_neighbours walks the trajectories containing the member and
-    -- returns the adjacent content constituents in BOTH directions -- the same
+    -- returns the adjacent content laplace.constituents in BOTH directions -- the same
     -- bidirectional adjacency the consensus form matched, without the
     -- materialised PRECEDES rows (Pillar 3a, e5e1b42).
     FROM members m
     JOIN domain d ON true
-    JOIN LATERAL laplace.geometry_neighbours(m.member_id, 200, 8) gn
+    JOIN LATERAL structural.geometry_neighbours(m.member_id, 200, 8) gn
       ON gn.neighbour_id = d.id
     GROUP BY m.synset_id
 ),
@@ -160,29 +159,29 @@ FROM ranked
 -- This was `ORDER BY score DESC, rank_key DESC, witnesses DESC`, which is two
 -- keys, not three: with no domain context domain_hits is 0, so
 -- score = base_eff_mu * (1 + ln(1)) = base_eff_mu, and rank_key is
--- eff_mu(rating, rd) — the same quantity in a different type. Witness count only
+-- laplace.eff_mu(rating, rd) — the same quantity in a different type. Witness count only
 -- broke exact ties in it.
 --
 -- On a thin substrate that inverts the ranking. Measured on the foundation
--- ladder, senses(word_id('water')):
+-- ladder, lexical.senses(laplace.word_id('water')):
 --
---     urine   1 witness   eff_mu 1169.73   <- elected
---     water   1 witness   eff_mu 1169.73
---     water   1 witness   eff_mu 1169.73
---     water   2 witnesses eff_mu 1168.45
---     water   2 witnesses eff_mu 1165.57
+--     urine   1 witness   laplace.eff_mu 1169.73   <- elected
+--     water   1 witness   laplace.eff_mu 1169.73
+--     water   1 witness   laplace.eff_mu 1169.73
+--     water   2 witnesses laplace.eff_mu 1168.45
+--     water   2 witnesses laplace.eff_mu 1165.57
 --
 -- Three senses tie exactly at the top on one witness each, so the id memcmp
 -- picks — and it picked urine. Meanwhile senses carrying TWICE the evidence sit
 -- below them, losing by 1.28 on a quantity whose uncertainty term is larger than
 -- its signal: W16 3.2 measured mean |rating - neutral| = 192.85 against mean rd
 -- = 262.24 over 447,145 consensus rows, so 2*rd runs ~2.7x the signal and
--- eff_mu orders substantially by how much rd has NOT yet shrunk.
+-- laplace.eff_mu orders substantially by how much rd has NOT yet shrunk.
 --
--- eff_mu is the right conservative bound for a well-witnessed edge and the wrong
+-- laplace.eff_mu is the right conservative bound for a well-witnessed edge and the wrong
 -- primary sort when rd dominates, because "least uncertain" and "best attested"
 -- come apart exactly where evidence is thin. Ordering by witnesses first states
--- the evidence explicitly instead of reading it backwards through rd; eff_mu
+-- the evidence explicitly instead of reading it backwards through rd; laplace.eff_mu
 -- then adjudicates among equally-attested senses, which is what it is for.
 --
 -- Not a floor or a cap — nothing is excluded, the sort order changes. Spec 37 L6

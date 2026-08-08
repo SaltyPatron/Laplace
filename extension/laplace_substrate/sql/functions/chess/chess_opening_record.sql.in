@@ -1,11 +1,11 @@
--- chess_opening_record(limit, offset, source): the opening leaderboard.
+-- chess.opening_record(limit, offset, source): the opening leaderboard.
 --
 -- One row per opening the corpus has actually played, with how many distinct lines
 -- reached it, how many playings those lines carry, and how the opening FARES —
 -- the witness-weighted mean of the lines' own OUTCOME fold cells, white POV.
 --
 -- WHAT MAKES THIS CHEAP. Every number here was folded at ingest. The score is not a
--- GROUP BY over 63M attestations recomputed per call: it reads (line, OUTCOME,
+-- GROUP BY over 63M laplace.attestations recomputed per call: it reads (line, OUTCOME,
 -- Chess_Result) consensus cells, which is one row per line no matter how many times
 -- the line was played. Consensus accumulates at ingest and there is no rebuild path;
 -- this reads what the fold already deposited.
@@ -13,11 +13,12 @@
 -- Weighting by witness_count, not a plain average over lines: an opening whose one
 -- exotic line went 1-0 once must not outrank the Sicilian. The weight IS the number
 -- of playings, which is exactly what witness_count counts on this cell.
-CREATE OR REPLACE FUNCTION chess_opening_record(p_limit int DEFAULT 25,
+DROP FUNCTION IF EXISTS laplace.chess_opening_record(int, int, bytea);
+CREATE OR REPLACE FUNCTION chess.opening_record(p_limit int DEFAULT 25,
                                                 p_offset int DEFAULT 0,
                                                 p_source bytea DEFAULT NULL)
     RETURNS TABLE(opening text, lines bigint, playings bigint,
-                  laplace.eff_mu double precision)
+                  eff_mu double precision)
     LANGUAGE sql STABLE
  AS $$
 WITH claim AS MATERIALIZED (
@@ -49,7 +50,7 @@ ord AS MATERIALIZED (
 -- Render last and once, after LIMIT/OFFSET. name_id is the GROUP BY key upstream, so
 -- the page is already distinct by construction — one realize call, p_limit ids.
 lbl AS MATERIALIZED (
-    SELECT laplace.realize_batch(array_agg(o.name_id ORDER BY o.ix), NULL) AS l FROM ord o
+    SELECT realize.batch(array_agg(o.name_id ORDER BY o.ix), NULL) AS l FROM ord o
 )
 SELECT lbl.l[o.ix], o.lines::bigint, o.playings::bigint,
        round((o.mu / 1e9)::numeric, 3)::double precision

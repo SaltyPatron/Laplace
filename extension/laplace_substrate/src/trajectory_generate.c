@@ -97,7 +97,7 @@ ensure_plans(void)
         Oid        argtypes[2] = { BYTEAARRAYOID, INT4OID };
         SPIPlanPtr plan = SPI_prepare(
             "SELECT object_id, sep_id, weight "
-            "FROM laplace.trajectory_continuations($1, $2)",
+            "FROM generation.trajectory_continuations($1, $2)",
             2, argtypes);
 
         if (plan == NULL)
@@ -112,7 +112,7 @@ ensure_plans(void)
         Oid        argtypes[2] = { BYTEAARRAYOID, BYTEAARRAYOID };
         SPIPlanPtr plan = SPI_prepare(
             "SELECT candidate, steer, edges "
-            "FROM laplace.steer_candidates($1, $2)",
+            "FROM generation.steer_candidates($1, $2)",
             2, argtypes);
 
         if (plan == NULL)
@@ -127,7 +127,7 @@ ensure_plans(void)
         Oid        argtypes[2] = { BYTEAOID, INT4OID };
         SPIPlanPtr plan = SPI_prepare(
             "SELECT object_id, weight "
-            "FROM laplace.walk_completes_floor($1, $2)",
+            "FROM generation.walk_completes_floor($1, $2)",
             2, argtypes);
 
         if (plan == NULL)

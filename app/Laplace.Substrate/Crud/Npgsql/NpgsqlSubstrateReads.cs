@@ -60,17 +60,17 @@ public static class NpgsqlSubstrateReads
             timeoutSeconds: 30, ct: ct, label: "taxonomy_tree", onError: onError);
 
     /// <summary><c>laplace.modality_counts()</c> — corpus modality breakdown, one row.</summary>
-    public static async Task<(long TextEvidence, long Chess, long Models, long Multilingual)> ModalityCountsAsync(
+    public static async Task<(long TextEvidence, long Chess, long Models, long Multilingual, long Documents)> ModalityCountsAsync(
         NpgsqlDataSource dataSource, CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null)
     {
         var rows = await NpgsqlRead.ReadRowsAsync(dataSource,
-            "SELECT text_evidence, chess, models, multilingual FROM laplace.modality_counts()",
-            static r => (r.GetInt64(0), r.GetInt64(1), r.GetInt64(2), r.GetInt64(3)),
+            "SELECT text_evidence, chess, models, multilingual, documents FROM laplace.modality_counts()",
+            static r => (r.GetInt64(0), r.GetInt64(1), r.GetInt64(2), r.GetInt64(3), r.GetInt64(4)),
             timeoutSeconds: 20, ct: ct, label: "modality_counts", onError: onError).ConfigureAwait(false);
-        return rows.Count == 0 ? (0, 0, 0, 0) : rows[0];
+        return rows.Count == 0 ? (0, 0, 0, 0, 0) : rows[0];
     }
 
-    /// <summary><c>laplace.substrate_pulse()</c> — the live scoreboard, one row.</summary>
+    /// <summary><c>ops.substrate_pulse()</c> — the live scoreboard, one row.</summary>
     public static async Task<(long Entities, long Attestations, long Consensus, long Physicalities,
         long? LastFlushUnix, long FlushesLastMin, bool Folding)?> SubstratePulseAsync(
         NpgsqlDataSource dataSource, CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null)
@@ -78,7 +78,7 @@ public static class NpgsqlSubstrateReads
         var rows = await NpgsqlRead.ReadRowsAsync(dataSource, """
             SELECT entities, attestations, consensus, physicalities,
                    extract(epoch FROM last_flush_at)::bigint, flushes_last_min, folding
-            FROM laplace.substrate_pulse()
+            FROM ops.substrate_pulse()
             """,
             static r => (
                 r.IsDBNull(0) ? 0L : r.GetInt64(0),
@@ -90,6 +90,428 @@ public static class NpgsqlSubstrateReads
                 !r.IsDBNull(6) && r.GetBoolean(6)),
             ct: ct, label: "substrate_pulse", onError: onError).ConfigureAwait(false);
         return rows.Count == 0 ? null : rows[0];
+    }
+
+    /// <summary><c>laplace.entity_type_counts_approx()</c> — MCV×reltuples type census (GH #813).</summary>
+    public static Task<IReadOnlyList<(string Type, long EntitiesApprox)>> EntityTypeCountsApproxAsync(
+        NpgsqlDataSource dataSource, CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT type, entities_approx
+            FROM laplace.entity_type_counts_approx()
+            ORDER BY entities_approx DESC
+            LIMIT 32
+            """,
+            static r => (r.IsDBNull(0) ? "" : r.GetString(0), r.IsDBNull(1) ? 0L : r.GetInt64(1)),
+            ct: ct, label: "entity_type_counts_approx", onError: onError);
+
+    /// <summary><c>laplace.partition_pressure()</c> — partition skew via reltuples (GH #813).</summary>
+    public static Task<IReadOnlyList<(string Parent, string Partition, decimal? Pct)>> PartitionPressureAsync(
+        NpgsqlDataSource dataSource, CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT parent, partition, pct_of_parent
+            FROM laplace.partition_pressure(NULL)
+            ORDER BY pct_of_parent DESC NULLS LAST
+            LIMIT 32
+            """,
+            static r => (
+                r.IsDBNull(0) ? "" : r.GetString(0),
+                r.IsDBNull(1) ? "" : r.GetString(1),
+                r.IsDBNull(2) ? (decimal?)null : r.GetDecimal(2)),
+            ct: ct, label: "partition_pressure", onError: onError);
+
+    /// <summary><c>laplace.atom_census()</c> — tier-0 window invariant (GH #813).</summary>
+    public static async Task<(long Tier0, long Window, long Over, long Unresolvable)?> AtomCensusAsync(
+        NpgsqlDataSource dataSource, CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null)
+    {
+        var rows = await NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT tier0_count, atom_window, over_window, unresolvable_ids
+            FROM laplace.atom_census()
+            """,
+            static r => (r.GetInt64(0), r.GetInt64(1), r.GetInt64(2), r.GetInt64(3)),
+            ct: ct, label: "atom_census", onError: onError).ConfigureAwait(false);
+        return rows.Count == 0 ? null : rows[0];
+    }
+
+    /// <summary><c>laplace.source_tier_census(source)</c> — entities by tier for a lane (GH #813).</summary>
+    public static Task<IReadOnlyList<(short Tier, long Entities)>> SourceTierCensusAsync(
+        NpgsqlDataSource dataSource, byte[] sourceId, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT tier, entities
+            FROM laplace.source_tier_census(@source)
+            ORDER BY tier
+            """,
+            static r => (r.GetInt16(0), r.GetInt64(1)),
+            p => p.AddWithValue("source", sourceId),
+            ct: ct, label: "source_tier_census", onError: onError);
+
+    /// <summary><c>laplace.surface_sample(source, tier, limit)</c> — ranked surfaces (GH #813).</summary>
+    public static Task<IReadOnlyList<(string Surface, string TypeName, long Observations)>> SurfaceSampleAsync(
+        NpgsqlDataSource dataSource, byte[] sourceId, short tier, int limit, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT surface, type_name, observations
+            FROM laplace.surface_sample(@source, @tier, @limit)
+            """,
+            static r => (
+                r.IsDBNull(0) ? "" : r.GetString(0),
+                r.IsDBNull(1) ? "" : r.GetString(1),
+                r.IsDBNull(2) ? 0L : r.GetInt64(2)),
+            p =>
+            {
+                p.AddWithValue("source", sourceId);
+                p.AddWithValue("tier", tier);
+                p.AddWithValue("limit", limit);
+            }, ct: ct, label: "surface_sample", onError: onError);
+
+    /// <summary><c>laplace.arena_counts()</c> — per-relation consensus mass (GH #764 callers).</summary>
+    public static Task<IReadOnlyList<(string Type, long Relations, long Witnesses)>> ArenaCountsAsync(
+        NpgsqlDataSource dataSource, CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT type, relations, witnesses
+            FROM laplace.arena_counts()
+            LIMIT 64
+            """,
+            static r => (
+                r.IsDBNull(0) ? "" : r.GetString(0),
+                r.IsDBNull(1) ? 0L : r.GetInt64(1),
+                r.IsDBNull(2) ? 0L : r.GetInt64(2)),
+            ct: ct, label: "arena_counts", onError: onError);
+
+    /// <summary><c>laplace.ingest_runs(limit)</c> — recent ingest journal rows.</summary>
+    public static Task<IReadOnlyList<(string Source, string Status, DateTimeOffset Started)>> IngestRunsAsync(
+        NpgsqlDataSource dataSource, int limit, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT source_name, status, started_at
+            FROM laplace.ingest_runs(@limit)
+            """,
+            static r => (
+                r.IsDBNull(0) ? "" : r.GetString(0),
+                r.IsDBNull(1) ? "" : r.GetString(1),
+                r.GetFieldValue<DateTimeOffset>(2)),
+            p => p.AddWithValue("limit", limit),
+            ct: ct, label: "ingest_runs", onError: onError);
+
+    /// <summary><c>laplace.consensus_count(type)</c> — consensus row count, optional type filter.</summary>
+    public static async Task<long> ConsensusCountAsync(
+        NpgsqlDataSource dataSource, byte[]? typeId, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null)
+    {
+        var rows = await NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT laplace.consensus_count(@type)
+            """,
+            static r => r.IsDBNull(0) ? 0L : r.GetInt64(0),
+            p => p.AddWithValue("type", (object?)typeId ?? DBNull.Value),
+            ct: ct, label: "consensus_count", onError: onError).ConfigureAwait(false);
+        return rows.Count == 0 ? 0L : rows[0];
+    }
+
+    /// <summary><c>laplace.compositional_tier_distribution()</c></summary>
+    public static Task<IReadOnlyList<(short Tier, long N)>> CompositionalTierDistributionAsync(
+        NpgsqlDataSource dataSource, CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT tier, n FROM laplace.compositional_tier_distribution() ORDER BY tier
+            """,
+            static r => (r.GetInt16(0), r.GetInt64(1)),
+            ct: ct, label: "compositional_tier_distribution", onError: onError);
+
+    /// <summary><c>laplace.consensus_tier_distribution()</c></summary>
+    public static Task<IReadOnlyList<(short Tier, long Relations)>> ConsensusTierDistributionAsync(
+        NpgsqlDataSource dataSource, CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT subject_tier, relations FROM laplace.consensus_tier_distribution() ORDER BY subject_tier
+            """,
+            static r => (r.GetInt16(0), r.GetInt64(1)),
+            ct: ct, label: "consensus_tier_distribution", onError: onError);
+
+    /// <summary><c>laplace.render_gaps(limit)</c> — ids that consensus references but cannot render.</summary>
+    public static Task<IReadOnlyList<(string IdHex, string Roles, long Refs)>> RenderGapsAsync(
+        NpgsqlDataSource dataSource, int limit, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT encode(id, 'hex'), roles, refs
+            FROM laplace.render_gaps(@limit)
+            """,
+            static r => (
+                r.IsDBNull(0) ? "" : r.GetString(0),
+                r.IsDBNull(1) ? "" : r.GetString(1),
+                r.IsDBNull(2) ? 0L : r.GetInt64(2)),
+            p => p.AddWithValue("limit", limit),
+            ct: ct, label: "render_gaps", onError: onError);
+
+    /// <summary><c>laplace.entity_type_counts()</c> — exact (slow); prefer EntityTypeCountsApproxAsync.</summary>
+    public static Task<IReadOnlyList<(string Type, short Tier, long Entities)>> EntityTypeCountsAsync(
+        NpgsqlDataSource dataSource, CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT type, tier, entities FROM laplace.entity_type_counts() LIMIT 64
+            """,
+            static r => (r.IsDBNull(0) ? "" : r.GetString(0), r.GetInt16(1), r.GetInt64(2)),
+            ct: ct, label: "entity_type_counts", onError: onError);
+
+    /// <summary><c>laplace.is_compositional_type(type_id)</c></summary>
+    public static async Task<bool> IsCompositionalTypeAsync(
+        NpgsqlDataSource dataSource, byte[] typeId, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null)
+    {
+        var rows = await NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT laplace.is_compositional_type(@type)
+            """,
+            static r => !r.IsDBNull(0) && r.GetBoolean(0),
+            p => p.AddWithValue("type", typeId),
+            ct: ct, label: "is_compositional_type", onError: onError).ConfigureAwait(false);
+        return rows.Count > 0 && rows[0];
+    }
+
+    /// <summary><c>laplace.top_relations_readable(limit, type)</c></summary>
+    public static Task<IReadOnlyList<(string Subject, string Type, string Object, decimal EffMu, long Witnesses)>> TopRelationsReadableAsync(
+        NpgsqlDataSource dataSource, int limit, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT subject, type, object, eff_mu, witnesses
+            FROM laplace.top_relations_readable(@limit, NULL)
+            """,
+            static r => (
+                r.IsDBNull(0) ? "" : r.GetString(0),
+                r.IsDBNull(1) ? "" : r.GetString(1),
+                r.IsDBNull(2) ? "" : r.GetString(2),
+                r.IsDBNull(3) ? 0m : r.GetDecimal(3),
+                r.IsDBNull(4) ? 0L : r.GetInt64(4)),
+            p => p.AddWithValue("limit", limit),
+            ct: ct, label: "top_relations_readable", onError: onError);
+
+    /// <summary><c>laplace.relation_rank(type_id)</c> — highway rank weight.</summary>
+    public static async Task<double> RelationRankAsync(
+        NpgsqlDataSource dataSource, byte[] typeId, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null)
+    {
+        var rows = await NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT laplace.relation_rank(@type)
+            """,
+            static r => r.IsDBNull(0) ? 0d : r.GetDouble(0),
+            p => p.AddWithValue("type", typeId),
+            ct: ct, label: "relation_rank", onError: onError).ConfigureAwait(false);
+        return rows.Count == 0 ? 0d : rows[0];
+    }
+
+    /// <summary><c>laplace.effective_mu(rating, rd)</c> — integer μ−2·RD.</summary>
+    public static async Task<long> EffectiveMuAsync(
+        NpgsqlDataSource dataSource, long rating, long rd, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null)
+    {
+        var rows = await NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT laplace.effective_mu(@rating, @rd)
+            """,
+            static r => r.IsDBNull(0) ? 0L : r.GetInt64(0),
+            p =>
+            {
+                p.AddWithValue("rating", rating);
+                p.AddWithValue("rd", rd);
+            }, ct: ct, label: "effective_mu", onError: onError).ConfigureAwait(false);
+        return rows.Count == 0 ? 0L : rows[0];
+    }
+
+    /// <summary><c>laplace.relation_type_resolve(surface)</c> — name/alias → type id.</summary>
+    public static async Task<byte[]?> RelationTypeResolveAsync(
+        NpgsqlDataSource dataSource, string surface, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null)
+    {
+        var rows = await NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT laplace.relation_type_resolve(@surface)
+            """,
+            static r => r.IsDBNull(0) ? null : r.GetFieldValue<byte[]>(0),
+            p => p.AddWithValue("surface", surface),
+            ct: ct, label: "relation_type_resolve", onError: onError).ConfigureAwait(false);
+        return rows.Count == 0 ? null : rows[0];
+    }
+
+    /// <summary><c>laplace.register_canonical(name)</c></summary>
+    public static async Task<byte[]?> RegisterCanonicalAsync(
+        NpgsqlDataSource dataSource, string name, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null)
+    {
+        var rows = await NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT laplace.register_canonical(@name)
+            """,
+            static r => r.IsDBNull(0) ? null : r.GetFieldValue<byte[]>(0),
+            p => p.AddWithValue("name", name),
+            ct: ct, label: "register_canonical", onError: onError).ConfigureAwait(false);
+        return rows.Count == 0 ? null : rows[0];
+    }
+
+    /// <summary><c>laplace.intent_preflight(entity_ids, phys_ids, att_ids)</c></summary>
+    public static async Task<byte[]?> IntentPreflightEntityBitmapAsync(
+        NpgsqlDataSource dataSource, byte[][] entityIds, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null)
+    {
+        var rows = await NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT (laplace.intent_preflight(@entities, ARRAY[]::bytea[], ARRAY[]::bytea[])).entity_exists
+            """,
+            static r => r.IsDBNull(0) ? null : r.GetFieldValue<byte[]>(0),
+            p => p.AddWithValue("entities", entityIds),
+            ct: ct, label: "intent_preflight", onError: onError).ConfigureAwait(false);
+        return rows.Count == 0 ? null : rows[0];
+    }
+
+    /// <summary><c>laplace.relation_family_type_ids(family)</c> / <c>relation_band_types(band)</c>.</summary>
+    public static async Task<byte[][]> RelationFamilyTypeIdsAsync(
+        NpgsqlDataSource dataSource, string family, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null)
+    {
+        var rows = await NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT laplace.relation_family_type_ids(@family)
+            """,
+            static r => r.IsDBNull(0) ? Array.Empty<byte[]>() : r.GetFieldValue<byte[][]>(0),
+            p => p.AddWithValue("family", family),
+            ct: ct, label: "relation_family_type_ids", onError: onError).ConfigureAwait(false);
+        return rows.Count == 0 ? [] : rows[0];
+    }
+
+    /// <summary><c>laplace.attestation_response_type(...)</c> — typed attestation frontier.</summary>
+    public static Task<IReadOnlyList<(string ObjectHex, double CombinedEffMu, int SourceCount)>> AttestationResponseTypeAsync(
+        NpgsqlDataSource dataSource, byte[] subjectId, byte[] relationTypeId, int topK, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT encode(object_id, 'hex'), combined_eff_mu, source_count
+            FROM laplace.attestation_response_type(@subject, @rel, NULL, NULL, @k)
+            """,
+            static r => (
+                r.IsDBNull(0) ? "" : r.GetString(0),
+                r.IsDBNull(1) ? 0d : r.GetDouble(1),
+                r.IsDBNull(2) ? 0 : r.GetInt32(2)),
+            p =>
+            {
+                p.AddWithValue("subject", subjectId);
+                p.AddWithValue("rel", relationTypeId);
+                p.AddWithValue("k", topK);
+            }, ct: ct, label: "attestation_response_type", onError: onError);
+
+    /// <summary><c>laplace.attestation_unary_response_type(...)</c></summary>
+    public static Task<IReadOnlyList<(double CombinedEffMu, int SourceCount)>> AttestationUnaryResponseTypeAsync(
+        NpgsqlDataSource dataSource, byte[] subjectId, byte[] relationTypeId, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT combined_eff_mu, source_count
+            FROM laplace.attestation_unary_response_type(@subject, @rel, NULL, NULL)
+            """,
+            static r => (
+                r.IsDBNull(0) ? 0d : r.GetDouble(0),
+                r.IsDBNull(1) ? 0 : r.GetInt32(1)),
+            p =>
+            {
+                p.AddWithValue("subject", subjectId);
+                p.AddWithValue("rel", relationTypeId);
+            }, ct: ct, label: "attestation_unary_response_type", onError: onError);
+
+    /// <summary><c>laplace.laplace_score(v, m)</c> / <c>laplace_score_inverse(score, m)</c>.</summary>
+    public static async Task<(long Score, double Inverse)> LaplaceScorePairAsync(
+        NpgsqlDataSource dataSource, double v, double m, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null)
+    {
+        var rows = await NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT s.score, laplace.laplace_score_inverse(s.score, @m)
+            FROM (SELECT laplace.laplace_score(@v, @m) AS score) s
+            """,
+            static r => (r.IsDBNull(0) ? 0L : r.GetInt64(0), r.IsDBNull(1) ? 0d : r.GetDouble(1)),
+            p =>
+            {
+                p.AddWithValue("v", v);
+                p.AddWithValue("m", m);
+            }, ct: ct, label: "laplace_score", onError: onError).ConfigureAwait(false);
+        return rows.Count == 0 ? (0L, 0d) : rows[0];
+    }
+
+    /// <summary><c>laplace.laplace_entities_at_depth(tier)</c>.</summary>
+    public static async Task<long> EntitiesAtDepthCountAsync(
+        NpgsqlDataSource dataSource, short depth, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null)
+    {
+        var rows = await NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT count(*)::bigint FROM laplace.laplace_entities_at_depth(@d)
+            """,
+            static r => r.IsDBNull(0) ? 0L : r.GetInt64(0),
+            p => p.AddWithValue("d", depth),
+            ct: ct, label: "laplace_entities_at_depth", onError: onError).ConfigureAwait(false);
+        return rows.Count == 0 ? 0L : rows[0];
+    }
+
+    /// <summary><c>laplace.laplace_entity_attestations(subject)</c>.</summary>
+    public static Task<IReadOnlyList<(string TypeHex, string ObjectHex, long EffMuRaw)>> EntityAttestationsAsync(
+        NpgsqlDataSource dataSource, byte[] subjectId, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT encode(type_id, 'hex'), encode(object_id, 'hex'), eff_mu_raw
+            FROM laplace.laplace_entity_attestations(@subject, 0)
+            """,
+            static r => (
+                r.IsDBNull(0) ? "" : r.GetString(0),
+                r.IsDBNull(1) ? "" : r.GetString(1),
+                r.IsDBNull(2) ? 0L : r.GetInt64(2)),
+            p => p.AddWithValue("subject", subjectId),
+            ct: ct, label: "laplace_entity_attestations", onError: onError);
+
+    /// <summary><c>laplace.laplace_ancestry(entity, band_mask)</c>.</summary>
+    public static Task<IReadOnlyList<(string AncestorHex, int Depth)>> AncestryAsync(
+        NpgsqlDataSource dataSource, byte[] entityId, byte[] bandMask, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT encode(ancestor_id, 'hex'), depth
+            FROM laplace.laplace_ancestry(@entity, @band, 4)
+            """,
+            static r => (
+                r.IsDBNull(0) ? "" : r.GetString(0),
+                r.IsDBNull(1) ? 0 : r.GetInt32(1)),
+            p =>
+            {
+                p.AddWithValue("entity", entityId);
+                p.AddWithValue("band", bandMask);
+            }, ct: ct, label: "laplace_ancestry", onError: onError);
+
+    /// <summary><c>laplace.laplace_translations(entity, band_mask)</c>.</summary>
+    public static Task<IReadOnlyList<(string TranslationHex, string SharedObjectHex)>> TranslationsAsync(
+        NpgsqlDataSource dataSource, byte[] entityId, byte[] bandMask, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT encode(translation_id, 'hex'), encode(shared_object_id, 'hex')
+            FROM laplace.laplace_translations(@entity, @band)
+            """,
+            static r => (
+                r.IsDBNull(0) ? "" : r.GetString(0),
+                r.IsDBNull(1) ? "" : r.GetString(1)),
+            p =>
+            {
+                p.AddWithValue("entity", entityId);
+                p.AddWithValue("band", bandMask);
+            }, ct: ct, label: "laplace_translations", onError: onError);
+
+    /// <summary><c>laplace.model_jitter_catalog(relation)</c>.</summary>
+    public static Task<IReadOnlyList<(string SubjectHex, string TypeHex, long WitnessCount)>> ModelJitterCatalogAsync(
+        NpgsqlDataSource dataSource, string? relation, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT encode(subject_id, 'hex'), encode(type_id, 'hex'), witness_count
+            FROM laplace.model_jitter_catalog(@rel, 150000000000)
+            LIMIT 32
+            """,
+            static r => (
+                r.IsDBNull(0) ? "" : r.GetString(0),
+                r.IsDBNull(1) ? "" : r.GetString(1),
+                r.IsDBNull(2) ? 0L : r.GetInt64(2)),
+            p => p.AddWithValue("rel", (object?)relation ?? DBNull.Value),
+            ct: ct, label: "model_jitter_catalog", onError: onError);
+
+    /// <summary><c>laplace.vertex_tier(flags)</c> / <c>laplace.vertex_atom(flags)</c>.</summary>
+    public static async Task<(short Tier, int Atom)> VertexDecodeAsync(
+        NpgsqlDataSource dataSource, long flags, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null)
+    {
+        var rows = await NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT laplace.vertex_tier(@flags), laplace.vertex_atom(@flags)
+            """,
+            static r => (r.GetInt16(0), r.GetInt32(1)),
+            p => p.AddWithValue("flags", flags),
+            ct: ct, label: "vertex_tier", onError: onError).ConfigureAwait(false);
+        return rows.Count == 0 ? ((short)0, 0) : rows[0];
     }
 
     public readonly record struct BandLeaderRow(
@@ -130,7 +552,7 @@ public static class NpgsqlSubstrateReads
     public readonly record struct SalientFactRow(string Type, string Fact, decimal EffMu, long Witnesses);
 
     /// <summary>
-    /// <c>laplace.salient_facts(id, relation_type, limit)</c> — typed relations ranked by
+    /// <c>consensus.salient_facts(id, relation_type, limit)</c> — typed relations ranked by
     /// eff_mu. Shared by SubstrateClient.Matchup, the CLI's neighbors command and the MCP
     /// facts tool — the exact 9-function cluster doc 33/41 name as the highest-duplication
     /// read surface.
@@ -140,7 +562,7 @@ public static class NpgsqlSubstrateReads
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
             SELECT f.type, f.fact, f.eff_mu, f.witnesses
-            FROM laplace.salient_facts(@id, NULL, @limit) f
+            FROM consensus.salient_facts(@id, NULL, @limit) f
             """,
             static r => new SalientFactRow(r.GetString(0), r.GetString(1), r.GetDecimal(2), r.GetInt64(3)),
             p =>
@@ -151,13 +573,13 @@ public static class NpgsqlSubstrateReads
 
     public readonly record struct TapeRow(string Holder, string Type, string Fact, decimal? Mu);
 
-    /// <summary><c>laplace.contrast(x, y, relation_type, limit)</c> — the head-to-head tape.</summary>
+    /// <summary><c>converse.contrast(x, y, relation_type, limit)</c> — the head-to-head tape.</summary>
     public static Task<IReadOnlyList<TapeRow>> ContrastAsync(
         NpgsqlDataSource dataSource, byte[] x, byte[] y, int limit, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
             SELECT c.holder, c.type, c.fact, c.mu
-            FROM laplace.contrast(@x, @y, NULL, @limit) c
+            FROM converse.contrast(@x, @y, NULL, @limit) c
             """,
             static r => new TapeRow(r.GetString(0), r.GetString(1), r.GetString(2),
                 r.IsDBNull(3) ? null : r.GetDecimal(3)),
@@ -172,7 +594,7 @@ public static class NpgsqlSubstrateReads
         string? Relation, string? Plane, decimal? Mu, long? Usage, double? Geodesic, string? Verdict);
 
     /// <summary>
-    /// <c>laplace.relation_summary(x, y)</c> — the slow path/verdict half of a matchup.
+    /// <c>consensus.relation_summary(x, y)</c> — the slow path/verdict half of a matchup.
     /// Measured 6-14s under an active seed; give it a generous timeout rather than the
     /// default serving budget.
     /// </summary>
@@ -227,12 +649,12 @@ public static class NpgsqlSubstrateReads
 
     public readonly record struct MetricCountRow(string Metric, long Value);
 
-    /// <summary><c>laplace.substrate_counts()</c> — inventory metrics (planner-labeled).</summary>
+    /// <summary><c>ops.substrate_counts()</c> — inventory metrics (planner-labeled).</summary>
     public static Task<IReadOnlyList<MetricCountRow>> SubstrateCountsAsync(
         NpgsqlConnection conn, CancellationToken ct,
         int timeoutSeconds = 0, NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(conn,
-            "SELECT metric, value FROM laplace.substrate_counts()",
+            "SELECT metric, value FROM ops.substrate_counts()",
             static r => new MetricCountRow(r.GetString(0), r.GetInt64(1)),
             timeoutSeconds: timeoutSeconds, ct: ct, label: "substrate_counts", onError: onError);
 
@@ -241,7 +663,7 @@ public static class NpgsqlSubstrateReads
         NpgsqlDataSource dataSource, CancellationToken ct,
         int timeoutSeconds = 0, NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource,
-            "SELECT metric, value FROM laplace.substrate_counts()",
+            "SELECT metric, value FROM ops.substrate_counts()",
             static r => new MetricCountRow(r.GetString(0), r.GetInt64(1)),
             timeoutSeconds: timeoutSeconds, ct: ct, label: "substrate_counts", onError: onError);
 
@@ -258,25 +680,25 @@ public static class NpgsqlSubstrateReads
     private const string ConsensusStatsSelect =
         "SELECT evidence_rows, consensus_rows, dedup_ratio, avg_witnesses, max_witnesses FROM ";
 
-    /// <summary><c>laplace.consensus_stats()</c> — exact full aggregates (minutes at scale).</summary>
+    /// <summary><c>consensus.stats()</c> — exact full aggregates (minutes at scale).</summary>
     public static async Task<ConsensusStatsRow?> ConsensusStatsExactAsync(
         NpgsqlConnection conn, CancellationToken ct,
         int timeoutSeconds = 0, NpgsqlRead.ErrorTranslator? onError = null)
     {
         var rows = await NpgsqlRead.ReadRowsAsync(conn,
-            ConsensusStatsSelect + "laplace.consensus_stats()",
+            ConsensusStatsSelect + "consensus.stats()",
             MapConsensusStats, timeoutSeconds: timeoutSeconds, ct: ct,
             label: "consensus_stats", onError: onError).ConfigureAwait(false);
         return rows.Count == 0 ? null : rows[0];
     }
 
-    /// <summary><c>laplace.consensus_stats_approx()</c> — planner estimates; avg/max may be NULL.</summary>
+    /// <summary><c>consensus.stats_approx()</c> — planner estimates; avg/max may be NULL.</summary>
     public static async Task<ConsensusStatsRow?> ConsensusStatsApproxAsync(
         NpgsqlConnection conn, CancellationToken ct,
         int timeoutSeconds = 0, NpgsqlRead.ErrorTranslator? onError = null)
     {
         var rows = await NpgsqlRead.ReadRowsAsync(conn,
-            ConsensusStatsSelect + "laplace.consensus_stats_approx()",
+            ConsensusStatsSelect + "consensus.stats_approx()",
             MapConsensusStats, timeoutSeconds: timeoutSeconds, ct: ct,
             label: "consensus_stats_approx", onError: onError).ConfigureAwait(false);
         return rows.Count == 0 ? null : rows[0];
@@ -316,7 +738,7 @@ public static class NpgsqlSubstrateReads
             timeoutSeconds: timeoutSeconds, ct: ct, label: "multi_source_entity_count", onError: onError);
 
     /// <summary>
-    /// Connection-scoped <c>laplace.salient_facts</c> — same SQL as the datasource overload;
+    /// Connection-scoped <c>consensus.salient_facts</c> — same SQL as the datasource overload;
     /// Explore keeps one open connection across entity facets.
     /// </summary>
     public static Task<IReadOnlyList<SalientFactRow>> SalientFactsAsync(
@@ -324,7 +746,7 @@ public static class NpgsqlSubstrateReads
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(conn, """
             SELECT f.type, f.fact, f.eff_mu, f.witnesses
-            FROM laplace.salient_facts(@id, NULL, @limit) f
+            FROM consensus.salient_facts(@id, NULL, @limit) f
             """,
             static r => new SalientFactRow(r.GetString(0), r.GetString(1), r.GetDecimal(2), r.GetInt64(3)),
             p =>
@@ -493,7 +915,7 @@ public static class NpgsqlSubstrateReads
 
     private const string RecallSessionSelect = """
         SELECT reply, eff_mu, witnesses
-        FROM laplace.recall_session(@p, @session)
+        FROM converse.recall_session(@p, @session)
         """;
 
     private static void BindRecallSession(NpgsqlParameterCollection p, string prompt, byte[]? session)
@@ -508,7 +930,7 @@ public static class NpgsqlSubstrateReads
         r.IsDBNull(1) ? null : r.GetDecimal(1),
         r.IsDBNull(2) ? null : r.GetInt64(2));
 
-    /// <summary><c>laplace.recall_session(prompt, session)</c> — session-resident converse.</summary>
+    /// <summary><c>converse.recall_session(prompt, session)</c> — session-resident converse.</summary>
     public static Task<IReadOnlyList<ConverseReplyRow>> RecallSessionAsync(
         NpgsqlConnection conn, string prompt, byte[]? session, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
@@ -524,14 +946,14 @@ public static class NpgsqlSubstrateReads
             p => BindRecallSession(p, prompt, session),
             ct: ct, label: "recall_session", onError: onError);
 
-    /// <summary><c>laplace.recall_intent(shape, topic, topic2, type, lang, ctx)</c>.</summary>
+    /// <summary><c>converse.recall_intent(shape, topic, topic2, type, lang, ctx)</c>.</summary>
     public static Task<IReadOnlyList<ConverseReplyRow>> RecallIntentAsync(
         NpgsqlDataSource dataSource, string shape, byte[] topic, byte[]? topic2,
         string? relationType, string? lang, byte[][]? contextIds, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
             SELECT reply, eff_mu, witnesses
-            FROM laplace.recall_intent(@shape, @topic, @topic2, @type, @lang, @ctx)
+            FROM converse.recall_intent(@shape, @topic, @topic2, @type, @lang, @ctx)
             """,
             MapConverseReply,
             p =>
@@ -545,17 +967,17 @@ public static class NpgsqlSubstrateReads
                     (object?)contextIds ?? DBNull.Value;
             }, ct: ct, label: "recall_intent", onError: onError);
 
-    /// <summary><c>laplace.recall(prompt)</c> — intent-routed converse without a session.</summary>
+    /// <summary><c>converse.recall(prompt)</c> — intent-routed converse without a session.</summary>
     public static Task<IReadOnlyList<ConverseReplyRow>> RecallAsync(
         NpgsqlConnection conn, string prompt, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(conn,
-            "SELECT reply, eff_mu, witnesses FROM laplace.recall(@p)",
+            "SELECT reply, eff_mu, witnesses FROM converse.recall(@p)",
             MapConverseReply,
             p => p.AddWithValue("p", prompt),
             ct: ct, label: "recall", onError: onError);
 
-    /// <summary><c>laplace.gaps(laplace.resolve_last_word(prompt))</c>.</summary>
+    /// <summary><c>consensus.gaps(converse.resolve_last_word(prompt))</c>.</summary>
     public static Task<IReadOnlyList<string>> GapsForPromptAsync(
         NpgsqlConnection conn, string prompt, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
@@ -576,12 +998,12 @@ public static class NpgsqlSubstrateReads
 
     public readonly record struct Neighbor4dRow(string Neighbor, double Geodesic, double? Frechet);
 
-    /// <summary><c>laplace.nearest_neighbors_4d(word, k)</c>.</summary>
+    /// <summary><c>structural.nearest_neighbors_4d(word, k)</c>.</summary>
     public static Task<IReadOnlyList<Neighbor4dRow>> NearestNeighbors4dAsync(
         NpgsqlConnection conn, string word, int k, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(conn,
-            "SELECT neighbor, geodesic, frechet FROM laplace.nearest_neighbors_4d(@w, @k)",
+            "SELECT neighbor, geodesic, frechet FROM structural.nearest_neighbors_4d(@w, @k)",
             static r => new Neighbor4dRow(
                 r.IsDBNull(0) ? "" : r.GetString(0),
                 r.IsDBNull(1) ? 0 : r.GetDouble(1),
@@ -622,14 +1044,14 @@ public static class NpgsqlSubstrateReads
     public readonly record struct ConsensusEdgeRenderedRow(
         string TypeLabel, string? PeerLabel, long Rating, long Rd, long Volatility, long WitnessCount);
 
-    /// <summary><c>laplace.consensus_out(id)</c> with rendered type/object labels.</summary>
+    /// <summary><c>consensus.consensus_out(id)</c> with rendered type/object labels.</summary>
     public static Task<IReadOnlyList<ConsensusEdgeRenderedRow>> ConsensusOutRenderedAsync(
         NpgsqlConnection conn, byte[] id, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(conn, """
             SELECT laplace.render(c.type_id), laplace.render(c.object_id),
                    c.rating, c.rd, c.volatility, c.witness_count
-            FROM laplace.consensus_out(@id) c
+            FROM consensus.consensus_out(@id) c
             """,
             static r => new ConsensusEdgeRenderedRow(
                 r.GetString(0), r.IsDBNull(1) ? null : r.GetString(1),
@@ -637,14 +1059,14 @@ public static class NpgsqlSubstrateReads
             p => p.Add("id", NpgsqlDbType.Bytea).Value = id,
             ct: ct, label: "consensus_out_rendered", onError: onError);
 
-    /// <summary><c>laplace.consensus_in(id)</c> with rendered subject/type labels.</summary>
+    /// <summary><c>consensus.consensus_in(id)</c> with rendered subject/type labels.</summary>
     public static Task<IReadOnlyList<ConsensusEdgeRenderedRow>> ConsensusInRenderedAsync(
         NpgsqlConnection conn, byte[] id, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(conn, """
             SELECT laplace.render(c.type_id), laplace.render(c.subject_id),
                    c.rating, c.rd, c.volatility, c.witness_count
-            FROM laplace.consensus_in(@id) c
+            FROM consensus.consensus_in(@id) c
             """,
             static r => new ConsensusEdgeRenderedRow(
                 r.GetString(0), r.IsDBNull(1) ? null : r.GetString(1),
@@ -686,12 +1108,12 @@ public static class NpgsqlSubstrateReads
             p => p.Add("id", NpgsqlDbType.Bytea).Value = id,
             ct: ct, label: "attestations_in_rendered", onError: onError);
 
-    /// <summary><c>laplace.resolve_ref(text)</c> — word, concept, or hex → entity id.</summary>
+    /// <summary><c>converse.resolve_ref(text)</c> — word, concept, or hex → entity id.</summary>
     public static Task<byte[]?> ResolveRefAsync(
         NpgsqlDataSource dataSource, string reference, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ExecuteScalarAsync<byte[]>(dataSource,
-            "SELECT laplace.resolve_ref(@ref)",
+            "SELECT converse.resolve_ref(@ref)",
             p => p.AddWithValue("ref", reference),
             ct: ct, label: "resolve_ref", onError: onError);
 
@@ -705,7 +1127,7 @@ public static class NpgsqlSubstrateReads
             ct: ct, label: "word_id", onError: onError);
 
     /// <summary>
-    /// <c>laplace.chat(prompt, session, …)</c> — the conversational entry point.
+    /// <c>converse.chat(prompt, session, …)</c> — the conversational entry point.
     /// Optional shape/bands/elaborate match the MCP/HTTP dials; omit for the CLI two-arg form.
     /// </summary>
     public static Task<string?> ChatAsync(
@@ -713,7 +1135,7 @@ public static class NpgsqlSubstrateReads
         string? shape = null, int[]? bands = null, bool elaborate = false,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ExecuteScalarAsync<string>(conn, """
-            SELECT laplace.chat(@p, @s, NULL, @shape, @bands, NULL, NULL, NULL, @elab)
+            SELECT converse.chat(@p, @s, NULL, @shape, @bands, NULL, NULL, NULL, @elab)
             """,
             p =>
             {
@@ -733,7 +1155,7 @@ public static class NpgsqlSubstrateReads
         string? shape = null, int[]? bands = null, bool elaborate = false,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ExecuteScalarAsync<string>(dataSource, """
-            SELECT laplace.chat(@p, @s, NULL, @shape, @bands, NULL, NULL, NULL, @elab)
+            SELECT converse.chat(@p, @s, NULL, @shape, @bands, NULL, NULL, NULL, @elab)
             """,
             p =>
             {
@@ -758,17 +1180,17 @@ public static class NpgsqlSubstrateReads
             WITH resolved AS (
                 SELECT CASE
                     WHEN @ref ~ '^[0-9a-f]{32}$' THEN decode(@ref, 'hex')
-                    ELSE COALESCE(laplace.concept_ref(@ref), laplace.word_id(@ref))
+                    ELSE COALESCE(lexical.concept_ref(@ref), laplace.word_id(@ref))
                 END AS id,
                 CASE
                     WHEN @ref ~ '^[0-9a-f]{32}$' THEN 'hex'
-                    WHEN laplace.concept_ref(@ref) IS NOT NULL THEN 'concept'
+                    WHEN lexical.concept_ref(@ref) IS NOT NULL THEN 'concept'
                     WHEN laplace.word_id(@ref) IS NOT NULL THEN 'word'
                     ELSE 'not_found'
                 END AS ref_kind
             )
-            SELECT r.id, laplace.label_or_hex(r.id), r.ref_kind,
-                   laplace.entity_exists(r.id) AS exists
+            SELECT r.id, converse.label_or_hex(r.id), r.ref_kind,
+                   consensus.entity_exists(r.id) AS exists
             FROM resolved r
             WHERE r.id IS NOT NULL
             """,
@@ -789,7 +1211,7 @@ public static class NpgsqlSubstrateReads
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(conn, """
             SELECT n.axis, encode(n.entity_id, 'hex'), n.label, n.tier, n.geodesic, n.frechet
-            FROM laplace.explore_anchor_neighbors(
+            FROM structural.explore_anchor_neighbors(
                 @cx, @cy, @cz, @cm, @traj, @gk, @fk, @fmax) n
             """,
             static r => new AnchorNeighborRow(
@@ -822,7 +1244,7 @@ public static class NpgsqlSubstrateReads
             SELECT c.s, encode(c.id, 'hex'),
                    laplace.evidence_count(NULL, NULL, c.id)
             FROM c
-            WHERE laplace.entity_exists(c.id)
+            WHERE consensus.entity_exists(c.id)
             """,
             static r => new WitnessedWordRow(
                 r.GetString(0), r.GetString(1), r.IsDBNull(2) ? 0L : r.GetInt64(2)),
@@ -865,8 +1287,8 @@ public static class NpgsqlSubstrateReads
         NpgsqlRead.ReadRowsAsync(conn, """
             SELECT encode(m.member, 'hex'), m.kind,
                    COALESCE(NULLIF(laplace.render_text_fast(m.member, 8), ''),
-                            laplace.label_or_hex(m.member)), m.mu, m.witnesses
-            FROM laplace.concept_members(@id) m
+                            converse.label_or_hex(m.member)), m.mu, m.witnesses
+            FROM lexical.concept_members(@id) m
             ORDER BY m.mu DESC NULLS LAST, m.member
             LIMIT @limit
             """,
@@ -884,7 +1306,7 @@ public static class NpgsqlSubstrateReads
         NpgsqlConnection conn, byte[] id, int limit, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(conn,
-            "SELECT peer, kind, strength FROM laplace.concept_peers(@id, @limit)",
+            "SELECT peer, kind, strength FROM lexical.concept_peers(@id, @limit)",
             static r => new ConceptPeerRow(r.GetString(0), r.GetString(1), r.GetDouble(2)),
             p =>
             {
@@ -900,10 +1322,10 @@ public static class NpgsqlSubstrateReads
         NpgsqlRead.ReadRowsAsync(conn, """
             SELECT encode(c.entity_id, 'hex'), c.tier,
                    COALESCE(NULLIF(laplace.render_text_fast(c.type_id, 4), ''),
-                            laplace.label_or_hex(c.type_id)), c.hops,
+                            converse.label_or_hex(c.type_id)), c.hops,
                    COALESCE(NULLIF(laplace.render_text_fast(c.entity_id, 8), ''),
-                            laplace.label_or_hex(c.entity_id))
-            FROM laplace.containers_of(@id, @hops, @limit) c
+                            converse.label_or_hex(c.entity_id))
+            FROM structural.containers_of(@id, @hops, @limit) c
             """,
             static r => new ContainerRow(
                 r.GetString(0), r.GetInt16(1), r.GetString(2), r.GetInt32(3), r.GetString(4)),
@@ -927,8 +1349,8 @@ public static class NpgsqlSubstrateReads
                 encode(c.type_id, 'hex') AS type_id_hex,
                 c.eff_mu,
                 c.witnesses,
-                laplace.label_or_hex(c.object_id) AS object_label
-            FROM laplace.completions(converse.resolve(@prompt), @limit) c
+                converse.label_or_hex(c.object_id) AS object_label
+            FROM consensus.completions(converse.resolve(@prompt), @limit) c
             ORDER BY c.eff_mu DESC
             """,
             static r => new CompletionRow(
@@ -942,7 +1364,7 @@ public static class NpgsqlSubstrateReads
     public readonly record struct WalkTextStepRow(int Step, string Entity, int StrideUsed);
 
     /// <summary>
-    /// <c>laplace.walk_text(...)</c> — streams as it reads, so it stays outside
+    /// <c>generation.walk_text(...)</c> — streams as it reads, so it stays outside
     /// NpgsqlRead's buffer-then-return shape; the caller's IAsyncEnumerable pass-through
     /// is the whole point of this endpoint.
     /// </summary>
@@ -952,7 +1374,7 @@ public static class NpgsqlSubstrateReads
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = new NpgsqlCommand(
-            "SELECT step, entity, stride_used FROM laplace.walk_text(@p, @steps, @order, @temp, @topk);", conn);
+            "SELECT step, entity, stride_used FROM generation.walk_text(@p, @steps, @order, @temp, @topk);", conn);
         cmd.Parameters.AddWithValue("p", prompt);
         cmd.Parameters.AddWithValue("steps", steps);
         cmd.Parameters.AddWithValue("order", maxOrder);
@@ -990,7 +1412,7 @@ public static class NpgsqlSubstrateReads
         int Depth, string[] PathHex, string[] TypePathHex, string EntityIdHex, string EntityLabel,
         decimal EffMu, decimal PathMu, long Witnesses);
 
-    /// <summary><c>laplace.walk_branches(resolve(prompt), NULL, depth, beam)</c> — the explain trace.</summary>
+    /// <summary><c>consensus.walk_branches(converse.resolve(prompt), NULL, depth, beam)</c> — the explain trace.</summary>
     public static Task<IReadOnlyList<WalkBranchStepRow>> ExplainTraceStepsAsync(
         NpgsqlConnection conn, string prompt, int depth, int beam, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
@@ -1000,11 +1422,11 @@ public static class NpgsqlSubstrateReads
                 ARRAY(SELECT encode(x, 'hex') FROM unnest(gt.path) AS u(x)) AS path_hex,
                 ARRAY(SELECT encode(x, 'hex') FROM unnest(gt.types) AS u(x)) AS type_path_hex,
                 encode(gt.entity_id, 'hex') AS entity_id_hex,
-                laplace.label_or_hex(gt.entity_id) AS entity_label,
+                converse.label_or_hex(gt.entity_id) AS entity_label,
                 gt.eff_mu,
                 gt.path_mu,
                 gt.witnesses
-            FROM laplace.walk_branches(converse.resolve(@prompt), NULL, @depth, @beam) gt
+            FROM consensus.walk_branches(converse.resolve(@prompt), NULL, @depth, @beam) gt
             ORDER BY gt.depth, gt.path_mu DESC
             """,
             static r => new WalkBranchStepRow(
@@ -1062,7 +1484,7 @@ public static class NpgsqlSubstrateReads
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(conn, """
             WITH resolved AS (
-                SELECT laplace.resolve_ref(@target) AS id
+                SELECT converse.resolve_ref(@target) AS id
             )
             SELECT
                 r.id,
@@ -1100,7 +1522,7 @@ public static class NpgsqlSubstrateReads
             }, ct: ct, label: "evidence_for_target", onError: onError);
 
     /// <summary>
-    /// Readiness probe via <c>laplace.substrate_counts()</c> — no raw table EXISTS.
+    /// Readiness probe via <c>ops.substrate_counts()</c> — no raw table EXISTS.
     /// Estimates can lag; a freshly empty DB still reports zero.
     /// </summary>
     public static async Task<(bool EntitiesExist, bool ConsensusExist)> EntitiesAndConsensusExistAsync(
@@ -1111,9 +1533,9 @@ public static class NpgsqlSubstrateReads
         bool entities = false, consensus = false;
         foreach (var r in rows)
         {
-            if (r.Metric.StartsWith("entities", StringComparison.OrdinalIgnoreCase))
+            if (r.Metric.Equals("entities(ESTIMATE)", StringComparison.Ordinal))
                 entities = r.Value > 0;
-            else if (r.Metric.StartsWith("consensus", StringComparison.OrdinalIgnoreCase))
+            else if (r.Metric.Equals("consensus(ESTIMATE)", StringComparison.Ordinal))
                 consensus = r.Value > 0;
         }
         return (entities, consensus);
@@ -1142,7 +1564,7 @@ public static class NpgsqlSubstrateReads
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(conn, """
             WITH resolved AS (
-                SELECT laplace.resolve_ref(@target) AS id
+                SELECT converse.resolve_ref(@target) AS id
             )
             SELECT 0 AS kind, 0::bigint AS ord, r.id AS eid,
                    f.x, f.y, f.z, f.m, f.radius, f.n_constituents,
@@ -1189,7 +1611,7 @@ public static class NpgsqlSubstrateReads
 
     /// <summary>
     /// The bounded top-M edges by salience band x eff_mu. This is the LABELING layer
-    /// over <c>laplace.top_relations</c> and nothing else.
+    /// over <c>consensus.top_relations</c> and nothing else.
     ///
     /// It used to hand-roll the ranking instead, on the stated grounds that
     /// top_relations ran "full-table edge_rank() measured &gt;9 minutes live". That
@@ -1199,7 +1621,7 @@ public static class NpgsqlSubstrateReads
     /// label_or_hex per row on top of it. On 2026-08-06 that query held AccessShareLock
     /// for 2h08m, queued an ALTER EXTENSION behind it, and wedged the whole read
     /// surface. Rank in the installed core, label ONCE after the limit — the same
-    /// rank-then-label rule edges() follows.
+    /// rank-then-label rule consensus.edges() follows.
     /// </summary>
     public static Task<IReadOnlyList<TopRelationEdgeRow>> TopRelationsAsync(
         NpgsqlConnection conn, int limit, CancellationToken ct,
@@ -1208,7 +1630,7 @@ public static class NpgsqlSubstrateReads
             WITH t AS MATERIALIZED (
                 SELECT r.subject_id, r.type_id, r.object_id, r.eff_mu, r.witnesses,
                        row_number() OVER () AS ord
-                FROM laplace.top_relations(@limit) r
+                FROM consensus.top_relations(@limit) r
             ),
             ids AS MATERIALIZED (
                 SELECT array_agg(v.id ORDER BY t.ord, v.slot) AS a
@@ -1218,19 +1640,19 @@ public static class NpgsqlSubstrateReads
             rel AS MATERIALIZED (
                 SELECT d.type_id,
                        COALESCE(NULLIF(laplace.relation_canonical(d.type_id), ''),
-                                laplace.label_or_hex(d.type_id)) AS relation
+                                converse.label_or_hex(d.type_id)) AS relation
                 FROM (SELECT DISTINCT t.type_id FROM t) d
             ),
             lbl AS MATERIALIZED (
-                SELECT laplace.realize_batch(ids.a, NULL) AS l FROM ids
+                SELECT realize.batch(ids.a, NULL) AS l FROM ids
             )
             SELECT
                 encode(t.subject_id, 'hex') AS subject_id_hex,
-                COALESCE(lbl.l[(t.ord - 1) * 2 + 1], laplace.label_or_hex(t.subject_id)) AS subject_label,
+                COALESCE(lbl.l[(t.ord - 1) * 2 + 1], converse.label_or_hex(t.subject_id)) AS subject_label,
                 encode(t.type_id, 'hex') AS type_id_hex,
                 rel.relation AS type_label,
                 encode(t.object_id, 'hex') AS object_id_hex,
-                COALESCE(lbl.l[(t.ord - 1) * 2 + 2], laplace.label_or_hex(t.object_id)) AS object_label,
+                COALESCE(lbl.l[(t.ord - 1) * 2 + 2], converse.label_or_hex(t.object_id)) AS object_label,
                 t.eff_mu,
                 t.witnesses
             FROM t
@@ -1250,7 +1672,7 @@ public static class NpgsqlSubstrateReads
         NpgsqlRead.ExecuteScalarAsync<string>(conn, """
             SELECT COALESCE(
                 NULLIF(laplace.render_text_fast(@id, 8), ''),
-                laplace.label_or_hex(@id));
+                converse.label_or_hex(@id));
             """,
             p => p.Add("id", NpgsqlDbType.Bytea).Value = id,
             ct: ct, label: "label_or_hex", onError: onError);
@@ -1268,9 +1690,9 @@ public static class NpgsqlSubstrateReads
     {
         var rows = await NpgsqlRead.ReadRowsAsync(conn, """
             SELECT f.tier,
-                   COALESCE(NULLIF(laplace.render_text_fast(f.type_id, 4), ''), laplace.label_or_hex(f.type_id)),
-                   COALESCE(NULLIF(laplace.render_text_fast(@id, 8), ''), laplace.label_or_hex(@id)),
-                   laplace.entity_exists(@id)
+                   COALESCE(NULLIF(laplace.render_text_fast(f.type_id, 4), ''), converse.label_or_hex(f.type_id)),
+                   COALESCE(NULLIF(laplace.render_text_fast(@id, 8), ''), converse.label_or_hex(@id)),
+                   consensus.entity_exists(@id)
             FROM laplace.entity_facets(@id) f
             """,
             static r => new EntityFacetRow(r.GetInt16(0), r.GetString(1), r.GetString(2), r.GetBoolean(3)),
@@ -1282,7 +1704,7 @@ public static class NpgsqlSubstrateReads
     public readonly record struct MatchupSenseRow(
         string SenseIdHex, string SynsetIdHex, string SynsetLabel, decimal EffMu, long Witnesses);
 
-    /// <summary><c>laplace.senses(id)</c>.</summary>
+    /// <summary><c>lexical.senses(id)</c>.</summary>
     public static Task<IReadOnlyList<MatchupSenseRow>> SensesAsync(
         NpgsqlConnection conn, byte[] id, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
@@ -1388,19 +1810,19 @@ public static class NpgsqlSubstrateReads
     public readonly record struct ConsensusInLabeledRow(
         string SubjectIdHex, string TypeLabel, string SubjectLabel, decimal EffMu, long Witnesses);
 
-    /// <summary><c>laplace.consensus_in(id, limit)</c> — the inbound half of a matchup.</summary>
+    /// <summary><c>consensus.consensus_in(id, limit)</c> — the inbound half of a matchup.</summary>
     public static Task<IReadOnlyList<ConsensusInLabeledRow>> ConsensusInLabeledAsync(
         NpgsqlConnection conn, byte[] id, int limit, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(conn, """
             SELECT encode(c.subject_id, 'hex'),
-                   laplace.type_label(c.type_id),
+                   lexical.type_label(c.type_id),
                    COALESCE(
                        NULLIF(realize._synset_lemma(c.subject_id, converse.word_language(@id)), ''),
                        NULLIF(laplace.render_text_fast(c.subject_id, 8), ''),
                        left(encode(c.subject_id, 'hex'), 16)),
                    laplace.eff_mu_display(c.rating, c.rd), c.witness_count
-            FROM laplace.consensus_in(@id, @limit) c
+            FROM consensus.consensus_in(@id, @limit) c
             """,
             static r => new ConsensusInLabeledRow(
                 r.GetString(0), r.GetString(1), r.GetString(2), r.GetDecimal(3), r.GetInt64(4)),
@@ -1423,7 +1845,7 @@ public static class NpgsqlSubstrateReads
         NpgsqlRead.ReadRowsAsync(conn, """
             SELECT encode(w.source_id, 'hex'), encode(w.type_id, 'hex'), encode(w.object_id, 'hex'),
                    w.hop, laplace.eff_mu(w.rating, w.rd), w.witness_count
-            FROM laplace.explore_web(@seed, @hops, @fanout, @max_nodes) w
+            FROM consensus.explore_web(@seed, @hops, @fanout, @max_nodes) w
             """,
             static r => new ExploreWebEdgeRow(
                 r.GetString(0), r.GetString(1), r.GetString(2), r.GetInt16(3), r.GetDecimal(4), r.GetInt64(5)),
@@ -1445,7 +1867,7 @@ public static class NpgsqlSubstrateReads
             SELECT encode(x.id, 'hex'),
                    COALESCE(
                        NULLIF(laplace.render_text_fast(x.id, 8), ''),
-                       laplace.label_or_hex(x.id)),
+                       converse.label_or_hex(x.id)),
                    e.tier
             FROM unnest(@ids::bytea[]) AS x(id)
             LEFT JOIN laplace.entities e ON e.id = x.id
@@ -1463,8 +1885,8 @@ public static class NpgsqlSubstrateReads
         long Rating, long Rd, long WitnessCount);
 
     /// <summary>
-    /// <c>laplace.edges_raw(subject, direction, types, limit, refuted, rank)</c> — the one
-    /// consensus edge scan. Prefer this (or labeled <c>edges()</c>) over hand-joining
+    /// <c>consensus.edges_raw(subject, direction, types, limit, refuted, rank)</c> — the one
+    /// consensus edge scan. Prefer this (or labeled <c>consensus.edges()</c>) over hand-joining
     /// <c>laplace.consensus</c>.
     /// </summary>
     public static Task<IReadOnlyList<EdgesRawRow>> EdgesRawAsync(
@@ -1475,7 +1897,7 @@ public static class NpgsqlSubstrateReads
         NpgsqlRead.ReadRowsAsync(dataSource, """
             SELECT e.direction, e.type_id, e.neighbour_id,
                    e.rating, e.rd, e.witness_count
-            FROM laplace.edges_raw(@subject, @direction, @types, @limit, @refuted, @rank) e
+            FROM consensus.edges_raw(@subject, @direction, @types, @limit, @refuted, @rank) e
             """,
             static r => new EdgesRawRow(
                 r.GetString(0), (byte[])r[1], (byte[])r[2],
@@ -1496,7 +1918,7 @@ public static class NpgsqlSubstrateReads
 
     /// <summary>
     /// Per-subject strongest outbound edge of one type — <c>unnest</c> ×
-    /// <c>edges_raw(..., limit 1, rank eff_mu)</c>. Replaces
+    /// <c>consensus.edges_raw(..., limit 1, rank eff_mu)</c>. Replaces
     /// <c>FROM consensus WHERE subject_id = ANY(...) AND type_id = …</c> batch scans
     /// that then max-by-eff_mu in the client (ProvenanceExtractor circuit ENCODES).
     /// </summary>
@@ -1509,7 +1931,7 @@ public static class NpgsqlSubstrateReads
                    laplace.eff_mu_display(e.rating, e.rd),
                    e.witness_count
             FROM unnest(@ids::bytea[]) AS s(id)
-            CROSS JOIN LATERAL laplace.edges_raw(
+            CROSS JOIN LATERAL consensus.edges_raw(
                 s.id, 'out', ARRAY[@type]::bytea[], 1, @refuted, 'eff_mu') e
             """,
             static r => new BestOutboundRow(
@@ -1526,13 +1948,13 @@ public static class NpgsqlSubstrateReads
     public readonly record struct TranslationRow(
         string Translation, string Language, decimal EffMu, long Witnesses);
 
-    /// <summary><c>laplace.translations(resolve_ref(term), limit)</c>.</summary>
+    /// <summary><c>converse.translations(converse.resolve_ref(term), limit)</c>.</summary>
     public static Task<IReadOnlyList<TranslationRow>> TranslationsAsync(
         NpgsqlDataSource dataSource, string term, int limit, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
             SELECT t.translation, t.language, t.eff_mu, t.witnesses
-            FROM laplace.translations(laplace.resolve_ref(@term), @limit) t
+            FROM converse.translations(converse.resolve_ref(@term), @limit) t
             """,
             static r => new TranslationRow(
                 r.GetString(0), r.GetString(1), r.GetDecimal(2), r.GetInt64(3)),
@@ -1545,7 +1967,7 @@ public static class NpgsqlSubstrateReads
     public readonly record struct WalkBranchRow(
         int Depth, string Path, decimal EffMu, decimal PathMu, long Witnesses);
 
-    /// <summary><c>laplace.walk_branches</c> over resolve(prompt) or a hex entity id.</summary>
+    /// <summary><c>consensus.walk_branches</c> over converse.resolve(prompt) or a hex entity id.</summary>
     public static Task<IReadOnlyList<WalkBranchRow>> WalkBranchesAsync(
         NpgsqlDataSource dataSource, string? prompt, string? entityHex, string? relationType,
         int depth, int breadth, CancellationToken ct,
@@ -1556,7 +1978,7 @@ public static class NpgsqlSubstrateReads
             SELECT w.depth,
                    realize.path(w.path, w.types) AS path,
                    w.eff_mu, w.path_mu, w.witnesses
-            FROM node, laplace.walk_branches(
+            FROM node, consensus.walk_branches(
                      node.id,
                      CASE WHEN @t IS NULL THEN NULL ELSE laplace.relation_type_id(@t) END,
                      @depth, @breadth) w
@@ -1652,13 +2074,13 @@ public static class NpgsqlSubstrateReads
     public readonly record struct QueryShapeRow(
         string Shape, string Summary, bool NeedsTopic2, bool NeedsType, bool AcceptsLang);
 
-    /// <summary><c>laplace.query_shapes()</c> — live recall_intent shape catalog.</summary>
+    /// <summary><c>converse.query_shapes()</c> — live recall_intent shape catalog.</summary>
     public static Task<IReadOnlyList<QueryShapeRow>> QueryShapesAsync(
         NpgsqlDataSource dataSource, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
             SELECT shape, summary, needs_topic2, needs_type, accepts_lang
-            FROM laplace.query_shapes()
+            FROM converse.query_shapes()
             """,
             static r => new QueryShapeRow(
                 r.GetString(0), r.GetString(1), r.GetBoolean(2), r.GetBoolean(3), r.GetBoolean(4)),
@@ -1691,20 +2113,20 @@ public static class NpgsqlSubstrateReads
                        ELSE (SELECT array_agg(e.id)
                              FROM laplace.entities e
                              WHERE e.type_id = laplace.entity_type_id('RelationType')
-                               AND laplace.relation_highway_band(e.id) = ANY(@bands::int[]))
+                               AND consensus.relation_highway_band(e.id) = ANY(@bands::int[]))
                        END AS ids
             )
             SELECT b.name || ' · ' || laplace.relation_canonical(z.type_id) || ' → '
-                     || laplace.label_or_hex(z.neighbour_id) AS reply,
+                     || converse.label_or_hex(z.neighbour_id) AS reply,
                    laplace.eff_mu_display(z.rating, z.rd) AS eff_mu,
                    z.witness_count
             FROM band_types bt
-            CROSS JOIN LATERAL laplace.edges_raw(
+            CROSS JOIN LATERAL consensus.edges_raw(
                 @topic, 'both', bt.ids,
                 GREATEST(@limit * 4, 40),
                 true, 'eff_mu') z
             JOIN converse.relation_band_catalog() b
-              ON b.band = laplace.relation_highway_band(z.type_id)
+              ON b.band = consensus.relation_highway_band(z.type_id)
             ORDER BY b.rank DESC, laplace.eff_mu(z.rating, z.rd) DESC
             LIMIT @limit
             """,
@@ -1717,15 +2139,15 @@ public static class NpgsqlSubstrateReads
                 p.AddWithValue("limit", limit);
             }, ct: ct, label: "band_facts", onError: onError);
 
-    /// <summary><c>laplace.walk_strongest(topic, NULL, depth)</c> — greedy single chain.</summary>
+    /// <summary><c>consensus.walk_strongest(topic, NULL, depth)</c> — greedy single chain.</summary>
     public static Task<IReadOnlyList<ConverseReplyRow>> WalkStrongestAsync(
         NpgsqlDataSource dataSource, byte[] topic, int depth, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
-            SELECT laplace.label_or_hex(w.entity_id)
+            SELECT converse.label_or_hex(w.entity_id)
                      || ' (' || laplace.relation_canonical(w.type_id) || ')' AS reply,
                    w.eff_mu, NULL::bigint
-            FROM laplace.walk_strongest(@topic, NULL, @depth) w
+            FROM consensus.walk_strongest(@topic, NULL, @depth) w
             ORDER BY w.step
             """,
             MapConverseReply,
@@ -1736,7 +2158,7 @@ public static class NpgsqlSubstrateReads
             }, ct: ct, label: "walk_strongest", onError: onError);
 
     /// <summary>
-    /// <c>laplace.walk_branches</c> gated by a highway band mask and/or named relation type.
+    /// <c>consensus.walk_branches</c> gated by a highway band mask and/or named relation type.
     /// </summary>
     public static Task<IReadOnlyList<ConverseReplyRow>> WalkBranchesBeamAsync(
         NpgsqlDataSource dataSource, byte[] topic, string? relationType, int[]? bands,
@@ -1745,16 +2167,16 @@ public static class NpgsqlSubstrateReads
         NpgsqlRead.ReadRowsAsync(dataSource, """
             WITH mask AS (
                 SELECT CASE WHEN @bands::int[] IS NULL THEN NULL
-                            ELSE laplace.laplace_highway_mask_from_bits(
+                            ELSE consensus.laplace_highway_mask_from_bits(
                                      (SELECT array_agg(DISTINCT bit)
                                       FROM unnest(@bands::int[]) AS b(band),
-                                           LATERAL unnest(laplace.laplace_highway_mask_bits(
-                                               laplace.laplace_highway_band_mask(b.band))) AS t(bit)))
+                                           LATERAL unnest(consensus.laplace_highway_mask_bits(
+                                               consensus.laplace_highway_band_mask(b.band))) AS t(bit)))
                        END AS m
             )
             SELECT repeat('  ', w.depth) || realize.path(w.path, w.types) AS reply,
                    w.path_mu, w.witnesses
-            FROM mask, laplace.walk_branches(
+            FROM mask, consensus.walk_branches(
                      @topic,
                      CASE WHEN @type::text IS NULL THEN NULL
                           ELSE laplace.relation_type_id(@type::text) END,
@@ -1774,15 +2196,15 @@ public static class NpgsqlSubstrateReads
                 p.AddWithValue("limit", limit);
             }, ct: ct, label: "walk_branches", onError: onError);
 
-    /// <summary><c>laplace.astar_path(topic, ARRAY[topic2], depth, NULL, directed, geometry)</c>.</summary>
+    /// <summary><c>converse.astar_path(topic, ARRAY[topic2], depth, NULL, directed, geometry)</c>.</summary>
     public static Task<IReadOnlyList<ConverseReplyRow>> AstarPathAsync(
         NpgsqlDataSource dataSource, byte[] topic, byte[] topic2, int depth,
         bool directed, bool useGeometry, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
-            SELECT repeat('  ', p.step) || laplace.label_or_hex(p.entity_id) AS reply,
+            SELECT repeat('  ', p.step) || converse.label_or_hex(p.entity_id) AS reply,
                    p.g::numeric, NULL::bigint
-            FROM laplace.astar_path(@topic, ARRAY[@topic2]::bytea[], @depth, NULL,
+            FROM converse.astar_path(@topic, ARRAY[@topic2]::bytea[], @depth, NULL,
                                     @directed, @geometry) p
             ORDER BY p.step
             """,
@@ -1796,14 +2218,14 @@ public static class NpgsqlSubstrateReads
                 p.AddWithValue("geometry", useGeometry);
             }, ct: ct, label: "astar_path", onError: onError);
 
-    /// <summary><c>laplace.walk_continuations</c> — seeded trajectory descent.</summary>
+    /// <summary><c>generation.walk_continuations</c> — seeded trajectory descent.</summary>
     public static Task<IReadOnlyList<ConverseReplyRow>> WalkContinuationsAsync(
         NpgsqlDataSource dataSource, byte[] topic, int steps, int maxStride,
         double spread, int breadth, long? seed, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
-            SELECT laplace.label_or_hex(w.entity) AS reply, NULL::numeric, NULL::bigint
-            FROM laplace.walk_continuations(ARRAY[@topic]::bytea[], @steps, @stride,
+            SELECT converse.label_or_hex(w.entity) AS reply, NULL::numeric, NULL::bigint
+            FROM generation.walk_continuations(ARRAY[@topic]::bytea[], @steps, @stride,
                                             @spread, @breadth, @seed) w
             ORDER BY w.step
             """,
@@ -1841,13 +2263,13 @@ public static class NpgsqlSubstrateReads
     public readonly record struct ChessRankedPlayerRow(
         long Rank, string IdHex, string Name, long Games, double Rating, double Rd, double EffMu);
 
-    /// <summary><c>laplace.chess_ranked(limit, offset)</c>.</summary>
+    /// <summary><c>chess.ranked(limit, offset)</c>.</summary>
     public static Task<IReadOnlyList<ChessRankedPlayerRow>> ChessRankedAsync(
         NpgsqlDataSource dataSource, int limit, int offset, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
             SELECT rank, encode(player_id, 'hex'), name, games, rating, rd, eff_mu
-            FROM laplace.chess_ranked(@limit, @offset)
+            FROM chess.ranked(@limit, @offset)
             """,
             static r => new ChessRankedPlayerRow(
                 r.GetInt64(0), r.GetString(1), r.GetString(2),
@@ -1861,13 +2283,13 @@ public static class NpgsqlSubstrateReads
     public readonly record struct ChessPlayerStrengthRow(
         string IdHex, string Name, long Games, double Rating, double Rd, double EffMu);
 
-    /// <summary><c>laplace.chess_players_by_initial(initial, limit, offset)</c>.</summary>
+    /// <summary><c>chess.players_by_initial(initial, limit, offset)</c>.</summary>
     public static Task<IReadOnlyList<ChessPlayerStrengthRow>> ChessPlayersByInitialAsync(
         NpgsqlDataSource dataSource, string initial, int limit, int offset, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
             SELECT encode(player_id, 'hex'), name, games, rating, rd, eff_mu
-            FROM laplace.chess_players_by_initial(@initial, @limit, @offset)
+            FROM chess.players_by_initial(@initial, @limit, @offset)
             """,
             static r => new ChessPlayerStrengthRow(
                 r.GetString(0), r.GetString(1),
@@ -1887,14 +2309,14 @@ public static class NpgsqlSubstrateReads
         NpgsqlDataSource dataSource, string name, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
-            WITH p AS (SELECT laplace.chess_player_id(@name) AS id)
-            SELECT encode(p.id, 'hex'), laplace.label_or_hex(p.id),
+            WITH p AS (SELECT chess.player_id(@name) AS id)
+            SELECT encode(p.id, 'hex'), converse.label_or_hex(p.id),
                    e.witness_count,
                    round((e.rating / 1e9)::numeric, 3)::double precision,
                    round((e.rd / 1e9)::numeric, 3)::double precision,
                    laplace.eff_mu_display(e.rating, e.rd)::double precision
             FROM p
-            CROSS JOIN LATERAL laplace.edges_raw(
+            CROSS JOIN LATERAL consensus.edges_raw(
                 p.id, 'out',
                 ARRAY[laplace.relation_type_id('OUTCOME')],
                 1, true, 'eff_mu') e
@@ -1908,13 +2330,13 @@ public static class NpgsqlSubstrateReads
     public readonly record struct ChessPlayerRecordRow(
         bool? AsWhite, long Games, long Wins, long Draws, long Losses, long Unscored, double? Score);
 
-    /// <summary><c>laplace.chess_player_record(id)</c>.</summary>
+    /// <summary><c>chess.player_record(id)</c>.</summary>
     public static Task<IReadOnlyList<ChessPlayerRecordRow>> ChessPlayerRecordAsync(
         NpgsqlDataSource dataSource, byte[] id, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
             SELECT as_white, games, wins, draws, losses, unscored, score
-            FROM laplace.chess_player_record(@id)
+            FROM chess.player_record(@id)
             """,
             static r => new ChessPlayerRecordRow(
                 r.IsDBNull(0) ? null : r.GetBoolean(0),
@@ -1925,12 +2347,12 @@ public static class NpgsqlSubstrateReads
 
     public readonly record struct ChessPlayerRatingRow(int Rating, long Games);
 
-    /// <summary><c>laplace.chess_player_ratings(id)</c>.</summary>
+    /// <summary><c>chess.player_ratings(id)</c>.</summary>
     public static Task<IReadOnlyList<ChessPlayerRatingRow>> ChessPlayerRatingsAsync(
         NpgsqlDataSource dataSource, byte[] id, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
-            SELECT rating, games FROM laplace.chess_player_ratings(@id)
+            SELECT rating, games FROM chess.player_ratings(@id)
             """,
             static r => new ChessPlayerRatingRow(r.GetInt32(0), r.GetInt64(1)),
             p => p.Add("id", NpgsqlDbType.Bytea).Value = id,
@@ -1939,13 +2361,13 @@ public static class NpgsqlSubstrateReads
     public readonly record struct ChessHeadToHeadRow(
         string OpponentIdHex, string Opponent, long Games, double Rating, double Rd, double EffMu);
 
-    /// <summary><c>laplace.chess_head_to_head(id, limit)</c>.</summary>
+    /// <summary><c>chess.head_to_head(id, limit)</c>.</summary>
     public static Task<IReadOnlyList<ChessHeadToHeadRow>> ChessHeadToHeadAsync(
         NpgsqlDataSource dataSource, byte[] id, int limit, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
             SELECT encode(opponent_id, 'hex'), opponent, games, rating, rd, eff_mu
-            FROM laplace.chess_head_to_head(@id, @limit)
+            FROM chess.head_to_head(@id, @limit)
             """,
             static r => new ChessHeadToHeadRow(
                 r.GetString(0), r.GetString(1),
@@ -1960,14 +2382,14 @@ public static class NpgsqlSubstrateReads
         string EventIdHex, string? PlayedOn, string? Event, string? Eco, bool AsWhite,
         string? OpponentIdHex, string Opponent, string? Result, short? Outcome);
 
-    /// <summary><c>laplace.chess_player_games(id, limit, offset)</c>.</summary>
+    /// <summary><c>chess.player_games(id, limit, offset)</c>.</summary>
     public static Task<IReadOnlyList<ChessPlayerGameRow>> ChessPlayerGamesAsync(
         NpgsqlDataSource dataSource, byte[] id, int limit, int offset, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
             SELECT encode(event_id, 'hex'), played_on, event, eco, as_white,
                    encode(opponent_id, 'hex'), opponent, result, outcome
-            FROM laplace.chess_player_games(@id, @limit, @offset)
+            FROM chess.player_games(@id, @limit, @offset)
             """,
             static r => new ChessPlayerGameRow(
                 r.GetString(0),
@@ -1990,13 +2412,13 @@ public static class NpgsqlSubstrateReads
     public readonly record struct ChessGamePlyStoredRow(
         int Ply, string PositionIdHex, string? San, string? Clock, string? EvalToken);
 
-    /// <summary><c>laplace.chess_game_plies(id)</c>.</summary>
+    /// <summary><c>chess.game_plies(id)</c>.</summary>
     public static Task<IReadOnlyList<ChessGamePlyStoredRow>> ChessGamePliesAsync(
         NpgsqlDataSource dataSource, byte[] id, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
             SELECT ply, encode(position_id, 'hex'), san, clock, eval_token
-            FROM laplace.chess_game_plies(@id)
+            FROM chess.game_plies(@id)
             """,
             static r => new ChessGamePlyStoredRow(
                 r.GetInt32(0), r.GetString(1),
@@ -2012,7 +2434,7 @@ public static class NpgsqlSubstrateReads
         string? Result, string? PlayedOn, string? Event, string? Eco,
         string? Termination, string? TimeControl, string? TcClass, string? Movetext);
 
-    /// <summary><c>laplace.chess_game(id)</c>.</summary>
+    /// <summary><c>chess.game(id)</c>.</summary>
     public static Task<IReadOnlyList<ChessGameDetailRow>> ChessGameAsync(
         NpgsqlDataSource dataSource, byte[] id, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
@@ -2020,7 +2442,7 @@ public static class NpgsqlSubstrateReads
             SELECT encode(white_id, 'hex'), white, encode(black_id, 'hex'), black,
                    result, played_on, event, eco, termination, time_control,
                    tc_class, movetext
-            FROM laplace.chess_game(@id)
+            FROM chess.game(@id)
             """,
             static r => new ChessGameDetailRow(
                 r.IsDBNull(0) ? null : r.GetString(0),
@@ -2041,12 +2463,12 @@ public static class NpgsqlSubstrateReads
 
     public readonly record struct ModelRecipeRow(byte[] RecipeId, string RecipeJson);
 
-    /// <summary><c>laplace.model_recipes()</c>.</summary>
+    /// <summary><c>structural.model_recipes()</c>.</summary>
     public static Task<IReadOnlyList<ModelRecipeRow>> ModelRecipesAsync(
         NpgsqlDataSource dataSource, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
-            SELECT recipe_id, recipe_json FROM laplace.model_recipes()
+            SELECT recipe_id, recipe_json FROM structural.model_recipes()
             """,
             static r => new ModelRecipeRow((byte[])r[0], r.GetString(1)),
             ct: ct, label: "model_recipes", onError: onError,
@@ -2110,13 +2532,13 @@ public static class NpgsqlSubstrateReads
     public readonly record struct ChessMoveRow(
         byte[] NextPosition, double EffMu, double Rd, long WitnessCount);
 
-    /// <summary><c>laplace.chess_moves(root, limit)</c>.</summary>
+    /// <summary><c>chess.moves(root, limit)</c>.</summary>
     public static Task<IReadOnlyList<ChessMoveRow>> ChessMovesAsync(
         NpgsqlDataSource dataSource, byte[] rootId, int limit, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
             SELECT next_position, eff_mu, rd, witness_count
-            FROM laplace.chess_moves(@root, @limit)
+            FROM chess.moves(@root, @limit)
             """,
             static r => new ChessMoveRow(
                 (byte[])r[0], r.GetDouble(1), r.GetDouble(2), r.GetInt64(3)),
@@ -2129,13 +2551,13 @@ public static class NpgsqlSubstrateReads
     public readonly record struct ChessPlayerMoveRow(
         byte[] NextPosition, long Games, double Score);
 
-    /// <summary><c>laplace.chess_player_moves(root, player, white, limit)</c>.</summary>
+    /// <summary><c>chess.player_moves(root, player, white, limit)</c>.</summary>
     public static Task<IReadOnlyList<ChessPlayerMoveRow>> ChessPlayerMovesAsync(
         NpgsqlDataSource dataSource, byte[] rootId, byte[] playerId, bool whiteToMove,
         int limit, CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
             SELECT next_position, games, score
-            FROM laplace.chess_player_moves(@root, @player, @white, @limit)
+            FROM chess.player_moves(@root, @player, @white, @limit)
             """,
             static r => new ChessPlayerMoveRow((byte[])r[0], r.GetInt64(1), r.GetDouble(2)),
             p =>
@@ -2267,7 +2689,7 @@ public static class NpgsqlSubstrateReads
                 FROM doc d
                 CROSS JOIN LATERAL (
                     SELECT t.entity_id, t.run_length, o AS ord
-                    FROM laplace.trajectory_unpacked_points(d.id) WITH ORDINALITY AS t(entity_id, run_length, ctier, o)
+                    FROM generation.trajectory_unpacked_points(d.id) WITH ORDINALITY AS t(entity_id, run_length, ctier, o)
                 ) p
                 CROSS JOIN LATERAL generate_series(1, GREATEST(p.run_length, 1)) AS rep(n)
             ),
@@ -2278,7 +2700,7 @@ public static class NpgsqlSubstrateReads
                 SELECT p.id AS eid, t.txt
                 FROM distinct_ids b,
                      LATERAL unnest(b.a) WITH ORDINALITY AS p(id, i),
-                     LATERAL unnest(laplace.realize_batch(b.a, NULL)) WITH ORDINALITY AS t(txt, j)
+                     LATERAL unnest(realize.batch(b.a, NULL)) WITH ORDINALITY AS t(txt, j)
                 WHERE p.i = t.j
             )
             SELECT tok.doc_id, string_agg(label.txt, ' ' ORDER BY tok.tord, tok.repeat_ix)
@@ -2297,12 +2719,12 @@ public static class NpgsqlSubstrateReads
         return result;
     }
 
-    /// <summary><c>laplace.recall_trajectories(word_id(w), k)</c> — first answer.</summary>
+    /// <summary><c>generation.recall_trajectories(word_id(w), k)</c> — first answer.</summary>
     public static Task<string?> RecallTrajectoryAnswerAsync(
         NpgsqlDataSource dataSource, string word, int k, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ExecuteScalarAsync<string>(dataSource, """
-            SELECT answer FROM laplace.recall_trajectories(laplace.word_id(@w), @k) LIMIT 1
+            SELECT answer FROM generation.recall_trajectories(laplace.word_id(@w), @k) LIMIT 1
             """,
             p =>
             {
@@ -2310,12 +2732,12 @@ public static class NpgsqlSubstrateReads
                 p.AddWithValue("k", k);
             }, ct: ct, label: "recall_trajectories", onError: onError);
 
-    /// <summary>Top <c>salient_facts(word_id(w), NULL, k)</c> fact by eff_mu.</summary>
+    /// <summary>Top <c>consensus.salient_facts(word_id(w), NULL, k)</c> fact by eff_mu.</summary>
     public static Task<string?> SalientFactForWordAsync(
         NpgsqlDataSource dataSource, string word, int k, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ExecuteScalarAsync<string>(dataSource, """
-            SELECT fact FROM laplace.salient_facts(laplace.word_id(@w), NULL, @k)
+            SELECT fact FROM consensus.salient_facts(laplace.word_id(@w), NULL, @k)
             ORDER BY eff_mu DESC LIMIT 1
             """,
             p =>

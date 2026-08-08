@@ -1,4 +1,6 @@
+-- BEGIN ATOMIC: GH #764.
 CREATE OR REPLACE FUNCTION vertex_atom(p_flags bigint) RETURNS integer
-    LANGUAGE sql LAPLACE_IMMUTABLE AS $$
-    SELECT public.laplace_vertex_atom(p_flags)
-$$;
+    LANGUAGE sql LAPLACE_IMMUTABLE
+BEGIN ATOMIC
+    SELECT public.laplace_vertex_atom(p_flags);
+END;

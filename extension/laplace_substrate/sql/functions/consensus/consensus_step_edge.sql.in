@@ -19,11 +19,12 @@
 -- index, ordered by the index's own second column, LIMIT 1 — so each stops at
 -- its first match. The outer LIMIT 1 then picks between at most two rows, which
 -- is the same answer: the maximum over a union is the maximum of the per-arm
--- maxima. This is exactly the UNION ALL shape edges_raw() uses for 'both'; the
+-- maxima. This is exactly the UNION ALL shape consensus.edges_raw() uses for 'both'; the
 -- reason this body cannot simply delegate to edges_raw is that edges_raw takes
 -- no neighbour filter, so it would apply its cap to the whole fan-out of p_from
 -- before p_to could be selected out of it.
-CREATE OR REPLACE FUNCTION consensus_step_edge(
+DROP FUNCTION IF EXISTS laplace.consensus_step_edge(bytea, bytea);
+CREATE OR REPLACE FUNCTION consensus.step_edge(
     p_from bytea,
     p_to   bytea)
     RETURNS TABLE(type_id bytea, subject_id bytea, rating bigint, rd bigint, witness_count bigint)
@@ -34,6 +35,9 @@ CREATE OR REPLACE FUNCTION consensus_step_edge(
          FROM @extschema@.v_consensus_unrefuted c
          WHERE c.subject_id = p_from
            AND c.object_id = p_to
+           -- Explicit IS NOT NULL so the planner can match the partial
+           -- consensus_subject_eff_mu_btree (WHERE object_id IS NOT NULL).
+           AND c.object_id IS NOT NULL
          ORDER BY @extschema@.eff_mu(c.rating, c.rd) DESC
          LIMIT 1)
         UNION ALL
@@ -41,6 +45,7 @@ CREATE OR REPLACE FUNCTION consensus_step_edge(
          FROM @extschema@.v_consensus_unrefuted c
          WHERE c.subject_id = p_to
            AND c.object_id = p_from
+           AND c.object_id IS NOT NULL
          ORDER BY @extschema@.eff_mu(c.rating, c.rd) DESC
          LIMIT 1)
     ) e

@@ -120,6 +120,9 @@ public sealed class FrameNetDecomposerTests
     [Fact]
     public async Task Attestations_Use_RegistryRouted_Canonical_Type_Ids()
     {
+        // Content attestations only — period-boundary/HasLayerCompleted markers
+        // (GH #898 per-file resume) are ops metadata typed outside the highway
+        // registry on purpose (LayerCompletion.RelationTypeId).
         var atts = await CollectAttestationsAsync();
 
         var canonical = new HashSet<Hash128>(RelationTypeRegistry.AllCanonical().Select(k => k.Id));
@@ -254,7 +257,16 @@ public sealed class FrameNetDecomposerTests
             var ctx = new FakeContext(new NullWriter()) { EcosystemPath = dir };
             var atts = new List<AttestationRow>();
             await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
+            {
+                // Skip file-progress markers (period-boundary/ / file-failed/) — not
+                // FrameNet testimony; their TypeId is HasLayerCompleted, not a highway
+                // relation (GH #898).
+                var unit = change.Metadata.SourceContentUnitName;
+                if (unit.StartsWith(IngestBatchPipeline.PeriodBoundaryUnitPrefix, StringComparison.Ordinal)
+                    || unit.StartsWith(IngestBatchPipeline.FileFailedUnitPrefix, StringComparison.Ordinal))
+                    continue;
                 atts.AddRange(change.Attestations.ToArray());
+            }
             return atts;
         }
         finally

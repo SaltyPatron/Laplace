@@ -1,16 +1,17 @@
 
 
 
-CREATE OR REPLACE FUNCTION language_coverage(p_word bytea, p_limit int DEFAULT 40)
-    RETURNS TABLE(reply text, laplace.eff_mu numeric, witnesses bigint)
+DROP FUNCTION IF EXISTS laplace.language_coverage(bytea, int);
+CREATE OR REPLACE FUNCTION converse.language_coverage(p_word bytea, p_limit int DEFAULT 40)
+    RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
  AS $$
     WITH langs AS (
         SELECT DISTINCT realize.label(sm.lang) AS code
-        FROM laplace.synset_members(p_word) sm
+        FROM lexical.synset_members(p_word) sm
         WHERE sm.lang IS NOT NULL
         UNION
-        SELECT realize.label(laplace.converse.word_language(p_word))
+        SELECT realize.label(converse.word_language(p_word))
     ),
     shown AS (SELECT code FROM langs WHERE code IS NOT NULL ORDER BY code LIMIT p_limit)
     SELECT COALESCE(realize.label(p_word), '?') || ' is witnessed across '

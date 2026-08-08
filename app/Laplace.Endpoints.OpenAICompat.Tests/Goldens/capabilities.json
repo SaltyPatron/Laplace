@@ -3,12 +3,12 @@
   "endpoints": {
     "chat_completions": {
       "status": "live",
-      "backend": "laplace.recall_session",
+      "backend": "converse.recall_session",
       "billing": "preflight_quote_required"
     },
     "completions": {
       "status": "live",
-      "backend": "laplace.completions",
+      "backend": "consensus.completions",
       "billing": "preflight_quote_required"
     },
     "embeddings": {
@@ -18,17 +18,17 @@
     },
     "audit_reports": {
       "status": "live",
-      "backend": "laplace.substrate_counts + laplace.consensus_stats + laplace.top_relations",
+      "backend": "laplace.substrate_counts + consensus.stats + consensus.top_relations",
       "billing": "audit.deep_report"
     },
     "visualizations": {
       "status": "live",
-      "backend": "laplace.top_relations + laplace.entity_physicalities",
+      "backend": "consensus.top_relations + laplace.entity_physicalities",
       "billing": "visualization.deep_export"
     },
     "explainability_reports": {
       "status": "live",
-      "backend": "laplace.walk_branches + laplace.attestations_out",
+      "backend": "consensus.walk_branches + laplace.attestations_out",
       "billing": "explain.trace"
     },
     "billing": {

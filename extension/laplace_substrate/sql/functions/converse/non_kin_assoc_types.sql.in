@@ -1,4 +1,4 @@
--- non_kin_assoc_types(): the relation types that ride the ASSOCIATIVE salience band
+-- converse.non_kin_assoc_types(): the relation types that ride the ASSOCIATIVE salience band
 -- but do not mean "semantically related to".
 --
 -- Bands rank IMPORTANCE; families say what a relation MEANS. Conversational
@@ -24,7 +24,6 @@
 -- WHERE clauses in hash space, never rendered.
 -- converse.non_kin_assoc_types — GH #862 / #860. No SET, real schema names.
 DROP FUNCTION IF EXISTS laplace.non_kin_assoc_types();
-
 CREATE OR REPLACE FUNCTION converse.non_kin_assoc_types()
     RETURNS TABLE(id bytea)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$

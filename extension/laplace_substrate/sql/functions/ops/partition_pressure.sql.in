@@ -1,3 +1,5 @@
+-- BEGIN ATOMIC: GH #764.
+-- Partition skew detector via pg_class.reltuples / pg_partition_tree (no table scan).
 CREATE OR REPLACE FUNCTION partition_pressure(p_table text DEFAULT NULL)
     RETURNS TABLE(
         parent        text,
@@ -8,33 +10,7 @@ CREATE OR REPLACE FUNCTION partition_pressure(p_table text DEFAULT NULL)
         total_size    text,
         bounds        text)
     LANGUAGE sql STABLE
-    SET search_path = @extschema@, public AS $$
-    -- Partition SKEW detector, for every partitioned substrate table.
-    --
-    -- consensus_partition_pressure() answers a narrower question (which relations are piling
-    -- into the LIST default) and cannot run at all on a populated database: it resolves
-    -- label() -> resolve_name() -> constituents_closure() per group, so it times out before
-    -- reporting. An instrument that dies at the scale where the problem appears is the same
-    -- as no instrument, and that is exactly how this went unseen:
-    --
-    --   physicalities is RANGE(hilbert_index) cut into 64 EQUAL-WIDTH slices. Equal width
-    --   assumes the hilbert index is uniformly distributed. It is not, and cannot be:
-    --   super_fibonacci_point places every atom exactly on S3 (a 3-manifold, zero 4-volume),
-    --   and hilbert4d_encode then linearizes the ambient 4-box. Uniform on S3 is not uniform
-    --   in the box. MEASURED 2026-08-03: physicalities_ba0 held 48.81% of all physicality
-    --   rows -- 31x its 1/64 share, 55 GB against 31 GB of shared_buffers, so the hot
-    --   partition cannot be cached by itself, ever. Nothing reported this.
-    --
-    --   The correct mechanism was already running one table over: entities tier 2 is
-    --   HASH(id) x8 and measured a 0.4% spread across its partitions at the same instant.
-    --
-    -- Statistics only -- pg_class.reltuples, pg_partition_tree, pg_get_expr. No table access,
-    -- no name resolution, no scan, so this stays answerable exactly when it matters.
-    -- ANALYZE freshness bounds reltuples; a partition never analyzed reports reltuples = -1
-    -- in PG14+ and is clamped to 0 here rather than poisoning the percentage.
-    --
-    -- p_table NULL reports every top-level partitioned table in the schema; pass a name
-    -- ('physicalities', 'entities', 'attestations', 'consensus') to scope it.
+BEGIN ATOMIC
     WITH parents AS (
         SELECT c.oid, c.relname
         FROM pg_class c
@@ -42,7 +18,6 @@ CREATE OR REPLACE FUNCTION partition_pressure(p_table text DEFAULT NULL)
         WHERE n.nspname = '@extschema@'
           AND c.relkind = 'p'
           AND (p_table IS NULL OR c.relname = p_table)
-          -- top-level only: sub-partitioned parents reappear as interior nodes of the tree
           AND NOT EXISTS (SELECT 1 FROM pg_inherits i WHERE i.inhrelid = c.oid)
     ), leaves AS (
         SELECT p.relname AS parent, t.relid
@@ -66,5 +41,5 @@ CREATE OR REPLACE FUNCTION partition_pressure(p_table text DEFAULT NULL)
            pg_size_pretty(s.total_bytes)              AS total_size,
            s.bounds
     FROM sized s
-    ORDER BY s.parent, s.rows_approx DESC
-$$;
+    ORDER BY s.parent, s.rows_approx DESC;
+END;

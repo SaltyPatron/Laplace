@@ -1,4 +1,5 @@
-CREATE OR REPLACE FUNCTION chess_outcome(p_as_white boolean, p_result bytea)
+DROP FUNCTION IF EXISTS laplace.chess_outcome(boolean, bytea);
+CREATE OR REPLACE FUNCTION chess.outcome(p_as_white boolean, p_result bytea)
     RETURNS smallint
     LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
     -- The one place a game header becomes an outcome for ONE of its two players.

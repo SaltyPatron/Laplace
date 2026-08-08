@@ -1,8 +1,7 @@
 -- Shape axis: Frechet over REALIZED curves (entity_curve), never packed
--- physicalities.trajectory (Rule #3 / Issue 51).
+-- laplace.physicalities.trajectory (Rule #3 / Issue 51).
 -- structural.neighbors — GH #862 / #860. No SET, real schema names.
 DROP FUNCTION IF EXISTS laplace.structural_neighbors(text, integer);
-
 CREATE OR REPLACE FUNCTION structural.neighbors(p_word text, p_k integer DEFAULT 10)
     RETURNS TABLE(neighbor text, geodesic double precision, frechet double precision)
     LANGUAGE plpgsql STABLE AS $sn$
@@ -11,7 +10,7 @@ DECLARE
     v_coord geometry;
     v_curve geometry;
 BEGIN
-    SELECT w.id, w.coord, laplace.entity_curve(w.id)
+    SELECT w.id, w.coord, structural.entity_curve(w.id)
       INTO v_id, v_coord, v_curve
     FROM laplace.v_word_points w
     JOIN converse.prompt_state(p_word) s ON w.id = s.id
@@ -46,11 +45,11 @@ BEGIN
         FROM nearest t
     ),
     curves AS (
-        SELECT o.entity_id, o.geo, o.ord, laplace.entity_curve(o.entity_id) AS curve
+        SELECT o.entity_id, o.geo, o.ord, structural.entity_curve(o.entity_id) AS curve
         FROM ordered o
     ),
     labels AS (
-        SELECT laplace.realize_batch(array_agg(c.entity_id ORDER BY c.ord)) AS l
+        SELECT realize.batch(array_agg(c.entity_id ORDER BY c.ord)) AS l
         FROM curves c
     )
     SELECT r.lbl, r.geo, r.frechet FROM (

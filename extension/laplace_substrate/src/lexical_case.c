@@ -538,7 +538,7 @@ pg_laplace_word_case_variants(PG_FUNCTION_ARGS)
 		Datum      av[1] = { PointerGetDatum(vid_arr) };
 
 		rc = SPI_execute_with_args(
-			"SELECT u.id, laplace.entity_exists(u.id) "
+			"SELECT u.id, consensus.entity_exists(u.id) "
 			"FROM unnest($1::bytea[]) AS u(id)",
 			1, at, av, NULL, true, 0);
 		if (rc != SPI_OK_SELECT)

@@ -6,7 +6,8 @@
 -- join + top-N heapsort. This does the same job as two explicitly sequenced
 -- SPI calls (fetch the anchor point, then a genuine bound-parameter KNN
 -- scan), restoring real index usage.
-CREATE OR REPLACE FUNCTION word_shape_peers_fast(p_word bytea, p_frechet_max double precision DEFAULT 0.02)
+DROP FUNCTION IF EXISTS laplace.word_shape_peers_fast(bytea, double precision);
+CREATE OR REPLACE FUNCTION lexical.word_shape_peers_fast(p_word bytea, p_frechet_max double precision DEFAULT 0.02)
     RETURNS bytea[]
     AS 'MODULE_PATHNAME', 'pg_laplace_word_shape_peers_fast'
     LANGUAGE C STABLE STRICT;

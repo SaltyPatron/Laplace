@@ -119,8 +119,8 @@ public class TypeIdLawTests
         var text = sb.ToString();
         // CLI walks via the shared catalog reader; the SQL text lives once in NpgsqlSubstrateReads.
         Assert.Contains("WalkTextAsync", text, StringComparison.Ordinal);
-        Assert.Contains("laplace.walk_text", File.ReadAllText(reads), StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("laplace.generate(", text, StringComparison.Ordinal);
+        Assert.Contains("generation.walk_text", File.ReadAllText(reads), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("generation.generate(", text, StringComparison.Ordinal);
     }
 
     [Fact]

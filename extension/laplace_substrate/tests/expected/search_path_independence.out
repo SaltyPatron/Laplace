@@ -45,143 +45,143 @@ END;
 $fn$;
 -- The consensus read path (22c3d98b, ea8e9066, 9f72cc86).
 SELECT pg_temp.resolves('consensus_out',
-    'SELECT * FROM laplace.consensus_out(laplace.word_id(''dog''), 1)');
-     resolves      
+    'SELECT * FROM consensus.consensus_out(laplace.word_id(''dog''), 1)');
+     resolves
 -------------------
  consensus_out: ok
 (1 row)
 
 SELECT pg_temp.resolves('consensus_in',
-    'SELECT * FROM laplace.consensus_in(laplace.word_id(''dog''), 1)');
-     resolves     
+    'SELECT * FROM consensus.consensus_in(laplace.word_id(''dog''), 1)');
+     resolves
 ------------------
  consensus_in: ok
 (1 row)
 
 SELECT pg_temp.resolves('edges_raw',
-    'SELECT * FROM laplace.edges_raw(laplace.word_id(''dog''), ''both'', NULL, 1, false, ''edge_rank'')');
-   resolves    
+    'SELECT * FROM consensus.edges_raw(laplace.word_id(''dog''), ''both'', NULL, 1, false, ''edge_rank'')');
+   resolves
 ---------------
  edges_raw: ok
 (1 row)
 
-SELECT pg_temp.resolves('edges(bytea)',
-    'SELECT * FROM laplace.edges(laplace.word_id(''dog''), ''both'', NULL, 1, false, NULL)');
-     resolves     
-------------------
- edges(bytea): ok
+SELECT pg_temp.resolves('consensus.edges(bytea)',
+    'SELECT * FROM consensus.edges(laplace.word_id(''dog''), ''both'', NULL, 1, false, NULL)');
+          resolves
+----------------------------
+ consensus.edges(bytea): ok
 (1 row)
 
-SELECT pg_temp.resolves('edges(text)',
-    'SELECT * FROM laplace.edges(''dog'', ''both'', 1, false)');
-    resolves     
------------------
- edges(text): ok
+SELECT pg_temp.resolves('consensus.edges(text)',
+    'SELECT * FROM consensus.edges(''dog'', ''both'', 1, false)');
+         resolves
+---------------------------
+ consensus.edges(text): ok
 (1 row)
 
 SELECT pg_temp.resolves('related',
-    'SELECT * FROM laplace.related(laplace.word_id(''dog''), laplace.relation_type_id(''IS_A''), NULL, 1)');
-  resolves   
+    'SELECT * FROM consensus.related(laplace.word_id(''dog''), laplace.relation_type_id(''IS_A''), NULL, 1)');
+  resolves
 -------------
  related: ok
 (1 row)
 
 SELECT pg_temp.resolves('related_in',
-    'SELECT * FROM laplace.related_in(laplace.word_id(''dog''), laplace.relation_type_id(''IS_A''), NULL, 1)');
-    resolves    
+    'SELECT * FROM consensus.related_in(laplace.word_id(''dog''), laplace.relation_type_id(''IS_A''), NULL, 1)');
+    resolves
 ----------------
  related_in: ok
 (1 row)
 
 SELECT pg_temp.resolves('completions',
-    'SELECT * FROM laplace.completions(laplace.word_id(''dog''), 1)');
-    resolves     
+    'SELECT * FROM consensus.completions(laplace.word_id(''dog''), 1)');
+    resolves
 -----------------
  completions: ok
 (1 row)
 
 SELECT pg_temp.resolves('top_relations',
-    'SELECT * FROM laplace.top_relations(1, NULL)');
-     resolves      
+    'SELECT * FROM consensus.top_relations(1, NULL)');
+     resolves
 -------------------
  top_relations: ok
 (1 row)
 
 SELECT pg_temp.resolves('salient_facts',
-    'SELECT * FROM laplace.salient_facts(laplace.word_id(''dog''), NULL, 1)');
-     resolves      
+    'SELECT * FROM consensus.salient_facts(laplace.word_id(''dog''), NULL, 1)');
+     resolves
 -------------------
  salient_facts: ok
 (1 row)
 
 SELECT pg_temp.resolves('consensus_neighbors_directed',
-    'SELECT * FROM laplace.consensus_neighbors_directed(laplace.word_id(''dog''), NULL, 1)');
-             resolves             
+    'SELECT * FROM consensus.neighbors_directed(laplace.word_id(''dog''), NULL, 1)');
+             resolves
 ----------------------------------
  consensus_neighbors_directed: ok
 (1 row)
 
 SELECT pg_temp.resolves('consensus_neighbors_undirected',
-    'SELECT * FROM laplace.consensus_neighbors_undirected(laplace.word_id(''dog''), NULL, 1)');
-              resolves              
+    'SELECT * FROM consensus.neighbors_undirected(laplace.word_id(''dog''), NULL, 1)');
+              resolves
 ------------------------------------
  consensus_neighbors_undirected: ok
 (1 row)
 
 SELECT pg_temp.resolves('explore_web_neighbors',
-    'SELECT * FROM laplace.explore_web_neighbors(laplace.word_id(''dog''), 1)');
-         resolves          
+    'SELECT * FROM consensus.explore_web_neighbors(laplace.word_id(''dog''), 1)');
+         resolves
 ---------------------------
  explore_web_neighbors: ok
 (1 row)
 
 SELECT pg_temp.resolves('foundry_crawl_neighbors',
-    'SELECT * FROM laplace.foundry_crawl_neighbors(laplace.word_id(''dog''), 1, NULL)');
-          resolves           
+    'SELECT * FROM consensus.foundry_crawl_neighbors(laplace.word_id(''dog''), 1, NULL)');
+          resolves
 -----------------------------
  foundry_crawl_neighbors: ok
 (1 row)
 
 SELECT pg_temp.resolves('shared_objects',
-    'SELECT * FROM laplace.shared_objects(ARRAY[laplace.word_id(''dog'')], NULL, 1)');
-      resolves      
+    'SELECT * FROM consensus.shared_objects(ARRAY[laplace.word_id(''dog'')], NULL, 1)');
+      resolves
 --------------------
  shared_objects: ok
 (1 row)
 
 -- The inference path (945299b7, c2bc4c55, 01bc76ee, 522714cf).
 SELECT pg_temp.resolves('laplace_attention_centroid',
-    'SELECT * FROM laplace.laplace_attention_centroid(laplace.word_id(''dog''), laplace.laplace_highway_band_mask(3))');
-            resolves            
+    'SELECT * FROM generation.laplace_attention_centroid(laplace.word_id(''dog''), laplace.laplace_highway_band_mask(3))');
+            resolves
 --------------------------------
  laplace_attention_centroid: ok
 (1 row)
 
 SELECT pg_temp.resolves('laplace_nearest_entity',
-    'SELECT * FROM laplace.laplace_nearest_entity(0, 0, 0, 1, 1, NULL, NULL)');
-          resolves          
+    'SELECT * FROM generation.laplace_nearest_entity(0, 0, 0, 1, 1, NULL, NULL)');
+          resolves
 ----------------------------
  laplace_nearest_entity: ok
 (1 row)
 
 SELECT pg_temp.resolves('laplace_forward_step',
-    'SELECT laplace.laplace_forward_step(laplace.word_id(''dog''), laplace.laplace_highway_band_mask(3))');
-         resolves         
+    'SELECT generation.laplace_forward_step(laplace.word_id(''dog''), laplace.laplace_highway_band_mask(3))');
+         resolves
 --------------------------
  laplace_forward_step: ok
 (1 row)
 
 -- The new operations added alongside them.
 SELECT pg_temp.resolves('entity_container_degree',
-    'SELECT * FROM laplace.entity_container_degree(ARRAY[laplace.word_id(''dog'')])');
-          resolves           
+    'SELECT * FROM structural.entity_container_degree(ARRAY[laplace.word_id(''dog'')])');
+          resolves
 -----------------------------
  entity_container_degree: ok
 (1 row)
 
 SELECT pg_temp.resolves('election_token_profile',
-    'SELECT * FROM laplace.election_token_profile(ARRAY[''dog''])');
-          resolves          
+    'SELECT * FROM converse.election_token_profile(ARRAY[''dog''])');
+          resolves
 ----------------------------
  election_token_profile: ok
 (1 row)

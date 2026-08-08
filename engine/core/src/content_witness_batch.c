@@ -97,7 +97,8 @@ void laplace_physicality_id_compute(hash128_t entity_id, int16_t physicality_typ
  * the stored identity, and word constituents reference it directly. The old
  * `tier <= 1` stop minted a tier-1 entity row for every single-cp character
  * (same id as the codepoint, wrong stored tier). */
-static uint32_t collapse_idx(const tier_tree_t* tree, uint32_t idx) {
+/* Exported as laplace_tier_tree_collapse_index for C#/C parity (GH #904). */
+uint32_t laplace_tier_tree_collapse_index(const tier_tree_t* tree, uint32_t idx) {
     for (;;) {
         tier_node_view_t node;
         if (tier_tree_get_node(tree, idx, &node) != 0) break;
@@ -109,6 +110,10 @@ static uint32_t collapse_idx(const tier_tree_t* tree, uint32_t idx) {
         idx = node.first_child_idx;
     }
     return idx;
+}
+
+static uint32_t collapse_idx(const tier_tree_t* tree, uint32_t idx) {
+    return laplace_tier_tree_collapse_index(tree, idx);
 }
 
 

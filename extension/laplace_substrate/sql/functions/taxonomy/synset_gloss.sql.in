@@ -4,7 +4,6 @@
 -- the control file pins schema = 'laplace' with relocatable = false, so that
 -- placeholder has exactly one possible expansion. Real schema names, written out.
 DROP FUNCTION IF EXISTS laplace.synset_gloss(bytea);
-
 CREATE OR REPLACE FUNCTION taxonomy.synset_gloss(p_synset bytea)
     RETURNS text
     LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$

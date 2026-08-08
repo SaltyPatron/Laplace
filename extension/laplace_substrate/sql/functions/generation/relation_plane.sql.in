@@ -5,31 +5,30 @@
 -- id is resolved into a local FIRST (a variable is a bound parameter and
 -- therefore an index condition — Rule #4; a function call in the qual is
 -- not, lesson L12).
-DROP FUNCTION IF EXISTS relation_plane(text, text, int);
-CREATE OR REPLACE FUNCTION relation_plane(p_family text, p_name text, p_arg int DEFAULT NULL,
+DROP FUNCTION IF EXISTS laplace.relation_plane(text, text, int, bytea[]);
+CREATE OR REPLACE FUNCTION generation.relation_plane(p_family text, p_name text, p_arg int DEFAULT NULL,
         p_vocab bytea[] DEFAULT NULL)
     RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
-    LANGUAGE plpgsql VOLATILE
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE plpgsql VOLATILE AS $$
 DECLARE
     g int;
     v_type bytea;
 BEGIN
     IF p_family = 'consensus' THEN
-        v_type := relation_type_id(p_name);
+        v_type := laplace.relation_type_id(p_name);
         IF p_vocab IS NULL THEN
             RETURN QUERY
             SELECT c.subject_id, c.object_id,
-                   walk_edge_weight(c.rating, c.rd, c.witness_count)
-            FROM consensus c
+                   laplace.walk_edge_weight(c.rating, c.rd, c.witness_count)
+            FROM laplace.consensus c
             WHERE c.type_id = v_type AND c.object_id IS NOT NULL;
         ELSE
             RETURN QUERY
             WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u)
             SELECT c.subject_id, c.object_id,
-                   walk_edge_weight(c.rating, c.rd, c.witness_count)
+                   laplace.walk_edge_weight(c.rating, c.rd, c.witness_count)
             FROM v
-            JOIN consensus c ON c.type_id = v_type AND c.subject_id = v.id
+            JOIN laplace.consensus c ON c.type_id = v_type AND c.subject_id = v.id
             JOIN v vo ON vo.id = c.object_id
             WHERE c.object_id IS NOT NULL;
         END IF;
@@ -54,7 +53,7 @@ BEGIN
     -- The pour is corpus-bounded by definition — it renders the whole consensus —
     -- so a full aggregation inside it is honest cost. What was NOT honest was a
     -- maintained trajectory_pairs cache with a corpus fingerprint and rebuild
-    -- guards: a second materialization of what physicalities.trajectory holds
+    -- guards: a second materialization of what laplace.physicalities.trajectory holds
     -- exactly-invertibly (§15 — a second body is a future divergence; §9 — the
     -- trajectory IS the sequence). gen_corpus and trajectory_pairs are deleted;
     -- this inline scan is the one remaining whole-corpus reader, and it lives on
@@ -63,20 +62,20 @@ BEGIN
     -- next/gap = pairs at exactly stride g; window = all strides 1..g. One body,
     -- bounded by (lo, hi). subject_total matches the retired semantics: per
     -- (subject, exact gap) for next/gap, per subject across the window for
-    -- window. Separators are excluded through separator_ids() — one body for
+    -- window. Separators are excluded through generation.separator_ids() — one body for
     -- that fact too — so pairs count CONTENT adjacency, as the corpus stream did.
     RETURN QUERY
     WITH bounds AS (
         SELECT CASE WHEN p_name = 'window' THEN 1 ELSE g END AS lo, g AS hi
     ),
     sepset AS MATERIALIZED (
-        SELECT COALESCE(separator_ids(), ARRAY[]::bytea[]) AS ids
+        SELECT COALESCE(generation.separator_ids(), ARRAY[]::bytea[]) AS ids
     ),
     seq AS (
         SELECT w.id AS root, c.ordinal, c.entity_id AS tok
-        FROM v_word_points w
+        FROM laplace.v_word_points w
         CROSS JOIN LATERAL public.laplace_trajectory_constituents(w.trajectory) c
-        WHERE w.type_id IN (canonical_id('Sentence'), canonical_id('Document'))
+        WHERE w.type_id IN (laplace.canonical_id('Sentence'), laplace.canonical_id('Document'))
           AND w.trajectory IS NOT NULL
     ),
     content AS (

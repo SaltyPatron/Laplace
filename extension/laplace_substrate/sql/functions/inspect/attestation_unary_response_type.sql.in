@@ -11,7 +11,6 @@ RETURNS TABLE(
     rd_fp1e9         bigint
 )
 LANGUAGE sql STABLE
-SET search_path = @extschema@, public
-AS $$
-    SELECT * FROM attestation_unary_response(p_subject_id, p_relation_type_id, p_source_scope, p_context_id)
+    AS $$
+    SELECT * FROM laplace.attestation_unary_response(p_subject_id, p_relation_type_id, p_source_scope, p_context_id)
 $$;

@@ -2,9 +2,9 @@
 --
 -- This slot exists because functions defined between here and the real body need
 -- the signature to resolve at CREATE time (check_function_bodies parses them).
--- It used to hold a COMPLETE SECOND IMPLEMENTATION of define(), which differed
+-- It used to hold a COMPLETE SECOND IMPLEMENTATION of lexical.define(), which differed
 -- from the real one -- its second arm read consensus directly for p_word where the
--- final reads unnest(lexical_peers(p_word)) -- and the only thing making the right
+-- final reads unnest(lexical.lexical_peers(p_word)) -- and the only thing making the right
 -- body win was that manifest.install happens to list it later. A reordering, a
 -- partial install, or an upgrade path that stopped early would silently ship the
 -- other answer, and nothing would report it.
@@ -12,7 +12,8 @@
 -- The signature must match the final definition EXACTLY (name, argument types,
 -- defaults, return type) or CREATE OR REPLACE at the real site fails with a return-
 -- type or signature error instead of replacing this.
-CREATE OR REPLACE FUNCTION define(p_word bytea, p_limit int DEFAULT 5)
+DROP FUNCTION IF EXISTS laplace.define(bytea, int);
+CREATE OR REPLACE FUNCTION lexical.define(p_word bytea, p_limit int DEFAULT 5)
     RETURNS TABLE(definition text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$
     SELECT NULL::text, NULL::numeric, NULL::bigint WHERE false

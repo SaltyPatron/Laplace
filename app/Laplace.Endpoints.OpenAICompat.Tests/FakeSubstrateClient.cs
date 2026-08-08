@@ -479,7 +479,7 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
             4_337_000, nowUnix - 3, 120, true));
 
     public Task<ModalitiesResponse> ModalitiesAsync(CancellationToken ct) =>
-        Task.FromResult(new ModalitiesResponse("modalities", 6_280_000, 781, 0, 0));
+        Task.FromResult(new ModalitiesResponse("modalities", 6_280_000, 781, 0, 0, 22_104));
 
     public Task<TaxonomyResponse?> TaxonomyAsync(string idHex, CancellationToken ct)
     {

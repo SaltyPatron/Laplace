@@ -1,14 +1,15 @@
-CREATE OR REPLACE FUNCTION top_relations(p_limit integer DEFAULT 50, p_type bytea DEFAULT NULL)
+DROP FUNCTION IF EXISTS laplace.top_relations(integer, bytea);
+CREATE OR REPLACE FUNCTION consensus.top_relations(p_limit integer DEFAULT 50, p_type bytea DEFAULT NULL)
     RETURNS TABLE(subject_id bytea, type_id bytea, object_id bytea, eff_mu numeric, witnesses bigint)
 -- No SET search_path — blocks inlining, costs the consensus index path. GH #860.
     LANGUAGE sql STABLE AS $$
-    -- Issue 52: edge_rank() per row over ALL consensus before LIMIT measured >9min at
+    -- Issue 52: laplace.edge_rank() per row over ALL consensus before LIMIT measured >9min at
     -- 124M rows and killed three endpoints. Bounded-candidate form, same ranking law:
-    -- consensus_eff_mu_btree serves a top-M head by raw eff_mu; edge_rank (salience
-    -- band x eff_mu, the single readout law) reorders only that pool. Bands span
-    -- 1.0..0.05, so anything reachable at the top of edge_rank sits inside a generous
-    -- raw-eff_mu head (measured 0.5s live at 124M via the API-side prototype).
-    -- With p_type fixed the band is a constant, edge_rank is monotone in eff_mu_raw,
+    -- consensus_eff_mu_btree serves a top-M head by raw laplace.eff_mu; laplace.edge_rank(salience
+    -- band x laplace.eff_mu, the single readout law) reorders only that pool. Bands span
+    -- 1.0..0.05, so anything reachable at the top of laplace.edge_rank sits inside a generous
+    -- raw-laplace.eff_mu head (measured 0.5s live at 124M via the API-side prototype).
+    -- With p_type fixed the band is a constant, laplace.edge_rank is monotone in eff_mu_raw,
     -- and the index order IS the answer - no candidate pool needed on that arm.
     WITH pool AS (
         SELECT c.subject_id, c.type_id, c.object_id,

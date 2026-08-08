@@ -88,7 +88,7 @@ BEGIN
 
     -- Consensus built exactly as ingest builds it: one incremental fold per
     -- batch against the stored prior, batches in timestamp order.
-    affected := consensus_upsert(
+    affected := consensus.upsert(
         ARRAY[subj, subj, subj, subj],
         ARRAY[rel_p, rel_p, rel_hot, rel_p],
         ARRAY[o2, o3, o4, o5],
@@ -99,7 +99,7 @@ BEGIN
     IF affected <> 4 THEN
         RAISE EXCEPTION 'FAIL: witness batch affected %, expected 4', affected;
     END IF;
-    affected := consensus_upsert(
+    affected := consensus.upsert(
         ARRAY[subj, subj, subj, subj, subj],
         ARRAY[rel_p, rel_p, rel_hot, rel_p, rel_p],
         ARRAY[o1, o2, o4, NULL, o5],
@@ -110,7 +110,7 @@ BEGIN
     IF affected <> 5 THEN
         RAISE EXCEPTION 'FAIL: analysis batch affected %, expected 5', affected;
     END IF;
-    affected := consensus_upsert(
+    affected := consensus.upsert(
         ARRAY[subj, subj],
         ARRAY[rel_p, rel_p],
         ARRAY[o1, o5],
@@ -356,7 +356,7 @@ BEGIN
         (laplace_hash128_blake3('test/evict/v2/a6'), subj, rel_p, o5, src_a, NULL,
          2, t2, 2, 2 * s_conf, phi_a);
 
-    affected := consensus_upsert(
+    affected := consensus.upsert(
         ARRAY[subj, subj, subj, subj, subj],
         ARRAY[rel_p, rel_p, rel_hot, rel_p, rel_p],
         ARRAY[o1, o2, o4, NULL, o5],
@@ -367,7 +367,7 @@ BEGIN
     IF affected <> 5 THEN
         RAISE EXCEPTION 'FAIL: v2 analysis batch affected %, expected 5', affected;
     END IF;
-    affected := consensus_upsert(
+    affected := consensus.upsert(
         ARRAY[subj], ARRAY[rel_p], ARRAY[o1],
         ARRAY[phi_a], ARRAY[1]::bigint[], ARRAY[s_ref]::bigint[], ARRAY[t3]);
     IF affected <> 1 THEN

@@ -13,12 +13,17 @@ namespace Laplace.Engine.Core.Tests;
 ///
 /// These pin every clause of the rule separately, so a partial edit (dropping the span
 /// check, stopping at tier 1, collapsing multi-child nodes) fails a specific test rather
-/// than being absorbed. The C twin remains unpinned by these — it is not exported through
-/// NativeInterop — so this holds the C# half to the written rule and names each clause a
-/// reader must keep identical on the C side.
+/// than being absorbed. The C twin is <c>laplace_tier_tree_collapse_index</c> via
+/// <see cref="NativeInterop.TierTreeCollapseIndex"/>; each clause also asserts C# == C.
 /// </summary>
 public class CollapseIndexParityTests
 {
+    private static uint NativeCollapse(TierTree t, uint idx)
+    {
+        lock (LaplaceCoreGate.Native)
+            return NativeInterop.TierTreeCollapseIndex(t.DangerousGetHandle(), idx);
+    }
+
     /// <summary>tier-0 leaf 'A', wrapped by a span-identical grapheme, wrapped again by a
     /// span-identical word: the chain the ingest actually produces for one-codepoint text.</summary>
     private static TierTree SingleCodepointChain()
@@ -40,6 +45,8 @@ public class CollapseIndexParityTests
         using var t = SingleCodepointChain();
         Assert.Equal(0u, t.CollapseIndex(2));
         Assert.Equal(0u, t.CollapseIndex(1));
+        Assert.Equal(t.CollapseIndex(2), NativeCollapse(t, 2));
+        Assert.Equal(t.CollapseIndex(1), NativeCollapse(t, 1));
     }
 
     [Fact]
@@ -47,6 +54,7 @@ public class CollapseIndexParityTests
     {
         using var t = SingleCodepointChain();
         Assert.Equal(0u, t.CollapseIndex(0));
+        Assert.Equal(t.CollapseIndex(0), NativeCollapse(t, 0));
     }
 
     [Fact]
@@ -59,7 +67,10 @@ public class CollapseIndexParityTests
         t.AddNode(1, 0, 2, 0, 2);
         t.FinalizeParents();
         using (t)
+        {
             Assert.Equal(2u, t.CollapseIndex(2));
+            Assert.Equal(t.CollapseIndex(2), NativeCollapse(t, 2));
+        }
     }
 
     [Fact]
@@ -73,6 +84,9 @@ public class CollapseIndexParityTests
         t.AddNode(1, 0, 1, 0, 2);   // single child, span [0,2) against the child's [0,1)
         t.FinalizeParents();
         using (t)
+        {
             Assert.Equal(1u, t.CollapseIndex(1));
+            Assert.Equal(t.CollapseIndex(1), NativeCollapse(t, 1));
+        }
     }
 }
