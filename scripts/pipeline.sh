@@ -896,16 +896,6 @@ phase_publish() {
   # `pipeline.sh publish-stamp` only after /health/ready passes. A deploy that
   # never went ready therefore re-deploys on the next run.
   fp=$(fp_publish)
-  if [[ -d "$app_dir" ]]; then
-    local app_owner app_group app_mode
-    app_owner=$(stat -c '%U' "$app_dir")
-    app_group=$(stat -c '%G' "$app_dir")
-    app_mode=$(stat -c '%a' "$app_dir")
-    if [[ "$app_owner" != "laplace-runner" || "$app_group" != "laplace-runner" || "$app_mode" != "2775" ]]; then
-      echo "::error::$app_dir permissions drifted: ${app_owner}:${app_group} mode ${app_mode}; expected laplace-runner:laplace-runner mode 2775. Run: sudo bash scripts/setup-host.sh"
-      return 1
-    fi
-  fi
   if fp_check publish "$fp" && [[ -x "$app_dir/laplace-uci" && -x "$app_dir/laplace-mcp" && -d "$app_dir/wwwroot" ]]; then
     echo "publish domain unchanged (app/ web/ deploy/) and $app_dir intact — skipping deploy"
     mkdir -p "$ROOT/build"

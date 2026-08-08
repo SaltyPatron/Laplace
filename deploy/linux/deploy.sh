@@ -10,6 +10,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 APP_DIR="${LAPLACE_APP_DIR:-/opt/laplace/app}"
 source "$REPO_ROOT/deploy/linux/app-dir-contract.sh"
+source "$REPO_ROOT/deploy/linux/payload-sync.sh"
 STAGE="$(mktemp -d)"
 FORCE_NPM=0
 SERIAL=0
@@ -132,11 +133,11 @@ fi
 
 echo "==> [4/4] sync isolated MCP runtime + app into $APP_DIR"
 mkdir -p "$APP_DIR/$MCP_RUNTIME_DIR"
-rsync -a --delete "$MCP_STAGE/" "$APP_DIR/$MCP_RUNTIME_DIR/"
-rsync -a --delete \
+laplace_sync_payload "$MCP_STAGE" "$APP_DIR/$MCP_RUNTIME_DIR"
+laplace_sync_payload "$STAGE" "$APP_DIR" \
   --exclude 'laplace-api.env' --exclude 'logs/' --exclude 'chess-lab-work/' \
-  --exclude "$MCP_RUNTIME_DIR/" --exclude 'mcp/' \
-  "$STAGE/" "$APP_DIR/"
+  --exclude "$MCP_RUNTIME_DIR/" --exclude 'mcp/'
+laplace_require_app_dir_contract "$APP_DIR"
 test -x "$APP_DIR/laplace-uci" || { echo "::error::laplace-uci missing from $APP_DIR after sync"; exit 1; }
 test -x "$APP_DIR/laplace-mcp" || { echo "::error::laplace-mcp missing from $APP_DIR after sync"; exit 1; }
 test -f "$APP_DIR/$MCP_RUNTIME_DIR/Laplace.Endpoints.Mcp.dll" || { echo "::error::MCP managed entry assembly missing from $APP_DIR/$MCP_RUNTIME_DIR after sync"; exit 1; }

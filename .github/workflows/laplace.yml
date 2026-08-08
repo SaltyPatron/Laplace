@@ -179,6 +179,9 @@ jobs:
         # turn into false "all clear". Severity error only; style is out of scope.
         run: bash scripts/shellcheck-gate.sh
 
+      - name: Deploy payload contract
+        run: bash scripts/test-deploy-payload-sync.sh
+
       - name: Validate witness-manifest vs orchestration scripts
         run: python3 scripts/validate-pipeline.py
 
