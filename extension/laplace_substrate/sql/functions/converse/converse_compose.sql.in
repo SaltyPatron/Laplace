@@ -40,13 +40,12 @@
 -- does that text stay on topic. Do not wire this into converse.chat() until that run exists.
 -- Signature change (p_ctx added): the 4-arg form must not survive as a second
 -- overload or every 4-arg call site becomes "function is not unique".
-DROP FUNCTION IF EXISTS laplace.converse_compose(text, int, bytea, bigint, bytea[]);
-CREATE OR REPLACE FUNCTION converse.compose(p_prompt text,
-                                            p_steps int DEFAULT 40,
-                                            p_lang bytea DEFAULT NULL,
-                                            p_seed bigint DEFAULT NULL,
-                                            p_ctx bytea[] DEFAULT NULL)
-    RETURNS text
+CREATE OR REPLACE FUNCTION generation.compose_batch(p_prompt text,
+                                                     p_steps int,
+                                                     p_lang bytea,
+                                                     p_seeds bigint[],
+                                                     p_ctx bytea[] DEFAULT NULL)
+    RETURNS TABLE(seed bigint, reply text)
     LANGUAGE plpgsql VOLATILE AS $$
 DECLARE
     b_def  int := 1;
@@ -62,8 +61,6 @@ DECLARE
     starts bytea[];
     core_seq bytea[];
     n      int;
-    rng    bigint;
-    out_ids bytea[];
 BEGIN
     t_def := laplace.relation_band_types(b_def);
     -- ORIENT. Same hash-space signal converse.chat() uses: how strongly the token denotes the
@@ -90,7 +87,13 @@ BEGIN
     ) y
     ORDER BY y.tok_breadth DESC NULLS LAST, y.denote_mu DESC NULLS LAST, y.syn
     LIMIT 1;
-    IF syn IS NULL THEN RETURN NULL; END IF;
+    IF syn IS NULL THEN
+        RETURN QUERY
+        SELECT s.seed, NULL::text
+        FROM unnest(p_seeds) WITH ORDINALITY AS s(seed, ord)
+        ORDER BY s.ord;
+        RETURN;
+    END IF;
 
     WITH
     -- CONTENT-BAND TYPE IDS, RESOLVED ONCE.
@@ -268,15 +271,19 @@ BEGIN
     INTO stream, w, starts, core_seq;
 
     n := COALESCE(array_length(stream,1), 0);
-    IF n < 3 OR starts IS NULL THEN RETURN NULL; END IF;
+    IF n < 3 OR starts IS NULL THEN
+        RETURN QUERY
+        SELECT s.seed, NULL::text
+        FROM unnest(p_seeds) WITH ORDINALITY AS s(seed, ord)
+        ORDER BY s.ord;
+        RETURN;
+    END IF;
 
-    rng := abs(COALESCE(p_seed, ('x'||substr(md5(p_prompt),1,8))::bit(32)::bigint)) % 2147483647;
-
-    out_ids := converse.steered_walk_raw(stream, w, COALESCE(core_seq, ARRAY[]::bytea[]),
-                                starts, p_steps, MINLEN, rng);
-    IF out_ids IS NULL OR array_length(out_ids,1) IS NULL THEN RETURN NULL; END IF;
-    IF array_length(out_ids,1) = 1 THEN RETURN laplace.render_text(out_ids[1], 64); END IF;
-
+    -- WALK every seed after the semantic frontier and concept stream have been
+    -- built ONCE. Only RNG varies at this stage. Realization is then one batch
+    -- over the union of every emitted id, not a per-seed replay of the same
+    -- catalog work.
+    --
     -- REALIZE last, and only here. p_lang selects which member of each concept's
     -- surface family is emitted; everything above ran in ids.
     -- BATCHED, over the DISTINCT emitted ids, re-expanded in emission order --
@@ -294,26 +301,66 @@ BEGIN
     -- ORDINALITY names the position but does not oblige the aggregate to use it,
     -- so token order in a generated sentence rested on the executor happening to
     -- feed rows in scan order.
-    RETURN btrim(regexp_replace(
-        regexp_replace(
-            (WITH ids AS MATERIALIZED (
-                 SELECT array_agg(DISTINCT u.t) AS a FROM unnest(out_ids) AS u(t)
-             ),
-             realized AS MATERIALIZED (
-                 SELECT i.a AS a,
-                        realize.batch(i.a, p_lang)  AS lbl,
-                        laplace.render_text_batch(i.a, 64)  AS txt
-                 FROM ids i
-             ),
-             m AS (
-                 SELECT (r.a)[k] AS id,
-                        COALESCE((r.lbl)[k], (r.txt)[k], '') AS s
-                 FROM realized r, generate_subscripts(r.a, 1) AS k
-             )
-             SELECT string_agg(COALESCE(m.s, ''), ' ' ORDER BY gg.o)
-             FROM unnest(out_ids) WITH ORDINALITY gg(t,o)
-             LEFT JOIN m ON m.id = gg.t),
-            '\s*[();:]\s*', ' ', 'g'),
-        '\s+', ' ', 'g'));
+    RETURN QUERY
+    WITH emitted AS MATERIALIZED (
+        SELECT s.ord, s.seed,
+               converse.steered_walk_raw(
+                   stream, w, COALESCE(core_seq, ARRAY[]::bytea[]), starts,
+                   p_steps, MINLEN,
+                   abs(COALESCE(s.seed,
+                       ('x'||substr(md5(p_prompt),1,8))::bit(32)::bigint)) % 2147483647
+               ) AS ids
+        FROM unnest(p_seeds) WITH ORDINALITY AS s(seed, ord)
+    ),
+    ids AS MATERIALIZED (
+        SELECT array_agg(DISTINCT u.id) AS a
+        FROM emitted e
+        CROSS JOIN LATERAL unnest(e.ids) AS u(id)
+    ),
+    realized AS MATERIALIZED (
+        SELECT i.a,
+               realize.batch(i.a, p_lang) AS lbl,
+               laplace.render_text_batch(i.a, 64) AS txt
+        FROM ids i
+    ),
+    labels AS MATERIALIZED (
+        SELECT (r.a)[k] AS id, (r.lbl)[k] AS lbl, (r.txt)[k] AS txt
+        FROM realized r
+        CROSS JOIN LATERAL generate_subscripts(r.a, 1) AS k
+    )
+    SELECT e.seed,
+           CASE count(u.id)
+               WHEN 0 THEN NULL::text
+               WHEN 1 THEN max(l.txt)
+               ELSE btrim(regexp_replace(
+                        regexp_replace(
+                            string_agg(COALESCE(l.lbl, l.txt, ''), ' ' ORDER BY u.ord),
+                            '\s*[();:]\s*', ' ', 'g'),
+                        '\s+', ' ', 'g'))
+           END AS reply
+    FROM emitted e
+    LEFT JOIN LATERAL unnest(e.ids) WITH ORDINALITY AS u(id, ord) ON true
+    LEFT JOIN labels l ON l.id = u.id
+    GROUP BY e.ord, e.seed
+    ORDER BY e.ord;
+END;
+$$;
+
+DROP FUNCTION IF EXISTS laplace.converse_compose(text, int, bytea, bigint, bytea[]);
+CREATE OR REPLACE FUNCTION converse.compose(p_prompt text,
+                                            p_steps int DEFAULT 40,
+                                            p_lang bytea DEFAULT NULL,
+                                            p_seed bigint DEFAULT NULL,
+                                            p_ctx bytea[] DEFAULT NULL)
+    RETURNS text
+    LANGUAGE plpgsql VOLATILE AS $$
+DECLARE
+    out_text text;
+BEGIN
+    SELECT b.reply INTO out_text
+    FROM generation.compose_batch(
+        p_prompt, p_steps, p_lang, ARRAY[p_seed]::bigint[], p_ctx) b
+    LIMIT 1;
+    RETURN out_text;
 END;
 $$;

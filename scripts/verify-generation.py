@@ -74,27 +74,25 @@ def expected_set(api, word, limit):
 
 def probe(api, word, seeds, steps):
     # Through the deployed operation surface: one row per (lane, seed), one
-    # request per SEED. An earlier per-call-isolation
-    # version here defended against a "statement interference" theory that
-    # turned out to be an ASCII-tokenizer artifact (see WORD_RE) — the
-    # installed op is the product surface and the measurement uses it.
-    # ONE SEED PER STATEMENT, deliberately: the all-seeds form put 3x compose
-    # + 3x walk in a single statement, and on the cold cache right after a
-    # deploy's PostgreSQL restart that breached the 300s statement bound (the
-    # 2026-08-06 eval failure — the same battery passes in seconds warm). The
-    # per-seed split keeps each statement a third of the work; the bound stays
-    # honest instead of being tripled away.
+    # request per SEED BATCH. generation.probe owns the batch because orientation,
+    # corpus gathering and concept mapping are invariant across seeds; only the
+    # final native walk's RNG changes. Splitting this in the harness previously
+    # forced the server to rebuild the same plan for every seed and turned a
+    # bounded quality measurement into serial RBAR over HTTP.
     out = {}
-    for seed in seeds:
-        rows = op_rows(
-            api,
-            "generation.probe",
-            {"p_prompt": word, "p_seeds": [int(seed)], "p_steps": int(steps)},
-            max_rows=4,
-            timeout_seconds=300,
-        )
-        for row in rows:
-            out.setdefault(str(row["lane"]), []).append(str(row.get("reply") or ""))
+    rows = op_rows(
+        api,
+        "generation.probe",
+        {
+            "p_prompt": word,
+            "p_seeds": [int(seed) for seed in seeds],
+            "p_steps": int(steps),
+        },
+        max_rows=2 * len(seeds),
+        timeout_seconds=300,
+    )
+    for row in rows:
+        out.setdefault(str(row["lane"]), []).append(str(row.get("reply") or ""))
     return out
 
 
@@ -132,23 +130,23 @@ def lang_pin(api, word, seeds, steps):
     pin = max(pin_rows, key=lambda row: float(row.get("mass") or 0), default=None)
     pin_id = pin.get("lang_id") if pin else None
     pinned_mass = total_mass = 0.0
-    for seed in seeds:
-        if not pin_id:
-            break
+    if pin_id:
         rows = op_rows(
             api,
             "generation.probe",
             {
                 "p_prompt": word,
-                "p_seeds": [int(seed)],
+                "p_seeds": [int(seed) for seed in seeds],
                 "p_steps": int(steps),
                 "p_lang": pin_id,
             },
-            max_rows=4,
+            max_rows=2 * len(seeds),
             timeout_seconds=300,
         )
-        compose = next((row for row in rows if row.get("lane") == "compose"), None)
-        reply = str(compose.get("reply") or "") if compose else ""
+    else:
+        rows = []
+    for compose in (row for row in rows if row.get("lane") == "compose"):
+        reply = str(compose.get("reply") or "")
         if not reply:
             continue
         reply_languages = op_rows(

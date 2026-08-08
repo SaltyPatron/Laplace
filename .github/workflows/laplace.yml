@@ -757,9 +757,10 @@ jobs:
     # 20m15s on 2026-08-06 (all prior jobs green). The concept-stream compose
     # pays senses() per distinct stream token — its documented tolerance until
     # the #757 C port — and the battery runs on a COLD cache right after this
-    # run's own PostgreSQL restart: measured 2-3 min/probe cold vs 8.6s warm,
-    # I/O-bound. 45 bounds the cold worst case without loosening the per-
-    # statement 300s honesty inside verify-generation.py.
+    # run's own PostgreSQL restart. generation.probe now computes the invariant
+    # lane plans once per seed batch; 45 remains a conservative outer bound while
+    # the first deployed batch timings replace the obsolete per-seed measurements,
+    # without loosening verify-generation.py's 300s statement bound.
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4

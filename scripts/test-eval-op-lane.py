@@ -115,6 +115,29 @@ class EvalOperationLaneTests(unittest.TestCase):
         self.assertGreaterEqual(text.count('"converse.prompt_language"'), 2)
         self.assertNotIn("word_" + "language", text)
 
+    def test_generation_probe_builds_each_lane_plan_once_per_seed_batch(self):
+        sql_root = ROOT / "extension/laplace_substrate/sql/functions/converse"
+        probe = (sql_root / "generation_probe.sql.in").read_text(encoding="utf-8")
+        walk = (sql_root / "converse_walk.sql.in").read_text(encoding="utf-8")
+        compose = (sql_root / "converse_compose.sql.in").read_text(encoding="utf-8")
+
+        self.assertIn("generation.walk_batch(p_prompt, p_steps, p_seeds)", probe)
+        self.assertIn(
+            "generation.compose_batch(p_prompt, p_steps, p_lang, p_seeds)",
+            probe,
+        )
+        self.assertNotIn("converse.walk(p_prompt, p_steps, s.seed)", probe)
+        self.assertNotIn("converse.compose(p_prompt, p_steps, p_lang, s.seed)", probe)
+
+        self.assertIn("CREATE OR REPLACE FUNCTION generation.walk_batch", walk)
+        self.assertIn("FROM generation.walk_batch(", walk)
+        self.assertIn("CREATE OR REPLACE FUNCTION generation.compose_batch", compose)
+        self.assertIn("FROM generation.compose_batch(", compose)
+
+        harness = (ROOT / "scripts/verify-generation.py").read_text(encoding="utf-8")
+        self.assertIn('"p_seeds": [int(seed) for seed in seeds]', harness)
+        self.assertNotIn('"p_seeds": [int(seed)]', harness)
+
 
 if __name__ == "__main__":
     unittest.main()
