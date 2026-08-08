@@ -27,7 +27,7 @@ DECLARE
 BEGIN
     SELECT a.coord, laplace.entity_curve(p_id)
       INTO v_coord, v_curve
-    FROM word_anchor(p_id) a;
+    FROM laplace.word_anchor(p_id) a;
     IF v_coord IS NULL THEN RETURN; END IF;
 
     RETURN QUERY

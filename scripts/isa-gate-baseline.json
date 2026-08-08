@@ -4,19 +4,15 @@
   "violations": {
     "g11_unqualified_in_setless_body": {
       "extension/laplace_substrate/sql/functions/highway/entities_has_highway.sql.in::entities": 1,
-      "extension/laplace_substrate/sql/functions/model/model_factor.sql.in::attestations": 7,
-      "extension/laplace_substrate/sql/functions/model/model_factor.sql.in::canonical_id": 2,
-      "extension/laplace_substrate/sql/functions/model/model_factor.sql.in::consensus": 2,
-      "extension/laplace_substrate/sql/functions/model/model_factor.sql.in::relation_type_id": 7,
+      "extension/laplace_substrate/sql/functions/model/model_factor.sql.in::canonical_id": 1,
+      "extension/laplace_substrate/sql/functions/model/model_factor.sql.in::relation_type_id": 6,
       "extension/laplace_substrate/sql/functions/model/model_factor.sql.in::render_text": 1,
-      "extension/laplace_substrate/sql/functions/model/model_factor.sql.in::word_id": 6,
+      "extension/laplace_substrate/sql/functions/model/model_factor.sql.in::word_id": 2,
       "extension/laplace_substrate/sql/functions/readback/canonical_names.sql.in::canonical_names": 1,
       "extension/laplace_substrate/sql/functions/readback/register_canonical.sql.in::canonical_names": 1,
       "extension/laplace_substrate/sql/functions/readback/register_canonicals.sql.in::canonical_names": 1
     },
     "g1_weight_literalism": {
-      "extension/laplace_substrate/sql/functions/converse/chat.sql.in::c.rating-2*c.rd": 6,
-      "extension/laplace_substrate/sql/functions/converse/converse_facts.sql.in::c.rating-2*c.rd": 6,
       "extension/laplace_substrate/src/highway_mask.c::rating-2*rd": 3,
       "extension/laplace_substrate/src/prompt_coherence.c::rating-2*rd": 2,
       "scripts/sql/model-planes-audit.sql::c.rating-2*c.rd": 6
@@ -589,15 +585,9 @@
       "extension/laplace_substrate/sql/functions/inspect/evidence_receipt.sql.in::OCCURS_IN_CONTEXT": 1,
       "extension/laplace_substrate/sql/functions/inspect/evidence_receipt.sql.in::PRECEDES": 1,
       "extension/laplace_substrate/sql/functions/lexical/define.sql.in::HAS_DEFINITION": 2,
-      "extension/laplace_substrate/sql/functions/lexical/define_bootstrap.sql.in::HAS_DEFINITION": 2,
       "extension/laplace_substrate/sql/functions/lexical/define_with_context.sql.in::HAS_DEFINITION": 2,
-      "extension/laplace_substrate/sql/functions/lexical/define_with_context_bootstrap.sql.in::HAS_DEFINITION": 2,
       "extension/laplace_substrate/sql/functions/lexical/examples.sql.in::HAS_EXAMPLE": 1,
-      "extension/laplace_substrate/sql/functions/lexical/senses_bootstrap.sql.in::HAS_SENSE": 1,
-      "extension/laplace_substrate/sql/functions/lexical/senses_bootstrap.sql.in::IS_SENSE_OF": 1,
       "extension/laplace_substrate/sql/functions/lexical/senses_with_context.sql.in::IS_SENSE_OF": 1,
-      "extension/laplace_substrate/sql/functions/lexical/senses_with_context_bootstrap.sql.in::HAS_SENSE": 1,
-      "extension/laplace_substrate/sql/functions/lexical/senses_with_context_bootstrap.sql.in::IS_SENSE_OF": 1,
       "extension/laplace_substrate/sql/functions/lexical/synset_members.sql.in::HAS_LANGUAGE": 1,
       "extension/laplace_substrate/sql/functions/lexical/synset_members.sql.in::IS_INSTANCE_OF": 1,
       "extension/laplace_substrate/sql/functions/lexical/synset_members.sql.in::IS_SYNONYM_OF": 2,
@@ -688,12 +678,7 @@
       "extension/laplace_substrate/sql/functions/consensus/related_objects.sql.in::related_objects": 1,
       "extension/laplace_substrate/sql/functions/consensus/shared_objects.sql.in::shared_objects": 1,
       "extension/laplace_substrate/sql/functions/converse/converse_tiered.sql.in::converse_tiered": 1,
-      "extension/laplace_substrate/sql/functions/converse/correlate.sql.in::correlate": 1,
       "extension/laplace_substrate/sql/functions/converse/election_token_profile.sql.in::election_token_profile": 1,
-      "extension/laplace_substrate/sql/functions/converse/links.sql.in::links": 1,
-      "extension/laplace_substrate/sql/functions/converse/prompt_language.sql.in::prompt_language_top": 1,
-      "extension/laplace_substrate/sql/functions/converse/structural_locale.sql.in::structural_locale": 1,
-      "extension/laplace_substrate/sql/functions/converse/witness_precedes_chain.sql.in::witness_precedes_chain": 1,
       "extension/laplace_substrate/sql/functions/corpus/corpus_trajectory_probe.sql.in::corpus_trajectory_probe": 1,
       "extension/laplace_substrate/sql/functions/generation/continue_text.sql.in::continue_text": 1,
       "extension/laplace_substrate/sql/functions/generation/foundry_vocab.sql.in::foundry_vocab": 1,
@@ -742,14 +727,10 @@
       "extension/laplace_substrate/sql/functions/structural/consensus_export_unary.sql.in::consensus_export_unary": 1,
       "extension/laplace_substrate/sql/functions/structural/geometry_successors.sql.in::geometry_predecessors": 1,
       "extension/laplace_substrate/sql/functions/structural/word_shape_distance.sql.in::word_shape_distance": 1,
-      "extension/laplace_substrate/sql/functions/taxonomy/retrieve_grounded.sql.in::retrieve_grounded": 1,
       "extension/laplace_substrate/sql/functions/trajectory/trajectory_point_count.sql.in::trajectory_point_count": 1,
       "extension/laplace_substrate/sql/functions/trajectory/trajectory_prefix_distance.sql.in::trajectory_prefix_distance": 1
     },
     "g8_band_literalism": {
-      "extension/laplace_substrate/sql/functions/converse/chat.sql.in::RELATION_HIGHWAY_BAND(C.TYPE_ID)=2": 1,
-      "extension/laplace_substrate/sql/functions/converse/chat.sql.in::RELATION_HIGHWAY_BAND(C.TYPE_ID)=4": 1,
-      "extension/laplace_substrate/sql/functions/converse/chat.sql.in::RELATION_HIGHWAY_BAND(C.TYPE_ID)=7": 1,
       "extension/laplace_substrate/sql/functions/lexical/senses_with_context.sql.in::RELATION_HIGHWAY_BAND(C.TYPE_ID)IN(1,7)": 1,
       "extension/laplace_substrate/sql/functions/lexical/senses_with_context.sql.in::RELATION_HIGHWAY_BAND(C.TYPE_ID)IN(2,4,7)": 2
     }

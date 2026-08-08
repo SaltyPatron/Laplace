@@ -42,13 +42,7 @@ CREATE OR REPLACE FUNCTION relation_band_types(p_bands int[])
       AND laplace.relation_highway_band(e.id) = ANY (p_bands)
 $$;
 
--- Family form, same reasoning. relation_type_in_family is IMMUTABLE and cheap per
--- call, but seven predicate sites still ran it per consensus edge instead of per
--- relation type. relation_family_members() already returns the rows; this returns
--- them as the array shape a partition-pruning probe needs.
-CREATE OR REPLACE FUNCTION relation_family_type_ids(p_family text)
-    RETURNS bytea[]
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
-    SELECT COALESCE(array_agg(m.id), '{}'::bytea[])
-    FROM laplace.relation_family_members(p_family) m
-$$;
+-- Retired before release: this helper shipped with no caller. Keep the DROP in
+-- the extension script so an upgrade removes installations from the brief
+-- broken-main window instead of preserving dead API surface indefinitely.
+DROP FUNCTION IF EXISTS relation_family_type_ids(text);

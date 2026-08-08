@@ -48,7 +48,7 @@ CREATE OR REPLACE FUNCTION converse.links(p_word text)
     rel AS MATERIALIZED (
         -- One row per DISTINCT relation type present on this subject.
         SELECT t.type_id,
-               COALESCE(NULLIF(relation_canonical(t.type_id), ''), realize.label(t.type_id)) AS relation
+               COALESCE(NULLIF(laplace.relation_canonical(t.type_id), ''), realize.label(t.type_id)) AS relation
         FROM (SELECT DISTINCT b.type_id FROM base b) t
     )
     SELECT r.relation,
