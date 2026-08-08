@@ -14,6 +14,7 @@ countable fact; prose docs cite it instead of embedding counts.
 - [AGENTS.md](../AGENTS.md) — agent conduct + PG service law + binding-doc pointers
 - [docs/INVENTIONS.md](INVENTIONS.md) — spec — the invention catalog, code-cited; 41 mechanisms enumerated in place, countable facts per [INVENTORY.md](INVENTORY.md) (2026-07-19)
 - [COMPLETION_PLAN.md](COMPLETION_PLAN.md) — conversation/inference completion axis (phases, gap register); not the whole backlog
+- [plan/REAL_CONVERSATION_AND_MODEL_CONSENSUS_FINISH_LINE.md](plan/REAL_CONVERSATION_AND_MODEL_CONSENSUS_FINISH_LINE.md) — **active product finish line** — measured MCP/OpenAI, real conversation, code, heterogeneous-model consensus, and export gaps (2026-08-08)
 - [plan/README.md](plan/README.md) — workstream index (W1–W13) + onboarding pointer
 - [plan/BACKLOG_KILL_LIST_2026-08-06.md](plan/BACKLOG_KILL_LIST_2026-08-06.md) — **full-backlog kill order** — all open issues invention-ranked; verified against code + live DB (2026-08-06); Phase 0 closes landed same day
 - [plan/CHECKPOINT_2026-08-05.md](plan/CHECKPOINT_2026-08-05.md) — resume notes (2026-08-05); **do not trust empty-box claims** — re-measure (`substrate_health` / journal / entities); superseded for backlog order by the kill list above

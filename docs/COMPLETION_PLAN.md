@@ -1,5 +1,13 @@
 # Laplace — Completion Plan: current state → finish line
 
+> **2026-08-08 product ruling:** this file remains the detailed historical
+> conversation/inference work map. The current measured product definition for
+> MCP/OpenAI conversation, code generation, heterogeneous-model consensus, and
+> export is
+> [plan/REAL_CONVERSATION_AND_MODEL_CONSENSUS_FINISH_LINE.md](plan/REAL_CONVERSATION_AND_MODEL_CONSENSUS_FINISH_LINE.md).
+> Where live-state or finish-line claims differ, the newer measured document and
+> running system win; this file may not be used to shrink that scope.
+
 Written 2026-08-02 from a measured, two-agent, code-level audit. This is the
 single document the owner asked for: how the system should work and why, what
 is settled, what is broken or missing with the code that proves it, and the
@@ -365,8 +373,8 @@ Items:
    probe set incl. held-out singles like glacier/trumpet) through a runner
    modeled on `verify-model-behavioral.py` detectors (on-topic rate,
    echo/hub collapse, flatness) + per-surface latency budget; run in CI
-   against a *seeded* fixture, not an empty DB. *Not started (#755) — next
-   measurement workstream after ops unblock.*
+   against a *seeded* fixture, not an empty DB. *Partial scaffolding exists;
+   reopened #755 now owns the unmet seeded product acceptance.*
 4. **G1/G2/G6 literalism + parity gates** (one WEIGHT, no render-in-select,
    C/SQL weight parity) — cheap greps + one fixed-vector test.
    *Progress:* G1/G3/G8 ratchets (#772); G7 C# (#775). G2 and G6-complete

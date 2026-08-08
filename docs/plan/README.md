@@ -1,5 +1,14 @@
 # docs/plan — the work, specified
 
+## Current product finish line
+
+[REAL_CONVERSATION_AND_MODEL_CONSENSUS_FINISH_LINE.md](REAL_CONVERSATION_AND_MODEL_CONSENSUS_FINISH_LINE.md)
+is the measured 2026-08-08 definition of done for MCP/OpenAI conversation, code,
+heterogeneous-model consensus, and export. It supersedes older live-state
+checkpoints for those claims. In particular, the 2026-08-05 "41 entities"
+checkpoint below is historical; the 2026-08-08 host was measured at roughly
+4.34 million entities with PostgreSQL and the API healthy.
+
 ## Scope — read this before treating the plan as complete
 
 `COMPLETION_PLAN.md` and this directory cover **one axis**: the conversational
@@ -43,7 +52,7 @@ point:
 
 ## Resume checkpoint
 
-**Current stage:** [CHECKPOINT_2026-08-05.md](CHECKPOINT_2026-08-05.md) —
+**Historical stage:** [CHECKPOINT_2026-08-05.md](CHECKPOINT_2026-08-05.md) —
 live box re-measured empty (THIN_SUBSTRATE), tracker drift 195→232, W5/W6
 status corrected against code/GH, ranked next work. Historical landing record
 for #771–#776 remains in [CHECKPOINT_2026-08-02.md](CHECKPOINT_2026-08-02.md).
@@ -56,7 +65,7 @@ for #771–#776 remains in [CHECKPOINT_2026-08-02.md](CHECKPOINT_2026-08-02.md).
 | W2 | [The document lane](W2_Document_Lane.md) — Pillar 0, identity/names/typed edges | #754 | 4 | specified |
 | W3 | [Self-ingest call graph](W3_Self_Ingest_Call_Graph.md) — the substrate reads its own source | #765 | 1 | **partial** — `.sql.in` discovery (#774); structural `CALLS`/`DEFINES` still zero |
 | W4 | [Sense-election ground](W4_Sense_Election_Ground.md) — tier seam + sense priors | #752, #753 | 3 | specified |
-| W5 | [Evaluation harness](W5_Evaluation_Harness.md) | #755 | 1 | **partial** — runner + probes + CI wire landed (`eval-generation.py`); issue body still claims none; needs seeded box + remaining acceptance |
+| W5 | [Evaluation harness](W5_Evaluation_Harness.md) | #755 | 1 | **partial** — runner + probes + CI wire landed (`eval-generation.py`); reopened #755 now owns the seeded HTTP/MCP/OpenAI, conversation, code, model-consensus, and export product gate; behavioral acceptance remains unproven |
 | W6 | [Architecture gates](W6_Architecture_Gates.md) — spec 37 G1–G10, elector invariant | #758 | 1 | **#758 CLOSED** (#829); G2/G5/G10 landed (#876, grandfathered); G4 destination still #765 `CALLS` in-degree |
 | W7 | [Questions route themselves](W7_Questions_Route_Themselves.md) — relation naming | #756 | 5 | specified |
 | W8 | [`infer()` to C](W8_Infer_To_C.md) — both directions, n-hop bias, multi-step | #757 | 5 | specified |
