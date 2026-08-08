@@ -1,4 +1,6 @@
+-- BEGIN ATOMIC: GH #764.
 CREATE OR REPLACE FUNCTION relation_type_id(p_name text) RETURNS bytea
-    LANGUAGE sql LAPLACE_IMMUTABLE_STRICT AS $$
-    SELECT @extschema@.canonical_id(p_name)
-$$;
+    LANGUAGE sql LAPLACE_IMMUTABLE_STRICT
+BEGIN ATOMIC
+    SELECT @extschema@.canonical_id(p_name);
+END;

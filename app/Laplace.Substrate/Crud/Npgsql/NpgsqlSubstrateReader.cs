@@ -247,7 +247,7 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         }
 
         await using var cmd = _ds.CreateCommand(
-            "SELECT subject_id, object_id, type_id, eff_mu, witnesses FROM laplace.classify_circuit($1)");
+            "SELECT subject_id, object_id, type_id, eff_mu, witnesses FROM consensus.classify_circuit($1)");
         var p = cmd.Parameters.AddWithValue(packed);
         p.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
 

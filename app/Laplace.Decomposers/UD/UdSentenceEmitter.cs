@@ -147,7 +147,10 @@ public sealed class UdSentenceEmitContext
                     if (key.Equals("Gloss", StringComparison.OrdinalIgnoreCase))
                     {
                         var gBytes = System.Text.Encoding.UTF8.GetBytes(val);
-                        if (ctx.RootFor(gBytes) is { } gid)
+                        // Never emit form HAS_DEFINITION form — when the gloss
+                        // roots to the same id as the token, that is a self-loop,
+                        // not a definition (#496). Numeric/misc tokens hit this.
+                        if (ctx.RootFor(gBytes) is { } gid && gid != form)
                             b.AddAttestation(NativeAttestation.Categorical(
                                 form, "HAS_DEFINITION", gid, sourceId, SourceTrust.AcademicCurated));
                     }

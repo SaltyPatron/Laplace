@@ -1,4 +1,4 @@
--- Plan Phase 8 (Build-A-Bear): re-fold attestations from ONLY the named sources
+-- Plan Phase 8 (Build-A-Bear): re-fold laplace.attestations from ONLY the named sources
 -- into a scoped consensus edge set — the "I know kung fu" package fold. The
 -- caller materializes this as pg_temp.consensus, which shadows laplace.consensus
 -- inside every plane function for that connection (pg_temp resolves first), so
@@ -15,13 +15,13 @@
 -- outcome reconstruction and no invented opponent. Partial order within a cell
 -- is (last_observed_at, id) — deterministic; the ingest's exact arrival order
 -- is the one thing evidence does not record.
-CREATE OR REPLACE FUNCTION scoped_consensus(p_source_ids bytea[])
+DROP FUNCTION IF EXISTS laplace.scoped_consensus(bytea[]);
+CREATE OR REPLACE FUNCTION consensus.scoped_consensus(p_source_ids bytea[])
     RETURNS TABLE(id bytea, subject_id bytea, type_id bytea, object_id bytea,
                   rating bigint, rd bigint, volatility bigint, witness_count bigint,
                   last_observed_at timestamptz)
-    LANGUAGE sql VOLATILE
-    SET search_path = @extschema@, public AS $$
-    SELECT consensus_id(f.subject_id, f.type_id, f.object_id),
+    LANGUAGE sql VOLATILE AS $$
+    SELECT laplace.consensus_id(f.subject_id, f.type_id, f.object_id),
            f.subject_id, f.type_id, f.object_id,
            (f.acc).rating, (f.acc).rd, (f.acc).volatility,
            (f.acc).witness_count, f.last_ts
@@ -31,10 +31,10 @@ CREATE OR REPLACE FUNCTION scoped_consensus(p_source_ids bytea[])
                               a.opponent_rd_fp1e9,
                               GREATEST(a.observation_count, 1),
                               a.sum_score_fp1e9,
-                              glicko2_tau()
+                              laplace.glicko2_tau()
                               ORDER BY a.last_observed_at, a.id) AS acc,
                max(a.last_observed_at) AS last_ts
-        FROM attestations a
+        FROM laplace.attestations a
         WHERE a.source_id = ANY(p_source_ids)
         GROUP BY a.subject_id, a.type_id, a.object_id
     ) f

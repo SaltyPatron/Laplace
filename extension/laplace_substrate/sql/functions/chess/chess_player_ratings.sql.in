@@ -1,4 +1,5 @@
-CREATE OR REPLACE FUNCTION chess_player_ratings(p_player bytea)
+DROP FUNCTION IF EXISTS laplace.chess_player_ratings(bytea);
+CREATE OR REPLACE FUNCTION chess.player_ratings(p_player bytea)
     RETURNS TABLE(rating integer, games bigint)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
     -- Every Elo this player has been witnessed at, and how many games carried
@@ -28,7 +29,7 @@ CREATE OR REPLACE FUNCTION chess_player_ratings(p_player bytea)
         SELECT p.id, t.txt
         FROM batch b,
              LATERAL unnest(b.ids) WITH ORDINALITY AS p(id, i),
-             LATERAL unnest(laplace.realize_batch(b.ids)) WITH ORDINALITY AS t(txt, j)
+             LATERAL unnest(realize.batch(b.ids)) WITH ORDINALITY AS t(txt, j)
         WHERE p.i = t.j
     )
     SELECT n.txt::integer, raw.games

@@ -1,21 +1,20 @@
--- NO `SET search_path` (GH #860, #617 item 6). realize() is the per-row labeling
--- scalar of the entire read path -- every arrow render, every relation listing,
+-- NO `SET search_path` (GH #860, #617 item 6). realize.realize() is the per-row labeling
+-- scalar of the entire read path -- every arrow laplace.render, every relation listing,
 -- every reply. The clause made SQL inlining impossible, so each row paid a full
 -- function execution for what is a COALESCE over four cheap resolvers.
 --
 -- GH #862: realize.realize, with its five resolvers as same-schema siblings.
 DROP FUNCTION IF EXISTS laplace.realize(bytea, bytea);
-
 CREATE OR REPLACE FUNCTION realize.realize(p_id bytea, p_lang bytea DEFAULT NULL)
     RETURNS text
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
-    -- resolve_name() is the single, referentially-correct name primitive: it
-    -- folds the former _realize_has_name (HAS_NAME primary + HAS_NAME_ALIAS) and
+    -- realize.resolve_name() is the single, referentially-correct name primitive: it
+    -- folds the former realize._has_name(HAS_NAME primary + HAS_NAME_ALIAS) and
     -- _realize_synset_lemma into one family-aware, abstaining resolver. It replaces
     -- the two separate arms this function used to run (synset-lemma first, HAS_NAME
     -- buried after translation); now the authoritative NAME wins ahead of a
     -- rendered self or a translation guess. The remaining arms stay as realize's
-    -- own display fallbacks (raw render, translation, canonical id, gloss).
+    -- own display fallbacks (raw laplace.render, translation, canonical id, gloss).
     SELECT COALESCE(
         realize.resolve_name(p_id, p_lang),
         NULLIF(laplace.render_text(p_id, 24), ''),

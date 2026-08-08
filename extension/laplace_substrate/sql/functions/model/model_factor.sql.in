@@ -6,7 +6,8 @@
 -- perfcache blob turns both into pointer arithmetic.
 
 -- The model's own coupling q(A)·k(B) in one circuit, by lookup.
-CREATE OR REPLACE FUNCTION model_pair_score(
+DROP FUNCTION IF EXISTS laplace.model_pair_score(bytea, bytea, bytea, bytea);
+CREATE OR REPLACE FUNCTION generation.model_pair_score(
     p_q_slice bytea,
     p_k_slice bytea,
     p_tok_a   bytea,
@@ -16,7 +17,8 @@ CREATE OR REPLACE FUNCTION model_pair_score(
     LANGUAGE C STABLE;
 
 -- One token's attention row in one circuit: k strongest partners, native scan.
-CREATE OR REPLACE FUNCTION model_row_topk(
+DROP FUNCTION IF EXISTS laplace.model_row_topk(bytea, bytea, bytea, int);
+CREATE OR REPLACE FUNCTION generation.model_row_topk(
     p_q_slice bytea,
     p_k_slice bytea,
     p_tok     bytea,
@@ -26,10 +28,11 @@ CREATE OR REPLACE FUNCTION model_row_topk(
     LANGUAGE C STABLE ROWS 20;
 
 -- Circuit navigation by anatomy. Order disambiguates layer vs head via
--- PRECEDES attestations whose CONTEXT is the coordinate (text-lane structure
+-- PRECEDES laplace.attestations whose CONTEXT is the coordinate (text-lane structure
 -- law); a single-constituent coordinate collapses to the plane anchor (emb).
 -- Uses attestations_relation_btree + consensus_object_type_btree.
-CREATE OR REPLACE FUNCTION model_circuit_slices(
+DROP FUNCTION IF EXISTS laplace.model_circuit_slices(text, int, int);
+CREATE OR REPLACE FUNCTION generation.model_circuit_slices(
     p_plane text,
     p_layer int DEFAULT NULL,
     p_head  int DEFAULT NULL)
@@ -73,19 +76,20 @@ CREATE OR REPLACE FUNCTION model_circuit_slices(
     FROM coord
     JOIN laplace.consensus s
       ON s.object_id = coord.id
-     AND s.type_id = relation_type_id('APPEARS_IN')
+     AND s.type_id = laplace.relation_type_id('APPEARS_IN')
     $fn$;
 
 -- Gravity decomposition: dot = |q|·|k|·cosθ — mass × mass × alignment.
 -- Norms come from self-scores; no extra native surface needed.
-CREATE OR REPLACE FUNCTION model_pair_cos(
+DROP FUNCTION IF EXISTS laplace.model_pair_cos(bytea, bytea, bytea, bytea, float8, float8, float8, float8);
+CREATE OR REPLACE FUNCTION generation.model_pair_cos(
     p_q bytea, p_k bytea, p_a bytea, p_b bytea,
     OUT raw_dot float8, OUT cos_theta float8, OUT mass_q float8, OUT mass_k float8)
     LANGUAGE plpgsql STABLE AS $fn$
 BEGIN
-    raw_dot := model_pair_score(p_q, p_k, p_a, p_b);
-    mass_q  := sqrt(model_pair_score(p_q, p_q, p_a, p_a));
-    mass_k  := sqrt(model_pair_score(p_k, p_k, p_b, p_b));
+    raw_dot := generation.model_pair_score(p_q, p_k, p_a, p_b);
+    mass_q  := sqrt(generation.model_pair_score(p_q, p_q, p_a, p_a));
+    mass_k  := sqrt(generation.model_pair_score(p_k, p_k, p_b, p_b));
     cos_theta := raw_dot / NULLIF(mass_q * mass_k, 0);
 END $fn$;
 
@@ -96,7 +100,8 @@ END $fn$;
 -- unembeds through the completion plane. Slices are content-addressed per
 -- model, so the directory is resolved by source: the slice deposited BY this
 -- source at each shared coordinate.
-CREATE OR REPLACE FUNCTION pg_laplace_model_forward(
+DROP FUNCTION IF EXISTS laplace.pg_laplace_model_forward(bytea, bytea[], bytea, bytea, int);
+CREATE OR REPLACE FUNCTION generation.pg_laplace_model_forward(
     p_emb_slice  bytea,
     p_mlp_slices bytea[],
     p_lm_slice   bytea,
@@ -107,9 +112,10 @@ CREATE OR REPLACE FUNCTION pg_laplace_model_forward(
     LANGUAGE C STABLE ROWS 20;
 
 -- The everyday entry: forward a WORD through a MODEL (by source id) to its k
--- strongest next tokens, word entities out (joinable against the web).
---   SELECT render_text(token), score FROM model_forward(:src, 'France', 10);
-CREATE OR REPLACE FUNCTION model_forward(
+-- strongest next tokens, word laplace.entities out (joinable against the web).
+--   SELECT laplace.render_text(token), score FROM generation.model_forward(:src, 'France', 10);
+DROP FUNCTION IF EXISTS laplace.model_forward(bytea, text, int);
+CREATE OR REPLACE FUNCTION generation.model_forward(
     p_source bytea,
     p_word   text,
     p_k      int DEFAULT 20)
@@ -119,10 +125,10 @@ CREATE OR REPLACE FUNCTION model_forward(
     WITH src_slice AS (
         -- The slice this source deposited at a given plane coordinate.
         SELECT s.slice_id, s.coord_id
-        FROM laplace.model_circuit_slices('emb') s
+        FROM generation.model_circuit_slices('emb') s
         WHERE EXISTS (SELECT 1 FROM laplace.attestations a
                       WHERE a.subject_id = s.slice_id
-                        AND a.type_id = relation_type_id('APPEARS_IN')
+                        AND a.type_id = laplace.relation_type_id('APPEARS_IN')
                         AND a.source_id = p_source)
     ),
     -- One slice per (source, plane) is the ingest convention, not a constraint the
@@ -131,10 +137,10 @@ CREATE OR REPLACE FUNCTION model_forward(
     emb AS (SELECT slice_id FROM src_slice ORDER BY slice_id LIMIT 1),
     lm AS (
         SELECT s.slice_id
-        FROM laplace.model_circuit_slices('lm') s
+        FROM generation.model_circuit_slices('lm') s
         WHERE EXISTS (SELECT 1 FROM laplace.attestations a
                       WHERE a.subject_id = s.slice_id
-                        AND a.type_id = relation_type_id('APPEARS_IN')
+                        AND a.type_id = laplace.relation_type_id('APPEARS_IN')
                         AND a.source_id = p_source)
         ORDER BY s.slice_id
         LIMIT 1
@@ -148,27 +154,28 @@ CREATE OR REPLACE FUNCTION model_forward(
         FROM laplace.attestations coord_has_plane
         JOIN laplace.consensus s
           ON s.object_id = coord_has_plane.subject_id
-         AND s.type_id = relation_type_id('APPEARS_IN')
-        WHERE coord_has_plane.type_id = relation_type_id('CONTAINS')
+         AND s.type_id = laplace.relation_type_id('APPEARS_IN')
+        WHERE coord_has_plane.type_id = laplace.relation_type_id('CONTAINS')
           AND coord_has_plane.object_id =
-              canonical_id('substrate/entity/model/plane/mlp/v1')
+              laplace.canonical_id('substrate/entity/model/plane/mlp/v1')
           AND EXISTS (SELECT 1 FROM laplace.attestations a
                       WHERE a.subject_id = s.subject_id
-                        AND a.type_id = relation_type_id('APPEARS_IN')
+                        AND a.type_id = laplace.relation_type_id('APPEARS_IN')
                         AND a.source_id = p_source)
     )
     SELECT f.token, f.score
-    FROM pg_laplace_model_forward(
+    FROM generation.pg_laplace_model_forward(
         (SELECT slice_id FROM emb),
         (SELECT array_agg(slice_id) FROM mlp),
         (SELECT slice_id FROM lm),
-        word_id(p_word),
+        laplace.word_id(p_word),
         p_k) f
     $fn$;
--- Returns word entities + text, ready to JOIN against senses/consensus/web:
---   SELECT r.*, c.rating FROM model_attention_row(2,9,'king',10) r
---   LEFT JOIN consensus c ON c.subject_id = r.token AND ...
-CREATE OR REPLACE FUNCTION model_attention_row(
+-- Returns word laplace.entities + text, ready to JOIN against senses/consensus/web:
+--   SELECT r.*, c.rating FROM generation.model_attention_row(2,9,'king',10) r
+--   LEFT JOIN laplace.consensus c ON c.subject_id = r.token AND ...
+DROP FUNCTION IF EXISTS laplace.model_attention_row(int, int, text, int);
+CREATE OR REPLACE FUNCTION generation.model_attention_row(
     p_layer int,
     p_head  int,
     p_word  text,
@@ -176,8 +183,8 @@ CREATE OR REPLACE FUNCTION model_attention_row(
     RETURNS TABLE(partner text, token bytea, score float8)
     LANGUAGE sql STABLE ROWS 20
     AS $fn$
-    SELECT render_text(t.token), t.token, t.score
-    FROM laplace.model_circuit_slices('qproj', p_layer, p_head) q,
-         model_circuit_slices('kproj', p_layer, p_head) k,
-         LATERAL model_row_topk(q.slice_id, k.slice_id, word_id(p_word), p_k) t
+    SELECT laplace.render_text(t.token), t.token, t.score
+    FROM generation.model_circuit_slices('qproj', p_layer, p_head) q,
+         generation.model_circuit_slices('kproj', p_layer, p_head) k,
+         LATERAL generation.model_row_topk(q.slice_id, k.slice_id, laplace.word_id(p_word), p_k) t
     $fn$;

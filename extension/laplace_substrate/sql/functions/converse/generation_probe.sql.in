@@ -6,18 +6,16 @@
 -- seed wave instead of living as ad-hoc operator SQL. Distinctness is then
 -- count(DISTINCT reply) per lane over this table; topicality is read against
 -- the topic's own consensus by the caller.
-DROP FUNCTION IF EXISTS laplace.generation_probe(text, int, int);
-
+DROP FUNCTION IF EXISTS laplace.generation_probe(text, bigint[], int, bytea);
 CREATE OR REPLACE FUNCTION generation.probe(p_prompt text,
                                             p_seeds bigint[],
                                             p_steps int DEFAULT 30,
                                             p_lang bytea DEFAULT NULL)
     RETURNS TABLE(lane text, seed bigint, reply text)
-    LANGUAGE sql VOLATILE
-    SET search_path = @extschema@, public AS $$
-    SELECT 'walk', s.seed, converse_walk(p_prompt, p_steps, s.seed)
-    FROM unnest(p_seeds) AS s(seed)
+    LANGUAGE sql VOLATILE AS $$
+    SELECT 'walk', b.seed, b.reply
+    FROM generation.walk_batch(p_prompt, p_steps, p_seeds) b
     UNION ALL
-    SELECT 'compose', s.seed, converse_compose(p_prompt, p_steps, p_lang, s.seed)
-    FROM unnest(p_seeds) AS s(seed)
+    SELECT 'compose', b.seed, b.reply
+    FROM generation.compose_batch(p_prompt, p_steps, p_lang, p_seeds) b
 $$;

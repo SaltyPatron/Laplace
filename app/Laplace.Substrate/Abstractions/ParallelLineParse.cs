@@ -16,7 +16,9 @@ namespace Laplace.Decomposers.Abstractions;
 /// Decomposers must not hand-roll this shape —
 /// DecomposerArchitectureGateTests.DecomposerProjects_NoHandRolledParallelIngest
 /// bans Channel.CreateBounded in decomposer projects; this helper is the
-/// sanctioned home.
+/// sanctioned home. Lives under <c>Laplace.Substrate/Abstractions/</c> (spine
+/// ownership) while keeping namespace <c>Laplace.Decomposers.Abstractions</c>
+/// so decomposer call sites stay on one import surface (Copilot #895).
 /// </summary>
 public static class ParallelLineParse
 {

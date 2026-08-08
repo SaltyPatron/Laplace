@@ -8811,6 +8811,15 @@
               "string"
             ],
             "format": "int64"
+          },
+          "documents": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64",
+            "default": 0
           }
         }
       },
@@ -8932,6 +8941,15 @@
             ]
           },
           "max_rows": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "timeout_seconds": {
             "pattern": "^-?(?:0|[1-9]\\d*)$",
             "type": [
               "null",

@@ -1,4 +1,4 @@
--- chess_opening_endgames(opening, limit): where an opening ACTUALLY ENDS UP, decided by
+-- chess.opening_endgames(opening, limit): where an opening ACTUALLY ENDS UP, decided by
 -- the tablebase rather than by the scoresheet.
 --
 -- This is the openings-to-syzygy correlation, and the point of both lanes being
@@ -27,18 +27,19 @@
 -- and that silence is correct: bool_or over zero rows is NULL, and a 3-4-5-man set covers
 -- a small fraction of play. Read lines_probed against chess_opening_record's lines before
 -- concluding anything about the opening as a whole.
-CREATE OR REPLACE FUNCTION chess_opening_endgames(p_opening text,
+DROP FUNCTION IF EXISTS laplace.chess_opening_endgames(text, int, int);
+CREATE OR REPLACE FUNCTION chess.opening_endgames(p_opening text,
                                                   p_limit int DEFAULT 16,
                                                   p_scan_lines int DEFAULT 5000)
     RETURNS TABLE(wdl text, positions bigint, lines_probed bigint)
     LANGUAGE sql STABLE
  AS $$
 WITH lines AS MATERIALIZED (
-    SELECT DISTINCT g.line_id FROM laplace.chess_opening_games(p_opening, p_scan_lines) g
+    SELECT DISTINCT g.line_id FROM chess.opening_games(p_opening, p_scan_lines) g
 ),
 verdict AS MATERIALIZED (
     SELECT s.wdl, count(*) AS positions, count(DISTINCT l.line_id) AS lines_probed
-    FROM lines l, LATERAL laplace.chess_syzygy_line(l.line_id) s
+    FROM lines l, LATERAL chess.syzygy_line(l.line_id) s
     WHERE s.wdl IS NOT NULL
     GROUP BY s.wdl
 )

@@ -1,10 +1,10 @@
--- prompt_coherence(prompt): joint orientation + sense resolution.
+-- converse.prompt_coherence(prompt): joint orientation + sense resolution.
 --
--- NATIVE (src/prompt_coherence.c). The SQL body this replaces hung chat() for
+-- NATIVE (src/prompt_coherence.c). The SQL body this replaces hung converse.chat() for
 -- every prompt -- >280s measured 2026-07-27 after the UD ingest -- and was taken
 -- off the hot path in the same change that ported it. It was SQL doing what the
 -- substrate law puts in C: set-returning functions as table sources (one
--- senses() per token, one bubble_up per candidate relation type), relation-name
+-- lexical.senses() per token, one bubble_up per candidate relation type), relation-name
 -- identifiers split with string_to_array per row, and an O(n^2) join of 277-315
 -- candidate senses against each other through an OR of both directions that no
 -- consensus index can serve. Rewriting it as two indexed joins behind a
@@ -12,7 +12,7 @@
 --
 -- The C form is the same computation as a MEMBERSHIP SCAN: candidates fetched
 -- once, then one indexed range read per direction with an O(1) hash probe per
--- edge. relation_rank and the canonical name come from the manifest in C
+-- edge. laplace.relation_rank and the canonical name come from the manifest in C
 -- (laplace_relation_lookup), and the name's object token becomes a content id
 -- through the same hash the substrate uses everywhere -- so no per-row SQL
 -- function call survives anywhere in the read.
@@ -46,11 +46,10 @@
 -- The elector sites declared and pinned by ElectorArchitectureGateTests instead
 -- break the all-silent case by ord DESC -- recency among sense-bearing candidates,
 -- resolve_last_word's semantics restricted to tokens the graph holds senses for.
--- total_mass stays exposed: it is the signal that refuted the premise, and the
+-- total_mass stays exposed: it is the signal that laplace.refuted the premise, and the
 -- election diagnostic reads it.
-DROP FUNCTION IF EXISTS prompt_coherence(text);
-
-CREATE OR REPLACE FUNCTION prompt_coherence(p_prompt text)
+DROP FUNCTION IF EXISTS laplace.prompt_coherence(text);
+CREATE OR REPLACE FUNCTION converse.prompt_coherence(p_prompt text)
     RETURNS TABLE(ord int, tok bytea, synset_id bytea,
                   coherence double precision, denote_mu numeric, peers bigint,
                   rel_type_id bytea, rel_mass double precision,

@@ -3,11 +3,12 @@
 -- so the listing responders keep only labels that are NOT a bare ILI id
 -- ("09411430-n"), a WordNet lexfile name ("noun.object", "adjs.pert"), or a
 -- multi-word phrase (a space). This was the same regex triplet copy-pasted into
--- chat() and converse_facts() -- and it had already drifted (chat dropped the
+-- converse.chat() and converse.facts() -- and it had already drifted (chat dropped the
 -- "adjs" lexfile case), the exact one-definition-per-fact hazard. One predicate,
 -- both callers. IMMUTABLE (pure function of the input, no schema objects) so it
 -- inlines into the WHERE and needs no search_path.
-CREATE OR REPLACE FUNCTION label_is_content(p_label text)
+DROP FUNCTION IF EXISTS laplace.label_is_content(text);
+CREATE OR REPLACE FUNCTION converse.label_is_content(p_label text)
     RETURNS boolean
     LANGUAGE sql IMMUTABLE AS $$
     SELECT p_label IS NOT NULL

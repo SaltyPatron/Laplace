@@ -348,7 +348,7 @@ pc_load_icf(HTAB *tok_h, MemoryContext work)
     args[0] = PointerGetDatum(arr);
 
     rc = SPI_execute_with_args(
-        "SELECT entity_id, icf FROM laplace.entity_container_degree($1)",
+        "SELECT entity_id, icf FROM structural.entity_container_degree($1)",
         1, argtypes, args, NULL, true, 0);
     if (rc != SPI_OK_SELECT)
         return;                 /* neutral priors already in place */
@@ -533,6 +533,26 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
                 }
                 pc_syn_add(syn_h, (const uint8 *) VARDATA_ANY(syn), ord, n_cand, work);
 
+                /* Word-level subjects too. IS_ANTONYM_OF on this seed hangs on
+                 * word_id('hot'), not its synsets (0 syn-subject edges, 2 word-
+                 * subject). Without the surface id in the membership set,
+                 * naming IS_ANTONYM_OF still left rel_mass at 0 — GH #864. */
+                if (hash_search(syn_h, VARDATA_ANY(tok), HASH_FIND, NULL) == NULL)
+                {
+                    old = MemoryContextSwitchTo(work);
+                    if (syn_datums == NULL)
+                        syn_datums = (Datum *) palloc(sizeof(Datum) * 4096);
+                    if (n_syn < 4096)
+                    {
+                        bytea *cp = (bytea *) palloc(VARSIZE_ANY(tok));
+
+                        memcpy(cp, tok, VARSIZE_ANY(tok));
+                        syn_datums[n_syn++] = PointerGetDatum(cp);
+                    }
+                    MemoryContextSwitchTo(old);
+                }
+                pc_syn_add(syn_h, (const uint8 *) VARDATA_ANY(tok), ord, n_cand, work);
+
                 tk = (PcTokEntry *) hash_search(tok_h, VARDATA_ANY(tok), HASH_ENTER, &found);
                 if (!found)
                     tk->ord_mask = 0;
@@ -609,14 +629,25 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
             const char *name, *last;
             size_t      len;
             hash128_t   wid;
+            hash128_t   type_id;
             PcTokEntry *tk;
             bool        found;
 
             name = def->canonical;
             if (name == NULL)
                 continue;
+            tk = NULL;
 
-            te = (PcTypeEntry *) hash_search(type_h, &def->type_id, HASH_ENTER, &found);
+            /* def->type_id in the static table is always zero; real ids live in
+             * k_relation_type_id_cache and are filled by relation_ids_ensure().
+             * HASH_ENTER on &def->type_id collapsed every relation into one
+             * all-zero key, so naming set namer_ords (specificity=-1) while
+             * the rel_mass query asked for type_id = 0x00… and returned nothing.
+             * Measured post-a1ec6ed1: synonym-of-dog and opposite-of-hot both
+             * demoted the namer and still left rel_mass=0 / rel_type_id NULL. */
+            if (laplace_relation_type_id(name, &type_id) < 0)
+                continue;
+            te = (PcTypeEntry *) hash_search(type_h, &type_id, HASH_ENTER, &found);
             if (!found)
             {
                 te->namer_mask = 0;
@@ -698,10 +729,37 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
                     pfree(lower);
                     continue;
                 }
+                /* GH #864: concept-segment aliases. IS_ANTONYM_OF's longest
+                 * segment is ANTONYM; prompts say "opposite". They share a
+                 * WordNet synset but a full senses×tokens join hung the
+                 * elector — keep a closed alias list of measured misses. */
+                {
+                    static const struct { const char *from; const char *to; } aliases[] = {
+                        {"antonym", "opposite"},
+                        {NULL, NULL}
+                    };
+                    hash128_t alias_wid;
+                    int       ai;
+
+                    tk = (PcTokEntry *) hash_search(tok_h, &wid, HASH_FIND, NULL);
+                    if (tk == NULL)
+                    {
+                        for (ai = 0; aliases[ai].from != NULL; ai++)
+                        {
+                            if (strcmp(lower, aliases[ai].from) != 0)
+                                continue;
+                            if (laplace_content_root_id(
+                                    (const uint8_t *) aliases[ai].to,
+                                    strlen(aliases[ai].to), &alias_wid) == 0)
+                                tk = (PcTokEntry *) hash_search(
+                                    tok_h, &alias_wid, HASH_FIND, NULL);
+                            break;
+                        }
+                    }
+                }
                 pfree(lower);
             }
 
-            tk = (PcTokEntry *) hash_search(tok_h, &wid, HASH_FIND, NULL);
             if (tk != NULL)
             {
                 te->named = true;
@@ -1061,19 +1119,16 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
                  * annihilate the other, and ties still fall through to rel_mass
                  * exactly as before.
                  *
-                 * NOT YET SUMMED INTO THE KEY. The prior is loaded and correct
-                 * (pc_load_icf), and on its own it is measurably WORSE than what
-                 * it replaces: election_correctness 5/6 -> 4/6 on the six probes,
-                 * 2026-08-04. It elects `opposite` over `hot` purely because
-                 * `opposite` is rarer (~517 containers vs ~1050), which is the
-                 * same single-scalar failure as every other key tried here.
-                 * Shipping it wired would trade a language-specific prior for a
-                 * frequency-specific one and call it progress.
-                 *
-                 * It becomes the key when it is weighed against what the fold
-                 * already says per candidate -- rating, rd as trust, witness
-                 * count -- so a rare token with thin evidence cannot outrank a
-                 * common token with strong evidence. GH #865. */
+                 * WEIGHED AGAINST THE FOLD (GH #865). ICF alone elected
+                 * `opposite` over `hot` (rarer wins) — 5/6 → 4/6. Witness sat
+                 * alone fixed that pair but elected capital→great over France
+                 * (more sense witnesses, far less total_mass). The prior that
+                 * clears both is ICF × mass sat, where mass sat =
+                 * total_mass/(total_mass+HALFMAX_MASS) and HALFMAX_MASS (~1e13)
+                 * is the sparse-concept scale on this substrate — same class of
+                 * saturation constant as foundry_witness_sat's half-max, not a
+                 * per-probe knob. total_mass is the fold's own volume on the
+                 * elected sense. share still leads when the graph speaks. */
                 /* A NAMER IS NOT A TOPIC (2026-08-05).
                  *
                  * Spec 37 OP3: a token that names a relation selects WHICH
@@ -1100,18 +1155,30 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
                  *
                  * Deliberately NOT symmetric with the ICF prior below: this is a
                  * ROLE distinction the manifest already encodes, not a frequency
-                 * heuristic. "The opposite of hot is" is unaffected — the
-                 * oppositional relation is IS_ANTONYM_OF, whose concept segment
-                 * is `antonym`, so `opposite` names nothing and `hot` keeps
-                 * winning as it already did. */
+                 * heuristic. "The opposite of hot is" is the load-bearing case:
+                 * the antonym→opposite alias + real type_id lookup make
+                 * `opposite` a namer (specificity -1) and let hot take the
+                 * IS_ANTONYM_OF rel_mass (GH #864). */
                 {
                     double share = best->total_mass > 0.0
                                    ? best->coherence / best->total_mass
                                    : 0.0;
                     bool   is_namer = (best->ord >= 0 && best->ord <= PC_MAX_ORD)
                                       && ((namer_ords >> best->ord) & 1) != 0;
+                    /* ~1e13: sparsely-wired concept mass on foundation seed. */
+                    double mass_sat = best->total_mass <= 0.0
+                                          ? 0.0
+                                          : (best->total_mass
+                                             / (best->total_mass + 1.0e13));
+                    double icf = 1.0;
+                    PcTokEntry *te = (PcTokEntry *) hash_search(
+                        tok_h, best->tok, HASH_FIND, NULL);
 
-                    values[8] = Float8GetDatum(is_namer ? -1.0 : share);
+                    if (te != NULL)
+                        icf = te->icf;
+
+                    values[8] = Float8GetDatum(
+                        is_namer ? -1.0 : (share + icf * mass_sat));
                 }
                 /* The denominator, exposed raw. Computed here all along and
                  * discarded; returning it is what let the electors' first

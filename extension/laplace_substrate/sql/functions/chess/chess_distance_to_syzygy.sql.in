@@ -1,11 +1,10 @@
--- chess_distance_to_syzygy(line): observed distance along a line to the first
+-- chess.distance_to_syzygy(line): observed distance along a line to the first
 -- deposited closing fact. Silence is not a draw — empty when the line never
 -- reaches a deposited tablebase position.
 --
--- Relation vocabulary via chess_has_wdl_type / chess_has_dtz_type (ISA G3).
-DROP FUNCTION IF EXISTS chess_distance_to_syzygy(bytea);
-
-CREATE OR REPLACE FUNCTION chess_distance_to_syzygy(p_line bytea)
+-- Relation vocabulary via chess_has_wdl_type / chess.has_dtz_type(ISA G3).
+DROP FUNCTION IF EXISTS laplace.chess_distance_to_syzygy(bytea);
+CREATE OR REPLACE FUNCTION chess.distance_to_syzygy(p_line bytea)
     RETURNS TABLE(
         position_id bytea,
         plies_to_close integer,
@@ -15,11 +14,11 @@ CREATE OR REPLACE FUNCTION chess_distance_to_syzygy(p_line bytea)
     LANGUAGE sql STABLE
  AS $$
 WITH rel AS MATERIALIZED (
-    SELECT laplace.chess_has_wdl_type() AS wdl, laplace.chess_has_dtz_type() AS dtz
+    SELECT chess.has_wdl_type() AS wdl, chess.has_dtz_type() AS dtz
 ),
 line AS MATERIALIZED (
     SELECT (u.ord - 1)::int AS ply, u.entity_id AS pos
-    FROM LATERAL laplace.trajectory_unpacked_points(p_line)
+    FROM LATERAL generation.trajectory_unpacked_points(p_line)
          WITH ORDINALITY AS u(entity_id, run_length, ctier, ord)
 ),
 hit AS MATERIALIZED (
@@ -44,12 +43,12 @@ label AS MATERIALIZED (
     SELECT p.id, t.txt
     FROM surfaces b,
          LATERAL unnest(b.ids) WITH ORDINALITY AS p(id, i),
-         LATERAL unnest(laplace.realize_batch(b.ids, NULL)) WITH ORDINALITY AS t(txt, j)
+         LATERAL unnest(realize.batch(b.ids, NULL)) WITH ORDINALITY AS t(txt, j)
     WHERE p.i = t.j
 )
 SELECT h.pos,
        h.ply,
-       -- Exact men is a board fact (compose-time). Not stored on physicalities;
+       -- Exact men is a board fact (compose-time). Not stored on laplace.physicalities;
        -- NULL here rather than lying with n_constituents (substructure count).
        NULL::integer,
        w.txt,

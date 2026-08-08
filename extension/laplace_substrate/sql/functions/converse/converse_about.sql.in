@@ -1,20 +1,18 @@
--- converse_about(syn, lang): the REALIZE half of converse() -- weave prose for an
+-- converse.about(syn, lang): the REALIZE half of converse.converse() -- weave prose for an
 -- ALREADY-RESOLVED topic synset. Internal seam so callers that have already
--- oriented (chat() resolves its topic once per turn) do not pay converse()'s
+-- oriented (converse.chat() resolves its topic once per turn) do not pay converse.converse()'s
 -- prompt re-segmentation + band-mass re-orientation just to describe a synset
 -- they hold in hand.
 --
--- The facts come from converse_facts() -- the walk-driven fact engine (native
+-- The facts come from converse.facts() -- the walk-driven fact engine (native
 -- beam walk for the taxonomy chain, ranked consensus for the listings), each
--- row carrying provenance (eff_mu, witnesses, path). This wrapper is prose-only:
+-- row carrying provenance (laplace.eff_mu, witnesses, path). This wrapper is prose-only:
 -- callers that want the provenance columns query converse_facts directly. The
 -- 'web' arrow-chain row is a drill-down surface, not prose -- excluded here.
 DROP FUNCTION IF EXISTS laplace.converse_about(bytea, bytea);
-
 CREATE OR REPLACE FUNCTION converse.about(p_syn bytea, p_lang bytea DEFAULT NULL)
     RETURNS text
-    LANGUAGE plpgsql STABLE
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE plpgsql STABLE AS $$
 DECLARE
     prose text;
     lbl   text;

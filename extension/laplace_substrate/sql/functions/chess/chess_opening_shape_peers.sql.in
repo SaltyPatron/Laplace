@@ -1,16 +1,15 @@
--- chess_opening_shape_peers(line_id): Hilbert/centroid locality prefilter, then
+-- chess.opening_shape_peers(line_id): Hilbert/centroid locality prefilter, then
 -- Frechet on REALIZED entity_curve — Cat/Act applied to chess opening lines.
 --
--- NEVER Frechet on packed physicalities.trajectory (Rule #3). Catalog peers are
--- Chess_Game entities first-observed by ChessOpenings that carry a trajectory
+-- NEVER Frechet on packed laplace.physicalities.trajectory (Rule #3). Catalog peers are
+-- Chess_Game laplace.entities first-observed by ChessOpenings that carry a trajectory
 -- (opening LINEs after the catalog-dual deposit) — not OPENING_NAME attestation
--- scans (that would re-introduce relation_type_id vocabulary literals; ISA G3).
+-- scans (that would re-introduce laplace.relation_type_id vocabulary literals; ISA G3).
 --
--- IDS OUT: peer_line_id only. Name/ECO are separate attestations; render via
+-- IDS OUT: peer_line_id only. Name/ECO are separate laplace.attestations; laplace.render via
 -- realize_batch on a page of peer ids if needed — never per-row realize here.
-DROP FUNCTION IF EXISTS chess_opening_shape_peers(bytea, integer, float8);
-
-CREATE OR REPLACE FUNCTION chess_opening_shape_peers(
+DROP FUNCTION IF EXISTS laplace.chess_opening_shape_peers(bytea, integer, float8);
+CREATE OR REPLACE FUNCTION chess.opening_shape_peers(
     p_line bytea,
     p_k integer DEFAULT 12,
     p_frechet_max float8 DEFAULT 0.05)
@@ -26,9 +25,9 @@ DECLARE
     v_openings_src bytea := laplace.source_id('ChessOpenings');
     v_game_type bytea := laplace.entity_type_id('Chess_Game');
 BEGIN
-    SELECT a.coord, laplace.entity_curve(p_line)
+    SELECT a.coord, structural.entity_curve(p_line)
       INTO v_coord, v_curve
-    FROM laplace.word_anchor(p_line) a;
+    FROM structural.word_anchor(p_line) a;
     IF v_coord IS NULL OR v_curve IS NULL THEN RETURN; END IF;
 
     RETURN QUERY
@@ -52,7 +51,7 @@ BEGIN
     scored AS (
         SELECT k.entity_id,
                public.laplace_angular_distance_4d(k.coord, v_coord) AS geo,
-               public.laplace_frechet_4d(laplace.entity_curve(k.entity_id), v_curve) AS fr
+               public.laplace_frechet_4d(structural.entity_curve(k.entity_id), v_curve) AS fr
         FROM knn k
     )
     SELECT s.entity_id, s.geo, s.fr

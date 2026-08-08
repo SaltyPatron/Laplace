@@ -10,7 +10,8 @@ namespace Laplace.Api.Contracts;
 public sealed record OpRequest(
     [property: JsonPropertyName("name")] string? Name,
     [property: JsonPropertyName("args")] Dictionary<string, JsonElement>? Args = null,
-    [property: JsonPropertyName("max_rows")] int? MaxRows = null);
+    [property: JsonPropertyName("max_rows")] int? MaxRows = null,
+    [property: JsonPropertyName("timeout_seconds")] int? TimeoutSeconds = null);
 
 public sealed record OpResponse(
     [property: JsonPropertyName("object")] string Object,

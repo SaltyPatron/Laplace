@@ -1,4 +1,5 @@
-CREATE OR REPLACE FUNCTION session_record_prompt(
+DROP FUNCTION IF EXISTS laplace.session_record_prompt(bytea, text, bytea);
+CREATE OR REPLACE FUNCTION generation.session_record_prompt(
         p_session bytea, p_prompt text, p_resolved bytea DEFAULT NULL)
     RETURNS void
     LANGUAGE plpgsql VOLATILE
@@ -21,8 +22,7 @@ BEGIN
     -- hash, so its high bits are already uniformly distributed -- no hashtext
     -- round trip, and a collision costs two unrelated sessions a brief wait, never
     -- a wrong ord.
-    PERFORM pg_advisory_xact_lock(
-        ('x' || substr(encode(p_session, 'hex'), 1, 16))::bit(64)::bigint);
+    PERFORM pg_advisory_xact_lock(laplace.hash128_lo(p_session));
 
     INSERT INTO laplace.session_topics (session_id, ord, prompt, resolved_id)
     VALUES (

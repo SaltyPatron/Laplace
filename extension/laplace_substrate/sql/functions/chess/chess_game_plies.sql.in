@@ -1,7 +1,7 @@
 -- GH #736 re-key: the input parameter was renamed (p_game -> p_event), which
 -- CREATE OR REPLACE cannot do on the upgrade path.
-DROP FUNCTION IF EXISTS chess_game_plies(bytea);
-CREATE OR REPLACE FUNCTION chess_game_plies(p_event bytea)
+DROP FUNCTION IF EXISTS laplace.chess_game_plies(bytea);
+CREATE OR REPLACE FUNCTION chess.game_plies(p_event bytea)
     RETURNS TABLE(ply integer, position_id bytea, san text, clock text,
                   eval_token text, think_class text, move_quality text)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
@@ -48,7 +48,7 @@ CREATE OR REPLACE FUNCTION chess_game_plies(p_event bytea)
         -- a build and to a regress case that only exercised the no-trajectory branch.
         SELECT u.ord AS ordinal, u.entity_id AS pos
         FROM played p,
-             LATERAL laplace.trajectory_unpacked_points(p.line)
+             LATERAL generation.trajectory_unpacked_points(p.line)
              WITH ORDINALITY AS u(entity_id, run_length, ctier, ord)
     ),
     facts AS MATERIALIZED (
@@ -79,7 +79,7 @@ CREATE OR REPLACE FUNCTION chess_game_plies(p_event bytea)
         GROUP BY f.pos
     ),
     surface_batch AS MATERIALIZED (
-        -- Every surface this game needs, resolved in ONE realize_batch. Per-row label() over
+        -- Every surface this game needs, resolved in ONE realize_batch. Per-row realize.label() over
         -- a 200-ply game is what made the old path slow enough to look like it needed an
         -- engine.
         SELECT COALESCE(array_agg(DISTINCT s), '{}'::bytea[]) AS ids
@@ -92,7 +92,7 @@ CREATE OR REPLACE FUNCTION chess_game_plies(p_event bytea)
         SELECT q.id, t.txt
         FROM surface_batch b,
              LATERAL unnest(b.ids) WITH ORDINALITY AS q(id, i),
-             LATERAL unnest(laplace.realize_batch(b.ids)) WITH ORDINALITY AS t(txt, j)
+             LATERAL unnest(realize.batch(b.ids)) WITH ORDINALITY AS t(txt, j)
         WHERE q.i = t.j
     )
     SELECT l.ordinal::integer,

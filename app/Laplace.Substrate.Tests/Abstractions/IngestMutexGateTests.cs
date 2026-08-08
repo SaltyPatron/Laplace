@@ -105,6 +105,9 @@ public sealed class IngestMutexGateTests
     private static readonly HashSet<string> DatabaseMutexAllowlist = new(StringComparer.OrdinalIgnoreCase)
     {
         "extension/laplace_substrate/sql/functions/highway/highway_mask_deposit.sql.in", // 1x @ 101
+        // GH #911: session ord RMW serialization — not the ingest mutex. Keyed on
+        // session id via hash128_lo; covers the empty-session FOR UPDATE gap.
+        "extension/laplace_substrate/sql/functions/variant/session_record_prompt.sql.in",
     };
 
     /// <summary>
@@ -147,7 +150,11 @@ public sealed class IngestMutexGateTests
     private const int ProcessMutexCeiling = 5;
 
     /// <inheritdoc cref="ProcessMutexCeiling"/>
-    private const int DatabaseMutexCeiling = 1;
+    // 1 -> 2 (2026-08-07): generation.session_record_prompt gained a
+    // session-keyed advisory lock for GH #911 ord RMW. Not an ingest mutex —
+    // listed so a third SQL-side lock is still a named failure. Visible raise
+    // per W6 D2 (same class as the g3_sql chess-read exception).
+    private const int DatabaseMutexCeiling = 2;
 
     /// <inheritdoc cref="ProcessMutexCeiling"/>
     private const int EvidenceVerifyCeiling = 11;
@@ -193,7 +200,9 @@ public sealed class IngestMutexGateTests
             char n = i + 1 < text.Length ? text[i + 1] : '\0';
             if (state == 0)
             {
-                var hit = lineStarts.FirstOrDefault(s => string.CompareOrdinal(text, i, s, 0, s.Length) == 0);
+                var hit = lineStarts.FirstOrDefault(s =>
+                    i + s.Length <= text.Length
+                    && string.CompareOrdinal(text, i, s, 0, s.Length) == 0);
                 if (hit is not null)
                 {
                     outBuf.Append(' ', hit.Length);
@@ -201,7 +210,9 @@ public sealed class IngestMutexGateTests
                     state = 1;
                     continue;
                 }
-                if (blockOpen is not null && string.CompareOrdinal(text, i, blockOpen, 0, blockOpen.Length) == 0)
+                if (blockOpen is not null
+                    && i + blockOpen.Length <= text.Length
+                    && string.CompareOrdinal(text, i, blockOpen, 0, blockOpen.Length) == 0)
                 {
                     outBuf.Append(' ', blockOpen.Length);
                     i += blockOpen.Length - 1;
@@ -218,7 +229,9 @@ public sealed class IngestMutexGateTests
             }
             else if (state == 2)
             {
-                if (blockClose is not null && string.CompareOrdinal(text, i, blockClose, 0, blockClose.Length) == 0)
+                if (blockClose is not null
+                    && i + blockClose.Length <= text.Length
+                    && string.CompareOrdinal(text, i, blockClose, 0, blockClose.Length) == 0)
                 {
                     outBuf.Append(' ', blockClose.Length);
                     i += blockClose.Length - 1;

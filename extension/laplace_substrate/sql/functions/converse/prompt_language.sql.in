@@ -1,22 +1,22 @@
--- prompt_language(prompt): which language is this prompt written in.
+-- converse.prompt_language(prompt): which language is this prompt written in.
 --
 -- NATIVE (src/prompt_language.c). The SQL body this replaces used
--- prompt_state() as a table source -- a per-row set-returning function -- and
--- called eff_mu() per row over a partitioned consensus join, which is the
--- exact shape CLAUDE.md:75 sends to C. Extracting it from chat() made it
+-- converse.prompt_state() as a table source -- a per-row set-returning function -- and
+-- called laplace.eff_mu() per row over a partitioned consensus join, which is the
+-- exact shape CLAUDE.md:75 sends to C. Extracting it from converse.chat() made it
 -- callable; porting it makes it lawful.
 --
 -- THE TALLY, EXTRACTED. This computation already existed -- inline, in the
--- body of chat() -- and was therefore callable by nothing. converse(),
--- converse_walk(), infer() and prompt_coherence() all need it and none could
+-- body of converse.chat() -- and was therefore callable by nothing. converse.converse(),
+-- converse.walk(), converse.infer() and converse.prompt_coherence() all need it and none could
 -- reach it. A canonical implementation with one inline caller is the drift
 -- shape spec 37 section 0 names; this is the same defect one level down.
 --
--- WHY A TALLY AND NOT word_language() PER TOKEN. word_language() is LIMIT 1 --
+-- WHY A TALLY AND NOT converse.word_language() PER TOKEN. converse.word_language() is LIMIT 1 --
 -- one language per word -- which discards the distribution and makes a token
 -- shared across languages ("chat" English/French, "die" English/German, "a"
--- in a dozen) look monolingual. Summing eff_mu over EVERY HAS_LANGUAGE edge
--- carried by the prompt's entities lets genuinely ambiguous tokens contribute
+-- in a dozen) look monolingual. Summing laplace.eff_mu over EVERY HAS_LANGUAGE edge
+-- carried by the prompt's laplace.entities lets genuinely ambiguous tokens contribute
 -- to both tallies and be settled by the tokens that are decisive, which is how
 -- a reader disambiguates too.
 --
@@ -32,26 +32,24 @@
 -- BIAS toward a language rather than hard-filter to it: a genuinely
 -- cross-lingual prompt must still work, and the substrate's identity law is
 -- language-agnostic by construction.
-DROP FUNCTION IF EXISTS prompt_language(text);
-
-CREATE OR REPLACE FUNCTION prompt_language(p_prompt text)
+DROP FUNCTION IF EXISTS laplace.prompt_language(text);
+CREATE OR REPLACE FUNCTION converse.prompt_language(p_prompt text)
     RETURNS TABLE(lang_id bytea, mass numeric)
     AS 'MODULE_PATHNAME', 'pg_laplace_prompt_language'
     LANGUAGE C STABLE;
 
 -- The winner alone, for callers that just want to pin a rendering language.
 -- A wrapper, not a second ladder.
+DROP FUNCTION IF EXISTS laplace.prompt_language(text);
 DROP FUNCTION IF EXISTS laplace.prompt_language_top(text);
-
 CREATE OR REPLACE FUNCTION converse.prompt_language_top(p_prompt text)
     RETURNS bytea
-    LANGUAGE sql STABLE
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE sql STABLE AS $$
     -- "The winner" is a claim about MASS, so rank on it rather than trusting the
     -- C SRF's emission order. A wrapper that depends on an unstated ordering is a
     -- second ladder in disguise -- it silently re-decides the election if the
     -- native side ever reorders its output.
-    SELECT lang_id FROM prompt_language(p_prompt)
+    SELECT lang_id FROM converse.prompt_language(p_prompt)
     ORDER BY mass DESC, lang_id
     LIMIT 1
 $$;

@@ -1,15 +1,14 @@
 -- Gloss plus the IS_A ladder upward. Context ids disambiguate the sense.
-DROP FUNCTION IF EXISTS recall_what_is_response(text, bytea);
-
-CREATE OR REPLACE FUNCTION recall_what_is_response(p_topic bytea, p_context_ids bytea[] DEFAULT NULL)
-    RETURNS TABLE(reply text, laplace.eff_mu numeric, witnesses bigint)
+DROP FUNCTION IF EXISTS laplace.recall_what_is_response(bytea, bytea[]);
+CREATE OR REPLACE FUNCTION converse.recall_what_is_response(p_topic bytea, p_context_ids bytea[] DEFAULT NULL)
+    RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
  AS $$
     SELECT realize.label(p_topic) || ': ' || d.definition, d.eff_mu, d.witnesses
-    FROM laplace.define_fast(p_topic, COALESCE(p_context_ids, ARRAY[]::bytea[]), 3) d
+    FROM converse.define_fast(p_topic, COALESCE(p_context_ids, ARRAY[]::bytea[]), 3) d
     UNION ALL
     SELECT repeat('  ', h.depth) || E'→ is ' || COALESCE(h.hypernym, '?')
            || COALESCE(': ' || h.gloss, ''), NULL::numeric, NULL::bigint
-    FROM laplace.hypernyms(p_topic, 6) h
+    FROM converse.hypernyms(p_topic, 6) h
     WHERE h.depth > 0
 $$;

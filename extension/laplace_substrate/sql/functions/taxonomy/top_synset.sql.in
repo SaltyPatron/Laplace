@@ -5,11 +5,10 @@
 -- by structure rather than by a SET clause repeated in 186 files -- and the SET is
 -- gone here, which is what lets the plan cache.
 --
--- The old laplace.top_synset is dropped rather than left as a shim: two names for
+-- The old taxonomy.top_synset is dropped rather than left as a shim: two names for
 -- one function is the dual-definition defect (GH #532), and a caller still on the
 -- old name should fail loudly at install rather than silently diverge later.
 DROP FUNCTION IF EXISTS laplace.top_synset(bytea);
-
 CREATE OR REPLACE FUNCTION taxonomy.top_synset(p_word bytea)
     RETURNS bytea
     LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$

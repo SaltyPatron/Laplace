@@ -1,6 +1,5 @@
 -- converse.epistemic_status — GH #862 / #860. No SET, real schema names.
 DROP FUNCTION IF EXISTS laplace.epistemic_status(bytea, bytea, int);
-
 CREATE OR REPLACE FUNCTION converse.epistemic_status(p_word bytea, p_lang bytea DEFAULT NULL,
                                             p_limit int DEFAULT 30)
     RETURNS TABLE(type text, fact text, status text, mu numeric,
@@ -23,7 +22,7 @@ CREATE OR REPLACE FUNCTION converse.epistemic_status(p_word bytea, p_lang bytea 
             FROM objs CROSS JOIN LATERAL unnest(objs.a, laplace.render_text_batch(objs.a, 32)) AS u(object_id, s)
             WHERE objs.a IS NOT NULL
          )
-    SELECT laplace.type_label(r.type_id),
+    SELECT lexical.type_label(r.type_id),
            COALESCE(rd.s, realize.realize(r.object_id, l.id)),
            CASE WHEN laplace.refuted(r.rating, r.rd) THEN 'refuted'
                 WHEN laplace.eff_mu(r.rating, r.rd) > laplace.glicko2_neutral_mu() THEN 'confirmed'

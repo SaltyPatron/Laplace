@@ -4,7 +4,7 @@ CREATE EXTENSION IF NOT EXISTS laplace_substrate;
 
 -- The generation SEQUENCE surface, corpus-free (#728): trajectory_continuations
 -- reads successors straight off physicalities.trajectory; separator-ness is a UCD
--- attestation fact resolved through separator_ids(); walk_continuations runs
+-- attestation fact resolved through generation.separator_ids(); walk_continuations runs
 -- S6 propose → S7 steer → S8 sample with the consensus COMPLETES_TO floor.
 -- Invariants held over from the corpus era: separators never leak into order
 -- metrics, run boundaries do not pair across sequences, same (data, prompt, seed)
@@ -53,7 +53,7 @@ BEGIN
 
     -- Separator-ness is an ATTESTED UCD fact, never a render: the fixture
     -- declares its space exactly the way the Unicode seed does —
-    -- HAS_GENERAL_CATEGORY → Zs — and separator_ids() resolves it.
+    -- HAS_GENERAL_CATEGORY → Zs — and generation.separator_ids() resolves it.
     INSERT INTO canonical_names (id, name)
     VALUES (zs_cat, 'unicode/category/Zs/v1');
     INSERT INTO attestations (id, subject_id, type_id, object_id, source_id,
@@ -63,8 +63,8 @@ BEGIN
             relation_type_id('HAS_GENERAL_CATEGORY'), zs_cat, src,
             NULL, 2, now(), 1, 1000000000, 30000000000);
 
-    IF NOT (sp = ANY (separator_ids())) THEN
-        RAISE EXCEPTION 'FAIL: attested Zs token not in separator_ids()';
+    IF NOT (sp = ANY (generation.separator_ids())) THEN
+        RAISE EXCEPTION 'FAIL: attested Zs token not in generation.separator_ids()';
     END IF;
 
     -- sent = the ␣ capital ␣ of ␣ france
@@ -107,12 +107,12 @@ BEGIN
 
     -- S6: the → capital; separator skipped, carried as sep_id, weight 1.
     IF NOT EXISTS (
-        SELECT 1 FROM trajectory_continuations(ARRAY[w_the], 8) t
+        SELECT 1 FROM generation.trajectory_continuations(ARRAY[w_the], 8) t
         WHERE t.object_id = w_capital AND t.weight = 1 AND t.sep_id = sp) THEN
         RAISE EXCEPTION 'FAIL: (the→capital) continuation missing, wrong weight, or separator not carried';
     END IF;
     IF EXISTS (
-        SELECT 1 FROM trajectory_continuations(ARRAY[w_the], 8) t
+        SELECT 1 FROM generation.trajectory_continuations(ARRAY[w_the], 8) t
         WHERE t.object_id = sp) THEN
         RAISE EXCEPTION 'FAIL: separator token leaked into the order metrics';
     END IF;
@@ -120,24 +120,24 @@ BEGIN
     -- Run boundary: france ends sent and starts sent2 — its successor comes only
     -- from WITHIN sent2; sequences never pair across roots.
     IF NOT EXISTS (
-        SELECT 1 FROM trajectory_continuations(ARRAY[w_france], 8) t
+        SELECT 1 FROM generation.trajectory_continuations(ARRAY[w_france], 8) t
         WHERE t.object_id = w_end AND t.weight = 1) THEN
         RAISE EXCEPTION 'FAIL: (france→end) within-sequence continuation missing';
     END IF;
-    IF (SELECT count(*) FROM trajectory_continuations(ARRAY[w_france], 8)) <> 1 THEN
+    IF (SELECT count(*) FROM generation.trajectory_continuations(ARRAY[w_france], 8)) <> 1 THEN
         RAISE EXCEPTION 'FAIL: cross-sequence pair leaked through a run boundary';
     END IF;
 
     -- k=2 context: (capital, of) → france, exactly one matching position.
     IF NOT EXISTS (
-        SELECT 1 FROM trajectory_continuations(ARRAY[w_capital, w_of], 8) t
+        SELECT 1 FROM generation.trajectory_continuations(ARRAY[w_capital, w_of], 8) t
         WHERE t.object_id = w_france AND t.weight = 1) THEN
         RAISE EXCEPTION 'FAIL: k=2 context (capital,of)→france missing';
     END IF;
 
     -- Export plane, computed inline from the trajectories: of→france is P=1.0.
     IF NOT EXISTS (
-        SELECT 1 FROM relation_plane('traj', 'next') p
+        SELECT 1 FROM generation.relation_plane('traj', 'next') p
         WHERE p.subject_id = w_of AND p.object_id = w_france AND p.w = 1.0) THEN
         RAISE EXCEPTION 'FAIL: relation_plane traj next (of→france) missing or not P=1.0';
     END IF;
@@ -146,8 +146,8 @@ BEGIN
     IF EXISTS (
         SELECT 1 FROM (
             SELECT g1.step, g1.entity AS t1, g2.entity AS t2
-            FROM walk_continuations(ARRAY[w_the], 6, 3, 0.7, 4, 42) g1
-            JOIN walk_continuations(ARRAY[w_the], 6, 3, 0.7, 4, 42) g2 USING (step)
+            FROM generation.walk_continuations(ARRAY[w_the], 6, 3, 0.7, 4, 42) g1
+            JOIN generation.walk_continuations(ARRAY[w_the], 6, 3, 0.7, 4, 42) g2 USING (step)
         ) z WHERE z.t1 <> z.t2) THEN
         RAISE EXCEPTION 'FAIL: same (data, prompt, seed) produced different streams';
     END IF;
@@ -163,7 +163,7 @@ BEGIN
             w_end, relation_type_id('COMPLETES_TO'), w_target,
             2000000000000, 100000000000, 60000000, 3, now());
     SELECT count(*) INTO n
-    FROM walk_continuations(ARRAY[w_end], 1, 3, 0.1, 4, 7) g
+    FROM generation.walk_continuations(ARRAY[w_end], 1, 3, 0.1, 4, 7) g
     WHERE g.stride_used = 0 AND g.entity = w_target;
     IF n <> 1 THEN
         RAISE EXCEPTION 'FAIL: dead-end context did not continue through the consensus floor (stride_used=0)';
@@ -183,7 +183,7 @@ BEGIN
                 public.laplace_mantissa_pack(w_of, 2, 1, t2flag)]),
             2, now());
     IF NOT EXISTS (
-        SELECT 1 FROM trajectory_continuations(ARRAY[w_capital], 8) t
+        SELECT 1 FROM generation.trajectory_continuations(ARRAY[w_capital], 8) t
         WHERE t.object_id = w_of AND t.weight = 2) THEN
         RAISE EXCEPTION 'FAIL: new trajectory not visible to the next read (capital→of should be weight 2)';
     END IF;

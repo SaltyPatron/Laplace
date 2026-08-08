@@ -10,7 +10,7 @@ namespace Laplace.Ingestion;
 /// The OODA close: one turn deposited as witnessed content, folded inline, under
 /// spec 34 provenance (tenant → source, session → context, user → attribution).
 ///
-/// THE ONE IMPLEMENTATION. chat()'s header states the close "happens at the
+/// THE ONE IMPLEMENTATION. converse.chat()'s header states the close "happens at the
 /// FRONTEND, not here: every caller (MCP chat tool, HTTP TurnWitness, CLI chat)
 /// deposits the prompt and response through the writer spine." The payload was
 /// already shared (<see cref="ConversationContent"/>); the SEQUENCE was not, and

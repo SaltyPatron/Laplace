@@ -88,7 +88,7 @@ public sealed class ConverseLoopLiveTests
         await using var cmd = new NpgsqlCommand(
             """
             SELECT count(*)
-            FROM laplace.walk_branches(@s, laplace.relation_type_id('RELATED_TO'), 1, 8) w
+            FROM consensus.walk_branches(@s, laplace.relation_type_id('RELATED_TO'), 1, 8) w
             WHERE w.entity_id = @o
             """, conn);
         cmd.Parameters.AddWithValue("s", subj.ToBytes());

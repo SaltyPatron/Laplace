@@ -1,33 +1,33 @@
--- converse_walk(prompt, steps, seed): the FUSED free-form walk.
+-- converse.walk(prompt, steps, seed): the FUSED free-form walk.
 --
 -- Sequence PROPOSES, meaning STEERS -- now with real semantic steering:
---   ORIENT  -> the prompt's richest concept synset (as converse()).
+--   ORIENT  -> the prompt's richest concept synset (as converse.converse()).
 --   GATHER  -> ordered token trajectories of the concept's own attested sentence
 --              (weight 50, the seed) plus the tier-3 sentences that contain the
 --              topic word (weight 40). Drawn from physicality trajectories =
 --              precedes/follows/co-occurrence. Each token carries its source's
 --              topic weight, so the corpus knows what is central vs peripheral.
---              Set-based: render_text runs once per DISTINCT token id to drop
---              whitespace constituents (the old loop rendered every occurrence
+--              Set-based: laplace.render_text runs once per DISTINCT token id to drop
+--              whitespace laplace.constituents(the old loop rendered every occurrence
 --              of every token of every sentence).
---   WALK    -> steered_walk_raw (steered_walk.c): trigram->bigram backoff over
+--   WALK    -> converse.steered_walk_raw(steered_walk.c): trigram->bigram backoff over
 --              the restricted stream, SEEDED from the core concept's own
 --              sentence and STEERED by topic weight (RNG breaks ties), with the
 --              anti-repeat guard forcing novel recombination at shared n-gram
 --              pivots. Ends at a sentence boundary once it has said enough.
 --              Grounded only in attested token order; deterministic per seed.
---   REALIZE -> render_text of the emitted token ids.
-CREATE OR REPLACE FUNCTION converse_walk(p_prompt text, p_steps int DEFAULT 40,
-                                         p_seed bigint DEFAULT NULL)
-    RETURNS text
-    LANGUAGE plpgsql VOLATILE
-    SET search_path = @extschema@, public AS $$
+--   REALIZE -> laplace.render_text of the emitted token ids.
+CREATE OR REPLACE FUNCTION generation.walk_batch(p_prompt text,
+                                                  p_steps int,
+                                                  p_seeds bigint[])
+    RETURNS TABLE(seed bigint, reply text)
+    LANGUAGE plpgsql VOLATILE AS $$
 DECLARE
     -- Only the definitional band survives here: it selects the concept's own gloss
     -- as the GATHER seed below. The taxonomic/partitive/associative constants went
     -- with the orientation block that used them for band-mass. They were magic
-    -- integers duplicated across this file, converse() and converse_facts() anyway
-    -- -- relation_band_catalog() is the published surface for band identity.
+    -- integers duplicated across this file, converse.converse() and converse.facts() anyway
+    -- -- converse.relation_band_catalog() is the published surface for band identity.
     b_def  int := 1;   -- definitional band (gloss)
     -- Resolved once (see converse_facts): a function on consensus.type_id is a
     -- function on the partition key, so it prunes nothing and runs per edge.
@@ -41,17 +41,15 @@ DECLARE
     starts bytea[];     -- starts of CORE sentences (on-topic seed)
     core_seq bytea[];   -- longest CORE gloss (deterministic seed)
     n      int;
-    rng    bigint;
-    out_ids bytea[];
 BEGIN
-    t_def := relation_band_types(b_def);
-    -- ORIENT: the same native election chat() and converse() run — one election,
+    t_def := laplace.relation_band_types(b_def);
+    -- ORIENT: the same native election converse.chat() and converse.converse() run — one election,
     -- one key order, so the three cannot disagree about what a prompt is about.
     -- prompt_coherence returns the elected TOKEN alongside its synset, which is
     -- what this lane needs for the tier fan-out below, so both come off one call.
     --
-    -- This replaces a verbatim copy of converse()'s pre-specificity ranking. Its
-    -- primary sort key was lower(realize(x.syn)) = x.surface -- case-folding used
+    -- This replaces a verbatim copy of converse.converse()'s pre-specificity ranking. Its
+    -- primary sort key was lower(realize.realize(x.syn)) = x.surface -- case-folding used
     -- as an identity test. "King" and "king" are different content and therefore
     -- different ids, and the substrate already attests the link both ways
     -- (K --HAS_LOWERCASE_MAPPING--> k, k --HAS_UPPERCASE_MAPPING--> K, resolved
@@ -60,7 +58,7 @@ BEGIN
     -- per candidate, a char_length tiebreak, a 29.6s correlated band-mass count and
     -- a 73s top_synset per token. See converse.sql.in for the full ledger.
     SELECT y.tok, y.synset_id INTO topic_word, syn
-    FROM prompt_coherence(p_prompt) y
+    FROM converse.prompt_coherence(p_prompt) y
     ORDER BY y.specificity DESC NULLS LAST,
              y.rel_mass DESC NULLS LAST,
              y.peers DESC,
@@ -68,13 +66,19 @@ BEGIN
              y.denote_mu DESC NULLS LAST,
              y.synset_id
     LIMIT 1;
-    IF syn IS NULL THEN RETURN NULL; END IF;
+    IF syn IS NULL THEN
+        RETURN QUERY
+        SELECT s.seed, NULL::text
+        FROM unnest(p_seeds) WITH ORDINALITY AS s(seed, ord)
+        ORDER BY s.ord;
+        RETURN;
+    END IF;
 
     -- GATHER: the concept's own gloss (tier-1 definition, the seed) PLUS the
     -- TIER FAN-OUT -- a word's usage lives in the tier above it, so pull the
     -- tier-3 sentences that contain the topic word as a constituent (dense real
-    -- usage) via the constituents index. This is the corpus, not just the gloss.
-    -- Word-level tokens only: the inter-word whitespace constituents are
+    -- usage) via the laplace.constituents index. This is the corpus, not just the gloss.
+    -- Word-level tokens only: the inter-word whitespace laplace.constituents are
     -- dropped, else (word,space) bigrams match every boundary and the walk
     -- jumps (e.g. "a"+space -> "creek" from "...than a creek").
     -- The corpus is ranked by the WEB, not by storage order. containers_of walks
@@ -84,7 +88,7 @@ BEGIN
     --
     -- The old ORDER BY was `is_core DESC, gid`: content-hash order. MEASURED on
     -- 'water', of the 400 tier-3 containers returned, 398 are the object of a
-    -- HAS_DEFINITION consensus edge whose eff_mu spans 1.17e12 to 1.46e12 -- a
+    -- HAS_DEFINITION consensus edge whose laplace.eff_mu spans 1.17e12 to 1.46e12 -- a
     -- 25% spread, witness_count up to 4. The signal was sitting on 99.5% of the
     -- candidates and the corpus that decides what this engine SAYS was picked by
     -- hash instead.
@@ -104,14 +108,14 @@ BEGIN
         -- contributes its token stream once, not twice.
         SELECT DISTINCT g.gid, g.wt, g.is_core FROM (
             SELECT c.object_id AS gid, 50::bigint AS wt, true AS is_core,
-                   eff_mu(c.rating, c.rd) AS mu
-            FROM consensus c
+                   laplace.eff_mu(c.rating, c.rd) AS mu
+            FROM laplace.consensus c
             WHERE c.subject_id = syn AND c.type_id = ANY (t_def)
             UNION ALL
             SELECT co.entity_id, 40, false,
-                   COALESCE(MAX(eff_mu(k.rating, k.rd)), glicko2_neutral_mu())
-            FROM containers_of(topic_word, 1, 400) co
-            LEFT JOIN consensus k ON k.object_id = co.entity_id
+                   COALESCE(MAX(laplace.eff_mu(k.rating, k.rd)), laplace.glicko2_neutral_mu())
+            FROM structural.containers_of(topic_word, 1, 400) co
+            LEFT JOIN laplace.consensus k ON k.object_id = co.entity_id
             WHERE co.tier = 3
             GROUP BY co.entity_id
             ORDER BY is_core DESC, mu DESC
@@ -125,8 +129,8 @@ BEGIN
         -- vocabulary assumption this engine exists to replace.
         --
         -- What the filter discarded, MEASURED over 12 containers of 'water':
-        --   ctier 0 : 164 constituents,  12 distinct  <- the separators
-        --   ctier 2 : 144 constituents,  94 distinct  <- the words
+        --   ctier 0 : 164 laplace.constituents,  12 distinct  <- the separators
+        --   ctier 2 : 144 laplace.constituents,  94 distinct  <- the words
         -- The separators were in the trajectory all along, in attested order.
         -- Dropping them is why REALIZE had to invent a ' ', false for every script
         -- that does not space its words.
@@ -139,7 +143,7 @@ BEGIN
         -- one-word case, and that is what actually handled it.
         SELECT g.gid, g.wt, g.is_core, u.entity_id, u.ord
         FROM gids g
-        CROSS JOIN LATERAL trajectory_unpacked_points(g.gid)
+        CROSS JOIN LATERAL generation.trajectory_unpacked_points(g.gid)
              WITH ORDINALITY AS u(entity_id, run_length, ctier, ord)
     ),
     -- The whitespace classification that sat here is GONE. It rendered every
@@ -193,44 +197,75 @@ BEGIN
     INTO stream, w, starts, core_seq;
 
     n := COALESCE(array_length(stream,1), 0);
-    IF n < 3 OR starts IS NULL THEN RETURN NULL; END IF;
+    IF n < 3 OR starts IS NULL THEN
+        RETURN QUERY
+        SELECT s.seed, NULL::text
+        FROM unnest(p_seeds) WITH ORDINALITY AS s(seed, ord)
+        ORDER BY s.ord;
+        RETURN;
+    END IF;
 
-    rng := abs(COALESCE(p_seed, ('x'||substr(md5(p_prompt),1,8))::bit(32)::bigint)) % 2147483647;
-
-    -- SEED + WALK run natively; single-token results fall out of a seed with no
-    -- attested successor (the old `IF b IS NULL` path).
-    out_ids := steered_walk_raw(stream, w, COALESCE(core_seq, ARRAY[]::bytea[]),
-                                starts, p_steps, MINLEN, rng);
-    IF out_ids IS NULL OR array_length(out_ids,1) IS NULL THEN RETURN NULL; END IF;
-    IF array_length(out_ids,1) = 1 THEN RETURN render_text(out_ids[1], 64); END IF;
-
-    -- REALIZE: no punctuation scrub, no whitespace normalization. The old tail ran
+    -- SEED + WALK runs natively over every requested seed after the prompt's
+    -- orientation and corpus plan have been built ONCE. generation.probe used
+    -- to call converse.walk once per seed, rebuilding everything above for an
+    -- input that only changes the final RNG. This batch is the one implementation;
+    -- converse.walk below is its scalar compatibility wrapper.
+    --
+    -- REALIZE is also one batch over the union of emitted ids. No punctuation
+    -- scrub and no whitespace normalization. The old tail ran
     -- regexp_replace('\s*[();:]\s*') then regexp_replace('\s+') because REALIZE
     -- had just wedged a ' ' between every token, orphaning the brackets the gloss
     -- actually attested. With separators carried through, the spacing IS the
     -- corpus's -- scrubbing it overwrites testimony with a rule, and a
     -- hardcoded-ASCII one ([();:] says nothing about U+3001, U+060C or U+0E5A).
-    RETURN btrim(
-            -- render_text_batch over the DISTINCT emitted ids, re-expanded in
-            -- emission order -- not render_text per row (MEASURED same-session on
-            -- 1,645 tokens: 1,895ms batched against 15.6ms each, ~15.8x).
-            -- render_text_batch and NOT realize_batch: they answer different
-            -- questions. render_text reconstructs the content's bytes, realize
-            -- LABELS an entity for a human -- render_text(U+0020) is ' ' where
-            -- realize(U+0020) is 'SPACE', render_text(U+0028) is '(' where realize
-            -- is 'LEFT PARENTHESIS'. Generation emits content, so it renders.
-            (WITH ids AS MATERIALIZED (
-                 SELECT array_agg(DISTINCT u.t) AS a FROM unnest(out_ids) AS u(t)
-             ),
-             realized AS MATERIALIZED (
-                 SELECT i.a AS a, render_text_batch(i.a, 64) AS s FROM ids i
-             ),
-             m AS (
-                 SELECT (r.a)[k] AS id, (r.s)[k] AS txt
-                 FROM realized r, generate_subscripts(r.a, 1) AS k
-             )
-             SELECT string_agg(COALESCE(m.txt,''), '' ORDER BY gg.o)
-             FROM unnest(out_ids) WITH ORDINALITY gg(t,o)
-             LEFT JOIN m ON m.id = gg.t));
+    RETURN QUERY
+    WITH emitted AS MATERIALIZED (
+        SELECT s.ord, s.seed,
+               converse.steered_walk_raw(
+                   stream, w, COALESCE(core_seq, ARRAY[]::bytea[]), starts,
+                   p_steps, MINLEN,
+                   abs(COALESCE(s.seed,
+                       ('x'||substr(md5(p_prompt),1,8))::bit(32)::bigint)) % 2147483647
+               ) AS ids
+        FROM unnest(p_seeds) WITH ORDINALITY AS s(seed, ord)
+    ),
+    ids AS MATERIALIZED (
+        SELECT array_agg(DISTINCT u.id) AS a
+        FROM emitted e
+        CROSS JOIN LATERAL unnest(e.ids) AS u(id)
+    ),
+    realized AS MATERIALIZED (
+        SELECT i.a, laplace.render_text_batch(i.a, 64) AS txt
+        FROM ids i
+    ),
+    labels AS MATERIALIZED (
+        SELECT (r.a)[k] AS id, (r.txt)[k] AS txt
+        FROM realized r
+        CROSS JOIN LATERAL generate_subscripts(r.a, 1) AS k
+    )
+    SELECT e.seed,
+           CASE WHEN count(u.id) = 0 THEN NULL::text
+                ELSE btrim(string_agg(COALESCE(l.txt, ''), '' ORDER BY u.ord))
+           END AS reply
+    FROM emitted e
+    LEFT JOIN LATERAL unnest(e.ids) WITH ORDINALITY AS u(id, ord) ON true
+    LEFT JOIN labels l ON l.id = u.id
+    GROUP BY e.ord, e.seed
+    ORDER BY e.ord;
+END;
+$$;
+
+DROP FUNCTION IF EXISTS laplace.converse_walk(text, int, bigint);
+CREATE OR REPLACE FUNCTION converse.walk(p_prompt text, p_steps int DEFAULT 40,
+                                         p_seed bigint DEFAULT NULL)
+    RETURNS text
+    LANGUAGE plpgsql VOLATILE AS $$
+DECLARE
+    out_text text;
+BEGIN
+    SELECT b.reply INTO out_text
+    FROM generation.walk_batch(p_prompt, p_steps, ARRAY[p_seed]::bigint[]) b
+    LIMIT 1;
+    RETURN out_text;
 END;
 $$;

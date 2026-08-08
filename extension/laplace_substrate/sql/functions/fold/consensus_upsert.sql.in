@@ -1,7 +1,7 @@
 -- The inline consensus fold — identity-routed, dedup-first, native.
 --
 -- NATIVE (2026-07-21, GH #565): the body lives in C (src/fold_route.c).
--- Consensus is content: dedup it the way ingest dedups entities. The batch is
+-- Consensus is content: dedup it the way ingest dedups laplace.entities. The batch is
 -- split by what it IS, per relation type:
 --   * EXISTING cells  -> bulk UPDATE, re-fold against current state;
 --   * NOVEL cells     -> bulk INSERT; INSERT tuple-routes to the one owning
@@ -29,12 +29,12 @@
 --    (laplace_glicko2_accumulate_games), once per row, record-valued — the
 --    rating period IS the batch;
 --  * cell ids are computed in C through the SAME core hash the SQL
---    consensus_id() wraps — blake3(subject || type || COALESCE(object, 16 zero
+--    laplace.consensus_id() wraps — blake3(subject || type || COALESCE(object, 16 zero
 --    bytes)) — byte-identical layout;
 --  * the duplicate-cell contract check raises the same cardinality_violation.
 --
 -- NO mask queue here: the caller deposits highway bits INLINE for this same
--- delta (highway_mask_deposit); highway_mask_dirty is populated only by the
+-- delta (laplace.highway_mask_deposit); highway_mask_dirty is populated only by the
 -- repair verbs, which need to CLEAR bits (per-source evict) — something an
 -- OR-accumulate deposit cannot express.
 --
@@ -45,7 +45,8 @@
 --   * rows arrive sorted by (type, subject, id) — partition-key order; the
 --     router only needs same-type rows ADJACENT and remains correct (merely
 --     one extra plan execution) if they are not.
-CREATE OR REPLACE FUNCTION consensus_upsert(
+DROP FUNCTION IF EXISTS laplace.consensus_upsert(bytea[], bytea[], bytea[], bigint[], bigint[], bigint[], timestamptz[]);
+CREATE OR REPLACE FUNCTION consensus.upsert(
     p_subjects bytea[],
     p_types    bytea[],
     p_objects  bytea[],

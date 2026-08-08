@@ -1,7 +1,7 @@
-CREATE OR REPLACE FUNCTION grapheme_order(p_vocab bytea[], p_words int DEFAULT 50000, p_gap int DEFAULT 1)
+DROP FUNCTION IF EXISTS laplace.grapheme_order(bytea[], int, int);
+CREATE OR REPLACE FUNCTION generation.grapheme_order(p_vocab bytea[], p_words int DEFAULT 50000, p_gap int DEFAULT 1)
     RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
-    LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
     
     
     
@@ -15,14 +15,14 @@ CREATE OR REPLACE FUNCTION grapheme_order(p_vocab bytea[], p_words int DEFAULT 5
         
         -- Role by TYPE, not tier. `tier = 2` was never "word": bootstrap mints relation
         -- types, trust classes, POS tags, sources and languages at tier 2 too, so this
-        -- was spelling out the grapheme runs of RelationType and Language entities. It
+        -- was spelling out the grapheme runs of RelationType and Language laplace.entities. It
         -- also missed single-grapheme words, which collapse to tier 0.
         --
         -- Ranked by length rather than content hash (an arbitrary LIMIT is a missing
         -- ranking); DISTINCT ON dropped, since (entity_id, type) is already unique.
         SELECT w.id AS wid, w.trajectory
-        FROM v_word_points w
-        WHERE w.type_id = canonical_id('Word')
+        FROM laplace.v_word_points w
+        WHERE w.type_id = laplace.canonical_id('Word')
           AND w.trajectory IS NOT NULL
         -- Sampling is by content hash, which is ARBITRARY -- an arbitrary LIMIT without
         -- an ordering is a missing ranking. The honest ranking is by trajectory length,

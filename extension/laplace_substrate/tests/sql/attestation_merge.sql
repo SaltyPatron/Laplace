@@ -35,7 +35,7 @@ BEGIN
     -- 1) one routed call, two types: counts AND score sums accumulate,
     --    GREATEST advances a newer ts and keeps a stored ts that is already
     --    newer.
-    affected := attestation_merge(
+    affected := consensus.attestation_merge(
         ARRAY[a1, a2], ARRAY[rel_hot, rel_dyn], ARRAY[subj, subj],
         ARRAY[5, 2]::bigint[], ARRAY[5000000000, 1000000000]::bigint[],
         ARRAY[t2, t0]);
@@ -85,7 +85,7 @@ BEGIN
     --    control tx): the temp-table guard must not trip, and an id that was
     --    never written merges zero rows (the probe contract violated upstream
     --    surfaces as a count shortfall, never silent corruption).
-    affected := attestation_merge(
+    affected := consensus.attestation_merge(
         ARRAY[a1, ghost], ARRAY[rel_hot, rel_hot], ARRAY[subj, subj],
         ARRAY[1, 1]::bigint[], ARRAY[500000000, 500000000]::bigint[],
         ARRAY[t2, t2]);

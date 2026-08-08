@@ -12,7 +12,7 @@ namespace Laplace.Endpoints.OpenAICompat;
 // codepoint is pinned on S3 and the parent coord/trajectory are composed, so a
 // word that was never witnessed (content hash resolves but exists=false) still
 // has a fully determined position and shape. This is what the not-found explorer
-// hands to laplace.explore_anchor_neighbors as a bound anchor.
+// hands to structural.explore_anchor_neighbors as a bound anchor.
 internal sealed record ExploreAnchor(
     string WordIdHex,
     double Cx, double Cy, double Cz, double Cm,

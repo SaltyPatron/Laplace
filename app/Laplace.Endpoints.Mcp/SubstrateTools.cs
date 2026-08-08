@@ -73,38 +73,38 @@ internal sealed class SubstrateTools
                 ? s.ExecuteSql(a)
                 : ("sql is operator-lane only (launch with LAPLACE_MCP_OPERATOR=1); product reads go through the typed tools", true)),
         new("recall", "Ask the substrate about a topic (default read, session-carried).",
-            "Ask the substrate about a topic (laplace.recall_session). A bare prompt gets the default read — gloss then the strongest chain — with session topic carry. There is NO English question routing (the regex router was removed): for a specific read shape use the `query` tool instead. Returns reply rows with eff_mu (conservative Glicko-2 estimate) and witness counts.",
+            "Ask the substrate about a topic (converse.recall_session). A bare prompt gets the default read — gloss then the strongest chain — with session topic carry. There is NO English question routing (the regex router was removed): for a specific read shape use the `query` tool instead. Returns reply rows with eff_mu (conservative Glicko-2 estimate) and witness counts.",
             () => Schema(("prompt", "string", "the topic (a word or phrase; phrasing is not parsed)", true),
                          ("session", "string", "session key for topic carry across turns", false)),
             (s, a) => s.Recall(a)),
         new("query", "A structural read naming an explicit shape (define, is_a, walk, ...).",
-            "A structural read (laplace.recall_intent): the caller names the SHAPE — define, what_is, describe, synonyms, translate, languages, examples, related, related_in, is_a, reason, walk, complete, fallback (SELECT * FROM laplace.query_shapes() for the live list). Language-agnostic by construction: nothing is inferred from phrasing. related/related_in need relation_type (canonical, e.g. HAS_PART); is_a/reason need topic2; translate accepts lang.",
-            () => Schema(("shape", "string", "the read shape (see query_shapes())", true),
+            "A structural read (converse.recall_intent): the caller names the SHAPE — define, what_is, describe, synonyms, translate, languages, examples, related, related_in, is_a, reason, walk, complete, fallback (SELECT * FROM converse.query_shapes() for the live list). Language-agnostic by construction: nothing is inferred from phrasing. related/related_in need relation_type (canonical, e.g. HAS_PART); is_a/reason need topic2; translate accepts lang.",
+            () => Schema(("shape", "string", "the read shape (see converse.query_shapes())", true),
                          ("topic", "string", "the subject — word, phrase, or hex entity id", true),
                          ("topic2", "string", "second topic for is_a / reason", false),
                          ("relation_type", "string", "canonical relation for related / related_in", false),
                          ("lang", "string", "target language for translate", false)),
             (s, a) => s.Query(a)),
         new("taxonomy", "The IS_A tree around a topic (up to root, or child kinds).",
-            "The IS_A tree around a topic: dir='up' rows climb the parent chain to the root (via walk_strongest over the IS_A arena, from the topic's top synset — taxonomy lives on concepts, not spellings), dir='child' rows are the strongest sub-kinds. Every row carries the entity id to continue from. dir='child' is the closest thing to a \"bubble down\" the substrate has today (there is no general sense/synset -> every-surface primitive symmetric with bubble's surface -> sense -> synset climb) -- it is IS_A-specific, not a reverse of bubble. Rows use label_or_hex (a cleaned display name), not render (the actual content) -- see the bubble tool's note on that distinction.",
+            "The IS_A tree around a topic: dir='up' rows climb the parent chain to the root (via walk_strongest over the IS_A arena, from the topic's top synset — taxonomy lives on concepts, not spellings), dir='child' rows are the strongest sub-kinds. Every row carries the entity id to continue from. dir='child' is the closest thing to a \"bubble down\" the substrate has today (there is no general sense/synset -> every-surface primitive symmetric with bubble's surface -> sense -> synset climb) -- it is IS_A-specific, not a reverse of bubble. Rows use converse.label_or_hex(a cleaned display name), not render (the actual content) -- see the bubble tool's note on that distinction.",
             () => Schema(("term", "string", "the topic (omit if entity given)", false),
                          ("entity", "string", "hex entity id to root at", false)),
             (s, a) => s.Taxonomy(a)),
         new("translate", "Cross-lingual surfaces for a topic via the ILI hub.",
-            "Cross-lingual surfaces for a topic (laplace.translations): the ILI hub meshing languages — OMW multilingual lemmas converging on the same concept ids. Each row is a surface + its language, rated.",
+            "Cross-lingual surfaces for a topic (converse.translations): the ILI hub meshing languages — OMW multilingual lemmas converging on the same concept ids. Each row is a surface + its language, rated.",
             () => Schema(("term", "string", "the topic", true),
                          ("limit", "integer", "max rows, default 24", false)),
             (s, a) => s.Translate(a)),
         new("leaders", "Per-band leaderboards of the strongest consensus edges.",
-            "Per-band leaderboards (laplace.consensus_band_edges): the strongest consensus edges in each salience band, fully labeled. Bands 0-12 (1 definitional, 2 taxonomic, 3 equivalence, 4 partitive, 5 causal, 6 oppositional, 7 associative, 9 lexical, 11 standards); SELECT * FROM converse.relation_bands() for live counts.",
+            "Per-band leaderboards (consensus.band_edges): the strongest consensus edges in each salience band, fully labeled. Bands 0-12 (1 definitional, 2 taxonomic, 3 equivalence, 4 partitive, 5 causal, 6 oppositional, 7 associative, 9 lexical, 11 standards); SELECT * FROM converse.relation_bands() for live counts.",
             () => Schema(("bands", "string", "comma-separated band numbers, default '1,2,4,5'", false),
                          ("per_band", "integer", "rows per band, default 5", false)),
             (s, a) => s.Leaders(a)),
         new("chat", "One conversational turn; reply is walk-driven and self-witnessing.",
-            "One conversational turn against the substrate (laplace.chat): walk-driven prose composed from rated consensus. Structural steering, no phrasing tricks: shape names the read, bands lenses it (e.g. '4' parts, '2' kinds, '5' causes), elaborate advances fact layers on a carried topic. Closes the loop: prompt and reply deposit as witnessed content (UserPrompt/Response trust classes) and fold, so the turn is visible to the next walk.",
+            "One conversational turn against the substrate (converse.chat): walk-driven prose composed from rated consensus. Structural steering, no phrasing tricks: shape names the read, bands lenses it (e.g. '4' parts, '2' kinds, '5' causes), elaborate advances fact layers on a carried topic. Closes the loop: prompt and reply deposit as witnessed content (UserPrompt/Response trust classes) and fold, so the turn is visible to the next walk.",
             () => Schema(("prompt", "string", "the message", true),
                          ("session", "string", "session key for continuity", false),
-                         ("shape", "string", "optional read shape (see query_shapes())", false),
+                         ("shape", "string", "optional read shape (see converse.query_shapes())", false),
                          ("bands", "string", "optional comma-separated salience bands to lens the reply", false),
                          ("elaborate", "boolean", "advance to the next fact layer of the carried topic", false)),
             (s, a) => s.ChatTurn(a)),
@@ -122,7 +122,7 @@ internal sealed class SubstrateTools
                          ("tokens", "string", "chain mode: comma-separated tokens (2+)", false)),
             (s, a) => s.Feedback(a)),
         new("walk", "Beam-walk the consensus graph from a prompt or entity.",
-            "Beam-walk the consensus graph from a prompt (laplace.walk_branches), ranked by relation_rank x eff_mu x exp(-k*rd) x witness-saturation, gated by the highway mask when relation_type narrows it. UNFILTERED walk_branches (no relation_type) Append-scans every relation-type partition -- measured ~24s -- so pass relation_type whenever you have one; the `query` tool's `beam` shape falls back to the cheaper walk_strongest (relation_rank x eff_mu only, no highway gating) greedy chain when neither a relation type nor a band lens is given, and this tool should get the same treatment when speed matters. Pass entity (hex id from bubble) to start from a resolved node rather than re-resolving text. Paths render via realize_path (label_or_hex per step), not render -- see the bubble tool's render-vs-label note.",
+            "Beam-walk the consensus graph from a prompt (consensus.walk_branches), ranked by relation_rank x eff_mu x exp(-k*rd) x witness-saturation, gated by the highway mask when relation_type narrows it. UNFILTERED consensus.walk_branches(no relation_type) Append-scans every relation-type partition -- measured ~24s -- so pass relation_type whenever you have one; the `query` tool's `beam` shape falls back to the cheaper consensus.walk_strongest(relation_rank x eff_mu only, no highway gating) greedy chain when neither a relation type nor a band lens is given, and this tool should get the same treatment when speed matters. Pass entity (hex id from bubble) to start from a resolved node rather than re-resolving text. Paths render via realize.path(label_or_hex per step), not render -- see the bubble tool's render-vs-label note.",
             () => Schema(("prompt", "string", "starting content (omit if entity given)", false),
                          ("entity", "string", "hex entity id to start from, e.g. from bubble", false),
                          ("relation_type", "string", "canonical relation name to constrain the walk", false),
@@ -130,34 +130,38 @@ internal sealed class SubstrateTools
                          ("breadth", "integer", "beam breadth, default 5", false)),
             (s, a) => s.Walk(a)),
         new("infer", "One forward pass: the topic's distribution reweighted by the prompt's bias tokens.",
-            "One forward pass over the substrate (laplace.infer): prompt_coherence elects the topic (attention), the topic's consensus objects are read as an uncollapsed ranked distribution, EVERY sense of every non-topic token reweights it by id-space intersection (the bias heads), and realize_batch renders once at the end. Returns prediction, weight (eff_mu/1e9), bias_hits — the whole ranked frontier, never just the argmax.",
+            "One forward pass over the substrate (converse.infer): prompt_coherence elects the topic (attention), the topic's consensus objects are read as an uncollapsed ranked distribution, EVERY sense of every non-topic token reweights it by id-space intersection (the bias heads), and realize_batch renders once at the end. Returns prediction, weight (eff_mu/1e9), bias_hits — the whole ranked frontier, never just the argmax.",
             () => Schema(("prompt", "string", "the prompt to complete", true),
                          ("limit", "integer", "max candidates, default 8", false)),
             (s, a) => s.Infer(a)),
-        new("sense_audit", "Why senses() returned what it returned — type, admitting relation, language, strength.",
-            "Diagnose a term's candidate sense set (laplace.sense_audit). Per candidate: the target's ENTITY TYPE (bubble_up promotes any IS_SYNONYM_OF target into the synset slot, so the value is frequently typed Word or Sentence rather than WordNet_Synset), the RELATION that admitted it (a candidate arriving via IS_SYNONYM_OF is a TRANSLATION competing as a sense), its attested HAS_LANGUAGE, and the denote_mu + witness count the election actually ranks on. Use this when a reply is on the right concept in the wrong language, or on an unrelated sense.",
+        new("sense_audit", "Why lexical.senses() returned what it returned — type, admitting relation, language, strength.",
+            "Diagnose a term's candidate sense set (lexical.sense_audit). Per candidate: the target's ENTITY TYPE (bubble_up promotes any IS_SYNONYM_OF target into the synset slot, so the value is frequently typed Word or Sentence rather than WordNet_Synset), the RELATION that admitted it (a candidate arriving via IS_SYNONYM_OF is a TRANSLATION competing as a sense), its attested HAS_LANGUAGE, and the denote_mu + witness count the election actually ranks on. Use this when a reply is on the right concept in the wrong language, or on an unrelated sense.",
             () => Schema(("term", "string", "the surface word", true),
                          ("limit", "integer", "max candidates, default 64", false)),
             (s, a) => s.SenseAudit(a)),
         new("prompt_language", "Which language a prompt is written in, as a ranked tally.",
-            "The request's language (laplace.prompt_language): a weighted tally of eff_mu over EVERY HAS_LANGUAGE edge carried by the prompt's entities, at every tier that has one. Deliberately not word_language() per token — that is LIMIT 1 and discards the distribution, making a token shared across languages look monolingual. Returns the ranked tally rather than just the winner, because an elector should BIAS toward a language, not hard-filter to it: a cross-lingual prompt must still work.",
+            "The request's language (converse.prompt_language): a weighted tally of eff_mu over EVERY HAS_LANGUAGE edge carried by the prompt's entities, at every tier that has one. Deliberately not converse.word_language() per token — that is LIMIT 1 and discards the distribution, making a token shared across languages look monolingual. Returns the ranked tally rather than just the winner, because an elector should BIAS toward a language, not hard-filter to it: a cross-lingual prompt must still work.",
             () => Schema(("prompt", "string", "the prompt", true)),
             (s, a) => s.PromptLanguage(a)),
-        new("bubble", "Bubble a surface term up the mesh to its concept hub.",
-            "Bubble a surface term up the mesh (laplace.bubble_up): surface -> sense -> synset, ranked by base_eff_mu x domain-log-boost from geometry adjacency, not consensus rows. Each row is one candidate sense with its synset, the relation that admitted it, and the score/witness fields the election ranked on. It does NOT climb past the synset — no hub row, no per-channel edge counts; continue upward with the taxonomy tool from the returned synset id. Returns entity ids, so the next step continues from where this one landed instead of re-entering from text. Use this before facts/walk when a term may resolve at the wrong layer — all three layers render with the SAME text, so a query aimed at the wrong one returns zero rows and looks like missing knowledge. There is no bubble_down (see the taxonomy tool for the closest, IS_A-specific, downward move). Note the render/label split: this tool's rows use render() (canonical name -> tier-0 codepoint -> resolve_name -> full recursive content rebuild -> hex fallback) because a sense/synset's actual gloss text is the point; most other tools (taxonomy, facts, walk, leaders) use label_or_hex() instead (resolve_name, else render() with internal canonical-key scaffolding regex-stripped for readability, else hex) because they want a short display tag, not content. Pick the wrong one and you get either a wall of text where a tag was wanted, or a stripped tag where the actual definition was wanted.",
+        new("bubble", "Bubble a surface term to its sense/synset frontier.",
+            "Bubble a surface term up the mesh (taxonomy.bubble_up): surface -> sense -> synset. Ranking is consensus-derived base_eff_mu (from the fold's rating/rd) multiplied by a domain-log geometry boost — not a non-consensus score. Each row is one candidate sense with its synset, the relation that admitted it, and the score/witness fields the election ranked on. It does NOT climb past the synset — no hub row, no per-channel edge counts; continue upward with the taxonomy tool from the returned synset id. Returns entity ids, so the next step continues from where this one landed instead of re-entering from text. Use this before facts/walk when a term may resolve at the wrong layer — all three layers render with the SAME text, so a query aimed at the wrong one returns zero rows and looks like missing knowledge. There is no bubble_down (see the taxonomy tool for the closest, IS_A-specific, downward move). Note the render/label split: this tool's rows use render() (canonical name -> tier-0 codepoint -> resolve_name -> full recursive content rebuild -> hex fallback) because a sense/synset's actual gloss text is the point; most other tools (taxonomy, facts, walk, leaders) use converse.label_or_hex() instead (resolve_name, else render() with internal canonical-key scaffolding regex-stripped for readability, else hex) because they want a short display tag, not content. Pick the wrong one and you get either a wall of text where a tag was wanted, or a stripped tag where the actual definition was wanted.",
             () => Schema(("term", "string", "the surface word or phrase", true),
                          ("k", "integer", "sense frontier width, default 5", false)),
             (s, a) => s.Bubble(a)),
         new("facts", "Salient rated facts about a word or entity.",
-            "Salient rated facts about a word (laplace.salient_facts): typed relations ranked by eff_mu with witness counts. Pass entity (hex id from bubble/walk) to read facts at a specific mesh layer instead of resolving text at the surface.",
+            "Salient rated facts about a word (consensus.salient_facts): typed relations ranked by eff_mu with witness counts. Pass entity (hex id from bubble/walk) to read facts at a specific mesh layer instead of resolving text at the surface.",
             () => Schema(("term", "string", "the word (omit if entity given)", false),
                          ("entity", "string", "hex entity id to read from, e.g. from bubble", false),
                          ("limit", "integer", "max facts, default 24", false)),
             (s, a) => s.Facts(a)),
         new("health", "Substrate health and row-count inventory.",
-            "Substrate health and inventory: laplace.substrate_health() plus laplace.substrate_counts(). Metric values are NULLABLE: a metric the health pass did not measure reports null, which is a different fact from zero. identity_violations is null whenever deep_checked is false — read them together or a skipped deep pass looks like a clean one.",
+            "Substrate health and inventory: laplace.substrate_health() plus ops.substrate_counts(). Metric values are NULLABLE: a metric the health pass did not measure reports null, which is a different fact from zero. identity_violations is null whenever deep_checked is false — read them together or a skipped deep pass looks like a clean one.",
             () => Schema(),
             (s, _) => s.Health()),
+        new("mcp_lane", "Which MCP lane is this process in (operator vs product).",
+            "Answer 'what am I talking to?' for this MCP process (GH #813 / #809): operator_lane (LAPLACE_MCP_OPERATOR=1), binary_path, process id, and start time. The lane is fixed at type init for the life of the process — Postgres cannot know it; this tool is the operation. health/help also surface operator_lane; this is the dedicated read so clients do not scrape those catalogs.",
+            () => Schema(),
+            (_, _) => McpLane()),
         new("source_status", "Is a source ingested, and how do we know.",
             "Ingest state per source (laplace.source_status): known, ingested, approximate evidence, whether it observed entities, and the last run's status. Call this instead of assembling an answer — every hand-rolled version of this question is wrong in a specific way. An evidence>0 test reports the DOCUMENT lane as absent, because it is content-only by design (entities and geometry, zero distributional attestations); a source name you typed returns nothing when the spelling differs from the decomposer's declared SourceName; and ingest_run_journal is ops metadata that does not survive a dump/restore, so a missing row is not absence. Asking with a name ALWAYS returns exactly one row: `ingested=false` means the source wrote nothing, and `known=false` means this substrate has no record of that source id at all — which on a mesh this dense usually means the name is wrong rather than the corpus missing. Absence is an answer here, never an empty result set.",
             () => Schema(("source", "string", "declared source name, e.g. WordNetDecomposer; omit for every source", false)),
@@ -215,10 +219,10 @@ internal sealed class SubstrateTools
         }
     }
 
-    // One conversational turn: SQL chat() composes the reply (read-side), then the
+    // One conversational turn: SQL converse.chat() composes the reply (read-side), then the
     // turn is deposited through the writer spine — full content mint + turn-level
     // evidence + inline fold under the mcp-local tenant's sources, session as
-    // context on every row (spec 34). This is chat()'s OODA close; the SQL function
+    // context on every row (spec 34). This is converse.chat()'s OODA close; the SQL function
     // itself stays read-only (session state aside).
     private const string McpTenant = "mcp-local";
     private readonly string _processSessionKey = $"s-{Guid.NewGuid():N}";
@@ -267,7 +271,7 @@ internal sealed class SubstrateTools
     private (string, bool) Infer(JsonObject? args)
     {
         using var cmd = _dbReadOnly.CreateCommand(
-            "SELECT prediction, weight, bias_hits FROM laplace.infer($1, $2)");
+            "SELECT prediction, weight, bias_hits FROM converse.infer($1, $2)");
         cmd.Parameters.Add(new() { Value = Req(args, "prompt") });
         cmd.Parameters.Add(new() { Value = Int(args, "limit", 8) });
         using var rd = cmd.ExecuteReader();
@@ -287,7 +291,7 @@ internal sealed class SubstrateTools
     private (string, bool) SenseAudit(JsonObject? args)
     {
         using var cmd = _dbReadOnly.CreateCommand(
-            "SELECT sense, sense_type, via_relation, language, denote_mu, witnesses FROM laplace.sense_audit($1, laplace.relation_type_id('HAS_LANGUAGE'), $2)");
+            "SELECT sense, sense_type, via_relation, language, denote_mu, witnesses FROM lexical.sense_audit($1, laplace.relation_type_id('HAS_LANGUAGE'), $2)");
         cmd.Parameters.Add(new() { Value = Req(args, "term") });
         cmd.Parameters.Add(new() { Value = Int(args, "limit", 64) });
         using var rd = cmd.ExecuteReader();
@@ -308,7 +312,7 @@ internal sealed class SubstrateTools
     private (string, bool) PromptLanguage(JsonObject? args)
     {
         using var cmd = _dbReadOnly.CreateCommand(
-            "SELECT realize.realize(lang_id) AS language, mass FROM laplace.prompt_language($1)");
+            "SELECT realize.realize(lang_id) AS language, mass FROM converse.prompt_language($1)");
         cmd.Parameters.Add(new() { Value = Req(args, "prompt") });
         using var rd = cmd.ExecuteReader();
         var rows = new List<JsonObject>();
@@ -419,7 +423,7 @@ internal sealed class SubstrateTools
         }));
     }
 
-    // Surface -> sense -> synset via laplace.bubble_up. Renders sense and synset
+    // Surface -> sense -> synset via taxonomy.bubble_up. Renders sense and synset
     // with render() — the gloss text is the point here, not a display tag (see
     // the catalog's render-vs-label note) — and returns hex ids so the next call
     // reads from the resolved layer instead of re-entering text.
@@ -434,7 +438,7 @@ internal sealed class SubstrateTools
         using var cmd = _dbReadOnly.CreateCommand(
             "SELECT b.sense_id, laplace.render(b.sense_id), b.synset_id, laplace.render(b.synset_id), " +
             "b.via_relation, b.score, b.base_eff_mu, b.domain_hits, b.witnesses " +
-            "FROM laplace.bubble_up($1, NULL::bytea[], $2) b");
+            "FROM taxonomy.bubble_up($1, NULL::bytea[], $2) b");
         cmd.Parameters.Add(new() { Value = id });
         cmd.Parameters.Add(new() { Value = Int(args, "k", 5) });
         using var rd = cmd.ExecuteReader();
@@ -491,7 +495,7 @@ internal sealed class SubstrateTools
         var supplied = args?["args"] as JsonObject;
         var dict = supplied?.ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
         var result = InstalledOpInvoker.InvokeAsync(
-                _dbReadOnly, name, dict, Int(args, "max_rows", DefaultRowCap), default)
+                _dbReadOnly, name, dict, Int(args, "max_rows", DefaultRowCap), ct: default)
             .GetAwaiter().GetResult();
         if (result.Error is not null)
             return (result.Error, true);
@@ -561,6 +565,18 @@ internal sealed class SubstrateTools
                 new JsonObject { ["metric"] = "binary_path", ["value"] = Environment.ProcessPath ?? AppContext.BaseDirectory },
             });
         return JsonRows(rows);
+    }
+
+    private static (string, bool) McpLane()
+    {
+        var started = Process.GetCurrentProcess().StartTime.ToUniversalTime();
+        return (new JsonObject
+        {
+            ["operator_lane"] = OperatorLane,
+            ["binary_path"] = Environment.ProcessPath ?? AppContext.BaseDirectory,
+            ["pid"] = Environment.ProcessId,
+            ["started_utc"] = started.ToString("o"),
+        }.ToJsonString(), false);
     }
 
     /// <summary>
@@ -981,7 +997,7 @@ internal sealed class SubstrateTools
     /// Text half of a text-or-entity tool: either is accepted, but not neither.
     /// Returning null when an entity was supplied keeps the SQL CASE honest — the
     /// text branch is never evaluated, so an absent term is not a silent empty
-    /// resolve() that would read as "the substrate doesn't know this".
+    /// converse.resolve() that would read as "the substrate doesn't know this".
     /// </summary>
     private static string? NodeText(JsonObject? args, string name)
     {
@@ -1048,12 +1064,43 @@ internal sealed class SubstrateTools
         var (text, isErr) = Rows(_dbReadOnly, query, Int(args, "max_rows", DefaultRowCap));
         sw.Stop();
 
-        // Issue #814: every accepted use is a gap report with its cost.
+        // Issue #814: every accepted use is a gap report with its cost —
+        // stderr for the live console, and a durable CSV ledger queryable as
+        // ops.sql_gap() / op(name => 'sql_gap').
+        var flatQuery = query.Replace('\r', ' ').Replace('\n', ' ');
         Console.Error.WriteLine(
             $"[mcp-sql-gap] duration_ms={sw.ElapsedMilliseconds} result_chars={text.Length} "
-            + $"error={isErr} query=\"{query.Replace('\r', ' ').Replace('\n', ' ')}\"");
+            + $"error={isErr} query=\"{flatQuery}\"");
+        AppendSqlGap(sw.ElapsedMilliseconds, text.Length, isErr, flatQuery);
 
         return (text, isErr);
+    }
+
+    private static void AppendSqlGap(long durationMs, int resultChars, bool isErr, string query)
+    {
+        try
+        {
+            var dir = LaplaceInstall.OpsLogDirectory;
+            Directory.CreateDirectory(dir);
+            var path = Path.Combine(dir, "laplace-sql-gap.csv");
+            var needHeader = !File.Exists(path) || new FileInfo(path).Length == 0;
+            using var fs = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+            using var w = new StreamWriter(fs, Encoding.UTF8);
+            if (needHeader)
+                w.WriteLine("log_time,duration_ms,result_chars,is_error,query");
+            static string Csv(string s) =>
+                "\"" + s.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
+            w.WriteLine(string.Join(',',
+                DateTimeOffset.UtcNow.ToString("o"),
+                durationMs.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                resultChars.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                isErr ? "t" : "f",
+                Csv(query)));
+        }
+        catch
+        {
+            // Ledger is best-effort; refuse/log criteria must not fail the hatch.
+        }
     }
 
     private static int Int(JsonObject? args, string name, int fallback) =>

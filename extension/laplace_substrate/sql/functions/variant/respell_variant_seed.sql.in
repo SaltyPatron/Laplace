@@ -1,4 +1,5 @@
-CREATE OR REPLACE FUNCTION respell_variant_seed(p_modality text, p_node_type text)
+DROP FUNCTION IF EXISTS laplace.respell_variant_seed(text, text);
+CREATE OR REPLACE FUNCTION generation.respell_variant_seed(p_modality text, p_node_type text)
     RETURNS bytea
     LANGUAGE sql STABLE PARALLEL SAFE
  AS $$

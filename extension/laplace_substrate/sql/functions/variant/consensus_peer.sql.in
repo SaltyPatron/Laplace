@@ -1,4 +1,5 @@
-CREATE OR REPLACE FUNCTION consensus_peer(p_id bytea, p_k int DEFAULT 6)
+DROP FUNCTION IF EXISTS laplace.consensus_peer(bytea, int);
+CREATE OR REPLACE FUNCTION generation.consensus_peer(p_id bytea, p_k int DEFAULT 6)
     RETURNS bytea
     LANGUAGE plpgsql STABLE PARALLEL RESTRICTED
  AS $$
@@ -8,9 +9,9 @@ DECLARE
     v_coord  geometry;
     v_curve  geometry;
 BEGIN
-    -- Relational election: entities of p_id's own type that share p_id's
+    -- Relational election: laplace.entities of p_id's own type that share p_id's
     -- (relation, partner) edges, scored by min-shared confidence. Reads through
-    -- v_consensus_unrefuted (was two inline `NOT refuted` base-table scans). The
+    -- laplace.v_consensus_unrefuted(was two inline `NOT laplace.refuted` base-table scans). The
     -- winner is the top-p_k by score, then one picked by the deterministic
     -- hash tie-break -- identical to the old UNION's hash pick over `elected`.
     --
@@ -35,7 +36,7 @@ BEGIN
     -- which is the identical defect the p_id arms above avoid, one level down --
     -- the two branches lead with different columns, so neither index serves the
     -- qual and the planner is back to BitmapOr or a scan. Carrying the flag into a
-    -- CASE for the entities join spread it further. Split, each arm is a plain
+    -- CASE for the laplace.entities join spread it further. Split, each arm is a plain
     -- equality on its own leading column and the flag disappears entirely.
     SELECT z.id INTO v_result
     FROM (
@@ -95,9 +96,9 @@ BEGIN
     -- parameter, and gate the whole branch behind the election miss.
     -- Shape rank uses REALIZED curves (entity_curve), never packed trajectory
     -- (Rule #3 / Issue 51).
-    SELECT a.type_id, a.coord, laplace.entity_curve(p_id)
+    SELECT a.type_id, a.coord, structural.entity_curve(p_id)
       INTO v_type, v_coord, v_curve
-    FROM laplace.word_anchor(p_id) a;
+    FROM structural.word_anchor(p_id) a;
     IF v_coord IS NULL THEN
         RETURN NULL;
     END IF;
@@ -106,7 +107,7 @@ BEGIN
     FROM (
         SELECT knn.id
         FROM (
-            SELECT w.id, laplace.entity_curve(w.id) AS curve
+            SELECT w.id, structural.entity_curve(w.id) AS curve
             FROM laplace.v_word_points w
             WHERE w.type_id = v_type AND w.id <> p_id AND w.trajectory IS NOT NULL
             ORDER BY w.coord <<->> v_coord

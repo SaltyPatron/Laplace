@@ -4,15 +4,15 @@
 -- Composes with the tier-2 continuation plane in the lm_head so the synthesized
 -- model can cross a sentence boundary instead of speaking document-internal
 -- word adjacency only.
-CREATE OR REPLACE FUNCTION sentence_order_word_bridge(p_vocab bytea[], p_docs int DEFAULT 100000)
+DROP FUNCTION IF EXISTS laplace.sentence_order_word_bridge(bytea[], int);
+CREATE OR REPLACE FUNCTION generation.sentence_order_word_bridge(p_vocab bytea[], p_docs int DEFAULT 100000)
     RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
-    LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
     WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
     t AS (
         SELECT DISTINCT ON (w.id) w.id AS did, w.trajectory
-        FROM v_word_points w
-        WHERE w.type_id = canonical_id('Document')
+        FROM laplace.v_word_points w
+        WHERE w.type_id = laplace.canonical_id('Document')
           AND w.trajectory IS NOT NULL
         ORDER BY w.id, w.physicality_id LIMIT p_docs
     ),
@@ -32,14 +32,14 @@ CREATE OR REPLACE FUNCTION sentence_order_word_bridge(p_vocab bytea[], p_docs in
     ),
     sent_traj AS (
         SELECT DISTINCT ON (w.id) w.id AS sid, w.trajectory
-        FROM v_word_points w
+        FROM laplace.v_word_points w
         JOIN live s ON s.sid = w.id
         WHERE w.trajectory IS NOT NULL
         ORDER BY w.id, w.physicality_id
     ),
     words AS (
         -- in-vocab join doubles as the content filter (whitespace/punctuation
-        -- constituents are not vocab entities)
+        -- laplace.constituents are not vocab laplace.entities)
         SELECT st.sid, tc.ordinal AS ord, tc.entity_id AS wid
         FROM sent_traj st CROSS JOIN LATERAL laplace_trajectory_constituents(st.trajectory) tc
         JOIN v ON v.id = tc.entity_id

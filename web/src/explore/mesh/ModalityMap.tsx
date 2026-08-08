@@ -12,13 +12,21 @@ import styles from './ModalityMap.module.css';
  */
 type Status = 'live' | 'sparse' | 'awaiting';
 
-interface Counts { text: number; chess: number; models: number; multilingual: number }
+interface Counts {
+  text: number; chess: number; models: number; multilingual: number; documents: number
+}
 
-const CARDS: { name: string; key: keyof Counts; blurb: string; ladder: string; href?: string }[] = [
+const CARDS: { name: string; key: keyof Counts; blurb: string; ladder: string; href?: string; unit?: string }[] = [
   {
     name: 'Text', key: 'text', href: '/explore/mesh',
     blurb: 'WordNet, FrameNet, VerbNet, PropBank and the ILI hub — the semantic mesh.',
     ladder: 'surface → sense → concept → frame / class / roleset → roles',
+  },
+  {
+    name: 'Documents', key: 'documents',
+    blurb: 'Gutenberg and other whole-document deposits — entities and trajectories with almost no attestations, so residency is structural entity count, not evidence volume.',
+    ladder: 'file → document → sentence → surface',
+    unit: 'documents',
   },
   {
     name: 'Chess', key: 'chess',
@@ -69,7 +77,7 @@ export function ModalityMap() {
               <span className={styles.blurb}>{m.blurb}</span>
               <span className={styles.count}>
                 {status === 'awaiting' ? 'not yet ingested'
-                  : `${(n ?? 0).toLocaleString()} attestations`}
+                  : `${(n ?? 0).toLocaleString()} ${m.unit ?? 'attestations'}`}
               </span>
             </>
           );

@@ -57,7 +57,7 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
     /// from decomposing this call) and a content-already-known short-circuit (unit is
     /// <see cref="PresentRootDeferredUnit"/>, IngestExistenceGate resolved root from
     /// record.SourceId without ever parsing the file — see GH #592). The concept-anchor
-    /// links (repo CONTAINS this file, file HAS_DEFINITION this concept) are re-emitted
+    /// converse.links(repo CONTAINS this file, file HAS_DEFINITION this concept) are re-emitted
     /// either way: they are per-CALLER facts, not per-CONTENT facts, so two repos
     /// containing byte-identical content still get two distinct CONTAINS edges on the
     /// one content node, never one silently dropped because the bytes were seen before.
@@ -132,7 +132,7 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
                 }
             }
 
-            // Concept-anchor links (repo CONTAINS this file, file HAS_DEFINITION this
+            // Concept-anchor converse.links(repo CONTAINS this file, file HAS_DEFINITION this
             // concept) moved to WalkWitness — the pipeline calls handler.WalkWitness
             // right after DrainInto on every novel record (IngestDescentFlush.cs) AND
             // on every content-already-known short-circuit (IngestExistenceGate.cs), so

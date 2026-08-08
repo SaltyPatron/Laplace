@@ -96,6 +96,33 @@ Rule #12 — Defaults derive from source and machine
 Batch, commit, and working-set sizing derive from source shape and machine capacity.
 Environment overrides are diagnostic controls, not product defaults.
 
+Rule #13 — Fence expensive STABLE calls deliberately
+-----------------------------------------------------
+
+PostgreSQL does not constant-fold a STABLE function into one execution for the whole
+query. A call in a filter can therefore execute once per candidate row. An indexed
+`= ANY(fn())` predicate may become a one-shot index condition; `<> ALL(fn())` and an
+ordinary filter do not provide that guarantee. A pull-up-eligible one-row subquery is
+not a fence. Use a MATERIALIZED CTE when an expensive stable set must be computed once,
+and prove the call count and plan with representative `EXPLAIN (ANALYZE, BUFFERS)`.
+
+Rule #14 — Serving rows carry ids with labels
+----------------------------------------------
+
+A human- or UI-facing serving operation returns the content id and its display label
+in the same row. Machine-hop, fold, and internal set-returning operations return ids
+and let the caller batch realization at the edge. Never call `realize` or `render_text`
+once per row when a batch form exists. Every table-returning operation declares which
+of these two shapes it serves.
+
+Rule #15 — CTE materialization is explicit
+-------------------------------------------
+
+Every CTE in a serving SQL body declares MATERIALIZED or NOT MATERIALIZED. Use
+MATERIALIZED for sets that must be evaluated once or must resist predicate pull-up;
+use NOT MATERIALIZED for a pure relational expression the planner should inline. The
+keyword documents and enforces the intended evaluation boundary.
+
 Operational constraints
 -----------------------
 

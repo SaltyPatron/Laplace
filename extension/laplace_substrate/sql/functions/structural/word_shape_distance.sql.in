@@ -1,5 +1,6 @@
-CREATE OR REPLACE FUNCTION word_shape_distance(p_a text, p_b text) RETURNS double precision
+DROP FUNCTION IF EXISTS laplace.word_shape_distance(text, text);
+CREATE OR REPLACE FUNCTION structural.word_shape_distance(p_a text, p_b text) RETURNS double precision
     LANGUAGE sql STABLE
  AS $$
-    SELECT public.laplace_frechet_4d(laplace.word_curve(laplace.word_id(p_a)), laplace.word_curve(laplace.word_id(p_b)))
+    SELECT public.laplace_frechet_4d(structural.word_curve(laplace.word_id(p_a)), structural.word_curve(laplace.word_id(p_b)))
 $$;

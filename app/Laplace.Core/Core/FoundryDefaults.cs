@@ -50,7 +50,7 @@ public static class FoundryDefaults
     public const double HilbertPeScale = 0.25;
     /// Highway salience bands — the width of doc 18 §2's G stratum (relation-gate
     /// signals: one indicator direction per band). COUNTED, not chosen: this is the
-    /// row count of relation_band_catalog() (mandate..probationary, bands 0..12), and
+    /// row count of converse.relation_band_catalog() (mandate..probationary, bands 0..12), and
     /// it moves only when the catalog does. Named here rather than inlined so the
     /// stratum allocator and the catalog cannot silently disagree.
     public const int HighwayBandCount = 13;
