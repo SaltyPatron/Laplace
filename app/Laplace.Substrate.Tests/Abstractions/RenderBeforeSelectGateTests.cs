@@ -84,7 +84,6 @@ public sealed class RenderBeforeSelectGateTests
         "converse/converse_compose.sql.in",            // 4x realize/render_text @ 137,183,189,189
         "converse/converse_facts.sql.in",              // 10x label/realize/render_text/type_label @ 40,40,45,100,100,121,154,172,173,173
         "converse/converse_tiered.sql.in",             // 2x realize/render_text @ 245,245
-        "converse/converse_walk.sql.in",               // 1x render_text @ 201
         "converse/correlate.sql.in",                   // 2x label @ 19,20
         "converse/epistemic_status.sql.in",            // 2x realize/type_label @ 23,24
         "converse/links.sql.in",                       // 2x label @ 49,53
@@ -151,14 +150,14 @@ public sealed class RenderBeforeSelectGateTests
     /// <c>realize_batch</c>; never raise. Compile-time consts on purpose (W6 D2): a
     /// ceiling in generated data is a ceiling nobody reviews.
     /// </summary>
-    private const int ScalarRealizerFileCeiling = 51;
+    private const int ScalarRealizerFileCeiling = 50;
 
     /// <inheritdoc cref="ScalarRealizerFileCeiling"/>
     /// <remarks>
     /// The second dimension. Without it a file could triple its per-row renders and stay
     /// green because its NAME is still one entry.
     /// </remarks>
-    private const int ScalarRealizerSiteCeiling = 111;
+    private const int ScalarRealizerSiteCeiling = 110;
 
     private static string FunctionsRoot(string repoRoot) =>
         Path.Combine(repoRoot, "extension", "laplace_substrate", "sql", "functions");
