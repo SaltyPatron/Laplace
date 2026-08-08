@@ -102,7 +102,8 @@ internal sealed class UnreachableSubstrateClient : ISubstrateClient
         throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
 
     public Task<InstalledOpInvoker.OpResult> InvokeOpAsync(
-        string name, IReadOnlyDictionary<string, JsonNode?>? args, int maxRows, CancellationToken ct) =>
+        string name, IReadOnlyDictionary<string, JsonNode?>? args, int maxRows,
+        int timeoutSeconds, CancellationToken ct) =>
         throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
 
     public Task<IReadOnlyList<QueryShape>> QueryShapesAsync(CancellationToken ct) =>
@@ -427,7 +428,8 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
             MaxNodes: 160));
 
     public Task<InstalledOpInvoker.OpResult> InvokeOpAsync(
-        string name, IReadOnlyDictionary<string, JsonNode?>? args, int maxRows, CancellationToken ct)
+        string name, IReadOnlyDictionary<string, JsonNode?>? args, int maxRows,
+        int timeoutSeconds, CancellationToken ct)
     {
         if (name == "source_status")
         {
@@ -436,6 +438,7 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
                 ["source"] = "WordNetDecomposer",
                 ["known"] = true,
                 ["ingested"] = true,
+                ["timeout_seconds"] = timeoutSeconds,
             };
             return Task.FromResult(new InstalledOpInvoker.OpResult([row], null, null));
         }
@@ -479,7 +482,7 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
             4_337_000, nowUnix - 3, 120, true));
 
     public Task<ModalitiesResponse> ModalitiesAsync(CancellationToken ct) =>
-        Task.FromResult(new ModalitiesResponse("modalities", 6_280_000, 781, 0, 0));
+        Task.FromResult(new ModalitiesResponse("modalities", 6_280_000, 781, 0, 0, 22_104));
 
     public Task<TaxonomyResponse?> TaxonomyAsync(string idHex, CancellationToken ct)
     {

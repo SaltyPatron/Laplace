@@ -1,4 +1,4 @@
--- resolve_audit(prompt): what the machine actually saw, and what it MISSED.
+-- converse.resolve_audit(prompt): what the machine actually saw, and what it MISSED.
 --
 -- THE EDGE OF THE WINDOW, MADE VISIBLE. A bounded observer's characteristic
 -- failure is mistaking the edge of its window for the edge of the world. This
@@ -27,7 +27,7 @@
 -- only visible output.
 --
 -- WHY THE RELATION IS A PARAMETER. G3 (vocabulary literalism) forbids new
--- relation_type_id('LITERAL') sites; 243 existing ones are grandfathered in
+-- laplace.relation_type_id('LITERAL') sites; 243 existing ones are grandfathered in
 -- scripts/isa-gate-baseline.json and the ceiling is shrink-only. Rather than
 -- raise it for a diagnostic, the caller passes the relation id. That is also
 -- correct on its own terms: a diagnostic that hardcodes one relation cannot
@@ -36,15 +36,11 @@
 --
 -- READ LAW: ids until the end; one realize_batch over the collected ids joined
 -- back by ordinal. No per-row realize, no string comparison, no lower().
-DROP FUNCTION IF EXISTS resolve_audit(text);
-
 DROP FUNCTION IF EXISTS laplace.resolve_audit(text, bytea);
-
 CREATE OR REPLACE FUNCTION converse.resolve_audit(p_prompt text, p_lang_rel bytea)
     RETURNS TABLE(ord int, token text, resolved boolean, tier smallint,
                   senses bigint, top_language text, verdict text)
-    LANGUAGE sql STABLE
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE sql STABLE AS $$
 WITH tok AS (
     -- prompt_words is the UAX-29 segmentation with its entity lookup. It
     -- returns one row per (ord, id) and an id living at two tiers appears
@@ -56,13 +52,13 @@ WITH tok AS (
 ),
 enriched AS (
     SELECT t.ord, t.word, t.id,
-           (SELECT min(e.tier) FROM entities e WHERE e.id = t.id) AS tier,
+           (SELECT min(e.tier) FROM laplace.entities e WHERE e.id = t.id) AS tier,
            (SELECT count(*) FROM lexical.senses(t.id)) AS n_senses,
            (SELECT c.object_id
-              FROM consensus c
+              FROM laplace.consensus c
              WHERE c.subject_id = t.id
                AND c.type_id = p_lang_rel
-             ORDER BY eff_mu(c.rating, c.rd) DESC, c.object_id
+             ORDER BY laplace.eff_mu(c.rating, c.rd) DESC, c.object_id
              LIMIT 1) AS lang_id
     FROM tok t
 ),
@@ -70,7 +66,7 @@ ord AS (
     SELECT e.*, row_number() OVER (ORDER BY e.ord) AS ix FROM enriched e
 ),
 lbl AS (
-    SELECT realize_batch(array_agg(o.lang_id ORDER BY o.ix), NULL) AS l
+    SELECT realize.batch(array_agg(o.lang_id ORDER BY o.ix), NULL) AS l
     FROM ord o
 )
 SELECT o.ord,

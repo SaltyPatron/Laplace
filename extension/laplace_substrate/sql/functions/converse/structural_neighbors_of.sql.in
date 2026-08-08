@@ -1,11 +1,10 @@
 -- Entity-id keyed structural KNN with S³ coords (explore glome overlay).
--- Unlike structural_neighbors(text), does not re-resolve via prompt_state.
+-- Unlike structural.neighbors(text), does not re-resolve via prompt_state.
 --
 -- Shape axis: Frechet over REALIZED curves (entity_curve), never packed
--- physicalities.trajectory (Rule #3 / Issue 51).
+-- laplace.physicalities.trajectory (Rule #3 / Issue 51).
 -- GH #862 / #860: structural.neighbors_of, no SET, real schema names.
 DROP FUNCTION IF EXISTS laplace.structural_neighbors_of(bytea, integer);
-
 CREATE OR REPLACE FUNCTION structural.neighbors_of(
     p_id bytea,
     p_k  integer DEFAULT 10)
@@ -25,9 +24,9 @@ DECLARE
     v_coord geometry;
     v_curve geometry;
 BEGIN
-    SELECT a.coord, laplace.entity_curve(p_id)
+    SELECT a.coord, structural.entity_curve(p_id)
       INTO v_coord, v_curve
-    FROM laplace.word_anchor(p_id) a;
+    FROM structural.word_anchor(p_id) a;
     IF v_coord IS NULL THEN RETURN; END IF;
 
     RETURN QUERY
@@ -56,7 +55,7 @@ BEGIN
     curves AS (
         -- Cache realized curves once per survivor (never rebuild inside Frechet).
         SELECT o.entity_id, o.coord, o.radius_origin, o.geo, o.ord,
-               laplace.entity_curve(o.entity_id) AS curve
+               structural.entity_curve(o.entity_id) AS curve
         FROM ordered o
     ),
     labels AS (
@@ -64,7 +63,7 @@ BEGIN
         -- (was: scalar realize per neighbour): synset/ILI hubs resolve through
         -- the name/synset-lemma/translation arms to the real word; hex stays
         -- only as the genuine last resort so the node still plots.
-        SELECT laplace.realize_batch(array_agg(c.entity_id ORDER BY c.ord)) AS l
+        SELECT realize.batch(array_agg(c.entity_id ORDER BY c.ord)) AS l
         FROM curves c
     )
     SELECT c.entity_id,

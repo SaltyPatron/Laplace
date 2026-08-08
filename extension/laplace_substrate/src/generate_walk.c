@@ -32,7 +32,7 @@ PG_FUNCTION_INFO_V1(pg_laplace_walk_strongest);
 
 static const char *EDGE_QUERY =
     "SELECT object_id, type_id, rating, rd, witness_count "
-    "FROM laplace.consensus_walk_edges($1, $2, $3, $4)";
+    "FROM consensus.walk_edges($1, $2, $3, $4)";
 
 static SPIPlanPtr edge_plan = NULL;
 

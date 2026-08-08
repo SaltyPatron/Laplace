@@ -2,14 +2,15 @@
 -- the planner keeps it as an opaque `Function Scan` instead of pulling the body
 -- into the caller and pushing predicates through to the index. Measured on the
 -- foundation seed 2026-08-04, the SET-carrying siblings planned as one opaque line
--- where `senses()` -- which dropped the clause under #617 -- inlined to an
+-- where `lexical.senses()` -- which dropped the clause under #617 -- inlined to an
 -- `Index Scan using entities_t2_h0_type_id_idx`. `define` sits on the read path,
 -- so it pays that on every call.
 --
 -- Every reference is `@extschema@.`-qualified instead. That is what the clause was
 -- actually doing here, and qualification does it at parse time for free. This is the
 -- same trade `drop_retired_eff_mu` records and CLAUDE.md states as law.
-CREATE OR REPLACE FUNCTION define(p_word bytea, p_limit int DEFAULT 5)
+DROP FUNCTION IF EXISTS laplace.define(bytea, int);
+CREATE OR REPLACE FUNCTION lexical.define(p_word bytea, p_limit int DEFAULT 5)
     RETURNS TABLE(definition text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$
     SELECT @extschema@.render_text(d.object_id, 24) AS definition, d.eff_mu, d.witnesses

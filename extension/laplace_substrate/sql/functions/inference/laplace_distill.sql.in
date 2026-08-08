@@ -1,23 +1,24 @@
-CREATE OR REPLACE FUNCTION laplace_distill(
+DROP FUNCTION IF EXISTS laplace.laplace_distill(bytea, float8);
+CREATE OR REPLACE FUNCTION generation.laplace_distill(
     p_band_mask  bytea,
     p_min_eff_mu float8 DEFAULT 0.5)
 RETURNS TABLE(subject_id bytea, type_id bytea, object_id bytea, eff_mu float8)
-LANGUAGE sql STABLE PARALLEL RESTRICTED SET search_path = @extschema@, public AS $$
+LANGUAGE sql STABLE PARALLEL RESTRICTED AS $$
     WITH band_types AS (
-        SELECT e.id FROM entities e
+        SELECT e.id FROM laplace.entities e
         WHERE e.highway_mask IS NOT NULL
-          AND laplace_highway_mask_bits(e.highway_mask) && laplace_highway_mask_bits(p_band_mask)
+          AND laplace.laplace_highway_mask_bits(e.highway_mask) && laplace.laplace_highway_mask_bits(p_band_mask)
     )
     SELECT c.subject_id, c.type_id, c.object_id,
-           (eff_mu(c.rating, c.rd)::float8 / 1e9) AS eff_mu
-    FROM consensus c
+           (laplace.eff_mu(c.rating, c.rd)::float8 / 1e9) AS eff_mu
+    FROM laplace.consensus c
     JOIN band_types bt ON bt.id = c.type_id
     WHERE c.object_id IS NOT NULL
-      -- Compare the BARE bigint eff_mu (= rating-2*rd, the indexed expression of
+      -- Compare the BARE bigint laplace.eff_mu(= rating-2*rd, the indexed expression of
       -- consensus_eff_mu_btree) against a once-computed bigint threshold, instead of
-      -- `eff_mu::float8/1e9 >= p_min` which wraps the column in ::float8/1e9 and defeats the
-      -- functional index → whole-consensus scan. EXACT: eff_mu is integer, so
-      -- `eff_mu::float8/1e9 >= p_min` ⟺ `eff_mu >= p_min*1e9` ⟺ `eff_mu >= ceil(p_min*1e9)`.
-      AND eff_mu(c.rating, c.rd) >= ceil(p_min_eff_mu * 1e9)::bigint
-    ORDER BY c.subject_id, eff_mu(c.rating, c.rd) DESC
+      -- `laplace.eff_mu::float8/1e9 >= p_min` which wraps the column in ::float8/1e9 and defeats the
+      -- functional index → whole-consensus scan. EXACT: laplace.eff_mu is integer, so
+      -- `laplace.eff_mu::float8/1e9 >= p_min` ⟺ `laplace.eff_mu >= p_min*1e9` ⟺ `laplace.eff_mu >= ceil(p_min*1e9)`.
+      AND laplace.eff_mu(c.rating, c.rd) >= ceil(p_min_eff_mu * 1e9)::bigint
+    ORDER BY c.subject_id, laplace.eff_mu(c.rating, c.rd) DESC
 $$;

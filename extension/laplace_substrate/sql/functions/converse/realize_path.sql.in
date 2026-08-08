@@ -6,7 +6,6 @@
 -- No SET: it blocks inlining, and a wrapper that cannot inline is a whole extra
 -- function execution to forward three arguments.
 DROP FUNCTION IF EXISTS laplace.realize_path(bytea[], bytea[], bytea);
-
 CREATE OR REPLACE FUNCTION realize.path(p_path bytea[], p_types bytea[],
                                         p_lang bytea DEFAULT NULL)
     RETURNS text

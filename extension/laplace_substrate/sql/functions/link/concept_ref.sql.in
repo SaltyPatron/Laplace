@@ -1,11 +1,11 @@
-CREATE OR REPLACE FUNCTION concept_ref(p_ref text)
+DROP FUNCTION IF EXISTS laplace.concept_ref(text);
+CREATE OR REPLACE FUNCTION lexical.concept_ref(p_ref text)
     RETURNS bytea
-    LANGUAGE sql STABLE STRICT PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$
     -- Resolve an external concept identifier to its content-addressed anchor
     -- entity, so callers can link things by ILI / WordNet synset key / frame
     -- name. Every shape is keyed off the SAME content hash the ingest
-    -- decomposers used (word_id = laplace_content_root_id), so the anchor id is
+    -- decomposers used (laplace.word_id = laplace_content_root_id), so the anchor id is
     -- reconstructed, never resolved by rendered surface:
     --   * ILI id       'i68021'       -> the synset entity IS that hash
     --   * WordNet key   '05510358-n'  -> that hash is the offset-pos key
@@ -21,11 +21,14 @@ CREATE OR REPLACE FUNCTION concept_ref(p_ref text)
             -- offset-pos key (a partial or double seed produces exactly that), and
             -- unordered this returned whichever the index reached first. Strongest
             -- standing claim wins; the id breaks the tie so the answer is stable.
-            THEN (SELECT c.subject_id FROM consensus c
-                  WHERE c.object_id = word_id((SELECT r FROM norm))
-                    AND c.type_id = relation_type_id('HAS_SYNSET_KEY')
-                  ORDER BY eff_mu(c.rating, c.rd) DESC, c.subject_id
+            THEN (SELECT c.subject_id FROM laplace.consensus c
+                  WHERE c.object_id = laplace.word_id((SELECT r FROM norm))
+                    AND c.type_id = laplace.relation_type_id('HAS_SYNSET_KEY')
+                    -- Standing claim only: a fully-refuted HAS_SYNSET_KEY is not
+                    -- a mapping (Copilot #918). Non-positive eff_mu ⇒ NULL.
+                    AND laplace.eff_mu(c.rating, c.rd) > 0
+                  ORDER BY laplace.eff_mu(c.rating, c.rd) DESC, c.subject_id
                   LIMIT 1)
-        ELSE word_id((SELECT r FROM norm))
+        ELSE laplace.word_id((SELECT r FROM norm))
     END
 $$;

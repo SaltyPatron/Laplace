@@ -1,10 +1,11 @@
 -- converse.prompt_state — GH #862 / #860. No SET, real schema names.
 DROP FUNCTION IF EXISTS laplace.prompt_state(text);
-
+-- BEGIN ATOMIC: GH #764.
 CREATE OR REPLACE FUNCTION converse.prompt_state(p_text text)
     RETURNS TABLE(ord int, word text, id bytea, language bytea)
-    LANGUAGE sql LAPLACE_STABLE_STRICT AS $$
+    LANGUAGE sql LAPLACE_STABLE_STRICT
+BEGIN ATOMIC
     SELECT pw.ord, pw.word, pw.id, converse.word_language(pw.id)
     FROM converse.prompt_words(p_text) pw
-    WHERE pw.id IS NOT NULL
-$$;
+    WHERE pw.id IS NOT NULL;
+END;

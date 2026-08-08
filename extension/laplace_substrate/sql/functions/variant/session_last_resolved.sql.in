@@ -1,10 +1,12 @@
-CREATE OR REPLACE FUNCTION session_last_resolved(p_session bytea)
+DROP FUNCTION IF EXISTS laplace.session_last_resolved(bytea);
+-- BEGIN ATOMIC: GH #764.
+CREATE OR REPLACE FUNCTION generation.session_last_resolved(p_session bytea)
     RETURNS bytea
     LANGUAGE sql STABLE STRICT PARALLEL SAFE
- AS $$
+BEGIN ATOMIC
     SELECT t.resolved_id
     FROM laplace.session_topics t
     WHERE t.session_id = p_session AND t.resolved_id IS NOT NULL
     ORDER BY t.ord DESC
-    LIMIT 1
-$$;
+    LIMIT 1;
+END;

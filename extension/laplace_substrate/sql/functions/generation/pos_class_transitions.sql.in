@@ -4,23 +4,23 @@
 -- ~18x18 CLASS table + each vocab word's dominant class; the dense compose
 -- M[x,y] += gain * T[class(x),class(y)] happens client-side over the full
 -- V x V table (SQL returns the small fact tables; C# orchestrates).
-CREATE OR REPLACE FUNCTION vocab_dominant_pos(p_vocab bytea[])
+DROP FUNCTION IF EXISTS laplace.vocab_dominant_pos(bytea[]);
+CREATE OR REPLACE FUNCTION generation.vocab_dominant_pos(p_vocab bytea[])
     RETURNS TABLE(word_id bytea, pos_id bytea)
-    LANGUAGE plpgsql STABLE PARALLEL RESTRICTED
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE plpgsql STABLE PARALLEL RESTRICTED AS $$
 DECLARE
     v_type bytea;
 BEGIN
-    v_type := relation_type_id('HAS_POS');
+    v_type := laplace.relation_type_id('HAS_POS');
     RETURN QUERY
     WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
     direct AS (
         SELECT DISTINCT ON (c.subject_id) c.subject_id AS wid, c.object_id AS pos
         FROM v
-        JOIN v_consensus_unrefuted c ON c.subject_id = v.id
+        JOIN laplace.v_consensus_unrefuted c ON c.subject_id = v.id
             AND c.type_id = v_type
         WHERE c.object_id IS NOT NULL
-        ORDER BY c.subject_id, eff_mu(c.rating, c.rd) DESC
+        ORDER BY c.subject_id, laplace.eff_mu(c.rating, c.rd) DESC
     ),
     -- CASE-VARIANT ASYMMETRY, resolved through the ATTESTED case surface.
     -- 'ALL' may carry no HAS_POS witness while 'all' does. They are different
@@ -29,32 +29,32 @@ BEGIN
     -- HAS_LOWERCASE_MAPPING / HAS_TITLECASE_MAPPING are governed in
     -- relation_types.toml, witnessed per codepoint from UnicodeData.txt fields
     -- 12/13/14, and composed to word grain natively and batched by
-    -- word_case_variants (src/lexical_case.c), which also gates on entity_exists.
+    -- lexical.word_case_variants(src/lexical_case.c), which also gates on entity_exists.
     --
-    -- This previously read `word_id(lower(render(vv.id)))`: render the id back to
+    -- This previously read `laplace.word_id(lower(laplace.render(vv.id)))`: laplace.render the id back to
     -- text, case-fold the text, then MINT AN ID FROM THE FOLDED STRING. Not a
     -- lookup -- a fabrication. It leaves hash space mid-operation, discards the
-    -- attested edges, and word_id() mints unconditionally, so an unwitnessed fold
+    -- attested edges, and laplace.word_id() mints unconditionally, so an unwitnessed fold
     -- yields a well-formed id for content that may have no entity at all (the
-    -- `m.fid IS NOT NULL` guard cannot catch that; word_id is never null). The
+    -- `m.fid IS NOT NULL` guard cannot catch that; laplace.word_id is never null). The
     -- result feeds pos_transition_plane and therefore the exported model's POS
     -- shaping, so a fabricated identity here becomes a weight.
     --
     -- Any attested variant is admissible, not just the lowercase one: the
     -- asymmetry runs both ways ('all' -> 'All' when only the title form is
-    -- witnessed). Ties break on eff_mu then id, so the choice stays deterministic.
+    -- witnessed). Ties break on laplace.eff_mu then id, so the choice stays deterministic.
     missing AS (
-        SELECT vv.id, unnest(word_case_variants(vv.id)) AS fid
+        SELECT vv.id, unnest(lexical.word_case_variants(vv.id)) AS fid
         FROM v vv
         WHERE NOT EXISTS (SELECT 1 FROM direct d WHERE d.wid = vv.id)
     ),
     folded AS (
         SELECT DISTINCT ON (m.id) m.id AS wid, c.object_id AS pos
         FROM missing m
-        JOIN v_consensus_unrefuted c ON c.subject_id = m.fid
+        JOIN laplace.v_consensus_unrefuted c ON c.subject_id = m.fid
             AND c.type_id = v_type
         WHERE c.object_id IS NOT NULL AND m.fid IS NOT NULL AND m.fid <> m.id
-        ORDER BY m.id, eff_mu(c.rating, c.rd) DESC, m.fid
+        ORDER BY m.id, laplace.eff_mu(c.rating, c.rd) DESC, m.fid
     )
     SELECT d.wid, d.pos FROM direct d
     UNION ALL
@@ -67,24 +67,24 @@ $$;
 -- adjacency), aggregated to the dominant-POS classes.
 --
 -- Pillar 5 (2026-07-20): PRECEDES-consensus leg removed. word_order reads the
--- ordered sequence straight from physicalities.trajectory via
+-- ordered sequence straight from laplace.physicalities.trajectory via
 -- laplace_trajectory_constituents, which is the same knowledge PRECEDES
--- materialized as redundant attestations (Pillar 3a, e5e1b42).
-CREATE OR REPLACE FUNCTION pos_class_transitions(
+-- materialized as redundant laplace.attestations(Pillar 3a, e5e1b42).
+DROP FUNCTION IF EXISTS laplace.pos_class_transitions(bytea[], int, double precision);
+CREATE OR REPLACE FUNCTION generation.pos_class_transitions(
         p_vocab bytea[], p_trajs int DEFAULT 200000, p_smooth_k double precision DEFAULT 0.5)
     RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
-    LANGUAGE plpgsql STABLE PARALLEL RESTRICTED
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE plpgsql STABLE PARALLEL RESTRICTED AS $$
 BEGIN
     RETURN QUERY
     WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
     word_pos AS MATERIALIZED (
-        SELECT wp.word_id AS wid, wp.pos_id AS pos FROM vocab_dominant_pos(p_vocab) wp
+        SELECT wp.word_id AS wid, wp.pos_id AS pos FROM generation.vocab_dominant_pos(p_vocab) wp
     ),
     nclasses AS (SELECT count(DISTINCT pos)::float8 AS n FROM word_pos),
     pairs AS (
         SELECT wo.subject_id AS x, wo.object_id AS y, wo.w AS c
-        FROM word_order(p_vocab, p_trajs, 1) wo
+        FROM generation.word_order(p_vocab, p_trajs, 1) wo
     ),
     class_pairs AS (
         SELECT wx.pos AS px, wy.pos AS py, sum(p.c) AS c

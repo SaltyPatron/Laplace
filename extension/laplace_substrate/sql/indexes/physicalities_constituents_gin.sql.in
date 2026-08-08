@@ -2,7 +2,7 @@
 -- this: compose a point locally from content (a hash, no round-trip), then ask which
 -- trajectories CONTAIN it — constituent_ids(trajectory) @> ARRAY[point]. Precedes,
 -- follows, contains, part-of and co-occurrence are that same probe read at different
--- offsets, and trajectory_continuations() serves generation from it. Without this it
+-- offsets, and generation.trajectory_continuations() serves generation from it. Without this it
 -- is a sequential scan of every trajectory in the substrate.
 --
 -- It is also the most expensive index here to maintain: GIN writes one entry per

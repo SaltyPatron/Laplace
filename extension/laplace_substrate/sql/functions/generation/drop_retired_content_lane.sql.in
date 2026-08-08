@@ -28,10 +28,10 @@ END $do$;
 
 -- 2026-07-29: the generation corpus cache and its pair tables are RETIRED.
 -- gen_corpus rebuilt the trajectories into a per-backend RAM suffix array from a
--- 97M-row scan (46 min before generate() emitted a token); trajectory_pairs
+-- 97M-row scan (46 min before generation.generate() emitted a token); trajectory_pairs
 -- persisted the same statistics to disk behind a corpus fingerprint. Both were
--- second bodies for what physicalities.trajectory holds exactly-invertibly.
--- Replaced by trajectory_continuations() (S6, path-bounded), steer_candidates()
+-- second bodies for what laplace.physicalities.trajectory holds exactly-invertibly.
+-- Replaced by generation.trajectory_continuations() (S6, path-bounded), generation.steer_candidates()
 -- (S7), and relation_plane's inline export-time aggregation.
 DO $do$
 DECLARE

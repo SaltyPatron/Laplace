@@ -14,9 +14,6 @@ public sealed class UDDecomposer : DecomposerMultiFile<UdIngestRecord, UDSource,
 
     public override int LayerOrder => 2;
 
-    // GH #898: 686 treebank files over multiple hours — a killed run must true-skip
-    // its applied prefix on restart instead of re-folding testimony corpus-wide.
-    public override bool PerFileResume => true;
     protected override double SourceTrust => TC.AcademicCurated;
 
     private readonly ConcurrentDictionary<string, byte> _canonicalNames = new(StringComparer.Ordinal);

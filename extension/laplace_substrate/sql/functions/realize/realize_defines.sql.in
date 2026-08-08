@@ -1,6 +1,5 @@
 -- realize._defines — GH #862 / #860. No SET, real schema names.
 DROP FUNCTION IF EXISTS laplace._realize_defines(bytea);
-
 CREATE OR REPLACE FUNCTION realize._defines(p_id bytea)
     RETURNS text
     LANGUAGE sql STABLE PARALLEL SAFE STRICT AS $$

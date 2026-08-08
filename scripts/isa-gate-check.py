@@ -67,17 +67,20 @@ CEILINGS = {
     # The remaining 1 is the floor: the name has to exist once in C#, and this is
     # the single place the feature owns it. A scoped source that spelled it again
     # locally would be the per-source hand-roll that caused the defect.
-    "g3_csharp_vocabulary_literalism": 506,
+    "g3_csharp_vocabulary_literalism": 504,
     "g8_band_literalism": 3,
     # G4 scaffolding (W6 D3): grep for CREATE FUNCTION with zero callers outside
     # its own CREATE line. Destination form is substrate CALLS in-degree after W3
     # (#765); this allowlist is shrink-only until that replace lands.
-    "g4_dead_canonical": 65,
+    "g4_dead_canonical": 0,
     # Measured 2026-08-05, landing with its violations enumerated per W6's trap
     # note ("a gate that goes red on merge-day teaches people to ignore it").
     # 29 occurrences across 10 sites, all pre-existing: model_factor (6 names),
     # entities_has_highway, and the three canonical_names writers.
-    "g11_unqualified_in_setless_body": 14,
+    "g11_unqualified_in_setless_body": 0,
+    # GH #764 step 3: LANGUAGE sql with quoted-string bodies (AS $$) — PostgreSQL
+    # records no pg_depend. Shrink-only allowlist; new SQL must use BEGIN ATOMIC.
+    "g12_string_sql_bodies": 216,
 }
 
 CREATE_FUNCTION = re.compile(
@@ -85,6 +88,12 @@ CREATE_FUNCTION = re.compile(
     re.IGNORECASE,
 )
 CALL_TOKEN = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+# CREATE AGGREGATE ... SFUNC = foo / FINALFUNC = bar — real callers without '('.
+AGGREGATE_FUNC_REF = re.compile(
+    r"\b(?:SFUNC|FINALFUNC|MSFUNC|MINVFUNC|COMBINEFUNC|SERIALFUNC|DESERIALFUNC)\s*=\s*"
+    r"(?:[A-Za-z_][A-Za-z0-9_]*\.)?([A-Za-z_][A-Za-z0-9_]*)\b",
+    re.IGNORECASE,
+)
 
 G1_FORMULA = re.compile(
     r"\b(?P<rating>(?:[A-Za-z_][A-Za-z0-9_]*\.)?(?:p_)?rating)"
@@ -242,6 +251,31 @@ def strip_sql_comments(text: str) -> str:
                 continue
             if char == "'":
                 state = "code"
+        i += 1
+    return "".join(out)
+
+
+def mask_sql_single_quoted_literals(text: str) -> str:
+    """Blank SQL string literals so identifier scans only inspect executable SQL."""
+    out: list[str] = []
+    i = 0
+    in_string = False
+    while i < len(text):
+        char = text[i]
+        nxt = text[i + 1] if i + 1 < len(text) else ""
+        if not in_string:
+            if char == "'":
+                in_string = True
+                out.append(" ")
+            else:
+                out.append(char)
+        else:
+            out.append(char if char in "\r\n" else " ")
+            if char == "'" and nxt == "'":
+                out.append(" ")
+                i += 1
+            elif char == "'":
+                in_string = False
         i += 1
     return "".join(out)
 
@@ -415,7 +449,7 @@ def scan_g11_unqualified_in_setless_body() -> Counter[str]:
     found: Counter[str] = Counter()
     for path in production_files(functions_root, (".sql.in",)):
         raw = path.read_text(encoding="utf-8", errors="replace")
-        text = strip_sql_comments(raw)
+        text = mask_sql_single_quoted_literals(strip_sql_comments(raw))
         if SET_SEARCH_PATH.search(text):
             continue                      # still gated by SET; not this gate's business
         rel = relative(path)
@@ -474,11 +508,49 @@ def scan_g4_dead_canonical() -> Counter[str]:
                 if "function" in window and "create" in window:
                     continue
             calls[name] += 1
+        for match in AGGREGATE_FUNC_REF.finditer(text):
+            name = match.group(1).lower()
+            if name in defined and rel != defined[name]:
+                calls[name] += 1
 
     found: Counter[str] = Counter()
     for name, def_path in defined.items():
         if calls[name] == 0:
             found[f"{def_path}::{name}"] = 1
+    return found
+
+
+def scan_g12_string_sql_bodies() -> Counter[str]:
+    """LANGUAGE sql functions still using opaque AS $$ bodies (GH #764).
+
+    BEGIN ATOMIC bodies parse at CREATE time and record pg_depend. String bodies
+    do not. Count shrinks as families convert; new string-bodied SQL fails CI.
+    """
+    functions_root = ROOT / "extension" / "laplace_substrate" / "sql" / "functions"
+    create_head = re.compile(
+        r"CREATE\s+OR\s+REPLACE\s+FUNCTION\s+"
+        r"(?:(?:[A-Za-z_][A-Za-z0-9_]*|@extschema@)\.)?"
+        r"([A-Za-z_][A-Za-z0-9_]*)\s*\(",
+        re.IGNORECASE,
+    )
+    found: Counter[str] = Counter()
+    for path in production_files(functions_root, (".sql.in",)):
+        rel = relative(path)
+        text = strip_sql_comments(path.read_text(encoding="utf-8", errors="replace"))
+        parts = re.split(r"(?=CREATE\s+OR\s+REPLACE\s+FUNCTION\b)", text, flags=re.IGNORECASE)
+        for part in parts:
+            head = create_head.match(part)
+            if head is None:
+                continue
+            lang = re.search(r"\bLANGUAGE\s+sql\b", part, flags=re.IGNORECASE)
+            if lang is None:
+                continue
+            after = part[lang.end() :]
+            # Options may sit between LANGUAGE sql and the body (IMMUTABLE, PARALLEL, …).
+            body = re.search(r"\bBEGIN\s+ATOMIC\b|\bAS\s+\$", after, flags=re.IGNORECASE)
+            if body is None or body.group(0).upper().startswith("BEGIN"):
+                continue
+            found[f"{rel}::{head.group(1).lower()}"] += 1
     return found
 
 
@@ -491,6 +563,7 @@ def current_violations() -> dict[str, dict[str, int]]:
         "g11_unqualified_in_setless_body": scan_g11_unqualified_in_setless_body(),
         "g8_band_literalism": scan_g8(),
         "g4_dead_canonical": scan_g4_dead_canonical(),
+        "g12_string_sql_bodies": scan_g12_string_sql_bodies(),
     }
     return {
         gate: dict(sorted(counter.items()))

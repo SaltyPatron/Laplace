@@ -1,4 +1,5 @@
-CREATE OR REPLACE FUNCTION word_segment(p_text text)
+DROP FUNCTION IF EXISTS laplace.word_segment(text);
+CREATE OR REPLACE FUNCTION converse.word_segment(p_text text)
     RETURNS TABLE(ord int, word text, id bytea)
     AS 'MODULE_PATHNAME', 'pg_laplace_word_segment'
     LANGUAGE C STABLE;

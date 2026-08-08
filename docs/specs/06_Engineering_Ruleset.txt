@@ -178,6 +178,34 @@ correct on the 128 GB server); worker counts come from CpuTopology; MKL/TBB thre
 should come from the same topology resolution (currently a blanket 8 in env.cmd — only
 laplace_synthesis links MKL, engine/core does not, verified 2026-07-03).
 
+Rule #13: An expensive STABLE function in a filter is executed PER ROW — Postgres
+constant-folds only IMMUTABLE. `= ANY(fn())` on an indexed column is safe (the array
+becomes the index condition, forced one-shot); `<> ALL(fn())` and plain WHERE-clause
+calls are not. A simple one-row subselect does NOT fix it (pulled up and re-pushed); a
+MATERIALIZED CTE does. Grounded: Issue 47, 65.3s → 349ms; GH #457 / #470. Related fence:
+SQL functions that fail inlining appear as opaque Function Scans the planner cannot see
+through; chains of them compound. See also Rule #2 (STRICT / `SET` / volatility kill
+inlining) — this rule is about evaluation frequency of a STABLE call that did inline
+or never needed to, not about whether the body inlines.
+
+Rule #14: Id WITH label vs id INSTEAD of label (GH #471). Serving surfaces that a human
+or UI reads return the content id AND a text label in the same row (e.g.
+`consensus.edges` neighbour_id+neighbour, `band_leaders` subject/object text,
+`structural.neighbors_of`). Machine-hop / fold / internal SRFs return ids only and let
+the caller batch `realize.batch` / `render_text_batch` at the edge (e.g.
+`consensus.walk_branches` entity_id, `consensus.step_edge`, attestation scanners).
+Never call `realize` / `render_text` once per row inside a set-returning body when a
+batch form exists — that is the converse_compose defect class (#907). New TABLE
+returns must pick one of the two shapes deliberately; mixed columns without a label
+column are "id instead of label".
+
+Rule #15: Every CTE in a serving SQL body must declare MATERIALIZED or NOT MATERIALIZED
+explicitly (GH #470). Silence is not a decision — Postgres 12+ defaults change meaning
+across versions and the planner's pull-up of one-row fences is exactly the STABLE-in-filter
+class Rule #13 names. Prefer MATERIALIZED for once-fenced sets that must not re-execute
+(relation-family membership, lang resolution, batch realize inputs); NOT MATERIALIZED when
+the CTE is a pure rename the planner should inline. Audit new WITH clauses in review.
+
 Open items surfaced by the 2026-07-01 survey, not yet actioned:
     - materialize_period_partition / materialize_period_partition_fresh differ only by whether
       the LEFT JOIN reads prior consensus state — candidate to merge into one parameterized
@@ -240,4 +268,4 @@ L12 An expensive STABLE function in a filter is executed PER ROW — Postgres
     which mixes the two inliners. ORDER BY and CTEs disqualify only the SCALAR path;
     STRICT disqualifies both. For RETURNS SETOF/TABLE the disqualifiers are the
     pg_proc properties plus "one plain SELECT" — see the amended Rule #2.]
-    (Standing candidate Rule #13.)
+    Promoted to numbered Rule #13 (GH #507).

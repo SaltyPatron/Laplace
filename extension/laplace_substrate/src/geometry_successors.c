@@ -49,7 +49,7 @@ static const char *UNPACK_QUERY =
     "ORDER BY w.id, c.ordinal";
 
 static const char *WS_CLASSIFY_QUERY =
-    "SELECT vocab_idx FROM laplace.corpus_whitespace_vocab_indices($1)";
+    "SELECT vocab_idx FROM generation.corpus_whitespace_vocab_indices($1)";
 
 static SPIPlanPtr unpack_plan   = NULL;
 static SPIPlanPtr classify_plan = NULL;

@@ -1,6 +1,6 @@
 -- hilbert_index equality lookups. NOT optional, and not a partitioning artefact.
 --
--- anagrams_of() is the caller that proves it:
+-- structural.anagrams_of() is the caller that proves it:
 --     JOIN v_word_points w2 ON w2.hilbert_index = w1.hilbert_index
 --     WHERE w1.id = word_id(p_word)
 -- Anagrams share a letter multiset, so they compose to the same coordinate and

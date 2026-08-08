@@ -147,7 +147,7 @@ export function exploreMesh(idHex: string, opts?: ApiOptions) {
 }
 
 export function exploreModalities(opts?: ApiOptions) {
-  return apiGet<{ text: number; chess: number; models: number; multilingual: number }>(
+  return apiGet<{ text: number; chess: number; models: number; multilingual: number; documents: number }>(
     '/v1/explore/modalities', opts);
 }
 

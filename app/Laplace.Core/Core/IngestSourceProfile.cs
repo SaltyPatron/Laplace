@@ -54,8 +54,10 @@ public sealed record IngestSourceProfile(
     /// multi-minute single <c>COPY physicalities</c>, progress frozen after
     /// ~4k/224k games. Live throughput before the choke: ~16 games/s and
     /// ~291 novel rows/game. 256001 keeps the fat path (batch 256, above the
-    /// 256 KiB coreFloor cut) and yields <c>commit_rows≈6144 max_intents≥3</c>
-    /// under the same budget.
+    /// 256 KiB coreFloor cut) so commit sizing stays on the fat-batch lane and
+    /// preserves multi-intent apply parallelism under the same budget (exact
+    /// commit_rows/max_intents follow <see cref="IngestSizing"/>, not a fixed
+    /// product of batch×partitions).
     /// </summary>
     public static readonly IngestSourceProfile ChessPgn = new(256_001, 1);
 

@@ -1,25 +1,25 @@
 -- Shape cluster: Frechet over REALIZED curves (entity_curve), never packed
--- physicalities.trajectory. Curve + distance cached once per candidate
+-- laplace.physicalities.trajectory. Curve + distance cached once per candidate
 -- (Rule #3 / Issue 51).
-CREATE OR REPLACE FUNCTION structural_cluster(
+DROP FUNCTION IF EXISTS laplace.structural_cluster(bytea, double precision, integer);
+CREATE OR REPLACE FUNCTION structural.cluster(
         p_seed bytea, p_eps double precision DEFAULT 0.05, p_limit integer DEFAULT 200)
     RETURNS TABLE(entity_id bytea, label text, frechet double precision, physicalities bigint)
-    LANGUAGE plpgsql STABLE
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE plpgsql STABLE AS $$
 DECLARE
     v_entity bytea;
     v_coord  geometry;
     v_curve  geometry;
 BEGIN
-    SELECT a.id, a.coord, entity_curve(a.id)
+    SELECT a.id, a.coord, structural.entity_curve(a.id)
       INTO v_entity, v_coord, v_curve
-    FROM word_anchor(p_seed) a;
+    FROM structural.word_anchor(p_seed) a;
     IF v_entity IS NULL OR v_coord IS NULL THEN RETURN; END IF;
 
     RETURN QUERY
     WITH knn AS (
         SELECT w.id AS entity_id
-        FROM v_word_points w
+        FROM laplace.v_word_points w
         WHERE w.coord IS NOT NULL
           AND w.id <> v_entity AND w.trajectory IS NOT NULL
         ORDER BY w.coord <<->> v_coord
@@ -29,7 +29,7 @@ BEGIN
         SELECT c.entity_id,
                public.laplace_frechet_4d(c.curve, v_curve) AS fr
         FROM (
-            SELECT k.entity_id, entity_curve(k.entity_id) AS curve
+            SELECT k.entity_id, structural.entity_curve(k.entity_id) AS curve
             FROM knn k
         ) c
         WHERE c.curve IS NOT NULL AND v_curve IS NOT NULL
@@ -40,9 +40,9 @@ BEGIN
         ORDER BY s.entity_id, s.fr
     )
     SELECT d.entity_id,
-           render_text(d.entity_id, 48),
+           laplace.render_text(d.entity_id, 48),
            d.fr,
-           physicality_count(d.entity_id) AS recurrence
+           converse.physicality_count(d.entity_id) AS recurrence
     FROM dedup d
     WHERE d.fr <= p_eps
     ORDER BY d.fr

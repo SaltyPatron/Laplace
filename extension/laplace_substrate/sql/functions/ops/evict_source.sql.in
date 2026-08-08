@@ -24,7 +24,7 @@
 --   (c) Cells with ZERO surviving evidence are DELETED, never zeroed — unattested is
 --       not attested-false (the #688/#689 law); a consensus row with no witnesses is
 --       a claim nobody makes.
---   (d) Touched entity ids queue into highway_mask_dirty — the CLEAR case the queue
+--   (d) Touched entity ids queue into laplace.highway_mask_dirty — the CLEAR case the queue
 --       exists for (deposit only OR-accumulates; eviction can remove an entity's
 --       last governed edge) — and drain via highway_mask_drain (p_drain), whose
 --       refresh recomputes masks from scratch and can therefore clear bits.

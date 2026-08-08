@@ -1,4 +1,5 @@
-CREATE OR REPLACE FUNCTION model_recipes()
+DROP FUNCTION IF EXISTS laplace.model_recipes();
+CREATE OR REPLACE FUNCTION structural.model_recipes()
     RETURNS TABLE(recipe_id bytea, recipe_json text, first_observed_by bytea)
     LANGUAGE sql STABLE
  AS $$

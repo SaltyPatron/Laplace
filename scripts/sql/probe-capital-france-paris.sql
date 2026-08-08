@@ -38,10 +38,10 @@ ORDER BY freq_rank;
 
 \echo ''
 \echo '=== PRECEDES: what FOLLOWS each word (consensus collocates) ==='
-SELECT 'capital' AS seed, * FROM collocates('capital', 25);
-SELECT 'france' AS seed, * FROM collocates('france', 25);
-SELECT 'Paris' AS seed, * FROM collocates('Paris', 25);
-SELECT 'paris' AS seed, * FROM collocates('paris', 25);
+SELECT 'capital' AS seed, * FROM structural.collocates('capital', 25);
+SELECT 'france' AS seed, * FROM structural.collocates('france', 25);
+SELECT 'Paris' AS seed, * FROM structural.collocates('Paris', 25);
+SELECT 'paris' AS seed, * FROM structural.collocates('paris', 25);
 
 \echo ''
 \echo '=== PRECEDES: what PRECEDES each word (consensus in-edges) ==='
@@ -130,9 +130,9 @@ SELECT * FROM tri;
 
 \echo ''
 \echo '=== RECALL TRAJECTORIES (sentences containing word) ==='
-SELECT 'capital' AS word, answer FROM recall_trajectories('capital', 8);
-SELECT 'france' AS word, answer FROM recall_trajectories('france', 8);
-SELECT 'Paris' AS word, answer FROM recall_trajectories('Paris', 8);
+SELECT 'capital' AS word, answer FROM generation.recall_trajectories('capital', 8);
+SELECT 'france' AS word, answer FROM generation.recall_trajectories('france', 8);
+SELECT 'Paris' AS word, answer FROM generation.recall_trajectories('Paris', 8);
 
 \echo ''
 \echo '=== ATTESTATIONS OUT (top 30 per word) ==='
@@ -187,13 +187,13 @@ LIMIT 40;
 
 \echo ''
 \echo '=== FOUNDRY CRAWL: is france reachable from capital seed alone? ==='
-SELECT surface, weight FROM foundry_vocab_crawl(ARRAY['capital'], 1500, 3, 64)
+SELECT surface, weight FROM generation.foundry_vocab_crawl(ARRAY['capital'], 1500, 3, 64)
 WHERE surface IN ('france','Paris','paris','France','of','city','capital');
 
 \echo ''
 \echo '=== FOUNDRY CRAWL: france in full corpus-seed crawl? ==='
-SELECT surface, weight FROM foundry_vocab_crawl(
-    (SELECT array_agg(surface) FROM (SELECT surface FROM corpus_word_vocab(1000, 400000)) q),
+SELECT surface, weight FROM generation.foundry_vocab_crawl(
+    (SELECT array_agg(surface) FROM (SELECT surface FROM generation.corpus_word_vocab(1000, 400000)) q),
     1500, 3, 64)
 WHERE surface IN ('france','Paris','paris','France','capital');
 

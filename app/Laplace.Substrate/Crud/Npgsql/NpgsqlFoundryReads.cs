@@ -16,7 +16,7 @@ public static class NpgsqlFoundryReads
     public readonly record struct SurfaceWeightRow(string Surface, long Weight);
     public readonly record struct CoordRow(byte[] EntityId, double X, double Y, double Z, double M);
     /// <summary>
-    /// One row of <c>laplace.entity_hilbert_keys</c>. Index is the 128-bit 1D Hilbert
+    /// One row of <c>generation.entity_hilbert_keys</c>. Index is the 128-bit 1D Hilbert
     /// value of the physicality centroid (collisions = shared S³ locality).
     /// </summary>
     public readonly record struct EntityHilbertKey(byte[] EntityId, Hilbert128 HilbertIndex);
@@ -32,7 +32,7 @@ public static class NpgsqlFoundryReads
         NpgsqlDataSource ds, string family, string name, int? arg, byte[][]? vocab,
         CancellationToken ct = default) =>
         NpgsqlRead.ReadRowsAsync(ds, """
-            SELECT subject_id, object_id, w FROM laplace.relation_plane(@family, @name, @arg, @vocab)
+            SELECT subject_id, object_id, w FROM generation.relation_plane(@family, @name, @arg, @vocab)
             """,
             static r => new WeightedEdgeRow((byte[])r[0], (byte[])r[1], r.GetDouble(2)),
             p =>
@@ -47,7 +47,7 @@ public static class NpgsqlFoundryReads
         NpgsqlDataSource ds, byte[][] vocab, string[] relNames, int degreeCap,
         CancellationToken ct = default) =>
         NpgsqlRead.ReadRowsAsync(ds, """
-            SELECT subject_id, object_id, w FROM laplace.entity_relation_plane(@vocab, @rels, @cap)
+            SELECT subject_id, object_id, w FROM generation.entity_relation_plane(@vocab, @rels, @cap)
             """,
             static r => new WeightedEdgeRow((byte[])r[0], (byte[])r[1], r.GetDouble(2)),
             p =>
@@ -67,7 +67,7 @@ public static class NpgsqlFoundryReads
         CancellationToken ct = default) =>
         NpgsqlRead.ReadRowsAsync(ds, """
             SELECT subject_id, object_id, w, layer_rank
-            FROM laplace.consensus_layer_plane(@vocab, @lo, @hi, @cap)
+            FROM generation.consensus_layer_plane(@vocab, @lo, @hi, @cap)
             """,
             static r => new LayerEdgeRow((byte[])r[0], (byte[])r[1], r.GetDouble(2), r.GetDouble(3)),
             p =>
@@ -83,7 +83,7 @@ public static class NpgsqlFoundryReads
         CancellationToken ct = default) =>
         NpgsqlRead.ReadRowsAsync(ds, """
             SELECT subject_id, object_id, w, layer_rank
-            FROM laplace.consensus_layer_plane_masked(@vocab, @mask, @cap)
+            FROM generation.consensus_layer_plane_masked(@vocab, @mask, @cap)
             """,
             static r => new LayerEdgeRow((byte[])r[0], (byte[])r[1], r.GetDouble(2), r.GetDouble(3)),
             p =>
@@ -98,7 +98,7 @@ public static class NpgsqlFoundryReads
         CancellationToken ct = default) =>
         NpgsqlRead.ReadRowsAsync(ds, """
             SELECT subject_id, object_id, w, type_id, layer_rank
-            FROM laplace.consensus_type_plane(@vocab, @cap, @types)
+            FROM generation.consensus_type_plane(@vocab, @cap, @types)
             """,
             static r => new TypePlaneEdgeRow(
                 (byte[])r[0], (byte[])r[1], r.GetDouble(2), (byte[])r[3], r.GetDouble(4)),
@@ -112,7 +112,7 @@ public static class NpgsqlFoundryReads
     public static Task<IReadOnlyList<WeightedEdgeRow>> ConsensusAdjacencyAsync(
         NpgsqlDataSource ds, byte[][] vocab, int degreeCap, CancellationToken ct = default) =>
         NpgsqlRead.ReadRowsAsync(ds, """
-            SELECT subject_id, object_id, w FROM laplace.consensus_adjacency(@vocab, @cap)
+            SELECT subject_id, object_id, w FROM generation.consensus_adjacency(@vocab, @cap)
             """,
             static r => new WeightedEdgeRow((byte[])r[0], (byte[])r[1], r.GetDouble(2)),
             p =>
@@ -125,7 +125,7 @@ public static class NpgsqlFoundryReads
         NpgsqlDataSource ds, byte[][] vocab, string metric, int k, int probe,
         CancellationToken ct = default) =>
         NpgsqlRead.ReadRowsAsync(ds, """
-            SELECT subject_id, object_id, w FROM laplace.metric_edges(@vocab, @metric, @k, @probe)
+            SELECT subject_id, object_id, w FROM generation.metric_edges(@vocab, @metric, @k, @probe)
             """,
             static r => new WeightedEdgeRow((byte[])r[0], (byte[])r[1], r.GetDouble(2)),
             p =>
@@ -149,7 +149,7 @@ public static class NpgsqlFoundryReads
     public static Task<IReadOnlyList<EntityHilbertKey>> EntityHilbertKeysAsync(
         NpgsqlDataSource ds, byte[][] vocab, CancellationToken ct = default) =>
         NpgsqlRead.ReadRowsAsync(ds, """
-            SELECT entity_id, hilbert_index FROM laplace.entity_hilbert_keys(@vocab)
+            SELECT entity_id, hilbert_index FROM generation.entity_hilbert_keys(@vocab)
             """,
             static r => new EntityHilbertKey(
                 (byte[])r[0], Hilbert128.FromBytes((byte[])r[1])),
@@ -173,7 +173,7 @@ public static class NpgsqlFoundryReads
     public static Task<IReadOnlyList<WeightedEdgeRow>> GraphemeOrderAsync(
         NpgsqlDataSource ds, byte[][] vocab, int limit, CancellationToken ct = default) =>
         NpgsqlRead.ReadRowsAsync(ds, """
-            SELECT subject_id, object_id, w FROM laplace.grapheme_order(@vocab, 50000, @limit)
+            SELECT subject_id, object_id, w FROM generation.grapheme_order(@vocab, 50000, @limit)
             """,
             static r => new WeightedEdgeRow((byte[])r[0], (byte[])r[1], r.GetDouble(2)),
             p =>
@@ -186,7 +186,7 @@ public static class NpgsqlFoundryReads
         NpgsqlDataSource ds, byte[][] vocab, int trajs, int gap,
         CancellationToken ct = default, int timeoutSeconds = 0) =>
         NpgsqlRead.ReadRowsAsync(ds, """
-            SELECT subject_id, object_id, w FROM laplace.word_order(@vocab, @trajs, @gap)
+            SELECT subject_id, object_id, w FROM generation.word_order(@vocab, @trajs, @gap)
             """,
             static r => new WeightedEdgeRow((byte[])r[0], (byte[])r[1], r.GetDouble(2)),
             p =>
@@ -203,7 +203,7 @@ public static class NpgsqlFoundryReads
         CancellationToken ct = default) =>
         NpgsqlRead.ReadRowsAsync(ds, """
             SELECT subject_id, object_id, w
-            FROM laplace.continuation_conditional_plane(@vocab, @trajs, @smooth, @cap)
+            FROM generation.continuation_conditional_plane(@vocab, @trajs, @smooth, @cap)
             """,
             static r => new ConditionalEdgeRow(
                 (byte[])r[0], r.IsDBNull(1) ? null : (byte[])r[1], r.GetDouble(2)),
@@ -230,14 +230,14 @@ public static class NpgsqlFoundryReads
     public static Task<object?> HighwayMaskRefreshAsync(
         NpgsqlConnection conn, byte[][] vocab, CancellationToken ct = default) =>
         NpgsqlRead.ExecuteScalarAsync<object>(conn, """
-            SELECT laplace.highway_mask_refresh(@vocab)
+            SELECT consensus.highway_mask_refresh(@vocab)
             """,
             p => p.Add(ByteaArray("vocab", vocab)), ct: ct, label: "highway_mask_refresh");
 
     public static Task<IReadOnlyList<PosRow>> VocabDominantPosAsync(
         NpgsqlDataSource ds, byte[][] vocab, CancellationToken ct = default) =>
         NpgsqlRead.ReadRowsAsync(ds, """
-            SELECT word_id, pos_id FROM laplace.vocab_dominant_pos(@vocab)
+            SELECT word_id, pos_id FROM generation.vocab_dominant_pos(@vocab)
             """,
             static r => new PosRow((byte[])r[0], (byte[])r[1]),
             p => p.Add(ByteaArray("vocab", vocab)),
@@ -246,7 +246,7 @@ public static class NpgsqlFoundryReads
     public static Task<IReadOnlyList<WeightedEdgeRow>> PosClassTransitionsAsync(
         NpgsqlDataSource ds, byte[][] vocab, CancellationToken ct = default) =>
         NpgsqlRead.ReadRowsAsync(ds, """
-            SELECT subject_id, object_id, w FROM laplace.pos_class_transitions(@vocab)
+            SELECT subject_id, object_id, w FROM generation.pos_class_transitions(@vocab)
             """,
             static r => new WeightedEdgeRow((byte[])r[0], (byte[])r[1], r.GetDouble(2)),
             p => p.Add(ByteaArray("vocab", vocab)),
@@ -255,7 +255,7 @@ public static class NpgsqlFoundryReads
     public static Task<IReadOnlyList<WeightedEdgeRow>> SentenceOrderWordBridgeAsync(
         NpgsqlDataSource ds, byte[][] vocab, int degreeCap, CancellationToken ct = default) =>
         NpgsqlRead.ReadRowsAsync(ds, """
-            SELECT subject_id, object_id, w FROM laplace.sentence_order_word_bridge(@vocab, @cap)
+            SELECT subject_id, object_id, w FROM generation.sentence_order_word_bridge(@vocab, @cap)
             """,
             static r => new WeightedEdgeRow((byte[])r[0], (byte[])r[1], r.GetDouble(2)),
             p =>
@@ -267,7 +267,7 @@ public static class NpgsqlFoundryReads
     public static Task<IReadOnlyList<HighwayMaskRow>> EntityHighwayMasksAsync(
         NpgsqlDataSource ds, byte[][] vocab, CancellationToken ct = default) =>
         NpgsqlRead.ReadRowsAsync(ds, """
-            SELECT entity_id, highway_mask FROM laplace.entity_highway_masks(@vocab)
+            SELECT entity_id, highway_mask FROM generation.entity_highway_masks(@vocab)
             """,
             static r => new HighwayMaskRow((byte[])r[0], (byte[])r[1]),
             p => p.Add(ByteaArray("vocab", vocab)),
@@ -276,7 +276,7 @@ public static class NpgsqlFoundryReads
     public static Task<IReadOnlyList<SurfaceWeightRow>> GraphemeFloorVocabAsync(
         NpgsqlDataSource ds, int vocabN, CancellationToken ct = default) =>
         NpgsqlRead.ReadRowsAsync(ds, """
-            SELECT surface, weight FROM laplace.grapheme_floor_vocab(@n)
+            SELECT surface, weight FROM generation.grapheme_floor_vocab(@n)
             """,
             static r => new SurfaceWeightRow(r.GetString(0), r.GetInt64(1)),
             p => p.AddWithValue("n", vocabN),
@@ -285,7 +285,7 @@ public static class NpgsqlFoundryReads
     public static Task<IReadOnlyList<string>> CorpusWordVocabAsync(
         NpgsqlDataSource ds, int seedN, int wordTrajs, CancellationToken ct = default) =>
         NpgsqlRead.ReadRowsAsync(ds, """
-            SELECT surface FROM laplace.corpus_word_vocab(@n, @trajs)
+            SELECT surface FROM generation.corpus_word_vocab(@n, @trajs)
             """,
             static r => r.GetString(0),
             p =>
@@ -298,7 +298,7 @@ public static class NpgsqlFoundryReads
         NpgsqlDataSource ds, string[] seeds, int vocabN, int hops, int fanout,
         CancellationToken ct = default) =>
         NpgsqlRead.ReadRowsAsync(ds, """
-            SELECT surface, weight FROM laplace.foundry_vocab_crawl(@seeds, @n, @hops, @fanout)
+            SELECT surface, weight FROM generation.foundry_vocab_crawl(@seeds, @n, @hops, @fanout)
             """,
             static r => new SurfaceWeightRow(r.GetString(0), r.GetInt64(1)),
             p =>
@@ -351,7 +351,7 @@ public static class NpgsqlFoundryReads
             $"decode('{Convert.ToHexString(id)}','hex')"));
         return
             "CREATE TEMP TABLE IF NOT EXISTS consensus AS " +
-            $"SELECT * FROM laplace.scoped_consensus(ARRAY[{arr}]::bytea[]); " +
+            $"SELECT * FROM consensus.scoped_consensus(ARRAY[{arr}]::bytea[]); " +
             "CREATE INDEX IF NOT EXISTS scoped_consensus_subject ON pg_temp.consensus (subject_id)";
     }
 
@@ -387,7 +387,7 @@ public static class NpgsqlFoundryReads
 
     public readonly record struct AttributeOutRow(byte[] SubjectId, byte[] NeighbourId, double W);
 
-    /// <summary>Outbound attribute edges via edges_raw (walk_edge_weight, clamped ≥ 0).</summary>
+    /// <summary>Outbound attribute edges via consensus.edges_raw(walk_edge_weight, clamped ≥ 0).</summary>
     public static Task<IReadOnlyList<AttributeOutRow>> AttributeOutboundAsync(
         NpgsqlDataSource ds, string relationType, byte[][] vocab, int degreeCap,
         CancellationToken ct = default) =>
@@ -395,7 +395,7 @@ public static class NpgsqlFoundryReads
             SELECT v.id, e.neighbour_id,
                    GREATEST(laplace.walk_edge_weight(e.rating, e.rd, e.witness_count), 0) AS w
             FROM unnest(@vocab) AS v(id)
-            CROSS JOIN LATERAL laplace.edges_raw(
+            CROSS JOIN LATERAL consensus.edges_raw(
               v.id, 'out', ARRAY[laplace.relation_type_id(@rel)],
               GREATEST(@cap, 16), true, 'eff_mu') e
             """,

@@ -21,10 +21,10 @@ PG_FUNCTION_INFO_V1(pg_laplace_astar_path);
 #define ASTAR_PI 3.14159265358979323846
 
 static const char *Q_UNDIRECTED =
-    "SELECT nbr, rating, rd, witness_count FROM laplace.consensus_neighbors_undirected($1, $2, $3)";
+    "SELECT nbr, rating, rd, witness_count FROM consensus.neighbors_undirected($1, $2, $3)";
 
 static const char *Q_DIRECTED =
-    "SELECT nbr, rating, rd, witness_count FROM laplace.consensus_neighbors_directed($1, $2, $3)";
+    "SELECT nbr, rating, rd, witness_count FROM consensus.neighbors_directed($1, $2, $3)";
 
 /* Single-key coordinate lookup, same ensure_*_plan cached-plan idiom as
  * containers_of.c and generate_walk.c's ordinal-continuity probe. Used only

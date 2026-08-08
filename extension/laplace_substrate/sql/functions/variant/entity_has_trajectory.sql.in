@@ -1,4 +1,5 @@
-CREATE OR REPLACE FUNCTION entity_has_trajectory(p_entity bytea)
+DROP FUNCTION IF EXISTS laplace.entity_has_trajectory(bytea);
+CREATE OR REPLACE FUNCTION generation.entity_has_trajectory(p_entity bytea)
     RETURNS boolean
     LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$
     SELECT EXISTS (

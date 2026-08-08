@@ -5,7 +5,7 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 
 /// <summary>
 /// ISA gate G5 — shape parity
-/// (<c>docs/specs/37_Substrate_Operation_ISA.md</c> §7: <i>"query_shapes(), the C dispatch,
+/// (<c>docs/specs/37_Substrate_Operation_ISA.md</c> §7: <i>"converse.query_shapes(), the C dispatch,
 /// and the client menu are not all generated from the §3 table"</i>; plan
 /// <c>docs/plan/W6_Architecture_Gates.md</c> §3/§8.3).
 ///
@@ -26,7 +26,7 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 ///   <item><c>src/recall.c</c> <c>kSingleArgIntents[]</c> — the uniform single-argument
 ///     responders. A SUBSET, so it is gated as a subset, not as equality.</item>
 ///   <item><c>src/recall.c</c> two <c>errhint</c>s — the only correct way for C to name
-///     the vocabulary: point at <c>query_shapes()</c> rather than list it a third
+///     the vocabulary: point at <c>converse.query_shapes()</c> rather than list it a third
 ///     time.</item>
 ///   <item><c>Laplace.Endpoints.Mcp/SubstrateTools.cs</c> — the client menu, as English
 ///     prose. Both the shape list AND the three requirement clauses are derived from the
@@ -71,7 +71,10 @@ public sealed class ShapeParityGateTests
     /// not silently stop being checked — the anchor missing is itself a failure.
     /// </summary>
     private static readonly Regex McpShapeMenu = new(
-        @"names the SHAPE\s*[—-]\s*(?<list>[a-z_,\s]+?)\s*\(SELECT \* FROM laplace\.query_shapes\(\)",
+        // Purpose-schema rename: converse.query_shapes() is the live catalog
+        // (laplace.query_shapes is gone). Accept either spelling so an old
+        // comment cannot green a drifted menu.
+        @"names the SHAPE\s*[—-]\s*(?<list>[a-z_,\s]+?)\s*\(SELECT \* FROM (?:laplace|converse)\.query_shapes\(\)",
         RegexOptions.Compiled);
 
     private static readonly Regex McpNeedsType = new(
@@ -81,7 +84,7 @@ public sealed class ShapeParityGateTests
     private static readonly Regex McpAcceptsLang = new(
         @"(?<shapes>[a-z_/]+) accepts lang", RegexOptions.Compiled);
 
-    /// <summary>Shape-name literals in <c>chat()</c>'s branch conditions.</summary>
+    /// <summary>Shape-name literals in <c>converse.chat()</c>'s branch conditions.</summary>
     private static readonly Regex ChatShapeLiteral = new(
         @"\bshape\s+(?:NOT\s+)?IN\s*\((?<list>[^)]*)\)|\bshape\s*=\s*'(?<one>[a-z_]+)'",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
@@ -145,7 +148,7 @@ public sealed class ShapeParityGateTests
         var m = McpShapeMenu.Match(Read(McpToolsPath));
         Assert.True(m.Success,
             $"{McpToolsPath} no longer publishes a shape menu in the form this gate reads "
-            + "(\"names the SHAPE — <list> (SELECT * FROM laplace.query_shapes()\"). Either "
+            + "(\"names the SHAPE — <list> (SELECT * FROM converse.query_shapes()\"). Either "
             + "restore it or re-anchor the gate — do not leave the menu unpinned.");
         var actual = m.Groups["list"].Value
             .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
@@ -192,7 +195,7 @@ public sealed class ShapeParityGateTests
             $"kSingleArgIntents[] in {RecallPath}");
         var unknown = singleArg.Where(s => !catalog.Contains(s)).ToList();
         Assert.True(unknown.Count == 0,
-            "kSingleArgIntents names shapes query_shapes() does not publish, so recall_intent "
+            "kSingleArgIntents names shapes converse.query_shapes() does not publish, so recall_intent "
             + "rejects them before the responder is ever reached:\n  " + string.Join("\n  ", unknown));
     }
 
@@ -205,12 +208,12 @@ public sealed class ShapeParityGateTests
     public void ShapeParity_UnknownShapeErrorsPointAtTheCatalog()
     {
         var recall = Read(RecallPath);
-        const string hint = "errhint(\"SELECT shape FROM laplace.query_shapes()\")";
+        const string hint = "errhint(\"SELECT shape FROM converse.query_shapes()\")";
         Assert.Equal(2, Regex.Matches(recall, Regex.Escape(hint)).Count);
     }
 
     /// <summary>
-    /// The default intent must be a published shape. <c>recall()</c> with no explicit shape
+    /// The default intent must be a published shape. <c>converse.recall()</c> with no explicit shape
     /// routes through <c>ROUTE_DEFAULT_INTENT</c>, so a default that fell out of the catalog
     /// would break the bare-prompt path and nothing else would say so.
     /// </summary>
@@ -223,7 +226,7 @@ public sealed class ShapeParityGateTests
     }
 
     /// <summary>
-    /// The sixth site W6 does not count: <c>chat()</c> branches on shape name literals.
+    /// The sixth site W6 does not count: <c>converse.chat()</c> branches on shape name literals.
     /// Subset, because chat deliberately special-cases only some shapes and delegates the
     /// rest to <c>recall_intent</c>.
     /// </summary>
@@ -242,11 +245,11 @@ public sealed class ShapeParityGateTests
         }
 
         Assert.True(literals.Count > 0,
-            $"no shape literals found in {ChatPath} — chat() stopped branching on shape "
+            $"no shape literals found in {ChatPath} — converse.chat() stopped branching on shape "
             + "names, or the parse broke. Either way this fact is measuring nothing.");
         var unknown = literals.Where(s => !catalog.Contains(s)).ToList();
         Assert.True(unknown.Count == 0,
-            "chat() branches on shape names query_shapes() does not publish:\n  "
+            "converse.chat() branches on shape names converse.query_shapes() does not publish:\n  "
             + string.Join("\n  ", unknown));
     }
 }

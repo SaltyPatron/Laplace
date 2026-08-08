@@ -4,13 +4,14 @@
 -- substrate never guesses either from the surface form of a question. This is
 -- what replaced parse_ask() and the English pattern ladder behind it.
 --
---   p_intent       one of laplace.query_shapes().shape
---   p_topic        subject id (laplace.resolve_ref accepts a word or an id hex)
+--   p_intent       one of converse.query_shapes().shape
+--   p_topic        subject id (converse.resolve_ref accepts a word or an id hex)
 --   p_topic2       object id, for the two-topic shapes (is_a, reason)
 --   p_type_name    canonical relation type, for the related / related_in shapes
 --   p_lang         target language, for the translate shape
 --   p_context_ids  other resolved ids, used to disambiguate a sense
-CREATE OR REPLACE FUNCTION recall_intent(
+DROP FUNCTION IF EXISTS laplace.recall_intent(text, bytea, bytea, text, text, bytea[]);
+CREATE OR REPLACE FUNCTION converse.recall_intent(
         p_intent text,
         p_topic bytea,
         p_topic2 bytea DEFAULT NULL,

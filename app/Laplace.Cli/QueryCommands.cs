@@ -104,7 +104,7 @@ internal static class QueryCommands
         }
         if (!any) Console.WriteLine("  (the substrate holds no answer to this yet)");
 
-        Console.WriteLine("── gaps (unwitnessed arenas — the research agenda) ──");
+        Console.WriteLine("── consensus.gaps(unwitnessed arenas — the research agenda) ──");
         var gaps = (await NpgsqlSubstrateReads.GapsForPromptAsync(conn, goal, default))
             .Where(g => g.Length > 0).ToList();
         Console.WriteLine(gaps.Count > 0
@@ -224,11 +224,11 @@ internal static class QueryCommands
         await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
         await using var conn = await ds.OpenConnectionAsync();
 
-        // chat() IS THE ENTRY POINT. This command used to call laplace.walk_text()
+        // converse.chat() IS THE ENTRY POINT. This command used to call generation.walk_text()
         // directly with four hardcoded knobs (steps 48, order 5, temp 0.6, topk 8),
         // which made the CLI a SIBLING entry point to the forward pass rather than a
         // caller of it — the one thing CLAUDE.md and spec 36 forbid outright:
-        // "chat() is the only conversational entry point and runs the full ladder;
+        // "converse.chat() is the only conversational entry point and runs the full ladder;
         // converse, converse_about, converse_walk, converse_facts are internal
         // STAGES of it, never sibling entry points."
         //

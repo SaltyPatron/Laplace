@@ -71,7 +71,7 @@ public sealed class ReadPathArchitectureGateTests
     /// MAY ONLY SHRINK.
     ///
     /// 2026-08-01: drained via <c>NpgsqlConsensusByIds</c> (the Chess
-    /// consensus_by_ids($1,$2) block, hand-copied in LearnedPst/SubstrateRootBias/
+    /// consensus.by_ids($1,$2) block, hand-copied in LearnedPst/SubstrateRootBias/
     /// SubstrateStateValuer/SubstrateTurnHost) and <c>NpgsqlSubstrateReads</c> (mesh_
     /// position/taxonomy_tree/band_leaders/entity_record/salient_facts/contrast/
     /// relation_summary/source_roster/modality_counts/substrate_pulse, which retired

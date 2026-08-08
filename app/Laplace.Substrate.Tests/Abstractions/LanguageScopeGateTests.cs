@@ -10,8 +10,8 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 /// The defect this exists to prevent, measured 2026-08-05: nine monolingual English
 /// sources — WordNet, FrameNet, PropBank, VerbNet, SemLink, WordFrameNet,
 /// PredicateMatrix among them — deposited no HAS_LANGUAGE edge at all. WordNet is the
-/// one that mattered: it supplies senses(), so every English sense in the substrate read
-/// back as language-UNATTESTED, and word_language() existed to infer at read time a fact
+/// one that mattered: it supplies lexical.senses(), so every English sense in the substrate read
+/// back as language-UNATTESTED, and converse.word_language() existed to infer at read time a fact
 /// the source states for free.
 ///
 /// Nothing caught it. A missing attestation is invisible by construction — there is no
@@ -51,7 +51,7 @@ public sealed class LanguageScopeGateTests
     {
         var scoped = ScopedSources().Select(s => s.Name).ToHashSet(StringComparer.Ordinal);
 
-        // WordNet is the load-bearing one: it is what senses() reads.
+        // WordNet is the load-bearing one: it is what lexical.senses() reads.
         Assert.Contains("WordNetDecomposer", scoped);
 
         // Guard against the regex/manifest silently matching nothing, which would turn

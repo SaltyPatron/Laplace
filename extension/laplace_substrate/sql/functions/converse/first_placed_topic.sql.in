@@ -1,6 +1,5 @@
 -- converse.first_placed_topic — GH #862 / #860. No SET, real schema names.
 DROP FUNCTION IF EXISTS laplace.first_placed_topic(text);
-
 CREATE OR REPLACE FUNCTION converse.first_placed_topic(p_text text)
     RETURNS bytea
     LANGUAGE sql LAPLACE_STABLE_STRICT AS $$

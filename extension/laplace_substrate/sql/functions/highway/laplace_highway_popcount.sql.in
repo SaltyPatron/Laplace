@@ -2,7 +2,8 @@
 -- SQL body implemented POPCNT as get_byte -> bit(8)::text -> replace ->
 -- length inside a generate_series loop; this is hardware popcount over
 -- uint64 chunks. NULL returns 0 (matches the old COALESCE).
-CREATE OR REPLACE FUNCTION laplace_highway_popcount(mask bytea)
+DROP VIEW IF EXISTS laplace.v_entities_highway;
+CREATE OR REPLACE FUNCTION laplace.laplace_highway_popcount(mask bytea)
     RETURNS integer
     AS 'MODULE_PATHNAME', 'pg_laplace_highway_popcount'
     LANGUAGE C IMMUTABLE;
