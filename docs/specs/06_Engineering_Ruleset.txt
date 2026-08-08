@@ -1,243 +1,108 @@
-ENGINEERING RULESET — how the substrate must be built and touched
-====================================================================
-Companion to 05_Substrate_Invariants.txt (which is "what must be true about the data/model").
-This doc is process: how code that touches the substrate must be written, grounded in real
-defects found and fixed this session, plus a full-codebase function-surface survey (2026-07-01,
-264 SQL function files / ~305 total functions+views across the extension).
+ENGINEERING RULESET
+===================
 
-Rule #1: SQL/C# orchestrate; native C/C++/SPI does the heavy lifting.
-    - RBAR, per-row correlated subqueries, and CTE-chained logic belong in native code with
-      explicit sequenced SPI calls and bound parameters — not raw SQL switch/if trees.
-    - Grounded in: define_fast/word_shape_peers_fast native rewrites of the define()/senses()/
-      lexical_peers()/word_shape_peers() SQL chain — recall() went 48.7s -> ~470ms (~100x).
+This file is normative. GitHub owns work status; archived reports own historical
+measurements. The rules below describe the implementation shape that must remain true.
 
-Rule #2: There are TWO inliners with DIFFERENT disqualifier lists. Which one applies depends on
-whether the function RETURNS SETOF/TABLE. Read the right list before concluding a body cannot
-inline.
-    [AMENDED 2026-08-04 — verified against the vendored source, not against documentation:
-     external/postgresql/src/backend/optimizer/util/clauses.c. The prior text of this rule
-     ("a body containing a CTE can never be inlined, regardless of STABLE/PARALLEL SAFE")
-     is TRUE for the scalar inliner and FALSE for the set-returning one. It cited
-     "Postgres's own inlining documentation" — that documentation describes the scalar
-     path. The "45+ CTE-bearing function files blocking inlining" survey below inherits
-     the error: any of those files declared RETURNS SETOF/TABLE is NOT blocked by its CTE.]
+Rule #1 — Managed and SQL layers orchestrate; native code computes
+------------------------------------------------------------------
 
-    (a) SCALAR — inline_function(), clauses.c. Body must be a single simple SELECT expression:
-        NO CTEs, NO FROM, NO subqueries, NO aggregates or window functions, NO GROUP BY /
-        HAVING / ORDER BY / DISTINCT / LIMIT / OFFSET / UNION / INTERSECT / EXCEPT, exactly
-        one output column. Plus: not SECURITY DEFINER, no SET clause, RETURNS neither SETOF
-        nor RECORD, volatility consistent, STRICT only if every construct is STRICT.
+C# and SQL own lifecycle, transactions, binding, and composition of operations. Native
+C/C++ owns byte-level codecs, geometry, hashing, ranking kernels, traversal, dense
+contractions, and other heavy loops. Moving a hot loop into a different orchestration
+syntax is not an optimization.
 
-    (b) SET-RETURNING — inline_set_returning_function(), clauses.c:5067. The COMPLETE bail-out
-        list, by line:
-          :5099    WITH ORDINALITY at the call site
-          :5103    more than one function in ROWS FROM
-          :5118    !funcretset
-          :5130-32 volatile functions or sub-selects IN THE ARGUMENTS (not the body)
-          :5139    a plugin hooks function entry/exit
-          :5160-68 prolang != SQL | prokind | proisstrict | provolatile == VOLATILE |
-                   returns VOID | prosecdef | !proretset | arg-count mismatch |
-                   proconfig IS NOT NULL   <-- THIS IS THE `SET` CLAUSE CHECK
-          :5241/48 more than one statement
-          :5272-74 commandType != CMD_SELECT ("The single command must be a plain SELECT")
-          :5289-96 composite result that is not a whole-tuple result
-        There is NO check of cteList, sortClause, limitCount, distinctClause, groupClause,
-        havingQual, setOperations, hasAggs, hasWindowFuncs, or hasSubLinks-in-the-body.
-        CTEs, ORDER BY, LIMIT, aggregates and UNION do NOT block set-returning inlining.
+Rule #2 — Preserve planner-visible SQL
+--------------------------------------
 
-    - Consequences that are easy to get backwards:
-        * `SET search_path` blocks BOTH paths (scalar: explicit; SRF: via proconfig).
-          Removing it from a RETURNS TABLE body with CTEs and ORDER BY DOES make it
-          inlinable. GH #860.
-        * STRICT and VOLATILE each kill the set-returning path outright and are absent
-          from most discussions of this, including earlier versions of this rule.
-        * A CTE-bearing scalar function still cannot inline. Move it to native C or make
-          it RETURNS TABLE if the caller shape allows.
-    - Verify with EXPLAIN, per Rule #4's discipline. "Function Scan on f" means the planner
-      could not see through f — but attributing that to the wrong disqualifier sends the fix
-      at the wrong file.
+SQL intended for inlining must satisfy the applicable PostgreSQL inliner contract.
+KNN comparison points reach the planner as bound parameters. `STRICT`, function-local
+`SET`, procedural bodies, blocking CTEs, and wrappers are evaluated by measurement and
+`EXPLAIN`, not assumption.
 
-Rule #3: Reduce result volume as early as possible in the query sequence; avoid cartesians.
-    - Pre-filter on the most selective predicate before joining/computing on broad, low-
-      selectivity columns. Grounded in: word_shape_peers's original cost was pre-joining on
-      type_id (matches most of the vocabulary, not selective) before the KNN window narrowed
-      anything — moving type_id to a post-filter on a bounded KNN result fixed it.
+Rule #3 — Reduce before expanding
+---------------------------------
 
-Rule #4: A GiST KNN `ORDER BY coord <<->> point LIMIT k` comparison point must be a genuine
-bound parameter or literal.
-    - A value derived from a correlated CTE reference (e.g. `me.coord` from an outer CTE) is
-      NOT eligible for index-ordered KNN scanning and silently falls back to a full hash-join
-      + sort — no error, no warning, just a query that's 100x slower with no visible cause.
-      This was the dominant root cause of the original 48s recall() query.
-    - Verify index usage via EXPLAIN; never assume a KNN-shaped query is actually using the
-      KNN index just because the operator is present in the SQL text.
+Apply indexed identity, relation, source, context, and band constraints before fan-out.
+Do not create cartesian candidates and repair them with a final `LIMIT`. Result limits
+require a ranking produced by the evidence model.
 
-Rule #5: Batch, don't RBAR.
-    - Compute/dedupe in bulk (client-side, or via `unnest(...) WITH ORDINALITY` array-based
-      SPI batching), then write pure records once. No per-row correlated subquery re-executed
-      per output row (senses_with_context.sql.in's pre-fix pattern was exactly this — fixed
-      via two set-based CTEs with GROUP BY). No per-candidate SPI round trip as the default
-      shape when a single array-based query will do.
-    - Caveat, also grounded in measurement: batching isn't free lunch by itself — batching
-      word_shape_peers_fast's per-candidate geometric checks into array queries barely moved
-      timing (461ms vs 482ms) once the real bottleneck (Rule #4) was already fixed. Don't
-      batch as a reflex; profile first, confirm the batch actually removes the dominant cost.
+Rule #4 — Query the installed typed surface
+--------------------------------------------
 
-Rule #6: No duplicate/overlapping logic without a documented reason it isn't consolidated.
-    - Survey found four wrappers around the same "get a definition" semantic (define(),
-      define_fast(), recall_define_response(), recall_fallback_gloss()), and the
-      `NOT refuted()` consensus-filter predicate reimplemented inline across 20+ functions
-      instead of a shared view/helper. Every reimplementation is a place the OR-bug class
-      (Rule #1 in 05_Substrate_Invariants.txt) or a future correctness fix can silently miss
-      one of the copies.
-    - This is the concrete first target for the "foundational set of functions/views" ask:
-      a shared view layer that every consumer joins against instead of re-deriving.
-      STATUS UPDATE (2026-08-01): v_consensus_unrefuted remains; v_word_points,
-      word_anchor(), v_word_senses, and v_attestation_readable are BUILT and registered
-      in manifest.install / manifest.upgrade. Call sites migrate onto v_word_points /
-      word_anchor instead of hand-rolling entities⋈physicalities type=1. Remaining:
-      finish migrating every type=1 inliner; drain remaining NOT-refuted / define wrappers;
-      shrink HandWrittenSqlAllowlist onto NpgsqlRead / edges(). Tracker: GitHub #463.
+Use `api('<substring>')` to discover installed operations before writing SQL against
+substrate tables. Prefer canonical helpers and `_approx` operational reads when exact
+counts are unnecessary. Validate schema claims against installed DDL/functions and
+performance claims against representative degree and seed profiles.
 
-Rule #7: `_fast` is the established suffix for a native-C replacement of a CTE-blocked SQL
-chain (define_fast, word_shape_peers_fast). Keep using it — don't invent `_v2`/`_native`/etc.
-variants that break the greppable pattern.
+Rule #5 — Batch instead of row-by-row calls
+-------------------------------------------
 
-Rule #8: The canonical ingest pipeline is a SEQUENCE, not a set of components (author spec,
-2026-07-02, stated during the OMW 20x-slowdown discussion). Having the right algorithm at the
-wrong point in the sequence is a violation even if the algorithm itself is correct.
-    1. Tree-sitter unpacks the packaging (raw file format) -> raw content. Nothing more.
-    2. Decomposer turns raw content into substrate records. Client-side, once.
-    3. Client-side dedup across the ENTIRE working set (hash-identical records merge in
-       memory -- content addressing makes this a dictionary, not a query).
-    4. Glicko-2 matchups accumulate CLIENT-SIDE across the set (same native glicko2.c math
-       already P/Invoked; only the merge with prior DB state needs a read, and that is ONE
-       bulk read of touched edge ids).
-    5. ONE trunk->tier descent across the whole working set -- O(tiers) round trips per
-       ingest, each a bulk set-membership probe, present nodes pruning their subtrees.
-       This descent is the write protocol's novelty proof — mandatory, not optional,
-       and not something step 6's apply-side probe substitutes for. Lives in
-       IngestDescentFlush.FinalizePendingAsync -> BulkDescent ->
-       TierTreeDescent.ProbeBatchEmitBitmapsAsync (ContentTierSpine).
-    6. The descent output is the write list: rows step 5 has already proven novel.
-       Writes are pure bulk raw-binary COPY of the client-deduped rows straight into
-       entities -> physicalities -> attestations (NpgsqlWorkingSetApply.cs). No TEMP
-       staging tables. No ON CONFLICT on a table landing — the only ON CONFLICT in the
-       apply path is the ingest_flush_journal idempotency-token insert (DO NOTHING),
-       which guards apply-retry replay and has nothing to do with row presence.
-       Immediately before the COPY, in the same transaction, the apply runs its own
-       presence probe (entities_stored_bitmap / physicalities_exist_bitmap /
-       attestations_exist_bitmap) over the claimed-novel set and drops any row the
-       probe finds already present; a present attestation is not dropped but merged
-       (attestation_merge, additive observation-count fold — dropping counts drops
-       testimony). This probe is NOT a second novelty proof and does not replace step
-       5's descent: it is a concurrent-overlap check, closing the one window step 5
-       cannot see across — step 5's descent runs unlocked, and a second ingest can
-       commit a subtree between that descent and this apply's transaction. The probe
-       is flat over the whole claimed-novel set, not frontier-only. The client owns
-       DEDUP (one row per id per statement); the probe also owns PRESENCE inside the
-       apply transaction. See NpgsqlWorkingSetApply.cs's header for tier-0/structural
-       fast paths that let some ids skip the probe without weakening it.
-       [SUPERSEDED: 2026-07-18 ca1148f amended this step to TEMP staging + INSERT ..
-       ON CONFLICT per table (measured old probe at 37-53 min/apply cache-cold).
-       2026-07-19 da69225 reverted to probe-then-COPY. Treat ON CONFLICT-on-landing
-       as attempted-and-reverted, not a default restore target — re-attempt needs
-       fresh measurement against today's probe mitigations.]
-    STATUS RE-BASELINE (2026-08-01, verified against source): write-protocol spine is
-    IngestBatchPipeline → ConsensusAccumulatingWriter → IngestDescentFlush/TierTreeDescent
-    → NpgsqlWorkingSetApply (concurrent-overlap probe + pure binary COPY). Step 5's
-    O(tiers) bulk descent is LANDED (the 2026-07-05 baseline listed it as open; closed).
-    apply_batch.c remains DELETED. There is NO NpgsqlConsensusFold class — that name
-    never shipped; read ghosts as ConsensusAccumulatingWriter. Remaining Rule #8 gaps:
-    (a) apply of set N overlapping compose of N+1 (apply-bound at chess scale);
-    (b) adapter-lane unification onto one spine (.scratchpad/13 Phase 1 / Issue 45).
+Resolve, realize, score, and write in bounded batches. Aggregate ids first, then call
+batch/native operations. Per-row set-returning functions, repeated name resolution,
+string rendering, and managed/native crossings are defects on scalable paths.
 
-Rule #9: The CLI is a server workload — it runs with Server GC (DOTNET_gcServer=1 +
-DOTNET_GCHeapCount=8 in env.cmd, guarded). Grounded in: parallel chess compose measured
-1.9 GB/s allocation with 73 gen0 + 29 gen1 collections/s and 16% of wall time paused under
-the workstation-GC default; Server GC took it to 2.4/1.6 collections/s, 6% pause, and
-+70% throughput (Issue 40). Any new entry point that composes in parallel must inherit
-env.cmd or set these itself.
+Rule #6 — One implementation per fact
+-------------------------------------
 
-Rule #10: Parallel pipeline stages communicate through BOUNDED channels only. An unbounded
-channel between a fast producer and a slow consumer is a memory leak with extra steps
-(Issue 41: fully-staged SubstrateChanges piled into RAM until the box hit 0.5 GB free).
-Backpressure is the design, not a failure mode: a blocked worker during apply is correct.
+Identity, relation resolution, ranking, rendering, traversal, folding, and realization
+each have one canonical implementation. A second body requires a documented semantic
+or performance reason and parity tests. Compatibility wrappers delegate; they do not
+reimplement.
 
-Rule #11: Diagnose parallel-lane performance with independent evidence — per-thread CPU,
-stack dumps, runtime counters — never with pipeline-internal rates. In a backpressured
-pipeline the producer rate equals the consumer rate by construction, so "the feeder is at
-X/s and compose is at X/s" identifies nothing. And a machine-wide symptom (high CPU + flat
-throughput + even per-thread busyness) fits GC storms, paging, and lock convoys equally —
-counters distinguish them in one 15s sample; theories don't (Issues 40-42 were found only
-after three runs burned on plausible-but-wrong knob fixes).
+Rule #7 — Native replacements use explicit contracts
+----------------------------------------------------
 
-Rule #12: Sizing defaults derive from the machine, not constants. Working-set budget is
-phys/16 clamped [1,8] GiB (Issue 42 — a fixed 8 GiB OOM'd the 48 GB box while being
-correct on the 128 GB server); worker counts come from CpuTopology; MKL/TBB thread counts
-should come from the same topology resolution (currently a blanket 8 in env.cmd — only
-laplace_synthesis links MKL, engine/core does not, verified 2026-07-03).
+When a native operation replaces a SQL reference path, its name, input domain, output
+order, null/unknown behavior, score equation, and parity test are explicit. Suffixes
+such as `_fast` do not excuse semantic drift.
 
-Open items surfaced by the 2026-07-01 survey, not yet actioned:
-    - materialize_period_partition / materialize_period_partition_fresh differ only by whether
-      the LEFT JOIN reads prior consensus state — candidate to merge into one parameterized
-      function.
-      [Superseded 2026-07-20: MOOT — both functions are gone from the extension
-      (`SELECT count(*) FROM api('materialize')` = 0; no .sql.in defines either). The fold
-      lives in fold/consensus_upsert.sql.in and fold/scoped_consensus.sql.in. Nothing to merge.]
-    - Full audit for other instances of the Rule #1 (05_Substrate_Invariants.txt) OR-combined
-      order-sensitive/order-insensitive metric bug: survey did one pass, found no other
-      confirmed instance, but explicitly flagged this as not exhaustive.
-    - Shared view layer: STARTED, see Rule #6's 2026-07-05 status update (v_consensus_
-      unrefuted deployed; v_word_points/word_anchor/v_word_senses/v_attestation_readable built 2026-08-01).
+Rule #8 — Ingest is one ordered spine
+--------------------------------------
 
-================================================================================
-LESSONS THAT MUST NOT BE RELEARNED (promoted 2026-07-18 from the closed
-.scratchpad/02 tracker — these are law-grade operational facts, extracted from
-resolved sagas; each cites its origin issue)
-================================================================================
-L1  rc==0 is success in this codebase's native lookups. The rc==1-vs-0 misread has
-    THREE independent instances (Issue 35 + two repros). Wrap new native lookups in
-    boolean-shaped helpers.
-L2  A GiST KNN comparison point must reach the planner as a genuine bound parameter
-    (Rule #4). Three independent instances found; EXPLAIN before blaming PostGIS.
-L3  After ANY build reporting MSB3027 copy failures, the output tree is poisoned —
-    clean-rebuild before trusting binaries (Issue 38: AV in MoveGen was stale DLLs,
-    not chess bugs).
-L4  Extension DLLs statically import laplace_core_static.lib: extension freshness
-    does NOT imply engine freshness. build-extensions after ANY engine rebuild.
-    Split-hash-universe symptom: word_id() disagrees with seeded data — diagnose
-    with substrate_health()/api()/evidence vs seeded ids. Lexical helpers are
-    ordinary API, not a universal health or invention gate.
-L5  Never edit a .cmd while any invocation is executing (cmd.exe re-reads by byte
-    offset). Recycle PG backends only BETWEEN stages (57P01 kills the seed shell).
-L6  In a backpressured pipeline producer rate == consumer rate by construction —
-    only independent evidence (per-thread CPU, stacks, counters) locates a
-    bottleneck (Rule #11; three runs burned).
-L7  Batching isn't a reflex: profile the call site's TOTAL wall-time contribution,
-    not the isolated sub-call, before expecting an end-to-end win (Issue 32's SIMD
-    kernel: 96.5% of a 2.5ms sub-call inside an 80ms function).
-L8  cmd.exe `goto` into/out of parenthesized blocks is a real parser trap; framenet's
-    dispatch NEEDS the `call :run_ingest_impl` form (Issue 21 — the "cosmetic"
-    normalization of Issue 10 caused the failure it later got blamed for).
-L9  Duplicate content-addressed inserts mean "we agree", not "error" — prevention
-    (advisory lock) over retry (Issue 17); and never dispose caller-owned stages on
-    a failed apply the runner will retry (Issue 15's masker).
-L10 An index can be a landmine armed by a correctness fix: attestations_highway_hash
-    was empty (masks all NULL) for the project's whole history until Issue 35
-    populated masks and chain-walks made every write O(duplicates) (Issue 36).
-L11 Fixing a symptom without verifying the fix caused Issue 21 to be misfiled twice.
-    The verification ritual for ingest changes: isolated re-ingest → hash-identical
-    ids; forced re-run → 0 novel rows + exact observation-count doubling.
-L12 An expensive STABLE function in a filter is executed PER ROW — Postgres
-    constant-folds only IMMUTABLE. `= ANY(fn())` on an indexed column is safe
-    (the array becomes the index condition, forced one-shot); `<> ALL(fn())`
-    and plain WHERE-clause calls are not. A simple one-row subselect does NOT
-    fix it (pulled up and re-pushed); a MATERIALIZED CTE does. Grounded: Issue
-    47, 65.3s → 349ms. Related fence: SQL functions that fail inlining appear as
-    opaque Function Scans the planner cannot see through; chains of them compound.
-    [AMENDED 2026-08-04: this line used to read "(STRICT, ORDER BY, CTEs — Rule #2)",
-    which mixes the two inliners. ORDER BY and CTEs disqualify only the SCALAR path;
-    STRICT disqualifies both. For RETURNS SETOF/TABLE the disqualifiers are the
-    pg_proc properties plus "one plain SELECT" — see the amended Rule #2.]
-    (Standing candidate Rule #13.)
+The ingest sequence is:
+
+`unpack → records → working-set dedup → accumulation → bulk tier descent → apply/COPY → fold completion`
+
+Decomposers are pure content-to-`SubstrateChange` streams and contain no inline SQL.
+They declare every relation they emit. The shared spine owns batching, novelty proof,
+tier descent, COPY, attestation merge, consensus fold, and completion semantics. The
+right operation at the wrong stage violates this rule.
+
+Rule #9 — The CLI is a server workload
+--------------------------------------
+
+Long ingest/export commands use server GC, bounded memory, structured progress, and
+cancellation-safe journals. Summary output is not verification; each command has an
+independent acceptance read.
+
+Rule #10 — Parallel stages are bounded and deterministic
+--------------------------------------------------------
+
+Parallel producers communicate through bounded channels. Outer index-build concurrency
+remains one unless a measured design proves safe. Per-cell non-commutative folds retain
+FIFO ordering; commutative deposits may run concurrently.
+
+Rule #11 — Diagnose with independent evidence
+---------------------------------------------
+
+Measure wall time, CPU, waits, allocations, database plans, lock state, and phase
+throughput at the layer that owns the claim. Do not infer a bottleneck from one metric
+or validate a populated-system claim with an empty fixture.
+
+Rule #12 — Defaults derive from source and machine
+--------------------------------------------------
+
+Batch, commit, and working-set sizing derive from source shape and machine capacity.
+Environment overrides are diagnostic controls, not product defaults.
+
+Operational constraints
+-----------------------
+
+- One ingest at a time. Never kill an ingest or backend owned by another task.
+- Never reset or drop the database without explicit authorization for that action.
+- PostgreSQL lifecycle is service-managed; do not start the live cluster with `pg_ctl`.
+- After an engine rebuild, rebuild and install extensions before verification.
+- `pg_regress` validates the installed extension, not an edited template.
+- Do not edit an executing Windows batch file.
+- Preserve unrelated worktree changes; use isolated worktrees and explicit staging.

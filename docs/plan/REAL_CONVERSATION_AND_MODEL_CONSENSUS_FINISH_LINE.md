@@ -519,7 +519,11 @@ cross-architecture circuit comparison/correlation, and the product-level epic.
 | #921 | One stateful dynamic-frontier forward pass shared by MCP/OpenAI |
 | #922 | Honest OpenAI role/parameter/tool/code contract |
 | #923 | Source-scoped circuit comparison cube and cross-architecture correlation |
+| #927 | One pooled heterogeneous-source forward pass with A/B/A+B ablation |
+| #928 | Deterministic source-scoped and pooled export with provenance receipts |
+| #929 | Per-dataset seed capability manifest and profile verification |
 | #755 | Reopened product evaluation gate; prior scaffolding did not meet behavioral acceptance |
+| #926 | Documentation and agent-instruction authority governance |
 
 The parent epic also binds existing owners #350, #354, #360, #368–#370,
 #756–#757, #811, #894, #8, #111–#112, #475–#476, and #488 into one final

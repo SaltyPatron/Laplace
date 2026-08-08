@@ -1,37 +1,30 @@
 ---
 name: 'Next task'
-description: 'Determine the next highest-leverage task from binding docs and code-verified open work'
+description: 'Recommend the next highest-leverage task from the product finish line and live GitHub ownership'
 agent: agent
 ---
-Determine the next task to work on in the Laplace repo. Do not start implementing —
-produce a ranked recommendation.
+Recommend work; do not implement it.
 
-Trust order (do NOT invert):
-1. Running code (`app/`, `engine/`, `extension/`) — verify claims with file:line or grep.
-2. Binding author docs: `docs/specs/05`, `06`, `08`, `09`, `11`, `12`.
-3. Operational config: `scripts/win/witness-manifest.json`, `scripts/decomposer-gates.json`.
-4. Do NOT treat as authority: `.scratchpad/13`, compacted `02` status index alone,
-   or the one-line "pipeline chain" — those are agent-written summaries that have drifted.
+Read in this order:
 
-Read for context:
-- [.scratchpad/17_Decomposer_Full_Stack_Audit.md](../../.scratchpad/17_Decomposer_Full_Stack_Audit.md)
-  if decomposer / ingest-spine work is in scope.
-- [docs/specs/06_Engineering_Ruleset.txt](../../docs/specs/06_Engineering_Ruleset.txt)
-  Rule #8 ingest sequence and Rule #6 one-implementation-per-fact.
-- [docs/specs/09_Substrate_LM_Synthesis.txt](../../docs/specs/09_Substrate_LM_Synthesis.txt)
-  for invention framing (construct-don't-train, spider-web Laplacian).
-- Open GitHub issues (label `tracker-migration` marks the 2026-07-18 batch; `.scratchpad/02`
-  is the closed historical tracker) ONLY after verifying each candidate against code
-  (an issue body alone is not truth).
+1. `docs/DOCUMENTATION_GOVERNANCE.md` — authority hierarchy.
+2. `docs/plan/REAL_CONVERSATION_AND_MODEL_CONSENSUS_FINISH_LINE.md` — product outcome.
+3. GitHub epic #924 and its live blocking/dependency graph.
+4. The relevant normative files in `docs/specs/`.
+5. Current code, installed schema/API, tests, and runtime measurements needed to verify
+   candidate gaps.
 
-Judge candidates by whether they:
-- Put more witnessed attestations through ONE Rule #8 spine door (`IngestBatchPipeline`
-  → `ContentTierSpine` / handlers → fold → `NpgsqlWorkingSetApply`).
-- Remove duplicate C# / native / SQL implementations of the same fact (Rule #6).
-- De-risk Mold-A-Model export by improving consensus supply (honest witnesses), per 09/12.
+Never select work from `.scratchpad/`, `docs/archive/`, checkpoints, old backlog lists,
+agent plans, prompts, memories, or issue prose that contradicts current evidence.
 
-Output: top 3 candidates ranked, each with (a) code/doc evidence, (b) dependency argument,
-(c) concrete first step, (d) live-data verification (`psql`, `seed-step.cmd :verify_step`,
-or targeted test).
+Rank the top three verified candidates by:
 
-If docs contradict code, code wins — say so explicitly.
+- direct contribution to the #924 final demonstration;
+- dependency unblocking and consolidation of rival paths;
+- preservation of identity, provenance, typed execution, and CPU-native architecture;
+- behavioral proof through MCP/OpenAI/code/model/export surfaces;
+- availability of a bounded issue with explicit acceptance.
+
+For each candidate provide evidence, dependency argument, issue owner, first mechanical
+step, required seed/runtime profile, and executable acceptance. State any stale issue
+claim that must be corrected before work begins.
