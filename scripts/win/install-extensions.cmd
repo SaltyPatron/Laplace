@@ -17,8 +17,10 @@ exit /b 2
 
 set "T0_SRC=%LAPLACE_PERFCACHE_BIN%"
 set "HW_SRC=%LAPLACE_HIGHWAY_PERFCACHE_BIN%"
+set "CHESS_SRC=%LAPLACE_CHESS_POSITION_PERFCACHE_BIN%"
 set "T0_DST=%DEPLOY%\share\laplace_t0_perfcache.bin"
 set "HW_DST=%DEPLOY%\share\laplace_highway_perfcache.bin"
+set "CHESS_DST=%DEPLOY%\share\laplace_chess_position_perfcache.bin"
 
 if not exist "%DEPLOY%\lib" mkdir "%DEPLOY%\lib"
 if not exist "%DEPLOY%\share" mkdir "%DEPLOY%\share"
@@ -39,6 +41,11 @@ if not exist "%T0_SRC%" (
 if not exist "%HW_SRC%" (
   echo ERROR: highway perfcache missing at %HW_SRC%
   echo        run: cmake --build "%LAPLACE_ENGINE_BUILD%" --target laplace_highway_perfcache
+  exit /b 1
+)
+if not exist "%CHESS_SRC%" (
+  echo ERROR: chess position perfcache missing at %CHESS_SRC%
+  echo        run: cmake --build "%LAPLACE_ENGINE_BUILD%" --target laplace_chess_position_perfcache
   exit /b 1
 )
 
@@ -70,9 +77,10 @@ call :swapcopy "%LAPLACE_EXT_BUILD%\laplace_geom\laplace_geom.dll" || exit /b 1
 call :swapcopy "%LAPLACE_EXT_BUILD%\laplace_substrate\laplace_substrate.dll" || exit /b 1
 call :swapcopy "%LAPLACE_ENGINE_BUILD%\core\laplace_core.dll" || exit /b 1
 call :swapcopy "%LAPLACE_ENGINE_BUILD%\dynamics\laplace_dynamics.dll" || exit /b 1
-rem Both perfcache blobs are mmap'd by the postmaster (shared_preload_libraries prewarm).
+rem Perfcache blobs are mmap'd by the postmaster (shared_preload_libraries prewarm).
 call :swapcopy "%T0_SRC%" "%DEPLOY%\share" || exit /b 1
 call :swapcopy "%HW_SRC%" "%DEPLOY%\share" || exit /b 1
+call :swapcopy "%CHESS_SRC%" "%DEPLOY%\share" || exit /b 1
 call :swapcopy "C:\Program Files (x86)\Intel\oneAPI\tbb\latest\bin\tbb12.dll" || exit /b 1
 call :swapcopy "C:\Program Files (x86)\Intel\oneAPI\tbb\latest\bin\libhwloc-15.dll"
 
@@ -108,6 +116,7 @@ set "GUC_SQL=%TEMP%\laplace-install-gucs.sql"
   echo ALTER SYSTEM SET dynamic_library_path = '$libdir;%LAPLACE_DEPLOY_PG%/lib';
   echo ALTER SYSTEM SET laplace_substrate.perfcache_path = '%LAPLACE_DEPLOY_PG%/share/laplace_t0_perfcache.bin';
   echo ALTER SYSTEM SET laplace_substrate.highway_perfcache_path = '%LAPLACE_DEPLOY_PG%/share/laplace_highway_perfcache.bin';
+  echo ALTER SYSTEM SET laplace_substrate.chess_position_perfcache_path = '%LAPLACE_DEPLOY_PG%/share/laplace_chess_position_perfcache.bin';
   echo ALTER SYSTEM SET shared_preload_libraries = 'laplace_substrate';
   echo SELECT pg_reload_conf^(^);
 )
@@ -117,7 +126,7 @@ if "%RECYCLE%"=="1" (
   echo recycling laplace backends so fresh DLLs/SQL load on next connection...
   "%PSQL%" -h localhost -U postgres -d postgres -tAc "SELECT count(pg_terminate_backend(pid)) || ' backend(s) recycled' FROM pg_stat_activity WHERE datname LIKE 'laplace%%' AND pid <> pg_backend_pid();"
 )
-echo wired: extension_control_path + dynamic_library_path + both perfcache GUCs -^> %DEPLOY%
+echo wired: extension_control_path + dynamic_library_path + t0/highway/chess perfcache GUCs -^> %DEPLOY%
 exit /b 0
 
 :verify_deploy
@@ -129,6 +138,7 @@ for %%P in (
   "%DEPLOY%\lib\svml_dispmd.dll"
   "%T0_DST%"
   "%HW_DST%"
+  "%CHESS_DST%"
 ) do (
   if not exist "%%~P" (
     echo ERROR: deploy verify missing %%~P
@@ -144,8 +154,13 @@ fc /b "%HW_SRC%" "%HW_DST%" >nul 2>&1 || (
   echo ERROR: deployed highway perfcache does not match build output
   exit /b 1
 )
+fc /b "%CHESS_SRC%" "%CHESS_DST%" >nul 2>&1 || (
+  echo ERROR: deployed chess position perfcache does not match build output
+  exit /b 1
+)
 for %%F in ("%T0_DST%") do echo   T0 perfcache: %%~zF bytes
 for %%F in ("%HW_DST%") do echo   highway perfcache: %%~zF bytes
+for %%F in ("%CHESS_DST%") do echo   chess position perfcache: %%~zF bytes
 exit /b 0
 
 :swapcopy

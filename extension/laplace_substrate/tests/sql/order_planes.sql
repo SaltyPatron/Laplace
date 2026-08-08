@@ -79,7 +79,7 @@ BEGIN
     -- never were. grapheme_order always filtered after counting; the two disagreed.
     vocab := ARRAY[w_a, w_b];
     SELECT count(*) INTO n
-    FROM word_order(vocab, 1000, 1)
+    FROM generation.word_order(vocab, 1000, 1)
     WHERE subject_id = w_a AND object_id = w_b;
     IF n <> 0 THEN
         RAISE EXCEPTION
@@ -90,7 +90,7 @@ BEGIN
     -- With `gap` present the two real adjacencies appear, proving the fixture is live
     -- and the emptiness above is the filter working rather than an empty read.
     vocab := ARRAY[w_a, w_gap, w_b];
-    SELECT count(*) INTO n FROM word_order(vocab, 1000, 1);
+    SELECT count(*) INTO n FROM generation.word_order(vocab, 1000, 1);
     IF n <> 2 THEN
         RAISE EXCEPTION 'FAIL: expected 2 real adjacencies (a->gap, gap->b), got %', n;
     END IF;
@@ -99,7 +99,7 @@ BEGIN
     -- grapheme_order kept its repeats -- an inconsistency inside one family, not a rule.
     vocab := ARRAY[w_rep];
     SELECT count(*) INTO n
-    FROM word_order(vocab, 1000, 1)
+    FROM generation.word_order(vocab, 1000, 1)
     WHERE subject_id = w_rep AND object_id = w_rep;
     IF n <> 1 THEN
         RAISE EXCEPTION 'FAIL: word_order dropped a legitimately repeated token: % row(s)', n;
@@ -109,7 +109,7 @@ BEGIN
     -- also pins the type_id role predicate: the document is selected by
     -- canonical_id('Document'), so a regression to a tier test shows up as zero rows.
     SELECT count(*) INTO n
-    FROM sentence_order(1000, 1)
+    FROM generation.sentence_order(1000, 1)
     WHERE subject_id = sent AND object_id = sent_rep;
     IF n <> 1 THEN
         RAISE EXCEPTION 'FAIL: sentence_order did not pair the document constituents: %', n;

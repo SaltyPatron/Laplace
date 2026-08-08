@@ -13,12 +13,12 @@ WHERE n.nspname = 'laplace'
       'collocates', 'structural_cluster', 'entity_curve');
 
 SELECT count(*) AS collocates_empty_for_unknown_word
-FROM collocates('zzznosuchword', 5);
+FROM structural.collocates('zzznosuchword', 5);
 
-SELECT word_curve(word_id('dog')) IS NULL AS no_curve_without_physicality;
+SELECT structural.word_curve(word_id('dog')) IS NULL AS no_curve_without_physicality;
 
 SELECT count(*) = 0 AS cluster_empty_without_physicality
-FROM structural_cluster(word_id('dog'), 0.05, 10);
+FROM structural.cluster(word_id('dog'), 0.05, 10);
 
 -- Rule #3 gate: production Frechet helpers must realize via entity_curve /
 -- word_curve. Packed physicalities.trajectory must never be a Frechet argument.

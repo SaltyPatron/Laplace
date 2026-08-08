@@ -7,6 +7,16 @@ namespace Laplace.Substrate.Tests.Crud;
 
 public sealed class InstalledOpInvokerTests
 {
+    [Theory]
+    [InlineData("substrate_health", "laplace.\"substrate_health\"")]
+    [InlineData("ops.substrate_counts", "\"ops\".\"substrate_counts\"")]
+    [InlineData("converse.resolve_topic", "\"converse\".\"resolve_topic\"")]
+    [InlineData("public.laplace_hash128_blake3", "\"public\".\"laplace_hash128_blake3\"")]
+    public void QualifiedCatalogName_QuotesSchemaAndFunctionSeparately(string catalogName, string expected)
+    {
+        Assert.Equal(expected, InstalledOpInvoker.QualifiedCatalogName(catalogName));
+    }
+
     [Fact]
     public void ParseSignature_NamesTypesAndOptionality()
     {

@@ -10,7 +10,9 @@ public static class ChessSeedManifest
     [
         "Chess_Position", "Chess_Substructure", "Chess_Result", "Chess_Player",
         "Chess_Game", "Chess_Event", "Chess_Playing", "Chess_Movetext", "Chess_AnalysisMarker",
-        "Chess_Eval", "Chess_Concept", "Chess_BookLine",
+        "Chess_Eval", "Chess_BookLine",
+        // Chess_Concept retired from the seed manifest (GH #577): zero entities
+        // on the live box; no emitter. Relation registry bits are untouched.
     ];
 
     // Named constants for the relation surfaces other chess code needs to NAME rather
@@ -31,8 +33,11 @@ public static class ChessSeedManifest
         "PLAYS_LINE",
         "HAS_MOVETEXT", "HAS_PLY", "HAS_SAN", "HAS_COMMENT", "HAS_SETUP", "ANALYZED_AT",
         "HAS_WHITE", "HAS_BLACK", "HAS_EVENT", "ON_DATE", "HAS_TIME_CONTROL", "HAS_TC_CLASS",
-        "HAS_TERMINATION", "HAS_RESULT", "GAME_AT", "GAME_AT_PLY", "HAS_EVAL", "MOVE_QUALITY",
+        "HAS_TERMINATION", "HAS_RESULT", "HAS_EVAL", "MOVE_QUALITY",
         "HAS_CLOCK", "HAS_EVAL_TOKEN", "HAS_THINK_CLASS", GameHasOpening, GameHasEco,
+        // GAME_AT / GAME_AT_PLY retired from the seed manifest (GH #577): ChessGraph
+        // removed the ply-grain emitters; live evidence_count is 0 for both.
+        // Append-only relation_types.toml keeps the bits — do not renumber.
         // Syzygy probe lane (campaign PR-8): exact endgame verdicts on witnessed
         // positions — five-valued WDL token (STM POV) + distance-to-zeroing scalar.
         "HAS_WDL", "HAS_DTZ",

@@ -1,8 +1,7 @@
-DROP FUNCTION IF EXISTS synset_members(bytea);
-CREATE OR REPLACE FUNCTION synset_members(p_word bytea)
+DROP FUNCTION IF EXISTS laplace.synset_members(bytea);
+CREATE OR REPLACE FUNCTION lexical.synset_members(p_word bytea)
     RETURNS TABLE(member bytea, lang bytea, mu bigint, witnesses bigint, sense_mu numeric)
-    LANGUAGE sql LAPLACE_STABLE_STRICT
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE sql LAPLACE_STABLE_STRICT AS $$
     WITH syn AS (
         SELECT s.synset_id AS id, max(s.eff_mu) AS sense_mu
         FROM lexical.senses(p_word) s
@@ -10,31 +9,31 @@ CREATE OR REPLACE FUNCTION synset_members(p_word bytea)
         -- instance edge. Bare row presence also excluded synsets whose
         -- IS_INSTANCE_OF was witnessed and REFUTED -- the fold said "not an
         -- instance" and the filter read that as "is an instance". consensus has no
-        -- outcome column; refutation is a non-positive eff_mu, the same test the
+        -- outcome column; refutation is a non-positive laplace.eff_mu, the same test the
         -- walk uses to dead-end an edge. An absent edge still excludes nothing.
         WHERE NOT EXISTS (
-            SELECT 1 FROM consensus i
+            SELECT 1 FROM laplace.consensus i
             WHERE i.subject_id = s.synset_id
-              AND i.type_id = relation_type_id('IS_INSTANCE_OF')
-              AND eff_mu(i.rating, i.rd) > 0)
+              AND i.type_id = laplace.relation_type_id('IS_INSTANCE_OF')
+              AND laplace.eff_mu(i.rating, i.rd) > 0)
         GROUP BY s.synset_id
     ),
     members AS (
         SELECT c.object_id AS w, c.rating, c.rd, c.witness_count, syn.sense_mu
-        FROM consensus c JOIN syn ON c.subject_id = syn.id
-        WHERE c.type_id = relation_type_id('IS_SYNONYM_OF') AND c.object_id IS NOT NULL
+        FROM laplace.consensus c JOIN syn ON c.subject_id = syn.id
+        WHERE c.type_id = laplace.relation_type_id('IS_SYNONYM_OF') AND c.object_id IS NOT NULL
         UNION ALL
         SELECT c.subject_id AS w, c.rating, c.rd, c.witness_count, syn.sense_mu
-        FROM consensus c JOIN syn ON c.object_id = syn.id
-        WHERE c.type_id = relation_type_id('IS_SYNONYM_OF')
+        FROM laplace.consensus c JOIN syn ON c.object_id = syn.id
+        WHERE c.type_id = laplace.relation_type_id('IS_SYNONYM_OF')
     ),
-    -- MATERIALIZED is load-bearing: it forces lexical_peers (a ~75ms native-KNN
+    -- MATERIALIZED is load-bearing: it forces lexical.lexical_peers(a ~75ms native-KNN
     -- call) to run ONCE per synset_members call. The bare
-    -- `<> ALL(lexical_peers(p_word))` filter form was pushed into the members
+    -- `<> ALL(lexical.lexical_peers(p_word))` filter form was pushed into the members
     -- index scans and re-executed PER ROW (STABLE fns are never constant-folded;
     -- a plain one-row subselect gets pulled up and re-pushed identically):
-    -- measured 65.3s of translate_to('water')'s 68.6s (2026-07-05, 14.9M
-    -- physicalities). `= ANY` callers (senses) are immune only because an
+    -- measured 65.3s of converse.translate_to('water')'s 68.6s (2026-07-05, 14.9M
+    -- laplace.physicalities). `= ANY` callers (senses) are immune only because an
     -- indexed ANY becomes the index condition itself, which forces one-shot
     -- evaluation of the array.
     peers AS MATERIALIZED (
@@ -42,7 +41,7 @@ CREATE OR REPLACE FUNCTION synset_members(p_word bytea)
     ),
     agg AS (
         SELECT m.w,
-               max(eff_mu(m.rating, m.rd)) AS mu,
+               max(laplace.eff_mu(m.rating, m.rd)) AS mu,
                sum(m.witness_count)::bigint AS witnesses,
                max(m.sense_mu) AS sense_mu
         FROM members m, peers px
@@ -51,6 +50,6 @@ CREATE OR REPLACE FUNCTION synset_members(p_word bytea)
     )
     SELECT a.w, hl.object_id AS lang, a.mu::bigint, a.witnesses, a.sense_mu
     FROM agg a
-    LEFT JOIN consensus hl
-      ON hl.subject_id = a.w AND hl.type_id = relation_type_id('HAS_LANGUAGE')
+    LEFT JOIN laplace.consensus hl
+      ON hl.subject_id = a.w AND hl.type_id = laplace.relation_type_id('HAS_LANGUAGE')
 $$;

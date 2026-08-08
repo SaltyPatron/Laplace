@@ -9,7 +9,7 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 /// needs raw Glicko <c>rating</c>/<c>rd</c>/<c>witness_count</c>, not the
 /// <see cref="NpgsqlConsensusByIds"/> display axis (<c>eff_mu</c>).
 ///
-/// Routes through the installed <c>laplace.consensus_cell</c> (GH #909), which looks the
+/// Routes through the installed <c>consensus.cell</c> (GH #909), which looks the
 /// row up by primary id (<c>laplace.consensus_id</c>) rather than scanning the triple.
 /// This type is now a typed wrapper over that surface, not a hand-written table read.
 /// </summary>

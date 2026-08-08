@@ -1,7 +1,8 @@
-CREATE OR REPLACE FUNCTION recall_translate_response(p_topic bytea, p_lang text DEFAULT NULL)
-    RETURNS TABLE(reply text, laplace.eff_mu numeric, witnesses bigint)
+DROP FUNCTION IF EXISTS laplace.recall_translate_response(bytea, text);
+CREATE OR REPLACE FUNCTION converse.recall_translate_response(p_topic bytea, p_lang text DEFAULT NULL)
+    RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
  AS $$
     SELECT t.translation || ' [' || COALESCE(t.language, '?') || ']', t.eff_mu, t.witnesses
-    FROM laplace.translate_to(p_topic, p_lang) t
+    FROM converse.translate_to(p_topic, p_lang) t
 $$;

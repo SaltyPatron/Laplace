@@ -1,17 +1,17 @@
--- chess_missed_finish(line): positions on the line where the closings catalog
+-- chess.missed_finish(line): positions on the line where the closings catalog
 -- says the side to move wins, but the played MOVE leaves a successor that is
 -- not a loss/blessed-loss for the opponent (tablebase win abandoned).
 -- Provenance read — not logistic HAS_EVAL.
 --
--- Relation vocabulary via chess_has_wdl_type (ISA G3).
+-- Relation vocabulary via chess.has_wdl_type(ISA G3).
 --
 -- Both id lookups are bound ONCE, in CTEs, and the WDL scan is restricted to the
 -- line's own positions -- the two defects this function shipped with (#844, #817):
 --
---   per-row STABLE call   `WHERE a.type_id = chess_has_wdl_type()` put a
+--   per-row STABLE call   `WHERE a.type_id = chess.has_wdl_type()` put a
 --                         `LANGUAGE sql STABLE` function inside a filter, so it ran
 --                         once per attestation row instead of once per statement.
---                         The same held for word_id('loss') / word_id('blessed-loss')
+--                         The same held for laplace.word_id('loss') / laplace.word_id('blessed-loss')
 --                         in the missed-finish predicate. chess_syzygy_line already
 --                         binds its relation ids in a `rel` CTE; this follows it.
 --
@@ -19,11 +19,10 @@
 --                         database and discarded the non-line ones by join afterwards,
 --                         so cost scaled with total Syzygy testimony rather than with
 --                         the line being asked about. The subject restriction now
---                         lives inside the CTE: `line` drives, attestations is probed
+--                         lives inside the CTE: `line` drives, laplace.attestations is probed
 --                         by subject_id.
-DROP FUNCTION IF EXISTS chess_missed_finish(bytea, integer);
-
-CREATE OR REPLACE FUNCTION chess_missed_finish(p_line bytea, p_limit int DEFAULT 32)
+DROP FUNCTION IF EXISTS laplace.chess_missed_finish(bytea, int);
+CREATE OR REPLACE FUNCTION chess.missed_finish(p_line bytea, p_limit int DEFAULT 32)
     RETURNS TABLE(
         from_position bytea,
         to_position bytea,
@@ -33,7 +32,7 @@ CREATE OR REPLACE FUNCTION chess_missed_finish(p_line bytea, p_limit int DEFAULT
     LANGUAGE sql STABLE
  AS $$
 WITH rel AS MATERIALIZED (
-    SELECT laplace.chess_has_wdl_type() AS wdl
+    SELECT chess.has_wdl_type() AS wdl
 ),
 verdict AS MATERIALIZED (
     SELECT laplace.word_id('win')           AS win,
@@ -42,7 +41,7 @@ verdict AS MATERIALIZED (
 ),
 line AS MATERIALIZED (
     SELECT (u.ord - 1)::int AS ply, u.entity_id AS pos
-    FROM LATERAL laplace.trajectory_unpacked_points(p_line)
+    FROM LATERAL generation.trajectory_unpacked_points(p_line)
          WITH ORDINALITY AS u(entity_id, run_length, ctier, ord)
 ),
 steps AS MATERIALIZED (
@@ -50,10 +49,10 @@ steps AS MATERIALIZED (
     FROM line a
     JOIN line b ON b.ply = a.ply + 1
 ),
--- Subject-restricted: the line's positions drive, attestations is probed by
+-- Subject-restricted: the line's positions drive, laplace.attestations is probed by
 -- subject_id. Both endpoints of every step are line points, so this covers the
 -- from_pos join and the to_pos outer join alike.
--- One row per position. attestations is keyed by (subject, type, object, source,
+-- One row per position. laplace.attestations is keyed by (subject, type, object, source,
 -- context), so a position carrying Syzygy WDL from more than one source yields
 -- several rows per pos. Left uncollapsed that is not merely duplication: the
 -- to_pos join below tests `IS DISTINCT FROM loss`, so a position with both a
@@ -91,7 +90,7 @@ label AS MATERIALIZED (
     SELECT p.id, t.txt
     FROM surfaces b,
          LATERAL unnest(b.ids) WITH ORDINALITY AS p(id, i),
-         LATERAL unnest(laplace.realize_batch(b.ids, NULL)) WITH ORDINALITY AS t(txt, j)
+         LATERAL unnest(realize.batch(b.ids, NULL)) WITH ORDINALITY AS t(txt, j)
     WHERE p.i = t.j
 )
 SELECT m.from_pos, m.to_pos, m.ply, f.txt, t.txt

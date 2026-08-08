@@ -9,18 +9,19 @@
 --
 -- That read was being hand-written each time it was needed: a CTE over
 -- entity_container_degree, a lateral count over consensus_out, a witness sum,
--- and foundry_witness_sat, re-derived per investigation. This is the same
+-- and laplace.foundry_witness_sat, re-derived per investigation. This is the same
 -- reinvented-wheel defect W16 documents in the read path, committed by the
 -- person documenting it. One implementation, named, installed, callable through
 -- `op` — so the next measurement quotes a function instead of a paragraph of SQL.
 --
--- Text in, because the caller has surfaces and word_id() is the resolution the
+-- Text in, because the caller has surfaces and laplace.word_id() is the resolution the
 -- elector itself performs. Ids that resolve to nothing come back with zeroes
 -- rather than vanishing: an unattested surface is a real answer, and dropping
 -- the row would be the EXISTS-collapses-NULL defect in another costume.
 --
 -- No SET search_path (GH #860), every reference @extschema@-qualified (G11).
-CREATE OR REPLACE FUNCTION election_token_profile(p_surfaces text[])
+DROP FUNCTION IF EXISTS laplace.election_token_profile(text[]);
+CREATE OR REPLACE FUNCTION converse.election_token_profile(p_surfaces text[])
     RETURNS TABLE(
         surface        text,
         entity_id      bytea,
@@ -40,25 +41,25 @@ CREATE OR REPLACE FUNCTION election_token_profile(p_surfaces text[])
     deg AS (
         SELECT t.ord, d.degree, d.icf
         FROM t
-        LEFT JOIN LATERAL @extschema@.entity_container_degree(ARRAY[t.id]) d ON true
+        LEFT JOIN LATERAL structural.entity_container_degree(ARRAY[t.id]) d ON true
     ),
     edg AS (
         SELECT t.ord,
                count(c.type_id)                                  AS out_edges,
                COALESCE(sum(c.witness_count), 0)::bigint         AS witnesses
         FROM t
-        LEFT JOIN LATERAL @extschema@.consensus_out(t.id, 1000000) c ON true
+        LEFT JOIN LATERAL consensus.consensus_out(t.id, 1000000) c ON true
         GROUP BY t.ord
     ),
     msk AS (
         SELECT t.ord,
-               COALESCE(@extschema@.laplace_highway_popcount(m.highway_mask), 0) AS bands
+               COALESCE(laplace.laplace_highway_popcount(m.highway_mask), 0) AS bands
         FROM t
-        LEFT JOIN LATERAL @extschema@.entity_highway_masks(ARRAY[t.id]) m ON true
+        LEFT JOIN LATERAL generation.entity_highway_masks(ARRAY[t.id]) m ON true
     )
     SELECT t.surface,
            t.id,
-           @extschema@.entity_tier_of(t.id),
+           generation.entity_tier_of(t.id),
            COALESCE(deg.degree, 0),
            COALESCE(deg.icf, 1.0),
            COALESCE(edg.out_edges, 0),

@@ -44,6 +44,14 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase<ConceptN
         return File.Exists(file) ? [file] : [];
     }
 
+    protected override Task OnBeforeRegisterAsync(IDecomposerContext context, CancellationToken ct)
+    {
+        // GH #520: hard-fail with the rest of the ILI mesh; warn-and-drop left
+        // ConceptNet synset anchors silently unmeshed.
+        SourceEntityIdConventions.EnsureCiliMapForIngest(context.Logger, SourceName);
+        return Task.CompletedTask;
+    }
+
     // Extraction only. assertions.csv is already
     // `assertion-uri <TAB> /r/Relation <TAB> /c/lang/start <TAB> /c/lang/end <TAB> {json}`
     // — no container to unpack, so no tree-sitter. Stream UTF-8 lines, tab-split managed,
@@ -53,7 +61,6 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase<ConceptN
         string filePath, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        SourceEntityIdConventions.WarnIfCiliMapMissing(null, SourceName);
         if (!File.Exists(filePath)) yield break;
 
         var langs = options.Languages;
@@ -89,7 +96,7 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase<ConceptN
         // Language scope. The URI's /c/<lang>/ segment was parsed and then DISCARDED,
         // which left every edge language-free — most damagingly Synonym, which is
         // cross-lingual by design and maps into the HAS_SENSE family, so unscoped
-        // translations competed as senses (the same defect OMWGrammarWitness fixed
+        // translations competed as lexical.senses(the same defect OMWGrammarWitness fixed
         // for GH #867: an English copula electing "ice" from Danish witnesses).
         // The handler already emits HAS_LANGUAGE from these ids; the edge's context
         // is the SUBJECT's language — the claim is made about the subject surface,

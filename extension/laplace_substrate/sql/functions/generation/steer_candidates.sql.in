@@ -1,4 +1,4 @@
--- steer_candidates(candidates, frontier, kappa) -> S7 STEER (docs/specs/36 §3).
+-- generation.steer_candidates(candidates, frontier, kappa) -> S7 STEER (docs/specs/36 §3).
 --
 -- Re-rank S6's proposed continuations by rated consensus mass reaching the LIVE
 -- frontier from S4. The frontier argument is what makes it S7 rather than a
@@ -30,7 +30,8 @@
 -- a candidate instead of being squashed toward zero.
 --
 -- NOT PARALLEL SAFE: reads consensus through SPI.
-CREATE OR REPLACE FUNCTION steer_candidates(
+DROP FUNCTION IF EXISTS laplace.steer_candidates(bytea[], bytea[], float8);
+CREATE OR REPLACE FUNCTION generation.steer_candidates(
         p_candidates bytea[], p_frontier bytea[], p_kappa float8 DEFAULT NULL)
     RETURNS TABLE(candidate bytea, steer float8, edges bigint, covered bigint)
     AS 'MODULE_PATHNAME', 'pg_laplace_steer_candidates'

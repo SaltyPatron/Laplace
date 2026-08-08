@@ -1,0 +1,120 @@
+#!/usr/bin/env python3
+"""Contract and architecture gate for the deployed eval operation lane."""
+
+from __future__ import annotations
+
+import importlib.util
+import json
+import sys
+import unittest
+from io import BytesIO
+from pathlib import Path
+from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "scripts"))
+
+from laplace_api import op_rows  # noqa: E402
+
+
+def _load_eval_generation():
+    path = ROOT / "scripts" / "eval-generation.py"
+    spec = importlib.util.spec_from_file_location("eval_generation", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+class _Response(BytesIO):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        self.close()
+
+
+class EvalOperationLaneTests(unittest.TestCase):
+    def test_client_posts_named_operation_with_timeout(self):
+        captured = {}
+
+        def fake_urlopen(request, timeout):
+            captured["url"] = request.full_url
+            captured["tenant"] = request.get_header("X-laplace-tenant")
+            captured["body"] = json.loads(request.data)
+            captured["timeout"] = timeout
+            return _Response(json.dumps({
+                "object": "op.result",
+                "name": captured["body"]["name"],
+                "rows": [{"ok": True}],
+                "truncated_at": None,
+            }).encode("utf-8"))
+
+        with patch("laplace_api.urlopen", fake_urlopen):
+            rows = op_rows(
+                "http://127.0.0.1:8080",
+                "generation.probe",
+                {"p_prompt": "dog", "p_seeds": [7]},
+                max_rows=4,
+                timeout_seconds=300,
+            )
+
+        self.assertEqual([{"ok": True}], rows)
+        self.assertEqual("http://127.0.0.1:8080/v1/op", captured["url"])
+        self.assertEqual("ci-eval", captured["tenant"])
+        self.assertEqual(310, captured["timeout"])
+        self.assertEqual(
+            {
+                "name": "generation.probe",
+                "args": {"p_prompt": "dog", "p_seeds": [7]},
+                "max_rows": 4,
+                "timeout_seconds": 300,
+            },
+            captured["body"],
+        )
+
+    def test_elector_comparator_preserves_all_six_keys(self):
+        module = _load_eval_generation()
+        key = module._elector_key
+        base = {
+            "specificity": 1,
+            "rel_mass": 1,
+            "peers": 1,
+            "ord": 1,
+            "denote_mu": 1,
+            "synset_id": "b",
+        }
+
+        def changed(**values):
+            return {**base, **values}
+
+        self.assertLess(key(base), key(changed(specificity=None)))
+        self.assertLess(key(changed(rel_mass=2)), key(base))
+        self.assertLess(key(changed(peers=2)), key(base))
+        self.assertLess(key(changed(ord=2)), key(base))
+        self.assertLess(key(changed(denote_mu=2)), key(base))
+        self.assertLess(key(changed(synset_id="a")), key(base))
+
+    def test_eval_scripts_have_no_private_database_lane(self):
+        forbidden = ["subprocess", "ps" + "ql", "SET " + "search_path", '"--' + 'db"']
+        for relative in ("scripts/eval-generation.py", "scripts/verify-generation.py"):
+            text = (ROOT / relative).read_text(encoding="utf-8")
+            for token in forbidden:
+                self.assertNotIn(token, text, f"{relative} reintroduced {token!r}")
+
+        workflow = (ROOT / ".github/workflows/laplace.yml").read_text(encoding="utf-8")
+        eval_block = workflow[workflow.index("  eval:"):workflow.index("  restore-api:")]
+        self.assertNotIn("--" + "db", eval_block)
+        self.assertEqual(2, eval_block.count("--api http://127.0.0.1:8080"))
+
+        probes = json.loads((ROOT / "scripts/eval-probes.json").read_text(encoding="utf-8"))
+        self.assertNotIn("sql", {probe.get("surface") for probe in probes["probes"]})
+
+    def test_language_score_reuses_native_operation(self):
+        text = (ROOT / "scripts/verify-generation.py").read_text(encoding="utf-8")
+        self.assertGreaterEqual(text.count('"converse.prompt_language"'), 2)
+        self.assertNotIn("word_" + "language", text)
+
+
+if __name__ == "__main__":
+    unittest.main()

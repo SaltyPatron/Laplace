@@ -1,5 +1,5 @@
--- witness_precedes_chain(text, source): deposit a text's consecutive-token PRECEDES
--- bigrams as attestations under a source -- the OODA ACT/OBSERVE deposit. This is how a
+-- converse.witness_precedes_chain(text, source): deposit a text's consecutive-token PRECEDES
+-- bigrams as laplace.attestations under a source -- the OODA ACT/OBSERVE deposit. This is how a
 -- prompt becomes witnessed content and a response becomes a first-class witness: the
 -- generated text's own edges fold into the SAME consensus the next walk reads
 -- (evaluation IS ingestion). Self-signals are outranked by design (Response/UserPrompt
@@ -15,13 +15,11 @@
 -- neutral WITHOUT folding its first game (the first outcome was dropped);
 -- consensus_upsert's novel arm folds every game -- no signal is discarded.
 DROP FUNCTION IF EXISTS laplace.witness_precedes_chain(text, bytea);
-
 CREATE OR REPLACE FUNCTION converse.witness_precedes_chain(p_text text, p_source bytea)
     RETURNS int
-    LANGUAGE plpgsql VOLATILE
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE plpgsql VOLATILE AS $$
 DECLARE
-    r_prec bytea := relation_type_id('PRECEDES');
+    r_prec bytea := laplace.relation_type_id('PRECEDES');
     ids    bytea[];
     n      int;
     subs   bytea[];
@@ -41,17 +39,17 @@ BEGIN
       INTO subs, objs, games, sums
     FROM (
         SELECT p.s, p.o, count(*)::bigint AS g,
-               consensus_id(p.s, r_prec, p.o) AS cid
+               laplace.consensus_id(p.s, r_prec, p.o) AS cid
         FROM (SELECT ids[i] AS s, ids[i + 1] AS o
               FROM generate_series(1, n - 1) i) p
         GROUP BY p.s, p.o
     ) d;
 
-    PERFORM consensus_upsert(
+    PERFORM consensus.upsert(
         subs,
         array_fill(r_prec, ARRAY[cardinality(subs)]),
         objs,
-        array_fill(glicko2_initial_rd(), ARRAY[cardinality(subs)]),
+        array_fill(laplace.glicko2_initial_rd(), ARRAY[cardinality(subs)]),
         games,
         sums,
         array_fill(now(), ARRAY[cardinality(subs)]));

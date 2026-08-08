@@ -47,7 +47,7 @@ ensure_variant_plans(void)
     {
         Oid        argtypes[1] = { BYTEAOID };
         SPIPlanPtr plan = SPI_prepare(
-            "SELECT laplace.entity_tier_of($1), laplace.entity_has_trajectory($1)",
+            "SELECT generation.entity_tier_of($1), generation.entity_has_trajectory($1)",
             1, argtypes);
         if (plan == NULL)
             elog(ERROR, "variant_walk: SPI_prepare(tier/traj) failed: %s",
@@ -61,7 +61,7 @@ ensure_variant_plans(void)
         Oid        argtypes[1] = { BYTEAOID };
         SPIPlanPtr plan = SPI_prepare(
             "SELECT entity_id, run_length, ctier "
-            "FROM laplace.trajectory_unpacked_points($1)",
+            "FROM generation.trajectory_unpacked_points($1)",
             1, argtypes);
         if (plan == NULL)
             elog(ERROR, "variant_walk: SPI_prepare(trajectory) failed: %s",
@@ -86,7 +86,7 @@ ensure_variant_plans(void)
     {
         Oid        argtypes[2] = { BYTEAOID, INT4OID };
         SPIPlanPtr plan = SPI_prepare(
-            "SELECT laplace.consensus_peer($1, $2)", 2, argtypes);
+            "SELECT generation.consensus_peer($1, $2)", 2, argtypes);
         if (plan == NULL)
             elog(ERROR, "variant_walk: SPI_prepare(consensus_peer) failed: %s",
                  SPI_result_code_string(SPI_result));
@@ -368,7 +368,7 @@ pg_laplace_respell_variant(PG_FUNCTION_ARGS)
     ensure_variant_plans();
 
     rc = SPI_execute_with_args(
-        "SELECT laplace.respell_variant_seed($1, $2)",
+        "SELECT generation.respell_variant_seed($1, $2)",
         2, argtypes, args, nulls, true, 1);
     if (rc != SPI_OK_SELECT)
         elog(ERROR, "respell_variant: seed lookup failed: %s", SPI_result_code_string(rc));

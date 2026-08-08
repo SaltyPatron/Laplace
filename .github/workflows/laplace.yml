@@ -166,15 +166,30 @@ jobs:
             scripts/isa-gate-check.py \
             scripts/isa-gate-baseline.json \
             scripts/ensure-foundation.sh \
+            scripts/laplace_api.py \
             scripts/eval-generation.py \
+            scripts/verify-generation.py \
+            scripts/test-eval-op-lane.py \
             scripts/eval-probes.json \
-            scripts/eval-baselines.json; do
+            scripts/eval-baselines.json \
+            scripts/shellcheck-gate.sh; do
             [ -f "$f" ] || { echo "::error file=$f::CI-critical file missing"; fail=1; }
           done
           exit "$fail"
 
+      - name: Shellcheck gate (severity error)
+        # GH #847 — catch quote/array bugs and swallowed-failure patterns that
+        # turn into false "all clear". Severity error only; style is out of scope.
+        run: bash scripts/shellcheck-gate.sh
+
+      - name: Deploy payload contract
+        run: bash scripts/test-deploy-payload-sync.sh
+
       - name: Validate witness-manifest vs orchestration scripts
         run: python3 scripts/validate-pipeline.py
+
+      - name: Eval operation-lane architecture gate
+        run: python3 scripts/test-eval-op-lane.py
 
       - name: Enforce ISA literalism ratchets
         run: python3 scripts/isa-gate-check.py
@@ -688,16 +703,32 @@ jobs:
         run: bash scripts/check-substrate-floor.sh "${PGDATABASE:-laplace}"
 
       - name: Live endpoint smoke
+        env:
+          LAPLACE_API_BASE: http://127.0.0.1:8080
         run: |
-          curl -fsS http://127.0.0.1:5187/v1/capabilities | grep -q '"chat_completions"'
-          curl -fsS http://127.0.0.1:5187/health/ready
-          echo
-          psql -d laplace -U laplace_admin -v ON_ERROR_STOP=1 \
-            -c "SELECT metric, value FROM laplace.substrate_counts();"
-          curl -fsS -X POST http://127.0.0.1:5187/v1/chat/completions \
+          capabilities="$(curl -fsS "${LAPLACE_API_BASE}/v1/capabilities")"
+          grep -q '"chat_completions"' <<<"${capabilities}"
+          grep -q '"op"' <<<"${capabilities}"
+
+          readiness="$(curl -fsS "${LAPLACE_API_BASE}/health/ready")"
+          printf '%s\n' "${readiness}"
+          grep -q '"ready":true' <<<"${readiness}"
+          grep -q '"substrate_reachable":true' <<<"${readiness}"
+          grep -Eq '"entities":[1-9][0-9]*' <<<"${readiness}"
+          grep -Eq '"consensus_relations":[1-9][0-9]*' <<<"${readiness}"
+
+          inventory="$(curl -fsS -X POST "${LAPLACE_API_BASE}/v1/op" \
             -H 'Content-Type: application/json' -H 'X-Laplace-Tenant: ci' \
-            --data '{"model":"laplace-converse-001","messages":[{"role":"user","content":"dog"}]}'
-          echo
+            --data '{"name":"ops.substrate_counts","max_rows":20}')"
+          printf '%s\n' "${inventory}"
+          grep -q '"object":"op.result"' <<<"${inventory}"
+          grep -q '"name":"ops.substrate_counts"' <<<"${inventory}"
+
+          completion="$(curl -fsS -X POST "${LAPLACE_API_BASE}/v1/chat/completions" \
+            -H 'Content-Type: application/json' -H 'X-Laplace-Tenant: ci' \
+            --data '{"model":"laplace-converse-001","messages":[{"role":"user","content":"dog"}]}')"
+          printf '%s\n' "${completion}"
+          grep -q '"object":"chat.completion"' <<<"${completion}"
 
       - name: Endpoint contract tests against the live service
         run: |
@@ -738,7 +769,7 @@ jobs:
         run: |
           mkdir -p .eval-proof
           python3 scripts/eval-generation.py \
-            --db "host=/var/run/postgresql user=laplace_admin dbname=laplace" \
+            --api http://127.0.0.1:8080 \
             --probes scripts/eval-probes.json \
             --baseline scripts/eval-baselines.json \
             --report .eval-proof/generation.json
@@ -753,7 +784,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           python3 scripts/verify-generation.py \
-            --db "host=/var/run/postgresql user=laplace_admin dbname=laplace" \
+            --api http://127.0.0.1:8080 \
             --report .eval-proof/lane-detectors.json \
             --enforce
 

@@ -1,4 +1,5 @@
-CREATE OR REPLACE FUNCTION hypernyms(p_word bytea, p_depth int DEFAULT 8)
+DROP FUNCTION IF EXISTS laplace.hypernyms(bytea, int);
+CREATE OR REPLACE FUNCTION converse.hypernyms(p_word bytea, p_depth int DEFAULT 8)
     RETURNS TABLE(depth int, hypernym text, gloss text)
     LANGUAGE C STABLE STRICT
     AS 'MODULE_PATHNAME', 'pg_laplace_hypernyms';

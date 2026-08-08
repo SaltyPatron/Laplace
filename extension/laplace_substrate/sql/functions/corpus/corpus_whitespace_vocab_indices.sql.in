@@ -1,4 +1,4 @@
--- corpus_whitespace_vocab_indices(vocab) -> the positions that are separators.
+-- generation.corpus_whitespace_vocab_indices(vocab) -> the positions that are separators.
 --
 -- Answered from what the substrate ATTESTS, not by rendering each id to text and
 -- inspecting the string. The Unicode seed already deposits
@@ -12,7 +12,7 @@
 -- that realization was the entire cost, not the test. MEASURED on 1,645 distinct
 -- tokens from 400 'water' containers:
 --
---   render_text per row + '^\s*$'          29,899 ms
+--   laplace.render_text per row + '^\s*$'          29,899 ms
 --   this function, previous body           35,232 ms
 --   the category join below                    33.7 ms
 --
@@ -42,13 +42,13 @@
 -- The previous body ran the category probe as a LEFT JOIN LATERAL correlated on
 -- v.id, so the whole subquery executed once PER VOCAB ENTRY. Worse, both partition
 -- keys arrived column-valued: `a.subject_id = v.id` is a column reference, and
--- `a.type_id = relation_type_id(...)` is a STABLE call the planner will not fold to
--- a literal. attestations is LIST(type_id) -> HASH(subject_id), and neither level
+-- `a.type_id = laplace.relation_type_id(...)` is a STABLE call the planner will not fold to
+-- a literal. laplace.attestations is LIST(type_id) -> HASH(subject_id), and neither level
 -- can prune against a value that is not bound at plan time -- which is exactly
 -- FAILED FORM (2) recorded in probes/attestations_present_ordinals.sql.in, where
 -- the same shape Append-scanned every leaf.
 --
--- MEASURED 2026-08-07 on the foundation seed: geometry_successors('king') took
+-- MEASURED 2026-08-07 on the foundation seed: structural.geometry_successors('king') took
 -- 8,148 ms, of which its containment+unpack query is 40 ms. The remaining ~8.1 s
 -- was this function, called once with the batch of 26,047 unpacked candidates. The
 -- foundry vocab crawl calls geometry_successors ~50 times (once per seed, then once
@@ -68,12 +68,12 @@
 -- substrate that fallback covers no ids and costs nothing; on the generation_corpus
 -- fixture (synthetic content, zero Unicode layer) it is the whole answer, which is
 -- the case that broke main on merge and is why the COALESCE is load-bearing.
-CREATE OR REPLACE FUNCTION corpus_whitespace_vocab_indices(p_vocab bytea[])
+DROP FUNCTION IF EXISTS laplace.corpus_whitespace_vocab_indices(bytea[]);
+CREATE OR REPLACE FUNCTION generation.corpus_whitespace_vocab_indices(p_vocab bytea[])
     RETURNS TABLE(vocab_idx int)
-    LANGUAGE plpgsql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE plpgsql STABLE PARALLEL SAFE AS $$
 DECLARE
-    v_type bytea := relation_type_id('HAS_GENERAL_CATEGORY');
+    v_type bytea := laplace.relation_type_id('HAS_GENERAL_CATEGORY');
 BEGIN
     RETURN QUERY
     WITH cat AS MATERIALIZED (
@@ -82,8 +82,8 @@ BEGIN
                                    'unicode/category/Zl/v1',
                                    'unicode/category/Zp/v1',
                                    'unicode/category/Cc/v1')) AS is_sep
-        FROM attestations a
-        JOIN canonical_names cn ON cn.id = a.object_id
+        FROM laplace.attestations a
+        JOIN laplace.canonical_names cn ON cn.id = a.object_id
         WHERE a.type_id = v_type              -- bound literal -> LIST prune at plan time
           AND a.subject_id = ANY (p_vocab)    -- index condition -> HASH prune per id
         GROUP BY a.subject_id
@@ -91,6 +91,6 @@ BEGIN
     SELECT (v.ord::int4 - 1)
     FROM unnest(p_vocab) WITH ORDINALITY v(id, ord)
     LEFT JOIN cat ON cat.id = v.id
-    WHERE COALESCE(cat.is_sep, is_all_whitespace(render_text_fast(v.id, 8)));
+    WHERE COALESCE(cat.is_sep, laplace.is_all_whitespace(laplace.render_text_fast(v.id, 8)));
 END;
 $$;

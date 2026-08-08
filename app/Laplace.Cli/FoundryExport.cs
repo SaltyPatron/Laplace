@@ -1637,7 +1637,7 @@ internal static class FoundryExport
         // Fallback for DB generations whose entities.highway_mask is unpopulated
         // (live finding 2026-07-08: 0 of 20.2M entities carry masks): ask the
         // substrate to recompute them, then re-read. Derivation lives in
-        // highway_mask_refresh(); this is only a call site.
+        // consensus.highway_mask_refresh(); this is only a call site.
         bool anyStored = false;
         foreach (var m in masks) if (!m.IsZero) { anyStored = true; break; }
         if (!anyStored)
@@ -1657,7 +1657,7 @@ internal static class FoundryExport
 
             if (refreshed > 0)
                 Apply(await NpgsqlFoundryReads.EntityHighwayMasksAsync(ds, vocab));
-            Console.WriteLine($"  highway masks: recomputed via highway_mask_refresh ({refreshed:N0} entities updated; stored masks were empty)");
+            Console.WriteLine($"  highway masks: recomputed via consensus.highway_mask_refresh({refreshed:N0} entities updated; stored masks were empty)");
         }
         return masks;
     }

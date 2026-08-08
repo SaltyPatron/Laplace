@@ -81,7 +81,7 @@ ON CONFLICT DO NOTHING;
 -- bonuses CANNOT resurrect a refuted edge: bonuses rank confirmed candidates
 -- only; the consensus verdict gates placement.
 SELECT count(*) = 1 AS only_confirmed_walked
-FROM walk_branches(
+FROM consensus.walk_branches(
     (SELECT id FROM walk_c_fixtures WHERE name = 'subject'),
     relation_type_id('COMPLETES_TO'), 1, 10);
  only_confirmed_walked 
@@ -90,7 +90,7 @@ FROM walk_branches(
 (1 row)
 
 SELECT entity_id = (SELECT id FROM walk_c_fixtures WHERE name = 'obj_confirmed') AS walked_node_is_confirmed
-FROM walk_branches(
+FROM consensus.walk_branches(
     (SELECT id FROM walk_c_fixtures WHERE name = 'subject'),
     relation_type_id('COMPLETES_TO'), 1, 10);
  walked_node_is_confirmed 
@@ -101,7 +101,7 @@ FROM walk_branches(
 -- 3Cb: NULL intent mask -- unfiltered; confirmed edge still walked (refuted
 -- stays excluded by the 3Ca score floor regardless of masking).
 SELECT count(*) = 1 AS null_mask_confirmed_present
-FROM walk_branches(
+FROM consensus.walk_branches(
     (SELECT id FROM walk_c_fixtures WHERE name = 'subject'),
     relation_type_id('COMPLETES_TO'), 1, 10, NULL, NULL);
  null_mask_confirmed_present 
@@ -112,7 +112,7 @@ FROM walk_branches(
 -- 3Cb: intent mask sharing a bit with the confirmed object's highway_mask --
 -- confirmed edge survives the gate.
 SELECT count(*) = 1 AS overlapping_mask_confirmed_present
-FROM walk_branches(
+FROM consensus.walk_branches(
     (SELECT id FROM walk_c_fixtures WHERE name = 'subject'),
     relation_type_id('COMPLETES_TO'), 1, 10,
     decode(repeat('01', 32), 'hex'), NULL);
@@ -124,7 +124,7 @@ FROM walk_branches(
 -- 3Cb: intent mask with zero bit overlap against the confirmed object's
 -- highway_mask -- gated out before scoring even runs.
 SELECT count(*) = 0 AS disjoint_mask_excludes_confirmed
-FROM walk_branches(
+FROM consensus.walk_branches(
     (SELECT id FROM walk_c_fixtures WHERE name = 'subject'),
     relation_type_id('COMPLETES_TO'), 1, 10,
     decode(repeat('02', 32), 'hex'), NULL);
@@ -136,12 +136,12 @@ FROM walk_branches(
 -- A*: default call (p_use_geometry omitted) is byte-identical to explicit
 -- false -- the toggle must never change default behavior.
 SELECT
-    (SELECT array_agg(entity_id ORDER BY step) FROM astar_path_raw(
+    (SELECT array_agg(entity_id ORDER BY step) FROM converse.astar_path_raw(
         (SELECT id FROM walk_c_fixtures WHERE name = 'subject'),
         ARRAY[(SELECT id FROM walk_c_fixtures WHERE name = 'obj_confirmed')],
         ARRAY[relation_type_id('COMPLETES_TO')], 4, false))
     =
-    (SELECT array_agg(entity_id ORDER BY step) FROM astar_path_raw(
+    (SELECT array_agg(entity_id ORDER BY step) FROM converse.astar_path_raw(
         (SELECT id FROM walk_c_fixtures WHERE name = 'subject'),
         ARRAY[(SELECT id FROM walk_c_fixtures WHERE name = 'obj_confirmed')],
         ARRAY[relation_type_id('COMPLETES_TO')], 4, false, false))
@@ -156,12 +156,12 @@ SELECT
 -- contributes 0.0 for coordless goals, never errors) and still find the same
 -- path as the non-geometry call.
 SELECT
-    (SELECT array_agg(entity_id ORDER BY step) FROM astar_path_raw(
+    (SELECT array_agg(entity_id ORDER BY step) FROM converse.astar_path_raw(
         (SELECT id FROM walk_c_fixtures WHERE name = 'subject'),
         ARRAY[(SELECT id FROM walk_c_fixtures WHERE name = 'obj_confirmed')],
         ARRAY[relation_type_id('COMPLETES_TO')], 4, false, false))
     =
-    (SELECT array_agg(entity_id ORDER BY step) FROM astar_path_raw(
+    (SELECT array_agg(entity_id ORDER BY step) FROM converse.astar_path_raw(
         (SELECT id FROM walk_c_fixtures WHERE name = 'subject'),
         ARRAY[(SELECT id FROM walk_c_fixtures WHERE name = 'obj_confirmed')],
         ARRAY[relation_type_id('COMPLETES_TO')], 4, false, true))

@@ -5,12 +5,12 @@
 -- slots (glue has high joint AND high marginal; content is concentrated).
 --
 -- Counts fuse the two continuation witnesses at word grain:
---   corpus order  : word_order (tier>2 trajectory adjacency, punctuation
+--   corpus order  : generation.word_order(tier>2 trajectory adjacency, punctuation
 --                   included once vocab admits it)
---   discourse     : sentence_order_word_bridge (sentence-boundary pairs)
+--   discourse     : generation.sentence_order_word_bridge(sentence-boundary pairs)
 --
 -- Pillar 5 (2026-07-20): the PRECEDES-consensus leg is GONE. Text never should
--- have materialized word adjacency as attestations (Pillar 3a, e5e1b42) -- the
+-- have materialized word adjacency as laplace.attestations(Pillar 3a, e5e1b42) -- the
 -- trajectory already holds the ordered sequence losslessly, and word_order
 -- reads it via laplace_trajectory_constituents. Keeping a PRECEDES leg here is
 -- what forced every text lane to keep emitting the redundant edges; both legs
@@ -18,21 +18,21 @@
 -- Emitted w = log((c(x,y) + k) / (c(x) + k*V)) — add-k smoothing over the
 -- vocab, so each row is a proper (log) conditional distribution up to the
 -- unseen-mass remainder. NEGATIVE values are expected and meaningful.
-CREATE OR REPLACE FUNCTION continuation_conditional_plane(
+DROP FUNCTION IF EXISTS laplace.continuation_conditional_plane(bytea[], int, double precision, int);
+CREATE OR REPLACE FUNCTION generation.continuation_conditional_plane(
         p_vocab bytea[], p_trajs int DEFAULT 200000, p_smooth_k double precision DEFAULT 0.5,
         p_degree_cap int DEFAULT 512)
     RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
-    LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
     WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
     vsize AS (SELECT count(*)::float8 AS n FROM v),
     corpus_pairs AS (
         SELECT subject_id AS x, object_id AS y, w AS c
-        FROM word_order(p_vocab, p_trajs, 1)
+        FROM generation.word_order(p_vocab, p_trajs, 1)
     ),
     bridge_pairs AS (
         SELECT subject_id AS x, object_id AS y, w AS c
-        FROM sentence_order_word_bridge(p_vocab, p_trajs)
+        FROM generation.sentence_order_word_bridge(p_vocab, p_trajs)
     ),
     fused AS (
         SELECT x, y, sum(c) AS c

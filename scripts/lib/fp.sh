@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Content fingerprints for change-aware phase skipping (sourced, not executed).
 #
 # A fingerprint is a sha256 over git's index blob ids for a pathspec plus live

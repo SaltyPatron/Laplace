@@ -1,18 +1,17 @@
+-- String body (not BEGIN ATOMIC): depends on v_word_points which extension
+-- upgrades recreate in the same script; parse-time resolution can miss mid-upgrade
+-- the same way source_roster hit v_attestation_readable (GH #764).
 CREATE OR REPLACE FUNCTION content_count(p_source bytea DEFAULT NULL)
     RETURNS bigint
     LANGUAGE sql STABLE
-    SET search_path = @extschema@, public AS $$
+AS $$
     SELECT CASE
         WHEN p_source IS NULL THEN
             (SELECT count(*) FROM @extschema@.v_word_points)
         ELSE
             -- Dedup the source's subjects FIRST (single hash-aggregate pass), THEN probe
             -- v_word_points by id. The prior JOIN nested-looped every source attestation
-            -- into physicalities: on UD (51.9M source attestations) that built a
-            -- ~1.9-BILLION-row intermediate before count(DISTINCT) — 16 min, seq-scan-
-            -- bound, and no amount of ANALYZE fixes it (it's the query shape, not stats).
-            -- Collapsing to distinct subjects before the probe is a ~17x cheaper plan
-            -- (EXPLAIN cost 33.1M -> 1.98M) with no row explosion.
+            -- into laplace.physicalities and exploded.
             (SELECT count(*)
              FROM (SELECT DISTINCT a.subject_id
                    FROM @extschema@.attestations a

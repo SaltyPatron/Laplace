@@ -1,7 +1,7 @@
 -- Retired: the English prompt router.
 --   parse_ask(prompt) -> (ask_kind, phrase, phrase2, type_name)   [pg_laplace_parse_ask]
 -- The ~30-pattern English regex ladder that guessed a read intent and a relation
--- type from the surface form of a prompt is gone; recall_intent() takes the shape
+-- type from the surface form of a prompt is gone; converse.recall_intent() takes the shape
 -- and the resolved ids as arguments instead. The C symbol pg_laplace_parse_ask no
 -- longer exists in the .so, so on the UPGRADE path (which only CREATE-OR-REPLACEs
 -- the manifest files and never drops what left it) the old catalog row would

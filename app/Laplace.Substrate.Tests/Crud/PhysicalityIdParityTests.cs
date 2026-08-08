@@ -17,11 +17,9 @@ namespace Laplace.SubstrateCRUD.Tests;
 /// and hashes that. They never call the production helper to build the expectation, so a
 /// change to <c>PhysicalityId.Compute</c> fails here instead of propagating.
 ///
-/// What this does NOT pin is the C side, which is not exported through
-/// <c>NativeInterop</c>. Exporting <c>laplace_physicality_id_compute</c> and asserting
-/// against it is the real gate and remains owed; until then this holds the C# half to the
-/// written spec, and the endianness is now explicit on both sides rather than inherited
-/// from the host, so the two can no longer diverge by platform.
+/// C side is exported as <c>laplace_physicality_id_compute</c> through
+/// <see cref="NativeInterop.PhysicalityIdCompute"/>; <see cref="Compute_MatchesNativeC"/>
+/// is the real cross-language gate.
 /// </summary>
 public class PhysicalityIdParityTests
 {
@@ -100,5 +98,17 @@ public class PhysicalityIdParityTests
         Assert.NotEqual(
             PhysicalityId.Compute(H(0x01), PhysicalityType.Content),
             PhysicalityId.Compute(H(0x02), PhysicalityType.Content));
+    }
+
+    [Theory]
+    [InlineData(PhysicalityType.Content)]
+    [InlineData(PhysicalityType.Projection)]
+    public unsafe void Compute_MatchesNativeC(PhysicalityType type)
+    {
+        var entityId = H(0xA5, 7);
+        Hash128 native;
+        NativeInterop.PhysicalityIdCompute(entityId, (short)type, &native);
+        Assert.Equal(PhysicalityId.Compute(entityId, type), native);
+        Assert.Equal(SpecPreImage(entityId, (short)type), native);
     }
 }

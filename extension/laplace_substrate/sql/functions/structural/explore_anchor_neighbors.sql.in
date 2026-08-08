@@ -1,6 +1,6 @@
 -- explore_anchor_neighbors: neighbour search from a COMPUTED anchor geometry,
 -- not a stored one. When a word (or any content) is typed but never witnessed,
--- its content hash resolves to an id with no entities/physicalities row
+-- its content hash resolves to an id with no laplace.entities/laplace.physicalities row
 -- (exists = false) -- yet its geometry is fully determined: HashComposer pins
 -- every codepoint on S3 from the t0 perfcache and composes the parent coord and
 -- trajectory in-process. The endpoint hands that computed anchor here as bound
@@ -17,8 +17,9 @@
 --     entity_curve = ST_MakeLine(child.coord ORDER BY ordinal)). p_traj_wkt from
 --     ExploreDecomposeService is already a realized LINESTRING ZM of child
 --     coords; candidates must use entity_curve, never packed
---     physicalities.trajectory (Rule #3 / Issue 51).
-CREATE OR REPLACE FUNCTION explore_anchor_neighbors(
+--     laplace.physicalities.trajectory (Rule #3 / Issue 51).
+DROP FUNCTION IF EXISTS laplace.explore_anchor_neighbors(float8, float8, float8, float8, text, integer, integer, float8);
+CREATE OR REPLACE FUNCTION structural.explore_anchor_neighbors(
     p_cx float8, p_cy float8, p_cz float8, p_cm float8,
     p_traj_wkt   text    DEFAULT NULL,
     p_geodesic_k integer DEFAULT 12,
@@ -64,7 +65,7 @@ BEGIN
     SELECT 'geodesic'::text,
            n.entity_id,
            COALESCE(NULLIF(laplace.render_text_fast(n.entity_id, 8), ''),
-                    laplace.label_or_hex(n.entity_id)),
+                    converse.label_or_hex(n.entity_id)),
            (SELECT min(e.tier) FROM laplace.entities e WHERE e.id = n.entity_id),
            n.geo,
            NULL::float8
@@ -86,7 +87,7 @@ BEGIN
             SELECT c.entity_id,
                    public.laplace_frechet_4d(c.curve, v_traj) AS fr
             FROM (
-                SELECT pre.entity_id, laplace.entity_curve(pre.entity_id) AS curve
+                SELECT pre.entity_id, structural.entity_curve(pre.entity_id) AS curve
                 FROM pre
             ) c
             WHERE c.curve IS NOT NULL
@@ -94,7 +95,7 @@ BEGIN
         SELECT 'shape'::text,
                f.entity_id,
                COALESCE(NULLIF(laplace.render_text_fast(f.entity_id, 8), ''),
-                        laplace.label_or_hex(f.entity_id)),
+                        converse.label_or_hex(f.entity_id)),
                2::smallint,
                NULL::float8,
                f.fr

@@ -179,7 +179,7 @@ public static class NpgsqlIngestOps
         return v is bool b && b;
     }
 
-    // W5 seed-variance probe through the installed op (laplace.generation_probe):
+    // W5 seed-variance probe through the installed op (generation.probe):
     // both generation lanes over one prompt and a seed set, one row per
     // (lane, seed). Replay — the failure converse_compose's header gates wiring
     // on — is distinct-reply-count == 1 for a lane across multiple seeds.

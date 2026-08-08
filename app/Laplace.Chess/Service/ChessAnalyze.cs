@@ -175,7 +175,7 @@ public static class ChessAnalyze
         // Reused across plies so the TT warms; only built when engine-eval is requested.
         var engine = engineDepth > 0 ? new Search(EvalTerm.All) : null;
 
-        // Directed SAN resolve (same as LineId replay) — full Legal() per ply was ~46% of
+        // Directed SAN converse.resolve(same as LineId replay) — full Legal() per ply was ~46% of
         // analyze time. Apply still owns repetition history for the motif window boards.
         var state = initial;
         ChessComposed? carried = null;

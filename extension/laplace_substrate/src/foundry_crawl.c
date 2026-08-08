@@ -139,7 +139,7 @@ pg_laplace_foundry_crawl(PG_FUNCTION_ARGS)
         Oid pargs[3] = { BYTEAOID, INT4OID, BYTEAARRAYOID };
         plan = SPI_prepare(
             "SELECT object_id, tier, rating, rd "
-            "FROM laplace.foundry_crawl_neighbors($1, $2, $3)",
+            "FROM consensus.foundry_crawl_neighbors($1, $2, $3)",
             3, pargs);
     }
     else
@@ -147,7 +147,7 @@ pg_laplace_foundry_crawl(PG_FUNCTION_ARGS)
         Oid pargs[2] = { BYTEAOID, INT4OID };
         plan = SPI_prepare(
             "SELECT object_id, tier, rating, rd "
-            "FROM laplace.foundry_crawl_neighbors($1, $2, NULL)",
+            "FROM consensus.foundry_crawl_neighbors($1, $2, NULL)",
             2, pargs);
     }
     if (plan == NULL)

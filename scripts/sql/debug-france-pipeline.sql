@@ -14,7 +14,7 @@ rel_types AS (
 crawled AS (
     SELECT c.entity_id, c.weight, row_number() OVER (ORDER BY c.weight DESC, c.entity_id) AS rn
     FROM seed_ids si, rel_types rt
-    CROSS JOIN LATERAL foundry_crawl(si.ids, 1500, 3, 64, rt.ids) c
+    CROSS JOIN LATERAL generation.foundry_crawl(si.ids, 1500, 3, 64, rt.ids) c
 ),
 order1 AS (
     SELECT c.object_id AS entity_id, eff_mu(c.rating, c.rd)::numeric AS w,

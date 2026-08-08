@@ -12,6 +12,7 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
 {
     private readonly NpgsqlDataSource _dataSource;
     private readonly NpgsqlDataSource _dataSourceReadOnly;
+    private readonly NpgsqlDataSource _dataSourceReadOnlyLong;
 
     public SubstrateClient()
     {
@@ -19,9 +20,20 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         // Same posture as MCP op: server-enforced read-only + statement timeout.
         _dataSourceReadOnly = LaplaceDataSource.Create(SubstrateAccess.Serving, dsb =>
         {
-            dsb.ConnectionStringBuilder.CommandTimeout = 20;
+            dsb.ConnectionStringBuilder.CommandTimeout =
+                InstalledOpInvoker.DefaultCommandTimeoutSeconds;
             dsb.ConnectionStringBuilder.Options =
                 "-c default_transaction_read_only=on -c statement_timeout=15000";
+        });
+        // Explicitly requested long-running installed operations (generation
+        // evals on a cold cache) remain read-only and server-bounded. Normal op
+        // traffic stays on the 15-second datasource above.
+        _dataSourceReadOnlyLong = LaplaceDataSource.Create(SubstrateAccess.Serving, dsb =>
+        {
+            dsb.ConnectionStringBuilder.CommandTimeout = InstalledOpInvoker.MaxCommandTimeoutSeconds;
+            dsb.ConnectionStringBuilder.MaxPoolSize = 2;
+            dsb.ConnectionStringBuilder.Options =
+                "-c default_transaction_read_only=on -c statement_timeout=600000";
         });
     }
 
@@ -57,7 +69,7 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
     }
 
     /// <summary>
-    /// Tenant-isolated converse (spec 34, opt-in): re-fold the tenant's own witnessed
+    /// Tenant-isolated converse.converse(spec 34, opt-in): re-fold the tenant's own witnessed
     /// world via scoped_consensus into pg_temp.consensus, which shadows
     /// laplace.consensus for every unqualified read on THIS connection (the Build-A-
     /// Bear scoped-pour mechanism), then run the same session read. One connection
@@ -70,7 +82,7 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         {
             await using var conn = await _dataSource.OpenConnectionAsync(ct);
             await using (var scopeCmd = new NpgsqlCommand(
-                "CREATE TEMP TABLE consensus AS SELECT * FROM laplace.scoped_consensus(@sources)", conn))
+                "CREATE TEMP TABLE consensus AS SELECT * FROM consensus.scoped_consensus(@sources)", conn))
             {
                 scopeCmd.Parameters.AddWithValue("sources", scopeSources);
                 await scopeCmd.ExecuteNonQueryAsync(ct);
@@ -105,16 +117,16 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         // (session context + session_topics carry) — clients never resend history,
         // and a resent history would be ignored here by construction (spec 34).
         //
-        // laplace.chat() is the conversational entry point — orientation over the
+        // converse.chat() is the conversational entry point — orientation over the
         // prompt's candidate senses, session carry, shape/band lenses, and its own
         // internal fallbacks — the same lane the MCP chat tool and CLI ride. This
-        // endpoint predated chat() and was still reading recall_session directly,
+        // endpoint predated converse.chat() and was still reading recall_session directly,
         // which treats the prompt as a phrase lookup: measured on the deployed box,
         // "What is a dog?" answered "I hold \"a dog\" but no gloss or continuation
-        // witnessed yet" on this lane while chat() answered with the dog gloss.
+        // witnessed yet" on this lane while converse.chat() answered with the dog gloss.
         // recall_session stays as the fallback when chat yields nothing, so the
         // no-consensus case still reports truthfully instead of faking prose.
-        // Tenant scoping is unaffected: chat() reads `consensus` unqualified, so
+        // Tenant scoping is unaffected: converse.chat() reads `consensus` unqualified, so
         // the pg_temp.consensus shadow on THIS connection governs it the same way.
         var reply = await NpgsqlSubstrateReads.ChatAsync(conn, prompt, session, ct);
         if (!string.IsNullOrWhiteSpace(reply))
@@ -320,9 +332,9 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
     }
 
     /// <summary>
-    /// Exact consensus_stats() is a full count(*) over attestations plus a full aggregate
+    /// Exact consensus.stats() is a full count(*) over attestations plus a full aggregate
     /// over consensus — measured minutes at 135M/124M rows live. Attempt it within a
-    /// bounded budget, then fall back to laplace.consensus_stats_approx() (planner
+    /// bounded budget, then fall back to consensus.stats_approx() (planner
     /// estimates; avg/max witnesses come back NULL — that nullness IS the approximation
     /// signal in the contract).
     /// </summary>
@@ -407,7 +419,7 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
     };
 
     /// <summary>
-    /// laplace.top_relations(@limit, NULL) computes edge_rank() per row over the FULL
+    /// consensus.top_relations(@limit, NULL) computes edge_rank() per row over the FULL
     /// consensus table (124M+ rows) before its LIMIT — measured >9 minutes live, which
     /// killed /v1/explore/catalog, /v1/audit/report and /v1/visualizations/substrate.
     /// <see cref="NpgsqlSubstrateReads.TopRelationsAsync"/> supersedes it: consensus_eff_mu_btree
@@ -434,7 +446,7 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
     public async Task<EntityEvidence?> EvidenceAsync(string target, int limit, CancellationToken ct)
     {
         // Provenance receipts: deduped (type, object) claims with named sources — not
-        // consensus_out (that duplicates chat/salient-facts) or raw attestations_out
+        // consensus.consensus_out(that duplicates chat/salient-facts) or raw attestations_out
         // (one row per source/context cartesian product).
         try
         {
@@ -497,9 +509,10 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
             long entities = 0, consensus = 0;
             foreach (var row in await NpgsqlSubstrateReads.SubstrateCountsAsync(conn, ct))
             {
-                if (row.Metric.StartsWith("entities", StringComparison.OrdinalIgnoreCase))
+                // Metric keys from ops.substrate_counts — relation roles, not Brand.table.
+                if (row.Metric.Equals("entities(ESTIMATE)", StringComparison.Ordinal))
                     entities = Math.Max(entities, row.Value);
-                else if (row.Metric.StartsWith("consensus", StringComparison.OrdinalIgnoreCase))
+                else if (row.Metric.Equals("consensus(ESTIMATE)", StringComparison.Ordinal))
                     consensus = Math.Max(consensus, row.Value);
             }
 
@@ -593,12 +606,19 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         }
     }
 
-    public Task<InstalledOpInvoker.OpResult> InvokeOpAsync(
-        string name, IReadOnlyDictionary<string, JsonNode?>? args, int maxRows, CancellationToken ct)
+    public async Task<InstalledOpInvoker.OpResult> InvokeOpAsync(
+        string name, IReadOnlyDictionary<string, JsonNode?>? args, int maxRows,
+        int timeoutSeconds, CancellationToken ct)
     {
         try
         {
-            return InstalledOpInvoker.InvokeAsync(_dataSourceReadOnly, name, args, maxRows, ct);
+            var boundedTimeout = Math.Clamp(
+                timeoutSeconds, 1, InstalledOpInvoker.MaxCommandTimeoutSeconds);
+            var dataSource = boundedTimeout > InstalledOpInvoker.DefaultCommandTimeoutSeconds
+                ? _dataSourceReadOnlyLong
+                : _dataSourceReadOnly;
+            return await InstalledOpInvoker.InvokeAsync(
+                dataSource, name, args, maxRows, boundedTimeout, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is NpgsqlException or TimeoutException or PostgresException)
         {
@@ -608,6 +628,7 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
 
     public async ValueTask DisposeAsync()
     {
+        await _dataSourceReadOnlyLong.DisposeAsync();
         await _dataSourceReadOnly.DisposeAsync();
         await _dataSource.DisposeAsync();
     }

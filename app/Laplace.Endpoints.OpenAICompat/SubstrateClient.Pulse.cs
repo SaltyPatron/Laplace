@@ -14,9 +14,9 @@ internal sealed partial class SubstrateClient
 {
     public async Task<ModalitiesResponse> ModalitiesAsync(CancellationToken ct)
     {
-        var (text, chess, models, multilingual) =
+        var (text, chess, models, multilingual, documents) =
             await NpgsqlSubstrateReads.ModalityCountsAsync(_dataSource, ct, TranslateSubstrateError);
-        return new ModalitiesResponse("modalities", text, chess, models, multilingual);
+        return new ModalitiesResponse("modalities", text, chess, models, multilingual, documents);
     }
 
     public async Task<PulseResponse> PulseAsync(long nowUnix, CancellationToken ct)
