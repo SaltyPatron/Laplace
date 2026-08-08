@@ -6,7 +6,7 @@ using NpgsqlTypes;
 namespace Laplace.SubstrateCRUD.Npgsql;
 
 /// <summary>
-/// Call any installed <c>laplace.*</c> operation by name. The catalog from
+/// Call any installed substrate operation by name. The catalog from
 /// <c>laplace.api()</c> is the allow-list — nothing outside it is callable.
 /// Shared by MCP <c>op</c> and OpenAICompat <c>POST /v1/op</c> (GH #812).
 /// </summary>
@@ -77,7 +77,7 @@ public static class InstalledOpInvoker
         }
 
         // LIMIT rowCap + 1 so truncation is observable.
-        var sql = $"SELECT * FROM laplace.{QuoteIdent(name)}({string.Join(", ", call)}) LIMIT {rowCap + 1}";
+        var sql = $"SELECT * FROM {QualifiedCatalogName(name)}({string.Join(", ", call)}) LIMIT {rowCap + 1}";
         await using var cmd = readOnlyDb.CreateCommand(sql);
         foreach (var (slot, value) in bound)
             cmd.Parameters.Add(BindArg(slot, value));
@@ -160,6 +160,22 @@ public static class InstalledOpInvoker
     }
 
     private static string QuoteIdent(string ident) => '"' + ident.Replace("\"", "\"\"") + '"';
+
+    /// <summary>
+    /// Turn the exact name returned by <c>laplace.api()</c> into a qualified SQL
+    /// identifier. Legacy <c>laplace</c> operations are catalogued without a
+    /// schema; purpose-schema and public operations are catalogued as
+    /// <c>schema.function</c>. Quote the two identifiers separately — quoting the
+    /// whole catalog name would look for a function literally named
+    /// <c>ops.substrate_counts</c> inside <c>laplace</c>.
+    /// </summary>
+    internal static string QualifiedCatalogName(string catalogName)
+    {
+        var dot = catalogName.IndexOf('.');
+        return dot < 0
+            ? $"laplace.{QuoteIdent(catalogName)}"
+            : $"{QuoteIdent(catalogName[..dot])}.{QuoteIdent(catalogName[(dot + 1)..])}";
+    }
 
     /// <summary>
     /// Map one JSON argument to a value Npgsql can bind. A JSON array becomes a

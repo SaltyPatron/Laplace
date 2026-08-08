@@ -694,16 +694,32 @@ jobs:
         run: bash scripts/check-substrate-floor.sh "${PGDATABASE:-laplace}"
 
       - name: Live endpoint smoke
+        env:
+          LAPLACE_API_BASE: http://127.0.0.1:8080
         run: |
-          curl -fsS http://127.0.0.1:5187/v1/capabilities | grep -q '"chat_completions"'
-          curl -fsS http://127.0.0.1:5187/health/ready
-          echo
-          psql -d laplace -U laplace_admin -v ON_ERROR_STOP=1 \
-            -c "SELECT metric, value FROM laplace.substrate_counts();"
-          curl -fsS -X POST http://127.0.0.1:5187/v1/chat/completions \
+          capabilities="$(curl -fsS "${LAPLACE_API_BASE}/v1/capabilities")"
+          grep -q '"chat_completions"' <<<"${capabilities}"
+          grep -q '"op"' <<<"${capabilities}"
+
+          readiness="$(curl -fsS "${LAPLACE_API_BASE}/health/ready")"
+          printf '%s\n' "${readiness}"
+          grep -q '"ready":true' <<<"${readiness}"
+          grep -q '"substrate_reachable":true' <<<"${readiness}"
+          grep -Eq '"entities":[1-9][0-9]*' <<<"${readiness}"
+          grep -Eq '"consensus_relations":[1-9][0-9]*' <<<"${readiness}"
+
+          inventory="$(curl -fsS -X POST "${LAPLACE_API_BASE}/v1/op" \
             -H 'Content-Type: application/json' -H 'X-Laplace-Tenant: ci' \
-            --data '{"model":"laplace-converse-001","messages":[{"role":"user","content":"dog"}]}'
-          echo
+            --data '{"name":"ops.substrate_counts","max_rows":20}')"
+          printf '%s\n' "${inventory}"
+          grep -q '"object":"op.result"' <<<"${inventory}"
+          grep -q '"name":"ops.substrate_counts"' <<<"${inventory}"
+
+          completion="$(curl -fsS -X POST "${LAPLACE_API_BASE}/v1/chat/completions" \
+            -H 'Content-Type: application/json' -H 'X-Laplace-Tenant: ci' \
+            --data '{"model":"laplace-converse-001","messages":[{"role":"user","content":"dog"}]}')"
+          printf '%s\n' "${completion}"
+          grep -q '"object":"chat.completion"' <<<"${completion}"
 
       - name: Endpoint contract tests against the live service
         run: |
