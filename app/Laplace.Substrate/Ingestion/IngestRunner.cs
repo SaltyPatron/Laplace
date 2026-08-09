@@ -302,9 +302,12 @@ public sealed class IngestRunner
             }, CancellationToken.None);
         }
 
-        await _writer.BeginBulkRunAsync(runCt);
+        bool bulkRunStarted = false;
         try
         {
+            await _writer.BeginBulkRunAsync(runCt);
+            bulkRunStarted = true;
+
             if (syncIngest)
             {
                 CpuTopology.RequirePerformanceCorePin();
@@ -412,9 +415,9 @@ public sealed class IngestRunner
                     }
                 }, "ingest-decompose-pcore", runCt);
 
-                // Parallel apply when index-cycle defer is on: presence preload has
-                // made novelty client-side and the writer skips the global advisory
-                // lock. CommitWorkers otherwise sat idle (SingleReader apply loop).
+                // The writer retains its cross-process advisory transaction lock.
+                // This lane only controls in-process apply workers; those remain
+                // serial until claim-before-COPY is proven race-free.
                 //
                 // Cap by connection budget: each apply worker opens 1 control conn plus
                 // up to ApplyParallelism COPY conns (and merge fans). Force-run on this
@@ -543,14 +546,15 @@ public sealed class IngestRunner
             {
                 await cappedWatchdog.ConfigureAwait(false);
             }
-            // Rebuild on every exit path, including failures — a fatal
+            // Rebuild after every successfully opened run, including failures — a fatal
             // apply error must not leave the table index-less. The one
             // exception is cancellation: the user is tearing the process
             // down, so don't block exit on a minutes-scale rebuild — the
             // journal recovers the drops at the next run's begin.
             try
             {
-                await _writer.CompleteBulkRunAsync(ct);
+                if (bulkRunStarted)
+                    await _writer.CompleteBulkRunAsync(ct);
             }
             catch (OperationCanceledException)
             {
