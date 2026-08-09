@@ -40,21 +40,31 @@ CREATE OR REPLACE FUNCTION converse.links(p_word text)
     AS $$
     WITH base AS MATERIALIZED (
         SELECT c.type_id, c.object_id,
-               consensus.eff_mu(c.rating, c.rd) AS emu
+               laplace.eff_mu(c.rating, c.rd) AS emu
         FROM laplace.consensus c
         WHERE c.subject_id = laplace.word_id(p_word)
     ),
-    rel AS MATERIALIZED (
-        -- One row per DISTINCT relation type present on this subject.
+    ids AS MATERIALIZED (
+        SELECT COALESCE(array_agg(DISTINCT x.id ORDER BY x.id), '{}'::bytea[]) AS a
+        FROM (SELECT type_id AS id FROM base UNION SELECT object_id FROM base) x
+    ), labels AS MATERIALIZED (
+        SELECT i.id, l.txt
+        FROM ids b,
+             LATERAL unnest(b.a) WITH ORDINALITY AS i(id, ord),
+             LATERAL unnest(realize.label_batch(b.a)) WITH ORDINALITY AS l(txt, ord)
+        WHERE i.ord = l.ord
+    ), rel AS MATERIALIZED (
         SELECT t.type_id,
-               COALESCE(NULLIF(consensus.relation_canonical(t.type_id), ''), realize.label(t.type_id)) AS relation
+               COALESCE(NULLIF(laplace.relation_canonical(t.type_id), ''), l.txt) AS relation
         FROM (SELECT DISTINCT b.type_id FROM base b) t
+        JOIN labels l ON l.id = t.type_id
     )
     SELECT r.relation,
-           realize.label(b.object_id) AS target,
+           l.txt AS target,
            (b.emu)::float8 / 1e9 AS strength
     FROM base b
     JOIN rel r ON r.type_id = b.type_id
-    ORDER BY consensus.edge_rank(b.type_id, b.emu) DESC,
+    JOIN labels l ON l.id = b.object_id
+    ORDER BY laplace.edge_rank(b.type_id, b.emu) DESC,
              strength DESC, r.relation
 $$;

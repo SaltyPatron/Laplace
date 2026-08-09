@@ -48,7 +48,7 @@
 -- the caller and pushing predicates through to the index. The 1-arg `lexical.senses()` this
 -- overload sits beside dropped the clause under #617 and inlines to an index scan;
 -- this overload is on the same read path and was still paying it. Every reference is
--- schema-qualified instead, which is what the clause was doing and costs
+-- `@extschema@.`-qualified instead, which is what the clause was doing and costs
 -- nothing at plan time.
 DROP FUNCTION IF EXISTS laplace.senses(bytea, bytea[]);
 CREATE OR REPLACE FUNCTION lexical.senses(p_word bytea, p_context bytea[])
@@ -67,25 +67,25 @@ CREATE OR REPLACE FUNCTION lexical.senses(p_word bytea, p_context bytea[])
         WHERE s.synset_id IS NOT NULL
     ),
     frame_t AS MATERIALIZED (
-        SELECT id FROM consensus.relation_family_members('EVOKES_FRAME')
+        SELECT id FROM @extschema@.relation_family_members('EVOKES_FRAME')
     ),
     cand AS MATERIALIZED (
         SELECT s.sense_id, ss.object_id AS synset_id,
                s.rating, s.rd, s.witness_count AS w1,
                ss.witness_count AS w2
-        FROM laplace.v_word_senses s
-        JOIN laplace.consensus ss ON ss.subject_id = s.sense_id
-                         AND ss.type_id = laplace.relation_type_id('IS_SENSE_OF')
+        FROM @extschema@.v_word_senses s
+        JOIN @extschema@.consensus ss ON ss.subject_id = s.sense_id
+                         AND ss.type_id = @extschema@.relation_type_id('IS_SENSE_OF')
         WHERE s.word_id = ANY(lexical.lexical_peers(p_word))
     ),
     -- USAGE: candidate owns a sentence (gloss band 1 / example band 7) whose
     -- word-tier laplace.constituents include a context token.
     own_sent AS (
         SELECT DISTINCT c.subject_id AS sid, c.object_id AS gid,
-               consensus.eff_mu(c.rating, c.rd) AS w
-        FROM laplace.consensus c
+               @extschema@.eff_mu(c.rating, c.rd) AS w
+        FROM @extschema@.consensus c
         WHERE c.subject_id IN (SELECT synset_id FROM cand)
-          AND laplace.relation_highway_band(c.type_id) IN (1, 7)
+          AND consensus.relation_highway_band(c.type_id) IN (1, 7)
     ),
     lane_usage AS (
         SELECT os.sid, sum(os.w) AS boost
@@ -97,14 +97,14 @@ CREATE OR REPLACE FUNCTION lexical.senses(p_word bytea, p_context bytea[])
     ),
     -- FRAME: shared frame between a context sense and the candidate.
     ctx_frame AS (
-        SELECT DISTINCT c.object_id AS fid, consensus.eff_mu(c.rating, c.rd) AS w
+        SELECT DISTINCT c.object_id AS fid, @extschema@.eff_mu(c.rating, c.rd) AS w
         FROM ctx_syn s
-        JOIN laplace.consensus c ON c.subject_id = s.sid
+        JOIN @extschema@.consensus c ON c.subject_id = s.sid
         WHERE c.type_id IN (SELECT id FROM frame_t)
     ),
     lane_frame AS (
         SELECT c.subject_id AS sid, sum(cf.w) AS boost
-        FROM laplace.consensus c
+        FROM @extschema@.consensus c
         JOIN ctx_frame cf ON cf.fid = c.object_id
         WHERE c.subject_id IN (SELECT synset_id FROM cand)
           AND c.type_id IN (SELECT id FROM frame_t)
@@ -113,17 +113,17 @@ CREATE OR REPLACE FUNCTION lexical.senses(p_word bytea, p_context bytea[])
     -- TAXON: candidate meets a context sense within one hop, either direction.
     lane_taxon AS (
         SELECT x.sid, sum(x.w) AS boost FROM (
-            SELECT c.subject_id AS sid, consensus.eff_mu(c.rating, c.rd) AS w
-            FROM laplace.consensus c
+            SELECT c.subject_id AS sid, @extschema@.eff_mu(c.rating, c.rd) AS w
+            FROM @extschema@.consensus c
             WHERE c.subject_id IN (SELECT synset_id FROM cand)
               AND c.object_id IN (SELECT sid FROM ctx_syn)
-              AND laplace.relation_highway_band(c.type_id) IN (2, 4, 7)
+              AND consensus.relation_highway_band(c.type_id) IN (2, 4, 7)
             UNION ALL
-            SELECT c.object_id, consensus.eff_mu(c.rating, c.rd)
-            FROM laplace.consensus c
+            SELECT c.object_id, @extschema@.eff_mu(c.rating, c.rd)
+            FROM @extschema@.consensus c
             WHERE c.object_id IN (SELECT synset_id FROM cand)
               AND c.subject_id IN (SELECT sid FROM ctx_syn)
-              AND laplace.relation_highway_band(c.type_id) IN (2, 4, 7)
+              AND consensus.relation_highway_band(c.type_id) IN (2, 4, 7)
         ) x
         GROUP BY x.sid
     ),
@@ -134,10 +134,10 @@ CREATE OR REPLACE FUNCTION lexical.senses(p_word bytea, p_context bytea[])
     -- the explicit discourse prior and works when the gloss spelling differs
     -- from the prompt token. Weighted by the domain edge's laplace.eff_mu.
     lane_domain AS (
-        SELECT c.subject_id AS sid, sum(consensus.eff_mu(c.rating, c.rd)) AS boost
-        FROM laplace.consensus c
+        SELECT c.subject_id AS sid, sum(@extschema@.eff_mu(c.rating, c.rd)) AS boost
+        FROM @extschema@.consensus c
         WHERE c.subject_id IN (SELECT synset_id FROM cand)
-          AND c.type_id = laplace.relation_type_id('HAS_DOMAIN_TOPIC')
+          AND c.type_id = laplace.relation_type_resolve('HAS_DOMAIN_TOPIC')
           AND (c.object_id IN (SELECT id FROM ctx)
                OR c.object_id IN (SELECT sid FROM ctx_syn))
         GROUP BY c.subject_id
@@ -164,13 +164,13 @@ CREATE OR REPLACE FUNCTION lexical.senses(p_word bytea, p_context bytea[])
     -- carries.
     lane_direct AS (
         SELECT x.sid, sum(x.w) AS boost FROM (
-            SELECT c.object_id AS sid, consensus.eff_mu(c.rating, c.rd) AS w
-            FROM laplace.consensus c
+            SELECT c.object_id AS sid, @extschema@.eff_mu(c.rating, c.rd) AS w
+            FROM @extschema@.consensus c
             WHERE c.subject_id IN (SELECT id FROM ctx)
               AND c.object_id IN (SELECT synset_id FROM cand)
             UNION ALL
-            SELECT c.subject_id, consensus.eff_mu(c.rating, c.rd)
-            FROM laplace.consensus c
+            SELECT c.subject_id, @extschema@.eff_mu(c.rating, c.rd)
+            FROM @extschema@.consensus c
             WHERE c.object_id IN (SELECT id FROM ctx)
               AND c.subject_id IN (SELECT synset_id FROM cand)
         ) x
@@ -178,9 +178,9 @@ CREATE OR REPLACE FUNCTION lexical.senses(p_word bytea, p_context bytea[])
     )
     SELECT cand.sense_id,
            cand.synset_id,
-           consensus.eff_mu_display(cand.rating, cand.rd),
+           @extschema@.eff_mu_display(cand.rating, cand.rd),
            (cand.w1 + cand.w2)::bigint,
-           round(((consensus.eff_mu(cand.rating, cand.rd)
+           round(((@extschema@.eff_mu(cand.rating, cand.rd)
                    + COALESCE(lu.boost, 0)
                    + COALESCE(lf.boost, 0)
                    + COALESCE(lt.boost, 0)

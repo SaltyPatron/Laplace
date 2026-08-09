@@ -5,7 +5,7 @@ CREATE OR REPLACE FUNCTION ops.entity_physicalities(p_id bytea)
                   z double precision, m double precision,
                   radius double precision, n_constituents integer,
                   hilbert_index bytea)
-    LANGUAGE sql STABLE 
+    LANGUAGE sql STABLE
     AS $$
     SELECT p.type, ST_X(p.coord), ST_Y(p.coord), ST_Z(p.coord), ST_M(p.coord),
            p.radius_origin, p.n_constituents, p.hilbert_index

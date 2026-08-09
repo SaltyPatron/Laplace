@@ -12,12 +12,11 @@ using Npgsql;
 namespace Laplace.Endpoints.Mcp;
 
 /// <summary>
-/// The MCP tool surface over the substrate's installed SQL functions. Typed
+/// The MCP tool surface over the substrate's installed operations. Typed
 /// tools compose laplace.* helpers so bytea ids never cross the MCP boundary
 /// (resolve/word_id/relation_type_id on the way in, realize/realize_path on
-/// the way out); the sql tool is a read-only escape hatch to the whole api()
-/// catalog. Two data sources: request/response-bounded for typed tools, and a
-/// server-enforced read-only one (default_transaction_read_only) for sql.
+/// the way out). SQL text never crosses the MCP boundary; named tools and
+/// <c>op</c> are the complete client contract.
 /// </summary>
 internal sealed class SubstrateTools
 {
@@ -49,29 +48,12 @@ internal sealed class SubstrateTools
         Func<JsonObject> BuildSchema,
         Func<SubstrateTools, JsonObject?, (string Text, bool IsError)> Handler);
 
-    /// <summary>
-    /// The raw-SQL escape hatch is OPERATOR-LANE ONLY. It is server-enforced
-    /// read-only (default_transaction_read_only) so it cannot write, but it can
-    /// read every table — including witnessed session prompts — and no product
-    /// client should hold that. Closed by default; scripts/laplace-mcp opts the
-    /// local operator in. A client deployment that wants it must say so out loud.
-    /// </summary>
-    internal static readonly bool OperatorLane =
-        Environment.GetEnvironmentVariable("LAPLACE_MCP_OPERATOR") == "1";
-
     private static readonly ToolSpec[] ToolCatalog =
     [
         new("api", "Search the installed SQL function catalog by substring.",
             "Search the substrate's installed SQL function catalog (ops.api). Returns name, args, returns for every function matching the substring. Use before assuming a helper doesn't exist.",
             () => Schema(("query", "string", "substring to match, '' lists everything", true)),
             (s, a) => s.Api(a)),
-        new("sql", "Run a read-only SQL query against the substrate.",
-            "Run a read-only SQL query against the substrate (schema laplace on the search_path). The whole api() catalog is callable. Enforced read-only with a 15s statement timeout; rows capped (default 200).",
-            () => Schema(("query", "string", "SQL SELECT/WITH to execute", true),
-                         ("max_rows", "integer", "row cap, default 200", false)),
-            (s, a) => OperatorLane
-                ? s.ExecuteSql(a)
-                : ("sql is operator-lane only (launch with LAPLACE_MCP_OPERATOR=1); product reads go through the typed tools", true)),
         new("recall", "Ask the substrate about a topic (default read, session-carried).",
             "Ask the substrate about a topic (converse.recall_session). A bare prompt gets the default read — gloss then the strongest chain — with session topic carry. There is NO English question routing (the regex router was removed): for a specific read shape use the `query` tool instead. Returns reply rows with eff_mu (conservative Glicko-2 estimate) and witness counts.",
             () => Schema(("prompt", "string", "the topic (a word or phrase; phrasing is not parsed)", true),
@@ -158,10 +140,10 @@ internal sealed class SubstrateTools
             "Substrate health and inventory: laplace.substrate_health() plus ops.substrate_counts(). Metric values are NULLABLE: a metric the health pass did not measure reports null, which is a different fact from zero. identity_violations is null whenever deep_checked is false — read them together or a skipped deep pass looks like a clean one.",
             () => Schema(),
             (s, _) => s.Health()),
-        new("mcp_lane", "Which MCP lane is this process in (operator vs product).",
-            "Answer 'what am I talking to?' for this MCP process (GH #813 / #809): operator_lane (LAPLACE_MCP_OPERATOR=1), binary_path, process id, and start time. The lane is fixed at type init for the life of the process — Postgres cannot know it; this tool is the operation. health/help also surface operator_lane; this is the dedicated read so clients do not scrape those catalogs.",
+        new("mcp_runtime", "Identity of the deployed MCP process.",
+            "Answer 'what am I talking to?' for this MCP process: binary_path, process id, and start time. Use this to prove the client launched the deployed apphost rather than a repository-local build.",
             () => Schema(),
-            (_, _) => McpLane()),
+            (_, _) => McpRuntime()),
         new("source_status", "Is a source ingested, and how do we know.",
             "Ingest state per source (ops.source_status): known, ingested, approximate evidence, whether it observed entities, and the last run's status. Call this instead of assembling an answer — every hand-rolled version of this question is wrong in a specific way. An evidence>0 test reports the DOCUMENT lane as absent, because it is content-only by design (entities and geometry, zero distributional attestations); a source name you typed returns nothing when the spelling differs from the decomposer's declared SourceName; and ingest_run_journal is ops metadata that does not survive a dump/restore, so a missing row is not absence. Asking with a name ALWAYS returns exactly one row: `ingested=false` means the source wrote nothing, and `known=false` means this substrate has no record of that source id at all — which on a mesh this dense usually means the name is wrong rather than the corpus missing. Absence is an answer here, never an empty result set.",
             () => Schema(("source", "string", "declared source name, e.g. WordNetDecomposer; omit for every source", false)),
@@ -189,13 +171,10 @@ internal sealed class SubstrateTools
     ];
 
     public JsonArray ListTools() => new(
-        ToolCatalog.Where(t => OperatorLane || t.Name != "sql")
-            .Select(t => (JsonNode)Tool(t.Name, t.Summary, t.BuildSchema())).ToArray());
+        ToolCatalog.Select(t => (JsonNode)Tool(t.Name, t.Summary, t.BuildSchema())).ToArray());
 
     // Dispatch resolves through the catalog itself: a ToolSpec cannot be declared
     // without a Handler, so every advertised tool is callable by construction.
-    // The converse is not symmetric: `sql` stays callable-but-unadvertised outside
-    // the operator lane (ListTools filters it; its handler carries its own gate).
     public (string Text, bool IsError) Call(string name, JsonObject? args)
     {
         var spec = ToolCatalog.FirstOrDefault(t => string.Equals(t.Name, name, StringComparison.Ordinal));
@@ -495,7 +474,7 @@ internal sealed class SubstrateTools
         var supplied = args?["args"] as JsonObject;
         var dict = supplied?.ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
         var result = InstalledOpInvoker.InvokeAsync(
-                _dbReadOnly, name, dict, Int(args, "max_rows", DefaultRowCap), default)
+                _dbReadOnly, name, dict, Int(args, "max_rows", DefaultRowCap), ct: default)
             .GetAwaiter().GetResult();
         if (result.Error is not null)
             return (result.Error, true);
@@ -559,20 +538,15 @@ internal sealed class SubstrateTools
                 ["value"] = h.Value is null ? null : JsonValue.Create(h.Value),
             })
             .Concat(counts.Select(c => new JsonObject { ["metric"] = c.Metric, ["value"] = c.Value.ToString() }))
-            .Concat(new[]
-            {
-                new JsonObject { ["metric"] = "operator_lane", ["value"] = OperatorLane.ToString().ToLowerInvariant() },
-                new JsonObject { ["metric"] = "binary_path", ["value"] = Environment.ProcessPath ?? AppContext.BaseDirectory },
-            });
+            .Append(new JsonObject { ["metric"] = "binary_path", ["value"] = Environment.ProcessPath ?? AppContext.BaseDirectory });
         return JsonRows(rows);
     }
 
-    private static (string, bool) McpLane()
+    private static (string, bool) McpRuntime()
     {
         var started = Process.GetCurrentProcess().StartTime.ToUniversalTime();
         return (new JsonObject
         {
-            ["operator_lane"] = OperatorLane,
             ["binary_path"] = Environment.ProcessPath ?? AppContext.BaseDirectory,
             ["pid"] = Environment.ProcessId,
             ["started_utc"] = started.ToString("o"),
@@ -891,7 +865,6 @@ internal sealed class SubstrateTools
                 ToolCatalog.Select(t => (JsonNode)new JsonObject { ["name"] = t.Name, ["summary"] = t.Summary }).ToArray());
             return (new JsonObject
             {
-                ["operator_lane"] = OperatorLane,
                 ["binary_path"] = Environment.ProcessPath ?? AppContext.BaseDirectory,
                 ["rows"] = listing,
             }.ToJsonString(), false);
@@ -903,7 +876,6 @@ internal sealed class SubstrateTools
 
         var result = new JsonObject
         {
-            ["operator_lane"] = OperatorLane,
             ["binary_path"] = Environment.ProcessPath ?? AppContext.BaseDirectory,
             ["rows"] = new JsonArray(new JsonObject
             {
@@ -1033,74 +1005,6 @@ internal sealed class SubstrateTools
         };
 
         return (result.ToJsonString(), false);
-    }
-
-    // Issue #814: the covered set — hand SQL over these tables is refused
-    // outright, naming the typed surface instead. A cheap substring match,
-    // biased toward refusing (false refusals name the right tool, which is
-    // the desired outcome anyway; never parse SQL to prove safety).
-    private static readonly (string Table, string UseInstead)[] CoveredTables =
-    [
-        ("ingest_run_journal", "ingest_runs / ingest_run_close via op()"),
-        ("ingest_flush_journal", "ingest_runs / substrate_health via op()"),
-        ("attestations", "evidence_count / source_counts_approx / source_roster / source_bootstrap_present via op()"),
-        ("consensus", "consensus_count / top_relations / arena_counts / consensus_stats_approx via op()"),
-        ("entities", "content_count / entity_type_counts_approx / substrate_counts via op()"),
-        ("physicalities", "substrate_counts / geometry_audit via op()"),
-    ];
-
-    private (string, bool) ExecuteSql(JsonObject? args)
-    {
-        var query = Req(args, "query");
-
-        foreach (var (table, useInstead) in CoveredTables)
-        {
-            if (query.Contains(table, StringComparison.OrdinalIgnoreCase))
-                return ($"refused: {table} is covered by installed operations. Use {useInstead} — "
-                    + "and if none answers your question, that is a missing operation: file it (#813).", true);
-        }
-
-        var sw = Stopwatch.StartNew();
-        var (text, isErr) = Rows(_dbReadOnly, query, Int(args, "max_rows", DefaultRowCap));
-        sw.Stop();
-
-        // Issue #814: every accepted use is a gap report with its cost —
-        // stderr for the live console, and a durable CSV ledger queryable as
-        // ops.sql_gap() / op(name => 'sql_gap').
-        var flatQuery = query.Replace('\r', ' ').Replace('\n', ' ');
-        Console.Error.WriteLine(
-            $"[mcp-sql-gap] duration_ms={sw.ElapsedMilliseconds} result_chars={text.Length} "
-            + $"error={isErr} query=\"{flatQuery}\"");
-        AppendSqlGap(sw.ElapsedMilliseconds, text.Length, isErr, flatQuery);
-
-        return (text, isErr);
-    }
-
-    private static void AppendSqlGap(long durationMs, int resultChars, bool isErr, string query)
-    {
-        try
-        {
-            var dir = LaplaceInstall.OpsLogDirectory;
-            Directory.CreateDirectory(dir);
-            var path = Path.Combine(dir, "laplace-sql-gap.csv");
-            var needHeader = !File.Exists(path) || new FileInfo(path).Length == 0;
-            using var fs = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
-            using var w = new StreamWriter(fs, Encoding.UTF8);
-            if (needHeader)
-                w.WriteLine("log_time,duration_ms,result_chars,is_error,query");
-            static string Csv(string s) =>
-                "\"" + s.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
-            w.WriteLine(string.Join(',',
-                DateTimeOffset.UtcNow.ToString("o"),
-                durationMs.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                resultChars.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                isErr ? "t" : "f",
-                Csv(query)));
-        }
-        catch
-        {
-            // Ledger is best-effort; refuse/log criteria must not fail the hatch.
-        }
     }
 
     private static int Int(JsonObject? args, string name, int fallback) =>

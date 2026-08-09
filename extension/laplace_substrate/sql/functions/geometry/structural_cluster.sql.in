@@ -38,14 +38,24 @@ BEGIN
         SELECT DISTINCT ON (s.entity_id) s.entity_id, s.fr
         FROM scored s
         ORDER BY s.entity_id, s.fr
+    ), survivors AS MATERIALIZED (
+        SELECT d.entity_id, d.fr FROM dedup d
+        WHERE d.fr <= p_eps ORDER BY d.fr LIMIT p_limit
+    ), ids AS MATERIALIZED (
+        SELECT array_agg(entity_id ORDER BY fr) AS a FROM survivors
+    ), rendered AS MATERIALIZED (
+        SELECT i.id, t.s
+        FROM ids,
+             LATERAL unnest(ids.a) WITH ORDINALITY AS i(id, ord),
+             LATERAL unnest(laplace.render_text_batch(ids.a, 48)) WITH ORDINALITY AS t(s, ord)
+        WHERE i.ord = t.ord
     )
     SELECT d.entity_id,
-           realize.render_text(d.entity_id, 48),
+           r.s,
            d.fr,
            converse.physicality_count(d.entity_id) AS recurrence
-    FROM dedup d
-    WHERE d.fr <= p_eps
+    FROM survivors d JOIN rendered r ON r.id = d.entity_id
     ORDER BY d.fr
-    LIMIT p_limit;
+    ;
 END;
 $$;

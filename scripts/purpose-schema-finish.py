@@ -301,7 +301,9 @@ def rewrite_creates(text: str, dir_name: str | None, moves: dict[str, tuple[str,
     return text
 
 
-def rewrite_calls(text: str, call_map: dict[str, str]) -> str:
+def rewrite_calls(
+    text: str, call_map: dict[str, str], *, rewrite_bare: bool = True
+) -> str:
     # Preserve DROP FUNCTION IF EXISTS laplace.<old>(...) — those drop the
     # pre-migration name and must not be rewritten to purpose.<new>.
     drops: list[str] = []
@@ -322,7 +324,8 @@ def rewrite_calls(text: str, call_map: dict[str, str]) -> str:
         target = call_map[old]
         text = re.sub(rf"\blaplace\.{re.escape(old)}\b", target, text)
         text = re.sub(rf"\b@extschema@\.{re.escape(old)}\b", target, text)
-        text = re.sub(rf"(?<![.\w]){re.escape(old)}\s*\(", f"{target}(", text)
+        if rewrite_bare:
+            text = re.sub(rf"(?<![.\w]){re.escape(old)}\s*\(", f"{target}(", text)
     # undo double purpose: converse.converse.chat
     text = re.sub(
         r"\b(consensus|converse|lexical|taxonomy|generation|structural|chess|realize)\.\1\.",
@@ -377,7 +380,8 @@ def main() -> int:
         orig = path.read_text(encoding="utf-8")
         text = fix_contamination(orig)
         text = rewrite_creates(text, dir_name, moves)
-        text = rewrite_calls(text, call_map)
+        is_sql = path.suffix == ".sql" or str(path).endswith(".sql.in")
+        text = rewrite_calls(text, call_map, rewrite_bare=is_sql)
         text = fix_table_schema_collision(text)
         if text != orig:
             path.write_text(text, encoding="utf-8")

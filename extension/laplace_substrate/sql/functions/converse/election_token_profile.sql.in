@@ -53,7 +53,7 @@ CREATE OR REPLACE FUNCTION converse.election_token_profile(p_surfaces text[])
     ),
     msk AS (
         SELECT t.ord,
-               COALESCE(laplace.laplace_highway_popcount(m.highway_mask), 0) AS bands
+               COALESCE(consensus.laplace_highway_popcount(m.highway_mask), 0) AS bands
         FROM t
         LEFT JOIN LATERAL generation.entity_highway_masks(ARRAY[t.id]) m ON true
     )

@@ -39,8 +39,8 @@ filter applied before or after it.
 
 Plus `canonical_names`, `highway_mask_dirty`, and three journals
 (`ingest_run_journal`, `ingest_flush_journal`, `index_cycle_journal`).
-(`trajectory_pairs`/`trajectory_pairs_meta` were retired and dropped 2026-07-29 —
-`drop_retired_content_lane.sql.in`.)
+`trajectory_pairs` and `trajectory_pairs_meta` are not part of the current schema;
+`drop_retired_content_lane.sql.in` defines the compatibility cleanup.
 
 Three properties do the structural work:
 
@@ -146,12 +146,10 @@ in the DEFAULT partition.
 computed from the four coordinates.
 
 `hilbert_index` equality lookups are served by an explicit
-`physicalities_hilbert_btree`, not by the primary key. Before the 2026-08-04
-repartition the PK was `(hilbert_index, id)` and hilbert was its leading column, so no
-separate index was needed; HASH(`id`) requires the PK to be `(id)`, which removed that
-coverage silently. `anagrams_of()` is the caller that proves the index is required —
-it joins `w2.hilbert_index = w1.hilbert_index`, because anagrams share a letter
-multiset and therefore compose to the same coordinate.
+`physicalities_hilbert_btree`, not by the HASH(`id`)-compatible `(id)` primary key.
+`anagrams_of()` proves the index requirement by joining
+`w2.hilbert_index = w1.hilbert_index`: anagrams share a letter multiset and therefore
+compose to the same coordinate.
 
 Native support in `engine/core/src/`: `super_fibonacci.c` (S³ point placement),
 `hilbert4d.c`, `math4d.c`, `mantissa.c` (bit-packing ids/scores/counts through the ZM

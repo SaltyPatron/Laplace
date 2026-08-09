@@ -7,7 +7,7 @@ LANGUAGE sql STABLE PARALLEL RESTRICTED AS $$
     WITH band_types AS (
         SELECT e.id FROM laplace.entities e
         WHERE e.highway_mask IS NOT NULL
-          AND laplace.laplace_highway_mask_bits(e.highway_mask) && laplace.laplace_highway_mask_bits(p_band_mask)
+          AND consensus.laplace_highway_mask_bits(e.highway_mask) && consensus.laplace_highway_mask_bits(p_band_mask)
     )
     SELECT c.subject_id, c.type_id, c.object_id,
            (consensus.eff_mu(c.rating, c.rd)::float8 / 1e9) AS eff_mu

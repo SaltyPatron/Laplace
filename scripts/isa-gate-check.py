@@ -53,7 +53,7 @@ MANIFEST = ROOT / "engine" / "manifest" / "relation_types.toml"
 # exception.
 CEILINGS = {
     "g1_weight_literalism": 11,
-    "g3_sql_vocabulary_literalism": 241,
+    "g3_sql_vocabulary_literalism": 240,
     "g3_c_vocabulary_literalism": 17,
     # 700 -> 701 (2026-08-05): the language-scope declaration. Nine monolingual
     # sources emitted no HAS_LANGUAGE at all, so every English sense read back as
@@ -80,7 +80,7 @@ CEILINGS = {
     "g11_unqualified_in_setless_body": 0,
     # GH #764 step 3: LANGUAGE sql with quoted-string bodies (AS $$) — PostgreSQL
     # records no pg_depend. Shrink-only allowlist; new SQL must use BEGIN ATOMIC.
-    "g12_string_sql_bodies": 217,
+    "g12_string_sql_bodies": 216,
 }
 
 CREATE_FUNCTION = re.compile(
@@ -255,6 +255,31 @@ def strip_sql_comments(text: str) -> str:
     return "".join(out)
 
 
+def mask_sql_single_quoted_literals(text: str) -> str:
+    """Blank SQL string literals so identifier scans only inspect executable SQL."""
+    out: list[str] = []
+    i = 0
+    in_string = False
+    while i < len(text):
+        char = text[i]
+        nxt = text[i + 1] if i + 1 < len(text) else ""
+        if not in_string:
+            if char == "'":
+                in_string = True
+                out.append(" ")
+            else:
+                out.append(char)
+        else:
+            out.append(char if char in "\r\n" else " ")
+            if char == "'" and nxt == "'":
+                out.append(" ")
+                i += 1
+            elif char == "'":
+                in_string = False
+        i += 1
+    return "".join(out)
+
+
 def governed_relation_names() -> set[str]:
     text = MANIFEST.read_text(encoding="utf-8")
     return set(
@@ -424,7 +449,7 @@ def scan_g11_unqualified_in_setless_body() -> Counter[str]:
     found: Counter[str] = Counter()
     for path in production_files(functions_root, (".sql.in",)):
         raw = path.read_text(encoding="utf-8", errors="replace")
-        text = strip_sql_comments(raw)
+        text = mask_sql_single_quoted_literals(strip_sql_comments(raw))
         if SET_SEARCH_PATH.search(text):
             continue                      # still gated by SET; not this gate's business
         rel = relative(path)

@@ -1,0 +1,113 @@
+ARCHIVED SPECIFICATION SNAPSHOT — historical annotations and measurements; not current authority
+
+SUBSTRATE INVARIANTS — things that must be true
+==================================================
+Not a how-to-work-with-it doc (see 06_Engineering_Ruleset.txt for that). This is the axiom
+list: properties that hold by construction, and what a collision/equality/bit actually
+certifies vs. what it does not. Every rule below is grounded in a specific file/line, not
+aspiration — update it when the grounding changes, don't let it drift into wishful thinking.
+Not every invariant here has an automated CI gate — enforcement and process live in
+06_Engineering_Ruleset.txt and CLAUDE.md (see their axioms vs gates vs ops split).
+
+Rule #1: Content-hash identity is exact. Centroid/hilbert identity is not.
+    - BLAKE3 entity-id collision (identical id) MUST mean identical canonical content. This
+      is the substrate's one true strong identity invariant — it's what makes cross-source
+      merging a hash collision, not an entity-resolution pass.
+    - physicalities.coord collision, and hilbert_index collision (confirmed the SAME
+      signal — laplace_hilbert_encode takes one POINT4D and encodes coord, laplace_geom.c:381
+      — not an independent check), do NOT mean identical entity, and for tier>0 do NOT even
+      mean identical order/shape. They certify only "same constituent multiset, some order" —
+      never "same entity," never "similar shape."
+    - Why: for tier>0, coord = math4d_centroid(constituents) = arithmetic mean, and mean is
+      commutative — mean(a,b,c) == mean(b,a,c) for any permutation. Any two entities built
+      from the same multiset of child points, any order, are GUARANTEED identical centroids
+      and therefore identical hilbert_index (mod quantization). Verified directly: word_id
+      ('cat') and word_id('act') return bit-identical POINT ZM centroids.
+    - Converse NOT guaranteed: two DIFFERENT multisets could in principle average to the same
+      point (distinct sums, same mean) — vanishingly unlikely with real codepoint-seeded
+      geometry, but not mathematically excluded. So centroid/hilbert equality is sufficient
+      to INVESTIGATE an anagram relationship (this is exactly what anagrams_of.sql.in does,
+      correctly, by joining on hilbert_index) — but must never be trusted as sufficient for
+      an order-sensitive judgment. word_shape_peers's `OR k.ang <= 0.115` branch violated this
+      exact rule (fixed this session — see 02_Identified_Issues.txt).
+
+Rule #1b: Tier is a FLOOR, not identity. same content = same hash, at every tier.
+    - entities.tier records the LOWEST tier at which that content exists — the minimal form.
+      There is no separate "sentence" entity for 'cat': 'cat' is a tier-2 word, and it can
+      serve as-is at every tier above it ("How do you feel?" → "Fine" — that one-word reply
+      IS the sentence; the sentence IS the word; one id).
+    - Mechanism: hash_composer_compose_node (hash_composer.c) collapses single-child nodes to
+      the child's own id — no re-hash, no wrapper. Promotion up the tier ladder is free and
+      identity-preserving by construction.
+    - Corollary: tier must NEVER be mixed into the content hash (hash128_merkle discards its
+      tier argument on purpose). It was briefly mixed in on 2026-07-01 and reverted
+      2026-07-02 by owner directive: 'A' is 'A' regardless of tier — identical ids across
+      tiers are the design, not a collision. It was also internally inconsistent: only
+      multi-child nodes got tier-mixed, so "Fine"-as-sentence kept its word id while
+      "the cat"-as-sentence forked from "the cat"-as-phrase.
+    - If code ever needs to distinguish the same content observed at different tiers, that is
+      a compound key at the schema level (id, tier) — never part of the id.
+
+Rule #2: Tier-0 coord/hilbert identity IS a real identity signal. Tier>0 is not — same bytes,
+different meaning, branch on tier before drawing any conclusion from a collision.
+    - Tier-0 codepoints get FIXED positions on S³, seeded once by Unicode's own UCA collation
+      order — not averaged from anything. A tier-0 coord/hilbert collision between two
+      DISTINCT codepoints would mean an actual seeding bug (two codepoints assigned the same
+      position), not a benign multiset coincidence.
+    - Tier>0 (grapheme/word/sentence/document, and other modalities' composed tiers) coord is
+      a genuine precomputed centroid via math4d_centroid — computed once at ingestion, never
+      recomputed on read. A tier>0 collision reflects Rule #1's averaging property and is
+      routine/expected for anagrams, not a bug.
+    - Any code reasoning about a coord/hilbert collision MUST know which tier produced it —
+      the identical bit pattern means two structurally different things depending on tier.
+
+Rule #3: trajectory and coord are both GeometryZM but are not interchangeable, and mixing
+them up is exactly how Rule #1 gets violated.
+    - coord (every tier) is the real 4D placement: tier 0 is the atom on the glome
+      (super-Fibonacci, radius 1); tier > 0 is math4d_centroid of the children's live
+      coords, persisted at compose. Angular distance and Hilbert locality operate on coord.
+    - trajectory (composed entities) is an ORDERED, exactly-invertible PACKED MANIFEST of
+      constituent identities — mantissa-packed id / ordinal / run_length / flags
+      (mantissa.c / trajectory.c). It is NOT a path of positions. Dumping its XYZM and
+      feeding that to a geometric metric measures payload bits, not shape.
+    - Shape comparison (Fréchet / Hausdorff / word_shape_distance) MUST run on a REALIZED
+      curve: entity_curve(id) / word_curve(id) = ST_MakeLine(child.coord ORDER BY ordinal).
+      Measured 2026-08-02 on live data: cat vs act have ang=0 on coord (identical
+      centroids) but frechet≈1.78 on entity_curve — while frechet on packed
+      trajectory verts is a different number (~0.35) that formerly polluted this
+      doc as if it were the shape metric. Passing physicalities.trajectory into
+      laplace_frechet_4d is a Rule #3/#4 defect.
+    - A function that needs "are these two composed entities similarly ordered/shaped"
+      uses Frechet/Hausdorff on entity_curve. A function that needs "roughly the same
+      neighborhood in space" (coarse locality pre-filter, NOT a similarity verdict) may
+      use coord/hilbert_index — but only to narrow candidates for a subsequent
+      order-sensitive check on the realized curve, never as the final admission criterion
+      alone. This is the general form of the word_shape_peers bug.
+
+Rule #4: A mantissa-packed GeometryZM value is not geometry, and there is no crash to catch
+the mistake if you treat it as one.
+    - trajectory/coord columns double as mantissa.c's bit-packed payload channel — hash ids +
+      scores + counts smuggled through the same PointZM/GeometryZM columns for non-spatial
+      evidence-log data, disambiguated only by a flag bit.
+    - Any geometric function (ST_Intersects, the <<->> KNN operator, frechet, angular_distance,
+      hilbert_encode) invoked on a mantissa-packed row will silently return a numerically
+      valid, semantically meaningless result — no error, no crash, nothing to signal the
+      mistake. Always confirm the flag bit marks genuine spatial content before calling a
+      geometric function on a coord/trajectory value pulled from an unfamiliar query path.
+
+Rule #5 (SATISFIED as of the 2026-07-01 fresh reseed — was violated for the project's whole
+prior history): a set highway_mask bit must mean the entity/attestation genuinely
+instantiates that canonical relation type.
+    - Three stacked causes, fixed in sequence (see 02 Issues 01/29/35): relation types
+      missing from the manifest; NULL-vs-zero marshal conflation in IntentStage.cs; and the
+      final one under them all — HighwayPerfcache checked rc == 1 where the native lookup
+      returns 0 on success, so every mask ever written was all-zero even after the first
+      two fixes.
+    - Verified live on regenerated data: 1,632,015/1,632,019 unicode-layer attestations
+      carry a non-zero mask whose set bit matches relation_highway_bit() and its band mask
+      (laplace_highway_match). The only NULL/zero masks are the SubstrateCanonical
+      bootstrap rows.
+    - Data written BEFORE this reseed (any database generation predating 2026-07-01) still
+      has NULL/all-zero masks — per the no-repairs directive those generations are
+      regenerated, never backfilled. Code may now rely on highway_mask for
+      filtering/ranking ONLY against post-reseed data.

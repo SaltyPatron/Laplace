@@ -5,21 +5,29 @@ CREATE OR REPLACE FUNCTION generation.corpus_word_vocab(p_size int, p_trajs int 
     WITH t AS (
         SELECT DISTINCT ON (w.id) w.id AS entity_id, w.trajectory
         FROM laplace.v_word_points w
-        WHERE w.type_id IN (realize.canonical_id('Sentence'), realize.canonical_id('Document'))
+        WHERE w.type_id IN (laplace.canonical_id('Sentence'), laplace.canonical_id('Document'))
           AND w.trajectory IS NOT NULL
         ORDER BY w.id, w.physicality_id LIMIT p_trajs
     ),
     w AS (
         SELECT tc.entity_id AS id, count(*) AS c
         FROM t CROSS JOIN LATERAL laplace_trajectory_constituents(t.trajectory) tc
-        JOIN laplace.entities e ON e.id = tc.entity_id AND e.type_id = realize.canonical_id('Word')
+        JOIN laplace.entities e ON e.id = tc.entity_id AND e.type_id = laplace.canonical_id('Word')
         GROUP BY tc.entity_id
     ),
     
     
     
-    cand AS (SELECT id, c, realize.render_text(id, 80) AS s FROM w ORDER BY c DESC LIMIT p_size * 4)
-    SELECT s, c FROM cand
-    WHERE s ~ '^[A-Za-z][A-Za-z''.-]*$'
-    ORDER BY c DESC LIMIT p_size
+    cand AS MATERIALIZED (SELECT id, c FROM w ORDER BY c DESC, id LIMIT p_size * 4),
+    ids AS MATERIALIZED (SELECT array_agg(id ORDER BY c DESC, id) AS a FROM cand),
+    rendered AS MATERIALIZED (
+        SELECT i.id, t.s
+        FROM ids,
+             LATERAL unnest(ids.a) WITH ORDINALITY AS i(id, ord),
+             LATERAL unnest(laplace.render_text_batch(ids.a, 80)) WITH ORDINALITY AS t(s, ord)
+        WHERE i.ord = t.ord
+    )
+    SELECT r.s, c.c FROM cand c JOIN rendered r ON r.id = c.id
+    WHERE r.s ~ '^[A-Za-z][A-Za-z''.-]*$'
+    ORDER BY c.c DESC LIMIT p_size
 $$;

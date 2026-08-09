@@ -1,7 +1,5 @@
 -- BEGIN ATOMIC: GH #764.
-DROP FUNCTION IF EXISTS laplace.source_counts_approx();
-
-CREATE OR REPLACE FUNCTION ops.source_counts_approx()
+CREATE OR REPLACE FUNCTION source_counts_approx()
     RETURNS TABLE(source text, source_id bytea, evidence_approx bigint)
     LANGUAGE sql STABLE
 BEGIN ATOMIC
@@ -17,18 +15,23 @@ BEGIN ATOMIC
         SELECT s.most_common_vals::text::bytea[] AS vals,
                s.most_common_freqs               AS freqs
         FROM pg_stats s
-        WHERE s.schemaname = 'laplace'
+        WHERE s.schemaname = '@extschema@'
           AND s.tablename  = 'attestations'
           AND s.attname    = 'source_id'
     ), rt AS (
         SELECT c.reltuples
         FROM pg_class c
         JOIN pg_namespace n ON n.oid = c.relnamespace
-        WHERE n.nspname = 'laplace' AND c.relname = 'attestations'
+        WHERE n.nspname = '@extschema@' AND c.relname = 'attestations'
     )
-    SELECT realize.render(m.sid)                    AS source,
-           m.sid                                    AS source_id,
-           (m.freq * rt.reltuples)::bigint          AS evidence_approx
-    FROM st, rt, LATERAL unnest(st.vals, st.freqs) AS m(sid, freq)
-    ORDER BY evidence_approx DESC;
+    , raw AS MATERIALIZED (
+      SELECT m.sid AS source_id, (m.freq * rt.reltuples)::bigint AS evidence_approx
+      FROM st, rt, LATERAL unnest(st.vals, st.freqs) AS m(sid, freq)
+    ), numbered AS MATERIALIZED (
+      SELECT r.*, row_number() OVER (ORDER BY evidence_approx DESC, source_id) AS rn FROM raw r
+    ), batch AS MATERIALIZED (
+      SELECT laplace.render_batch(array_agg(source_id ORDER BY rn)) AS labels FROM numbered
+    )
+    SELECT b.labels[n.rn], n.source_id, n.evidence_approx
+    FROM numbered n CROSS JOIN batch b ORDER BY n.rn;
 END;

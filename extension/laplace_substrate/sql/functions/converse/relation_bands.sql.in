@@ -35,7 +35,7 @@ CREATE OR REPLACE FUNCTION converse.relation_bands()
                   relation_types bigint, consensus_rows bigint)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
     WITH live AS (
-        SELECT laplace.relation_highway_band(c.type_id) AS band,
+        SELECT consensus.relation_highway_band(c.type_id) AS band,
                c.type_id,
                count(*) AS rows
         FROM laplace.consensus c

@@ -1252,6 +1252,8 @@ pg_laplace_render_text_batch(PG_FUNCTION_ARGS)
     arr = PG_GETARG_ARRAYTYPE_P(0);
     max_depth = PG_ARGISNULL(1) ? 8 : PG_GETARG_INT32(1);
 
+    if (ARR_NDIM(arr) == 0)
+        PG_RETURN_ARRAYTYPE_P(construct_empty_array(TEXTOID));
     if (ARR_NDIM(arr) != 1)
         ereport(ERROR, (errmsg("render_text_batch: ids must be 1-dimensional")));
     if (ARR_ELEMTYPE(arr) != BYTEAOID)

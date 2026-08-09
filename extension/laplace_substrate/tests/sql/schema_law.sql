@@ -2,6 +2,21 @@ CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE EXTENSION laplace_geom;
 CREATE EXTENSION laplace_substrate;
 
+SET search_path TO laplace, public;
+
+-- Purpose is a physical ownership boundary, not just a naming convention. The
+-- upgrade must also absorb a namespace created before the split (notably ops).
+SELECT count(*) = 9 AS purpose_schemas_extension_owned
+FROM pg_catalog.pg_depend d
+JOIN pg_catalog.pg_extension e ON e.oid = d.refobjid
+JOIN pg_catalog.pg_namespace n ON n.oid = d.objid
+WHERE d.classid = 'pg_catalog.pg_namespace'::regclass
+  AND d.refclassid = 'pg_catalog.pg_extension'::regclass
+  AND d.deptype = 'e'
+  AND e.extname = 'laplace_substrate'
+  AND n.nspname IN ('consensus','converse','lexical','taxonomy','generation',
+                    'structural','chess','realize','ops');
+
 
 SELECT count(*) = 0 AS no_legacy_type_column
 FROM information_schema.columns
@@ -16,22 +31,22 @@ WHERE n.nspname = 'laplace'
     convert_from(decode('6b696e645f6964', 'hex'), 'UTF8'),
     convert_from(decode('656e746974795f6b696e64', 'hex'), 'UTF8'));
 
-SELECT count(*) AS physicality_type_entities FROM laplace.entities
+SELECT count(*) AS physicality_type_entities FROM entities
 WHERE id IN (
-    public.laplace_hash128_blake3('substrate/physicality_type/CONTENT/v1'::bytea),
-    public.laplace_hash128_blake3('substrate/physicality_type/BUILDING_BLOCK/v1'::bytea),
-    public.laplace_hash128_blake3('substrate/physicality_type/PROJECTION/v1'::bytea),
-    public.laplace_hash128_blake3('substrate/physicality_type/PROJECTION_OUTPUT/v1'::bytea)
+    laplace_hash128_blake3('substrate/physicality_type/CONTENT/v1'::bytea),
+    laplace_hash128_blake3('substrate/physicality_type/BUILDING_BLOCK/v1'::bytea),
+    laplace_hash128_blake3('substrate/physicality_type/PROJECTION/v1'::bytea),
+    laplace_hash128_blake3('substrate/physicality_type/PROJECTION_OUTPUT/v1'::bytea)
 );
 
-SELECT laplace.relation_type_id('IS_A')
-       = public.laplace_hash128_blake3('IS_A'::bytea) AS relation_type_path_law;
+SELECT relation_type_id('IS_A')
+       = laplace_hash128_blake3('IS_A'::bytea) AS relation_type_path_law;
 
-SELECT consensus.relation_type_resolve('HAS_UPOS') = laplace.relation_type_id('HAS_POS') AS pos_alias_resolve_law;
+SELECT relation_type_resolve('HAS_UPOS') = relation_type_id('HAS_POS') AS pos_alias_resolve_law;
 
-SELECT consensus.relation_type_in_family(laplace.relation_type_id('HAS_XPOS'), 'HAS_POS') AS xpos_in_pos_family;
+SELECT relation_type_in_family(relation_type_id('HAS_XPOS'), 'HAS_POS') AS xpos_in_pos_family;
 
-SELECT NOT consensus.relation_type_in_family(laplace.relation_type_id('HAS_LEX_CATEGORY'), 'HAS_POS') AS lex_not_pos_family;
+SELECT NOT relation_type_in_family(relation_type_id('HAS_LEX_CATEGORY'), 'HAS_POS') AS lex_not_pos_family;
 
 SELECT EXISTS (
     SELECT 1 FROM pg_attribute a
@@ -76,3 +91,4 @@ SELECT to_regclass('laplace.v_word_points') IS NOT NULL AS has_v_word_points;
 SELECT to_regclass('laplace.v_word_senses') IS NOT NULL AS has_v_word_senses;
 SELECT to_regclass('laplace.v_attestation_readable') IS NOT NULL AS has_v_attestation_readable;
 SELECT to_regprocedure('structural.word_anchor(bytea)') IS NOT NULL AS has_word_anchor;
+-- Stable terminal marker keeps the final pg_regress result separator anchored.

@@ -61,7 +61,7 @@ BEGIN
         SELECT array_agg(s.id ORDER BY s.id) INTO ids FROM (
             SELECT id FROM _hmr_candidates WHERE id > last_id ORDER BY id LIMIT p_batch) s;
         EXIT WHEN ids IS NULL;
-        n := laplace.highway_mask_refresh(ids);
+        n := consensus.highway_mask_refresh(ids);
         total := total + n;
         scanned := scanned + cardinality(ids);
         last_id := ids[cardinality(ids)];

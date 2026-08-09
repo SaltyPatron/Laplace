@@ -1,4 +1,4 @@
-# Laplace recipe schema (build-a-bear spec)
+# Laplace model-construction recipe schema
 
 A **recipe** is a modality (JSON). It is the *build-a-bear parts list*: it names the architecture
 structure, the content slice, and — the core of it — the **operator array**: per layer, per head,

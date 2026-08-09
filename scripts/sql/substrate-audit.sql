@@ -26,7 +26,7 @@ SELECT multi_source_entity_count();
 \echo '=== compositional tier distribution ==='
 SELECT * FROM compositional_tier_distribution();
 
-\echo '=== render_gaps (orphan consensus ids, top 10) ==='
-SELECT count(*) AS gap_count FROM render_gaps(1000);
-SELECT render(id), roles, refs FROM render_gaps(10);
+\echo '=== realize.render_gaps(orphan consensus ids, top 10) ==='
+SELECT count(*) AS gap_count FROM realize.render_gaps(1000);
+SELECT render(id), roles, refs FROM realize.render_gaps(10);
 

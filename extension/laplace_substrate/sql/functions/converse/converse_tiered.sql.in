@@ -83,6 +83,8 @@ DECLARE
     u_w      float8[];
     c_unit   bytea[];
     c_concept bytea[];
+    said_realized text[];
+    said_rendered text[];
 BEGIN
     IF p_topic IS NULL THEN RETURN NULL; END IF;
 
@@ -110,7 +112,7 @@ BEGIN
         FROM (
             SELECT c.object_id AS id,
                    laplace.relation_rank_resolved(c.type_id)
-                     * consensus.eff_mu(c.rating, c.rd)::float8
+                     * laplace.eff_mu(c.rating, c.rd)::float8
                      * (c.witness_count::float8 / (1.0 + c.witness_count)) AS w
             FROM laplace.consensus c
             JOIN laplace.entities e ON e.id = c.object_id AND e.tier >= 3
@@ -146,7 +148,7 @@ BEGIN
               AND laplace.relation_in_family(e.id, 'HAS_SENSE')
         ) fam ON fam.id = sc.type_id
         WHERE tp.ctier = 2
-        ORDER BY p.id, tp.entity_id, consensus.eff_mu(sc.rating, sc.rd) DESC, sc.object_id
+        ORDER BY p.id, tp.entity_id, laplace.eff_mu(sc.rating, sc.rd) DESC, sc.object_id
     ) q;
 
     -- ANSWER IN THE LANGUAGE THAT WAS ASKED. Kept in HASH SPACE.
@@ -203,7 +205,7 @@ BEGIN
                    count(*) AS shared,
                    COALESCE((
                        SELECT sum(laplace.relation_rank_resolved(c.type_id)
-                                  * consensus.eff_mu(c.rating, c.rd)::float8)
+                                  * laplace.eff_mu(c.rating, c.rd)::float8)
                        FROM laplace.consensus c
                        WHERE c.subject_id = ANY (ARRAY(
                                  SELECT cc FROM unnest(c_unit, c_concept) AS x(cu, cc)
@@ -212,7 +214,7 @@ BEGIN
                    ), 0)
                    + COALESCE((
                        SELECT sum(laplace.relation_rank_resolved(c.type_id)
-                                  * consensus.eff_mu(c.rating, c.rd)::float8)
+                                  * laplace.eff_mu(c.rating, c.rd)::float8)
                        FROM laplace.consensus c
                        WHERE c.object_id = ANY (ARRAY(
                                  SELECT cc FROM unnest(c_unit, c_concept) AS x(cu, cc)
@@ -236,8 +238,10 @@ BEGIN
 
     -- REALIZE verbatim, in walk order. Terminate each unit that does not already
     -- end in punctuation (clause seam, not content rewrite).
+    said_realized := realize.batch(said, p_lang);
+    said_rendered := laplace.render_text_batch(said, 512);
     FOR i IN 1..COALESCE(array_length(said, 1), 0) LOOP
-        s := btrim(COALESCE(realize.realize(said[i], p_lang), realize.render_text(said[i], 512)));
+        s := btrim(COALESCE(said_realized[i], said_rendered[i]));
         IF s IS NOT NULL AND s <> '' THEN
             IF s !~ '[.!?;:,]$' THEN s := s || '.'; END IF;
             parts := parts || s;

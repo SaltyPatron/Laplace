@@ -1,42 +1,10 @@
 #!/usr/bin/env bash
-# Laplace substrate MCP server (stdio). Registered in .mcp.json; stdout is
-# protocol frames only, so all launcher diagnostics go to stderr.
+# Laplace substrate MCP development launcher (stdio). Agent clients launch the
+# deployed /opt/laplace/app/laplace-mcp apphost directly; this helper exists only
+# for an explicit repository-local development run.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
-
-# RAW-SQL ESCAPE HATCH: OFF UNLESS EXPLICITLY ASKED FOR.
-#
-# The C# gate is correct and always was — OperatorLane requires
-# LAPLACE_MCP_OPERATOR == "1" and defaults false. This line used to read
-#
-#     export LAPLACE_MCP_OPERATOR="${LAPLACE_MCP_OPERATOR:-1}"
-#
-# under a comment stating "the gate defaults CLOSED in code". Both halves were
-# individually true and the combination was a backdoor: the C# default never
-# applied, because the launcher every client actually starts through (.mcp.json
-# registers this script) set the variable to 1 first. Arbitrary SELECT against the
-# production substrate, on by default, described in the file as off by default.
-#
-# Read-only is not harmless. It is an exfiltration surface, and a denial-of-service
-# one — an unbounded query on a 214 GB substrate holds backends and starves the
-# ingest path, which is not hypothetical: it happened repeatedly while this session
-# was probing with hand-written SQL.
-#
-# Opt in deliberately when you need it, per invocation:
-#
-#     LAPLACE_MCP_OPERATOR=1 scripts/laplace-mcp
-#
-# Everything else gets the typed tool surface, which is the point: a question the
-# typed tools cannot answer is a missing tool, not a reason to reach past them.
-#
-# CHANGING THIS LINE DOES NOT AFFECT ANY RUNNING SERVER, AND CI CANNOT MAKE IT.
-# The MCP server is a stdio CHILD OF THE CLIENT that launched it (.mcp.json), not a
-# systemd service — there is no unit, and the publish step restarts laplace-api only.
-# OperatorLane is read once at type init, so a server started before this edit keeps
-# serving raw SQL until its client restarts it, and nothing in the protocol reports
-# which lane it is in. Do not read a deploy as having applied this. See GH #809.
-export LAPLACE_MCP_OPERATOR="${LAPLACE_MCP_OPERATOR:-0}"
 
 # Prefer repo-local builds (dev freshest), then the published apphost.
 # app/Directory.Build.props redirects BaseOutputPath to $LAPLACE_BUILD_ROOT/app/bin

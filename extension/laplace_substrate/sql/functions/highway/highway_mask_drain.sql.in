@@ -43,7 +43,7 @@ BEGIN
         FROM (SELECT id FROM laplace.highway_mask_dirty LIMIT p_batch) d;
         EXIT WHEN ids IS NULL;
 
-        n := laplace.highway_mask_refresh(ids);
+        n := consensus.highway_mask_refresh(ids);
         DELETE FROM laplace.highway_mask_dirty WHERE id = ANY(ids);
 
         total   := total + n;

@@ -8,7 +8,7 @@ CREATE OR REPLACE FUNCTION generation.consensus_layer_plane_masked(
              SELECT e.id, laplace.relation_rank_resolved(e.id) AS rank
              FROM laplace.entities e
              WHERE e.highway_mask IS NOT NULL
-               AND laplace.laplace_highway_mask_bits(e.highway_mask) && laplace.laplace_highway_mask_bits(p_band_mask)
+               AND consensus.laplace_highway_mask_bits(e.highway_mask) && consensus.laplace_highway_mask_bits(p_band_mask)
          ),
          edges AS (
              SELECT c.subject_id, c.object_id, c.rating, c.rd, c.witness_count, c.type_id,

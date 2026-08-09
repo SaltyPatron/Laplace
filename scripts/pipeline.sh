@@ -786,8 +786,8 @@ phase_api_env() {
   if command -v psql >/dev/null 2>&1; then
     PGPASSWORD="${PGPASSWORD:-postgres}" psql -h "${PGHOST:-localhost}" -U "${PGUSER:-postgres}" \
       -d "${PGDATABASE:-laplace}" -v ON_ERROR_STOP=1 \
-      -c "SELECT ops.repoint_app_log('$ops_log_dir'); SELECT ops.repoint_sql_gap('$ops_log_dir'); SELECT ops.repoint_chess_drops('$ops_log_dir');" \
-      || echo "::warning::ops.repoint_* failed — ops.app_log/sql_gap/chess_drops stay unpointed until next successful api-env"
+      -c "SELECT ops.repoint_app_log('$ops_log_dir'); SELECT ops.repoint_chess_drops('$ops_log_dir');" \
+      || echo "::warning::ops.repoint_* failed — ops.app_log/chess_drops stay unpointed until next successful api-env"
   fi
 }
 
@@ -881,6 +881,9 @@ fp_publish() {
 }
 
 phase_publish() {
+  local fp app_dir="${LAPLACE_APP_DIR:-/opt/laplace/app}"
+  source "$ROOT/deploy/linux/app-dir-contract.sh"
+  laplace_reconcile_app_dir_contract "$app_dir"
   echo "===== PHASE — PUBLISH (full runtime contract) ====="
   # Publish owns the whole target: chess binaries, secrets, API+SPA+uci.
   phase_chess_lab
@@ -892,18 +895,7 @@ phase_publish() {
   # and the restart+readiness gate lives in the workflow, which records it via
   # `pipeline.sh publish-stamp` only after /health/ready passes. A deploy that
   # never went ready therefore re-deploys on the next run.
-  local fp app_dir="${LAPLACE_APP_DIR:-/opt/laplace/app}"
   fp=$(fp_publish)
-  if [[ -d "$app_dir" ]]; then
-    local app_owner app_group app_mode
-    app_owner=$(stat -c '%U' "$app_dir")
-    app_group=$(stat -c '%G' "$app_dir")
-    app_mode=$(stat -c '%a' "$app_dir")
-    if [[ "$app_owner" != "laplace-runner" || "$app_group" != "laplace-runner" || "$app_mode" != "2775" ]]; then
-      echo "::error::$app_dir permissions drifted: ${app_owner}:${app_group} mode ${app_mode}; expected laplace-runner:laplace-runner mode 2775. Run: sudo bash scripts/setup-host.sh"
-      return 1
-    fi
-  fi
   if fp_check publish "$fp" && [[ -x "$app_dir/laplace-uci" && -x "$app_dir/laplace-mcp" && -d "$app_dir/wwwroot" ]]; then
     echo "publish domain unchanged (app/ web/ deploy/) and $app_dir intact — skipping deploy"
     mkdir -p "$ROOT/build"

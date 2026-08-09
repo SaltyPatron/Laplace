@@ -316,7 +316,7 @@ pg_laplace_relation_highway_band(PG_FUNCTION_ARGS)
 }
 
 /*
- * consensus_band_edges(band, min_eff_mu, limit): every unrefuted consensus
+ * consensus.band_edges(band, min_eff_mu, limit): every unrefuted consensus
  * edge whose relation type belongs to the given salience band, strongest
  * first. This is the plane-selection primitive the foundry/synthesis and any
  * band-scoped reader should use.

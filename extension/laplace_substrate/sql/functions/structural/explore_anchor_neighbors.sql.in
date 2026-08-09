@@ -61,15 +61,22 @@ BEGIN
     nearest AS (
         SELECT d.entity_id, d.geo
         FROM dedup d ORDER BY d.geo LIMIT GREATEST(p_geodesic_k, 1)
+    ), numbered AS MATERIALIZED (
+        SELECT n.*, row_number() OVER (ORDER BY n.geo, n.entity_id) AS rn FROM nearest n
+    ), ids AS MATERIALIZED (
+        SELECT array_agg(entity_id ORDER BY rn) AS a FROM numbered
+    ), display AS MATERIALIZED (
+        SELECT laplace.render_text_batch(a, 8) AS rendered,
+               realize.label_batch(a) AS labels
+        FROM ids
     )
     SELECT 'geodesic'::text,
            n.entity_id,
-           COALESCE(NULLIF(realize.render_text_fast(n.entity_id, 8), ''),
-                    converse.label_or_hex(n.entity_id)),
+           COALESCE(NULLIF(d.rendered[n.rn], ''), d.labels[n.rn]),
            (SELECT min(e.tier) FROM laplace.entities e WHERE e.id = n.entity_id),
            n.geo,
            NULL::float8
-    FROM nearest n
+    FROM numbered n CROSS JOIN display d
     ORDER BY n.geo;
 
     -- Shape: Frechet of realized curves. Prefilter by coord KNN so Frechet
@@ -91,18 +98,30 @@ BEGIN
                 FROM pre
             ) c
             WHERE c.curve IS NOT NULL
+        ), survivors AS MATERIALIZED (
+            SELECT f.entity_id, f.fr
+            FROM f
+            WHERE f.fr IS NOT NULL AND f.fr <= p_frechet_max
+            ORDER BY f.fr, f.entity_id
+            LIMIT GREATEST(p_frechet_k, 1)
+        ), numbered AS MATERIALIZED (
+            SELECT s.*, row_number() OVER (ORDER BY s.fr, s.entity_id) AS rn FROM survivors s
+        ), ids AS MATERIALIZED (
+            SELECT array_agg(entity_id ORDER BY rn) AS a FROM numbered
+        ), display AS MATERIALIZED (
+            SELECT laplace.render_text_batch(a, 8) AS rendered,
+                   realize.label_batch(a) AS labels
+            FROM ids
         )
         SELECT 'shape'::text,
                f.entity_id,
-               COALESCE(NULLIF(realize.render_text_fast(f.entity_id, 8), ''),
-                        converse.label_or_hex(f.entity_id)),
+               COALESCE(NULLIF(d.rendered[f.rn], ''), d.labels[f.rn]),
                2::smallint,
                NULL::float8,
                f.fr
-        FROM f
-        WHERE f.fr IS NOT NULL AND f.fr <= p_frechet_max
+        FROM numbered f CROSS JOIN display d
         ORDER BY f.fr
-        LIMIT GREATEST(p_frechet_k, 1);
+        ;
     END IF;
 END;
 $$;

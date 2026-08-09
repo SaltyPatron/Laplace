@@ -40,13 +40,12 @@
 -- does that text stay on topic. Do not wire this into converse.chat() until that run exists.
 -- Signature change (p_ctx added): the 4-arg form must not survive as a second
 -- overload or every 4-arg call site becomes "function is not unique".
-DROP FUNCTION IF EXISTS laplace.converse_compose(text, int, bytea, bigint, bytea[]);
-CREATE OR REPLACE FUNCTION converse.compose(p_prompt text,
-                                            p_steps int DEFAULT 40,
-                                            p_lang bytea DEFAULT NULL,
-                                            p_seed bigint DEFAULT NULL,
-                                            p_ctx bytea[] DEFAULT NULL)
-    RETURNS text
+CREATE OR REPLACE FUNCTION generation.compose_batch(p_prompt text,
+                                                     p_steps int,
+                                                     p_lang bytea,
+                                                     p_seeds bigint[],
+                                                     p_ctx bytea[] DEFAULT NULL)
+    RETURNS TABLE(seed bigint, reply text)
     LANGUAGE plpgsql VOLATILE AS $$
 DECLARE
     b_def  int := 1;
@@ -62,10 +61,8 @@ DECLARE
     starts bytea[];
     core_seq bytea[];
     n      int;
-    rng    bigint;
-    out_ids bytea[];
 BEGIN
-    t_def := consensus.relation_band_types(b_def);
+    t_def := laplace.relation_band_types(b_def);
     -- ORIENT. Same hash-space signal converse.chat() uses: how strongly the token denotes the
     -- sense, then highway-mask breadth. No realize.realize(), no surface comparison.
     -- Two levels: breadth picks WHICH TOKEN, denote_mu picks WHICH SENSE of it.
@@ -79,7 +76,7 @@ BEGIN
                x.tok, x.syn, x.denote_mu, x.tok_breadth
         FROM (
             SELECT p.id AS tok, s.synset_id AS syn, s.eff_mu AS denote_mu,
-                   max(laplace.laplace_highway_popcount(e.highway_mask))
+                   max(consensus.laplace_highway_popcount(e.highway_mask))
                        OVER (PARTITION BY p.id) AS tok_breadth
             FROM converse.prompt_state(p_prompt) p
             CROSS JOIN LATERAL lexical.senses(p.id) s
@@ -90,12 +87,18 @@ BEGIN
     ) y
     ORDER BY y.tok_breadth DESC NULLS LAST, y.denote_mu DESC NULLS LAST, y.syn
     LIMIT 1;
-    IF syn IS NULL THEN RETURN NULL; END IF;
+    IF syn IS NULL THEN
+        RETURN QUERY
+        SELECT s.seed, NULL::text
+        FROM unnest(p_seeds) WITH ORDINALITY AS s(seed, ord)
+        ORDER BY s.ord;
+        RETURN;
+    END IF;
 
     WITH
     -- CONTENT-BAND TYPE IDS, RESOLVED ONCE.
     --
-    -- Every arm below used to test `laplace.relation_highway_band(c.type_id) IN (1,2,4,7)`
+    -- Every arm below used to test `consensus.relation_highway_band(c.type_id) IN (1,2,4,7)`
     -- directly against consensus. consensus is LIST-partitioned by type_id and holds
     -- ~48M rows, so a function on the partition key means no pruning, no index on the
     -- predicate, and one C call per edge scanned -- five times in this one function,
@@ -103,20 +106,20 @@ BEGIN
     -- Resolved here it becomes a bound array and each arm is an indexed
     -- (subject_id, type_id) probe.
     bands AS MATERIALIZED (
-        SELECT consensus.relation_band_types(ARRAY[1,2,4,7]) AS t
+        SELECT laplace.relation_band_types(ARRAY[1,2,4,7]) AS t
     ),
     -- FRONTIER: the topic's consensus neighbourhood, both directions, over the
     -- content bands. This is the turn's semantic plan -- concept-level, language-free.
     frontier AS MATERIALIZED (
-        SELECT c.object_id AS cid, consensus.eff_mu(c.rating, c.rd) AS mu
+        SELECT c.object_id AS cid, laplace.eff_mu(c.rating, c.rd) AS mu
         FROM bands b, laplace.consensus c
         WHERE c.subject_id = syn AND c.type_id = ANY (b.t)
         UNION ALL
-        SELECT c.subject_id, consensus.eff_mu(c.rating, c.rd)
+        SELECT c.subject_id, laplace.eff_mu(c.rating, c.rd)
         FROM bands b, laplace.consensus c
         WHERE c.object_id = syn AND c.type_id = ANY (b.t)
         UNION ALL
-        SELECT syn, (SELECT max(consensus.eff_mu(c2.rating, c2.rd)) FROM laplace.consensus c2
+        SELECT syn, (SELECT max(laplace.eff_mu(c2.rating, c2.rd)) FROM laplace.consensus c2
                      WHERE c2.subject_id = syn)
         -- BIOGRAPHY ARMS (R7 slice 2, GH #759): the session's recent topics
         -- join the turn's frontier with RECENCY-DECAYED weight — attention
@@ -133,21 +136,21 @@ BEGIN
         -- and a caller whose ctx happens to contain the elected topic would
         -- double-count it at full-plus-decayed weight (Copilot, PR #896).
         UNION ALL
-        SELECT c.object_id, consensus.eff_mu(c.rating, c.rd) / (2 ^ x.dist)
+        SELECT c.object_id, laplace.eff_mu(c.rating, c.rd) / (2 ^ x.dist)
         FROM bands b
         CROSS JOIN unnest(COALESCE(p_ctx, ARRAY[]::bytea[])) WITH ORDINALITY x(cid, dist)
         JOIN laplace.consensus c ON c.subject_id = x.cid
                         AND c.type_id = ANY (b.t)
         WHERE x.cid <> syn
         UNION ALL
-        SELECT c.subject_id, consensus.eff_mu(c.rating, c.rd) / (2 ^ x.dist)
+        SELECT c.subject_id, laplace.eff_mu(c.rating, c.rd) / (2 ^ x.dist)
         FROM bands b
         CROSS JOIN unnest(COALESCE(p_ctx, ARRAY[]::bytea[])) WITH ORDINALITY x(cid, dist)
         JOIN laplace.consensus c ON c.object_id = x.cid
                         AND c.type_id = ANY (b.t)
         WHERE x.cid <> syn
         UNION ALL
-        SELECT x.cid, (SELECT max(consensus.eff_mu(c2.rating, c2.rd)) FROM laplace.consensus c2
+        SELECT x.cid, (SELECT max(laplace.eff_mu(c2.rating, c2.rd)) FROM laplace.consensus c2
                        WHERE c2.subject_id = x.cid) / (2 ^ x.dist)
         FROM unnest(COALESCE(p_ctx, ARRAY[]::bytea[])) WITH ORDINALITY x(cid, dist)
         WHERE x.cid <> syn
@@ -191,10 +194,14 @@ BEGIN
     -- with an extra join paid first. Classification on ids is right where the ids
     -- carry the class; here they do not, and pretending otherwise buys a slower
     -- query with identical output.
-    ws AS MATERIALIZED (
-        SELECT d.entity_id AS id,
-               laplace.is_all_whitespace(COALESCE(realize.render_text_fast(d.entity_id, 8), ' ')) AS is_ws
-        FROM (SELECT DISTINCT t.entity_id FROM toks t) d
+    ws_ids AS MATERIALIZED (
+        SELECT array_agg(DISTINCT t.entity_id ORDER BY t.entity_id) AS a FROM toks t
+    ), ws AS MATERIALIZED (
+        SELECT i.id, laplace.is_all_whitespace(COALESCE(s.txt, ' ')) AS is_ws
+        FROM ws_ids,
+             LATERAL unnest(ws_ids.a) WITH ORDINALITY i(id, ord),
+             LATERAL unnest(laplace.render_text_batch(ws_ids.a, 8)) WITH ORDINALITY s(txt, ord)
+        WHERE i.ord=s.ord
     ),
     kept AS MATERIALIZED (
         SELECT q.* FROM (
@@ -268,15 +275,19 @@ BEGIN
     INTO stream, w, starts, core_seq;
 
     n := COALESCE(array_length(stream,1), 0);
-    IF n < 3 OR starts IS NULL THEN RETURN NULL; END IF;
+    IF n < 3 OR starts IS NULL THEN
+        RETURN QUERY
+        SELECT s.seed, NULL::text
+        FROM unnest(p_seeds) WITH ORDINALITY AS s(seed, ord)
+        ORDER BY s.ord;
+        RETURN;
+    END IF;
 
-    rng := abs(COALESCE(p_seed, ('x'||substr(md5(p_prompt),1,8))::bit(32)::bigint)) % 2147483647;
-
-    out_ids := converse.steered_walk_raw(stream, w, COALESCE(core_seq, ARRAY[]::bytea[]),
-                                starts, p_steps, MINLEN, rng);
-    IF out_ids IS NULL OR array_length(out_ids,1) IS NULL THEN RETURN NULL; END IF;
-    IF array_length(out_ids,1) = 1 THEN RETURN realize.render_text(out_ids[1], 64); END IF;
-
+    -- WALK every seed after the semantic frontier and concept stream have been
+    -- built ONCE. Only RNG varies at this stage. Realization is then one batch
+    -- over the union of every emitted id, not a per-seed replay of the same
+    -- catalog work.
+    --
     -- REALIZE last, and only here. p_lang selects which member of each concept's
     -- surface family is emitted; everything above ran in ids.
     -- BATCHED, over the DISTINCT emitted ids, re-expanded in emission order --
@@ -294,26 +305,66 @@ BEGIN
     -- ORDINALITY names the position but does not oblige the aggregate to use it,
     -- so token order in a generated sentence rested on the executor happening to
     -- feed rows in scan order.
-    RETURN btrim(regexp_replace(
-        regexp_replace(
-            (WITH ids AS MATERIALIZED (
-                 SELECT array_agg(DISTINCT u.t) AS a FROM unnest(out_ids) AS u(t)
-             ),
-             realized AS MATERIALIZED (
-                 SELECT i.a AS a,
-                        realize.batch(i.a, p_lang)  AS lbl,
-                        realize.render_text_batch(i.a, 64)  AS txt
-                 FROM ids i
-             ),
-             m AS (
-                 SELECT (r.a)[k] AS id,
-                        COALESCE((r.lbl)[k], (r.txt)[k], '') AS s
-                 FROM realized r, generate_subscripts(r.a, 1) AS k
-             )
-             SELECT string_agg(COALESCE(m.s, ''), ' ' ORDER BY gg.o)
-             FROM unnest(out_ids) WITH ORDINALITY gg(t,o)
-             LEFT JOIN m ON m.id = gg.t),
-            '\s*[();:]\s*', ' ', 'g'),
-        '\s+', ' ', 'g'));
+    RETURN QUERY
+    WITH emitted AS MATERIALIZED (
+        SELECT s.ord, s.seed,
+               converse.steered_walk_raw(
+                   stream, w, COALESCE(core_seq, ARRAY[]::bytea[]), starts,
+                   p_steps, MINLEN,
+                   abs(COALESCE(s.seed,
+                       ('x'||substr(md5(p_prompt),1,8))::bit(32)::bigint)) % 2147483647
+               ) AS ids
+        FROM unnest(p_seeds) WITH ORDINALITY AS s(seed, ord)
+    ),
+    ids AS MATERIALIZED (
+        SELECT array_agg(DISTINCT u.id) AS a
+        FROM emitted e
+        CROSS JOIN LATERAL unnest(e.ids) AS u(id)
+    ),
+    realized AS MATERIALIZED (
+        SELECT i.a,
+               realize.batch(i.a, p_lang) AS lbl,
+               laplace.render_text_batch(i.a, 64) AS txt
+        FROM ids i
+    ),
+    labels AS MATERIALIZED (
+        SELECT (r.a)[k] AS id, (r.lbl)[k] AS lbl, (r.txt)[k] AS txt
+        FROM realized r
+        CROSS JOIN LATERAL generate_subscripts(r.a, 1) AS k
+    )
+    SELECT e.seed,
+           CASE count(u.id)
+               WHEN 0 THEN NULL::text
+               WHEN 1 THEN max(l.txt)
+               ELSE btrim(regexp_replace(
+                        regexp_replace(
+                            string_agg(COALESCE(l.lbl, l.txt, ''), ' ' ORDER BY u.ord),
+                            '\s*[();:]\s*', ' ', 'g'),
+                        '\s+', ' ', 'g'))
+           END AS reply
+    FROM emitted e
+    LEFT JOIN LATERAL unnest(e.ids) WITH ORDINALITY AS u(id, ord) ON true
+    LEFT JOIN labels l ON l.id = u.id
+    GROUP BY e.ord, e.seed
+    ORDER BY e.ord;
+END;
+$$;
+
+DROP FUNCTION IF EXISTS laplace.converse_compose(text, int, bytea, bigint, bytea[]);
+CREATE OR REPLACE FUNCTION converse.compose(p_prompt text,
+                                            p_steps int DEFAULT 40,
+                                            p_lang bytea DEFAULT NULL,
+                                            p_seed bigint DEFAULT NULL,
+                                            p_ctx bytea[] DEFAULT NULL)
+    RETURNS text
+    LANGUAGE plpgsql VOLATILE AS $$
+DECLARE
+    out_text text;
+BEGIN
+    SELECT b.reply INTO out_text
+    FROM generation.compose_batch(
+        p_prompt, p_steps, p_lang, ARRAY[p_seed]::bigint[], p_ctx) b
+    LIMIT 1;
+    RETURN out_text;
 END;
 $$;

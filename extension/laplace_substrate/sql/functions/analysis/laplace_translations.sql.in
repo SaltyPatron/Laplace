@@ -13,7 +13,7 @@ BEGIN ATOMIC
     WITH band_types AS (
         SELECT e.id FROM laplace.entities e
         WHERE e.highway_mask IS NOT NULL
-          AND laplace.laplace_highway_mask_bits(e.highway_mask) && laplace.laplace_highway_mask_bits(p_band_mask)
+          AND consensus.laplace_highway_mask_bits(e.highway_mask) && consensus.laplace_highway_mask_bits(p_band_mask)
     )
     SELECT DISTINCT a2.subject_id, a1.object_id,
            consensus.eff_mu_display(a2.rating, a2.rd)

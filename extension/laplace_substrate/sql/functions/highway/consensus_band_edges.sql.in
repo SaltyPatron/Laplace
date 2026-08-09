@@ -8,7 +8,11 @@
 -- zero DB round trips), then ONE indexed query fetches the edges
 -- (consensus_type_btree for the ANY() filter, the eff_mu expression index for
 -- ordering) — the define_fast pattern.
-CREATE OR REPLACE FUNCTION laplace.consensus_band_edges(
+DROP FUNCTION IF EXISTS consensus.band_edges(
+    p_band       int,
+    p_min_eff_mu bigint DEFAULT NULL,
+    p_limit      bigint DEFAULT 1000);
+CREATE OR REPLACE FUNCTION consensus.band_edges(
     p_band       int,
     p_min_eff_mu bigint DEFAULT NULL,
     p_limit      bigint DEFAULT 1000)

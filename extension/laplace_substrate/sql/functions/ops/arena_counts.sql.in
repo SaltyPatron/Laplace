@@ -1,14 +1,19 @@
 -- BEGIN ATOMIC: GH #764.
-DROP FUNCTION IF EXISTS laplace.arena_counts();
-
-CREATE OR REPLACE FUNCTION ops.arena_counts()
+CREATE OR REPLACE FUNCTION arena_counts()
     RETURNS TABLE(type text, type_id bytea, relations bigint, witnesses bigint,
                   top_eff_mu numeric)
     LANGUAGE sql STABLE
 BEGIN ATOMIC
-    SELECT realize.render(c.type_id), c.type_id, count(*), sum(c.witness_count),
-           max(consensus.eff_mu_display(c.rating, c.rd))
-    FROM laplace.consensus c
+    WITH raw AS MATERIALIZED (
+      SELECT c.type_id, count(*) AS relations, sum(c.witness_count) AS witnesses,
+             max(@extschema@.eff_mu_display(c.rating, c.rd)) AS top_eff_mu
+    FROM @extschema@.consensus c
     GROUP BY c.type_id
-    ORDER BY count(*) DESC;
+    ), numbered AS MATERIALIZED (
+      SELECT r.*, row_number() OVER (ORDER BY relations DESC, type_id) AS rn FROM raw r
+    ), batch AS MATERIALIZED (
+      SELECT @extschema@.render_batch(array_agg(type_id ORDER BY rn)) AS labels FROM numbered
+    )
+    SELECT b.labels[n.rn], n.type_id, n.relations, n.witnesses, n.top_eff_mu
+    FROM numbered n CROSS JOIN batch b ORDER BY n.rn;
 END;

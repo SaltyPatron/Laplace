@@ -176,7 +176,7 @@ emit_no_topic_msg(ReplyBuf *buf, const char *prompt, const RouteResult *route)
 
 /* Sense-disambiguation context for the gloss responders: the other resolvable
  * tokens the caller supplied. Structural callers pass ids directly; the text
- * entry points derive them from the prompt via prompt_state(). Either way this
+ * entry points derive them from the prompt via converse.prompt_state(). Either way this
  * is pure id resolution — no grammar is consulted. */
 static Datum
 spi_context_ids(const char *prompt, Datum topic)
@@ -536,7 +536,7 @@ respond_routed(const char *prompt, Datum context, bool ctx_null,
         if (bind->ctx_ids == (Datum) 0) dnulls[1] = 'n';
         n = spi_forward_replies(buf,
             "SELECT reply, eff_mu, witnesses "
-            "FROM laplace.recall_fallback_gloss($1, $2)",
+            "FROM converse.recall_fallback_gloss($1, $2)",
             2, dtypes, dargs, dnulls);
         if (n == 0)
         {
@@ -611,7 +611,7 @@ define_cand_cmp(const void *a, const void *b)
 }
 
 /*
- * Native replacement for the define()/senses()/lexical_peers() SQL composition
+ * Native replacement for the define()/lexical.senses()/lexical.lexical_peers() SQL composition
  * chain. That chain was measured taking 48+ seconds and 2.27M shared-buffer
  * hits for a single word, root-caused to: (1) every function in the chain
  * uses a CTE, which PostgreSQL cannot inline for set-returning functions --

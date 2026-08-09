@@ -8,13 +8,14 @@
 -- highway_mask_rebuild for full population. No-ops with a warning when the highway
 -- perfcache is not configured (hart-server before its blob deploys) so the fold
 -- never faults on mask maintenance.
-CREATE OR REPLACE FUNCTION laplace.highway_mask_refresh(p_ids bytea[])
+DROP FUNCTION IF EXISTS laplace.highway_mask_refresh(p_ids bytea[]);
+CREATE OR REPLACE FUNCTION consensus.highway_mask_refresh(p_ids bytea[])
     RETURNS bigint
     LANGUAGE plpgsql VOLATILE AS $$
 DECLARE
     updated bigint;
 BEGIN
-    IF NOT laplace.laplace_highway_ready() THEN
+    IF NOT consensus.laplace_highway_ready() THEN
         RAISE WARNING 'highway_mask_refresh: highway perfcache not configured — masks not refreshed (set laplace_substrate.highway_perfcache_path)';
         RETURN 0;
     END IF;
@@ -36,8 +37,8 @@ BEGIN
         SELECT q.id, q.bit
         FROM (
             SELECT tp.id,
-                   COALESCE(laplace.relation_highway_bit(tp.type_id),
-                            laplace.relation_highway_bit(fam.object_id)) AS bit
+                   COALESCE(consensus.relation_highway_bit(tp.type_id),
+                            consensus.relation_highway_bit(fam.object_id)) AS bit
             FROM tp
             LEFT JOIN laplace.consensus fam
               ON fam.subject_id = tp.type_id
@@ -46,7 +47,7 @@ BEGIN
         WHERE q.bit IS NOT NULL
     ),
     m AS (
-        SELECT bits.id, laplace.laplace_highway_mask_from_bits(array_agg(DISTINCT bits.bit)) AS mask
+        SELECT bits.id, consensus.laplace_highway_mask_from_bits(array_agg(DISTINCT bits.bit)) AS mask
         FROM bits GROUP BY bits.id
     ),
     upd AS (

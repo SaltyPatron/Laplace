@@ -97,6 +97,11 @@ functions/readback/vertex_tier.sql.in
 functions/readback/render_text.sql.in
 functions/readback/render_text_fast.sql.in
 functions/readback/render_text_batch.sql.in
+functions/realize/realize_batch.sql.in
+functions/realize/resolve_name_batch.sql.in
+functions/readback/render_batch.sql.in
+functions/converse/label_batch.sql.in
+functions/lexical/type_label_batch.sql.in
 functions/readback/render.sql.in
 functions/readback/register_canonicals.sql.in
 functions/inspect/entity_facets.sql.in
@@ -247,7 +252,6 @@ functions/identity/hash128_lo.sql.in
 functions/identity/atom_window.sql.in
 functions/identity/atom_census.sql.in
 functions/ops/source_tier_census.sql.in
-functions/realize/realize_batch.sql.in
 functions/ops/surface_sample.sql.in
 functions/ingest/intent_preflight_result.sql.in
 functions/ingest/intent_preflight.sql.in

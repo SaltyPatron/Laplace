@@ -68,7 +68,7 @@ LANGUAGE sql STABLE PARALLEL RESTRICTED AS $$
         FROM laplace.v_word_points w, anchor a
         WHERE w.coord IS NOT NULL
           AND (p_band_mask IS NULL
-               OR laplace.laplace_highway_match(w.highway_mask, p_band_mask))
+               OR consensus.laplace_highway_match(w.highway_mask, p_band_mask))
           AND (p_tiers IS NULL OR w.tier = ANY (p_tiers))
         ORDER BY w.coord <<->> a.pt
         LIMIT GREATEST(p_k * 6, 60)

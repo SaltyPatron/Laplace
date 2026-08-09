@@ -13,9 +13,9 @@ CREATE OR REPLACE FUNCTION generation.probe(p_prompt text,
                                             p_lang bytea DEFAULT NULL)
     RETURNS TABLE(lane text, seed bigint, reply text)
     LANGUAGE sql VOLATILE AS $$
-    SELECT 'walk', s.seed, converse.walk(p_prompt, p_steps, s.seed)
-    FROM unnest(p_seeds) AS s(seed)
+    SELECT 'walk', b.seed, b.reply
+    FROM generation.walk_batch(p_prompt, p_steps, p_seeds) b
     UNION ALL
-    SELECT 'compose', s.seed, converse.compose(p_prompt, p_steps, p_lang, s.seed)
-    FROM unnest(p_seeds) AS s(seed)
+    SELECT 'compose', b.seed, b.reply
+    FROM generation.compose_batch(p_prompt, p_steps, p_lang, p_seeds) b
 $$;

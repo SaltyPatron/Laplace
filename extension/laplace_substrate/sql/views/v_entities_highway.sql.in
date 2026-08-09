@@ -1,5 +1,5 @@
 CREATE OR REPLACE VIEW laplace.v_entities_highway AS
 SELECT e.*,
-       laplace.laplace_highway_popcount(e.highway_mask) AS highway_density
+       consensus.laplace_highway_popcount(e.highway_mask) AS highway_density
 FROM laplace.entities e
 WHERE e.highway_mask IS NOT NULL;

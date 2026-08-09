@@ -4,7 +4,7 @@
  * WHY THIS IS C. The SQL form of this read hung chat() for every prompt (>280s,
  * measured 2026-07-27 after the UD ingest) and was reverted off the hot path.
  * It was SQL doing what the substrate law puts in C: set-returning functions as
- * table sources (one senses() per token, one bubble_up per candidate relation
+ * table sources (one lexical.senses() per token, one bubble_up per candidate relation
  * type), relation-name identifiers split with string_to_array per row, and an
  * O(n^2) join of 277-315 candidate senses against each other through an OR of
  * both directions that no consensus index can serve. Rewriting it as two indexed
@@ -82,7 +82,7 @@ typedef struct PcCand
     uint8   tok[16];
     uint8   syn[16];
     double  denote_mu;
-    int64   witnesses;         /* evidence behind this sense, from senses() */
+    int64   witnesses;         /* evidence behind this sense, from lexical.senses() */
     int32   lang_agree;        /* +1 agrees with the token's language, 0 unknown,
                                 * -1 disagrees. Tri-state on purpose: an
                                 * unattested language is NOT a mismatch. */
@@ -996,10 +996,10 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
                  * railway carriage, both by id order. The sense that carries
                  * more witnessed mass is the dominant sense, and mass is
                  * fold-produced; the id stays only as the determinism anchor. */
-                /* EVIDENCE BEFORE ADJUDICATED STRENGTH, third site. senses() and
-                 * bubble_up() were corrected the same way on 2026-08-05; this
+                /* EVIDENCE BEFORE ADJUDICATED STRENGTH, third site. lexical.senses() and
+                 * taxonomy.bubble_up() were corrected the same way on 2026-08-05; this
                  * comparator is a SEPARATE election and did not inherit either
-                 * fix, because it re-ranks the rows senses() returns rather than
+                 * fix, because it re-ranks the rows lexical.senses() returns rather than
                  * taking its order. Correcting only the SQL left the C picking
                  * `urine` for the word "water" in "Water is made of" -- the exact
                  * row the SQL fix had just demoted.

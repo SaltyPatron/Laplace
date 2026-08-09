@@ -17,7 +17,7 @@ BEGIN ATOMIC
         band_types AS (
             SELECT e.id FROM laplace.entities e
             WHERE e.highway_mask IS NOT NULL
-              AND laplace.laplace_highway_mask_bits(e.highway_mask) && laplace.laplace_highway_mask_bits(p_band_mask)
+              AND consensus.laplace_highway_mask_bits(e.highway_mask) && consensus.laplace_highway_mask_bits(p_band_mask)
         ),
         ancestry(ancestor_id, depth, eff_mu_raw, visited) AS (
             SELECT c.object_id, 1, consensus.eff_mu(c.rating, c.rd),

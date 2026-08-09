@@ -4,15 +4,17 @@
 -- exact bug class that left chess/model planes maskless.
 -- STRICT: a NULL type id has no highway bit. Without it, a NULL bytea reaches the C
 -- (which PG_GETARG_BYTEA_Ps arg 0 unconditionally) and segfaults the backend — as it did
--- when highway_mask_refresh's COALESCE(..., laplace.relation_highway_bit(fam.object_id)) passed a
+-- when highway_mask_refresh's COALESCE(..., consensus.relation_highway_bit(fam.object_id)) passed a
 -- LEFT-JOIN-miss NULL on the fold path (crash-recovery, whole cluster down). STRICT makes
 -- NULL input return NULL without entering the C, which is the correct semantics anyway.
-CREATE OR REPLACE FUNCTION laplace.relation_highway_bit(p_type_id bytea)
+DROP FUNCTION IF EXISTS laplace.relation_highway_bit(p_type_id bytea);
+CREATE OR REPLACE FUNCTION consensus.relation_highway_bit(p_type_id bytea)
     RETURNS int
     AS 'MODULE_PATHNAME', 'pg_laplace_relation_highway_bit'
     LANGUAGE C STABLE STRICT;
 
-CREATE OR REPLACE FUNCTION laplace.relation_highway_band(p_type_id bytea)
+DROP FUNCTION IF EXISTS laplace.relation_highway_band(p_type_id bytea);
+CREATE OR REPLACE FUNCTION consensus.relation_highway_band(p_type_id bytea)
     RETURNS int
     AS 'MODULE_PATHNAME', 'pg_laplace_relation_highway_band'
     LANGUAGE C STABLE STRICT;

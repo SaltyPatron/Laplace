@@ -215,11 +215,11 @@ BEGIN
             ),
             sel AS MATERIALIZED (
                 -- Types resolved ONCE, structural families removed in ID SPACE.
-                -- laplace.relation_highway_band() is a C STABLE call; in the edge predicate
+                -- consensus.relation_highway_band() is a C STABLE call; in the edge predicate
                 -- it runs per EDGE and makes the scan unsargable.
                 SELECT e.id AS type_id, bd.layer
                 FROM laplace.entities e
-                JOIN bands bd ON bd.band = laplace.relation_highway_band(e.id)
+                JOIN bands bd ON bd.band = consensus.relation_highway_band(e.id)
                 WHERE e.type_id = laplace.entity_type_id('RelationType')
                   AND e.id NOT IN (SELECT id FROM converse.non_kin_assoc_types())
             ),
@@ -291,11 +291,11 @@ BEGIN
             -- joined back by ordinal (realize_batch is position-aligned, pinned by
             -- tests/sql/realize_ladder_parity.sql).
             WITH sel AS MATERIALIZED (
-                -- The band's relation types, resolved ONCE. laplace.relation_highway_band()
+                -- The band's relation types, resolved ONCE. consensus.relation_highway_band()
                 -- is a C STABLE call; evaluating it in the edge predicate ran it per
                 -- EDGE and made the scan unsargable. There are ~189 governed types,
                 -- so resolving the set up front turns the filter into an indexed
-                -- (subject_id, type_id) probe — the same move laplace.consensus_band_edges
+                -- (subject_id, type_id) probe — the same move consensus.band_edges
                 -- makes natively.
                 -- Structural families are excluded HERE, in id space, before a
                 -- single edge is read -- not by filtering rendered strings after.
@@ -306,10 +306,10 @@ BEGIN
                 -- (non_kin_assoc_types, whole families via laplace.relation_family_members)
                 -- and kept label_is_content only as a last-resort laplace.render guard; the
                 -- lens was still reading the band raw.
-                SELECT e.id AS type_id, laplace.relation_highway_band(e.id) AS band
+                SELECT e.id AS type_id, consensus.relation_highway_band(e.id) AS band
                 FROM laplace.entities e
                 WHERE e.type_id = laplace.entity_type_id('RelationType')
-                  AND laplace.relation_highway_band(e.id) = ANY(p_bands)
+                  AND consensus.relation_highway_band(e.id) = ANY(p_bands)
                   AND e.id NOT IN (SELECT id FROM converse.non_kin_assoc_types())
             ),
             edges AS MATERIALIZED (

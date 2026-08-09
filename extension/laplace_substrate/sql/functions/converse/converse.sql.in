@@ -7,7 +7,7 @@
 -- just IS_A -- and it is the same 13-band ladder the manifest governs and the highway
 -- perfcache bit-packs. (Native per-entity highway_mask AND is the intended fast path
 -- once the highway perfcache + laplace.entities.highway_mask are built; here we gate by
--- laplace.relation_highway_band on the read side, which is band-correct and works today.)
+-- consensus.relation_highway_band on the read side, which is band-correct and works today.)
 --
 -- ORIENT here, REALIZE in converse.about(): callers that already resolved a topic
 -- (converse.chat() orients once per turn) call converse_about directly and skip the

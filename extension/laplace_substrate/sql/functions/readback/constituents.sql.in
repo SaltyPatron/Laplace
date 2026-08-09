@@ -1,7 +1,7 @@
 DROP FUNCTION IF EXISTS laplace.constituents(bytea);
 CREATE OR REPLACE FUNCTION realize.constituents(p_id bytea)
     RETURNS TABLE(ordinal integer, child_id bytea, run_length integer, flags bigint)
-    LANGUAGE sql STABLE 
+    LANGUAGE sql STABLE
     AS $$
     SELECT u.ordinal, u.entity_id, u.run_length, u.flags
     FROM (

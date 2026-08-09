@@ -1,15 +1,14 @@
-DROP FUNCTION IF EXISTS laplace.render_gaps(integer);
-
+DROP FUNCTION IF EXISTS laplace.render_gaps(p_limit integer DEFAULT 50);
 CREATE OR REPLACE FUNCTION realize.render_gaps(p_limit integer DEFAULT 50)
     RETURNS TABLE(id bytea, roles text, refs bigint)
     LANGUAGE sql STABLE
     AS $$
     WITH refs AS (
-        SELECT c.type_id AS id, 'type' AS role FROM laplace.consensus c
+        SELECT c.type_id AS id, 'type' AS role FROM @extschema@.consensus c
         UNION ALL
-        SELECT c.object_id, 'object' FROM laplace.consensus c WHERE c.object_id IS NOT NULL
+        SELECT c.object_id, 'object' FROM @extschema@.consensus c WHERE c.object_id IS NOT NULL
         UNION ALL
-        SELECT c.subject_id, 'subject' FROM laplace.consensus c
+        SELECT c.subject_id, 'subject' FROM @extschema@.consensus c
     ),
     agg AS (
         SELECT r.id, string_agg(DISTINCT r.role, ',' ORDER BY r.role) AS roles, count(*) AS refs
@@ -17,9 +16,9 @@ CREATE OR REPLACE FUNCTION realize.render_gaps(p_limit integer DEFAULT 50)
     )
     SELECT a.id, a.roles, a.refs
     FROM agg a
-    WHERE NOT EXISTS (SELECT 1 FROM laplace.canonical_names n WHERE n.id = a.id)
-      AND realize.codepoint_for_id(a.id) IS NULL
-      AND NOT EXISTS (SELECT 1 FROM laplace.v_word_points w
+    WHERE NOT EXISTS (SELECT 1 FROM @extschema@.canonical_names n WHERE n.id = a.id)
+      AND @extschema@.codepoint_for_id(a.id) IS NULL
+      AND NOT EXISTS (SELECT 1 FROM @extschema@.v_word_points w
                       WHERE w.id = a.id AND w.trajectory IS NOT NULL)
     ORDER BY a.refs DESC
     LIMIT p_limit

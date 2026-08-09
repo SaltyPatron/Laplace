@@ -8,7 +8,7 @@ CREATE OR REPLACE FUNCTION ops.consensus_out_labeled(p_id bytea, p_limit integer
         object_label text,
         eff_mu numeric,
         witnesses bigint)
-    LANGUAGE sql STABLE 
+    LANGUAGE sql STABLE
     AS $$
     WITH subj(id) AS (
         SELECT p_id
@@ -29,11 +29,12 @@ CREATE OR REPLACE FUNCTION ops.consensus_out_labeled(p_id bytea, p_limit integer
         FROM ranked r
     ), labels AS (
         SELECT realize.batch(array_agg(o.object_id ORDER BY o.ord),
-                             converse.word_language(p_id)) AS l
+                             converse.word_language(p_id)) AS l,
+               lexical.type_label_batch(array_agg(o.type_id ORDER BY o.ord)) AS types
         FROM ordered o
     )
     SELECT o.type_id, o.object_id,
-           lexical.type_label(o.type_id),
+           labels.types[o.ord],
            COALESCE(NULLIF(labels.l[o.ord], ''),
                     left(encode(o.object_id, 'hex'), 16)),
            o.eff_mu,

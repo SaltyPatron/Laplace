@@ -1,8 +1,6 @@
 -- BEGIN ATOMIC: GH #764.
 -- Planner-statistics form of entity_type_counts (MCV x reltuples).
-DROP FUNCTION IF EXISTS laplace.entity_type_counts_approx();
-
-CREATE OR REPLACE FUNCTION ops.entity_type_counts_approx()
+CREATE OR REPLACE FUNCTION entity_type_counts_approx()
     RETURNS TABLE(type text, type_id bytea, entities_approx bigint)
     LANGUAGE sql STABLE
 BEGIN ATOMIC
@@ -10,18 +8,23 @@ BEGIN ATOMIC
         SELECT s.most_common_vals::text::bytea[] AS vals,
                s.most_common_freqs               AS freqs
         FROM pg_stats s
-        WHERE s.schemaname = 'laplace'
+        WHERE s.schemaname = '@extschema@'
           AND s.tablename  = 'entities'
           AND s.attname    = 'type_id'
     ), rt AS (
         SELECT c.reltuples
         FROM pg_class c
         JOIN pg_namespace n ON n.oid = c.relnamespace
-        WHERE n.nspname = 'laplace' AND c.relname = 'entities'
+        WHERE n.nspname = '@extschema@' AND c.relname = 'entities'
     )
-    SELECT realize.render(m.tid)                        AS type,
-           m.tid                                AS type_id,
-           (m.freq * rt.reltuples)::bigint      AS entities_approx
-    FROM st, rt, LATERAL unnest(st.vals, st.freqs) AS m(tid, freq)
-    ORDER BY entities_approx DESC;
+    , raw AS MATERIALIZED (
+      SELECT m.tid AS type_id, (m.freq * rt.reltuples)::bigint AS entities_approx
+      FROM st, rt, LATERAL unnest(st.vals, st.freqs) AS m(tid, freq)
+    ), numbered AS MATERIALIZED (
+      SELECT r.*, row_number() OVER (ORDER BY entities_approx DESC, type_id) AS rn FROM raw r
+    ), batch AS MATERIALIZED (
+      SELECT laplace.render_batch(array_agg(type_id ORDER BY rn)) AS labels FROM numbered
+    )
+    SELECT b.labels[n.rn], n.type_id, n.entities_approx
+    FROM numbered n CROSS JOIN batch b ORDER BY n.rn;
 END;
