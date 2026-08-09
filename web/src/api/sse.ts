@@ -19,14 +19,14 @@ export interface ChatChunk {
     witnesses?: number;
     ord_used?: number;
     performance?: {
-      substrate_ms: number;
-      elapsed_ms: number;
-      first_result_ms?: number;
-      output_utf8_bytes: number;
-      output_codepoints: number;
-      output_words: number;
-      generated_tokens?: number;
-      generated_tokens_per_second?: number;
+      substrate_ms: string | number;
+      elapsed_ms: string | number;
+      first_result_ms?: string | number;
+      output_utf8_bytes: string | number;
+      output_codepoints: string | number;
+      output_words: string | number;
+      generated_tokens?: string | number;
+      generated_tokens_per_second?: string | number;
     };
   };
 }

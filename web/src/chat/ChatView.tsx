@@ -19,6 +19,9 @@ import { ReceiptPanel } from './ReceiptPanel';
 
 import styles from './ChatView.module.css';
 
+const asOptionalNum = (value: string | number | null | undefined): number | undefined =>
+  value == null ? undefined : asNum(value);
+
 
 
 export function ChatView() {
@@ -153,14 +156,14 @@ export function ChatView() {
           updateLastAssistant((m) => ({
             ...m,
             performance: {
-              substrateMs: p.substrate_ms,
-              elapsedMs: p.elapsed_ms,
-              firstResultMs: p.first_result_ms,
-              outputUtf8Bytes: p.output_utf8_bytes,
-              outputCodepoints: p.output_codepoints,
-              outputWords: p.output_words,
-              generatedTokens: p.generated_tokens,
-              generatedTokensPerSecond: p.generated_tokens_per_second,
+              substrateMs: asNum(p.substrate_ms),
+              elapsedMs: asNum(p.elapsed_ms),
+              firstResultMs: asOptionalNum(p.first_result_ms),
+              outputUtf8Bytes: asNum(p.output_utf8_bytes),
+              outputCodepoints: asNum(p.output_codepoints),
+              outputWords: asNum(p.output_words),
+              generatedTokens: asOptionalNum(p.generated_tokens),
+              generatedTokensPerSecond: asOptionalNum(p.generated_tokens_per_second),
             },
           }));
         }
@@ -272,25 +275,25 @@ export function ChatView() {
       const sessionKey = (response.metadata as { session?: string } | undefined)?.session;
 
       const rawPerformance = (response.metadata as { performance?: {
-        substrate_ms: number;
-        elapsed_ms: number;
-        first_result_ms?: number;
-        output_utf8_bytes: number;
-        output_codepoints: number;
-        output_words: number;
-        generated_tokens?: number;
-        generated_tokens_per_second?: number;
+        substrate_ms: string | number;
+        elapsed_ms: string | number;
+        first_result_ms?: string | number;
+        output_utf8_bytes: string | number;
+        output_codepoints: string | number;
+        output_words: string | number;
+        generated_tokens?: string | number;
+        generated_tokens_per_second?: string | number;
       } } | undefined)?.performance;
 
       const performance: ChatPerformance | undefined = rawPerformance ? {
-        substrateMs: rawPerformance.substrate_ms,
-        elapsedMs: rawPerformance.elapsed_ms,
-        firstResultMs: rawPerformance.first_result_ms,
-        outputUtf8Bytes: rawPerformance.output_utf8_bytes,
-        outputCodepoints: rawPerformance.output_codepoints,
-        outputWords: rawPerformance.output_words,
-        generatedTokens: rawPerformance.generated_tokens,
-        generatedTokensPerSecond: rawPerformance.generated_tokens_per_second,
+        substrateMs: asNum(rawPerformance.substrate_ms),
+        elapsedMs: asNum(rawPerformance.elapsed_ms),
+        firstResultMs: asOptionalNum(rawPerformance.first_result_ms),
+        outputUtf8Bytes: asNum(rawPerformance.output_utf8_bytes),
+        outputCodepoints: asNum(rawPerformance.output_codepoints),
+        outputWords: asNum(rawPerformance.output_words),
+        generatedTokens: asOptionalNum(rawPerformance.generated_tokens),
+        generatedTokensPerSecond: asOptionalNum(rawPerformance.generated_tokens_per_second),
       } : undefined;
 
       if (sessionKey) useAppStore.getState().setSession(sessionKey);
