@@ -16,6 +16,10 @@ public sealed class RenderBeforeSelectGateTests
         + @"|type_label|label|label_or_hex)\s*\(",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
+    private static readonly Regex UnorderedRowNumber = new(
+        @"\brow_number\s*\(\s*\)\s*over\s*\(\s*\)",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
     private static readonly string[] ExcludedDirectories = ["realize/", "readback/"];
     private static readonly string[] ExcludedPrefixes = ["converse/label"];
     private static readonly string[] ExcludedFiles = ["lexical/type_label.sql.in"];
@@ -138,5 +142,26 @@ public sealed class RenderBeforeSelectGateTests
             "singleton scalar counts changed; classify every changed site:\n  "
             + string.Join("\n  ", changed));
         Assert.Equal(17, actual.Values.Sum());
+    }
+
+    [Fact]
+    public void BatchProjection_DoesNotInventOrderAfterRanking()
+    {
+        var root = FunctionsRoot(TypeIdLawTests.FindRepoRootPublic());
+        var violations = Directory.EnumerateFiles(root, "*.sql.in", SearchOption.AllDirectories)
+            .Select(file => new
+            {
+                Relative = Path.GetRelativePath(root, file).Replace('\\', '/'),
+                Sql = StripSqlComments(File.ReadAllText(file)),
+            })
+            .Where(x => UnorderedRowNumber.IsMatch(x.Sql))
+            .Select(x => x.Relative)
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        Assert.True(violations.Count == 0,
+            "row_number() OVER () does not preserve an operation's emitted ranking; "
+            + "capture set-returning-function order with WITH ORDINALITY:\n  "
+            + string.Join("\n  ", violations));
     }
 }

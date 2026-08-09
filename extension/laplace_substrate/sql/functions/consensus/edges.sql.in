@@ -47,10 +47,11 @@ CREATE OR REPLACE FUNCTION consensus.edges(
         -- The scan is consensus.edges_raw() — the one consensus scan. This function is its
         -- LABELING layer and nothing else: rank/limit happen in the core, labels
         -- resolve here, once, over exactly the surviving ids.
-        SELECT e.direction AS dir, e.type_id, e.neighbour_id AS nid,
-               e.rating, e.rd, e.witness_count,
-               row_number() OVER () AS ord
-        FROM consensus.edges_raw(p_subject, p_direction, p_types, p_limit, p_refuted, 'edge_rank') e
+        SELECT e.direction AS dir,e.type_id,e.neighbour_id AS nid,
+               e.rating,e.rd,e.witness_count,e.ord
+        FROM consensus.edges_raw(p_subject,p_direction,p_types,p_limit,p_refuted,'edge_rank')
+             WITH ORDINALITY
+             AS e(direction,type_id,neighbour_id,rating,rd,volatility,witness_count,ord)
     ),
     ids AS MATERIALIZED (
         SELECT array_agg(DISTINCT id ORDER BY id) AS a
