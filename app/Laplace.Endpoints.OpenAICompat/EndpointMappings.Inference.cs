@@ -532,8 +532,27 @@ internal static class InferenceEndpoints
             FirstResultMs: firstResultMs,
             OutputUtf8Bytes: Encoding.UTF8.GetByteCount(output),
             OutputCodepoints: output.EnumerateRunes().Count(),
-            OutputWords: output.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length,
+            OutputWords: CountWords(output),
             GeneratedTokens: generatedTokens,
             GeneratedTokensPerSecond: tokensPerSecond);
+    }
+
+    private static int CountWords(string value)
+    {
+        int words = 0;
+        bool inWord = false;
+        foreach (char c in value)
+        {
+            if (char.IsWhiteSpace(c))
+            {
+                inWord = false;
+            }
+            else if (!inWord)
+            {
+                words++;
+                inWord = true;
+            }
+        }
+        return words;
     }
 }

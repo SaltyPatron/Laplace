@@ -72,7 +72,9 @@ vertices.
 Both now select salient token entities, look up their deposited content PointZM
 placements, compute the real centroid, and encode Hilbert from it. Factor and ranked
 testimony remain exclusively in `TrajectoryXyzm`. The ETL test independently asserts
-the exact PointZM/Hilbert placement and trajectory constituent order.
+the exact PointZM/Hilbert placement and trajectory constituent order. If no ranked
+token is placeable, ingest retains the testimony and emits a warning but omits the
+projection physicality; it never fabricates a point from packed hashes or zero.
 
 ### Why Constellation looked linear/clouded
 
@@ -131,9 +133,11 @@ OpenAI chat now reports:
 - UTF-8 bytes, Unicode code points, and whitespace-delimited words;
 - generated trajectory tokens and trajectory tokens per substrate second on walk.
 
-The MCP wrapper adds elapsed time, result bytes/code points, row count, and rows per
-second to successful JSON-object tool results. This makes typed operations comparable
-without client-authored SQL.
+The MCP wrapper adds elapsed time, canonicalized inner-result bytes/code points, row
+count, and rows per second to successful JSON-object tool results. The size fields
+explicitly exclude the attached performance envelope; measuring that envelope would
+be self-referential. This makes typed operations comparable without client-authored
+SQL.
 
 `walk_text` tokens are substrate trajectory selections, not necessarily checkpoint or
 GGUF tokenizer tokens. They are not directly comparable to llama.cpp tokens/second.

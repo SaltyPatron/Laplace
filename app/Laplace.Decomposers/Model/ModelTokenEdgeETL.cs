@@ -287,7 +287,7 @@ public sealed class ModelTokenEdgeETL
     }
 
     private readonly record struct FactorDeposit(
-        Hash128 Slice, double[] Coord, double[] Xyzm, int Tokens, int Dim, CircuitDescriptor Desc);
+        Hash128 Slice, double[]? Coord, double[] Xyzm, int Tokens, int Dim, CircuitDescriptor Desc);
 
     // Item A deposit: per (projection tensor, head) — one Projection physicality
     // on the head's byte-range SLICE entity (same content law as tensors; slices
@@ -445,9 +445,21 @@ public sealed class ModelTokenEdgeETL
             .OrderByDescending(i => sal[i])
             .ThenBy(i => tokenIds[i].Hi)
             .ThenBy(i => tokenIds[i].Lo)
-            .Take(Math.Min(TopTokensPerCircuit, n))
-            .Select(i => tokenIds[i]);
-        double[] coord = CentroidOfPlacedTokens(salient, $"factor slice {slice}");
+            .Select(i => tokenIds[i])
+            .Where(_tokenPlacements.ContainsKey)
+            .Take(Math.Min(TopTokensPerCircuit, n));
+        double[]? coord;
+        if (!TryCentroidOfPlacedTokens(salient, out var placedCoord))
+        {
+            coord = null;
+            _log.LogWarning(
+                "Cannot place factor slice {Slice}: no vocabulary token has a real content coordinate; retaining trajectory testimony without a projection physicality",
+                slice);
+        }
+        else
+        {
+            coord = placedCoord;
+        }
         return new FactorDeposit(slice, coord, xyzm, n, dim, desc);
     }
 
@@ -479,16 +491,19 @@ public sealed class ModelTokenEdgeETL
                                    dep.Slice, ModelCoordinates.AppearsInTypeId,
                                    ModelCoordinates.CoordinateId(dep.Desc), _source,
                                    ModelCoordinates.CoordinateId(dep.Desc), 1.0));
-                               b.AddPhysicality(new PhysicalityRow(
-                                   Id: PhysicalityId.Compute(dep.Slice, PhysicalityType.Projection),
-                                   EntityId: dep.Slice, SourceId: _source,
-                                   Type: PhysicalityType.Projection,
-                                   CoordX: dep.Coord[0], CoordY: dep.Coord[1],
-                                   CoordZ: dep.Coord[2], CoordM: dep.Coord[3],
-                                   HilbertIndex: Hilbert128.Encode(dep.Coord),
-                                   TrajectoryXyzm: dep.Xyzm, NConstituents: dep.Tokens,
-                                   AlignmentResidual: null, SourceDim: dep.Dim,
-                                   ObservedAtUnixUs: IngestClock.NowUnixUs()));
+                               if (dep.Coord is { } placed)
+                               {
+                                   b.AddPhysicality(new PhysicalityRow(
+                                       Id: PhysicalityId.Compute(dep.Slice, PhysicalityType.Projection),
+                                       EntityId: dep.Slice, SourceId: _source,
+                                       Type: PhysicalityType.Projection,
+                                       CoordX: placed[0], CoordY: placed[1],
+                                       CoordZ: placed[2], CoordM: placed[3],
+                                       HilbertIndex: Hilbert128.Encode(placed),
+                                       TrajectoryXyzm: dep.Xyzm, NConstituents: dep.Tokens,
+                                       AlignmentResidual: null, SourceDim: dep.Dim,
+                                       ObservedAtUnixUs: IngestClock.NowUnixUs()));
+                               }
                            },
                            _source, label, 1,
                            reader, options, ct, commitEpoch, rowBudget))
@@ -1120,18 +1135,29 @@ public sealed class ModelTokenEdgeETL
         // discriminates nothing. Packed identity/score vertices remain in
         // trajectory only; treating them as child positions produces a valid
         // double and a meaningless point.
-        double[] centroid = CentroidOfPlacedTokens(
-            top.Select(static pair => pair.Subject),
-            $"circuit {descriptor.Plane} L{descriptor.Layer} H{descriptor.Head}");
-        var circuitPhys = new PhysicalityRow(
-            Id: PhysicalityId.Compute(coord, PhysicalityType.Projection),
-            EntityId: coord, SourceId: _source,
-            Type: PhysicalityType.Projection,
-            CoordX: centroid[0], CoordY: centroid[1], CoordZ: centroid[2], CoordM: centroid[3],
-            HilbertIndex: Hilbert128.Encode(centroid),
-            TrajectoryXyzm: trajXyzm, NConstituents: ranked.Length,
-            AlignmentResidual: null, SourceDim: null,
-            ObservedAtUnixUs: IngestClock.NowUnixUs());
+        PhysicalityRow? circuitPhys = null;
+        var salientPlacedTokens = ranked
+            .Select(static pair => pair.Token)
+            .Where(_tokenPlacements.ContainsKey)
+            .Take(Math.Min(TopTokensPerCircuit, ranked.Length));
+        if (TryCentroidOfPlacedTokens(salientPlacedTokens, out var centroid))
+        {
+            circuitPhys = new PhysicalityRow(
+                Id: PhysicalityId.Compute(coord, PhysicalityType.Projection),
+                EntityId: coord, SourceId: _source,
+                Type: PhysicalityType.Projection,
+                CoordX: centroid[0], CoordY: centroid[1], CoordZ: centroid[2], CoordM: centroid[3],
+                HilbertIndex: Hilbert128.Encode(centroid),
+                TrajectoryXyzm: trajXyzm, NConstituents: ranked.Length,
+                AlignmentResidual: null, SourceDim: null,
+                ObservedAtUnixUs: IngestClock.NowUnixUs());
+        }
+        else
+        {
+            _log.LogWarning(
+                "Cannot place circuit {Plane} L{Layer} H{Head}: no ranked token has a real content coordinate; retaining testimony without a projection physicality",
+                descriptor.Plane, descriptor.Layer, descriptor.Head);
+        }
 
         // Same batch door as the pair planes: fill machine-sized cell chunks,
         // ONE AggregatedBatch P/Invoke per chunk — never one per token.
@@ -1162,7 +1188,8 @@ public sealed class ModelTokenEdgeETL
                                if (!metaStaged)
                                {
                                    ModelCoordinates.StageCoordinate(b, descriptor, _source);
-                                   b.AddPhysicality(circuitPhys);
+                                   if (circuitPhys is { } placed)
+                                       b.AddPhysicality(placed);
                                    metaStaged = true;
                                }
                                StageEdgeChunk(b, chunk);
@@ -1172,7 +1199,8 @@ public sealed class ModelTokenEdgeETL
             yield return batch;
     }
 
-    private double[] CentroidOfPlacedTokens(IEnumerable<Hash128> tokenIds, string owner)
+    private bool TryCentroidOfPlacedTokens(
+        IEnumerable<Hash128> tokenIds, out double[] centroid)
     {
         var coords = new List<double>();
         foreach (var tokenId in tokenIds)
@@ -1184,9 +1212,12 @@ public sealed class ModelTokenEdgeETL
             coords.Add(coord[3]);
         }
         if (coords.Count == 0)
-            throw new InvalidOperationException(
-                $"Cannot place {owner}: none of its selected token entities has a real content coordinate.");
-        return Math4d.Centroid(coords.ToArray());
+        {
+            centroid = [];
+            return false;
+        }
+        centroid = Math4d.Centroid(coords.ToArray());
+        return true;
     }
 
     private static async IAsyncEnumerable<EdgeRowChunk> EnumerateChunksAsync(

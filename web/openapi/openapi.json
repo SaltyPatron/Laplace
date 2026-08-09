@@ -4670,7 +4670,6 @@
         "required": [
           "substrate_ms",
           "elapsed_ms",
-          "first_result_ms",
           "output_utf8_bytes",
           "output_codepoints",
           "output_words"
@@ -4688,15 +4687,6 @@
           "elapsed_ms": {
             "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
             "type": [
-              "number",
-              "string"
-            ],
-            "format": "double"
-          },
-          "first_result_ms": {
-            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
-            "type": [
-              "null",
               "number",
               "string"
             ],
@@ -4725,6 +4715,15 @@
               "string"
             ],
             "format": "int32"
+          },
+          "first_result_ms": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
           },
           "generated_tokens": {
             "pattern": "^-?(?:0|[1-9]\\d*)$",

@@ -55,9 +55,21 @@ public class ModelTokenEdgeETLTests
             $"γ=(1,2) should make t2 salience outrank t1; got {byDim1[2]} vs {byDim1[1]}");
     }
 
+    [Fact]
+    public async Task StructureMode_UnplaceableTokens_SkipsProjectionWithoutDroppingTestimony()
+    {
+        var testimony = await RunAttend(
+            new float[] { 1, 1, 2, 0, 0, 2, 3, 3 },
+            gamma: new float[] { 2f, 1f },
+            placeTokens: false);
+
+        Assert.NotEmpty(testimony);
+    }
 
 
-    private static async Task<Dictionary<int, long>> RunAttend(float[] embed, float[] gamma)
+
+    private static async Task<Dictionary<int, long>> RunAttend(
+        float[] embed, float[] gamma, bool placeTokens = true)
     {
         const int n = 4, d = 2;
         string dir = Path.Combine(Path.GetTempPath(), "laplace-fold-" + Guid.NewGuid().ToString("N"));
@@ -86,11 +98,11 @@ public class ModelTokenEdgeETLTests
                     Tier = 2,
                     IsByteLevel = false,
                     Role = TokenRole.None,
-                    ContentX = Math.Cos(i),
-                    ContentY = Math.Sin(i),
-                    ContentZ = 0,
-                    ContentM = 0,
-                    HasContentCoord = true,
+                    ContentX = placeTokens ? Math.Cos(i) : double.NaN,
+                    ContentY = placeTokens ? Math.Sin(i) : double.NaN,
+                    ContentZ = placeTokens ? 0 : double.NaN,
+                    ContentM = placeTokens ? 0 : double.NaN,
+                    HasContentCoord = placeTokens,
                 };
             }
 

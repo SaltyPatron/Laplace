@@ -34,10 +34,10 @@ public sealed record ChatMetadata(
 public sealed record ChatPerformance(
     [property: JsonPropertyName("substrate_ms")] double SubstrateMs,
     [property: JsonPropertyName("elapsed_ms")] double ElapsedMs,
-    [property: JsonPropertyName("first_result_ms"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] double? FirstResultMs,
     [property: JsonPropertyName("output_utf8_bytes")] int OutputUtf8Bytes,
     [property: JsonPropertyName("output_codepoints")] int OutputCodepoints,
     [property: JsonPropertyName("output_words")] int OutputWords,
+    [property: JsonPropertyName("first_result_ms"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] double? FirstResultMs = null,
     [property: JsonPropertyName("generated_tokens"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? GeneratedTokens = null,
     [property: JsonPropertyName("generated_tokens_per_second"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] double? GeneratedTokensPerSecond = null);
 
