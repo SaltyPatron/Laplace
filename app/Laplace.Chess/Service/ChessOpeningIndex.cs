@@ -58,7 +58,7 @@ internal sealed class ChessOpeningIndex : ChessOpeningIndexView
     /// actually reached, transpositions included.
     ///
     /// Deepest, not first: every prefix of an opening is itself a named position, so the
-    /// first hit is always the shallowest label ("Queen's Pawn Game") and the last is the
+    /// first hit is always the shallowest realize.label("Queen's Pawn Game") and the last is the
     /// specific line ("QGD: Orthodox Defense, Pillsbury Variation"). Scanning forward and
     /// keeping the last hit is what lets a game that starts 1.c4 and transposes into the
     /// Semi-Slav be named the Semi-Slav.

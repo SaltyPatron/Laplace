@@ -1,10 +1,11 @@
-CREATE OR REPLACE FUNCTION related(p_word bytea, p_type bytea, p_lang bytea DEFAULT NULL,
+DROP FUNCTION IF EXISTS laplace.related(bytea, bytea, bytea, int);
+CREATE OR REPLACE FUNCTION consensus.related(p_word bytea, p_type bytea, p_lang bytea DEFAULT NULL,
                                    p_limit int DEFAULT 10)
     RETURNS TABLE(fact text, eff_mu numeric, witnesses bigint)
 -- No SET search_path — blocks inlining, costs the consensus index path. GH #860.
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
     WITH subj(id) AS (
-        SELECT p_word UNION SELECT sn.synset_id FROM @extschema@.senses(p_word) sn
+        SELECT p_word UNION SELECT sn.synset_id FROM lexical.senses(p_word) sn
     ), top AS (
         SELECT cc.object_id, cc.rating, cc.rd, cc.witness_count
         FROM subj s CROSS JOIN LATERAL (
@@ -24,8 +25,8 @@ CREATE OR REPLACE FUNCTION related(p_word bytea, p_type bytea, p_lang bytea DEFA
         LIMIT p_limit
     ), labels AS (
         -- ONE realize_batch over exactly the returned rows, position-aligned.
-        SELECT @extschema@.realize_batch(array_agg(r.object_id ORDER BY r.ord),
-                             COALESCE(p_lang, @extschema@.word_language(p_word))) AS l
+        SELECT realize.batch(array_agg(r.object_id ORDER BY r.ord),
+                             COALESCE(p_lang, converse.word_language(p_word))) AS l
         FROM ranked r
     )
     SELECT labels.l[r.ord], @extschema@.eff_mu_display(r.rating, r.rd), r.witness_count

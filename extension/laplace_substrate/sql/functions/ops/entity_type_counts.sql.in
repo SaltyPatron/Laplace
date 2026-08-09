@@ -1,9 +1,17 @@
+-- BEGIN ATOMIC: GH #764. Full scan — serving path should use entity_type_counts_approx.
 CREATE OR REPLACE FUNCTION entity_type_counts()
     RETURNS TABLE(type text, type_id bytea, tier smallint, entities bigint)
     LANGUAGE sql STABLE
-    SET search_path = @extschema@, public AS $$
-    SELECT @extschema@.render(e.type_id), e.type_id, e.tier, count(*)
+BEGIN ATOMIC
+    WITH raw AS MATERIALIZED (
+      SELECT e.type_id, e.tier, count(*) AS entities
     FROM @extschema@.entities e
     GROUP BY e.type_id, e.tier
-    ORDER BY count(*) DESC
-$$;
+    ), numbered AS MATERIALIZED (
+      SELECT r.*, row_number() OVER (ORDER BY entities DESC, type_id, tier) AS rn FROM raw r
+    ), batch AS MATERIALIZED (
+      SELECT @extschema@.render_batch(array_agg(type_id ORDER BY rn)) AS labels FROM numbered
+    )
+    SELECT b.labels[n.rn], n.type_id, n.tier, n.entities
+    FROM numbered n CROSS JOIN batch b ORDER BY n.rn;
+END;

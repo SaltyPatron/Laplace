@@ -1,18 +1,18 @@
--- edges_raw() — THE consensus edge scan. Every other edge reader is a wrapper.
+-- consensus.edges_raw() — THE consensus edge scan. Every other edge reader is a wrapper.
 --
 -- Six functions were the same scan with different axes hard-coded, and no caller
 -- ever chose those axes — they inherited whichever function they happened to
 -- reach for:
 --
---   fn                              table       dir   rank       refuted
---   consensus_out                   consensus   out   edge_rank  INCLUDED
---   consensus_in                    consensus   in    edge_rank  INCLUDED
---   consensus_neighbors_directed    unrefuted   out   eff_mu     excluded
---   consensus_neighbors_undirected  unrefuted   both  eff_mu     excluded
---   explore_web_neighbors           consensus   both  eff_mu     INCLUDED
---   foundry_crawl_neighbors         consensus   out   eff_mu     INCLUDED
+--   fn                              table       dir   rank       laplace.refuted
+--   consensus_out                   consensus   out   laplace.edge_rank  INCLUDED
+--   consensus_in                    consensus   in    laplace.edge_rank  INCLUDED
+--   consensus_neighbors_directed    unrefuted   out   laplace.eff_mu     excluded
+--   consensus_neighbors_undirected  unrefuted   both  laplace.eff_mu     excluded
+--   explore_web_neighbors           consensus   both  laplace.eff_mu     INCLUDED
+--   foundry_crawl_neighbors         consensus   out   laplace.eff_mu     INCLUDED
 --
--- Four of the six return refuted edges. That is a semantic split — a refuted edge
+-- Four of the six return laplace.refuted edges. That is a semantic split — a laplace.refuted edge
 -- is one the fold has rated BELOW neutral at its optimistic bound, i.e. the
 -- substrate's own verdict is "this claim lost" — and it was distributed by
 -- accident, not by design. consensus_out and consensus_in are the pair a new
@@ -25,27 +25,22 @@
 -- which one excludes refutation.
 --
 -- RAW on purpose: ids and Glicko state, no labels. Labeling is a separate layer
--- (edges(), which wraps this and resolves in one realize_batch after the limit),
+-- (consensus.edges(), which wraps this and resolves in one realize_batch after the limit),
 -- because the native walkers that consume edges want ids and would pay for text
--- they never render.
-CREATE OR REPLACE FUNCTION edges_raw(
+-- they never laplace.render.
+DROP FUNCTION IF EXISTS laplace.edges_raw(bytea, text, bytea[], int, boolean, text);
+-- BEGIN ATOMIC: GH #764. No SET search_path (#617/#860) — inlining into wrappers.
+CREATE OR REPLACE FUNCTION consensus.edges_raw(
         p_subject   bytea,
         p_direction text    DEFAULT 'both',   -- 'out' | 'in' | 'both'
         p_types     bytea[] DEFAULT NULL,     -- NULL = every relation type
         p_limit     int     DEFAULT 40,       -- a QUERY limit over the ranking
-        p_refuted   boolean DEFAULT false,    -- include edges the fold refuted
+        p_refuted   boolean DEFAULT false,    -- include edges the fold laplace.refuted
         p_rank      text    DEFAULT 'edge_rank')  -- 'edge_rank' | 'eff_mu'
     RETURNS TABLE(direction text, type_id bytea, neighbour_id bytea,
                   rating bigint, rd bigint, volatility bigint, witness_count bigint)
--- No SET search_path: it blocks SQL inlining, so this body — THE consensus edge
--- scan that every other edge reader wraps — reaches the planner as an opaque
--- Function Scan instead of index scans over consensus. Measured 2026-08-04:
--- EXPLAIN (COSTS OFF) on consensus_out(word_id('dog'), 40) produced the single
--- line "Function Scan on consensus_out", while senses() — which documents its
--- own no-SET rule for the same reason (#617) — inlined to
--- "Index Scan using entities_t2_h0_type_id_idx" with predicates pushed through.
--- Every reference below is @extschema@-qualified instead. GH #860.
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     SELECT e.direction, e.type_id, e.neighbour_id,
            e.rating, e.rd, e.volatility, e.witness_count
     FROM (
@@ -71,5 +66,5 @@ CREATE OR REPLACE FUNCTION edges_raw(
                   ELSE (@extschema@.eff_mu(e.rating, e.rd))::float8 / 1e9
              END DESC,
              e.neighbour_id
-    LIMIT p_limit
-$$;
+    LIMIT p_limit;
+END;

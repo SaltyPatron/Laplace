@@ -1,19 +1,20 @@
 
 
 
-CREATE OR REPLACE FUNCTION language_coverage(p_word bytea, p_limit int DEFAULT 40)
+DROP FUNCTION IF EXISTS laplace.language_coverage(bytea, int);
+CREATE OR REPLACE FUNCTION converse.language_coverage(p_word bytea, p_limit int DEFAULT 40)
     RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+ AS $$
     WITH langs AS (
-        SELECT DISTINCT label(sm.lang) AS code
-        FROM synset_members(p_word) sm
+        SELECT DISTINCT realize.label(sm.lang) AS code
+        FROM lexical.synset_members(p_word) sm
         WHERE sm.lang IS NOT NULL
         UNION
-        SELECT label(word_language(p_word))
+        SELECT realize.label(converse.word_language(p_word))
     ),
     shown AS (SELECT code FROM langs WHERE code IS NOT NULL ORDER BY code LIMIT p_limit)
-    SELECT COALESCE(label(p_word), '?') || ' is witnessed across '
+    SELECT COALESCE(realize.label(p_word), '?') || ' is witnessed across '
            || (SELECT count(*) FROM langs WHERE code IS NOT NULL)::text || ' languages: '
            || (SELECT string_agg(code, ', ' ORDER BY code) FROM shown)
            || CASE WHEN (SELECT count(*) FROM langs WHERE code IS NOT NULL) > p_limit

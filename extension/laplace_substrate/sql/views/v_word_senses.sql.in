@@ -1,4 +1,4 @@
--- Word → sense edges on the unrefuted consensus surface. senses()/bubble_up own
+-- Word → sense edges on the unrefuted consensus surface. lexical.senses()/bubble_up own
 -- the ranked synset walk; this view is the shared HAS_SENSE join so callers
 -- stop re-typing relation_type_id('HAS_SENSE') + v_consensus_unrefuted.
 --

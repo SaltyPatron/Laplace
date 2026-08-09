@@ -1,11 +1,11 @@
 CREATE OR REPLACE FUNCTION constituents(p_id bytea)
     RETURNS TABLE(ordinal integer, child_id bytea, run_length integer, flags bigint)
     LANGUAGE sql STABLE
-    SET search_path = @extschema@, public AS $$
+    AS $$
     SELECT u.ordinal, u.entity_id, u.run_length, u.flags
     FROM (
         SELECT w.trajectory AS traj
-        FROM v_word_points w
+        FROM laplace.v_word_points w
         WHERE w.id = p_id AND w.trajectory IS NOT NULL
         ORDER BY w.physicality_id
         LIMIT 1

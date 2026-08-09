@@ -1,19 +1,21 @@
-CREATE OR REPLACE FUNCTION _realize_has_name(p_id bytea, p_lang bytea DEFAULT NULL)
+-- realize._has_name — GH #862 / #860. No SET (this is on the per-row label path),
+-- real schema names.
+DROP FUNCTION IF EXISTS laplace._realize_has_name(bytea, bytea);
+CREATE OR REPLACE FUNCTION realize._has_name(p_id bytea, p_lang bytea DEFAULT NULL)
     RETURNS text
-    LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
     SELECT q.s FROM (
-        SELECT render_text(nm.object_id, 24) AS s,
+        SELECT laplace.render_text(nm.object_id, 24) AS s,
                (lang.object_id IS NOT NULL) AS lp,
-               (nm.type_id = relation_type_id('HAS_NAME')) AS prim,
-               eff_mu(nm.rating, nm.rd) AS mu
-        FROM v_consensus_unrefuted nm
-        LEFT JOIN consensus lang ON lang.subject_id = nm.object_id
-          AND lang.type_id = relation_type_id('HAS_LANGUAGE')
+               (nm.type_id = laplace.relation_type_id('HAS_NAME')) AS prim,
+               laplace.eff_mu(nm.rating, nm.rd) AS mu
+        FROM laplace.v_consensus_unrefuted nm
+        LEFT JOIN laplace.consensus lang ON lang.subject_id = nm.object_id
+          AND lang.type_id = laplace.relation_type_id('HAS_LANGUAGE')
           AND lang.object_id = p_lang
         WHERE nm.subject_id = p_id
-          AND nm.type_id IN (relation_type_id('HAS_NAME'),
-                             relation_type_id('HAS_NAME_ALIAS'))
+          AND nm.type_id IN (laplace.relation_type_id('HAS_NAME'),
+                             laplace.relation_type_id('HAS_NAME_ALIAS'))
     ) q
     WHERE q.s IS NOT NULL AND q.s <> ''
     ORDER BY q.lp DESC, q.prim DESC, q.mu DESC

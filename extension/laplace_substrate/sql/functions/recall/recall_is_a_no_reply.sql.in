@@ -1,9 +1,10 @@
-CREATE OR REPLACE FUNCTION recall_is_a_no_reply(p_from bytea, p_to bytea, p_lang bytea DEFAULT NULL)
+DROP FUNCTION IF EXISTS laplace.recall_is_a_no_reply(bytea, bytea, bytea);
+CREATE OR REPLACE FUNCTION converse.recall_is_a_no_reply(p_from bytea, p_to bytea, p_lang bytea DEFAULT NULL)
     RETURNS text
     LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+ AS $$
     SELECT 'No witnessed IS_A path from "'
-           || COALESCE(realize(p_from, p_lang), label(p_from))
+           || COALESCE(realize.realize(p_from, p_lang), realize.label(p_from))
            || '" to "'
-           || COALESCE(realize(p_to, p_lang), label(p_to)) || '".'
+           || COALESCE(realize.realize(p_to, p_lang), realize.label(p_to)) || '".'
 $$;

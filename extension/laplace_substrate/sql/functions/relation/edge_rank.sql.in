@@ -19,5 +19,5 @@ CREATE OR REPLACE FUNCTION edge_rank(p_type bytea, p_eff_mu numeric)
     -- (a STRICT SQL function is not inlined when its args aren't provably
     -- non-null); NULL still propagates identically through relation_rank_resolved
     -- (itself STRICT) and the multiply, so dropping STRICT is semantically free.
-    SELECT @extschema@.relation_rank_resolved(p_type) * (p_eff_mu / 1e9)
+    SELECT laplace.relation_rank_resolved(p_type) * (p_eff_mu / 1e9)
 $$;

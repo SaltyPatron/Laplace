@@ -1,18 +1,19 @@
 -- Shape axis: Frechet over REALIZED curves (entity_curve), never packed
--- physicalities.trajectory (Rule #3 / Issue 51).
-CREATE OR REPLACE FUNCTION structural_neighbors(p_word text, p_k integer DEFAULT 10)
+-- laplace.physicalities.trajectory (Rule #3 / Issue 51).
+-- structural.neighbors — GH #862 / #860. No SET, real schema names.
+DROP FUNCTION IF EXISTS laplace.structural_neighbors(text, integer);
+CREATE OR REPLACE FUNCTION structural.neighbors(p_word text, p_k integer DEFAULT 10)
     RETURNS TABLE(neighbor text, geodesic double precision, frechet double precision)
-    LANGUAGE plpgsql STABLE
-    SET search_path = @extschema@, public AS $sn$
+    LANGUAGE plpgsql STABLE AS $sn$
 DECLARE
     v_id    bytea;
     v_coord geometry;
     v_curve geometry;
 BEGIN
-    SELECT w.id, w.coord, entity_curve(w.id)
+    SELECT w.id, w.coord, structural.entity_curve(w.id)
       INTO v_id, v_coord, v_curve
-    FROM v_word_points w
-    JOIN prompt_state(p_word) s ON w.id = s.id
+    FROM laplace.v_word_points w
+    JOIN converse.prompt_state(p_word) s ON w.id = s.id
     WHERE w.coord IS NOT NULL
     ORDER BY s.ord, w.physicality_id
     LIMIT 1;
@@ -21,7 +22,7 @@ BEGIN
     RETURN QUERY
     WITH knn AS (
         SELECT w.id AS entity_id, w.coord
-        FROM v_word_points w
+        FROM laplace.v_word_points w
         WHERE w.coord IS NOT NULL
         ORDER BY w.coord <<->> v_coord
         LIMIT GREATEST(p_k * 20, 200)),
@@ -44,11 +45,11 @@ BEGIN
         FROM nearest t
     ),
     curves AS (
-        SELECT o.entity_id, o.geo, o.ord, entity_curve(o.entity_id) AS curve
+        SELECT o.entity_id, o.geo, o.ord, structural.entity_curve(o.entity_id) AS curve
         FROM ordered o
     ),
     labels AS (
-        SELECT realize_batch(array_agg(c.entity_id ORDER BY c.ord)) AS l
+        SELECT realize.batch(array_agg(c.entity_id ORDER BY c.ord)) AS l
         FROM curves c
     )
     SELECT r.lbl, r.geo, r.frechet FROM (

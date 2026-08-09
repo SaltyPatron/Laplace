@@ -24,7 +24,7 @@ SELECT
     AND object_id=canonical_id('FrameNet_Frame'))   AS framenet_frames;
 
 \echo '== synset: identity reads back as the ILI (supermodel -> i93445); WN+OMW share the anchor =='
-SELECT laplace.render(sn.synset_id) AS ili_readback FROM senses(word_id('supermodel')) sn;
+SELECT laplace.render(sn.synset_id) AS ili_readback FROM lexical.senses(word_id('supermodel')) sn;
 SELECT count(*) AS synsets_with_wn_and_omw FROM (
   SELECT s.subject_id FROM consensus s
   WHERE s.type_id=relation_type_id('IS_A') AND s.object_id=canonical_id('WordNet_Synset')

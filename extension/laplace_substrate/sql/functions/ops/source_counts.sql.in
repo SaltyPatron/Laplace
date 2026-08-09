@@ -1,17 +1,17 @@
 CREATE OR REPLACE FUNCTION source_counts()
     RETURNS TABLE(source text, source_id bytea, evidence bigint, content bigint)
     LANGUAGE sql STABLE
-    SET search_path = @extschema@, public AS $$
-    
-    
-    
-    SELECT @extschema@.render(COALESCE(ev.sid, ct.sid)) AS source,
-           COALESCE(ev.sid, ct.sid)                     AS source_id,
+    AS $$
+
+
+
+    WITH raw AS MATERIALIZED (
+    SELECT COALESCE(ev.sid, ct.sid)                     AS source_id,
            COALESCE(ev.evidence, 0)                     AS evidence,
            COALESCE(ct.content, 0)                      AS content
-    
-    
-    
+
+
+
     FROM (SELECT a.source_id AS sid, count(*) AS evidence
           FROM @extschema@.attestations a GROUP BY a.source_id) ev
     FULL JOIN (SELECT a.source_id AS sid, count(DISTINCT w.id) AS content
@@ -19,5 +19,11 @@ CREATE OR REPLACE FUNCTION source_counts()
                JOIN @extschema@.v_word_points w ON w.id = a.subject_id
                GROUP BY a.source_id) ct
       ON ev.sid = ct.sid
-    ORDER BY evidence DESC NULLS LAST
+    ), numbered AS MATERIALIZED (
+      SELECT r.*, row_number() OVER (ORDER BY evidence DESC NULLS LAST, source_id) AS rn FROM raw r
+    ), batch AS MATERIALIZED (
+      SELECT @extschema@.render_batch(array_agg(source_id ORDER BY rn)) AS labels FROM numbered
+    )
+    SELECT b.labels[n.rn], n.source_id, n.evidence, n.content
+    FROM numbered n CROSS JOIN batch b ORDER BY n.rn
 $$;

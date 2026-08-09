@@ -103,7 +103,7 @@ BEGIN
       (consensus_id(w_c,   k_lang, lang_en),     w_c,    k_lang, lang_en,    neutral + 250000000000, sharp_rd, 60000000, 5, now()),
       (consensus_id(w_h,   k_lang, lang_de),     w_h,    k_lang, lang_de,    neutral + 250000000000, sharp_rd, 60000000, 5, now());
 END $$;
-SELECT word, (id IS NOT NULL) AS resolved FROM prompt_words('what is a Dog') ORDER BY ord;
+SELECT word, (id IS NOT NULL) AS resolved FROM converse.prompt_words('what is a Dog') ORDER BY ord;
  word | resolved 
 ------+----------
  what | f
@@ -112,55 +112,55 @@ SELECT word, (id IS NOT NULL) AS resolved FROM prompt_words('what is a Dog') ORD
  Dog  | f
 (4 rows)
 
-SELECT resolve_phrase('sort a list') = word_id('sort') AS phrase_prefers_leftmost;
+SELECT converse.resolve_phrase('sort a list') = word_id('sort') AS phrase_prefers_leftmost;
  phrase_prefers_leftmost 
 -------------------------
  
 (1 row)
 
-SELECT resolve_phrase('what is a dog') = word_id('dog') AS phrase_finds_dog;
+SELECT converse.resolve_phrase('what is a dog') = word_id('dog') AS phrase_finds_dog;
  phrase_finds_dog 
 ------------------
  t
 (1 row)
 
-SELECT resolve_last_word('what is a dog') = word_id('dog') AS last_word_is_dog;
+SELECT converse.resolve_last_word('what is a dog') = word_id('dog') AS last_word_is_dog;
  last_word_is_dog 
 ------------------
  t
 (1 row)
 
-SELECT resolve_last_word('zzzunknownzzz') IS NULL AS unknown_is_null;
+SELECT converse.resolve_last_word('zzzunknownzzz') IS NULL AS unknown_is_null;
  unknown_is_null 
 -----------------
  t
 (1 row)
 
-SELECT word_id('dog') = ANY(lexical_peers(word_id('dog'))) AS peer_includes_self;
+SELECT word_id('dog') = ANY(lexical.lexical_peers(word_id('dog'))) AS peer_includes_self;
  peer_includes_self 
 --------------------
  t
 (1 row)
 
-SELECT count(*) AS dog_senses FROM senses(word_id('dog'));
+SELECT count(*) AS dog_senses FROM lexical.senses(word_id('dog'));
  dog_senses 
 ------------
           2
 (1 row)
 
-SELECT definition, witnesses FROM define(word_id('dog'));
+SELECT definition, witnesses FROM lexical.define(word_id('dog'));
  definition | witnesses 
 ------------+-----------
  G          |         2
 (1 row)
 
-SELECT synonym FROM synonyms(word_id('dog'));
+SELECT synonym FROM converse.synonyms(word_id('dog'));
  synonym 
 ---------
  p
 (1 row)
 
-SELECT translation, language FROM translations(word_id('dog')) ORDER BY translation;
+SELECT translation, language FROM converse.translations(word_id('dog')) ORDER BY translation;
  translation |   language   
 -------------+--------------
  h           | test/lang/de
@@ -168,44 +168,44 @@ SELECT translation, language FROM translations(word_id('dog')) ORDER BY translat
 
 -- The read shape is an ARGUMENT, never inferred from the phrasing. These same
 -- calls answer identically whatever language the caller thinks in.
-SELECT reply, witnesses FROM recall_intent('define', word_id('dog'));
+SELECT reply, witnesses FROM converse.recall_intent('define', word_id('dog'));
  reply | witnesses 
 -------+-----------
  G     |         2
 (1 row)
 
-SELECT reply FROM recall_intent('synonyms', word_id('dog'));
+SELECT reply FROM converse.recall_intent('synonyms', word_id('dog'));
  reply 
 -------
  p
 (1 row)
 
-SELECT reply FROM recall_intent('translate', word_id('dog'));
+SELECT reply FROM converse.recall_intent('translate', word_id('dog'));
       reply       
 ------------------
  h [test/lang/de]
 (1 row)
 
-SELECT reply FROM recall_intent('translate', word_id('h'));
+SELECT reply FROM converse.recall_intent('translate', word_id('h'));
       reply       
 ------------------
  p [test/lang/en]
 (1 row)
 
-SELECT count(*) = 0 AS unknown_topic_has_no_id FROM prompt_state('zzzunknownzzz') WHERE id IS NOT NULL;
+SELECT count(*) = 0 AS unknown_topic_has_no_id FROM converse.prompt_state('zzzunknownzzz') WHERE id IS NOT NULL;
  unknown_topic_has_no_id 
 -------------------------
  t
 (1 row)
 
 -- Every published shape is dispatchable, and only published shapes are.
-SELECT count(*) AS published_shapes FROM query_shapes();
+SELECT count(*) AS published_shapes FROM converse.query_shapes();
  published_shapes 
 ------------------
                14
 (1 row)
 
-SELECT count(*) FILTER (WHERE needs_topic2) = 2 AS exactly_two_topic2_shapes FROM query_shapes();
+SELECT count(*) FILTER (WHERE needs_topic2) = 2 AS exactly_two_topic2_shapes FROM converse.query_shapes();
  exactly_two_topic2_shapes 
 ---------------------------
  t
@@ -213,59 +213,59 @@ SELECT count(*) FILTER (WHERE needs_topic2) = 2 AS exactly_two_topic2_shapes FRO
 
 DO $$
 BEGIN
-    PERFORM * FROM recall_intent('what does dog mean', word_id('dog'));
+    PERFORM * FROM converse.recall_intent('what does dog mean', word_id('dog'));
     RAISE EXCEPTION 'recall_intent accepted an unpublished shape';
 EXCEPTION WHEN OTHERS THEN
     IF SQLERRM NOT LIKE '%unknown shape%' THEN RAISE; END IF;
 END $$;
-SELECT word FROM prompt_state('what is a Dog') ORDER BY ord;
+SELECT word FROM converse.prompt_state('what is a Dog') ORDER BY ord;
  word 
 ------
 (0 rows)
 
 SELECT support,
        object_id = laplace_hash128_blake3('test/converse/lang_en') AS is_lang_en
-FROM shared_objects(ARRAY[word_id('dog'), word_id('p')])
+FROM consensus.shared_objects(ARRAY[word_id('dog'), word_id('p')])
 LIMIT 1;
  support | is_lang_en 
 ---------+------------
        2 | t
 (1 row)
 
-SELECT (SELECT sn.synset_id FROM senses(word_id('dog')) sn LIMIT 1)
+SELECT (SELECT sn.synset_id FROM lexical.senses(word_id('dog')) sn LIMIT 1)
        = laplace_hash128_blake3('test/converse/synset_b') AS plain_top_is_b;
  plain_top_is_b 
 ----------------
  t
 (1 row)
 
-SELECT (SELECT sn.synset_id FROM senses(word_id('dog'), ARRAY[word_id('h')]) sn LIMIT 1)
+SELECT (SELECT sn.synset_id FROM lexical.senses(word_id('dog'), ARRAY[word_id('h')]) sn LIMIT 1)
        = laplace_hash128_blake3('test/converse/synset1') AS context_flips_to_1;
  context_flips_to_1 
 --------------------
  t
 (1 row)
 
-SELECT realize(word_id('p'), NULL) AS leaf_realizes;
+SELECT realize.realize(word_id('p'), NULL) AS leaf_realizes;
  leaf_realizes 
 ---------------
  p
 (1 row)
 
-SELECT realize(laplace_hash128_blake3('test/converse/synset1'),
+SELECT realize.realize(laplace_hash128_blake3('test/converse/synset1'),
                laplace_hash128_blake3('test/converse/lang_en')) AS synset_realizes_member;
  synset_realizes_member 
 ------------------------
  p
 (1 row)
 
-SELECT type_label(relation_type_id('IS_A')) AS isa_label;
+SELECT lexical.type_label(relation_type_id('IS_A')) AS isa_label;
  isa_label 
 -----------
  is a
 (1 row)
 
-SELECT realize_path(ARRAY[laplace_hash128_blake3('test/converse/synset1'),
+SELECT realize.path(ARRAY[laplace_hash128_blake3('test/converse/synset1'),
                           laplace_hash128_blake3('test/converse/synset2')],
                     ARRAY[relation_type_id('IS_A')],
                     laplace_hash128_blake3('test/converse/lang_en')) AS realized_path;
@@ -274,7 +274,7 @@ SELECT realize_path(ARRAY[laplace_hash128_blake3('test/converse/synset1'),
  p —is a→ c
 (1 row)
 
-SELECT type, fact, witnesses FROM salient_facts(word_id('dog'));
+SELECT type, fact, witnesses FROM consensus.salient_facts(word_id('dog'));
       type      | fact | witnesses 
 ----------------+------+-----------
  has definition | G    |         2
@@ -284,46 +284,46 @@ SELECT type, fact, witnesses FROM salient_facts(word_id('dog'));
  is antonym of  | h    |         1
 (5 rows)
 
-SELECT reply FROM recall_intent('related', word_id('dog'), NULL, 'IS_ANTONYM_OF');
+SELECT reply FROM converse.recall_intent('related', word_id('dog'), NULL, 'IS_ANTONYM_OF');
  reply 
 -------
  h
 (1 row)
 
-SELECT fact FROM related_in(laplace_hash128_blake3('test/converse/synset1'), relation_type_id('CAUSES'));
+SELECT fact FROM consensus.related_in(laplace_hash128_blake3('test/converse/synset1'), relation_type_id('CAUSES'));
  fact 
 ------
  h
 (1 row)
 
-SELECT reply FROM recall_intent('is_a', word_id('dog'), word_id('c'));
+SELECT reply FROM converse.recall_intent('is_a', word_id('dog'), word_id('c'));
       reply       
 ------------------
  Yes — p —is a→ c
 (1 row)
 
-SELECT reply FROM recall_intent('is_a', word_id('h'), word_id('c'));
+SELECT reply FROM converse.recall_intent('is_a', word_id('h'), word_id('c'));
       reply       
 ------------------
  Yes — h —is a→ c
 (1 row)
 
-SELECT g.step, type_label(g.type_id) AS rel_type,
+SELECT g.step, lexical.type_label(g.type_id) AS rel_type,
        g.entity_id = laplace_hash128_blake3('test/converse/synset2') AS is_synset2
-FROM walk_strongest(laplace_hash128_blake3('test/converse/synset1'), relation_type_id('IS_A')) g;
+FROM consensus.walk_strongest(laplace_hash128_blake3('test/converse/synset1'), relation_type_id('IS_A')) g;
  step | rel_type | is_synset2 
 ------+----------+------------
     1 | is a     | t
 (1 row)
 
 SELECT count(*) AS tree_nodes
-FROM walk_branches(laplace_hash128_blake3('test/converse/synset1'), relation_type_id('IS_A'), 4, 5);
+FROM consensus.walk_branches(laplace_hash128_blake3('test/converse/synset1'), relation_type_id('IS_A'), 4, 5);
  tree_nodes 
 ------------
           1
 (1 row)
 
-SELECT reply, eff_mu FROM recall_intent('walk', word_id('p'));
+SELECT reply, eff_mu FROM converse.recall_intent('walk', word_id('p'));
                  reply                  |  eff_mu  
 ----------------------------------------+----------
  p —is synonym of→ p —has definition→ G | 1530.000
@@ -332,19 +332,19 @@ SELECT reply, eff_mu FROM recall_intent('walk', word_id('p'));
 -- recall_session stays a text entry point because it carries session state, but
 -- it no longer routes on phrasing: a bare prompt gets the default shape, and the
 -- session carries the topic forward. Callers wanting a specific shape name it.
-SELECT reply, witnesses FROM recall_session('dog', convert_to('s1', 'UTF8'));
+SELECT reply, witnesses FROM converse.recall_session('dog', convert_to('s1', 'UTF8'));
                 reply                 | witnesses 
 --------------------------------------+-----------
  01cdcce152940fce07b431bc4f3bc2d5…: G |         2
 (1 row)
 
-SELECT reply FROM recall_session('dog', convert_to('s1', 'UTF8'));
+SELECT reply FROM converse.recall_session('dog', convert_to('s1', 'UTF8'));
                 reply                 
 --------------------------------------
  01cdcce152940fce07b431bc4f3bc2d5…: G
 (1 row)
 
-SELECT reply, witnesses FROM recall_session('dog', convert_to('s1', 'UTF8'));
+SELECT reply, witnesses FROM converse.recall_session('dog', convert_to('s1', 'UTF8'));
                 reply                 | witnesses 
 --------------------------------------+-----------
  01cdcce152940fce07b431bc4f3bc2d5…: G |         2
@@ -359,51 +359,51 @@ FROM session_topics WHERE session_id = convert_to('s1', 'UTF8') ORDER BY ord;
    3 | dog    | t
 (3 rows)
 
-SELECT plane AS reason_plane FROM relate_path(word_id('dog'), word_id('h'));
+SELECT plane AS reason_plane FROM consensus.relate_path(word_id('dog'), word_id('h'));
  reason_plane  
 ---------------
  is synonym of
 (1 row)
 
-SELECT count(*) AS band_rows FROM relation_bands();
+SELECT count(*) AS band_rows FROM converse.relation_bands();
  band_rows 
 -----------
         13
 (1 row)
 
-SELECT bool_and(consensus_rows >= 0) AS bands_counted FROM relation_bands();
+SELECT bool_and(consensus_rows >= 0) AS bands_counted FROM converse.relation_bands();
  bands_counted 
 ---------------
  t
 (1 row)
 
-SELECT array_agg(missing_arena ORDER BY missing_arena) AS dog_gaps FROM gaps(word_id('dog'));
+SELECT array_agg(missing_arena ORDER BY missing_arena) AS dog_gaps FROM consensus.gaps(word_id('dog'));
                                      dog_gaps                                      
 -----------------------------------------------------------------------------------
  {DERIVATIONALLY_RELATED,HAS_ATTRIBUTE,HAS_MEMBER,HAS_PART,IS_SIMILAR_TO,USED_FOR}
 (1 row)
 
 SELECT bool_and(status = 'confirmed') AS isa_confirmed
-FROM epistemic_status(word_id('dog')) WHERE type = 'is a';
+FROM converse.epistemic_status(word_id('dog')) WHERE type = 'is a';
  isa_confirmed 
 ---------------
  t
 (1 row)
 
-SELECT plane AS rel_plane, usage AS rel_usage FROM relation_summary(word_id('dog'), word_id('h'));
+SELECT plane AS rel_plane, usage AS rel_usage FROM consensus.relation_summary(word_id('dog'), word_id('h'));
    rel_plane   | rel_usage 
 ---------------+-----------
  is synonym of |         0
 (1 row)
 
 SELECT reply LIKE '%antonym%' AS related_reply_mentions_antonym
-FROM recall_intent('reason', word_id('dog'), word_id('h'));
+FROM converse.recall_intent('reason', word_id('dog'), word_id('h'));
  related_reply_mentions_antonym 
 --------------------------------
  f
 (1 row)
 
-SELECT holder, type, fact FROM contrast(word_id('dog'), word_id('c'))
+SELECT holder, type, fact FROM converse.contrast(word_id('dog'), word_id('c'))
 ORDER BY holder, type, fact;
  holder |     type      | fact 
 --------+---------------+------
@@ -413,28 +413,28 @@ ORDER BY holder, type, fact;
 (3 rows)
 
 SELECT count(*) >= 0 AS hypernyms_runs
-FROM hypernyms(word_id('dog'), 4);
+FROM converse.hypernyms(word_id('dog'), 4);
  hypernyms_runs 
 ----------------
  t
 (1 row)
 
 SELECT cardinality(path) > 1 AS isa_path_found
-FROM isa_path(word_id('dog'), word_id('c'));
+FROM converse.isa_path(word_id('dog'), word_id('c'));
  isa_path_found 
 ----------------
  t
 (1 row)
 
 SELECT reply LIKE 'Yes%' AS cascade_via_isa
-FROM recall_intent('is_a', word_id('dog'), word_id('c'));
+FROM converse.recall_intent('is_a', word_id('dog'), word_id('c'));
  cascade_via_isa 
 -----------------
  t
 (1 row)
 
 SELECT count(*) >= 1 AS null_session_converse_runs
-FROM recall_session('dog');
+FROM converse.recall_session('dog');
  null_session_converse_runs 
 ----------------------------
  t

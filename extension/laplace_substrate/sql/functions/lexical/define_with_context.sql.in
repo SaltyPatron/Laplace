@@ -1,29 +1,32 @@
-CREATE OR REPLACE FUNCTION define(p_word bytea, p_context bytea[], p_limit int DEFAULT 5)
+DROP FUNCTION IF EXISTS laplace.define(bytea, bytea[], int);
+CREATE OR REPLACE FUNCTION lexical.define(p_word bytea, p_context bytea[], p_limit int DEFAULT 5)
     RETURNS TABLE(definition text, eff_mu numeric, witnesses bigint)
-    LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
-    SELECT render_text(d.object_id, 24) AS definition, d.eff_mu, d.witnesses
-    FROM (
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    WITH picked AS MATERIALIZED (
         SELECT u.object_id, u.eff_mu, u.witnesses, u.sense_rank
         FROM (
             SELECT g.object_id AS object_id,
-                   eff_mu_display(g.rating, g.rd) AS eff_mu,
+                   laplace.eff_mu_display(g.rating, g.rd) AS eff_mu,
                    g.witness_count AS witnesses,
                    sn.score AS sense_rank
-            FROM senses(p_word, p_context) sn
-            JOIN consensus g ON g.subject_id = sn.synset_id
-                            AND g.type_id = relation_type_id('HAS_DEFINITION')
+            FROM lexical.senses(p_word, p_context) sn
+            JOIN laplace.consensus g ON g.subject_id = sn.synset_id
+                            AND g.type_id = laplace.relation_type_id('HAS_DEFINITION')
             UNION ALL
             SELECT g.object_id,
-                   eff_mu_display(g.rating, g.rd),
+                   laplace.eff_mu_display(g.rating, g.rd),
                    g.witness_count,
                    NULL::numeric
-            FROM unnest(lexical_peers(p_word)) AS peer(id)
-            JOIN consensus g ON g.subject_id = peer.id
-                            AND g.type_id = relation_type_id('HAS_DEFINITION')
+            FROM unnest(lexical.lexical_peers(p_word)) AS peer(id)
+            JOIN laplace.consensus g ON g.subject_id = peer.id
+                            AND g.type_id = laplace.relation_type_id('HAS_DEFINITION')
         ) u
         ORDER BY COALESCE(u.sense_rank, 0) + u.eff_mu DESC
         LIMIT p_limit
-    ) d
-    ORDER BY COALESCE(d.sense_rank, 0) + d.eff_mu DESC
+    ), numbered AS MATERIALIZED (
+      SELECT d.*, row_number() OVER (ORDER BY COALESCE(d.sense_rank,0)+d.eff_mu DESC, d.object_id) AS rn FROM picked d
+    ), batch AS MATERIALIZED (
+      SELECT laplace.render_text_batch(array_agg(object_id ORDER BY rn), 24) AS txt FROM numbered
+    )
+    SELECT b.txt[d.rn], d.eff_mu, d.witnesses FROM numbered d CROSS JOIN batch b ORDER BY d.rn
 $$;

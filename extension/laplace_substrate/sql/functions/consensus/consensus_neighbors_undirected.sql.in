@@ -1,11 +1,12 @@
-DROP FUNCTION IF EXISTS consensus_neighbors_undirected(bytea, bytea[], int);
--- Neighbours in BOTH directions of one type set, unrefuted, eff_mu order. Thin
--- wrapper over edges_raw(); the UNION ALL it used to hand-roll is that function.
-CREATE OR REPLACE FUNCTION consensus_neighbors_undirected(
+-- Neighbours in BOTH directions of one type set, unrefuted, laplace.eff_mu order. Thin
+-- wrapper over consensus.edges_raw(); the UNION ALL it used to hand-roll is that function.
+DROP FUNCTION IF EXISTS laplace.consensus_neighbors_undirected(bytea, bytea[], int);
+-- BEGIN ATOMIC: GH #764.
+CREATE OR REPLACE FUNCTION consensus.neighbors_undirected(
     p_subject bytea, p_types bytea[], p_limit int)
     RETURNS TABLE(nbr bytea, rating bigint, rd bigint, witness_count bigint)
--- Class A per GH #860: RETURNS TABLE, not STRICT, not VOLATILE, single SELECT.
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     SELECT e.neighbour_id, e.rating, e.rd, e.witness_count
-    FROM @extschema@.edges_raw(p_subject, 'both', p_types, p_limit, false, 'eff_mu') e
-$$;
+    FROM consensus.edges_raw(p_subject, 'both', p_types, p_limit, false, 'eff_mu') e;
+END;

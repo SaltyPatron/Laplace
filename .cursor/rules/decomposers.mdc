@@ -3,14 +3,7 @@ globs: app/Laplace.Decomposers/**
 alwaysApply: false
 ---
 
-Decomposers are pure content → `SubstrateChange` streams with ZERO inline SQL
-(protected property). The pipeline spine (IngestBatchPipeline working-set →
-ConsensusAccumulatingWriter → NpgsqlWorkingSetApply) does all batching/dedup/Glicko
-fold/COPY. The spec is the SEQUENCE (Rule #8) — right algorithm at the wrong stage is a
-violation. Never change a SourceId. Do not create a new source by copying the nearest
-neighbor. [Updated 2026-07-20: the seven historical lanes are collapsed — every
-`*Decomposer.cs` now inherits the `Decomposer<T>` family and the architecture gate's
-escape-hatch allowlists are empty sets (`DecomposerArchitectureGateTests.cs:30-35,148-172`);
-dispatch is table-driven (`IngestDispatchTable.cs`). GH #406 closed on that evidence.
-`.scratchpad/13` is historical, not a lane index.] Full rules:
-`.github/instructions/decomposers.instructions.md` — read it.
+Read `.github/instructions/decomposers.instructions.md`. Decomposers are pure
+content-to-`SubstrateChange` streams with no SQL. The shared Rule #8 spine owns dedup,
+descent, COPY, and fold. Preserve SourceIds and verify current dispatch before editing;
+never select a path from archived lane reports.

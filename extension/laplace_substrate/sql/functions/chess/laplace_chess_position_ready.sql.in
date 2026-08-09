@@ -2,7 +2,8 @@
 -- (laplace_substrate.chess_position_perfcache_path GUC configured and mmap'd).
 -- Tier-1 piece×square vocab + catalog tier-2 positions (GH #822 / spec 33).
 -- Tier 0 remains codepoints (laplace_t0_perfcache).
-CREATE OR REPLACE FUNCTION laplace_chess_position_ready()
+DROP FUNCTION IF EXISTS laplace.laplace_chess_position_ready();
+CREATE OR REPLACE FUNCTION chess.position_ready()
     RETURNS boolean
     LANGUAGE C STABLE PARALLEL SAFE
     AS 'MODULE_PATHNAME', 'pg_laplace_chess_position_ready';

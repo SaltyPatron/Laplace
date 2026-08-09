@@ -4,7 +4,7 @@ using Laplace.Endpoints.Mcp;
 using Laplace.Ops;
 using Microsoft.Extensions.Logging;
 
-// MCP stdio server over the substrate's SQL surface. Same shape as
+// MCP stdio server over the substrate's typed operation surface. Same shape as
 // Laplace.Chess.Uci: a Console.ReadLine loop speaking a line protocol —
 // here JSON-RPC 2.0, newline-delimited, per the MCP stdio transport.
 // Protocol state and tool dispatch live in McpServer; substrate access in
@@ -15,8 +15,8 @@ using Microsoft.Extensions.Logging;
 using var loggerFactory = LaplaceLogging.FileOnly("mcp");
 var log = loggerFactory.CreateLogger("server");
 
-Console.Error.WriteLine($"[mcp] starting server — operator_lane={SubstrateTools.OperatorLane}, binary={Environment.ProcessPath ?? AppContext.BaseDirectory}");
-log.LogInformation("starting mcp server, operator_lane={OperatorLane}, binary={BinaryPath}", SubstrateTools.OperatorLane, Environment.ProcessPath ?? AppContext.BaseDirectory);
+Console.Error.WriteLine($"[mcp] starting server — binary={Environment.ProcessPath ?? AppContext.BaseDirectory}");
+log.LogInformation("starting mcp server, binary={BinaryPath}", Environment.ProcessPath ?? AppContext.BaseDirectory);
 
 var server = new McpServer(new SubstrateTools());
 string? line;

@@ -78,9 +78,9 @@ BEGIN
     -- inputs (sum_score_fp1e9, opponent_rd_fp1e9), so a scoped refold of this
     -- source reproduces the exact partials computed above — including the
     -- trust distinction the v1 neutral-opponent approximation erased.
-    SELECT rating INTO sc_trust FROM scoped_consensus(ARRAY[src]) WHERE object_id = o_trust;
-    SELECT rating INTO sc_crank FROM scoped_consensus(ARRAY[src]) WHERE object_id = o_crank;
-    SELECT rating INTO sc_many  FROM scoped_consensus(ARRAY[src]) WHERE object_id = o_games;
+    SELECT rating INTO sc_trust FROM consensus.scoped_consensus(ARRAY[src]) WHERE object_id = o_trust;
+    SELECT rating INTO sc_crank FROM consensus.scoped_consensus(ARRAY[src]) WHERE object_id = o_crank;
+    SELECT rating INTO sc_many  FROM consensus.scoped_consensus(ARRAY[src]) WHERE object_id = o_games;
     IF sc_trust IS DISTINCT FROM mu_trust THEN RAISE EXCEPTION 'FAIL: scoped_consensus trusted μ=% <> inline fold %', sc_trust, mu_trust; END IF;
     IF sc_crank IS DISTINCT FROM mu_crank THEN RAISE EXCEPTION 'FAIL: scoped_consensus crank μ=% <> inline fold % (per-row phi not consumed)', sc_crank, mu_crank; END IF;
     IF sc_many  IS DISTINCT FROM mu_many  THEN RAISE EXCEPTION 'FAIL: scoped_consensus 8-games μ=% <> inline fold % (persisted sum_score not consumed)', sc_many, mu_many; END IF;

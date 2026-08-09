@@ -179,7 +179,7 @@ public static class NpgsqlIngestOps
         return v is bool b && b;
     }
 
-    // W5 seed-variance probe through the installed op (laplace.generation_probe):
+    // W5 seed-variance probe through the installed op (generation.probe):
     // both generation lanes over one prompt and a seed set, one row per
     // (lane, seed). Replay — the failure converse_compose's header gates wiring
     // on — is distinct-reply-count == 1 for a lane across multiple seeds.
@@ -188,7 +188,7 @@ public static class NpgsqlIngestOps
         CancellationToken ct = default)
     {
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT lane, seed, reply FROM laplace.generation_probe(@p, @s, @n)";
+        cmd.CommandText = "SELECT lane, seed, reply FROM generation.probe(@p, @s, @n)";
         cmd.CommandTimeout = 0;
         cmd.Parameters.AddWithValue("p", prompt);
         cmd.Parameters.Add("s", NpgsqlDbType.Array | NpgsqlDbType.Bigint).Value = seeds;
@@ -219,10 +219,8 @@ public static class NpgsqlIngestOps
     public static Task<long> ModelCircuitTrajectoryCountAsync(
         NpgsqlConnection conn, CancellationToken ct = default) =>
         ScalarLongAsync(conn, """
-            SELECT count(*)::bigint
-            FROM laplace.physicalities p
-            JOIN laplace.entities e ON e.id = p.entity_id
-            WHERE p.type = 3 AND e.type_id = laplace.canonical_id('Model_Circuit')
+            SELECT consensus.entity_physicality_count(
+                       laplace.canonical_id('Model_Circuit'), 3)
             """, null, ct, "model_circuit_trajectory_count");
 
     public readonly record struct SourceEvidenceRow(string Source, long Evidence);
@@ -230,10 +228,9 @@ public static class NpgsqlIngestOps
     public static Task<IReadOnlyList<SourceEvidenceRow>> AttestationCountsBySourceAsync(
         NpgsqlConnection conn, int timeoutSeconds = 120, CancellationToken ct = default) =>
         NpgsqlRead.ReadRowsAsync(conn, """
-            SELECT laplace.render(a.source_id) AS source, count(*)::bigint AS evidence
-            FROM laplace.attestations a
-            GROUP BY a.source_id
-            ORDER BY evidence DESC
+            SELECT s.source, s.evidence
+            FROM laplace.source_counts() s
+            ORDER BY s.evidence DESC
             """,
             static r => new SourceEvidenceRow(r.GetString(0), r.GetInt64(1)),
             timeoutSeconds: timeoutSeconds, ct: ct, label: "attestation_counts_by_source");

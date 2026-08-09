@@ -150,7 +150,7 @@ spi_resolve_topic(const char *phrase, Datum context, bool ctx_null)
         nulls[1] = 'n';
 
     rc = SPI_execute_with_args(
-        "SELECT laplace.resolve_topic($1, $2)",
+        "SELECT converse.resolve_topic($1, $2)",
         2, types, args, nulls, true, 1);
     if (rc != SPI_OK_SELECT || SPI_processed == 0)
         return (Datum) 0;
@@ -192,7 +192,7 @@ spi_context_ids(const char *prompt, Datum topic)
     args[0] = CStringGetTextDatum(prompt);
     args[1] = topic;
     rc = SPI_execute_with_args(
-        "SELECT laplace.recall_context_exclude($1, $2)",
+        "SELECT converse.recall_context_exclude($1, $2)",
         2, types, args, NULL, true, 1);
     if (rc != SPI_OK_SELECT || SPI_processed == 0)
         return (Datum) 0;
@@ -246,7 +246,7 @@ respond_is_a(ReplyBuf *buf, Datum topic, Datum topic2)
         bool  path_null, mu_null;
         int   rc = SPI_execute_with_args(
             "SELECT ip.path, ip.types, ip.path_mu "
-            "FROM laplace.isa_path($1, $2) ip LIMIT 1",
+            "FROM converse.isa_path($1, $2) ip LIMIT 1",
             2, types, args, NULL, true, 1);
 
         if (rc == SPI_OK_SELECT && SPI_processed > 0)
@@ -275,7 +275,7 @@ respond_is_a(ReplyBuf *buf, Datum topic, Datum topic2)
                     rnulls[2] = 'n';
 
                 crc = SPI_execute_with_args(
-                    "SELECT laplace.recall_is_a_yes_reply($1, $2, $3)",
+                    "SELECT converse.recall_is_a_yes_reply($1, $2, $3)",
                     3, rtypes, rargs, rnulls, true, 1);
                 if (crc == SPI_OK_SELECT && SPI_processed > 0)
                 {
@@ -301,7 +301,7 @@ respond_is_a(ReplyBuf *buf, Datum topic, Datum topic2)
                 rnulls[2] = 'n';
 
             crc = SPI_execute_with_args(
-                "SELECT laplace.recall_is_a_no_reply($1, $2, $3)",
+                "SELECT converse.recall_is_a_no_reply($1, $2, $3)",
                 3, rtypes, rargs, rnulls, true, 1);
             if (crc == SPI_OK_SELECT && SPI_processed > 0)
             {
@@ -346,16 +346,16 @@ static const struct {
     const char *fallback;
 } kSingleArgIntents[] = {
     { "languages",
-      "SELECT reply, eff_mu, witnesses FROM laplace.recall_languages_response($1)",
+      "SELECT reply, eff_mu, witnesses FROM converse.recall_languages_response($1)",
       "no cross-language consensus yet." },
     { "synonyms",
-      "SELECT reply, eff_mu, witnesses FROM laplace.recall_synonyms_response($1)",
+      "SELECT reply, eff_mu, witnesses FROM converse.recall_synonyms_response($1)",
       "no synonym consensus yet." },
     { "examples",
-      "SELECT reply, eff_mu, witnesses FROM laplace.recall_examples_response($1)",
+      "SELECT reply, eff_mu, witnesses FROM converse.recall_examples_response($1)",
       "no example consensus yet." },
     { "describe",
-      "SELECT reply, eff_mu, witnesses FROM laplace.recall_describe_response($1)",
+      "SELECT reply, eff_mu, witnesses FROM converse.recall_describe_response($1)",
       "no relation consensus to describe yet." },
 };
 
@@ -410,7 +410,7 @@ respond_routed(const char *prompt, Datum context, bool ctx_null,
         if (bind->ctx_ids == (Datum) 0) nulls[1] = 'n';
         n = spi_forward_replies(buf,
             "SELECT reply, eff_mu, witnesses "
-            "FROM laplace.recall_define_response($1, $2)",
+            "FROM converse.recall_define_response($1, $2)",
             2, types, args, nulls);
         if (n == 0)
             emit_label_fallback(buf, topic, "no glosses have been witnessed yet.");
@@ -424,7 +424,7 @@ respond_routed(const char *prompt, Datum context, bool ctx_null,
         if (bind->ctx_ids == (Datum) 0) nulls[1] = 'n';
         n = spi_forward_replies(buf,
             "SELECT reply, eff_mu, witnesses "
-            "FROM laplace.recall_what_is_response($1, $2)",
+            "FROM converse.recall_what_is_response($1, $2)",
             2, types, args, nulls);
         if (n == 0)
             emit_label_fallback(buf, topic, "no sense consensus has been witnessed yet.");
@@ -442,7 +442,7 @@ respond_routed(const char *prompt, Datum context, bool ctx_null,
             nulls[1] = 'n';
         n = spi_forward_replies(buf,
             "SELECT reply, eff_mu, witnesses "
-            "FROM laplace.recall_translate_response($1, $2)",
+            "FROM converse.recall_translate_response($1, $2)",
             2, types, args, nulls);
         if (n == 0)
         {
@@ -469,7 +469,7 @@ respond_routed(const char *prompt, Datum context, bool ctx_null,
                           CStringGetTextDatum(route.type_name ? route.type_name : "") };
         n = spi_forward_replies(buf,
             "SELECT reply, eff_mu, witnesses "
-            "FROM laplace.recall_related_response($1, $2)",
+            "FROM converse.recall_related_response($1, $2)",
             2, types, args, NULL);
         if (n == 0)
             emit_type_miss(buf, topic, route.type_name, false);
@@ -481,7 +481,7 @@ respond_routed(const char *prompt, Datum context, bool ctx_null,
                           CStringGetTextDatum(route.type_name ? route.type_name : "") };
         n = spi_forward_replies(buf,
             "SELECT reply, eff_mu, witnesses "
-            "FROM laplace.recall_related_in_response($1, $2)",
+            "FROM converse.recall_related_in_response($1, $2)",
             2, types, args, NULL);
         if (n == 0)
             emit_type_miss(buf, topic, route.type_name, true);
@@ -505,7 +505,7 @@ respond_routed(const char *prompt, Datum context, bool ctx_null,
             Datum args[2] = { topic, topic2 };
             spi_forward_replies(buf,
                 "SELECT reply, eff_mu, witnesses "
-                "FROM laplace.recall_relation_summary_response($1, $2)",
+                "FROM converse.recall_relation_summary_response($1, $2)",
                 2, types, args, NULL);
         }
     }
@@ -516,7 +516,7 @@ respond_routed(const char *prompt, Datum context, bool ctx_null,
         Datum args[2] = { topic, CStringGetTextDatum(route.intent) };
         n = spi_forward_replies(buf,
             "SELECT reply, eff_mu, witnesses "
-            "FROM laplace.recall_walk_response($1, $2)",
+            "FROM converse.recall_walk_response($1, $2)",
             2, types, args, NULL);
         if (n == 0)
             emit_label_fallback(buf, topic, "no outgoing consensus to walk yet.");
@@ -544,7 +544,7 @@ respond_routed(const char *prompt, Datum context, bool ctx_null,
             Datum wargs[1] = { topic };
             n = spi_forward_replies(buf,
                 "SELECT reply, eff_mu, witnesses "
-                "FROM laplace.recall_fallback_walk($1)",
+                "FROM converse.recall_fallback_walk($1)",
                 1, wtypes, wargs, NULL);
             if (n == 0)
                 emit_label_fallback(buf, topic, "no gloss or continuation witnessed yet.");
@@ -562,7 +562,7 @@ respond_routed(const char *prompt, Datum context, bool ctx_null,
         if (bind->ctx_ids == (Datum) 0) nulls[1] = 'n';
         n = spi_forward_replies(buf,
             "SELECT reply, eff_mu, witnesses "
-            "FROM laplace.recall_define_response($1, $2)",
+            "FROM converse.recall_define_response($1, $2)",
             2, types, args, nulls);
         if (n == 0)
             emit_label_fallback(buf, topic, "no glosses have been witnessed yet.");
@@ -642,7 +642,7 @@ define_fast_impl(Datum p_word, ArrayType *p_context_arr, int p_limit, ReplyBuf *
         Datum args[1] = { p_word };
 
         rc = SPI_execute_with_args(
-            "SELECT laplace.lexical_peers($1)", 1, types, args, NULL, true, 1);
+            "SELECT lexical.lexical_peers($1)", 1, types, args, NULL, true, 1);
         if (rc != SPI_OK_SELECT || SPI_processed == 0)
             return;
         peers_arr = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &peers_null);
@@ -908,7 +908,7 @@ word_shape_peers_fast_impl(Datum p_word, double p_frechet_max)
      * candidate curves build inside the batched call below (STABLE functions in
      * filters run per row -- the anchor must never be recomputed per candidate). */
     rc = SPI_execute_with_args(
-        "SELECT laplace.word_curve($1), w.coord, w.type_id, w.n_constituents "
+        "SELECT structural.word_curve($1), w.coord, w.type_id, w.n_constituents "
         "FROM laplace.v_word_points w "
         "WHERE w.id = $1 "
         "  AND w.trajectory IS NOT NULL AND w.coord IS NOT NULL "
@@ -1074,7 +1074,7 @@ word_shape_peers_fast_impl(Datum p_word, double p_frechet_max)
                     Datum fargs[2] = { PointerGetDatum(eid_array), me_curve };
 
                     grc = SPI_execute_with_args(
-                        "SELECT t.idx, public.laplace_frechet_4d(laplace.word_curve(t.entity_id), $2) "
+                        "SELECT t.idx, public.laplace_frechet_4d(structural.word_curve(t.entity_id), $2) "
                         "FROM unnest($1::bytea[]) WITH ORDINALITY AS t(entity_id, idx)",
                         2, ftypes, fargs, NULL, true, 0);
                     if (grc == SPI_OK_SELECT)
@@ -1234,15 +1234,15 @@ pg_laplace_recall_intent(PG_FUNCTION_ARGS)
 
     if (PG_ARGISNULL(0))
         ereport(ERROR, (errmsg("recall_intent: p_intent must not be NULL"),
-                        errhint("SELECT shape FROM laplace.query_shapes()")));
+                        errhint("SELECT shape FROM converse.query_shapes()")));
     if (PG_ARGISNULL(1))
         ereport(ERROR, (errmsg("recall_intent: p_topic must not be NULL"),
-                        errhint("resolve it first: laplace.resolve_ref('<word or id hex>')")));
+                        errhint("resolve it first: converse.resolve_ref('<word or id hex>')")));
 
     intent = trim_dup(text_to_cstring(PG_GETARG_TEXT_PP(0)));
     if (!route_intent_known(intent))
         ereport(ERROR, (errmsg("recall_intent: unknown shape \"%s\"", intent),
-                        errhint("SELECT shape FROM laplace.query_shapes()")));
+                        errhint("SELECT shape FROM converse.query_shapes()")));
 
     route.intent = intent;
     bind.topic = PG_GETARG_DATUM(1);
@@ -1361,7 +1361,7 @@ pg_laplace_recall_session(PG_FUNCTION_ARGS)
             Datum args[1] = { session };
             bool  isnull;
             int   rc = SPI_execute_with_args(
-                "SELECT laplace.session_last_resolved($1)",
+                "SELECT generation.session_last_resolved($1)",
                 1, types, args, NULL, true, 1);
             if (rc == SPI_OK_SELECT && SPI_processed > 0)
             {
@@ -1389,7 +1389,7 @@ pg_laplace_recall_session(PG_FUNCTION_ARGS)
             /* This deposits the prompt as a conversational-provenance witness;
              * a silent failure would drop the turn from the record. */
             int rec_rc = SPI_execute_with_args(
-                "SELECT laplace.session_record_prompt($1, $2, $3)",
+                "SELECT generation.session_record_prompt($1, $2, $3)",
                 3, itypes, iargs, bind.topic == (Datum) 0 ? "  n" : NULL, false, 0);
             if (rec_rc != SPI_OK_SELECT)
                 elog(ERROR, "recall_session: session_record_prompt failed (SPI rc %d)",

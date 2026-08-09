@@ -1,15 +1,16 @@
-CREATE OR REPLACE FUNCTION structural_locale(p_word text, p_near double precision DEFAULT 0.05)
+-- structural.locale — GH #862 / #860. No SET, real schema names.
+DROP FUNCTION IF EXISTS laplace.structural_locale(text, double precision);
+CREATE OR REPLACE FUNCTION structural.locale(p_word text, p_near double precision DEFAULT 0.05)
     RETURNS TABLE(nearest double precision, within_near bigint,
                   within_2x bigint, within_5x bigint, isolated boolean)
-    LANGUAGE plpgsql STABLE
-    SET search_path = @extschema@, public AS $sl$
+    LANGUAGE plpgsql STABLE AS $sl$
 DECLARE
     v_id    bytea;
     v_coord geometry;
 BEGIN
     SELECT w.id, w.coord INTO v_id, v_coord
-    FROM v_word_points w
-    JOIN prompt_state(p_word) s ON w.id = s.id
+    FROM laplace.v_word_points w
+    JOIN converse.prompt_state(p_word) s ON w.id = s.id
     WHERE w.coord IS NOT NULL
     ORDER BY s.ord, w.physicality_id
     LIMIT 1;
@@ -18,7 +19,7 @@ BEGIN
     RETURN QUERY
     WITH cand AS (
         SELECT w.id AS entity_id, w.coord
-        FROM v_word_points w
+        FROM laplace.v_word_points w
         WHERE w.coord IS NOT NULL
         ORDER BY w.coord <<->> v_coord
         LIMIT 3000),

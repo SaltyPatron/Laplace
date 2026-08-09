@@ -1,11 +1,12 @@
-CREATE OR REPLACE FUNCTION respell_variant_seed(p_modality text, p_node_type text)
+DROP FUNCTION IF EXISTS laplace.respell_variant_seed(text, text);
+CREATE OR REPLACE FUNCTION generation.respell_variant_seed(p_modality text, p_node_type text)
     RETURNS bytea
     LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+ AS $$
     SELECT e.id
-    FROM canonical_names n
-    JOIN entities e ON e.type_id = n.id
-    JOIN v_word_points w ON w.id = e.id AND w.trajectory IS NOT NULL
+    FROM laplace.canonical_names n
+    JOIN laplace.entities e ON e.type_id = n.id
+    JOIN laplace.v_word_points w ON w.id = e.id AND w.trajectory IS NOT NULL
     WHERE n.name = 'substrate/type/grammar/' || p_modality || '/' || p_node_type || '/v1'
     ORDER BY public.laplace_hash128_blake3(e.id || convert_to(p_modality || '/' || p_node_type, 'UTF8'))
     LIMIT 1

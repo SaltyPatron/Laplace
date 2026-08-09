@@ -13,4 +13,5 @@ public sealed record ModalitiesResponse(
     [property: JsonPropertyName("text")] long Text,
     [property: JsonPropertyName("chess")] long Chess,
     [property: JsonPropertyName("models")] long Models,
-    [property: JsonPropertyName("multilingual")] long Multilingual);
+    [property: JsonPropertyName("multilingual")] long Multilingual,
+    [property: JsonPropertyName("documents")] long Documents = 0);

@@ -6,7 +6,7 @@ using Xunit;
 namespace Laplace.SubstrateCRUD.Tests;
 
 /// <summary>
-/// Guards the installed SQL surface: consensus_upsert (the inline fold) must be
+/// Guards the installed SQL surface: consensus.upsert(the inline fold) must be
 /// present after CREATE EXTENSION, a real fold must leave the consensus table's
 /// OID-bound dependents (secondary indexes, views, pg_extension_config_dump
 /// registration) intact while producing rows, and the consolidated helpers stay
@@ -118,7 +118,7 @@ public class SqlConsolidationTests
         // collocates now reads FROM v_consensus_unrefuted; proven body-equal to the inline
         // NOT refuted(...) form by the SQL parity harness — assert it is callable/typed.
         await using (var cmd = _pg.DataSource.CreateCommand(
-            "SELECT next_word, mu, witnesses FROM laplace.collocates('a', 3)"))
+            "SELECT next_word, mu, witnesses FROM structural.collocates('a', 3)"))
         await using (var rd = await cmd.ExecuteReaderAsync())
         {
             Assert.Equal(3, rd.FieldCount);

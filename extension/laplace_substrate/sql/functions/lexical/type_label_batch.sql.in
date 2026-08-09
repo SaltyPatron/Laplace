@@ -1,0 +1,8 @@
+CREATE OR REPLACE FUNCTION lexical.type_label_batch(p_ids bytea[])
+    RETURNS text[]
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE
+BEGIN ATOMIC
+    SELECT COALESCE(array_agg(lower(replace(u.s, '_', ' ')) ORDER BY u.ord),
+                    '{}'::text[])
+    FROM unnest(laplace.render_batch(p_ids)) WITH ORDINALITY AS u(s, ord);
+END;

@@ -1,4 +1,4 @@
--- non_kin_assoc_types(): the relation types that ride the ASSOCIATIVE salience band
+-- converse.non_kin_assoc_types(): the relation types that ride the ASSOCIATIVE salience band
 -- but do not mean "semantically related to".
 --
 -- Bands rank IMPORTANCE; families say what a relation MEANS. Conversational
@@ -19,13 +19,14 @@
 -- Naming the roots keeps this correct when a new child is added to the manifest --
 -- the exclusion follows automatically instead of silently regressing.
 --
--- Resolved through relation_family_members(), so an unknown or not-yet-seeded name
+-- Resolved through laplace.relation_family_members(), so an unknown or unseeded name
 -- contributes nothing rather than raising. Returns ids only: this is consumed inside
 -- WHERE clauses in hash space, never rendered.
-CREATE OR REPLACE FUNCTION non_kin_assoc_types()
+-- converse.non_kin_assoc_types — GH #862 / #860. No SET, real schema names.
+DROP FUNCTION IF EXISTS laplace.non_kin_assoc_types();
+CREATE OR REPLACE FUNCTION converse.non_kin_assoc_types()
     RETURNS TABLE(id bytea)
-    LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
     SELECT DISTINCT m.id
     FROM unnest(ARRAY[
              'HAS_ETYMOLOGY',        -- + ETYMOLOGICALLY_DERIVED_FROM / _RELATED_TO
@@ -33,5 +34,5 @@ CREATE OR REPLACE FUNCTION non_kin_assoc_types()
              'HAS_USAGE_REGISTER',   -- "archaic", "colloquial"
              'HAS_LEX_CATEGORY'      -- "noun.object", a catalogue bucket
          ]) AS fam(name)
-    CROSS JOIN LATERAL relation_family_members(fam.name) AS m(id)
+    CROSS JOIN LATERAL laplace.relation_family_members(fam.name) AS m(id)
 $$;

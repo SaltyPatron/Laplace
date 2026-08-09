@@ -11,7 +11,7 @@
 -- -- measured live via EXPLAIN ANALYZE, and caught in regress turning a
 -- sub-second converse.sql assertion into 24s. 'complete' mode's COMPLETES_TO
 -- filter keeps walk_branches on the fast, partition-pruned path; plain
--- 'walk' has no filter to give it, so it stays on walk_strongest (proven
+-- 'walk' has no filter to give it, so it stays on consensus.walk_strongest(proven
 -- fast for the genuinely-unrestricted case via the original baseline) until
 -- a bounded default relation set or a type-agnostic index makes the
 -- unfiltered case safe for the beam engine too.
@@ -25,12 +25,13 @@
 -- high-scoring but unreadable raw-hex-id reply. Averaging normalizes for
 -- path length, so a short high-confidence chain beats a long chain diluted
 -- by merely-adequate hops.
-CREATE OR REPLACE FUNCTION recall_walk_response(p_topic bytea, p_mode text)
+DROP FUNCTION IF EXISTS laplace.recall_walk_response(bytea, text);
+CREATE OR REPLACE FUNCTION converse.recall_walk_response(p_topic bytea, p_mode text)
     RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+ AS $$
     WITH complete_branches AS (
-        SELECT * FROM walk_branches(p_topic, relation_type_id('COMPLETES_TO'), 8, 5)
+        SELECT * FROM consensus.walk_branches(p_topic, laplace.relation_type_id('COMPLETES_TO'), 8, 5)
         WHERE p_mode = 'complete'
     ),
     complete_winner AS (
@@ -42,27 +43,35 @@ CREATE OR REPLACE FUNCTION recall_walk_response(p_topic bytea, p_mode text)
         SELECT i, w.path[i + 1] AS entity_id, w.types[i] AS type_id
         FROM complete_winner w, generate_series(1, w.depth) AS i
     ),
+    complete_ids AS MATERIALIZED (
+        SELECT ARRAY[p_topic] || COALESCE(array_agg(entity_id ORDER BY i),'{}'::bytea[]) AS entities,
+               COALESCE(array_agg(type_id ORDER BY i),'{}'::bytea[]) AS types
+        FROM complete_steps
+    ), complete_labels AS MATERIALIZED (
+        SELECT realize.batch(entities, converse.word_language(p_topic)) AS realized,
+               realize.label_batch(entities) AS fallback,
+               lexical.type_label_batch(types) AS types
+        FROM complete_ids
+    ),
     complete_reply AS (
-        SELECT (SELECT COALESCE(realize(p_topic, word_language(p_topic)), label(p_topic)))
-               || string_agg(' —' || COALESCE(type_label(s.type_id), '?') || E'→ '
-                             || COALESCE(realize(s.entity_id, word_language(p_topic)),
-                                         label(s.entity_id)), '' ORDER BY s.i) AS reply,
+        SELECT COALESCE(l.realized[1],l.fallback[1])
+               || string_agg(' —' || COALESCE(l.types[s.i], '?') || E'→ '
+                             || COALESCE(l.realized[s.i+1],l.fallback[s.i+1]), '' ORDER BY s.i) AS reply,
                min(b.eff_mu) AS eff_mu,
                (SELECT w.witnesses FROM complete_winner w) AS witnesses
-        FROM complete_steps s
+        FROM complete_steps s CROSS JOIN complete_labels l
         JOIN complete_branches b ON b.entity_id = s.entity_id AND b.depth = s.i
+        GROUP BY l.realized, l.fallback, l.types
         HAVING count(*) > 0
     ),
+    -- ONE responder, called at this branch's depth. This block used to be a
+    -- byte-for-byte copy of recall_fallback_walk differing only in depth and in
+    -- how '→' was spelled (GH #906 item 1). The gate stays a short-circuit: the
+    -- LATERAL is not evaluated at all when the mode is 'complete'.
     walk_reply AS (
-        SELECT COALESCE(realize(p_topic, word_language(p_topic)), label(p_topic))
-               || string_agg(' —' || COALESCE(type_label(g.type_id), '?') || E'→ '
-                             || COALESCE(realize(g.entity_id, word_language(p_topic)),
-                                         label(g.entity_id)), '' ORDER BY g.step) AS reply,
-               min(g.eff_mu) AS eff_mu,
-               NULL::bigint AS witnesses
-        FROM walk_strongest(p_topic, NULL, 8) g
-        WHERE p_mode <> 'complete'
-        HAVING count(*) > 0
+        SELECT r.reply, r.eff_mu, r.witnesses
+        FROM (SELECT 1 WHERE p_mode <> 'complete') gate
+        CROSS JOIN LATERAL converse.recall_fallback_walk(p_topic, 8) r
     )
     SELECT * FROM complete_reply
     UNION ALL

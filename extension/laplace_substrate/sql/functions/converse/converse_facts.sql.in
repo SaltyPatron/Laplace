@@ -1,5 +1,5 @@
--- converse_facts(syn, lang): the walk-driven fact set behind converse_about() --
--- one row per attested fact family, each carrying its provenance (eff_mu,
+-- converse.facts(syn, lang): the walk-driven fact set behind converse.about() --
+-- one row per attested fact family, each carrying its provenance (laplace.eff_mu,
 -- witnesses) and, for walk-built rows, the literal path/types so a caller can
 -- drill to the exact consensus edges that produced the sentence.
 --
@@ -18,38 +18,50 @@
 -- uses walk_strongest, the correct engine for the type-unfiltered case. The
 -- listing rows are 1-hop by nature (a parts inventory IS its ranked edges);
 -- LIMIT here is a query limit, not a truncation of what the source asserts.
--- eff_mu for a chain = the weakest edge on it (a chain is only as certain as
+-- laplace.eff_mu for a chain = the weakest edge on it (a chain is only as certain as
 -- its loosest strand).
-CREATE OR REPLACE FUNCTION converse_facts(p_syn bytea, p_lang bytea DEFAULT NULL)
+DROP FUNCTION IF EXISTS laplace.converse_facts(bytea, bytea);
+CREATE OR REPLACE FUNCTION converse.facts(p_syn bytea, p_lang bytea DEFAULT NULL)
     RETURNS TABLE(fact_kind text, sentence text, eff_mu numeric, witnesses bigint,
                   path bytea[], types bytea[])
-    LANGUAGE plpgsql STABLE
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE plpgsql STABLE AS $$
 DECLARE
     b_def  int := 1;   -- definitional band (gloss)
     b_tax  int := 2;   -- taxonomic band (is-a / hypernym)
     b_part int := 4;   -- partitive band (parts)
     b_assoc int := 7;  -- associative band (related)
+    -- Band -> relation-type ids, resolved ONCE per call. The predicates below used
+    -- `laplace.relation_highway_band(c.type_id) = b_*` directly against consensus, which is
+    -- LIST-partitioned by type_id over ~48M rows: a function on the partition key
+    -- prunes nothing, indexes nothing, and runs per edge scanned. The band is a
+    -- property of ~221 relation types, so it is resolved here and each read becomes
+    -- an indexed (subject_id, type_id) probe against a bound array.
+    t_def   bytea[];
+    t_part  bytea[];
+    t_assoc bytea[];
     v_lbl    text;
     tax_type bytea;
 BEGIN
+    t_def   := laplace.relation_band_types(b_def);
+    t_part  := laplace.relation_band_types(b_part);
+    t_assoc := laplace.relation_band_types(b_assoc);
     IF p_syn IS NULL THEN
         RETURN;
     END IF;
 
-    v_lbl := COALESCE(realize(p_syn, p_lang), label(p_syn));
+    v_lbl := COALESCE(realize.realize(p_syn, p_lang), realize.label(p_syn));
 
-    -- definition: highest eff_mu edge in the definitional band.
+    -- definition: highest laplace.eff_mu edge in the definitional band.
     RETURN QUERY
     SELECT 'definition'::text,
-           initcap(v_lbl) || ' is ' || render_text(c.object_id, 96) || '.',
-           eff_mu_display(c.rating, c.rd),
+           initcap(v_lbl) || ' is ' || laplace.render_text(c.object_id, 96) || '.',
+           laplace.eff_mu_display(c.rating, c.rd),
            c.witness_count::bigint,
            ARRAY[c.subject_id, c.object_id],
            ARRAY[c.type_id]
-    FROM consensus c
-    WHERE c.subject_id = p_syn AND relation_highway_band(c.type_id) = b_def
-    ORDER BY (c.rating - 2*c.rd) DESC
+    FROM laplace.consensus c
+    WHERE c.subject_id = p_syn AND c.type_id = ANY (t_def)
+    ORDER BY laplace.eff_mu(c.rating, c.rd) DESC
     LIMIT 1;
 
     -- taxonomy: multi-hop beam walk up the topic's strongest HYPERNYMY relation.
@@ -60,10 +72,10 @@ BEGIN
     -- wiktionary seed). Bands say how much a relation matters; families say what it
     -- MEANS, and only the IS_A family means hypernymy.
     SELECT c.type_id INTO tax_type
-    FROM consensus c
+    FROM laplace.consensus c
     WHERE c.subject_id = p_syn
-      AND c.type_id IN (SELECT id FROM relation_family_members('IS_A'))
-    ORDER BY (c.rating - 2*c.rd) DESC
+      AND c.type_id IN (SELECT id FROM laplace.relation_family_members('IS_A'))
+    ORDER BY laplace.eff_mu(c.rating, c.rd) DESC
     LIMIT 1;
     -- NO band fallback. An earlier revision fell back to the taxonomic BAND when the
     -- topic had no IS_A-family edge, "so it still says something rather than going
@@ -76,10 +88,10 @@ BEGIN
     IF tax_type IS NOT NULL THEN
         RETURN QUERY
         WITH branches AS (
-            SELECT * FROM walk_branches(p_syn, tax_type, 4, 3)
+            SELECT * FROM consensus.walk_branches(p_syn, tax_type, 4, 3)
         ),
         winner AS (
-            -- Deepest chain first: the beam never walks a refuted or
+            -- Deepest chain first: the beam never walks a laplace.refuted or
             -- non-positive edge, so every placed node sits on a confirmed
             -- chain and depth IS ancestry. Average per-hop confidence only
             -- breaks ties between equally deep chains (an avg-first order
@@ -92,42 +104,56 @@ BEGIN
         steps AS (
             SELECT i, w.path[i + 1] AS entity_id
             FROM winner w, generate_series(1, w.depth) AS i
+        ), ids AS MATERIALIZED (
+            SELECT array_agg(entity_id ORDER BY i) AS a FROM steps
+        ), labels AS MATERIALIZED (
+            SELECT realize.batch(a,p_lang) AS realized,
+                   realize.label_batch(a) AS fallback FROM ids
         )
         SELECT 'taxonomy'::text,
                initcap(v_lbl)
                  || string_agg(CASE WHEN s.i = 1 THEN ' is a kind of '
                                     ELSE ', which is a kind of ' END
-                               || COALESCE(realize(s.entity_id, p_lang), label(s.entity_id)),
+                               || COALESCE(l.realized[s.i], l.fallback[s.i]),
                                '' ORDER BY s.i)
                  || '.',
                min(b.eff_mu),
                (SELECT w.witnesses FROM winner w),
                (SELECT w.path  FROM winner w),
                (SELECT w.types FROM winner w)
-        FROM steps s
+        FROM steps s CROSS JOIN labels l
         JOIN branches b ON b.entity_id = s.entity_id AND b.depth = s.i
         HAVING count(*) > 0;
     END IF;
 
     -- parts: partitive-band ranked listing (1-hop by nature).
+    -- Rank in id space, then ONE realize.batch over survivors — not per-edge
+    -- realize() ahead of LIMIT (#903; same pattern chat.sql.in band lens).
     RETURN QUERY
+    WITH ranked AS MATERIALIZED (
+        SELECT c.object_id AS nid,
+               laplace.eff_mu(c.rating, c.rd) AS mu,
+               laplace.eff_mu_display(c.rating, c.rd) AS mu_disp,
+               c.witness_count AS wc,
+               row_number() OVER (
+                   ORDER BY laplace.eff_mu(c.rating, c.rd) DESC, c.object_id) AS ix
+        FROM laplace.consensus c
+        WHERE c.subject_id = p_syn AND c.type_id = ANY (t_part)
+        ORDER BY laplace.eff_mu(c.rating, c.rd) DESC, c.object_id
+        LIMIT 6
+    ),
+    lbl AS MATERIALIZED (
+        SELECT realize.batch(array_agg(r.nid ORDER BY r.ix), p_lang) AS l
+        FROM ranked r
+    )
     SELECT 'parts'::text,
            initcap(v_lbl) || ' has parts such as '
-             || string_agg(x.lbl, ', ' ORDER BY x.mu DESC) || '.',
-           min(x.mu_disp),
-           sum(x.wc)::bigint,
+             || string_agg(lbl.l[r.ix], ', ' ORDER BY r.mu DESC) || '.',
+           min(r.mu_disp),
+           sum(r.wc)::bigint,
            NULL::bytea[], NULL::bytea[]
-    FROM (
-        SELECT realize(c.object_id, p_lang) AS lbl,
-               (c.rating - 2*c.rd) AS mu,
-               eff_mu_display(c.rating, c.rd) AS mu_disp,
-               c.witness_count AS wc
-        FROM consensus c
-        WHERE c.subject_id = p_syn AND relation_highway_band(c.type_id) = b_part
-        ORDER BY (c.rating - 2*c.rd) DESC
-        LIMIT 6
-    ) x
-    WHERE x.lbl IS NOT NULL
+    FROM ranked r CROSS JOIN lbl
+    WHERE lbl.l[r.ix] IS NOT NULL
     HAVING count(*) > 0;
 
     -- kin: associative-band ranked listing, MINUS the associative families that are
@@ -140,42 +166,58 @@ BEGIN
     --
     -- Excluded in ID SPACE, before anything is rendered. The old `label_is_content`
     -- filter ran on the RENDERED string to drop bare ILI ids and lexfile names --
-    -- a stoplist in disguise, and a render call in the middle of a hash-space
+    -- a stoplist in disguise, and a laplace.render call in the middle of a hash-space
     -- operation. Selecting families up front removes the reason it existed; it is
     -- retained only as a last-resort guard at the point of rendering.
+    -- Rank in id space, exclude non-kin families in id space, then ONE
+    -- realize.batch — label_is_content stays a last-resort guard on survivors (#903).
     RETURN QUERY
+    WITH ranked AS MATERIALIZED (
+        SELECT c.object_id AS nid,
+               laplace.eff_mu(c.rating, c.rd) AS mu,
+               laplace.eff_mu_display(c.rating, c.rd) AS mu_disp,
+               c.witness_count AS wc,
+               row_number() OVER (
+                   ORDER BY laplace.eff_mu(c.rating, c.rd) DESC, c.object_id) AS ix
+        FROM laplace.consensus c
+        WHERE c.subject_id = p_syn
+          AND c.type_id = ANY (t_assoc)
+          AND c.type_id NOT IN (SELECT id FROM converse.non_kin_assoc_types())
+        ORDER BY laplace.eff_mu(c.rating, c.rd) DESC, c.object_id
+        LIMIT 8
+    ),
+    lbl AS MATERIALIZED (
+        SELECT realize.batch(array_agg(r.nid ORDER BY r.ix), p_lang) AS l
+        FROM ranked r
+    )
     SELECT 'kin'::text,
            initcap(v_lbl) || ' is related to '
-             || string_agg(x.lbl, ' and ' ORDER BY x.mu DESC) || '.',
-           min(x.mu_disp),
-           sum(x.wc)::bigint,
+             || string_agg(lbl.l[r.ix], ' and ' ORDER BY r.mu DESC) || '.',
+           min(r.mu_disp),
+           sum(r.wc)::bigint,
            NULL::bytea[], NULL::bytea[]
-    FROM (
-        SELECT realize(c.object_id, p_lang) AS lbl,
-               (c.rating - 2*c.rd) AS mu,
-               eff_mu_display(c.rating, c.rd) AS mu_disp,
-               c.witness_count AS wc
-        FROM consensus c
-        WHERE c.subject_id = p_syn
-          AND relation_highway_band(c.type_id) = b_assoc
-          AND c.type_id NOT IN (SELECT id FROM non_kin_assoc_types())
-        ORDER BY (c.rating - 2*c.rd) DESC
-        LIMIT 8
-    ) x
-    WHERE label_is_content(x.lbl)
+    FROM ranked r CROSS JOIN lbl
+    WHERE converse.label_is_content(lbl.l[r.ix])
     HAVING count(*) > 0;
 
     -- web: the strongest chain across ALL relations -- the explicit
     -- pull-one-strand answer, rendered with its relation arrows.
     RETURN QUERY
+    -- Third hand-rolled arrow laplace.render, now the installed one (GH #906 item 2).
+    -- walk_strongest walks forward, so every direction is 1. This also unifies the
+    -- glyphs: this copy drew ASCII ' -type-> ' where realize_path and both walk
+    -- responders draw ' —type→ ', so one substrate spoke two arrow dialects
+    -- depending on which surface answered.
     SELECT 'web'::text,
-           v_lbl || string_agg(' -' || COALESCE(type_label(g.type_id), '?') || '-> '
-                             || COALESCE(realize(g.entity_id, p_lang), label(g.entity_id)),
-                             '' ORDER BY g.step),
+           realize.path(
+               p_syn || array_agg(g.entity_id ORDER BY g.step),
+               array_agg(g.type_id ORDER BY g.step),
+               array_fill(1, ARRAY[count(*)::int]),
+               p_lang),
            min(g.eff_mu),
            NULL::bigint,
            NULL::bytea[], NULL::bytea[]
-    FROM walk_strongest(p_syn, NULL, 5) g
+    FROM consensus.walk_strongest(p_syn, NULL, 5) g
     HAVING count(*) > 0;
 END;
 $$;

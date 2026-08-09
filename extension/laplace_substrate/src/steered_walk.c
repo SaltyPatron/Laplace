@@ -306,8 +306,9 @@ pg_laplace_steered_walk(PG_FUNCTION_ARGS)
         if (starts_n == 0)
             PG_RETURN_NULL();
         rng = sw_lcg(rng);
+        /* Same uint64 modulus as core_off — no INT64_MIN negation UB. */
         a = sw_intern(vocab, &tok_datum, &next_tok, &datum_cap,
-                      starts_elems[(rng < 0 ? -rng : rng) % starts_n]);
+                      starts_elems[(uint64) rng % (uint64) starts_n]);
         ue = (SwUniEntry *) hash_search(bi, &a, HASH_FIND, NULL);
         if (ue != NULL)
         {

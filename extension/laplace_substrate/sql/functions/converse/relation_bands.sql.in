@@ -4,12 +4,13 @@
 -- precomputed highway mask. Selecting bands is how a caller narrows a read
 -- without naming a single relation and without naming a language.
 --
--- Two functions, because they cost different amounts. relation_band_catalog()
+-- Two functions, because they cost different amounts. converse.relation_band_catalog()
 -- is the NAMING — IMMUTABLE, no table access, safe to JOIN inside any read.
--- relation_bands() adds LIVE consensus counts, which is a full aggregate over
+-- converse.relation_bands() adds LIVE consensus counts, which is a full aggregate over
 -- the consensus tree (measured 1.34s at 5.66M rows), so it belongs in a catalog
 -- call a client makes once and caches — never in a per-query join.
-CREATE OR REPLACE FUNCTION relation_band_catalog()
+DROP FUNCTION IF EXISTS laplace.relation_band_catalog();
+CREATE OR REPLACE FUNCTION converse.relation_band_catalog()
     RETURNS TABLE(band integer, name text, rank double precision)
     LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
     VALUES
@@ -28,16 +29,16 @@ CREATE OR REPLACE FUNCTION relation_band_catalog()
       (12, 'probationary',         0.05)
 $$;
 
-CREATE OR REPLACE FUNCTION relation_bands()
+DROP FUNCTION IF EXISTS laplace.relation_bands();
+CREATE OR REPLACE FUNCTION converse.relation_bands()
     RETURNS TABLE(band integer, name text, rank double precision,
                   relation_types bigint, consensus_rows bigint)
-    LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
     WITH live AS (
-        SELECT relation_highway_band(c.type_id) AS band,
+        SELECT laplace.relation_highway_band(c.type_id) AS band,
                c.type_id,
                count(*) AS rows
-        FROM consensus c
+        FROM laplace.consensus c
         GROUP BY 1, 2
     )
     SELECT b.band,
@@ -45,7 +46,7 @@ CREATE OR REPLACE FUNCTION relation_bands()
            b.rank,
            count(live.type_id)::bigint,
            COALESCE(sum(live.rows), 0)::bigint
-    FROM relation_band_catalog() b
+    FROM converse.relation_band_catalog() b
     LEFT JOIN live ON live.band = b.band
     GROUP BY b.band, b.name, b.rank
     ORDER BY b.band

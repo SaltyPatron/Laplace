@@ -1,0 +1,56 @@
+{
+  "dog": {
+    "compose": {
+      "content_rate": 0.0,
+      "echo_rate": 0.0,
+      "empty": false,
+      "expected_n": 59,
+      "flatness": 0.688,
+      "seed_variance": 1
+    },
+    "walk": {
+      "content_rate": 0.05,
+      "echo_rate": 0.0,
+      "empty": false,
+      "expected_n": 59,
+      "flatness": 0.341,
+      "seed_variance": 3
+    }
+  },
+  "king": {
+    "compose": {
+      "content_rate": 0.0,
+      "echo_rate": 0.0,
+      "empty": false,
+      "expected_n": 53,
+      "flatness": 0.667,
+      "seed_variance": 1
+    },
+    "walk": {
+      "content_rate": 0.034,
+      "echo_rate": 0.03,
+      "empty": false,
+      "expected_n": 53,
+      "flatness": 0.303,
+      "seed_variance": 3
+    }
+  },
+  "water": {
+    "compose": {
+      "content_rate": 0.0,
+      "echo_rate": 0.0,
+      "empty": false,
+      "expected_n": 37,
+      "flatness": 0.667,
+      "seed_variance": 1
+    },
+    "walk": {
+      "content_rate": 0.059,
+      "echo_rate": 0.03,
+      "empty": false,
+      "expected_n": 37,
+      "flatness": 0.152,
+      "seed_variance": 3
+    }
+  }
+}

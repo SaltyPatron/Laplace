@@ -1,2 +1,21 @@
+-- type_id only: tier is constant inside each LIST(tier) leaf, so including it
+-- in the BRIN key adds size/maintenance with no discrimination (Copilot #859).
+-- Index name kept for stable references. DROP+CREATE so an in-place upgrade
+-- that still has the old (tier, type_id) shape is rewritten, not left behind
+-- by CREATE INDEX IF NOT EXISTS.
+DO $do$
+BEGIN
+    BEGIN
+        EXECUTE format('ALTER EXTENSION %I DROP INDEX laplace.entities_tier_type_brin',
+                       'laplace_substrate');
+    EXCEPTION WHEN OTHERS THEN
+        NULL;
+    END;
+    EXECUTE 'DROP INDEX IF EXISTS laplace.entities_tier_type_brin';
+END $do$;
+
 CREATE INDEX IF NOT EXISTS entities_tier_type_brin
-    ON entities USING brin (tier, type_id) WITH (pages_per_range = 64);
+    ON entities USING brin (type_id) WITH (pages_per_range = 64);
+
+COMMENT ON INDEX entities_tier_type_brin IS
+    'BRIN type_id banding for ingest validation at scale (tier is partition-constant).';

@@ -1,14 +1,16 @@
-CREATE OR REPLACE FUNCTION gaps(p_word bytea)
+-- consensus.gaps — GH #862 / #860. No SET (it invalidates plan caching and blocks
+-- inlining), real schema names, no build-time placeholder.
+DROP FUNCTION IF EXISTS laplace.gaps(bytea);
+CREATE OR REPLACE FUNCTION consensus.gaps(p_word bytea)
     RETURNS TABLE(missing_arena text)
-    LANGUAGE sql STABLE PARALLEL SAFE STRICT
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE STRICT AS $$
     WITH subj(id) AS (
-        SELECT p_word UNION SELECT sn.synset_id FROM senses(p_word) sn
+        SELECT p_word UNION SELECT sn.synset_id FROM lexical.senses(p_word) sn
     ), expected(name) AS (SELECT unnest(ARRAY[
         'IS_A','HAS_PART','HAS_MEMBER','CAUSES','USED_FOR','IS_ANTONYM_OF',
         'IS_SIMILAR_TO','HAS_ATTRIBUTE','DERIVATIONALLY_RELATED']))
     SELECT e.name FROM expected e
     WHERE NOT EXISTS (
-        SELECT 1 FROM v_consensus_unrefuted c JOIN subj s ON c.subject_id = s.id
-        WHERE c.type_id = relation_type_id(e.name))
+        SELECT 1 FROM laplace.v_consensus_unrefuted c JOIN subj s ON c.subject_id = s.id
+        WHERE c.type_id = laplace.relation_type_id(e.name))
 $$;

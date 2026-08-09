@@ -538,6 +538,18 @@ public static unsafe partial class NativeInterop
         nuint len,
         Hash128* outRootId);
 
+    // GH #904 — C twin of PhysicalityId.Compute / TierTree.CollapseIndex.
+    // Layout and collapse rule are identity axioms; these entry points exist so
+    // tests pin C# against the live native definitions instead of prose.
+    [LibraryImport(Library, EntryPoint = "laplace_physicality_id_compute")]
+    internal static partial void PhysicalityIdCompute(
+        Hash128 entityId,
+        short physicalityType,
+        Hash128* outId);
+
+    [LibraryImport(Library, EntryPoint = "laplace_tier_tree_collapse_index")]
+    internal static partial uint TierTreeCollapseIndex(IntPtr tree, uint idx);
+
     // --- Modality ladders above shared codepoint T0 (packaging buffers in, compose out) ---
     // Identity is digit→number→… trajectories (docs/invention/modality-ladder-law.md).
     // RGBA / PCM16 here are recovery inputs only — never forged T0 leaf mints.

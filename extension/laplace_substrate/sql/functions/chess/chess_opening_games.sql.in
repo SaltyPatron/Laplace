@@ -1,4 +1,4 @@
--- chess_opening_games(opening, limit, offset): the PLAYINGS of one opening, ranked.
+-- chess.opening_games(opening, limit, offset): the PLAYINGS of one opening, ranked.
 --
 -- WHY THIS EXISTS. Openings and games were both in the substrate and joined correctly,
 -- and no read surface joined them. api('chess') listed fourteen chess functions and the
@@ -10,35 +10,36 @@
 --
 -- THE JOIN IS A CONTENT COLLISION, NOT A LOOKUP. The openings catalog attests
 -- (final_position, OPENING_NAME, name); a game attests (line, GAME_HAS_OPENING, name).
--- Both mint `name` through the same content law, so they are the SAME id and word_id()
+-- Both mint `name` through the same content law, so they are the SAME id and laplace.word_id()
 -- reproduces it, multi-word names included. The filter is in ID SPACE — one index seek
--- on attestations_object_btree — never a render-and-compare.
+-- on attestations_object_btree — never a laplace.render-and-compare.
 --
 -- IDS OUT, NOT HEADERS. This returns the ranked (line, event) pairs and stops.
--- chess_game(event) already owns reading a playing's white/black/result/date/ECO, and an
+-- chess.game(event) already owns reading a playing's white/black/result/date/ECO, and an
 -- earlier cut of this function re-implemented all of it — five more relation names typed
 -- a second time, which is both duplicated logic and exactly the vocabulary literalism the
 -- ISA gate exists to stop. Compose instead:
 --
 --   SELECT g.*, d.white, d.black, d.result, d.played_on, d.eco
---   FROM chess_opening_games('Ruy Lopez', 25) g,
---        LATERAL chess_game(g.event_id) d;
+--   FROM chess.opening_games('Ruy Lopez', 25) g,
+--        LATERAL chess.game(g.event_id) d;
 --
 -- Ranked by the LINE'S OWN FOLD CELL — (line, OUTCOME, Chess_Result) — where
--- witness_count IS how many times the line was played and eff_mu IS how it fares (white
+-- witness_count IS how many times the line was played and laplace.eff_mu IS how it fares (white
 -- POV). A ranking the fold produced, not an arbitrary LIMIT over an unordered scan.
 --
 -- p_source selects one witness when they disagree: ChessPgn transcribes the PGN's own
 -- Opening header, ChessAnalysis derives it by SAN prefix, ChessOpeningMatch derives it by
 -- board identity. NULL (default) accepts any.
-CREATE OR REPLACE FUNCTION chess_opening_games(p_opening text,
+DROP FUNCTION IF EXISTS laplace.chess_opening_games(text, int, int, bytea);
+CREATE OR REPLACE FUNCTION chess.opening_games(p_opening text,
                                                p_limit int DEFAULT 25,
                                                p_offset int DEFAULT 0,
                                                p_source bytea DEFAULT NULL)
     RETURNS TABLE(line_id bytea, event_id bytea, times_played bigint,
                   eff_mu double precision)
     LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+ AS $$
 WITH claim AS MATERIALIZED (
     -- Line-grain, context_id NULL by design: every playing asserting the same opening for
     -- the same line MERGES into one evidence row whose observation count accumulates
@@ -46,32 +47,32 @@ WITH claim AS MATERIALIZED (
     -- row — an earlier cut tried and returned a page of games with no date, no result and
     -- no players. PLAYS_LINE is the one record edge whose subject IS the event.
     SELECT DISTINCT a.subject_id AS line
-    FROM attestations a
-    WHERE a.object_id = word_id(p_opening)
-      AND a.type_id = relation_type_id('GAME_HAS_OPENING')
+    FROM laplace.attestations a
+    WHERE a.object_id = laplace.word_id(p_opening)
+      AND a.type_id = laplace.relation_type_id('GAME_HAS_OPENING')
       AND (p_source IS NULL OR a.source_id = p_source)
 ),
 played AS MATERIALIZED (
     SELECT k.line, pl.subject_id AS event
     FROM claim k
-    JOIN attestations pl ON pl.object_id = k.line
-                        AND pl.type_id = relation_type_id('PLAYS_LINE')
+    JOIN laplace.attestations pl ON pl.object_id = k.line
+                        AND pl.type_id = laplace.relation_type_id('PLAYS_LINE')
 ),
 fold AS MATERIALIZED (
     -- LEFT-joined below: a line recorded before the fold ran returns with NULL rather
     -- than vanishing (unattested is not attested-false).
     SELECT c.subject_id AS line, c.witness_count, c.rating, c.rd
-    FROM consensus c
+    FROM laplace.consensus c
     JOIN claim k ON k.line = c.subject_id
-    WHERE c.type_id = relation_type_id('OUTCOME')
+    WHERE c.type_id = laplace.relation_type_id('OUTCOME')
 )
 SELECT g.line, g.event,
        f.witness_count::bigint,
-       eff_mu_display(f.rating, f.rd)::double precision
+       laplace.eff_mu_display(f.rating, f.rd)::double precision
 FROM played g
 LEFT JOIN fold f ON f.line = g.line
 ORDER BY f.witness_count DESC NULLS LAST,
-         eff_mu(f.rating, f.rd) DESC NULLS LAST,
+         laplace.eff_mu(f.rating, f.rd) DESC NULLS LAST,
          g.line, g.event
 LIMIT p_limit OFFSET p_offset
 $$;

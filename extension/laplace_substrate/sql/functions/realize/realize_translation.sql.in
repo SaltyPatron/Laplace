@@ -1,17 +1,18 @@
-CREATE OR REPLACE FUNCTION _realize_translation(p_id bytea, p_lang bytea DEFAULT NULL)
+-- realize._translation — GH #862 / #860. No SET, real schema names.
+DROP FUNCTION IF EXISTS laplace._realize_translation(bytea, bytea);
+CREATE OR REPLACE FUNCTION realize._translation(p_id bytea, p_lang bytea DEFAULT NULL)
     RETURNS text
-    LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
     SELECT q.s FROM (
-        SELECT render_text(m.object_id, 24) AS s,
+        SELECT laplace.render_text(m.object_id, 24) AS s,
                (lang.object_id IS NOT NULL) AS lp,
-               eff_mu(m.rating, m.rd) AS mu
-        FROM v_consensus_unrefuted m
-        LEFT JOIN consensus lang ON lang.subject_id = m.object_id
-          AND lang.type_id = relation_type_id('HAS_LANGUAGE')
+               laplace.eff_mu(m.rating, m.rd) AS mu
+        FROM laplace.v_consensus_unrefuted m
+        LEFT JOIN laplace.consensus lang ON lang.subject_id = m.object_id
+          AND lang.type_id = laplace.relation_type_id('HAS_LANGUAGE')
           AND lang.object_id = p_lang
         WHERE m.subject_id = p_id
-          AND m.type_id = relation_type_id('IS_TRANSLATION_OF')
+          AND m.type_id = laplace.relation_type_id('IS_TRANSLATION_OF')
     ) q
     WHERE q.s IS NOT NULL AND q.s <> ''
     ORDER BY q.lp DESC, q.mu DESC

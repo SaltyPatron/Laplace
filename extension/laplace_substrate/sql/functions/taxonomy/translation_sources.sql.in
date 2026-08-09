@@ -1,9 +1,15 @@
-CREATE OR REPLACE FUNCTION translation_sources(p_object bytea)
+-- taxonomy.translation_sources — GH #862 / #860.
+--
+-- No SET search_path (it blocks plan caching and inlining), and no placeholder:
+-- the control file pins schema = 'laplace' with relocatable = false, so that
+-- placeholder has exactly one possible expansion and the indirection buys nothing
+-- but noise. Real schema names, written out.
+DROP FUNCTION IF EXISTS laplace.translation_sources(bytea);
+CREATE OR REPLACE FUNCTION taxonomy.translation_sources(p_object bytea)
     RETURNS TABLE(subject_id bytea)
-    LANGUAGE sql STABLE STRICT PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$
     SELECT c.subject_id
-    FROM v_consensus_unrefuted c
-    WHERE c.type_id = relation_type_id('IS_TRANSLATION_OF')
+    FROM laplace.v_consensus_unrefuted c
+    WHERE c.type_id = laplace.relation_type_id('IS_TRANSLATION_OF')
       AND c.object_id = p_object
 $$;

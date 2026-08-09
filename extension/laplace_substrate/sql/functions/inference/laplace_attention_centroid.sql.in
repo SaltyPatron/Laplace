@@ -7,30 +7,28 @@
 --
 -- Signature changed 2026-08-04: `concentration` added, so DROP before CREATE.
 -- CREATE OR REPLACE cannot alter a return type.
-DROP FUNCTION IF EXISTS laplace_attention_centroid(bytea, bytea);
-
--- FIX 1 (2026-08-04) — the band filter used to ask `entities` which band a
+-- FIX 1 (2026-08-04) — the band filter used to ask `laplace.entities` which band a
 -- RELATION TYPE belongs to:
 --
---     SELECT e.id FROM entities e
+--     SELECT e.id FROM laplace.entities e
 --     WHERE e.highway_mask IS NOT NULL
---       AND laplace_highway_mask_bits(e.highway_mask)
---           && laplace_highway_mask_bits(p_band_mask)
+--       AND laplace.laplace_highway_mask_bits(e.highway_mask)
+--           && laplace.laplace_highway_mask_bits(p_band_mask)
 --
 -- then joined that to consensus.type_id. A highway mask records which bands an
 -- entity has EDGES IN; it is not a statement about which band a type BELONGS
--- TO. That is relation_highway_bit(type_id), from the manifest. Measured: the
--- CTE matched 0 rows for word_id('dog') against band 3 while dog carries 9
+-- TO. That is laplace.relation_highway_bit(type_id), from the manifest. Measured: the
+-- CTE matched 0 rows for laplace.word_id('dog') against band 3 while dog carries 9
 -- HAS_SENSE (bit 112) and 8 IS_SYNONYM_OF (bit 153), both band 3. Zero rows in,
 -- NULL out, no error — on every call this function had ever served. It was also
--- a full scan of 4.34M entities with a set-returning function evaluated per row,
+-- a full scan of 4.34M laplace.entities with a set-returning function evaluated per row,
 -- to build a set the manifest already determines and that has at most 233
 -- members. GH #866.
 --
 -- FIX 2 (2026-08-04) — the mean is now projected back onto the sphere.
 -- SUM(coord*w)/SUM(w) is the arithmetic mean of unit vectors, which is NOT a
 -- unit vector: it lies strictly inside S³, and at the exact origin for an
--- antipodal pair. Measured immediately after FIX 1 landed, word_id('dog') band 3:
+-- antipodal pair. Measured immediately after FIX 1 landed, laplace.word_id('dog') band 3:
 --
 --     cx -0.00488  cy 0.03184  cz -0.22988  cm 0.15099   ||c|| = 0.27691
 --
@@ -55,14 +53,15 @@ DROP FUNCTION IF EXISTS laplace_attention_centroid(bytea, bytea);
 -- No SET search_path: it blocks inlining (pg_proc.proconfig, checked at
 -- clauses.c:5168 for the set-returning path). Every reference is
 -- @extschema@-qualified instead. GH #860.
-CREATE OR REPLACE FUNCTION laplace_attention_centroid(
+DROP FUNCTION IF EXISTS laplace.laplace_attention_centroid(bytea, bytea);
+CREATE OR REPLACE FUNCTION generation.laplace_attention_centroid(
     p_entity   bytea,
     p_band_mask bytea)
 RETURNS TABLE(cx float8, cy float8, cz float8, cm float8,
               total_weight float8, concentration float8)
 LANGUAGE sql STABLE PARALLEL RESTRICTED AS $$
     WITH band_bits AS MATERIALIZED (
-        SELECT @extschema@.laplace_highway_mask_bits(p_band_mask) AS bits
+        SELECT laplace.laplace_highway_mask_bits(p_band_mask) AS bits
     ),
     attended AS (
         SELECT c.object_id,
@@ -71,7 +70,7 @@ LANGUAGE sql STABLE PARALLEL RESTRICTED AS $$
         CROSS JOIN band_bits b
         WHERE c.subject_id = p_entity
           AND c.object_id IS NOT NULL
-          AND @extschema@.relation_highway_bit(c.type_id) = ANY (b.bits)
+          AND laplace.relation_highway_bit(c.type_id) = ANY (b.bits)
           AND @extschema@.eff_mu(c.rating, c.rd) > 0
     ),
     weighted AS (
@@ -80,6 +79,19 @@ LANGUAGE sql STABLE PARALLEL RESTRICTED AS $$
         JOIN @extschema@.v_word_points w ON w.id = a.object_id
         WHERE w.coord IS NOT NULL
     ),
+    -- THIRD centroid path in this system, kept deliberately (GH #906 item 4).
+    -- public.laplace_centroid_4d and the composer's math4d_centroid both exist and
+    -- neither answers this: they take unweighted point sets, and this is a
+    -- CONSENSUS-WEIGHTED mean -- each coordinate scaled by its edge's rated mass,
+    -- normalized by total weight, then projected back onto the unit 3-sphere.
+    -- Substituting either would silently drop the weighting, which IS the operation.
+    --
+    -- The parity that DOES hold, and the one a reader should check if this moves:
+    -- with all weights equal this reduces exactly to math4d_centroid's arithmetic
+    -- mean followed by its normalize step. Equal weights are the degenerate case, so
+    -- any divergence there is a defect in one of the two, not a semantic difference.
+    -- Unpinned by a test because no fixture yet builds an equal-weight attended set;
+    -- that fixture is the missing gate, not a different centroid.
     summed AS (
         SELECT SUM(ST_X(coord) * w) / NULLIF(SUM(w), 0) AS mx,
                SUM(ST_Y(coord) * w) / NULLIF(SUM(w), 0) AS my,

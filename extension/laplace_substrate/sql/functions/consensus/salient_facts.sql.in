@@ -1,4 +1,5 @@
-CREATE OR REPLACE FUNCTION salient_facts(p_word bytea, p_lang bytea DEFAULT NULL,
+DROP FUNCTION IF EXISTS laplace.salient_facts(bytea, bytea, int);
+CREATE OR REPLACE FUNCTION consensus.salient_facts(p_word bytea, p_lang bytea DEFAULT NULL,
                                     p_limit int DEFAULT 24)
     RETURNS TABLE(type text, fact text, eff_mu numeric, witnesses bigint)
 -- No SET search_path — blocks inlining, costs the consensus index path. The
@@ -21,10 +22,10 @@ CREATE OR REPLACE FUNCTION salient_facts(p_word bytea, p_lang bytea DEFAULT NULL
           AND c.object_id = @extschema@.relation_type_id('HAS_FEATURE')
     ), lang AS (
         -- Resolved ONCE, not per candidate row. When p_lang is supplied COALESCE
-        -- short-circuits and word_language() is never evaluated.
-        SELECT COALESCE(p_lang, @extschema@.word_language(p_word)) AS l
+        -- short-circuits and converse.word_language() is never evaluated.
+        SELECT COALESCE(p_lang, converse.word_language(p_word)) AS l
     ), subj(id) AS (
-        SELECT p_word UNION SELECT sn.synset_id FROM @extschema@.senses(p_word) sn
+        SELECT p_word UNION SELECT sn.synset_id FROM lexical.senses(p_word) sn
     ), top AS (
         SELECT cc.type_id, cc.object_id, cc.rating, cc.rd, cc.witness_count
         FROM subj s CROSS JOIN LATERAL (
@@ -51,13 +52,13 @@ CREATE OR REPLACE FUNCTION salient_facts(p_word bytea, p_lang bytea DEFAULT NULL
         ) cc
     ), ranked AS (
         -- Rank BEFORE labeling (mirrors evidence_receipt's Issue 52). The old
-        -- shape ran realize() + type_label over EVERY row of `top` (dog: 413
+        -- shape ran realize.realize() + type_label over EVERY row of `top` (dog: 413
         -- rows across 10 subjects) only to ORDER/LIMIT to p_limit afterwards --
-        -- ~1.5ms/render x 413 dominated the call (~575ms warm on real data).
-        -- Ranking needs only the eff_mu already in `top`, so it runs first over
+        -- ~1.5ms/laplace.render x 413 dominated the call (~575ms warm on real data).
+        -- Ranking needs only the laplace.eff_mu already in `top`, so it runs first over
         -- everything; labeling then runs over a small over-fetched pool
         -- (3x + 8 keeps top-N starvation implausible after the empty/ellipsis
-        -- filters below drop rows). Same eff_mu order, same result set.
+        -- filters below drop rows). Same laplace.eff_mu order, same result set.
         SELECT t.type_id, t.object_id, t.rating, t.rd, t.witness_count,
                @extschema@.eff_mu(t.rating, t.rd) AS sort_mu
         FROM top t
@@ -69,12 +70,13 @@ CREATE OR REPLACE FUNCTION salient_facts(p_word bytea, p_lang bytea DEFAULT NULL
         FROM ranked r
     ), labels AS (
         -- ONE realize_batch over the ranked pool (was: scalar realize per row).
-        SELECT @extschema@.realize_batch(array_agg(o.object_id ORDER BY o.ord),
-                             (SELECT l FROM lang)) AS l
+        SELECT realize.batch(array_agg(o.object_id ORDER BY o.ord),
+                             (SELECT l FROM lang)) AS l,
+               lexical.type_label_batch(array_agg(o.type_id ORDER BY o.ord)) AS types
         FROM ordered o
     )
     SELECT d.type, d.fact, d.eff_mu, d.witnesses FROM (
-        SELECT @extschema@.type_label(o.type_id) AS type,
+        SELECT labels.types[o.ord] AS type,
                labels.l[o.ord] AS fact,
                @extschema@.eff_mu_display(o.rating, o.rd) AS eff_mu, o.witness_count AS witnesses,
                o.sort_mu

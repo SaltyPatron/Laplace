@@ -8,10 +8,10 @@
 DO $do$
 BEGIN
     BEGIN
-        EXECUTE format('ALTER EXTENSION %I DROP INDEX @extschema@.entities_tier_type_btree',
+        EXECUTE format('ALTER EXTENSION %I DROP INDEX laplace.entities_tier_type_btree',
                        'laplace_substrate');
     EXCEPTION WHEN OTHERS THEN
         NULL;
     END;
-    EXECUTE 'DROP INDEX IF EXISTS @extschema@.entities_tier_type_btree';
+    EXECUTE 'DROP INDEX IF EXISTS laplace.entities_tier_type_btree';
 END $do$;

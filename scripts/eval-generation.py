@@ -17,10 +17,11 @@ import argparse
 import importlib.util
 import json
 import re
-import subprocess
 import sys
 import time
 from pathlib import Path
+
+from laplace_api import LaplaceApiError, op_rows
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_PROBES = ROOT / "scripts" / "eval-probes.json"
@@ -40,54 +41,25 @@ def _load_glue_words():
 GLUE_WORDS, WORD_RE = _load_glue_words()
 
 
-def psql_rows(db: str, sql: str) -> list[str]:
-    cmd = ["psql", "-X", "-q", "-t", "-A", "-F", "\t"]
-    for part in db.split():
-        k, _, v = part.partition("=")
-        if k == "host":
-            cmd += ["-h", v]
-        elif k == "user":
-            cmd += ["-U", v]
-        elif k == "dbname":
-            cmd += ["-d", v]
-        elif k == "port":
-            cmd += ["-p", v]
-    r = subprocess.run(
-        cmd + ["-c", sql],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    if r.returncode != 0:
-        sys.stderr.write(r.stderr or r.stdout or "psql failed\n")
-        sys.exit(2)
-    return [line for line in r.stdout.splitlines() if line.strip()]
-
-
-def substrate_fingerprint(db: str) -> dict:
-    rows = psql_rows(
-        db,
-        "SET search_path=laplace,public; SELECT metric, value FROM substrate_counts();",
-    )
+def substrate_fingerprint(api: str) -> dict:
+    rows = op_rows(api, "ops.substrate_counts", max_rows=50)
     fp: dict[str, int] = {}
-    for line in rows:
-        metric, _, value = line.partition("\t")
+    for row in rows:
         try:
-            fp[metric] = int(value)
-        except ValueError:
+            fp[str(row["metric"])] = int(row["value"])
+        except (KeyError, TypeError, ValueError):
             continue
     return fp
 
 
-def seeded_sources(db: str) -> list[str]:
+def seeded_sources(api: str) -> list[str]:
     """Which sources are ingested. THIS is what decides comparability."""
-    rows = psql_rows(
-        db,
-        "SET search_path=laplace,public; "
-        "SELECT source FROM source_status() WHERE ingested ORDER BY source;",
+    rows = op_rows(api, "source_status", max_rows=2000)
+    return sorted(
+        str(row["source"]).strip()
+        for row in rows
+        if row.get("ingested") and str(row.get("source", "")).strip()
     )
-    return [r.strip() for r in rows if r.strip()]
 
 
 # How far the row estimates may move before a baseline is considered
@@ -118,9 +90,14 @@ def fingerprint_drift(baseline: dict, fp: dict, sources: list[str]) -> str | Non
         removed = sorted(set(base_sources) - set(sources))
         return f"seeded sources changed (added={added}, removed={removed})"
 
+    # Purpose-schema migration removed the historical `laplace.` prefix from
+    # metric labels. The measured relation is the same; compare canonical
+    # metric names so a naming cleanup cannot masquerade as lost data.
+    canonical = lambda metric: str(metric).split(".", 1)[-1]
+    current = {canonical(metric): value for metric, value in fp.items()}
     base_fp = baseline.get("fingerprint") or {}
     for metric, base_val in base_fp.items():
-        cur = fp.get(metric)
+        cur = current.get(canonical(metric))
         if cur is None:
             return f"metric {metric!r} no longer reported"
         if base_val <= 0:
@@ -132,20 +109,30 @@ def fingerprint_drift(baseline: dict, fp: dict, sources: list[str]) -> str | Non
 
 
 def entities_estimate(fp: dict) -> int:
+    # substrate_counts() metrics are schema-qualified, e.g.
+    # `laplace.entities(ESTIMATE)` — not a bare `entities` prefix.
     for k, v in fp.items():
-        if k.startswith("entities"):
+        if "entities" in k:
             return v
     return 0
 
 
-def resolve_topic_surface(db: str, phrase: str) -> str | None:
-    q = phrase.replace("'", "''")
-    rows = psql_rows(
-        db,
-        "SET search_path=laplace,public; "
-        f"SELECT render(resolve_topic('{q}', NULL));",
+def label(api: str, entity_id: str | None) -> str | None:
+    if not entity_id:
+        return None
+    rows = op_rows(api, "realize.label", {"p_id": entity_id}, max_rows=1)
+    return str(rows[0]["label"]) if rows and rows[0].get("label") is not None else None
+
+
+def resolve_topic_surface(api: str, phrase: str) -> str | None:
+    rows = op_rows(
+        api,
+        "converse.resolve_topic",
+        {"p_phrase": phrase, "p_context": None},
+        max_rows=1,
     )
-    return rows[0] if rows else None
+    topic_id = rows[0].get("resolve_topic") if rows else None
+    return label(api, topic_id)
 
 
 # The six-key elector invariant, verbatim from the five production sites
@@ -160,33 +147,38 @@ def resolve_topic_surface(db: str, phrase: str) -> str | None:
 # specificity/rel_mass/peers all tie at 0, ord 2 = "a", ord 3 = "glacier", so
 # ord ASC elected the article and scored the elector wrong. Two of the six
 # probes ("glacier", "pawn") were failing on that alone.
-ELECTOR_ORDER = (
-    "specificity DESC NULLS LAST, "
-    "rel_mass DESC NULLS LAST, "
-    "peers DESC, "
-    "ord DESC, "
-    "denote_mu DESC NULLS LAST, "
-    "synset_id"
-)
+def _descending_nulls_last(value) -> tuple[bool, float]:
+    return value is None, -float(value or 0)
 
 
-def prompt_coherence_rank1(db: str, prompt: str) -> tuple[str | None, float | None, float]:
+def _elector_key(row: dict) -> tuple:
+    return (
+        _descending_nulls_last(row.get("specificity")),
+        _descending_nulls_last(row.get("rel_mass")),
+        -int(row.get("peers") or 0),
+        -int(row.get("ord") or 0),
+        _descending_nulls_last(row.get("denote_mu")),
+        str(row.get("synset_id") or ""),
+    )
+
+
+def prompt_coherence_rank1(api: str, prompt: str) -> tuple[str | None, float | None, float]:
     """Return (synset_surface, specificity, latency_s) for the elected candidate."""
-    q = prompt.replace("'", "''")
     t0 = time.perf_counter()
-    rows = psql_rows(
-        db,
-        "SET search_path=laplace,public; "
-        "SELECT render(synset_id), specificity "
-        f"FROM prompt_coherence('{q}') ORDER BY {ELECTOR_ORDER} LIMIT 1;",
+    rows = op_rows(
+        api,
+        "converse.prompt_coherence",
+        {"p_prompt": prompt},
+        max_rows=200,
     )
     latency = time.perf_counter() - t0
     if not rows:
         return None, None, latency
-    parts = rows[0].split("\t")
-    syn = parts[0] if parts else None
-    spec = float(parts[1]) if len(parts) > 1 and parts[1] else None
-    return syn, spec, latency
+    elected = min(rows, key=_elector_key)
+    specificity = elected.get("specificity")
+    return label(api, elected.get("synset_id")), (
+        float(specificity) if specificity is not None else None
+    ), latency
 
 
 # Rendering hygiene for the FORWARD PASS. These need no hand-written expected
@@ -217,34 +209,36 @@ ILI_KEY_RE = re.compile(r"^i\d+$")
 HEX_ID_RE = re.compile(r"^[0-9a-f]{16,32}\W*$")
 
 
-def entity_type_names(db: str) -> set[str]:
+def entity_type_names(api: str) -> set[str]:
     """The substrate's own entity-type roster, so the leak check is not a
     hardcoded list that drifts the moment a type is added."""
-    rows = psql_rows(
-        db,
-        "SET search_path=laplace,public; SELECT type FROM entity_type_counts();",
-    )
-    return {r.strip() for r in rows if r.strip()}
+    rows = op_rows(api, "entity_type_counts_approx", max_rows=1000)
+    return {str(row["type"]).strip() for row in rows if str(row.get("type", "")).strip()}
 
 
-def infer_predictions(db: str, prompt: str, limit: int = 8) -> tuple[list[str], float]:
-    q = prompt.replace("'", "''")
+def infer_predictions(api: str, prompt: str, limit: int = 8) -> tuple[list[str], float]:
     t0 = time.perf_counter()
-    rows = psql_rows(
-        db,
-        "SET search_path=laplace,public; "
-        f"SELECT prediction FROM infer('{q}', {int(limit)});",
+    rows = op_rows(
+        api,
+        "converse.infer",
+        {"p_prompt": prompt, "p_limit": int(limit)},
+        max_rows=limit,
     )
-    return [r.strip() for r in rows if r.strip()], time.perf_counter() - t0
+    predictions = [
+        str(row["prediction"]).strip()
+        for row in rows
+        if str(row.get("prediction", "")).strip()
+    ]
+    return predictions, time.perf_counter() - t0
 
 
-def run_forward(db: str, probe: dict, type_names: set[str]) -> dict:
+def run_forward(api: str, probe: dict, type_names: set[str]) -> dict:
     """The PRODUCTION entry point, not the elector behind it. A probe passes only
     if the forward pass emits no leaked bookkeeping AND, when an answer is
     specified, actually reaches it."""
     prompt = probe["prompt"]
     expected = probe.get("expected_answer_surface")
-    preds, latency = infer_predictions(db, prompt, probe.get("limit", 8))
+    preds, latency = infer_predictions(api, prompt, probe.get("limit", 8))
 
     leaks = []
     for p in preds:
@@ -276,21 +270,21 @@ def run_forward(db: str, probe: dict, type_names: set[str]) -> dict:
     }
 
 
-def run_sql_election(db: str, probe: dict) -> dict:
+def run_op_election(api: str, probe: dict) -> dict:
     prompt = probe["prompt"]
     expected = probe.get("expected_topic_surface")
     mode = probe.get("election_via", "prompt_coherence")
     t0 = time.perf_counter()
     if mode == "resolve_topic":
-        got = resolve_topic_surface(db, prompt)
+        got = resolve_topic_surface(api, prompt)
         latency = time.perf_counter() - t0
         specificity = None
     else:
-        got, specificity, latency = prompt_coherence_rank1(db, prompt)
+        got, specificity, latency = prompt_coherence_rank1(api, prompt)
     ok = expected is not None and got is not None and got.lower() == expected.lower()
     return {
         "id": probe.get("id"),
-        "surface": "sql",
+        "surface": "op",
         "class": probe.get("class", "election"),
         "held_out": bool(probe.get("held_out", False)),
         "prompt": prompt,
@@ -305,12 +299,7 @@ def run_sql_election(db: str, probe: dict) -> dict:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument(
-        "--db",
-        default="host=/var/run/postgresql user=laplace_admin dbname=laplace",
-        help="psql connection as space-separated key=value",
-    )
-    ap.add_argument("--api", default=None, help="HTTP base (optional; not required for SQL election)")
+    ap.add_argument("--api", default="http://127.0.0.1:8080", help="deployed HTTP base")
     ap.add_argument("--probes", type=Path, default=DEFAULT_PROBES)
     ap.add_argument("--baseline", type=Path, default=DEFAULT_BASELINE)
     ap.add_argument("--report", type=Path, default=None)
@@ -320,8 +309,8 @@ def main() -> None:
         # `forward` is ON by default deliberately. It is the production entry
         # point; leaving it opt-in is how a green board coexisted with a forward
         # pass emitting an entity type as its rank-1 answer.
-        default="sql,forward",
-        help="comma list: sql,forward[,http] — http deferred until API path wired",
+        default="op,forward",
+        help="comma list: op,forward",
     )
     args = ap.parse_args()
 
@@ -330,11 +319,9 @@ def main() -> None:
         sys.exit(2)
 
     try:
-        fp = substrate_fingerprint(args.db)
-        sources = seeded_sources(args.db)
-    except SystemExit:
-        raise
-    except Exception as ex:  # noqa: BLE001 — harness boundary
+        fp = substrate_fingerprint(args.api)
+        sources = seeded_sources(args.api)
+    except (LaplaceApiError, KeyError, TypeError, ValueError) as ex:
         sys.stderr.write(f"fingerprint failed: {ex}\n")
         sys.exit(2)
 
@@ -367,16 +354,16 @@ def main() -> None:
     # entity type is covered the moment it exists.
     type_names: set[str] = set()
     if any(p.get("class") == "forward" for p in probes) and "forward" in surfaces:
-        type_names = entity_type_names(args.db)
+        type_names = entity_type_names(args.api)
 
     for probe in probes:
         if probe.get("class") == "forward":
             if "forward" in surfaces:
-                results.append(run_forward(args.db, probe, type_names))
+                results.append(run_forward(args.api, probe, type_names))
             continue
-        if "sql" in surfaces and probe.get("surface", "sql") in ("sql", "both"):
+        if "op" in surfaces and probe.get("surface", "op") in ("op", "both"):
             if probe.get("class") == "election" or probe.get("expected_topic_surface"):
-                results.append(run_sql_election(args.db, probe))
+                results.append(run_op_election(args.api, probe))
 
     # Misses before hits (plan standard of evidence).
     results.sort(key=lambda r: (0 if r.get("miss") else 1, r.get("id") or ""))

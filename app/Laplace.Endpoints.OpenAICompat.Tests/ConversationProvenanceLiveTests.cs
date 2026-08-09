@@ -99,7 +99,7 @@ public sealed class ConversationProvenanceLiveTests
             await using (var scopeCmd = new NpgsqlCommand(
                 """
                 CREATE TEMP TABLE consensus AS
-                SELECT * FROM laplace.scoped_consensus(
+                SELECT * FROM consensus.scoped_consensus(
                     ARRAY[laplace.source_id(@p), laplace.source_id(@r)])
                 """, conn))
             {
@@ -120,7 +120,7 @@ public sealed class ConversationProvenanceLiveTests
         // (5) recall_session accepts the canonically minted session id.
         await using (var conn = await ds.OpenConnectionAsync())
         await using (var cmd = new NpgsqlCommand(
-            "SELECT count(*) FROM laplace.recall_session(@p, @session)", conn))
+            "SELECT count(*) FROM converse.recall_session(@p, @session)", conn))
         {
             cmd.Parameters.AddWithValue("p", prompt);
             cmd.Parameters.AddWithValue("session", sessionA.ToBytes());

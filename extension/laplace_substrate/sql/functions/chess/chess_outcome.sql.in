@@ -1,4 +1,5 @@
-CREATE OR REPLACE FUNCTION chess_outcome(p_as_white boolean, p_result bytea)
+DROP FUNCTION IF EXISTS laplace.chess_outcome(boolean, bytea);
+CREATE OR REPLACE FUNCTION chess.outcome(p_as_white boolean, p_result bytea)
     RETURNS smallint
     LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
     -- The one place a game header becomes an outcome for ONE of its two players.
@@ -13,10 +14,10 @@ CREATE OR REPLACE FUNCTION chess_outcome(p_as_white boolean, p_result bytea)
     -- asserted a result (an abandoned or untagged game) -- an abstention, not a
     -- draw, and never counted as one.
     SELECT CASE
-        WHEN p_result = @extschema@.word_id('1/2-1/2') THEN 1::smallint
-        WHEN p_result = @extschema@.word_id('1-0')
+        WHEN p_result = laplace.word_id('1/2-1/2') THEN 1::smallint
+        WHEN p_result = laplace.word_id('1-0')
             THEN (CASE WHEN p_as_white THEN 2 ELSE 0 END)::smallint
-        WHEN p_result = @extschema@.word_id('0-1')
+        WHEN p_result = laplace.word_id('0-1')
             THEN (CASE WHEN p_as_white THEN 0 ELSE 2 END)::smallint
         ELSE NULL
     END

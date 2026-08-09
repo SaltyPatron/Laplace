@@ -76,6 +76,11 @@ void laplace_physicality_id_compute(
     int16_t    physicality_type,
     hash128_t* out);
 
+/* Tier-floor collapse — single-child, span-identical wrappers walk to the
+ * stored identity. Exported for C#/C parity (GH #904); mirrors
+ * TierTree.CollapseIndex. */
+uint32_t laplace_tier_tree_collapse_index(const tier_tree_t* tree, uint32_t idx);
+
 typedef void (*laplace_word_emit_fn)(void* ctx, uint32_t ordinal,
                                      const uint8_t* word_utf8, uint32_t word_len,
                                      const hash128_t* id);

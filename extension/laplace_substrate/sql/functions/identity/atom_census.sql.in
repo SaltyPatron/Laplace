@@ -1,0 +1,23 @@
+-- Tier-0 invariant as an operation (GH #813 first job).
+-- atom_window comes from the format constant; tier0_count from entity_count.
+-- over_window > 0 means non-atoms were minted at the atom layer.
+-- unresolvable_ids stays 0 here — a full codepoint_for_id sweep is O(window)
+-- and is a follow-on when a gate needs the NULL-label count.
+-- BEGIN ATOMIC: GH #764 beachhead.
+CREATE OR REPLACE FUNCTION atom_census()
+    RETURNS TABLE(
+        tier0_count bigint,
+        atom_window bigint,
+        over_window bigint,
+        unresolvable_ids bigint)
+    LANGUAGE sql
+    STABLE
+BEGIN ATOMIC
+    WITH w AS (SELECT laplace.atom_window() AS n),
+         t AS (SELECT laplace.entity_count(laplace.entity_type_id('Codepoint')) AS n)
+    SELECT t.n,
+           w.n,
+           greatest(0, t.n - w.n),
+           0::bigint
+    FROM w, t;
+END;

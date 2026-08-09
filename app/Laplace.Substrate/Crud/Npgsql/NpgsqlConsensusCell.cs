@@ -9,17 +9,16 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 /// needs raw Glicko <c>rating</c>/<c>rd</c>/<c>witness_count</c>, not the
 /// <see cref="NpgsqlConsensusByIds"/> display axis (<c>eff_mu</c>).
 ///
-/// Looked up by primary id (<c>laplace.consensus_id</c>), not a triple scan. There is no
-/// installed <c>consensus_cell</c>/<c>edge_strength</c> yet (doc 41); until that lands this
-/// is the one sanctioned reader for the shape. Callers must not hand-write the table.
+/// Routes through the installed <c>consensus.cell</c> (GH #909), which looks the
+/// row up by primary id (<c>laplace.consensus_id</c>) rather than scanning the triple.
+/// This type is now a typed wrapper over that surface, not a hand-written table read.
 /// </summary>
 public static class NpgsqlConsensusCell
 {
     public readonly record struct Row(long Rating, long Rd, long WitnessCount);
 
     private const string Sql =
-        "SELECT rating, rd, witness_count FROM laplace.consensus "
-        + "WHERE id = laplace.consensus_id($1, $2, $3)";
+        "SELECT rating, rd, witness_count FROM consensus.cell($1, $2, $3)";
 
     public static async Task<Row?> ReadAsync(
         NpgsqlDataSource dataSource, Hash128 subject, Hash128 typeId, Hash128 obj,

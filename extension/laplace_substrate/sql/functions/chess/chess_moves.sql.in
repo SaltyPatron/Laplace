@@ -1,25 +1,26 @@
-CREATE OR REPLACE FUNCTION chess_moves(p_position bytea, p_limit integer DEFAULT 12)
+DROP FUNCTION IF EXISTS laplace.chess_moves(bytea, integer);
+CREATE OR REPLACE FUNCTION chess.moves(p_position bytea, p_limit integer DEFAULT 12)
     RETURNS TABLE(next_position bytea, eff_mu double precision, rd double precision,
                   witness_count bigint)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
     -- Opening explorer over the rated MOVE web: every continuation the fold has
     -- ever witnessed out of one position, ranked by the conservative estimate.
     -- Position ids are COMPOSED (ChessCompose merkle path), never
-    -- canonical_id(surface) — callers hold them from composing a board state or
+    -- laplace.canonical_id(surface) — callers hold them from composing a board state or
     -- from a prior chess_moves step. Rides
     -- consensus_subject_type_eff_mu_btree (subject_id, type_id, rating-2*rd DESC
-    -- WHERE object_id IS NOT NULL); eff_mu() inlines to that exact expression.
+    -- WHERE object_id IS NOT NULL); laplace.eff_mu() inlines to that exact expression.
     -- LIMIT is the only cut — no floors, no thresholds.
-    -- eff_mu/rd are returned in DISPLAY units (eff_mu_display's /1e9 round), never
-    -- raw fp1e9; the ORDER BY stays on raw eff_mu() so the index expression matches.
+    -- laplace.eff_mu/rd are returned in DISPLAY units (laplace.eff_mu_display's /1e9 round), never
+    -- raw fp1e9; the ORDER BY stays on raw laplace.eff_mu() so the index expression matches.
     SELECT c.object_id,
-           @extschema@.eff_mu_display(c.rating, c.rd)::double precision,
+           laplace.eff_mu_display(c.rating, c.rd)::double precision,
            round((c.rd / 1e9)::numeric, 3)::double precision,
            c.witness_count
-    FROM @extschema@.consensus c
+    FROM laplace.consensus c
     WHERE c.subject_id = p_position
-      AND c.type_id = @extschema@.relation_type_id('MOVE')
+      AND c.type_id = laplace.relation_type_id('MOVE')
       AND c.object_id IS NOT NULL
-    ORDER BY @extschema@.eff_mu(c.rating, c.rd) DESC
+    ORDER BY laplace.eff_mu(c.rating, c.rd) DESC
     LIMIT p_limit
 $$;

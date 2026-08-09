@@ -1,10 +1,8 @@
+-- BEGIN ATOMIC: GH #764. No SET search_path — keeps `= ANY(...)` inlinable.
 CREATE OR REPLACE FUNCTION is_compositional_type(p_type_id bytea)
 RETURNS boolean
 LANGUAGE sql
 IMMUTABLE
--- No SET search_path: the body is fully schema-qualified, and the clause would prevent this
--- trivial `= ANY(...)` predicate from inlining into callers' WHERE clauses (it then runs as a
--- real per-row function call instead of an index-probable array membership test).
-AS $$
+BEGIN ATOMIC
     SELECT p_type_id = ANY(@extschema@.compositional_type_ids());
-$$;
+END;

@@ -11,9 +11,8 @@
 -- follows x" -- same containment query, same separator cache, same aggregation.
 -- Asking the question is always legal; what is banned is MATERIALISING the answer
 -- as stored PRECEDES rows when the geometry already holds it losslessly.
-DROP FUNCTION IF EXISTS geometry_successors(bytea, int, int);
-
-CREATE OR REPLACE FUNCTION geometry_successors(
+DROP FUNCTION IF EXISTS laplace.geometry_successors(bytea, int, int, boolean);
+CREATE OR REPLACE FUNCTION structural.geometry_successors(
         p_point    bytea,
         p_limit    int DEFAULT 20,
         p_window   int DEFAULT 8,
@@ -23,30 +22,32 @@ CREATE OR REPLACE FUNCTION geometry_successors(
     LANGUAGE C STABLE;
 
 -- Named mirror: "what comes before x", read from the same sequence.
-CREATE OR REPLACE FUNCTION geometry_predecessors(
+DROP FUNCTION IF EXISTS laplace.geometry_predecessors(bytea, int, int);
+CREATE OR REPLACE FUNCTION structural.geometry_predecessors(
         p_point  bytea,
         p_limit  int DEFAULT 20,
         p_window int DEFAULT 8)
     RETURNS TABLE(predecessor_id bytea, seen bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
-    SELECT successor_id, seen FROM geometry_successors(p_point, p_limit, p_window, true)
+ AS $$
+    SELECT successor_id, seen FROM structural.geometry_successors(p_point, p_limit, p_window, true)
 $$;
 
 -- Both directions at once, for the symmetric questions (shared-usage overlap,
 -- domain co-occurrence) that must not be silently halved to fit a one-way walk.
-CREATE OR REPLACE FUNCTION geometry_neighbours(
+DROP FUNCTION IF EXISTS laplace.geometry_neighbours(bytea, int, int);
+CREATE OR REPLACE FUNCTION structural.geometry_neighbours(
         p_point  bytea,
         p_limit  int DEFAULT 20,
         p_window int DEFAULT 8)
     RETURNS TABLE(neighbour_id bytea, seen bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+ AS $$
     SELECT n.id, sum(n.seen)::bigint
     FROM (
-        SELECT successor_id AS id, seen FROM geometry_successors(p_point, p_limit, p_window, false)
+        SELECT successor_id AS id, seen FROM structural.geometry_successors(p_point, p_limit, p_window, false)
         UNION ALL
-        SELECT successor_id AS id, seen FROM geometry_successors(p_point, p_limit, p_window, true)
+        SELECT successor_id AS id, seen FROM structural.geometry_successors(p_point, p_limit, p_window, true)
     ) n
     GROUP BY n.id
     ORDER BY 2 DESC

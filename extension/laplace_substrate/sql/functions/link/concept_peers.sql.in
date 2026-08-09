@@ -1,44 +1,44 @@
-CREATE OR REPLACE FUNCTION concept_peers(p_word bytea, p_limit int DEFAULT 24)
+DROP FUNCTION IF EXISTS laplace.concept_peers(bytea, int);
+CREATE OR REPLACE FUNCTION lexical.concept_peers(p_word bytea, p_limit int DEFAULT 24)
     RETURNS TABLE(peer text, kind text, strength double precision)
-    LANGUAGE sql STABLE STRICT PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$
     -- Words related to p_word through a shared content-addressed anchor -- a
     -- synset/ILI concept or a FrameNet frame. Surface- and language-independent
     -- because the bridge is the anchor id, not any rendered string: two words
     -- link iff they attach to the same anchor entity. Ranking is pure id/mu;
-    -- label() runs once per surviving row, past the LIMIT, at the boundary.
-    WITH me AS (SELECT lexical_peers(p_word) AS ids),
+    -- realize.label() runs once per surviving row, past the LIMIT, at the boundary.
+    WITH me AS (SELECT lexical.lexical_peers(p_word) AS ids),
     self AS (SELECT unnest(ids) AS id FROM me),
     anchors AS (
         SELECT DISTINCT c.object_id AS anchor
-        FROM self s JOIN v_consensus_unrefuted c ON c.subject_id = s.id
-        WHERE c.type_id IN (relation_type_id('IS_SYNONYM_OF'), relation_type_id('EVOKES_FRAME'))
+        FROM self s JOIN laplace.v_consensus_unrefuted c ON c.subject_id = s.id
+        WHERE c.type_id IN (laplace.relation_type_id('IS_SYNONYM_OF'), laplace.relation_type_id('EVOKES_FRAME'))
           AND c.object_id IS NOT NULL
         UNION
         SELECT DISTINCT so.object_id
         FROM self s
-        JOIN v_consensus_unrefuted hs ON hs.subject_id = s.id AND hs.type_id = relation_type_id('HAS_SENSE')
-        JOIN v_consensus_unrefuted so ON so.subject_id = hs.object_id
-                         AND so.type_id = relation_type_id('IS_SENSE_OF')
+        JOIN laplace.v_consensus_unrefuted hs ON hs.subject_id = s.id AND hs.type_id = laplace.relation_type_id('HAS_SENSE')
+        JOIN laplace.v_consensus_unrefuted so ON so.subject_id = hs.object_id
+                         AND so.type_id = laplace.relation_type_id('IS_SENSE_OF')
     ),
     -- Set-based member expansion: one reverse-edge join per bridge kind over
     -- ALL anchors at once (consensus_object_btree), replacing the per-anchor
-    -- concept_members() CROSS JOIN LATERAL that re-ran the same three lookups
+    -- lexical.concept_members() CROSS JOIN LATERAL that re-ran the same three lookups
     -- 181x for one word (measured 55s -> sub-second). Same three bridges.
     members AS (
-        SELECT c.subject_id AS member, 'synonym'::text AS kind, eff_mu_display(c.rating, c.rd) AS mu
-        FROM anchors a JOIN v_consensus_unrefuted c ON c.object_id = a.anchor
-                          AND c.type_id = relation_type_id('IS_SYNONYM_OF')
+        SELECT c.subject_id AS member, 'synonym'::text AS kind, laplace.eff_mu_display(c.rating, c.rd) AS mu
+        FROM anchors a JOIN laplace.v_consensus_unrefuted c ON c.object_id = a.anchor
+                          AND c.type_id = laplace.relation_type_id('IS_SYNONYM_OF')
         UNION ALL
-        SELECT hs.subject_id, 'sense'::text, eff_mu_display(hs.rating, hs.rd)
-        FROM anchors a JOIN v_consensus_unrefuted so ON so.object_id = a.anchor
-                          AND so.type_id = relation_type_id('IS_SENSE_OF')
-                       JOIN v_consensus_unrefuted hs ON hs.object_id = so.subject_id
-                          AND hs.type_id = relation_type_id('HAS_SENSE')
+        SELECT hs.subject_id, 'sense'::text, laplace.eff_mu_display(hs.rating, hs.rd)
+        FROM anchors a JOIN laplace.v_consensus_unrefuted so ON so.object_id = a.anchor
+                          AND so.type_id = laplace.relation_type_id('IS_SENSE_OF')
+                       JOIN laplace.v_consensus_unrefuted hs ON hs.object_id = so.subject_id
+                          AND hs.type_id = laplace.relation_type_id('HAS_SENSE')
         UNION ALL
-        SELECT c.subject_id, 'frame'::text, eff_mu_display(c.rating, c.rd)
-        FROM anchors a JOIN v_consensus_unrefuted c ON c.object_id = a.anchor
-                          AND c.type_id = relation_type_id('EVOKES_FRAME')
+        SELECT c.subject_id, 'frame'::text, laplace.eff_mu_display(c.rating, c.rd)
+        FROM anchors a JOIN laplace.v_consensus_unrefuted c ON c.object_id = a.anchor
+                          AND c.type_id = laplace.relation_type_id('EVOKES_FRAME')
     ),
     peers AS (
         SELECT m.member, m.kind, max(m.mu) AS mu
@@ -53,11 +53,19 @@ CREATE OR REPLACE FUNCTION concept_peers(p_word bytea, p_limit int DEFAULT 24)
         SELECT member, kind, mu,
                row_number() OVER (PARTITION BY kind ORDER BY mu DESC NULLS LAST, member) AS rk
         FROM peers
+    ), survivors AS MATERIALIZED (
+        SELECT * FROM ranked WHERE rk <= p_limit
+    ), ids AS MATERIALIZED (
+        SELECT COALESCE(array_agg(DISTINCT member ORDER BY member), '{}'::bytea[]) AS a FROM survivors
+    ), labels AS MATERIALIZED (
+        SELECT i.id, l.txt
+        FROM ids,
+             LATERAL unnest(ids.a) WITH ORDINALITY AS i(id, ord),
+             LATERAL unnest(realize.label_batch(ids.a)) WITH ORDINALITY AS l(txt, ord)
+        WHERE i.ord = l.ord
     )
     SELECT l.txt AS peer, r.kind, (r.mu::double precision) AS strength
-    FROM ranked r
-    CROSS JOIN LATERAL (SELECT label(r.member) AS txt) l
-    WHERE r.rk <= p_limit
-      AND NULLIF(btrim(l.txt), '') IS NOT NULL
+    FROM survivors r JOIN labels l ON l.id = r.member
+    WHERE NULLIF(btrim(l.txt), '') IS NOT NULL
     ORDER BY r.kind, r.mu DESC NULLS LAST, l.txt
 $$;
