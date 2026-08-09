@@ -441,13 +441,8 @@ public sealed class ModelTokenEdgeETL
         // factor/testimony bytes belong exclusively to trajectory. Place the
         // slice at the centroid of the vocabulary entities this factor actually
         // makes most salient, using their deposited Content coordinates.
-        var salient = Enumerable.Range(0, n)
-            .OrderByDescending(i => sal[i])
-            .ThenBy(i => tokenIds[i].Hi)
-            .ThenBy(i => tokenIds[i].Lo)
-            .Select(i => tokenIds[i])
-            .Where(_tokenPlacements.ContainsKey)
-            .Take(Math.Min(TopTokensPerCircuit, n));
+        var salient = SelectMostSalientPlacedTokens(
+            sal, tokenIds, n, Math.Min(TopTokensPerCircuit, n));
         double[]? coord;
         if (!TryCentroidOfPlacedTokens(salient, out var placedCoord))
         {
@@ -1218,6 +1213,50 @@ public sealed class ModelTokenEdgeETL
         }
         centroid = Math4d.Centroid(coords.ToArray());
         return true;
+    }
+
+    private Hash128[] SelectMostSalientPlacedTokens(
+        double[] salience, Hash128[] tokenIds, int count, int cap)
+    {
+        var queue = new PriorityQueue<Hash128, SaliencePriority>(
+            cap, SalienceWorstFirstComparer.Instance);
+        for (int i = 0; i < count; i++)
+        {
+            var token = tokenIds[i];
+            if (!_tokenPlacements.ContainsKey(token)) continue;
+
+            var priority = new SaliencePriority(salience[i], token);
+            if (queue.Count < cap)
+            {
+                queue.Enqueue(token, priority);
+            }
+            else if (queue.TryPeek(out _, out var worst)
+                     && SalienceWorstFirstComparer.Instance.Compare(priority, worst) > 0)
+            {
+                queue.Dequeue();
+                queue.Enqueue(token, priority);
+            }
+        }
+
+        var selected = new Hash128[queue.Count];
+        for (int i = 0; i < selected.Length; i++)
+            selected[i] = queue.Dequeue();
+        return selected;
+    }
+
+    private readonly record struct SaliencePriority(double Salience, Hash128 Token);
+
+    private sealed class SalienceWorstFirstComparer : IComparer<SaliencePriority>
+    {
+        public static SalienceWorstFirstComparer Instance { get; } = new();
+
+        public int Compare(SaliencePriority x, SaliencePriority y)
+        {
+            int bySalience = x.Salience.CompareTo(y.Salience);
+            return bySalience != 0
+                ? bySalience
+                : y.Token.CompareToBytewise(x.Token);
+        }
     }
 
     private static async IAsyncEnumerable<EdgeRowChunk> EnumerateChunksAsync(

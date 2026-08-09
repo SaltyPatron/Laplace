@@ -115,7 +115,7 @@ public sealed class ElectorArchitectureGateTests
         var source = File.ReadAllText(Path.Combine(
             repoRoot, "extension", "laplace_substrate", "src", "prompt_coherence.c"));
 
-        Assert.Contains("{\"definition\", \"define\"}", source, StringComparison.Ordinal);
+        Assert.Matches(@"\{\s*""definition""\s*,\s*""define""\s*\}", source);
     }
 
     private static List<IReadOnlyList<string>> ExtractElectorOrders(string sql)
