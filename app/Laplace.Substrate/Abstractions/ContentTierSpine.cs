@@ -139,12 +139,14 @@ public static class ContentTierSpine
         // as 77 records/s with 11 compose workers serialized behind an armed-but-empty
         // ledger. A memo miss now derives exactly once, in the same single native
         // crossing that emits, and memoizes the root it returns for future hits.
-        if (ContentLadderLedger.Armed && ContentLadderLedger.HasEntries)
+        if (ContentLadderLedger.Armed)
         {
             var key = Hash128.Blake3(canonicalUtf8);
             if (RootMemo.TryGetValue(key, out var memo))
             {
-                if (memo is { } m && ContentLadderLedger.IsPersisted(m))
+                if (ContentLadderLedger.HasEntries
+                    && memo is { } m
+                    && ContentLadderLedger.IsPersisted(m))
                 {
                     rootId = m;
                     return true;

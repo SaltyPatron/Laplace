@@ -93,7 +93,8 @@ public static class ContentLadderLedger
     /// staging site — the 2026-08-06 full-file Wiktionary run paid a second, globally
     /// serialized derivation per surface for a membership test that could never pass
     /// (the fill gate never admitted its 738k-distinct working sets). Callers must
-    /// check this before spending anything on a lookup key.
+    /// check this before probing membership. The armed-empty staging path may still
+    /// compute its memo key so the first post-commit recurrence can skip derivation.
     /// </summary>
     public static bool HasEntries => Volatile.Read(ref _count) > 0;
 

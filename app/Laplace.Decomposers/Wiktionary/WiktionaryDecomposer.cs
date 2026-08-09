@@ -61,7 +61,7 @@ public sealed class WiktionaryDecomposer
         // on 12 cores (measured on the 2026-08-06 full-file run), starving the stage
         // that actually needed the cores. A few workers saturate the parse lane.
         int workers = Math.Clamp(
-            IngestSizing.ResolveForSource(IngestSourceProfile.Wiktionary).ComposeWorkers / 4, 2, 4);
+            IngestSizing.ResolveForSource(IngestSourceProfile.Wiktionary).ComposeWorkers / 4, 1, 4);
 
         return ParallelLineParse.RecordsAsync<WiktionaryEntry>(
             file,

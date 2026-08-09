@@ -79,6 +79,26 @@ public sealed class ContentLadderLedgerTests : IDisposable
         Assert.Equal(derived, Stage(surface, "armed-empty"));
     }
 
+    [Fact]
+    public void Armed_empty_run_memoizes_before_first_commit_and_skips_after_commit()
+    {
+        const string surface = "memoize before first committed apply";
+        ContentLadderLedger.Begin();
+        Assert.False(ContentLadderLedger.HasEntries);
+
+        var first = NewBuilder("armed-empty-first");
+        Assert.True(ContentTierSpine.TryStageIntoBuilder(
+            first, System.Text.Encoding.UTF8.GetBytes(surface), Source, out var root));
+        Assert.True(first.ContentStage.EntityCount > 0);
+
+        ContentLadderLedger.MarkPersisted([root]);
+        var repeated = NewBuilder("armed-after-commit");
+        Assert.True(ContentTierSpine.TryStageIntoBuilder(
+            repeated, System.Text.Encoding.UTF8.GetBytes(surface), Source, out var repeatedRoot));
+        Assert.Equal(root, repeatedRoot);
+        Assert.Equal(0, repeated.ContentStage.EntityCount);
+    }
+
     [Theory]
     [MemberData(nameof(Surfaces))]
     public void Recorded_skips_and_returns_the_identical_root(string surface)

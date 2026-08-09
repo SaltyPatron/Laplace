@@ -18,6 +18,7 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 /// (build-logs/wiktionary-21gb-20260806-201419.log).
 /// </summary>
 [Collection("GrammarPerfcache")]
+[Trait("Tier", "perf")]
 public sealed class ComposeCostBenchTests
 {
     private readonly ITestOutputHelper _out;
