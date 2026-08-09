@@ -16,7 +16,7 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 /// (already merged in RAM), forward evidence to the inner writer, then dispatch
 /// the delta onto the per-type fold lanes — each running consensus_upsert
 /// (server-side native Glicko fold inside each row's lock window, ordered by
-/// partition keys) — plus the mask lane running consensus.highway_mask_deposit(bits OR'd
+/// partition keys) — plus the mask lane running laplace.highway_mask_deposit(bits OR'd
 /// in from the pairs this batch touched).
 /// Ingest completion IS fold completion — no accumulator epochs, no staging
 /// tables, no walk journal, no terminal fold, no advisory-lock wall.
@@ -702,7 +702,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
                     await using var mask = conn.CreateCommand();
                     mask.Transaction = tx;
                     mask.CommandTimeout = 0;
-                    mask.CommandText = "SELECT consensus.highway_mask_deposit($1, $2)";
+                    mask.CommandText = "SELECT laplace.highway_mask_deposit($1, $2)";
                     mask.Parameters.Add(new NpgsqlParameter { Value = pairEnts, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
                     mask.Parameters.Add(new NpgsqlParameter { Value = pairTypes, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
                     dep += (long)(await mask.ExecuteScalarAsync(ct) ?? 0L);

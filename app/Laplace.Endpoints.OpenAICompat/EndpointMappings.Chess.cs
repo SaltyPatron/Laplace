@@ -43,11 +43,11 @@ internal static class ChessEndpoints
         app.MapGet("/chess/learned-pst", async (ChessEngineService svc, CancellationToken ct) =>
             Results.Json(await svc.LearnedPstAsync(ct))).WithTags("chess");
 
-        app.MapPost("/chess/play/start", (PlayStartRequest req, ChessEngineService svc) =>
+        app.MapPost("/chess/play/start", async (PlayStartRequest req, ChessEngineService svc, CancellationToken ct) =>
             // tenant/user are spec-34 provenance for the play session (stubbed until auth):
             // tenant defaults to the shared "public" world, user is optional attribution.
-            Results.Json(svc.StartPlaySession(req.Record ?? true, req.Moves,
-                req.Tenant ?? "public", req.User))).WithTags("chess");
+            Results.Json(await svc.StartPlaySessionAsync(req.Record ?? true, req.Moves,
+                req.Tenant ?? "public", req.User, ct))).WithTags("chess");
 
         app.MapPost("/chess/play/move", async (PlayMoveRequest req, ChessEngineService svc, CancellationToken ct) =>
             Results.Json(await svc.PlayMoveAsync(req.SessionId, req.Fen, req.Uci, ct))).WithTags("chess");
