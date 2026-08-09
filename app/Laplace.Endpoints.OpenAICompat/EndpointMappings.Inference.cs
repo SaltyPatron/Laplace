@@ -69,14 +69,6 @@ internal static class InferenceEndpoints
             if (hasBands && !string.IsNullOrWhiteSpace(payload.Shape))
                 return EndpointJson.BadRequest("invalid_request_error",
                     "Fields 'shape' and 'bands' select different read paths and cannot be combined.");
-            if (converseModel && !string.IsNullOrWhiteSpace(payload.Shape))
-            {
-                var shapes = await substrate.QueryShapesAsync(ct);
-                if (!shapes.Any(s => string.Equals(s.Shape, payload.Shape, StringComparison.Ordinal)))
-                    return EndpointJson.BadRequest("invalid_shape",
-                        $"Unknown converse shape '{payload.Shape}'. See GET /v1/query/shapes for the installed catalog.");
-            }
-
             var (scope, scopeError) = await ResolveTurnScopeAsync(request, tenantResolver, payload.Session, payload.User, ct);
             if (scopeError is not null) return scopeError;
 
@@ -95,6 +87,16 @@ internal static class InferenceEndpoints
                     : (object)new QuotePendingDetail(gate.Quote.QuoteId, gate.Quote.Status, gate.Quote.StripeCheckoutUrl));
 
             if (gate.Quote is not null) await billing.MarkConsumedAndRecordAsync(gate.Quote, ct);
+
+            // Installed shape validation is a substrate read. Keep it behind the
+            // quote gate so an unquoted request cannot spend database work.
+            if (converseModel && !string.IsNullOrWhiteSpace(payload.Shape))
+            {
+                var shapes = await substrate.QueryShapesAsync(ct);
+                if (!shapes.Any(s => string.Equals(s.Shape, payload.Shape, StringComparison.Ordinal)))
+                    return EndpointJson.BadRequest("invalid_shape",
+                        $"Unknown converse shape '{payload.Shape}'. See GET /v1/query/shapes for the installed catalog.");
+            }
 
             if (RequireTurnWitness(turnWitness) is { } chatWitnessErr) return chatWitnessErr;
 

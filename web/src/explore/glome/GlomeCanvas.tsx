@@ -36,8 +36,8 @@ export function packedDisplayPos(n: GlomeNode): [number, number, number] {
 
 /**
  * Placement: an orthographic projection of the actual 4D point after an X-M
- * plane rotation. This preserves the interior radius automatically and makes M
- * observable. The former projection discarded M, normalized XYZ, then restored
+ * plane rotation. It retains the projected XYZ magnitude instead of normalizing
+ * every point onto a shell, and makes M observable. The former projection discarded M, normalized XYZ, then restored
  * radius_origin; every point on the same XYZ ray therefore collapsed onto one
  * display ray even when its fourth coordinate differed.
  */

@@ -448,7 +448,7 @@ public sealed class ModelTokenEdgeETL
         {
             coord = null;
             _log.LogWarning(
-                "Cannot place factor slice {Slice}: no vocabulary token has a real content coordinate; retaining trajectory testimony without a projection physicality",
+                "Cannot place factor slice {Slice}: no vocabulary token has a real content coordinate; omitting the projection physicality and its trajectory testimony",
                 slice);
         }
         else
