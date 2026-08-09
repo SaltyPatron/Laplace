@@ -8,10 +8,7 @@
 -- zero DB round trips), then ONE indexed query fetches the edges
 -- (consensus_type_btree for the ANY() filter, the eff_mu expression index for
 -- ordering) — the define_fast pattern.
-DROP FUNCTION IF EXISTS consensus.band_edges(
-    p_band       int,
-    p_min_eff_mu bigint DEFAULT NULL,
-    p_limit      bigint DEFAULT 1000);
+DROP FUNCTION IF EXISTS consensus.band_edges(int, bigint, bigint);
 CREATE OR REPLACE FUNCTION consensus.band_edges(
     p_band       int,
     p_min_eff_mu bigint DEFAULT NULL,

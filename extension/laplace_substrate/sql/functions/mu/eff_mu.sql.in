@@ -1,5 +1,12 @@
-DROP FUNCTION IF EXISTS laplace.eff_mu(bigint, bigint);
 CREATE OR REPLACE FUNCTION consensus.eff_mu(p_rating bigint, p_rd bigint)
     RETURNS bigint LANGUAGE sql LAPLACE_IMMUTABLE AS $$
     SELECT p_rating - 2 * p_rd
+$$;
+
+-- Compatibility surface for installed objects and external callers that still
+-- depend on the extension schema. CREATE OR REPLACE preserves its OID and all
+-- dependent objects while the implementation's authority moves to consensus.
+CREATE OR REPLACE FUNCTION laplace.eff_mu(p_rating bigint, p_rd bigint)
+    RETURNS bigint LANGUAGE sql LAPLACE_IMMUTABLE AS $$
+    SELECT consensus.eff_mu(p_rating, p_rd)
 $$;
