@@ -72,7 +72,7 @@ public sealed class ShapeParityGateTests
     /// </summary>
     private static readonly Regex McpShapeMenu = new(
         // Purpose-schema rename: converse.query_shapes() is the live catalog
-        // (converse.query_shapes is gone). Accept either spelling so an old
+        // (laplace.query_shapes is retired). Accept either spelling so an old
         // comment cannot green a drifted menu.
         @"names the SHAPE\s*[—-]\s*(?<list>[a-z_,\s]+?)\s*\(SELECT \* FROM (?:laplace|converse)\.query_shapes\(\)",
         RegexOptions.Compiled);
