@@ -9,7 +9,7 @@ CREATE OR REPLACE FUNCTION generation.grapheme_floor_vocab(p_size int DEFAULT 51
     WITH t AS (
         SELECT w.trajectory
         FROM laplace.v_word_points w
-        WHERE w.type_id = laplace.canonical_id('Word')
+        WHERE w.type_id = realize.canonical_id('Word')
           AND w.trajectory IS NOT NULL
         ORDER BY w.id LIMIT p_words
     ),
@@ -21,7 +21,7 @@ CREATE OR REPLACE FUNCTION generation.grapheme_floor_vocab(p_size int DEFAULT 51
         
         
         SELECT g.entity_id, sum(GREATEST(g.run_length,1))::bigint AS cnt
-        FROM g JOIN laplace.entities e ON e.id = g.entity_id AND e.type_id IN (laplace.canonical_id('Codepoint'), laplace.canonical_id('Grapheme'))
+        FROM g JOIN laplace.entities e ON e.id = g.entity_id AND e.type_id IN (realize.canonical_id('Codepoint'), realize.canonical_id('Grapheme'))
         GROUP BY g.entity_id
     ),
     named AS MATERIALIZED (
@@ -33,11 +33,11 @@ CREATE OR REPLACE FUNCTION generation.grapheme_floor_vocab(p_size int DEFAULT 51
         SELECT i.id, t.s
         FROM ids,
              LATERAL unnest(ids.a) WITH ORDINALITY AS i(id, ord),
-             LATERAL unnest(laplace.render_text_batch(ids.a, 8)) WITH ORDINALITY AS t(s, ord)
+             LATERAL unnest(realize.render_text_batch(ids.a, 8)) WITH ORDINALITY AS t(s, ord)
         WHERE i.ord = t.ord
     )
     SELECT n.entity_id, r.s, n.cnt
     FROM named n JOIN rendered r ON r.id = n.entity_id
-    WHERE char_length(r.s) = 1 AND NOT laplace.is_all_whitespace(r.s)
+    WHERE char_length(r.s) = 1 AND NOT realize.is_all_whitespace(r.s)
     ORDER BY n.cnt DESC LIMIT p_size
 $$;

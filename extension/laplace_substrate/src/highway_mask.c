@@ -333,7 +333,7 @@ static const char *BAND_EDGES_QUERY =
     "FROM laplace.consensus "
     "WHERE type_id = ANY($1) "
     "  AND object_id IS NOT NULL "
-    "  AND NOT laplace.refuted(rating, rd) "
+    "  AND NOT consensus.refuted(rating, rd) "
     "  AND (rating - 2 * rd) >= $2 "
     "ORDER BY (rating - 2 * rd) DESC "
     "LIMIT $3";

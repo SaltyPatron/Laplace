@@ -1,7 +1,7 @@
 /*
  * walk_score.h — the walk's per-edge score, in ONE place.
  *
- * `relation_rank(type) * laplace_walk_edge_weight(rating, rd, witnesses, kappa)`
+ * `consensus.relation_rank(type) * laplace_walk_edge_weight(rating, rd, witnesses, kappa)`
  * is the Glicko-complete signed weight (doc 15 §3Ca, glicko2.h) and is the SAME
  * formula consensus_adjacency uses on the Foundry export side. It was previously
  * a file-static in generate_walk.c, which meant S7 (steer_candidates.c) could

@@ -97,7 +97,7 @@ public class BootstrapIntentBuilderAliasTests
     private static readonly Hash128 TrustClassId =
         SubstrateCanonicalIds.TrustClass("AIModelProbe");
 
-    // A content-hash source (an AI model) must register its own name so render()/
+    // A content-hash source (an AI model) must register its own name so realize.render()/
     // realize.label() stop showing raw hex and seed-step verify can resolve name → id
     // through consensus (HAS_NAME_ALIAS → the name's content root == word_id).
     [Fact]

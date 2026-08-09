@@ -9,11 +9,11 @@ CREATE OR REPLACE FUNCTION consensus.edge_rank(p_type bytea, p_eff_mu numeric)
     -- links, epistemic_status, consensus_walk_edges).
     --
     -- p_eff_mu is numeric, NOT double precision, on purpose: the literal 1e9 is
-    -- a numeric constant, so the callers' original `eff_mu(...) / 1e9` was an
+    -- a numeric constant, so the callers' original `consensus.eff_mu(...) / 1e9` was an
     -- EXACT numeric division; a float8 parameter would silently switch it to
     -- rounded float8 division and reorder rows that tie only in the ~15th digit
     -- (invisible on subject-filtered reads, but it reshuffles top_relations'
-    -- whole-table LIMIT). Callers pass eff_mu(rating,rd) or a view's eff_mu_raw
+    -- whole-table LIMIT). Callers pass consensus.eff_mu(rating,rd) or a view's eff_mu_raw
     -- column -- both bigint, coerced exactly to numeric.
     --
     -- No SET search_path and NOT STRICT so it inlines into the caller's ORDER BY

@@ -6,7 +6,7 @@
 -- (opening LINEs after the catalog-dual deposit) — not OPENING_NAME attestation
 -- scans (that would re-introduce laplace.relation_type_id vocabulary literals; ISA G3).
 --
--- IDS OUT: peer_line_id only. Name/ECO are separate laplace.attestations; laplace.render via
+-- IDS OUT: peer_line_id only. Name/ECO are separate laplace.attestations; realize.render via
 -- realize_batch on a page of peer ids if needed — never per-row realize here.
 DROP FUNCTION IF EXISTS laplace.chess_opening_shape_peers(bytea, integer, float8);
 CREATE OR REPLACE FUNCTION chess.opening_shape_peers(

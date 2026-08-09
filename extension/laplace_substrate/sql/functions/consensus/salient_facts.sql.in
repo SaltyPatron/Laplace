@@ -12,7 +12,7 @@ CREATE OR REPLACE FUNCTION consensus.salient_facts(p_word bytea, p_lang bytea DE
     ), feat_dynamic AS MATERIALIZED (
         -- Dynamic HAS_FEATURE children (FEAT_case, FEAT_number, ...) carry an
         -- IS_A -> family-root edge in consensus (RelationTypeRegistry.SeedDynamic).
-        -- Fenced ONCE here: the SQL wrapper relation_in_family() carries a SET
+        -- Fenced ONCE here: the SQL wrapper consensus.relation_in_family() carries a SET
         -- search_path clause, so the planner can never inline it and its EXISTS
         -- probe would run per candidate row. (relation_type_in_family below is the
         -- C IMMUTABLE static check — cheap per row, unaffected.) Same truth table:
@@ -54,11 +54,11 @@ CREATE OR REPLACE FUNCTION consensus.salient_facts(p_word bytea, p_lang bytea DE
         -- Rank BEFORE labeling (mirrors evidence_receipt's Issue 52). The old
         -- shape ran realize.realize() + type_label over EVERY row of `top` (dog: 413
         -- rows across 10 subjects) only to ORDER/LIMIT to p_limit afterwards --
-        -- ~1.5ms/laplace.render x 413 dominated the call (~575ms warm on real data).
-        -- Ranking needs only the laplace.eff_mu already in `top`, so it runs first over
+        -- ~1.5ms/realize.render x 413 dominated the call (~575ms warm on real data).
+        -- Ranking needs only the consensus.eff_mu already in `top`, so it runs first over
         -- everything; labeling then runs over a small over-fetched pool
         -- (3x + 8 keeps top-N starvation implausible after the empty/ellipsis
-        -- filters below drop rows). Same laplace.eff_mu order, same result set.
+        -- filters below drop rows). Same consensus.eff_mu order, same result set.
         SELECT t.type_id, t.object_id, t.rating, t.rd, t.witness_count,
                consensus.eff_mu(t.rating, t.rd) AS sort_mu
         FROM top t

@@ -37,7 +37,7 @@ CREATE OR REPLACE FUNCTION ops.index_usage_report(p_min_bytes bigint DEFAULT 0)
     -- report is indistinguishable here from an index serving nothing.
     --
     -- Statistics only (pg_stat_user_indexes + pg_relation_size). No scans.
-    -- Companion: index_usage_detail() for the per-index rows behind these buckets.
+    -- Companion: ops.index_usage_report() for the per-index rows behind these buckets.
     WITH ix AS (
         SELECT s.indexrelname,
                s.idx_scan,

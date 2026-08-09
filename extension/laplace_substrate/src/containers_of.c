@@ -10,7 +10,7 @@
 #include "spi_nested.h"
 
 /*
- * containers_of(entity, max_hops, limit) -- the reverse of constituents():
+ * structural.containers_of(entity, max_hops, limit) -- the reverse of realize.constituents():
  * given an entity, walk UP the composition hierarchy and return every entity
  * of a higher tier whose trajectory contains it (directly, hop=1, or
  * transitively through intermediate tiers, hop>1) -- e.g. a word -> the
@@ -142,7 +142,7 @@ pg_laplace_containers_of(PG_FUNCTION_ARGS)
              * partition -- and then the dedup loop below threw away all but
              * limit_rows of them.
              *
-             * MEASURED on 'water': containers_of(word_id('water'), 1, 400) ran
+             * MEASURED on 'water': structural.containers_of(word_id('water'), 1, 400) ran
              * 7,987ms, while the IDENTICAL query with LIMIT 400 pushed into SQL
              * planned as an early-terminating Gather and returned in 97.7ms. Same
              * rows, same index (physicalities_*_laplace_trajectory_constituent_ids

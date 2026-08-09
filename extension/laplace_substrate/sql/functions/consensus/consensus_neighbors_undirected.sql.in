@@ -1,4 +1,4 @@
--- Neighbours in BOTH directions of one type set, unrefuted, laplace.eff_mu order. Thin
+-- Neighbours in BOTH directions of one type set, unrefuted, consensus.eff_mu order. Thin
 -- wrapper over consensus.edges_raw(); the UNION ALL it used to hand-roll is that function.
 DROP FUNCTION IF EXISTS laplace.consensus_neighbors_undirected(bytea, bytea[], int);
 -- BEGIN ATOMIC: GH #764.

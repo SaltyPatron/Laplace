@@ -4,7 +4,7 @@ using Laplace.Decomposers.Abstractions.Tests;
 namespace Laplace.Ingestion.Tests;
 
 /// <summary>
-/// I1: substrate_counts() must label planner estimates, not present as exact counts.
+/// I1: ops.substrate_counts() must label planner estimates, not present as exact counts.
 /// </summary>
 public sealed class SubstrateCountsExactTests
 {
@@ -31,6 +31,6 @@ public sealed class SubstrateCountsExactTests
         var ingest = Path.Combine(repoRoot, "app", "Laplace.Cli", "IngestCommands.cs");
         var text = File.ReadAllText(ingest);
         Assert.Contains("reltuples ESTIMATE", text, StringComparison.Ordinal);
-        Assert.Contains("substrate_counts()", text, StringComparison.Ordinal);
+        Assert.Contains("ops.substrate_counts()", text, StringComparison.Ordinal);
     }
 }

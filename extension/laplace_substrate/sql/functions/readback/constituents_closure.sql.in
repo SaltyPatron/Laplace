@@ -1,8 +1,8 @@
 -- Bulk constituent closure for native no-SPI render assembly (R1).
--- The C render (generate_walk.c) runs this ONCE per render call and assembles text in C.
+-- The C realize.render(generate_walk.c) runs this ONCE per render call and assembles text in C.
 --
--- History / why this shape: the prior version called the SQL wrapper constituents(id) per
--- node — and constituents() is NON-INLINABLE (ORDER BY ... LIMIT 1 + a lateral SRF), so the
+-- History / why this shape: the prior version called the SQL wrapper realize.constituents(id) per
+-- node — and realize.constituents() is NON-INLINABLE (ORDER BY ... LIMIT 1 + a lateral SRF), so the
 -- planner emitted a real function-call per node, in BOTH the recursive term AND the final
 -- projection (every node expanded twice, through the slow path). Rendering ~15 short names
 -- fanned into hundreds of per-node function calls and timed out under load.
@@ -11,7 +11,7 @@
 --   * reach  — node-recursion (dedup on entity_id, so a shared node is expanded once per depth
 --               it is reached at, NOT once per incoming edge; edge-recursion would re-expand a
 --               common word/codepoint once per parent — a fan-in blow-up on real documents).
---               The physicalities probe + trajectory SRF are INLINED, not the constituents()
+--               The physicalities probe + trajectory SRF are INLINED, not the realize.constituents()
 --               wrapper.
 --   * picked — ONE physicalities row per reached node, chosen SET-BASED via DISTINCT ON over a
 --               join, replacing N correlated `ORDER BY id LIMIT 1` subqueries with one sort.

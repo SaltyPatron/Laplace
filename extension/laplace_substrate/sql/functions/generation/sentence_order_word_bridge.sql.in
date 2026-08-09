@@ -39,7 +39,7 @@ CREATE OR REPLACE FUNCTION generation.sentence_order_word_bridge(p_vocab bytea[]
     ),
     words AS (
         -- in-vocab join doubles as the content filter (whitespace/punctuation
-        -- laplace.constituents are not vocab laplace.entities)
+        -- realize.constituents are not vocab laplace.entities)
         SELECT st.sid, tc.ordinal AS ord, tc.entity_id AS wid
         FROM sent_traj st CROSS JOIN LATERAL laplace_trajectory_constituents(st.trajectory) tc
         JOIN v ON v.id = tc.entity_id

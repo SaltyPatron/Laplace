@@ -27,7 +27,7 @@ FROM consensus WHERE type_id = relation_type_id('HAS_XPOS');
 
 \echo '=== relation-TYPE fragmentation: unnamed types (no canonical) per source ==='
 WITH g AS (SELECT DISTINCT type_id FROM consensus),
-     u AS (SELECT type_id FROM g WHERE relation_canonical(type_id) IS NULL)
+     u AS (SELECT type_id FROM g WHERE consensus.relation_canonical(type_id) IS NULL)
 SELECT coalesce(cn.name, encode(a.source_id, 'hex')) AS source,
        count(DISTINCT a.type_id) AS unnamed_types,
        count(*)                  AS attestations
@@ -39,6 +39,6 @@ ORDER BY attestations DESC;
 
 \echo '=== summary: named-vs-unnamed relation types overall ==='
 WITH g AS (SELECT DISTINCT type_id FROM consensus)
-SELECT count(*) FILTER (WHERE relation_canonical(type_id) IS NOT NULL) AS named_types,
-       count(*) FILTER (WHERE relation_canonical(type_id) IS NULL)     AS unnamed_types
+SELECT count(*) FILTER (WHERE consensus.relation_canonical(type_id) IS NOT NULL) AS named_types,
+       count(*) FILTER (WHERE consensus.relation_canonical(type_id) IS NULL)     AS unnamed_types
 FROM g;

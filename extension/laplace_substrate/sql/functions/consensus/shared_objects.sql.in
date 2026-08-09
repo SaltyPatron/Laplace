@@ -3,7 +3,7 @@ CREATE OR REPLACE FUNCTION consensus.shared_objects(p_subjects bytea[], p_type b
                                      p_limit int DEFAULT 40)
     RETURNS TABLE(object_id bytea, support int, total_mu numeric)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
-    -- laplace.eff_mu_display, not the scale-and-round open-coded. Its own header says
+    -- consensus.eff_mu_display, not the scale-and-round open-coded. Its own header says
     -- "same rounding, same scale, one definition file -- never re-derived inline",
     -- and this was the inline re-derivation: if the fold's fp1e9 scale or the
     -- display precision ever moves, one copy moves and the other silently reports

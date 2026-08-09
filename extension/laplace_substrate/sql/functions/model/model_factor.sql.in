@@ -40,7 +40,7 @@ CREATE OR REPLACE FUNCTION generation.model_circuit_slices(
     LANGUAGE sql STABLE ROWS 1
     AS $fn$
     WITH anchor AS (
-        SELECT laplace.canonical_id('substrate/entity/model/plane/' || p_plane || '/v1') AS id
+        SELECT realize.canonical_id('substrate/entity/model/plane/' || p_plane || '/v1') AS id
     ),
     coord AS (
         SELECT CASE WHEN p_layer IS NULL THEN a.id ELSE lh.ctx END AS id
@@ -113,7 +113,7 @@ CREATE OR REPLACE FUNCTION generation.pg_laplace_model_forward(
 
 -- The everyday entry: forward a WORD through a MODEL (by source id) to its k
 -- strongest next tokens, word laplace.entities out (joinable against the web).
---   SELECT laplace.render_text(token), score FROM generation.model_forward(:src, 'France', 10);
+--   SELECT realize.render_text(token), score FROM generation.model_forward(:src, 'France', 10);
 DROP FUNCTION IF EXISTS laplace.model_forward(bytea, text, int);
 CREATE OR REPLACE FUNCTION generation.model_forward(
     p_source bytea,
@@ -157,7 +157,7 @@ CREATE OR REPLACE FUNCTION generation.model_forward(
          AND s.type_id = laplace.relation_type_id('APPEARS_IN')
         WHERE coord_has_plane.type_id = laplace.relation_type_id('CONTAINS')
           AND coord_has_plane.object_id =
-              laplace.canonical_id('substrate/entity/model/plane/mlp/v1')
+              realize.canonical_id('substrate/entity/model/plane/mlp/v1')
           AND EXISTS (SELECT 1 FROM laplace.attestations a
                       WHERE a.subject_id = s.subject_id
                         AND a.type_id = laplace.relation_type_id('APPEARS_IN')
@@ -193,7 +193,7 @@ CREATE OR REPLACE FUNCTION generation.model_attention_row(
       SELECT i.id, s.txt
       FROM ids,
            LATERAL unnest(ids.a) WITH ORDINALITY AS i(id, ord),
-           LATERAL unnest(laplace.render_text_batch(ids.a, 32)) WITH ORDINALITY AS s(txt, ord)
+           LATERAL unnest(realize.render_text_batch(ids.a, 32)) WITH ORDINALITY AS s(txt, ord)
       WHERE i.ord = s.ord
     )
     SELECT s.txt, t.token, t.score FROM ranked t JOIN rendered s ON s.id = t.token

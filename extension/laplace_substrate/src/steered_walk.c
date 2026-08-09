@@ -150,7 +150,7 @@ sw_score(int64 weight, int64 rng, int64 pos1based)
 }
 
 /*
- * steered_walk_raw(stream bytea[], weights int8[], core_seq bytea[],
+ * converse.steered_walk_raw(stream bytea[], weights int8[], core_seq bytea[],
  *                  starts bytea[], steps int, minlen int, rng int8)
  *   RETURNS bytea[]
  */
