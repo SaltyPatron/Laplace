@@ -159,10 +159,11 @@ internal static class InferenceEndpoints
                                 [new ChatChunkChoice(0, new ChatDelta(Content: token.Token), null)],
                                 Laplace: new ChunkProvenance(OrdUsed: (int)token.Mu)), ct);
                         }
+                        var generatedText = genStreamText.ToString().TrimStart();
                         turnWitness.EnqueueTurn(scope.Tenant, scope.UserKey, scope.SessionId,
-                            prompt, genStreamText.ToString().TrimStart());
+                            prompt, generatedText);
                         var genPerformance = BuildPerformance(
-                            genStreamText.ToString().TrimStart(), substrateClock, totalClock,
+                            generatedText, substrateClock, totalClock,
                             firstResultMs, generatedTokens: genStreamTokens);
                         await ServerSentEvents.WriteJsonAsync(response, new ChatCompletionChunk(
                             genId, "chat.completion.chunk", genCreated, payload.Model,

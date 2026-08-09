@@ -44,9 +44,12 @@ export function packedDisplayPos(n: GlomeNode): [number, number, number] {
 export function placementBallPos(n: GlomeNode, xmAngle = 0): [number, number, number] {
   const c = Math.cos(xmAngle);
   const s = Math.sin(xmAngle);
-  const m = n.m ?? 0;
-  const rotatedX = n.x * c - m * s;
-  return [rotatedX * SHELL, n.y * SHELL, n.z * SHELL];
+  const x = Number.isFinite(n.x) ? n.x : 0;
+  const y = Number.isFinite(n.y) ? n.y : 0;
+  const z = Number.isFinite(n.z) ? n.z : 0;
+  const m = n.m != null && Number.isFinite(n.m) ? n.m : 0;
+  const rotatedX = x * c - m * s;
+  return [rotatedX * SHELL, y * SHELL, z * SHELL];
 }
 
 function project(n: GlomeNode, mode: GlomeProjection, xmAngle: number): [number, number, number] {
