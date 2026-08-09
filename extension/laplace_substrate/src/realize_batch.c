@@ -327,8 +327,22 @@ run_name_arms(ArrayType *in_arr, Datum lang, bool lang_null,
             arm_lemma, render_ids, union_ids, un, ucap, "synset_lemma");
 }
 
+static bool
+validate_id_array(ArrayType *arr, const char *operation)
+{
+    if (ARR_NDIM(arr) == 0)
+        return false;
+    if (ARR_NDIM(arr) != 1)
+        ereport(ERROR,
+                (errmsg("%s: ids must be 1-dimensional", operation)));
+    if (ARR_ELEMTYPE(arr) != BYTEAOID)
+        ereport(ERROR,
+                (errmsg("%s: element type must be bytea", operation)));
+    return true;
+}
+
 static char **
-render_union(Datum *union_ids, int32 un)
+render_union(Datum *union_ids, int32 un, const char *operation)
 {
     char **rendered = (char **) palloc0(sizeof(char *) * Max(un, 1));
 
@@ -342,7 +356,7 @@ render_union(Datum *union_ids, int32 un)
         Datum      arr_datum;
 
         if (rc != SPI_OK_SELECT || SPI_processed != 1)
-            elog(ERROR, "realize_batch: render batch failed: %s",
+            elog(ERROR, "%s: render batch failed: %s", operation,
                  SPI_result_code_string(rc));
         arr_datum = SPI_getbinval(SPI_tuptable->vals[0],
                                   SPI_tuptable->tupdesc, 1, &isnull);
@@ -356,7 +370,8 @@ render_union(Datum *union_ids, int32 un)
             deconstruct_array(ra, TEXTOID, -1, false, TYPALIGN_INT,
                               &relems, &rnulls, &rn);
             if (rn != un)
-                elog(ERROR, "realize_batch: render batch returned %d of %d", rn, un);
+                elog(ERROR, "%s: render batch returned %d of %d",
+                     operation, rn, un);
             for (int i = 0; i < un; i++)
                 if (!rnulls[i])
                     rendered[i] = text_to_cstring(DatumGetTextPP(relems[i]));
@@ -390,6 +405,8 @@ pg_laplace_resolve_name_batch(PG_FUNCTION_ARGS)
     if (PG_ARGISNULL(0))
         PG_RETURN_NULL();
     in_arr = PG_GETARG_ARRAYTYPE_P(0);
+    if (!validate_id_array(in_arr, "resolve_name_batch"))
+        PG_RETURN_ARRAYTYPE_P(construct_empty_array(TEXTOID));
     if (!PG_ARGISNULL(1))
     {
         lang = PG_GETARG_DATUM(1);
@@ -397,9 +414,6 @@ pg_laplace_resolve_name_batch(PG_FUNCTION_ARGS)
     }
     deconstruct_array(in_arr, BYTEAOID, -1, false, TYPALIGN_INT,
                       &in_elems, &in_nulls, &n);
-    if (n == 0)
-        PG_RETURN_ARRAYTYPE_P(construct_empty_array(TEXTOID));
-
     if (laplace_spi_connect(&need_finish) != SPI_OK_CONNECT)
         elog(ERROR, "resolve_name_batch: SPI_connect failed");
     ensure_name_plans();
@@ -410,7 +424,7 @@ pg_laplace_resolve_name_batch(PG_FUNCTION_ARGS)
     union_ids = (Datum *) palloc(sizeof(Datum) * ucap);
     run_name_arms(in_arr, lang, lang_null, &arm_name, &arm_lemma,
                   render_ids, &union_ids, &un, &ucap);
-    rendered = render_union(union_ids, un);
+    rendered = render_union(union_ids, un, "resolve_name_batch");
 
     out = (Datum *) palloc0(sizeof(Datum) * n);
     out_nulls = (bool *) palloc(sizeof(bool) * n);
@@ -475,6 +489,8 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
     if (PG_ARGISNULL(0))
         PG_RETURN_NULL();
     in_arr = PG_GETARG_ARRAYTYPE_P(0);
+    if (!validate_id_array(in_arr, "realize_batch"))
+        PG_RETURN_ARRAYTYPE_P(construct_empty_array(TEXTOID));
     if (!PG_ARGISNULL(1))
     {
         lang = PG_GETARG_DATUM(1);
@@ -483,9 +499,6 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
 
     deconstruct_array(in_arr, BYTEAOID, -1, false, TYPALIGN_INT,
                       &in_elems, &in_nulls, &n);
-    if (n == 0)
-        PG_RETURN_ARRAYTYPE_P(construct_empty_array(TEXTOID));
-
     if (laplace_spi_connect(&need_finish) != SPI_OK_CONNECT)
         elog(ERROR, "realize_batch: SPI_connect failed");
 
@@ -594,7 +607,7 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
     }
 
     /* ---- ONE shared render pass over every candidate + every input ---- */
-    rendered = render_union(union_ids, un);
+    rendered = render_union(union_ids, un, "realize_batch");
 
     /* ---- per-id COALESCE ladder, output aligned to the input ---- */
     out = (Datum *) palloc(sizeof(Datum) * n);

@@ -117,4 +117,15 @@ SELECT realize.resolve_name_batch(NULL::bytea[],NULL::bytea) IS NULL AS names_nu
        converse.label_or_hex_batch(NULL::bytea[]) IS NULL AS hex_null,
        lexical.type_label_batch(NULL::bytea[]) IS NULL AS type_null;
 
+-- Multidimensional inputs cannot preserve the one-input/one-output positional
+-- contract. Native batch primitives reject them instead of silently flattening.
+SAVEPOINT multidim_resolve_name;
+SELECT realize.resolve_name_batch(
+         ARRAY[[word_id('a')],[word_id('dog')]],NULL::bytea);
+ROLLBACK TO SAVEPOINT multidim_resolve_name;
+SAVEPOINT multidim_realize;
+SELECT realize.batch(
+         ARRAY[[word_id('a')],[word_id('dog')]],NULL::bytea);
+ROLLBACK TO SAVEPOINT multidim_realize;
+
 ROLLBACK;

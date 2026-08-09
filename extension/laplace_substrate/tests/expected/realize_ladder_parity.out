@@ -147,4 +147,16 @@ SELECT realize.resolve_name_batch(NULL::bytea[],NULL::bytea) IS NULL AS names_nu
  t          | t           | t          | t        | t
 (1 row)
 
+-- Multidimensional inputs cannot preserve the one-input/one-output positional
+-- contract. Native batch primitives reject them instead of silently flattening.
+SAVEPOINT multidim_resolve_name;
+SELECT realize.resolve_name_batch(
+         ARRAY[[word_id('a')],[word_id('dog')]],NULL::bytea);
+ERROR:  resolve_name_batch: ids must be 1-dimensional
+ROLLBACK TO SAVEPOINT multidim_resolve_name;
+SAVEPOINT multidim_realize;
+SELECT realize.batch(
+         ARRAY[[word_id('a')],[word_id('dog')]],NULL::bytea);
+ERROR:  realize_batch: ids must be 1-dimensional
+ROLLBACK TO SAVEPOINT multidim_realize;
 ROLLBACK;
