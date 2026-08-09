@@ -359,32 +359,15 @@ public sealed partial class NpgsqlSubstrateWriter
         // maintenance_work_mem, parallel workers — is owned by tune-pg.cmd (derived from
         // Cpu/MemoryTopology) and INHERITED here, never re-set with a hardcoded literal.
         //
-        // When presence sets are complete, concurrent applies in one process decide
-        // novelty client-side; the global advisory lock would serialize them back to
-        // one COPY lane. Still take a local transaction with the same GUCs.
+        // Presence sets make novelty probes cheap, but they do not coordinate with a
+        // second process. The advisory transaction lock remains the cross-process
+        // apply mutex and supplies the bounded lock-timeout diagnostics.
         const string ApplyGucs =
             "SET LOCAL session_replication_role = replica; "
             + "SET LOCAL synchronous_commit = off; "
             + "SET LOCAL jit = off; ";
-        // e+p complete is enough to skip the global advisory lock under parallel apply.
-        // Attestations still probe; claim dicts prevent double-COPY / merge-before-commit.
-        bool presenceComplete = _entityPresenceComplete && _physPresenceComplete;
-        NpgsqlTransaction tx;
-        if (presenceComplete)
-        {
-            tx = await conn.BeginTransactionAsync(ct);
-            await using (var guc = conn.CreateCommand())
-            {
-                guc.Transaction = tx;
-                guc.CommandText = ApplyGucs;
-                await guc.ExecuteNonQueryAsync(ct);
-            }
-        }
-        else
-        {
-            tx = await AdvisoryTxLock.BeginWithLockAsync(
-                conn, "laplace_apply_batch", ApplyGucs, _log, ct);
-        }
+        NpgsqlTransaction tx = await AdvisoryTxLock.BeginWithLockAsync(
+            conn, "laplace_apply_batch", ApplyGucs, _log, ct);
         await using (tx)
         {
         // Ids this apply successfully claimed — released after commit, or on failure so
