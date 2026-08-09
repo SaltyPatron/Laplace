@@ -736,6 +736,14 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
                 {
                     static const struct { const char *from; const char *to; } aliases[] = {
                         {"antonym", "opposite"},
+                        /* HAS_DEFINITION's manifest segment is the noun. A user
+                         * supplies the verb when invoking that relation as an
+                         * operator ("define whale"). Without this content-id
+                         * alias, DEFINE remains a topic candidate and its ICF
+                         * prior beats WHALE even though it names the requested
+                         * traversal. The alias only marks its role; it does not
+                         * parse or dispatch an English shape. */
+                        {"definition", "define"},
                         {NULL, NULL}
                     };
                     hash128_t alias_wid;

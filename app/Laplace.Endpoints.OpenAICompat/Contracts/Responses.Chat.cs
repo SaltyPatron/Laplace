@@ -28,7 +28,18 @@ public sealed record ChatMetadata(
     [property: JsonPropertyName("reply_rows"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? ReplyRows = null,
     [property: JsonPropertyName("generated_tokens"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? GeneratedTokens = null,
     [property: JsonPropertyName("session"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Session = null,
-    [property: JsonPropertyName("laplace"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] LaplaceChatMetadata? Laplace = null);
+    [property: JsonPropertyName("laplace"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] LaplaceChatMetadata? Laplace = null,
+    [property: JsonPropertyName("performance"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ChatPerformance? Performance = null);
+
+public sealed record ChatPerformance(
+    [property: JsonPropertyName("substrate_ms")] double SubstrateMs,
+    [property: JsonPropertyName("elapsed_ms")] double ElapsedMs,
+    [property: JsonPropertyName("first_result_ms"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] double? FirstResultMs,
+    [property: JsonPropertyName("output_utf8_bytes")] int OutputUtf8Bytes,
+    [property: JsonPropertyName("output_codepoints")] int OutputCodepoints,
+    [property: JsonPropertyName("output_words")] int OutputWords,
+    [property: JsonPropertyName("generated_tokens"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? GeneratedTokens = null,
+    [property: JsonPropertyName("generated_tokens_per_second"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] double? GeneratedTokensPerSecond = null);
 
 
 
@@ -47,7 +58,8 @@ public sealed record ProvenanceLine(
 public sealed record ChunkProvenance(
     [property: JsonPropertyName("eff_mu"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] decimal? EffMu = null,
     [property: JsonPropertyName("witnesses"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? Witnesses = null,
-    [property: JsonPropertyName("ord_used"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? OrdUsed = null);
+    [property: JsonPropertyName("ord_used"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? OrdUsed = null,
+    [property: JsonPropertyName("performance"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ChatPerformance? Performance = null);
 
 
 

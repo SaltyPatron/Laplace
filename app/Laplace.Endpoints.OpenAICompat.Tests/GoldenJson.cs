@@ -86,6 +86,12 @@ internal static partial class GoldenJson
                 foreach (var key in obj.Select(p => p.Key).ToArray())
                 {
                     var value = obj[key];
+                    if (key is "substrate_ms" or "elapsed_ms" or "first_result_ms"
+                        or "generated_tokens_per_second")
+                    {
+                        obj[key] = 0;
+                        continue;
+                    }
                     if (key == "created" && value is JsonValue cv && cv.TryGetValue<long>(out var unix) && unix > 0)
                     {
                         obj[key] = 0;

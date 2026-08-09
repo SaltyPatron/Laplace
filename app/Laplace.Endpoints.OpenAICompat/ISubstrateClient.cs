@@ -4,6 +4,11 @@ using Laplace.SubstrateCRUD.Npgsql;
 
 namespace Laplace.Endpoints.OpenAICompat;
 
+internal readonly record struct ConverseOptions(
+    string? Shape = null,
+    int[]? Bands = null,
+    bool Elaborate = false);
+
 
 
 
@@ -25,8 +30,17 @@ internal interface ISubstrateClient
     Task<IReadOnlyList<ConverseRow>> ConverseAsync(
         string prompt, byte[]? session, CancellationToken ct);
 
+    Task<IReadOnlyList<ConverseRow>> ConverseAsync(
+        string prompt, byte[]? session, ConverseOptions options, CancellationToken ct) =>
+        ConverseAsync(prompt, session, ct);
+
     Task<IReadOnlyList<ConverseRow>> ConverseTenantScopedAsync(
         string prompt, byte[]? session, byte[][] scopeSources, CancellationToken ct);
+
+    Task<IReadOnlyList<ConverseRow>> ConverseTenantScopedAsync(
+        string prompt, byte[]? session, byte[][] scopeSources,
+        ConverseOptions options, CancellationToken ct) =>
+        ConverseTenantScopedAsync(prompt, session, scopeSources, ct);
 
     Task<PulseResponse> PulseAsync(long nowUnix, CancellationToken ct);
 

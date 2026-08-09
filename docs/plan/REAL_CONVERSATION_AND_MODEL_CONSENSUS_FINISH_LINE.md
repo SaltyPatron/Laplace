@@ -43,6 +43,20 @@ Point distance alone is not relatedness, and approximate nearest-neighbor select
 not the inference law. Structural coordinates identify and order substrate objects;
 typed, source-bearing evidence steers the decision.
 
+### Physicality and trajectory are different fields with different laws
+
+A physicality's `coord` is its real PointZM placement in the shared four-dimensional
+frame. A composed content entity is placed from the real PointZM placements of its
+selected children, normally their centroid, and its `hilbert_index` is encoded from
+that result. The `trajectory` is a lossless ordered manifest: constituent identities,
+ordinals, flags, and specialized testimony may be mantissa-packed into its vertices.
+
+Packed trajectory vertices are valid doubles by construction but are not child
+placements. They must never be copied into `coord`, averaged to place a parent, or
+presented as spatial coordinates. Every modality or model lane that emits a
+physicality must preserve this separation, and tests must independently assert the
+PointZM/Hilbert placement and the trajectory's identity/order payload.
+
 ## Conversation is a trajectory
 
 A conversation is a content-addressed container analogous to a game trajectory. Each
@@ -172,6 +186,14 @@ capabilities; they are never silently accepted.
 forward pass as MCP. The protocol adapter may translate shapes but may not implement a
 second inference path. Responses identify the effective model/source scope, seed
 profile, finish reason, usage accounting, and trace/receipt handle.
+
+Performance receipts distinguish substrate execution, first-result latency, and total
+adapter latency. They also identify the measured unit. A `walk_text` trajectory step
+rate may be reported as generated trajectory tokens per second; it is not an
+autoregressive checkpoint tokenizer rate and must not be compared to one without an
+explicit equivalence experiment. Read operations report rows per second, while text
+readouts also report UTF-8 bytes, Unicode code points, and words so cross-surface
+comparisons do not silently change units.
 
 ## Code generation as an executed conversation
 

@@ -86,11 +86,11 @@ public class ModelTokenEdgeETLTests
                     Tier = 2,
                     IsByteLevel = false,
                     Role = TokenRole.None,
-                    ContentX = double.NaN,
-                    ContentY = double.NaN,
-                    ContentZ = double.NaN,
-                    ContentM = double.NaN,
-                    HasContentCoord = false,
+                    ContentX = Math.Cos(i),
+                    ContentY = Math.Sin(i),
+                    ContentZ = 0,
+                    ContentM = 0,
+                    HasContentCoord = true,
                 };
             }
 
@@ -194,11 +194,11 @@ public class ModelTokenEdgeETLTests
                     Tier = 2,
                     IsByteLevel = false,
                     Role = TokenRole.None,
-                    ContentX = double.NaN,
-                    ContentY = double.NaN,
-                    ContentZ = double.NaN,
-                    ContentM = double.NaN,
-                    HasContentCoord = false,
+                    ContentX = Math.Cos(i),
+                    ContentY = Math.Sin(i),
+                    ContentZ = 0,
+                    ContentM = 0,
+                    HasContentCoord = true,
                 };
             }
 
@@ -295,6 +295,19 @@ public class ModelTokenEdgeETLTests
             Assert.Equal(
                 ent.OrderBy(x => x.Hi).ThenBy(x => x.Lo).ToArray(),
                 Trajectory.Constituents(phys.TrajectoryXyzm).OrderBy(x => x.Hi).ThenBy(x => x.Lo).ToArray());
+
+            // PointZM is the centroid of the selected entities' real content
+            // placements. The packed trajectory is identity/testimony payload and
+            // must never be averaged or copied into the point columns.
+            var actualPlacements = tokens
+                .SelectMany(t => new[] { t.ContentX, t.ContentY, t.ContentZ, t.ContentM })
+                .ToArray();
+            var expectedPlacement = Math4d.Centroid(actualPlacements);
+            Assert.Equal(expectedPlacement[0], phys.CoordX, 12);
+            Assert.Equal(expectedPlacement[1], phys.CoordY, 12);
+            Assert.Equal(expectedPlacement[2], phys.CoordZ, 12);
+            Assert.Equal(expectedPlacement[3], phys.CoordM, 12);
+            Assert.Equal(Hilbert128.Encode(expectedPlacement), phys.HilbertIndex);
 
             // Testimony is ranked: the emitted rows are the trajectory's leading
             // salience prefix, in order.
@@ -432,11 +445,11 @@ public class ModelTokenEdgeETLTests
                     Tier = 2,
                     IsByteLevel = false,
                     Role = TokenRole.None,
-                    ContentX = double.NaN,
-                    ContentY = double.NaN,
-                    ContentZ = double.NaN,
-                    ContentM = double.NaN,
-                    HasContentCoord = false,
+                    ContentX = Math.Cos(i),
+                    ContentY = Math.Sin(i),
+                    ContentZ = 0,
+                    ContentM = 0,
+                    HasContentCoord = true,
                 };
 
             var cfg = new ModelConfig
@@ -543,11 +556,11 @@ public class ModelTokenEdgeETLTests
                     Tier = 2,
                     IsByteLevel = false,
                     Role = TokenRole.None,
-                    ContentX = double.NaN,
-                    ContentY = double.NaN,
-                    ContentZ = double.NaN,
-                    ContentM = double.NaN,
-                    HasContentCoord = false,
+                    ContentX = Math.Cos(i),
+                    ContentY = Math.Sin(i),
+                    ContentZ = 0,
+                    ContentM = 0,
+                    HasContentCoord = true,
                 };
             }
 

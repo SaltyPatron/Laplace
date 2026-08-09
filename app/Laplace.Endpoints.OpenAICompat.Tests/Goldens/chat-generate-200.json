@@ -16,6 +16,16 @@
   "billing": null,
   "metadata": {
     "generated_tokens": 3,
-    "session": "<session>"
+    "session": "<session>",
+    "performance": {
+      "substrate_ms": 0,
+      "elapsed_ms": 0,
+      "first_result_ms": 0,
+      "output_utf8_bytes": 15,
+      "output_codepoints": 15,
+      "output_words": 3,
+      "generated_tokens": 3,
+      "generated_tokens_per_second": 0
+    }
   }
 }

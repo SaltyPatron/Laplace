@@ -13,7 +13,7 @@ import { apiPost, PaymentRequiredError, type PreflightQuoteResponse, type ChatCo
 
 import { streamChat } from '../api/sse';
 
-import { asNum, provenanceFromMetadata, useAppStore, type ProvenanceEntry } from '../store';
+import { asNum, provenanceFromMetadata, useAppStore, type ChatPerformance, type ProvenanceEntry } from '../store';
 
 import { ReceiptPanel } from './ReceiptPanel';
 
@@ -148,6 +148,23 @@ export function ChatView() {
 
         const lap = chunk.laplace;
 
+        if (lap?.performance) {
+          const p = lap.performance;
+          updateLastAssistant((m) => ({
+            ...m,
+            performance: {
+              substrateMs: p.substrate_ms,
+              elapsedMs: p.elapsed_ms,
+              firstResultMs: p.first_result_ms,
+              outputUtf8Bytes: p.output_utf8_bytes,
+              outputCodepoints: p.output_codepoints,
+              outputWords: p.output_words,
+              generatedTokens: p.generated_tokens,
+              generatedTokensPerSecond: p.generated_tokens_per_second,
+            },
+          }));
+        }
+
         if (delta?.content !== undefined || lap) {
 
           const text = delta?.content ?? '';
@@ -254,9 +271,31 @@ export function ChatView() {
 
       const sessionKey = (response.metadata as { session?: string } | undefined)?.session;
 
+      const rawPerformance = (response.metadata as { performance?: {
+        substrate_ms: number;
+        elapsed_ms: number;
+        first_result_ms?: number;
+        output_utf8_bytes: number;
+        output_codepoints: number;
+        output_words: number;
+        generated_tokens?: number;
+        generated_tokens_per_second?: number;
+      } } | undefined)?.performance;
+
+      const performance: ChatPerformance | undefined = rawPerformance ? {
+        substrateMs: rawPerformance.substrate_ms,
+        elapsedMs: rawPerformance.elapsed_ms,
+        firstResultMs: rawPerformance.first_result_ms,
+        outputUtf8Bytes: rawPerformance.output_utf8_bytes,
+        outputCodepoints: rawPerformance.output_codepoints,
+        outputWords: rawPerformance.output_words,
+        generatedTokens: rawPerformance.generated_tokens,
+        generatedTokensPerSecond: rawPerformance.generated_tokens_per_second,
+      } : undefined;
+
       if (sessionKey) useAppStore.getState().setSession(sessionKey);
 
-      updateLastAssistant((m) => ({ ...m, content, provenance, streaming: false }));
+      updateLastAssistant((m) => ({ ...m, content, provenance, performance, streaming: false }));
 
     } catch (e) {
 
@@ -365,6 +404,22 @@ export function ChatView() {
 
               )}
 
+              {m.performance && (
+                <div className={styles.performance}>
+                  substrate {m.performance.substrateMs.toFixed(1)} ms
+                  {' · '}first {m.performance.firstResultMs?.toFixed(1) ?? '—'} ms
+                  {' · '}total {m.performance.elapsedMs.toFixed(1)} ms
+                  {' · '}{m.performance.outputWords} words
+                  {' · '}{m.performance.outputCodepoints} codepoints
+                  {m.performance.generatedTokens != null
+                    ? ` · ${m.performance.generatedTokens} trajectory tokens`
+                    : ''}
+                  {m.performance.generatedTokensPerSecond != null
+                    ? ` · ${m.performance.generatedTokensPerSecond.toFixed(1)} trajectory tokens/s`
+                    : ''}
+                </div>
+              )}
+
             </div>
 
           ))}
@@ -460,4 +515,3 @@ export function ChatView() {
   );
 
 }
-

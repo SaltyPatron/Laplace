@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Laplace.Api.Contracts;
@@ -15,6 +16,7 @@ internal static class InferenceEndpoints
     {
         app.MapPost("/v1/chat/completions", async (HttpRequest request, ISubstrateClient substrate, IBillingOrchestrator billing, TurnWitness turnWitness, ITenantResolver tenantResolver, CancellationToken ct) =>
         {
+            var totalClock = Stopwatch.StartNew();
             var payload = await EndpointJson.ReadJsonAsync<ChatCompletionsRequest>(request, ct);
             if (payload is null)
                 return EndpointJson.BadRequest("invalid_json", "Request body must be valid JSON.");
@@ -29,11 +31,51 @@ internal static class InferenceEndpoints
             // Conversation state is substrate-resident: only the newest user turn is
             // consumed; any resent history is ignored by construction (spec 34).
             var prompt = payload.Messages
-                .Where(m => !string.IsNullOrWhiteSpace(m.Content))
+                .Where(m => string.Equals(m.Role, "user", StringComparison.OrdinalIgnoreCase)
+                         && !string.IsNullOrWhiteSpace(m.Content))
                 .Select(m => m.Content!.Trim())
                 .LastOrDefault();
             if (string.IsNullOrWhiteSpace(prompt))
-                return EndpointJson.BadRequest("invalid_request_error", "At least one message must include non-empty 'content'.");
+                return EndpointJson.BadRequest("invalid_request_error", "At least one user message must include non-empty 'content'.");
+
+            bool converseModel = ModelCatalog.IsConverse(payload.Model);
+            bool hasBands = payload.Bands is { Length: > 0 };
+            if (payload.WebSearch || payload.WebSearchResults is not null)
+                return EndpointJson.BadRequest("unsupported_parameter",
+                    "Web search is not implemented on this endpoint; no request will silently ignore it.");
+            if (converseModel &&
+                (payload.MaxTokens is not null || payload.MaxCompletionTokens is not null
+                 || payload.Temperature is not null || payload.TopP is not null
+                 || payload.TopK is not null || payload.Window is not null
+                 || payload.TopicBoost is not null || payload.Stop is not null))
+                return EndpointJson.BadRequest("unsupported_parameter",
+                    "Generation controls do not apply to the converse read lane. Use shape/bands/elaborate, or select the completions model.");
+            if (!converseModel &&
+                ((payload.TopP is { } topP && topP != 1.0)
+                 || payload.TopicBoost is not null || payload.Stop is not null))
+                return EndpointJson.BadRequest("unsupported_parameter",
+                    "The walk lane does not implement top_p, topic_boost, or stop; the endpoint rejects them instead of ignoring them.");
+            if (!converseModel &&
+                (!string.IsNullOrWhiteSpace(payload.Shape) || hasBands || payload.Elaborate))
+                return EndpointJson.BadRequest("invalid_request_error",
+                    "Fields 'shape', 'bands', and 'elaborate' are available only on the converse model lane.");
+            if (payload.Bands is { } suppliedBands &&
+                (suppliedBands.Length == 0 || suppliedBands.Any(b => b is < 1 or > 13)))
+                return EndpointJson.BadRequest("invalid_request_error",
+                    "Field 'bands' must contain one or more salience-band numbers in the range 1..13.");
+            if (payload.Elaborate && (!string.IsNullOrWhiteSpace(payload.Shape) || hasBands))
+                return EndpointJson.BadRequest("invalid_request_error",
+                    "Field 'elaborate' cannot be combined with 'shape' or 'bands'; it advances the session's fact layers.");
+            if (hasBands && !string.IsNullOrWhiteSpace(payload.Shape))
+                return EndpointJson.BadRequest("invalid_request_error",
+                    "Fields 'shape' and 'bands' select different read paths and cannot be combined.");
+            if (converseModel && !string.IsNullOrWhiteSpace(payload.Shape))
+            {
+                var shapes = await substrate.QueryShapesAsync(ct);
+                if (!shapes.Any(s => string.Equals(s.Shape, payload.Shape, StringComparison.Ordinal)))
+                    return EndpointJson.BadRequest("invalid_shape",
+                        $"Unknown converse shape '{payload.Shape}'. See GET /v1/query/shapes for the installed catalog.");
+            }
 
             var (scope, scopeError) = await ResolveTurnScopeAsync(request, tenantResolver, payload.Session, payload.User, ct);
             if (scopeError is not null) return scopeError;
@@ -60,10 +102,25 @@ internal static class InferenceEndpoints
             // continue the conversation without resending history.
             request.HttpContext.Response.Headers[SessionHeader] = scope.SessionKey;
 
-            if (!ModelCatalog.IsConverse(payload.Model))
+            if (!converseModel)
             {
                 int genSteps = payload.MaxTokens ?? payload.MaxCompletionTokens ?? 128;
                 double genTemp = payload.Temperature ?? 0.6;
+                int genOrder = payload.Window ?? 5;
+                int genTopK = payload.TopK ?? 10;
+
+                if (genSteps is < 1 or > 4096)
+                    return EndpointJson.BadRequest("invalid_request_error",
+                        "Generation steps must be in the range 1..4096.");
+                if (!double.IsFinite(genTemp) || genTemp <= 0)
+                    return EndpointJson.BadRequest("invalid_request_error",
+                        "Field 'temperature' must be a finite number greater than zero.");
+                if (genOrder is < 1 or > 64)
+                    return EndpointJson.BadRequest("invalid_request_error",
+                        "Field 'window' must be in the range 1..64.");
+                if (genTopK is < 1 or > 4096)
+                    return EndpointJson.BadRequest("invalid_request_error",
+                        "Field 'top_k' must be in the range 1..4096.");
 
                 if (payload.Stream)
                 {
@@ -73,14 +130,29 @@ internal static class InferenceEndpoints
                     ServerSentEvents.Begin(response);
                     try
                     {
+                        var substrateClock = new Stopwatch();
+                        double? firstResultMs = null;
+                        int genStreamTokens = 0;
                         await ServerSentEvents.WriteJsonAsync(response, new ChatCompletionChunk(
                             genId, "chat.completion.chunk", genCreated, payload.Model,
                             [new ChatChunkChoice(0, new ChatDelta(Role: "assistant"), null)]), ct);
 
                         var genStreamText = new StringBuilder();
-                        await foreach (var token in substrate.WalkTextStreamAsync(
-                            prompt, steps: genSteps, temperature: genTemp, ct: ct))
+                        await using var tokenStream = substrate.WalkTextStreamAsync(
+                            prompt, steps: genSteps, maxOrder: genOrder,
+                            temperature: genTemp, topK: genTopK, ct: ct)
+                            .GetAsyncEnumerator(ct);
+                        while (true)
                         {
+                            bool hasToken;
+                            substrateClock.Start();
+                            try { hasToken = await tokenStream.MoveNextAsync(); }
+                            finally { substrateClock.Stop(); }
+                            if (!hasToken) break;
+
+                            var token = tokenStream.Current;
+                            firstResultMs ??= totalClock.Elapsed.TotalMilliseconds;
+                            genStreamTokens++;
                             genStreamText.Append(token.Token);
                             await ServerSentEvents.WriteJsonAsync(response, new ChatCompletionChunk(
                                 genId, "chat.completion.chunk", genCreated, payload.Model,
@@ -89,9 +161,13 @@ internal static class InferenceEndpoints
                         }
                         turnWitness.EnqueueTurn(scope.Tenant, scope.UserKey, scope.SessionId,
                             prompt, genStreamText.ToString().TrimStart());
+                        var genPerformance = BuildPerformance(
+                            genStreamText.ToString().TrimStart(), substrateClock, totalClock,
+                            firstResultMs, generatedTokens: genStreamTokens);
                         await ServerSentEvents.WriteJsonAsync(response, new ChatCompletionChunk(
                             genId, "chat.completion.chunk", genCreated, payload.Model,
-                            [new ChatChunkChoice(0, new ChatDelta(Content: ""), "stop")]), ct);
+                            [new ChatChunkChoice(0, new ChatDelta(Content: ""), "stop")],
+                            Laplace: new ChunkProvenance(Performance: genPerformance)), ct);
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException)
                     {
@@ -102,9 +178,16 @@ internal static class InferenceEndpoints
                 }
 
                 var genTokens = new List<GenerateToken>(genSteps);
+                var genSubstrateClock = Stopwatch.StartNew();
+                double? genFirstResultMs = null;
                 await foreach (var token in substrate.WalkTextStreamAsync(
-                    prompt, steps: genSteps, temperature: genTemp, ct: ct))
+                    prompt, steps: genSteps, maxOrder: genOrder,
+                    temperature: genTemp, topK: genTopK, ct: ct))
+                {
+                    genFirstResultMs ??= totalClock.Elapsed.TotalMilliseconds;
                     genTokens.Add(token);
+                }
+                genSubstrateClock.Stop();
 
                 var genContent = string.Concat(genTokens.Select(t => t.Token)).TrimStart();
                 turnWitness.EnqueueTurn(scope.Tenant, scope.UserKey, scope.SessionId, prompt, genContent);
@@ -116,19 +199,32 @@ internal static class InferenceEndpoints
                     Model: payload.Model,
                     Choices: [new ChatChoice(0, new ChatResponseMessage("assistant", genContent), "stop")],
                     Billing: null,
-                    Metadata: new ChatMetadata(GeneratedTokens: genTokens.Count, Session: scope.SessionKey)));
+                    Metadata: new ChatMetadata(
+                        GeneratedTokens: genTokens.Count,
+                        Session: scope.SessionKey,
+                        Performance: BuildPerformance(
+                            genContent, genSubstrateClock, totalClock, genFirstResultMs, genTokens.Count))));
             }
 
             // Default = act as a whole (global consensus). scope:"tenant" re-folds the
             // tenant's own witnessed world and reads inside it (spec 34 isolation).
             var tenantScope = ConversationContent.Resolve(scope.Tenant);
+            var converseOptions = new ConverseOptions(
+                payload.Shape, payload.Bands, payload.Elaborate);
+            var converseSubstrateClock = Stopwatch.StartNew();
             var rows = tenantScoped
                 ? await substrate.ConverseTenantScopedAsync(prompt, scope.SessionId.ToBytes(),
-                    [tenantScope.PromptSource.ToBytes(), tenantScope.ResponseSource.ToBytes()], ct)
-                : await substrate.ConverseAsync(prompt, scope.SessionId.ToBytes(), ct);
+                    [tenantScope.PromptSource.ToBytes(), tenantScope.ResponseSource.ToBytes()],
+                    converseOptions, ct)
+                : await substrate.ConverseAsync(
+                    prompt, scope.SessionId.ToBytes(), converseOptions, ct);
+            converseSubstrateClock.Stop();
             // Empty consensus is reported truthfully: empty content + reply_rows 0.
             // The client renders the absence; the substrate never fakes prose.
             var content = string.Join("\n", rows.Select(r => r.Reply));
+            var conversePerformance = BuildPerformance(
+                content, converseSubstrateClock, totalClock,
+                rows.Count > 0 ? totalClock.Elapsed.TotalMilliseconds : null);
 
             turnWitness.EnqueueTurn(scope.Tenant, scope.UserKey, scope.SessionId,
                 prompt, rows.Count > 0 ? content : null);
@@ -155,7 +251,8 @@ internal static class InferenceEndpoints
 
                 await ServerSentEvents.WriteJsonAsync(response, new ChatCompletionChunk(
                     completionId, "chat.completion.chunk", created, payload.Model,
-                    [new ChatChunkChoice(0, new ChatDelta(Content: ""), "stop")]), ct);
+                    [new ChatChunkChoice(0, new ChatDelta(Content: ""), "stop")],
+                    Laplace: new ChunkProvenance(Performance: conversePerformance)), ct);
                 await ServerSentEvents.WriteDoneAsync(response, ct);
                 return Results.Empty;
             }
@@ -176,7 +273,8 @@ internal static class InferenceEndpoints
                     ReplyRows: rows.Count,
                     Session: scope.SessionKey,
                     Laplace: new LaplaceChatMetadata(
-                        rows.Select(r => new ProvenanceLine(r.Reply, r.EffectiveMu, r.Witnesses)).ToArray()))));
+                        rows.Select(r => new ProvenanceLine(r.Reply, r.EffectiveMu, r.Witnesses)).ToArray()),
+                    Performance: conversePerformance)));
         })
         .WithTags("openai")
         .Accepts<ChatCompletionsRequest>("application/json")
@@ -215,7 +313,17 @@ internal static class InferenceEndpoints
 
             int steps = payload.MaxTokens ?? 64;
             double temp = payload.Temperature ?? 0.7;
-            string[]? stop = payload.Stop is { } s ? ReadStopSequences(s) : null;
+            int order = payload.Window ?? 5;
+            int topK = payload.TopK ?? 10;
+
+            if ((payload.TopP is { } topP && topP != 1.0)
+                || payload.TopicBoost is not null || payload.Stop is not null)
+                return EndpointJson.BadRequest("unsupported_parameter",
+                    "The walk lane does not implement top_p, topic_boost, or stop; the endpoint rejects them instead of ignoring them.");
+            if (steps is < 1 or > 4096 || order is < 1 or > 64 || topK is < 1 or > 4096
+                || !double.IsFinite(temp) || temp <= 0)
+                return EndpointJson.BadRequest("invalid_request_error",
+                    "Generation requires max_tokens 1..4096, window 1..64, top_k 1..4096, and a finite positive temperature.");
 
             if (payload.Stream)
             {
@@ -227,7 +335,8 @@ internal static class InferenceEndpoints
                 {
                     var streamText = new StringBuilder();
                     await foreach (var token in substrate.WalkTextStreamAsync(
-                        payload.Prompt.Trim(), steps: steps, temperature: temp, ct: ct))
+                        payload.Prompt.Trim(), steps: steps, maxOrder: order,
+                        temperature: temp, topK: topK, ct: ct))
                     {
                         streamText.Append(token.Token);
                         await ServerSentEvents.WriteJsonAsync(response, new CompletionChunk(
@@ -248,7 +357,8 @@ internal static class InferenceEndpoints
 
             var tokens = new List<GenerateToken>(steps);
             await foreach (var token in substrate.WalkTextStreamAsync(
-                payload.Prompt.Trim(), steps: steps, temperature: temp, ct: ct))
+                payload.Prompt.Trim(), steps: steps, maxOrder: order,
+                temperature: temp, topK: topK, ct: ct))
                 tokens.Add(token);
 
             var text = string.Concat(tokens.Select(t => t.Token)).TrimStart();
@@ -382,19 +492,6 @@ internal static class InferenceEndpoints
             ConversationContent.SessionId(tenant, sessionKey)), null);
     }
 
-    private static string[]? ReadStopSequences(JsonElement stop) =>
-        stop.ValueKind switch
-        {
-            JsonValueKind.String => stop.GetString() is { Length: > 0 } s ? [s] : null,
-            JsonValueKind.Array => stop.EnumerateArray()
-                                        .Select(e => e.ValueKind == JsonValueKind.String ? e.GetString() : null)
-                                        .Where(s => !string.IsNullOrEmpty(s))
-                                        .Select(s => s!)
-                                        .ToArray() is { Length: > 0 } arr ? arr : null,
-            _ => null
-        };
-
-
     private static List<string> ReadEmbeddingInputs(JsonElement? input)
     {
         var list = new List<string>();
@@ -419,4 +516,24 @@ internal static class InferenceEndpoints
             ? null
             : EndpointJson.ServiceUnavailable(
                 "witness_unavailable", "Turn witness is unavailable; prompt turns cannot be recorded.");
+
+    private static ChatPerformance BuildPerformance(
+        string output, Stopwatch substrateClock, Stopwatch totalClock,
+        double? firstResultMs, int? generatedTokens = null)
+    {
+        double substrateMs = substrateClock.Elapsed.TotalMilliseconds;
+        double elapsedMs = totalClock.Elapsed.TotalMilliseconds;
+        double? tokensPerSecond = generatedTokens is { } count && substrateMs > 0
+            ? count * 1000.0 / substrateMs
+            : null;
+        return new ChatPerformance(
+            SubstrateMs: substrateMs,
+            ElapsedMs: elapsedMs,
+            FirstResultMs: firstResultMs,
+            OutputUtf8Bytes: Encoding.UTF8.GetByteCount(output),
+            OutputCodepoints: output.EnumerateRunes().Count(),
+            OutputWords: output.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length,
+            GeneratedTokens: generatedTokens,
+            GeneratedTokensPerSecond: tokensPerSecond);
+    }
 }

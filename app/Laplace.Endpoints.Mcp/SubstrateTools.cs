@@ -201,9 +201,12 @@ internal sealed class SubstrateTools
         var spec = ToolCatalog.FirstOrDefault(t => string.Equals(t.Name, name, StringComparison.Ordinal));
         if (spec is null)
             return ($"unknown tool: {name}", true);
+        var clock = Stopwatch.StartNew();
         try
         {
-            return spec.Handler(this, args);
+            var result = spec.Handler(this, args);
+            clock.Stop();
+            return AttachPerformance(result, clock.Elapsed.TotalMilliseconds);
         }
         catch (PostgresException ex)
         {
@@ -217,6 +220,29 @@ internal sealed class SubstrateTools
         {
             return (ex.Message, true);
         }
+    }
+
+    private static (string Text, bool IsError) AttachPerformance(
+        (string Text, bool IsError) result, double elapsedMs)
+    {
+        if (result.IsError) return result;
+        JsonObject? payload;
+        try { payload = JsonNode.Parse(result.Text) as JsonObject; }
+        catch (System.Text.Json.JsonException) { return result; }
+        if (payload is null) return result;
+
+        int? rows = (payload["rows"] as JsonArray)?.Count;
+        payload["performance"] = new JsonObject
+        {
+            ["elapsed_ms"] = elapsedMs,
+            ["row_count"] = rows,
+            ["rows_per_second"] = rows is { } count && elapsedMs > 0
+                ? count * 1000.0 / elapsedMs
+                : null,
+            ["result_utf8_bytes"] = Encoding.UTF8.GetByteCount(result.Text),
+            ["result_codepoints"] = result.Text.EnumerateRunes().Count(),
+        };
+        return (payload.ToJsonString(), false);
     }
 
     // One conversational turn: SQL converse.chat() composes the reply (read-side), then the

@@ -130,6 +130,7 @@ public sealed class ModelTokenEdgeETL
     private readonly string _modelDir;
     private readonly ModelManifest _manifest;
     private readonly IReadOnlyList<LlamaTokenizerParser.TokenRecord> _tokens;
+    private readonly IReadOnlyDictionary<Hash128, double[]> _tokenPlacements;
     private readonly Hash128 _source;
     private readonly ILogger _log;
     private readonly HeadClassifier? _classifier;
@@ -141,6 +142,15 @@ public sealed class ModelTokenEdgeETL
         _modelDir = modelDir; _manifest = manifest; _tokens = tokens; _source = sourceId;
         _log = log ?? Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
         _classifier = classifier;
+
+        var placements = new Dictionary<Hash128, double[]>();
+        foreach (var token in tokens)
+        {
+            if (!token.HasContentCoord) continue;
+            placements.TryAdd(token.EntityId,
+                [token.ContentX, token.ContentY, token.ContentZ, token.ContentM]);
+        }
+        _tokenPlacements = placements;
     }
 
     private static double WeightFor(string relation) =>
@@ -277,7 +287,7 @@ public sealed class ModelTokenEdgeETL
     }
 
     private readonly record struct FactorDeposit(
-        Hash128 Slice, double[] Xyzm, int Tokens, int Dim, CircuitDescriptor Desc);
+        Hash128 Slice, double[] Coord, double[] Xyzm, int Tokens, int Dim, CircuitDescriptor Desc);
 
     // Item A deposit: per (projection tensor, head) — one Projection physicality
     // on the head's byte-range SLICE entity (same content law as tensors; slices
@@ -418,7 +428,7 @@ public sealed class ModelTokenEdgeETL
     // Cauchy–Schwarz pruning bound), arena = RMS of salience (the MERGES_WITH
     // convention), layout = the FactorTrajectory law (arena vertex 0, testimony
     // header + factor run per token — token identity travels IN the trajectory).
-    private static FactorDeposit BuildDeposit(
+    private FactorDeposit BuildDeposit(
         Hash128 slice, double[] M, Hash128[] tokenIds, int n, int dim, CircuitDescriptor desc)
     {
         var sal = new double[n];
@@ -426,7 +436,19 @@ public sealed class ModelTokenEdgeETL
         double arena = VectorNorm(sal, n) / Math.Sqrt(Math.Max(1, n));
         if (arena <= 0) arena = 1e-9;
         double[] xyzm = FactorTrajectory.Pack(slice, arena, tokenIds.AsSpan(0, n), M, dim, sal);
-        return new FactorDeposit(slice, xyzm, n, dim, desc);
+
+        // A Projection point is still a real point in the shared S3 frame. The
+        // factor/testimony bytes belong exclusively to trajectory. Place the
+        // slice at the centroid of the vocabulary entities this factor actually
+        // makes most salient, using their deposited Content coordinates.
+        var salient = Enumerable.Range(0, n)
+            .OrderByDescending(i => sal[i])
+            .ThenBy(i => tokenIds[i].Hi)
+            .ThenBy(i => tokenIds[i].Lo)
+            .Take(Math.Min(TopTokensPerCircuit, n))
+            .Select(i => tokenIds[i]);
+        double[] coord = CentroidOfPlacedTokens(salient, $"factor slice {slice}");
+        return new FactorDeposit(slice, coord, xyzm, n, dim, desc);
     }
 
     // Rows are few but tens of MB each: budget rows-per-commit by BYTES against
@@ -461,9 +483,9 @@ public sealed class ModelTokenEdgeETL
                                    Id: PhysicalityId.Compute(dep.Slice, PhysicalityType.Projection),
                                    EntityId: dep.Slice, SourceId: _source,
                                    Type: PhysicalityType.Projection,
-                                   CoordX: dep.Xyzm[0], CoordY: dep.Xyzm[1],
-                                   CoordZ: dep.Xyzm[2], CoordM: dep.Xyzm[3],
-                                   HilbertIndex: default,
+                                   CoordX: dep.Coord[0], CoordY: dep.Coord[1],
+                                   CoordZ: dep.Coord[2], CoordM: dep.Coord[3],
+                                   HilbertIndex: Hilbert128.Encode(dep.Coord),
                                    TrajectoryXyzm: dep.Xyzm, NConstituents: dep.Tokens,
                                    AlignmentResidual: null, SourceDim: dep.Dim,
                                    ObservedAtUnixUs: IngestClock.NowUnixUs()));
@@ -1089,18 +1111,18 @@ public sealed class ModelTokenEdgeETL
         var top = collector.Drain();
 
         // The circuit's point in 4-space: the centroid of the substrate's OWN
-        // projection of its salient tokens — Trajectory.Build then Math4d.Centroid,
-        // the NgramTrajectory.Compose convention verbatim, with Hilbert128 over the
-        // same centroid. Content-derived and model-free, so two checkpoints whose
+        // real placements of its salient tokens. Content-derived and model-free,
+        // so two checkpoints whose
         // L5.H7 head is salient for the same tokens land on neighbouring points and
         // find each other through physicalities_coord_gist / the Hilbert order.
         // Taken over the SALIENT PREFIX, never the whole vocabulary: averaged over
         // every token, every circuit converges on the same vocabulary centroid and
-        // discriminates nothing. (The old coord was trajXyzm[0..3] — the packed
-        // mantissa of one vertex, a hash slot, not a position.)
-        var signature = new Hash128[top.Count];
-        for (int i = 0; i < top.Count; i++) signature[i] = top[i].Subject;
-        double[] centroid = Math4d.Centroid(Trajectory.Build(signature));
+        // discriminates nothing. Packed identity/score vertices remain in
+        // trajectory only; treating them as child positions produces a valid
+        // double and a meaningless point.
+        double[] centroid = CentroidOfPlacedTokens(
+            top.Select(static pair => pair.Subject),
+            $"circuit {descriptor.Plane} L{descriptor.Layer} H{descriptor.Head}");
         var circuitPhys = new PhysicalityRow(
             Id: PhysicalityId.Compute(coord, PhysicalityType.Projection),
             EntityId: coord, SourceId: _source,
@@ -1148,6 +1170,23 @@ public sealed class ModelTokenEdgeETL
                            _source, EdgeBatchLabel(descriptor) + "/occ", 1,
                            reader, options, ct, commitEpoch, _rowsPerChange))
             yield return batch;
+    }
+
+    private double[] CentroidOfPlacedTokens(IEnumerable<Hash128> tokenIds, string owner)
+    {
+        var coords = new List<double>();
+        foreach (var tokenId in tokenIds)
+        {
+            if (!_tokenPlacements.TryGetValue(tokenId, out var coord)) continue;
+            coords.Add(coord[0]);
+            coords.Add(coord[1]);
+            coords.Add(coord[2]);
+            coords.Add(coord[3]);
+        }
+        if (coords.Count == 0)
+            throw new InvalidOperationException(
+                $"Cannot place {owner}: none of its selected token entities has a real content coordinate.");
+        return Math4d.Centroid(coords.ToArray());
     }
 
     private static async IAsyncEnumerable<EdgeRowChunk> EnumerateChunksAsync(

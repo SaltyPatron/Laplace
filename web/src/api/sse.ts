@@ -18,6 +18,16 @@ export interface ChatChunk {
     eff_mu?: number;
     witnesses?: number;
     ord_used?: number;
+    performance?: {
+      substrate_ms: number;
+      elapsed_ms: number;
+      first_result_ms?: number;
+      output_utf8_bytes: number;
+      output_codepoints: number;
+      output_words: number;
+      generated_tokens?: number;
+      generated_tokens_per_second?: number;
+    };
   };
 }
 

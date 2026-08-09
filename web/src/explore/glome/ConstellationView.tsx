@@ -16,13 +16,14 @@ type VizResponse = Schemas['VisualizationGraphResponse'];
 
 function nodesFromGraph(graph: VizResponse['graph']): GlomeNode[] {
   return (graph?.nodes ?? [])
-    .filter((n) => n.x != null && n.y != null && n.z != null)
+    .filter((n) => n.x != null && n.y != null && n.z != null && n.m != null)
     .map((n) => ({
       id: n.idHex ?? '',
       label: n.label ?? n.idHex ?? '',
       x: Number(n.x),
       y: Number(n.y),
       z: Number(n.z),
+      m: Number(n.m),
       radius: Number(n.radius ?? 1),
       kind: 'primary' as const,
     }));
