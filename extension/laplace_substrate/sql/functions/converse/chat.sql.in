@@ -70,7 +70,7 @@ BEGIN
     -- most evidence behind it wins. Deliberately NOT converse.word_language() per token:
     -- that is LIMIT 1, one language per word, which discards the distribution and
     -- makes a token shared across languages ("chat" in English and French, "die" in
-    -- English and German) look monolingual. Summing laplace.eff_mu over all of them lets a
+    -- English and German) look monolingual. Summing consensus.eff_mu over all of them lets a
     -- prompt's genuinely ambiguous tokens contribute to both tallies and be settled
     -- by the tokens that are decisive, which is how a reader disambiguates too.
     --
@@ -196,7 +196,7 @@ BEGIN
             -- scalar form carried, all fixed here and none of them a law change:
             --   * (c.rating-2*c.rd) open-coded three times -- a SECOND definition of
             --     edge strength inside a function whose other branches call consensus.eff_mu().
-            --     If laplace.eff_mu's definition moves, this branch silently diverges.
+            --     If consensus.eff_mu's definition moves, this branch silently diverges.
             --   * realize.realize() PER ROW before the cut, in the same file whose band lens
             --     measures that at ~7 ms/id against ~0.3 ms/id batched.
             --   * bare band literals 4/2/7 -- converse.relation_band_catalog() rows restated
@@ -266,7 +266,7 @@ BEGIN
                 FROM ord o
                 CROSS JOIN lbl
                 WHERE lbl.l[o.ix] IS NOT NULL
-                  -- last-resort laplace.render guard, kin layer only (as converse_facts keeps it)
+                  -- last-resort realize.render guard, kin layer only (as converse_facts keeps it)
                   AND (o.layer <> 3 OR converse.label_is_content(lbl.l[o.ix]))
                 GROUP BY o.layer
             ) q;
@@ -279,11 +279,11 @@ BEGIN
 
         ELSIF p_bands IS NOT NULL AND array_length(p_bands, 1) > 0 THEN
             -- BAND LENS: every edge of the topic inside the selected bands, both
-            -- directions, ranked by laplace.eff_mu. This one read replaces the former
+            -- directions, ranked by consensus.eff_mu. This one read replaces the former
             -- parts / kinds / causes English branches and generalizes to all 13.
             -- HASH SPACE, THEN ONE realize_batch. This used to call realize.realize() PER
             -- ROW on both arms of the UNION, before any filter or limit, so a
-            -- high-degree topic paid a scalar laplace.render for every edge it has.
+            -- high-degree topic paid a scalar realize.render for every edge it has.
             -- Measured 2026-07-28 on the foundation substrate: the scalar ladder
             -- runs ~7 ms/id, one batched call ~0.3 ms/id -- and the densest
             -- subject here carries 6,687 edges. Same rows, same order, same
@@ -303,8 +303,8 @@ BEGIN
                 -- labels and lexfile categories next to real kin, which is what put
                 -- "06831177-n, noun.communication, 05593148-n" in a band listing.
                 -- converse_facts already resolved this the right way
-                -- (non_kin_assoc_types, whole families via laplace.relation_family_members)
-                -- and kept label_is_content only as a last-resort laplace.render guard; the
+                -- (non_kin_assoc_types, whole families via consensus.relation_family_members)
+                -- and kept label_is_content only as a last-resort realize.render guard; the
                 -- lens was still reading the band raw.
                 SELECT e.id AS type_id, consensus.relation_highway_band(e.id) AS band
                 FROM laplace.entities e
@@ -330,7 +330,7 @@ BEGIN
             -- RANK, CAP, THEN LABEL. Batching made the uncapped lens fast; it did
             -- not make it sane -- the densest subject here carries 6,687 edges, and
             -- rendering 6,687 surfaces into one prose line is not an answer. The
-            -- cap is a per-band query LIMIT over an laplace.eff_mu ranking (rn <= 12), the
+            -- cap is a per-band query LIMIT over an consensus.eff_mu ranking (rn <= 12), the
             -- only kind of top-k the substrate permits: it truncates the READ, not
             -- the fold, and nothing about what the sources assert changes.
             ranked AS MATERIALIZED (

@@ -4,7 +4,7 @@
 -- The whole subsystem was a second copy of a fact the substrate already stores exactly.
 -- physicalities.trajectory IS the constituent sequence -- Trajectory.Build packs the ordered
 -- child ids into the linestring mantissa and laplace_trajectory_constituents unpacks them
--- losslessly. constituents() and constituents_closure() read that trajectory directly, and
+-- losslessly. realize.constituents() and realize.constituents_closure() read that trajectory directly, and
 -- so does the live render path. constituent_edges held a decode of the same bytes in a
 -- different shape, and its own rebuild header said so: "it only unpacks what
 -- physicalities.trajectory already encodes."

@@ -75,7 +75,7 @@ rows AS (
     LEFT JOIN via  v ON v.synset_id = c.synset_id AND v.rk = 1
     LEFT JOIN lang l ON l.synset_id = c.synset_id AND l.rk = 1
 ),
--- ONE laplace.render pass over every id this result needs, position-aligned.
+-- ONE realize.render pass over every id this result needs, position-aligned.
 ids AS (
     SELECT array_agg(x ORDER BY ord) AS arr
     FROM (SELECT r.rk * 4 - 3 AS ord, r.synset_id AS x FROM rows r

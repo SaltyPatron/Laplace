@@ -9,7 +9,7 @@ BEGIN ATOMIC
         FROM unnest(p_ids) WITH ORDINALITY AS u(id, ord)
     ), batches AS MATERIALIZED (
         SELECT realize.resolve_name_batch(p_ids) AS names,
-               laplace.render_batch(p_ids) AS rendered
+               realize.render_batch(p_ids) AS rendered
     ), cleaned AS (
         SELECT i.id, i.ord, b.names[i.ord] AS name,
                regexp_replace(

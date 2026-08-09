@@ -24,7 +24,7 @@ CREATE OR REPLACE FUNCTION generation.foundry_vocab_crawl(
         SELECT array_agg(e.id) AS ids
         FROM laplace.entities e
         WHERE e.type_id = realize.canonical_id('RelationType')
-          AND laplace.relation_rank_resolved(e.id) >= p_rank_floor
+          AND consensus.relation_rank_resolved(e.id) >= p_rank_floor
     ),
     crawled AS (
         SELECT c.entity_id, c.weight,
@@ -41,7 +41,7 @@ CREATE OR REPLACE FUNCTION generation.foundry_vocab_crawl(
     -- next content constituent in every trajectory containing the point --
     -- not from PRECEDES consensus, which merely materialized the same sequence
     -- the trajectory already holds (Pillar 3a, e5e1b42). Weight is observed
-    -- frequency (seen), not laplace.eff_mu, because there is no rated edge to read.
+    -- frequency (seen), not consensus.eff_mu, because there is no rated edge to read.
     order1 AS (
         SELECT gs.successor_id AS entity_id,
                gs.seen::numeric AS w,
@@ -94,8 +94,8 @@ CREATE OR REPLACE FUNCTION generation.foundry_vocab_crawl(
     
     
     scaffold AS (
-        -- Plan Phase 3b: rank by CONSENSUS TENSION (signed laplace.eff_mu, rd-discounted,
-        -- witness-saturated; laplace.refuted edges excluded), not raw degree count —
+        -- Plan Phase 3b: rank by CONSENSUS TENSION (signed consensus.eff_mu, rd-discounted,
+        -- witness-saturated; consensus.refuted edges excluded), not raw degree count —
         -- frequent-but-slack pairings stop outranking rare-but-taut terms.
         SELECT f.id AS entity_id, f.d::bigint AS weight,
                row_number() OVER (ORDER BY f.d DESC) AS rn
@@ -141,7 +141,7 @@ CREATE OR REPLACE FUNCTION generation.foundry_vocab_crawl(
     clean AS (
         SELECT DISTINCT ON (n.s) n.entity_id, n.s, n.weight, n.pri
         FROM rendered n
-        WHERE n.s IS NOT NULL AND btrim(n.s) <> '' AND NOT laplace.is_all_whitespace(n.s)
+        WHERE n.s IS NOT NULL AND btrim(n.s) <> '' AND NOT realize.is_all_whitespace(n.s)
           AND position(' ' IN n.s) = 0 AND char_length(n.s) <= 40
           -- 2026-07-09 (finish-line Phase 2): the old `~ '[[:alpha:]]'` gate made
           -- punctuation and numerals unrepresentable — no synthesized model could emit

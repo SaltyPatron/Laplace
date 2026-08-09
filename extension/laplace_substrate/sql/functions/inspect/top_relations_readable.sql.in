@@ -8,9 +8,9 @@ BEGIN ATOMIC
       FROM consensus.top_relations(p_limit,p_type) WITH ORDINALITY
         AS t(subject_id,type_id,object_id,eff_mu,witnesses,rn)
     ), batch AS MATERIALIZED (
-      SELECT laplace.render_batch(array_agg(subject_id ORDER BY rn)) AS subjects,
-             laplace.render_batch(array_agg(type_id ORDER BY rn)) AS types,
-             laplace.render_batch(array_agg(object_id ORDER BY rn)) AS objects FROM raw
+      SELECT realize.render_batch(array_agg(subject_id ORDER BY rn)) AS subjects,
+             realize.render_batch(array_agg(type_id ORDER BY rn)) AS types,
+             realize.render_batch(array_agg(object_id ORDER BY rn)) AS objects FROM raw
     )
     SELECT b.subjects[t.rn],b.types[t.rn],b.objects[t.rn],t.eff_mu,t.witnesses
     FROM raw t CROSS JOIN batch b ORDER BY t.rn;

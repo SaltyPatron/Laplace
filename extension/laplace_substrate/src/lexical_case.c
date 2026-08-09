@@ -13,7 +13,7 @@
 #include <string.h>
 
 /*
- * word_case_variants(word) -> bytea[] : the orthographic case-variant word ids
+ * lexical.word_case_variants(word) -> bytea[] : the orthographic case-variant word ids
  * of a word (itself + witnessed lower/upper/title surfaces minted back to word
  * ids). This is the native, batched replacement for the SQL trio
  * word_case_variant_ids -> word_case_map_surface (x3) -> grapheme_case_target,
@@ -24,17 +24,17 @@
  * OUTPUT-IDENTICAL BY DELEGATION. Every semantic decision is still made by the
  * exact same function the SQL used:
  *   - case-map selection: one batched DISTINCT ON (subject, type) ... ORDER BY
- *     subject, type, eff_mu(rating, rd) DESC over v_consensus_unrefuted -- the
+ *     subject, type, consensus.eff_mu(rating, rd) DESC over v_consensus_unrefuted -- the
  *     same view, same eff_mu ordering, same "highest eff_mu wins, NULL/absent
  *     object => no mapping" semantics as grapheme_case_target's LIMIT 1;
- *   - grapheme rendering: laplace.render_text (depth 32), identical to the
+ *   - grapheme rendering: realize.render_text (depth 32), identical to the
  *     scalar render_text the SQL surface builder called;
  *   - word minting: laplace.word_id, the same content hash;
  *   - existence gate: laplace.entity_exists, identical predicate.
  * The C code only (a) walks the grapheme trajectory once and (b) reproduces
  * word_case_map_surface's string assembly verbatim (title => title map on the
- * first grapheme, lower on the rest; per-grapheme COALESCE(render(target),
- * render(child)) with run_length repetition; string_agg's skip-NULL semantics),
+ * first grapheme, lower on the rest; per-grapheme COALESCE(realize.render(target),
+ * realize.render(child)) with run_length repetition; string_agg's skip-NULL semantics),
  * collapsing the fan-out to a fixed handful of batched SPI round trips.
  */
 
@@ -96,9 +96,9 @@ render_lookup(HTAB *r, const char *key16)
 
 /*
  * The per-grapheme base string for a map slot, matching
- * COALESCE(render_text(grapheme_case_target(child, slot)), render_text(child)):
- * render(target) if a non-NULL-rendering target exists, else render(child).
- * Returns NULL only when render(child) itself is NULL (string_agg then skips
+ * COALESCE(realize.render_text(grapheme_case_target(child, slot)), realize.render_text(child)):
+ * realize.render(target) if a non-NULL-rendering target exists, else realize.render(child).
+ * Returns NULL only when realize.render(child) itself is NULL (string_agg then skips
  * the whole grapheme).
  */
 static char *
@@ -178,7 +178,7 @@ pg_laplace_word_case_variants(PG_FUNCTION_ARGS)
 
 		rc = SPI_execute_with_args(
 			"SELECT ordinal, child_id, run_length "
-			"FROM laplace.constituents($1) ORDER BY ordinal",
+			"FROM realize.constituents($1) ORDER BY ordinal",
 			1, at, av, NULL, true, 0);
 		if (rc != SPI_OK_SELECT)
 			elog(ERROR, "word_case_variants: constituents failed: %s",
@@ -273,7 +273,7 @@ pg_laplace_word_case_variants(PG_FUNCTION_ARGS)
 			"       c.subject_id, c.type_id, c.object_id "
 			"FROM laplace.v_consensus_unrefuted c "
 			"WHERE c.subject_id = ANY($1) AND c.type_id = ANY($2) "
-			"ORDER BY c.subject_id, c.type_id, laplace.eff_mu(c.rating, c.rd) DESC",
+			"ORDER BY c.subject_id, c.type_id, consensus.eff_mu(c.rating, c.rd) DESC",
 			2, at, av, NULL, true, 0);
 		if (rc != SPI_OK_SELECT)
 			elog(ERROR, "word_case_variants: case-map fetch failed: %s",
@@ -327,7 +327,7 @@ pg_laplace_word_case_variants(PG_FUNCTION_ARGS)
 	render_cap = n_graphemes * (CM_SLOTS + 1) + 1;
 	render_ids = (Datum *) palloc(sizeof(Datum) * render_cap);
 
-	/* p_word (for the IS DISTINCT FROM render_text(p_word) filter). */
+	/* p_word (for the IS DISTINCT FROM realize.render_text(p_word) filter). */
 	{
 		bool         found;
 		RenderEntry *e = (RenderEntry *) hash_search(rmap, pword_key, HASH_ENTER,
@@ -376,7 +376,7 @@ pg_laplace_word_case_variants(PG_FUNCTION_ARGS)
 		Datum      av[1] = { PointerGetDatum(rid_arr) };
 
 		rc = SPI_execute_with_args(
-			"SELECT u.id, laplace.render_text(u.id) "
+			"SELECT u.id, realize.render_text(u.id) "
 			"FROM unnest($1::bytea[]) AS u(id)",
 			1, at, av, NULL, true, 0);
 		if (rc != SPI_OK_SELECT)
@@ -424,8 +424,8 @@ pg_laplace_word_case_variants(PG_FUNCTION_ARGS)
 				if (i == 0)
 				{
 					/* first grapheme: title once, then lower for the rest of
-					 * its run -- COALESCE(render(title),render(child)) ||
-					 * repeat(COALESCE(render(lower),render(child)), run-1).
+					 * its run -- COALESCE(realize.render(title),realize.render(child)) ||
+					 * repeat(COALESCE(realize.render(lower),realize.render(child)), run-1).
 					 * repeat() is STRICT, so the whole '||' expression is NULL
 					 * (grapheme skipped) if EITHER operand is NULL, including
 					 * repeat(lb, 0) when lb is NULL. Hence both tb and lb must
@@ -479,7 +479,7 @@ pg_laplace_word_case_variants(PG_FUNCTION_ARGS)
 
 		if (surf[m] == NULL)
 			continue;
-		/* surface IS DISTINCT FROM render_text(p_word) */
+		/* surface IS DISTINCT FROM realize.render_text(p_word) */
 		distinct = (render_pword == NULL) ? true
 										  : (strcmp(surf[m], render_pword) != 0);
 		if (!distinct)

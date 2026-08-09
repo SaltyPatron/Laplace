@@ -24,9 +24,9 @@
 -- CONCEPT vs SURFACE (spec 36 §3.1). The frontier is concept-level and language-free.
 -- Realization picks surfaces at the very end, honouring p_lang -- an ILI is an
 -- equivalence class spanning every language that witnesses it, so nothing but the
--- final laplace.render decides which member is emitted.
+-- final realize.render decides which member is emitted.
 --
--- SCALING. laplace.eff_mu arrives in the fold's internal units (~1e12) and steered_walk_raw
+-- SCALING. consensus.eff_mu arrives in the fold's internal units (~1e12) and steered_walk_raw
 -- wants an int8 weight multiplied by a 0..100000 hash. The /1e10 below is a UNITS
 -- CONVERSION chosen so frontier salience lands in the same order of magnitude as the
 -- existing provenance weights (40-50), not a tuning knob and not a floor -- it
@@ -111,15 +111,15 @@ BEGIN
     -- FRONTIER: the topic's consensus neighbourhood, both directions, over the
     -- content bands. This is the turn's semantic plan -- concept-level, language-free.
     frontier AS MATERIALIZED (
-        SELECT c.object_id AS cid, laplace.eff_mu(c.rating, c.rd) AS mu
+        SELECT c.object_id AS cid, consensus.eff_mu(c.rating, c.rd) AS mu
         FROM bands b, laplace.consensus c
         WHERE c.subject_id = syn AND c.type_id = ANY (b.t)
         UNION ALL
-        SELECT c.subject_id, laplace.eff_mu(c.rating, c.rd)
+        SELECT c.subject_id, consensus.eff_mu(c.rating, c.rd)
         FROM bands b, laplace.consensus c
         WHERE c.object_id = syn AND c.type_id = ANY (b.t)
         UNION ALL
-        SELECT syn, (SELECT max(laplace.eff_mu(c2.rating, c2.rd)) FROM laplace.consensus c2
+        SELECT syn, (SELECT max(consensus.eff_mu(c2.rating, c2.rd)) FROM laplace.consensus c2
                      WHERE c2.subject_id = syn)
         -- BIOGRAPHY ARMS (R7 slice 2, GH #759): the session's recent topics
         -- join the turn's frontier with RECENCY-DECAYED weight — attention
@@ -136,21 +136,21 @@ BEGIN
         -- and a caller whose ctx happens to contain the elected topic would
         -- double-count it at full-plus-decayed weight (Copilot, PR #896).
         UNION ALL
-        SELECT c.object_id, laplace.eff_mu(c.rating, c.rd) / (2 ^ x.dist)
+        SELECT c.object_id, consensus.eff_mu(c.rating, c.rd) / (2 ^ x.dist)
         FROM bands b
         CROSS JOIN unnest(COALESCE(p_ctx, ARRAY[]::bytea[])) WITH ORDINALITY x(cid, dist)
         JOIN laplace.consensus c ON c.subject_id = x.cid
                         AND c.type_id = ANY (b.t)
         WHERE x.cid <> syn
         UNION ALL
-        SELECT c.subject_id, laplace.eff_mu(c.rating, c.rd) / (2 ^ x.dist)
+        SELECT c.subject_id, consensus.eff_mu(c.rating, c.rd) / (2 ^ x.dist)
         FROM bands b
         CROSS JOIN unnest(COALESCE(p_ctx, ARRAY[]::bytea[])) WITH ORDINALITY x(cid, dist)
         JOIN laplace.consensus c ON c.object_id = x.cid
                         AND c.type_id = ANY (b.t)
         WHERE x.cid <> syn
         UNION ALL
-        SELECT x.cid, (SELECT max(laplace.eff_mu(c2.rating, c2.rd)) FROM laplace.consensus c2
+        SELECT x.cid, (SELECT max(consensus.eff_mu(c2.rating, c2.rd)) FROM laplace.consensus c2
                        WHERE c2.subject_id = x.cid) / (2 ^ x.dist)
         FROM unnest(COALESCE(p_ctx, ARRAY[]::bytea[])) WITH ORDINALITY x(cid, dist)
         WHERE x.cid <> syn
@@ -190,17 +190,17 @@ BEGIN
     -- NOT converted to the id-space HAS_GENERAL_CATEGORY classification that
     -- corpus_whitespace_vocab_indices uses: that reads Unicode general category,
     -- which is attested on CODEPOINTS, and toks is filtered to ctier = 2 (words).
-    -- Every probe would miss, return NULL, and fall through to this same laplace.render
+    -- Every probe would miss, return NULL, and fall through to this same realize.render
     -- with an extra join paid first. Classification on ids is right where the ids
     -- carry the class; here they do not, and pretending otherwise buys a slower
     -- query with identical output.
     ws_ids AS MATERIALIZED (
         SELECT array_agg(DISTINCT t.entity_id ORDER BY t.entity_id) AS a FROM toks t
     ), ws AS MATERIALIZED (
-        SELECT i.id, laplace.is_all_whitespace(COALESCE(s.txt, ' ')) AS is_ws
+        SELECT i.id, realize.is_all_whitespace(COALESCE(s.txt, ' ')) AS is_ws
         FROM ws_ids,
              LATERAL unnest(ws_ids.a) WITH ORDINALITY i(id, ord),
-             LATERAL unnest(laplace.render_text_batch(ws_ids.a, 8)) WITH ORDINALITY s(txt, ord)
+             LATERAL unnest(realize.render_text_batch(ws_ids.a, 8)) WITH ORDINALITY s(txt, ord)
         WHERE i.ord=s.ord
     ),
     kept AS MATERIALIZED (
@@ -217,7 +217,7 @@ BEGIN
     -- with no sense (numbers, names, glue) keep their surface id, so
     -- realization still has something to print. Election context is the
     -- token alone — EVIDENCE BEFORE ADJUDICATED STRENGTH, mirroring
-    -- lexical.senses()'s own ORDER BY (witnesses, then laplace.eff_mu; the urine-over-water
+    -- lexical.senses()'s own ORDER BY (witnesses, then consensus.eff_mu; the urine-over-water
     -- election in senses.sql.in is why strength alone mis-elects on
     -- one-witness exact ties). Contextual salience is Phase 3 (R3).
     -- lexical.senses() per DISTINCT token rides the same documented tolerance as
@@ -297,7 +297,7 @@ BEGIN
     -- being the one wired into converse.chat()'s walk shape.
     --
     -- BOTH ladders batch, because both are needed and they answer different
-    -- questions: realize LABELS a concept in p_lang, laplace.render_text reconstructs
+    -- questions: realize LABELS a concept in p_lang, realize.render_text reconstructs
     -- content bytes. The COALESCE order is unchanged -- label first, content as
     -- the fallback for ids with no surface family.
     --
@@ -324,7 +324,7 @@ BEGIN
     realized AS MATERIALIZED (
         SELECT i.a,
                realize.batch(i.a, p_lang) AS lbl,
-               laplace.render_text_batch(i.a, 64) AS txt
+               realize.render_text_batch(i.a, 64) AS txt
         FROM ids i
     ),
     labels AS MATERIALIZED (

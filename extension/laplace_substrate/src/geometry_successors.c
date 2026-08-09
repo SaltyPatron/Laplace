@@ -12,7 +12,7 @@
 #include "spi_nested.h"
 
 /*
- * geometry_successors(point, limit, window)
+ * structural.geometry_successors(point, limit, window)
  *   -> TABLE(successor_id bytea, seen bigint)
  *
  * The geometry-native continuation operator: for a content POINT, walk every

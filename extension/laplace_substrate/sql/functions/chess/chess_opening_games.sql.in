@@ -1,7 +1,7 @@
 -- chess.opening_games(opening, limit, offset): the PLAYINGS of one opening, ranked.
 --
 -- WHY THIS EXISTS. Openings and games were both in the substrate and joined correctly,
--- and no read surface joined them. api('chess') listed fourteen chess functions and the
+-- and no read surface joined them. ops.api('chess') listed fourteen chess functions and the
 -- only one touching openings was chess_opening_preference, which is per-PLAYER and
 -- returns ECO codes. Answering "which games were played in the Ruy Lopez" meant
 -- hand-writing the layer map again (GH #736: the subject is the shared LINE, the context
@@ -12,7 +12,7 @@
 -- (final_position, OPENING_NAME, name); a game attests (line, GAME_HAS_OPENING, name).
 -- Both mint `name` through the same content law, so they are the SAME id and laplace.word_id()
 -- reproduces it, multi-word names included. The filter is in ID SPACE — one index seek
--- on attestations_object_btree — never a laplace.render-and-compare.
+-- on attestations_object_btree — never a realize.render-and-compare.
 --
 -- IDS OUT, NOT HEADERS. This returns the ranked (line, event) pairs and stops.
 -- chess.game(event) already owns reading a playing's white/black/result/date/ECO, and an
@@ -25,7 +25,7 @@
 --        LATERAL chess.game(g.event_id) d;
 --
 -- Ranked by the LINE'S OWN FOLD CELL — (line, OUTCOME, Chess_Result) — where
--- witness_count IS how many times the line was played and laplace.eff_mu IS how it fares (white
+-- witness_count IS how many times the line was played and consensus.eff_mu IS how it fares (white
 -- POV). A ranking the fold produced, not an arbitrary LIMIT over an unordered scan.
 --
 -- p_source selects one witness when they disagree: ChessPgn transcribes the PGN's own

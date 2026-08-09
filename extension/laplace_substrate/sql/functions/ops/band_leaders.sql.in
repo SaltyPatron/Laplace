@@ -1,7 +1,8 @@
 -- Per-band leaderboards: the strongest consensus edges in each salience band,
 -- fully labeled — consensus.band_edges(native top-k by mu) with the labels
 -- applied only to the survivors. BEGIN ATOMIC: GH #764.
-CREATE OR REPLACE FUNCTION band_leaders(p_bands int[] DEFAULT ARRAY[1,2,4,5], p_per int DEFAULT 5)
+DROP FUNCTION IF EXISTS laplace.band_leaders(p_bands int[] DEFAULT ARRAY[1,2,4,5], p_per int DEFAULT 5);
+CREATE OR REPLACE FUNCTION ops.band_leaders(p_bands int[] DEFAULT ARRAY[1,2,4,5], p_per int DEFAULT 5)
     RETURNS TABLE(band int, subject_id bytea, subject text, relation text,
                   object_id bytea, object text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE
@@ -20,8 +21,8 @@ BEGIN ATOMIC
       WHERE i.ord = l.ord
     )
     SELECT e.band, e.subject_id, s.txt,
-           laplace.relation_canonical(e.type_id),
+           consensus.relation_canonical(e.type_id),
            e.object_id, o.txt,
-           laplace.eff_mu_display(e.rating, e.rd), e.witness_count
+           consensus.eff_mu_display(e.rating, e.rd), e.witness_count
     FROM raw e JOIN labels s ON s.id=e.subject_id JOIN labels o ON o.id=e.object_id;
 END;

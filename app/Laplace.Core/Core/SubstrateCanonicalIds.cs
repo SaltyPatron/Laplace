@@ -3,7 +3,7 @@ namespace Laplace.Engine.Core;
 /// <summary>
 /// The one place C# composes a substrate canonical key.
 ///
-/// Law (CLAUDE.md): ids are NEVER constructed outside the system — canonical_id(),
+/// Law (CLAUDE.md): ids are NEVER constructed outside the system — realize.canonical_id(),
 /// source_id(), relation_type_id() and consensus_id() resolve through the native hash.
 /// 152 hand-typed canonical-key literals (raw <c>OfCanonical</c> calls) were scattered
 /// across the app, where a single typo mints a DIFFERENT entity and nothing complains:
@@ -11,7 +11,7 @@ namespace Laplace.Engine.Core;
 ///
 /// These builders produce byte-identical keys to the SQL surface. Proven, not assumed:
 /// <c>source_id('WordNetDecomposer')</c> and
-/// <c>canonical_id('substrate/source/WordNetDecomposer/v1')</c> both resolve to
+/// <c>realize.canonical_id('substrate/source/WordNetDecomposer/v1')</c> both resolve to
 /// 4b1ee33be3034910df7629b2948cde35 on the live DB, and SubstrateCanonicalIdsTests
 /// pins that shape.
 ///

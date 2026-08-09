@@ -1,7 +1,7 @@
 -- lexical.senses(word, context[]): the senses of a word, ranked BY CONTEXT.
 --
 -- PRIOR VERSION WAS INERT ON REAL DATA. Its only lane boosted a synset by summing
--- laplace.eff_mu over consensus rows where `subject_id = ANY(p_context)` (or object_id),
+-- consensus.eff_mu over consensus rows where `subject_id = ANY(p_context)` (or object_id),
 -- i.e. it required a DIRECT edge from a context entity to the synset. p_context
 -- carries WORD laplace.entities and words reach synsets through HAS_SENSE -> IS_SENSE_OF,
 -- so on a real corpus that join almost never matches and every boost was 0.
@@ -17,10 +17,10 @@
 -- sense. It is restored below as a fourth lane. Adding lanes is the fix; removing
 -- the one that existed was not.
 --
--- Five lanes now, all in ID SPACE (no realize/laplace.render/label anywhere -- rendering is
+-- Five lanes now, all in ID SPACE (no realize/realize.render/label anywhere -- rendering is
 -- the caller's final step, never a mid-operation string compare):
 --
---   USAGE   the candidate synset OWNS a gloss or example whose word laplace.constituents
+--   USAGE   the candidate synset OWNS a gloss or example whose word realize.constituents
 --           include a context token. Sense-resolution here is by OWNERSHIP, not
 --           per-token tagging: a gloss/example hangs off exactly one synset, so a
 --           word occurring inside it is already sense-resolved on the owning side.
@@ -36,7 +36,7 @@
 --           bands -- the synset-to-synset comparison the old version was reaching
 --           for and getting wrong.
 --
--- Every lane is weighted by the laplace.eff_mu of the edges carrying it: trust enters
+-- Every lane is weighted by the consensus.eff_mu of the edges carrying it: trust enters
 -- through the rating math, never through an operator-chosen constant. No floors,
 -- no caps, no top-k -- ORDER BY only, LIMIT is the caller's.
 --
@@ -79,7 +79,7 @@ CREATE OR REPLACE FUNCTION lexical.senses(p_word bytea, p_context bytea[])
         WHERE s.word_id = ANY(lexical.lexical_peers(p_word))
     ),
     -- USAGE: candidate owns a sentence (gloss band 1 / example band 7) whose
-    -- word-tier laplace.constituents include a context token.
+    -- word-tier realize.constituents include a context token.
     own_sent AS (
         SELECT DISTINCT c.subject_id AS sid, c.object_id AS gid,
                @extschema@.eff_mu(c.rating, c.rd) AS w
@@ -132,12 +132,12 @@ CREATE OR REPLACE FUNCTION lexical.senses(p_word bytea, p_context bytea[])
     -- because WordNet attached HAS_DOMAIN_TOPIC→chess; the USAGE lane also
     -- catches "(chess) the least powerful piece" in the gloss, but domain is
     -- the explicit discourse prior and works when the gloss spelling differs
-    -- from the prompt token. Weighted by the domain edge's laplace.eff_mu.
+    -- from the prompt token. Weighted by the domain edge's consensus.eff_mu.
     lane_domain AS (
         SELECT c.subject_id AS sid, sum(@extschema@.eff_mu(c.rating, c.rd)) AS boost
         FROM @extschema@.consensus c
         WHERE c.subject_id IN (SELECT synset_id FROM cand)
-          AND c.type_id = laplace.relation_type_resolve('HAS_DOMAIN_TOPIC')
+          AND c.type_id = consensus.relation_type_resolve('HAS_DOMAIN_TOPIC')
           AND (c.object_id IN (SELECT id FROM ctx)
                OR c.object_id IN (SELECT sid FROM ctx_syn))
         GROUP BY c.subject_id

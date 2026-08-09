@@ -7,7 +7,7 @@ CREATE OR REPLACE FUNCTION converse.correlate(p_words text[])
     -- content, but one surface string can cover many ids (homographs), so the
     -- old GROUP BY realize.label(type)/realize.label(object) both conflated distinct targets
     -- that happen to share a surface AND rendered a label for every consensus
-    -- edge of every input word. Aggregate per (type_id, object_id), then laplace.render
+    -- edge of every input word. Aggregate per (type_id, object_id), then realize.render
     -- exactly once per output row at the boundary.
     WITH v AS (SELECT w AS word, laplace.word_id(w) AS id
                FROM unnest(p_words) AS w WHERE laplace.word_id(w) IS NOT NULL),
@@ -15,7 +15,7 @@ CREATE OR REPLACE FUNCTION converse.correlate(p_words text[])
         SELECT c.type_id, c.object_id,
                array_agg(DISTINCT v.word ORDER BY v.word) AS words,
                count(DISTINCT v.word) AS nwords,
-               (max(laplace.eff_mu(c.rating, c.rd)))::float8 / 1e9 AS strength
+               (max(consensus.eff_mu(c.rating, c.rd)))::float8 / 1e9 AS strength
         FROM v JOIN laplace.consensus c ON c.subject_id = v.id
         GROUP BY c.type_id, c.object_id),
     ids AS MATERIALIZED (
@@ -27,7 +27,7 @@ CREATE OR REPLACE FUNCTION converse.correlate(p_words text[])
         LATERAL unnest(realize.label_batch(ids.a)) WITH ORDINALITY l(txt,ord)
       WHERE i.ord=l.ord
     )
-    SELECT COALESCE(NULLIF(laplace.relation_canonical(g.type_id), ''), rt.txt) AS relation,
+    SELECT COALESCE(NULLIF(consensus.relation_canonical(g.type_id), ''), rt.txt) AS relation,
            ro.txt AS target, g.words, g.strength
     FROM g JOIN labels rt ON rt.id=g.type_id JOIN labels ro ON ro.id=g.object_id
     ORDER BY g.nwords DESC, g.strength DESC, 1

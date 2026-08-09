@@ -1,12 +1,12 @@
 -- COMPLETES_TO successors as a sampling floor for the dry generator. Thin
 -- wrapper over consensus.edges_raw() — the one consensus scan — with this lane's axes
--- pinned: outbound, one relation type, unrefuted, laplace.eff_mu order. The weight
+-- pinned: outbound, one relation type, unrefuted, consensus.eff_mu order. The weight
 -- projection is this caller's own need and stays here.
 --
 -- The hand-rolled scan this replaced was edges_raw's 'out' arm verbatim
--- (subject equality, type equality, object_id IS NOT NULL, NOT laplace.refuted,
--- laplace.eff_mu DESC, LIMIT) — one axis set out of the six the core already takes as
--- arguments. Ordering is unchanged except that edges_raw breaks laplace.eff_mu ties on
+-- (subject equality, type equality, object_id IS NOT NULL, NOT consensus.refuted,
+-- consensus.eff_mu DESC, LIMIT) — one axis set out of the six the core already takes as
+-- arguments. Ordering is unchanged except that edges_raw breaks consensus.eff_mu ties on
 -- neighbour_id, so the cap is now deterministic instead of plan-dependent.
 --
 -- No SET search_path: it blocks inlining, which is what makes the wrapper free

@@ -6,14 +6,14 @@ CREATE OR REPLACE FUNCTION ops.entity_count(p_type bytea)
     RETURNS bigint
     LANGUAGE sql STABLE
 BEGIN ATOMIC
-    -- Scalar counterpart to entity_type_counts(). That function aggregates every
+    -- Scalar counterpart to ops.entity_type_counts(). That function aggregates every
     -- type in the substrate; a caller that wants one type's count should not pay
     -- a full GROUP BY over entities to read a single row. Here p_type arrives as
     -- a plain equality the planner can drive from the type_id index.
     --
     -- NULL p_type counts nothing, not everything: `type_id = NULL` matches no
     -- rows, and an unspecified type is not a wildcard. Callers that want the
-    -- whole-table count already have substrate_counts().
+    -- whole-table count already have ops.substrate_counts().
     SELECT count(*) FROM laplace.entities e WHERE e.type_id = p_type;
 END;
 

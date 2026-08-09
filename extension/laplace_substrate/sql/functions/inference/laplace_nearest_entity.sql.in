@@ -11,9 +11,9 @@
 --   * tier 0 coords are placed by super_fibonacci directly ON the unit sphere.
 --     Every codepoint sits at radius exactly 1, and they are the only inhabitants
 --     of that shell.
---   * tier > 0 coord is math4d_centroid of the laplace.constituents — a weighted mean of
+--   * tier > 0 coord is math4d_centroid of the realize.constituents — a weighted mean of
 --     unit vectors, which is not a unit vector. Composed laplace.entities are interior,
---     and how far interior tracks how DISPERSED their laplace.constituents are, not how
+--     and how far interior tracks how DISPERSED their realize.constituents are, not how
 --     deep the tier is.
 --
 -- So radius reveals dispersion, not depth: the composed tiers overlap each other
@@ -38,7 +38,7 @@
 -- radius exactly 1 (super_fibonacci places codepoints on the sphere) while every
 -- composed coord is a centroid and therefore interior. Across mixed radii, chord
 -- order is a blend of angle and radius, and the radius half is dispersion of
--- laplace.constituents rather than anything semantic.
+-- realize.constituents rather than anything semantic.
 --
 -- So this now does what explore_anchor_neighbors already does and documents:
 -- over-fetch on the index-ordered <<->> (GiST-eligible, cheap, correct as a

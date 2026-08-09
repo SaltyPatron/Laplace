@@ -26,7 +26,7 @@
 --      natively and batched by lexical.word_case_variants(src/lexical_case.c). Calling
 --      lower() throws those attested edges away and re-derives a worse answer in
 --      string space -- the identity law inverted, at a per-row cost.
---   2. TWO renders per candidate (realize of the synset, laplace.render_text of the token)
+--   2. TWO renders per candidate (realize of the synset, realize.render_text of the token)
 --      inside the ranking, i.e. rendering before the operation is finished.
 --   3. A string EQUALITY as the primary sort key, in a substrate whose identity law
 --      is language-agnostic: a synset whose label differs from the surface

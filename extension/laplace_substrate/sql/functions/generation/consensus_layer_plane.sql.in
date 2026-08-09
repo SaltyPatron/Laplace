@@ -16,13 +16,13 @@ CREATE OR REPLACE FUNCTION generation.consensus_layer_plane(
          rk AS (
              SELECT d.type_id, r.rank
              FROM (SELECT DISTINCT type_id FROM edges) d
-             CROSS JOIN LATERAL laplace.relation_rank_resolved(d.type_id) AS r(rank)
+             CROSS JOIN LATERAL consensus.relation_rank_resolved(d.type_id) AS r(rank)
              WHERE r.rank IS NOT NULL AND r.rank BETWEEN p_rank_lo AND p_rank_hi
          ),
          -- P5 Glicko-complete weight (doc 14 M5): signed, rd-discounted,
-         -- witness-saturated. laplace.walk_edge_weight IS the law; kappa resolved once
+         -- witness-saturated. consensus.walk_edge_weight IS the law; kappa resolved once
          -- rather than per row.
-         kappa(k) AS (SELECT laplace.foundry_rd_kappa()),
+         kappa(k) AS (SELECT consensus.foundry_rd_kappa()),
          ranked AS (
              SELECT e.subject_id, e.object_id,
                     consensus.walk_edge_weight(e.rating, e.rd, e.witness_count,

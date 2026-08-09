@@ -54,9 +54,9 @@ ensure_edge_plan(void)
 
 /*
  * walk_branches' batched edge fetch -- the native-C-does-the-heavy-lifting
- * replacement for calling consensus_walk_edges() once per frontier node.
- * consensus_walk_edges() did real per-call work in SQL: fetch + compute an
- * unindexed `relation_rank_resolved(type_id) * eff_mu(rating,rd)` sort key
+ * replacement for calling consensus.walk_edges() once per frontier node.
+ * consensus.walk_edges() did real per-call work in SQL: fetch + compute an
+ * unindexed `consensus.relation_rank_resolved(type_id) * consensus.eff_mu(rating,rd)` sort key
  * per candidate row + ORDER BY + LIMIT, AND an O(path length) `= ANY(exclude)`
  * scan per row against a path array that grows every level. Multiplied by an
  * unbounded, non-deduplicated frontier (see below), a depth=6/breadth=12 walk
@@ -289,7 +289,7 @@ ensure_ordinal_continuity_plan(void)
  * trajectory selected by the object's own (fast, single-key) containment
  * probe; 0.0 otherwise (no such trajectory, that trajectory doesn't also
  * carry the subject, or coordinate/mantissa data didn't decode -- never an
- * error, this is an additive bonus only). Trades a little recall (a
+ * error, this is an additive bonus only). Trades a little converse.recall(a
  * DIFFERENT trajectory might contain both when the object's first match
  * doesn't) for guaranteed single-key-probe performance.
  */
@@ -593,7 +593,7 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
 
                     /*
                      * 3Ca: refutation is no longer a hard drop -- signed
-                     * scoring (below) naturally pushes refuted edges (eff_mu
+                     * scoring (below) naturally pushes refuted consensus.edges(eff_mu
                      * below neutral) to a negative score, so they qsort last
                      * but still appear in output (doc 15 I2: confirming a
                      * response = confirming the edges it walked; refuting
@@ -870,7 +870,7 @@ pg_laplace_walk_strongest(PG_FUNCTION_ARGS)
 #define VFLAG_ATOM_MASK  ((int64) 0x1FFFFF)
 
 /*
- * ONE PREPARED LEVEL QUERY, WALKED IN C (was: laplace.constituents_closure).
+ * ONE PREPARED LEVEL QUERY, WALKED IN C (was: realize.constituents_closure).
  *
  * The closure used to be a SQL function wrapping a WITH RECURSIVE, called once per
  * render. MEASURED 2026-08-07 on the foundation seed: 59 ms to return THREE rows,
@@ -902,7 +902,7 @@ pg_laplace_walk_strongest(PG_FUNCTION_ARGS)
  */
 static const char *CLOSURE_QUERY =
     "SELECT parent_id, child_id, run_length, flags "
-    "FROM laplace.constituents_closure($1, $2) "
+    "FROM realize.constituents_closure($1, $2) "
     "ORDER BY parent_id, ordinal";
 
 static SPIPlanPtr closure_plan = NULL;

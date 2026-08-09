@@ -96,7 +96,7 @@ internal sealed partial class SubstrateClient
             var multiSource = await TryReadMultiSourceCountAsync(conn, budgetSeconds: 5, ct);
             var topRelations = await ReadTopRelationsAsync(conn, 20, ct);
 
-            // source_counts() is a full GROUP BY over attestations plus a
+            // ops.source_counts() is a full GROUP BY over attestations plus a
             // count(DISTINCT) join — unbounded at 135M rows. Attempt within a small
             // budget; on timeout the stage grid still renders from the static witness
             // catalog with zero live counts (degraded, not dead).
@@ -121,7 +121,7 @@ internal sealed partial class SubstrateClient
             }
             catch (Exception ex) when (IsStatementTimeout(ex) && !ct.IsCancellationRequested)
             {
-                // Exact source_counts() blew its budget (measured ~15s at 6.3M
+                // Exact ops.source_counts() blew its budget (measured ~15s at 6.3M
                 // rows and growing). Fall back to the approx catalog — name, id
                 // and a partition-stats evidence estimate in ~200ms. Content
                 // count is unknown there and stays null: an estimate labelled,

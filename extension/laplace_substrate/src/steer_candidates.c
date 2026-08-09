@@ -1,7 +1,7 @@
 /*
  * steer_candidates.c — S7 STEER (docs/specs/36 §3).
  *
- *   steer_candidates(candidates bytea[], frontier bytea[], kappa float8)
+ *   generation.steer_candidates(candidates bytea[], frontier bytea[], kappa float8)
  *     -> TABLE(candidate bytea, steer float8, edges bigint)
  *
  * THE STAGE THE SPEC SAYS NOBODY WROTE. S6 proposes continuations from sequence
@@ -25,7 +25,7 @@
  * SCORING IS walk_score.h, SHARED WITH walk_branches. S7 must not invent a second
  * ranking: if steering used a different weight than retrieval, the two halves of
  * the forward pass would disagree about what the graph says, which is the exact
- * condition that lets generate() and chat() answer differently today.
+ * condition that lets generate() and converse.chat() answer differently today.
  *
  * ZERO IS NOT ABSENCE. A candidate with no consensus edge to the frontier returns
  * steer 0.0 with edges 0 — unattested, distinct from a candidate whose edges sum

@@ -7,12 +7,12 @@
  * matters):
  *
  *   COALESCE(
- *     _realize_has_name(id, lang),      -- arm 1: first NON-EMPTY render
- *     _realize_synset_lemma(id, lang),  -- arm 2: first NON-EMPTY render
- *     NULLIF(render_text(id, 24), ''),  -- arm 3: self render
- *     _realize_translation(id, lang),   -- arm 4: first NON-EMPTY render
- *     _realize_canonical(id),           -- arm 5: first row, text AS-IS
- *     _realize_defines(id))             -- arm 6: TOP-mu row, render AS-IS
+ *     realize._has_name(id, lang),      -- arm 1: first NON-EMPTY render
+ *     realize._synset_lemma(id, lang),  -- arm 2: first NON-EMPTY render
+ *     NULLIF(realize.render_text(id, 24), ''),  -- arm 3: self render
+ *     realize._translation(id, lang),   -- arm 4: first NON-EMPTY render
+ *     realize._canonical(id),           -- arm 5: first row, text AS-IS
+ *     realize._defines(id))             -- arm 6: TOP-mu row, render AS-IS
  *
  * Parity notes (deliberate, match the scalar helpers byte-for-byte):
  *   - arms 1/2/4 filter candidates to non-empty renders BEFORE their LIMIT 1,
@@ -28,10 +28,10 @@
  *     never matches), identical to the scalar helpers;
  *   - abstention: unresolvable ids yield SQL NULL, never hex.
  *
- * All candidate rendering funnels through ONE render_text_batch($ids, 24) call
+ * All candidate rendering funnels through ONE realize.render_text_batch($ids, 24) call
  * (generate_walk.c) — one shared constituent closure + memo across every
  * candidate of every arm plus the inputs themselves. Depth 24 matches every
- * render_text(x, 24) in the scalar ladder.
+ * realize.render_text(x, 24) in the scalar ladder.
  */
 #include "postgres.h"
 
@@ -63,7 +63,7 @@ static const char *Q_HAS_NAME =
     "SELECT nm.subject_id, nm.object_id,"
     "       (lang.object_id IS NOT NULL) AS lp,"
     "       (nm.type_id = laplace.relation_type_id('HAS_NAME')) AS prim,"
-    "       laplace.eff_mu(nm.rating, nm.rd) AS mu"
+    "       consensus.eff_mu(nm.rating, nm.rd) AS mu"
     " FROM laplace.v_consensus_unrefuted nm"
     " LEFT JOIN laplace.consensus lang ON lang.subject_id = nm.object_id"
     "   AND lang.type_id = laplace.relation_type_id('HAS_LANGUAGE')"
@@ -76,7 +76,7 @@ static const char *Q_HAS_NAME =
 static const char *Q_SYNSET_LEMMA =
     "SELECT io.object_id, hs.subject_id,"
     "       (lang.object_id IS NOT NULL) AS lp,"
-    "       laplace.eff_mu(hs.rating, hs.rd) AS mu"
+    "       consensus.eff_mu(hs.rating, hs.rd) AS mu"
     " FROM laplace.v_consensus_unrefuted io"
     " JOIN laplace.consensus hs ON hs.object_id = io.subject_id"
     "   AND hs.type_id = laplace.relation_type_id('HAS_SENSE')"
@@ -90,7 +90,7 @@ static const char *Q_SYNSET_LEMMA =
 static const char *Q_TRANSLATION =
     "SELECT m.subject_id, m.object_id,"
     "       (lang.object_id IS NOT NULL) AS lp,"
-    "       laplace.eff_mu(m.rating, m.rd) AS mu"
+    "       consensus.eff_mu(m.rating, m.rd) AS mu"
     " FROM laplace.v_consensus_unrefuted m"
     " LEFT JOIN laplace.consensus lang ON lang.subject_id = m.object_id"
     "   AND lang.type_id = laplace.relation_type_id('HAS_LANGUAGE')"
@@ -107,14 +107,14 @@ static const char *Q_CANONICAL =
 
 static const char *Q_DEFINES =
     "SELECT g.subject_id, g.object_id,"
-    "       laplace.eff_mu(g.rating, g.rd) AS mu"
+    "       consensus.eff_mu(g.rating, g.rd) AS mu"
     " FROM laplace.v_consensus_unrefuted g"
     " WHERE g.subject_id = ANY($1)"
     "   AND g.type_id = laplace.relation_type_id('HAS_DEFINITION')"
     " ORDER BY g.subject_id, mu DESC";
 
 static const char *Q_RENDER =
-    "SELECT laplace.render_text_batch($1, 24)";
+    "SELECT realize.render_text_batch($1, 24)";
 
 static SPIPlanPtr ensure_plan(SPIPlanPtr *slot, const char *sql,
                               int nargs, const Oid *argtypes);

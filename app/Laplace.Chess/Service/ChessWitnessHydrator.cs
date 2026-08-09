@@ -338,7 +338,7 @@ internal static class ChessWitnessHydrator
 
         // Result and SetUp are single surfaces — render_text_batch round-trips them.
         // The MOVETEXT is a composition over ordered tokens and does NOT round-trip
-        // through render (see RebuildMovetextsAsync), so it is rebuilt from its
+        // through realize.render(see RebuildMovetextsAsync), so it is rebuilt from its
         // trajectory instead.
         var contentIds = new List<Hash128>();
         var movetextIds = new List<Hash128>();
@@ -466,10 +466,10 @@ internal static class ChessWitnessHydrator
     /// <summary>
     /// Rebuild a movetext from its ORDERED TOKEN IDS, space-joined.
     ///
-    /// WHY render() CANNOT BE USED HERE. RecordMovetext composes the movetext as a Merkle
+    /// WHY realize.render() CANNOT BE USED HERE. RecordMovetext composes the movetext as a Merkle
     /// over its ordered ply-token ids — "1." "d4" "d5" "2." … — with the trajectory
     /// carrying the sequence. That record is lossless and the tokens are all present and
-    /// in order. But <c>render()</c> concatenates a composed document's constituents with
+    /// in order. But <c>realize.render()</c> concatenates a composed document's constituents with
     /// NO SEPARATOR, so a movetext reads back as
     ///
     ///     1.d4d52.c4dxc43.Nf3Nf64.e3e65.Bxc4c5...

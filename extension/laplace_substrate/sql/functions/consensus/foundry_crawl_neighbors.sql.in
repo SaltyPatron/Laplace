@@ -1,5 +1,5 @@
 -- Outbound neighbours with their tier, for the foundry vocab crawl. Thin wrapper
--- over consensus.edges_raw(); pins outbound, laplace.eff_mu order and laplace.refuted edges INCLUDED — the
+-- over consensus.edges_raw(); pins outbound, consensus.eff_mu order and consensus.refuted edges INCLUDED — the
 -- axes this lane has always used. The tier join is this caller's own need, so it
 -- stays here rather than widening the core.
 DROP FUNCTION IF EXISTS laplace.foundry_crawl_neighbors(bytea, int, bytea[]);

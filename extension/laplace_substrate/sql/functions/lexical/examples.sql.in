@@ -4,18 +4,18 @@ CREATE OR REPLACE FUNCTION lexical.examples(p_word bytea, p_limit int DEFAULT 5)
     LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$
     WITH picked AS MATERIALIZED (
         SELECT g.object_id AS object_id,
-               laplace.eff_mu_display(g.rating, g.rd) AS eff_mu,
+               consensus.eff_mu_display(g.rating, g.rd) AS eff_mu,
                g.witness_count AS witnesses,
                sn.eff_mu AS sense_rank
         FROM lexical.senses(p_word) sn
         JOIN laplace.consensus g ON g.subject_id = sn.synset_id
                         AND g.type_id = laplace.relation_type_id('HAS_EXAMPLE')
-        ORDER BY sn.eff_mu + laplace.eff_mu_display(g.rating, g.rd) DESC
+        ORDER BY sn.eff_mu + consensus.eff_mu_display(g.rating, g.rd) DESC
         LIMIT p_limit
     ), numbered AS MATERIALIZED (
       SELECT x.*, row_number() OVER (ORDER BY x.sense_rank+x.eff_mu DESC, x.object_id) AS rn FROM picked x
     ), batch AS MATERIALIZED (
-      SELECT laplace.render_text_batch(array_agg(object_id ORDER BY rn), 24) AS txt FROM numbered
+      SELECT realize.render_text_batch(array_agg(object_id ORDER BY rn), 24) AS txt FROM numbered
     )
     SELECT b.txt[x.rn], x.eff_mu, x.witnesses FROM numbered x CROSS JOIN batch b ORDER BY x.rn
 $$;

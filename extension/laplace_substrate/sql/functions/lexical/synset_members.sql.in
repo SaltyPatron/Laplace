@@ -9,7 +9,7 @@ CREATE OR REPLACE FUNCTION lexical.synset_members(p_word bytea)
         -- instance edge. Bare row presence also excluded synsets whose
         -- IS_INSTANCE_OF was witnessed and REFUTED -- the fold said "not an
         -- instance" and the filter read that as "is an instance". consensus has no
-        -- outcome column; refutation is a non-positive laplace.eff_mu, the same test the
+        -- outcome column; refutation is a non-positive consensus.eff_mu, the same test the
         -- walk uses to dead-end an edge. An absent edge still excludes nothing.
         WHERE NOT EXISTS (
             SELECT 1 FROM laplace.consensus i

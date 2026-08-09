@@ -20,8 +20,8 @@ CREATE OR REPLACE FUNCTION generation.walk_text(
                array_agg(sep_entity ORDER BY step) AS separators
         FROM walked
     ), txt AS MATERIALIZED (
-        SELECT laplace.render_text_batch(entities, 64) AS entities,
-               laplace.render_text_batch(separators, 8) AS separators
+        SELECT realize.render_text_batch(entities, 64) AS entities,
+               realize.render_text_batch(separators, 8) AS separators
         FROM ids
     )
     SELECT w.step, t.entities[rn] || COALESCE(t.separators[rn], ''), w.stride_used

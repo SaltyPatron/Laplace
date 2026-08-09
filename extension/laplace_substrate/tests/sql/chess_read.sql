@@ -603,7 +603,7 @@ BEGIN
     ON CONFLICT DO NOTHING;
 
     -- One MOVE cell per position (the folded-outcome side of the join) and one
-    -- think-class cell naming its class. eff_mu(rushed) = 1600e9 - 2*50e9 = 1500e9,
+    -- think-class cell naming its class. consensus.eff_mu(rushed) = 1600e9 - 2*50e9 = 1500e9,
     -- which must read back display-scale (1500.000), never raw fp1e9.
     INSERT INTO laplace.consensus
         (id, subject_id, type_id, object_id, rating, rd, volatility, witness_count, last_observed_at)

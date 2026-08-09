@@ -31,7 +31,7 @@ BEGIN
     -- 12/13/14, and composed to word grain natively and batched by
     -- lexical.word_case_variants(src/lexical_case.c), which also gates on entity_exists.
     --
-    -- This previously read `laplace.word_id(lower(laplace.render(vv.id)))`: laplace.render the id back to
+    -- This previously read `laplace.word_id(lower(realize.render(vv.id)))`: realize.render the id back to
     -- text, case-fold the text, then MINT AN ID FROM THE FOLDED STRING. Not a
     -- lookup -- a fabrication. It leaves hash space mid-operation, discards the
     -- attested edges, and laplace.word_id() mints unconditionally, so an unwitnessed fold
@@ -42,7 +42,7 @@ BEGIN
     --
     -- Any attested variant is admissible, not just the lowercase one: the
     -- asymmetry runs both ways ('all' -> 'All' when only the title form is
-    -- witnessed). Ties break on laplace.eff_mu then id, so the choice stays deterministic.
+    -- witnessed). Ties break on consensus.eff_mu then id, so the choice stays deterministic.
     missing AS (
         SELECT vv.id, unnest(lexical.word_case_variants(vv.id)) AS fid
         FROM v vv

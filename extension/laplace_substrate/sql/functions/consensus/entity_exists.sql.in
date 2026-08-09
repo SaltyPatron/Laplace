@@ -5,7 +5,7 @@
 --
 -- Dropping STRICT is safe here because the body is already null-safe and gives the
 -- same answer: `e.id = NULL` matches nothing, EXISTS over that is false, and
--- laplace.codepoint_for_id(NULL) is NULL, so a NULL argument returns false either way --
+-- realize.codepoint_for_id(NULL) is NULL, so a NULL argument returns false either way --
 -- where STRICT short-circuited to NULL. That is a change from NULL to false on a
 -- NULL input, and it is the correct one: "does this id exist" for a non-existent id
 -- is false. No caller passes NULL expecting to distinguish those; the presence
@@ -16,7 +16,7 @@ CREATE OR REPLACE FUNCTION consensus.entity_exists(p_id bytea)
     RETURNS boolean
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-    -- A valid tier-0 codepoint is real via the perfcache alone (see laplace.codepoint_for_id());
+    -- A valid tier-0 codepoint is real via the perfcache alone (see realize.codepoint_for_id());
     -- it must resolve true here even before/without its own laplace.entities row being written,
     -- so callers can't mistake "orphaned tier-0" for "genuinely missing".
     SELECT EXISTS (SELECT 1 FROM laplace.entities e WHERE e.id = p_id)

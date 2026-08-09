@@ -6,7 +6,7 @@
  * "^tell\s+me\s+about", and so on. It was the one place where a substrate whose
  * identity law is content-addressed and language-agnostic could only be
  * questioned in English. Callers now pass the intent structurally — see
- * laplace.recall_intent() and laplace.query_shapes().
+ * converse.recall_intent() and converse.query_shapes().
  */
 
 #include "postgres.h"
@@ -59,7 +59,7 @@ lower_dup(const char *s)
                                                 CStringGetTextDatum(s)));
 }
 
-/* The read shapes recall_intent() dispatches. Kept in one place so the C
+/* The read shapes converse.recall_intent() dispatches. Kept in one place so the C
  * dispatch, the SQL catalog (query_shapes) and any UI stay in parity. */
 static const char *const route_intents[] = {
     "define",                   /* witnessed glosses, sense-disambiguated */

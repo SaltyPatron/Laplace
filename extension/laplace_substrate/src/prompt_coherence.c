@@ -1,7 +1,7 @@
 /*
  * prompt_coherence — joint orientation + sense resolution, natively.
  *
- * WHY THIS IS C. The SQL form of this read hung chat() for every prompt (>280s,
+ * WHY THIS IS C. The SQL form of this read hung converse.chat() for every prompt (>280s,
  * measured 2026-07-27 after the UD ingest) and was reverted off the hot path.
  * It was SQL doing what the substrate law puts in C: set-returning functions as
  * table sources (one lexical.senses() per token, one bubble_up per candidate relation
@@ -295,7 +295,7 @@ pc_scan_edges(HTAB *syn_h, HTAB *type_h, PcCand *cands, ArrayType *syn_arr,
  * derived from the composition hierarchy rather than from a stop-word list, so
  * it carries across languages and modalities by construction.
  *
- * One batched call to the installed entity_container_degree() operation — the
+ * One batched call to the installed structural.entity_container_degree() operation — the
  * same body diagnostics use, never a second copy of the read. Bounded by its
  * p_cap, so cost does not scale with how ubiquitous the floor is.
  *
