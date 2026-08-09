@@ -1,4 +1,4 @@
-CREATE OR REPLACE FUNCTION render(p_id bytea) RETURNS text
+CREATE OR REPLACE FUNCTION realize.render(p_id bytea) RETURNS text
     LANGUAGE sql STABLE
     AS $$
     SELECT COALESCE(
@@ -9,7 +9,7 @@ CREATE OR REPLACE FUNCTION render(p_id bytea) RETURNS text
         -- NOT gate this on an entities lookup -- that would defeat the whole point
         -- of having a perfcache and would misrender orphaned-but-valid tier-0 ids
         -- via the slower fallbacks below (or worse, as opaque hex).
-        chr(@extschema@.codepoint_for_id(p_id)),
+        chr(realize.codepoint_for_id(p_id)),
 
         -- Name-edge resolution goes through the one shared primitive rather than a
         -- private HAS_NAME_ALIAS-only argmax: realize.resolve_name() consults HAS_NAME
@@ -18,6 +18,12 @@ CREATE OR REPLACE FUNCTION render(p_id bytea) RETURNS text
         -- below run. It is reached only after the canonical-name and codepoint
         -- fast paths above, so tier-0 glyph reconstruction is unchanged.
         realize.resolve_name(p_id),
-        laplace.render_text(p_id),
+        realize.render_text(p_id),
         encode(p_id, 'hex') || '…')
+$$;
+
+
+CREATE OR REPLACE FUNCTION laplace.render(p_id bytea) RETURNS text
+    LANGUAGE sql STABLE AS $$
+    SELECT realize.render(p_id)
 $$;

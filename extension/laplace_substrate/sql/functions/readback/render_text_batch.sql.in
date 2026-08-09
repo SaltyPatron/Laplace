@@ -1,5 +1,9 @@
-DROP FUNCTION IF EXISTS laplace.render_text_batch(bytea[], integer);
 CREATE OR REPLACE FUNCTION realize.render_text_batch(p_ids bytea[], p_max_depth integer DEFAULT 8)
+    RETURNS text[]
+    AS 'MODULE_PATHNAME', 'pg_laplace_render_text_batch'
+    LANGUAGE C STABLE;
+
+CREATE OR REPLACE FUNCTION laplace.render_text_batch(p_ids bytea[], p_max_depth integer DEFAULT 8)
     RETURNS text[]
     AS 'MODULE_PATHNAME', 'pg_laplace_render_text_batch'
     LANGUAGE C STABLE;
