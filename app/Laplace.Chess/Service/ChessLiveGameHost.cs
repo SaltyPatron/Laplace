@@ -40,6 +40,11 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
         _turnHost = turnHost;
     }
 
+    // The live runtime owns the one chess datasource/write spine. ChessEngineService
+    // borrows these components instead of creating and bootstrapping a second writer.
+    internal ConsensusAccumulatingWriter Writer => _writer;
+    internal SubstrateTurnHost TurnHost => _turnHost;
+
     // connString overrides the installed default — REQUIRED for tests: the default resolves to
     // the production substrate, and a per-ply recorder pointed there writes real consensus rows.
     public static async Task<ChessLiveGameHost> CreateAsync(

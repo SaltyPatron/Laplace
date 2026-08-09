@@ -22,16 +22,17 @@ internal static class AppComposition
         services.AddHostedService<CatalogPrewarmService>();
 
         const double chessWeight = 0.5d;
-        services.AddSingleton(_ =>
-            ChessLiveGameHost.CreateAsync(chessWeight).ConfigureAwait(false).GetAwaiter().GetResult());
+        services.AddSingleton(sp => new ChessRuntimeService(
+            sp.GetRequiredService<ILogger<ChessRuntimeService>>(), chessWeight));
+        services.AddHostedService(sp => sp.GetRequiredService<ChessRuntimeService>());
         services.AddSingleton(sp => new ChessEngineService(
-            LaplaceInstall.PostgresConnectionString(), chessWeight,
-            sp.GetRequiredService<ChessLiveGameHost>(),
+            chessWeight,
+            sp.GetRequiredService<ChessRuntimeService>().GetAsync,
             sp.GetService<ILoggerFactory>()?.CreateLogger("chess")));
         services.AddSingleton(sp => new ChessLabService(
             sp.GetService<ILoggerFactory>()?.CreateLogger("chess-lab")));
         services.AddSingleton(sp => new LichessConnectivityService(
-            sp.GetRequiredService<ChessLiveGameHost>(),
+            sp.GetRequiredService<ChessRuntimeService>().GetAsync,
             sp.GetService<ILoggerFactory>()?.CreateLogger("lichess")));
 
         services.AddSingleton<IRecipeCompileService, RecipeCompileService>();

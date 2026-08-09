@@ -334,6 +334,24 @@ public sealed class IngestMutexGateTests
     }
 
     [Fact]
+    public void HighwayMaskDeposit_CallerMatchesInstalledSurface()
+    {
+        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
+        var writer = File.ReadAllText(Path.Combine(repoRoot, "app", "Laplace.Substrate", "Crud",
+            "Npgsql", "ConsensusAccumulatingWriter.cs"));
+        var installer = File.ReadAllText(Path.Combine(repoRoot, "extension", "laplace_substrate",
+            "sql", "functions", "highway", "highway_mask_deposit.sql.in"));
+
+        const string installedName = "laplace.highway_mask_deposit";
+        Assert.Contains($"CREATE OR REPLACE FUNCTION {installedName}", installer,
+            StringComparison.Ordinal);
+        Assert.Contains($"SELECT {installedName}($1, $2)", writer,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("consensus.highway_mask_deposit", writer,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void EvidenceVerify_NoNewHandRolledImplementation()
         => AssertRatchet(EvidenceVerify, EvidenceVerifyAllowlist, nameof(EvidenceVerifyAllowlist),
             "New hand-rolled `evidence_count(...) > 0` verify. That test reports "

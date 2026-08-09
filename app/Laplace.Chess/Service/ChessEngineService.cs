@@ -47,14 +47,12 @@ public sealed record ChessPlayMoveResult(
 
 public sealed class ChessEngineService : IAsyncDisposable
 {
-    private readonly string _connString;
-    private readonly double _witnessWeight;
-    private readonly ChessLiveGameHost _liveHost;
+    private readonly Func<CancellationToken, Task<ChessLiveGameHost>> _getLiveHost;
+    private ChessLiveGameHost? _liveHost;
     private readonly ILogger _log;
 
     private readonly SemaphoreSlim _initGate = new(1, 1);
     private NpgsqlDataSource? _ds;
-    private ConsensusAccumulatingWriter? _writer;
     private SubstrateTurnHost? _host;
     private ChessModality? _modality;
     private ModalityEngine<ChessState, ChessMove>? _engine;
@@ -68,31 +66,22 @@ public sealed class ChessEngineService : IAsyncDisposable
     private double _trainTemp = 120d, _trainWeight; private int _trainMaxPlies = 400;
 
     public ChessEngineService(
-        string connString, double witnessWeight, ChessLiveGameHost liveHost, ILogger? log = null)
+        double witnessWeight, ChessLiveGameHost liveHost, ILogger? log = null)
+        : this(witnessWeight, _ => Task.FromResult(liveHost), log)
     {
-        _connString = connString;
-        _witnessWeight = witnessWeight;
         _liveHost = liveHost;
+    }
+
+    public ChessEngineService(
+        double witnessWeight,
+        Func<CancellationToken, Task<ChessLiveGameHost>> getLiveHost, ILogger? log = null)
+    {
+        _getLiveHost = getLiveHost;
         _trainWeight = witnessWeight;
         _log = log ?? NullLogger.Instance;
     }
 
-    /// <summary>
-    /// Chess routes through the shared datasource policy rather than reading the install
-    /// string directly.
-    ///
-    /// Deliberately <see cref="SubstrateAccess.Ingest"/>, which is byte-identical to the
-    /// bare passthrough this replaced: this service builds an
-    /// <see cref="NpgsqlSubstrateWriter"/>/<see cref="ConsensusAccumulatingWriter"/> pair,
-    /// and a bounded serving timeout would abort a long fold mid-game.
-    ///
-    /// KNOWN GAP, not fixed here: the pure-read play paths (ChessLiveGameHost, UciEngine,
-    /// SubstrateStateValuer, SubstrateRootBias, SubstructureFoldBias, LearnedPst) are
-    /// serving paths and should take <see cref="SubstrateAccess.Serving"/> so a slow
-    /// substrate read surfaces as an error instead of stalling a live game. That flip
-    /// changes timeout behaviour under load and needs verifying against a seeded
-    /// substrate, so it is left as its own change.
-    /// </summary>
+    /// <summary>Connection policy used by runtime hosts and standalone chess readers.</summary>
     public static string ResolveConnString()
         => LaplaceDataSource.ConnectionStringFor(SubstrateAccess.Ingest);
 
@@ -110,19 +99,18 @@ public sealed class ChessEngineService : IAsyncDisposable
         try
         {
             if (_engine is not null) return _engine;
+            var liveHost = _liveHost ??= await _getLiveHost(ct);
+            var ds = liveHost.DataSource;
+            // Share the live runtime's datasource/writer, but retain the self-play
+            // provenance context for engine training writes. The live host's turn
+            // host deliberately records under chess/live/game.
+            var host = new SubstrateTurnHost(
+                ds, liveHost.Writer, new NpgsqlSubstrateReader(ds), _trainWeight);
             LoadPerfcache();
-            var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, _connString);
-            var inner = new NpgsqlSubstrateWriter(ds);
-            var writer = new ConsensusAccumulatingWriter(
-                inner, ds, persistEvidence: true);
-            var reader = new NpgsqlSubstrateReader(ds);
-            var host = new SubstrateTurnHost(ds, writer, reader, _witnessWeight);
-            var modality = new ChessModality();
+            var modality = _modality ??= new ChessModality();
             var engine = new ModalityEngine<ChessState, ChessMove>(modality, ChessVocabulary.MoveType, host, host);
-            var canonicalNames = await ChessVocabulary.BootstrapAsync(writer, ct);
-            await NpgsqlCanonicalRegistry.RegisterCanonicalsAsync(ds, canonicalNames, ct);
-            _ds = ds; _writer = writer; _host = host; _modality = modality; _engine = engine;
-            _log.LogInformation("chess engine initialized against {Conn}", LaplaceInstall.RedactConnectionString(_connString));
+            _ds = ds; _host = host; _engine = engine;
+            _log.LogInformation("chess engine initialized from shared live runtime substrate host");
             return engine;
         }
         finally { _initGate.Release(); }
@@ -387,13 +375,14 @@ public sealed class ChessEngineService : IAsyncDisposable
         }
     }
 
-    public ChessPlayStart StartPlaySession(
+    public async Task<ChessPlayStart> StartPlaySessionAsync(
         bool recordToSubstrate = true, IReadOnlyList<string>? moves = null,
-        string tenantId = "public", string? userId = null)
+        string tenantId = "public", string? userId = null, CancellationToken ct = default)
     {
-        EnsureModality();
-        var id = _liveHost.StartPlaySession(recordToSubstrate, tenantId: tenantId, userId: userId);
-        var session = _liveHost.GetPlaySession(id)
+        await EngineAsync(ct);
+        var liveHost = _liveHost!;
+        var id = liveHost.StartPlaySession(recordToSubstrate, tenantId: tenantId, userId: userId);
+        var session = liveHost.GetPlaySession(id)
             ?? throw new InvalidOperationException("play session missing after start");
 
         var state = _modality!.Initial();
@@ -415,14 +404,6 @@ public sealed class ChessEngineService : IAsyncDisposable
             Convert.ToHexString(session.EventId.ToBytes()).ToLowerInvariant());
     }
 
-    private void EnsureModality()
-    {
-        // EngineAsync loads modality; start endpoints are sync and may run before first await.
-        if (_modality is not null) return;
-        LoadPerfcache();
-        _modality = new ChessModality();
-    }
-
     private static ChessMove? FindLegalUci(ChessState state, string uci)
     {
         foreach (var m in MoveGen.Legal(state.Board))
@@ -434,7 +415,7 @@ public sealed class ChessEngineService : IAsyncDisposable
         Guid sessionId, string fen, string uci, CancellationToken ct = default)
     {
         await EngineAsync(ct);
-        if (_liveHost.GetPlaySession(sessionId) is not { } session)
+        if (_liveHost!.GetPlaySession(sessionId) is not { } session)
             return new ChessPlayMoveResult(fen, false, "session expired", Legal: false, Ply: 0);
 
         var state = session.State ?? _modality!.FromFen(fen);
@@ -469,7 +450,7 @@ public sealed class ChessEngineService : IAsyncDisposable
         Guid sessionId, string fen, int depth = 4, bool substrate = true, CancellationToken ct = default)
     {
         await EngineAsync(ct);
-        if (_liveHost.GetPlaySession(sessionId) is not { } session)
+        if (_liveHost!.GetPlaySession(sessionId) is not { } session)
             return new ChessBestMove(null, fen, 0, false, false, "session expired");
 
         var state = session.State ?? _modality!.FromFen(fen);
@@ -510,9 +491,12 @@ public sealed class ChessEngineService : IAsyncDisposable
             Pv: pv, Motifs: motifs);
     }
 
-    public Task FinishPlaySessionAsync(
+    public async Task FinishPlaySessionAsync(
         Guid sessionId, string status, bool adjudicated = false, CancellationToken ct = default)
-        => _liveHost.FinishPlaySessionAsync(sessionId, ParseTerminalStatus(status), adjudicated, ct);
+    {
+        var liveHost = _liveHost ??= await _getLiveHost(ct);
+        await liveHost.FinishPlaySessionAsync(sessionId, ParseTerminalStatus(status), adjudicated, ct);
+    }
 
     private static GameOutcome ParseTerminalStatus(string status) => status switch
     {
@@ -629,8 +613,6 @@ public sealed class ChessEngineService : IAsyncDisposable
     {
         StopTraining();
         if (_trainTask is not null) { try { await _trainTask; } catch { } }
-        if (_writer is not null) await _writer.DisposeAsync();
-        if (_ds is not null) await _ds.DisposeAsync();
         _initGate.Dispose();
     }
 }

@@ -13,7 +13,8 @@ public sealed class LichessConnectivityService
 {
     private const int MaxLogLines = 64;
     private const int MaxChatLines = 32;
-    private readonly ChessLiveGameHost _host;
+    private readonly Func<CancellationToken, Task<ChessLiveGameHost>> _getHost;
+    private ChessLiveGameHost? _host;
     private readonly ILogger _log;
     private readonly object _gate = new();
     private readonly ConcurrentQueue<string> _recentLog = new();
@@ -29,8 +30,15 @@ public sealed class LichessConnectivityService
     private long _gamesRecorded;
 
     public LichessConnectivityService(ChessLiveGameHost host, ILogger? log = null)
+        : this(_ => Task.FromResult(host), log)
     {
         _host = host;
+    }
+
+    public LichessConnectivityService(
+        Func<CancellationToken, Task<ChessLiveGameHost>> getHost, ILogger? log = null)
+    {
+        _getHost = getHost;
         _log = log ?? NullLogger.Instance;
     }
 
@@ -110,6 +118,7 @@ public sealed class LichessConnectivityService
     {
         try
         {
+            var host = _host ??= await _getHost(ct);
             var user = await LichessBot.FetchUsernameAsync(token, ct);
             lock (_gate) { _username = user; }
             PushLog(user is not null
@@ -123,7 +132,7 @@ public sealed class LichessConnectivityService
 
             await using var bot = new LichessBot(
                 token,
-                _host,
+                host,
                 substrate: _substrate,
                 record: true,
                 maxDepth: _depth,
@@ -155,7 +164,7 @@ public sealed class LichessConnectivityService
         {
             lock (_gate)
             {
-                _gamesRecorded = _host.GamesCompleted;
+                _gamesRecorded = _host?.GamesCompleted ?? _gamesRecorded;
                 _cts?.Dispose();
                 _cts = null;
             }
@@ -181,7 +190,7 @@ public sealed class LichessConnectivityService
             if (!IsEnabled(logLevel)) return;
             svc.PushLog(formatter(state, exception));
             if (formatter(state, exception).Contains("recorded", StringComparison.OrdinalIgnoreCase))
-                lock (svc._gate) { svc._gamesRecorded = svc._host.GamesCompleted; }
+                lock (svc._gate) { svc._gamesRecorded = svc._host?.GamesCompleted ?? svc._gamesRecorded; }
         }
     }
 }
