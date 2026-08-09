@@ -46,14 +46,14 @@ ON CONFLICT (id) DO NOTHING;
 
 \echo '=== coverage: dynamic (unranked) types now NAMED vs still anonymous ==='
 WITH g AS (SELECT DISTINCT type_id FROM consensus WHERE type_id IS NOT NULL)
-SELECT count(*) FILTER (WHERE consensus.relation_rank(type_id) IS NULL) AS dynamic_types,
-       count(*) FILTER (WHERE consensus.relation_rank(type_id) IS NULL
+SELECT count(*) FILTER (WHERE relation_rank(type_id) IS NULL) AS dynamic_types,
+       count(*) FILTER (WHERE relation_rank(type_id) IS NULL
                         AND EXISTS (SELECT 1 FROM canonical_names cn WHERE cn.id = type_id)) AS now_named,
-       sum(CASE WHEN consensus.relation_rank(type_id) IS NULL
+       sum(CASE WHEN relation_rank(type_id) IS NULL
                AND NOT EXISTS (SELECT 1 FROM canonical_names cn WHERE cn.id = type_id)
                THEN 1 ELSE 0 END) AS still_anonymous
 FROM g;
 
 \echo '=== spot check: a named syntactic head resolves now ==='
 SELECT (SELECT name FROM canonical_names WHERE id = relation_type_id('DEP_NSUBJ')) AS dep_nsubj_name,
-       realize.render(relation_type_id('DEP_NSUBJ')) AS dep_nsubj_render;
+       render(relation_type_id('DEP_NSUBJ')) AS dep_nsubj_render;

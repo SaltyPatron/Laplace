@@ -344,7 +344,7 @@ PG_FUNCTION_INFO_V1(pg_laplace_model_forward);
  * — top-k strongest next tokens. This is the transformer's residual stream and
  * unembed, run as an indexed read.
  *
- * v0 scope, stated plainly: NO cross-position converse.attention(the Q/K/OV softmax
+ * v0 scope, stated plainly: NO cross-position attention (the Q/K/OV softmax
  * that binds one position into another) and the layer factors are the at-rest
  * embedding-probe write vectors, not a re-projected running residual — so this
  * is the LINEARIZED forward whose depth-decay doc 26 T4 measured. It is the

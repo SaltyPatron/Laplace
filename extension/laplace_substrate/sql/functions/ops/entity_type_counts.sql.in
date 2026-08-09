@@ -1,6 +1,5 @@
 -- BEGIN ATOMIC: GH #764. Full scan — serving path should use entity_type_counts_approx.
-DROP FUNCTION IF EXISTS laplace.entity_type_counts();
-CREATE OR REPLACE FUNCTION ops.entity_type_counts()
+CREATE OR REPLACE FUNCTION entity_type_counts()
     RETURNS TABLE(type text, type_id bytea, tier smallint, entities bigint)
     LANGUAGE sql STABLE
 BEGIN ATOMIC

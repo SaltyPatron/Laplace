@@ -6,8 +6,8 @@ CREATE OR REPLACE FUNCTION consensus.by_ids(p_ids bytea[])
     -- Batch consensus lookup by primary id, returning the confidence axis the
     -- Chess lane needs. Replaces four hand-copied reads (LearnedPst,
     -- SubstrateStateValuer, SubstrateTurnHost, SubstrateRootBias) that each
-    -- open-coded `(rating - 2*rd)::double precision` instead of consensus.eff_mu(); since
-    -- consensus.eff_mu(r,d) IS rating - 2*rd the value is identical, but centralized on
+    -- open-coded `(rating - 2*rd)::double precision` instead of laplace.eff_mu(); since
+    -- laplace.eff_mu(r,d) IS rating - 2*rd the value is identical, but centralized on
     -- the canonical helper. No SET search_path so it inlines into the caller's
     -- FROM (the state-valuation path is hot).
     SELECT c.id, consensus.eff_mu(c.rating, c.rd)::double precision,

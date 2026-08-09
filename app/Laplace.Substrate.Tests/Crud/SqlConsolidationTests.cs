@@ -116,7 +116,7 @@ public class SqlConsolidationTests
     public async Task Collocates_And_TablePresentOrdinals_AreCallableWithExpectedShape()
     {
         // collocates now reads FROM v_consensus_unrefuted; proven body-equal to the inline
-        // NOT consensus.refuted(...) form by the SQL parity harness — assert it is callable/typed.
+        // NOT refuted(...) form by the SQL parity harness — assert it is callable/typed.
         await using (var cmd = _pg.DataSource.CreateCommand(
             "SELECT next_word, mu, witnesses FROM structural.collocates('a', 3)"))
         await using (var rd = await cmd.ExecuteReaderAsync())

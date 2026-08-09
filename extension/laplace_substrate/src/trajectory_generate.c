@@ -2,7 +2,7 @@
  * trajectory_generate.c — walk_continuations: the S6→S7→S8 emission loop
  * (docs/specs/36 §3), corpus-free.
  *
- * S6 PROPOSE  generation.trajectory_continuations($tail, $topk): the k-context successor
+ * S6 PROPOSE  trajectory_continuations($tail, $topk): the k-context successor
  *             read straight off physicalities.trajectory (GIN containment +
  *             ordinal window), with trigram→…→unigram backoff over max_stride.
  *             The trajectory IS the ordered sequence (§9); the per-backend
@@ -13,7 +13,7 @@
  *             not the corpus, and a whole-corpus build cannot satisfy that at
  *             any size.
  *
- * S7 STEER    generation.steer_candidates($cands, $frontier): re-rank by rated consensus
+ * S7 STEER    steer_candidates($cands, $frontier): re-rank by rated consensus
  *             mass reaching the LIVE frontier — here the prompt's own content
  *             ids, re-scored per emitted token. Scored by walk_score.h, the
  *             same kernel walk_branches retrieves with, so proposing and

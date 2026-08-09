@@ -20,7 +20,7 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 ///     implementation (<see cref="ProcessMutexAllowlist"/>,
 ///     <see cref="DatabaseMutexSanctionedHome"/>).</item>
 ///   <item><b>11 verify implementations</b> = 11 files hand-rolling
-///     <c>ops.evidence_count(…) &gt; 0</c> as "is this source/layer ingested?"
+///     <c>evidence_count(…) &gt; 0</c> as "is this source/layer ingested?"
 ///     (<see cref="EvidenceVerifyAllowlist"/>, 13 call sites).</item>
 /// </list>
 ///
@@ -33,7 +33,7 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 /// <para><b>Where the verify belongs.</b> <c>ops/source_status.sql.in</c>'s own header is
 /// the argument, and it names this gate's defect precisely: <i>"There was no standardized
 /// answer to the most basic operational question in the system, so every caller assembled
-/// one, and every assembly was wrong in a different way … ops.evidence_count(source_id('X'))
+/// one, and every assembly was wrong in a different way … evidence_count(source_id('X'))
 /// &gt; 0 says DOCUMENTS ARE NOT INGESTED … This exact false negative has been reached
 /// three times."</i> The 11 files below are those callers. They are enumerated, not
 /// deleted, because a gate that goes red on merge-day teaches people to ignore it.</para>
@@ -111,7 +111,7 @@ public sealed class IngestMutexGateTests
     };
 
     /// <summary>
-    /// Hand-rolled <c>ops.evidence_count(…) &gt; 0</c> verifies, 2026-08-05: 11 files,
+    /// Hand-rolled <c>evidence_count(…) &gt; 0</c> verifies, 2026-08-05: 11 files,
     /// 13 call sites. THIS LIST MAY ONLY SHRINK. Destination is
     /// <see cref="VerifySanctionedHome"/> (<c>ops.source_status()</c>), which already
     /// answers the question correctly for content-only lanes.
@@ -121,7 +121,7 @@ public sealed class IngestMutexGateTests
     /// <c>NpgsqlSubstrateReader.HasSourceCompletedAsync</c>,
     /// <c>NpgsqlIngestOps.LayerMarkedCompleteAsync</c> and its generic sibling
     /// <c>EvidenceExistsForTypeAndSourceAsync</c> all issue
-    /// <c>ops.evidence_count(p_type =&gt; realize.canonical_id('substrate/type/HasLayerCompleted/N/v1'),
+    /// <c>evidence_count(p_type =&gt; canonical_id('substrate/type/HasLayerCompleted/N/v1'),
     /// p_source =&gt; …) &gt; 0</c>. <c>ensure-foundation.sh</c> and
     /// <c>decomposer-ensure-floor.sh</c> carry that same string in shell.</para>
     /// </summary>
@@ -177,7 +177,7 @@ public sealed class IngestMutexGateTests
     /// Strip comments so the counts describe code, not prose about code. Necessary here
     /// and not merely tidy: <c>AdvisoryTxLock.cs</c>'s own doc comment quotes
     /// <c>pg_advisory_xact_lock(...)</c>, and <c>source_status.sql.in</c>'s header quotes
-    /// <c>ops.evidence_count(source_id('X')) &gt; 0</c> as the anti-pattern it replaces.
+    /// <c>evidence_count(source_id('X')) &gt; 0</c> as the anti-pattern it replaces.
     /// Without the strip both would be counted as the thing they warn about.
     /// </summary>
     private static string Strip(string name, string text)
@@ -336,7 +336,7 @@ public sealed class IngestMutexGateTests
     [Fact]
     public void EvidenceVerify_NoNewHandRolledImplementation()
         => AssertRatchet(EvidenceVerify, EvidenceVerifyAllowlist, nameof(EvidenceVerifyAllowlist),
-            "New hand-rolled `ops.evidence_count(...) > 0` verify. That test reports "
+            "New hand-rolled `evidence_count(...) > 0` verify. That test reports "
             + "content-only lanes as NOT INGESTED — source_status.sql.in's header records "
             + "the same false negative being reached three times. Ask ops.source_status() "
             + "instead of here:",

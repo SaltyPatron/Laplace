@@ -1,6 +1,6 @@
 -- Outbound edges of an entity. Thin wrapper over consensus.edges_raw(), which is the one
 -- consensus scan; this pins the axes this signature has always had — outbound,
--- consensus.edge_rank ordering, and REFUTED EDGES INCLUDED. That last one is now visible
+-- laplace.edge_rank ordering, and REFUTED EDGES INCLUDED. That last one is now visible
 -- rather than implicit: pass through consensus.edges_raw(p_refuted => false) if you want
 -- only claims the fold has not rated below neutral.
 DROP FUNCTION IF EXISTS laplace.consensus_out(bytea, integer);

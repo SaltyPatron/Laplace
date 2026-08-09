@@ -1,5 +1,5 @@
 -- senses: HAS_SENSE-family read (R2). Prefer bubble_up for top-k + domain;
--- this keeps the classic (sense, synset, consensus.eff_mu, witnesses) shape for lexical.define().
+-- this keeps the classic (sense, synset, laplace.eff_mu, witnesses) shape for lexical.define().
 -- No SET search_path and no STRICT so it inlines into callers (both block
 -- inlining; #617). NULL-safety is preserved without STRICT: taxonomy.bubble_up(NULL)
 -- yields zero rows (lexical_peers is STRICT -> NULL array -> empty unnest).
@@ -28,7 +28,7 @@ CREATE OR REPLACE FUNCTION lexical.senses(p_word bytea)
     -- twice the evidence sat below, losing by 1.28 on a quantity whose
     -- uncertainty term exceeds its signal — W16 3.2 measured mean
     -- |rating - neutral| 192.85 against mean rd 262.24 across 447,145 consensus
-    -- rows, so 2*rd runs ~2.7x the signal and consensus.eff_mu sorts substantially by how
+    -- rows, so 2*rd runs ~2.7x the signal and laplace.eff_mu sorts substantially by how
     -- little rd has shrunk.
     ORDER BY b.witnesses DESC, b.score DESC
 $$;

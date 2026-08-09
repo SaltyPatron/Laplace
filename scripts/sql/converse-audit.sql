@@ -21,16 +21,16 @@ SELECT laplace.laplace_substrate_version() AS substrate_lib,
        public.laplace_geom_version()       AS geom_lib;
 
 \echo '-- 0b. T0 perfcache wired (render_text leaves resolve via codepoint_for_id) --'
-SELECT realize.codepoint_for_id(realize.canonical_id('A')) AS cp_of_A,
-       CASE WHEN realize.codepoint_for_id(realize.canonical_id('A')) = 65
+SELECT laplace.codepoint_for_id(laplace.canonical_id('A')) AS cp_of_A,
+       CASE WHEN laplace.codepoint_for_id(laplace.canonical_id('A')) = 65
             THEN 'PASS' ELSE 'FAIL — laplace_substrate.perfcache_path unset/stale' END AS verdict;
 
 \echo '-- 0c. render_text C offload round-trips codepoint, word, and batch --'
-SELECT realize.render_text(word_id('A'))                                  AS r_codepoint,
-       realize.render_text(word_id('cat'))                                AS r_word,
-       realize.render_text_batch(ARRAY[word_id('cat'), word_id('dog')])   AS r_batch,
-       CASE WHEN realize.render_text(word_id('cat')) = 'cat'
-                 AND realize.render_text_batch(ARRAY[word_id('cat'),word_id('dog')]) = ARRAY['cat','dog']
+SELECT render_text(word_id('A'))                                  AS r_codepoint,
+       render_text(word_id('cat'))                                AS r_word,
+       render_text_batch(ARRAY[word_id('cat'), word_id('dog')])   AS r_batch,
+       CASE WHEN render_text(word_id('cat')) = 'cat'
+                 AND render_text_batch(ARRAY[word_id('cat'),word_id('dog')]) = ARRAY['cat','dog']
             THEN 'PASS' ELSE 'FAIL — C reconstruction broken' END AS verdict;
 
 \echo '-- 0d. geom SIMD offload (relatedness/reason structural plane) --'
@@ -54,7 +54,7 @@ SELECT (intent_preflight(ARRAY[word_id('dog')], ARRAY[]::bytea[], ARRAY[]::bytea
                  IS NOT NULL THEN 'PASS' ELSE 'FAIL — C preflight returned NULL' END AS verdict;
 
 \echo '-- 0g. glicko2 score offload (eff_mu / ranking on every reply) --'
-SELECT round(consensus.eff_mu_display(1500000000000, 350000000000), 3) AS sample_eff_mu;
+SELECT round(eff_mu_display(1500000000000, 350000000000), 3) AS sample_eff_mu;
 
 \echo ''
 \echo '================ 1. BACKING DATA PER INTENT ================'
@@ -120,9 +120,9 @@ ORDER BY verdict, t.prompt;
 \echo '================ 4. KNOWN-BUG ASSERTIONS ================'
 \echo '(each row should read PASS once fixed; FAIL marks a live defect)'
 
-\echo '-- 4a. converse.synonyms() direction: word is keyed as OBJECT of IS_SYNONYM_OF, not subject --'
+\echo '-- 4a. synonyms() direction: word is keyed as OBJECT of IS_SYNONYM_OF, not subject --'
 SELECT
-    (SELECT count(*) FROM converse.synonyms(word_id('happy'), 10)) AS via_function,
+    (SELECT count(*) FROM synonyms(word_id('happy'), 10)) AS via_function,
     (SELECT count(DISTINCT other.object_id)
        FROM consensus mine
        JOIN consensus other ON other.subject_id = mine.subject_id
@@ -130,8 +130,8 @@ SELECT
                            AND other.object_id <> word_id('happy')
       WHERE mine.object_id = word_id('happy')
         AND mine.type_id = relation_type_id('IS_SYNONYM_OF')) AS available_co_members,
-    CASE WHEN (SELECT count(*) FROM converse.synonyms(word_id('happy'),10)) > 0
-         THEN 'PASS' ELSE 'FAIL — converse.synonyms() queries word as subject; data keys it as object' END AS verdict;
+    CASE WHEN (SELECT count(*) FROM synonyms(word_id('happy'),10)) > 0
+         THEN 'PASS' ELSE 'FAIL — synonyms() queries word as subject; data keys it as object' END AS verdict;
 
 \echo '-- 4b. article-leak: "parts of a car" must resolve to car, not the article "a" --'
 SELECT realize.label(converse.resolve_topic('a car', NULL)) AS resolved_topic,

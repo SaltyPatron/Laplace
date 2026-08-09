@@ -1614,7 +1614,7 @@ public static class NpgsqlSubstrateReads
     /// over <c>consensus.top_relations</c> and nothing else.
     ///
     /// It used to hand-roll the ranking instead, on the stated grounds that
-    /// top_relations ran "full-table consensus.edge_rank() measured &gt;9 minutes live". That
+    /// top_relations ran "full-table edge_rank() measured &gt;9 minutes live". That
     /// defect was fixed extension-side (Issue 52: bounded-candidate form, raw-eff_mu
     /// head via consensus_eff_mu_btree, measured 0.5s at 124M) and the copy here was
     /// never retired — so the API kept serving the superseded shape, with a scalar
@@ -2620,7 +2620,7 @@ public static class NpgsqlSubstrateReads
         // or a parallel scan, which is non-deterministic naming in a content-addressed
         // system. Rank by what the fold produced (eff_mu over the name cell), with the
         // object id as a total tiebreak so the result is reproducible even for unattested
-        // names. consensus.eff_mu() is called, never inlined as `rating - 2*rd` — that literal is
+        // names. eff_mu() is called, never inlined as `rating - 2*rd` — that literal is
         // what g1_weight_literalism exists to reject.
         NpgsqlRead.ReadRowsAsync(dataSource, """
             SELECT n.subject_id, n.object_id, e.object_id

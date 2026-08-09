@@ -21,7 +21,7 @@ CREATE OR REPLACE FUNCTION chess.game(p_event bytea)
     -- not here.
     --
     -- All headers arrive in ONE index scan of the line's subject rows filtered
-    -- by this event's context, and the short surfaces realize.render in ONE
+    -- by this event's context, and the short surfaces laplace.render in ONE
     -- realize_batch. The movetext is rendered on its own with the full depth
     -- budget: it is a tier-4 document whose constituent chain rebuilds the
     -- original PGN bytes exactly, so it is not a label lookup and must not be

@@ -12,18 +12,18 @@ FROM lexical.define(laplace.word_id(:'probe'), 5);
 
 \echo '================ 3. SYNONYMS (same-language synset co-members, dominant sense first) ====='
 SELECT synonym, round(eff_mu,1) AS mu, witnesses
-FROM converse.synonyms(laplace.word_id(:'probe'), 10);
+FROM laplace.synonyms(laplace.word_id(:'probe'), 10);
 
 \echo '================ 4. TRANSLATIONS (emergent, one row per language, dominant sense first) =='
 SELECT translation, language, round(eff_mu,1) AS mu
-FROM converse.translations(laplace.word_id(:'probe'), 14);
+FROM laplace.translations(laplace.word_id(:'probe'), 14);
 
 \echo '================ 5. TRANSLATE_TO french (scoped; roi/monarch sense must lead) ==========='
 SELECT translation, language, round(eff_mu,1) AS mu
-FROM converse.translate_to(laplace.word_id(:'probe'), 'french', 8);
+FROM laplace.translate_to(laplace.word_id(:'probe'), 'french', 8);
 
 \echo '================ 6. LANGUAGE COVERAGE (omniglottal witness count) ======================='
-SELECT reply FROM converse.language_coverage(laplace.word_id(:'probe'));
+SELECT reply FROM laplace.language_coverage(laplace.word_id(:'probe'));
 
 \echo '================ 7. RECALL x4 (conversational intent routing) =========================='
 SELECT 'define'      AS intent, reply FROM converse.recall(:'probe');
@@ -33,7 +33,7 @@ SELECT 'related'     AS intent, reply FROM converse.recall('what is related to k
 
 \echo '================ 8. ATTENTION (Glicko-2 consensus weight + S3 geodesic) ================='
 SELECT neighbor, relation, round(attention::numeric,4) AS attention, round(geodesic::numeric,4) AS geodesic
-FROM converse.attention(laplace.word_id(:'probe'), 12);
+FROM laplace.attention(laplace.word_id(:'probe'), 12);
 
 \echo '================ 9. S3 GEOMETRY (nearest neighbors on the glome) ========================'
 SELECT neighbor, round(geodesic::numeric,4) AS geodesic, round(frechet::numeric,4) AS frechet

@@ -1,6 +1,6 @@
 -- converse.chat_scaffold — per-language connective templates for converse.chat.
 --
--- GH #901: converse.chat()'s render side was gluing realized labels with hardcoded English
+-- GH #901: chat()'s render side was gluing realized labels with hardcoded English
 -- connectives while the parse side and language tally were language-agnostic.
 -- A Bulgarian prompt correctly resolved lang, then wrapped Bulgarian labels in
 -- English scaffolding — the 2026-07-25 Bulgarian-dog defect one layer down.

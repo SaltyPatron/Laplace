@@ -27,22 +27,22 @@ CREATE OR REPLACE FUNCTION converse.recall_interaction_response(p_topic bytea, p
             (laplace.relation_type_id('HAS_SUBEVENT'),     'involves'),
             (laplace.relation_type_id('OBSTRUCTED_BY'),    'is hindered by')
     ),
-    -- consensus.edge_rank folds relation salience into the consensus.eff_mu ordering so mandate-band
+    -- laplace.edge_rank folds relation salience into the laplace.eff_mu ordering so mandate-band
     -- relations outrank probationary ones.
     facts AS (
         SELECT k.phrase,
                c.object_id,
-               consensus.edge_rank(c.type_id, consensus.eff_mu(c.rating, c.rd)) AS rank,
-               consensus.eff_mu(c.rating, c.rd) AS mu,
+               laplace.edge_rank(c.type_id, laplace.eff_mu(c.rating, c.rd)) AS rank,
+               laplace.eff_mu(c.rating, c.rd) AS mu,
                c.witness_count AS witnesses
         FROM laplace.v_consensus_unrefuted c
         JOIN kinds k ON k.type_id = c.type_id
         WHERE c.subject_id = p_topic AND c.object_id IS NOT NULL
     ),
-    -- Rank BEFORE rendering (Issue-52 pattern): the old shape ran realize.render_text over
+    -- Rank BEFORE rendering (Issue-52 pattern): the old shape ran laplace.render_text over
     -- the topic's FULL commonsense fan-out and only then ORDER/LIMIT'd to p_limit.
-    -- Ranking needs only ids + rank/mu already in `facts`; realize.render_text runs over
-    -- exactly the p_limit survivors. Output-identical (no post-realize.render filtering).
+    -- Ranking needs only ids + rank/mu already in `facts`; laplace.render_text runs over
+    -- exactly the p_limit survivors. Output-identical (no post-laplace.render filtering).
     ranked AS MATERIALIZED (
         SELECT f.phrase, f.object_id, f.rank, f.mu, f.witnesses
         FROM facts f
@@ -52,7 +52,7 @@ CREATE OR REPLACE FUNCTION converse.recall_interaction_response(p_topic bytea, p
         SELECT r.*, row_number() OVER (ORDER BY r.rank DESC,r.mu DESC,r.object_id) AS rn FROM ranked r
     ), batch AS MATERIALIZED (
         SELECT realize.label(p_topic) AS topic,
-               realize.render_text_batch(array_agg(object_id ORDER BY rn),96) AS objects
+               laplace.render_text_batch(array_agg(object_id ORDER BY rn),96) AS objects
         FROM numbered
     )
     SELECT b.topic || ' — ' || r.phrase || ' ' || b.objects[r.rn] AS reply,

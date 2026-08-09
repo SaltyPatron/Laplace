@@ -374,7 +374,7 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
     }
 
     /// <summary>
-    /// ops.multi_source_entity_count() is a GROUP BY over ALL attestations with a
+    /// multi_source_entity_count() is a GROUP BY over ALL attestations with a
     /// count(DISTINCT source_id) — 169M rows and growing, with no bound and no index that
     /// helps. Durable fix is a calculated-layer stat maintained post-ingest (doc 02, Issue 52).
     ///
@@ -419,11 +419,11 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
     };
 
     /// <summary>
-    /// consensus.top_relations(@limit, NULL) computes consensus.edge_rank() per row over the FULL
+    /// consensus.top_relations(@limit, NULL) computes edge_rank() per row over the FULL
     /// consensus table (124M+ rows) before its LIMIT — measured >9 minutes live, which
     /// killed /v1/explore/catalog, /v1/audit/report and /v1/visualizations/substrate.
     /// <see cref="NpgsqlSubstrateReads.TopRelationsAsync"/> supersedes it: consensus_eff_mu_btree
-    /// serves the global top-M by raw eff_mu instantly; consensus.edge_rank(salience band x eff_mu, the
+    /// serves the global top-M by raw eff_mu instantly; edge_rank (salience band x eff_mu, the
     /// single readout law) then reorders only that candidate pool. Measured 0.5s live.
     /// </summary>
     private static async Task<IReadOnlyList<VisualizationEdge>> ReadTopRelationsAsync(NpgsqlConnection conn, int limit, CancellationToken ct)

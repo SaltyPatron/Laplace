@@ -6,7 +6,7 @@ CREATE OR REPLACE FUNCTION realize.path(p_path bytea[], p_types bytea[], p_dirs 
     AS $$
     -- realize.label() before '?': an id with no realization in p_lang usually still has a
     -- name, and printing '?' for it threw that away. The walk responders open-coded
-    -- this whole realize.render specifically because they needed the label tier
+    -- this whole laplace.render specifically because they needed the label tier
     -- (GH #906 item 2); with it here they can route through the one definition.
     -- Strictly additive -- the only rows this changes are the ones that used to
     -- print '?'.

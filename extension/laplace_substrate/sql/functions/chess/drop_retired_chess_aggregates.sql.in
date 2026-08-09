@@ -8,7 +8,7 @@
 -- fold the substrate exists to have already done.
 --
 -- Each game now carries its result onto the player in the aggregating lane at ingest, so
--- the same two questions are reads of consensus cells: chess.ranked() orders by consensus.eff_mu
+-- the same two questions are reads of consensus cells: chess.ranked() orders by laplace.eff_mu
 -- over one relation partition, chess.head_to_head() reads one folded cell per pairing.
 -- witness_count IS games played. Nothing is recomputed and nothing is cached.
 --

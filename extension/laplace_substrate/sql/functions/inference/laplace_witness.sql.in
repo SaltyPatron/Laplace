@@ -15,14 +15,14 @@ BEGIN
         INSERT INTO laplace.consensus(id, subject_id, type_id, object_id,
             rating, rd, volatility, witness_count, last_observed_at)
         VALUES(v_id, p_subject, p_type, p_object,
-            consensus.glicko2_neutral_mu(), consensus.glicko2_initial_rd(), consensus.glicko2_initial_volatility(),
+            laplace.glicko2_neutral_mu(), laplace.glicko2_initial_rd(), laplace.glicko2_initial_volatility(),
             1, now());
         RETURN;
     END IF;
     v_new := laplace.laplace_glicko2_accumulate_games(
         v_rec.rating, v_rec.rd, v_rec.volatility,
-        consensus.glicko2_neutral_mu(), consensus.glicko2_initial_rd(),
-        1, p_score_fp1e9, consensus.glicko2_tau());
+        laplace.glicko2_neutral_mu(), laplace.glicko2_initial_rd(),
+        1, p_score_fp1e9, laplace.glicko2_tau());
     UPDATE laplace.consensus
     SET rating = v_new.rating, rd = v_new.rd, volatility = v_new.volatility,
         witness_count = witness_count + 1,

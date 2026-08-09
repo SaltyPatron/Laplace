@@ -42,11 +42,11 @@ WHERE id IN (
 SELECT relation_type_id('IS_A')
        = laplace_hash128_blake3('IS_A'::bytea) AS relation_type_path_law;
 
-SELECT consensus.relation_type_resolve('HAS_UPOS') = relation_type_id('HAS_POS') AS pos_alias_resolve_law;
+SELECT relation_type_resolve('HAS_UPOS') = relation_type_id('HAS_POS') AS pos_alias_resolve_law;
 
-SELECT consensus.relation_type_in_family(relation_type_id('HAS_XPOS'), 'HAS_POS') AS xpos_in_pos_family;
+SELECT relation_type_in_family(relation_type_id('HAS_XPOS'), 'HAS_POS') AS xpos_in_pos_family;
 
-SELECT NOT consensus.relation_type_in_family(relation_type_id('HAS_LEX_CATEGORY'), 'HAS_POS') AS lex_not_pos_family;
+SELECT NOT relation_type_in_family(relation_type_id('HAS_LEX_CATEGORY'), 'HAS_POS') AS lex_not_pos_family;
 
 SELECT EXISTS (
     SELECT 1 FROM pg_attribute a

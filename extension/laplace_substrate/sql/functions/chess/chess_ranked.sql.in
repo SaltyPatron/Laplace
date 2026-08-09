@@ -19,7 +19,7 @@ CREATE OR REPLACE FUNCTION chess.ranked(p_limit integer DEFAULT 200, p_offset in
     -- Minting a player-only outcome object to make the query easier would duplicate a fact the
     -- entity type already states.
     --
-    -- consensus.eff_mu, not a win percentage: Glicko-2 weighs WHO you beat, so a 68% score against 1960s
+    -- laplace.eff_mu, not a win percentage: Glicko-2 weighs WHO you beat, so a 68% score against 1960s
     -- grandmasters outranks 68% against beginners instead of tying it, and a thin record sinks
     -- on RD rather than flattering itself. A raw ratio can express neither.
     --
@@ -58,8 +58,8 @@ CREATE OR REPLACE FUNCTION chess.ranked(p_limit integer DEFAULT 200, p_offset in
            rec.player,
            COALESCE(NULLIF(n.txt, ''), encode(rec.player, 'hex')),
            rec.games,
-           -- DISPLAY units, never raw fp1e9: consensus.eff_mu_display is the one scaling law
-           -- (functions/mu/consensus.eff_mu_display.sql.in), rating/rd take the same /1e9 round.
+           -- DISPLAY units, never raw fp1e9: laplace.eff_mu_display is the one scaling law
+           -- (functions/mu/laplace.eff_mu_display.sql.in), rating/rd take the same /1e9 round.
            round((rec.rating / 1e9)::numeric, 3)::double precision,
            round((rec.rd / 1e9)::numeric, 3)::double precision,
            consensus.eff_mu_display(rec.rating, rec.rd)::double precision

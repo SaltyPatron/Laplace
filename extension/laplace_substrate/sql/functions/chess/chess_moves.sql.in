@@ -6,12 +6,12 @@ CREATE OR REPLACE FUNCTION chess.moves(p_position bytea, p_limit integer DEFAULT
     -- Opening explorer over the rated MOVE web: every continuation the fold has
     -- ever witnessed out of one position, ranked by the conservative estimate.
     -- Position ids are COMPOSED (ChessCompose merkle path), never
-    -- realize.canonical_id(surface) — callers hold them from composing a board state or
+    -- laplace.canonical_id(surface) — callers hold them from composing a board state or
     -- from a prior chess_moves step. Rides
     -- consensus_subject_type_eff_mu_btree (subject_id, type_id, rating-2*rd DESC
     -- WHERE object_id IS NOT NULL); consensus.eff_mu() inlines to that exact expression.
     -- LIMIT is the only cut — no floors, no thresholds.
-    -- consensus.eff_mu/rd are returned in DISPLAY units (consensus.eff_mu_display's /1e9 round), never
+    -- laplace.eff_mu/rd are returned in DISPLAY units (laplace.eff_mu_display's /1e9 round), never
     -- raw fp1e9; the ORDER BY stays on raw consensus.eff_mu() so the index expression matches.
     SELECT c.object_id,
            consensus.eff_mu_display(c.rating, c.rd)::double precision,

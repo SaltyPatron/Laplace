@@ -9,24 +9,24 @@ SELECT fake_tier_band_count() AS fake_tier_bands;
 SELECT count(*) AS identity_violations FROM identity_law_violations();
 
 \echo '=== layer completion markers ==='
-SELECT layer, ops.evidence_count(
-           p_type => realize.canonical_id('substrate/type/HasLayerCompleted/' || layer || '/v1')) > 0 AS completed
+SELECT layer, laplace.evidence_count(
+           p_type => laplace.canonical_id('substrate/type/HasLayerCompleted/' || layer || '/v1')) > 0 AS completed
 FROM generate_series(0, 3) AS layer
 ORDER BY layer;
 
 \echo '=== substrate_counts ==='
-SELECT * FROM ops.substrate_counts();
+SELECT * FROM substrate_counts();
 
 \echo '=== witnesses ingested (evidence + content per source) ==='
-SELECT source, evidence, content FROM ops.source_counts();
+SELECT source, evidence, content FROM source_counts();
 
 \echo '=== multi-source entities (frayed-edge substrate) ==='
-SELECT ops.multi_source_entity_count();
+SELECT multi_source_entity_count();
 
 \echo '=== compositional tier distribution ==='
 SELECT * FROM compositional_tier_distribution();
 
 \echo '=== realize.render_gaps(orphan consensus ids, top 10) ==='
 SELECT count(*) AS gap_count FROM realize.render_gaps(1000);
-SELECT realize.render(id), roles, refs FROM realize.render_gaps(10);
+SELECT render(id), roles, refs FROM realize.render_gaps(10);
 

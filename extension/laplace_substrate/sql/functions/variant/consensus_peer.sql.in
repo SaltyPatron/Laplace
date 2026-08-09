@@ -11,7 +11,7 @@ DECLARE
 BEGIN
     -- Relational election: laplace.entities of p_id's own type that share p_id's
     -- (relation, partner) edges, scored by min-shared confidence. Reads through
-    -- laplace.v_consensus_unrefuted(was two inline `NOT consensus.refuted` base-table scans). The
+    -- laplace.v_consensus_unrefuted(was two inline `NOT laplace.refuted` base-table scans). The
     -- winner is the top-p_k by score, then one picked by the deterministic
     -- hash tie-break -- identical to the old UNION's hash pick over `elected`.
     --

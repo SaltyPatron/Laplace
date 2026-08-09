@@ -8,8 +8,7 @@ Rules match landed families (taxonomy / lexical / realize / converse):
   rewrite callers laplace.<old> / bare <old>( → <purpose>.<new>(
   fix contamination: RETURNS/AS laplace.eff_mu, three-part laplace.purpose.x
 
-Identity / relation / inspect stay in laplace. μ, readback, and ops move to
-consensus, realize, and ops respectively.
+Identity / μ / relation / readback / ops / inspect stay in laplace.
 Run from repo root. Review via git diff.
 """
 from __future__ import annotations
@@ -45,12 +44,12 @@ DIR_SCHEMA: dict[str, str | None] = {
     "variant": "generation",
     "model": "generation",
     "inference": "generation",
-    "mu": "consensus",
+    "mu": None,
     "glicko2": None,
     "relation": None,
-    "readback": "realize",
+    "readback": None,
     "identity": None,
-    "ops": "ops",
+    "ops": None,
     "inspect": None,
     "ingest": None,
     "analysis": None,
@@ -82,7 +81,7 @@ RESERVED = {
 
 PURPOSE = {
     "consensus", "converse", "lexical", "taxonomy", "generation",
-    "structural", "chess", "realize", "ops",
+    "structural", "chess", "realize",
 }
 
 TABLES = {
@@ -143,15 +142,6 @@ CREATE_RE = re.compile(
     re.IGNORECASE,
 )
 
-MOVED_RE = re.compile(
-    r"DROP\s+FUNCTION\s+IF\s+EXISTS\s+laplace\."
-    r"([A-Za-z_][A-Za-z0-9_]*)\s*\([^;\n]*\);\s*"
-    r"CREATE\s+OR\s+REPLACE\s+FUNCTION\s+"
-    r"(consensus|converse|lexical|taxonomy|generation|structural|chess|realize|ops)\."
-    r"([A-Za-z_][A-Za-z0-9_]*)\s*\(",
-    re.IGNORECASE,
-)
-
 
 def shorten(schema: str, name: str) -> str:
     if name in NAME_OVERRIDES:
@@ -184,16 +174,6 @@ def collect_moves() -> dict[str, tuple[str, str]]:
     moves: dict[str, tuple[str, str]] = {}
 
     def consider(dir_name: str, text: str) -> None:
-        # A rerun must remember surfaces that a previous run already moved. Without
-        # this pair scan, merging current main can introduce fresh laplace.<old>
-        # callers while collect_moves() silently forgets the old-to-purpose map.
-        for m in MOVED_RE.finditer(text):
-            old, sch, new = m.group(1), m.group(2).lower(), m.group(3)
-            prev = moves.get(old)
-            if prev and prev != (sch, new):
-                raise SystemExit(f"conflicting move for {old}: {prev} vs {(sch, new)}")
-            moves[old] = (sch, new)
-
         for m in CREATE_RE.finditer(text):
             qual, name = m.group(1), m.group(2)
             if qual and qual.rstrip(".") in PURPOSE:
@@ -225,7 +205,7 @@ def fix_contamination(text: str) -> str:
     text = re.sub(r"\bAS\s+laplace\.eff_mu\b", "AS eff_mu", text)
     text = re.sub(r"\bAS\s+laplace\.attention\b", "AS attention", text)
     text = re.sub(
-        r"\blaplace\.(converse|consensus|lexical|realize|taxonomy|structural|generation|chess|ops)\.",
+        r"\blaplace\.(converse|consensus|lexical|realize|taxonomy|structural|generation|chess)\.",
         r"\1.",
         text,
     )
@@ -264,7 +244,7 @@ def qualify_tables(text: str) -> str:
 def fix_table_schema_collision(text: str) -> str:
     """Undo FROM laplace.consensus.fn → FROM consensus.fn (table/schema clash)."""
     text = re.sub(
-        r"\blaplace\.(consensus|converse|lexical|realize|taxonomy|structural|generation|chess|ops)\.",
+        r"\blaplace\.(consensus|converse|lexical|realize|taxonomy|structural|generation|chess)\.",
         r"\1.",
         text,
     )
@@ -348,7 +328,7 @@ def rewrite_calls(
             text = re.sub(rf"(?<![.\w]){re.escape(old)}\s*\(", f"{target}(", text)
     # undo double purpose: converse.converse.chat
     text = re.sub(
-        r"\b(consensus|converse|lexical|taxonomy|generation|structural|chess|realize|ops)\.\1\.",
+        r"\b(consensus|converse|lexical|taxonomy|generation|structural|chess|realize)\.\1\.",
         r"\1.",
         text,
     )
@@ -357,8 +337,7 @@ def rewrite_calls(
     return text
 
 
-API_SQL = """DROP FUNCTION IF EXISTS laplace.api(text);
-CREATE OR REPLACE FUNCTION ops.api(p_like text DEFAULT NULL)
+API_SQL = """CREATE OR REPLACE FUNCTION api(p_like text DEFAULT NULL)
     RETURNS TABLE(name text, args text, returns text)
     LANGUAGE sql STABLE AS $$
     SELECT CASE WHEN n.nspname = 'laplace' THEN p.proname::text
@@ -369,7 +348,7 @@ CREATE OR REPLACE FUNCTION ops.api(p_like text DEFAULT NULL)
     JOIN pg_namespace n ON n.oid = p.pronamespace
     WHERE n.nspname = ANY (ARRAY[
             'laplace','consensus','converse','lexical','taxonomy',
-            'generation','structural','chess','realize','ops'
+            'generation','structural','chess','realize'
         ])
       AND (p_like IS NULL
            OR p.proname ILIKE '%'||p_like||'%'
@@ -418,11 +397,7 @@ def main() -> int:
     extras += list(SRC.glob("*.c"))
     extras += list(SRC.glob("*.h"))
     extras += list(TESTS.rglob("*.sql"))
-    extras += [
-        path
-        for path in APP.rglob("*.cs")
-        if not {"bin", "obj"}.intersection(path.relative_to(APP).parts)
-    ]
+    extras += list(APP.rglob("*.cs"))
     for base in (ROOT / "scripts/queries", ROOT / "scripts/sql"):
         if base.exists():
             extras += list(base.rglob("*.sql"))
@@ -434,8 +409,7 @@ def main() -> int:
         except (UnicodeDecodeError, OSError):
             continue
         text = fix_contamination(orig) if path.suffix in {".sql", ".in"} or str(path).endswith(".sql.in") else orig
-        is_sql = path.suffix == ".sql" or str(path).endswith(".sql.in")
-        text = rewrite_calls(text, call_map, rewrite_bare=is_sql)
+        text = rewrite_calls(text, call_map)
         text = fix_table_schema_collision(text)
         if text != orig:
             path.write_text(text, encoding="utf-8")

@@ -15,7 +15,7 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 public sealed class SubstrateCanonicalIdsTests
 {
     // Byte-for-byte agreement with the SQL surface. source_id('WordNetDecomposer') and
-    // realize.canonical_id('substrate/source/WordNetDecomposer/v1') both resolve to this on the
+    // canonical_id('substrate/source/WordNetDecomposer/v1') both resolve to this on the
     // live DB, so C# and SQL cannot drift apart without failing here.
     private const string WordNetSourceIdHex = "4b1ee33be3034910df7629b2948cde35";
 

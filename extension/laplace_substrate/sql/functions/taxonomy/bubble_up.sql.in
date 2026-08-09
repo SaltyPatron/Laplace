@@ -1,11 +1,11 @@
 -- bubble_up: top-k sense frontier for the forward pass (R2).
--- Ranks HAS_SENSE-family edges by base consensus.eff_mu × domain co-occurrence.
+-- Ranks HAS_SENSE-family edges by base laplace.eff_mu × domain co-occurrence.
 -- Local 0 at a hop is a backtrack signal for the beam; this function seeds the
 -- open set. Abstain = zero rows (queue empty), never fabricate.
 --
 -- No SET search_path so it inlines into callers (#617); family membership is
 -- joined against consensus.relation_family_members('HAS_SENSE') (fenced once) instead
--- of calling consensus.relation_type_in_family() per consensus row — the same static
+-- of calling relation_type_in_family() per consensus row — the same static
 -- truth table, but sargable through the (subject_id, type_id) indexes.
 -- Row-set equivalence of the sargable family_out proven live 2026-07-24
 -- ("run": 345 = 345 rows, both EXCEPT directions empty).
@@ -123,7 +123,7 @@ domain_scores AS (
            count(*)::bigint AS domain_hits
     -- Pillar 5 (2026-07-20): domain co-occurrence is read from the GEOMETRY.
     -- geometry_neighbours walks the trajectories containing the member and
-    -- returns the adjacent content realize.constituents in BOTH directions -- the same
+    -- returns the adjacent content laplace.constituents in BOTH directions -- the same
     -- bidirectional adjacency the consensus form matched, without the
     -- materialised PRECEDES rows (Pillar 3a, e5e1b42).
     FROM members m
@@ -165,23 +165,23 @@ FROM ranked
 -- On a thin substrate that inverts the ranking. Measured on the foundation
 -- ladder, lexical.senses(laplace.word_id('water')):
 --
---     urine   1 witness   consensus.eff_mu 1169.73   <- elected
---     water   1 witness   consensus.eff_mu 1169.73
---     water   1 witness   consensus.eff_mu 1169.73
---     water   2 witnesses consensus.eff_mu 1168.45
---     water   2 witnesses consensus.eff_mu 1165.57
+--     urine   1 witness   laplace.eff_mu 1169.73   <- elected
+--     water   1 witness   laplace.eff_mu 1169.73
+--     water   1 witness   laplace.eff_mu 1169.73
+--     water   2 witnesses laplace.eff_mu 1168.45
+--     water   2 witnesses laplace.eff_mu 1165.57
 --
 -- Three senses tie exactly at the top on one witness each, so the id memcmp
 -- picks — and it picked urine. Meanwhile senses carrying TWICE the evidence sit
 -- below them, losing by 1.28 on a quantity whose uncertainty term is larger than
 -- its signal: W16 3.2 measured mean |rating - neutral| = 192.85 against mean rd
 -- = 262.24 over 447,145 consensus rows, so 2*rd runs ~2.7x the signal and
--- consensus.eff_mu orders substantially by how much rd has NOT yet shrunk.
+-- laplace.eff_mu orders substantially by how much rd has NOT yet shrunk.
 --
--- consensus.eff_mu is the right conservative bound for a well-witnessed edge and the wrong
+-- laplace.eff_mu is the right conservative bound for a well-witnessed edge and the wrong
 -- primary sort when rd dominates, because "least uncertain" and "best attested"
 -- come apart exactly where evidence is thin. Ordering by witnesses first states
--- the evidence explicitly instead of reading it backwards through rd; consensus.eff_mu
+-- the evidence explicitly instead of reading it backwards through rd; laplace.eff_mu
 -- then adjudicates among equally-attested senses, which is what it is for.
 --
 -- Not a floor or a cap — nothing is excluded, the sort order changes. Spec 37 L6

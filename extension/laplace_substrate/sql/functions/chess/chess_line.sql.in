@@ -8,7 +8,7 @@ CREATE OR REPLACE FUNCTION chess.line(p_line bytea)
     -- line (the events that carry a PLAYS_LINE edge onto it), each with the
     -- headers that playing asserted (ON_DATE / HAS_RESULT, pinned by context),
     -- alongside the line's own fold cell -- (line, OUTCOME, Chess_Result) --
-    -- where witness_count IS "times this line was played" and consensus.eff_mu IS how the
+    -- where witness_count IS "times this line was played" and laplace.eff_mu IS how the
     -- line fares (white POV), already folded, never recomputed.
     --
     -- The fold columns are LEFT-joined and repeat per playing: a line recorded

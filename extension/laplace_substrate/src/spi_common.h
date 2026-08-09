@@ -168,7 +168,7 @@ spi_realize(Datum id, Datum lang)
 }
 
 /* Batch form of spi_realize. ids_arr is a bytea[] ArrayType Datum; returns the
- * text[] Datum from realize.batch, or 0 on empty/NULL. Caller owns any
+ * text[] Datum from laplace.realize_batch, or 0 on empty/NULL. Caller owns any
  * deconstruct_array / DatumGetArrayTypePCopy. */
 static inline Datum
 spi_realize_batch(Datum ids_arr, Datum lang)
@@ -258,12 +258,12 @@ spi_fetch_rd_kappa(void)
     bool  isnull;
     Datum d;
 
-    rc = SPI_execute("SELECT consensus.foundry_rd_kappa()", true, 1);
+    rc = SPI_execute("SELECT laplace.foundry_rd_kappa()", true, 1);
     if (rc != SPI_OK_SELECT || SPI_processed == 0)
-        elog(ERROR, "laplace_substrate: could not resolve consensus.foundry_rd_kappa()");
+        elog(ERROR, "laplace_substrate: could not resolve foundry_rd_kappa()");
     d = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
     if (isnull)
-        elog(ERROR, "laplace_substrate: consensus.foundry_rd_kappa() returned NULL");
+        elog(ERROR, "laplace_substrate: foundry_rd_kappa() returned NULL");
     return DatumGetFloat8(d);
 }
 
@@ -276,7 +276,7 @@ spi_render_text(Datum id)
     int   rc;
 
     rc = SPI_execute_with_args(
-        "SELECT realize.render_text($1)", 1, argtypes, args, NULL, true, 1);
+        "SELECT laplace.render_text($1)", 1, argtypes, args, NULL, true, 1);
     if (rc != SPI_OK_SELECT || SPI_processed == 0)
         return (Datum) 0;
     return SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);

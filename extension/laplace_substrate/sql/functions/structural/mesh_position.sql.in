@@ -9,7 +9,7 @@ CREATE OR REPLACE FUNCTION structural.mesh_position(p_id bytea)
         SELECT (SELECT t.object_id
                 FROM laplace.consensus t
                 WHERE t.subject_id=p_id AND t.type_id=laplace.relation_type_id('IS_TYPED_AS')
-                ORDER BY consensus.eff_mu(t.rating,t.rd) DESC, t.object_id LIMIT 1) AS object_id
+                ORDER BY laplace.eff_mu(t.rating,t.rd) DESC, t.object_id LIMIT 1) AS object_id
     ), sense_rows AS MATERIALIZED (
         SELECT s.synset_id AS id, s.eff_mu, s.witnesses,
                row_number() OVER (ORDER BY s.eff_mu DESC NULLS LAST, s.synset_id) AS ord
@@ -17,15 +17,15 @@ CREATE OR REPLACE FUNCTION structural.mesh_position(p_id bytea)
         WHERE NOT EXISTS (
           SELECT 1 FROM laplace.consensus t
           WHERE t.subject_id=p_id AND t.type_id=laplace.relation_type_id('IS_TYPED_AS')
-            AND consensus.eff_mu(t.rating,t.rd)>0)
+            AND laplace.eff_mu(t.rating,t.rd)>0)
     ), up_rows AS MATERIALIZED (
         SELECT c.object_id AS id, c.type_id,
                (SELECT t.object_id FROM laplace.consensus t
                 WHERE t.subject_id=c.object_id
                   AND t.type_id=laplace.relation_type_id('IS_TYPED_AS')
-                ORDER BY consensus.eff_mu(t.rating,t.rd) DESC, t.object_id LIMIT 1) AS hub_id,
-               consensus.eff_mu_display(c.rating,c.rd) AS eff_mu, c.witness_count,
-               row_number() OVER (ORDER BY consensus.eff_mu_display(c.rating,c.rd) DESC NULLS LAST,
+                ORDER BY laplace.eff_mu(t.rating,t.rd) DESC, t.object_id LIMIT 1) AS hub_id,
+               laplace.eff_mu_display(c.rating,c.rd) AS eff_mu, c.witness_count,
+               row_number() OVER (ORDER BY laplace.eff_mu_display(c.rating,c.rd) DESC NULLS LAST,
                                            c.object_id) AS ord
         FROM laplace.consensus c
         WHERE c.subject_id=p_id
@@ -51,7 +51,7 @@ CREATE OR REPLACE FUNCTION structural.mesh_position(p_id bytea)
         SELECT 1, s.ord, 'up', s.id, 'has sense', NULL, 'WordNet_Synset', s.eff_mu, s.witnesses
         FROM sense_rows s
         UNION ALL
-        SELECT 2, u.ord, 'up', u.id, consensus.relation_canonical(u.type_id),
+        SELECT 2, u.ord, 'up', u.id, laplace.relation_canonical(u.type_id),
                u.hub_id, NULL, u.eff_mu, u.witness_count FROM up_rows u
         UNION ALL
         SELECT 3, d.ord, 'down', d.id, d.kind, NULL, NULL, d.mu, d.witnesses FROM down_rows d

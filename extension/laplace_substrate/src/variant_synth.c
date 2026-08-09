@@ -74,7 +74,7 @@ ensure_variant_plans(void)
     {
         Oid        argtypes[2] = { BYTEAOID, INT4OID };
         SPIPlanPtr plan = SPI_prepare(
-            "SELECT realize.render_text($1, $2)", 2, argtypes);
+            "SELECT laplace.render_text($1, $2)", 2, argtypes);
         if (plan == NULL)
             elog(ERROR, "variant_walk: SPI_prepare(render_text) failed: %s",
                  SPI_result_code_string(SPI_result));

@@ -6,7 +6,7 @@
 -- flattened to word tokens -- concatenates them into `stream bytea[]` plus a
 -- scalar `w bigint[]` (topic weight 50/40/0), and hands both to
 -- steered_walk_raw for trigram->bigram backoff. Once you are inside those two
--- flat arrays there is no relation type, no consensus.eff_mu/rd/witness_count, no highway
+-- flat arrays there is no relation type, no laplace.eff_mu/rd/witness_count, no highway
 -- band, no tier, no geometry and no provenance. That is a Markov chain using
 -- the substrate as a word list; the tier ladder and the rating math -- the whole
 -- invention -- are discarded before the walk begins.
@@ -17,13 +17,13 @@
 --   UNITS    tier-3/4 sentences the topic is actually attested in -- its gloss
 --            (definitional band), its HAS_EXAMPLE usages. Each unit carries the
 --            full signed weight the walker ranks by everywhere else:
---            consensus.relation_rank x consensus.eff_mu x witness saturation. A consensus.refuted
+--            laplace.relation_rank x laplace.eff_mu x witness saturation. A laplace.refuted
 --            edge goes negative and drops out on its own -- no floor.
---   CONCEPTS each unit's tier-2 realize.constituents lifted to their synsets. The tier
+--   CONCEPTS each unit's tier-2 laplace.constituents lifted to their synsets. The tier
 --            ladder is USED here (3 -> 2 -> concept), not collapsed to 2.
 --   STEER    the next unit is the one whose concepts carry the most rated
 --            consensus mass to the concepts already said. The graph does the
---            sequencing, at sentence grain, through the same consensus.eff_mu the rest of
+--            sequencing, at sentence grain, through the same laplace.eff_mu the rest of
 --            the engine reads. This is "sequence proposes, meaning steers" with
 --            the steering actually live per step rather than computed once.
 --   REALIZE  each chosen unit renders VERBATIM. It is attested content and the
@@ -61,15 +61,15 @@ CREATE OR REPLACE FUNCTION converse.tiered(p_topic bytea,
     RETURNS text
     LANGUAGE plpgsql STABLE AS $$
 -- NO NEUTRAL SUBTRACTION. consensus_adjacency's export weight uses
--- (consensus.eff_mu - neutral) so consensus.refuted edges sign-flip, and copying that here was a bug
--- caught before it shipped: consensus.eff_mu arrives in the fold's INTERNAL units (~1e12,
--- so Glicko 1500 is 1.5e12), and consensus.eff_mu = rating - 2*rd puts every honestly
+-- (laplace.eff_mu - neutral) so laplace.refuted edges sign-flip, and copying that here was a bug
+-- caught before it shipped: laplace.eff_mu arrives in the fold's INTERNAL units (~1e12,
+-- so Glicko 1500 is 1.5e12), and laplace.eff_mu = rating - 2*rd puts every honestly
 -- weakly-witnessed edge BELOW neutral. Measured on pawn: the whole gloss family
 -- sits at 1.17e12-1.37e12, i.e. Glicko 1170-1370. Subtracting neutral and
 -- keeping w > 0 would have dropped every unit and fallen back to template prose
 -- forever, silently. Rank by the walker's own formula instead --
--- consensus.relation_rank x consensus.eff_mu x witness-saturation -- which keeps everything the fold
--- kept and lets a genuinely consensus.refuted edge go negative on its own rating. consensus.eff_mu
+-- laplace.relation_rank x laplace.eff_mu x witness-saturation -- which keeps everything the fold
+-- kept and lets a genuinely laplace.refuted edge go negative on its own rating. laplace.eff_mu
 -- already carries the rd penalty (rating - 2*rd), so no separate exp(-k*rd).
 DECLARE
     said     bytea[] := ARRAY[]::bytea[];   -- units already emitted, in order
@@ -111,8 +111,8 @@ BEGIN
         SELECT u.id, max(u.w) AS w
         FROM (
             SELECT c.object_id AS id,
-                   consensus.relation_rank_resolved(c.type_id)
-                     * consensus.eff_mu(c.rating, c.rd)::float8
+                   laplace.relation_rank_resolved(c.type_id)
+                     * laplace.eff_mu(c.rating, c.rd)::float8
                      * (c.witness_count::float8 / (1.0 + c.witness_count)) AS w
             FROM laplace.consensus c
             JOIN laplace.entities e ON e.id = c.object_id AND e.tier >= 3
@@ -130,7 +130,7 @@ BEGIN
         u_w  := u_w[1:p_pool];
     END IF;
 
-    -- CONCEPTS per unit: tier-2 realize.constituents lifted to synsets. SET-BASED,
+    -- CONCEPTS per unit: tier-2 laplace.constituents lifted to synsets. SET-BASED,
     -- NOT PER WORD (taxonomy.top_synset per row hung at 73s for 48 dog units).
     -- Fence HAS_SENSE family once (incl. dynamic children via relation_in_family).
     SELECT coalesce(array_agg(q.unit ORDER BY q.unit, q.concept), ARRAY[]::bytea[]),
@@ -145,10 +145,10 @@ BEGIN
             SELECT e.id
             FROM laplace.entities e
             WHERE e.type_id = laplace.entity_type_id('RelationType')
-              AND consensus.relation_in_family(e.id, 'HAS_SENSE')
+              AND laplace.relation_in_family(e.id, 'HAS_SENSE')
         ) fam ON fam.id = sc.type_id
         WHERE tp.ctier = 2
-        ORDER BY p.id, tp.entity_id, consensus.eff_mu(sc.rating, sc.rd) DESC, sc.object_id
+        ORDER BY p.id, tp.entity_id, laplace.eff_mu(sc.rating, sc.rd) DESC, sc.object_id
     ) q;
 
     -- ANSWER IN THE LANGUAGE THAT WAS ASKED. Kept in HASH SPACE.
@@ -204,8 +204,8 @@ BEGIN
             SELECT k.unit,
                    count(*) AS shared,
                    COALESCE((
-                       SELECT sum(consensus.relation_rank_resolved(c.type_id)
-                                  * consensus.eff_mu(c.rating, c.rd)::float8)
+                       SELECT sum(laplace.relation_rank_resolved(c.type_id)
+                                  * laplace.eff_mu(c.rating, c.rd)::float8)
                        FROM laplace.consensus c
                        WHERE c.subject_id = ANY (ARRAY(
                                  SELECT cc FROM unnest(c_unit, c_concept) AS x(cu, cc)
@@ -213,8 +213,8 @@ BEGIN
                          AND c.object_id = ANY(seen)
                    ), 0)
                    + COALESCE((
-                       SELECT sum(consensus.relation_rank_resolved(c.type_id)
-                                  * consensus.eff_mu(c.rating, c.rd)::float8)
+                       SELECT sum(laplace.relation_rank_resolved(c.type_id)
+                                  * laplace.eff_mu(c.rating, c.rd)::float8)
                        FROM laplace.consensus c
                        WHERE c.object_id = ANY (ARRAY(
                                  SELECT cc FROM unnest(c_unit, c_concept) AS x(cu, cc)
@@ -239,7 +239,7 @@ BEGIN
     -- REALIZE verbatim, in walk order. Terminate each unit that does not already
     -- end in punctuation (clause seam, not content rewrite).
     said_realized := realize.batch(said, p_lang);
-    said_rendered := realize.render_text_batch(said, 512);
+    said_rendered := laplace.render_text_batch(said, 512);
     FOR i IN 1..COALESCE(array_length(said, 1), 0) LOOP
         s := btrim(COALESCE(said_realized[i], said_rendered[i]));
         IF s IS NOT NULL AND s <> '' THEN

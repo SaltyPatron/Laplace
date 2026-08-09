@@ -210,7 +210,7 @@ internal static class FoundryExport
         var wordMu = new Dictionary<int, double>();
         // Objects are categories (often outside the token vocab) — relation_plane
         // would drop them. edges_raw per subject keeps the object unrestricted while
-        // retiring the raw laplace.consensus scan. consensus.walk_edge_weight(not eff_mu) —
+        // retiring the raw laplace.consensus scan. walk_edge_weight (not eff_mu) —
         // glicko2.c documents using eff_mu as a sign/gate as the bug that scored
         // 99.04% of won claims negative.
         var attrRows = await NpgsqlFoundryReads.AttributeOutboundAsync(

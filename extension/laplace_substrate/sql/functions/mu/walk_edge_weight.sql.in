@@ -1,4 +1,4 @@
--- consensus.walk_edge_weight(rating, rd, witness_count [, kappa]) -> float8
+-- walk_edge_weight(rating, rd, witness_count [, kappa]) -> float8
 --
 -- The Glicko-complete signed edge weight (doc 14 P5), and the ONLY expression
 -- of it. Signed by the RATING against neutral; magnitude discounted by RD
@@ -17,11 +17,11 @@
 -- the only cross-language parity test in the tree pinned eff_mu, the trivial
 -- one. tests/sql/walk_edge_weight_parity.sql now pins THIS.
 --
--- kappa defaults to consensus.foundry_rd_kappa(), the same SQL tunable the native
+-- kappa defaults to foundry_rd_kappa(), the same SQL tunable the native
 -- walkers fetch through spi_fetch_rd_kappa(). That was already single-sourced
 -- and stays so; only the formula and the half-max were duplicated.
 --
--- NOT eff_mu. consensus.eff_mu(rating - 2*rd) remains the conservative RANKING key --
+-- NOT eff_mu. eff_mu (rating - 2*rd) remains the conservative RANKING key --
 -- it is the indexed expression and the correct ORDER BY for reads. This is the
 -- WEIGHT: what an edge contributes to a walk score or an exported tensor.
 -- Using eff_mu as a sign/gate is the bug glicko2.c documents (99.04% of won

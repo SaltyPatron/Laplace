@@ -9,7 +9,7 @@
 -- caller (top-k is only ever a query LIMIT).
 -- BEGIN ATOMIC: GH #764.
 -- Model artifact scan → generation (ELECT / forward-pass family).
-DROP FUNCTION IF EXISTS generation.model_jitter_catalog(text, bigint);
+DROP FUNCTION IF EXISTS model_jitter_catalog(text, bigint);
 DROP FUNCTION IF EXISTS laplace.model_jitter_catalog(text, bigint);
 CREATE OR REPLACE FUNCTION generation.model_jitter_catalog(
         p_relation text DEFAULT NULL,

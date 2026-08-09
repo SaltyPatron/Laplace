@@ -8,7 +8,7 @@ DECLARE
     v_id bytea := laplace.consensus_id(p_subject, p_type, p_object);
 BEGIN
     UPDATE laplace.consensus
-    SET rd = LEAST((rd / p_decay_factor)::bigint, consensus.glicko2_initial_rd())
+    SET rd = LEAST((rd / p_decay_factor)::bigint, laplace.glicko2_initial_rd())
     WHERE id = v_id;
 END;
 $$;

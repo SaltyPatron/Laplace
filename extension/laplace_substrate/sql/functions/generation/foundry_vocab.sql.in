@@ -84,7 +84,7 @@ CREATE OR REPLACE FUNCTION generation.foundry_vocab(p_size int)
     clean AS (
         SELECT DISTINCT ON (n.s) n.id, n.s, n.d
         FROM named n
-        WHERE n.s IS NOT NULL AND btrim(n.s) <> '' AND NOT realize.is_all_whitespace(n.s)
+        WHERE n.s IS NOT NULL AND btrim(n.s) <> '' AND NOT laplace.is_all_whitespace(n.s)
           AND position(' ' IN n.s) = 0 AND char_length(n.s) <= 40
         ORDER BY n.s, n.d DESC
     )

@@ -1,5 +1,5 @@
 -- converse.facts(syn, lang): the walk-driven fact set behind converse.about() --
--- one row per attested fact family, each carrying its provenance (consensus.eff_mu,
+-- one row per attested fact family, each carrying its provenance (laplace.eff_mu,
 -- witnesses) and, for walk-built rows, the literal path/types so a caller can
 -- drill to the exact consensus edges that produced the sentence.
 --
@@ -18,7 +18,7 @@
 -- uses walk_strongest, the correct engine for the type-unfiltered case. The
 -- listing rows are 1-hop by nature (a parts inventory IS its ranked edges);
 -- LIMIT here is a query limit, not a truncation of what the source asserts.
--- consensus.eff_mu for a chain = the weakest edge on it (a chain is only as certain as
+-- laplace.eff_mu for a chain = the weakest edge on it (a chain is only as certain as
 -- its loosest strand).
 DROP FUNCTION IF EXISTS laplace.converse_facts(bytea, bytea);
 CREATE OR REPLACE FUNCTION converse.facts(p_syn bytea, p_lang bytea DEFAULT NULL)
@@ -51,7 +51,7 @@ BEGIN
 
     v_lbl := COALESCE(realize.realize(p_syn, p_lang), realize.label(p_syn));
 
-    -- definition: highest consensus.eff_mu edge in the definitional band.
+    -- definition: highest laplace.eff_mu edge in the definitional band.
     RETURN QUERY
     SELECT 'definition'::text,
            initcap(v_lbl) || ' is ' || realize.render_text(c.object_id, 96) || '.',
@@ -91,7 +91,7 @@ BEGIN
             SELECT * FROM consensus.walk_branches(p_syn, tax_type, 4, 3)
         ),
         winner AS (
-            -- Deepest chain first: the beam never walks a consensus.refuted or
+            -- Deepest chain first: the beam never walks a laplace.refuted or
             -- non-positive edge, so every placed node sits on a confirmed
             -- chain and depth IS ancestry. Average per-hop confidence only
             -- breaks ties between equally deep chains (an avg-first order
@@ -166,7 +166,7 @@ BEGIN
     --
     -- Excluded in ID SPACE, before anything is rendered. The old `label_is_content`
     -- filter ran on the RENDERED string to drop bare ILI ids and lexfile names --
-    -- a stoplist in disguise, and a realize.render call in the middle of a hash-space
+    -- a stoplist in disguise, and a laplace.render call in the middle of a hash-space
     -- operation. Selecting families up front removes the reason it existed; it is
     -- retained only as a last-resort guard at the point of rendering.
     -- Rank in id space, exclude non-kin families in id space, then ONE
@@ -203,7 +203,7 @@ BEGIN
     -- web: the strongest chain across ALL relations -- the explicit
     -- pull-one-strand answer, rendered with its relation arrows.
     RETURN QUERY
-    -- Third hand-rolled arrow realize.render, now the installed one (GH #906 item 2).
+    -- Third hand-rolled arrow laplace.render, now the installed one (GH #906 item 2).
     -- walk_strongest walks forward, so every direction is 1. This also unifies the
     -- glyphs: this copy drew ASCII ' -type-> ' where realize_path and both walk
     -- responders draw ' —type→ ', so one substrate spoke two arrow dialects

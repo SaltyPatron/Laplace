@@ -8,7 +8,7 @@ CREATE OR REPLACE FUNCTION generation.recall_trajectories(p_word text, p_limit i
     FROM wid
     JOIN laplace.v_word_points w
       ON w.trajectory IS NOT NULL
-     AND w.type_id = realize.canonical_id('Sentence')
+     AND w.type_id = laplace.canonical_id('Sentence')
      AND public.laplace_trajectory_constituent_ids(w.trajectory) @> ARRAY[wid.id]
     ORDER BY rank_distance, w.id
     LIMIT p_limit
@@ -17,6 +17,6 @@ CREATE OR REPLACE FUNCTION generation.recall_trajectories(p_word text, p_limit i
   )
   SELECT left(replace(t.s, chr(10), ' '), 180)
   FROM batch,
-       LATERAL unnest(realize.render_text_batch(batch.a, 300)) WITH ORDINALITY AS t(s, ord)
+       LATERAL unnest(laplace.render_text_batch(batch.a, 300)) WITH ORDINALITY AS t(s, ord)
   ORDER BY t.ord
 $$;

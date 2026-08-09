@@ -584,7 +584,7 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
     // Two players and the one game between them, wired so the drill the UI walks
     // is walkable end to end: roster -> player -> his games -> that game -> the
     // opponent's page. TalIdHex is the live content address of "Tal, Mikhail"
-    // (realize.canonical_id('chess/player/mikhail tal')), so a fixture id and a real id
+    // (canonical_id('chess/player/mikhail tal')), so a fixture id and a real id
     // are the same kind of thing here, as they are in the substrate.
     private const string TalIdHex = "b422a7d40dec7948426e7c8ae40810d5";
     private const string BotvinnikIdHex = "aa11bb22cc33dd44ee55ff6677889900";

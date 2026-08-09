@@ -1,9 +1,9 @@
 -- Retired: laplace_eff_mu(subject, type, object) -> bigint.
 -- A convenience wrapper that looked up one consensus row and returned
--- consensus.eff_mu(rating, rd). It was marked `STABLE SET search_path`, and the SET clause
+-- eff_mu(rating, rd). It was marked `STABLE SET search_path`, and the SET clause
 -- blocks SQL inlining — so in a WHERE/ORDER BY it would have run per-row and could
 -- not match the (rating - 2*rd) expression indexes that every other eff_mu caller
--- relies on. It had zero callers tree-wide (readers open-code consensus.eff_mu(c.rating, c.rd)
+-- relies on. It had zero callers tree-wide (readers open-code eff_mu(c.rating, c.rd)
 -- against the consensus row they already hold), so it was dead code that also
 -- violated the eff_mu inlining law. On the UPGRADE path the old catalog row would
 -- linger; a fresh CREATE EXTENSION never had it. This DROP makes the two match.

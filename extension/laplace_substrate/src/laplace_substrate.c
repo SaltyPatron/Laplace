@@ -187,7 +187,7 @@ pg_laplace_glicko2_neutral_mu(PG_FUNCTION_ARGS)
  * EXPORTS -- the same graph, two weights.
  *
  * kappa stays a caller-supplied parameter, unchanged: it is the SQL tunable
- * consensus.foundry_rd_kappa(), fetched once per call site (spi_fetch_rd_kappa in the
+ * foundry_rd_kappa(), fetched once per call site (spi_fetch_rd_kappa in the
  * native walkers, the function default here), so the tunable itself was never
  * duplicated. Only the formula and the half-max were.
  */
@@ -922,7 +922,7 @@ pg_relation_rank_resolved(PG_FUNCTION_ARGS)
             "SELECT object_id FROM laplace.consensus "
             "WHERE subject_id = $1 "
             "  AND type_id = laplace.relation_type_id('IS_A') "
-            "ORDER BY consensus.eff_mu(rating, rd) DESC LIMIT 1",
+            "ORDER BY laplace.eff_mu(rating, rd) DESC LIMIT 1",
             1, argtypes, args, NULL, true, 1);
         if (rc != SPI_OK_SELECT || SPI_processed == 0)
             break;

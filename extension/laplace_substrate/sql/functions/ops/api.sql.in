@@ -1,5 +1,4 @@
-DROP FUNCTION IF EXISTS laplace.api(text);
-CREATE OR REPLACE FUNCTION ops.api(p_like text DEFAULT NULL)
+CREATE OR REPLACE FUNCTION api(p_like text DEFAULT NULL)
     RETURNS TABLE(name text, args text, returns text)
     LANGUAGE sql STABLE AS $$
     SELECT CASE WHEN n.nspname = 'laplace' THEN p.proname::text
@@ -10,7 +9,7 @@ CREATE OR REPLACE FUNCTION ops.api(p_like text DEFAULT NULL)
     JOIN pg_namespace n ON n.oid = p.pronamespace
     WHERE n.nspname = ANY (ARRAY[
             'laplace','consensus','converse','lexical','taxonomy',
-            'generation','structural','chess','realize','ops'
+            'generation','structural','chess','realize'
         ])
       AND (p_like IS NULL
            OR p.proname ILIKE '%'||p_like||'%'

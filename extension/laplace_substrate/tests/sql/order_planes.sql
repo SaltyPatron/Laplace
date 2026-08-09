@@ -106,7 +106,7 @@ BEGIN
 
     -- sentence_order reads document trajectories and must find the sentence pair. This
     -- also pins the type_id role predicate: the document is selected by
-    -- realize.canonical_id('Document'), so a regression to a tier test shows up as zero rows.
+    -- canonical_id('Document'), so a regression to a tier test shows up as zero rows.
     SELECT count(*) INTO n
     FROM generation.sentence_order(1000, 1)
     WHERE subject_id = sent AND object_id = sent_rep;

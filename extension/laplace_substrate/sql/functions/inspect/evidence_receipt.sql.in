@@ -14,7 +14,7 @@ CREATE OR REPLACE FUNCTION evidence_receipt(p_id bytea, p_limit integer DEFAULT 
         UNION
         SELECT sn.synset_id FROM lexical.senses(p_id) sn
     ), feat_dynamic AS MATERIALIZED (
-        -- Dynamic HAS_FEATURE children fenced once; consensus.relation_in_family() never
+        -- Dynamic HAS_FEATURE children fenced once; laplace.relation_in_family() never
         -- inlines (SET search_path), so calling it per attestation row ran its
         -- EXISTS probe per row. Same truth table: static family via the C check
         -- below, dynamic membership via this set.
@@ -34,8 +34,8 @@ CREATE OR REPLACE FUNCTION evidence_receipt(p_id bytea, p_limit integer DEFAULT 
           AND EXISTS (
               SELECT 1 FROM laplace.entities et
               WHERE et.id = a.type_id AND et.type_id = laplace.entity_type_id('RelationType'))
-          AND NOT consensus.relation_type_in_family(a.type_id, 'HAS_POS')
-          AND NOT consensus.relation_type_in_family(a.type_id, 'HAS_FEATURE')
+          AND NOT laplace.relation_type_in_family(a.type_id, 'HAS_POS')
+          AND NOT laplace.relation_type_in_family(a.type_id, 'HAS_FEATURE')
           AND a.type_id NOT IN (SELECT id FROM feat_dynamic)
           AND a.type_id NOT IN (
               laplace.relation_type_id('HAS_SENSE'), laplace.relation_type_id('IS_SENSE_OF'),
@@ -58,7 +58,7 @@ CREATE OR REPLACE FUNCTION evidence_receipt(p_id bytea, p_limit integer DEFAULT 
         SELECT array_agg(DISTINCT f.source_id ORDER BY f.source_id) AS a FROM filtered f
     ), src_labels AS MATERIALIZED (
         -- Label each DISTINCT source ONCE (sources number in the dozens), fenced
-        -- so realize.render() cannot be pushed back down to run per (type, object, source)
+        -- so laplace.render() cannot be pushed back down to run per (type, object, source)
         -- group (~3,129 renders for one entity before this map existed). The
         -- string_agg below keeps the exact DISTINCT + ORDER BY label semantics of
         -- the old inline expression, so output is byte-identical.
@@ -67,7 +67,7 @@ CREATE OR REPLACE FUNCTION evidence_receipt(p_id bytea, p_limit integer DEFAULT 
                    '^substrate/source/([^/]+)(?:/v[0-9]+)?$', '\1') AS label
         FROM src_ids,
           LATERAL unnest(src_ids.a) WITH ORDINALITY i(id,ord),
-          LATERAL unnest(realize.render_batch(src_ids.a)) WITH ORDINALITY r(txt,ord)
+          LATERAL unnest(laplace.render_batch(src_ids.a)) WITH ORDINALITY r(txt,ord)
         WHERE i.ord=r.ord
     ), folded AS (
         SELECT f.type_id, f.object_id,
@@ -85,12 +85,12 @@ CREATE OR REPLACE FUNCTION evidence_receipt(p_id bytea, p_limit integer DEFAULT 
         -- "single best row by eff_mu" semantics of the old ORDER BY ... LIMIT 1.
         SELECT DISTINCT ON (c.type_id, c.object_id)
                c.type_id, c.object_id,
-               consensus.eff_mu(c.rating, c.rd) AS mu_raw,
-               consensus.eff_mu_display(c.rating, c.rd) AS mu_disp
+               laplace.eff_mu(c.rating, c.rd) AS mu_raw,
+               laplace.eff_mu_display(c.rating, c.rd) AS mu_disp
         FROM laplace.consensus c
         WHERE c.subject_id IN (SELECT id FROM subj)
           AND c.object_id IS NOT NULL
-        ORDER BY c.type_id, c.object_id, consensus.eff_mu(c.rating, c.rd) DESC
+        ORDER BY c.type_id, c.object_id, laplace.eff_mu(c.rating, c.rd) DESC
     ), ranked AS (
         -- Issue 52: rank BEFORE labeling. The old shape labeled every folded claim
         -- (type_label + _realize_synset_lemma/render_text, ~6ms/row — 3,129 labels
@@ -106,12 +106,12 @@ CREATE OR REPLACE FUNCTION evidence_receipt(p_id bytea, p_limit integer DEFAULT 
         LEFT JOIN best b
                ON b.type_id = fo.type_id AND b.object_id = fo.object_id
         WHERE fo.source_labels IS NOT NULL AND fo.source_labels <> ''
-        ORDER BY consensus.edge_rank(fo.type_id, COALESCE(b.mu_raw, 0)) DESC,
+        ORDER BY laplace.edge_rank(fo.type_id, COALESCE(b.mu_raw, 0)) DESC,
                  fo.witness_count DESC
         LIMIT GREATEST(1, p_limit) * 3 + 8
     ), ordered AS (
         SELECT rk.*, row_number() OVER (
-                   ORDER BY consensus.edge_rank(rk.type_id, rk.mu_raw) DESC,
+                   ORDER BY laplace.edge_rank(rk.type_id, rk.mu_raw) DESC,
                             rk.witness_count DESC) AS ord
         FROM ranked rk
     ), labels AS MATERIALIZED (
@@ -148,7 +148,7 @@ CREATE OR REPLACE FUNCTION evidence_receipt(p_id bytea, p_limit integer DEFAULT 
     WHERE lb.obj IS NOT NULL AND lb.obj <> ''
       AND right(lb.obj, 1) <> U&'\2026'
       AND right(lb.rel, 1) <> U&'\2026'
-    ORDER BY consensus.edge_rank(lb.type_id, lb.mu_raw) DESC,
+    ORDER BY laplace.edge_rank(lb.type_id, lb.mu_raw) DESC,
              lb.witness_count DESC
     LIMIT GREATEST(1, p_limit)
 $$;

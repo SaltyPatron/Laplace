@@ -7,8 +7,8 @@
 --              topic word (weight 40). Drawn from physicality trajectories =
 --              precedes/follows/co-occurrence. Each token carries its source's
 --              topic weight, so the corpus knows what is central vs peripheral.
---              Set-based: realize.render_text runs once per DISTINCT token id to drop
---              whitespace realize.constituents(the old loop rendered every occurrence
+--              Set-based: laplace.render_text runs once per DISTINCT token id to drop
+--              whitespace laplace.constituents(the old loop rendered every occurrence
 --              of every token of every sentence).
 --   WALK    -> converse.steered_walk_raw(steered_walk.c): trigram->bigram backoff over
 --              the restricted stream, SEEDED from the core concept's own
@@ -16,7 +16,7 @@
 --              anti-repeat guard forcing novel recombination at shared n-gram
 --              pivots. Ends at a sentence boundary once it has said enough.
 --              Grounded only in attested token order; deterministic per seed.
---   REALIZE -> realize.render_text of the emitted token ids.
+--   REALIZE -> laplace.render_text of the emitted token ids.
 CREATE OR REPLACE FUNCTION generation.walk_batch(p_prompt text,
                                                   p_steps int,
                                                   p_seeds bigint[])
@@ -77,8 +77,8 @@ BEGIN
     -- GATHER: the concept's own gloss (tier-1 definition, the seed) PLUS the
     -- TIER FAN-OUT -- a word's usage lives in the tier above it, so pull the
     -- tier-3 sentences that contain the topic word as a constituent (dense real
-    -- usage) via the realize.constituents index. This is the corpus, not just the gloss.
-    -- Word-level tokens only: the inter-word whitespace realize.constituents are
+    -- usage) via the laplace.constituents index. This is the corpus, not just the gloss.
+    -- Word-level tokens only: the inter-word whitespace laplace.constituents are
     -- dropped, else (word,space) bigrams match every boundary and the walk
     -- jumps (e.g. "a"+space -> "creek" from "...than a creek").
     -- The corpus is ranked by the WEB, not by storage order. containers_of walks
@@ -88,7 +88,7 @@ BEGIN
     --
     -- The old ORDER BY was `is_core DESC, gid`: content-hash order. MEASURED on
     -- 'water', of the 400 tier-3 containers returned, 398 are the object of a
-    -- HAS_DEFINITION consensus edge whose consensus.eff_mu spans 1.17e12 to 1.46e12 -- a
+    -- HAS_DEFINITION consensus edge whose laplace.eff_mu spans 1.17e12 to 1.46e12 -- a
     -- 25% spread, witness_count up to 4. The signal was sitting on 99.5% of the
     -- candidates and the corpus that decides what this engine SAYS was picked by
     -- hash instead.
@@ -108,12 +108,12 @@ BEGIN
         -- contributes its token stream once, not twice.
         SELECT DISTINCT g.gid, g.wt, g.is_core FROM (
             SELECT c.object_id AS gid, 50::bigint AS wt, true AS is_core,
-                   consensus.eff_mu(c.rating, c.rd) AS mu
+                   laplace.eff_mu(c.rating, c.rd) AS mu
             FROM laplace.consensus c
             WHERE c.subject_id = syn AND c.type_id = ANY (t_def)
             UNION ALL
             SELECT co.entity_id, 40, false,
-                   COALESCE(MAX(consensus.eff_mu(k.rating, k.rd)), consensus.glicko2_neutral_mu())
+                   COALESCE(MAX(laplace.eff_mu(k.rating, k.rd)), laplace.glicko2_neutral_mu())
             FROM structural.containers_of(topic_word, 1, 400) co
             LEFT JOIN laplace.consensus k ON k.object_id = co.entity_id
             WHERE co.tier = 3
@@ -129,8 +129,8 @@ BEGIN
         -- vocabulary assumption this engine exists to replace.
         --
         -- What the filter discarded, MEASURED over 12 containers of 'water':
-        --   ctier 0 : 164 realize.constituents,  12 distinct  <- the separators
-        --   ctier 2 : 144 realize.constituents,  94 distinct  <- the words
+        --   ctier 0 : 164 laplace.constituents,  12 distinct  <- the separators
+        --   ctier 2 : 144 laplace.constituents,  94 distinct  <- the words
         -- The separators were in the trajectory all along, in attested order.
         -- Dropping them is why REALIZE had to invent a ' ', false for every script
         -- that does not space its words.
@@ -235,7 +235,7 @@ BEGIN
         CROSS JOIN LATERAL unnest(e.ids) AS u(id)
     ),
     realized AS MATERIALIZED (
-        SELECT i.a, realize.render_text_batch(i.a, 64) AS txt
+        SELECT i.a, laplace.render_text_batch(i.a, 64) AS txt
         FROM ids i
     ),
     labels AS MATERIALIZED (

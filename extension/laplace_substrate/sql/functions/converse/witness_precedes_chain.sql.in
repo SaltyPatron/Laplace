@@ -49,7 +49,7 @@ BEGIN
         subs,
         array_fill(r_prec, ARRAY[cardinality(subs)]),
         objs,
-        array_fill(consensus.glicko2_initial_rd(), ARRAY[cardinality(subs)]),
+        array_fill(laplace.glicko2_initial_rd(), ARRAY[cardinality(subs)]),
         games,
         sums,
         array_fill(now(), ARRAY[cardinality(subs)]));

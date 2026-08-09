@@ -1,4 +1,4 @@
--- structural.geometry_audit(): the S³ placement, per tier, as a standing surface.
+-- geometry_audit(): the S³ placement, per tier, as a standing surface.
 --
 -- Promoted 2026-08-02 from ad-hoc queries run while investigating Hilbert
 -- partition skew. A diagnostic that answers a recurring structural question is

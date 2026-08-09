@@ -9,7 +9,7 @@
 --
 -- That read was being hand-written each time it was needed: a CTE over
 -- entity_container_degree, a lateral count over consensus_out, a witness sum,
--- and consensus.foundry_witness_sat, re-derived per investigation. This is the same
+-- and laplace.foundry_witness_sat, re-derived per investigation. This is the same
 -- reinvented-wheel defect W16 documents in the read path, committed by the
 -- person documenting it. One implementation, named, installed, callable through
 -- `op` — so the next measurement quotes a function instead of a paragraph of SQL.

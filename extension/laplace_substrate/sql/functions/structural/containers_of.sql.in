@@ -1,4 +1,4 @@
--- The reverse of realize.constituents(): given an entity, walk UP the composition
+-- The reverse of laplace.constituents(): given an entity, walk UP the composition
 -- hierarchy and return every higher-tier entity whose trajectory contains it
 -- (directly at hop=1, or transitively through intermediate tiers at hop>1),
 -- e.g. structural.containers_of(laplace.word_id('chess'), 2) returns the sentences containing

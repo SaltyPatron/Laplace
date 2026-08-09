@@ -6,7 +6,7 @@
 --
 -- The facts come from converse.facts() -- the walk-driven fact engine (native
 -- beam walk for the taxonomy chain, ranked consensus for the listings), each
--- row carrying provenance (consensus.eff_mu, witnesses, path). This wrapper is prose-only:
+-- row carrying provenance (laplace.eff_mu, witnesses, path). This wrapper is prose-only:
 -- callers that want the provenance columns query converse_facts directly. The
 -- 'web' arrow-chain row is a drill-down surface, not prose -- excluded here.
 DROP FUNCTION IF EXISTS laplace.converse_about(bytea, bytea);

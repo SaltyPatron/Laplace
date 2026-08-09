@@ -1,7 +1,7 @@
 -- relation_family_members: enumerate the STATIC governed members of a relation
--- family — the set-returning companion to consensus.relation_type_in_family(which can
+-- family — the set-returning companion to relation_type_in_family (which can
 -- only answer membership one id at a time). Callers that filtered big scans
--- with `consensus.relation_type_in_family(c.type_id, 'X')` per row could never use the
+-- with `relation_type_in_family(c.type_id, 'X')` per row could never use the
 -- (subject_id, type_id) indexes; joining against this set makes the same
 -- predicate sargable. Membership truth stays with the C check — this just
 -- applies it over the RelationType entity roster (hundreds of rows) instead

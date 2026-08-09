@@ -1,7 +1,7 @@
 /*
  * explore_web.c — SPI beam crawl for the explore consensus-web viz.
  *
- * Unlike generation.foundry_crawl(vocab / tier-2 emit only), this:
+ * Unlike foundry_crawl (vocab / tier-2 emit only), this:
  *   - walks undirected consensus (out ∪ in) via explore_web_neighbors
  *   - admits every tier
  *   - beams ≤ fanout NEW nodes per hop (pool-safe: one SPI connection)

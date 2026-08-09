@@ -12,7 +12,7 @@
 --
 -- The C form is the same computation as a MEMBERSHIP SCAN: candidates fetched
 -- once, then one indexed range read per direction with an O(1) hash probe per
--- edge. consensus.relation_rank and the canonical name come from the manifest in C
+-- edge. laplace.relation_rank and the canonical name come from the manifest in C
 -- (laplace_relation_lookup), and the name's object token becomes a content id
 -- through the same hash the substrate uses everywhere -- so no per-row SQL
 -- function call survives anywhere in the read.
@@ -46,7 +46,7 @@
 -- The elector sites declared and pinned by ElectorArchitectureGateTests instead
 -- break the all-silent case by ord DESC -- recency among sense-bearing candidates,
 -- resolve_last_word's semantics restricted to tokens the graph holds senses for.
--- total_mass stays exposed: it is the signal that consensus.refuted the premise, and the
+-- total_mass stays exposed: it is the signal that laplace.refuted the premise, and the
 -- election diagnostic reads it.
 DROP FUNCTION IF EXISTS laplace.prompt_coherence(text);
 CREATE OR REPLACE FUNCTION converse.prompt_coherence(p_prompt text)

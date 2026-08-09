@@ -31,7 +31,7 @@ extern char *trim_dup(const char *s);
 extern bool  str_empty(const char *s);
 extern char *lower_dup(const char *s);
 
-/* Canonical intent vocabulary. converse.query_shapes() publishes it to callers
+/* Canonical intent vocabulary. laplace.query_shapes() publishes it to callers
  * so a UI can build its controls from the substrate instead of hardcoding. */
 extern bool  route_intent_known(const char *intent);
 

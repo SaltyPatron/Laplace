@@ -4,7 +4,7 @@
  * WHY THIS IS C. CLAUDE.md:75: "Per-row set-returning functions, string
  * operations, and both-directions OR joins belong in C, not in a rewritten
  * CTE." The SQL form used converse.prompt_state() as a table source (a per-row SRF)
- * and called consensus.eff_mu() per row over a partitioned consensus join. That is
+ * and called eff_mu() per row over a partitioned consensus join. That is
  * exactly the shape the law names. One indexed range read plus an O(1) hash
  * probe per edge here -- the shape prompt_coherence.c and recall.c use.
  *

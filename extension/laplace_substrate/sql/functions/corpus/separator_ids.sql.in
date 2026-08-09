@@ -9,19 +9,19 @@
 -- a special case: UAX#29 GB3 makes CR+LF a single grapheme, so the cluster is a
 -- first-class entity at tier 1 and can never carry a category attestation of its
 -- own -- categories are atom-level facts. Composition lifts the property (§3,
--- composition is Merkle), so bool_and over the realize.constituents IS the definition.
+-- composition is Merkle), so bool_and over the laplace.constituents IS the definition.
 --
 -- Measured on the foundation substrate 2026-07-29: 84 atoms + 1 grapheme (CRLF)
 -- = 85 ids, 1.2 s for the whole set. Bounded by the alphabet, not by the corpus --
 -- the same class of lookup as laplace.relation_type_id(), and explicitly NOT a corpus
 -- cache. Nothing here scans ingested content.
 --
--- NO RENDER FALLBACK. An earlier shape reached for realize.is_all_whitespace(render_text_
+-- NO RENDER FALLBACK. An earlier shape reached for is_all_whitespace(render_text_
 -- fast(...)) whenever a token had no category attestation. That was compensating
 -- for the grapheme arm being missing, and it hid the reason: composites are
 -- unattested BY CONSTRUCTION, not by incomplete seeding. Rendering to classify is
 -- also the read-side law inverted -- classification is an indexed read on the id;
--- the realize.render is the cost.
+-- the laplace.render is the cost.
 --
 -- SCRIPT HONESTY: Zs/Zl/Zp/Cc are the Unicode separator and control categories.
 -- For a script that does not delimit with separator characters (Han, Thai,

@@ -1,5 +1,5 @@
 -- Inbound edges of an entity. Thin wrapper over consensus.edges_raw(); pins inbound,
--- consensus.edge_rank ordering, consensus.refuted edges INCLUDED — the axes this signature has
+-- laplace.edge_rank ordering, laplace.refuted edges INCLUDED — the axes this signature has
 -- always carried, now stated instead of inferred from the body.
 DROP FUNCTION IF EXISTS laplace.consensus_in(bytea, integer);
 -- BEGIN ATOMIC: GH #764.

@@ -31,7 +31,7 @@ public sealed class BootstrapIntentBuilder
 
         // The source names ITSELF, by the same law AddType uses for type nodes:
         // HAS_NAME_ALIAS → the name's content root. Canonical-string sources are
-        // unaffected on the read side (realize.render() prefers canonical_names); content-
+        // unaffected on the read side (render() prefers canonical_names); content-
         // hash sources (models) stop rendering as raw hex, and name → source-id
         // resolution becomes a consensus lookup (seed-step verify depends on it).
         if (ContentEmitter.Emit(_inner, sourceName, sourceId) is { } sourceNameId)

@@ -17,7 +17,7 @@ CREATE OR REPLACE FUNCTION chess.players_by_initial(
     -- there is nothing to regenerate and nothing that can go silently empty. The expression
     -- must match physicalities_traj_first_id_btree exactly or the scan falls back to a seq.
     --
-    -- Ordered by consensus.eff_mu within the letter, for the same reason the roster is: strength is
+    -- Ordered by laplace.eff_mu within the letter, for the same reason the roster is: strength is
     -- what the fold knows, and a thin record sinks on its own RD rather than surfacing just
     -- because it sorts early. Names are resolved ONCE for the page, batched.
     WITH target AS MATERIALIZED (
@@ -34,7 +34,7 @@ CREATE OR REPLACE FUNCTION chess.players_by_initial(
     ),
     players AS MATERIALIZED (
         -- Back to the players those names belong to. HAS_NAME_ALIAS is the edge the chess
-        -- decomposer writes; the join is on the consensus cell, so an unnamed or consensus.refuted
+        -- decomposer writes; the join is on the consensus cell, so an unnamed or laplace.refuted
         -- alias never surfaces a player.
         SELECT DISTINCT c.subject_id AS player
         FROM laplace.consensus c
@@ -65,8 +65,8 @@ CREATE OR REPLACE FUNCTION chess.players_by_initial(
     SELECT rated.player,
            COALESCE(NULLIF(s.txt, ''), encode(rated.player, 'hex')),
            rated.games,
-           -- DISPLAY units, never raw fp1e9: consensus.eff_mu_display is the one scaling law
-           -- (functions/mu/consensus.eff_mu_display.sql.in), rating/rd take the same /1e9 round.
+           -- DISPLAY units, never raw fp1e9: laplace.eff_mu_display is the one scaling law
+           -- (functions/mu/laplace.eff_mu_display.sql.in), rating/rd take the same /1e9 round.
            round((rated.rating / 1e9)::numeric, 3)::double precision,
            round((rated.rd / 1e9)::numeric, 3)::double precision,
            consensus.eff_mu_display(rated.rating, rated.rd)::double precision

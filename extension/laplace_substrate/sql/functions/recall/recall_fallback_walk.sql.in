@@ -1,10 +1,10 @@
 -- THE walk responder. recall_walk_response's walk_reply branch used to carry a
 -- byte-for-byte second copy of this body (GH #906 item 1) -- same walk_strongest
--- call, same arrow realize.render, same min(consensus.eff_mu) -- differing only in depth and in how
+-- call, same arrow laplace.render, same min(laplace.eff_mu) -- differing only in depth and in how
 -- the arrow character was spelled (E'→' against a literal). Two maintained
--- copies of one realize.render; the depth is now the parameter that separated them.
+-- copies of one laplace.render; the depth is now the parameter that separated them.
 --
--- The realize.render itself goes through realize.path(GH #906 item 2) instead of a third
+-- The laplace.render itself goes through realize.path(GH #906 item 2) instead of a third
 -- hand-rolled arrow join. walk_strongest walks forward, so every direction is 1.
 DROP FUNCTION IF EXISTS laplace.recall_fallback_walk(bytea, int);
 CREATE OR REPLACE FUNCTION converse.recall_fallback_walk(p_topic bytea, p_depth int DEFAULT 6)

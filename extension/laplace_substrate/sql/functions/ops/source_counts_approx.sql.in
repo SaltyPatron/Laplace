@@ -1,17 +1,16 @@
 -- BEGIN ATOMIC: GH #764.
-DROP FUNCTION IF EXISTS laplace.source_counts_approx();
-CREATE OR REPLACE FUNCTION ops.source_counts_approx()
+CREATE OR REPLACE FUNCTION source_counts_approx()
     RETURNS TABLE(source text, source_id bytea, evidence_approx bigint)
     LANGUAGE sql STABLE
 BEGIN ATOMIC
-    -- Issue 52: ops.source_counts() full-scans attestations twice (GROUP BY everything
+    -- Issue 52: source_counts() full-scans attestations twice (GROUP BY everything
     -- plus a count(DISTINCT) join) — minutes at 135M rows, killed the catalog
     -- endpoints. This is the planner-statistics form, the same sanctioned pattern
     -- as substrate_counts' reltuples estimates: per-source evidence share = MCV
     -- frequency x reltuples. ANALYZE freshness bounds the error; sources below the
     -- MCV cutoff don't appear (raise attestations.source_id statistics target if a
     -- long tail matters). Exact per-source numbers stay available through
-    -- ops.evidence_count(NULL, source_id) — this function never replaces them.
+    -- evidence_count(NULL, source_id) — this function never replaces them.
     WITH st AS (
         SELECT s.most_common_vals::text::bytea[] AS vals,
                s.most_common_freqs               AS freqs
@@ -31,7 +30,7 @@ BEGIN ATOMIC
     ), numbered AS MATERIALIZED (
       SELECT r.*, row_number() OVER (ORDER BY evidence_approx DESC, source_id) AS rn FROM raw r
     ), batch AS MATERIALIZED (
-      SELECT realize.render_batch(array_agg(source_id ORDER BY rn)) AS labels FROM numbered
+      SELECT laplace.render_batch(array_agg(source_id ORDER BY rn)) AS labels FROM numbered
     )
     SELECT b.labels[n.rn], n.source_id, n.evidence_approx
     FROM numbered n CROSS JOIN batch b ORDER BY n.rn;

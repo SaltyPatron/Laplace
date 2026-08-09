@@ -31,7 +31,7 @@ CREATE OR REPLACE FUNCTION consensus.scoped_consensus(p_source_ids bytea[])
                               a.opponent_rd_fp1e9,
                               GREATEST(a.observation_count, 1),
                               a.sum_score_fp1e9,
-                              consensus.glicko2_tau()
+                              laplace.glicko2_tau()
                               ORDER BY a.last_observed_at, a.id) AS acc,
                max(a.last_observed_at) AS last_ts
         FROM laplace.attestations a

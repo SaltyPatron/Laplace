@@ -1,5 +1,5 @@
 -- The Glicko-complete edge weight has ONE implementation (glicko2.c,
--- laplace_walk_edge_weight), reached from SQL as consensus.walk_edge_weight() and from
+-- laplace_walk_edge_weight), reached from SQL as walk_edge_weight() and from
 -- native code by generate_walk.c's beam scorer and astar_path.c's edge_cost.
 --
 -- It did not always. Until 2026-07-27 consensus_adjacency.sql.in re-derived the
@@ -37,7 +37,8 @@ SELECT bool_and(
 FROM (VALUES
     (1600000000000::bigint,  30000000000::bigint,  50::bigint),  -- confident win
     (1600000000000::bigint, 350000000000::bigint,   1::bigint),  -- wide-RD win
-    (1400000000000::bigint,  30000000000::bigint,  50::bigint),  -- consensus.refuted(1500000000000::bigint,  80000000000::bigint,  10::bigint),  -- neutral
+    (1400000000000::bigint,  30000000000::bigint,  50::bigint),  -- refuted
+    (1500000000000::bigint,  80000000000::bigint,  10::bigint),  -- neutral
     (2010500000000::bigint,  12000000000::bigint,   4::bigint),  -- half-max witness
     (1500000000001::bigint,           0::bigint,   1::bigint),   -- minimal win, no rd
     (1499999999999::bigint,           0::bigint, 999::bigint)    -- minimal loss
@@ -55,13 +56,13 @@ SELECT consensus.walk_edge_weight(1600000000000, 350000000000, 1) > 0   AS wide_
        consensus.walk_edge_weight(1600000000000,  30000000000, 50)
          > consensus.walk_edge_weight(1600000000000,  30000000000, 1)   AS witnesses_saturate;
 
--- 4. The 3-arg form defaults kappa to consensus.foundry_rd_kappa(), the same tunable the
+-- 4. The 3-arg form defaults kappa to foundry_rd_kappa(), the same tunable the
 -- native walkers fetch via spi_fetch_rd_kappa(). One tunable, not two.
 SELECT consensus.walk_edge_weight(1600000000000, 30000000000, 50)
        = consensus.walk_edge_weight(1600000000000, 30000000000, 50, consensus.foundry_rd_kappa())
        AS default_kappa_is_the_sql_tunable;
 
--- 5. walk_edge_weight is NOT eff_mu. consensus.eff_mu(rating - 2*rd) stays the
+-- 5. walk_edge_weight is NOT eff_mu. eff_mu (rating - 2*rd) stays the
 -- conservative ranking key and the indexed expression; this is the weight.
 -- Pinned so a future "simplification" cannot quietly collapse them.
 SELECT consensus.walk_edge_weight(1600000000000, 350000000000, 1)::numeric

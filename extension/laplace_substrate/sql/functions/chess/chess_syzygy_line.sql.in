@@ -9,7 +9,7 @@
 --
 -- WDL is five-valued and SIDE-TO-MOVE POV, not white POV: 'win' means the player to
 -- move in that position wins with perfect play. It is never mixed with the OUTCOME
--- fold's white-POV consensus.eff_mu, which is why this returns the token rather than a number.
+-- fold's white-POV laplace.eff_mu, which is why this returns the token rather than a number.
 --
 -- Typed accessors below own the single laplace.relation_type_id('…') literals for this
 -- vocabulary (ISA G3). New chess SQL must call these — never re-type the strings.

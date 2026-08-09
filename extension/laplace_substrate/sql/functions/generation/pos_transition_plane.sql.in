@@ -1,6 +1,6 @@
 -- Finish-line Phase 4 v1 (the syntax organ): class-transition log-conditionals,
 -- P(class(y) | class(x)), from evidence the substrate ALREADY holds — each
--- word's dominant HAS_POS (max consensus.eff_mu across ConceptNet/OMW/Wiktionary/WordNet
+-- word's dominant HAS_POS (max laplace.eff_mu across ConceptNet/OMW/Wiktionary/WordNet
 -- witnesses) joined onto the fused continuation counts. Composed into the
 -- lm_head as a log-linear correction, this is what shifts the conditional's
 -- support by grammatical slot (determiner→noun, clause→boundary) — the thing
