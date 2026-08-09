@@ -2,7 +2,8 @@
 -- render ladders execute once for the whole input; regex cleanup is text-only.
 CREATE OR REPLACE FUNCTION realize.label_batch(p_ids bytea[])
     RETURNS text[]
-    LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE
+BEGIN ATOMIC
     WITH inp AS MATERIALIZED (
         SELECT u.id, u.ord
         FROM unnest(p_ids) WITH ORDINALITY AS u(id, ord)
@@ -33,11 +34,12 @@ CREATE OR REPLACE FUNCTION realize.label_batch(p_ids bytea[])
                COALESCE(c.name, NULLIF(c.rendered, ''),
                         encode(c.id, 'hex') || '…')
                ORDER BY c.ord), '{}'::text[])
-    FROM cleaned c
-$$;
+    FROM cleaned c;
+END;
 
 CREATE OR REPLACE FUNCTION converse.label_or_hex_batch(p_ids bytea[])
     RETURNS text[]
-    LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$
-    SELECT realize.label_batch(p_ids)
-$$;
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE
+BEGIN ATOMIC
+    SELECT realize.label_batch(p_ids);
+END;

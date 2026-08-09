@@ -2,7 +2,8 @@
 -- batched; only cheap codepoint and final text projection remain per element.
 CREATE OR REPLACE FUNCTION laplace.render_batch(p_ids bytea[])
     RETURNS text[]
-    LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE
+BEGIN ATOMIC
     WITH inp AS MATERIALIZED (
         SELECT u.id, u.ord
         FROM unnest(p_ids) WITH ORDINALITY AS u(id, ord)
@@ -19,5 +20,5 @@ CREATE OR REPLACE FUNCTION laplace.render_batch(p_ids bytea[])
                ORDER BY i.ord), '{}'::text[])
     FROM inp i
     CROSS JOIN batches b
-    LEFT JOIN laplace.canonical_names n ON n.id = i.id
-$$;
+    LEFT JOIN laplace.canonical_names n ON n.id = i.id;
+END;
