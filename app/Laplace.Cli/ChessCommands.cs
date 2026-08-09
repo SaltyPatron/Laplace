@@ -374,7 +374,7 @@ internal static class ChessCommands
 
         await using var liveHost = await ChessLiveGameHost.CreateAsync(
             ArgDouble(args, "--weight", 0.5d), ct: default);
-        await using var svc = new ChessEngineService(ChessEngineService.ResolveConnString(),
+        await using var svc = new ChessEngineService(
             ArgDouble(args, "--weight", 0.5d), liveHost);
 
         if (weak)
@@ -405,7 +405,7 @@ internal static class ChessCommands
         if (fen.Length == 0) return Fail("usage: laplace chess move <fen>");
 
         await using var liveHost = await ChessLiveGameHost.CreateAsync();
-        await using var svc = new ChessEngineService(ChessEngineService.ResolveConnString(), 0.5d, liveHost);
+        await using var svc = new ChessEngineService(0.5d, liveHost);
         var best = await svc.BestMoveAsync(fen, 0d);
         if (best.Uci is null) { Console.WriteLine($"terminal: {best.Status}"); return 0; }
         Console.WriteLine($"bestmove {best.Uci}  (eff_mu {best.EffMu:F1}, {(best.Rated ? "rated" : "unrated-prior")})");

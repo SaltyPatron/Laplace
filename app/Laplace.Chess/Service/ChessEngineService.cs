@@ -47,7 +47,6 @@ public sealed record ChessPlayMoveResult(
 
 public sealed class ChessEngineService : IAsyncDisposable
 {
-    private readonly string _connString;
     private readonly Func<CancellationToken, Task<ChessLiveGameHost>> _getLiveHost;
     private ChessLiveGameHost? _liveHost;
     private readonly ILogger _log;
@@ -67,38 +66,22 @@ public sealed class ChessEngineService : IAsyncDisposable
     private double _trainTemp = 120d, _trainWeight; private int _trainMaxPlies = 400;
 
     public ChessEngineService(
-        string connString, double witnessWeight, ChessLiveGameHost liveHost, ILogger? log = null)
-        : this(connString, witnessWeight, _ => Task.FromResult(liveHost), log)
+        double witnessWeight, ChessLiveGameHost liveHost, ILogger? log = null)
+        : this(witnessWeight, _ => Task.FromResult(liveHost), log)
     {
         _liveHost = liveHost;
     }
 
     public ChessEngineService(
-        string connString, double witnessWeight,
+        double witnessWeight,
         Func<CancellationToken, Task<ChessLiveGameHost>> getLiveHost, ILogger? log = null)
     {
-        _connString = connString;
         _getLiveHost = getLiveHost;
         _trainWeight = witnessWeight;
         _log = log ?? NullLogger.Instance;
     }
 
-    /// <summary>
-    /// Chess routes through the shared datasource policy rather than reading the install
-    /// string directly.
-    ///
-    /// Deliberately <see cref="SubstrateAccess.Ingest"/>, which is byte-identical to the
-    /// bare passthrough this replaced: this service builds an
-    /// <see cref="NpgsqlSubstrateWriter"/>/<see cref="ConsensusAccumulatingWriter"/> pair,
-    /// and a bounded serving timeout would abort a long fold mid-game.
-    ///
-    /// KNOWN GAP, not fixed here: the pure-read play paths (ChessLiveGameHost, UciEngine,
-    /// SubstrateStateValuer, SubstrateRootBias, SubstructureFoldBias, LearnedPst) are
-    /// serving paths and should take <see cref="SubstrateAccess.Serving"/> so a slow
-    /// substrate read surfaces as an error instead of stalling a live game. That flip
-    /// changes timeout behaviour under load and needs verifying against a seeded
-    /// substrate, so it is left as its own change.
-    /// </summary>
+    /// <summary>Connection policy used by runtime hosts and standalone chess readers.</summary>
     public static string ResolveConnString()
         => LaplaceDataSource.ConnectionStringFor(SubstrateAccess.Ingest);
 
@@ -127,7 +110,7 @@ public sealed class ChessEngineService : IAsyncDisposable
             var modality = _modality ??= new ChessModality();
             var engine = new ModalityEngine<ChessState, ChessMove>(modality, ChessVocabulary.MoveType, host, host);
             _ds = ds; _host = host; _engine = engine;
-            _log.LogInformation("chess engine initialized against {Conn}", LaplaceInstall.RedactConnectionString(_connString));
+            _log.LogInformation("chess engine initialized from shared live runtime substrate host");
             return engine;
         }
         finally { _initGate.Release(); }

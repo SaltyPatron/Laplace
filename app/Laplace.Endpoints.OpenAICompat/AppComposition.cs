@@ -26,7 +26,7 @@ internal static class AppComposition
             sp.GetRequiredService<ILogger<ChessRuntimeService>>(), chessWeight));
         services.AddHostedService(sp => sp.GetRequiredService<ChessRuntimeService>());
         services.AddSingleton(sp => new ChessEngineService(
-            LaplaceInstall.PostgresConnectionString(), chessWeight,
+            chessWeight,
             sp.GetRequiredService<ChessRuntimeService>().GetAsync,
             sp.GetService<ILoggerFactory>()?.CreateLogger("chess")));
         services.AddSingleton(sp => new ChessLabService(
