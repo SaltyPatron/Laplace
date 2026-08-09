@@ -118,7 +118,11 @@ public sealed class ChessEngineService : IAsyncDisposable
             if (_engine is not null) return _engine;
             var liveHost = _liveHost ??= await _getLiveHost(ct);
             var ds = liveHost.DataSource;
-            var host = liveHost.TurnHost;
+            // Share the live runtime's datasource/writer, but retain the self-play
+            // provenance context for engine training writes. The live host's turn
+            // host deliberately records under chess/live/game.
+            var host = new SubstrateTurnHost(
+                ds, liveHost.Writer, new NpgsqlSubstrateReader(ds), _trainWeight);
             LoadPerfcache();
             var modality = _modality ??= new ChessModality();
             var engine = new ModalityEngine<ChessState, ChessMove>(modality, ChessVocabulary.MoveType, host, host);
