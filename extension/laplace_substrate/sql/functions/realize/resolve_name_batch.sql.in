@@ -1,0 +1,8 @@
+-- Position-aligned, exact null-context implementation of realize.resolve_name.
+-- The native core owns HAS_NAME/HAS_NAME_ALIAS and synset-lemma election once;
+-- scalar wrappers and every display projection build on this fact.
+CREATE OR REPLACE FUNCTION realize.resolve_name_batch(
+    p_ids bytea[], p_lang bytea DEFAULT NULL)
+    RETURNS text[]
+    LANGUAGE C STABLE PARALLEL SAFE
+    AS 'MODULE_PATHNAME', 'pg_laplace_resolve_name_batch';

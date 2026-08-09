@@ -54,16 +54,21 @@ CREATE OR REPLACE FUNCTION evidence_receipt(p_id bytea, p_limit integer DEFAULT 
               a.type_id = laplace.relation_type_id('IS_SYNONYM_OF')
               AND a.object_id IN (SELECT id FROM subj))
         GROUP BY a.type_id, a.object_id, a.source_id
+    ), src_ids AS MATERIALIZED (
+        SELECT array_agg(DISTINCT f.source_id ORDER BY f.source_id) AS a FROM filtered f
     ), src_labels AS MATERIALIZED (
         -- Label each DISTINCT source ONCE (sources number in the dozens), fenced
         -- so laplace.render() cannot be pushed back down to run per (type, object, source)
         -- group (~3,129 renders for one entity before this map existed). The
         -- string_agg below keeps the exact DISTINCT + ORDER BY label semantics of
         -- the old inline expression, so output is byte-identical.
-        SELECT s.source_id,
-               regexp_replace(laplace.render(s.source_id),
+        SELECT i.id AS source_id,
+               regexp_replace(r.txt,
                    '^substrate/source/([^/]+)(?:/v[0-9]+)?$', '\1') AS label
-        FROM (SELECT DISTINCT f.source_id FROM filtered f) s
+        FROM src_ids,
+          LATERAL unnest(src_ids.a) WITH ORDINALITY i(id,ord),
+          LATERAL unnest(laplace.render_batch(src_ids.a)) WITH ORDINALITY r(txt,ord)
+        WHERE i.ord=r.ord
     ), folded AS (
         SELECT f.type_id, f.object_id,
                sum(f.obs) AS witness_count,
@@ -124,12 +129,13 @@ CREATE OR REPLACE FUNCTION evidence_receipt(p_id bytea, p_limit integer DEFAULT 
         -- HAS_NAME/translation/canonical/gloss arms; hex stays the genuine
         -- last resort so every claim still shows. Approved behavior change.
         SELECT realize.batch(array_agg(o.object_id ORDER BY o.ord),
-                             converse.word_language(p_id)) AS l
+                             converse.word_language(p_id)) AS l,
+               lexical.type_label_batch(array_agg(o.type_id ORDER BY o.ord)) AS types
         FROM ordered o
     ), labeled AS (
         SELECT o.type_id, o.object_id, o.witness_count, o.source_labels,
                o.mu_raw, o.eff_mu_disp,
-               lexical.type_label(o.type_id) AS rel,
+               labels.types[o.ord] AS rel,
                COALESCE(NULLIF(labels.l[o.ord], ''),
                         left(encode(o.object_id, 'hex'), 16)) AS obj
         FROM ordered o, labels

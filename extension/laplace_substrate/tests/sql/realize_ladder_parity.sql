@@ -82,4 +82,50 @@ SELECT (realize.batch(ARRAY[word_id('test/realize/never-witnessed-xyzzy')], NULL
 SELECT realize.batch(ARRAY[]::bytea[], NULL) IS NOT DISTINCT FROM ARRAY[]::text[] AS empty_ok,
        realize.batch(NULL, NULL) IS NULL                                          AS null_ok;
 
+-- 5. Every display projection is byte-for-byte equal to its scalar contract.
+-- These are separate ladders: realize abstains, render has canonical/codepoint/
+-- recursive/hex fallback, label cleans internal keys, and type labels normalize.
+WITH ids AS (SELECT array_agg(p.id ORDER BY p.ord) AS a FROM probe p),
+     b AS (SELECT realize.resolve_name_batch(a,NULL::bytea) AS names,
+                  laplace.render_batch(a) AS rendered,
+                  realize.label_batch(a) AS labels,
+                  converse.label_or_hex_batch(a) AS labels_hex,
+                  lexical.type_label_batch(a) AS types FROM ids)
+SELECT bool_and(b.names[p.ord] IS NOT DISTINCT FROM realize.resolve_name(p.id,NULL)) AS names_match,
+       bool_and(b.rendered[p.ord] IS NOT DISTINCT FROM laplace.render(p.id)) AS render_match,
+       bool_and(b.labels[p.ord] IS NOT DISTINCT FROM realize.label(p.id)) AS label_match,
+       bool_and(b.labels_hex[p.ord] IS NOT DISTINCT FROM converse.label_or_hex(p.id)) AS hex_match,
+       bool_and(b.types[p.ord] IS NOT DISTINCT FROM lexical.type_label(p.id)) AS type_match
+FROM probe p CROSS JOIN b;
+
+-- 6. Alignment, duplicates, NULLs, and empty arrays are part of every batch contract.
+WITH ids AS (SELECT ARRAY[word_id('a'),NULL::bytea,word_id('dog'),word_id('a')] AS a),
+     b AS (SELECT laplace.render_batch(a) AS rendered,
+                  realize.label_batch(a) AS labels FROM ids)
+SELECT cardinality(b.rendered)=4 AS render_length,
+       cardinality(b.labels)=4 AS label_length,
+       b.rendered[1] IS NOT DISTINCT FROM b.rendered[4] AS duplicate_aligned,
+       b.rendered[2] IS NULL AND b.labels[2] IS NULL AS null_aligned,
+       laplace.render_batch('{}'::bytea[])='{}'::text[] AS render_empty,
+       realize.label_batch('{}'::bytea[])='{}'::text[] AS label_empty
+FROM b;
+
+-- NULL input is distinct from an empty aligned batch for every projection.
+SELECT realize.resolve_name_batch(NULL::bytea[],NULL::bytea) IS NULL AS names_null,
+       laplace.render_batch(NULL::bytea[]) IS NULL AS render_null,
+       realize.label_batch(NULL::bytea[]) IS NULL AS label_null,
+       converse.label_or_hex_batch(NULL::bytea[]) IS NULL AS hex_null,
+       lexical.type_label_batch(NULL::bytea[]) IS NULL AS type_null;
+
+-- Multidimensional inputs cannot preserve the one-input/one-output positional
+-- contract. Native batch primitives reject them instead of silently flattening.
+SAVEPOINT multidim_resolve_name;
+SELECT realize.resolve_name_batch(
+         ARRAY[[word_id('a')],[word_id('dog')]],NULL::bytea);
+ROLLBACK TO SAVEPOINT multidim_resolve_name;
+SAVEPOINT multidim_realize;
+SELECT realize.batch(
+         ARRAY[[word_id('a')],[word_id('dog')]],NULL::bytea);
+ROLLBACK TO SAVEPOINT multidim_realize;
+
 ROLLBACK;

@@ -43,15 +43,25 @@ CREATE OR REPLACE FUNCTION converse.recall_walk_response(p_topic bytea, p_mode t
         SELECT i, w.path[i + 1] AS entity_id, w.types[i] AS type_id
         FROM complete_winner w, generate_series(1, w.depth) AS i
     ),
+    complete_ids AS MATERIALIZED (
+        SELECT ARRAY[p_topic] || COALESCE(array_agg(entity_id ORDER BY i),'{}'::bytea[]) AS entities,
+               COALESCE(array_agg(type_id ORDER BY i),'{}'::bytea[]) AS types
+        FROM complete_steps
+    ), complete_labels AS MATERIALIZED (
+        SELECT realize.batch(entities, converse.word_language(p_topic)) AS realized,
+               realize.label_batch(entities) AS fallback,
+               lexical.type_label_batch(types) AS types
+        FROM complete_ids
+    ),
     complete_reply AS (
-        SELECT (SELECT COALESCE(realize.realize(p_topic, converse.word_language(p_topic)), realize.label(p_topic)))
-               || string_agg(' —' || COALESCE(lexical.type_label(s.type_id), '?') || E'→ '
-                             || COALESCE(realize.realize(s.entity_id, converse.word_language(p_topic)),
-                                         realize.label(s.entity_id)), '' ORDER BY s.i) AS reply,
+        SELECT COALESCE(l.realized[1],l.fallback[1])
+               || string_agg(' —' || COALESCE(l.types[s.i], '?') || E'→ '
+                             || COALESCE(l.realized[s.i+1],l.fallback[s.i+1]), '' ORDER BY s.i) AS reply,
                min(b.eff_mu) AS eff_mu,
                (SELECT w.witnesses FROM complete_winner w) AS witnesses
-        FROM complete_steps s
+        FROM complete_steps s CROSS JOIN complete_labels l
         JOIN complete_branches b ON b.entity_id = s.entity_id AND b.depth = s.i
+        GROUP BY l.realized, l.fallback, l.types
         HAVING count(*) > 0
     ),
     -- ONE responder, called at this branch's depth. This block used to be a

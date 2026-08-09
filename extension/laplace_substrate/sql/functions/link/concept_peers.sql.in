@@ -53,11 +53,19 @@ CREATE OR REPLACE FUNCTION lexical.concept_peers(p_word bytea, p_limit int DEFAU
         SELECT member, kind, mu,
                row_number() OVER (PARTITION BY kind ORDER BY mu DESC NULLS LAST, member) AS rk
         FROM peers
+    ), survivors AS MATERIALIZED (
+        SELECT * FROM ranked WHERE rk <= p_limit
+    ), ids AS MATERIALIZED (
+        SELECT COALESCE(array_agg(DISTINCT member ORDER BY member), '{}'::bytea[]) AS a FROM survivors
+    ), labels AS MATERIALIZED (
+        SELECT i.id, l.txt
+        FROM ids,
+             LATERAL unnest(ids.a) WITH ORDINALITY AS i(id, ord),
+             LATERAL unnest(realize.label_batch(ids.a)) WITH ORDINALITY AS l(txt, ord)
+        WHERE i.ord = l.ord
     )
     SELECT l.txt AS peer, r.kind, (r.mu::double precision) AS strength
-    FROM ranked r
-    CROSS JOIN LATERAL (SELECT realize.label(r.member) AS txt) l
-    WHERE r.rk <= p_limit
-      AND NULLIF(btrim(l.txt), '') IS NOT NULL
+    FROM survivors r JOIN labels l ON l.id = r.member
+    WHERE NULLIF(btrim(l.txt), '') IS NOT NULL
     ORDER BY r.kind, r.mu DESC NULLS LAST, l.txt
 $$;

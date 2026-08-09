@@ -43,15 +43,21 @@ CREATE OR REPLACE FUNCTION converse.recall_interaction_response(p_topic bytea, p
     -- the topic's FULL commonsense fan-out and only then ORDER/LIMIT'd to p_limit.
     -- Ranking needs only ids + rank/mu already in `facts`; laplace.render_text runs over
     -- exactly the p_limit survivors. Output-identical (no post-laplace.render filtering).
-    ranked AS (
+    ranked AS MATERIALIZED (
         SELECT f.phrase, f.object_id, f.rank, f.mu, f.witnesses
         FROM facts f
         ORDER BY f.rank DESC, f.mu DESC
         LIMIT p_limit
+    ), numbered AS MATERIALIZED (
+        SELECT r.*, row_number() OVER (ORDER BY r.rank DESC,r.mu DESC,r.object_id) AS rn FROM ranked r
+    ), batch AS MATERIALIZED (
+        SELECT realize.label(p_topic) AS topic,
+               laplace.render_text_batch(array_agg(object_id ORDER BY rn),96) AS objects
+        FROM numbered
     )
-    SELECT realize.label(p_topic) || ' — ' || r.phrase || ' ' || laplace.render_text(r.object_id, 96) AS reply,
+    SELECT b.topic || ' — ' || r.phrase || ' ' || b.objects[r.rn] AS reply,
            r.mu AS eff_mu,
            r.witnesses
-    FROM ranked r
-    ORDER BY r.rank DESC, r.mu DESC
+    FROM numbered r CROSS JOIN batch b
+    ORDER BY r.rn
 $$;

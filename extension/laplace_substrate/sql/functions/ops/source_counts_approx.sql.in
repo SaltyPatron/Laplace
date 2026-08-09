@@ -24,9 +24,14 @@ BEGIN ATOMIC
         JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE n.nspname = '@extschema@' AND c.relname = 'attestations'
     )
-    SELECT laplace.render(m.sid)                        AS source,
-           m.sid                                AS source_id,
-           (m.freq * rt.reltuples)::bigint      AS evidence_approx
-    FROM st, rt, LATERAL unnest(st.vals, st.freqs) AS m(sid, freq)
-    ORDER BY evidence_approx DESC;
+    , raw AS MATERIALIZED (
+      SELECT m.sid AS source_id, (m.freq * rt.reltuples)::bigint AS evidence_approx
+      FROM st, rt, LATERAL unnest(st.vals, st.freqs) AS m(sid, freq)
+    ), numbered AS MATERIALIZED (
+      SELECT r.*, row_number() OVER (ORDER BY evidence_approx DESC, source_id) AS rn FROM raw r
+    ), batch AS MATERIALIZED (
+      SELECT laplace.render_batch(array_agg(source_id ORDER BY rn)) AS labels FROM numbered
+    )
+    SELECT b.labels[n.rn], n.source_id, n.evidence_approx
+    FROM numbered n CROSS JOIN batch b ORDER BY n.rn;
 END;
