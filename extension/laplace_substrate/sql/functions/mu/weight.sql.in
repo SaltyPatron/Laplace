@@ -1,0 +1,64 @@
+-- OP4 WEIGHT -- the one edge-strength entry point (spec 37 §OP4, audit 38 §2).
+--
+-- The audit found SEVEN implementations carrying SIX semantics, and the reason
+-- they multiplied is that they answer genuinely different questions. Collapsing
+-- them to one formula would be wrong. Collapsing them to one ENTRY, with the
+-- question named, is the fix: a caller must now say which weight it wants, and
+-- every mode dispatches to the single existing body for that question rather
+-- than to a retyped copy of it.
+--
+--   conservative  eff_mu in real units -- rating - 2*rd, the pessimistic bound.
+--                 The RANKING key. Ordering only; it is not a sign or a gate
+--                 (see mu/refuted.sql.in, which tests the OPTIMISTIC bound).
+--   salience      relation-type rank x eff_mu -- what the consensus reads order
+--                 by, so a strong edge of a weak relation type sorts below a
+--                 weak edge of a strong one.
+--   complete      the Glicko-complete walk weight: signed mu, rd-decayed,
+--                 witness-saturated. Signed on purpose -- a wide-rd win stays
+--                 walkable, a refutation goes negative and dead-ends.
+--   strength      the foundry/explore logistic, clamped [0.05, 1.0].
+--
+-- WHY p_mode IS AN ENUM AND NOT text. A text mode with a CASE would return NULL
+-- for a typo, silently, and a NULL weight sorts as "no opinion" rather than as
+-- an error -- the failure would surface as quietly wrong ORDER BY, which is the
+-- hardest kind of defect to see in a ranked read. As an enum the typo is a type
+-- error at parse time. Loud, and free at runtime.
+--
+-- NOT a replacement for the eff_mu index expressions. consensus_eff_mu_btree and
+-- its siblings index literal (rating - 2*rd) and MUST keep doing so -- routing
+-- them through a function would make the index expression non-matchable and cost
+-- the index path (#860, the eff-mu-inlining-law). This entry is for BODIES.
+--
+-- No SET search_path and LANGUAGE sql so it inlines into the caller's ORDER BY.
+-- Guarded rather than DROP TYPE ... CASCADE: a DROP would take consensus.weight
+-- and every dependent body with it, mint a new OID, and re-create the exact
+-- dependency breakage the purpose-schema move already hit on refuted(). There is
+-- no CREATE TYPE IF NOT EXISTS, so the existence check is explicit. Adding a
+-- value later is ALTER TYPE ... ADD VALUE, which is also non-destructive.
+DO $weight_mode$
+BEGIN
+    IF to_regtype('consensus.weight_mode') IS NULL THEN
+        CREATE TYPE consensus.weight_mode AS ENUM (
+            'conservative', 'salience', 'complete', 'strength');
+    END IF;
+END
+$weight_mode$;
+
+CREATE OR REPLACE FUNCTION consensus.weight(
+        p_rating        bigint,
+        p_rd            bigint,
+        p_mode          consensus.weight_mode DEFAULT 'conservative',
+        p_witness_count bigint DEFAULT NULL,
+        p_type          bytea  DEFAULT NULL)
+    RETURNS double precision
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+    SELECT CASE p_mode
+        WHEN 'conservative' THEN consensus.eff_mu(p_rating, p_rd)::float8 / 1e9
+        WHEN 'salience'     THEN consensus.edge_rank(
+                                     p_type, consensus.eff_mu(p_rating, p_rd)::numeric)
+        WHEN 'complete'     THEN consensus.walk_edge_weight(
+                                     p_rating, p_rd, p_witness_count)
+        WHEN 'strength'     THEN consensus.edge_strength(p_rating, p_rd)
+    END;
+END;

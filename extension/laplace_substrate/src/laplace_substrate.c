@@ -202,6 +202,27 @@ pg_laplace_walk_edge_weight(PG_FUNCTION_ARGS)
                                               PG_GETARG_FLOAT8(3)));
 }
 
+/*
+ * Edge strength in [0.05, 1.0] -- the logistic on eff_mu relative to neutral
+ * that the foundry crawl and the web-explore path both walk on.
+ *
+ * Same reason walk_edge_weight got a SQL entry: the body lived only in
+ * spi_common.h, reachable from C callers alone, so any SQL surface wanting the
+ * foundry's notion of strength had to retype the algebra -- which is exactly how
+ * consensus_adjacency ended up carrying a second copy of the Glicko-complete
+ * formula. Exposing it here means consensus.weight(..., 'strength') dispatches
+ * to the same body laplace_edge_strength() serves to foundry_crawl and
+ * explore_web, so the four weight modes cannot drift from their C originals.
+ */
+PG_FUNCTION_INFO_V1(pg_laplace_edge_strength);
+
+Datum
+pg_laplace_edge_strength(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_FLOAT8(laplace_edge_strength(PG_GETARG_INT64(0),
+                                           PG_GETARG_INT64(1)));
+}
+
 PG_FUNCTION_INFO_V1(pg_laplace_score_inverse);
 
 Datum
