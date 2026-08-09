@@ -1,0 +1,43 @@
+-- Exact realize.label() cleanup/fallback over an aligned id array. Name and
+-- render ladders execute once for the whole input; regex cleanup is text-only.
+CREATE OR REPLACE FUNCTION realize.label_batch(p_ids bytea[])
+    RETURNS text[]
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    WITH inp AS MATERIALIZED (
+        SELECT u.id, u.ord
+        FROM unnest(p_ids) WITH ORDINALITY AS u(id, ord)
+    ), batches AS MATERIALIZED (
+        SELECT realize.resolve_name_batch(p_ids) AS names,
+               laplace.render_batch(p_ids) AS rendered
+    ), cleaned AS (
+        SELECT i.id, i.ord, b.names[i.ord] AS name,
+               regexp_replace(
+               regexp_replace(
+                   regexp_replace(
+                       regexp_replace(
+                           regexp_replace(
+                               regexp_replace(
+                                   regexp_replace(
+                                       regexp_replace(b.rendered[i.ord],
+                                           '^substrate/(?:type|relation|trust_class|source|entity)/(.*)/v1$', '\1'),
+                                       '^substrate/pos/(?:probationary/[^/]+/)?(.+)/v1$', '\1'),
+                                   '^source/file/(.+)/v1$', '\1'),
+                               '^repo:(.+)/v1$', '\1'),
+                           '^language:([a-z]{3})$', '\1'),
+                       '^ud/feature/(.+)$', '\1'),
+                   '^tiny-codes/concept/(.+)/v1$', '\1'),
+               '^(i[0-9]+|[0-9]{6,}-[nvarspNVARSP])$', '') AS rendered
+        FROM inp i CROSS JOIN batches b
+    )
+    SELECT COALESCE(array_agg(
+               COALESCE(c.name, NULLIF(c.rendered, ''),
+                        encode(c.id, 'hex') || '…')
+               ORDER BY c.ord), '{}'::text[])
+    FROM cleaned c
+$$;
+
+CREATE OR REPLACE FUNCTION converse.label_or_hex_batch(p_ids bytea[])
+    RETURNS text[]
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    SELECT realize.label_batch(p_ids)
+$$;

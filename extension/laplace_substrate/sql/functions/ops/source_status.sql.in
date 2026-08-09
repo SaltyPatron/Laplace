@@ -85,9 +85,14 @@ rolled AS (
     FROM ids i
     LEFT JOIN by_evidence ev ON ev.source_id = i.source_id
     LEFT JOIN by_journal  jr ON jr.source_id = i.source_id
+), rolled_numbered AS MATERIALIZED (
+    SELECT r.*, row_number() OVER (ORDER BY r.source_id) AS rn FROM rolled r
+), rendered AS MATERIALIZED (
+    SELECT @extschema@.render_batch(array_agg(source_id ORDER BY rn)) AS labels
+    FROM rolled_numbered
 ),
 matched AS (
-    SELECT COALESCE(r.journal_name, @extschema@.render(r.source_id))     AS source,
+    SELECT COALESCE(r.journal_name, x.labels[r.rn])                     AS source,
            r.source_id,
            (r.evidence_approx > 0 OR r.has_entities)                     AS ingested,
            true                                                          AS known,
@@ -97,7 +102,7 @@ matched AS (
            r.last_run_at
     -- The journal's recorded name beats render(): render returns a source's CANONICAL
     -- PATH ("substrate/source/ChessPgn/v1"), which is correct and useless as a label.
-    FROM rolled r
+    FROM rolled_numbered r CROSS JOIN rendered x
     WHERE p_source IS NULL
        OR r.journal_name = p_source
        OR r.source_id = @extschema@.source_id(p_source)

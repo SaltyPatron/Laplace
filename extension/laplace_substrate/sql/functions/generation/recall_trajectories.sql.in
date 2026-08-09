@@ -12,6 +12,7 @@ CREATE OR REPLACE FUNCTION generation.recall_trajectories(p_word text, p_limit i
      AND public.laplace_trajectory_constituent_ids(w.trajectory) @> ARRAY[wid.id]
     ORDER BY abs(w.n_constituents - 7)
     LIMIT p_limit
-  )
-  SELECT left(replace(laplace.render_text(entity_id, 300), chr(10), ' '), 180) FROM ids
+  ), batch AS MATERIALIZED (SELECT array_agg(entity_id) AS a FROM ids)
+  SELECT left(replace(t.s, chr(10), ' '), 180)
+  FROM batch, LATERAL unnest(laplace.render_text_batch(batch.a, 300)) AS t(s)
 $$;

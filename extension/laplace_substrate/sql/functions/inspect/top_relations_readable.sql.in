@@ -3,7 +3,13 @@ CREATE OR REPLACE FUNCTION top_relations_readable(p_limit integer DEFAULT 10, p_
     RETURNS TABLE(subject text, type text, object text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE
 BEGIN ATOMIC
-    SELECT laplace.render(t.subject_id), laplace.render(t.type_id), laplace.render(t.object_id),
-           t.eff_mu, t.witnesses
-    FROM consensus.top_relations(p_limit, p_type) t;
+    WITH raw AS MATERIALIZED (
+      SELECT t.*, row_number() OVER () AS rn FROM consensus.top_relations(p_limit,p_type) t
+    ), batch AS MATERIALIZED (
+      SELECT laplace.render_batch(array_agg(subject_id ORDER BY rn)) AS subjects,
+             laplace.render_batch(array_agg(type_id ORDER BY rn)) AS types,
+             laplace.render_batch(array_agg(object_id ORDER BY rn)) AS objects FROM raw
+    )
+    SELECT b.subjects[t.rn],b.types[t.rn],b.objects[t.rn],t.eff_mu,t.witnesses
+    FROM raw t CROSS JOIN batch b ORDER BY t.rn;
 END;

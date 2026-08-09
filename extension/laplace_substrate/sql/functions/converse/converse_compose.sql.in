@@ -194,10 +194,14 @@ BEGIN
     -- with an extra join paid first. Classification on ids is right where the ids
     -- carry the class; here they do not, and pretending otherwise buys a slower
     -- query with identical output.
-    ws AS MATERIALIZED (
-        SELECT d.entity_id AS id,
-               laplace.is_all_whitespace(COALESCE(laplace.render_text_fast(d.entity_id, 8), ' ')) AS is_ws
-        FROM (SELECT DISTINCT t.entity_id FROM toks t) d
+    ws_ids AS MATERIALIZED (
+        SELECT array_agg(DISTINCT t.entity_id ORDER BY t.entity_id) AS a FROM toks t
+    ), ws AS MATERIALIZED (
+        SELECT i.id, laplace.is_all_whitespace(COALESCE(s.txt, ' ')) AS is_ws
+        FROM ws_ids,
+             LATERAL unnest(ws_ids.a) WITH ORDINALITY i(id, ord),
+             LATERAL unnest(laplace.render_text_batch(ws_ids.a, 8)) WITH ORDINALITY s(txt, ord)
+        WHERE i.ord=s.ord
     ),
     kept AS MATERIALIZED (
         SELECT q.* FROM (

@@ -2,6 +2,7 @@ DROP FUNCTION IF EXISTS laplace.recall_examples_response(bytea);
 CREATE OR REPLACE FUNCTION converse.recall_examples_response(p_topic bytea)
     RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
-    SELECT replace(e.example, '%s', realize.label(p_topic)), e.eff_mu, e.witnesses
-    FROM lexical.examples(p_topic) e
+    WITH topic AS MATERIALIZED (SELECT realize.label(p_topic) AS label)
+    SELECT replace(e.example, '%s', t.label), e.eff_mu, e.witnesses
+    FROM lexical.examples(p_topic) e CROSS JOIN topic t
 $$;

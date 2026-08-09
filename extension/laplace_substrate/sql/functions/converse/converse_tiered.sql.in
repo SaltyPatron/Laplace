@@ -83,6 +83,8 @@ DECLARE
     u_w      float8[];
     c_unit   bytea[];
     c_concept bytea[];
+    said_realized text[];
+    said_rendered text[];
 BEGIN
     IF p_topic IS NULL THEN RETURN NULL; END IF;
 
@@ -236,8 +238,10 @@ BEGIN
 
     -- REALIZE verbatim, in walk order. Terminate each unit that does not already
     -- end in punctuation (clause seam, not content rewrite).
+    said_realized := realize.batch(said, p_lang);
+    said_rendered := laplace.render_text_batch(said, 512);
     FOR i IN 1..COALESCE(array_length(said, 1), 0) LOOP
-        s := btrim(COALESCE(realize.realize(said[i], p_lang), laplace.render_text(said[i], 512)));
+        s := btrim(COALESCE(said_realized[i], said_rendered[i]));
         IF s IS NOT NULL AND s <> '' THEN
             IF s !~ '[.!?;:,]$' THEN s := s || '.'; END IF;
             parts := parts || s;

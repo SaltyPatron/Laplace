@@ -8,13 +8,23 @@ CREATE OR REPLACE FUNCTION generation.walk_text(
     WITH ctx AS (
         SELECT array_agg(id ORDER BY ord) AS ids
         FROM converse.prompt_state(p_prompt) WHERE id IS NOT NULL
-    )
-    SELECT g.step,
-           laplace.render_text(g.entity, 64) || COALESCE(laplace.render_text(g.sep_entity, 8), ''),
-           g.stride_used
-    FROM ctx, generation.walk_continuations(ctx.ids, p_steps, p_max_stride, p_spread, p_breadth,
+    ), walked AS MATERIALIZED (
+        SELECT g.*
+        FROM ctx, generation.walk_continuations(ctx.ids, p_steps, p_max_stride, p_spread, p_breadth,
                               COALESCE(p_seed,
                                   laplace.hash128_lo(public.laplace_hash128_blake3(
                                       convert_to(p_prompt, 'UTF8'))))) g
-    WHERE ctx.ids IS NOT NULL
+        WHERE ctx.ids IS NOT NULL
+    ), ids AS MATERIALIZED (
+        SELECT array_agg(entity ORDER BY step) AS entities,
+               array_agg(sep_entity ORDER BY step) AS separators
+        FROM walked
+    ), txt AS MATERIALIZED (
+        SELECT laplace.render_text_batch(entities, 64) AS entities,
+               laplace.render_text_batch(separators, 8) AS separators
+        FROM ids
+    )
+    SELECT w.step, t.entities[rn] || COALESCE(t.separators[rn], ''), w.stride_used
+    FROM (SELECT w.*, row_number() OVER (ORDER BY step) AS rn FROM walked w) w
+    CROSS JOIN txt t
 $$;

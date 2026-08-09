@@ -132,7 +132,6 @@ else
 fi
 
 echo "==> [4/4] sync isolated MCP runtime + app into $APP_DIR"
-mkdir -p "$APP_DIR/$MCP_RUNTIME_DIR"
 laplace_sync_payload "$MCP_STAGE" "$APP_DIR/$MCP_RUNTIME_DIR"
 laplace_sync_payload "$STAGE" "$APP_DIR" \
   --exclude 'laplace-api.env' --exclude 'logs/' --exclude 'chess-lab-work/' \

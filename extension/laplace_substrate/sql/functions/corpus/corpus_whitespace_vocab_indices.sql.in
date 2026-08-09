@@ -88,9 +88,21 @@ BEGIN
           AND a.subject_id = ANY (p_vocab)    -- index condition -> HASH prune per id
         GROUP BY a.subject_id
     )
+    ), missing AS MATERIALIZED (
+        SELECT COALESCE(array_agg(DISTINCT v.id ORDER BY v.id), '{}'::bytea[]) AS ids
+        FROM unnest(p_vocab) v(id) LEFT JOIN cat ON cat.id = v.id
+        WHERE cat.id IS NULL
+    ), rendered AS MATERIALIZED (
+        SELECT i.id, t.s
+        FROM missing m,
+             LATERAL unnest(m.ids) WITH ORDINALITY AS i(id, ord),
+             LATERAL unnest(laplace.render_text_batch(m.ids, 8)) WITH ORDINALITY AS t(s, ord)
+        WHERE i.ord = t.ord
+    )
     SELECT (v.ord::int4 - 1)
     FROM unnest(p_vocab) WITH ORDINALITY v(id, ord)
     LEFT JOIN cat ON cat.id = v.id
-    WHERE COALESCE(cat.is_sep, laplace.is_all_whitespace(laplace.render_text_fast(v.id, 8)));
+    LEFT JOIN rendered r ON r.id = v.id
+    WHERE COALESCE(cat.is_sep, laplace.is_all_whitespace(r.s));
 END;
 $$;
