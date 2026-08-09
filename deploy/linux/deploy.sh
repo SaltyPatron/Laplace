@@ -28,7 +28,7 @@ done
 
 trap 'rm -rf "$STAGE"' EXIT
 
-laplace_require_app_dir_contract "$APP_DIR"
+laplace_reconcile_app_dir_contract "$APP_DIR"
 
 echo "==> [1/4] build front-end (web/ -> dist)"
 pushd "$REPO_ROOT/web" >/dev/null

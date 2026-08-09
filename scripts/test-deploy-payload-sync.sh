@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/deploy/linux/payload-sync.sh"
+source "$ROOT/deploy/linux/app-dir-contract.sh"
 
 TEST_ROOT="$(mktemp -d)"
 trap 'rm -rf "$TEST_ROOT"' EXIT
@@ -68,5 +69,11 @@ assert_app_contract
 [[ "$(<"$APP_DIR/api.dll")" == "second" ]]
 [[ ! -e "$APP_DIR/wwwroot/index.html" ]]
 [[ -f "$APP_DIR/wwwroot/app.js" ]]
+
+# Legacy deploys copied mktemp's 0700 mode onto mcp-runtime. A current deploy
+# converges mode-only drift without taking ownership repair away from bootstrap.
+chmod 0700 "$MCP_DIR"
+laplace_reconcile_app_dir_contract "$APP_DIR" "$(id -un)" "$(id -gn)"
+assert_app_contract
 
 echo "OK deploy payload sync preserves bootstrap-owned host metadata across repeat publishes"

@@ -883,7 +883,7 @@ fp_publish() {
 phase_publish() {
   local fp app_dir="${LAPLACE_APP_DIR:-/opt/laplace/app}"
   source "$ROOT/deploy/linux/app-dir-contract.sh"
-  laplace_require_app_dir_contract "$app_dir"
+  laplace_reconcile_app_dir_contract "$app_dir"
   echo "===== PHASE — PUBLISH (full runtime contract) ====="
   # Publish owns the whole target: chess binaries, secrets, API+SPA+uci.
   phase_chess_lab

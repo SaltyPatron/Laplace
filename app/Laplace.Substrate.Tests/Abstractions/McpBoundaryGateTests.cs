@@ -70,6 +70,8 @@ public sealed class McpBoundaryGateTests
         Assert.Contains("$APP_DIR/mcp-runtime", bootstrap);
         Assert.Contains("$app_dir/mcp-runtime", contract);
         Assert.DoesNotContain("mkdir -p \"$APP_DIR/$MCP_RUNTIME_DIR\"", deploy);
+        Assert.Contains("laplace_reconcile_app_dir_contract", contract);
+        Assert.Contains("laplace_reconcile_app_dir_contract \"$APP_DIR\"", deploy);
         Assert.Contains("laplace_require_app_dir_contract", deploy);
     }
 }
