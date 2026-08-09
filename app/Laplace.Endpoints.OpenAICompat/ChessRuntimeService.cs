@@ -10,8 +10,6 @@ namespace Laplace.Endpoints.OpenAICompat;
 /// </summary>
 internal sealed class ChessRuntimeService : IHostedService, IAsyncDisposable
 {
-    private const double WitnessWeight = 0.5d;
-
     private readonly ILogger<ChessRuntimeService> _log;
     private readonly Func<CancellationToken, Task<ChessLiveGameHost>> _createHost;
     private readonly object _gate = new();
@@ -19,8 +17,8 @@ internal sealed class ChessRuntimeService : IHostedService, IAsyncDisposable
     private Task<ChessLiveGameHost>? _initialization;
     private ChessLiveGameHost? _host;
 
-    public ChessRuntimeService(ILogger<ChessRuntimeService> log)
-        : this(log, ct => ChessLiveGameHost.CreateAsync(WitnessWeight, ct: ct))
+    public ChessRuntimeService(ILogger<ChessRuntimeService> log, double witnessWeight)
+        : this(log, ct => ChessLiveGameHost.CreateAsync(witnessWeight, ct: ct))
     {
     }
 

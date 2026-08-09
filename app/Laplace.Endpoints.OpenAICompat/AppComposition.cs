@@ -22,7 +22,8 @@ internal static class AppComposition
         services.AddHostedService<CatalogPrewarmService>();
 
         const double chessWeight = 0.5d;
-        services.AddSingleton<ChessRuntimeService>();
+        services.AddSingleton(sp => new ChessRuntimeService(
+            sp.GetRequiredService<ILogger<ChessRuntimeService>>(), chessWeight));
         services.AddHostedService(sp => sp.GetRequiredService<ChessRuntimeService>());
         services.AddSingleton(sp => new ChessEngineService(
             LaplaceInstall.PostgresConnectionString(), chessWeight,
