@@ -1,7 +1,7 @@
 # Modality ladder law — codepoint floor (binding)
 
-**Status:** Operator invention (2026-08-06) **supersedes** every prior private
-tier-0 alphabet in this file and in the modality campaign code that mirrored it
+This binding law supersedes every prior private tier-0 alphabet in this file and in the
+modality campaign code that mirrored it.
 (`modality_atoms*` packed-RGBA / PCM16 blake3 mints, image/audio “scalar content
 law” as distinct T0 alphabets). Geometry = identity/reconstruction only.
 Semantics live in the Glicko attestation graph. Do **not** hash embeddings as

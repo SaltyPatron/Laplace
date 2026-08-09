@@ -31,6 +31,6 @@ applyTo: 'engine/**,extension/**'
 - `rc == 0` is SUCCESS in this codebase's native lookups (lesson L1).
 - perfcache blobs (`laplace_t0_perfcache.bin`, `laplace_highway_perfcache.bin`) are
   deterministic and CI-gated; PG side is gated on the `laplace_substrate.perfcache_path` GUC.
-- `engine/manifest/relation_types.toml` generates the 256-bit highway mask (153 bits,
-  13 salience bands). It is fixed + live-verified (doc 05 Rule #5) — never backfill old
-  DB generations, regenerate them.
+- `engine/manifest/relation_types.toml` generates the highway mask and owns the
+  append-only bit registry. Do not hardcode relation counts in instructions; use the
+  generated inventory. Regenerate derived artifacts rather than backfilling testimony.

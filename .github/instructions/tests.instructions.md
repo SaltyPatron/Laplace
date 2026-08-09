@@ -5,7 +5,7 @@ applyTo: 'app/**.Tests/**'
 ---
 # Test rules
 
-- Five xunit projects: Core, Substrate, Decomposers, Endpoints.OpenAICompat, Chess.
+- Use generated inventory/project discovery for the current test-project roster.
   Default runs exclude `Tier=perf` (`XUNIT_TIER_EXCLUDE` in test-app.cmd).
 - Run via `cmd /c "scripts\win\test-app.cmd [project-substring]"` — env.cmd puts the
   native DLL directories (`build-win\core|dynamics|synthesis`) and PG 18 on PATH; bare
@@ -15,7 +15,7 @@ applyTo: 'app/**.Tests/**'
 - Engine gtests: `cmd /c "scripts\win\test-engine.cmd"` (ctest over build-win).
   pg_regress: `cmd /c "scripts\win\regress.cmd"`. Everything: `test-all.cmd`
   (logs to build-win-ext\test-all.log).
-- Verify fixes against live data; a passing narrow unit test is not the architectural
-  fix (Issue 19 is the canonical example).
+- Verify live-data claims against the running system; a narrow unit test proves only its
+  declared behavior.
 - Re-ingest hash identity is the regression test for identity-affecting changes
   (SourceIds, hashing, tier logic).

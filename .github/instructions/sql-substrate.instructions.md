@@ -5,7 +5,7 @@ applyTo: 'db/**,extension/**/*.sql*,scripts/**/*.sql'
 ---
 # Substrate SQL rules
 
-- The SQL source of truth is MANIFEST-DRIVEN and LOCKED ([doc 10](../../.scratchpad/10_SQL_Consolidation_Reconciliation.txt)):
+- The SQL source of truth is manifest-driven and locked:
   a completeness gate fails configure on any orphan `.sql.in`; EXT_VERSION is
   manifest-derived. Never reintroduce numbered legacy bundles; add new files through the
   manifest or the gate will fail the build.
@@ -17,8 +17,8 @@ applyTo: 'db/**,extension/**/*.sql*,scripts/**/*.sql'
 - An expensive STABLE function in a filter executes PER ROW (lesson L12). Hoist it.
 - Ranking convention everywhere: `eff_mu = rating − 2·rd` (conservative Glicko-2
   estimate). Consensus keys on `consensus_id(subject, type, object)`.
-- Indexes can be landmines armed by correctness fixes (lesson L10) — check write-path
+- Indexes can expose write-path costs after correctness fixes — check write-path
   cost when adding one to attestations/consensus.
-- Recycle PG backends only between ingest stages, never mid-stage.
+- Recycle PostgreSQL backends only between ingest stages, never mid-stage.
 - Verify against live data: `psql -h localhost -U postgres -d laplace`, then
   `SET search_path = laplace, public;`.
