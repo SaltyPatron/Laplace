@@ -19,6 +19,13 @@
     "session": "golden-empty-session",
     "laplace": {
       "provenance": []
+    },
+    "performance": {
+      "substrate_ms": 0,
+      "elapsed_ms": 0,
+      "output_utf8_bytes": 0,
+      "output_codepoints": 0,
+      "output_words": 0
     }
   }
 }

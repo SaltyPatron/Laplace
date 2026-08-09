@@ -14,6 +14,18 @@ export interface ChatMessage {
   provenance: ProvenanceEntry[];
   streaming?: boolean;
   error?: string;
+  performance?: ChatPerformance;
+}
+
+export interface ChatPerformance {
+  substrateMs: number;
+  elapsedMs: number;
+  firstResultMs?: number;
+  outputUtf8Bytes: number;
+  outputCodepoints: number;
+  outputWords: number;
+  generatedTokens?: number;
+  generatedTokensPerSecond?: number;
 }
 
 export interface QuoteGate {

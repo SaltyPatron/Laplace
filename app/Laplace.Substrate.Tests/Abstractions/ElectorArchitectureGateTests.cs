@@ -108,6 +108,16 @@ public sealed class ElectorArchitectureGateTests
     public void PromptElectorExemptions_AreEmpty()
         => Assert.Empty(ElectorExemptions);
 
+    [Fact]
+    public void PromptCoherence_DefineVerb_IsPinnedToDefinitionRelation()
+    {
+        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
+        var source = File.ReadAllText(Path.Combine(
+            repoRoot, "extension", "laplace_substrate", "src", "prompt_coherence.c"));
+
+        Assert.Matches(@"\{\s*""definition""\s*,\s*""define""\s*\}", source);
+    }
+
     private static List<IReadOnlyList<string>> ExtractElectorOrders(string sql)
     {
         var text = StripComments(sql);

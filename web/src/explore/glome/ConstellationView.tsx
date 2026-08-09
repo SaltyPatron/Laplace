@@ -23,6 +23,7 @@ function nodesFromGraph(graph: VizResponse['graph']): GlomeNode[] {
       x: Number(n.x),
       y: Number(n.y),
       z: Number(n.z),
+      m: Number(n.m ?? 0),
       radius: Number(n.radius ?? 1),
       kind: 'primary' as const,
     }));

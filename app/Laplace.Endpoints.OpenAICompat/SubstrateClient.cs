@@ -48,13 +48,17 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
 
     public async Task<IReadOnlyList<ConverseRow>> ConverseAsync(
         string prompt, byte[]? session, CancellationToken ct)
+        => await ConverseAsync(prompt, session, default, ct);
+
+    public async Task<IReadOnlyList<ConverseRow>> ConverseAsync(
+        string prompt, byte[]? session, ConverseOptions options, CancellationToken ct)
     {
         try
         {
             // GH #575: bare FEN prompt → composed position hex before lexical recall_session.
             prompt = ChessPositionRef.RewriteFenToHex(prompt) ?? prompt;
             await using var conn = await _dataSource.OpenConnectionAsync(ct);
-            return await RecallSessionAsync(conn, prompt, session, ct);
+            return await RecallSessionAsync(conn, prompt, session, options, ct);
         }
         catch (PostgresException pg)
         {
@@ -77,6 +81,11 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
     /// </summary>
     public async Task<IReadOnlyList<ConverseRow>> ConverseTenantScopedAsync(
         string prompt, byte[]? session, byte[][] scopeSources, CancellationToken ct)
+        => await ConverseTenantScopedAsync(prompt, session, scopeSources, default, ct);
+
+    public async Task<IReadOnlyList<ConverseRow>> ConverseTenantScopedAsync(
+        string prompt, byte[]? session, byte[][] scopeSources,
+        ConverseOptions options, CancellationToken ct)
     {
         try
         {
@@ -87,7 +96,7 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
                 scopeCmd.Parameters.AddWithValue("sources", scopeSources);
                 await scopeCmd.ExecuteNonQueryAsync(ct);
             }
-            return await RecallSessionAsync(conn, prompt, session, ct);
+            return await RecallSessionAsync(conn, prompt, session, options, ct);
         }
         catch (PostgresException pg)
         {
@@ -111,7 +120,8 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         ConverseAsync(userTurns.Count > 0 ? userTurns[^1] : "", session, ct);
 
     private static async Task<IReadOnlyList<ConverseRow>> RecallSessionAsync(
-        NpgsqlConnection conn, string prompt, byte[]? session, CancellationToken ct)
+        NpgsqlConnection conn, string prompt, byte[]? session,
+        ConverseOptions options, CancellationToken ct)
     {
         // One turn in, one read out. Conversation state is substrate-resident
         // (session context + session_topics carry) — clients never resend history,
@@ -128,7 +138,11 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         // no-consensus case still reports truthfully instead of faking prose.
         // Tenant scoping is unaffected: converse.chat() reads `consensus` unqualified, so
         // the pg_temp.consensus shadow on THIS connection governs it the same way.
-        var reply = await NpgsqlSubstrateReads.ChatAsync(conn, prompt, session, ct);
+        var reply = await NpgsqlSubstrateReads.ChatAsync(
+            conn, prompt, session, ct,
+            shape: options.Shape,
+            bands: options.Bands,
+            elaborate: options.Elaborate);
         if (!string.IsNullOrWhiteSpace(reply))
             return [new ConverseRow(reply, null, null)];
 

@@ -187,6 +187,17 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
                     new ConverseRow("whale IS_A cetacean.", 0.84m, 17)
                 ]);
 
+    public Task<IReadOnlyList<ConverseRow>> ConverseAsync(
+        string prompt, byte[]? session, ConverseOptions options, CancellationToken ct) =>
+        options.Shape is null && options.Bands is null && !options.Elaborate
+            ? ConverseAsync(prompt, session, ct)
+            : Task.FromResult<IReadOnlyList<ConverseRow>>(
+            [
+                new ConverseRow(
+                    $"shape={options.Shape ?? "-"};bands={string.Join(',', options.Bands ?? [])};elaborate={options.Elaborate}",
+                    0.91m, 42)
+            ]);
+
     public Task<IReadOnlyList<ConverseRow>> ConverseTenantScopedAsync(
         string prompt, byte[]? session, byte[][] scopeSources, CancellationToken ct) =>
         Task.FromResult<IReadOnlyList<ConverseRow>>(

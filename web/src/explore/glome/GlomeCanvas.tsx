@@ -35,20 +35,25 @@ export function packedDisplayPos(n: GlomeNode): [number, number, number] {
 }
 
 /**
- * Placement: ball interior. Direction from XYZ; scale = radius_origin so
- * composed entities fall inward (coherence). Wireframe unit sphere is the boundary.
+ * Placement: an orthographic projection of the actual 4D point after an X-M
+ * plane rotation. It retains the projected XYZ magnitude instead of normalizing
+ * every point onto a shell, and makes M observable. The former projection discarded M, normalized XYZ, then restored
+ * radius_origin; every point on the same XYZ ray therefore collapsed onto one
+ * display ray even when its fourth coordinate differed.
  */
-export function placementBallPos(n: GlomeNode): [number, number, number] {
-  const dirLen = Math.hypot(n.x, n.y, n.z) || 1;
-  const r4 = Number.isFinite(n.radius) && n.radius > 0
-    ? Math.min(1, n.radius)
-    : Math.min(1, Math.hypot(n.x, n.y, n.z, n.m ?? 0) || 1);
-  const s = SHELL * Math.max(0.02, r4);
-  return [(n.x / dirLen) * s, (n.y / dirLen) * s, (n.z / dirLen) * s];
+export function placementBallPos(n: GlomeNode, xmAngle = 0): [number, number, number] {
+  const c = Math.cos(xmAngle);
+  const s = Math.sin(xmAngle);
+  const x = Number.isFinite(n.x) ? n.x : 0;
+  const y = Number.isFinite(n.y) ? n.y : 0;
+  const z = Number.isFinite(n.z) ? n.z : 0;
+  const m = n.m != null && Number.isFinite(n.m) ? n.m : 0;
+  const rotatedX = x * c - m * s;
+  return [rotatedX * SHELL, y * SHELL, z * SHELL];
 }
 
-function project(n: GlomeNode, mode: GlomeProjection): [number, number, number] {
-  return mode === 'packed' ? packedDisplayPos(n) : placementBallPos(n);
+function project(n: GlomeNode, mode: GlomeProjection, xmAngle: number): [number, number, number] {
+  return mode === 'packed' ? packedDisplayPos(n) : placementBallPos(n, xmAngle);
 }
 
 /** Demand-mode: redraw when node set changes; OrbitControls still invalidates on input. */
@@ -86,6 +91,7 @@ function GlomeScene({
   highlightIds,
   highlightOrdinal,
   projection,
+  xmAngle,
   revision,
   onSelectOrdinal,
 }: {
@@ -94,6 +100,7 @@ function GlomeScene({
   highlightIds: Set<string>;
   highlightOrdinal: number | null;
   projection: GlomeProjection;
+  xmAngle: number;
   revision: string;
   onSelectOrdinal?: (ordinal: number | null) => void;
 }) {
@@ -107,7 +114,7 @@ function GlomeScene({
       <ambientLight intensity={0.55} />
       <pointLight position={[4, 4, 4]} intensity={1.2} />
       {limited.map((n) => {
-        const pos = project(n, projection);
+        const pos = project(n, projection, xmAngle);
         const ordHit = highlightOrdinal != null && n.ordinal === highlightOrdinal;
         const color =
           n.color
@@ -149,7 +156,7 @@ function GlomeScene({
         <meshBasicMaterial color="#243049" wireframe transparent opacity={0.15} />
       </mesh>
       {hover ? (
-        <Html position={project(hover, projection).map((v) => v + 0.08) as [number, number, number]}>
+        <Html position={project(hover, projection, xmAngle).map((v) => v + 0.08) as [number, number, number]}>
           <div className={styles.tooltip}>
             <strong>{hover.label}</strong>
             {hover.ordinal != null ? <span> · ord {hover.ordinal}</span> : null}
@@ -218,6 +225,8 @@ export function GlomeCanvas({
 }) {
   const baseReady = useDeferredWebGlMount(nodes.length > 0);
   const [staggerReady, setStaggerReady] = useState(staggerMs <= 0);
+  const [xmDegrees, setXmDegrees] = useState(35);
+  const xmAngle = xmDegrees * Math.PI / 180;
   useEffect(() => {
     if (!baseReady || staggerMs <= 0) {
       setStaggerReady(staggerMs <= 0 ? baseReady : false);
@@ -235,13 +244,13 @@ export function GlomeCanvas({
       .filter((n) => n.kind === 'constituent')
       .slice()
       .sort((a, b) => (a.ordinal ?? 0) - (b.ordinal ?? 0))
-      .map((n) => project(n, projection));
-  }, [nodes, trajectoryPoints, projection]);
+      .map((n) => project(n, projection, xmAngle));
+  }, [nodes, trajectoryPoints, projection, xmAngle]);
 
   const highlights = useMemo(() => new Set(highlightIds), [highlightIds]);
   const revision = useMemo(
-    () => `${projection}:${nodes.length}:${highlightOrdinal}:${nodes.map((n) => n.id).join(',')}`,
-    [nodes, projection, highlightOrdinal],
+    () => `${projection}:${xmDegrees}:${nodes.length}:${highlightOrdinal}:${nodes.map((n) => n.id).join(',')}`,
+    [nodes, projection, xmDegrees, highlightOrdinal],
   );
 
   if (nodes.length === 0) {
@@ -252,6 +261,20 @@ export function GlomeCanvas({
     <div className={fill ? `${styles.root} ${styles.rootFill}` : styles.root}>
       {nodes.length > MAX_NODES ? (
         <Muted className={styles.cap}>Showing {MAX_NODES} of {nodes.length} nodes</Muted>
+      ) : null}
+      {projection === 'placement' ? (
+        <label className={styles.rotationControl}>
+          <span>X–M rotation</span>
+          <input
+            type="range"
+            min="-180"
+            max="180"
+            step="1"
+            value={xmDegrees}
+            onChange={(event) => setXmDegrees(Number(event.target.value))}
+          />
+          <output>{xmDegrees}°</output>
+        </label>
       ) : null}
       <div className={fill ? `${styles.canvas} ${styles.canvasFill}` : styles.canvas}>
         {webGlReady ? (
@@ -273,6 +296,7 @@ export function GlomeCanvas({
                 highlightIds={highlights}
                 highlightOrdinal={highlightOrdinal}
                 projection={projection}
+                xmAngle={xmAngle}
                 revision={revision}
                 onSelectOrdinal={onSelectOrdinal}
               />

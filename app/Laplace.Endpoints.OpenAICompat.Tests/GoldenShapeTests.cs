@@ -155,6 +155,66 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
     }
 
     [Fact]
+    public async Task Chat_ConsumesNewestUserTurn_NotTrailingAssistantContent()
+    {
+        var quoteId = await ApproveQuoteAsync("chat.completions", "role-routing-tenant", "evt_role_routing");
+        using var response = await PostWithQuoteAsync("/v1/chat/completions", new
+        {
+            model = "laplace-converse-001",
+            messages = new object[]
+            {
+                new { role = "user", content = "unknown-topic" },
+                new { role = "assistant", content = "what is a whale" },
+            }
+        }, quoteId);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
+        Assert.Equal(0, (int?)body["metadata"]?["reply_rows"]);
+        Assert.Equal(string.Empty, (string?)body["choices"]?[0]?["message"]?["content"]);
+    }
+
+    [Fact]
+    public async Task Chat_ConverseDials_ReachTheSubstrateClient()
+    {
+        var quoteId = await ApproveQuoteAsync("chat.completions", "dial-routing-tenant", "evt_dial_routing");
+        using var response = await PostWithQuoteAsync("/v1/chat/completions", new
+        {
+            model = "laplace-converse-001",
+            shape = "define",
+            messages = new[] { new { role = "user", content = "whale" } }
+        }, quoteId);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
+        Assert.Equal("shape=define;bands=;elaborate=False",
+            (string?)body["choices"]?[0]?["message"]?["content"]);
+    }
+
+    [Theory]
+    [InlineData("laplace-converse-001", "max_tokens", 32)]
+    [InlineData("laplace-completions-001", "top_p", 0.5)]
+    public async Task Chat_RejectsControlsItsSelectedLaneDoesNotImplement(
+        string model, string control, object value)
+    {
+        var payload = new JsonObject
+        {
+            ["model"] = model,
+            ["messages"] = new JsonArray(new JsonObject
+            {
+                ["role"] = "user",
+                ["content"] = "whale",
+            }),
+            [control] = JsonValue.Create(value),
+        };
+
+        using var response = await _client.PostAsJsonAsync("/v1/chat/completions", payload);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
+        Assert.Equal("unsupported_parameter", (string?)body["error"]?["code"]);
+    }
+
+    [Fact]
     public async Task Golden_Chat_Converse_Sse()
     {
         var quoteId = await ApproveQuoteAsync("chat.completions", "golden-chat-sse-tenant", "evt_golden_chat_sse");
@@ -195,6 +255,24 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
         });
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         GoldenJson.Match("chat-unknown-model-400", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Chat_CodeModel_IsNotAdvertisedUntilItsClosedLoopExists()
+    {
+        using var modelsResponse = await _client.GetAsync("/v1/models");
+        var models = JsonNode.Parse(await modelsResponse.Content.ReadAsStringAsync())!;
+        Assert.DoesNotContain(models["data"]!.AsArray(),
+            item => (string?)item?["id"] == "laplace-code-001");
+
+        using var response = await _client.PostAsJsonAsync("/v1/chat/completions", new
+        {
+            model = "laplace-code-001",
+            messages = new[] { new { role = "user", content = "write a program" } }
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
+        Assert.Equal("unknown_model", (string?)body["error"]?["code"]);
     }
 
     [Fact]

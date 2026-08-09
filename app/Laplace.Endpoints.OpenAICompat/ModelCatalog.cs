@@ -20,7 +20,6 @@ internal static class ModelCatalog
     [
         new ModelInfo(Converse, "model", 0, "laplace"),
         new ModelInfo(Completions, "model", 0, "laplace"),
-        new ModelInfo(Code, "model", 0, "laplace"),
         new ModelInfo(EmbedForm, "model", 0, "laplace"),
         new ModelInfo(EmbedMeaning, "model", 0, "laplace"),
     ];
@@ -29,10 +28,10 @@ internal static class ModelCatalog
         string.Equals(model, Converse, StringComparison.Ordinal);
 
     public static bool IsChatModel(string model) =>
-        model is Converse or Completions or Code;
+        model is Converse or Completions;
 
     public static bool IsCompletionsModel(string model) =>
-        model is Completions or Code;
+        model is Completions;
 
     /// <summary>False = unknown embedding model; includeMeaning distinguishes the two lanes.</summary>
     public static bool TryEmbeddingModel(string model, out bool includeMeaning)

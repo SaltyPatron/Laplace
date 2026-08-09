@@ -442,10 +442,10 @@ BEGIN
             -- 2026-08-05 (GH #878): the 2026-07-27 hangs are FIXED (ceef97d
             -- landed; dog 3.7s, pawn 1.4s), but content REGRESSED to a
             -- degenerate topic echo ("dog. dog. dog. dog." — including pawn,
-            -- its one historically verified topic), and it executes CREATE
-            -- TABLE internally, which no read-only lane can run (25006 via
-            -- the MCP op surface). Unfit for wiring on content and on
-            -- transaction mode; latency is no longer the blocker.
+            -- its one historically verified topic). Its former temp-table
+            -- implementation has since been replaced by PL/pgSQL arrays and is
+            -- read-only-safe; content quality, not transaction mode, is why it
+            -- remains off this hot path.
             --
             -- converse_about is the pre-existing path and is fast and correct-ish
             -- ("Dog is a member of the genus Canis (probably descended from the

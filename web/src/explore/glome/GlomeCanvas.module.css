@@ -49,4 +49,23 @@
     margin-bottom: 0.35rem;
     flex: 0 0 auto;
   }
+
+  .rotationControl {
+    display: grid;
+    grid-template-columns: auto minmax(8rem, 1fr) 3.5rem;
+    align-items: center;
+    gap: 0.65rem;
+    margin: 0 0 0.45rem;
+    color: var(--color-text-muted);
+    font-size: 0.78rem;
+  }
+
+  .rotationControl input {
+    width: 100%;
+  }
+
+  .rotationControl output {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
 }

@@ -22,7 +22,10 @@ public sealed record ChatCompletionsRequest(
     [property: JsonPropertyName("web_search_results")] int? WebSearchResults = null,
     [property: JsonPropertyName("user")] string? User = null,
     [property: JsonPropertyName("session")] string? Session = null,
-    [property: JsonPropertyName("scope")] string? Scope = null);
+    [property: JsonPropertyName("scope")] string? Scope = null,
+    [property: JsonPropertyName("shape")] string? Shape = null,
+    [property: JsonPropertyName("bands")] int[]? Bands = null,
+    [property: JsonPropertyName("elaborate")] bool Elaborate = false);
 
 public sealed record ChatMessage(
     [property: JsonPropertyName("role")] string? Role,
