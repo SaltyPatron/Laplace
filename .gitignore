@@ -232,6 +232,13 @@ FakesAssemblies/
 
 .ntvs_analysis.dat
 node_modules/
+.claude/
+.worktrees/
+web/test-results/
+web/playwright-report/
+*.tsbuildinfo
+/external/*
+!/external/CMakeLists.txt
 
 *.plg
 

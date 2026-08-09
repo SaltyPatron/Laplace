@@ -5,7 +5,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 VAULT="${LAPLACE_VAULT_TREESITTER:-/vault/Data/TreeSitter}"
-TARGET="$REPO_DIR/external/tree-sitter-grammars"
+EXTERNAL_ROOT="${LAPLACE_EXTERNAL:-${LAPLACE_SUBMODULE_CACHE:-/opt/laplace/external}}"
+TARGET="$EXTERNAL_ROOT/tree-sitter-grammars"
 DRY_RUN=0
 
 for arg in "$@"; do
@@ -38,7 +39,7 @@ for grammar_dir in "$VAULT"/tree-sitter-*; do
     name=$(basename "$grammar_dir")
     count=$((count + 1))
 
-    submodule_path="external/tree-sitter-grammars/$name"
+    submodule_path="$TARGET/$name"
 
     if [ -d "$submodule_path/.git" ] || [ -f "$submodule_path/.git" ]; then
         skipped=$((skipped + 1))

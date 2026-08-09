@@ -76,8 +76,17 @@ else()
     endif()
 endif()
 
-set(LAPLACE_EXTERNAL "${CMAKE_CURRENT_SOURCE_DIR}/../external"
-    CACHE PATH "Path to external/ submodule tree")
+if(NOT DEFINED LAPLACE_EXTERNAL OR LAPLACE_EXTERNAL STREQUAL "")
+    if(DEFINED ENV{LAPLACE_EXTERNAL} AND NOT "$ENV{LAPLACE_EXTERNAL}" STREQUAL "")
+        set(LAPLACE_EXTERNAL "$ENV{LAPLACE_EXTERNAL}")
+    elseif(DEFINED ENV{LAPLACE_SUBMODULE_CACHE} AND NOT "$ENV{LAPLACE_SUBMODULE_CACHE}" STREQUAL "")
+        set(LAPLACE_EXTERNAL "$ENV{LAPLACE_SUBMODULE_CACHE}")
+    else()
+        set(LAPLACE_EXTERNAL "${CMAKE_CURRENT_SOURCE_DIR}/../external")
+    endif()
+endif()
+set(LAPLACE_EXTERNAL "${LAPLACE_EXTERNAL}"
+    CACHE PATH "Path to the shared external dependency tree")
 
 set(LAPLACE_UNICODE_VERSION "17.0.0"
     CACHE STRING "Unicode version pinned for substrate determinism. MUST be a stable release; never alpha/beta.")
