@@ -1,4 +1,3 @@
-DROP FUNCTION IF EXISTS laplace.entity_curve(bytea);
 CREATE OR REPLACE FUNCTION structural.entity_curve(p_entity bytea) RETURNS geometry
     LANGUAGE sql STABLE
  AS $$

@@ -1,7 +1,6 @@
 
 
 
-DROP FUNCTION IF EXISTS laplace.language_coverage(bytea, int);
 CREATE OR REPLACE FUNCTION converse.language_coverage(p_word bytea, p_limit int DEFAULT 40)
     RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE

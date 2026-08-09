@@ -3,7 +3,6 @@
 -- correction: no sentence-tier PRECEDES exists in consensus); this is the
 -- calculated view over it — word_order one tier up. Document realize.constituents are
 -- sentences by construction (same convention as corpus_sentence_constituents_since).
-DROP FUNCTION IF EXISTS laplace.sentence_order(int, int);
 CREATE OR REPLACE FUNCTION generation.sentence_order(p_docs int DEFAULT 100000, p_gap int DEFAULT 1)
     RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$

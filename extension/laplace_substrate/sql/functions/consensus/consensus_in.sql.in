@@ -1,7 +1,6 @@
 -- Inbound edges of an entity. Thin wrapper over consensus.edges_raw(); pins inbound,
 -- consensus.edge_rank ordering, consensus.refuted edges INCLUDED — the axes this signature has
 -- always carried, now stated instead of inferred from the body.
-DROP FUNCTION IF EXISTS laplace.consensus_in(bytea, integer);
 -- BEGIN ATOMIC: GH #764.
 CREATE OR REPLACE FUNCTION consensus.consensus_in(p_id bytea, p_limit integer DEFAULT 40)
     RETURNS TABLE(subject_id bytea, type_id bytea, rating bigint, rd bigint,

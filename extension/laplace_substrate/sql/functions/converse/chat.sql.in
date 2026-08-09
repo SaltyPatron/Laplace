@@ -29,7 +29,6 @@
 -- Connectives-as-realized-entities through consensus remains the longer path;
 -- the scaffold stops the mixed-language lie the 2026-07-25 Bulgarian-dog
 -- incident exposed one layer down from the language tally below.
-DROP FUNCTION IF EXISTS laplace.chat(text, bytea, bytea, text, int[], bytea, bytea, text, boolean);
 CREATE OR REPLACE FUNCTION converse.chat(p_prompt text,
                                 p_session bytea DEFAULT NULL,
                                 p_lang bytea DEFAULT NULL,

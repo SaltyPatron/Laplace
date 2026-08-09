@@ -1,4 +1,3 @@
-DROP FUNCTION IF EXISTS laplace.concept_ref(text);
 CREATE OR REPLACE FUNCTION lexical.concept_ref(p_ref text)
     RETURNS bytea
     LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$

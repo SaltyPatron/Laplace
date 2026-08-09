@@ -1,4 +1,3 @@
-DROP FUNCTION IF EXISTS laplace.entity_physicality_coords(bytea[]);
 DROP FUNCTION IF EXISTS consensus.entity_physicality_coords(bytea[]);
 CREATE OR REPLACE FUNCTION ops.entity_physicality_coords(p_ids bytea[])
     RETURNS TABLE(entity_id bytea, x double precision, y double precision,

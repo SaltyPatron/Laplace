@@ -1,4 +1,3 @@
-DROP FUNCTION IF EXISTS laplace.salient_facts(bytea, bytea, int);
 CREATE OR REPLACE FUNCTION consensus.salient_facts(p_word bytea, p_lang bytea DEFAULT NULL,
                                     p_limit int DEFAULT 24)
     RETURNS TABLE(type text, fact text, eff_mu numeric, witnesses bigint)

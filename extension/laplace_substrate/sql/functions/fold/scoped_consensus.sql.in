@@ -15,7 +15,6 @@
 -- outcome reconstruction and no invented opponent. Partial order within a cell
 -- is (last_observed_at, id) — deterministic; the ingest's exact arrival order
 -- is the one thing evidence does not record.
-DROP FUNCTION IF EXISTS laplace.scoped_consensus(bytea[]);
 CREATE OR REPLACE FUNCTION consensus.scoped_consensus(p_source_ids bytea[])
     RETURNS TABLE(id bytea, subject_id bytea, type_id bytea, object_id bytea,
                   rating bigint, rd bigint, volatility bigint, witness_count bigint,

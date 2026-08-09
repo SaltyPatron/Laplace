@@ -1,4 +1,3 @@
-DROP FUNCTION IF EXISTS laplace.attestation_unary_response_type(bytea, bytea, bytea[], bytea);
 DROP FUNCTION IF EXISTS consensus.attestation_unary_response_type(bytea, bytea, bytea[], bytea);
 CREATE OR REPLACE FUNCTION ops.attestation_unary_response_type(
     p_subject_id   bytea,

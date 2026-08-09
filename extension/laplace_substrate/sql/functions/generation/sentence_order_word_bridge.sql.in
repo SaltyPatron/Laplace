@@ -4,7 +4,6 @@
 -- Composes with the tier-2 continuation plane in the lm_head so the synthesized
 -- model can cross a sentence boundary instead of speaking document-internal
 -- word adjacency only.
-DROP FUNCTION IF EXISTS laplace.sentence_order_word_bridge(bytea[], int);
 CREATE OR REPLACE FUNCTION generation.sentence_order_word_bridge(p_vocab bytea[], p_docs int DEFAULT 100000)
     RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$

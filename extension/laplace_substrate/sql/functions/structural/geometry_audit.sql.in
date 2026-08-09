@@ -49,7 +49,6 @@
 -- Return-type change needs a DROP: CREATE OR REPLACE cannot alter a function's
 -- RETURNS TABLE. Adding avg_constituents to this surface failed the upgrade
 -- until this line existed -- the same trap prompt_coherence and infer hit.
-DROP FUNCTION IF EXISTS laplace.geometry_audit(double precision);
 
 CREATE OR REPLACE FUNCTION structural.geometry_audit(p_sample double precision DEFAULT 0.3)
     RETURNS TABLE(tier smallint, entities bigint,

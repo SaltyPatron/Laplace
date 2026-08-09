@@ -13,7 +13,6 @@
 -- Weighting by witness_count, not a plain average over lines: an opening whose one
 -- exotic line went 1-0 once must not outrank the Sicilian. The weight IS the number
 -- of playings, which is exactly what witness_count counts on this cell.
-DROP FUNCTION IF EXISTS laplace.chess_opening_record(int, int, bytea);
 CREATE OR REPLACE FUNCTION chess.opening_record(p_limit int DEFAULT 25,
                                                 p_offset int DEFAULT 0,
                                                 p_source bytea DEFAULT NULL)

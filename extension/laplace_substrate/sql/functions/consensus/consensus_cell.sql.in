@@ -10,7 +10,6 @@
 -- Keyed by primary id through laplace.consensus_id(), never a three-column triple scan: the
 -- id IS blake3(subject || type || object), so the lookup is one index probe on the
 -- PK and the partition keys come along in the same expression.
-DROP FUNCTION IF EXISTS laplace.consensus_cell(bytea, bytea, bytea);
 -- BEGIN ATOMIC: GH #764.
 CREATE OR REPLACE FUNCTION consensus.cell(
     p_subject bytea, p_type bytea, p_object bytea)
@@ -34,7 +33,6 @@ END;
 --
 -- LEFT JOIN on the computed id, ordinal-aligned: one row out per row in, in input
 -- order, so the caller indexes the result by position without a second pass.
-DROP FUNCTION IF EXISTS laplace.consensus_pair_scores(bytea[], bytea, bytea[]);
 CREATE OR REPLACE FUNCTION consensus.pair_scores(
     p_subjects bytea[], p_type bytea, p_objects bytea[])
     RETURNS TABLE(ord int, score float8)
@@ -54,7 +52,6 @@ END;
 -- installed answered it. p_type is the entity type id; p_physicality_type selects
 -- the physicality kind (3 = trajectory), named rather than left as a bare literal
 -- at the call site.
-DROP FUNCTION IF EXISTS laplace.entity_physicality_count(bytea, int);
 CREATE OR REPLACE FUNCTION consensus.entity_physicality_count(
     p_type bytea, p_physicality_type int DEFAULT 3)
     RETURNS bigint

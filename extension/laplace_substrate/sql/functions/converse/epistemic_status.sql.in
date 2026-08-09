@@ -1,5 +1,4 @@
 -- converse.epistemic_status — GH #862 / #860. No SET, real schema names.
-DROP FUNCTION IF EXISTS laplace.epistemic_status(bytea, bytea, int);
 CREATE OR REPLACE FUNCTION converse.epistemic_status(p_word bytea, p_lang bytea DEFAULT NULL,
                                             p_limit int DEFAULT 30)
     RETURNS TABLE(type text, fact text, status text, mu numeric,

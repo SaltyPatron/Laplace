@@ -1,4 +1,3 @@
-DROP FUNCTION IF EXISTS laplace.consensus_export_unary(bytea);
 CREATE OR REPLACE FUNCTION structural.consensus_export_unary(p_type_id bytea)
     RETURNS TABLE(subject_id bytea, rating bigint, witness_count bigint)
     LANGUAGE sql STABLE

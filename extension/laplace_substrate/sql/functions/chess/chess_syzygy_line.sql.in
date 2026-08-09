@@ -13,21 +13,18 @@
 --
 -- Typed accessors below own the single laplace.relation_type_id('…') literals for this
 -- vocabulary (ISA G3). New chess SQL must call these — never re-type the strings.
-DROP FUNCTION IF EXISTS laplace.chess_has_wdl_type();
 CREATE OR REPLACE FUNCTION chess.has_wdl_type() RETURNS bytea
     LANGUAGE sql STABLE PARALLEL SAFE
  AS $$
     SELECT laplace.relation_type_id('HAS_WDL')
 $$;
 
-DROP FUNCTION IF EXISTS laplace.chess_has_dtz_type();
 CREATE OR REPLACE FUNCTION chess.has_dtz_type() RETURNS bytea
     LANGUAGE sql STABLE PARALLEL SAFE
  AS $$
     SELECT laplace.relation_type_id('HAS_DTZ')
 $$;
 
-DROP FUNCTION IF EXISTS laplace.chess_syzygy_line(bytea, int);
 CREATE OR REPLACE FUNCTION chess.syzygy_line(p_line bytea, p_limit int DEFAULT 64)
     RETURNS TABLE(position_id bytea, wdl text, dtz text)
     LANGUAGE sql STABLE

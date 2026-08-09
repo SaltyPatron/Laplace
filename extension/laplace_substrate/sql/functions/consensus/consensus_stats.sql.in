@@ -1,4 +1,3 @@
-DROP FUNCTION IF EXISTS laplace.consensus_stats();
 -- BEGIN ATOMIC: GH #764.
 CREATE OR REPLACE FUNCTION consensus.stats()
     RETURNS TABLE(evidence_rows bigint, consensus_rows bigint, dedup_ratio numeric,

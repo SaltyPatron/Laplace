@@ -26,14 +26,12 @@
 -- WEIGHT: what an edge contributes to a walk score or an exported tensor.
 -- Using eff_mu as a sign/gate is the bug glicko2.c documents (99.04% of won
 -- claims scored negative, an accidental floor at eff_mu >= neutral).
-DROP FUNCTION IF EXISTS laplace.walk_edge_weight(bigint, bigint, bigint, double precision);
 CREATE OR REPLACE FUNCTION consensus.walk_edge_weight(
         p_rating bigint, p_rd bigint, p_witness_count bigint, p_kappa double precision)
     RETURNS double precision
     AS 'MODULE_PATHNAME', 'pg_laplace_walk_edge_weight'
     LANGUAGE C LAPLACE_IMMUTABLE_STRICT;
 
-DROP FUNCTION IF EXISTS laplace.walk_edge_weight(bigint, bigint, bigint);
 CREATE OR REPLACE FUNCTION consensus.walk_edge_weight(
         p_rating bigint, p_rd bigint, p_witness_count bigint)
     RETURNS double precision

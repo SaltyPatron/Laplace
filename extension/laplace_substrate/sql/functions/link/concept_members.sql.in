@@ -1,4 +1,3 @@
-DROP FUNCTION IF EXISTS laplace.concept_members(bytea);
 CREATE OR REPLACE FUNCTION lexical.concept_members(p_concept bytea)
     RETURNS TABLE(member bytea, kind text, mu numeric, witnesses bigint)
     LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$

@@ -14,7 +14,6 @@
 -- The previous body computed count(*) over ALL trajectory rows (parallel scan of
 -- ~3.4M index entries, plan cost ~26k) on every call; this body plans at cost <5.
 -- Total corpus size for display lives in stream_stats(), not here.
-DROP FUNCTION IF EXISTS laplace.corpus_trajectory_probe();
 CREATE OR REPLACE FUNCTION generation.corpus_trajectory_probe()
     RETURNS TABLE(rows bigint, max_us bigint)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$

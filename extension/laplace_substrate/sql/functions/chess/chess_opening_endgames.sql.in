@@ -27,7 +27,6 @@
 -- and that silence is correct: bool_or over zero rows is NULL, and a 3-4-5-man set covers
 -- a small fraction of play. Read lines_probed against chess_opening_record's lines before
 -- concluding anything about the opening as a whole.
-DROP FUNCTION IF EXISTS laplace.chess_opening_endgames(text, int, int);
 CREATE OR REPLACE FUNCTION chess.opening_endgames(p_opening text,
                                                   p_limit int DEFAULT 16,
                                                   p_scan_lines int DEFAULT 5000)

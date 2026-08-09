@@ -2,7 +2,6 @@
 -- this expression serves bit-overlap plane queries (bits && band-bits) with
 -- posting lists built for duplicate-heavy keys, replacing the pathological
 -- hash-on-66-distinct-values indexes removed in Issue 36.
-DROP FUNCTION IF EXISTS laplace.laplace_highway_mask_bits(mask bytea);
 CREATE OR REPLACE FUNCTION consensus.laplace_highway_mask_bits(mask bytea)
     RETURNS int[]
     AS 'MODULE_PATHNAME', 'pg_laplace_highway_mask_bits'

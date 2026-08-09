@@ -4,7 +4,6 @@
 -- taxonomy.laplace_ancestry mid-migration name) dropped rather than shimmed (#532).
 -- BEGIN ATOMIC: GH #764.
 DROP FUNCTION IF EXISTS laplace_ancestry(bytea, bytea, integer);
-DROP FUNCTION IF EXISTS laplace.laplace_ancestry(bytea, bytea, integer);
 DROP FUNCTION IF EXISTS taxonomy.laplace_ancestry(bytea, bytea, integer);
 CREATE OR REPLACE FUNCTION taxonomy.ancestry(
     p_entity_id bytea,

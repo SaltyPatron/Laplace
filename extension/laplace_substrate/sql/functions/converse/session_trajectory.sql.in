@@ -17,7 +17,6 @@
 -- — converse.chat()'s carry ranks by consensus adjacency to the current turn first,
 -- falling back to recency, which keeps session_last_resolved's semantics as
 -- the zero-evidence case.
-DROP FUNCTION IF EXISTS laplace.session_trajectory(bytea, int);
 CREATE OR REPLACE FUNCTION converse.session_trajectory(p_session bytea, p_k int DEFAULT 8)
     RETURNS TABLE(topic_id bytea, last_ord int, mentions bigint)
     LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$

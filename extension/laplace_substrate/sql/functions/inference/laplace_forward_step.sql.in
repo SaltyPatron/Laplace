@@ -27,7 +27,6 @@
 -- No SET search_path (GH #860). This body is scalar and carries a FROM clause, so
 -- the scalar inliner rejects it either way; the clause is unjustified regardless
 -- and its presence would be one more site for the sweep.
-DROP FUNCTION IF EXISTS laplace.laplace_forward_step(bytea, bytea);
 CREATE OR REPLACE FUNCTION generation.laplace_forward_step(
     p_entity   bytea,
     p_band_mask bytea)

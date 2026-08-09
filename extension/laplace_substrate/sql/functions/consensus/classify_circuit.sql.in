@@ -1,4 +1,3 @@
-DROP FUNCTION IF EXISTS laplace.classify_circuit(bytea[]);
 -- BEGIN ATOMIC: GH #764.
 CREATE OR REPLACE FUNCTION consensus.classify_circuit(p_pairs bytea[])
     RETURNS TABLE(subject_id bytea, object_id bytea, type_id bytea, eff_mu numeric, witnesses bigint)

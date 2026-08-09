@@ -1,4 +1,3 @@
-DROP FUNCTION IF EXISTS laplace.walk_strongest(bytea, bytea, int);
 CREATE OR REPLACE FUNCTION consensus.walk_strongest(
     p_prompt bytea, p_type bytea DEFAULT NULL, p_depth int DEFAULT 8)
     RETURNS TABLE(step int, type_id bytea, entity_id bytea, eff_mu numeric)

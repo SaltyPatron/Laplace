@@ -20,7 +20,6 @@
 -- the row would be the EXISTS-collapses-NULL defect in another costume.
 --
 -- No SET search_path (GH #860), every reference schema-qualified (G11).
-DROP FUNCTION IF EXISTS laplace.election_token_profile(text[]);
 CREATE OR REPLACE FUNCTION converse.election_token_profile(p_surfaces text[])
     RETURNS TABLE(
         surface        text,

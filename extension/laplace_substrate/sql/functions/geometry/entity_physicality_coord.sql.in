@@ -1,4 +1,3 @@
-DROP FUNCTION IF EXISTS laplace.entity_physicality_coord(bytea);
 CREATE OR REPLACE FUNCTION structural.entity_physicality_coord(p_entity bytea)
     RETURNS geometry
     LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$

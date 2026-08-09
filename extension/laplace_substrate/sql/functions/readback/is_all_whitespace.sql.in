@@ -1,4 +1,3 @@
-DROP FUNCTION IF EXISTS laplace.is_all_whitespace(text);
 CREATE OR REPLACE FUNCTION realize.is_all_whitespace(p_text text)
     RETURNS boolean
     AS 'MODULE_PATHNAME', 'pg_laplace_is_all_whitespace'

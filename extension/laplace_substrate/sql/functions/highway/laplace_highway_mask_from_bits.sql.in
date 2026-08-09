@@ -8,7 +8,6 @@
 -- consensus.laplace_highway_mask_bits(mask_from_bits(x)) = sorted(x) is a regression.
 -- Bit VALUES still come only from consensus.relation_highway_bit(the perfcache); this
 -- function never assigns meaning to a position.
-DROP FUNCTION IF EXISTS laplace.laplace_highway_mask_from_bits(int[]);
 CREATE OR REPLACE FUNCTION consensus.laplace_highway_mask_from_bits(p_bits int[])
     RETURNS bytea
     AS 'MODULE_PATHNAME', 'pg_laplace_highway_mask_from_bits'

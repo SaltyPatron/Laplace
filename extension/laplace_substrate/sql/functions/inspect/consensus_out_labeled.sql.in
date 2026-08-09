@@ -1,4 +1,3 @@
-DROP FUNCTION IF EXISTS laplace.consensus_out_labeled(bytea, integer);
 DROP FUNCTION IF EXISTS consensus.consensus_out_labeled(bytea, integer);
 CREATE OR REPLACE FUNCTION ops.consensus_out_labeled(p_id bytea, p_limit integer DEFAULT 40)
     RETURNS TABLE(

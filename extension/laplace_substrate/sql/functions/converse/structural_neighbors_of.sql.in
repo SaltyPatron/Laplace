@@ -4,7 +4,6 @@
 -- Shape axis: Frechet over REALIZED curves (entity_curve), never packed
 -- laplace.physicalities.trajectory (Rule #3 / Issue 51).
 -- GH #862 / #860: structural.neighbors_of, no SET, real schema names.
-DROP FUNCTION IF EXISTS laplace.structural_neighbors_of(bytea, integer);
 CREATE OR REPLACE FUNCTION structural.neighbors_of(
     p_id bytea,
     p_k  integer DEFAULT 10)

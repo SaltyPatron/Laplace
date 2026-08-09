@@ -9,7 +9,6 @@
 -- Every reference is `@extschema@.`-qualified instead. That is what the clause was
 -- actually doing here, and qualification does it at parse time for free. This is the
 -- same trade `drop_retired_eff_mu` records and CLAUDE.md states as law.
-DROP FUNCTION IF EXISTS laplace.define(bytea, int);
 CREATE OR REPLACE FUNCTION lexical.define(p_word bytea, p_limit int DEFAULT 5)
     RETURNS TABLE(definition text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$

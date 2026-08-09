@@ -3,7 +3,6 @@
 -- reaches a deposited tablebase position.
 --
 -- Relation vocabulary via chess_has_wdl_type / chess.has_dtz_type(ISA G3).
-DROP FUNCTION IF EXISTS laplace.chess_distance_to_syzygy(bytea);
 CREATE OR REPLACE FUNCTION chess.distance_to_syzygy(p_line bytea)
     RETURNS TABLE(
         position_id bytea,

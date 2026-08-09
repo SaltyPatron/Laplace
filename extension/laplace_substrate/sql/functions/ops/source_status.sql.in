@@ -45,7 +45,6 @@
 -- sense_audit / prompt_language.
 DROP FUNCTION IF EXISTS ops.source_status(text);
 
-DROP FUNCTION IF EXISTS laplace.source_status(text);
 CREATE OR REPLACE FUNCTION ops.source_status(p_source text DEFAULT NULL)
     RETURNS TABLE(source            text,
                   source_id         bytea,

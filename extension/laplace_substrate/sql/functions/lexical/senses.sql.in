@@ -5,7 +5,6 @@
 -- yields zero rows (lexical_peers is STRICT -> NULL array -> empty unnest).
 -- lexical.senses — GH #862. Every call site moves in this same commit; a rename
 -- with a live caller is a tree that does not install.
-DROP FUNCTION IF EXISTS laplace.senses(bytea);
 CREATE OR REPLACE FUNCTION lexical.senses(p_word bytea)
     RETURNS TABLE(sense_id bytea, synset_id bytea, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$

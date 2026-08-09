@@ -1,5 +1,4 @@
 -- Gloss plus the IS_A ladder upward. Context ids disambiguate the sense.
-DROP FUNCTION IF EXISTS laplace.recall_what_is_response(bytea, bytea[]);
 CREATE OR REPLACE FUNCTION converse.recall_what_is_response(p_topic bytea, p_context_ids bytea[] DEFAULT NULL)
     RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE

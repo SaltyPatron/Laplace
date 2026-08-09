@@ -35,7 +35,6 @@ probes/entities_stored_bitmap.sql.in
 probes/physicalities_exist_bitmap.sql.in
 probes/content_descent_bitmap.sql.in
 probes/tier_batch_existence_probe.sql.in
-probes/drop_content_descent_novel_ordinals.sql.in
 bootstrap/bootstrap.sql.in
 functions/glicko2/laplace_glicko2_result.sql.in
 functions/glicko2/laplace_glicko2_sfunc.sql.in
@@ -227,9 +226,6 @@ functions/structural/consensus_export_relations_mu.sql.in
 functions/structural/model_recipes.sql.in
 functions/lexical/word_case_variants.sql.in
 functions/lexical/word_case_variant_ids.sql.in
-functions/lexical/drop_retired_case_surface.sql.in
-functions/converse/drop_retired_english_router.sql.in
-functions/lexical/drop_word_shape_peers.sql.in
 functions/lexical/word_shape_peers_fast.sql.in
 functions/lexical/lexical_peers.sql.in
 functions/lexical/senses.sql.in
@@ -255,7 +251,6 @@ functions/ops/source_tier_census.sql.in
 functions/ops/surface_sample.sql.in
 functions/ingest/intent_preflight_result.sql.in
 functions/ingest/intent_preflight.sql.in
-functions/generation/drop_retired_content_lane.sql.in
 functions/generation/relation_plane.sql.in
 functions/generation/entity_relation_plane.sql.in
 functions/generation/consensus_layer_plane.sql.in
@@ -286,10 +281,6 @@ functions/generation/continue_text.sql.in
 functions/generation/variant_walk.sql.in
 functions/generation/respell_variant.sql.in
 functions/generation/recall_trajectories.sql.in
-functions/ingest/drop_retired_ingest_lanes.sql.in
-functions/ingest/drop_apply_batch_merge_entities.sql.in
-functions/ingest/drop_apply_batch_merge_physicalities.sql.in
-functions/ingest/drop_apply_batch_merge_attestations.sql.in
 functions/consensus/consensus_walk_edges.sql.in
 functions/consensus/consensus_neighbors_directed.sql.in
 functions/consensus/consensus_neighbors_undirected.sql.in
@@ -392,7 +383,6 @@ views/v_word_points.sql.in
 views/v_word_senses.sql.in
 views/v_attestation_readable.sql.in
 functions/structural/word_anchor.sql.in
-functions/analysis/drop_retired_eff_mu.sql.in
 functions/analysis/laplace_entity_attestations.sql.in
 functions/analysis/laplace_entities_at_depth.sql.in
 functions/analysis/laplace_ancestry.sql.in
@@ -418,9 +408,6 @@ functions/chess/chess_players_by_initial.sql.in
 functions/chess/chess_head_to_head.sql.in
 functions/chess/chess_game_plies.sql.in
 functions/chess/chess_line.sql.in
-functions/chess/drop_retired_chess_aggregates.sql.in
-functions/readback/drop_retired_constituent_edges.sql.in
-functions/ops/drop_retired_ops_instruments.sql.in
 functions/converse/infer.sql.in
 functions/chess/chess_opening_preference.sql.in
 functions/chess/chess_opening_games.sql.in

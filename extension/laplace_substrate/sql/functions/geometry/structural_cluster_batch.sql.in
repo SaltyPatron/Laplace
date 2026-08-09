@@ -1,4 +1,3 @@
-DROP FUNCTION IF EXISTS laplace.structural_cluster_batch(bytea[], double precision, integer);
 CREATE OR REPLACE FUNCTION structural.cluster_batch(
     p_seeds bytea[],
     p_eps   double precision DEFAULT 0.05,

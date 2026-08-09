@@ -20,7 +20,6 @@
 -- LIMIT here is a query limit, not a truncation of what the source asserts.
 -- consensus.eff_mu for a chain = the weakest edge on it (a chain is only as certain as
 -- its loosest strand).
-DROP FUNCTION IF EXISTS laplace.converse_facts(bytea, bytea);
 CREATE OR REPLACE FUNCTION converse.facts(p_syn bytea, p_lang bytea DEFAULT NULL)
     RETURNS TABLE(fact_kind text, sentence text, eff_mu numeric, witnesses bigint,
                   path bytea[], types bytea[])

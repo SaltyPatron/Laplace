@@ -4,7 +4,6 @@
 -- function execution for what is a COALESCE over four cheap resolvers.
 --
 -- GH #862: realize.realize, with its five resolvers as same-schema siblings.
-DROP FUNCTION IF EXISTS laplace.realize(bytea, bytea);
 CREATE OR REPLACE FUNCTION realize.realize(p_id bytea, p_lang bytea DEFAULT NULL)
     RETURNS text
     LANGUAGE sql STABLE PARALLEL SAFE AS $$

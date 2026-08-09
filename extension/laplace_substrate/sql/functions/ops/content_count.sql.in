@@ -1,7 +1,6 @@
 -- String body (not BEGIN ATOMIC): depends on v_word_points which extension
 -- upgrades recreate in the same script; parse-time resolution can miss mid-upgrade
 -- the same way source_roster hit v_attestation_readable (GH #764).
-DROP FUNCTION IF EXISTS laplace.content_count(bytea);
 
 CREATE OR REPLACE FUNCTION ops.content_count(p_source bytea DEFAULT NULL)
     RETURNS bigint

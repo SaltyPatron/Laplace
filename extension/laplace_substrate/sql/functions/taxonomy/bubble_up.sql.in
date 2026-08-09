@@ -12,7 +12,6 @@
 -- taxonomy.bubble_up — GH #862. The schema names the operation (hierarchy
 -- traversal, spec 37 TRAVERSE), not the project. Old name dropped rather than
 -- shimmed: two names for one function is the dual-definition defect (#532).
-DROP FUNCTION IF EXISTS laplace.bubble_up(bytea, bytea[], integer);
 CREATE OR REPLACE FUNCTION taxonomy.bubble_up(
     p_term bytea,
     p_domain_context bytea[] DEFAULT NULL,

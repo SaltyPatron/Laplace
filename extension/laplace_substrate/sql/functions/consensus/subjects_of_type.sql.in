@@ -1,7 +1,6 @@
 -- Distinct subjects that participate as the subject of a consensus edge of
 -- the given relation type. consensus is LIST(type_id), so the type equality
 -- prunes to one partition; callers must not open-code that scan.
-DROP FUNCTION IF EXISTS laplace.subjects_of_type(bytea);
 -- BEGIN ATOMIC: GH #764.
 CREATE OR REPLACE FUNCTION consensus.subjects_of_type(p_type bytea)
     RETURNS TABLE(subject_id bytea)
@@ -12,7 +11,6 @@ BEGIN ATOMIC
     WHERE c.type_id = p_type;
 END;
 
-DROP FUNCTION IF EXISTS laplace.subjects_of_type(text);
 CREATE OR REPLACE FUNCTION consensus.subjects_of_type(p_relation text)
     RETURNS TABLE(subject_id bytea)
     LANGUAGE sql STABLE PARALLEL SAFE

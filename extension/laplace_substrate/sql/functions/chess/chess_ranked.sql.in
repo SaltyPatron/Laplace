@@ -1,4 +1,3 @@
-DROP FUNCTION IF EXISTS laplace.chess_ranked(integer, integer);
 CREATE OR REPLACE FUNCTION chess.ranked(p_limit integer DEFAULT 200, p_offset integer DEFAULT 0)
     RETURNS TABLE(rank bigint, player_id bytea, name text, games bigint,
                   rating double precision, rd double precision, eff_mu double precision)

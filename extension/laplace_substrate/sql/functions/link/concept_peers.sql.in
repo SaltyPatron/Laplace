@@ -1,4 +1,3 @@
-DROP FUNCTION IF EXISTS laplace.concept_peers(bytea, int);
 CREATE OR REPLACE FUNCTION lexical.concept_peers(p_word bytea, p_limit int DEFAULT 24)
     RETURNS TABLE(peer text, kind text, strength double precision)
     LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$

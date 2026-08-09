@@ -1,4 +1,3 @@
-DROP FUNCTION IF EXISTS laplace.recall_is_a_no_reply(bytea, bytea, bytea);
 CREATE OR REPLACE FUNCTION converse.recall_is_a_no_reply(p_from bytea, p_to bytea, p_lang bytea DEFAULT NULL)
     RETURNS text
     LANGUAGE sql STABLE PARALLEL SAFE

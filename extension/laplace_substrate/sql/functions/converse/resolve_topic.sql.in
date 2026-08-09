@@ -52,7 +52,6 @@
 -- NOT PARALLEL SAFE: converse.prompt_coherence() is `LANGUAGE C STABLE` with no parallel
 -- marking, so this body cannot claim more than its callee. recall.c invokes this
 -- as a single scalar SPI select, where parallelism was never in play.
-DROP FUNCTION IF EXISTS laplace.resolve_topic(text, bytea);
 CREATE OR REPLACE FUNCTION converse.resolve_topic(p_phrase text, p_context bytea)
     RETURNS bytea
     LANGUAGE sql STABLE AS $$

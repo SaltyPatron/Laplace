@@ -1,5 +1,4 @@
 -- converse.prompt_state — GH #862 / #860. No SET, real schema names.
-DROP FUNCTION IF EXISTS laplace.prompt_state(text);
 -- BEGIN ATOMIC: GH #764.
 CREATE OR REPLACE FUNCTION converse.prompt_state(p_text text)
     RETURNS TABLE(ord int, word text, id bytea, language bytea)

@@ -45,7 +45,6 @@
 --   * rows arrive sorted by (type, subject, id) — partition-key order; the
 --     router only needs same-type rows ADJACENT and remains correct (merely
 --     one extra plan execution) if they are not.
-DROP FUNCTION IF EXISTS laplace.consensus_upsert(bytea[], bytea[], bytea[], bigint[], bigint[], bigint[], timestamptz[]);
 CREATE OR REPLACE FUNCTION consensus.upsert(
     p_subjects bytea[],
     p_types    bytea[],

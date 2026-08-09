@@ -1,7 +1,6 @@
 -- Witnessed glosses for a topic, sense-disambiguated by the other content ids
 -- the caller resolved. Takes ids, not prompt text: what disambiguates a sense is
 -- the company it keeps in the substrate, not the sentence it arrived in.
-DROP FUNCTION IF EXISTS laplace.recall_define_response(bytea, bytea[]);
 CREATE OR REPLACE FUNCTION converse.recall_define_response(p_topic bytea, p_context_ids bytea[] DEFAULT NULL)
     RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$

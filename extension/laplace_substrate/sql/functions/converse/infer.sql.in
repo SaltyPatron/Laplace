@@ -24,7 +24,6 @@
 -- On a single-witness seed the base weights are flat and bias_hits carries the
 -- whole signal -- measured: the California read returns 39 candidates all at
 -- consensus.eff_mu 1315.5, and exactly one (sacramento) carries a capital-family edge.
-DROP FUNCTION IF EXISTS laplace.infer(text, int);
 CREATE OR REPLACE FUNCTION converse.infer(p_prompt text, p_limit int DEFAULT 8)
     RETURNS TABLE(prediction text, weight double precision, bias_hits bigint)
     LANGUAGE sql STABLE AS $$

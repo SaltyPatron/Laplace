@@ -1,4 +1,3 @@
-DROP FUNCTION IF EXISTS laplace.continue_text(text, int, int, double precision, int, text[], double precision, boolean);
 -- BEGIN ATOMIC: GH #764.
 CREATE OR REPLACE FUNCTION generation.continue_text(
         p_prompt text, p_steps int DEFAULT 16, p_window int DEFAULT 3,

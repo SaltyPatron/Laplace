@@ -9,7 +9,6 @@
 -- row carrying provenance (consensus.eff_mu, witnesses, path). This wrapper is prose-only:
 -- callers that want the provenance columns query converse_facts directly. The
 -- 'web' arrow-chain row is a drill-down surface, not prose -- excluded here.
-DROP FUNCTION IF EXISTS laplace.converse_about(bytea, bytea);
 CREATE OR REPLACE FUNCTION converse.about(p_syn bytea, p_lang bytea DEFAULT NULL)
     RETURNS text
     LANGUAGE plpgsql STABLE AS $$

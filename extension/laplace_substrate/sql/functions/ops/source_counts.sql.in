@@ -1,4 +1,3 @@
-DROP FUNCTION IF EXISTS laplace.source_counts();
 CREATE OR REPLACE FUNCTION ops.source_counts()
     RETURNS TABLE(source text, source_id bytea, evidence bigint, content bigint)
     LANGUAGE sql STABLE

@@ -3,7 +3,6 @@
 -- Old names dropped (#532), including a mid-migration consensus.* placement.
 -- BEGIN ATOMIC: GH #764.
 DROP FUNCTION IF EXISTS laplace_entity_attestations(bytea, bigint);
-DROP FUNCTION IF EXISTS laplace.laplace_entity_attestations(bytea, bigint);
 DROP FUNCTION IF EXISTS consensus.laplace_entity_attestations(bytea, bigint);
 CREATE OR REPLACE FUNCTION ops.entity_attestations(
     p_subject bytea, p_min_eff_mu_raw bigint DEFAULT 0)

@@ -1,4 +1,3 @@
-DROP FUNCTION IF EXISTS laplace.chess_line(bytea);
 CREATE OR REPLACE FUNCTION chess.line(p_line bytea)
     RETURNS TABLE(event_id bytea, played_on text, result text,
                   times_played bigint, rating double precision,

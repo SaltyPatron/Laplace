@@ -1,4 +1,3 @@
-DROP FUNCTION IF EXISTS laplace.laplace_prune(bigint, boolean);
 CREATE OR REPLACE FUNCTION generation.laplace_prune(
     p_max_eff_mu bigint DEFAULT 0,
     p_dry_run    boolean DEFAULT true)

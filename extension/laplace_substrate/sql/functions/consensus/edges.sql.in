@@ -30,7 +30,6 @@
 -- Ranking is consensus.edge_rank(relation salience x consensus.eff_mu), the readout law the serving
 -- surface already uses. Labels resolve in ONE realize_batch after the limit, per
 -- the rank-then-label rule — never a scalar realize per row.
-DROP FUNCTION IF EXISTS laplace.edges(bytea, text, bytea[], int, boolean, bytea);
 CREATE OR REPLACE FUNCTION consensus.edges(
         p_subject   bytea,
         p_direction text    DEFAULT 'both',
@@ -88,7 +87,6 @@ $$;
 -- Text front door. Every hand-written probe this replaced started by resolving a
 -- word, and getting that wrong (laplace.word_id vs resolve vs resolve_ref) is its own
 -- class of silent miss.
-DROP FUNCTION IF EXISTS laplace.edges(text, text, int, boolean);
 CREATE OR REPLACE FUNCTION consensus.edges(
         p_word      text,
         p_direction text    DEFAULT 'both',

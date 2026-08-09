@@ -1,4 +1,3 @@
-DROP FUNCTION IF EXISTS laplace.entity_tier_of(bytea);
 -- BEGIN ATOMIC: GH #764.
 CREATE OR REPLACE FUNCTION generation.entity_tier_of(p_entity bytea)
     RETURNS int

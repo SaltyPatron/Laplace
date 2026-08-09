@@ -51,7 +51,6 @@
 -- or the GiST prefilter silently degrades to a scan. A caller passing a
 -- correlated LATERAL reference does NOT satisfy that — EXPLAIN before trusting
 -- the index.
-DROP FUNCTION IF EXISTS laplace.laplace_nearest_entity(float8, float8, float8, float8, integer, bytea, smallint[]);
 CREATE OR REPLACE FUNCTION generation.laplace_nearest_entity(
     p_cx float8, p_cy float8, p_cz float8, p_cm float8,
     p_k integer DEFAULT 1,

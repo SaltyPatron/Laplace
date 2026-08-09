@@ -21,7 +21,6 @@
 -- consensus index path (#617, #860). NULL-safety without STRICT: a NULL
 -- p_subject matches no subject_id, and laplace.relation_type_id(NULL) matches no
 -- type_id, so both still return zero rows.
-DROP FUNCTION IF EXISTS laplace.related_objects(bytea, text, int);
 CREATE OR REPLACE FUNCTION consensus.related_objects(
         p_subject bytea, p_relation text, p_limit int DEFAULT 8)
     RETURNS TABLE(object_id bytea, eff_mu bigint, witnesses bigint)

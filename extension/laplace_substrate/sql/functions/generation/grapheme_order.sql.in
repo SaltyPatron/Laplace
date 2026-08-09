@@ -1,4 +1,3 @@
-DROP FUNCTION IF EXISTS laplace.grapheme_order(bytea[], int, int);
 CREATE OR REPLACE FUNCTION generation.grapheme_order(p_vocab bytea[], p_words int DEFAULT 50000, p_gap int DEFAULT 1)
     RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$

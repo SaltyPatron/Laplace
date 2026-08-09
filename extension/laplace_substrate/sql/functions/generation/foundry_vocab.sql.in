@@ -1,4 +1,3 @@
-DROP FUNCTION IF EXISTS laplace.foundry_vocab(int);
 CREATE OR REPLACE FUNCTION generation.foundry_vocab(p_size int)
     RETURNS TABLE(entity_id bytea, surface text, weight bigint)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$

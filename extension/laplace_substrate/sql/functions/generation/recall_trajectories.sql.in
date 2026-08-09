@@ -1,4 +1,3 @@
-DROP FUNCTION IF EXISTS laplace.recall_trajectories(text, int);
 CREATE OR REPLACE FUNCTION generation.recall_trajectories(p_word text, p_limit int DEFAULT 6)
     RETURNS TABLE(answer text)
     LANGUAGE sql STABLE AS $$

@@ -6,7 +6,6 @@
 -- parity notes. This is the shared labeling primitive the serving surface
 -- calls AFTER its rank/LIMIT step (the librarian hands the survivor id-array
 -- to the machine room).
-DROP FUNCTION IF EXISTS laplace.realize_batch(bytea[], bytea);
 CREATE OR REPLACE FUNCTION realize.batch(p_ids bytea[], p_lang bytea DEFAULT NULL)
     RETURNS text[]
     AS 'MODULE_PATHNAME', 'pg_laplace_realize_batch'

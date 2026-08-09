@@ -5,7 +5,6 @@
 -- ChessAnalysis/ChessPgn/ChessOpenings; OMW meshes languages through the ILI
 -- hub; models count on their plane relation until a checkpoint ingests.
 -- BEGIN ATOMIC: GH #764.
-DROP FUNCTION IF EXISTS laplace.modality_counts();
 
 CREATE OR REPLACE FUNCTION ops.modality_counts()
     RETURNS TABLE(

@@ -1,7 +1,6 @@
 -- The converse_walk WALK phase: steered trigram->bigram backoff over a
 -- weighted token stream, natively (steered_walk.c). Pure computation over the
 -- arguments — deterministic per rng seed, no catalog access.
-DROP FUNCTION IF EXISTS laplace.steered_walk_raw(bytea[], int8[], bytea[], bytea[], int, int, int8);
 CREATE OR REPLACE FUNCTION converse.steered_walk_raw(
     p_stream   bytea[],
     p_weights  int8[],

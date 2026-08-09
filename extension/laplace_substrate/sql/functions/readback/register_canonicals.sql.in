@@ -1,4 +1,3 @@
-DROP FUNCTION IF EXISTS laplace.register_canonicals(text[]);
 CREATE OR REPLACE FUNCTION realize.register_canonicals(p_names text[]) RETURNS bigint
     LANGUAGE sql AS $$
     INSERT INTO laplace.canonical_names (id, name)

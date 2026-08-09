@@ -1,5 +1,4 @@
 -- BEGIN ATOMIC: GH #764.
-DROP FUNCTION IF EXISTS laplace.consensus_count(bytea);
 
 CREATE OR REPLACE FUNCTION ops.consensus_count(p_type bytea DEFAULT NULL)
     RETURNS bigint

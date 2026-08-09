@@ -12,9 +12,6 @@
 -- Unattested reads 0 rather than absent: these feed a positives/negatives score
 -- distribution where every sampled pair must contribute a number, the same
 -- deliberate tri-state collapse consensus_pair_scores documents.
-DROP FUNCTION IF EXISTS laplace.eval_pair_plane_score(bytea, bytea, bytea);
-DROP FUNCTION IF EXISTS laplace.eval_ingest_fidelity_positives(text, text, int);
-DROP FUNCTION IF EXISTS laplace.eval_ingest_fidelity_negatives(text, int);
 
 CREATE OR REPLACE FUNCTION ops.eval_pair_plane_score(
     p_w1 bytea, p_w2 bytea, p_type bytea)

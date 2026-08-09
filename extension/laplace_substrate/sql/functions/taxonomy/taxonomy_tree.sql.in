@@ -1,7 +1,6 @@
 -- The IS_A tree around a topic: dir='self' the root (a bare surface hops to
 -- its top synset — taxonomy lives on concepts, not spellings), dir='up' the
 -- parent chain to the root, dir='child' the strongest sub-kinds.
-DROP FUNCTION IF EXISTS laplace.taxonomy_tree(bytea);
 CREATE OR REPLACE FUNCTION taxonomy.tree(p_id bytea)
     RETURNS TABLE(dir text, ord int, id bytea, label text, eff_mu numeric)
     LANGUAGE sql STABLE

@@ -5,7 +5,6 @@
 -- one pull on an event knot returns the taut strands (Glicko-ranked) that answer
 -- "and then what / and so others feel". Each relation type maps to a natural connective
 -- so the folded edge reads as an inference, not a table row.
-DROP FUNCTION IF EXISTS laplace.recall_interaction_response(bytea, int);
 CREATE OR REPLACE FUNCTION converse.recall_interaction_response(p_topic bytea, p_limit int DEFAULT 8)
     RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE

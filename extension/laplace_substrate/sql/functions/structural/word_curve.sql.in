@@ -1,4 +1,3 @@
-DROP FUNCTION IF EXISTS laplace.word_curve(bytea);
 CREATE OR REPLACE FUNCTION structural.word_curve(p_word bytea) RETURNS geometry
     LANGUAGE sql STABLE AS $$
     SELECT public.ST_MakeLine(w.coord ORDER BY c.ordinal)

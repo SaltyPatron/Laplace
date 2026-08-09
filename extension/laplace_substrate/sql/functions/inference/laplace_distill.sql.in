@@ -1,4 +1,3 @@
-DROP FUNCTION IF EXISTS laplace.laplace_distill(bytea, float8);
 CREATE OR REPLACE FUNCTION generation.laplace_distill(
     p_band_mask  bytea,
     p_min_eff_mu float8 DEFAULT 0.5)

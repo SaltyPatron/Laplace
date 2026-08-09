@@ -1,5 +1,4 @@
 -- BEGIN ATOMIC: GH #764.
-DROP FUNCTION IF EXISTS laplace.evidence_count(bytea, bytea, bytea);
 
 CREATE OR REPLACE FUNCTION ops.evidence_count(
     p_type bytea DEFAULT NULL, p_source bytea DEFAULT NULL, p_object bytea DEFAULT NULL)
