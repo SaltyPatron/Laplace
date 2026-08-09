@@ -580,7 +580,6 @@ public sealed partial class NpgsqlSubstrateWriter
             var probeAttIdsUse = probeAttIds;
             var probeAttTypesUse = probeAttTypes;
             var probeAttSubjectsUse = probeAttSubjects;
-            HashSet<Hash128>? presentAttsPreloaded = null;
             if (probeAttIdsUse.Count > 0)
             {
                 rtProbe++;
@@ -616,11 +615,9 @@ public sealed partial class NpgsqlSubstrateWriter
                 "SELECT laplace.physicalities_exist_bitmap($1)", probePhysIdsUse,
                 static (_, _, _) => { },
                 r => Interlocked.Add(ref rtProbe, r), ct);
-            var attProbeTask = presentAttsPreloaded is null
-                ? ProbePresentKeyedParallelAsync(
-                    "laplace.attestations_exist_bitmap", probeAttIdsUse, probeAttTypesUse,
-                    probeAttSubjectsUse, r => Interlocked.Add(ref rtProbe, r), ct)
-                : Task.FromResult(presentAttsPreloaded);
+            var attProbeTask = ProbePresentKeyedParallelAsync(
+                "laplace.attestations_exist_bitmap", probeAttIdsUse, probeAttTypesUse,
+                probeAttSubjectsUse, r => Interlocked.Add(ref rtProbe, r), ct);
 
             await Task.WhenAll(entProbeTask, physProbeTask, attProbeTask).ConfigureAwait(false);
             var presentEntities = await entProbeTask.ConfigureAwait(false);

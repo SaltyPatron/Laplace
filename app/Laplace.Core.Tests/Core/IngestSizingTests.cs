@@ -83,6 +83,22 @@ public sealed class IngestSizingTests
     }
 
     [Fact]
+    public void ResolveWorkingSetProbeInterval_RawIntervalAboveFlushCap_ClampsToCap()
+    {
+        // This profile drives the envelope-derived cap to its 256-record safety
+        // floor while raw=4*1000. The probe interval must never outrun that cap.
+        var profile = new IngestSourceProfile(
+            EstBytesPerRecord: 1_000_000,
+            EstComposeUnitsPerRecord: 1_000);
+        int flushCap = IngestSizing.ResolveFlushEnvelopeRecordCap(profile);
+
+        Assert.Equal(256, flushCap);
+        Assert.True(4 * profile.EstComposeUnitsPerRecord > flushCap);
+        Assert.Equal(flushCap,
+            IngestSizing.ResolveWorkingSetProbeInterval(4, profile));
+    }
+
+    [Fact]
     public void ResolveForSource_RelationTriple_UsesTopologyAndMemory()
     {
         IngestTopology.EnsureReady();

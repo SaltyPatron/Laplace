@@ -15,7 +15,7 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 public sealed class WorkingSetPipelineTests
 {
     private static IngestBatchConfig WorkingSetConfig(
-        ISubstrateReader? reader, int probeChunk) =>
+        ISubstrateReader? reader, int probeChunk, int? recordCap = null) =>
         new()
         {
             SourceId = TestSource,
@@ -25,6 +25,7 @@ public sealed class WorkingSetPipelineTests
             ContainmentReader = reader,
             WorkingSet = true,
             WorkingSetProbeInterval = probeChunk,
+            WorkingSetRecordCap = recordCap,
         };
 
     private static async Task<List<SubstrateChange>> RunAsync(
@@ -113,6 +114,23 @@ public sealed class WorkingSetPipelineTests
         Assert.Equal(0, reader.FlatProbeCalls);
         Assert.Equal(0, ContentEntityCount(changes));
         Assert.Equal(10, changes.Sum(c => c.Metadata.InputUnitsConsumed));
+    }
+
+    [Fact]
+    public async Task WorkingSet_RecordCapFlushesBeforeLargerProbeInterval()
+    {
+        var records = Enumerable.Range(1, 10)
+            .Select(i => ContentRecord($"record cap {i}"))
+            .ToList();
+        var config = WorkingSetConfig(
+            new ProbeTrackingReader(present: false), probeChunk: 100, recordCap: 3);
+
+        var changes = await RunAsync(records, config);
+
+        Assert.Equal(4, changes.Count);
+        Assert.Equal(10, changes.Sum(c => c.Metadata.InputUnitsConsumed));
+        Assert.All(changes.Take(3), change =>
+            Assert.Equal(3, change.Metadata.InputUnitsConsumed));
     }
 
     /// <summary>
