@@ -385,8 +385,11 @@ public static class IngestBatchPipeline
                 }
             }
 
+            // pending.Count must count toward the envelope: InBatch only advances inside
+            // FlushPending. A probeInterval larger than recordCap (Wiktionary units=64 →
+            // probe 32768 vs cap ~516) otherwise held the whole stream until EOF.
             if (config.WorkingSet && pending.Count > 0
-                && ShouldCloseWorkingSet(state, config))
+                && ShouldCloseWorkingSet(state, config, pending.Count))
             {
                 await foreach (var change in FlushPending(pending, handler, reader, state, config, probedAbsent, ct))
                 {
@@ -729,7 +732,8 @@ public static class IngestBatchPipeline
             scoped.ResetBatchState();
     }
 
-    private static bool ShouldCloseWorkingSet(BatchState state, IngestBatchConfig config)
+    private static bool ShouldCloseWorkingSet(
+        BatchState state, IngestBatchConfig config, int pendingCount = 0)
     {
         var profile = config.WorkingSetProfile ?? IngestSourceProfile.Default;
 
@@ -739,24 +743,24 @@ public static class IngestBatchPipeline
         // live content bank and collapses compose throughput (MEASURED 30k -> 1.8k rec/s as
         // a ~4 GiB set filled with ~3M records before flushing). The envelope (RAM/64,
         // <= 512 MiB) closes the set continuously in small memory-bounded batches so resident
-        // memory stays flat and compose stays fast. It never explodes round-trips: the runner
-        // re-coalesces these bounded changes back up to the apply budget before COPY, and the
-        // content bank is preserved across compose closes (reset only after the apply).
+        // memory stays flat and compose stays fast.
         long envelope = IngestSizing.ResolveWorkingSetFlushEnvelopeBytes();
 
         int recordCap = Math.Min(
             config.WorkingSetRecordCap ?? int.MaxValue,
             IngestSizing.ResolveFlushEnvelopeRecordCap(profile, envelope));
-        if (recordCap > 0 && state.InBatch >= recordCap)
+        // InBatch + still-buffered pending: pending is not in InBatch until FlushPending.
+        int inFlight = state.InBatch + Math.Max(0, pendingCount);
+        if (recordCap > 0 && inFlight >= recordCap)
             return true;
 
         long staged = state.Builder.StagedBytesEstimate;
         if (staged >= envelope)
             return true;
 
-        if (state.InBatch > 0)
+        if (inFlight > 0)
         {
-            long est = IngestSizing.EstimateWorkingSetBytes(state.InBatch, staged, profile);
+            long est = IngestSizing.EstimateWorkingSetBytes(inFlight, staged, profile);
             if (est >= envelope)
                 return true;
         }

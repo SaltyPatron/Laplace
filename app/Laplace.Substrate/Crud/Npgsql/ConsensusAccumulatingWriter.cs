@@ -59,7 +59,11 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
     // next apply call or at the drain — never silently. OUTSIDE a bulk run the
     // fold is awaited inline: online lanes (feedback → immediate fold → next
     // walk) require read-your-writes consensus.
-    private const int FoldPipelineDepth = 2;
+    // Was 2: Wiktionary fresh batches fold 300–450k cells in 10–19s while the
+    // next apply is only 8–16s, so depth-2 backpressured EnqueueFoldAsync into
+    // the apply critical path. Depth 6 keeps folds off the probe/COPY lane
+    // without unbounded RAM (each delta is one working-set cell map).
+    private const int FoldPipelineDepth = 6;
     private readonly SemaphoreSlim _foldDepth = new(FoldPipelineDepth, FoldPipelineDepth);
     private readonly object _foldChainLock = new();
     private volatile bool _bulkRun;

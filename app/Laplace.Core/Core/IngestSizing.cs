@@ -378,12 +378,23 @@ public static class IngestSizing
         return Math.Clamp(commit, floor, budgetCap);
     }
 
+    /// <summary>
+    /// How many records accumulate in <c>pending</c> before
+    /// <c>FlushPending</c> runs. MUST be ≤ the compose flush record cap: the close
+    /// check reads <c>state.InBatch</c>, which only advances inside FlushPending.
+    /// Wiktionary with EstComposeUnits=64 resolved probe=32768 (batch×units clamp)
+    /// while flush recordCap≈516 — an 8k-line uncapped slice never FlushPending'd
+    /// mid-stream and applied as intents=1 / ~281k entity verify (measured 2026-08-06).
+    /// </summary>
     public static int ResolveWorkingSetProbeInterval(
-        int recordBatchSize, IngestSourceProfile profile) =>
-        Math.Clamp(
-            recordBatchSize * Math.Max(1, profile.EstComposeUnitsPerRecord),
-            256,
-            32_768);
+        int recordBatchSize, IngestSourceProfile profile)
+    {
+        int flushCap = ResolveFlushEnvelopeRecordCap(profile);
+        int raw = recordBatchSize * Math.Max(1, profile.EstComposeUnitsPerRecord);
+        // Stay at or under flushCap so pending cannot outrun the envelope close.
+        int capped = Math.Min(raw, flushCap);
+        return Math.Clamp(capped, Math.Min(256, flushCap), flushCap);
+    }
 
     // Presence probes are ROUND-TRIP dominated (~10ms fixed cost each, id
     // arrays are 16 bytes/id); the old [128, 2048] clamp turned big-source

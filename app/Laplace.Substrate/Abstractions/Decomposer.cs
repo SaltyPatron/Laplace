@@ -414,7 +414,13 @@ public abstract class ComposeDecomposer<TRecord> : Decomposer<TRecord>
 {
     protected abstract void Compose(TRecord record, SubstrateChangeBuilder builder);
 
-    protected sealed override IIngestRecordHandler<TRecord> CreateHandler() =>
+    /// <summary>
+    /// Default: compose callback runs in <see cref="IIngestDeferredUnit.DrainInto"/> (serial).
+    /// Sources whose <see cref="ContentTierSpine"/> work belongs on the compose fan
+    /// (Wiktionary, …) override with a handler that builds trees in
+    /// <see cref="IIngestRecordHandler{TRecord}.CreateDeferredUnit"/>.
+    /// </summary>
+    protected override IIngestRecordHandler<TRecord> CreateHandler() =>
         new DirectComposeHandler<TRecord>(Compose);
 
     protected override IngestBatchConfig BuildPipelineConfig(

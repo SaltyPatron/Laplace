@@ -222,6 +222,14 @@ public sealed class IngestRunner
             IngestSizing.ResolveWorkingSetFlushEnvelopeBytes(),
             Laplace.Decomposers.Abstractions.WorkingSetMode.BudgetBytes);
 
+        // High compose-unit sources close compose often. Re-coalescing all the way
+        // to applyEnvelope rebuilt ~0.8M-id verifies; committing every single close
+        // paid ~1.3–2.5s verify fixed cost per ~500–2k input records (~100/s).
+        // Coalesce a few closes, hard-cap rows so the mega-flush cannot return.
+        var sizingProfile = decomposer.SizingProfile;
+        int coalesceWorkingSetIntents = sizingProfile.EstComposeUnitsPerRecord >= 8 ? 3 : int.MaxValue;
+        const int workingSetApplyRowCap = 400_000;
+
         // A file boundary is a commit OPPORTUNITY, not a commit requirement
         // (2026-07-21). Flushing on EVERY boundary shreds a many-small-files
         // source: OMW's 1226 files each yielded one working-set change plus one
@@ -246,6 +254,8 @@ public sealed class IngestRunner
         bool ShouldFlushWithCap(int intents, int rows) =>
             workingSet
                 ? wsBytes >= applyEnvelope
+                  || rows >= workingSetApplyRowCap
+                  || intents >= coalesceWorkingSetIntents
                 : ShouldFlush(intents, rows) || intents >= maxIntentsPerCommit;
 
 
@@ -265,7 +275,34 @@ public sealed class IngestRunner
             ContentLadderLedger.Reset();
             _ladderSource = decomposer.SourceId;
         }
-        await _writer.BeginBulkRunAsync(ct);
+        using var runCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var runCt = runCts.Token;
+        Exception? cappedFail = null;
+        Task? cappedWatchdog = null;
+        if (options.DecomposerOptions.MaxInputUnits > 0)
+        {
+            // Poll even when DecomposeAsync has not yielded — the 20k Wiktionary smoke
+            // sat minutes at composed=0 with no ThrowIfCappedFailFast call sites hit.
+            cappedWatchdog = Task.Run(async () =>
+            {
+                try
+                {
+                    while (!runCt.IsCancellationRequested)
+                    {
+                        await Task.Delay(250, runCt).ConfigureAwait(false);
+                        ThrowIfCappedFailFast(options, counters);
+                    }
+                }
+                catch (OperationCanceledException) { }
+                catch (InvalidOperationException ex)
+                {
+                    cappedFail = ex;
+                    try { runCts.Cancel(); } catch { /* already cancelled */ }
+                }
+            }, CancellationToken.None);
+        }
+
+        await _writer.BeginBulkRunAsync(runCt);
         try
         {
             if (syncIngest)
@@ -278,11 +315,12 @@ public sealed class IngestRunner
                 var sbatch = new List<SubstrateChange>(batchSize);
                 int sbatchRows = 0;
                 await foreach (var intent in decomposer
-                    .DecomposeAsync(ctx, options.DecomposerOptions, ct).WithCancellation(ct))
+                    .DecomposeAsync(ctx, options.DecomposerOptions, runCt).WithCancellation(runCt))
                 {
                     Interlocked.Increment(ref counters._unitsProduced);
                     long units = intent.Metadata.InputUnitsConsumed;
                     if (units > 0) Interlocked.Add(ref counters._inputUnitsComposed, units);
+                    ThrowIfCappedFailFast(options, counters);
                     options.Progress?.Report(MakeProgress(counters));
                     if (!workingSet && batchSize == 1 && commitRows == 0)
                     {
@@ -347,11 +385,12 @@ public sealed class IngestRunner
                     try
                     {
                         await foreach (var intent in decomposer
-                            .DecomposeAsync(ctx, options.DecomposerOptions, ct).WithCancellation(ct))
+                            .DecomposeAsync(ctx, options.DecomposerOptions, runCt).WithCancellation(runCt))
                         {
                             Interlocked.Increment(ref counters._unitsProduced);
                             long units = intent.Metadata.InputUnitsConsumed;
                             if (units > 0) Interlocked.Add(ref counters._inputUnitsComposed, units);
+                            ThrowIfCappedFailFast(options, counters);
                             options.Progress?.Report(MakeProgress(counters));
                             int r = RowsOf(intent);
                             long b = BytesOf(intent);
@@ -372,6 +411,71 @@ public sealed class IngestRunner
                         channel.Writer.TryComplete(ex);
                     }
                 }, "ingest-decompose-pcore", ct);
+
+                // Parallel apply when index-cycle defer is on: presence preload has
+                // made novelty client-side and the writer skips the global advisory
+                // lock. CommitWorkers otherwise sat idle (SingleReader apply loop).
+                //
+                // Cap by connection budget: each apply worker opens 1 control conn plus
+                // up to ApplyParallelism COPY conns (and merge fans). Force-run on this
+                // host (max_connections=60) with workers=8 × ~12 COPY blew 53300 too-many
+                // clients, then left half-committed attestations and 23505 races.
+                // Parallel apply under Deferred still 23505s on attestation PKs even with
+                // claim dicts + conn budget (measured 2026-08-06 Wiktionary --force:
+                // workers=2, attestations_r_has_definition_h1_pkey). Keep apply serial
+                // until claim-before-COPY is proven under multi-writer; compose fan can
+                // still run. Wrong parallelism is slower and corrupt.
+                int applyWorkers = 1;
+                if (workingSet
+                    && Laplace.SubstrateCRUD.Npgsql.NpgsqlIndexCycle.Deferred
+                    && options.ParallelWorkers > 1)
+                {
+                    log.LogInformation(
+                        "INGEST_PARALLEL_APPLY disabled (serial apply); "
+                        + "ParallelWorkers={W} ignored until attestation claim is race-free",
+                        options.ParallelWorkers);
+                }
+
+                var applyChannel = applyWorkers > 1
+                    ? Channel.CreateBounded<List<SubstrateChange>>(new BoundedChannelOptions(applyWorkers * 2)
+                    {
+                        SingleWriter = true,
+                        SingleReader = false,
+                        FullMode = BoundedChannelFullMode.Wait,
+                    })
+                    : null;
+
+                Task[]? applyTasks = null;
+                if (applyChannel is not null)
+                {
+                    applyTasks = new Task[applyWorkers];
+                    for (int w = 0; w < applyWorkers; w++)
+                    {
+                        applyTasks[w] = Task.Run(async () =>
+                        {
+                            await foreach (var b in applyChannel.Reader.ReadAllAsync(ct).ConfigureAwait(false))
+                            {
+                                await ProcessBatchAsync(b, decomposer, options, rng,
+                                    counters, failures, log, workingSet, ct).ConfigureAwait(false);
+                            }
+                        }, ct);
+                    }
+                }
+
+                async Task FlushBatchAsync(List<SubstrateChange> b)
+                {
+                    if (b.Count == 0) return;
+                    if (applyChannel is null)
+                    {
+                        await ProcessBatchAsync(b, decomposer, options, rng,
+                            counters, failures, log, workingSet, ct).ConfigureAwait(false);
+                        b.Clear();
+                        return;
+                    }
+                    var copy = new List<SubstrateChange>(b);
+                    b.Clear();
+                    await applyChannel.Writer.WriteAsync(copy, ct).ConfigureAwait(false);
+                }
 
                 var batch = new List<SubstrateChange>(batchSize);
                 int batchRows = 0;
@@ -397,9 +501,7 @@ public sealed class IngestRunner
                         if (workingSet && batch.Count > 0
                             && wsBytes + ib > Laplace.Decomposers.Abstractions.WorkingSetMode.BudgetBytes)
                         {
-                            await ProcessBatchAsync(batch, decomposer, options, rng,
-                                                    counters, failures, log, workingSet, ct);
-                            batch.Clear();
+                            await FlushBatchAsync(batch);
                             batchRows = 0;
                             wsBytes = 0;
                         }
@@ -409,24 +511,34 @@ public sealed class IngestRunner
                         if (ShouldFlushWithCap(batch.Count, batchRows)
                             || (IsPeriodBoundary(intent) && wsBytes >= boundaryCommitFloor))
                         {
-                            await ProcessBatchAsync(batch, decomposer, options, rng,
-                                                    counters, failures, log, workingSet, ct);
-                            batch.Clear();
+                            await FlushBatchAsync(batch);
                             batchRows = 0;
                             wsBytes = 0;
                         }
                     }
                 }
                 if (batch.Count > 0)
-                    await ProcessBatchAsync(batch, decomposer, options, rng,
-                                            counters, failures, log, workingSet, ct);
+                    await FlushBatchAsync(batch);
 
+                if (applyChannel is not null)
+                {
+                    applyChannel.Writer.TryComplete();
+                    await Task.WhenAll(applyTasks!).ConfigureAwait(false);
+                }
 
                 await producer;
             }
+
+            if (cappedFail is not null)
+                throw cappedFail;
         }
         finally
         {
+            try { runCts.Cancel(); } catch { /* ignore */ }
+            if (cappedWatchdog is not null)
+            {
+                try { await cappedWatchdog.ConfigureAwait(false); } catch { /* ignore */ }
+            }
             // Rebuild on every exit path, including failures — a fatal
             // apply error must not leave the table index-less. The one
             // exception is cancellation: the user is tearing the process
@@ -443,6 +555,9 @@ public sealed class IngestRunner
                     + "drops will be recovered at the next run's begin");
             }
         }
+
+        if (cappedFail is not null)
+            throw cappedFail;
 
         unitsAttempted = counters.UnitsAttempted;
         unitsApplied = counters.UnitsApplied;
@@ -534,7 +649,10 @@ public sealed class IngestRunner
         // Zero-novel re-ingest did not add traffic — the default-partition scan is a
         // multi-second catalog read on a populated box and must not sit on the process
         // completion envelope after a no-op fold.
-        if (result.EntitiesInserted + result.PhysicalitiesInserted + result.AttestationsInserted > 0)
+        // Partition-pressure scan walks consensus_rdefault; with secondaries down
+        // under DEFER it is a multi-minute heap scan after INGEST_COMPLETE.
+        if (result.EntitiesInserted + result.PhysicalitiesInserted + result.AttestationsInserted > 0
+            && !Laplace.SubstrateCRUD.Npgsql.NpgsqlIndexCycle.Deferred)
             await ReportPartitionPressureAsync(log, ct);
         if (emptySourceNoOp)
             throw new InvalidOperationException(
@@ -932,6 +1050,36 @@ public sealed class IngestRunner
             c.RoundTrips,
             c.UnitsProduced,
             c.InputUnitsComposed);
+    }
+
+    /// <summary>
+    /// Capped <see cref="DecomposerOptions.MaxInputUnits"/> runs are smoke gates, not seeds.
+    /// They used to sit for minutes at composed=0/committed=0 with CommandTimeout=0 and no
+    /// wall — legal under the old code, useless as a gate. Floor 3s; scale with cap at
+    /// 7k input units/s (the Wiktionary 10-minute full-corpus bar).
+    /// </summary>
+    private static void ThrowIfCappedFailFast(IngestRunOptions options, RunCounters c)
+    {
+        long cap = options.DecomposerOptions.MaxInputUnits;
+        if (cap <= 0) return;
+        double sec = c.Sw?.Elapsed.TotalSeconds ?? 0;
+        if (sec < 3.0) return;
+
+        if (c.UnitsProduced == 0 && c.InputUnitsComposed == 0 && c.InputUnitsDone == 0)
+        {
+            throw new InvalidOperationException(
+                $"INGEST_STALL_FAILFAST source={c.SourceName} MaxInputUnits={cap} "
+                + $"elapsed_s={sec:F1} produced=0 composed=0 committed=0 — "
+                + "capped smoke made no progress in 3s");
+        }
+
+        double wall = Math.Max(3.0, cap / 7000.0);
+        if (sec <= wall) return;
+
+        throw new InvalidOperationException(
+            $"INGEST_WALL_FAILFAST source={c.SourceName} MaxInputUnits={cap} "
+            + $"elapsed_s={sec:F1} wall_s={wall:F1} composed={c.InputUnitsComposed} "
+            + $"committed={c.InputUnitsDone} — capped smoke exceeded wall");
     }
 
     private sealed class RunCounters
