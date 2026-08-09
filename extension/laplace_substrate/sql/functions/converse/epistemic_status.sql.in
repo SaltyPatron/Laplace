@@ -16,18 +16,27 @@ CREATE OR REPLACE FUNCTION converse.epistemic_status(p_word bytea, p_lang bytea 
             ORDER BY laplace.edge_rank(c.type_id, laplace.eff_mu(c.rating, c.rd)) DESC
             LIMIT p_limit),
          lang(id) AS (SELECT COALESCE(p_lang, converse.word_language(p_word))),
-         ids AS MATERIALIZED (
-            SELECT array_agg(DISTINCT id ORDER BY id) AS a
-            FROM (SELECT object_id AS id FROM rels UNION SELECT type_id FROM rels) x),
+         object_ids AS MATERIALIZED (
+            SELECT array_agg(DISTINCT object_id ORDER BY object_id) AS a FROM rels),
          rendered AS (
-            SELECT i.id, NULLIF(r.s, '') AS rendered,
-                   z.s AS realized, t.s AS type_label
-            FROM ids,
-              LATERAL unnest(ids.a) WITH ORDINALITY i(id,ord),
-              LATERAL unnest(laplace.render_text_batch(ids.a,32)) WITH ORDINALITY r(s,ord),
-              LATERAL unnest(realize.batch(ids.a,(SELECT id FROM lang))) WITH ORDINALITY z(s,ord),
-              LATERAL unnest(lexical.type_label_batch(ids.a)) WITH ORDINALITY t(s,ord)
-            WHERE i.ord=r.ord AND i.ord=z.ord AND i.ord=t.ord
+            SELECT i.id,NULLIF(r.s,'') AS rendered,z.s AS realized
+            FROM object_ids,
+              LATERAL unnest(object_ids.a) WITH ORDINALITY i(id,ord),
+              LATERAL unnest(laplace.render_text_batch(object_ids.a,32))
+                WITH ORDINALITY r(s,ord),
+              LATERAL unnest(realize.batch(object_ids.a,(SELECT id FROM lang)))
+                WITH ORDINALITY z(s,ord)
+            WHERE i.ord=r.ord AND i.ord=z.ord
+         ),
+         type_ids AS MATERIALIZED (
+            SELECT array_agg(DISTINCT type_id ORDER BY type_id) AS a FROM rels),
+         type_labels AS (
+            SELECT i.id,t.s AS type_label
+            FROM type_ids,
+              LATERAL unnest(type_ids.a) WITH ORDINALITY i(id,ord),
+              LATERAL unnest(lexical.type_label_batch(type_ids.a))
+                WITH ORDINALITY t(s,ord)
+            WHERE i.ord=t.ord
          )
     SELECT td.type_label,
            COALESCE(rd.rendered, rd.realized),
@@ -38,8 +47,7 @@ CREATE OR REPLACE FUNCTION converse.epistemic_status(p_word bytea, p_lang bytea 
            laplace.eff_mu_display(r.rating, r.rd),
            round(r.volatility / 1e9, 4), r.witness_count
     FROM rels r
-    CROSS JOIN lang l
     LEFT JOIN rendered rd ON rd.id = r.object_id
-    LEFT JOIN rendered td ON td.id = r.type_id
+    LEFT JOIN type_labels td ON td.id = r.type_id
     ORDER BY laplace.edge_rank(r.type_id, laplace.eff_mu(r.rating, r.rd)) DESC
 $$;

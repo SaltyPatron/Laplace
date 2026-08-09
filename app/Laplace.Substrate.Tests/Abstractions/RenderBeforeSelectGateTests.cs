@@ -164,4 +164,16 @@ public sealed class RenderBeforeSelectGateTests
             + "capture set-returning-function order with WITH ORDINALITY:\n  "
             + string.Join("\n  ", violations));
     }
+
+    [Fact]
+    public void EpistemicStatus_BatchesTypeLabelsOnlyForRelationTypes()
+    {
+        var path = Path.Combine(FunctionsRoot(TypeIdLawTests.FindRepoRootPublic()),
+            "converse", "epistemic_status.sql.in");
+        var sql = StripSqlComments(File.ReadAllText(path));
+
+        Assert.Contains("type_ids AS MATERIALIZED", sql);
+        Assert.Contains("lexical.type_label_batch(type_ids.a)", sql);
+        Assert.DoesNotContain("lexical.type_label_batch(object_ids.a)", sql);
+    }
 }
