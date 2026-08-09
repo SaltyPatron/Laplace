@@ -74,13 +74,18 @@ internal sealed class ChessRuntimeService : IHostedService, IAsyncDisposable
         try
         {
             var host = await _createHost(ct);
+            bool runtimeOwnsHost;
             lock (_gate)
             {
-                if (!ct.IsCancellationRequested)
+                runtimeOwnsHost = !ct.IsCancellationRequested;
+                if (runtimeOwnsHost)
                     _host = host;
             }
-            if (ct.IsCancellationRequested)
+            if (!runtimeOwnsHost)
             {
+                // Ownership was never published, so this initializer is the only
+                // disposer. Once published, Stop/Dispose owns the host even if
+                // cancellation arrives immediately after the lock.
                 await host.DisposeAsync();
                 ct.ThrowIfCancellationRequested();
             }
