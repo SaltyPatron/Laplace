@@ -223,7 +223,7 @@ internal sealed class SubstrateTools
     }
 
     private static (string Text, bool IsError) AttachPerformance(
-        (string Text, bool IsError) result, double elapsedMs)
+        (string Text, bool IsError) result, double handlerMs)
     {
         if (result.IsError) return result;
         JsonObject? payload;
@@ -238,10 +238,13 @@ internal sealed class SubstrateTools
         int? rows = (payload["rows"] as JsonArray)?.Count;
         payload["performance"] = new JsonObject
         {
-            ["elapsed_ms"] = elapsedMs,
+            // This clock intentionally covers only the catalog handler. JSON parsing,
+            // receipt construction, and response serialization are wrapper overhead,
+            // so naming it elapsed_ms incorrectly implied client-visible latency.
+            ["handler_ms"] = handlerMs,
             ["row_count"] = rows,
-            ["rows_per_second"] = rows is { } count && elapsedMs > 0
-                ? count * 1000.0 / elapsedMs
+            ["rows_per_second"] = rows is { } count && handlerMs > 0
+                ? count * 1000.0 / handlerMs
                 : null,
             ["inner_result_utf8_bytes"] = Encoding.UTF8.GetByteCount(canonicalInner),
             ["inner_result_codepoints"] = canonicalInner.EnumerateRunes().Count(),
