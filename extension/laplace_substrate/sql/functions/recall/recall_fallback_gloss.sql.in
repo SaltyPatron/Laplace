@@ -9,6 +9,8 @@ CREATE OR REPLACE FUNCTION laplace.recall_fallback_gloss(
     STABLE
     PARALLEL SAFE
 AS $$
-    SELECT realize.label(p_topic) || ': ' || d.definition, d.eff_mu, d.witnesses
+    WITH topic AS MATERIALIZED (SELECT realize.label(p_topic) AS label)
+    SELECT t.label || ': ' || d.definition, d.eff_mu, d.witnesses
     FROM converse.define_fast(p_topic, COALESCE(p_context_ids, ARRAY[]::bytea[]), 3) d
+    CROSS JOIN topic t
 $$;

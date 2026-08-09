@@ -48,6 +48,7 @@
 #include "spi_nested.h"
 
 PG_FUNCTION_INFO_V1(pg_laplace_realize_batch);
+PG_FUNCTION_INFO_V1(pg_laplace_resolve_name_batch);
 
 /* ---- prepared plans, one per arm, kept across calls ---- */
 
@@ -114,6 +115,20 @@ static const char *Q_DEFINES =
 
 static const char *Q_RENDER =
     "SELECT laplace.render_text_batch($1, 24)";
+
+static SPIPlanPtr ensure_plan(SPIPlanPtr *slot, const char *sql,
+                              int nargs, const Oid *argtypes);
+
+static void
+ensure_name_plans(void)
+{
+    Oid two[2] = { BYTEAARRAYOID, BYTEAOID };
+    Oid one[1] = { BYTEAARRAYOID };
+
+    ensure_plan(&plan_has_name, Q_HAS_NAME, 2, two);
+    ensure_plan(&plan_synset_lemma, Q_SYNSET_LEMMA, 2, two);
+    ensure_plan(&plan_render, Q_RENDER, 1, one);
+}
 
 static SPIPlanPtr
 ensure_plan(SPIPlanPtr *slot, const char *sql, int nargs, const Oid *argtypes)
@@ -301,6 +316,153 @@ first_nonempty(const ArmData *arm, const IdKey *key,
     return NULL;
 }
 
+static void
+run_name_arms(ArrayType *in_arr, Datum lang, bool lang_null,
+              ArmData *arm_name, ArmData *arm_lemma,
+              HTAB *render_ids, Datum **union_ids, int32 *un, int32 *ucap)
+{
+    run_arm(plan_has_name, PointerGetDatum(in_arr), lang, lang_null,
+            arm_name, render_ids, union_ids, un, ucap, "has_name");
+    run_arm(plan_synset_lemma, PointerGetDatum(in_arr), lang, lang_null,
+            arm_lemma, render_ids, union_ids, un, ucap, "synset_lemma");
+}
+
+static bool
+validate_id_array(ArrayType *arr, const char *operation)
+{
+    if (ARR_NDIM(arr) == 0)
+        return false;
+    if (ARR_NDIM(arr) != 1)
+        ereport(ERROR,
+                (errmsg("%s: ids must be 1-dimensional", operation)));
+    if (ARR_ELEMTYPE(arr) != BYTEAOID)
+        ereport(ERROR,
+                (errmsg("%s: element type must be bytea", operation)));
+    return true;
+}
+
+static char **
+render_union(Datum *union_ids, int32 un, const char *operation)
+{
+    char **rendered = (char **) palloc0(sizeof(char *) * Max(un, 1));
+
+    if (un > 0)
+    {
+        ArrayType *ids_arr = construct_array(union_ids, un, BYTEAOID, -1,
+                                             false, TYPALIGN_INT);
+        Datum      args[1] = { PointerGetDatum(ids_arr) };
+        int        rc = SPI_execute_plan(plan_render, args, NULL, true, 1);
+        bool       isnull;
+        Datum      arr_datum;
+
+        if (rc != SPI_OK_SELECT || SPI_processed != 1)
+            elog(ERROR, "%s: render batch failed: %s", operation,
+                 SPI_result_code_string(rc));
+        arr_datum = SPI_getbinval(SPI_tuptable->vals[0],
+                                  SPI_tuptable->tupdesc, 1, &isnull);
+        if (!isnull)
+        {
+            ArrayType *ra = DatumGetArrayTypeP(arr_datum);
+            Datum     *relems;
+            bool      *rnulls;
+            int        rn;
+
+            deconstruct_array(ra, TEXTOID, -1, false, TYPALIGN_INT,
+                              &relems, &rnulls, &rn);
+            if (rn != un)
+                elog(ERROR, "%s: render batch returned %d of %d",
+                     operation, rn, un);
+            for (int i = 0; i < un; i++)
+                if (!rnulls[i])
+                    rendered[i] = text_to_cstring(DatumGetTextPP(relems[i]));
+        }
+        SPI_freetuptable(SPI_tuptable);
+    }
+    return rendered;
+}
+
+Datum
+pg_laplace_resolve_name_batch(PG_FUNCTION_ARGS)
+{
+    MemoryContext caller = CurrentMemoryContext;
+    ArrayType    *in_arr;
+    Datum        *in_elems;
+    bool         *in_nulls;
+    int           n;
+    Datum         lang = (Datum) 0;
+    bool          lang_null = true;
+    bool          need_finish = false;
+    HTAB         *render_ids;
+    Datum        *union_ids;
+    int32         un = 0, ucap;
+    ArmData       arm_name, arm_lemma;
+    char        **rendered;
+    Datum        *out;
+    bool         *out_nulls;
+    ArrayType    *result;
+    int           dims[1], lbs[1];
+
+    if (PG_ARGISNULL(0))
+        PG_RETURN_NULL();
+    in_arr = PG_GETARG_ARRAYTYPE_P(0);
+    if (!validate_id_array(in_arr, "resolve_name_batch"))
+        PG_RETURN_ARRAYTYPE_P(construct_empty_array(TEXTOID));
+    if (!PG_ARGISNULL(1))
+    {
+        lang = PG_GETARG_DATUM(1);
+        lang_null = false;
+    }
+    deconstruct_array(in_arr, BYTEAOID, -1, false, TYPALIGN_INT,
+                      &in_elems, &in_nulls, &n);
+    if (laplace_spi_connect(&need_finish) != SPI_OK_CONNECT)
+        elog(ERROR, "resolve_name_batch: SPI_connect failed");
+    ensure_name_plans();
+
+    render_ids = make_id_htab("resolve_name_batch render union",
+                              sizeof(RenderEntry), Max(256, n * 2));
+    ucap = Max(64, n * 2);
+    union_ids = (Datum *) palloc(sizeof(Datum) * ucap);
+    run_name_arms(in_arr, lang, lang_null, &arm_name, &arm_lemma,
+                  render_ids, &union_ids, &un, &ucap);
+    rendered = render_union(union_ids, un, "resolve_name_batch");
+
+    out = (Datum *) palloc0(sizeof(Datum) * n);
+    out_nulls = (bool *) palloc(sizeof(bool) * n);
+    for (int i = 0; i < n; i++)
+    {
+        IdKey       key;
+        const char *label = NULL;
+
+        out_nulls[i] = true;
+        if (in_nulls[i])
+            continue;
+        id_key(&key, in_elems[i], "input");
+        label = first_nonempty(&arm_name, &key, rendered, render_ids);
+        if (label == NULL)
+            label = first_nonempty(&arm_lemma, &key, rendered, render_ids);
+        if (label != NULL)
+        {
+            MemoryContext old = MemoryContextSwitchTo(caller);
+
+            out[i] = CStringGetTextDatum(label);
+            MemoryContextSwitchTo(old);
+            out_nulls[i] = false;
+        }
+    }
+
+    {
+        MemoryContext old = MemoryContextSwitchTo(caller);
+
+        dims[0] = n;
+        lbs[0] = 1;
+        result = construct_md_array(out, out_nulls, 1, dims, lbs,
+                                    TEXTOID, -1, false, TYPALIGN_INT);
+        MemoryContextSwitchTo(old);
+    }
+    laplace_spi_finish(need_finish);
+    PG_RETURN_ARRAYTYPE_P(result);
+}
+
 Datum
 pg_laplace_realize_batch(PG_FUNCTION_ARGS)
 {
@@ -327,6 +489,8 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
     if (PG_ARGISNULL(0))
         PG_RETURN_NULL();
     in_arr = PG_GETARG_ARRAYTYPE_P(0);
+    if (!validate_id_array(in_arr, "realize_batch"))
+        PG_RETURN_ARRAYTYPE_P(construct_empty_array(TEXTOID));
     if (!PG_ARGISNULL(1))
     {
         lang = PG_GETARG_DATUM(1);
@@ -335,9 +499,6 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
 
     deconstruct_array(in_arr, BYTEAOID, -1, false, TYPALIGN_INT,
                       &in_elems, &in_nulls, &n);
-    if (n == 0)
-        PG_RETURN_ARRAYTYPE_P(construct_empty_array(TEXTOID));
-
     if (laplace_spi_connect(&need_finish) != SPI_OK_CONNECT)
         elog(ERROR, "realize_batch: SPI_connect failed");
 
@@ -345,12 +506,10 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
         Oid two[2] = { BYTEAARRAYOID, BYTEAOID };
         Oid one[1] = { BYTEAARRAYOID };
 
-        ensure_plan(&plan_has_name, Q_HAS_NAME, 2, two);
-        ensure_plan(&plan_synset_lemma, Q_SYNSET_LEMMA, 2, two);
+        ensure_name_plans();
         ensure_plan(&plan_translation, Q_TRANSLATION, 2, two);
         ensure_plan(&plan_canonical, Q_CANONICAL, 1, one);
         ensure_plan(&plan_defines, Q_DEFINES, 1, one);
-        ensure_plan(&plan_render, Q_RENDER, 1, one);
     }
 
     /* Seed the render union with the inputs themselves (arm 3, self render). */
@@ -363,10 +522,8 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
             render_union_add(render_ids, &union_ids, &un, &ucap, in_elems[i]);
 
     /* ---- the four candidate arms (batched, grouped, rank-ordered) ---- */
-    run_arm(plan_has_name, PointerGetDatum(in_arr), lang, lang_null,
-            &arm_name, render_ids, &union_ids, &un, &ucap, "has_name");
-    run_arm(plan_synset_lemma, PointerGetDatum(in_arr), lang, lang_null,
-            &arm_lemma, render_ids, &union_ids, &un, &ucap, "synset_lemma");
+    run_name_arms(in_arr, lang, lang_null, &arm_name, &arm_lemma,
+                  render_ids, &union_ids, &un, &ucap);
     run_arm(plan_translation, PointerGetDatum(in_arr), lang, lang_null,
             &arm_trans, render_ids, &union_ids, &un, &ucap, "translation");
     /* defines takes no lang; reuse the runner with a one-arg plan. */
@@ -450,38 +607,7 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
     }
 
     /* ---- ONE shared render pass over every candidate + every input ---- */
-    rendered = (char **) palloc0(sizeof(char *) * Max(un, 1));
-    if (un > 0)
-    {
-        ArrayType *ids_arr = construct_array(union_ids, un, BYTEAOID, -1,
-                                             false, TYPALIGN_INT);
-        Datum      args[1] = { PointerGetDatum(ids_arr) };
-        int        rc = SPI_execute_plan(plan_render, args, NULL, true, 1);
-        bool       isnull;
-        Datum      arr_datum;
-
-        if (rc != SPI_OK_SELECT || SPI_processed != 1)
-            elog(ERROR, "realize_batch: render batch failed: %s",
-                 SPI_result_code_string(rc));
-        arr_datum = SPI_getbinval(SPI_tuptable->vals[0],
-                                  SPI_tuptable->tupdesc, 1, &isnull);
-        if (!isnull)
-        {
-            ArrayType *ra = DatumGetArrayTypeP(arr_datum);
-            Datum     *relems;
-            bool      *rnulls;
-            int        rn;
-
-            deconstruct_array(ra, TEXTOID, -1, false, TYPALIGN_INT,
-                              &relems, &rnulls, &rn);
-            if (rn != un)
-                elog(ERROR, "realize_batch: render batch returned %d of %d", rn, un);
-            for (int i = 0; i < un; i++)
-                if (!rnulls[i])
-                    rendered[i] = text_to_cstring(DatumGetTextPP(relems[i]));
-        }
-        SPI_freetuptable(SPI_tuptable);
-    }
+    rendered = render_union(union_ids, un, "realize_batch");
 
     /* ---- per-id COALESCE ladder, output aligned to the input ---- */
     out = (Datum *) palloc(sizeof(Datum) * n);

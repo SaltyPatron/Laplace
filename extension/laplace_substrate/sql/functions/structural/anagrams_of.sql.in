@@ -3,14 +3,17 @@ CREATE OR REPLACE FUNCTION structural.anagrams_of(p_word text)
     RETURNS TABLE(word text, entity_id bytea)
     LANGUAGE sql STABLE
  AS $$
-    SELECT laplace.render(d.entity_id), d.entity_id
-    FROM (
+    WITH raw AS MATERIALIZED (
         SELECT DISTINCT w2.id AS entity_id
         FROM laplace.v_word_points w1
         JOIN laplace.v_word_points w2 ON w2.hilbert_index = w1.hilbert_index
         WHERE w1.id = laplace.word_id(p_word)
           AND w2.type_id = laplace.canonical_id('Word')
           AND w2.id <> w1.id
-    ) d
-    ORDER BY d.entity_id
+    ), numbered AS MATERIALIZED (
+      SELECT d.*, row_number() OVER (ORDER BY d.entity_id) AS rn FROM raw d
+    ), batch AS MATERIALIZED (
+      SELECT laplace.render_batch(array_agg(entity_id ORDER BY rn)) AS labels FROM numbered
+    )
+    SELECT b.labels[d.rn], d.entity_id FROM numbered d CROSS JOIN batch b ORDER BY d.rn
 $$;

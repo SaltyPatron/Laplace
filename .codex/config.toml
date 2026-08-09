@@ -1,0 +1,2 @@
+[mcp_servers.laplace]
+command = "/opt/laplace/app/laplace-mcp"

@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/deploy/linux/payload-sync.sh"
+source "$ROOT/deploy/linux/app-dir-contract.sh"
 
 TEST_ROOT="$(mktemp -d)"
 trap 'rm -rf "$TEST_ROOT"' EXIT
@@ -15,7 +16,7 @@ mkdir -m 0700 "$STAGE"
 mkdir -m 2775 "$APP_DIR"
 mkdir -m 2775 "$APP_DIR/logs"
 mkdir -m 0700 "$MCP_STAGE"
-mkdir -m 2755 "$MCP_DIR"
+mkdir -m 2775 "$MCP_DIR"
 APP_METADATA="$(stat -c '%u:%g:%a' "$APP_DIR")"
 MCP_METADATA="$(stat -c '%u:%g:%a' "$MCP_DIR")"
 printf 'keep\n' > "$APP_DIR/laplace-api.env"
@@ -47,12 +48,12 @@ assert_app_contract() {
   [[ -x "$APP_DIR/laplace-mcp" ]]
   [[ -L "$APP_DIR/current-api" ]]
   [[ ! -e "$APP_DIR/stale.dll" ]]
+  [[ "$(stat -c '%u:%g:%a' "$MCP_DIR")" == "$MCP_METADATA" ]]
 }
 
 laplace_sync_payload "$MCP_STAGE" "$MCP_DIR"
 sync_app
 assert_app_contract
-[[ "$(stat -c '%u:%g:%a' "$MCP_DIR")" == "$MCP_METADATA" ]]
 [[ -x "$MCP_DIR/Laplace.Endpoints.Mcp" ]]
 [[ "$(<"$APP_DIR/api.dll")" == "first" ]]
 
@@ -63,8 +64,16 @@ rm "$STAGE/wwwroot/index.html"
 printf 'second\n' > "$STAGE/wwwroot/app.js"
 sync_app
 assert_app_contract
+laplace_sync_payload "$MCP_STAGE" "$MCP_DIR"
+assert_app_contract
 [[ "$(<"$APP_DIR/api.dll")" == "second" ]]
 [[ ! -e "$APP_DIR/wwwroot/index.html" ]]
 [[ -f "$APP_DIR/wwwroot/app.js" ]]
+
+# Legacy deploys copied mktemp's 0700 mode onto mcp-runtime. A current deploy
+# converges mode-only drift without taking ownership repair away from bootstrap.
+chmod 0700 "$MCP_DIR"
+laplace_reconcile_app_dir_contract "$APP_DIR" "$(id -un)" "$(id -gn)"
+assert_app_contract
 
 echo "OK deploy payload sync preserves bootstrap-owned host metadata across repeat publishes"

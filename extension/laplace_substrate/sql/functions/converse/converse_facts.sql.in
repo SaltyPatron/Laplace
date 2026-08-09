@@ -104,19 +104,24 @@ BEGIN
         steps AS (
             SELECT i, w.path[i + 1] AS entity_id
             FROM winner w, generate_series(1, w.depth) AS i
+        ), ids AS MATERIALIZED (
+            SELECT array_agg(entity_id ORDER BY i) AS a FROM steps
+        ), labels AS MATERIALIZED (
+            SELECT realize.batch(a,p_lang) AS realized,
+                   realize.label_batch(a) AS fallback FROM ids
         )
         SELECT 'taxonomy'::text,
                initcap(v_lbl)
                  || string_agg(CASE WHEN s.i = 1 THEN ' is a kind of '
                                     ELSE ', which is a kind of ' END
-                               || COALESCE(realize.realize(s.entity_id, p_lang), realize.label(s.entity_id)),
+                               || COALESCE(l.realized[s.i], l.fallback[s.i]),
                                '' ORDER BY s.i)
                  || '.',
                min(b.eff_mu),
                (SELECT w.witnesses FROM winner w),
                (SELECT w.path  FROM winner w),
                (SELECT w.types FROM winner w)
-        FROM steps s
+        FROM steps s CROSS JOIN labels l
         JOIN branches b ON b.entity_id = s.entity_id AND b.depth = s.i
         HAVING count(*) > 0;
     END IF;
