@@ -327,14 +327,17 @@ public abstract class DecomposerMultiFile<TRecord> : Decomposer<TRecord>
         string fileLabel, ISubstrateReader? reader, DecomposerOptions options);
 
     /// <summary>
-    /// Opt-in per-file resume (GH #898): each finished file's boundary deposits a
+    /// Per-file resume (GH #898): each finished file's boundary deposits a
     /// HasLayerCompleted marker on the file's content identity, and a restarted run
     /// true-skips marker-complete files before opening them. Without this, a killed
     /// multi-hour run restarts from record zero and RE-FOLDS the applied prefix —
     /// testimony is not idempotent, so witness counts inflate corpus-wide. With it,
     /// the blast radius of a kill is the one file that was mid-apply.
+    /// Default ON for every <see cref="DecomposerMultiFile{TRecord}"/> lane — that is
+    /// the shape the resume contract was built for. Monolith / multi-phase sources do
+    /// not inherit this base. Files above the resume hash cap opt out per file.
     /// </summary>
-    public virtual bool PerFileResume => false;
+    public virtual bool PerFileResume => true;
 
     // Multi-file sources ingest PARALLEL BY DEFAULT across the file-worker pool. References resolve
     // content-addressed (hash of the canonical key), so files carry no cross-file ordering and no

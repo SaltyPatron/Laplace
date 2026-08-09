@@ -1,15 +1,16 @@
 -- entities_tier_btree (single-column btree on entities(tier)) is redundant with
--- LIST(tier) partitioning + entities_tier_brin. Drop it on upgrade. New installs
--- never create it (removed from manifest.install).
+-- LIST(tier) partitioning. Drop it on upgrade. New installs never create it
+-- (removed from manifest.install). A BRIN on tier alone is also non-discriminating
+-- inside a LIST(tier) leaf — see entities_tier_brin.sql.in (now a DROP).
 DO $do$
 BEGIN
     -- Release extension membership first (no-op on a fresh install where the index
     -- was never created / never a member); the guarded DROP then removes the object.
     BEGIN
-        EXECUTE format('ALTER EXTENSION %I DROP INDEX @extschema@.entities_tier_btree',
+        EXECUTE format('ALTER EXTENSION %I DROP INDEX laplace.entities_tier_btree',
                        'laplace_substrate');
     EXCEPTION WHEN OTHERS THEN
         NULL;  -- not a member (fresh install or already released) — nothing to detach
     END;
-    EXECUTE 'DROP INDEX IF EXISTS @extschema@.entities_tier_btree';
+    EXECUTE 'DROP INDEX IF EXISTS laplace.entities_tier_btree';
 END $do$;

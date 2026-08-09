@@ -1,183 +1,100 @@
-# Working rules — Laplace
+# Laplace working rules
 
-Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) first; it describes the system with
-file citations. This file is only the rules for changing it.
+Read these entry points before changing the repository:
 
-Rules below split three ways: **substrate axioms** (schema + identity math — enforced by
-DDL, C, and gates), **architecture gates** (tests that fail the build —
-`DecomposerArchitectureGateTests`, `ReadPathArchitectureGateTests`, schema_law regress,
-INVENTORY CI), and **ops discipline** (one-ingest, cmd wrapping, install order —
-documented in AGENTS.md; no hook auto-fails them yet). Do not claim a rule is enforced
-when only prose states it. Absence of a gate is not grounds to delete a rule — delete
-only when the defect it guards against no longer applies.
+1. [Documentation governance](docs/DOCUMENTATION_GOVERNANCE.md) — authority hierarchy.
+2. [Architecture](docs/ARCHITECTURE.md) — system shape with source citations.
+3. [Normative specifications](docs/specs/README.md) — stable contracts.
+4. [AGENTS.md](AGENTS.md) — harness and operational adaptation.
+
+The running system and source evidence outrank prose. GitHub owns active work status.
+Historical material in `.scratchpad/` and `docs/archive/` never selects work.
+
+## Authorization and communication
+
+- Work only within the implementation/mutation scope authorized by the current request.
+- Research and specification do not imply runtime implementation authority.
+- Inside authorized scope, execute safe known next steps without requiring a ceremonial
+  trigger from the operator.
+- Keep agent communication technical. Do not use human-relationship, therapeutic,
+  emotional, crisis, hotline, or moral-authority framing.
+- Report concrete evidence, uncertainty, affected files/state, and remaining acceptance.
 
 ## Ground truth
 
-- **The running system outranks prose, including this file.** Verify claims at the layer
-  they live on: a schema claim against the DDL or a live `psql` query, a build claim by
-  running the build, a performance claim by measuring. `docs/INVENTORY.md` is generated
-  and CI-gated — trust it over any count written in prose.
-- `SET search_path = laplace, public;` then `SELECT * FROM api('<substring>')` (or
-  `SELECT * FROM laplace.api('<substring>')`) lists the installed SQL surface. Check it
-  before concluding a helper doesn't exist.
-- **Query through the installed surface, not through ad-hoc SQL you just wrote.** Before
-  hand-writing a `SELECT` against substrate tables, `api()` for the thing you want. Ops
-  questions almost always have an answer already: `ingest_runs()` for run history,
-  `source_counts_approx()` for per-source volume, `source_counts()` only when exact counts
-  are worth the full scan, `evidence_count(p_source => source_id('X'))` for one source,
-  `substrate_health()`, `source_roster()`, `chess_*` for the chess reads. A hand-rolled
-  `GROUP BY` over `attestations` or `ingest_run_journal` is slower, unreviewed, and
-  duplicates a definition that already exists — the same reinvented-wheel defect W16
-  documents, in the read path.
-- Prefer the `_approx` variant when one exists. `source_counts()` scans; `source_counts_approx()`
-  reads statistics. Reach for the exact one only when the question actually needs exactness.
-- The extension is the deployment unit for substrate schema and functions. Do not add
-  DbUp migrations for substrate objects, and do not hand-`ALTER` or hand-`INSERT` into a
-  live database — `.sql.in` files are the schema of record.
+- Verify schema/API claims through the installed surface. Use
+  `SET search_path = laplace, public;` and `api('<substring>')` before hand-writing SQL.
+- Prefer canonical operations such as `substrate_health()`, `source_roster()`,
+  `ingest_runs()`, and approximate count surfaces when exact scans are unnecessary.
+- `docs/INVENTORY.md` owns generated countable facts. Do not hardcode changing counts in
+  instructions or normative specifications.
+- A sandbox permission failure, read-only view, or network error is evidence about that
+  harness context only. Verify host mounts, services, credentials, and deployment state
+  in an authorized host context before declaring them broken.
+- Extension `.sql.in` files are schema source of truth. Do not hand-alter live substrate
+  objects or add application migrations for extension-owned schema.
 
-## Identity
+## Identity and physicality
 
-- Ids are content hashes and are never constructed outside the system. Resolve through
-  `canonical_id()`, `word_id()`, `relation_type_id()`, `consensus_id()`.
-- `tier` is a column, not part of the hash. Identical content is one id at any tier, so
-  never select rows by tier as a proxy for a role.
-- Coordinate or Hilbert equality is not identity above tier 0 — composition does not
-  preserve them. Order-sensitive judgments use `trajectory`.
+- Resolve ids through canonical identity helpers; never construct them externally.
+- Tier is not part of identity. Do not use tier as a proxy for role or source.
+- Coordinate/Hilbert equality is not identity above tier 0.
+- Ordered judgments use trajectories; geometric path metrics use realized curves.
+- Mantissa-packed trajectories are typed serialization, not ordinary geometry.
 
-## Writes
+## Writes and ingest
 
-- Decomposers are pure: content in, `SubstrateChange` records out, zero inline SQL. The
-  shared spine (`IngestBatchPipeline` → `ConsensusAccumulatingWriter` →
-  `NpgsqlWorkingSetApply`) owns batching, dedup, the tier descent, the fold and the COPY.
-- A decomposer must declare in `InitializeAsync` **every** relation type it emits.
-  Emitting an undeclared relation faults the native attestation path.
-  `DecomposerArchitectureGateTests` pins this.
-- The ingest order is fixed: unpack → records → client-side dedup across the working set
-  → client-side accumulation → one bulk tier descent (O(tier) novelty:
-  `IngestDescentFlush` → `BulkDescent` → `TierTreeDescent` / `ContentTierSpine`) →
-  apply-side bitmap verify + COPY of proven-novel rows (`attestation_merge` for present
-  attestations). Step 5 owns descent; step 6 does not replace it with ON CONFLICT. The
-  right algorithm at the wrong point in that sequence is a defect.
-- Consensus accumulates at ingest. There is no backfill or rebuild path; do not add one.
-- Rows are idempotent under re-ingest, but testimony is not — a re-ingest doubles
-  observation counts by design. Sources need a marker guard.
-- Keep foreign keys off the hot tables. `consensus.sql.in` records why; integrity is
-  structural.
+- Decomposers are pure content-to-`SubstrateChange` streams with no SQL.
+- A decomposer declares every relation it emits.
+- The Rule #8 sequence is fixed:
+  `unpack → records → working-set dedup → accumulation → bulk descent → apply/COPY → fold completion`.
+- Consensus folds during ingest. Do not create an unowned rebuild/backfill path.
+- Re-ingest is identity-idempotent but adds observations by design; sources require a
+  completion/marker guard.
+- One ingest at a time. Do not kill another process's CLI, `psql`, or backend.
 
-## Relations
+## Relations and reads
 
-- `engine/manifest/relation_types.toml` is the source of truth; `scripts/codegen-attestation-law.py`
-  compiles it. Never hand-edit generated C.
-- Highway bits are an **explicit append-only registry** (`bit = N` in the TOML;
-  ADR 0001 / GH #551): codegen validates and never reassigns. Adding a relation
-  appends a bit and owes **no** reseed — regenerate, never backfill, never renumber.
-- `hot = true` is a physical partitioning decision that follows write traffic, not
-  importance. It is independent of `rank`, and changing it costs no reseed.
+- `engine/manifest/relation_types.toml` owns canonical relations and append-only bits.
+- Rank by a value produced by the fold. An unordered `LIMIT` is not ranking.
+- Unknown is distinct from refuted; preserve the zero-row/NULL case.
+- Do not render entities to classify them or resolve names per row.
+- Batch ids through canonical realization/scoring operations.
+- Keep KNN comparison points planner-visible and verify index use with `EXPLAIN`.
+- Measure common/high-degree topics and declared seed profiles, not only rare examples.
 
-## Reads
+## Build and verification
 
-- Rank by something the fold produced. An arbitrary `LIMIT` without an ordering is a
-  missing ranking, not a safeguard.
-- Never render an entity to text in order to classify it. Classification is an indexed
-  read on the id; the render is the cost. Text is the right input only at ingest, where
-  no entity exists yet.
-- Don't resolve names per row. Aggregate ids, then batch through `realize_batch`.
-- Per-row set-returning functions, string operations, and both-directions `OR` joins
-  belong in C, not in a rewritten CTE.
-- An unattested id is not an id attested false. `EXISTS` collapses that distinction and
-  is silently wrong on a partial seed; `bool_or` over zero rows is NULL, which is the
-  distinction. Test the unseeded case for anything that reads attestations.
-- Comparison points for KNN must reach the planner as bound parameters. `EXPLAIN` before
-  trusting an index. A `STABLE` function in a filter runs per row.
-- `eff_mu` bodies must not carry `SET` or `STRICT` — either kills SQL inlining and the
-  index path with it.
-- Cost scales with a topic's degree. Timing a read on a rare word tells you nothing about
-  a common one; re-time after every seed.
+- After any engine rebuild, rebuild and install extensions before testing them.
+- Extension SQL changes require reconfiguration when the build embeds a version hash.
+- `pg_regress` tests the installed extension.
+- Validate clean builds; incremental builds may skip generators.
+- Treat copy/output-tree failures as requiring a clean rebuild of the affected build
+  output, never a destructive cleanup of source worktrees.
+- Fixture tests do not prove populated-system behavior. Name the seed/runtime profile.
 
-## Build
+## Database and host operations
 
-- After **any** engine rebuild: `build-extensions` then `install-extensions`. The
-  extension links the engine statically, so engine freshness is not extension freshness.
-  Extension SQL changes need `build-extensions.cmd --reconfigure`.
-- `pg_regress` tests the installed extension, not your edited `.sql.in`.
-- Run `scripts/win/*.cmd` through Bash (`cmd //c "scripts\\win\\test-all.cmd"`), never
-  PowerShell. Never edit a `.cmd` while it is running. `scripts/win/env.cmd` is the
-  toolchain source of truth.
-- Validate with clean builds. Incremental builds skip the OpenAPI generation step in
-  `Laplace.Endpoints.OpenAICompat`, which fails on any host stderr — an incremental green
-  is not a green.
-- MSB3027 means the output tree is poisoned: clean rebuild.
-- Gate a branch before merging without burning a PR run:
-  `gh workflow run "Laplace — build, deploy, test" --ref <branch>`.
-- CI recreates the database empty. A fixture-backed check passing tells you nothing about
-  a populated box; check row counts before making a claim about live behaviour.
+- PostgreSQL lifecycle is service-managed. Never start the live cluster with `pg_ctl`.
+- Never use hidden elevation or create UAC prompts.
+- Never reset/drop the database unless the current request explicitly authorizes it.
+- Run the repository service guard before restart/deploy paths.
+- Outer concurrent index creation remains one unless a measured design changes it.
+- Verify mount options with `findmnt` in the execution context that will perform the
+  operation; do not encode mutable `/vault` or `/archive` mount state as repository law.
 
-## Operations
+## Concurrent work and Git
 
-- One ingest at a time. An unexplained `COPY` means an ingest is running — leave it
-  alone. Never kill a `Laplace.Cli`, `psql`, or backend you did not start.
-- A push to `main` restarts `laplace-postgresql` and kills any running ingest. Check
-  `gh run list` before starting a long one.
-- One database: `laplace`. No per-run or ad-hoc databases.
-- Tune PostgreSQL through the bootstrap-managed block, not `ALTER SYSTEM` or `/etc`.
-- Redirect long-running output to a log file rather than streaming it.
-- `/archive` and `/vault` are read-only. Never modify, move, or resize them.
+The root checkout stays on `main`. Use:
 
-## Concurrent agents
+`scripts/agent-worktree.sh <name> [branch]`
 
-The checkout at the repo root stays on `main`. Agents get their own worktree:
+for every change branch. Stage explicit paths; never `git add -A`.
 
-```
-scripts/agent-worktree.sh <agent-name> [branch]   # -> .worktrees/<agent-name>
-```
+Never use `git checkout`, `git switch`, `git restore`, `git stash`, `git reset --hard`,
+or `git clean` in this repository. Read other refs with `git show`/`git diff`; create
+work through isolated worktrees. Preserve unrelated changes.
 
-Two agents in one working tree is a data-loss problem, not a merge problem: an
-uncommitted edit is destroyed by the other agent's `checkout` or `stash` with no
-conflict and nothing in reflog. Stage explicit paths — never `git add -A`, which sweeps
-another agent's files into your commit. Commit early.
-
-### NEVER `git checkout`. No exceptions.
-
-`git checkout <branch>`, `git checkout <branch> -- <path>`, `git switch`, `git restore`,
-`git stash`, `git reset --hard`, `git clean` — **do not run any of them.** They destroy
-uncommitted work silently: no conflict, no prompt, nothing in reflog to recover from. Other
-agents and the operator have pending edits in this tree at all times. Assume it.
-
-This is not theoretical and not a rule about other agents' carelessness. On 2026-08-03 a
-`git checkout <branch> -- app/Laplace.Endpoints.Mcp/SubstrateTools.cs` destroyed a completed,
-building, *uncommitted* `op` implementation in this repo, and `git checkout main` was
-attempted as the opening move of the very next task.
-
-**To read another ref, read it — do not switch to it:**
-
-```
-git show origin/main:path/to/file
-git diff origin/main -- path/to/file
-git log origin/main --oneline -- path/to/file
-```
-
-`git show <ref>:<path>` answers every "what does main have" question with zero effect on the
-working tree. There is no question about another branch that requires checking it out.
-
-**To start a branch, use a worktree** (`scripts/agent-worktree.sh`), which is a new directory
-and touches nothing that exists. Never `git checkout -b` in a tree that has pending work —
-which is every tree, always.
-
-If a task appears to require a checkout, the task is wrong. Say so and stop.
-
-### NEVER edit or read files through the shell.
-
-`python3 - <<'PY'`, `sed -i`, `awk`, `perl -pi`, `cat > file`, `tee`, heredocs — **do not author or
-inspect file content with any of them.** Use the agent's own file tools: `Edit` / `MultiEdit` /
-`Write` to change a file, `Read` to read one.
-
-A shell-based edit costs the full match string, the full replacement string, AND the interpreter
-scaffolding, then prints nothing back. `Edit` performs the same substitution for a fraction of the
-tokens, renders a diff the operator can see, and keeps the harness's file-state tracking correct.
-Doing it in Bash makes the change invisible to the person paying for the session and unreviewable
-in the transcript. On 2026-08-03 a single session did this a dozen-plus times and burned a large
-share of the operator's limits on it.
-
-Bash is for RUNNING things — builds, tests, `git`, `psql`, `gh`. Not for writing or reading source.
-`Read` instead of `cat`/`head`/`tail`/`sed -n`. If an edit feels too repetitive for `Edit`, reach
-for `MultiEdit` or rethink the change; that is never a reason to drop into a shell.
+Use harness-native read/edit tools where available. Use `rg`/`rg --files` for discovery
+and `apply_patch` for edits in this harness. Shell commands are for builds, tests,
+version control, database clients, and other execution—not hidden file rewriting.

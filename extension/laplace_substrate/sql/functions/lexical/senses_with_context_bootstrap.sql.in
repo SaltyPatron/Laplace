@@ -1,34 +1,21 @@
-CREATE OR REPLACE FUNCTION senses(p_word bytea, p_context bytea[])
+-- FORWARD DECLARATION ONLY (GH #532). Not an implementation.
+--
+-- What used to sit here was the SUPERSEDED sense-election body: the single
+-- direct-edge lane that senses_with_context.sql.in's header documents as INERT ON
+-- REAL DATA -- opposite contexts ({animal,pet,bark} vs {sausage,roll,beef}) scored
+-- byte-identically for `dog` because words reach synsets through HAS_SENSE ->
+-- IS_SENSE_OF and almost never carry a direct edge to one. The four-lane
+-- implementation replaced it, and this copy survived, winning or losing purely on
+-- manifest ordering. A reorder or a truncated upgrade would have silently restored
+-- context-blind sense election with no error anywhere.
+--
+-- The signature must match the final definition EXACTLY or the real CREATE OR
+-- REPLACE fails instead of replacing this.
+DROP FUNCTION IF EXISTS laplace.senses(bytea, bytea[]);
+CREATE OR REPLACE FUNCTION lexical.senses(p_word bytea, p_context bytea[])
     RETURNS TABLE(sense_id bytea, synset_id bytea, eff_mu numeric, witnesses bigint,
                   score numeric)
-    LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
-    -- Was two correlated subqueries against consensus re-executed per output row (RBAR) --
-    -- replaced with two set-based aggregates over p_context, computed once, then left-joined
-    -- by the object_id they'd have matched on. Mirrors senses_with_context.sql.in.
-    WITH ctx_as_subject AS (
-        SELECT c.object_id, sum(eff_mu(c.rating, c.rd)) AS boost
-        FROM v_consensus_unrefuted c
-        WHERE c.subject_id = ANY (p_context)
-        GROUP BY c.object_id
-    ),
-    ctx_as_object AS (
-        SELECT c.subject_id, sum(eff_mu(c.rating, c.rd)) AS boost
-        FROM v_consensus_unrefuted c
-        WHERE c.object_id = ANY (p_context)
-        GROUP BY c.subject_id
-    )
-    SELECT s.object_id, ss.object_id,
-           eff_mu_display(s.rating, s.rd),
-           s.witness_count + ss.witness_count,
-           round(((eff_mu(s.rating, s.rd) + eff_mu(ss.rating, ss.rd)
-             + COALESCE(cas.boost, 0) + COALESCE(cao.boost, 0)) / 1e9)::numeric, 3)
-    FROM consensus s
-    JOIN consensus ss ON ss.subject_id = s.object_id
-                     AND ss.type_id = relation_type_id('IS_SENSE_OF')
-    LEFT JOIN ctx_as_subject cas ON cas.object_id = ss.object_id
-    LEFT JOIN ctx_as_object cao ON cao.subject_id = ss.object_id
-    WHERE s.subject_id = p_word
-      AND s.type_id = relation_type_id('HAS_SENSE')
-    ORDER BY 5 DESC
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    SELECT NULL::bytea, NULL::bytea, NULL::numeric, NULL::bigint, NULL::numeric
+    WHERE false
 $$;

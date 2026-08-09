@@ -31,7 +31,14 @@ RETURNS TABLE(
     flags bigint
 )
 LANGUAGE sql STABLE PARALLEL SAFE
-SET search_path = @extschema@, public AS $$
+-- NO `SET search_path`. MEASURED 2026-08-07: this function was 59 ms to return
+-- three rows, of which ~30 ms was PLANNING. A SET clause invalidates plan caching --
+-- the body is re-planned on every invocation because the search_path in effect can
+-- change what an unqualified name resolves to. Without it the plan is cached for the
+-- session, and this is the most-called query in the system (1,496,183 calls), so 30 ms
+-- of planner work was being paid a million and a half times for a walk that executes
+-- in 5 ms.
+AS $$
 WITH RECURSIVE reach(entity_id, depth) AS (
     SELECT r.id, 0
     FROM unnest(COALESCE(p_roots, ARRAY[]::bytea[])) AS r(id)
@@ -41,7 +48,7 @@ WITH RECURSIVE reach(entity_id, depth) AS (
     FROM reach rc
     CROSS JOIN LATERAL (
         SELECT w.trajectory
-        FROM v_word_points w
+        FROM @extschema@.v_word_points w
         WHERE w.id = rc.entity_id AND w.trajectory IS NOT NULL
         ORDER BY w.physicality_id
         LIMIT 1
@@ -69,7 +76,7 @@ picked AS (
     -- and NULL for the same id inside a 500-id array, because the two calls got
     -- different plans and therefore different trajectories. Every consumer of
     -- render_text_batch inherits that: realize_batch, and through it related,
-    -- related_in, salient_facts, chat()'s band lens and edges().
+    -- related_in, salient_facts, converse.chat()'s band lens and consensus.edges().
     --
     -- ST_NPoints DESC breaks the tie deterministically and prefers the FINER
     -- decomposition — the one that reaches the tier-0 floor and reconstructs the
@@ -80,8 +87,17 @@ picked AS (
     -- sharing a physicality id means that id is not a function of what it holds,
     -- and the tier-2/tier-3 pair means collapse_idx did not fire for content that
     -- is span-identical to its own single child. Both are upstream of here.
+    -- ST_NPoints costs ~11 ms of this function's ~14 ms execution (measured
+    -- 2026-08-07: 2.7 ms without it in the sort key, 14.1 ms with), and only 5,063
+    -- entities in the substrate actually need the tiebreak. Splitting it so single-
+    -- candidate ids skip PostGIS is the right optimisation and it is NOT done here:
+    -- the obvious form puts a DISTINCT ON arm under a UNION ALL, where the trailing
+    -- ORDER BY binds to the whole union and the alias is out of scope. It needs each
+    -- arm self-contained in its own subquery. Left as written rather than shipped
+    -- half-right -- the SET removal above is the larger win (~30 ms of per-call
+    -- planning) and is independent of this.
     SELECT DISTINCT ON (w.id) w.id AS entity_id, w.trajectory
-    FROM v_word_points w
+    FROM @extschema@.v_word_points w
     JOIN node n ON n.entity_id = w.id
     WHERE w.trajectory IS NOT NULL
     ORDER BY w.id, w.physicality_id, public.ST_NPoints(w.trajectory) DESC

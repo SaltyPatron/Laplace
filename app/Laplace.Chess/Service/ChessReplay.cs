@@ -28,7 +28,7 @@ public sealed record ChessReplayResult(
 /// This is what a game "is" in the substrate, and it is worth being exact about. The
 /// record layer stores the movetext VERBATIM as content — not a parse, not a blob: a
 /// tier-4 entity whose constituent chain rebuilds the original PGN bytes from its id
-/// alone. Per-ply record edges (HAS_PLY / HAS_SAN) were deliberately removed, because a
+/// alone. Per-ply record consensus.edges(HAS_PLY / HAS_SAN) were deliberately removed, because a
 /// ply of one game can never corroborate a ply of another, so each was a permanently
 /// single-witness consensus cell. The movetext plus replay reconstructs all of them,
 /// which is exactly what this does.

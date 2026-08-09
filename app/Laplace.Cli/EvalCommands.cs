@@ -39,7 +39,7 @@ internal static class EvalCommands
     }
 
     // W5 seed-variance measurement through the installed surface
-    // (laplace.generation_probe): both lanes over one prompt and a seed set,
+    // (generation.probe): both lanes over one prompt and a seed set,
     // one row per (lane, seed). Replay — the failure converse_compose's header
     // gates wiring on — shows up mechanically as distinct==1 for a lane.
     private static async Task<int> GenerationAsync(string[] args)

@@ -3,7 +3,7 @@
 Pointer only — binding blob law is [`docs/specs/33_Perfcache_Blob_Law.md`](../specs/33_Perfcache_Blob_Law.md);
 identity law is [`modality-ladder-law.md`](modality-ladder-law.md) (codepoint floor).
 
-## What landed
+## Contract surface
 
 | Piece | Path |
 |-------|------|
@@ -19,13 +19,13 @@ decimal digit codepoints → number (operator white: `255` → `2`,`5`,`5`). A d
 256-slot table makes `records[value]` true O(1) with no DB call. Audio shares the
 same number law; full signed sample range is a later scope, not a private T0.
 
-## Still TODO
+## Required acceptance
 
-- Extension GUC / prewarm (peer of chess_position_perfcache_path)
-- App `NativeInterop` + managed floor wrapper / process load
-- Higher ROM layers: channel→pixel→patch→… / sample→window→…
-- Optional signed PCM scope (or separate blob) when audio needs full int16 table
-- Determinism gate (double-emit compare) in CI
+- Loader and GUC/prewarm behavior follow spec 33.
+- Managed/native callers preserve reference-path identity and geometry.
+- Higher modality ladders compose numbers without minting a private tier-0.
+- Signed/sample range expansion is explicit recipe/modality scope.
+- Deterministic double-emission and reference parity are executable gates.
 
 Compose already prefers `modality_number_table_lookup_geom` for unsigned 0..255
 when the table is loaded (`modality_witness.c`); without load it falls back to

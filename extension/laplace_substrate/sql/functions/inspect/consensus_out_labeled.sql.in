@@ -7,35 +7,36 @@ CREATE OR REPLACE FUNCTION consensus_out_labeled(p_id bytea, p_limit integer DEF
         eff_mu numeric,
         witnesses bigint)
     LANGUAGE sql STABLE
-    SET search_path = @extschema@, public AS $$
+    AS $$
     WITH subj(id) AS (
         SELECT p_id
         UNION
-        SELECT sn.synset_id FROM senses(p_id) sn
+        SELECT sn.synset_id FROM lexical.senses(p_id) sn
     ),
     ranked AS (
         SELECT c.type_id, c.object_id, c.eff_mu, c.witness_count,
-               edge_rank(c.type_id, c.eff_mu_raw) AS rnk
-        FROM v_consensus_resolved c
+               laplace.edge_rank(c.type_id, c.eff_mu_raw) AS rnk
+        FROM laplace.v_consensus_resolved c
         WHERE c.subject_id IN (SELECT id FROM subj)
           AND c.object_id IS NOT NULL
-        ORDER BY edge_rank(c.type_id, c.eff_mu_raw) DESC
+        ORDER BY laplace.edge_rank(c.type_id, c.eff_mu_raw) DESC
         LIMIT GREATEST(1, p_limit)
     )
     , ordered AS (
         SELECT r.*, row_number() OVER (ORDER BY r.rnk DESC) AS ord
         FROM ranked r
     ), labels AS (
-        -- Full-mesh labels via ONE realize_batch (was: a shorter hand-rolled
+        -- Full-mesh labels via ONE realize.batch(was: a shorter hand-rolled
         -- synset-lemma -> render_fast -> HEX ladder per row). Gains the
         -- HAS_NAME/translation/canonical/gloss arms; hex stays the genuine
         -- last resort so every edge still shows. Approved behavior change.
-        SELECT realize_batch(array_agg(o.object_id ORDER BY o.ord),
-                             word_language(p_id)) AS l
+        SELECT realize.batch(array_agg(o.object_id ORDER BY o.ord),
+                             converse.word_language(p_id)) AS l,
+               lexical.type_label_batch(array_agg(o.type_id ORDER BY o.ord)) AS types
         FROM ordered o
     )
     SELECT o.type_id, o.object_id,
-           type_label(o.type_id),
+           labels.types[o.ord],
            COALESCE(NULLIF(labels.l[o.ord], ''),
                     left(encode(o.object_id, 'hex'), 16)),
            o.eff_mu,

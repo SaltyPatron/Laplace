@@ -1,21 +1,24 @@
-CREATE OR REPLACE FUNCTION label(p_id bytea)
+-- realize.label — GH #862 / #860. A label is a rendering decision, so it lives with
+-- the realize family. No SET (it invalidates plan caching and this is per-row on the
+-- laplace.render path); real schema names.
+DROP FUNCTION IF EXISTS laplace.label(bytea);
+CREATE OR REPLACE FUNCTION realize.label(p_id bytea)
     RETURNS text
-    LANGUAGE sql LAPLACE_STABLE_STRICT
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE sql LAPLACE_STABLE_STRICT AS $$
     -- A label is a NAME/surface, never a definition. Order: the entity's
     -- resolved name, else its own rendered+cleaned surface, else a stable hex id.
-    -- The name lookup now goes through resolve_name() -- the single, family-aware
+    -- The name lookup now goes through realize.resolve_name() -- the single, family-aware
     -- primitive that consults HAS_NAME (primary) + HAS_NAME_ALIAS + the
     -- synset-lemma path and abstains rather than guessing -- instead of this
     -- function's former HAS_NAME_ALIAS-only argmax, which ignored the primary
     -- HAS_NAME edge entirely. (The former HAS_DEFINITION fallback made every
-    -- surface-less entity render as its gloss, which polluted every consumer;
+    -- surface-less entity laplace.render as its gloss, which polluted every consumer;
     -- that is gone. The trailing hex arm is retained for now so callers that
     -- expect a non-null display string keep working -- full abstention here is a
-    -- follow-up once label_or_hex() owns the id-display decision and the goldens
+    -- follow-up once converse.label_or_hex() owns the id-display decision and the goldens
     -- are regenerated on a live DB.)
     SELECT COALESCE(
-        resolve_name(p_id),
+        realize.resolve_name(p_id),
         NULLIF(
             regexp_replace(
             regexp_replace(
@@ -24,7 +27,7 @@ CREATE OR REPLACE FUNCTION label(p_id bytea)
                         regexp_replace(
                             regexp_replace(
                                 regexp_replace(
-                                    regexp_replace(render(p_id),
+                                    regexp_replace(laplace.render(p_id),
                                         '^substrate/(?:type|relation|trust_class|source|entity)/(.*)/v1$', '\1'),
                                     '^substrate/pos/(?:probationary/[^/]+/)?(.+)/v1$', '\1'),
                                 '^source/file/(.+)/v1$', '\1'),

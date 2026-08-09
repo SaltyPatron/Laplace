@@ -34,8 +34,11 @@ CREATE TABLE IF NOT EXISTS physicalities (
     coord              geometry(PointZM)    NOT NULL,
     hilbert_index      bytea                NOT NULL CHECK (octet_length(hilbert_index) = 16),
     trajectory         geometry(GeometryZM),
+    -- W16 / GH #912: one definition — public.laplace_radius_origin (native C
+    -- IMMUTABLE STRICT). The open-coded ST_X²+… form was a second copy of the
+    -- same 4D radius; greenfield DDL calls the installed function.
     radius_origin      double precision GENERATED ALWAYS AS (
-        sqrt(ST_X(coord)^2 + ST_Y(coord)^2 + ST_Z(coord)^2 + ST_M(coord)^2)
+        public.laplace_radius_origin(coord)
     ) STORED,
     n_constituents     integer          NOT NULL DEFAULT 0 CHECK (n_constituents >= 0),
     alignment_residual double precision,

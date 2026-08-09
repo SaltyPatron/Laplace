@@ -78,7 +78,7 @@ internal sealed partial class SubstrateClient
                 .Select(r => new SubstrateCount(r.Metric.TrimEnd(' ', '~'), r.Value))
                 .ToList();
 
-            // Approx variant only: the exact consensus_stats() is a minutes-long full
+            // Approx variant only: the exact consensus.stats() is a minutes-long full
             // aggregate and this is the UI landing call. The audit report is the place
             // that attempts exactness (AuditReportAsync).
             ConsensusHealth? consensus = null;

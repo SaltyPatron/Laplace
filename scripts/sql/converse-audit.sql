@@ -134,8 +134,8 @@ SELECT
          THEN 'PASS' ELSE 'FAIL — synonyms() queries word as subject; data keys it as object' END AS verdict;
 
 \echo '-- 4b. article-leak: "parts of a car" must resolve to car, not the article "a" --'
-SELECT label(resolve_topic('a car', NULL)) AS resolved_topic,
-       CASE WHEN resolve_topic('a car', NULL) = word_id('car')
+SELECT realize.label(converse.resolve_topic('a car', NULL)) AS resolved_topic,
+       CASE WHEN converse.resolve_topic('a car', NULL) = word_id('car')
             THEN 'PASS' ELSE 'FAIL — leading article wins leftmost tie-break in resolve_phrase' END AS verdict;
 
 \echo '-- 4c. describe() dedup: no (type,fact) pair should repeat for one topic --'
@@ -149,8 +149,8 @@ SELECT (SELECT count(*) FROM describe(word_id('democracy'), NULL)) AS rows,
 \echo '================ 5. SESSION CONTINUITY (pronoun follow-up) ================'
 \echo '(turn 2 "and its synonyms?" must resolve against turn 1 topic, not error)'
 BEGIN;
-SELECT 'turn1' AS turn, left(reply,52) AS reply FROM converse('define happy', '\x9001'::bytea) LIMIT 1;
-SELECT 'turn2' AS turn, left(reply,52) AS reply FROM converse('and its synonyms?', '\x9001'::bytea) LIMIT 1;
+SELECT 'turn1' AS turn, left(reply,52) AS reply FROM converse.converse('define happy', '\x9001'::bytea) LIMIT 1;
+SELECT 'turn2' AS turn, left(reply,52) AS reply FROM converse.converse('and its synonyms?', '\x9001'::bytea) LIMIT 1;
 ROLLBACK;
 
 \echo ''

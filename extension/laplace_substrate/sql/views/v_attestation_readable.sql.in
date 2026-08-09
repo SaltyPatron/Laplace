@@ -19,9 +19,9 @@ SELECT a.id,
        a.sum_score_fp1e9,
        a.opponent_rd_fp1e9,
        a.last_observed_at,
-       label_or_hex(a.subject_id) AS subject_label,
-       label_or_hex(a.type_id)    AS type_label,
-       label_or_hex(a.object_id)  AS object_label,
-       label_or_hex(a.source_id)  AS source_label,
-       label_or_hex(a.context_id) AS context_label
-FROM attestations a;
+       converse.label_or_hex(a.subject_id) AS subject_label,
+       converse.label_or_hex(a.type_id)    AS type_label,
+       converse.label_or_hex(a.object_id)  AS object_label,
+       converse.label_or_hex(a.source_id)  AS source_label,
+       converse.label_or_hex(a.context_id) AS context_label
+FROM laplace.attestations a;

@@ -10,14 +10,14 @@ SELECT * FROM arena_counts ORDER BY relations DESC LIMIT 30;
 
 \echo ====== does the substrate know about Paris / France? ======
 \echo 
-SELECT * FROM salient_facts(word_id('Paris'));
+SELECT * FROM consensus.salient_facts(word_id('Paris'));
 \echo 
-SELECT * FROM salient_facts(word_id('France'));
+SELECT * FROM consensus.salient_facts(word_id('France'));
 
 \echo ====== the actual question: Paris <-> France ======
 \echo 
-SELECT * FROM relation_summary(word_id('Paris'), word_id('France'));
+SELECT * FROM consensus.relation_summary(word_id('Paris'), word_id('France'));
 \echo 
-SELECT * FROM links('Paris');
+SELECT * FROM converse.links('Paris');
 \echo 
-SELECT * FROM relate_path(word_id('Paris'), word_id('France'), 7);
+SELECT * FROM consensus.relate_path(word_id('Paris'), word_id('France'), 7);

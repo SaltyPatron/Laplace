@@ -124,28 +124,11 @@ internal sealed class PostgresBillingEntitlementStore : IBillingEntitlementStore
         if (units <= 0)
             return (false, new BillingCreditDebit(tenant, string.Empty, serviceId, units, 0, DateTimeOffset.MinValue, "invalid_units"));
 
+        // GH #531: debit lives in app.consume_credit — one function, pinned by
+        // BillingStoreContractTests, not a hand-rolled FOR UPDATE CTE per caller.
         const string sql = """
-            WITH candidate AS (
-                SELECT tenant, plan_id,
-                       COALESCE((monthly_credits->>@service)::int, 0) AS credit_limit,
-                       COALESCE((used_credits->>@service)::int, 0) AS used,
-                       period_end
-                FROM app.billing_entitlements
-                WHERE tenant = @tenant
-                  AND status = 'active'
-                  AND period_end > now()
-                  AND COALESCE((monthly_credits->>@service)::int, 0)
-                      - COALESCE((used_credits->>@service)::int, 0) >= @units
-                ORDER BY COALESCE((monthly_credits->>@service)::int, 0) DESC
-                LIMIT 1
-                FOR UPDATE
-            )
-            UPDATE app.billing_entitlements e
-            SET used_credits = jsonb_set(e.used_credits, ARRAY[@service], to_jsonb(c.used + @units)),
-                updated_at = now()
-            FROM candidate c
-            WHERE e.tenant = c.tenant AND e.plan_id = c.plan_id
-            RETURNING e.plan_id, c.credit_limit - c.used - @units, e.period_end;
+            SELECT plan_id, remaining, period_end
+            FROM app.consume_credit(@tenant, @service, @units);
             """;
         var debit = await NpgsqlRead.ReadFirstOrDefaultAsync(_dataSource, sql,
             r => new BillingCreditDebit(

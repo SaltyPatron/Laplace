@@ -13,7 +13,16 @@ if [[ "$(id -u)" -ne 0 ]]; then
 fi
 
 echo "==> app dir: $APP_DIR (owner $RUN_USER)"
-install -d -m 2775 -o "$RUN_USER" -g "$RUN_GROUP" "$APP_DIR" "$APP_DIR/logs"
+install -d -m 2775 -o "$RUN_USER" -g "$RUN_GROUP" \
+  "$APP_DIR" "$APP_DIR/logs" "$APP_DIR/mcp-runtime"
+chown "$RUN_USER:$RUN_GROUP" "$APP_DIR" "$APP_DIR/logs" "$APP_DIR/mcp-runtime"
+chmod 2775 "$APP_DIR" "$APP_DIR/logs" "$APP_DIR/mcp-runtime"
+
+echo "==> logrotate: /etc/logrotate.d/laplace-ops (copytruncate over ops CSVs)"
+install -m 0644 "$HERE/logrotate.d/laplace-ops" /etc/logrotate.d/laplace-ops
+if command -v logrotate >/dev/null 2>&1; then
+  logrotate -d /etc/logrotate.d/laplace-ops >/dev/null
+fi
 
 echo "==> secrets drop: /opt/laplace/secrets"
 # Seeded by setup-host from ~/.config/shell/secrets.env; systemd loads

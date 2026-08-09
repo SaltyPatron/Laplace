@@ -1,14 +1,15 @@
-CREATE OR REPLACE FUNCTION senses(p_word bytea)
+-- FORWARD DECLARATION ONLY (GH #532). Not an implementation.
+--
+-- Held a complete second body for lexical.senses(bytea) whose only claim to being the wrong
+-- one was that manifest.install lists the real file later. Two bodies for one
+-- signature drift silently: nothing errors, nothing warns, and the answer changes
+-- with load order.
+--
+-- The signature must match the final definition EXACTLY (name, argument types,
+-- return type) or the real CREATE OR REPLACE fails instead of replacing this.
+DROP FUNCTION IF EXISTS laplace.senses(bytea);
+CREATE OR REPLACE FUNCTION lexical.senses(p_word bytea)
     RETURNS TABLE(sense_id bytea, synset_id bytea, eff_mu numeric, witnesses bigint)
-    LANGUAGE sql STABLE STRICT PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
-    SELECT s.object_id, ss.object_id,
-           eff_mu_display(s.rating, s.rd),
-           s.witness_count + ss.witness_count
-    FROM consensus s
-    JOIN consensus ss ON ss.subject_id = s.object_id
-                     AND ss.type_id = relation_type_id('IS_SENSE_OF')
-    WHERE s.subject_id = p_word
-      AND s.type_id = relation_type_id('HAS_SENSE')
-    ORDER BY eff_mu(s.rating, s.rd) + eff_mu(ss.rating, ss.rd) DESC
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$
+    SELECT NULL::bytea, NULL::bytea, NULL::numeric, NULL::bigint WHERE false
 $$;

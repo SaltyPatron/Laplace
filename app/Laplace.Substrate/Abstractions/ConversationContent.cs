@@ -12,7 +12,7 @@ namespace Laplace.Decomposers.Abstractions;
 /// (context_id keeps per-session provenance; deduped subjects keep the fold shared).
 /// Tenant identity lives in the SOURCE (`UserPrompt@{tenant}` / `Response@{tenant}`),
 /// so two tenants asserting the same fact are distinct provenanced evidence rows by
-/// construction, and `scoped_consensus(source_ids)` isolates a tenant's world with
+/// construction, and `consensus.scoped_consensus(source_ids)` isolates a tenant's world with
 /// zero extension changes. Tenant trust is the third witness-weight factor
 /// (rank × source trust × tenant trust), default-neutral 1.0 — values are operator
 /// policy, never invented here.

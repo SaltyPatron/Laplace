@@ -1,14 +1,19 @@
-CREATE OR REPLACE FUNCTION shared_objects(p_subjects bytea[], p_type bytea DEFAULT NULL,
+DROP FUNCTION IF EXISTS laplace.shared_objects(bytea[], bytea, int);
+CREATE OR REPLACE FUNCTION consensus.shared_objects(p_subjects bytea[], p_type bytea DEFAULT NULL,
                                      p_limit int DEFAULT 40)
     RETURNS TABLE(object_id bytea, support int, total_mu numeric)
--- Class A per GH #860: RETURNS TABLE, not STRICT, not VOLATILE, single SELECT.
--- The GROUP BY and aggregates disqualify the SCALAR inliner but are not checked
--- by inline_set_returning_function — it verifies pg_proc properties plus "one
--- plain SELECT" (clauses.c:5272), nothing about the query shape.
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    -- laplace.eff_mu_display, not the scale-and-round open-coded. Its own header says
+    -- "same rounding, same scale, one definition file -- never re-derived inline",
+    -- and this was the inline re-derivation: if the fold's fp1e9 scale or the
+    -- display precision ever moves, one copy moves and the other silently reports
+    -- a different number for the same edges.
     SELECT c.object_id,
            count(DISTINCT c.subject_id)::int,
-           round((sum(@extschema@.eff_mu(c.rating, c.rd)) / 1e9)::numeric, 3)
+           -- ::bigint because sum() over bigint returns numeric and the display
+           -- overloads take bigint. The sum of integers IS an integer, so the cast
+           -- is lossless; it is the type, not the value, being restated.
+           @extschema@.eff_mu_display(sum(@extschema@.eff_mu(c.rating, c.rd))::bigint)
     FROM @extschema@.v_consensus_unrefuted c
     WHERE c.subject_id = ANY (p_subjects)
       AND c.object_id IS NOT NULL

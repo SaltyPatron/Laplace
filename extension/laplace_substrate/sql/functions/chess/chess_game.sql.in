@@ -1,7 +1,7 @@
 -- GH #736 re-key: the input parameter was renamed (p_game -> p_event), which
 -- CREATE OR REPLACE cannot do on the upgrade path.
-DROP FUNCTION IF EXISTS chess_game(bytea);
-CREATE OR REPLACE FUNCTION chess_game(p_event bytea)
+DROP FUNCTION IF EXISTS laplace.chess_game(bytea);
+CREATE OR REPLACE FUNCTION chess.game(p_event bytea)
     RETURNS TABLE(white_id bytea, white text, black_id bytea, black text,
                   result text, played_on text, event text, eco text,
                   termination text, time_control text, tc_class text,
@@ -21,53 +21,58 @@ CREATE OR REPLACE FUNCTION chess_game(p_event bytea)
     -- not here.
     --
     -- All headers arrive in ONE index scan of the line's subject rows filtered
-    -- by this event's context, and the short surfaces render in ONE
+    -- by this event's context, and the short surfaces laplace.render in ONE
     -- realize_batch. The movetext is rendered on its own with the full depth
     -- budget: it is a tier-4 document whose constituent chain rebuilds the
     -- original PGN bytes exactly, so it is not a label lookup and must not be
     -- depth-clipped like one.
     WITH line AS MATERIALIZED (
         SELECT pl.object_id AS line
-        FROM @extschema@.attestations pl
+        FROM laplace.attestations pl
         WHERE pl.subject_id = p_event
-          AND pl.type_id = @extschema@.relation_type_id('PLAYS_LINE')
+          AND pl.type_id = laplace.relation_type_id('PLAYS_LINE')
+        -- event -> line is expected to be unique, but nothing enforces it and a
+        -- re-ingest of the same PGN under a second source deposits a second
+        -- testimony row. laplace.attestations carry no fold to rank by, so the id is the
+        -- tie-break that keeps the pick reproducible instead of scan-ordered.
+        ORDER BY pl.object_id
         LIMIT 1
     ),
     hdr AS MATERIALIZED (
         SELECT max(a.object_id) FILTER (
-                   WHERE a.type_id = @extschema@.relation_type_id('HAS_WHITE')) AS white_id,
+                   WHERE a.type_id = laplace.relation_type_id('HAS_WHITE')) AS white_id,
                max(a.object_id) FILTER (
-                   WHERE a.type_id = @extschema@.relation_type_id('HAS_BLACK')) AS black_id,
+                   WHERE a.type_id = laplace.relation_type_id('HAS_BLACK')) AS black_id,
                max(a.object_id) FILTER (
-                   WHERE a.type_id = @extschema@.relation_type_id('HAS_RESULT')) AS result_id,
+                   WHERE a.type_id = laplace.relation_type_id('HAS_RESULT')) AS result_id,
                max(a.object_id) FILTER (
-                   WHERE a.type_id = @extschema@.relation_type_id('ON_DATE')) AS date_id,
+                   WHERE a.type_id = laplace.relation_type_id('ON_DATE')) AS date_id,
                max(a.object_id) FILTER (
-                   WHERE a.type_id = @extschema@.relation_type_id('HAS_EVENT')) AS event_id,
+                   WHERE a.type_id = laplace.relation_type_id('HAS_EVENT')) AS event_id,
                max(a.object_id) FILTER (
-                   WHERE a.type_id = @extschema@.relation_type_id('HAS_ECO')) AS eco_id,
+                   WHERE a.type_id = laplace.relation_type_id('HAS_ECO')) AS eco_id,
                max(a.object_id) FILTER (
-                   WHERE a.type_id = @extschema@.relation_type_id('HAS_TERMINATION')) AS term_id,
+                   WHERE a.type_id = laplace.relation_type_id('HAS_TERMINATION')) AS term_id,
                max(a.object_id) FILTER (
-                   WHERE a.type_id = @extschema@.relation_type_id('HAS_TIME_CONTROL')) AS tc_id,
+                   WHERE a.type_id = laplace.relation_type_id('HAS_TIME_CONTROL')) AS tc_id,
                max(a.object_id) FILTER (
-                   WHERE a.type_id = @extschema@.relation_type_id('HAS_TC_CLASS')) AS tcc_id,
+                   WHERE a.type_id = laplace.relation_type_id('HAS_TC_CLASS')) AS tcc_id,
                max(a.object_id) FILTER (
-                   WHERE a.type_id = @extschema@.relation_type_id('HAS_MOVETEXT')) AS movetext_id
+                   WHERE a.type_id = laplace.relation_type_id('HAS_MOVETEXT')) AS movetext_id
         FROM line l
-        JOIN @extschema@.attestations a
+        JOIN laplace.attestations a
           ON a.subject_id = l.line
          AND a.context_id = p_event
-        WHERE a.type_id IN (@extschema@.relation_type_id('HAS_WHITE'),
-                            @extschema@.relation_type_id('HAS_BLACK'),
-                            @extschema@.relation_type_id('HAS_RESULT'),
-                            @extschema@.relation_type_id('ON_DATE'),
-                            @extschema@.relation_type_id('HAS_EVENT'),
-                            @extschema@.relation_type_id('HAS_ECO'),
-                            @extschema@.relation_type_id('HAS_TERMINATION'),
-                            @extschema@.relation_type_id('HAS_TIME_CONTROL'),
-                            @extschema@.relation_type_id('HAS_TC_CLASS'),
-                            @extschema@.relation_type_id('HAS_MOVETEXT'))
+        WHERE a.type_id IN (laplace.relation_type_id('HAS_WHITE'),
+                            laplace.relation_type_id('HAS_BLACK'),
+                            laplace.relation_type_id('HAS_RESULT'),
+                            laplace.relation_type_id('ON_DATE'),
+                            laplace.relation_type_id('HAS_EVENT'),
+                            laplace.relation_type_id('HAS_ECO'),
+                            laplace.relation_type_id('HAS_TERMINATION'),
+                            laplace.relation_type_id('HAS_TIME_CONTROL'),
+                            laplace.relation_type_id('HAS_TC_CLASS'),
+                            laplace.relation_type_id('HAS_MOVETEXT'))
     ),
     surface_batch AS MATERIALIZED (
         SELECT COALESCE(array_agg(DISTINCT s), '{}'::bytea[]) AS ids
@@ -81,7 +86,7 @@ CREATE OR REPLACE FUNCTION chess_game(p_event bytea)
         SELECT p.id, t.txt
         FROM surface_batch b,
              LATERAL unnest(b.ids) WITH ORDINALITY AS p(id, i),
-             LATERAL unnest(@extschema@.realize_batch(b.ids)) WITH ORDINALITY AS t(txt, j)
+             LATERAL unnest(realize.batch(b.ids)) WITH ORDINALITY AS t(txt, j)
         WHERE p.i = t.j
     )
     SELECT h.white_id,
@@ -89,7 +94,7 @@ CREATE OR REPLACE FUNCTION chess_game(p_event bytea)
            h.black_id,
            COALESCE(NULLIF(bl.txt, ''), encode(h.black_id, 'hex')),
            r.txt, d.txt, ev.txt, ec.txt, tm.txt, tc.txt, tcc.txt,
-           @extschema@.render_text(h.movetext_id, 32)
+           laplace.render_text(h.movetext_id, 32)
     FROM hdr h
     LEFT JOIN surface_text w   ON w.id   = h.white_id
     LEFT JOIN surface_text bl  ON bl.id  = h.black_id

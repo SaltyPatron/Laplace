@@ -1,7 +1,8 @@
-CREATE OR REPLACE FUNCTION trajectory_prefix_distance(
+DROP FUNCTION IF EXISTS laplace.trajectory_prefix_distance(geometry, geometry);
+CREATE OR REPLACE FUNCTION structural.trajectory_prefix_distance(
     p_a geometry, p_b geometry)
     RETURNS double precision
     LANGUAGE sql STABLE STRICT
-    SET search_path = @extschema@, public AS $$
+ AS $$
     SELECT public.laplace_frechet_4d(p_a, p_b)
 $$;

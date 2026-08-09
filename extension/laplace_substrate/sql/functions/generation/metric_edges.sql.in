@@ -1,14 +1,14 @@
 -- Pairwise metric edges over a vocab. frechet/hausdorff use REALIZED curves
--- (entity_curve), never packed physicalities.trajectory (Rule #3 / Issue 51).
+-- (entity_curve), never packed laplace.physicalities.trajectory (Rule #3 / Issue 51).
 -- Curves are built once per vocab id in CTE `v`.
-CREATE OR REPLACE FUNCTION metric_edges(
+DROP FUNCTION IF EXISTS laplace.metric_edges(bytea[], text, int, int);
+CREATE OR REPLACE FUNCTION generation.metric_edges(
         p_vocab bytea[], p_metric text DEFAULT 'frechet', p_k int DEFAULT 16, p_probe int DEFAULT 64)
     RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
-    LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
     WITH v AS (
-        SELECT DISTINCT ON (w.id) w.id, w.coord, entity_curve(w.id) AS curve
-        FROM v_word_points w
+        SELECT DISTINCT ON (w.id) w.id, w.coord, structural.entity_curve(w.id) AS curve
+        FROM laplace.v_word_points w
         JOIN unnest(p_vocab) AS u(id) ON u.id = w.id
         ORDER BY w.id, w.physicality_id
     ),

@@ -1,12 +1,16 @@
-CREATE OR REPLACE FUNCTION word_language(p_word bytea)
+-- converse.word_language — GH #862 / #860. No SET (it invalidates plan caching and
+-- blocks inlining, and this is a per-row call on the laplace.render path), real schema names.
+DROP FUNCTION IF EXISTS laplace.word_language(bytea);
+-- BEGIN ATOMIC: GH #764.
+CREATE OR REPLACE FUNCTION converse.word_language(p_word bytea)
     RETURNS bytea
     LANGUAGE sql LAPLACE_STABLE_STRICT
-    SET search_path = @extschema@, public AS $$
+BEGIN ATOMIC
     SELECT c.object_id
-    FROM consensus c
+    FROM laplace.consensus c
     WHERE c.subject_id = p_word
-      AND c.type_id = relation_type_id('HAS_LANGUAGE')
+      AND c.type_id = laplace.relation_type_id('HAS_LANGUAGE')
       AND c.object_id IS NOT NULL
-    ORDER BY eff_mu(c.rating, c.rd) DESC
-    LIMIT 1
-$$;
+    ORDER BY laplace.eff_mu(c.rating, c.rd) DESC
+    LIMIT 1;
+END;

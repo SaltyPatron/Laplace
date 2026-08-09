@@ -1,13 +1,33 @@
-CREATE OR REPLACE FUNCTION session_record_prompt(
+DROP FUNCTION IF EXISTS laplace.session_record_prompt(bytea, text, bytea);
+CREATE OR REPLACE FUNCTION generation.session_record_prompt(
         p_session bytea, p_prompt text, p_resolved bytea DEFAULT NULL)
     RETURNS void
     LANGUAGE plpgsql VOLATILE
-    SET search_path = @extschema@, public AS $$
+ AS $$
 BEGIN
-    INSERT INTO session_topics (session_id, ord, prompt, resolved_id)
+    -- GH #911 item 2. `COALESCE((SELECT max(ord) ...), 0) + 1` was an unlocked
+    -- read-modify-write: two concurrent turns on one session read the same max and
+    -- both claim the same ord -- duplicate ordinals, or a unique violation
+    -- depending on the key. Latent while one frontend owns a session, live the day
+    -- two share it.
+    --
+    -- Serialized on the SESSION, not the table, and not with row locks. Row locks
+    -- cannot fix this case: the race that matters is two FIRST turns, where there
+    -- are no rows to lock and `FOR UPDATE` protects nothing (it is also illegal
+    -- beside an aggregate). A transaction-scoped advisory lock keyed on the
+    -- session id covers the empty case and every later one, and releases at commit
+    -- or abort without an unlock path to leak.
+    --
+    -- The key is the leading 64 bits of the session id. The id is a BLAKE3 content
+    -- hash, so its high bits are already uniformly distributed -- no hashtext
+    -- round trip, and a collision costs two unrelated sessions a brief wait, never
+    -- a wrong ord.
+    PERFORM pg_advisory_xact_lock(laplace.hash128_lo(p_session));
+
+    INSERT INTO laplace.session_topics (session_id, ord, prompt, resolved_id)
     VALUES (
         p_session,
-        COALESCE((SELECT max(t.ord) FROM session_topics t WHERE t.session_id = p_session), 0) + 1,
+        COALESCE((SELECT max(t.ord) FROM laplace.session_topics t WHERE t.session_id = p_session), 0) + 1,
         p_prompt,
         p_resolved
     );

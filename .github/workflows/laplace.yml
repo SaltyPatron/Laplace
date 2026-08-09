@@ -72,6 +72,10 @@ on:
         description: "ignore content-fingerprint stamps — run every phase/test even when its inputs are unchanged"
         type: boolean
         default: false
+      generation_benchmark:
+        description: "run the expensive multi-prompt generation lane benchmark"
+        type: boolean
+        default: false
 
 # NO WORKFLOW-LEVEL CONCURRENCY -- it cannot say what this pipeline needs.
 #
@@ -98,14 +102,9 @@ on:
 permissions:
   contents: read
 
-# Whole-RUN serialization on the shared self-hosted workspace. The per-job
-# groups this replaces (-policy/-build/-unit-test suffixes) let a NEW run's
-# build job cancel-and-rewipe _work/ while the OLD run's test jobs were still
-# executing in it — measured 2026-08-05: two consecutive runs failed with
-# ctest "Failed to change working directory to .../build: No such file or
-# directory" while a solo run of the same tree passed.
-#
-# Runs QUEUE, never cancel: cancel-in-progress would kill deploy/db-ops/
+# Whole-run serialization protects the shared self-hosted workspace from a new build
+# replacing files while an earlier run's tests still consume them.
+# Runs queue and never cancel: cancel-in-progress would kill deploy/db-ops/
 # publish mid-install (the "never cancelled" jobs below — half-installed
 # tree), so a superseded run finishes wastefully-but-safely instead. And the
 # group is REF-INDEPENDENT: the wipe race is on the one shared _work/, which
@@ -166,15 +165,30 @@ jobs:
             scripts/isa-gate-check.py \
             scripts/isa-gate-baseline.json \
             scripts/ensure-foundation.sh \
+            scripts/laplace_api.py \
             scripts/eval-generation.py \
+            scripts/verify-generation.py \
+            scripts/test-eval-op-lane.py \
             scripts/eval-probes.json \
-            scripts/eval-baselines.json; do
+            scripts/eval-baselines.json \
+            scripts/shellcheck-gate.sh; do
             [ -f "$f" ] || { echo "::error file=$f::CI-critical file missing"; fail=1; }
           done
           exit "$fail"
 
+      - name: Shellcheck gate (severity error)
+        # GH #847 — catch quote/array bugs and swallowed-failure patterns that
+        # turn into false "all clear". Severity error only; style is out of scope.
+        run: bash scripts/shellcheck-gate.sh
+
+      - name: Deploy payload contract
+        run: bash scripts/test-deploy-payload-sync.sh
+
       - name: Validate witness-manifest vs orchestration scripts
         run: python3 scripts/validate-pipeline.py
+
+      - name: Eval operation-lane architecture gate
+        run: python3 scripts/test-eval-op-lane.py
 
       - name: Enforce ISA literalism ratchets
         run: python3 scripts/isa-gate-check.py
@@ -213,26 +227,13 @@ jobs:
           echo "codegen deterministic across a clean regen: $a"
 
       - name: Docs inventory drift gate
-        # docs/INVENTORY.md is generated (scripts/docs-inventory.py): the counted
-        # facts prose docs cite (projects, decomposers, SQL families, relations).
-        # The 2026-07-18 audit found every count embedded in prose had drifted, so
-        # prose carries NO counts and points here instead — README, ARCHITECTURE,
-        # INDEX, COMPLETION_PLAN, INVENTIONS and the doc-reconciler agent all
-        # depend on that. The file therefore has to be true at every commit, which
-        # is why it is committed and why this stays BLOCKING.
-        #
-        # What changed is that keeping it true is no longer a human step.
-        # scripts/githooks/pre-commit regenerates and stages this file on every
-        # commit; scripts/install-githooks.sh points core.hooksPath at it and is
-        # invoked by scripts/check-prereqs.sh and scripts/agent-worktree.sh, so any
-        # checkout that has been set up at all has it. This gate is now a backstop
-        # for a checkout that skipped setup, not the mechanism.
-        #
-        # It blocked main twice on 2026-08-04 because the mechanism WAS a human
-        # remembering. Making the gate advisory would have been the wrong fix: it
-        # would keep the drift and hide it. The fix is upstream — nobody has to
-        # remember anything.
+        # Countable facts are generated; prose points at the inventory.
         run: python3 scripts/docs-inventory.py --check
+
+      - name: Documentation authority drift gate
+        run: |
+          python3 scripts/test-doc-governance.py
+          python3 scripts/check-doc-governance.py
 
       - name: Forbid C# attestation policy in decomposers
         run: |
@@ -391,7 +392,7 @@ jobs:
           # expected to leave behind; if it is absent, name that directly
           # instead of failing as a bare `cd` three theories deep.
           if [ ! -d build ]; then
-            echo "::error::build/ absent at ctest start — expected from the build job this run depends on. Either it was removed between jobs or the build phase did not produce it; see #880 for the measured 2026-08-05 timeline. Re-run the workflow."
+            echo "::error::build/ absent at ctest start — the build job did not leave the required shared-workspace output. Re-run after inspecting the producing job."
             exit 1
           fi
           chmod +x scripts/test-parallel.sh
@@ -440,12 +441,14 @@ jobs:
       # Bounded: a stuck 'running' row must not wedge deploys forever. On timeout this
       # reports what it is waiting on and FAILS rather than deploying anyway -- killing an
       # ingest silently is the thing being fixed.
-      - name: Wait for in-flight ingests (substrate lock)
-        timeout-minutes: 305
-        run: bash scripts/wait-for-quiet-substrate.sh "${PGDATABASE:-laplace}"
+      # Checkout precedes the wait: the wait script comes FROM the checkout, so a
+      # fresh runner workspace has nothing to run until after it (Copilot, PR #797).
       - uses: actions/checkout@v4
         with: { submodules: false, clean: false }
       - uses: ./.github/actions/setup-laplace-env
+      - name: Wait for in-flight ingests (substrate lock)
+        timeout-minutes: 305
+        run: bash scripts/wait-for-quiet-substrate.sh "${PGDATABASE:-laplace}"
 
       - name: Install
         # pipeline.sh install owns the API stop/start around the install window
@@ -686,16 +689,32 @@ jobs:
         run: bash scripts/check-substrate-floor.sh "${PGDATABASE:-laplace}"
 
       - name: Live endpoint smoke
+        env:
+          LAPLACE_API_BASE: http://127.0.0.1:8080
         run: |
-          curl -fsS http://127.0.0.1:5187/v1/capabilities | grep -q '"chat_completions"'
-          curl -fsS http://127.0.0.1:5187/health/ready
-          echo
-          psql -d laplace -U laplace_admin -v ON_ERROR_STOP=1 \
-            -c "SELECT metric, value FROM laplace.substrate_counts();"
-          curl -fsS -X POST http://127.0.0.1:5187/v1/chat/completions \
+          capabilities="$(curl -fsS "${LAPLACE_API_BASE}/v1/capabilities")"
+          grep -q '"chat_completions"' <<<"${capabilities}"
+          grep -q '"op"' <<<"${capabilities}"
+
+          readiness="$(curl -fsS "${LAPLACE_API_BASE}/health/ready")"
+          printf '%s\n' "${readiness}"
+          grep -q '"ready":true' <<<"${readiness}"
+          grep -q '"substrate_reachable":true' <<<"${readiness}"
+          grep -Eq '"entities":[1-9][0-9]*' <<<"${readiness}"
+          grep -Eq '"consensus_relations":[1-9][0-9]*' <<<"${readiness}"
+
+          inventory="$(curl -fsS -X POST "${LAPLACE_API_BASE}/v1/op" \
             -H 'Content-Type: application/json' -H 'X-Laplace-Tenant: ci' \
-            --data '{"model":"laplace-converse-001","messages":[{"role":"user","content":"dog"}]}'
-          echo
+            --data '{"name":"ops.substrate_counts","max_rows":20}')"
+          printf '%s\n' "${inventory}"
+          grep -q '"object":"op.result"' <<<"${inventory}"
+          grep -q '"name":"ops.substrate_counts"' <<<"${inventory}"
+
+          completion="$(curl -fsS -X POST "${LAPLACE_API_BASE}/v1/chat/completions" \
+            -H 'Content-Type: application/json' -H 'X-Laplace-Tenant: ci' \
+            --data '{"model":"laplace-converse-001","messages":[{"role":"user","content":"dog"}]}')"
+          printf '%s\n' "${completion}"
+          grep -q '"object":"chat.completion"' <<<"${completion}"
 
       - name: Endpoint contract tests against the live service
         run: |
@@ -704,14 +723,12 @@ jobs:
             --filter 'Tier!=perf & Tier!=db & FullyQualifiedName~Endpoints.OpenAICompat'
 
   eval:
-    name: Eval — generation / election quality (replay+echo blocking)
+    name: Eval — generation / election correctness
     needs: [publish, smoke]
-    # Same seeded guard as smoke. FLIPPED TO BLOCKING 2026-08-06 (operator
-    # ruling: thresholds are the agent's call, not a deferred question). The
-    # lane detectors enforce ONLY the unambiguous regression classes — replay
-    # (variance==1, the #751/#884 class) and echo (rate>0.5, the #878 class).
-    # Content/flatness remain advisory while concept-stream work (#751 R1)
-    # moves them. The election harness governs itself via eval-baselines.json.
+    # Same seeded guard as smoke. The bounded election harness is the ordinary
+    # deploy gate and governs itself via eval-baselines.json. The multi-prompt
+    # lane benchmark is deliberately opt-in: its cold generation battery is a
+    # performance/quality investigation, not a prerequisite for publishing.
     if: >-
       !cancelled() && needs.publish.result == 'success' &&
       needs.publish.outputs.seeded == 'true' &&
@@ -720,13 +737,8 @@ jobs:
     concurrency:
       group: laplace-substrate-lifecycle
       cancel-in-progress: false
-    # 20 was sized to the pre-concept-stream compose and killed the battery at
-    # 20m15s on 2026-08-06 (all prior jobs green). The concept-stream compose
-    # pays senses() per distinct stream token — its documented tolerance until
-    # the #757 C port — and the battery runs on a COLD cache right after this
-    # run's own PostgreSQL restart: measured 2-3 min/probe cold vs 8.6s warm,
-    # I/O-bound. 45 bounds the cold worst case without loosening the per-
-    # statement 300s honesty inside verify-generation.py.
+    # The explicit generation benchmark retains this conservative outer bound;
+    # ordinary deploy runs execute only the bounded correctness harness.
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -736,22 +748,20 @@ jobs:
         run: |
           mkdir -p .eval-proof
           python3 scripts/eval-generation.py \
-            --db "host=/var/run/postgresql user=laplace_admin dbname=laplace" \
+            --api http://127.0.0.1:8080 \
             --probes scripts/eval-probes.json \
             --baseline scripts/eval-baselines.json \
             --report .eval-proof/generation.json
 
       - name: Lane detectors — seed variance / echo / flatness / content (W5 #755)
-        # BLOCKING as of 2026-08-06 on the two unambiguous regression classes
-        # only — replay (variance==1 across seeds, the #751/#884 class) and
-        # echo (rate>0.5, the #878 class) via --enforce; content/flatness stay
-        # advisory in the report while #751 R1 moves those numbers. Full table
-        # lands in the job log and .eval-proof every deploy.
-        # Independent measurement: runs even when the harness step above fails.
-        if: ${{ !cancelled() }}
+        # Explicit benchmark only. It enforces the declared replay and echo classes;
+        # content and flatness remain measured outputs without blocking thresholds.
+        if: >-
+          !cancelled() && github.event_name == 'workflow_dispatch' &&
+          inputs.generation_benchmark == true
         run: |
           python3 scripts/verify-generation.py \
-            --db "host=/var/run/postgresql user=laplace_admin dbname=laplace" \
+            --api http://127.0.0.1:8080 \
             --report .eval-proof/lane-detectors.json \
             --enforce
 

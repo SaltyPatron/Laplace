@@ -125,7 +125,7 @@ pg_laplace_prompt_language(PG_FUNCTION_ARGS)
         args[0] = PointerGetDatum(prompt);
         portal = SPI_cursor_open_with_args(
             "pl_ids",
-            "SELECT p.id FROM laplace.prompt_state($1) p WHERE p.id IS NOT NULL",
+            "SELECT p.id FROM converse.prompt_state($1) p WHERE p.id IS NOT NULL",
             1, argtypes, args, NULL, true, 0);
 
         for (;;)

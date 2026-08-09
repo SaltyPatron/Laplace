@@ -1,10 +1,10 @@
 CREATE OR REPLACE FUNCTION physicalities_present_ordinals(p_ids bytea[])
     RETURNS TABLE(idx int)
     LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+ AS $$
     SELECT (u.ord - 1)::int
     FROM unnest(p_ids) WITH ORDINALITY u(id, ord)
-    INNER JOIN physicalities t ON t.id = u.id
+    INNER JOIN laplace.physicalities t ON t.id = u.id
 $$;
 
 -- KEYED overload: physicalities are partitioned RANGE(hilbert_index), and
@@ -15,10 +15,10 @@ $$;
 CREATE OR REPLACE FUNCTION physicalities_present_ordinals(p_ids bytea[], p_hilberts bytea[])
     RETURNS TABLE(idx int)
     LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+ AS $$
     SELECT (u.ord - 1)::int
     FROM unnest(p_ids, p_hilberts) WITH ORDINALITY u(id, h, ord)
-    JOIN physicalities p
+    JOIN laplace.physicalities p
       ON p.hilbert_index = u.h             -- runtime RANGE prune per row
      AND p.id = u.id
 $$;

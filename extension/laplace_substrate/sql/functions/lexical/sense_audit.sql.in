@@ -1,11 +1,11 @@
--- sense_audit(term): why senses() returned what it returned.
+-- lexical.sense_audit(term): why lexical.senses() returned what it returned.
 --
 -- Promoted 2026-08-02 from six ad-hoc queries run to diagnose a live
 -- regression, because a diagnostic run more than once is a missing surface,
 -- not a query. It answers, per candidate sense, the four questions that
--- diagnosis needed and could not get from senses() alone:
+-- diagnosis needed and could not get from lexical.senses() alone:
 --
---   WHAT IS IT      the target's ENTITY TYPE. senses() returns a `synset_id`
+--   WHAT IS IT      the target's ENTITY TYPE. lexical.senses() returns a `synset_id`
 --                   column, but bubble_up promotes any IS_SYNONYM_OF target
 --                   into that slot, so the value is frequently typed Word or
 --                   Sentence rather than WordNet_Synset. Measured on the
@@ -25,23 +25,21 @@
 -- ids, joined back by ordinal. No per-row realize, no string comparison, no
 -- lower(). A diagnostic that violated the read law while diagnosing the read
 -- path would be worth nothing.
-DROP FUNCTION IF EXISTS sense_audit(text, int);
-
 -- p_lang_rel precedes p_limit: a non-defaulted parameter cannot follow a
 -- defaulted one, and it cannot BE defaulted without writing the literal G3
 -- forbids. The caller resolves it -- which is also what lets this audit any
 -- relation, not only language.
-CREATE OR REPLACE FUNCTION sense_audit(p_term text, p_lang_rel bytea,
+DROP FUNCTION IF EXISTS laplace.sense_audit(text, bytea, int);
+CREATE OR REPLACE FUNCTION lexical.sense_audit(p_term text, p_lang_rel bytea,
                                        p_limit int DEFAULT 64)
     RETURNS TABLE(sense text, sense_type text, via_relation text,
                   language text, denote_mu numeric, witnesses bigint)
-    LANGUAGE sql STABLE
-    SET search_path = @extschema@, public AS $$
-WITH w AS (SELECT word_id(p_term) AS id),
+    LANGUAGE sql STABLE AS $$
+WITH w AS (SELECT laplace.word_id(p_term) AS id),
 cand AS (
     SELECT s.synset_id, s.eff_mu, s.witnesses,
            row_number() OVER (ORDER BY s.eff_mu DESC, s.synset_id) AS rk
-    FROM w CROSS JOIN LATERAL senses(w.id) s
+    FROM w CROSS JOIN LATERAL lexical.senses(w.id) s
 ),
 capped AS (SELECT * FROM cand WHERE rk <= p_limit),
 -- The relation that admitted this candidate. A target reachable by several
@@ -49,23 +47,23 @@ capped AS (SELECT * FROM cand WHERE rk <= p_limit),
 via AS (
     SELECT c.object_id AS synset_id, c.type_id,
            row_number() OVER (PARTITION BY c.object_id
-                              ORDER BY eff_mu(c.rating, c.rd) DESC, c.type_id) AS rk
-    FROM w CROSS JOIN consensus c
+                              ORDER BY laplace.eff_mu(c.rating, c.rd) DESC, c.type_id) AS rk
+    FROM w CROSS JOIN laplace.consensus c
     WHERE c.subject_id = w.id AND c.object_id IN (SELECT synset_id FROM capped)
 ),
--- Language via word_language() — the existing HAS_LANGUAGE surface — so this
--- diagnostic does not mint a new relation_type_id('HAS_LANGUAGE') literal
+-- Language via converse.word_language() — the existing HAS_LANGUAGE surface — so this
+-- diagnostic does not mint a new laplace.relation_type_id('HAS_LANGUAGE') literal
 -- (W6 G3 shrink-only). Same strongest-language pick as the prior CTE.
 lang AS (
-    -- ONE set-based scan, not word_language() per row. #787 fixed the same G3
-    -- violation by calling word_language(synset_id) per candidate; that helper
+    -- ONE set-based scan, not converse.word_language() per row. #787 fixed the same G3
+    -- violation by calling converse.word_language(synset_id) per candidate; that helper
     -- is STRICT and carries a SET clause, so it cannot inline, and each call is
     -- its own consensus scan -- the per-row shape CLAUDE.md:75 sends to C and
     -- W15 documents as a defect. Same G3 outcome, different cost.
     SELECT c.subject_id AS synset_id, c.object_id AS lang_id,
            row_number() OVER (PARTITION BY c.subject_id
-                              ORDER BY eff_mu(c.rating, c.rd) DESC, c.object_id) AS rk
-    FROM consensus c
+                              ORDER BY laplace.eff_mu(c.rating, c.rd) DESC, c.object_id) AS rk
+    FROM laplace.consensus c
     WHERE c.type_id = p_lang_rel
       AND c.subject_id IN (SELECT synset_id FROM capped)
 ),
@@ -73,11 +71,11 @@ rows AS (
     SELECT c.rk, c.synset_id, e.type_id, v.type_id AS via_id, l.lang_id,
            c.eff_mu, c.witnesses
     FROM capped c
-    LEFT JOIN entities e ON e.id = c.synset_id
+    LEFT JOIN laplace.entities e ON e.id = c.synset_id
     LEFT JOIN via  v ON v.synset_id = c.synset_id AND v.rk = 1
     LEFT JOIN lang l ON l.synset_id = c.synset_id AND l.rk = 1
 ),
--- ONE render pass over every id this result needs, position-aligned.
+-- ONE laplace.render pass over every id this result needs, position-aligned.
 ids AS (
     SELECT array_agg(x ORDER BY ord) AS arr
     FROM (SELECT r.rk * 4 - 3 AS ord, r.synset_id AS x FROM rows r
@@ -85,7 +83,7 @@ ids AS (
           UNION ALL SELECT r.rk * 4 - 1, r.via_id   FROM rows r
           UNION ALL SELECT r.rk * 4,     r.lang_id  FROM rows r) z
 ),
-lbl AS (SELECT realize_batch(arr, NULL) AS l FROM ids)
+lbl AS (SELECT realize.batch(arr, NULL) AS l FROM ids)
 SELECT lbl.l[r.rk * 4 - 3],
        lbl.l[r.rk * 4 - 2],
        lbl.l[r.rk * 4 - 1],

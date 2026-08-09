@@ -161,7 +161,7 @@ spi_realize(Datum id, Datum lang)
     if (lang == (Datum) 0)
         nulls[1] = 'n';
     rc = SPI_execute_with_args(
-        "SELECT laplace.realize($1, $2)", 2, argtypes, args, nulls, true, 1);
+        "SELECT realize.realize($1, $2)", 2, argtypes, args, nulls, true, 1);
     if (rc != SPI_OK_SELECT || SPI_processed == 0)
         return (Datum) 0;
     return SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
@@ -183,7 +183,7 @@ spi_realize_batch(Datum ids_arr, Datum lang)
     if (lang == (Datum) 0)
         nulls[1] = 'n';
     rc = SPI_execute_with_args(
-        "SELECT laplace.realize_batch($1, $2)", 2, argtypes, args, nulls, true, 1);
+        "SELECT realize.batch($1, $2)", 2, argtypes, args, nulls, true, 1);
     if (rc != SPI_OK_SELECT || SPI_processed == 0)
         return (Datum) 0;
     d = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
@@ -201,7 +201,7 @@ spi_label(Datum id)
     int   rc;
 
     rc = SPI_execute_with_args(
-        "SELECT laplace.label($1)", 1, argtypes, args, NULL, true, 1);
+        "SELECT realize.label($1)", 1, argtypes, args, NULL, true, 1);
     if (rc != SPI_OK_SELECT || SPI_processed == 0)
         return (Datum) 0;
     return SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
@@ -216,7 +216,7 @@ spi_type_label(Datum type_id)
     int   rc;
 
     rc = SPI_execute_with_args(
-        "SELECT laplace.type_label($1)", 1, argtypes, args, NULL, true, 1);
+        "SELECT lexical.type_label($1)", 1, argtypes, args, NULL, true, 1);
     if (rc != SPI_OK_SELECT || SPI_processed == 0)
         return (Datum) 0;
     return SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
@@ -232,7 +232,7 @@ spi_word_language(Datum word)
     Datum d;
 
     rc = SPI_execute_with_args(
-        "SELECT laplace.word_language($1)", 1, argtypes, args, NULL, true, 1);
+        "SELECT converse.word_language($1)", 1, argtypes, args, NULL, true, 1);
     if (rc != SPI_OK_SELECT || SPI_processed == 0)
         return (Datum) 0;
     
@@ -313,7 +313,7 @@ spi_fetch_synset_ids(Datum word, Datum **out_ids, int *out_n)
     *out_ids = NULL;
     *out_n = 0;
     rc = SPI_execute_with_args(
-        "SELECT sn.synset_id FROM laplace.senses($1) sn",
+        "SELECT sn.synset_id FROM lexical.senses($1) sn",
         1, argtypes, args, NULL, true, 0);
     if (rc != SPI_OK_SELECT)
         elog(ERROR, "laplace_substrate: senses query failed: %s",

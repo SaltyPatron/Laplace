@@ -1,4 +1,4 @@
--- converse(prompt [, lang]): the fused OODA walk as a deterministic narrative.
+-- converse.converse(prompt [, lang]): the fused OODA walk as a deterministic narrative.
 --
 -- Relation selection is gated by SALIENCE BAND (the governed highway structure),
 -- not hardcoded English relation names: band 1 = definitional (the gloss),
@@ -6,27 +6,27 @@
 -- the language-agnostic family -- taxonomic catches every subsumption relation, not
 -- just IS_A -- and it is the same 13-band ladder the manifest governs and the highway
 -- perfcache bit-packs. (Native per-entity highway_mask AND is the intended fast path
--- once the highway perfcache + entities.highway_mask are built; here we gate by
--- relation_highway_band on the read side, which is band-correct and works today.)
+-- once the highway perfcache + laplace.entities.highway_mask are built; here we gate by
+-- laplace.relation_highway_band on the read side, which is band-correct and works today.)
 --
--- ORIENT here, REALIZE in converse_about(): callers that already resolved a topic
--- (chat() orients once per turn) call converse_about directly and skip the
+-- ORIENT here, REALIZE in converse.about(): callers that already resolved a topic
+-- (converse.chat() orients once per turn) call converse_about directly and skip the
 -- re-segmentation.
 --
--- ONE ELECTION, and it is chat()'s. This function used to carry a private copy of
--- the pre-specificity ranking -- copy-pasted verbatim into converse_walk() as well
--- -- long after chat() replaced it. Since chat() falls back to converse() on three
--- paths, the ranking chat() abandoned was still reachable from chat(). It carried
+-- ONE ELECTION, and it is converse.chat()'s. This function used to carry a private copy of
+-- the pre-specificity ranking -- copy-pasted verbatim into converse.walk() as well
+-- -- long after converse.chat() replaced it. Since converse.chat() falls back to converse.converse() on three
+-- paths, the ranking converse.chat() abandoned was still reachable from converse.chat(). It carried
 -- five separate defects in one expression:
 --
---   1. lower(realize(x.syn, p_lang)) = x.surface -- CASE-FOLDING AS A HACK.
+--   1. lower(realize.realize(x.syn, p_lang)) = x.surface -- CASE-FOLDING AS A HACK.
 --      "King" and "king" are DIFFERENT CONTENT, so different ids, and the substrate
 --      already attests the link both ways: K --HAS_LOWERCASE_MAPPING--> k and
 --      k --HAS_UPPERCASE_MAPPING--> K, governed in relation_types.toml, resolved
---      natively and batched by word_case_variants (src/lexical_case.c). Calling
+--      natively and batched by lexical.word_case_variants(src/lexical_case.c). Calling
 --      lower() throws those attested edges away and re-derives a worse answer in
 --      string space -- the identity law inverted, at a per-row cost.
---   2. TWO renders per candidate (realize of the synset, render_text of the token)
+--   2. TWO renders per candidate (realize of the synset, laplace.render_text of the token)
 --      inside the ranking, i.e. rendering before the operation is finished.
 --   3. A string EQUALITY as the primary sort key, in a substrate whose identity law
 --      is language-agnostic: a synset whose label differs from the surface
@@ -34,26 +34,26 @@
 --   4. char_length(surface) as the final tiebreak -- ranking concepts by how long
 --      their spelling is.
 --   5. A correlated count(*) over consensus per candidate for band_mass: 29.6s for
---      ONE candidate on the seeded corpus, and top_synset() per token on top of it
+--      ONE candidate on the seeded corpus, and taxonomy.top_synset() per token on top of it
 --      (73s -- it is bubble_up per constituent).
 --
--- All five are gone. prompt_coherence() is native, id-space end to end, and elects
+-- All five are gone. converse.prompt_coherence() is native, id-space end to end, and elects
 -- on SPECIFICITY (coherence / the candidate's own total rated mass) exactly as
--- chat() does -- same function, same key order, so the two can no longer disagree
+-- converse.chat() does -- same function, same key order, so the two can no longer disagree
 -- about what a prompt is about.
-CREATE OR REPLACE FUNCTION converse(p_prompt text, p_lang bytea DEFAULT NULL)
+DROP FUNCTION IF EXISTS laplace.converse(text, bytea);
+CREATE OR REPLACE FUNCTION converse.converse(p_prompt text, p_lang bytea DEFAULT NULL)
     RETURNS text
-    LANGUAGE plpgsql STABLE
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE plpgsql STABLE AS $$
 DECLARE
     syn bytea;
 BEGIN
-    -- ORIENT: the same native election chat() runs. Key order is chat()'s,
+    -- ORIENT: the same native election converse.chat() runs. Key order is converse.chat()'s,
     -- verbatim -- specificity, then rel_mass (the "what are the X of Y" shape,
     -- where X names a relation and coherence is silent), then peers, with
     -- denote_mu as a TIEBREAK ONLY and the id for determinism.
     SELECT y.synset_id INTO syn
-    FROM prompt_coherence(p_prompt) y
+    FROM converse.prompt_coherence(p_prompt) y
     ORDER BY y.specificity DESC NULLS LAST,
              y.rel_mass DESC NULLS LAST,
              y.peers DESC,
@@ -66,6 +66,6 @@ BEGIN
         RETURN NULL;
     END IF;
 
-    RETURN converse_about(syn, p_lang);
+    RETURN converse.about(syn, p_lang);
 END;
 $$;

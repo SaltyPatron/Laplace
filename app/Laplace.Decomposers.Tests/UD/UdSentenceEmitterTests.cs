@@ -79,6 +79,26 @@ public sealed class UdSentenceEmitterTests
     }
 
     [Fact]
+    public void Gloss_DoesNotEmitSelfReferentialHasDefinition()
+    {
+        // Gloss that roots to the same content as the form → self-loop (#496).
+        byte[] sentenceText = Encoding.UTF8.GetBytes("dog.");
+        byte[] dog = Encoding.UTF8.GetBytes("dog");
+        var tokens = new List<UdToken>
+        {
+            new(1, "1", dog, dog, true, "NOUN", "NN", [], 0, "root", "_", "Gloss=dog"),
+        };
+        var sentence = new UdSentence(sentenceText, tokens, [], 1);
+        var ctx = BuildEmitContext(sentenceText, dog);
+        var change = Emit(sentence, ctx);
+
+        Hash128 hasDef = RelationTypeRegistry.Resolve("HAS_DEFINITION").Id;
+        Assert.DoesNotContain(change.Attestations, a =>
+            a.TypeId == hasDef && a.SubjectId == a.ObjectId);
+        Assert.DoesNotContain(change.Attestations, a => a.TypeId == hasDef);
+    }
+
+    [Fact]
     public void Xpos_LinksToUposViaIsA_AndFeatsEmitOnForm()
     {
         byte[] sentenceText = Encoding.UTF8.GetBytes("Cats run.");

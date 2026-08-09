@@ -698,7 +698,7 @@ SQL
 
 phase_perfcache_guc() {
   echo "===== PHASE — PERFCACHE GUC ====="
-  local bin hwbin
+  local bin hwbin chessbin
   bin=$(find "$LAPLACE_INSTALL_PREFIX/share/laplace" -name 'laplace_t0_perfcache*.bin' 2>/dev/null | sort -V | tail -1)
   test -n "$bin" || { echo "::error::t0 perfcache blob not installed under $LAPLACE_INSTALL_PREFIX/share/laplace"; exit 1; }
   # The highway perfcache is built + installed (engine/core/CMakeLists.txt:206) and required
@@ -707,13 +707,20 @@ phase_perfcache_guc() {
   # hart-server and the band-mask path never used its perfcache. Wire it here too.
   hwbin=$(find "$LAPLACE_INSTALL_PREFIX/share/laplace" -name 'laplace_highway_perfcache*.bin' 2>/dev/null | sort -V | tail -1)
   test -n "$hwbin" || { echo "::error::highway perfcache blob not installed under $LAPLACE_INSTALL_PREFIX/share/laplace"; exit 1; }
+  # GH #822 — chess position_id → coord floor. Same class of omission as highway:
+  # the blob was built/installed and chess.position_ready() stayed false because
+  # the GUC was never pointed at it.
+  chessbin=$(find "$LAPLACE_INSTALL_PREFIX/share/laplace" -name 'laplace_chess_position_perfcache*.bin' 2>/dev/null | sort -V | tail -1)
+  test -n "$chessbin" || { echo "::error::chess position perfcache blob not installed under $LAPLACE_INSTALL_PREFIX/share/laplace"; exit 1; }
   psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 \
     -c "LOAD 'laplace_substrate'" \
     -c "ALTER SYSTEM SET laplace_substrate.perfcache_path = '$bin'" \
     -c "ALTER SYSTEM SET laplace_substrate.highway_perfcache_path = '$hwbin'" \
+    -c "ALTER SYSTEM SET laplace_substrate.chess_position_perfcache_path = '$chessbin'" \
     -c "SELECT pg_reload_conf()"
   echo "perfcache_path -> $bin"
   echo "highway_perfcache_path -> $hwbin"
+  echo "chess_position_perfcache_path -> $chessbin"
   # Preload the extension in the postmaster so every forked backend inherits
   # the mmap'd perfcache + reverse index copy-on-write (_PG_init prewarm)
   # instead of paying a multi-second lazy load on its first substrate call.
@@ -761,6 +768,27 @@ phase_api_env() {
     printf '\n%s\n' "$api_db" >> "$env_file"
   fi
   echo "LAPLACE_DB -> Database=${PGDATABASE:-laplace}"
+
+  # GH #657: shared ops CSV dir + file_fdw repoint so ops.app_log() is live.
+  local ops_log_dir="${LAPLACE_OPS_LOG_DIR:-$LAPLACE_INSTALL_PREFIX/app/logs}"
+  mkdir -p "$ops_log_dir"
+  chmod 2775 "$ops_log_dir" 2>/dev/null || true
+  if grep -q '^LAPLACE_OPS_LOG_DIR=' "$env_file"; then
+    sed -i "s|^LAPLACE_OPS_LOG_DIR=.*|LAPLACE_OPS_LOG_DIR=$ops_log_dir|" "$env_file"
+  else
+    printf '\nLAPLACE_OPS_LOG_DIR=%s\n' "$ops_log_dir" >> "$env_file"
+  fi
+  # Drop the misnamed LAPLACE_LOG_DIR if present — the code never reads it.
+  if grep -q '^LAPLACE_LOG_DIR=' "$env_file"; then
+    sed -i '/^LAPLACE_LOG_DIR=/d' "$env_file"
+  fi
+  echo "LAPLACE_OPS_LOG_DIR -> $ops_log_dir"
+  if command -v psql >/dev/null 2>&1; then
+    PGPASSWORD="${PGPASSWORD:-postgres}" psql -h "${PGHOST:-localhost}" -U "${PGUSER:-postgres}" \
+      -d "${PGDATABASE:-laplace}" -v ON_ERROR_STOP=1 \
+      -c "SELECT ops.repoint_app_log('$ops_log_dir'); SELECT ops.repoint_chess_drops('$ops_log_dir');" \
+      || echo "::warning::ops.repoint_* failed — ops.app_log/chess_drops stay unpointed until next successful api-env"
+  fi
 }
 
 phase_chess_lab() {
@@ -853,6 +881,9 @@ fp_publish() {
 }
 
 phase_publish() {
+  local fp app_dir="${LAPLACE_APP_DIR:-/opt/laplace/app}"
+  source "$ROOT/deploy/linux/app-dir-contract.sh"
+  laplace_reconcile_app_dir_contract "$app_dir"
   echo "===== PHASE — PUBLISH (full runtime contract) ====="
   # Publish owns the whole target: chess binaries, secrets, API+SPA+uci.
   phase_chess_lab
@@ -864,7 +895,6 @@ phase_publish() {
   # and the restart+readiness gate lives in the workflow, which records it via
   # `pipeline.sh publish-stamp` only after /health/ready passes. A deploy that
   # never went ready therefore re-deploys on the next run.
-  local fp app_dir="${LAPLACE_APP_DIR:-/opt/laplace/app}"
   fp=$(fp_publish)
   if fp_check publish "$fp" && [[ -x "$app_dir/laplace-uci" && -x "$app_dir/laplace-mcp" && -d "$app_dir/wwwroot" ]]; then
     echo "publish domain unchanged (app/ web/ deploy/) and $app_dir intact — skipping deploy"

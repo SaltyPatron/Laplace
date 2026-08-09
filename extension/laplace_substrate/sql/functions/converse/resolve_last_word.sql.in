@@ -1,9 +1,12 @@
-CREATE OR REPLACE FUNCTION resolve_last_word(p_phrase text)
+-- converse.resolve_last_word — GH #862 / #860. No SET, real schema names.
+DROP FUNCTION IF EXISTS laplace.resolve_last_word(text);
+-- BEGIN ATOMIC: GH #764.
+CREATE OR REPLACE FUNCTION converse.resolve_last_word(p_phrase text)
     RETURNS bytea
     LANGUAGE sql LAPLACE_STABLE_STRICT
-    SET search_path = @extschema@, public AS $$
-    SELECT pw.id FROM prompt_words(p_phrase) pw
+BEGIN ATOMIC
+    SELECT pw.id FROM converse.prompt_words(p_phrase) pw
     WHERE pw.id IS NOT NULL
     ORDER BY pw.ord DESC
-    LIMIT 1
-$$;
+    LIMIT 1;
+END;

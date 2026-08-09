@@ -28,6 +28,7 @@
 #include "laplace/core/content_witness_batch.h"
 #include "laplace/core/hash128.h"
 #include "laplace/core/highway_table.h"
+#include "laplace/core/perfcache_format.h"
 
 #include "perfcache_native.h"
 
@@ -360,4 +361,14 @@ pg_laplace_is_all_whitespace(PG_FUNCTION_ARGS)
     t = PG_GETARG_TEXT_PP(0);
     PG_RETURN_BOOL(laplace_text_is_all_whitespace(
         (const uint8_t *) VARDATA_ANY(t), VARSIZE_ANY_EXHDR(t)) != 0);
+}
+
+/* GH #813: atom_window is the configured T0 N, not a SQL literal. Read from the
+ * same constant the perfcache blob loader validates against. */
+PG_FUNCTION_INFO_V1(pg_laplace_atom_window);
+
+Datum
+pg_laplace_atom_window(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT64((int64) LAPLACE_PERFCACHE_RECORD_COUNT);
 }

@@ -1,4 +1,5 @@
-CREATE OR REPLACE FUNCTION chess_player_moves(
+DROP FUNCTION IF EXISTS laplace.chess_player_moves(bytea, bytea, boolean, integer);
+CREATE OR REPLACE FUNCTION chess.player_moves(
         p_position bytea, p_player bytea, p_as_white boolean,
         p_limit integer DEFAULT 12)
     RETURNS TABLE(next_position bytea, games bigint, score double precision)
@@ -18,13 +19,13 @@ CREATE OR REPLACE FUNCTION chess_player_moves(
            sum(a.observation_count)::bigint AS games,
            (sum(a.outcome::double precision * a.observation_count)
                 / (2.0 * sum(a.observation_count)))::double precision AS score
-    FROM @extschema@.attestations a
+    FROM laplace.attestations a
     WHERE a.subject_id = p_position
-      AND a.type_id = @extschema@.relation_type_id('MOVE')
+      AND a.type_id = laplace.relation_type_id('MOVE')
       AND a.context_id IN (
             SELECT g.context_id
-            FROM @extschema@.attestations g
-            WHERE g.type_id = @extschema@.relation_type_id(
+            FROM laplace.attestations g
+            WHERE g.type_id = laplace.relation_type_id(
                       CASE WHEN p_as_white THEN 'HAS_WHITE' ELSE 'HAS_BLACK' END)
               AND g.object_id = p_player
               AND g.context_id IS NOT NULL)

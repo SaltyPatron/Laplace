@@ -1,40 +1,41 @@
-CREATE OR REPLACE FUNCTION attention(p_word bytea, p_k int DEFAULT 12)
+DROP FUNCTION IF EXISTS laplace.attention(bytea, int);
+CREATE OR REPLACE FUNCTION converse.attention(p_word bytea, p_k int DEFAULT 12)
     RETURNS TABLE(neighbor text, relation text, attention double precision,
                   geodesic double precision)
     LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+ AS $$
     WITH qcoord AS (
-        SELECT coord FROM v_word_points WHERE id = p_word LIMIT 1),
+        SELECT coord FROM laplace.v_word_points WHERE id = p_word LIMIT 1),
     edges AS (
-        SELECT c.object_id AS nb, c.type_id, eff_mu(c.rating, c.rd) AS mu
-        FROM consensus c
+        SELECT c.object_id AS nb, c.type_id, laplace.eff_mu(c.rating, c.rd) AS mu
+        FROM laplace.consensus c
         WHERE c.subject_id = p_word AND c.object_id IS NOT NULL
-          AND c.type_id NOT IN (relation_type_id('HAS_LANGUAGE'),
-                                relation_type_id('HAS_SENSE'), relation_type_id('IS_SENSE_OF'),
-                                relation_type_id('PRECEDES'), relation_type_id('FOLLOWS'),
-                                relation_type_id('HAS_POS'), relation_type_id('HAS_XPOS'),
-                                relation_type_id('HAS_FEATURE'), relation_type_id('HAS_LEX_CATEGORY'),
-                                relation_type_id('HAS_NAME_ALIAS'), relation_type_id('IS_LEMMA_OF'),
-                                relation_type_id('HAS_LANGUAGE_SCOPE'), relation_type_id('HAS_LANGUAGE_TYPE'))
+          AND c.type_id NOT IN (laplace.relation_type_id('HAS_LANGUAGE'),
+                                laplace.relation_type_id('HAS_SENSE'), laplace.relation_type_id('IS_SENSE_OF'),
+                                laplace.relation_type_id('PRECEDES'), laplace.relation_type_id('FOLLOWS'),
+                                laplace.relation_type_id('HAS_POS'), laplace.relation_type_id('HAS_XPOS'),
+                                laplace.relation_type_id('HAS_FEATURE'), laplace.relation_type_id('HAS_LEX_CATEGORY'),
+                                laplace.relation_type_id('HAS_NAME_ALIAS'), laplace.relation_type_id('IS_LEMMA_OF'),
+                                laplace.relation_type_id('HAS_LANGUAGE_SCOPE'), laplace.relation_type_id('HAS_LANGUAGE_TYPE'))
         UNION ALL
-        SELECT sm.member, relation_type_id('IS_SYNONYM_OF'), sm.mu
-        FROM synset_members(p_word) sm
+        SELECT sm.member, laplace.relation_type_id('IS_SYNONYM_OF'), sm.mu
+        FROM lexical.synset_members(p_word) sm
     ),
     best AS (
         SELECT nb, (array_agg(type_id ORDER BY mu DESC))[1] AS type_id, max(mu) AS mu
-        FROM edges WHERE nb <> p_word GROUP BY nb)
-    SELECT l.txt AS neighbor, type_label(r.type_id) AS relation,
+        FROM consensus.edges WHERE nb <> p_word GROUP BY nb)
+    SELECT l.txt AS neighbor, lexical.type_label(r.type_id) AS relation,
            r.attention, r.geodesic
     FROM (
         SELECT b.nb, b.type_id, (b.mu::double precision / 1e9) AS attention,
                CASE WHEN qc.coord IS NOT NULL AND w.coord IS NOT NULL
                     THEN laplace_angular_distance_4d(w.coord, qc.coord) END AS geodesic
         FROM best b
-        LEFT JOIN v_word_points w ON w.id = b.nb
+        LEFT JOIN laplace.v_word_points w ON w.id = b.nb
         CROSS JOIN qcoord qc
-        ORDER BY attention DESC NULLS LAST, geodesic NULLS LAST
+        ORDER BY converse.attention DESC NULLS LAST, geodesic NULLS LAST
     ) r
-    CROSS JOIN LATERAL (SELECT label(r.nb) AS txt) l
+    CROSS JOIN LATERAL (SELECT realize.label(r.nb) AS txt) l
     WHERE NULLIF(btrim(l.txt), '') IS NOT NULL
     LIMIT p_k
 $$;

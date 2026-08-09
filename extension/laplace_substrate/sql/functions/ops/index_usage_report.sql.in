@@ -5,7 +5,7 @@ CREATE OR REPLACE FUNCTION index_usage_report(p_min_bytes bigint DEFAULT 0)
         total_bytes bigint,
         total_size  text)
     LANGUAGE sql STABLE
-    SET search_path = @extschema@, public AS $$
+    AS $$
     -- What the index set COSTS versus what anything has ever READ.
     --
     -- Every index is maintained on every insert. An index nothing reads is pure write
@@ -64,7 +64,7 @@ CREATE OR REPLACE FUNCTION index_usage_detail(p_table text DEFAULT NULL, p_limit
         total_bytes bigint,
         total_size  text)
     LANGUAGE sql STABLE
-    SET search_path = @extschema@, public AS $$
+    AS $$
     -- The per-index rows behind index_usage_report()'s buckets, biggest first. This is the
     -- form that names a specific drop candidate; the bucket form only sizes the problem.
     -- Same caveat: idx_scan is cumulative since the last stats reset, not since build.

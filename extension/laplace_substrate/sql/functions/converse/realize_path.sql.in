@@ -1,11 +1,14 @@
--- Thin wrapper: the directed 4-arg realize_path is the single implementation;
--- forward-only rendering is the NULL-dirs case (p_dirs[i-1] = -1 is NULL for a
--- NULL array, so every connector takes the forward arrow — identical output to
--- the old copy-pasted 3-arg body).
-CREATE OR REPLACE FUNCTION realize_path(p_path bytea[], p_types bytea[],
+-- realize.path (3-arg) — GH #862 / #860. Thin wrapper: the directed 4-arg form is
+-- the single implementation; forward-only rendering is the NULL-dirs case
+-- (p_dirs[i-1] = -1 is NULL for a NULL array, so every connector takes the forward
+-- arrow — identical output to the old copy-pasted 3-arg body).
+--
+-- No SET: it blocks inlining, and a wrapper that cannot inline is a whole extra
+-- function execution to forward three arguments.
+DROP FUNCTION IF EXISTS laplace.realize_path(bytea[], bytea[], bytea);
+CREATE OR REPLACE FUNCTION realize.path(p_path bytea[], p_types bytea[],
                                         p_lang bytea DEFAULT NULL)
     RETURNS text
-    LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
-    SELECT realize_path(p_path, p_types, NULL::int[], p_lang)
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    SELECT realize.path(p_path, p_types, NULL::int[], p_lang)
 $$;

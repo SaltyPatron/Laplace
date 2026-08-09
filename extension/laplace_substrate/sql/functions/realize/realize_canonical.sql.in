@@ -1,8 +1,10 @@
-CREATE OR REPLACE FUNCTION _realize_canonical(p_id bytea)
+-- realize._canonical — GH #862 / #860. No SET (blocks plan caching and inlining;
+-- this runs per row inside realize's COALESCE), real schema names.
+DROP FUNCTION IF EXISTS laplace._realize_canonical(bytea);
+CREATE OR REPLACE FUNCTION realize._canonical(p_id bytea)
     RETURNS text
-    LANGUAGE sql STABLE PARALLEL SAFE STRICT
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE STRICT AS $$
     SELECT regexp_replace(n.name, '^substrate/[a-z_]+/(.+)/v1$', '\1')
-    FROM canonical_names n
+    FROM laplace.canonical_names n
     WHERE n.id = p_id AND n.name LIKE 'substrate/%'
 $$;

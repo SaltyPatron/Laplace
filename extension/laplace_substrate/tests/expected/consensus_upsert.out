@@ -30,7 +30,7 @@ BEGIN
     -- 1) fresh insert: three cells in one ordered call (hot relation, plain
     --    relation, NULL object). Every row folds from the initial priors via
     --    the same native scalar the upsert uses.
-    affected := consensus_upsert(
+    affected := consensus.upsert(
         ARRAY[subj, subj, subj], ARRAY[rel_hot, rel_a, rel_a],
         ARRAY[o1, o2, NULL],
         ARRAY[phi, phi, phi], ARRAY[2, 1, 3]::bigint[],
@@ -76,7 +76,7 @@ BEGIN
     expect := laplace_glicko2_accumulate_games(
         row1.rating, row1.rd, row1.volatility,
         glicko2_neutral_mu(), phi, 5, 5 * s_conf, glicko2_tau());
-    affected := consensus_upsert(
+    affected := consensus.upsert(
         ARRAY[subj], ARRAY[rel_hot], ARRAY[o1],
         ARRAY[phi], ARRAY[5]::bigint[], ARRAY[5 * s_conf]::bigint[], ARRAY[t2]);
     IF affected <> 1 THEN
@@ -100,7 +100,7 @@ BEGIN
 
     -- 4) a duplicate cell in one call is a contract violation and fails loud.
     BEGIN
-        PERFORM consensus_upsert(
+        PERFORM consensus.upsert(
             ARRAY[subj, subj], ARRAY[rel_hot, rel_hot], ARRAY[o1, o1],
             ARRAY[phi, phi], ARRAY[1, 1]::bigint[], ARRAY[s_conf, s_conf]::bigint[],
             ARRAY[t2, t2]);

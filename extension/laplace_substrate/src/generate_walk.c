@@ -32,7 +32,7 @@ PG_FUNCTION_INFO_V1(pg_laplace_walk_strongest);
 
 static const char *EDGE_QUERY =
     "SELECT object_id, type_id, rating, rd, witness_count "
-    "FROM laplace.consensus_walk_edges($1, $2, $3, $4)";
+    "FROM consensus.walk_edges($1, $2, $3, $4)";
 
 static SPIPlanPtr edge_plan = NULL;
 
@@ -869,7 +869,37 @@ pg_laplace_walk_strongest(PG_FUNCTION_ARGS)
 #define VFLAG_ATOM_SHIFT 31
 #define VFLAG_ATOM_MASK  ((int64) 0x1FFFFF)
 
-/* R1: one indexed bulk closure fetch; C assembles — zero per-node SPI. */
+/*
+ * ONE PREPARED LEVEL QUERY, WALKED IN C (was: laplace.constituents_closure).
+ *
+ * The closure used to be a SQL function wrapping a WITH RECURSIVE, called once per
+ * render. MEASURED 2026-08-07 on the foundation seed: 59 ms to return THREE rows,
+ * and this is the most-called query in the system (1,496,183 calls / 19.6 h
+ * cumulative). The breakdown says the recursion was never the problem:
+ *
+ *   planning                    ~30 ms   v_word_points is a view over partitioned
+ *                                        physicalities, re-planned on EVERY call
+ *   ST_NPoints in the sort key  ~11 ms   PostGIS per row, for a tiebreak that only
+ *                                        5,063 entities in the substrate need
+ *   the recursive term          ~5.4 ms  the part that looks like the cost
+ *
+ * A SQL function cannot fix the first line: an invoked SQL body is planned per
+ * invocation. A prepared plan is planned ONCE per backend and executed with bound
+ * parameters thereafter, which is what SPI_keepplan buys — so the walk moves here
+ * and SQL is left holding one indexed level query.
+ *
+ * LEVEL-SYNCHRONOUS, NOT PER-NODE. Each iteration executes this once with the whole
+ * frontier as a bound bytea[]; `= ANY($1)` is the index condition and prunes the
+ * HASH sublevel per element. Depth for words is 2-3 levels, so a render costs a
+ * handful of executions rather than one re-planned recursion — and never one query
+ * per node, which is the RBAR shape the read law bans.
+ *
+ * The DISTINCT ON tiebreak is preserved exactly (physicality_id, then ST_NPoints
+ * DESC): 5,063 entities carry two type-1 rows with the same (entity_id, type, id)
+ * and different trajectories, and without the second key the PLAN decided which
+ * survived — so batch size changed the answer. ST_NPoints prefers the finer
+ * decomposition, the one that reaches the tier-0 floor and reconstructs the text.
+ */
 static const char *CLOSURE_QUERY =
     "SELECT parent_id, child_id, run_length, flags "
     "FROM laplace.constituents_closure($1, $2) "
@@ -1222,6 +1252,8 @@ pg_laplace_render_text_batch(PG_FUNCTION_ARGS)
     arr = PG_GETARG_ARRAYTYPE_P(0);
     max_depth = PG_ARGISNULL(1) ? 8 : PG_GETARG_INT32(1);
 
+    if (ARR_NDIM(arr) == 0)
+        PG_RETURN_ARRAYTYPE_P(construct_empty_array(TEXTOID));
     if (ARR_NDIM(arr) != 1)
         ereport(ERROR, (errmsg("render_text_batch: ids must be 1-dimensional")));
     if (ARR_ELEMTYPE(arr) != BYTEAOID)

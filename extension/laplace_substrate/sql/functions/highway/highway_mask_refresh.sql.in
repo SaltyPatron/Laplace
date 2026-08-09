@@ -8,24 +8,23 @@
 -- highway_mask_rebuild for full population. No-ops with a warning when the highway
 -- perfcache is not configured (hart-server before its blob deploys) so the fold
 -- never faults on mask maintenance.
-CREATE OR REPLACE FUNCTION highway_mask_refresh(p_ids bytea[])
+CREATE OR REPLACE FUNCTION laplace.highway_mask_refresh(p_ids bytea[])
     RETURNS bigint
-    LANGUAGE plpgsql VOLATILE
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE plpgsql VOLATILE AS $$
 DECLARE
     updated bigint;
 BEGIN
-    IF NOT laplace_highway_ready() THEN
+    IF NOT laplace.laplace_highway_ready() THEN
         RAISE WARNING 'highway_mask_refresh: highway perfcache not configured — masks not refreshed (set laplace_substrate.highway_perfcache_path)';
         RETURN 0;
     END IF;
 
     WITH t AS (SELECT DISTINCT u.id FROM unnest(p_ids) AS u(id)),
     tp AS (
-        SELECT t.id, c.type_id FROM t JOIN consensus c ON c.subject_id = t.id
+        SELECT t.id, c.type_id FROM t JOIN laplace.consensus c ON c.subject_id = t.id
         GROUP BY t.id, c.type_id
         UNION
-        SELECT t.id, c.type_id FROM t JOIN consensus c ON c.object_id = t.id
+        SELECT t.id, c.type_id FROM t JOIN laplace.consensus c ON c.object_id = t.id
         GROUP BY t.id, c.type_id
     ),
     bits AS (
@@ -37,21 +36,21 @@ BEGIN
         SELECT q.id, q.bit
         FROM (
             SELECT tp.id,
-                   COALESCE(relation_highway_bit(tp.type_id),
-                            relation_highway_bit(fam.object_id)) AS bit
+                   COALESCE(laplace.relation_highway_bit(tp.type_id),
+                            laplace.relation_highway_bit(fam.object_id)) AS bit
             FROM tp
-            LEFT JOIN consensus fam
+            LEFT JOIN laplace.consensus fam
               ON fam.subject_id = tp.type_id
-             AND fam.type_id = relation_type_id('IS_A')
+             AND fam.type_id = laplace.relation_type_id('IS_A')
         ) q
         WHERE q.bit IS NOT NULL
     ),
     m AS (
-        SELECT bits.id, laplace_highway_mask_from_bits(array_agg(DISTINCT bits.bit)) AS mask
+        SELECT bits.id, laplace.laplace_highway_mask_from_bits(array_agg(DISTINCT bits.bit)) AS mask
         FROM bits GROUP BY bits.id
     ),
     upd AS (
-        UPDATE entities e SET highway_mask = m.mask
+        UPDATE laplace.entities e SET highway_mask = m.mask
         FROM m
         WHERE e.id = m.id AND m.mask IS DISTINCT FROM e.highway_mask
         RETURNING 1

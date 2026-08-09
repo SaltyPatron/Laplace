@@ -1,4 +1,5 @@
-CREATE OR REPLACE FUNCTION chess_player_record(p_player bytea)
+DROP FUNCTION IF EXISTS laplace.chess_player_record(bytea);
+CREATE OR REPLACE FUNCTION chess.player_record(p_player bytea)
     RETURNS TABLE(as_white boolean, games bigint, wins bigint, draws bigint,
                   losses bigint, unscored bigint, score double precision)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
@@ -22,21 +23,21 @@ CREATE OR REPLACE FUNCTION chess_player_record(p_player bytea)
     WITH sides AS (
         SELECT a.subject_id AS line,
                a.context_id AS event,
-               (a.type_id = @extschema@.relation_type_id('HAS_WHITE')) AS white
-        FROM @extschema@.attestations a
+               (a.type_id = laplace.relation_type_id('HAS_WHITE')) AS white
+        FROM laplace.attestations a
         WHERE a.object_id = p_player
           AND a.context_id IS NOT NULL
-          AND a.type_id IN (@extschema@.relation_type_id('HAS_WHITE'),
-                            @extschema@.relation_type_id('HAS_BLACK'))
+          AND a.type_id IN (laplace.relation_type_id('HAS_WHITE'),
+                            laplace.relation_type_id('HAS_BLACK'))
     ),
     scored AS (
         SELECT s.white,
-               @extschema@.chess_outcome(s.white, r.object_id) AS outcome
+               chess.outcome(s.white, r.object_id) AS outcome
         FROM sides s
-        LEFT JOIN @extschema@.attestations r
+        LEFT JOIN laplace.attestations r
                ON r.subject_id = s.line
               AND r.context_id = s.event
-              AND r.type_id = @extschema@.relation_type_id('HAS_RESULT')
+              AND r.type_id = laplace.relation_type_id('HAS_RESULT')
     )
     SELECT sc.white,
            count(*)::bigint,

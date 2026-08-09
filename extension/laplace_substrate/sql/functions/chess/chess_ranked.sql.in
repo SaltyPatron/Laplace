@@ -1,4 +1,5 @@
-CREATE OR REPLACE FUNCTION chess_ranked(p_limit integer DEFAULT 200, p_offset integer DEFAULT 0)
+DROP FUNCTION IF EXISTS laplace.chess_ranked(integer, integer);
+CREATE OR REPLACE FUNCTION chess.ranked(p_limit integer DEFAULT 200, p_offset integer DEFAULT 0)
     RETURNS TABLE(rank bigint, player_id bytea, name text, games bigint,
                   rating double precision, rd double precision, eff_mu double precision)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
@@ -18,7 +19,7 @@ CREATE OR REPLACE FUNCTION chess_ranked(p_limit integer DEFAULT 200, p_offset in
     -- Minting a player-only outcome object to make the query easier would duplicate a fact the
     -- entity type already states.
     --
-    -- eff_mu, not a win percentage: Glicko-2 weighs WHO you beat, so a 68% score against 1960s
+    -- laplace.eff_mu, not a win percentage: Glicko-2 weighs WHO you beat, so a 68% score against 1960s
     -- grandmasters outranks 68% against beginners instead of tying it, and a thin record sinks
     -- on RD rather than flattering itself. A raw ratio can express neither.
     --
@@ -29,40 +30,40 @@ CREATE OR REPLACE FUNCTION chess_ranked(p_limit integer DEFAULT 200, p_offset in
                c.witness_count AS games,
                c.rating,
                c.rd
-        FROM @extschema@.entities e
-        JOIN @extschema@.consensus c
+        FROM laplace.entities e
+        JOIN laplace.consensus c
           ON c.subject_id = e.id
-         AND c.type_id = @extschema@.relation_type_id('OUTCOME')
-        WHERE e.type_id = @extschema@.entity_type_id('Chess_Player')
-        ORDER BY @extschema@.eff_mu(c.rating, c.rd) DESC, c.subject_id
+         AND c.type_id = laplace.relation_type_id('OUTCOME')
+        WHERE e.type_id = laplace.entity_type_id('Chess_Player')
+        ORDER BY laplace.eff_mu(c.rating, c.rd) DESC, c.subject_id
         LIMIT p_limit OFFSET p_offset
     ),
     batch AS MATERIALIZED (
         SELECT COALESCE(
-                   array_agg(rec.player ORDER BY @extschema@.eff_mu(rec.rating, rec.rd) DESC, rec.player),
+                   array_agg(rec.player ORDER BY laplace.eff_mu(rec.rating, rec.rd) DESC, rec.player),
                    '{}'::bytea[]) AS ids
         FROM rec
     ),
     named AS (
-        -- Batched name resolution, never per-row label(): resolving names one at a time is
+        -- Batched name resolution, never per-row realize.label(): resolving names one at a time is
         -- ~45ms each and would dominate a read that is otherwise an index scan.
         SELECT p.id, t.txt
         FROM batch b,
              LATERAL unnest(b.ids) WITH ORDINALITY AS p(id, i),
-             LATERAL unnest(@extschema@.realize_batch(b.ids)) WITH ORDINALITY AS t(txt, j)
+             LATERAL unnest(realize.batch(b.ids)) WITH ORDINALITY AS t(txt, j)
         WHERE p.i = t.j
     )
-    SELECT row_number() OVER (ORDER BY @extschema@.eff_mu(rec.rating, rec.rd) DESC, rec.player)
+    SELECT row_number() OVER (ORDER BY laplace.eff_mu(rec.rating, rec.rd) DESC, rec.player)
                + p_offset,
            rec.player,
            COALESCE(NULLIF(n.txt, ''), encode(rec.player, 'hex')),
            rec.games,
-           -- DISPLAY units, never raw fp1e9: eff_mu_display is the one scaling law
-           -- (functions/mu/eff_mu_display.sql.in), rating/rd take the same /1e9 round.
+           -- DISPLAY units, never raw fp1e9: laplace.eff_mu_display is the one scaling law
+           -- (functions/mu/laplace.eff_mu_display.sql.in), rating/rd take the same /1e9 round.
            round((rec.rating / 1e9)::numeric, 3)::double precision,
            round((rec.rd / 1e9)::numeric, 3)::double precision,
-           @extschema@.eff_mu_display(rec.rating, rec.rd)::double precision
+           laplace.eff_mu_display(rec.rating, rec.rd)::double precision
     FROM rec
     LEFT JOIN named n ON n.id = rec.player
-    ORDER BY @extschema@.eff_mu(rec.rating, rec.rd) DESC, rec.player
+    ORDER BY laplace.eff_mu(rec.rating, rec.rd) DESC, rec.player
 $$;

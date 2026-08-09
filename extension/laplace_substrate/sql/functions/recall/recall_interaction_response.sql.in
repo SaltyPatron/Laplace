@@ -5,52 +5,59 @@
 -- one pull on an event knot returns the taut strands (Glicko-ranked) that answer
 -- "and then what / and so others feel". Each relation type maps to a natural connective
 -- so the folded edge reads as an inference, not a table row.
-CREATE OR REPLACE FUNCTION recall_interaction_response(p_topic bytea, p_limit int DEFAULT 8)
+DROP FUNCTION IF EXISTS laplace.recall_interaction_response(bytea, int);
+CREATE OR REPLACE FUNCTION converse.recall_interaction_response(p_topic bytea, p_limit int DEFAULT 8)
     RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+ AS $$
     WITH kinds(type_id, phrase) AS (
         VALUES
-            (relation_type_id('X_INTENT'),         'intends'),
-            (relation_type_id('X_WANT'),           'then wants'),
-            (relation_type_id('X_NEED'),           'first needs'),
-            (relation_type_id('X_REACT'),          'feels'),
-            (relation_type_id('X_EFFECT'),         'then'),
-            (relation_type_id('O_WANT'),           'others then want'),
-            (relation_type_id('O_REACT'),          'others feel'),
-            (relation_type_id('O_EFFECT'),         'for others,'),
-            (relation_type_id('CAUSES'),           'causes'),
-            (relation_type_id('CAUSES_DESIRE'),    'causes a desire for'),
-            (relation_type_id('MOTIVATED_BY_GOAL'),'is motivated by'),
-            (relation_type_id('HAS_PREREQUISITE'), 'requires'),
-            (relation_type_id('HAS_SUBEVENT'),     'involves'),
-            (relation_type_id('OBSTRUCTED_BY'),    'is hindered by')
+            (laplace.relation_type_id('X_INTENT'),         'intends'),
+            (laplace.relation_type_id('X_WANT'),           'then wants'),
+            (laplace.relation_type_id('X_NEED'),           'first needs'),
+            (laplace.relation_type_id('X_REACT'),          'feels'),
+            (laplace.relation_type_id('X_EFFECT'),         'then'),
+            (laplace.relation_type_id('O_WANT'),           'others then want'),
+            (laplace.relation_type_id('O_REACT'),          'others feel'),
+            (laplace.relation_type_id('O_EFFECT'),         'for others,'),
+            (laplace.relation_type_id('CAUSES'),           'causes'),
+            (laplace.relation_type_id('CAUSES_DESIRE'),    'causes a desire for'),
+            (laplace.relation_type_id('MOTIVATED_BY_GOAL'),'is motivated by'),
+            (laplace.relation_type_id('HAS_PREREQUISITE'), 'requires'),
+            (laplace.relation_type_id('HAS_SUBEVENT'),     'involves'),
+            (laplace.relation_type_id('OBSTRUCTED_BY'),    'is hindered by')
     ),
-    -- edge_rank folds relation salience into the eff_mu ordering so mandate-band
+    -- laplace.edge_rank folds relation salience into the laplace.eff_mu ordering so mandate-band
     -- relations outrank probationary ones.
     facts AS (
         SELECT k.phrase,
                c.object_id,
-               edge_rank(c.type_id, eff_mu(c.rating, c.rd)) AS rank,
-               eff_mu(c.rating, c.rd) AS mu,
+               laplace.edge_rank(c.type_id, laplace.eff_mu(c.rating, c.rd)) AS rank,
+               laplace.eff_mu(c.rating, c.rd) AS mu,
                c.witness_count AS witnesses
-        FROM v_consensus_unrefuted c
+        FROM laplace.v_consensus_unrefuted c
         JOIN kinds k ON k.type_id = c.type_id
         WHERE c.subject_id = p_topic AND c.object_id IS NOT NULL
     ),
-    -- Rank BEFORE rendering (Issue-52 pattern): the old shape ran render_text over
+    -- Rank BEFORE rendering (Issue-52 pattern): the old shape ran laplace.render_text over
     -- the topic's FULL commonsense fan-out and only then ORDER/LIMIT'd to p_limit.
-    -- Ranking needs only ids + rank/mu already in `facts`; render_text runs over
-    -- exactly the p_limit survivors. Output-identical (no post-render filtering).
-    ranked AS (
+    -- Ranking needs only ids + rank/mu already in `facts`; laplace.render_text runs over
+    -- exactly the p_limit survivors. Output-identical (no post-laplace.render filtering).
+    ranked AS MATERIALIZED (
         SELECT f.phrase, f.object_id, f.rank, f.mu, f.witnesses
         FROM facts f
         ORDER BY f.rank DESC, f.mu DESC
         LIMIT p_limit
+    ), numbered AS MATERIALIZED (
+        SELECT r.*, row_number() OVER (ORDER BY r.rank DESC,r.mu DESC,r.object_id) AS rn FROM ranked r
+    ), batch AS MATERIALIZED (
+        SELECT realize.label(p_topic) AS topic,
+               laplace.render_text_batch(array_agg(object_id ORDER BY rn),96) AS objects
+        FROM numbered
     )
-    SELECT label(p_topic) || ' — ' || r.phrase || ' ' || render_text(r.object_id, 96) AS reply,
+    SELECT b.topic || ' — ' || r.phrase || ' ' || b.objects[r.rn] AS reply,
            r.mu AS eff_mu,
            r.witnesses
-    FROM ranked r
-    ORDER BY r.rank DESC, r.mu DESC
+    FROM numbered r CROSS JOIN batch b
+    ORDER BY r.rn
 $$;

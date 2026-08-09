@@ -1,19 +1,19 @@
--- resolve_topic(phrase, context): the topic a prompt is about.
+-- converse.resolve_topic(phrase, context): the topic a prompt is about.
 --
--- ONE ELECTION, ONE KEY ORDER. chat(), converse() and converse_walk() all orient
--- through prompt_coherence() on the identical sort key, with the stated invariant
+-- ONE ELECTION, ONE KEY ORDER. converse.chat(), converse.converse() and converse.walk() all orient
+-- through converse.prompt_coherence() on the identical sort key, with the stated invariant
 -- that the three "cannot disagree about what a prompt is about". resolve_topic is
--- the FOURTH orientation path -- it is what recall() resolves through (recall.c
+-- the FOURTH orientation path -- it is what converse.recall() resolves through (recall.c
 -- spi_resolve_topic) -- and it disagreed with all three. The elector was already
--- built, compiled and correct; recall() just never called it.
+-- built, compiled and correct; converse.recall() just never called it.
 --
--- WHAT ACTUALLY DECIDED THE TOPIC, measured: not resolve_last_word() but
--- resolve_phrase(). That function is a longest-span-first, LEFTMOST-wins span
+-- WHAT ACTUALLY DECIDED THE TOPIC, measured: not converse.resolve_last_word() but
+-- converse.resolve_phrase(). That function is a longest-span-first, LEFTMOST-wins span
 -- resolver (content_resolve.c: `for L = n..1` outer, i ascending inner, first
 -- stored span wins) -- so on any prompt where no long span is stored it descends
 -- to single words and returns the leftmost one that happens to be a stored
--- entity. `resolve_phrase('What is a pawn in chess?')` = `What`;
--- `resolve_phrase('what is rain')` = `what`. resolve_last_word was almost never
+-- entity. `converse.resolve_phrase('What is a pawn in chess?')` = `What`;
+-- `converse.resolve_phrase('what is rain')` = `what`. resolve_last_word was almost never
 -- reached, and on that same question returns `QUESTION MARK`.
 --
 -- So the election cannot sit behind resolve_phrase -- that is where it was first
@@ -22,14 +22,14 @@
 --
 -- ORDER OF RESOLUTION, and why:
 --   1. the specificity election -- the same call and the same key order as
---      chat()/converse()/converse_walk(), so all four now agree by construction.
---   2. resolve_phrase() -- reached only when the election is silent. This is NOT
+--      converse.chat()/converse.converse()/converse.walk(), so all four now agree by construction.
+--   2. converse.resolve_phrase() -- reached only when the election is silent. This is NOT
 --      a demotion: measured, the election is silent on exactly the inputs that
 --      ARE an entity ('pawn', 'ice cream', 'New York', 'carbon dioxide' all
 --      return specificity 0 with no peers), because a phrase that resolves whole
 --      has no token pair to be coherent across. Identity still wins where
 --      identity exists; the election only speaks when there are competing tokens.
---   3. resolve_last_word() -- unchanged, and still the last resort.
+--   3. converse.resolve_last_word() -- unchanged, and still the last resort.
 --
 -- WHY specificity > 0 GATES THE ELECTION: specificity is coherence over the
 -- candidate's own total mass, so it is 0 for every token when no pair of tokens
@@ -49,25 +49,27 @@
 -- election has nothing to say. That is a seeding gap, not a defect in this
 -- body, and it resolves itself the moment a source rates an edge on rain.
 --
--- NOT PARALLEL SAFE: prompt_coherence() is `LANGUAGE C STABLE` with no parallel
+-- NOT PARALLEL SAFE: converse.prompt_coherence() is `LANGUAGE C STABLE` with no parallel
 -- marking, so this body cannot claim more than its callee. recall.c invokes this
 -- as a single scalar SPI select, where parallelism was never in play.
-CREATE OR REPLACE FUNCTION resolve_topic(p_phrase text, p_context bytea)
+DROP FUNCTION IF EXISTS laplace.resolve_topic(text, bytea);
+CREATE OR REPLACE FUNCTION converse.resolve_topic(p_phrase text, p_context bytea)
     RETURNS bytea
-    LANGUAGE sql STABLE
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE sql STABLE AS $$
     SELECT CASE
         WHEN p_phrase IS NULL OR btrim(p_phrase) = '' THEN p_context
         -- Literal content id (incl. a FEN rewritten to hex by the app resolve
         -- hook, GH #575). Same arm resolve_ref already has — without it a
         -- hex prompt falls through to resolve_phrase and hashes the digits.
-        WHEN btrim(p_phrase) ~ '^[0-9a-f]{32}$' THEN decode(btrim(p_phrase), 'hex')
+        -- Case-insensitive: pasted ids arrive uppercase too, and decode()
+        -- accepts either; a lowercase-only class silently hashed A-F pastes.
+        WHEN btrim(p_phrase) ~ '^[0-9a-fA-F]{32}$' THEN decode(btrim(p_phrase), 'hex')
         WHEN p_context IS NOT NULL
              AND btrim(lower(p_phrase), ' ?.!') ~ '^(it|its|that|this|they|their|them|those|these|one|he|she|him|her)$'
             THEN p_context
         ELSE COALESCE(
             (SELECT y.tok
-               FROM @extschema@.prompt_coherence(p_phrase) y
+               FROM converse.prompt_coherence(p_phrase) y
               WHERE y.tok IS NOT NULL
                 AND y.specificity > 0
               ORDER BY y.specificity DESC NULLS LAST,
@@ -77,7 +79,7 @@ CREATE OR REPLACE FUNCTION resolve_topic(p_phrase text, p_context bytea)
                        y.denote_mu   DESC NULLS LAST,
                        y.synset_id
               LIMIT 1),
-            @extschema@.resolve_phrase(p_phrase),
-            @extschema@.resolve_last_word(p_phrase))
+            converse.resolve_phrase(p_phrase),
+            converse.resolve_last_word(p_phrase))
     END
 $$;

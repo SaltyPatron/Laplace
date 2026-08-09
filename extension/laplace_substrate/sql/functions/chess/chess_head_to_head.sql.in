@@ -1,4 +1,5 @@
-CREATE OR REPLACE FUNCTION chess_head_to_head(p_player bytea, p_limit integer DEFAULT 25)
+DROP FUNCTION IF EXISTS laplace.chess_head_to_head(bytea, integer);
+CREATE OR REPLACE FUNCTION chess.head_to_head(p_player bytea, p_limit integer DEFAULT 25)
     RETURNS TABLE(opponent_id bytea, opponent text, games bigint,
                   rating double precision, rd double precision, eff_mu double precision)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
@@ -13,18 +14,18 @@ CREATE OR REPLACE FUNCTION chess_head_to_head(p_player bytea, p_limit integer DE
     -- PAIRING grain it is the opposite: every repeat meeting lands on the same cell. Grain is
     -- what decides whether an edge accumulates.
     --
-    -- Ranked by eff_mu rather than games so the rivalries a career is actually defined by come
+    -- Ranked by laplace.eff_mu rather than games so the rivalries a career is actually defined by come
     -- first: a long even series against a strong opponent outranks a short lopsided one.
     WITH rec AS MATERIALIZED (
         SELECT c.object_id AS opponent,
                c.witness_count AS games,
                c.rating,
                c.rd
-        FROM @extschema@.consensus c
+        FROM laplace.consensus c
         WHERE c.subject_id = p_player
-          AND c.type_id = @extschema@.relation_type_id('PLAYED_BY')
+          AND c.type_id = laplace.relation_type_id('PLAYED_BY')
           AND c.object_id IS NOT NULL
-        ORDER BY @extschema@.eff_mu(c.rating, c.rd) DESC, c.object_id
+        ORDER BY laplace.eff_mu(c.rating, c.rd) DESC, c.object_id
         LIMIT p_limit
     ),
     batch AS MATERIALIZED (
@@ -35,18 +36,18 @@ CREATE OR REPLACE FUNCTION chess_head_to_head(p_player bytea, p_limit integer DE
         SELECT p.id, t.txt
         FROM batch b,
              LATERAL unnest(b.ids) WITH ORDINALITY AS p(id, i),
-             LATERAL unnest(@extschema@.realize_batch(b.ids)) WITH ORDINALITY AS t(txt, j)
+             LATERAL unnest(realize.batch(b.ids)) WITH ORDINALITY AS t(txt, j)
         WHERE p.i = t.j
     )
     SELECT rec.opponent,
            COALESCE(NULLIF(n.txt, ''), encode(rec.opponent, 'hex')),
            rec.games,
-           -- DISPLAY units, never raw fp1e9: eff_mu_display is the one scaling law
-           -- (functions/mu/eff_mu_display.sql.in), rating/rd take the same /1e9 round.
+           -- DISPLAY units, never raw fp1e9: laplace.eff_mu_display is the one scaling law
+           -- (functions/mu/laplace.eff_mu_display.sql.in), rating/rd take the same /1e9 round.
            round((rec.rating / 1e9)::numeric, 3)::double precision,
            round((rec.rd / 1e9)::numeric, 3)::double precision,
-           @extschema@.eff_mu_display(rec.rating, rec.rd)::double precision
+           laplace.eff_mu_display(rec.rating, rec.rd)::double precision
     FROM rec
     LEFT JOIN named n ON n.id = rec.opponent
-    ORDER BY @extschema@.eff_mu(rec.rating, rec.rd) DESC, rec.opponent
+    ORDER BY laplace.eff_mu(rec.rating, rec.rd) DESC, rec.opponent
 $$;

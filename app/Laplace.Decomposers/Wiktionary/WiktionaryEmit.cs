@@ -146,7 +146,7 @@ internal static class WiktionaryEmit
             foreach (var s in senses)
             {
                 WalkSense(b, wordId, s, posCtx, isVerb, langCtx, roots);
-                RouteSynsetLinks(b, wordId, s, posCtx, langCtx);
+                RouteSynsetLinks(b, wordId, s, langCtx);
             }
 
         WalkSounds(b, wordId, e.Sounds, roots);
@@ -289,32 +289,30 @@ internal static class WiktionaryEmit
     }
 
     private static void RouteSynsetLinks(
-        SubstrateChangeBuilder b, Hash128 wordId, WiktionaryEntry.Sense s, Hash128? posCtx,
-        Hash128? langCtx)
+        SubstrateChangeBuilder b, Hash128 wordId, WiktionaryEntry.Sense s, Hash128? langCtx)
     {
         if (s.LinkTargets is { } links)
             foreach (var key in links)
             {
                 if (SourceEntityIdConventions.ResolveSynsetAnchor(key) is { } syn && syn != default)
-                    LinkSynset(b, wordId, syn, posCtx, langCtx);
+                    LinkSynset(b, wordId, syn, langCtx);
             }
 
         if (s.SynsetKey is { Length: > 0 } sk
             && SourceEntityIdConventions.ResolveSynsetAnchor(sk) is { } synId && synId != default)
-            LinkSynset(b, wordId, synId, posCtx, langCtx);
+            LinkSynset(b, wordId, synId, langCtx);
     }
 
     // Both edges on purpose. CORRESPONDS_TO is the cross-reference hub the CILI/
     // WordNet routing reads — but it is NOT in the HAS_SENSE family, so before this
-    // change Wiktionary's word->synset links (the GOOD sense evidence) were invisible
-    // to senses()/bubble_up while its word->word synonyms (translation-shaped) were
-    // the only Wiktionary edges electing senses. IS_SYNONYM_OF word->synset with the
-    // language as context is exactly OMW's post-#867 shape, and it puts the synset-
-    // typed candidate in the family so election prefers it over word-typed ones.
+    // change Wiktionary's word->synset converse.links(the GOOD sense evidence) were invisible
+    // to lexical.senses()/bubble_up while its word->word converse.synonyms(translation-shaped) were
+    // the only Wiktionary edges electing senses. Both edges carry language context
+    // (OMW post-#867 / Copilot #891); POS stays on the word via HAS_POS.
     private static void LinkSynset(
-        SubstrateChangeBuilder b, Hash128 wordId, Hash128 synId, Hash128? posCtx, Hash128? langCtx)
+        SubstrateChangeBuilder b, Hash128 wordId, Hash128 synId, Hash128? langCtx)
     {
-        Attest(b, wordId, "CORRESPONDS_TO", synId, posCtx);
+        Attest(b, wordId, "CORRESPONDS_TO", synId, langCtx);
         Attest(b, wordId, "IS_SYNONYM_OF", synId, langCtx);
     }
 

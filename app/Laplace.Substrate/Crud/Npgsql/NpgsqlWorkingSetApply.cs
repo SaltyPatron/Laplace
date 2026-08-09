@@ -1063,7 +1063,7 @@ public sealed partial class NpgsqlSubstrateWriter
                             await using var merge = mconn.CreateCommand();
                             merge.Transaction = mtx;
                             merge.CommandTimeout = 0;
-                            merge.CommandText = "SELECT laplace.attestation_merge($1, $2, $3, $4, $5, $6)";
+                            merge.CommandText = "SELECT consensus.attestation_merge($1, $2, $3, $4, $5, $6)";
                             merge.Parameters.Add(new NpgsqlParameter
                             { Value = ids, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
                             merge.Parameters.Add(new NpgsqlParameter

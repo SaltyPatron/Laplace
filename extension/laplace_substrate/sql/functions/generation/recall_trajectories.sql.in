@@ -1,17 +1,22 @@
-CREATE OR REPLACE FUNCTION recall_trajectories(p_word text, p_limit int DEFAULT 6)
+DROP FUNCTION IF EXISTS laplace.recall_trajectories(text, int);
+CREATE OR REPLACE FUNCTION generation.recall_trajectories(p_word text, p_limit int DEFAULT 6)
     RETURNS TABLE(answer text)
-    LANGUAGE sql STABLE
-    SET search_path = @extschema@, public AS $$
-  WITH wid AS (SELECT word_id(p_word) AS id),
+    LANGUAGE sql STABLE AS $$
+  WITH wid AS (SELECT laplace.word_id(p_word) AS id),
   ids AS (
-    SELECT w.id AS entity_id
+    SELECT w.id AS entity_id, abs(w.n_constituents - 7) AS rank_distance
     FROM wid
-    JOIN v_word_points w
+    JOIN laplace.v_word_points w
       ON w.trajectory IS NOT NULL
-     AND w.type_id = canonical_id('Sentence')
+     AND w.type_id = laplace.canonical_id('Sentence')
      AND public.laplace_trajectory_constituent_ids(w.trajectory) @> ARRAY[wid.id]
-    ORDER BY abs(w.n_constituents - 7)
+    ORDER BY rank_distance, w.id
     LIMIT p_limit
+  ), batch AS MATERIALIZED (
+    SELECT array_agg(entity_id ORDER BY rank_distance, entity_id) AS a FROM ids
   )
-  SELECT left(replace(render_text(entity_id, 300), chr(10), ' '), 180) FROM ids
+  SELECT left(replace(t.s, chr(10), ' '), 180)
+  FROM batch,
+       LATERAL unnest(laplace.render_text_batch(batch.a, 300)) WITH ORDINALITY AS t(s, ord)
+  ORDER BY t.ord
 $$;

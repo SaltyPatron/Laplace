@@ -3,7 +3,7 @@
 --
 -- TIER SCOPE (2026-08-05, GH #868). The step now stays at the subject's own tier.
 -- A forward step is a move among peers — word to word, sentence to sentence.
--- Previously the KNN ran over every tier in v_word_points with no tier predicate,
+-- Previously the KNN ran over every tier in laplace.v_word_points with no tier predicate,
 -- so a step from a word could land on a codepoint, a sentence or a document.
 --
 -- That was not theoretical. This function could never return a row at all: its
@@ -27,19 +27,24 @@
 -- No SET search_path (GH #860). This body is scalar and carries a FROM clause, so
 -- the scalar inliner rejects it either way; the clause is unjustified regardless
 -- and its presence would be one more site for the sweep.
-CREATE OR REPLACE FUNCTION laplace_forward_step(
+DROP FUNCTION IF EXISTS laplace.laplace_forward_step(bytea, bytea);
+CREATE OR REPLACE FUNCTION generation.laplace_forward_step(
     p_entity   bytea,
     p_band_mask bytea)
 RETURNS bytea
 LANGUAGE sql STABLE PARALLEL RESTRICTED AS $$
     SELECT n.entity_id
-    FROM @extschema@.laplace_attention_centroid(p_entity, p_band_mask) c
-    JOIN LATERAL @extschema@.laplace_nearest_entity(
+    FROM generation.laplace_attention_centroid(p_entity, p_band_mask) c
+    JOIN LATERAL generation.laplace_nearest_entity(
              c.cx, c.cy, c.cz, c.cm, 1, p_band_mask,
-             ARRAY[@extschema@.entity_tier_of(p_entity)::smallint]) n ON TRUE
+             ARRAY[generation.entity_tier_of(p_entity)::smallint]) n ON TRUE
     WHERE c.total_weight > 0
       AND c.cx IS NOT NULL          -- concentration 0 => no direction => abstain
       AND n.entity_id IS NOT NULL
       AND n.entity_id <> p_entity
-    LIMIT 1
+    -- No LIMIT: the k argument to laplace_nearest_entity IS the cap (k = 1), and
+    -- the KNN ranks before it cuts. A trailing LIMIT 1 read as a safeguard over an
+    -- unordered pick, which is the opposite of what this call does -- and it could
+    -- not have guarded the one real edge case anyway, since the self-match filter
+    -- runs after the k = 1 pick and correctly yields no row.
 $$;

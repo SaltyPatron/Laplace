@@ -1,4 +1,4 @@
--- entity_container_degree: how many higher-tier entities contain each id.
+-- entity_container_degree: how many higher-tier laplace.entities contain each id.
 --
 -- This is inverse-document-frequency derived from the substrate's own structure
 -- rather than from a word list. A token that appears inside almost every
@@ -21,11 +21,12 @@
 -- Saturating by design: p_cap bounds the GIN probing, and everything at the cap
 -- is "ubiquitous" — the difference between 8192 and 80000 containers does not
 -- change the ranking, only the cost. Callers that need the exact number should
--- call containers_of() directly and pay for it.
+-- call structural.containers_of() directly and pay for it.
 --
 -- Set-based over the whole id array in one call: per-row resolution of this is
 -- the read-path defect the architecture rules name explicitly.
-CREATE OR REPLACE FUNCTION entity_container_degree(
+DROP FUNCTION IF EXISTS laplace.entity_container_degree(bytea[], integer);
+CREATE OR REPLACE FUNCTION structural.entity_container_degree(
     p_ids bytea[],
     p_cap integer DEFAULT 8192)
     RETURNS TABLE(entity_id bytea, degree bigint, icf double precision)
@@ -42,6 +43,6 @@ CREATE OR REPLACE FUNCTION entity_container_degree(
             * value that is only ever compared. */
            (ln(2.0) / ln(2.0 + count(c.entity_id)::double precision))::double precision
     FROM unnest(p_ids) AS t(id)
-    LEFT JOIN LATERAL @extschema@.containers_of(t.id, 1, p_cap) c ON true
+    LEFT JOIN LATERAL structural.containers_of(t.id, 1, p_cap) c ON true
     GROUP BY t.id
 $$;

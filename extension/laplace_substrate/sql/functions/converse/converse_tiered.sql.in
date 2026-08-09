@@ -1,4 +1,4 @@
--- converse_tiered(topic, lang, steps): compose a reply by walking the SENTENCE
+-- converse.tiered(topic, lang, steps): compose a reply by walking the SENTENCE
 -- tier, steered by the Glicko tuple. The replacement for word-level n-grams.
 --
 -- WHAT WAS WRONG WITH THE OLD PATH. converse_walk gathers <=160 sentences, then
@@ -6,7 +6,7 @@
 -- flattened to word tokens -- concatenates them into `stream bytea[]` plus a
 -- scalar `w bigint[]` (topic weight 50/40/0), and hands both to
 -- steered_walk_raw for trigram->bigram backoff. Once you are inside those two
--- flat arrays there is no relation type, no eff_mu/rd/witness_count, no highway
+-- flat arrays there is no relation type, no laplace.eff_mu/rd/witness_count, no highway
 -- band, no tier, no geometry and no provenance. That is a Markov chain using
 -- the substrate as a word list; the tier ladder and the rating math -- the whole
 -- invention -- are discarded before the walk begins.
@@ -15,16 +15,15 @@
 -- above it. So walk THERE:
 --
 --   UNITS    tier-3/4 sentences the topic is actually attested in -- its gloss
---            (definitional band), its HAS_EXAMPLE usages, and the corpus
---            sentences that contain it (containers_of). Each unit carries the
+--            (definitional band), its HAS_EXAMPLE usages. Each unit carries the
 --            full signed weight the walker ranks by everywhere else:
---            relation_rank x (eff_mu - neutral) x witness saturation. A refuted
+--            laplace.relation_rank x laplace.eff_mu x witness saturation. A laplace.refuted
 --            edge goes negative and drops out on its own -- no floor.
---   CONCEPTS each unit's tier-2 constituents lifted to their synsets. The tier
+--   CONCEPTS each unit's tier-2 laplace.constituents lifted to their synsets. The tier
 --            ladder is USED here (3 -> 2 -> concept), not collapsed to 2.
 --   STEER    the next unit is the one whose concepts carry the most rated
 --            consensus mass to the concepts already said. The graph does the
---            sequencing, at sentence grain, through the same eff_mu the rest of
+--            sequencing, at sentence grain, through the same laplace.eff_mu the rest of
 --            the engine reads. This is "sequence proposes, meaning steers" with
 --            the steering actually live per step rather than computed once.
 --   REALIZE  each chosen unit renders VERBATIM. It is attested content and the
@@ -43,30 +42,34 @@
 --    change a checker piece for a more valuable piece by moving it to the row
 --    closest to your opponent. (chess) the least powerful piece."
 -- Four separately-witnessed clauses, stepped by concept adjacency, on topic.
--- Wired into chat() on the strength of that run. Two defects it exposed are
+-- Wired into converse.chat() on the strength of that run. Two defects it exposed are
 -- fixed below: subsumed-unit repetition and missing clause termination.
 --
 -- LANGUAGE: gated below by a constituent tally, since the sentence root carries
 -- no HAS_LANGUAGE but the word tier carries 6.7M. Corrects an earlier note here
 -- that claimed no read-side work could fix language mixing -- it can, one tier
 -- down. Residual leak (shared scientific Latin) documented at the gate.
-CREATE OR REPLACE FUNCTION converse_tiered(p_topic bytea,
+--
+-- READ-ONLY (#878): no CREATE TEMP / CREATE INDEX. Working set lives in plpgsql
+-- arrays so the MCP op lane (SQLSTATE 25006) and any read-only connection can
+-- call this. Algorithm identical; only the scratch storage moved.
+DROP FUNCTION IF EXISTS laplace.converse_tiered(bytea, bytea, int, int);
+CREATE OR REPLACE FUNCTION converse.tiered(p_topic bytea,
                                            p_lang  bytea DEFAULT NULL,
                                            p_steps int DEFAULT 4,
                                            p_pool  int DEFAULT 48)
     RETURNS text
-    LANGUAGE plpgsql VOLATILE
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE plpgsql STABLE AS $$
 -- NO NEUTRAL SUBTRACTION. consensus_adjacency's export weight uses
--- (eff_mu - neutral) so refuted edges sign-flip, and copying that here was a bug
--- caught before it shipped: eff_mu arrives in the fold's INTERNAL units (~1e12,
--- so Glicko 1500 is 1.5e12), and eff_mu = rating - 2*rd puts every honestly
+-- (laplace.eff_mu - neutral) so laplace.refuted edges sign-flip, and copying that here was a bug
+-- caught before it shipped: laplace.eff_mu arrives in the fold's INTERNAL units (~1e12,
+-- so Glicko 1500 is 1.5e12), and laplace.eff_mu = rating - 2*rd puts every honestly
 -- weakly-witnessed edge BELOW neutral. Measured on pawn: the whole gloss family
 -- sits at 1.17e12-1.37e12, i.e. Glicko 1170-1370. Subtracting neutral and
 -- keeping w > 0 would have dropped every unit and fallen back to template prose
 -- forever, silently. Rank by the walker's own formula instead --
--- relation_rank x eff_mu x witness-saturation -- which keeps everything the fold
--- kept and lets a genuinely refuted edge go negative on its own rating. eff_mu
+-- laplace.relation_rank x laplace.eff_mu x witness-saturation -- which keeps everything the fold
+-- kept and lets a genuinely laplace.refuted edge go negative on its own rating. laplace.eff_mu
 -- already carries the rd penalty (rating - 2*rd), so no separate exp(-k*rd).
 DECLARE
     said     bytea[] := ARRAY[]::bytea[];   -- units already emitted, in order
@@ -75,174 +78,170 @@ DECLARE
     parts    text[]  := ARRAY[]::text[];
     s        text;
     i        int;
+    v_syn    bytea;
+    u_id     bytea[];
+    u_w      float8[];
+    c_unit   bytea[];
+    c_concept bytea[];
+    said_realized text[];
+    said_rendered text[];
 BEGIN
     IF p_topic IS NULL THEN RETURN NULL; END IF;
 
-    -- UNITS + their weight. The topic's own attested sentences, both the ones it
-    -- points at (gloss, examples) and the ones that contain its surface.
-    CREATE TEMP TABLE IF NOT EXISTS _ct_unit (
-        id bytea PRIMARY KEY, w double precision) ON COMMIT DROP;
-    DELETE FROM _ct_unit;
-
-    INSERT INTO _ct_unit (id, w)
-    SELECT u.id, max(u.w)
-    FROM (
-        -- Sentences the topic ASSERTS: gloss (band 1) and usages (HAS_EXAMPLE).
-        -- Weight is the Glicko-complete signed weight, not a hand-set constant.
-        -- Band governance does the filtering, not a regex: HAS_SYNSET_KEY
-        -- objects are tier-3 content too ("03901750-n") and outrank the gloss on
-        -- raw eff_mu, but relation_rank demotes band 7 (0.36) under band 1
-        -- (0.97) and the definitions win. Measured on pawn: gloss 8.5e11 vs
-        -- synset key 3.7e11.
-        SELECT c.object_id AS id,
-               relation_rank_resolved(c.type_id)
-                 * eff_mu(c.rating, c.rd)::float8
-                 * (c.witness_count::float8 / (1.0 + c.witness_count)) AS w
-        FROM consensus c
-        JOIN entities e ON e.id = c.object_id AND e.tier >= 3
-        WHERE c.subject_id = p_topic
-        -- REMOVED: a containers_of() arm over every sense-subject of the topic
-        -- ("sentences the topic appears in"). Measured 2026-07-27, topic = dog:
-        -- that arm alone ran >100s and never returned, so converse_tiered HUNG
-        -- for every common topic -- dog, tree, music, river all timed out, and
-        -- only `pawn` ever answered because it has few senses and few usages.
-        -- Wiring that into chat() would have hung the conversation on ordinary
-        -- words. The asserted arm above costs 0.03s and is not short of material
-        -- (45 tier-3 sentences for dog), so usage sentences are not worth a
-        -- corpus-wide container scan on the hot path; if they come back it must
-        -- be through a bounded, indexed read, not this.
-    ) u
-    WHERE u.w > 0            -- refuted/neutral edges fall out by sign, not a floor
-    GROUP BY u.id;
-
-    -- CONCEPTS per unit: tier-2 constituents lifted to synsets. This is the tier
-    -- ladder in use -- sentence -> word -> concept -- rather than flattened.
-    CREATE TEMP TABLE IF NOT EXISTS _ct_concept (
-        unit bytea, concept bytea) ON COMMIT DROP;
-    DELETE FROM _ct_concept;
-
-    -- SET-BASED, NOT PER WORD. top_synset() is bubble_up under the hood, so
-    -- lifting each constituent with it is one function call per word of every
-    -- unit -- measured 73s for 48 units on `dog`, the second reason this
-    -- function hung. The same lift as ONE indexed join over the sense family,
-    -- taking each word's best-rated sense, is 2.67s and yields the identical
-    -- concept set (66 concepts, both ways). Never resolve per row what the
-    -- planner can resolve as a set.
-    INSERT INTO _ct_concept (unit, concept)
-    SELECT DISTINCT ON (q.id, q.entity_id) q.id, sc.object_id
-    FROM (
-        SELECT p.id, tp.entity_id
-        FROM (SELECT id, w FROM _ct_unit ORDER BY w DESC LIMIT p_pool) p
-        CROSS JOIN LATERAL trajectory_unpacked_points(p.id) tp
-        WHERE tp.ctier = 2
-    ) q
-    JOIN consensus sc ON sc.subject_id = q.entity_id
-                     AND relation_in_family(sc.type_id, 'HAS_SENSE')
-    ORDER BY q.id, q.entity_id, eff_mu(sc.rating, sc.rd) DESC, sc.object_id;
-
-    CREATE INDEX IF NOT EXISTS _ct_concept_unit ON _ct_concept (unit);
-
-    -- ANSWER IN THE LANGUAGE THAT WAS ASKED. The sentence ROOT carries no
-    -- HAS_LANGUAGE, but the WORD tier carries 6.7M of them, so a unit gets a
-    -- language by tallying its constituents -- the same weighted tally chat()
-    -- runs on the prompt, one tier down. Kept in HASH SPACE: comparing rendered
-    -- language names cost 43s, comparing ids costs 1.4s, and nothing here needs
-    -- to know what the language is CALLED.
-    --
-    -- A unit with no language evidence at all is KEPT, not dropped -- absence of
-    -- a witness is not evidence of a foreign language, and dropping it measured
-    -- no better (identical output, strict vs lenient).
-    --
-    -- Measured on `dog` asked in English: removes the Italian, Catalan,
-    -- Bulgarian and Japanese glosses. RESIDUAL LEAK, understood and not fixed
-    -- here: "σκύλος γένους Canis familiaris" survives, because its Greek words
-    -- carry no HAS_LANGUAGE while "Canis"/"familiaris" are attested English, so
-    -- the vote is carried by shared scientific Latin. That is a coverage
-    -- artifact of the witness set, not a flaw in the tally. The signal that
-    -- would catch it is HAS_SCRIPT (dense, from Unicode) -- Greek script against
-    -- a Latin-script prompt -- which is resident and unused here.
-    IF p_lang IS NOT NULL THEN
-        DELETE FROM _ct_unit u
-        WHERE EXISTS (
-            SELECT 1 FROM (
-                SELECT DISTINCT ON (t.unit) t.unit, t.lg FROM (
-                    SELECT k.unit, lc.object_id AS lg, count(*) AS votes
-                    FROM _ct_concept k
-                    JOIN consensus lc ON lc.subject_id = k.concept
-                                     AND lc.type_id = relation_type_id('HAS_LANGUAGE')
-                    GROUP BY k.unit, lc.object_id
-                ) t ORDER BY t.unit, t.votes DESC, t.lg
-            ) top WHERE top.unit = u.id AND top.lg <> p_lang);
-        DELETE FROM _ct_concept c WHERE NOT EXISTS (SELECT 1 FROM _ct_unit u WHERE u.id = c.unit);
+    -- Topic may arrive as a word id (chat/MCP). Gloss/example edges hang on the
+    -- synset; walking the word as subject empties the unit pool and degenerates
+    -- to topic-echo (#878). Elect the best sense when one exists.
+    SELECT s.synset_id INTO v_syn
+    FROM lexical.senses(p_topic) s
+    ORDER BY s.witnesses DESC, s.eff_mu DESC NULLS LAST, s.synset_id
+    LIMIT 1;
+    IF v_syn IS NOT NULL THEN
+        p_topic := v_syn;
     END IF;
 
-    -- OPEN on the best-rated unit: the topic's own strongest assertion about
-    -- itself, which is the gloss whenever one is attested.
-    SELECT id INTO cur FROM _ct_unit ORDER BY w DESC, id LIMIT 1;
-    IF cur IS NULL THEN RETURN NULL; END IF;
+    -- UNITS + their weight. The topic's own attested sentences (gloss, examples).
+    -- REMOVED: a structural.containers_of() arm over every sense-subject of the topic
+    -- ("sentences the topic appears in"). Measured 2026-07-27, topic = dog:
+    -- that arm alone ran >100s and never returned. The asserted arm costs 0.03s
+    -- and is not short of material (45 tier-3 sentences for dog).
+    SELECT coalesce(array_agg(x.id ORDER BY x.w DESC, x.id), ARRAY[]::bytea[]),
+           coalesce(array_agg(x.w  ORDER BY x.w DESC, x.id), ARRAY[]::float8[])
+    INTO u_id, u_w
+    FROM (
+        SELECT u.id, max(u.w) AS w
+        FROM (
+            SELECT c.object_id AS id,
+                   laplace.relation_rank_resolved(c.type_id)
+                     * laplace.eff_mu(c.rating, c.rd)::float8
+                     * (c.witness_count::float8 / (1.0 + c.witness_count)) AS w
+            FROM laplace.consensus c
+            JOIN laplace.entities e ON e.id = c.object_id AND e.tier >= 3
+            WHERE c.subject_id = p_topic
+        ) u
+        WHERE u.w > 0
+        GROUP BY u.id
+    ) x;
+
+    IF coalesce(array_length(u_id, 1), 0) = 0 THEN RETURN NULL; END IF;
+
+    -- Cap the pool before the concept lift (same ORDER BY w DESC LIMIT p_pool).
+    IF array_length(u_id, 1) > p_pool THEN
+        u_id := u_id[1:p_pool];
+        u_w  := u_w[1:p_pool];
+    END IF;
+
+    -- CONCEPTS per unit: tier-2 laplace.constituents lifted to synsets. SET-BASED,
+    -- NOT PER WORD (taxonomy.top_synset per row hung at 73s for 48 dog units).
+    -- Fence HAS_SENSE family once (incl. dynamic children via relation_in_family).
+    SELECT coalesce(array_agg(q.unit ORDER BY q.unit, q.concept), ARRAY[]::bytea[]),
+           coalesce(array_agg(q.concept ORDER BY q.unit, q.concept), ARRAY[]::bytea[])
+    INTO c_unit, c_concept
+    FROM (
+        SELECT DISTINCT ON (p.id, tp.entity_id) p.id AS unit, sc.object_id AS concept
+        FROM unnest(u_id) AS p(id)
+        CROSS JOIN LATERAL generation.trajectory_unpacked_points(p.id) tp
+        JOIN laplace.consensus sc ON sc.subject_id = tp.entity_id
+        JOIN (
+            SELECT e.id
+            FROM laplace.entities e
+            WHERE e.type_id = laplace.entity_type_id('RelationType')
+              AND laplace.relation_in_family(e.id, 'HAS_SENSE')
+        ) fam ON fam.id = sc.type_id
+        WHERE tp.ctier = 2
+        ORDER BY p.id, tp.entity_id, laplace.eff_mu(sc.rating, sc.rd) DESC, sc.object_id
+    ) q;
+
+    -- ANSWER IN THE LANGUAGE THAT WAS ASKED. Kept in HASH SPACE.
+    -- A unit with no language evidence at all is KEPT, not dropped.
+    -- Units with a winning language vote in another language drop; units with
+    -- no language evidence stay (absence is not evidence of a foreign language).
+    IF p_lang IS NOT NULL AND coalesce(array_length(c_unit, 1), 0) > 0 THEN
+        SELECT coalesce(array_agg(u ORDER BY ord), ARRAY[]::bytea[]),
+               coalesce(array_agg(w ORDER BY ord), ARRAY[]::float8[])
+        INTO u_id, u_w
+        FROM (
+            SELECT u, w, ord
+            FROM unnest(u_id, u_w) WITH ORDINALITY AS x(u, w, ord)
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM (
+                    SELECT DISTINCT ON (t.unit) t.unit, t.lg
+                    FROM (
+                        SELECT k.unit, lc.object_id AS lg, count(*) AS votes
+                        FROM unnest(c_unit, c_concept) AS k(unit, concept)
+                        JOIN laplace.consensus lc ON lc.subject_id = k.concept
+                                         AND lc.type_id = laplace.relation_type_id('HAS_LANGUAGE')
+                        GROUP BY k.unit, lc.object_id
+                    ) t
+                    ORDER BY t.unit, t.votes DESC, t.lg
+                ) foreign_top
+                WHERE foreign_top.unit = x.u AND foreign_top.lg <> p_lang
+            )
+        ) kept;
+
+        SELECT coalesce(array_agg(cu ORDER BY cu, cc), ARRAY[]::bytea[]),
+               coalesce(array_agg(cc ORDER BY cu, cc), ARRAY[]::bytea[])
+        INTO c_unit, c_concept
+        FROM unnest(c_unit, c_concept) AS k(cu, cc)
+        WHERE cu = ANY (u_id);
+    END IF;
+
+    IF coalesce(array_length(u_id, 1), 0) = 0 THEN RETURN NULL; END IF;
+
+    -- OPEN on the best-rated unit (arrays already ordered by w DESC, id).
+    cur := u_id[1];
 
     FOR i IN 1..GREATEST(p_steps, 1) LOOP
         EXIT WHEN cur IS NULL;
         said := said || cur;
-        seen := seen || ARRAY(SELECT concept FROM _ct_concept WHERE unit = cur);
+        seen := seen || ARRAY(
+            SELECT cc FROM unnest(c_unit, c_concept) AS k(cu, cc) WHERE cu = cur);
 
-        -- STEP: the unit whose concepts carry the most rated consensus mass to
-        -- what has already been said. Ties break on unit weight, then id.
-        --
-        -- SUBSUMED UNITS ARE SKIPPED. A unit whose concepts are ALREADY all in
-        -- `seen` contributes no new meaning -- it is the same assertion at a
-        -- different granularity, which this corpus is full of: WordNet stores
-        -- "(chess) the least powerful piece" AND "the least powerful piece" AND
-        -- the full semicolon-joined gloss as three separate tier-3 entities, so
-        -- an unguarded walk emitted "...the least powerful piece the least
-        -- powerful piece" (observed on the first live run). This is not a
-        -- floor or a top-k: nothing is ranked out, and a unit carrying even one
-        -- unsaid concept stays eligible. It is the walk declining to re-say what
-        -- it just said, which is what the anti-repeat guard does at the n-gram
-        -- pivot in steered_walk.c -- here at the sentence pivot instead.
-        -- STEER BY SHARED CONCEPTS, not by an edge between concepts. Requiring a
-        -- consensus edge between the next unit's concepts and the said ones is
-        -- too strict to be a general steering signal: measured 2026-07-27 on
-        -- `dog`, the first unit's concepts had edges to the concepts of ZERO
-        -- other units, so the walk emitted a single clause and stopped. `pawn`
-        -- answered only because chess is a densely inter-linked domain. Two
-        -- sentences that share concepts are continuations of the same thought --
-        -- that is the tier ladder speaking (shared tier-2 constituents lifted to
-        -- the hub), it is always available, and it costs a hash comparison.
-        -- Edge mass stays as the tiebreak, so a genuinely linked continuation
-        -- still outranks a merely overlapping one. Measured: dog goes from 1
-        -- clause to 4, in 5.3s.
+        -- STEER BY SHARED CONCEPTS (intersection), edge mass as tiebreak.
+        -- Two direction-pinned reads UNION ALL — never an OR join (#871 / #878).
         SELECT n.unit INTO cur
         FROM (
             SELECT k.unit,
                    count(*) AS shared,
-                   COALESCE(sum(relation_rank_resolved(c.type_id)
-                                * eff_mu(c.rating, c.rd)::float8), 0) AS pull
-            FROM _ct_concept k
-            LEFT JOIN consensus c
-              ON ((c.subject_id = k.concept AND c.object_id = ANY(seen))
-               OR (c.object_id = k.concept AND c.subject_id = ANY(seen)))
+                   COALESCE((
+                       SELECT sum(laplace.relation_rank_resolved(c.type_id)
+                                  * laplace.eff_mu(c.rating, c.rd)::float8)
+                       FROM laplace.consensus c
+                       WHERE c.subject_id = ANY (ARRAY(
+                                 SELECT cc FROM unnest(c_unit, c_concept) AS x(cu, cc)
+                                 WHERE cu = k.unit))
+                         AND c.object_id = ANY(seen)
+                   ), 0)
+                   + COALESCE((
+                       SELECT sum(laplace.relation_rank_resolved(c.type_id)
+                                  * laplace.eff_mu(c.rating, c.rd)::float8)
+                       FROM laplace.consensus c
+                       WHERE c.object_id = ANY (ARRAY(
+                                 SELECT cc FROM unnest(c_unit, c_concept) AS x(cu, cc)
+                                 WHERE cu = k.unit))
+                         AND c.subject_id = ANY(seen)
+                   ), 0) AS pull
+            FROM unnest(c_unit, c_concept) AS k(unit, concept)
             WHERE NOT (k.unit = ANY(said))
               AND k.concept = ANY(seen)
-              AND EXISTS (SELECT 1 FROM _ct_concept nk
-                           WHERE nk.unit = k.unit AND NOT (nk.concept = ANY(seen)))
+              AND EXISTS (
+                  SELECT 1 FROM unnest(c_unit, c_concept) AS nk(unit, concept)
+                   WHERE nk.unit = k.unit AND NOT (nk.concept = ANY(seen)))
             GROUP BY k.unit
         ) n
-        JOIN _ct_unit u ON u.id = n.unit
-        ORDER BY n.shared DESC, n.pull DESC, u.w DESC, n.unit
+        JOIN LATERAL (
+            SELECT u_w[array_position(u_id, n.unit)] AS w
+        ) u ON true
+        ORDER BY n.shared DESC, n.pull DESC, u.w DESC NULLS LAST, n.unit
         LIMIT 1;
     END LOOP;
 
-    -- REALIZE verbatim, in walk order. render_text runs once per chosen unit --
-    -- a handful of calls, not one per token (label-per-row is ~40x realize_batch).
-    -- Units are clauses, not sentences -- a gloss is witnessed without terminal
-    -- punctuation -- so run-on output ("...8th rank change a pawn for...",
-    -- observed live) is a RENDER defect, not a walk defect. Terminate each unit
-    -- that does not already end in punctuation. Nothing is added to the content:
-    -- the witnessed bytes are unchanged and still reconstruct, this only marks
-    -- the seam between two separately-witnessed clauses.
+    -- REALIZE verbatim, in walk order. Terminate each unit that does not already
+    -- end in punctuation (clause seam, not content rewrite).
+    said_realized := realize.batch(said, p_lang);
+    said_rendered := laplace.render_text_batch(said, 512);
     FOR i IN 1..COALESCE(array_length(said, 1), 0) LOOP
-        s := btrim(COALESCE(realize(said[i], p_lang), render_text(said[i], 512)));
+        s := btrim(COALESCE(said_realized[i], said_rendered[i]));
         IF s IS NOT NULL AND s <> '' THEN
             IF s !~ '[.!?;:,]$' THEN s := s || '.'; END IF;
             parts := parts || s;

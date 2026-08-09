@@ -11,7 +11,7 @@ namespace Laplace.Chess.Service.Tests;
 /// <summary>
 /// Phase A gate (Chess catalog dual): Cat/Act applied to chess paths.
 /// Hilbert/centroid = locality prefilter only; Frechet on the realized position-coord
-/// polyline (what <c>entity_curve(line)</c> builds once a trajectory is deposited).
+/// polyline (what <c>structural.entity_curve(line)</c> builds once a trajectory is deposited).
 /// Never Frechet on packed <c>physicalities.trajectory</c>.
 /// </summary>
 // Tier=db, not "integration". EVERY test here needs a live PostgreSQL: the Frechet and
@@ -96,7 +96,7 @@ public sealed class ChessLineGeometryGateTests
                 using var c2 = new NpgsqlCommand(
                     """
                     SELECT public.laplace_frechet_4d(
-                        laplace.entity_curve(@a), laplace.entity_curve(@b))
+                        structural.entity_curve(@a), structural.entity_curve(@b))
                     """, conn);
                 c2.CommandTimeout = 30;
                 c2.Parameters.AddWithValue("a", direct.LineId.ToBytes());

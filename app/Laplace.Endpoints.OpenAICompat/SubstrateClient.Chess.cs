@@ -20,7 +20,7 @@ namespace Laplace.Endpoints.OpenAICompat;
 /// is an ORDER BY over a single relation partition. No TTL, no prewarm, no stale
 /// window, nothing to repopulate.
 ///
-/// Search is a content-address lookup: chess_player_id() folds a typed name the way
+/// Search is a content-address lookup: chess.player_id() folds a typed name the way
 /// the decomposer did and hashes it, so a fully-spelled name resolves in one round
 /// trip at any depth in the corpus.
 /// </summary>
@@ -91,7 +91,7 @@ internal sealed partial class SubstrateClient
     }
 
     /// <summary>
-    /// Name to player, in one round trip. chess_player_id() reproduces the decomposer's own
+    /// Name to player, in one round trip. chess.player_id() reproduces the decomposer's own
     /// name folding ("Tal, Mikhail" -> "mikhail tal") and hashes the canonical key, so the
     /// typed name lands on the identical id the ingest wrote — or on nothing. The rating comes
     /// from his folded cell; no cell means the substrate has never witnessed him at a board.
@@ -160,7 +160,7 @@ internal sealed partial class SubstrateClient
     ///
     /// Every per-ply fact is already an attestation keyed by context_id = the game — the MOVE
     /// edge, HAS_SAN, HAS_CLOCK, HAS_EVAL_TOKEN, HAS_THINK_CLASS, MOVE_QUALITY — and the
-    /// ordered line of boards is the game's own trajectory. chess_game_plies() is one
+    /// ordered line of boards is the game's own trajectory. chess.game_plies() is one
     /// trajectory decode plus one indexed pass per relation. Nothing here parses chess.
     ///
     /// This used to replay the verbatim movetext through the engine on every request:

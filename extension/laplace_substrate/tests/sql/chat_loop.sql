@@ -93,26 +93,26 @@ END $$;
 -- 1. The walk-driven fact engine: every fact family present, taxonomy multi-hop,
 --    the refuted IS_A branch absent, provenance columns populated.
 SELECT fact_kind, sentence, witnesses
-FROM converse_facts(laplace_hash128_blake3('test/chat_loop/synset1'));
+FROM converse.facts(laplace_hash128_blake3('test/chat_loop/synset1'));
 
 SELECT fact_kind, cardinality(path) AS path_len, cardinality(types) AS type_len
-FROM converse_facts(laplace_hash128_blake3('test/chat_loop/synset1'))
+FROM converse.facts(laplace_hash128_blake3('test/chat_loop/synset1'))
 WHERE fact_kind IN ('definition', 'taxonomy');
 
 SELECT bool_and(sentence !~* 'synset_bad') AS refuted_branch_excluded
-FROM converse_facts(laplace_hash128_blake3('test/chat_loop/synset1'));
+FROM converse.facts(laplace_hash128_blake3('test/chat_loop/synset1'));
 
 -- 2. The prose wrapper weaves the fact rows (web drill-down row excluded).
-SELECT converse_about(laplace_hash128_blake3('test/chat_loop/synset1')) AS about;
+SELECT converse.about(laplace_hash128_blake3('test/chat_loop/synset1')) AS about;
 
 -- 3. A full chat turn lands on the walk-driven answer.
-SELECT chat('what is a dog?') AS chat_reply;
+SELECT converse.chat('what is a dog?') AS chat_reply;
 
--- 4. chat() is read-side: a session turn records session state but folds NOTHING
+-- 4. converse.chat() is read-side: a session turn records session state but folds NOTHING
 --    into consensus (the OODA close lives at the frontends, through the writer
 --    spine, with evidence). 'dog p' are adjacent existing tokens -- the old
 --    in-SQL close would have folded a PRECEDES cell for them.
-SELECT chat('dog p', convert_to('loop1', 'UTF8')) IS NOT NULL AS session_chat_ran;
+SELECT converse.chat('dog p', convert_to('loop1', 'UTF8')) IS NOT NULL AS session_chat_ran;
 SELECT count(*) AS precedes_cells_written
 FROM consensus c
 WHERE c.type_id = relation_type_id('PRECEDES')
@@ -122,7 +122,7 @@ FROM session_topics WHERE session_id = convert_to('loop1', 'UTF8');
 
 -- 5. THE LOOP: refute the leading definition through the same consensus_upsert
 --    lane the feedback frontends (/v1/feedback, laplace attest) use...
-SELECT consensus_upsert(
+SELECT consensus.upsert(
     ARRAY[laplace_hash128_blake3('test/chat_loop/synset1')],
     ARRAY[relation_type_id('HAS_DEFINITION')],
     ARRAY[word_id('G')],
@@ -141,9 +141,9 @@ WHERE c1.id = consensus_id(laplace_hash128_blake3('test/chat_loop/synset1'),
 
 -- ...and the ANSWER CHANGES: the next walk reads the updated consensus.
 SELECT sentence AS definition_after_refute
-FROM converse_facts(laplace_hash128_blake3('test/chat_loop/synset1'))
+FROM converse.facts(laplace_hash128_blake3('test/chat_loop/synset1'))
 WHERE fact_kind = 'definition';
 
-SELECT chat('what is a dog?') AS chat_reply_after_refute;
+SELECT converse.chat('what is a dog?') AS chat_reply_after_refute;
 
 ROLLBACK;

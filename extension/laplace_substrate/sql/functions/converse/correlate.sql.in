@@ -1,23 +1,34 @@
-CREATE OR REPLACE FUNCTION correlate(p_words text[])
+-- converse.correlate — GH #862 / #860. No SET, real schema names.
+DROP FUNCTION IF EXISTS laplace.correlate(text[]);
+CREATE OR REPLACE FUNCTION converse.correlate(p_words text[])
     RETURNS TABLE(relation text, target text, words text[], strength double precision)
-    LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
     -- Group on ids, not rendered strings: content-addressing means one id = one
     -- content, but one surface string can cover many ids (homographs), so the
-    -- old GROUP BY label(type)/label(object) both conflated distinct targets
+    -- old GROUP BY realize.label(type)/realize.label(object) both conflated distinct targets
     -- that happen to share a surface AND rendered a label for every consensus
-    -- edge of every input word. Aggregate per (type_id, object_id), then render
+    -- edge of every input word. Aggregate per (type_id, object_id), then laplace.render
     -- exactly once per output row at the boundary.
-    WITH v AS (SELECT w AS word, word_id(w) AS id FROM unnest(p_words) AS w WHERE word_id(w) IS NOT NULL),
-    g AS (
+    WITH v AS (SELECT w AS word, laplace.word_id(w) AS id
+               FROM unnest(p_words) AS w WHERE laplace.word_id(w) IS NOT NULL),
+    g AS MATERIALIZED (
         SELECT c.type_id, c.object_id,
                array_agg(DISTINCT v.word ORDER BY v.word) AS words,
                count(DISTINCT v.word) AS nwords,
-               (max(eff_mu(c.rating, c.rd)))::float8 / 1e9 AS strength
-        FROM v JOIN consensus c ON c.subject_id = v.id
-        GROUP BY c.type_id, c.object_id)
-    SELECT COALESCE(NULLIF(relation_canonical(g.type_id), ''), label(g.type_id)) AS relation,
-           label(g.object_id) AS target, g.words, g.strength
-    FROM g
+               (max(laplace.eff_mu(c.rating, c.rd)))::float8 / 1e9 AS strength
+        FROM v JOIN laplace.consensus c ON c.subject_id = v.id
+        GROUP BY c.type_id, c.object_id),
+    ids AS MATERIALIZED (
+      SELECT array_agg(DISTINCT id ORDER BY id) AS a
+      FROM (SELECT type_id AS id FROM g UNION SELECT object_id FROM g) x
+    ), labels AS MATERIALIZED (
+      SELECT i.id, l.txt FROM ids,
+        LATERAL unnest(ids.a) WITH ORDINALITY i(id,ord),
+        LATERAL unnest(realize.label_batch(ids.a)) WITH ORDINALITY l(txt,ord)
+      WHERE i.ord=l.ord
+    )
+    SELECT COALESCE(NULLIF(laplace.relation_canonical(g.type_id), ''), rt.txt) AS relation,
+           ro.txt AS target, g.words, g.strength
+    FROM g JOIN labels rt ON rt.id=g.type_id JOIN labels ro ON ro.id=g.object_id
     ORDER BY g.nwords DESC, g.strength DESC, 1
 $$;

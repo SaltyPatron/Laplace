@@ -1,11 +1,11 @@
--- chess_opening_record(limit, offset, source): the opening leaderboard.
+-- chess.opening_record(limit, offset, source): the opening leaderboard.
 --
 -- One row per opening the corpus has actually played, with how many distinct lines
 -- reached it, how many playings those lines carry, and how the opening FARES —
 -- the witness-weighted mean of the lines' own OUTCOME fold cells, white POV.
 --
 -- WHAT MAKES THIS CHEAP. Every number here was folded at ingest. The score is not a
--- GROUP BY over 63M attestations recomputed per call: it reads (line, OUTCOME,
+-- GROUP BY over 63M laplace.attestations recomputed per call: it reads (line, OUTCOME,
 -- Chess_Result) consensus cells, which is one row per line no matter how many times
 -- the line was played. Consensus accumulates at ingest and there is no rebuild path;
 -- this reads what the fold already deposited.
@@ -13,19 +13,20 @@
 -- Weighting by witness_count, not a plain average over lines: an opening whose one
 -- exotic line went 1-0 once must not outrank the Sicilian. The weight IS the number
 -- of playings, which is exactly what witness_count counts on this cell.
-CREATE OR REPLACE FUNCTION chess_opening_record(p_limit int DEFAULT 25,
+DROP FUNCTION IF EXISTS laplace.chess_opening_record(int, int, bytea);
+CREATE OR REPLACE FUNCTION chess.opening_record(p_limit int DEFAULT 25,
                                                 p_offset int DEFAULT 0,
                                                 p_source bytea DEFAULT NULL)
     RETURNS TABLE(opening text, lines bigint, playings bigint,
                   eff_mu double precision)
     LANGUAGE sql STABLE
-    SET search_path = @extschema@, public AS $$
+ AS $$
 WITH claim AS MATERIALIZED (
     -- (opening name id, line) pairs. DISTINCT because ChessPgn and ChessAnalysis both
     -- assert the opening for the same line — two witnesses, one line.
     SELECT DISTINCT a.object_id AS name_id, a.subject_id AS line
-    FROM attestations a
-    WHERE a.type_id = relation_type_id('GAME_HAS_OPENING')
+    FROM laplace.attestations a
+    WHERE a.type_id = laplace.relation_type_id('GAME_HAS_OPENING')
       AND (p_source IS NULL OR a.source_id = p_source)
 ),
 scored AS MATERIALIZED (
@@ -33,11 +34,11 @@ scored AS MATERIALIZED (
            count(*)                                          AS lines,
            COALESCE(sum(c.witness_count), 0)                 AS playings,
            -- Witness-weighted mean of the per-line conservative estimate.
-           sum(eff_mu(c.rating, c.rd) * c.witness_count)
+           sum(laplace.eff_mu(c.rating, c.rd) * c.witness_count)
              / NULLIF(sum(c.witness_count), 0)               AS mu
     FROM claim k
-    LEFT JOIN consensus c ON c.subject_id = k.line
-                         AND c.type_id = relation_type_id('OUTCOME')
+    LEFT JOIN laplace.consensus c ON c.subject_id = k.line
+                         AND c.type_id = laplace.relation_type_id('OUTCOME')
     GROUP BY k.name_id
 ),
 ord AS MATERIALIZED (
@@ -49,7 +50,7 @@ ord AS MATERIALIZED (
 -- Render last and once, after LIMIT/OFFSET. name_id is the GROUP BY key upstream, so
 -- the page is already distinct by construction — one realize call, p_limit ids.
 lbl AS MATERIALIZED (
-    SELECT realize_batch(array_agg(o.name_id ORDER BY o.ix), NULL) AS l FROM ord o
+    SELECT realize.batch(array_agg(o.name_id ORDER BY o.ix), NULL) AS l FROM ord o
 )
 SELECT lbl.l[o.ix], o.lines::bigint, o.playings::bigint,
        round((o.mu / 1e9)::numeric, 3)::double precision

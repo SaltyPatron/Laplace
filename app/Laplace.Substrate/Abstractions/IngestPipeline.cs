@@ -263,9 +263,14 @@ public static class IngestBatchPipeline
             if (!info.Exists || info.Length == 0 || info.Length > ResumeHashMaxBytes) return null;
             return FileEntity.SourceId(File.ReadAllBytes(filePath));
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        catch (Exception ex) when (ex is IOException
+            or UnauthorizedAccessException
+            or InvalidOperationException
+            or ArgumentException
+            or NotSupportedException
+            or System.Security.SecurityException)
         {
-            return null; // unreadable/degenerate file: no resume identity, never a crash
+            return null; // unreadable/degenerate path: no resume identity, never a crash
         }
     }
 

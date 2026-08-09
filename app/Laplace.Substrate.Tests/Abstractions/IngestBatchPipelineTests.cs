@@ -257,6 +257,92 @@ public sealed class IngestBatchPipelineTests
                 IngestBatchPipeline.PeriodBoundaryUnitPrefix, StringComparison.Ordinal)));
     }
 
+    /// <summary>
+    /// GH #898: kill after file 2 applies → restart true-skips marker-complete
+    /// files 1–2 (zero fold / zero units) and only re-opens file 3.
+    /// </summary>
+    [Fact]
+    public async Task MultiFileResume_MarkerCompleteFilesTrueSkip()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), $"laplace-resume-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var paths = new[]
+            {
+                Path.Combine(dir, "file-1.txt"),
+                Path.Combine(dir, "file-2.txt"),
+                Path.Combine(dir, "file-3.txt"),
+            };
+            await File.WriteAllTextAsync(paths[0], "resume one\n");
+            await File.WriteAllTextAsync(paths[1], "resume two\n");
+            await File.WriteAllTextAsync(paths[2], "resume three\n");
+
+            var roots = paths.Select(p => FileEntity.SourceId(File.ReadAllBytes(p))).ToArray();
+            var completed = new HashSet<Hash128> { roots[0], roots[1] };
+            var reader = new ProbeTrackingReader(present: false)
+            {
+                SourceCompleted = (id, _) => completed.Contains(id),
+            };
+            const int layer = 3;
+            var resume = new IngestBatchPipeline.PerFileResumePlan(reader, layer, IgnoreCompletedFiles: false);
+
+            var sources = new List<IFileRecordSource<ContentIngestRecord>>();
+            foreach (var path in paths)
+            {
+                string label = Path.GetFileName(path);
+                string captured = path;
+                sources.Add(new DelegateFileRecordSource<ContentIngestRecord>(
+                    label,
+                    ct => OpenOneAsync(label, ct),
+                    filePath: captured));
+            }
+
+            static async IAsyncEnumerable<ContentIngestRecord> OpenOneAsync(
+                string label,
+                [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+            {
+                ct.ThrowIfCancellationRequested();
+                yield return ContentRecord($"payload-{label}");
+                await Task.Yield();
+            }
+
+            var changes = new List<SubstrateChange>();
+            await foreach (var change in IngestBatchPipeline.RunMultiFileAsync(
+                new SourceListMultiFileStream<ContentIngestRecord>(sources),
+                _ => new ContentIngestHandler(TestSource),
+                label => new IngestBatchConfig
+                {
+                    SourceId = TestSource,
+                    BatchLabelPrefix = $"resume/{label}",
+                    BatchSize = 4,
+                    ProbeChunkSize = 1024,
+                    ContainmentReader = reader,
+                },
+                fileWorkers: 1,
+                resume: resume))
+                changes.Add(change);
+
+            // Marker-complete files emit nothing; only file-3 folds one unit + boundary.
+            Assert.DoesNotContain(changes, c =>
+                c.Metadata.SourceContentUnitName.Contains("file-1", StringComparison.Ordinal));
+            Assert.DoesNotContain(changes, c =>
+                c.Metadata.SourceContentUnitName.Contains("file-2", StringComparison.Ordinal));
+            Assert.Equal(1, changes.Sum(c => c.Metadata.InputUnitsConsumed));
+            Assert.Contains(changes, c =>
+                c.Metadata.SourceContentUnitName.Contains("file-3", StringComparison.Ordinal));
+            Assert.Equal(1, changes.Count(c =>
+                c.Metadata.SourceContentUnitName.StartsWith(
+                    IngestBatchPipeline.PeriodBoundaryUnitPrefix, StringComparison.Ordinal)));
+            Assert.True(MarkerAttestationCount(changes) >= 1,
+                "file-3 boundary must deposit the HasLayerCompleted marker");
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
     [Fact]
     public async Task MultiFileTier_MaxTotalUnits_StopsAcrossFiles()
     {

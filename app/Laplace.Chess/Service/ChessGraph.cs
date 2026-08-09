@@ -19,11 +19,11 @@ public static class ChessGraph
     };
 
     // AGGREGATING lane only: deduped substructure/position outcome deposits + the MOVE edge.
-    // Game-specific record edges (GAME_AT: subject unique per game; GAME_AT_PLY, and PLAYED_BY
-    // AT PLY GRAIN: one near-unique row per ply) were deliberately removed — at that grain they
-    // can never corroborate across games, so each was a permanently single-witness consensus
-    // cell. The game's verbatim HAS_MOVETEXT plus replay reconstructs all of them; contextId
-    // keeps per-game provenance on the evidence rows.
+    // Ply-grain GAME_AT / GAME_AT_PLY emitters were removed (and retired from
+    // ChessSeedManifest — GH #577): at that grain they can never corroborate across
+    // games, so each was a permanently single-witness consensus cell. The game's
+    // verbatim HAS_MOVETEXT plus replay reconstructs them; contextId keeps
+    // per-game provenance on the evidence rows.
     //
     // PLAYED_BY at PLAYER grain is the opposite case and is emitted (AppendPlayerResult): one
     // cell per pairing, so two players who met 28 times corroborate into a single cell with 28

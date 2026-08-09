@@ -1,9 +1,9 @@
--- senses(word, context[]): the senses of a word, ranked BY CONTEXT.
+-- lexical.senses(word, context[]): the senses of a word, ranked BY CONTEXT.
 --
 -- PRIOR VERSION WAS INERT ON REAL DATA. Its only lane boosted a synset by summing
--- eff_mu over consensus rows where `subject_id = ANY(p_context)` (or object_id),
+-- laplace.eff_mu over consensus rows where `subject_id = ANY(p_context)` (or object_id),
 -- i.e. it required a DIRECT edge from a context entity to the synset. p_context
--- carries WORD entities and words reach synsets through HAS_SENSE -> IS_SENSE_OF,
+-- carries WORD laplace.entities and words reach synsets through HAS_SENSE -> IS_SENSE_OF,
 -- so on a real corpus that join almost never matches and every boost was 0.
 -- Verified 2026-07-25: opposite contexts ({animal,pet,bark} vs
 -- {sausage,roll,beef}) returned byte-identical rankings AND byte-identical scores
@@ -17,16 +17,18 @@
 -- sense. It is restored below as a fourth lane. Adding lanes is the fix; removing
 -- the one that existed was not.
 --
--- Four lanes now, all in ID SPACE (no realize/render/label anywhere -- rendering is
+-- Five lanes now, all in ID SPACE (no realize/laplace.render/label anywhere -- rendering is
 -- the caller's final step, never a mid-operation string compare):
 --
---   USAGE   the candidate synset OWNS a gloss or example whose word constituents
+--   USAGE   the candidate synset OWNS a gloss or example whose word laplace.constituents
 --           include a context token. Sense-resolution here is by OWNERSHIP, not
 --           per-token tagging: a gloss/example hangs off exactly one synset, so a
 --           word occurring inside it is already sense-resolved on the owning side.
 --           This is the lane that actually discriminates.
 --   FRAME   a context sense EVOKES_FRAME F and the candidate corresponds to F.
 --           Frames unify across languages, so this lane is language-agnostic.
+--   DOMAIN  candidate HAS_DOMAIN_TOPIC D and a context token is (or senses to) D
+--           (GH #785 discourse prior — e.g. pawn+chess).
 --   DIRECT  a context ENTITY has an attested edge straight to a candidate synset.
 --           Usually absent on real data, but where present it is the strongest
 --           statement that a context term bears on a sense.
@@ -34,18 +36,25 @@
 --           bands -- the synset-to-synset comparison the old version was reaching
 --           for and getting wrong.
 --
--- Every lane is weighted by the eff_mu of the edges carrying it: trust enters
+-- Every lane is weighted by the laplace.eff_mu of the edges carrying it: trust enters
 -- through the rating math, never through an operator-chosen constant. No floors,
 -- no caps, no top-k -- ORDER BY only, LIMIT is the caller's.
 --
 -- Returns the same columns as before so existing callers are unaffected. With an
 -- empty/NULL context every lane contributes nothing and the ordering degenerates to
 -- the sense prior, which is the documented no-context behaviour.
-CREATE OR REPLACE FUNCTION senses(p_word bytea, p_context bytea[])
+-- NO `SET search_path` (GH #860). The clause blocks SQL inlining -- the planner
+-- keeps the function as an opaque `Function Scan` rather than pulling the body into
+-- the caller and pushing predicates through to the index. The 1-arg `lexical.senses()` this
+-- overload sits beside dropped the clause under #617 and inlines to an index scan;
+-- this overload is on the same read path and was still paying it. Every reference is
+-- `@extschema@.`-qualified instead, which is what the clause was doing and costs
+-- nothing at plan time.
+DROP FUNCTION IF EXISTS laplace.senses(bytea, bytea[]);
+CREATE OR REPLACE FUNCTION lexical.senses(p_word bytea, p_context bytea[])
     RETURNS TABLE(sense_id bytea, synset_id bytea, eff_mu numeric, witnesses bigint,
                   score numeric)
-    LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
     WITH ctx AS MATERIALIZED (
         SELECT DISTINCT t AS id
         FROM unnest(COALESCE(p_context, ARRAY[]::bytea[])) AS t
@@ -54,48 +63,48 @@ CREATE OR REPLACE FUNCTION senses(p_word bytea, p_context bytea[])
     -- context words resolved to their own senses: the comparison is synset<->synset.
     ctx_syn AS MATERIALIZED (
         SELECT DISTINCT s.synset_id AS sid
-        FROM ctx CROSS JOIN LATERAL senses(ctx.id) s
+        FROM ctx CROSS JOIN LATERAL lexical.senses(ctx.id) s
         WHERE s.synset_id IS NOT NULL
     ),
     frame_t AS MATERIALIZED (
-        SELECT id FROM relation_family_members('EVOKES_FRAME')
+        SELECT id FROM @extschema@.relation_family_members('EVOKES_FRAME')
     ),
     cand AS MATERIALIZED (
         SELECT s.sense_id, ss.object_id AS synset_id,
                s.rating, s.rd, s.witness_count AS w1,
                ss.witness_count AS w2
-        FROM v_word_senses s
-        JOIN consensus ss ON ss.subject_id = s.sense_id
-                         AND ss.type_id = relation_type_id('IS_SENSE_OF')
-        WHERE s.word_id = ANY(lexical_peers(p_word))
+        FROM @extschema@.v_word_senses s
+        JOIN @extschema@.consensus ss ON ss.subject_id = s.sense_id
+                         AND ss.type_id = @extschema@.relation_type_id('IS_SENSE_OF')
+        WHERE s.word_id = ANY(lexical.lexical_peers(p_word))
     ),
     -- USAGE: candidate owns a sentence (gloss band 1 / example band 7) whose
-    -- word-tier constituents include a context token.
+    -- word-tier laplace.constituents include a context token.
     own_sent AS (
         SELECT DISTINCT c.subject_id AS sid, c.object_id AS gid,
-               eff_mu(c.rating, c.rd) AS w
-        FROM consensus c
+               @extschema@.eff_mu(c.rating, c.rd) AS w
+        FROM @extschema@.consensus c
         WHERE c.subject_id IN (SELECT synset_id FROM cand)
-          AND relation_highway_band(c.type_id) IN (1, 7)
+          AND laplace.relation_highway_band(c.type_id) IN (1, 7)
     ),
     lane_usage AS (
         SELECT os.sid, sum(os.w) AS boost
         FROM own_sent os
-        CROSS JOIN LATERAL trajectory_unpacked_points(os.gid)
+        CROSS JOIN LATERAL generation.trajectory_unpacked_points(os.gid)
              WITH ORDINALITY AS u(entity_id, run_length, ctier, ord)
         WHERE u.ctier = 2 AND u.entity_id IN (SELECT id FROM ctx)
         GROUP BY os.sid
     ),
     -- FRAME: shared frame between a context sense and the candidate.
     ctx_frame AS (
-        SELECT DISTINCT c.object_id AS fid, eff_mu(c.rating, c.rd) AS w
+        SELECT DISTINCT c.object_id AS fid, @extschema@.eff_mu(c.rating, c.rd) AS w
         FROM ctx_syn s
-        JOIN consensus c ON c.subject_id = s.sid
+        JOIN @extschema@.consensus c ON c.subject_id = s.sid
         WHERE c.type_id IN (SELECT id FROM frame_t)
     ),
     lane_frame AS (
         SELECT c.subject_id AS sid, sum(cf.w) AS boost
-        FROM consensus c
+        FROM @extschema@.consensus c
         JOIN ctx_frame cf ON cf.fid = c.object_id
         WHERE c.subject_id IN (SELECT synset_id FROM cand)
           AND c.type_id IN (SELECT id FROM frame_t)
@@ -104,19 +113,34 @@ CREATE OR REPLACE FUNCTION senses(p_word bytea, p_context bytea[])
     -- TAXON: candidate meets a context sense within one hop, either direction.
     lane_taxon AS (
         SELECT x.sid, sum(x.w) AS boost FROM (
-            SELECT c.subject_id AS sid, eff_mu(c.rating, c.rd) AS w
-            FROM consensus c
+            SELECT c.subject_id AS sid, @extschema@.eff_mu(c.rating, c.rd) AS w
+            FROM @extschema@.consensus c
             WHERE c.subject_id IN (SELECT synset_id FROM cand)
               AND c.object_id IN (SELECT sid FROM ctx_syn)
-              AND relation_highway_band(c.type_id) IN (2, 4, 7)
+              AND laplace.relation_highway_band(c.type_id) IN (2, 4, 7)
             UNION ALL
-            SELECT c.object_id, eff_mu(c.rating, c.rd)
-            FROM consensus c
+            SELECT c.object_id, @extschema@.eff_mu(c.rating, c.rd)
+            FROM @extschema@.consensus c
             WHERE c.object_id IN (SELECT synset_id FROM cand)
               AND c.subject_id IN (SELECT sid FROM ctx_syn)
-              AND relation_highway_band(c.type_id) IN (2, 4, 7)
+              AND laplace.relation_highway_band(c.type_id) IN (2, 4, 7)
         ) x
         GROUP BY x.sid
+    ),
+    -- DOMAIN (GH #785): a candidate synset HAS_DOMAIN_TOPIC D and a context
+    -- token is (or senses to) D. "pawn" + "chess" elects the chess-piece sense
+    -- because WordNet attached HAS_DOMAIN_TOPIC→chess; the USAGE lane also
+    -- catches "(chess) the least powerful piece" in the gloss, but domain is
+    -- the explicit discourse prior and works when the gloss spelling differs
+    -- from the prompt token. Weighted by the domain edge's laplace.eff_mu.
+    lane_domain AS (
+        SELECT c.subject_id AS sid, sum(@extschema@.eff_mu(c.rating, c.rd)) AS boost
+        FROM @extschema@.consensus c
+        WHERE c.subject_id IN (SELECT synset_id FROM cand)
+          AND c.type_id = laplace.relation_type_resolve('HAS_DOMAIN_TOPIC')
+          AND (c.object_id IN (SELECT id FROM ctx)
+               OR c.object_id IN (SELECT sid FROM ctx_syn))
+        GROUP BY c.subject_id
     ),
     -- DIRECT: a context ENTITY has an attested edge to a candidate synset, either
     -- direction, any relation. This is the lane the previous implementation had, and
@@ -140,13 +164,13 @@ CREATE OR REPLACE FUNCTION senses(p_word bytea, p_context bytea[])
     -- carries.
     lane_direct AS (
         SELECT x.sid, sum(x.w) AS boost FROM (
-            SELECT c.object_id AS sid, eff_mu(c.rating, c.rd) AS w
-            FROM consensus c
+            SELECT c.object_id AS sid, @extschema@.eff_mu(c.rating, c.rd) AS w
+            FROM @extschema@.consensus c
             WHERE c.subject_id IN (SELECT id FROM ctx)
               AND c.object_id IN (SELECT synset_id FROM cand)
             UNION ALL
-            SELECT c.subject_id, eff_mu(c.rating, c.rd)
-            FROM consensus c
+            SELECT c.subject_id, @extschema@.eff_mu(c.rating, c.rd)
+            FROM @extschema@.consensus c
             WHERE c.object_id IN (SELECT id FROM ctx)
               AND c.subject_id IN (SELECT synset_id FROM cand)
         ) x
@@ -154,17 +178,19 @@ CREATE OR REPLACE FUNCTION senses(p_word bytea, p_context bytea[])
     )
     SELECT cand.sense_id,
            cand.synset_id,
-           eff_mu_display(cand.rating, cand.rd),
+           @extschema@.eff_mu_display(cand.rating, cand.rd),
            (cand.w1 + cand.w2)::bigint,
-           round(((eff_mu(cand.rating, cand.rd)
+           round(((@extschema@.eff_mu(cand.rating, cand.rd)
                    + COALESCE(lu.boost, 0)
                    + COALESCE(lf.boost, 0)
                    + COALESCE(lt.boost, 0)
+                   + COALESCE(ldo.boost, 0)
                    + COALESCE(ld.boost, 0)) / 1e9)::numeric, 3)
     FROM cand
-    LEFT JOIN lane_usage  lu ON lu.sid = cand.synset_id
-    LEFT JOIN lane_frame  lf ON lf.sid = cand.synset_id
-    LEFT JOIN lane_taxon  lt ON lt.sid = cand.synset_id
-    LEFT JOIN lane_direct ld ON ld.sid = cand.synset_id
+    LEFT JOIN lane_usage  lu  ON lu.sid  = cand.synset_id
+    LEFT JOIN lane_frame  lf  ON lf.sid  = cand.synset_id
+    LEFT JOIN lane_taxon  lt  ON lt.sid  = cand.synset_id
+    LEFT JOIN lane_domain ldo ON ldo.sid = cand.synset_id
+    LEFT JOIN lane_direct ld  ON ld.sid  = cand.synset_id
     ORDER BY 5 DESC
 $$;

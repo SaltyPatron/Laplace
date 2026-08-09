@@ -1,13 +1,15 @@
-CREATE OR REPLACE FUNCTION entity_tier_of(p_entity bytea)
+DROP FUNCTION IF EXISTS laplace.entity_tier_of(bytea);
+-- BEGIN ATOMIC: GH #764.
+CREATE OR REPLACE FUNCTION generation.entity_tier_of(p_entity bytea)
     RETURNS int
     LANGUAGE sql STABLE STRICT PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+BEGIN ATOMIC
     -- Fall back to the perfcache-backed codepoint lookup before giving up: a valid
-    -- tier-0 codepoint is tier 0 whether or not it has been given its own entities
+    -- tier-0 codepoint is tier 0 whether or not it has been given its own laplace.entities
     -- row yet. Only genuinely unresolvable ids (neither a real row nor a valid
     -- codepoint) should surface as NULL here.
     SELECT COALESCE(
-        (SELECT tier FROM entities WHERE id = p_entity),
-        CASE WHEN codepoint_for_id(p_entity) IS NOT NULL THEN 0 END
-    )
-$$;
+        (SELECT tier FROM laplace.entities WHERE id = p_entity),
+        CASE WHEN laplace.codepoint_for_id(p_entity) IS NOT NULL THEN 0 END
+    );
+END;

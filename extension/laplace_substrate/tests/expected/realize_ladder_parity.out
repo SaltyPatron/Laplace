@@ -1,4 +1,4 @@
--- realize() and realize_batch() are TWO implementations of one COALESCE ladder:
+-- realize.realize() and realize.batch() are TWO implementations of one COALESCE ladder:
 -- the scalar one in SQL (realize.sql.in) and the batched one in C
 -- (src/realize_batch.c), whose header states it "Reproduces the scalar COALESCE
 -- ladder exactly" and points at parity notes. Prose was the parity mechanism.
@@ -8,11 +8,11 @@
 -- WHY BOTH STILL EXIST, measured 2026-07-28 on the foundation substrate
 -- (4.34M entities), 2000 sampled ids:
 --
---   realize(id) per row                13.9 s   (7 ms/row)   <- scalar path
---   realize_batch(ARRAY[id]) per row   44.8 s   (22 ms/row)
---   realize_batch(all 2000 ids)         0.56 s  (0.3 ms/row) <- set path
+--   realize.realize(id) per row                13.9 s   (7 ms/row)   <- scalar path
+--   realize.batch(ARRAY[id]) per row   44.8 s   (22 ms/row)
+--   realize.batch(all 2000 ids)         0.56 s  (0.3 ms/row) <- set path
 --
--- So collapsing realize() into a realize_batch() wrapper -- the obvious
+-- So collapsing realize.realize() into a realize.batch() wrapper -- the obvious
 -- "one implementation per fact" move, and what docs/specs/37 originally
 -- prescribed -- would make every remaining scalar caller 3.2x SLOWER. The C
 -- function pays SPI setup per call; the SQL ladder inlines. Two bodies is the
@@ -47,9 +47,9 @@ SELECT count(*) = 8 AS probe_is_fixed_size FROM probe;
 -- 1. Scalar and batched agree on every id, INCLUDING where both abstain. The
 -- cardinality guard is the point: a comparison over zero rows is not a pass.
 WITH ids AS (SELECT array_agg(p.id ORDER BY p.ord) AS a FROM probe p),
-     lbl AS (SELECT realize_batch((SELECT a FROM ids), NULL) AS l)
+     lbl AS (SELECT realize.batch((SELECT a FROM ids), NULL) AS l)
 SELECT count(*) = 8                                              AS compared_all,
-       bool_and(lbl.l[p.ord] IS NOT DISTINCT FROM realize(p.id, NULL))
+       bool_and(lbl.l[p.ord] IS NOT DISTINCT FROM realize.realize(p.id, NULL))
                                                                  AS batch_matches_scalar
 FROM probe p CROSS JOIN lbl;
  compared_all | batch_matches_scalar 
@@ -67,11 +67,11 @@ WITH ids AS (SELECT array_agg(x.id ORDER BY x.ord) AS a
                    UNION ALL SELECT 2, word_id('dog')
                    UNION ALL SELECT 3, word_id('a')
                    UNION ALL SELECT 4, word_id('nine')) x),
-     lbl AS (SELECT realize_batch((SELECT a FROM ids), NULL) AS l)
+     lbl AS (SELECT realize.batch((SELECT a FROM ids), NULL) AS l)
 SELECT array_length(lbl.l, 1) = 4                     AS length_matches_input,
        lbl.l[1] IS NOT DISTINCT FROM lbl.l[3]         AS duplicate_id_not_collapsed,
-       lbl.l[1] IS NOT DISTINCT FROM realize(word_id('a'), NULL)   AS pos1_aligned,
-       lbl.l[4] IS NOT DISTINCT FROM realize(word_id('nine'), NULL) AS pos4_aligned
+       lbl.l[1] IS NOT DISTINCT FROM realize.realize(word_id('a'), NULL)   AS pos1_aligned,
+       lbl.l[4] IS NOT DISTINCT FROM realize.realize(word_id('nine'), NULL) AS pos4_aligned
 FROM lbl;
  length_matches_input | duplicate_id_not_collapsed | pos1_aligned | pos4_aligned 
 ----------------------+----------------------------+--------------+--------------
@@ -82,9 +82,9 @@ FROM lbl;
 -- both, never '<hex...>' styled as a label. label_or_hex is the only place that
 -- decides to show a raw id. (IS NOT DISTINCT FROM, not `=`: array equality with
 -- a NULL element yields NULL, which would make `=` a silent pass.)
-SELECT (realize_batch(ARRAY[word_id('test/realize/never-witnessed-xyzzy')], NULL))[1] IS NULL
+SELECT (realize.batch(ARRAY[word_id('test/realize/never-witnessed-xyzzy')], NULL))[1] IS NULL
                                                                  AS batch_abstains,
-       realize(word_id('test/realize/never-witnessed-xyzzy'), NULL) IS NULL
+       realize.realize(word_id('test/realize/never-witnessed-xyzzy'), NULL) IS NULL
                                                                  AS scalar_abstains;
  batch_abstains | scalar_abstains 
 ----------------+-----------------
@@ -93,11 +93,70 @@ SELECT (realize_batch(ARRAY[word_id('test/realize/never-witnessed-xyzzy')], NULL
 
 -- 4. Degenerate inputs do not throw — the serving surface calls this with
 -- whatever survived a filter, including nothing.
-SELECT realize_batch(ARRAY[]::bytea[], NULL) IS NOT DISTINCT FROM ARRAY[]::text[] AS empty_ok,
-       realize_batch(NULL, NULL) IS NULL                                          AS null_ok;
+SELECT realize.batch(ARRAY[]::bytea[], NULL) IS NOT DISTINCT FROM ARRAY[]::text[] AS empty_ok,
+       realize.batch(NULL, NULL) IS NULL                                          AS null_ok;
  empty_ok | null_ok 
 ----------+---------
  t        | t
 (1 row)
 
+-- 5. Every display projection is byte-for-byte equal to its scalar contract.
+-- These are separate ladders: realize abstains, render has canonical/codepoint/
+-- recursive/hex fallback, label cleans internal keys, and type labels normalize.
+WITH ids AS (SELECT array_agg(p.id ORDER BY p.ord) AS a FROM probe p),
+     b AS (SELECT realize.resolve_name_batch(a,NULL::bytea) AS names,
+                  laplace.render_batch(a) AS rendered,
+                  realize.label_batch(a) AS labels,
+                  converse.label_or_hex_batch(a) AS labels_hex,
+                  lexical.type_label_batch(a) AS types FROM ids)
+SELECT bool_and(b.names[p.ord] IS NOT DISTINCT FROM realize.resolve_name(p.id,NULL)) AS names_match,
+       bool_and(b.rendered[p.ord] IS NOT DISTINCT FROM laplace.render(p.id)) AS render_match,
+       bool_and(b.labels[p.ord] IS NOT DISTINCT FROM realize.label(p.id)) AS label_match,
+       bool_and(b.labels_hex[p.ord] IS NOT DISTINCT FROM converse.label_or_hex(p.id)) AS hex_match,
+       bool_and(b.types[p.ord] IS NOT DISTINCT FROM lexical.type_label(p.id)) AS type_match
+FROM probe p CROSS JOIN b;
+ names_match | render_match | label_match | hex_match | type_match 
+-------------+--------------+-------------+-----------+------------
+ t           | t            | t           | t         | t
+(1 row)
+
+-- 6. Alignment, duplicates, NULLs, and empty arrays are part of every batch contract.
+WITH ids AS (SELECT ARRAY[word_id('a'),NULL::bytea,word_id('dog'),word_id('a')] AS a),
+     b AS (SELECT laplace.render_batch(a) AS rendered,
+                  realize.label_batch(a) AS labels FROM ids)
+SELECT cardinality(b.rendered)=4 AS render_length,
+       cardinality(b.labels)=4 AS label_length,
+       b.rendered[1] IS NOT DISTINCT FROM b.rendered[4] AS duplicate_aligned,
+       b.rendered[2] IS NULL AND b.labels[2] IS NULL AS null_aligned,
+       laplace.render_batch('{}'::bytea[])='{}'::text[] AS render_empty,
+       realize.label_batch('{}'::bytea[])='{}'::text[] AS label_empty
+FROM b;
+ render_length | label_length | duplicate_aligned | null_aligned | render_empty | label_empty 
+---------------+--------------+-------------------+--------------+--------------+-------------
+ t             | t            | t                 | t            | t            | t
+(1 row)
+
+-- NULL input is distinct from an empty aligned batch for every projection.
+SELECT realize.resolve_name_batch(NULL::bytea[],NULL::bytea) IS NULL AS names_null,
+       laplace.render_batch(NULL::bytea[]) IS NULL AS render_null,
+       realize.label_batch(NULL::bytea[]) IS NULL AS label_null,
+       converse.label_or_hex_batch(NULL::bytea[]) IS NULL AS hex_null,
+       lexical.type_label_batch(NULL::bytea[]) IS NULL AS type_null;
+ names_null | render_null | label_null | hex_null | type_null 
+------------+-------------+------------+----------+-----------
+ t          | t           | t          | t        | t
+(1 row)
+
+-- Multidimensional inputs cannot preserve the one-input/one-output positional
+-- contract. Native batch primitives reject them instead of silently flattening.
+SAVEPOINT multidim_resolve_name;
+SELECT realize.resolve_name_batch(
+         ARRAY[[word_id('a')],[word_id('dog')]],NULL::bytea);
+ERROR:  resolve_name_batch: ids must be 1-dimensional
+ROLLBACK TO SAVEPOINT multidim_resolve_name;
+SAVEPOINT multidim_realize;
+SELECT realize.batch(
+         ARRAY[[word_id('a')],[word_id('dog')]],NULL::bytea);
+ERROR:  realize_batch: ids must be 1-dimensional
+ROLLBACK TO SAVEPOINT multidim_realize;
 ROLLBACK;

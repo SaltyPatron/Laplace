@@ -27,8 +27,7 @@ RETURNS TABLE(
 )
 LANGUAGE sql
 STABLE
-SET search_path = @extschema@, public
-AS $$
+    AS $$
     WITH d AS (
         SELECT 'consensus'::text AS tbl, c.type_id
           FROM @extschema@.consensus_rdefault c
@@ -44,14 +43,18 @@ AS $$
     tot AS (
         SELECT agg.tbl, sum(agg.rows) AS total FROM agg GROUP BY agg.tbl
     )
+    , numbered AS MATERIALIZED (
+      SELECT agg.*, tot.total, row_number() OVER (ORDER BY agg.rows DESC,agg.tbl,agg.type_id) AS rn
+      FROM agg JOIN tot ON tot.tbl=agg.tbl WHERE agg.rows>=min_rows
+    ), batch AS MATERIALIZED (
+      SELECT realize.label_batch(array_agg(type_id ORDER BY rn)) AS labels FROM numbered
+    )
     SELECT
         agg.tbl,
-        @extschema@.label(agg.type_id) AS relation,
+        b.labels[agg.rn] AS relation,
         agg.type_id,
         agg.rows,
-        round(100.0 * agg.rows / NULLIF(tot.total, 0), 2) AS pct_of_default
-      FROM agg
-      JOIN tot ON tot.tbl = agg.tbl
-     WHERE agg.rows >= min_rows
-     ORDER BY agg.rows DESC;
+        round(100.0 * agg.rows / NULLIF(agg.total, 0), 2) AS pct_of_default
+      FROM numbered agg CROSS JOIN batch b
+     ORDER BY agg.rn;
 $$;

@@ -51,7 +51,7 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
     public async Task<long> CountEntitiesByTypeAsync(Hash128 typeId, CancellationToken ct = default)
     {
         await using var cmd = _ds.CreateCommand(
-            "SELECT count(*) FROM laplace.entities WHERE type_id = $1");
+            "SELECT laplace.entity_count($1)");
         cmd.Parameters.AddWithValue(NpgsqlDbType.Bytea, typeId.ToBytes());
         var result = await cmd.ExecuteScalarAsync(ct);
         return result is long l ? l : 0L;
@@ -247,7 +247,7 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         }
 
         await using var cmd = _ds.CreateCommand(
-            "SELECT subject_id, object_id, type_id, eff_mu, witnesses FROM laplace.classify_circuit($1)");
+            "SELECT subject_id, object_id, type_id, eff_mu, witnesses FROM consensus.classify_circuit($1)");
         var p = cmd.Parameters.AddWithValue(packed);
         p.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
 
@@ -281,12 +281,12 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
 
 
 
-        await using var cmd = _ds.CreateCommand(@"
-            SELECT COALESCE(laplace.eff_mu_display(c.rating, c.rd), 0)::float8
-            FROM unnest($1::bytea[]) WITH ORDINALITY AS s(sid, ord)
-            JOIN unnest($2::bytea[]) WITH ORDINALITY AS o(oid, ord) USING (ord)
-            LEFT JOIN laplace.consensus c ON c.id = laplace.consensus_id(s.sid, $3, o.oid)
-            ORDER BY s.ord");
+        // Installed pair-scoring surface, not a hand-rolled join over the consensus
+        // table. The unattested->0 COALESCE this caller depends on is part of that
+        // function's contract and documented there as a deliberate tri-state collapse
+        // for scoring; presence questions use consensus_cell instead.
+        await using var cmd = _ds.CreateCommand(
+            "SELECT score FROM consensus.pair_scores($1, $3, $2) ORDER BY ord");
         var p1 = cmd.Parameters.AddWithValue(subj); p1.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
         var p2 = cmd.Parameters.AddWithValue(obj); p2.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
         var p3 = cmd.Parameters.AddWithValue(typeId.ToBytes()); p3.NpgsqlDbType = NpgsqlDbType.Bytea;
@@ -358,7 +358,7 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
     public async Task<long> CountEvidenceBySourceAsync(Hash128 sourceId, CancellationToken ct = default)
     {
         await using var cmd = _ds.CreateCommand(
-            "SELECT count(*) FROM laplace.attestations WHERE source_id = $1");
+            "SELECT laplace.evidence_count(p_source => $1)");
         cmd.CommandTimeout = 0;
         cmd.Parameters.AddWithValue(NpgsqlDbType.Bytea, sourceId.ToBytes());
         return (long)(await cmd.ExecuteScalarAsync(ct) ?? 0L);

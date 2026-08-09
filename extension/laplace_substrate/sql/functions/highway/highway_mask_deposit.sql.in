@@ -34,16 +34,15 @@
 -- chunk's work and waiters queue in chunk-sized steps. Serial-and-fast beats
 -- parallel-and-taxed: the parallelism never parallelised the row updates, it
 -- only manufactured the contention (the pre-bd10fcf C# scheduler knew this).
-CREATE OR REPLACE FUNCTION highway_mask_deposit(p_entity_ids bytea[], p_type_ids bytea[])
+CREATE OR REPLACE FUNCTION laplace.highway_mask_deposit(p_entity_ids bytea[], p_type_ids bytea[])
     RETURNS bigint
-    LANGUAGE plpgsql VOLATILE
-    SET search_path = @extschema@, public AS $$
+    LANGUAGE plpgsql VOLATILE AS $$
 DECLARE
     updated bigint;
     v_eids  bytea[];
     v_bits  int[];
 BEGIN
-    IF NOT laplace_highway_ready() THEN
+    IF NOT laplace.laplace_highway_ready() THEN
         RAISE WARNING 'highway_mask_deposit: highway perfcache not configured — masks not deposited (set laplace_substrate.highway_perfcache_path)';
         RETURN 0;
     END IF;
@@ -73,12 +72,12 @@ BEGIN
         -- it contributes its FAMILY ROOT's bit via its IS_A edge (SeedDynamic).
         -- Bounded: one probe per DISTINCT type this epoch (dozens), not per entity.
         SELECT t.tid,
-               COALESCE(relation_highway_bit(t.tid),
-                        relation_highway_bit(fam.object_id)) AS bit
+               COALESCE(laplace.relation_highway_bit(t.tid),
+                        laplace.relation_highway_bit(fam.object_id)) AS bit
         FROM types t
-        LEFT JOIN consensus fam
+        LEFT JOIN laplace.consensus fam
           ON fam.subject_id = t.tid
-         AND fam.type_id = relation_type_id('IS_A')
+         AND fam.type_id = laplace.relation_type_id('IS_A')
     )
     -- Flat parallel arrays, one element per (entity, bit). NOT array_agg of an int[]:
     -- that yields a 2-D array, and unnest() flattens multidimensional arrays completely
@@ -98,7 +97,7 @@ BEGIN
 
     -- xact-scoped, released at the caller's per-chunk COMMIT. Held for the UPDATE
     -- alone now, not for the computation above.
-    PERFORM pg_advisory_xact_lock(hashtext('laplace.highway_mask_deposit')::bigint);
+    PERFORM pg_advisory_xact_lock(hashtext('highway_mask_deposit')::bigint);
 
     WITH d AS (
         SELECT u.eid, array_agg(DISTINCT u.bit) AS bits
@@ -106,13 +105,13 @@ BEGIN
         GROUP BY u.eid
     ),
     upd AS (
-        UPDATE entities e
-        SET highway_mask = laplace_highway_mask_from_bits(
-                COALESCE(laplace_highway_mask_bits(e.highway_mask), ARRAY[]::int[]) || d.bits)
+        UPDATE laplace.entities e
+        SET highway_mask = laplace.laplace_highway_mask_from_bits(
+                COALESCE(laplace.laplace_highway_mask_bits(e.highway_mask), ARRAY[]::int[]) || d.bits)
         FROM d
         WHERE e.id = d.eid
           AND (e.highway_mask IS NULL
-               OR NOT (laplace_highway_mask_bits(e.highway_mask) @> d.bits))
+               OR NOT (laplace.laplace_highway_mask_bits(e.highway_mask) @> d.bits))
         RETURNING 1
     )
     SELECT count(*) INTO updated FROM upd;

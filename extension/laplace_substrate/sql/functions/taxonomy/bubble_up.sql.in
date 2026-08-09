@@ -1,15 +1,19 @@
 -- bubble_up: top-k sense frontier for the forward pass (R2).
--- Ranks HAS_SENSE-family edges by base eff_mu × domain co-occurrence.
+-- Ranks HAS_SENSE-family edges by base laplace.eff_mu × domain co-occurrence.
 -- Local 0 at a hop is a backtrack signal for the beam; this function seeds the
 -- open set. Abstain = zero rows (queue empty), never fabricate.
 --
 -- No SET search_path so it inlines into callers (#617); family membership is
--- joined against relation_family_members('HAS_SENSE') (fenced once) instead
+-- joined against laplace.relation_family_members('HAS_SENSE') (fenced once) instead
 -- of calling relation_type_in_family() per consensus row — the same static
 -- truth table, but sargable through the (subject_id, type_id) indexes.
 -- Row-set equivalence of the sargable family_out proven live 2026-07-24
 -- ("run": 345 = 345 rows, both EXCEPT directions empty).
-CREATE OR REPLACE FUNCTION bubble_up(
+-- taxonomy.bubble_up — GH #862. The schema names the operation (hierarchy
+-- traversal, spec 37 TRAVERSE), not the project. Old name dropped rather than
+-- shimmed: two names for one function is the dual-definition defect (#532).
+DROP FUNCTION IF EXISTS laplace.bubble_up(bytea, bytea[], integer);
+CREATE OR REPLACE FUNCTION taxonomy.bubble_up(
     p_term bytea,
     p_domain_context bytea[] DEFAULT NULL,
     p_k integer DEFAULT 5
@@ -25,20 +29,20 @@ RETURNS TABLE(
 )
 LANGUAGE sql STABLE PARALLEL SAFE AS $$
 WITH fam AS MATERIALIZED (
-    SELECT id FROM @extschema@.relation_family_members('HAS_SENSE')
+    SELECT id FROM laplace.relation_family_members('HAS_SENSE')
 ),
 peers AS (
-    SELECT unnest(@extschema@.lexical_peers(p_term)) AS id
+    SELECT unnest(lexical.lexical_peers(p_term)) AS id
 ),
 family_out AS (
     SELECT c.object_id AS target_id,
-           @extschema@.relation_canonical(c.type_id) AS via_relation,
-           @extschema@.eff_mu_display(c.rating, c.rd) AS base_eff_mu,
+           laplace.relation_canonical(c.type_id) AS via_relation,
+           laplace.eff_mu_display(c.rating, c.rd) AS base_eff_mu,
            c.witness_count AS witnesses,
            c.rating,
            c.rd
     FROM peers p
-    JOIN @extschema@.consensus c ON c.subject_id = p.id
+    JOIN laplace.consensus c ON c.subject_id = p.id
     WHERE c.type_id IN (SELECT id FROM fam)
 ),
 resolved AS (
@@ -51,10 +55,10 @@ resolved AS (
            fo.rating,
            fo.rd
     FROM family_out fo
-    LEFT JOIN @extschema@.consensus ss
+    LEFT JOIN laplace.consensus ss
       ON ss.subject_id = fo.target_id
      AND ss.type_id IN (SELECT id FROM fam)
-     AND @extschema@.relation_canonical(ss.type_id) = 'IS_SENSE_OF'
+     AND laplace.relation_canonical(ss.type_id) = 'IS_SENSE_OF'
     WHERE fo.via_relation = 'HAS_SENSE'
       AND ss.object_id IS NOT NULL
 
@@ -93,9 +97,9 @@ members AS (
     -- Feeds domain_scores ONLY, whose sole output (domain_hits) is 0 for every
     -- synset when no domain context is supplied. The domain-presence gate below
     -- is a one-time filter on the p_domain_context parameter: when the caller
-    -- passes NULL/empty (the common senses()/define()/salient_facts() path) it
+    -- passes NULL/empty (the common lexical.senses()/lexical.define()/consensus.salient_facts() path) it
     -- makes `members` empty, so the geometry_neighbours lateral in domain_scores
-    -- is never evaluated. Without it, geometry_neighbours(member,200,8) runs once
+    -- is never evaluated. Without it, structural.geometry_neighbours(member,200,8) runs once
     -- per synset member of a high-frequency word -- 14s each for "dog", 37s total
     -- -- for a domain_hits of 0 that changes nothing (measured 2026-07-20; this is
     -- what CommandTimeout-cancelled the explore preview endpoint). Output-identical:
@@ -103,14 +107,14 @@ members AS (
     SELECT r.synset_id,
            m.object_id AS member_id
     FROM resolved r
-    JOIN @extschema@.consensus m ON m.subject_id = r.synset_id
+    JOIN laplace.consensus m ON m.subject_id = r.synset_id
     WHERE m.type_id IN (SELECT id FROM fam)
       AND COALESCE(cardinality(p_domain_context), 0) > 0
     UNION
     SELECT r.synset_id,
            m.subject_id AS member_id
     FROM resolved r
-    JOIN @extschema@.consensus m ON m.object_id = r.synset_id
+    JOIN laplace.consensus m ON m.object_id = r.synset_id
     WHERE m.type_id IN (SELECT id FROM fam)
       AND COALESCE(cardinality(p_domain_context), 0) > 0
 ),
@@ -119,12 +123,12 @@ domain_scores AS (
            count(*)::bigint AS domain_hits
     -- Pillar 5 (2026-07-20): domain co-occurrence is read from the GEOMETRY.
     -- geometry_neighbours walks the trajectories containing the member and
-    -- returns the adjacent content constituents in BOTH directions -- the same
+    -- returns the adjacent content laplace.constituents in BOTH directions -- the same
     -- bidirectional adjacency the consensus form matched, without the
     -- materialised PRECEDES rows (Pillar 3a, e5e1b42).
     FROM members m
     JOIN domain d ON true
-    JOIN LATERAL @extschema@.geometry_neighbours(m.member_id, 200, 8) gn
+    JOIN LATERAL structural.geometry_neighbours(m.member_id, 200, 8) gn
       ON gn.neighbour_id = d.id
     GROUP BY m.synset_id
 ),
@@ -137,10 +141,10 @@ ranked AS (
            COALESCE(ds.domain_hits, 0)::bigint AS domain_hits,
            r.witnesses,
            (r.base_eff_mu * (1::numeric + ln(1::numeric + COALESCE(ds.domain_hits, 0)))) AS score,
-           @extschema@.eff_mu(r.rating, r.rd) AS rank_key
+           laplace.eff_mu(r.rating, r.rd) AS rank_key
     FROM resolved r
     LEFT JOIN domain_scores ds ON ds.synset_id = r.synset_id
-    ORDER BY r.synset_id, @extschema@.eff_mu(r.rating, r.rd) DESC
+    ORDER BY r.synset_id, laplace.eff_mu(r.rating, r.rd) DESC
 )
 SELECT sense_id,
        synset_id,
@@ -155,29 +159,29 @@ FROM ranked
 -- This was `ORDER BY score DESC, rank_key DESC, witnesses DESC`, which is two
 -- keys, not three: with no domain context domain_hits is 0, so
 -- score = base_eff_mu * (1 + ln(1)) = base_eff_mu, and rank_key is
--- eff_mu(rating, rd) — the same quantity in a different type. Witness count only
+-- laplace.eff_mu(rating, rd) — the same quantity in a different type. Witness count only
 -- broke exact ties in it.
 --
 -- On a thin substrate that inverts the ranking. Measured on the foundation
--- ladder, senses(word_id('water')):
+-- ladder, lexical.senses(laplace.word_id('water')):
 --
---     urine   1 witness   eff_mu 1169.73   <- elected
---     water   1 witness   eff_mu 1169.73
---     water   1 witness   eff_mu 1169.73
---     water   2 witnesses eff_mu 1168.45
---     water   2 witnesses eff_mu 1165.57
+--     urine   1 witness   laplace.eff_mu 1169.73   <- elected
+--     water   1 witness   laplace.eff_mu 1169.73
+--     water   1 witness   laplace.eff_mu 1169.73
+--     water   2 witnesses laplace.eff_mu 1168.45
+--     water   2 witnesses laplace.eff_mu 1165.57
 --
 -- Three senses tie exactly at the top on one witness each, so the id memcmp
 -- picks — and it picked urine. Meanwhile senses carrying TWICE the evidence sit
 -- below them, losing by 1.28 on a quantity whose uncertainty term is larger than
 -- its signal: W16 3.2 measured mean |rating - neutral| = 192.85 against mean rd
 -- = 262.24 over 447,145 consensus rows, so 2*rd runs ~2.7x the signal and
--- eff_mu orders substantially by how much rd has NOT yet shrunk.
+-- laplace.eff_mu orders substantially by how much rd has NOT yet shrunk.
 --
--- eff_mu is the right conservative bound for a well-witnessed edge and the wrong
+-- laplace.eff_mu is the right conservative bound for a well-witnessed edge and the wrong
 -- primary sort when rd dominates, because "least uncertain" and "best attested"
 -- come apart exactly where evidence is thin. Ordering by witnesses first states
--- the evidence explicitly instead of reading it backwards through rd; eff_mu
+-- the evidence explicitly instead of reading it backwards through rd; laplace.eff_mu
 -- then adjudicates among equally-attested senses, which is what it is for.
 --
 -- Not a floor or a cap — nothing is excluded, the sort order changes. Spec 37 L6

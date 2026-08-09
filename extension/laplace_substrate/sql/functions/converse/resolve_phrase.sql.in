@@ -1,4 +1,5 @@
-CREATE OR REPLACE FUNCTION resolve_phrase(p_phrase text)
+DROP FUNCTION IF EXISTS laplace.resolve_phrase(text);
+CREATE OR REPLACE FUNCTION converse.resolve_phrase(p_phrase text)
     RETURNS bytea
     AS 'MODULE_PATHNAME', 'pg_laplace_resolve_phrase'
     LANGUAGE C STABLE STRICT;

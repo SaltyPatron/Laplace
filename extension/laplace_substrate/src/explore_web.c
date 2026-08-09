@@ -131,7 +131,7 @@ pg_laplace_explore_web(PG_FUNCTION_ARGS)
 
 		plan = SPI_prepare(
 			"SELECT nbr, type_id, rating, rd, witness_count, outbound "
-			"FROM laplace.explore_web_neighbors($1, $2)",
+			"FROM consensus.explore_web_neighbors($1, $2)",
 			2, pargs);
 		if (plan == NULL)
 			elog(ERROR, "explore_web: SPI_prepare failed");

@@ -129,7 +129,7 @@ internal static class FoundryCommands
             if (recipeIdPrefix == "*" || hex.StartsWith(recipeIdPrefix.ToLowerInvariant(), StringComparison.Ordinal))
                 hits.Add((hex, recipe.RecipeJson));
         }
-        if (hits.Count == 0) { Fail($"no deposed recipe matches '{recipeIdPrefix}' — list them via laplace.model_recipes()"); return null; }
+        if (hits.Count == 0) { Fail($"no deposed recipe matches '{recipeIdPrefix}' — list them via structural.model_recipes()"); return null; }
         if (hits.Count > 1) { Fail($"recipe prefix '{recipeIdPrefix}' is ambiguous ({hits.Count} matches) — extend the prefix"); return null; }
 
         string moldDir = Path.Combine(Path.GetTempPath(), $"laplace-foundry-mold-{hits[0].Hex[..12]}");
@@ -214,8 +214,8 @@ internal static class FoundryCommands
         if (sel.Count == 0)
         {
             Fail(seeds is { Length: > 0 }
-                ? "laplace.foundry_vocab_crawl returned nothing — none of the seed words resolve (try other seeds / more hops)"
-                : "laplace.foundry_vocab returned nothing — ingest text first");
+                ? "generation.foundry_vocab_crawl returned nothing — none of the seed words converse.resolve(try other seeds / more hops)"
+                : "generation.foundry_vocab returned nothing — ingest text first");
             return null;
         }
 
@@ -623,7 +623,7 @@ internal static class FoundryCommands
 
         var adjacency = FoundryExport.Normalize(
             await FoundryExport.ReadAdjacencyAsync(ds, tokenSlots, degreeCap));
-        Console.WriteLine($"  rank-weighted adjacency read: {adjacency.Nnz:N0} content edges (banked relation_rank)");
+        Console.WriteLine($"  rank-weighted adjacency read: {adjacency.Nnz:N0} content consensus.edges(banked relation_rank)");
 
 
 
@@ -1093,7 +1093,7 @@ internal static class FoundryCommands
 
 
         // Plan Phase 8 (Build-A-Bear): a scoped synthesis re-folds ONLY the named sources'
-        // attestations (laplace.scoped_consensus) into pg_temp.consensus on every
+        // attestations (consensus.scoped_consensus) into pg_temp.consensus on every
         // physical connection — the temp table shadows laplace.consensus inside all
         // plane functions (pg_temp resolves first), so the entire synthesis reads the
         // scoped world with zero plane changes.

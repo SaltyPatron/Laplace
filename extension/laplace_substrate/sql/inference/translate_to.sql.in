@@ -1,13 +1,14 @@
 
 
 
-CREATE OR REPLACE FUNCTION translate_to(p_word bytea, p_lang text DEFAULT NULL,
+DROP FUNCTION IF EXISTS laplace.translate_to(bytea, text, int);
+CREATE OR REPLACE FUNCTION converse.translate_to(p_word bytea, p_lang text DEFAULT NULL,
                                         p_limit int DEFAULT 24)
     RETURNS TABLE(translation text, language text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
-    SET search_path = @extschema@, public AS $$
+ AS $$
     -- Dedup and rank by (member, lang) id pair, never by rendered surface (the
-    -- old GROUP BY render_text(member) conflated homographs). The user-supplied
+    -- old GROUP BY laplace.render_text(member) conflated homographs). The user-supplied
     -- language reference is text, so it is resolved at the INPUT boundary: each
     -- DISTINCT candidate language is matched once against the reference (by
     -- label or definition surface), instead of re-rendering per member row.
@@ -19,23 +20,42 @@ CREATE OR REPLACE FUNCTION translate_to(p_word bytea, p_lang text DEFAULT NULL,
     -- every translate_to call while language_coverage — same synset_members
     -- source, no NOT IN — keeps working.
     WITH src_langs AS (
-        SELECT c.object_id AS id FROM consensus c
-        WHERE c.subject_id = p_word AND c.type_id = relation_type_id('HAS_LANGUAGE')
+        SELECT c.object_id AS id FROM laplace.consensus c
+        WHERE c.subject_id = p_word AND c.type_id = laplace.relation_type_id('HAS_LANGUAGE')
           AND c.object_id IS NOT NULL
     ),
     want AS (SELECT NULLIF(btrim(lower(COALESCE(p_lang, ''))), '') AS name),
     agg AS (
         SELECT sm.member, sm.lang, max(sm.mu) AS mu, max(sm.witnesses) AS witnesses,
                max(sm.sense_mu) AS sense_mu
-        FROM synset_members(p_word) sm
+        FROM lexical.synset_members(p_word) sm
         WHERE sm.lang IS NOT NULL
           AND sm.lang NOT IN (SELECT id FROM src_langs)
         GROUP BY sm.member, sm.lang
     ),
+    -- Definition surfaces for the CANDIDATE languages, rendered ONCE in a fenced
+    -- CTE. This used to sit inside the lang_match predicate as
+    -- `lower(laplace.render_text(d.object_id, 32)) = w.name`, i.e. a render evaluated per
+    -- probed edge purely to classify it -- the render-to-classify defect the read
+    -- law names, in the one position the law calls out. Same accept set, rendered
+    -- a bounded number of times.
+    --
+    -- eff_mu > 0 is the tri-state guard: the old EXISTS matched on bare row
+    -- presence, so a HAS_DEFINITION edge the fold had REFUTED still admitted the
+    -- language. consensus carries no outcome column; refutation is a non-positive
+    -- fold, the same test the walk uses to dead-end an edge.
+    lang_def_names AS MATERIALIZED (
+        SELECT d.subject_id AS lang, lower(laplace.render_text(d.object_id, 32)) AS dname
+        FROM laplace.consensus d, want w0
+        WHERE w0.name IS NOT NULL
+          AND d.subject_id IN (SELECT DISTINCT lang FROM agg)
+          AND d.type_id = laplace.relation_type_id('HAS_DEFINITION')
+          AND laplace.eff_mu(d.rating, d.rd) > 0
+    ),
     lang_match AS (
         -- No-filter call (name IS NULL): pass every candidate language through with
         -- ZERO rendering — Postgres does not guarantee OR short-circuit, so the old
-        -- single-WHERE shape could evaluate label()/render_text() even when no
+        -- single-WHERE shape could evaluate realize.label()/laplace.render_text() even when no
         -- language filter was supplied (the common call).
         SELECT l.lang
         FROM (SELECT DISTINCT lang FROM agg) l, want w
@@ -47,24 +67,21 @@ CREATE OR REPLACE FUNCTION translate_to(p_word bytea, p_lang text DEFAULT NULL,
         -- identical to the old matcher.
         SELECT s.lang
         FROM (
-            SELECT l.lang, lower(label(l.lang)) AS lbl
+            SELECT l.lang, lower(realize.label(l.lang)) AS lbl
             FROM (SELECT DISTINCT lang FROM agg) l, want w0
             WHERE w0.name IS NOT NULL
         ) s, want w
         WHERE s.lbl = w.name
-           OR EXISTS (SELECT 1 FROM consensus d
-                      WHERE d.subject_id = s.lang
-                        AND d.type_id = relation_type_id('HAS_DEFINITION')
-                        AND lower(render_text(d.object_id, 32)) = w.name)
+           OR s.lang IN (SELECT ld.lang FROM lang_def_names ld WHERE ld.dname = w.name)
     )
     -- a.mu is fp1e9 (synset_members) — convert through the one display definition
-    SELECT r.txt AS translation, label(a.lang) AS language, eff_mu_display(a.mu), a.witnesses
+    SELECT r.txt AS translation, realize.label(a.lang) AS language, laplace.eff_mu_display(a.mu), a.witnesses
     FROM (
         SELECT member, lang, mu, witnesses FROM agg
         WHERE lang IN (SELECT lang FROM lang_match)
         ORDER BY sense_mu DESC NULLS LAST, mu DESC, witnesses DESC, lang, member
     ) a
-    CROSS JOIN LATERAL (SELECT render_text(a.member, 64) AS txt) r
+    CROSS JOIN LATERAL (SELECT laplace.render_text(a.member, 64) AS txt) r
     WHERE NULLIF(btrim(r.txt), '') IS NOT NULL
     LIMIT p_limit
 $$;
