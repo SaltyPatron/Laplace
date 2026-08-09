@@ -65,7 +65,7 @@ CREATE OR REPLACE FUNCTION consensus.edges(
         -- Relation names come from the manifest, once per DISTINCT type — a
         -- governed vocabulary of ~189, so a subject spans a handful.
         SELECT t.type_id,
-               COALESCE(NULLIF(@extschema@.relation_canonical(t.type_id), ''),
+               COALESCE(NULLIF(consensus.relation_canonical(t.type_id), ''),
                         l.txt) AS relation
         FROM (SELECT DISTINCT k.type_id FROM ranked k) t
         JOIN labels l ON l.id=t.type_id
@@ -76,7 +76,7 @@ CREATE OR REPLACE FUNCTION consensus.edges(
     )
     SELECT k.dir, rel.relation, k.nid,
            COALESCE(lbl.l[k.ord], nl.txt),
-           @extschema@.eff_mu_display(k.rating, k.rd),
+           consensus.eff_mu_display(k.rating, k.rd),
            k.witness_count
     FROM ranked k
     JOIN rel ON rel.type_id = k.type_id

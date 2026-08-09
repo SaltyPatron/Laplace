@@ -45,7 +45,7 @@
 -- sense_audit / prompt_language.
 DROP FUNCTION IF EXISTS ops.source_status(text);
 
-DROP FUNCTION IF EXISTS laplace.source_status(p_source text DEFAULT NULL);
+DROP FUNCTION IF EXISTS laplace.source_status(text);
 CREATE OR REPLACE FUNCTION ops.source_status(p_source text DEFAULT NULL)
     RETURNS TABLE(source            text,
                   source_id         bytea,
@@ -59,7 +59,7 @@ CREATE OR REPLACE FUNCTION ops.source_status(p_source text DEFAULT NULL)
     AS $$
 WITH by_evidence AS (
     SELECT s.source_id, s.evidence_approx
-    FROM @extschema@.source_counts_approx() s
+    FROM ops.source_counts_approx() s
 ),
 -- NOTE: no by_entities aggregate. Entities carry first_observed_by, which is how a
 -- CONTENT-ONLY lane proves it ran, but aggregating 44M rows to learn a boolean is the
@@ -89,7 +89,7 @@ rolled AS (
 ), rolled_numbered AS MATERIALIZED (
     SELECT r.*, row_number() OVER (ORDER BY r.source_id) AS rn FROM rolled r
 ), rendered AS MATERIALIZED (
-    SELECT @extschema@.render_batch(array_agg(source_id ORDER BY rn)) AS labels
+    SELECT realize.render_batch(array_agg(source_id ORDER BY rn)) AS labels
     FROM rolled_numbered
 ),
 matched AS (

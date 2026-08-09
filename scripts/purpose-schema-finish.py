@@ -286,6 +286,43 @@ def scan_args(text: str, open_paren_idx: int) -> str:
     return ""
 
 
+def drop_identity_args(args: str) -> str:
+    """Return type-only input arguments accepted by DROP FUNCTION."""
+    parts: list[str] = []
+    start = 0
+    parens = brackets = 0
+    quoted = False
+    for i, ch in enumerate(args):
+        if ch == "'":
+            quoted = not quoted
+        elif not quoted:
+            if ch == "(": parens += 1
+            elif ch == ")": parens -= 1
+            elif ch == "[": brackets += 1
+            elif ch == "]": brackets -= 1
+            elif ch == "," and parens == 0 and brackets == 0:
+                parts.append(args[start:i])
+                start = i + 1
+    parts.append(args[start:])
+
+    identity: list[str] = []
+    for part in parts:
+        decl = re.split(r"\s+(?:DEFAULT|=)\s+", part.strip(), maxsplit=1,
+                        flags=re.IGNORECASE)[0]
+        tokens = decl.split()
+        if not tokens:
+            continue
+        mode = tokens[0].upper()
+        if mode == "OUT":
+            continue
+        if mode in {"IN", "INOUT", "VARIADIC"}:
+            tokens.pop(0)
+        if tokens and tokens[0].lower().startswith("p_"):
+            tokens.pop(0)
+        identity.append(" ".join(tokens))
+    return ", ".join(identity)
+
+
 def rewrite_creates(text: str, dir_name: str | None, moves: dict[str, tuple[str, str]]) -> str:
     out: list[str] = []
     pos = 0
@@ -309,9 +346,10 @@ def rewrite_creates(text: str, dir_name: str | None, moves: dict[str, tuple[str,
             continue
         sch, new = sch_new
         args = scan_args(text, m.end() - 1)
+        drop_args = drop_identity_args(args)
         prefix = text[max(0, m.start() - 240) : m.start()]
         if f"DROP FUNCTION IF EXISTS laplace.{name}(" not in prefix:
-            out.append(f"DROP FUNCTION IF EXISTS laplace.{name}({args});\n")
+            out.append(f"DROP FUNCTION IF EXISTS laplace.{name}({drop_args});\n")
         out.append(f"CREATE OR REPLACE FUNCTION {sch}.{new}(")
         pos = m.end()
     out.append(text[pos:])
@@ -343,9 +381,9 @@ def rewrite_calls(
     for old in sorted(call_map.keys(), key=len, reverse=True):
         target = call_map[old]
         text = re.sub(rf"\blaplace\.{re.escape(old)}\b", target, text)
-        text = re.sub(rf"\b@extschema@\.{re.escape(old)}\b", target, text)
+        text = re.sub(rf"@extschema@\.{re.escape(old)}\b", target, text)
         if rewrite_bare:
-            text = re.sub(rf"(?<![.\w]){re.escape(old)}\s*\(", f"{target}(", text)
+            text = re.sub(rf"(?<![.\w]){re.escape(old)}[ \t]*\(", f"{target}(", text)
     # undo double purpose: converse.converse.chat
     text = re.sub(
         r"\b(consensus|converse|lexical|taxonomy|generation|structural|chess|realize|ops)\.\1\.",

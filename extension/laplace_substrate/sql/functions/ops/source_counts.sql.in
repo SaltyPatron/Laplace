@@ -23,7 +23,7 @@ CREATE OR REPLACE FUNCTION ops.source_counts()
     ), numbered AS MATERIALIZED (
       SELECT r.*, row_number() OVER (ORDER BY evidence DESC NULLS LAST, source_id) AS rn FROM raw r
     ), batch AS MATERIALIZED (
-      SELECT @extschema@.render_batch(array_agg(source_id ORDER BY rn)) AS labels FROM numbered
+      SELECT realize.render_batch(array_agg(source_id ORDER BY rn)) AS labels FROM numbered
     )
     SELECT b.labels[n.rn], n.source_id, n.evidence, n.content
     FROM numbered n CROSS JOIN batch b ORDER BY n.rn

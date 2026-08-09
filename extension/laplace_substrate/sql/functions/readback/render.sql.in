@@ -1,4 +1,4 @@
-DROP FUNCTION IF EXISTS laplace.render(p_id bytea);
+DROP FUNCTION IF EXISTS laplace.render(bytea);
 CREATE OR REPLACE FUNCTION realize.render(p_id bytea) RETURNS text
     LANGUAGE sql STABLE
     AS $$
@@ -10,7 +10,7 @@ CREATE OR REPLACE FUNCTION realize.render(p_id bytea) RETURNS text
         -- NOT gate this on an entities lookup -- that would defeat the whole point
         -- of having a perfcache and would misrender orphaned-but-valid tier-0 ids
         -- via the slower fallbacks below (or worse, as opaque hex).
-        chr(@extschema@.codepoint_for_id(p_id)),
+        chr(realize.codepoint_for_id(p_id)),
 
         -- Name-edge resolution goes through the one shared primitive rather than a
         -- private HAS_NAME_ALIAS-only argmax: realize.resolve_name() consults HAS_NAME

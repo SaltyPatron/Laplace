@@ -1,4 +1,4 @@
-DROP FUNCTION IF EXISTS laplace.render_gaps(p_limit integer DEFAULT 50);
+DROP FUNCTION IF EXISTS laplace.render_gaps(integer);
 CREATE OR REPLACE FUNCTION realize.render_gaps(p_limit integer DEFAULT 50)
     RETURNS TABLE(id bytea, roles text, refs bigint)
     LANGUAGE sql STABLE
@@ -17,7 +17,7 @@ CREATE OR REPLACE FUNCTION realize.render_gaps(p_limit integer DEFAULT 50)
     SELECT a.id, a.roles, a.refs
     FROM agg a
     WHERE NOT EXISTS (SELECT 1 FROM @extschema@.canonical_names n WHERE n.id = a.id)
-      AND @extschema@.codepoint_for_id(a.id) IS NULL
+      AND realize.codepoint_for_id(a.id) IS NULL
       AND NOT EXISTS (SELECT 1 FROM @extschema@.v_word_points w
                       WHERE w.id = a.id AND w.trajectory IS NOT NULL)
     ORDER BY a.refs DESC

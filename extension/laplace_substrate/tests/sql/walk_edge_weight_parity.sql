@@ -37,7 +37,8 @@ SELECT bool_and(
 FROM (VALUES
     (1600000000000::bigint,  30000000000::bigint,  50::bigint),  -- confident win
     (1600000000000::bigint, 350000000000::bigint,   1::bigint),  -- wide-RD win
-    (1400000000000::bigint,  30000000000::bigint,  50::bigint),  -- consensus.refuted(1500000000000::bigint,  80000000000::bigint,  10::bigint),  -- neutral
+    (1400000000000::bigint,  30000000000::bigint,  50::bigint),  -- refuted
+    (1500000000000::bigint,  80000000000::bigint,  10::bigint),  -- neutral
     (2010500000000::bigint,  12000000000::bigint,   4::bigint),  -- half-max witness
     (1500000000001::bigint,           0::bigint,   1::bigint),   -- minimal win, no rd
     (1499999999999::bigint,           0::bigint, 999::bigint)    -- minimal loss

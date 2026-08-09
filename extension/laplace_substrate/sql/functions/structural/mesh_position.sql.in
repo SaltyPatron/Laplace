@@ -1,6 +1,6 @@
 -- A node's position in the semantic mesh. IDs are selected and ranked first;
 -- every display label is resolved in one position-aligned batch at the edge.
-DROP FUNCTION IF EXISTS laplace.mesh_position(p_id bytea);
+DROP FUNCTION IF EXISTS laplace.mesh_position(bytea);
 CREATE OR REPLACE FUNCTION structural.mesh_position(p_id bytea)
     RETURNS TABLE(dir text, id bytea, label text, relation text,
                   hub_type text, eff_mu numeric, witnesses bigint)
