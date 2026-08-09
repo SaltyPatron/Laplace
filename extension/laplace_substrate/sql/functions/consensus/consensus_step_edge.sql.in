@@ -23,6 +23,7 @@
 -- reason this body cannot simply delegate to edges_raw is that edges_raw takes
 -- no neighbour filter, so it would apply its cap to the whole fan-out of p_from
 -- before p_to could be selected out of it.
+DROP FUNCTION IF EXISTS laplace.consensus_step_edge(bytea, bytea);
 CREATE OR REPLACE FUNCTION consensus.step_edge(
     p_from bytea,
     p_to   bytea)

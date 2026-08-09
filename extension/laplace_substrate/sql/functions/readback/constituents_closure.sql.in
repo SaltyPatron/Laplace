@@ -19,6 +19,7 @@
 -- Termination: the content law makes the constituent DAG acyclic (constituents are strictly
 -- lower-tier), and the depth cap is a belt-and-braces bound; leaves (codepoints, no type-1
 -- trajectory) yield zero rows and stop the descent.
+DROP FUNCTION IF EXISTS laplace.constituents_closure(bytea[], integer);
 CREATE OR REPLACE FUNCTION realize.constituents_closure(
     p_roots bytea[],
     p_max_depth integer DEFAULT 32

@@ -68,6 +68,7 @@
 -- substrate that fallback covers no ids and costs nothing; on the generation_corpus
 -- fixture (synthetic content, zero Unicode layer) it is the whole answer, which is
 -- the case that broke main on merge and is why the COALESCE is load-bearing.
+DROP FUNCTION IF EXISTS laplace.corpus_whitespace_vocab_indices(bytea[]);
 CREATE OR REPLACE FUNCTION generation.corpus_whitespace_vocab_indices(p_vocab bytea[])
     RETURNS TABLE(vocab_idx int)
     LANGUAGE plpgsql STABLE PARALLEL SAFE AS $$

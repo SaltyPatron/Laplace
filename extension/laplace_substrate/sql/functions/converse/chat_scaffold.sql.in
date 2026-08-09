@@ -15,6 +15,7 @@
 -- p_key is a fixed slot name (parts / kinds / related / core / no_edges / no_type /
 -- band). p_topic and p_labels / p_extra fill the slots. Missing pieces yield NULL
 -- so the caller can decide, not empty-string silence.
+DROP FUNCTION IF EXISTS laplace.chat_scaffold(bytea, text, text, text, text);
 CREATE OR REPLACE FUNCTION converse.chat_scaffold(
         p_lang   bytea,
         p_key    text,

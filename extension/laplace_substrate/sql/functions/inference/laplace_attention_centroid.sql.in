@@ -53,6 +53,7 @@
 -- No SET search_path: it blocks inlining (pg_proc.proconfig, checked at
 -- clauses.c:5168 for the set-returning path). Every reference is
 -- schema-qualified instead. GH #860.
+DROP FUNCTION IF EXISTS laplace.laplace_attention_centroid(bytea, bytea);
 CREATE OR REPLACE FUNCTION generation.laplace_attention_centroid(
     p_entity   bytea,
     p_band_mask bytea)

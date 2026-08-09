@@ -9,6 +9,7 @@
 -- replace()/lower() and still return NULL, so the value is unchanged, but the
 -- declaration is what documents that a NULL type has no label rather than a blank
 -- one. The search_path clause was the free half of this win; STRICT is not.
+DROP FUNCTION IF EXISTS laplace.type_label(bytea);
 CREATE OR REPLACE FUNCTION lexical.type_label(p_type bytea)
     RETURNS text
     LANGUAGE sql LAPLACE_STABLE_STRICT AS $$

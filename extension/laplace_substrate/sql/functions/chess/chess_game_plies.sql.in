@@ -1,5 +1,6 @@
 -- GH #736 re-key: the input parameter was renamed (p_game -> p_event), which
 -- CREATE OR REPLACE cannot do on the upgrade path.
+DROP FUNCTION IF EXISTS laplace.chess_game_plies(bytea);
 CREATE OR REPLACE FUNCTION chess.game_plies(p_event bytea)
     RETURNS TABLE(ply integer, position_id bytea, san text, clock text,
                   eval_token text, think_class text, move_quality text)

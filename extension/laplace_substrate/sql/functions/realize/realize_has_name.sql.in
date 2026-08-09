@@ -1,5 +1,6 @@
 -- realize._has_name — GH #862 / #860. No SET (this is on the per-row label path),
 -- real schema names.
+DROP FUNCTION IF EXISTS laplace._realize_has_name(bytea, bytea);
 CREATE OR REPLACE FUNCTION realize._has_name(p_id bytea, p_lang bytea DEFAULT NULL)
     RETURNS text
     LANGUAGE sql STABLE PARALLEL SAFE AS $$

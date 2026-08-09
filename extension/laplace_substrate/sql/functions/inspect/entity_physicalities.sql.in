@@ -1,3 +1,4 @@
+DROP FUNCTION IF EXISTS laplace.entity_physicalities(bytea);
 DROP FUNCTION IF EXISTS consensus.entity_physicalities(bytea);
 CREATE OR REPLACE FUNCTION ops.entity_physicalities(p_id bytea)
     RETURNS TABLE(type smallint, x double precision, y double precision,

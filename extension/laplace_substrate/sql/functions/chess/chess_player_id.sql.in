@@ -1,3 +1,4 @@
+DROP FUNCTION IF EXISTS laplace.chess_player_id(text);
 CREATE OR REPLACE FUNCTION chess.player_id(p_name text)
     RETURNS bytea
     LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$

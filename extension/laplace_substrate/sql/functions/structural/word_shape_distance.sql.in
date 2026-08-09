@@ -1,3 +1,4 @@
+DROP FUNCTION IF EXISTS laplace.word_shape_distance(text, text);
 CREATE OR REPLACE FUNCTION structural.word_shape_distance(p_a text, p_b text) RETURNS double precision
     LANGUAGE sql STABLE
  AS $$

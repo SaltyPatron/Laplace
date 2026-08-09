@@ -8,6 +8,7 @@
 -- pair adjacent", never "how many times did it occur". Callers needing occurrence mass
 -- must use testimony (laplace.attestations.observation_count / consensus.witness_count), which the
 -- text lane deliberately does not emit. Do not relabel this as corpus frequency.
+DROP FUNCTION IF EXISTS laplace.word_order(bytea[], int, int);
 CREATE OR REPLACE FUNCTION generation.word_order(p_vocab bytea[], p_trajs int DEFAULT 100000, p_gap int DEFAULT 1)
     RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$

@@ -8,6 +8,7 @@
 --
 -- IDS OUT: peer_line_id only. Name/ECO are separate laplace.attestations; realize.render via
 -- realize_batch on a page of peer ids if needed — never per-row realize here.
+DROP FUNCTION IF EXISTS laplace.chess_opening_shape_peers(bytea, integer, float8);
 CREATE OR REPLACE FUNCTION chess.opening_shape_peers(
     p_line bytea,
     p_k integer DEFAULT 12,

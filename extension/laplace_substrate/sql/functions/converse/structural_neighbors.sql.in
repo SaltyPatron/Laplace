@@ -1,6 +1,7 @@
 -- Shape axis: Frechet over REALIZED curves (entity_curve), never packed
 -- laplace.physicalities.trajectory (Rule #3 / Issue 51).
 -- structural.neighbors — GH #862 / #860. No SET, real schema names.
+DROP FUNCTION IF EXISTS laplace.structural_neighbors(text, integer);
 CREATE OR REPLACE FUNCTION structural.neighbors(p_word text, p_k integer DEFAULT 10)
     RETURNS TABLE(neighbor text, geodesic double precision, frechet double precision)
     LANGUAGE plpgsql STABLE AS $sn$

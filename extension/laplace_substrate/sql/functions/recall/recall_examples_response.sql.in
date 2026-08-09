@@ -1,3 +1,4 @@
+DROP FUNCTION IF EXISTS laplace.recall_examples_response(bytea);
 CREATE OR REPLACE FUNCTION converse.recall_examples_response(p_topic bytea)
     RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$

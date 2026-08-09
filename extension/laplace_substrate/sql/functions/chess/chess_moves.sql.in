@@ -1,3 +1,4 @@
+DROP FUNCTION IF EXISTS laplace.chess_moves(bytea, integer);
 CREATE OR REPLACE FUNCTION chess.moves(p_position bytea, p_limit integer DEFAULT 12)
     RETURNS TABLE(next_position bytea, eff_mu double precision, rd double precision,
                   witness_count bigint)

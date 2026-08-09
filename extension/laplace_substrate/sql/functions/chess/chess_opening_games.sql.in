@@ -31,6 +31,7 @@
 -- p_source selects one witness when they disagree: ChessPgn transcribes the PGN's own
 -- Opening header, ChessAnalysis derives it by SAN prefix, ChessOpeningMatch derives it by
 -- board identity. NULL (default) accepts any.
+DROP FUNCTION IF EXISTS laplace.chess_opening_games(text, int, int, bytea);
 CREATE OR REPLACE FUNCTION chess.opening_games(p_opening text,
                                                p_limit int DEFAULT 25,
                                                p_offset int DEFAULT 0,

@@ -1,3 +1,4 @@
+DROP FUNCTION IF EXISTS laplace.realize_path(bytea[], bytea[], int[], bytea);
 CREATE OR REPLACE FUNCTION realize.path(p_path bytea[], p_types bytea[], p_dirs int[],
                                         p_lang bytea DEFAULT NULL)
     RETURNS text

@@ -1,3 +1,4 @@
+DROP FUNCTION IF EXISTS laplace.related(bytea, bytea, bytea, int);
 CREATE OR REPLACE FUNCTION consensus.related(p_word bytea, p_type bytea, p_lang bytea DEFAULT NULL,
                                    p_limit int DEFAULT 10)
     RETURNS TABLE(fact text, eff_mu numeric, witnesses bigint)

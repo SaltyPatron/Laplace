@@ -28,6 +28,7 @@
 -- (consensus.edges(), which wraps this and resolves in one realize_batch after the limit),
 -- because the native walkers that consume edges want ids and would pay for text
 -- they never realize.render.
+DROP FUNCTION IF EXISTS laplace.edges_raw(bytea, text, bytea[], int, boolean, text);
 -- BEGIN ATOMIC: GH #764. No SET search_path (#617/#860) — inlining into wrappers.
 CREATE OR REPLACE FUNCTION consensus.edges_raw(
         p_subject   bytea,

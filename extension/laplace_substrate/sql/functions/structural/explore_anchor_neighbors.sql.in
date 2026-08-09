@@ -18,6 +18,7 @@
 --     ExploreDecomposeService is already a realized LINESTRING ZM of child
 --     coords; candidates must use entity_curve, never packed
 --     laplace.physicalities.trajectory (Rule #3 / Issue 51).
+DROP FUNCTION IF EXISTS laplace.explore_anchor_neighbors(float8, float8, float8, float8, text, integer, integer, float8);
 CREATE OR REPLACE FUNCTION structural.explore_anchor_neighbors(
     p_cx float8, p_cy float8, p_cz float8, p_cm float8,
     p_traj_wkt   text    DEFAULT NULL,

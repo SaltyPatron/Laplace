@@ -1,3 +1,4 @@
+DROP FUNCTION IF EXISTS laplace.attestation_response(bytea, bytea, bytea[], bytea, integer);
 DROP FUNCTION IF EXISTS consensus.attestation_response(bytea, bytea, bytea[], bytea, integer);
 CREATE OR REPLACE FUNCTION ops.attestation_response(
     p_subject_id        bytea,

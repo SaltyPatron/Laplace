@@ -1,3 +1,4 @@
+DROP FUNCTION IF EXISTS laplace.consensus_layer_plane(bytea[], float8, float8, int);
 CREATE OR REPLACE FUNCTION generation.consensus_layer_plane(
         p_vocab bytea[], p_rank_lo float8, p_rank_hi float8, p_degree_cap int DEFAULT 48)
     RETURNS TABLE(subject_id bytea, object_id bytea, w double precision, layer_rank double precision)

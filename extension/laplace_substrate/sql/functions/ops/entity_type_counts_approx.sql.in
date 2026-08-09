@@ -1,5 +1,6 @@
 -- BEGIN ATOMIC: GH #764.
 -- Planner-statistics form of ops.entity_type_counts(MCV x reltuples).
+DROP FUNCTION IF EXISTS laplace.entity_type_counts_approx();
 CREATE OR REPLACE FUNCTION ops.entity_type_counts_approx()
     RETURNS TABLE(type text, type_id bytea, entities_approx bigint)
     LANGUAGE sql STABLE

@@ -2,6 +2,7 @@
 -- per miss on laplace.physicalities' hilbert-band partitioning; see generate_walk.c
 -- comment above ordinal_continuity_bonus). Opt in only once a hilbert-band-
 -- scoped search lands; recall_walk_response does not enable it.
+DROP FUNCTION IF EXISTS laplace.walk_branches(bytea, bytea, int, int, bytea, bytea[], bool);
 CREATE OR REPLACE FUNCTION consensus.walk_branches(
     p_prompt              bytea,
     p_type                bytea    DEFAULT NULL,

@@ -9,6 +9,7 @@
 -- converse.relation_bands() adds LIVE consensus counts, which is a full aggregate over
 -- the consensus tree (measured 1.34s at 5.66M rows), so it belongs in a catalog
 -- call a client makes once and caches — never in a per-query join.
+DROP FUNCTION IF EXISTS laplace.relation_band_catalog();
 CREATE OR REPLACE FUNCTION converse.relation_band_catalog()
     RETURNS TABLE(band integer, name text, rank double precision)
     LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
@@ -28,6 +29,7 @@ CREATE OR REPLACE FUNCTION converse.relation_band_catalog()
       (12, 'probationary',         0.05)
 $$;
 
+DROP FUNCTION IF EXISTS laplace.relation_bands();
 CREATE OR REPLACE FUNCTION converse.relation_bands()
     RETURNS TABLE(band integer, name text, rank double precision,
                   relation_types bigint, consensus_rows bigint)

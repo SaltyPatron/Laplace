@@ -1,4 +1,5 @@
 -- BEGIN ATOMIC: GH #764.
+DROP FUNCTION IF EXISTS laplace.source_counts_approx();
 CREATE OR REPLACE FUNCTION ops.source_counts_approx()
     RETURNS TABLE(source text, source_id bytea, evidence_approx bigint)
     LANGUAGE sql STABLE

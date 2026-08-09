@@ -6,6 +6,7 @@
 --
 -- The realize.render itself goes through realize.path(GH #906 item 2) instead of a third
 -- hand-rolled arrow join. walk_strongest walks forward, so every direction is 1.
+DROP FUNCTION IF EXISTS laplace.recall_fallback_walk(bytea, int);
 CREATE OR REPLACE FUNCTION converse.recall_fallback_walk(p_topic bytea, p_depth int DEFAULT 6)
     RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE

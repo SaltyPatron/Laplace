@@ -6,6 +6,7 @@
 -- String body on purpose (not BEGIN ATOMIC): extension upgrades recreate
 -- v_attestation_readable in the same script; parse-time resolution fails with
 -- "relation does not exist" mid-upgrade (GH #764).
+DROP FUNCTION IF EXISTS laplace.source_roster(bytea, int);
 
 CREATE OR REPLACE FUNCTION ops.source_roster(p_source bytea, p_limit int DEFAULT 40)
     RETURNS TABLE(subject_id bytea, subject text, relation text,

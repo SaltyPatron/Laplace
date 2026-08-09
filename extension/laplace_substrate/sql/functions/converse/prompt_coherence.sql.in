@@ -48,6 +48,7 @@
 -- resolve_last_word's semantics restricted to tokens the graph holds senses for.
 -- total_mass stays exposed: it is the signal that consensus.refuted the premise, and the
 -- election diagnostic reads it.
+DROP FUNCTION IF EXISTS laplace.prompt_coherence(text);
 CREATE OR REPLACE FUNCTION converse.prompt_coherence(p_prompt text)
     RETURNS TABLE(ord int, tok bytea, synset_id bytea,
                   coherence double precision, denote_mu numeric, peers bigint,

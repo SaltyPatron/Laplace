@@ -1,6 +1,7 @@
 -- lexical.lexical_peers — GH #862 / #860. No SET (it blocks plan caching and SQL
 -- inlining, so the body re-plans per call); real schema names, no build-time
 -- placeholder.
+DROP FUNCTION IF EXISTS laplace.lexical_peers(bytea);
 CREATE OR REPLACE FUNCTION lexical.lexical_peers(p_word bytea)
     RETURNS bytea[]
     LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$

@@ -350,6 +350,7 @@ BEGIN
 END;
 $$;
 
+DROP FUNCTION IF EXISTS laplace.converse_compose(text, int, bytea, bigint, bytea[]);
 CREATE OR REPLACE FUNCTION converse.compose(p_prompt text,
                                             p_steps int DEFAULT 40,
                                             p_lang bytea DEFAULT NULL,

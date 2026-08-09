@@ -1,3 +1,4 @@
+DROP FUNCTION IF EXISTS laplace.chess_head_to_head(bytea, integer);
 CREATE OR REPLACE FUNCTION chess.head_to_head(p_player bytea, p_limit integer DEFAULT 25)
     RETURNS TABLE(opponent_id bytea, opponent text, games bigint,
                   rating double precision, rd double precision, eff_mu double precision)

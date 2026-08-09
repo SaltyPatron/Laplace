@@ -1,3 +1,4 @@
+DROP FUNCTION IF EXISTS laplace.recall_context_exclude(text, bytea);
 CREATE OR REPLACE FUNCTION converse.recall_context_exclude(p_prompt text, p_topic bytea)
     RETURNS bytea[]
     LANGUAGE sql STABLE PARALLEL SAFE AS $$

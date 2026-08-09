@@ -1,3 +1,4 @@
+DROP FUNCTION IF EXISTS laplace.chess_player_ratings(bytea);
 CREATE OR REPLACE FUNCTION chess.player_ratings(p_player bytea)
     RETURNS TABLE(rating integer, games bigint)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$

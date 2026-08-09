@@ -1,4 +1,5 @@
 -- consensus.relation_summary — GH #862 / #860. No SET, real schema names.
+DROP FUNCTION IF EXISTS laplace.relation_summary(bytea, bytea);
 CREATE OR REPLACE FUNCTION consensus.relation_summary(p_x bytea, p_y bytea)
     RETURNS TABLE(relation text, plane text, mu numeric, usage bigint,
                   geodesic double precision, verdict text)

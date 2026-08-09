@@ -1,3 +1,4 @@
+DROP FUNCTION IF EXISTS laplace.synset_members(bytea);
 CREATE OR REPLACE FUNCTION lexical.synset_members(p_word bytea)
     RETURNS TABLE(member bytea, lang bytea, mu bigint, witnesses bigint, sense_mu numeric)
     LANGUAGE sql LAPLACE_STABLE_STRICT AS $$

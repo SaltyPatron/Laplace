@@ -29,6 +29,7 @@
 --
 -- The frame offset is a parameter, so one body serves every backoff order rather
 -- than five hand-written arms.
+DROP FUNCTION IF EXISTS laplace.trajectory_continuations(bytea[], int);
 CREATE OR REPLACE FUNCTION generation.trajectory_continuations(
         p_ctx bytea[], p_topk int DEFAULT 256)
     RETURNS TABLE(object_id bytea, sep_id bytea, weight bigint)

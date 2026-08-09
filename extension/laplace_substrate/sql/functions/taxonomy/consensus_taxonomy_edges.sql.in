@@ -1,5 +1,6 @@
 -- taxonomy.consensus_taxonomy_edges — GH #862. Real schema names, no install-time
 -- schema placeholder (schema = 'laplace', relocatable = false: one possible expansion).
+DROP FUNCTION IF EXISTS laplace.consensus_taxonomy_edges(bytea, bytea[]);
 CREATE OR REPLACE FUNCTION taxonomy.consensus_taxonomy_edges(p_subject bytea, p_types bytea[])
     RETURNS TABLE(object_id bytea, type_id bytea, rating bigint, rd bigint)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$

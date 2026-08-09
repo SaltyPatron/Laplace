@@ -1,3 +1,4 @@
+DROP FUNCTION IF EXISTS laplace.consensus_peer(bytea, int);
 CREATE OR REPLACE FUNCTION generation.consensus_peer(p_id bytea, p_k int DEFAULT 6)
     RETURNS bytea
     LANGUAGE plpgsql STABLE PARALLEL RESTRICTED

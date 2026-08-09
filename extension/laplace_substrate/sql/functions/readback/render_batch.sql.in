@@ -1,5 +1,6 @@
 -- Exact realize.render() ladder for an aligned id array. Graph/name work is
 -- batched; only cheap codepoint and final text projection remain per element.
+DROP FUNCTION IF EXISTS laplace.render_batch(bytea[]);
 CREATE OR REPLACE FUNCTION realize.render_batch(p_ids bytea[])
     RETURNS text[]
     LANGUAGE sql STABLE STRICT PARALLEL SAFE

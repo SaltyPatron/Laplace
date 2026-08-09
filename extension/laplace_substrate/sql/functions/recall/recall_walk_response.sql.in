@@ -25,6 +25,7 @@
 -- high-scoring but unreadable raw-hex-id reply. Averaging normalizes for
 -- path length, so a short high-confidence chain beats a long chain diluted
 -- by merely-adequate hops.
+DROP FUNCTION IF EXISTS laplace.recall_walk_response(bytea, text);
 CREATE OR REPLACE FUNCTION converse.recall_walk_response(p_topic bytea, p_mode text)
     RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE

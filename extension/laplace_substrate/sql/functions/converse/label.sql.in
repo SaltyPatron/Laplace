@@ -1,6 +1,7 @@
 -- realize.label — GH #862 / #860. A label is a rendering decision, so it lives with
 -- the realize family. No SET (it invalidates plan caching and this is per-row on the
 -- realize.render path); real schema names.
+DROP FUNCTION IF EXISTS laplace.label(bytea);
 CREATE OR REPLACE FUNCTION realize.label(p_id bytea)
     RETURNS text
     LANGUAGE sql LAPLACE_STABLE_STRICT AS $$

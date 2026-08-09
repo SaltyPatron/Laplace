@@ -3,6 +3,7 @@
 -- a cut-off run; seed verification passes on the latest row for a source
 -- being ok/skipped-complete with evidence persisted.
 -- BEGIN ATOMIC: GH #764.
+DROP FUNCTION IF EXISTS laplace.ingest_runs(int);
 
 CREATE OR REPLACE FUNCTION ops.ingest_runs(p_limit int DEFAULT 20)
     RETURNS SETOF laplace.ingest_run_journal

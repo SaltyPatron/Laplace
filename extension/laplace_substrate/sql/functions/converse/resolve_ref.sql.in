@@ -1,3 +1,4 @@
+DROP FUNCTION IF EXISTS laplace.resolve_ref(text);
 CREATE OR REPLACE FUNCTION converse.resolve_ref(p_ref text)
     RETURNS bytea
     LANGUAGE sql STABLE PARALLEL SAFE AS $$

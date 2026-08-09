@@ -11,6 +11,7 @@
 --
 -- No SET search_path: it blocks inlining, which is what makes the wrapper free
 -- (#617, #860). Every reference is schema-qualified instead.
+DROP FUNCTION IF EXISTS laplace.walk_completes_floor(bytea, int);
 -- BEGIN ATOMIC: GH #764.
 CREATE OR REPLACE FUNCTION generation.walk_completes_floor(p_subject bytea, p_limit int)
     RETURNS TABLE(object_id bytea, weight bigint)

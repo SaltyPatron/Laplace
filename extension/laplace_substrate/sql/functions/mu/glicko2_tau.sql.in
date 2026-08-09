@@ -1,2 +1,3 @@
+DROP FUNCTION IF EXISTS laplace.glicko2_tau();
 CREATE OR REPLACE FUNCTION consensus.glicko2_tau() RETURNS bigint
     LANGUAGE sql LAPLACE_IMMUTABLE AS $$ SELECT 500000000::bigint $$;

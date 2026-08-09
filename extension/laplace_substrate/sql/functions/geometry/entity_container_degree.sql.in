@@ -25,6 +25,7 @@
 --
 -- Set-based over the whole id array in one call: per-row resolution of this is
 -- the read-path defect the architecture rules name explicitly.
+DROP FUNCTION IF EXISTS laplace.entity_container_degree(bytea[], integer);
 CREATE OR REPLACE FUNCTION structural.entity_container_degree(
     p_ids bytea[],
     p_cap integer DEFAULT 8192)

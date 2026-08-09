@@ -2,6 +2,7 @@
 -- family). Old names dropped (#532).
 -- BEGIN ATOMIC: GH #764.
 DROP FUNCTION IF EXISTS laplace_entities_at_depth(smallint);
+DROP FUNCTION IF EXISTS laplace.laplace_entities_at_depth(smallint);
 DROP FUNCTION IF EXISTS structural.laplace_entities_at_depth(smallint);
 CREATE OR REPLACE FUNCTION structural.entities_at_depth(p_depth smallint)
 RETURNS SETOF laplace.entities

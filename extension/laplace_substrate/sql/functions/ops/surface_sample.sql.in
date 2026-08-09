@@ -6,6 +6,7 @@
 -- keep rows whose entity is first-observed by the source at p_tier. Labels via
 -- ONE realize.batch over survivors (not per-row render ahead of LIMIT).
 -- BEGIN ATOMIC: GH #764 beachhead.
+DROP FUNCTION IF EXISTS laplace.surface_sample(bytea, smallint, int);
 
 CREATE OR REPLACE FUNCTION ops.surface_sample(
         p_source bytea,

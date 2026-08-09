@@ -1,5 +1,6 @@
 -- BEGIN ATOMIC: GH #764.
 -- Partition skew detector via pg_class.reltuples / pg_partition_tree (no table scan).
+DROP FUNCTION IF EXISTS laplace.partition_pressure(text);
 
 CREATE OR REPLACE FUNCTION ops.partition_pressure(p_table text DEFAULT NULL)
     RETURNS TABLE(

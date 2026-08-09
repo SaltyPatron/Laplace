@@ -1,3 +1,4 @@
+DROP FUNCTION IF EXISTS laplace.resolve_name(bytea, bytea, bytea[]);
 CREATE OR REPLACE FUNCTION realize.resolve_name(
     p_id bytea,
     p_lang bytea DEFAULT NULL,

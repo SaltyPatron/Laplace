@@ -2,6 +2,7 @@
 -- GUC configured and mmap'd). Read paths error with a hint when it is missing;
 -- write paths (highway_mask_refresh) use this to degrade to a no-op instead of
 -- faulting the ingest fold.
+DROP FUNCTION IF EXISTS laplace.laplace_highway_ready();
 CREATE OR REPLACE FUNCTION consensus.laplace_highway_ready()
     RETURNS boolean
     LANGUAGE C STABLE PARALLEL SAFE

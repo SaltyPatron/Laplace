@@ -7,6 +7,7 @@
 -- primitives, this is the one door in front of them.
 --
 -- GH #862 / #860: no SET, real schema names.
+DROP FUNCTION IF EXISTS laplace.resolve(text);
 CREATE OR REPLACE FUNCTION converse.resolve(p_text text)
     RETURNS bytea
     LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$

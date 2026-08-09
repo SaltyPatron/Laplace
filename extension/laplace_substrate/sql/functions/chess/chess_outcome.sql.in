@@ -1,3 +1,4 @@
+DROP FUNCTION IF EXISTS laplace.chess_outcome(boolean, bytea);
 CREATE OR REPLACE FUNCTION chess.outcome(p_as_white boolean, p_result bytea)
     RETURNS smallint
     LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$

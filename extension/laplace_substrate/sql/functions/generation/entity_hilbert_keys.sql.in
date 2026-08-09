@@ -2,6 +2,7 @@
 -- static content positional encoding. hilbert_index is big-endian packed
 -- (lexicographic byte order = hilbert curve order), so the leading bytes are
 -- the coarsest content-locality signal.
+DROP FUNCTION IF EXISTS laplace.entity_hilbert_keys(bytea[]);
 CREATE OR REPLACE FUNCTION generation.entity_hilbert_keys(p_vocab bytea[])
     RETURNS TABLE(entity_id bytea, hilbert_index bytea)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$

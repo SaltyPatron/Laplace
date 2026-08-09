@@ -11,6 +11,7 @@
 -- follows x" -- same containment query, same separator cache, same aggregation.
 -- Asking the question is always legal; what is banned is MATERIALISING the answer
 -- as stored PRECEDES rows when the geometry already holds it losslessly.
+DROP FUNCTION IF EXISTS laplace.geometry_successors(bytea, int, int, boolean);
 CREATE OR REPLACE FUNCTION structural.geometry_successors(
         p_point    bytea,
         p_limit    int DEFAULT 20,
@@ -21,6 +22,7 @@ CREATE OR REPLACE FUNCTION structural.geometry_successors(
     LANGUAGE C STABLE;
 
 -- Named mirror: "what comes before x", read from the same sequence.
+DROP FUNCTION IF EXISTS laplace.geometry_predecessors(bytea, int, int);
 CREATE OR REPLACE FUNCTION structural.geometry_predecessors(
         p_point  bytea,
         p_limit  int DEFAULT 20,
@@ -33,6 +35,7 @@ $$;
 
 -- Both directions at once, for the symmetric questions (shared-usage overlap,
 -- domain co-occurrence) that must not be silently halved to fit a one-way walk.
+DROP FUNCTION IF EXISTS laplace.geometry_neighbours(bytea, int, int);
 CREATE OR REPLACE FUNCTION structural.geometry_neighbours(
         p_point  bytea,
         p_limit  int DEFAULT 20,

@@ -1,3 +1,4 @@
+DROP FUNCTION IF EXISTS laplace.anagrams_of(text);
 CREATE OR REPLACE FUNCTION structural.anagrams_of(p_word text)
     RETURNS TABLE(word text, entity_id bytea)
     LANGUAGE sql STABLE

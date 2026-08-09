@@ -1,3 +1,4 @@
+DROP FUNCTION IF EXISTS laplace.astar_path_raw(bytea, bytea[], bytea[], int, bool, bool);
 CREATE OR REPLACE FUNCTION converse.astar_path_raw(
     p_start        bytea,
     p_goals        bytea[],

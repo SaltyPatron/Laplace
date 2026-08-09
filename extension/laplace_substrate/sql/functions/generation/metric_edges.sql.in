@@ -1,6 +1,7 @@
 -- Pairwise metric edges over a vocab. frechet/hausdorff use REALIZED curves
 -- (entity_curve), never packed laplace.physicalities.trajectory (Rule #3 / Issue 51).
 -- Curves are built once per vocab id in CTE `v`.
+DROP FUNCTION IF EXISTS laplace.metric_edges(bytea[], text, int, int);
 CREATE OR REPLACE FUNCTION generation.metric_edges(
         p_vocab bytea[], p_metric text DEFAULT 'frechet', p_k int DEFAULT 16, p_probe int DEFAULT 64)
     RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)

@@ -1,3 +1,4 @@
+DROP FUNCTION IF EXISTS laplace.chess_players_by_initial(text, integer, integer);
 CREATE OR REPLACE FUNCTION chess.players_by_initial(
         p_initial text, p_limit integer DEFAULT 50, p_offset integer DEFAULT 0)
     RETURNS TABLE(player_id bytea, name text, games bigint,

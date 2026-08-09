@@ -1,3 +1,4 @@
+DROP FUNCTION IF EXISTS laplace.entity_facets(bytea);
 DROP FUNCTION IF EXISTS consensus.entity_facets(bytea);
 CREATE OR REPLACE FUNCTION ops.entity_facets(p_id bytea)
     RETURNS TABLE(tier smallint, type_id bytea)

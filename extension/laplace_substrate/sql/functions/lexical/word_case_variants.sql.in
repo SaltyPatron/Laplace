@@ -7,6 +7,7 @@
 -- stays realize.render_text, minting stays laplace.word_id, the existence gate
 -- stays consensus.entity_exists; the C only walks the grapheme trajectory once and
 -- reproduces word_case_map_surface's string assembly. See src/lexical_case.c.
+DROP FUNCTION IF EXISTS laplace.word_case_variants(bytea);
 CREATE OR REPLACE FUNCTION lexical.word_case_variants(p_word bytea)
     RETURNS bytea[]
     AS 'MODULE_PATHNAME', 'pg_laplace_word_case_variants'

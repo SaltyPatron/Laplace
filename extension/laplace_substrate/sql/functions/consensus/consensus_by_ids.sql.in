@@ -1,3 +1,4 @@
+DROP FUNCTION IF EXISTS laplace.consensus_by_ids(bytea[]);
 CREATE OR REPLACE FUNCTION consensus.by_ids(p_ids bytea[])
     RETURNS TABLE(id bytea, eff_mu double precision, rd double precision,
                   witness_count double precision)
@@ -15,6 +16,7 @@ CREATE OR REPLACE FUNCTION consensus.by_ids(p_ids bytea[])
     WHERE c.id = ANY(p_ids)
 $$;
 
+DROP FUNCTION IF EXISTS laplace.consensus_by_ids(bytea[], bytea);
 CREATE OR REPLACE FUNCTION consensus.by_ids(p_ids bytea[], p_type bytea)
     RETURNS TABLE(id bytea, eff_mu double precision, rd double precision,
                   witness_count double precision)

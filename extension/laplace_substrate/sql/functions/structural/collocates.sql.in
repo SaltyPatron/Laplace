@@ -1,3 +1,4 @@
+DROP FUNCTION IF EXISTS laplace.collocates(text, int);
 CREATE OR REPLACE FUNCTION structural.collocates(p_word text, p_limit int DEFAULT 12)
     RETURNS TABLE(next_word text, mu numeric, witnesses bigint)
     LANGUAGE sql STABLE

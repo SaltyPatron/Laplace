@@ -50,6 +50,7 @@
 -- this overload is on the same read path and was still paying it. Every reference is
 -- `@extschema@.`-qualified instead, which is what the clause was doing and costs
 -- nothing at plan time.
+DROP FUNCTION IF EXISTS laplace.senses(bytea, bytea[]);
 CREATE OR REPLACE FUNCTION lexical.senses(p_word bytea, p_context bytea[])
     RETURNS TABLE(sense_id bytea, synset_id bytea, eff_mu numeric, witnesses bigint,
                   score numeric)

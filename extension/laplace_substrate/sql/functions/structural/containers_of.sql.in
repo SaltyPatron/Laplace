@@ -10,6 +10,7 @@
 -- scan (measured 850ms for a query that should be sub-millisecond). This
 -- drives the walk as a sequence of cached, single-key SPI probes instead,
 -- each of which the GIN index serves in ~2ms regardless of table size.
+DROP FUNCTION IF EXISTS laplace.containers_of(bytea, int, int);
 CREATE OR REPLACE FUNCTION structural.containers_of(
     p_entity   bytea,
     p_max_hops int   DEFAULT 1,

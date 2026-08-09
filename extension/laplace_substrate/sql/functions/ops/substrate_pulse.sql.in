@@ -2,6 +2,7 @@
 -- enough to poll every few seconds (estimate counts + a PK scan of the tiny
 -- flush journal + one pg_stat_activity pass). Consolidated from the API's
 -- inline C# SQL — the HTTP /v1/pulse and any MCP caller read THIS.
+DROP FUNCTION IF EXISTS laplace.substrate_pulse();
 
 CREATE OR REPLACE FUNCTION ops.substrate_pulse()
     RETURNS TABLE(entities bigint, attestations bigint, consensus bigint,

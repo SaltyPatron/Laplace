@@ -32,6 +32,7 @@
 -- BIAS toward a language rather than hard-filter to it: a genuinely
 -- cross-lingual prompt must still work, and the substrate's identity law is
 -- language-agnostic by construction.
+DROP FUNCTION IF EXISTS laplace.prompt_language(text);
 CREATE OR REPLACE FUNCTION converse.prompt_language(p_prompt text)
     RETURNS TABLE(lang_id bytea, mass numeric)
     AS 'MODULE_PATHNAME', 'pg_laplace_prompt_language'
@@ -39,7 +40,8 @@ CREATE OR REPLACE FUNCTION converse.prompt_language(p_prompt text)
 
 -- The winner alone, for callers that just want to pin a rendering language.
 -- A wrapper, not a second ladder.
-
+DROP FUNCTION IF EXISTS laplace.prompt_language(text);
+DROP FUNCTION IF EXISTS laplace.prompt_language_top(text);
 CREATE OR REPLACE FUNCTION converse.prompt_language_top(p_prompt text)
     RETURNS bytea
     LANGUAGE sql STABLE AS $$

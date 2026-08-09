@@ -36,6 +36,7 @@
 --
 -- READ LAW: ids until the end; one realize_batch over the collected ids joined
 -- back by ordinal. No per-row realize, no string comparison, no lower().
+DROP FUNCTION IF EXISTS laplace.resolve_audit(text, bytea);
 CREATE OR REPLACE FUNCTION converse.resolve_audit(p_prompt text, p_lang_rel bytea)
     RETURNS TABLE(ord int, token text, resolved boolean, tier smallint,
                   senses bigint, top_language text, verdict text)

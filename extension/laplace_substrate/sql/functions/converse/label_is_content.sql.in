@@ -7,6 +7,7 @@
 -- "adjs" lexfile case), the exact one-definition-per-fact hazard. One predicate,
 -- both callers. IMMUTABLE (pure function of the input, no schema objects) so it
 -- inlines into the WHERE and needs no search_path.
+DROP FUNCTION IF EXISTS laplace.label_is_content(text);
 CREATE OR REPLACE FUNCTION converse.label_is_content(p_label text)
     RETURNS boolean
     LANGUAGE sql IMMUTABLE AS $$

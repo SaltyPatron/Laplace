@@ -1,3 +1,4 @@
+DROP FUNCTION IF EXISTS laplace.trajectory_point_count(geometry);
 CREATE OR REPLACE FUNCTION structural.trajectory_point_count(p_traj geometry)
     RETURNS integer
     LANGUAGE sql IMMUTABLE STRICT

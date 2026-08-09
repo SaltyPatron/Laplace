@@ -6,6 +6,7 @@
 -- edge row (~369k calls ≈ 10s measured), same rk CTE as
 -- consensus_layer_plane/consensus_type_plane. edges is referenced twice below
 -- (rk's DISTINCT scan and summed's join) — the fence stays load-bearing.
+DROP FUNCTION IF EXISTS laplace.consensus_adjacency(bytea[], int);
 CREATE OR REPLACE FUNCTION generation.consensus_adjacency(
         p_vocab bytea[], p_degree_cap int DEFAULT 64)
     RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)

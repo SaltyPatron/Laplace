@@ -1,3 +1,4 @@
+DROP FUNCTION IF EXISTS laplace.register_canonical(text);
 CREATE OR REPLACE FUNCTION realize.register_canonical(p_name text) RETURNS bytea
     LANGUAGE sql AS $$
     INSERT INTO laplace.canonical_names (id, name)

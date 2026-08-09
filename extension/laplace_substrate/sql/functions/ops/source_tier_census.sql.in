@@ -2,6 +2,7 @@
 -- the source, grouped by tier — the cheap index path on first_observed_by, not
 -- a join across attestations. Answers the chess-vs-vocabulary tier-2 question
 -- without hand-rolled GROUP BY. BEGIN ATOMIC: GH #764 beachhead.
+DROP FUNCTION IF EXISTS laplace.source_tier_census(bytea);
 
 CREATE OR REPLACE FUNCTION ops.source_tier_census(p_source bytea)
     RETURNS TABLE(tier smallint, entities bigint)

@@ -1,5 +1,6 @@
 -- GH #736 re-key: the key OUT column was renamed (game_id -> event_id), which
 -- CREATE OR REPLACE cannot do on the upgrade path.
+DROP FUNCTION IF EXISTS laplace.chess_player_games(bytea, integer, integer);
 CREATE OR REPLACE FUNCTION chess.player_games(
         p_player bytea, p_limit integer DEFAULT 25, p_offset integer DEFAULT 0)
     RETURNS TABLE(event_id bytea, played_on text, event text, eco text,

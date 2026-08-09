@@ -1,6 +1,7 @@
 
 
 
+DROP FUNCTION IF EXISTS laplace.translations(bytea, int);
 CREATE OR REPLACE FUNCTION converse.translations(p_word bytea, p_limit int DEFAULT 24)
     RETURNS TABLE(translation text, language text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql LAPLACE_STABLE_STRICT

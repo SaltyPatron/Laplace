@@ -1,3 +1,4 @@
+DROP FUNCTION IF EXISTS laplace.explore_web(bytea, int, int, int);
 CREATE OR REPLACE FUNCTION consensus.explore_web(
     p_seed bytea,
     p_hops int DEFAULT 2,

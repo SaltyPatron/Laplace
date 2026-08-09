@@ -29,6 +29,7 @@
 -- defaulted one, and it cannot BE defaulted without writing the literal G3
 -- forbids. The caller resolves it -- which is also what lets this audit any
 -- relation, not only language.
+DROP FUNCTION IF EXISTS laplace.sense_audit(text, bytea, int);
 CREATE OR REPLACE FUNCTION lexical.sense_audit(p_term text, p_lang_rel bytea,
                                        p_limit int DEFAULT 64)
     RETURNS TABLE(sense text, sense_type text, via_relation text,

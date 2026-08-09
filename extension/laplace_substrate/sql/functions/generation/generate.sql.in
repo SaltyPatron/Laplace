@@ -1,3 +1,4 @@
+DROP FUNCTION IF EXISTS laplace.generate(text, int, int, float8, int, bigint);
 -- BEGIN ATOMIC: GH #764.
 CREATE OR REPLACE FUNCTION generation.generate(
         p_prompt text, p_steps int DEFAULT 40, p_max_stride int DEFAULT 5,

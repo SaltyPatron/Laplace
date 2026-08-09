@@ -1,5 +1,6 @@
 -- consensus.gaps — GH #862 / #860. No SET (it invalidates plan caching and blocks
 -- inlining), real schema names, no build-time placeholder.
+DROP FUNCTION IF EXISTS laplace.gaps(bytea);
 CREATE OR REPLACE FUNCTION consensus.gaps(p_word bytea)
     RETURNS TABLE(missing_arena text)
     LANGUAGE sql STABLE PARALLEL SAFE STRICT AS $$

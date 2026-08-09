@@ -1,3 +1,4 @@
+DROP FUNCTION IF EXISTS laplace.chess_player_moves(bytea, bytea, boolean, integer);
 CREATE OR REPLACE FUNCTION chess.player_moves(
         p_position bytea, p_player bytea, p_as_white boolean,
         p_limit integer DEFAULT 12)

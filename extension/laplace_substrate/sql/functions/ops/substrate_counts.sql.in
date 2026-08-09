@@ -1,5 +1,6 @@
 -- BEGIN ATOMIC: GH #764.
 -- Census lives in ops (purpose), not the product/extension dump schema.
+DROP FUNCTION IF EXISTS laplace.substrate_counts();
 
 CREATE OR REPLACE FUNCTION ops.substrate_counts()
     RETURNS TABLE(metric text, value bigint)

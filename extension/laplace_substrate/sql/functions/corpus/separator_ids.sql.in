@@ -27,6 +27,7 @@
 -- For a script that does not delimit with separator characters (Han, Thai,
 -- Japanese) the set is simply empty for its atoms and the sequence is
 -- content-contiguous -- the correct answer, not a silent failure.
+DROP FUNCTION IF EXISTS laplace.separator_ids();
 CREATE OR REPLACE FUNCTION generation.separator_ids()
     RETURNS bytea[]
     LANGUAGE sql STABLE AS $$

@@ -2,6 +2,7 @@
 -- consensus.edges_raw(); pins both directions, every type, eff_mu order and
 -- refuted edges INCLUDED — the axes this lane has always used. outbound is the
 -- direction the core already returns.
+DROP FUNCTION IF EXISTS laplace.explore_web_neighbors(bytea, int);
 -- BEGIN ATOMIC: GH #764.
 CREATE OR REPLACE FUNCTION consensus.explore_web_neighbors(
     p_subject bytea,

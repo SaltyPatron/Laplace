@@ -1,3 +1,4 @@
+DROP FUNCTION IF EXISTS laplace.chess_player_record(bytea);
 CREATE OR REPLACE FUNCTION chess.player_record(p_player bytea)
     RETURNS TABLE(as_white boolean, games bigint, wins bigint, draws bigint,
                   losses bigint, unscored bigint, score double precision)

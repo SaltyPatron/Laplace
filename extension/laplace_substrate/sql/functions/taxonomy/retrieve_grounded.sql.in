@@ -5,6 +5,7 @@
 -- the body was re-planned on every call. No @extschema@ either: the control file
 -- pins schema = 'laplace' with relocatable = false, so the placeholder has exactly
 -- one possible expansion. Real schema names throughout.
+DROP FUNCTION IF EXISTS laplace.retrieve_grounded(text, bytea[], integer);
 CREATE OR REPLACE FUNCTION taxonomy.retrieve_grounded(
     p_term text,
     p_domain_context bytea[] DEFAULT NULL,

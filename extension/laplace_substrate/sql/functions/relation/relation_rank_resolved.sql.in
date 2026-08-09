@@ -1,2 +1,3 @@
+DROP FUNCTION IF EXISTS laplace.relation_rank_resolved(bytea);
 CREATE OR REPLACE FUNCTION consensus.relation_rank_resolved(p_type_id bytea) RETURNS float8
     LANGUAGE c STABLE STRICT AS 'MODULE_PATHNAME', 'pg_relation_rank_resolved';

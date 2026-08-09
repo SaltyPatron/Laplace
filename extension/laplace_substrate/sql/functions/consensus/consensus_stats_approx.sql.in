@@ -1,3 +1,4 @@
+DROP FUNCTION IF EXISTS laplace.consensus_stats_approx();
 CREATE OR REPLACE FUNCTION consensus.stats_approx()
     RETURNS TABLE(evidence_rows bigint, consensus_rows bigint, dedup_ratio numeric,
                   avg_witnesses numeric, max_witnesses bigint)

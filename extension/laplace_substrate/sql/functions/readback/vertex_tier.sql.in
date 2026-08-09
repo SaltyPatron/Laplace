@@ -1,4 +1,5 @@
 -- BEGIN ATOMIC: GH #764.
+DROP FUNCTION IF EXISTS laplace.vertex_tier(bigint);
 CREATE OR REPLACE FUNCTION realize.vertex_tier(p_flags bigint) RETURNS smallint
     LANGUAGE sql LAPLACE_IMMUTABLE
 BEGIN ATOMIC

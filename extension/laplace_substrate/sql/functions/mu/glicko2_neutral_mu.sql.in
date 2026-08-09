@@ -1,3 +1,4 @@
+DROP FUNCTION IF EXISTS laplace.glicko2_neutral_mu();
 CREATE OR REPLACE FUNCTION consensus.glicko2_neutral_mu() RETURNS bigint
     AS 'MODULE_PATHNAME', 'pg_laplace_glicko2_neutral_mu'
     LANGUAGE C LAPLACE_IMMUTABLE;

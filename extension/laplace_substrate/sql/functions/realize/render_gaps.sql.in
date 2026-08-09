@@ -1,3 +1,4 @@
+DROP FUNCTION IF EXISTS laplace.render_gaps(integer);
 CREATE OR REPLACE FUNCTION realize.render_gaps(p_limit integer DEFAULT 50)
     RETURNS TABLE(id bytea, roles text, refs bigint)
     LANGUAGE sql STABLE

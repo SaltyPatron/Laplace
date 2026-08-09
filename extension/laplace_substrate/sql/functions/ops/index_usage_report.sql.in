@@ -1,3 +1,5 @@
+DROP FUNCTION IF EXISTS laplace.index_usage_report(bigint);
+DROP FUNCTION IF EXISTS laplace.index_usage_detail(text, integer);
 
 CREATE OR REPLACE FUNCTION ops.index_usage_report(p_min_bytes bigint DEFAULT 0)
     RETURNS TABLE(

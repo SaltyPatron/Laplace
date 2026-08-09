@@ -255,6 +255,7 @@ BEGIN
 END;
 $$;
 
+DROP FUNCTION IF EXISTS laplace.converse_walk(text, int, bigint);
 CREATE OR REPLACE FUNCTION converse.walk(p_prompt text, p_steps int DEFAULT 40,
                                          p_seed bigint DEFAULT NULL)
     RETURNS text
