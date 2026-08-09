@@ -119,9 +119,10 @@ public sealed class ChessEngineService : IAsyncDisposable
             var liveHost = _liveHost ??= await _getLiveHost(ct);
             var ds = liveHost.DataSource;
             var host = liveHost.TurnHost;
-            var modality = new ChessModality();
+            LoadPerfcache();
+            var modality = _modality ??= new ChessModality();
             var engine = new ModalityEngine<ChessState, ChessMove>(modality, ChessVocabulary.MoveType, host, host);
-            _ds = ds; _host = host; _modality = modality; _engine = engine;
+            _ds = ds; _host = host; _engine = engine;
             _log.LogInformation("chess engine initialized against {Conn}", LaplaceInstall.RedactConnectionString(_connString));
             return engine;
         }
@@ -391,8 +392,8 @@ public sealed class ChessEngineService : IAsyncDisposable
         bool recordToSubstrate = true, IReadOnlyList<string>? moves = null,
         string tenantId = "public", string? userId = null, CancellationToken ct = default)
     {
-        EnsureModality();
-        var liveHost = _liveHost ??= await _getLiveHost(ct);
+        await EngineAsync(ct);
+        var liveHost = _liveHost!;
         var id = liveHost.StartPlaySession(recordToSubstrate, tenantId: tenantId, userId: userId);
         var session = liveHost.GetPlaySession(id)
             ?? throw new InvalidOperationException("play session missing after start");
@@ -414,14 +415,6 @@ public sealed class ChessEngineService : IAsyncDisposable
         return new ChessPlayStart(id, state.Board.ToFen(), status, session.PlyCount,
             session.TenantId, session.UserId,
             Convert.ToHexString(session.EventId.ToBytes()).ToLowerInvariant());
-    }
-
-    private void EnsureModality()
-    {
-        // EngineAsync loads modality; start endpoints are sync and may run before first await.
-        if (_modality is not null) return;
-        LoadPerfcache();
-        _modality = new ChessModality();
     }
 
     private static ChessMove? FindLegalUci(ChessState state, string uci)

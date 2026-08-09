@@ -59,6 +59,12 @@ public sealed class ChessRuntimeContractTests : IClassFixture<ExploreFactory>
 
         Assert.Equal(2, attempts);
         await runtime.StopAsync(CancellationToken.None);
+        Assert.False(runtime.InitializationStarted);
+
+        await runtime.StartAsync(CancellationToken.None);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => runtime.GetAsync(CancellationToken.None));
+        Assert.Equal(3, attempts);
+        await runtime.StopAsync(CancellationToken.None);
         await runtime.DisposeAsync();
     }
 }

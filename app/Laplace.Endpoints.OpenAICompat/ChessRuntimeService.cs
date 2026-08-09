@@ -40,8 +40,15 @@ internal sealed class ChessRuntimeService : IHostedService, IAsyncDisposable
     public Task StartAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        CancellationTokenSource? prior;
         lock (_gate)
+        {
+            if (_stopping is { IsCancellationRequested: false })
+                return Task.CompletedTask;
+            prior = _stopping;
             _stopping = new CancellationTokenSource();
+        }
+        prior?.Dispose();
         return Task.CompletedTask;
     }
 
@@ -50,13 +57,15 @@ internal sealed class ChessRuntimeService : IHostedService, IAsyncDisposable
         Task<ChessLiveGameHost> initialization;
         lock (_gate)
         {
+            var lifetime = _stopping
+                ?? throw new InvalidOperationException("chess runtime has not started");
+            lifetime.Token.ThrowIfCancellationRequested();
             // A connection/schema failure is not a process-lifetime state. Every caller in
             // one attempt shares the same task, while the first caller after a fault starts
             // one fresh attempt instead of requiring an application restart.
             if (_initialization is { IsFaulted: true } or { IsCanceled: true })
                 _initialization = null;
-            initialization = _initialization ??= InitializeAsync(
-                _stopping?.Token ?? CancellationToken.None);
+            initialization = _initialization ??= InitializeAsync(lifetime.Token);
         }
 
         return await initialization.WaitAsync(ct);
@@ -67,7 +76,16 @@ internal sealed class ChessRuntimeService : IHostedService, IAsyncDisposable
         try
         {
             var host = await _createHost(ct);
-            lock (_gate) _host = host;
+            lock (_gate)
+            {
+                if (!ct.IsCancellationRequested)
+                    _host = host;
+            }
+            if (ct.IsCancellationRequested)
+            {
+                await host.DisposeAsync();
+                ct.ThrowIfCancellationRequested();
+            }
             _log.LogInformation("chess runtime initialized");
             return host;
         }
@@ -85,6 +103,7 @@ internal sealed class ChessRuntimeService : IHostedService, IAsyncDisposable
         {
             _stopping?.Cancel();
             initialization = _initialization;
+            _initialization = null;
         }
 
         if (initialization is not null)
@@ -99,12 +118,20 @@ internal sealed class ChessRuntimeService : IHostedService, IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         CancellationTokenSource? stopping;
+        Task<ChessLiveGameHost>? initialization;
         lock (_gate)
         {
             stopping = _stopping;
             _stopping = null;
+            initialization = _initialization;
+            _initialization = null;
         }
         stopping?.Cancel();
+        if (initialization is not null)
+        {
+            try { await initialization; }
+            catch (Exception) { }
+        }
         await DisposeHostAsync();
         stopping?.Dispose();
     }
