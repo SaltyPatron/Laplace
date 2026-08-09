@@ -29,11 +29,3 @@ CREATE OR REPLACE FUNCTION ops.api(p_like text DEFAULT NULL)
            OR (n.nspname || '.' || p.proname) ILIKE '%'||p_like||'%')
     ORDER BY n.nspname, p.proname
 $$;
-
--- Preserve the installed extension-schema catalog entry and its dependents;
--- operational code names ops.api explicitly.
-CREATE OR REPLACE FUNCTION laplace.api(p_like text DEFAULT NULL)
-    RETURNS TABLE(name text, args text, returns text)
-    LANGUAGE sql STABLE AS $$
-    SELECT * FROM ops.api(p_like)
-$$;

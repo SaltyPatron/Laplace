@@ -40,7 +40,7 @@ layer_ok() {
   db_exists || return 1
   # psql -tA prints bool as t/f, not true/false.
   "${PSQL[@]}" -d "$DB" -tAc \
-    "SELECT laplace.evidence_count(p_type => laplace.canonical_id('substrate/type/HasLayerCompleted/${layer}/v1'), p_source => laplace.source_id('${decomposer}')) > 0;" \
+    "SELECT ops.evidence_count(p_type => realize.canonical_id('substrate/type/HasLayerCompleted/${layer}/v1'), p_source => laplace.source_id('${decomposer}')) > 0;" \
     | grep -qiE '^(t|true)$'
 }
 

@@ -42,7 +42,7 @@ set "WN_EV="
 rem bare psql from PATH — quoted-path executables inside for /f backticks lose
 rem their leading quote (the 'C:\Program' is not recognized trap; lesson L8 class)
 for /f "usebackq delims=" %%v in (`psql -h localhost -U postgres -d %LAPLACE_DBNAME% -tAc "SET search_path=laplace,public; SELECT ok FROM substrate_health();"`) do set "HEALTH=%%v"
-for /f "usebackq delims=" %%v in (`psql -h localhost -U postgres -d %LAPLACE_DBNAME% -tAc "SET search_path=laplace,public; SELECT laplace.evidence_count(NULL, laplace.source_id('WordNetDecomposer'));"`) do set "WN_EV=%%v"
+for /f "usebackq delims=" %%v in (`psql -h localhost -U postgres -d %LAPLACE_DBNAME% -tAc "SET search_path=laplace,public; SELECT ops.evidence_count(NULL, laplace.source_id('WordNetDecomposer'));"`) do set "WN_EV=%%v"
 echo   substrate_health.ok = !HEALTH!
 echo   WordNetDecomposer evidence_count = !WN_EV!
 if /i not "!HEALTH!"=="t" if /i not "!HEALTH!"=="true" goto :fail

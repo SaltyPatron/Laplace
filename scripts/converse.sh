@@ -19,7 +19,7 @@ trap 'rm -f "$TMP"' EXIT
 SET check_function_bodies = off;
 CREATE OR REPLACE FUNCTION pg_temp.relation_type_id(p_name text) RETURNS bytea
     LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE AS $$
-    SELECT laplace.canonical_id('substrate/type/' || p_name || '/v1')
+    SELECT realize.canonical_id('substrate/type/' || p_name || '/v1')
 $$;
 CREATE OR REPLACE FUNCTION pg_temp.eff_mu(p_rating bigint, p_rd bigint) RETURNS bigint
     LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$

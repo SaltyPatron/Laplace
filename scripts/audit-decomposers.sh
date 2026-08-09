@@ -33,14 +33,14 @@ skip() { echo "SKIP  $*"; }
 
 counts() {
   "${PSQL[@]}" -t -A -c \
-    "SELECT metric || '=' || value::text FROM laplace.substrate_counts();"
+    "SELECT metric || '=' || value::text FROM ops.substrate_counts();"
 }
 
 layer_done() {
   local n="$1"
   "${PSQL[@]}" -t -A -c "
-    SELECT laplace.evidence_count(
-      p_type => laplace.canonical_id('substrate/type/HasLayerCompleted/${n}/v1')) > 0;
+    SELECT ops.evidence_count(
+      p_type => realize.canonical_id('substrate/type/HasLayerCompleted/${n}/v1')) > 0;
   " | tr -d '[:space:]'
 }
 
@@ -151,7 +151,7 @@ done
 if printf '%s\n' "${LADDER[@]}" | grep -qx wordnet || [[ "$(layer_done 2)" == "t" ]]; then
   section "CONTENT CHECK (seed = content + attestations, not attestations alone)"
   wn_content=$("${PSQL[@]}" -t -A -c \
-    "SELECT laplace.content_count(laplace.source_id('WordNetDecomposer'));" | tr -d '[:space:]')
+    "SELECT ops.content_count(laplace.source_id('WordNetDecomposer'));" | tr -d '[:space:]')
   echo "WordNet CONTENT physicalities = ${wn_content:-0}"
   if [[ "${wn_content:-0}" -gt 0 ]]; then
     pass "WordNet emits CONTENT physicalities (${wn_content}) — content path live"

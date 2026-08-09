@@ -21,9 +21,3 @@ CREATE OR REPLACE FUNCTION realize.render(p_id bytea) RETURNS text
         realize.render_text(p_id),
         encode(p_id, 'hex') || '…')
 $$;
-
-
-CREATE OR REPLACE FUNCTION laplace.render(p_id bytea) RETURNS text
-    LANGUAGE sql STABLE AS $$
-    SELECT realize.render(p_id)
-$$;

@@ -83,7 +83,7 @@ def check_source(
         att = int(
             psql(
                 dbname,
-                f"SELECT laplace.evidence_count(p_source => laplace.source_id('{decomposer}'));",
+                f"SELECT ops.evidence_count(p_source => laplace.source_id('{decomposer}'));",
                 host=host,
                 user=user,
             )
@@ -98,8 +98,8 @@ def check_source(
             markers = int(
                 psql(
                     dbname,
-                    "SELECT COALESCE(sum(laplace.evidence_count("
-                    "p_type => laplace.canonical_id('substrate/type/HasLayerCompleted/' || l || '/v1'), "
+                    "SELECT COALESCE(sum(ops.evidence_count("
+                    "p_type => realize.canonical_id('substrate/type/HasLayerCompleted/' || l || '/v1'), "
                     f"p_source => laplace.source_id('{decomposer}'))), 0) FROM generate_series(0, 8) l;",
                     host=host,
                     user=user,
@@ -181,8 +181,8 @@ def check_source(
         try:
             layer_ok = psql(
                 dbname,
-                "SELECT laplace.evidence_count("
-                f"p_type => laplace.canonical_id('substrate/type/HasLayerCompleted/{layer}/v1'), "
+                "SELECT ops.evidence_count("
+                f"p_type => realize.canonical_id('substrate/type/HasLayerCompleted/{layer}/v1'), "
                 f"p_source => laplace.source_id('{decomposer}')) > 0;",
                 host=host,
                 user=user,
@@ -216,7 +216,7 @@ def check_source(
                 n = int(
                     psql(
                         dbname,
-                        f"SELECT laplace.consensus_count(laplace.relation_type_id('{rel}'));",
+                        f"SELECT ops.consensus_count(laplace.relation_type_id('{rel}'));",
                         host=host,
                         user=user,
                     )
@@ -230,7 +230,7 @@ def check_source(
                     total += int(
                         psql(
                             dbname,
-                            "SELECT laplace.evidence_count("
+                            "SELECT ops.evidence_count("
                             f"p_type => laplace.relation_type_id('{alt}'), "
                             f"p_source => laplace.source_id('{decomposer}'));",
                             host=host,
