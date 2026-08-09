@@ -50,8 +50,15 @@ public sealed partial class NpgsqlSubstrateWriter
     /// entities durable before physicalities before attestations).
     /// </summary>
     private const int ParallelCopyMinRows = 65_536;
-    /// <summary>Skip run-cache / ladder ledger fills above this (MEASURED tax on 500k gate).</summary>
-    private const int MaxRunCacheFillIds = 100_000;
+    /// <summary>
+    /// Skip run-cache / ladder ledger fills above this. The fill is dictionary adds
+    /// (~sub-second per million ids) against multi-second applies; the old 100k gate
+    /// silently excluded every Wiktionary working set (738k+ distinct entities), so
+    /// the ledger stayed EMPTY for the whole 2026-08-06 full-file run while its
+    /// staging-site cost was still paid per surface. The gate exists to bound the
+    /// post-COPY tax on pathological id floods, not to starve normal corpora.
+    /// </summary>
+    private const int MaxRunCacheFillIds = 2_000_000;
 
     internal static readonly int ApplyParallelism = CpuTopology.ResolveApplyPartitions();
 

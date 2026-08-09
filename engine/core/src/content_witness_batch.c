@@ -362,6 +362,16 @@ int content_witness_tree_build(
     return content_tree_build(utf8, len, out_tree);
 }
 
+int content_witness_tree_root_id(
+    const tier_tree_t* tree,
+    hash128_t*         out_root_id) {
+    if (!tree || !out_root_id) return -1;
+    tier_node_view_t root;
+    if (tier_tree_get_node(tree, natural_unit_index(tree), &root) != 0) return -2;
+    *out_root_id = root.id;
+    return 0;
+}
+
 int content_witness_emit_tree(
     intent_stage_t*    stage,
     const tier_tree_t* tree,

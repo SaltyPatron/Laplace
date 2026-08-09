@@ -88,6 +88,16 @@ public static class ContentLadderLedger
     /// <summary>True while a bulk run has armed the ledger. Outside one, never skip.</summary>
     public static bool Armed => Volatile.Read(ref _armed) != 0;
 
+    /// <summary>
+    /// True iff at least one root is recorded. Armed-but-empty is pure cost at the
+    /// staging site — the 2026-08-06 full-file Wiktionary run paid a second, globally
+    /// serialized derivation per surface for a membership test that could never pass
+    /// (the fill gate never admitted its 738k-distinct working sets). Callers must
+    /// check this before probing membership. The armed-empty staging path may still
+    /// compute its memo key so the first post-commit recurrence can skip derivation.
+    /// </summary>
+    public static bool HasEntries => Volatile.Read(ref _count) > 0;
+
     /// <summary>True iff this root's ladder is proven present in the target substrate.</summary>
     public static bool IsPersisted(Hash128 root)
     {
