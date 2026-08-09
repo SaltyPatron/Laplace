@@ -848,7 +848,7 @@ internal static class IngestCommands
         Task<long> RelationEvidence(string relationType, string? sourceKey = null) =>
             NpgsqlIngestOps.EvidenceCountForRelationAsync(conn, relationType, sourceKey);
 
-        Console.WriteLine("substrate counts (pg_class.reltuples ESTIMATE — not count(*); run ANALYZE, evidence_count(), or substrate_counts() for exact):");
+        Console.WriteLine("substrate counts (pg_class.reltuples ESTIMATE — not count(*); run ANALYZE, ops.evidence_count(), or ops.substrate_counts() for exact):");
         {
             var counts = await NpgsqlSubstrateReads.SubstrateCountsAsync(conn, CancellationToken.None);
             foreach (var row in counts)
@@ -857,7 +857,7 @@ internal static class IngestCommands
 
         if (decomposer is null)
         {
-            // laplace.source_counts() joins a count(DISTINCT physicalities) per source —
+            // ops.source_counts() joins a count(DISTINCT physicalities) per source —
             // unbounded at 135M attestations; `stats` hung for minutes (Issue 52). The
             // evidence half alone walks attestations_source_btree in ~30s live. Content
             // per source stays exact via `stats <source>` (content_count is per-source
@@ -870,7 +870,7 @@ internal static class IngestCommands
             }
             catch (Exception ex) when (ex is NpgsqlException { InnerException: TimeoutException } or TimeoutException)
             {
-                Console.WriteLine("    (source grouping exceeded 120s — per-source: `stats <source>`, exact via laplace.evidence_count)");
+                Console.WriteLine("    (source grouping exceeded 120s — per-source: `stats <source>`, exact via ops.evidence_count)");
             }
             return;
         }

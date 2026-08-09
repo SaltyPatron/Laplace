@@ -5,10 +5,11 @@
 -- byte-identical to the prior plpgsql set_bit() loop. NULL input, or a mask that
 -- ends up with no bits set (empty/all-out-of-range array), returns NULL — the
 -- any_set contract highway_mask_refresh relies on every fold epoch. Round trip
--- laplace.laplace_highway_mask_bits(mask_from_bits(x)) = sorted(x) is a regression.
--- Bit VALUES still come only from laplace.relation_highway_bit(the perfcache); this
+-- consensus.laplace_highway_mask_bits(mask_from_bits(x)) = sorted(x) is a regression.
+-- Bit VALUES still come only from consensus.relation_highway_bit(the perfcache); this
 -- function never assigns meaning to a position.
-CREATE OR REPLACE FUNCTION laplace.laplace_highway_mask_from_bits(p_bits int[])
+DROP FUNCTION IF EXISTS laplace.laplace_highway_mask_from_bits(int[]);
+CREATE OR REPLACE FUNCTION consensus.laplace_highway_mask_from_bits(p_bits int[])
     RETURNS bytea
     AS 'MODULE_PATHNAME', 'pg_laplace_highway_mask_from_bits'
     LANGUAGE C IMMUTABLE PARALLEL SAFE;

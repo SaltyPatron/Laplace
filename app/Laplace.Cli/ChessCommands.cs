@@ -58,7 +58,7 @@ internal static class ChessCommands
         + "  substrate-test [--mode fold|edge|off] [--games N] [--depth D] [--cp-per-point X] [--cap C] [--openings] [--no-record]\n"
         + "      guided-vs-pure: the corpus's Elo lift over the classical floor.\n"
         + "      --mode fold = substructure-fold (generalizes, the honest transfer test; DEFAULT);\n"
-        + "             edge = raw MOVE-edge eff_mu (popularity; the first null result); off = sanity (pure vs pure)\n"
+        + "             edge = raw MOVE-edge consensus.eff_mu(popularity; the first null result); off = sanity (pure vs pure)\n"
         + "      --openings = seed games from the ingested ECO openings (where the corpus HAS data)\n"
         + "  ladder [--games N] [--depth D] [--openings] [--no-record]   (overlay-ablation: each EvalTerm's individual Elo)\n"
         + "  review <pgn-file|dir> [--depth D] [--max-games N]   (centipawn-loss + 'crazy win' triage over ingested games)\n"

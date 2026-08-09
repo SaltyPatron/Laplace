@@ -8,6 +8,6 @@ CREATE OR REPLACE FUNCTION attestations_in(p_id bytea, p_limit integer DEFAULT 4
     FROM laplace.attestations a
     WHERE a.object_id = p_id
 
-    ORDER BY laplace.relation_rank_resolved(a.type_id) DESC, a.observation_count DESC, a.outcome DESC
+    ORDER BY consensus.relation_rank_resolved(a.type_id) DESC, a.observation_count DESC, a.outcome DESC
     LIMIT p_limit
 $$;

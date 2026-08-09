@@ -1,8 +1,8 @@
 -- Thin wrapper over the native lexical.word_case_variants(src/lexical_case.c). The old
 -- SQL body composed word_case_map_surface x3 (each a per-grapheme
--- grapheme_case_target consensus subquery + laplace.render_text) -- the RBAR that
+-- grapheme_case_target consensus subquery + realize.render_text) -- the RBAR that
 -- lexical_peers -> senses/define/bubble_up amplified. The native function does
--- the identical selection/laplace.render/mint/exist steps in a fixed handful of batched
+-- the identical selection/realize.render/mint/exist steps in a fixed handful of batched
 -- SPI round trips. Kept as a wrapper so lexical_peers and callers are unchanged.
 DROP FUNCTION IF EXISTS laplace.word_case_variant_ids(bytea);
 CREATE OR REPLACE FUNCTION lexical.word_case_variant_ids(p_word bytea)

@@ -1,4 +1,9 @@
-CREATE OR REPLACE FUNCTION canonical_id(p_name text) RETURNS bytea
+CREATE OR REPLACE FUNCTION realize.canonical_id(p_name text) RETURNS bytea
     LANGUAGE sql IMMUTABLE STRICT AS $$
     SELECT public.laplace_hash128_blake3(convert_to(p_name, 'UTF8'))
+$$;
+
+CREATE OR REPLACE FUNCTION laplace.canonical_id(p_name text) RETURNS bytea
+    LANGUAGE sql IMMUTABLE STRICT AS $$
+    SELECT realize.canonical_id(p_name)
 $$;

@@ -1,4 +1,4 @@
-CREATE OR REPLACE FUNCTION laplace_glicko2_sfunc(
+CREATE OR REPLACE FUNCTION laplace.laplace_glicko2_sfunc(
     internal,
     bigint, bigint, bigint,
     bigint, bigint, bigint,

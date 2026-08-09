@@ -85,9 +85,9 @@ public sealed class UnicodeSeedIntegrationTests : IAsyncLifetime
 
         long resolvable = await ScalarLong(
             @"SELECT count(*) FROM laplace.entities e
-              WHERE e.type_id = laplace.canonical_id('Codepoint')
+              WHERE e.type_id = realize.canonical_id('Codepoint')
                 AND e.tier = 0
-                AND laplace.codepoint_for_id(e.id) IS NOT NULL");
+                AND realize.codepoint_for_id(e.id) IS NOT NULL");
         Assert.True(resolvable > 1_100_000, $"perfcache-resolvable codepoints unexpectedly few: {resolvable:N0}");
 
 
@@ -96,7 +96,7 @@ public sealed class UnicodeSeedIntegrationTests : IAsyncLifetime
 
 
 
-        long physCount = await ScalarLong("SELECT laplace.content_count()");
+        long physCount = await ScalarLong("SELECT ops.content_count()");
         Assert.True(physCount >= TotalCodepoints,
             $"content physicalities {physCount:N0} < codepoint count {TotalCodepoints:N0}");
 
@@ -105,7 +105,7 @@ public sealed class UnicodeSeedIntegrationTests : IAsyncLifetime
         await using var conn = await _ds.OpenConnectionAsync();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = @"SELECT p.x, p.y, p.z, p.m
-                            FROM laplace.entity_physicalities(laplace.canonical_id('A')) p
+                            FROM ops.entity_physicalities(realize.canonical_id('A')) p
                             WHERE p.type = 1";
         await using var r = await cmd.ExecuteReaderAsync();
         Assert.True(await r.ReadAsync(), "no CONTENT physicality for U+0041");

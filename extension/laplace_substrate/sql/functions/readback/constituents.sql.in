@@ -1,4 +1,4 @@
-CREATE OR REPLACE FUNCTION constituents(p_id bytea)
+CREATE OR REPLACE FUNCTION realize.constituents(p_id bytea)
     RETURNS TABLE(ordinal integer, child_id bytea, run_length integer, flags bigint)
     LANGUAGE sql STABLE
     AS $$
@@ -12,4 +12,10 @@ CREATE OR REPLACE FUNCTION constituents(p_id bytea)
     ) t
     CROSS JOIN LATERAL public.laplace_trajectory_constituents(t.traj) AS u
     ORDER BY 1
+$$;
+
+CREATE OR REPLACE FUNCTION laplace.constituents(p_id bytea)
+    RETURNS TABLE(ordinal integer, child_id bytea, run_length integer, flags bigint)
+    LANGUAGE sql STABLE AS $$
+    SELECT * FROM realize.constituents(p_id)
 $$;

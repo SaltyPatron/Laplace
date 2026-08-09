@@ -1,4 +1,4 @@
--- Outbound neighbours of one type set, unrefuted, laplace.eff_mu order. Thin wrapper over
+-- Outbound neighbours of one type set, unrefuted, consensus.eff_mu order. Thin wrapper over
 -- consensus.edges_raw() with those axes pinned.
 DROP FUNCTION IF EXISTS laplace.consensus_neighbors_directed(bytea, bytea[], int);
 -- BEGIN ATOMIC: GH #764.

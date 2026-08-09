@@ -2,7 +2,7 @@
 -- binding reads LAPLACE_PERFCACHE_RECORD_COUNT from the perfcache format header.
 -- No DROP: atom_census() BEGIN ATOMIC depends on this; DROP would fail the
 -- extension upgrade (GH #764). CREATE OR REPLACE is enough for the C binding.
-CREATE OR REPLACE FUNCTION atom_window()
+CREATE OR REPLACE FUNCTION laplace.atom_window()
     RETURNS bigint
     LANGUAGE C
     IMMUTABLE

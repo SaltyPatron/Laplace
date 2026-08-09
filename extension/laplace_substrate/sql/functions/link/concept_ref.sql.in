@@ -26,8 +26,8 @@ CREATE OR REPLACE FUNCTION lexical.concept_ref(p_ref text)
                     AND c.type_id = laplace.relation_type_id('HAS_SYNSET_KEY')
                     -- Standing claim only: a fully-refuted HAS_SYNSET_KEY is not
                     -- a mapping (Copilot #918). Non-positive eff_mu ⇒ NULL.
-                    AND laplace.eff_mu(c.rating, c.rd) > 0
-                  ORDER BY laplace.eff_mu(c.rating, c.rd) DESC, c.subject_id
+                    AND consensus.eff_mu(c.rating, c.rd) > 0
+                  ORDER BY consensus.eff_mu(c.rating, c.rd) DESC, c.subject_id
                   LIMIT 1)
         ELSE laplace.word_id((SELECT r FROM norm))
     END

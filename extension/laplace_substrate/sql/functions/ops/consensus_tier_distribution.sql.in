@@ -1,11 +1,13 @@
 -- BEGIN ATOMIC: GH #764.
-CREATE OR REPLACE FUNCTION consensus_tier_distribution()
+DROP FUNCTION IF EXISTS laplace.consensus_tier_distribution();
+
+CREATE OR REPLACE FUNCTION ops.consensus_tier_distribution()
     RETURNS TABLE(subject_tier smallint, relations bigint)
     LANGUAGE sql STABLE
 BEGIN ATOMIC
     SELECT e.tier, count(*)
-    FROM @extschema@.consensus c JOIN @extschema@.entities e ON e.id = c.subject_id
+    FROM laplace.consensus c JOIN laplace.entities e ON e.id = c.subject_id
     WHERE c.object_id IS NOT NULL
-      AND e.type_id = ANY(@extschema@.compositional_type_ids())
+      AND e.type_id = ANY(laplace.compositional_type_ids())
     GROUP BY e.tier ORDER BY e.tier;
 END;

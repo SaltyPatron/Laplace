@@ -5,7 +5,7 @@ namespace Laplace.Api.Contracts;
 /// <summary>
 /// Honest per-modality resident counts. Computed from FAST targeted queries
 /// (per-source / per-plane counts, tens of ms) rather than the full
-/// source_counts() aggregate, which degrades to empty under a seed and would
+/// ops.source_counts() aggregate, which degrades to empty under a seed and would
 /// make a live modality read as awaiting.
 /// </summary>
 public sealed record ModalitiesResponse(

@@ -1,5 +1,5 @@
 -- Outbound neighbours with their tier, for the foundry vocab crawl. Thin wrapper
--- over consensus.edges_raw(); pins outbound, laplace.eff_mu order and laplace.refuted edges INCLUDED — the
+-- over consensus.edges_raw(); pins outbound, consensus.eff_mu order and consensus.refuted edges INCLUDED — the
 -- axes this lane has always used. The tier join is this caller's own need, so it
 -- stays here rather than widening the core.
 DROP FUNCTION IF EXISTS laplace.foundry_crawl_neighbors(bytea, int, bytea[]);
@@ -13,5 +13,5 @@ CREATE OR REPLACE FUNCTION consensus.foundry_crawl_neighbors(
 BEGIN ATOMIC
     SELECT e.neighbour_id, en.tier, e.rating, e.rd
     FROM consensus.edges_raw(p_subject, 'out', p_types, p_limit, true, 'eff_mu') e
-    JOIN @extschema@.entities en ON en.id = e.neighbour_id;
+    JOIN laplace.entities en ON en.id = e.neighbour_id;
 END;

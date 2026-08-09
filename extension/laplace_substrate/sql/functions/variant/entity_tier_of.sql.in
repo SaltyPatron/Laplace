@@ -10,6 +10,6 @@ BEGIN ATOMIC
     -- codepoint) should surface as NULL here.
     SELECT COALESCE(
         (SELECT tier FROM laplace.entities WHERE id = p_entity),
-        CASE WHEN laplace.codepoint_for_id(p_entity) IS NOT NULL THEN 0 END
+        CASE WHEN realize.codepoint_for_id(p_entity) IS NOT NULL THEN 0 END
     );
 END;

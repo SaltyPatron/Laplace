@@ -1,5 +1,11 @@
+-- lexical.translations — peer subjects sharing a band-typed object (sense /
+-- translation-shaped co-denotation). Prefer lexical over taxonomy: the row is
+-- a same-plane peer set, not a hierarchy walk. Old names dropped (#532).
 -- BEGIN ATOMIC: GH #764.
-CREATE OR REPLACE FUNCTION laplace_translations(
+DROP FUNCTION IF EXISTS laplace_translations(bytea, bytea);
+DROP FUNCTION IF EXISTS laplace.laplace_translations(bytea, bytea);
+DROP FUNCTION IF EXISTS lexical.laplace_translations(bytea, bytea);
+CREATE OR REPLACE FUNCTION lexical.translations(
     p_entity_id bytea, p_band_mask bytea)
 RETURNS TABLE(translation_id bytea, shared_object_id bytea, eff_mu numeric)
 LANGUAGE sql STABLE
@@ -7,10 +13,10 @@ BEGIN ATOMIC
     WITH band_types AS (
         SELECT e.id FROM laplace.entities e
         WHERE e.highway_mask IS NOT NULL
-          AND laplace.laplace_highway_mask_bits(e.highway_mask) && laplace.laplace_highway_mask_bits(p_band_mask)
+          AND consensus.laplace_highway_mask_bits(e.highway_mask) && consensus.laplace_highway_mask_bits(p_band_mask)
     )
     SELECT DISTINCT a2.subject_id, a1.object_id,
-           laplace.eff_mu_display(a2.rating, a2.rd)
+           consensus.eff_mu_display(a2.rating, a2.rd)
     FROM laplace.consensus a1
     JOIN band_types bt ON bt.id = a1.type_id
     JOIN laplace.consensus a2
@@ -19,6 +25,6 @@ BEGIN ATOMIC
      AND a2.type_id    = a1.type_id
     WHERE a1.subject_id = p_entity_id
       AND a1.object_id IS NOT NULL
-      AND laplace.eff_mu(a1.rating, a1.rd) > 0
-      AND laplace.eff_mu(a2.rating, a2.rd) > 0;
+      AND consensus.eff_mu(a1.rating, a1.rd) > 0
+      AND consensus.eff_mu(a2.rating, a2.rd) > 0;
 END;

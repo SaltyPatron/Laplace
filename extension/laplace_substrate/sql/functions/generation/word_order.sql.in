@@ -27,7 +27,7 @@ CREATE OR REPLACE FUNCTION generation.word_order(p_vocab bytea[], p_trajs int DE
         -- pinned below, so there is at most one row per entity already.
         SELECT w.id AS entity_id, w.trajectory
         FROM laplace.v_word_points w
-        WHERE w.type_id IN (laplace.canonical_id('Sentence'), laplace.canonical_id('Document'))
+        WHERE w.type_id IN (realize.canonical_id('Sentence'), realize.canonical_id('Document'))
           AND w.trajectory IS NOT NULL
         -- Sampling is by content hash, which is ARBITRARY -- an arbitrary LIMIT without
         -- an ordering is a missing ranking. The honest ranking is by trajectory length,

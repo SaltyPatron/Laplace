@@ -47,7 +47,7 @@ BEGIN
         SELECT i.id, t.s
         FROM ids,
              LATERAL unnest(ids.a) WITH ORDINALITY AS i(id, ord),
-             LATERAL unnest(laplace.render_text_batch(ids.a, 48)) WITH ORDINALITY AS t(s, ord)
+             LATERAL unnest(realize.render_text_batch(ids.a, 48)) WITH ORDINALITY AS t(s, ord)
         WHERE i.ord = t.ord
     )
     SELECT d.entity_id,

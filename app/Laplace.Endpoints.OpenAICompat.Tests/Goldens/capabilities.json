@@ -13,7 +13,7 @@
     },
     "embeddings": {
       "status": "live",
-      "backend": "laplace.entity_physicalities (form) + laplace.consensus_out_readable (meaning)",
+      "backend": "ops.entity_physicalities (form) + ops.consensus_out_readable (meaning)",
       "billing": "embeddings"
     },
     "audit_reports": {
@@ -23,12 +23,12 @@
     },
     "visualizations": {
       "status": "live",
-      "backend": "consensus.top_relations + laplace.entity_physicalities",
+      "backend": "consensus.top_relations + ops.entity_physicalities",
       "billing": "visualization.deep_export"
     },
     "explainability_reports": {
       "status": "live",
-      "backend": "consensus.walk_branches + laplace.attestations_out",
+      "backend": "consensus.walk_branches + ops.attestations_out",
       "billing": "explain.trace"
     },
     "billing": {
@@ -54,7 +54,7 @@
     },
     "op": {
       "status": "live",
-      "backend": "laplace.api catalog allow-list; named function call; no SQL text"
+      "backend": "ops.api catalog allow-list; named function call; no SQL text"
     }
   }
 }

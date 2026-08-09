@@ -3,8 +3,8 @@
  *
  * WHY THIS IS C. CLAUDE.md:75: "Per-row set-returning functions, string
  * operations, and both-directions OR joins belong in C, not in a rewritten
- * CTE." The SQL form used prompt_state() as a table source (a per-row SRF)
- * and called eff_mu() per row over a partitioned consensus join. That is
+ * CTE." The SQL form used converse.prompt_state() as a table source (a per-row SRF)
+ * and called consensus.eff_mu() per row over a partitioned consensus join. That is
  * exactly the shape the law names. One indexed range read plus an O(1) hash
  * probe per edge here -- the shape prompt_coherence.c and recall.c use.
  *
@@ -24,7 +24,7 @@
  * WHAT IT COMPUTES. Sum eff_mu over EVERY HAS_LANGUAGE edge carried by the
  * prompt's entities, at every tier that has one.
  *
- * Deliberately NOT word_language() per token -- that is LIMIT 1, one language
+ * Deliberately NOT converse.word_language() per token -- that is LIMIT 1, one language
  * per word, which discards the distribution and makes a token shared across
  * languages ("chat" English/French, "die" English/German, "a" in a dozen) look
  * monolingual. Summing lets genuinely ambiguous tokens contribute to every
@@ -36,7 +36,7 @@
  * than being invisible to a word-only scan. Nothing here assumes which tier
  * answered, which is what makes it work for a modality that is not text.
  *
- * A DOUBLE-COUNT THE SQL FORM HAD. prompt_state() returns one row per
+ * A DOUBLE-COUNT THE SQL FORM HAD. converse.prompt_state() returns one row per
  * (ord, id) and an id that exists at two tiers appears TWICE -- measured on
  * "What is a glacier?": 7 rows, 5 distinct ids, because the tier-collision
  * seam (GH #752) puts single-character surfaces at tier 0 and tier 2. The SQL

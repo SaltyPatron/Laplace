@@ -14,8 +14,9 @@
 -- claims and collapsing them is how the detector became a green light in the first
 -- place. deep_checked says which one you got.
 DROP FUNCTION IF EXISTS substrate_health();
+DROP FUNCTION IF EXISTS substrate_health(boolean);
 
-CREATE OR REPLACE FUNCTION substrate_health(p_deep boolean DEFAULT false)
+CREATE OR REPLACE FUNCTION laplace.substrate_health(p_deep boolean DEFAULT false)
 RETURNS TABLE(
     ok boolean,
     fake_tier_bands bigint,
@@ -32,13 +33,13 @@ STABLE
     -- the scans inside the boolean) halves the entities passes per call.
     WITH scans AS (
         SELECT
-            @extschema@.fake_tier_band_count() AS fake_tier_bands,
+            laplace.fake_tier_band_count() AS fake_tier_bands,
             CASE WHEN p_deep
-                 THEN (SELECT count(*) FROM @extschema@.identity_law_violations())
+                 THEN (SELECT count(*) FROM laplace.identity_law_violations())
             END AS identity_violations,
-            (SELECT count(*) FROM @extschema@.entities) AS bootstrap_entities,
+            (SELECT count(*) FROM laplace.entities) AS bootstrap_entities,
             EXISTS (
-                SELECT 1 FROM @extschema@.entities
+                SELECT 1 FROM laplace.entities
                 WHERE id = public.laplace_hash128_blake3('substrate/source/SubstrateCanonical/v1'::bytea)
             ) AS canonical_source_present
     )

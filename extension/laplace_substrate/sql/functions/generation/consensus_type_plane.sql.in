@@ -18,18 +18,18 @@ CREATE OR REPLACE FUNCTION generation.consensus_type_plane(
          rk AS (
              SELECT d.type_id, r.rank
              FROM (SELECT DISTINCT type_id FROM edges) d
-             CROSS JOIN LATERAL laplace.relation_rank_resolved(d.type_id) AS r(rank)
+             CROSS JOIN LATERAL consensus.relation_rank_resolved(d.type_id) AS r(rank)
              WHERE r.rank IS NOT NULL
          ),
-         -- P5 Glicko-complete weight (doc 14 M5): neutral-centered (signed) laplace.eff_mu,
+         -- P5 Glicko-complete weight (doc 14 M5): neutral-centered (signed) consensus.eff_mu,
          -- rd-uncertainty discount, witness-mass saturation. Refuted edges go
          -- NEGATIVE (operator planes are sign-safe; the basis union clamps
          -- client-side via FoundryExport.PositivePart).
-         -- laplace.walk_edge_weight IS the law; kappa resolved once rather than per row.
-         kappa(k) AS (SELECT laplace.foundry_rd_kappa()),
+         -- consensus.walk_edge_weight IS the law; kappa resolved once rather than per row.
+         kappa(k) AS (SELECT consensus.foundry_rd_kappa()),
          ranked AS (
              SELECT e.subject_id, e.object_id,
-                    laplace.walk_edge_weight(e.rating, e.rd, e.witness_count,
+                    consensus.walk_edge_weight(e.rating, e.rd, e.witness_count,
                                      (SELECT k FROM kappa)) AS w,
                     e.type_id, rk.rank AS rk
              FROM edges e JOIN rk ON rk.type_id = e.type_id

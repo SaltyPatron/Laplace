@@ -3,7 +3,7 @@ CREATE OR REPLACE FUNCTION consensus.shared_objects(p_subjects bytea[], p_type b
                                      p_limit int DEFAULT 40)
     RETURNS TABLE(object_id bytea, support int, total_mu numeric)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
-    -- laplace.eff_mu_display, not the scale-and-round open-coded. Its own header says
+    -- consensus.eff_mu_display, not the scale-and-round open-coded. Its own header says
     -- "same rounding, same scale, one definition file -- never re-derived inline",
     -- and this was the inline re-derivation: if the fold's fp1e9 scale or the
     -- display precision ever moves, one copy moves and the other silently reports
@@ -13,13 +13,13 @@ CREATE OR REPLACE FUNCTION consensus.shared_objects(p_subjects bytea[], p_type b
            -- ::bigint because sum() over bigint returns numeric and the display
            -- overloads take bigint. The sum of integers IS an integer, so the cast
            -- is lossless; it is the type, not the value, being restated.
-           @extschema@.eff_mu_display(sum(@extschema@.eff_mu(c.rating, c.rd))::bigint)
-    FROM @extschema@.v_consensus_unrefuted c
+           consensus.eff_mu_display(sum(consensus.eff_mu(c.rating, c.rd))::bigint)
+    FROM laplace.v_consensus_unrefuted c
     WHERE c.subject_id = ANY (p_subjects)
       AND c.object_id IS NOT NULL
       AND (p_type IS NULL OR c.type_id = p_type)
     GROUP BY c.object_id
     ORDER BY count(DISTINCT c.subject_id) DESC,
-             sum(@extschema@.eff_mu(c.rating, c.rd)) DESC
+             sum(consensus.eff_mu(c.rating, c.rd)) DESC
     LIMIT p_limit
 $$;

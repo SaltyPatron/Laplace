@@ -1,4 +1,6 @@
-CREATE OR REPLACE FUNCTION consensus_out_labeled(p_id bytea, p_limit integer DEFAULT 40)
+DROP FUNCTION IF EXISTS laplace.consensus_out_labeled(bytea, integer);
+DROP FUNCTION IF EXISTS consensus.consensus_out_labeled(bytea, integer);
+CREATE OR REPLACE FUNCTION ops.consensus_out_labeled(p_id bytea, p_limit integer DEFAULT 40)
     RETURNS TABLE(
         type_id bytea,
         object_id bytea,
@@ -15,21 +17,17 @@ CREATE OR REPLACE FUNCTION consensus_out_labeled(p_id bytea, p_limit integer DEF
     ),
     ranked AS (
         SELECT c.type_id, c.object_id, c.eff_mu, c.witness_count,
-               laplace.edge_rank(c.type_id, c.eff_mu_raw) AS rnk
+               consensus.edge_rank(c.type_id, c.eff_mu_raw) AS rnk
         FROM laplace.v_consensus_resolved c
         WHERE c.subject_id IN (SELECT id FROM subj)
           AND c.object_id IS NOT NULL
-        ORDER BY laplace.edge_rank(c.type_id, c.eff_mu_raw) DESC
+        ORDER BY consensus.edge_rank(c.type_id, c.eff_mu_raw) DESC
         LIMIT GREATEST(1, p_limit)
     )
     , ordered AS (
         SELECT r.*, row_number() OVER (ORDER BY r.rnk DESC) AS ord
         FROM ranked r
     ), labels AS (
-        -- Full-mesh labels via ONE realize.batch(was: a shorter hand-rolled
-        -- synset-lemma -> render_fast -> HEX ladder per row). Gains the
-        -- HAS_NAME/translation/canonical/gloss arms; hex stays the genuine
-        -- last resort so every edge still shows. Approved behavior change.
         SELECT realize.batch(array_agg(o.object_id ORDER BY o.ord),
                              converse.word_language(p_id)) AS l,
                lexical.type_label_batch(array_agg(o.type_id ORDER BY o.ord)) AS types

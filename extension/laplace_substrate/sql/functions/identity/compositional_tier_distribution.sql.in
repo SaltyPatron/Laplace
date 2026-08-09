@@ -1,5 +1,6 @@
 -- BEGIN ATOMIC: GH #764.
-CREATE OR REPLACE FUNCTION compositional_tier_distribution()
+DROP FUNCTION IF EXISTS compositional_tier_distribution();
+CREATE OR REPLACE FUNCTION laplace.compositional_tier_distribution()
 RETURNS TABLE(tier smallint, n bigint)
 LANGUAGE sql
 STABLE
@@ -8,8 +9,8 @@ BEGIN ATOMIC
     -- evaluates ONCE and entities_type_btree serves the membership probe, instead of a per-row
     -- function call that recomputes 5 BLAKE3 hashes for every entity row (100M+).
     SELECT e.tier, count(*)::bigint
-    FROM @extschema@.entities e
-    WHERE e.type_id = ANY(@extschema@.compositional_type_ids())
+    FROM laplace.entities e
+    WHERE e.type_id = ANY(laplace.compositional_type_ids())
     GROUP BY e.tier
     ORDER BY e.tier;
 END;

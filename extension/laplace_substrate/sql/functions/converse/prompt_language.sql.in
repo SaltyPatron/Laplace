@@ -2,7 +2,7 @@
 --
 -- NATIVE (src/prompt_language.c). The SQL body this replaces used
 -- converse.prompt_state() as a table source -- a per-row set-returning function -- and
--- called laplace.eff_mu() per row over a partitioned consensus join, which is the
+-- called consensus.eff_mu() per row over a partitioned consensus join, which is the
 -- exact shape CLAUDE.md:75 sends to C. Extracting it from converse.chat() made it
 -- callable; porting it makes it lawful.
 --
@@ -15,7 +15,7 @@
 -- WHY A TALLY AND NOT converse.word_language() PER TOKEN. converse.word_language() is LIMIT 1 --
 -- one language per word -- which discards the distribution and makes a token
 -- shared across languages ("chat" English/French, "die" English/German, "a"
--- in a dozen) look monolingual. Summing laplace.eff_mu over EVERY HAS_LANGUAGE edge
+-- in a dozen) look monolingual. Summing consensus.eff_mu over EVERY HAS_LANGUAGE edge
 -- carried by the prompt's laplace.entities lets genuinely ambiguous tokens contribute
 -- to both tallies and be settled by the tokens that are decisive, which is how
 -- a reader disambiguates too.

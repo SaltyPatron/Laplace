@@ -5,7 +5,7 @@ using Laplace.Engine.Core;
 namespace Laplace.Decomposers.Tests;
 
 // Golden-id pins for every decomposer's SourceId/TrustClassId. The hex values were minted
-// from the DB side (laplace.canonical_id(), i.e. the native blake3 the extension binds), so
+// from the DB side (realize.canonical_id(), i.e. the native blake3 the extension binds), so
 // this asserts C# and the substrate agree AND that refactors of the id-minting call paths
 // (base classes, helper extraction) never change a content-addressed id. If this test fails,
 // substrate identity has drifted — do not update the constants without an owner decision.

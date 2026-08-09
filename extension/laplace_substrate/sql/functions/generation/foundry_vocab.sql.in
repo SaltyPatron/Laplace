@@ -22,7 +22,7 @@ CREATE OR REPLACE FUNCTION generation.foundry_vocab(p_size int)
     WITH traj AS (
         SELECT w.id AS entity_id, w.trajectory
         FROM laplace.v_word_points w
-        WHERE w.type_id IN (laplace.canonical_id('Sentence'), laplace.canonical_id('Document'))
+        WHERE w.type_id IN (realize.canonical_id('Sentence'), realize.canonical_id('Document'))
           AND w.trajectory IS NOT NULL
         -- Sampling is by content hash, which is ARBITRARY -- an arbitrary LIMIT without
         -- an ordering is a missing ranking. The honest ranking is by trajectory length,
@@ -36,19 +36,19 @@ CREATE OR REPLACE FUNCTION generation.foundry_vocab(p_size int)
     freq AS (
         SELECT tc.entity_id AS id, count(*) AS d
         FROM traj CROSS JOIN LATERAL laplace_trajectory_constituents(traj.trajectory) tc
-        JOIN laplace.entities ew ON ew.id = tc.entity_id AND ew.type_id = laplace.canonical_id('Word')
+        JOIN laplace.entities ew ON ew.id = tc.entity_id AND ew.type_id = realize.canonical_id('Word')
         GROUP BY tc.entity_id
     ),
     seeds AS (
         SELECT f.id, f.d
-        FROM freq f JOIN laplace.entities e ON e.id = f.id AND e.type_id = laplace.canonical_id('Word')
+        FROM freq f JOIN laplace.entities e ON e.id = f.id AND e.type_id = realize.canonical_id('Word')
         ORDER BY f.d DESC LIMIT p_size
     ),
     closure AS (
         SELECT DISTINCT c.object_id AS id
         FROM laplace.consensus c
         JOIN seeds s ON s.id = c.subject_id
-        JOIN laplace.entities e ON e.id = c.object_id AND e.type_id = laplace.canonical_id('Word')
+        JOIN laplace.entities e ON e.id = c.object_id AND e.type_id = realize.canonical_id('Word')
         WHERE c.object_id IS NOT NULL
           AND c.type_id IN (
               laplace.relation_type_id('IS_A'), laplace.relation_type_id('IS_SYNONYM_OF'),
@@ -78,13 +78,13 @@ CREATE OR REPLACE FUNCTION generation.foundry_vocab(p_size int)
         
         SELECT u.id, u.s, a.ds[u.ord::int] AS d
         FROM arr a
-        CROSS JOIN LATERAL unnest(a.a, laplace.render_text_batch(a.a, 64)) WITH ORDINALITY AS u(id, s, ord)
+        CROSS JOIN LATERAL unnest(a.a, realize.render_text_batch(a.a, 64)) WITH ORDINALITY AS u(id, s, ord)
         WHERE a.a IS NOT NULL
     ),
     clean AS (
         SELECT DISTINCT ON (n.s) n.id, n.s, n.d
         FROM named n
-        WHERE n.s IS NOT NULL AND btrim(n.s) <> '' AND NOT laplace.is_all_whitespace(n.s)
+        WHERE n.s IS NOT NULL AND btrim(n.s) <> '' AND NOT realize.is_all_whitespace(n.s)
           AND position(' ' IN n.s) = 0 AND char_length(n.s) <= 40
         ORDER BY n.s, n.d DESC
     )

@@ -26,17 +26,17 @@ CREATE OR REPLACE FUNCTION lexical.concept_peers(p_word bytea, p_limit int DEFAU
     -- lexical.concept_members() CROSS JOIN LATERAL that re-ran the same three lookups
     -- 181x for one word (measured 55s -> sub-second). Same three bridges.
     members AS (
-        SELECT c.subject_id AS member, 'synonym'::text AS kind, laplace.eff_mu_display(c.rating, c.rd) AS mu
+        SELECT c.subject_id AS member, 'synonym'::text AS kind, consensus.eff_mu_display(c.rating, c.rd) AS mu
         FROM anchors a JOIN laplace.v_consensus_unrefuted c ON c.object_id = a.anchor
                           AND c.type_id = laplace.relation_type_id('IS_SYNONYM_OF')
         UNION ALL
-        SELECT hs.subject_id, 'sense'::text, laplace.eff_mu_display(hs.rating, hs.rd)
+        SELECT hs.subject_id, 'sense'::text, consensus.eff_mu_display(hs.rating, hs.rd)
         FROM anchors a JOIN laplace.v_consensus_unrefuted so ON so.object_id = a.anchor
                           AND so.type_id = laplace.relation_type_id('IS_SENSE_OF')
                        JOIN laplace.v_consensus_unrefuted hs ON hs.object_id = so.subject_id
                           AND hs.type_id = laplace.relation_type_id('HAS_SENSE')
         UNION ALL
-        SELECT c.subject_id, 'frame'::text, laplace.eff_mu_display(c.rating, c.rd)
+        SELECT c.subject_id, 'frame'::text, consensus.eff_mu_display(c.rating, c.rd)
         FROM anchors a JOIN laplace.v_consensus_unrefuted c ON c.object_id = a.anchor
                           AND c.type_id = laplace.relation_type_id('EVOKES_FRAME')
     ),

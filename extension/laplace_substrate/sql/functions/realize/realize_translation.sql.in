@@ -4,9 +4,9 @@ CREATE OR REPLACE FUNCTION realize._translation(p_id bytea, p_lang bytea DEFAULT
     RETURNS text
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
     SELECT q.s FROM (
-        SELECT laplace.render_text(m.object_id, 24) AS s,
+        SELECT realize.render_text(m.object_id, 24) AS s,
                (lang.object_id IS NOT NULL) AS lp,
-               laplace.eff_mu(m.rating, m.rd) AS mu
+               consensus.eff_mu(m.rating, m.rd) AS mu
         FROM laplace.v_consensus_unrefuted m
         LEFT JOIN laplace.consensus lang ON lang.subject_id = m.object_id
           AND lang.type_id = laplace.relation_type_id('HAS_LANGUAGE')

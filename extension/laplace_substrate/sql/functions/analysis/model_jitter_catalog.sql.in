@@ -8,7 +8,10 @@
 -- bound (fp1e9 Glicko-1 scale). Set-returning; the LIMIT belongs to the
 -- caller (top-k is only ever a query LIMIT).
 -- BEGIN ATOMIC: GH #764.
-CREATE OR REPLACE FUNCTION model_jitter_catalog(
+-- Model artifact scan → generation (ELECT / forward-pass family).
+DROP FUNCTION IF EXISTS generation.model_jitter_catalog(text, bigint);
+DROP FUNCTION IF EXISTS laplace.model_jitter_catalog(text, bigint);
+CREATE OR REPLACE FUNCTION generation.model_jitter_catalog(
         p_relation text DEFAULT NULL,
         p_rd_floor bigint DEFAULT 150000000000)
     RETURNS TABLE(
@@ -26,7 +29,7 @@ BEGIN ATOMIC
     )
     SELECT a.subject_id, a.type_id, a.object_id,
            a.source_id, a.outcome, a.observation_count,
-           c.rating, c.rd, laplace.eff_mu(c.rating, c.rd), c.witness_count
+           c.rating, c.rd, consensus.eff_mu(c.rating, c.rd), c.witness_count
     FROM laplace.consensus c
     JOIN model_rels r ON r.tid = c.type_id
     JOIN laplace.attestations a

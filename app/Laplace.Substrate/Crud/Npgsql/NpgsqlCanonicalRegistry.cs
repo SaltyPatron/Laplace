@@ -4,7 +4,7 @@ using NpgsqlTypes;
 namespace Laplace.SubstrateCRUD.Npgsql;
 
 /// <summary>
-/// The one <c>laplace.register_canonicals</c> call. Every ingest lane that mints its own
+/// The one <c>realize.register_canonicals</c> call. Every ingest lane that mints its own
 /// canonical relation/entity-type names (bulk decomposers via IngestRunner, and the
 /// in-process Chess lanes that bootstrap outside it — engine service, live-game host, PGN
 /// lab ingestor) had hand-copied the identical open-connection/bind-text-array/execute
@@ -19,7 +19,7 @@ public static class NpgsqlCanonicalRegistry
         if (names.Count == 0) return Task.CompletedTask;
         return NpgsqlRead.ExecuteNonQueryAsync(
             dataSource,
-            "SELECT laplace.register_canonicals(@names)",
+            "SELECT realize.register_canonicals(@names)",
             bind: p => p.Add(new NpgsqlParameter
             {
                 ParameterName = "names",

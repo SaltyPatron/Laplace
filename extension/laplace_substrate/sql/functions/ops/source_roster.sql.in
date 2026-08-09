@@ -6,13 +6,15 @@
 -- String body on purpose (not BEGIN ATOMIC): extension upgrades recreate
 -- v_attestation_readable in the same script; parse-time resolution fails with
 -- "relation does not exist" mid-upgrade (GH #764).
-CREATE OR REPLACE FUNCTION source_roster(p_source bytea, p_limit int DEFAULT 40)
+DROP FUNCTION IF EXISTS laplace.source_roster(bytea, int);
+
+CREATE OR REPLACE FUNCTION ops.source_roster(p_source bytea, p_limit int DEFAULT 40)
     RETURNS TABLE(subject_id bytea, subject text, relation text,
                   object_id bytea, object text, observations bigint)
     LANGUAGE sql STABLE
 AS $$
     SELECT a.subject_id, a.subject_label,
-           laplace.relation_canonical(a.type_id),
+           consensus.relation_canonical(a.type_id),
            a.object_id, a.object_label,
            a.observation_count
     FROM laplace.v_attestation_readable a
@@ -20,6 +22,6 @@ AS $$
       -- Every source bootstraps the shared relation law first. Those rows have
       -- relation-type subjects and otherwise consume the whole bounded sample,
       -- making every source appear to hold the same content.
-      AND laplace.relation_canonical(a.subject_id) IS NULL
+      AND consensus.relation_canonical(a.subject_id) IS NULL
     LIMIT p_limit
 $$;

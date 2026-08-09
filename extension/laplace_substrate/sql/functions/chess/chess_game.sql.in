@@ -21,7 +21,7 @@ CREATE OR REPLACE FUNCTION chess.game(p_event bytea)
     -- not here.
     --
     -- All headers arrive in ONE index scan of the line's subject rows filtered
-    -- by this event's context, and the short surfaces laplace.render in ONE
+    -- by this event's context, and the short surfaces realize.render in ONE
     -- realize_batch. The movetext is rendered on its own with the full depth
     -- budget: it is a tier-4 document whose constituent chain rebuilds the
     -- original PGN bytes exactly, so it is not a label lookup and must not be
@@ -94,7 +94,7 @@ CREATE OR REPLACE FUNCTION chess.game(p_event bytea)
            h.black_id,
            COALESCE(NULLIF(bl.txt, ''), encode(h.black_id, 'hex')),
            r.txt, d.txt, ev.txt, ec.txt, tm.txt, tc.txt, tcc.txt,
-           laplace.render_text(h.movetext_id, 32)
+           realize.render_text(h.movetext_id, 32)
     FROM hdr h
     LEFT JOIN surface_text w   ON w.id   = h.white_id
     LEFT JOIN surface_text bl  ON bl.id  = h.black_id

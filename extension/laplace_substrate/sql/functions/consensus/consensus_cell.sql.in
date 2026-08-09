@@ -1,6 +1,6 @@
 -- The RAW Glicko cell for one triple, and the batch form for many (GH #909).
 --
--- consensus_by_ids answers the DISPLAY axis (laplace.eff_mu); this answers the bookkeeping
+-- consensus_by_ids answers the DISPLAY axis (consensus.eff_mu); this answers the bookkeeping
 -- axis -- rating, rd, witness_count as stored. Feedback and fold-audit callers need
 -- the untransformed numbers, and lacking an installed surface for that shape they
 -- hand-wrote `SELECT rating, rd, witness_count FROM laplace.consensus WHERE id = ...`
@@ -41,7 +41,7 @@ CREATE OR REPLACE FUNCTION consensus.pair_scores(
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
     SELECT s.ord::int,
-           COALESCE(laplace.eff_mu_display(c.rating, c.rd), 0)::float8
+           COALESCE(consensus.eff_mu_display(c.rating, c.rd), 0)::float8
     FROM unnest(p_subjects) WITH ORDINALITY AS s(sid, ord)
     JOIN unnest(p_objects) WITH ORDINALITY AS o(oid, ord) USING (ord)
     LEFT JOIN laplace.consensus c

@@ -1,7 +1,9 @@
 -- An entity's verdict record: its edges grouped by the canonical
 -- epistemic_status logic — confirmed / contested / refuted / thin. The verdict
 -- rule lives THERE; this only counts, and no client re-derives it from raw mu.
-CREATE OR REPLACE FUNCTION entity_record(p_id bytea)
+DROP FUNCTION IF EXISTS laplace.entity_record(bytea);
+
+CREATE OR REPLACE FUNCTION ops.entity_record(p_id bytea)
     RETURNS TABLE(confirmed bigint, contested bigint, refuted bigint, thin bigint)
     LANGUAGE sql STABLE
     AS $$

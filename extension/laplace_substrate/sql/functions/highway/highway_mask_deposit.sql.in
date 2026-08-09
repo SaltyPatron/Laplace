@@ -34,7 +34,8 @@
 -- chunk's work and waiters queue in chunk-sized steps. Serial-and-fast beats
 -- parallel-and-taxed: the parallelism never parallelised the row updates, it
 -- only manufactured the contention (the pre-bd10fcf C# scheduler knew this).
-CREATE OR REPLACE FUNCTION laplace.highway_mask_deposit(p_entity_ids bytea[], p_type_ids bytea[])
+DROP FUNCTION IF EXISTS laplace.highway_mask_deposit(bytea[], bytea[]);
+CREATE OR REPLACE FUNCTION consensus.highway_mask_deposit(p_entity_ids bytea[], p_type_ids bytea[])
     RETURNS bigint
     LANGUAGE plpgsql VOLATILE AS $$
 DECLARE
@@ -42,7 +43,7 @@ DECLARE
     v_eids  bytea[];
     v_bits  int[];
 BEGIN
-    IF NOT laplace.laplace_highway_ready() THEN
+    IF NOT consensus.laplace_highway_ready() THEN
         RAISE WARNING 'highway_mask_deposit: highway perfcache not configured — masks not deposited (set laplace_substrate.highway_perfcache_path)';
         RETURN 0;
     END IF;
@@ -72,8 +73,8 @@ BEGIN
         -- it contributes its FAMILY ROOT's bit via its IS_A edge (SeedDynamic).
         -- Bounded: one probe per DISTINCT type this epoch (dozens), not per entity.
         SELECT t.tid,
-               COALESCE(laplace.relation_highway_bit(t.tid),
-                        laplace.relation_highway_bit(fam.object_id)) AS bit
+               COALESCE(consensus.relation_highway_bit(t.tid),
+                        consensus.relation_highway_bit(fam.object_id)) AS bit
         FROM types t
         LEFT JOIN laplace.consensus fam
           ON fam.subject_id = t.tid
@@ -106,12 +107,12 @@ BEGIN
     ),
     upd AS (
         UPDATE laplace.entities e
-        SET highway_mask = laplace.laplace_highway_mask_from_bits(
-                COALESCE(laplace.laplace_highway_mask_bits(e.highway_mask), ARRAY[]::int[]) || d.bits)
+        SET highway_mask = consensus.laplace_highway_mask_from_bits(
+                COALESCE(consensus.laplace_highway_mask_bits(e.highway_mask), ARRAY[]::int[]) || d.bits)
         FROM d
         WHERE e.id = d.eid
           AND (e.highway_mask IS NULL
-               OR NOT (laplace.laplace_highway_mask_bits(e.highway_mask) @> d.bits))
+               OR NOT (consensus.laplace_highway_mask_bits(e.highway_mask) @> d.bits))
         RETURNING 1
     )
     SELECT count(*) INTO updated FROM upd;

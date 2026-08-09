@@ -2,71 +2,69 @@ CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE EXTENSION laplace_geom;
 CREATE EXTENSION laplace_substrate;
 
-SET search_path TO laplace, public;
-
-SELECT count(*) AS canonical_type_count FROM entities
+SELECT count(*) AS canonical_type_count FROM laplace.entities
 WHERE id IN (
-    laplace_hash128_blake3('IS_A'::bytea),
-    laplace_hash128_blake3('HAS_PART'::bytea),
-    laplace_hash128_blake3('CO_OCCURS_WITH'::bytea),
-    laplace_hash128_blake3('FOLLOWS'::bytea),
-    laplace_hash128_blake3('PRECEDES'::bytea),
-    laplace_hash128_blake3('OCCURS_IN_CONTEXT'::bytea),
-    laplace_hash128_blake3('HAS_LANGUAGE'::bytea),
-    laplace_hash128_blake3('IS_TRANSLATION_OF'::bytea),
-    laplace_hash128_blake3('DEPICTS'::bytea),
-    laplace_hash128_blake3('CAPTIONS'::bytea),
-    laplace_hash128_blake3('TRANSCRIBES_AS'::bytea),
-    laplace_hash128_blake3('IS_LOSSY_ENCODING_OF'::bytea),
-    laplace_hash128_blake3('HAS_VARIANT_OF'::bytea),
-    laplace_hash128_blake3('IS_REPLACED_BY'::bytea),
-    laplace_hash128_blake3('HAS_TRUST_CLASS'::bytea),
-    laplace_hash128_blake3('IS_ALIAS_OF'::bytea)
+    public.laplace_hash128_blake3('IS_A'::bytea),
+    public.laplace_hash128_blake3('HAS_PART'::bytea),
+    public.laplace_hash128_blake3('CO_OCCURS_WITH'::bytea),
+    public.laplace_hash128_blake3('FOLLOWS'::bytea),
+    public.laplace_hash128_blake3('PRECEDES'::bytea),
+    public.laplace_hash128_blake3('OCCURS_IN_CONTEXT'::bytea),
+    public.laplace_hash128_blake3('HAS_LANGUAGE'::bytea),
+    public.laplace_hash128_blake3('IS_TRANSLATION_OF'::bytea),
+    public.laplace_hash128_blake3('DEPICTS'::bytea),
+    public.laplace_hash128_blake3('CAPTIONS'::bytea),
+    public.laplace_hash128_blake3('TRANSCRIBES_AS'::bytea),
+    public.laplace_hash128_blake3('IS_LOSSY_ENCODING_OF'::bytea),
+    public.laplace_hash128_blake3('HAS_VARIANT_OF'::bytea),
+    public.laplace_hash128_blake3('IS_REPLACED_BY'::bytea),
+    public.laplace_hash128_blake3('HAS_TRUST_CLASS'::bytea),
+    public.laplace_hash128_blake3('IS_ALIAS_OF'::bytea)
 );
 
 SELECT EXISTS(
-    SELECT 1 FROM entities
-    WHERE id = laplace_hash128_blake3('substrate/source/SubstrateCanonical/v1'::bytea)
+    SELECT 1 FROM laplace.entities
+    WHERE id = public.laplace_hash128_blake3('substrate/source/SubstrateCanonical/v1'::bytea)
 ) AS substrate_canonical_present;
 
-SELECT count(*) AS tier_count FROM entities
+SELECT count(*) AS tier_count FROM laplace.entities
 WHERE id IN (
-    laplace_hash128_blake3('substrate/type_tier/T1_Mandate/v1'::bytea),
-    laplace_hash128_blake3('substrate/type_tier/T2_StandardsStructural/v1'::bytea),
-    laplace_hash128_blake3('substrate/type_tier/T3_Taxonomic/v1'::bytea),
-    laplace_hash128_blake3('substrate/type_tier/T4_Partitive/v1'::bytea),
-    laplace_hash128_blake3('substrate/type_tier/T5_Causal/v1'::bytea),
-    laplace_hash128_blake3('substrate/type_tier/T6_Equivalence/v1'::bytea),
-    laplace_hash128_blake3('substrate/type_tier/T7_Oppositional/v1'::bytea),
-    laplace_hash128_blake3('substrate/type_tier/T8_Associative/v1'::bytea),
-    laplace_hash128_blake3('substrate/type_tier/T9_TensorCalculation/v1'::bytea),
-    laplace_hash128_blake3('substrate/type_tier/T10_ScalarValued/v1'::bytea),
-    laplace_hash128_blake3('substrate/type_tier/T11_Probationary/v1'::bytea)
+    public.laplace_hash128_blake3('substrate/type_tier/T1_Mandate/v1'::bytea),
+    public.laplace_hash128_blake3('substrate/type_tier/T2_StandardsStructural/v1'::bytea),
+    public.laplace_hash128_blake3('substrate/type_tier/T3_Taxonomic/v1'::bytea),
+    public.laplace_hash128_blake3('substrate/type_tier/T4_Partitive/v1'::bytea),
+    public.laplace_hash128_blake3('substrate/type_tier/T5_Causal/v1'::bytea),
+    public.laplace_hash128_blake3('substrate/type_tier/T6_Equivalence/v1'::bytea),
+    public.laplace_hash128_blake3('substrate/type_tier/T7_Oppositional/v1'::bytea),
+    public.laplace_hash128_blake3('substrate/type_tier/T8_Associative/v1'::bytea),
+    public.laplace_hash128_blake3('substrate/type_tier/T9_TensorCalculation/v1'::bytea),
+    public.laplace_hash128_blake3('substrate/type_tier/T10_ScalarValued/v1'::bytea),
+    public.laplace_hash128_blake3('substrate/type_tier/T11_Probationary/v1'::bytea)
 );
 
-SELECT count(*) AS trust_class_count FROM entities
+SELECT count(*) AS trust_class_count FROM laplace.entities
 WHERE id IN (
-    laplace_hash128_blake3('substrate/trust_class/SubstrateMandate/v1'::bytea),
-    laplace_hash128_blake3('substrate/trust_class/StandardsDerived/v1'::bytea),
-    laplace_hash128_blake3('substrate/trust_class/AcademicCurated/v1'::bytea),
-    laplace_hash128_blake3('substrate/trust_class/AcademicCuratedWithUserInput/v1'::bytea),
-    laplace_hash128_blake3('substrate/trust_class/StructuredCorpus/v1'::bytea),
-    laplace_hash128_blake3('substrate/trust_class/UserCuratedResource/v1'::bytea),
-    laplace_hash128_blake3('substrate/trust_class/AIModelProbe/v1'::bytea),
-    laplace_hash128_blake3('substrate/trust_class/AppDerived/v1'::bytea),
-    laplace_hash128_blake3('substrate/trust_class/UserPromptContent/v1'::bytea),
-    laplace_hash128_blake3('substrate/trust_class/AdversarialUntrusted/v1'::bytea)
+    public.laplace_hash128_blake3('substrate/trust_class/SubstrateMandate/v1'::bytea),
+    public.laplace_hash128_blake3('substrate/trust_class/StandardsDerived/v1'::bytea),
+    public.laplace_hash128_blake3('substrate/trust_class/AcademicCurated/v1'::bytea),
+    public.laplace_hash128_blake3('substrate/trust_class/AcademicCuratedWithUserInput/v1'::bytea),
+    public.laplace_hash128_blake3('substrate/trust_class/StructuredCorpus/v1'::bytea),
+    public.laplace_hash128_blake3('substrate/trust_class/UserCuratedResource/v1'::bytea),
+    public.laplace_hash128_blake3('substrate/trust_class/AIModelProbe/v1'::bytea),
+    public.laplace_hash128_blake3('substrate/trust_class/AppDerived/v1'::bytea),
+    public.laplace_hash128_blake3('substrate/trust_class/UserPromptContent/v1'::bytea),
+    public.laplace_hash128_blake3('substrate/trust_class/AdversarialUntrusted/v1'::bytea)
 );
 
 SELECT EXISTS(
-    SELECT 1 FROM attestations
-    WHERE subject_id = laplace_hash128_blake3('substrate/source/SubstrateCanonical/v1'::bytea)
-      AND type_id    = laplace_hash128_blake3('HAS_TRUST_CLASS'::bytea)
-      AND object_id  = laplace_hash128_blake3('substrate/trust_class/SubstrateMandate/v1'::bytea)
-      AND source_id  = laplace_hash128_blake3('substrate/source/SubstrateCanonical/v1'::bytea)
+    SELECT 1 FROM laplace.attestations
+    WHERE subject_id = public.laplace_hash128_blake3('substrate/source/SubstrateCanonical/v1'::bytea)
+      AND type_id    = public.laplace_hash128_blake3('HAS_TRUST_CLASS'::bytea)
+      AND object_id  = public.laplace_hash128_blake3('substrate/trust_class/SubstrateMandate/v1'::bytea)
+      AND source_id  = public.laplace_hash128_blake3('substrate/source/SubstrateCanonical/v1'::bytea)
 ) AS substrate_canonical_trust_class_set;
 
 SELECT count(*) AS deferred_fk_count
 FROM pg_constraint
-WHERE conrelid = 'entities'::regclass
+WHERE conrelid = 'laplace.entities'::regclass
   AND conname IN ('entities_type_fk', 'entities_first_observed_fk');

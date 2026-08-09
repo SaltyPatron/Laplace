@@ -1,5 +1,7 @@
 -- BEGIN ATOMIC: GH #764.
-CREATE OR REPLACE FUNCTION consensus_count(p_type bytea DEFAULT NULL)
+DROP FUNCTION IF EXISTS laplace.consensus_count(bytea);
+
+CREATE OR REPLACE FUNCTION ops.consensus_count(p_type bytea DEFAULT NULL)
     RETURNS bigint
     LANGUAGE sql STABLE
 BEGIN ATOMIC
@@ -11,7 +13,7 @@ BEGIN ATOMIC
     -- p_type set counts exactly that type.
     SELECT CASE
         WHEN p_type IS NULL
-            THEN (SELECT count(*) FROM @extschema@.consensus)
-            ELSE (SELECT count(*) FROM @extschema@.consensus c WHERE c.type_id = p_type)
+            THEN (SELECT count(*) FROM laplace.consensus)
+            ELSE (SELECT count(*) FROM laplace.consensus c WHERE c.type_id = p_type)
     END;
 END;

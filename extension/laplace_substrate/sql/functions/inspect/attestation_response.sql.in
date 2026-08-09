@@ -1,4 +1,6 @@
-CREATE OR REPLACE FUNCTION attestation_response(
+DROP FUNCTION IF EXISTS laplace.attestation_response(bytea, bytea, bytea[], bytea, integer);
+DROP FUNCTION IF EXISTS consensus.attestation_response(bytea, bytea, bytea[], bytea, integer);
+CREATE OR REPLACE FUNCTION ops.attestation_response(
     p_subject_id        bytea,
     p_relation_type_id  bytea,
     p_source_scope      bytea[]    DEFAULT NULL,
@@ -15,7 +17,7 @@ RETURNS TABLE(
 LANGUAGE sql STABLE
     AS $$
     SELECT c.object_id,
-           (laplace.eff_mu(c.rating, c.rd) / 1e9)::double precision,
+           (consensus.eff_mu(c.rating, c.rd) / 1e9)::double precision,
            c.witness_count::integer,
            c.rating,
            c.rd
@@ -34,6 +36,6 @@ LANGUAGE sql STABLE
                   AND (p_context_id   IS NULL OR a.context_id IS NOT DISTINCT FROM p_context_id)
             )
           )
-    ORDER BY laplace.eff_mu(c.rating, c.rd) DESC
+    ORDER BY consensus.eff_mu(c.rating, c.rd) DESC
     LIMIT GREATEST(1, p_top_k)
 $$;

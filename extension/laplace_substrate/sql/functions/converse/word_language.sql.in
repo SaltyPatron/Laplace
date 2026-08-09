@@ -1,5 +1,5 @@
 -- converse.word_language — GH #862 / #860. No SET (it invalidates plan caching and
--- blocks inlining, and this is a per-row call on the laplace.render path), real schema names.
+-- blocks inlining, and this is a per-row call on the realize.render path), real schema names.
 DROP FUNCTION IF EXISTS laplace.word_language(bytea);
 -- BEGIN ATOMIC: GH #764.
 CREATE OR REPLACE FUNCTION converse.word_language(p_word bytea)
@@ -11,6 +11,6 @@ BEGIN ATOMIC
     WHERE c.subject_id = p_word
       AND c.type_id = laplace.relation_type_id('HAS_LANGUAGE')
       AND c.object_id IS NOT NULL
-    ORDER BY laplace.eff_mu(c.rating, c.rd) DESC
+    ORDER BY consensus.eff_mu(c.rating, c.rd) DESC
     LIMIT 1;
 END;

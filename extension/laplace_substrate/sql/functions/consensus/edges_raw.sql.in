@@ -4,15 +4,15 @@
 -- ever chose those axes — they inherited whichever function they happened to
 -- reach for:
 --
---   fn                              table       dir   rank       laplace.refuted
---   consensus_out                   consensus   out   laplace.edge_rank  INCLUDED
---   consensus_in                    consensus   in    laplace.edge_rank  INCLUDED
---   consensus_neighbors_directed    unrefuted   out   laplace.eff_mu     excluded
---   consensus_neighbors_undirected  unrefuted   both  laplace.eff_mu     excluded
---   explore_web_neighbors           consensus   both  laplace.eff_mu     INCLUDED
---   foundry_crawl_neighbors         consensus   out   laplace.eff_mu     INCLUDED
+--   fn                              table       dir   rank       consensus.refuted
+--   consensus_out                   consensus   out   consensus.edge_rank  INCLUDED
+--   consensus_in                    consensus   in    consensus.edge_rank  INCLUDED
+--   consensus_neighbors_directed    unrefuted   out   consensus.eff_mu     excluded
+--   consensus_neighbors_undirected  unrefuted   both  consensus.eff_mu     excluded
+--   explore_web_neighbors           consensus   both  consensus.eff_mu     INCLUDED
+--   foundry_crawl_neighbors         consensus   out   consensus.eff_mu     INCLUDED
 --
--- Four of the six return laplace.refuted edges. That is a semantic split — a laplace.refuted edge
+-- Four of the six return consensus.refuted edges. That is a semantic split — a consensus.refuted edge
 -- is one the fold has rated BELOW neutral at its optimistic bound, i.e. the
 -- substrate's own verdict is "this claim lost" — and it was distributed by
 -- accident, not by design. consensus_out and consensus_in are the pair a new
@@ -27,7 +27,7 @@
 -- RAW on purpose: ids and Glicko state, no labels. Labeling is a separate layer
 -- (consensus.edges(), which wraps this and resolves in one realize_batch after the limit),
 -- because the native walkers that consume edges want ids and would pay for text
--- they never laplace.render.
+-- they never realize.render.
 DROP FUNCTION IF EXISTS laplace.edges_raw(bytea, text, bytea[], int, boolean, text);
 -- BEGIN ATOMIC: GH #764. No SET search_path (#617/#860) — inlining into wrappers.
 CREATE OR REPLACE FUNCTION consensus.edges_raw(
@@ -35,7 +35,7 @@ CREATE OR REPLACE FUNCTION consensus.edges_raw(
         p_direction text    DEFAULT 'both',   -- 'out' | 'in' | 'both'
         p_types     bytea[] DEFAULT NULL,     -- NULL = every relation type
         p_limit     int     DEFAULT 40,       -- a QUERY limit over the ranking
-        p_refuted   boolean DEFAULT false,    -- include edges the fold laplace.refuted
+        p_refuted   boolean DEFAULT false,    -- include edges the fold consensus.refuted
         p_rank      text    DEFAULT 'edge_rank')  -- 'edge_rank' | 'eff_mu'
     RETURNS TABLE(direction text, type_id bytea, neighbour_id bytea,
                   rating bigint, rd bigint, volatility bigint, witness_count bigint)
@@ -46,24 +46,24 @@ BEGIN ATOMIC
     FROM (
         SELECT 'out'::text AS direction, c.type_id, c.object_id AS neighbour_id,
                c.rating, c.rd, c.volatility, c.witness_count
-        FROM @extschema@.consensus c
+        FROM laplace.consensus c
         WHERE p_direction IN ('out', 'both')
           AND c.subject_id = p_subject
           AND c.object_id IS NOT NULL
           AND (p_types IS NULL OR c.type_id = ANY (p_types))
-          AND (p_refuted OR NOT @extschema@.refuted(c.rating, c.rd))
+          AND (p_refuted OR NOT consensus.refuted(c.rating, c.rd))
         UNION ALL
         SELECT 'in'::text, c.type_id, c.subject_id,
                c.rating, c.rd, c.volatility, c.witness_count
-        FROM @extschema@.consensus c
+        FROM laplace.consensus c
         WHERE p_direction IN ('in', 'both')
           AND c.object_id = p_subject
           AND (p_types IS NULL OR c.type_id = ANY (p_types))
-          AND (p_refuted OR NOT @extschema@.refuted(c.rating, c.rd))
+          AND (p_refuted OR NOT consensus.refuted(c.rating, c.rd))
     ) e
     ORDER BY CASE WHEN p_rank = 'edge_rank'
-                  THEN @extschema@.edge_rank(e.type_id, @extschema@.eff_mu(e.rating, e.rd))
-                  ELSE (@extschema@.eff_mu(e.rating, e.rd))::float8 / 1e9
+                  THEN consensus.edge_rank(e.type_id, consensus.eff_mu(e.rating, e.rd))
+                  ELSE (consensus.eff_mu(e.rating, e.rd))::float8 / 1e9
              END DESC,
              e.neighbour_id
     LIMIT p_limit;

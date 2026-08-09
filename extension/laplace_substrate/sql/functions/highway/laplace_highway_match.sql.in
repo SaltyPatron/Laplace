@@ -3,7 +3,8 @@
 -- the SQL executor for what is four uint64 AND/OR ops. NULL on either side
 -- returns false (unchanged WHERE semantics); length mismatch is an error,
 -- matching the old `&` operator behavior.
-CREATE OR REPLACE FUNCTION laplace.laplace_highway_match(mask bytea, band_mask bytea)
+DROP FUNCTION IF EXISTS laplace.laplace_highway_match(mask bytea, band_mask bytea);
+CREATE OR REPLACE FUNCTION consensus.laplace_highway_match(mask bytea, band_mask bytea)
     RETURNS boolean
     AS 'MODULE_PATHNAME', 'pg_laplace_highway_match'
     LANGUAGE C IMMUTABLE;

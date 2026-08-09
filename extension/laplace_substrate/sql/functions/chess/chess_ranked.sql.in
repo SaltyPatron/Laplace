@@ -19,7 +19,7 @@ CREATE OR REPLACE FUNCTION chess.ranked(p_limit integer DEFAULT 200, p_offset in
     -- Minting a player-only outcome object to make the query easier would duplicate a fact the
     -- entity type already states.
     --
-    -- laplace.eff_mu, not a win percentage: Glicko-2 weighs WHO you beat, so a 68% score against 1960s
+    -- consensus.eff_mu, not a win percentage: Glicko-2 weighs WHO you beat, so a 68% score against 1960s
     -- grandmasters outranks 68% against beginners instead of tying it, and a thin record sinks
     -- on RD rather than flattering itself. A raw ratio can express neither.
     --
@@ -35,12 +35,12 @@ CREATE OR REPLACE FUNCTION chess.ranked(p_limit integer DEFAULT 200, p_offset in
           ON c.subject_id = e.id
          AND c.type_id = laplace.relation_type_id('OUTCOME')
         WHERE e.type_id = laplace.entity_type_id('Chess_Player')
-        ORDER BY laplace.eff_mu(c.rating, c.rd) DESC, c.subject_id
+        ORDER BY consensus.eff_mu(c.rating, c.rd) DESC, c.subject_id
         LIMIT p_limit OFFSET p_offset
     ),
     batch AS MATERIALIZED (
         SELECT COALESCE(
-                   array_agg(rec.player ORDER BY laplace.eff_mu(rec.rating, rec.rd) DESC, rec.player),
+                   array_agg(rec.player ORDER BY consensus.eff_mu(rec.rating, rec.rd) DESC, rec.player),
                    '{}'::bytea[]) AS ids
         FROM rec
     ),
@@ -53,17 +53,17 @@ CREATE OR REPLACE FUNCTION chess.ranked(p_limit integer DEFAULT 200, p_offset in
              LATERAL unnest(realize.batch(b.ids)) WITH ORDINALITY AS t(txt, j)
         WHERE p.i = t.j
     )
-    SELECT row_number() OVER (ORDER BY laplace.eff_mu(rec.rating, rec.rd) DESC, rec.player)
+    SELECT row_number() OVER (ORDER BY consensus.eff_mu(rec.rating, rec.rd) DESC, rec.player)
                + p_offset,
            rec.player,
            COALESCE(NULLIF(n.txt, ''), encode(rec.player, 'hex')),
            rec.games,
-           -- DISPLAY units, never raw fp1e9: laplace.eff_mu_display is the one scaling law
-           -- (functions/mu/laplace.eff_mu_display.sql.in), rating/rd take the same /1e9 round.
+           -- DISPLAY units, never raw fp1e9: consensus.eff_mu_display is the one scaling law
+           -- (functions/mu/consensus.eff_mu_display.sql.in), rating/rd take the same /1e9 round.
            round((rec.rating / 1e9)::numeric, 3)::double precision,
            round((rec.rd / 1e9)::numeric, 3)::double precision,
-           laplace.eff_mu_display(rec.rating, rec.rd)::double precision
+           consensus.eff_mu_display(rec.rating, rec.rd)::double precision
     FROM rec
     LEFT JOIN named n ON n.id = rec.player
-    ORDER BY laplace.eff_mu(rec.rating, rec.rd) DESC, rec.player
+    ORDER BY consensus.eff_mu(rec.rating, rec.rd) DESC, rec.player
 $$;

@@ -8,7 +8,8 @@ Rules match landed families (taxonomy / lexical / realize / converse):
   rewrite callers laplace.<old> / bare <old>( → <purpose>.<new>(
   fix contamination: RETURNS/AS laplace.eff_mu, three-part laplace.purpose.x
 
-Identity / μ / relation / readback / ops / inspect stay in laplace.
+Identity / relation / inspect stay in laplace. μ, readback, and ops move to
+consensus, realize, and ops respectively.
 Run from repo root. Review via git diff.
 """
 from __future__ import annotations
@@ -44,12 +45,12 @@ DIR_SCHEMA: dict[str, str | None] = {
     "variant": "generation",
     "model": "generation",
     "inference": "generation",
-    "mu": None,
+    "mu": "consensus",
     "glicko2": None,
     "relation": None,
-    "readback": None,
+    "readback": "realize",
     "identity": None,
-    "ops": None,
+    "ops": "ops",
     "inspect": None,
     "ingest": None,
     "analysis": None,
@@ -81,7 +82,7 @@ RESERVED = {
 
 PURPOSE = {
     "consensus", "converse", "lexical", "taxonomy", "generation",
-    "structural", "chess", "realize",
+    "structural", "chess", "realize", "ops",
 }
 
 TABLES = {
@@ -142,6 +143,15 @@ CREATE_RE = re.compile(
     re.IGNORECASE,
 )
 
+MOVED_RE = re.compile(
+    r"DROP\s+FUNCTION\s+IF\s+EXISTS\s+laplace\."
+    r"([A-Za-z_][A-Za-z0-9_]*)\s*\([^;\n]*\);\s*"
+    r"CREATE\s+OR\s+REPLACE\s+FUNCTION\s+"
+    r"(consensus|converse|lexical|taxonomy|generation|structural|chess|realize|ops)\."
+    r"([A-Za-z_][A-Za-z0-9_]*)\s*\(",
+    re.IGNORECASE,
+)
+
 
 def shorten(schema: str, name: str) -> str:
     if name in NAME_OVERRIDES:
@@ -174,6 +184,16 @@ def collect_moves() -> dict[str, tuple[str, str]]:
     moves: dict[str, tuple[str, str]] = {}
 
     def consider(dir_name: str, text: str) -> None:
+        # A rerun must remember surfaces that a previous run already moved. Without
+        # this pair scan, merging current main can introduce fresh laplace.<old>
+        # callers while collect_moves() silently forgets the old-to-purpose map.
+        for m in MOVED_RE.finditer(text):
+            old, sch, new = m.group(1), m.group(2).lower(), m.group(3)
+            prev = moves.get(old)
+            if prev and prev != (sch, new):
+                raise SystemExit(f"conflicting move for {old}: {prev} vs {(sch, new)}")
+            moves[old] = (sch, new)
+
         for m in CREATE_RE.finditer(text):
             qual, name = m.group(1), m.group(2)
             if qual and qual.rstrip(".") in PURPOSE:
@@ -205,7 +225,7 @@ def fix_contamination(text: str) -> str:
     text = re.sub(r"\bAS\s+laplace\.eff_mu\b", "AS eff_mu", text)
     text = re.sub(r"\bAS\s+laplace\.attention\b", "AS attention", text)
     text = re.sub(
-        r"\blaplace\.(converse|consensus|lexical|realize|taxonomy|structural|generation|chess)\.",
+        r"\blaplace\.(converse|consensus|lexical|realize|taxonomy|structural|generation|chess|ops)\.",
         r"\1.",
         text,
     )
@@ -244,7 +264,7 @@ def qualify_tables(text: str) -> str:
 def fix_table_schema_collision(text: str) -> str:
     """Undo FROM laplace.consensus.fn → FROM consensus.fn (table/schema clash)."""
     text = re.sub(
-        r"\blaplace\.(consensus|converse|lexical|realize|taxonomy|structural|generation|chess)\.",
+        r"\blaplace\.(consensus|converse|lexical|realize|taxonomy|structural|generation|chess|ops)\.",
         r"\1.",
         text,
     )
@@ -264,6 +284,43 @@ def scan_args(text: str, open_paren_idx: int) -> str:
                 return text[open_paren_idx + 1 : i]
         i += 1
     return ""
+
+
+def drop_identity_args(args: str) -> str:
+    """Return type-only input arguments accepted by DROP FUNCTION."""
+    parts: list[str] = []
+    start = 0
+    parens = brackets = 0
+    quoted = False
+    for i, ch in enumerate(args):
+        if ch == "'":
+            quoted = not quoted
+        elif not quoted:
+            if ch == "(": parens += 1
+            elif ch == ")": parens -= 1
+            elif ch == "[": brackets += 1
+            elif ch == "]": brackets -= 1
+            elif ch == "," and parens == 0 and brackets == 0:
+                parts.append(args[start:i])
+                start = i + 1
+    parts.append(args[start:])
+
+    identity: list[str] = []
+    for part in parts:
+        decl = re.split(r"\s+(?:DEFAULT|=)\s+", part.strip(), maxsplit=1,
+                        flags=re.IGNORECASE)[0]
+        tokens = decl.split()
+        if not tokens:
+            continue
+        mode = tokens[0].upper()
+        if mode == "OUT":
+            continue
+        if mode in {"IN", "INOUT", "VARIADIC"}:
+            tokens.pop(0)
+        if tokens and tokens[0].lower().startswith("p_"):
+            tokens.pop(0)
+        identity.append(" ".join(tokens))
+    return ", ".join(identity)
 
 
 def rewrite_creates(text: str, dir_name: str | None, moves: dict[str, tuple[str, str]]) -> str:
@@ -289,9 +346,10 @@ def rewrite_creates(text: str, dir_name: str | None, moves: dict[str, tuple[str,
             continue
         sch, new = sch_new
         args = scan_args(text, m.end() - 1)
+        drop_args = drop_identity_args(args)
         prefix = text[max(0, m.start() - 240) : m.start()]
         if f"DROP FUNCTION IF EXISTS laplace.{name}(" not in prefix:
-            out.append(f"DROP FUNCTION IF EXISTS laplace.{name}({args});\n")
+            out.append(f"DROP FUNCTION IF EXISTS laplace.{name}({drop_args});\n")
         out.append(f"CREATE OR REPLACE FUNCTION {sch}.{new}(")
         pos = m.end()
     out.append(text[pos:])
@@ -301,7 +359,9 @@ def rewrite_creates(text: str, dir_name: str | None, moves: dict[str, tuple[str,
     return text
 
 
-def rewrite_calls(text: str, call_map: dict[str, str]) -> str:
+def rewrite_calls(
+    text: str, call_map: dict[str, str], *, rewrite_bare: bool = True
+) -> str:
     # Preserve DROP FUNCTION IF EXISTS laplace.<old>(...) — those drop the
     # pre-migration name and must not be rewritten to purpose.<new>.
     drops: list[str] = []
@@ -321,11 +381,12 @@ def rewrite_calls(text: str, call_map: dict[str, str]) -> str:
     for old in sorted(call_map.keys(), key=len, reverse=True):
         target = call_map[old]
         text = re.sub(rf"\blaplace\.{re.escape(old)}\b", target, text)
-        text = re.sub(rf"\b@extschema@\.{re.escape(old)}\b", target, text)
-        text = re.sub(rf"(?<![.\w]){re.escape(old)}\s*\(", f"{target}(", text)
+        text = re.sub(rf"@extschema@\.{re.escape(old)}\b", target, text)
+        if rewrite_bare:
+            text = re.sub(rf"(?<![.\w]){re.escape(old)}[ \t]*\(", f"{target}(", text)
     # undo double purpose: converse.converse.chat
     text = re.sub(
-        r"\b(consensus|converse|lexical|taxonomy|generation|structural|chess|realize)\.\1\.",
+        r"\b(consensus|converse|lexical|taxonomy|generation|structural|chess|realize|ops)\.\1\.",
         r"\1.",
         text,
     )
@@ -334,7 +395,8 @@ def rewrite_calls(text: str, call_map: dict[str, str]) -> str:
     return text
 
 
-API_SQL = """CREATE OR REPLACE FUNCTION api(p_like text DEFAULT NULL)
+API_SQL = """DROP FUNCTION IF EXISTS laplace.api(text);
+CREATE OR REPLACE FUNCTION ops.api(p_like text DEFAULT NULL)
     RETURNS TABLE(name text, args text, returns text)
     LANGUAGE sql STABLE AS $$
     SELECT CASE WHEN n.nspname = 'laplace' THEN p.proname::text
@@ -345,7 +407,7 @@ API_SQL = """CREATE OR REPLACE FUNCTION api(p_like text DEFAULT NULL)
     JOIN pg_namespace n ON n.oid = p.pronamespace
     WHERE n.nspname = ANY (ARRAY[
             'laplace','consensus','converse','lexical','taxonomy',
-            'generation','structural','chess','realize'
+            'generation','structural','chess','realize','ops'
         ])
       AND (p_like IS NULL
            OR p.proname ILIKE '%'||p_like||'%'
@@ -377,7 +439,8 @@ def main() -> int:
         orig = path.read_text(encoding="utf-8")
         text = fix_contamination(orig)
         text = rewrite_creates(text, dir_name, moves)
-        text = rewrite_calls(text, call_map)
+        is_sql = path.suffix == ".sql" or str(path).endswith(".sql.in")
+        text = rewrite_calls(text, call_map, rewrite_bare=is_sql)
         text = fix_table_schema_collision(text)
         if text != orig:
             path.write_text(text, encoding="utf-8")
@@ -393,7 +456,11 @@ def main() -> int:
     extras += list(SRC.glob("*.c"))
     extras += list(SRC.glob("*.h"))
     extras += list(TESTS.rglob("*.sql"))
-    extras += list(APP.rglob("*.cs"))
+    extras += [
+        path
+        for path in APP.rglob("*.cs")
+        if not {"bin", "obj"}.intersection(path.relative_to(APP).parts)
+    ]
     for base in (ROOT / "scripts/queries", ROOT / "scripts/sql"):
         if base.exists():
             extras += list(base.rglob("*.sql"))
@@ -405,7 +472,8 @@ def main() -> int:
         except (UnicodeDecodeError, OSError):
             continue
         text = fix_contamination(orig) if path.suffix in {".sql", ".in"} or str(path).endswith(".sql.in") else orig
-        text = rewrite_calls(text, call_map)
+        is_sql = path.suffix == ".sql" or str(path).endswith(".sql.in")
+        text = rewrite_calls(text, call_map, rewrite_bare=is_sql)
         text = fix_table_schema_collision(text)
         if text != orig:
             path.write_text(text, encoding="utf-8")

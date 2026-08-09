@@ -12,7 +12,7 @@
 -- that realization was the entire cost, not the test. MEASURED on 1,645 distinct
 -- tokens from 400 'water' containers:
 --
---   laplace.render_text per row + '^\s*$'          29,899 ms
+--   realize.render_text per row + '^\s*$'          29,899 ms
 --   this function, previous body           35,232 ms
 --   the category join below                    33.7 ms
 --
@@ -96,13 +96,13 @@ BEGIN
         SELECT i.id, t.s
         FROM missing m,
              LATERAL unnest(m.ids) WITH ORDINALITY AS i(id, ord),
-             LATERAL unnest(laplace.render_text_batch(m.ids, 8)) WITH ORDINALITY AS t(s, ord)
+             LATERAL unnest(realize.render_text_batch(m.ids, 8)) WITH ORDINALITY AS t(s, ord)
         WHERE i.ord = t.ord
     )
     SELECT (v.ord::int4 - 1)
     FROM unnest(p_vocab) WITH ORDINALITY v(id, ord)
     LEFT JOIN cat ON cat.id = v.id
     LEFT JOIN rendered r ON r.id = v.id
-    WHERE COALESCE(cat.is_sep, laplace.is_all_whitespace(r.s));
+    WHERE COALESCE(cat.is_sep, realize.is_all_whitespace(r.s));
 END;
 $$;

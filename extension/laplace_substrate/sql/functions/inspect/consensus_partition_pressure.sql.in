@@ -17,7 +17,9 @@
 --
 -- Not part of substrate_health(): that function gates IDENTITY law. This is
 -- physical layout, a different claim on a different layer.
-CREATE OR REPLACE FUNCTION consensus_partition_pressure(min_rows bigint DEFAULT 100000)
+DROP FUNCTION IF EXISTS laplace.consensus_partition_pressure(bigint);
+DROP FUNCTION IF EXISTS consensus.consensus_partition_pressure(bigint);
+CREATE OR REPLACE FUNCTION ops.consensus_partition_pressure(min_rows bigint DEFAULT 100000)
 RETURNS TABLE(
     tbl         text,
     relation    text,
@@ -30,10 +32,10 @@ STABLE
     AS $$
     WITH d AS (
         SELECT 'consensus'::text AS tbl, c.type_id
-          FROM @extschema@.consensus_rdefault c
+          FROM laplace.consensus_rdefault c
         UNION ALL
         SELECT 'attestations'::text, a.type_id
-          FROM @extschema@.attestations_rdefault a
+          FROM laplace.attestations_rdefault a
     ),
     agg AS (
         SELECT d.tbl, d.type_id, count(*) AS rows

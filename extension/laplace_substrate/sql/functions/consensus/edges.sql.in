@@ -9,25 +9,25 @@
 --   consensus_neighbors_undirected unrefuted view, both, types[] required
 --   consensus_walk_edges           unrefuted, outbound, exclude[], RelationType antijoin
 --   consensus_step_edge            unrefuted, both, but ONE edge between two ids
---   explore_web_neighbors          RAW consensus (laplace.refuted included), both
---   foundry_crawl_neighbors        RAW consensus (laplace.refuted included), outbound
+--   explore_web_neighbors          RAW consensus (consensus.refuted included), both
+--   foundry_crawl_neighbors        RAW consensus (consensus.refuted included), outbound
 --   related / related_in           unrefuted, one direction each, senses-expanded
 --   related_objects                unrefuted, outbound, relation BY NAME
 --
 -- The axes: which table (consensus vs laplace.v_consensus_unrefuted vs
--- laplace.v_consensus_resolved), which direction, which ranking (raw laplace.eff_mu vs laplace.edge_rank
--- vs none), and whether laplace.refuted edges are included. consensus_subject_edges and
--- the two crawl feeders return laplace.refuted edges; their siblings do not. That is a
+-- laplace.v_consensus_resolved), which direction, which ranking (raw consensus.eff_mu vs consensus.edge_rank
+-- vs none), and whether consensus.refuted edges are included. consensus_subject_edges and
+-- the two crawl feeders return consensus.refuted edges; their siblings do not. That is a
 -- semantic difference, not a stylistic one, and it was never a caller's choice —
 -- it was an accident of which function got reached for.
 --
 -- Here every axis is an explicit argument with a stated default:
 --   p_direction  'out' | 'in' | 'both'      (default 'both')
 --   p_types      NULL = every relation type (default NULL)
---   p_refuted    false = exclude laplace.refuted(default false)
---   p_limit      a QUERY limit over an laplace.eff_mu ranking, never a floor
+--   p_refuted    false = exclude consensus.refuted(default false)
+--   p_limit      a QUERY limit over an consensus.eff_mu ranking, never a floor
 --
--- Ranking is laplace.edge_rank(relation salience x laplace.eff_mu), the readout law the serving
+-- Ranking is consensus.edge_rank(relation salience x consensus.eff_mu), the readout law the serving
 -- surface already uses. Labels resolve in ONE realize_batch after the limit, per
 -- the rank-then-label rule — never a scalar realize per row.
 DROP FUNCTION IF EXISTS laplace.edges(bytea, text, bytea[], int, boolean, bytea);
@@ -65,7 +65,7 @@ CREATE OR REPLACE FUNCTION consensus.edges(
         -- Relation names come from the manifest, once per DISTINCT type — a
         -- governed vocabulary of ~189, so a subject spans a handful.
         SELECT t.type_id,
-               COALESCE(NULLIF(@extschema@.relation_canonical(t.type_id), ''),
+               COALESCE(NULLIF(consensus.relation_canonical(t.type_id), ''),
                         l.txt) AS relation
         FROM (SELECT DISTINCT k.type_id FROM ranked k) t
         JOIN labels l ON l.id=t.type_id
@@ -76,7 +76,7 @@ CREATE OR REPLACE FUNCTION consensus.edges(
     )
     SELECT k.dir, rel.relation, k.nid,
            COALESCE(lbl.l[k.ord], nl.txt),
-           @extschema@.eff_mu_display(k.rating, k.rd),
+           consensus.eff_mu_display(k.rating, k.rd),
            k.witness_count
     FROM ranked k
     JOIN rel ON rel.type_id = k.type_id

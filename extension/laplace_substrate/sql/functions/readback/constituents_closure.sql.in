@@ -1,8 +1,8 @@
 -- Bulk constituent closure for native no-SPI render assembly (R1).
--- The C render (generate_walk.c) runs this ONCE per render call and assembles text in C.
+-- The C realize.render(generate_walk.c) runs this ONCE per render call and assembles text in C.
 --
--- History / why this shape: the prior version called the SQL wrapper constituents(id) per
--- node — and constituents() is NON-INLINABLE (ORDER BY ... LIMIT 1 + a lateral SRF), so the
+-- History / why this shape: the prior version called the SQL wrapper realize.constituents(id) per
+-- node — and realize.constituents() is NON-INLINABLE (ORDER BY ... LIMIT 1 + a lateral SRF), so the
 -- planner emitted a real function-call per node, in BOTH the recursive term AND the final
 -- projection (every node expanded twice, through the slow path). Rendering ~15 short names
 -- fanned into hundreds of per-node function calls and timed out under load.
@@ -11,7 +11,7 @@
 --   * reach  — node-recursion (dedup on entity_id, so a shared node is expanded once per depth
 --               it is reached at, NOT once per incoming edge; edge-recursion would re-expand a
 --               common word/codepoint once per parent — a fan-in blow-up on real documents).
---               The physicalities probe + trajectory SRF are INLINED, not the constituents()
+--               The physicalities probe + trajectory SRF are INLINED, not the realize.constituents()
 --               wrapper.
 --   * picked — ONE physicalities row per reached node, chosen SET-BASED via DISTINCT ON over a
 --               join, replacing N correlated `ORDER BY id LIMIT 1` subqueries with one sort.
@@ -19,7 +19,8 @@
 -- Termination: the content law makes the constituent DAG acyclic (constituents are strictly
 -- lower-tier), and the depth cap is a belt-and-braces bound; leaves (codepoints, no type-1
 -- trajectory) yield zero rows and stop the descent.
-CREATE OR REPLACE FUNCTION constituents_closure(
+DROP FUNCTION IF EXISTS laplace.constituents_closure(bytea[], integer);
+CREATE OR REPLACE FUNCTION realize.constituents_closure(
     p_roots bytea[],
     p_max_depth integer DEFAULT 32
 )
@@ -48,7 +49,7 @@ WITH RECURSIVE reach(entity_id, depth) AS (
     FROM reach rc
     CROSS JOIN LATERAL (
         SELECT w.trajectory
-        FROM @extschema@.v_word_points w
+        FROM laplace.v_word_points w
         WHERE w.id = rc.entity_id AND w.trajectory IS NOT NULL
         ORDER BY w.physicality_id
         LIMIT 1
@@ -97,7 +98,7 @@ picked AS (
     -- half-right -- the SET removal above is the larger win (~30 ms of per-call
     -- planning) and is independent of this.
     SELECT DISTINCT ON (w.id) w.id AS entity_id, w.trajectory
-    FROM @extschema@.v_word_points w
+    FROM laplace.v_word_points w
     JOIN node n ON n.entity_id = w.id
     WHERE w.trajectory IS NOT NULL
     ORDER BY w.id, w.physicality_id, public.ST_NPoints(w.trajectory) DESC

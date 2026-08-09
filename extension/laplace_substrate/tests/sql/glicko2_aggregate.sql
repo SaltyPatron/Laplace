@@ -2,8 +2,6 @@ CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE EXTENSION IF NOT EXISTS laplace_geom;
 CREATE EXTENSION IF NOT EXISTS laplace_substrate;
 
-SET search_path TO laplace, public;
-
 WITH paper_input(prior_rating, prior_rd, prior_volatility,
                  opponent_rating, opponent_rd, score, tau) AS (
     VALUES
@@ -15,7 +13,7 @@ WITH paper_input(prior_rating, prior_rd, prior_volatility,
          1700000000000,         300000000000,                  0,         500000000)
 ),
 result AS (
-    SELECT laplace_glicko2_accumulate(
+    SELECT laplace.laplace_glicko2_accumulate(
         prior_rating, prior_rd, prior_volatility,
         opponent_rating, opponent_rd, score, tau
     ) AS r FROM paper_input
@@ -26,7 +24,7 @@ SELECT
     abs((r).volatility -      59990000) <=    50000 AS sigma_pinned
 FROM result;
 
-SELECT laplace_glicko2_accumulate(
+SELECT laplace.laplace_glicko2_accumulate(
     prior_rating, prior_rd, prior_volatility,
     opponent_rating, opponent_rd, score, tau
 ) IS NULL AS empty_input_returns_null
@@ -52,13 +50,13 @@ WITH ordered_input(prior_rating, prior_rd, prior_volatility,
          1700000000000,         300000000000,                  0,         500000000,         3)
 ),
 forward AS (
-    SELECT laplace_glicko2_accumulate(
+    SELECT laplace.laplace_glicko2_accumulate(
         prior_rating, prior_rd, prior_volatility,
         opponent_rating, opponent_rd, score, tau
     ) AS r FROM (SELECT * FROM ordered_input ORDER BY ord ASC) f
 ),
 reverse AS (
-    SELECT laplace_glicko2_accumulate(
+    SELECT laplace.laplace_glicko2_accumulate(
         prior_rating, prior_rd, prior_volatility,
         opponent_rating, opponent_rd, score, tau
     ) AS r FROM (SELECT * FROM ordered_input ORDER BY ord DESC) r
@@ -70,14 +68,14 @@ SELECT
 FROM forward, reverse;
 
 WITH one_draw AS (
-    SELECT laplace_glicko2_accumulate(
+    SELECT laplace.laplace_glicko2_accumulate(
         1500000000000, 200000000000, 60000000,
         1500000000000,  30000000000,  500000000, 500000000
     ) AS r
     FROM generate_series(1, 1)
 ),
 five_draws AS (
-    SELECT laplace_glicko2_accumulate(
+    SELECT laplace.laplace_glicko2_accumulate(
         1500000000000, 200000000000, 60000000,
         1500000000000,  30000000000,  500000000, 500000000
     ) AS r
@@ -90,14 +88,14 @@ SELECT
 FROM one_draw, five_draws;
 
 WITH one_win AS (
-    SELECT laplace_glicko2_accumulate(
+    SELECT laplace.laplace_glicko2_accumulate(
         1500000000000, 200000000000, 60000000,
         1400000000000,  30000000000, 1000000000, 500000000
     ) AS r
     FROM generate_series(1, 1)
 ),
 five_wins AS (
-    SELECT laplace_glicko2_accumulate(
+    SELECT laplace.laplace_glicko2_accumulate(
         1500000000000, 200000000000, 60000000,
         1400000000000,  30000000000, 1000000000, 500000000
     ) AS r
@@ -109,14 +107,14 @@ SELECT
 FROM one_win, five_wins;
 
 WITH replay AS (
-    SELECT laplace_glicko2_accumulate(
+    SELECT laplace.laplace_glicko2_accumulate(
         1500000000000, 350000000000, 60000000,
         1500000000000,  80000000000,  500000000, 500000000
     ) AS r
     FROM generate_series(1, 5)
 ),
 batch AS (
-    SELECT laplace_glicko2_accumulate_games(
+    SELECT laplace.laplace_glicko2_accumulate_games(
         1500000000000, 350000000000, 60000000,
         1500000000000,  80000000000, 5, 2500000000, 500000000
     ) AS r
@@ -128,7 +126,7 @@ SELECT
 FROM replay, batch;
 
 WITH replay AS (
-    SELECT laplace_glicko2_accumulate(
+    SELECT laplace.laplace_glicko2_accumulate(
         1480000000000, 200000000000, 60000000,
         1500000000000, 120000000000, s.score, 500000000
     ) AS r
@@ -136,7 +134,7 @@ WITH replay AS (
                  (3, 333333335::bigint)) AS s(ord, score)
 ),
 batch AS (
-    SELECT laplace_glicko2_accumulate_games(
+    SELECT laplace.laplace_glicko2_accumulate_games(
         1480000000000, 200000000000, 60000000,
         1500000000000, 120000000000, 3, 1000000001, 500000000
     ) AS r
@@ -148,14 +146,14 @@ SELECT
 FROM replay, batch;
 
 WITH replay AS (
-    SELECT laplace_glicko2_accumulate(
+    SELECT laplace.laplace_glicko2_accumulate(
         1520000000000, 180000000000, 60000000,
         1500000000000,  90000000000, 700000000, 500000000
     ) AS r
     FROM generate_series(1, 1)
 ),
 batch AS (
-    SELECT laplace_glicko2_accumulate_games(
+    SELECT laplace.laplace_glicko2_accumulate_games(
         1520000000000, 180000000000, 60000000,
         1500000000000,  90000000000, 1, 700000000, 500000000
     ) AS r
@@ -166,7 +164,7 @@ SELECT
     (batch.r).volatility = (replay.r).volatility AS one_volatility_bit_equal
 FROM replay, batch;
 
-SELECT laplace_glicko2_accumulate_games(
+SELECT laplace.laplace_glicko2_accumulate_games(
     1500000000000, 350000000000, 60000000,
     1500000000000,  80000000000, 0, 0, 500000000);
 

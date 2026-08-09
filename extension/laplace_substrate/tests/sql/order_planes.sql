@@ -9,28 +9,27 @@
 -- bootstrap mints relation types, trust classes, POS tags, sources and languages at tier 2
 -- and single-grapheme words collapse to tier 0.
 BEGIN;
-SET search_path = laplace, public;
 
 DO $$
 DECLARE
-    src       bytea := laplace_hash128_blake3('test/order/source');
-    type_t    bytea := laplace_hash128_blake3('Type');
-    type_word bytea := laplace_hash128_blake3('Word');
-    type_sent bytea := laplace_hash128_blake3('Sentence');
-    type_doc  bytea := laplace_hash128_blake3('Document');
-    w_a       bytea := laplace_hash128_blake3('test/order/word-a');
-    w_gap     bytea := laplace_hash128_blake3('test/order/word-gap');
-    w_b       bytea := laplace_hash128_blake3('test/order/word-b');
-    w_rep     bytea := laplace_hash128_blake3('test/order/word-rep');
-    sent      bytea := laplace_hash128_blake3('test/order/sentence');
-    sent_rep  bytea := laplace_hash128_blake3('test/order/sentence-rep');
-    doc       bytea := laplace_hash128_blake3('test/order/document');
+    src       bytea := public.laplace_hash128_blake3('test/order/source');
+    type_t    bytea := public.laplace_hash128_blake3('Type');
+    type_word bytea := public.laplace_hash128_blake3('Word');
+    type_sent bytea := public.laplace_hash128_blake3('Sentence');
+    type_doc  bytea := public.laplace_hash128_blake3('Document');
+    w_a       bytea := public.laplace_hash128_blake3('test/order/word-a');
+    w_gap     bytea := public.laplace_hash128_blake3('test/order/word-gap');
+    w_b       bytea := public.laplace_hash128_blake3('test/order/word-b');
+    w_rep     bytea := public.laplace_hash128_blake3('test/order/word-rep');
+    sent      bytea := public.laplace_hash128_blake3('test/order/sentence');
+    sent_rep  bytea := public.laplace_hash128_blake3('test/order/sentence-rep');
+    doc       bytea := public.laplace_hash128_blake3('test/order/document');
     t2flag    bigint := (2::bigint << 1);
     t3flag    bigint := (3::bigint << 1);
     vocab     bytea[];
     n         bigint;
 BEGIN
-    INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
+    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) VALUES
         (src, 0, type_t, NULL),
         (w_a, 2, type_word, src), (w_gap, 2, type_word, src),
         (w_b, 2, type_word, src), (w_rep, 2, type_word, src),
@@ -40,9 +39,9 @@ BEGIN
 
     -- sent = a, gap, b  — three CONSECUTIVE words. `gap` is deliberately left OUT of the
     -- vocabulary below, so (a -> b) is NOT an adjacency that occurred.
-    INSERT INTO physicalities (id, entity_id, type, coord, hilbert_index,
+    INSERT INTO laplace.physicalities (id, entity_id, type, coord, hilbert_index,
                                trajectory, n_constituents, observed_at)
-    VALUES (laplace_hash128_blake3('test/order/phys-sentence'), sent, 1,
+    VALUES (public.laplace_hash128_blake3('test/order/phys-sentence'), sent, 1,
             public.ST_SetSRID(public.ST_MakePoint(1,1,1,1), 0),
             decode('00000000000000000000000000000000','hex'),
             public.ST_MakeLine(ARRAY[
@@ -52,9 +51,9 @@ BEGIN
             3, now());
 
     -- sent_rep = rep, rep — a legitimately repeated token.
-    INSERT INTO physicalities (id, entity_id, type, coord, hilbert_index,
+    INSERT INTO laplace.physicalities (id, entity_id, type, coord, hilbert_index,
                                trajectory, n_constituents, observed_at)
-    VALUES (laplace_hash128_blake3('test/order/phys-sentence-rep'), sent_rep, 1,
+    VALUES (public.laplace_hash128_blake3('test/order/phys-sentence-rep'), sent_rep, 1,
             public.ST_SetSRID(public.ST_MakePoint(2,2,2,2), 0),
             decode('00000000000000000000000000000000','hex'),
             public.ST_MakeLine(ARRAY[
@@ -63,9 +62,9 @@ BEGIN
             2, now());
 
     -- doc = sent, sent_rep — two consecutive sentences, for sentence_order.
-    INSERT INTO physicalities (id, entity_id, type, coord, hilbert_index,
+    INSERT INTO laplace.physicalities (id, entity_id, type, coord, hilbert_index,
                                trajectory, n_constituents, observed_at)
-    VALUES (laplace_hash128_blake3('test/order/phys-document'), doc, 1,
+    VALUES (public.laplace_hash128_blake3('test/order/phys-document'), doc, 1,
             public.ST_SetSRID(public.ST_MakePoint(3,3,3,3), 0),
             decode('00000000000000000000000000000000','hex'),
             public.ST_MakeLine(ARRAY[
@@ -107,7 +106,7 @@ BEGIN
 
     -- sentence_order reads document trajectories and must find the sentence pair. This
     -- also pins the type_id role predicate: the document is selected by
-    -- canonical_id('Document'), so a regression to a tier test shows up as zero rows.
+    -- realize.canonical_id('Document'), so a regression to a tier test shows up as zero rows.
     SELECT count(*) INTO n
     FROM generation.sentence_order(1000, 1)
     WHERE subject_id = sent AND object_id = sent_rep;

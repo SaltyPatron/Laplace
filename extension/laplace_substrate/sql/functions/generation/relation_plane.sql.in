@@ -19,14 +19,14 @@ BEGIN
         IF p_vocab IS NULL THEN
             RETURN QUERY
             SELECT c.subject_id, c.object_id,
-                   laplace.walk_edge_weight(c.rating, c.rd, c.witness_count)
+                   consensus.walk_edge_weight(c.rating, c.rd, c.witness_count)
             FROM laplace.consensus c
             WHERE c.type_id = v_type AND c.object_id IS NOT NULL;
         ELSE
             RETURN QUERY
             WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u)
             SELECT c.subject_id, c.object_id,
-                   laplace.walk_edge_weight(c.rating, c.rd, c.witness_count)
+                   consensus.walk_edge_weight(c.rating, c.rd, c.witness_count)
             FROM v
             JOIN laplace.consensus c ON c.type_id = v_type AND c.subject_id = v.id
             JOIN v vo ON vo.id = c.object_id
@@ -75,7 +75,7 @@ BEGIN
         SELECT w.id AS root, c.ordinal, c.entity_id AS tok
         FROM laplace.v_word_points w
         CROSS JOIN LATERAL public.laplace_trajectory_constituents(w.trajectory) c
-        WHERE w.type_id IN (laplace.canonical_id('Sentence'), laplace.canonical_id('Document'))
+        WHERE w.type_id IN (realize.canonical_id('Sentence'), realize.canonical_id('Document'))
           AND w.trajectory IS NOT NULL
     ),
     content AS (

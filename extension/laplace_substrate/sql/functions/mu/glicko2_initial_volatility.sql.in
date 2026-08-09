@@ -1,2 +1,3 @@
-CREATE OR REPLACE FUNCTION glicko2_initial_volatility() RETURNS bigint
+DROP FUNCTION IF EXISTS laplace.glicko2_initial_volatility();
+CREATE OR REPLACE FUNCTION consensus.glicko2_initial_volatility() RETURNS bigint
     LANGUAGE sql LAPLACE_IMMUTABLE AS $$ SELECT 60000000::bigint $$;

@@ -5,7 +5,7 @@ namespace Laplace.Endpoints.OpenAICompat;
 
 /// <summary>
 /// The live scoreboard + modality reads. Thin callers over the installed
-/// substrate_pulse() / modality_counts() — the set logic lives in the
+/// ops.substrate_pulse() / ops.modality_counts() — the set logic lives in the
 /// extension (one implementation; the MCP server reads the same functions),
 /// C# only maps rows. The SQL itself lives in
 /// <see cref="NpgsqlSubstrateReads"/> (doc 41).

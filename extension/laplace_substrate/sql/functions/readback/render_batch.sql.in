@@ -1,6 +1,7 @@
--- Exact laplace.render() ladder for an aligned id array. Graph/name work is
+-- Exact realize.render() ladder for an aligned id array. Graph/name work is
 -- batched; only cheap codepoint and final text projection remain per element.
-CREATE OR REPLACE FUNCTION laplace.render_batch(p_ids bytea[])
+DROP FUNCTION IF EXISTS laplace.render_batch(bytea[]);
+CREATE OR REPLACE FUNCTION realize.render_batch(p_ids bytea[])
     RETURNS text[]
     LANGUAGE sql STABLE STRICT PARALLEL SAFE
 BEGIN ATOMIC
@@ -9,11 +10,11 @@ BEGIN ATOMIC
         FROM unnest(p_ids) WITH ORDINALITY AS u(id, ord)
     ), batches AS MATERIALIZED (
         SELECT realize.resolve_name_batch(p_ids) AS names,
-               laplace.render_text_batch(p_ids, 32) AS bodies
+               realize.render_text_batch(p_ids, 32) AS bodies
     )
     SELECT COALESCE(array_agg(
                COALESCE(n.name,
-                        chr(laplace.codepoint_for_id(i.id)),
+                        chr(realize.codepoint_for_id(i.id)),
                         b.names[i.ord],
                         b.bodies[i.ord],
                         encode(i.id, 'hex') || '…')

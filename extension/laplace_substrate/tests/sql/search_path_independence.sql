@@ -79,11 +79,11 @@ SELECT pg_temp.resolves('shared_objects',
 
 -- The inference path (945299b7, c2bc4c55, 01bc76ee, 522714cf).
 SELECT pg_temp.resolves('laplace_attention_centroid',
-    'SELECT * FROM generation.laplace_attention_centroid(laplace.word_id(''dog''), laplace.laplace_highway_band_mask(3))');
+    'SELECT * FROM generation.laplace_attention_centroid(laplace.word_id(''dog''), consensus.laplace_highway_band_mask(3))');
 SELECT pg_temp.resolves('laplace_nearest_entity',
     'SELECT * FROM generation.laplace_nearest_entity(0, 0, 0, 1, 1, NULL, NULL)');
 SELECT pg_temp.resolves('laplace_forward_step',
-    'SELECT generation.laplace_forward_step(laplace.word_id(''dog''), laplace.laplace_highway_band_mask(3))');
+    'SELECT generation.laplace_forward_step(laplace.word_id(''dog''), consensus.laplace_highway_band_mask(3))');
 
 -- The new operations added alongside them.
 SELECT pg_temp.resolves('entity_container_degree',

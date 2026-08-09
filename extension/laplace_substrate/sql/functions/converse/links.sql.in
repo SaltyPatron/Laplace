@@ -26,12 +26,12 @@
 -- Those 6,686 ids are nearly all distinct, so deduping cannot help — that arm
 -- needs a BATCHED label, which does not exist. realize.batch() is batched but is a
 -- DIFFERENT ladder: it abstains with NULL where realize.label() falls back to a cleaned
--- laplace.render and finally to hex, so substituting it changes what every caller
+-- realize.render and finally to hex, so substituting it changes what every caller
 -- receives. A label_batch() in C beside realize_batch is the real fix and is not
 -- in this change.
 --
 -- Semantics here are unchanged by construction: same function, same argument,
--- same COALESCE(NULLIF(laplace.relation_canonical, ''), label) ladder. Only the number of
+-- same COALESCE(NULLIF(consensus.relation_canonical, ''), label) ladder. Only the number of
 -- evaluations changes.
 DROP FUNCTION IF EXISTS laplace.links(text);
 CREATE OR REPLACE FUNCTION converse.links(p_word text)
@@ -40,7 +40,7 @@ CREATE OR REPLACE FUNCTION converse.links(p_word text)
     AS $$
     WITH base AS MATERIALIZED (
         SELECT c.type_id, c.object_id,
-               laplace.eff_mu(c.rating, c.rd) AS emu
+               consensus.eff_mu(c.rating, c.rd) AS emu
         FROM laplace.consensus c
         WHERE c.subject_id = laplace.word_id(p_word)
     ),
@@ -55,7 +55,7 @@ CREATE OR REPLACE FUNCTION converse.links(p_word text)
         WHERE i.ord = l.ord
     ), rel AS MATERIALIZED (
         SELECT t.type_id,
-               COALESCE(NULLIF(laplace.relation_canonical(t.type_id), ''), l.txt) AS relation
+               COALESCE(NULLIF(consensus.relation_canonical(t.type_id), ''), l.txt) AS relation
         FROM (SELECT DISTINCT b.type_id FROM base b) t
         JOIN labels l ON l.id = t.type_id
     )
@@ -65,6 +65,6 @@ CREATE OR REPLACE FUNCTION converse.links(p_word text)
     FROM base b
     JOIN rel r ON r.type_id = b.type_id
     JOIN labels l ON l.id = b.object_id
-    ORDER BY laplace.edge_rank(b.type_id, b.emu) DESC,
+    ORDER BY consensus.edge_rank(b.type_id, b.emu) DESC,
              strength DESC, r.relation
 $$;

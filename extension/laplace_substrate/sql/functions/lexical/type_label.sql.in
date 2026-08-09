@@ -1,9 +1,9 @@
 -- NO `SET search_path` (GH #617 item 6). This is a labeling scalar called PER ROW in
--- every arrow laplace.render and relation listing; the clause made each of those a full
+-- every arrow realize.render and relation listing; the clause made each of those a full
 -- non-inlined function execution for one string operation.
 --
 -- STRICT is KEPT (LAPLACE_STABLE_STRICT). It also blocks inlining, but here it is
--- load-bearing rather than incidental: laplace.render(NULL) is the label of nothing, and the
+-- load-bearing rather than incidental: realize.render(NULL) is the label of nothing, and the
 -- callers -- realize_path, the walk responders -- COALESCE a NULL type_label to '?'
 -- to mark an unrenderable relation. Dropping STRICT would push NULL through
 -- replace()/lower() and still return NULL, so the value is unchanged, but the
@@ -13,5 +13,5 @@ DROP FUNCTION IF EXISTS laplace.type_label(bytea);
 CREATE OR REPLACE FUNCTION lexical.type_label(p_type bytea)
     RETURNS text
     LANGUAGE sql LAPLACE_STABLE_STRICT AS $$
-    SELECT lower(replace(@extschema@.render(p_type), '_', ' '))
+    SELECT lower(replace(realize.render(p_type), '_', ' '))
 $$;

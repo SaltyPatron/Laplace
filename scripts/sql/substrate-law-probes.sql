@@ -41,7 +41,7 @@ FROM (
 
 \echo '=== tier-witness histogram: content physicalities per source per tier ==='
 \echo '(informational: a source carrying sentence data must show tier-3 content)'
-SELECT coalesce(render(p.source_id), left(encode(p.source_id, 'hex'), 12)) AS source,
+SELECT coalesce(realize.render(p.source_id), left(encode(p.source_id, 'hex'), 12)) AS source,
        e.tier, count(*) AS content_rows
 FROM physicalities p
 JOIN entities e ON e.id = p.entity_id

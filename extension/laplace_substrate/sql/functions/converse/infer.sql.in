@@ -12,9 +12,9 @@
 --            A->[...] distribution, and it is NOT collapsed here.
 --   REWEIGHT bias_hits counts each candidate's own edges into the bias
 --            family (bias synsets plus their one-hop in-edges), id space
---            only -- no laplace.render, no string compare.
+--            only -- no realize.render, no string compare.
 --   EMIT     realize_batch ONCE over the ranked survivors, position-aligned;
---            the single laplace.render, at the end, where rendering belongs.
+--            the single realize.render, at the end, where rendering belongs.
 --
 -- KNOWN LIMITS, stated not hidden: forward direction only (the both-direction
 -- OR join belongs in C next to prompt_coherence, not rewritten here); one-hop
@@ -23,7 +23,7 @@
 -- election rel_type_id narrows the READ when a prompt token names a relation.
 -- On a single-witness seed the base weights are flat and bias_hits carries the
 -- whole signal -- measured: the California read returns 39 candidates all at
--- laplace.eff_mu 1315.5, and exactly one (sacramento) carries a capital-family edge.
+-- consensus.eff_mu 1315.5, and exactly one (sacramento) carries a capital-family edge.
 DROP FUNCTION IF EXISTS laplace.infer(text, int);
 CREATE OR REPLACE FUNCTION converse.infer(p_prompt text, p_limit int DEFAULT 8)
     RETURNS TABLE(prediction text, weight double precision, bias_hits bigint)
@@ -61,11 +61,11 @@ biasfam AS (
     SELECT c.subject_id FROM laplace.consensus c JOIN bias b ON c.object_id = b.synset_id
 ),
 cand AS (
-    SELECT c.object_id AS id, max(laplace.eff_mu(c.rating, c.rd)) AS m
+    SELECT c.object_id AS id, max(consensus.eff_mu(c.rating, c.rd)) AS m
     FROM topic t
     -- WordNet antonymy (and similar) lands on the WORD id; election seats a
     -- synset. Read both subjects or a typed antonym prompt returns empty
-    -- while untyped still sees the synset's other edges (GH #756.3).
+    -- while untyped still sees the synset's other consensus.edges(GH #756.3).
     JOIN laplace.consensus c ON c.subject_id IN (t.synset_id, t.tok)
     WHERE c.object_id IS NOT NULL
       -- Typed scan when the election named a relation; full distribution otherwise

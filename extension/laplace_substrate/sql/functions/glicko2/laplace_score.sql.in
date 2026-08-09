@@ -1,4 +1,4 @@
-CREATE OR REPLACE FUNCTION laplace_score(v double precision, m double precision)
+CREATE OR REPLACE FUNCTION laplace.laplace_score(v double precision, m double precision)
     RETURNS bigint
     AS 'MODULE_PATHNAME', 'pg_laplace_score'
     LANGUAGE C IMMUTABLE STRICT;

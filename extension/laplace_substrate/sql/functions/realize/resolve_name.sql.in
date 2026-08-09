@@ -9,15 +9,15 @@ CREATE OR REPLACE FUNCTION realize.resolve_name(
     -- and this is on the per-row label path. Real schema names instead.
     AS $$
     -- The one referentially-correct name primitive. Three call sites (label,
-    -- laplace.render, realize) used to each resolve a name a different way and disagree:
-    -- label saw only HAS_NAME_ALIAS, laplace.render saw canonical->codepoint->ALIAS,
+    -- realize.render, realize) used to each resolve a name a different way and disagree:
+    -- label saw only HAS_NAME_ALIAS, realize.render saw canonical->codepoint->ALIAS,
     -- realize walked the synset lemma. None consulted HAS_NAME (the PRIMARY,
     -- authoritative name), none took a domain context, and every one ended in a
-    -- context-blind `ORDER BY laplace.eff_mu DESC LIMIT 1` global-popularity argmax whose
+    -- context-blind `ORDER BY consensus.eff_mu DESC LIMIT 1` global-popularity argmax whose
     -- final fallback fabricated hex styled as a label. This unifies all three:
     --
     --   * NAME edges consulted as families -- HAS_NAME (primary, preferred) and
-    --     HAS_NAME_ALIAS, unioned via relation_type_in_family() so members roll in
+    --     HAS_NAME_ALIAS, unioned via consensus.relation_type_in_family() so members roll in
     --     without editing this site. They are distinct family roots (there is no
     --     single "name" root), so both are consulted.
     --   * the synset-lemma path, walked via the HAS_SENSE family_root (IS_SENSE_OF
@@ -36,7 +36,7 @@ CREATE OR REPLACE FUNCTION realize.resolve_name(
             COALESCE(realize._has_name(p_id, p_lang),
                      realize._synset_lemma(p_id, p_lang))
         ELSE (
-            -- Context-conditioned selection. Same lang-pref-then-laplace.eff_mu shape as
+            -- Context-conditioned selection. Same lang-pref-then-consensus.eff_mu shape as
             -- the null-context helpers, plus a domain boost for name candidates
             -- whose surface entity co-occurs (as subject OR object of any
             -- unrefuted edge) with the supplied context ids -- the set-based
@@ -47,15 +47,15 @@ CREATE OR REPLACE FUNCTION realize.resolve_name(
             -- FAMILY TYPE IDS RESOLVED ONCE, AS ARRAYS.
             --
             -- consensus is LIST-partitioned by type_id, and the previous body filtered
-            -- with `relation_type_in_family(hs.type_id, 'HAS_SENSE')` -- a FUNCTION CALL
+            -- with `consensus.relation_type_in_family(hs.type_id, 'HAS_SENSE')` -- a FUNCTION CALL
             -- ON THE PARTITION KEY. The planner cannot prune against that, so the join
             -- Append-scanned all ~221 relation partitions and ran the function once per
             -- edge on top. Measured 2026-08-07: the context branch cost 5,706 ms, of
-            -- which ctx was 6.5 ms and the batched laplace.render ~140 ms -- the rest was here.
+            -- which ctx was 6.5 ms and the batched realize.render ~140 ms -- the rest was here.
             --
             -- Resolved up front, `type_id = ANY(...)` is a bound array the planner prunes
             -- with and serves from the (subject_id, type_id) index. Identical semantics:
-            -- laplace.relation_family_members is the same family rollup the predicate consulted.
+            -- consensus.relation_family_members is the same family rollup the predicate consulted.
             -- This is the move chat.sql.in's band lens already documents for exactly the
             -- same reason.
             WITH fam AS MATERIALIZED (
@@ -63,40 +63,40 @@ CREATE OR REPLACE FUNCTION realize.resolve_name(
                        COALESCE(array_agg(id) FILTER (WHERE fam IN ('HAS_NAME','HAS_NAME_ALIAS')), '{}'::bytea[]) AS any_name_t,
                        COALESCE(array_agg(id) FILTER (WHERE fam = 'HAS_SENSE'), '{}'::bytea[]) AS sense_t
                 FROM (
-                    SELECT 'HAS_NAME'::text AS fam, id FROM laplace.relation_family_members('HAS_NAME')
+                    SELECT 'HAS_NAME'::text AS fam, id FROM consensus.relation_family_members('HAS_NAME')
                     UNION ALL
-                    SELECT 'HAS_NAME_ALIAS', id FROM laplace.relation_family_members('HAS_NAME_ALIAS')
+                    SELECT 'HAS_NAME_ALIAS', id FROM consensus.relation_family_members('HAS_NAME_ALIAS')
                     UNION ALL
-                    SELECT 'HAS_SENSE', id FROM laplace.relation_family_members('HAS_SENSE')
+                    SELECT 'HAS_SENSE', id FROM consensus.relation_family_members('HAS_SENSE')
                 ) f
             ),
             ctx AS (
                 SELECT id, sum(boost) AS boost FROM (
-                    SELECT c.object_id AS id, sum(laplace.eff_mu(c.rating, c.rd)) AS boost
+                    SELECT c.object_id AS id, sum(consensus.eff_mu(c.rating, c.rd)) AS boost
                     FROM laplace.v_consensus_unrefuted c
                     WHERE c.subject_id = ANY (p_context)
                     GROUP BY c.object_id
                     UNION ALL
-                    SELECT c.subject_id AS id, sum(laplace.eff_mu(c.rating, c.rd)) AS boost
+                    SELECT c.subject_id AS id, sum(consensus.eff_mu(c.rating, c.rd)) AS boost
                     FROM laplace.v_consensus_unrefuted c
                     WHERE c.object_id = ANY (p_context)
                     GROUP BY c.subject_id
                 ) t GROUP BY id
             ),
-            -- CANDIDATES IN ID SPACE. No laplace.render here (GH #906/#907 idiom; CLAUDE.md's
+            -- CANDIDATES IN ID SPACE. No realize.render here (GH #906/#907 idiom; CLAUDE.md's
             -- "don't resolve names per row -- aggregate ids, then batch").
             --
             -- MEASURED 2026-08-07 via pg_stat_statements on the foundation seed: this
-            -- branch was 24,511 calls at a 2,380 ms mean, and the `laplace.render_text(...)`
+            -- branch was 24,511 calls at a 2,380 ms mean, and the `realize.render_text(...)`
             -- inside it was a separate 24,512 calls at 2,372 ms -- i.e. essentially the
             -- ENTIRE cost of resolving a name was rendering candidates that were then
-            -- discarded. laplace.render_text is a scalar: each call opens its own SPI connection
+            -- discarded. realize.render_text is a scalar: each call opens its own SPI connection
             -- and runs its own constituents_closure recursion, and that recursion is the
             -- single largest line item in the whole system (1,496,183 calls, 19.6 hours
             -- cumulative). A name with 40 candidates paid 40 closure walks to return one
             -- string.
             --
-            -- laplace.render_text_batch runs ONE closure over every id at once -- the native
+            -- realize.render_text_batch runs ONE closure over every id at once -- the native
             -- batch path already does exactly that (generate_walk.c fetch_constituents_
             -- closure with n_roots), it was simply never reached from here.
             cand AS MATERIALIZED (
@@ -104,7 +104,7 @@ CREATE OR REPLACE FUNCTION realize.resolve_name(
                 SELECT nm.object_id AS name_id,
                        nm.type_id = ANY (fam.name_t) AS prim,
                        (lang.object_id IS NOT NULL) AS lp,
-                       laplace.eff_mu(nm.rating, nm.rd) AS mu
+                       consensus.eff_mu(nm.rating, nm.rd) AS mu
                 FROM fam CROSS JOIN laplace.v_consensus_unrefuted nm
                 LEFT JOIN laplace.consensus lang ON lang.subject_id = nm.object_id
                      AND lang.type_id = laplace.relation_type_id('HAS_LANGUAGE')
@@ -117,7 +117,7 @@ CREATE OR REPLACE FUNCTION realize.resolve_name(
                 SELECT hs.subject_id AS name_id,
                        false AS prim,
                        (lang.object_id IS NOT NULL) AS lp,
-                       laplace.eff_mu(hs.rating, hs.rd) AS mu
+                       consensus.eff_mu(hs.rating, hs.rd) AS mu
                 -- CROSS JOIN, not a comma: a comma-list binds looser than an explicit
                 -- JOIN, so `fam` would not be visible from the ON clause below.
                 FROM fam CROSS JOIN laplace.v_consensus_unrefuted io
@@ -131,7 +131,7 @@ CREATE OR REPLACE FUNCTION realize.resolve_name(
             ),
             -- RANK FIRST, THEN RENDER. The ordering keys are all fold-side, so the
             -- winner is decided in id space and only the survivors are realized.
-            -- Ranked in full (not capped) because the laplace.render filter below can reject
+            -- Ranked in full (not capped) because the realize.render filter below can reject
             -- any prefix of them: an id with no renderable surface must fall through
             -- to the next candidate, and a LIMIT here would turn "unrenderable" into
             -- "no name" -- an abstention this function is explicit about not faking.
@@ -150,7 +150,7 @@ CREATE OR REPLACE FUNCTION realize.resolve_name(
             -- ONE closure walk for every candidate, position-aligned (the alignment is
             -- pinned by tests/sql/realize_ladder_parity.sql).
             lbl AS MATERIALIZED (
-                SELECT laplace.render_text_batch(array_agg(r.name_id ORDER BY r.rn), 24) AS s
+                SELECT realize.render_text_batch(array_agg(r.name_id ORDER BY r.rn), 24) AS s
                 FROM ranked r
             )
             SELECT l.s[r.rn]

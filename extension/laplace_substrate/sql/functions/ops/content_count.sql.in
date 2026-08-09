@@ -1,22 +1,24 @@
 -- String body (not BEGIN ATOMIC): depends on v_word_points which extension
 -- upgrades recreate in the same script; parse-time resolution can miss mid-upgrade
 -- the same way source_roster hit v_attestation_readable (GH #764).
-CREATE OR REPLACE FUNCTION content_count(p_source bytea DEFAULT NULL)
+DROP FUNCTION IF EXISTS laplace.content_count(bytea);
+
+CREATE OR REPLACE FUNCTION ops.content_count(p_source bytea DEFAULT NULL)
     RETURNS bigint
     LANGUAGE sql STABLE
 AS $$
     SELECT CASE
         WHEN p_source IS NULL THEN
-            (SELECT count(*) FROM @extschema@.v_word_points)
+            (SELECT count(*) FROM laplace.v_word_points)
         ELSE
             -- Dedup the source's subjects FIRST (single hash-aggregate pass), THEN probe
             -- v_word_points by id. The prior JOIN nested-looped every source attestation
             -- into laplace.physicalities and exploded.
             (SELECT count(*)
              FROM (SELECT DISTINCT a.subject_id
-                   FROM @extschema@.attestations a
+                   FROM laplace.attestations a
                    WHERE a.source_id = p_source) s
-             WHERE EXISTS (SELECT 1 FROM @extschema@.v_word_points w
+             WHERE EXISTS (SELECT 1 FROM laplace.v_word_points w
                            WHERE w.id = s.subject_id))
     END
 $$;

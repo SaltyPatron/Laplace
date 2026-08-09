@@ -4,7 +4,7 @@ using Laplace.Engine.Core;
 
 namespace Laplace.Chess.Tests.Service;
 
-// Golden-id pins for the chess source ids, minted from the DB side (laplace.canonical_id(),
+// Golden-id pins for the chess source ids, minted from the DB side (realize.canonical_id(),
 // the native blake3 the extension binds). Refactors of vocabulary bootstrap / id minting must
 // never change these — a failure here means substrate identity drifted, not a stale test.
 public class ChessSourceIdPinTests

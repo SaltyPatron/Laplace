@@ -4,9 +4,9 @@ CREATE OR REPLACE FUNCTION realize._synset_lemma(p_id bytea, p_lang bytea DEFAUL
     RETURNS text
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
     SELECT q.s FROM (
-        SELECT laplace.render_text(hs.subject_id, 24) AS s,
+        SELECT realize.render_text(hs.subject_id, 24) AS s,
                (lang.object_id IS NOT NULL) AS lp,
-               laplace.eff_mu(hs.rating, hs.rd) AS mu
+               consensus.eff_mu(hs.rating, hs.rd) AS mu
         FROM laplace.v_consensus_unrefuted io
         JOIN laplace.consensus hs ON hs.object_id = io.subject_id
           AND hs.type_id = laplace.relation_type_id('HAS_SENSE')

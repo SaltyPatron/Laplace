@@ -4,7 +4,7 @@
 -- The whole subsystem was a second copy of a fact the substrate already stores exactly.
 -- physicalities.trajectory IS the constituent sequence -- Trajectory.Build packs the ordered
 -- child ids into the linestring mantissa and laplace_trajectory_constituents unpacks them
--- losslessly. constituents() and constituents_closure() read that trajectory directly, and
+-- losslessly. realize.constituents() and realize.constituents_closure() read that trajectory directly, and
 -- so does the live render path. constituent_edges held a decode of the same bytes in a
 -- different shape, and its own rebuild header said so: "it only unpacks what
 -- physicalities.trajectory already encodes."
@@ -28,6 +28,6 @@
 -- Order matters: the closure function references the table, so it goes first. The table was
 -- registered with pg_extension_config_dump, so dropping it also removes it from the
 -- extension's dump set -- intended, since there is nothing left to restore.
-DROP FUNCTION IF EXISTS constituents_closure_edges(bytea[], integer);
-DROP PROCEDURE IF EXISTS constituent_edges_rebuild(integer);
-DROP TABLE IF EXISTS constituent_edges;
+DROP FUNCTION IF EXISTS laplace.constituents_closure_edges(bytea[], integer);
+DROP PROCEDURE IF EXISTS laplace.constituent_edges_rebuild(integer);
+DROP TABLE IF EXISTS laplace.constituent_edges;

@@ -1,10 +1,10 @@
--- source_status(): is this source ingested, and how do you know?
+-- ops.source_status(): is this source ingested, and how do you know?
 --
 -- WHY THIS EXISTS. There was no standardized answer to the most basic operational
 -- question in the system, so every caller assembled one, and every assembly was wrong in
 -- a different way:
 --
---   evidence_count(laplace.source_id('X')) > 0     says DOCUMENTS ARE NOT INGESTED. The document
+--   ops.evidence_count(laplace.source_id('X')) > 0     says DOCUMENTS ARE NOT INGESTED. The document
 --                                          lane is content-only by design -- entities and
 --                                          geometry, zero distributional attestations --
 --                                          so the obvious test reports 3.6M entities of
@@ -28,7 +28,7 @@
 -- the others. They are returned separately and `ingested` is their disjunction, so a
 -- caller can see WHY rather than being handed a boolean to misread.
 --
--- FAST, AND THE FIRST CUT WAS NOT. Per-source volume comes from source_counts_approx()
+-- FAST, AND THE FIRST CUT WAS NOT. Per-source volume comes from ops.source_counts_approx()
 -- (planner statistics), never a scan. The entity side asks EXISTS per known source -- an
 -- index probe against entities_first_observed_btree, a couple of dozen of them -- because
 -- the question is "did this source observe entities", not "how many".
@@ -40,12 +40,13 @@
 --
 -- DROP first: an ad-hoc / pre-membership install of this function is not owned
 -- by the extension. CREATE OR REPLACE then fails ALTER EXTENSION UPDATE with
--- "function source_status(text) is not a member of extension laplace_substrate"
+-- "function ops.source_status(text) is not a member of extension laplace_substrate"
 -- (CI 2026-08-03 runs 30788596381 / 30791014736). Same trap as geometry_audit /
 -- sense_audit / prompt_language.
-DROP FUNCTION IF EXISTS source_status(text);
+DROP FUNCTION IF EXISTS ops.source_status(text);
 
-CREATE OR REPLACE FUNCTION source_status(p_source text DEFAULT NULL)
+DROP FUNCTION IF EXISTS laplace.source_status(text);
+CREATE OR REPLACE FUNCTION ops.source_status(p_source text DEFAULT NULL)
     RETURNS TABLE(source            text,
                   source_id         bytea,
                   ingested          boolean,
@@ -58,7 +59,7 @@ CREATE OR REPLACE FUNCTION source_status(p_source text DEFAULT NULL)
     AS $$
 WITH by_evidence AS (
     SELECT s.source_id, s.evidence_approx
-    FROM @extschema@.source_counts_approx() s
+    FROM ops.source_counts_approx() s
 ),
 -- NOTE: no by_entities aggregate. Entities carry first_observed_by, which is how a
 -- CONTENT-ONLY lane proves it ran, but aggregating 44M rows to learn a boolean is the
@@ -88,7 +89,7 @@ rolled AS (
 ), rolled_numbered AS MATERIALIZED (
     SELECT r.*, row_number() OVER (ORDER BY r.source_id) AS rn FROM rolled r
 ), rendered AS MATERIALIZED (
-    SELECT @extschema@.render_batch(array_agg(source_id ORDER BY rn)) AS labels
+    SELECT realize.render_batch(array_agg(source_id ORDER BY rn)) AS labels
     FROM rolled_numbered
 ),
 matched AS (
@@ -100,7 +101,7 @@ matched AS (
            r.has_entities,
            r.last_run_status,
            r.last_run_at
-    -- The journal's recorded name beats render(): render returns a source's CANONICAL
+    -- The journal's recorded name beats realize.render(): render returns a source's CANONICAL
     -- PATH ("substrate/source/ChessPgn/v1"), which is correct and useless as a label.
     FROM rolled_numbered r CROSS JOIN rendered x
     WHERE p_source IS NULL

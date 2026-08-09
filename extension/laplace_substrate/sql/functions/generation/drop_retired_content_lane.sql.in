@@ -3,10 +3,10 @@ DECLARE
     obj text;
 BEGIN
     FOREACH obj IN ARRAY ARRAY[
-        'TABLE @extschema@.content_pairs',
-        'PROCEDURE @extschema@.rebuild_content_index(int)',
-        'PROCEDURE @extschema@.rebuild_content_index_deep()',
-        'PROCEDURE @extschema@.rebuild_content_pairs(int)']
+        'TABLE laplace.content_pairs',
+        'PROCEDURE laplace.rebuild_content_index(int)',
+        'PROCEDURE laplace.rebuild_content_index_deep()',
+        'PROCEDURE laplace.rebuild_content_pairs(int)']
     LOOP
         BEGIN
             EXECUTE format('ALTER EXTENSION %I DROP %s', 'laplace_substrate', obj);
@@ -14,16 +14,16 @@ BEGIN
             NULL;  
         END;
     END LOOP;
-    EXECUTE 'DROP TABLE IF EXISTS @extschema@.content_pairs';
-    EXECUTE 'DROP TABLE IF EXISTS @extschema@.content_index';
-    EXECUTE 'DROP TABLE IF EXISTS @extschema@.constituency_edge';
-    EXECUTE 'DROP PROCEDURE IF EXISTS @extschema@.rebuild_content_index(int)';
-    EXECUTE 'DROP PROCEDURE IF EXISTS @extschema@.rebuild_content_index_deep()';
-    EXECUTE 'DROP PROCEDURE IF EXISTS @extschema@.rebuild_content_pairs(int)';
+    EXECUTE 'DROP TABLE IF EXISTS laplace.content_pairs';
+    EXECUTE 'DROP TABLE IF EXISTS laplace.content_index';
+    EXECUTE 'DROP TABLE IF EXISTS laplace.constituency_edge';
+    EXECUTE 'DROP PROCEDURE IF EXISTS laplace.rebuild_content_index(int)';
+    EXECUTE 'DROP PROCEDURE IF EXISTS laplace.rebuild_content_index_deep()';
+    EXECUTE 'DROP PROCEDURE IF EXISTS laplace.rebuild_content_pairs(int)';
     
     
-    EXECUTE 'DROP FUNCTION IF EXISTS @extschema@.entity_trajectory_plane(bytea[], int, int)';
-    EXECUTE 'DROP FUNCTION IF EXISTS @extschema@.cooccurrence_scan(int, bytea[])';
+    EXECUTE 'DROP FUNCTION IF EXISTS laplace.entity_trajectory_plane(bytea[], int, int)';
+    EXECUTE 'DROP FUNCTION IF EXISTS laplace.cooccurrence_scan(int, bytea[])';
 END $do$;
 
 -- 2026-07-29: the generation corpus cache and its pair tables are RETIRED.
@@ -38,18 +38,18 @@ DECLARE
     obj text;
 BEGIN
     FOREACH obj IN ARRAY ARRAY[
-        'TABLE @extschema@.trajectory_pairs',
-        'TABLE @extschema@.trajectory_pairs_meta',
-        'FUNCTION @extschema@.cooccurrence_scan(int)',
-        'FUNCTION @extschema@.cooccurrence_scan(int, bytea[])',
-        'FUNCTION @extschema@.trajectory_cooccurrence(int)',
-        'FUNCTION @extschema@.trajectory_cooccurrence_by_stride(int)',
-        'FUNCTION @extschema@.trajectory_pairs_ensure(int)',
-        'FUNCTION @extschema@.trajectory_pairs_plane(bytea[], int)',
-        'FUNCTION @extschema@.stream_reset()',
-        'FUNCTION @extschema@.stream_stats()',
-        'FUNCTION @extschema@.corpus_sentence_constituents(text, int)',
-        'FUNCTION @extschema@.corpus_sentence_constituents_since(text, int, timestamptz)']
+        'TABLE laplace.trajectory_pairs',
+        'TABLE laplace.trajectory_pairs_meta',
+        'FUNCTION laplace.cooccurrence_scan(int)',
+        'FUNCTION laplace.cooccurrence_scan(int, bytea[])',
+        'FUNCTION laplace.trajectory_cooccurrence(int)',
+        'FUNCTION laplace.trajectory_cooccurrence_by_stride(int)',
+        'FUNCTION laplace.trajectory_pairs_ensure(int)',
+        'FUNCTION laplace.trajectory_pairs_plane(bytea[], int)',
+        'FUNCTION laplace.stream_reset()',
+        'FUNCTION laplace.stream_stats()',
+        'FUNCTION laplace.corpus_sentence_constituents(text, int)',
+        'FUNCTION laplace.corpus_sentence_constituents_since(text, int, timestamptz)']
     LOOP
         BEGIN
             EXECUTE format('ALTER EXTENSION %I DROP %s', 'laplace_substrate', obj);
@@ -57,16 +57,16 @@ BEGIN
             NULL;
         END;
     END LOOP;
-    EXECUTE 'DROP TABLE IF EXISTS @extschema@.trajectory_pairs';
-    EXECUTE 'DROP TABLE IF EXISTS @extschema@.trajectory_pairs_meta';
-    EXECUTE 'DROP FUNCTION IF EXISTS @extschema@.cooccurrence_scan(int)';
-    EXECUTE 'DROP FUNCTION IF EXISTS @extschema@.cooccurrence_scan(int, bytea[])';
-    EXECUTE 'DROP FUNCTION IF EXISTS @extschema@.trajectory_cooccurrence(int)';
-    EXECUTE 'DROP FUNCTION IF EXISTS @extschema@.trajectory_cooccurrence_by_stride(int)';
-    EXECUTE 'DROP FUNCTION IF EXISTS @extschema@.trajectory_pairs_ensure(int)';
-    EXECUTE 'DROP FUNCTION IF EXISTS @extschema@.trajectory_pairs_plane(bytea[], int)';
-    EXECUTE 'DROP FUNCTION IF EXISTS @extschema@.stream_reset()';
-    EXECUTE 'DROP FUNCTION IF EXISTS @extschema@.stream_stats()';
-    EXECUTE 'DROP FUNCTION IF EXISTS @extschema@.corpus_sentence_constituents(text, int)';
-    EXECUTE 'DROP FUNCTION IF EXISTS @extschema@.corpus_sentence_constituents_since(text, int, timestamptz)';
+    EXECUTE 'DROP TABLE IF EXISTS laplace.trajectory_pairs';
+    EXECUTE 'DROP TABLE IF EXISTS laplace.trajectory_pairs_meta';
+    EXECUTE 'DROP FUNCTION IF EXISTS laplace.cooccurrence_scan(int)';
+    EXECUTE 'DROP FUNCTION IF EXISTS laplace.cooccurrence_scan(int, bytea[])';
+    EXECUTE 'DROP FUNCTION IF EXISTS laplace.trajectory_cooccurrence(int)';
+    EXECUTE 'DROP FUNCTION IF EXISTS laplace.trajectory_cooccurrence_by_stride(int)';
+    EXECUTE 'DROP FUNCTION IF EXISTS laplace.trajectory_pairs_ensure(int)';
+    EXECUTE 'DROP FUNCTION IF EXISTS laplace.trajectory_pairs_plane(bytea[], int)';
+    EXECUTE 'DROP FUNCTION IF EXISTS laplace.stream_reset()';
+    EXECUTE 'DROP FUNCTION IF EXISTS laplace.stream_stats()';
+    EXECUTE 'DROP FUNCTION IF EXISTS laplace.corpus_sentence_constituents(text, int)';
+    EXECUTE 'DROP FUNCTION IF EXISTS laplace.corpus_sentence_constituents_since(text, int, timestamptz)';
 END $do$;

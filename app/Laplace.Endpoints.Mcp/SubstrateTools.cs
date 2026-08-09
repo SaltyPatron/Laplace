@@ -40,7 +40,7 @@ internal sealed class SubstrateTools
     /// One catalog, two views: <see cref="ListTools"/> sends every agent a name +
     /// one-line summary (cheap, always in context); <c>help</c> looks up the full
     /// rationale + schema for one name on demand — the same shape as
-    /// laplace.api('substring') on the SQL side, so the tool surface doesn't repeat
+    /// ops.api('substring') on the SQL side, so the tool surface doesn't repeat
     /// the mistake it fixed there (a verbose catalog nobody reads because it's
     /// expensive to hold in context every turn).
     /// </summary>
@@ -51,11 +51,11 @@ internal sealed class SubstrateTools
     private static readonly ToolSpec[] ToolCatalog =
     [
         new("api", "Search the installed SQL function catalog by substring.",
-            "Search the substrate's installed SQL function catalog (laplace.api). Returns name, args, returns for every function matching the substring. Use before assuming a helper doesn't exist.",
+            "Search the substrate's installed SQL function catalog (ops.api). Returns name, args, returns for every function matching the substring. Use before assuming a helper doesn't exist.",
             () => Schema(("query", "string", "substring to match, '' lists everything", true)),
             (s, a) => s.Api(a)),
         new("recall", "Ask the substrate about a topic (default read, session-carried).",
-            "Ask the substrate about a topic (converse.recall_session). A bare prompt gets the default read — gloss then the strongest chain — with session topic carry. There is NO English question routing (the regex router was removed): for a specific read shape use the `query` tool instead. Returns reply rows with eff_mu (conservative Glicko-2 estimate) and witness counts.",
+            "Ask the substrate about a topic (converse.recall_session). A bare prompt gets the default read — gloss then the strongest chain — with session topic carry. There is NO English question routing (the regex router was removed): for a specific read shape use the `query` tool instead. Returns reply rows with consensus.eff_mu(conservative Glicko-2 estimate) and witness counts.",
             () => Schema(("prompt", "string", "the topic (a word or phrase; phrasing is not parsed)", true),
                          ("session", "string", "session key for topic carry across turns", false)),
             (s, a) => s.Recall(a)),
@@ -68,7 +68,7 @@ internal sealed class SubstrateTools
                          ("lang", "string", "target language for translate", false)),
             (s, a) => s.Query(a)),
         new("taxonomy", "The IS_A tree around a topic (up to root, or child kinds).",
-            "The IS_A tree around a topic: dir='up' rows climb the parent chain to the root (via walk_strongest over the IS_A arena, from the topic's top synset — taxonomy lives on concepts, not spellings), dir='child' rows are the strongest sub-kinds. Every row carries the entity id to continue from. dir='child' is the closest thing to a \"bubble down\" the substrate has today (there is no general sense/synset -> every-surface primitive symmetric with bubble's surface -> sense -> synset climb) -- it is IS_A-specific, not a reverse of bubble. Rows use converse.label_or_hex(a cleaned display name), not render (the actual content) -- see the bubble tool's note on that distinction.",
+            "The IS_A tree around a topic: dir='up' rows climb the parent chain to the root (via walk_strongest over the IS_A arena, from the topic's top synset — taxonomy lives on concepts, not spellings), dir='child' rows are the strongest sub-kinds. Every row carries the entity id to continue from. dir='child' is the closest thing to a \"bubble down\" the substrate has today (there is no general sense/synset -> every-surface primitive symmetric with bubble's surface -> sense -> synset climb) -- it is IS_A-specific, not a reverse of bubble. Rows use converse.label_or_hex(a cleaned display name), not realize.render(the actual content) -- see the bubble tool's note on that distinction.",
             () => Schema(("term", "string", "the topic (omit if entity given)", false),
                          ("entity", "string", "hex entity id to root at", false)),
             (s, a) => s.Taxonomy(a)),
@@ -126,7 +126,7 @@ internal sealed class SubstrateTools
             () => Schema(("prompt", "string", "the prompt", true)),
             (s, a) => s.PromptLanguage(a)),
         new("bubble", "Bubble a surface term to its sense/synset frontier.",
-            "Bubble a surface term up the mesh (taxonomy.bubble_up): surface -> sense -> synset. Ranking is consensus-derived base_eff_mu (from the fold's rating/rd) multiplied by a domain-log geometry boost — not a non-consensus score. Each row is one candidate sense with its synset, the relation that admitted it, and the score/witness fields the election ranked on. It does NOT climb past the synset — no hub row, no per-channel edge counts; continue upward with the taxonomy tool from the returned synset id. Returns entity ids, so the next step continues from where this one landed instead of re-entering from text. Use this before facts/walk when a term may resolve at the wrong layer — all three layers render with the SAME text, so a query aimed at the wrong one returns zero rows and looks like missing knowledge. There is no bubble_down (see the taxonomy tool for the closest, IS_A-specific, downward move). Note the render/label split: this tool's rows use render() (canonical name -> tier-0 codepoint -> resolve_name -> full recursive content rebuild -> hex fallback) because a sense/synset's actual gloss text is the point; most other tools (taxonomy, facts, walk, leaders) use converse.label_or_hex() instead (resolve_name, else render() with internal canonical-key scaffolding regex-stripped for readability, else hex) because they want a short display tag, not content. Pick the wrong one and you get either a wall of text where a tag was wanted, or a stripped tag where the actual definition was wanted.",
+            "Bubble a surface term up the mesh (taxonomy.bubble_up): surface -> sense -> synset. Ranking is consensus-derived base_eff_mu (from the fold's rating/rd) multiplied by a domain-log geometry boost — not a non-consensus score. Each row is one candidate sense with its synset, the relation that admitted it, and the score/witness fields the election ranked on. It does NOT climb past the synset — no hub row, no per-channel edge counts; continue upward with the taxonomy tool from the returned synset id. Returns entity ids, so the next step continues from where this one landed instead of re-entering from text. Use this before facts/walk when a term may resolve at the wrong layer — all three layers render with the SAME text, so a query aimed at the wrong one returns zero rows and looks like missing knowledge. There is no bubble_down (see the taxonomy tool for the closest, IS_A-specific, downward move). Note the render/label split: this tool's rows use realize.render() (canonical name -> tier-0 codepoint -> resolve_name -> full recursive content rebuild -> hex fallback) because a sense/synset's actual gloss text is the point; most other tools (taxonomy, facts, walk, leaders) use converse.label_or_hex() instead (resolve_name, else realize.render() with internal canonical-key scaffolding regex-stripped for readability, else hex) because they want a short display tag, not content. Pick the wrong one and you get either a wall of text where a tag was wanted, or a stripped tag where the actual definition was wanted.",
             () => Schema(("term", "string", "the surface word or phrase", true),
                          ("k", "integer", "sense frontier width, default 5", false)),
             (s, a) => s.Bubble(a)),
@@ -145,7 +145,7 @@ internal sealed class SubstrateTools
             () => Schema(),
             (_, _) => McpRuntime()),
         new("source_status", "Is a source ingested, and how do we know.",
-            "Ingest state per source (laplace.source_status): known, ingested, approximate evidence, whether it observed entities, and the last run's status. Call this instead of assembling an answer — every hand-rolled version of this question is wrong in a specific way. An evidence>0 test reports the DOCUMENT lane as absent, because it is content-only by design (entities and geometry, zero distributional attestations); a source name you typed returns nothing when the spelling differs from the decomposer's declared SourceName; and ingest_run_journal is ops metadata that does not survive a dump/restore, so a missing row is not absence. Asking with a name ALWAYS returns exactly one row: `ingested=false` means the source wrote nothing, and `known=false` means this substrate has no record of that source id at all — which on a mesh this dense usually means the name is wrong rather than the corpus missing. Absence is an answer here, never an empty result set.",
+            "Ingest state per source (ops.source_status): known, ingested, approximate evidence, whether it observed entities, and the last run's status. Call this instead of assembling an answer — every hand-rolled version of this question is wrong in a specific way. An evidence>0 test reports the DOCUMENT lane as absent, because it is content-only by design (entities and geometry, zero distributional attestations); a source name you typed returns nothing when the spelling differs from the decomposer's declared SourceName; and ingest_run_journal is ops metadata that does not survive a dump/restore, so a missing row is not absence. Asking with a name ALWAYS returns exactly one row: `ingested=false` means the source wrote nothing, and `known=false` means this substrate has no record of that source id at all — which on a mesh this dense usually means the name is wrong rather than the corpus missing. Absence is an answer here, never an empty result set.",
             () => Schema(("source", "string", "declared source name, e.g. WordNetDecomposer; omit for every source", false)),
             (s, a) => s.SourceStatus(a)),
         new("ingest", "Run a corpus ingest through the CLI's tested pipeline.",
@@ -155,8 +155,8 @@ internal sealed class SubstrateTools
                          ("timeout_seconds", "integer", "max seconds to wait before killing the child process, default 600", false)),
             (_, a) => Ingest(a)),
         new("op", "Call an installed SQL operation by name, with bound arguments.",
-            "Call any operation in the installed catalog BY NAME (laplace.api is the allow-list; nothing outside it is callable). Arguments are bound as parameters and cast to the signature's declared types -- no SQL text crosses this boundary in either direction, which is what makes this narrower than `sql` rather than a nicer spelling of it. Overloads resolve from the argument names you supply. Enforced read-only with a 15s statement timeout, rows capped (default 200). This exists because a per-function tool is written by hand and therefore forgotten (358 installed functions, 358 chances), and because a hand-written tool is invisible until the server restarts -- which nothing owns. `op` resolves against the LIVE catalog, so an operation is callable the moment it is installed. If you are about to hand-write a SELECT, the operation you want probably exists: api('<substring>') first.",
-            () => Schema(("name", "string", "installed function name, exactly as api() reports it", true),
+            "Call any operation in the installed catalog BY NAME (ops.api is the allow-list; nothing outside it is callable). Arguments are bound as parameters and cast to the signature's declared types -- no SQL text crosses this boundary in either direction, which is what makes this narrower than `sql` rather than a nicer spelling of it. Overloads resolve from the argument names you supply. Enforced read-only with a 15s statement timeout, rows capped (default 200). This exists because a per-function tool is written by hand and therefore forgotten (358 installed functions, 358 chances), and because a hand-written tool is invisible until the server restarts -- which nothing owns. `op` resolves against the LIVE catalog, so an operation is callable the moment it is installed. If you are about to hand-write a SELECT, the operation you want probably exists: ops.api('<substring>') first.",
+            () => Schema(("name", "string", "installed function name, exactly as ops.api() reports it", true),
                          ("args", "object", "argument name -> value, e.g. {\"p_source\": \"WordNetDecomposer\"}", false),
                          ("max_rows", "integer", "row cap, default 200", false)),
             (s, a) => s.Op(a)),
@@ -165,7 +165,7 @@ internal sealed class SubstrateTools
             () => Schema(),
             (s, a) => s.PipelineStatus(a)),
         new("help", "List every tool (one-line each), or full detail for one name.",
-            "Catalog introspection for THIS tool surface, same idea as laplace.api('substring') for the SQL catalog: with no name, lists every tool's one-line summary; with name, returns the full rationale and input schema for that one tool. Call this before guessing at a tool's arguments from its one-line summary alone.",
+            "Catalog introspection for THIS tool surface, same idea as ops.api('substring') for the SQL catalog: with no name, lists every tool's one-line summary; with name, returns the full rationale and input schema for that one tool. Call this before guessing at a tool's arguments from its one-line summary alone.",
             () => Schema(("name", "string", "tool name for full detail; omit to list every tool", false)),
             (_, a) => Help(a)),
     ];
@@ -436,7 +436,7 @@ internal sealed class SubstrateTools
     }
 
     // Surface -> sense -> synset via taxonomy.bubble_up. Renders sense and synset
-    // with render() — the gloss text is the point here, not a display tag (see
+    // with realize.render() — the gloss text is the point here, not a display tag (see
     // the catalog's render-vs-label note) — and returns hex ids so the next call
     // reads from the resolved layer instead of re-entering text.
     private (string, bool) Bubble(JsonObject? args)
@@ -448,7 +448,7 @@ internal sealed class SubstrateTools
             return JsonRows(Array.Empty<JsonObject>());
 
         using var cmd = _dbReadOnly.CreateCommand(
-            "SELECT b.sense_id, laplace.render(b.sense_id), b.synset_id, laplace.render(b.synset_id), " +
+            "SELECT b.sense_id, realize.render(b.sense_id), b.synset_id, realize.render(b.synset_id), " +
             "b.via_relation, b.score, b.base_eff_mu, b.domain_hits, b.witnesses " +
             "FROM taxonomy.bubble_up($1, NULL::bytea[], $2) b");
         cmd.Parameters.Add(new() { Value = id });
@@ -484,7 +484,7 @@ internal sealed class SubstrateTools
     }
 
     /// <summary>
-    /// Call an installed operation by name. The installed catalog (laplace.api) is the
+    /// Call an installed operation by name. The installed catalog (ops.api) is the
     /// allow-list, so this is strictly narrower than the sql hatch: `sql` accepts arbitrary
     /// text, `op` accepts a name that must already exist as a reviewed, installed function.
     /// Arguments bind as parameters cast to the signature's declared types — no caller text

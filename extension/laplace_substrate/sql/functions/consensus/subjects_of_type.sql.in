@@ -8,7 +8,7 @@ CREATE OR REPLACE FUNCTION consensus.subjects_of_type(p_type bytea)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
     SELECT DISTINCT c.subject_id
-    FROM @extschema@.consensus c
+    FROM laplace.consensus c
     WHERE c.type_id = p_type;
 END;
 
@@ -18,5 +18,5 @@ CREATE OR REPLACE FUNCTION consensus.subjects_of_type(p_relation text)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
     SELECT s.subject_id
-    FROM consensus.subjects_of_type(@extschema@.relation_type_id(p_relation)) s;
+    FROM consensus.subjects_of_type(laplace.relation_type_id(p_relation)) s;
 END;

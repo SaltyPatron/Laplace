@@ -34,7 +34,7 @@
 --  * the duplicate-cell contract check raises the same cardinality_violation.
 --
 -- NO mask queue here: the caller deposits highway bits INLINE for this same
--- delta (laplace.highway_mask_deposit); highway_mask_dirty is populated only by the
+-- delta (consensus.highway_mask_deposit); highway_mask_dirty is populated only by the
 -- repair verbs, which need to CLEAR bits (per-source evict) — something an
 -- OR-accumulate deposit cannot express.
 --

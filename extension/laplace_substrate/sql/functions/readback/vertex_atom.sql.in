@@ -1,5 +1,6 @@
 -- BEGIN ATOMIC: GH #764.
-CREATE OR REPLACE FUNCTION vertex_atom(p_flags bigint) RETURNS integer
+DROP FUNCTION IF EXISTS laplace.vertex_atom(bigint);
+CREATE OR REPLACE FUNCTION realize.vertex_atom(p_flags bigint) RETURNS integer
     LANGUAGE sql LAPLACE_IMMUTABLE
 BEGIN ATOMIC
     SELECT public.laplace_vertex_atom(p_flags);

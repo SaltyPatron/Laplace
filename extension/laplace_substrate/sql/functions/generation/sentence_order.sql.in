@@ -1,7 +1,7 @@
 -- Plan Phase 4 (doc 18 §3): tier-3 sentence adjacency DERIVED from tier-4
 -- document trajectories. Witnessed order lives in the trajectory (doc 14 C3
 -- correction: no sentence-tier PRECEDES exists in consensus); this is the
--- calculated view over it — word_order one tier up. Document laplace.constituents are
+-- calculated view over it — word_order one tier up. Document realize.constituents are
 -- sentences by construction (same convention as corpus_sentence_constituents_since).
 DROP FUNCTION IF EXISTS laplace.sentence_order(int, int);
 CREATE OR REPLACE FUNCTION generation.sentence_order(p_docs int DEFAULT 100000, p_gap int DEFAULT 1)
@@ -14,7 +14,7 @@ CREATE OR REPLACE FUNCTION generation.sentence_order(p_docs int DEFAULT 100000, 
         -- physicality identity is (entity_id, type), so type = 1 already yields one row.
         SELECT w.id AS did, w.trajectory
         FROM laplace.v_word_points w
-        WHERE w.type_id = laplace.canonical_id('Document')
+        WHERE w.type_id = realize.canonical_id('Document')
           AND w.trajectory IS NOT NULL
         -- Sampling is by content hash, which is ARBITRARY -- an arbitrary LIMIT without
         -- an ordering is a missing ranking. The honest ranking is by trajectory length,

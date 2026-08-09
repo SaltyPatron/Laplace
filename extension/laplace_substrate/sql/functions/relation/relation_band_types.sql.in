@@ -1,7 +1,7 @@
 -- The relation-type ids in a salience band, as an ARRAY the planner can prune with.
 --
 -- THE DEFECT THIS RETIRES. 25 sites across the read path wrote the band test as
--- `laplace.relation_highway_band(c.type_id) = N` directly against consensus. consensus is
+-- `consensus.relation_highway_band(c.type_id) = N` directly against consensus. consensus is
 -- LIST-partitioned by type_id and holds ~48M rows, so a function applied to the
 -- partition key means: no partition pruning (the planner cannot evaluate a C
 -- STABLE call at plan time), no index on the predicate, and one function
@@ -27,7 +27,7 @@ CREATE OR REPLACE FUNCTION relation_band_types(p_band int)
     SELECT COALESCE(array_agg(e.id), '{}'::bytea[])
     FROM laplace.entities e
     WHERE e.type_id = laplace.entity_type_id('RelationType')
-      AND laplace.relation_highway_band(e.id) = p_band
+      AND consensus.relation_highway_band(e.id) = p_band
 $$;
 
 -- Multi-band form. Callers testing several bands (the content bands 1/2/4/7 are
@@ -39,7 +39,7 @@ CREATE OR REPLACE FUNCTION relation_band_types(p_bands int[])
     SELECT COALESCE(array_agg(e.id), '{}'::bytea[])
     FROM laplace.entities e
     WHERE e.type_id = laplace.entity_type_id('RelationType')
-      AND laplace.relation_highway_band(e.id) = ANY (p_bands)
+      AND consensus.relation_highway_band(e.id) = ANY (p_bands)
 $$;
 
 -- Retired before release: this helper shipped with no caller. Keep the DROP in

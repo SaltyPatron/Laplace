@@ -21,7 +21,8 @@
 --
 -- No SET clause: a PL/pgSQL procedure carrying one is barred from transaction control
 -- (COMMIT), so references are schema-qualified instead.
-CREATE OR REPLACE PROCEDURE highway_mask_drain(p_batch int DEFAULT 100000)
+DROP PROCEDURE IF EXISTS highway_mask_drain(int);
+CREATE OR REPLACE PROCEDURE laplace.highway_mask_drain(p_batch int DEFAULT 100000)
     LANGUAGE plpgsql AS $$
 DECLARE
     ids     bytea[];
@@ -31,7 +32,7 @@ DECLARE
     queued  bigint;
     t0      timestamptz := clock_timestamp();
 BEGIN
-    SELECT count(*) INTO queued FROM @extschema@.highway_mask_dirty;
+    SELECT count(*) INTO queued FROM laplace.highway_mask_dirty;
     IF queued = 0 THEN
         RETURN;
     END IF;
@@ -39,11 +40,11 @@ BEGIN
 
     LOOP
         SELECT array_agg(d.id) INTO ids
-        FROM (SELECT id FROM @extschema@.highway_mask_dirty LIMIT p_batch) d;
+        FROM (SELECT id FROM laplace.highway_mask_dirty LIMIT p_batch) d;
         EXIT WHEN ids IS NULL;
 
-        n := laplace.highway_mask_refresh(ids);
-        DELETE FROM @extschema@.highway_mask_dirty WHERE id = ANY(ids);
+        n := consensus.highway_mask_refresh(ids);
+        DELETE FROM laplace.highway_mask_dirty WHERE id = ANY(ids);
 
         total   := total + n;
         drained := drained + cardinality(ids);

@@ -8,9 +8,9 @@ CREATE OR REPLACE FUNCTION ops.substrate_counts()
 BEGIN ATOMIC
     -- Planner estimates (pg_class.reltuples), NOT count(*). Full scans on 100M+ unvacuumed
     -- tables hung every ingest tail; these numbers are directionally correct post-ingest.
-    -- Run ANALYZE for exact counts, or evidence_count()/source_id() for source precision.
+    -- Run ANALYZE for exact counts, or ops.evidence_count()/source_id() for source precision.
     -- Metric keys are relation roles (entities/…); oids name current storage homes until
-    -- the table cut. No @extschema@, no SET, no Brand.table metric labels.
+    -- the table cut. No install-time schema placeholder, no SET, no Brand.table metric labels.
     SELECT 'entities(ESTIMATE)',      GREATEST(0, (SELECT reltuples FROM pg_class WHERE oid = 'laplace.entities'::regclass))::bigint
     UNION ALL
     SELECT 'physicalities(ESTIMATE)', GREATEST(0, (SELECT reltuples FROM pg_class WHERE oid = 'laplace.physicalities'::regclass))::bigint

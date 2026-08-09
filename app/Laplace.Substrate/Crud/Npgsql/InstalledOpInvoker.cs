@@ -7,7 +7,7 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 
 /// <summary>
 /// Call any installed substrate operation by name. The catalog from
-/// <c>laplace.api()</c> is the allow-list — nothing outside it is callable.
+/// <c>ops.api()</c> is the allow-list — nothing outside it is callable.
 /// Shared by MCP <c>op</c> and OpenAICompat <c>POST /v1/op</c> (GH #812).
 /// </summary>
 public static class InstalledOpInvoker
@@ -45,7 +45,7 @@ public static class InstalledOpInvoker
         if (overloads.Length == 0)
         {
             var err = catalog.Count == 0
-                ? $"no installed operation named '{name}', and nothing in the catalog matches that substring — try api('<shorter substring>')"
+                ? $"no installed operation named '{name}', and nothing in the catalog matches that substring — try ops.api('<shorter substring>')"
                 : $"no installed operation named '{name}' — did you mean: {string.Join(", ", catalog.Select(r => r.Name).Distinct().Take(8))}";
             return new OpResult([], null, err);
         }
@@ -166,7 +166,7 @@ public static class InstalledOpInvoker
     private static string QuoteIdent(string ident) => '"' + ident.Replace("\"", "\"\"") + '"';
 
     /// <summary>
-    /// Turn the exact name returned by <c>laplace.api()</c> into a qualified SQL
+    /// Turn the exact name returned by <c>ops.api()</c> into a qualified SQL
     /// identifier. Legacy <c>laplace</c> operations are catalogued without a
     /// schema; purpose-schema and public operations are catalogued as
     /// <c>schema.function</c>. Quote the two identifiers separately — quoting the

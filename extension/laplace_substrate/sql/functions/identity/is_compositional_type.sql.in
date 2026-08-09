@@ -1,8 +1,11 @@
 -- BEGIN ATOMIC: GH #764. No SET search_path — keeps `= ANY(...)` inlinable.
-CREATE OR REPLACE FUNCTION is_compositional_type(p_type_id bytea)
+-- Identity helpers stay in the extension schema (laplace); purpose_schemas notes
+-- the family has not moved yet. DROP the flat leftover from pre-qualification.
+DROP FUNCTION IF EXISTS is_compositional_type(bytea);
+CREATE OR REPLACE FUNCTION laplace.is_compositional_type(p_type_id bytea)
 RETURNS boolean
 LANGUAGE sql
 IMMUTABLE
 BEGIN ATOMIC
-    SELECT p_type_id = ANY(@extschema@.compositional_type_ids());
+    SELECT p_type_id = ANY(laplace.compositional_type_ids());
 END;

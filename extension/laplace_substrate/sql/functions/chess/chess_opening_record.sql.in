@@ -34,7 +34,7 @@ scored AS MATERIALIZED (
            count(*)                                          AS lines,
            COALESCE(sum(c.witness_count), 0)                 AS playings,
            -- Witness-weighted mean of the per-line conservative estimate.
-           sum(laplace.eff_mu(c.rating, c.rd) * c.witness_count)
+           sum(consensus.eff_mu(c.rating, c.rd) * c.witness_count)
              / NULLIF(sum(c.witness_count), 0)               AS mu
     FROM claim k
     LEFT JOIN laplace.consensus c ON c.subject_id = k.line

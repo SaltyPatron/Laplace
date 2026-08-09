@@ -9,13 +9,13 @@ CREATE OR REPLACE FUNCTION lexical.synset_members(p_word bytea)
         -- instance edge. Bare row presence also excluded synsets whose
         -- IS_INSTANCE_OF was witnessed and REFUTED -- the fold said "not an
         -- instance" and the filter read that as "is an instance". consensus has no
-        -- outcome column; refutation is a non-positive laplace.eff_mu, the same test the
+        -- outcome column; refutation is a non-positive consensus.eff_mu, the same test the
         -- walk uses to dead-end an edge. An absent edge still excludes nothing.
         WHERE NOT EXISTS (
             SELECT 1 FROM laplace.consensus i
             WHERE i.subject_id = s.synset_id
               AND i.type_id = laplace.relation_type_id('IS_INSTANCE_OF')
-              AND laplace.eff_mu(i.rating, i.rd) > 0)
+              AND consensus.eff_mu(i.rating, i.rd) > 0)
         GROUP BY s.synset_id
     ),
     members AS (
@@ -41,7 +41,7 @@ CREATE OR REPLACE FUNCTION lexical.synset_members(p_word bytea)
     ),
     agg AS (
         SELECT m.w,
-               max(laplace.eff_mu(m.rating, m.rd)) AS mu,
+               max(consensus.eff_mu(m.rating, m.rd)) AS mu,
                sum(m.witness_count)::bigint AS witnesses,
                max(m.sense_mu) AS sense_mu
         FROM members m, peers px

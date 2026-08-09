@@ -176,7 +176,7 @@ emit_no_topic_msg(ReplyBuf *buf, const char *prompt, const RouteResult *route)
 
 /* Sense-disambiguation context for the gloss responders: the other resolvable
  * tokens the caller supplied. Structural callers pass ids directly; the text
- * entry points derive them from the prompt via prompt_state(). Either way this
+ * entry points derive them from the prompt via converse.prompt_state(). Either way this
  * is pure id resolution — no grammar is consulted. */
 static Datum
 spi_context_ids(const char *prompt, Datum topic)
@@ -536,7 +536,7 @@ respond_routed(const char *prompt, Datum context, bool ctx_null,
         if (bind->ctx_ids == (Datum) 0) dnulls[1] = 'n';
         n = spi_forward_replies(buf,
             "SELECT reply, eff_mu, witnesses "
-            "FROM laplace.recall_fallback_gloss($1, $2)",
+            "FROM converse.recall_fallback_gloss($1, $2)",
             2, dtypes, dargs, dnulls);
         if (n == 0)
         {
@@ -552,7 +552,7 @@ respond_routed(const char *prompt, Datum context, bool ctx_null,
     }
     else
     {
-        /* Unknown intent. recall_intent() rejects these before dispatch, so
+        /* Unknown intent. converse.recall_intent() rejects these before dispatch, so
          * reaching here means an internal caller passed something outside the
          * published vocabulary; answer with the gloss rather than nothing. */
         Oid   types[2] = { BYTEAOID, BYTEAARRAYOID };
@@ -611,17 +611,17 @@ define_cand_cmp(const void *a, const void *b)
 }
 
 /*
- * Native replacement for the define()/senses()/lexical_peers() SQL composition
+ * Native replacement for the lexical.define()/lexical.senses()/lexical.lexical_peers() SQL composition
  * chain. That chain was measured taking 48+ seconds and 2.27M shared-buffer
  * hits for a single word, root-caused to: (1) every function in the chain
  * uses a CTE, which PostgreSQL cannot inline for set-returning functions --
  * each nested call is planned and executed as an opaque black box with zero
- * cross-function optimization, and (2) render_text() was being called on
+ * cross-function optimization, and (2) realize.render_text() was being called on
  * every candidate row before the final ORDER BY/LIMIT trimmed the result to
  * p_limit. This function does the whole thing as a small, fixed number of
  * explicitly sequenced SPI calls instead: fetch lexical peers once (not the
  * 2-3x redundant calls the SQL chain made), fetch bounded candidate sets via
- * indexed ANY(array) joins, rank in C, and render_text() only the winners.
+ * indexed ANY(array) joins, rank in C, and realize.render_text() only the winners.
  */
 static void
 define_fast_impl(Datum p_word, ArrayType *p_context_arr, int p_limit, ReplyBuf *buf)
@@ -764,7 +764,7 @@ define_fast_impl(Datum p_word, ArrayType *p_context_arr, int p_limit, ReplyBuf *
             }
 
             rc = SPI_execute_with_args(
-                "SELECT c.object_id, sum(laplace.eff_mu(c.rating, c.rd)) "
+                "SELECT c.object_id, sum(consensus.eff_mu(c.rating, c.rd)) "
                 "FROM laplace.v_consensus_unrefuted c "
                 "WHERE c.object_id = ANY($1) AND c.subject_id = ANY($2) "
                 "GROUP BY c.object_id",
@@ -902,7 +902,7 @@ word_shape_peers_fast_impl(Datum p_word, double p_frechet_max)
     /* Issue 51: the Frechet gate must run on GEOMETRY. physicalities.trajectory
      * vertices are mantissa-packed child IDENTITIES (exponent pinned 0x3FF) --
      * feeding them to the DP measured hash bits, behaving as a rough aligned
-     * sequence-identity test. word_curve() rebuilds the constituent COORD curve
+     * sequence-identity test. structural.word_curve() rebuilds the constituent COORD curve
      * (ST_MakeLine ORDER BY ordinal) -- the same metric word_shape_distance uses.
      * The anchor curve is fetched once here and passed as a bound parameter;
      * candidate curves build inside the batched call below (STABLE functions in
@@ -1066,7 +1066,7 @@ word_shape_peers_fast_impl(Datum p_word, double p_frechet_max)
                 /* Frechet stays SQL-computed (order-sensitive, variable-length DP
                  * recurrence -- doesn't batch across candidates the same way a
                  * fixed-width angular distance does). Issue 51: it now runs over
-                 * word_curve(entity) -- the constituent COORD curve, word_shape_
+                 * structural.word_curve(entity) -- the constituent COORD curve, word_shape_
                  * distance's metric -- never the mantissa-packed identity
                  * trajectory, whose vertices are hash bits, not S3 shape. */
                 {
@@ -1217,7 +1217,7 @@ pg_laplace_word_shape_peers_fast(PG_FUNCTION_ARGS)
     PG_RETURN_ARRAYTYPE_P(DatumGetArrayTypeP(result));
 }
 
-/* recall_intent(p_intent, p_topic, p_topic2, p_type_name, p_lang, p_context_ids)
+/* converse.recall_intent(p_intent, p_topic, p_topic2, p_type_name, p_lang, p_context_ids)
  *
  * The structural read entry point: the caller names the shape of the read and
  * supplies resolved content ids. Nothing about the answer depends on the

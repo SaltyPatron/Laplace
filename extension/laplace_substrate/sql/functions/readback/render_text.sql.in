@@ -1,4 +1,11 @@
-CREATE OR REPLACE FUNCTION render_text(p_id bytea, p_max_depth integer DEFAULT 32)
+CREATE OR REPLACE FUNCTION realize.render_text(p_id bytea, p_max_depth integer DEFAULT 32)
+    RETURNS text
+    AS 'MODULE_PATHNAME', 'pg_laplace_render_text'
+    LANGUAGE C STABLE;
+
+-- Keep the installed entry point and its OID: extension C/SPI and installed
+-- SQL objects still name laplace.render_text during the schema transition.
+CREATE OR REPLACE FUNCTION laplace.render_text(p_id bytea, p_max_depth integer DEFAULT 32)
     RETURNS text
     AS 'MODULE_PATHNAME', 'pg_laplace_render_text'
     LANGUAGE C STABLE;

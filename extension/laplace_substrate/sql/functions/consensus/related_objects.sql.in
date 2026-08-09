@@ -5,12 +5,12 @@
 --
 -- The name resolution is all this adds. The scan underneath is consensus.edges_raw() —
 -- the one consensus scan — with the axes this signature has always pinned:
--- outbound, one relation type, unrefuted, laplace.eff_mu order, p_limit as a query
+-- outbound, one relation type, unrefuted, consensus.eff_mu order, p_limit as a query
 -- limit. The body used to hand-roll that scan and open-code `rating - 2*rd`
--- instead of laplace.eff_mu(); the two are the same expression, now stated once.
+-- instead of consensus.eff_mu(); the two are the same expression, now stated once.
 --
 -- Two deliberate changes came with the delegation:
---   * ties on laplace.eff_mu now break on neighbour_id, so the cap is deterministic
+--   * ties on consensus.eff_mu now break on neighbour_id, so the cap is deterministic
 --     rather than plan-dependent.
 --   * edges_raw's outbound arm requires object_id IS NOT NULL, so a unary
 --     attestation of p_relation can no longer surface here as a row whose
@@ -27,9 +27,9 @@ CREATE OR REPLACE FUNCTION consensus.related_objects(
     RETURNS TABLE(object_id bytea, eff_mu bigint, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
     SELECT e.neighbour_id,
-           @extschema@.eff_mu(e.rating, e.rd) AS eff_mu,
+           consensus.eff_mu(e.rating, e.rd) AS eff_mu,
            e.witness_count                    AS witnesses
     FROM consensus.edges_raw(p_subject, 'out',
-                               ARRAY[@extschema@.relation_type_id(p_relation)],
+                               ARRAY[laplace.relation_type_id(p_relation)],
                                p_limit, false, 'eff_mu') e
 $$;

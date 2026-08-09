@@ -1,2 +1,3 @@
-CREATE OR REPLACE FUNCTION relation_type_in_family(p_type_id bytea, p_family text) RETURNS boolean
+DROP FUNCTION IF EXISTS laplace.relation_type_in_family(bytea, text);
+CREATE OR REPLACE FUNCTION consensus.relation_type_in_family(p_type_id bytea, p_family text) RETURNS boolean
     LANGUAGE c IMMUTABLE STRICT PARALLEL SAFE AS 'MODULE_PATHNAME', 'pg_relation_type_in_family';

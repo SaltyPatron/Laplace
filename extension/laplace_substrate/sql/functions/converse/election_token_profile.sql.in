@@ -9,7 +9,7 @@
 --
 -- That read was being hand-written each time it was needed: a CTE over
 -- entity_container_degree, a lateral count over consensus_out, a witness sum,
--- and laplace.foundry_witness_sat, re-derived per investigation. This is the same
+-- and consensus.foundry_witness_sat, re-derived per investigation. This is the same
 -- reinvented-wheel defect W16 documents in the read path, committed by the
 -- person documenting it. One implementation, named, installed, callable through
 -- `op` — so the next measurement quotes a function instead of a paragraph of SQL.
@@ -19,7 +19,7 @@
 -- rather than vanishing: an unattested surface is a real answer, and dropping
 -- the row would be the EXISTS-collapses-NULL defect in another costume.
 --
--- No SET search_path (GH #860), every reference @extschema@-qualified (G11).
+-- No SET search_path (GH #860), every reference schema-qualified (G11).
 DROP FUNCTION IF EXISTS laplace.election_token_profile(text[]);
 CREATE OR REPLACE FUNCTION converse.election_token_profile(p_surfaces text[])
     RETURNS TABLE(
@@ -35,7 +35,7 @@ CREATE OR REPLACE FUNCTION converse.election_token_profile(p_surfaces text[])
         bands          integer)
     LANGUAGE sql STABLE AS $$
     WITH t AS (
-        SELECT s.ord, s.surface, @extschema@.word_id(s.surface) AS id
+        SELECT s.ord, s.surface, laplace.word_id(s.surface) AS id
         FROM unnest(p_surfaces) WITH ORDINALITY AS s(surface, ord)
     ),
     deg AS (
@@ -53,7 +53,7 @@ CREATE OR REPLACE FUNCTION converse.election_token_profile(p_surfaces text[])
     ),
     msk AS (
         SELECT t.ord,
-               COALESCE(laplace.laplace_highway_popcount(m.highway_mask), 0) AS bands
+               COALESCE(consensus.laplace_highway_popcount(m.highway_mask), 0) AS bands
         FROM t
         LEFT JOIN LATERAL generation.entity_highway_masks(ARRAY[t.id]) m ON true
     )
@@ -64,9 +64,9 @@ CREATE OR REPLACE FUNCTION converse.election_token_profile(p_surfaces text[])
            COALESCE(deg.icf, 1.0),
            COALESCE(edg.out_edges, 0),
            COALESCE(edg.witnesses, 0),
-           @extschema@.foundry_witness_sat(COALESCE(edg.witnesses, 0)),
+           consensus.foundry_witness_sat(COALESCE(edg.witnesses, 0)),
            COALESCE(deg.icf, 1.0)
-               * @extschema@.foundry_witness_sat(COALESCE(edg.witnesses, 0)),
+               * consensus.foundry_witness_sat(COALESCE(edg.witnesses, 0)),
            COALESCE(msk.bands, 0)
     FROM t
     LEFT JOIN deg ON deg.ord = t.ord

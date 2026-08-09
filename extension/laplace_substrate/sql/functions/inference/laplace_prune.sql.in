@@ -9,13 +9,13 @@ BEGIN
         RETURN QUERY
             SELECT count(*)::bigint FROM laplace.consensus
             WHERE object_id IS NOT NULL
-              AND laplace.eff_mu(rating, rd) < p_max_eff_mu;
+              AND consensus.eff_mu(rating, rd) < p_max_eff_mu;
     ELSE
         RETURN QUERY
         WITH deleted AS (
             DELETE FROM laplace.consensus
             WHERE object_id IS NOT NULL
-              AND laplace.eff_mu(rating, rd) < p_max_eff_mu
+              AND consensus.eff_mu(rating, rd) < p_max_eff_mu
             RETURNING 1
         )
         SELECT count(*)::bigint FROM deleted;

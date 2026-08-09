@@ -1,10 +1,12 @@
 -- BEGIN ATOMIC: GH #764.
-CREATE OR REPLACE FUNCTION multi_source_entity_count()
+DROP FUNCTION IF EXISTS laplace.multi_source_entity_count();
+
+CREATE OR REPLACE FUNCTION ops.multi_source_entity_count()
     RETURNS bigint
     LANGUAGE sql STABLE
 BEGIN ATOMIC
     SELECT count(*) FROM (
-        SELECT a.subject_id FROM @extschema@.attestations a
+        SELECT a.subject_id FROM laplace.attestations a
         GROUP BY a.subject_id
         HAVING count(DISTINCT a.source_id) > 1) t;
 END;
