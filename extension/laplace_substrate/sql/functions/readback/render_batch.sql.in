@@ -2,7 +2,7 @@
 -- batched; only cheap codepoint and final text projection remain per element.
 CREATE OR REPLACE FUNCTION laplace.render_batch(p_ids bytea[])
     RETURNS text[]
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$
     WITH inp AS MATERIALIZED (
         SELECT u.id, u.ord
         FROM unnest(p_ids) WITH ORDINALITY AS u(id, ord)

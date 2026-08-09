@@ -110,4 +110,11 @@ SELECT cardinality(b.rendered)=4 AS render_length,
        realize.label_batch('{}'::bytea[])='{}'::text[] AS label_empty
 FROM b;
 
+-- NULL input is distinct from an empty aligned batch for every projection.
+SELECT realize.resolve_name_batch(NULL::bytea[],NULL::bytea) IS NULL AS names_null,
+       laplace.render_batch(NULL::bytea[]) IS NULL AS render_null,
+       realize.label_batch(NULL::bytea[]) IS NULL AS label_null,
+       converse.label_or_hex_batch(NULL::bytea[]) IS NULL AS hex_null,
+       lexical.type_label_batch(NULL::bytea[]) IS NULL AS type_null;
+
 ROLLBACK;
