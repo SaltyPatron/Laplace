@@ -1116,20 +1116,20 @@ public sealed partial class NpgsqlSubstrateWriter
                     persistedPhys.TryAdd(probePhysIds[i], 0);
             }
             // Release in-flight claims only after commit — peers may now merge safely.
-            if (_claimedEntityIds is not null && novelEntIds is { Count: > 0 })
+            if (_claimedEntityIds is not null)
             {
-                foreach (var id in novelEntIds)
+                foreach (var id in claimedEntThis)
                     _claimedEntityIds.TryRemove(id, out _);
             }
-            if (_claimedPhysIds is not null && novelPhysIds is { Count: > 0 })
+            if (_claimedPhysIds is not null)
             {
-                foreach (var id in novelPhysIds)
+                foreach (var id in claimedPhysThis)
                     _claimedPhysIds.TryRemove(id, out _);
             }
-            if (_claimedAttIds is not null && novelRepIdx.Count > 0)
+            if (_claimedAttIds is not null)
             {
-                for (int k = 0; k < novelRepIdx.Count; k++)
-                    _claimedAttIds.TryRemove(atts.Ids[novelRepIdx[k]], out _);
+                foreach (var id in claimedAttThis)
+                    _claimedAttIds.TryRemove(id, out _);
             }
 
             // Same commit boundary, same reason: a root may only answer "ladder already

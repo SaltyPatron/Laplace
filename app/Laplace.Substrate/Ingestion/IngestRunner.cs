@@ -293,8 +293,8 @@ public sealed class IngestRunner
                         ThrowIfCappedFailFast(options, counters);
                     }
                 }
-                catch (OperationCanceledException) { }
-                catch (InvalidOperationException ex)
+                catch (OperationCanceledException) when (runCt.IsCancellationRequested) { }
+                catch (Exception ex)
                 {
                     Interlocked.Exchange(ref cappedFail, ex);
                     try { runCts.Cancel(); } catch { /* already cancelled */ }
@@ -541,7 +541,7 @@ public sealed class IngestRunner
             try { runCts.Cancel(); } catch { /* ignore */ }
             if (cappedWatchdog is not null)
             {
-                try { await cappedWatchdog.ConfigureAwait(false); } catch { /* ignore */ }
+                await cappedWatchdog.ConfigureAwait(false);
             }
             // Rebuild on every exit path, including failures — a fatal
             // apply error must not leave the table index-less. The one
