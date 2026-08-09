@@ -47,7 +47,7 @@ capped AS (SELECT * FROM cand WHERE rk <= p_limit),
 via AS (
     SELECT c.object_id AS synset_id, c.type_id,
            row_number() OVER (PARTITION BY c.object_id
-                              ORDER BY laplace.eff_mu(c.rating, c.rd) DESC, c.type_id) AS rk
+                              ORDER BY consensus.eff_mu(c.rating, c.rd) DESC, c.type_id) AS rk
     FROM w CROSS JOIN laplace.consensus c
     WHERE c.subject_id = w.id AND c.object_id IN (SELECT synset_id FROM capped)
 ),
@@ -62,7 +62,7 @@ lang AS (
     -- W15 documents as a defect. Same G3 outcome, different cost.
     SELECT c.subject_id AS synset_id, c.object_id AS lang_id,
            row_number() OVER (PARTITION BY c.subject_id
-                              ORDER BY laplace.eff_mu(c.rating, c.rd) DESC, c.object_id) AS rk
+                              ORDER BY consensus.eff_mu(c.rating, c.rd) DESC, c.object_id) AS rk
     FROM laplace.consensus c
     WHERE c.type_id = p_lang_rel
       AND c.subject_id IN (SELECT synset_id FROM capped)

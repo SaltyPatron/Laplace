@@ -1,10 +1,12 @@
 -- BEGIN ATOMIC: GH #764. Full scan — serving path should use entity_type_counts_approx.
-CREATE OR REPLACE FUNCTION entity_type_counts()
+DROP FUNCTION IF EXISTS laplace.entity_type_counts();
+
+CREATE OR REPLACE FUNCTION ops.entity_type_counts()
     RETURNS TABLE(type text, type_id bytea, tier smallint, entities bigint)
     LANGUAGE sql STABLE
 BEGIN ATOMIC
-    SELECT @extschema@.render(e.type_id), e.type_id, e.tier, count(*)
-    FROM @extschema@.entities e
+    SELECT realize.render(e.type_id), e.type_id, e.tier, count(*)
+    FROM laplace.entities e
     GROUP BY e.type_id, e.tier
     ORDER BY count(*) DESC;
 END;

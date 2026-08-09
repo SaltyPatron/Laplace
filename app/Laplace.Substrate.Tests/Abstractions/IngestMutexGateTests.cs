@@ -113,7 +113,7 @@ public sealed class IngestMutexGateTests
     /// <summary>
     /// Hand-rolled <c>evidence_count(…) &gt; 0</c> verifies, 2026-08-05: 11 files,
     /// 13 call sites. THIS LIST MAY ONLY SHRINK. Destination is
-    /// <see cref="VerifySanctionedHome"/> (<c>laplace.source_status()</c>), which already
+    /// <see cref="VerifySanctionedHome"/> (<c>ops.source_status()</c>), which already
     /// answers the question correctly for content-only lanes.
     ///
     /// <para>The C# three are not three different questions — they are the same
@@ -338,7 +338,7 @@ public sealed class IngestMutexGateTests
         => AssertRatchet(EvidenceVerify, EvidenceVerifyAllowlist, nameof(EvidenceVerifyAllowlist),
             "New hand-rolled `evidence_count(...) > 0` verify. That test reports "
             + "content-only lanes as NOT INGESTED — source_status.sql.in's header records "
-            + "the same false negative being reached three times. Ask laplace.source_status() "
+            + "the same false negative being reached three times. Ask ops.source_status() "
             + "instead of here:",
             sanctionedHome: VerifySanctionedHome);
 

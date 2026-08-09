@@ -1,9 +1,11 @@
 -- The IS_A tree around a topic: dir='self' the root (a bare surface hops to
 -- its top synset — taxonomy lives on concepts, not spellings), dir='up' the
 -- parent chain to the root, dir='child' the strongest sub-kinds.
-CREATE OR REPLACE FUNCTION taxonomy_tree(p_id bytea)
+DROP FUNCTION IF EXISTS laplace.taxonomy_tree(bytea);
+
+CREATE OR REPLACE FUNCTION taxonomy.taxonomy_tree(p_id bytea)
     RETURNS TABLE(dir text, ord int, id bytea, label text, eff_mu numeric)
-    LANGUAGE sql STABLE 
+    LANGUAGE sql STABLE
     AS $$
     WITH root AS MATERIALIZED (
         SELECT COALESCE(taxonomy.top_synset(p_id), p_id) AS id)
@@ -13,11 +15,11 @@ CREATE OR REPLACE FUNCTION taxonomy_tree(p_id bytea)
     FROM root, consensus.walk_strongest(root.id, laplace.relation_type_id('IS_A'), 10) w
     UNION ALL
     (SELECT 'child',
-            row_number() OVER (ORDER BY laplace.eff_mu_display(c.rating, c.rd) DESC)::int,
+            row_number() OVER (ORDER BY consensus.eff_mu_display(c.rating, c.rd) DESC)::int,
             c.subject_id, converse.label_or_hex(c.subject_id),
-            laplace.eff_mu_display(c.rating, c.rd)
+            consensus.eff_mu_display(c.rating, c.rd)
      FROM root JOIN laplace.consensus c
        ON c.object_id = root.id AND c.type_id = laplace.relation_type_id('IS_A')
-     ORDER BY laplace.eff_mu_display(c.rating, c.rd) DESC
+     ORDER BY consensus.eff_mu_display(c.rating, c.rd) DESC
      LIMIT 24)
 $$;

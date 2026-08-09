@@ -10,18 +10,18 @@ CREATE OR REPLACE FUNCTION consensus.related(p_word bytea, p_type bytea, p_lang 
         SELECT cc.object_id, cc.rating, cc.rd, cc.witness_count
         FROM subj s CROSS JOIN LATERAL (
             SELECT c.object_id, c.rating, c.rd, c.witness_count
-            FROM @extschema@.v_consensus_unrefuted c
+            FROM laplace.v_consensus_unrefuted c
             WHERE c.subject_id = s.id AND c.type_id = p_type
               AND c.object_id IS NOT NULL
-            ORDER BY @extschema@.eff_mu(c.rating, c.rd) DESC LIMIT p_limit
+            ORDER BY consensus.eff_mu(c.rating, c.rd) DESC LIMIT p_limit
         ) cc
     ), ranked AS (
         -- rank + LIMIT on ids BEFORE labeling (was: scalar realize per row over
         -- the num_senses x p_limit pool, labeling more rows than returned).
         SELECT t.object_id, t.rating, t.rd, t.witness_count,
-               row_number() OVER (ORDER BY @extschema@.eff_mu(t.rating, t.rd) DESC) AS ord
+               row_number() OVER (ORDER BY consensus.eff_mu(t.rating, t.rd) DESC) AS ord
         FROM top t
-        ORDER BY @extschema@.eff_mu(t.rating, t.rd) DESC
+        ORDER BY consensus.eff_mu(t.rating, t.rd) DESC
         LIMIT p_limit
     ), labels AS (
         -- ONE realize_batch over exactly the returned rows, position-aligned.
@@ -29,7 +29,7 @@ CREATE OR REPLACE FUNCTION consensus.related(p_word bytea, p_type bytea, p_lang 
                              COALESCE(p_lang, converse.word_language(p_word))) AS l
         FROM ranked r
     )
-    SELECT labels.l[r.ord], @extschema@.eff_mu_display(r.rating, r.rd), r.witness_count
+    SELECT labels.l[r.ord], consensus.eff_mu_display(r.rating, r.rd), r.witness_count
     FROM ranked r, labels
     ORDER BY r.ord
 $$;

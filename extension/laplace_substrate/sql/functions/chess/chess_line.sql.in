@@ -48,8 +48,8 @@ CREATE OR REPLACE FUNCTION chess.line(p_line bytea)
           AND c.type_id = laplace.relation_type_id('OUTCOME')
           -- Standing fold only (Copilot #918): a fully-refuted OUTCOME is not
           -- the line's result.
-          AND laplace.eff_mu(c.rating, c.rd) > 0
-        ORDER BY laplace.eff_mu(c.rating, c.rd) DESC, c.object_id
+          AND consensus.eff_mu(c.rating, c.rd) > 0
+        ORDER BY consensus.eff_mu(c.rating, c.rd) DESC, c.object_id
         LIMIT 1
     ),
     surface_batch AS MATERIALIZED (
@@ -71,7 +71,7 @@ CREATE OR REPLACE FUNCTION chess.line(p_line bytea)
            f.witness_count::bigint,
            f.rating::double precision,
            f.rd::double precision,
-           laplace.eff_mu(f.rating, f.rd)::double precision
+           consensus.eff_mu(f.rating, f.rd)::double precision
     FROM playings pg
     LEFT JOIN hdr h ON h.event = pg.event
     LEFT JOIN surface_text d ON d.id = h.date_id

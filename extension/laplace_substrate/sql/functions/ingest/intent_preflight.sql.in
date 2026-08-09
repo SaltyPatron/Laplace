@@ -1,4 +1,4 @@
-CREATE OR REPLACE FUNCTION intent_preflight(
+CREATE OR REPLACE FUNCTION laplace.intent_preflight(
     entity_ids bytea[],
     phys_ids   bytea[],
     att_ids    bytea[])

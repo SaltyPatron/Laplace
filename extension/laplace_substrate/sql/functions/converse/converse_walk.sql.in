@@ -44,7 +44,7 @@ DECLARE
     rng    bigint;
     out_ids bytea[];
 BEGIN
-    t_def := laplace.relation_band_types(b_def);
+    t_def := consensus.relation_band_types(b_def);
     -- ORIENT: the same native election converse.chat() and converse.converse() run — one election,
     -- one key order, so the three cannot disagree about what a prompt is about.
     -- prompt_coherence returns the elected TOKEN alongside its synset, which is
@@ -104,12 +104,12 @@ BEGIN
         -- contributes its token stream once, not twice.
         SELECT DISTINCT g.gid, g.wt, g.is_core FROM (
             SELECT c.object_id AS gid, 50::bigint AS wt, true AS is_core,
-                   laplace.eff_mu(c.rating, c.rd) AS mu
+                   consensus.eff_mu(c.rating, c.rd) AS mu
             FROM laplace.consensus c
             WHERE c.subject_id = syn AND c.type_id = ANY (t_def)
             UNION ALL
             SELECT co.entity_id, 40, false,
-                   COALESCE(MAX(laplace.eff_mu(k.rating, k.rd)), laplace.glicko2_neutral_mu())
+                   COALESCE(MAX(consensus.eff_mu(k.rating, k.rd)), laplace.glicko2_neutral_mu())
             FROM structural.containers_of(topic_word, 1, 400) co
             LEFT JOIN laplace.consensus k ON k.object_id = co.entity_id
             WHERE co.tier = 3
@@ -202,7 +202,7 @@ BEGIN
     out_ids := converse.steered_walk_raw(stream, w, COALESCE(core_seq, ARRAY[]::bytea[]),
                                 starts, p_steps, MINLEN, rng);
     IF out_ids IS NULL OR array_length(out_ids,1) IS NULL THEN RETURN NULL; END IF;
-    IF array_length(out_ids,1) = 1 THEN RETURN laplace.render_text(out_ids[1], 64); END IF;
+    IF array_length(out_ids,1) = 1 THEN RETURN realize.render_text(out_ids[1], 64); END IF;
 
     -- REALIZE: no punctuation scrub, no whitespace normalization. The old tail ran
     -- regexp_replace('\s*[();:]\s*') then regexp_replace('\s+') because REALIZE
@@ -216,14 +216,14 @@ BEGIN
             -- 1,645 tokens: 1,895ms batched against 15.6ms each, ~15.8x).
             -- laplace.render_text_batch and NOT realize_batch: they answer different
             -- questions. laplace.render_text reconstructs the content's bytes, realize
-            -- LABELS an entity for a human -- laplace.render_text(U+0020) is ' ' where
-            -- realize.realize(U+0020) is 'SPACE', laplace.render_text(U+0028) is '(' where realize
+            -- LABELS an entity for a human -- realize.render_text(U+0020) is ' ' where
+            -- realize.realize(U+0020) is 'SPACE', realize.render_text(U+0028) is '(' where realize
             -- is 'LEFT PARENTHESIS'. Generation emits content, so it renders.
             (WITH ids AS MATERIALIZED (
                  SELECT array_agg(DISTINCT u.t) AS a FROM unnest(out_ids) AS u(t)
              ),
              realized AS MATERIALIZED (
-                 SELECT i.a AS a, laplace.render_text_batch(i.a, 64) AS s FROM ids i
+                 SELECT i.a AS a, realize.render_text_batch(i.a, 64) AS s FROM ids i
              ),
              m AS (
                  SELECT (r.a)[k] AS id, (r.s)[k] AS txt

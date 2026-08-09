@@ -32,8 +32,8 @@ CREATE OR REPLACE FUNCTION converse.recall_interaction_response(p_topic bytea, p
     facts AS (
         SELECT k.phrase,
                c.object_id,
-               laplace.edge_rank(c.type_id, laplace.eff_mu(c.rating, c.rd)) AS rank,
-               laplace.eff_mu(c.rating, c.rd) AS mu,
+               consensus.edge_rank(c.type_id, consensus.eff_mu(c.rating, c.rd)) AS rank,
+               consensus.eff_mu(c.rating, c.rd) AS mu,
                c.witness_count AS witnesses
         FROM laplace.v_consensus_unrefuted c
         JOIN kinds k ON k.type_id = c.type_id
@@ -49,7 +49,7 @@ CREATE OR REPLACE FUNCTION converse.recall_interaction_response(p_topic bytea, p
         ORDER BY f.rank DESC, f.mu DESC
         LIMIT p_limit
     )
-    SELECT realize.label(p_topic) || ' — ' || r.phrase || ' ' || laplace.render_text(r.object_id, 96) AS reply,
+    SELECT realize.label(p_topic) || ' — ' || r.phrase || ' ' || realize.render_text(r.object_id, 96) AS reply,
            r.mu AS eff_mu,
            r.witnesses
     FROM ranked r

@@ -1,6 +1,0 @@
--- BEGIN ATOMIC: GH #764.
-CREATE OR REPLACE FUNCTION source_id(p_name text) RETURNS bytea
-    LANGUAGE sql LAPLACE_IMMUTABLE_STRICT
-BEGIN ATOMIC
-    SELECT @extschema@.canonical_id('substrate/source/' || p_name || '/v1');
-END;

@@ -9,7 +9,7 @@ CREATE OR REPLACE FUNCTION generation.grapheme_floor_vocab(p_size int DEFAULT 51
     WITH t AS (
         SELECT w.trajectory
         FROM laplace.v_word_points w
-        WHERE w.type_id = laplace.canonical_id('Word')
+        WHERE w.type_id = realize.canonical_id('Word')
           AND w.trajectory IS NOT NULL
         ORDER BY w.id LIMIT p_words
     ),
@@ -21,11 +21,11 @@ CREATE OR REPLACE FUNCTION generation.grapheme_floor_vocab(p_size int DEFAULT 51
         
         
         SELECT g.entity_id, sum(GREATEST(g.run_length,1))::bigint AS cnt
-        FROM g JOIN laplace.entities e ON e.id = g.entity_id AND e.type_id IN (laplace.canonical_id('Codepoint'), laplace.canonical_id('Grapheme'))
+        FROM g JOIN laplace.entities e ON e.id = g.entity_id AND e.type_id IN (realize.canonical_id('Codepoint'), realize.canonical_id('Grapheme'))
         GROUP BY g.entity_id
     ),
     named AS (
-        SELECT a.entity_id, laplace.render_text(a.entity_id, 8) AS s, a.cnt
+        SELECT a.entity_id, realize.render_text(a.entity_id, 8) AS s, a.cnt
         FROM agg a ORDER BY a.cnt DESC LIMIT p_size * 2
     )
     SELECT n.entity_id, n.s, n.cnt

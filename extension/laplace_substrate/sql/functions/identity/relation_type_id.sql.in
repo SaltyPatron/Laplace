@@ -1,0 +1,9 @@
+-- BEGIN ATOMIC: GH #764.
+-- Identity helper: stays in the extension schema (no identity purpose schema).
+DROP FUNCTION IF EXISTS laplace.relation_type_id(text);
+
+CREATE OR REPLACE FUNCTION laplace.relation_type_id(p_name text) RETURNS bytea
+    LANGUAGE sql LAPLACE_IMMUTABLE_STRICT
+BEGIN ATOMIC
+    SELECT realize.canonical_id(p_name);
+END;

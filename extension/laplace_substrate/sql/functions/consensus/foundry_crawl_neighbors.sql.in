@@ -13,5 +13,5 @@ CREATE OR REPLACE FUNCTION consensus.foundry_crawl_neighbors(
 BEGIN ATOMIC
     SELECT e.neighbour_id, en.tier, e.rating, e.rd
     FROM consensus.edges_raw(p_subject, 'out', p_types, p_limit, true, 'eff_mu') e
-    JOIN @extschema@.entities en ON en.id = e.neighbour_id;
+    JOIN laplace.entities en ON en.id = e.neighbour_id;
 END;

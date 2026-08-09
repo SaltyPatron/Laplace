@@ -40,7 +40,7 @@ BEGIN
         ORDER BY s.entity_id, s.fr
     )
     SELECT d.entity_id,
-           laplace.render_text(d.entity_id, 48),
+           realize.render_text(d.entity_id, 48),
            d.fr,
            converse.physicality_count(d.entity_id) AS recurrence
     FROM dedup d

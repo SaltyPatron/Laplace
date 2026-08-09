@@ -1,5 +1,7 @@
 -- BEGIN ATOMIC: GH #764.
-CREATE OR REPLACE FUNCTION evidence_count(
+DROP FUNCTION IF EXISTS laplace.evidence_count(bytea, bytea, bytea);
+
+CREATE OR REPLACE FUNCTION ops.evidence_count(
     p_type bytea DEFAULT NULL, p_source bytea DEFAULT NULL, p_object bytea DEFAULT NULL)
     RETURNS bigint
     LANGUAGE sql STABLE
@@ -14,23 +16,23 @@ BEGIN ATOMIC
     -- reduces to for that NULL combination, so results are byte-identical.
     SELECT CASE
         WHEN p_type IS NULL AND p_source IS NULL AND p_object IS NULL
-            THEN (SELECT count(*) FROM @extschema@.attestations)
+            THEN (SELECT count(*) FROM laplace.attestations)
         WHEN p_type IS NULL AND p_source IS NULL
-            THEN (SELECT count(*) FROM @extschema@.attestations a WHERE a.object_id = p_object)
+            THEN (SELECT count(*) FROM laplace.attestations a WHERE a.object_id = p_object)
         WHEN p_type IS NULL AND p_object IS NULL
-            THEN (SELECT count(*) FROM @extschema@.attestations a WHERE a.source_id = p_source)
+            THEN (SELECT count(*) FROM laplace.attestations a WHERE a.source_id = p_source)
         WHEN p_source IS NULL AND p_object IS NULL
-            THEN (SELECT count(*) FROM @extschema@.attestations a WHERE a.type_id = p_type)
+            THEN (SELECT count(*) FROM laplace.attestations a WHERE a.type_id = p_type)
         WHEN p_type IS NULL
-            THEN (SELECT count(*) FROM @extschema@.attestations a
+            THEN (SELECT count(*) FROM laplace.attestations a
                   WHERE a.source_id = p_source AND a.object_id = p_object)
         WHEN p_source IS NULL
-            THEN (SELECT count(*) FROM @extschema@.attestations a
+            THEN (SELECT count(*) FROM laplace.attestations a
                   WHERE a.type_id = p_type AND a.object_id = p_object)
         WHEN p_object IS NULL
-            THEN (SELECT count(*) FROM @extschema@.attestations a
+            THEN (SELECT count(*) FROM laplace.attestations a
                   WHERE a.type_id = p_type AND a.source_id = p_source)
-        ELSE (SELECT count(*) FROM @extschema@.attestations a
+        ELSE (SELECT count(*) FROM laplace.attestations a
               WHERE a.type_id = p_type AND a.source_id = p_source AND a.object_id = p_object)
     END;
 END;

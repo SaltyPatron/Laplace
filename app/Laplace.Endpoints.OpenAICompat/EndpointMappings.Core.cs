@@ -42,16 +42,16 @@ internal static class CoreEndpoints
             var endpoints = new CapabilityEndpoints(
                 ChatCompletions: new CapabilityStatus("live", Backend: "converse.recall_session", Billing: "preflight_quote_required"),
                 Completions: new CapabilityStatus("live", Backend: "consensus.completions", Billing: "preflight_quote_required"),
-                Embeddings: new CapabilityStatus("live", Backend: "laplace.entity_physicalities (form) + laplace.consensus_out_readable (meaning)", Billing: "embeddings"),
+                Embeddings: new CapabilityStatus("live", Backend: "ops.entity_physicalities (form) + ops.consensus_out_readable (meaning)", Billing: "embeddings"),
                 AuditReports: new CapabilityStatus("live", Backend: "ops.substrate_counts + consensus.stats + consensus.top_relations", Billing: "audit.deep_report"),
-                Visualizations: new CapabilityStatus("live", Backend: "consensus.top_relations + laplace.entity_physicalities", Billing: "visualization.deep_export"),
-                ExplainabilityReports: new CapabilityStatus("live", Backend: "consensus.walk_branches + laplace.attestations_out", Billing: "explain.trace"),
+                Visualizations: new CapabilityStatus("live", Backend: "consensus.top_relations + ops.entity_physicalities", Billing: "visualization.deep_export"),
+                ExplainabilityReports: new CapabilityStatus("live", Backend: "consensus.walk_branches + ops.attestations_out", Billing: "explain.trace"),
                 Billing: new CapabilityStatus("live", Provider: "stripe_or_manual"),
                 Models: new CapabilityStatus("live"),
                 Feedback: new CapabilityStatus("live", Backend: "laplace.attestations (confirm/refute) + consensus fold"),
                 RecipeCompile: new CapabilityStatus("live", Backend: "laplace.recipe validation + RecipeDescriptor", Billing: "recipe.compile"),
                 SynthesisExport: new CapabilityStatus("live", Backend: "foundry CLI export (writes GGUF; never loaded on chat path)", Billing: "synthesis"),
-                Op: new CapabilityStatus("live", Backend: "laplace.api catalog allow-list; named function call; no SQL text"));
+                Op: new CapabilityStatus("live", Backend: "ops.api catalog allow-list; named function call; no SQL text"));
             return Results.Json(new CapabilitiesResponse("F-scaffold", endpoints));
         })
         .WithTags("core").Produces<CapabilitiesResponse>();

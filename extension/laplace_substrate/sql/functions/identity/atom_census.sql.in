@@ -4,7 +4,8 @@
 -- unresolvable_ids stays 0 here — a full codepoint_for_id sweep is O(window)
 -- and is a follow-on when a gate needs the NULL-label count.
 -- BEGIN ATOMIC: GH #764 beachhead.
-CREATE OR REPLACE FUNCTION atom_census()
+DROP FUNCTION IF EXISTS atom_census();
+CREATE OR REPLACE FUNCTION laplace.atom_census()
     RETURNS TABLE(
         tier0_count bigint,
         atom_window bigint,
@@ -14,7 +15,7 @@ CREATE OR REPLACE FUNCTION atom_census()
     STABLE
 BEGIN ATOMIC
     WITH w AS (SELECT laplace.atom_window() AS n),
-         t AS (SELECT laplace.entity_count(laplace.entity_type_id('Codepoint')) AS n)
+         t AS (SELECT ops.entity_count(laplace.entity_type_id('Codepoint')) AS n)
     SELECT t.n,
            w.n,
            greatest(0, t.n - w.n),

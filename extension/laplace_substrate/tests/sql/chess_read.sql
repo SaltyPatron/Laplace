@@ -1,5 +1,4 @@
 BEGIN;
-SET search_path = laplace, public;
 
 -- chess_moves / chess_player_moves / typed consensus_by_ids: the chess read
 -- surface. Synthetic rows only — one position with three rated continuations
@@ -7,31 +6,31 @@ SET search_path = laplace, public;
 -- staged in the GH #736 line/event shape.
 DO $$
 DECLARE
-    type_t   bytea := laplace_hash128_blake3('Type');
-    mv       bytea := relation_type_id('MOVE');
-    hw       bytea := relation_type_id('HAS_WHITE');
-    hb       bytea := relation_type_id('HAS_BLACK');
-    plns     bytea := relation_type_id('PLAYS_LINE');
-    src      bytea := laplace_hash128_blake3('test/chess/source');
-    pos      bytea := laplace_hash128_blake3('test/chess/pos');
-    n_strong bytea := laplace_hash128_blake3('test/chess/next_strong');
-    n_mid    bytea := laplace_hash128_blake3('test/chess/next_mid');
-    n_thin   bytea := laplace_hash128_blake3('test/chess/next_thin');
-    player   bytea := laplace_hash128_blake3('test/chess/player');
-    rival    bytea := laplace_hash128_blake3('test/chess/rival');
-    g_white  bytea := laplace_hash128_blake3('test/chess/game_as_white');
-    g_black  bytea := laplace_hash128_blake3('test/chess/game_as_black');
-    l_white  bytea := laplace_hash128_blake3('test/chess/line_as_white');
-    l_black  bytea := laplace_hash128_blake3('test/chess/line_as_black');
-    c_strong bytea := laplace_hash128_blake3('test/chess/c_strong');
-    c_mid    bytea := laplace_hash128_blake3('test/chess/c_mid');
-    c_thin   bytea := laplace_hash128_blake3('test/chess/c_thin');
+    type_t   bytea := public.laplace_hash128_blake3('Type');
+    mv       bytea := laplace.relation_type_id('MOVE');
+    hw       bytea := laplace.relation_type_id('HAS_WHITE');
+    hb       bytea := laplace.relation_type_id('HAS_BLACK');
+    plns     bytea := laplace.relation_type_id('PLAYS_LINE');
+    src      bytea := public.laplace_hash128_blake3('test/chess/source');
+    pos      bytea := public.laplace_hash128_blake3('test/chess/pos');
+    n_strong bytea := public.laplace_hash128_blake3('test/chess/next_strong');
+    n_mid    bytea := public.laplace_hash128_blake3('test/chess/next_mid');
+    n_thin   bytea := public.laplace_hash128_blake3('test/chess/next_thin');
+    player   bytea := public.laplace_hash128_blake3('test/chess/player');
+    rival    bytea := public.laplace_hash128_blake3('test/chess/rival');
+    g_white  bytea := public.laplace_hash128_blake3('test/chess/game_as_white');
+    g_black  bytea := public.laplace_hash128_blake3('test/chess/game_as_black');
+    l_white  bytea := public.laplace_hash128_blake3('test/chess/line_as_white');
+    l_black  bytea := public.laplace_hash128_blake3('test/chess/line_as_black');
+    c_strong bytea := public.laplace_hash128_blake3('test/chess/c_strong');
+    c_mid    bytea := public.laplace_hash128_blake3('test/chess/c_mid');
+    c_thin   bytea := public.laplace_hash128_blake3('test/chess/c_thin');
     got      bytea[];
     n        bigint;
     s        double precision;
     s2       double precision;
 BEGIN
-    INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
+    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) VALUES
         (src, 0, type_t, NULL),
         (pos, 0, type_t, src), (n_strong, 0, type_t, src),
         (n_mid, 0, type_t, src), (n_thin, 0, type_t, src),
@@ -43,7 +42,7 @@ BEGIN
     --   strong: 1600e9 - 2*50e9  = 1500e9   (ranked 1st)
     --   mid:    1550e9 - 2*40e9  = 1470e9   (ranked 2nd)
     --   thin:   1500e9 - 2*200e9 = 1100e9   (ranked 3rd — wide RD sinks it)
-    INSERT INTO consensus
+    INSERT INTO laplace.consensus
         (id, subject_id, type_id, object_id, rating, rd, volatility, witness_count, last_observed_at)
     VALUES
         (c_strong, pos, mv, n_strong, 1600000000000, 50000000000, 60000000, 100, now()),
@@ -53,19 +52,19 @@ BEGIN
     -- MOVE evidence rides ctx = the playing-EVENT (GH #736); the colour
     -- headers subject the shared LINE with ctx = that same event, so the
     -- repertoire join threads context equality, never the line subject.
-    INSERT INTO attestations
+    INSERT INTO laplace.attestations
         (id, subject_id, type_id, object_id, source_id, context_id,
          outcome, last_observed_at, observation_count,
          sum_score_fp1e9, opponent_rd_fp1e9)
     VALUES
-        (laplace_hash128_blake3('test/chess/ev_strong'), pos, mv, n_strong, src, g_white, 2, now(), 3, 3000000000, 30000000000),
-        (laplace_hash128_blake3('test/chess/ev_mid'),    pos, mv, n_mid,    src, g_black, 0, now(), 1, 0, 30000000000),
-        (laplace_hash128_blake3('test/chess/pl1'), g_white, plns, l_white, src, NULL, 2, now(), 1, 1000000000, 30000000000),
-        (laplace_hash128_blake3('test/chess/pl2'), g_black, plns, l_black, src, NULL, 2, now(), 1, 1000000000, 30000000000),
-        (laplace_hash128_blake3('test/chess/hw1'), l_white, hw, player, src, g_white, 2, now(), 1, 1000000000, 30000000000),
-        (laplace_hash128_blake3('test/chess/hb1'), l_white, hb, rival,  src, g_white, 2, now(), 1, 1000000000, 30000000000),
-        (laplace_hash128_blake3('test/chess/hw2'), l_black, hw, rival,  src, g_black, 2, now(), 1, 1000000000, 30000000000),
-        (laplace_hash128_blake3('test/chess/hb2'), l_black, hb, player, src, g_black, 2, now(), 1, 1000000000, 30000000000);
+        (public.laplace_hash128_blake3('test/chess/ev_strong'), pos, mv, n_strong, src, g_white, 2, now(), 3, 3000000000, 30000000000),
+        (public.laplace_hash128_blake3('test/chess/ev_mid'),    pos, mv, n_mid,    src, g_black, 0, now(), 1, 0, 30000000000),
+        (public.laplace_hash128_blake3('test/chess/pl1'), g_white, plns, l_white, src, NULL, 2, now(), 1, 1000000000, 30000000000),
+        (public.laplace_hash128_blake3('test/chess/pl2'), g_black, plns, l_black, src, NULL, 2, now(), 1, 1000000000, 30000000000),
+        (public.laplace_hash128_blake3('test/chess/hw1'), l_white, hw, player, src, g_white, 2, now(), 1, 1000000000, 30000000000),
+        (public.laplace_hash128_blake3('test/chess/hb1'), l_white, hb, rival,  src, g_white, 2, now(), 1, 1000000000, 30000000000),
+        (public.laplace_hash128_blake3('test/chess/hw2'), l_black, hw, rival,  src, g_black, 2, now(), 1, 1000000000, 30000000000),
+        (public.laplace_hash128_blake3('test/chess/hb2'), l_black, hb, player, src, g_black, 2, now(), 1, 1000000000, 30000000000);
 
     -- chess_moves: eff_mu ranking, full and LIMITed.
     SELECT array_agg(next_position ORDER BY ord) INTO got
@@ -116,46 +115,46 @@ END $$;
 -- is what keeps their records apart.
 DO $$
 DECLARE
-    type_t  bytea := laplace_hash128_blake3('Type');
-    hw      bytea := relation_type_id('HAS_WHITE');
-    hb      bytea := relation_type_id('HAS_BLACK');
-    hr      bytea := relation_type_id('HAS_RESULT');
-    hrat    bytea := relation_type_id('HAS_RATING');
-    mv      bytea := relation_type_id('MOVE');
-    plns    bytea := relation_type_id('PLAYS_LINE');
-    od      bytea := relation_type_id('ON_DATE');
-    hev     bytea := relation_type_id('HAS_EVENT');
-    heco    bytea := relation_type_id('HAS_ECO');
-    hmt     bytea := relation_type_id('HAS_MOVETEXT');
-    mq      bytea := relation_type_id('MOVE_QUALITY');
-    outc    bytea := relation_type_id('OUTCOME');
-    cres    bytea := entity_type_id('Chess_Result');
-    src     bytea := laplace_hash128_blake3('test/chess2/source');
+    type_t  bytea := public.laplace_hash128_blake3('Type');
+    hw      bytea := laplace.relation_type_id('HAS_WHITE');
+    hb      bytea := laplace.relation_type_id('HAS_BLACK');
+    hr      bytea := laplace.relation_type_id('HAS_RESULT');
+    hrat    bytea := laplace.relation_type_id('HAS_RATING');
+    mv      bytea := laplace.relation_type_id('MOVE');
+    plns    bytea := laplace.relation_type_id('PLAYS_LINE');
+    od      bytea := laplace.relation_type_id('ON_DATE');
+    hev     bytea := laplace.relation_type_id('HAS_EVENT');
+    heco    bytea := laplace.relation_type_id('HAS_ECO');
+    hmt     bytea := laplace.relation_type_id('HAS_MOVETEXT');
+    mq      bytea := laplace.relation_type_id('MOVE_QUALITY');
+    outc    bytea := laplace.relation_type_id('OUTCOME');
+    cres    bytea := laplace.entity_type_id('Chess_Result');
+    src     bytea := public.laplace_hash128_blake3('test/chess2/source');
     tal     bytea := chess.player_id('Tal, Mikhail');
     botv    bytea := chess.player_id('Botvinnik, Mikhail');
     spas    bytea := chess.player_id('Spassky, Boris');
     -- playing-events and the lines they play; ln_a is SHARED by e1 and e4
-    e1      bytea := laplace_hash128_blake3('test/chess2/e1');
-    e2      bytea := laplace_hash128_blake3('test/chess2/e2');
-    e3      bytea := laplace_hash128_blake3('test/chess2/e3');
-    e4      bytea := laplace_hash128_blake3('test/chess2/e4');
-    ln_a    bytea := laplace_hash128_blake3('test/chess2/line_a');
-    ln_b    bytea := laplace_hash128_blake3('test/chess2/line_b');
-    ln_c    bytea := laplace_hash128_blake3('test/chess2/line_c');
-    pos2    bytea := laplace_hash128_blake3('test/chess2/opening_pos');
-    mv_w    bytea := laplace_hash128_blake3('test/chess2/mv_w');
-    mv_b    bytea := laplace_hash128_blake3('test/chess2/mv_b');
-    r_white bytea := word_id('1-0');
-    r_black bytea := word_id('0-1');
-    r_draw  bytea := word_id('1/2-1/2');
-    r_junk  bytea := laplace_hash128_blake3('test/chess2/unparseable_result');
-    elo     bytea := laplace_hash128_blake3('test/chess2/elo_tag');
-    pos_probe bytea := laplace_hash128_blake3('test/chess2/position_probe');
-    pl_p0   bytea := laplace_hash128_blake3('t2/plies/p0');
-    pl_p1   bytea := laplace_hash128_blake3('t2/plies/p1');
-    pl_p2   bytea := laplace_hash128_blake3('t2/plies/p2');
-    pl_line bytea := laplace_hash128_blake3('t2/plies/line');
-    pl_event bytea := laplace_hash128_blake3('t2/plies/event');
+    e1      bytea := public.laplace_hash128_blake3('test/chess2/e1');
+    e2      bytea := public.laplace_hash128_blake3('test/chess2/e2');
+    e3      bytea := public.laplace_hash128_blake3('test/chess2/e3');
+    e4      bytea := public.laplace_hash128_blake3('test/chess2/e4');
+    ln_a    bytea := public.laplace_hash128_blake3('test/chess2/line_a');
+    ln_b    bytea := public.laplace_hash128_blake3('test/chess2/line_b');
+    ln_c    bytea := public.laplace_hash128_blake3('test/chess2/line_c');
+    pos2    bytea := public.laplace_hash128_blake3('test/chess2/opening_pos');
+    mv_w    bytea := public.laplace_hash128_blake3('test/chess2/mv_w');
+    mv_b    bytea := public.laplace_hash128_blake3('test/chess2/mv_b');
+    r_white bytea := laplace.word_id('1-0');
+    r_black bytea := laplace.word_id('0-1');
+    r_draw  bytea := laplace.word_id('1/2-1/2');
+    r_junk  bytea := public.laplace_hash128_blake3('test/chess2/unparseable_result');
+    elo     bytea := public.laplace_hash128_blake3('test/chess2/elo_tag');
+    pos_probe bytea := public.laplace_hash128_blake3('test/chess2/position_probe');
+    pl_p0   bytea := public.laplace_hash128_blake3('t2/plies/p0');
+    pl_p1   bytea := public.laplace_hash128_blake3('t2/plies/p1');
+    pl_p2   bytea := public.laplace_hash128_blake3('t2/plies/p2');
+    pl_line bytea := public.laplace_hash128_blake3('t2/plies/line');
+    pl_event bytea := public.laplace_hash128_blake3('t2/plies/event');
     -- Header and SAN surfaces. SINGLE CODEPOINTS on purpose: these reads return
     -- REALIZED text, and a tier-0 codepoint renders straight from the perfcache
     -- with no constituents deposited. A multi-codepoint word_id (the result
@@ -163,18 +162,18 @@ DECLARE
     -- entity whose surface needs its constituent chain, which this fixture
     -- never deposits -- so it realized to NULL and `WHERE san IS NOT NULL`
     -- counted 0. Same trick converse.sql uses for word_id('p').
-    d1      bytea := word_id('1');
-    d2      bytea := word_id('2');
-    d3      bytea := word_id('3');
-    en      bytea := word_id('e');
-    ec      bytea := word_id('C');
-    mt      bytea := word_id('m');
-    qg      bytea := word_id('g');
-    pl_sa   bytea := word_id('a');
-    pl_sb   bytea := word_id('b');
-    pl_sc   bytea := word_id('c');
-    cap_t   bytea := word_id('T');
-    tname   bytea := laplace_hash128_blake3('t2/name/tal');
+    d1      bytea := laplace.word_id('1');
+    d2      bytea := laplace.word_id('2');
+    d3      bytea := laplace.word_id('3');
+    en      bytea := laplace.word_id('e');
+    ec      bytea := laplace.word_id('C');
+    mt      bytea := laplace.word_id('m');
+    qg      bytea := laplace.word_id('g');
+    pl_sa   bytea := laplace.word_id('a');
+    pl_sb   bytea := laplace.word_id('b');
+    pl_sc   bytea := laplace.word_id('c');
+    cap_t   bytea := laplace.word_id('T');
+    tname   bytea := public.laplace_hash128_blake3('t2/name/tal');
     ids_got bytea[];
     n       bigint;
     w       bigint;
@@ -221,7 +220,7 @@ BEGIN
         RAISE EXCEPTION 'FAIL: a missing result was scored instead of abstaining';
     END IF;
 
-    INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
+    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) VALUES
         (src, 0, type_t, NULL),
         (tal, 0, type_t, src), (botv, 0, type_t, src), (spas, 0, type_t, src),
         (e1, 0, type_t, src), (e2, 0, type_t, src),
@@ -240,45 +239,45 @@ BEGIN
     -- the playing's white-POV score; every header subjects on the LINE with
     -- ctx = its own playing, so e1's result must never cross onto e4's
     -- appearance.
-    INSERT INTO attestations
+    INSERT INTO laplace.attestations
         (id, subject_id, type_id, object_id, source_id, context_id,
          outcome, last_observed_at, observation_count,
          sum_score_fp1e9, opponent_rd_fp1e9)
     VALUES
-        (laplace_hash128_blake3('t2/e1pl'), e1, plns, ln_a, src, NULL, 2, now(), 1, 1000000000, 30000000000),
-        (laplace_hash128_blake3('t2/e2pl'), e2, plns, ln_b, src, NULL, 2, now(), 1, 1000000000, 30000000000),
-        (laplace_hash128_blake3('t2/e3pl'), e3, plns, ln_c, src, NULL, 1, now(), 1, 500000000, 30000000000),
-        (laplace_hash128_blake3('t2/e4pl'), e4, plns, ln_a, src, NULL, 2, now(), 1, 1000000000, 30000000000),
-        (laplace_hash128_blake3('t2/e1w'), ln_a, hw, tal,  src, e1, 2, now(), 1, 1000000000, 30000000000),
-        (laplace_hash128_blake3('t2/e1b'), ln_a, hb, botv, src, e1, 2, now(), 1, 1000000000, 30000000000),
-        (laplace_hash128_blake3('t2/e1r'), ln_a, hr, r_white, src, e1, 2, now(), 1, 1000000000, 30000000000),
-        (laplace_hash128_blake3('t2/e1d'), ln_a, od, d1, src, e1, 2, now(), 1, 1000000000, 30000000000),
-        (laplace_hash128_blake3('t2/e1e'), ln_a, hev, en, src, e1, 2, now(), 1, 1000000000, 30000000000),
-        (laplace_hash128_blake3('t2/e1c'), ln_a, heco, ec, src, e1, 2, now(), 1, 1000000000, 30000000000),
-        (laplace_hash128_blake3('t2/e1m'), ln_a, hmt, mt, src, e1, 2, now(), 1, 1000000000, 30000000000),
-        (laplace_hash128_blake3('t2/e2w'), ln_b, hw, botv, src, e2, 2, now(), 1, 1000000000, 30000000000),
-        (laplace_hash128_blake3('t2/e2b'), ln_b, hb, tal,  src, e2, 2, now(), 1, 1000000000, 30000000000),
-        (laplace_hash128_blake3('t2/e2r'), ln_b, hr, r_white, src, e2, 2, now(), 1, 1000000000, 30000000000),
-        (laplace_hash128_blake3('t2/e2d'), ln_b, od, d2, src, e2, 2, now(), 1, 1000000000, 30000000000),
-        (laplace_hash128_blake3('t2/e3w'), ln_c, hw, tal,  src, e3, 2, now(), 1, 1000000000, 30000000000),
-        (laplace_hash128_blake3('t2/e3b'), ln_c, hb, spas, src, e3, 2, now(), 1, 1000000000, 30000000000),
-        (laplace_hash128_blake3('t2/e3r'), ln_c, hr, r_draw, src, e3, 1, now(), 1, 500000000, 30000000000),
-        (laplace_hash128_blake3('t2/e3d'), ln_c, od, d3, src, e3, 2, now(), 1, 1000000000, 30000000000),
-        (laplace_hash128_blake3('t2/e4w'), ln_a, hw, tal,  src, e4, 2, now(), 1, 1000000000, 30000000000),
-        (laplace_hash128_blake3('t2/e4b'), ln_a, hb, botv, src, e4, 2, now(), 1, 1000000000, 30000000000),
+        (public.laplace_hash128_blake3('t2/e1pl'), e1, plns, ln_a, src, NULL, 2, now(), 1, 1000000000, 30000000000),
+        (public.laplace_hash128_blake3('t2/e2pl'), e2, plns, ln_b, src, NULL, 2, now(), 1, 1000000000, 30000000000),
+        (public.laplace_hash128_blake3('t2/e3pl'), e3, plns, ln_c, src, NULL, 1, now(), 1, 500000000, 30000000000),
+        (public.laplace_hash128_blake3('t2/e4pl'), e4, plns, ln_a, src, NULL, 2, now(), 1, 1000000000, 30000000000),
+        (public.laplace_hash128_blake3('t2/e1w'), ln_a, hw, tal,  src, e1, 2, now(), 1, 1000000000, 30000000000),
+        (public.laplace_hash128_blake3('t2/e1b'), ln_a, hb, botv, src, e1, 2, now(), 1, 1000000000, 30000000000),
+        (public.laplace_hash128_blake3('t2/e1r'), ln_a, hr, r_white, src, e1, 2, now(), 1, 1000000000, 30000000000),
+        (public.laplace_hash128_blake3('t2/e1d'), ln_a, od, d1, src, e1, 2, now(), 1, 1000000000, 30000000000),
+        (public.laplace_hash128_blake3('t2/e1e'), ln_a, hev, en, src, e1, 2, now(), 1, 1000000000, 30000000000),
+        (public.laplace_hash128_blake3('t2/e1c'), ln_a, heco, ec, src, e1, 2, now(), 1, 1000000000, 30000000000),
+        (public.laplace_hash128_blake3('t2/e1m'), ln_a, hmt, mt, src, e1, 2, now(), 1, 1000000000, 30000000000),
+        (public.laplace_hash128_blake3('t2/e2w'), ln_b, hw, botv, src, e2, 2, now(), 1, 1000000000, 30000000000),
+        (public.laplace_hash128_blake3('t2/e2b'), ln_b, hb, tal,  src, e2, 2, now(), 1, 1000000000, 30000000000),
+        (public.laplace_hash128_blake3('t2/e2r'), ln_b, hr, r_white, src, e2, 2, now(), 1, 1000000000, 30000000000),
+        (public.laplace_hash128_blake3('t2/e2d'), ln_b, od, d2, src, e2, 2, now(), 1, 1000000000, 30000000000),
+        (public.laplace_hash128_blake3('t2/e3w'), ln_c, hw, tal,  src, e3, 2, now(), 1, 1000000000, 30000000000),
+        (public.laplace_hash128_blake3('t2/e3b'), ln_c, hb, spas, src, e3, 2, now(), 1, 1000000000, 30000000000),
+        (public.laplace_hash128_blake3('t2/e3r'), ln_c, hr, r_draw, src, e3, 1, now(), 1, 500000000, 30000000000),
+        (public.laplace_hash128_blake3('t2/e3d'), ln_c, od, d3, src, e3, 2, now(), 1, 1000000000, 30000000000),
+        (public.laplace_hash128_blake3('t2/e4w'), ln_a, hw, tal,  src, e4, 2, now(), 1, 1000000000, 30000000000),
+        (public.laplace_hash128_blake3('t2/e4b'), ln_a, hb, botv, src, e4, 2, now(), 1, 1000000000, 30000000000),
         -- the shared opening position: Tal's White choice in e1, and the move
         -- played in e2 while he sat Black -- MOVE ctx = the playing-EVENT
-        (laplace_hash128_blake3('t2/mv_e1'), pos2, mv, mv_w, src, e1, 2, now(), 1, 1000000000, 30000000000),
-        (laplace_hash128_blake3('t2/mv_e2'), pos2, mv, mv_b, src, e2, 0, now(), 1, 0, 30000000000),
+        (public.laplace_hash128_blake3('t2/mv_e1'), pos2, mv, mv_w, src, e1, 2, now(), 1, 1000000000, 30000000000),
+        (public.laplace_hash128_blake3('t2/mv_e2'), pos2, mv, mv_b, src, e2, 0, now(), 1, 0, 30000000000),
         -- the players' own aggregating lane (AppendPlayerResult), ctx = the playing
-        (laplace_hash128_blake3('t2/e1ot'), tal,  outc, cres, src, e1, 2, now(), 1, 1000000000, 30000000000),
-        (laplace_hash128_blake3('t2/e1ob'), botv, outc, cres, src, e1, 0, now(), 1, 0, 30000000000),
-        (laplace_hash128_blake3('t2/e2ob'), botv, outc, cres, src, e2, 2, now(), 1, 1000000000, 30000000000),
-        (laplace_hash128_blake3('t2/e2ot'), tal,  outc, cres, src, e2, 0, now(), 1, 0, 30000000000),
-        (laplace_hash128_blake3('t2/e3ot'), tal,  outc, cres, src, e3, 1, now(), 1, 500000000, 30000000000),
-        (laplace_hash128_blake3('t2/e3os'), spas, outc, cres, src, e3, 1, now(), 1, 500000000, 30000000000),
+        (public.laplace_hash128_blake3('t2/e1ot'), tal,  outc, cres, src, e1, 2, now(), 1, 1000000000, 30000000000),
+        (public.laplace_hash128_blake3('t2/e1ob'), botv, outc, cres, src, e1, 0, now(), 1, 0, 30000000000),
+        (public.laplace_hash128_blake3('t2/e2ob'), botv, outc, cres, src, e2, 2, now(), 1, 1000000000, 30000000000),
+        (public.laplace_hash128_blake3('t2/e2ot'), tal,  outc, cres, src, e2, 0, now(), 1, 0, 30000000000),
+        (public.laplace_hash128_blake3('t2/e3ot'), tal,  outc, cres, src, e3, 1, now(), 1, 500000000, 30000000000),
+        (public.laplace_hash128_blake3('t2/e3os'), spas, outc, cres, src, e3, 1, now(), 1, 500000000, 30000000000),
         -- an Elo tag whose surface cannot be rendered back to digits
-        (laplace_hash128_blake3('t2/rat'), tal, hrat, elo, src, e1, 2, now(), 1, 1000000000, 30000000000);
+        (public.laplace_hash128_blake3('t2/rat'), tal, hrat, elo, src, e1, 2, now(), 1, 1000000000, 30000000000);
 
     -- chess_player_record: the career total. 4 playings — one won, one lost, one
     -- drawn, one the source never scored. score is over SCORED games only:
@@ -361,7 +360,7 @@ BEGIN
     IF txt IS DISTINCT FROM '1' THEN RAISE EXCEPTION 'FAIL: e1 date should realize to 1, got %', txt; END IF;
     SELECT movetext INTO txt FROM chess.game(e1);
     IF txt IS DISTINCT FROM 'm' THEN RAISE EXCEPTION 'FAIL: e1 movetext should render to m, got %', txt; END IF;
-    SELECT count(*) INTO n FROM chess.game(laplace_hash128_blake3('test/chess2/no_such_game'));
+    SELECT count(*) INTO n FROM chess.game(public.laplace_hash128_blake3('test/chess2/no_such_game'));
     IF n <> 0 THEN RAISE EXCEPTION 'FAIL: an unwitnessed playing returned % rows', n; END IF;
 
     -- chess_player_moves across the re-key: MOVE evidence carries ctx = the
@@ -389,27 +388,27 @@ BEGIN
     -- through the aggregating lane instead of counted by a GROUP BY. Tal is given a strong
     -- cell, Spassky a thin one, so the conservative estimate has to order them by strength
     -- rather than by games -- the thing a win percentage cannot express.
-    INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
-        (laplace_hash128_blake3('t2/outcome_obj'), 0, type_t, src)
+    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) VALUES
+        (public.laplace_hash128_blake3('t2/outcome_obj'), 0, type_t, src)
     ON CONFLICT DO NOTHING;
-    UPDATE entities SET type_id = entity_type_id('Chess_Player')
+    UPDATE laplace.entities SET type_id = laplace.entity_type_id('Chess_Player')
      WHERE id IN (tal, botv, spas);
 
-    INSERT INTO consensus
+    INSERT INTO laplace.consensus
         (id, subject_id, type_id, object_id, rating, rd, volatility, witness_count, last_observed_at)
     VALUES
         -- eff_mu = rating - 2*rd: tal 1800e9, botv 1500e9, spas 1100e9 (thin, wide RD)
-        (laplace_hash128_blake3('t2/c_tal'),  tal,  relation_type_id('OUTCOME'),
-             entity_type_id('Chess_Result'), 1900000000000, 50000000000, 60000000, 40, now()),
-        (laplace_hash128_blake3('t2/c_botv'), botv, relation_type_id('OUTCOME'),
-             entity_type_id('Chess_Result'), 1600000000000, 50000000000, 60000000, 30, now()),
-        (laplace_hash128_blake3('t2/c_spas'), spas, relation_type_id('OUTCOME'),
-             entity_type_id('Chess_Result'), 1500000000000, 200000000000, 60000000, 1, now()),
-        (laplace_hash128_blake3('t2/h2h'),    tal,  relation_type_id('PLAYED_BY'),
+        (public.laplace_hash128_blake3('t2/c_tal'),  tal,  laplace.relation_type_id('OUTCOME'),
+             laplace.entity_type_id('Chess_Result'), 1900000000000, 50000000000, 60000000, 40, now()),
+        (public.laplace_hash128_blake3('t2/c_botv'), botv, laplace.relation_type_id('OUTCOME'),
+             laplace.entity_type_id('Chess_Result'), 1600000000000, 50000000000, 60000000, 30, now()),
+        (public.laplace_hash128_blake3('t2/c_spas'), spas, laplace.relation_type_id('OUTCOME'),
+             laplace.entity_type_id('Chess_Result'), 1500000000000, 200000000000, 60000000, 1, now()),
+        (public.laplace_hash128_blake3('t2/h2h'),    tal,  laplace.relation_type_id('PLAYED_BY'),
              botv, 1700000000000, 60000000000, 60000000, 28, now()),
         -- the LINE's own fold cell (GH #736): witness_count IS times played (e1 + e4)
-        (laplace_hash128_blake3('t2/c_line_a'), ln_a, relation_type_id('OUTCOME'),
-             entity_type_id('Chess_Result'), 1700000000000, 50000000000, 60000000, 2, now());
+        (public.laplace_hash128_blake3('t2/c_line_a'), ln_a, laplace.relation_type_id('OUTCOME'),
+             laplace.entity_type_id('Chess_Result'), 1700000000000, 50000000000, 60000000, 2, now());
 
     SELECT player_id INTO got FROM chess.ranked(10) WHERE rank = 1;
     IF got <> tal THEN RAISE EXCEPTION 'FAIL: chess_ranked rank 1 should be Tal (highest eff_mu)'; END IF;
@@ -428,10 +427,10 @@ BEGIN
 
     -- Positions carry the IDENTICAL (OUTCOME, Chess_Result) cell shape; the subject's entity
     -- type is what separates them, so a position must never appear in a player ranking.
-    INSERT INTO consensus
+    INSERT INTO laplace.consensus
         (id, subject_id, type_id, object_id, rating, rd, volatility, witness_count, last_observed_at)
-    VALUES (laplace_hash128_blake3('t2/c_pos'), pos_probe, relation_type_id('OUTCOME'),
-            entity_type_id('Chess_Result'), 9900000000000, 1000000000, 60000000, 999, now());
+    VALUES (public.laplace_hash128_blake3('t2/c_pos'), pos_probe, laplace.relation_type_id('OUTCOME'),
+            laplace.entity_type_id('Chess_Result'), 9900000000000, 1000000000, 60000000, 999, now());
     SELECT count(*) INTO n FROM chess.ranked(10) WHERE player_id = pos_probe;
     IF n <> 0 THEN RAISE EXCEPTION 'FAIL: a position leaked into the player ranking'; END IF;
 
@@ -471,22 +470,22 @@ BEGIN
     IF txt IS NOT NULL OR n <> 2 THEN
         RAISE EXCEPTION 'FAIL: e4 should be undated yet carry the shared fold (2 plays), got %/%', txt, n;
     END IF;
-    SELECT count(*) INTO n FROM chess.line(laplace_hash128_blake3('test/chess2/no_such_line'));
+    SELECT count(*) INTO n FROM chess.line(public.laplace_hash128_blake3('test/chess2/no_such_line'));
     IF n <> 0 THEN RAISE EXCEPTION 'FAIL: a line nobody played returned % rows', n; END IF;
 
     -- chess_players_by_initial: Tal browsable under 'T' via a name whose trajectory's
     -- first constituent IS the codepoint, bound to him by a HAS_NAME_ALIAS cell -- and
     -- the same display-scale law on the rating columns.
-    INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
+    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) VALUES
         (cap_t, 0, type_t, src), (tname, 0, type_t, src);
-    INSERT INTO physicalities (id, entity_id, type, coord, hilbert_index,
+    INSERT INTO laplace.physicalities (id, entity_id, type, coord, hilbert_index,
                                trajectory, n_constituents, observed_at)
-    VALUES (laplace_hash128_blake3('t2/name/tal_phys'), tname, 1,
+    VALUES (public.laplace_hash128_blake3('t2/name/tal_phys'), tname, 1,
             'SRID=0;POINT ZM (0 0 0 0)'::geometry, decode(repeat('00', 16), 'hex'),
-            laplace_trajectory_build(ARRAY[cap_t]), 1, now());
-    INSERT INTO consensus
+            public.laplace_trajectory_build(ARRAY[cap_t]), 1, now());
+    INSERT INTO laplace.consensus
         (id, subject_id, type_id, object_id, rating, rd, volatility, witness_count, last_observed_at)
-    VALUES (laplace_hash128_blake3('t2/c_alias'), tal, relation_type_id('HAS_NAME_ALIAS'),
+    VALUES (public.laplace_hash128_blake3('t2/c_alias'), tal, laplace.relation_type_id('HAS_NAME_ALIAS'),
             tname, 1500000000000, 50000000000, 60000000, 1, now());
 
     SELECT p.rating, p.rd, p.eff_mu INTO ra, rdv, mu
@@ -503,40 +502,40 @@ BEGIN
     -- fixture is byte-identical to a real deposit), the playing-EVENT hops to it
     -- through PLAYS_LINE, and per-ply facts join by context: the EVENT for this
     -- playing's own testimony, the LINE for line-grain engine testimony.
-    INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
+    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) VALUES
         (pl_p0, 0, type_t, src), (pl_p1, 0, type_t, src), (pl_p2, 0, type_t, src),
         (pl_line, 0, type_t, src), (pl_event, 0, type_t, src),
         (pl_sa, 0, type_t, src), (pl_sb, 0, type_t, src),
         (pl_sc, 0, type_t, src), (qg, 0, type_t, src);
-    INSERT INTO physicalities (id, entity_id, type, coord, hilbert_index,
+    INSERT INTO laplace.physicalities (id, entity_id, type, coord, hilbert_index,
                                trajectory, n_constituents, observed_at)
-    VALUES (laplace_hash128_blake3('t2/plies/phys'), pl_line, 1,
+    VALUES (public.laplace_hash128_blake3('t2/plies/phys'), pl_line, 1,
             'SRID=0;POINT ZM (0 0 0 0)'::geometry, decode(repeat('00', 16), 'hex'),
-            laplace_trajectory_build(ARRAY[pl_p0, pl_p1, pl_p2]), 3, now());
+            public.laplace_trajectory_build(ARRAY[pl_p0, pl_p1, pl_p2]), 3, now());
 
     -- the packer/decoder round-trip: the ids come back, in order
     SELECT array_agg(entity_id ORDER BY ordinal) INTO ids_got
-    FROM laplace_trajectory_constituents(
-             laplace_trajectory_build(ARRAY[pl_p0, pl_p1, pl_p2]));
+    FROM public.laplace_trajectory_constituents(
+             public.laplace_trajectory_build(ARRAY[pl_p0, pl_p1, pl_p2]));
     IF ids_got <> ARRAY[pl_p0, pl_p1, pl_p2] THEN
         RAISE EXCEPTION 'FAIL: trajectory build/decode round-trip lost the sequence';
     END IF;
 
-    INSERT INTO attestations
+    INSERT INTO laplace.attestations
         (id, subject_id, type_id, object_id, source_id, context_id,
          outcome, last_observed_at, observation_count,
          sum_score_fp1e9, opponent_rd_fp1e9)
     VALUES
-        (laplace_hash128_blake3('t2/plies/pl'), pl_event, plns, pl_line, src, NULL, 2, now(), 1, 1000000000, 30000000000),
-        (laplace_hash128_blake3('t2/plies/san0'), pl_p0, relation_type_id('HAS_SAN'),
+        (public.laplace_hash128_blake3('t2/plies/pl'), pl_event, plns, pl_line, src, NULL, 2, now(), 1, 1000000000, 30000000000),
+        (public.laplace_hash128_blake3('t2/plies/san0'), pl_p0, laplace.relation_type_id('HAS_SAN'),
              pl_sa, src, pl_event, 2, now(), 1, 1000000000, 30000000000),
-        (laplace_hash128_blake3('t2/plies/san1'), pl_p1, relation_type_id('HAS_SAN'),
+        (public.laplace_hash128_blake3('t2/plies/san1'), pl_p1, laplace.relation_type_id('HAS_SAN'),
              pl_sb, src, pl_event, 2, now(), 1, 1000000000, 30000000000),
         -- line-grain engine testimony rides ctx = the LINE and must be included
-        (laplace_hash128_blake3('t2/plies/qual'), pl_p1, mq,
+        (public.laplace_hash128_blake3('t2/plies/qual'), pl_p1, mq,
              qg, src, pl_line, 2, now(), 1, 1000000000, 30000000000),
         -- another playing's ply on the SAME shared position: context must exclude it
-        (laplace_hash128_blake3('t2/plies/other'), pl_p0, relation_type_id('HAS_SAN'),
+        (public.laplace_hash128_blake3('t2/plies/other'), pl_p0, laplace.relation_type_id('HAS_SAN'),
              pl_sc, src, e1, 2, now(), 1, 1000000000, 30000000000);
 
     SELECT count(*) INTO n FROM chess.game_plies(pl_event);
@@ -564,7 +563,7 @@ BEGIN
     IF n <> 0 THEN
         RAISE EXCEPTION 'FAIL: a line with no trajectory returned % rows instead of abstaining', n;
     END IF;
-    SELECT count(*) INTO n FROM chess.game_plies(laplace_hash128_blake3('test/chess2/no_such_game'));
+    SELECT count(*) INTO n FROM chess.game_plies(public.laplace_hash128_blake3('test/chess2/no_such_game'));
     IF n <> 0 THEN
         RAISE EXCEPTION 'FAIL: an unrecorded playing returned % rows', n;
     END IF;
@@ -578,24 +577,24 @@ END $$;
 -- playing's event enters only as evidence context, which this folded read never touches.
 DO $$
 DECLARE
-    type_t   bytea := laplace_hash128_blake3('Type');
-    mv       bytea := relation_type_id('MOVE');
-    tcl      bytea := relation_type_id('HAS_THINK_CLASS');
-    src      bytea := laplace_hash128_blake3('test/chess3/source');
-    p_rush   bytea := laplace_hash128_blake3('test/chess3/p_rush');
-    p_plan   bytea := laplace_hash128_blake3('test/chess3/p_plan');
-    p_press  bytea := laplace_hash128_blake3('test/chess3/p_press');
-    p_flag   bytea := laplace_hash128_blake3('test/chess3/p_flag');
-    nx       bytea := laplace_hash128_blake3('test/chess3/next');
-    w_rush   bytea := word_id('rushed');
-    w_plan   bytea := word_id('planned_quick');
-    w_press  bytea := word_id('pressed_think');
-    w_flag   bytea := word_id('flagging');
+    type_t   bytea := public.laplace_hash128_blake3('Type');
+    mv       bytea := laplace.relation_type_id('MOVE');
+    tcl      bytea := laplace.relation_type_id('HAS_THINK_CLASS');
+    src      bytea := public.laplace_hash128_blake3('test/chess3/source');
+    p_rush   bytea := public.laplace_hash128_blake3('test/chess3/p_rush');
+    p_plan   bytea := public.laplace_hash128_blake3('test/chess3/p_plan');
+    p_press  bytea := public.laplace_hash128_blake3('test/chess3/p_press');
+    p_flag   bytea := public.laplace_hash128_blake3('test/chess3/p_flag');
+    nx       bytea := public.laplace_hash128_blake3('test/chess3/next');
+    w_rush   bytea := laplace.word_id('rushed');
+    w_plan   bytea := laplace.word_id('planned_quick');
+    w_press  bytea := laplace.word_id('pressed_think');
+    w_flag   bytea := laplace.word_id('flagging');
     labels   text[];
     n        bigint;
     mu       numeric;
 BEGIN
-    INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
+    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) VALUES
         (src, 0, type_t, NULL), (nx, 0, type_t, src),
         (p_rush, 0, type_t, src), (p_plan, 0, type_t, src),
         (p_press, 0, type_t, src), (p_flag, 0, type_t, src),
@@ -606,17 +605,17 @@ BEGIN
     -- One MOVE cell per position (the folded-outcome side of the join) and one
     -- think-class cell naming its class. eff_mu(rushed) = 1600e9 - 2*50e9 = 1500e9,
     -- which must read back display-scale (1500.000), never raw fp1e9.
-    INSERT INTO consensus
+    INSERT INTO laplace.consensus
         (id, subject_id, type_id, object_id, rating, rd, volatility, witness_count, last_observed_at)
     VALUES
-        (laplace_hash128_blake3('t3/mv_rush'),  p_rush,  mv, nx, 1600000000000, 50000000000, 60000000, 10, now()),
-        (laplace_hash128_blake3('t3/mv_plan'),  p_plan,  mv, nx, 1500000000000, 50000000000, 60000000, 20, now()),
-        (laplace_hash128_blake3('t3/mv_press'), p_press, mv, nx, 1400000000000, 50000000000, 60000000, 5, now()),
-        (laplace_hash128_blake3('t3/mv_flag'),  p_flag,  mv, nx, 1200000000000, 50000000000, 60000000, 2, now()),
-        (laplace_hash128_blake3('t3/tc_rush'),  p_rush,  tcl, w_rush,  1500000000000, 50000000000, 60000000, 3, now()),
-        (laplace_hash128_blake3('t3/tc_plan'),  p_plan,  tcl, w_plan,  1500000000000, 50000000000, 60000000, 4, now()),
-        (laplace_hash128_blake3('t3/tc_press'), p_press, tcl, w_press, 1500000000000, 50000000000, 60000000, 2, now()),
-        (laplace_hash128_blake3('t3/tc_flag'),  p_flag,  tcl, w_flag,  1500000000000, 50000000000, 60000000, 1, now());
+        (public.laplace_hash128_blake3('t3/mv_rush'),  p_rush,  mv, nx, 1600000000000, 50000000000, 60000000, 10, now()),
+        (public.laplace_hash128_blake3('t3/mv_plan'),  p_plan,  mv, nx, 1500000000000, 50000000000, 60000000, 20, now()),
+        (public.laplace_hash128_blake3('t3/mv_press'), p_press, mv, nx, 1400000000000, 50000000000, 60000000, 5, now()),
+        (public.laplace_hash128_blake3('t3/mv_flag'),  p_flag,  mv, nx, 1200000000000, 50000000000, 60000000, 2, now()),
+        (public.laplace_hash128_blake3('t3/tc_rush'),  p_rush,  tcl, w_rush,  1500000000000, 50000000000, 60000000, 3, now()),
+        (public.laplace_hash128_blake3('t3/tc_plan'),  p_plan,  tcl, w_plan,  1500000000000, 50000000000, 60000000, 4, now()),
+        (public.laplace_hash128_blake3('t3/tc_press'), p_press, tcl, w_press, 1500000000000, 50000000000, 60000000, 2, now()),
+        (public.laplace_hash128_blake3('t3/tc_flag'),  p_flag,  tcl, w_flag,  1500000000000, 50000000000, 60000000, 1, now());
 
     -- Exactly the witnessed classes come back, in lens-ladder order; classes with no
     -- witnessed cell (normal/deep here) produce no row rather than a zero row.

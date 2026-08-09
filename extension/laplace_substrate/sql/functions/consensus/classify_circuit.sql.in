@@ -12,11 +12,11 @@ BEGIN ATOMIC
     ),
     ranked AS (
         SELECT pr.subj, pr.obj, c.type_id,
-               laplace.eff_mu_display(c.rating, c.rd) AS emu,
+               consensus.eff_mu_display(c.rating, c.rd) AS emu,
                c.witness_count                AS w,
                row_number() OVER (
                    PARTITION BY pr.subj, pr.obj
-                   ORDER BY laplace.eff_mu(c.rating, c.rd) DESC) AS rn
+                   ORDER BY consensus.eff_mu(c.rating, c.rd) DESC) AS rn
         FROM pairs pr
         JOIN laplace.consensus c
           ON c.subject_id = pr.subj AND c.object_id = pr.obj

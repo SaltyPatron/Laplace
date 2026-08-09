@@ -55,7 +55,7 @@ CREATE OR REPLACE FUNCTION realize.resolve_name(
             --
             -- Resolved up front, `type_id = ANY(...)` is a bound array the planner prunes
             -- with and serves from the (subject_id, type_id) index. Identical semantics:
-            -- laplace.relation_family_members is the same family rollup the predicate consulted.
+            -- consensus.relation_family_members is the same family rollup the predicate consulted.
             -- This is the move chat.sql.in's band lens already documents for exactly the
             -- same reason.
             WITH fam AS MATERIALIZED (
@@ -63,21 +63,21 @@ CREATE OR REPLACE FUNCTION realize.resolve_name(
                        COALESCE(array_agg(id) FILTER (WHERE fam IN ('HAS_NAME','HAS_NAME_ALIAS')), '{}'::bytea[]) AS any_name_t,
                        COALESCE(array_agg(id) FILTER (WHERE fam = 'HAS_SENSE'), '{}'::bytea[]) AS sense_t
                 FROM (
-                    SELECT 'HAS_NAME'::text AS fam, id FROM laplace.relation_family_members('HAS_NAME')
+                    SELECT 'HAS_NAME'::text AS fam, id FROM consensus.relation_family_members('HAS_NAME')
                     UNION ALL
-                    SELECT 'HAS_NAME_ALIAS', id FROM laplace.relation_family_members('HAS_NAME_ALIAS')
+                    SELECT 'HAS_NAME_ALIAS', id FROM consensus.relation_family_members('HAS_NAME_ALIAS')
                     UNION ALL
-                    SELECT 'HAS_SENSE', id FROM laplace.relation_family_members('HAS_SENSE')
+                    SELECT 'HAS_SENSE', id FROM consensus.relation_family_members('HAS_SENSE')
                 ) f
             ),
             ctx AS (
                 SELECT id, sum(boost) AS boost FROM (
-                    SELECT c.object_id AS id, sum(laplace.eff_mu(c.rating, c.rd)) AS boost
+                    SELECT c.object_id AS id, sum(consensus.eff_mu(c.rating, c.rd)) AS boost
                     FROM laplace.v_consensus_unrefuted c
                     WHERE c.subject_id = ANY (p_context)
                     GROUP BY c.object_id
                     UNION ALL
-                    SELECT c.subject_id AS id, sum(laplace.eff_mu(c.rating, c.rd)) AS boost
+                    SELECT c.subject_id AS id, sum(consensus.eff_mu(c.rating, c.rd)) AS boost
                     FROM laplace.v_consensus_unrefuted c
                     WHERE c.object_id = ANY (p_context)
                     GROUP BY c.subject_id
@@ -104,7 +104,7 @@ CREATE OR REPLACE FUNCTION realize.resolve_name(
                 SELECT nm.object_id AS name_id,
                        nm.type_id = ANY (fam.name_t) AS prim,
                        (lang.object_id IS NOT NULL) AS lp,
-                       laplace.eff_mu(nm.rating, nm.rd) AS mu
+                       consensus.eff_mu(nm.rating, nm.rd) AS mu
                 FROM fam CROSS JOIN laplace.v_consensus_unrefuted nm
                 LEFT JOIN laplace.consensus lang ON lang.subject_id = nm.object_id
                      AND lang.type_id = laplace.relation_type_id('HAS_LANGUAGE')
@@ -117,7 +117,7 @@ CREATE OR REPLACE FUNCTION realize.resolve_name(
                 SELECT hs.subject_id AS name_id,
                        false AS prim,
                        (lang.object_id IS NOT NULL) AS lp,
-                       laplace.eff_mu(hs.rating, hs.rd) AS mu
+                       consensus.eff_mu(hs.rating, hs.rd) AS mu
                 -- CROSS JOIN, not a comma: a comma-list binds looser than an explicit
                 -- JOIN, so `fam` would not be visible from the ON clause below.
                 FROM fam CROSS JOIN laplace.v_consensus_unrefuted io
@@ -150,7 +150,7 @@ CREATE OR REPLACE FUNCTION realize.resolve_name(
             -- ONE closure walk for every candidate, position-aligned (the alignment is
             -- pinned by tests/sql/realize_ladder_parity.sql).
             lbl AS MATERIALIZED (
-                SELECT laplace.render_text_batch(array_agg(r.name_id ORDER BY r.rn), 24) AS s
+                SELECT realize.render_text_batch(array_agg(r.name_id ORDER BY r.rn), 24) AS s
                 FROM ranked r
             )
             SELECT l.s[r.rn]

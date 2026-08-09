@@ -26,14 +26,14 @@ AS $$
     yset(id) AS (SELECT p_y UNION SELECT synset_id FROM y_top),
     direct AS (
         SELECT ARRAY[x.id, c.object_id] AS nodes, ARRAY[c.type_id] AS types,
-               ARRAY[1] AS dirs, laplace.eff_mu_display(c.rating, c.rd) AS mu, 1 AS len,
+               ARRAY[1] AS dirs, consensus.eff_mu_display(c.rating, c.rd) AS mu, 1 AS len,
                c.type_id AS plane_type
         FROM xset x JOIN laplace.v_consensus_unrefuted c ON c.subject_id = x.id
           AND c.object_id IN (SELECT id FROM yset)
           AND c.type_id IN (SELECT k FROM lat)
         UNION ALL
         SELECT ARRAY[x.id, c.subject_id], ARRAY[c.type_id], ARRAY[-1],
-               laplace.eff_mu_display(c.rating, c.rd), 1, c.type_id
+               consensus.eff_mu_display(c.rating, c.rd), 1, c.type_id
         FROM xset x JOIN laplace.v_consensus_unrefuted c ON c.object_id = x.id
           AND c.subject_id IN (SELECT id FROM yset)
           AND c.type_id IN (SELECT k FROM lat)
@@ -42,8 +42,8 @@ AS $$
         SELECT id, ARRAY[id], ARRAY[]::bytea[], NULL::numeric, 0 FROM xset
         UNION ALL
         SELECT c.object_id, u.path || c.object_id, u.types || c.type_id,
-               LEAST(COALESCE(u.mu, laplace.eff_mu_display(c.rating, c.rd)),
-                     laplace.eff_mu_display(c.rating, c.rd)), u.d + 1
+               LEAST(COALESCE(u.mu, consensus.eff_mu_display(c.rating, c.rd)),
+                     consensus.eff_mu_display(c.rating, c.rd)), u.d + 1
         FROM ux u JOIN laplace.v_consensus_unrefuted c ON c.subject_id = u.node
           AND c.type_id IN (SELECT k FROM up_k) AND c.object_id IS NOT NULL
           AND NOT (c.object_id = ANY (u.path))
@@ -53,8 +53,8 @@ AS $$
         SELECT id, ARRAY[id], ARRAY[]::bytea[], NULL::numeric, 0 FROM yset
         UNION ALL
         SELECT c.object_id, u.path || c.object_id, u.types || c.type_id,
-               LEAST(COALESCE(u.mu, laplace.eff_mu_display(c.rating, c.rd)),
-                     laplace.eff_mu_display(c.rating, c.rd)), u.d + 1
+               LEAST(COALESCE(u.mu, consensus.eff_mu_display(c.rating, c.rd)),
+                     consensus.eff_mu_display(c.rating, c.rd)), u.d + 1
         FROM uy u JOIN laplace.v_consensus_unrefuted c ON c.subject_id = u.node
           AND c.type_id IN (SELECT k FROM up_k) AND c.object_id IS NOT NULL
           AND NOT (c.object_id = ANY (u.path))

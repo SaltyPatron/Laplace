@@ -65,7 +65,7 @@ DECLARE
     rng    bigint;
     out_ids bytea[];
 BEGIN
-    t_def := laplace.relation_band_types(b_def);
+    t_def := consensus.relation_band_types(b_def);
     -- ORIENT. Same hash-space signal converse.chat() uses: how strongly the token denotes the
     -- sense, then highway-mask breadth. No realize.realize(), no surface comparison.
     -- Two levels: breadth picks WHICH TOKEN, denote_mu picks WHICH SENSE of it.
@@ -103,20 +103,20 @@ BEGIN
     -- Resolved here it becomes a bound array and each arm is an indexed
     -- (subject_id, type_id) probe.
     bands AS MATERIALIZED (
-        SELECT laplace.relation_band_types(ARRAY[1,2,4,7]) AS t
+        SELECT consensus.relation_band_types(ARRAY[1,2,4,7]) AS t
     ),
     -- FRONTIER: the topic's consensus neighbourhood, both directions, over the
     -- content bands. This is the turn's semantic plan -- concept-level, language-free.
     frontier AS MATERIALIZED (
-        SELECT c.object_id AS cid, laplace.eff_mu(c.rating, c.rd) AS mu
+        SELECT c.object_id AS cid, consensus.eff_mu(c.rating, c.rd) AS mu
         FROM bands b, laplace.consensus c
         WHERE c.subject_id = syn AND c.type_id = ANY (b.t)
         UNION ALL
-        SELECT c.subject_id, laplace.eff_mu(c.rating, c.rd)
+        SELECT c.subject_id, consensus.eff_mu(c.rating, c.rd)
         FROM bands b, laplace.consensus c
         WHERE c.object_id = syn AND c.type_id = ANY (b.t)
         UNION ALL
-        SELECT syn, (SELECT max(laplace.eff_mu(c2.rating, c2.rd)) FROM laplace.consensus c2
+        SELECT syn, (SELECT max(consensus.eff_mu(c2.rating, c2.rd)) FROM laplace.consensus c2
                      WHERE c2.subject_id = syn)
         -- BIOGRAPHY ARMS (R7 slice 2, GH #759): the session's recent topics
         -- join the turn's frontier with RECENCY-DECAYED weight — attention
@@ -133,21 +133,21 @@ BEGIN
         -- and a caller whose ctx happens to contain the elected topic would
         -- double-count it at full-plus-decayed weight (Copilot, PR #896).
         UNION ALL
-        SELECT c.object_id, laplace.eff_mu(c.rating, c.rd) / (2 ^ x.dist)
+        SELECT c.object_id, consensus.eff_mu(c.rating, c.rd) / (2 ^ x.dist)
         FROM bands b
         CROSS JOIN unnest(COALESCE(p_ctx, ARRAY[]::bytea[])) WITH ORDINALITY x(cid, dist)
         JOIN laplace.consensus c ON c.subject_id = x.cid
                         AND c.type_id = ANY (b.t)
         WHERE x.cid <> syn
         UNION ALL
-        SELECT c.subject_id, laplace.eff_mu(c.rating, c.rd) / (2 ^ x.dist)
+        SELECT c.subject_id, consensus.eff_mu(c.rating, c.rd) / (2 ^ x.dist)
         FROM bands b
         CROSS JOIN unnest(COALESCE(p_ctx, ARRAY[]::bytea[])) WITH ORDINALITY x(cid, dist)
         JOIN laplace.consensus c ON c.object_id = x.cid
                         AND c.type_id = ANY (b.t)
         WHERE x.cid <> syn
         UNION ALL
-        SELECT x.cid, (SELECT max(laplace.eff_mu(c2.rating, c2.rd)) FROM laplace.consensus c2
+        SELECT x.cid, (SELECT max(consensus.eff_mu(c2.rating, c2.rd)) FROM laplace.consensus c2
                        WHERE c2.subject_id = x.cid) / (2 ^ x.dist)
         FROM unnest(COALESCE(p_ctx, ARRAY[]::bytea[])) WITH ORDINALITY x(cid, dist)
         WHERE x.cid <> syn
@@ -193,7 +193,7 @@ BEGIN
     -- query with identical output.
     ws AS MATERIALIZED (
         SELECT d.entity_id AS id,
-               laplace.is_all_whitespace(COALESCE(laplace.render_text_fast(d.entity_id, 8), ' ')) AS is_ws
+               laplace.is_all_whitespace(COALESCE(realize.render_text_fast(d.entity_id, 8), ' ')) AS is_ws
         FROM (SELECT DISTINCT t.entity_id FROM toks t) d
     ),
     kept AS MATERIALIZED (
@@ -275,7 +275,7 @@ BEGIN
     out_ids := converse.steered_walk_raw(stream, w, COALESCE(core_seq, ARRAY[]::bytea[]),
                                 starts, p_steps, MINLEN, rng);
     IF out_ids IS NULL OR array_length(out_ids,1) IS NULL THEN RETURN NULL; END IF;
-    IF array_length(out_ids,1) = 1 THEN RETURN laplace.render_text(out_ids[1], 64); END IF;
+    IF array_length(out_ids,1) = 1 THEN RETURN realize.render_text(out_ids[1], 64); END IF;
 
     -- REALIZE last, and only here. p_lang selects which member of each concept's
     -- surface family is emitted; everything above ran in ids.
@@ -302,7 +302,7 @@ BEGIN
              realized AS MATERIALIZED (
                  SELECT i.a AS a,
                         realize.batch(i.a, p_lang)  AS lbl,
-                        laplace.render_text_batch(i.a, 64)  AS txt
+                        realize.render_text_batch(i.a, 64)  AS txt
                  FROM ids i
              ),
              m AS (

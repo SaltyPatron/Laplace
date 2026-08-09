@@ -13,25 +13,25 @@ CREATE OR REPLACE FUNCTION converse.epistemic_status(p_word bytea, p_lang bytea 
               AND c.type_id NOT IN (laplace.relation_type_id('HAS_SENSE'),
                                     laplace.relation_type_id('IS_SENSE_OF'),
                                     laplace.relation_type_id('HAS_LANGUAGE'))
-            ORDER BY laplace.edge_rank(c.type_id, laplace.eff_mu(c.rating, c.rd)) DESC
+            ORDER BY consensus.edge_rank(c.type_id, consensus.eff_mu(c.rating, c.rd)) DESC
             LIMIT p_limit),
          lang(id) AS (SELECT COALESCE(p_lang, converse.word_language(p_word))),
          objs(a) AS (SELECT array_agg(DISTINCT object_id) FROM rels),
          rendered AS (
             SELECT u.object_id, NULLIF(u.s, '') AS s
-            FROM objs CROSS JOIN LATERAL unnest(objs.a, laplace.render_text_batch(objs.a, 32)) AS u(object_id, s)
+            FROM objs CROSS JOIN LATERAL unnest(objs.a, realize.render_text_batch(objs.a, 32)) AS u(object_id, s)
             WHERE objs.a IS NOT NULL
          )
     SELECT lexical.type_label(r.type_id),
            COALESCE(rd.s, realize.realize(r.object_id, l.id)),
-           CASE WHEN laplace.refuted(r.rating, r.rd) THEN 'refuted'
-                WHEN laplace.eff_mu(r.rating, r.rd) > laplace.glicko2_neutral_mu() THEN 'confirmed'
+           CASE WHEN consensus.refuted(r.rating, r.rd) THEN 'refuted'
+                WHEN consensus.eff_mu(r.rating, r.rd) > laplace.glicko2_neutral_mu() THEN 'confirmed'
                 WHEN r.volatility::numeric > laplace.glicko2_initial_volatility() * 1.5 THEN 'contested'
                 ELSE 'thin' END,
-           laplace.eff_mu_display(r.rating, r.rd),
+           consensus.eff_mu_display(r.rating, r.rd),
            round(r.volatility / 1e9, 4), r.witness_count
     FROM rels r
     CROSS JOIN lang l
     LEFT JOIN rendered rd ON rd.object_id = r.object_id
-    ORDER BY laplace.edge_rank(r.type_id, laplace.eff_mu(r.rating, r.rd)) DESC
+    ORDER BY consensus.edge_rank(r.type_id, consensus.eff_mu(r.rating, r.rd)) DESC
 $$;

@@ -7,7 +7,7 @@
 -- with a selective predicate and LIMIT (inspect/UI). Never as the base of a
 -- bulk fold, ingest, or unbounded join — that turns a cheap scan into a render
 -- storm.
-CREATE OR REPLACE VIEW v_attestation_readable AS
+CREATE OR REPLACE VIEW laplace.v_attestation_readable AS
 SELECT a.id,
        a.subject_id,
        a.type_id,

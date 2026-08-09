@@ -8,3 +8,4 @@
 -- violated the eff_mu inlining law. On the UPGRADE path the old catalog row would
 -- linger; a fresh CREATE EXTENSION never had it. This DROP makes the two match.
 DROP FUNCTION IF EXISTS laplace_eff_mu(bytea, bytea, bytea);
+DROP FUNCTION IF EXISTS laplace.laplace_eff_mu(bytea, bytea, bytea);

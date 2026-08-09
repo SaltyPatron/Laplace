@@ -15,10 +15,10 @@ CREATE OR REPLACE FUNCTION converse.correlate(p_words text[])
         SELECT c.type_id, c.object_id,
                array_agg(DISTINCT v.word ORDER BY v.word) AS words,
                count(DISTINCT v.word) AS nwords,
-               (max(laplace.eff_mu(c.rating, c.rd)))::float8 / 1e9 AS strength
+               (max(consensus.eff_mu(c.rating, c.rd)))::float8 / 1e9 AS strength
         FROM v JOIN laplace.consensus c ON c.subject_id = v.id
         GROUP BY c.type_id, c.object_id)
-    SELECT COALESCE(NULLIF(laplace.relation_canonical(g.type_id), ''), realize.label(g.type_id)) AS relation,
+    SELECT COALESCE(NULLIF(consensus.relation_canonical(g.type_id), ''), realize.label(g.type_id)) AS relation,
            realize.label(g.object_id) AS target, g.words, g.strength
     FROM g
     ORDER BY g.nwords DESC, g.strength DESC, 1

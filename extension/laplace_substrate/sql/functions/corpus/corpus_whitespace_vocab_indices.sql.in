@@ -91,6 +91,6 @@ BEGIN
     SELECT (v.ord::int4 - 1)
     FROM unnest(p_vocab) WITH ORDINALITY v(id, ord)
     LEFT JOIN cat ON cat.id = v.id
-    WHERE COALESCE(cat.is_sep, laplace.is_all_whitespace(laplace.render_text_fast(v.id, 8)));
+    WHERE COALESCE(cat.is_sep, laplace.is_all_whitespace(realize.render_text_fast(v.id, 8)));
 END;
 $$;

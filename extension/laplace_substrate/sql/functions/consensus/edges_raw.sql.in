@@ -46,24 +46,24 @@ BEGIN ATOMIC
     FROM (
         SELECT 'out'::text AS direction, c.type_id, c.object_id AS neighbour_id,
                c.rating, c.rd, c.volatility, c.witness_count
-        FROM @extschema@.consensus c
+        FROM laplace.consensus c
         WHERE p_direction IN ('out', 'both')
           AND c.subject_id = p_subject
           AND c.object_id IS NOT NULL
           AND (p_types IS NULL OR c.type_id = ANY (p_types))
-          AND (p_refuted OR NOT @extschema@.refuted(c.rating, c.rd))
+          AND (p_refuted OR NOT consensus.refuted(c.rating, c.rd))
         UNION ALL
         SELECT 'in'::text, c.type_id, c.subject_id,
                c.rating, c.rd, c.volatility, c.witness_count
-        FROM @extschema@.consensus c
+        FROM laplace.consensus c
         WHERE p_direction IN ('in', 'both')
           AND c.object_id = p_subject
           AND (p_types IS NULL OR c.type_id = ANY (p_types))
-          AND (p_refuted OR NOT @extschema@.refuted(c.rating, c.rd))
+          AND (p_refuted OR NOT consensus.refuted(c.rating, c.rd))
     ) e
     ORDER BY CASE WHEN p_rank = 'edge_rank'
-                  THEN @extschema@.edge_rank(e.type_id, @extschema@.eff_mu(e.rating, e.rd))
-                  ELSE (@extschema@.eff_mu(e.rating, e.rd))::float8 / 1e9
+                  THEN consensus.edge_rank(e.type_id, consensus.eff_mu(e.rating, e.rd))
+                  ELSE (consensus.eff_mu(e.rating, e.rd))::float8 / 1e9
              END DESC,
              e.neighbour_id
     LIMIT p_limit;

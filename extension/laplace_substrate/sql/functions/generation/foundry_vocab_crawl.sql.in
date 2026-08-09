@@ -23,7 +23,7 @@ CREATE OR REPLACE FUNCTION generation.foundry_vocab_crawl(
 
         SELECT array_agg(e.id) AS ids
         FROM laplace.entities e
-        WHERE e.type_id = laplace.canonical_id('RelationType')
+        WHERE e.type_id = realize.canonical_id('RelationType')
           AND laplace.relation_rank_resolved(e.id) >= p_rank_floor
     ),
     crawled AS (
@@ -49,7 +49,7 @@ CREATE OR REPLACE FUNCTION generation.foundry_vocab_crawl(
         FROM seed_ids si
         CROSS JOIN unnest(si.ids) AS seed(wid)
         CROSS JOIN LATERAL structural.geometry_successors(seed.wid, p_fanout, 8) gs
-        JOIN laplace.entities e ON e.id = gs.successor_id AND e.type_id = laplace.canonical_id('Word')
+        JOIN laplace.entities e ON e.id = gs.successor_id AND e.type_id = realize.canonical_id('Word')
     ),
     order1_cut AS (
         SELECT entity_id, w, w::bigint AS weight FROM order1 WHERE rn <= p_fanout
@@ -60,7 +60,7 @@ CREATE OR REPLACE FUNCTION generation.foundry_vocab_crawl(
                row_number() OVER (ORDER BY o.w * gs.seen DESC, gs.successor_id) AS rn
         FROM order1_cut o
         CROSS JOIN LATERAL structural.geometry_successors(o.entity_id, p_fanout, 8) gs
-        JOIN laplace.entities e ON e.id = gs.successor_id AND e.type_id = laplace.canonical_id('Word')
+        JOIN laplace.entities e ON e.id = gs.successor_id AND e.type_id = realize.canonical_id('Word')
     ),
     order2_cut AS (
         SELECT entity_id, weight FROM order2 WHERE rn <= p_max
@@ -74,7 +74,7 @@ CREATE OR REPLACE FUNCTION generation.foundry_vocab_crawl(
         JOIN laplace.v_consensus_unrefuted c ON c.subject_id = o.entity_id
             AND c.type_id = laplace.relation_type_id('IS_LEMMA_OF')
             AND c.object_id IS NOT NULL
-        JOIN laplace.entities e ON e.id = c.object_id AND e.type_id = laplace.canonical_id('Word')
+        JOIN laplace.entities e ON e.id = c.object_id AND e.type_id = realize.canonical_id('Word')
     ),
     order_closure AS (
         SELECT entity_id, max(weight) AS weight,
@@ -105,12 +105,12 @@ CREATE OR REPLACE FUNCTION generation.foundry_vocab_crawl(
             FROM (
                 SELECT DISTINCT ON (w.id) w.id AS entity_id, w.trajectory
                 FROM laplace.v_word_points w
-                WHERE w.type_id IN (laplace.canonical_id('Sentence'), laplace.canonical_id('Document'))
+                WHERE w.type_id IN (realize.canonical_id('Sentence'), realize.canonical_id('Document'))
                   AND w.trajectory IS NOT NULL
                 ORDER BY w.id, w.physicality_id LIMIT 400000
             ) t
             CROSS JOIN LATERAL laplace_trajectory_constituents(t.trajectory) tc
-            JOIN laplace.entities e ON e.id = tc.entity_id AND e.type_id = laplace.canonical_id('Word')
+            JOIN laplace.entities e ON e.id = tc.entity_id AND e.type_id = realize.canonical_id('Word')
             GROUP BY tc.entity_id
         ) f
     ),
@@ -134,7 +134,7 @@ CREATE OR REPLACE FUNCTION generation.foundry_vocab_crawl(
     rendered AS (
         SELECT u.entity_id, u.s, a.ws[u.ord::int] AS weight, a.prs[u.ord::int] AS pri
         FROM ids_arr a
-        CROSS JOIN LATERAL unnest(a.ids, laplace.render_text_batch(a.ids, 8))
+        CROSS JOIN LATERAL unnest(a.ids, realize.render_text_batch(a.ids, 8))
                    WITH ORDINALITY AS u(entity_id, s, ord)
         WHERE a.ids IS NOT NULL AND cardinality(a.ids) > 0
     ),

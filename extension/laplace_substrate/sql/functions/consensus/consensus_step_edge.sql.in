@@ -32,23 +32,23 @@ CREATE OR REPLACE FUNCTION consensus.step_edge(
     SELECT e.type_id, e.subject_id, e.rating, e.rd, e.witness_count
     FROM (
         (SELECT c.type_id, c.subject_id, c.rating, c.rd, c.witness_count
-         FROM @extschema@.v_consensus_unrefuted c
+         FROM laplace.v_consensus_unrefuted c
          WHERE c.subject_id = p_from
            AND c.object_id = p_to
            -- Explicit IS NOT NULL so the planner can match the partial
            -- consensus_subject_eff_mu_btree (WHERE object_id IS NOT NULL).
            AND c.object_id IS NOT NULL
-         ORDER BY @extschema@.eff_mu(c.rating, c.rd) DESC
+         ORDER BY consensus.eff_mu(c.rating, c.rd) DESC
          LIMIT 1)
         UNION ALL
         (SELECT c.type_id, c.subject_id, c.rating, c.rd, c.witness_count
-         FROM @extschema@.v_consensus_unrefuted c
+         FROM laplace.v_consensus_unrefuted c
          WHERE c.subject_id = p_to
            AND c.object_id = p_from
            AND c.object_id IS NOT NULL
-         ORDER BY @extschema@.eff_mu(c.rating, c.rd) DESC
+         ORDER BY consensus.eff_mu(c.rating, c.rd) DESC
          LIMIT 1)
     ) e
-    ORDER BY @extschema@.eff_mu(e.rating, e.rd) DESC
+    ORDER BY consensus.eff_mu(e.rating, e.rd) DESC
     LIMIT 1
 $$;

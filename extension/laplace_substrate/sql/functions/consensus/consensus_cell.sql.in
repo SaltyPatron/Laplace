@@ -41,7 +41,7 @@ CREATE OR REPLACE FUNCTION consensus.pair_scores(
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
     SELECT s.ord::int,
-           COALESCE(laplace.eff_mu_display(c.rating, c.rd), 0)::float8
+           COALESCE(consensus.eff_mu_display(c.rating, c.rd), 0)::float8
     FROM unnest(p_subjects) WITH ORDINALITY AS s(sid, ord)
     JOIN unnest(p_objects) WITH ORDINALITY AS o(oid, ord) USING (ord)
     LEFT JOIN laplace.consensus c

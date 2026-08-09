@@ -1,4 +1,4 @@
-CREATE OR REPLACE AGGREGATE laplace_glicko2_accumulate(
+CREATE OR REPLACE AGGREGATE laplace.laplace_glicko2_accumulate(
     prior_rating     bigint,
     prior_rd         bigint,
     prior_volatility bigint,
@@ -7,7 +7,7 @@ CREATE OR REPLACE AGGREGATE laplace_glicko2_accumulate(
     score            bigint,
     tau              bigint
 ) (
-    SFUNC     = laplace_glicko2_sfunc,
+    SFUNC     = laplace.laplace_glicko2_sfunc,
     STYPE     = internal,
-    FINALFUNC = laplace_glicko2_finalfunc
+    FINALFUNC = laplace.laplace_glicko2_finalfunc
 );

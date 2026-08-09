@@ -6,32 +6,32 @@
 -- `Index Scan using entities_t2_h0_type_id_idx`. `define` sits on the read path,
 -- so it pays that on every call.
 --
--- Every reference is `@extschema@.`-qualified instead. That is what the clause was
+-- Every reference is schema-qualified instead. That is what the clause was
 -- actually doing here, and qualification does it at parse time for free. This is the
 -- same trade `drop_retired_eff_mu` records and CLAUDE.md states as law.
 DROP FUNCTION IF EXISTS laplace.define(bytea, int);
 CREATE OR REPLACE FUNCTION lexical.define(p_word bytea, p_limit int DEFAULT 5)
     RETURNS TABLE(definition text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$
-    SELECT @extschema@.render_text(d.object_id, 24) AS definition, d.eff_mu, d.witnesses
+    SELECT realize.render_text(d.object_id, 24) AS definition, d.eff_mu, d.witnesses
     FROM (
         SELECT u.object_id, u.eff_mu, u.witnesses, u.sense_rank
         FROM (
             SELECT g.object_id AS object_id,
-                   @extschema@.eff_mu_display(g.rating, g.rd) AS eff_mu,
+                   consensus.eff_mu_display(g.rating, g.rd) AS eff_mu,
                    g.witness_count AS witnesses,
                    sn.eff_mu AS sense_rank
             FROM lexical.senses(p_word) sn
-            JOIN @extschema@.consensus g ON g.subject_id = sn.synset_id
-                            AND g.type_id = @extschema@.relation_type_id('HAS_DEFINITION')
+            JOIN laplace.consensus g ON g.subject_id = sn.synset_id
+                            AND g.type_id = laplace.relation_type_id('HAS_DEFINITION')
             UNION ALL
             SELECT g.object_id,
-                   @extschema@.eff_mu_display(g.rating, g.rd),
+                   consensus.eff_mu_display(g.rating, g.rd),
                    g.witness_count,
                    NULL::numeric
             FROM unnest(lexical.lexical_peers(p_word)) AS peer(id)
-            JOIN @extschema@.consensus g ON g.subject_id = peer.id
-                            AND g.type_id = @extschema@.relation_type_id('HAS_DEFINITION')
+            JOIN laplace.consensus g ON g.subject_id = peer.id
+                            AND g.type_id = laplace.relation_type_id('HAS_DEFINITION')
         ) u
         ORDER BY COALESCE(u.sense_rank, 0) + u.eff_mu DESC
         LIMIT p_limit

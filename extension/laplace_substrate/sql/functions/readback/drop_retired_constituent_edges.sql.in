@@ -28,6 +28,6 @@
 -- Order matters: the closure function references the table, so it goes first. The table was
 -- registered with pg_extension_config_dump, so dropping it also removes it from the
 -- extension's dump set -- intended, since there is nothing left to restore.
-DROP FUNCTION IF EXISTS constituents_closure_edges(bytea[], integer);
-DROP PROCEDURE IF EXISTS constituent_edges_rebuild(integer);
-DROP TABLE IF EXISTS constituent_edges;
+DROP FUNCTION IF EXISTS laplace.constituents_closure_edges(bytea[], integer);
+DROP PROCEDURE IF EXISTS laplace.constituent_edges_rebuild(integer);
+DROP TABLE IF EXISTS laplace.constituent_edges;

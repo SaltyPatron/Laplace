@@ -2,8 +2,6 @@ CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE EXTENSION laplace_geom;
 CREATE EXTENSION laplace_substrate;
 
-SET search_path TO laplace, public;
-
 
 SELECT count(*) = 0 AS no_legacy_type_column
 FROM information_schema.columns
@@ -18,22 +16,22 @@ WHERE n.nspname = 'laplace'
     convert_from(decode('6b696e645f6964', 'hex'), 'UTF8'),
     convert_from(decode('656e746974795f6b696e64', 'hex'), 'UTF8'));
 
-SELECT count(*) AS physicality_type_entities FROM entities
+SELECT count(*) AS physicality_type_entities FROM laplace.entities
 WHERE id IN (
-    laplace_hash128_blake3('substrate/physicality_type/CONTENT/v1'::bytea),
-    laplace_hash128_blake3('substrate/physicality_type/BUILDING_BLOCK/v1'::bytea),
-    laplace_hash128_blake3('substrate/physicality_type/PROJECTION/v1'::bytea),
-    laplace_hash128_blake3('substrate/physicality_type/PROJECTION_OUTPUT/v1'::bytea)
+    public.laplace_hash128_blake3('substrate/physicality_type/CONTENT/v1'::bytea),
+    public.laplace_hash128_blake3('substrate/physicality_type/BUILDING_BLOCK/v1'::bytea),
+    public.laplace_hash128_blake3('substrate/physicality_type/PROJECTION/v1'::bytea),
+    public.laplace_hash128_blake3('substrate/physicality_type/PROJECTION_OUTPUT/v1'::bytea)
 );
 
-SELECT relation_type_id('IS_A')
-       = laplace_hash128_blake3('IS_A'::bytea) AS relation_type_path_law;
+SELECT laplace.relation_type_id('IS_A')
+       = public.laplace_hash128_blake3('IS_A'::bytea) AS relation_type_path_law;
 
-SELECT relation_type_resolve('HAS_UPOS') = relation_type_id('HAS_POS') AS pos_alias_resolve_law;
+SELECT consensus.relation_type_resolve('HAS_UPOS') = laplace.relation_type_id('HAS_POS') AS pos_alias_resolve_law;
 
-SELECT relation_type_in_family(relation_type_id('HAS_XPOS'), 'HAS_POS') AS xpos_in_pos_family;
+SELECT consensus.relation_type_in_family(laplace.relation_type_id('HAS_XPOS'), 'HAS_POS') AS xpos_in_pos_family;
 
-SELECT NOT relation_type_in_family(relation_type_id('HAS_LEX_CATEGORY'), 'HAS_POS') AS lex_not_pos_family;
+SELECT NOT consensus.relation_type_in_family(laplace.relation_type_id('HAS_LEX_CATEGORY'), 'HAS_POS') AS lex_not_pos_family;
 
 SELECT EXISTS (
     SELECT 1 FROM pg_attribute a

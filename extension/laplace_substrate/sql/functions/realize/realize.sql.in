@@ -17,7 +17,7 @@ CREATE OR REPLACE FUNCTION realize.realize(p_id bytea, p_lang bytea DEFAULT NULL
     -- own display fallbacks (raw laplace.render, translation, canonical id, gloss).
     SELECT COALESCE(
         realize.resolve_name(p_id, p_lang),
-        NULLIF(laplace.render_text(p_id, 24), ''),
+        NULLIF(realize.render_text(p_id, 24), ''),
         realize._translation(p_id, p_lang),
         realize._canonical(p_id),
         realize._defines(p_id))

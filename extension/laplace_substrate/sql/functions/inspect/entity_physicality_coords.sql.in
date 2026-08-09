@@ -1,14 +1,12 @@
-CREATE OR REPLACE FUNCTION entity_physicality_coords(p_ids bytea[])
+DROP FUNCTION IF EXISTS laplace.entity_physicality_coords(bytea[]);
+DROP FUNCTION IF EXISTS consensus.entity_physicality_coords(bytea[]);
+CREATE OR REPLACE FUNCTION ops.entity_physicality_coords(p_ids bytea[])
     RETURNS TABLE(entity_id bytea, x double precision, y double precision,
                   z double precision, m double precision)
     LANGUAGE sql STABLE AS $$
-    -- Batch tier-1 coordinates via v_word_points. DISTINCT ON: an entity CAN
-    -- have >1 type=1 physicality (PhysicalityId hashes entity_id,type,coord,
-    -- trajectory); coord is identical across such rows, so ORDER BY
-    -- physicality_id picks one deterministically.
     SELECT DISTINCT ON (w.id) w.id AS entity_id,
            ST_X(w.coord), ST_Y(w.coord), ST_Z(w.coord), ST_M(w.coord)
-    FROM @extschema@.v_word_points w
+    FROM laplace.v_word_points w
     JOIN unnest(p_ids) AS u(id) ON u.id = w.id
     WHERE w.coord IS NOT NULL
     ORDER BY w.id, w.physicality_id

@@ -1,4 +1,4 @@
-CREATE OR REPLACE FUNCTION laplace_glicko2_accumulate_games(
+CREATE OR REPLACE FUNCTION laplace.laplace_glicko2_accumulate_games(
     prior_rating     bigint,
     prior_rd         bigint,
     prior_volatility bigint,

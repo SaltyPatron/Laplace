@@ -12,7 +12,7 @@ CREATE OR REPLACE FUNCTION generation.sentence_order_word_bridge(p_vocab bytea[]
     t AS (
         SELECT DISTINCT ON (w.id) w.id AS did, w.trajectory
         FROM laplace.v_word_points w
-        WHERE w.type_id = laplace.canonical_id('Document')
+        WHERE w.type_id = realize.canonical_id('Document')
           AND w.trajectory IS NOT NULL
         ORDER BY w.id, w.physicality_id LIMIT p_docs
     ),

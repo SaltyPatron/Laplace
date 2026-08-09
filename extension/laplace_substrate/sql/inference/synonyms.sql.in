@@ -23,12 +23,12 @@ CREATE OR REPLACE FUNCTION converse.synonyms(p_word bytea, p_limit int DEFAULT 1
     -- a raw ×1e9 eff_mu from synset_members; rd=0 => round(mu/1e9, 3)). Ordering
     -- above still runs on the raw mu, so ranking is unchanged. (Was the lone
     -- recall_*_response outlier leaking the raw fixed-point value.)
-    SELECT r.txt AS synonym, laplace.eff_mu_display(a.mu, 0) AS eff_mu, a.witnesses
+    SELECT r.txt AS synonym, consensus.eff_mu_display(a.mu, 0) AS eff_mu, a.witnesses
     FROM (
         SELECT member, mu, witnesses FROM agg
         ORDER BY sense_mu DESC NULLS LAST, mu DESC, witnesses DESC, member
     ) a
-    CROSS JOIN LATERAL (SELECT laplace.render_text(a.member, 64) AS txt) r
+    CROSS JOIN LATERAL (SELECT realize.render_text(a.member, 64) AS txt) r
     WHERE NULLIF(btrim(r.txt), '') IS NOT NULL
     LIMIT p_limit
 $$;

@@ -30,7 +30,7 @@ CREATE OR REPLACE FUNCTION chess.time_pressure_outcome()
         WHERE c.type_id = laplace.relation_type_id('HAS_THINK_CLASS')
     ), mv AS (
         SELECT c.subject_id AS position,
-               laplace.eff_mu(c.rating, c.rd) AS mu,
+               consensus.eff_mu(c.rating, c.rd) AS mu,
                c.witness_count
         FROM laplace.consensus c
         WHERE c.type_id = laplace.relation_type_id('MOVE')
@@ -51,7 +51,7 @@ CREATE OR REPLACE FUNCTION chess.time_pressure_outcome()
     SELECT cls.label,
            count(DISTINCT tc.position)::bigint                       AS positions,
            sum(mv.witness_count)::bigint                             AS plays,
-           round(laplace.eff_mu_display(
+           round(consensus.eff_mu_display(
                    avg(mv.mu)::bigint, 0)::numeric, 3)               AS avg_eff_mu
     FROM tc
     JOIN mv  ON mv.position = tc.position

@@ -16,7 +16,7 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
     public async Task<bool> HasSourceEverCompletedAsync(int layerOrder, CancellationToken ct = default)
     {
         await using var cmd = _ds.CreateCommand(
-            "SELECT laplace.evidence_count(p_type => laplace.canonical_id($1)) > 0");
+            "SELECT ops.evidence_count(p_type => realize.canonical_id($1)) > 0");
         cmd.Parameters.AddWithValue(NpgsqlDbType.Text,
             $"substrate/type/HasLayerCompleted/{layerOrder}/v1");
         try
@@ -33,7 +33,7 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
     public async Task<bool> HasSourceCompletedAsync(Hash128 sourceId, int layerOrder, CancellationToken ct = default)
     {
         await using var cmd = _ds.CreateCommand(
-            "SELECT laplace.evidence_count(p_type => laplace.canonical_id($1), p_source => $2) > 0");
+            "SELECT ops.evidence_count(p_type => realize.canonical_id($1), p_source => $2) > 0");
         cmd.Parameters.AddWithValue(NpgsqlDbType.Text,
             $"substrate/type/HasLayerCompleted/{layerOrder}/v1");
         cmd.Parameters.AddWithValue(NpgsqlDbType.Bytea, sourceId.ToBytes());
@@ -51,7 +51,7 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
     public async Task<long> CountEntitiesByTypeAsync(Hash128 typeId, CancellationToken ct = default)
     {
         await using var cmd = _ds.CreateCommand(
-            "SELECT laplace.entity_count($1)");
+            "SELECT ops.entity_count($1)");
         cmd.Parameters.AddWithValue(NpgsqlDbType.Bytea, typeId.ToBytes());
         var result = await cmd.ExecuteScalarAsync(ct);
         return result is long l ? l : 0L;
@@ -304,7 +304,7 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         // fact, on the layer that owns partition layout. An install predating the
         // function degrades to "nothing to report" rather than sinking a finished run.
         await using var cmd = _ds.CreateCommand(
-            "SELECT relation, rows, pct_of_default FROM laplace.consensus_partition_pressure($1) "
+            "SELECT relation, rows, pct_of_default FROM ops.consensus_partition_pressure($1) "
             + "WHERE tbl = 'consensus' ORDER BY rows DESC");
         cmd.Parameters.AddWithValue(NpgsqlDbType.Bigint, minRows);
         try
@@ -324,7 +324,7 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
 
     /// <summary>
     /// Retract a source's testimony and refold every cell it touched
-    /// (<c>laplace.evict_source</c>, GH #508). The procedure COMMITs per batch and
+    /// (<c>ops.evict_source</c>, GH #508). The procedure COMMITs per batch and
     /// RAISE LOGs progress server-side, so hours are legitimate on a large lane —
     /// hence no command timeout. <paramref name="relationIds"/> and
     /// <paramref name="markerTypeIds"/> are null to mean "every relation the source
@@ -334,7 +334,7 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         Hash128 sourceId, IReadOnlyList<Hash128>? relationIds,
         IReadOnlyList<Hash128>? markerTypeIds, CancellationToken ct = default)
     {
-        await using var cmd = _ds.CreateCommand("CALL laplace.evict_source($1, $2, $3)");
+        await using var cmd = _ds.CreateCommand("CALL ops.evict_source($1, $2, $3)");
         cmd.CommandTimeout = 0;
         cmd.Parameters.AddWithValue(NpgsqlDbType.Bytea, sourceId.ToBytes());
         cmd.Parameters.AddWithValue(
@@ -358,7 +358,7 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
     public async Task<long> CountEvidenceBySourceAsync(Hash128 sourceId, CancellationToken ct = default)
     {
         await using var cmd = _ds.CreateCommand(
-            "SELECT laplace.evidence_count(p_source => $1)");
+            "SELECT ops.evidence_count(p_source => $1)");
         cmd.CommandTimeout = 0;
         cmd.Parameters.AddWithValue(NpgsqlDbType.Bytea, sourceId.ToBytes());
         return (long)(await cmd.ExecuteScalarAsync(ct) ?? 0L);

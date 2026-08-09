@@ -1,4 +1,5 @@
-CREATE OR REPLACE FUNCTION @extschema@.effective_mu(p_rating bigint, p_rd bigint)
+DROP FUNCTION IF EXISTS laplace.effective_mu(bigint, bigint);
+CREATE OR REPLACE FUNCTION consensus.effective_mu(p_rating bigint, p_rd bigint)
     RETURNS bigint
     AS 'MODULE_PATHNAME', 'pg_laplace_effective_mu'
     LANGUAGE C LAPLACE_IMMUTABLE_STRICT;

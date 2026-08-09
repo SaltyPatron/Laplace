@@ -46,7 +46,7 @@ public class ConsensusClientFoldTests
     {
         await using var cmd = _pg.DataSource.CreateCommand(
             "SELECT (r).rating, (r).rd, (r).volatility FROM (SELECT laplace.laplace_glicko2_accumulate_games("
-            + "$1, $2, $3, laplace.glicko2_neutral_mu(), $4, $5, $6, laplace.glicko2_tau()) AS r) s");
+            + "$1, $2, $3, consensus.glicko2_neutral_mu(), $4, $5, $6, consensus.glicko2_tau()) AS r) s");
         cmd.Parameters.AddWithValue(priorRating);
         cmd.Parameters.AddWithValue(priorRd);
         cmd.Parameters.AddWithValue(priorVol);
@@ -61,7 +61,7 @@ public class ConsensusClientFoldTests
     private async Task<(long NeutralMu, long InitRd, long InitVol)> SeedsAsync()
     {
         await using var cmd = _pg.DataSource.CreateCommand(
-            "SELECT laplace.glicko2_neutral_mu(), laplace.glicko2_initial_rd(), laplace.glicko2_initial_volatility()");
+            "SELECT consensus.glicko2_neutral_mu(), consensus.glicko2_initial_rd(), consensus.glicko2_initial_volatility()");
         await using var rd = await cmd.ExecuteReaderAsync();
         Assert.True(await rd.ReadAsync());
         return (rd.GetInt64(0), rd.GetInt64(1), rd.GetInt64(2));

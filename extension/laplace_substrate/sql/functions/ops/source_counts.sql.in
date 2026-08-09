@@ -1,22 +1,18 @@
-CREATE OR REPLACE FUNCTION source_counts()
+DROP FUNCTION IF EXISTS laplace.source_counts();
+
+CREATE OR REPLACE FUNCTION ops.source_counts()
     RETURNS TABLE(source text, source_id bytea, evidence bigint, content bigint)
-    LANGUAGE sql STABLE 
+    LANGUAGE sql STABLE
     AS $$
-    
-    
-    
-    SELECT @extschema@.render(COALESCE(ev.sid, ct.sid)) AS source,
+    SELECT realize.render(COALESCE(ev.sid, ct.sid)) AS source,
            COALESCE(ev.sid, ct.sid)                     AS source_id,
            COALESCE(ev.evidence, 0)                     AS evidence,
            COALESCE(ct.content, 0)                      AS content
-    
-    
-    
     FROM (SELECT a.source_id AS sid, count(*) AS evidence
-          FROM @extschema@.attestations a GROUP BY a.source_id) ev
+          FROM laplace.attestations a GROUP BY a.source_id) ev
     FULL JOIN (SELECT a.source_id AS sid, count(DISTINCT w.id) AS content
-               FROM @extschema@.attestations a
-               JOIN @extschema@.v_word_points w ON w.id = a.subject_id
+               FROM laplace.attestations a
+               JOIN laplace.v_word_points w ON w.id = a.subject_id
                GROUP BY a.source_id) ct
       ON ev.sid = ct.sid
     ORDER BY evidence DESC NULLS LAST

@@ -48,21 +48,22 @@
 -- Reports ids, not counts, so a caller can act on them. Deliberately unbounded: a
 -- violation list that silently truncates is the same failure as a detector that
 -- cannot fail.
-CREATE OR REPLACE FUNCTION identity_law_violations()
+DROP FUNCTION IF EXISTS identity_law_violations();
+CREATE OR REPLACE FUNCTION laplace.identity_law_violations()
 RETURNS TABLE(id bytea, tier smallint, reason text)
 LANGUAGE sql
 STABLE
     AS $$
     SELECT e.id, e.tier, 'tier_out_of_range'::text
-    FROM @extschema@.entities e
+    FROM laplace.entities e
     WHERE e.tier < 0 OR e.tier >= 256
 
     UNION ALL
 
     -- Same content id stored at more than one tier: one entity, N rows.
     SELECT e.id, e.tier, 'multi_tier_entity'::text
-    FROM @extschema@.entities e
-    JOIN (SELECT d.id FROM @extschema@.entities d
+    FROM laplace.entities e
+    JOIN (SELECT d.id FROM laplace.entities d
           GROUP BY d.id HAVING count(*) > 1) dup ON dup.id = e.id
 
     UNION ALL
@@ -71,7 +72,7 @@ STABLE
     -- does not determine its content and reads over it are plan-dependent.
     SELECT p.entity_id, NULL::smallint, 'ambiguous_physicality'::text
     FROM (SELECT ph.entity_id, ph.type, ph.id
-          FROM @extschema@.physicalities ph
+          FROM laplace.physicalities ph
           WHERE ph.trajectory IS NOT NULL
           GROUP BY ph.entity_id, ph.type, ph.id
           HAVING count(DISTINCT public.ST_AsBinary(ph.trajectory)) > 1) p
@@ -83,6 +84,6 @@ STABLE
     -- it, so the row count stays proportional to the defect rather than to the
     -- corpus.
     SELECT DISTINCT e.type_id, NULL::smallint, 'dangling_entity_type'::text
-    FROM @extschema@.entities e
-    WHERE NOT EXISTS (SELECT 1 FROM @extschema@.entities t WHERE t.id = e.type_id)
+    FROM laplace.entities e
+    WHERE NOT EXISTS (SELECT 1 FROM laplace.entities t WHERE t.id = e.type_id)
 $$;

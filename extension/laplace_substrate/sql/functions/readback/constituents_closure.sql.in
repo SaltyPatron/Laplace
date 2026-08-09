@@ -19,7 +19,8 @@
 -- Termination: the content law makes the constituent DAG acyclic (constituents are strictly
 -- lower-tier), and the depth cap is a belt-and-braces bound; leaves (codepoints, no type-1
 -- trajectory) yield zero rows and stop the descent.
-CREATE OR REPLACE FUNCTION constituents_closure(
+DROP FUNCTION IF EXISTS laplace.constituents_closure(bytea[], integer);
+CREATE OR REPLACE FUNCTION realize.constituents_closure(
     p_roots bytea[],
     p_max_depth integer DEFAULT 32
 )
@@ -48,7 +49,7 @@ WITH RECURSIVE reach(entity_id, depth) AS (
     FROM reach rc
     CROSS JOIN LATERAL (
         SELECT w.trajectory
-        FROM @extschema@.v_word_points w
+        FROM laplace.v_word_points w
         WHERE w.id = rc.entity_id AND w.trajectory IS NOT NULL
         ORDER BY w.physicality_id
         LIMIT 1
@@ -97,7 +98,7 @@ picked AS (
     -- half-right -- the SET removal above is the larger win (~30 ms of per-call
     -- planning) and is independent of this.
     SELECT DISTINCT ON (w.id) w.id AS entity_id, w.trajectory
-    FROM @extschema@.v_word_points w
+    FROM laplace.v_word_points w
     JOIN node n ON n.entity_id = w.id
     WHERE w.trajectory IS NOT NULL
     ORDER BY w.id, w.physicality_id, public.ST_NPoints(w.trajectory) DESC

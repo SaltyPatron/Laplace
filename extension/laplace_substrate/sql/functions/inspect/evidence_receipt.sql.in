@@ -1,4 +1,6 @@
-CREATE OR REPLACE FUNCTION evidence_receipt(p_id bytea, p_limit integer DEFAULT 25)
+DROP FUNCTION IF EXISTS laplace.evidence_receipt(bytea, integer);
+DROP FUNCTION IF EXISTS consensus.evidence_receipt(bytea, integer);
+CREATE OR REPLACE FUNCTION ops.evidence_receipt(p_id bytea, p_limit integer DEFAULT 25)
     RETURNS TABLE(
         type_id bytea,
         object_id bytea,
@@ -14,18 +16,10 @@ CREATE OR REPLACE FUNCTION evidence_receipt(p_id bytea, p_limit integer DEFAULT 
         UNION
         SELECT sn.synset_id FROM lexical.senses(p_id) sn
     ), feat_dynamic AS MATERIALIZED (
-        -- Dynamic HAS_FEATURE children fenced once; laplace.relation_in_family() never
-        -- inlines (SET search_path), so calling it per attestation row ran its
-        -- EXISTS probe per row. Same truth table: static family via the C check
-        -- below, dynamic membership via this set.
         SELECT c.subject_id AS id FROM laplace.consensus c
         WHERE c.type_id = laplace.relation_type_id('IS_A')
           AND c.object_id = laplace.relation_type_id('HAS_FEATURE')
     ), filtered AS MATERIALIZED (
-        -- Fenced: without the fence the downstream LIMIT flips the planner into
-        -- a cheap-startup nested loop that seq-scans EVERY attestations partition
-        -- once per subj id (measured 2026-07-23 on the live 133.5M-row table:
-        -- >180s for the "run" hub vs 991ms for this same CTE planned standalone).
         SELECT a.type_id, a.object_id, a.source_id,
                sum(a.observation_count) AS obs
         FROM laplace.attestations a
@@ -34,8 +28,8 @@ CREATE OR REPLACE FUNCTION evidence_receipt(p_id bytea, p_limit integer DEFAULT 
           AND EXISTS (
               SELECT 1 FROM laplace.entities et
               WHERE et.id = a.type_id AND et.type_id = laplace.entity_type_id('RelationType'))
-          AND NOT laplace.relation_type_in_family(a.type_id, 'HAS_POS')
-          AND NOT laplace.relation_type_in_family(a.type_id, 'HAS_FEATURE')
+          AND NOT consensus.relation_type_in_family(a.type_id, 'HAS_POS')
+          AND NOT consensus.relation_type_in_family(a.type_id, 'HAS_FEATURE')
           AND a.type_id NOT IN (SELECT id FROM feat_dynamic)
           AND a.type_id NOT IN (
               laplace.relation_type_id('HAS_SENSE'), laplace.relation_type_id('IS_SENSE_OF'),
@@ -55,13 +49,8 @@ CREATE OR REPLACE FUNCTION evidence_receipt(p_id bytea, p_limit integer DEFAULT 
               AND a.object_id IN (SELECT id FROM subj))
         GROUP BY a.type_id, a.object_id, a.source_id
     ), src_labels AS MATERIALIZED (
-        -- Label each DISTINCT source ONCE (sources number in the dozens), fenced
-        -- so laplace.render() cannot be pushed back down to run per (type, object, source)
-        -- group (~3,129 renders for one entity before this map existed). The
-        -- string_agg below keeps the exact DISTINCT + ORDER BY label semantics of
-        -- the old inline expression, so output is byte-identical.
         SELECT s.source_id,
-               regexp_replace(laplace.render(s.source_id),
+               regexp_replace(realize.render(s.source_id),
                    '^substrate/source/([^/]+)(?:/v[0-9]+)?$', '\1') AS label
         FROM (SELECT DISTINCT f.source_id FROM filtered f) s
     ), folded AS (
@@ -72,28 +61,15 @@ CREATE OR REPLACE FUNCTION evidence_receipt(p_id bytea, p_limit integer DEFAULT 
         JOIN src_labels sl ON sl.source_id = f.source_id
         GROUP BY f.type_id, f.object_id
     ), best AS MATERIALIZED (
-        -- One subject-side indexed scan replaces the old per-folded-row LATERAL
-        -- probe. The lateral shape re-probed consensus once per folded group
-        -- (~19.7k groups for a hub word), each probe Append-planned across the
-        -- type partitions — measured >120s for "run"; this whole set is ~22k rows
-        -- and aggregates in well under a second. DISTINCT ON keeps the exact
-        -- "single best row by eff_mu" semantics of the old ORDER BY ... LIMIT 1.
         SELECT DISTINCT ON (c.type_id, c.object_id)
                c.type_id, c.object_id,
-               laplace.eff_mu(c.rating, c.rd) AS mu_raw,
-               laplace.eff_mu_display(c.rating, c.rd) AS mu_disp
+               consensus.eff_mu(c.rating, c.rd) AS mu_raw,
+               consensus.eff_mu_display(c.rating, c.rd) AS mu_disp
         FROM laplace.consensus c
         WHERE c.subject_id IN (SELECT id FROM subj)
           AND c.object_id IS NOT NULL
-        ORDER BY c.type_id, c.object_id, laplace.eff_mu(c.rating, c.rd) DESC
+        ORDER BY c.type_id, c.object_id, consensus.eff_mu(c.rating, c.rd) DESC
     ), ranked AS (
-        -- Issue 52: rank BEFORE labeling. The old shape labeled every folded claim
-        -- (type_label + _realize_synset_lemma/render_text, ~6ms/row — 3,129 labels
-        -- to return 3 rows, >25s cold) and only then ordered/limited. Ranking needs
-        -- only the consensus join, so it runs first over everything; labels
-        -- run over a small over-fetched pool (labels can drop rows via the ellipsis/
-        -- empty filters below — 3x+8 makes top-N starvation implausible while
-        -- keeping labeling O(pool), not O(claims)).
         SELECT fo.type_id, fo.object_id, fo.witness_count, fo.source_labels,
                COALESCE(b.mu_raw, 0)  AS mu_raw,
                COALESCE(b.mu_disp, 0) AS eff_mu_disp
@@ -101,28 +77,15 @@ CREATE OR REPLACE FUNCTION evidence_receipt(p_id bytea, p_limit integer DEFAULT 
         LEFT JOIN best b
                ON b.type_id = fo.type_id AND b.object_id = fo.object_id
         WHERE fo.source_labels IS NOT NULL AND fo.source_labels <> ''
-        ORDER BY laplace.edge_rank(fo.type_id, COALESCE(b.mu_raw, 0)) DESC,
+        ORDER BY consensus.edge_rank(fo.type_id, COALESCE(b.mu_raw, 0)) DESC,
                  fo.witness_count DESC
         LIMIT GREATEST(1, p_limit) * 3 + 8
     ), ordered AS (
         SELECT rk.*, row_number() OVER (
-                   ORDER BY laplace.edge_rank(rk.type_id, rk.mu_raw) DESC,
+                   ORDER BY consensus.edge_rank(rk.type_id, rk.mu_raw) DESC,
                             rk.witness_count DESC) AS ord
         FROM ranked rk
     ), labels AS MATERIALIZED (
-        -- MATERIALIZED is load-bearing: this is a single-row realize_batch over
-        -- the whole `ordered` window. Un-fenced, PG inlines it into the final
-        -- `labeled` join, and because the labels array is subscripted by o.ord
-        -- the planner re-evaluates the entire array_agg + realize_batch ONCE PER
-        -- OUTPUT ROW (128 loops × ~160ms = 20s for the "run" hub; measured
-        -- 2026-07-24 — the exact regression that reappeared after an upstream
-        -- cardinality-estimate shift flipped the inlining decision). Fenced, it
-        -- runs exactly once. Output is byte-identical (proven run/emperor/king,
-        -- both EXCEPT directions empty).
-        -- Full-mesh labels via ONE realize.batch(was: a shorter hand-rolled
-        -- synset-lemma -> render -> HEX ladder per row). Gains the
-        -- HAS_NAME/translation/canonical/gloss arms; hex stays the genuine
-        -- last resort so every claim still shows. Approved behavior change.
         SELECT realize.batch(array_agg(o.object_id ORDER BY o.ord),
                              converse.word_language(p_id)) AS l
         FROM ordered o
@@ -142,7 +105,7 @@ CREATE OR REPLACE FUNCTION evidence_receipt(p_id bytea, p_limit integer DEFAULT 
     WHERE lb.obj IS NOT NULL AND lb.obj <> ''
       AND right(lb.obj, 1) <> U&'\2026'
       AND right(lb.rel, 1) <> U&'\2026'
-    ORDER BY laplace.edge_rank(lb.type_id, lb.mu_raw) DESC,
+    ORDER BY consensus.edge_rank(lb.type_id, lb.mu_raw) DESC,
              lb.witness_count DESC
     LIMIT GREATEST(1, p_limit)
 $$;

@@ -1,47 +1,46 @@
 BEGIN;
-SET search_path = laplace, public;
 
-SELECT word_id('d') = laplace_hash128_blake3(convert_to('d','UTF8')) AS leaf_rule_holds;
+SELECT laplace.word_id('d') = public.laplace_hash128_blake3(convert_to('d','UTF8')) AS leaf_rule_holds;
 
-SELECT word_id('dog') = laplace_hash128_blake3(
+SELECT laplace.word_id('dog') = public.laplace_hash128_blake3(
            ('\x01'::bytea
-            || laplace_hash128_blake3(convert_to('d','UTF8'))
-            || laplace_hash128_blake3(convert_to('o','UTF8'))
-            || laplace_hash128_blake3(convert_to('g','UTF8')))) AS merkle_rule_holds;
+            || public.laplace_hash128_blake3(convert_to('d','UTF8'))
+            || public.laplace_hash128_blake3(convert_to('o','UTF8'))
+            || public.laplace_hash128_blake3(convert_to('g','UTF8')))) AS merkle_rule_holds;
 
-SELECT word_id('') IS NULL AS empty_is_null;
+SELECT laplace.word_id('') IS NULL AS empty_is_null;
 
 DO $$
 DECLARE
-    rel_meta bytea := entity_type_id('RelationType');
-    type_t   bytea := laplace_hash128_blake3('Type');
-    src      bytea := laplace_hash128_blake3('test/converse/source');
-    w_dog    bytea := word_id('dog');
-    w_p      bytea := word_id('p');
-    w_h      bytea := word_id('h');
-    w_c      bytea := word_id('c');
-    sense1   bytea := laplace_hash128_blake3('test/converse/sense1');
-    synset1  bytea := laplace_hash128_blake3('test/converse/synset1');
-    sense_b  bytea := laplace_hash128_blake3('test/converse/sense_b');
-    synset_b bytea := laplace_hash128_blake3('test/converse/synset_b');
-    synset2  bytea := laplace_hash128_blake3('test/converse/synset2');
-    syn_bad  bytea := laplace_hash128_blake3('test/converse/synset_bad');
-    gloss1   bytea := word_id('G');
-    lang_en  bytea := laplace_hash128_blake3('test/converse/lang_en');
-    lang_de  bytea := laplace_hash128_blake3('test/converse/lang_de');
-    k_sense  bytea := relation_type_id('HAS_SENSE');
-    k_senseof bytea := relation_type_id('IS_SENSE_OF');
-    k_def    bytea := relation_type_id('HAS_DEFINITION');
-    k_syn    bytea := relation_type_id('IS_SYNONYM_OF');
-    k_member bytea := relation_type_id('IS_TRANSLATION_OF');
-    k_lang   bytea := relation_type_id('HAS_LANGUAGE');
-    k_isa    bytea := relation_type_id('IS_A');
-    k_causes bytea := relation_type_id('CAUSES');
-    k_anto   bytea := relation_type_id('IS_ANTONYM_OF');
+    rel_meta bytea := laplace.entity_type_id('RelationType');
+    type_t   bytea := public.laplace_hash128_blake3('Type');
+    src      bytea := public.laplace_hash128_blake3('test/converse/source');
+    w_dog    bytea := laplace.word_id('dog');
+    w_p      bytea := laplace.word_id('p');
+    w_h      bytea := laplace.word_id('h');
+    w_c      bytea := laplace.word_id('c');
+    sense1   bytea := public.laplace_hash128_blake3('test/converse/sense1');
+    synset1  bytea := public.laplace_hash128_blake3('test/converse/synset1');
+    sense_b  bytea := public.laplace_hash128_blake3('test/converse/sense_b');
+    synset_b bytea := public.laplace_hash128_blake3('test/converse/synset_b');
+    synset2  bytea := public.laplace_hash128_blake3('test/converse/synset2');
+    syn_bad  bytea := public.laplace_hash128_blake3('test/converse/synset_bad');
+    gloss1   bytea := laplace.word_id('G');
+    lang_en  bytea := public.laplace_hash128_blake3('test/converse/lang_en');
+    lang_de  bytea := public.laplace_hash128_blake3('test/converse/lang_de');
+    k_sense  bytea := laplace.relation_type_id('HAS_SENSE');
+    k_senseof bytea := laplace.relation_type_id('IS_SENSE_OF');
+    k_def    bytea := laplace.relation_type_id('HAS_DEFINITION');
+    k_syn    bytea := laplace.relation_type_id('IS_SYNONYM_OF');
+    k_member bytea := laplace.relation_type_id('IS_TRANSLATION_OF');
+    k_lang   bytea := laplace.relation_type_id('HAS_LANGUAGE');
+    k_isa    bytea := laplace.relation_type_id('IS_A');
+    k_causes bytea := laplace.relation_type_id('CAUSES');
+    k_anto   bytea := laplace.relation_type_id('IS_ANTONYM_OF');
     neutral  bigint := 1500000000000;
     sharp_rd bigint := 30000000000;
 BEGIN
-    INSERT INTO entities (id, tier, type_id, first_observed_by)
+    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
     VALUES (src, 0, type_t, NULL),
            (k_sense, 0, rel_meta, src), (k_senseof, 0, rel_meta, src), (k_def, 0, rel_meta, src),
            (k_syn, 0, rel_meta, src), (k_member, 0, rel_meta, src), (k_lang, 0, rel_meta, src),
@@ -56,66 +55,66 @@ BEGIN
            (lang_en, 0, type_t, src), (lang_de, 0, type_t, src)
     ON CONFLICT DO NOTHING;
 
-    INSERT INTO canonical_names (id, name)
+    INSERT INTO laplace.canonical_names (id, name)
     VALUES (lang_en, 'test/lang/en'), (lang_de, 'test/lang/de')
     ON CONFLICT DO NOTHING;
-    PERFORM register_canonical('IS_A');
-    PERFORM register_canonical('CAUSES');
-    PERFORM register_canonical('IS_ANTONYM_OF');
-    PERFORM register_canonical('HAS_DEFINITION');
-    PERFORM register_canonical('IS_SYNONYM_OF');
-    PERFORM register_canonical('IS_TRANSLATION_OF');
-    PERFORM register_canonical('HAS_LANGUAGE');
+    PERFORM realize.register_canonical('IS_A');
+    PERFORM realize.register_canonical('CAUSES');
+    PERFORM realize.register_canonical('IS_ANTONYM_OF');
+    PERFORM realize.register_canonical('HAS_DEFINITION');
+    PERFORM realize.register_canonical('IS_SYNONYM_OF');
+    PERFORM realize.register_canonical('IS_TRANSLATION_OF');
+    PERFORM realize.register_canonical('HAS_LANGUAGE');
 
-    INSERT INTO consensus (id, subject_id, type_id, object_id,
+    INSERT INTO laplace.consensus (id, subject_id, type_id, object_id,
                            rating, rd, volatility, witness_count, last_observed_at)
     VALUES
-      (consensus_id(w_dog,  k_sense,   sense1),  w_dog,  k_sense,   sense1,  neutral + 200000000000, sharp_rd, 60000000, 3, now()),
-      (consensus_id(sense1, k_senseof, synset1), sense1, k_senseof, synset1, neutral + 200000000000, sharp_rd, 60000000, 3, now()),
-      (consensus_id(w_dog,  k_sense,   sense_b), w_dog,  k_sense,   sense_b, neutral + 250000000000, sharp_rd, 60000000, 4, now()),
-      (consensus_id(sense_b, k_senseof, synset_b), sense_b, k_senseof, synset_b, neutral + 200000000000, sharp_rd, 60000000, 3, now()),
-      (consensus_id(synset1, k_def,    gloss1),  synset1, k_def,    gloss1,  neutral + 150000000000, sharp_rd, 60000000, 2, now()),
-      (consensus_id(synset1, k_member, w_dog),   synset1, k_member, w_dog,   neutral + 100000000000, sharp_rd, 60000000, 2, now()),
-      (consensus_id(synset1, k_member, w_p),     synset1, k_member, w_p,     neutral +  90000000000, sharp_rd, 60000000, 2, now()),
-      (consensus_id(synset1, k_member, w_h),     synset1, k_member, w_h,     neutral +  80000000000, sharp_rd, 60000000, 2, now()),
-      (consensus_id(w_dog,  k_syn,     synset1), w_dog,  k_syn,     synset1, neutral + 100000000000, sharp_rd, 60000000, 2, now()),
-      (consensus_id(w_p,    k_syn,     synset1), w_p,    k_syn,     synset1, neutral +  90000000000, sharp_rd, 60000000, 2, now()),
-      (consensus_id(w_h,    k_syn,     synset1), w_h,    k_syn,     synset1, neutral +  80000000000, sharp_rd, 60000000, 2, now()),
-      (consensus_id(synset1, k_isa,    synset2), synset1, k_isa,    synset2, neutral + 120000000000, sharp_rd, 60000000, 2, now()),
-      (consensus_id(synset2, k_member, w_c),     synset2, k_member, w_c,     neutral + 100000000000, sharp_rd, 60000000, 2, now()),
-      (consensus_id(synset2, k_isa,    syn_bad), synset2, k_isa,    syn_bad, neutral - 300000000000, sharp_rd, 60000000, 3, now()),
-      (consensus_id(w_dog,  k_causes,  w_h),     w_dog,  k_causes,  w_h,     neutral + 110000000000, sharp_rd, 60000000, 1, now()),
-      (consensus_id(w_h,    k_causes,  synset1), w_h,    k_causes,  synset1, neutral + 200000000000, sharp_rd, 60000000, 2, now()),
-      (consensus_id(synset1, k_anto,   w_h),     synset1, k_anto,   w_h,     neutral +  95000000000, sharp_rd, 60000000, 1, now()),
-      (consensus_id(w_dog, k_lang, lang_en),     w_dog,  k_lang, lang_en,    neutral + 300000000000, sharp_rd, 60000000, 9, now()),
-      (consensus_id(w_p,   k_lang, lang_en),     w_p,    k_lang, lang_en,    neutral + 250000000000, sharp_rd, 60000000, 5, now()),
-      (consensus_id(w_c,   k_lang, lang_en),     w_c,    k_lang, lang_en,    neutral + 250000000000, sharp_rd, 60000000, 5, now()),
-      (consensus_id(w_h,   k_lang, lang_de),     w_h,    k_lang, lang_de,    neutral + 250000000000, sharp_rd, 60000000, 5, now());
+      (laplace.consensus_id(w_dog,  k_sense,   sense1),  w_dog,  k_sense,   sense1,  neutral + 200000000000, sharp_rd, 60000000, 3, now()),
+      (laplace.consensus_id(sense1, k_senseof, synset1), sense1, k_senseof, synset1, neutral + 200000000000, sharp_rd, 60000000, 3, now()),
+      (laplace.consensus_id(w_dog,  k_sense,   sense_b), w_dog,  k_sense,   sense_b, neutral + 250000000000, sharp_rd, 60000000, 4, now()),
+      (laplace.consensus_id(sense_b, k_senseof, synset_b), sense_b, k_senseof, synset_b, neutral + 200000000000, sharp_rd, 60000000, 3, now()),
+      (laplace.consensus_id(synset1, k_def,    gloss1),  synset1, k_def,    gloss1,  neutral + 150000000000, sharp_rd, 60000000, 2, now()),
+      (laplace.consensus_id(synset1, k_member, w_dog),   synset1, k_member, w_dog,   neutral + 100000000000, sharp_rd, 60000000, 2, now()),
+      (laplace.consensus_id(synset1, k_member, w_p),     synset1, k_member, w_p,     neutral +  90000000000, sharp_rd, 60000000, 2, now()),
+      (laplace.consensus_id(synset1, k_member, w_h),     synset1, k_member, w_h,     neutral +  80000000000, sharp_rd, 60000000, 2, now()),
+      (laplace.consensus_id(w_dog,  k_syn,     synset1), w_dog,  k_syn,     synset1, neutral + 100000000000, sharp_rd, 60000000, 2, now()),
+      (laplace.consensus_id(w_p,    k_syn,     synset1), w_p,    k_syn,     synset1, neutral +  90000000000, sharp_rd, 60000000, 2, now()),
+      (laplace.consensus_id(w_h,    k_syn,     synset1), w_h,    k_syn,     synset1, neutral +  80000000000, sharp_rd, 60000000, 2, now()),
+      (laplace.consensus_id(synset1, k_isa,    synset2), synset1, k_isa,    synset2, neutral + 120000000000, sharp_rd, 60000000, 2, now()),
+      (laplace.consensus_id(synset2, k_member, w_c),     synset2, k_member, w_c,     neutral + 100000000000, sharp_rd, 60000000, 2, now()),
+      (laplace.consensus_id(synset2, k_isa,    syn_bad), synset2, k_isa,    syn_bad, neutral - 300000000000, sharp_rd, 60000000, 3, now()),
+      (laplace.consensus_id(w_dog,  k_causes,  w_h),     w_dog,  k_causes,  w_h,     neutral + 110000000000, sharp_rd, 60000000, 1, now()),
+      (laplace.consensus_id(w_h,    k_causes,  synset1), w_h,    k_causes,  synset1, neutral + 200000000000, sharp_rd, 60000000, 2, now()),
+      (laplace.consensus_id(synset1, k_anto,   w_h),     synset1, k_anto,   w_h,     neutral +  95000000000, sharp_rd, 60000000, 1, now()),
+      (laplace.consensus_id(w_dog, k_lang, lang_en),     w_dog,  k_lang, lang_en,    neutral + 300000000000, sharp_rd, 60000000, 9, now()),
+      (laplace.consensus_id(w_p,   k_lang, lang_en),     w_p,    k_lang, lang_en,    neutral + 250000000000, sharp_rd, 60000000, 5, now()),
+      (laplace.consensus_id(w_c,   k_lang, lang_en),     w_c,    k_lang, lang_en,    neutral + 250000000000, sharp_rd, 60000000, 5, now()),
+      (laplace.consensus_id(w_h,   k_lang, lang_de),     w_h,    k_lang, lang_de,    neutral + 250000000000, sharp_rd, 60000000, 5, now());
 END $$;
 
 SELECT word, (id IS NOT NULL) AS resolved FROM converse.prompt_words('what is a Dog') ORDER BY ord;
 
-SELECT converse.resolve_phrase('sort a list') = word_id('sort') AS phrase_prefers_leftmost;
-SELECT converse.resolve_phrase('what is a dog') = word_id('dog') AS phrase_finds_dog;
-SELECT converse.resolve_last_word('what is a dog') = word_id('dog') AS last_word_is_dog;
+SELECT converse.resolve_phrase('sort a list') = laplace.word_id('sort') AS phrase_prefers_leftmost;
+SELECT converse.resolve_phrase('what is a dog') = laplace.word_id('dog') AS phrase_finds_dog;
+SELECT converse.resolve_last_word('what is a dog') = laplace.word_id('dog') AS last_word_is_dog;
 SELECT converse.resolve_last_word('zzzunknownzzz') IS NULL AS unknown_is_null;
 
-SELECT word_id('dog') = ANY(lexical.lexical_peers(word_id('dog'))) AS peer_includes_self;
+SELECT laplace.word_id('dog') = ANY(lexical.lexical_peers(laplace.word_id('dog'))) AS peer_includes_self;
 
-SELECT count(*) AS dog_senses FROM lexical.senses(word_id('dog'));
+SELECT count(*) AS dog_senses FROM lexical.senses(laplace.word_id('dog'));
 
-SELECT definition, witnesses FROM lexical.define(word_id('dog'));
+SELECT definition, witnesses FROM lexical.define(laplace.word_id('dog'));
 
-SELECT synonym FROM converse.synonyms(word_id('dog'));
+SELECT synonym FROM converse.synonyms(laplace.word_id('dog'));
 
-SELECT translation, language FROM converse.translations(word_id('dog')) ORDER BY translation;
+SELECT translation, language FROM converse.translations(laplace.word_id('dog')) ORDER BY translation;
 
 -- The read shape is an ARGUMENT, never inferred from the phrasing. These same
 -- calls answer identically whatever language the caller thinks in.
-SELECT reply, witnesses FROM converse.recall_intent('define', word_id('dog'));
-SELECT reply FROM converse.recall_intent('synonyms', word_id('dog'));
-SELECT reply FROM converse.recall_intent('translate', word_id('dog'));
-SELECT reply FROM converse.recall_intent('translate', word_id('h'));
+SELECT reply, witnesses FROM converse.recall_intent('define', laplace.word_id('dog'));
+SELECT reply FROM converse.recall_intent('synonyms', laplace.word_id('dog'));
+SELECT reply FROM converse.recall_intent('translate', laplace.word_id('dog'));
+SELECT reply FROM converse.recall_intent('translate', laplace.word_id('h'));
 SELECT count(*) = 0 AS unknown_topic_has_no_id FROM converse.prompt_state('zzzunknownzzz') WHERE id IS NOT NULL;
 
 -- Every published shape is dispatchable, and only published shapes are.
@@ -124,7 +123,7 @@ SELECT count(*) FILTER (WHERE needs_topic2) = 2 AS exactly_two_topic2_shapes FRO
 
 DO $$
 BEGIN
-    PERFORM * FROM converse.recall_intent('what does dog mean', word_id('dog'));
+    PERFORM * FROM converse.recall_intent('what does dog mean', laplace.word_id('dog'));
     RAISE EXCEPTION 'recall_intent accepted an unpublished shape';
 EXCEPTION WHEN OTHERS THEN
     IF SQLERRM NOT LIKE '%unknown shape%' THEN RAISE; END IF;
@@ -133,37 +132,37 @@ END $$;
 SELECT word FROM converse.prompt_state('what is a Dog') ORDER BY ord;
 
 SELECT support,
-       object_id = laplace_hash128_blake3('test/converse/lang_en') AS is_lang_en
-FROM consensus.shared_objects(ARRAY[word_id('dog'), word_id('p')])
+       object_id = public.laplace_hash128_blake3('test/converse/lang_en') AS is_lang_en
+FROM consensus.shared_objects(ARRAY[laplace.word_id('dog'), laplace.word_id('p')])
 LIMIT 1;
 
-SELECT (SELECT sn.synset_id FROM lexical.senses(word_id('dog')) sn LIMIT 1)
-       = laplace_hash128_blake3('test/converse/synset_b') AS plain_top_is_b;
-SELECT (SELECT sn.synset_id FROM lexical.senses(word_id('dog'), ARRAY[word_id('h')]) sn LIMIT 1)
-       = laplace_hash128_blake3('test/converse/synset1') AS context_flips_to_1;
+SELECT (SELECT sn.synset_id FROM lexical.senses(laplace.word_id('dog')) sn LIMIT 1)
+       = public.laplace_hash128_blake3('test/converse/synset_b') AS plain_top_is_b;
+SELECT (SELECT sn.synset_id FROM lexical.senses(laplace.word_id('dog'), ARRAY[laplace.word_id('h')]) sn LIMIT 1)
+       = public.laplace_hash128_blake3('test/converse/synset1') AS context_flips_to_1;
 
-SELECT realize.realize(word_id('p'), NULL) AS leaf_realizes;
-SELECT realize.realize(laplace_hash128_blake3('test/converse/synset1'),
-               laplace_hash128_blake3('test/converse/lang_en')) AS synset_realizes_member;
-SELECT lexical.type_label(relation_type_id('IS_A')) AS isa_label;
-SELECT realize.path(ARRAY[laplace_hash128_blake3('test/converse/synset1'),
-                          laplace_hash128_blake3('test/converse/synset2')],
-                    ARRAY[relation_type_id('IS_A')],
-                    laplace_hash128_blake3('test/converse/lang_en')) AS realized_path;
+SELECT realize.realize(laplace.word_id('p'), NULL) AS leaf_realizes;
+SELECT realize.realize(public.laplace_hash128_blake3('test/converse/synset1'),
+               public.laplace_hash128_blake3('test/converse/lang_en')) AS synset_realizes_member;
+SELECT lexical.type_label(laplace.relation_type_id('IS_A')) AS isa_label;
+SELECT realize.path(ARRAY[public.laplace_hash128_blake3('test/converse/synset1'),
+                          public.laplace_hash128_blake3('test/converse/synset2')],
+                    ARRAY[laplace.relation_type_id('IS_A')],
+                    public.laplace_hash128_blake3('test/converse/lang_en')) AS realized_path;
 
-SELECT type, fact, witnesses FROM consensus.salient_facts(word_id('dog'));
-SELECT reply FROM converse.recall_intent('related', word_id('dog'), NULL, 'IS_ANTONYM_OF');
-SELECT fact FROM consensus.related_in(laplace_hash128_blake3('test/converse/synset1'), relation_type_id('CAUSES'));
+SELECT type, fact, witnesses FROM consensus.salient_facts(laplace.word_id('dog'));
+SELECT reply FROM converse.recall_intent('related', laplace.word_id('dog'), NULL, 'IS_ANTONYM_OF');
+SELECT fact FROM consensus.related_in(public.laplace_hash128_blake3('test/converse/synset1'), laplace.relation_type_id('CAUSES'));
 
-SELECT reply FROM converse.recall_intent('is_a', word_id('dog'), word_id('c'));
-SELECT reply FROM converse.recall_intent('is_a', word_id('h'), word_id('c'));
+SELECT reply FROM converse.recall_intent('is_a', laplace.word_id('dog'), laplace.word_id('c'));
+SELECT reply FROM converse.recall_intent('is_a', laplace.word_id('h'), laplace.word_id('c'));
 
 SELECT g.step, lexical.type_label(g.type_id) AS rel_type,
-       g.entity_id = laplace_hash128_blake3('test/converse/synset2') AS is_synset2
-FROM consensus.walk_strongest(laplace_hash128_blake3('test/converse/synset1'), relation_type_id('IS_A')) g;
+       g.entity_id = public.laplace_hash128_blake3('test/converse/synset2') AS is_synset2
+FROM consensus.walk_strongest(public.laplace_hash128_blake3('test/converse/synset1'), laplace.relation_type_id('IS_A')) g;
 SELECT count(*) AS tree_nodes
-FROM consensus.walk_branches(laplace_hash128_blake3('test/converse/synset1'), relation_type_id('IS_A'), 4, 5);
-SELECT reply, eff_mu FROM converse.recall_intent('walk', word_id('p'));
+FROM consensus.walk_branches(public.laplace_hash128_blake3('test/converse/synset1'), laplace.relation_type_id('IS_A'), 4, 5);
+SELECT reply, eff_mu FROM converse.recall_intent('walk', laplace.word_id('p'));
 
 -- recall_session stays a text entry point because it carries session state, but
 -- it no longer routes on phrasing: a bare prompt gets the default shape, and the
@@ -171,35 +170,35 @@ SELECT reply, eff_mu FROM converse.recall_intent('walk', word_id('p'));
 SELECT reply, witnesses FROM converse.recall_session('dog', convert_to('s1', 'UTF8'));
 SELECT reply FROM converse.recall_session('dog', convert_to('s1', 'UTF8'));
 SELECT reply, witnesses FROM converse.recall_session('dog', convert_to('s1', 'UTF8'));
-SELECT ord, prompt, resolved_id = word_id('dog') AS topic_is_dog
-FROM session_topics WHERE session_id = convert_to('s1', 'UTF8') ORDER BY ord;
+SELECT ord, prompt, resolved_id = laplace.word_id('dog') AS topic_is_dog
+FROM laplace.session_topics WHERE session_id = convert_to('s1', 'UTF8') ORDER BY ord;
 
-SELECT plane AS reason_plane FROM consensus.relate_path(word_id('dog'), word_id('h'));
+SELECT plane AS reason_plane FROM consensus.relate_path(laplace.word_id('dog'), laplace.word_id('h'));
 
 SELECT count(*) AS band_rows FROM converse.relation_bands();
 SELECT bool_and(consensus_rows >= 0) AS bands_counted FROM converse.relation_bands();
 
-SELECT array_agg(missing_arena ORDER BY missing_arena) AS dog_gaps FROM consensus.gaps(word_id('dog'));
+SELECT array_agg(missing_arena ORDER BY missing_arena) AS dog_gaps FROM consensus.gaps(laplace.word_id('dog'));
 
 SELECT bool_and(status = 'confirmed') AS isa_confirmed
-FROM converse.epistemic_status(word_id('dog')) WHERE type = 'is a';
+FROM converse.epistemic_status(laplace.word_id('dog')) WHERE type = 'is a';
 
-SELECT plane AS rel_plane, usage AS rel_usage FROM consensus.relation_summary(word_id('dog'), word_id('h'));
+SELECT plane AS rel_plane, usage AS rel_usage FROM consensus.relation_summary(laplace.word_id('dog'), laplace.word_id('h'));
 
 SELECT reply LIKE '%antonym%' AS related_reply_mentions_antonym
-FROM converse.recall_intent('reason', word_id('dog'), word_id('h'));
+FROM converse.recall_intent('reason', laplace.word_id('dog'), laplace.word_id('h'));
 
-SELECT holder, type, fact FROM converse.contrast(word_id('dog'), word_id('c'))
+SELECT holder, type, fact FROM converse.contrast(laplace.word_id('dog'), laplace.word_id('c'))
 ORDER BY holder, type, fact;
 
 SELECT count(*) >= 0 AS hypernyms_runs
-FROM converse.hypernyms(word_id('dog'), 4);
+FROM converse.hypernyms(laplace.word_id('dog'), 4);
 
 SELECT cardinality(path) > 1 AS isa_path_found
-FROM converse.isa_path(word_id('dog'), word_id('c'));
+FROM converse.isa_path(laplace.word_id('dog'), laplace.word_id('c'));
 
 SELECT reply LIKE 'Yes%' AS cascade_via_isa
-FROM converse.recall_intent('is_a', word_id('dog'), word_id('c'));
+FROM converse.recall_intent('is_a', laplace.word_id('dog'), laplace.word_id('c'));
 
 
 

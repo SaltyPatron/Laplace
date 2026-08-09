@@ -1,16 +1,22 @@
+-- ops.entity_attestations — inspect/census listing of consensus cells for a
+-- subject (spec 37 WITNESS). Attestation listing is ops, not the fold itself.
+-- Old names dropped (#532), including a mid-migration consensus.* placement.
 -- BEGIN ATOMIC: GH #764.
-CREATE OR REPLACE FUNCTION laplace_entity_attestations(
+DROP FUNCTION IF EXISTS laplace_entity_attestations(bytea, bigint);
+DROP FUNCTION IF EXISTS laplace.laplace_entity_attestations(bytea, bigint);
+DROP FUNCTION IF EXISTS consensus.laplace_entity_attestations(bytea, bigint);
+CREATE OR REPLACE FUNCTION ops.entity_attestations(
     p_subject bytea, p_min_eff_mu_raw bigint DEFAULT 0)
 RETURNS TABLE(type_id bytea, object_id bytea, eff_mu_raw bigint, eff_mu numeric, witnesses bigint)
 LANGUAGE sql STABLE
 BEGIN ATOMIC
     SELECT c.type_id, c.object_id,
-           laplace.eff_mu(c.rating, c.rd),
-           laplace.eff_mu_display(c.rating, c.rd),
+           consensus.eff_mu(c.rating, c.rd),
+           consensus.eff_mu_display(c.rating, c.rd),
            c.witness_count
     FROM laplace.consensus c
     WHERE c.subject_id = p_subject
       AND c.object_id IS NOT NULL
-      AND laplace.eff_mu(c.rating, c.rd) >= p_min_eff_mu_raw
-    ORDER BY laplace.eff_mu(c.rating, c.rd) DESC;
+      AND consensus.eff_mu(c.rating, c.rd) >= p_min_eff_mu_raw
+    ORDER BY consensus.eff_mu(c.rating, c.rd) DESC;
 END;

@@ -65,7 +65,7 @@ LANGUAGE sql STABLE PARALLEL RESTRICTED AS $$
     ),
     pre AS (
         SELECT w.id, w.coord
-        FROM @extschema@.v_word_points w, anchor a
+        FROM laplace.v_word_points w, anchor a
         WHERE w.coord IS NOT NULL
           AND (p_band_mask IS NULL
                OR laplace.laplace_highway_match(w.highway_mask, p_band_mask))

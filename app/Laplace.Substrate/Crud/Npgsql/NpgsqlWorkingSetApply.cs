@@ -134,8 +134,8 @@ public sealed partial class NpgsqlSubstrateWriter
         await using var conn = await _ds.OpenConnectionAsync(ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText =
-            "SELECT laplace.evidence_count("
-            + "p_type => laplace.canonical_id('substrate/type/HasLayerCompleted/0/v1'), "
+            "SELECT ops.evidence_count("
+            + "p_type => realize.canonical_id('substrate/type/HasLayerCompleted/0/v1'), "
             + "p_source => laplace.source_id('UnicodeDecomposer')) > 0";
         return await cmd.ExecuteScalarAsync(ct) is true;
     }

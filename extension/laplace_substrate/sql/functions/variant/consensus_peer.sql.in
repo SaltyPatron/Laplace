@@ -45,10 +45,10 @@ BEGIN
             -- OUTBOUND: p_id -> partner. A peer is another SUBJECT asserting the
             -- same (relation, object).
             SELECT c2.subject_id AS peer,
-                   LEAST(m.mu, laplace.eff_mu(c2.rating, c2.rd)) AS contrib
+                   LEAST(m.mu, consensus.eff_mu(c2.rating, c2.rd)) AS contrib
             FROM (
                 SELECT c.type_id AS rel, c.object_id AS partner,
-                       laplace.eff_mu(c.rating, c.rd) AS mu
+                       consensus.eff_mu(c.rating, c.rd) AS mu
                 FROM laplace.v_consensus_unrefuted c
                 WHERE c.subject_id = p_id
                   AND c.object_id IS NOT NULL
@@ -62,10 +62,10 @@ BEGIN
             -- asserts under that relation. `subject_id IS DISTINCT FROM p_id`
             -- keeps a self-loop one row, exactly as the CASE did.
             SELECT c2.object_id AS peer,
-                   LEAST(m.mu, laplace.eff_mu(c2.rating, c2.rd))
+                   LEAST(m.mu, consensus.eff_mu(c2.rating, c2.rd))
             FROM (
                 SELECT c.type_id AS rel, c.subject_id AS partner,
-                       laplace.eff_mu(c.rating, c.rd) AS mu
+                       consensus.eff_mu(c.rating, c.rd) AS mu
                 FROM laplace.v_consensus_unrefuted c
                 WHERE c.object_id = p_id
                   AND c.subject_id IS DISTINCT FROM p_id

@@ -1,4 +1,6 @@
-CREATE OR REPLACE FUNCTION attestation_unary_response(
+DROP FUNCTION IF EXISTS laplace.attestation_unary_response(bytea, bytea, bytea[], bytea);
+DROP FUNCTION IF EXISTS consensus.attestation_unary_response(bytea, bytea, bytea[], bytea);
+CREATE OR REPLACE FUNCTION ops.attestation_unary_response(
     p_subject_id        bytea,
     p_relation_type_id  bytea,
     p_source_scope bytea[]    DEFAULT NULL,
@@ -12,7 +14,7 @@ RETURNS TABLE(
 )
 LANGUAGE sql STABLE
     AS $$
-    SELECT (laplace.eff_mu(c.rating, c.rd) / 1e9)::double precision,
+    SELECT (consensus.eff_mu(c.rating, c.rd) / 1e9)::double precision,
            c.witness_count::integer,
            c.rating,
            c.rd

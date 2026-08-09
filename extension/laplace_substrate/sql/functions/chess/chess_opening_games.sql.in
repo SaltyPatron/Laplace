@@ -68,11 +68,11 @@ fold AS MATERIALIZED (
 )
 SELECT g.line, g.event,
        f.witness_count::bigint,
-       laplace.eff_mu_display(f.rating, f.rd)::double precision
+       consensus.eff_mu_display(f.rating, f.rd)::double precision
 FROM played g
 LEFT JOIN fold f ON f.line = g.line
 ORDER BY f.witness_count DESC NULLS LAST,
-         laplace.eff_mu(f.rating, f.rd) DESC NULLS LAST,
+         consensus.eff_mu(f.rating, f.rd) DESC NULLS LAST,
          g.line, g.event
 LIMIT p_limit OFFSET p_offset
 $$;

@@ -4,12 +4,14 @@
 -- that no live ingest owns the run (no active backend, no Laplace.Cli you did
 -- not start) before closing. Refuses rows not currently 'running' and
 -- statuses outside the cut-off terminal vocabulary.
-CREATE OR REPLACE FUNCTION ingest_run_close(p_run_id uuid, p_status text DEFAULT 'cancelled')
-    RETURNS ingest_run_journal
-    LANGUAGE plpgsql VOLATILE 
+DROP FUNCTION IF EXISTS laplace.ingest_run_close(uuid, text);
+
+CREATE OR REPLACE FUNCTION ops.ingest_run_close(p_run_id uuid, p_status text DEFAULT 'cancelled')
+    RETURNS laplace.ingest_run_journal
+    LANGUAGE plpgsql VOLATILE
     AS $$
 DECLARE
-    r ingest_run_journal;
+    r laplace.ingest_run_journal;
 BEGIN
     IF p_status NOT IN ('failed', 'cancelled') THEN
         RAISE EXCEPTION 'ingest_run_close: % is not a cut-off terminal status (failed|cancelled)', p_status;

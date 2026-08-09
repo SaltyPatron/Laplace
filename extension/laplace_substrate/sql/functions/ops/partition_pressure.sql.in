@@ -1,6 +1,8 @@
 -- BEGIN ATOMIC: GH #764.
 -- Partition skew detector via pg_class.reltuples / pg_partition_tree (no table scan).
-CREATE OR REPLACE FUNCTION partition_pressure(p_table text DEFAULT NULL)
+DROP FUNCTION IF EXISTS laplace.partition_pressure(text);
+
+CREATE OR REPLACE FUNCTION ops.partition_pressure(p_table text DEFAULT NULL)
     RETURNS TABLE(
         parent        text,
         partition     text,
@@ -15,7 +17,7 @@ BEGIN ATOMIC
         SELECT c.oid, c.relname
         FROM pg_class c
         JOIN pg_namespace n ON n.oid = c.relnamespace
-        WHERE n.nspname = '@extschema@'
+        WHERE n.nspname = 'laplace'
           AND c.relkind = 'p'
           AND (p_table IS NULL OR c.relname = p_table)
           AND NOT EXISTS (SELECT 1 FROM pg_inherits i WHERE i.inhrelid = c.oid)

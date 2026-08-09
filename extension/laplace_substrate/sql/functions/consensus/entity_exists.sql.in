@@ -19,6 +19,6 @@ BEGIN ATOMIC
     -- A valid tier-0 codepoint is real via the perfcache alone (see laplace.codepoint_for_id());
     -- it must resolve true here even before/without its own laplace.entities row being written,
     -- so callers can't mistake "orphaned tier-0" for "genuinely missing".
-    SELECT EXISTS (SELECT 1 FROM @extschema@.entities e WHERE e.id = p_id)
-        OR @extschema@.codepoint_for_id(p_id) IS NOT NULL;
+    SELECT EXISTS (SELECT 1 FROM laplace.entities e WHERE e.id = p_id)
+        OR realize.codepoint_for_id(p_id) IS NOT NULL;
 END;

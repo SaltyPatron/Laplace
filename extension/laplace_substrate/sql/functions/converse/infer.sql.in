@@ -61,7 +61,7 @@ biasfam AS (
     SELECT c.subject_id FROM laplace.consensus c JOIN bias b ON c.object_id = b.synset_id
 ),
 cand AS (
-    SELECT c.object_id AS id, max(laplace.eff_mu(c.rating, c.rd)) AS m
+    SELECT c.object_id AS id, max(consensus.eff_mu(c.rating, c.rd)) AS m
     FROM topic t
     -- WordNet antonymy (and similar) lands on the WORD id; election seats a
     -- synset. Read both subjects or a typed antonym prompt returns empty

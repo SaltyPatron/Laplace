@@ -5,10 +5,10 @@ CREATE OR REPLACE FUNCTION realize._has_name(p_id bytea, p_lang bytea DEFAULT NU
     RETURNS text
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
     SELECT q.s FROM (
-        SELECT laplace.render_text(nm.object_id, 24) AS s,
+        SELECT realize.render_text(nm.object_id, 24) AS s,
                (lang.object_id IS NOT NULL) AS lp,
                (nm.type_id = laplace.relation_type_id('HAS_NAME')) AS prim,
-               laplace.eff_mu(nm.rating, nm.rd) AS mu
+               consensus.eff_mu(nm.rating, nm.rd) AS mu
         FROM laplace.v_consensus_unrefuted nm
         LEFT JOIN laplace.consensus lang ON lang.subject_id = nm.object_id
           AND lang.type_id = laplace.relation_type_id('HAS_LANGUAGE')

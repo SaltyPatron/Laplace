@@ -1,4 +1,6 @@
-CREATE OR REPLACE FUNCTION api(p_like text DEFAULT NULL)
+DROP FUNCTION IF EXISTS laplace.api(text);
+
+CREATE OR REPLACE FUNCTION ops.api(p_like text DEFAULT NULL)
     RETURNS TABLE(name text, args text, returns text)
     LANGUAGE sql STABLE
 AS $$

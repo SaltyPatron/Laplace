@@ -50,8 +50,10 @@
 --
 -- No SET clause: a PL/pgSQL procedure carrying one is barred from transaction
 -- control (COMMIT), so references are schema-qualified instead.
--- Invoke with: CALL @extschema@.evict_source(source_id('ChessAnalysis'));
-CREATE OR REPLACE PROCEDURE evict_source(
+-- Invoke with: CALL ops.evict_source(laplace.source_id('ChessAnalysis'));
+DROP PROCEDURE IF EXISTS laplace.evict_source(bytea, bytea[], bytea[], int, boolean);
+
+CREATE OR REPLACE PROCEDURE ops.evict_source(
     p_source       bytea,
     p_relations    bytea[] DEFAULT NULL,
     p_marker_types bytea[] DEFAULT NULL,
@@ -130,17 +132,17 @@ BEGIN
             EXECUTE format($q$
                 WITH pick AS (
                     SELECT a.id, a.subject_id
-                    FROM @extschema@.attestations a
+                    FROM laplace.attestations a
                     WHERE a.type_id = %L::bytea AND a.source_id = $1
                     LIMIT %s),
                 del AS (
-                    DELETE FROM @extschema@.attestations a
+                    DELETE FROM laplace.attestations a
                     USING pick
                     WHERE a.type_id = %L::bytea
                       AND a.id = pick.id AND a.subject_id = pick.subject_id
                     RETURNING a.subject_id, a.object_id),
                 dirty AS (
-                    INSERT INTO @extschema@.highway_mask_dirty (id)
+                    INSERT INTO laplace.highway_mask_dirty (id)
                     SELECT DISTINCT u.id
                     FROM (SELECT d.subject_id AS id FROM del d
                           UNION
@@ -164,7 +166,7 @@ BEGIN
             --     (last_observed_at, id), neutral-prior seed — the consensus_fold
             --     aggregate is the SQL surface of the ingest fold's native scalar.
             EXECUTE format($q$
-                UPDATE @extschema@.consensus c
+                UPDATE laplace.consensus c
                 SET rating           = (f.acc).rating,
                     rd               = (f.acc).rd,
                     volatility       = (f.acc).volatility,
@@ -172,15 +174,15 @@ BEGIN
                     last_observed_at = f.last_ts
                 FROM (
                     SELECT t.subject_id, t.object_id,
-                           @extschema@.consensus_fold(false, NULL, NULL, NULL,
+                           laplace.consensus_fold(false, NULL, NULL, NULL,
                                a.opponent_rd_fp1e9,
                                GREATEST(a.observation_count, 1),
                                a.sum_score_fp1e9,
-                               @extschema@.glicko2_tau()
+                               consensus.glicko2_tau()
                                ORDER BY a.last_observed_at, a.id) AS acc,
                            max(a.last_observed_at) AS last_ts
                     FROM _evict_cells t
-                    JOIN @extschema@.attestations a
+                    JOIN laplace.attestations a
                       ON a.type_id = %L::bytea
                      AND a.subject_id = t.subject_id
                      AND a.object_id IS NOT DISTINCT FROM t.object_id
@@ -188,20 +190,20 @@ BEGIN
                 ) f
                 WHERE c.type_id = %L::bytea
                   AND c.subject_id = f.subject_id
-                  AND c.id = @extschema@.consensus_id(f.subject_id, %L::bytea, f.object_id)
+                  AND c.id = laplace.consensus_id(f.subject_id, %L::bytea, f.object_id)
             $q$, rel, rel, rel);
             GET DIAGNOSTICS n = ROW_COUNT;
             refold_total := refold_total + n;
 
             -- (c) zero-survivor cells are DELETED, not zeroed.
             EXECUTE format($q$
-                DELETE FROM @extschema@.consensus c
+                DELETE FROM laplace.consensus c
                 USING _evict_cells t
                 WHERE c.type_id = %L::bytea
                   AND c.subject_id = t.subject_id
-                  AND c.id = @extschema@.consensus_id(t.subject_id, %L::bytea, t.object_id)
+                  AND c.id = laplace.consensus_id(t.subject_id, %L::bytea, t.object_id)
                   AND NOT EXISTS (
-                      SELECT 1 FROM @extschema@.attestations a
+                      SELECT 1 FROM laplace.attestations a
                       WHERE a.type_id = %L::bytea
                         AND a.subject_id = t.subject_id
                         AND a.object_id IS NOT DISTINCT FROM t.object_id)
@@ -224,17 +226,17 @@ BEGIN
         LOOP
             WITH pick AS (
                 SELECT e.id, e.tier
-                FROM @extschema@.entities e
+                FROM laplace.entities e
                 WHERE e.type_id = ANY(p_marker_types)
                   AND e.first_observed_by = p_source
                 LIMIT p_batch),
             del AS (
-                DELETE FROM @extschema@.entities e
+                DELETE FROM laplace.entities e
                 USING pick
                 WHERE e.id = pick.id AND e.tier = pick.tier
                 RETURNING e.id),
             phys AS (
-                DELETE FROM @extschema@.physicalities p
+                DELETE FROM laplace.physicalities p
                 USING del
                 WHERE p.entity_id = del.id)
             SELECT count(*) INTO n FROM del;
@@ -251,7 +253,7 @@ BEGIN
     -- (d) drain the mask-repair queue through the existing machinery (refresh
     -- recomputes from scratch and can CLEAR bits deposit could only OR on).
     IF p_drain THEN
-        CALL @extschema@.highway_mask_drain(p_batch);
+        CALL laplace.highway_mask_drain(p_batch);
     END IF;
 
     RAISE LOG 'evict_source: done — source %: % evidence row(s) deleted, % cell(s) refolded, % cell(s) culled, % marker(s) removed in %s',

@@ -22,7 +22,7 @@ CREATE OR REPLACE FUNCTION generation.grapheme_order(p_vocab bytea[], p_words in
         -- ranking); DISTINCT ON dropped, since (entity_id, type) is already unique.
         SELECT w.id AS wid, w.trajectory
         FROM laplace.v_word_points w
-        WHERE w.type_id = laplace.canonical_id('Word')
+        WHERE w.type_id = realize.canonical_id('Word')
           AND w.trajectory IS NOT NULL
         -- Sampling is by content hash, which is ARBITRARY -- an arbitrary LIMIT without
         -- an ordering is a missing ranking. The honest ranking is by trajectory length,

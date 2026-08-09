@@ -43,9 +43,9 @@
 -- "function source_status(text) is not a member of extension laplace_substrate"
 -- (CI 2026-08-03 runs 30788596381 / 30791014736). Same trap as geometry_audit /
 -- sense_audit / prompt_language.
-DROP FUNCTION IF EXISTS source_status(text);
+DROP FUNCTION IF EXISTS laplace.source_status(text);
 
-CREATE OR REPLACE FUNCTION source_status(p_source text DEFAULT NULL)
+CREATE OR REPLACE FUNCTION ops.source_status(p_source text DEFAULT NULL)
     RETURNS TABLE(source            text,
                   source_id         bytea,
                   ingested          boolean,
@@ -54,11 +54,11 @@ CREATE OR REPLACE FUNCTION source_status(p_source text DEFAULT NULL)
                   has_entities      boolean,
                   last_run_status   text,
                   last_run_at       timestamptz)
-    LANGUAGE sql STABLE 
+    LANGUAGE sql STABLE
     AS $$
 WITH by_evidence AS (
     SELECT s.source_id, s.evidence_approx
-    FROM @extschema@.source_counts_approx() s
+    FROM ops.source_counts_approx() s
 ),
 -- NOTE: no by_entities aggregate. Entities carry first_observed_by, which is how a
 -- CONTENT-ONLY lane proves it ran, but aggregating 44M rows to learn a boolean is the
@@ -67,7 +67,7 @@ WITH by_evidence AS (
 by_journal AS (
     SELECT DISTINCT ON (j.source_name)
            j.source_name, j.source_id, j.status, j.started_at
-    FROM @extschema@.ingest_run_journal j
+    FROM laplace.ingest_run_journal j
     ORDER BY j.source_name, j.started_at DESC
 ),
 ids AS (
@@ -77,7 +77,7 @@ ids AS (
 rolled AS (
     SELECT i.source_id,
            COALESCE(ev.evidence_approx, 0)                     AS evidence_approx,
-           EXISTS (SELECT 1 FROM @extschema@.entities e
+           EXISTS (SELECT 1 FROM laplace.entities e
                    WHERE e.first_observed_by = i.source_id)    AS has_entities,
            jr.source_name                                      AS journal_name,
            jr.status                                           AS last_run_status,
@@ -87,7 +87,7 @@ rolled AS (
     LEFT JOIN by_journal  jr ON jr.source_id = i.source_id
 ),
 matched AS (
-    SELECT COALESCE(r.journal_name, @extschema@.render(r.source_id))     AS source,
+    SELECT COALESCE(r.journal_name, realize.render(r.source_id))     AS source,
            r.source_id,
            (r.evidence_approx > 0 OR r.has_entities)                     AS ingested,
            true                                                          AS known,
@@ -100,7 +100,7 @@ matched AS (
     FROM rolled r
     WHERE p_source IS NULL
        OR r.journal_name = p_source
-       OR r.source_id = @extschema@.source_id(p_source)
+       OR r.source_id = laplace.source_id(p_source)
 )
 SELECT * FROM matched
 UNION ALL
@@ -116,15 +116,15 @@ UNION ALL
 -- see the name did resolve to an identity, and the answer is about the substrate rather
 -- than about their spelling.
 SELECT p_source,
-       @extschema@.source_id(p_source),
+       laplace.source_id(p_source),
        false,
        -- KNOWN separates "declared source that has written nothing" from "no such source".
        -- Bootstrapping a lane mints its source ENTITY, so an id with no entity is a name
        -- nothing in this substrate has ever declared -- almost always a misspelling, which
        -- on a mesh this dense is far likelier than genuine absence. Reporting both as a
        -- bare `ingested = false` answers a question the caller did not ask.
-       EXISTS (SELECT 1 FROM @extschema@.entities e
-               WHERE e.id = @extschema@.source_id(p_source)),
+       EXISTS (SELECT 1 FROM laplace.entities e
+               WHERE e.id = laplace.source_id(p_source)),
        0::bigint, false, NULL::text, NULL::timestamptz
 WHERE p_source IS NOT NULL
   AND NOT EXISTS (SELECT 1 FROM matched)

@@ -7,7 +7,7 @@ CREATE OR REPLACE FUNCTION converse.translations(p_word bytea, p_limit int DEFAU
     LANGUAGE sql LAPLACE_STABLE_STRICT
  AS $$
     -- Dedup and rank by (member, lang) id pair, never by rendered surface: the
-    -- old DISTINCT ON (laplace.render_text(member)) collapsed distinct translations --
+    -- old DISTINCT ON (realize.render_text(member)) collapsed distinct translations --
     -- even across different languages -- whenever their surfaces coincided.
     -- render_text/label run above the sort, streaming off the ranked candidates
     -- only until p_limit rows survive the empty-surface filter.
@@ -24,12 +24,12 @@ CREATE OR REPLACE FUNCTION converse.translations(p_word bytea, p_limit int DEFAU
         GROUP BY sm.member, sm.lang
     )
     -- a.mu is fp1e9 (synset_members) — convert through the one display definition
-    SELECT r.txt AS translation, realize.label(a.lang) AS language, laplace.eff_mu_display(a.mu), a.witnesses
+    SELECT r.txt AS translation, realize.label(a.lang) AS language, consensus.eff_mu_display(a.mu), a.witnesses
     FROM (
         SELECT member, lang, mu, witnesses FROM agg
         ORDER BY sense_mu DESC NULLS LAST, mu DESC, witnesses DESC, lang, member
     ) a
-    CROSS JOIN LATERAL (SELECT laplace.render_text(a.member, 64) AS txt) r
+    CROSS JOIN LATERAL (SELECT realize.render_text(a.member, 64) AS txt) r
     WHERE NULLIF(btrim(r.txt), '') IS NOT NULL
     LIMIT p_limit
 $$;

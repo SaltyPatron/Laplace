@@ -49,14 +49,14 @@
 -- Return-type change needs a DROP: CREATE OR REPLACE cannot alter a function's
 -- RETURNS TABLE. Adding avg_constituents to this surface failed the upgrade
 -- until this line existed -- the same trap prompt_coherence and infer hit.
-DROP FUNCTION IF EXISTS geometry_audit(double precision);
+DROP FUNCTION IF EXISTS laplace.geometry_audit(double precision);
 
-CREATE OR REPLACE FUNCTION geometry_audit(p_sample double precision DEFAULT 0.3)
+CREATE OR REPLACE FUNCTION structural.geometry_audit(p_sample double precision DEFAULT 0.3)
     RETURNS TABLE(tier smallint, entities bigint,
                   min_radius numeric, avg_radius numeric, max_radius numeric,
                   on_sphere bigint, interior bigint, avg_constituents numeric,
                   hilbert_bands int, min_band bigint, max_band bigint)
-    LANGUAGE plpgsql VOLATILE 
+    LANGUAGE plpgsql VOLATILE
     AS $$
 DECLARE
     q text;

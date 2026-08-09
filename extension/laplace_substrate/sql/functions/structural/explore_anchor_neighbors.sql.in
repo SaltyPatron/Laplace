@@ -64,7 +64,7 @@ BEGIN
     )
     SELECT 'geodesic'::text,
            n.entity_id,
-           COALESCE(NULLIF(laplace.render_text_fast(n.entity_id, 8), ''),
+           COALESCE(NULLIF(realize.render_text_fast(n.entity_id, 8), ''),
                     converse.label_or_hex(n.entity_id)),
            (SELECT min(e.tier) FROM laplace.entities e WHERE e.id = n.entity_id),
            n.geo,
@@ -94,7 +94,7 @@ BEGIN
         )
         SELECT 'shape'::text,
                f.entity_id,
-               COALESCE(NULLIF(laplace.render_text_fast(f.entity_id, 8), ''),
+               COALESCE(NULLIF(realize.render_text_fast(f.entity_id, 8), ''),
                         converse.label_or_hex(f.entity_id)),
                2::smallint,
                NULL::float8,

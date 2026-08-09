@@ -1,5 +1,5 @@
-INSERT INTO canonical_names (id, name)
-SELECT canonical_id(v.name), v.name
+INSERT INTO laplace.canonical_names (id, name)
+SELECT realize.canonical_id(v.name), v.name
 FROM (VALUES
     ('substrate/atomic/none/v1'),
     ('substrate/entity/Architecture_Llama/v1'),

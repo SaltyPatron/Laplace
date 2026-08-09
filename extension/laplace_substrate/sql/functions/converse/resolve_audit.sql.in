@@ -58,7 +58,7 @@ enriched AS (
               FROM laplace.consensus c
              WHERE c.subject_id = t.id
                AND c.type_id = p_lang_rel
-             ORDER BY laplace.eff_mu(c.rating, c.rd) DESC, c.object_id
+             ORDER BY consensus.eff_mu(c.rating, c.rd) DESC, c.object_id
              LIMIT 1) AS lang_id
     FROM tok t
 ),

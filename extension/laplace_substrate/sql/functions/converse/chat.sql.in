@@ -90,7 +90,7 @@ BEGIN
                         AND c.type_id = laplace.relation_type_id('HAS_LANGUAGE')
         WHERE p.id IS NOT NULL AND c.object_id IS NOT NULL
         GROUP BY c.object_id
-        ORDER BY sum(laplace.eff_mu(c.rating, c.rd)) DESC, c.object_id
+        ORDER BY sum(consensus.eff_mu(c.rating, c.rd)) DESC, c.object_id
         LIMIT 1;
     END IF;
 
@@ -155,11 +155,11 @@ BEGIN
             ),
             adj AS (
                 SELECT st.topic_id, st.last_ord,
-                       (SELECT sum(laplace.eff_mu(c.rating, c.rd))
+                       (SELECT sum(consensus.eff_mu(c.rating, c.rd))
                         FROM psense ps
                         JOIN laplace.consensus c ON c.subject_id = st.topic_id
                                         AND c.object_id = ps.sid) AS m_out,
-                       (SELECT sum(laplace.eff_mu(c.rating, c.rd))
+                       (SELECT sum(consensus.eff_mu(c.rating, c.rd))
                         FROM psense ps
                         JOIN laplace.consensus c ON c.object_id = st.topic_id
                                         AND c.subject_id = ps.sid) AS m_in
@@ -195,7 +195,7 @@ BEGIN
             -- Built ON the band-lens pattern below, not beside it. Four defects the
             -- scalar form carried, all fixed here and none of them a law change:
             --   * (c.rating-2*c.rd) open-coded three times -- a SECOND definition of
-            --     edge strength inside a function whose other branches call laplace.eff_mu().
+            --     edge strength inside a function whose other branches call consensus.eff_mu().
             --     If laplace.eff_mu's definition moves, this branch silently diverges.
             --   * realize.realize() PER ROW before the cut, in the same file whose band lens
             --     measures that at ~7 ms/id against ~0.3 ms/id batched.
@@ -226,12 +226,12 @@ BEGIN
             edges AS MATERIALIZED (
                 -- parts and kin read forward (topic -> object); kinds reads backward,
                 -- because the kinds OF a topic are the subjects whose hypernym it is.
-                SELECT s.layer, c.object_id AS nid, laplace.eff_mu(c.rating, c.rd) AS m
+                SELECT s.layer, c.object_id AS nid, consensus.eff_mu(c.rating, c.rd) AS m
                 FROM sel s
                 JOIN laplace.consensus c ON c.type_id = s.type_id AND c.subject_id = topic
                 WHERE s.layer IN (1, 3) AND c.object_id IS NOT NULL
                 UNION ALL
-                SELECT s.layer, c.subject_id, laplace.eff_mu(c.rating, c.rd)
+                SELECT s.layer, c.subject_id, consensus.eff_mu(c.rating, c.rd)
                 FROM sel s
                 JOIN laplace.consensus c ON c.type_id = s.type_id AND c.object_id = topic
                 WHERE s.layer = 2
@@ -313,12 +313,12 @@ BEGIN
                   AND e.id NOT IN (SELECT id FROM converse.non_kin_assoc_types())
             ),
             edges AS MATERIALIZED (
-                SELECT s.band, c.object_id AS nid, laplace.eff_mu(c.rating, c.rd) AS m
+                SELECT s.band, c.object_id AS nid, consensus.eff_mu(c.rating, c.rd) AS m
                 FROM sel s
                 JOIN laplace.consensus c ON c.type_id = s.type_id AND c.subject_id = topic
                 WHERE c.object_id IS NOT NULL
                 UNION ALL
-                SELECT s.band, c.subject_id, laplace.eff_mu(c.rating, c.rd)
+                SELECT s.band, c.subject_id, consensus.eff_mu(c.rating, c.rd)
                 FROM sel s
                 JOIN laplace.consensus c ON c.type_id = s.type_id AND c.object_id = topic
             ),

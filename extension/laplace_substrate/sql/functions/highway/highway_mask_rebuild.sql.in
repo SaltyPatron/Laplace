@@ -26,8 +26,10 @@
 --
 -- No SET clause on the procedure: a PL/pgSQL procedure carrying a SET clause is
 -- barred from transaction control (COMMIT), so references are schema-qualified
--- instead. Invoke with: CALL @extschema@.highway_mask_rebuild();
-CREATE OR REPLACE PROCEDURE highway_mask_rebuild(p_batch int DEFAULT 500000)
+-- instead. Invoke with: CALL laplace.highway_mask_rebuild();
+DROP PROCEDURE IF EXISTS laplace.highway_mask_rebuild(int);
+
+CREATE OR REPLACE PROCEDURE laplace.highway_mask_rebuild(p_batch int DEFAULT 500000)
     LANGUAGE plpgsql AS $$
 DECLARE
     last_id bytea := decode(repeat('00', 16), 'hex');
@@ -44,11 +46,11 @@ BEGIN
     CREATE TEMP TABLE _hmr_candidates (id bytea PRIMARY KEY);
 
     INSERT INTO _hmr_candidates (id)
-    SELECT c.subject_id FROM @extschema@.consensus c
+    SELECT c.subject_id FROM laplace.consensus c
     UNION
-    SELECT c.object_id  FROM @extschema@.consensus c WHERE c.object_id IS NOT NULL
+    SELECT c.object_id  FROM laplace.consensus c WHERE c.object_id IS NOT NULL
     UNION
-    SELECT e.id FROM @extschema@.entities e WHERE e.highway_mask IS NOT NULL;
+    SELECT e.id FROM laplace.entities e WHERE e.highway_mask IS NOT NULL;
     GET DIAGNOSTICS candidates = ROW_COUNT;
 
     RAISE LOG 'highway_mask_rebuild: start — % mask candidates (consensus participants + already-masked)',

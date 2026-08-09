@@ -105,11 +105,11 @@ public sealed class RenderBeforeSelectGateTests
         "ops/band_leaders.sql.in",                     // 2x label_or_hex @ 9,11
         "ops/entity_type_counts.sql.in",               // 1x render @ 5
         "ops/entity_type_counts_approx.sql.in",        // 1x render @ 43
-        "ops/mesh_position.sql.in",                    // 6x label_or_hex @ 10,11,15,21,23,36
+        "structural/mesh_position.sql.in",             // 6x label_or_hex @ 10,11,15,21,23,36
         "ops/source_counts.sql.in",                    // 1x render @ 8
         "ops/source_counts_approx.sql.in",             // 1x render @ 26
         "ops/source_status.sql.in",                    // 1x render @ 90
-        "ops/taxonomy_tree.sql.in",                    // 3x label_or_hex @ 10,12,17
+        "taxonomy/taxonomy_tree.sql.in",               // 3x label_or_hex @ 10,12,17
 
         // --- lexical: one gloss per answered question. Bounded; likely permanent.
         "lexical/define.sql.in",                       // 1x render_text @ 5

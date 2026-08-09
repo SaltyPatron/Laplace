@@ -671,8 +671,8 @@ int laplace_relation_in_family(const hash128_t* type_id, const char* family_root
         seed_names.append(a['surface'])
     seed_names = sorted(set(seed_names))
     sql_lines = [
-        "INSERT INTO canonical_names (id, name)",
-        "SELECT canonical_id(v.name), v.name",
+        "INSERT INTO laplace.canonical_names (id, name)",
+        "SELECT realize.canonical_id(v.name), v.name",
         "FROM (VALUES",
     ]
     for i, n in enumerate(seed_names):
@@ -905,8 +905,8 @@ def emit_pos_law(pos: dict) -> None:
     pos_seeds = [f"substrate/pos/{u}/v1" for u in upos_list]
     pos_frag = OUT_SEED_FRAG.parent / "seed_pos.sql.in"
     sql = [
-        "INSERT INTO canonical_names (id, name)",
-        "SELECT canonical_id(v.name), v.name",
+        "INSERT INTO laplace.canonical_names (id, name)",
+        "SELECT realize.canonical_id(v.name), v.name",
         "FROM (VALUES",
     ]
     for i, n in enumerate(pos_seeds):

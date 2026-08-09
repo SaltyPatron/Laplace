@@ -139,7 +139,7 @@ public static class NpgsqlFoundryReads
     public static Task<IReadOnlyList<CoordRow>> EntityPhysicalityCoordsAsync(
         NpgsqlDataSource ds, byte[][] vocab, CancellationToken ct = default) =>
         NpgsqlRead.ReadRowsAsync(ds, """
-            SELECT entity_id, x, y, z, m FROM laplace.entity_physicality_coords(@vocab)
+            SELECT entity_id, x, y, z, m FROM ops.entity_physicality_coords(@vocab)
             """,
             static r => new CoordRow(
                 (byte[])r[0], r.GetDouble(1), r.GetDouble(2), r.GetDouble(3), r.GetDouble(4)),
@@ -320,14 +320,14 @@ public static class NpgsqlFoundryReads
             p => p.AddWithValue("s", source), ct: ct, label: "source_id");
 
     /// <summary>
-    /// Surfaces for crawl-seed pinning: <c>render_text(word_id(s), 80)</c> over a text array.
+    /// Surfaces for crawl-seed pinning: <c>realize.render_text(laplace.word_id(s), 80)</c> over a text array.
     /// </summary>
     public static Task<IReadOnlyList<string>> RenderResolvedWordSurfacesAsync(
         NpgsqlDataSource ds, string[] surfaces, CancellationToken ct = default) =>
         NpgsqlRead.ReadRowsAsync(ds, """
-            SELECT render_text(word_id(s), 80)
+            SELECT realize.render_text(laplace.word_id(s), 80)
             FROM unnest(@surfaces::text[]) AS s
-            WHERE word_id(s) IS NOT NULL
+            WHERE laplace.word_id(s) IS NOT NULL
             """,
             static r => r.GetString(0),
             p =>
@@ -393,7 +393,7 @@ public static class NpgsqlFoundryReads
         CancellationToken ct = default) =>
         NpgsqlRead.ReadRowsAsync(ds, """
             SELECT v.id, e.neighbour_id,
-                   GREATEST(laplace.walk_edge_weight(e.rating, e.rd, e.witness_count), 0) AS w
+                   GREATEST(consensus.walk_edge_weight(e.rating, e.rd, e.witness_count), 0) AS w
             FROM unnest(@vocab) AS v(id)
             CROSS JOIN LATERAL consensus.edges_raw(
               v.id, 'out', ARRAY[laplace.relation_type_id(@rel)],

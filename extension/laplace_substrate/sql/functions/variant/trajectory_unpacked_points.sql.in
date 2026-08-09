@@ -10,7 +10,7 @@ CREATE OR REPLACE FUNCTION generation.trajectory_unpacked_points(p_entity bytea)
                -- tiers (UD mints single-word sentences), so a bare scalar lookup
                -- multi-rows (21000). The floor IS min(tier).
                (SELECT min(e.tier) FROM laplace.entities e WHERE e.id = u.entity_id),
-               CASE WHEN laplace.codepoint_for_id(u.entity_id) IS NOT NULL THEN 0 END
+               CASE WHEN realize.codepoint_for_id(u.entity_id) IS NOT NULL THEN 0 END
            ) AS ctier
     FROM laplace.v_word_points w,
     LATERAL public.ST_DumpPoints(w.trajectory) dp,

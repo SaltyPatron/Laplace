@@ -10,9 +10,9 @@ CREATE OR REPLACE FUNCTION consensus.by_ids(p_ids bytea[])
     -- laplace.eff_mu(r,d) IS rating - 2*rd the value is identical, but centralized on
     -- the canonical helper. No SET search_path so it inlines into the caller's
     -- FROM (the state-valuation path is hot).
-    SELECT c.id, @extschema@.eff_mu(c.rating, c.rd)::double precision,
+    SELECT c.id, consensus.eff_mu(c.rating, c.rd)::double precision,
            c.rd::double precision, c.witness_count::double precision
-    FROM @extschema@.consensus c
+    FROM laplace.consensus c
     WHERE c.id = ANY(p_ids)
 $$;
 
@@ -27,9 +27,9 @@ CREATE OR REPLACE FUNCTION consensus.by_ids(p_ids bytea[], p_type bytea)
     -- are all OUTCOME- or MOVE-typed. Callers that know the edge type (they
     -- built the ids via ConsensusKeys.EdgeId(subject, type, object)) pass it
     -- here and the scan prunes to the one partition that can hold the rows.
-    SELECT c.id, @extschema@.eff_mu(c.rating, c.rd)::double precision,
+    SELECT c.id, consensus.eff_mu(c.rating, c.rd)::double precision,
            c.rd::double precision, c.witness_count::double precision
-    FROM @extschema@.consensus c
+    FROM laplace.consensus c
     WHERE c.id = ANY(p_ids)
       AND c.type_id = p_type
 $$;

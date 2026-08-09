@@ -41,7 +41,7 @@ internal sealed class SubstrateTools
     /// One catalog, two views: <see cref="ListTools"/> sends every agent a name +
     /// one-line summary (cheap, always in context); <c>help</c> looks up the full
     /// rationale + schema for one name on demand — the same shape as
-    /// laplace.api('substring') on the SQL side, so the tool surface doesn't repeat
+    /// ops.api('substring') on the SQL side, so the tool surface doesn't repeat
     /// the mistake it fixed there (a verbose catalog nobody reads because it's
     /// expensive to hold in context every turn).
     /// </summary>
@@ -62,7 +62,7 @@ internal sealed class SubstrateTools
     private static readonly ToolSpec[] ToolCatalog =
     [
         new("api", "Search the installed SQL function catalog by substring.",
-            "Search the substrate's installed SQL function catalog (laplace.api). Returns name, args, returns for every function matching the substring. Use before assuming a helper doesn't exist.",
+            "Search the substrate's installed SQL function catalog (ops.api). Returns name, args, returns for every function matching the substring. Use before assuming a helper doesn't exist.",
             () => Schema(("query", "string", "substring to match, '' lists everything", true)),
             (s, a) => s.Api(a)),
         new("sql", "Run a read-only SQL query against the substrate.",
@@ -163,7 +163,7 @@ internal sealed class SubstrateTools
             () => Schema(),
             (_, _) => McpLane()),
         new("source_status", "Is a source ingested, and how do we know.",
-            "Ingest state per source (laplace.source_status): known, ingested, approximate evidence, whether it observed entities, and the last run's status. Call this instead of assembling an answer — every hand-rolled version of this question is wrong in a specific way. An evidence>0 test reports the DOCUMENT lane as absent, because it is content-only by design (entities and geometry, zero distributional attestations); a source name you typed returns nothing when the spelling differs from the decomposer's declared SourceName; and ingest_run_journal is ops metadata that does not survive a dump/restore, so a missing row is not absence. Asking with a name ALWAYS returns exactly one row: `ingested=false` means the source wrote nothing, and `known=false` means this substrate has no record of that source id at all — which on a mesh this dense usually means the name is wrong rather than the corpus missing. Absence is an answer here, never an empty result set.",
+            "Ingest state per source (ops.source_status): known, ingested, approximate evidence, whether it observed entities, and the last run's status. Call this instead of assembling an answer — every hand-rolled version of this question is wrong in a specific way. An evidence>0 test reports the DOCUMENT lane as absent, because it is content-only by design (entities and geometry, zero distributional attestations); a source name you typed returns nothing when the spelling differs from the decomposer's declared SourceName; and ingest_run_journal is ops metadata that does not survive a dump/restore, so a missing row is not absence. Asking with a name ALWAYS returns exactly one row: `ingested=false` means the source wrote nothing, and `known=false` means this substrate has no record of that source id at all — which on a mesh this dense usually means the name is wrong rather than the corpus missing. Absence is an answer here, never an empty result set.",
             () => Schema(("source", "string", "declared source name, e.g. WordNetDecomposer; omit for every source", false)),
             (s, a) => s.SourceStatus(a)),
         new("ingest", "Run a corpus ingest through the CLI's tested pipeline.",
@@ -173,7 +173,7 @@ internal sealed class SubstrateTools
                          ("timeout_seconds", "integer", "max seconds to wait before killing the child process, default 600", false)),
             (_, a) => Ingest(a)),
         new("op", "Call an installed SQL operation by name, with bound arguments.",
-            "Call any operation in the installed catalog BY NAME (laplace.api is the allow-list; nothing outside it is callable). Arguments are bound as parameters and cast to the signature's declared types -- no SQL text crosses this boundary in either direction, which is what makes this narrower than `sql` rather than a nicer spelling of it. Overloads resolve from the argument names you supply. Enforced read-only with a 15s statement timeout, rows capped (default 200). This exists because a per-function tool is written by hand and therefore forgotten (358 installed functions, 358 chances), and because a hand-written tool is invisible until the server restarts -- which nothing owns. `op` resolves against the LIVE catalog, so an operation is callable the moment it is installed. If you are about to hand-write a SELECT, the operation you want probably exists: api('<substring>') first.",
+            "Call any operation in the installed catalog BY NAME (ops.api is the allow-list; nothing outside it is callable). Arguments are bound as parameters and cast to the signature's declared types -- no SQL text crosses this boundary in either direction, which is what makes this narrower than `sql` rather than a nicer spelling of it. Overloads resolve from the argument names you supply. Enforced read-only with a 15s statement timeout, rows capped (default 200). This exists because a per-function tool is written by hand and therefore forgotten (358 installed functions, 358 chances), and because a hand-written tool is invisible until the server restarts -- which nothing owns. `op` resolves against the LIVE catalog, so an operation is callable the moment it is installed. If you are about to hand-write a SELECT, the operation you want probably exists: api('<substring>') first.",
             () => Schema(("name", "string", "installed function name, exactly as api() reports it", true),
                          ("args", "object", "argument name -> value, e.g. {\"p_source\": \"WordNetDecomposer\"}", false),
                          ("max_rows", "integer", "row cap, default 200", false)),
@@ -183,7 +183,7 @@ internal sealed class SubstrateTools
             () => Schema(),
             (s, a) => s.PipelineStatus(a)),
         new("help", "List every tool (one-line each), or full detail for one name.",
-            "Catalog introspection for THIS tool surface, same idea as laplace.api('substring') for the SQL catalog: with no name, lists every tool's one-line summary; with name, returns the full rationale and input schema for that one tool. Call this before guessing at a tool's arguments from its one-line summary alone.",
+            "Catalog introspection for THIS tool surface, same idea as ops.api('substring') for the SQL catalog: with no name, lists every tool's one-line summary; with name, returns the full rationale and input schema for that one tool. Call this before guessing at a tool's arguments from its one-line summary alone.",
             () => Schema(("name", "string", "tool name for full detail; omit to list every tool", false)),
             (_, a) => Help(a)),
     ];
@@ -436,7 +436,7 @@ internal sealed class SubstrateTools
             return JsonRows(Array.Empty<JsonObject>());
 
         using var cmd = _dbReadOnly.CreateCommand(
-            "SELECT b.sense_id, laplace.render(b.sense_id), b.synset_id, laplace.render(b.synset_id), " +
+            "SELECT b.sense_id, realize.render(b.sense_id), b.synset_id, realize.render(b.synset_id), " +
             "b.via_relation, b.score, b.base_eff_mu, b.domain_hits, b.witnesses " +
             "FROM taxonomy.bubble_up($1, NULL::bytea[], $2) b");
         cmd.Parameters.Add(new() { Value = id });
@@ -472,7 +472,7 @@ internal sealed class SubstrateTools
     }
 
     /// <summary>
-    /// Call an installed operation by name. The installed catalog (laplace.api) is the
+    /// Call an installed operation by name. The installed catalog (ops.api) is the
     /// allow-list, so this is strictly narrower than the sql hatch: `sql` accepts arbitrary
     /// text, `op` accepts a name that must already exist as a reviewed, installed function.
     /// Arguments bind as parameters cast to the signature's declared types — no caller text

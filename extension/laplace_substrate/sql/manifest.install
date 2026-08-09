@@ -122,10 +122,10 @@ functions/inspect/attestation_response.sql.in
 functions/inspect/attestation_response_type.sql.in
 functions/inspect/attestation_unary_response.sql.in
 functions/inspect/attestation_unary_response_type.sql.in
-functions/ops/relation_type_id.sql.in
+functions/identity/relation_type_id.sql.in
 functions/consensus/subjects_of_type.sql.in
-functions/ops/entity_type_id.sql.in
-functions/ops/source_id.sql.in
+functions/identity/entity_type_id.sql.in
+functions/identity/source_id.sql.in
 functions/ops/evidence_count.sql.in
 functions/ops/consensus_count.sql.in
 functions/ops/content_count.sql.in
@@ -143,7 +143,7 @@ functions/ops/partition_pressure.sql.in
 functions/ops/index_usage_report.sql.in
 functions/identity/compositional_type_ids.sql.in
 functions/ops/consensus_tier_distribution.sql.in
-functions/ops/render_gaps.sql.in
+functions/realize/render_gaps.sql.in
 functions/ops/api.sql.in
 functions/lexical/type_label.sql.in
 functions/lexical/senses_bootstrap.sql.in
@@ -364,8 +364,8 @@ functions/ops/source_roster.sql.in
 functions/ops/source_bootstrap_present.sql.in
 functions/ops/ingest_run_close.sql.in
 functions/ops/source_status.sql.in
-functions/ops/mesh_position.sql.in
-functions/ops/taxonomy_tree.sql.in
+functions/structural/mesh_position.sql.in
+functions/taxonomy/taxonomy_tree.sql.in
 functions/ops/band_leaders.sql.in
 functions/ops/entity_record.sql.in
 functions/highway/laplace_highway_mask_bits.sql.in
@@ -376,7 +376,7 @@ functions/highway/highway_mask_refresh.sql.in
 functions/highway/highway_mask_drain.sql.in
 functions/highway/highway_mask_deposit.sql.in
 functions/model/model_factor.sql.in
-functions/ops/highway_mask_rebuild.sql.in
+functions/highway/highway_mask_rebuild.sql.in
 functions/ops/evict_source.sql.in
 functions/highway/entities_highway_bits_gin.sql.in
 functions/highway/entities_has_highway.sql.in
@@ -429,5 +429,5 @@ functions/chess/chess_opening_endgames.sql.in
 functions/lexical/sense_audit.sql.in
 functions/converse/prompt_language.sql.in
 functions/converse/election_token_profile.sql.in
-functions/ops/geometry_audit.sql.in
+functions/structural/geometry_audit.sql.in
 functions/converse/resolve_audit.sql.in

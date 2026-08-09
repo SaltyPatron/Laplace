@@ -19,8 +19,8 @@
 --     ~4M rows and will seq-scan.
 -- DROP+CREATE: physicality_tableoid was inserted before coord; CREATE OR REPLACE
 -- VIEW cannot rename/reorder columns (PG error on upgrade).
-DROP VIEW IF EXISTS v_word_points CASCADE;
-CREATE VIEW v_word_points AS
+DROP VIEW IF EXISTS laplace.v_word_points CASCADE;
+CREATE VIEW laplace.v_word_points AS
 SELECT e.id,
        e.tier,
        e.type_id,

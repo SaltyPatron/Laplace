@@ -2,9 +2,9 @@
 -- Formal R0/R2 tool ISA entry; abstains with 0 rows when ungrounded.
 --
 -- GH #862 / #860. No SET search_path -- it blocks plan caching and SQL inlining, so
--- the body was re-planned on every call. No @extschema@ either: the control file
--- pins schema = 'laplace' with relocatable = false, so the placeholder has exactly
--- one possible expansion. Real schema names throughout.
+-- the body was re-planned on every call. No install-time schema placeholder
+-- either: the control file pins schema = 'laplace' with relocatable = false, so
+-- the placeholder has exactly one possible expansion. Real schema names throughout.
 DROP FUNCTION IF EXISTS laplace.retrieve_grounded(text, bytea[], integer);
 CREATE OR REPLACE FUNCTION taxonomy.retrieve_grounded(
     p_term text,
@@ -38,17 +38,17 @@ glossed AS (
            f.score,
            f.witnesses,
            (
-               SELECT laplace.render_text(g.object_id, 48)
+               SELECT realize.render_text(g.object_id, 48)
                FROM laplace.consensus g
                WHERE g.subject_id = f.synset_id
                  AND g.type_id = laplace.relation_type_id('HAS_DEFINITION')
-               ORDER BY laplace.eff_mu(g.rating, g.rd) DESC
+               ORDER BY consensus.eff_mu(g.rating, g.rd) DESC
                LIMIT 1
            ) AS definition
     FROM frontier f
 )
 SELECT entity_id,
-       COALESCE(NULLIF(laplace.render_text(entity_id, 32), ''), p_term) AS surface,
+       COALESCE(NULLIF(realize.render_text(entity_id, 32), ''), p_term) AS surface,
        synset_id,
        definition,
        score,

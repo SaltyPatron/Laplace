@@ -1,10 +1,13 @@
-CREATE OR REPLACE FUNCTION index_usage_report(p_min_bytes bigint DEFAULT 0)
+DROP FUNCTION IF EXISTS laplace.index_usage_report(bigint);
+DROP FUNCTION IF EXISTS laplace.index_usage_detail(text, integer);
+
+CREATE OR REPLACE FUNCTION ops.index_usage_report(p_min_bytes bigint DEFAULT 0)
     RETURNS TABLE(
         bucket      text,
         indexes     bigint,
         total_bytes bigint,
         total_size  text)
-    LANGUAGE sql STABLE 
+    LANGUAGE sql STABLE
     AS $$
     -- What the index set COSTS versus what anything has ever READ.
     --
@@ -40,7 +43,7 @@ CREATE OR REPLACE FUNCTION index_usage_report(p_min_bytes bigint DEFAULT 0)
                s.idx_scan,
                pg_relation_size(s.indexrelid) AS bytes
         FROM pg_stat_user_indexes s
-        WHERE s.schemaname = '@extschema@'
+        WHERE s.schemaname = 'laplace'
           AND pg_relation_size(s.indexrelid) >= p_min_bytes
     )
     SELECT CASE
@@ -56,14 +59,14 @@ CREATE OR REPLACE FUNCTION index_usage_report(p_min_bytes bigint DEFAULT 0)
     ORDER BY sum(ix.bytes) DESC
 $$;
 
-CREATE OR REPLACE FUNCTION index_usage_detail(p_table text DEFAULT NULL, p_limit integer DEFAULT 40)
+CREATE OR REPLACE FUNCTION ops.index_usage_detail(p_table text DEFAULT NULL, p_limit integer DEFAULT 40)
     RETURNS TABLE(
         tbl         text,
         index_name  text,
         idx_scan    bigint,
         total_bytes bigint,
         total_size  text)
-    LANGUAGE sql STABLE 
+    LANGUAGE sql STABLE
     AS $$
     -- The per-index rows behind index_usage_report()'s buckets, biggest first. This is the
     -- form that names a specific drop candidate; the bucket form only sizes the problem.
@@ -74,7 +77,7 @@ CREATE OR REPLACE FUNCTION index_usage_detail(p_table text DEFAULT NULL, p_limit
            pg_relation_size(s.indexrelid),
            pg_size_pretty(pg_relation_size(s.indexrelid))
     FROM pg_stat_user_indexes s
-    WHERE s.schemaname = '@extschema@'
+    WHERE s.schemaname = 'laplace'
       AND (p_table IS NULL OR s.relname = p_table)
     ORDER BY pg_relation_size(s.indexrelid) DESC
     LIMIT GREATEST(p_limit, 1)

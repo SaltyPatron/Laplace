@@ -27,7 +27,7 @@ CREATE OR REPLACE FUNCTION realize.label(p_id bytea)
                         regexp_replace(
                             regexp_replace(
                                 regexp_replace(
-                                    regexp_replace(laplace.render(p_id),
+                                    regexp_replace(realize.render(p_id),
                                         '^substrate/(?:type|relation|trust_class|source|entity)/(.*)/v1$', '\1'),
                                     '^substrate/pos/(?:probationary/[^/]+/)?(.+)/v1$', '\1'),
                                 '^source/file/(.+)/v1$', '\1'),

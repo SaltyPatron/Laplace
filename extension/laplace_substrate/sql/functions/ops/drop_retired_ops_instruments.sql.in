@@ -1,8 +1,8 @@
--- Retired: index_usage_report(bigint) and index_usage_detail(text, integer).
+-- Retired flat-schema copies of index_usage_report / index_usage_detail.
+-- Live surfaces are ops.index_usage_report / ops.index_usage_detail (GH #813/#764).
 --
 -- entity_type_counts_approx / partition_pressure were retired here when they had
--- zero callers (g4_dead_canonical). They are live again on PR #919 (GH #813/#764)
--- and called from NpgsqlSubstrateReads — do NOT re-drop them.
+-- zero callers (g4_dead_canonical). They are live again as ops.* — do NOT re-drop them.
 --
 -- WHY A DROP MODULE AND NOT JUST DELETING THE .sql.in FILES. Removing a file from the
 -- manifests stops FUTURE installs from creating the function. It does nothing to a database
@@ -12,5 +12,6 @@
 -- scans SOURCE, not pg_proc.
 --
 -- IF EXISTS throughout: a fresh install never created these, and this module runs there too.
-DROP FUNCTION IF EXISTS index_usage_report(bigint);
-DROP FUNCTION IF EXISTS index_usage_detail(text, integer);
+-- Qualify laplace.* so this cannot delete the ops.* replacements installed earlier.
+DROP FUNCTION IF EXISTS laplace.index_usage_report(bigint);
+DROP FUNCTION IF EXISTS laplace.index_usage_detail(text, integer);

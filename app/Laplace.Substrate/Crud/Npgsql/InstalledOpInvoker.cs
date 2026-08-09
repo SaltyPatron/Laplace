@@ -6,8 +6,9 @@ using NpgsqlTypes;
 namespace Laplace.SubstrateCRUD.Npgsql;
 
 /// <summary>
-/// Call any installed <c>laplace.*</c> operation by name. The catalog from
-/// <c>laplace.api()</c> is the allow-list — nothing outside it is callable.
+/// Call any installed operation by name. The catalog from <c>ops.api()</c> is
+/// the allow-list — nothing outside it is callable. Catalog names are bare for
+/// <c>laplace.*</c> and <c>schema.proname</c> elsewhere (see <c>ops.api</c>).
 /// Shared by MCP <c>op</c> and OpenAICompat <c>POST /v1/op</c> (GH #812).
 /// </summary>
 public static class InstalledOpInvoker
@@ -24,6 +25,8 @@ public static class InstalledOpInvoker
     /// <summary>
     /// Resolve <paramref name="name"/> against the live catalog, bind named args
     /// with declared-type casts, and return rows under a read-only data source.
+    /// Accepts catalog names (<c>ops.source_counts</c>) or a bare proname that
+    /// uniquely suffix-matches one catalog entry.
     /// </summary>
     public static async Task<OpResult> InvokeAsync(
         NpgsqlDataSource readOnlyDb,
@@ -38,7 +41,7 @@ public static class InstalledOpInvoker
 
         var catalog = await NpgsqlSubstrateReads.ApiCatalogAsync(readOnlyDb, name, ct)
             .ConfigureAwait(false);
-        var overloads = catalog.Where(r => r.Name == name).ToArray();
+        var overloads = ResolveOverloads(catalog, name);
         if (overloads.Length == 0)
         {
             var err = catalog.Count == 0
@@ -47,6 +50,7 @@ public static class InstalledOpInvoker
             return new OpResult([], null, err);
         }
 
+        var callableName = overloads[0].Name;
         var candidates = overloads
             .Select(o => (Row: o, Params: ParseSignature(o.Args)))
             .Where(c => keys.All(k => c.Params.Any(p => p.Name == k))
@@ -55,17 +59,18 @@ public static class InstalledOpInvoker
 
         if (candidates.Length == 0)
             return new OpResult([], null,
-                $"'{name}' has no overload matching arguments [{string.Join(", ", keys)}]. Signatures: "
-                + string.Join(" | ", overloads.Select(o => $"{name}({o.Args})")));
+                $"'{callableName}' has no overload matching arguments [{string.Join(", ", keys)}]. Signatures: "
+                + string.Join(" | ", overloads.Select(o => $"{o.Name}({o.Args})")));
         if (candidates.Length > 1)
             return new OpResult([], null,
-                $"'{name}' is ambiguous for arguments [{string.Join(", ", keys)}] — name more of them. Signatures: "
-                + string.Join(" | ", candidates.Select(c => $"{name}({c.Row.Args})")));
+                $"'{callableName}' is ambiguous for arguments [{string.Join(", ", keys)}] — name more of them. Signatures: "
+                + string.Join(" | ", candidates.Select(c => $"{c.Row.Name}({c.Row.Args})")));
 
         var chosen = candidates[0].Params;
+        callableName = candidates[0].Row.Name;
         if (chosen.Any(p => p.Name.Length == 0) && keys.Count > 0)
             return new OpResult([], null,
-                $"'{name}' has unnamed parameters and cannot be called by name: {name}({candidates[0].Row.Args})");
+                $"'{callableName}' has unnamed parameters and cannot be called by name: {callableName}({candidates[0].Row.Args})");
 
         var bound = new List<(string Slot, object? Value)>();
         var call = new List<string>();
@@ -77,7 +82,7 @@ public static class InstalledOpInvoker
         }
 
         // LIMIT rowCap + 1 so truncation is observable.
-        var sql = $"SELECT * FROM laplace.{QuoteIdent(name)}({string.Join(", ", call)}) LIMIT {rowCap + 1}";
+        var sql = $"SELECT * FROM {QualifyCallable(callableName)}({string.Join(", ", call)}) LIMIT {rowCap + 1}";
         await using var cmd = readOnlyDb.CreateCommand(sql);
         foreach (var (slot, value) in bound)
             cmd.Parameters.Add(BindArg(slot, value));
@@ -160,6 +165,41 @@ public static class InstalledOpInvoker
     }
 
     private static string QuoteIdent(string ident) => '"' + ident.Replace("\"", "\"\"") + '"';
+
+    /// <summary>
+    /// Match catalog rows by exact name, or — when <paramref name="name"/> is bare —
+    /// by a unique <c>schema.name</c> suffix. Ambiguous bare names return empty so the
+    /// caller surfaces the catalog suggestions.
+    /// </summary>
+    private static NpgsqlSubstrateReads.ApiCatalogRow[] ResolveOverloads(
+        IReadOnlyList<NpgsqlSubstrateReads.ApiCatalogRow> catalog, string name)
+    {
+        var exact = catalog.Where(r => r.Name == name).ToArray();
+        if (exact.Length > 0 || name.Contains('.', StringComparison.Ordinal))
+            return exact;
+
+        var suffix = "." + name;
+        var bySuffix = catalog.Where(r => r.Name.EndsWith(suffix, StringComparison.Ordinal)).ToArray();
+        var distinct = bySuffix.Select(r => r.Name).Distinct(StringComparer.Ordinal).ToArray();
+        return distinct.Length == 1 ? bySuffix : [];
+    }
+
+    /// <summary>
+    /// Turn a catalog name into a SQL callable ref. Bare names are <c>laplace</c>
+    /// (identity helpers); qualified names quote each part.
+    /// </summary>
+    private static string QualifyCallable(string catalogName)
+    {
+        var parts = catalogName.Split('.');
+        return parts.Length switch
+        {
+            1 => $"laplace.{QuoteIdent(parts[0])}",
+            2 => $"{QuoteIdent(parts[0])}.{QuoteIdent(parts[1])}",
+            _ => throw new ArgumentException(
+                $"catalog name '{catalogName}' is not schema.function or bare proname",
+                nameof(catalogName)),
+        };
+    }
 
     /// <summary>
     /// Map one JSON argument to a value Npgsql can bind. A JSON array becomes a

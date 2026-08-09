@@ -27,9 +27,9 @@ CREATE OR REPLACE FUNCTION consensus.related_objects(
     RETURNS TABLE(object_id bytea, eff_mu bigint, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
     SELECT e.neighbour_id,
-           @extschema@.eff_mu(e.rating, e.rd) AS eff_mu,
+           consensus.eff_mu(e.rating, e.rd) AS eff_mu,
            e.witness_count                    AS witnesses
     FROM consensus.edges_raw(p_subject, 'out',
-                               ARRAY[@extschema@.relation_type_id(p_relation)],
+                               ARRAY[laplace.relation_type_id(p_relation)],
                                p_limit, false, 'eff_mu') e
 $$;

@@ -52,7 +52,7 @@
 --
 -- No SET search_path: it blocks inlining (pg_proc.proconfig, checked at
 -- clauses.c:5168 for the set-returning path). Every reference is
--- @extschema@-qualified instead. GH #860.
+-- schema-qualified instead. GH #860.
 DROP FUNCTION IF EXISTS laplace.laplace_attention_centroid(bytea, bytea);
 CREATE OR REPLACE FUNCTION generation.laplace_attention_centroid(
     p_entity   bytea,
@@ -65,18 +65,18 @@ LANGUAGE sql STABLE PARALLEL RESTRICTED AS $$
     ),
     attended AS (
         SELECT c.object_id,
-               @extschema@.eff_mu(c.rating, c.rd)::float8 AS w
-        FROM @extschema@.consensus c
+               consensus.eff_mu(c.rating, c.rd)::float8 AS w
+        FROM laplace.consensus c
         CROSS JOIN band_bits b
         WHERE c.subject_id = p_entity
           AND c.object_id IS NOT NULL
           AND laplace.relation_highway_bit(c.type_id) = ANY (b.bits)
-          AND @extschema@.eff_mu(c.rating, c.rd) > 0
+          AND consensus.eff_mu(c.rating, c.rd) > 0
     ),
     weighted AS (
         SELECT w.coord, a.w
         FROM attended a
-        JOIN @extschema@.v_word_points w ON w.id = a.object_id
+        JOIN laplace.v_word_points w ON w.id = a.object_id
         WHERE w.coord IS NOT NULL
     ),
     -- THIRD centroid path in this system, kept deliberately (GH #906 item 4).

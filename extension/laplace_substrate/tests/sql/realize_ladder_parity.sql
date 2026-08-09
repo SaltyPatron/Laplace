@@ -29,14 +29,13 @@
 -- assertion is guarded by a cardinality check so an empty input FAILS instead of
 -- vacuously succeeding.
 BEGIN;
-SET search_path = laplace, public;
 
 -- A fixed, deterministic id set spanning the ladder's arms: ordinary words that
 -- a seeded substrate resolves, and content that nothing has ever witnessed
 -- (the abstain arm). Both must behave identically scalar and batched, whether or
 -- not this particular database has the lexical layer loaded.
 CREATE TEMP TABLE probe AS
-SELECT ord, word_id(w) AS id
+SELECT ord, laplace.word_id(w) AS id
 FROM unnest(ARRAY['a','dog','nine','letter','the','king','King',
                   'test/realize/never-witnessed-xyzzy']) WITH ORDINALITY AS t(w, ord);
 
@@ -57,24 +56,24 @@ FROM probe p CROSS JOIN lbl;
 -- Duplicated ids are included deliberately: 'a' appears twice below, and both
 -- positions must carry it (a dedup would collapse them and shift everything).
 WITH ids AS (SELECT array_agg(x.id ORDER BY x.ord) AS a
-             FROM (SELECT 1 AS ord, word_id('a') AS id
-                   UNION ALL SELECT 2, word_id('dog')
-                   UNION ALL SELECT 3, word_id('a')
-                   UNION ALL SELECT 4, word_id('nine')) x),
+             FROM (SELECT 1 AS ord, laplace.word_id('a') AS id
+                   UNION ALL SELECT 2, laplace.word_id('dog')
+                   UNION ALL SELECT 3, laplace.word_id('a')
+                   UNION ALL SELECT 4, laplace.word_id('nine')) x),
      lbl AS (SELECT realize.batch((SELECT a FROM ids), NULL) AS l)
 SELECT array_length(lbl.l, 1) = 4                     AS length_matches_input,
        lbl.l[1] IS NOT DISTINCT FROM lbl.l[3]         AS duplicate_id_not_collapsed,
-       lbl.l[1] IS NOT DISTINCT FROM realize.realize(word_id('a'), NULL)   AS pos1_aligned,
-       lbl.l[4] IS NOT DISTINCT FROM realize.realize(word_id('nine'), NULL) AS pos4_aligned
+       lbl.l[1] IS NOT DISTINCT FROM realize.realize(laplace.word_id('a'), NULL)   AS pos1_aligned,
+       lbl.l[4] IS NOT DISTINCT FROM realize.realize(laplace.word_id('nine'), NULL) AS pos4_aligned
 FROM lbl;
 
 -- 3. Abstention is preserved through the batch: unwitnessed content is NULL in
 -- both, never '<hex...>' styled as a label. label_or_hex is the only place that
 -- decides to show a raw id. (IS NOT DISTINCT FROM, not `=`: array equality with
 -- a NULL element yields NULL, which would make `=` a silent pass.)
-SELECT (realize.batch(ARRAY[word_id('test/realize/never-witnessed-xyzzy')], NULL))[1] IS NULL
+SELECT (realize.batch(ARRAY[laplace.word_id('test/realize/never-witnessed-xyzzy')], NULL))[1] IS NULL
                                                                  AS batch_abstains,
-       realize.realize(word_id('test/realize/never-witnessed-xyzzy'), NULL) IS NULL
+       realize.realize(laplace.word_id('test/realize/never-witnessed-xyzzy'), NULL) IS NULL
                                                                  AS scalar_abstains;
 
 -- 4. Degenerate inputs do not throw — the serving surface calls this with

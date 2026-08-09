@@ -4,7 +4,7 @@
 -- open set. Abstain = zero rows (queue empty), never fabricate.
 --
 -- No SET search_path so it inlines into callers (#617); family membership is
--- joined against laplace.relation_family_members('HAS_SENSE') (fenced once) instead
+-- joined against consensus.relation_family_members('HAS_SENSE') (fenced once) instead
 -- of calling relation_type_in_family() per consensus row — the same static
 -- truth table, but sargable through the (subject_id, type_id) indexes.
 -- Row-set equivalence of the sargable family_out proven live 2026-07-24
@@ -29,15 +29,15 @@ RETURNS TABLE(
 )
 LANGUAGE sql STABLE PARALLEL SAFE AS $$
 WITH fam AS MATERIALIZED (
-    SELECT id FROM laplace.relation_family_members('HAS_SENSE')
+    SELECT id FROM consensus.relation_family_members('HAS_SENSE')
 ),
 peers AS (
     SELECT unnest(lexical.lexical_peers(p_term)) AS id
 ),
 family_out AS (
     SELECT c.object_id AS target_id,
-           laplace.relation_canonical(c.type_id) AS via_relation,
-           laplace.eff_mu_display(c.rating, c.rd) AS base_eff_mu,
+           consensus.relation_canonical(c.type_id) AS via_relation,
+           consensus.eff_mu_display(c.rating, c.rd) AS base_eff_mu,
            c.witness_count AS witnesses,
            c.rating,
            c.rd
@@ -58,7 +58,7 @@ resolved AS (
     LEFT JOIN laplace.consensus ss
       ON ss.subject_id = fo.target_id
      AND ss.type_id IN (SELECT id FROM fam)
-     AND laplace.relation_canonical(ss.type_id) = 'IS_SENSE_OF'
+     AND consensus.relation_canonical(ss.type_id) = 'IS_SENSE_OF'
     WHERE fo.via_relation = 'HAS_SENSE'
       AND ss.object_id IS NOT NULL
 
@@ -141,10 +141,10 @@ ranked AS (
            COALESCE(ds.domain_hits, 0)::bigint AS domain_hits,
            r.witnesses,
            (r.base_eff_mu * (1::numeric + ln(1::numeric + COALESCE(ds.domain_hits, 0)))) AS score,
-           laplace.eff_mu(r.rating, r.rd) AS rank_key
+           consensus.eff_mu(r.rating, r.rd) AS rank_key
     FROM resolved r
     LEFT JOIN domain_scores ds ON ds.synset_id = r.synset_id
-    ORDER BY r.synset_id, laplace.eff_mu(r.rating, r.rd) DESC
+    ORDER BY r.synset_id, consensus.eff_mu(r.rating, r.rd) DESC
 )
 SELECT sense_id,
        synset_id,
@@ -159,7 +159,7 @@ FROM ranked
 -- This was `ORDER BY score DESC, rank_key DESC, witnesses DESC`, which is two
 -- keys, not three: with no domain context domain_hits is 0, so
 -- score = base_eff_mu * (1 + ln(1)) = base_eff_mu, and rank_key is
--- laplace.eff_mu(rating, rd) — the same quantity in a different type. Witness count only
+-- consensus.eff_mu(rating, rd) — the same quantity in a different type. Witness count only
 -- broke exact ties in it.
 --
 -- On a thin substrate that inverts the ranking. Measured on the foundation

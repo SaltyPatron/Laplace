@@ -1,6 +1,8 @@
 -- BEGIN ATOMIC: GH #764.
 -- Planner-statistics form of entity_type_counts (MCV x reltuples).
-CREATE OR REPLACE FUNCTION entity_type_counts_approx()
+DROP FUNCTION IF EXISTS laplace.entity_type_counts_approx();
+
+CREATE OR REPLACE FUNCTION ops.entity_type_counts_approx()
     RETURNS TABLE(type text, type_id bytea, entities_approx bigint)
     LANGUAGE sql STABLE
 BEGIN ATOMIC
@@ -8,16 +10,16 @@ BEGIN ATOMIC
         SELECT s.most_common_vals::text::bytea[] AS vals,
                s.most_common_freqs               AS freqs
         FROM pg_stats s
-        WHERE s.schemaname = '@extschema@'
+        WHERE s.schemaname = 'laplace'
           AND s.tablename  = 'entities'
           AND s.attname    = 'type_id'
     ), rt AS (
         SELECT c.reltuples
         FROM pg_class c
         JOIN pg_namespace n ON n.oid = c.relnamespace
-        WHERE n.nspname = '@extschema@' AND c.relname = 'entities'
+        WHERE n.nspname = 'laplace' AND c.relname = 'entities'
     )
-    SELECT laplace.render(m.tid)                        AS type,
+    SELECT realize.render(m.tid)                        AS type,
            m.tid                                AS type_id,
            (m.freq * rt.reltuples)::bigint      AS entities_approx
     FROM st, rt, LATERAL unnest(st.vals, st.freqs) AS m(tid, freq)

@@ -29,7 +29,7 @@ CREATE OR REPLACE FUNCTION generation.consensus_type_plane(
          kappa(k) AS (SELECT laplace.foundry_rd_kappa()),
          ranked AS (
              SELECT e.subject_id, e.object_id,
-                    laplace.walk_edge_weight(e.rating, e.rd, e.witness_count,
+                    consensus.walk_edge_weight(e.rating, e.rd, e.witness_count,
                                      (SELECT k FROM kappa)) AS w,
                     e.type_id, rk.rank AS rk
              FROM edges e JOIN rk ON rk.type_id = e.type_id

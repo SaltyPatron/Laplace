@@ -6,5 +6,5 @@ CREATE OR REPLACE FUNCTION structural.model_recipes()
     SELECT e.id, cn.name, e.first_observed_by
     FROM laplace.entities e
     JOIN laplace.canonical_names cn ON cn.id = e.id
-    WHERE e.type_id = laplace.canonical_id('Model_Recipe')
+    WHERE e.type_id = realize.canonical_id('Model_Recipe')
 $$;

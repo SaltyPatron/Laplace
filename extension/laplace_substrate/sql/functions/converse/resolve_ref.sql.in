@@ -9,6 +9,6 @@ CREATE OR REPLACE FUNCTION converse.resolve_ref(p_ref text)
     -- EmbeddingAsync each inlined. No SET search_path so it inlines.
     SELECT CASE
         WHEN p_ref ~ '^[0-9a-f]{32}$' THEN decode(p_ref, 'hex')
-        ELSE @extschema@.word_id(p_ref)
+        ELSE laplace.word_id(p_ref)
     END
 $$;

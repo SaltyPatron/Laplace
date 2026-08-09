@@ -8,7 +8,7 @@ CREATE OR REPLACE FUNCTION converse.translate_to(p_word bytea, p_lang text DEFAU
     LANGUAGE sql STABLE PARALLEL SAFE
  AS $$
     -- Dedup and rank by (member, lang) id pair, never by rendered surface (the
-    -- old GROUP BY laplace.render_text(member) conflated homographs). The user-supplied
+    -- old GROUP BY realize.render_text(member) conflated homographs). The user-supplied
     -- language reference is text, so it is resolved at the INPUT boundary: each
     -- DISTINCT candidate language is matched once against the reference (by
     -- label or definition surface), instead of re-rendering per member row.
@@ -35,7 +35,7 @@ CREATE OR REPLACE FUNCTION converse.translate_to(p_word bytea, p_lang text DEFAU
     ),
     -- Definition surfaces for the CANDIDATE languages, rendered ONCE in a fenced
     -- CTE. This used to sit inside the lang_match predicate as
-    -- `lower(laplace.render_text(d.object_id, 32)) = w.name`, i.e. a render evaluated per
+    -- `lower(realize.render_text(d.object_id, 32)) = w.name`, i.e. a render evaluated per
     -- probed edge purely to classify it -- the render-to-classify defect the read
     -- law names, in the one position the law calls out. Same accept set, rendered
     -- a bounded number of times.
@@ -45,17 +45,17 @@ CREATE OR REPLACE FUNCTION converse.translate_to(p_word bytea, p_lang text DEFAU
     -- language. consensus carries no outcome column; refutation is a non-positive
     -- fold, the same test the walk uses to dead-end an edge.
     lang_def_names AS MATERIALIZED (
-        SELECT d.subject_id AS lang, lower(laplace.render_text(d.object_id, 32)) AS dname
+        SELECT d.subject_id AS lang, lower(realize.render_text(d.object_id, 32)) AS dname
         FROM laplace.consensus d, want w0
         WHERE w0.name IS NOT NULL
           AND d.subject_id IN (SELECT DISTINCT lang FROM agg)
           AND d.type_id = laplace.relation_type_id('HAS_DEFINITION')
-          AND laplace.eff_mu(d.rating, d.rd) > 0
+          AND consensus.eff_mu(d.rating, d.rd) > 0
     ),
     lang_match AS (
         -- No-filter call (name IS NULL): pass every candidate language through with
         -- ZERO rendering — Postgres does not guarantee OR short-circuit, so the old
-        -- single-WHERE shape could evaluate realize.label()/laplace.render_text() even when no
+        -- single-WHERE shape could evaluate realize.label()/realize.render_text() even when no
         -- language filter was supplied (the common call).
         SELECT l.lang
         FROM (SELECT DISTINCT lang FROM agg) l, want w
@@ -75,13 +75,13 @@ CREATE OR REPLACE FUNCTION converse.translate_to(p_word bytea, p_lang text DEFAU
            OR s.lang IN (SELECT ld.lang FROM lang_def_names ld WHERE ld.dname = w.name)
     )
     -- a.mu is fp1e9 (synset_members) — convert through the one display definition
-    SELECT r.txt AS translation, realize.label(a.lang) AS language, laplace.eff_mu_display(a.mu), a.witnesses
+    SELECT r.txt AS translation, realize.label(a.lang) AS language, consensus.eff_mu_display(a.mu), a.witnesses
     FROM (
         SELECT member, lang, mu, witnesses FROM agg
         WHERE lang IN (SELECT lang FROM lang_match)
         ORDER BY sense_mu DESC NULLS LAST, mu DESC, witnesses DESC, lang, member
     ) a
-    CROSS JOIN LATERAL (SELECT laplace.render_text(a.member, 64) AS txt) r
+    CROSS JOIN LATERAL (SELECT realize.render_text(a.member, 64) AS txt) r
     WHERE NULLIF(btrim(r.txt), '') IS NOT NULL
     LIMIT p_limit
 $$;

@@ -20,7 +20,7 @@ BEGIN
         JOIN laplace.v_consensus_unrefuted c ON c.subject_id = v.id
             AND c.type_id = v_type
         WHERE c.object_id IS NOT NULL
-        ORDER BY c.subject_id, laplace.eff_mu(c.rating, c.rd) DESC
+        ORDER BY c.subject_id, consensus.eff_mu(c.rating, c.rd) DESC
     ),
     -- CASE-VARIANT ASYMMETRY, resolved through the ATTESTED case surface.
     -- 'ALL' may carry no HAS_POS witness while 'all' does. They are different
@@ -54,7 +54,7 @@ BEGIN
         JOIN laplace.v_consensus_unrefuted c ON c.subject_id = m.fid
             AND c.type_id = v_type
         WHERE c.object_id IS NOT NULL AND m.fid IS NOT NULL AND m.fid <> m.id
-        ORDER BY m.id, laplace.eff_mu(c.rating, c.rd) DESC, m.fid
+        ORDER BY m.id, consensus.eff_mu(c.rating, c.rd) DESC, m.fid
     )
     SELECT d.wid, d.pos FROM direct d
     UNION ALL

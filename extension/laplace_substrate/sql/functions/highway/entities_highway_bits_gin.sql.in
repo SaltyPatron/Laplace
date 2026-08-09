@@ -8,6 +8,6 @@
 -- minority of entities, so its insert volume per ingest is a fraction of a
 -- 137-entries-per-row trajectory index and it does not need the same runway.
 CREATE INDEX IF NOT EXISTS entities_highway_bits_gin
-    ON entities USING gin (laplace.laplace_highway_mask_bits(highway_mask))
+    ON laplace.entities USING gin (laplace.laplace_highway_mask_bits(highway_mask))
     WITH (fastupdate = on, gin_pending_list_limit = 8192)
     WHERE highway_mask IS NOT NULL;

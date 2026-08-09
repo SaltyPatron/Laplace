@@ -12,35 +12,39 @@
 -- Unattested reads 0 rather than absent: these feed a positives/negatives score
 -- distribution where every sampled pair must contribute a number, the same
 -- deliberate tri-state collapse consensus_pair_scores documents.
-CREATE OR REPLACE FUNCTION eval_pair_plane_score(
+DROP FUNCTION IF EXISTS laplace.eval_pair_plane_score(bytea, bytea, bytea);
+DROP FUNCTION IF EXISTS laplace.eval_ingest_fidelity_positives(text, text, int);
+DROP FUNCTION IF EXISTS laplace.eval_ingest_fidelity_negatives(text, int);
+
+CREATE OR REPLACE FUNCTION ops.eval_pair_plane_score(
     p_w1 bytea, p_w2 bytea, p_type bytea)
     RETURNS float8
-    LANGUAGE sql STABLE PARALLEL SAFE 
+    LANGUAGE sql STABLE PARALLEL SAFE
     AS $$
     SELECT GREATEST(
-        COALESCE((SELECT @extschema@.eff_mu_display(c.rating, c.rd)
-                  FROM @extschema@.consensus c
-                  WHERE c.id = @extschema@.consensus_id(p_w1, p_type, p_w2)), 0),
-        COALESCE((SELECT @extschema@.eff_mu_display(c.rating, c.rd)
-                  FROM @extschema@.consensus c
-                  WHERE c.id = @extschema@.consensus_id(p_w2, p_type, p_w1)), 0))::float8
+        COALESCE((SELECT consensus.eff_mu_display(c.rating, c.rd)
+                  FROM laplace.consensus c
+                  WHERE c.id = laplace.consensus_id(p_w1, p_type, p_w2)), 0),
+        COALESCE((SELECT consensus.eff_mu_display(c.rating, c.rd)
+                  FROM laplace.consensus c
+                  WHERE c.id = laplace.consensus_id(p_w2, p_type, p_w1)), 0))::float8
 $$;
 
 -- POSITIVES: pairs the ground-truth relation grounds together (two surfaces sharing
 -- a sense), scored on the plane relation. p_relation names the plane; p_ground_truth
 -- names the relation whose shared object makes two surfaces a true pair.
-CREATE OR REPLACE FUNCTION eval_ingest_fidelity_positives(
+CREATE OR REPLACE FUNCTION ops.eval_ingest_fidelity_positives(
     p_relation text, p_ground_truth text, p_limit int DEFAULT 200)
     RETURNS TABLE(score float8)
-    LANGUAGE sql STABLE 
+    LANGUAGE sql STABLE
     AS $$
     WITH vocab AS (
         SELECT subject_id AS id FROM consensus.subjects_of_type(p_relation)
     ),
     syn AS (
         SELECT c.subject_id AS w, c.object_id AS sense
-        FROM @extschema@.consensus c
-        WHERE c.type_id = @extschema@.relation_type_id(p_ground_truth)
+        FROM laplace.consensus c
+        WHERE c.type_id = laplace.relation_type_id(p_ground_truth)
           AND c.subject_id IN (SELECT id FROM vocab)
           AND c.object_id IS NOT NULL
     ),
@@ -50,8 +54,8 @@ CREATE OR REPLACE FUNCTION eval_ingest_fidelity_positives(
         SELECT DISTINCT a.w AS w1, b.w AS w2
         FROM syn a JOIN syn b ON a.sense = b.sense AND a.w < b.w
     )
-    SELECT @extschema@.eval_pair_plane_score(
-               p.w1, p.w2, @extschema@.relation_type_id(p_relation))
+    SELECT ops.eval_pair_plane_score(
+               p.w1, p.w2, laplace.relation_type_id(p_relation))
     FROM (SELECT w1, w2 FROM pairs ORDER BY random() LIMIT p_limit) p
 $$;
 
@@ -61,10 +65,10 @@ $$;
 -- shuffled vocabulary away, which draws unrelated pairs without ever asserting that
 -- a pair is NOT related: an unattested edge is unattested, and scoring it 0 here is
 -- the eval's convention, not a claim of refutation.
-CREATE OR REPLACE FUNCTION eval_ingest_fidelity_negatives(
+CREATE OR REPLACE FUNCTION ops.eval_ingest_fidelity_negatives(
     p_relation text, p_limit int DEFAULT 200)
     RETURNS TABLE(score float8)
-    LANGUAGE sql STABLE 
+    LANGUAGE sql STABLE
     AS $$
     WITH vocab AS (
         SELECT subject_id AS id FROM consensus.subjects_of_type(p_relation)
@@ -75,7 +79,7 @@ CREATE OR REPLACE FUNCTION eval_ingest_fidelity_negatives(
         SELECT a.id AS w1, b.id AS w2
         FROM samp a JOIN samp b ON b.rn = a.rn + (SELECT c/2 FROM cnt)
     )
-    SELECT @extschema@.eval_pair_plane_score(
-               p.w1, p.w2, @extschema@.relation_type_id(p_relation))
+    SELECT ops.eval_pair_plane_score(
+               p.w1, p.w2, laplace.relation_type_id(p_relation))
     FROM (SELECT w1, w2 FROM neg ORDER BY random() LIMIT p_limit) p
 $$;

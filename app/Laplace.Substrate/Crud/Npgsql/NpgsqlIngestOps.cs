@@ -20,7 +20,7 @@ public static class NpgsqlIngestOps
         NpgsqlConnection conn, byte[] sourceId, byte[] typeId, CancellationToken ct = default)
     {
         var v = await NpgsqlRead.ExecuteScalarAsync<object>(conn, """
-            SELECT laplace.evidence_count(p_type => @type, p_source => @source) > 0
+            SELECT ops.evidence_count(p_type => @type, p_source => @source) > 0
             """,
             p =>
             {
@@ -105,13 +105,13 @@ public static class NpgsqlIngestOps
     public static Task<long> EvidenceCountForSourceNameAsync(
         NpgsqlConnection conn, string sourceKey, CancellationToken ct = default) =>
         ScalarLongAsync(conn, """
-            SELECT laplace.evidence_count(p_source => laplace.source_id(@s))
+            SELECT ops.evidence_count(p_source => laplace.source_id(@s))
             """, p => p.AddWithValue("s", sourceKey), ct, "evidence_count_source_name");
 
     public static Task<long> ContentCountForSourceNameAsync(
         NpgsqlConnection conn, string sourceKey, CancellationToken ct = default) =>
         ScalarLongAsync(conn, """
-            SELECT laplace.content_count(p_source => laplace.source_id(@s))
+            SELECT ops.content_count(p_source => laplace.source_id(@s))
             """, p => p.AddWithValue("s", sourceKey), ct, "content_count_source_name");
 
     public static Task<long> EvidenceCountForRelationAsync(
@@ -119,10 +119,10 @@ public static class NpgsqlIngestOps
         CancellationToken ct = default) =>
         sourceKey is null
             ? ScalarLongAsync(conn, """
-                SELECT laplace.evidence_count(p_type => laplace.relation_type_id(@rel))
+                SELECT ops.evidence_count(p_type => laplace.relation_type_id(@rel))
                 """, p => p.AddWithValue("rel", relationType), ct, "evidence_count_relation")
             : ScalarLongAsync(conn, """
-                SELECT laplace.evidence_count(
+                SELECT ops.evidence_count(
                     p_type => laplace.relation_type_id(@rel),
                     p_source => laplace.source_id(@src))
                 """, p =>
@@ -135,7 +135,7 @@ public static class NpgsqlIngestOps
         NpgsqlConnection conn, string relationType, byte[] sourceId,
         CancellationToken ct = default) =>
         ScalarLongAsync(conn, """
-            SELECT laplace.evidence_count(
+            SELECT ops.evidence_count(
                 p_type => laplace.relation_type_id(@rel), p_source => @src)
             """,
             p =>
@@ -152,7 +152,7 @@ public static class NpgsqlIngestOps
         NpgsqlConnection conn, Guid runId, string status,
         CancellationToken ct = default) =>
         ScalarLongAsync(conn, """
-            SELECT count(*) FROM laplace.ingest_run_close(@run, @status)
+            SELECT count(*) FROM ops.ingest_run_close(@run, @status)
             """,
             p =>
             {
@@ -168,7 +168,7 @@ public static class NpgsqlIngestOps
         CancellationToken ct = default)
     {
         var v = await NpgsqlRead.ExecuteScalarAsync<object>(conn, """
-            SELECT laplace.source_bootstrap_present(
+            SELECT ops.source_bootstrap_present(
                 laplace.source_id(@src), laplace.relation_type_id(@rel))
             """,
             p =>
@@ -204,8 +204,8 @@ public static class NpgsqlIngestOps
         NpgsqlConnection conn, int layer, string sourceKey, CancellationToken ct = default)
     {
         var v = await NpgsqlRead.ExecuteScalarAsync<object>(conn, """
-            SELECT laplace.evidence_count(
-                p_type => laplace.canonical_id('substrate/type/HasLayerCompleted/' || @layer::text || '/v1'),
+            SELECT ops.evidence_count(
+                p_type => realize.canonical_id('substrate/type/HasLayerCompleted/' || @layer::text || '/v1'),
                 p_source => laplace.source_id(@src)) > 0
             """,
             p =>
@@ -220,7 +220,7 @@ public static class NpgsqlIngestOps
         NpgsqlConnection conn, CancellationToken ct = default) =>
         ScalarLongAsync(conn, """
             SELECT consensus.entity_physicality_count(
-                       laplace.canonical_id('Model_Circuit'), 3)
+                       realize.canonical_id('Model_Circuit'), 3)
             """, null, ct, "model_circuit_trajectory_count");
 
     public readonly record struct SourceEvidenceRow(string Source, long Evidence);
@@ -229,7 +229,7 @@ public static class NpgsqlIngestOps
         NpgsqlConnection conn, int timeoutSeconds = 120, CancellationToken ct = default) =>
         NpgsqlRead.ReadRowsAsync(conn, """
             SELECT s.source, s.evidence
-            FROM laplace.source_counts() s
+            FROM ops.source_counts() s
             ORDER BY s.evidence DESC
             """,
             static r => new SourceEvidenceRow(r.GetString(0), r.GetInt64(1)),
@@ -241,10 +241,10 @@ public static class NpgsqlIngestOps
     public static Task<IReadOnlyList<UnicodeAtomProbeRow>> UnicodeCapitalAContentProbeAsync(
         NpgsqlConnection conn, CancellationToken ct = default) =>
         NpgsqlRead.ReadRowsAsync(conn, """
-            SELECT laplace.render(laplace.canonical_id('A')), f.tier,
+            SELECT realize.render(realize.canonical_id('A')), f.tier,
                    p.x, p.y, p.z, p.m
-            FROM laplace.entity_facets(laplace.canonical_id('A')) f
-            CROSS JOIN laplace.entity_physicalities(laplace.canonical_id('A')) p
+            FROM ops.entity_facets(realize.canonical_id('A')) f
+            CROSS JOIN ops.entity_physicalities(realize.canonical_id('A')) p
             WHERE p.type = 1
             """,
             static r => new UnicodeAtomProbeRow(

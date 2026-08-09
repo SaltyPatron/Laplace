@@ -6,7 +6,9 @@
 -- keep rows whose entity is first-observed by the source at p_tier. Labels via
 -- ONE realize.batch over survivors (not per-row render ahead of LIMIT).
 -- BEGIN ATOMIC: GH #764 beachhead.
-CREATE OR REPLACE FUNCTION surface_sample(
+DROP FUNCTION IF EXISTS laplace.surface_sample(bytea, smallint, int);
+
+CREATE OR REPLACE FUNCTION ops.surface_sample(
         p_source bytea,
         p_tier smallint,
         p_limit int DEFAULT 20)
@@ -23,7 +25,7 @@ BEGIN ATOMIC
                sum(a.observation_count)::bigint AS observations
         FROM laplace.attestations a
         WHERE a.source_id = p_source
-          AND laplace.relation_canonical(a.subject_id) IS NULL
+          AND consensus.relation_canonical(a.subject_id) IS NULL
         GROUP BY a.subject_id
         ORDER BY sum(a.observation_count) DESC
         LIMIT greatest(GREATEST(p_limit, 1) * 200, 4000)

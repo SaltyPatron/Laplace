@@ -23,7 +23,7 @@ CREATE OR REPLACE FUNCTION generation.pos_transition_plane(
         JOIN laplace.v_consensus_unrefuted c ON c.subject_id = v.id
             AND c.type_id = laplace.relation_type_id('HAS_POS')
             AND c.object_id IS NOT NULL
-        ORDER BY c.subject_id, laplace.eff_mu(c.rating, c.rd) DESC
+        ORDER BY c.subject_id, consensus.eff_mu(c.rating, c.rd) DESC
     ),
     nclasses AS (SELECT count(DISTINCT pos)::float8 AS n FROM word_pos),
     -- fused word-adjacency counts (same evidence as the conditional plane)

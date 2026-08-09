@@ -1,4 +1,5 @@
-CREATE OR REPLACE FUNCTION render_text(p_id bytea, p_max_depth integer DEFAULT 32)
+DROP FUNCTION IF EXISTS laplace.render_text(bytea, integer);
+CREATE OR REPLACE FUNCTION realize.render_text(p_id bytea, p_max_depth integer DEFAULT 32)
     RETURNS text
     AS 'MODULE_PATHNAME', 'pg_laplace_render_text'
     LANGUAGE C STABLE;

@@ -40,14 +40,14 @@ CREATE OR REPLACE FUNCTION converse.links(p_word text)
     AS $$
     WITH base AS MATERIALIZED (
         SELECT c.type_id, c.object_id,
-               laplace.eff_mu(c.rating, c.rd) AS emu
+               consensus.eff_mu(c.rating, c.rd) AS emu
         FROM laplace.consensus c
         WHERE c.subject_id = laplace.word_id(p_word)
     ),
     rel AS MATERIALIZED (
         -- One row per DISTINCT relation type present on this subject.
         SELECT t.type_id,
-               COALESCE(NULLIF(laplace.relation_canonical(t.type_id), ''), realize.label(t.type_id)) AS relation
+               COALESCE(NULLIF(consensus.relation_canonical(t.type_id), ''), realize.label(t.type_id)) AS relation
         FROM (SELECT DISTINCT b.type_id FROM base b) t
     )
     SELECT r.relation,
@@ -55,6 +55,6 @@ CREATE OR REPLACE FUNCTION converse.links(p_word text)
            (b.emu)::float8 / 1e9 AS strength
     FROM base b
     JOIN rel r ON r.type_id = b.type_id
-    ORDER BY laplace.edge_rank(b.type_id, b.emu) DESC,
+    ORDER BY consensus.edge_rank(b.type_id, b.emu) DESC,
              strength DESC, r.relation
 $$;

@@ -1,12 +1,14 @@
 -- BEGIN ATOMIC: GH #764.
-CREATE OR REPLACE FUNCTION arena_counts()
+DROP FUNCTION IF EXISTS laplace.arena_counts();
+
+CREATE OR REPLACE FUNCTION ops.arena_counts()
     RETURNS TABLE(type text, type_id bytea, relations bigint, witnesses bigint,
                   top_eff_mu numeric)
     LANGUAGE sql STABLE
 BEGIN ATOMIC
-    SELECT @extschema@.render(c.type_id), c.type_id, count(*), sum(c.witness_count),
-           max(@extschema@.eff_mu_display(c.rating, c.rd))
-    FROM @extschema@.consensus c
+    SELECT realize.render(c.type_id), c.type_id, count(*), sum(c.witness_count),
+           max(consensus.eff_mu_display(c.rating, c.rd))
+    FROM laplace.consensus c
     GROUP BY c.type_id
     ORDER BY count(*) DESC;
 END;
