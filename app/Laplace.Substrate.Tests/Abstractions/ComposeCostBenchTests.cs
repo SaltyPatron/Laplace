@@ -82,7 +82,7 @@ public sealed class ComposeCostBenchTests
     /// </summary>
     [Theory]
     [InlineData(1000, 11, 200)]
-    public void StageCost_Parallel(int bytes, int threads, int itersPerThread)
+    public async Task StageCost_Parallel(int bytes, int threads, int itersPerThread)
     {
         CodepointPerfcache.LoadDefault();
 
@@ -111,7 +111,7 @@ public sealed class ComposeCostBenchTests
                 }
             }));
         }
-        Task.WaitAll(tasks.ToArray());
+        await Task.WhenAll(tasks);
         sw.Stop();
 
         long total = (long)threads * itersPerThread;
