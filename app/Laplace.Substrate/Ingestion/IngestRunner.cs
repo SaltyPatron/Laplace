@@ -296,7 +296,7 @@ public sealed class IngestRunner
                 catch (OperationCanceledException) { }
                 catch (InvalidOperationException ex)
                 {
-                    cappedFail = ex;
+                    Interlocked.Exchange(ref cappedFail, ex);
                     try { runCts.Cancel(); } catch { /* already cancelled */ }
                 }
             }, CancellationToken.None);
@@ -325,7 +325,7 @@ public sealed class IngestRunner
                     if (!workingSet && batchSize == 1 && commitRows == 0)
                     {
                         await ProcessOneIntentAsync(intent, decomposer, options, rng,
-                                                    counters, failures, log, ct);
+                                                    counters, failures, log, runCt);
                         continue;
                     }
                     long sib = BytesOf(intent);
@@ -337,7 +337,7 @@ public sealed class IngestRunner
                         && wsBytes + sib > Laplace.Decomposers.Abstractions.WorkingSetMode.BudgetBytes)
                     {
                         await ProcessBatchAsync(sbatch, decomposer, options, rng,
-                                                counters, failures, log, workingSet, ct);
+                                                counters, failures, log, workingSet, runCt);
                         sbatch.Clear();
                         sbatchRows = 0;
                         wsBytes = 0;
@@ -349,7 +349,7 @@ public sealed class IngestRunner
                         || (IsPeriodBoundary(intent) && wsBytes >= boundaryCommitFloor))
                     {
                         await ProcessBatchAsync(sbatch, decomposer, options, rng,
-                                                counters, failures, log, workingSet, ct);
+                                                counters, failures, log, workingSet, runCt);
                         sbatch.Clear();
                         sbatchRows = 0;
                         wsBytes = 0;
@@ -357,7 +357,7 @@ public sealed class IngestRunner
                 }
                 if (sbatch.Count > 0)
                     await ProcessBatchAsync(sbatch, decomposer, options, rng,
-                                            counters, failures, log, workingSet, ct);
+                                            counters, failures, log, workingSet, runCt);
             }
             else
             {
@@ -380,7 +380,7 @@ public sealed class IngestRunner
                         FullMode = BoundedChannelFullMode.Wait,
                     });
 
-                var producer = CpuTopology.RunOnPinnedThread(async ct =>
+                var producer = CpuTopology.RunOnPinnedThread(async producerCt =>
                 {
                     try
                     {
@@ -398,11 +398,11 @@ public sealed class IngestRunner
                                     || Interlocked.Read(ref bufferedBytes) + b > byteBudget)
                                    && Volatile.Read(ref bufferedRows) > 0)
                             {
-                                await drained.WaitAsync(ct);
+                                await drained.WaitAsync(producerCt);
                             }
                             Interlocked.Add(ref bufferedRows, r);
                             Interlocked.Add(ref bufferedBytes, b);
-                            await channel.Writer.WriteAsync(intent, ct);
+                            await channel.Writer.WriteAsync(intent, producerCt);
                         }
                         channel.Writer.TryComplete();
                     }
@@ -410,7 +410,7 @@ public sealed class IngestRunner
                     {
                         channel.Writer.TryComplete(ex);
                     }
-                }, "ingest-decompose-pcore", ct);
+                }, "ingest-decompose-pcore", runCt);
 
                 // Parallel apply when index-cycle defer is on: presence preload has
                 // made novelty client-side and the writer skips the global advisory
@@ -453,12 +453,12 @@ public sealed class IngestRunner
                     {
                         applyTasks[w] = Task.Run(async () =>
                         {
-                            await foreach (var b in applyChannel.Reader.ReadAllAsync(ct).ConfigureAwait(false))
+                            await foreach (var b in applyChannel.Reader.ReadAllAsync(runCt).ConfigureAwait(false))
                             {
                                 await ProcessBatchAsync(b, decomposer, options, rng,
-                                    counters, failures, log, workingSet, ct).ConfigureAwait(false);
+                                    counters, failures, log, workingSet, runCt).ConfigureAwait(false);
                             }
-                        }, ct);
+                        }, runCt);
                     }
                 }
 
@@ -468,22 +468,22 @@ public sealed class IngestRunner
                     if (applyChannel is null)
                     {
                         await ProcessBatchAsync(b, decomposer, options, rng,
-                            counters, failures, log, workingSet, ct).ConfigureAwait(false);
+                            counters, failures, log, workingSet, runCt).ConfigureAwait(false);
                         b.Clear();
                         return;
                     }
                     var copy = new List<SubstrateChange>(b);
                     b.Clear();
-                    await applyChannel.Writer.WriteAsync(copy, ct).ConfigureAwait(false);
+                    await applyChannel.Writer.WriteAsync(copy, runCt).ConfigureAwait(false);
                 }
 
                 var batch = new List<SubstrateChange>(batchSize);
                 int batchRows = 0;
-                while (await channel.Reader.WaitToReadAsync(ct))
+                while (await channel.Reader.WaitToReadAsync(runCt))
                 {
                     while (channel.Reader.TryRead(out var intent))
                     {
-                        ct.ThrowIfCancellationRequested();
+                        runCt.ThrowIfCancellationRequested();
                         Interlocked.Add(ref bufferedRows, -RowsOf(intent));
                         Interlocked.Add(ref bufferedBytes, -BytesOf(intent));
                         try { drained.Release(); } catch (SemaphoreFullException) { }
@@ -491,7 +491,7 @@ public sealed class IngestRunner
                         if (!workingSet && batchSize == 1 && commitRows == 0)
                         {
                             await ProcessOneIntentAsync(intent, decomposer, options, rng,
-                                                         counters, failures, log, ct);
+                                                         counters, failures, log, runCt);
                             continue;
                         }
                         long ib = BytesOf(intent);
@@ -529,8 +529,12 @@ public sealed class IngestRunner
                 await producer;
             }
 
-            if (cappedFail is not null)
-                throw cappedFail;
+            if (Volatile.Read(ref cappedFail) is { } cappedFailure)
+                throw cappedFailure;
+        }
+        catch (OperationCanceledException) when (Volatile.Read(ref cappedFail) is not null)
+        {
+            throw Volatile.Read(ref cappedFail)!;
         }
         finally
         {
@@ -556,8 +560,8 @@ public sealed class IngestRunner
             }
         }
 
-        if (cappedFail is not null)
-            throw cappedFail;
+        if (Volatile.Read(ref cappedFail) is { } terminalCappedFailure)
+            throw terminalCappedFailure;
 
         unitsAttempted = counters.UnitsAttempted;
         unitsApplied = counters.UnitsApplied;

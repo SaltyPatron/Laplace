@@ -806,8 +806,19 @@ public sealed partial class NpgsqlSubstrateWriter
                     // Peer owns in-flight COPY. Wait for claim release (post-commit) —
                     // never merge against an uncommitted peer row (count corruption).
                     var waitSw = System.Diagnostics.Stopwatch.StartNew();
-                    while (_claimedAttIds.ContainsKey(id) && waitSw.ElapsedMilliseconds < 120_000)
-                        await Task.Yield();
+                    int claimDelayMs = 1;
+                    while (_claimedAttIds.ContainsKey(id))
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        if (waitSw.ElapsedMilliseconds >= 120_000)
+                        {
+                            throw new TimeoutException(
+                                $"Attestation claim {id} remained held for 120 seconds; "
+                                + "refusing to merge against a possibly uncommitted row.");
+                        }
+                        await Task.Delay(claimDelayMs, ct).ConfigureAwait(false);
+                        claimDelayMs = Math.Min(claimDelayMs * 2, 100);
+                    }
                     mergeRows.Add((atts.TypeIds[g.RepIdx], atts.SubjectIds[g.RepIdx], id,
                         g.Games, g.Sum, AttestationMergeMath.TimestampFromPgMicros(g.MaxTs)));
                 }
