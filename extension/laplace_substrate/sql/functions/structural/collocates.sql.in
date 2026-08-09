@@ -11,12 +11,15 @@ CREATE OR REPLACE FUNCTION structural.collocates(p_word text, p_limit int DEFAUL
     -- no rated PRECEDES edge to read any more (Pillar 3a, e5e1b42), so `mu` is
     -- NULL: observed frequency is the signal, and inventing a rating here would
     -- fabricate a number the substrate never adjudicated.
-    SELECT laplace.render(s.successor_id), NULL::numeric, s.seen
-    FROM (
+    WITH raw AS MATERIALIZED (
         SELECT gs.successor_id, gs.seen
         FROM structural.geometry_successors(laplace.word_id(p_word), p_limit, 8) gs
         ORDER BY gs.seen DESC
         LIMIT p_limit
-    ) s
-    ORDER BY s.seen DESC
+    ), numbered AS MATERIALIZED (
+      SELECT s.*, row_number() OVER (ORDER BY s.seen DESC,s.successor_id) AS rn FROM raw s
+    ), batch AS MATERIALIZED (
+      SELECT laplace.render_batch(array_agg(successor_id ORDER BY rn)) AS labels FROM numbered
+    )
+    SELECT b.labels[s.rn],NULL::numeric,s.seen FROM numbered s CROSS JOIN batch b ORDER BY s.rn
 $$;

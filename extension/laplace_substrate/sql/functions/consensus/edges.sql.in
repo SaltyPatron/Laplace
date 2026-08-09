@@ -52,24 +52,34 @@ CREATE OR REPLACE FUNCTION consensus.edges(
                row_number() OVER () AS ord
         FROM consensus.edges_raw(p_subject, p_direction, p_types, p_limit, p_refuted, 'edge_rank') e
     ),
-    rel AS MATERIALIZED (
+    ids AS MATERIALIZED (
+        SELECT array_agg(DISTINCT id ORDER BY id) AS a
+        FROM (SELECT type_id AS id FROM ranked UNION SELECT nid FROM ranked) x
+    ), labels AS MATERIALIZED (
+        SELECT i.id,l.txt FROM ids,
+          LATERAL unnest(ids.a) WITH ORDINALITY i(id,ord),
+          LATERAL unnest(realize.label_batch(ids.a)) WITH ORDINALITY l(txt,ord)
+        WHERE i.ord=l.ord
+    ), rel AS MATERIALIZED (
         -- Relation names come from the manifest, once per DISTINCT type — a
         -- governed vocabulary of ~189, so a subject spans a handful.
         SELECT t.type_id,
                COALESCE(NULLIF(@extschema@.relation_canonical(t.type_id), ''),
-                        realize.label(t.type_id)) AS relation
+                        l.txt) AS relation
         FROM (SELECT DISTINCT k.type_id FROM ranked k) t
+        JOIN labels l ON l.id=t.type_id
     ),
     lbl AS MATERIALIZED (
         SELECT realize.batch(array_agg(k.nid ORDER BY k.ord), p_lang) AS l
         FROM ranked k
     )
     SELECT k.dir, rel.relation, k.nid,
-           COALESCE(lbl.l[k.ord], realize.label(k.nid)),
+           COALESCE(lbl.l[k.ord], nl.txt),
            @extschema@.eff_mu_display(k.rating, k.rd),
            k.witness_count
     FROM ranked k
     JOIN rel ON rel.type_id = k.type_id
+    JOIN labels nl ON nl.id=k.nid
     CROSS JOIN lbl
     ORDER BY k.ord
 $$;

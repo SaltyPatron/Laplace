@@ -786,8 +786,8 @@ phase_api_env() {
   if command -v psql >/dev/null 2>&1; then
     PGPASSWORD="${PGPASSWORD:-postgres}" psql -h "${PGHOST:-localhost}" -U "${PGUSER:-postgres}" \
       -d "${PGDATABASE:-laplace}" -v ON_ERROR_STOP=1 \
-      -c "SELECT ops.repoint_app_log('$ops_log_dir'); SELECT ops.repoint_sql_gap('$ops_log_dir'); SELECT ops.repoint_chess_drops('$ops_log_dir');" \
-      || echo "::warning::ops.repoint_* failed — ops.app_log/sql_gap/chess_drops stay unpointed until next successful api-env"
+      -c "SELECT ops.repoint_app_log('$ops_log_dir'); SELECT ops.repoint_chess_drops('$ops_log_dir');" \
+      || echo "::warning::ops.repoint_* failed — ops.app_log/chess_drops stay unpointed until next successful api-env"
   fi
 }
 

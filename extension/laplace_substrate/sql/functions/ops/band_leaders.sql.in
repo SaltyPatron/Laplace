@@ -6,10 +6,22 @@ CREATE OR REPLACE FUNCTION band_leaders(p_bands int[] DEFAULT ARRAY[1,2,4,5], p_
                   object_id bytea, object text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE
 BEGIN ATOMIC
-    SELECT b.band, e.subject_id, converse.label_or_hex(e.subject_id),
+    WITH raw AS MATERIALIZED (
+      SELECT b.band, e.subject_id, e.type_id, e.object_id, e.rating, e.rd, e.witness_count
+      FROM unnest(p_bands) AS b(band)
+      CROSS JOIN LATERAL laplace.consensus_band_edges(b.band, NULL, p_per) e
+    ), ids AS MATERIALIZED (
+      SELECT array_agg(DISTINCT id ORDER BY id) AS a
+      FROM (SELECT subject_id AS id FROM raw UNION SELECT object_id FROM raw) x
+    ), labels AS MATERIALIZED (
+      SELECT i.id, l.txt FROM ids,
+        LATERAL unnest(ids.a) WITH ORDINALITY i(id, ord),
+        LATERAL unnest(realize.label_batch(ids.a)) WITH ORDINALITY l(txt, ord)
+      WHERE i.ord = l.ord
+    )
+    SELECT e.band, e.subject_id, s.txt,
            laplace.relation_canonical(e.type_id),
-           e.object_id, converse.label_or_hex(e.object_id),
+           e.object_id, o.txt,
            laplace.eff_mu_display(e.rating, e.rd), e.witness_count
-    FROM unnest(p_bands) AS b(band)
-    CROSS JOIN LATERAL laplace.consensus_band_edges(b.band, NULL, p_per) e;
+    FROM raw e JOIN labels s ON s.id=e.subject_id JOIN labels o ON o.id=e.object_id;
 END;
