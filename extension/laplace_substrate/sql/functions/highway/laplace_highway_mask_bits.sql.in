@@ -2,6 +2,17 @@
 -- this expression serves bit-overlap plane queries (bits && band-bits) with
 -- posting lists built for duplicate-heavy keys, replacing the pathological
 -- hash-on-66-distinct-values indexes removed in Issue 36.
+--
+-- DROP THE INDEX FIRST. entities_highway_bits_gin indexes this function's
+-- expression, so on any database that already has the index Postgres refuses the
+-- drop below outright (2BP01, "cannot drop function ... because other objects
+-- depend on it") -- and CREATE INDEX IF NOT EXISTS in entities_highway_bits_gin
+-- cannot repair it afterwards, because the stale index still exists and still
+-- points at laplace.laplace_highway_mask_bits. A greenfield install never sees
+-- this (no index yet, nothing to depend on); every UPGRADE of a populated
+-- substrate does. Same shape as the DROP VIEW guarding laplace_highway_popcount.
+-- entities_highway_bits_gin runs later in the manifest and rebuilds it.
+DROP INDEX IF EXISTS laplace.entities_highway_bits_gin;
 DROP FUNCTION IF EXISTS laplace.laplace_highway_mask_bits(mask bytea);
 CREATE OR REPLACE FUNCTION consensus.laplace_highway_mask_bits(mask bytea)
     RETURNS int[]
