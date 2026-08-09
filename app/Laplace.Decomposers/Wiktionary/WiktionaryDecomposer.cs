@@ -25,18 +25,19 @@ public sealed class WiktionaryDecomposer
     public override int LayerOrder => 2;
     protected override double SourceTrust => TC.AcademicCuratedUserInput;
 
-    // Wiktionary entries explode into many content trees (word, glosses, examples,
-    // relations, forms, etymology) per record — size the working set like WordNet's
-    // multi-emit line, not a single flat compose.
-    public override int EstimatedComposeUnitsPerRecord => 6;
-
     internal static readonly ConcurrentDictionary<string, byte> VocabularyNames = new(StringComparer.Ordinal);
     public override IReadOnlyCollection<string> CanonicalNamesForReadback => VocabularyNames.Keys.ToArray();
 
     protected override ConcurrentDictionary<string, byte>? VocabularyReadback => VocabularyNames;
 
+    // Grammar-witness / dry paths still need Compose; the bulk ingest lane overrides
+    // CreateHandler so ContentTierSpine.BuildTree runs on the compose fan instead of
+    // serial DrainInto (DirectComposeHandler put the entire Emit walk on one core).
     protected override void Compose(WiktionaryEntry record, SubstrateChangeBuilder builder) =>
         WiktionaryEmit.Emit(record, builder);
+
+    protected override IIngestRecordHandler<WiktionaryEntry> CreateHandler() =>
+        new WiktionaryComposeHandler();
 
     // PARSE POOL, not a serial loop. The former `await foreach … Parse(span)` put
     // 10.5M rows of full Utf8JsonReader object-graph construction on ONE core while

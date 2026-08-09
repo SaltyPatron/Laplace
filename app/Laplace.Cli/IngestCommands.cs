@@ -811,6 +811,17 @@ internal static class IngestCommands
 
     private static async Task PrintIngestValidationAsync(NpgsqlDataSource ds, IDecomposer? decomposer)
     {
+        // Index-cycle defer leaves secondaries down; ANALYZE + evidence walks after a
+        // multi-million-row COPY sat for minutes with CommandTimeout=0 (measured:
+        // process hung after INGEST_COMPLETE with no WALL_SEC). Skip the heavy
+        // post-path; recover-indexes + a later stats pass own that work.
+        if (NpgsqlIndexCycle.Deferred)
+        {
+            Console.WriteLine(
+                "ingest validation skipped (LAPLACE_INDEX_CYCLE_DEFER) — run recover-indexes then stats");
+            return;
+        }
+
         await using var conn = await ds.OpenConnectionAsync();
 
         // Immediately after a bulk COPY ingest the just-loaded tables can still carry

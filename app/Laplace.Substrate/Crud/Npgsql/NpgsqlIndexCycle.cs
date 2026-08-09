@@ -38,14 +38,13 @@ public sealed class NpgsqlIndexCycle
     private readonly List<(string Name, string Def)> _dropped = new();
 
     /// <summary>
-    /// Master switch, DEFAULT OFF since the partitioned schema: every big table is
-    /// LIST/RANGE/HASH-partitioned (consensus/attestations by relation, entities by
-    /// tier, physicalities by hilbert band), so bulk loads maintain small
-    /// partition-local indexes in place — dropping and serially rebuilding global
-    /// indexes is no longer worth the downtime. Set LAPLACE_INDEX_CYCLE=1 to
-    /// re-enable the legacy drop→journal→rebuild cycle (e.g. against a legacy
-    /// non-partitioned DB). Journal RECOVERY stays active regardless, so remnants
-    /// of an old cycled run are still rebuilt at the next run start.
+    /// Master switch, DEFAULT OFF. Partition-local secondaries are smaller than the
+    /// old global indexes, but physicalities still carry GiST/GIN/btree per leaf —
+    /// measured Wiktionary COPY at ~2.4k phys rows/s with those indexes live, which
+    /// cannot finish a multi-million-record seed in tens of minutes. Set
+    /// <c>LAPLACE_INDEX_CYCLE=1</c> (or campaign <c>drop-indexes</c> +
+    /// <c>LAPLACE_INDEX_CYCLE_DEFER=1</c>) for bulk seeds. Journal RECOVERY stays
+    /// active regardless.
     /// </summary>
     public static readonly bool Enabled =
         EnvFlag.IsSet("LAPLACE_INDEX_CYCLE");
@@ -328,14 +327,34 @@ public sealed class NpgsqlIndexCycle
     private static async Task<List<(string Name, string Def)>> ListPlainSecondariesAsync(
         NpgsqlConnection conn, string table, CancellationToken ct)
     {
+        // Partitioned heaps (physicalities HASH, entities LIST, attestations
+        // LIST→HASH, consensus LIST) attach secondaries on LEAF relations.
+        // Parent-only listing left every partition GiST/GIN/btree up — measured
+        // Wiktionary COPY physicalities ~2.4k rows/s with indexes live vs the
+        // heap path the cycle was built for. Recurse pg_inherits so campaign
+        // drop / BeginAsync actually clear the indexes COPY pays for.
         var secondaries = new List<(string, string)>();
         await using var list = conn.CreateCommand();
+        // Roots only. Partitioned indexes attach leaf/mid indexes via
+        // pg_inherits; DROP of the root removes the whole tree. Listing every
+        // leaf hit 2BP01 (child before parent) and would journal orphans after
+        // the parent DROP already removed them. Independent per-partition
+        // indexes (no inhparent) are roots and still appear here.
         list.CommandText =
-            "SELECT c.relname, pg_get_indexdef(i.indexrelid) "
+            "WITH RECURSIVE parts AS ("
+            + "  SELECT ($1)::regclass AS oid "
+            + "  UNION ALL "
+            + "  SELECT i.inhrelid FROM pg_inherits i JOIN parts p ON i.inhparent = p.oid"
+            + ") "
+            + "SELECT c.relname, pg_get_indexdef(i.indexrelid) "
             + "FROM pg_index i "
             + "JOIN pg_class c ON c.oid = i.indexrelid "
-            + "WHERE i.indrelid = ($1)::regclass "
-            + "  AND NOT i.indisprimary AND NOT i.indisunique AND NOT i.indisexclusion";
+            + "WHERE i.indrelid IN (SELECT oid FROM parts) "
+            + "  AND NOT i.indisprimary AND NOT i.indisunique AND NOT i.indisexclusion "
+            + "  AND NOT EXISTS ("
+            + "    SELECT 1 FROM pg_inherits ih WHERE ih.inhrelid = i.indexrelid"
+            + ") "
+            + "ORDER BY c.relname";
         list.Parameters.AddWithValue($"laplace.{table}");
         await using var rd = await list.ExecuteReaderAsync(ct);
         while (await rd.ReadAsync(ct))
@@ -346,8 +365,13 @@ public sealed class NpgsqlIndexCycle
     private static async Task JournalAndDropAsync(
         NpgsqlConnection conn, string table, string name, string def, CancellationToken ct)
     {
+        // One transaction: a failed DROP must not leave a journal row for an
+        // index that still exists (measured: entities_t0_type_id_idx journaled
+        // then 2BP01 on DROP, orphaning the journal).
+        await using var tx = await conn.BeginTransactionAsync(ct);
         await using (var journal = conn.CreateCommand())
         {
+            journal.Transaction = tx;
             journal.CommandText =
                 "INSERT INTO laplace.index_cycle_journal (index_name, table_name, index_def) "
                 + "VALUES ($1, $2, $3) ON CONFLICT (index_name) DO NOTHING";
@@ -358,9 +382,11 @@ public sealed class NpgsqlIndexCycle
         }
         await using (var drop = conn.CreateCommand())
         {
+            drop.Transaction = tx;
             drop.CommandTimeout = 0;
             drop.CommandText = $"DROP INDEX IF EXISTS laplace.\"{name}\"";
             await drop.ExecuteNonQueryAsync(ct);
         }
+        await tx.CommitAsync(ct);
     }
 }

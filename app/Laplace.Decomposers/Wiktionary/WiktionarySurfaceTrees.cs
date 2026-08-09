@@ -29,7 +29,9 @@ namespace Laplace.Decomposers.Wiktionary;
 /// <para>
 /// UD already separates the two halves (UdIngestAdapter.EnsureTrees/DrainInto); this is
 /// the same split, plus a cache across records because Wiktionary's repeat class spans
-/// entries rather than living inside one sentence.
+/// entries rather than living inside one sentence. The bulk ingest handler builds via
+/// <see cref="TryBuild"/> on the compose fan and emits via <see cref="TryEmit"/> in
+/// serial DrainInto — <see cref="TryStage"/> remains for the grammar-witness path.
 /// </para>
 /// </summary>
 internal static class WiktionarySurfaceTrees
@@ -65,6 +67,86 @@ internal static class WiktionarySurfaceTrees
             }
     }
 
+    /// <summary>
+    /// Build (or cache-hit) the tier tree for <paramref name="surface"/> without touching a
+    /// builder. Safe on the compose fan. When <paramref name="callerOwns"/> is true the
+    /// caller must Dispose the tree after emit; when false the process cache owns it.
+    /// </summary>
+    public static bool TryBuild(string surface, out TierTree tree, out bool callerOwns)
+    {
+        tree = null!;
+        callerOwns = false;
+        if (string.IsNullOrEmpty(surface)) return false;
+
+        if (Trees.TryGetValue(surface, out var hit))
+        {
+            tree = hit;
+            return true;
+        }
+
+        int byteLen = Encoding.UTF8.GetByteCount(surface);
+        TierTree? built;
+        if (byteLen <= MaxCachedSurfaceBytes)
+        {
+            Span<byte> buf = stackalloc byte[MaxCachedSurfaceBytes];
+            int n = Encoding.UTF8.GetBytes(surface, buf);
+            built = ContentTierSpine.BuildTree(buf[..n]);
+        }
+        else
+        {
+            int max = Encoding.UTF8.GetMaxByteCount(surface.Length);
+            if (max <= 512)
+            {
+                Span<byte> small = stackalloc byte[512];
+                int written = Encoding.UTF8.GetBytes(surface, small);
+                built = ContentTierSpine.BuildTree(small[..written]);
+            }
+            else
+            {
+                byte[] rented = ArrayPool<byte>.Shared.Rent(max);
+                try
+                {
+                    int written = Encoding.UTF8.GetBytes(surface, rented);
+                    built = ContentTierSpine.BuildTree(rented.AsSpan(0, written));
+                }
+                finally
+                {
+                    ArrayPool<byte>.Shared.Return(rented);
+                }
+            }
+        }
+
+        if (built is null) return false;
+
+        if (byteLen <= MaxCachedSurfaceBytes
+            && Volatile.Read(ref _count) < Cap
+            && Trees.TryAdd(surface, built))
+        {
+            Interlocked.Increment(ref _count);
+            tree = built;
+            callerOwns = false;
+            return true;
+        }
+
+        // Over-cap, long surface, or lost the publish race: caller owns and disposes.
+        if (byteLen <= MaxCachedSurfaceBytes && Trees.TryGetValue(surface, out hit))
+        {
+            built.Dispose();
+            tree = hit;
+            callerOwns = false;
+            return true;
+        }
+
+        tree = built;
+        callerOwns = true;
+        return true;
+    }
+
+    public static bool TryEmit(
+        SubstrateChangeBuilder builder, TierTree tree, Hash128 sourceId,
+        ReadOnlySpan<byte> existingBitmap, out Hash128 rootId) =>
+        ContentTierSpine.EmitTree(builder, tree, sourceId, existingBitmap, out rootId);
+
     public static bool TryStage(
         SubstrateChangeBuilder builder, string surface, Hash128 sourceId, out Hash128 rootId)
     {
@@ -76,37 +158,16 @@ internal static class WiktionarySurfaceTrees
         if (builder.DeferredContent is not null)
             return StageDirect(builder, surface, sourceId, out rootId);
 
-        if (Trees.TryGetValue(surface, out var hit))
-            return ContentTierSpine.EmitTree(builder, hit, sourceId, ReadOnlySpan<byte>.Empty, out rootId);
-
-        int byteLen = Encoding.UTF8.GetByteCount(surface);
-        if (byteLen > MaxCachedSurfaceBytes)
-            return StageDirect(builder, surface, sourceId, out rootId);
-
-        Span<byte> buf = stackalloc byte[MaxCachedSurfaceBytes];
-        int n = Encoding.UTF8.GetBytes(surface, buf);
-
-        var tree = ContentTierSpine.BuildTree(buf[..n]);
-        if (tree is null) return false;
-
-        // Publish first so a concurrent builder of the same surface can reuse it. The
-        // loser of the race (or an over-cap build) emits from its own tree and disposes
-        // it — the cache never owns two trees for one key, and no tree is ever disposed
-        // while still reachable from the map.
-        bool owned = false;
-        if (Volatile.Read(ref _count) < Cap && Trees.TryAdd(surface, tree))
-        {
-            Interlocked.Increment(ref _count);
-            owned = true;
-        }
+        if (!TryBuild(surface, out var tree, out bool owned))
+            return false;
 
         try
         {
-            return ContentTierSpine.EmitTree(builder, tree, sourceId, ReadOnlySpan<byte>.Empty, out rootId);
+            return TryEmit(builder, tree, sourceId, ReadOnlySpan<byte>.Empty, out rootId);
         }
         finally
         {
-            if (!owned) tree.Dispose();
+            if (owned) tree.Dispose();
         }
     }
 
