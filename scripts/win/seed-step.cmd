@@ -218,7 +218,7 @@ set "STEP_STATUS="
 for /f "usebackq delims=" %%v in (`psql -h %LAPLACE_PGHOST% -U %LAPLACE_PGUSER% -d %LAPLACE_DBNAME% -tAc "SELECT status || '/' || evidence_persisted FROM laplace.ingest_run_journal WHERE source_name = '%STEP_SOURCE%' ORDER BY started_at DESC LIMIT 1;"`) do set "STEP_STATUS=%%v"
 if not defined STEP_STATUS goto verify_fail
 set "STEP_EVIDENCE="
-for /f "usebackq delims=" %%v in (`psql -h %LAPLACE_PGHOST% -U %LAPLACE_PGUSER% -d %LAPLACE_DBNAME% -tAc "SELECT laplace.evidence_count(NULL, laplace.source_id('%STEP_SOURCE%'));"`) do set "STEP_EVIDENCE=%%v"
+for /f "usebackq delims=" %%v in (`psql -h %LAPLACE_PGHOST% -U %LAPLACE_PGUSER% -d %LAPLACE_DBNAME% -tAc "SELECT ops.evidence_count(NULL, laplace.source_id('%STEP_SOURCE%'));"`) do set "STEP_EVIDENCE=%%v"
 if "%STEP_STATUS%"=="ok/t" goto verify_ok
 if "%STEP_STATUS%"=="skipped-complete/t" goto verify_ok
 goto verify_fail
@@ -242,7 +242,7 @@ if not defined STEP_SOURCE (
   exit /b 3
 )
 set "STEP_EVIDENCE="
-for /f "usebackq delims=" %%v in (`psql -h %LAPLACE_PGHOST% -U %LAPLACE_PGUSER% -d %LAPLACE_DBNAME% -tAc "SELECT COALESCE(SUM(laplace.evidence_count(NULL, c.subject_id)), 0) FROM laplace.consensus c WHERE c.type_id = laplace.relation_type_id('HAS_NAME_ALIAS') AND c.object_id = laplace.word_id('%STEP_SOURCE%');"`) do set "STEP_EVIDENCE=%%v"
+for /f "usebackq delims=" %%v in (`psql -h %LAPLACE_PGHOST% -U %LAPLACE_PGUSER% -d %LAPLACE_DBNAME% -tAc "SELECT COALESCE(SUM(ops.evidence_count(NULL, c.subject_id)), 0) FROM laplace.consensus c WHERE c.type_id = laplace.relation_type_id('HAS_NAME_ALIAS') AND c.object_id = laplace.word_id('%STEP_SOURCE%');"`) do set "STEP_EVIDENCE=%%v"
 if not defined STEP_EVIDENCE goto verify_fail
 if "%STEP_EVIDENCE%"=="0" goto verify_fail
 echo ==== seed-step verify: %STEP_SOURCE% evidence_count=%STEP_EVIDENCE% ====

@@ -395,7 +395,7 @@ def rewrite_calls(
     return text
 
 
-API_SQL = """DROP FUNCTION IF EXISTS laplace.api(text);
+API_SQL = """DROP FUNCTION IF EXISTS ops.api(text);
 CREATE OR REPLACE FUNCTION ops.api(p_like text DEFAULT NULL)
     RETURNS TABLE(name text, args text, returns text)
     LANGUAGE sql STABLE AS $$

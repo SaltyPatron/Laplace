@@ -79,7 +79,7 @@ echo ==== generation content index ====
 call "%~dp0index-content.cmd" laplace deep || exit /b 1
 
 echo ==== smoke: substrate_counts + consensus_stats ====
-"%PGBIN%\psql.exe" -h localhost -U postgres -d laplace -P pager=off -c "SELECT * FROM laplace.substrate_counts();" -c "SELECT * FROM laplace.consensus_stats();" -c "SELECT pg_size_pretty(pg_database_size('laplace')) AS db_size;" || exit /b 1
+"%PGBIN%\psql.exe" -h localhost -U postgres -d laplace -P pager=off -c "SELECT * FROM ops.substrate_counts();" -c "SELECT * FROM laplace.consensus_stats();" -c "SELECT pg_size_pretty(pg_database_size('laplace')) AS db_size;" || exit /b 1
 
 echo.
 echo ===== E2E-MASTER COMPLETE =====

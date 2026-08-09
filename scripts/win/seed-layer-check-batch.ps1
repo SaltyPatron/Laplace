@@ -39,8 +39,8 @@ SELECT 'STAT_document=' || EXISTS(
 "@
     } else {
         @"
-SELECT 'STAT_$key=' || (laplace.evidence_count(
-  p_type => laplace.canonical_id('substrate/type/HasLayerCompleted/$layer/v1'),
+SELECT 'STAT_$key=' || (ops.evidence_count(
+  p_type => realize.canonical_id('substrate/type/HasLayerCompleted/$layer/v1'),
   p_source => laplace.source_id('$src')) > 0)::text
 "@
     }

@@ -16,7 +16,7 @@ PSQL=(psql -h localhost -U postgres -d laplace -AtX)
 fail() { echo "REFUSED: $1" >&2; exit 1; }
 
 # 1. No ingest run open in the journal (the substrate's own ledger).
-running=$("${PSQL[@]}" -c "SELECT count(*) FROM laplace.ingest_runs(50) WHERE status = 'running';") \
+running=$("${PSQL[@]}" -c "SELECT count(*) FROM ops.ingest_runs(50) WHERE status = 'running';") \
     || fail "journal probe failed — cannot PROVE quiet, so not quiet (fail closed)"
 [ "$running" = "0" ] || fail "ingest_run_journal shows $running run(s) status=running"
 

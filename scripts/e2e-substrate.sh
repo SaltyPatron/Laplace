@@ -59,7 +59,7 @@ fi
 phase "$n" "audit — referential integrity + substrate state + consensus"
 psql -U laplace_admin -d "$DB" -f scripts/verify-fk.sql
 psql -U laplace_admin -d "$DB" -P pager=off -c "
-SELECT * FROM laplace.substrate_counts();
+SELECT * FROM ops.substrate_counts();
 SELECT * FROM laplace.consensus_stats();
 SELECT pg_size_pretty(pg_database_size('$DB')) AS db_size;"
 

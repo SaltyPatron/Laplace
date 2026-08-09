@@ -2,8 +2,3 @@ CREATE OR REPLACE FUNCTION realize.codepoint_for_id(p_id bytea)
     RETURNS integer
     AS 'MODULE_PATHNAME', 'pg_laplace_codepoint_for_id'
     LANGUAGE C LAPLACE_STABLE_STRICT;
-
-CREATE OR REPLACE FUNCTION laplace.codepoint_for_id(p_id bytea)
-    RETURNS integer
-    AS 'MODULE_PATHNAME', 'pg_laplace_codepoint_for_id'
-    LANGUAGE C LAPLACE_STABLE_STRICT;

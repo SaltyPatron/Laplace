@@ -42,7 +42,7 @@ echo ==== seed-chain verify: evidence per source ====
 set "FAIL=0"
 for %%S in (UnicodeDecomposer ISO639Decomposer CILIDecomposer SemLinkDecomposer PropBankDecomposer WordNetDecomposer VerbNetDecomposer FrameNetDecomposer MapNetDecomposer WordFrameNetDecomposer OMWDecomposer Atomic2020Decomposer UserPrompt) do (
   set "EVID="
-  for /f "usebackq delims=" %%v in (`psql -h %LAPLACE_PGHOST% -U %LAPLACE_PGUSER% -d %LAPLACE_DBNAME% -tAc "SELECT laplace.evidence_count(NULL, laplace.source_id('%%S'));"`) do set "EVID=%%v"
+  for /f "usebackq delims=" %%v in (`psql -h %LAPLACE_PGHOST% -U %LAPLACE_PGUSER% -d %LAPLACE_DBNAME% -tAc "SELECT ops.evidence_count(NULL, laplace.source_id('%%S'));"`) do set "EVID=%%v"
   if not defined EVID set "EVID=0"
   if "!EVID!"=="0" (
     echo ERROR: verify %%S: evidence_count=0

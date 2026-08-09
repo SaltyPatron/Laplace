@@ -57,7 +57,7 @@ check_type_evidence() {
   local rel_type="$1" min="$2"
   local count
   count=$(psql -d laplace -U laplace_admin -tAc \
-    "SELECT laplace.evidence_count(p_type => laplace.relation_type_id('$rel_type'))")
+    "SELECT ops.evidence_count(p_type => laplace.relation_type_id('$rel_type'))")
   [ "${count:-0}" -ge "$min" ] || die "type $rel_type has $count evidence rows (need >= $min) — ingest broken"
   log "  $rel_type: $count evidence rows OK"
 }

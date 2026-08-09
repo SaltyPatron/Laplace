@@ -30,8 +30,8 @@ FROM (
     ('document',      2, 'UserPrompt')
 ) AS t(step, layer_order, source_name)
 CROSS JOIN LATERAL (
-  SELECT laplace.evidence_count(
-           laplace.canonical_id('substrate/type/HasLayerCompleted/' || t.layer_order::text || '/v1'),
+  SELECT ops.evidence_count(
+           realize.canonical_id('substrate/type/HasLayerCompleted/' || t.layer_order::text || '/v1'),
            laplace.source_id(t.source_name)) > 0 AS layer_complete
 ) m
 ORDER BY 1;

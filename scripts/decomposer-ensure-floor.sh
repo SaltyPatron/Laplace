@@ -13,7 +13,7 @@ PSQL=(psql -h "$PGHOST" -U "$PGUSER" -v ON_ERROR_STOP=1 -tAc)
 layer_ok() {
   local decomposer="$1" layer="$2"
   "${PSQL[@]}" -d "$DB" \
-    "SELECT laplace.evidence_count(p_type => laplace.canonical_id('substrate/type/HasLayerCompleted/${layer}/v1'), p_source => laplace.source_id('${decomposer}')) > 0;" \
+    "SELECT ops.evidence_count(p_type => realize.canonical_id('substrate/type/HasLayerCompleted/${layer}/v1'), p_source => laplace.source_id('${decomposer}')) > 0;" \
     | grep -qi true
 }
 
