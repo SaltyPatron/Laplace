@@ -2,7 +2,7 @@
 -- (band indices come from the manifest's rank ladder; see highway_manifest.h).
 -- Requires laplace_substrate.highway_perfcache_path to be configured.
 DROP FUNCTION IF EXISTS laplace.laplace_highway_band_mask(int);
-CREATE OR REPLACE FUNCTION consensus.laplace_highway_band_mask(p_band int)
+CREATE OR REPLACE FUNCTION consensus.highway_band_mask(p_band int)
     RETURNS bytea
     AS 'MODULE_PATHNAME', 'pg_laplace_highway_band_mask'
     LANGUAGE C STABLE;

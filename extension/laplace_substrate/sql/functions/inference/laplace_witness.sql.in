@@ -1,5 +1,5 @@
 DROP FUNCTION IF EXISTS laplace.laplace_witness(bytea, bytea, bytea, bytea, bigint);
-CREATE OR REPLACE FUNCTION generation.laplace_witness(
+CREATE OR REPLACE FUNCTION generation.witness(
     p_subject  bytea, p_type  bytea, p_object  bytea,
     p_source   bytea,
     p_score_fp1e9 bigint DEFAULT 1000000000)

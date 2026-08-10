@@ -4,7 +4,7 @@
 -- returns false (unchanged WHERE semantics); length mismatch is an error,
 -- matching the old `&` operator behavior.
 DROP FUNCTION IF EXISTS laplace.laplace_highway_match(mask bytea, band_mask bytea);
-CREATE OR REPLACE FUNCTION consensus.laplace_highway_match(mask bytea, band_mask bytea)
+CREATE OR REPLACE FUNCTION consensus.highway_match(mask bytea, band_mask bytea)
     RETURNS boolean
     AS 'MODULE_PATHNAME', 'pg_laplace_highway_match'
     LANGUAGE C IMMUTABLE;

@@ -1,5 +1,5 @@
 DROP FUNCTION IF EXISTS laplace.laplace_prune(bigint, boolean);
-CREATE OR REPLACE FUNCTION generation.laplace_prune(
+CREATE OR REPLACE FUNCTION generation.prune(
     p_max_eff_mu bigint DEFAULT 0,
     p_dry_run    boolean DEFAULT true)
 RETURNS TABLE(affected_rows bigint)

@@ -4,7 +4,7 @@
 -- uint64 chunks. NULL returns 0 (matches the old COALESCE).
 DROP VIEW IF EXISTS laplace.v_entities_highway;
 DROP FUNCTION IF EXISTS laplace.laplace_highway_popcount(mask bytea);
-CREATE OR REPLACE FUNCTION consensus.laplace_highway_popcount(mask bytea)
+CREATE OR REPLACE FUNCTION consensus.highway_popcount(mask bytea)
     RETURNS integer
     AS 'MODULE_PATHNAME', 'pg_laplace_highway_popcount'
     LANGUAGE C IMMUTABLE;
