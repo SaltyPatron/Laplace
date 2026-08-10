@@ -26,6 +26,49 @@ public sealed class IngestRunStatusHonestyTests
             unitsFailed, emptyNoOp, capped, filesDone, filesTotal));
     }
 
+    /// <summary>
+    /// A ledger row saying `failed` with error NULL is not diagnosable. MEASURED 2026-08-10:
+    /// the document lane recorded failed at files_done=199/207, units_failed=0, error empty —
+    /// twice — and the row was the only artifact that outlived the run.
+    /// </summary>
+    [Theory]
+    [InlineData(0, 199, 207, "files_done 199 of 207 — 8 file(s) did not reach completion; "
+                           + "their content is absent from the substrate")]
+    [InlineData(0, 33, 14900, "files_done 33 of 14900 — 14867 file(s) did not reach completion; "
+                            + "their content is absent from the substrate")]
+    [InlineData(3, 10, 10, "3 unit(s) failed to apply")]
+    [InlineData(0, 11, 1, "files_done 11 exceeds files_total 1 — "
+                        + "the lane counted more completions than it declared inputs")]
+    public void DescribeRunFailure_NamesTheReason(
+        long unitsFailed, int filesDone, long filesTotal, string expected)
+    {
+        Assert.Equal(expected, IngestRunner.DescribeRunFailure(unitsFailed, filesDone, filesTotal));
+    }
+
+    /// <summary>Every input that derives `failed` must also derive a reason — no silent rows.</summary>
+    [Theory]
+    [InlineData(1, 9, 10)]
+    [InlineData(0, 33, 14900)]
+    [InlineData(0, 0, 10)]
+    [InlineData(0, 11, 1)]
+    [InlineData(2, 3, 10)]
+    public void EveryFailedStatus_HasAReason(long unitsFailed, int filesDone, long filesTotal)
+    {
+        Assert.Equal("failed", IngestRunner.DeriveRunStatus(
+            unitsFailed, emptySourceNoOp: false, capped: false, filesDone, filesTotal));
+        Assert.False(string.IsNullOrWhiteSpace(
+            IngestRunner.DescribeRunFailure(unitsFailed, filesDone, filesTotal)));
+    }
+
+    /// <summary>A clean run derives no reason — the column stays NULL on success.</summary>
+    [Theory]
+    [InlineData(0, 10, 10)]
+    [InlineData(0, 0, 0)]
+    public void SuccessfulRun_HasNoReason(long unitsFailed, int filesDone, long filesTotal)
+    {
+        Assert.Null(IngestRunner.DescribeRunFailure(unitsFailed, filesDone, filesTotal));
+    }
+
     [Fact]
     public void Inventory_TracksFileCompletion_GatesFileCount()
     {

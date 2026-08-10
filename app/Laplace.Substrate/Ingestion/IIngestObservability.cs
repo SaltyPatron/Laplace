@@ -11,10 +11,16 @@ public interface IIngestObservability
 
     void OnIntentFailed(string sourceName, IngestFailure failure);
 
-    /// <summary>Terminal success-shaped exit; <paramref name="status"/> is the same value
+    /// <summary>Terminal exit; <paramref name="status"/> is the same value
     /// INGEST_COMPLETE logs (ok / failed / empty-noop / capped, or a decomposer-supplied
-    /// expected-empty status via IIngestNoOpExplainer: already-present, already-complete, …).</summary>
-    void OnRunFinished(string sourceName, IngestRunResult result, string status);
+    /// expected-empty status via IIngestNoOpExplainer: already-present, already-complete, …).
+    ///
+    /// <paramref name="error"/> carries the reason whenever <paramref name="status"/> is a
+    /// failure. It cannot be supplied by a later <see cref="OnRunFailed"/> call: that method
+    /// no-ops once the run is terminal, which is why runs reached this method with
+    /// status=failed and a NULL error column — a ledger row saying the run failed and
+    /// nothing at all about why.</summary>
+    void OnRunFinished(string sourceName, IngestRunResult result, string status, string? error = null);
 
     /// <summary>Terminal abnormal exit (exception or cancellation) — called when
     /// <see cref="OnRunFinished"/> was NOT reached; implementations that already
@@ -36,5 +42,5 @@ public sealed class NoOpObservability : IIngestObservability
     public void OnRunStart(string sourceName, int layerOrder, IngestInventory? inventory) { }
     public void OnIntentApplied(string sourceName, ApplyResult result) { }
     public void OnIntentFailed(string sourceName, IngestFailure failure) { }
-    public void OnRunFinished(string sourceName, IngestRunResult result, string status) { }
+    public void OnRunFinished(string sourceName, IngestRunResult result, string status, string? error = null) { }
 }

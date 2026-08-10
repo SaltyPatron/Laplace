@@ -80,15 +80,20 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
             });
     }
 
-    public void OnRunFinished(string sourceName, IngestRunResult result, string status)
+    public void OnRunFinished(string sourceName, IngestRunResult result, string status, string? error = null)
     {
         if (!_active) return;
         _active = false;
+        // error is written HERE, not by a follow-up OnRunFailed: that method returns early
+        // once the run is terminal, so every failure reaching this path landed in the ledger
+        // as status=failed with error NULL. MEASURED 2026-08-10: the document lane recorded
+        // failed at files_done=199/207 twice, with no diagnostic in the row either time.
         Execute(
             "UPDATE laplace.ingest_run_journal SET "
             + "status = $2, ended_at = now(), "
             + "units_attempted = $3, units_applied = $4, units_failed = $5, "
-            + "entities = $6, physicalities = $7, attestations = $8 "
+            + "entities = $6, physicalities = $7, attestations = $8, "
+            + "error = COALESCE($9, error) "
             + "WHERE run_id = $1",
             cmd =>
             {
@@ -100,6 +105,11 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
                 cmd.Parameters.Add(new NpgsqlParameter { Value = result.EntitiesInserted });
                 cmd.Parameters.Add(new NpgsqlParameter { Value = result.PhysicalitiesInserted });
                 cmd.Parameters.Add(new NpgsqlParameter { Value = result.AttestationsInserted });
+                cmd.Parameters.Add(new NpgsqlParameter
+                {
+                    Value = (object?)error ?? DBNull.Value,
+                    NpgsqlDbType = NpgsqlDbType.Text,
+                });
             });
     }
 
