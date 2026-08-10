@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Runtime.InteropServices;
 using System.Diagnostics;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
@@ -41,12 +42,46 @@ public sealed class IngestRunner
     {
         ArgumentNullException.ThrowIfNull(decomposer);
         ArgumentNullException.ThrowIfNull(options);
+
+        // SIGTERM MUST REACH THE CATCH BELOW. The cancellation arm already journals a
+        // terminal row -- but only if the token is cancelled. A raw SIGTERM terminates
+        // the process outright, so RunCoreAsync never unwinds, OnRunFinished never runs,
+        // and the row sits at 'running' with no process behind it.
+        //
+        // That is not hypothetical and it is not rare: GitHub Actions cancels a job by
+        // SIGTERMing the job's processes ("Terminate orphan process: pid (N) (dotnet)"),
+        // and laplace.yml states that rebuilds preempt seeds BY DESIGN on the strength of
+        // "a preempted seed loses nothing and re-runs cleanly". It does not. MEASURED
+        // 2026-08-10: five PR merges inside 25 minutes preempted a ChessPgn seed at
+        // 19:02; 6,649,061 entities and 17,337,962 attestations went in with no terminal
+        // record, the row stranded at 'running', and wait-for-quiet-substrate.sh then
+        // blocked the very deploy that had caused the preemption -- for its full budget,
+        // waiting on an ingest that was already dead.
+        //
+        // Console.CancelKeyPress does NOT cover this. It surfaces SIGINT only; SIGTERM
+        // never reaches it, which is exactly why the chess lane's handler did not help.
+        //
+        // ctx.Cancel = true suppresses the default terminate so the token cancellation
+        // can unwind normally. Actions escalates to SIGKILL after its grace period, so
+        // the terminal write must be cheap -- it is one UPDATE on one row by primary key.
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        using var sigterm = PosixSignalRegistration.Create(PosixSignal.SIGTERM, ctx =>
+        {
+            ctx.Cancel = true;
+            linked.Cancel();
+        });
+        using var sigint = PosixSignalRegistration.Create(PosixSignal.SIGINT, ctx =>
+        {
+            ctx.Cancel = true;
+            linked.Cancel();
+        });
+
         // Abnormal exits still journal a terminal status: a run cut off by cancellation or
         // a fatal error must be distinguishable from one that never ran (the run-journal
         // row would otherwise sit at 'running' forever with no explanation attached).
         try
         {
-            return await RunCoreAsync(decomposer, options, ct);
+            return await RunCoreAsync(decomposer, options, linked.Token);
         }
         catch (OperationCanceledException)
         {
