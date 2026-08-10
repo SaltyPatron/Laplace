@@ -295,6 +295,95 @@ public sealed class DecomposerArchitectureGateTests
             }
         }
 
+        // LINE-ORIENTED FORMATS. The block above only knows two idioms -- XDocument and
+        // JsonDocument -- so it scores zero for every lane that hand-rolls a delimited
+        // format, and TEN registered grammars were invisible to it: conllu, csv, tsv,
+        // tab, pgn, markdown, md, ttl, turtle, sql.
+        //
+        // The commit that introduced this gate said "UD is the sharpest: conllu is
+        // registered specifically for it and the decomposer still hand-rolls." That
+        // sentence was written in the commit message of a gate that could not detect it.
+        // UdConlluParser uses neither XDocument nor JsonDocument, so it was never in the
+        // allowlist and never could have been -- and UD is the slowest lane on the box.
+        // "Nineteen violations" measured which C# TYPE was used, not which law was broken.
+        //
+        // Format association is by DIRECTORY, not by file. UDDecomposer.cs names
+        // "*.conllu"; UdConlluParser.cs one file over does the parsing and names no
+        // extension at all. File-local matching finds 2 files and misses UD entirely --
+        // the same "the parser sits one file over" evasion recorded above.
+        //
+        // Detection requires BOTH line reading AND delimiter field extraction, because
+        // directory scope alone over-reports badly (38 files, including IngestInventory
+        // and LanguageFilter, which merely live beside a file that names a format).
+        var lineFormats = new[] { "conllu", "csv", "tsv", "tab", "pgn", "markdown", "md", "ttl", "turtle" }
+            .Where(registered.Contains).ToArray();
+        var extPattern = new Regex(
+            "\"\\*?\\.(" + string.Join('|', lineFormats) + ")\"",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        var lineRead = new Regex(
+            @"\bReadLine\b|\bReadLineAsync\b|\bReadAllLines\b|\bStreamingUtf8LineReader\b",
+            RegexOptions.Compiled);
+        var fieldSplit = new Regex(
+            @"Split\s*\(\s*['""]?\\?[t,|]|IndexOf\s*\(\s*\(?byte\)?\s*['""]\\?[t,|]|\bTryField\b|['""]\\t['""]",
+            RegexOptions.Compiled);
+
+        // GrammarRowReader.ReadFieldsAsync(path, modalityId) IS the compliant route for a
+        // line format -- it takes the modality and reads fields through the grammar. It
+        // reads lines and splits fields BECAUSE it is the bridge, so exempting it is not
+        // a carve-out; flagging it would be flagging the fix. Everything else has this
+        // available and does not call it.
+        var lineExempt = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "app/Laplace.Substrate/Abstractions/GrammarRowReader.cs",
+        };
+
+        // Measured 2026-08-10, shrink-only. THREE, each with GrammarRowReader available:
+        //   UdConlluParser.cs        conllu, registered FOR UD. The 3,124s lane.
+        //   TabBridgeHelpers.cs      .tab rows straight through StreamingUtf8LineReader.
+        //   ChessOpeningsDecomposer  ReadLineAsync + line.Split('\t').
+        var lineAllowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "app/Laplace.Decomposers/UD/UdConlluParser.cs",
+            "app/Laplace.Substrate/Abstractions/TabBridgeHelpers.cs",
+            "app/Laplace.Chess/Service/ChessOpeningsDecomposer.cs",
+        };
+
+        if (lineFormats.Length > 0)
+        {
+            var dirFormats = new Dictionary<string, SortedSet<string>>(StringComparer.OrdinalIgnoreCase);
+            var scanned = new List<(string Rel, string Path, string Text)>();
+            foreach (var dir in DecomposerProjectRoots(repoRoot))
+            {
+                if (!Directory.Exists(dir)) continue;
+                foreach (var file in Directory.EnumerateFiles(dir, "*.cs", SearchOption.AllDirectories))
+                {
+                    if (file.Contains(".Tests", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")) continue;
+                    if (file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")) continue;
+                    var rel = Path.GetRelativePath(repoRoot, file).Replace('\\', '/');
+                    var text = File.ReadAllText(file);
+                    scanned.Add((rel, Path.GetDirectoryName(file)!, text));
+                    foreach (Match m in extPattern.Matches(text))
+                    {
+                        var key = Path.GetDirectoryName(file)!;
+                        if (!dirFormats.TryGetValue(key, out var set))
+                            dirFormats[key] = set = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+                        set.Add(m.Groups[1].Value.ToLowerInvariant());
+                    }
+                }
+            }
+
+            foreach (var (rel, dirPath, text) in scanned)
+            {
+                if (lineAllowed.Contains(rel) || lineExempt.Contains(rel)) continue;
+                if (!dirFormats.TryGetValue(dirPath, out var fmts)) continue;
+                if (!lineRead.IsMatch(text) || !fieldSplit.IsMatch(text)) continue;
+                violations.Add(
+                    $"{rel} hand-rolls a delimited format its own lane declares ({string.Join(", ", fmts)}) "
+                    + "— GrammarRowReader.ReadFieldsAsync(path, modalityId) is the registered route");
+            }
+        }
+
         Assert.True(violations.Count == 0,
             "Container formats go through the grammar registry, not a hand-rolled parser. "
             + "Register/route the format instead of parsing it in C#:\n"
