@@ -18,7 +18,7 @@
 -- Not part of substrate_health(): that function gates IDENTITY law. This is
 -- physical layout, a different claim on a different layer.
 DROP FUNCTION IF EXISTS laplace.consensus_partition_pressure(bigint);
-DROP FUNCTION IF EXISTS consensus.consensus_partition_pressure(bigint);
+DROP FUNCTION IF EXISTS ops.consensus_partition_pressure(bigint);
 CREATE OR REPLACE FUNCTION ops.consensus_partition_pressure(min_rows bigint DEFAULT 100000)
 RETURNS TABLE(
     tbl         text,

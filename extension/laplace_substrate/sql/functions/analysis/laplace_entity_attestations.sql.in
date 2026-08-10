@@ -4,7 +4,7 @@
 -- BEGIN ATOMIC: GH #764.
 DROP FUNCTION IF EXISTS laplace_entity_attestations(bytea, bigint);
 DROP FUNCTION IF EXISTS laplace.laplace_entity_attestations(bytea, bigint);
-DROP FUNCTION IF EXISTS consensus.laplace_entity_attestations(bytea, bigint);
+DROP FUNCTION IF EXISTS ops.entity_attestations(bytea, bigint);
 CREATE OR REPLACE FUNCTION ops.entity_attestations(
     p_subject bytea, p_min_eff_mu_raw bigint DEFAULT 0)
 RETURNS TABLE(type_id bytea, object_id bytea, eff_mu_raw bigint, eff_mu numeric, witnesses bigint)

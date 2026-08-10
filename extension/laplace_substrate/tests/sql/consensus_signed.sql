@@ -56,13 +56,13 @@ BEGIN
     -- spine uses: consensus_fold(is_seed, rating, rd, volatility, phi, games,
     -- sum_score, tau). Trust enters as the opponent RD (phi); no seed row =
     -- fold starts from the neutral prior, exactly as a fresh consensus cell.
-    SELECT (laplace.consensus_fold(false, NULL, NULL, NULL, phi_trust, 1, s_conf,     NULL)).rating INTO mu_conf;
-    SELECT (laplace.consensus_fold(false, NULL, NULL, NULL, phi_trust, 1, s_ref,      NULL)).rating INTO mu_ref;
-    SELECT (laplace.consensus_fold(false, NULL, NULL, NULL, phi_trust, 1, s_draw,     NULL)).rating INTO mu_draw;
-    SELECT (laplace.consensus_fold(false, NULL, NULL, NULL, phi_trust, 1, s_conf,     NULL)).rating INTO mu_trust;
-    SELECT (laplace.consensus_fold(false, NULL, NULL, NULL, phi_crank, 1, s_conf,     NULL)).rating INTO mu_crank;
-    SELECT (laplace.consensus_fold(false, NULL, NULL, NULL, phi_trust, 8, s_conf * 8, NULL)).rating INTO mu_many;
-    SELECT (laplace.consensus_fold(false, NULL, NULL, NULL, phi_trust, 1, s_conf,     NULL)).rating INTO mu_one;
+    SELECT (laplace.consensus_fold(false, NULL::bigint, NULL::bigint, NULL::bigint, phi_trust, 1, s_conf, NULL::bigint)).rating INTO mu_conf;
+    SELECT (laplace.consensus_fold(false, NULL::bigint, NULL::bigint, NULL::bigint, phi_trust, 1, s_ref, NULL::bigint)).rating INTO mu_ref;
+    SELECT (laplace.consensus_fold(false, NULL::bigint, NULL::bigint, NULL::bigint, phi_trust, 1, s_draw, NULL::bigint)).rating INTO mu_draw;
+    SELECT (laplace.consensus_fold(false, NULL::bigint, NULL::bigint, NULL::bigint, phi_trust, 1, s_conf, NULL::bigint)).rating INTO mu_trust;
+    SELECT (laplace.consensus_fold(false, NULL::bigint, NULL::bigint, NULL::bigint, phi_crank, 1, s_conf, NULL::bigint)).rating INTO mu_crank;
+    SELECT (laplace.consensus_fold(false, NULL::bigint, NULL::bigint, NULL::bigint, phi_trust, 8, s_conf * 8, NULL::bigint)).rating INTO mu_many;
+    SELECT (laplace.consensus_fold(false, NULL::bigint, NULL::bigint, NULL::bigint, phi_trust, 1, s_conf, NULL::bigint)).rating INTO mu_one;
 
     RAISE NOTICE 'confirm μ=% refute μ=% draw μ=% (neutral=%)', mu_conf, mu_ref, mu_draw, neutral;
     RAISE NOTICE 'trusted μ=% crank μ=% | 8-games μ=% 1-game μ=%', mu_trust, mu_crank, mu_many, mu_one;

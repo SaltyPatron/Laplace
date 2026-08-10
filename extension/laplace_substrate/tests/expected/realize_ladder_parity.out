@@ -25,17 +25,16 @@
 -- exactly, so a sampled row count is not reproducible; and on the near-empty
 -- regress database the sample returned nothing, making `bool_and(...)` NULL over
 -- zero rows -- an assertion that passes by asserting nothing. Every id below is
--- minted through word_id(), so the set is fixed on any database, and every
+-- minted through laplace.word_id(), so the set is fixed on any database, and every
 -- assertion is guarded by a cardinality check so an empty input FAILS instead of
 -- vacuously succeeding.
 BEGIN;
-SET search_path = laplace, public;
 -- A fixed, deterministic id set spanning the ladder's arms: ordinary words that
 -- a seeded substrate resolves, and content that nothing has ever witnessed
 -- (the abstain arm). Both must behave identically scalar and batched, whether or
 -- not this particular database has the lexical layer loaded.
 CREATE TEMP TABLE probe AS
-SELECT ord, word_id(w) AS id
+SELECT ord, laplace.word_id(w) AS id
 FROM unnest(ARRAY['a','dog','nine','letter','the','king','King',
                   'test/realize/never-witnessed-xyzzy']) WITH ORDINALITY AS t(w, ord);
 SELECT count(*) = 8 AS probe_is_fixed_size FROM probe;
@@ -63,15 +62,15 @@ FROM probe p CROSS JOIN lbl;
 -- Duplicated ids are included deliberately: 'a' appears twice below, and both
 -- positions must carry it (a dedup would collapse them and shift everything).
 WITH ids AS (SELECT array_agg(x.id ORDER BY x.ord) AS a
-             FROM (SELECT 1 AS ord, word_id('a') AS id
-                   UNION ALL SELECT 2, word_id('dog')
-                   UNION ALL SELECT 3, word_id('a')
-                   UNION ALL SELECT 4, word_id('nine')) x),
+             FROM (SELECT 1 AS ord, laplace.word_id('a') AS id
+                   UNION ALL SELECT 2, laplace.word_id('dog')
+                   UNION ALL SELECT 3, laplace.word_id('a')
+                   UNION ALL SELECT 4, laplace.word_id('nine')) x),
      lbl AS (SELECT realize.batch((SELECT a FROM ids), NULL) AS l)
 SELECT array_length(lbl.l, 1) = 4                     AS length_matches_input,
        lbl.l[1] IS NOT DISTINCT FROM lbl.l[3]         AS duplicate_id_not_collapsed,
-       lbl.l[1] IS NOT DISTINCT FROM realize.realize(word_id('a'), NULL)   AS pos1_aligned,
-       lbl.l[4] IS NOT DISTINCT FROM realize.realize(word_id('nine'), NULL) AS pos4_aligned
+       lbl.l[1] IS NOT DISTINCT FROM realize.realize(laplace.word_id('a'), NULL)   AS pos1_aligned,
+       lbl.l[4] IS NOT DISTINCT FROM realize.realize(laplace.word_id('nine'), NULL) AS pos4_aligned
 FROM lbl;
  length_matches_input | duplicate_id_not_collapsed | pos1_aligned | pos4_aligned 
 ----------------------+----------------------------+--------------+--------------
@@ -82,9 +81,9 @@ FROM lbl;
 -- both, never '<hex...>' styled as a label. label_or_hex is the only place that
 -- decides to show a raw id. (IS NOT DISTINCT FROM, not `=`: array equality with
 -- a NULL element yields NULL, which would make `=` a silent pass.)
-SELECT (realize.batch(ARRAY[word_id('test/realize/never-witnessed-xyzzy')], NULL))[1] IS NULL
+SELECT (realize.batch(ARRAY[laplace.word_id('test/realize/never-witnessed-xyzzy')], NULL))[1] IS NULL
                                                                  AS batch_abstains,
-       realize.realize(word_id('test/realize/never-witnessed-xyzzy'), NULL) IS NULL
+       realize.realize(laplace.word_id('test/realize/never-witnessed-xyzzy'), NULL) IS NULL
                                                                  AS scalar_abstains;
  batch_abstains | scalar_abstains 
 ----------------+-----------------
@@ -105,12 +104,12 @@ SELECT realize.batch(ARRAY[]::bytea[], NULL) IS NOT DISTINCT FROM ARRAY[]::text[
 -- recursive/hex fallback, label cleans internal keys, and type labels normalize.
 WITH ids AS (SELECT array_agg(p.id ORDER BY p.ord) AS a FROM probe p),
      b AS (SELECT realize.resolve_name_batch(a,NULL::bytea) AS names,
-                  laplace.render_batch(a) AS rendered,
+                  realize.render_batch(a) AS rendered,
                   realize.label_batch(a) AS labels,
                   converse.label_or_hex_batch(a) AS labels_hex,
                   lexical.type_label_batch(a) AS types FROM ids)
 SELECT bool_and(b.names[p.ord] IS NOT DISTINCT FROM realize.resolve_name(p.id,NULL)) AS names_match,
-       bool_and(b.rendered[p.ord] IS NOT DISTINCT FROM laplace.render(p.id)) AS render_match,
+       bool_and(b.rendered[p.ord] IS NOT DISTINCT FROM realize.render(p.id)) AS render_match,
        bool_and(b.labels[p.ord] IS NOT DISTINCT FROM realize.label(p.id)) AS label_match,
        bool_and(b.labels_hex[p.ord] IS NOT DISTINCT FROM converse.label_or_hex(p.id)) AS hex_match,
        bool_and(b.types[p.ord] IS NOT DISTINCT FROM lexical.type_label(p.id)) AS type_match
@@ -121,14 +120,14 @@ FROM probe p CROSS JOIN b;
 (1 row)
 
 -- 6. Alignment, duplicates, NULLs, and empty arrays are part of every batch contract.
-WITH ids AS (SELECT ARRAY[word_id('a'),NULL::bytea,word_id('dog'),word_id('a')] AS a),
-     b AS (SELECT laplace.render_batch(a) AS rendered,
+WITH ids AS (SELECT ARRAY[laplace.word_id('a'),NULL::bytea,laplace.word_id('dog'),laplace.word_id('a')] AS a),
+     b AS (SELECT realize.render_batch(a) AS rendered,
                   realize.label_batch(a) AS labels FROM ids)
 SELECT cardinality(b.rendered)=4 AS render_length,
        cardinality(b.labels)=4 AS label_length,
        b.rendered[1] IS NOT DISTINCT FROM b.rendered[4] AS duplicate_aligned,
        b.rendered[2] IS NULL AND b.labels[2] IS NULL AS null_aligned,
-       laplace.render_batch('{}'::bytea[])='{}'::text[] AS render_empty,
+       realize.render_batch('{}'::bytea[])='{}'::text[] AS render_empty,
        realize.label_batch('{}'::bytea[])='{}'::text[] AS label_empty
 FROM b;
  render_length | label_length | duplicate_aligned | null_aligned | render_empty | label_empty 
@@ -138,7 +137,7 @@ FROM b;
 
 -- NULL input is distinct from an empty aligned batch for every projection.
 SELECT realize.resolve_name_batch(NULL::bytea[],NULL::bytea) IS NULL AS names_null,
-       laplace.render_batch(NULL::bytea[]) IS NULL AS render_null,
+       realize.render_batch(NULL::bytea[]) IS NULL AS render_null,
        realize.label_batch(NULL::bytea[]) IS NULL AS label_null,
        converse.label_or_hex_batch(NULL::bytea[]) IS NULL AS hex_null,
        lexical.type_label_batch(NULL::bytea[]) IS NULL AS type_null;
@@ -151,12 +150,12 @@ SELECT realize.resolve_name_batch(NULL::bytea[],NULL::bytea) IS NULL AS names_nu
 -- contract. Native batch primitives reject them instead of silently flattening.
 SAVEPOINT multidim_resolve_name;
 SELECT realize.resolve_name_batch(
-         ARRAY[[word_id('a')],[word_id('dog')]],NULL::bytea);
+         ARRAY[[laplace.word_id('a')],[laplace.word_id('dog')]],NULL::bytea);
 ERROR:  resolve_name_batch: ids must be 1-dimensional
 ROLLBACK TO SAVEPOINT multidim_resolve_name;
 SAVEPOINT multidim_realize;
 SELECT realize.batch(
-         ARRAY[[word_id('a')],[word_id('dog')]],NULL::bytea);
+         ARRAY[[laplace.word_id('a')],[laplace.word_id('dog')]],NULL::bytea);
 ERROR:  realize_batch: ids must be 1-dimensional
 ROLLBACK TO SAVEPOINT multidim_realize;
 ROLLBACK;

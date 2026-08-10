@@ -4,7 +4,7 @@
 -- BEGIN ATOMIC: GH #764.
 DROP FUNCTION IF EXISTS laplace_translations(bytea, bytea);
 DROP FUNCTION IF EXISTS laplace.laplace_translations(bytea, bytea);
-DROP FUNCTION IF EXISTS lexical.laplace_translations(bytea, bytea);
+DROP FUNCTION IF EXISTS lexical.translations(bytea, bytea);
 CREATE OR REPLACE FUNCTION lexical.translations(
     p_entity_id bytea, p_band_mask bytea)
 RETURNS TABLE(translation_id bytea, shared_object_id bytea, eff_mu numeric)

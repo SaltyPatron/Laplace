@@ -4,19 +4,18 @@ CREATE EXTENSION IF NOT EXISTS laplace_geom;
 NOTICE:  extension "laplace_geom" already exists, skipping
 CREATE EXTENSION IF NOT EXISTS laplace_substrate;
 NOTICE:  extension "laplace_substrate" already exists, skipping
-SET search_path TO laplace, public;
 CREATE TEMP TABLE test_fixtures AS
 SELECT
     decode(lpad(to_hex(b), 2, '0') || repeat(lpad(to_hex(b), 2, '0'), 15), 'hex') AS id
 FROM generate_series(0, 7) b;
-INSERT INTO entities (id, tier, type_id, first_observed_by)
+INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
 SELECT id, 0::smallint, (SELECT id FROM test_fixtures LIMIT 1), NULL
 FROM test_fixtures
 WHERE id IN (
     SELECT id FROM test_fixtures LIMIT 4
 )
 ON CONFLICT (id, tier) DO NOTHING;
-SELECT encode(entities_exist_bitmap(ARRAY(
+SELECT encode(laplace.entities_exist_bitmap(ARRAY(
     SELECT id FROM test_fixtures WHERE id IN (
         SELECT id FROM test_fixtures OFFSET 4 LIMIT 4
     )
@@ -26,7 +25,7 @@ SELECT encode(entities_exist_bitmap(ARRAY(
  00
 (1 row)
 
-SELECT encode(entities_exist_bitmap(ARRAY(
+SELECT encode(laplace.entities_exist_bitmap(ARRAY(
     SELECT id FROM test_fixtures WHERE id IN (
         SELECT id FROM test_fixtures LIMIT 4
     )
@@ -48,7 +47,7 @@ WITH ordered_input AS (
         ((SELECT id FROM test_fixtures OFFSET 7 LIMIT 1), 7)
     ) v(id, ord)
 )
-SELECT encode(entities_exist_bitmap(
+SELECT encode(laplace.entities_exist_bitmap(
     ARRAY(SELECT id FROM ordered_input ORDER BY ord)::bytea[]
 ), 'hex') AS mixed;
  mixed 
@@ -56,17 +55,17 @@ SELECT encode(entities_exist_bitmap(
  55
 (1 row)
 
-SELECT octet_length(entities_exist_bitmap(ARRAY[]::bytea[])) AS empty_len;
+SELECT octet_length(laplace.entities_exist_bitmap(ARRAY[]::bytea[])) AS empty_len;
  empty_len 
 -----------
          0
 (1 row)
 
 SELECT
-    encode(entities_exist_bitmap(ARRAY(
+    encode(laplace.entities_exist_bitmap(ARRAY(
         SELECT id FROM test_fixtures LIMIT 4
     )::bytea[]), 'hex') =
-    encode(entities_exist_bitmap(ARRAY(
+    encode(laplace.entities_exist_bitmap(ARRAY(
         SELECT id FROM test_fixtures LIMIT 4
     )::bytea[]), 'hex') AS idempotent;
  idempotent 
@@ -74,5 +73,5 @@ SELECT
  t
 (1 row)
 
-DELETE FROM entities WHERE id IN (SELECT id FROM test_fixtures);
+DELETE FROM laplace.entities WHERE id IN (SELECT id FROM test_fixtures);
 DROP TABLE test_fixtures;

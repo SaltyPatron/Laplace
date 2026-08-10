@@ -43,13 +43,13 @@ public static class NpgsqlSubstrateReads
     public readonly record struct TaxonomyTreeRow(
         string Dir, int Ord, string IdHex, string Label, decimal? EffMu);
 
-    /// <summary><c>taxonomy.taxonomy_tree(id)</c> — the IS_A climb/descent around a topic.</summary>
+    /// <summary><c>taxonomy.tree(id)</c> — the IS_A climb/descent around a topic.</summary>
     public static Task<IReadOnlyList<TaxonomyTreeRow>> TaxonomyTreeAsync(
         NpgsqlDataSource dataSource, byte[] id, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
             SELECT dir, ord, encode(id, 'hex'), label, eff_mu
-            FROM taxonomy.taxonomy_tree(@id)
+            FROM taxonomy.tree(@id)
             ORDER BY dir DESC, ord
             """,
             static r => new TaxonomyTreeRow(

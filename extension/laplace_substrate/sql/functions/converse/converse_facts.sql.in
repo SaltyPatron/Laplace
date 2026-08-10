@@ -42,9 +42,9 @@ DECLARE
     v_lbl    text;
     tax_type bytea;
 BEGIN
-    t_def   := consensus.relation_band_types(b_def);
-    t_part  := consensus.relation_band_types(b_part);
-    t_assoc := consensus.relation_band_types(b_assoc);
+    t_def   := laplace.relation_band_types(b_def);
+    t_part  := laplace.relation_band_types(b_part);
+    t_assoc := laplace.relation_band_types(b_assoc);
     IF p_syn IS NULL THEN
         RETURN;
     END IF;

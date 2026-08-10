@@ -27,7 +27,7 @@ CREATE OR REPLACE FUNCTION consensus.scoped_consensus(p_source_ids bytea[])
            (f.acc).witness_count, f.last_ts
     FROM (
         SELECT a.subject_id, a.type_id, a.object_id,
-               consensus_fold(false, NULL, NULL, NULL,
+               laplace.consensus_fold(false, NULL::bigint, NULL::bigint, NULL::bigint,
                               a.opponent_rd_fp1e9,
                               GREATEST(a.observation_count, 1),
                               a.sum_score_fp1e9,

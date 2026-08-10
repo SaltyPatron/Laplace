@@ -62,19 +62,19 @@ SELECT relation_type_id('IS_A')
  t
 (1 row)
 
-SELECT relation_type_resolve('HAS_UPOS') = relation_type_id('HAS_POS') AS pos_alias_resolve_law;
+SELECT consensus.relation_type_resolve('HAS_UPOS') = relation_type_id('HAS_POS') AS pos_alias_resolve_law;
  pos_alias_resolve_law 
 -----------------------
  t
 (1 row)
 
-SELECT relation_type_in_family(relation_type_id('HAS_XPOS'), 'HAS_POS') AS xpos_in_pos_family;
+SELECT consensus.relation_type_in_family(relation_type_id('HAS_XPOS'), 'HAS_POS') AS xpos_in_pos_family;
  xpos_in_pos_family 
 --------------------
  t
 (1 row)
 
-SELECT NOT relation_type_in_family(relation_type_id('HAS_LEX_CATEGORY'), 'HAS_POS') AS lex_not_pos_family;
+SELECT NOT consensus.relation_type_in_family(relation_type_id('HAS_LEX_CATEGORY'), 'HAS_POS') AS lex_not_pos_family;
  lex_not_pos_family 
 --------------------
  t
