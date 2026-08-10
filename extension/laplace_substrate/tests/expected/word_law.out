@@ -1,40 +1,39 @@
 BEGIN;
-SET search_path = laplace, public;
-SELECT word_id('a') = laplace_hash128_blake3(convert_to('a', 'UTF8'))
+SELECT laplace.word_id('a') = public.laplace_hash128_blake3(convert_to('a', 'UTF8'))
     AS single_grapheme_collapses;
  single_grapheme_collapses 
 ---------------------------
  t
 (1 row)
 
-SELECT word_id('dog') = laplace_hash128_blake3(
+SELECT laplace.word_id('dog') = public.laplace_hash128_blake3(
            ('\x01'::bytea
-            || laplace_hash128_blake3(convert_to('d', 'UTF8'))
-            || laplace_hash128_blake3(convert_to('o', 'UTF8'))
-            || laplace_hash128_blake3(convert_to('g', 'UTF8'))))
+            || public.laplace_hash128_blake3(convert_to('d', 'UTF8'))
+            || public.laplace_hash128_blake3(convert_to('o', 'UTF8'))
+            || public.laplace_hash128_blake3(convert_to('g', 'UTF8'))))
     AS ascii_word_law_holds;
  ascii_word_law_holds 
 ----------------------
  t
 (1 row)
 
-SELECT word_id('') IS NULL AS empty_is_null;
+SELECT laplace.word_id('') IS NULL AS empty_is_null;
  empty_is_null 
 ---------------
  t
 (1 row)
 
 WITH ids AS (
-    SELECT laplace_hash128_blake3(convert_to('q', 'UTF8'))           AS q_id,
-           laplace_hash128_blake3(convert_to(U&'\0301', 'UTF8'))     AS acc_id,
-           laplace_hash128_blake3(convert_to('x', 'UTF8'))           AS x_id
+    SELECT public.laplace_hash128_blake3(convert_to('q', 'UTF8'))           AS q_id,
+           public.laplace_hash128_blake3(convert_to(U&'\0301', 'UTF8'))     AS acc_id,
+           public.laplace_hash128_blake3(convert_to('x', 'UTF8'))           AS x_id
 )
-SELECT word_id('q' || U&'\0301' || 'x')
-           = laplace_hash128_blake3('\x01'::bytea
-                 || laplace_hash128_blake3('\x01'::bytea || q_id || acc_id)
+SELECT laplace.word_id('q' || U&'\0301' || 'x')
+           = public.laplace_hash128_blake3('\x01'::bytea
+                 || public.laplace_hash128_blake3('\x01'::bytea || q_id || acc_id)
                  || x_id)                                            AS grapheme_law_nested,
-       word_id('q' || U&'\0301' || 'x')
-           <> laplace_hash128_blake3('\x01'::bytea || q_id || acc_id || x_id)
+       laplace.word_id('q' || U&'\0301' || 'x')
+           <> public.laplace_hash128_blake3('\x01'::bytea || q_id || acc_id || x_id)
                                                                      AS grapheme_law_not_flat
 FROM ids;
  grapheme_law_nested | grapheme_law_not_flat 
@@ -42,47 +41,47 @@ FROM ids;
  t                   | t
 (1 row)
 
-SELECT codepoint_for_id(laplace_hash128_blake3(convert_to('A', 'UTF8'))) = 65
+SELECT realize.codepoint_for_id(public.laplace_hash128_blake3(convert_to('A', 'UTF8'))) = 65
     AS reverse_lookup_works;
  reverse_lookup_works 
 ----------------------
  t
 (1 row)
 
-SELECT codepoint_for_id('\x00000000000000000000000000000000'::bytea) IS NULL
+SELECT realize.codepoint_for_id('\x00000000000000000000000000000000'::bytea) IS NULL
     AS unknown_id_is_null;
  unknown_id_is_null 
 --------------------
  t
 (1 row)
 
-SELECT codepoint_for_id(laplace_hash128_blake3(convert_to('字', 'UTF8'))) = 23383
+SELECT realize.codepoint_for_id(public.laplace_hash128_blake3(convert_to('字', 'UTF8'))) = 23383
     AS reverse_lookup_cjk;
  reverse_lookup_cjk 
 --------------------
  t
 (1 row)
 
-SELECT render(laplace_hash128_blake3(convert_to('A', 'UTF8'))) = 'A'
+SELECT realize.render(public.laplace_hash128_blake3(convert_to('A', 'UTF8'))) = 'A'
     AS render_t0_via_perfcache;
  render_t0_via_perfcache 
 -------------------------
  t
 (1 row)
 
-SELECT is_all_whitespace('   ')        AS ascii_spaces_ws,
-       is_all_whitespace(U&'\3000')    AS ideographic_space_ws,  
-       is_all_whitespace(U&'\00A0')    AS nbsp_ws,
-       is_all_whitespace(U&'\2003')    AS em_space_ws,
-       NOT is_all_whitespace(U&'\200B') AS zwsp_is_not_ws,        
-       NOT is_all_whitespace('a b')    AS mixed_is_not_ws,
-       NOT is_all_whitespace('')       AS empty_is_not_ws;
+SELECT realize.is_all_whitespace('   ')        AS ascii_spaces_ws,
+       realize.is_all_whitespace(U&'\3000')    AS ideographic_space_ws,
+       realize.is_all_whitespace(U&'\00A0')    AS nbsp_ws,
+       realize.is_all_whitespace(U&'\2003')    AS em_space_ws,
+       NOT realize.is_all_whitespace(U&'\200B') AS zwsp_is_not_ws,
+       NOT realize.is_all_whitespace('a b')    AS mixed_is_not_ws,
+       NOT realize.is_all_whitespace('')       AS empty_is_not_ws;
  ascii_spaces_ws | ideographic_space_ws | nbsp_ws | em_space_ws | zwsp_is_not_ws | mixed_is_not_ws | empty_is_not_ws 
 -----------------+----------------------+---------+-------------+----------------+-----------------+-----------------
  t               | t                    | t       | t           | t              | t               | t
 (1 row)
 
-SELECT bool_and(eff_mu(r, d) = effective_mu(r, d)) AS eff_mu_matches_engine
+SELECT bool_and(consensus.eff_mu(r, d) = consensus.effective_mu(r, d)) AS eff_mu_matches_engine
 FROM (VALUES
     (1500000000000::bigint, 350000000000::bigint),
     (1600000000000::bigint,  80000000000::bigint),

@@ -39,7 +39,7 @@ FROM structural.mesh_position(laplace.word_id('x'));
 -- taxonomy_tree roots at the id itself when no synset exists
 SELECT count(*) >= 1 AS tax_has_self,
        count(*) FILTER (WHERE dir = 'self') = 1 AS tax_one_self
-FROM taxonomy.taxonomy_tree(laplace.word_id('x'));
+FROM taxonomy.tree(laplace.word_id('x'));
 
 SELECT count(*) >= 0 AS leaders_runs FROM ops.band_leaders(ARRAY[1,2], 2);
 

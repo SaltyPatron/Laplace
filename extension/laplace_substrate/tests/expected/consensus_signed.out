@@ -1,18 +1,17 @@
 BEGIN;
-SET search_path = laplace, public;
 DO $$
 DECLARE
-    type_t   bytea := laplace_hash128_blake3('Type');
-    src      bytea := laplace_hash128_blake3('test/s10/source');
-    rel_type  bytea := laplace_hash128_blake3('test/s10/reltype');
-    subj     bytea := laplace_hash128_blake3('test/s10/subject');
-    o_conf   bytea := laplace_hash128_blake3('test/s10/obj_confirm');
-    o_ref    bytea := laplace_hash128_blake3('test/s10/obj_refute');
-    o_draw   bytea := laplace_hash128_blake3('test/s10/obj_draw');
-    o_trust  bytea := laplace_hash128_blake3('test/s10/obj_trusted');
-    o_crank  bytea := laplace_hash128_blake3('test/s10/obj_crank');
-    o_games  bytea := laplace_hash128_blake3('test/s10/obj_manygames');
-    o_one    bytea := laplace_hash128_blake3('test/s10/obj_onegame');
+    type_t   bytea := public.laplace_hash128_blake3('Type');
+    src      bytea := public.laplace_hash128_blake3('test/s10/source');
+    rel_type  bytea := public.laplace_hash128_blake3('test/s10/reltype');
+    subj     bytea := public.laplace_hash128_blake3('test/s10/subject');
+    o_conf   bytea := public.laplace_hash128_blake3('test/s10/obj_confirm');
+    o_ref    bytea := public.laplace_hash128_blake3('test/s10/obj_refute');
+    o_draw   bytea := public.laplace_hash128_blake3('test/s10/obj_draw');
+    o_trust  bytea := public.laplace_hash128_blake3('test/s10/obj_trusted');
+    o_crank  bytea := public.laplace_hash128_blake3('test/s10/obj_crank');
+    o_games  bytea := public.laplace_hash128_blake3('test/s10/obj_manygames');
+    o_one    bytea := public.laplace_hash128_blake3('test/s10/obj_onegame');
     phi_trust bigint := 30000000000;
     phi_crank bigint := 350000000000;
     s_conf   bigint := 900000000;
@@ -24,7 +23,7 @@ DECLARE
     n_prov   bigint;
     neutral bigint := 1500000000000;
 BEGIN
-    INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
+    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) VALUES
         (src,    0, type_t, NULL),
         (rel_type,   0, type_t, src), (subj, 0, type_t, src),
         (o_conf, 0, type_t, src), (o_ref, 0, type_t, src), (o_draw, 0, type_t, src),
@@ -34,20 +33,20 @@ BEGIN
     -- Evidence persists the fold's exact inputs: sum_score_fp1e9 (score total)
     -- and opponent_rd_fp1e9 (per-deposit phi) — the same partials the
     -- consensus_fold calls below replay.
-    INSERT INTO attestations
+    INSERT INTO laplace.attestations
         (id, subject_id, type_id, object_id, source_id, context_id,
          outcome, last_observed_at, observation_count,
          sum_score_fp1e9, opponent_rd_fp1e9)
     VALUES
-        (laplace_hash128_blake3('a/confirm'), subj, rel_type, o_conf,  src, NULL, 2, now(), 1, s_conf,     phi_trust),
-        (laplace_hash128_blake3('a/refute'),  subj, rel_type, o_ref,   src, NULL, 0, now(), 1, s_ref,      phi_trust),
-        (laplace_hash128_blake3('a/draw'),    subj, rel_type, o_draw,  src, NULL, 1, now(), 1, s_draw,     phi_trust),
-        (laplace_hash128_blake3('a/trusted'), subj, rel_type, o_trust, src, NULL, 2, now(), 1, s_conf,     phi_trust),
-        (laplace_hash128_blake3('a/crank'),   subj, rel_type, o_crank, src, NULL, 2, now(), 1, s_conf,     phi_crank),
-        (laplace_hash128_blake3('a/many'),    subj, rel_type, o_games, src, NULL, 2, now(), 8, s_conf * 8, phi_trust),
-        (laplace_hash128_blake3('a/one'),     subj, rel_type, o_one,   src, NULL, 2, now(), 1, s_conf,     phi_trust);
+        (public.laplace_hash128_blake3('a/confirm'), subj, rel_type, o_conf,  src, NULL, 2, now(), 1, s_conf,     phi_trust),
+        (public.laplace_hash128_blake3('a/refute'),  subj, rel_type, o_ref,   src, NULL, 0, now(), 1, s_ref,      phi_trust),
+        (public.laplace_hash128_blake3('a/draw'),    subj, rel_type, o_draw,  src, NULL, 1, now(), 1, s_draw,     phi_trust),
+        (public.laplace_hash128_blake3('a/trusted'), subj, rel_type, o_trust, src, NULL, 2, now(), 1, s_conf,     phi_trust),
+        (public.laplace_hash128_blake3('a/crank'),   subj, rel_type, o_crank, src, NULL, 2, now(), 1, s_conf,     phi_crank),
+        (public.laplace_hash128_blake3('a/many'),    subj, rel_type, o_games, src, NULL, 2, now(), 8, s_conf * 8, phi_trust),
+        (public.laplace_hash128_blake3('a/one'),     subj, rel_type, o_one,   src, NULL, 2, now(), 1, s_conf,     phi_trust);
 
-    SELECT count(*) INTO n_prov FROM attestations WHERE type_id = rel_type;
+    SELECT count(*) INTO n_prov FROM laplace.attestations WHERE type_id = rel_type;
     IF n_prov <> 7 THEN RAISE EXCEPTION 'FAIL: expected 7 provenance rows, got %', n_prov; END IF;
 
     -- The period-staging apparatus is gone by design (consensus accumulates at
@@ -56,13 +55,13 @@ BEGIN
     -- spine uses: consensus_fold(is_seed, rating, rd, volatility, phi, games,
     -- sum_score, tau). Trust enters as the opponent RD (phi); no seed row =
     -- fold starts from the neutral prior, exactly as a fresh consensus cell.
-    SELECT (consensus_fold(false, NULL, NULL, NULL, phi_trust, 1, s_conf,     NULL)).rating INTO mu_conf;
-    SELECT (consensus_fold(false, NULL, NULL, NULL, phi_trust, 1, s_ref,      NULL)).rating INTO mu_ref;
-    SELECT (consensus_fold(false, NULL, NULL, NULL, phi_trust, 1, s_draw,     NULL)).rating INTO mu_draw;
-    SELECT (consensus_fold(false, NULL, NULL, NULL, phi_trust, 1, s_conf,     NULL)).rating INTO mu_trust;
-    SELECT (consensus_fold(false, NULL, NULL, NULL, phi_crank, 1, s_conf,     NULL)).rating INTO mu_crank;
-    SELECT (consensus_fold(false, NULL, NULL, NULL, phi_trust, 8, s_conf * 8, NULL)).rating INTO mu_many;
-    SELECT (consensus_fold(false, NULL, NULL, NULL, phi_trust, 1, s_conf,     NULL)).rating INTO mu_one;
+    SELECT (laplace.consensus_fold(false, NULL::bigint, NULL::bigint, NULL::bigint, phi_trust, 1, s_conf, NULL::bigint)).rating INTO mu_conf;
+    SELECT (laplace.consensus_fold(false, NULL::bigint, NULL::bigint, NULL::bigint, phi_trust, 1, s_ref, NULL::bigint)).rating INTO mu_ref;
+    SELECT (laplace.consensus_fold(false, NULL::bigint, NULL::bigint, NULL::bigint, phi_trust, 1, s_draw, NULL::bigint)).rating INTO mu_draw;
+    SELECT (laplace.consensus_fold(false, NULL::bigint, NULL::bigint, NULL::bigint, phi_trust, 1, s_conf, NULL::bigint)).rating INTO mu_trust;
+    SELECT (laplace.consensus_fold(false, NULL::bigint, NULL::bigint, NULL::bigint, phi_crank, 1, s_conf, NULL::bigint)).rating INTO mu_crank;
+    SELECT (laplace.consensus_fold(false, NULL::bigint, NULL::bigint, NULL::bigint, phi_trust, 8, s_conf * 8, NULL::bigint)).rating INTO mu_many;
+    SELECT (laplace.consensus_fold(false, NULL::bigint, NULL::bigint, NULL::bigint, phi_trust, 1, s_conf, NULL::bigint)).rating INTO mu_one;
 
     RAISE NOTICE 'confirm μ=% refute μ=% draw μ=% (neutral=%)', mu_conf, mu_ref, mu_draw, neutral;
     RAISE NOTICE 'trusted μ=% crank μ=% | 8-games μ=% 1-game μ=%', mu_trust, mu_crank, mu_many, mu_one;

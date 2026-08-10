@@ -1,29 +1,28 @@
 BEGIN;
-SET search_path = laplace, public;
 DO $$
 DECLARE
-    src      bytea := laplace_hash128_blake3('test/merge/source');
-    rel_hot  bytea := relation_type_id('IS_A');
-    rel_dyn  bytea := laplace_hash128_blake3('test/merge/rel_dyn');
-    subj     bytea := laplace_hash128_blake3('test/merge/subject');
-    o1       bytea := laplace_hash128_blake3('test/merge/obj1');
-    o2       bytea := laplace_hash128_blake3('test/merge/obj2');
-    a1       bytea := laplace_hash128_blake3('test/merge/att1');
-    a2       bytea := laplace_hash128_blake3('test/merge/att2');
-    ghost    bytea := laplace_hash128_blake3('test/merge/never-written');
+    src      bytea := public.laplace_hash128_blake3('test/merge/source');
+    rel_hot  bytea := laplace.relation_type_id('IS_A');
+    rel_dyn  bytea := public.laplace_hash128_blake3('test/merge/rel_dyn');
+    subj     bytea := public.laplace_hash128_blake3('test/merge/subject');
+    o1       bytea := public.laplace_hash128_blake3('test/merge/obj1');
+    o2       bytea := public.laplace_hash128_blake3('test/merge/obj2');
+    a1       bytea := public.laplace_hash128_blake3('test/merge/att1');
+    a2       bytea := public.laplace_hash128_blake3('test/merge/att2');
+    ghost    bytea := public.laplace_hash128_blake3('test/merge/never-written');
     phi1     bigint := 30000000000;
     phi2     bigint := 350000000000;
     t1       timestamptz := '2026-01-01 00:00:00+00';
     t2       timestamptz := '2026-02-01 00:00:00+00';
     t0       timestamptz := '2025-12-01 00:00:00+00';
     affected bigint;
-    row1     attestations%ROWTYPE;
-    row2     attestations%ROWTYPE;
+    row1     laplace.attestations%ROWTYPE;
+    row2     laplace.attestations%ROWTYPE;
     leafname text;
 BEGIN
     -- Seed: one row in a hot (IS_A) leaf, one in the dynamic DEFAULT leaf.
     -- Distinct per-row phi pins that merge preserves each row's own value.
-    INSERT INTO attestations
+    INSERT INTO laplace.attestations
         (id, subject_id, type_id, object_id, source_id, context_id,
          outcome, last_observed_at, observation_count,
          sum_score_fp1e9, opponent_rd_fp1e9)
@@ -42,7 +41,7 @@ BEGIN
         RAISE EXCEPTION 'FAIL: merge affected % rows, expected 2', affected;
     END IF;
 
-    SELECT * INTO row1 FROM attestations
+    SELECT * INTO row1 FROM laplace.attestations
     WHERE type_id = rel_hot AND subject_id = subj AND id = a1;
     IF row1.observation_count <> 8 THEN
         RAISE EXCEPTION 'FAIL: observation_count=%, expected 3+5=8', row1.observation_count;
@@ -57,7 +56,7 @@ BEGIN
         RAISE EXCEPTION 'FAIL: last_observed_at=%, expected advanced to %', row1.last_observed_at, t2;
     END IF;
 
-    SELECT * INTO row2 FROM attestations
+    SELECT * INTO row2 FROM laplace.attestations
     WHERE type_id = rel_dyn AND subject_id = subj AND id = a2;
     IF row2.observation_count <> 3 THEN
         RAISE EXCEPTION 'FAIL: observation_count=%, expected 1+2=3', row2.observation_count;
@@ -74,7 +73,7 @@ BEGIN
 
     -- 2) partition routing: the hot row lives in an IS_A hash leaf (runtime
     --    prune has a leaf to prune TO).
-    SELECT a.tableoid::regclass::text INTO leafname FROM attestations a
+    SELECT a.tableoid::regclass::text INTO leafname FROM laplace.attestations a
     WHERE a.type_id = rel_hot AND a.subject_id = subj AND a.id = a1;
     IF leafname NOT LIKE '%attestations_r_is_a_h%' THEN
         RAISE EXCEPTION 'FAIL: hot row routed to %, expected an is_a hash leaf', leafname;
@@ -91,7 +90,7 @@ BEGIN
     IF affected <> 1 THEN
         RAISE EXCEPTION 'FAIL: repeat-call merge affected %, expected 1 (ghost id merges nothing)', affected;
     END IF;
-    SELECT * INTO row1 FROM attestations
+    SELECT * INTO row1 FROM laplace.attestations
     WHERE type_id = rel_hot AND subject_id = subj AND id = a1;
     IF row1.observation_count <> 9 THEN
         RAISE EXCEPTION 'FAIL: observation_count=% after repeat call, expected 9', row1.observation_count;

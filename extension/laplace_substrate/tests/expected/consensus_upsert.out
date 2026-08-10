@@ -1,14 +1,13 @@
 BEGIN;
-SET search_path = laplace, public;
 DO $$
 DECLARE
-    type_t   bytea := laplace_hash128_blake3('Type');
-    src      bytea := laplace_hash128_blake3('test/upsert/source');
-    rel_a    bytea := laplace_hash128_blake3('test/upsert/rel_a');
-    rel_hot  bytea := relation_type_id('IS_A');
-    subj     bytea := laplace_hash128_blake3('test/upsert/subject');
-    o1       bytea := laplace_hash128_blake3('test/upsert/obj1');
-    o2       bytea := laplace_hash128_blake3('test/upsert/obj2');
+    type_t   bytea := public.laplace_hash128_blake3('Type');
+    src      bytea := public.laplace_hash128_blake3('test/upsert/source');
+    rel_a    bytea := public.laplace_hash128_blake3('test/upsert/rel_a');
+    rel_hot  bytea := laplace.relation_type_id('IS_A');
+    subj     bytea := public.laplace_hash128_blake3('test/upsert/subject');
+    o1       bytea := public.laplace_hash128_blake3('test/upsert/obj1');
+    o2       bytea := public.laplace_hash128_blake3('test/upsert/obj2');
     phi      bigint := 30000000000;
     s_conf   bigint := 900000000;
     s_ref    bigint := 100000000;
@@ -16,13 +15,13 @@ DECLARE
     t1       timestamptz := '2026-01-01 00:00:00+00';
     t2       timestamptz := '2026-02-01 00:00:00+00';
     affected bigint;
-    row1     consensus%ROWTYPE;
-    row2     consensus%ROWTYPE;
-    expect   laplace_glicko2_result;
+    row1     laplace.consensus%ROWTYPE;
+    row2     laplace.consensus%ROWTYPE;
+    expect   laplace.laplace_glicko2_result;
     leafname text;
     dup_ok   boolean := false;
 BEGIN
-    INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
+    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) VALUES
         (src, 0, type_t, NULL), (rel_a, 0, type_t, src), (subj, 0, type_t, src),
         (o1, 0, type_t, src), (o2, 0, type_t, src)
     ON CONFLICT (id, tier) DO NOTHING;
@@ -40,7 +39,7 @@ BEGIN
         RAISE EXCEPTION 'FAIL: fresh upsert affected % rows, expected 3', affected;
     END IF;
 
-    SELECT * INTO row1 FROM consensus
+    SELECT * INTO row1 FROM laplace.consensus
     WHERE subject_id = subj AND type_id = rel_hot AND object_id = o1;
     IF NOT FOUND THEN RAISE EXCEPTION 'FAIL: hot-relation cell missing'; END IF;
     IF row1.witness_count <> 2 THEN
@@ -49,23 +48,23 @@ BEGIN
     IF row1.rating <= neutral THEN
         RAISE EXCEPTION 'FAIL: confirming evidence must lift rating above neutral';
     END IF;
-    expect := laplace_glicko2_accumulate_games(
-        glicko2_neutral_mu(), glicko2_initial_rd(), glicko2_initial_volatility(),
-        glicko2_neutral_mu(), phi, 2, 2 * s_conf, glicko2_tau());
+    expect := laplace.laplace_glicko2_accumulate_games(
+        consensus.glicko2_neutral_mu(), consensus.glicko2_initial_rd(), consensus.glicko2_initial_volatility(),
+        consensus.glicko2_neutral_mu(), phi, 2, 2 * s_conf, consensus.glicko2_tau());
     IF row1.rating <> expect.rating OR row1.rd <> expect.rd
        OR row1.volatility <> expect.volatility THEN
         RAISE EXCEPTION 'FAIL: fresh fold diverges from the native scalar';
     END IF;
 
     -- the refuting cell lands below neutral
-    SELECT * INTO row2 FROM consensus
+    SELECT * INTO row2 FROM laplace.consensus
     WHERE subject_id = subj AND type_id = rel_a AND object_id = o2;
     IF row2.rating >= neutral THEN
         RAISE EXCEPTION 'FAIL: refuting evidence must sink rating below neutral';
     END IF;
 
     -- 2) partition routing: the hot-relation cell lives in an IS_A hash leaf.
-    SELECT c.tableoid::regclass::text INTO leafname FROM consensus c
+    SELECT c.tableoid::regclass::text INTO leafname FROM laplace.consensus c
     WHERE c.subject_id = subj AND c.type_id = rel_hot AND c.object_id = o1;
     IF leafname NOT LIKE '%consensus_r_is_a_h%' THEN
         RAISE EXCEPTION 'FAIL: hot cell routed to %, expected an is_a hash leaf', leafname;
@@ -73,16 +72,16 @@ BEGIN
 
     -- 3) second batch folds against the stored prior: exact scalar parity,
     --    witness accumulation, GREATEST timestamp.
-    expect := laplace_glicko2_accumulate_games(
+    expect := laplace.laplace_glicko2_accumulate_games(
         row1.rating, row1.rd, row1.volatility,
-        glicko2_neutral_mu(), phi, 5, 5 * s_conf, glicko2_tau());
+        consensus.glicko2_neutral_mu(), phi, 5, 5 * s_conf, consensus.glicko2_tau());
     affected := consensus.upsert(
         ARRAY[subj], ARRAY[rel_hot], ARRAY[o1],
         ARRAY[phi], ARRAY[5]::bigint[], ARRAY[5 * s_conf]::bigint[], ARRAY[t2]);
     IF affected <> 1 THEN
         RAISE EXCEPTION 'FAIL: refold affected % rows, expected 1', affected;
     END IF;
-    SELECT * INTO row2 FROM consensus
+    SELECT * INTO row2 FROM laplace.consensus
     WHERE subject_id = subj AND type_id = rel_hot AND object_id = o1;
     IF row2.witness_count <> 7 THEN
         RAISE EXCEPTION 'FAIL: witness_count=% after refold, expected 7', row2.witness_count;

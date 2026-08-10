@@ -86,7 +86,6 @@ Two mmap'd perfcache blobs are required at runtime (`laplace_t0_perfcache.bin`,
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — the system as built, with file citations
 - [docs/INVENTORY.md](docs/INVENTORY.md) — generated counts and listings, CI-gated
-- [CLAUDE.md](CLAUDE.md) — working rules for coding agents
 
 ## License
 

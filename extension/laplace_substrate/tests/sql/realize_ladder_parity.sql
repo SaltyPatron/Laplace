@@ -25,7 +25,7 @@
 -- exactly, so a sampled row count is not reproducible; and on the near-empty
 -- regress database the sample returned nothing, making `bool_and(...)` NULL over
 -- zero rows -- an assertion that passes by asserting nothing. Every id below is
--- minted through word_id(), so the set is fixed on any database, and every
+-- minted through laplace.word_id(), so the set is fixed on any database, and every
 -- assertion is guarded by a cardinality check so an empty input FAILS instead of
 -- vacuously succeeding.
 BEGIN;
@@ -98,7 +98,7 @@ SELECT bool_and(b.names[p.ord] IS NOT DISTINCT FROM realize.resolve_name(p.id,NU
 FROM probe p CROSS JOIN b;
 
 -- 6. Alignment, duplicates, NULLs, and empty arrays are part of every batch contract.
-WITH ids AS (SELECT ARRAY[word_id('a'),NULL::bytea,word_id('dog'),word_id('a')] AS a),
+WITH ids AS (SELECT ARRAY[laplace.word_id('a'),NULL::bytea,laplace.word_id('dog'),laplace.word_id('a')] AS a),
      b AS (SELECT realize.render_batch(a) AS rendered,
                   realize.label_batch(a) AS labels FROM ids)
 SELECT cardinality(b.rendered)=4 AS render_length,
@@ -120,11 +120,11 @@ SELECT realize.resolve_name_batch(NULL::bytea[],NULL::bytea) IS NULL AS names_nu
 -- contract. Native batch primitives reject them instead of silently flattening.
 SAVEPOINT multidim_resolve_name;
 SELECT realize.resolve_name_batch(
-         ARRAY[[word_id('a')],[word_id('dog')]],NULL::bytea);
+         ARRAY[[laplace.word_id('a')],[laplace.word_id('dog')]],NULL::bytea);
 ROLLBACK TO SAVEPOINT multidim_resolve_name;
 SAVEPOINT multidim_realize;
 SELECT realize.batch(
-         ARRAY[[word_id('a')],[word_id('dog')]],NULL::bytea);
+         ARRAY[[laplace.word_id('a')],[laplace.word_id('dog')]],NULL::bytea);
 ROLLBACK TO SAVEPOINT multidim_realize;
 
 ROLLBACK;

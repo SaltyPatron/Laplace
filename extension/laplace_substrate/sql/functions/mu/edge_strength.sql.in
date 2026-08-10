@@ -1,0 +1,15 @@
+-- Edge strength in [0.05, 1.0]: the logistic on eff_mu relative to the neutral
+-- rating that the foundry crawl and the web-explore path both walk on.
+--
+-- The body is laplace_edge_strength() in spi_common.h:118, already shared by
+-- foundry_crawl.c:233 and explore_web.c:237. This is only the SQL entry to it,
+-- added for the same reason walk_edge_weight got one: while the formula was
+-- reachable from C alone, any SQL surface that wanted the foundry's notion of
+-- strength had to retype the algebra -- which is precisely how
+-- consensus_adjacency ended up carrying a second, hand-typed copy of the
+-- Glicko-complete formula that then had nothing binding it to the engine's.
+-- One body, three callers, no restatement.
+CREATE OR REPLACE FUNCTION consensus.edge_strength(p_rating bigint, p_rd bigint)
+    RETURNS double precision
+    AS 'MODULE_PATHNAME', 'pg_laplace_edge_strength'
+    LANGUAGE C LAPLACE_IMMUTABLE_STRICT;
