@@ -271,7 +271,7 @@ BEGIN
                 GROUP BY o.layer
             ) q;
             layers := COALESCE(layers, ARRAY[]::text[]);
-            SELECT count(*) INTO depth FROM session_topics t
+            SELECT count(*) INTO depth FROM converse.session_topics t
               WHERE t.session_id=p_session AND t.resolved_id=topic;
             out := CASE WHEN depth BETWEEN 1 AND COALESCE(array_length(layers,1),0)
                         THEN layers[depth]
@@ -408,7 +408,7 @@ BEGIN
             -- generator and can bound it with their own statement_timeout.
             -- max(ord) is the turn counter session_record_prompt maintains:
             -- PK-indexed, no full per-session count, no bigint->int narrowing.
-            SELECT COALESCE(max(t.ord), 0) INTO depth FROM session_topics t
+            SELECT COALESCE(max(t.ord), 0) INTO depth FROM converse.session_topics t
               WHERE t.session_id = p_session;
             -- BIOGRAPHY (R7 slice 2): recent session topics ride into the
             -- compose frontier with recency decay — the turn's own topic is

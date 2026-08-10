@@ -669,7 +669,22 @@ public sealed class IngestRunner
             result.WallClock.TotalSeconds, result.UnitsFailed, status,
             SourceEntityIdConventions.SynsetHits, SourceEntityIdConventions.SynsetMisses,
             LanguageReference.ResolveMisses);
-        _obs.OnRunFinished(decomposer.SourceName, result, status);
+        string? failureReason = status == "failed"
+            ? DescribeRunFailure(result.UnitsFailed, counters.FilesDone, declaredFiles)
+            : null;
+        _obs.OnRunFinished(decomposer.SourceName, result, status, failureReason);
+        // A run that wrote status=failed to the ledger MUST NOT return normally. It used to:
+        // the journal recorded failed, this method returned the result, the CLI saw no
+        // exception and exited 0. MEASURED 2026-08-10 — `INGEST_TIMING source=document
+        // elapsed_s=594 rc=0` over a row reading `failed, files 199/207`. Eight files'
+        // content was absent from the substrate and every downstream step read green.
+        // The empty-noop branch below already throws for exactly this reason; a partial
+        // run is the same class of lie and gets the same treatment.
+        if (status == "failed")
+            throw new InvalidOperationException(
+                $"{decomposer.SourceName}: ingest run recorded status=failed — "
+                + (failureReason ?? "no reason derived")
+                + ". Failing the process so the exit code matches the ledger.");
         // Zero-novel re-ingest did not add traffic — the default-partition scan is a
         // multi-second catalog read on a populated box and must not sit on the process
         // completion envelope after a no-op fold.
@@ -704,6 +719,25 @@ public sealed class IngestRunner
         // Exact match: undercount was Q5; overcount (segment markers counted as files) is the same lie.
         if (filesTotal > 0 && filesDone != filesTotal) return "failed";
         return "ok";
+    }
+
+    /// <summary>
+    /// The operator-facing reason a run derived <c>failed</c>, written into
+    /// <c>ingest_run_journal.error</c>. Without it the ledger says a run failed and nothing
+    /// about why: the document lane recorded <c>failed, files_done=199/207, units_failed=0,
+    /// error=NULL</c> twice on 2026-08-10, and the row was the only surviving artifact.
+    /// </summary>
+    internal static string? DescribeRunFailure(long unitsFailed, int filesDone, long filesTotal)
+    {
+        if (unitsFailed > 0)
+            return $"{unitsFailed} unit(s) failed to apply";
+        if (filesTotal > 0 && filesDone < filesTotal)
+            return $"files_done {filesDone} of {filesTotal} — {filesTotal - filesDone} file(s) "
+                 + "did not reach completion; their content is absent from the substrate";
+        if (filesTotal > 0 && filesDone > filesTotal)
+            return $"files_done {filesDone} exceeds files_total {filesTotal} — "
+                 + "the lane counted more completions than it declared inputs";
+        return null;
     }
 
     /// <summary>
