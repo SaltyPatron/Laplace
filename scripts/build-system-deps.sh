@@ -200,7 +200,21 @@ if [ ! -d "$EXT" ]; then
   exit 1
 fi
 if [ ! -f "$ROOT/external/CMakeLists.txt" ]; then
-  red "missing $ROOT/external/CMakeLists.txt"
+  # The superbuild is HOW deps are built from source, not WHETHER they are
+  # installed. 391d9be7 deleted it (224 lines) with .gitmodules when the deps
+  # moved to the shared cache, and this guard has failed every build since --
+  # including on hosts where all six artifacts are present and correct.
+  #
+  # installs_present() above already answers the real question, and
+  # deps_fingerprint() already records cmake=MISSING for this case, so the
+  # stamp logic needs nothing new. Building on a bare host is the bootstrap's
+  # job now (scripts/bootstrap-laplace-runner.sh), not a per-build step.
+  if installs_present; then
+    green "✓ system deps installed under $PREFIX; no superbuild present — nothing to build"
+    exit 0
+  fi
+  red "missing $ROOT/external/CMakeLists.txt, and deps are not installed under $PREFIX"
+  red "  provision once: sudo scripts/bootstrap-laplace-runner.sh bootstrap"
   exit 1
 fi
 if ! grep -q 'USES_TERMINAL_BUILD' "$ROOT/external/CMakeLists.txt"; then
