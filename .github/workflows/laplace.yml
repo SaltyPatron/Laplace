@@ -372,20 +372,29 @@ jobs:
             [ -e "$f" ] || { echo "::error::unbuilt: $f"; miss=$((miss+1)); }
           done
 
-          # PROVENANCE, not presence. `test -e` cannot tell a correct binary from
-          # a stale one, and it reported "artifacts built" over a postgres compiled
+          # PROVENANCE, not presence. `test -e` cannot tell a correct binary from a
+          # stale one, and it reported "artifacts built" over a postgres compiled
           # without the write-path codecs for as long as that binary existed.
-          # external/CMakeLists.txt marks these "Mandatory, not opportunistic";
-          # assert the shipped binary actually carries them.
+          #
+          # A wrong binary must TRIGGER the rebuild, not block it. This gate runs
+          # BEFORE "Build system deps", so counting a flag miss into $miss exits 1
+          # and the step that would fix it never executes — a detector that
+          # prevents its own remedy. Raise the force flag instead and let the
+          # build step do the work.
           if [ -x /opt/laplace/pgsql-18/bin/pg_config ]; then
             cfg=$(/opt/laplace/pgsql-18/bin/pg_config --configure 2>/dev/null || true)
+            need_rebuild=0
             for flag in --with-lz4 --with-zstd --with-liburing; do
               case "$cfg" in
                 *"$flag"*) ;;
-                *) echo "::error::postgres built without $flag — wal_compression/io_method degrade silently"
-                   miss=$((miss+1)) ;;
+                *) echo "::warning::postgres built without $flag — forcing a dep rebuild"
+                   need_rebuild=1 ;;
               esac
             done
+            if [ "$need_rebuild" -eq 1 ]; then
+              echo "LAPLACE_FORCE_DEPS=1" >> "$GITHUB_ENV"
+              echo "postgres predates the mandatory write-path codecs; dep rebuild forced"
+            fi
           fi
 
           if [ "$miss" -gt 0 ] || [ "$stale" -gt 0 ]; then
@@ -405,6 +414,18 @@ jobs:
       - name: Verify installed dep artifacts
         run: |
           miss=0
+          # Post-build, the flags are load-bearing and their absence IS fatal:
+          # the rebuild has already had its chance.
+          if [ -x /opt/laplace/pgsql-18/bin/pg_config ]; then
+            cfg=$(/opt/laplace/pgsql-18/bin/pg_config --configure 2>/dev/null || true)
+            for flag in --with-lz4 --with-zstd --with-liburing; do
+              case "$cfg" in
+                *"$flag"*) ;;
+                *) echo "::error::postgres STILL lacks $flag after the dep build"
+                   miss=$((miss+1)) ;;
+              esac
+            done
+          fi
           for f in \
             /opt/laplace/proj/lib/libproj.so \
             /opt/laplace/geos/lib/libgeos_c.so \
