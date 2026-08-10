@@ -348,8 +348,17 @@ if [ "$FORCE" = "1" ]; then
   invalidate_ep_stamps
   purge_autoconf_build_trees
 elif [ -f "$STAMP_FILE" ] && [ "$(cat "$STAMP_FILE" 2>/dev/null)" != "$fp" ]; then
-  yellow "deps sources/pins changed — invalidating ExternalProject stamps"
+  # Same purge as the FORCE path, and for the same reason. The fingerprint hashes
+  # external/CMakeLists.txt, so a changed CONFIGURE_COMMAND lands here — and
+  # invalidating stamps alone would re-enter configure, hit an existing
+  # config.status, relink stale objects and install them. A detected change that
+  # produces the old binary is worse than no detection: it reports success.
+  #
+  # With this, no operator has to know to set LAPLACE_FORCE_DEPS=1. Editing the
+  # configure line is the signal; the rebuild follows from it.
+  yellow "deps sources/pins/configure changed — invalidating stamps and autoconf trees"
   invalidate_ep_stamps
+  purge_autoconf_build_trees
 elif ! installs_present; then
   yellow "install artifacts missing under $PREFIX — building"
 fi
