@@ -448,3 +448,8 @@ deploy/**/migrations/
 # what to diff and bless. It is output, never source — one was tracked by
 # accident in bbb7b4fb and then showed as a pending deletion for months.
 **/Goldens/*.actual.json
+
+# Pin record lives with the cache at /opt/laplace/external/PINS.tsv, never in the
+# checkout — a repo-root manifest of URLs+shas reads as a sync target to any agent
+# or tool that finds it, which is exactly what .gitmodules did before 391d9be7.
+external-pins.tsv

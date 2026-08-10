@@ -1018,7 +1018,69 @@ bootstrap_external_dirs() {
         install -d -m 2775 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "/opt/laplace/$sub"
     done
     green "✓ /opt/laplace/{external,tree-sitter,geos,proj,gdal,pgsql-18,include,lib,share,bin}/ ready (owned $RUNNER_USER:$RUNNER_GROUP, mode 2775 setgid)"
-    echo "  → /opt/laplace/external/ populated by: scripts/sync-external.sh (pipeline step or developer)"
+    bootstrap_external_pins
+}
+
+# Provision /opt/laplace/external to external-pins.tsv. ONE-TIME setup: external
+# sources do not change between builds, so CI verifies and never populates.
+#
+# This used to say "populated by scripts/sync-external.sh", which read .gitmodules
+# — deleted by 391d9be7 along with all 311 submodules when the deps moved to the
+# shared cache. From that commit nothing could provision the cache at all: the
+# bootstrap only created empty directories and the sync script exited 2 on a
+# missing manifest. external-pins.tsv restores the pin set (311 path/url/sha
+# triples recovered from 391d9be7^ and verified against the live cache: 311
+# current, 0 stale, 0 absent).
+#
+# Idempotent by construction: a dep already at its pinned commit is skipped
+# without a network call, so re-running the bootstrap on a healthy host is free.
+bootstrap_external_pins() {
+    local pins="/opt/laplace/external/PINS.tsv"
+    say "Provision /opt/laplace/external to $pins"
+
+    if [ ! -f "$pins" ]; then
+        yellow "  $pins not present — nothing to provision from."
+        yellow "  Seed it once from a known-good cache:"
+        yellow "    for d in /opt/laplace/external/*/; do n=${d%/}; n=${n##*/}; \\"
+        yellow "      printf 'external/%s\\t%s\\t%s\\n' \"$n\" \\"
+        yellow "        \"$(git -C \"$d\" remote get-url origin)\" \\"
+        yellow "        \"$(git -C \"$d\" rev-parse HEAD)\"; done > $pins"
+        return
+    fi
+
+    local total=0 synced=0 nooped=0 failed=0
+    while IFS=$'\t' read -r path url pin; do
+        case "$path" in ''|'#'*) continue;; esac
+        total=$((total + 1))
+        local entry="/opt/laplace/external/${path#external/}"
+
+        # Already at the pin: no fetch, no clone.
+        if [ -d "$entry/.git" ] \
+           && [ "$(sudo -u "$RUNNER_USER" git -c safe.directory='*' -C "$entry" rev-parse HEAD 2>/dev/null)" = "$pin" ]; then
+            nooped=$((nooped + 1)); continue
+        fi
+
+        install -d -m 2775 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "$(dirname "$entry")"
+        if [ ! -d "$entry/.git" ]; then
+            sudo -u "$RUNNER_USER" git clone --quiet "$url" "$entry" || {
+                red "  clone failed: ${path#external/} <- $url"; failed=$((failed + 1)); continue; }
+        fi
+        if ! sudo -u "$RUNNER_USER" git -c safe.directory='*' -C "$entry" cat-file -e "${pin}^{commit}" 2>/dev/null; then
+            sudo -u "$RUNNER_USER" git -c safe.directory='*' -C "$entry" \
+                fetch --quiet --tags origin '+refs/heads/*:refs/remotes/origin/*' || true
+        fi
+        if sudo -u "$RUNNER_USER" git -c safe.directory='*' -C "$entry" checkout --quiet --detach "$pin" 2>/dev/null; then
+            synced=$((synced + 1))
+        else
+            red "  pin unreachable: ${path#external/} $pin"; failed=$((failed + 1))
+        fi
+    done < "$pins"
+
+    if [ "$failed" -gt 0 ]; then
+        red "✗ external: total=$total synced=$synced nooped=$nooped failed=$failed"
+        return 1
+    fi
+    green "✓ external: total=$total synced=$synced nooped=$nooped (already current)"
 }
 
 bootstrap_runner_gh_auth() {

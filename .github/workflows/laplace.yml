@@ -328,6 +328,12 @@ jobs:
           done
 
           CACHE="${LAPLACE_SUBMODULE_CACHE:-/opt/laplace/external}"
+          # PINS.tsv lives WITH the cache, never in the checkout: a repo-root file of
+          # URLs+shas reads as a sync target to any agent or tool that finds it.
+          [ -f "$CACHE/PINS.tsv" ] || {
+            echo "::error::$CACHE/PINS.tsv missing — run: sudo scripts/bootstrap-laplace-runner.sh bootstrap"
+            exit 1
+          }
           [ -d "$CACHE" ] || {
             echo "::error::$CACHE missing — run: sudo scripts/bootstrap-laplace-runner.sh bootstrap"
             exit 1
@@ -353,7 +359,7 @@ jobs:
               echo "::error::stale: ${path#external/} at ${head:0:12}, pinned ${pin:0:12}"
               stale=$((stale+1))
             fi
-          done < external-pins.tsv
+          done < "$CACHE/PINS.tsv"
 
           # BUILT — the artifacts the build actually links against, not the sources.
           for f in \
@@ -372,7 +378,7 @@ jobs:
             echo "::error::  rebuild:   LAPLACE_FORCE_DEPS=1 bash scripts/build-system-deps.sh"
             exit 1
           fi
-          echo "external cache verified: $(grep -cv '^#' external-pins.tsv) pins current, artifacts built"
+          echo "external cache verified: $(grep -cv '^#' "$CACHE/PINS.tsv") pins current, artifacts built"
 
       - name: Build system deps (fingerprinted — skip unless pins change)
         run: |
