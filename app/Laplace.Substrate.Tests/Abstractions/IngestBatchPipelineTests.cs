@@ -335,9 +335,18 @@ public sealed class IngestBatchPipelineTests
 
             Assert.True(seen > 0, "the run must actually produce changes");
 
-            // 40 files, chunk size 512 → exactly one batched probe, zero scalar ones.
-            Assert.Equal(1, reader.BatchedSourceCompletedCalls);
+            // The LAW is "probes scale sub-linearly with files, and none are scalar" --
+            // not any particular chunk count. An earlier version asserted exactly one
+            // batched call, which pinned a fixed 512-file chunk; when that chunk had to
+            // ramp (a fixed chunk made the first file wait for the whole corpus to be
+            // hashed -- 260x on the document lane) the assertion failed even though the
+            // property it existed to protect was intact. Assert the property.
             Assert.Equal(0, reader.ScalarSourceCompletedCalls);
+            Assert.True(reader.BatchedSourceCompletedCalls > 0,
+                "the batched probe must actually be used");
+            Assert.True(reader.BatchedSourceCompletedCalls <= fileCount / 4,
+                $"probes must scale sub-linearly with files: {reader.BatchedSourceCompletedCalls} "
+                + $"probes for {fileCount} files is approaching one-per-file");
         }
         finally
         {
