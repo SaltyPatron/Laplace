@@ -332,18 +332,46 @@ jobs:
             exit 1
           }
 
-          miss=0
-          for dep in blake3 eigen gdal geos googletest postgis postgresql proj spectra tree-sitter; do
-            if [ ! -d "$CACHE/$dep" ] || [ -z "$(ls -A "$CACHE/$dep" 2>/dev/null)" ]; then
-              echo "::error::$CACHE/$dep missing or empty"
-              miss=$((miss+1))
+          # PRESENT, CURRENT, BUILT — three distinct questions. Checking only the first
+          # is what let a cache drift from its pins silently.
+          miss=0; stale=0
+          while IFS=$'\t' read -r path url pin; do
+            case "$path" in ''|'#'*) continue;; esac
+            entry="$CACHE/${path#external/}"
+
+            # PRESENT
+            if [ ! -d "$entry/.git" ]; then
+              echo "::error::absent: $entry"; miss=$((miss+1)); continue
             fi
+
+            # CURRENT — the pinned commit must be checked out, not merely fetched.
+            # safe.directory: the cache is owned by the runner user, so git refuses
+            # without it. sync-external.sh exported the same guard.
+            head=$(git -c safe.directory='*' -C "$entry" rev-parse HEAD 2>/dev/null || echo "")
+            if [ "$head" != "$pin" ]; then
+              echo "::error::stale: ${path#external/} at ${head:0:12}, pinned ${pin:0:12}"
+              stale=$((stale+1))
+            fi
+          done < external-pins.tsv
+
+          # BUILT — the artifacts the build actually links against, not the sources.
+          for f in \
+            /opt/laplace/proj/lib/libproj.so \
+            /opt/laplace/geos/lib/libgeos_c.so \
+            /opt/laplace/gdal/lib/libgdal.so \
+            /opt/laplace/pgsql-18/bin/postgres \
+            /opt/laplace/pgsql-18/lib/postgis-3.so \
+            /opt/laplace/tree-sitter/lib/libtree-sitter.a; do
+            [ -e "$f" ] || { echo "::error::unbuilt: $f"; miss=$((miss+1)); }
           done
-          [ "$miss" -eq 0 ] || {
-            echo "::error::$miss external dep(s) absent — run: sudo scripts/bootstrap-laplace-runner.sh bootstrap"
+
+          if [ "$miss" -gt 0 ] || [ "$stale" -gt 0 ]; then
+            echo "::error::external cache: $miss absent/unbuilt, $stale stale —"
+            echo "::error::  provision: sudo scripts/bootstrap-laplace-runner.sh bootstrap"
+            echo "::error::  rebuild:   LAPLACE_FORCE_DEPS=1 bash scripts/build-system-deps.sh"
             exit 1
-          }
-          echo "external cache verified: $(ls -1 "$CACHE" | wc -l) entries under $CACHE"
+          fi
+          echo "external cache verified: $(grep -cv '^#' external-pins.tsv) pins current, artifacts built"
 
       - name: Build system deps (fingerprinted — skip unless pins change)
         run: |
