@@ -1,0 +1,43 @@
+# Foundation ladder — first complete recorded baseline
+#
+# Captured 2026-08-10 ~15:35 UTC from laplace.ingest_run_journal, on the
+# generation created at 15:22:24. ALL TEN RUNGS ok.
+#
+# WHY THIS FILE EXISTS: the journal is per-generation. It is created empty with
+# the database and destroyed with it, and the database has been dropped three
+# times today. Before this capture there was NO recorded baseline for any
+# foundation rung anywhere in the repository -- docs/plan/
+# INGEST_THROUGHPUT_FINDINGS_2026-08-10.md section 8 says so explicitly:
+# "there is no prior baseline in the repository for any foundation rung, so
+# every figure here is a first baseline." Every throughput number argued about
+# during 2026-08-10 was compared against numbers that existed only in a
+# transcript.
+#
+# HOW TO READ IT: these are NOT a regression baseline yet. FrameNet ran 548s
+# and then 461s on IDENTICAL code within forty minutes -- 16% run-to-run
+# variance -- so a single run cannot attribute a delta to a change. Two runs of
+# the same commit are the minimum before any figure here is used as a
+# comparison.
+#
+# Machine: i7-6850K, 6 physical / 12 logical cores, 126 GiB RAM.
+#   NOTE: the ingest reports p_physical=12 (GH #986) -- worker pools, MKL/TBB
+#   thread counts and PG max_parallel_workers are all sized from a doubled core
+#   count on this host, so these timings are from an oversubscribed run.
+# PG: wal_compression=lz4, io_method=io_uring, shared_buffers=31.4 GiB,
+#     effective_cache_size=81.7 GiB, synchronous_commit=off.
+#
+# Prior figures for the same rungs, from INGEST_THROUGHPUT_FINDINGS (laplace_iter6):
+#   unicode 54s | cili 357s | wordnet 183s | framenet 602s | ladder wall 1,327s
+
+source_name | status | files | entities | attestations | secs | started
+UnicodeDecomposer | ok | 0/0 | 1175086 | 1631769 | 46 | 2026-08-10 15:24:16
+ISO639Decomposer | ok | 0/0 | 19830 | 42879 | 3 | 2026-08-10 15:25:08
+CILIDecomposer | ok | 0/0 | 2212105 | 1378442 | 80 | 2026-08-10 15:25:16
+WordNetDecomposer | ok | 0/0 | 461648 | 2617273 | 145 | 2026-08-10 15:26:48
+VerbNetDecomposer | ok | 0/0 | 3672 | 25238 | 5 | 2026-08-10 15:29:31
+PropBankDecomposer | ok | 0/0 | 79117 | 131971 | 13 | 2026-08-10 15:29:52
+FrameNetDecomposer | ok | 14900/14900 | 357091 | 685380 | 461 | 2026-08-10 15:30:21
+MapNetDecomposer | ok | 2/2 | 437 | 14126 | 4 | 2026-08-10 15:38:21
+WordFrameNetDecomposer | ok | 2/2 | 16524 | 40122 | 6 | 2026-08-10 15:38:38
+SemLinkDecomposer | ok | 0/0 | 7060 | 76182 | 11 | 2026-08-10 15:39:02
+(10 rows)
