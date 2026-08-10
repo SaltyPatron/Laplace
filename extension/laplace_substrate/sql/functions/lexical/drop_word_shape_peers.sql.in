@@ -4,4 +4,4 @@
 -- known seq-scan defect (coord passed as a CTE column reference instead of a
 -- genuine bound parameter defeats the GiST KNN index -- .scratchpad/02 Issue 33),
 -- so it was both dead and slow. Dropped rather than fixed.
-DROP FUNCTION IF EXISTS word_shape_peers(bytea, double precision);
+DROP FUNCTION IF EXISTS laplace.word_shape_peers(bytea, double precision);

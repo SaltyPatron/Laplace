@@ -3,5 +3,5 @@
 -- fold runs client-side in ConsensusAccumulatingWriter against the same native
 -- glicko-2. The server-side apply/fold entry points below have no callers and
 -- are dropped on upgrade.
-DROP FUNCTION IF EXISTS laplace_apply_batch(text);
-DROP FUNCTION IF EXISTS consensus_fold_partition_incremental(text, boolean);
+DROP FUNCTION IF EXISTS laplace.laplace_apply_batch(text);
+DROP FUNCTION IF EXISTS laplace.consensus_fold_partition_incremental(text, boolean);

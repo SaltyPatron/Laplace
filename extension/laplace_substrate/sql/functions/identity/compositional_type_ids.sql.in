@@ -1,4 +1,4 @@
-DROP FUNCTION IF EXISTS compositional_type_ids();
+DROP FUNCTION IF EXISTS laplace.compositional_type_ids();
 CREATE OR REPLACE FUNCTION laplace.compositional_type_ids()
 RETURNS bytea[]
 LANGUAGE sql

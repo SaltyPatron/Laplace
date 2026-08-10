@@ -2,7 +2,7 @@
 -- translation-shaped co-denotation). Prefer lexical over taxonomy: the row is
 -- a same-plane peer set, not a hierarchy walk. Old names dropped (#532).
 -- BEGIN ATOMIC: GH #764.
-DROP FUNCTION IF EXISTS laplace_translations(bytea, bytea);
+DROP FUNCTION IF EXISTS laplace.laplace_translations(bytea, bytea);
 DROP FUNCTION IF EXISTS laplace.laplace_translations(bytea, bytea);
 DROP FUNCTION IF EXISTS lexical.translations(bytea, bytea);
 CREATE OR REPLACE FUNCTION lexical.translations(

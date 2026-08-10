@@ -7,4 +7,4 @@
 -- the manifest files and never drops what left it) the old catalog row would
 -- linger bound to a missing symbol — an orphan that errors on every call. A fresh
 -- CREATE EXTENSION never had it; this DROP makes the upgraded catalog match.
-DROP FUNCTION IF EXISTS parse_ask(text);
+DROP FUNCTION IF EXISTS laplace.parse_ask(text);

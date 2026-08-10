@@ -21,5 +21,5 @@
 -- chess.player_record() is NOT retired. The fold yields strength, not the W/D/L split, and
 -- that split is a genuinely different question -- answered by index lookups on ONE player
 -- (74ms measured over a 1341-game career), which is a read, not an aggregate.
-DROP FUNCTION IF EXISTS chess_leaderboard(integer);
-DROP FUNCTION IF EXISTS chess_opponents(bytea, integer);
+DROP FUNCTION IF EXISTS laplace.chess_leaderboard(integer);
+DROP FUNCTION IF EXISTS laplace.chess_opponents(bytea, integer);
