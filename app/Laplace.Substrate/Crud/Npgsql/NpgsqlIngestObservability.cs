@@ -35,6 +35,7 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
         _runId = Guid.NewGuid();
         _active = true;
         _lastProgressUtc = DateTime.MinValue;
+        ReconcileOrphanedRuns();
         Execute(
             "INSERT INTO laplace.ingest_run_journal "
             + "(run_id, source_name, source_id, layer, status, files_total, input_units_total, evidence_persisted) "
@@ -48,6 +49,39 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
                 cmd.Parameters.Add(new NpgsqlParameter { Value = inventory?.TotalInputUnits ?? 0L });
                 cmd.Parameters.Add(new NpgsqlParameter { Value = _evidencePersisted });
             });
+    }
+
+    /// <summary>
+    /// Terminate journal rows whose backend no longer exists.
+    ///
+    /// A run that dies WITH the cluster never reaches OnRunFinished, so its row keeps
+    /// status='running' forever and every later reader — verify-ingest-journal.sh,
+    /// ensure-foundation.sh's layer check, source_status — believes an ingest is still
+    /// in flight. Nothing else reconciles it: the process that would have written the
+    /// terminal row is the process that died.
+    ///
+    /// MEASURED 2026-08-10: FrameNetDecomposer sat at 13863/14900 files, status
+    /// 'running', after `apt install bc` triggered needrestart -> `systemctl restart
+    /// laplace-postgresql.service` and terminated the backend 93% through the corpus.
+    /// The row still read 'running' with no process behind it.
+    ///
+    /// Reconciled at the START of the next run rather than by a sweeper: that is the
+    /// one moment a live connection is guaranteed and the single-ingest law says no
+    /// other run can be legitimately in flight. pg_stat_activity is the authority on
+    /// whether a backend exists — not a timeout, which would race a slow corpus.
+    /// </summary>
+    private void ReconcileOrphanedRuns()
+    {
+        Execute(
+            "UPDATE laplace.ingest_run_journal j SET status = 'interrupted', ended_at = now(), "
+            + "error = 'run did not reach completion: no backend for this run remains (cluster "
+            + "restart, OOM kill, or terminated session). Reconciled at the start of the next run.' "
+            + "WHERE j.status = 'running' "
+            + "  AND NOT EXISTS (SELECT 1 FROM pg_stat_activity a "
+            + "                   WHERE a.datname = current_database() "
+            + "                     AND a.backend_start <= j.started_at "
+            + "                     AND a.state IS NOT NULL)",
+            static _ => { });
     }
 
     public void OnIntentApplied(string sourceName, ApplyResult result) { }
