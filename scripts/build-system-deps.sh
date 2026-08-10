@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build system deps (proj/geos/gdal/postgresql/postgis/tree-sitter) into /opt/laplace.
 #
-# Idempotent: fingerprints /opt/laplace/external pins + CMakeLists + ISA. If the
+# Idempotent: fingerprints /opt/laplace/external pins + ISA. If the
 # fingerprint matches and install artifacts exist, this is a no-op. Rebuilds only
 # when sources/pins actually change (or LAPLACE_FORCE_DEPS=1).
 #
@@ -54,15 +54,16 @@ deps_fingerprint() {
     echo "isa=$ISA"
     echo "prefix=$PREFIX"
     echo "external=$EXT"
+    # NOT the superbuild's hash. external/CMakeLists.txt is untracked since
+    # 391d9be7 deleted it AND added /external/ to .gitignore, so it survives on a
+    # developer box (8,193 bytes, Aug 3) and never exists in a CI checkout. Hashing
+    # it made the stamp ENVIRONMENT-DEPENDENT: identical source fingerprints one way
+    # locally and "cmake=MISSING" in CI, so the skip logic can no-op on one host and
+    # rebuild on the other forever. Track only whether a superbuild is in play.
     if [ -f "$ROOT/external/CMakeLists.txt" ]; then
-      # Prefer sha256sum; fall back to cksum
-      if command -v sha256sum >/dev/null 2>&1; then
-        echo "cmake=$(sha256sum "$ROOT/external/CMakeLists.txt" | awk '{print $1}')"
-      else
-        echo "cmake=$(cksum "$ROOT/external/CMakeLists.txt" | awk '{print $1"-"$2}')"
-      fi
+      echo "cmake=present"
     else
-      echo "cmake=MISSING"
+      echo "cmake=absent"
     fi
     for d in "${DEPS[@]}"; do
       if [ -d "$EXT/$d/.git" ] || [ -f "$EXT/$d/.git" ]; then
