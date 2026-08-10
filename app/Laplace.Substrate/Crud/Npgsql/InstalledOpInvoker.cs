@@ -16,6 +16,30 @@ public static class InstalledOpInvoker
     public const int DefaultCommandTimeoutSeconds = 15;
     public const int MaxCommandTimeoutSeconds = 600;
 
+    /// <summary>
+    /// Installed operations permitted to run against a writable connection.
+    ///
+    /// Every other op resolves onto a <c>default_transaction_read_only=on</c>
+    /// datasource, so the catalog being an allow-list is not on its own enough
+    /// to make a mutation callable — it also has to be named here. This is a
+    /// second, deliberately short list rather than a flag on the catalog: adding
+    /// a write op to the substrate must not silently make it reachable over
+    /// HTTP; someone has to add it here on purpose.
+    ///
+    /// <c>ops.ingest_run_close</c> is the gate CI/CD pipelines wait on. Without
+    /// it a stuck run can only be cleared by hand against the database, which
+    /// leaves the pipeline blocked and the operator with no way to intervene.
+    /// </summary>
+    public static readonly IReadOnlySet<string> WritableOps =
+        new HashSet<string>(StringComparer.Ordinal)
+        {
+            "ops.ingest_run_close",
+        };
+
+    /// <summary>True when <paramref name="name"/> may run against a writable connection.</summary>
+    public static bool IsWritable(string? name) =>
+        !string.IsNullOrWhiteSpace(name) && WritableOps.Contains(name);
+
     public sealed record OpParam(string Name, string Type, bool Optional);
 
     public sealed record OpResult(
@@ -28,7 +52,7 @@ public static class InstalledOpInvoker
     /// with declared-type casts, and return rows under a read-only data source.
     /// </summary>
     public static async Task<OpResult> InvokeAsync(
-        NpgsqlDataSource readOnlyDb,
+        NpgsqlDataSource db,
         string name,
         IReadOnlyDictionary<string, JsonNode?>? args,
         int maxRows = DefaultRowCap,
@@ -39,7 +63,7 @@ public static class InstalledOpInvoker
         var rowCap = Math.Clamp(maxRows, 1, 2000);
         var keys = args?.Keys.ToHashSet(StringComparer.Ordinal) ?? [];
 
-        var catalog = await NpgsqlSubstrateReads.ApiCatalogAsync(readOnlyDb, name, ct)
+        var catalog = await NpgsqlSubstrateReads.ApiCatalogAsync(db, name, ct)
             .ConfigureAwait(false);
         var overloads = catalog.Where(r => r.Name == name).ToArray();
         if (overloads.Length == 0)
@@ -81,7 +105,7 @@ public static class InstalledOpInvoker
 
         // LIMIT rowCap + 1 so truncation is observable.
         var sql = $"SELECT * FROM {QualifiedCatalogName(name)}({string.Join(", ", call)}) LIMIT {rowCap + 1}";
-        await using var cmd = readOnlyDb.CreateCommand(sql);
+        await using var cmd = db.CreateCommand(sql);
         cmd.CommandTimeout = Math.Clamp(commandTimeoutSeconds, 1, MaxCommandTimeoutSeconds);
         foreach (var (slot, value) in bound)
             cmd.Parameters.Add(BindArg(slot, value));

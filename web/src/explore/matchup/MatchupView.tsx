@@ -28,6 +28,7 @@ export function MatchupView() {
 
   const [data, setData] = useState<Matchup | null>(null);
   const [verdict, setVerdict] = useState<MatchupVerdict | null>(null);
+  const [verdictError, setVerdictError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [gated, setGated] = useState(false);
@@ -39,6 +40,7 @@ export function MatchupView() {
     setError(null);
     setData(null);
     setVerdict(null);
+    setVerdictError(null);
     setGated(false);
 
     const opts = { tenant, quoteId };
@@ -53,9 +55,20 @@ export function MatchupView() {
 
     // The verdict rides its own request — path search runs seconds; never let
     // it hold up the cards and the tape.
+    // The verdict is optional — the tape still carries the comparison — but a
+    // failed one must not read as a slow one. Swallowed, it left "weighing the
+    // path…" on screen forever, so a 500 from the path search was
+    // indistinguishable from a search still running.
     exploreMatchupVerdict(decodeURIComponent(x), decodeURIComponent(y), opts)
       .then((v) => { if (!stale) setVerdict(v); })
-      .catch(() => { /* verdict is optional; the tape carries the comparison */ });
+      .catch((e) => {
+        if (stale) return;
+        setVerdictError(
+          e instanceof PaymentRequiredError
+            ? 'verdict locked'
+            : e instanceof Error ? e.message : String(e),
+        );
+      });
 
     return () => { stale = true; };
   }, [x, y, tenant, quoteId]);
@@ -91,7 +104,7 @@ export function MatchupView() {
             <SideCard side={data.x} align="left" />
             <div className={styles.center}>
               <span className={styles.vsBig}>vs</span>
-              <Verdict verdict={verdict} />
+              <Verdict verdict={verdict} error={verdictError} />
             </div>
             <SideCard side={data.y} align="right" />
           </div>
@@ -135,7 +148,8 @@ function Rec({ n, label, tone }: { n: number; label: string; tone?: 'confirm' | 
   );
 }
 
-function Verdict({ verdict }: { verdict: MatchupVerdict | null }) {
+function Verdict({ verdict, error }: { verdict: MatchupVerdict | null; error: string | null }) {
+  if (error) return <ErrorText className={styles.verdictPending}>no verdict — {error}</ErrorText>;
   if (verdict === null) return <Muted className={styles.verdictPending}>weighing the path…</Muted>;
   if (!verdict.verdict) return <Muted className={styles.verdictPending}>no verdict</Muted>;
   return (
