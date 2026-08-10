@@ -96,53 +96,42 @@ internal sealed partial class SubstrateClient
             var multiSource = await TryReadMultiSourceCountAsync(conn, budgetSeconds: 5, ct);
             var topRelations = await ReadTopRelationsAsync(conn, 20, ct);
 
-            // ops.source_counts() is a full GROUP BY over attestations plus a
-            // count(DISTINCT) join — unbounded at 135M rows. Attempt within a small
-            // budget; on timeout the stage grid still renders from the static witness
-            // catalog with zero live counts (degraded, not dead).
+            // BOUNDED ONLY. ops.source_counts() is a full GROUP BY over attestations
+            // plus a count(DISTINCT) join — unbounded, and it does not belong on a
+            // request path at any budget.
+            //
+            // This used to attempt the exact form first with timeoutSeconds:10 and treat
+            // approx as the failure case. That guard could not work: timeoutSeconds sets
+            // Npgsql's CommandTimeout, which is a CLIENT wait. The client gives up at 10s,
+            // sends a best-effort cancel, renders this degraded page on schedule, and
+            // returns 200 — while the BACKEND keeps executing and keeps AccessShareLock.
+            //
+            // MEASURED 2026-08-10: a request issued this query, the endpoint answered
+            // normally, and the backend ran 21+ minutes holding the lock. ALTER EXTENSION
+            // laplace_substrate UPDATE queued behind it and the deploy job was cancelled
+            // at timeout. The same wedge is recorded at 2h08m on 2026-08-06 in
+            // NpgsqlSubstrateReads.TopRelationsAsync — a second query, same shape, and the
+            // fix applied there (Issue 52, bounded candidate form, 0.5s at 124M) was never
+            // generalized to this one.
+            //
+            // Serving reads the bounded form. The exact aggregate is an offline audit and
+            // has no caller here. Content count is unknown in approx and stays null: an
+            // estimate labelled, never a lying zero.
             var sources = new List<ExploreSourceRow>();
             var liveByKey = new Dictionary<string, ExploreSourceRow>(StringComparer.OrdinalIgnoreCase);
-            try
+            foreach (var row in await NpgsqlSubstrateReads.SourceCountsApproxAsync(
+                conn, ct, timeoutSeconds: 10))
             {
-                foreach (var row in await NpgsqlSubstrateReads.SourceCountsAsync(
-                    conn, ct, timeoutSeconds: 10))
-                {
-                    var mapped = new ExploreSourceRow(
-                        Key: row.Source,
-                        Evidence: row.Evidence,
-                        Content: row.Content,
-                        Stage: WitnessCatalog.StageForSource(WitnessCatalog.Root, WitnessCatalog.CliForSourceKey(row.Source)),
-                        Layer: null,
-                        Role: null,
-                        IdHex: row.IdHex);
-                    sources.Add(mapped);
-                    liveByKey[row.Source] = mapped;
-                }
-            }
-            catch (Exception ex) when (IsStatementTimeout(ex) && !ct.IsCancellationRequested)
-            {
-                // Exact ops.source_counts() blew its budget (measured ~15s at 6.3M
-                // rows and growing). Fall back to the approx catalog — name, id
-                // and a partition-stats evidence estimate in ~200ms. Content
-                // count is unknown there and stays null: an estimate labelled,
-                // never a lying zero. The whole stage→source→roster tier hangs
-                // off this listing, so it must never come back empty.
-                sources.Clear();
-                liveByKey.Clear();
-                foreach (var row in await NpgsqlSubstrateReads.SourceCountsApproxAsync(
-                    conn, ct, timeoutSeconds: 10))
-                {
-                    var mapped = new ExploreSourceRow(
-                        Key: row.Source,
-                        Evidence: row.Evidence,
-                        Content: null,
-                        Stage: WitnessCatalog.StageForSource(WitnessCatalog.Root, WitnessCatalog.CliForSourceKey(row.Source)),
-                        Layer: null,
-                        Role: null,
-                        IdHex: row.IdHex);
-                    sources.Add(mapped);
-                    liveByKey[row.Source] = mapped;
-                }
+                var mapped = new ExploreSourceRow(
+                    Key: row.Source,
+                    Evidence: row.Evidence,
+                    Content: null,
+                    Stage: WitnessCatalog.StageForSource(WitnessCatalog.Root, WitnessCatalog.CliForSourceKey(row.Source)),
+                    Layer: null,
+                    Role: null,
+                    IdHex: row.IdHex);
+                sources.Add(mapped);
+                liveByKey[row.Source] = mapped;
             }
 
             var stages = WitnessCatalog.BuildStages(liveByKey);
