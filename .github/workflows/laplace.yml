@@ -310,12 +310,40 @@ jobs:
           UCD_ZIP="${LAPLACE_DATA_ROOT:-/vault/Data}/UCD/Public/UCD/latest/ucdxml/ucd.nounihan.flat.zip"
           [ -f "$UCD_ZIP" ] || { echo "::error::UCD zip missing: $UCD_ZIP"; exit 1; }
 
-      - name: Sync /opt/laplace/external to .gitmodules pins
+      - name: Verify /opt/laplace/external is provisioned (no per-build clone)
         run: |
+          # External sources do not change between builds, so the runner must NOT
+          # clone or fetch them per run. 391d9be7 moved them to the shared cache and
+          # deleted .gitmodules (933 lines, 311 submodules -- 10 core deps plus ~300
+          # tree-sitter grammars); this step still called sync-external.sh, whose first
+          # line is `[ -f .gitmodules ] || exit 2`. Every build since has either failed
+          # here or re-fetched gigabytes that were already on disk.
+          #
+          # The cache is provisioned ONCE by scripts/bootstrap-laplace-runner.sh. CI's
+          # job is to prove it is there and fail loudly pointing at the bootstrap if it
+          # is not -- never to populate it.
           for d in tree-sitter geos proj gdal pgsql-18 include lib share bin; do
             mkdir -p "/opt/laplace/$d"
           done
-          scripts/sync-external.sh
+
+          CACHE="${LAPLACE_SUBMODULE_CACHE:-/opt/laplace/external}"
+          [ -d "$CACHE" ] || {
+            echo "::error::$CACHE missing — run: sudo scripts/bootstrap-laplace-runner.sh bootstrap"
+            exit 1
+          }
+
+          miss=0
+          for dep in blake3 eigen gdal geos googletest postgis postgresql proj spectra tree-sitter; do
+            if [ ! -d "$CACHE/$dep" ] || [ -z "$(ls -A "$CACHE/$dep" 2>/dev/null)" ]; then
+              echo "::error::$CACHE/$dep missing or empty"
+              miss=$((miss+1))
+            fi
+          done
+          [ "$miss" -eq 0 ] || {
+            echo "::error::$miss external dep(s) absent — run: sudo scripts/bootstrap-laplace-runner.sh bootstrap"
+            exit 1
+          }
+          echo "external cache verified: $(ls -1 "$CACHE" | wc -l) entries under $CACHE"
 
       - name: Build system deps (fingerprinted — skip unless pins change)
         run: |
