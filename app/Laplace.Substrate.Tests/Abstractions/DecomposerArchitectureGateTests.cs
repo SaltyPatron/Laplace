@@ -192,6 +192,115 @@ public sealed class DecomposerArchitectureGateTests
             + string.Join("\n", violations));
     }
 
+    /// <summary>
+    /// A decomposer must not hand-roll a parser for a format the grammar registry
+    /// already covers.
+    ///
+    /// The law is written in this repo: "Tree-sitter's job is narrow: unpack container
+    /// formats, then hand off." 299 grammars are vendored and ~70 are registered in
+    /// engine/core/src/grammar_registry.c -- including xml, json, csv, tsv, tab, conllu,
+    /// ttl, markdown and sql. Nine decomposers route through them. Fourteen parse around
+    /// a grammar that exists for their exact format, and UD is the sharpest case: conllu
+    /// is registered specifically for it and the decomposer still hand-rolls.
+    ///
+    /// It was recorded twice before and fixed neither time -- .scratchpad/34 for PGN
+    /// ("a direct violation of this project's own stated law; PGN is a container format;
+    /// nothing here currently hands it to tree-sitter") and .scratchpad/30 for the
+    /// vendored gitcommit/gitdiff grammars left unregistered. .scratchpad/13 names the
+    /// mechanism: "every new source is written by copying the nearest neighbor, forking
+    /// further." Ten other decomposer laws have a gate here. This one had none, which is
+    /// why it drifted for three sessions.
+    ///
+    /// SHRINK-ONLY. The allowlist is the measured population as of 2026-08-10, so the
+    /// gate lands enumerated instead of red on merge day. Removing an entry is the fix;
+    /// adding one is a regression that must be argued for in the diff.
+    /// </summary>
+    [Fact]
+    public void DecomposerProjects_NoHandRolledParserForARegisteredGrammar()
+    {
+        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
+
+        // Formats the registry already unpacks. Parsed from the registry itself rather
+        // than hardcoded, so registering a new grammar tightens this gate automatically.
+        var registryPath = Path.Combine(repoRoot, "engine", "core", "src", "grammar_registry.c");
+        var registered = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (File.Exists(registryPath))
+            foreach (Match m in Regex.Matches(File.ReadAllText(registryPath), "\"([a-z0-9_+-]+)\""))
+                registered.Add(m.Groups[1].Value);
+
+        // Hand-rolled parser idioms, mapped to the format they stand in for.
+        var handRolled = new (Regex Pattern, string Format)[]
+        {
+            (new Regex(@"\bXDocument\b|\bXmlReader\b|\bXElement\b", RegexOptions.Compiled), "xml"),
+            (new Regex(@"\bJsonDocument\b|\bUtf8JsonReader\b", RegexOptions.Compiled), "json"),
+        };
+
+        // Measured population 2026-08-10, shrink-only. NINETEEN files, not the fourteen
+        // a grep over *Decomposer.cs suggested -- the hand-rolling lives in helper types
+        // (WiktionaryEntry, LlamaTokenizerParser, ConceptNetUri, LanguageGraph), which is
+        // exactly how it stayed invisible: the decomposer looks clean and the parser sits
+        // one file over.
+        var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "app/Laplace.Decomposers/FrameNet/FrameNetDecomposer.cs",
+            "app/Laplace.Decomposers/FrameNet/FrameNetLuIngest.cs",
+            "app/Laplace.Decomposers/PropBank/PropBankDecomposer.cs",
+            "app/Laplace.Decomposers/VerbNet/VerbNetDecomposer.cs",
+            "app/Laplace.Decomposers/SemLink/SemLinkDecomposer.cs",
+            "app/Laplace.Decomposers/SemLink/SemLinkIngestAdapter.cs",
+            "app/Laplace.Decomposers/Wiktionary/WiktionaryDecomposer.cs",
+            "app/Laplace.Decomposers/Wiktionary/WiktionaryEntry.cs",
+            "app/Laplace.Decomposers/Wiktionary/WiktionaryGrammarWitness.cs",
+            "app/Laplace.Decomposers/Wiktionary/WiktionaryJsonFilter.cs",
+            "app/Laplace.Decomposers/ConceptNet/ConceptNetUri.cs",
+            "app/Laplace.Decomposers/ISO/LanguageGraph.cs",
+            "app/Laplace.Decomposers/Model/LlamaRecipeExtractor.cs",
+            "app/Laplace.Decomposers/Model/LlamaTokenizerParser.cs",
+            "app/Laplace.Decomposers/Model/ModelConfigReader.cs",
+            "app/Laplace.Decomposers/Model/RecipeDescriptor.cs",
+            "app/Laplace.Decomposers/Model/RecipeExtractor.cs",
+
+            // Over HTTP, and still violations. An earlier draft of this gate exempted
+            // anything touching HttpClient on the reasoning that "a REST reply is a wire
+            // format, not a container." That is wrong: a response carries a Content-Type
+            // and a body, the body is the same container it would be on disk, and
+            // Content-Type IS the format declaration. Transport does not change payload.
+            //
+            // The two files prove it. ChessGameFetcher sends
+            // `Accept: application/x-chess-pgn` -- it requests a PGN container, and `pgn`
+            // is registered. LichessBot reads NDJSON with ReadLineAsync and a bare
+            // `catch { }` that swallows every unparseable line. The exemption was written
+            // to make this gate pass, which is the same defect as adjusting a test to fit
+            // the code. Listed as measured violations instead.
+            "app/Laplace.Chess/Service/ChessGameFetcher.cs",
+            "app/Laplace.Chess/Service/LichessBot.cs",
+        };
+
+        var violations = new List<string>();
+        foreach (var dir in DecomposerProjectRoots(repoRoot))
+        {
+            if (!Directory.Exists(dir)) continue;
+            foreach (var file in Directory.EnumerateFiles(dir, "*.cs", SearchOption.AllDirectories))
+            {
+                if (file.Contains(".Tests", StringComparison.OrdinalIgnoreCase)) continue;
+                if (file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")) continue;
+                if (file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")) continue;
+                var rel = Path.GetRelativePath(repoRoot, file).Replace('\\', '/');
+                if (allowed.Contains(rel)) continue;
+                var text = File.ReadAllText(file);
+
+                foreach (var (pattern, format) in handRolled)
+                    if (registered.Contains(format) && pattern.IsMatch(text))
+                        violations.Add($"{rel} hand-rolls {format} (grammar '{format}' IS registered)");
+            }
+        }
+
+        Assert.True(violations.Count == 0,
+            "Container formats go through the grammar registry, not a hand-rolled parser. "
+            + "Register/route the format instead of parsing it in C#:\n"
+            + string.Join("\n", violations));
+    }
+
     [Fact]
     public void DecomposerProjects_ContainNoInlineSql()
     {
