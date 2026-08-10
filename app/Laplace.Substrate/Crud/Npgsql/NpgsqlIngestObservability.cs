@@ -73,7 +73,11 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
     private void ReconcileOrphanedRuns()
     {
         Execute(
-            "UPDATE laplace.ingest_run_journal j SET status = 'interrupted', ended_at = now(), "
+            // 'cancelled', not 'interrupted': ingest_run_journal.status carries a CHECK
+            // constraint and 'interrupted' is not a member. The UPDATE would raise 23514,
+            // Execute() swallows it, and the row stays 'running' — the exact failure this
+            // reconciliation exists to repair.
+            "UPDATE laplace.ingest_run_journal j SET status = 'cancelled', ended_at = now(), "
             + "error = 'run did not reach completion: no backend for this run remains (cluster "
             + "restart, OOM kill, or terminated session). Reconciled at the start of the next run.' "
             + "WHERE j.status = 'running' "

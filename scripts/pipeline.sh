@@ -500,20 +500,34 @@ sync_one_extension() {
 # Fail in seconds and say who is holding it. A deploy that cannot proceed must
 # not be indistinguishable from a deploy that is working.
 alter_extension_update() {
-  local ext="$1" avail="$2" rc=0
+  local ext="$1" avail="$2" rc=0 log
+  log=$(mktemp)
   PGOPTIONS="-c lock_timeout=${LAPLACE_DDL_LOCK_TIMEOUT:-20s}" \
     psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 \
-      -c "ALTER EXTENSION $ext UPDATE TO '$avail'" || rc=$?
-  [[ "$rc" -eq 0 ]] && return 0
-  echo "::error::ALTER EXTENSION $ext UPDATE TO '$avail' could not take its lock" >&2
-  echo "--- blocking backends ---" >&2
-  psql -d "$PGDATABASE" -U laplace_admin -tAX -F' | ' -c "
-    SELECT pid, state, now() - query_start AS held, left(query, 120)
-      FROM pg_stat_activity
-     WHERE datname = current_database()
-       AND pid <> pg_backend_pid()
-       AND state <> 'idle'
-     ORDER BY query_start" >&2 || true
+      -c "ALTER EXTENSION $ext UPDATE TO '$avail'" >"$log" 2>&1 || rc=$?
+  if [[ "$rc" -eq 0 ]]; then rm -f "$log"; return 0; fi
+  # Only claim a lock problem when Postgres actually said so. Emitting
+  # "could not take its lock" for every failure buries the real error and
+  # sends the operator hunting a blocker that does not exist.
+  if grep -q 'canceling statement due to lock timeout' "$log"; then
+    echo "::error::ALTER EXTENSION $ext UPDATE TO '$avail' could not take its lock" >&2
+    cat "$log" >&2
+    echo "--- blocking backends (held measured from xact_start: a lock is held for the" >&2
+    echo "--- whole transaction, so query_start understates idle-in-transaction holders)" >&2
+    psql -d "$PGDATABASE" -U laplace_admin -tAX -F' | ' -c "
+      SELECT pid, state, wait_event_type, wait_event,
+             now() - COALESCE(xact_start, query_start) AS held,
+             left(query, 120)
+        FROM pg_stat_activity
+       WHERE datname = current_database()
+         AND pid <> pg_backend_pid()
+         AND state <> 'idle'
+       ORDER BY COALESCE(xact_start, query_start)" >&2 || true
+  else
+    echo "::error::ALTER EXTENSION $ext UPDATE TO '$avail' failed" >&2
+    cat "$log" >&2
+  fi
+  rm -f "$log"
   return "$rc"
 }
 

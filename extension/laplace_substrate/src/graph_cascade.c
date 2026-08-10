@@ -199,11 +199,18 @@ pg_laplace_cascade(PG_FUNCTION_ARGS)
                 HeapTuple tup = SPI_tuptable->vals[0];
                 TupleDesc td  = SPI_tuptable->tupdesc;
                 bool      isnull;
-                via_types[s] = copy_bytea_datum(
-                    SPI_getbinval(tup, td, 1, &isnull));
+                /* isnull FIRST. copy_bytea_datum() calls DatumGetByteaPP()
+                 * then VARSIZE_ANY() with no null check, so copying before
+                 * testing the flag dereferences the zero Datum that
+                 * SPI_getbinval returns for a NULL column — the same fault
+                 * this function was fixed for. */
+                Datum via = SPI_getbinval(tup, td, 1, &isnull);
                 via_null[s] = isnull;
-                via_dirs[s] = DatumGetInt32(
-                    SPI_getbinval(tup, td, 2, &isnull));
+                if (!isnull)
+                    via_types[s] = copy_bytea_datum(via);
+                bool dir_isnull;
+                Datum dir = SPI_getbinval(tup, td, 2, &dir_isnull);
+                via_dirs[s] = dir_isnull ? 0 : DatumGetInt32(dir);
             }
             if (costs[s] > max_cost)
                 max_cost = costs[s];
