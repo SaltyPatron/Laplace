@@ -92,6 +92,8 @@ StyleCopReport.xml
 *.tmp_proj
 *_wpftmp.csproj
 *.log
+*.log.wall
+*.log.time
 *.tlog
 *.vspscc
 *.vssscc
@@ -237,7 +239,12 @@ node_modules/
 web/test-results/
 web/playwright-report/
 *.tsbuildinfo
-/external/
+# The superbuild is TRACKED; the sources it builds are not. 391d9be7 collapsed
+# this to /external/ and deleted external/CMakeLists.txt, conflating "sources
+# live in the shared cache" with "delete the build definition" -- but the
+# superbuild already built FROM the cache (SOURCE_DIR ${LAPLACE_EXTERNAL}/...).
+/external/*
+!/external/CMakeLists.txt
 
 *.plg
 
