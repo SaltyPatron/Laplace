@@ -150,7 +150,7 @@ WHERE c.type_id = laplace.relation_type_id('PRECEDES')
 (1 row)
 
 SELECT count(*) AS session_rows
-FROM laplace.session_topics WHERE session_id = convert_to('loop1', 'UTF8');
+FROM converse.session_topics WHERE session_id = convert_to('loop1', 'UTF8');
  session_rows 
 --------------
             1

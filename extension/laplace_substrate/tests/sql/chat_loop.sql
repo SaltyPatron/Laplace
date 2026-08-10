@@ -117,7 +117,7 @@ FROM laplace.consensus c
 WHERE c.type_id = laplace.relation_type_id('PRECEDES')
   AND c.subject_id = laplace.word_id('dog');
 SELECT count(*) AS session_rows
-FROM laplace.session_topics WHERE session_id = convert_to('loop1', 'UTF8');
+FROM converse.session_topics WHERE session_id = convert_to('loop1', 'UTF8');
 
 -- 5. THE LOOP: refute the leading definition through the same consensus_upsert
 --    lane the feedback frontends (/v1/feedback, laplace attest) use...

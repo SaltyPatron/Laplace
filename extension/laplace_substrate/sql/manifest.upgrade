@@ -201,8 +201,8 @@ functions/converse/converse_compose.sql.in
 functions/converse/generation_probe.sql.in
 functions/converse/converse_tiered.sql.in
 functions/converse/chat_scaffold.sql.in
-functions/converse/chat.sql.in
 functions/converse/session_topics.sql.in
+functions/converse/chat.sql.in
 functions/converse/session_trajectory.sql.in
 functions/converse/recall_session.sql.in
 functions/converse/structural_neighbors.sql.in

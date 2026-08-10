@@ -5,7 +5,7 @@ CREATE OR REPLACE FUNCTION generation.session_last_resolved(p_session bytea)
     LANGUAGE sql STABLE STRICT PARALLEL SAFE
 BEGIN ATOMIC
     SELECT t.resolved_id
-    FROM laplace.session_topics t
+    FROM converse.session_topics t
     WHERE t.session_id = p_session AND t.resolved_id IS NOT NULL
     ORDER BY t.ord DESC
     LIMIT 1;

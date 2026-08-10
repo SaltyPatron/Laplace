@@ -350,7 +350,7 @@ SELECT reply, witnesses FROM converse.recall_session('dog', convert_to('s1', 'UT
 (1 row)
 
 SELECT ord, prompt, resolved_id = laplace.word_id('dog') AS topic_is_dog
-FROM laplace.session_topics WHERE session_id = convert_to('s1', 'UTF8') ORDER BY ord;
+FROM converse.session_topics WHERE session_id = convert_to('s1', 'UTF8') ORDER BY ord;
  ord | prompt | topic_is_dog 
 -----+--------+--------------
    1 | dog    | t

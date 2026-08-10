@@ -22,7 +22,7 @@ CREATE OR REPLACE FUNCTION converse.session_trajectory(p_session bytea, p_k int 
     RETURNS TABLE(topic_id bytea, last_ord int, mentions bigint)
     LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$
     SELECT t.resolved_id, max(t.ord), count(*)
-    FROM laplace.session_topics t
+    FROM converse.session_topics t
     WHERE t.session_id = p_session AND t.resolved_id IS NOT NULL
     GROUP BY t.resolved_id
     ORDER BY max(t.ord) DESC

@@ -32,20 +32,46 @@ public static class VendoredPathFilter
         "external", "ext", "extern", "third_party", "3rdparty", "thirdparty",
     ];
 
-    // A single hand-authored source file this large is not a realistic thing
+    // A single hand-authored SOURCE file this large is not a realistic thing
     // to expect from a human — it's a generated data dump, a vendored blob, or
     // a lockfile that happened to match a recognized extension. Decomposing it
     // token-by-token is exactly the "generated content should be ignored"
     // principle applied to size instead of location.
+    //
+    // SCOPE (GH #754, 2026-08-10): this is a heuristic about SOURCE CODE
+    // provenance and it does not transfer to a corpus. On a document or media
+    // lane the premise inverts — large files are books, recordings and images,
+    // which are the corpus rather than an accident in it. Applied to
+    // test-data/text it silently discarded webster-unabridged-dictionary-1913
+    // (27.6 MB) and britannica-1911-bulgaria-to-calgary (2.02 MB): the two
+    // densest lexical documents in the set, dropped at ENUMERATION, so
+    // files_total reported 207 against 209 on disk and no journal row recorded
+    // the loss. Use IsVendoredOrBuildPath for code lanes; use
+    // IsVendoredOrBuildLocation for corpus lanes, which asks only the
+    // provenance question.
     private const long MaxFileBytes = 2 * 1024 * 1024;
 
-    public static bool IsVendoredOrBuildPath(string file)
+    /// <summary>
+    /// Provenance only: is this path inside a vendored/build tree, or is its
+    /// filename conventionally tool-generated? No size heuristic. This is the
+    /// predicate corpus lanes want — a large book is not a build artifact.
+    /// </summary>
+    public static bool IsVendoredOrBuildLocation(string file)
     {
         char sep = Path.DirectorySeparatorChar;
         foreach (var seg in Segments)
             if (file.Contains($"{sep}{seg}{sep}", StringComparison.Ordinal))
                 return true;
-        if (IsGeneratedFileName(file)) return true;
+        return IsGeneratedFileName(file);
+    }
+
+    /// <summary>
+    /// Provenance plus the source-code size heuristic. Code lanes only — see the
+    /// MaxFileBytes scope note.
+    /// </summary>
+    public static bool IsVendoredOrBuildPath(string file)
+    {
+        if (IsVendoredOrBuildLocation(file)) return true;
         try { return new FileInfo(file).Length > MaxFileBytes; }
         catch (IOException) { return false; }
     }

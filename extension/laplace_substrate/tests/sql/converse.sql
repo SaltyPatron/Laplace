@@ -171,7 +171,7 @@ SELECT reply, witnesses FROM converse.recall_session('dog', convert_to('s1', 'UT
 SELECT reply FROM converse.recall_session('dog', convert_to('s1', 'UTF8'));
 SELECT reply, witnesses FROM converse.recall_session('dog', convert_to('s1', 'UTF8'));
 SELECT ord, prompt, resolved_id = laplace.word_id('dog') AS topic_is_dog
-FROM laplace.session_topics WHERE session_id = convert_to('s1', 'UTF8') ORDER BY ord;
+FROM converse.session_topics WHERE session_id = convert_to('s1', 'UTF8') ORDER BY ord;
 
 SELECT plane AS reason_plane FROM consensus.relate_path(laplace.word_id('dog'), laplace.word_id('h'));
 

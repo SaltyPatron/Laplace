@@ -24,10 +24,10 @@ BEGIN
     -- a wrong ord.
     PERFORM pg_advisory_xact_lock(laplace.hash128_lo(p_session));
 
-    INSERT INTO laplace.session_topics (session_id, ord, prompt, resolved_id)
+    INSERT INTO converse.session_topics (session_id, ord, prompt, resolved_id)
     VALUES (
         p_session,
-        COALESCE((SELECT max(t.ord) FROM laplace.session_topics t WHERE t.session_id = p_session), 0) + 1,
+        COALESCE((SELECT max(t.ord) FROM converse.session_topics t WHERE t.session_id = p_session), 0) + 1,
         p_prompt,
         p_resolved
     );
