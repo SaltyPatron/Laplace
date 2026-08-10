@@ -1,4 +1,7 @@
-CREATE OR REPLACE FUNCTION consensus_out_readable(p_id bytea, p_limit integer DEFAULT 40)
+-- Declared unqualified, so it installed as laplace.consensus_out_readable while every caller
+-- asks for ops.consensus_out_readable -- 42883 at runtime. See ops.evidence_receipt.
+DROP FUNCTION IF EXISTS laplace.consensus_out_readable(bytea, integer);
+CREATE OR REPLACE FUNCTION ops.consensus_out_readable(p_id bytea, p_limit integer DEFAULT 40)
     RETURNS TABLE(type text, object text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE
     AS $$

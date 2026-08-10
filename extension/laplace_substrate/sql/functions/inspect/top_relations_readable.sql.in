@@ -1,5 +1,8 @@
 -- BEGIN ATOMIC: GH #764.
-CREATE OR REPLACE FUNCTION top_relations_readable(p_limit integer DEFAULT 10, p_type bytea DEFAULT NULL)
+-- Declared unqualified, so it installed as laplace.top_relations_readable while every caller
+-- asks for ops.top_relations_readable -- 42883 at runtime. See ops.evidence_receipt.
+DROP FUNCTION IF EXISTS laplace.top_relations_readable(integer, bytea);
+CREATE OR REPLACE FUNCTION ops.top_relations_readable(p_limit integer DEFAULT 10, p_type bytea DEFAULT NULL)
     RETURNS TABLE(subject text, type text, object text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE
 BEGIN ATOMIC

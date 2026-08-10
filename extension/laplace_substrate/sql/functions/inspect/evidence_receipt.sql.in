@@ -1,4 +1,12 @@
-CREATE OR REPLACE FUNCTION evidence_receipt(p_id bytea, p_limit integer DEFAULT 25)
+-- Declared UNQUALIFIED until 2026-08-10, so it installed wherever search_path
+-- pointed -- laplace.evidence_receipt -- while every caller and all three of its
+-- siblings in this directory (ops.entity_facets, ops.evidence_count,
+-- ops.entity_physicalities) use ops. NpgsqlSubstrateReads.EvidenceReceiptAsync
+-- asked for ops.evidence_receipt, got 42883, and because SubstrateClient.Explore
+-- fans the nine entity reads through one Task.WhenAll, that single missing
+-- function failed the WHOLE Explore entity page as "Explore entity query failed."
+DROP FUNCTION IF EXISTS laplace.evidence_receipt(bytea, integer);
+CREATE OR REPLACE FUNCTION ops.evidence_receipt(p_id bytea, p_limit integer DEFAULT 25)
     RETURNS TABLE(
         type_id bytea,
         object_id bytea,
