@@ -87,7 +87,6 @@ BEGIN
         WHERE a.type_id = v_type              -- bound literal -> LIST prune at plan time
           AND a.subject_id = ANY (p_vocab)    -- index condition -> HASH prune per id
         GROUP BY a.subject_id
-    )
     ), missing AS MATERIALIZED (
         SELECT COALESCE(array_agg(DISTINCT v.id ORDER BY v.id), '{}'::bytea[]) AS ids
         FROM unnest(p_vocab) v(id) LEFT JOIN cat ON cat.id = v.id
