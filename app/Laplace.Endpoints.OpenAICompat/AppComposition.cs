@@ -2,6 +2,7 @@ using Laplace.Chess.Service;
 using Laplace.Endpoints.OpenAICompat.Auth;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD.Npgsql;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -9,6 +10,63 @@ namespace Laplace.Endpoints.OpenAICompat;
 
 internal static class AppComposition
 {
+    /// <summary>
+    /// True when the process is a build-time OpenAPI document generator rather than a
+    /// server.
+    ///
+    /// `Microsoft.Extensions.ApiDescription.Server` runs the application's host inside
+    /// `GetDocument.Insider` during the BUILD to emit web/openapi/openapi.json. That
+    /// starts every IHostedService. MEASURED 2026-08-10 in a CI build log:
+    ///
+    ///   GenerateOpenApiDocuments:
+    ///     [INF] TurnWitness: turn-witness online
+    ///     [WRN] CatalogPrewarmService: explore catalog prewarm failed
+    ///     Npgsql.PostgresException 3D000: database "laplace" does not exist
+    ///
+    /// A compile brought up the substrate WRITER (TurnWitness), opened Postgres
+    /// (CatalogPrewarm), and started BillingBootstrapService -- whose documented job is
+    /// to self-provision the Stripe catalog, prices and webhooks idempotently. The only
+    /// reason that build did not reach a database or a payment processor is that the
+    /// environment was broken at the time. Nothing in the code prevented it.
+    ///
+    /// The repo already knew the remedy and applied it in exactly two places, both
+    /// tests -- GoldenFactory.cs:19 and BillingIdentityTests.cs:50 both call
+    /// `services.RemoveAll&lt;IHostedService&gt;()`. .scratchpad/31 flagged the same shape
+    /// for BillingTestFactories and named GoldenFactory as the fix. It was applied to
+    /// the test factories and never to the composition, so the production path still
+    /// boots everything for a schema dump.
+    ///
+    /// Guarding at REGISTRATION rather than asking each entry point to strip services
+    /// afterwards: a new host inherits the guard, and a new hosted service is covered
+    /// the day it is added. The document generator only needs the endpoint surface --
+    /// routes, DTOs, auth metadata -- all of which are registered below this line.
+    /// </summary>
+    private static bool IsDocumentGenerationHost =>
+        string.Equals(
+            System.Reflection.Assembly.GetEntryAssembly()?.GetName().Name,
+            "GetDocument.Insider",
+            StringComparison.Ordinal)
+        || Environment.GetEnvironmentVariable("LAPLACE_SKIP_HOSTED_SERVICES") == "1";
+
+    /// <summary>
+    /// Registers a hosted service unless this process is a build-time document
+    /// generator. Every AddHostedService in this file goes through here; a bare
+    /// AddHostedService call is the regression.
+    /// </summary>
+    private static IServiceCollection AddServerHostedService<T>(this IServiceCollection services)
+        where T : class, IHostedService
+    {
+        if (IsDocumentGenerationHost) return services;
+        return services.AddHostedService<T>();
+    }
+
+    private static IServiceCollection AddServerHostedService<T>(
+        this IServiceCollection services, Func<IServiceProvider, T> factory)
+        where T : class, IHostedService
+    {
+        if (IsDocumentGenerationHost) return services;
+        return services.AddHostedService(factory);
+    }
     public static IServiceCollection AddOpenAiCompatServices(this IServiceCollection services)
     {
         services.AddSingleton<ITenantResolver, ApiKeyTenantResolver>();
@@ -18,13 +76,13 @@ internal static class AppComposition
         services.AddSingleton<ExploreDecomposeService>();
         services.AddSingleton<WitnessCatalog>(_ => WitnessCatalog.Load());
         services.AddSingleton<TurnWitness>();
-        services.AddHostedService(sp => sp.GetRequiredService<TurnWitness>());
-        services.AddHostedService<CatalogPrewarmService>();
+        services.AddServerHostedService(sp => sp.GetRequiredService<TurnWitness>());
+        services.AddServerHostedService<CatalogPrewarmService>();
 
         const double chessWeight = 0.5d;
         services.AddSingleton(sp => new ChessRuntimeService(
             sp.GetRequiredService<ILogger<ChessRuntimeService>>(), chessWeight));
-        services.AddHostedService(sp => sp.GetRequiredService<ChessRuntimeService>());
+        services.AddServerHostedService(sp => sp.GetRequiredService<ChessRuntimeService>());
         services.AddSingleton(sp => new ChessEngineService(
             chessWeight,
             sp.GetRequiredService<ChessRuntimeService>().GetAsync,
@@ -54,7 +112,7 @@ internal static class AppComposition
         services.AddSingleton<IWebhookSecretProvider, WebhookSecretProvider>();
         services.AddSingleton<IStripeWebhookProvisioner, StripeWebhookProvisioner>();
         services.AddSingleton<IBillingBootstrap, BillingBootstrap>();
-        services.AddHostedService<BillingBootstrapService>();
+        services.AddServerHostedService<BillingBootstrapService>();
         services.AddSingleton<IApiKeyService, ApiKeyService>();
 
         services.AddOptions<LaplaceAuthOptions>().Configure(options =>
