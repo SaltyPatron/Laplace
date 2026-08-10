@@ -105,12 +105,42 @@ BEGIN
     IF p_topic IS NOT NULL THEN
         topic := p_topic;
     ELSE
-        SELECT array_agg(y.synset_id ORDER BY y.specificity DESC NULLS LAST,
-                                              y.rel_mass DESC NULLS LAST,
-                                              y.peers DESC,
-                                              y.ord DESC,
-                                              y.denote_mu DESC NULLS LAST,
-                                              y.synset_id)
+        -- WEIGHED, NOT ORDERED (GH #865). specificity is coherence over the
+        -- candidate's OWN total mass, so dividing by own-mass makes rarity a
+        -- virtue: the rarer sense of a surface wins on the same coherence. And
+        -- denote_mu -- the fold signal that already knows which sense is
+        -- witnessed -- sat at key five, behind three keys that never tie on real
+        -- data, so it was never consulted.
+        --
+        -- MEASURED 2026-08-10, six turns against laplace-converse-001 on an 8M
+        -- entity substrate: "what is a dog" -> Chase (the VERB sense, to pursue),
+        -- "what is a cat" -> Guy (informal), "what is a knight" -> Dub (the verb).
+        -- Right surface, rarest sense, every time. 0/6.
+        --
+        -- Reordering does not fix it and the dead-forms list above says so:
+        -- denote_mu-first, raw coherence and inverse own-mass were each tried and
+        -- each replaced. The failure is that ONE signal decides. #865's done-when
+        -- is explicit -- "election weighs fold signals with containment" -- so the
+        -- primary key is the PRODUCT: a candidate must be both coherent in
+        -- context and actually witnessed. The rare sense keeps its high
+        -- specificity and loses on mass; a well-witnessed but incoherent token
+        -- keeps its mass and loses on specificity.
+        --
+        -- This is spec 36's law applied to election: "approximate geometry may
+        -- propose candidates but cannot establish final identity or truth."
+        -- Containment proposes. The fold governs.
+        --
+        -- NOT YET VERIFIED against a seeded substrate -- the box holds 41
+        -- entities as of this commit. tests/sql/prompt_election.sql pins the law
+        -- with controlled fixtures so the claim is falsifiable without one.
+        SELECT array_agg(y.synset_id ORDER BY
+                    (COALESCE(y.specificity, 0)
+                     * GREATEST(COALESCE(y.denote_mu, 0), 1)) DESC,
+                    y.specificity DESC NULLS LAST,
+                    y.rel_mass DESC NULLS LAST,
+                    y.peers DESC,
+                    y.ord DESC,
+                    y.synset_id)
           INTO cands
         FROM converse.prompt_coherence(p_prompt) y;
         topic := cands[1];

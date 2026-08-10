@@ -1,0 +1,66 @@
+-- Prompt election law (GH #865): the primary key is the PRODUCT of coherence
+-- and fold-witness, not coherence alone.
+--
+-- converse.chat orders converse.prompt_coherence() candidates. Ordering by
+-- specificity first makes rarity a virtue -- specificity is coherence over the
+-- candidate's OWN total mass, so dividing by own-mass rewards the rare sense of
+-- a surface. MEASURED 2026-08-10 on an 8M-entity substrate: "what is a dog" ->
+-- Chase (the VERB, to pursue), "what is a cat" -> Guy, "what is a knight" ->
+-- Dub. Right surface, rarest sense, 0/6.
+--
+-- These fixtures pin the ranking law itself over a controlled candidate set, so
+-- the claim is falsifiable WITHOUT a seeded substrate. They deliberately do not
+-- call prompt_coherence(): its output depends on ingest, and a law test must not.
+
+BEGIN;
+
+CREATE TEMP TABLE cand(synset_id bytea, specificity numeric, denote_mu numeric,
+                       rel_mass numeric, peers bigint, ord bigint) ON COMMIT DROP;
+
+-- 'rare'    high coherence, never witnessed  -- what the old key elected
+-- 'common'  lower coherence, well witnessed  -- what the fold knows is meant
+-- 'noise'   no coherence, heavily witnessed  -- must not win on mass alone
+INSERT INTO cand VALUES
+    ('\x01'::bytea, 0.90, 0,    0.10, 2,  1),
+    ('\x02'::bytea, 0.40, 12.0, 0.70, 40, 2),
+    ('\x03'::bytea, 0.02, 99.0, 0.90, 90, 3);
+
+-- THE LAW. A candidate must be BOTH coherent in context AND actually witnessed.
+SELECT (SELECT synset_id FROM cand
+        ORDER BY (COALESCE(specificity,0) * GREATEST(COALESCE(denote_mu,0),1)) DESC,
+                 specificity DESC NULLS LAST, rel_mass DESC NULLS LAST,
+                 peers DESC, ord DESC, synset_id
+        LIMIT 1) = '\x02'::bytea AS elects_coherent_and_witnessed;
+
+-- The regression this replaces: coherence-first elects the rare, unwitnessed sense.
+SELECT (SELECT synset_id FROM cand
+        ORDER BY specificity DESC NULLS LAST, rel_mass DESC NULLS LAST,
+                 peers DESC, ord DESC, denote_mu DESC NULLS LAST, synset_id
+        LIMIT 1) = '\x01'::bytea AS old_key_elected_the_rare_sense;
+
+-- Mass alone must not win: 'noise' has the largest denote_mu and still loses,
+-- because near-zero specificity collapses the product.
+SELECT (SELECT synset_id FROM cand
+        ORDER BY (COALESCE(specificity,0) * GREATEST(COALESCE(denote_mu,0),1)) DESC,
+                 specificity DESC NULLS LAST, synset_id
+        LIMIT 1) <> '\x03'::bytea AS witness_mass_alone_does_not_elect;
+
+-- GREATEST(denote_mu, 1) is a FLOOR, not a filter: with nothing witnessed, the
+-- election must still fall back to pure coherence rather than collapse to a tie.
+CREATE TEMP TABLE unwitnessed(synset_id bytea, specificity numeric, denote_mu numeric) ON COMMIT DROP;
+INSERT INTO unwitnessed VALUES ('\x0a'::bytea, 0.10, 0), ('\x0b'::bytea, 0.80, NULL);
+SELECT (SELECT synset_id FROM unwitnessed
+        ORDER BY (COALESCE(specificity,0) * GREATEST(COALESCE(denote_mu,0),1)) DESC,
+                 specificity DESC NULLS LAST, synset_id
+        LIMIT 1) = '\x0b'::bytea AS unwitnessed_falls_back_to_coherence;
+
+-- Determinism: equal product and equal specificity must break on synset_id, so
+-- the elected topic cannot vary run to run.
+CREATE TEMP TABLE tied(synset_id bytea, specificity numeric, denote_mu numeric) ON COMMIT DROP;
+INSERT INTO tied VALUES ('\xff'::bytea, 0.50, 4.0), ('\x10'::bytea, 0.50, 4.0);
+SELECT (SELECT synset_id FROM tied
+        ORDER BY (COALESCE(specificity,0) * GREATEST(COALESCE(denote_mu,0),1)) DESC,
+                 specificity DESC NULLS LAST, synset_id
+        LIMIT 1) = '\x10'::bytea AS ties_break_deterministically;
+
+COMMIT;
