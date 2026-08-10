@@ -243,7 +243,19 @@ public static class IngestBatchPipeline
     public readonly record struct PerFileResumePlan(
         ISubstrateReader Reader,
         int LayerOrder,
-        bool IgnoreCompletedFiles);
+        bool IgnoreCompletedFiles)
+    {
+        /// <summary>
+        /// Dispatcher-resolved (identity, already-complete) per file path, filled a chunk
+        /// at a time so the marker probe costs one round trip per CHUNK instead of one per
+        /// FILE. Absent entry = not yet resolved, and the worker falls back to the scalar
+        /// path — never to "skip", so a miss can only cost time, never silently drop a file.
+        /// </summary>
+        public System.Collections.Concurrent.ConcurrentDictionary<string, (Hash128? Root, bool Skip)>? Resolved { get; init; }
+    }
+
+    /// <summary>How many files the dispatcher resolves per bulk marker probe.</summary>
+    private const int ResumeProbeChunk = 512;
 
     // File identity for resume = FileEntity.SourceId over the raw bytes — the file's
     // content-DAG root, the ONE documented file-identity convention (same content =
@@ -476,6 +488,14 @@ public static class IngestBatchPipeline
         PerFileResumePlan? resume, string? filePath, CancellationToken ct)
     {
         if (resume is not { } plan) return (null, false);
+
+        // Dispatcher already resolved this file as part of a bulk probe: no round trip.
+        // A MISS falls through to the scalar path below rather than assuming anything —
+        // the fallback can only cost latency, never skip an un-ingested file.
+        if (filePath is not null && plan.Resolved is { } cache
+            && cache.TryGetValue(filePath, out var hit))
+            return plan.IgnoreCompletedFiles ? (hit.Root, false) : hit;
+
         Hash128? root = TryResolveFileIdentity(filePath);
         if (root is not { } r) return (null, false);
         if (plan.IgnoreCompletedFiles) return (r, false); // --force: re-observe, still re-mark
@@ -505,7 +525,18 @@ public static class IngestBatchPipeline
             if (skipComplete)
             {
                 Console.Error.WriteLine($"INGEST_FILE_SKIPPED file={label} reason=marker-complete");
-                continue; // true skip: zero rows, zero testimony, no re-fold
+                // Still a true skip -- zero rows, zero testimony, no re-fold -- but it must
+                // COUNT. FilesTotal comes from enumeration and includes skipped files, while
+                // _filesDone only advances when a period boundary reaches TrackIntent. A bare
+                // `continue` therefore made every already-complete file look unfinished:
+                // MEASURED 2026-08-10 on the document lane, 209 enumerated, 8 marker-complete,
+                // files_done 201, and the run failed claiming "8 file(s) did not reach
+                // completion; their content is absent from the substrate" -- the exact
+                // opposite of the truth, since the content being PRESENT is what caused the
+                // skip. BuildPeriodBoundary carries no fold semantics and the writer drops it
+                // as an empty change, so counting costs nothing the skip was protecting.
+                yield return BuildPeriodBoundary(config.SourceId, label);
+                continue;
             }
 
             long fileCap = maxTotalUnits > 0 ? maxTotalUnits - unitsConsumed : 0;
@@ -614,15 +645,53 @@ public static class IngestBatchPipeline
             segmentsPerFile = Math.Max(1,
                 Math.Max(1, IngestTopology.Current.ComposeWorkers) / peeked.Count);
 
+        // Resolve the resume question a CHUNK at a time on the way into the channel: file
+        // identities in parallel (pure CPU: read + BLAKE3), then ONE marker probe for the
+        // whole chunk. The scalar path this replaces cost one round trip per file, which
+        // on FrameNet was 14,900 of them and ~100% of the run's wall clock. Chunked rather
+        // than whole-corpus so the stream stays lazy — nothing materializes 14,900 sources.
+        var chunk = new List<IFileRecordSource<TRecord>>(ResumeProbeChunk);
+        async Task FlushChunkAsync()
+        {
+            if (chunk.Count == 0) return;
+            if (resume is { } plan && plan.Resolved is { } cache && !plan.IgnoreCompletedFiles)
+            {
+                var paths = chunk.Where(s => s.FilePath is not null).Select(s => s.FilePath!).ToArray();
+                var roots = new Hash128?[paths.Length];
+                Parallel.For(0, paths.Length,
+                    new ParallelOptions { CancellationToken = ct },
+                    i => roots[i] = TryResolveFileIdentity(paths[i]));
+
+                var probe = new List<Hash128>(paths.Length);
+                foreach (var r in roots) if (r is { } v) probe.Add(v);
+                var done = probe.Count > 0
+                    ? await plan.Reader.HasSourcesCompletedAsync(probe, plan.LayerOrder, ct)
+                        .ConfigureAwait(false)
+                    : (IReadOnlySet<Hash128>)new HashSet<Hash128>();
+
+                for (int i = 0; i < paths.Length; i++)
+                    cache[paths[i]] = (roots[i], roots[i] is { } v && done.Contains(v));
+            }
+            foreach (var s in chunk) await sources.Writer.WriteAsync(s, ct);
+            chunk.Clear();
+        }
+
         var dispatcher = Task.Run(async () =>
         {
             try
             {
                 foreach (var source in peeked)
-                    await sources.Writer.WriteAsync(source, ct);
+                {
+                    chunk.Add(source);
+                    if (chunk.Count >= ResumeProbeChunk) await FlushChunkAsync();
+                }
                 if (!exhaustedInPeek)
                     while (await fileEnumerator.MoveNextAsync())
-                        await sources.Writer.WriteAsync(fileEnumerator.Current, ct);
+                    {
+                        chunk.Add(fileEnumerator.Current);
+                        if (chunk.Count >= ResumeProbeChunk) await FlushChunkAsync();
+                    }
+                await FlushChunkAsync();
                 sources.Writer.Complete();
             }
             finally
@@ -657,6 +726,14 @@ public static class IngestBatchPipeline
                     {
                         Console.Error.WriteLine(
                             $"INGEST_FILE_SKIPPED file={source.FileLabel} worker={workerId} reason=marker-complete");
+                        // Counts, for the reason spelled out on the sequential path's skip:
+                        // FilesTotal counts enumerated files, _filesDone counts boundaries, so
+                        // dropping the boundary makes an already-complete file read as
+                        // unfinished and fails the run. Boundary, not FileCompletion -- the
+                        // marker this file already carries is what got us here; re-depositing
+                        // it would be a write on a lane whose whole contract is zero rows.
+                        await outCh.Writer.WriteAsync(
+                            BuildPeriodBoundary(config.SourceId, source.FileLabel), ct);
                         continue;
                     }
 

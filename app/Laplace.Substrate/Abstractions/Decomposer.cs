@@ -354,6 +354,12 @@ public abstract class DecomposerMultiFile<TRecord> : Decomposer<TRecord>
             PerFileResume && context.Reader is { } rdr
                 ? new IngestBatchPipeline.PerFileResumePlan(
                     rdr, LayerOrder, options.ReObservePresent)
+                {
+                    // Shared per-run: the dispatcher fills it a chunk at a time so the
+                    // marker probe is one round trip per chunk instead of one per file.
+                    Resolved = new System.Collections.Concurrent.ConcurrentDictionary<
+                        string, (Hash128? Root, bool Skip)>(StringComparer.Ordinal),
+                }
                 : null;
 
         await foreach (var change in IngestBatchPipeline.RunMultiFileAsync(

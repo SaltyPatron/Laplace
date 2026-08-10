@@ -80,8 +80,28 @@ internal static class IngestPipelineTestHelpers
         public Task<bool> HasSourceEverCompletedAsync(int layerOrder, CancellationToken ct = default)
             => Task.FromResult(false);
 
+        /// <summary>Scalar per-file marker probes. One round trip each — the cost the
+        /// batched form exists to remove, so tests assert this stays bounded.</summary>
+        public int ScalarSourceCompletedCalls;
+
+        /// <summary>Batched marker probes. One round trip per CHUNK of files.</summary>
+        public int BatchedSourceCompletedCalls;
+
         public Task<bool> HasSourceCompletedAsync(Hash128 sourceId, int layerOrder, CancellationToken ct = default)
-            => Task.FromResult(SourceCompleted?.Invoke(sourceId, layerOrder) ?? false);
+        {
+            Interlocked.Increment(ref ScalarSourceCompletedCalls);
+            return Task.FromResult(SourceCompleted?.Invoke(sourceId, layerOrder) ?? false);
+        }
+
+        public Task<IReadOnlySet<Hash128>> HasSourcesCompletedAsync(
+            IReadOnlyList<Hash128> sourceIds, int layerOrder, CancellationToken ct = default)
+        {
+            Interlocked.Increment(ref BatchedSourceCompletedCalls);
+            var done = new HashSet<Hash128>();
+            foreach (var id in sourceIds)
+                if (SourceCompleted?.Invoke(id, layerOrder) ?? false) done.Add(id);
+            return Task.FromResult<IReadOnlySet<Hash128>>(done);
+        }
 
         public Task<long> CountEntitiesByTypeAsync(Hash128 typeId, CancellationToken ct = default)
             => Task.FromResult(0L);
