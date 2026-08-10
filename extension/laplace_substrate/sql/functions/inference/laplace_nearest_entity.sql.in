@@ -52,7 +52,7 @@
 -- correlated LATERAL reference does NOT satisfy that — EXPLAIN before trusting
 -- the index.
 DROP FUNCTION IF EXISTS laplace.laplace_nearest_entity(float8, float8, float8, float8, integer, bytea, smallint[]);
-CREATE OR REPLACE FUNCTION generation.laplace_nearest_entity(
+CREATE OR REPLACE FUNCTION generation.nearest_entity(
     p_cx float8, p_cy float8, p_cz float8, p_cm float8,
     p_k integer DEFAULT 1,
     p_band_mask bytea DEFAULT NULL,
@@ -68,7 +68,7 @@ LANGUAGE sql STABLE PARALLEL RESTRICTED AS $$
         FROM laplace.v_word_points w, anchor a
         WHERE w.coord IS NOT NULL
           AND (p_band_mask IS NULL
-               OR consensus.laplace_highway_match(w.highway_mask, p_band_mask))
+               OR consensus.highway_match(w.highway_mask, p_band_mask))
           AND (p_tiers IS NULL OR w.tier = ANY (p_tiers))
         ORDER BY w.coord <<->> a.pt
         LIMIT GREATEST(p_k * 6, 60)

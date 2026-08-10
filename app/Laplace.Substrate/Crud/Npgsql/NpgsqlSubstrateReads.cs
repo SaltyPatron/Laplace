@@ -2167,11 +2167,11 @@ public static class NpgsqlSubstrateReads
         NpgsqlRead.ReadRowsAsync(dataSource, """
             WITH mask AS (
                 SELECT CASE WHEN @bands::int[] IS NULL THEN NULL
-                            ELSE consensus.laplace_highway_mask_from_bits(
+                            ELSE consensus.highway_mask_from_bits(
                                      (SELECT array_agg(DISTINCT bit)
                                       FROM unnest(@bands::int[]) AS b(band),
-                                           LATERAL unnest(consensus.laplace_highway_mask_bits(
-                                               consensus.laplace_highway_band_mask(b.band))) AS t(bit)))
+                                           LATERAL unnest(consensus.highway_mask_bits(
+                                               consensus.highway_band_mask(b.band))) AS t(bit)))
                        END AS m
             )
             SELECT repeat('  ', w.depth) || realize.path(w.path, w.types) AS reply,

@@ -43,7 +43,7 @@ DECLARE
     v_eids  bytea[];
     v_bits  int[];
 BEGIN
-    IF NOT consensus.laplace_highway_ready() THEN
+    IF NOT consensus.highway_ready() THEN
         RAISE WARNING 'highway_mask_deposit: highway perfcache not configured — masks not deposited (set laplace_substrate.highway_perfcache_path)';
         RETURN 0;
     END IF;
@@ -107,12 +107,12 @@ BEGIN
     ),
     upd AS (
         UPDATE laplace.entities e
-        SET highway_mask = consensus.laplace_highway_mask_from_bits(
-                COALESCE(consensus.laplace_highway_mask_bits(e.highway_mask), ARRAY[]::int[]) || d.bits)
+        SET highway_mask = consensus.highway_mask_from_bits(
+                COALESCE(consensus.highway_mask_bits(e.highway_mask), ARRAY[]::int[]) || d.bits)
         FROM d
         WHERE e.id = d.eid
           AND (e.highway_mask IS NULL
-               OR NOT (consensus.laplace_highway_mask_bits(e.highway_mask) @> d.bits))
+               OR NOT (consensus.highway_mask_bits(e.highway_mask) @> d.bits))
         RETURNING 1
     )
     SELECT count(*) INTO updated FROM upd;

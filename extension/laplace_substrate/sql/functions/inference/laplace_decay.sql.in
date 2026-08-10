@@ -1,5 +1,5 @@
 DROP FUNCTION IF EXISTS laplace.laplace_decay(bytea, bytea, bytea, float8);
-CREATE OR REPLACE FUNCTION generation.laplace_decay(
+CREATE OR REPLACE FUNCTION generation.decay(
     p_subject  bytea, p_type  bytea, p_object  bytea,
     p_decay_factor float8 DEFAULT 0.95)
 RETURNS void

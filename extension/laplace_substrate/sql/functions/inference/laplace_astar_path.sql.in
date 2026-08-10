@@ -1,5 +1,5 @@
 DROP FUNCTION IF EXISTS laplace.laplace_astar_path(bytea, bytea, bytea[], integer, bool);
-CREATE OR REPLACE FUNCTION generation.laplace_astar_path(
+CREATE OR REPLACE FUNCTION generation.astar_path(
     p_source bytea, p_target bytea,
     p_type_ids bytea[] DEFAULT NULL,
     p_max_depth integer DEFAULT 20,

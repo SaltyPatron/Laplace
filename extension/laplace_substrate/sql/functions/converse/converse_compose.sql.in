@@ -76,7 +76,7 @@ BEGIN
                x.tok, x.syn, x.denote_mu, x.tok_breadth
         FROM (
             SELECT p.id AS tok, s.synset_id AS syn, s.eff_mu AS denote_mu,
-                   max(consensus.laplace_highway_popcount(e.highway_mask))
+                   max(consensus.highway_popcount(e.highway_mask))
                        OVER (PARTITION BY p.id) AS tok_breadth
             FROM converse.prompt_state(p_prompt) p
             CROSS JOIN LATERAL lexical.senses(p.id) s

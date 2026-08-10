@@ -15,7 +15,7 @@ CREATE OR REPLACE FUNCTION consensus.highway_mask_refresh(p_ids bytea[])
 DECLARE
     updated bigint;
 BEGIN
-    IF NOT consensus.laplace_highway_ready() THEN
+    IF NOT consensus.highway_ready() THEN
         RAISE WARNING 'highway_mask_refresh: highway perfcache not configured — masks not refreshed (set laplace_substrate.highway_perfcache_path)';
         RETURN 0;
     END IF;
@@ -47,7 +47,7 @@ BEGIN
         WHERE q.bit IS NOT NULL
     ),
     m AS (
-        SELECT bits.id, consensus.laplace_highway_mask_from_bits(array_agg(DISTINCT bits.bit)) AS mask
+        SELECT bits.id, consensus.highway_mask_from_bits(array_agg(DISTINCT bits.bit)) AS mask
         FROM bits GROUP BY bits.id
     ),
     upd AS (

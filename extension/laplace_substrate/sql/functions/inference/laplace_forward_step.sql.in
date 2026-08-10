@@ -28,14 +28,14 @@
 -- the scalar inliner rejects it either way; the clause is unjustified regardless
 -- and its presence would be one more site for the sweep.
 DROP FUNCTION IF EXISTS laplace.laplace_forward_step(bytea, bytea);
-CREATE OR REPLACE FUNCTION generation.laplace_forward_step(
+CREATE OR REPLACE FUNCTION generation.forward_step(
     p_entity   bytea,
     p_band_mask bytea)
 RETURNS bytea
 LANGUAGE sql STABLE PARALLEL RESTRICTED AS $$
     SELECT n.entity_id
-    FROM generation.laplace_attention_centroid(p_entity, p_band_mask) c
-    JOIN LATERAL generation.laplace_nearest_entity(
+    FROM generation.attention_centroid(p_entity, p_band_mask) c
+    JOIN LATERAL generation.nearest_entity(
              c.cx, c.cy, c.cz, c.cm, 1, p_band_mask,
              ARRAY[generation.entity_tier_of(p_entity)::smallint]) n ON TRUE
     WHERE c.total_weight > 0

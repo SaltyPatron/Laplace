@@ -1,5 +1,5 @@
 DROP FUNCTION IF EXISTS laplace.laplace_distill(bytea, float8);
-CREATE OR REPLACE FUNCTION generation.laplace_distill(
+CREATE OR REPLACE FUNCTION generation.distill(
     p_band_mask  bytea,
     p_min_eff_mu float8 DEFAULT 0.5)
 RETURNS TABLE(subject_id bytea, type_id bytea, object_id bytea, eff_mu float8)
@@ -7,7 +7,7 @@ LANGUAGE sql STABLE PARALLEL RESTRICTED AS $$
     WITH band_types AS (
         SELECT e.id FROM laplace.entities e
         WHERE e.highway_mask IS NOT NULL
-          AND consensus.laplace_highway_mask_bits(e.highway_mask) && consensus.laplace_highway_mask_bits(p_band_mask)
+          AND consensus.highway_mask_bits(e.highway_mask) && consensus.highway_mask_bits(p_band_mask)
     )
     SELECT c.subject_id, c.type_id, c.object_id,
            (consensus.eff_mu(c.rating, c.rd)::float8 / 1e9) AS eff_mu
