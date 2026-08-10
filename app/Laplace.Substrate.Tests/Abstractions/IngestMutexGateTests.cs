@@ -342,12 +342,18 @@ public sealed class IngestMutexGateTests
         var installer = File.ReadAllText(Path.Combine(repoRoot, "extension", "laplace_substrate",
             "sql", "functions", "highway", "highway_mask_deposit.sql.in"));
 
-        const string installedName = "laplace.highway_mask_deposit";
+        // The gate is that the caller and the installed surface agree -- NOT that they
+        // agree on `laplace.`. This previously pinned the pre-migration name in both
+        // directions, including an explicit DoesNotContain on the purpose-schema form,
+        // which made the only way to satisfy it reverting the caller to laplace.* and
+        // undoing the GH #862 move. The 42883 in run 31306797089 was the two sides
+        // disagreeing; the fix is to move the definition forward, never the caller back.
+        const string installedName = "consensus.highway_mask_deposit";
         Assert.Contains($"CREATE OR REPLACE FUNCTION {installedName}", installer,
             StringComparison.Ordinal);
         Assert.Contains($"SELECT {installedName}($1, $2)", writer,
             StringComparison.Ordinal);
-        Assert.DoesNotContain("consensus.highway_mask_deposit", writer,
+        Assert.DoesNotContain("laplace.highway_mask_deposit(", writer,
             StringComparison.Ordinal);
     }
 
