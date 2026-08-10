@@ -381,9 +381,15 @@ jobs:
           # and the step that would fix it never executes — a detector that
           # prevents its own remedy. Raise the force flag instead and let the
           # build step do the work.
-          if [ -x /opt/laplace/pgsql-18/bin/pg_config ]; then
+          need_rebuild=0
+          if [ ! -x /opt/laplace/pgsql-18/bin/pg_config ]; then
+            # An unverifiable install must not pass silently — that is the same
+            # "gate reports success over something it never checked" defect this
+            # provenance assertion exists to remove.
+            echo "::error::pg_config missing or not executable — cannot verify postgres build flags"
+            miss=$((miss+1))
+          else
             cfg=$(/opt/laplace/pgsql-18/bin/pg_config --configure 2>/dev/null || true)
-            need_rebuild=0
             for flag in --with-lz4 --with-zstd --with-liburing; do
               case "$cfg" in
                 *"$flag"*) ;;
@@ -403,7 +409,11 @@ jobs:
             echo "::error::  rebuild:   LAPLACE_FORCE_DEPS=1 bash scripts/build-system-deps.sh"
             exit 1
           fi
-          echo "external cache verified: $(grep -cv '^#' "$CACHE/PINS.tsv") pins current, artifacts built"
+          if [ "${need_rebuild:-0}" -eq 1 ]; then
+            echo "external cache: $(grep -cv '^#' "$CACHE/PINS.tsv") pins current; REBUILD FORCED (see warnings above)"
+          else
+            echo "external cache verified: $(grep -cv '^#' "$CACHE/PINS.tsv") pins current, artifacts built"
+          fi
 
       - name: Build system deps (fingerprinted — skip unless pins change)
         run: |

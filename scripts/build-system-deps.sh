@@ -72,9 +72,18 @@ deps_fingerprint() {
     # is now present identically in every checkout and hashing it is
     # deterministic again. Restore the input rather than keep the workaround.
     if [ -f "$ROOT/external/CMakeLists.txt" ]; then
-      echo "cmake=$(sha256sum "$ROOT/external/CMakeLists.txt" | awk '{print $1}')"
+      # Same sha256sum-or-cksum fallback the outer digest uses. Calling
+      # sha256sum unconditionally aborts under `set -euo pipefail` on hosts
+      # without it, before the fallback at the end of this function can run.
+      if command -v sha256sum >/dev/null 2>&1; then
+        echo "cmake=$(sha256sum "$ROOT/external/CMakeLists.txt" | awk '{print $1}')"
+      else
+        echo "cmake=$(cksum "$ROOT/external/CMakeLists.txt" | awk '{print $1"-"$2}')"
+      fi
     else
-      echo "cmake=absent"
+      # MISSING, matching the per-dep marker below and the cmake=MISSING the
+      # comments in this file already refer to.
+      echo "cmake=MISSING"
     fi
     for d in "${DEPS[@]}"; do
       if [ -d "$EXT/$d/.git" ] || [ -f "$EXT/$d/.git" ]; then
