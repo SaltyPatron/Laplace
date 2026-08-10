@@ -54,14 +54,25 @@ deps_fingerprint() {
     echo "isa=$ISA"
     echo "prefix=$PREFIX"
     echo "external=$EXT"
-    # NOT the superbuild's hash. external/CMakeLists.txt is untracked since
-    # 391d9be7 deleted it AND added /external/ to .gitignore, so it survives on a
-    # developer box (8,193 bytes, Aug 3) and never exists in a CI checkout. Hashing
-    # it made the stamp ENVIRONMENT-DEPENDENT: identical source fingerprints one way
-    # locally and "cmake=MISSING" in CI, so the skip logic can no-op on one host and
-    # rebuild on the other forever. Track only whether a superbuild is in play.
+    # HASH THE SUPERBUILD, don't just note its presence.
+    #
+    # external/CMakeLists.txt carries the postgres configure line, including
+    # --with-lz4 / --with-zstd / --with-liburing. If the stamp only records
+    # present/absent, changing a configure FLAG does not move the fingerprint:
+    # the pins are unchanged, the stamp matches, the build skips, and a binary
+    # compiled without those flags survives every CI run forever. MEASURED
+    # 2026-08-10: wal_compression pinned to pglz and io_method to worker on a
+    # postgres predating the flags, with a 649s checkpoint writing 17.6 GB
+    # underneath a 600s ingest.
+    #
+    # 0ab74ee2 replaced the hash with present/absent because the file was
+    # UNTRACKED after 391d9be7 (+ /external/ in .gitignore), which made the stamp
+    # environment-dependent: hashed locally, "MISSING" in CI. That reasoning was
+    # right and the remedy was wrong -- #971 restored the file to tracking, so it
+    # is now present identically in every checkout and hashing it is
+    # deterministic again. Restore the input rather than keep the workaround.
     if [ -f "$ROOT/external/CMakeLists.txt" ]; then
-      echo "cmake=present"
+      echo "cmake=$(sha256sum "$ROOT/external/CMakeLists.txt" | awk '{print $1}')"
     else
       echo "cmake=absent"
     fi

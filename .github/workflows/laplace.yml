@@ -372,6 +372,22 @@ jobs:
             [ -e "$f" ] || { echo "::error::unbuilt: $f"; miss=$((miss+1)); }
           done
 
+          # PROVENANCE, not presence. `test -e` cannot tell a correct binary from
+          # a stale one, and it reported "artifacts built" over a postgres compiled
+          # without the write-path codecs for as long as that binary existed.
+          # external/CMakeLists.txt marks these "Mandatory, not opportunistic";
+          # assert the shipped binary actually carries them.
+          if [ -x /opt/laplace/pgsql-18/bin/pg_config ]; then
+            cfg=$(/opt/laplace/pgsql-18/bin/pg_config --configure 2>/dev/null || true)
+            for flag in --with-lz4 --with-zstd --with-liburing; do
+              case "$cfg" in
+                *"$flag"*) ;;
+                *) echo "::error::postgres built without $flag — wal_compression/io_method degrade silently"
+                   miss=$((miss+1)) ;;
+              esac
+            done
+          fi
+
           if [ "$miss" -gt 0 ] || [ "$stale" -gt 0 ]; then
             echo "::error::external cache: $miss absent/unbuilt, $stale stale —"
             echo "::error::  provision: sudo scripts/bootstrap-laplace-runner.sh bootstrap"
