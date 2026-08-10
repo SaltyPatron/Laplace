@@ -177,6 +177,45 @@ int parse_ducet(const char* path, DucetKeys& dk) {
         if ((cp>=0x3400&&cp<=0x4DBF)||(cp>=0x20000&&cp<=0x3FFFF)) return 0xFB80;
         return 0xFBC0;
     };
+    /* Hangul syllables are canonical compositions, not unweighted codepoints.
+     *
+     * U+AC00..U+D7A3 are the 11,172 precomposed syllables; allkeys.txt gives
+     * them no entry because UCA §7.1 says a canonical composition sorts as its
+     * decomposition. Falling through to the implicit branch below assigns them
+     * base 0xFBC0 -- above every real primary -- so all of Korean sorts AFTER
+     * every unassigned codepoint. MEASURED on the 17.0.0 blob before this fix:
+     *   U+AC00 GA          rank 206,233
+     *   U+0378 unassigned  rank 205,018
+     *   U+1100 jamo KIYEOK rank  25,257   <- where GA's weight should come from
+     *
+     * The decomposition is algorithmic (UAX #15 3.12), so this needs no table:
+     *   SIndex = s - SBase;  L = LBase + SIndex / NCount
+     * Keying on the leading jamo alone is sufficient for ordering because the
+     * syllable block is laid out L-major, then V, then T -- so two syllables
+     * sharing an L land on the same key and the sort's existing `a < b`
+     * codepoint tiebreak below orders V and T exactly as UCA would.
+     *
+     * The conjoining jamo are explicitly weighted and were parsed above, so
+     * dk.key[L] is populated by the time this runs.
+     *
+     * This moves ranks, which moves coords and hilbert_index. It does NOT move
+     * identity: entity ids are blake3 over the codepoint's UTF-8 bytes and
+     * never read rank or coord. Regenerating the blob is a geometry rebuild,
+     * not an id reseed. */
+    {
+        const uint32_t SBase = 0xAC00, LBase = 0x1100;
+        const uint32_t VCount = 21, TCount = 28;
+        const uint32_t NCount = VCount * TCount;      /* 588  */
+        const uint32_t SCount = 19 * NCount;          /* 11172 */
+        for (uint32_t s = SBase; s < SBase + SCount; ++s) {
+            if (dk.explicit_[s]) continue;
+            uint32_t L = LBase + (s - SBase) / NCount;
+            if (!dk.explicit_[L]) continue;           /* no jamo weight: leave implicit */
+            dk.key[s] = dk.key[L];
+            dk.explicit_[s] = 1;
+        }
+    }
+
     for (uint32_t cp = 0; cp < CP_COUNT; ++cp) {
         if (dk.explicit_[cp]) continue;
         uint32_t base = base_for(cp);

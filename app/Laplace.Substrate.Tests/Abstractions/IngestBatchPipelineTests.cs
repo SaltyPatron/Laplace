@@ -258,6 +258,94 @@ public sealed class IngestBatchPipelineTests
     }
 
     /// <summary>
+    /// The per-file resume probe must cost ONE round trip per chunk, not one per file.
+    ///
+    /// MEASURED 2026-08-10 (knowledge seed, live): FrameNet deposited 1,042,471 rows
+    /// across 14,900 files in 561s — 1,857 rows/s, against OMW's 22,462 rows/s on the
+    /// same run and Unicode's 61,285. Per-file cost was 37.7 ms, and 14,900 × 37.7 ms =
+    /// 562s, i.e. per-file overhead accounted for essentially the entire runtime while
+    /// the payload was ~70 rows per file. The dominant term was this probe: one
+    /// `ops.evidence_count(...) > 0` round trip per file, counting rows to answer an
+    /// existence question, called serially inside the worker loop.
+    ///
+    /// This is a GATE, not a benchmark. `PerFileResume` is ON BY DEFAULT for every
+    /// DecomposerMultiFile, so a regression to the scalar form silently taxes every
+    /// multi-file lane in the repo — and the failure mode is invisible in output
+    /// (identical rows, identical markers, just slower). Asserting the call SHAPE is the
+    /// only thing that catches it.
+    /// </summary>
+    [Fact]
+    public async Task MultiFileResume_MarkerProbeIsBatchedNotPerFile()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), $"laplace-resume-batch-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        try
+        {
+            const int fileCount = 40;
+            var paths = new List<string>(fileCount);
+            for (int i = 0; i < fileCount; i++)
+            {
+                string p = Path.Combine(dir, $"probe-{i:D3}.txt");
+                await File.WriteAllTextAsync(p, $"probe body {i}\n");
+                paths.Add(p);
+            }
+
+            var reader = new ProbeTrackingReader(present: false)
+            {
+                SourceCompleted = (_, _) => false,   // nothing complete: every file is read
+            };
+            var resume = new IngestBatchPipeline.PerFileResumePlan(reader, 3, IgnoreCompletedFiles: false)
+            {
+                Resolved = new System.Collections.Concurrent.ConcurrentDictionary<
+                    string, (Hash128? Root, bool Skip)>(StringComparer.Ordinal),
+            };
+
+            var sources = new List<IFileRecordSource<ContentIngestRecord>>();
+            foreach (var path in paths)
+            {
+                string label = Path.GetFileName(path);
+                sources.Add(new DelegateFileRecordSource<ContentIngestRecord>(
+                    label, ct => OneAsync(label, ct), filePath: path));
+            }
+
+            static async IAsyncEnumerable<ContentIngestRecord> OneAsync(
+                string label,
+                [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+            {
+                ct.ThrowIfCancellationRequested();
+                yield return ContentRecord($"payload-{label}");
+                await Task.Yield();
+            }
+
+            int seen = 0;
+            await foreach (var _ in IngestBatchPipeline.RunMultiFileAsync(
+                new SourceListMultiFileStream<ContentIngestRecord>(sources),
+                _ => new ContentIngestHandler(TestSource),
+                label => new IngestBatchConfig
+                {
+                    SourceId = TestSource,
+                    BatchLabelPrefix = $"batch/{label}",
+                    BatchSize = 4,
+                    ProbeChunkSize = 1024,
+                    ContainmentReader = reader,
+                },
+                fileWorkers: 4,
+                resume: resume))
+                seen++;
+
+            Assert.True(seen > 0, "the run must actually produce changes");
+
+            // 40 files, chunk size 512 → exactly one batched probe, zero scalar ones.
+            Assert.Equal(1, reader.BatchedSourceCompletedCalls);
+            Assert.Equal(0, reader.ScalarSourceCompletedCalls);
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    /// <summary>
     /// GH #898: kill after file 2 applies → restart true-skips marker-complete
     /// files 1–2 (zero fold / zero units) and only re-opens file 3.
     /// </summary>
@@ -323,19 +411,40 @@ public sealed class IngestBatchPipelineTests
                 resume: resume))
                 changes.Add(change);
 
-            // Marker-complete files emit nothing; only file-3 folds one unit + boundary.
-            Assert.DoesNotContain(changes, c =>
-                c.Metadata.SourceContentUnitName.Contains("file-1", StringComparison.Ordinal));
-            Assert.DoesNotContain(changes, c =>
-                c.Metadata.SourceContentUnitName.Contains("file-2", StringComparison.Ordinal));
+            // A marker-complete file is SKIPPED (zero rows, zero testimony, no re-fold) but
+            // it still COUNTS. This assertion used to read "marker-complete files emit
+            // nothing", which pinned a real defect: files_total counts every enumerated
+            // file while files_done only advances on a period boundary, so a silent skip
+            // made an already-ingested file read as unfinished. MEASURED 2026-08-10 on the
+            // document lane — 209 enumerated, 8 marker-complete, files_done 201, and the
+            // run failed with "8 file(s) did not reach completion; their content is absent
+            // from the substrate" when its PRESENCE was what caused the skip.
+            //
+            // The contract is therefore: one boundary per file, always; rows only from the
+            // files actually read; the completion marker only from the file that just
+            // finished (a skipped file already carries its own).
+            Assert.Equal(3, changes.Count(c =>
+                c.Metadata.SourceContentUnitName.StartsWith(
+                    IngestBatchPipeline.PeriodBoundaryUnitPrefix, StringComparison.Ordinal)));
+            foreach (var stem in new[] { "file-1", "file-2" })
+            {
+                var emitted = changes.Where(c =>
+                    c.Metadata.SourceContentUnitName.Contains(stem, StringComparison.Ordinal)).ToList();
+                Assert.Single(emitted);
+                Assert.StartsWith(IngestBatchPipeline.PeriodBoundaryUnitPrefix,
+                    emitted[0].Metadata.SourceContentUnitName, StringComparison.Ordinal);
+                Assert.Equal(0, emitted[0].Metadata.InputUnitsConsumed);
+                Assert.Empty(emitted[0].Entities);
+                Assert.Empty(emitted[0].Attestations);
+            }
+
             Assert.Equal(1, changes.Sum(c => c.Metadata.InputUnitsConsumed));
             Assert.Contains(changes, c =>
                 c.Metadata.SourceContentUnitName.Contains("file-3", StringComparison.Ordinal));
-            Assert.Equal(1, changes.Count(c =>
-                c.Metadata.SourceContentUnitName.StartsWith(
-                    IngestBatchPipeline.PeriodBoundaryUnitPrefix, StringComparison.Ordinal)));
-            Assert.True(MarkerAttestationCount(changes) >= 1,
-                "file-3 boundary must deposit the HasLayerCompleted marker");
+            Assert.Equal(1, MarkerAttestationCount(changes));
+            Assert.Equal(0, NonMarkerAttestationCount(changes.Where(c =>
+                c.Metadata.SourceContentUnitName.Contains("file-1", StringComparison.Ordinal)
+                || c.Metadata.SourceContentUnitName.Contains("file-2", StringComparison.Ordinal))));
         }
         finally
         {
