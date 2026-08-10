@@ -254,8 +254,22 @@ public static class IngestBatchPipeline
         public System.Collections.Concurrent.ConcurrentDictionary<string, (Hash128? Root, bool Skip)>? Resolved { get; init; }
     }
 
-    /// <summary>How many files the dispatcher resolves per bulk marker probe.</summary>
-    private const int ResumeProbeChunk = 512;
+    /// <summary>
+    /// Ceiling on how many files the dispatcher resolves per bulk marker probe.
+    ///
+    /// The chunk RAMPS from 1 to this value rather than starting here. A fixed chunk
+    /// makes the first file wait for the whole chunk to be read and hashed, and
+    /// TryResolveFileIdentity reads every byte -- MEASURED 2026-08-10: on 209 x 1 MB
+    /// files (the document corpus shape, 204 files / 208 MB with a 27.6 MB Webster in
+    /// it) time-to-first-file went 1.9 ms -> 506.7 ms, a 260x regression, because the
+    /// entire corpus is under a 512 chunk and so gets read before any row is written.
+    /// On 2000 x 64 KB it was 0.2 ms -> 104 ms, 504x.
+    ///
+    /// Ramping keeps both properties: the first file releases after ONE hash, and a
+    /// 14,900-file corpus still reaches full batching after ~10 doublings (~30 probes
+    /// total instead of 14,900).
+    /// </summary>
+    private const int ResumeProbeChunkMax = 512;
 
     // File identity for resume = FileEntity.SourceId over the raw bytes — the file's
     // content-DAG root, the ONE documented file-identity convention (same content =
@@ -650,7 +664,8 @@ public static class IngestBatchPipeline
         // whole chunk. The scalar path this replaces cost one round trip per file, which
         // on FrameNet was 14,900 of them and ~100% of the run's wall clock. Chunked rather
         // than whole-corpus so the stream stays lazy — nothing materializes 14,900 sources.
-        var chunk = new List<IFileRecordSource<TRecord>>(ResumeProbeChunk);
+        var chunk = new List<IFileRecordSource<TRecord>>(ResumeProbeChunkMax);
+        int chunkTarget = 1;   // ramps 1,2,4,...,ResumeProbeChunkMax
         async Task FlushChunkAsync()
         {
             if (chunk.Count == 0) return;
@@ -658,9 +673,38 @@ public static class IngestBatchPipeline
             {
                 var paths = chunk.Where(s => s.FilePath is not null).Select(s => s.FilePath!).ToArray();
                 var roots = new Hash128?[paths.Length];
-                Parallel.For(0, paths.Length,
-                    new ParallelOptions { CancellationToken = ct },
-                    i => roots[i] = TryResolveFileIdentity(paths[i]));
+
+                // Parallel.For is SYNCHRONOUS: it blocks this thread-pool thread while
+                // requesting more pool threads, on the same pool serving the file workers
+                // that park on outCh.Writer.WriteAsync. That is sync-over-async on a
+                // shared pool -- "one blocking call is enough to poison the pool", and it
+                // passes every unit test before surfacing under real concurrency.
+                //
+                // It also had no MaxDegreeOfParallelism, so it defaulted to
+                // Environment.ProcessorCount -- 12 on this box, and 12 is itself wrong
+                // (6 physical cores, see GH #986). TryResolveFileIdentity is
+                // File.ReadAllBytes, so that is up to 12 WHOLE FILES resident at once,
+                // every one over 85,000 bytes landing on the Large Object Heap, which is
+                // not compacted. ResumeHashMaxBytes is 512 MB, so the ceiling was
+                // 12 x 512 MB = 6 GB against a MemoryTopology budget of 4 GiB that does
+                // not account for any of it.
+                //
+                // Bounded, async, and hashing is I/O-bound anyway.
+                using (var gate = new SemaphoreSlim(Math.Max(1, Math.Min(4, paths.Length))))
+                {
+                    var hashing = new Task[paths.Length];
+                    for (int i = 0; i < paths.Length; i++)
+                    {
+                        int idx = i;
+                        hashing[i] = Task.Run(async () =>
+                        {
+                            await gate.WaitAsync(ct).ConfigureAwait(false);
+                            try { roots[idx] = TryResolveFileIdentity(paths[idx]); }
+                            finally { gate.Release(); }
+                        }, ct);
+                    }
+                    await Task.WhenAll(hashing).ConfigureAwait(false);
+                }
 
                 var probe = new List<Hash128>(paths.Length);
                 foreach (var r in roots) if (r is { } v) probe.Add(v);
@@ -674,6 +718,7 @@ public static class IngestBatchPipeline
             }
             foreach (var s in chunk) await sources.Writer.WriteAsync(s, ct);
             chunk.Clear();
+            if (chunkTarget < ResumeProbeChunkMax) chunkTarget = Math.Min(ResumeProbeChunkMax, chunkTarget * 2);
         }
 
         var dispatcher = Task.Run(async () =>
@@ -683,19 +728,33 @@ public static class IngestBatchPipeline
                 foreach (var source in peeked)
                 {
                     chunk.Add(source);
-                    if (chunk.Count >= ResumeProbeChunk) await FlushChunkAsync();
+                    if (chunk.Count >= chunkTarget) await FlushChunkAsync();
                 }
                 if (!exhaustedInPeek)
                     while (await fileEnumerator.MoveNextAsync())
                     {
                         chunk.Add(fileEnumerator.Current);
-                        if (chunk.Count >= ResumeProbeChunk) await FlushChunkAsync();
+                        if (chunk.Count >= chunkTarget) await FlushChunkAsync();
                     }
                 await FlushChunkAsync();
                 sources.Writer.Complete();
             }
+            catch (Exception ex)
+            {
+                // Complete(ex) propagates the failure to ReadAllAsync instead of leaving
+                // consumers parked. Without it a throw anywhere above skips Complete()
+                // entirely and every worker awaits a channel that never closes -- a hang
+                // with no error. That window widened when identity resolution and a
+                // marker round trip moved into this try: the DB call is exactly what
+                // fails when the substrate is dropped.
+                sources.Writer.TryComplete(ex);
+                throw;
+            }
             finally
             {
+                // Belt and braces: TryComplete is idempotent, so a path that somehow
+                // reaches here un-completed still releases the consumers.
+                sources.Writer.TryComplete();
                 await fileEnumerator.DisposeAsync();
             }
         }, ct);

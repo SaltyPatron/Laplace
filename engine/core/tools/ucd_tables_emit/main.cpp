@@ -203,9 +203,29 @@ static void put_h128(std::vector<uint8_t>& b, const hash128_t& h) {
 }
 
 
-// Bump when the emit LOGIC changes (not the inputs) so a generator change
-// invalidates the source-hash gate and forces a regenerate.
-static const char* GENERATOR_TAG = "ucd_tables_emit/v2-scope";
+// Generator identity for the source-hash gate. This USED to be a hand-edited
+// string with a comment asking the author to "bump when the emit LOGIC changes",
+// and nothing enforced it.
+//
+// MEASURED 2026-08-10: the Hangul collation fix changed rank assignment in
+// unicode_seed.cpp and left this constant alone. source_hash was therefore
+// unchanged, the gate below matched, this tool printed "sources unchanged
+// (source-hash match) -- crawl skipped", and every build -- including a full
+// green CI run reporting "Build: engine, extensions, app, perfcache success" --
+// kept the OLD geometry. A staleness key that depends on human memory reports
+// "current" precisely when it is wrong.
+//
+// LAPLACE_GENERATOR_FINGERPRINT is a build-time SHA256 over this file plus
+// unicode_seed.cpp / super_fibonacci.c / hilbert4d.c (see this tool's
+// CMakeLists.txt). Any edit to the emit logic or the seed computation changes
+// it, which changes source_hash, which forces the regenerate. Nobody has to
+// remember. The literal fallback only applies to a build system that does not
+// define it, and is deliberately marked so such a blob is identifiable.
+#ifdef LAPLACE_GENERATOR_FINGERPRINT
+static const char* GENERATOR_TAG = "ucd_tables_emit/v3-fp/" LAPLACE_GENERATOR_FINGERPRINT;
+#else
+static const char* GENERATOR_TAG = "ucd_tables_emit/v3-NO-FINGERPRINT";
+#endif
 
 static bool read_file_bytes(const fs::path& p, std::vector<uint8_t>& out) {
     std::ifstream f(p, std::ios::binary);
