@@ -93,7 +93,25 @@ CEILINGS = {
     #      the MCP op tool via api()'s unfiltered pg_proc scan. These are
     #      deletions, tracked in #989 — a write-path hazard, not scaffolding.
     #   4  converse/geometry — tiered, label_or_hex_batch, locale, cluster_batch.
-    #      Genuine zero-caller candidates for the #758 audit.
+    #      Audited one by one 2026-08-10. NONE are safe deletions; "zero textual
+    #      caller" turned out to mean "written ahead of its caller" in every case:
+    #        converse.tiered            deliberately off the hot path, and chat.sql.in
+    #                                   says so in 14 lines at :441. Hangs are fixed
+    #                                   (ceef97d); it stays off because content
+    #                                   regressed to topic echo. Open as #878.
+    #        converse.label_or_hex_batch the BATCH replacement for converse.label_or_hex,
+    #                                   which production C# calls PER ROW from 20 sites
+    #                                   across NpgsqlSubstrateReads and SubstrateTools.
+    #                                   Added 2026-08-09 by "standardize deployed MCP and
+    #                                   batch realization" and never wired. Deleting it
+    #                                   would delete the fix and keep the N+1 — the same
+    #                                   shape evidence_receipt's header records as
+    #                                   ~3,129 renders to return 3 rows.
+    #        structural.locale          2026-06-30 import, touched since only by schema
+    #        structural.cluster_batch   migrations. Operator-diagnostic shaped, and
+    #                                   api() is an unfiltered pg_proc scan (#989), so
+    #                                   "no textual caller" cannot prove unused while
+    #                                   any MCP op call reaches them. Not provably dead.
     "g4_dead_canonical": 16,
     # Measured 2026-08-05, landing with its violations enumerated per W6's trap
     # note ("a gate that goes red on merge-day teaches people to ignore it").
