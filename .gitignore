@@ -237,8 +237,7 @@ node_modules/
 web/test-results/
 web/playwright-report/
 *.tsbuildinfo
-/external/*
-!/external/CMakeLists.txt
+/external/
 
 *.plg
 
