@@ -478,9 +478,43 @@ sync_one_extension() {
   test -n "$share" || { echo "::error::could not locate $ext.control under $LAPLACE_INSTALL_PREFIX"; exit 1; }
   bridge="$share/$ext--${installed}--${avail}.sql"
   install -m 664 "$share/${ext}_upgrade.sql" "$bridge"
-  psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 \
-    -c "ALTER EXTENSION $ext UPDATE TO '$avail'"
+  alter_extension_update "$ext" "$avail" || exit 1
   echo "OK upgraded $ext $installed -> $avail in place"
+}
+
+# ALTER EXTENSION UPDATE takes AccessExclusive on every object the bridge script
+# touches. With no lock_timeout it queues behind any reader FOREVER and prints
+# nothing while it waits — the step looks hung, not blocked, and nothing names
+# the blocker.
+#
+# MEASURED 2026-08-10: run 31360661946 sat 21m45s on "DB — migrate, extension
+# sync, perfcache GUC" and was cancelled. The holder was ops.source_counts(), an
+# unbounded count(DISTINCT ...) issued from the live OpenAICompat serving path
+# and guarded only by Npgsql CommandTimeout — which is client-side, so the client
+# gave up at 10s, rendered its degraded page, returned 200, and left the backend
+# holding AccessShareLock. NpgsqlSubstrateReads.cs:1622 documents the identical
+# wedge at 2h08m on 2026-08-06. Consequence: laplace_substrate stayed pinned at
+# a8e944e192fbc767 while the fix for the unqualified session_topics reference sat
+# merged and undeployed, so converse.chat's walk path stayed dead on the box.
+#
+# Fail in seconds and say who is holding it. A deploy that cannot proceed must
+# not be indistinguishable from a deploy that is working.
+alter_extension_update() {
+  local ext="$1" avail="$2" rc=0
+  PGOPTIONS="-c lock_timeout=${LAPLACE_DDL_LOCK_TIMEOUT:-20s}" \
+    psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 \
+      -c "ALTER EXTENSION $ext UPDATE TO '$avail'" || rc=$?
+  [[ "$rc" -eq 0 ]] && return 0
+  echo "::error::ALTER EXTENSION $ext UPDATE TO '$avail' could not take its lock" >&2
+  echo "--- blocking backends ---" >&2
+  psql -d "$PGDATABASE" -U laplace_admin -tAX -F' | ' -c "
+    SELECT pid, state, now() - query_start AS held, left(query, 120)
+      FROM pg_stat_activity
+     WHERE datname = current_database()
+       AND pid <> pg_backend_pid()
+       AND state <> 'idle'
+     ORDER BY query_start" >&2 || true
+  return "$rc"
 }
 
 phase_sync_extension() {
@@ -555,13 +589,29 @@ phase_sync_extension() {
     # real error and must not be masked by a restart.
     local upd_log rc=0
     upd_log=$(mktemp)
-    if ! psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 \
+    if ! PGOPTIONS="-c lock_timeout=${LAPLACE_DDL_LOCK_TIMEOUT:-20s}" \
+           psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 \
            -c "ALTER EXTENSION laplace_substrate UPDATE TO '$avail'" >"$upd_log" 2>&1; then
-      if grep -q 'could not find function\|could not load library\|undefined symbol' "$upd_log"; then
+      if grep -q 'lock timeout\|canceling statement due to lock timeout' "$upd_log"; then
+        # Blocked, not broken. Name the holder — see alter_extension_update().
+        echo "::error::sync-extension: could not take the DDL lock within ${LAPLACE_DDL_LOCK_TIMEOUT:-20s}" >&2
+        cat "$upd_log" >&2
+        echo "--- blocking backends ---" >&2
+        psql -d "$PGDATABASE" -U laplace_admin -tAX -F' | ' -c "
+          SELECT pid, state, now() - query_start AS held, left(query, 120)
+            FROM pg_stat_activity
+           WHERE datname = current_database()
+             AND pid <> pg_backend_pid()
+             AND state <> 'idle'
+           ORDER BY query_start" >&2 || true
+        rm -f "$upd_log"
+        exit 1
+      elif grep -q 'could not find function\|could not load library\|undefined symbol' "$upd_log"; then
         echo "sync-extension: loaded image lacks a symbol this SQL binds — bounce required"
         cat "$upd_log"
         restart_postgres "sync-extension: preloaded .so is stale for the new SQL"
-        psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 \
+        PGOPTIONS="-c lock_timeout=${LAPLACE_DDL_LOCK_TIMEOUT:-20s}" \
+          psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 \
           -c "ALTER EXTENSION laplace_substrate UPDATE TO '$avail'" || rc=$?
       else
         cat "$upd_log" >&2
