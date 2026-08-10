@@ -161,6 +161,45 @@ assert_single_build_identity() {
   exit 1
 }
 
+purge_autoconf_build_trees() {
+  # Deleting ExternalProject step stamps re-ENTERS configure/build/install. For the
+  # cmake deps that is enough. For the autoconf ones it is not: PostgreSQL's
+  # configure short-circuits against an existing config.status, and make sees no
+  # changed prerequisites, so a "forced rebuild" relinks stale objects and installs
+  # them. The result looks fresh by mtime and carries none of the new configure
+  # options.
+  #
+  # MEASURED 2026-08-10 after a full LAPLACE_FORCE_DEPS=1 run reporting
+  # "[42/42] Completed 'postgis'" and "system deps built + stamped":
+  #     postgresql-build/src/include/pg_config.h        2026-08-03 22:43
+  #     postgresql-build/src/backend/.../xlog.o         2026-07-26 15:34
+  #     postgresql-build/src/bin/pg_config/pg_config    2026-07-26 15:34  (0 --with-lz4)
+  #     postgresql-build/src/backend/postgres           2026-08-10 11:18  (relink only)
+  #     /opt/laplace/pgsql-18/bin/postgres              2026-08-10 11:18
+  # Six seconds from configure to install cannot compile PostgreSQL. Nothing was
+  # rebuilt, and --with-lz4/--with-zstd/--with-liburing have never reached the
+  # shipped binary despite being in external/CMakeLists.txt since restoration.
+  # Consequence: wal_compression enumvals {pglz,on,off}, io_method {sync,worker},
+  # and a checkpointer writing 17.6 GB in 649 s under a ~600 s ingest.
+  #
+  # Force must mean force. Remove the autoconf build trees so configure runs from
+  # nothing. The cmake deps keep their object trees — their stamp invalidation
+  # already re-runs cmake, which does react to changed arguments.
+  local d
+  for d in postgresql-build postgis-build; do
+    if [ -d "$BUILD/$d" ]; then
+      yellow "  purging autoconf build tree: $BUILD/$d (config.status would short-circuit configure)"
+      rm -rf "${BUILD:?}/$d"
+    fi
+  done
+  # postgis builds in-source under $EXT; clear its configure cache the same way.
+  for d in postgis; do
+    [ -f "$EXT/$d/config.status" ] || continue
+    yellow "  clearing in-source autoconf cache: $EXT/$d"
+    rm -f "$EXT/$d/config.status" "$EXT/$d/config.cache" 2>/dev/null || true
+  done
+}
+
 invalidate_ep_stamps() {
   # Drop ExternalProject step stamps so a pin change re-enters configure/build/install.
   # Keep object trees where possible — cmake/make still incremental inside BINARY_DIR.
@@ -307,6 +346,7 @@ fi
 if [ "$FORCE" = "1" ]; then
   yellow "LAPLACE_FORCE_DEPS=1 — rebuilding"
   invalidate_ep_stamps
+  purge_autoconf_build_trees
 elif [ -f "$STAMP_FILE" ] && [ "$(cat "$STAMP_FILE" 2>/dev/null)" != "$fp" ]; then
   yellow "deps sources/pins changed — invalidating ExternalProject stamps"
   invalidate_ep_stamps
