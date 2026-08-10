@@ -1,4 +1,4 @@
-CREATE OR REPLACE FUNCTION physicalities_exist_bitmap(ids bytea[])
+CREATE OR REPLACE FUNCTION laplace.physicalities_exist_bitmap(ids bytea[])
     RETURNS bytea
     AS 'MODULE_PATHNAME', 'pg_laplace_physicalities_exist_bitmap'
     LANGUAGE C STABLE;
@@ -10,4 +10,4 @@ CREATE OR REPLACE FUNCTION physicalities_exist_bitmap(ids bytea[])
 -- the ingest (see the novel-by-construction post-mortem in NpgsqlWorkingSetApply).
 -- The id-only probe above needs no partition hint: HASH(id) routes on the id it
 -- is already given.
-DROP FUNCTION IF EXISTS physicalities_exist_bitmap(bytea[], bytea[]);
+DROP FUNCTION IF EXISTS laplace.physicalities_exist_bitmap(bytea[], bytea[]);

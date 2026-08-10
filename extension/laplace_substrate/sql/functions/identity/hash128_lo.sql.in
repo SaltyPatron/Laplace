@@ -2,7 +2,7 @@
 -- advisory-lock / walk RNG sites do not open-code encode+bit casts (GH #468).
 -- BEGIN ATOMIC: body is parsed at create time so pg_depend records the call
 -- graph (GH #764 beachhead — string bodies record zero deps).
-DROP FUNCTION IF EXISTS hash128_lo(bytea);
+DROP FUNCTION IF EXISTS laplace.hash128_lo(bytea);
 CREATE OR REPLACE FUNCTION laplace.hash128_lo(p_id bytea)
     RETURNS bigint
     LANGUAGE sql

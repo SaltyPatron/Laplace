@@ -1,4 +1,4 @@
-CREATE OR REPLACE FUNCTION table_present_ordinals(p_table text, p_ids bytea[])
+CREATE OR REPLACE FUNCTION laplace.table_present_ordinals(p_table text, p_ids bytea[])
     RETURNS TABLE(idx int)
     LANGUAGE sql STABLE PARALLEL SAFE
  AS $$

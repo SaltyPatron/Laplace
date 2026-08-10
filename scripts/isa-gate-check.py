@@ -72,7 +72,29 @@ CEILINGS = {
     # G4 scaffolding (W6 D3): grep for CREATE FUNCTION with zero callers outside
     # its own CREATE line. Destination form is substrate CALLS in-degree after W3
     # (#765); this allowlist is shrink-only until that replace lands.
-    "g4_dead_canonical": 0,
+    #
+    # 0 -> 16, and this is the ONE ceiling raise in this file. It is not a
+    # regression: the previous 0 was never a measurement. CREATE_FUNCTION matched
+    # only `@extschema@.`-prefixed names, so once the purpose-schema migration
+    # qualified every declaration the detector saw 0 of 377 functions and this
+    # gate reported green over an empty set. Same blindness silently zeroed G11.
+    # 16 is the first true count this gate has ever produced.
+    #
+    # The 16 are NOT uniformly deletable, which is why they are baselined rather
+    # than removed here:
+    #   8  chess/*  — Phase D reads (distance_to_syzygy, missed_finish,
+    #      opening_shape_peers, opening_record, opening_preference,
+    #      opening_endgames, time_pressure_outcome, position_ready). Written and
+    #      installed, awaiting the extension rebuild that puts them in api()
+    #      (.scratchpad/43, unchecked box). Not dead — not yet wired.
+    #   4  inference/* — decay, prune, distill, forward_step. prune DELETEs from
+    #      consensus and decay hand-UPDATEs it, both against the "consensus
+    #      accumulates at ingest, no backfill path" law, and both reachable from
+    #      the MCP op tool via api()'s unfiltered pg_proc scan. These are
+    #      deletions, tracked in #989 — a write-path hazard, not scaffolding.
+    #   4  converse/geometry — tiered, label_or_hex_batch, locale, cluster_batch.
+    #      Genuine zero-caller candidates for the #758 audit.
+    "g4_dead_canonical": 16,
     # Measured 2026-08-05, landing with its violations enumerated per W6's trap
     # note ("a gate that goes red on merge-day teaches people to ignore it").
     # 29 occurrences across 10 sites, all pre-existing: model_factor (6 names),
@@ -120,13 +142,54 @@ CEILINGS = {
     #       resolution is a feature English speakers get and nobody else does.
     #       It is also on the elector path this session is measuring.
     "g14_case_fold": 24,
+    # G15 — unqualified CREATE/DROP FUNCTION. Ceiling 0: measured 2026-08-10,
+    # all 32 occurrences fixed in the same change that added this gate, so there
+    # is no landing to grandfather.
+    #
+    # `CREATE OR REPLACE FUNCTION evidence_receipt(...)` with no schema installs
+    # wherever search_path points. It went to laplace.evidence_receipt while
+    # every caller — and all three siblings in its own directory — used ops.
+    # NpgsqlSubstrateReads asked for ops.evidence_receipt, got 42883, and because
+    # SubstrateClient.Explore fans nine reads through one Task.WhenAll, that one
+    # missing function failed the WHOLE Explore entity page. Four more functions
+    # carried the identical defect and were dead read-path surface the whole time
+    # (top_relations_readable, consensus_out_readable, attestations_out,
+    # attestations_in).
+    #
+    # The DROP side fails the opposite way and is quieter: an unqualified
+    # `DROP FUNCTION IF EXISTS substrate_health(boolean)` silently no-ops when
+    # search_path does not reach the schema holding it, so the retired function
+    # SURVIVES — which is the one thing the retirement files exist to prevent.
+    #
+    # Not flagged: `DROP laplace.X` followed by `CREATE <purpose>.X` is the
+    # purpose-schema migration idiom (generation/variant_walk.sql.in), used by
+    # 250 files. Both halves are qualified, so both are correct and neither
+    # matches this pattern. This gate only rejects a name with NO schema at all.
+    "g15_unqualified_ddl": 0,
 }
 
+# The schema prefix is OPTIONAL AND ARBITRARY. It used to accept only
+# `@extschema@.`, which meant that once the purpose-schema migration qualified
+# every declaration (ops.entity_facets, consensus.salient_facts, …) this pattern
+# matched NOTHING: it consumed the schema as the name and then demanded '(' where
+# a '.' sat. MEASURED 2026-08-10: 0 of 377 declared functions were visible, so
+# g4_dead_canonical reported 0 while scanning an empty set — a green gate over no
+# data, not a clean tree. scan_g12 carries its own copy of this pattern that was
+# updated for the migration; this shared one was not.
 CREATE_FUNCTION = re.compile(
-    r"CREATE\s+OR\s+REPLACE\s+FUNCTION\s+(?:@extschema@\.)?([A-Za-z_][A-Za-z0-9_]*)\s*\(",
+    r"CREATE\s+OR\s+REPLACE\s+FUNCTION\s+"
+    r"(?:(?:[A-Za-z_][A-Za-z0-9_]*|@extschema@)\.)?"
+    r"([A-Za-z_][A-Za-z0-9_]*)\s*\(",
     re.IGNORECASE,
 )
 CALL_TOKEN = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+# `WITH x AS (`, `, x AS (`, and the RECURSIVE / column-list / [NOT] MATERIALIZED
+# spellings. Used by G11 to treat a CTE alias as a local binding.
+CTE_ALIAS = re.compile(
+    r"(?:WITH|,)\s*(?:RECURSIVE\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*"
+    r"(?:\([^)]*\)\s*)?AS\s*(?:NOT\s+)?(?:MATERIALIZED\s*)?\(",
+    re.IGNORECASE,
+)
 # CREATE AGGREGATE ... SFUNC = foo / FINALFUNC = bar — real callers without '('.
 AGGREGATE_FUNC_REF = re.compile(
     r"\b(?:SFUNC|FINALFUNC|MSFUNC|MINVFUNC|COMBINEFUNC|SERIALFUNC|DESERIALFUNC)\s*=\s*"
@@ -227,6 +290,16 @@ G13_STRING_OP_ON_SURFACE = re.compile(
 # by definition and never content) and prose assembly in the final output
 # projection, which is where string work is supposed to live.
 G14_CASE_FOLD = re.compile(r"\b(?P<fold>lower|upper|initcap)\s*\(", re.IGNORECASE)
+
+# G15 — a CREATE/DROP FUNCTION whose name carries no schema. Anchored at line
+# start because that is how every declaration in sql/functions is written, and
+# it keeps the pattern off nested references inside bodies (which is G11's job).
+# The name group deliberately excludes '.', so a qualified name never matches.
+G15_UNQUALIFIED_DDL = re.compile(
+    r"^(?P<ddl>CREATE\s+OR\s+REPLACE\s+FUNCTION|DROP\s+FUNCTION\s+IF\s+EXISTS)"
+    r"\s+(?P<name>[a-z_][a-z0-9_]*)\s*\(",
+    re.MULTILINE | re.IGNORECASE,
+)
 
 G14_EXEMPT_PREFIXES = (
     # Generated DDL: `tbl || '_r_' || lower(h)` builds a partition identifier.
@@ -586,6 +659,31 @@ def scan_g14_case_fold() -> Counter[str]:
     return found
 
 
+def scan_g15_unqualified_ddl() -> Counter[str]:
+    """A CREATE/DROP FUNCTION whose name carries no schema.
+
+    Unqualified DDL resolves through search_path at install time, so the object
+    lands somewhere the author did not choose and callers cannot predict. It
+    fails in both directions: an unqualified CREATE installs into the wrong
+    schema and every qualified caller raises 42883, while an unqualified DROP
+    silently misses and leaves retired surface installed.
+
+    Bodies are not scanned — an unqualified reference inside a body is G11.
+    """
+    found: Counter[str] = Counter()
+    root = ROOT / "extension" / "laplace_substrate" / "sql"
+    for path in production_files(root, (".sql.in",)):
+        text = strip_sql_comments(path.read_text(encoding="utf-8", errors="replace"))
+        add_matches(
+            found,
+            path,
+            text,
+            G15_UNQUALIFIED_DDL,
+            lambda match: match.group("name"),
+        )
+    return found
+
+
 def scan_g11_unqualified_in_setless_body() -> Counter[str]:
     """A body without SET search_path must qualify every substrate reference.
 
@@ -633,6 +731,15 @@ def scan_g11_unqualified_in_setless_body() -> Counter[str]:
         rel = relative(path)
         own = {m.group(1).lower() for m in CREATE_FUNCTION.finditer(text)}
         own |= {m.group(1).lower() for m in DROP_FUNCTION.finditer(text)}
+        # A CTE alias is a LOCAL binding, not a substrate reference — `WITH ranked
+        # AS (...)` then `FROM ranked` resolves to the CTE, never to a function,
+        # so search_path cannot change what it means and the gate has nothing to
+        # enforce. Names collide constantly because the natural CTE vocabulary is
+        # also the natural function vocabulary: batch/ranked/edges/facts are all
+        # both. MEASURED 2026-08-10, the first run after CREATE_FUNCTION was
+        # repaired: 57 of 57 G11 hits were CTE aliases — a 100% false-positive
+        # rate that would have been baselined as real had it not been checked.
+        own |= {m.group(1).lower() for m in CTE_ALIAS.finditer(text)}
 
         for match in UNQUALIFIED_REF.finditer(text):
             raw_name = match.group("name") or match.group("t")
@@ -744,6 +851,7 @@ def current_violations() -> dict[str, dict[str, int]]:
         "g12_string_sql_bodies": scan_g12_string_sql_bodies(),
         "g13_string_op_on_surface": scan_g13_string_op_on_surface(),
         "g14_case_fold": scan_g14_case_fold(),
+        "g15_unqualified_ddl": scan_g15_unqualified_ddl(),
     }
     return {
         gate: dict(sorted(counter.items()))

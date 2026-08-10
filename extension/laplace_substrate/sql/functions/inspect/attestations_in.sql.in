@@ -1,4 +1,7 @@
-CREATE OR REPLACE FUNCTION attestations_in(p_id bytea, p_limit integer DEFAULT 40)
+-- Declared unqualified, so it installed as laplace.attestations_in while every caller
+-- asks for ops.attestations_in -- 42883 at runtime. See ops.evidence_receipt.
+DROP FUNCTION IF EXISTS laplace.attestations_in(bytea, integer);
+CREATE OR REPLACE FUNCTION ops.attestations_in(p_id bytea, p_limit integer DEFAULT 40)
     RETURNS TABLE(subject_id bytea, type_id bytea, source_id bytea, context_id bytea,
                   outcome smallint, observation_count bigint)
     LANGUAGE sql STABLE

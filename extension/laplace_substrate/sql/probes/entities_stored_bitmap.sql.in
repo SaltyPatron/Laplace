@@ -1,4 +1,4 @@
-CREATE OR REPLACE FUNCTION entities_stored_bitmap(ids bytea[])
+CREATE OR REPLACE FUNCTION laplace.entities_stored_bitmap(ids bytea[])
     RETURNS bytea
     AS 'MODULE_PATHNAME', 'pg_laplace_entities_stored_bitmap'
     LANGUAGE C STABLE;
@@ -8,7 +8,7 @@ CREATE OR REPLACE FUNCTION entities_stored_bitmap(ids bytea[])
 -- probe prunes LIST(tier) instead of descending every leaf per id.
 -- Perfcache fast path stays OFF: stored-row semantics (see 1-arg comment
 -- chain in descent_probe.c).
-CREATE OR REPLACE FUNCTION entities_stored_bitmap(ids bytea[], tiers smallint[])
+CREATE OR REPLACE FUNCTION laplace.entities_stored_bitmap(ids bytea[], tiers smallint[])
     RETURNS bytea
     AS 'MODULE_PATHNAME', 'pg_laplace_entities_stored_bitmap_keyed'
     LANGUAGE C STABLE;

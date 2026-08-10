@@ -1,4 +1,4 @@
-CREATE OR REPLACE FUNCTION consensus_id(
+CREATE OR REPLACE FUNCTION laplace.consensus_id(
     p_subject bytea, p_type bytea, p_object bytea)
     RETURNS bytea LANGUAGE sql LAPLACE_IMMUTABLE
  AS $$

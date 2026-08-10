@@ -231,6 +231,7 @@
       "extension/laplace_substrate/sql/functions/lexical/type_label_batch.sql.in::lower": 1,
       "extension/laplace_substrate/sql/inference/translate_to.sql.in::lower": 3
     },
+    "g15_unqualified_ddl": {},
     "g1_weight_literalism": {
       "extension/laplace_substrate/src/highway_mask.c::rating-2*rd": 3,
       "extension/laplace_substrate/src/prompt_coherence.c::rating-2*rd": 2,
@@ -880,7 +881,24 @@
       "extension/laplace_substrate/sql/inference/translations.sql.in::HAS_LANGUAGE": 1,
       "extension/laplace_substrate/sql/views/v_word_senses.sql.in::HAS_SENSE": 1
     },
-    "g4_dead_canonical": {},
+    "g4_dead_canonical": {
+      "extension/laplace_substrate/sql/functions/chess/chess_distance_to_syzygy.sql.in::distance_to_syzygy": 1,
+      "extension/laplace_substrate/sql/functions/chess/chess_missed_finish.sql.in::missed_finish": 1,
+      "extension/laplace_substrate/sql/functions/chess/chess_opening_endgames.sql.in::opening_endgames": 1,
+      "extension/laplace_substrate/sql/functions/chess/chess_opening_preference.sql.in::opening_preference": 1,
+      "extension/laplace_substrate/sql/functions/chess/chess_opening_record.sql.in::opening_record": 1,
+      "extension/laplace_substrate/sql/functions/chess/chess_opening_shape_peers.sql.in::opening_shape_peers": 1,
+      "extension/laplace_substrate/sql/functions/chess/chess_time_pressure_outcome.sql.in::time_pressure_outcome": 1,
+      "extension/laplace_substrate/sql/functions/chess/laplace_chess_position_ready.sql.in::position_ready": 1,
+      "extension/laplace_substrate/sql/functions/converse/converse_tiered.sql.in::tiered": 1,
+      "extension/laplace_substrate/sql/functions/converse/label_batch.sql.in::label_or_hex_batch": 1,
+      "extension/laplace_substrate/sql/functions/converse/structural_locale.sql.in::locale": 1,
+      "extension/laplace_substrate/sql/functions/geometry/structural_cluster_batch.sql.in::cluster_batch": 1,
+      "extension/laplace_substrate/sql/functions/inference/laplace_decay.sql.in::decay": 1,
+      "extension/laplace_substrate/sql/functions/inference/laplace_distill.sql.in::distill": 1,
+      "extension/laplace_substrate/sql/functions/inference/laplace_forward_step.sql.in::forward_step": 1,
+      "extension/laplace_substrate/sql/functions/inference/laplace_prune.sql.in::prune": 1
+    },
     "g8_band_literalism": {
       "extension/laplace_substrate/sql/functions/lexical/senses_with_context.sql.in::RELATION_HIGHWAY_BAND(C.TYPE_ID)IN(1,7)": 1,
       "extension/laplace_substrate/sql/functions/lexical/senses_with_context.sql.in::RELATION_HIGHWAY_BAND(C.TYPE_ID)IN(2,4,7)": 2

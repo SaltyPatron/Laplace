@@ -9,7 +9,7 @@
 -- committed entities row) -- never a default-present assumption. See
 -- laplace_tier_batch_existence_probe() / batch_presence_core() in
 -- descent_probe.c.
-CREATE OR REPLACE FUNCTION tier_batch_existence_probe(ids bytea[])
+CREATE OR REPLACE FUNCTION laplace.tier_batch_existence_probe(ids bytea[])
     RETURNS bytea
     AS 'MODULE_PATHNAME', 'pg_laplace_tier_batch_existence_probe'
     LANGUAGE C STABLE;
@@ -19,7 +19,7 @@ CREATE OR REPLACE FUNCTION tier_batch_existence_probe(ids bytea[])
 -- every candidate in a round. Pruning LIST(tier) turns each probe from
 -- one index descent per leaf into one per id. Perfcache codepoint fast
 -- path stays ON (identical semantics to the 1-arg form).
-CREATE OR REPLACE FUNCTION tier_batch_existence_probe(ids bytea[], tiers smallint[])
+CREATE OR REPLACE FUNCTION laplace.tier_batch_existence_probe(ids bytea[], tiers smallint[])
     RETURNS bytea
     AS 'MODULE_PATHNAME', 'pg_laplace_tier_batch_existence_probe_keyed'
     LANGUAGE C STABLE;

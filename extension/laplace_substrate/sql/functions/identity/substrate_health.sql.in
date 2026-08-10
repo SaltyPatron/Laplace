@@ -13,8 +13,8 @@
 -- back NULL, not 0, because "not checked" and "checked, none found" are different
 -- claims and collapsing them is how the detector became a green light in the first
 -- place. deep_checked says which one you got.
-DROP FUNCTION IF EXISTS substrate_health();
-DROP FUNCTION IF EXISTS substrate_health(boolean);
+DROP FUNCTION IF EXISTS laplace.substrate_health();
+DROP FUNCTION IF EXISTS laplace.substrate_health(boolean);
 
 CREATE OR REPLACE FUNCTION laplace.substrate_health(p_deep boolean DEFAULT false)
 RETURNS TABLE(
