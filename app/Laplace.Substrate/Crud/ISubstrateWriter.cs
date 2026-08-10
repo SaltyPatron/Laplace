@@ -4,6 +4,20 @@ namespace Laplace.SubstrateCRUD;
 
 public interface ISubstrateWriter
 {
+    /// <summary>
+    /// Awaits every fold this writer has queued. Default no-op: only the
+    /// consensus-accumulating writer defers work past the apply call.
+    /// </summary>
+    /// <remarks>
+    /// On the interface because the RUNNER has to drain before it cancels the run
+    /// token. That token is what the fold lanes hold, so cancelling it while a fold
+    /// is mid-statement sends a Postgres cancel into it — measured as 57014 inside
+    /// consensus.highway_mask_deposit, at the end of a fully successful decompose.
+    /// A completed decompose owes its folds a drain; cancellation must mean abnormal
+    /// teardown and nothing else.
+    /// </remarks>
+    Task DrainFoldsAsync() => Task.CompletedTask;
+
     Task<ApplyResult> ApplyAsync(SubstrateChange change, CancellationToken ct = default);
 
     async Task<ApplyResult> ApplyManyAsync(IReadOnlyList<SubstrateChange> changes, CancellationToken ct = default)

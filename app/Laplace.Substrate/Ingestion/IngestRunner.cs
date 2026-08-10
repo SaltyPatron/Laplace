@@ -541,6 +541,22 @@ public sealed class IngestRunner
         }
         finally
         {
+            // DRAIN BEFORE CANCELLING. runCt is the token the consensus fold lanes are
+            // still holding, so cancelling it here -- on the SUCCESS path, not just on
+            // teardown -- sends a Postgres cancel into whatever fold is mid-statement.
+            // MEASURED: unicode died at exactly 40.1s twice on a clean database with
+            // 57014 raised inside consensus.highway_mask_deposit line 64, holding its
+            // advisory lock, after a healthy 3.98M-row decompose. 40s is not a timeout;
+            // it is the end of decompose.
+            //
+            // The window only opens once the deposit is slow enough to still be running
+            // when decompose ends, which is precisely the state reached when
+            // highway_mask_deposit resolves and does real work -- so the bug hid behind
+            // the 42883 it was paired with. Cancelling must mean abnormal teardown and
+            // nothing else; a completed decompose owes its folds a drain.
+            try { await _writer.DrainFoldsAsync().ConfigureAwait(false); }
+            catch (Exception ex) { log.LogError(ex, "fold drain before run teardown failed"); }
+
             try { runCts.Cancel(); } catch { /* ignore */ }
             if (cappedWatchdog is not null)
             {
