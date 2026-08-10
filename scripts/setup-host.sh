@@ -119,10 +119,12 @@ layer1_status() {
 }
 
 layer0_5_build_deps() {
-    say "Layer 0.5 — sync external + build vendor deps into /opt/laplace"
-    if [ -x "$REPO_DIR/scripts/sync-external.sh" ]; then
-        bash "$REPO_DIR/scripts/sync-external.sh" || yellow "sync-external warned — continuing"
-    fi
+    say "Layer 0.5 — provision external cache + build vendor deps into /opt/laplace"
+    # sync-external.sh is gone: it parsed .gitmodules, which 391d9be7 deleted with
+    # all 311 submodules when the deps moved to the shared cache. It exited 2 on the
+    # missing file, so this layer failed at exactly the point CI did. Provisioning
+    # the cache is bootstrap-laplace-runner.sh's job (bootstrap_external_pins),
+    # driven by /opt/laplace/external/PINS.tsv.
     bash "$REPO_DIR/scripts/build-system-deps.sh"
 }
 
