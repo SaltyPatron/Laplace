@@ -160,6 +160,7 @@ pg_laplace_cascade(PG_FUNCTION_ARGS)
 
     {
         Datum     *via_types;
+        bool      *via_null;
         int       *via_dirs;
         Datum      lang;
         Oid        argtypes[4];
@@ -168,7 +169,24 @@ pg_laplace_cascade(PG_FUNCTION_ARGS)
         int        rc;
         double     max_cost = costs[0];
 
+        /* via_types[s] stays 0 for any step whose edge lookup misses. A zero
+         * Datum is a NULL pointer, and construct_array() with elmlen=-1 /
+         * elmbyval=false dereferences every element to read its varlena header
+         * — so one missing edge segfaults the backend and takes the whole
+         * cluster into recovery. construct_array() has no nulls argument and
+         * cannot represent a missing element; construct_md_array() can.
+         *
+         * MEASURED: `SELECT * FROM converse.cascade('dog','dog',4)` on a
+         * substrate with 0 consensus rows. Every step-edge lookup misses, so it
+         * dereferences NULL on the first element. Server log 2026-08-10
+         * 10:23:33 UTC and again at 03:01:56 UTC — "client backend was
+         * terminated by signal 11: Segmentation fault", followed by
+         * "terminating any other active server processes". Reproducible.
+         */
         via_types = (Datum *) palloc0(sizeof(Datum) * n_steps);
+        via_null = (bool *) palloc0(sizeof(bool) * n_steps);
+        for (int s = 0; s < n_steps; s++)
+            via_null[s] = true;          /* until an edge is actually found */
         via_dirs = (int *) palloc0(sizeof(int) * n_steps);
 
         for (int s = 1; s < n_steps; s++)
@@ -183,6 +201,7 @@ pg_laplace_cascade(PG_FUNCTION_ARGS)
                 bool      isnull;
                 via_types[s] = copy_bytea_datum(
                     SPI_getbinval(tup, td, 1, &isnull));
+                via_null[s] = isnull;
                 via_dirs[s] = DatumGetInt32(
                     SPI_getbinval(tup, td, 2, &isnull));
             }
@@ -198,8 +217,16 @@ pg_laplace_cascade(PG_FUNCTION_ARGS)
         argtypes[3] = BYTEAOID;
         args[0] = PointerGetDatum(construct_array(steps, n_steps, BYTEAOID,
                                                   -1, false, TYPALIGN_INT));
-        args[1] = PointerGetDatum(construct_array(via_types + 1, n_steps - 1,
-                                                  BYTEAOID, -1, false, TYPALIGN_INT));
+        {
+            /* construct_md_array, not construct_array: a step with no edge is a
+             * genuine SQL NULL, not a zero Datum to dereference. */
+            int md_dims[1] = { n_steps - 1 };
+            int md_lbs[1]  = { 1 };
+            args[1] = PointerGetDatum(
+                construct_md_array(via_types + 1, via_null + 1, 1,
+                                   md_dims, md_lbs,
+                                   BYTEAOID, -1, false, TYPALIGN_INT));
+        }
         {
             Datum *dir_datums = (Datum *) palloc(sizeof(Datum) * (n_steps - 1));
             for (int di = 1; di < n_steps; di++)
@@ -238,6 +265,7 @@ pg_laplace_cascade(PG_FUNCTION_ARGS)
         pfree(DatumGetPointer(args[1]));
         pfree(DatumGetPointer(args[2]));
         pfree(via_types);
+        pfree(via_null);
         pfree(via_dirs);
     }
 
