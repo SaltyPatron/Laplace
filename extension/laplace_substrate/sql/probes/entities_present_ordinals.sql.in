@@ -1,4 +1,4 @@
-CREATE OR REPLACE FUNCTION entities_present_ordinals(p_ids bytea[])
+CREATE OR REPLACE FUNCTION laplace.entities_present_ordinals(p_ids bytea[])
     RETURNS TABLE(idx int)
     LANGUAGE sql STABLE PARALLEL SAFE
  AS $$
@@ -32,7 +32,7 @@ $$;
 -- throws 0A000 on the FIRST CALL, at execution, not at definition -- which is how a
 -- STABLE marking survives pg_regress (it only loads the SQL) and dies in the ingest.
 -- The sibling records that trap; this is the same one.
-CREATE OR REPLACE FUNCTION entities_present_ordinals(p_ids bytea[], p_tiers smallint[])
+CREATE OR REPLACE FUNCTION laplace.entities_present_ordinals(p_ids bytea[], p_tiers smallint[])
     RETURNS TABLE(idx int)
     LANGUAGE plpgsql VOLATILE
  AS $$

@@ -36,8 +36,8 @@
 -- ONCE into an indexed temp table, then each per-type query reads only its slice
 -- through the (t) index. O(N_ids) total scan work, one descent per id, and the
 -- type is a literal so pruning is total.
-DROP FUNCTION IF EXISTS attestations_present_ordinals(bytea[]);
-CREATE OR REPLACE FUNCTION attestations_present_ordinals(
+DROP FUNCTION IF EXISTS laplace.attestations_present_ordinals(bytea[]);
+CREATE OR REPLACE FUNCTION laplace.attestations_present_ordinals(
     p_ids bytea[], p_type_ids bytea[], p_subject_ids bytea[])
     RETURNS TABLE(idx int)
     -- VOLATILE, not STABLE: the body runs CREATE TEMP TABLE ... AS, and PostgreSQL

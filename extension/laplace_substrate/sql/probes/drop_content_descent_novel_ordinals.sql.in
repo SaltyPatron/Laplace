@@ -1,1 +1,1 @@
-DROP FUNCTION IF EXISTS content_descent_novel_ordinals(bytea[], int[]);
+DROP FUNCTION IF EXISTS laplace.content_descent_novel_ordinals(bytea[], int[]);

@@ -231,6 +231,7 @@
       "extension/laplace_substrate/sql/functions/lexical/type_label_batch.sql.in::lower": 1,
       "extension/laplace_substrate/sql/inference/translate_to.sql.in::lower": 3
     },
+    "g15_unqualified_ddl": {},
     "g1_weight_literalism": {
       "extension/laplace_substrate/src/highway_mask.c::rating-2*rd": 3,
       "extension/laplace_substrate/src/prompt_coherence.c::rating-2*rd": 2,

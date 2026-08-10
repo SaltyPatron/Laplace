@@ -120,6 +120,30 @@ CEILINGS = {
     #       resolution is a feature English speakers get and nobody else does.
     #       It is also on the elector path this session is measuring.
     "g14_case_fold": 24,
+    # G15 — unqualified CREATE/DROP FUNCTION. Ceiling 0: measured 2026-08-10,
+    # all 32 occurrences fixed in the same change that added this gate, so there
+    # is no landing to grandfather.
+    #
+    # `CREATE OR REPLACE FUNCTION evidence_receipt(...)` with no schema installs
+    # wherever search_path points. It went to laplace.evidence_receipt while
+    # every caller — and all three siblings in its own directory — used ops.
+    # NpgsqlSubstrateReads asked for ops.evidence_receipt, got 42883, and because
+    # SubstrateClient.Explore fans nine reads through one Task.WhenAll, that one
+    # missing function failed the WHOLE Explore entity page. Four more functions
+    # carried the identical defect and were dead read-path surface the whole time
+    # (top_relations_readable, consensus_out_readable, attestations_out,
+    # attestations_in).
+    #
+    # The DROP side fails the opposite way and is quieter: an unqualified
+    # `DROP FUNCTION IF EXISTS substrate_health(boolean)` silently no-ops when
+    # search_path does not reach the schema holding it, so the retired function
+    # SURVIVES — which is the one thing the retirement files exist to prevent.
+    #
+    # Not flagged: `DROP laplace.X` followed by `CREATE <purpose>.X` is the
+    # purpose-schema migration idiom (generation/variant_walk.sql.in), used by
+    # 250 files. Both halves are qualified, so both are correct and neither
+    # matches this pattern. This gate only rejects a name with NO schema at all.
+    "g15_unqualified_ddl": 0,
 }
 
 CREATE_FUNCTION = re.compile(
@@ -227,6 +251,16 @@ G13_STRING_OP_ON_SURFACE = re.compile(
 # by definition and never content) and prose assembly in the final output
 # projection, which is where string work is supposed to live.
 G14_CASE_FOLD = re.compile(r"\b(?P<fold>lower|upper|initcap)\s*\(", re.IGNORECASE)
+
+# G15 — a CREATE/DROP FUNCTION whose name carries no schema. Anchored at line
+# start because that is how every declaration in sql/functions is written, and
+# it keeps the pattern off nested references inside bodies (which is G11's job).
+# The name group deliberately excludes '.', so a qualified name never matches.
+G15_UNQUALIFIED_DDL = re.compile(
+    r"^(?P<ddl>CREATE\s+OR\s+REPLACE\s+FUNCTION|DROP\s+FUNCTION\s+IF\s+EXISTS)"
+    r"\s+(?P<name>[a-z_][a-z0-9_]*)\s*\(",
+    re.MULTILINE | re.IGNORECASE,
+)
 
 G14_EXEMPT_PREFIXES = (
     # Generated DDL: `tbl || '_r_' || lower(h)` builds a partition identifier.
@@ -586,6 +620,31 @@ def scan_g14_case_fold() -> Counter[str]:
     return found
 
 
+def scan_g15_unqualified_ddl() -> Counter[str]:
+    """A CREATE/DROP FUNCTION whose name carries no schema.
+
+    Unqualified DDL resolves through search_path at install time, so the object
+    lands somewhere the author did not choose and callers cannot predict. It
+    fails in both directions: an unqualified CREATE installs into the wrong
+    schema and every qualified caller raises 42883, while an unqualified DROP
+    silently misses and leaves retired surface installed.
+
+    Bodies are not scanned — an unqualified reference inside a body is G11.
+    """
+    found: Counter[str] = Counter()
+    root = ROOT / "extension" / "laplace_substrate" / "sql"
+    for path in production_files(root, (".sql.in",)):
+        text = strip_sql_comments(path.read_text(encoding="utf-8", errors="replace"))
+        add_matches(
+            found,
+            path,
+            text,
+            G15_UNQUALIFIED_DDL,
+            lambda match: match.group("name"),
+        )
+    return found
+
+
 def scan_g11_unqualified_in_setless_body() -> Counter[str]:
     """A body without SET search_path must qualify every substrate reference.
 
@@ -744,6 +803,7 @@ def current_violations() -> dict[str, dict[str, int]]:
         "g12_string_sql_bodies": scan_g12_string_sql_bodies(),
         "g13_string_op_on_surface": scan_g13_string_op_on_surface(),
         "g14_case_fold": scan_g14_case_fold(),
+        "g15_unqualified_ddl": scan_g15_unqualified_ddl(),
     }
     return {
         gate: dict(sorted(counter.items()))

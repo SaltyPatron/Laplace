@@ -1,8 +1,8 @@
 -- KEYED (2026-07-16): id alone cannot prune the LIST(type_id) ->
 -- HASH(subject_id) partitioning; the caller passes the partition keys it
 -- already holds. Parallel arrays, length-checked natively.
-DROP FUNCTION IF EXISTS attestations_exist_bitmap(bytea[]);
-CREATE OR REPLACE FUNCTION attestations_exist_bitmap(
+DROP FUNCTION IF EXISTS laplace.attestations_exist_bitmap(bytea[]);
+CREATE OR REPLACE FUNCTION laplace.attestations_exist_bitmap(
     ids bytea[], type_ids bytea[], subject_ids bytea[])
     RETURNS bytea
     AS 'MODULE_PATHNAME', 'pg_laplace_attestations_exist_bitmap'
@@ -18,7 +18,7 @@ CREATE OR REPLACE FUNCTION attestations_exist_bitmap(
 -- probe removes) but never wrong — presence bits only, LSB-first within
 -- each byte, identical layout to the native bitmap. New code never calls
 -- this; delete only when no pre-keyed binary can reach this database.
-CREATE OR REPLACE FUNCTION attestations_exist_bitmap(ids bytea[])
+CREATE OR REPLACE FUNCTION laplace.attestations_exist_bitmap(ids bytea[])
     RETURNS bytea
     LANGUAGE plpgsql STABLE
  AS $$

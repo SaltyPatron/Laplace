@@ -1,4 +1,4 @@
-CREATE OR REPLACE FUNCTION physicalities_present_ordinals(p_ids bytea[])
+CREATE OR REPLACE FUNCTION laplace.physicalities_present_ordinals(p_ids bytea[])
     RETURNS TABLE(idx int)
     LANGUAGE sql STABLE PARALLEL SAFE
  AS $$
@@ -12,7 +12,7 @@ $$;
 -- sort key already). Equality on hilbert_index gives per-row runtime RANGE
 -- pruning; id equality closes the match. One descent per id instead of one
 -- per leaf. The 1-arg form stays for callers without the key.
-CREATE OR REPLACE FUNCTION physicalities_present_ordinals(p_ids bytea[], p_hilberts bytea[])
+CREATE OR REPLACE FUNCTION laplace.physicalities_present_ordinals(p_ids bytea[], p_hilberts bytea[])
     RETURNS TABLE(idx int)
     LANGUAGE sql STABLE PARALLEL SAFE
  AS $$
