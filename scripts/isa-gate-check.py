@@ -81,6 +81,45 @@ CEILINGS = {
     # GH #764 step 3: LANGUAGE sql with quoted-string bodies (AS $$) — PostgreSQL
     # records no pg_depend. Shrink-only allowlist; new SQL must use BEGIN ATOMIC.
     "g12_string_sql_bodies": 216,
+    # G13 — case-folding a realized surface. Measured 2026-08-10 with the check
+    # that introduced it, so it lands enumerated rather than red on merge day.
+    # Both survivors are in translate_to's language-reference matcher, where the
+    # fold is bounded (once per DISTINCT candidate language, inside a
+    # MATERIALIZED fence) and compares against a user-supplied language NAME —
+    # the input boundary the read law does permit. They are baselined, not
+    # blessed: the durable fix is resolving the language reference to an id once
+    # and comparing ids, which retires the fold entirely.
+    #
+    # This ceiling exists because the defect kept coming back. converse(),
+    # converse_walk() and chat() each carried `lower(realize(syn)) = surface` as
+    # a sort key, each was fixed separately, and each fix left only a comment
+    # behind — nothing stopped the next author from writing the fourth. A
+    # comment is not enforcement.
+    "g13_string_op_on_surface": 1,
+    # G14 — case folding. Measured 2026-08-10, landing enumerated: 24 occurrences
+    # across 9 sites, all pre-existing.
+    #
+    #   14  initcap() in chat_scaffold/converse_facts prose assembly. Output
+    #       projection, so the least wrong — but note the shape: these templates
+    #       already ship an English and a Bulgarian arm, both bicameral. The same
+    #       initcap() on a Japanese or Arabic arm silently returns its input, so
+    #       the substrate would capitalize its replies in some languages and not
+    #       others with nothing reporting the difference.
+    #    7  input-boundary normalization of a caller-supplied string before id
+    #       resolution (translate_to's language reference, chess tc-class and
+    #       player name). Permitted by the read law, still Latin-only: a language
+    #       named in Han or Arabic gets no normalization at all, so the matcher
+    #       is case-forgiving for "English" and case-strict for "日本語".
+    #    2  type_label/type_label_batch display formatting.
+    #    1  resolve_topic — THE REAL ONE, and it is not a formatting call. It case-
+    #       folds a raw prompt to match a hardcoded English pronoun list
+    #       (it|its|that|this|they|...) and returns the session context on a hit.
+    #       Two defects stacked: an English function-word stoplist, which the
+    #       conversational design says to replace with frame evocation, and a fold
+    #       that does nothing for a Japanese or Arabic pronoun — so anaphora
+    #       resolution is a feature English speakers get and nobody else does.
+    #       It is also on the elector path this session is measuring.
+    "g14_case_fold": 24,
 }
 
 CREATE_FUNCTION = re.compile(
@@ -113,6 +152,85 @@ G8_BAND_LITERAL = re.compile(
     r"\brelation_highway_band\s*\([^)]*\)\s*"
     r"(?:=\s*\d+|IN\s*\(\s*\d+(?:\s*,\s*\d+)*\s*\))",
     re.IGNORECASE,
+)
+# G13 — a string operation applied to a realized surface.
+#
+# The law (spec: hash-space until render): `realize`/`render`/`render_text`/
+# `label` ARE the output projection. From prompt decomposition to the final
+# projection it is ids only — indexing, cost, pathing, fanout, mask routing,
+# Glicko weight. A string operation wrapped around a realizer means the surface
+# is about to be compared, grouped, joined, sorted or measured on, i.e. text is
+# standing in for identity in the middle of the pipeline. That is simultaneously
+# three defects: the language dependence that breaks omni-glottal behaviour, the
+# identity contamination (the substrate already carries the case bridge as rated
+# tier-0 evidence, K --HAS_LOWERCASE_MAPPING--> k, read by word_case_variants();
+# locale folding fabricates that link unrated and unprovenanced, and is
+# locale-dependent besides — Turkish dotless i), and a per-row STABLE call.
+#
+# Case folds are the common form but not the only one. `char_length(surface)`
+# as a sort key was one of the three costs measured taking chat() down, beside
+# `lower(realize(syn)) = surface` — same defect class, different function. The
+# check covers the fold family AND the length/trim/rewrite family for that
+# reason; scoping it to lower() alone would have left the sibling live and
+# called the job done.
+G13_STRING_OP_ON_SURFACE = re.compile(
+    r"\b(?P<op>char_length|length|octet_length|bit_length"
+    r"|btrim|ltrim|rtrim|trim"
+    r"|replace|translate|substr|substring|left|right"
+    r"|md5|starts_with|strpos|position)\s*\(\s*"
+    r"(?:[A-Za-z_][A-Za-z0-9_]*\.)?"
+    r"(?P<realizer>realize|render|render_text|render_text_fast|label|label_or_hex"
+    r"|realize_batch|render_text_batch|synset_gloss|type_label)\s*\(",
+    re.IGNORECASE,
+)
+
+# G14 — case folding, anywhere in the substrate.
+#
+# G13 is the render/label rule: do not operate on a surface you just realized.
+# This is a different and larger law, and scoping the check to realizer
+# arguments misses it entirely — `lower(p_phrase)` wraps no realizer and is the
+# worse defect.
+#
+# CASE IS NOT A PROPERTY OF TEXT — IT IS PACKAGING, AND ITS OWN NAME SAYS SO.
+# "Uppercase" and "lowercase" are letterpress furniture. A compositor's type
+# lived in a case that folded into two halves; opened, the majuscules sat in the
+# upper half and the minuscules in the lower. The terms name WHICH HALF OF THE
+# BOX a typesetter's hand reached into. That is a storage layout — precisely the
+# class of thing this substrate strips at the witness boundary and never admits
+# into identity, the same rule that keeps a tokenizer's vocabulary or a
+# checkpoint's tensor layout out of the hash. Folding on it is letting a
+# 16th-century box's hinge decide what two pieces of content mean.
+#
+# It is also a property of BICAMERAL scripts only, which are a minority of the
+# writing systems this substrate claims to serve. There is no lowercase 犬 and no
+# uppercase 犬; Han is unicameral, as are Arabic, Hebrew, Devanagari, Thai and
+# Hangul. `lower()` returns those inputs unchanged, so any branch whose behaviour
+# depends on the fold is silently inert for most of the world's scripts and
+# silently active for Latin/Greek/Cyrillic. That is not a rounding error in an
+# omni-glottal system; it is a pipeline that works in one script family and
+# quietly does nothing in the others, which is worse than failing, because it
+# never reports.
+#
+# Where it DOES fire it is locale-dependent and therefore not deterministic
+# identity: Turkish I/ı vs I/i, German ß, Greek final sigma, Lithuanian dot-above
+# — the fold's result depends on the server's collation, which is environment,
+# not content. A content-addressed substrate cannot key, compare, group, join or
+# route on a value that changes with the locale of the machine reading it.
+#
+# The substrate already holds the correct primitive: case is witnessed at tier 0
+# as rated evidence (K --HAS_LOWERCASE_MAPPING--> k, 1,488 lc / 1,505 uc /
+# 1,509 tc cells) and `word_case_variants()` reads it. That path is provenanced,
+# language-correct, and returns the empty set for 犬 — which is the truth.
+# `lower()` fabricates the same link unrated, unprovenanced, and Latin-only.
+#
+# Exempt by construction: DDL identifier generation (partition names are ASCII
+# by definition and never content) and prose assembly in the final output
+# projection, which is where string work is supposed to live.
+G14_CASE_FOLD = re.compile(r"\b(?P<fold>lower|upper|initcap)\s*\(", re.IGNORECASE)
+
+G14_EXEMPT_PREFIXES = (
+    # Generated DDL: `tbl || '_r_' || lower(h)` builds a partition identifier.
+    "extension/laplace_substrate/sql/generated/",
 )
 
 CREATE_RELATION = re.compile(
@@ -408,6 +526,66 @@ def scan_g8() -> Counter[str]:
     return found
 
 
+def scan_g13_string_op_on_surface() -> Counter[str]:
+    """A string operation applied to a realized surface, anywhere in the read path.
+
+    Scans the whole substrate SQL tree plus the extension C sources, because the
+    defect has appeared in both (`spi_common.h` publishes per-id realizers that C
+    callers have folded the same way).
+    """
+    found: Counter[str] = Counter()
+    roots = [
+        (ROOT / "extension" / "laplace_substrate" / "sql", (".sql.in",)),
+        (ROOT / "extension" / "laplace_substrate" / "src", (".c", ".h")),
+    ]
+    for root, suffixes in roots:
+        for path in production_files(root, suffixes):
+            raw = path.read_text(encoding="utf-8", errors="replace")
+            text = (
+                strip_c_comments(raw)
+                if path.name.endswith((".c", ".h"))
+                else strip_sql_comments(raw)
+            )
+            add_matches(
+                found,
+                path,
+                text,
+                G13_STRING_OP_ON_SURFACE,
+                lambda match: (
+                    f"{match.group('op').lower()}({match.group('realizer').lower()}"
+                ),
+            )
+    return found
+
+
+def scan_g14_case_fold() -> Counter[str]:
+    """lower()/upper()/initcap() anywhere in the substrate read path."""
+    found: Counter[str] = Counter()
+    roots = [
+        (ROOT / "extension" / "laplace_substrate" / "sql", (".sql.in",)),
+        (ROOT / "extension" / "laplace_substrate" / "src", (".c", ".h")),
+    ]
+    for root, suffixes in roots:
+        for path in production_files(root, suffixes):
+            rel = relative(path)
+            if rel.startswith(G14_EXEMPT_PREFIXES):
+                continue
+            raw = path.read_text(encoding="utf-8", errors="replace")
+            text = (
+                strip_c_comments(raw)
+                if path.name.endswith((".c", ".h"))
+                else strip_sql_comments(raw)
+            )
+            add_matches(
+                found,
+                path,
+                text,
+                G14_CASE_FOLD,
+                lambda match: match.group("fold").lower(),
+            )
+    return found
+
+
 def scan_g11_unqualified_in_setless_body() -> Counter[str]:
     """A body without SET search_path must qualify every substrate reference.
 
@@ -564,6 +742,8 @@ def current_violations() -> dict[str, dict[str, int]]:
         "g8_band_literalism": scan_g8(),
         "g4_dead_canonical": scan_g4_dead_canonical(),
         "g12_string_sql_bodies": scan_g12_string_sql_bodies(),
+        "g13_string_op_on_surface": scan_g13_string_op_on_surface(),
+        "g14_case_fold": scan_g14_case_fold(),
     }
     return {
         gate: dict(sorted(counter.items()))
