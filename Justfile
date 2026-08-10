@@ -37,12 +37,9 @@ setup-host-status:
 setup-host-reset:
     sudo bash scripts/setup-host.sh reset
 
-submodule-sanity:
-    @scripts/normalize-submodule-attributes.sh
-
 # Fingerprinted vendor deps (proj/geos/gdal/pg/postgis/…). No-op unless pins change.
 # Force: LAPLACE_FORCE_DEPS=1 just build-deps
-build-deps: submodule-sanity
+build-deps:
     bash scripts/build-system-deps.sh
 
 verify-deps:
