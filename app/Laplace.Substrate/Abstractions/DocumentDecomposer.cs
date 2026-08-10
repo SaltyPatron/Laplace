@@ -87,8 +87,12 @@ public sealed class DocumentDecomposer : DecomposerMultiFile<ContentIngestRecord
 
         if (!Directory.Exists(path)) yield break;
 
+        // Provenance filter ONLY — not the source-code size heuristic. A 27 MB
+        // dictionary is the corpus, not a build artifact. IsVendoredOrBuildPath
+        // dropped webster-unabridged-dictionary-1913 and one Britannica volume
+        // here, silently, before enumeration (GH #754).
         foreach (string file in Directory.EnumerateFiles(path, "*.txt", SearchOption.AllDirectories)
-                                         .Where(f => !VendoredPathFilter.IsVendoredOrBuildPath(f))
+                                         .Where(f => !VendoredPathFilter.IsVendoredOrBuildLocation(f))
                                          .OrderBy(p => p, StringComparer.Ordinal))
             yield return file;
     }
