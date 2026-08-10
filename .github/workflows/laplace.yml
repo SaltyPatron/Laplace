@@ -311,12 +311,68 @@ jobs:
           UCD_ZIP="${LAPLACE_DATA_ROOT:-/vault/Data}/UCD/Public/UCD/latest/ucdxml/ucd.nounihan.flat.zip"
           [ -f "$UCD_ZIP" ] || { echo "::error::UCD zip missing: $UCD_ZIP"; exit 1; }
 
-      - name: Sync /opt/laplace/external to .gitmodules pins
+      - name: Verify /opt/laplace/external is provisioned (no per-build clone)
         run: |
+          # External sources do not change between builds, so the runner must NOT
+          # clone or fetch them per run. 391d9be7 moved them to the shared cache and
+          # deleted .gitmodules (933 lines, 311 submodules -- 10 core deps plus ~300
+          # tree-sitter grammars); this step still called sync-external.sh, whose first
+          # line is `[ -f .gitmodules ] || exit 2`. Every build since has either failed
+          # here or re-fetched gigabytes that were already on disk.
+          #
+          # The cache is provisioned ONCE by scripts/bootstrap-laplace-runner.sh. CI's
+          # job is to prove it is there and fail loudly pointing at the bootstrap if it
+          # is not -- never to populate it.
           for d in tree-sitter geos proj gdal pgsql-18 include lib share bin; do
             mkdir -p "/opt/laplace/$d"
           done
-          scripts/sync-external.sh
+
+          CACHE="${LAPLACE_SUBMODULE_CACHE:-/opt/laplace/external}"
+          [ -d "$CACHE" ] || {
+            echo "::error::$CACHE missing — run: sudo scripts/bootstrap-laplace-runner.sh bootstrap"
+            exit 1
+          }
+
+          # PRESENT, CURRENT, BUILT — three distinct questions. Checking only the first
+          # is what let a cache drift from its pins silently.
+          miss=0; stale=0
+          while IFS=$'\t' read -r path url pin; do
+            case "$path" in ''|'#'*) continue;; esac
+            entry="$CACHE/${path#external/}"
+
+            # PRESENT
+            if [ ! -d "$entry/.git" ]; then
+              echo "::error::absent: $entry"; miss=$((miss+1)); continue
+            fi
+
+            # CURRENT — the pinned commit must be checked out, not merely fetched.
+            # safe.directory: the cache is owned by the runner user, so git refuses
+            # without it. sync-external.sh exported the same guard.
+            head=$(git -c safe.directory='*' -C "$entry" rev-parse HEAD 2>/dev/null || echo "")
+            if [ "$head" != "$pin" ]; then
+              echo "::error::stale: ${path#external/} at ${head:0:12}, pinned ${pin:0:12}"
+              stale=$((stale+1))
+            fi
+          done < external-pins.tsv
+
+          # BUILT — the artifacts the build actually links against, not the sources.
+          for f in \
+            /opt/laplace/proj/lib/libproj.so \
+            /opt/laplace/geos/lib/libgeos_c.so \
+            /opt/laplace/gdal/lib/libgdal.so \
+            /opt/laplace/pgsql-18/bin/postgres \
+            /opt/laplace/pgsql-18/lib/postgis-3.so \
+            /opt/laplace/tree-sitter/lib/libtree-sitter.a; do
+            [ -e "$f" ] || { echo "::error::unbuilt: $f"; miss=$((miss+1)); }
+          done
+
+          if [ "$miss" -gt 0 ] || [ "$stale" -gt 0 ]; then
+            echo "::error::external cache: $miss absent/unbuilt, $stale stale —"
+            echo "::error::  provision: sudo scripts/bootstrap-laplace-runner.sh bootstrap"
+            echo "::error::  rebuild:   LAPLACE_FORCE_DEPS=1 bash scripts/build-system-deps.sh"
+            exit 1
+          fi
+          echo "external cache verified: $(grep -cv '^#' external-pins.tsv) pins current, artifacts built"
 
       - name: Build system deps (fingerprinted — skip unless pins change)
         run: |
