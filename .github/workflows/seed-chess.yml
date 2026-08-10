@@ -205,6 +205,27 @@ jobs:
             esac
           }
 
+          # An explicit path WINS over the corpus dropdown, and says so.
+          # Same defect as seed-documents.yml carried until 2026-08-10: `path`
+          # was read ONLY under corpus=path-override, so setting a path while
+          # leaving corpus at its default silently ingested the default corpus
+          # instead -- no notice, no warning, no error. Here the blast radius is
+          # larger: the default corpora are multi-GB PGN sets, so a discarded
+          # path means hours of ingest against the wrong games. seed-code.yml
+          # had the correct precedence all along.
+          user_path="${{ inputs.path }}"
+          if [ -n "$user_path" ]; then
+            if [ ! -e "$user_path" ]; then
+              echo "::error::path '$user_path' does not exist on this runner"; exit 1
+            fi
+            if [ "$corpus" != "path-override" ]; then
+              echo "::notice::path given -- corpus '$corpus' ignored for this run."
+            fi
+            echo "resolved explicit path -> $user_path"
+            echo "path=$user_path" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           case "$corpus" in
             lumbras-elite)    p="$lum/pgn/export_ELO2400.pgn" ;;
             chesscom-all)     p="$chess" ;;

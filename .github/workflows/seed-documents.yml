@@ -65,6 +65,38 @@ jobs:
       - id: pick
         run: |
           root="${LAPLACE_DATA_ROOT:-/vault/Data}"
+
+          # An explicit path WINS over the corpus dropdown, and says so.
+          #
+          # This block used to read `path` only under corpus=path-override, so
+          # setting a path while leaving corpus at its default `all-books`
+          # SILENTLY ingested $root/test-data instead. MEASURED 2026-08-10: a run
+          # aimed at /vault/Data/ProjectGutenberg/Pierre-Simon-Laplace/
+          # gutenberg.org/58881 ingested `path='/vault/Data/test-data'` -- 209
+          # unrelated files -- with no notice, no warning and no error. The
+          # operator only found out by reading the corpus that came back.
+          #
+          # seed-code.yml already had the correct precedence (its resolve step:
+          # non-empty path wins, existence-checked, `::notice::` emitted). Two
+          # sibling workflows with the same two inputs disagreed on which one
+          # wins, and the one that discarded input was the silent one.
+          #
+          # Least surprise: if you typed a path, you meant it. An unusable path
+          # is an error, never a fallback to a default corpus -- silently
+          # ingesting the wrong 209 files is worse than failing.
+          user_path="${{ inputs.path }}"
+          if [ -n "$user_path" ]; then
+            if [ ! -e "$user_path" ]; then
+              echo "::error::path '$user_path' does not exist on this runner"; exit 1
+            fi
+            if [ "${{ inputs.corpus }}" != "path-override" ]; then
+              echo "::notice::path given -- corpus '${{ inputs.corpus }}' ignored for this run."
+            fi
+            echo "resolved explicit path -> $user_path"
+            echo "path=$user_path" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           case "${{ inputs.corpus }}" in
             all-books)      p="$root/test-data" ;;
             literature-etc) p="$root/test-data/text" ;;
