@@ -734,16 +734,11 @@ ident_file = '$PG_IDENT_FILE'
 # not in pg-machine-tuning.sh because it is an fd-budget knob bound to the unit's
 # kernel limit, not a machine-sized memory/parallelism GUC.
 max_files_per_process = $LAPLACE_PG_MAX_FILES
-# TOAST compression. pglz is the stock default and was never overridden here
-# (pg_settings reported source='default'). Measured 2026-08-11 before the
-# database was recreated: 86 GB of the 143 GB database was TOAST, all pglz,
-# concentrated in the physicalities_h* trajectory columns that a SQL forward
-# pass decompresses on every read. lz4 is several times faster in both
-# directions. Every compressible column carries the unbaked sentinel
-# (pg_attribute.attcompression = \0), so this GUC is resolved per value at
-# INSERT — no ALTER TABLE, no rewrite, and mixed pglz/lz4 data stays readable
-# because the method is recorded in each TOAST pointer.
-default_toast_compression = lz4
+# default_toast_compression is deliberately NOT set here. It was, briefly, and
+# that made two owners: this block and pg_apply_toast_compression's ALTER SYSTEM.
+# postgresql.auto.conf wins over postgresql.conf, so the hardcoded value here
+# would lose silently on any host whose Postgres lacks lz4 -- the probe would
+# correctly choose pglz while this file still claimed lz4. The prober owns it.
 $marker_end
 EOF
     green "✓ Wrote substrate cluster config to $PG_POSTGRESQL_CONF"
