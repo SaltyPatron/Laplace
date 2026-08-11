@@ -8,25 +8,25 @@
 # only reports at warning. The tree was already clean bar 8 findings, all fixed
 # or given a justified disable, so the stricter bar costs nothing to hold.
 # Style (info/style severity) remains out of scope.
+#
+# The linter itself is a SYSTEM DEPENDENCY, installed by
+# bootstrap_build_environment alongside every other apt build-dep. This gate
+# deliberately does not download, pin, or version-check it: the enforced checks
+# are stable across releases
+# (0.8.0 and 0.10.0 agree exactly at -S warning on this tree), and a gate that
+# fetches its own toolchain is one more thing that can silently drift from what
+# the host actually runs. If it is missing, that is a provisioning bug — say so
+# and fail, rather than papering over it with a download.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SC_BIN="${SHELLCHECK_BIN:-shellcheck}"
 
 if ! command -v "$SC_BIN" >/dev/null 2>&1; then
-  # CI / developer machine without a package: pull the official static binary.
-  ver="${SHELLCHECK_VERSION:-v0.10.0}"
-  arch="$(uname -m)"
-  case "$arch" in
-    x86_64|amd64) arch=x86_64 ;;
-    aarch64|arm64) arch=aarch64 ;;
-    *) echo "::error::unsupported arch for shellcheck binary: $arch"; exit 2 ;;
-  esac
-  url="https://github.com/koalaman/shellcheck/releases/download/${ver}/shellcheck-${ver}.linux.${arch}.tar.xz"
-  tmp="$(mktemp -d)"
-  curl -fsSL "$url" -o "$tmp/sc.tar.xz"
-  tar -xJf "$tmp/sc.tar.xz" -C "$tmp"
-  SC_BIN="$tmp/shellcheck-${ver}/shellcheck"
+  echo "::error::shellcheck not found on PATH — this is a provisioning gap, not a lint failure."
+  echo "::error::  sudo apt-get install -y shellcheck"
+  echo "::error::A full host provision installs it: sudo bash scripts/setup-host.sh"
+  exit 2
 fi
 
 mapfile -t scripts < <(find "$ROOT/scripts" -type f -name '*.sh' | sort)
@@ -35,6 +35,7 @@ if [[ ${#scripts[@]} -eq 0 ]]; then
   exit 2
 fi
 
+echo "$("$SC_BIN" --version | awk '/^version:/{print "shellcheck "$2}') from $(command -v "$SC_BIN")"
 echo "shellcheck -S warning -x (${#scripts[@]} scripts)"
 "$SC_BIN" -S warning -x "${scripts[@]}"
 echo "OK shellcheck gate"

@@ -149,6 +149,7 @@ bootstrap_build_environment() {
         build-essential cmake ninja-build autoconf automake libtool pkg-config \
         bison flex perl \
         sqlite3 \
+        shellcheck \
         libssl-dev zlib1g-dev libreadline-dev uuid-dev \
         libxml2-dev libjson-c-dev libicu-dev \
         liblz4-dev libzstd-dev liburing-dev \
