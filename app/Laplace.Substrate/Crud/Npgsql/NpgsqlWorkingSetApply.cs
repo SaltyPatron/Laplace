@@ -1583,7 +1583,47 @@ public sealed partial class NpgsqlSubstrateWriter
         CopyPartitionKey LaneKey, CopyPartitionKey OrderKey, StagedRowRef Row,
         long Patch, int CountOff, long PatchSum = 0, int SumOff = 0);
 
+    /// <summary>
+    /// Half of PackFiltered's 2 GiB ceiling, so a chunk that lands slightly over the
+    /// estimate still packs. Bytes, never rows: row COUNT says nothing about payload
+    /// size when one row can be a 145 MB trajectory.
+    /// </summary>
+    private const long MaxCopyPayloadBytes = 1L << 30;
+
+    /// <summary>
+    /// Splits a kept-range into byte-bounded COPY payloads. PackFiltered packs an
+    /// entire call into ONE byte[] and refuses past 2 GiB, so the unit that matters
+    /// is bytes — a TinyLlama factors layer is only 69 physicality rows but ~10 GB of
+    /// trajectory, and no row-count batching avoids the ceiling. Each chunk gets its
+    /// own COPY stream, which is already what CopyFilteredAsync does per call, so this
+    /// changes the size of the unit and nothing about the wire protocol.
+    /// </summary>
     private static async Task CopyKeptAsync(
+        NpgsqlConnection conn, string tableName, IntentStageTable table,
+        IReadOnlyList<(IntPtr Ptr, long Len)> blobs, IReadOnlyList<KeptRow> kept,
+        int start, int count, CancellationToken ct)
+    {
+        int end = start + count;
+        for (int i = start; i < end;)
+        {
+            long bytes = 0;
+            int chunk = 0;
+            while (i + chunk < end)
+            {
+                long len = kept[i + chunk].Row.Length;
+                // Always take at least one row. A single row over the ceiling cannot
+                // be split here; it must reach PackFiltered and fail with that
+                // function's explicit size message rather than spin taking zero rows.
+                if (chunk > 0 && bytes + len > MaxCopyPayloadBytes) break;
+                bytes += len;
+                chunk++;
+            }
+            await CopyKeptChunkAsync(conn, tableName, table, blobs, kept, i, chunk, ct);
+            i += chunk;
+        }
+    }
+
+    private static async Task CopyKeptChunkAsync(
         NpgsqlConnection conn, string tableName, IntentStageTable table,
         IReadOnlyList<(IntPtr Ptr, long Len)> blobs, IReadOnlyList<KeptRow> kept,
         int start, int count, CancellationToken ct)
@@ -1856,10 +1896,19 @@ public sealed partial class NpgsqlSubstrateWriter
         long[]? patchedCounts, IReadOnlyList<int>? countValueOffsets,
         long[]? patchedSums, IReadOnlyList<int>? sumValueOffsets, CancellationToken ct)
     {
+        // Pack BEFORE opening the stream. PackFiltered can throw — its own 2 GiB
+        // ceiling is the common one — and when it threw with the COPY already open,
+        // `await using` disposed the stream, the server reported that it had never
+        // received a binary header, and that 22P04 "COPY file signature not
+        // recognized" REPLACED the real exception on the way out. A TinyLlama
+        // factors layer packing 9,547 MB reported a corrupt-looking wire protocol
+        // instead of "payload exceeds 2 GiB", which is a completely different bug
+        // hunt. Packing first lets the real error propagate untouched.
+        byte[] packed = CopyTupleParser.PackFiltered(
+            blobs, rows, patchedCounts, countValueOffsets, patchedSums, sumValueOffsets);
         string cols = IntentStage.CopyColumnList(table);
         await using var stream = await conn.BeginRawBinaryCopyAsync(
             $"COPY laplace.{tableName} ({cols}) FROM STDIN (FORMAT BINARY)", ct);
-        await CopyTupleParser.WriteFilteredAsync(
-            stream, blobs, rows, patchedCounts, countValueOffsets, patchedSums, sumValueOffsets, ct);
+        await CopyTupleParser.WritePackedAsync(stream, packed, ct);
     }
 }

@@ -217,6 +217,20 @@
       "extension/laplace_substrate/sql/functions/variant/respell_variant_seed.sql.in::respell_variant_seed": 1,
       "extension/laplace_substrate/sql/functions/variant/trajectory_unpacked_points.sql.in::trajectory_unpacked_points": 1
     },
+    "g13_string_op_on_surface": {
+      "extension/laplace_substrate/sql/functions/lexical/type_label.sql.in::replace(render": 1
+    },
+    "g14_case_fold": {
+      "extension/laplace_substrate/sql/functions/chess/chess_opening_preference.sql.in::lower": 1,
+      "extension/laplace_substrate/sql/functions/chess/chess_player_id.sql.in::lower": 1,
+      "extension/laplace_substrate/sql/functions/converse/chat_scaffold.sql.in::initcap": 10,
+      "extension/laplace_substrate/sql/functions/converse/chat_scaffold.sql.in::lower": 2,
+      "extension/laplace_substrate/sql/functions/converse/converse_facts.sql.in::initcap": 4,
+      "extension/laplace_substrate/sql/functions/converse/resolve_topic.sql.in::lower": 1,
+      "extension/laplace_substrate/sql/functions/lexical/type_label.sql.in::lower": 1,
+      "extension/laplace_substrate/sql/functions/lexical/type_label_batch.sql.in::lower": 1,
+      "extension/laplace_substrate/sql/inference/translate_to.sql.in::lower": 3
+    },
     "g1_weight_literalism": {
       "extension/laplace_substrate/src/highway_mask.c::rating-2*rd": 3,
       "extension/laplace_substrate/src/prompt_coherence.c::rating-2*rd": 2,

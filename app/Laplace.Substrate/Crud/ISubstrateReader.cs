@@ -17,6 +17,38 @@ public interface ISubstrateReader
 
     Task<bool> HasSourceCompletedAsync(Hash128 sourceId, int layerOrder, CancellationToken ct = default);
 
+    /// <summary>
+    /// Batched form of <see cref="HasSourceCompletedAsync"/>: returns the subset of
+    /// <paramref name="sourceIds"/> that already carry the layer's completion marker.
+    ///
+    /// Per-file resume (#898) is ON BY DEFAULT for every <c>DecomposerMultiFile</c>, and
+    /// the scalar form is called once per file inside the worker loop. MEASURED on the
+    /// 2026-08-10 knowledge seed: FrameNet spent 561s to deposit 1,042,471 rows across
+    /// 14,900 files -- 1,857 rows/s against OMW's 22,462 on the same run, and 37.7 ms per
+    /// file x 14,900 files = 562s, i.e. essentially the ENTIRE runtime was per-file
+    /// overhead rather than payload. The scalar probe is one round trip per file, and the
+    /// SQL behind it (<c>ops.evidence_count(...) &gt; 0</c>) counts rows to answer an
+    /// existence question.
+    ///
+    /// This is the shape the write path already rejected everywhere else: the substrate
+    /// exposes array-in C primitives (<c>entities_exist_bitmap</c>,
+    /// <c>physicalities_exist_bitmap</c>, <c>tier_batch_existence_probe</c>) precisely so
+    /// membership questions cost one round trip, not N. Resume was added as a scalar and
+    /// never got the same treatment.
+    ///
+    /// The default implementation loops the scalar form so every existing reader keeps
+    /// working unchanged; a store that can answer it in one round trip overrides it.
+    /// </summary>
+    async Task<IReadOnlySet<Hash128>> HasSourcesCompletedAsync(
+        IReadOnlyList<Hash128> sourceIds, int layerOrder, CancellationToken ct = default)
+    {
+        var done = new HashSet<Hash128>();
+        foreach (var id in sourceIds)
+            if (await HasSourceCompletedAsync(id, layerOrder, ct).ConfigureAwait(false))
+                done.Add(id);
+        return done;
+    }
+
     Task<long> CountEntitiesByTypeAsync(Hash128 typeId, CancellationToken ct = default);
 
     Task<byte[]> EntitiesExistBitmapAsync(IReadOnlyList<Hash128> candidates, CancellationToken ct = default);

@@ -14,7 +14,12 @@ CREATE OR REPLACE FUNCTION generation.model_pair_score(
     p_tok_b   bytea)
     RETURNS float8
     AS 'MODULE_PATHNAME', 'pg_laplace_model_pair_score'
-    LANGUAGE C STABLE;
+    -- STRICT is load-bearing, not decoration: these C entry points dereference
+    -- their slice arguments without a null check, so a NULL reaching them
+    -- segfaults the backend and takes the whole cluster into recovery. Callers
+    -- routinely produce NULL by construction — a scalar subquery over a slice
+    -- directory returns NULL when the model deposited no slices at that plane.
+    LANGUAGE C STABLE STRICT;
 
 -- One token's attention row in one circuit: k strongest partners, native scan.
 DROP FUNCTION IF EXISTS laplace.model_row_topk(bytea, bytea, bytea, int);
@@ -25,7 +30,9 @@ CREATE OR REPLACE FUNCTION generation.model_row_topk(
     p_k       int DEFAULT 20)
     RETURNS TABLE(token bytea, score float8)
     AS 'MODULE_PATHNAME', 'pg_laplace_model_row_topk'
-    LANGUAGE C STABLE ROWS 20;
+    -- STRICT: see model_pair_score. On a set-returning function this yields the
+    -- empty set for a NULL slice instead of a crash.
+    LANGUAGE C STABLE STRICT ROWS 20;
 
 -- Circuit navigation by anatomy. Order disambiguates layer vs head via
 -- PRECEDES laplace.attestations whose CONTEXT is the coordinate (text-lane structure
@@ -109,7 +116,10 @@ CREATE OR REPLACE FUNCTION generation.pg_laplace_model_forward(
     p_k          int)
     RETURNS TABLE(token bytea, score float8)
     AS 'MODULE_PATHNAME', 'pg_laplace_model_forward'
-    LANGUAGE C STABLE ROWS 20;
+    -- STRICT: see model_pair_score. model_forward below feeds this from three
+    -- scalar subqueries over the slice directory; a model with no APPEARS_IN
+    -- rows makes all three NULL, which crashed the cluster before this.
+    LANGUAGE C STABLE STRICT ROWS 20;
 
 -- The everyday entry: forward a WORD through a MODEL (by source id) to its k
 -- strongest next tokens, word laplace.entities out (joinable against the web).
@@ -120,8 +130,31 @@ CREATE OR REPLACE FUNCTION generation.model_forward(
     p_word   text,
     p_k      int DEFAULT 20)
     RETURNS TABLE(token bytea, score float8)
-    LANGUAGE sql STABLE ROWS 20
+    LANGUAGE plpgsql STABLE ROWS 20
     AS $fn$
+BEGIN
+    -- Slice resolution below keys ENTIRELY on APPEARS_IN. A model whose ingest
+    -- deposited no APPEARS_IN rows resolves all three planes to NULL, and STRICT
+    -- then makes this return the empty set — indistinguishable from "this word
+    -- has no continuation". Name the real cause instead: the checkpoint is
+    -- recorded but has no circuit anatomy, which is a missing pass, not a query bug.
+    -- The default LAPLACE_MODEL_PLANES=structure pass records vocab, merges,
+    -- TOKEN_MAPS_TO and CONTAINS/PRECEDES but emits NO APPEARS_IN; only the
+    -- factors pass (ModelTokenEdgeETL.EmitFactorTrajectories, gated on RunFactors)
+    -- deposits the slices this reads. So the remedy is the second pass, not a re-record.
+    IF NOT EXISTS (SELECT 1 FROM laplace.attestations a
+                   WHERE a.type_id = laplace.relation_type_id('APPEARS_IN')
+                     AND a.source_id = p_source) THEN
+        RAISE EXCEPTION
+            'model % has no APPEARS_IN circuit slices — the checkpoint is recorded '
+            'but its circuit anatomy was never deposited, so there is nothing to '
+            'forward through. Run the analyzer pass over the recorded model: '
+            'LAPLACE_MODEL_PLANES=factors laplace ingest model <snapshot-dir>',
+            encode(p_source, 'hex')
+            USING ERRCODE = 'no_data_found';
+    END IF;
+
+    RETURN QUERY
     WITH src_slice AS (
         -- The slice this source deposited at a given plane coordinate.
         SELECT s.slice_id, s.coord_id
@@ -169,8 +202,8 @@ CREATE OR REPLACE FUNCTION generation.model_forward(
         (SELECT array_agg(slice_id) FROM mlp),
         (SELECT slice_id FROM lm),
         laplace.word_id(p_word),
-        p_k) f
-    $fn$;
+        p_k) f;
+END $fn$;
 -- Returns word laplace.entities + text, ready to JOIN against senses/consensus/web:
 --   SELECT r.*, c.rating FROM generation.model_attention_row(2,9,'king',10) r
 --   LEFT JOIN laplace.consensus c ON c.subject_id = r.token AND ...
