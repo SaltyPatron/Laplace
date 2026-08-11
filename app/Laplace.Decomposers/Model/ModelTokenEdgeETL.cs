@@ -112,8 +112,13 @@ public sealed class ModelTokenEdgeETL
     // hand-set constant (Rule #12).
     private readonly int _rowsPerChange = IngestSizing.ResolveForSource(IngestSourceProfile.Default).CommitRows;
 
-    // "structure" (default) deposits bounded APPEARS_IN occurrences aggregated
-    // from the native projections — the recorder's anatomy pass.
+    // "structure" (default) is the recorder's anatomy pass: vocab, merges,
+    // TOKEN_MAPS_TO, CONTAINS/PRECEDES structure. It does NOT deposit APPEARS_IN
+    // — the only emitter is EmitFactorTrajectories, gated on RunFactors below.
+    // This matters because generation.model_forward resolves its emb/lm/mlp slices
+    // exclusively through APPEARS_IN: a checkpoint ingested with the default mode
+    // alone is queryable as anatomy but cannot be forwarded through, and needs a
+    // second `LAPLACE_MODEL_PLANES=factors` pass over the already-recorded model.
     private readonly string _mode = ResolvePlanesMode();
     private bool StructureMode => _mode == "structure";
     private bool RunLayers => _mode == "structure";

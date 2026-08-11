@@ -1,8 +1,10 @@
 # GH #657: Serilog writes a stable filename per role (shared-file append).
 # copytruncate keeps the inode so the open sink handle and file_fdw keep the
 # same path after rotation.
-/opt/laplace/app/logs/laplace-*.csv
-/opt/laplace/app/logs/laplace-chess-drops.csv {
+# One pattern only: laplace-*.csv already covers laplace-chess-drops.csv, and
+# naming it a second time made logrotate abort the stanza with "duplicate log
+# entry" on every bootstrap run — the rotation silently never applied.
+/opt/laplace/app/logs/laplace-*.csv {
     weekly
     rotate 8
     missingok

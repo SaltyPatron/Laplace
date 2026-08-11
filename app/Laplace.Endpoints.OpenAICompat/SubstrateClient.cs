@@ -641,11 +641,33 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
             return await InstalledOpInvoker.InvokeAsync(
                 dataSource, name, args, maxRows, boundedTimeout, ct).ConfigureAwait(false);
         }
+        // A PostgresException outside the availability classes is the OPERATION
+        // answering — a RAISE, a bad argument, a failed precondition — not the
+        // cluster being down. Reporting it as 503 "unreachable" sent callers
+        // hunting a connectivity fault while the real cause sat unread in
+        // MessageText (generation.model_forward raising "no APPEARS_IN circuit
+        // slices" surfaced as substrate_unavailable). Return it as an op error so
+        // the endpoint answers 400 with the message the function actually wrote.
+        catch (PostgresException pg) when (!IsAvailabilitySqlState(pg.SqlState))
+        {
+            return new InstalledOpInvoker.OpResult(
+                [], null, $"op '{name}' failed [{pg.SqlState}] {pg.MessageText}");
+        }
         catch (Exception ex) when (ex is NpgsqlException or TimeoutException or PostgresException)
         {
             throw new SubstrateUnavailableException("Substrate is unreachable for op.", ex);
         }
     }
+
+    /// <summary>
+    /// SQLSTATE classes that mean the cluster rather than the query, and so must stay
+    /// 503: 08 connection_exception, 53 insufficient_resources, 57 operator_intervention,
+    /// 58 system_error. 53000 is load-bearing here — that is the fd-exhaustion
+    /// "could not open shared memory segment" that genuinely IS unavailability.
+    /// PostgresException derives from NpgsqlException, so this must be tested first.
+    /// </summary>
+    private static bool IsAvailabilitySqlState(string? sqlState) =>
+        sqlState is { Length: >= 2 } && sqlState[..2] is "08" or "53" or "57" or "58";
 
     public async ValueTask DisposeAsync()
     {

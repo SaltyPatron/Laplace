@@ -36,6 +36,18 @@ LAPLACE_PG_WAL_HEADROOM="${LAPLACE_PG_WAL_HEADROOM:-3}"
 LAPLACE_PG_PORT="5432"
 LAPLACE_PG_SOCKET_DIR="/var/run/postgresql"
 LAPLACE_PG_SERVICE="laplace-postgresql.service"
+# Per-backend fd ceiling. systemd's default is 1024 soft, and max_files_per_process
+# defaults to 1000 — leaving ~24 fds for everything the VFD cache does not manage.
+# Parallel query needs a real fd per dynamic shared memory segment and cannot evict
+# one to get it, so a leader that has filled its VFD cache dies with
+# "could not open shared memory segment ...: Too many open files" the moment the
+# planner picks a Gather. That is invisible until a table grows past the parallel
+# threshold, then every partition-wide read starts failing at once (2026-08-10:
+# /v1/explore/modalities, /v1/query/bands and /v1/query/leaders all 500ed this way
+# while serial plans on the same tables kept working). Raise the ceiling rather
+# than lowering max_files_per_process: the VFD cache is what makes 5k+ relations
+# cheap to scan, and starving it to buy DSM headroom trades one stall for another.
+LAPLACE_PG_NOFILE="${LAPLACE_PG_NOFILE:-65536}"
 LAPLACE_PG_LAN_CIDR="${LAPLACE_PG_LAN_CIDR:-192.168.1.0/24}"
 PG_CONFIG_DIR="/etc/postgresql/$PG_VERSION/main"
 REPO="SaltyPatron/Laplace"
@@ -699,6 +711,10 @@ TimeoutStopSec=120
 Restart=always
 RestartSec=2
 UMask=0027
+# See LAPLACE_PG_NOFILE: parallel query allocates a DSM segment per Gather and
+# needs a spare fd to open it. The stock 1024 leaves none once the VFD cache is
+# warm. Children inherit this, so it must live on the unit, not in postgresql.conf.
+LimitNOFILE=$LAPLACE_PG_NOFILE
 
 [Install]
 WantedBy=multi-user.target
@@ -731,6 +747,10 @@ EOF
     while [ $tries -lt 30 ]; do
         if [ -S "$LAPLACE_PG_SOCKET_DIR/.s.PGSQL.$LAPLACE_PG_PORT" ]; then
             green "✓ Substrate cluster accepting connections on $LAPLACE_PG_SOCKET_DIR/.s.PGSQL.$LAPLACE_PG_PORT"
+            # Fatal on purpose: tuning below re-enables parallel query
+            # (max_parallel_workers_per_gather), so applying it over a postmaster
+            # still capped at 1024 fds arms the exact failure this guards against.
+            verify_pg_nofile || return 1
             apply_and_validate_pg_machine_tuning
             return $?
         fi
@@ -739,6 +759,35 @@ EOF
     done
     red "✗ Substrate cluster failed to come up — check journalctl -u $LAPLACE_PG_SERVICE"
     return 1
+}
+
+# Assert the RUNNING postmaster's soft fd limit, not the unit's declared one. A
+# stale daemon-reload, a hand-edited drop-in ordering after 20-ready.conf, or a
+# restart that silently reused the old cgroup all leave a unit that reads
+# LimitNOFILE=65536 above a postmaster still capped at 1024 — and the symptom is
+# not a startup failure, it is parallel reads dying under load hours later.
+# /proc is the only ground truth here; `systemctl show` reports what was asked for.
+verify_pg_nofile() {
+    local pid soft
+    pid=$(systemctl show -p MainPID --value "$LAPLACE_PG_SERVICE" 2>/dev/null)
+    if [ -z "$pid" ] || [ "$pid" = "0" ] || [ ! -r "/proc/$pid/limits" ]; then
+        yellow "  cannot read /proc/\$MainPID/limits for $LAPLACE_PG_SERVICE — fd ceiling unverified"
+        return 0
+    fi
+    soft=$(awk '/Max open files/ {print $4}' "/proc/$pid/limits" 2>/dev/null)
+    case "$soft" in
+        ''|*[!0-9]*)
+            yellow "  could not parse the fd ceiling from /proc/$pid/limits — unverified"
+            return 0 ;;
+    esac
+    if [ "$soft" -lt "$LAPLACE_PG_NOFILE" ]; then
+        red "✗ postmaster fd ceiling is $soft, expected $LAPLACE_PG_NOFILE"
+        red "  parallel query will die with \"could not open shared memory segment: Too many open files\""
+        red "  fix: systemctl daemon-reload && systemctl restart $LAPLACE_PG_SERVICE"
+        return 1
+    fi
+    green "✓ postmaster fd ceiling $soft (>= $LAPLACE_PG_NOFILE) — DSM headroom for parallel query"
+    return 0
 }
 
 apply_and_validate_pg_machine_tuning() {
