@@ -74,7 +74,36 @@ PG_IDENT_FILE="$LAPLACE_PG_CONF_DIR/pg_ident.conf"
 PG_POSTGRESQL_CONF="$LAPLACE_PG_DATA/postgresql.conf"
 RUNNER_SERVICE="actions.runner.SaltyPatron-Laplace.hart-server.service"
 
-GH_SUDO_USER="${SUDO_USER:-ahart}"
+# THE OPERATOR — the human this host belongs to, not whoever is running us.
+#
+# This was `${SUDO_USER:-ahart}`, which is wrong under the ONE invocation the
+# repo documents. setup-host.sh is run as `sudo bash scripts/setup-host.sh`, so
+# it is already root when it calls `sudo "$BOOTSTRAP" bootstrap` — and a nested
+# sudo sets SUDO_USER=root. So the operator resolved to `root` on every normal
+# run, and:
+#   * bootstrap_pg_bounce_sudoers granted the NOPASSWD postgres bounce to root
+#     (which already had it) instead of to the human, so pipeline.sh's
+#     restart_postgres found "no rootless path" and dumped a pending_restart on
+#     the operator to finish by hand — the exact "script leaves it broken" bug.
+#   * bootstrap_runner_gh_auth looked for /home/root/.config/gh/hosts.yml, a path
+#     that cannot exist because root's home is /root, and skipped every time.
+#   * the Verification block ran `gh api` as root and printed nothing.
+# All three reported success or a benign skip. None of them worked.
+#
+# LAPLACE_OPERATOR is passed explicitly by setup-host.sh (which still has the
+# real SUDO_USER); logname covers a direct `sudo bootstrap-laplace-runner.sh`.
+# If neither resolves to a human, say so — granting root a grant it already has
+# and calling it done is how this hid for so long.
+GH_SUDO_USER="${LAPLACE_OPERATOR:-}"
+if [ -z "$GH_SUDO_USER" ] || [ "$GH_SUDO_USER" = root ]; then
+    GH_SUDO_USER="${SUDO_USER:-}"
+fi
+if [ -z "$GH_SUDO_USER" ] || [ "$GH_SUDO_USER" = root ]; then
+    GH_SUDO_USER="$(logname 2>/dev/null || true)"
+fi
+if [ -z "$GH_SUDO_USER" ] || [ "$GH_SUDO_USER" = root ]; then
+    GH_SUDO_USER=""
+fi
 MODE="${1:-bootstrap}"
 LAPLACE_STRIPE_SUCCESS_URL_DEFAULT="${LAPLACE_STRIPE_SUCCESS_URL:-http://127.0.0.1:5187/billing/success}"
 LAPLACE_STRIPE_CANCEL_URL_DEFAULT="${LAPLACE_STRIPE_CANCEL_URL:-http://127.0.0.1:5187/billing/cancel}"
@@ -1139,6 +1168,15 @@ bootstrap_remove_legacy_sudoers() {
 bootstrap_pg_bounce_sudoers() {
     say "NOPASSWD systemctl bounce for $LAPLACE_PG_SERVICE (operators + runner)"
     local op="$GH_SUDO_USER"
+    if [ -z "$op" ]; then
+        # Granting root a grant it already holds, and printing ✓, is exactly how
+        # this hid: pipeline.sh restart_postgres then found "no rootless path"
+        # and handed the operator a pending_restart to finish by hand.
+        red "✗ operator unresolved — NOT writing $SUDOERS_PG_BOUNCE"
+        red "  Without it, pipeline.sh cannot bounce the cluster and will leave"
+        red "  pending_restart settings for a human. Pass LAPLACE_OPERATOR=<user>."
+        return 1
+    fi
     local tmp
     tmp="$(mktemp)"
     # One command per line — no backslash wraps (visudo + terminal paste both
@@ -1251,7 +1289,15 @@ HINT
 bootstrap_runner_gh_auth() {
     say "Set up gh CLI auth for $RUNNER_USER (mirror $GH_SUDO_USER's token)"
 
-    local src="/home/$GH_SUDO_USER/.config/gh/hosts.yml"
+    if [ -z "$GH_SUDO_USER" ]; then
+        yellow "  operator unresolved — skipping (pass LAPLACE_OPERATOR or run via setup-host.sh)"
+        return
+    fi
+    # getent, NOT /home/$user. When this resolved to root it probed
+    # /home/root/.config/gh/hosts.yml — a path that cannot exist, because root's
+    # home is /root — and reported a benign skip on every single run.
+    local src
+    src="$(getent passwd "$GH_SUDO_USER" | cut -d: -f6)/.config/gh/hosts.yml"
     if [ ! -f "$src" ]; then
         yellow "  $src not present — skipping (run 'gh auth login' as $GH_SUDO_USER first, then re-run bootstrap)"
         return
