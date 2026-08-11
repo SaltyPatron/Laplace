@@ -648,11 +648,26 @@ bootstrap_pg_hugepages() {
     # runtime-computed GUC, and -C refuses to report those while a postmaster
     # holds the data directory. This function runs after the cluster is up, so -C
     # always failed here and silently skipped the whole step.
+    # Two probes, because this runs BEFORE the cluster is provisioned so the
+    # postmaster may be up or down, and the two ways of asking are mutually
+    # exclusive: shared_memory_size_in_huge_pages is runtime-computed, so
+    # `postgres -C` refuses it while a postmaster holds the data directory, and
+    # SHOW needs a server to ask. Try the live one, fall back to the offline one.
     need="$(sudo -u "$RUNNER_USER" "$LAPLACE_PG_PREFIX/bin/psql" \
         -h "$LAPLACE_PG_SOCKET_DIR" -p "$LAPLACE_PG_PORT" -d postgres -U laplace_admin \
         -tAc "SHOW shared_memory_size_in_huge_pages" 2>/dev/null | tr -dc '0-9' || true)"
     if ! [[ "$need" =~ ^[0-9]+$ ]] || [ "$need" -eq 0 ]; then
-        yellow "  could not read shared_memory_size_in_huge_pages — leaving huge pages alone"
+        if [ -f "$LAPLACE_PG_DATA/PG_VERSION" ]; then
+            need="$(sudo -u "$RUNNER_USER" "$LAPLACE_PG_PREFIX/bin/postgres" \
+                -D "$LAPLACE_PG_DATA" -C shared_memory_size_in_huge_pages 2>/dev/null \
+                | tr -dc '0-9' || true)"
+        fi
+    fi
+    if ! [[ "$need" =~ ^[0-9]+$ ]] || [ "$need" -eq 0 ]; then
+        # Only reachable on a host with no cluster at all — initdb has not run
+        # yet, so there is no shared-memory size to size a reservation against.
+        # The next run has one. This is genuinely first-boot-only.
+        yellow "  no cluster yet — huge pages sized on the next run"
         return 0
     fi
     target=$(( need + 256 ))   # headroom for shared_buffers growth
@@ -1535,10 +1550,14 @@ do_bootstrap() {
 
     bootstrap_host_vm_tuning
     bootstrap_disable_system_postgresql
-    bootstrap_laplace_pg_cluster
-    # After the cluster: needs a live postmaster to read its shared-memory size
-    # and to ALTER SYSTEM. Takes effect on the next restart, not this one.
+    # BEFORE the cluster, deliberately. bootstrap_laplace_pg_cluster runs the
+    # machine tuning, which is where pg_apply_huge_pages decides between 'on' and
+    # 'try' by counting reserved pages — and where the restart that activates the
+    # choice happens. Reserving afterwards meant run 1 always found zero pages,
+    # chose 'try', and only then reserved; run 2 promoted. Two runs to converge,
+    # for no reason but ordering.
     bootstrap_pg_hugepages
+    bootstrap_laplace_pg_cluster
 
     bootstrap_pg_roles
     bootstrap_pg_legacy_cleanup
