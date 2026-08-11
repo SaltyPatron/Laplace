@@ -595,15 +595,19 @@ EOF
     green "✓ swappiness=$(sysctl -n vm.swappiness) dirty_bytes=$(sysctl -n vm.dirty_bytes) dirty_background_bytes=$(sysctl -n vm.dirty_background_bytes)"
 }
 
-# Back the cluster's shared memory with 2 MiB huge pages.
+# RESERVE 2 MiB huge pages for the cluster's shared memory. Reservation ONLY —
+# the huge_pages GUC is owned by pg_apply_huge_pages in pg-machine-tuning.sh.
 #
 # huge_pages=try was silently falling back to 4 KiB pages because nothing ever
 # reserved any — a ~31 GiB buffer pool addressed through ~8.1M PTEs per backend.
-# "try" is precisely the kind of quiet degradation this bootstrap exists to
-# prevent, so once the reservation is PROVEN we promote it to "on".
 #
-# Two-phase on purpose: huge_pages=on makes Postgres REFUSE to start when the
-# pages are absent. Only ever flipped after verifying the reservation landed.
+# This function used to set the GUC too, which made it the THIRD owner: the
+# emitter wrote 'try', the validator asserted eq 'try', and this wrote 'on'.
+# tune-pg runs on every CI publish, so the promotion was overwritten and would
+# have been reported as a validation failure if it had survived. Reservation is
+# a host concern (sysctl, applied at boot because late allocation fails on a
+# fragmented host); which GUC that reservation justifies is a cluster concern,
+# and it belongs on the path that runs every publish, not only on manual setup.
 bootstrap_pg_hugepages() {
     say "Huge pages for Postgres shared memory"
     local need target got
@@ -635,18 +639,11 @@ EOF
     got="$(awk '/HugePages_Total/{print $2}' /proc/meminfo)"
 
     if [ "${got:-0}" -ge "$need" ]; then
-        sudo -u "$RUNNER_USER" "$LAPLACE_PG_PREFIX/bin/psql" \
-            -h "$LAPLACE_PG_SOCKET_DIR" -p "$LAPLACE_PG_PORT" -d postgres -U laplace_admin \
-            -tAc "ALTER SYSTEM SET huge_pages = 'on'" >/dev/null
-        green "✓ reserved $got huge pages (need $need) — huge_pages=on, active next restart"
+        green "✓ reserved $got huge pages (need $need) — pg_apply_huge_pages promotes the GUC"
     else
-        # Do NOT promote to 'on': the cluster would refuse to start.
-        sudo -u "$RUNNER_USER" "$LAPLACE_PG_PREFIX/bin/psql" \
-            -h "$LAPLACE_PG_SOCKET_DIR" -p "$LAPLACE_PG_PORT" -d postgres -U laplace_admin \
-            -tAc "ALTER SYSTEM SET huge_pages = 'try'" >/dev/null 2>&1 || true
         yellow "  only ${got:-0} of $target pages reserved — memory is fragmented"
         yellow "  /etc/sysctl.d/60-laplace-hugepages.conf persists: REBOOT reserves them"
-        yellow "  cleanly, then re-run this bootstrap to promote huge_pages to 'on'"
+        yellow "  cleanly; huge_pages stays at 'try' until the reservation covers $need"
     fi
 }
 

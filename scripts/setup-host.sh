@@ -101,9 +101,18 @@ layer1_clean_foreign_build_artifacts() {
             # (measured: 1587 ahart-owned and 121 root-owned files under
             # app/Laplace.*/{obj,bin} against 105 correctly owned).
             # Repair recursively; chown is idempotent and cheap at this size.
-            if [ -n "$(sudo find "$d" ! -user "$RUNNER_USER" -print -quit 2>/dev/null)" ]; then
+            # SHARED, not seized. chown alone made these trees runner-owned at mode
+            # 644, so the operator — who IS in the laplace-runner group — got
+            # "Access to the path ... is denied" building in their own home
+            # directory. Both identities build here: the operator interactively,
+            # and $RUNNER_USER via layer1_up and CI. Group-write plus setgid makes
+            # the tree writable by both and keeps new files in the shared group
+            # instead of re-splitting ownership on the next build.
+            if [ -n "$(sudo find "$d" \( ! -user "$RUNNER_USER" -o ! -perm -g+w \) -print -quit 2>/dev/null)" ]; then
                 sudo chown -R "$RUNNER_USER:$RUNNER_USER" "$d"
-                yellow "  - re-owned foreign files under $d to $RUNNER_USER"
+                sudo chmod -R g+w "$d"
+                sudo find "$d" -type d -exec chmod g+s {} +
+                yellow "  - re-owned + group-shared $d ($RUNNER_USER:$RUNNER_USER, g+w, setgid)"
             fi
         done
     done
