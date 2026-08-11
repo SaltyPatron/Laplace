@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
-# GH #847 — shellcheck gate. Severity error only: the gate exists to catch
-# swallowed failures and quote bugs that turn into false "all clear", not to
-# enforce style across every sourced fragment.
+# GH #847 — shellcheck gate. The gate exists to catch swallowed failures and
+# quote bugs that turn into false "all clear", not to enforce style across every
+# sourced fragment.
+#
+# Raised error -> warning (2026-08-11): SC2155 (`local x=$(cmd)` discards cmd's
+# exit status) IS the swallowed-failure class this gate was written for, and it
+# only reports at warning. The tree was already clean bar 8 findings, all fixed
+# or given a justified disable, so the stricter bar costs nothing to hold.
+# Style (info/style severity) remains out of scope.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -29,6 +35,6 @@ if [[ ${#scripts[@]} -eq 0 ]]; then
   exit 2
 fi
 
-echo "shellcheck -S error -x (${#scripts[@]} scripts)"
-"$SC_BIN" -S error -x "${scripts[@]}"
+echo "shellcheck -S warning -x (${#scripts[@]} scripts)"
+"$SC_BIN" -S warning -x "${scripts[@]}"
 echo "OK shellcheck gate"

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -eo pipefail
+set -euo pipefail
 
 RUNNER_USER="laplace-runner"
 RUNNER_GROUP="laplace-runner"
@@ -31,7 +31,7 @@ LAPLACE_PG_WAL="${LAPLACE_PG_WAL:-/opt/laplace/pg_wal}"
 # Must equal PG_TUNE_MAX_WAL in pg-machine-tuning.sh — the ENOSPC guard multiplies
 # these; when they were undefined, bash arithmetic made want_free 0 and the guard
 # passed unconditionally (dead since it was written).
-LAPLACE_PG_MAX_WAL_GB="${LAPLACE_PG_MAX_WAL_GB:-64}"
+LAPLACE_PG_MAX_WAL_GB="${LAPLACE_PG_MAX_WAL_GB:-32}"
 LAPLACE_PG_WAL_HEADROOM="${LAPLACE_PG_WAL_HEADROOM:-3}"
 LAPLACE_PG_PORT="5432"
 LAPLACE_PG_SOCKET_DIR="/var/run/postgresql"
@@ -49,7 +49,6 @@ LAPLACE_PG_SERVICE="laplace-postgresql.service"
 # cheap to scan, and starving it to buy DSM headroom trades one stall for another.
 LAPLACE_PG_NOFILE="${LAPLACE_PG_NOFILE:-65536}"
 LAPLACE_PG_LAN_CIDR="${LAPLACE_PG_LAN_CIDR:-192.168.1.0/24}"
-PG_CONFIG_DIR="/etc/postgresql/$PG_VERSION/main"
 REPO="SaltyPatron/Laplace"
 REPO_URL="https://github.com/$REPO"
 RUNNER_VERSION="v2.334.0"
@@ -213,7 +212,8 @@ bootstrap_migrate_runner_home() {
         green "✓ Rewrote $unit_file: $RUNNER_HOME_LEGACY -> $RUNNER_HOME"
     fi
 
-    local archive="${RUNNER_HOME_LEGACY}.pre-migration-$(date +%Y%m%d-%H%M%S)"
+    local archive
+    archive="${RUNNER_HOME_LEGACY}.pre-migration-$(date +%Y%m%d-%H%M%S)"
     mv "$RUNNER_HOME_LEGACY" "$archive"
     green "✓ Archived legacy tree to $archive (rm -rf when satisfied)"
 
@@ -262,7 +262,8 @@ bootstrap_legacy_runner_teardown() {
         green "✓ Deregistered legacy runner from GitHub"
     fi
 
-    local archive="/tmp/laplace-runner-prev-$(date +%s)"
+    local archive
+    archive="/tmp/laplace-runner-prev-$(date +%s)"
     mv "$old" "$archive"
     rm -rf /home/ahart/_work 2>/dev/null || true
     green "✓ Legacy runner archived at $archive"
@@ -331,9 +332,6 @@ EOF
     green "✓ OOM guard + auto-restart drop-in installed"
 }
 
-bootstrap_runner_oom_guard
-
-
 bootstrap_runner_job_env() {
     # LAPLACE_TEST_DB is a disposable DB *name* for ChessLiveGameHost writer tests.
     # Never default it to the production database — that either writes into laplace or
@@ -369,6 +367,7 @@ bootstrap_runner_model_env() {
         local fam snap
         for fam in /vault/models/$1; do
             [ -d "$fam/snapshots" ] || continue
+            # shellcheck disable=SC2045  # newest-first is the point; globs cannot sort by mtime
             for snap in $(ls -t "$fam/snapshots" 2>/dev/null); do
                 if ls "$fam/snapshots/$snap"/*.safetensors >/dev/null 2>&1; then
                     echo "$fam/snapshots/$snap"; return 0
@@ -1090,10 +1089,17 @@ bootstrap_external_pins() {
     if [ ! -f "$pins" ]; then
         yellow "  $pins not present — nothing to provision from."
         yellow "  Seed it once from a known-good cache:"
-        yellow "    for d in /opt/laplace/external/*/; do n=${d%/}; n=${n##*/}; \\"
-        yellow "      printf 'external/%s\\t%s\\t%s\\n' \"$n\" \\"
-        yellow "        \"$(git -C \"$d\" remote get-url origin)\" \\"
-        yellow "        \"$(git -C \"$d\" rev-parse HEAD)\"; done > $pins"
+        # QUOTED heredoc: this is literal text to SHOW the operator, never to run
+        # here. Unquoted it was double-quoted shell, so ${d%/} and ${n##*/} expanded
+        # to empty at print time and BOTH $(git -C "$d" ...) substitutions actually
+        # executed against '' — the hint rendered as `n=; n=;` with empty fields and
+        # spat two `fatal: cannot change to '""'` lines at the operator.
+        while IFS= read -r hint; do yellow "${hint//@PINS@/$pins}"; done <<'HINT'
+    for d in /opt/laplace/external/*/; do n=${d%/}; n=${n##*/}; \
+      printf 'external/%s\t%s\t%s\n' "$n" \
+        "$(git -C "$d" remote get-url origin)" \
+        "$(git -C "$d" rev-parse HEAD)"; done > @PINS@
+HINT
         return
     fi
 
@@ -1199,14 +1205,21 @@ do_status() {
     grep "laplace_map" "$PG_IDENT_FILE" 2>/dev/null || echo "  (no laplace_map entry)"
 
     say "Sudoers"
-    if [ -f "$SUDOERS_FILE" ]; then
+    # -r not -f: sudoers drop-ins are 0440 root:root, so a non-root `status` passes
+    # the -f test and then dies on cat (EACCES) under set -e. Diagnostics must
+    # degrade to a note, never abort the report.
+    if [ -r "$SUDOERS_FILE" ]; then
         cat "$SUDOERS_FILE"
+    elif [ -f "$SUDOERS_FILE" ]; then
+        echo "  (present, unreadable as $(id -un) — rerun status as root: $SUDOERS_FILE)"
     else
         echo "  (absent: $SUDOERS_FILE)"
     fi
-    if [ -f "$SUDOERS_PG_BOUNCE" ]; then
+    if [ -r "$SUDOERS_PG_BOUNCE" ]; then
         echo "--- $SUDOERS_PG_BOUNCE ---"
         cat "$SUDOERS_PG_BOUNCE"
+    elif [ -f "$SUDOERS_PG_BOUNCE" ]; then
+        echo "  (present, unreadable as $(id -un) — rerun status as root: $SUDOERS_PG_BOUNCE)"
     else
         echo "  (absent: $SUDOERS_PG_BOUNCE)"
     fi
@@ -1356,6 +1369,7 @@ do_bootstrap() {
     bootstrap_runner_install
     bootstrap_runner_register
     bootstrap_runner_service
+    bootstrap_runner_oom_guard
     bootstrap_runner_job_env
     bootstrap_runner_model_env
     bootstrap_runner_stripe_env

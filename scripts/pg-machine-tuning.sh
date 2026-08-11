@@ -65,6 +65,8 @@ pg_compute_machine_tuning() {
   PG_TUNE_MWM=${mwm}MB
   PG_TUNE_WM=${wm}MB
   PG_TUNE_WB=${wb}MB
+  # shellcheck disable=SC2034  # no consumer yet; kept so this block mirrors EmitPgTuning's
+  # full surface — deleting one member of a mirrored contract is worse than an unused var.
   PG_TUNE_CORES=$cores
   PG_TUNE_PCORES=$pcores
   PG_TUNE_PDEG=$pdeg

@@ -176,9 +176,11 @@ jobs:
           done
           exit "$fail"
 
-      - name: Shellcheck gate (severity error)
+      - name: Shellcheck gate (severity warning)
         # GH #847 — catch quote/array bugs and swallowed-failure patterns that
-        # turn into false "all clear". Severity error only; style is out of scope.
+        # turn into false "all clear". Severity warning (raised from error
+        # 2026-08-11: SC2155 masks command exit status and only reports at
+        # warning); style/info remain out of scope.
         run: bash scripts/shellcheck-gate.sh
 
       - name: Deploy payload contract

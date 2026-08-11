@@ -193,6 +193,7 @@ purge_autoconf_build_trees() {
     fi
   done
   # postgis builds in-source under $EXT; clear its configure cache the same way.
+  # shellcheck disable=SC2043  # single-element by design: the in-source list grows here
   for d in postgis; do
     [ -f "$EXT/$d/config.status" ] || continue
     yellow "  clearing in-source autoconf cache: $EXT/$d"
