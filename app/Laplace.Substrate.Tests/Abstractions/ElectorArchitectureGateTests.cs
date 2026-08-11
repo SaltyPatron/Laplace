@@ -19,13 +19,28 @@ public sealed class ElectorArchitectureGateTests
         "extension/laplace_substrate/sql/functions/converse/resolve_topic.sql.in",
     ];
 
+    /// <summary>
+    /// GH #865. The primary key is the PRODUCT of coherence and fold-witness, not
+    /// coherence alone: specificity is coherence over the candidate's OWN total mass,
+    /// so leading with it makes rarity a virtue, and denote_mu previously sat at key
+    /// five behind three keys that never tie on real data — never consulted.
+    ///
+    /// denote_mu is deliberately GONE from the tail. It is inside the product now;
+    /// leaving it in both places would let it break ties it had already won or lost.
+    ///
+    /// This list changed on 2026-08-11 and the change is why this gate exists. The
+    /// weighted order landed in chat.sql.in ALONE, leaving the other four sites on the
+    /// old keys — precisely the drift this file was written to catch, and it caught it
+    /// (`found 0`, because the leading key is now an expression rather than a bare
+    /// column). All five sites move together or the gate fails.
+    /// </summary>
     private static readonly string[] ExpectedElectorKeys =
     [
+        "SPECIFICITY*DENOTE_MU DESC",
         "SPECIFICITY DESC NULLS LAST",
         "REL_MASS DESC NULLS LAST",
         "PEERS DESC",
         "ORD DESC",
-        "DENOTE_MU DESC NULLS LAST",
         "SYNSET_ID",
     ];
 
@@ -38,6 +53,17 @@ public sealed class ElectorArchitectureGateTests
 
     private static readonly Regex OrderBy = new(
         @"\bORDER\s+BY\b",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    /// <summary>
+    /// The weighted primary key, matched as one unit and normalised to
+    /// "SPECIFICITY*DENOTE_MU DESC". Written across lines in every site, so the
+    /// pattern must tolerate arbitrary whitespace between the operands.
+    /// </summary>
+    private static readonly Regex WeightedElectorKey = new(
+        @"\G\s*\(\s*COALESCE\s*\(\s*(?:(?:@extschema@\.)?y\.)?specificity\s*,\s*0\s*\)\s*"
+        + @"\*\s*GREATEST\s*\(\s*COALESCE\s*\(\s*(?:(?:@extschema@\.)?y\.)?denote_mu\s*,\s*0\s*\)\s*,\s*1\s*\)\s*\)"
+        + @"(?<direction>\s+DESC\b)?",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     private static readonly Regex ElectorKey = new(
@@ -138,6 +164,26 @@ public sealed class ElectorArchitectureGateTests
         var keys = new List<string>();
         while (position < text.Length)
         {
+            // The weighted product is tried FIRST: it opens with '(' where a bare column
+            // name would be, so ElectorKey cannot match it and the whole clause would
+            // read as "not an election" — which is exactly how a one-site change slipped
+            // past as `found 0` instead of failing as drift.
+            var weighted = WeightedElectorKey.Match(text, position);
+            if (weighted.Success && weighted.Index == position)
+            {
+                var weightedKey = "SPECIFICITY*DENOTE_MU";
+                if (weighted.Groups["direction"].Success)
+                    weightedKey += " DESC";
+                keys.Add(weightedKey);
+                position = weighted.Index + weighted.Length;
+
+                var weightedComma = Comma.Match(text, position);
+                if (!weightedComma.Success || weightedComma.Index != position)
+                    break;
+                position = weightedComma.Index + weightedComma.Length;
+                continue;
+            }
+
             var key = ElectorKey.Match(text, position);
             if (!key.Success || key.Index != position)
             {
