@@ -22,6 +22,26 @@
     <!-- Never compile leftovers from a previous in-repo output layout. -->
     <DefaultItemExcludes>$(DefaultItemExcludes);obj/**;bin/**</DefaultItemExcludes>
   </PropertyGroup>
+  <!--
+    Throughput and db-bound tests are excluded BY DEFAULT, not by remembering a
+    filter. scripts/test-parallel.sh has always passed `Tier!=perf & Tier!=db`,
+    so CI never ran them; a bare `dotnet test` did. On a box that is also
+    seeding or building, a ">500k rows/sec" gate reports machine load rather
+    than a regression, which produced failures nobody acted on. That is worse
+    than not running the test.
+
+    Same expression as the script, applied as the project default, so the two
+    cannot drift. Passing an explicit filter on the command line still
+    overrides this, so the tests are skipped by default and never removed:
+
+      dotnet test /p:VSTestTestCaseFilter="Tier=perf"   run the gates on purpose
+      dotnet test /p:VSTestTestCaseFilter=""            run absolutely everything
+  -->
+  <!-- IsTestProject is set by the test SDK, which imports AFTER this file, so it
+       is empty here; key off the project name, which is known immediately. -->
+  <PropertyGroup Condition="$(MSBuildProjectName.EndsWith('.Tests')) AND '$(VSTestTestCaseFilter)' == ''">
+    <VSTestTestCaseFilter>Tier!=perf&amp;Tier!=db</VSTestTestCaseFilter>
+  </PropertyGroup>
   <ItemGroup>
     <!-- Outputs live outside the repo, so tests can no longer find the repo
          root by walking up from their own binary — stamp it instead. -->
