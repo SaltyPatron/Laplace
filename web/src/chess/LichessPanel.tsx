@@ -197,7 +197,9 @@ export function LichessPanel() {
       {chat.length > 0 && (
         <div className={styles.log}>
           <Muted>Game chat {activeGameId ? `(${activeGameId})` : ''}</Muted>
-          <ul>
+          {/* .log ul caps at 6rem and scrolls — without tabindex its content is
+              unreachable by keyboard (axe: scrollable-region-focusable). */}
+          <ul tabIndex={0} aria-label="Game chat">
             {chat.slice(-12).map((line, i) => (
               <li key={`${i}-${line.username}-${line.text}`}>
                 <strong>@{line.username}</strong> [{line.room}]: {line.text}
@@ -210,7 +212,7 @@ export function LichessPanel() {
       {(status?.recentLog?.length ?? 0) > 0 && (
         <div className={styles.log}>
           <Muted>Activity</Muted>
-          <ul>
+          <ul tabIndex={0} aria-label="Lichess activity">
             {status!.recentLog.slice(-8).map((line, i) => (
               <li key={`${i}-${line}`}>{line}</li>
             ))}

@@ -628,9 +628,16 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         {
             var boundedTimeout = Math.Clamp(
                 timeoutSeconds, 1, InstalledOpInvoker.MaxCommandTimeoutSeconds);
-            var dataSource = boundedTimeout > InstalledOpInvoker.DefaultCommandTimeoutSeconds
-                ? _dataSourceReadOnlyLong
-                : _dataSourceReadOnly;
+            // Ops on the explicit write allow-list need a connection that is not
+            // default_transaction_read_only; everything else keeps the read-only
+            // posture. Without this branch a write op resolves from the catalog
+            // and then fails at execution, which is how the ingest-run gate ended
+            // up only clearable by hand against the database.
+            var dataSource = InstalledOpInvoker.IsWritable(name)
+                ? _dataSource
+                : boundedTimeout > InstalledOpInvoker.DefaultCommandTimeoutSeconds
+                    ? _dataSourceReadOnlyLong
+                    : _dataSourceReadOnly;
             return await InstalledOpInvoker.InvokeAsync(
                 dataSource, name, args, maxRows, boundedTimeout, ct).ConfigureAwait(false);
         }

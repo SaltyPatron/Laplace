@@ -375,7 +375,10 @@ export function ChatView() {
 
               <div>
 
-                {m.content || (m.streaming ? '…' : '')}
+                {/* A finished turn with nothing in it must still say so — an
+                    empty string renders an invisible bubble, which reads as
+                    "the question was never asked" rather than "no reply". */}
+                {m.content || (m.streaming ? '…' : m.error ? '' : <span className={styles.messageEmpty}>no reply — the substrate returned nothing for this turn</span>)}
 
                 {m.error && <span className={styles.messageError}> [{m.error}]</span>}
 
@@ -404,6 +407,21 @@ export function ChatView() {
                   ))}
 
                 </div>
+
+              )}
+
+              {/* This surface promises μ and witness counts on every reply. When
+                  the endpoint returns `laplace: {}` for the content chunk there
+                  is nothing to bind a badge to, and silently rendering no
+                  badges reads as "this reply has no witnesses" rather than
+                  "the receipt did not come back". Say which it is. */}
+              {m.role === 'assistant' && !m.streaming && !m.error && m.content && m.provenance.length === 0 && (
+
+                <Muted className={styles.noReceipts}>
+
+                  no receipt returned for this reply — look the terms up in Evidence →
+
+                </Muted>
 
               )}
 

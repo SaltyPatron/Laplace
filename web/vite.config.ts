@@ -20,9 +20,18 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/v1': endpoint,
-      '/chess': endpoint,
       '/health': endpoint,
       '/openapi': endpoint,
+      // `/chess` is BOTH an API prefix and the Chess DB route in the SPA. A
+      // blanket '/chess' proxy handed the router's own URLs to the endpoint,
+      // which answered with the deployed index.html; its hashed dist asset
+      // paths then 404 against the dev server and the page renders blank.
+      // Only the real API segments are proxied — /chess and /chess/players/*
+      // stay with the router. Production is unaffected: one host serves both.
+      '^/chess/(bestmove|eval|explore|legal|move|new|learned-pst|lab|play|train|lichess)(/|$)': {
+        target: endpoint,
+        changeOrigin: false,
+      },
     },
   },
   build: {

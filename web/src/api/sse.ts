@@ -1,4 +1,4 @@
-import { laplaceHeaders, PaymentRequiredError, ApiError, type ApiOptions, type PaymentRequiredResponse } from './client';
+import { laplaceHeaders, PaymentRequiredError, ApiError, type ApiOptions, type ErrorResponse, type PaymentRequiredResponse } from './client';
 
 
 
@@ -34,6 +34,33 @@ export interface ChatChunk {
 
 
 
+
+/**
+ * One SSE `data:` frame into a chunk — or a throw.
+ *
+ * A failing substrate does not close the stream: the endpoint answers 200,
+ * writes `data: {"error":{…}}`, then `data: [DONE]`. Parsed blindly as a
+ * ChatChunk that frame has no `choices` and no `laplace`, so every render
+ * branch skips it and the turn ends with empty content and no error — the
+ * reply silently disappears in front of the user. Error frames are raised
+ * here so the one catch in the caller reports them like any other failure.
+ */
+function parseFrame(data: string, status: number): ChatChunk {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(data);
+  } catch {
+    throw new ApiError(status, 'Malformed stream frame from the substrate.');
+  }
+  const err = (parsed as ErrorResponse | undefined)?.error;
+  if (err) {
+    if (err.code === 'payment_required' || err.type === 'payment_required') {
+      throw new PaymentRequiredError(parsed as PaymentRequiredResponse);
+    }
+    throw new ApiError(status, err.message ?? err.code ?? 'Substrate stream failed.');
+  }
+  return parsed as ChatChunk;
+}
 
 export async function* streamChat(
   path: string,
@@ -80,7 +107,7 @@ export async function* streamChat(
           if (!line.startsWith('data: ')) continue;
           const data = line.slice(6).trim();
           if (data === '[DONE]') return;
-          yield JSON.parse(data) as ChatChunk;
+          yield parseFrame(data, res.status);
         }
       }
     }

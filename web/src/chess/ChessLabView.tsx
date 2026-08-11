@@ -369,7 +369,12 @@ export function ChessLabView() {
 
       <Panel className={styles.feed} title="Live feed">
         <Muted className={styles.feedHint}>Logs, progress, metrics, and result tables appear here as the job runs.</Muted>
-        <ul className={styles.events}>
+        {/* The feed scrolls, so it needs to be reachable by keyboard — an
+            overflow region with no tabindex traps its content for anyone not
+            using a pointer (axe: scrollable-region-focusable). */}
+        {/* tabIndex only — a role here would override the list semantics and
+            orphan the <li> children (axe: listitem). */}
+        <ul className={styles.events} tabIndex={0} aria-label="Live feed">
           {events.map((e, i) => <LabRow key={i} e={e} />)}
           {events.length === 0 && <li><Muted>Select a job or start an experiment to see live output.</Muted></li>}
         </ul>

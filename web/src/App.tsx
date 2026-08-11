@@ -9,6 +9,7 @@ import { ChessView } from './chess/ChessView';
 import { ChessLabView } from './chess/ChessLabView';
 import { ChessDbView } from './chess/db/ChessDbView';
 import { ExploreView } from './explore/ExploreView';
+import { AdminView } from './admin/AdminView';
 import { useAppStore } from './store';
 import { SubstrateStatusBanner } from './layout/SubstrateStatusBanner';
 import styles from './App.module.css';
@@ -30,6 +31,7 @@ const TABS: { id: string; label: string; path: string }[] = [
   { id: 'play', label: 'Play', path: '/play' },
   { id: 'lab', label: 'Lab', path: '/lab' },
   { id: 'billing', label: 'Billing', path: '/billing' },
+  { id: 'operator', label: 'Operator', path: '/operator' },
 ];
 
 function isActive(pathname: string, tabPath: string): boolean {
@@ -72,6 +74,7 @@ function Shell() {
           <Route path="/play" element={<ChessView />} />
           <Route path="/lab" element={<ChessLabView />} />
           <Route path="/billing" element={<BillingView />} />
+          <Route path="/operator" element={<AdminView />} />
         </Routes>
       </main>
     </div>

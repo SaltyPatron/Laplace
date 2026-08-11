@@ -95,7 +95,7 @@ export function HomeView({ onGoto }: Props) {
       <section className={styles.examples} aria-label="Things you can ask">
         <div className={styles.examplesHead}>
           <span className={styles.examplesTitle}>Try a structural read</span>
-          <Muted className={styles.examplesSub}>each opens the Query console, set up and ready to run</Muted>
+          <Muted className={styles.examplesSub}>each opens the read that answers it — the topic page, a head-to-head, or the Query console</Muted>
         </div>
         <div className={styles.exampleGrid}>
           {EXAMPLES.map((ex) => (

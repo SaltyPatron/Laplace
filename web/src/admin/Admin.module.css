@@ -1,0 +1,183 @@
+@layer components {
+  .page { display: flex; flex-direction: column; gap: var(--space-4); }
+
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+  }
+
+  .title { margin: 0; font-size: var(--text-lg); }
+
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+    margin-bottom: var(--space-3);
+  }
+
+  .liveLabel,
+  .limitLabel {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+  }
+
+  .limitSelect {
+    background: var(--color-bg-panel);
+    color: var(--color-text-primary);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-sm);
+    padding: 2px var(--space-1);
+  }
+
+  .gateNote { margin: 0; font-size: var(--text-sm); }
+
+  /* Tables are wide by nature here — scroll the table, never the page. */
+  .tableWrap { overflow-x: auto; }
+
+  .table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--text-sm);
+  }
+
+  .table th,
+  .table td {
+    text-align: left;
+    padding: var(--space-2);
+    border-bottom: 1px solid var(--color-border-default);
+    vertical-align: top;
+    white-space: nowrap;
+  }
+
+  .table thead th {
+    color: var(--color-text-muted);
+    font-size: var(--text-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+  }
+
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+  .openRow { background: color-mix(in srgb, var(--color-accent) 8%, transparent); }
+
+  .badge {
+    display: inline-block;
+    padding: 0 var(--space-1);
+    border-radius: var(--radius-sm);
+    font-size: var(--text-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    border: 1px solid currentColor;
+  }
+
+  .ok { color: var(--color-confirm, #3ecf8e); }
+  .running { color: var(--color-accent); }
+  .cancelled { color: var(--color-text-muted); }
+  .failed { color: var(--color-error); }
+
+  .source { font-weight: 600; }
+  .runId { font-size: var(--text-xs); color: var(--color-text-muted); }
+  .failedUnits { color: var(--color-error); }
+
+  .runErr {
+    max-width: 40ch;
+    white-space: normal;
+    color: var(--color-error);
+    font-size: var(--text-xs);
+    margin-top: var(--space-1);
+  }
+
+  .copyCmd {
+    display: block;
+    margin-top: var(--space-1);
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--color-accent);
+    font-size: var(--text-xs);
+    cursor: pointer;
+  }
+  .copyCmd:hover { text-decoration: underline; }
+
+  .foot { margin-top: var(--space-3); font-size: var(--text-xs); white-space: normal; }
+
+  /* Op console — catalog beside the invoker. */
+  .opGrid {
+    display: grid;
+    grid-template-columns: minmax(280px, 1fr) minmax(360px, 1.4fr);
+    gap: var(--space-4);
+    align-items: start;
+  }
+
+  @media (max-width: 900px) {
+    .opGrid { grid-template-columns: 1fr; }
+  }
+
+  .opList {
+    list-style: none;
+    margin: var(--space-2) 0 0;
+    padding: 0;
+    max-height: 60vh;
+    overflow-y: auto;
+  }
+
+  .opItem {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    border-bottom: 1px solid var(--color-border-default);
+    padding: var(--space-2);
+    cursor: pointer;
+    color: inherit;
+  }
+  .opItem:hover { background: var(--color-surface-hover, rgba(255, 255, 255, 0.04)); }
+  .opItemOn { background: color-mix(in srgb, var(--color-accent) 14%, transparent); }
+
+  .opName { font-weight: 600; font-size: var(--text-sm); }
+  .opArgs {
+    font-family: var(--font-mono, ui-monospace, monospace);
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+  }
+
+  .writeTag {
+    align-self: flex-start;
+    font-size: var(--text-xs);
+    color: var(--color-draw, #e8b339);
+    border: 1px solid currentColor;
+    border-radius: var(--radius-sm);
+    padding: 0 4px;
+  }
+
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    margin-bottom: var(--space-3);
+    font-size: var(--text-sm);
+  }
+  .field > span { color: var(--color-text-muted); font-size: var(--text-xs); }
+
+  .sig {
+    display: block;
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    margin-bottom: var(--space-2);
+    overflow-x: auto;
+  }
+
+  .writeWarn { margin: 0 0 var(--space-2); font-size: var(--text-xs); }
+  .runErrBox { margin-top: var(--space-3); white-space: normal; }
+}

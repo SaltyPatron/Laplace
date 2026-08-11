@@ -95,6 +95,15 @@
     outline-offset: 1px;
   }
 
+  /* A bare <a> otherwise falls back to the UA's #0000ee, which is 1.88:1
+     against the panel background — axe reports it as a serious contrast
+     violation for every such link (149 nodes on the Lab page alone). The Link
+     primitive styles itself; this covers the anchors that are not it, and sits
+     in `base` so any component rule still wins. */
+  a {
+    color: var(--color-accent);
+  }
+
   body {
     margin: 0;
     height: 100%;
