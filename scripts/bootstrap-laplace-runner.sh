@@ -48,6 +48,14 @@ LAPLACE_PG_SERVICE="laplace-postgresql.service"
 # than lowering max_files_per_process: the VFD cache is what makes 5k+ relations
 # cheap to scan, and starving it to buy DSM headroom trades one stall for another.
 LAPLACE_PG_NOFILE="${LAPLACE_PG_NOFILE:-65536}"
+# Postgres' OWN VFD cache ceiling, distinct from the kernel fd limit above. The
+# note on LimitNOFILE says to raise the ceiling rather than lower this — but this
+# was then left at the stock 1000 while LimitNOFILE went to 65536, so the VFD
+# cache never grew to use the headroom that was bought for it. With 5k+ relations
+# and the physicalities_h* partitions, a backend evicts and re-opens constantly.
+# 4000 x max_connections stays far inside both the per-process ceiling and
+# fs.file-max, and leaves ~61k fds per backend for DSM segments.
+LAPLACE_PG_MAX_FILES="${LAPLACE_PG_MAX_FILES:-4000}"
 LAPLACE_PG_LAN_CIDR="${LAPLACE_PG_LAN_CIDR:-192.168.1.0/24}"
 REPO="SaltyPatron/Laplace"
 REPO_URL="https://github.com/$REPO"
@@ -566,6 +574,75 @@ pg_relocate_waldir() {
     green "✓ Relocated pg_wal → $LAPLACE_PG_WAL/pg_wal (heap and WAL now on separate spindles)"
 }
 
+# Host VM policy for a database box. Written to /etc/sysctl.d (survives reboot)
+# and applied now. Idempotent: rewriting the same file is a no-op.
+bootstrap_host_vm_tuning() {
+    say "Host VM tunables (swappiness, writeback ceilings)"
+    cat > /etc/sysctl.d/60-laplace-vm.conf <<'EOF'
+# Laplace DB host tunables. Owned by bootstrap-laplace-runner.sh — edit there.
+# swappiness 60 is desktop policy. Measured 2026-08-11: 7.5 GB swapped with
+# 81 GB available. Postgres was not the victim (editor/JVM heaps were), but a
+# database host should not page out anonymous memory this eagerly.
+vm.swappiness = 10
+# dirty_ratio/dirty_background_ratio are PERCENTAGES OF RAM. On the 125 GB host
+# that is 25 GB dirty before writers block and 12.5 GB before background
+# writeback — one flush can stall the box. The *_bytes forms are mutually
+# exclusive with *_ratio, so setting these zeroes the ratios. That is intended.
+vm.dirty_bytes = 2147483648
+vm.dirty_background_bytes = 536870912
+EOF
+    sysctl -q --system >/dev/null 2>&1 || true
+    green "✓ swappiness=$(sysctl -n vm.swappiness) dirty_bytes=$(sysctl -n vm.dirty_bytes) dirty_background_bytes=$(sysctl -n vm.dirty_background_bytes)"
+}
+
+# Back the cluster's shared memory with 2 MiB huge pages.
+#
+# huge_pages=try was silently falling back to 4 KiB pages because nothing ever
+# reserved any — a ~31 GiB buffer pool addressed through ~8.1M PTEs per backend.
+# "try" is precisely the kind of quiet degradation this bootstrap exists to
+# prevent, so once the reservation is PROVEN we promote it to "on".
+#
+# Two-phase on purpose: huge_pages=on makes Postgres REFUSE to start when the
+# pages are absent. Only ever flipped after verifying the reservation landed.
+bootstrap_pg_hugepages() {
+    say "Huge pages for Postgres shared memory"
+    local need target got
+    # Ask Postgres, do not derive from shared_buffers: this accounts for ALL
+    # shared memory and for rounding.
+    need="$(sudo -u "$RUNNER_USER" "$LAPLACE_PG_PREFIX/bin/postgres" \
+        -D "$LAPLACE_PG_DATA" -C shared_memory_size_in_huge_pages 2>/dev/null || true)"
+    if ! [[ "$need" =~ ^[0-9]+$ ]] || [ "$need" -eq 0 ]; then
+        yellow "  could not read shared_memory_size_in_huge_pages — leaving huge pages alone"
+        return 0
+    fi
+    target=$(( need + 256 ))   # headroom for shared_buffers growth
+
+    cat > /etc/sysctl.d/60-laplace-hugepages.conf <<EOF
+# Laplace: 2 MiB huge pages for the substrate cluster's shared memory.
+# Owned by bootstrap-laplace-runner.sh (bootstrap_pg_hugepages) — edit there.
+# Reserved at BOOT: late allocation fails once memory is fragmented.
+# $need pages is what Postgres reports it needs; +256 is growth headroom.
+vm.nr_hugepages = $target
+EOF
+    sysctl -q -w vm.nr_hugepages="$target" >/dev/null 2>&1 || true
+    got="$(awk '/HugePages_Total/{print $2}' /proc/meminfo)"
+
+    if [ "${got:-0}" -ge "$need" ]; then
+        sudo -u "$RUNNER_USER" "$LAPLACE_PG_PREFIX/bin/psql" \
+            -h "$LAPLACE_PG_SOCKET_DIR" -p "$LAPLACE_PG_PORT" -d postgres -U laplace_admin \
+            -tAc "ALTER SYSTEM SET huge_pages = 'on'" >/dev/null
+        green "✓ reserved $got huge pages (need $need) — huge_pages=on, active next restart"
+    else
+        # Do NOT promote to 'on': the cluster would refuse to start.
+        sudo -u "$RUNNER_USER" "$LAPLACE_PG_PREFIX/bin/psql" \
+            -h "$LAPLACE_PG_SOCKET_DIR" -p "$LAPLACE_PG_PORT" -d postgres -U laplace_admin \
+            -tAc "ALTER SYSTEM SET huge_pages = 'try'" >/dev/null 2>&1 || true
+        yellow "  only ${got:-0} of $target pages reserved — memory is fragmented"
+        yellow "  /etc/sysctl.d/60-laplace-hugepages.conf persists: REBOOT reserves them"
+        yellow "  cleanly, then re-run this bootstrap to promote huge_pages to 'on'"
+    fi
+}
+
 bootstrap_laplace_pg_cluster() {
     say "Provision /opt/laplace/pgsql-18 cluster (substrate runtime PG)"
 
@@ -628,6 +705,7 @@ bootstrap_laplace_pg_cluster() {
         -e '/^[[:space:]]*#\?[[:space:]]*log_file_mode[[:space:]]*=/d' \
         -e '/^[[:space:]]*#\?[[:space:]]*hba_file[[:space:]]*=/d' \
         -e '/^[[:space:]]*#\?[[:space:]]*ident_file[[:space:]]*=/d' \
+        -e '/^[[:space:]]*#\?[[:space:]]*max_files_per_process[[:space:]]*=/d' \
         "$PG_POSTGRESQL_CONF"
     sudo -u "$RUNNER_USER" tee -a "$PG_POSTGRESQL_CONF" >/dev/null <<EOF
 
@@ -647,6 +725,10 @@ log_file_mode = 0640
 log_destination = 'stderr,csvlog'
 hba_file = '$PG_HBA_FILE'
 ident_file = '$PG_IDENT_FILE'
+# Paired with LimitNOFILE on the unit — see LAPLACE_PG_MAX_FILES. Lives here and
+# not in pg-machine-tuning.sh because it is an fd-budget knob bound to the unit's
+# kernel limit, not a machine-sized memory/parallelism GUC.
+max_files_per_process = $LAPLACE_PG_MAX_FILES
 $marker_end
 EOF
     green "✓ Wrote substrate cluster config to $PG_POSTGRESQL_CONF"
@@ -690,6 +772,13 @@ Description=Laplace substrate PostgreSQL cluster ($LAPLACE_PG_PREFIX, data on $L
 Documentation=https://github.com/SaltyPatron/Laplace
 After=network.target
 ConditionPathExists=$LAPLACE_PG_DATA/PG_VERSION
+# ConditionPathExists alone is NOT enough once the mounts carry nofail (added
+# 2026-08-11 so a dead array cannot wedge boot at an emergency shell): an unmet
+# Condition* is not a unit failure, so a missing mount would skip the cluster
+# SILENTLY. RequiresMountsFor turns that back into a loud, visible failure
+# without reintroducing the boot block. $LAPLACE_PG_MOUNT is the heap;
+# $LAPLACE_PG_WAL's volume carries pg_wal since the 2026-08-11 split.
+RequiresMountsFor=$LAPLACE_PG_MOUNT $LAPLACE_PG_WAL
 
 [Service]
 Type=simple
@@ -721,6 +810,16 @@ WantedBy=multi-user.target
 EOF
     chmod 644 "$unit_file"
     install -d "/etc/systemd/system/${LAPLACE_PG_SERVICE}.d"
+    # Retire hand-made drop-ins whose contents this unit now carries verbatim.
+    # Left in place they are pure noise, and a drop-in that merely restates the
+    # unit is indistinguishable from one that overrides it at a glance.
+    local stale
+    for stale in 10-owner-bounce.conf 30-nofile.conf; do
+        if [ -f "/etc/systemd/system/${LAPLACE_PG_SERVICE}.d/$stale" ]; then
+            rm -f "/etc/systemd/system/${LAPLACE_PG_SERVICE}.d/$stale"
+            yellow "  removed redundant drop-in $stale (already in the unit)"
+        fi
+    done
     cat > "/etc/systemd/system/${LAPLACE_PG_SERVICE}.d/20-ready.conf" <<EOF
 [Service]
 # Type=simple returns when the postmaster process exists — before the Unix
@@ -1378,8 +1477,12 @@ do_bootstrap() {
     bootstrap_engine_lib_path
     bootstrap_external_dirs
 
+    bootstrap_host_vm_tuning
     bootstrap_disable_system_postgresql
     bootstrap_laplace_pg_cluster
+    # After the cluster: needs a live postmaster to read its shared-memory size
+    # and to ALTER SYSTEM. Takes effect on the next restart, not this one.
+    bootstrap_pg_hugepages
 
     bootstrap_pg_roles
     bootstrap_pg_legacy_cleanup
