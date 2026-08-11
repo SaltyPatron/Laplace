@@ -608,9 +608,16 @@ bootstrap_pg_hugepages() {
     say "Huge pages for Postgres shared memory"
     local need target got
     # Ask Postgres, do not derive from shared_buffers: this accounts for ALL
-    # shared memory and for rounding.
-    need="$(sudo -u "$RUNNER_USER" "$LAPLACE_PG_PREFIX/bin/postgres" \
-        -D "$LAPLACE_PG_DATA" -C shared_memory_size_in_huge_pages 2>/dev/null || true)"
+    # shared memory and for rounding (measured 16614 where shared_buffers alone
+    # implied ~16100).
+    #
+    # Read it with SHOW, NOT `postgres -C`: shared_memory_size_in_huge_pages is a
+    # runtime-computed GUC, and -C refuses to report those while a postmaster
+    # holds the data directory. This function runs after the cluster is up, so -C
+    # always failed here and silently skipped the whole step.
+    need="$(sudo -u "$RUNNER_USER" "$LAPLACE_PG_PREFIX/bin/psql" \
+        -h "$LAPLACE_PG_SOCKET_DIR" -p "$LAPLACE_PG_PORT" -d postgres -U laplace_admin \
+        -tAc "SHOW shared_memory_size_in_huge_pages" 2>/dev/null | tr -dc '0-9' || true)"
     if ! [[ "$need" =~ ^[0-9]+$ ]] || [ "$need" -eq 0 ]; then
         yellow "  could not read shared_memory_size_in_huge_pages — leaving huge pages alone"
         return 0

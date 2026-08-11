@@ -91,6 +91,20 @@ layer1_clean_foreign_build_artifacts() {
                 sudo install -d -o "$RUNNER_USER" -g "$RUNNER_USER" -m 775 "$d"
                 yellow "  - created $d owned by $RUNNER_USER"
             fi
+            # The stat above only inspects the TOP directory. MSBuild writes
+            # thousands of files underneath it, and a developer `dotnet build` as
+            # ahart — or this script's own Layer 1 extension build, which runs
+            # pipeline.sh as root — leaves foreign-owned files inside a directory
+            # that still passes the ownership test. layer1_up then runs as
+            # $RUNNER_USER and dies on MSB3374 "last access/last write time ...
+            # cannot be set" the first time MSBuild touches one of them
+            # (measured: 1587 ahart-owned and 121 root-owned files under
+            # app/Laplace.*/{obj,bin} against 105 correctly owned).
+            # Repair recursively; chown is idempotent and cheap at this size.
+            if [ -n "$(sudo find "$d" ! -user "$RUNNER_USER" -print -quit 2>/dev/null)" ]; then
+                sudo chown -R "$RUNNER_USER:$RUNNER_USER" "$d"
+                yellow "  - re-owned foreign files under $d to $RUNNER_USER"
+            fi
         done
     done
     return 0
