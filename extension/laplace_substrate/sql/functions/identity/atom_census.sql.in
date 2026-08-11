@@ -4,7 +4,6 @@
 -- unresolvable_ids stays 0 here — a full codepoint_for_id sweep is O(window)
 -- and is a follow-on when a gate needs the NULL-label count.
 -- BEGIN ATOMIC: GH #764 beachhead.
-DROP FUNCTION IF EXISTS laplace.atom_census();
 CREATE OR REPLACE FUNCTION laplace.atom_census()
     RETURNS TABLE(
         tier0_count bigint,
