@@ -713,6 +713,7 @@ bootstrap_laplace_pg_cluster() {
         -e '/^[[:space:]]*#\?[[:space:]]*hba_file[[:space:]]*=/d' \
         -e '/^[[:space:]]*#\?[[:space:]]*ident_file[[:space:]]*=/d' \
         -e '/^[[:space:]]*#\?[[:space:]]*max_files_per_process[[:space:]]*=/d' \
+        -e '/^[[:space:]]*#\?[[:space:]]*default_toast_compression[[:space:]]*=/d' \
         "$PG_POSTGRESQL_CONF"
     sudo -u "$RUNNER_USER" tee -a "$PG_POSTGRESQL_CONF" >/dev/null <<EOF
 
@@ -736,6 +737,16 @@ ident_file = '$PG_IDENT_FILE'
 # not in pg-machine-tuning.sh because it is an fd-budget knob bound to the unit's
 # kernel limit, not a machine-sized memory/parallelism GUC.
 max_files_per_process = $LAPLACE_PG_MAX_FILES
+# TOAST compression. pglz is the stock default and was never overridden here
+# (pg_settings reported source='default'). Measured 2026-08-11 before the
+# database was recreated: 86 GB of the 143 GB database was TOAST, all pglz,
+# concentrated in the physicalities_h* trajectory columns that a SQL forward
+# pass decompresses on every read. lz4 is several times faster in both
+# directions. Every compressible column carries the unbaked sentinel
+# (pg_attribute.attcompression = \0), so this GUC is resolved per value at
+# INSERT — no ALTER TABLE, no rewrite, and mixed pglz/lz4 data stays readable
+# because the method is recorded in each TOAST pointer.
+default_toast_compression = lz4
 $marker_end
 EOF
     green "✓ Wrote substrate cluster config to $PG_POSTGRESQL_CONF"
