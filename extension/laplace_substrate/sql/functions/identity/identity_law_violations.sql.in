@@ -48,7 +48,6 @@
 -- Reports ids, not counts, so a caller can act on them. Deliberately unbounded: a
 -- violation list that silently truncates is the same failure as a detector that
 -- cannot fail.
-DROP FUNCTION IF EXISTS laplace.identity_law_violations();
 CREATE OR REPLACE FUNCTION laplace.identity_law_violations()
 RETURNS TABLE(id bytea, tier smallint, reason text)
 LANGUAGE sql

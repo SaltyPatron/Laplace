@@ -1,4 +1,3 @@
-DROP FUNCTION IF EXISTS laplace.fake_tier_band_count();
 CREATE OR REPLACE FUNCTION laplace.fake_tier_band_count()
 RETURNS bigint
 LANGUAGE sql

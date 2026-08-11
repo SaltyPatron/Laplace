@@ -1,5 +1,4 @@
 -- BEGIN ATOMIC: GH #764.
-DROP FUNCTION IF EXISTS laplace.compositional_tier_distribution();
 CREATE OR REPLACE FUNCTION laplace.compositional_tier_distribution()
 RETURNS TABLE(tier smallint, n bigint)
 LANGUAGE sql

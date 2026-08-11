@@ -1,7 +1,6 @@
 -- BEGIN ATOMIC: GH #764. No SET search_path — keeps `= ANY(...)` inlinable.
 -- Identity helpers stay in the extension schema (laplace); purpose_schemas notes
 -- the family has not moved yet. DROP the flat leftover from pre-qualification.
-DROP FUNCTION IF EXISTS laplace.is_compositional_type(bytea);
 CREATE OR REPLACE FUNCTION laplace.is_compositional_type(p_type_id bytea)
 RETURNS boolean
 LANGUAGE sql
