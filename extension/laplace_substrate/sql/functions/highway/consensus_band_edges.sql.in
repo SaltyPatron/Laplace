@@ -8,7 +8,25 @@
 -- zero DB round trips), then ONE indexed query fetches the edges
 -- (consensus_type_btree for the ANY() filter, the eff_mu expression index for
 -- ordering) — the define_fast pattern.
-DROP FUNCTION IF EXISTS consensus.band_edges(int, bigint, bigint);
+-- NO DROP. `DROP FUNCTION IF EXISTS consensus.band_edges(int, bigint, bigint)`
+-- stood here and broke EVERY extension upgrade (2026-08-11 06:38, migrate phase):
+--
+--   ERROR: cannot drop function consensus.band_edges(integer,bigint,bigint)
+--          because other objects depend on it
+--   DETAIL: function ops.band_leaders(integer[],integer) depends on it
+--
+-- ops.band_leaders is `LANGUAGE sql STABLE BEGIN ATOMIC`, and an ATOMIC body is
+-- parsed at CREATE time and records a real pg_depend edge on everything it
+-- references (that is the whole point of the form, and why G12 pushes toward it).
+-- So converting a caller to ATOMIC retroactively turns any DROP of its callees
+-- into an upgrade-blocking error, and the manifest installs band_edges (367)
+-- before band_leaders (377) — the dependent from the PREVIOUS install is still
+-- present when the DROP runs.
+--
+-- The DROP was redundant anyway: name, argument types and return type are all
+-- unchanged, so CREATE OR REPLACE alone does the job. A DROP is only load-bearing
+-- when the signature or return type CHANGES; this one bought nothing and cost the
+-- whole deploy. Same class as #1004, which removed ten of these under identity/.
 CREATE OR REPLACE FUNCTION consensus.band_edges(
     p_band       int,
     p_min_eff_mu bigint DEFAULT NULL,
