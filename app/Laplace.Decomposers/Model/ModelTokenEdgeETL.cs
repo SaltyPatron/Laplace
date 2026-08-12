@@ -1216,7 +1216,10 @@ public sealed class ModelTokenEdgeETL
             centroid = [];
             return false;
         }
-        centroid = Math4d.Centroid(coords.ToArray());
+        // Karcher, not Centroid. This feeds PhysicalityType.Projection's coord and
+        // its Hilbert index, so it is placement and belongs on S3 at norm 1 like
+        // every other coord. Requires a reseed.
+        centroid = Math4d.KarcherMean(coords.ToArray());
         return true;
     }
 

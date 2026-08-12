@@ -1,0 +1,83 @@
+-- ops.metric_ladder — every rung of the comparison ladder for two entities, in
+-- one result, ordered by how much of the trajectory each rung forgets.
+--
+-- The rungs are not interchangeable and the collisions are deliberate. From
+-- MODEL_INGESTION_DESIGN.md: "a slice coordinate is a bucket, not an identity."
+-- Geometry proposes candidates; typed evidence governs selection.
+--
+--   rung             operates on              order      cat/tac/act
+--   ---------------- ----------------------- ---------- ----------------
+--   coord_distance   collapsed point          forgotten  collide
+--   hilbert          quantised point          forgotten  collide
+--   hausdorff        realized curve as a SET  forgotten  collide
+--   frechet          realized curve as a PATH preserved  separate
+--   merkle_id        ordered childIds         preserved  separate exactly
+--
+-- REALIZED CURVES, NOT PACKED TRAJECTORIES. structural.entity_curve rebuilds
+-- ST_MakeLine(child.coord ORDER BY ordinal) -- actual placements in trajectory
+-- order. The `trajectory` column is mantissa-packed identity payload: entity id,
+-- ordinal and flags encoded into double mantissas. Feeding it to a geometric
+-- metric compares packed hashes as if they were positions, which is the error
+-- the placement law forbids ("packed trajectory vertices ... must never be
+-- presented as spatial coordinates") and which commit 2537fcd7 already fixed
+-- once. Symptom if it regresses: Hausdorff between two anagrams returns ~1e-16
+-- instead of exactly 0, because the ordinal differs in the low mantissa bits.
+--
+-- Each metric is evaluated ONCE, in the CTE, and reused for both `value` and
+-- `collides`. The prior revision computed every metric twice -- including
+-- Frechet, the expensive one -- by repeating the call in the collides column.
+DROP FUNCTION IF EXISTS ops.metric_ladder(bytea, bytea);
+CREATE OR REPLACE FUNCTION ops.metric_ladder(p_a bytea, p_b bytea)
+RETURNS TABLE(rung          text,
+              value         double precision,
+              collides      boolean,
+              order_bearing boolean)
+LANGUAGE sql STABLE PARALLEL SAFE
+AS $$
+    WITH pt AS (
+        -- one scan, both entities, pivoted; not six scalar subqueries
+        SELECT (array_agg(coord         ORDER BY ord))[1] AS ca,
+               (array_agg(coord         ORDER BY ord))[2] AS cb,
+               (array_agg(hilbert_index ORDER BY ord))[1] AS ha,
+               (array_agg(hilbert_index ORDER BY ord))[2] AS hb
+        FROM (SELECT p.coord, p.hilbert_index,
+                     CASE WHEN p.entity_id = p_a THEN 1 ELSE 2 END AS ord
+              FROM laplace.physicalities p
+              WHERE p.entity_id IN (p_a, p_b)) s
+    ),
+    m AS (
+        SELECT pt.ca, pt.cb, pt.ha, pt.hb,
+               laplace_distance_4d(pt.ca, pt.cb)              AS d_coord,
+               laplace_hausdorff_4d(qa.curve, qb.curve)       AS d_haus,
+               laplace_frechet_4d(qa.curve, qb.curve)         AS d_fre
+        FROM pt
+        CROSS JOIN LATERAL (SELECT structural.entity_curve(p_a) AS curve) qa
+        CROSS JOIN LATERAL (SELECT structural.entity_curve(p_b) AS curve) qb
+    )
+    SELECT 'coord_distance', m.d_coord, m.d_coord = 0.0,  false FROM m
+    UNION ALL
+    SELECT 'hilbert',        NULL,      m.ha = m.hb,      false FROM m
+    UNION ALL
+    SELECT 'hausdorff',      m.d_haus,  m.d_haus = 0.0,   false FROM m
+    UNION ALL
+    SELECT 'frechet',        m.d_fre,   m.d_fre = 0.0,    true  FROM m
+    UNION ALL
+    SELECT 'merkle_id',      NULL,      p_a = p_b,        true
+$$;
+
+COMMENT ON FUNCTION ops.metric_ladder(bytea, bytea) IS
+    'All comparison rungs for two entities over REALIZED curves. Coord/Hilbert/'
+    'Hausdorff collide on anagrams by design; Frechet and Merkle id separate them.';
+
+
+-- ops.metric_ladder_words — same ladder addressed by surface, for interactive use.
+DROP FUNCTION IF EXISTS ops.metric_ladder_words(text, text);
+CREATE OR REPLACE FUNCTION ops.metric_ladder_words(p_a text, p_b text)
+RETURNS TABLE(rung          text,
+              value         double precision,
+              collides      boolean,
+              order_bearing boolean)
+LANGUAGE sql STABLE PARALLEL SAFE
+AS $$
+    SELECT * FROM ops.metric_ladder(laplace.word_id(p_a), laplace.word_id(p_b))
+$$;

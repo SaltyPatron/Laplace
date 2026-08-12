@@ -1,0 +1,107 @@
+-- ops.render_trace — why did realize.render_text(id) return NULL?
+--
+-- render_node (generate_walk.c:1104-1126) accumulates children into one buffer
+-- and discards ALL of it if any single child fails to resolve:
+--
+--     if (child_text != NULL)  append child_text
+--     else if (!append_codepoint_render(&out, kids[r].child))  ok = false;
+--     ...
+--     e->text = ok ? out.data : NULL;
+--
+-- NULL then propagates to the root, so one unresolvable constituent out of
+-- thirty makes an entire document unreadable at any p_max_depth. That is the
+-- CORRECT behaviour -- rendering the other twenty-nine would manufacture
+-- content with a valid hash, which is the one thing a provenance substrate
+-- must not do. Abstention is the design (see "softmax can be zero").
+--
+-- What was missing is the diagnosis. render_text returns NULL and says nothing
+-- about which constituent killed it, so the only way to find out was a manual
+-- LEFT JOIN against the trajectory, one document at a time. MEASURED
+-- 2026-08-12: three tier-4 documents with n_constituents=5 returned NULL at
+-- both depth 8 and depth 32; ordinals 1 and 5 had no laplace.entities row.
+-- Those are two of the 899,179 orphaned physicalities (ops.ingest_integrity_gate).
+--
+-- realize.render_gaps() does not answer this: it scans consensus for globally
+-- unnameable ids, not the constituent closure of one entity.
+--
+-- Cost discipline: realize.codepoint_for_id is the expensive call, so it fires
+-- only on rows the cheap entity join could not already classify, and labels
+-- resolve through ONE converse.label_or_hex_batch rather than N scalar calls
+-- (measured 2026-08-12: the scalar form is ~42 ms per call).
+DROP FUNCTION IF EXISTS ops.render_trace(bytea, integer, boolean);
+CREATE OR REPLACE FUNCTION ops.render_trace(
+    p_entity        bytea,
+    p_max_depth     integer DEFAULT 32,
+    p_failures_only boolean DEFAULT true
+)
+RETURNS TABLE(
+    parent_id  bytea,
+    ordinal    integer,
+    child_id   bytea,
+    tier       smallint,
+    label      text,
+    verdict    text
+)
+LANGUAGE sql STABLE PARALLEL SAFE
+AS $$
+    WITH clo AS (
+        SELECT c.parent_id, c.ordinal, c.child_id
+        FROM realize.constituents_closure(ARRAY[p_entity], p_max_depth) c
+    ),
+    -- Cheap pass first: an id with no entities row is an orphan and needs no
+    -- further probing. An id that carries a trajectory renders by recursion.
+    cheap AS (
+        SELECT c.parent_id, c.ordinal, c.child_id, e.tier,
+               (e.id IS NOT NULL) AS has_entity,
+               EXISTS (SELECT 1 FROM laplace.v_word_points w
+                       WHERE w.id = c.child_id AND w.trajectory IS NOT NULL) AS has_traj
+        FROM clo c
+        LEFT JOIN laplace.entities e ON e.id = c.child_id
+    ),
+    -- codepoint_for_id only for rows still undecided: real entity, no trajectory.
+    resolved AS (
+        SELECT k.*,
+               CASE WHEN k.has_entity AND NOT k.has_traj
+                    THEN realize.codepoint_for_id(k.child_id)
+               END AS codepoint
+        FROM cheap k
+    ),
+    verdicted AS (
+        SELECT r.parent_id, r.ordinal, r.child_id, r.tier,
+               CASE
+                 WHEN NOT r.has_entity
+                   THEN 'ORPHAN: physicality exists, no laplace.entities row'
+                 WHEN r.has_traj      THEN 'ok: composed, renders by recursion'
+                 WHEN r.codepoint IS NOT NULL
+                   THEN 'ok: codepoint U+' || upper(to_hex(r.codepoint))
+                 ELSE 'UNRENDERABLE: entity exists, no trajectory, no codepoint'
+               END AS verdict
+        FROM resolved r
+    ),
+    kept AS (
+        SELECT v.* FROM verdicted v
+        WHERE NOT p_failures_only OR v.verdict NOT LIKE 'ok:%'
+    ),
+    -- One batched label call for the surviving rows, positional.
+    ids AS (
+        SELECT array_agg(DISTINCT k.child_id) AS arr FROM kept k
+    ),
+    labels AS (
+        SELECT u.id, l.lbl
+        FROM ids
+        CROSS JOIN LATERAL unnest(ids.arr) WITH ORDINALITY AS u(id, n)
+        CROSS JOIN LATERAL (
+            SELECT (converse.label_or_hex_batch(ids.arr))[u.n] AS lbl
+        ) l
+        WHERE ids.arr IS NOT NULL
+    )
+    SELECT k.parent_id, k.ordinal, k.child_id, k.tier, lb.lbl, k.verdict
+    FROM kept k
+    LEFT JOIN labels lb ON lb.id = k.child_id
+    ORDER BY k.parent_id, k.ordinal
+$$;
+
+COMMENT ON FUNCTION ops.render_trace(bytea, integer, boolean) IS
+    'Why realize.render_text(id) returned NULL: the constituent closure with a '
+    'per-child verdict. Non-empty with p_failures_only means the render aborted '
+    'on those rows and discarded everything already assembled.';

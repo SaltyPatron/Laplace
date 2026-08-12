@@ -17,6 +17,7 @@ indexes/physicalities_entity_btree.sql.in
 indexes/physicalities_type_btree.sql.in
 indexes/physicalities_coord_gist.sql.in
 indexes/physicalities_hilbert_btree.sql.in
+indexes/physicalities_ducet_rank_btree.sql.in
 indexes/physicalities_radius_btree.sql.in
 indexes/physicalities_residual_btree.sql.in
 indexes/physicalities_observed_brin.sql.in
@@ -402,6 +403,11 @@ functions/analysis/laplace_entities_at_depth.sql.in
 functions/analysis/laplace_ancestry.sql.in
 functions/analysis/model_jitter_catalog.sql.in
 functions/analysis/laplace_translations.sql.in
+functions/analysis/ducet_rank.sql.in
+functions/analysis/placement_health.sql.in
+functions/analysis/metric_ladder.sql.in
+functions/analysis/ingest_integrity_gate.sql.in
+functions/analysis/render_trace.sql.in
 functions/inference/laplace_attention_centroid.sql.in
 functions/inference/laplace_nearest_entity.sql.in
 functions/inference/laplace_astar_path.sql.in

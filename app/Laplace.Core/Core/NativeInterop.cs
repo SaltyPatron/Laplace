@@ -101,6 +101,10 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "math4d_centroid")]
     internal static partial void Math4dCentroid(double* points, nuint nPoints, double* out4);
 
+    [LibraryImport(Library, EntryPoint = "math4d_karcher_mean")]
+    internal static partial void Math4dKarcherMean(
+        double* points, nuint nPoints, double* weights, double tol, int maxIters, double* out4);
+
     [LibraryImport(Library, EntryPoint = "trajectory_build")]
     internal static partial int TrajectoryBuild(Hash128* entityHashes, nuint n, double* outXyzm);
 

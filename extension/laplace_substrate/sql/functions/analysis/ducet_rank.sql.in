@@ -1,0 +1,71 @@
+-- ops.ducet_rank — recover a tier-0 atom's DUCET collation rank from its coord.
+--
+-- Super-Fibonacci places atom i (of N = laplace.atom_window()) using
+--   s = i + 0.5,  r = sqrt(s/N),  R = sqrt(1 - s/N)
+--   coord = (r*sin a, r*cos a, R*sin b, R*cos b)
+-- so x^2 + y^2 = r^2 = s/N exactly. The rank is therefore recoverable from
+-- geometry alone, with no collation table consulted at runtime: allkeys.txt is
+-- baked into the placement at seed time.
+--
+-- VERIFIED 2026-08-12 on a seeded substrate: rank('a') = 12142.5 < rank('A') =
+-- 12207.5 (DUCET puts lowercase first; codepoint order would invert it), and
+-- rank('a-acute') = 12144.5 lands two ranks after 'a' rather than at codepoint
+-- 225 -- secondary-weight behaviour codepoint ordering cannot produce. Every
+-- recovered rank is an exact half integer, which pins both s = i + 0.5 and
+-- N = atom_window (1,114,112, NOT the 1,114,240 tier-0 row count, which
+-- includes sentinels).
+--
+-- Only meaningful for tier-0 physicalities (radius_origin = 1). Composed
+-- entities are centroids and carry no rank; use ops.placement_health().
+DROP FUNCTION IF EXISTS ops.ducet_rank(geometry);
+CREATE OR REPLACE FUNCTION ops.ducet_rank(p_coord geometry)
+RETURNS double precision
+LANGUAGE sql IMMUTABLE PARALLEL SAFE
+AS $$
+    SELECT (ST_X(p_coord)^2 + ST_Y(p_coord)^2) * laplace.atom_window()::double precision
+$$;
+
+COMMENT ON FUNCTION ops.ducet_rank(geometry) IS
+    'DUCET collation rank recovered from a tier-0 coord (x^2+y^2 = s/N). Returns i+0.5.';
+
+
+-- ops.ducet_ordered — collation-ordered atom listing, straight from geometry.
+--
+-- Evaluation order is deliberate and is the whole point of the shape below:
+-- ducet_rank is pure arithmetic on a stored geometry, so it is cheap enough to
+-- range-filter and sort on. realize.codepoint_for_id is NOT cheap. So the inner
+-- query does rank/filter/sort/LIMIT using only the cheap expression, and the
+-- expensive resolution runs exactly p_limit times in the outer projection --
+-- never once per tier-0 row.
+--
+-- The earlier revision of this function called codepoint_for_id THREE times per
+-- row inside the projection and evaluated ducet_rank twice (SELECT and WHERE),
+-- across all 1,114,240 atoms before LIMIT could apply. Measured cost of that
+-- class of mistake elsewhere in this session: converse.label_or_hex at ~42 ms a
+-- call, 4,587 calls, 195 seconds. Resolve last, on the surviving rows only.
+DROP FUNCTION IF EXISTS ops.ducet_ordered(integer, integer);
+CREATE OR REPLACE FUNCTION ops.ducet_ordered(p_from  integer DEFAULT 0,
+                                             p_limit integer DEFAULT 50)
+RETURNS TABLE(rank double precision, codepoint integer, ch text)
+LANGUAGE sql STABLE PARALLEL SAFE
+AS $$
+    SELECT w.rank,
+           cp.codepoint,
+           CASE WHEN cp.codepoint BETWEEN 32 AND 1114111
+                THEN chr(cp.codepoint) END AS ch
+    FROM (
+        SELECT e.id, ops.ducet_rank(p.coord) AS rank
+        FROM laplace.entities e
+        JOIN laplace.physicalities p ON p.entity_id = e.id
+        WHERE e.tier = 0
+          AND ops.ducet_rank(p.coord) >= p_from
+        ORDER BY 2
+        LIMIT p_limit
+    ) w
+    CROSS JOIN LATERAL (SELECT realize.codepoint_for_id(w.id) AS codepoint) cp
+    ORDER BY w.rank
+$$;
+
+COMMENT ON FUNCTION ops.ducet_ordered(integer, integer) IS
+    'Atoms in DUCET order recovered from geometry. Cheap rank filter first; '
+    'codepoint resolution runs only on the LIMITed rows.';

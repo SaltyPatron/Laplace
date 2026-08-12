@@ -58,19 +58,99 @@ void math4d_scale(const double a[4], double s, double out[4]) {
     out[3] = a[3] * s;
 }
 
+/* ---- canonical constituent order -----------------------------------------
+ *
+ * Floating-point addition is commutative but NOT associative, so a sum over
+ * constituents depends on the order they arrive in. MEASURED 2026-08-12: six
+ * permutations of three tier-0 placements produced three distinct bit patterns,
+ * grouped by the FINAL addend -- the signature of a left fold. Observed in the
+ * substrate as `tac` differing from `cat`/`act` below 1e-12, invisible
+ * downstream only because Hilbert quantisation absorbed it. A placement derived
+ * from constituents must be reproducible under constituent reordering; the
+ * content-addressing law requires it.
+ *
+ * Ordering is NUMERIC, component by component, never a memcmp over raw bytes.
+ * memcmp is a fine total order on any single host but walks bytes in address
+ * order, so little- and big-endian hosts would sort constituents differently and
+ * derive different placements from identical inputs. IEEE-754 comparison
+ * semantics are identical on both. Content addressing has to be
+ * architecture-stable, not merely run-stable.
+ *
+ * Identical entries compare equal and are interchangeable in the sum, so an
+ * unstable sort is safe. -0.0 and +0.0 compare equal and sum identically.
+ */
+typedef struct {
+    const double* p;
+    double        w;
+} laplace_pt_t;
+
+/* Total order over doubles independent of byte layout. NaN sorts last and
+ * compares equal to itself, so the comparator stays a valid strict weak
+ * ordering -- qsort is undefined behaviour otherwise. */
+static int laplace_dbl_cmp(double a, double b) {
+    if (a < b)  return -1;
+    if (a > b)  return  1;
+    if (a == b) return  0;              /* includes -0.0 vs +0.0 */
+    const int an = isnan(a), bn = isnan(b);
+    if (an && bn) return 0;
+    return an ? 1 : -1;
+}
+
+static int laplace_pt_cmp(const void* a, const void* b) {
+    const laplace_pt_t* x = (const laplace_pt_t*) a;
+    const laplace_pt_t* y = (const laplace_pt_t*) b;
+    for (int i = 0; i < 4; ++i) {
+        const int c = laplace_dbl_cmp(x->p[i], y->p[i]);
+        if (c != 0) return c;
+    }
+    return laplace_dbl_cmp(x->w, y->w);
+}
+
+#define LAPLACE_PT_STACK 64
+
+/* Fills `slots` with the constituents in canonical order. Returns the array to
+ * use, which is `stackbuf` for small n, a malloc'd block for large n, or NULL if
+ * allocation failed (callers then fall back to input order: the result stays
+ * correct, it only loses reproducibility). Free with laplace_pts_release. */
+static laplace_pt_t* laplace_pts_canonical(const double* points, size_t n_points,
+                                           const double* weights,
+                                           laplace_pt_t* stackbuf) {
+    laplace_pt_t* pts = stackbuf;
+    if (n_points > LAPLACE_PT_STACK) {
+        pts = (laplace_pt_t*) malloc(sizeof(laplace_pt_t) * n_points);
+        if (pts == NULL) return NULL;
+    }
+    for (size_t i = 0; i < n_points; ++i) {
+        pts[i].p = points + i * 4;
+        pts[i].w = (weights != NULL) ? weights[i] : 1.0;
+    }
+    qsort(pts, n_points, sizeof(laplace_pt_t), laplace_pt_cmp);
+    return pts;
+}
+
+static void laplace_pts_release(laplace_pt_t* pts, laplace_pt_t* stackbuf) {
+    if (pts != NULL && pts != stackbuf) free(pts);
+}
+
 void math4d_centroid(const double* points, size_t n_points, double out[4]) {
     out[0] = 0.0;
     out[1] = 0.0;
     out[2] = 0.0;
     out[3] = 0.0;
     if (n_points == 0) return;
+
+    laplace_pt_t  stackbuf[LAPLACE_PT_STACK];
+    laplace_pt_t* pts = laplace_pts_canonical(points, n_points, NULL, stackbuf);
+
     for (size_t i = 0; i < n_points; ++i) {
-        const double* p = points + i * 4;
+        const double* p = (pts != NULL) ? pts[i].p : points + i * 4;
         out[0] += p[0];
         out[1] += p[1];
         out[2] += p[2];
         out[3] += p[3];
     }
+    laplace_pts_release(pts, stackbuf);
+
     const double inv = 1.0 / (double)n_points;
     out[0] *= inv;
     out[1] *= inv;
@@ -135,6 +215,36 @@ void math4d_exp_s3(const double base[4], const double tangent[4], double out[4])
     normalize4d(out);
 }
 
+/* Canonical constituent order, for reproducible accumulation.
+ *
+ * Floating-point addition is commutative but NOT associative, so any sum over
+ * constituents depends on the order they arrive in. MEASURED 2026-08-12: six
+ * permutations of three tier-0 placements produced three distinct bit patterns
+ * from both math4d_centroid and this function, grouped by the FINAL addend --
+ * the signature of a left fold. A placement derived from constituents was
+ * therefore not reproducible under constituent reordering, which the
+ * content-addressing law requires it to be. (Observed in the wild as `tac`
+ * differing from `cat`/`act` below 1e-12, absorbed by Hilbert quantisation and
+ * so invisible downstream.)
+ *
+ * Ordering is NUMERIC, component by component, not a memcmp over the raw bytes.
+ * memcmp would be a perfectly good total order on any single host, but it walks
+ * bytes in address order: little-endian compares mantissa low bytes first,
+ * big-endian hits sign/exponent first. Two hosts of different endianness would
+ * therefore sort constituents differently, sum in different orders, and derive
+ * different placements from identical inputs -- which defeats the point, since
+ * content addressing has to be architecture-stable and not merely run-stable.
+ * IEEE-754 comparison semantics are identical on both.
+ *
+ * Identical (point, weight) pairs compare equal and are interchangeable in the
+ * sum, so an unstable sort is safe. -0.0 and +0.0 compare equal here and sum
+ * identically, so collapsing them is correct rather than merely harmless.
+ *
+ * Uses the shared laplace_pts_canonical helper defined above math4d_centroid --
+ * one ordering rule for every constituent accumulation in this file, so the two
+ * means cannot drift apart.
+ */
+
 void math4d_karcher_mean(const double* points, size_t n_points,
                          const double* weights, double tol, int max_iters,
                          double out[4]) {
@@ -150,34 +260,39 @@ void math4d_karcher_mean(const double* points, size_t n_points,
         return;
     }
 
+    /* Establish the canonical visitation order once; every accumulation below
+     * uses it -- the weight total, the seed estimate, and the tangent mean that
+     * is recomputed on each iteration. All three were order-dependent. On
+     * allocation failure the result stays correct but loses reproducibility; it
+     * never becomes wrong. */
+    laplace_pt_t  stackbuf[LAPLACE_PT_STACK];
+    laplace_pt_t* pts = laplace_pts_canonical(points, n_points, weights, stackbuf);
+#define LK_P(i) (pts != NULL ? pts[i].p : points + (i) * 4)
+#define LK_W(i) (pts != NULL ? pts[i].w : ((weights != NULL) ? weights[i] : 1.0))
+
     double w_total = 0.0;
-    for (size_t i = 0; i < n_points; ++i) {
-        const double w = (weights != NULL) ? weights[i] : 1.0;
-        w_total += w;
-    }
+    for (size_t i = 0; i < n_points; ++i) w_total += LK_W(i);
+
     if (w_total == 0.0) {
-        out[0] = points[0];
-        out[1] = points[1];
-        out[2] = points[2];
-        out[3] = points[3];
+        const double* p0 = LK_P(0);
+        out[0] = p0[0]; out[1] = p0[1]; out[2] = p0[2]; out[3] = p0[3];
         normalize4d(out);
+        laplace_pts_release(pts, stackbuf);
         return;
     }
 
     double est[4] = {0.0, 0.0, 0.0, 0.0};
     for (size_t i = 0; i < n_points; ++i) {
-        const double w = (weights != NULL) ? weights[i] : 1.0;
-        const double* p = points + i * 4;
+        const double  w = LK_W(i);
+        const double* p = LK_P(i);
         est[0] += w * p[0];
         est[1] += w * p[1];
         est[2] += w * p[2];
         est[3] += w * p[3];
     }
     if (normalize4d(est) == 0.0) {
-        est[0] = points[0];
-        est[1] = points[1];
-        est[2] = points[2];
-        est[3] = points[3];
+        const double* p0 = LK_P(0);
+        est[0] = p0[0]; est[1] = p0[1]; est[2] = p0[2]; est[3] = p0[3];
         normalize4d(est);
     }
 
@@ -185,9 +300,9 @@ void math4d_karcher_mean(const double* points, size_t n_points,
     for (int iter = 0; iter < max_iters; ++iter) {
         double mean_t[4] = {0.0, 0.0, 0.0, 0.0};
         for (size_t i = 0; i < n_points; ++i) {
-            const double w = (weights != NULL) ? weights[i] : 1.0;
+            const double w = LK_W(i);
             double tng[4];
-            math4d_log_s3(est, points + i * 4, tng);
+            math4d_log_s3(est, LK_P(i), tng);
             mean_t[0] += w * tng[0];
             mean_t[1] += w * tng[1];
             mean_t[2] += w * tng[2];
@@ -203,6 +318,10 @@ void math4d_karcher_mean(const double* points, size_t n_points,
 
         if (step < tol) break;
     }
+
+#undef LK_P
+#undef LK_W
+    laplace_pts_release(pts, stackbuf);
 
     out[0] = est[0];
     out[1] = est[1];
