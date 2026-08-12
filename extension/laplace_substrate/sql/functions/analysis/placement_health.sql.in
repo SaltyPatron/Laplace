@@ -43,6 +43,11 @@
 -- already, so the tier-0/composed cut needs no join and the whole table
 -- aggregates in ~1.3 s. radius_origin is STORED, so nothing is recomputed.
 -- Use ops.placement_health_by_tier() when the finer per-tier cut is wanted.
+--
+-- BEGIN ATOMIC, not AS $$ (G12 / GH #764). The inner aggregate aliases are
+-- n_rows/r_min/r_avg rather than rows/min_r/avg_r because RETURNS TABLE columns
+-- are OUT parameters and are in scope over an atomic body -- an inner alias
+-- sharing their name is a silent capture waiting to happen.
 DROP FUNCTION IF EXISTS ops.placement_health(double precision, double precision);
 DROP FUNCTION IF EXISTS ops.placement_health(double precision);
 CREATE OR REPLACE FUNCTION ops.placement_health(
@@ -57,25 +62,35 @@ RETURNS TABLE(cohort              text,
               worst_digits_lost   numeric,
               fp32_digits_left    numeric)
 LANGUAGE sql STABLE PARALLEL SAFE
-AS $$
-    SELECT CASE WHEN a.is_tier0 THEN 'tier0 (on spiral)' ELSE 'composed (centroid)' END,
-           a.rows, a.min_r, a.avg_r, a.off_sphere, a.unreliable,
-           round((100.0 * a.unreliable / NULLIF(a.rows, 0))::numeric, 4),
-           round((-log(10, GREATEST(a.min_r, 1e-300)))::numeric, 2),
-           round((7.22 + log(10, GREATEST(a.min_r, 1e-300)))::numeric, 2)
+BEGIN ATOMIC
+    SELECT CASE WHEN a.is_tier0 THEN 'tier0 (on spiral)'::text
+                ELSE 'composed (centroid)'::text END,
+           a.n_rows,
+           a.r_min,
+           a.r_avg,
+           a.n_off,
+           a.n_unrel,
+           round((100.0 * a.n_unrel / NULLIF(a.n_rows, 0))::numeric, 4),
+           -- log() has no (double, double) form -- only log(numeric, numeric) --
+           -- so the raw minimum is cast rather than reusing the ROUNDED r_min,
+           -- which would fold the cancellation figure to 6 decimal places before
+           -- taking its logarithm. BEGIN ATOMIC caught this at CREATE time; the
+           -- string body it replaced would have raised it at first call.
+           round(-log(10::numeric, GREATEST(a.r_min_raw, 1e-300)::numeric), 2),
+           round(7.22 + log(10::numeric, GREATEST(a.r_min_raw, 1e-300)::numeric), 2)
     FROM (
         SELECT (p.n_constituents = 0)                                      AS is_tier0,
-               count(*)                                                    AS rows,
-               round(min(p.radius_origin)::numeric, 6)                     AS min_r,
-               round(avg(p.radius_origin)::numeric, 6)                     AS avg_r,
-               count(*) FILTER (WHERE abs(p.radius_origin - 1.0) > 1e-9)   AS off_sphere,
-               count(*) FILTER (WHERE p.radius_origin < p_unreliable)      AS unreliable,
-               min(p.radius_origin)                                        AS min_r_raw
+               count(*)                                                    AS n_rows,
+               round(min(p.radius_origin)::numeric, 6)                     AS r_min,
+               round(avg(p.radius_origin)::numeric, 6)                     AS r_avg,
+               count(*) FILTER (WHERE abs(p.radius_origin - 1.0) > 1e-9)   AS n_off,
+               count(*) FILTER (WHERE p.radius_origin < p_unreliable)      AS n_unrel,
+               min(p.radius_origin)                                        AS r_min_raw
         FROM laplace.physicalities p
-        GROUP BY 1
+        GROUP BY (p.n_constituents = 0)
     ) a
-    ORDER BY a.is_tier0 DESC
-$$;
+    ORDER BY a.is_tier0 DESC;
+END;
 
 COMMENT ON FUNCTION ops.placement_health(double precision) IS
     'Exact placement confidence, tier0 vs composed, with the cancellation figure '
@@ -84,7 +99,8 @@ COMMENT ON FUNCTION ops.placement_health(double precision) IS
 
 -- ops.placement_health_by_tier — the finer per-tier cut. Needs the entities join,
 -- so it samples; use ops.placement_health() when the exact tier0/composed split
--- is enough.
+-- is enough. plpgsql, because TABLESAMPLE takes a literal rather than a
+-- parameter, so the percentage has to reach the parser through format().
 DROP FUNCTION IF EXISTS ops.placement_health_by_tier(double precision, double precision);
 CREATE OR REPLACE FUNCTION ops.placement_health_by_tier(
     p_sample_pct  double precision DEFAULT 2.0,
@@ -141,9 +157,9 @@ CREATE OR REPLACE FUNCTION ops.placement_unreliable(
     p_limit     integer          DEFAULT 50)
 RETURNS TABLE(entity_id bytea, tier smallint, radius double precision, label text)
 LANGUAGE sql STABLE PARALLEL SAFE
-AS $$
+BEGIN ATOMIC
     WITH picked AS (
-        SELECT p.entity_id, e.tier, p.radius_origin AS radius
+        SELECT p.entity_id AS eid, e.tier AS etier, p.radius_origin AS r
         FROM laplace.physicalities p
         JOIN laplace.entities e ON e.id = p.entity_id
         WHERE p.radius_origin < p_threshold
@@ -151,19 +167,19 @@ AS $$
         LIMIT p_limit
     ),
     ord AS (
-        SELECT entity_id, tier, radius,
-               row_number() OVER (ORDER BY radius, entity_id) AS k
+        SELECT picked.eid, picked.etier, picked.r,
+               row_number() OVER (ORDER BY picked.r, picked.eid) AS k
         FROM picked
     ),
     labs AS (
         SELECT converse.label_or_hex_batch(
-                   array_agg(entity_id ORDER BY radius, entity_id)) AS l
+                   array_agg(picked.eid ORDER BY picked.r, picked.eid)) AS l
         FROM picked
     )
-    SELECT o.entity_id, o.tier, o.radius, (labs.l)[o.k]
+    SELECT o.eid, o.etier, o.r, (labs.l)[o.k]
     FROM ord o CROSS JOIN labs
-    ORDER BY o.k
-$$;
+    ORDER BY o.k;
+END;
 
 COMMENT ON FUNCTION ops.placement_unreliable(double precision, integer) IS
     'Rows whose centroid is a poor summary of their trajectory. One batched '

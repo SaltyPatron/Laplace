@@ -26,6 +26,13 @@
 -- Each metric is evaluated ONCE, in the CTE, and reused for both `value` and
 -- `collides`. The prior revision computed every metric twice -- including
 -- Frechet, the expensive one -- by repeating the call in the collides column.
+--
+-- BEGIN ATOMIC, not AS $$ (G12 / GH #764). Two consequences visible below: the
+-- 4D metric functions are schema-qualified, because an atomic body resolves
+-- names at CREATE time and pins the OID rather than re-resolving through
+-- search_path per call; and every literal in the UNION carries an explicit cast,
+-- because the parsed body must match the declared return type exactly instead of
+-- coercing an `unknown` at first execution.
 DROP FUNCTION IF EXISTS ops.metric_ladder(bytea, bytea);
 CREATE OR REPLACE FUNCTION ops.metric_ladder(p_a bytea, p_b bytea)
 RETURNS TABLE(rung          text,
@@ -33,37 +40,38 @@ RETURNS TABLE(rung          text,
               collides      boolean,
               order_bearing boolean)
 LANGUAGE sql STABLE PARALLEL SAFE
-AS $$
+BEGIN ATOMIC
     WITH pt AS (
         -- one scan, both entities, pivoted; not six scalar subqueries
-        SELECT (array_agg(coord         ORDER BY ord))[1] AS ca,
-               (array_agg(coord         ORDER BY ord))[2] AS cb,
-               (array_agg(hilbert_index ORDER BY ord))[1] AS ha,
-               (array_agg(hilbert_index ORDER BY ord))[2] AS hb
+        SELECT (array_agg(s.coord         ORDER BY s.ord))[1] AS ca,
+               (array_agg(s.coord         ORDER BY s.ord))[2] AS cb,
+               (array_agg(s.hilbert_index ORDER BY s.ord))[1] AS ha,
+               (array_agg(s.hilbert_index ORDER BY s.ord))[2] AS hb
         FROM (SELECT p.coord, p.hilbert_index,
                      CASE WHEN p.entity_id = p_a THEN 1 ELSE 2 END AS ord
               FROM laplace.physicalities p
               WHERE p.entity_id IN (p_a, p_b)) s
     ),
     m AS (
-        SELECT pt.ca, pt.cb, pt.ha, pt.hb,
-               laplace_distance_4d(pt.ca, pt.cb)              AS d_coord,
-               laplace_hausdorff_4d(qa.curve, qb.curve)       AS d_haus,
-               laplace_frechet_4d(qa.curve, qb.curve)         AS d_fre
+        SELECT public.laplace_distance_4d(pt.ca, pt.cb)        AS d_coord,
+               pt.ha                                           AS ha,
+               pt.hb                                           AS hb,
+               public.laplace_hausdorff_4d(qa.curve, qb.curve)  AS d_haus,
+               public.laplace_frechet_4d(qa.curve, qb.curve)    AS d_fre
         FROM pt
         CROSS JOIN LATERAL (SELECT structural.entity_curve(p_a) AS curve) qa
         CROSS JOIN LATERAL (SELECT structural.entity_curve(p_b) AS curve) qb
     )
-    SELECT 'coord_distance', m.d_coord, m.d_coord = 0.0,  false FROM m
+    SELECT 'coord_distance'::text, m.d_coord, (m.d_coord = 0.0), false FROM m
     UNION ALL
-    SELECT 'hilbert',        NULL,      m.ha = m.hb,      false FROM m
+    SELECT 'hilbert'::text, NULL::double precision, (m.ha = m.hb), false FROM m
     UNION ALL
-    SELECT 'hausdorff',      m.d_haus,  m.d_haus = 0.0,   false FROM m
+    SELECT 'hausdorff'::text, m.d_haus, (m.d_haus = 0.0), false FROM m
     UNION ALL
-    SELECT 'frechet',        m.d_fre,   m.d_fre = 0.0,    true  FROM m
+    SELECT 'frechet'::text, m.d_fre, (m.d_fre = 0.0), true FROM m
     UNION ALL
-    SELECT 'merkle_id',      NULL,      p_a = p_b,        true
-$$;
+    SELECT 'merkle_id'::text, NULL::double precision, (p_a = p_b), true;
+END;
 
 COMMENT ON FUNCTION ops.metric_ladder(bytea, bytea) IS
     'All comparison rungs for two entities over REALIZED curves. Coord/Hilbert/'
@@ -78,6 +86,10 @@ RETURNS TABLE(rung          text,
               collides      boolean,
               order_bearing boolean)
 LANGUAGE sql STABLE PARALLEL SAFE
-AS $$
-    SELECT * FROM ops.metric_ladder(laplace.word_id(p_a), laplace.word_id(p_b))
-$$;
+BEGIN ATOMIC
+    SELECT l.rung, l.value, l.collides, l.order_bearing
+    FROM ops.metric_ladder(laplace.word_id(p_a), laplace.word_id(p_b)) l;
+END;
+
+COMMENT ON FUNCTION ops.metric_ladder_words(text, text) IS
+    'ops.metric_ladder addressed by surface rather than id.';
