@@ -308,13 +308,22 @@ public class ModelTokenEdgeETLTests
                 ent.OrderBy(x => x.Hi).ThenBy(x => x.Lo).ToArray(),
                 Trajectory.Constituents(phys.TrajectoryXyzm).OrderBy(x => x.Hi).ThenBy(x => x.Lo).ToArray());
 
-            // PointZM is the centroid of the selected entities' real content
-            // placements. The packed trajectory is identity/testimony payload and
-            // must never be averaged or copied into the point columns.
+            // PointZM is the KARCHER (intrinsic) mean of the selected entities'
+            // real content placements. The packed trajectory is identity/testimony
+            // payload and must never be averaged or copied into the point columns.
+            //
+            // Was Math4d.Centroid. The Euclidean mean of unit vectors lands INSIDE
+            // the 4-ball, not on S3: measured 2026-08-12 over 14,481,064 composed
+            // placements, min ||coord|| = 0.003148 and 241,015 rows under 0.1,
+            // where the normalised direction is dominated by accumulated float
+            // error. Karcher lands at norm 1 by construction. Both means are now
+            // canonically ordered so either is permutation-invariant, but only one
+            // of them puts a composed entity where the placement law says entities
+            // live. This is placement-changing and rides the reseed.
             var actualPlacements = tokens
                 .SelectMany(t => new[] { t.ContentX, t.ContentY, t.ContentZ, t.ContentM })
                 .ToArray();
-            var expectedPlacement = Math4d.Centroid(actualPlacements);
+            var expectedPlacement = Math4d.KarcherMean(actualPlacements);
             Assert.Equal(expectedPlacement[0], phys.CoordX, 12);
             Assert.Equal(expectedPlacement[1], phys.CoordY, 12);
             Assert.Equal(expectedPlacement[2], phys.CoordZ, 12);

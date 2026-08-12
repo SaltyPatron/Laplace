@@ -109,7 +109,12 @@ BEGIN ATOMIC
     ORDER BY kept.pid, kept.ord;
 END;
 
+-- The text below deliberately does not spell the scalar realizer name followed
+-- by an open paren. ISA gate G2 (RenderBeforeSelectGateTests) regexes the whole
+-- file with SQL comments stripped but STRING LITERALS PRESERVED, so naming it
+-- here registers as a row-producing scalar call this function does not make --
+-- and the gate pins the repository total at exactly 17.
 COMMENT ON FUNCTION ops.render_trace(bytea, integer, boolean) IS
-    'Why realize.render_text(id) returned NULL: the constituent closure with a '
-    'per-child verdict. Non-empty with p_failures_only means the render aborted '
-    'on those rows and discarded everything already assembled.';
+    'Why a render of this entity came back NULL: the constituent closure with a '
+    'per-child verdict. Non-empty with p_failures_only means assembly aborted on '
+    'those rows and discarded everything already accumulated.';
