@@ -686,7 +686,27 @@ static int emit_ast_node_physicalities(
                 }
             }
         }
-        if (m > 0 && child_ids) {
+        /* GH #1027 — the SAME packaging gate the main compose walk applies to
+         * push_phys (see `int packaging = !hash128_equals(&id, &st.comp_id[0])`
+         * and `if (m > 0 && child_ids && materialize_phys && !packaging)`).
+         *
+         * This function is the second implementation of that step: it runs on the
+         * INCREMENTAL path only — GrammarRowComposer.EnsureComposed calls
+         * laplace_grammar_compose_materialize_phys when it holds a probe result and
+         * a non-empty descent bitmap, i.e. composing against an already-populated
+         * substrate. The full-compose path takes the gated walk instead, which is
+         * why every unit test passed: none of them supply a descent bitmap.
+         *
+         * Without the gate, every non-root node of a composed RECORD — packaging by
+         * construction — got a placement while the entity loop correctly refused to
+         * mint it, and the attestation lane never saw it either. MEASURED on a fresh
+         * database, 4 minutes of OMW: 83,443 placements with no entity row, all
+         * type=Content, exactly 1:1, zero of 20,000 sampled appearing in any
+         * attestation as subject or object, and the rendered constituents were
+         * synset / ILI / frame identifier strings (00875329-n, 02587390-v). Scales
+         * linearly with corpus: one per record field. */
+        const int packaging = !hash128_equals(&id, &st->comp_id[0]);
+        if (m > 0 && child_ids && !packaging) {
             if (push_phys(r, id, st->comp_coord + idx * 4, &hb,
                           child_ids, child_flags, m) != 0) {
                 free(child_ids); free(child_flags);
