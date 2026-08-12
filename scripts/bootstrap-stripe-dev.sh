@@ -2,7 +2,23 @@
 
 set -euo pipefail
 
-ENV_DIR="${HOME}/.config/laplace"
+# THE OPERATOR'S home, not root's. setup-host.sh runs this under sudo, where $HOME
+# is /root — so this wrote /root/.config/laplace/stripe-dev.env and appended the
+# source line to /root/.zshrc, while the operator's own config sat untouched and the
+# key never reached the shell that needed it (2026-08-12).
+#
+# setup-host.sh already resolves this ONCE, at the only point where SUDO_USER is
+# still the human, and exports it as LAPLACE_OPERATOR — the same nested-sudo problem
+# its own comment documents for the bootstrap. Honour it here; fall back to
+# SUDO_USER, then to $HOME for a non-sudo invocation.
+_op="${LAPLACE_OPERATOR:-${SUDO_USER:-}}"
+if [ -n "$_op" ] && [ "$_op" != root ]; then
+    OP_HOME="$(getent passwd "$_op" | cut -d: -f6)"
+else
+    OP_HOME="$HOME"
+fi
+[ -n "$OP_HOME" ] || OP_HOME="$HOME"
+ENV_DIR="${OP_HOME}/.config/laplace"
 ENV_FILE="${ENV_DIR}/stripe-dev.env"
 DEFAULT_SUCCESS_URL="http://127.0.0.1:5187/billing/success"
 DEFAULT_CANCEL_URL="http://127.0.0.1:5187/billing/cancel"
@@ -98,6 +114,12 @@ mkdir -p "${ENV_DIR}"
 umask 077
 printf "%s\n" "${ENV_CONTENT}" > "${ENV_FILE}"
 chmod 600 "${ENV_FILE}"
+# Under sudo these are created by ROOT inside the operator's home, and mode 600
+# then makes them unreadable by the very account whose shell sources them. Hand
+# them back. No-op when not running as root.
+if [ "$(id -u)" -eq 0 ] && [ -n "${_op:-}" ] && [ "$_op" != root ]; then
+  chown "$_op:$(id -gn "$_op")" "${ENV_DIR}" "${ENV_FILE}"
+fi
 
 echo "Wrote ${ENV_FILE} (mode 600)."
 echo "Load now: source ${ENV_FILE}"
@@ -109,7 +131,7 @@ echo "  stripe listen --forward-to http://127.0.0.1:5187/v1/billing/webhooks/str
 
 auto_line="source ${ENV_FILE}"
 if [[ "${PERSIST_ZSH}" -eq 1 ]]; then
-  ZSHRC="${HOME}/.zshrc"
+  ZSHRC="${OP_HOME}/.zshrc"
   touch "${ZSHRC}"
   if ! grep -Fq "${auto_line}" "${ZSHRC}"; then
     printf "\n%s\n" "${auto_line}" >> "${ZSHRC}"
