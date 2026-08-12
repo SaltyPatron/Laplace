@@ -373,6 +373,116 @@ TEST(LaplaceCoreMath4d, KarcherDiffersFromEuclideanCentroid) {
     EXPECT_GT(math4d_angular_distance(k2, c2), 1e-6);
 }
 
+// --- constituent-reordering invariance -------------------------------------
+//
+// coord is defined as an ORDER-BLIND projection of the trajectory: cat/act/tac
+// share a placement by design, and order is recovered from the trajectory (or
+// the Merkle id), never from the coordinate. These gates pin how far that
+// order-blindness actually holds today.
+//
+// MEASURED 2026-08-12, six permutations of three tier-0 placements:
+//   math4d_centroid     -> 3 distinct bit-patterns  (order-dependent)
+//   math4d_karcher_mean -> 3 distinct bit-patterns  (order-dependent)
+//   karcher norm = 1 exactly; centroid norm = 0.0868 (deep inside the 4-ball)
+//   worst karcher ANGULAR spread across permutations = 0
+//
+// The mechanism is floating-point addition: commutative but not associative. A
+// left fold groups results by the FINAL addend, so swapping the first two terms
+// is bit-identical while regrouping is not. Karcher inherits this because its
+// initial estimate is an order-dependent Euclidean accumulation.
+//
+// Consequence for the placement law: coord is not reproducible under
+// constituent reordering, and switching the composer to Karcher fixes the
+// off-sphere radius WITHOUT fixing reproducibility. The remaining fix is a
+// canonical accumulation order (sort by child id, or Kahan/pairwise summation)
+// applied in math4d_centroid AND in the karcher seed loop.
+namespace {
+
+void PermutedInto(const double src[12], const int perm[3], double dst[12]) {
+    for (int i = 0; i < 3; ++i)
+        std::memcpy(dst + i * 4, src + perm[i] * 4, sizeof(double) * 4);
+}
+
+int DistinctBitPatterns(const double results[6][4]) {
+    int groups = 0;
+    bool seen[6] = {false, false, false, false, false, false};
+    for (int i = 0; i < 6; ++i) {
+        if (seen[i]) continue;
+        ++groups;
+        for (int j = i; j < 6; ++j)
+            if (std::memcmp(results[i], results[j], sizeof(double) * 4) == 0)
+                seen[j] = true;
+    }
+    return groups;
+}
+
+const int kPerms[6][3] = {{0,1,2},{1,0,2},{2,1,0},{1,2,0},{0,2,1},{2,0,1}};
+
+}  // namespace
+
+TEST(LaplaceCoreMath4d, CentroidIsCommutativeInLeadingPair) {
+    // Swapping the first two addends must be bit-identical: FP addition is
+    // commutative. This is the half of order-blindness that does hold.
+    double pts[12];
+    super_fibonacci_point(1114112, 12142, pts);
+    super_fibonacci_point(1114112, 12554, pts + 4);
+    super_fibonacci_point(1114112, 40000, pts + 8);
+
+    double swapped[12];
+    PermutedInto(pts, kPerms[1], swapped);  // {1,0,2}
+
+    double a[4], b[4];
+    math4d_centroid(pts, 3, a);
+    math4d_centroid(swapped, 3, b);
+    EXPECT_EQ(0, std::memcmp(a, b, sizeof(a)));
+}
+
+TEST(LaplaceCoreMath4d, CentroidIsPermutationInvariant) {
+    // Was 3 distinct bit-patterns until canonical accumulation landed
+    // 2026-08-12. coord is defined as an order-blind projection, so this is the
+    // gate that makes it true by construction rather than by luck.
+    double pts[12];
+    super_fibonacci_point(1114112, 12142, pts);
+    super_fibonacci_point(1114112, 12554, pts + 4);
+    super_fibonacci_point(1114112, 40000, pts + 8);
+
+    double out[6][4], buf[12];
+    for (int k = 0; k < 6; ++k) {
+        PermutedInto(pts, kPerms[k], buf);
+        math4d_centroid(buf, 3, out[k]);
+    }
+    EXPECT_EQ(1, DistinctBitPatterns(out))
+        << "centroid lost permutation invariance -- a constituent accumulation "
+           "is running in input order again";
+}
+
+TEST(LaplaceCoreMath4d, KarcherIsPermutationInvariantAndOnSphere) {
+    double pts[12];
+    super_fibonacci_point(1114112, 12142, pts);
+    super_fibonacci_point(1114112, 12554, pts + 4);
+    super_fibonacci_point(1114112, 40000, pts + 8);
+
+    double out[6][4], buf[12];
+    for (int k = 0; k < 6; ++k) {
+        PermutedInto(pts, kPerms[k], buf);
+        math4d_karcher_mean(buf, 3, nullptr, kKarcherTol, kKarcherMaxIters, out[k]);
+    }
+
+    // Karcher lands on the sphere -- the thing the Euclidean centroid does not.
+    for (auto &o : out) {
+        ExpectOnSphere(o);
+        EXPECT_NEAR(math4d_angular_distance(out[0], o), 0.0, 1e-12);
+    }
+
+    // And, since 2026-08-12, is bit-reproducible under constituent reordering:
+    // all three accumulations (weight total, seed estimate, per-iteration
+    // tangent mean) now run in a canonical order. Before that fix this returned
+    // 3 distinct bit patterns, grouped by the final addend.
+    EXPECT_EQ(1, DistinctBitPatterns(out))
+        << "karcher lost permutation invariance -- a constituent accumulation "
+           "is running in input order again";
+}
+
 TEST(LaplaceCoreMath4d, FrechetEmptyTrajectoryReturnsNaN) {
     const double p[4] = {0, 0, 0, 0};
     EXPECT_TRUE(std::isnan(math4d_frechet(p, 1, nullptr, 0)));

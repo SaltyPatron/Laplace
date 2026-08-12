@@ -1,0 +1,170 @@
+-- ops.placement_health — placement confidence by tier, from radius_origin.
+--
+-- radius_origin is the resultant length of the constituent unit vectors: the
+-- standard concentration statistic from directional statistics. It is already a
+-- STORED generated column on physicalities and was, until this function, never
+-- read as a predicate anywhere in the extension (physicalities_radius_btree was
+-- dropped 2026-07-28 having taken 0 scans against 99M rows). It is the only
+-- signal the geometry has for "this coordinate is a poor summary of its
+-- trajectory".
+--
+-- Reading of the value:
+--   r = 1      constituents coincide, or tier 0 (Super-Fibonacci, on the sphere)
+--   r -> 1     tight cluster; the centroid is a faithful bucket
+--   r -> 0     dispersed constituents; the Euclidean mean nearly cancels and the
+--              normalised DIRECTION is dominated by accumulated float error
+--
+-- Below p_unreliable the coordinate should be treated as absent rather than
+-- wrong: the geometry cannot otherwise abstain, since every placement is a
+-- valid-looking 4-vector whether or not it means anything.
+--
+-- MEASURED 2026-08-12 (foundation + OMW), EXACT over 15,595,304 physicalities:
+--
+--   tier 0    1,114,240 rows   min 1.000000   avg 1.000000   0% under 0.1
+--   composed 14,481,064 rows   min 0.003148   avg 0.453797   1.664% under 0.1
+--                                                            1,184 rows under 0.02
+--
+-- The composed ladder does not inherit Super-Fibonacci's low discrepancy:
+-- composed entities are centroids and are not on the spiral.
+--
+-- WHY THE CANCELLATION COLUMN EXISTS. Constituents are unit vectors, so
+-- -log10(r) is the number of decimal digits destroyed by cancellation in
+-- forming the mean. At the observed minimum r = 0.003148 that is ~2.5 digits.
+-- fp64 carries ~15.95 decimal digits and so has ~13.5 left; fp32 carries ~7.22
+-- and has ~4.7 left, and less than that for the 1,184 rows under 0.02. This is
+-- the measurement that decides whether a code path may be narrowed to fp32, and
+-- it is a WIDTH question entirely separate from determinism: a CPU fp32
+-- reduction in fixed order is bit-reproducible, while a GPU reduction is not at
+-- any width (CUDA defaults to -fmad=true and block reduction order is
+-- undefined). Width governs the placement path; order governs anything feeding
+-- a hash, coord, hilbert_index or trajectory.
+--
+-- Split is on n_constituents rather than entities.tier: it is on physicalities
+-- already, so the tier-0/composed cut needs no join and the whole table
+-- aggregates in ~1.3 s. radius_origin is STORED, so nothing is recomputed.
+-- Use ops.placement_health_by_tier() when the finer per-tier cut is wanted.
+DROP FUNCTION IF EXISTS ops.placement_health(double precision, double precision);
+DROP FUNCTION IF EXISTS ops.placement_health(double precision);
+CREATE OR REPLACE FUNCTION ops.placement_health(
+    p_unreliable double precision DEFAULT 0.1)
+RETURNS TABLE(cohort              text,
+              rows                bigint,
+              min_r               numeric,
+              avg_r               numeric,
+              off_sphere          bigint,
+              unreliable          bigint,
+              pct_unreliable      numeric,
+              worst_digits_lost   numeric,
+              fp32_digits_left    numeric)
+LANGUAGE sql STABLE PARALLEL SAFE
+AS $$
+    SELECT CASE WHEN a.is_tier0 THEN 'tier0 (on spiral)' ELSE 'composed (centroid)' END,
+           a.rows, a.min_r, a.avg_r, a.off_sphere, a.unreliable,
+           round((100.0 * a.unreliable / NULLIF(a.rows, 0))::numeric, 4),
+           round((-log(10, GREATEST(a.min_r, 1e-300)))::numeric, 2),
+           round((7.22 + log(10, GREATEST(a.min_r, 1e-300)))::numeric, 2)
+    FROM (
+        SELECT (p.n_constituents = 0)                                      AS is_tier0,
+               count(*)                                                    AS rows,
+               round(min(p.radius_origin)::numeric, 6)                     AS min_r,
+               round(avg(p.radius_origin)::numeric, 6)                     AS avg_r,
+               count(*) FILTER (WHERE abs(p.radius_origin - 1.0) > 1e-9)   AS off_sphere,
+               count(*) FILTER (WHERE p.radius_origin < p_unreliable)      AS unreliable,
+               min(p.radius_origin)                                        AS min_r_raw
+        FROM laplace.physicalities p
+        GROUP BY 1
+    ) a
+    ORDER BY a.is_tier0 DESC
+$$;
+
+COMMENT ON FUNCTION ops.placement_health(double precision) IS
+    'Exact placement confidence, tier0 vs composed, with the cancellation figure '
+    'that decides whether a path may be narrowed to fp32.';
+
+
+-- ops.placement_health_by_tier — the finer per-tier cut. Needs the entities join,
+-- so it samples; use ops.placement_health() when the exact tier0/composed split
+-- is enough.
+DROP FUNCTION IF EXISTS ops.placement_health_by_tier(double precision, double precision);
+CREATE OR REPLACE FUNCTION ops.placement_health_by_tier(
+    p_sample_pct  double precision DEFAULT 2.0,
+    p_unreliable  double precision DEFAULT 0.1)
+RETURNS TABLE(tier            smallint,
+              sampled         bigint,
+              min_r           numeric,
+              avg_r           numeric,
+              max_r           numeric,
+              off_sphere      bigint,
+              unreliable      bigint,
+              pct_unreliable  numeric)
+LANGUAGE plpgsql STABLE PARALLEL SAFE
+AS $$
+BEGIN
+    -- counts aggregated once in the inner query; the percentage is derived
+    -- outside rather than re-running the FILTER a second time.
+    RETURN QUERY EXECUTE format($fmt$
+        SELECT a.tier, a.sampled, a.min_r, a.avg_r, a.max_r, a.off_sphere,
+               a.unreliable,
+               round((100.0 * a.unreliable / NULLIF(a.sampled, 0))::numeric, 2)
+        FROM (
+            SELECT e.tier,
+                   count(*)                                                  AS sampled,
+                   round(min(p.radius_origin)::numeric, 6)                    AS min_r,
+                   round(avg(p.radius_origin)::numeric, 6)                    AS avg_r,
+                   round(max(p.radius_origin)::numeric, 6)                    AS max_r,
+                   count(*) FILTER (WHERE abs(p.radius_origin - 1.0) > 1e-9)  AS off_sphere,
+                   count(*) FILTER (WHERE p.radius_origin < %L)               AS unreliable
+            FROM laplace.physicalities p TABLESAMPLE SYSTEM (%L)
+            JOIN laplace.entities e ON e.id = p.entity_id
+            GROUP BY e.tier
+        ) a
+        ORDER BY a.tier
+    $fmt$, p_unreliable, p_sample_pct);
+END;
+$$;
+
+COMMENT ON FUNCTION ops.placement_health_by_tier(double precision, double precision) IS
+    'Sampled placement confidence broken out per tier. Tier 0 must be exactly 1.0; '
+    'low r above tier 0 means the centroid is a poor summary of its trajectory.';
+
+
+-- ops.placement_unreliable — the offending rows themselves, so the signal is
+-- actionable rather than merely observable.
+--
+-- Labels are resolved by ONE call to converse.label_or_hex_batch over the
+-- already-LIMITed id array, not by p_limit scalar calls in the projection.
+-- Measured cost of the scalar form: ~42 ms per label (4,587 labels = 195 s), so
+-- at the default limit the difference is roughly one call against 50.
+DROP FUNCTION IF EXISTS ops.placement_unreliable(double precision, integer);
+CREATE OR REPLACE FUNCTION ops.placement_unreliable(
+    p_threshold double precision DEFAULT 0.1,
+    p_limit     integer          DEFAULT 50)
+RETURNS TABLE(entity_id bytea, tier smallint, radius double precision, label text)
+LANGUAGE sql STABLE PARALLEL SAFE
+AS $$
+    WITH picked AS (
+        SELECT p.entity_id, e.tier, p.radius_origin AS radius
+        FROM laplace.physicalities p
+        JOIN laplace.entities e ON e.id = p.entity_id
+        WHERE p.radius_origin < p_threshold
+        ORDER BY p.radius_origin, p.entity_id
+        LIMIT p_limit
+    ),
+    ord AS (
+        SELECT entity_id, tier, radius,
+               row_number() OVER (ORDER BY radius, entity_id) AS k
+        FROM picked
+    ),
+    labs AS (
+        SELECT converse.label_or_hex_batch(
+                   array_agg(entity_id ORDER BY radius, entity_id)) AS l
+        FROM picked
+    )
+    SELECT o.entity_id, o.tier, o.radius, (labs.l)[o.k]
+    FROM ord o CROSS JOIN labs
+    ORDER BY o.k
+$$;
+
+COMMENT ON FUNCTION ops.placement_unreliable(double precision, integer) IS
+    'Rows whose centroid is a poor summary of their trajectory. One batched '
+    'label resolution over the LIMITed set.';
