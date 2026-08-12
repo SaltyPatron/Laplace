@@ -103,4 +103,149 @@ public sealed class OmwPlacementEntityParityTests(ITestOutputHelper output)
         Assert.True(rows > 0, "no OMW records read; the assertion would be vacuous");
         Assert.Equal(0, orphanPlacements);
     }
+
+    /// THE WITNESS STAGE — the layer neither test above exercises.
+    ///
+    /// FullBuilderDrainKeepsPlacementsUnderEntities reported staged_ent=0
+    /// staged_phys=0, because it never ran OMWGrammarWitness.WalkRow. That is
+    /// what drives ContentTierSpine into builder.ContentStage — the native
+    /// IntentStage — which is the SECOND dedup universe the apply COPYs beside
+    /// the managed arrays. Managed rows dedup on _seenEntities/_seenPhysicalities;
+    /// staged rows dedup on intent_stage_witness_*. Nothing reconciles the two.
+    ///
+    /// So this runs the real witness over real rows and totals BOTH universes.
+    /// It is the last layer above the database, and the database is where the
+    /// surplus was measured (1,713,165 placements against 1,460,249 entities,
+    /// ~17%, scaling linearly with input).
+    [Fact]
+    public void WitnessDrainKeepsPlacementsUnderEntities()
+    {
+        if (!Directory.Exists(WnsDir)) { output.WriteLine($"skipped: {WnsDir} absent"); return; }
+
+        CodepointPerfcache.LoadDefault();
+        // The witness resolves a language id per row, so the ISO-639 table has to
+        // be loaded or WalkRow throws before it emits anything.
+        LanguageReference.EnsureLoaded(TestIngestPaths.Iso639);
+        var omw = EtlManifest.Get("omw");
+        string? tab = OMWTabFiles.EnumerateTabFiles(WnsDir, langs: null)
+            .OrderBy(p => p).FirstOrDefault();
+        Assert.NotNull(tab);
+
+        // Same construction the ingest uses: OMWDecomposer.CreateHandlerForFile
+        // builds `new OMWGrammarWitness(OmwIngestSupport.LangFromLabel(fileLabel))`.
+        var witness = new OMWGrammarWitness(OMWTabFiles.FileLang(tab!));
+        var builder = new SubstrateChangeBuilder(omw.SourceId, "g1027-witness");
+        long rows = 0;
+
+        var stream = GrammarFileRecordStream.ForSource(
+            tab!, omw, line => line.Length > 0 && line[0] != (byte)'#');
+
+        foreach (var record in stream.RecordsAsync(default).ToBlockingEnumerable())
+        {
+            if (rows >= 2000) break;
+            var ast = record.Ast;
+            try
+            {
+                var geb = new GrammarEntityBuilder(
+                    record.LineUtf8, ast, omw.SourceId, omw.Modality.GrammarId);
+                var (ents, phys, atts, root) = geb.Build(1.0);
+                foreach (var e in ents) builder.AddEntity(e);
+                foreach (var p in phys) builder.AddPhysicality(p);
+                foreach (var a in atts) builder.AddAttestation(a);
+
+                witness.WalkRow(
+                    new GrammarComposeContext(record.LineUtf8, ast, root, null),
+                    new RowContext((int)rows, 1),
+                    builder);
+                rows++;
+            }
+            finally { ast.Dispose(); }
+        }
+
+        var change = builder.Build();
+        int stagedEnt = 0, stagedPhys = 0;
+        if (!change.IntentStages.IsDefault)
+        {
+            foreach (var st in change.IntentStages)
+            {
+                stagedEnt += st.EntityCount;
+                stagedPhys += st.PhysicalityCount;
+            }
+        }
+
+        long ent = change.Entities.Length + stagedEnt;
+        long ph = change.Physicalities.Length + stagedPhys;
+        output.WriteLine(
+            $"rows={rows} managed_ent={change.Entities.Length} managed_phys={change.Physicalities.Length} "
+            + $"staged_ent={stagedEnt} staged_phys={stagedPhys} "
+            + $"TOTAL_ent={ent} TOTAL_phys={ph} surplus={ph - ent}");
+
+        Assert.True(rows > 0, "no OMW records read; the assertion would be vacuous");
+        Assert.True(ph <= ent, $"{ph - ent} placement(s) beyond entities after the witness drain");
+    }
+
+    /// The build-level parity above holds, so the surplus enters DOWNSTREAM of
+    /// Build. SubstrateChange carries rows from TWO separate dedup universes: the
+    /// managed ImmutableArrays (deduped by _seenEntities/_seenPhysicalities) and
+    /// the native IntentStages (deduped by intent_stage_witness_*). The apply
+    /// COPYs both. This measures that boundary the same way — real OMW rows, real
+    /// witness, real builder, no database.
+    [Fact]
+    public void FullBuilderDrainKeepsPlacementsUnderEntities()
+    {
+        if (!Directory.Exists(WnsDir))
+        {
+            output.WriteLine($"skipped: {WnsDir} not present");
+            return;
+        }
+
+        CodepointPerfcache.LoadDefault();
+        var omw = EtlManifest.Get("omw");
+        string? tab = OMWTabFiles.EnumerateTabFiles(WnsDir, langs: null)
+            .OrderBy(p => p).FirstOrDefault();
+        Assert.NotNull(tab);
+
+        var builder = new SubstrateChangeBuilder(omw.SourceId, "g1027-probe");
+        long rows = 0;
+
+        var stream = GrammarFileRecordStream.ForSource(
+            tab!, omw, line => line.Length > 0 && line[0] != (byte)'#');
+
+        foreach (var record in stream.RecordsAsync(default).ToBlockingEnumerable())
+        {
+            if (rows >= 2000) break;
+            rows++;
+            var ast = record.Ast;
+            try
+            {
+                var geb = new GrammarEntityBuilder(
+                    record.LineUtf8, ast, omw.SourceId, omw.Modality.GrammarId);
+                var (ents, phys, atts, _) = geb.Build(1.0);
+                foreach (var e in ents) builder.AddEntity(e);
+                foreach (var p in phys) builder.AddPhysicality(p);
+                foreach (var a in atts) builder.AddAttestation(a);
+            }
+            finally { ast.Dispose(); }
+        }
+
+        int stagedEnt = 0, stagedPhys = 0;
+        var change = builder.Build();
+        foreach (var st in change.IntentStages.IsDefault ? [] : change.IntentStages)
+        {
+            stagedEnt += st.EntityCount;
+            stagedPhys += st.PhysicalityCount;
+        }
+
+        long ent = change.Entities.Length + stagedEnt;
+        long ph = change.Physicalities.Length + stagedPhys;
+
+        output.WriteLine(
+            $"rows={rows} managed_ent={change.Entities.Length} managed_phys={change.Physicalities.Length} "
+            + $"staged_ent={stagedEnt} staged_phys={stagedPhys} "
+            + $"TOTAL_ent={ent} TOTAL_phys={ph} surplus={ph - ent}");
+
+        Assert.True(rows > 0, "no OMW records read; the assertion would be vacuous");
+        Assert.True(ph <= ent,
+            $"{ph - ent} placement(s) beyond entities after the full builder drain");
+    }
 }
