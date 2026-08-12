@@ -743,7 +743,12 @@ int laplace_relation_in_family(const hash128_t* type_id, const char* family_root
         "        IF cardinality(missing) = 0 THEN",
         "            CONTINUE;  -- nothing to do: no lock, no scan",
         "        END IF;",
-        "        rids := ARRAY(SELECT relation_type_id(h) FROM unnest(missing) AS h);",
+        # laplace.-qualified, NOT bare. efd479de ("repair 17 dangling cross-schema
+        # calls; pg_regress 1/20 -> 20/20") fixed this by hand in the GENERATED
+        # file and left the generator emitting the unqualified form, so every
+        # regeneration silently reverted it. The seed body has no SET search_path,
+        # so a bare name resolves through whatever the caller happens to have.
+        "        rids := ARRAY(SELECT laplace.relation_type_id(h) FROM unnest(missing) AS h);",
         "        dflt := tbl || '_rdefault';",
         "        has_default := to_regclass(current_schema() || '.' || dflt) IS NOT NULL;",
         "        -- Detach FIRST so each CREATE ... PARTITION OF skips the default's",
@@ -753,7 +758,7 @@ int laplace_relation_in_family(const hash128_t* type_id, const char* family_root
         "            EXECUTE format('ALTER TABLE %I DETACH PARTITION %I', tbl, dflt);",
         "        END IF;",
         "        FOREACH r IN ARRAY missing LOOP",
-        "            rid := relation_type_id(r);",
+        "            rid := laplace.relation_type_id(r);",  # see note above
         "            part := tbl || '_r_' || lower(r);",
         "            EXECUTE format('CREATE TABLE %I PARTITION OF %I FOR VALUES IN (%L)"
         " PARTITION BY HASH (subject_id)', part, tbl, rid);",
