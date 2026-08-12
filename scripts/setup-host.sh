@@ -191,6 +191,24 @@ layer1_build_install_extensions() {
         bash scripts/pipeline.sh build
         bash scripts/pipeline.sh install
     )
+    # This runs pipeline.sh AS ROOT, so every artifact it writes into build/ is
+    # root-owned and the operator cannot rebuild afterwards. Measured 2026-08-12:
+    # 31 root-owned entries under build/, and cmake died on
+    #   file failed to open for writing (Permission denied):
+    #     build/engine/core/tests/laplace_core_tests[1]_include.cmake
+    # from gtest_discover_tests -- a CMake error that says nothing about
+    # ownership. layer1_clean_foreign_build_artifacts already repairs
+    # app/*/{obj,bin} for exactly this reason and stops at the managed tree;
+    # build/ has the same problem from the same cause and was never covered.
+    # Same remedy: shared, not seized -- the operator and $RUNNER_USER both build
+    # here, so group-write plus setgid keeps new files in the shared group.
+    if [ -d "$REPO_DIR/build" ] \
+       && [ -n "$(sudo find "$REPO_DIR/build" \( ! -user "$RUNNER_USER" -o ! -perm -g+w \) -print -quit 2>/dev/null)" ]; then
+        sudo chown -R "$RUNNER_USER:$RUNNER_USER" "$REPO_DIR/build"
+        sudo chmod -R g+w "$REPO_DIR/build"
+        sudo find "$REPO_DIR/build" -type d -exec chmod g+s {} +
+        yellow "  - re-owned + group-shared build/ ($RUNNER_USER:$RUNNER_USER, g+w, setgid)"
+    fi
     green "✓ extensions installed at ${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
 }
 
