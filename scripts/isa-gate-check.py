@@ -92,27 +92,28 @@ CEILINGS = {
     #      accumulates at ingest, no backfill path" law, and both reachable from
     #      the MCP op tool via api()'s unfiltered pg_proc scan. These are
     #      deletions, tracked in #989 — a write-path hazard, not scaffolding.
-    #   4  converse/geometry — tiered, label_or_hex_batch, locale, cluster_batch.
+    #   3  converse/geometry — tiered, locale, cluster_batch.
     #      Audited one by one 2026-08-10. NONE are safe deletions; "zero textual
     #      caller" turned out to mean "written ahead of its caller" in every case:
     #        converse.tiered            deliberately off the hot path, and chat.sql.in
     #                                   says so in 14 lines at :441. Hangs are fixed
     #                                   (ceef97d); it stays off because content
     #                                   regressed to topic echo. Open as #878.
-    #        converse.label_or_hex_batch the BATCH replacement for converse.label_or_hex,
-    #                                   which production C# calls PER ROW from 20 sites
-    #                                   across NpgsqlSubstrateReads and SubstrateTools.
-    #                                   Added 2026-08-09 by "standardize deployed MCP and
-    #                                   batch realization" and never wired. Deleting it
-    #                                   would delete the fix and keep the N+1 — the same
-    #                                   shape evidence_receipt's header records as
-    #                                   ~3,129 renders to return 3 rows.
+    #        converse.label_or_hex_batch WIRED 2026-08-12 and removed from this baseline.
+    #                                   It had sat here since 2026-08-09 as the BATCH
+    #                                   replacement for converse.label_or_hex with no
+    #                                   caller, while production C# called the scalar form
+    #                                   PER ROW from 20 sites. ops.placement_unreliable
+    #                                   and ops.render_trace now call it. The 20 C# sites
+    #                                   are still N+1 and are NOT covered by this entry's
+    #                                   removal — measured cost of the scalar form is
+    #                                   ~42 ms per label (4,587 labels = 195 s).
     #        structural.locale          2026-06-30 import, touched since only by schema
     #        structural.cluster_batch   migrations. Operator-diagnostic shaped, and
     #                                   api() is an unfiltered pg_proc scan (#989), so
     #                                   "no textual caller" cannot prove unused while
     #                                   any MCP op call reaches them. Not provably dead.
-    "g4_dead_canonical": 16,
+    "g4_dead_canonical": 15,
     # Measured 2026-08-05, landing with its violations enumerated per W6's trap
     # note ("a gate that goes red on merge-day teaches people to ignore it").
     # 29 occurrences across 10 sites, all pre-existing: model_factor (6 names),

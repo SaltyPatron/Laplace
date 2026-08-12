@@ -890,7 +890,6 @@
       "extension/laplace_substrate/sql/functions/chess/chess_time_pressure_outcome.sql.in::time_pressure_outcome": 1,
       "extension/laplace_substrate/sql/functions/chess/laplace_chess_position_ready.sql.in::position_ready": 1,
       "extension/laplace_substrate/sql/functions/converse/converse_tiered.sql.in::tiered": 1,
-      "extension/laplace_substrate/sql/functions/converse/label_batch.sql.in::label_or_hex_batch": 1,
       "extension/laplace_substrate/sql/functions/converse/structural_locale.sql.in::locale": 1,
       "extension/laplace_substrate/sql/functions/geometry/structural_cluster_batch.sql.in::cluster_batch": 1,
       "extension/laplace_substrate/sql/functions/inference/laplace_decay.sql.in::decay": 1,

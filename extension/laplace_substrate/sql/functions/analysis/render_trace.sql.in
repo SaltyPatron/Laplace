@@ -28,6 +28,13 @@
 -- only on rows the cheap entity join could not already classify, and labels
 -- resolve through ONE converse.label_or_hex_batch rather than N scalar calls
 -- (measured 2026-08-12: the scalar form is ~42 ms per call).
+--
+-- BEGIN ATOMIC, not AS $$ (G12 / GH #764). Codepoints render through to_hex
+-- alone -- G14 bans lower()/upper()/initcap() anywhere on the read path, and
+-- the conventional uppercase of "U+00E9" is not worth a case fold that is
+-- Latin-shaped and silently a no-op for most of the codespace. Internal aliases
+-- avoid the RETURNS TABLE column names, which are OUT parameters in scope over
+-- an atomic body.
 DROP FUNCTION IF EXISTS ops.render_trace(bytea, integer, boolean);
 CREATE OR REPLACE FUNCTION ops.render_trace(
     p_entity        bytea,
@@ -43,63 +50,64 @@ RETURNS TABLE(
     verdict    text
 )
 LANGUAGE sql STABLE PARALLEL SAFE
-AS $$
+BEGIN ATOMIC
     WITH clo AS (
-        SELECT c.parent_id, c.ordinal, c.child_id
+        SELECT c.parent_id AS pid, c.ordinal AS ord, c.child_id AS cid
         FROM realize.constituents_closure(ARRAY[p_entity], p_max_depth) c
     ),
     -- Cheap pass first: an id with no entities row is an orphan and needs no
     -- further probing. An id that carries a trajectory renders by recursion.
     cheap AS (
-        SELECT c.parent_id, c.ordinal, c.child_id, e.tier,
+        SELECT clo.pid, clo.ord, clo.cid, e.tier AS etier,
                (e.id IS NOT NULL) AS has_entity,
                EXISTS (SELECT 1 FROM laplace.v_word_points w
-                       WHERE w.id = c.child_id AND w.trajectory IS NOT NULL) AS has_traj
-        FROM clo c
-        LEFT JOIN laplace.entities e ON e.id = c.child_id
+                       WHERE w.id = clo.cid AND w.trajectory IS NOT NULL) AS has_traj
+        FROM clo
+        LEFT JOIN laplace.entities e ON e.id = clo.cid
     ),
     -- codepoint_for_id only for rows still undecided: real entity, no trajectory.
     resolved AS (
-        SELECT k.*,
-               CASE WHEN k.has_entity AND NOT k.has_traj
-                    THEN realize.codepoint_for_id(k.child_id)
-               END AS codepoint
-        FROM cheap k
+        SELECT cheap.pid, cheap.ord, cheap.cid, cheap.etier,
+               cheap.has_entity, cheap.has_traj,
+               CASE WHEN cheap.has_entity AND NOT cheap.has_traj
+                    THEN realize.codepoint_for_id(cheap.cid)
+               END AS cp
+        FROM cheap
     ),
     verdicted AS (
-        SELECT r.parent_id, r.ordinal, r.child_id, r.tier,
+        SELECT r.pid, r.ord, r.cid, r.etier,
                CASE
                  WHEN NOT r.has_entity
-                   THEN 'ORPHAN: physicality exists, no laplace.entities row'
-                 WHEN r.has_traj      THEN 'ok: composed, renders by recursion'
-                 WHEN r.codepoint IS NOT NULL
-                   THEN 'ok: codepoint U+' || upper(to_hex(r.codepoint))
-                 ELSE 'UNRENDERABLE: entity exists, no trajectory, no codepoint'
-               END AS verdict
+                   THEN 'ORPHAN: physicality exists, no laplace.entities row'::text
+                 WHEN r.has_traj
+                   THEN 'ok: composed, renders by recursion'::text
+                 WHEN r.cp IS NOT NULL
+                   THEN ('ok: codepoint U+' || to_hex(r.cp))::text
+                 ELSE 'UNRENDERABLE: entity exists, no trajectory, no codepoint'::text
+               END AS vd
         FROM resolved r
     ),
     kept AS (
-        SELECT v.* FROM verdicted v
-        WHERE NOT p_failures_only OR v.verdict NOT LIKE 'ok:%'
+        SELECT verdicted.pid, verdicted.ord, verdicted.cid,
+               verdicted.etier, verdicted.vd
+        FROM verdicted
+        WHERE NOT p_failures_only OR verdicted.vd NOT LIKE 'ok:%'
     ),
-    -- One batched label call for the surviving rows, positional.
-    ids AS (
-        SELECT array_agg(DISTINCT k.child_id) AS arr FROM kept k
+    -- One batched label call over the surviving ids, joined back positionally.
+    bag AS (
+        SELECT array_agg(DISTINCT kept.cid) AS arr FROM kept
     ),
-    labels AS (
-        SELECT u.id, l.lbl
-        FROM ids
-        CROSS JOIN LATERAL unnest(ids.arr) WITH ORDINALITY AS u(id, n)
-        CROSS JOIN LATERAL (
-            SELECT (converse.label_or_hex_batch(ids.arr))[u.n] AS lbl
-        ) l
-        WHERE ids.arr IS NOT NULL
+    labs AS (
+        SELECT u.id AS lid, (l.res)[u.n] AS lbl
+        FROM bag
+        CROSS JOIN LATERAL (SELECT converse.label_or_hex_batch(bag.arr) AS res) l
+        CROSS JOIN LATERAL unnest(bag.arr) WITH ORDINALITY AS u(id, n)
+        WHERE bag.arr IS NOT NULL
     )
-    SELECT k.parent_id, k.ordinal, k.child_id, k.tier, lb.lbl, k.verdict
-    FROM kept k
-    LEFT JOIN labels lb ON lb.id = k.child_id
-    ORDER BY k.parent_id, k.ordinal
-$$;
+    SELECT kept.pid, kept.ord, kept.cid, kept.etier, labs.lbl, kept.vd
+    FROM kept LEFT JOIN labs ON labs.lid = kept.cid
+    ORDER BY kept.pid, kept.ord;
+END;
 
 COMMENT ON FUNCTION ops.render_trace(bytea, integer, boolean) IS
     'Why realize.render_text(id) returned NULL: the constituent closure with a '
