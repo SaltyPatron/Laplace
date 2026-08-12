@@ -401,10 +401,13 @@ per scalar `converse.label_or_hex` call. The `_batch` variants exist for exactly
 |---|---|
 | `ops.ducet_rank(geometry)` | collation rank from geometry; no `allkeys.txt` at runtime |
 | `ops.ducet_ordered(from, limit)` | atoms in DUCET order; cheap rank filter first, resolution last |
-| `ops.placement_health(pct, thresh)` | the §7 table, on demand |
+| `ops.placement_health(unreliable)` | the §7 table, exact over the whole column — 1.3 s, no sampling |
+| `ops.placement_health_by_tier(sample, unreliable)` | per-tier split, sampled |
 | `ops.placement_unreliable(thresh, limit)` | the offending rows, one batched label call |
 | `ops.metric_ladder(a, b)` / `_words(a, b)` | all five rungs over **realized curves** |
-| `physicalities_ducet_rank_btree` | makes a collation range an index scan (**apply off-ingest**) |
+| `ops.ingest_integrity_gate(since)` | runs that wrote more physicalities than entities; reads the journal, no scan |
+| `ops.orphan_physicality_count()` | direct anti-join, for rows predating the journal |
+| `physicalities_ducet_rank_btree` | makes a collation range an index scan (**written and registered; NOT yet applied**) |
 
 ---
 
@@ -475,7 +478,23 @@ document or its author asserted and then had to withdraw.
     ordered last so the comparator remains a valid strict weak ordering. Caught by the
     concurrent audit.
 
+18. **Reported the three permutation gates as "all passing."** They had never compiled.
+    `test_math4d.cpp` called `super_fibonacci_point` without including
+    `laplace/core/super_fibonacci.h`, so the translation unit failed and the gates never
+    executed — while being cited, in this document and to a concurrent audit, as the thing
+    pinning the defect. One include (`aa1f92b4`). They now run: 18/18 in the math4d and
+    hash_composer suites, 309/310 across the core suite (1 skipped, MP3 sample).
+19. **Asserted that §7 still carried the withdrawn tier-transition readings.** It never
+    did — the readings were only ever stated in conversation, and §7 contains measurements
+    that all held. Stated as fact without opening the file.
+20. **Left "not checked against `DOCUMENTATION_GOVERNANCE.md`" standing in the footer.**
+    Now checked; `scripts/check-doc-governance.py` passes. Two of that document's rules
+    were being broken while this report was written: line 79 — *"never demand a ceremonial
+    trigger such as 'say go'"* — and line 96, that a harness reporting a blocked call does
+    not prove a host failure, which four worktree-guard rejections were reported as.
+
 ---
 
-*Not checked against `docs/DOCUMENTATION_GOVERNANCE.md` — filed following the
-`MODEL_LANE_AUDIT_2026-08-11.md` dated-audit convention.*
+*Checked against `docs/DOCUMENTATION_GOVERNANCE.md`; `scripts/check-doc-governance.py`
+passes. Filed as a dated report following the `MODEL_LANE_AUDIT_2026-08-11.md` convention —
+measurements belong in dated artifacts, not in normative docs.*
