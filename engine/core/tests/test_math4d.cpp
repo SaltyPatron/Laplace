@@ -8,6 +8,7 @@
 #endif
 
 #include "laplace/core/math4d.h"
+#include "laplace/core/super_fibonacci.h"
 
 namespace {
 constexpr double kEpsilon = 1e-12;
