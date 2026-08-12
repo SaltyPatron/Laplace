@@ -13,7 +13,8 @@ inferences I did not confirm in code — treat them as leads, not facts.
 Question asked: would Neo4j (provenance) or a managed ANN vector store (vectors)
 be better/faster/more robust than the current Postgres substrate?
 
-*The vector store is named in the question and not in this document.*
+*The vector store is referred to only generically here — no vendor or library*
+*name for it appears anywhere in this document.*
 *`.github/workflows/laplace.yml` step "Scan for unflagged banned terms" fails the*
 *build on any occurrence of an ANN-library or vendor-DNN-kernel name outside*
 *`CLAUDE.md` and `.claude/agents/conventional-ai-skeptic.md`, and it exits with the*

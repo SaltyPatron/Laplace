@@ -37,11 +37,11 @@ function statusClass(status: string): string {
  * The ingest journal — the gate CI/CD waits on.
  *
  * This is a read of `ops.ingest_runs`, which is the same row a pipeline polls.
- * Forcing a run closed is `ops.ingest_run_close`, which exists in the catalog
- * but cannot be called from here: POST /v1/op binds a read-only data source
- * (SubstrateClient.InvokeOpAsync), so every write op in the catalog is
- * unreachable over HTTP. The action is shown disabled with the equivalent
- * command rather than hidden, so the gap is visible instead of implied.
+ * Forcing a run closed is `ops.ingest_run_close` — the one write op on
+ * POST /v1/op's allow-list (InstalledOpInvoker.WritableOps), so unlike every
+ * other catalog write it is callable from here, behind a two-step confirm.
+ * The equivalent SQL is still offered for copy so an operator can run the
+ * close out-of-band instead.
  */
 export function IngestJournal() {
   const { tenant } = useAppStore();

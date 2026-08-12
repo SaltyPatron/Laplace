@@ -108,8 +108,8 @@ static int laplace_pt_cmp(const void* a, const void* b) {
 
 #define LAPLACE_PT_STACK 64
 
-/* Fills `slots` with the constituents in canonical order. Returns the array to
- * use, which is `stackbuf` for small n, a malloc'd block for large n, or NULL if
+/* Sorts the constituents into canonical order. Returns the array to use, which
+ * is `stackbuf` for small n, a malloc'd block for large n, or NULL if
  * allocation failed (callers then fall back to input order: the result stays
  * correct, it only loses reproducibility). Free with laplace_pts_release. */
 static laplace_pt_t* laplace_pts_canonical(const double* points, size_t n_points,

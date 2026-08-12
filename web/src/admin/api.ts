@@ -41,10 +41,11 @@ export interface OpResult<T> {
  * Call an installed substrate operation by name.
  *
  * `POST /v1/op` resolves the name against `ops.api()` and refuses anything
- * outside it, so this is a named call and never SQL text. Note the endpoint
- * binds a read-only data source (SubstrateClient.InvokeOpAsync), so operations
- * that write — `ops.ingest_run_close` among them — are in the catalog but not
- * invokable here.
+ * outside it, so this is a named call and never SQL text. The endpoint binds a
+ * read-only data source (SubstrateClient.InvokeOpAsync) for every op EXCEPT
+ * those on the write allow-list (InstalledOpInvoker.WritableOps), which get a
+ * writable connection — see `closeIngestRun` below for the one op currently on
+ * that list. Every other catalog write fails read-only.
  */
 export function callOp<T = Record<string, unknown>>(
   name: string,

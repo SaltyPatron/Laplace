@@ -4,7 +4,8 @@ import { useAppStore } from '../store';
 import { callOp, listOps, type OpSignature } from './api';
 import styles from './Admin.module.css';
 
-/** Signatures that mutate — the catalog holds them, /v1/op cannot run them. */
+/** Signatures that mutate — badged, because /v1/op refuses them read-only
+ * unless allow-listed (InstalledOpInvoker.WritableOps). */
 const WRITE_HINT = /_close|_deposit|_refresh|_set|_apply|_delete|_insert|_update|_reset/i;
 
 /**
