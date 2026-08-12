@@ -167,7 +167,7 @@ layer0_5_build_deps() {
     # all 311 submodules when the deps moved to the shared cache. It exited 2 on the
     # missing file, so this layer failed at exactly the point CI did. Provisioning
     # the cache is bootstrap-laplace-runner.sh's job (bootstrap_external_pins),
-    # driven by /opt/laplace/external/PINS.tsv.
+    # driven by $LAPLACE_EXTERNAL/PINS.tsv.
     bash "$REPO_DIR/scripts/build-system-deps.sh"
 }
 

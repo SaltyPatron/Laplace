@@ -1360,8 +1360,11 @@ bootstrap_pg_bounce_sudoers() {
 }
 
 bootstrap_external_dirs() {
-    say "Ensure /opt/laplace/external/ + per-dep install destinations + engine install destinations"
-    install -d -m 2775 -o "$RUNNER_USER" -g "$RUNNER_GROUP" /opt/laplace/external
+    say "Ensure $LAPLACE_EXTERNAL/ + per-dep install destinations + engine install destinations"
+    # $LAPLACE_EXTERNAL, not a hardcoded /opt/laplace/external. Creating the latter
+    # after the cache moved left an empty directory that looked like a valid cache —
+    # and bootstrap_external_pins, then still hardcoded, cloned 311 repos into it.
+    install -d -m 2775 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "$LAPLACE_EXTERNAL"
     for dep in tree-sitter geos proj gdal pgsql-18; do
         install -d -m 2775 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "/opt/laplace/$dep"
     done
