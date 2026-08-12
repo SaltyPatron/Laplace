@@ -125,6 +125,52 @@ TEST(LaplaceSynthesisArchTemplate, AbsentKvHeadsDefaultsToHeadCount) {
     arch_template_free(t);
 }
 
+// GH #1033 — compute_substrate_gram's sparse SB fold must be a function of the
+// EDGE SET, not of the caller's traversal order.
+//
+// Construction is deliberately adversarial rather than incidental: every edge
+// targets row 0 so all four products land in the same accumulator, and the
+// weights are chosen so that summation order decides the result under IEEE-754.
+// 1e-16 is below half an ulp of 1.0 (~1.11e-16), so 1.0 + 1e-16 + 1e-16 absorbs
+// both small terms and leaves exactly 1.0, while -1.0 + 1.0 + 1e-16 + 1e-16
+// cancels first and retains them. Feed the same four edges in two orders and an
+// order-dependent fold returns two different doubles.
+//
+// This test FAILS if the canonical sort in compute_substrate_gram is removed —
+// verified by reverting the sort locally before committing.
+TEST(LaplaceSynthesisArchTemplate, SubstrateGramIsEdgeOrderInvariant) {
+    constexpr std::size_t kVocab = 4, kDim = 1;
+    const double token_basis[kVocab * kDim] = {1.0, 1.0, 1.0, 1.0};
+    const double per_token[kVocab]          = {0.0, 0.0, 0.0, 0.0};
+
+    // Same set, two traversals.
+    const int    rowsA[4] = {0, 0, 0, 0};
+    const int    colsA[4] = {1, 2, 3, 0};
+    const double valsA[4] = {1.0, 1e-16, 1e-16, -1.0};
+
+    const int    rowsB[4] = {0, 0, 0, 0};
+    const int    colsB[4] = {0, 3, 2, 1};
+    const double valsB[4] = {-1.0, 1e-16, 1e-16, 1.0};
+
+    double unaryA[kDim * kDim] = {0.0}, binaryA[kDim * kDim] = {0.0};
+    double unaryB[kDim * kDim] = {0.0}, binaryB[kDim * kDim] = {0.0};
+
+    int rcA = compute_substrate_gram(token_basis, per_token, kVocab, kDim,
+                                     rowsA, colsA, valsA, 4, unaryA, binaryA);
+    if (rcA == -2) GTEST_SKIP() << "built without MKL; compute_substrate_gram is a no-op";
+    ASSERT_EQ(rcA, 0);
+
+    int rcB = compute_substrate_gram(token_basis, per_token, kVocab, kDim,
+                                     rowsB, colsB, valsB, 4, unaryB, binaryB);
+    ASSERT_EQ(rcB, 0);
+
+    // Bitwise, not near: the whole point is reproducibility, and this feeds a
+    // Gram matrix that feeds a decomposition.
+    EXPECT_EQ(binaryA[0], binaryB[0])
+        << "binary_gram depends on edge traversal order: "
+        << binaryA[0] << " vs " << binaryB[0];
+}
+
 TEST(LaplaceSynthesisArchTemplate, CapTooSmallReturnsCount) {
     arch_template_t* t = arch_template_load("llama");
     ASSERT_NE(t, nullptr);
