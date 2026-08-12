@@ -149,6 +149,71 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
                     NpgsqlDbType = NpgsqlDbType.Text,
                 });
             });
+
+        WarnIfPlacementsExceedEntities(sourceName, result);
+    }
+
+    /// <summary>
+    /// EVERY PLACEMENT NEEDS AN ENTITY, and this row already held the proof.
+    ///
+    /// physicalities.entity_id has no foreign key — only NOT NULL and an
+    /// octet_length CHECK — so a run may write a placement for an entity it never
+    /// declares and nothing objects. The two counts sat in this very UPDATE, one
+    /// column apart, and were never compared.
+    ///
+    /// MEASURED 2026-08-12: 899,179 physicalities in the substrate referencing an
+    /// entity id with no entity row, all type=Content, all composed (avg 30
+    /// constituents), and participating in ZERO attestations — inert placements
+    /// pointing at nothing. The journal had recorded the split per run all along:
+    /// SemLinkDecomposer 7,060 entities against 11,626 physicalities (+4,566),
+    /// OMWDecomposer 5,111,969 against 6,006,582 (+894,613). Those two sum to
+    /// exactly 899,179. FrameNet, MapNet and WordFrameNet came out balanced.
+    ///
+    /// Warn rather than throw: the run's rows are already committed by the time
+    /// this executes, so failing here would report a completed ingest as failed
+    /// and tell the operator nothing they can act on. The point is that the next
+    /// occurrence is loud on the first run instead of found by hand-joining two
+    /// tables months later. GH #1027.
+    ///
+    /// A surplus of ENTITIES is normal and not reported — entities COPY before
+    /// physicalities, so an interrupted or in-flight run legitimately shows one.
+    /// </summary>
+    private void WarnIfPlacementsExceedEntities(string sourceName, IngestRunResult result)
+    {
+        long delta = result.PhysicalitiesInserted - result.EntitiesInserted;
+        if (delta == 0) return;
+
+        // Console.Error, matching INGEST_RUN_JOURNAL_WRITE_FAILED above: this class
+        // takes no logger, and ingest logs are scraped for these tokens.
+        if (delta > 0)
+        {
+            Console.Error.WriteLine(
+                $"INGEST_PLACEMENT_SURPLUS source={sourceName} run={_runId} "
+                + $"entities={result.EntitiesInserted} physicalities={result.PhysicalitiesInserted} "
+                + $"surplus={delta} — this run wrote {delta} placement(s) for entities it never "
+                + "declared. physicalities.entity_id has no FK, so they are dangling and invisible "
+                + "to the database. See GH #1027.");
+            return;
+        }
+
+        // The other direction is equally a fault, and was previously not reported at
+        // all. An entity IS composed content: every constituent codepoint carries a
+        // coordinate, so 'C', 'A' and 'T' each have one and therefore 'CAT' has one.
+        // No class of entity legitimately lacks a placement — an entity with none was
+        // minted from a hashed string rather than composed from the DAG (GH #1038,
+        // measured 2026-08-12: 10,293 such rows, all reporting zero constituents).
+        //
+        // The one benign reading is timing, not design: entities COPY before
+        // physicalities within an apply, so a run interrupted between the two phases
+        // ends with a real entity surplus and nothing wrong. The message names that
+        // explicitly instead of asserting a defect the counts cannot distinguish.
+        Console.Error.WriteLine(
+            $"INGEST_ENTITY_SURPLUS source={sourceName} run={_runId} "
+            + $"entities={result.EntitiesInserted} physicalities={result.PhysicalitiesInserted} "
+            + $"surplus={-delta} — this run declared {-delta} entit(ies) it never placed. "
+            + "Benign if the run was interrupted between the entity and physicality COPY "
+            + "phases; otherwise these entities were minted outside the compose DAG and "
+            + "have no coordinate. See GH #1038.");
     }
 
     public void OnRunFailed(string sourceName, string status, string error)
