@@ -355,6 +355,22 @@ int arch_template_materialize_tensor(const arch_template_t*  tmpl,
     return 0;
 }
 
+namespace {
+
+/// Total order over doubles, for canonical edge ordering (GH #1033).
+/// Numeric rather than memcmp so it is endianness-independent; separates
+/// -0.0 from +0.0 and sorts NaN last so std::sort receives a strict weak
+/// ordering. Same discipline as laplace_dbl_cmp in engine/core/src/math4d.c.
+inline bool dbl_lt(double a, double b) {
+    const bool an = std::isnan(a), bn = std::isnan(b);
+    if (an || bn) return !an && bn;
+    if (a < b) return true;
+    if (b < a) return false;
+    return std::signbit(a) && !std::signbit(b);
+}
+
+}  // namespace
+
 extern "C"
 int compute_substrate_gram(
     const double* token_basis,
@@ -386,15 +402,41 @@ int compute_substrate_gram(
                      E_scaled.data(), D,
                 0.0, unary_gram, D);
 
+    // GH #1033 — canonical accumulation order.
+    //
+    // The fold below is floating-point addition, which is not associative: the
+    // SAME edge set delivered in a different traversal order produced a
+    // bit-different SB, and SB feeds binary_gram, which feeds a decomposition.
+    // Nothing upstream promises an edge order (qk_rows/qk_cols/qk_vals arrive
+    // in whatever order the caller assembled them), so the result was a
+    // function of the caller's iteration rather than of the graph.
+    //
+    // Ordering the surviving edges by (row, col, weight) makes SB a function of
+    // the edge SET. Cost is one O(nnz) index vector plus an O(nnz log nnz)
+    // sort, paid once against a V-deep DGEMM. Same defect class already fixed
+    // in math4d_centroid; out-of-range edges are dropped BEFORE the sort so the
+    // ordering never depends on rows that are discarded anyway.
     std::vector<double> SB(vocab * basis_dim, 0.0);
     if (qk_rows && qk_cols && qk_vals) {
+        std::vector<std::size_t> order;
+        order.reserve(nnz);
         for (std::size_t e = 0; e < nnz; ++e) {
             int r = qk_rows[e], c = qk_cols[e];
             if (r < 0 || c < 0 || (std::size_t)r >= vocab || (std::size_t)c >= vocab)
                 continue;
-            double w = qk_vals[e];
-            const double* Ec = token_basis + (std::size_t)c * basis_dim;
-            double*       Br = SB.data()   + (std::size_t)r * basis_dim;
+            order.push_back(e);
+        }
+        std::sort(order.begin(), order.end(),
+                  [&](std::size_t a, std::size_t b) {
+                      if (qk_rows[a] != qk_rows[b]) return qk_rows[a] < qk_rows[b];
+                      if (qk_cols[a] != qk_cols[b]) return qk_cols[a] < qk_cols[b];
+                      return dbl_lt(qk_vals[a], qk_vals[b]);
+                  });
+        for (std::size_t k = 0; k < order.size(); ++k) {
+            const std::size_t e = order[k];
+            const double  w  = qk_vals[e];
+            const double* Ec = token_basis + (std::size_t)qk_cols[e] * basis_dim;
+            double*       Br = SB.data()   + (std::size_t)qk_rows[e] * basis_dim;
             for (std::size_t d = 0; d < basis_dim; ++d)
                 Br[d] += w * Ec[d];
         }
