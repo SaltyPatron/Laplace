@@ -517,3 +517,80 @@ TEST(LaplaceCoreMath4d, HausdorffDeterministicAcrossRuns) {
     const double b = math4d_hausdorff(p, 4, q, 3);
     EXPECT_DOUBLE_EQ(a, b);
 }
+
+namespace {
+
+// PERMUTATION INVARIANCE. Floating-point addition is not associative, so a left
+// fold over constituents makes a composed placement depend on arrival order —
+// and content addressing requires it not to. Before the canonical order, six
+// permutations of three points produced three distinct bit patterns, grouped by
+// the final addend. Absorbed by Hilbert quantisation downstream, so nothing
+// caught it.
+//
+// Asserts BIT equality, not EXPECT_NEAR: near-equality is exactly the property
+// that let this hide for months.
+TEST(Math4dCanonical, CentroidIsBitIdenticalUnderPermutation) {
+    const double a[4] = { 0.1, 0.2, 0.30000000000000004, 0.7 };
+    const double b[4] = { 0.7, 1e-17, 0.3, 0.2 };
+    const double c[4] = { 1e-17, 0.7, 0.1, 0.30000000000000004 };
+    const double* perms[6][3] = {
+        {a,b,c},{a,c,b},{b,a,c},{b,c,a},{c,a,b},{c,b,a}
+    };
+    double ref[4];
+    for (int k = 0; k < 6; ++k) {
+        double pts[12];
+        for (int i = 0; i < 3; ++i) std::memcpy(pts + i * 4, perms[k][i], sizeof(double) * 4);
+        double out[4];
+        math4d_centroid(pts, 3, out);
+        if (k == 0) { std::memcpy(ref, out, sizeof(ref)); continue; }
+        for (int j = 0; j < 4; ++j)
+            EXPECT_EQ(std::memcmp(&ref[j], &out[j], sizeof(double)), 0)
+                << "permutation " << k << " component " << j
+                << " differs in bits: " << ref[j] << " vs " << out[j];
+    }
+}
+
+TEST(Math4dCanonical, KarcherMeanIsBitIdenticalUnderPermutation) {
+    const double a[4] = { 0.1, 0.2, 0.30000000000000004, 0.7 };
+    const double b[4] = { 0.7, 1e-17, 0.3, 0.2 };
+    const double c[4] = { 1e-17, 0.7, 0.1, 0.30000000000000004 };
+    const double wa = 0.3, wb = 0.45, wc = 0.25;
+    const double* perms[6][3] = {
+        {a,b,c},{a,c,b},{b,a,c},{b,c,a},{c,a,b},{c,b,a}
+    };
+    const double wperm[6][3] = {
+        {wa,wb,wc},{wa,wc,wb},{wb,wa,wc},{wb,wc,wa},{wc,wa,wb},{wc,wb,wa}
+    };
+    double ref[4];
+    for (int k = 0; k < 6; ++k) {
+        double pts[12];
+        for (int i = 0; i < 3; ++i) std::memcpy(pts + i * 4, perms[k][i], sizeof(double) * 4);
+        double out[4];
+        math4d_karcher_mean(pts, 3, wperm[k], 1e-12, 64, out);
+        if (k == 0) { std::memcpy(ref, out, sizeof(ref)); continue; }
+        for (int j = 0; j < 4; ++j)
+            EXPECT_EQ(std::memcmp(&ref[j], &out[j], sizeof(double)), 0)
+                << "permutation " << k << " component " << j;
+    }
+}
+
+// Weight must travel WITH its point through the sort, or a reordered pair
+// silently swaps weights and the mean moves.
+TEST(Math4dCanonical, KarcherMeanWeightsTrackTheirPoints) {
+    const double a[4] = { 1.0, 0.0, 0.0, 0.0 };
+    const double b[4] = { 0.0, 1.0, 0.0, 0.0 };
+    double fwd[8], rev[8];
+    std::memcpy(fwd,     a, sizeof(double) * 4); std::memcpy(fwd + 4, b, sizeof(double) * 4);
+    std::memcpy(rev,     b, sizeof(double) * 4); std::memcpy(rev + 4, a, sizeof(double) * 4);
+    const double wf[2] = { 0.9, 0.1 };
+    const double wr[2] = { 0.1, 0.9 };   // same pairing, reversed order
+    double of[4], orv[4];
+    math4d_karcher_mean(fwd, 2, wf, 1e-12, 64, of);
+    math4d_karcher_mean(rev, 2, wr, 1e-12, 64, orv);
+    for (int j = 0; j < 4; ++j)
+        EXPECT_EQ(std::memcmp(&of[j], &orv[j], sizeof(double)), 0)
+            << "component " << j << ": weights did not follow their points";
+    EXPECT_GT(of[0], of[1]) << "the 0.9-weighted point must dominate";
+}
+
+}  // namespace
