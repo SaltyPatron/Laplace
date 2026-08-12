@@ -59,11 +59,12 @@ BEGIN
     -- a 73s top_synset per token. See converse.sql.in for the full ledger.
     SELECT y.tok, y.synset_id INTO topic_word, syn
     FROM converse.prompt_coherence(p_prompt) y
-    ORDER BY y.specificity DESC NULLS LAST,
+    ORDER BY (COALESCE(y.specificity, 0)
+                       * GREATEST(COALESCE(y.denote_mu, 0), 1)) DESC,
+             y.specificity DESC NULLS LAST,
              y.rel_mass DESC NULLS LAST,
              y.peers DESC,
              y.ord DESC,
-             y.denote_mu DESC NULLS LAST,
              y.synset_id
     LIMIT 1;
     IF syn IS NULL THEN
