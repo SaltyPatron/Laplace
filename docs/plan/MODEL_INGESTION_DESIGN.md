@@ -1,7 +1,7 @@
 # Model ingestion — the design
 
 Status: design. Every constraint below traces to a measurement in
-`docs/MODEL_LANE_AUDIT_2026-08-11.md`; nothing here is argued from a code comment.
+`docs/archive/reports/MODEL_LANE_AUDIT_2026-08-11.md`; nothing here is argued from a code comment.
 
 ## The one-line statement
 

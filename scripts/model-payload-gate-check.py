@@ -13,7 +13,7 @@ nothing failed. `LAPLACE_MODEL_PLANES=factors` deposits a [V x dim] float field
 per circuit slice; TinyLlama's 22 layers projected to 210 GB and filled the
 cluster volume before anything complained. The projection across the local model
 library is 23.1 TB from 0.24 TB of checkpoints, and Qwen3-Coder-480B alone
-projects to 57.8 TB. See docs/MODEL_LANE_AUDIT_2026-08-11.md for the derivation
+projects to 57.8 TB. See docs/archive/reports/MODEL_LANE_AUDIT_2026-08-11.md for the derivation
 and every verification command.
 
 WHY A BASELINE RATHER THAN ZERO: the correct steady state is ~0 payload bytes per
@@ -143,10 +143,19 @@ def main(argv: list[str]) -> int:
     total_bytes = sum(r["payload_bytes"] for r in rows)
     total_verts = sum(r["vertices"] for r in rows)
 
+    violations = []
+    baseline = None
+    if BASELINE.is_file():
+        try:
+            baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            violations.append(f"baseline {BASELINE.name} unreadable: {exc} — "
+                              f"fix or regenerate it with --write-baseline")
+
     if args.write_baseline:
         BASELINE.write_text(json.dumps(
             {"note": "Measured payload per model source. Shrink-only; see "
-                     "docs/MODEL_LANE_AUDIT_2026-08-11.md",
+                     "docs/archive/reports/MODEL_LANE_AUDIT_2026-08-11.md",
              "total_payload_bytes": total_bytes,
              "total_vertices": total_verts,
              "per_source": {r["source"]: r["payload_bytes"] for r in rows}},
@@ -162,7 +171,44 @@ def main(argv: list[str]) -> int:
     print(f"{'TOTAL':34} {sum(r['rows'] for r in rows):8,} "
           f"{gb(total_bytes):>12} {total_verts:16,}")
 
-    violations = []
+    # The shrink-only contract proper: the recorded baseline is the effective
+    # ceiling, and it may only be moved by an explicit --write-baseline (a
+    # visible, reviewable edit to the JSON), never by data growth. The
+    # CEILING_* constants stay as the outer bound so a re-baseline upward past
+    # them is itself a violation — the isa-gate-check.py arrangement.
+    if baseline is None:
+        if not violations:
+            print(f"\nmodel-payload-gate: NOTE — no baseline recorded "
+                  f"({BASELINE.name}); enforcing hard ceilings only. Run "
+                  f"--write-baseline against the substrate to arm the "
+                  f"shrink-only contract.")
+    else:
+        base_bytes = int(baseline.get("total_payload_bytes", 0))
+        base_verts = int(baseline.get("total_vertices", 0))
+        per_source = baseline.get("per_source", {})
+        if base_bytes > CEILING_TOTAL_BYTES:
+            violations.append(
+                f"baseline total {gb(base_bytes)} exceeds the hard ceiling "
+                f"{gb(CEILING_TOTAL_BYTES)} — re-baselining upward requires "
+                f"editing this file's ceiling, not just the JSON")
+        if total_bytes > base_bytes:
+            violations.append(
+                f"total payload {gb(total_bytes)} grew past the recorded "
+                f"baseline {gb(base_bytes)} — the model lane deposited new "
+                f"geometry payload; shrink-only")
+        if total_verts > base_verts:
+            violations.append(
+                f"total vertices {total_verts:,} grew past the recorded "
+                f"baseline {base_verts:,}")
+        for r in rows:
+            allowed = int(per_source.get(r["source"], 0))
+            if r["payload_bytes"] > allowed:
+                violations.append(
+                    f"source {r['source']} deposited {gb(r['payload_bytes'])} "
+                    f"against a recorded baseline of {gb(allowed)} — "
+                    + ("a NEW source may deposit zero payload bytes"
+                       if r["source"] not in per_source else "shrink-only"))
+
     if total_bytes > CEILING_TOTAL_BYTES:
         violations.append(
             f"total payload {gb(total_bytes)} exceeds ceiling "

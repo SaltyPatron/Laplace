@@ -175,8 +175,11 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
     /// occurrence is loud on the first run instead of found by hand-joining two
     /// tables months later. GH #1027.
     ///
-    /// A surplus of ENTITIES is normal and not reported — entities COPY before
-    /// physicalities, so an interrupted or in-flight run legitimately shows one.
+    /// A surplus of ENTITIES is reported too (INGEST_ENTITY_SURPLUS), with the
+    /// one benign reading named in the message: entities COPY before
+    /// physicalities, so a run interrupted between the two phases legitimately
+    /// shows one. Any other cause is entities minted outside the compose DAG
+    /// with no coordinate. GH #1038.
     /// </summary>
     private void WarnIfPlacementsExceedEntities(string sourceName, IngestRunResult result)
     {
@@ -190,9 +193,10 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
             Console.Error.WriteLine(
                 $"INGEST_PLACEMENT_SURPLUS source={sourceName} run={_runId} "
                 + $"entities={result.EntitiesInserted} physicalities={result.PhysicalitiesInserted} "
-                + $"surplus={delta} — this run wrote {delta} placement(s) for entities it never "
-                + "declared. physicalities.entity_id has no FK, so they are dangling and invisible "
-                + "to the database. See GH #1027.");
+                + $"surplus={delta} — this run inserted {delta} more placement(s) than entities. "
+                + "That can be legitimate (placements added to entities declared by an earlier "
+                + "run), but physicalities.entity_id has no FK, so any placement whose entity was "
+                + "never declared is dangling and invisible to the database. See GH #1027.");
             return;
         }
 
@@ -210,7 +214,7 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
         Console.Error.WriteLine(
             $"INGEST_ENTITY_SURPLUS source={sourceName} run={_runId} "
             + $"entities={result.EntitiesInserted} physicalities={result.PhysicalitiesInserted} "
-            + $"surplus={-delta} — this run declared {-delta} entit(ies) it never placed. "
+            + $"surplus={-delta} — this run declared {-delta} entities it never placed. "
             + "Benign if the run was interrupted between the entity and physicality COPY "
             + "phases; otherwise these entities were minted outside the compose DAG and "
             + "have no coordinate. See GH #1038.");
