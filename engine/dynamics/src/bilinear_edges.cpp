@@ -68,15 +68,22 @@ int project_embedding(const float* pts, std::size_t n, std::size_t d,
 {
     if (!pts || !W || !out || n == 0 || d == 0 || r == 0) return -1;
 #ifdef LAPLACE_HAS_MKL
-    std::vector<double> P((std::size_t)n * d), Wd((std::size_t)r * d);
-    for (std::size_t i = 0; i < (std::size_t)n * d; ++i) P[i]  = (double)pts[i];
-    for (std::size_t i = 0; i < (std::size_t)r * d; ++i) Wd[i] = (double)W[i];
+    // SGEMM on the inputs as they arrive. This widened BOTH operands into heap
+    // doubles (n*d + r*d elements) and called DGEMM — manufacturing mantissa
+    // bits that fp32 arguments never carried, then paying half CPU throughput
+    // to multiply them (measured 2026-08-12: 0.252 vs 0.434 TFLOP/s). Only the
+    // n*r result is widened now, and the operands are passed through untouched.
+    // GH #1023. Output stays double* so the ABI and every LibraryImport are
+    // unchanged; the wider fp64->fp32 question is GH #1024.
+    std::vector<float> C((std::size_t)n * r);
 
-    cblas_dgemm(
+    cblas_sgemm(
         CblasRowMajor, CblasNoTrans, CblasTrans,
         (MKL_INT)n, (MKL_INT)r, (MKL_INT)d,
-        1.0, P.data(), (MKL_INT)d, Wd.data(), (MKL_INT)d,
-        0.0, out, (MKL_INT)r);
+        1.0f, pts, (MKL_INT)d, W, (MKL_INT)d,
+        0.0f, C.data(), (MKL_INT)r);
+
+    for (std::size_t i = 0; i < (std::size_t)n * r; ++i) out[i] = (double)C[i];
     return 0;
 #else
     (void)pts; (void)W; (void)out;
@@ -90,6 +97,10 @@ int project_embedding_d(const double* pts, std::size_t n, std::size_t d,
 {
     if (!pts || !W || !out || n == 0 || d == 0 || r == 0) return -1;
 #ifdef LAPLACE_HAS_MKL
+    // pts is genuinely double here, so this stays DGEMM — but W arrives as
+    // float and was widened into a heap temporary for no reason other than
+    // matching the other operand. MKL has no mixed-precision GEMM, so the
+    // widening is unavoidable; keeping it explicit and local. GH #1023.
     std::vector<double> Wd((std::size_t)r * d);
     for (std::size_t i = 0; i < (std::size_t)r * d; ++i) Wd[i] = (double)W[i];
 

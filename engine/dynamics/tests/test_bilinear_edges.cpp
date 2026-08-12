@@ -111,21 +111,56 @@ TEST(BilinearEdges, BadArgs) {
 }
 
 TEST(ProjectEmbedding, FloatAndDoubleSrcAgree) {
-    
+
     const size_t n = 2, d = 3, r = 2;
     std::vector<float> pts  = { 1.0f, 0.0f, 0.5f,   0.0f, 1.0f, -0.5f };
     std::vector<float> W    = { 2.0f, 1.0f, 0.0f,   0.0f, 1.0f,  2.0f };
-    
+
     std::vector<double> ptsD(pts.begin(), pts.end());
 
     std::vector<double> outF(n * r), outD(n * r);
     ASSERT_EQ(0, project_embedding  (pts.data(),  n, d, W.data(), r, outF.data()));
     ASSERT_EQ(0, project_embedding_d(ptsD.data(), n, d, W.data(), r, outD.data()));
 
+    // Every value above is a dyadic rational, so both paths are exact and this
+    // 1e-12 holds even though project_embedding is SGEMM and project_embedding_d
+    // is DGEMM. Kept deliberately: it pins that the fp32 path is exact when the
+    // arithmetic is. See NonDyadicInputsAgreeToFp32 for the general invariant.
     for (size_t i = 0; i < n * r; ++i)
         EXPECT_NEAR(outF[i], outD[i], 1e-12);
     EXPECT_NEAR(2.0, outF[0], 1e-5);
     EXPECT_NEAR(1.0, outF[1], 1e-5);
     EXPECT_NEAR(1.0, outF[2], 1e-5);
     EXPECT_NEAR(0.0, outF[3], 1e-5);
+}
+
+// The fixture above agrees to 1e-12 because its inputs are exactly
+// representable, not because the two paths compute identically -- it would pass
+// against a broken implementation just as happily. project_embedding takes
+// `const float*` and now SGEMMs them (GH #1023); project_embedding_d takes
+// `const double*` and DGEMMs. Once the inputs are NOT dyadic the two disagree at
+// fp32 epsilon, which is correct and must be asserted as such, or the next
+// person reads 1e-12 as a guarantee the code does not make.
+TEST(ProjectEmbedding, NonDyadicInputsAgreeToFp32) {
+    const size_t n = 4, d = 8, r = 3;
+    std::vector<float> pts(n * d), W(r * d);
+    // 1/3, 1/7, pi/10 ... nothing here lands on a binary boundary.
+    for (size_t i = 0; i < pts.size(); ++i)
+        pts[i] = (float)(((i % 7) + 1) / 3.0 - ((i % 5) + 1) / 7.0);
+    for (size_t i = 0; i < W.size(); ++i)
+        W[i] = (float)(0.3141592653589793 * ((i % 11) + 1) - ((i % 3) + 1) / 9.0);
+
+    std::vector<double> ptsD(pts.begin(), pts.end());
+    std::vector<double> outF(n * r), outD(n * r);
+    ASSERT_EQ(0, project_embedding  (pts.data(),  n, d, W.data(), r, outF.data()));
+    ASSERT_EQ(0, project_embedding_d(ptsD.data(), n, d, W.data(), r, outD.data()));
+
+    // fp32 has ~1.2e-7 relative precision; d=8 accumulation cannot outrun that
+    // by more than a small constant. Tight enough to catch a real defect, loose
+    // enough to state the truth about the precision actually in play.
+    for (size_t i = 0; i < n * r; ++i) {
+        const double scale = std::max(1.0, std::fabs(outD[i]));
+        EXPECT_NEAR(outF[i], outD[i], 1e-5 * scale)
+            << "index " << i << " fp32=" << outF[i] << " fp64=" << outD[i];
+    }
 }
