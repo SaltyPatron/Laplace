@@ -78,6 +78,54 @@ pattern this function already sets.
 | `model_math.cpp:286,291` | `double*` | Same provenance. |
 | `tensor_decompose.cpp:30` `LAPACKE_sgesdd` | `float` | Already single. Correct, and the best GPU candidate in the tree — SVD is iterative and stays resident. |
 
+## CORRECTION 2026-08-12 — this audit was incomplete
+
+Everything below the fold reasoned from **input provenance**: sources are
+fp16/bf16, therefore fp32 loses nothing. That bounds what you START with and
+says nothing about what SURVIVES accumulation. The omitted term is
+**cancellation**, and it decides the placement path.
+
+Measured on the reseeded database:
+
+| | rows | min ‖coord‖ | <0.1 | <0.02 |
+|---|---|---|---|---|
+| tier-0 (`n_constituents=0`) | 1,114,240 | 1.000000 | 0% | 0% |
+| composed (`n_constituents>0`) | 14,481,064 | **0.003148** | 1.66% | 0.008% (~1,160 rows) |
+
+Composition drives unit-norm constituents down to 0.003148 — roughly **2.5
+decimal digits of cancellation**, ~99.7% of magnitude destroyed on the worst
+rows. FP64 (~16 digits) still leaves ~13.5 usable. FP32 (~7) leaves ~4.5, and
+less than that on the ~1,160 rows below 0.02. **FP32 anywhere near centroid,
+Karcher, coord or hilbert_index converts a bounded noise floor into an unbounded
+one.**
+
+Second correction, on determinism. This audit says "determinism does not require
+fp64", which is true **on CPU with fixed reduction order** — that is exactly what
+`-fno-fast-math -ffp-contract=off` buys, and it is width-independent. It does not
+transfer to GPU. CUDA contracts FMA by default (`-fmad=true`), block reductions
+sum in an undefined order, and atomics have no defined order at all, so a GPU
+fp32 reduction is not reproducible run to run. Width was never the problem there;
+**order** is. Conflating the two was an error in the original text.
+
+### The boundary
+
+> **GPU FP32 for contraction magnitudes feeding Glicko. Never for identity,
+> placement, or ordering.**
+
+Contraction magnitudes become Glicko votes through
+`witnessWeight = ½(1 + tanh(m/M))`, which is robust to small perturbation —
+approximate testimony, adjudicated downstream. Anything feeding a content hash, a
+coord, a `hilbert_index` or a trajectory has no such tolerance: a one-ULP
+difference is a different identity.
+
+This reclassifies the table below. `ffn_edges` and `compute_substrate_gram` were
+marked "fp32 safe on information grounds" — that verdict considered provenance
+only and is **withdrawn** pending a per-site cancellation analysis. #1023
+(`project_embedding`, already landed) is unaffected: its call sites are Q/K/V
+projections in `ModelTokenEdgeETL` (lines 779, 781, 855), which are contraction
+magnitudes in the model lane, on the permitted side of the boundary.
+`project_embedding_d` (587, 677, 883) was never touched and remains DGEMM.
+
 ## The risk, which is not precision
 
 FP32 GEMM changes the *exact* `int64` scores. Relative error ~1e-7 propagates
