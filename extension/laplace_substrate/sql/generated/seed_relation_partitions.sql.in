@@ -50,7 +50,7 @@ BEGIN
         IF cardinality(missing) = 0 THEN
             CONTINUE;  -- nothing to do: no lock, no scan
         END IF;
-        rids := ARRAY(SELECT laplace.relation_type_id(h) FROM unnest(missing) AS h);
+        rids := ARRAY(SELECT relation_type_id(h) FROM unnest(missing) AS h);
         dflt := tbl || '_rdefault';
         has_default := to_regclass(current_schema() || '.' || dflt) IS NOT NULL;
         -- Detach FIRST so each CREATE ... PARTITION OF skips the default's
@@ -60,7 +60,7 @@ BEGIN
             EXECUTE format('ALTER TABLE %I DETACH PARTITION %I', tbl, dflt);
         END IF;
         FOREACH r IN ARRAY missing LOOP
-            rid := laplace.relation_type_id(r);
+            rid := relation_type_id(r);
             part := tbl || '_r_' || lower(r);
             EXECUTE format('CREATE TABLE %I PARTITION OF %I FOR VALUES IN (%L) PARTITION BY HASH (subject_id)', part, tbl, rid);
             FOR i IN 0..7 LOOP
