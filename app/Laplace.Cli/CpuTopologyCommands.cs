@@ -184,7 +184,14 @@ internal static class CpuTopologyCommands
         w.WriteLine("ALTER SYSTEM SET maintenance_io_concurrency = 256;");
         w.WriteLine("ALTER SYSTEM SET random_page_cost = 1.1;");
         w.WriteLine("ALTER SYSTEM SET autovacuum_vacuum_cost_delay = 0;");
-        w.WriteLine("ALTER SYSTEM SET huge_pages = try;");
+        // huge_pages is deliberately NOT emitted here, for the same reason as
+        // wal_compression: choosing between 'on' and 'try' requires reading
+        // /proc/meminfo against shared_memory_size_in_huge_pages, and this emitter
+        // writes SQL with no connection and no host access. Emitting a flat 'try'
+        // made this the third owner of the setting and silently overwrote the
+        // promotion whenever tune-pg ran. pg_apply_huge_pages in
+        // scripts/pg-machine-tuning.sh owns it, on the path that can actually
+        // measure. 'try' is what it falls back to, so nothing is lost by silence.
         w.WriteLine("ALTER SYSTEM SET io_method = worker;");
 
         // STATEMENT-LEVEL PROFILING. Nothing on this cluster could report execution time

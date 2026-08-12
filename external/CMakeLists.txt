@@ -146,6 +146,18 @@ ExternalProject_Add(postgresql
         "--with-uuid=e2fs"
         "--with-libxml"
         "--without-readline"
+        # PL/Python. configure looks for `python` on PATH, which Ubuntu 22.04 does not
+        # provide (python3 only) — without PYTHON= set explicitly it silently builds
+        # WITHOUT plpython3u, exactly like the lz4/zstd/io_uring flags below.
+        #
+        # CUDA CAVEAT for anything written in plpython3u: a CUDA context does NOT
+        # survive fork(), and PostgreSQL forks a backend per connection. Any device
+        # init that happens in the postmaster — shared_preload_libraries, _PG_init, or
+        # a module-scope `import cupy` in a preloaded interpreter — poisons every
+        # forked backend with cudaErrorInitializationError while the postmaster's own
+        # test passes. Keep imports and device calls INSIDE the function body.
+        "PYTHON=/usr/bin/python3"
+        "--with-python"
         # WRITE-PATH CODECS AND ASYNC I/O. PostgreSQL's configure does NOT auto-detect any of
         # these — omit the flag and the feature is silently absent. No warning, no error; the
         # only symptom is a shorter enumvals list on a GUC nobody reads.

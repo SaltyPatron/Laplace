@@ -66,7 +66,19 @@ systemctl enable laplace-api >/dev/null
 
 echo "==> validate + reload nginx"
 nginx -t
-systemctl reload nginx
+# reload FAILS on a stopped nginx ("cannot reload"), and this script runs under
+# `set -e` inside setup-host.sh — so a stopped nginx aborted the whole run BEFORE
+# Layer 1 ever built the extensions or ran migrations. 2026-08-12: the storage
+# migration stopped nginx to unmount /var/www, and every setup-host after it died
+# right here with the cluster half-configured. Start it if it is not running;
+# there is no state where "nginx should stay down" is the correct outcome of a
+# script whose job is to install an nginx vhost.
+if systemctl is-active --quiet nginx; then
+  systemctl reload nginx
+else
+  echo "    nginx not running — starting it (reload cannot start a stopped unit)"
+  systemctl start nginx
+fi
 
 echo "==> firewall: allow API port $API_PORT from the LAN if ufw is active"
 if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then

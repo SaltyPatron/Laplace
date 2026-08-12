@@ -16,6 +16,7 @@ newest_snapshot() {
     local fam snap
     for fam in /vault/models/$1; do
         [ -d "$fam/snapshots" ] || continue
+        # shellcheck disable=SC2045  # newest-first is the point; globs cannot sort by mtime
         for snap in $(ls -t "$fam/snapshots" 2>/dev/null); do
             if ls "$fam/snapshots/$snap"/*.safetensors >/dev/null 2>&1; then
                 echo "$fam/snapshots/$snap"; return 0

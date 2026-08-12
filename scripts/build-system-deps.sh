@@ -8,7 +8,7 @@
 # Used by: scripts/setup-host.sh Layer 0.5, CI deps job, `just build-deps`.
 #
 # Env:
-#   LAPLACE_EXTERNAL       default /opt/laplace/external
+#   LAPLACE_EXTERNAL       default /build/external
 #   LAPLACE_DEPS_BUILD     default /opt/laplace/build/deps
 #   LAPLACE_DEPS_PREFIX    default /opt/laplace
 #   LAPLACE_TARGET_ISA     default AVX2
@@ -18,8 +18,13 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-EXT="${LAPLACE_EXTERNAL:-/opt/laplace/external}"
-BUILD="${LAPLACE_DEPS_BUILD:-/opt/laplace/build/deps}"
+EXT="${LAPLACE_EXTERNAL:-/build/external}"
+# Build tree on the SAME expendable volume as the source, not the database device.
+# It defaulted to /opt/laplace/build/deps — vg-data/lv-laplace on nvme1n1 — so every
+# postgres/gdal/proj compile wrote gigabytes onto the disk serving the heap, which is
+# exactly what moving external/ to /build was meant to stop. Build output is
+# regenerable by definition; it belongs beside the pinned source it is built from.
+BUILD="${LAPLACE_DEPS_BUILD:-/build/deps}"
 PREFIX="${LAPLACE_DEPS_PREFIX:-/opt/laplace}"
 ISA="${LAPLACE_TARGET_ISA:-AVX2}"
 RUN_AS="${LAPLACE_DEPS_USER:-laplace-runner}"
@@ -193,6 +198,7 @@ purge_autoconf_build_trees() {
     fi
   done
   # postgis builds in-source under $EXT; clear its configure cache the same way.
+  # shellcheck disable=SC2043  # single-element by design: the in-source list grows here
   for d in postgis; do
     [ -f "$EXT/$d/config.status" ] || continue
     yellow "  clearing in-source autoconf cache: $EXT/$d"

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -eo pipefail
+set -euo pipefail
 
 RUNNER_USER="laplace-runner"
 RUNNER_GROUP="laplace-runner"
@@ -27,12 +27,49 @@ LAPLACE_PG_DATA="$LAPLACE_PG_MOUNT/data"
 # onto the idle spindle removes the fsync stream from the read path.
 # The capacity lesson still binds: max_wal_size (32GB) must stay small relative
 # to the WAL volume's free space, which is asserted before initdb/relocation.
-LAPLACE_PG_WAL="${LAPLACE_PG_WAL:-/opt/laplace/pg_wal}"
+#
+# NOT /opt/laplace/pg_wal (vg-raid on md127). That was the 2026-08-11 default and
+# it cost the cluster: md127 is a two-disk RAID0 with no redundancy, so when sda
+# stopped answering mid-OMW-ingest (ata1 frozen, 5x COMRESET failed over 60s) the
+# WAL fsync could not be retried against a second copy. issue_xlog_fsync PANICked
+# on segment 0000000100001ABC0000009A, XFS shut the filesystem down, and the
+# checkpoint record in that segment was never recoverable — the cluster had to be
+# rebuilt from scratch. pg_prepare_waldir() below did NOT catch it: it asserts a
+# different filesystem and free space, neither of which a stripe fails.
+# WAL is the durability substrate; it belongs on redundant or at minimum
+# single-disk storage, never on a stripe. /var is on sdc (vg-os), the healthiest
+# device on this host.
+LAPLACE_PG_WAL="${LAPLACE_PG_WAL:-/var/lib/pgwal}"
 # Must equal PG_TUNE_MAX_WAL in pg-machine-tuning.sh — the ENOSPC guard multiplies
 # these; when they were undefined, bash arithmetic made want_free 0 and the guard
 # passed unconditionally (dead since it was written).
-LAPLACE_PG_MAX_WAL_GB="${LAPLACE_PG_MAX_WAL_GB:-64}"
+LAPLACE_PG_MAX_WAL_GB="${LAPLACE_PG_MAX_WAL_GB:-32}"
 LAPLACE_PG_WAL_HEADROOM="${LAPLACE_PG_WAL_HEADROOM:-3}"
+# THE THIRD I/O STREAM. Without a temp tablespace, sort/hash spill lands in
+# $PGDATA/base/pgsql_tmp — the heap device, competing with the reads of the very
+# query that is spilling. WAL was split off the heap after the 2026-07-26
+# wiktionary contention; temp spill is the same fight and was never split. Points
+# at the RAID0 deliberately: temp files are deleted at startup, so the correlated
+# pair holding them costs nothing, and it is the only idle spindle left.
+# Empty disables the tablespace entirely (spill stays in PGDATA).
+LAPLACE_PG_TEMP="${LAPLACE_PG_TEMP:-/pgtemp}"
+LAPLACE_PG_TEMP_TS="${LAPLACE_PG_TEMP_TS:-pgtemp}"
+# THE FOURTH WRITE STREAM. logging_collector writes stderr AND csvlog for every
+# connection, error and checkpoint. Inside the install prefix that put ~250MB across
+# 1083 files on the heap device, growing without retention. /var is the FHS home for
+# it, sits on sdc with ~100GB idle, and is the one volume with no database workload
+# competing. ops.repoint_pg_log() resolves the path via pg_current_logfile(), so the
+# file_fdw follows this automatically — no migration change needed.
+LAPLACE_PG_LOG="${LAPLACE_PG_LOG:-/var/log/postgresql}"
+# Retention. log_filename is timestamped and log_truncate_on_rotation is off, so
+# the collector NEVER reuses a name and nothing ever deletes one — 1083 files /
+# 247MB had accumulated by 2026-08-11. 0 disables pruning.
+LAPLACE_PG_LOG_RETAIN_DAYS="${LAPLACE_PG_LOG_RETAIN_DAYS:-30}"
+# Git-pinned source checkouts (PINS.tsv), NOT build output — re-clonable, so they
+# live on expendable storage, and compile churn stays off the database device.
+LAPLACE_EXTERNAL="${LAPLACE_EXTERNAL:-/build/external}"
+LAPLACE_SUBMODULE_CACHE="${LAPLACE_SUBMODULE_CACHE:-/build/submodule-modules}"
+export LAPLACE_EXTERNAL LAPLACE_SUBMODULE_CACHE
 LAPLACE_PG_PORT="5432"
 LAPLACE_PG_SOCKET_DIR="/var/run/postgresql"
 LAPLACE_PG_SERVICE="laplace-postgresql.service"
@@ -48,8 +85,15 @@ LAPLACE_PG_SERVICE="laplace-postgresql.service"
 # than lowering max_files_per_process: the VFD cache is what makes 5k+ relations
 # cheap to scan, and starving it to buy DSM headroom trades one stall for another.
 LAPLACE_PG_NOFILE="${LAPLACE_PG_NOFILE:-65536}"
+# Postgres' OWN VFD cache ceiling, distinct from the kernel fd limit above. The
+# note on LimitNOFILE says to raise the ceiling rather than lower this — but this
+# was then left at the stock 1000 while LimitNOFILE went to 65536, so the VFD
+# cache never grew to use the headroom that was bought for it. With 5k+ relations
+# and the physicalities_h* partitions, a backend evicts and re-opens constantly.
+# 4000 x max_connections stays far inside both the per-process ceiling and
+# fs.file-max, and leaves ~61k fds per backend for DSM segments.
+LAPLACE_PG_MAX_FILES="${LAPLACE_PG_MAX_FILES:-4000}"
 LAPLACE_PG_LAN_CIDR="${LAPLACE_PG_LAN_CIDR:-192.168.1.0/24}"
-PG_CONFIG_DIR="/etc/postgresql/$PG_VERSION/main"
 REPO="SaltyPatron/Laplace"
 REPO_URL="https://github.com/$REPO"
 RUNNER_VERSION="v2.334.0"
@@ -67,7 +111,36 @@ PG_IDENT_FILE="$LAPLACE_PG_CONF_DIR/pg_ident.conf"
 PG_POSTGRESQL_CONF="$LAPLACE_PG_DATA/postgresql.conf"
 RUNNER_SERVICE="actions.runner.SaltyPatron-Laplace.hart-server.service"
 
-GH_SUDO_USER="${SUDO_USER:-ahart}"
+# THE OPERATOR — the human this host belongs to, not whoever is running us.
+#
+# This was `${SUDO_USER:-ahart}`, which is wrong under the ONE invocation the
+# repo documents. setup-host.sh is run as `sudo bash scripts/setup-host.sh`, so
+# it is already root when it calls `sudo "$BOOTSTRAP" bootstrap` — and a nested
+# sudo sets SUDO_USER=root. So the operator resolved to `root` on every normal
+# run, and:
+#   * bootstrap_pg_bounce_sudoers granted the NOPASSWD postgres bounce to root
+#     (which already had it) instead of to the human, so pipeline.sh's
+#     restart_postgres found "no rootless path" and dumped a pending_restart on
+#     the operator to finish by hand — the exact "script leaves it broken" bug.
+#   * bootstrap_runner_gh_auth looked for /home/root/.config/gh/hosts.yml, a path
+#     that cannot exist because root's home is /root, and skipped every time.
+#   * the Verification block ran `gh api` as root and printed nothing.
+# All three reported success or a benign skip. None of them worked.
+#
+# LAPLACE_OPERATOR is passed explicitly by setup-host.sh (which still has the
+# real SUDO_USER); logname covers a direct `sudo bootstrap-laplace-runner.sh`.
+# If neither resolves to a human, say so — granting root a grant it already has
+# and calling it done is how this hid for so long.
+GH_SUDO_USER="${LAPLACE_OPERATOR:-}"
+if [ -z "$GH_SUDO_USER" ] || [ "$GH_SUDO_USER" = root ]; then
+    GH_SUDO_USER="${SUDO_USER:-}"
+fi
+if [ -z "$GH_SUDO_USER" ] || [ "$GH_SUDO_USER" = root ]; then
+    GH_SUDO_USER="$(logname 2>/dev/null || true)"
+fi
+if [ -z "$GH_SUDO_USER" ] || [ "$GH_SUDO_USER" = root ]; then
+    GH_SUDO_USER=""
+fi
 MODE="${1:-bootstrap}"
 LAPLACE_STRIPE_SUCCESS_URL_DEFAULT="${LAPLACE_STRIPE_SUCCESS_URL:-http://127.0.0.1:5187/billing/success}"
 LAPLACE_STRIPE_CANCEL_URL_DEFAULT="${LAPLACE_STRIPE_CANCEL_URL:-http://127.0.0.1:5187/billing/cancel}"
@@ -150,6 +223,7 @@ bootstrap_build_environment() {
         build-essential cmake ninja-build autoconf automake libtool pkg-config \
         bison flex perl \
         sqlite3 \
+        shellcheck \
         libssl-dev zlib1g-dev libreadline-dev uuid-dev \
         libxml2-dev libjson-c-dev libicu-dev \
         liblz4-dev libzstd-dev liburing-dev \
@@ -213,7 +287,8 @@ bootstrap_migrate_runner_home() {
         green "✓ Rewrote $unit_file: $RUNNER_HOME_LEGACY -> $RUNNER_HOME"
     fi
 
-    local archive="${RUNNER_HOME_LEGACY}.pre-migration-$(date +%Y%m%d-%H%M%S)"
+    local archive
+    archive="${RUNNER_HOME_LEGACY}.pre-migration-$(date +%Y%m%d-%H%M%S)"
     mv "$RUNNER_HOME_LEGACY" "$archive"
     green "✓ Archived legacy tree to $archive (rm -rf when satisfied)"
 
@@ -262,7 +337,8 @@ bootstrap_legacy_runner_teardown() {
         green "✓ Deregistered legacy runner from GitHub"
     fi
 
-    local archive="/tmp/laplace-runner-prev-$(date +%s)"
+    local archive
+    archive="/tmp/laplace-runner-prev-$(date +%s)"
     mv "$old" "$archive"
     rm -rf /home/ahart/_work 2>/dev/null || true
     green "✓ Legacy runner archived at $archive"
@@ -331,9 +407,6 @@ EOF
     green "✓ OOM guard + auto-restart drop-in installed"
 }
 
-bootstrap_runner_oom_guard
-
-
 bootstrap_runner_job_env() {
     # LAPLACE_TEST_DB is a disposable DB *name* for ChessLiveGameHost writer tests.
     # Never default it to the production database — that either writes into laplace or
@@ -369,6 +442,7 @@ bootstrap_runner_model_env() {
         local fam snap
         for fam in /vault/models/$1; do
             [ -d "$fam/snapshots" ] || continue
+            # shellcheck disable=SC2045  # newest-first is the point; globs cannot sort by mtime
             for snap in $(ls -t "$fam/snapshots" 2>/dev/null); do
                 if ls "$fam/snapshots/$snap"/*.safetensors >/dev/null 2>&1; then
                     echo "$fam/snapshots/$snap"; return 0
@@ -566,6 +640,94 @@ pg_relocate_waldir() {
     green "✓ Relocated pg_wal → $LAPLACE_PG_WAL/pg_wal (heap and WAL now on separate spindles)"
 }
 
+# Host VM policy for a database box. Written to /etc/sysctl.d (survives reboot)
+# and applied now. Idempotent: rewriting the same file is a no-op.
+bootstrap_host_vm_tuning() {
+    say "Host VM tunables (swappiness, writeback ceilings)"
+    cat > /etc/sysctl.d/60-laplace-vm.conf <<'EOF'
+# Laplace DB host tunables. Owned by bootstrap-laplace-runner.sh — edit there.
+# swappiness 60 is desktop policy. Measured 2026-08-11: 7.5 GB swapped with
+# 81 GB available. Postgres was not the victim (editor/JVM heaps were), but a
+# database host should not page out anonymous memory this eagerly.
+vm.swappiness = 10
+# dirty_ratio/dirty_background_ratio are PERCENTAGES OF RAM. On the 125 GB host
+# that is 25 GB dirty before writers block and 12.5 GB before background
+# writeback — one flush can stall the box. The *_bytes forms are mutually
+# exclusive with *_ratio, so setting these zeroes the ratios. That is intended.
+vm.dirty_bytes = 2147483648
+vm.dirty_background_bytes = 536870912
+EOF
+    sysctl -q --system >/dev/null 2>&1 || true
+    green "✓ swappiness=$(sysctl -n vm.swappiness) dirty_bytes=$(sysctl -n vm.dirty_bytes) dirty_background_bytes=$(sysctl -n vm.dirty_background_bytes)"
+}
+
+# RESERVE 2 MiB huge pages for the cluster's shared memory. Reservation ONLY —
+# the huge_pages GUC is owned by pg_apply_huge_pages in pg-machine-tuning.sh.
+#
+# huge_pages=try was silently falling back to 4 KiB pages because nothing ever
+# reserved any — a ~31 GiB buffer pool addressed through ~8.1M PTEs per backend.
+#
+# This function used to set the GUC too, which made it the THIRD owner: the
+# emitter wrote 'try', the validator asserted eq 'try', and this wrote 'on'.
+# tune-pg runs on every CI publish, so the promotion was overwritten and would
+# have been reported as a validation failure if it had survived. Reservation is
+# a host concern (sysctl, applied at boot because late allocation fails on a
+# fragmented host); which GUC that reservation justifies is a cluster concern,
+# and it belongs on the path that runs every publish, not only on manual setup.
+bootstrap_pg_hugepages() {
+    say "Huge pages for Postgres shared memory"
+    local need target got
+    # Ask Postgres, do not derive from shared_buffers: this accounts for ALL
+    # shared memory and for rounding (measured 16614 where shared_buffers alone
+    # implied ~16100).
+    #
+    # Read it with SHOW, NOT `postgres -C`: shared_memory_size_in_huge_pages is a
+    # runtime-computed GUC, and -C refuses to report those while a postmaster
+    # holds the data directory. This function runs after the cluster is up, so -C
+    # always failed here and silently skipped the whole step.
+    # Two probes, because this runs BEFORE the cluster is provisioned so the
+    # postmaster may be up or down, and the two ways of asking are mutually
+    # exclusive: shared_memory_size_in_huge_pages is runtime-computed, so
+    # `postgres -C` refuses it while a postmaster holds the data directory, and
+    # SHOW needs a server to ask. Try the live one, fall back to the offline one.
+    need="$(sudo -u "$RUNNER_USER" "$LAPLACE_PG_PREFIX/bin/psql" \
+        -h "$LAPLACE_PG_SOCKET_DIR" -p "$LAPLACE_PG_PORT" -d postgres -U laplace_admin \
+        -tAc "SHOW shared_memory_size_in_huge_pages" 2>/dev/null | tr -dc '0-9' || true)"
+    if ! [[ "$need" =~ ^[0-9]+$ ]] || [ "$need" -eq 0 ]; then
+        if [ -f "$LAPLACE_PG_DATA/PG_VERSION" ]; then
+            need="$(sudo -u "$RUNNER_USER" "$LAPLACE_PG_PREFIX/bin/postgres" \
+                -D "$LAPLACE_PG_DATA" -C shared_memory_size_in_huge_pages 2>/dev/null \
+                | tr -dc '0-9' || true)"
+        fi
+    fi
+    if ! [[ "$need" =~ ^[0-9]+$ ]] || [ "$need" -eq 0 ]; then
+        # Only reachable on a host with no cluster at all — initdb has not run
+        # yet, so there is no shared-memory size to size a reservation against.
+        # The next run has one. This is genuinely first-boot-only.
+        yellow "  no cluster yet — huge pages sized on the next run"
+        return 0
+    fi
+    target=$(( need + 256 ))   # headroom for shared_buffers growth
+
+    cat > /etc/sysctl.d/60-laplace-hugepages.conf <<EOF
+# Laplace: 2 MiB huge pages for the substrate cluster's shared memory.
+# Owned by bootstrap-laplace-runner.sh (bootstrap_pg_hugepages) — edit there.
+# Reserved at BOOT: late allocation fails once memory is fragmented.
+# $need pages is what Postgres reports it needs; +256 is growth headroom.
+vm.nr_hugepages = $target
+EOF
+    sysctl -q -w vm.nr_hugepages="$target" >/dev/null 2>&1 || true
+    got="$(awk '/HugePages_Total/{print $2}' /proc/meminfo)"
+
+    if [ "${got:-0}" -ge "$need" ]; then
+        green "✓ reserved $got huge pages (need $need) — pg_apply_huge_pages promotes the GUC"
+    else
+        yellow "  only ${got:-0} of $target pages reserved — memory is fragmented"
+        yellow "  /etc/sysctl.d/60-laplace-hugepages.conf persists: REBOOT reserves them"
+        yellow "  cleanly; huge_pages stays at 'try' until the reservation covers $need"
+    fi
+}
+
 bootstrap_laplace_pg_cluster() {
     say "Provision /opt/laplace/pgsql-18 cluster (substrate runtime PG)"
 
@@ -574,7 +736,7 @@ bootstrap_laplace_pg_cluster() {
         return 1
     fi
 
-    install -d -m 2775 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "$LAPLACE_PG_PREFIX/log"
+    install -d -m 2775 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "$LAPLACE_PG_LOG"
     install -d -m 2775 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "$LAPLACE_PG_CONF_DIR"
 
     if ! mountpoint -q "$LAPLACE_PG_MOUNT"; then
@@ -628,6 +790,8 @@ bootstrap_laplace_pg_cluster() {
         -e '/^[[:space:]]*#\?[[:space:]]*log_file_mode[[:space:]]*=/d' \
         -e '/^[[:space:]]*#\?[[:space:]]*hba_file[[:space:]]*=/d' \
         -e '/^[[:space:]]*#\?[[:space:]]*ident_file[[:space:]]*=/d' \
+        -e '/^[[:space:]]*#\?[[:space:]]*max_files_per_process[[:space:]]*=/d' \
+        -e '/^[[:space:]]*#\?[[:space:]]*default_toast_compression[[:space:]]*=/d' \
         "$PG_POSTGRESQL_CONF"
     sudo -u "$RUNNER_USER" tee -a "$PG_POSTGRESQL_CONF" >/dev/null <<EOF
 
@@ -638,7 +802,7 @@ unix_socket_directories = '$LAPLACE_PG_SOCKET_DIR,/tmp'
 extension_control_path = '/opt/laplace/share/postgresql/$PG_VERSION:\$system'
 dynamic_library_path = '\$libdir:/opt/laplace/lib/postgresql/$PG_VERSION'
 logging_collector = on
-log_directory = '$LAPLACE_PG_PREFIX/log'
+log_directory = '$LAPLACE_PG_LOG'
 log_filename = 'postgresql-%Y-%m-%d_%H%M%S.log'
 log_file_mode = 0640
 # csvlog runs ALONGSIDE stderr so DB-down still degrades to "read the .log file"; the
@@ -647,6 +811,15 @@ log_file_mode = 0640
 log_destination = 'stderr,csvlog'
 hba_file = '$PG_HBA_FILE'
 ident_file = '$PG_IDENT_FILE'
+# Paired with LimitNOFILE on the unit — see LAPLACE_PG_MAX_FILES. Lives here and
+# not in pg-machine-tuning.sh because it is an fd-budget knob bound to the unit's
+# kernel limit, not a machine-sized memory/parallelism GUC.
+max_files_per_process = $LAPLACE_PG_MAX_FILES
+# default_toast_compression is deliberately NOT set here. It was, briefly, and
+# that made two owners: this block and pg_apply_toast_compression's ALTER SYSTEM.
+# postgresql.auto.conf wins over postgresql.conf, so the hardcoded value here
+# would lose silently on any host whose Postgres lacks lz4 -- the probe would
+# correctly choose pglz while this file still claimed lz4. The prober owns it.
 $marker_end
 EOF
     green "✓ Wrote substrate cluster config to $PG_POSTGRESQL_CONF"
@@ -690,6 +863,13 @@ Description=Laplace substrate PostgreSQL cluster ($LAPLACE_PG_PREFIX, data on $L
 Documentation=https://github.com/SaltyPatron/Laplace
 After=network.target
 ConditionPathExists=$LAPLACE_PG_DATA/PG_VERSION
+# ConditionPathExists alone is NOT enough once the mounts carry nofail (added
+# 2026-08-11 so a dead array cannot wedge boot at an emergency shell): an unmet
+# Condition* is not a unit failure, so a missing mount would skip the cluster
+# SILENTLY. RequiresMountsFor turns that back into a loud, visible failure
+# without reintroducing the boot block. $LAPLACE_PG_MOUNT is the heap;
+# $LAPLACE_PG_WAL's volume carries pg_wal since the 2026-08-11 split.
+RequiresMountsFor=$LAPLACE_PG_MOUNT $LAPLACE_PG_WAL
 
 [Service]
 Type=simple
@@ -721,6 +901,16 @@ WantedBy=multi-user.target
 EOF
     chmod 644 "$unit_file"
     install -d "/etc/systemd/system/${LAPLACE_PG_SERVICE}.d"
+    # Retire hand-made drop-ins whose contents this unit now carries verbatim.
+    # Left in place they are pure noise, and a drop-in that merely restates the
+    # unit is indistinguishable from one that overrides it at a glance.
+    local stale
+    for stale in 10-owner-bounce.conf 30-nofile.conf; do
+        if [ -f "/etc/systemd/system/${LAPLACE_PG_SERVICE}.d/$stale" ]; then
+            rm -f "/etc/systemd/system/${LAPLACE_PG_SERVICE}.d/$stale"
+            yellow "  removed redundant drop-in $stale (already in the unit)"
+        fi
+    done
     cat > "/etc/systemd/system/${LAPLACE_PG_SERVICE}.d/20-ready.conf" <<EOF
 [Service]
 # Type=simple returns when the postmaster process exists — before the Unix
@@ -874,6 +1064,109 @@ BEGIN
 END $$;
 PG_EOF
     green "✓ Roles present (laplace_admin = SUPERUSER; postgres = LAN convenience superuser; substrate operator role per AWS/GCP RDS pattern)"
+}
+
+# Create the temp tablespace so sort/hash spill leaves the heap device.
+#
+# WHY. Without this, spill goes to $PGDATA/base/pgsql_tmp — the same volume as the
+# heap, so a spilling query competes with its own reads. Splitting WAL off the heap
+# after the 2026-07-26 wiktionary contention fixed one of the two write streams;
+# this is the other. With work_mem=502MB across ~26 live backends, the seed host
+# spills constantly.
+#
+# Refuses rather than degrades if the directory is not its own mount: a tablespace
+# on the heap device is worse than none, because pg-machine-tuning would then point
+# temp_tablespaces at it and every spill would land right back where it started.
+# Set LAPLACE_PG_TEMP="" to opt out entirely.
+bootstrap_pg_tempspace() {
+    [ -n "$LAPLACE_PG_TEMP" ] || { yellow "  LAPLACE_PG_TEMP empty — spill stays in PGDATA"; return 0; }
+    say "Ensure temp tablespace '$LAPLACE_PG_TEMP_TS' at $LAPLACE_PG_TEMP (spill off the heap device)"
+
+    install -d -m 0700 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "$LAPLACE_PG_TEMP"
+
+    local heap_dev temp_dev
+    heap_dev="$(pg_device_of "$LAPLACE_PG_MOUNT")"
+    temp_dev="$(pg_device_of "$LAPLACE_PG_TEMP")"
+    if [ -n "$heap_dev" ] && [ "$heap_dev" = "$temp_dev" ]; then
+        red "✗ $LAPLACE_PG_TEMP is on the SAME filesystem as the heap ($LAPLACE_PG_MOUNT)."
+        red "  A temp tablespace there moves nothing — spill would still contend with the"
+        red "  heap reads. Mount it on a different spindle or set LAPLACE_PG_TEMP=\"\"."
+        return 1
+    fi
+
+    sudo -u "$RUNNER_USER" "$LAPLACE_PG_PREFIX/bin/psql" \
+        -h "$LAPLACE_PG_SOCKET_DIR" -p "$LAPLACE_PG_PORT" \
+        -d postgres -U laplace_admin -v ON_ERROR_STOP=1 \
+        -v ts="$LAPLACE_PG_TEMP_TS" -v loc="$LAPLACE_PG_TEMP" <<'PG_EOF'
+SELECT format('CREATE TABLESPACE %I LOCATION %L', :'ts', :'loc')
+WHERE NOT EXISTS (SELECT 1 FROM pg_tablespace WHERE spcname = :'ts') \gexec
+GRANT CREATE ON TABLESPACE :"ts" TO laplace_app, laplace_readonly;
+PG_EOF
+    # ORDER MATTERS. pg_apply_machine_tuning runs inside bootstrap_laplace_pg_cluster,
+    # BEFORE this function exists to create the tablespace — so on a fresh initdb it
+    # probes, finds nothing, and correctly leaves temp_tablespaces unset. Re-apply now
+    # that the tablespace is real, or spill silently stays in $PGDATA for the life of
+    # the cluster (2026-08-12: "tablespace 'pgtemp' absent — temp_tablespaces left
+    # unset" on the very run that then created it).
+    if declare -F pg_apply_temp_tablespace >/dev/null 2>&1; then
+        pg_apply_temp_tablespace
+        pg_tune_reload
+    else
+        yellow "  pg-machine-tuning.sh not sourced — run it to set temp_tablespaces"
+    fi
+    green "✓ Tablespace $LAPLACE_PG_TEMP_TS → $LAPLACE_PG_TEMP"
+}
+
+# Prune collector logs older than LAPLACE_PG_LOG_RETAIN_DAYS.
+#
+# NOT logrotate. logrotate's model is "rename the live file, app reopens it" —
+# correct for a fixed filename, wrong here: the collector already rotates itself
+# into timestamped names and holds the current one open, so letting logrotate
+# rename it either orphans the writer or truncates the file ops.pg_log is pointed
+# at. What is missing is deletion, not rotation, so this only deletes.
+#
+# -mtime is what keeps the live file safe: the current .log/.csv are being written
+# now, so they can never match "+N days". No exclusion list to get wrong.
+bootstrap_pg_log_retention() {
+    local days="$LAPLACE_PG_LOG_RETAIN_DAYS"
+    local svc=/etc/systemd/system/laplace-pg-log-prune.service
+    local tmr=/etc/systemd/system/laplace-pg-log-prune.timer
+
+    if [ "${days:-0}" -le 0 ]; then
+        yellow "  LAPLACE_PG_LOG_RETAIN_DAYS=0 — collector logs grow unbounded"
+        systemctl disable --now laplace-pg-log-prune.timer 2>/dev/null || true
+        return 0
+    fi
+    say "Ensure collector-log retention: ${days}d in $LAPLACE_PG_LOG"
+
+    cat > "$svc" <<EOF
+[Unit]
+Description=Prune Laplace PostgreSQL collector logs older than ${days} days
+Documentation=https://github.com/SaltyPatron/Laplace
+
+[Service]
+Type=oneshot
+# One ExecStart per pattern: systemd does not glob, but it does its own word
+# splitting, and find's parenthesised -o grouping needs escaping that differs
+# between systemd's parser and a shell. Two flat invocations have neither problem.
+ExecStart=/usr/bin/find $LAPLACE_PG_LOG -maxdepth 1 -type f -name *.log -mtime +${days} -delete
+ExecStart=/usr/bin/find $LAPLACE_PG_LOG -maxdepth 1 -type f -name *.csv -mtime +${days} -delete
+EOF
+    cat > "$tmr" <<'EOF'
+[Unit]
+Description=Daily prune of Laplace PostgreSQL collector logs
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=1h
+
+[Install]
+WantedBy=timers.target
+EOF
+    systemctl daemon-reload
+    systemctl enable --now laplace-pg-log-prune.timer >/dev/null 2>&1 || true
+    green "✓ laplace-pg-log-prune.timer — .log/.csv older than ${days}d deleted daily"
 }
 
 bootstrap_pg_legacy_cleanup() {
@@ -1030,6 +1323,15 @@ bootstrap_remove_legacy_sudoers() {
 bootstrap_pg_bounce_sudoers() {
     say "NOPASSWD systemctl bounce for $LAPLACE_PG_SERVICE (operators + runner)"
     local op="$GH_SUDO_USER"
+    if [ -z "$op" ]; then
+        # Granting root a grant it already holds, and printing ✓, is exactly how
+        # this hid: pipeline.sh restart_postgres then found "no rootless path"
+        # and handed the operator a pending_restart to finish by hand.
+        red "✗ operator unresolved — NOT writing $SUDOERS_PG_BOUNCE"
+        red "  Without it, pipeline.sh cannot bounce the cluster and will leave"
+        red "  pending_restart settings for a human. Pass LAPLACE_OPERATOR=<user>."
+        return 1
+    fi
     local tmp
     tmp="$(mktemp)"
     # One command per line — no backslash wraps (visudo + terminal paste both
@@ -1070,7 +1372,7 @@ bootstrap_external_dirs() {
     bootstrap_external_pins
 }
 
-# Provision /opt/laplace/external to external-pins.tsv. ONE-TIME setup: external
+# Provision $LAPLACE_EXTERNAL to PINS.tsv. ONE-TIME setup: external
 # sources do not change between builds, so CI verifies and never populates.
 #
 # This used to say "populated by scripts/sync-external.sh", which read .gitmodules
@@ -1084,16 +1386,27 @@ bootstrap_external_dirs() {
 # Idempotent by construction: a dep already at its pinned commit is skipped
 # without a network call, so re-running the bootstrap on a healthy host is free.
 bootstrap_external_pins() {
-    local pins="/opt/laplace/external/PINS.tsv"
-    say "Provision /opt/laplace/external to $pins"
+    # Follows LAPLACE_EXTERNAL rather than hardcoding the prefix: the source cache
+    # moved to /build (its own LV on the array) so compile churn stays off the
+    # database device. A hardcoded /opt/laplace/external here made this report
+    # "PINS.tsv not present" against a cache that was simply somewhere else.
+    local pins="$LAPLACE_EXTERNAL/PINS.tsv"
+    say "Provision $LAPLACE_EXTERNAL to $pins"
 
     if [ ! -f "$pins" ]; then
         yellow "  $pins not present — nothing to provision from."
         yellow "  Seed it once from a known-good cache:"
-        yellow "    for d in /opt/laplace/external/*/; do n=${d%/}; n=${n##*/}; \\"
-        yellow "      printf 'external/%s\\t%s\\t%s\\n' \"$n\" \\"
-        yellow "        \"$(git -C \"$d\" remote get-url origin)\" \\"
-        yellow "        \"$(git -C \"$d\" rev-parse HEAD)\"; done > $pins"
+        # QUOTED heredoc: this is literal text to SHOW the operator, never to run
+        # here. Unquoted it was double-quoted shell, so ${d%/} and ${n##*/} expanded
+        # to empty at print time and BOTH $(git -C "$d" ...) substitutions actually
+        # executed against '' — the hint rendered as `n=; n=;` with empty fields and
+        # spat two `fatal: cannot change to '""'` lines at the operator.
+        while IFS= read -r hint; do yellow "${hint//@PINS@/$pins}"; done <<'HINT'
+    for d in '"$LAPLACE_EXTERNAL"'/*/; do n=${d%/}; n=${n##*/}; \
+      printf 'external/%s\t%s\t%s\n' "$n" \
+        "$(git -C "$d" remote get-url origin)" \
+        "$(git -C "$d" rev-parse HEAD)"; done > @PINS@
+HINT
         return
     fi
 
@@ -1101,7 +1414,12 @@ bootstrap_external_pins() {
     while IFS=$'\t' read -r path url pin; do
         case "$path" in ''|'#'*) continue;; esac
         total=$((total + 1))
-        local entry="/opt/laplace/external/${path#external/}"
+        # Destination follows LAPLACE_EXTERNAL, like the pins file. Hardcoding
+        # /opt/laplace/external here while reading pins from /build made every entry
+        # read as "not at pin" — because the checkouts had moved — and it began
+        # re-cloning all ~110 repos from the network onto the 16G database-tier LV,
+        # duplicating 14G that already existed one mount away (2026-08-12).
+        local entry="$LAPLACE_EXTERNAL/${path#external/}"
 
         # Already at the pin: no fetch, no clone.
         if [ -d "$entry/.git" ] \
@@ -1135,7 +1453,15 @@ bootstrap_external_pins() {
 bootstrap_runner_gh_auth() {
     say "Set up gh CLI auth for $RUNNER_USER (mirror $GH_SUDO_USER's token)"
 
-    local src="/home/$GH_SUDO_USER/.config/gh/hosts.yml"
+    if [ -z "$GH_SUDO_USER" ]; then
+        yellow "  operator unresolved — skipping (pass LAPLACE_OPERATOR or run via setup-host.sh)"
+        return
+    fi
+    # getent, NOT /home/$user. When this resolved to root it probed
+    # /home/root/.config/gh/hosts.yml — a path that cannot exist, because root's
+    # home is /root — and reported a benign skip on every single run.
+    local src
+    src="$(getent passwd "$GH_SUDO_USER" | cut -d: -f6)/.config/gh/hosts.yml"
     if [ ! -f "$src" ]; then
         yellow "  $src not present — skipping (run 'gh auth login' as $GH_SUDO_USER first, then re-run bootstrap)"
         return
@@ -1199,14 +1525,21 @@ do_status() {
     grep "laplace_map" "$PG_IDENT_FILE" 2>/dev/null || echo "  (no laplace_map entry)"
 
     say "Sudoers"
-    if [ -f "$SUDOERS_FILE" ]; then
+    # -r not -f: sudoers drop-ins are 0440 root:root, so a non-root `status` passes
+    # the -f test and then dies on cat (EACCES) under set -e. Diagnostics must
+    # degrade to a note, never abort the report.
+    if [ -r "$SUDOERS_FILE" ]; then
         cat "$SUDOERS_FILE"
+    elif [ -f "$SUDOERS_FILE" ]; then
+        echo "  (present, unreadable as $(id -un) — rerun status as root: $SUDOERS_FILE)"
     else
         echo "  (absent: $SUDOERS_FILE)"
     fi
-    if [ -f "$SUDOERS_PG_BOUNCE" ]; then
+    if [ -r "$SUDOERS_PG_BOUNCE" ]; then
         echo "--- $SUDOERS_PG_BOUNCE ---"
         cat "$SUDOERS_PG_BOUNCE"
+    elif [ -f "$SUDOERS_PG_BOUNCE" ]; then
+        echo "  (present, unreadable as $(id -un) — rerun status as root: $SUDOERS_PG_BOUNCE)"
     else
         echo "  (absent: $SUDOERS_PG_BOUNCE)"
     fi
@@ -1303,9 +1636,9 @@ EOF
         rm -rf "$LAPLACE_PG_DATA"
         green "✓ Removed $LAPLACE_PG_DATA (cluster wiped)"
     fi
-    if [ -d "$LAPLACE_PG_PREFIX/log" ]; then
-        rm -rf "$LAPLACE_PG_PREFIX/log"
-        green "✓ Removed $LAPLACE_PG_PREFIX/log"
+    if [ -d "$LAPLACE_PG_LOG" ]; then
+        rm -rf "$LAPLACE_PG_LOG"
+        green "✓ Removed $LAPLACE_PG_LOG"
     fi
 
     say "Re-enable system postgresql@$PG_VERSION-main (if installed) so the host has a default PG"
@@ -1356,6 +1689,7 @@ do_bootstrap() {
     bootstrap_runner_install
     bootstrap_runner_register
     bootstrap_runner_service
+    bootstrap_runner_oom_guard
     bootstrap_runner_job_env
     bootstrap_runner_model_env
     bootstrap_runner_stripe_env
@@ -1363,10 +1697,20 @@ do_bootstrap() {
     bootstrap_engine_lib_path
     bootstrap_external_dirs
 
+    bootstrap_host_vm_tuning
     bootstrap_disable_system_postgresql
+    # BEFORE the cluster, deliberately. bootstrap_laplace_pg_cluster runs the
+    # machine tuning, which is where pg_apply_huge_pages decides between 'on' and
+    # 'try' by counting reserved pages — and where the restart that activates the
+    # choice happens. Reserving afterwards meant run 1 always found zero pages,
+    # chose 'try', and only then reserved; run 2 promoted. Two runs to converge,
+    # for no reason but ordering.
+    bootstrap_pg_hugepages
     bootstrap_laplace_pg_cluster
 
     bootstrap_pg_roles
+    bootstrap_pg_tempspace
+    bootstrap_pg_log_retention
     bootstrap_pg_legacy_cleanup
     bootstrap_pg_auth
     bootstrap_pg_database_and_postgis

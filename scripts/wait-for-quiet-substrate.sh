@@ -23,6 +23,9 @@ set -euo pipefail
 DB="${1:-${PGDATABASE:-laplace}}"
 BUDGET_SECONDS="${2:-18000}"     # 5h: longer than the longest observed seed
 INTERVAL=30
+# The unit whose liveness decides "down" vs "misconfigured" below. Must name the
+# same cluster the caller is about to bounce, or the down-check proves nothing.
+PG_SERVICE="${LAPLACE_PG_SERVICE:-laplace-postgresql.service}"
 
 PSQL=(psql -h "${PGHOST:-/var/run/postgresql}" -U "${PGUSER:-laplace_admin}" -d "$DB")
 deadline=$(( SECONDS + BUDGET_SECONDS ))
@@ -64,6 +67,21 @@ while :; do
     # fall through to BUSY below. Only 3D000 / the database-missing phrasing
     # counts.
     echo "substrate quiet — database \"$DB\" does not exist, so no ingest can be running in it"
+    exit 0
+  elif ! systemctl is-active --quiet "$PG_SERVICE" 2>/dev/null; then
+    # A STOPPED CLUSTER is quiet, and systemd — not psql — is what proves it.
+    # Without this branch, a down postmaster is indistinguishable from a wrong
+    # PGHOST, so both fell to BUSY below and the loop burned the entire 5h budget
+    # waiting for an ingest that cannot exist (2026-08-11: "DB — recreate" spun
+    # 26min against a socket that had no server behind it, and would have spun
+    # until the job timeout). Waiting is only meaningful when something can
+    # finish; a stopped server finishes nothing.
+    #
+    # Asking systemd rather than inferring from the psql error is what keeps this
+    # fail-closed: a typo'd PGHOST or a dropped connection while the real cluster
+    # is UP still falls through to BUSY, because the unit is active. Only the
+    # cluster this caller is about to bounce being genuinely down counts.
+    echo "substrate quiet — $PG_SERVICE is not running, so no ingest can be in flight"
     exit 0
   else
     echo "::warning::ingest-state probe failed (psql rc=${rc}): ${n//$'\n'/ }"

@@ -65,6 +65,8 @@ pg_compute_machine_tuning() {
   PG_TUNE_MWM=${mwm}MB
   PG_TUNE_WM=${wm}MB
   PG_TUNE_WB=${wb}MB
+  # shellcheck disable=SC2034  # no consumer yet; kept so this block mirrors EmitPgTuning's
+  # full surface — deleting one member of a mirrored contract is worse than an unused var.
   PG_TUNE_CORES=$cores
   PG_TUNE_PCORES=$pcores
   PG_TUNE_PDEG=$pdeg
@@ -144,6 +146,87 @@ pg_tune_reload() {
   pg_tune_psql -v ON_ERROR_STOP=1 -c "SELECT pg_reload_conf()" >/dev/null
 }
 
+# TOAST compression, probed the same way and for the same reason as WAL: the
+# emitter writes SQL with no connection, so it cannot read enumvals, and a host
+# built without --with-lz4 would ERROR on 'lz4' under ON_ERROR_STOP=1 and take
+# tune-pg down with it. default_toast_compression only ever offers {pglz,lz4}.
+#
+# MEASURED 2026-08-11, before the database was recreated: 86 GB of the 143 GB
+# database was TOAST, all pglz -- pg_settings reported source='default', so it
+# had never been set anywhere. It concentrates in the physicalities_h*
+# trajectory columns a SQL forward pass decompresses on every read, and pglz is
+# several times slower than lz4 in both directions.
+#
+# Safe to change in place: all 2716 compressible columns carry the unbaked
+# sentinel (pg_attribute.attcompression = \0), so this resolves per value at
+# INSERT rather than being frozen at CREATE TABLE. No ALTER TABLE, no rewrite,
+# and mixed pglz/lz4 data stays readable because the codec is recorded in each
+# TOAST pointer.
+pg_apply_toast_compression() {
+  local tc
+  tc=$(pg_tune_psql -tAc \
+    "SELECT CASE WHEN 'lz4' = ANY(enumvals) THEN 'lz4' ELSE 'pglz' END FROM pg_settings WHERE name = 'default_toast_compression'")
+  pg_tune_psql -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET default_toast_compression = $tc"
+  echo "pg-machine-tuning: default_toast_compression=$tc"
+  if [[ "$tc" == "pglz" ]]; then
+    echo "pg-machine-tuning: NOTE pg built without lz4 -- TOAST uses the slowest codec." >&2
+    echo "  external/CMakeLists.txt passes --with-lz4; rebuild pg to pick it up." >&2
+  fi
+}
+
+# huge_pages, probed for the same reason as the two above: the choice between
+# 'on' and 'try' depends on /proc/meminfo, which the emitter cannot read.
+#
+# 'try' fails SILENTLY -- it is why a ~31 GiB buffer pool ran on 4 KiB pages for
+# months while the setting read as configured. 'on' makes the postmaster refuse
+# to start when the pages are missing, which is the loud behaviour we want, but
+# only once the reservation is PROVEN. Reserving the pages themselves is a host
+# concern and belongs to bootstrap_pg_hugepages (sysctl vm.nr_hugepages, applied
+# at boot because late allocation fails on a fragmented host). This function only
+# decides which GUC that reservation justifies.
+pg_apply_huge_pages() {
+  local need got hp
+  need=$(pg_tune_psql -tAc "SHOW shared_memory_size_in_huge_pages" 2>/dev/null | tr -dc '0-9')
+  got=$(awk '/HugePages_Total/{print $2}' /proc/meminfo 2>/dev/null)
+  if [[ -z "$need" || -z "$got" ]]; then
+    echo "pg-machine-tuning: huge_pages unprobeable — leaving as-is" >&2
+    return 0
+  fi
+  if (( got >= need )); then hp=on; else hp=try; fi
+  pg_tune_psql -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET huge_pages = $hp"
+  echo "pg-machine-tuning: huge_pages=$hp (reserved $got, need $need)"
+  if [[ "$hp" == "try" ]]; then
+    echo "pg-machine-tuning: NOTE only $got of $need huge pages reserved -- shared memory" >&2
+    echo "  will silently fall back to 4 KiB pages. /etc/sysctl.d/60-laplace-hugepages.conf" >&2
+    echo "  persists the reservation; REBOOT so it lands before memory fragments." >&2
+  fi
+}
+
+# temp_tablespaces, probed because it depends on a tablespace the HOST provides.
+#
+# THE THIRD I/O STREAM. Sort/hash spill lands in $PGDATA/base/pgsql_tmp unless a
+# temp tablespace exists — i.e. on the same device as the heap, competing with the
+# very reads the spilling query is doing. That is the 2026-07-26 wiktionary
+# contention (vg-data at 100% util, aqu-sz ~36) in a second costume: WAL was moved
+# off the heap device, temp spill never was. With work_mem=502MB across ~26 live
+# backends the seed host spills hard and drove 12.5GB into swap.
+#
+# Left unset when the tablespace is absent: pointing temp_tablespaces at a missing
+# tablespace makes every spilling query ERROR, which is far worse than sharing a
+# spindle. bootstrap_pg_tempspace creates it; this only decides whether to use it.
+pg_apply_temp_tablespace() {
+  local ts="${LAPLACE_PG_TEMP_TS:-pgtemp}" found
+  found=$(pg_tune_psql -tAc \
+    "SELECT 1 FROM pg_tablespace WHERE spcname = '$ts'" 2>/dev/null | tr -dc '0-9')
+  if [[ -z "$found" ]]; then
+    echo "pg-machine-tuning: tablespace '$ts' absent — temp_tablespaces left unset" >&2
+    echo "  (spill stays in \$PGDATA/base/pgsql_tmp, sharing the heap device)" >&2
+    return 0
+  fi
+  pg_tune_psql -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET temp_tablespaces = '$ts'"
+  echo "pg-machine-tuning: temp_tablespaces=$ts (spill off the heap device)"
+}
+
 pg_apply_wal_compression() {
   local wc
   wc=$(pg_tune_psql -tAc \
@@ -179,6 +262,9 @@ pg_apply_machine_tuning() {
       # io_method=worker. Correct it here, on the path that actually runs.
       pg_apply_io_method
       pg_apply_wal_compression
+      pg_apply_toast_compression
+      pg_apply_huge_pages
+      pg_apply_temp_tablespace
       pg_tune_reload
       echo "pg-machine-tuning: applied from cpu-topology --pg-tuning (authoritative emitter)"
       return 0
@@ -219,13 +305,15 @@ pg_apply_machine_tuning_fallback() {
     -c "ALTER SYSTEM SET maintenance_io_concurrency = $PG_TUNE_IO_CONC" \
     -c "ALTER SYSTEM SET random_page_cost = 1.1" \
     -c "ALTER SYSTEM SET autovacuum_vacuum_cost_delay = 0" \
-    -c "ALTER SYSTEM SET huge_pages = try" \
     -c "ALTER SYSTEM SET synchronous_commit = off" \
     -c "ALTER SYSTEM SET io_workers = $PG_TUNE_IOW" \
     -c "ALTER SYSTEM SET max_locks_per_transaction = 1024"
 
   pg_apply_io_method
   pg_apply_wal_compression
+  pg_apply_toast_compression
+  pg_apply_huge_pages
+  pg_apply_temp_tablespace
   pg_tune_reload
   echo "pg-machine-tuning: shared_buffers=$PG_TUNE_SB effective_cache_size=$PG_TUNE_ECS maintenance_work_mem=$PG_TUNE_MWM work_mem=$PG_TUNE_WM wal_buffers=$PG_TUNE_WB pcores=$PG_TUNE_PCORES pdeg=$PG_TUNE_PDEG"
 }
@@ -268,7 +356,10 @@ WITH want(name, expected, mode) AS (VALUES
   ('max_parallel_maintenance_workers','${PG_TUNE_PDEG}','eq'),
   ('effective_io_concurrency','${PG_TUNE_IO_CONC}','eq'),
   ('max_locks_per_transaction','1024','eq'),
-  ('huge_pages','try','eq'))
+  -- 'enabled' (<> off), NOT eq 'try': pg_apply_huge_pages promotes this to 'on'
+  -- once the reservation is proven to cover shared_memory_size_in_huge_pages.
+  -- Pinning it to 'try' made a successful promotion read as a validation FAILURE.
+  ('huge_pages','on','enabled'))
 SELECT w.name, current_setting(w.name),
        CASE w.mode
          WHEN 'mem'     THEN pg_size_bytes(current_setting(w.name)) = pg_size_bytes(w.expected)

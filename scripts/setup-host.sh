@@ -18,12 +18,29 @@ STRIPE_BOOTSTRAP="$SCRIPT_DIR/bootstrap-stripe-dev.sh"
 MIGRATIONS_PROJ="$REPO_DIR/app/Laplace.Migrations/Laplace.Migrations.csproj"
 RUNNER_USER="laplace-runner"
 
+# THE OPERATOR, resolved ONCE here, where SUDO_USER is still the human.
+# Each nested `sudo ... "$BOOTSTRAP"` below runs from an ALREADY-ROOT process, and
+# a nested sudo resets SUDO_USER to root — so the bootstrap could never see who
+# this host belongs to, and granted its operator permissions to root instead.
+# Passed explicitly rather than re-derived on the far side.
+LAPLACE_OPERATOR="${SUDO_USER:-$(logname 2>/dev/null || true)}"
+export LAPLACE_OPERATOR
+
 MODE="${1:-setup}"
 
 green()  { printf '\033[0;32m%s\033[0m\n' "$1"; }
 yellow() { printf '\033[0;33m%s\033[0m\n' "$1"; }
 red()    { printf '\033[0;31m%s\033[0m\n' "$1"; }
 say()    { echo; echo "============================================================"; echo "  $1"; echo "============================================================"; }
+
+# Warn only AFTER the helpers exist — this block used to call yellow() nine lines
+# before it was defined, which under `set -e` aborts the whole run.
+if [ -z "$LAPLACE_OPERATOR" ] || [ "$LAPLACE_OPERATOR" = root ]; then
+    yellow "WARNING: cannot resolve the operator account (SUDO_USER=${SUDO_USER:-unset})."
+    yellow "  Operator-scoped grants (postgres bounce, gh auth mirror) will be SKIPPED"
+    yellow "  rather than silently granted to root, which is how this stayed hidden."
+    yellow "  Run as: sudo bash scripts/setup-host.sh"
+fi
 
 usage() {
     cat <<EOF
@@ -49,7 +66,10 @@ ensure_dotnet_present() {
 # Deploy credentials: GitHub Secrets → laplace.yml publish → /opt/laplace/secrets.
 seed_billing_from_operator_files() {
     say "Billing secrets — optional local seed (CI publish is authoritative)"
-    local home_src="/home/${SUDO_USER:-ahart}/.config/shell/secrets.env"
+    # getent, not /home/$user: root's home is /root, and a hardcoded /home/$user
+    # is how bootstrap_runner_gh_auth ended up probing /home/root and skipping.
+    local home_src
+    home_src="$(getent passwd "${LAPLACE_OPERATOR:-}" 2>/dev/null | cut -d: -f6)/.config/shell/secrets.env"
     local repo_src="$REPO_DIR/.env"
     local src=""
     if [ -f "$home_src" ]; then src="$home_src"
@@ -72,7 +92,7 @@ seed_billing_from_operator_files() {
         STRIPE_API_SECRET="$stripe_key" \
             "$STRIPE_BOOTSTRAP" --api-key "$stripe_key" --persist-zsh || yellow "stripe-dev.env bootstrap warned"
     fi
-    sudo STRIPE_API_SECRET="$stripe_key" "$BOOTSTRAP" stripe || yellow "runner stripe env warned"
+    sudo STRIPE_API_SECRET="$stripe_key" LAPLACE_OPERATOR="$LAPLACE_OPERATOR" "$BOOTSTRAP" stripe || yellow "runner stripe env warned"
     green "✓ local billing seed from $src (overwritten by next CI publish)"
 }
 
@@ -90,6 +110,29 @@ layer1_clean_foreign_build_artifacts() {
             if [ ! -e "$d" ]; then
                 sudo install -d -o "$RUNNER_USER" -g "$RUNNER_USER" -m 775 "$d"
                 yellow "  - created $d owned by $RUNNER_USER"
+            fi
+            # The stat above only inspects the TOP directory. MSBuild writes
+            # thousands of files underneath it, and a developer `dotnet build` as
+            # ahart — or this script's own Layer 1 extension build, which runs
+            # pipeline.sh as root — leaves foreign-owned files inside a directory
+            # that still passes the ownership test. layer1_up then runs as
+            # $RUNNER_USER and dies on MSB3374 "last access/last write time ...
+            # cannot be set" the first time MSBuild touches one of them
+            # (measured: 1587 ahart-owned and 121 root-owned files under
+            # app/Laplace.*/{obj,bin} against 105 correctly owned).
+            # Repair recursively; chown is idempotent and cheap at this size.
+            # SHARED, not seized. chown alone made these trees runner-owned at mode
+            # 644, so the operator — who IS in the laplace-runner group — got
+            # "Access to the path ... is denied" building in their own home
+            # directory. Both identities build here: the operator interactively,
+            # and $RUNNER_USER via layer1_up and CI. Group-write plus setgid makes
+            # the tree writable by both and keeps new files in the shared group
+            # instead of re-splitting ownership on the next build.
+            if [ -n "$(sudo find "$d" \( ! -user "$RUNNER_USER" -o ! -perm -g+w \) -print -quit 2>/dev/null)" ]; then
+                sudo chown -R "$RUNNER_USER:$RUNNER_USER" "$d"
+                sudo chmod -R g+w "$d"
+                sudo find "$d" -type d -exec chmod g+s {} +
+                yellow "  - re-owned + group-shared $d ($RUNNER_USER:$RUNNER_USER, g+w, setgid)"
             fi
         done
     done
@@ -159,12 +202,12 @@ do_setup() {
     ensure_dotnet_present
 
     say "Layer 0a — account, apt (incl. nginx/stockfish/Qt), /opt/laplace"
-    sudo "$BOOTSTRAP" prefix
+    sudo LAPLACE_OPERATOR="$LAPLACE_OPERATOR" "$BOOTSTRAP" prefix
 
     layer0_5_build_deps
 
     say "Layer 0b — runner, PG cluster, API unit, chess-lab, secrets seed"
-    sudo "$BOOTSTRAP" bootstrap
+    sudo LAPLACE_OPERATOR="$LAPLACE_OPERATOR" "$BOOTSTRAP" bootstrap
 
     say "Layer 0c — agent ops lever: guarded runner bounce (sudoers drop-in)"
     # scripts/runner-bounce.sh refuses unless the ingest journal, database
@@ -214,7 +257,7 @@ EOF
 
 do_status() {
     say "Layer 0 — bootstrap status"
-    sudo "$BOOTSTRAP" status
+    sudo LAPLACE_OPERATOR="$LAPLACE_OPERATOR" "$BOOTSTRAP" status
     if id -u "$RUNNER_USER" >/dev/null 2>&1; then
         ensure_dotnet_present
         layer1_status
@@ -244,7 +287,7 @@ EOF
             || yellow "Layer 1 nuke skipped"
     fi
 
-    echo "RESET" | sudo "$BOOTSTRAP" reset
+    echo "RESET" | sudo LAPLACE_OPERATOR="$LAPLACE_OPERATOR" "$BOOTSTRAP" reset
     green "===== HOST RESET COMPLETE ====="
 }
 

@@ -11,8 +11,12 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 RUNNER_USER="${RUNNER_USER:-laplace-runner}"
 RUNNER_GROUP="${RUNNER_GROUP:-laplace-runner}"
 PREFIX="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
-EXTERNAL="${LAPLACE_EXTERNAL:-$PREFIX/external}"
-CC_BUILD="${LAPLACE_CUTECHESS_BUILD:-$PREFIX/build-cutechess}"
+EXTERNAL="${LAPLACE_EXTERNAL:-/build/external}"
+# Build tree beside the source on /build, not under $PREFIX on the database device.
+# It defaulted to $PREFIX/build-cutechess (nvme1n1) and its CMakeCache pinned
+# CMAKE_HOME_DIRECTORY to the OLD source path, so the first run after the source
+# moved failed with "does not match the source used to generate cache" (2026-08-12).
+CC_BUILD="${LAPLACE_CUTECHESS_BUILD:-/build/cutechess}"
 CC_BIN_DIR="$PREFIX/bin"
 APP_DIR="$PREFIX/app"
 ENV_FILE="$APP_DIR/laplace-api.env"
