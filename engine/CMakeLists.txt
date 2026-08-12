@@ -136,9 +136,27 @@ message(STATUS "Laplace UCD: version=${LAPLACE_UNICODE_VERSION} xml=${LAPLACE_UC
 message(STATUS "Laplace UCA: version=${LAPLACE_UCA_VERSION} ducet=${LAPLACE_DUCET_FILE}")
 
 if(NOT EXISTS "${LAPLACE_EXTERNAL}/eigen/Eigen/Dense")
+    # Do NOT restore the old advice here. This said "git submodule update --init
+    # external/eigen ..." long after 391d9be7 deleted all 311 submodules and moved
+    # the deps to a PINS.tsv-driven cache, so the remedy it printed could not work
+    # and the operator was sent to a dead command. It is also the wrong diagnosis
+    # in the common case: the tree is usually fine and the CACHED path is stale.
+    # LAPLACE_EXTERNAL is a CACHE PATH, so an env var does not override it once a
+    # build directory exists -- when /opt/laplace/external became a 16 GB LV and
+    # external moved to /build (44962ae4), every pre-existing build/ kept pointing
+    # at the dead location and failed here with a submodule error that had nothing
+    # to do with submodules. Say where it looked and how to repoint it.
     message(FATAL_ERROR
-        "external/eigen submodule not initialized. Run:\n"
-        "    git submodule update --init external/eigen external/spectra external/blake3 external/fathom external/googletest\n")
+        "Eigen not found under LAPLACE_EXTERNAL.\n"
+        "  looked for: ${LAPLACE_EXTERNAL}/eigen/Eigen/Dense\n"
+        "  LAPLACE_EXTERNAL = ${LAPLACE_EXTERNAL}"
+        " (CACHE PATH -- an env var will NOT override it in an existing build dir)\n"
+        "\n"
+        "  If that path is stale, repoint the cache:\n"
+        "      cmake -S . -B build -DLAPLACE_EXTERNAL=/build/external\n"
+        "\n"
+        "  If the cache is absent, provision it (PINS.tsv-driven, not submodules):\n"
+        "      sudo bash scripts/setup-host.sh\n")
 endif()
 
 # The vendored Syzygy prober is provisioned like every other external dep:

@@ -53,6 +53,13 @@ DESIGN_ROOTS = (
     ROOT / "docs" / "plan" / "README.md",
     ROOT / "docs" / "plan" / "WORKSTREAMS.md",
     ROOT / "docs" / "plan" / "REAL_CONVERSATION_AND_MODEL_CONSENSUS_FINISH_LINE.md",
+    # Classified 2026-08-12. The model ingestion/export lane is active work —
+    # GPU evaluation, fp64->fp32, safetensors decomposition. 09d2e64f DELETED
+    # this artifact to make the gate pass, which is backwards: the gate exists
+    # to stop status snapshots and archived plans accumulating in docs/plan, not
+    # to reject genuine active design. When the plan legitimately changes, widen
+    # the classification; do not drop the document.
+    ROOT / "docs" / "plan" / "MODEL_INGESTION_DESIGN.md",
 )
 
 INSTRUCTION_ROOTS = (
@@ -90,6 +97,7 @@ ACTIVE_PLAN_FILES = {
     "README.md",
     "WORKSTREAMS.md",
     "REAL_CONVERSATION_AND_MODEL_CONSENSUS_FINISH_LINE.md",
+    "MODEL_INGESTION_DESIGN.md",
 }
 
 LINK_PATTERN = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
