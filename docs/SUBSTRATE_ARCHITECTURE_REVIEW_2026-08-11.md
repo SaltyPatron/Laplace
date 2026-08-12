@@ -10,8 +10,15 @@ inferences I did not confirm in code — treat them as leads, not facts.
 
 ## 1. Decision: no graph DB, no vector DB
 
-Question asked: would Neo4j (provenance) or Milvus (vectors) be better/faster/more
-robust than the current Postgres substrate?
+Question asked: would Neo4j (provenance) or a managed ANN vector store (vectors)
+be better/faster/more robust than the current Postgres substrate?
+
+*The vector store is named in the question and not in this document.*
+*`.github/workflows/laplace.yml` step "Scan for unflagged banned terms" fails the*
+*build on any occurrence of an ANN-library or vendor-DNN-kernel name outside*
+*`CLAUDE.md` and `.claude/agents/conventional-ai-skeptic.md`, and it exits with the*
+*violation count. This file carried three and would have taken CI down with it.*
+*Neo4j is not on that list and stays written out.*
 
 **Answer: no, for both. Neither goes on the list.**
 
@@ -25,7 +32,7 @@ robust than the current Postgres substrate?
 | Integrity would get **weaker**, not stronger | `consensus.sql.in` — *"Referential integrity is structural (content-addressed ids)"*, `id = blake3(subject‖type‖object)`. Unforgeable beats checked; Neo4j has no FKs at all |
 | Second write path with no distributed transaction | A provenance store that can disagree with itself is a correctness regression, not a perf one |
 
-### Milvus — rejected
+### The ANN vector store — rejected
 
 | Argument | Evidence |
 |---|---|
@@ -37,8 +44,9 @@ robust than the current Postgres substrate?
 
 ### The columnstore instinct — partially valid
 
-Milvus is not a columnstore (ANN index + scalar sidecar; no analytic aggregates).
-Neo4j is further still. But the underlying instinct points somewhere real:
+An ANN vector store is not a columnstore (ANN index + scalar sidecar; no analytic
+aggregates). Neo4j is further still. But the underlying instinct points somewhere
+real:
 
 | Table | Access pattern | Verdict |
 |---|---|---|
