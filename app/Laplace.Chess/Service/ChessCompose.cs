@@ -313,7 +313,10 @@ public static class ChessCompose
                 nFloor != 0 ? (int)nFloor : n, tierFloor != 0 ? tierFloor : tier);
         }
 
-        double[] coord = Math4d.Centroid(childCoords);
+        // Karcher, not Centroid — intrinsic mean, lands on S3 at norm 1. The floor
+        // hit above returns ROM geometry untouched; only the computed branch moves.
+        // Requires a reseed.
+        double[] coord = Math4d.KarcherMean(childCoords);
         Hilbert128 hbEnc = Hilbert128.Encode(coord);
         return new ChessNode(id, coord, hbEnc, traj, physId, n, tier);
     }

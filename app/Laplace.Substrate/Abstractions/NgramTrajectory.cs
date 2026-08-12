@@ -25,7 +25,13 @@ public static class NgramTrajectory
         }
 
         Hash128 id = Hash128.Merkle(tier, childIds);
-        double[] cen = Math4d.Centroid(coords);
+        // Karcher, not Centroid: the intrinsic mean lands ON S3 at norm 1. The
+        // Euclidean centroid falls inside the 4-ball — measured min 0.003148
+        // across 14.5M composed placements, 241,015 under 0.1 where the
+        // normalised direction is float noise. Both are permutation-invariant
+        // now; only this one is on the sphere. Changes every composed coord and
+        // every hilbert_index derived from it — requires a reseed.
+        double[] cen = Math4d.KarcherMean(coords);
         Hilbert128 hb = Hilbert128.Encode(cen);
         double[] traj = Trajectory.Build(childIds);
         Hash128 physId = PhysicalityId.Compute(id, PhysicalityType.Content);

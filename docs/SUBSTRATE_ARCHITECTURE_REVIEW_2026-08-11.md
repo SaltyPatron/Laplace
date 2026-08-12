@@ -450,7 +450,24 @@ document or its author asserted and then had to withdraw.
     first cut of `ops.placement_health` bought nothing and understated the minimum by 3.7×
     (0.0117 sampled vs 0.003148 exact). Also joined `entities` for a tier split that
     `physicalities.n_constituents` already provides.
-14. **Ordered the Karcher canonical sort with `memcmp` over raw double bytes.** A valid
+15. **Read the tier-transition matrix as damage when it was the law working.** Measured
+    `word → codepoint` at 96.3%, `document → sentence` at 6.2%, and 30.6% of
+    `sentence → codepoint` edges carrying content letters, and called the decomposers
+    broken. **Tier is a floor, not a rung in a containment ladder.** Same content = same
+    hash means a one-codepoint grapheme *is* the codepoint and a one-word sentence *is*
+    the word — there is nothing separate to record, and `TextEntityBuilder`'s
+    `CollapseIndex` implements exactly that. The one-child collapse exists *because*
+    length-1 trajectories once duplicated ~1,100 physicality rows. Every "skip" in that
+    matrix is deduplication working. `"So?"` and `"No."` are word + punctuation-codepoint,
+    which is the `sentence → codepoint` row I called a defect.
+16. **Claimed UAX #29 grapheme segmentation was never wired into text decomposition.**
+    False. `text_decomposer.c:43` calls `laplace_grapheme_floor_build`, which calls
+    `laplace_grapheme_break_next`, and `grapheme_floor.c:80` emits a tier-1 node for every
+    cluster unconditionally. The ladder is built correctly; the collapse is applied at
+    persistence. The UI duplicates tier 0 and tier 1 because `ExploreDecomposeService`
+    renders the *uncollapsed* live tree with no database — that is a display bug, not a
+    substrate defect.
+17. **Ordered the Karcher canonical sort with `memcmp` over raw double bytes.** A valid
     total order on any one host, but byte order is endianness-dependent, so two hosts of
     different endianness would sort constituents differently and derive different
     placements from identical inputs — architecture-stable content addressing requires

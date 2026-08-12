@@ -1,0 +1,72 @@
+-- ops.ingest_integrity_gate — refuse a seed run that wrote more physicalities
+-- than entities.
+--
+-- A physicality whose entity_id has no row in laplace.entities is unreachable
+-- content: structural.containers_of finds it, realize.render_text returns NULL
+-- for anything containing it, and converse.label_or_hex falls through to hex. A
+-- document holding one such constituent renders empty in full.
+--
+-- MEASURED 2026-08-12: 899,179 such rows, 5.8% of physicalities. 894,613 of them
+-- (99.5%) fall inside the OMWDecomposer window 02:41:27-02:52:32, and the run
+-- journal recorded the imbalance at write time:
+--
+--   source                    entities     physicalities
+--   OMWDecomposer            5,111,969     6,006,582     <- +894,613
+--   CILIDecomposer           2,212,105     2,212,105        1:1
+--   WordFrameNetDecomposer      16,524        16,524        1:1
+--   ChessOpenings               15,831        15,710        fewer
+--   ChessPgn                    85,304        80,329        fewer
+--
+-- Entities without physicalities is normal. The inverse is not: identity is
+-- written before projection, so a projection with no identity behind it means
+-- the identity write was skipped or lost. Every other lane is 1:1 or has fewer
+-- physicalities; OMW is the only one that inverts.
+--
+-- The run reported status=ok and the document consensus gate passed. Nothing
+-- asserted this invariant, and FKs from physicalities to entities are dropped by
+-- design ("Referential integrity is structural (content-addressed ids)") --
+-- which guarantees that a row present is the right row, and nothing about a row
+-- being present at all.
+--
+-- Costs nothing: both counts are already columns on ingest_run_journal, so this
+-- is a catalog-speed read, not the 4.3 s anti-join over physicalities.
+DROP FUNCTION IF EXISTS ops.ingest_integrity_gate(timestamptz);
+CREATE OR REPLACE FUNCTION ops.ingest_integrity_gate(p_since timestamptz DEFAULT NULL)
+RETURNS TABLE(run_id        uuid,
+              source_name   text,
+              started_at    timestamptz,
+              entities      bigint,
+              physicalities bigint,
+              orphaned      bigint,
+              status        text)
+LANGUAGE sql STABLE PARALLEL SAFE
+AS $$
+    SELECT j.run_id, j.source_name, j.started_at,
+           j.entities, j.physicalities,
+           j.physicalities - j.entities AS orphaned,
+           j.status
+    FROM laplace.ingest_run_journal j
+    WHERE j.physicalities > j.entities
+      AND (p_since IS NULL OR j.started_at >= p_since)
+    ORDER BY (j.physicalities - j.entities) DESC
+$$;
+
+COMMENT ON FUNCTION ops.ingest_integrity_gate(timestamptz) IS
+    'Runs that wrote more physicalities than entities. Non-empty = orphaned '
+    'projections with no identity behind them; documents containing them render NULL.';
+
+
+-- ops.orphan_physicality_count — the direct measurement, for when the journal is
+-- not trusted or the rows predate it. Full anti-join: ~4.3 s at 15.6M rows.
+DROP FUNCTION IF EXISTS ops.orphan_physicality_count();
+CREATE OR REPLACE FUNCTION ops.orphan_physicality_count()
+RETURNS bigint
+LANGUAGE sql STABLE PARALLEL SAFE
+AS $$
+    SELECT count(*)
+    FROM laplace.physicalities p
+    WHERE NOT EXISTS (SELECT 1 FROM laplace.entities e WHERE e.id = p.entity_id)
+$$;
+
+COMMENT ON FUNCTION ops.orphan_physicality_count() IS
+    'Physicalities whose entity_id has no entities row. Must be 0.';

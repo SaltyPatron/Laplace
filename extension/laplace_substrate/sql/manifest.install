@@ -404,6 +404,7 @@ functions/analysis/laplace_translations.sql.in
 functions/analysis/ducet_rank.sql.in
 functions/analysis/placement_health.sql.in
 functions/analysis/metric_ladder.sql.in
+functions/analysis/ingest_integrity_gate.sql.in
 functions/inference/laplace_attention_centroid.sql.in
 functions/inference/laplace_nearest_entity.sql.in
 functions/inference/laplace_astar_path.sql.in
