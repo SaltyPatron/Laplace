@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build system deps (proj/geos/gdal/postgresql/postgis/tree-sitter) into /opt/laplace.
 #
-# Idempotent: fingerprints /opt/laplace/external pins + ISA. If the
+# Idempotent: fingerprints $LAPLACE_EXTERNAL pins + ISA. If the
 # fingerprint matches and install artifacts exist, this is a no-op. Rebuilds only
 # when sources/pins actually change (or LAPLACE_FORCE_DEPS=1).
 #
@@ -9,7 +9,7 @@
 #
 # Env:
 #   LAPLACE_EXTERNAL       default /build/external
-#   LAPLACE_DEPS_BUILD     default /opt/laplace/build/deps
+#   LAPLACE_DEPS_BUILD     default /build/deps
 #   LAPLACE_DEPS_PREFIX    default /opt/laplace
 #   LAPLACE_TARGET_ISA     default AVX2
 #   LAPLACE_FORCE_DEPS=1   ignore stamp; rebuild

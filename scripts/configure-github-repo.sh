@@ -15,7 +15,11 @@ if ! gh auth status >/dev/null 2>&1; then
 fi
 
 declare -A vars=(
-    [LAPLACE_EXTERNAL]="/opt/laplace/external"
+    # The pinned source cache lives on /build (its own LV) so compile churn stays
+    # off the database device. This value becomes vars.LAPLACE_EXTERNAL, which
+    # OVERRIDES the workflow default — leaving it at /opt/laplace/external here
+    # would silently re-break CI on the next run of this script.
+    [LAPLACE_EXTERNAL]="/build/external"
     [LAPLACE_INSTALL_PREFIX]="/opt/laplace"
     [LAPLACE_PG_PREFIX]="/opt/laplace/pgsql-18"
 )
