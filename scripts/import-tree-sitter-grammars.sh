@@ -5,7 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 VAULT="${LAPLACE_VAULT_TREESITTER:-/vault/Data/TreeSitter}"
-EXTERNAL_ROOT="${LAPLACE_EXTERNAL:-${LAPLACE_SUBMODULE_CACHE:-/opt/laplace/external}}"
+EXTERNAL_ROOT="${LAPLACE_EXTERNAL:-${LAPLACE_SUBMODULE_CACHE:-/build/external}}"
 TARGET="$EXTERNAL_ROOT/tree-sitter-grammars"
 DRY_RUN=0
 

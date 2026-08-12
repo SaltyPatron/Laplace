@@ -8,7 +8,7 @@
 # Used by: scripts/setup-host.sh Layer 0.5, CI deps job, `just build-deps`.
 #
 # Env:
-#   LAPLACE_EXTERNAL       default /opt/laplace/external
+#   LAPLACE_EXTERNAL       default /build/external
 #   LAPLACE_DEPS_BUILD     default /opt/laplace/build/deps
 #   LAPLACE_DEPS_PREFIX    default /opt/laplace
 #   LAPLACE_TARGET_ISA     default AVX2
@@ -18,7 +18,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-EXT="${LAPLACE_EXTERNAL:-/opt/laplace/external}"
+EXT="${LAPLACE_EXTERNAL:-/build/external}"
 BUILD="${LAPLACE_DEPS_BUILD:-/opt/laplace/build/deps}"
 PREFIX="${LAPLACE_DEPS_PREFIX:-/opt/laplace}"
 ISA="${LAPLACE_TARGET_ISA:-AVX2}"

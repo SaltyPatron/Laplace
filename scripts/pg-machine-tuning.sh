@@ -202,6 +202,31 @@ pg_apply_huge_pages() {
   fi
 }
 
+# temp_tablespaces, probed because it depends on a tablespace the HOST provides.
+#
+# THE THIRD I/O STREAM. Sort/hash spill lands in $PGDATA/base/pgsql_tmp unless a
+# temp tablespace exists — i.e. on the same device as the heap, competing with the
+# very reads the spilling query is doing. That is the 2026-07-26 wiktionary
+# contention (vg-data at 100% util, aqu-sz ~36) in a second costume: WAL was moved
+# off the heap device, temp spill never was. With work_mem=502MB across ~26 live
+# backends the seed host spills hard and drove 12.5GB into swap.
+#
+# Left unset when the tablespace is absent: pointing temp_tablespaces at a missing
+# tablespace makes every spilling query ERROR, which is far worse than sharing a
+# spindle. bootstrap_pg_tempspace creates it; this only decides whether to use it.
+pg_apply_temp_tablespace() {
+  local ts="${LAPLACE_PG_TEMP_TS:-pgtemp}" found
+  found=$(pg_tune_psql -tAc \
+    "SELECT 1 FROM pg_tablespace WHERE spcname = '$ts'" 2>/dev/null | tr -dc '0-9')
+  if [[ -z "$found" ]]; then
+    echo "pg-machine-tuning: tablespace '$ts' absent — temp_tablespaces left unset" >&2
+    echo "  (spill stays in \$PGDATA/base/pgsql_tmp, sharing the heap device)" >&2
+    return 0
+  fi
+  pg_tune_psql -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET temp_tablespaces = '$ts'"
+  echo "pg-machine-tuning: temp_tablespaces=$ts (spill off the heap device)"
+}
+
 pg_apply_wal_compression() {
   local wc
   wc=$(pg_tune_psql -tAc \
@@ -239,6 +264,7 @@ pg_apply_machine_tuning() {
       pg_apply_wal_compression
       pg_apply_toast_compression
       pg_apply_huge_pages
+      pg_apply_temp_tablespace
       pg_tune_reload
       echo "pg-machine-tuning: applied from cpu-topology --pg-tuning (authoritative emitter)"
       return 0
@@ -287,6 +313,7 @@ pg_apply_machine_tuning_fallback() {
   pg_apply_wal_compression
   pg_apply_toast_compression
   pg_apply_huge_pages
+  pg_apply_temp_tablespace
   pg_tune_reload
   echo "pg-machine-tuning: shared_buffers=$PG_TUNE_SB effective_cache_size=$PG_TUNE_ECS maintenance_work_mem=$PG_TUNE_MWM work_mem=$PG_TUNE_WM wal_buffers=$PG_TUNE_WB pcores=$PG_TUNE_PCORES pdeg=$PG_TUNE_PDEG"
 }

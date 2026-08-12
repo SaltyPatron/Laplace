@@ -27,12 +27,49 @@ LAPLACE_PG_DATA="$LAPLACE_PG_MOUNT/data"
 # onto the idle spindle removes the fsync stream from the read path.
 # The capacity lesson still binds: max_wal_size (32GB) must stay small relative
 # to the WAL volume's free space, which is asserted before initdb/relocation.
-LAPLACE_PG_WAL="${LAPLACE_PG_WAL:-/opt/laplace/pg_wal}"
+#
+# NOT /opt/laplace/pg_wal (vg-raid on md127). That was the 2026-08-11 default and
+# it cost the cluster: md127 is a two-disk RAID0 with no redundancy, so when sda
+# stopped answering mid-OMW-ingest (ata1 frozen, 5x COMRESET failed over 60s) the
+# WAL fsync could not be retried against a second copy. issue_xlog_fsync PANICked
+# on segment 0000000100001ABC0000009A, XFS shut the filesystem down, and the
+# checkpoint record in that segment was never recoverable — the cluster had to be
+# rebuilt from scratch. pg_prepare_waldir() below did NOT catch it: it asserts a
+# different filesystem and free space, neither of which a stripe fails.
+# WAL is the durability substrate; it belongs on redundant or at minimum
+# single-disk storage, never on a stripe. /var is on sdc (vg-os), the healthiest
+# device on this host.
+LAPLACE_PG_WAL="${LAPLACE_PG_WAL:-/var/lib/pgwal}"
 # Must equal PG_TUNE_MAX_WAL in pg-machine-tuning.sh — the ENOSPC guard multiplies
 # these; when they were undefined, bash arithmetic made want_free 0 and the guard
 # passed unconditionally (dead since it was written).
 LAPLACE_PG_MAX_WAL_GB="${LAPLACE_PG_MAX_WAL_GB:-32}"
 LAPLACE_PG_WAL_HEADROOM="${LAPLACE_PG_WAL_HEADROOM:-3}"
+# THE THIRD I/O STREAM. Without a temp tablespace, sort/hash spill lands in
+# $PGDATA/base/pgsql_tmp — the heap device, competing with the reads of the very
+# query that is spilling. WAL was split off the heap after the 2026-07-26
+# wiktionary contention; temp spill is the same fight and was never split. Points
+# at the RAID0 deliberately: temp files are deleted at startup, so the correlated
+# pair holding them costs nothing, and it is the only idle spindle left.
+# Empty disables the tablespace entirely (spill stays in PGDATA).
+LAPLACE_PG_TEMP="${LAPLACE_PG_TEMP:-/pgtemp}"
+LAPLACE_PG_TEMP_TS="${LAPLACE_PG_TEMP_TS:-pgtemp}"
+# THE FOURTH WRITE STREAM. logging_collector writes stderr AND csvlog for every
+# connection, error and checkpoint. Inside the install prefix that put ~250MB across
+# 1083 files on the heap device, growing without retention. /var is the FHS home for
+# it, sits on sdc with ~100GB idle, and is the one volume with no database workload
+# competing. ops.repoint_pg_log() resolves the path via pg_current_logfile(), so the
+# file_fdw follows this automatically — no migration change needed.
+LAPLACE_PG_LOG="${LAPLACE_PG_LOG:-/var/log/postgresql}"
+# Retention. log_filename is timestamped and log_truncate_on_rotation is off, so
+# the collector NEVER reuses a name and nothing ever deletes one — 1083 files /
+# 247MB had accumulated by 2026-08-11. 0 disables pruning.
+LAPLACE_PG_LOG_RETAIN_DAYS="${LAPLACE_PG_LOG_RETAIN_DAYS:-30}"
+# Git-pinned source checkouts (PINS.tsv), NOT build output — re-clonable, so they
+# live on expendable storage, and compile churn stays off the database device.
+LAPLACE_EXTERNAL="${LAPLACE_EXTERNAL:-/build/external}"
+LAPLACE_SUBMODULE_CACHE="${LAPLACE_SUBMODULE_CACHE:-/build/submodule-modules}"
+export LAPLACE_EXTERNAL LAPLACE_SUBMODULE_CACHE
 LAPLACE_PG_PORT="5432"
 LAPLACE_PG_SOCKET_DIR="/var/run/postgresql"
 LAPLACE_PG_SERVICE="laplace-postgresql.service"
@@ -699,7 +736,7 @@ bootstrap_laplace_pg_cluster() {
         return 1
     fi
 
-    install -d -m 2775 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "$LAPLACE_PG_PREFIX/log"
+    install -d -m 2775 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "$LAPLACE_PG_LOG"
     install -d -m 2775 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "$LAPLACE_PG_CONF_DIR"
 
     if ! mountpoint -q "$LAPLACE_PG_MOUNT"; then
@@ -765,7 +802,7 @@ unix_socket_directories = '$LAPLACE_PG_SOCKET_DIR,/tmp'
 extension_control_path = '/opt/laplace/share/postgresql/$PG_VERSION:\$system'
 dynamic_library_path = '\$libdir:/opt/laplace/lib/postgresql/$PG_VERSION'
 logging_collector = on
-log_directory = '$LAPLACE_PG_PREFIX/log'
+log_directory = '$LAPLACE_PG_LOG'
 log_filename = 'postgresql-%Y-%m-%d_%H%M%S.log'
 log_file_mode = 0640
 # csvlog runs ALONGSIDE stderr so DB-down still degrades to "read the .log file"; the
@@ -1029,6 +1066,109 @@ PG_EOF
     green "✓ Roles present (laplace_admin = SUPERUSER; postgres = LAN convenience superuser; substrate operator role per AWS/GCP RDS pattern)"
 }
 
+# Create the temp tablespace so sort/hash spill leaves the heap device.
+#
+# WHY. Without this, spill goes to $PGDATA/base/pgsql_tmp — the same volume as the
+# heap, so a spilling query competes with its own reads. Splitting WAL off the heap
+# after the 2026-07-26 wiktionary contention fixed one of the two write streams;
+# this is the other. With work_mem=502MB across ~26 live backends, the seed host
+# spills constantly.
+#
+# Refuses rather than degrades if the directory is not its own mount: a tablespace
+# on the heap device is worse than none, because pg-machine-tuning would then point
+# temp_tablespaces at it and every spill would land right back where it started.
+# Set LAPLACE_PG_TEMP="" to opt out entirely.
+bootstrap_pg_tempspace() {
+    [ -n "$LAPLACE_PG_TEMP" ] || { yellow "  LAPLACE_PG_TEMP empty — spill stays in PGDATA"; return 0; }
+    say "Ensure temp tablespace '$LAPLACE_PG_TEMP_TS' at $LAPLACE_PG_TEMP (spill off the heap device)"
+
+    install -d -m 0700 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "$LAPLACE_PG_TEMP"
+
+    local heap_dev temp_dev
+    heap_dev="$(pg_device_of "$LAPLACE_PG_MOUNT")"
+    temp_dev="$(pg_device_of "$LAPLACE_PG_TEMP")"
+    if [ -n "$heap_dev" ] && [ "$heap_dev" = "$temp_dev" ]; then
+        red "✗ $LAPLACE_PG_TEMP is on the SAME filesystem as the heap ($LAPLACE_PG_MOUNT)."
+        red "  A temp tablespace there moves nothing — spill would still contend with the"
+        red "  heap reads. Mount it on a different spindle or set LAPLACE_PG_TEMP=\"\"."
+        return 1
+    fi
+
+    sudo -u "$RUNNER_USER" "$LAPLACE_PG_PREFIX/bin/psql" \
+        -h "$LAPLACE_PG_SOCKET_DIR" -p "$LAPLACE_PG_PORT" \
+        -d postgres -U laplace_admin -v ON_ERROR_STOP=1 \
+        -v ts="$LAPLACE_PG_TEMP_TS" -v loc="$LAPLACE_PG_TEMP" <<'PG_EOF'
+SELECT format('CREATE TABLESPACE %I LOCATION %L', :'ts', :'loc')
+WHERE NOT EXISTS (SELECT 1 FROM pg_tablespace WHERE spcname = :'ts') \gexec
+GRANT CREATE ON TABLESPACE :"ts" TO laplace_app, laplace_readonly;
+PG_EOF
+    # ORDER MATTERS. pg_apply_machine_tuning runs inside bootstrap_laplace_pg_cluster,
+    # BEFORE this function exists to create the tablespace — so on a fresh initdb it
+    # probes, finds nothing, and correctly leaves temp_tablespaces unset. Re-apply now
+    # that the tablespace is real, or spill silently stays in $PGDATA for the life of
+    # the cluster (2026-08-12: "tablespace 'pgtemp' absent — temp_tablespaces left
+    # unset" on the very run that then created it).
+    if declare -F pg_apply_temp_tablespace >/dev/null 2>&1; then
+        pg_apply_temp_tablespace
+        pg_tune_reload
+    else
+        yellow "  pg-machine-tuning.sh not sourced — run it to set temp_tablespaces"
+    fi
+    green "✓ Tablespace $LAPLACE_PG_TEMP_TS → $LAPLACE_PG_TEMP"
+}
+
+# Prune collector logs older than LAPLACE_PG_LOG_RETAIN_DAYS.
+#
+# NOT logrotate. logrotate's model is "rename the live file, app reopens it" —
+# correct for a fixed filename, wrong here: the collector already rotates itself
+# into timestamped names and holds the current one open, so letting logrotate
+# rename it either orphans the writer or truncates the file ops.pg_log is pointed
+# at. What is missing is deletion, not rotation, so this only deletes.
+#
+# -mtime is what keeps the live file safe: the current .log/.csv are being written
+# now, so they can never match "+N days". No exclusion list to get wrong.
+bootstrap_pg_log_retention() {
+    local days="$LAPLACE_PG_LOG_RETAIN_DAYS"
+    local svc=/etc/systemd/system/laplace-pg-log-prune.service
+    local tmr=/etc/systemd/system/laplace-pg-log-prune.timer
+
+    if [ "${days:-0}" -le 0 ]; then
+        yellow "  LAPLACE_PG_LOG_RETAIN_DAYS=0 — collector logs grow unbounded"
+        systemctl disable --now laplace-pg-log-prune.timer 2>/dev/null || true
+        return 0
+    fi
+    say "Ensure collector-log retention: ${days}d in $LAPLACE_PG_LOG"
+
+    cat > "$svc" <<EOF
+[Unit]
+Description=Prune Laplace PostgreSQL collector logs older than ${days} days
+Documentation=https://github.com/SaltyPatron/Laplace
+
+[Service]
+Type=oneshot
+# One ExecStart per pattern: systemd does not glob, but it does its own word
+# splitting, and find's parenthesised -o grouping needs escaping that differs
+# between systemd's parser and a shell. Two flat invocations have neither problem.
+ExecStart=/usr/bin/find $LAPLACE_PG_LOG -maxdepth 1 -type f -name *.log -mtime +${days} -delete
+ExecStart=/usr/bin/find $LAPLACE_PG_LOG -maxdepth 1 -type f -name *.csv -mtime +${days} -delete
+EOF
+    cat > "$tmr" <<'EOF'
+[Unit]
+Description=Daily prune of Laplace PostgreSQL collector logs
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=1h
+
+[Install]
+WantedBy=timers.target
+EOF
+    systemctl daemon-reload
+    systemctl enable --now laplace-pg-log-prune.timer >/dev/null 2>&1 || true
+    green "✓ laplace-pg-log-prune.timer — .log/.csv older than ${days}d deleted daily"
+}
+
 bootstrap_pg_legacy_cleanup() {
     say "Clean up legacy 'ahart' PG state (substrate cluster)"
     sudo -u "$RUNNER_USER" "$LAPLACE_PG_PREFIX/bin/dropdb" \
@@ -1246,7 +1386,11 @@ bootstrap_external_dirs() {
 # Idempotent by construction: a dep already at its pinned commit is skipped
 # without a network call, so re-running the bootstrap on a healthy host is free.
 bootstrap_external_pins() {
-    local pins="/opt/laplace/external/PINS.tsv"
+    # Follows LAPLACE_EXTERNAL rather than hardcoding the prefix: the source cache
+    # moved to /build (its own LV on the array) so compile churn stays off the
+    # database device. A hardcoded /opt/laplace/external here made this report
+    # "PINS.tsv not present" against a cache that was simply somewhere else.
+    local pins="$LAPLACE_EXTERNAL/PINS.tsv"
     say "Provision /opt/laplace/external to $pins"
 
     if [ ! -f "$pins" ]; then
@@ -1487,9 +1631,9 @@ EOF
         rm -rf "$LAPLACE_PG_DATA"
         green "✓ Removed $LAPLACE_PG_DATA (cluster wiped)"
     fi
-    if [ -d "$LAPLACE_PG_PREFIX/log" ]; then
-        rm -rf "$LAPLACE_PG_PREFIX/log"
-        green "✓ Removed $LAPLACE_PG_PREFIX/log"
+    if [ -d "$LAPLACE_PG_LOG" ]; then
+        rm -rf "$LAPLACE_PG_LOG"
+        green "✓ Removed $LAPLACE_PG_LOG"
     fi
 
     say "Re-enable system postgresql@$PG_VERSION-main (if installed) so the host has a default PG"
@@ -1560,6 +1704,8 @@ do_bootstrap() {
     bootstrap_laplace_pg_cluster
 
     bootstrap_pg_roles
+    bootstrap_pg_tempspace
+    bootstrap_pg_log_retention
     bootstrap_pg_legacy_cleanup
     bootstrap_pg_auth
     bootstrap_pg_database_and_postgis
