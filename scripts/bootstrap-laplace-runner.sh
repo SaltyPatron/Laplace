@@ -1372,7 +1372,7 @@ bootstrap_external_dirs() {
     bootstrap_external_pins
 }
 
-# Provision /opt/laplace/external to external-pins.tsv. ONE-TIME setup: external
+# Provision $LAPLACE_EXTERNAL to PINS.tsv. ONE-TIME setup: external
 # sources do not change between builds, so CI verifies and never populates.
 #
 # This used to say "populated by scripts/sync-external.sh", which read .gitmodules
@@ -1391,7 +1391,7 @@ bootstrap_external_pins() {
     # database device. A hardcoded /opt/laplace/external here made this report
     # "PINS.tsv not present" against a cache that was simply somewhere else.
     local pins="$LAPLACE_EXTERNAL/PINS.tsv"
-    say "Provision /opt/laplace/external to $pins"
+    say "Provision $LAPLACE_EXTERNAL to $pins"
 
     if [ ! -f "$pins" ]; then
         yellow "  $pins not present — nothing to provision from."
@@ -1402,7 +1402,7 @@ bootstrap_external_pins() {
         # executed against '' — the hint rendered as `n=; n=;` with empty fields and
         # spat two `fatal: cannot change to '""'` lines at the operator.
         while IFS= read -r hint; do yellow "${hint//@PINS@/$pins}"; done <<'HINT'
-    for d in /opt/laplace/external/*/; do n=${d%/}; n=${n##*/}; \
+    for d in '"$LAPLACE_EXTERNAL"'/*/; do n=${d%/}; n=${n##*/}; \
       printf 'external/%s\t%s\t%s\n' "$n" \
         "$(git -C "$d" remote get-url origin)" \
         "$(git -C "$d" rev-parse HEAD)"; done > @PINS@
@@ -1414,7 +1414,12 @@ HINT
     while IFS=$'\t' read -r path url pin; do
         case "$path" in ''|'#'*) continue;; esac
         total=$((total + 1))
-        local entry="/opt/laplace/external/${path#external/}"
+        # Destination follows LAPLACE_EXTERNAL, like the pins file. Hardcoding
+        # /opt/laplace/external here while reading pins from /build made every entry
+        # read as "not at pin" — because the checkouts had moved — and it began
+        # re-cloning all ~110 repos from the network onto the 16G database-tier LV,
+        # duplicating 14G that already existed one mount away (2026-08-12).
+        local entry="$LAPLACE_EXTERNAL/${path#external/}"
 
         # Already at the pin: no fetch, no clone.
         if [ -d "$entry/.git" ] \
