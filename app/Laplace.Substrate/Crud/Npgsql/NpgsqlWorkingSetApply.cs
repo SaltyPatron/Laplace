@@ -74,6 +74,18 @@ public sealed partial class NpgsqlSubstrateWriter
     /// </summary>
     private NpgsqlIndexCycle? _runCycle;
 
+    // Cumulative staged rows across the whole bulk-run bracket. BeginAsync's
+    // volume gates (MinRowsToCycle, CycleMinLiveFraction) answer "is this RUN
+    // fresh-seed shaped?" — but each apply stages only tens of thousands of
+    // rows, so testing per-apply counts meant the run-scoped cycle could never
+    // fire mid-run no matter how large the run grew (measured 2026-08-12: the
+    // UD/OMW seed paid live secondary maintenance for every row — 21.3KB WAL
+    // per consensus insert across 9 indexes vs 7.5KB with them cycled). The
+    // drop decision is idempotent (each qualifying apply drops whatever still
+    // stands), so passing running totals lets it fire the moment cumulative
+    // volume crosses the gates.
+    private long _runStagedEnts, _runStagedPhys, _runStagedAtts;
+
     /// <summary>
     /// Run-scoped persisted-id caches for the existence probe, active on the
     /// same BeginBulkRunAsync/CompleteBulkRunAsync bracket as <see cref="_runCycle"/>.
@@ -133,6 +145,7 @@ public sealed partial class NpgsqlSubstrateWriter
         // BEFORE this run makes its own cycling decisions.
         await NpgsqlIndexCycle.RecoverAsync(_ds, _log, ct);
         _runCycle = new NpgsqlIndexCycle(_ds, _log);
+        _runStagedEnts = _runStagedPhys = _runStagedAtts = 0;
         _persistedEntityIds = new System.Collections.Concurrent.ConcurrentDictionary<Hash128, byte>();
         _persistedPhysIds = new System.Collections.Concurrent.ConcurrentDictionary<Hash128, byte>();
         _claimedEntityIds = new System.Collections.Concurrent.ConcurrentDictionary<Hash128, byte>();
@@ -158,6 +171,7 @@ public sealed partial class NpgsqlSubstrateWriter
     {
         var cycle = _runCycle;
         _runCycle = null;
+        _runStagedEnts = _runStagedPhys = _runStagedAtts = 0;
         _persistedEntityIds = null;
         _persistedPhysIds = null;
         _claimedEntityIds = null;
@@ -891,23 +905,38 @@ public sealed partial class NpgsqlSubstrateWriter
                 // probe (*_stored_bitmap / *_present_ordinals) is a PK
                 // lookup, and PK/unique/exclusion never cycle.
                 var cycle = _runCycle;
+                bool runScoped = cycle is not null;
                 if (cycle is null)
                 {
                     cycle = new NpgsqlIndexCycle(_ds, _log);
                     await NpgsqlIndexCycle.RecoverAsync(_ds, _log, ct);
                 }
+                // Inside a bulk run the volume gates see CUMULATIVE staged rows
+                // (_runStagedEnts and siblings): the bracket owns the whole run,
+                // so the fresh-seed-shaped question is about the run's volume,
+                // not one apply's ~50k rows — per-apply counts could never cross
+                // MinRowsToCycle and the bracket never fired (2026-08-12 seeds
+                // paid live-index maintenance end to end). Outside a bracket the
+                // local cycle keeps per-apply semantics unchanged.
+                long entStaged = keptEnts.Count, physStaged = keptPhys.Count, attStaged = keptAtts.Count;
+                if (runScoped)
+                {
+                    entStaged = Interlocked.Add(ref _runStagedEnts, entStaged);
+                    physStaged = Interlocked.Add(ref _runStagedPhys, physStaged);
+                    attStaged = Interlocked.Add(ref _runStagedAtts, attStaged);
+                }
                 await cycle.BeginAsync(new[]
                 {
-                    ("entities", (long)keptEnts.Count),
-                    ("physicalities", (long)keptPhys.Count),
-                    ("attestations", (long)keptAtts.Count),
+                    ("entities", entStaged),
+                    ("physicalities", physStaged),
+                    ("attestations", attStaged),
                     // Consensus is written by the client fold, which has no cycle
                     // of its own and paid 6 live secondary-index inserts per novel
                     // row (fold collapsed to ~5K rel/s on the big sources). Drop
                     // them in the same run-scoped bracket, rebuilt once at run end;
                     // the fold's prior-read is a PK lookup, unaffected by dropping
                     // the secondaries. Staged proxied by the attestation count.
-                    ("consensus", (long)keptAtts.Count),
+                    ("consensus", attStaged),
                 }, ct);
 
                 // Entities COMPLETE first — the structural attestation

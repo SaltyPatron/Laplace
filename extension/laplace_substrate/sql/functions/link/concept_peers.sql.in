@@ -22,7 +22,10 @@ CREATE OR REPLACE FUNCTION lexical.concept_peers(p_word bytea, p_limit int DEFAU
                          AND so.type_id = laplace.relation_type_id('IS_SENSE_OF')
     ),
     -- Set-based member expansion: one reverse-edge join per bridge kind over
-    -- ALL anchors at once (consensus_object_btree), replacing the per-anchor
+    -- ALL anchors at once (consensus_object_type_btree — every join here is
+    -- object_id = anchor AND type_id = literal, the composite's exact shape;
+    -- the single-column consensus_object_btree was retired 2026-08-13 as its
+    -- strict prefix), replacing the per-anchor
     -- lexical.concept_members() CROSS JOIN LATERAL that re-ran the same three lookups
     -- 181x for one word (measured 55s -> sub-second). Same three bridges.
     members AS (

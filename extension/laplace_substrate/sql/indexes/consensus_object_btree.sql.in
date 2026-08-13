@@ -1,1 +1,23 @@
-CREATE INDEX IF NOT EXISTS consensus_object_btree ON consensus (object_id) WHERE object_id IS NOT NULL;
+-- consensus_object_btree (object_id) WHERE object_id IS NOT NULL is a strict
+-- prefix of consensus_object_type_btree (object_id, type_id) under the SAME
+-- partial predicate: every access path the single-column index serves, the
+-- composite serves from its identical leading column. Measured 2026-08-13 on
+-- the live seed epoch: 24 scans in a full day against 396 MB of maintained
+-- mass across the partition tree — write tax with no unique read capability
+-- (every consensus insert paid a ninth btree; the fold's own probes ride the
+-- PK). Dropped on upgrade; new installs never create it. This file IS the
+-- drop, per the entities_tier_btree convention, so both manifests keep the
+-- same entry.
+DO $do$
+BEGIN
+    -- Release extension membership first (no-op on a fresh install where the
+    -- index was never created / never a member); the guarded DROP then
+    -- removes the object.
+    BEGIN
+        EXECUTE format('ALTER EXTENSION %I DROP INDEX laplace.consensus_object_btree',
+                       'laplace_substrate');
+    EXCEPTION WHEN OTHERS THEN
+        NULL;  -- not a member (fresh install or already released)
+    END;
+    EXECUTE 'DROP INDEX IF EXISTS laplace.consensus_object_btree';
+END $do$;
