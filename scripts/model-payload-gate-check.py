@@ -16,12 +16,18 @@ library is 23.1 TB from 0.24 TB of checkpoints, and Qwen3-Coder-480B alone
 projects to 57.8 TB. See docs/archive/reports/MODEL_LANE_AUDIT_2026-08-11.md for the derivation
 and every verification command.
 
-WHY A BASELINE RATHER THAN ZERO: the correct steady state is ~0 payload bytes per
-model, but 81 GB is already deposited. A gate asserting 0 today fails on arrival
-and gets disabled, which is how the last policy died. So the deposited bytes are
-baselined and the ceiling may only DECREASE -- the same shrink-only contract
-scripts/isa-gate-check.py uses. Re-baselining upward is a deliberate, visible
-edit to this file, not a silent data change.
+THE BASELINE IS THE CONTRACT: the recorded measurement is the effective ceiling
+and may only DECREASE -- the same shrink-only contract scripts/isa-gate-check.py
+uses. Re-baselining upward is a deliberate, visible edit to the JSON, not a
+silent data change. When this gate landed, 87.4 GB was already deposited and the
+baseline existed to avoid a gate that fails on arrival and gets disabled (how
+the last policy died). MEASURED 2026-08-13 after the storage remediation
+re-seed: 0 bytes, 0 sources -- the deposit is gone, so the baseline now arms at
+the correct steady state. NOTE the consequence: the first legitimate model
+ingest that composes new content entities (subword vocabulary and the like,
+~MBs of trajectory) will trip the gate and require a reviewed --write-baseline.
+That friction is the design, not a defect: every payload byte a model source
+deposits gets seen and blessed in a diff.
 
 WHAT THIS DELIBERATELY DOES NOT GATE: constant `witnessWeight: 1.0` in the model
 lane. Seven call sites pass a literal 1.0, and for CONTAINS / PRECEDES / recipe
@@ -46,27 +52,29 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 BASELINE = ROOT / "scripts" / "model-payload-gate-baseline.json"
 
-# Measured 2026-08-11 on hart-server. MAY ONLY DECREASE.
+# MAY ONLY DECREASE. Outer bound on any future deliberate re-baseline: the
+# baseline JSON is the day-to-day contract, these constants are what a
+# re-baseline itself may not silently cross.
 #
-# Total geometry payload the model lane has deposited, in bytes. The number is
-# the sum of length(trajectory::bytea) over physicalities whose entity was first
-# observed by a model source. 81 GB across two checkpoints -- one 90 MB BERT
-# encoder and one 2.2 GB Llama -- which is the fact the gate is here to keep
-# visible.
-# Measured 87.4 GB across 13,324 rows from two checkpoints. Set just above that
-# so the gate passes at baseline and only a REGRESSION trips it -- a ceiling set
-# below the deposited total fails on arrival and gets disabled, which is the
-# failure mode this file's header warns about and which the first draft of this
-# constant walked straight into.
-CEILING_TOTAL_BYTES = 88_000_000_000
+# History: first measured 2026-08-11 on hart-server at 87.4 GB across 13,324
+# rows from two checkpoints (a 90 MB BERT encoder and a 2.2 GB Llama), and the
+# ceilings sat just above that so the gate passed at baseline. MEASURED
+# 2026-08-13 after the storage remediation re-seed: 0 bytes. Shrink-only means
+# the ceilings follow the deposit down. 2 GB is headroom for legitimately
+# composed content trajectories from model sources (subword vocabulary is ~MBs,
+# not GBs) while the violation class -- [V x dim] float fields at 210 GB per
+# checkpoint -- stays two orders of magnitude beyond it.
+CEILING_TOTAL_BYTES = 2_000_000_000
 
-# Per-source ceiling: no single checkpoint may deposit more than the worst one
-# already has. TinyLlama is 81.8 GB across 8,164 rows.
-CEILING_PER_SOURCE_BYTES = 82_500_000_000
+# Per-source ceiling: was 82.5 GB when TinyLlama's deposit (81.8 GB across
+# 8,164 rows) was the standing worst case; that deposit is purged.
+CEILING_PER_SOURCE_BYTES = 1_000_000_000
 
-# Vertex count is the axis that actually blows up -- 13,324 rows is nothing, but
-# each spans the whole vocabulary at full hidden dim. 2.73 bn vertices measured.
-CEILING_TOTAL_VERTICES = 2_800_000_000
+# Vertex count is the axis that actually blows up -- 13,324 rows was nothing,
+# but each spanned the whole vocabulary at full hidden dim: 2.73 bn vertices
+# measured before the purge. Composed content trajectories are a few points per
+# entity; 100 M is generous headroom.
+CEILING_TOTAL_VERTICES = 100_000_000
 
 QUERY = """
 SELECT coalesce(encode(e.first_observed_by, 'hex'), 'unattributed') AS src,
