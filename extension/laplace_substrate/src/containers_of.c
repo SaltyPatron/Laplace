@@ -32,16 +32,23 @@
  * probe per frontier element, expressed as a correlated subquery) fared
  * worse still under concurrent load.
  *
- * The fix is exactly the "native C/SPI does the heavy lifting" pattern used
- * elsewhere in this file family (see generate_walk.c's edge_plan): prepare
- * the proven-fast single-key query ONCE via SPI_prepare/SPI_keepplan, then
- * drive the frontier expansion as a tight C loop of SPI_execute_plan calls
- * against that cached plan -- one bound execution per frontier element, in
- * -process, with zero re-parsing/re-planning per call. This is not "batching
- * for its own sake" (word_shape_peers_fast's array-unnest batching measurably
- * did NOT help once its real bottleneck was fixed) -- it's the specific
- * response to a specific, confirmed planner cost-estimation defect for this
- * query shape.
+ * The fix is the "native C/SPI does the heavy lifting" pattern used elsewhere
+ * in this file family (see generate_walk.c's edge_plan): drive the frontier
+ * expansion as a tight C loop -- one bound execution of the proven-fast
+ * single-key query per frontier element, in-process. UNLIKE that family, the
+ * plan is deliberately NOT kept (no SPI_prepare/SPI_keepplan): a process-wide
+ * kept plan is planned once and never revisited, so a backend that planned it
+ * against since-rebuilt indexes (the partitioned index cycle drops and
+ * recreates them), or that settled into a bad generic plan, executes the
+ * stale shape for the life of the backend. MEASURED 2026-08-13: 527ms per
+ * call from a backend holding the stale plan vs 17ms planned fresh against
+ * the live GIN. Each call plans custom via SPI_execute_with_args -- parsing
+ * this one-liner is microseconds against a 17ms execution, and the planner
+ * sees the live indexes and the actual bound values every time. This is not
+ * "batching for its own sake" (word_shape_peers_fast's array-unnest batching
+ * measurably did NOT help once its real bottleneck was fixed) -- it's the
+ * specific response to a specific, confirmed planner cost-estimation defect
+ * for this query shape.
  */
 
 /* LIMIT $2 is IN THE QUERY TEXT, and it has to be. SPI_execute_plan's count
@@ -52,37 +59,18 @@
  * MEASURED on 'water' at 37.4M entities, same rows returned:
  *   SPI count = limit_rows (no LIMIT in text)   3,245 ms
  *   LIMIT $2 as a bound parameter                  40.4 ms
- * 80x, and the 40ms figure is the GENERIC plan (6th execution, after PostgreSQL
- * stops re-planning), so it is what the kept plan actually costs -- not a
- * custom-plan best case.
+ * 80x. (Measured on the since-removed kept plan's generic shape; the custom
+ * plan only improves on it.)
  *
- * The limit must be a PARAMETER, not interpolated into the string: the plan is
- * prepared once with SPI_keepplan and reused process-wide, so a literal would
- * pin the first caller's limit for every later caller. */
+ * The limit stays a PARAMETER, not interpolated into the string:
+ * SPI_execute_with_args plans with the bound value visible, so a parameter
+ * plans exactly like a literal would -- and the constant query text keeps
+ * this one entry in pg_stat_statements instead of one per distinct limit. */
 static const char *CONTAINERS_QUERY =
     "SELECT w.id, w.tier, w.type_id "
     "FROM laplace.v_word_points w "
     "WHERE public.laplace_trajectory_constituent_ids(w.trajectory) @> ARRAY[$1]::bytea[] "
     "LIMIT $2";
-
-static SPIPlanPtr containers_plan = NULL;
-
-static void
-ensure_containers_plan(void)
-{
-    if (containers_plan == NULL)
-    {
-        Oid argtypes[2] = { BYTEAOID, INT4OID };
-        SPIPlanPtr plan = SPI_prepare(CONTAINERS_QUERY, 2, argtypes);
-
-        if (plan == NULL)
-            elog(ERROR, "containers_of: SPI_prepare failed: %s",
-                 SPI_result_code_string(SPI_result));
-        if (SPI_keepplan(plan) != 0)
-            elog(ERROR, "containers_of: SPI_keepplan failed");
-        containers_plan = plan;
-    }
-}
 
 PG_FUNCTION_INFO_V1(pg_laplace_containers_of);
 
@@ -113,7 +101,6 @@ pg_laplace_containers_of(PG_FUNCTION_ARGS)
 
     if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
         elog(ERROR, "containers_of: SPI_connect failed");
-    ensure_containers_plan();
 
     frontier = (Datum *) palloc(sizeof(Datum));
     frontier[0] = copy_bytea_datum(PointerGetDatum(prompt));
@@ -131,6 +118,7 @@ pg_laplace_containers_of(PG_FUNCTION_ARGS)
 
         for (int f = 0; f < n_frontier && n_output < limit_rows; f++)
         {
+            Oid   argtypes[2] = { BYTEAOID, INT4OID };
             Datum args[2];
             int   rc;
 
@@ -156,7 +144,8 @@ pg_laplace_containers_of(PG_FUNCTION_ARGS)
              * so "the first limit_rows containers" was already an arbitrary subset
              * of the matches. Capping the fetch changes WHICH arbitrary rows come
              * back, not how many the caller is promised. */
-            rc = SPI_execute_plan(containers_plan, args, NULL, true, limit_rows);
+            rc = SPI_execute_with_args(CONTAINERS_QUERY, 2, argtypes,
+                                       args, NULL, true, limit_rows);
             if (rc != SPI_OK_SELECT)
                 elog(ERROR, "containers_of: probe query failed: %s",
                      SPI_result_code_string(rc));
