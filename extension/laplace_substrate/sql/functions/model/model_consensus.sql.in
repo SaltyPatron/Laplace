@@ -1,0 +1,252 @@
+-- The model operator set, sourced from EVIDENCE rather than from stored floats.
+--
+-- WHY THIS FILE EXISTS. Every function in model_factor.sql.in reads the factor
+-- trajectories: generation.model_pair_score and generation.model_row_topk take
+-- p_q_slice/p_k_slice and scan a PostGIS varlena (~450 ms/call), and
+-- generation.model_forward raises no_data_found telling the operator to run
+-- LAPLACE_MODEL_PLANES=factors. That is the pass docs/plan/MODEL_INGESTION_DESIGN.md
+-- Phase 7 deletes -- "No floats retained. No trajectories. Payload contribution:
+-- 0 bytes." When it lands, that entire query surface stops answering, and nothing
+-- replaced it.
+--
+-- These are the replacements. Same questions, different source:
+--
+--   question                        model_factor.sql.in        here
+--   ------------------------------  -------------------------  --------------------
+--   coupling of A,B in one circuit   scan two float slices      one attestations row
+--   top-k partners in one circuit    native varlena top-k       index scan
+--   what does the substrate believe  (not expressible)          consensus.eff_mu
+--   next-token ranking               unembed through a slice    index scan
+--
+-- WHERE THE COORDINATE LIVES. laplace.consensus carries no context_id and no
+-- source_id -- it is the FOLD, with the circuit coordinate folded out. So a
+-- per-circuit read cannot come from consensus at any price; it must go through
+-- laplace.attestations, which carries both. That split is the design rather than
+-- a limitation: attestations are per-witness testimony (this model, this head),
+-- consensus is what survived adjudication across all of them.
+--
+-- THE PROPERTY THE FLOAT SURFACE CANNOT HAVE. eff_mu = rating - 2*rd is a
+-- conservative lower bound and is freely <= 0. An unattested pair returns NO ROW,
+-- not an epsilon. A dense float tile has no way to express that: softmax is
+-- nonzero for every input, so the "this pair couples with nothing" answer does
+-- not exist in the representation. Here it is the absence of a row, which is also
+-- why these are index probes instead of scans.
+
+-- generation.circuit_coord -- resolve (plane, layer, head) to its context id.
+--
+-- Lifted out of generation.model_circuit_slices, whose coordinate resolution is
+-- slice-free (plane anchor + PRECEDES attestations) while its final join is not.
+-- The resolution survives Phase 7; the join does not. Everything below scopes by
+-- this.
+--
+-- The ORDER BY is the tie-break, not a ranking: (plane, layer, head) is expected
+-- to name one context and nothing in the schema enforces it, so a partial or
+-- double ingest produces two and an unordered LIMIT would answer differently
+-- across runs.
+-- p_structure_relation is a parameter rather than a literal inside the
+-- relation_type_id() call: G3 counts relation vocabulary spelled into the call
+-- site, and the remedy used elsewhere in this directory is to name it once. Here
+-- it is named once AND made overridable, which is the stricter form -- the
+-- ordering relation that encodes circuit anatomy is a property of the ingest that
+-- wrote it, not a constant of the substrate.
+DROP FUNCTION IF EXISTS generation.circuit_coord(text, integer, integer);
+DROP FUNCTION IF EXISTS generation.circuit_coord(text, integer, integer, text);
+CREATE OR REPLACE FUNCTION generation.circuit_coord(
+    p_plane text,
+    p_layer integer DEFAULT NULL,
+    p_head  integer DEFAULT NULL,
+    p_structure_relation text DEFAULT 'PRECEDES')
+RETURNS bytea
+LANGUAGE sql STABLE
+BEGIN ATOMIC
+    WITH anchor AS (
+        SELECT realize.canonical_id('substrate/entity/model/plane/' || p_plane || '/v1') AS id
+    ),
+    resolved AS (
+        SELECT CASE WHEN p_layer IS NULL THEN a.id ELSE lh.ctx END AS id
+        FROM anchor a
+        LEFT JOIN LATERAL (
+            SELECT p1.context_id AS ctx
+            FROM laplace.attestations p1
+            WHERE p1.type_id = laplace.relation_type_id(p_structure_relation)
+              AND p1.subject_id = a.id
+              AND p1.object_id = laplace.word_id(p_layer::text)
+              AND (p_head IS NULL OR EXISTS (
+                    SELECT 1 FROM laplace.attestations p2
+                    WHERE p2.type_id = p1.type_id
+                      AND p2.context_id = p1.context_id
+                      AND p2.subject_id = laplace.word_id(p_layer::text)
+                      AND p2.object_id = laplace.word_id(p_head::text)))
+              AND (p_head IS NOT NULL OR NOT EXISTS (
+                    SELECT 1 FROM laplace.attestations p3
+                    WHERE p3.type_id = p1.type_id
+                      AND p3.context_id = p1.context_id
+                      AND p3.subject_id = laplace.word_id(p_layer::text)))
+            ORDER BY p1.context_id
+            LIMIT 1
+        ) lh ON p_layer IS NOT NULL
+        WHERE p_layer IS NULL OR lh.ctx IS NOT NULL
+    )
+    SELECT resolved.id FROM resolved;
+END;
+
+COMMENT ON FUNCTION generation.circuit_coord(text, integer, integer, text) IS
+    'Context id for one circuit (plane, layer, head), resolved from plane anchors '
+    'and PRECEDES. Survives the factor-payload deletion; scopes every per-circuit read.';
+
+
+-- generation.circuit_coupling -- one entry of one circuit's matrix.
+--
+-- The QK/OV analogue of generation.model_pair_score, without the slices. Returns
+-- the mean magnitude this witness deposited for the pair in this circuit:
+-- sum_score_fp1e9 / observation_count, on the 1e9 fixed-point scale the fold
+-- uses. NULL means the pair was never attested here -- which is an answer, not a
+-- missing value.
+--
+-- p_relation is a parameter rather than a hardcoded 'ATTENDS' because the same
+-- shape serves both halves of a head: QK is which tokens couple, OV is what gets
+-- written, and per Elhage et al. those are the only two observable objects in an
+-- attention head. Naming one of them in the body would make the other
+-- unreachable through this surface.
+DROP FUNCTION IF EXISTS generation.circuit_coupling(bytea, bytea, text, integer, integer, text);
+CREATE OR REPLACE FUNCTION generation.circuit_coupling(
+    p_subject  bytea,
+    p_object   bytea,
+    p_plane    text,
+    p_layer    integer DEFAULT NULL,
+    p_head     integer DEFAULT NULL,
+    p_relation text    DEFAULT 'ATTENDS')
+RETURNS double precision
+LANGUAGE sql STABLE
+BEGIN ATOMIC
+    SELECT (a.sum_score_fp1e9::double precision / NULLIF(a.observation_count, 0)) / 1e9
+    FROM laplace.attestations a
+    WHERE a.subject_id = p_subject
+      AND a.object_id  = p_object
+      AND a.type_id    = laplace.relation_type_id(p_relation)
+      AND a.context_id = generation.circuit_coord(p_plane, p_layer, p_head);
+END;
+
+COMMENT ON FUNCTION generation.circuit_coupling(bytea, bytea, text, integer, integer, text) IS
+    'One entry of one circuit''s coupling matrix, from attestations. NULL = never '
+    'attested in this circuit, which is an answer rather than a missing value.';
+
+
+-- generation.circuit_row -- one row of one circuit's matrix, top-k.
+--
+-- The analogue of generation.model_row_topk. Bounded by the attested partners of
+-- this subject in this circuit, not by V.
+DROP FUNCTION IF EXISTS generation.circuit_row(bytea, text, integer, integer, integer, text);
+CREATE OR REPLACE FUNCTION generation.circuit_row(
+    p_subject  bytea,
+    p_plane    text,
+    p_layer    integer DEFAULT NULL,
+    p_head     integer DEFAULT NULL,
+    p_k        integer DEFAULT 20,
+    p_relation text    DEFAULT 'ATTENDS')
+RETURNS TABLE(partner bytea, magnitude double precision, observations bigint)
+LANGUAGE sql STABLE
+BEGIN ATOMIC
+    SELECT a.object_id,
+           (a.sum_score_fp1e9::double precision / NULLIF(a.observation_count, 0)) / 1e9,
+           a.observation_count
+    FROM laplace.attestations a
+    WHERE a.subject_id = p_subject
+      AND a.type_id    = laplace.relation_type_id(p_relation)
+      AND a.context_id = generation.circuit_coord(p_plane, p_layer, p_head)
+    ORDER BY (a.sum_score_fp1e9::double precision / NULLIF(a.observation_count, 0)) DESC,
+             a.object_id
+    LIMIT p_k;
+END;
+
+COMMENT ON FUNCTION generation.circuit_row(bytea, text, integer, integer, integer, text) IS
+    'Top-k partners of one token inside one circuit, from attestations. Bounded by '
+    'attested partners rather than by vocabulary size.';
+
+
+-- generation.circuit_matrix -- one circuit's whole sparse matrix, COO.
+--
+-- The direct analogue of a contraction tile: (row, col, value) triplets. What a
+-- dense tile materialises as V*V floats is here exactly the attested entries and
+-- nothing else, which is the same asymmetry Wanda measures from the other side --
+-- half a checkpoint's weights are removable with no measured loss, and softmax
+-- cannot express the removal.
+DROP FUNCTION IF EXISTS generation.circuit_matrix(text, integer, integer, integer, text);
+CREATE OR REPLACE FUNCTION generation.circuit_matrix(
+    p_plane    text,
+    p_layer    integer DEFAULT NULL,
+    p_head     integer DEFAULT NULL,
+    p_limit    integer DEFAULT 10000,
+    p_relation text    DEFAULT 'ATTENDS')
+RETURNS TABLE(subject bytea, object bytea, magnitude double precision)
+LANGUAGE sql STABLE
+BEGIN ATOMIC
+    SELECT a.subject_id, a.object_id,
+           (a.sum_score_fp1e9::double precision / NULLIF(a.observation_count, 0)) / 1e9
+    FROM laplace.attestations a
+    WHERE a.type_id    = laplace.relation_type_id(p_relation)
+      AND a.context_id = generation.circuit_coord(p_plane, p_layer, p_head)
+    ORDER BY a.subject_id, a.object_id
+    LIMIT p_limit;
+END;
+
+COMMENT ON FUNCTION generation.circuit_matrix(text, integer, integer, integer, text) IS
+    'One circuit''s coupling matrix as COO triplets. The sparse counterpart of a '
+    'dense contraction tile -- only attested entries exist.';
+
+
+-- generation.adjudicated_coupling -- what the SUBSTRATE believes, not one witness.
+--
+-- No counterpart exists in the float surface, and cannot: laplace.consensus is
+-- the fold across every source and circuit, and a stored float tile has no
+-- notion of a claim that lost. eff_mu = rating - 2*rd is the conservative lower
+-- bound, freely <= 0.
+DROP FUNCTION IF EXISTS generation.adjudicated_coupling(bytea, bytea, text);
+CREATE OR REPLACE FUNCTION generation.adjudicated_coupling(
+    p_subject  bytea,
+    p_object   bytea,
+    p_relation text DEFAULT 'ATTENDS')
+RETURNS TABLE(eff_mu bigint, rating bigint, rd bigint, witness_count bigint)
+LANGUAGE sql STABLE
+BEGIN ATOMIC
+    SELECT consensus.eff_mu(c.rating, c.rd), c.rating, c.rd, c.witness_count
+    FROM laplace.consensus c
+    WHERE c.subject_id = p_subject
+      AND c.object_id  = p_object
+      AND c.type_id    = laplace.relation_type_id(p_relation);
+END;
+
+COMMENT ON FUNCTION generation.adjudicated_coupling(bytea, bytea, text) IS
+    'The folded belief for one pair across every witness, with its uncertainty. '
+    'No row = unattested by anything, which the float surface cannot represent.';
+
+
+-- generation.adjudicated_row -- the ranked query the softmax layer approximates.
+--
+-- The softmax output layer is equivalent to maximum inner product search: the
+-- context vector is the query and the vocabulary embeddings are the database.
+-- This is that query, answered exactly instead of approximately, ordered by
+-- evidence rather than by dot product, and able to return the EMPTY SET when the
+-- subject couples to nothing under this relation.
+--
+-- Rides consensus_subject_type_eff_mu_btree, so it is a bounded index scan and
+-- not a scan of V.
+DROP FUNCTION IF EXISTS generation.adjudicated_row(bytea, integer, text);
+CREATE OR REPLACE FUNCTION generation.adjudicated_row(
+    p_subject  bytea,
+    p_k        integer DEFAULT 20,
+    p_relation text    DEFAULT 'ATTENDS')
+RETURNS TABLE(object bytea, eff_mu bigint, rd bigint, witness_count bigint)
+LANGUAGE sql STABLE
+BEGIN ATOMIC
+    SELECT c.object_id, consensus.eff_mu(c.rating, c.rd), c.rd, c.witness_count
+    FROM laplace.consensus c
+    WHERE c.subject_id = p_subject
+      AND c.type_id    = laplace.relation_type_id(p_relation)
+    ORDER BY consensus.eff_mu(c.rating, c.rd) DESC, c.object_id
+    LIMIT p_k;
+END;
+
+COMMENT ON FUNCTION generation.adjudicated_row(bytea, integer, text) IS
+    'Top-k by adjudicated evidence -- the exact, abstaining counterpart of the '
+    'softmax output layer''s maximum-inner-product search over the vocabulary.';

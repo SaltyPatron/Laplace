@@ -385,6 +385,7 @@ functions/highway/highway_mask_refresh.sql.in
 functions/highway/highway_mask_drain.sql.in
 functions/highway/highway_mask_deposit.sql.in
 functions/model/model_factor.sql.in
+functions/model/model_consensus.sql.in
 functions/highway/highway_mask_rebuild.sql.in
 functions/ops/evict_source.sql.in
 functions/highway/entities_highway_bits_gin.sql.in
