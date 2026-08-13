@@ -31,13 +31,18 @@ BEGIN
         RETURN;  -- partitions already exist
     END IF;
     FOR t IN 0..4 LOOP
-        IF t = 2 THEN
-            EXECUTE format('CREATE TABLE entities_t2 PARTITION OF entities'
-                           || ' FOR VALUES IN (2) PARTITION BY HASH (id)');
+        -- Hash-shard the HIGH-CARDINALITY tiers, not just t2 (#1008): measured
+        -- 2026-08-10, t3 sat FLAT at 5.9M rows (65% of all entities) while its
+        -- smaller sibling t2 (2.5M) had 8 shards, and t0 is a fixed 1.11M.
+        -- Content-addressed ids are uniform by construction, so HASH(id) lands
+        -- flat untuned; t1 (~1.1k) and t4 stay plain.
+        IF t IN (0, 2, 3) THEN
+            EXECUTE format('CREATE TABLE entities_t%s PARTITION OF entities'
+                           || ' FOR VALUES IN (%s) PARTITION BY HASH (id)', t, t);
             FOR i IN 0..7 LOOP
-                EXECUTE format('CREATE TABLE entities_t2_h%s PARTITION OF entities_t2'
-                               || ' FOR VALUES WITH (MODULUS 8, REMAINDER %s)', i, i);
-                EXECUTE format('ALTER TABLE entities_t2_h%s', i) || opts;
+                EXECUTE format('CREATE TABLE entities_t%s_h%s PARTITION OF entities_t%s'
+                               || ' FOR VALUES WITH (MODULUS 8, REMAINDER %s)', t, i, t, i);
+                EXECUTE format('ALTER TABLE entities_t%s_h%s', t, i) || opts;
             END LOOP;
         ELSE
             EXECUTE format('CREATE TABLE entities_t%s PARTITION OF entities'

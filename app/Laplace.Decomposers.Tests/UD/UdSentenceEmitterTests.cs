@@ -134,6 +134,43 @@ public sealed class UdSentenceEmitterTests
             a.TypeId == featNumber.Id && a.SubjectId == formRoot);
     }
 
+    [Fact]
+    public void DependencyArcs_CarrySentenceContext_AndRootBindsToSentence()
+    {
+        byte[] sentenceText = Encoding.UTF8.GetBytes("The cat sat.");
+        byte[] cat = Encoding.UTF8.GetBytes("cat");
+        byte[] sat = Encoding.UTF8.GetBytes("sat");
+        var tokens = new List<UdToken>
+        {
+            new(1, "1", sat, sat, true, "VERB", "VB", [], 0, "root", "_", "_"),
+            new(2, "2", cat, cat, true, "NOUN", "NN", [], 1, "nsubj", "_", "_"),
+        };
+        var sentence = new UdSentence(sentenceText, tokens, [], 2);
+        var ctx = BuildEmitContext(sentenceText, cat, sat);
+        var change = Emit(sentence, ctx);
+
+        var sentRoot = ctx.RootFor(sentenceText);
+        Assert.NotNull(sentRoot);
+
+        // A dependency arc is bound to THIS sentence via contextId (#1057): with a
+        // null context the nsubj arc from "The cat sat" was the same attestation
+        // identity as every other cat→sat pair in every corpus — an aggregate
+        // grammar statistic, never a parse.
+        var nsubj = RelationTypeRegistry.ResolveDeprel("nsubj");
+        var arc = Assert.Single(change.Attestations.Where(a => a.TypeId == nsubj.Id));
+        Assert.Equal(ctx.RootFor(cat), arc.SubjectId);
+        Assert.Equal(ctx.RootFor(sat), arc.ObjectId);
+        Assert.Equal(sentRoot, arc.ContextId);
+
+        // HEAD=0 binds the heading word to the SENTENCE — previously dropped
+        // entirely (~2.31M sentence-head markers across the treebanks, #1057).
+        var root = RelationTypeRegistry.ResolveDeprel("root");
+        var rootArc = Assert.Single(change.Attestations.Where(a => a.TypeId == root.Id));
+        Assert.Equal(ctx.RootFor(sat), rootArc.SubjectId);
+        Assert.Equal(sentRoot, rootArc.ObjectId);
+        Assert.Equal(sentRoot, rootArc.ContextId);
+    }
+
     private static UdSentenceEmitContext BuildEmitContext(params byte[][] canonicals)
     {
         var ctx = new UdSentenceEmitContext();

@@ -178,5 +178,7 @@ public static class EtlManifest
     };
 
     private static readonly string[] UdBootstrap =
-        { "HAS_POS", "IS_LEMMA_OF", "HAS_FEATURE", "HAS_DEPENDENCY" };
+        // DEPENDS_ON, not "HAS_DEPENDENCY" — the latter existed nowhere in the
+        // repo (no manifest entry, no emitter; #1057 defect 5, phantom name).
+        { "HAS_POS", "IS_LEMMA_OF", "HAS_FEATURE", "DEPENDS_ON" };
 }
