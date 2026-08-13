@@ -465,6 +465,16 @@ public sealed partial class NpgsqlSubstrateWriter
             // return an all-zero mask after paying full chunk round-trips.
             // Exact EXISTS under the lock; not reltuples. Does NOT weaken the
             // pure-COPY invariant: non-empty partitions still probe in full.
+            //
+            // These probes MUST NOT run on the control tx: they leave
+            // AccessShareLock on every partition of the probed tables for the
+            // rest of the apply, and cycle.BeginAsync below issues DROP INDEX
+            // (AccessExclusive) on those same tables from a sibling connection
+            // — a self-deadlock this process cannot resolve (measured
+            // 2026-08-13: foundation seed wedged 22+ min at unicode, DROP
+            // queued behind our own idle-in-transaction probe locks). Pooled
+            // connections give the same visibility: every snapshot starts
+            // after the apply advisory lock was acquired.
             long entEmptySkip = 0, physEmptySkip = 0, attEmptySkip = 0;
             long entInvertResolved = 0;
             var presentFromInvert = new HashSet<Hash128>();
@@ -483,7 +493,7 @@ public sealed partial class NpgsqlSubstrateWriter
                 var tierSample = new List<short>(entVerifyIdx.Count);
                 for (int k = 0; k < entVerifyIdx.Count; k++)
                     tierSample.Add(ents.Tiers[entVerifyIdx[k]]);
-                var nonemptyTiers = await NonEmptyEntityTiersAsync(conn, tx, tierSample, ct);
+                var nonemptyTiers = await NonEmptyEntityTiersAsync(_ds, tierSample, ct);
                 rtProbe++; // one EXISTS roster round-trip
                 if (nonemptyTiers.Count < DistinctShortCount(tierSample))
                 {
@@ -506,7 +516,7 @@ public sealed partial class NpgsqlSubstrateWriter
                 if (entVerifyIdx.Count > 0)
                 {
                     var inverted = await InvertEntityTiersBySmallerSideAsync(
-                        conn, tx, ents, entVerifyIdx, presentFromInvert, ct);
+                        _ds, ents, entVerifyIdx, presentFromInvert, ct);
                     rtProbe += inverted.RoundTrips;
                     entInvertResolved = inverted.Resolved;
                     probeEntIdsUse = new List<Hash128>(inverted.RemainingIdx.Count);
@@ -528,7 +538,7 @@ public sealed partial class NpgsqlSubstrateWriter
             else if (probePhysIdsUse.Count > 0)
             {
                 rtProbe++;
-                if (!await RelationHasRowsAsync(conn, tx, "physicalities", ct))
+                if (!await RelationHasRowsAsync(_ds, "physicalities", ct))
                 {
                     physEmptySkip = probePhysIdsUse.Count;
                     probePhysIdsUse = new List<Hash128>();
@@ -604,7 +614,7 @@ public sealed partial class NpgsqlSubstrateWriter
             if (probeAttIdsUse.Count > 0)
             {
                 rtProbe++;
-                if (!await RelationHasRowsAsync(conn, tx, "attestations", ct))
+                if (!await RelationHasRowsAsync(_ds, "attestations", ct))
                 {
                     attEmptySkip = probeAttIdsUse.Count;
                     probeAttIdsUse = new List<Hash128>();
@@ -1285,15 +1295,15 @@ public sealed partial class NpgsqlSubstrateWriter
     /// row in <c>laplace.entities</c>. Empty LIST(tier) leaves need no bitmap probe.
     /// </summary>
     private static async Task<HashSet<short>> NonEmptyEntityTiersAsync(
-        NpgsqlConnection conn, NpgsqlTransaction tx, IReadOnlyList<short> tiers, CancellationToken ct)
+        NpgsqlDataSource ds, IReadOnlyList<short> tiers, CancellationToken ct)
     {
         var distinct = new HashSet<short>();
         for (int i = 0; i < tiers.Count; i++) distinct.Add(tiers[i]);
         if (distinct.Count == 0) return distinct;
 
         var arr = distinct.ToArray();
+        await using var conn = await ds.OpenConnectionAsync(ct);
         await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
         cmd.CommandTimeout = 0;
         cmd.CommandText =
             "SELECT t FROM unnest($1::smallint[]) AS t "
@@ -1308,10 +1318,10 @@ public sealed partial class NpgsqlSubstrateWriter
     }
 
     private static async Task<bool> RelationHasRowsAsync(
-        NpgsqlConnection conn, NpgsqlTransaction tx, string relation, CancellationToken ct)
+        NpgsqlDataSource ds, string relation, CancellationToken ct)
     {
+        await using var conn = await ds.OpenConnectionAsync(ct);
         await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
         cmd.CommandTimeout = 0;
         // Relation name is an internal constant (entities/physicalities/attestations), not user input.
         cmd.CommandText = $"SELECT EXISTS (SELECT 1 FROM laplace.{relation} LIMIT 1)";
@@ -1330,7 +1340,7 @@ public sealed partial class NpgsqlSubstrateWriter
     /// <paramref name="rowIdx"/> are indices into <paramref name="ents"/>.
     /// </summary>
     private static async Task<EntityInvertResult> InvertEntityTiersBySmallerSideAsync(
-        NpgsqlConnection conn, NpgsqlTransaction tx,
+        NpgsqlDataSource ds,
         CopyTupleParser.EntityRows ents, List<int> rowIdx, HashSet<Hash128> presentOut,
         CancellationToken ct)
     {
@@ -1346,9 +1356,9 @@ public sealed partial class NpgsqlSubstrateWriter
         }
         var tierArr = stagedPerTier.Keys.ToArray();
 
+        await using var conn = await ds.OpenConnectionAsync(ct);
         await using (var countCmd = conn.CreateCommand())
         {
-            countCmd.Transaction = tx;
             countCmd.CommandTimeout = 0;
             countCmd.CommandText =
                 "SELECT e.tier, count(*)::bigint FROM laplace.entities e "
@@ -1371,7 +1381,6 @@ public sealed partial class NpgsqlSubstrateWriter
 
             var invertArr = invertTiers.ToArray();
             await using var loadCmd = conn.CreateCommand();
-            loadCmd.Transaction = tx;
             loadCmd.CommandTimeout = 0;
             loadCmd.CommandText = "SELECT e.id FROM laplace.entities e WHERE e.tier = ANY($1)";
             loadCmd.Parameters.Add(new NpgsqlParameter

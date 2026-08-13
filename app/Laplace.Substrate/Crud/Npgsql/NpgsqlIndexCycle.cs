@@ -232,7 +232,20 @@ public sealed class NpgsqlIndexCycle
                     _log.LogInformation("INDEX_CYCLE {Table}: keeping {Index} (LAPLACE_INDEX_CYCLE_KEEP)", table, name);
                     continue;
                 }
-                await JournalAndDropAsync(conn, table, name, def, ct);
+                try
+                {
+                    await JournalAndDropAsync(conn, table, name, def, ct);
+                }
+                catch (PostgresException pe) when (pe.SqlState == PostgresErrorCodes.LockNotAvailable)
+                {
+                    // Whoever holds the conflicting lock holds it on the table,
+                    // so the remaining secondaries would each burn the same
+                    // timeout. COPY proceeds with this table's indexes live.
+                    _log.LogWarning(
+                        "INDEX_CYCLE {Table}: lock not acquired in 5s for {Index} — skipping cycle for this table, COPY keeps live indexes",
+                        table, name);
+                    break;
+                }
                 _dropped.Add((name, def));
                 droppedHere++;
             }
@@ -313,7 +326,17 @@ public sealed class NpgsqlIndexCycle
                     log.LogInformation("INDEX_CYCLE {Table}: keeping {Index} (LAPLACE_INDEX_CYCLE_KEEP)", table, name);
                     continue;
                 }
-                await JournalAndDropAsync(conn, table, name, def, ct);
+                try
+                {
+                    await JournalAndDropAsync(conn, table, name, def, ct);
+                }
+                catch (PostgresException pe) when (pe.SqlState == PostgresErrorCodes.LockNotAvailable)
+                {
+                    log.LogWarning(
+                        "INDEX_CYCLE {Table}: lock not acquired in 5s for {Index} — skipping remaining secondaries on this table",
+                        table, name);
+                    break;
+                }
                 here++;
             }
             if (here > 0)
@@ -369,6 +392,17 @@ public sealed class NpgsqlIndexCycle
         // index that still exists (measured: entities_t0_type_id_idx journaled
         // then 2BP01 on DROP, orphaning the journal).
         await using var tx = await conn.BeginTransactionAsync(ct);
+        await using (var guard = conn.CreateCommand())
+        {
+            // Cycling is an optimization; its AccessExclusive DROP must never
+            // queue unboundedly behind a reader. Unbounded wait wedged a whole
+            // foundation seed for 22+ min (2026-08-13) when the apply's own
+            // control tx held AccessShare on the target — callers catch 55P03
+            // and proceed with the index live instead.
+            guard.Transaction = tx;
+            guard.CommandText = "SET LOCAL lock_timeout = '5s'";
+            await guard.ExecuteNonQueryAsync(ct);
+        }
         await using (var journal = conn.CreateCommand())
         {
             journal.Transaction = tx;
