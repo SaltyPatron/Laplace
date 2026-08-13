@@ -59,11 +59,10 @@ public static class PosReference
         if (probationary)
         {
             b.AddEntity(new EntityRow(posId, EntityTier.Word, PosTypeId, sourceId));
-
-
-            if (ContentEmitter.Emit(b, tag, sourceId) is { } nameId)
-                b.AddAttestation(NativeAttestation.Categorical(
-                    posId, "HAS_NAME_ALIAS", nameId, sourceId, null, sourceTrust));
+            // GH #1041: no content DAG for the raw tag string — the entity's
+            // canonical name (substrate/pos/probationary/<ns>/<tag>/v1) is
+            // registered via TrackProbationaryPos below and matches the native
+            // id, so rendering resolves from canonical_names.
         }
         VocabularyNames.TrackProbationaryPos(readbackNames, tag, tagset, probationary);
         b.AddAttestation(NativeAttestation.Categorical(
@@ -82,11 +81,8 @@ public static class PosReference
         {
             Hash128 posId = CanonicalId(tag);
             builder.AddEntity(new EntityRow(posId, EntityTier.Word, PosTypeId, sourceId));
-
-
-            if (ContentEmitter.Emit(builder, tag, sourceId) is { } nameId)
-                builder.AddAttestation(NativeAttestation.Categorical(
-                    posId, "HAS_NAME_ALIAS", nameId, sourceId, null, SourceTrust.SubstrateMandate));
+            // GH #1041: no content DAG for the UPOS tag — the 17 canonical
+            // substrate/pos/... names are in the static canonical_names seed.
         }
     }
 }
