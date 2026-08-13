@@ -73,6 +73,17 @@ env:
   # Only a campaign sets index_cycle_defer=true, and even then this phase merely refrains
   # from rebuilding the campaign's up-front drops — it never drops or rebuilds on its own.
   LAPLACE_INDEX_CYCLE_DEFER: ${{ inputs.index_cycle_defer && '1' || '' }}
+  # Master switch ON for every seed dispatch (2026-08-13). With it unset, single-source
+  # runs paid live secondary-index maintenance for every row — measured 2026-08-12:
+  # attestation COPY at 4.2k rows/s and 21.3KB WAL per consensus insert with all nine
+  # indexes live, vs 7.5KB with them cycled. The volume gates still protect small runs:
+  # cycling fires only once a run's CUMULATIVE staged rows cross MinRowsToCycle and the
+  # live-fraction gate below; the run-end rebuild is one sort-based build per index.
+  LAPLACE_INDEX_CYCLE: '1'
+  # GiST/GIN/expression-heavy tables win from cycling well below staged==live (the
+  # knob's own documentation); 0.2 lets a UD/document-scale increment cycle after the
+  # first ~2-3M rows instead of paying per-row maintenance for the whole run.
+  LAPLACE_INDEX_CYCLE_MIN_FRACTION: '0.2'
 
 jobs:
   ingest:

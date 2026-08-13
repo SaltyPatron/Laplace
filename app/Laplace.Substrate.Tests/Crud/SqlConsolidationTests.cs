@@ -30,9 +30,14 @@ public class SqlConsolidationTests
     [Fact]
     public async Task ConsensusUpsert_IsInstalled()
     {
+        // consensus.upsert is the migrated name (purpose-schema move): the DDL
+        // both creates it there and DROPs the legacy laplace.consensus_upsert
+        // (fold/consensus_upsert.sql.in:48-49). This probe pinned the
+        // pre-migration schema and failed against every fresh install — the
+        // same stale-pin class as GH #962. Pin the migrated name.
         var kind = await ScalarAsync(
             "SELECT p.prokind FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
-            + "WHERE n.nspname = 'laplace' AND p.proname = 'consensus_upsert'");
+            + "WHERE n.nspname = 'consensus' AND p.proname = 'upsert'");
         Assert.Equal('f', Assert.IsType<char>(kind));
 
         // The installed form — not merely the name: consensus_upsert was promoted
@@ -43,12 +48,18 @@ public class SqlConsolidationTests
         var lang = await ScalarAsync(
             "SELECT l.lanname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
             + "JOIN pg_language l ON l.oid = p.prolang "
-            + "WHERE n.nspname = 'laplace' AND p.proname = 'consensus_upsert'");
+            + "WHERE n.nspname = 'consensus' AND p.proname = 'upsert'");
         Assert.Equal("c", Assert.IsType<string>(lang));
         var src = (string)(await ScalarAsync(
             "SELECT p.prosrc FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
-            + "WHERE n.nspname = 'laplace' AND p.proname = 'consensus_upsert'"))!;
+            + "WHERE n.nspname = 'consensus' AND p.proname = 'upsert'"))!;
         Assert.Equal("pg_laplace_consensus_upsert", src.Trim());
+
+        // And the legacy name must stay gone — its DROP is part of the migration.
+        var legacy = await ScalarAsync(
+            "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
+            + "WHERE n.nspname = 'laplace' AND p.proname = 'consensus_upsert'");
+        Assert.Equal(0L, Assert.IsType<long>(legacy));
     }
 
     // (Per-table stat/autovacuum tuning is NOT extension SQL — it moved to the db-scoped
@@ -81,17 +92,27 @@ public class SqlConsolidationTests
         }
 
         // The secondary indexes created with the consensus table must remain.
+        // consensus_object_btree is deliberately ABSENT: retired 2026-08-13 as a
+        // strict prefix of consensus_object_type_btree under the same partial
+        // predicate (its .sql.in is now the guarded DROP) — asserted below.
         foreach (var idx in new[]
                  {
-                     "consensus_object_btree", "consensus_type_btree",
+                     "consensus_type_btree",
                      "consensus_subject_type_btree", "consensus_type_subject_btree",
                      "consensus_eff_mu_btree", "consensus_subject_eff_mu_btree",
+                     "consensus_object_type_btree",
                  })
         {
             var exists = (bool)(await ScalarAsync(
                 "SELECT to_regclass('laplace.' || $1) IS NOT NULL", idx))!;
             Assert.True(exists, $"index {idx} missing after inline fold");
         }
+
+        // The retired duplicate must NOT come back (indexes/consensus_object_btree.sql.in
+        // is the guarded DROP; a resurrected create means the manifest regressed).
+        var retired = (bool)(await ScalarAsync(
+            "SELECT to_regclass('laplace.consensus_object_btree') IS NULL"))!;
+        Assert.True(retired, "consensus_object_btree resurrected — retired as a strict prefix duplicate of consensus_object_type_btree");
 
         foreach (var v in new[] { "v_consensus_resolved", "v_consensus_edges", "v_consensus_unrefuted" })
         {
