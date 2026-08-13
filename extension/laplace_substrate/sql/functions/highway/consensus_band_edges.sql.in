@@ -17,11 +17,11 @@
 --
 -- ops.band_leaders is `LANGUAGE sql STABLE BEGIN ATOMIC`, and an ATOMIC body is
 -- parsed at CREATE time and records a real pg_depend edge on everything it
--- references (that is the whole point of the form, and why G12 pushes toward it).
--- So converting a caller to ATOMIC retroactively turns any DROP of its callees
--- into an upgrade-blocking error, and the manifest installs band_edges (367)
--- before band_leaders (377) — the dependent from the PREVIOUS install is still
--- present when the DROP runs.
+-- references (that is the whole point of the form, and why the G12 gate — string
+-- SQL bodies, GH #764 — pushes toward it). So converting a caller to ATOMIC
+-- retroactively turns any DROP of its callees into an upgrade-blocking error,
+-- and the manifest installs band_edges before band_leaders — the dependent from
+-- the PREVIOUS install is still present when the DROP runs.
 --
 -- The DROP was redundant anyway: name, argument types and return type are all
 -- unchanged, so CREATE OR REPLACE alone does the job. A DROP is only load-bearing

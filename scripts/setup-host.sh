@@ -162,7 +162,7 @@ layer1_status() {
 }
 
 layer0_5_build_deps() {
-    say "Layer 0.5 — provision external cache + build vendor deps into /opt/laplace"
+    say "Layer 0.5 — build vendor deps into /opt/laplace (cache provisioning is bootstrap-laplace-runner.sh's job)"
     # sync-external.sh is gone: it parsed .gitmodules, which 391d9be7 deleted with
     # all 311 submodules when the deps moved to the shared cache. It exited 2 on the
     # missing file, so this layer failed at exactly the point CI did. Provisioning

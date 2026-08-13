@@ -49,9 +49,11 @@ DECLARE
     syn bytea;
 BEGIN
     -- ORIENT: the same native election converse.chat() runs. Key order is converse.chat()'s,
-    -- verbatim -- specificity, then rel_mass (the "what are the X of Y" shape,
-    -- where X names a relation and coherence is silent), then peers, with
-    -- denote_mu as a TIEBREAK ONLY and the id for determinism.
+    -- verbatim -- the LEADING key is specificity scaled by denote_mu
+    -- (GREATEST(denote_mu, 1), so an unrated candidate keeps its bare
+    -- specificity rather than zeroing out), then bare specificity, rel_mass
+    -- (the "what are the X of Y" shape, where X names a relation and coherence
+    -- is silent), then peers, recency (ord), and the id for determinism.
     SELECT y.synset_id INTO syn
     FROM converse.prompt_coherence(p_prompt) y
     ORDER BY (COALESCE(y.specificity, 0)

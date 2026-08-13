@@ -49,7 +49,9 @@ public static class InstalledOpInvoker
 
     /// <summary>
     /// Resolve <paramref name="name"/> against the live catalog, bind named args
-    /// with declared-type casts, and return rows under a read-only data source.
+    /// with declared-type casts, and return rows. The endpoint hands ops a
+    /// read-only data source unless the name is on the <see cref="WritableOps"/>
+    /// allow-list, which resolves onto a writable connection instead.
     /// </summary>
     public static async Task<OpResult> InvokeAsync(
         NpgsqlDataSource db,

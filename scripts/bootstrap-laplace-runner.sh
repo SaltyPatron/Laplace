@@ -1371,7 +1371,7 @@ bootstrap_external_dirs() {
     for sub in include lib share bin; do
         install -d -m 2775 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "/opt/laplace/$sub"
     done
-    green "✓ /opt/laplace/{external,tree-sitter,geos,proj,gdal,pgsql-18,include,lib,share,bin}/ ready (owned $RUNNER_USER:$RUNNER_GROUP, mode 2775 setgid)"
+    green "✓ $LAPLACE_EXTERNAL/ + /opt/laplace/{tree-sitter,geos,proj,gdal,pgsql-18,include,lib,share,bin}/ ready (owned $RUNNER_USER:$RUNNER_GROUP, mode 2775 setgid)"
     bootstrap_external_pins
 }
 

@@ -82,7 +82,7 @@ BEGIN ATOMIC
                  WHEN r.has_traj
                    THEN 'ok: composed, renders by recursion'::text
                  WHEN r.cp IS NOT NULL
-                   THEN ('ok: codepoint U+' || to_hex(r.cp))::text
+                   THEN ('ok: codepoint U+' || lpad(to_hex(r.cp), 4, '0'))::text
                  ELSE 'UNRENDERABLE: entity exists, no trajectory, no codepoint'::text
                END AS vd
         FROM resolved r
