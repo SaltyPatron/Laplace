@@ -181,12 +181,7 @@ public sealed class NpgsqlIndexCycle
                     guc.CommandText = IndexBuildGucs();
                     await guc.ExecuteNonQueryAsync(token);
                 }
-                await using (var mk = conn.CreateCommand())
-                {
-                    mk.CommandTimeout = 0;
-                    mk.CommandText = def.Replace("CREATE INDEX", "CREATE INDEX IF NOT EXISTS", StringComparison.Ordinal);
-                    await mk.ExecuteNonQueryAsync(token);
-                }
+                await RebuildOneValidAsync(conn, name, def, token);
                 await using (var del = conn.CreateCommand())
                 {
                     del.CommandText = "DELETE FROM laplace.index_cycle_journal WHERE index_name = $1";
@@ -195,6 +190,58 @@ public sealed class NpgsqlIndexCycle
                 }
             }
         }, ct);
+    }
+
+    /// <summary>
+    /// Rebuild one journaled index and PROVE it valid before the caller clears the
+    /// journal row. Replaces the old `CREATE INDEX IF NOT EXISTS` replay, which had
+    /// two silent failure modes (both hit 2026-08-13): a def carrying ' ON ONLY '
+    /// creates an empty invalid parent shell, and IF NOT EXISTS then treats that
+    /// shell as "already built" on every later recovery — the journal row is
+    /// deleted and the index is gone forever without one error line.
+    /// </summary>
+    private static async Task RebuildOneValidAsync(
+        NpgsqlConnection conn, string name, string def, CancellationToken ct)
+    {
+        // A valid index of this name may legitimately exist (crash after build,
+        // before the journal delete). An INVALID one is a shell and must go.
+        await using (var probe = conn.CreateCommand())
+        {
+            probe.CommandText =
+                "SELECT i.indisvalid FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid "
+                + "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                + "WHERE n.nspname = 'laplace' AND c.relname = $1";
+            probe.Parameters.AddWithValue(name);
+            var existing = await probe.ExecuteScalarAsync(ct);
+            if (existing is true) return;
+            if (existing is false)
+            {
+                await using var rm = conn.CreateCommand();
+                rm.CommandText = $"DROP INDEX laplace.\"{name}\"";
+                await rm.ExecuteNonQueryAsync(ct);
+            }
+        }
+        await using (var mk = conn.CreateCommand())
+        {
+            mk.CommandTimeout = 0;
+            // Plain CREATE, no IF NOT EXISTS: the name is provably free or valid
+            // by the probe above, and a failure here must be loud, not skipped.
+            mk.CommandText = def.Replace(" ON ONLY ", " ON ", StringComparison.Ordinal);
+            await mk.ExecuteNonQueryAsync(ct);
+        }
+        await using (var chk = conn.CreateCommand())
+        {
+            chk.CommandText =
+                "SELECT i.indisvalid FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid "
+                + "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                + "WHERE n.nspname = 'laplace' AND c.relname = $1";
+            chk.Parameters.AddWithValue(name);
+            if (await chk.ExecuteScalarAsync(ct) is not true)
+                throw new InvalidOperationException(
+                    $"INDEX_CYCLE rebuilt '{name}' but it is INVALID or absent — refusing to clear "
+                    + "its journal row. Partitioned-parent defs must recurse into leaves "
+                    + "(no ' ON ONLY '); see 2026-08-13 shell incident.");
+        }
     }
 
     /// <summary>
@@ -291,13 +338,7 @@ public sealed class NpgsqlIndexCycle
                     guc.CommandText = IndexBuildGucs();
                     await guc.ExecuteNonQueryAsync(token);
                 }
-                await using (var mk = conn.CreateCommand())
-                {
-                    mk.CommandTimeout = 0;
-                    mk.CommandText = def.Replace(
-                        "CREATE INDEX", "CREATE INDEX IF NOT EXISTS", StringComparison.Ordinal);
-                    await mk.ExecuteNonQueryAsync(token);
-                }
+                await RebuildOneValidAsync(conn, name, def, token);
                 await using (var del = conn.CreateCommand())
                 {
                     del.CommandText = "DELETE FROM laplace.index_cycle_journal WHERE index_name = $1";
@@ -375,13 +416,21 @@ public sealed class NpgsqlIndexCycle
         // leaf hit 2BP01 (child before parent) and would journal orphans after
         // the parent DROP already removed them. Independent per-partition
         // indexes (no inhparent) are roots and still appear here.
+        // ' ON ONLY ' MUST be stripped from the recorded def. pg_get_indexdef of a
+        // partitioned-parent index emits `CREATE INDEX ... ON ONLY <table>`, and
+        // replaying that after the DROP creates an EMPTY PARENT SHELL: no leaf
+        // indexes, indisvalid = false, silently unusable. 2026-08-13: the first
+        // default-on seed rebuilt all 28 partitioned secondaries as shells and
+        // every read surface degraded to PK scans (chat 503 at 30s+, single
+        // render_text 7.6s). Stripping ONLY makes CREATE INDEX recurse into the
+        // leaves and attach them, which is the rebuild this journal promises.
         list.CommandText =
             "WITH RECURSIVE parts AS ("
             + "  SELECT ($1)::regclass AS oid "
             + "  UNION ALL "
             + "  SELECT i.inhrelid FROM pg_inherits i JOIN parts p ON i.inhparent = p.oid"
             + ") "
-            + "SELECT c.relname, pg_get_indexdef(i.indexrelid) "
+            + "SELECT c.relname, replace(pg_get_indexdef(i.indexrelid), ' ON ONLY ', ' ON ') "
             + "FROM pg_index i "
             + "JOIN pg_class c ON c.oid = i.indexrelid "
             + "WHERE i.indrelid IN (SELECT oid FROM parts) "

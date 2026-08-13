@@ -34,6 +34,25 @@ if [[ "${running:-0}" -gt 0 ]]; then
   exit 1
 fi
 
+# INVALID_INDEXES — a partitioned-parent secondary that exists but cannot serve
+# reads (indisvalid=false). 2026-08-13: the index cycle's journal replay rebuilt
+# all 28 partitioned secondaries as empty parent shells and every read surface
+# silently degraded to PK scans — counts stayed right, chat 503'd. An invalid
+# index is never a legitimate steady state on this substrate: fail loud here so
+# the FIRST post-seed gate catches it, not the live endpoint.
+invalid=$("${PSQL[@]}" -d "$DB" -tAc "
+  SELECT count(*) FROM pg_index i JOIN pg_class t ON t.oid = i.indrelid
+  WHERE t.relnamespace = 'laplace'::regnamespace AND NOT i.indisvalid;")
+if [[ "${invalid:-0}" -gt 0 ]]; then
+  echo "::error::INVALID_INDEXES: ${invalid} invalid index(es) on ${DB} — reads degrade to PK scans"
+  psql -h "$PGHOST" -U "$PGUSER" -d "$DB" -P pager=off -c \
+    "SELECT c.relname AS index, t.relname AS table FROM pg_index i
+       JOIN pg_class c ON c.oid = i.indexrelid JOIN pg_class t ON t.oid = i.indrelid
+      WHERE t.relnamespace = 'laplace'::regnamespace AND NOT i.indisvalid ORDER BY 2, 1;" || true
+  echo "Heal: DROP each invalid index and re-run its CREATE with ' ON ONLY ' stripped (recursive leaf build), or ingest index-rebuild from the cycle journal."
+  exit 1
+fi
+
 # Same layer roster as ensure-foundation.sh — --check-only never ingests.
 export LAPLACE_DBNAME="$DB"
 export PGHOST PGUSER

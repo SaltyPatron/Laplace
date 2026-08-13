@@ -1,1 +1,34 @@
-CREATE INDEX IF NOT EXISTS physicalities_entity_btree ON physicalities USING btree (entity_id);
+-- physicalities_entity_btree: (entity_id, id) — the id column is LOAD-BEARING.
+--
+-- realize.constituents_closure's per-node probe is
+--   WHERE entity_id = ? AND type = 1 AND trajectory IS NOT NULL ORDER BY id LIMIT 1
+-- across the 64 HASH(id) partitions. With the old single-column (entity_id)
+-- index the planner refuses it for that shape: it estimates ~1.7k matches per
+-- entity (actual <= 4, structural misestimate — fresh ANALYZE does not fix it)
+-- and instead walks every partition's PKEY IN ID ORDER expecting an early
+-- match, scanning ~67k rows per partition per probe (measured 2026-08-13:
+-- 17.3M buffer hits and 1.73s PER PROBE; render_text('dog') = 7.0s; chat
+-- timed out at 30s+ and the live endpoint returned 503).
+--
+-- Appending id gives each partition a parameterized ordered path — index cond
+-- entity_id = ?, rows already in id order — so the Merge Append merges 64
+-- one-row streams instead of 64 full-partition ordered scans. Every lookup the
+-- single-column index served, the composite serves from the same leading
+-- column (consensus_object_btree precedent).
+DO $do$
+BEGIN
+    IF to_regclass('laplace.physicalities_entity_btree') IS NOT NULL
+       AND pg_get_indexdef('laplace.physicalities_entity_btree'::regclass)
+           NOT LIKE '%(entity_id, id)%' THEN
+        -- Upgrade path: replace the old (entity_id)-only index. Release
+        -- extension membership first (no-op when not a member).
+        BEGIN
+            EXECUTE format('ALTER EXTENSION %I DROP INDEX laplace.physicalities_entity_btree',
+                           'laplace_substrate');
+        EXCEPTION WHEN OTHERS THEN
+            NULL;
+        END;
+        EXECUTE 'DROP INDEX IF EXISTS laplace.physicalities_entity_btree';
+    END IF;
+END $do$;
+CREATE INDEX IF NOT EXISTS physicalities_entity_btree ON physicalities USING btree (entity_id, id);
