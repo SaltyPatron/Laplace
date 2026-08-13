@@ -743,18 +743,23 @@ int laplace_relation_in_family(const hash128_t* type_id, const char* family_root
         "        IF cardinality(missing) = 0 THEN",
         "            CONTINUE;  -- nothing to do: no lock, no scan",
         "        END IF;",
-        # laplace.-qualified, NOT bare — RATIFIED 2026-08-13, do not flip again.
+        # Qualified, NOT bare — and the generator is the only author of the
+        # generated file (RATIFIED 2026-08-13; do not hand-edit the artifact).
         # History: efd479de ("repair 17 dangling cross-schema calls; pg_regress
         # 1/20 -> 20/20") fixed this by hand in the GENERATED file while the
         # generator emitted bare, so every regeneration silently reverted it;
-        # then 34db42a5 hand-UNQUALIFIED the generated file (purpose-migration
-        # instinct) while this generator emitted qualified — the same anti-pattern
-        # mirrored (GH #1065). The ruling: the identity family (relation_type_id,
-        # word_id, source_id) has NO purpose_relocate row — laplace. is its
-        # permanent home — and SET search_path on function bodies is banned by
-        # the inlining law (#617), so a bare name resolving through the caller's
-        # search_path is the only unsafe option. Qualified is canonical; the
-        # generator is the only author of the generated file.
+        # then 34db42a5 hand-UNQUALIFIED the generated file while this generator
+        # emitted qualified — the same anti-pattern mirrored (GH #1065).
+        # Why qualified: bare resolves through the CALLER's search_path (the
+        # measured pg_regress failure), and SET search_path on function bodies
+        # is banned by the inlining law (#617). Why laplace. FOR NOW: it is the
+        # identity family's CURRENT ADDRESS, not its home — laplace is the
+        # legacy schema the purpose migration (#957) exists to drain, and the
+        # trio's absence from purpose_relocate is unfinished work, not a ruling
+        # (the DDL already lives in functions/identity/, naming the destination).
+        # When relation_type_id/word_id/source_id relocate to the identity
+        # schema, retarget THIS emission in the same change as the relocate
+        # rows and the caller sweep — never by hand-editing the artifact.
         "        rids := ARRAY(SELECT laplace.relation_type_id(h) FROM unnest(missing) AS h);",
         "        dflt := tbl || '_rdefault';",
         "        has_default := to_regclass(current_schema() || '.' || dflt) IS NOT NULL;",
