@@ -18,6 +18,11 @@ struct tier_tree {
     hash128_t*    id;
     double*       coord;
     hilbert128_t* hilbert;
+
+    /* Post-NFC text the node offsets index into. Owned (freed with the tree).
+     * See tier_tree_set_text in the header for the offset-space law (#1039). */
+    uint8_t* text;
+    size_t   text_len;
 };
 
 static int tier_tree_grow(tier_tree_t* t, size_t min_capacity) {
@@ -98,7 +103,22 @@ void tier_tree_free(tier_tree_t* tree) {
     free(tree->id);
     free(tree->coord);
     free(tree->hilbert);
+    free(tree->text);
     free(tree);
+}
+
+int tier_tree_set_text(tier_tree_t* tree, uint8_t* text_owned, size_t len) {
+    if (!tree) return -1;
+    if (!text_owned && len > 0) return -1;
+    free(tree->text);
+    tree->text     = text_owned;
+    tree->text_len = len;
+    return 0;
+}
+
+const uint8_t* tier_tree_text(const tier_tree_t* tree, size_t* out_len) {
+    if (out_len) *out_len = tree ? tree->text_len : 0;
+    return tree ? tree->text : NULL;
 }
 
 size_t tier_tree_node_count(const tier_tree_t* tree) {
