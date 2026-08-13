@@ -153,7 +153,16 @@ internal static class CpuTopologyCommands
         // pg_apply_wal_compression in scripts/pg-machine-tuning.sh.
         w.WriteLine("ALTER SYSTEM SET checkpoint_timeout = '30min';");
         w.WriteLine("ALTER SYSTEM SET checkpoint_completion_target = 0.9;");
-        w.WriteLine("ALTER SYSTEM SET max_wal_size = '32GB';");
+        // 32GB -> 96GB (2026-08-13): the controlled evidence the old comment
+        // asked for. Measured 2026-08-12 at 32GB: 60 volume-forced checkpoints
+        // against 33 timed in ONE day, 478GB WAL written for a ~15GB substrate,
+        // 42.3M full-page images = 72% of all WAL — each forced checkpoint
+        // re-arms FPI, converting row-sized fold updates into page-sized WAL.
+        // Rollback benchmark: 21.3KB WAL per consensus insert under the storm.
+        // The WAL volume is a dedicated 128GB NVMe LV (/var/lib/pgwal); 96GB
+        // leaves 25% headroom. Mirrored in scripts/pg-machine-tuning.sh;
+        // PgTuningParityTests pins the pair.
+        w.WriteLine("ALTER SYSTEM SET max_wal_size = '96GB';");
         w.WriteLine("ALTER SYSTEM SET min_wal_size = '4GB';");
         // Every Windows backend is a full process plus a per-connection
         // perfcache map; connections are budgeted, not free. Memory ceiling
