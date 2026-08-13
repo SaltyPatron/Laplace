@@ -23,7 +23,12 @@
 -- relation fails loudly here instead of leaving an opaque string that breaks at
 -- first call. Every object named below must therefore already be installed when
 -- this file runs -- which is what the manifest ordering is for.
-DROP FUNCTION IF EXISTS ops.ducet_rank(geometry);
+-- No DROP: signature and return type are unchanged, so CREATE OR REPLACE alone
+-- does the job — and the DROP was not merely redundant but upgrade-blocking:
+-- ops.ducet_ordered below is BEGIN ATOMIC, so the installed copy holds a real
+-- pg_depend edge on this function, and the first live upgrade died on
+-- "cannot drop function ops.ducet_rank because other objects depend on it"
+-- (2026-08-13, run 31661560670). Same class as #1004 and #1006.
 CREATE OR REPLACE FUNCTION ops.ducet_rank(p_coord geometry)
 RETURNS double precision
 LANGUAGE sql IMMUTABLE PARALLEL SAFE
@@ -65,7 +70,7 @@ COMMENT ON FUNCTION ops.ducet_rank(geometry) IS
 -- Internal aliases are rnk/cp_val rather than rank/codepoint: under BEGIN ATOMIC
 -- the RETURNS TABLE columns are OUT parameters and sit in scope over the body,
 -- so reusing their names for inner aliases invites a silent capture.
-DROP FUNCTION IF EXISTS ops.ducet_ordered(integer, integer);
+-- No DROP: same signature, same RETURNS TABLE shape — see the ducet_rank note.
 CREATE OR REPLACE FUNCTION ops.ducet_ordered(p_from  integer DEFAULT 0,
                                              p_limit integer DEFAULT 50)
 RETURNS TABLE(rank double precision, codepoint integer, ch text)
