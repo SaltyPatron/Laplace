@@ -108,6 +108,13 @@ public sealed class IngestMutexGateTests
         // GH #911: session ord RMW serialization — not the ingest mutex. Keyed on
         // session id via hash128_lo; covers the empty-session FOR UPDATE gap.
         "extension/laplace_substrate/sql/functions/variant/session_record_prompt.sql.in",
+        // GH #1066: per-run LIVENESS beacon — not the ingest mutex. A
+        // session-scoped pg_advisory_lock(classid, hashtext(run_id)) held on a
+        // dedicated connection for the run's lifetime, so reconcilers and
+        // deploys can tell a live run from a corpse (lock gone = holder died).
+        // Different lock family, keyed per run, never contends with
+        // AdvisoryTxLock's apply mutex and never blocks ingest.
+        "app/Laplace.Substrate/Crud/Npgsql/NpgsqlIngestObservability.cs",
     };
 
     /// <summary>
@@ -154,7 +161,12 @@ public sealed class IngestMutexGateTests
     // session-keyed advisory lock for GH #911 ord RMW. Not an ingest mutex —
     // listed so a third SQL-side lock is still a named failure. Visible raise
     // per W6 D2 (same class as the g3_sql chess-read exception).
-    private const int DatabaseMutexCeiling = 2;
+    // 2 -> 3 (2026-08-13): NpgsqlIngestObservability gained the GH #1066
+    // per-run LIVENESS beacon — a session-scoped advisory lock keyed per run
+    // so reconcilers/deploys can tell a live run from a corpse. Different
+    // lock family, never contends with the apply mutex. Visible raise; a
+    // fourth database-level lock is still a named failure.
+    private const int DatabaseMutexCeiling = 3;
 
     /// <inheritdoc cref="ProcessMutexCeiling"/>
     private const int EvidenceVerifyCeiling = 11;
