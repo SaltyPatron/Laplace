@@ -47,7 +47,17 @@ public sealed class UdSentenceEmitContext
         // Per-token Lang= from MISC (genuine code-switching the source marks) is still
         // emitted in the token loop below. See docs/specs/16 §1a — this replaces 5.3M
         // per-word HAS_LANGUAGE rows with one per sentence.
-        if (s.TextUtf8 is { Length: > 0 } && ctx.RootFor(s.TextUtf8) is { } sentenceRootId)
+        // Hoisted: the sentence content root anchors the language attestation AND
+        // is the contextId on every dependency arc below (#1057). With a null
+        // context, arcs joined type-level wordforms globally — the nsubj arc from
+        // "The cat sat" was the same consensus row as every cat→sat pair in every
+        // corpus, no arc was bound to any sentence, and French/Spanish homographs
+        // merged. Context = sentence root keeps consensus folding by
+        // (subject, type, object) exactly as before while the attestation layer
+        // retains per-sentence testimony (attestation identity includes context),
+        // and language scoping rides the sentence's own HAS_LANGUAGE.
+        Hash128? sentenceRoot = s.TextUtf8 is { Length: > 0 } ? ctx.RootFor(s.TextUtf8) : null;
+        if (sentenceRoot is { } sentenceRootId)
             b.AddAttestation(NativeAttestation.Categorical(
                 sentenceRootId, "HAS_LANGUAGE", langId, sourceId, null, SourceTrust.AcademicCurated));
 
@@ -113,7 +123,21 @@ public sealed class UdSentenceEmitContext
                 RelationTypeRegistry.SeedDeprel(b, tok.Deprel, sourceId, seenEntBatch, seenAttBatch, canonicalNames);
                 var dep = RelationTypeRegistry.ResolveDeprel(tok.Deprel);
                 b.AddAttestation(NativeAttestation.CategoricalResolved(
-                    form, dep.Id, headId, sourceId, null, dep.Rank * SourceTrust.AcademicCurated));
+                    form, dep.Id, headId, sourceId, sentenceRoot,
+                    dep.Rank * SourceTrust.AcademicCurated));
+            }
+            else if (tok.Head == 0 && sentenceRoot is { } sentRoot
+                     && !string.IsNullOrEmpty(tok.Deprel) && tok.Deprel != "_")
+            {
+                // HEAD=0 marks the sentence head (deprel 'root'): bind the heading
+                // word to the SENTENCE itself. Previously dropped entirely —
+                // ~2.31M sentence-head markers lost across the treebanks, and
+                // "which word heads this sentence" was unanswerable (#1057).
+                RelationTypeRegistry.SeedDeprel(b, tok.Deprel, sourceId, seenEntBatch, seenAttBatch, canonicalNames);
+                var dep = RelationTypeRegistry.ResolveDeprel(tok.Deprel);
+                b.AddAttestation(NativeAttestation.CategoricalResolved(
+                    form, dep.Id, sentRoot, sourceId, sentRoot,
+                    dep.Rank * SourceTrust.AcademicCurated));
             }
 
             if (tok.Deps.Length > 0 && tok.Deps != "_")
@@ -124,14 +148,29 @@ public sealed class UdSentenceEmitContext
                     if (colon <= 0) continue;
                     string headRef = edge[..colon];
                     string erel = edge[(colon + 1)..].Trim();
-                    if (erel.Length == 0 || headRef == "0") continue;
-                    if (!ctx.RefToForm.TryGetValue(headRef, out var eHead)) continue;
+                    if (erel.Length == 0) continue;
                     int esub = erel.IndexOf(':');
                     string ebase = esub > 0 ? erel[..esub] : erel;
+                    if (headRef == "0")
+                    {
+                        // Enhanced-graph root: same law as the basic HEAD=0 arc —
+                        // bind to the sentence, don't drop (#1057).
+                        if (sentenceRoot is { } esr)
+                        {
+                            RelationTypeRegistry.SeedEnhancedDeprel(b, ebase, sourceId, seenEntBatch, seenAttBatch, canonicalNames);
+                            var eroot = RelationTypeRegistry.ResolveEnhancedDeprel(ebase);
+                            b.AddAttestation(NativeAttestation.CategoricalResolved(
+                                form, eroot.Id, esr, sourceId, esr,
+                                eroot.Rank * SourceTrust.AcademicCurated));
+                        }
+                        continue;
+                    }
+                    if (!ctx.RefToForm.TryGetValue(headRef, out var eHead)) continue;
                     RelationTypeRegistry.SeedEnhancedDeprel(b, ebase, sourceId, seenEntBatch, seenAttBatch, canonicalNames);
                     var edep = RelationTypeRegistry.ResolveEnhancedDeprel(ebase);
                     b.AddAttestation(NativeAttestation.CategoricalResolved(
-                        form, edep.Id, eHead, sourceId, null, edep.Rank * SourceTrust.AcademicCurated));
+                        form, edep.Id, eHead, sourceId, sentenceRoot,
+                        edep.Rank * SourceTrust.AcademicCurated));
                 }
             }
 

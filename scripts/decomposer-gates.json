@@ -272,8 +272,8 @@
           "min": 10000
         },
         {
-          "relation": "ENHANCED_DEPENDS_ON",
-          "min": 1,
+          "relation": "DEPENDS_ON",
+          "min": 100000,
           "family": true
         }
       ]

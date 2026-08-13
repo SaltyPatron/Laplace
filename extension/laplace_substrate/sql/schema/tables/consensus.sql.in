@@ -38,8 +38,18 @@ BEGIN
     IF (SELECT c.relkind FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE n.nspname = current_schema() AND c.relname = 'consensus') = 'p'
        AND to_regclass(current_schema() || '.consensus_rdefault') IS NULL THEN
-        CREATE TABLE consensus_rdefault PARTITION OF consensus DEFAULT;
-        EXECUTE 'ALTER TABLE consensus_rdefault SET (autovacuum_analyze_scale_factor = 0.02, autovacuum_analyze_threshold = 100000)';
+        -- The DEFAULT is hash-sharded like every named sibling (#1008): flat, it
+        -- absorbed 56% of all rows (5.1M measured 2026-08-12) because every
+        -- dynamic family (DEP_*/EDEP_*/FEAT_*) lands here until promoted to a
+        -- named partition — the highest-volume incoming families had the only
+        -- unsharded heap, and a full UD pass (~36M arcs) would have landed on it.
+        CREATE TABLE consensus_rdefault PARTITION OF consensus DEFAULT
+            PARTITION BY HASH (subject_id);
+        FOR i IN 0..7 LOOP
+            EXECUTE format('CREATE TABLE consensus_rdefault_h%s PARTITION OF consensus_rdefault'
+                           || ' FOR VALUES WITH (MODULUS 8, REMAINDER %s)', i, i);
+            EXECUTE format('ALTER TABLE consensus_rdefault_h%s SET (autovacuum_analyze_scale_factor = 0.02, autovacuum_analyze_threshold = 100000)', i);
+        END LOOP;
     END IF;
 END $$;
 

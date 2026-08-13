@@ -46,8 +46,16 @@ BEGIN
     IF (SELECT c.relkind FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE n.nspname = current_schema() AND c.relname = 'attestations') = 'p'
        AND to_regclass(current_schema() || '.attestations_rdefault') IS NULL THEN
-        CREATE TABLE attestations_rdefault PARTITION OF attestations DEFAULT;
-        EXECUTE 'ALTER TABLE attestations_rdefault SET (autovacuum_analyze_scale_factor = 0.02, autovacuum_analyze_threshold = 100000)';
+        -- Hash-sharded like every named sibling (#1008): flat, the default held
+        -- 57% of all attestations (3.8M measured) — the dynamic families'
+        -- (DEP_*/EDEP_*/FEAT_*) only landing zone was the one unsharded heap.
+        CREATE TABLE attestations_rdefault PARTITION OF attestations DEFAULT
+            PARTITION BY HASH (subject_id);
+        FOR i IN 0..7 LOOP
+            EXECUTE format('CREATE TABLE attestations_rdefault_h%s PARTITION OF attestations_rdefault'
+                           || ' FOR VALUES WITH (MODULUS 8, REMAINDER %s)', i, i);
+            EXECUTE format('ALTER TABLE attestations_rdefault_h%s SET (autovacuum_analyze_scale_factor = 0.02, autovacuum_analyze_threshold = 100000)', i);
+        END LOOP;
     END IF;
 END $$;
 
