@@ -202,7 +202,7 @@ public static class NpgsqlSubstrateReads
             SELECT ops.consensus_count(@type)
             """,
             static r => r.IsDBNull(0) ? 0L : r.GetInt64(0),
-            p => p.AddWithValue("type", (object?)typeId ?? DBNull.Value),
+            p => p.Add(new NpgsqlParameter("type", NpgsqlTypes.NpgsqlDbType.Bytea) { Value = (object?)typeId ?? DBNull.Value }),
             ct: ct, label: "consensus_count", onError: onError).ConfigureAwait(false);
         return rows.Count == 0 ? 0L : rows[0];
     }
@@ -497,7 +497,7 @@ public static class NpgsqlSubstrateReads
                 r.IsDBNull(0) ? "" : r.GetString(0),
                 r.IsDBNull(1) ? "" : r.GetString(1),
                 r.IsDBNull(2) ? 0L : r.GetInt64(2)),
-            p => p.AddWithValue("rel", (object?)relation ?? DBNull.Value),
+            p => p.Add(new NpgsqlParameter("rel", NpgsqlTypes.NpgsqlDbType.Text) { Value = (object?)relation ?? DBNull.Value }),
             ct: ct, label: "model_jitter_catalog", onError: onError);
 
     /// <summary><c>realize.vertex_tier(flags)</c> / <c>realize.vertex_atom(flags)</c>.</summary>
@@ -961,8 +961,8 @@ public static class NpgsqlSubstrateReads
                 p.AddWithValue("shape", shape);
                 p.Add("topic", NpgsqlDbType.Bytea).Value = topic;
                 p.Add("topic2", NpgsqlDbType.Bytea).Value = (object?)topic2 ?? DBNull.Value;
-                p.AddWithValue("type", (object?)relationType ?? DBNull.Value);
-                p.AddWithValue("lang", (object?)lang ?? DBNull.Value);
+                p.Add(new NpgsqlParameter("type", NpgsqlTypes.NpgsqlDbType.Text) { Value = (object?)relationType ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("lang", NpgsqlTypes.NpgsqlDbType.Text) { Value = (object?)lang ?? DBNull.Value });
                 p.Add("ctx", NpgsqlDbType.Array | NpgsqlDbType.Bytea).Value =
                     (object?)contextIds ?? DBNull.Value;
             }, ct: ct, label: "recall_intent", onError: onError);
@@ -1224,7 +1224,7 @@ public static class NpgsqlSubstrateReads
                 p.AddWithValue("cy", cy);
                 p.AddWithValue("cz", cz);
                 p.AddWithValue("cm", cm);
-                p.AddWithValue("traj", (object?)trajectoryWkt ?? DBNull.Value);
+                p.Add(new NpgsqlParameter("traj", NpgsqlTypes.NpgsqlDbType.Text) { Value = (object?)trajectoryWkt ?? DBNull.Value });
                 p.AddWithValue("gk", geodesicK);
                 p.AddWithValue("fk", frechetK);
                 p.AddWithValue("fmax", frechetMax);
@@ -1988,9 +1988,15 @@ public static class NpgsqlSubstrateReads
                 r.GetInt32(0), r.GetString(1), r.GetDecimal(2), r.GetDecimal(3), r.GetInt64(4)),
             p =>
             {
-                p.AddWithValue("p", (object?)prompt ?? DBNull.Value);
-                p.AddWithValue("e", (object?)entityHex ?? DBNull.Value);
-                p.AddWithValue("t", (object?)relationType ?? DBNull.Value);
+                // Explicit types: a DBNull with no NpgsqlDbType leaves the wire type
+                // undetermined and the whole statement fails with 42P08 ("could not
+                // determine data type of parameter $1") the moment any of the three
+                // is null — which is every call, since prompt and entity are
+                // mutually exclusive. The surface never worked; measured live
+                // 2026-08-13 via the MCP walk tool.
+                p.Add(new NpgsqlParameter("p", NpgsqlTypes.NpgsqlDbType.Text) { Value = (object?)prompt ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("e", NpgsqlTypes.NpgsqlDbType.Text) { Value = (object?)entityHex ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("t", NpgsqlTypes.NpgsqlDbType.Text) { Value = (object?)relationType ?? DBNull.Value });
                 p.AddWithValue("depth", depth);
                 p.AddWithValue("breadth", breadth);
             }, ct: ct, label: "walk_branches", onError: onError);
@@ -2188,7 +2194,7 @@ public static class NpgsqlSubstrateReads
             p =>
             {
                 p.Add("topic", NpgsqlDbType.Bytea).Value = topic;
-                p.AddWithValue("type", (object?)relationType ?? DBNull.Value);
+                p.Add(new NpgsqlParameter("type", NpgsqlTypes.NpgsqlDbType.Text) { Value = (object?)relationType ?? DBNull.Value });
                 p.Add("bands", NpgsqlDbType.Array | NpgsqlDbType.Integer).Value =
                     (object?)bands ?? DBNull.Value;
                 p.AddWithValue("depth", depth);
@@ -2237,7 +2243,7 @@ public static class NpgsqlSubstrateReads
                 p.AddWithValue("stride", maxStride);
                 p.AddWithValue("spread", spread);
                 p.AddWithValue("breadth", breadth);
-                p.AddWithValue("seed", (object?)seed ?? DBNull.Value);
+                p.Add(new NpgsqlParameter("seed", NpgsqlTypes.NpgsqlDbType.Bigint) { Value = (object?)seed ?? DBNull.Value });
             }, ct: ct, label: "walk_continuations", onError: onError);
 
     /// <inheritdoc cref="StructuralNeighborsAsync(NpgsqlConnection, byte[], int, CancellationToken, NpgsqlRead.ErrorTranslator?)"/>
