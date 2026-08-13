@@ -743,11 +743,18 @@ int laplace_relation_in_family(const hash128_t* type_id, const char* family_root
         "        IF cardinality(missing) = 0 THEN",
         "            CONTINUE;  -- nothing to do: no lock, no scan",
         "        END IF;",
-        # laplace.-qualified, NOT bare. efd479de ("repair 17 dangling cross-schema
-        # calls; pg_regress 1/20 -> 20/20") fixed this by hand in the GENERATED
-        # file and left the generator emitting the unqualified form, so every
-        # regeneration silently reverted it. The seed body has no SET search_path,
-        # so a bare name resolves through whatever the caller happens to have.
+        # laplace.-qualified, NOT bare — RATIFIED 2026-08-13, do not flip again.
+        # History: efd479de ("repair 17 dangling cross-schema calls; pg_regress
+        # 1/20 -> 20/20") fixed this by hand in the GENERATED file while the
+        # generator emitted bare, so every regeneration silently reverted it;
+        # then 34db42a5 hand-UNQUALIFIED the generated file (purpose-migration
+        # instinct) while this generator emitted qualified — the same anti-pattern
+        # mirrored (GH #1065). The ruling: the identity family (relation_type_id,
+        # word_id, source_id) has NO purpose_relocate row — laplace. is its
+        # permanent home — and SET search_path on function bodies is banned by
+        # the inlining law (#617), so a bare name resolving through the caller's
+        # search_path is the only unsafe option. Qualified is canonical; the
+        # generator is the only author of the generated file.
         "        rids := ARRAY(SELECT laplace.relation_type_id(h) FROM unnest(missing) AS h);",
         "        dflt := tbl || '_rdefault';",
         "        has_default := to_regclass(current_schema() || '.' || dflt) IS NOT NULL;",
