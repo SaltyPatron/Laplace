@@ -13,8 +13,10 @@
 #include "utils/builtins.h"
 #include "utils/hsearch.h"
 
+#include "laplace/core/codepoint_table.h"
 #include "laplace/core/content_witness_batch.h"
 #include "laplace/core/hash128.h"
+#include "laplace/core/tier_tree.h"
 
 #include "perfcache_native.h"
 #include "spi_common.h"
@@ -74,42 +76,67 @@ pg_laplace_word_segment(PG_FUNCTION_ARGS)
 
 typedef struct
 {
-    const uint8_t *base;
-    uint32_t      *off;
-    uint32_t      *len;
-    int            n;
-    int            cap;
+    uint32_t *off;   /* tree-text (post-NFC) offsets — see #1039 note below */
+    uint32_t *len;
+    int       n;
+    int       cap;
 } phrase_ctx;
 
-static void
-phrase_collect_emit(void *ctx_, uint32_t ordinal,
-                    const uint8_t *word_utf8, uint32_t word_len,
-                    const hash128_t *id)
+/* Word spans collected from the TREE, in the tree's own post-NFC offset
+ * space (#1039). The previous collector derived offsets by pointer
+ * arithmetic against the CALLER's buffer (word_utf8 - base) — valid only
+ * while segmentation spans aliased the input, which stopped being true when
+ * the tier tree took ownership of its normalized text; on any NFC-changed
+ * input the offsets were garbage even before that. Same word set as
+ * laplace_content_word_segment: tier-2 nodes, non-empty, not all-whitespace,
+ * ascending by offset. */
+static int
+phrase_collect_from_tree(const tier_tree_t *tree,
+                         const uint8_t *norm, size_t norm_len,
+                         phrase_ctx *ctx)
 {
-    phrase_ctx *ctx = (phrase_ctx *) ctx_;
+    size_t nc = tier_tree_node_count(tree);
 
-    (void) ordinal;
-    (void) id;
-    if (ctx->n == ctx->cap)
+    for (uint32_t idx = 0; idx < (uint32_t) nc; ++idx)
     {
-        int newcap = ctx->cap ? ctx->cap * 2 : 16;
+        tier_node_view_t node;
 
-        if (ctx->off == NULL)
+        if (tier_tree_get_node(tree, idx, &node) != 0)
+            continue;
+        if (node.tier != 2 || node.text_range_len == 0)
+            continue;
+        if ((size_t) node.text_range_off + node.text_range_len > norm_len)
+            continue;
+        if (laplace_text_is_all_whitespace(norm + node.text_range_off,
+                                           node.text_range_len))
+            continue;
+        if (ctx->n == ctx->cap)
         {
-            ctx->off = (uint32_t *) palloc(sizeof(uint32_t) * newcap);
-            ctx->len = (uint32_t *) palloc(sizeof(uint32_t) * newcap);
+            int newcap = ctx->cap ? ctx->cap * 2 : 16;
+
+            if (ctx->off == NULL)
+            {
+                ctx->off = (uint32_t *) palloc(sizeof(uint32_t) * newcap);
+                ctx->len = (uint32_t *) palloc(sizeof(uint32_t) * newcap);
+            }
+            else
+            {
+                ctx->off = (uint32_t *) repalloc(ctx->off, sizeof(uint32_t) * newcap);
+                ctx->len = (uint32_t *) repalloc(ctx->len, sizeof(uint32_t) * newcap);
+            }
+            ctx->cap = newcap;
         }
-        else
-        {
-            ctx->off = (uint32_t *) repalloc(ctx->off, sizeof(uint32_t) * newcap);
-            ctx->len = (uint32_t *) repalloc(ctx->len, sizeof(uint32_t) * newcap);
-        }
-        ctx->cap = newcap;
+        ctx->off[ctx->n] = node.text_range_off;
+        ctx->len[ctx->n] = node.text_range_len;
+        ctx->n++;
     }
 
-    ctx->off[ctx->n] = (uint32_t) (word_utf8 - ctx->base);
-    ctx->len[ctx->n] = word_len;
-    ctx->n++;
+    /* The decomposer appends words in ascending offset order; keep the
+     * contract explicit with an insertion check rather than assuming it. */
+    for (int i = 1; i < ctx->n; i++)
+        if (ctx->off[i] < ctx->off[i - 1])
+            return -1;
+    return 0;
 }
 
 PG_FUNCTION_INFO_V1(pg_laplace_resolve_phrase);
@@ -137,15 +164,33 @@ pg_laplace_resolve_phrase(PG_FUNCTION_ARGS)
 
     base = (const uint8_t *) VARDATA_ANY(t);
     memset(&ctx, 0, sizeof(ctx));
-    ctx.base = base;
-    rc = laplace_content_word_segment(base, (size_t) VARSIZE_ANY_EXHDR(t),
-                                      phrase_collect_emit, &ctx);
+
+    /* Build the tier tree ONCE and collect spans in ITS offset space; the
+     * tree's text is the post-NFC bytes those offsets index (#1039). The
+     * tree is freed as soon as pass 1 has computed the sub-span root ids —
+     * before SPI connects — so no native allocation crosses an elog. */
+    tier_tree_t   *tree = NULL;
+    const uint8_t *norm = NULL;
+    size_t         norm_len = 0;
+
+    rc = laplace_content_tree_build_public(base, (size_t) VARSIZE_ANY_EXHDR(t), &tree);
     if (rc != 0)
         ereport(ERROR,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                  errmsg("resolve_phrase: segmentation failed (rc=%d)", rc)));
+    norm = tier_tree_text(tree, &norm_len);
+    if (norm == NULL || phrase_collect_from_tree(tree, norm, norm_len, &ctx) != 0)
+    {
+        tier_tree_free(tree);
+        ereport(ERROR,
+                (errcode(ERRCODE_INTERNAL_ERROR),
+                 errmsg("resolve_phrase: span collection failed")));
+    }
     if (ctx.n == 0)
+    {
+        tier_tree_free(tree);
         PG_RETURN_NULL();
+    }
 
     /*
      * The candidate span set is fixed and content_root_id is native (no SPI),
@@ -172,13 +217,16 @@ pg_laplace_resolve_phrase(PG_FUNCTION_ARGS)
         int         n_elems = 0;
         int         s;
 
-        /* Pass 1: compute each span's content_root_id in canonical order. */
+        /* Pass 1: compute each span's content_root_id in canonical order.
+         * Sub-span bytes slice the tree's normalized text — contiguous runs
+         * across words INCLUDING the inter-word bytes, exactly as before,
+         * just in the correct (post-NFC) space. */
         s = 0;
         for (int L = ctx.n; L >= 1; L--)
         {
             for (int i = 0; i + L <= ctx.n; i++, s++)
             {
-                const uint8_t *sp = base + ctx.off[i];
+                const uint8_t *sp = norm + ctx.off[i];
                 size_t  splen = (size_t) ((ctx.off[i + L - 1] + ctx.len[i + L - 1])
                                           - ctx.off[i]);
 
@@ -193,6 +241,10 @@ pg_laplace_resolve_phrase(PG_FUNCTION_ARGS)
                 }
             }
         }
+
+        /* Root ids are computed; nothing below reads the tree's text. */
+        tier_tree_free(tree);
+        tree = NULL;
 
         if (n_elems > 0)
         {

@@ -85,11 +85,25 @@ typedef void (*laplace_word_emit_fn)(void* ctx, uint32_t ordinal,
                                      const uint8_t* word_utf8, uint32_t word_len,
                                      const hash128_t* id);
 
+/* Emit-callback contract (#1039): word_utf8 points into the TREE's own
+ * post-NFC text buffer, which is freed when this call returns. Consume the
+ * bytes inside the callback (copy if needed) and NEVER compute offsets by
+ * pointer arithmetic against the caller's input buffer — NFC changes byte
+ * positions, so the two spaces do not correspond. */
 int laplace_content_word_segment(
     const uint8_t*       utf8,
     size_t               len,
     laplace_word_emit_fn emit,
     void*                ctx);
+
+/* Build the full content tier tree (NFC → UAX #29 ladder → merkle ids) for
+ * consumers that need offsets, spans, and ids in ONE coherent space: the
+ * returned tree owns its post-NFC text (tier_tree_text) and every node's
+ * text_range_off/len indexes it. Caller frees with tier_tree_free. */
+int laplace_content_tree_build_public(
+    const uint8_t* utf8,
+    size_t         len,
+    tier_tree_t**  out_tree);
 
 #ifdef __cplusplus
 }

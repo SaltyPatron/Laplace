@@ -154,6 +154,14 @@ static int content_tree_build(const uint8_t* utf8, size_t len, tier_tree_t** out
     return 0;
 }
 
+int laplace_content_tree_build_public(
+    const uint8_t* utf8,
+    size_t         len,
+    tier_tree_t**  out_tree) {
+    if (!utf8 || !out_tree) return -1;
+    return content_tree_build(utf8, len, out_tree);
+}
+
 int laplace_content_root_id(
     const uint8_t* utf8,
     size_t         len,
