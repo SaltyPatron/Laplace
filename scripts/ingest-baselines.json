@@ -1,23 +1,23 @@
 {
   "cili": {
     "decomposer": "CILIDecomposer",
-    "elapsed_s": 115.3,
+    "elapsed_s": 114.0,
     "rc": 0,
-    "rows_new": 5802652,
-    "rows_per_s": 50326.6,
+    "rows_new": 5802654,
+    "rows_per_s": 50900.5,
     "source": "cili",
     "status": "ok",
-    "wall_s": 121
+    "wall_s": 126
   },
   "framenet": {
     "decomposer": "FrameNetDecomposer",
-    "elapsed_s": 93.3,
+    "elapsed_s": 547.0,
     "rc": 0,
-    "rows_new": 1384659,
-    "rows_per_s": 14840.9,
+    "rows_new": 1399559,
+    "rows_per_s": 2558.6,
     "source": "framenet",
     "status": "ok",
-    "wall_s": 103
+    "wall_s": 565
   },
   "iso639": {
     "decomposer": "ISO639Decomposer",
@@ -27,76 +27,76 @@
     "rows_per_s": 18405.5,
     "source": "iso639",
     "status": "ok",
-    "wall_s": 7
+    "wall_s": 10
   },
   "mapnet": {
     "decomposer": "MapNetDecomposer",
-    "elapsed_s": 3.0,
+    "elapsed_s": 4.0,
     "rc": 0,
-    "rows_new": 14998,
-    "rows_per_s": 4999.3,
+    "rows_new": 15000,
+    "rows_per_s": 3750.0,
     "source": "mapnet",
     "status": "ok",
-    "wall_s": 13
+    "wall_s": 21
   },
   "propbank": {
     "decomposer": "PropBankDecomposer",
-    "elapsed_s": 23.2,
+    "elapsed_s": 10.0,
     "rc": 0,
-    "rows_new": 290199,
-    "rows_per_s": 12508.6,
+    "rows_new": 290191,
+    "rows_per_s": 29019.1,
     "source": "propbank",
     "status": "ok",
-    "wall_s": 32
+    "wall_s": 27
   },
   "semlink": {
     "decomposer": "SemLinkDecomposer",
-    "elapsed_s": 10.5,
+    "elapsed_s": 10.0,
     "rc": 0,
-    "rows_new": 99564,
-    "rows_per_s": 9482.3,
+    "rows_new": 90302,
+    "rows_per_s": 9030.2,
     "source": "semlink",
     "status": "ok",
-    "wall_s": 20
+    "wall_s": 28
   },
   "unicode": {
     "decomposer": "UnicodeDecomposer",
-    "elapsed_s": 55.5,
+    "elapsed_s": 42.0,
     "rc": 0,
-    "rows_new": 3979786,
-    "rows_per_s": 71707.9,
+    "rows_new": 3980870,
+    "rows_per_s": 94782.6,
     "source": "unicode",
     "status": "ok",
-    "wall_s": 60
+    "wall_s": 50
   },
   "verbnet": {
     "decomposer": "VerbNetDecomposer",
-    "elapsed_s": 6.4,
+    "elapsed_s": 4.0,
     "rc": 0,
-    "rows_new": 32582,
-    "rows_per_s": 5090.9,
+    "rows_new": 32584,
+    "rows_per_s": 8146.0,
     "source": "verbnet",
     "status": "ok",
-    "wall_s": 15
+    "wall_s": 20
   },
   "wordframenet": {
     "decomposer": "WordFrameNetDecomposer",
-    "elapsed_s": 4.9,
+    "elapsed_s": 6.0,
     "rc": 0,
-    "rows_new": 73168,
-    "rows_per_s": 14932.2,
+    "rows_new": 73170,
+    "rows_per_s": 12195.0,
     "source": "wordframenet",
     "status": "ok",
-    "wall_s": 14
+    "wall_s": 23
   },
   "wordnet": {
     "decomposer": "WordNetDecomposer",
-    "elapsed_s": 137.4,
+    "elapsed_s": 133.0,
     "rc": 0,
-    "rows_new": 3190904,
-    "rows_per_s": 23223.5,
+    "rows_new": 3540569,
+    "rows_per_s": 26620.8,
     "source": "wordnet",
     "status": "ok",
-    "wall_s": 148
+    "wall_s": 150
   }
 }
