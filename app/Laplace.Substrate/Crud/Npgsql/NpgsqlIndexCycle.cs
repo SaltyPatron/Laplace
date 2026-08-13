@@ -38,16 +38,28 @@ public sealed class NpgsqlIndexCycle
     private readonly List<(string Name, string Def)> _dropped = new();
 
     /// <summary>
-    /// Master switch, DEFAULT OFF. Partition-local secondaries are smaller than the
-    /// old global indexes, but physicalities still carry GiST/GIN/btree per leaf —
-    /// measured Wiktionary COPY at ~2.4k phys rows/s with those indexes live, which
-    /// cannot finish a multi-million-record seed in tens of minutes. Set
-    /// <c>LAPLACE_INDEX_CYCLE=1</c> (or campaign <c>drop-indexes</c> +
-    /// <c>LAPLACE_INDEX_CYCLE_DEFER=1</c>) for bulk seeds. Journal RECOVERY stays
-    /// active regardless.
+    /// Master switch, DEFAULT ON (2026-08-13; was opt-in). The old OFF default
+    /// existed because cycling was all-or-nothing; the protection is now the
+    /// volume gates themselves — <see cref="MinRowsToCycle"/> and
+    /// <see cref="CycleMinLiveFraction"/> over CUMULATIVE run volume — so small
+    /// runs never cycle regardless of the switch. Opt-in left every hand-run
+    /// ingest unprotected: CI exported the flag, a shell `ingest-source.sh` did
+    /// not, and the manual seed paid live secondary maintenance for every row
+    /// (measured 2026-08-12: 21.3KB WAL and 5.5 pages dirtied per consensus
+    /// insert; Wiktionary COPY at ~2.4k phys rows/s). One write path, one law:
+    /// set <c>LAPLACE_INDEX_CYCLE=0</c> to opt OUT (e.g. a run that must keep
+    /// every index online for concurrent serving); campaign mode
+    /// (<c>drop-indexes</c> + <c>LAPLACE_INDEX_CYCLE_DEFER=1</c>) is unchanged.
+    /// Journal RECOVERY stays active regardless.
     /// </summary>
-    public static readonly bool Enabled =
-        EnvFlag.IsSet("LAPLACE_INDEX_CYCLE");
+    public static readonly bool Enabled = ReadEnabled();
+
+    private static bool ReadEnabled()
+    {
+        var v = Environment.GetEnvironmentVariable("LAPLACE_INDEX_CYCLE");
+        if (string.IsNullOrWhiteSpace(v)) return true;
+        return EnvFlag.IsSet("LAPLACE_INDEX_CYCLE");
+    }
 
     /// <summary>Hard cap: one CREATE INDEX session at a time (see class note).</summary>
     private const int MaxConcurrentIndexBuilds = 1;

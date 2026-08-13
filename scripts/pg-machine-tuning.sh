@@ -80,10 +80,12 @@ pg_compute_machine_tuning() {
   #
   # Measured 2026-07-31 on the 125GB host: 202 volume-forced checkpoints against 24 timed,
   # i.e. one roughly every 9 minutes against a 30-minute target, each re-arming full-page
-  # writes. That is evidence 32GB is small for this write rate. It is NOT evidence that a
-  # larger value is better here, which needs a controlled run, so the number stays where
-  # policy put it and the measurement is recorded rather than acted on.
-  PG_TUNE_MAX_WAL=32GB
+  # writes. The controlled evidence arrived 2026-08-12: at 32GB one seed day produced 60
+  # forced vs 33 timed checkpoints and 478GB of WAL for a ~15GB substrate — 72% of it
+  # full-page images (42.3M), i.e. the cap itself was the write amplifier. Raised to 96GB
+  # (the WAL volume is a dedicated 128GB NVMe LV; 25% headroom). MUST match
+  # CpuTopologyCommands.EmitPgTuning; PgTuningParityTests pins the pair.
+  PG_TUNE_MAX_WAL=96GB
   PG_TUNE_MIN_WAL=4GB
   PG_TUNE_IO_CONC=256
   PG_TUNE_CHECKPOINT=30min

@@ -166,6 +166,20 @@ jobs:
         if: always() && steps.run_ingest.outcome == 'success'
         run: scripts/verify-ingest-journal.sh --cli-key "${{ inputs.source }}"
 
+      - name: Throughput gate — ingest-baseline check
+        # RESTORED 2026-08-13. ingest-baseline.py's check mode existed with ZERO
+        # callers — its own header: "no gate compared against one, so 'the seed
+        # is slow' was an opinion for fourteen months." A slow seed is now a
+        # named failure. Tolerance (1.5x, in the script) catches 2x regressions
+        # and ignores shared-box noise; sources without a recorded baseline
+        # pass with a notice ("recording is a separate step"). Re-baseline ONLY
+        # after a deliberate perf change, never to make a red run green:
+        #   python3 scripts/ingest-baseline.py record <detail log>
+        if: always() && steps.run_ingest.outcome == 'success'
+        run: |
+          python3 scripts/ingest-baseline.py check \
+            "$RUNNER_TEMP/laplace-ingest/laplace-ingest-${{ inputs.source }}.log"
+
   idempotency:
     name: "verify — re-ingest ${{ inputs.source }} does not double-count"
     needs: ingest
