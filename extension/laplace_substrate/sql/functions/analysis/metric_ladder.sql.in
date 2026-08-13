@@ -33,6 +33,12 @@
 -- search_path per call; and every literal in the UNION carries an explicit cast,
 -- because the parsed body must match the declared return type exactly instead of
 -- coercing an `unknown` at first execution.
+-- DROP ORDER IS LOAD-BEARING: metric_ladder_words is BEGIN ATOMIC and pins
+-- this function's OID in pg_depend, so on a live-DB extension UPDATE (where
+-- both already exist) the base cannot drop while the words wrapper stands.
+-- Fresh installs never notice — which is how the wrong order survived until
+-- the first post-#764 upgrade ran against a populated cluster (2026-08-13).
+DROP FUNCTION IF EXISTS ops.metric_ladder_words(text, text);
 DROP FUNCTION IF EXISTS ops.metric_ladder(bytea, bytea);
 CREATE OR REPLACE FUNCTION ops.metric_ladder(p_a bytea, p_b bytea)
 RETURNS TABLE(rung          text,
