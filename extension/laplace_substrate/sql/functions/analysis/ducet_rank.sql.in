@@ -51,6 +51,17 @@ COMMENT ON FUNCTION ops.ducet_rank(geometry) IS
 -- class of mistake elsewhere in this session: converse.label_or_hex at ~42 ms a
 -- call, 4,587 calls, 195 seconds. Resolve last, on the surviving rows only.
 --
+-- UNITS, and why the WHERE/ORDER BY spell out the raw expression instead of
+-- calling ducet_rank: physicalities_ducet_rank_btree indexes the UNSCALED
+-- x^2 + y^2 (= s/N), and the planner does not match an index through
+-- ducet_rank's * atom_window() scale factor. MEASURED 2026-08-13: predicating
+-- on ducet_rank(p.coord) is a 1,434 ms seq scan + sort of every physicality;
+-- predicating on the raw expression is a 6 ms Merge Append over the
+-- per-partition expression indexes, identical six rows returned. So the bound
+-- converts ONCE into index space (p_from / atom_window), the range filter and
+-- sort run unscaled — order is preserved, the scale factor is a positive
+-- constant — and ducet_rank projects the rank for the survivors only.
+--
 -- Internal aliases are rnk/cp_val rather than rank/codepoint: under BEGIN ATOMIC
 -- the RETURNS TABLE columns are OUT parameters and sit in scope over the body,
 -- so reusing their names for inner aliases invites a silent capture.
@@ -69,8 +80,9 @@ BEGIN ATOMIC
         FROM laplace.entities e
         JOIN laplace.physicalities p ON p.entity_id = e.id
         WHERE e.tier = 0
-          AND ops.ducet_rank(p.coord) >= p_from
-        ORDER BY 2
+          AND (public.ST_X(p.coord) ^ 2 + public.ST_Y(p.coord) ^ 2)
+              >= p_from::double precision / laplace.atom_window()::double precision
+        ORDER BY (public.ST_X(p.coord) ^ 2 + public.ST_Y(p.coord) ^ 2)
         LIMIT p_limit
     ) w
     CROSS JOIN LATERAL (SELECT realize.codepoint_for_id(w.eid) AS cp_val) cp

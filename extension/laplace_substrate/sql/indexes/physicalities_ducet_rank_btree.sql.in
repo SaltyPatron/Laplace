@@ -10,7 +10,12 @@
 -- The expression is written out rather than calling ops.ducet_rank, because a
 -- functional index must reference a function that cannot be redefined under it;
 -- inlining keeps the index independent of the ops schema's migration state.
--- ops.ducet_rank is the same expression and the planner matches it.
+-- THE UNITS ARE THEREFORE UNSCALED: x^2 + y^2 = s/N, NOT the rank — the planner
+-- does not match this index through ducet_rank's * atom_window() scale factor.
+-- A reader must range-filter and sort on the raw expression and convert its
+-- bound into s/N space once (ops.ducet_ordered does exactly this). Predicating
+-- on ducet_rank() bypasses the index: MEASURED 2026-08-13, 1,434 ms seq scan
+-- vs 6 ms Merge Append over the per-partition expression indexes.
 --
 -- What this unlocks, and it is the tier-0 half of "precedes / follows / occurs
 -- near": DUCET rank is the Hopf latitude parameter, so a btree range on this
@@ -23,7 +28,14 @@
 -- imprecise. Filter to tier 0 when reading, or the range returns interior noise.
 --
 -- APPLY OFF-INGEST. CREATE INDEX takes a ShareLock that blocks writers; on a
--- live seed this stalls the ingest for the duration of the build. Use
--- CONCURRENTLY if it must go in against a hot table.
+-- live seed this stalls the ingest for the duration of the build. CONCURRENTLY
+-- is NOT the escape hatch: physicalities is partitioned and Postgres refuses
+-- CREATE INDEX CONCURRENTLY on a partitioned parent (verified 2026-08-13 on
+-- this cluster's major version). The manifest entries are correct as they
+-- stand — a fresh install has no writers, and once the index exists the
+-- IF NOT EXISTS makes every later manifest run a no-op. The one expensive case
+-- is the FIRST upgrade of a cluster that predates this index: run that upgrade
+-- inside an ingest pause (scripts/wait-for-quiet-substrate.sh), not against
+-- hot writers.
 CREATE INDEX IF NOT EXISTS physicalities_ducet_rank_btree
     ON physicalities (((public.ST_X(coord)^2 + public.ST_Y(coord)^2)));
