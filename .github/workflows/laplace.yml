@@ -164,6 +164,8 @@ jobs:
             scripts/ingest-source.sh \
             scripts/isa-gate-check.py \
             scripts/isa-gate-baseline.json \
+            scripts/model-payload-gate-check.py \
+            scripts/model-payload-gate-baseline.json \
             scripts/ensure-foundation.sh \
             scripts/laplace_api.py \
             scripts/eval-generation.py \
@@ -194,6 +196,14 @@ jobs:
 
       - name: Enforce ISA literalism ratchets
         run: python3 scripts/isa-gate-check.py
+
+      - name: Model-lane payload gate (shrink-only)
+        # GH #1026 class: a model is testimony (attestations), not geometry
+        # payload — factors mode filled the cluster volume before anything
+        # complained. Measures the standing substrate against the recorded
+        # baseline; SKIPs (exit 0) when the substrate is unreachable so the
+        # gate survives maintenance windows instead of getting disabled.
+        run: python3 scripts/model-payload-gate-check.py
 
       - name: Regenerate attestation law + verify deterministic
         run: |
