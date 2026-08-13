@@ -252,12 +252,21 @@ int laplace_content_word_segment(
     }
     qsort(words, nw, sizeof(seg_order_t), seg_order_cmp);
 
+    /* Offsets are POST-NFC (#1039): slice the tree's own buffer, never the
+     * caller's. NFD input mis-sliced words mid-UTF-8 here, and NFC-expanding
+     * codepoints (U+0958 class) read past the caller's allocation — the bytes
+     * went straight into cstring_to_text_with_len as SQL results. */
+    size_t tree_text_len = 0;
+    const uint8_t* tree_text = tier_tree_text(tree, &tree_text_len);
+    if (!tree_text) { free(words); tier_tree_free(tree); return -2; }
+
     uint32_t ord = 0;
     for (size_t w = 0; w < nw; ++w) {
         tier_node_view_t node;
         if (tier_tree_get_node(tree, words[w].idx, &node) != 0) continue;
         if (node.text_range_len == 0) continue;
-        const uint8_t* span = utf8 + node.text_range_off;
+        if ((size_t)node.text_range_off + node.text_range_len > tree_text_len) continue;
+        const uint8_t* span = tree_text + node.text_range_off;
         
 
         if (laplace_text_is_all_whitespace(span, node.text_range_len)) continue;
