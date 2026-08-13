@@ -15,6 +15,19 @@
 # nuke lands in the gap. laplace.ingest_run_journal carries status='running' for the
 # whole run, start to terminal status, across every workflow and every dispatcher.
 #
+# WHY THE JOURNAL ALONE IS NOT ENOUGH. A run killed without ceremony (OOM, SIGKILL,
+# cluster bounce, cancelled CI runner) never writes its terminal row, so its journal
+# entry reads 'running' forever. MEASURED 2026-08-13: two UDDecomposer corpses sat
+# 'running' for 8 and 6 hours with zero backends behind them and wedged every deploy
+# behind this gate. So 'running' is only BELIEVED when the run also holds its
+# liveness lock -- a session advisory lock keyed (LOCK_CLASS, hashtext(run_id)) that
+# NpgsqlIngestObservability takes at run start on a dedicated connection. The server
+# releases a session lock the instant the holding process dies, no cleanup code
+# involved, which makes lock-presence the one liveness signal a corpse cannot fake.
+# A 'running' row without its lock, observed twice across CORPSE_GRACE seconds (the
+# grace covers the instant between the journal INSERT and the lock acquisition), is
+# closed here as 'cancelled' and deploys stop being hostage to ghosts.
+#
 # It is also the only lock that works with more than one runner: GitHub concurrency
 # groups cannot express "many ingests, one bouncer", and serialising ingest against
 # ingest to fake it would freeze a single box's capacity into the pipeline.
@@ -23,12 +36,24 @@ set -euo pipefail
 DB="${1:-${PGDATABASE:-laplace}}"
 BUDGET_SECONDS="${2:-18000}"     # 5h: longer than the longest observed seed
 INTERVAL=30
+CORPSE_GRACE=90
+# Must match NpgsqlIngestObservability.RunLivenessLockClass ("LPLK").
+LOCK_CLASS=$(( 0x4C504C4B ))
 # The unit whose liveness decides "down" vs "misconfigured" below. Must name the
 # same cluster the caller is about to bounce, or the down-check proves nothing.
 PG_SERVICE="${LAPLACE_PG_SERVICE:-laplace-postgresql.service}"
 
 PSQL=(psql -h "${PGHOST:-/var/run/postgresql}" -U "${PGUSER:-laplace_admin}" -d "$DB")
 deadline=$(( SECONDS + BUDGET_SECONDS ))
+corpse_first_seen=""
+
+HELD="EXISTS (SELECT 1 FROM pg_locks l
+       WHERE l.locktype = 'advisory'
+         AND l.database = (SELECT d.oid FROM pg_database d
+                            WHERE d.datname = current_database())
+         AND l.classid = ${LOCK_CLASS}::oid
+         AND l.objsubid = 2
+         AND l.objid::bigint = (hashtext(j.run_id::text)::bigint & 4294967295))"
 
 while :; do
   # FAIL CLOSED. The previous form was `n=$(psql ... 2>/dev/null || echo 0)`, which
@@ -36,22 +61,45 @@ while :; do
   # answer -- so an unreachable host, a bad PGUSER, a missing laplace schema or an
   # exhausted connection cap all reported QUIET and let the caller bounce PostgreSQL
   # over a live ingest. That is the one failure this script exists to prevent, and it
-  # was the only one it could not see. Quiet must now be PROVEN: rc 0 and a numeric
-  # count. Anything else is busy, and the wait budget still bounds the loop.
+  # was the only one it could not see. Quiet must now be PROVEN: rc 0 and two numeric
+  # counts. Anything else is busy, and the wait budget still bounds the loop.
   rc=0
   n=$("${PSQL[@]}" -tAc \
-      "SELECT count(*) FROM laplace.ingest_run_journal WHERE status = 'running';" 2>&1) || rc=$?
+      "SELECT count(*) FILTER (WHERE ${HELD}) || ' ' || count(*) FILTER (WHERE NOT ${HELD})
+       FROM laplace.ingest_run_journal j WHERE j.status = 'running';" 2>&1) || rc=$?
 
-  if [ "$rc" -eq 0 ] && [[ "$n" =~ ^[0-9]+$ ]]; then
-    if [ "$n" -eq 0 ]; then
+  if [ "$rc" -eq 0 ] && [[ "$n" =~ ^[0-9]+\ [0-9]+$ ]]; then
+    live="${n% *}"
+    corpses="${n#* }"
+
+    if [ "$corpses" -gt 0 ]; then
+      if [ -z "$corpse_first_seen" ]; then
+        corpse_first_seen=$SECONDS
+        echo "::warning::${corpses} 'running' row(s) hold no liveness lock — rechecking in ${CORPSE_GRACE}s before closing them as orphaned"
+      elif [ $(( SECONDS - corpse_first_seen )) -ge "$CORPSE_GRACE" ]; then
+        echo "::warning::closing ${corpses} orphaned run(s): 'running' in the journal, liveness lock absent for ${CORPSE_GRACE}s+ — no process is behind them"
+        "${PSQL[@]}" -P pager=off -c \
+          "UPDATE laplace.ingest_run_journal j SET status = 'cancelled', ended_at = now(),
+                  error = 'run did not reach completion: liveness lock absent (cluster restart, OOM kill, or terminated session). Closed by wait-for-quiet-substrate.sh.'
+           WHERE j.status = 'running' AND NOT ${HELD}
+           RETURNING j.run_id, j.source_name, j.input_units_done, j.input_units_total;" || true
+        corpse_first_seen=""
+      fi
+    else
+      corpse_first_seen=""
+    fi
+
+    if [ "$live" -eq 0 ] && [ "$corpses" -eq 0 ]; then
       echo "substrate quiet — no ingest in flight"
       exit 0
     fi
 
-    echo "::notice::waiting on ${n} in-flight ingest(s) before touching PostgreSQL"
-    "${PSQL[@]}" -P pager=off -c \
-      "SELECT source_name, input_units_done, input_units_total, now() - started_at AS elapsed
-       FROM laplace.ingest_run_journal WHERE status = 'running' ORDER BY started_at;" || true
+    if [ "$live" -gt 0 ]; then
+      echo "::notice::waiting on ${live} live ingest(s) before touching PostgreSQL"
+      "${PSQL[@]}" -P pager=off -c \
+        "SELECT source_name, input_units_done, input_units_total, now() - started_at AS elapsed
+         FROM laplace.ingest_run_journal WHERE status = 'running' ORDER BY started_at;" || true
+    fi
   elif [[ "$n" == *"3D000"* || "$n" == *"database \"$DB\" does not exist"* || "$n" == *"database $DB does not exist"* ]]; then
     # A database that DOES NOT EXIST is quiet, and it is the one non-answer that
     # proves it: SQLSTATE 3D000 means the server answered, authentication passed,
@@ -68,7 +116,7 @@ while :; do
     # counts.
     echo "substrate quiet — database \"$DB\" does not exist, so no ingest can be running in it"
     exit 0
-  elif ! systemctl is-active --quiet "$PG_SERVICE" 2>/dev/null; then
+  elif command -v systemctl >/dev/null 2>&1 && ! systemctl is-active --quiet "$PG_SERVICE"; then
     # A STOPPED CLUSTER is quiet, and systemd — not psql — is what proves it.
     # Without this branch, a down postmaster is indistinguishable from a wrong
     # PGHOST, so both fell to BUSY below and the loop burned the entire 5h budget
@@ -79,8 +127,12 @@ while :; do
     #
     # Asking systemd rather than inferring from the psql error is what keeps this
     # fail-closed: a typo'd PGHOST or a dropped connection while the real cluster
-    # is UP still falls through to BUSY, because the unit is active. Only the
-    # cluster this caller is about to bounce being genuinely down counts.
+    # is UP still falls through to BUSY, because the unit is active. And systemctl
+    # itself must EXIST to testify (GH #1060): without the command -v guard, a
+    # missing systemctl (rc 127) made `! systemctl is-active` true and declared a
+    # cluster quiet on a box that cannot even ask — a broken observer reporting
+    # the safest possible state. No systemctl means no systemd testimony, and the
+    # probe failure falls through to BUSY where it belongs.
     echo "substrate quiet — $PG_SERVICE is not running, so no ingest can be in flight"
     exit 0
   else

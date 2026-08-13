@@ -17,12 +17,25 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
 {
     private static readonly TimeSpan ProgressInterval = TimeSpan.FromSeconds(5);
 
+    /// <summary>
+    /// classid of the per-run session advisory lock (objid = hashtext(run_id::text)).
+    /// The lock IS the liveness proof: the server releases it the moment this
+    /// process's session dies — OOM kill, SIGKILL, cluster bounce, cancelled CI
+    /// runner — so unlike a journal column it cannot be left behind by a process
+    /// that never got to clean up. Readers (ReconcileOrphanedRuns here, and
+    /// scripts/wait-for-quiet-substrate.sh) treat a 'running' row without this
+    /// lock as a corpse. The value is arbitrary but load-bearing: the gate script
+    /// carries the same constant, and they must agree.
+    /// </summary>
+    private const int RunLivenessLockClass = 0x4C504C4B; // "LPLK"
+
     private readonly NpgsqlDataSource _ds;
     private readonly bool _evidencePersisted;
 
     private Guid _runId;
     private bool _active;
     private DateTime _lastProgressUtc;
+    private NpgsqlConnection? _livenessConn;
 
     public NpgsqlIngestObservability(NpgsqlDataSource dataSource, bool evidencePersisted = true)
     {
@@ -49,6 +62,43 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
                 cmd.Parameters.Add(new NpgsqlParameter { Value = inventory?.TotalInputUnits ?? 0L });
                 cmd.Parameters.Add(new NpgsqlParameter { Value = _evidencePersisted });
             });
+        AcquireLivenessLock();
+    }
+
+    /// <summary>
+    /// Hold the per-run session advisory lock for the run's lifetime, on a
+    /// dedicated connection pinned outside the pool (a pooled connection would be
+    /// pruned while the run composes in memory between COPY bursts, releasing the
+    /// lock under a live run). Failure to acquire logs loudly and never aborts
+    /// the ingest — same law as every other journal write in this class — but a
+    /// run without the lock is indistinguishable from a corpse to the deploy
+    /// gate, so the log line matters.
+    /// </summary>
+    private void AcquireLivenessLock()
+    {
+        try
+        {
+            _livenessConn = _ds.OpenConnection();
+            using var cmd = _livenessConn.CreateCommand();
+            cmd.CommandText = "SELECT pg_advisory_lock($1, hashtext($2))";
+            cmd.Parameters.Add(new NpgsqlParameter { Value = RunLivenessLockClass });
+            cmd.Parameters.Add(new NpgsqlParameter { Value = _runId.ToString() });
+            cmd.ExecuteNonQuery();
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                $"INGEST_RUN_LIVENESS_LOCK_FAILED run={_runId} — {ex.Message}; the run "
+                + "proceeds, but wait-for-quiet-substrate.sh will read it as orphaned");
+            _livenessConn?.Dispose();
+            _livenessConn = null;
+        }
+    }
+
+    private void ReleaseLivenessLock()
+    {
+        _livenessConn?.Dispose();   // session end releases the advisory lock
+        _livenessConn = null;
     }
 
     /// <summary>
@@ -65,10 +115,16 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
     /// laplace-postgresql.service` and terminated the backend 93% through the corpus.
     /// The row still read 'running' with no process behind it.
     ///
-    /// Reconciled at the START of the next run rather than by a sweeper: that is the
-    /// one moment a live connection is guaranteed and the single-ingest law says no
-    /// other run can be legitimately in flight. pg_stat_activity is the authority on
-    /// whether a backend exists — not a timeout, which would race a slow corpus.
+    /// Reconciled at the START of the next run AND by the deploy gate
+    /// (scripts/wait-for-quiet-substrate.sh), both against the same authority: the
+    /// per-run session advisory lock. The previous criterion here asked
+    /// pg_stat_activity whether ANY backend predated the run — and any long-lived
+    /// client defeats it: the API endpoint's connection pool predates every run,
+    /// so the NOT EXISTS never held and reconciliation NEVER FIRED. MEASURED
+    /// 2026-08-13: two UDDecomposer corpses sat 'running' for 8 and 6 hours with
+    /// zero backends behind them, wedging every deploy behind the substrate lock.
+    /// A lock keyed to the run and dropped by the server on session death is
+    /// per-run, unforgeable, and cannot be left behind.
     /// </summary>
     private void ReconcileOrphanedRuns()
     {
@@ -78,13 +134,16 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
             // Execute() swallows it, and the row stays 'running' — the exact failure this
             // reconciliation exists to repair.
             "UPDATE laplace.ingest_run_journal j SET status = 'cancelled', ended_at = now(), "
-            + "error = 'run did not reach completion: no backend for this run remains (cluster "
-            + "restart, OOM kill, or terminated session). Reconciled at the start of the next run.' "
+            + "error = 'run did not reach completion: liveness lock absent (cluster restart, "
+            + "OOM kill, or terminated session). Reconciled at the start of the next run.' "
             + "WHERE j.status = 'running' "
-            + "  AND NOT EXISTS (SELECT 1 FROM pg_stat_activity a "
-            + "                   WHERE a.datname = current_database() "
-            + "                     AND a.backend_start <= j.started_at "
-            + "                     AND a.state IS NOT NULL)",
+            + "  AND NOT EXISTS (SELECT 1 FROM pg_locks l "
+            + "                   WHERE l.locktype = 'advisory' "
+            + "                     AND l.database = (SELECT d.oid FROM pg_database d "
+            + "                                        WHERE d.datname = current_database()) "
+            + $"                    AND l.classid = {RunLivenessLockClass}::oid "
+            + "                     AND l.objsubid = 2 "
+            + "                     AND l.objid::bigint = (hashtext(j.run_id::text)::bigint & 4294967295))",
             static _ => { });
     }
 
@@ -151,6 +210,7 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
             });
 
         WarnIfPlacementsExceedEntities(sourceName, result);
+        ReleaseLivenessLock();
     }
 
     /// <summary>
@@ -234,6 +294,7 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
                     cmd.Parameters.Add(new NpgsqlParameter { Value = status });
                     cmd.Parameters.Add(new NpgsqlParameter { Value = error });
                 });
+            ReleaseLivenessLock();
             return;
         }
         // Failure before OnRunStart (init/inventory) — journal it as its own terminal row
