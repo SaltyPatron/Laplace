@@ -176,12 +176,11 @@ public static class RelationTypeRegistry
                 builder.AddAttestation(NativeAttestation.Categorical(
                     k.Id, "IS_A", parent, sourceId, null, SourceTrust.SubstrateMandate));
 
-
-
-        foreach (var k in all)
-            if (ContentEmitter.Emit(builder, k.Canonical, sourceId) is { } nameId)
-                builder.AddAttestation(NativeAttestation.Categorical(
-                    k.Id, "HAS_NAME_ALIAS", nameId, sourceId, null, SourceTrust.SubstrateMandate));
+        // GH #1041: no content DAGs for canonical relation names — the ids are
+        // blake3(canonical) and every canonical name is in the static
+        // canonical_names seed, so realize.render resolves them from arm 1.
+        // The old loop staged a text DAG per relation name (221 identifier
+        // strings minted as word/sentence entities).
     }
 
     public static void SeedDynamic(SubstrateChangeBuilder builder, in RelationTypeResolution k, Hash128 sourceId,
@@ -211,9 +210,11 @@ public static class RelationTypeRegistry
                 builder.AddAttestation(NativeAttestation.Categorical(
                     k.Id, "IS_A", parent, sourceId, null, SourceTrust.AcademicCurated));
             }
-            if (ContentEmitter.Emit(builder, k.Canonical, sourceId) is { } nameId)
-                builder.AddAttestation(NativeAttestation.Categorical(
-                    k.Id, "HAS_NAME_ALIAS", nameId, sourceId, null, SourceTrust.AcademicCurated));
+            // GH #1041: no content DAG for the label — "DEP_NSUBJ" was a
+            // measured tier-2 Word entity. The type id is blake3(canonical) =
+            // realize.canonical_id(canonical); VocabularyNames.Track above
+            // feeds register_canonicals, and realize.render resolves from
+            // canonical_names arm 1. Nothing walks the label's sub-tokens.
         }
     }
 

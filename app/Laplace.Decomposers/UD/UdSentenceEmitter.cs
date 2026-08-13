@@ -84,7 +84,8 @@ public sealed class UdSentenceEmitContext
             if (!string.IsNullOrEmpty(tok.Xpos) && tok.Xpos != "_")
             {
                 Hash128 xposId = HighwayNodeEmitter.Emit(b, tok.Xpos, PosReference.PosTypeId,
-                    sourceId, TC.AcademicCurated, seenEntBatch);
+                    sourceId, TC.AcademicCurated, seenEntBatch,
+                    readbackNames: canonicalNames);
                 b.AddAttestation(NativeAttestation.Categorical(
                     form, "HAS_XPOS", xposId, sourceId, langId, TC.AcademicCurated));
                 // Link the language-specific XPOS to its universal POS on the SAME row, so the
@@ -101,7 +102,8 @@ public sealed class UdSentenceEmitContext
                 if (!RelationTypeRegistry.ParseFeature(feat, out var fName, out var fVal)) continue;
                 VocabularyNames.TrackUdFeatureValue(canonicalNames, fName, fVal);
                 Hash128 valId = HighwayNodeEmitter.Emit(b, $"{fName}={fVal}", FeatureTypeId,
-                    sourceId, SourceTrust.AcademicCurated, seenEntBatch);
+                    sourceId, SourceTrust.AcademicCurated, seenEntBatch,
+                    readbackNames: canonicalNames);
                 var featRel = RelationTypeRegistry.ResolveFeature(fName);
                 RelationTypeRegistry.SeedDynamic(b, featRel, sourceId,
                     seenEntBatch, seenAttBatch, canonicalNames);

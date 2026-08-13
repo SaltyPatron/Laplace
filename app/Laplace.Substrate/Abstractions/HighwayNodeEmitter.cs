@@ -13,7 +13,8 @@ public static class HighwayNodeEmitter
         double trust,
         ISet<Hash128> seen,
         Hash128? parentId = null,
-        string parentRelation = "IS_A")
+        string parentRelation = "IS_A",
+        System.Collections.Concurrent.ConcurrentDictionary<string, byte>? readbackNames = null)
     {
         var id = HighwayPerfcache.NodeHash(canonicalName);
         if (!seen.Add(id)) return id;
@@ -27,9 +28,14 @@ public static class HighwayNodeEmitter
                 id, parentRelation, parent, sourceId, null, trust));
         }
 
-        if (ContentEmitter.Emit(builder, canonicalName, sourceId) is { } nameId)
-            builder.AddAttestation(NativeAttestation.Categorical(
-                id, "HAS_NAME_ALIAS", nameId, sourceId, null, trust));
+        // GH #1041: the node's name is VOCABULARY, not content. The old
+        // ContentEmitter.Emit here staged a full text DAG for every tag string
+        // ("NNP" as a word entity, "Number=Sing" as a sentence) — identifiers
+        // minted as prose. The id is blake3(canonicalName), which is exactly
+        // realize.canonical_id(name), so registering the name in
+        // laplace.canonical_names (via the readback set → register_canonicals
+        // at run end) gives realize.render its arm-1 hit with no ladder rows.
+        VocabularyNames.Track(readbackNames, canonicalName);
 
         return id;
     }
