@@ -181,6 +181,7 @@ public sealed class NpgsqlIndexCycle
                     guc.CommandText = IndexBuildGucs();
                     await guc.ExecuteNonQueryAsync(token);
                 }
+                await DropIfInvalidAsync(conn, name, token);
                 await using (var mk = conn.CreateCommand())
                 {
                     mk.CommandTimeout = 0;
@@ -291,6 +292,7 @@ public sealed class NpgsqlIndexCycle
                     guc.CommandText = IndexBuildGucs();
                     await guc.ExecuteNonQueryAsync(token);
                 }
+                await DropIfInvalidAsync(conn, name, token);
                 await using (var mk = conn.CreateCommand())
                 {
                     mk.CommandTimeout = 0;
@@ -359,6 +361,30 @@ public sealed class NpgsqlIndexCycle
         return total;
     }
 
+    /// <summary>
+    /// An INVALID index of the target name (a killed recursive build, or a shell
+    /// from a pre-fix ON ONLY rebuild) satisfies CREATE INDEX IF NOT EXISTS and
+    /// discharges the journal row with zero children built — drop it first so the
+    /// create actually runs. A VALID index passes through untouched.
+    /// </summary>
+    private static async Task DropIfInvalidAsync(
+        NpgsqlConnection conn, string name, CancellationToken ct)
+    {
+        await using var probe = conn.CreateCommand();
+        probe.CommandText =
+            "SELECT NOT i.indisvalid FROM pg_index i "
+            + "JOIN pg_class c ON c.oid = i.indexrelid "
+            + "JOIN pg_namespace n ON n.oid = c.relnamespace "
+            + "WHERE n.nspname = 'laplace' AND c.relname = $1";
+        probe.Parameters.AddWithValue(name);
+        if (await probe.ExecuteScalarAsync(ct) is not true) return;
+
+        await using var drop = conn.CreateCommand();
+        drop.CommandTimeout = 0;
+        drop.CommandText = $"DROP INDEX IF EXISTS laplace.\"{name}\"";
+        await drop.ExecuteNonQueryAsync(ct);
+    }
+
     private static async Task<List<(string Name, string Def)>> ListPlainSecondariesAsync(
         NpgsqlConnection conn, string table, CancellationToken ct)
     {
@@ -381,7 +407,11 @@ public sealed class NpgsqlIndexCycle
             + "  UNION ALL "
             + "  SELECT i.inhrelid FROM pg_inherits i JOIN parts p ON i.inhparent = p.oid"
             + ") "
-            + "SELECT c.relname, pg_get_indexdef(i.indexrelid) "
+            // ON ONLY stripped at capture: pg_get_indexdef on a partitioned ROOT
+            // emits the non-recursive form, and rebuilding that creates an empty
+            // invalid shell with zero children instead of the index tree the DROP
+            // removed. Both rebuild paths run this def verbatim.
+            + "SELECT c.relname, replace(pg_get_indexdef(i.indexrelid), ' ON ONLY ', ' ON ') "
             + "FROM pg_index i "
             + "JOIN pg_class c ON c.oid = i.indexrelid "
             + "WHERE i.indrelid IN (SELECT oid FROM parts) "
