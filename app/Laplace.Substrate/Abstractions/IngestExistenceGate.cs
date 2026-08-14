@@ -315,12 +315,9 @@ internal static class IngestExistenceGate
     }
 
     /// <summary>
-    /// A short-circuited record never becomes a <c>GrammarDeferredUnit</c>, whose
-    /// <c>Dispose</c> is the only production release of the native AST — so its arena
-    /// otherwise waits for the finalizer thread, which a repeat-heavy seed (OMW: 1226
-    /// language files over a shared alphabet, near-total short-circuit rate) outruns
-    /// by tens of GB. The witness walk is complete by the time this is called; nothing
-    /// downstream reads the AST of a short-circuited record.
+    /// A short-circuited record never creates a <c>GrammarDeferredUnit</c>, the only
+    /// other release of the native AST — so it must be released here, after the
+    /// witness walk. Nothing downstream reads a short-circuited record's AST.
     /// </summary>
     private static void ReleaseNativeArtifacts<TRecord>(
         TRecord record, IIngestRecordHandler<TRecord> handler)

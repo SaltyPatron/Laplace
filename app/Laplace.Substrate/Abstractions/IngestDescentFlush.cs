@@ -168,8 +168,7 @@ internal static class IngestDescentFlush
             }
             catch
             {
-                // The failing unit is released by the finally below; without this the
-                // rest of the working set's native trees wait for the finalizer thread.
+                // The finally below only covers the current unit.
                 for (int j = i + 1; j < pending.Count; j++)
                     pending[j].Unit.Dispose();
                 throw;
