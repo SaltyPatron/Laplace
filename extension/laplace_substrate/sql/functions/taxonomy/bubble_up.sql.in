@@ -88,6 +88,24 @@ resolved AS (
     FROM family_out fo
     WHERE fo.via_relation = 'IS_SENSE_OF'
 ),
+-- The ILI hub makes a term's synonym set language-blind, so an English surface
+-- competes against its own translations and loses on base_eff_mu alone. Language
+-- is a CONSTRAINT on which surface the input denotes, never a score: a candidate
+-- is dropped only when both sides have a primary language and they differ.
+-- Candidates with no HAS_LANGUAGE (concepts) and terms with no language are
+-- untouched, so this can only narrow a language-blind set, never empty a
+-- concept-level one. converse.word_language IS the primary-language definition
+-- (argmax over HAS_LANGUAGE); a boolean "has an edge to the query language" does
+-- not discriminate, because loanwords carry English edges too.
+term_lang AS MATERIALIZED (
+    SELECT converse.word_language(p_term) AS id
+),
+scoped AS (
+    SELECT r.* FROM resolved r
+    WHERE (SELECT id FROM term_lang) IS NULL
+       OR converse.word_language(r.synset_id) IS NULL
+       OR converse.word_language(r.synset_id) = (SELECT id FROM term_lang)
+),
 domain AS (
     SELECT DISTINCT d AS id
     FROM unnest(COALESCE(p_domain_context, ARRAY[]::bytea[])) AS d
@@ -106,14 +124,14 @@ members AS (
     -- only the no-domain case changes, where every domain_hits was already 0.
     SELECT r.synset_id,
            m.object_id AS member_id
-    FROM resolved r
+    FROM scoped r
     JOIN laplace.consensus m ON m.subject_id = r.synset_id
     WHERE m.type_id IN (SELECT id FROM fam)
       AND COALESCE(cardinality(p_domain_context), 0) > 0
     UNION
     SELECT r.synset_id,
            m.subject_id AS member_id
-    FROM resolved r
+    FROM scoped r
     JOIN laplace.consensus m ON m.object_id = r.synset_id
     WHERE m.type_id IN (SELECT id FROM fam)
       AND COALESCE(cardinality(p_domain_context), 0) > 0
@@ -142,7 +160,7 @@ ranked AS (
            r.witnesses,
            (r.base_eff_mu * (1::numeric + ln(1::numeric + COALESCE(ds.domain_hits, 0)))) AS score,
            consensus.eff_mu(r.rating, r.rd) AS rank_key
-    FROM resolved r
+    FROM scoped r
     LEFT JOIN domain_scores ds ON ds.synset_id = r.synset_id
     ORDER BY r.synset_id, consensus.eff_mu(r.rating, r.rd) DESC
 )
