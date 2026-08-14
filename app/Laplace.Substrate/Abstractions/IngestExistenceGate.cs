@@ -73,6 +73,7 @@ internal static class IngestExistenceGate
                 ApplyWitness(records[i], rootId, handler, builder);
                 reader.MarkProven([rootId]);
                 shortcircuited.Add((records[i], handler.UnitsPerRecord(records[i])));
+                ReleaseNativeArtifacts(records[i], handler);
                 rootIndex[i] = -2;
                 continue;
             }
@@ -117,6 +118,7 @@ internal static class IngestExistenceGate
                 ApplyWitness(records[i], roots[k].RootId, handler, builder);
                 reader.MarkProven([roots[k].RootId]);
                 shortcircuited.Add((records[i], handler.UnitsPerRecord(records[i])));
+                ReleaseNativeArtifacts(records[i], handler);
                 rootIndex[i] = -2;
             }
         }
@@ -310,6 +312,21 @@ internal static class IngestExistenceGate
             grammar.WalkWitnessWithoutCompose(gr, rootId, builder);
         else if (rootId != default)
             handler.WalkWitness(record, rootId, builder, PresentRootDeferredUnit.Instance);
+    }
+
+    /// <summary>
+    /// A short-circuited record never becomes a <c>GrammarDeferredUnit</c>, whose
+    /// <c>Dispose</c> is the only production release of the native AST — so its arena
+    /// otherwise waits for the finalizer thread, which a repeat-heavy seed (OMW: 1226
+    /// language files over a shared alphabet, near-total short-circuit rate) outruns
+    /// by tens of GB. The witness walk is complete by the time this is called; nothing
+    /// downstream reads the AST of a short-circuited record.
+    /// </summary>
+    private static void ReleaseNativeArtifacts<TRecord>(
+        TRecord record, IIngestRecordHandler<TRecord> handler)
+    {
+        if (handler is GrammarIngestHandler && record is GrammarIngestRecord gr)
+            gr.Ast.Dispose();
     }
 
 }
