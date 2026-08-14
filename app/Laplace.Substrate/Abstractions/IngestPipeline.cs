@@ -976,11 +976,8 @@ public static class IngestBatchPipeline
             await IngestDescentFlush.FinalizeWorkingSetAsync(
                 deferred, handler, reader, Builder, config, probedAbsent, ct).ConfigureAwait(false);
             WorkingSetDeferred = null;
-            // The absent-set is working-set-lifetime by contract (TierTreeDescent:
-            // "it must never be shared across working sets or processes — another
-            // writer may commit the id at any time"). It was allocated per FILE and
-            // only ever grew, so it both violated that contract and accreted one
-            // Hash128 per distinct absent node over the whole file × FileWorkers.
+            // Working-set-lifetime by contract (TierTreeDescent: another writer
+            // may commit any of these ids once this working set's rows are out).
             probedAbsent?.Clear();
         }
 

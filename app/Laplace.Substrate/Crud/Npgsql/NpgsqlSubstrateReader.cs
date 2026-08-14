@@ -126,11 +126,9 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
     /// present -- see the dorian.txt repro in
     /// .scratchpad/02_Identified_Issues.txt.
     ///
-    /// Cleared at the cap as a memory valve (same as
-    /// ConsensusAccumulatingWriter._depositedMaskPairs): a full UD/OMW pass
-    /// accretes one entry per distinct content id ever confirmed present —
-    /// tens of millions, several GB, process-lifetime. Clearing costs
-    /// re-probes, never correctness: a miss falls through to the DB.
+    /// Cleared at the cap (memory valve, same as
+    /// ConsensusAccumulatingWriter._depositedMaskPairs): a miss falls through
+    /// to the DB, so clearing costs re-probes, never correctness.
     /// </summary>
     private readonly System.Collections.Concurrent.ConcurrentDictionary<Hash128, byte> _proven = new();
     private const int ProvenCacheCap = 1 << 24;
@@ -139,8 +137,7 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
     private void AddProven(Hash128 id)
     {
         if (!_proven.TryAdd(id, 1)) return;
-        // Approximate counter — ConcurrentDictionary.Count locks every stripe, and
-        // an off-by-a-few overshoot on the valve is harmless.
+        // Approximate on purpose: ConcurrentDictionary.Count locks every stripe.
         if (Interlocked.Increment(ref _provenApprox) >= ProvenCacheCap)
         {
             _proven.Clear();
@@ -213,8 +210,8 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
 
 
 
-    // Same memory valve as _proven: canonical→root is a deterministic mapping, so a
-    // cleared entry only costs a recompute/re-probe on next use.
+    // Same memory valve as _proven: canonical→root is deterministic, so a cleared
+    // entry only costs a recompute.
     private readonly System.Collections.Concurrent.ConcurrentDictionary<Hash128, Hash128> _rootCache = new();
     private const int RootCacheCap = 1 << 22;
     private int _rootCacheApprox;

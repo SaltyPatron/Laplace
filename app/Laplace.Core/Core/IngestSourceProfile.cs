@@ -22,16 +22,11 @@ public sealed record IngestSourceProfile(
     public static readonly IngestSourceProfile RelationTriple = new(8_192, 2);
 
     /// <summary>UD sentence — a few KB of CoNLL-U tokens per record.</summary>
-    // Units=1 was never true: UdSentenceEmitContext.CollectCanonicals builds one
-    // tier tree for the sentence text PLUS every token form, every differing
-    // lemma, Gloss/Translit, and every MWT surface — ~30-60 native trees per
-    // sentence, all realized at once by FinalizePendingAsync's flatTrees. This
-    // multiplier is the denominator of ResolveFlushEnvelopeRecordCap and
-    // EstimateWorkingSetBytes; declaring 1 admitted ~105k sentences (≈3.5M live
-    // native trees) per working set × FileWorkers concurrent sets — the
-    // 2026-08-13 ingest OOM (kernel killed dotnet at 83 GB RSS mid-`ud`).
-    // Units=32 targets recordCap ≈ 3.2k sentences so the estimate tracks the
-    // real resident cost, same reasoning as Wiktionary's measured 12.
+    // UdSentenceEmitContext.CollectCanonicals builds ~30-60 native trees per
+    // sentence (sentence text, token forms, differing lemmas, Gloss/Translit,
+    // MWT surfaces), all live at once in FinalizePendingAsync. This multiplier
+    // must track that fan: it is the denominator of
+    // ResolveFlushEnvelopeRecordCap / EstimateWorkingSetBytes.
     public static readonly IngestSourceProfile UdSentence = new(2_048, 32);
 
     /// <summary>Kaikki wiktextract JSON — tens of KB per entry, many tier trees each.</summary>
