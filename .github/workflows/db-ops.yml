@@ -94,7 +94,7 @@ jobs:
         # sees an ingest during its COPY bursts and reports "clear" through the minutes
         # of in-memory compose between them. Same check as the deploy job now, and the
         # sound one — see the script.
-        if: inputs.operation == 'recreate' || inputs.operation == 'remigrate'
+        if: inputs.operation == 'recreate' || inputs.operation == 'remigrate' || inputs.operation == 'reindex'
         timeout-minutes: 305
         run: bash scripts/wait-for-quiet-substrate.sh "${{ inputs.database }}"
       - name: Status (read-only)
@@ -147,25 +147,33 @@ jobs:
         if: inputs.operation == 'reindex'
         run: |
           P(){ psql -h /var/run/postgresql -U laplace_admin -d "${{ inputs.database }}" -v ON_ERROR_STOP=1 -tAc "$1"; }
-          invalid=$(P "SELECT n.nspname || '.' || c.relname FROM pg_index i
-                       JOIN pg_class c ON c.oid=i.indexrelid
-                       JOIN pg_class t ON t.oid=i.indrelid
-                       JOIN pg_namespace n ON n.oid=c.relnamespace
-                       WHERE NOT i.indisvalid ORDER BY 1")
+          # Invalid partitioned PARENTS cannot be REINDEXed back to validity — the
+          # flag only flips when every child is attached — and pg_get_indexdef on a
+          # parent says ON ONLY, which recreates the same empty shell. So: capture
+          # the definition, strip ON ONLY, drop, recreate; CREATE INDEX on the
+          # parent then builds every missing child and attaches any that match.
+          # Consensus first: converse election reads block on those.
+          list(){ P "SELECT n.nspname || '.' || c.relname || E'\t' || pg_get_indexdef(i.indexrelid)
+                     FROM pg_index i
+                     JOIN pg_class c ON c.oid=i.indexrelid
+                     JOIN pg_class t ON t.oid=i.indrelid
+                     JOIN pg_namespace n ON n.oid=c.relnamespace
+                     WHERE NOT i.indisvalid
+                     ORDER BY CASE t.relname WHEN 'consensus' THEN 0 WHEN 'entities' THEN 1
+                              WHEN 'physicalities' THEN 2 ELSE 3 END, c.relname"; }
+          invalid=$(list)
           [ -z "$invalid" ] && { echo "::notice::no invalid indexes — nothing to do"; exit 0; }
           echo "rebuilding $(echo "$invalid" | wc -l) invalid index(es):"
           rc=0
-          while IFS= read -r idx; do
-            case "$idx" in
-              *_ccnew*)
-                echo "--- DROP leftover $idx"
-                P "DROP INDEX CONCURRENTLY IF EXISTS $idx" || rc=1 ;;
-              *)
-                echo "--- REINDEX $idx"
-                P "REINDEX INDEX CONCURRENTLY $idx" || rc=1 ;;
-            esac
+          while IFS=$'\t' read -r idx def; do
+            def_recursive=${def/ ON ONLY / ON }
+            echo "--- $idx"
+            P "DROP INDEX IF EXISTS $idx" || { rc=1; continue; }
+            P "$def_recursive" || rc=1
           done <<< "$invalid"
-          remaining=$(P "SELECT count(*) FROM pg_index WHERE NOT indisvalid")
+          remaining=$(P "SELECT count(*) FROM pg_index i JOIN pg_class t ON t.oid=i.indrelid
+                         JOIN pg_namespace n ON n.oid=t.relnamespace
+                         WHERE n.nspname='laplace' AND NOT i.indisvalid")
           echo "invalid indexes remaining: $remaining"
           [ "$rc" -eq 0 ] && [ "$remaining" = "0" ] || { echo "::error::reindex incomplete — $remaining invalid remain"; exit 1; }
 

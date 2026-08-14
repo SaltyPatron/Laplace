@@ -11,14 +11,14 @@
 -- Returns one row per NON-VALID index in the extension's schemas (empty set =
 -- healthy), plus leaf coverage for partitioned parents so a shell (leaves=0)
 -- is distinguishable from a mid-build (indisvalid=false, leaves>0).
--- LANGUAGE sql, not BEGIN ATOMIC: the body reads catalogs whose OIDs must be
--- resolved per call, and @extschema@ substitution does not apply to pg_catalog.
+-- BEGIN ATOMIC per G12: pg_catalog relation OIDs are stable for the cluster's
+-- life, and the regnamespace literals name schemas this extension guarantees.
 DROP FUNCTION IF EXISTS ops.index_health();
 CREATE OR REPLACE FUNCTION ops.index_health()
     RETURNS TABLE(index_name text, table_name text, valid boolean,
                   is_partitioned_parent boolean, leaf_count bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
-    AS $fn$
+BEGIN ATOMIC
     SELECT c.relname::text,
            t.relname::text,
            i.indisvalid,
@@ -31,7 +31,7 @@ CREATE OR REPLACE FUNCTION ops.index_health()
                              'consensus'::regnamespace, 'generation'::regnamespace)
       AND NOT i.indisvalid
     ORDER BY t.relname, c.relname;
-$fn$;
+END;
 
 COMMENT ON FUNCTION ops.index_health() IS
     'Every non-valid index in the substrate schemas (empty set = healthy). '
