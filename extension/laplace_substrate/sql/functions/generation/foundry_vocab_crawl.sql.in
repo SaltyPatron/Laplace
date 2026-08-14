@@ -107,6 +107,12 @@ CREATE OR REPLACE FUNCTION generation.foundry_vocab_crawl(
                 FROM laplace.v_word_points w
                 WHERE w.type_id IN (realize.canonical_id('Sentence'), realize.canonical_id('Document'))
                   AND w.trajectory IS NOT NULL
+                  -- Postgres refuses any single palloc ≥ 1GB and constituent
+                  -- expansion runs ~4x the packed bytes, so a trajectory past
+                  -- 256MB can never expand (XX000 invalid memory alloc) — and a
+                  -- document that size carries no word-frequency signal its
+                  -- sentences don't already carry 400k times over.
+                  AND octet_length(w.trajectory) <= 268435456
                 ORDER BY w.id, w.physicality_id LIMIT 400000
             ) t
             CROSS JOIN LATERAL laplace_trajectory_constituents(t.trajectory) tc
