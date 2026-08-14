@@ -56,10 +56,17 @@ bias AS (
     CROSS JOIN LATERAL lexical.senses(r.tok) s
     WHERE r.rk > 1 AND s.synset_id IS NOT NULL
 ),
+-- The in-edge arm probes with = ANY(array), never a join. laplace.consensus is
+-- LIST(type_id) with hash sub-partitions and this read constrains only
+-- object_id, so no partition can be pruned: as a join the planner takes a full
+-- index-only scan of EVERY partition and hash-joins, while the array form emits
+-- one ScalarArrayOpExpr probe per bias id against
+-- consensus_*_object_id_type_id_idx. A LATERAL rewrite is worse than the join.
 biasfam AS (
     SELECT b.synset_id FROM bias b
     UNION
-    SELECT c.subject_id FROM laplace.consensus c JOIN bias b ON c.object_id = b.synset_id
+    SELECT c.subject_id FROM laplace.consensus c
+    WHERE c.object_id = ANY (ARRAY(SELECT b2.synset_id FROM bias b2))
 ),
 cand AS (
     SELECT c.object_id AS id, max(consensus.eff_mu(c.rating, c.rd)) AS m
