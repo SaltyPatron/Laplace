@@ -27,6 +27,121 @@ typedef struct
     ReturnSetInfo *rsinfo;
 } word_seg_ctx;
 
+#include "utils/array.h"
+
+/* Joint-evidence hash entry: key must be first for HASH_BLOBS.
+ *
+ * INVENTION §7 rules out deciding a ranking on a single-token scalar, so the
+ * election key is the rating tuple summed over the joint edges. `degree` holds
+ * trajectory co-occurrence and is consulted only when the consensus graph
+ * between the candidates is empty. */
+typedef struct
+{
+    hash128_t key;
+    int64     witnesses;
+    int64     rating;
+    int64     rd;
+    int64     degree;
+} joint_degree_entry;
+
+/* Container -> which candidates sit inside it. first_candidate is the last
+ * candidate seen, used only to avoid double-counting one candidate's own
+ * repeated rows; n_candidates > 1 means the container is joint evidence. */
+typedef struct
+{
+    hash128_t key;
+    int       first_candidate;
+    int       n_candidates;
+} container_owner_entry;
+
+/* Bounded per-candidate container fan-out. LIMIT must be a bound parameter:
+ * the plan is kept process-wide, so a literal would pin the first caller's
+ * value (containers_of.c, measured 3,245ms -> 40.4ms). */
+#define RESOLVE_CONTAINER_PROBE_LIMIT 64
+
+/*
+ * MEASURED live 2026-08-14: this probe executes in 14ms on a hit and 25.6ms on
+ * a miss, but PLANS in 33ms. SPI_execute_with_args re-plans on every call, so
+ * planning dominated and scaled with the candidate count on a path every
+ * surface calls through converse.resolve. Kept plan, same idiom as
+ * generate_walk.c's ensure_edge_plan.
+ *
+ * LIMIT stays a bound parameter precisely BECAUSE the plan is kept -- and the
+ * bound is what lets the Append short-circuit: on a hit, EXPLAIN shows
+ * partitions h02..h63 "never executed". laplace.physicalities is HASH(id) over
+ * 64 partitions and this joins by trajectory content, so nothing prunes; the
+ * LIMIT is the only bound there is.
+ */
+static const char *RESOLVE_CONTAINER_QUERY =
+    "SELECT w.id FROM laplace.v_word_points w "
+    "WHERE public.laplace_trajectory_constituent_ids(w.trajectory) "
+    "      @> ARRAY[$1]::bytea[] "
+    "LIMIT $2";
+
+static SPIPlanPtr resolve_container_plan = NULL;
+
+static void
+ensure_resolve_container_plan(void)
+{
+    if (resolve_container_plan == NULL)
+    {
+        Oid argtypes[2] = { BYTEAOID, INT4OID };
+        SPIPlanPtr plan = SPI_prepare(RESOLVE_CONTAINER_QUERY, 2, argtypes);
+        if (plan == NULL)
+            elog(ERROR, "resolve_phrase: SPI_prepare failed: %s",
+                 SPI_result_code_string(SPI_result));
+        if (SPI_keepplan(plan) != 0)
+            elog(ERROR, "resolve_phrase: SPI_keepplan failed");
+        resolve_container_plan = plan;
+    }
+}
+
+/*
+ * The election graph, as resolve_phrase's own spec states it: edges with BOTH
+ * endpoints inside the candidate set, credited per endpoint, in ONE query over
+ * the set rather than one probe per candidate.
+ *
+ * Per-candidate truncation cannot express an intersection. 64 containers drawn
+ * from a 39,793,705-row posting list ('a') and 64 from a 3,207-row one ('wolf')
+ * do not meet, so the joint term reads zero for the content word and the
+ * leftmost-longest tie-break re-elects the interrogative — the exact defect §7
+ * names. The projection is the rating tuple: §7 rules out a scalar key and §5
+ * orders ranked reads by belief.
+ */
+static const char *RESOLVE_JOINT_EDGE_QUERY =
+    "WITH cand AS (SELECT unnest($1::bytea[]) AS id), "
+    "     e AS ("
+    "       SELECT c.subject_id AS id, c.witness_count, c.rating, c.rd "
+    "         FROM laplace.consensus c "
+    "        WHERE c.subject_id IN (SELECT id FROM cand) "
+    "          AND c.object_id  IN (SELECT id FROM cand) "
+    "       UNION ALL "
+    "       SELECT c.object_id AS id, c.witness_count, c.rating, c.rd "
+    "         FROM laplace.consensus c "
+    "        WHERE c.subject_id IN (SELECT id FROM cand) "
+    "          AND c.object_id  IN (SELECT id FROM cand)) "
+    "SELECT e.id, sum(e.witness_count)::bigint, sum(e.rating)::bigint, "
+    "       min(e.rd)::bigint "
+    "  FROM e GROUP BY e.id";
+
+static SPIPlanPtr resolve_joint_edge_plan = NULL;
+
+static void
+ensure_resolve_joint_edge_plan(void)
+{
+    if (resolve_joint_edge_plan == NULL)
+    {
+        Oid argtypes[1] = { BYTEAARRAYOID };
+        SPIPlanPtr plan = SPI_prepare(RESOLVE_JOINT_EDGE_QUERY, 1, argtypes);
+        if (plan == NULL)
+            elog(ERROR, "resolve_phrase: SPI_prepare failed: %s",
+                 SPI_result_code_string(SPI_result));
+        if (SPI_keepplan(plan) != 0)
+            elog(ERROR, "resolve_phrase: SPI_keepplan failed");
+        resolve_joint_edge_plan = plan;
+    }
+}
+
 static void
 word_seg_emit(void *ctx_, uint32_t ordinal,
               const uint8_t *word_utf8, uint32_t word_len,
@@ -286,26 +401,251 @@ pg_laplace_resolve_phrase(PG_FUNCTION_ARGS)
             }
 
             /*
-             * Pass 2 runs while SPI is still connected: `present` lives in the
-             * SPI procedure memory context and would be freed by an early
-             * finish. It performs no SPI itself — just the same nested-loop
-             * order (first present span wins).
+             * Pass 2 elects jointly, per the election law: no ranking may be
+             * decided on a single-token scalar, because the discriminating
+             * information lives in the graph BETWEEN a prompt's tokens. A span
+             * that shares consensus edges with the other candidate spans of the
+             * same prompt is the topic; a span with no edges to any of them is
+             * glue, however it ranks alone. Position and length are tie-breaks
+             * only, never the criterion — leftmost-longest is what elected the
+             * interrogative in "What is a wolf?".
+             *
+             * One SPI query over the candidate set, not per candidate: edges
+             * with BOTH endpoints inside the set, counted per endpoint.
              */
-            s = 0;
-            for (int L = ctx.n; L >= 1 && !found; L--)
             {
-                for (int i = 0; i + L <= ctx.n && !found; i++, s++)
-                {
-                    bool pfound;
+                Datum     *pres_elems = (Datum *) palloc(sizeof(Datum) * n_span);
+                hash128_t *pres_ids = (hash128_t *) palloc(sizeof(hash128_t) * n_span);
+                int        n_pres = 0;
+                HTAB      *degree = NULL;
+                HASHCTL    dctl;
 
-                    if (!span_ok[s])
-                        continue;
-                    hash_search(present, &span_id[s], HASH_FIND, &pfound);
-                    if (pfound)
+                s = 0;
+                for (int L = ctx.n; L >= 1; L--)
+                    for (int i = 0; i + L <= ctx.n; i++, s++)
                     {
-                        found_id = span_id[s];
-                        found = true;
+                        bool pfound;
+                        if (!span_ok[s])
+                            continue;
+                        hash_search(present, &span_id[s], HASH_FIND, &pfound);
+                        if (pfound)
+                        {
+                            pres_ids[n_pres]     = span_id[s];
+                            pres_elems[n_pres++] = hash128_to_datum(&span_id[s]);
+                        }
                     }
+
+                memset(&dctl, 0, sizeof(dctl));
+                dctl.keysize   = sizeof(hash128_t);
+                dctl.entrysize = sizeof(joint_degree_entry);
+                degree = hash_create("resolve_phrase joint degree",
+                                     (n_pres > 0 ? (long) n_pres : 16),
+                                     &dctl, HASH_ELEM | HASH_BLOBS);
+
+                if (n_pres > 1)
+                {
+                    ArrayType *cand_arr = construct_array(
+                        pres_elems, n_pres, BYTEAOID, -1, false, TYPALIGN_INT);
+                    Datum      jarg[1];
+                    bool       joint_from_consensus = false;
+                    int        jrc;
+
+                    ensure_resolve_joint_edge_plan();
+                    jarg[0] = PointerGetDatum(cand_arr);
+                    jrc = SPI_execute_plan(resolve_joint_edge_plan, jarg, NULL,
+                                           true, 0);
+                    if (jrc != SPI_OK_SELECT)
+                        elog(ERROR, "resolve_phrase: joint edge query failed: %s",
+                             SPI_result_code_string(jrc));
+
+                    for (uint64 r = 0; r < SPI_processed; r++)
+                    {
+                        bool       isnull, dfound;
+                        HeapTuple  tup = SPI_tuptable->vals[r];
+                        TupleDesc  td  = SPI_tuptable->tupdesc;
+                        hash128_t  eid;
+                        joint_degree_entry *ent;
+                        int64      rdv;
+
+                        eid = datum_to_hash128(SPI_getbinval(tup, td, 1, &isnull));
+                        if (isnull)
+                            continue;
+                        ent = (joint_degree_entry *)
+                            hash_search(degree, &eid, HASH_ENTER, &dfound);
+                        if (!dfound)
+                        {
+                            ent->witnesses = 0;
+                            ent->rating    = 0;
+                            ent->rd        = PG_INT64_MAX;
+                            ent->degree    = 0;
+                        }
+                        ent->witnesses += DatumGetInt64(
+                            SPI_getbinval(tup, td, 2, &isnull));
+                        ent->rating += DatumGetInt64(
+                            SPI_getbinval(tup, td, 3, &isnull));
+                        rdv = DatumGetInt64(SPI_getbinval(tup, td, 4, &isnull));
+                        if (!isnull && rdv < ent->rd)
+                            ent->rd = rdv;
+                        joint_from_consensus = true;
+                    }
+
+                    /* Trajectory co-occurrence is the fallback, never the
+                     * primary: it is raw frequency, and raw frequency elects
+                     * whatever appears everywhere. */
+                    if (!joint_from_consensus)
+                    {
+                    /*
+                     * Co-occurrence comes from the TRAJECTORY, not from
+                     * attestations. Word-adjacency PRECEDES/CONTAINS were drained
+                     * on purpose (13,497,079 rows, 34% of attestations, consumed by
+                     * no read path) because the ordered constituent sequence already
+                     * holds containment, co-occurrence and order losslessly. So the
+                     * joint evidence for a candidate is: how many of ITS containers
+                     * also contain another candidate from the same prompt.
+                     *
+                     * Single-key GIN probe per candidate against a kept plan, and
+                     * LIMIT as a bound parameter — the multi-key `&&` form makes the
+                     * planner abandon the index (850ms, 873,366 rows rechecked), and
+                     * a fetch-count cap skips no bitmap work (3,245ms vs 40.4ms).
+                     * See containers_of.c for both measurements.
+                     */
+                    HTAB      *owners;
+                    HASHCTL    octl;
+                    Datum      cargs[2];
+                    hash128_t *cont = (hash128_t *) palloc(
+                        sizeof(hash128_t) * n_pres * RESOLVE_CONTAINER_PROBE_LIMIT);
+                    int       *cont_n = (int *) palloc0(sizeof(int) * n_pres);
+
+                    memset(&octl, 0, sizeof(octl));
+                    octl.keysize   = sizeof(hash128_t);
+                    octl.entrysize = sizeof(container_owner_entry);
+                    owners = hash_create("resolve_phrase containers",
+                                         (long) n_pres * RESOLVE_CONTAINER_PROBE_LIMIT,
+                                         &octl, HASH_ELEM | HASH_BLOBS);
+
+                    ensure_resolve_container_plan();
+
+                    /* One probe per candidate. Containers are kept so scoring
+                     * reads memory instead of re-querying. */
+                    for (int c = 0; c < n_pres; c++)
+                    {
+                        int qrc2;
+
+                        cargs[0] = pres_elems[c];
+                        cargs[1] = Int32GetDatum(RESOLVE_CONTAINER_PROBE_LIMIT);
+                        qrc2 = SPI_execute_plan(resolve_container_plan,
+                                                cargs, NULL, true, 0);
+                        if (qrc2 != SPI_OK_SELECT)
+                            elog(ERROR, "resolve_phrase: container probe failed: %s",
+                                 SPI_result_code_string(qrc2));
+
+                        for (uint64 r = 0; r < SPI_processed; r++)
+                        {
+                            bool      isnull, ofound;
+                            hash128_t cid = datum_to_hash128(
+                                SPI_getbinval(SPI_tuptable->vals[r],
+                                              SPI_tuptable->tupdesc, 1, &isnull));
+                            container_owner_entry *oe;
+
+                            if (isnull)
+                                continue;
+                            cont[c * RESOLVE_CONTAINER_PROBE_LIMIT + cont_n[c]++] = cid;
+                            oe = (container_owner_entry *)
+                                hash_search(owners, &cid, HASH_ENTER, &ofound);
+                            if (!ofound)
+                            {
+                                oe->first_candidate = c;
+                                oe->n_candidates    = 1;
+                            }
+                            else if (oe->first_candidate != c)
+                            {
+                                oe->n_candidates++;
+                                oe->first_candidate = c;
+                            }
+                        }
+                    }
+
+                    /* A container holding two or more candidates is joint
+                     * evidence; credit every candidate inside it. */
+                    for (int c = 0; c < n_pres; c++)
+                    {
+                        int64 shared = 0;
+                        bool  dfound;
+                        joint_degree_entry *ent;
+
+                        for (int k = 0; k < cont_n[c]; k++)
+                        {
+                            bool ofound;
+                            container_owner_entry *oe = (container_owner_entry *)
+                                hash_search(owners,
+                                            &cont[c * RESOLVE_CONTAINER_PROBE_LIMIT + k],
+                                            HASH_FIND, &ofound);
+                            if (ofound && oe->n_candidates > 1)
+                                shared++;
+                        }
+                        if (shared == 0)
+                            continue;
+                        ent = (joint_degree_entry *)
+                            hash_search(degree, &pres_ids[c], HASH_ENTER, &dfound);
+                        if (!dfound)
+                        {
+                            ent->witnesses = 0;
+                            ent->rating    = 0;
+                            ent->rd        = PG_INT64_MAX;
+                            ent->degree    = 0;
+                        }
+                        ent->degree += shared;
+                    }
+                    }
+                }
+
+                /*
+                 * Elect: highest joint degree wins. Length then position break
+                 * ties, preserving the previous deterministic order for the
+                 * degenerate case where the graph says nothing (single-token
+                 * prompts, or a set with no edges between its members).
+                 */
+                {
+                    int64 best_w = 0, best_r = 0, best_rd = 0, best_d = 0;
+                    bool  have_best = false;
+
+                    s = 0;
+                    for (int L = ctx.n; L >= 1; L--)
+                        for (int i = 0; i + L <= ctx.n; i++, s++)
+                        {
+                            bool  pfound, dfound, better;
+                            int64 w = 0, rt = 0, rd = PG_INT64_MAX, d = 0;
+                            joint_degree_entry *ent;
+
+                            if (!span_ok[s])
+                                continue;
+                            hash_search(present, &span_id[s], HASH_FIND, &pfound);
+                            if (!pfound)
+                                continue;
+                            ent = (joint_degree_entry *)
+                                hash_search(degree, &span_id[s], HASH_FIND, &dfound);
+                            if (dfound)
+                            {
+                                w  = ent->witnesses;
+                                rt = ent->rating;
+                                rd = ent->rd;
+                                d  = ent->degree;
+                            }
+
+                            if (!have_best)          better = true;
+                            else if (w  != best_w)   better = w  > best_w;
+                            else if (rt != best_r)   better = rt > best_r;
+                            else if (rd != best_rd)  better = rd < best_rd;
+                            else                     better = d  > best_d;
+
+                            if (better)
+                            {
+                                best_w = w; best_r = rt; best_rd = rd; best_d = d;
+                                have_best = true;
+                                found_id  = span_id[s];
+                                found     = true;
+                            }
+                        }
                 }
             }
 
