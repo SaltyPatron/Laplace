@@ -47,11 +47,6 @@ public sealed class DocumentIngestHandler : IIngestRecordHandler<ContentIngestRe
     /// the existence gate and re-observe already-completed files.</summary>
     public bool IgnoreCompletedFiles { get; init; }
 
-    public ValueTask<bool> TryTrunkShortcircuitAsync(
-        ContentIngestRecord record, SubstrateChangeBuilder builder, ISubstrateReader reader,
-        double witnessWeight, CancellationToken ct) =>
-        _inner.TryTrunkShortcircuitAsync(record, builder, reader, witnessWeight, ct);
-
     public IIngestDeferredUnit CreateDeferredUnit(ContentIngestRecord record) =>
         _inner.CreateDeferredUnit(record);
 

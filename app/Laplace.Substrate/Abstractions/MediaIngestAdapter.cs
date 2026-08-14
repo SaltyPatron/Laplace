@@ -50,11 +50,6 @@ public sealed class ImageIngestHandler : IIngestRecordHandler<ImageIngestRecord>
         _layerOrder = layerOrder;
     }
 
-    public ValueTask<bool> TryTrunkShortcircuitAsync(
-        ImageIngestRecord record, SubstrateChangeBuilder builder, ISubstrateReader reader,
-        double witnessWeight, CancellationToken ct) =>
-        ValueTask.FromResult(false);
-
     public IIngestDeferredUnit CreateDeferredUnit(ImageIngestRecord record) =>
         new ImageDeferredUnit(record,
             record.SourceId.Equals(default(Hash128)) ? _sourceId : record.SourceId);
@@ -124,11 +119,6 @@ public sealed class AudioIngestHandler : IIngestRecordHandler<AudioIngestRecord>
         _sourceId = sourceId;
         _layerOrder = layerOrder;
     }
-
-    public ValueTask<bool> TryTrunkShortcircuitAsync(
-        AudioIngestRecord record, SubstrateChangeBuilder builder, ISubstrateReader reader,
-        double witnessWeight, CancellationToken ct) =>
-        ValueTask.FromResult(false);
 
     public IIngestDeferredUnit CreateDeferredUnit(AudioIngestRecord record) =>
         new AudioDeferredUnit(record,
@@ -218,11 +208,6 @@ public sealed class VideoFrameIngestHandler : IIngestRecordHandler<VideoFrameIng
         _layerOrder = layerOrder;
         _videoRootId = videoRootId;
     }
-
-    public ValueTask<bool> TryTrunkShortcircuitAsync(
-        VideoFrameIngestRecord record, SubstrateChangeBuilder builder, ISubstrateReader reader,
-        double witnessWeight, CancellationToken ct) =>
-        ValueTask.FromResult(false);
 
     public IIngestDeferredUnit CreateDeferredUnit(VideoFrameIngestRecord record) =>
         new ImageIngestHandler(_sourceId, _layerOrder).CreateDeferredUnit(

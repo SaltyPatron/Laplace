@@ -106,13 +106,6 @@ public interface ITrunkRootRecord
 
 public interface IIngestRecordHandler<TRecord>
 {
-    ValueTask<bool> TryTrunkShortcircuitAsync(
-        TRecord record,
-        SubstrateChangeBuilder builder,
-        ISubstrateReader reader,
-        double witnessWeight,
-        CancellationToken ct = default);
-
     IIngestDeferredUnit CreateDeferredUnit(TRecord record);
 
     void WalkWitness(TRecord record, Hash128 root, SubstrateChangeBuilder builder, IIngestDeferredUnit unit);

@@ -17,11 +17,6 @@ public sealed class ContentIngestHandler : IIngestRecordHandler<ContentIngestRec
 
     public ContentIngestHandler(Hash128 sourceId) => _sourceId = sourceId;
 
-    public ValueTask<bool> TryTrunkShortcircuitAsync(
-        ContentIngestRecord record, SubstrateChangeBuilder builder, ISubstrateReader reader,
-        double witnessWeight, CancellationToken ct) =>
-        ValueTask.FromResult(false);
-
     public IIngestDeferredUnit CreateDeferredUnit(ContentIngestRecord record) =>
         new ContentDeferredUnit(record.CanonicalUtf8,
             record.SourceId.Equals(default(Hash128)) ? _sourceId : record.SourceId);

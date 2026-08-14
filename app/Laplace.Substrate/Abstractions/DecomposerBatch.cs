@@ -60,11 +60,6 @@ public sealed class DirectComposeHandler<T> : IIngestRecordHandler<T>
         _trunkShortcircuit = trunkShortcircuit;
     }
 
-    public ValueTask<bool> TryTrunkShortcircuitAsync(
-        T record, SubstrateChangeBuilder builder, ISubstrateReader reader,
-        double witnessWeight, CancellationToken ct) =>
-        ValueTask.FromResult(_trunkShortcircuit?.Invoke(record) == true);
-
     public IIngestDeferredUnit CreateDeferredUnit(T record) => new Unit(record, _compose);
 
     public void WalkWitness(T record, Hash128 root, SubstrateChangeBuilder builder, IIngestDeferredUnit unit) { }

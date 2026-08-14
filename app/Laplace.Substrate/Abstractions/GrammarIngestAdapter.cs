@@ -30,26 +30,6 @@ public sealed class GrammarIngestHandler : IIngestRecordHandler<GrammarIngestRec
         _contextId = contextId;
     }
 
-    public ValueTask<bool> TryTrunkShortcircuitAsync(
-        GrammarIngestRecord record, SubstrateChangeBuilder builder, ISubstrateReader reader,
-        double witnessWeight, CancellationToken ct)
-    {
-        if (!_witness.TrunkShortcircuitWithoutCompose)
-            return ValueTask.FromResult(false);
-
-        if (!GrammarRowComposer.TryProbeRowRoot(
-                record.LineUtf8, record.Ast, _modalityId, out var rootId, out var tier) || tier < 2)
-            return ValueTask.FromResult(false);
-
-
-
-        if (!reader.IsProvenPresent(rootId))
-            return ValueTask.FromResult(false);
-
-        WalkWitnessWithoutCompose(record, rootId, builder);
-        return ValueTask.FromResult(true);
-    }
-
     internal void WalkWitnessWithoutCompose(
         GrammarIngestRecord record, Hash128 rootId, SubstrateChangeBuilder builder)
     {

@@ -26,11 +26,6 @@ public sealed class CategoryCorrespondenceHandler : IIngestRecordHandler<Categor
         _trust = trust;
     }
 
-    public ValueTask<bool> TryTrunkShortcircuitAsync(
-        CategoryCorrespondenceRecord record, SubstrateChangeBuilder builder, ISubstrateReader reader,
-        double witnessWeight, CancellationToken ct) =>
-        ValueTask.FromResult(false);
-
     public IIngestDeferredUnit CreateDeferredUnit(CategoryCorrespondenceRecord record) =>
         new Unit(record, _sourceId, _trust);
 
