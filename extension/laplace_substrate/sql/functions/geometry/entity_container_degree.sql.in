@@ -18,10 +18,17 @@
 --   * ord DESC          — an SVO word-order prior. Wrong for SOV, VSO, a chess
 --     position, or an image, in a substrate that is modality-agnostic.
 --
--- Saturating by design: p_cap bounds the GIN probing, and everything at the cap
--- is "ubiquitous" — the difference between 8192 and 80000 containers does not
--- change the ranking, only the cost. Callers that need the exact number should
--- call structural.containers_of() directly and pay for it.
+-- p_cap is a symptom, not a dial to retune. structural.containers_of ENUMERATES
+-- rows to produce a COUNT, so every cap trades separation against latency: a cap
+-- low enough to be fast reports the same degree for an ordinary content word as
+-- for a pure function word, and a cap high enough to separate them puts a
+-- multi-second call under converse.resolve — converse.election_token_profile and
+-- prompt_coherence.c:351 both call this on the resolve path. The fix is a
+-- maintained or index-only count that never materialises the container rows.
+--
+-- icf is a PER-TOKEN SCALAR. INVENTION §7 forbids deciding a ranking on one, and
+-- #861 requires a key combining what the fold produces per edge. This is an input
+-- to an election, never the election.
 --
 -- Set-based over the whole id array in one call: per-row resolution of this is
 -- the read-path defect the architecture rules name explicitly.
