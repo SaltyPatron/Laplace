@@ -656,7 +656,7 @@ public sealed class IngestRunner
 
 
 
-        long declaredInput = inventory?.TotalInputUnits ?? 0;
+        long declaredInput = inventory?.EffectiveTotalInputUnits ?? 0;
         long declaredFiles = inventory?.FileCount ?? 0;
         bool emptySourceNoOp = result.UnitsApplied == 0 && (declaredInput > 0 || declaredFiles > 0);
 
@@ -1130,7 +1130,7 @@ public sealed class IngestRunner
             c.UnitsAttempted,
             c.UnitsApplied,
             c.UnitsFailed,
-            inv?.TotalInputUnits ?? 0,
+            inv?.EffectiveTotalInputUnits ?? 0,
             c.InputUnitsDone,
             inv?.FileCount ?? 0,
             c.FilesDone,

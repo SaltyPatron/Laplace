@@ -19,6 +19,66 @@ public sealed record IngestInventory(
     /// <summary>Journal <c>files_total</c>. Zero unless <see cref="TracksFileCompletion"/>.</summary>
     public int FileCount => TracksFileCompletion ? Files.Count : 0;
 
+    private long _refinedTotal;
+
+    /// <summary>
+    /// <see cref="TotalInputUnits"/> unless a background exact count has published a
+    /// correction. Sampled estimates over-run or under-run the true denominator (a
+    /// 20 GB corpus with uneven line density read input_pct past 111%); progress and
+    /// INGEST_COMPLETE read this so the denominator self-corrects mid-run.
+    /// </summary>
+    public long EffectiveTotalInputUnits
+    {
+        get { long r = Interlocked.Read(ref _refinedTotal); return r > 0 ? r : TotalInputUnits; }
+    }
+
+    /// <summary>Publish the exact total once a background count finishes.</summary>
+    public void PublishExactTotal(long exact)
+    {
+        if (exact > 0) Interlocked.Exchange(ref _refinedTotal, exact);
+    }
+
+    /// <summary>
+    /// Kick an exact count on a worker thread when the estimate may be sampled
+    /// (any file over the exact-scan threshold). Never blocks INGEST_START, never
+    /// fails a run — an IO error just leaves the estimate standing.
+    /// </summary>
+    private static void RefineInBackground(
+        IngestInventory inventory,
+        IReadOnlyList<string> paths,
+        Func<string, CancellationToken, long> exactCount,
+        CancellationToken ct)
+    {
+        bool anySampled = false;
+        foreach (var p in paths)
+        {
+            if (File.Exists(p) && new FileInfo(p).Length > EtlInventory.ExactScanThresholdBytes)
+            {
+                anySampled = true;
+                break;
+            }
+        }
+        if (!anySampled) return;
+
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                long total = 0;
+                foreach (var p in paths)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    if (File.Exists(p)) total += exactCount(p, ct);
+                }
+                inventory.PublishExactTotal(total);
+            }
+            catch
+            {
+                // Best-effort refinement: the sampled estimate stands.
+            }
+        }, ct);
+    }
+
     public static IngestInventory Single(long units, string unitType = "units") =>
         new(unitType, units, Array.Empty<IngestFileSpec>());
 
@@ -37,7 +97,10 @@ public sealed record IngestInventory(
                 [new IngestFileSpec(Path.GetFileName(filePath), filePath, maxInputUnits)]);
         }
         long n = EtlInventory.EstimateNewlineCount(filePath, ct);
-        return new IngestInventory(unitType, n, [new IngestFileSpec(Path.GetFileName(filePath), filePath, n)]);
+        var single = new IngestInventory(
+            unitType, n, [new IngestFileSpec(Path.GetFileName(filePath), filePath, n)]);
+        RefineInBackground(single, [filePath], EtlInventory.CountNewlinesExactFor, ct);
+        return single;
     }
 
     /// <param name="tracksFileCompletion">
@@ -65,7 +128,9 @@ public sealed record IngestInventory(
             files.Add(new IngestFileSpec(Path.GetFileName(paths[i]), paths[i], units[i]));
             total += units[i];
         }
-        return new IngestInventory(unitType, total, files, tracksFileCompletion);
+        var inv = new IngestInventory(unitType, total, files, tracksFileCompletion);
+        RefineInBackground(inv, paths, EtlInventory.CountNewlinesExactFor, ct);
+        return inv;
     }
 
     /// <summary>
@@ -119,7 +184,9 @@ public sealed record IngestInventory(
                 Path.GetFileNameWithoutExtension(paths[i]), paths[i], units[i]));
             total += units[i];
         }
-        return new IngestInventory(unitType, total, files, tracksFileCompletion);
+        var inv = new IngestInventory(unitType, total, files, tracksFileCompletion);
+        RefineInBackground(inv, paths, EtlInventory.CountConlluSentencesFor, ct);
+        return inv;
     }
 }
 
@@ -359,6 +426,17 @@ public static class EtlInventory
         }
 
         return units;
+    }
+
+    /// <summary>Exact newline count for background denominator refinement.</summary>
+    internal static long CountNewlinesExactFor(string path, CancellationToken ct) =>
+        CountNewlinesExact(path, new FileInfo(path).Length, ct);
+
+    /// <summary>Exact CoNLL-U sentence count for background denominator refinement.</summary>
+    internal static long CountConlluSentencesFor(string path, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        return CountConlluSentences(path);
     }
 
     private static long CountNewlinesExact(string path, long size, CancellationToken ct)
