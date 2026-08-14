@@ -28,7 +28,18 @@ DROP FUNCTION IF EXISTS laplace.infer(text, int);
 CREATE OR REPLACE FUNCTION converse.infer(p_prompt text, p_limit int DEFAULT 8)
     RETURNS TABLE(prediction text, weight double precision, bias_hits bigint)
     LANGUAGE sql STABLE AS $$
-WITH ranked AS (
+-- The prompt's language is a CONSTRAINT on which candidates may be seated, never
+-- a score. Without it a foreign interjection outranks the content word on the
+-- specificity scalar and takes the topic seat, which is the §7 violation seen on
+-- every phrase probe. A candidate is dropped only when the prompt's language and
+-- the candidate's primary language are both known and differ; concepts (no
+-- HAS_LANGUAGE) and undetectable prompts are untouched, so this can only narrow a
+-- language-blind field. converse.prompt_language_top and converse.word_language
+-- are the existing definitions of both sides — neither was wired to this election.
+WITH plang AS MATERIALIZED (
+    SELECT converse.prompt_language_top(p_prompt) AS id
+),
+ranked AS (
     SELECT y.tok, y.synset_id, y.rel_type_id,
            row_number() OVER (ORDER BY (COALESCE(y.specificity, 0)
                                                  * GREATEST(COALESCE(y.denote_mu, 0), 1)) DESC,
@@ -38,6 +49,9 @@ WITH ranked AS (
                                        y.ord DESC,
                                        y.synset_id) AS rk
     FROM converse.prompt_coherence(p_prompt) y
+    WHERE (SELECT id FROM plang) IS NULL
+       OR converse.word_language(y.synset_id) IS NULL
+       OR converse.word_language(y.synset_id) = (SELECT id FROM plang)
 ),
 topic AS (
     SELECT r.synset_id, r.rel_type_id, r.tok FROM ranked r WHERE r.rk = 1
