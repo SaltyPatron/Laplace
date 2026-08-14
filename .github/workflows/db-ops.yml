@@ -29,6 +29,7 @@ on:
           - status      # READ-ONLY. Migration state + extension version + substrate counts.
           - migrate     # `up` only. Idempotent; applies any pending migrations.
           - repair      # Re-sync extension SQL + re-tune + re-point perfcache/API env. NO DATA LOSS.
+          - reindex     # Rebuild INVALID indexes (interrupted index cycles). CONCURRENTLY; NO DATA LOSS.
           - remigrate   # `reset` + `up`: re-apply ALL migrations. Keeps substrate data.
           - recreate    # DESTRUCTIVE. `nuke` + `up` + repair. Drops the database and rebuilds it EMPTY.
       confirm:
@@ -61,7 +62,9 @@ jobs:
   db:
     name: "DB — ${{ inputs.operation }}"
     runs-on: [self-hosted, laplace]
-    timeout-minutes: 30
+    # reindex rebuilds up to every index on billion-row partitioned tables — hours,
+    # not minutes. Every other operation keeps the 30-minute leash.
+    timeout-minutes: ${{ inputs.operation == 'reindex' && 720 || 30 }}
     steps:
       - uses: actions/checkout@v4
         with: { submodules: false, clean: false }
@@ -110,6 +113,12 @@ jobs:
           echo "----- substrate -----"
           psql -h /var/run/postgresql -U laplace_admin -d "${{ inputs.database }}" -c \
             "SET search_path=laplace,public; SELECT * FROM substrate_health()" || rc=1
+          echo "----- index health (invalid = planner-invisible, run 'reindex') -----"
+          psql -h /var/run/postgresql -U laplace_admin -d "${{ inputs.database }}" -c \
+            "SELECT t.relname AS table, count(*) FILTER (WHERE NOT i.indisvalid) AS invalid, count(*) AS total
+             FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid JOIN pg_class t ON t.oid=i.indrelid
+             JOIN pg_namespace n ON n.oid=t.relnamespace WHERE n.nspname='laplace'
+             GROUP BY 1 HAVING count(*) FILTER (WHERE NOT i.indisvalid) > 0 ORDER BY 2 DESC" || rc=1
           echo "----- what has been ingested -----"
           psql -h /var/run/postgresql -U laplace_admin -d "${{ inputs.database }}" -c \
             "SET search_path=laplace,public; SELECT source_name, status, attestations, ended_at FROM ingest_run_journal ORDER BY started_at DESC LIMIT 20" || rc=1
@@ -126,6 +135,39 @@ jobs:
         # there but the extension or a GUC drifted".
         if: inputs.operation == 'repair'
         run: bash scripts/pipeline.sh sync-extension tune-pg tune-laplace perfcache-guc api-env
+
+      - name: Reindex — rebuild INVALID indexes
+        # An interrupted index cycle (OOM-killed ingest, cancelled run) leaves
+        # indexes marked indisvalid=false; the planner ignores them and every read
+        # seq-scans. 2026-08-14: 28 of them across attestations/consensus/entities/
+        # physicalities — every core query index — after the wiktionary-era kills.
+        # CONCURRENTLY: readers keep working while each rebuilds. `_ccnew` leftovers
+        # are half-built temp indexes from a died CREATE INDEX CONCURRENTLY — the
+        # real name still exists, so they drop rather than rebuild.
+        if: inputs.operation == 'reindex'
+        run: |
+          P(){ psql -h /var/run/postgresql -U laplace_admin -d "${{ inputs.database }}" -v ON_ERROR_STOP=1 -tAc "$1"; }
+          invalid=$(P "SELECT n.nspname || '.' || c.relname FROM pg_index i
+                       JOIN pg_class c ON c.oid=i.indexrelid
+                       JOIN pg_class t ON t.oid=i.indrelid
+                       JOIN pg_namespace n ON n.oid=c.relnamespace
+                       WHERE NOT i.indisvalid ORDER BY 1")
+          [ -z "$invalid" ] && { echo "::notice::no invalid indexes — nothing to do"; exit 0; }
+          echo "rebuilding $(echo "$invalid" | wc -l) invalid index(es):"
+          rc=0
+          while IFS= read -r idx; do
+            case "$idx" in
+              *_ccnew*)
+                echo "--- DROP leftover $idx"
+                P "DROP INDEX CONCURRENTLY IF EXISTS $idx" || rc=1 ;;
+              *)
+                echo "--- REINDEX $idx"
+                P "REINDEX INDEX CONCURRENTLY $idx" || rc=1 ;;
+            esac
+          done <<< "$invalid"
+          remaining=$(P "SELECT count(*) FROM pg_index WHERE NOT indisvalid")
+          echo "invalid indexes remaining: $remaining"
+          [ "$rc" -eq 0 ] && [ "$remaining" = "0" ] || { echo "::error::reindex incomplete — $remaining invalid remain"; exit 1; }
 
       - name: Remigrate (reset + up)
         if: inputs.operation == 'remigrate'
