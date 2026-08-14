@@ -219,7 +219,7 @@ jobs:
           # lives only in that manifest.
           src_name=$(python3 -c "import json; e=json.load(open('scripts/decomposer-gates.json'))['sources'].get('${{ inputs.source }}'); print(e['decomposer'] if e else '')")
           if [ -n "$src_name" ]; then
-            count_sql="SELECT laplace.evidence_count(p_source => laplace.source_id('$src_name'));"
+            count_sql="SELECT ops.evidence_count(p_source => laplace.source_id('$src_name'));"
             scope="evidence for source $src_name"
           else
             count_sql="SELECT count(*) FROM laplace.attestations;"
