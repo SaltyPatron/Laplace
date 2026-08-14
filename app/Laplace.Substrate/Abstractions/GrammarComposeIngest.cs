@@ -44,11 +44,6 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
         _reader = reader;
     }
 
-    public ValueTask<bool> TryTrunkShortcircuitAsync(
-        GrammarComposeRecord record, SubstrateChangeBuilder builder, ISubstrateReader reader,
-        double witnessWeight, CancellationToken ct) =>
-        ValueTask.FromResult(false);
-
     public IIngestDeferredUnit CreateDeferredUnit(GrammarComposeRecord record) =>
         new Unit(record, _sourceId, _trust, _reader);
 

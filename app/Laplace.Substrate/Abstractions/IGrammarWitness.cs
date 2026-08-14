@@ -11,8 +11,6 @@ public interface IGrammarWitness
 {
     string ModalityId { get; }
 
-    bool TrunkShortcircuitWithoutCompose => false;
-
     void WalkRow(
         in GrammarComposeContext composed,
         in RowContext ctx,

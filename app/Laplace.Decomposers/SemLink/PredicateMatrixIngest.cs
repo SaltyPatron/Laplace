@@ -217,11 +217,6 @@ internal static class PredicateMatrixIngest
             _triple = new RelationTripleHandler(sourceId, trust);
         }
 
-        public ValueTask<bool> TryTrunkShortcircuitAsync(
-            PredicateMatrixEdge record, SubstrateChangeBuilder builder, ISubstrateReader reader,
-            double witnessWeight, CancellationToken ct) =>
-            ValueTask.FromResult(false);
-
         public IIngestDeferredUnit CreateDeferredUnit(PredicateMatrixEdge record) =>
             record.Category is { } cat
                 ? _category.CreateDeferredUnit(cat)

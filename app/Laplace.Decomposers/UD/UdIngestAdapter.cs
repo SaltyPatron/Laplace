@@ -57,11 +57,6 @@ public sealed class UdIngestHandler : IIngestRecordHandler<UdIngestRecord>, IIng
         _canonicalNames = canonicalNames;
     }
 
-    public ValueTask<bool> TryTrunkShortcircuitAsync(
-        UdIngestRecord record, SubstrateChangeBuilder builder, ISubstrateReader reader,
-        double witnessWeight, CancellationToken ct) =>
-        ValueTask.FromResult(false);
-
     public IIngestDeferredUnit CreateDeferredUnit(UdIngestRecord record) =>
         new UdDeferredUnit(record.Sentence, _sourceId, this);
 

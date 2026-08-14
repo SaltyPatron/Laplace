@@ -14,11 +14,6 @@ namespace Laplace.Decomposers.Wiktionary;
 /// </summary>
 internal sealed class WiktionaryComposeHandler : IIngestRecordHandler<WiktionaryEntry>
 {
-    public ValueTask<bool> TryTrunkShortcircuitAsync(
-        WiktionaryEntry record, SubstrateChangeBuilder builder, ISubstrateReader reader,
-        double witnessWeight, CancellationToken ct) =>
-        ValueTask.FromResult(false);
-
     public IIngestDeferredUnit CreateDeferredUnit(WiktionaryEntry record) =>
         new WiktionaryDeferredUnit(record);
 

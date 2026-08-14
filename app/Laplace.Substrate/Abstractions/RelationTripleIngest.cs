@@ -56,11 +56,6 @@ public sealed class RelationTripleHandler : IIngestRecordHandler<RelationTripleR
         _sourceTrust = sourceTrust;
     }
 
-    public ValueTask<bool> TryTrunkShortcircuitAsync(
-        RelationTripleRecord record, SubstrateChangeBuilder builder, ISubstrateReader reader,
-        double witnessWeight, CancellationToken ct) =>
-        ValueTask.FromResult(false);
-
     public IIngestDeferredUnit CreateDeferredUnit(RelationTripleRecord record) =>
         new TripleDeferredUnit(record, _sourceId, _sourceTrust);
 

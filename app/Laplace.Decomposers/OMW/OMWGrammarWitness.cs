@@ -13,8 +13,6 @@ internal sealed class OMWGrammarWitness(string fileLang) : IGrammarWitness
 {
     public string ModalityId => "tsv";
 
-    public bool TrunkShortcircuitWithoutCompose => true;
-
     public void WalkRow(in GrammarComposeContext composed, in RowContext ctx, SubstrateChangeBuilder b)
     {
         OmwRow row;
