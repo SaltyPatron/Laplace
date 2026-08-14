@@ -5,6 +5,17 @@ public static class FoundryDefaults
 {
     public const int CrawlSeeds = 1000;
     public const int WordTrajs = 400_000;
+
+    /// Faithful writer (restored per #1055; produced the kfix.gguf existence proof).
+    /// Rank band hi is 0.95, NOT the historical 0.85: the relation-rank ladder
+    /// recalibration moved IS_A 0.82→0.90, and 0.85 silently excludes the entire
+    /// hypernym chain (#1055 step 3).
+    public const int FaithfulCap = 128;
+    public const double FaithfulRankLo = 0.55;
+    public const double FaithfulRankHi = 0.95;
+    public const bool FaithfulKnowledge = true;
+    public const bool FaithfulTrajOrder = true;
+    public const bool FaithfulLookup = true;
     public const int LeDegree = 48;
     public const int MetricK = 16;
     public const int MetricProbe = 64;
