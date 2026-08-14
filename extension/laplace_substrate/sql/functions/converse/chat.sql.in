@@ -144,7 +144,16 @@ BEGIN
                     y.ord DESC,
                     y.synset_id)
           INTO cands
-        FROM converse.prompt_coherence(p_prompt) y;
+        -- `lang` is already resolved above and constrains the seat: a candidate
+        -- is dropped only when both it and the prompt have a primary language and
+        -- they differ. Without this a foreign interjection outranks the content
+        -- word on the specificity scalar and takes the topic, which is the §7
+        -- violation. Concepts carry no HAS_LANGUAGE and a prompt with no language
+        -- evidence leaves lang NULL, so both cases pass through untouched.
+        FROM converse.prompt_coherence(p_prompt) y
+        WHERE lang IS NULL
+           OR converse.word_language(y.synset_id) IS NULL
+           OR converse.word_language(y.synset_id) = lang;
         topic := cands[1];
         -- Nothing in this turn resolved: read the session's BIOGRAPHY, not one
         -- carried id (R7 / GH #759 slice 1). generation.session_last_resolved() answered
