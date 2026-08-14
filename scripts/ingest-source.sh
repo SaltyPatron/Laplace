@@ -71,6 +71,11 @@ ingest() {
     fi
     local elapsed=$((SECONDS - t0))
     echo "INGEST_TIMING source=$source elapsed_s=$elapsed rc=$rc"
+    if [[ -n "${GITHUB_ACTIONS:-}" && -n "${LOGDIR:-}" ]]; then
+        # The throughput gate parses the detail log; under LAPLACE_INGEST_CONSOLE=ci
+        # nothing else machine-readable lands there.
+        echo "INGEST_TIMING source=$source elapsed_s=$elapsed rc=$rc" >> "$detail"
+    fi
     if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
         echo "elapsed_s=$elapsed" >> "$GITHUB_OUTPUT"
     fi
