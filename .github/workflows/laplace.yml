@@ -194,6 +194,9 @@ jobs:
       - name: Eval operation-lane architecture gate
         run: python3 scripts/test-eval-op-lane.py
 
+      - name: Upgrade drop-order gate — live dependents must drop before their base
+        run: python3 scripts/check-upgrade-drop-order.py
+
       - name: Enforce ISA literalism ratchets
         run: python3 scripts/isa-gate-check.py
 

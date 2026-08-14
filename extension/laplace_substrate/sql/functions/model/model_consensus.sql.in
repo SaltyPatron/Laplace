@@ -49,6 +49,12 @@
 -- it is named once AND made overridable, which is the stricter form -- the
 -- ordering relation that encodes circuit anatomy is a property of the ingest that
 -- wrote it, not a constant of the substrate.
+-- Dependents first: circuit_coupling/row/matrix are BEGIN ATOMIC and pin
+-- circuit_coord's OID, so on a live upgrade the base cannot drop while they
+-- stand (same RESTRICT shape metric_ladder hit; d1fa0245).
+DROP FUNCTION IF EXISTS generation.circuit_coupling(bytea, bytea, text, integer, integer, text);
+DROP FUNCTION IF EXISTS generation.circuit_row(bytea, text, integer, integer, integer, text);
+DROP FUNCTION IF EXISTS generation.circuit_matrix(text, integer, integer, integer, text);
 DROP FUNCTION IF EXISTS generation.circuit_coord(text, integer, integer);
 DROP FUNCTION IF EXISTS generation.circuit_coord(text, integer, integer, text);
 CREATE OR REPLACE FUNCTION generation.circuit_coord(
