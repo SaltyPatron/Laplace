@@ -969,10 +969,19 @@ public static class IngestBatchPipeline
             CancellationToken ct)
         {
             if (WorkingSetDeferred is not WorkingSetDeferredBatch<TRecord> deferred || !deferred.HasWork)
+            {
+                probedAbsent?.Clear();
                 return;
+            }
             await IngestDescentFlush.FinalizeWorkingSetAsync(
                 deferred, handler, reader, Builder, config, probedAbsent, ct).ConfigureAwait(false);
             WorkingSetDeferred = null;
+            // The absent-set is working-set-lifetime by contract (TierTreeDescent:
+            // "it must never be shared across working sets or processes — another
+            // writer may commit the id at any time"). It was allocated per FILE and
+            // only ever grew, so it both violated that contract and accreted one
+            // Hash128 per distinct absent node over the whole file × FileWorkers.
+            probedAbsent?.Clear();
         }
 
         public void AddUnits(long units)

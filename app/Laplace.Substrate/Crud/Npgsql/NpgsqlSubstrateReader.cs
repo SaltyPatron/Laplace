@@ -125,8 +125,28 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
     /// content anywhere in the ingest run to be silently treated as already
     /// present -- see the dorian.txt repro in
     /// .scratchpad/02_Identified_Issues.txt.
+    ///
+    /// Cleared at the cap as a memory valve (same as
+    /// ConsensusAccumulatingWriter._depositedMaskPairs): a full UD/OMW pass
+    /// accretes one entry per distinct content id ever confirmed present —
+    /// tens of millions, several GB, process-lifetime. Clearing costs
+    /// re-probes, never correctness: a miss falls through to the DB.
     /// </summary>
     private readonly System.Collections.Concurrent.ConcurrentDictionary<Hash128, byte> _proven = new();
+    private const int ProvenCacheCap = 1 << 24;
+    private int _provenApprox;
+
+    private void AddProven(Hash128 id)
+    {
+        if (!_proven.TryAdd(id, 1)) return;
+        // Approximate counter — ConcurrentDictionary.Count locks every stripe, and
+        // an off-by-a-few overshoot on the valve is harmless.
+        if (Interlocked.Increment(ref _provenApprox) >= ProvenCacheCap)
+        {
+            _proven.Clear();
+            Interlocked.Exchange(ref _provenApprox, 0);
+        }
+    }
 
     public async Task<byte[]> EntitiesExistBitmapAsync(IReadOnlyList<Hash128> candidates, CancellationToken ct = default)
     {
@@ -153,7 +173,7 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
             if (CodepointPerfcache.IsKnownCodepointId(candidates[i]))
             {
                 BitmapBits.Set(bm, i);
-                _proven.TryAdd(candidates[i], 1);
+                AddProven(candidates[i]);
             }
             else
                 dbUnknownIdx.Add(i);
@@ -175,7 +195,7 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
             {
                 int i = dbUnknownIdx[u];
                 BitmapBits.Set(bm, i);
-                _proven.TryAdd(candidates[i], 1);
+                AddProven(candidates[i]);
             }
         }
         return bm;
@@ -184,7 +204,7 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
     public void MarkProven(IReadOnlyList<Hash128> ids)
     {
         if (ids is null) return;
-        for (int i = 0; i < ids.Count; i++) _proven.TryAdd(ids[i], 1);
+        for (int i = 0; i < ids.Count; i++) AddProven(ids[i]);
     }
 
     public bool IsProvenPresent(Hash128 id) => _proven.ContainsKey(id);
@@ -193,9 +213,21 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
 
 
 
+    // Same memory valve as _proven: canonical→root is a deterministic mapping, so a
+    // cleared entry only costs a recompute/re-probe on next use.
     private readonly System.Collections.Concurrent.ConcurrentDictionary<Hash128, Hash128> _rootCache = new();
+    private const int RootCacheCap = 1 << 22;
+    private int _rootCacheApprox;
     public bool TryGetCachedRoot(Hash128 canonicalKey, out Hash128 rootId) => _rootCache.TryGetValue(canonicalKey, out rootId);
-    public void CacheRoot(Hash128 canonicalKey, Hash128 rootId) => _rootCache.TryAdd(canonicalKey, rootId);
+    public void CacheRoot(Hash128 canonicalKey, Hash128 rootId)
+    {
+        if (!_rootCache.TryAdd(canonicalKey, rootId)) return;
+        if (Interlocked.Increment(ref _rootCacheApprox) >= RootCacheCap)
+        {
+            _rootCache.Clear();
+            Interlocked.Exchange(ref _rootCacheApprox, 0);
+        }
+    }
 
     public async Task<byte[]> ContentDescentBitmapAsync(
     IReadOnlyList<Hash128> ids, IReadOnlyList<int> parents, CancellationToken ct = default)

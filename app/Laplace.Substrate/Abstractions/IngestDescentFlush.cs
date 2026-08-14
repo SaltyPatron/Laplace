@@ -166,6 +166,14 @@ internal static class IngestDescentFlush
                 if (root != default)
                     reader.MarkProven([root]);
             }
+            catch
+            {
+                // The failing unit is released by the finally below; without this the
+                // rest of the working set's native trees wait for the finalizer thread.
+                for (int j = i + 1; j < pending.Count; j++)
+                    pending[j].Unit.Dispose();
+                throw;
+            }
             finally
             {
                 unit.Dispose();
