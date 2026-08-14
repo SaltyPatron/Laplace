@@ -81,11 +81,16 @@ int64_t glicko2_effective_mu(const glicko2_state_t* st);
 /*
  * The Glicko-complete signed edge weight -- doc 14 P5, ratified and live on
  * the Foundry export path as consensus_adjacency.sql.in's per-edge term:
- *   (eff_mu(rating,rd) - neutral)/1e9 * exp(-kappa * rd/1e9) * witness_sat(wc)
+ *   (rating - neutral)/1e9 * exp(-kappa * rd/1e9) * witness_sat(wc)
+ * SIGN IS THE RATING'S, never eff_mu's (INVENTION SS5): rd is a confidence
+ * interval and applies once, as the decay factor. Signing on eff_mu
+ * (rating - 2*rd) double-counts it and scores a wide-rd WIN as a refutation --
+ * measured at 99.04% of won claims. The body in glicko2.c is authoritative.
  * witness_sat(wc) = wc/(wc+4.0) (Michaelis-Menten, half-max at 4 witnesses --
  * see mu/foundry_witness_sat.sql.in for the documented rationale). `kappa` is
- * the SQL-level tunable foundry_rd_kappa() (mu/foundry_rd_kappa.sql.in,
- * currently 1.0) -- callers fetch it once (not per-candidate) and pass it in,
+ * consensus.foundry_rd_kappa() (mu/foundry_rd_kappa.sql.in), which derives it
+ * as 1/initial_rd so the decay reads exp(-rd/rd_initial) and cannot drift from
+ * consensus.glicko2_initial_rd() -- callers fetch it once (not per-candidate) and pass it in,
  * so the walk and the Foundry export share one tunable, never drift apart.
  * Rule #1 (one implementation per fact): this is the ONLY native copy of this
  * formula; both generate_walk.c's beam scorer and astar_path.c's edge_cost
