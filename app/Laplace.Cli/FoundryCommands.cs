@@ -59,6 +59,7 @@ internal static class FoundryCommands
 
 
             bool grapheme = false;
+            bool faithful = false;   // #1055: restored faithful/LOOKUP writer instead of the pour
             string? scopeSource = null; // Plan Phase 8: comma-separated source short-names
             var positional = new List<string>();
             for (int i = 1; i < args.Length; i++)
@@ -66,6 +67,7 @@ internal static class FoundryCommands
                 switch (args[i])
                 {
                     case "--grapheme-floor": grapheme = true; break;
+                    case "--faithful": faithful = true; break;
                     case "--scope-source" when i + 1 < args.Length: scopeSource = args[++i]; break;
                     case "--recipe-from" when i + 1 < args.Length: recipeFrom = args[++i]; break;
                     case "--tokenizer" when i + 1 < args.Length: tokenizerDir = args[++i]; break;
@@ -106,7 +108,7 @@ internal static class FoundryCommands
                 if (molded is null) return 2;
                 recipePath = molded;
             }
-            return await SynthesizeFromSubstrateAsync(recipePath, outputPath, grapheme, scopeSource);
+            return await SynthesizeFromSubstrateAsync(recipePath, outputPath, grapheme, scopeSource, faithful);
         }
 
         return Fail(
@@ -471,7 +473,7 @@ internal static class FoundryCommands
         return (merges, learned);
     }
 
-    private static async Task<int> SynthesizeFromSubstrateAsync(string recipePath, string outputPath, bool grapheme = false, string? scopeSource = null)
+    private static async Task<int> SynthesizeFromSubstrateAsync(string recipePath, string outputPath, bool grapheme = false, string? scopeSource = null, bool faithful = false)
     {
         if (string.IsNullOrEmpty(recipePath) || !File.Exists(recipePath))
             return Fail(
@@ -547,8 +549,13 @@ internal static class FoundryCommands
 
         await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
 
-
-
+        if (faithful)
+        {
+            int faithfulRc = await WriteFaithfulGgufAsync(
+                ds, recipe, tokens, tokenSlots, vocab, dModel, modelDir, outputPath,
+                specs, tensorCount, grapheme);
+            return faithfulRc == 0 ? 0 : Fail($"faithful foundry write failed (status {faithfulRc})");
+        }
 
 
 
@@ -1831,6 +1838,273 @@ internal static class FoundryCommands
 
 
     private static int RoundTo64(int x) => Math.Max(64, ((x + 63) / 64) * 64);
+
+    // Restored per #1055 from 36886687 (deleted e04104e6). The LOOKUP/KNOWLEDGE/TRAJORDER
+    // readouts that produced the kfix.gguf existence proof; knobs live in FoundryDefaults
+    // per the env-var retirement doctrine.
+    // no-ops, norms = 1. This is last-token (bigram) order; carrying context across the prompt
+    // is a later layer of work, and the model says so rather than pretend.
+    private static async Task<int> WriteFaithfulGgufAsync(
+        NpgsqlDataSource ds,
+        LlamaRecipeExtractor.RecipeInfo recipe,
+        IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens,
+        Dictionary<Hash128, List<int>> tokenSlots,
+        int vocab, int dModel, string modelDir, string outputPath,
+        TensorSpec[] specs, int tensorCount, bool grapheme = false)
+    {
+        int cap = FoundryDefaults.FaithfulCap;
+        var sw = Stopwatch.StartNew();
+        // grapheme floor reads the letter-bigram order off the trajectories. The word model has
+        // two readout sources (the LAYERING LAW: severity/eff_mu is not value):
+        //   default     → consensus_adjacency: ALL in-vocab content edges, rank-weighted. Includes
+        //                 the PRECEDES order glue (king→of/was/and) which, being a first-order
+        //                 frequency witness, HUBS on function words under greedy decode.
+        //   --knowledge → consensus_layer_plane gated to the CONTENT rank band [0.55,0.85]: IS_A
+        //                 (king→monarch), HAS_PROPERTY, IS_SYNONYM_OF — ABOVE the 0.36 glue/metadata
+        //                 bucket (PRECEDES, HAS_DOMAIN_TOPIC, HAS_EXAMPLE). The substrate's own
+        //                 relation_rank does the de-hubbing the flat readout threw away.
+        bool knowledge = !grapheme && FoundryDefaults.FaithfulKnowledge;
+        double rkLo = FoundryDefaults.FaithfulRankLo;
+        double rkHi = FoundryDefaults.FaithfulRankHi;
+        // TRAJORDER: the EXACT readout — no folded PRECEDES glue, no flat hub. The rated KNOWLEDGE
+        // band (IS_A/property/synonym, rank∈[lo,hi]) UNION the EXACT trajectory continuation
+        // (P(next word | word) read straight off the witnessed sentence trajectory LineStrings via
+        // word_order, NOT the lossy single-hop folded PRECEDES band that hubs on function words).
+        // Both normalized to comparable scale, then merged. This is the order signal the function-
+        // word loop was missing; it lives in the trajectories, not in type=PRECEDES.
+        bool trajOrder = !grapheme && FoundryDefaults.FaithfulTrajOrder;
+        FoundryExport.PlaneCoo A;
+        if (grapheme)
+            A = await FoundryExport.ReadGraphemeOrderAsync(ds, tokenSlots);
+        else if (trajOrder)
+        {
+            var know  = FoundryExport.Normalize(await FoundryExport.ReadLayerPlaneAsync(ds, rkLo, rkHi, tokenSlots, cap));
+            var order = FoundryExport.Normalize(await FoundryExport.ReadWordOrderAsync(
+                ds, tokenSlots, 1, FoundryDefaults.WordTrajs, cap));
+            A = FoundryExport.Union(know, order);
+            Console.WriteLine($"  TRAJORDER readout: knowledge band rank∈[{rkLo},{rkHi}] ∪ exact trajectory continuation "
+                + $"(word_order off LineStrings; {know.Nnz:N0} knowledge + {order.Nnz:N0} order edges)");
+        }
+        else if (knowledge)
+        {
+            A = await FoundryExport.ReadLayerPlaneAsync(ds, rkLo, rkHi, tokenSlots, cap);
+            Console.WriteLine($"  KNOWLEDGE readout: consensus content band rank∈[{rkLo},{rkHi}] (IS_A/property/synonym, no PRECEDES glue)");
+        }
+        else
+            A = await FoundryExport.ReadAdjacencyAsync(ds, tokenSlots, cap);
+        if (A.Nnz == 0)
+            return Fail((grapheme ? "grapheme_order" : "consensus_adjacency")
+                + " returned no edges over this vocab — ingest/seed first");
+        var subjects = new HashSet<int>();
+        foreach (var r in A.Rows) subjects.Add(r);
+        Console.WriteLine($"  FAITHFUL adjacency read in {sw.Elapsed.TotalSeconds:F1}s: {A.Nnz:N0} rank-weighted edges "
+            + $"over {subjects.Count:N0}/{vocab:N0} tokens (cap {cap})");
+
+        // factor A → embed (U) + lm_head (V·S) at rank dModel (the hidden width, not vocab).
+        // conditional=true (log-odds of the continuation P(Y|X)) for BOTH grapheme and word: it is
+        // the GENERATIVE readout. PPMI is a SIMILARITY transform that inflates rare next-tokens into
+        // a hub — wrong for next-token decode (it is what made the word cast collapse to byte garbage
+        // while the grapheme cast, already conditional, generated).
+        var swSvd = Stopwatch.StartNew();
+        // conditional log-odds (P(Y|X)) for grapheme + word-default; PMI / global-prior-subtraction
+        // (log P(Y|X) − log P(Y)) for the knowledge readout. The plain log-odds matrix has a dominant
+        // Perron-Frobenius top singular direction (same sign for every token) that acts as a global
+        // bias; bf16 rounding in the GGUF erases the smaller differentiating terms, collapsing every
+        // input to that one hub direction in llama.cpp. PMI subtracts log P(Y), removing exactly that
+        // global-frequency hub so the input-specific signal survives (with byte/content suppression
+        // already taming PMI's rare-token inflation).
+        FoundryExport.FactorAdjacency(A, vocab, dModel, out var embed, out var lmHead, out int usedRank, conditional: true, suppressSelf: !grapheme);
+        Console.WriteLine($"  FAITHFUL factorization in {swSvd.Elapsed.TotalSeconds:F1}s: "
+            + $"log-odds-SVD rank {usedRank}/{dModel} → embed=U, lm_head=V·S, no-op layers");
+
+        // SUBSTRATE-NATIVE LOOKUP (knowledge, dModel≥vocab): the attestation lookup IS the forward
+        // pass — embed = I, lm_head[Y][X] = log-odds(X→Y). Then logits[Y] = lm_head[Y]·RMSNorm(e_X)
+        // = log-odds(X→Y) EXACTLY. NO SVD, so no Perron-Frobenius global-frequency hub (the and/that/as
+        // direction the SVD injected). This is the design the substrate states outright: "lm_head=A,
+        // embed=I; the GEMM literally is the lookup." Grounded in the source material (a knowledge
+        // graph), not in fluent-LM priors. Falls back to SVD if dModel<vocab (identity impossible).
+        bool lookup = knowledge && FoundryDefaults.FaithfulLookup && dModel >= vocab;
+        if (lookup)
+        {
+            Array.Clear(embed); Array.Clear(lmHead);
+            var rowSum = new double[vocab];
+            for (long e = 0; e < A.Nnz; e++)
+            {
+                int x = A.Rows[e], y = A.Cols[e];
+                if (x >= 0 && x < vocab && y >= 0 && y < vocab && x != y) rowSum[x] += A.Vals[e];
+            }
+            for (int i = 0; i < vocab && i < dModel; i++) embed[(long)i * dModel + i] = 1.0;   // embed = I
+            double invScale = 1.0 / Math.Sqrt(dModel);   // cancels RMSNorm(e_X)=√dModel·e_X
+            for (long e = 0; e < A.Nnz; e++)
+            {
+                int x = A.Rows[e], y = A.Cols[e];
+                if (x < 0 || x >= vocab || y < 0 || y >= vocab || x == y || x >= dModel) continue;
+                if (rowSum[x] <= 0) continue;
+                lmHead[(long)y * dModel + x] = Math.Log(A.Vals[e] / rowSum[x] * vocab) * invScale;
+            }
+            Console.WriteLine("  LOOKUP: embed=I, lm_head=log-odds(A) — the GEMM IS the attestation lookup (no SVD, no global hub)");
+        }
+        else if (knowledge)
+            Console.WriteLine($"  (lookup needs dModel≥vocab; dModel={dModel} vocab={vocab} → SVD fallback, may re-introduce the hub)");
+
+        // A token that nothing precedes (no incoming edge) cannot be a next-token. Such tokens —
+        // the 256 byte floor, specials, off-graph words — have all-zero adjacency rows, so the
+        // truncated SVD assigns them ARBITRARY null-space directions in lm_head that can win the
+        // argmax (king→GJjJj, water→RRRR). Zero their lm_head row so the readout can only emit
+        // witnessed continuations. (embed is left intact — they still tokenize as inputs.)
+        {
+            var isContinuation = new bool[vocab];
+            foreach (var y in A.Cols) if (y >= 0 && y < vocab) isContinuation[y] = true;
+            // For the WORD model, byte/punctuation tokens are valid INPUTS but must never be a
+            // PREDICTED next-token: they are continuation HUBS (<0x49>='I', <0x2E>='.') that
+            // collapse the readout to one direction in llama.cpp. Suppress them; word tokens only.
+            var isByte = new bool[vocab];
+            if (!grapheme) foreach (var t in tokens) if (t.TokenId >= 0 && t.TokenId < vocab && t.IsByteLevel) isByte[t.TokenId] = true;
+            int suppressed = 0;
+            for (int y = 0; y < vocab; y++)
+                if (!isContinuation[y] || isByte[y]) { for (int c = 0; c < dModel; c++) lmHead[(long)y * dModel + c] = 0; suppressed++; }
+            Console.WriteLine($"  suppressed {suppressed:N0}/{vocab:N0} non-continuation + byte tokens from lm_head (word continuations only)");
+        }
+
+        // ── ACCEPTANCE GATE (in-process, BEFORE the cast) ───────────────────────────────────
+        // The cast's logits[Y|X] rank EXACTLY as lm_head[Y]·embed[X] (the no-op layers pass the
+        // embedding through; the final RMSNorm is a positive per-X scalar that cannot change the
+        // argmax/order over Y). So we can SCORE the model here, without llama.cpp: for each probe
+        // token X, the reconstructed top continuations must reproduce the substrate's own raw
+        // rated adjacency A[X,·] (the ground truth dog→teeth/animal). Overlap is the gate.
+        {
+            var id2surf = new string[vocab];
+            var surf2id = new Dictionary<string, int>(StringComparer.Ordinal);
+            foreach (var t in tokens)
+            {
+                if (t.TokenId < 0 || t.TokenId >= vocab) continue;
+                string s = t.RawToken.StartsWith('▁') ? t.RawToken[1..] : t.RawToken;
+                id2surf[t.TokenId] = s;
+                if (s.Length > 0 && !surf2id.ContainsKey(s)) surf2id[s] = t.TokenId;
+            }
+            // raw-A ground truth: subject ordinal → top objects by weight
+            var rawTop = new Dictionary<int, List<int>>();
+            {
+                var byX = new Dictionary<int, List<(int Y, double W)>>();
+                for (long e = 0; e < A.Nnz; e++)
+                {
+                    int x = A.Rows[e];
+                    if (!byX.TryGetValue(x, out var l)) byX[x] = l = new();
+                    l.Add((A.Cols[e], A.Vals[e]));
+                }
+                foreach (var (x, l) in byX)
+                {
+                    l.Sort((a, b) => b.W.CompareTo(a.W));
+                    rawTop[x] = l.Take(10).Select(p => p.Y).ToList();
+                }
+            }
+            string[] probes = { "dog", "king", "water", "fire", "man", "city", "tree", "food", "house", "river" };
+            int gatePass = 0, gateTotal = 0;
+            Console.WriteLine("  ── acceptance gate: reconstructed continuation vs raw adjacency (ground truth) ──");
+            foreach (var p in probes)
+            {
+                if (!surf2id.TryGetValue(p, out int x) || !rawTop.TryGetValue(x, out var truth) || truth.Count == 0)
+                    continue;
+                gateTotal++;
+                // reconstructed top-5: argmax_Y lm_head[Y]·embed[X]
+                long xo = (long)x * dModel;
+                var scored = new (int Y, double L)[vocab];
+                for (int y = 0; y < vocab; y++)
+                {
+                    long yo = (long)y * dModel; double dot = 0;
+                    for (int c = 0; c < dModel; c++) dot += embed[xo + c] * lmHead[yo + c];
+                    scored[y] = (y, dot);
+                }
+                Array.Sort(scored, (a, b) => b.L.CompareTo(a.L));
+                var recon = scored.Take(5).Select(s => s.Y).ToList();
+                int overlap = recon.Count(y => truth.Contains(y));
+                if (overlap >= 1) gatePass++;
+                string Render(IEnumerable<int> ids) => string.Join(", ",
+                    ids.Select(y => (y >= 0 && y < vocab ? id2surf[y] : null) ?? $"#{y}"));
+                Console.WriteLine($"    {p,-8} recon[{Render(recon)}]  vs truth[{Render(truth.Take(5))}]  overlap={overlap}/5");
+            }
+            string verdict = gateTotal == 0 ? "NO PROBES IN VOCAB"
+                : gatePass >= (gateTotal + 1) / 2 ? $"PASS ({gatePass}/{gateTotal} probes reproduce ≥1 top edge)"
+                : $"WEAK ({gatePass}/{gateTotal}) — rank {dModel} under-captures the adjacency; raise --dim";
+            Console.WriteLine($"  ── gate verdict: {verdict} ──");
+        }
+
+        var gguf = SynthInterop.GgufWriterCreate(outputPath);
+        if (gguf == IntPtr.Zero) return Fail($"gguf_writer_create failed for {outputPath}");
+        WriteGgufMetadata(gguf, recipe, tokens, modelDir, byteBpe: !grapheme);   // word → byte-level BPE; grapheme → SPM
+        var swW = Stopwatch.StartNew();
+        for (int i = 0; i < tensorCount; i++)
+        {
+            string name; ulong rows, cols; int dtype;
+            unsafe
+            {
+                var sp = specs[i];
+                name  = Marshal.PtrToStringUTF8((IntPtr)sp.Name) ?? "";
+                rows  = sp.Rank >= 1 ? sp.Shape[0] : 1;
+                cols  = sp.Rank >= 2 ? sp.Shape[1] : 1;
+                dtype = 0;   // F32 only — 14900KS has AVX-512 fused off; bf16 has no fast path and crushes the ~0.02 embed deltas
+            }
+            int tr = (int)rows, tc = (int)Math.Max(1UL, cols);
+            var vals = new float[(long)tr * tc];   // zero-initialized = the no-op layer fill
+
+            if (name == "model.embed_tokens.weight")
+            {
+                // embed[X,c] = U[X,c]·√S  (rows = vocab, cols = dim)
+                for (int r = 0; r < tr; r++)
+                    for (int c = 0; c < tc; c++)
+                        vals[(long)r * tc + c] = (float)embed[(long)r * dModel + c];
+            }
+            else if (name == "lm_head.weight")
+            {
+                // lm_head[Y,c] = V[Y,c]·√S  (rows = vocab, cols = dim)
+                for (int r = 0; r < tr; r++)
+                    for (int c = 0; c < tc; c++)
+                        vals[(long)r * tc + c] = (float)lmHead[(long)r * dModel + c];
+            }
+            else if (name == "model.norm.weight"
+                     || name.EndsWith("input_layernorm.weight", StringComparison.Ordinal)
+                     || name.EndsWith("post_attention_layernorm.weight", StringComparison.Ordinal))
+            {
+                Array.Fill(vals, 1.0f);
+            }
+            else if (name.StartsWith("model.layers.", StringComparison.Ordinal))
+            {
+                int layerDot = name.IndexOf('.', "model.layers.".Length);
+                string rest = name[(layerDot + 1)..];
+                // recognized no-op slots stay zero; an unknown layer tensor is a hard error
+                switch (rest)
+                {
+                    case "self_attn.q_proj.weight": case "self_attn.k_proj.weight":
+                    case "self_attn.v_proj.weight": case "self_attn.o_proj.weight":
+                    case "mlp.gate_proj.weight":    case "mlp.up_proj.weight":
+                    case "mlp.down_proj.weight":    break;   // zero (no-op)
+                    default:
+                        Console.WriteLine($"  faithful foundry does not define mold tensor '{name}'");
+                        SynthInterop.GgufWriterFree(gguf); return 3;
+                }
+            }
+            else
+            {
+                Console.WriteLine($"  faithful foundry does not define mold tensor '{name}'");
+                SynthInterop.GgufWriterFree(gguf); return 3;
+            }
+
+            byte[] tensorBytes = dtype == 0 ? FoundryExport.ToF32Bytes(vals) : FoundryExport.ToBf16Bytes(vals);
+            nuint[] ggufDims = cols > 1 ? [(nuint)cols, (nuint)rows] : [(nuint)rows];
+            unsafe
+            {
+                fixed (nuint* dimsPtr = ggufDims)
+                fixed (byte*  dataPtr = tensorBytes)
+                    SynthInterop.GgufWriterAddTensor(gguf, HfToGgmlName(name), dtype, dimsPtr, (nuint)ggufDims.Length, dataPtr);
+            }
+        }
+        int rcw = SynthInterop.GgufWriterFinalize(gguf);
+        SynthInterop.GgufWriterFree(gguf);
+        if (rcw != 0) return Fail($"gguf_writer_finalize failed (rc={rcw}) for {outputPath}");
+        long fsz = new FileInfo(outputPath).Length;
+        Console.WriteLine($"FAITHFUL synthesis complete: {outputPath} ({fsz / 1048576.0:F0} MB) in {swW.Elapsed.TotalSeconds:F1}s");
+        return 0;
+    }
 
     private static string? RejectRetiredFoundryEnvVars()
     {
