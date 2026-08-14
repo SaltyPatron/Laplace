@@ -54,7 +54,7 @@ def substrate_fingerprint(api: str) -> dict:
 
 def seeded_sources(api: str) -> list[str]:
     """Which sources are ingested. THIS is what decides comparability."""
-    rows = op_rows(api, "source_status", max_rows=2000)
+    rows = op_rows(api, "ops.source_status", max_rows=2000)
     return sorted(
         str(row["source"]).strip()
         for row in rows
@@ -212,7 +212,7 @@ HEX_ID_RE = re.compile(r"^[0-9a-f]{16,32}\W*$")
 def entity_type_names(api: str) -> set[str]:
     """The substrate's own entity-type roster, so the leak check is not a
     hardcoded list that drifts the moment a type is added."""
-    rows = op_rows(api, "entity_type_counts_approx", max_rows=1000)
+    rows = op_rows(api, "ops.entity_type_counts_approx", max_rows=1000)
     return {str(row["type"]).strip() for row in rows if str(row.get("type", "")).strip()}
 
 
