@@ -1,0 +1,39 @@
+-- ops.index_health — the invalid-index question as a permanent surface.
+--
+-- Born 2026-08-13: the cycle-shell incident left all 28 partitioned-parent
+-- secondaries as empty invalid shells while every row count read green, and
+-- the diagnosis was ad-hoc psql against pg_index — typed by hand, thrown
+-- away, re-typed. A health question this load-bearing must be an installed
+-- operation reachable from every surface (CLI, API, MCP `op`, psql), not a
+-- query someone has to know to write. check-substrate-floor.sh asks the same
+-- question in shell; this is the one implementation the shell can migrate to.
+--
+-- Returns one row per NON-VALID index in the extension's schemas (empty set =
+-- healthy), plus leaf coverage for partitioned parents so a shell (leaves=0)
+-- is distinguishable from a mid-build (indisvalid=false, leaves>0).
+-- LANGUAGE sql, not BEGIN ATOMIC: the body reads catalogs whose OIDs must be
+-- resolved per call, and @extschema@ substitution does not apply to pg_catalog.
+DROP FUNCTION IF EXISTS ops.index_health();
+CREATE OR REPLACE FUNCTION ops.index_health()
+    RETURNS TABLE(index_name text, table_name text, valid boolean,
+                  is_partitioned_parent boolean, leaf_count bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+    AS $fn$
+    SELECT c.relname::text,
+           t.relname::text,
+           i.indisvalid,
+           t.relkind = 'p',
+           (SELECT count(*) FROM pg_inherits h WHERE h.inhparent = i.indexrelid)
+    FROM pg_index i
+    JOIN pg_class c ON c.oid = i.indexrelid
+    JOIN pg_class t ON t.oid = i.indrelid
+    WHERE t.relnamespace IN ('laplace'::regnamespace, 'realize'::regnamespace,
+                             'consensus'::regnamespace, 'generation'::regnamespace)
+      AND NOT i.indisvalid
+    ORDER BY t.relname, c.relname;
+$fn$;
+
+COMMENT ON FUNCTION ops.index_health() IS
+    'Every non-valid index in the substrate schemas (empty set = healthy). '
+    'leaf_count 0 on a partitioned parent = the 2026-08-13 shell class: '
+    'present in the catalog, unusable for reads, invisible to row counts.';
