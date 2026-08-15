@@ -4,41 +4,42 @@
 DROP FUNCTION IF EXISTS laplace.lexical_peers(bytea);
 CREATE OR REPLACE FUNCTION lexical.lexical_peers(p_word bytea)
     RETURNS bytea[]
-    LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$
-    -- WIDENING IS A FALLBACK, NOT A FIRST STEP.
+    LANGUAGE plpgsql STABLE STRICT PARALLEL SAFE AS $$
+DECLARE
+    v bytea[];
+BEGIN
+    -- WIDENING IS A FALLBACK, AND plpgsql IS WHAT MAKES IT ONE.
     --
-    -- dog, Dog and DOG are DIFFERENT CONTENT, so they are different hashes and
-    -- different entities -- laplace.word_id('dog') = 01cdcce1..., laplace.word_id('Dog') =
-    -- af1513f0..., equal = false. Merging them asserts an equivalence the identity
-    -- scheme denies, and case folding only exists in bicameral scripts, so it is a
-    -- Latin-script text-preprocessing convention, not a property of this substrate.
-    -- Where the relationship is real the graph already witnesses it: dog and Dog
-    -- carry an attested IS_SYNONYM_OF edge.
+    -- dog, Dog and DOG are DIFFERENT CONTENT, so different hashes and different
+    -- entities (laplace.word_id('dog') = 01cdcce1..., word_id('Dog') = af1513f0...).
+    -- Merging them asserts an equivalence the identity scheme denies, and case folding
+    -- exists only in bicameral scripts. Where the relation is real the graph attests it:
+    -- dog and Dog carry an IS_SYNONYM_OF edge.
     --
-    -- The previous body widened UNCONDITIONALLY, so every caller paid the case-variant
-    -- routine whether or not the exact word resolved. Measured live in
-    -- laplace.pg_stat_statements: this body 11,964 calls / 96 ms mean / 1,146 s, and the
-    -- native lexical.word_case_variants it calls 12,303 calls / 96 ms / 1,179 s, whose own
-    -- inner `SELECT u.id, realize.render_text(u.id) FROM unnest($1)` is another 12,223
-    -- calls / 88 ms / 1,081 s. Measured on 20 common words, ALL 20 resolve exactly --
-    -- they carry HAS_SENSE-family edges on their own id -- and the old body returned 3
-    -- peers for every one. The widening fired 100% of the time and was needed 0%.
+    -- THIS WAS WRITTEN IN SQL FIRST AND THE GUARD DID NOT HOLD. A `CASE WHEN exists
+    -- THEN ARRAY[p_word] ELSE (widening) END` returns the right ANSWER but still does
+    -- the WORK: the sub-SELECT in the ELSE is hoisted to an InitPlan and evaluated
+    -- unconditionally. Verified by call count -- lexical_peers(word_id('dog')), which
+    -- resolves exactly and returns one peer, still invoked lexical.word_case_variants
+    -- once. Rewriting the guard as `WHERE NOT EXISTS (...)` on the widening arm did not
+    -- help either; the set-returning function was still invoked. plpgsql IF is the
+    -- construct that actually skips it.
     --
-    -- Now the exact id is tried first: an indexed (subject_id, type_id) probe that
-    -- prunes to ONE leaf. Only when the exact content witnesses no sense does the
-    -- fallback widen to case variants, which is where "we did not find anything, try
-    -- the variants" belongs.
-    SELECT CASE
-        WHEN EXISTS (SELECT 1 FROM laplace.consensus c
-                      WHERE c.subject_id = p_word
-                        AND c.type_id = ANY (consensus.relation_family_ids('HAS_SENSE')))
-        THEN ARRAY[p_word]
-        ELSE (
-            WITH merged AS (
-                SELECT p_word AS id
-                UNION SELECT unnest(lexical.word_case_variant_ids(p_word)) AS id
-            )
-            SELECT COALESCE(array_agg(DISTINCT id ORDER BY id), ARRAY[p_word])
-            FROM merged WHERE id IS NOT NULL)
-    END
-$$;
+    -- What that call costs, measured in laplace.pg_stat_statements on one
+    -- converse.prompt_coherence('the capital of France is'): word_case_variants 5 calls /
+    -- 98.5 ms mean, and the per-id realize.render_text inside it another 5 / 88.4 ms --
+    -- ~934 ms, about half that function, for five tokens that all resolve exactly.
+    IF EXISTS (SELECT 1 FROM laplace.consensus c
+                WHERE c.subject_id = p_word
+                  AND c.type_id = ANY (consensus.relation_family_ids('HAS_SENSE')))
+    THEN
+        RETURN ARRAY[p_word];
+    END IF;
+
+    SELECT COALESCE(array_agg(DISTINCT id ORDER BY id), ARRAY[p_word])
+      INTO v
+      FROM (SELECT p_word AS id
+            UNION SELECT unnest(lexical.word_case_variant_ids(p_word)) AS id) m
+     WHERE id IS NOT NULL;
+    RETURN v;
+END $$;

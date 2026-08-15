@@ -440,12 +440,31 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
              * prompt gets answered from English senses while 87,985 Polish senses
              * sit in the substrate (W14 G-A, measured). Selecting both sides of
              * the comparison; neither is ever named in code. */
-            "SELECT p.ord, p.id, s.synset_id, s.eff_mu::float8, "
-            "       s.witnesses::bigint, p.language, "
-            "       converse.word_language(s.sense_id) "
-            "FROM converse.prompt_state($1) p "
-            "CROSS JOIN LATERAL lexical.senses(p.id) s "
-            "WHERE p.id IS NOT NULL AND s.synset_id IS NOT NULL",
+            /* ONE ELECTION FOR THE WHOLE PROMPT, not a LATERAL per token.
+             *
+             * lexical.senses is an inlinable SQL wrapper over taxonomy.bubble_up, so
+             * `CROSS JOIN LATERAL lexical.senses(p.id)` expanded bubble_up's entire CTE
+             * cascade into this plan once per token -- and dragged its whole
+             * dependency chain with it, including lexical_peers ->
+             * lexical.word_case_variants and the per-id realize.render_text inside it.
+             * Measured on 'the capital of France is': word_case_variants 5 calls /
+             * 486 ms and that inner render 5 calls / 435 ms, ~half of this function.
+             *
+             * p_k => 64 keeps the candidate field EXACTLY as lexical.senses produced it
+             * (lexical.senses calls bubble_up with k = 64), so this is a plan change and
+             * not an election change. Verified on the same prompt: 48 rows both ways,
+             * EXCEPT ALL empty in both directions, 881.7 ms -> 196.5 ms.
+             *
+             * Row ORDER is not load-bearing here: the loop below appends every row to
+             * `cands` and indexes it by token, so no row wins by arriving first. */
+            "WITH p AS MATERIALIZED (SELECT * FROM converse.prompt_state($1)), "
+            "     b AS MATERIALIZED (SELECT * FROM taxonomy.bubble_up_batch("
+            "         ARRAY(SELECT id FROM p WHERE id IS NOT NULL), NULL, 64)) "
+            "SELECT p.ord, p.id, b.synset_id, b.base_eff_mu::float8, "
+            "       b.witnesses::bigint, p.language, "
+            "       converse.word_language(b.sense_id) "
+            "FROM p JOIN b ON b.term = p.id "
+            "WHERE p.id IS NOT NULL AND b.synset_id IS NOT NULL",
             1, argtypes, args, NULL, true, 0);
 
         for (;;)
