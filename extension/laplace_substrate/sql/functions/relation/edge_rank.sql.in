@@ -1,7 +1,8 @@
 DROP FUNCTION IF EXISTS laplace.edge_rank(bytea, numeric);
 CREATE OR REPLACE FUNCTION consensus.edge_rank(p_type bytea, p_eff_mu numeric)
     RETURNS double precision
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     -- The single salience-weighted edge ranking used by every consensus read:
     -- relation-type salience rank times the edge's confidence (eff_mu, scaled
     -- back to the /1e9 unit). Was copy-pasted verbatim into 8 ORDER BY clauses
@@ -20,5 +21,5 @@ CREATE OR REPLACE FUNCTION consensus.edge_rank(p_type bytea, p_eff_mu numeric)
     -- (a STRICT SQL function is not inlined when its args aren't provably
     -- non-null); NULL still propagates identically through relation_rank_resolved
     -- (itself STRICT) and the multiply, so dropping STRICT is semantically free.
-    SELECT consensus.relation_rank_resolved(p_type) * (p_eff_mu / 1e9)
-$$;
+    SELECT consensus.relation_rank_resolved(p_type) * (p_eff_mu / 1e9);
+END;

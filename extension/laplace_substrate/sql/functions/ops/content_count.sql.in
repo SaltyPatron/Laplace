@@ -6,7 +6,7 @@ DROP FUNCTION IF EXISTS laplace.content_count(bytea);
 CREATE OR REPLACE FUNCTION ops.content_count(p_source bytea DEFAULT NULL)
     RETURNS bigint
     LANGUAGE sql STABLE
-AS $$
+BEGIN ATOMIC
     SELECT CASE
         WHEN p_source IS NULL THEN
             (SELECT count(*) FROM laplace.v_word_points)
@@ -20,5 +20,5 @@ AS $$
                    WHERE a.source_id = p_source) s
              WHERE EXISTS (SELECT 1 FROM laplace.v_word_points w
                            WHERE w.id = s.subject_id))
-    END
-$$;
+    END;
+END;

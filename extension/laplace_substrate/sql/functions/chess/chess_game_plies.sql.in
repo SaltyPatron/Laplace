@@ -4,7 +4,8 @@ DROP FUNCTION IF EXISTS laplace.chess_game_plies(bytea);
 CREATE OR REPLACE FUNCTION chess.game_plies(p_event bytea)
     RETURNS TABLE(ply integer, position_id bytea, san text, clock text,
                   eval_token text, think_class text, move_quality text)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     -- A playing read back as LOOKUPS (GH #736). The parameter is the playing-EVENT
     -- handle; hop 1 follows (event, PLAYS_LINE, line) to the game CONTENT. Every
     -- per-ply fact is already an attestation keyed by context -- the EVENT for
@@ -105,5 +106,5 @@ CREATE OR REPLACE FUNCTION chess.game_plies(p_event bytea)
     LEFT JOIN surface_text ev ON ev.id = p.eval_id
     LEFT JOIN surface_text th ON th.id = p.think_id
     LEFT JOIN surface_text mq ON mq.id = p.quality_id
-    ORDER BY l.ordinal
-$$;
+    ORDER BY l.ordinal;
+END;

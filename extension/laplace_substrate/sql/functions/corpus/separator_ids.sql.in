@@ -30,7 +30,8 @@
 DROP FUNCTION IF EXISTS laplace.separator_ids();
 CREATE OR REPLACE FUNCTION generation.separator_ids()
     RETURNS bytea[]
-    LANGUAGE sql STABLE AS $$
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
     -- THE CLUSTER ARM IS A HASH, NOT A SEARCH.
     --
     -- A separator-only grapheme cluster is alphabet-bounded, so it does not have to
@@ -72,5 +73,5 @@ CREATE OR REPLACE FUNCTION generation.separator_ids()
         SELECT id FROM atoms
         UNION
         SELECT laplace.word_id(chr(13) || chr(10))
-    ) s
-$$;
+    ) s;
+END;

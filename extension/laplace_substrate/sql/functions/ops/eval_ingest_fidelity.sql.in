@@ -20,7 +20,7 @@ CREATE OR REPLACE FUNCTION ops.eval_pair_plane_score(
     p_w1 bytea, p_w2 bytea, p_type bytea)
     RETURNS float8
     LANGUAGE sql STABLE PARALLEL SAFE
-    AS $$
+BEGIN ATOMIC
     SELECT GREATEST(
         -- type_id and subject_id are the partition keys and both are in hand. Filtering
         -- on c.id alone prunes nothing across the 216 leaves; with them it is one leaf
@@ -33,8 +33,8 @@ CREATE OR REPLACE FUNCTION ops.eval_pair_plane_score(
         COALESCE((SELECT consensus.eff_mu_display(c.rating, c.rd)
                   FROM laplace.consensus c
                   WHERE c.id = laplace.consensus_id(p_w2, p_type, p_w1)
-                    AND c.type_id = p_type AND c.subject_id = p_w2), 0))::float8
-$$;
+                    AND c.type_id = p_type AND c.subject_id = p_w2), 0))::float8;
+END;
 
 -- POSITIVES: pairs the ground-truth relation grounds together (two surfaces sharing
 -- a sense), scored on the plane relation. p_relation names the plane; p_ground_truth
@@ -43,7 +43,7 @@ CREATE OR REPLACE FUNCTION ops.eval_ingest_fidelity_positives(
     p_relation text, p_ground_truth text, p_limit int DEFAULT 200)
     RETURNS TABLE(score float8)
     LANGUAGE sql STABLE
-    AS $$
+BEGIN ATOMIC
     WITH vocab AS (
         SELECT subject_id AS id FROM consensus.subjects_of_type(p_relation)
     ),
@@ -62,8 +62,8 @@ CREATE OR REPLACE FUNCTION ops.eval_ingest_fidelity_positives(
     )
     SELECT ops.eval_pair_plane_score(
                p.w1, p.w2, laplace.relation_type_id(p_relation))
-    FROM (SELECT w1, w2 FROM pairs ORDER BY random() LIMIT p_limit) p
-$$;
+    FROM (SELECT w1, w2 FROM pairs ORDER BY random() LIMIT p_limit) p;
+END;
 
 -- NEGATIVES: pairs drawn with no grounding relation between them, from the same
 -- vocabulary, on the same plane -- the null distribution the positives are measured
@@ -75,7 +75,7 @@ CREATE OR REPLACE FUNCTION ops.eval_ingest_fidelity_negatives(
     p_relation text, p_limit int DEFAULT 200)
     RETURNS TABLE(score float8)
     LANGUAGE sql STABLE
-    AS $$
+BEGIN ATOMIC
     WITH vocab AS (
         SELECT subject_id AS id FROM consensus.subjects_of_type(p_relation)
     ),
@@ -87,5 +87,5 @@ CREATE OR REPLACE FUNCTION ops.eval_ingest_fidelity_negatives(
     )
     SELECT ops.eval_pair_plane_score(
                p.w1, p.w2, laplace.relation_type_id(p_relation))
-    FROM (SELECT w1, w2 FROM neg ORDER BY random() LIMIT p_limit) p
-$$;
+    FROM (SELECT w1, w2 FROM neg ORDER BY random() LIMIT p_limit) p;
+END;

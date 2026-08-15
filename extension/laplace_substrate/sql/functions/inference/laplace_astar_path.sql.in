@@ -5,7 +5,8 @@ CREATE OR REPLACE FUNCTION generation.astar_path(
     p_max_depth integer DEFAULT 20,
     p_use_geometry bool DEFAULT false)
 RETURNS TABLE(step integer, entity_id bytea, g float8)
-LANGUAGE sql STABLE AS $$
+LANGUAGE sql STABLE
+BEGIN ATOMIC
     SELECT step, entity_id, g
     FROM converse.astar_path_raw(
         p_source,
@@ -13,5 +14,5 @@ LANGUAGE sql STABLE AS $$
         p_type_ids,
         p_max_depth,
         false,
-        p_use_geometry)
-$$;
+        p_use_geometry);
+END;

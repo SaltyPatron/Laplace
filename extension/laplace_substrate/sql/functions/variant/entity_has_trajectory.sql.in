@@ -1,9 +1,10 @@
 DROP FUNCTION IF EXISTS laplace.entity_has_trajectory(bytea);
 CREATE OR REPLACE FUNCTION generation.entity_has_trajectory(p_entity bytea)
     RETURNS boolean
-    LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE
+BEGIN ATOMIC
     SELECT EXISTS (
         SELECT 1 FROM laplace.v_word_points w
         WHERE w.id = p_entity AND w.trajectory IS NOT NULL
-    )
-$$;
+    );
+END;

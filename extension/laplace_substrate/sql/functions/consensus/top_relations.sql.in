@@ -2,7 +2,8 @@ DROP FUNCTION IF EXISTS laplace.top_relations(integer, bytea);
 CREATE OR REPLACE FUNCTION consensus.top_relations(p_limit integer DEFAULT 50, p_type bytea DEFAULT NULL)
     RETURNS TABLE(subject_id bytea, type_id bytea, object_id bytea, eff_mu numeric, witnesses bigint)
 -- No SET search_path — blocks inlining, costs the consensus index path. GH #860.
-    LANGUAGE sql STABLE AS $$
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
     -- Issue 52: consensus.edge_rank() per row over ALL consensus before LIMIT measured >9min at
     -- 124M rows and killed three endpoints. Bounded-candidate form, same ranking law:
     -- consensus_eff_mu_btree serves a top-M head by raw consensus.eff_mu; consensus.edge_rank(salience
@@ -30,5 +31,5 @@ CREATE OR REPLACE FUNCTION consensus.top_relations(p_limit integer DEFAULT 50, p
     SELECT u.subject_id, u.type_id, u.object_id, u.eff_mu, u.witness_count
     FROM (SELECT * FROM pool UNION ALL SELECT * FROM typed) u
     ORDER BY consensus.edge_rank(u.type_id, u.eff_mu_raw) DESC, u.witness_count DESC
-    LIMIT p_limit
-$$;
+    LIMIT p_limit;
+END;

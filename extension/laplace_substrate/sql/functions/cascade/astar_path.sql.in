@@ -4,7 +4,8 @@ CREATE OR REPLACE FUNCTION converse.astar_path(
     p_types bytea[] DEFAULT NULL, p_directed bool DEFAULT false,
     p_use_geometry bool DEFAULT false)
     RETURNS TABLE(step int, entity_id bytea, g double precision)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     SELECT * FROM converse.astar_path_raw(p_start, p_goals,
         COALESCE(p_types, ARRAY[
             laplace.relation_type_id('IS_A'), laplace.relation_type_id('IS_INSTANCE_OF'), laplace.relation_type_id('IS_SYNONYM_OF'),
@@ -12,5 +13,5 @@ CREATE OR REPLACE FUNCTION converse.astar_path(
             laplace.relation_type_id('HAS_SUBSTANCE'), laplace.relation_type_id('DERIVATIONALLY_RELATED'),
             laplace.relation_type_id('PERTAINS_TO'), laplace.relation_type_id('ALSO_SEE'), laplace.relation_type_id('IS_ANTONYM_OF'),
             laplace.relation_type_id('HAS_ATTRIBUTE'), laplace.relation_type_id('IN_VERB_GROUP_WITH')]),
-        p_max_depth, p_directed, p_use_geometry)
-$$;
+        p_max_depth, p_directed, p_use_geometry);
+END;

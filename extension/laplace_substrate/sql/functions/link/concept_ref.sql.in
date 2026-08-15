@@ -1,7 +1,8 @@
 DROP FUNCTION IF EXISTS laplace.concept_ref(text);
 CREATE OR REPLACE FUNCTION lexical.concept_ref(p_ref text)
     RETURNS bytea
-    LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE
+BEGIN ATOMIC
     -- Resolve an external concept identifier to its content-addressed anchor
     -- entity, so callers can link things by ILI / WordNet synset key / frame
     -- name. Every shape is keyed off the SAME content hash the ingest
@@ -30,5 +31,5 @@ CREATE OR REPLACE FUNCTION lexical.concept_ref(p_ref text)
                   ORDER BY consensus.eff_mu(c.rating, c.rd) DESC, c.subject_id
                   LIMIT 1)
         ELSE laplace.word_id((SELECT r FROM norm))
-    END
-$$;
+    END;
+END;

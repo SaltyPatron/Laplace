@@ -39,7 +39,7 @@ CREATE OR REPLACE FUNCTION chess.opening_games(p_opening text,
     RETURNS TABLE(line_id bytea, event_id bytea, times_played bigint,
                   eff_mu double precision)
     LANGUAGE sql STABLE PARALLEL SAFE
- AS $$
+BEGIN ATOMIC
 WITH claim AS MATERIALIZED (
     -- Line-grain, context_id NULL by design: every playing asserting the same opening for
     -- the same line MERGES into one evidence row whose observation count accumulates
@@ -74,5 +74,5 @@ LEFT JOIN fold f ON f.line = g.line
 ORDER BY f.witness_count DESC NULLS LAST,
          consensus.eff_mu(f.rating, f.rd) DESC NULLS LAST,
          g.line, g.event
-LIMIT p_limit OFFSET p_offset
-$$;
+LIMIT p_limit OFFSET p_offset;
+END;

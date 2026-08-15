@@ -2,7 +2,8 @@
 DROP FUNCTION IF EXISTS laplace._realize_translation(bytea, bytea);
 CREATE OR REPLACE FUNCTION realize._translation(p_id bytea, p_lang bytea DEFAULT NULL)
     RETURNS text
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     -- RANK FIRST, THEN RENDER ONCE FOR ALL CANDIDATES.
     -- The `s <> ''` filter means an unrenderable candidate must fall through to the
     -- next, so the surface cannot be dropped from the decision -- but it does not have
@@ -31,5 +32,5 @@ CREATE OR REPLACE FUNCTION realize._translation(p_id bytea, p_lang bytea DEFAULT
     FROM ranked r CROSS JOIN lbl l
     WHERE l.s[r.rn] IS NOT NULL AND l.s[r.rn] <> ''
     ORDER BY r.rn
-    LIMIT 1
-$$;
+    LIMIT 1;
+END;

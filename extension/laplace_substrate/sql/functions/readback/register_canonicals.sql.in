@@ -1,8 +1,9 @@
 DROP FUNCTION IF EXISTS laplace.register_canonicals(text[]);
 CREATE OR REPLACE FUNCTION realize.register_canonicals(p_names text[]) RETURNS bigint
-    LANGUAGE sql AS $$
+    LANGUAGE sql
+BEGIN ATOMIC
     INSERT INTO laplace.canonical_names (id, name)
     SELECT realize.canonical_id(n), n FROM unnest(p_names) AS n
     ON CONFLICT (id) DO NOTHING;
-    SELECT count(*)::bigint FROM unnest(p_names)
-$$;
+    SELECT count(*)::bigint FROM unnest(p_names);
+END;

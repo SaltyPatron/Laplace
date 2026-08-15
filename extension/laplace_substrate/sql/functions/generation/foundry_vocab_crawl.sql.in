@@ -3,7 +3,8 @@ CREATE OR REPLACE FUNCTION generation.foundry_vocab_crawl(
         p_seeds text[], p_max int DEFAULT 32000, p_hops int DEFAULT 3, p_fanout int DEFAULT 64,
         p_rank_floor float8 DEFAULT 0.5)
     RETURNS TABLE(entity_id bytea, surface text, weight bigint)
-    LANGUAGE sql VOLATILE AS $$
+    LANGUAGE sql VOLATILE
+BEGIN ATOMIC
     WITH seed_ids AS (
         SELECT coalesce(array_agg(wid), '{}'::bytea[]) AS ids
         FROM (SELECT laplace.word_id(s) AS wid FROM unnest(p_seeds) AS s) q
@@ -112,7 +113,7 @@ CREATE OR REPLACE FUNCTION generation.foundry_vocab_crawl(
                   -- 256MB can never expand (XX000 invalid memory alloc) — and a
                   -- document that size carries no word-frequency signal its
                   -- sentences don't already carry 400k times over.
-                  AND octet_length(w.trajectory) <= 268435456
+                  AND octet_length(w.trajectory::bytea) <= 268435456
                 ORDER BY w.id, w.physicality_id LIMIT 400000
             ) t
             CROSS JOIN LATERAL laplace_trajectory_constituents(t.trajectory) tc
@@ -155,5 +156,5 @@ CREATE OR REPLACE FUNCTION generation.foundry_vocab_crawl(
           AND n.s !~ '^i[0-9]+$'
         ORDER BY n.s, n.pri DESC, n.weight DESC
     )
-    SELECT c.entity_id, c.s, c.weight FROM clean c ORDER BY c.pri DESC, c.weight DESC LIMIT p_max
-$$;
+    SELECT c.entity_id, c.s, c.weight FROM clean c ORDER BY c.pri DESC, c.weight DESC LIMIT p_max;
+END;

@@ -6,9 +6,10 @@
 DROP FUNCTION IF EXISTS laplace.synset_gloss(bytea);
 CREATE OR REPLACE FUNCTION taxonomy.synset_gloss(p_synset bytea)
     RETURNS text
-    LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE
+BEGIN ATOMIC
     -- ONE BODY (§15). This was byte-identical to realize._defines apart from the
     -- parameter name -- same relation, same ordering, same LIMIT -- two definitions
     -- free to drift. realize._defines ranks in id space and renders the winner once.
-    SELECT realize._defines(p_synset)
-$$;
+    SELECT realize._defines(p_synset);
+END;

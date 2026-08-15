@@ -4,7 +4,8 @@ DROP FUNCTION IF EXISTS laplace.mesh_position(bytea);
 CREATE OR REPLACE FUNCTION structural.mesh_position(p_id bytea)
     RETURNS TABLE(dir text, id bytea, label text, relation text,
                   hub_type text, eff_mu numeric, witnesses bigint)
-    LANGUAGE sql STABLE AS $$
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
     WITH self_hub AS MATERIALIZED (
         SELECT (SELECT t.object_id
                 FROM laplace.consensus t
@@ -67,5 +68,5 @@ CREATE OR REPLACE FUNCTION structural.mesh_position(p_id bytea)
     SELECT r.dir, r.id, n.txt, r.relation,
            COALESCE(r.hub_literal, h.txt), r.eff_mu, r.witnesses
     FROM raw r JOIN labels n ON n.id=r.id LEFT JOIN labels h ON h.id=r.hub_id
-    ORDER BY r.branch, r.ord
-$$;
+    ORDER BY r.branch, r.ord;
+END;

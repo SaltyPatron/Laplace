@@ -52,7 +52,7 @@ CREATE OR REPLACE FUNCTION laplace.identity_law_violations()
 RETURNS TABLE(id bytea, tier smallint, reason text)
 LANGUAGE sql
 STABLE
-    AS $$
+BEGIN ATOMIC
     SELECT e.id, e.tier, 'tier_out_of_range'::text
     FROM laplace.entities e
     WHERE e.tier < 0 OR e.tier >= 256
@@ -84,5 +84,5 @@ STABLE
     -- corpus.
     SELECT DISTINCT e.type_id, NULL::smallint, 'dangling_entity_type'::text
     FROM laplace.entities e
-    WHERE NOT EXISTS (SELECT 1 FROM laplace.entities t WHERE t.id = e.type_id)
-$$;
+    WHERE NOT EXISTS (SELECT 1 FROM laplace.entities t WHERE t.id = e.type_id);
+END;

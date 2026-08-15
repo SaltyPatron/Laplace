@@ -10,7 +10,7 @@ DROP FUNCTION IF EXISTS laplace.recall_fallback_walk(bytea, int);
 CREATE OR REPLACE FUNCTION converse.recall_fallback_walk(p_topic bytea, p_depth int DEFAULT 6)
     RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
- AS $$
+BEGIN ATOMIC
     SELECT realize.path(
                p_topic || array_agg(g.entity_id ORDER BY g.step),
                array_agg(g.type_id ORDER BY g.step),
@@ -19,5 +19,5 @@ CREATE OR REPLACE FUNCTION converse.recall_fallback_walk(p_topic bytea, p_depth 
            min(g.eff_mu),
            NULL::bigint
     FROM consensus.walk_strongest(p_topic, NULL::bytea, p_depth) g
-    HAVING count(*) > 0
-$$;
+    HAVING count(*) > 0;
+END;

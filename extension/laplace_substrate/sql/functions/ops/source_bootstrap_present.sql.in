@@ -11,11 +11,11 @@ DROP FUNCTION IF EXISTS laplace.source_bootstrap_present(bytea, bytea);
 CREATE OR REPLACE FUNCTION ops.source_bootstrap_present(p_source bytea, p_law_type bytea)
     RETURNS boolean
     LANGUAGE sql STABLE
-    AS $$
+BEGIN ATOMIC
     SELECT EXISTS (
         SELECT 1
         FROM laplace.attestations
         WHERE type_id = p_law_type
           AND source_id = p_source
-          AND consensus.relation_canonical(subject_id) IS NOT NULL)
-$$;
+          AND consensus.relation_canonical(subject_id) IS NOT NULL);
+END;

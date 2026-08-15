@@ -1,7 +1,8 @@
 DROP FUNCTION IF EXISTS laplace.recall_describe_response(bytea);
 CREATE OR REPLACE FUNCTION converse.recall_describe_response(p_topic bytea)
     RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     SELECT d.type || ': ' || COALESCE(d.fact, '?'), d.eff_mu, d.witnesses
-    FROM consensus.salient_facts(p_topic, converse.word_language(p_topic)) d
-$$;
+    FROM consensus.salient_facts(p_topic, converse.word_language(p_topic)) d;
+END;

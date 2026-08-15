@@ -16,22 +16,22 @@
 DROP FUNCTION IF EXISTS laplace.chess_has_wdl_type();
 CREATE OR REPLACE FUNCTION chess.has_wdl_type() RETURNS bytea
     LANGUAGE sql STABLE PARALLEL SAFE
- AS $$
-    SELECT laplace.relation_type_id('HAS_WDL')
-$$;
+BEGIN ATOMIC
+    SELECT laplace.relation_type_id('HAS_WDL');
+END;
 
 DROP FUNCTION IF EXISTS laplace.chess_has_dtz_type();
 CREATE OR REPLACE FUNCTION chess.has_dtz_type() RETURNS bytea
     LANGUAGE sql STABLE PARALLEL SAFE
- AS $$
-    SELECT laplace.relation_type_id('HAS_DTZ')
-$$;
+BEGIN ATOMIC
+    SELECT laplace.relation_type_id('HAS_DTZ');
+END;
 
 DROP FUNCTION IF EXISTS laplace.chess_syzygy_line(bytea, int);
 CREATE OR REPLACE FUNCTION chess.syzygy_line(p_line bytea, p_limit int DEFAULT 64)
     RETURNS TABLE(position_id bytea, wdl text, dtz text)
     LANGUAGE sql STABLE
- AS $$
+BEGIN ATOMIC
 WITH rel AS MATERIALIZED (
     SELECT chess.has_wdl_type() AS wdl, chess.has_dtz_type() AS dtz
 ),
@@ -73,5 +73,5 @@ SELECT o.pos, w.txt, d.txt
 FROM ord o
 LEFT JOIN label w ON w.id = o.wdl_id
 LEFT JOIN label d ON d.id = o.dtz_id
-ORDER BY o.ix
-$$;
+ORDER BY o.ix;
+END;

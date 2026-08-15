@@ -1,7 +1,8 @@
 DROP FUNCTION IF EXISTS laplace.examples(bytea, int);
 CREATE OR REPLACE FUNCTION lexical.examples(p_word bytea, p_limit int DEFAULT 5)
     RETURNS TABLE(example text, eff_mu numeric, witnesses bigint)
-    LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE
+BEGIN ATOMIC
     WITH picked AS MATERIALIZED (
         SELECT g.object_id AS object_id,
                consensus.eff_mu_display(g.rating, g.rd) AS eff_mu,
@@ -17,5 +18,5 @@ CREATE OR REPLACE FUNCTION lexical.examples(p_word bytea, p_limit int DEFAULT 5)
     ), batch AS MATERIALIZED (
       SELECT realize.render_text_batch(array_agg(object_id ORDER BY rn), 24) AS txt FROM numbered
     )
-    SELECT b.txt[x.rn], x.eff_mu, x.witnesses FROM numbered x CROSS JOIN batch b ORDER BY x.rn
-$$;
+    SELECT b.txt[x.rn], x.eff_mu, x.witnesses FROM numbered x CROSS JOIN batch b ORDER BY x.rn;
+END;

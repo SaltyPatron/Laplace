@@ -42,7 +42,8 @@ CREATE OR REPLACE FUNCTION consensus.edges(
                   neighbour text, eff_mu numeric, witnesses bigint)
 -- No SET search_path — it blocks inlining and this body wraps consensus.edges_raw(), the
 -- one consensus scan. Every reference is @extschema@-qualified instead. GH #860.
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     WITH ranked AS MATERIALIZED (
         -- The scan is consensus.edges_raw() — the one consensus scan. This function is its
         -- LABELING layer and nothing else: rank/limit happen in the core, labels
@@ -82,8 +83,8 @@ CREATE OR REPLACE FUNCTION consensus.edges(
     JOIN rel ON rel.type_id = k.type_id
     JOIN labels nl ON nl.id=k.nid
     CROSS JOIN lbl
-    ORDER BY k.ord
-$$;
+    ORDER BY k.ord;
+END;
 
 -- Text front door. Every hand-written probe this replaced started by resolving a
 -- word, and getting that wrong (laplace.word_id vs resolve vs resolve_ref) is its own
@@ -96,9 +97,10 @@ CREATE OR REPLACE FUNCTION consensus.edges(
         p_refuted   boolean DEFAULT false)
     RETURNS TABLE(direction text, relation text, neighbour_id bytea,
                   neighbour text, eff_mu numeric, witnesses bigint)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     SELECT e.direction, e.relation, e.neighbour_id, e.neighbour, e.eff_mu, e.witnesses
     FROM consensus.edges(@extschema@.word_id(p_word), p_direction, NULL::bytea[],
                            p_limit, p_refuted,
-                           converse.word_language(laplace.word_id(p_word))) e
-$$;
+                           converse.word_language(laplace.word_id(p_word))) e;
+END;

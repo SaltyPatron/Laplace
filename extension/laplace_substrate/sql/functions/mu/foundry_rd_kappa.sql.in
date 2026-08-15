@@ -10,6 +10,7 @@
 -- drift.
 DROP FUNCTION IF EXISTS laplace.foundry_rd_kappa();
 CREATE OR REPLACE FUNCTION consensus.foundry_rd_kappa()
-    RETURNS double precision LANGUAGE sql LAPLACE_IMMUTABLE AS $$
-    SELECT 1e9::double precision / consensus.glicko2_initial_rd()::double precision
-$$;
+    RETURNS double precision LANGUAGE sql LAPLACE_IMMUTABLE
+BEGIN ATOMIC
+    SELECT 1e9::double precision / consensus.glicko2_initial_rd()::double precision;
+END;

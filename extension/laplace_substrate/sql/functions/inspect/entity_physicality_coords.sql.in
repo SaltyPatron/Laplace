@@ -3,11 +3,12 @@ DROP FUNCTION IF EXISTS ops.entity_physicality_coords(bytea[]);
 CREATE OR REPLACE FUNCTION ops.entity_physicality_coords(p_ids bytea[])
     RETURNS TABLE(entity_id bytea, x double precision, y double precision,
                   z double precision, m double precision)
-    LANGUAGE sql STABLE AS $$
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
     SELECT DISTINCT ON (w.id) w.id AS entity_id,
            ST_X(w.coord), ST_Y(w.coord), ST_Z(w.coord), ST_M(w.coord)
     FROM laplace.v_word_points w
     JOIN unnest(p_ids) AS u(id) ON u.id = w.id
     WHERE w.coord IS NOT NULL
-    ORDER BY w.id, w.physicality_id
-$$;
+    ORDER BY w.id, w.physicality_id;
+END;

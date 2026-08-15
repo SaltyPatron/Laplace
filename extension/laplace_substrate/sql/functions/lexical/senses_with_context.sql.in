@@ -54,7 +54,8 @@ DROP FUNCTION IF EXISTS laplace.senses(bytea, bytea[]);
 CREATE OR REPLACE FUNCTION lexical.senses(p_word bytea, p_context bytea[])
     RETURNS TABLE(sense_id bytea, synset_id bytea, eff_mu numeric, witnesses bigint,
                   score numeric)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     WITH ctx AS MATERIALIZED (
         SELECT DISTINCT t AS id
         FROM unnest(COALESCE(p_context, ARRAY[]::bytea[])) AS t
@@ -199,5 +200,5 @@ CREATE OR REPLACE FUNCTION lexical.senses(p_word bytea, p_context bytea[])
     LEFT JOIN lane_taxon  lt  ON lt.sid  = cand.synset_id
     LEFT JOIN lane_domain ldo ON ldo.sid = cand.synset_id
     LEFT JOIN lane_direct ld  ON ld.sid  = cand.synset_id
-    ORDER BY 5 DESC
-$$;
+    ORDER BY 5 DESC;
+END;

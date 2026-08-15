@@ -16,7 +16,7 @@ CREATE OR REPLACE FUNCTION ops.evidence_receipt(p_id bytea, p_limit integer DEFA
         witness_count bigint,
         source_labels text)
     LANGUAGE sql STABLE
-    AS $$
+BEGIN ATOMIC
     WITH subj(id) AS (
         SELECT p_id
         UNION
@@ -158,5 +158,5 @@ CREATE OR REPLACE FUNCTION ops.evidence_receipt(p_id bytea, p_limit integer DEFA
       AND right(lb.rel, 1) <> U&'\2026'
     ORDER BY consensus.edge_rank(lb.type_id, lb.mu_raw) DESC,
              lb.witness_count DESC
-    LIMIT GREATEST(1, p_limit)
-$$;
+    LIMIT GREATEST(1, p_limit);
+END;

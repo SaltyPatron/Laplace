@@ -37,7 +37,8 @@ DROP FUNCTION IF EXISTS laplace.walk_edge_weight(bigint, bigint, bigint);
 CREATE OR REPLACE FUNCTION consensus.walk_edge_weight(
         p_rating bigint, p_rd bigint, p_witness_count bigint)
     RETURNS double precision
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     SELECT consensus.walk_edge_weight(p_rating, p_rd, p_witness_count,
-                                        consensus.foundry_rd_kappa())
-$$;
+                                        consensus.foundry_rd_kappa());
+END;

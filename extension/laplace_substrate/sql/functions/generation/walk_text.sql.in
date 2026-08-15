@@ -4,7 +4,8 @@ CREATE OR REPLACE FUNCTION generation.walk_text(
         p_spread float8 DEFAULT 0.7, p_breadth int DEFAULT 10,
         p_seed bigint DEFAULT NULL)
     RETURNS TABLE(step int, entity text, stride_used int)
-    LANGUAGE sql VOLATILE AS $$
+    LANGUAGE sql VOLATILE
+BEGIN ATOMIC
     WITH ctx AS (
         SELECT array_agg(id ORDER BY ord) AS ids
         FROM converse.prompt_state(p_prompt) WHERE id IS NOT NULL
@@ -26,5 +27,5 @@ CREATE OR REPLACE FUNCTION generation.walk_text(
     )
     SELECT w.step, t.entities[rn] || COALESCE(t.separators[rn], ''), w.stride_used
     FROM (SELECT w.*, row_number() OVER (ORDER BY step) AS rn FROM walked w) w
-    CROSS JOIN txt t
-$$;
+    CROSS JOIN txt t;
+END;

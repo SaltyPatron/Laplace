@@ -5,7 +5,7 @@ CREATE OR REPLACE FUNCTION consensus.relate_path(p_x bytea, p_y bytea, p_depth i
     LANGUAGE sql STABLE PARALLEL SAFE
     -- No SET search_path (GH #860). Body is purpose-/laplace-qualified; CTE names
     -- (xset/yset/lat/…) are local and need no schema.
-AS $$
+BEGIN ATOMIC
     -- Candidate discovery is id/attestation logic only: every candidate carries
     -- its node/type/direction arrays and numeric score, and the single winner is
     -- picked on (len, mu) before any rendering. realize_path/type_label run
@@ -97,5 +97,5 @@ AS $$
            w.mu AS path_mu,
            CASE WHEN w.plane_type IS NULL THEN 'taxonomy'
                 ELSE lexical.type_label(w.plane_type) END AS plane
-    FROM winner w
-$$;
+    FROM winner w;
+END;

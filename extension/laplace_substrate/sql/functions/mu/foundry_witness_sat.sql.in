@@ -4,6 +4,7 @@
 -- "Tension = certainty" (doc 09): witnessing tightens the strand.
 DROP FUNCTION IF EXISTS laplace.foundry_witness_sat(bigint);
 CREATE OR REPLACE FUNCTION consensus.foundry_witness_sat(p_wc bigint)
-    RETURNS double precision LANGUAGE sql LAPLACE_IMMUTABLE AS $$
-    SELECT p_wc::double precision / (p_wc::double precision + 4.0)
-$$;
+    RETURNS double precision LANGUAGE sql LAPLACE_IMMUTABLE
+BEGIN ATOMIC
+    SELECT p_wc::double precision / (p_wc::double precision + 4.0);
+END;

@@ -2,7 +2,8 @@ DROP FUNCTION IF EXISTS laplace.chess_player_record(bytea);
 CREATE OR REPLACE FUNCTION chess.player_record(p_player bytea)
     RETURNS TABLE(as_white boolean, games bigint, wins bigint, draws bigint,
                   losses bigint, unscored bigint, score double precision)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     -- One player's record, straight off the witnessed game headers. Rides
     -- attestations_rdefault_object_id_idx to find the games he appears in (as
     -- HAS_WHITE or HAS_BLACK), then the (subject_id, type_id, object_id) index
@@ -50,5 +51,5 @@ CREATE OR REPLACE FUNCTION chess.player_record(p_player bytea)
            / NULLIF(count(*) FILTER (WHERE sc.outcome IS NOT NULL), 0)
     FROM scored sc
     GROUP BY GROUPING SETS ((sc.white), ())
-    ORDER BY sc.white NULLS FIRST
-$$;
+    ORDER BY sc.white NULLS FIRST;
+END;

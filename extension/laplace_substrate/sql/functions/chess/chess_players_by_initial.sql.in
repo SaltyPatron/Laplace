@@ -3,7 +3,8 @@ CREATE OR REPLACE FUNCTION chess.players_by_initial(
         p_initial text, p_limit integer DEFAULT 50, p_offset integer DEFAULT 0)
     RETURNS TABLE(player_id bytea, name text, games bigint,
                   rating double precision, rd double precision, eff_mu double precision)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     -- Browse the roster by first letter, WITHOUT rendering a single name.
     --
     -- A player's name is content, and composed content packs its constituent ids into the
@@ -72,5 +73,5 @@ CREATE OR REPLACE FUNCTION chess.players_by_initial(
            consensus.eff_mu_display(rated.rating, rated.rd)::double precision
     FROM rated
     LEFT JOIN surfaced s ON s.id = rated.player
-    ORDER BY consensus.eff_mu(rated.rating, rated.rd) DESC, rated.player
-$$;
+    ORDER BY consensus.eff_mu(rated.rating, rated.rd) DESC, rated.player;
+END;

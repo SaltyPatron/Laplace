@@ -6,7 +6,8 @@ CREATE OR REPLACE FUNCTION chess.game(p_event bytea)
                   result text, played_on text, event text, eco text,
                   termination text, time_control text, tc_class text,
                   movetext text)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     -- One PLAYING, as its source recorded it (GH #736). The parameter is the
     -- playing-EVENT handle; the game CONTENT is the line it plays. Hop 1 follows
     -- the one record edge whose subject is the event -- (event, PLAYS_LINE, line)
@@ -106,5 +107,5 @@ CREATE OR REPLACE FUNCTION chess.game(p_event bytea)
     LEFT JOIN surface_text tc  ON tc.id  = h.tc_id
     LEFT JOIN surface_text tcc ON tcc.id = h.tcc_id
     WHERE h.white_id IS NOT NULL OR h.black_id IS NOT NULL
-       OR h.movetext_id IS NOT NULL
-$$;
+       OR h.movetext_id IS NOT NULL;
+END;

@@ -2,8 +2,8 @@ DROP FUNCTION IF EXISTS laplace.consensus_export_relations_mu(bytea);
 CREATE OR REPLACE FUNCTION structural.consensus_export_relations_mu(p_type_id bytea)
     RETURNS TABLE(subject_id bytea, object_id bytea, eff_mu_fp bigint)
     LANGUAGE sql STABLE
- AS $$
+BEGIN ATOMIC
     SELECT c.subject_id, c.object_id, consensus.eff_mu(c.rating, c.rd)
     FROM laplace.consensus c
-    WHERE c.type_id = p_type_id AND c.object_id IS NOT NULL
-$$;
+    WHERE c.type_id = p_type_id AND c.object_id IS NOT NULL;
+END;

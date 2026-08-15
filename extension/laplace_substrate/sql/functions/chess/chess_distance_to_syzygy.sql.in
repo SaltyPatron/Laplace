@@ -12,7 +12,7 @@ CREATE OR REPLACE FUNCTION chess.distance_to_syzygy(p_line bytea)
         wdl text,
         dtz text)
     LANGUAGE sql STABLE
- AS $$
+BEGIN ATOMIC
 WITH rel AS MATERIALIZED (
     SELECT chess.has_wdl_type() AS wdl, chess.has_dtz_type() AS dtz
 ),
@@ -55,5 +55,5 @@ SELECT h.pos,
        d.txt
 FROM hit h
 LEFT JOIN label w ON w.id = h.wdl_id
-LEFT JOIN label d ON d.id = h.dtz_id
-$$;
+LEFT JOIN label d ON d.id = h.dtz_id;
+END;

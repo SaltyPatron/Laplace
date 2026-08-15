@@ -3,8 +3,9 @@
 DROP FUNCTION IF EXISTS laplace._realize_canonical(bytea);
 CREATE OR REPLACE FUNCTION realize._canonical(p_id bytea)
     RETURNS text
-    LANGUAGE sql STABLE PARALLEL SAFE STRICT AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE STRICT
+BEGIN ATOMIC
     SELECT regexp_replace(n.name, '^substrate/[a-z_]+/(.+)/v1$', '\1')
     FROM laplace.canonical_names n
-    WHERE n.id = p_id AND n.name LIKE 'substrate/%'
-$$;
+    WHERE n.id = p_id AND n.name LIKE 'substrate/%';
+END;

@@ -1,9 +1,10 @@
 DROP FUNCTION IF EXISTS laplace.entity_physicality_coord(bytea);
 CREATE OR REPLACE FUNCTION structural.entity_physicality_coord(p_entity bytea)
     RETURNS geometry
-    LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE
+BEGIN ATOMIC
     SELECT w.coord
     FROM laplace.v_word_points w
     WHERE w.id = p_entity AND w.coord IS NOT NULL
-    LIMIT 1
-$$;
+    LIMIT 1;
+END;

@@ -3,7 +3,8 @@ CREATE OR REPLACE FUNCTION chess.player_moves(
         p_position bytea, p_player bytea, p_as_white boolean,
         p_limit integer DEFAULT 12)
     RETURNS TABLE(next_position bytea, games bigint, score double precision)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     -- Player-scoped repertoire: a PROVENANCE read over evidence, not a fold.
     -- GH #736: MOVE evidence rows carry context_id = the playing-EVENT they
     -- were played in, and the colour facts subject the shared LINE with
@@ -31,5 +32,5 @@ CREATE OR REPLACE FUNCTION chess.player_moves(
               AND g.context_id IS NOT NULL)
     GROUP BY a.object_id
     ORDER BY games DESC
-    LIMIT p_limit
-$$;
+    LIMIT p_limit;
+END;

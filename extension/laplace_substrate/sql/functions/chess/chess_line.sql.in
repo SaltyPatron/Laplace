@@ -3,7 +3,8 @@ CREATE OR REPLACE FUNCTION chess.line(p_line bytea)
     RETURNS TABLE(event_id bytea, played_on text, result text,
                   times_played bigint, rating double precision,
                   rd double precision, eff_mu double precision)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     -- The line-grain read GH #736's re-key pays for: one row per PLAYING of this
     -- line (the events that carry a PLAYS_LINE edge onto it), each with the
     -- headers that playing asserted (ON_DATE / HAS_RESULT, pinned by context),
@@ -77,5 +78,5 @@ CREATE OR REPLACE FUNCTION chess.line(p_line bytea)
     LEFT JOIN surface_text d ON d.id = h.date_id
     LEFT JOIN surface_text r ON r.id = h.result_id
     LEFT JOIN fold f ON true
-    ORDER BY d.txt DESC NULLS LAST, pg.event
-$$;
+    ORDER BY d.txt DESC NULLS LAST, pg.event;
+END;

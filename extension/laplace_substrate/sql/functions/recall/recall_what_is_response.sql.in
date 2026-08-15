@@ -3,7 +3,7 @@ DROP FUNCTION IF EXISTS laplace.recall_what_is_response(bytea, bytea[]);
 CREATE OR REPLACE FUNCTION converse.recall_what_is_response(p_topic bytea, p_context_ids bytea[] DEFAULT NULL)
     RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
- AS $$
+BEGIN ATOMIC
     WITH topic AS MATERIALIZED (SELECT realize.label(p_topic) AS label)
     SELECT t.label || ': ' || d.definition, d.eff_mu, d.witnesses
     FROM converse.define_fast(p_topic, COALESCE(p_context_ids, ARRAY[]::bytea[]), 3) d
@@ -12,5 +12,5 @@ CREATE OR REPLACE FUNCTION converse.recall_what_is_response(p_topic bytea, p_con
     SELECT repeat('  ', h.depth) || E'→ is ' || COALESCE(h.hypernym, '?')
            || COALESCE(': ' || h.gloss, ''), NULL::numeric, NULL::bigint
     FROM converse.hypernyms(p_topic, 6) h
-    WHERE h.depth > 0
-$$;
+    WHERE h.depth > 0;
+END;

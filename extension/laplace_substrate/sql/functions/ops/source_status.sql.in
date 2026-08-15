@@ -56,7 +56,7 @@ CREATE OR REPLACE FUNCTION ops.source_status(p_source text DEFAULT NULL)
                   last_run_status   text,
                   last_run_at       timestamptz)
     LANGUAGE sql STABLE
-    AS $$
+BEGIN ATOMIC
 WITH by_evidence AS (
     SELECT s.source_id, s.evidence_approx
     FROM ops.source_counts_approx() s
@@ -144,5 +144,5 @@ SELECT p_source,
        0::bigint, false, NULL::text, NULL::timestamptz
 WHERE p_source IS NOT NULL
   AND NOT EXISTS (SELECT 1 FROM matched)
-ORDER BY evidence_approx DESC, source_id
-$$;
+ORDER BY evidence_approx DESC, source_id;
+END;

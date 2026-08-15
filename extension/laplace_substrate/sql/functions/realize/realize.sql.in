@@ -7,7 +7,8 @@
 DROP FUNCTION IF EXISTS laplace.realize(bytea, bytea);
 CREATE OR REPLACE FUNCTION realize.realize(p_id bytea, p_lang bytea DEFAULT NULL)
     RETURNS text
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     -- realize.resolve_name() is the single, referentially-correct name primitive: it
     -- folds the former realize._has_name(HAS_NAME primary + HAS_NAME_ALIAS) and
     -- _realize_synset_lemma into one family-aware, abstaining resolver. It replaces
@@ -37,5 +38,5 @@ CREATE OR REPLACE FUNCTION realize.realize(p_id bytea, p_lang bytea DEFAULT NULL
         realize.resolve_name(p_id, p_lang),
         realize._translation(p_id, p_lang),
         realize._canonical(p_id),
-        realize._defines(p_id))
-$$;
+        realize._defines(p_id));
+END;

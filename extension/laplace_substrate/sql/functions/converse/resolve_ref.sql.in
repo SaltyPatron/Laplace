@@ -1,7 +1,8 @@
 DROP FUNCTION IF EXISTS laplace.resolve_ref(text);
 CREATE OR REPLACE FUNCTION converse.resolve_ref(p_ref text)
     RETURNS bytea
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     -- Resolve a caller-supplied reference to an entity id: a 32-hex string is a
     -- literal content id (decode it); anything else is a surface to content-
     -- address via laplace.word_id. Centralizes the identical `WITH resolved AS (SELECT
@@ -10,5 +11,5 @@ CREATE OR REPLACE FUNCTION converse.resolve_ref(p_ref text)
     SELECT CASE
         WHEN p_ref ~ '^[0-9a-f]{32}$' THEN decode(p_ref, 'hex')
         ELSE laplace.word_id(p_ref)
-    END
-$$;
+    END;
+END;

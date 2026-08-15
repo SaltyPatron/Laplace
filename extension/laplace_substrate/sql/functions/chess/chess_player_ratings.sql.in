@@ -1,7 +1,8 @@
 DROP FUNCTION IF EXISTS laplace.chess_player_ratings(bytea);
 CREATE OR REPLACE FUNCTION chess.player_ratings(p_player bytea)
     RETURNS TABLE(rating integer, games bigint)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     -- Every Elo this player has been witnessed at, and how many games carried
     -- it. HAS_RATING is a per-game assertion -- context_id is the game the tag
     -- came from -- so a career is a distribution, not a single number, and the
@@ -35,5 +36,5 @@ CREATE OR REPLACE FUNCTION chess.player_ratings(p_player bytea)
     SELECT n.txt::integer, raw.games
     FROM raw JOIN named n ON n.id = raw.rating_id
     WHERE n.txt ~ '^[0-9]{1,5}$'
-    ORDER BY 1 DESC
-$$;
+    ORDER BY 1 DESC;
+END;

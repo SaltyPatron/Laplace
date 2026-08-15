@@ -29,7 +29,7 @@ RETURNS TABLE(
 )
 LANGUAGE sql
 STABLE
-    AS $$
+BEGIN ATOMIC
     WITH d AS (
         SELECT 'consensus'::text AS tbl, c.type_id
           FROM laplace.consensus_rdefault c
@@ -59,4 +59,4 @@ STABLE
         round(100.0 * agg.rows / NULLIF(agg.total, 0), 2) AS pct_of_default
       FROM numbered agg CROSS JOIN batch b
      ORDER BY agg.rn;
-$$;
+END;

@@ -13,7 +13,8 @@ CREATE OR REPLACE FUNCTION generation.pos_transition_plane(
         p_vocab bytea[], p_trajs int DEFAULT 200000, p_smooth_k double precision DEFAULT 0.5,
         p_degree_cap int DEFAULT 512)
     RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
     -- dominant POS per vocab word: strongest unrefuted HAS_POS object
     word_pos AS (
@@ -59,5 +60,5 @@ CREATE OR REPLACE FUNCTION generation.pos_transition_plane(
         JOIN class_conditional cc ON cc.px = wx.pos
         JOIN word_pos wy ON wy.pos = cc.py
     )
-    SELECT wc.x, wc.y, wc.w FROM word_corrections wc WHERE wc.rn <= p_degree_cap
-$$;
+    SELECT wc.x, wc.y, wc.w FROM word_corrections wc WHERE wc.rn <= p_degree_cap;
+END;

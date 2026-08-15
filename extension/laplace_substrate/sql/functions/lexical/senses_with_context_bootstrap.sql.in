@@ -15,7 +15,8 @@ DROP FUNCTION IF EXISTS laplace.senses(bytea, bytea[]);
 CREATE OR REPLACE FUNCTION lexical.senses(p_word bytea, p_context bytea[])
     RETURNS TABLE(sense_id bytea, synset_id bytea, eff_mu numeric, witnesses bigint,
                   score numeric)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     SELECT NULL::bytea, NULL::bytea, NULL::numeric, NULL::bigint, NULL::numeric
-    WHERE false
-$$;
+    WHERE false;
+END;

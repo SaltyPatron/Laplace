@@ -33,7 +33,8 @@ DROP FUNCTION IF EXISTS laplace.trajectory_continuations(bytea[], int);
 CREATE OR REPLACE FUNCTION generation.trajectory_continuations(
         p_ctx bytea[], p_topk int DEFAULT 256)
     RETURNS TABLE(object_id bytea, sep_id bytea, weight bigint)
-    LANGUAGE sql STABLE AS $$
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
     WITH sepset AS MATERIALIZED (
         SELECT COALESCE(generation.separator_ids(), ARRAY[]::bytea[]) AS ids
     ),
@@ -103,5 +104,5 @@ CREATE OR REPLACE FUNCTION generation.trajectory_continuations(
       AND w.nxt IS NOT NULL
     GROUP BY w.nxt
     ORDER BY weight DESC, w.nxt
-    LIMIT p_topk
-$$;
+    LIMIT p_topk;
+END;

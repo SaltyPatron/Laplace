@@ -30,7 +30,7 @@ CREATE OR REPLACE FUNCTION chess.missed_finish(p_line bytea, p_limit int DEFAULT
         from_wdl text,
         to_wdl text)
     LANGUAGE sql STABLE
- AS $$
+BEGIN ATOMIC
 WITH rel AS MATERIALIZED (
     SELECT chess.has_wdl_type() AS wdl
 ),
@@ -97,5 +97,5 @@ SELECT m.from_pos, m.to_pos, m.ply, f.txt, t.txt
 FROM missed m
 LEFT JOIN label f ON f.id = m.from_wdl_id
 LEFT JOIN label t ON t.id = m.to_wdl_id
-ORDER BY m.ply
-$$;
+ORDER BY m.ply;
+END;

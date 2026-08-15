@@ -29,9 +29,9 @@ CREATE OR REPLACE FUNCTION structural.geometry_predecessors(
         p_window int DEFAULT 8)
     RETURNS TABLE(predecessor_id bytea, seen bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
- AS $$
-    SELECT successor_id, seen FROM structural.geometry_successors(p_point, p_limit, p_window, true)
-$$;
+BEGIN ATOMIC
+    SELECT successor_id, seen FROM structural.geometry_successors(p_point, p_limit, p_window, true);
+END;
 
 -- Both directions at once, for the symmetric questions (shared-usage overlap,
 -- domain co-occurrence) that must not be silently halved to fit a one-way walk.
@@ -42,7 +42,7 @@ CREATE OR REPLACE FUNCTION structural.geometry_neighbours(
         p_window int DEFAULT 8)
     RETURNS TABLE(neighbour_id bytea, seen bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
- AS $$
+BEGIN ATOMIC
     SELECT n.id, sum(n.seen)::bigint
     FROM (
         SELECT successor_id AS id, seen FROM structural.geometry_successors(p_point, p_limit, p_window, false)
@@ -50,5 +50,5 @@ CREATE OR REPLACE FUNCTION structural.geometry_neighbours(
         SELECT successor_id AS id, seen FROM structural.geometry_successors(p_point, p_limit, p_window, true)
     ) n
     GROUP BY n.id
-    ORDER BY 2 DESC
-$$;
+    ORDER BY 2 DESC;
+END;

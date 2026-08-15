@@ -3,7 +3,8 @@
 DROP FUNCTION IF EXISTS laplace.gaps(bytea);
 CREATE OR REPLACE FUNCTION consensus.gaps(p_word bytea)
     RETURNS TABLE(missing_arena text)
-    LANGUAGE sql STABLE PARALLEL SAFE STRICT AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE STRICT
+BEGIN ATOMIC
     WITH subj(id) AS (
         SELECT p_word UNION SELECT sn.synset_id FROM lexical.senses(p_word) sn
     ), expected(name) AS (SELECT unnest(ARRAY[
@@ -12,5 +13,5 @@ CREATE OR REPLACE FUNCTION consensus.gaps(p_word bytea)
     SELECT e.name FROM expected e
     WHERE NOT EXISTS (
         SELECT 1 FROM laplace.v_consensus_unrefuted c JOIN subj s ON c.subject_id = s.id
-        WHERE c.type_id = laplace.relation_type_id(e.name))
-$$;
+        WHERE c.type_id = laplace.relation_type_id(e.name));
+END;

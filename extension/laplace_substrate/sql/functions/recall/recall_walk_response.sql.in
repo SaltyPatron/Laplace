@@ -29,7 +29,7 @@ DROP FUNCTION IF EXISTS laplace.recall_walk_response(bytea, text);
 CREATE OR REPLACE FUNCTION converse.recall_walk_response(p_topic bytea, p_mode text)
     RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
- AS $$
+BEGIN ATOMIC
     WITH complete_branches AS (
         SELECT * FROM consensus.walk_branches(p_topic, laplace.relation_type_id('COMPLETES_TO'), 8, 5)
         WHERE p_mode = 'complete'
@@ -75,5 +75,5 @@ CREATE OR REPLACE FUNCTION converse.recall_walk_response(p_topic bytea, p_mode t
     )
     SELECT * FROM complete_reply
     UNION ALL
-    SELECT * FROM walk_reply
-$$;
+    SELECT * FROM walk_reply;
+END;

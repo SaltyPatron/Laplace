@@ -1,7 +1,8 @@
 DROP FUNCTION IF EXISTS laplace.recall_trajectories(text, int);
 CREATE OR REPLACE FUNCTION generation.recall_trajectories(p_word text, p_limit int DEFAULT 6)
     RETURNS TABLE(answer text)
-    LANGUAGE sql STABLE AS $$
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
   WITH wid AS (SELECT laplace.word_id(p_word) AS id),
   ids AS (
     SELECT w.id AS entity_id, abs(w.n_constituents - 7) AS rank_distance
@@ -18,5 +19,5 @@ CREATE OR REPLACE FUNCTION generation.recall_trajectories(p_word text, p_limit i
   SELECT left(replace(t.s, chr(10), ' '), 180)
   FROM batch,
        LATERAL unnest(realize.render_text_batch(batch.a, 300)) WITH ORDINALITY AS t(s, ord)
-  ORDER BY t.ord
-$$;
+  ORDER BY t.ord;
+END;

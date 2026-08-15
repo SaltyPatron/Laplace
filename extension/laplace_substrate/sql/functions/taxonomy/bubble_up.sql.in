@@ -27,7 +27,8 @@ RETURNS TABLE(
     domain_hits bigint,
     witnesses bigint
 )
-LANGUAGE sql STABLE PARALLEL SAFE AS $$
+LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
 -- consensus.relation_family_ids is IMMUTABLE and generated from the manifest, so
 -- this folds to a literal bytea[] at PLAN time and the LIST partitions prune before
 -- execution. relation_family_members() is STABLE and scans laplace.entities, which
@@ -226,5 +227,5 @@ FROM ranked
 -- Not a floor or a cap — nothing is excluded, the sort order changes. Spec 37 L6
 -- is untouched.
 ORDER BY witnesses DESC, score DESC, rank_key DESC
-LIMIT GREATEST(COALESCE(p_k, 5), 1)
-$$;
+LIMIT GREATEST(COALESCE(p_k, 5), 1);
+END;

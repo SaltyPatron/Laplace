@@ -1,7 +1,7 @@
 CREATE OR REPLACE FUNCTION realize.constituents(p_id bytea)
     RETURNS TABLE(ordinal integer, child_id bytea, run_length integer, flags bigint)
     LANGUAGE sql STABLE
-    AS $$
+BEGIN ATOMIC
     SELECT u.ordinal, u.entity_id, u.run_length, u.flags
     FROM (
         SELECT w.trajectory AS traj
@@ -11,5 +11,5 @@ CREATE OR REPLACE FUNCTION realize.constituents(p_id bytea)
         LIMIT 1
     ) t
     CROSS JOIN LATERAL public.laplace_trajectory_constituents(t.traj) AS u
-    ORDER BY 1
-$$;
+    ORDER BY 1;
+END;

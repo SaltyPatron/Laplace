@@ -3,7 +3,8 @@ CREATE OR REPLACE FUNCTION consensus.related_in(p_word bytea, p_type bytea, p_la
                                       p_limit int DEFAULT 10)
     RETURNS TABLE(fact text, eff_mu numeric, witnesses bigint)
 -- No SET search_path — blocks inlining, costs the consensus index path. GH #860.
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     WITH subj(id) AS (
         SELECT p_word UNION SELECT sn.synset_id FROM lexical.senses(p_word) sn
     ), top AS (
@@ -30,5 +31,5 @@ CREATE OR REPLACE FUNCTION consensus.related_in(p_word bytea, p_type bytea, p_la
     )
     SELECT labels.l[r.ord], consensus.eff_mu_display(r.rating, r.rd), r.witness_count
     FROM ranked r, labels
-    ORDER BY r.ord
-$$;
+    ORDER BY r.ord;
+END;

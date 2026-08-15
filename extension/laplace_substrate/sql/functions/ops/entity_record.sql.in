@@ -6,10 +6,10 @@ DROP FUNCTION IF EXISTS laplace.entity_record(bytea);
 CREATE OR REPLACE FUNCTION ops.entity_record(p_id bytea)
     RETURNS TABLE(confirmed bigint, contested bigint, refuted bigint, thin bigint)
     LANGUAGE sql STABLE
-    AS $$
+BEGIN ATOMIC
     SELECT count(*) FILTER (WHERE s.status = 'confirmed'),
            count(*) FILTER (WHERE s.status = 'contested'),
            count(*) FILTER (WHERE s.status = 'refuted'),
            count(*) FILTER (WHERE s.status = 'thin')
-    FROM converse.epistemic_status(p_id, NULL, 500) s
-$$;
+    FROM converse.epistemic_status(p_id, NULL, 500) s;
+END;

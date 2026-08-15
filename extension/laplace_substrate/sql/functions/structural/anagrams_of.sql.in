@@ -2,7 +2,7 @@ DROP FUNCTION IF EXISTS laplace.anagrams_of(text);
 CREATE OR REPLACE FUNCTION structural.anagrams_of(p_word text)
     RETURNS TABLE(word text, entity_id bytea)
     LANGUAGE sql STABLE
- AS $$
+BEGIN ATOMIC
     WITH raw AS MATERIALIZED (
         SELECT DISTINCT w2.id AS entity_id
         FROM laplace.v_word_points w1
@@ -15,5 +15,5 @@ CREATE OR REPLACE FUNCTION structural.anagrams_of(p_word text)
     ), batch AS MATERIALIZED (
       SELECT realize.render_batch(array_agg(entity_id ORDER BY rn)) AS labels FROM numbered
     )
-    SELECT b.labels[d.rn], d.entity_id FROM numbered d CROSS JOIN batch b ORDER BY d.rn
-$$;
+    SELECT b.labels[d.rn], d.entity_id FROM numbered d CROSS JOIN batch b ORDER BY d.rn;
+END;

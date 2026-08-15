@@ -1,6 +1,6 @@
 CREATE OR REPLACE FUNCTION realize.render(p_id bytea) RETURNS text
     LANGUAGE sql STABLE
-    AS $$
+BEGIN ATOMIC
     SELECT COALESCE(
         (SELECT n.name FROM @extschema@.canonical_names n WHERE n.id = p_id),
         -- Perfcache-backed: authoritative for a valid tier-0 codepoint on its own
@@ -19,5 +19,5 @@ CREATE OR REPLACE FUNCTION realize.render(p_id bytea) RETURNS text
         -- fast paths above, so tier-0 glyph reconstruction is unchanged.
         realize.resolve_name(p_id),
         realize.render_text(p_id),
-        encode(p_id, 'hex') || '…')
-$$;
+        encode(p_id, 'hex') || '…');
+END;

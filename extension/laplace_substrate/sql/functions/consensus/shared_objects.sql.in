@@ -2,7 +2,8 @@ DROP FUNCTION IF EXISTS laplace.shared_objects(bytea[], bytea, int);
 CREATE OR REPLACE FUNCTION consensus.shared_objects(p_subjects bytea[], p_type bytea DEFAULT NULL,
                                      p_limit int DEFAULT 40)
     RETURNS TABLE(object_id bytea, support int, total_mu numeric)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     -- consensus.eff_mu_display, not the scale-and-round open-coded. Its own header says
     -- "same rounding, same scale, one definition file -- never re-derived inline",
     -- and this was the inline re-derivation: if the fold's fp1e9 scale or the
@@ -21,5 +22,5 @@ CREATE OR REPLACE FUNCTION consensus.shared_objects(p_subjects bytea[], p_type b
     GROUP BY c.object_id
     ORDER BY count(DISTINCT c.subject_id) DESC,
              sum(consensus.eff_mu(c.rating, c.rd)) DESC
-    LIMIT p_limit
-$$;
+    LIMIT p_limit;
+END;

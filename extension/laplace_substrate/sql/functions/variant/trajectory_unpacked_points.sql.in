@@ -10,7 +10,7 @@ CREATE OR REPLACE FUNCTION generation.trajectory_unpacked_points(p_entity bytea)
     -- Only 6 set-returning functions in this surface declare a real ROWS; the
     -- rest ship the 1000 default and mis-plan their callers the same way.
     ROWS 6
- AS $$
+BEGIN ATOMIC
     -- THE PHYSICALITIES LOOKUP IS FENCED IN A CTE, NOT JOINED INTO THE UNPACK.
     --
     -- physicalities is HASH (id) and this lookup is by entity_id -- an independent
@@ -67,5 +67,5 @@ CREATE OR REPLACE FUNCTION generation.trajectory_unpacked_points(p_entity bytea)
     FROM traj,
     LATERAL public.ST_DumpPoints(traj.trajectory) dp,
     LATERAL public.laplace_mantissa_unpack(dp.geom) u
-    ORDER BY u.ordinal
-$$;
+    ORDER BY u.ordinal;
+END;

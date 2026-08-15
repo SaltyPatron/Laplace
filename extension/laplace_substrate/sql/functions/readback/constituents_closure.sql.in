@@ -39,7 +39,7 @@ LANGUAGE sql STABLE PARALLEL SAFE
 -- session, and this is the most-called query in the system (1,496,183 calls), so 30 ms
 -- of planner work was being paid a million and a half times for a walk that executes
 -- in 5 ms.
-AS $$
+BEGIN ATOMIC
 WITH RECURSIVE reach(entity_id, depth) AS (
     SELECT r.id, 0
     FROM unnest(COALESCE(p_roots, ARRAY[]::bytea[])) AS r(id)
@@ -106,5 +106,5 @@ picked AS (
 SELECT pk.entity_id AS parent_id, u.ordinal, u.entity_id AS child_id, u.run_length, u.flags
 FROM picked pk
 CROSS JOIN LATERAL public.laplace_trajectory_constituents(pk.trajectory) AS u
-ORDER BY pk.entity_id, u.ordinal
-$$;
+ORDER BY pk.entity_id, u.ordinal;
+END;

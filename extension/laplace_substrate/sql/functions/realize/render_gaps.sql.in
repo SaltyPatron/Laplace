@@ -2,7 +2,7 @@ DROP FUNCTION IF EXISTS laplace.render_gaps(integer);
 CREATE OR REPLACE FUNCTION realize.render_gaps(p_limit integer DEFAULT 50)
     RETURNS TABLE(id bytea, roles text, refs bigint)
     LANGUAGE sql STABLE
-    AS $$
+BEGIN ATOMIC
     WITH refs AS (
         SELECT c.type_id AS id, 'type' AS role FROM @extschema@.consensus c
         UNION ALL
@@ -21,5 +21,5 @@ CREATE OR REPLACE FUNCTION realize.render_gaps(p_limit integer DEFAULT 50)
       AND NOT EXISTS (SELECT 1 FROM @extschema@.v_word_points w
                       WHERE w.id = a.id AND w.trajectory IS NOT NULL)
     ORDER BY a.refs DESC
-    LIMIT p_limit
-$$;
+    LIMIT p_limit;
+END;

@@ -1,7 +1,8 @@
 DROP FUNCTION IF EXISTS laplace.concept_members(bytea);
 CREATE OR REPLACE FUNCTION lexical.concept_members(p_concept bytea)
     RETURNS TABLE(member bytea, kind text, mu numeric, witnesses bigint)
-    LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE
+BEGIN ATOMIC
     -- Every entity linked to an anchor (a synset/ILI concept or a FrameNet
     -- frame), pivoting only on ids. Three content-addressed bridge kinds:
     --   synonym : member --IS_SYNONYM_OF--> synset
@@ -23,5 +24,5 @@ CREATE OR REPLACE FUNCTION lexical.concept_members(p_concept bytea)
     UNION ALL
     SELECT c.subject_id, 'frame'::text, consensus.eff_mu_display(c.rating, c.rd), c.witness_count
     FROM laplace.v_consensus_unrefuted c
-    WHERE c.object_id = p_concept AND c.type_id = laplace.relation_type_id('EVOKES_FRAME')
-$$;
+    WHERE c.object_id = p_concept AND c.type_id = laplace.relation_type_id('EVOKES_FRAME');
+END;

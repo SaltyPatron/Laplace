@@ -13,6 +13,6 @@ RETURNS TABLE(
     rd_fp1e9         bigint
 )
 LANGUAGE sql STABLE
-    AS $$
-    SELECT * FROM ops.attestation_unary_response(p_subject_id, p_relation_type_id, p_source_scope, p_context_id)
-$$;
+BEGIN ATOMIC
+    SELECT * FROM ops.attestation_unary_response(p_subject_id, p_relation_type_id, p_source_scope, p_context_id);
+END;

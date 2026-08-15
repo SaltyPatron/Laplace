@@ -5,7 +5,8 @@ DROP FUNCTION IF EXISTS laplace.metric_edges(bytea[], text, int, int);
 CREATE OR REPLACE FUNCTION generation.metric_edges(
         p_vocab bytea[], p_metric text DEFAULT 'frechet', p_k int DEFAULT 16, p_probe int DEFAULT 64)
     RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     WITH v AS (
         SELECT DISTINCT ON (w.id) w.id, w.coord, structural.entity_curve(w.id) AS curve
         FROM laplace.v_word_points w
@@ -38,5 +39,5 @@ CREATE OR REPLACE FUNCTION generation.metric_edges(
                row_number() OVER (PARTITION BY aid ORDER BY d) AS rn
         FROM refined
     )
-    SELECT aid, bid, d FROM topk WHERE rn <= p_k
-$$;
+    SELECT aid, bid, d FROM topk WHERE rn <= p_k;
+END;

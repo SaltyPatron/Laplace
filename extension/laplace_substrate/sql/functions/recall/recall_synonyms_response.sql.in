@@ -2,6 +2,6 @@ DROP FUNCTION IF EXISTS laplace.recall_synonyms_response(bytea);
 CREATE OR REPLACE FUNCTION converse.recall_synonyms_response(p_topic bytea)
     RETURNS TABLE(reply text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
- AS $$
-    SELECT s.synonym, s.eff_mu, s.witnesses FROM converse.synonyms(p_topic) s
-$$;
+BEGIN ATOMIC
+    SELECT s.synonym, s.eff_mu, s.witnesses FROM converse.synonyms(p_topic) s;
+END;

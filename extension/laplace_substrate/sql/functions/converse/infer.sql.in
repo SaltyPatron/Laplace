@@ -27,7 +27,8 @@
 DROP FUNCTION IF EXISTS laplace.infer(text, int);
 CREATE OR REPLACE FUNCTION converse.infer(p_prompt text, p_limit int DEFAULT 8)
     RETURNS TABLE(prediction text, weight double precision, bias_hits bigint)
-    LANGUAGE sql STABLE AS $$
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
 -- The prompt's language is a CONSTRAINT on which candidates may be seated, never
 -- a score. Without it a foreign interjection outranks the content word on the
 -- specificity scalar and takes the topic seat, which is the §7 violation seen on
@@ -149,5 +150,5 @@ dedup AS (
 )
 SELECT d.prediction, d.weight, d.bias_hits
 FROM dedup d
-ORDER BY d.bias_hits DESC, d.weight DESC, d.ix
-$$;
+ORDER BY d.bias_hits DESC, d.weight DESC, d.ix;
+END;

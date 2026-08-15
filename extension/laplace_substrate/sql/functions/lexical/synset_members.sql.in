@@ -1,7 +1,8 @@
 DROP FUNCTION IF EXISTS laplace.synset_members(bytea);
 CREATE OR REPLACE FUNCTION lexical.synset_members(p_word bytea)
     RETURNS TABLE(member bytea, lang bytea, mu bigint, witnesses bigint, sense_mu numeric)
-    LANGUAGE sql LAPLACE_STABLE_STRICT AS $$
+    LANGUAGE sql LAPLACE_STABLE_STRICT
+BEGIN ATOMIC
     WITH syn AS (
         SELECT s.synset_id AS id, max(s.eff_mu) AS sense_mu
         FROM lexical.senses(p_word) s
@@ -51,5 +52,5 @@ CREATE OR REPLACE FUNCTION lexical.synset_members(p_word bytea)
     SELECT a.w, hl.object_id AS lang, a.mu::bigint, a.witnesses, a.sense_mu
     FROM agg a
     LEFT JOIN laplace.consensus hl
-      ON hl.subject_id = a.w AND hl.type_id = laplace.relation_type_id('HAS_LANGUAGE')
-$$;
+      ON hl.subject_id = a.w AND hl.type_id = laplace.relation_type_id('HAS_LANGUAGE');
+END;

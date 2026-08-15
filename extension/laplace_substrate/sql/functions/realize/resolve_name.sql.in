@@ -7,7 +7,7 @@ CREATE OR REPLACE FUNCTION realize.resolve_name(
     LANGUAGE sql STABLE PARALLEL SAFE
     -- No SET search_path (GH #860): it invalidates plan caching and blocks inlining,
     -- and this is on the per-row label path. Real schema names instead.
-    AS $$
+BEGIN ATOMIC
     -- The one referentially-correct name primitive. Three call sites (label,
     -- realize.render, realize) used to each resolve a name a different way and disagree:
     -- label saw only HAS_NAME_ALIAS, realize.render saw canonical->codepoint->ALIAS,
@@ -154,5 +154,5 @@ CREATE OR REPLACE FUNCTION realize.resolve_name(
             ORDER BY r.rn
             LIMIT 1
         )
-    END
-$$;
+    END;
+END;

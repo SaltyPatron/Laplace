@@ -11,7 +11,8 @@
 DROP FUNCTION IF EXISTS laplace.word_order(bytea[], int, int);
 CREATE OR REPLACE FUNCTION generation.word_order(p_vocab bytea[], p_trajs int DEFAULT 100000, p_gap int DEFAULT 1)
     RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     -- COUNT is one valuation of generation.word_adjacency, which owns the extraction.
     -- The continuation lane values the same rows by the adjudicated standing of the
     -- witnessing composition instead; keeping one extraction body is what stops the
@@ -21,5 +22,5 @@ CREATE OR REPLACE FUNCTION generation.word_order(p_vocab bytea[], p_trajs int DE
     -- that needs it reads word_adjacency directly.
     SELECT a.subject_id, a.object_id, count(*)::float8
     FROM generation.word_adjacency(p_vocab, p_trajs, p_gap) a
-    GROUP BY a.subject_id, a.object_id
-$$;
+    GROUP BY a.subject_id, a.object_id;
+END;

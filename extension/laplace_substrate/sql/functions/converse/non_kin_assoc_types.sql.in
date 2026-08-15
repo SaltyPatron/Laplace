@@ -26,7 +26,8 @@
 DROP FUNCTION IF EXISTS laplace.non_kin_assoc_types();
 CREATE OR REPLACE FUNCTION converse.non_kin_assoc_types()
     RETURNS TABLE(id bytea)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     SELECT DISTINCT m.id
     FROM unnest(ARRAY[
              'HAS_ETYMOLOGY',        -- + ETYMOLOGICALLY_DERIVED_FROM / _RELATED_TO
@@ -34,5 +35,5 @@ CREATE OR REPLACE FUNCTION converse.non_kin_assoc_types()
              'HAS_USAGE_REGISTER',   -- "archaic", "colloquial"
              'HAS_LEX_CATEGORY'      -- "noun.object", a catalogue bucket
          ]) AS fam(name)
-    CROSS JOIN LATERAL consensus.relation_family_members(fam.name) AS m(id)
-$$;
+    CROSS JOIN LATERAL consensus.relation_family_members(fam.name) AS m(id);
+END;

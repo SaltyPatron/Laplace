@@ -6,7 +6,8 @@ CREATE OR REPLACE FUNCTION chess.player_games(
     RETURNS TABLE(event_id bytea, played_on text, event text, eco text,
                   as_white boolean, opponent_id bytea, opponent text,
                   result text, outcome smallint)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     -- A player's game log: the detail list behind chess_player_record, most
     -- recent first. Every field is a header the PGN decomposer transcribed
     -- verbatim (ON_DATE / HAS_EVENT / HAS_ECO / HAS_RESULT) plus the opposite
@@ -115,5 +116,5 @@ CREATE OR REPLACE FUNCTION chess.player_games(
     LEFT JOIN surface_text ec ON ec.id = f.eco_id
     LEFT JOIN surface_text rs ON rs.id = f.result_id
     LEFT JOIN surface_text op ON op.id = f.opponent_id
-    ORDER BY f.played_on DESC NULLS LAST, f.event
-$$;
+    ORDER BY f.played_on DESC NULLS LAST, f.event;
+END;

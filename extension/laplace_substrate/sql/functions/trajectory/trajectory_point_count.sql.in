@@ -2,7 +2,7 @@ DROP FUNCTION IF EXISTS laplace.trajectory_point_count(geometry);
 CREATE OR REPLACE FUNCTION structural.trajectory_point_count(p_traj geometry)
     RETURNS integer
     LANGUAGE sql IMMUTABLE STRICT
- AS $$
+BEGIN ATOMIC
     SELECT CASE WHEN p_traj IS NULL THEN 0
-                ELSE public.ST_NPoints(p_traj)::integer END
-$$;
+                ELSE public.ST_NPoints(p_traj)::integer END;
+END;

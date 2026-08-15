@@ -7,6 +7,7 @@
 DROP FUNCTION IF EXISTS laplace.word_case_variant_ids(bytea);
 CREATE OR REPLACE FUNCTION lexical.word_case_variant_ids(p_word bytea)
     RETURNS bytea[]
-    LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$
-    SELECT lexical.word_case_variants(p_word)
-$$;
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE
+BEGIN ATOMIC
+    SELECT lexical.word_case_variants(p_word);
+END;

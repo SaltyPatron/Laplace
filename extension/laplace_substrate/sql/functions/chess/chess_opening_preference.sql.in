@@ -18,7 +18,7 @@ CREATE OR REPLACE FUNCTION chess.opening_preference(p_player bytea,
                                                     p_limit int DEFAULT 12)
     RETURNS TABLE(tc_class text, eco text, games bigint)
     LANGUAGE sql STABLE
- AS $$
+BEGIN ATOMIC
 WITH grouped AS (
     SELECT tcc.object_id AS tc_id, e.object_id AS eco_id, count(*) AS games
     FROM laplace.attestations a
@@ -49,5 +49,5 @@ lbl AS (
 )
 SELECT lbl.l[o.ix * 2 - 1], lbl.l[o.ix * 2], o.games
 FROM ord o CROSS JOIN lbl
-ORDER BY o.ix
-$$;
+ORDER BY o.ix;
+END;

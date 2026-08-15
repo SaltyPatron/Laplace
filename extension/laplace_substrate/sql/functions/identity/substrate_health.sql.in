@@ -26,7 +26,7 @@ RETURNS TABLE(
 )
 LANGUAGE sql
 STABLE
-    AS $$
+BEGIN ATOMIC
     -- Each verification scan runs exactly once: the planner does not
     -- common-subexpression-eliminate independent scalar subqueries in one
     -- targetlist, so deriving `ok` from the scanned columns (not re-invoking
@@ -55,4 +55,4 @@ STABLE
         s.bootstrap_entities,
         p_deep AS deep_checked
     FROM scans s;
-$$;
+END;

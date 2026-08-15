@@ -145,7 +145,22 @@ CEILINGS = {
     "g11_unqualified_in_setless_body": 0,
     # GH #764 step 3: LANGUAGE sql with quoted-string bodies (AS $$) — PostgreSQL
     # records no pg_depend. Shrink-only allowlist; new SQL must use BEGIN ATOMIC.
-    "g12_string_sql_bodies": 215,
+    #
+    # 215 -> 2 (2026-08-15). 201 files converted, every one verified against the live
+    # substrate inside a rolled-back transaction before it was kept; a body that would
+    # not create was reverted rather than committed. Parse-at-CREATE found two defects
+    # the string bodies had been hiding:
+    #   * generation.foundry_vocab_crawl called octet_length() on a geometry, which is
+    #     ambiguous between PostGIS and pg_catalog. Now cast to bytea.
+    #   * recall.recall_walk_response calls consensus.walk_branches with 4 arguments,
+    #     and the LIVE database carries BOTH the 7-arg and 8-arg overloads, so the call
+    #     resolves to neither: "function ... is not unique". The source already retires
+    #     the 7-arg form (walk_branches.sql.in:8) — the database has never had that
+    #     upgrade applied. Verified by dropping the stale overload inside a transaction:
+    #     the function then creates clean. converse_facts.sql.in:104 makes the same
+    #     4-arg call and is broken the same way.
+    # The two survivors are model_factor's model_attention_row / model_circuit_slices.
+    "g12_string_sql_bodies": 2,
     # G13 — case-folding a realized surface. Measured 2026-08-10 with the check
     # that introduced it, so it lands enumerated rather than red on merge day.
     # Both survivors are in translate_to's language-reference matcher, where the

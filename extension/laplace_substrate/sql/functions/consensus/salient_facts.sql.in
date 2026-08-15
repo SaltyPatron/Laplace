@@ -5,7 +5,8 @@ CREATE OR REPLACE FUNCTION consensus.salient_facts(p_word bytea, p_lang bytea DE
 -- No SET search_path — blocks inlining, costs the consensus index path. The
 -- workaround below (fencing relation_in_family ONCE because its own SET clause
 -- makes it uninlinable) is the same defect one level down. GH #860.
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     WITH reltypes AS MATERIALIZED (
         SELECT id FROM laplace.entities
         WHERE type_id = laplace.entity_type_id('RelationType')
@@ -91,5 +92,5 @@ CREATE OR REPLACE FUNCTION consensus.salient_facts(p_word bytea, p_lang bytea DE
     WHERE d.fact IS NOT NULL AND d.fact <> ''
       AND right(d.fact, 1) <> U&'\2026' AND right(d.type, 1) <> U&'\2026'
     ORDER BY d.sort_mu DESC
-    LIMIT p_limit
-$$;
+    LIMIT p_limit;
+END;

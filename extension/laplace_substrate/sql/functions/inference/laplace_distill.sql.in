@@ -3,7 +3,8 @@ CREATE OR REPLACE FUNCTION generation.distill(
     p_band_mask  bytea,
     p_min_eff_mu float8 DEFAULT 0.5)
 RETURNS TABLE(subject_id bytea, type_id bytea, object_id bytea, eff_mu float8)
-LANGUAGE sql STABLE PARALLEL RESTRICTED AS $$
+LANGUAGE sql STABLE PARALLEL RESTRICTED
+BEGIN ATOMIC
     WITH band_types AS (
         SELECT e.id FROM laplace.entities e
         WHERE e.highway_mask IS NOT NULL
@@ -20,5 +21,5 @@ LANGUAGE sql STABLE PARALLEL RESTRICTED AS $$
       -- functional index → whole-consensus scan. EXACT: consensus.eff_mu is integer, so
       -- `consensus.eff_mu::float8/1e9 >= p_min` ⟺ `consensus.eff_mu >= p_min*1e9` ⟺ `consensus.eff_mu >= ceil(p_min*1e9)`.
       AND consensus.eff_mu(c.rating, c.rd) >= ceil(p_min_eff_mu * 1e9)::bigint
-    ORDER BY c.subject_id, consensus.eff_mu(c.rating, c.rd) DESC
-$$;
+    ORDER BY c.subject_id, consensus.eff_mu(c.rating, c.rd) DESC;
+END;

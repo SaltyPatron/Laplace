@@ -11,10 +11,11 @@
 DROP FUNCTION IF EXISTS laplace.top_synset(bytea);
 CREATE OR REPLACE FUNCTION taxonomy.top_synset(p_word bytea)
     RETURNS bytea
-    LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE
+BEGIN ATOMIC
     -- p_k = 1 IS the cap, and bubble_up ranks before it cuts. The LIMIT 1 that used
     -- to sit here added nothing and read as a safeguard over an unordered pick,
     -- which is the opposite of what this call does.
     SELECT b.synset_id
-    FROM taxonomy.bubble_up(p_word, NULL::bytea[], 1) b
-$$;
+    FROM taxonomy.bubble_up(p_word, NULL::bytea[], 1) b;
+END;

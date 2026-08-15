@@ -10,9 +10,10 @@
 DROP FUNCTION IF EXISTS laplace.label_is_content(text);
 CREATE OR REPLACE FUNCTION converse.label_is_content(p_label text)
     RETURNS boolean
-    LANGUAGE sql IMMUTABLE AS $$
+    LANGUAGE sql IMMUTABLE
+BEGIN ATOMIC
     SELECT p_label IS NOT NULL
        AND p_label !~ '^[0-9]{6,}-[nvasr]$'
        AND p_label !~ '^(noun|verb|adj|adv|adjs)\.'
-       AND p_label !~ ' '
-$$;
+       AND p_label !~ ' ';
+END;

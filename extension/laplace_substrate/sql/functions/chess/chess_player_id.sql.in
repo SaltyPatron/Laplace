@@ -1,7 +1,8 @@
 DROP FUNCTION IF EXISTS laplace.chess_player_id(text);
 CREATE OR REPLACE FUNCTION chess.player_id(p_name text)
     RETURNS bytea
-    LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
+    LANGUAGE sql IMMUTABLE PARALLEL SAFE
+BEGIN ATOMIC
     -- Name -> player entity id, O(1), no scan. The chess decomposer mints a
     -- player as realize.canonical_id('chess/player/' || PlayerAlias.Canonical(name)):
     -- "Last, First" is flipped to "First Last", lowercased, punctuation folded
@@ -22,5 +23,5 @@ CREATE OR REPLACE FUNCTION chess.player_id(p_name text)
                 ELSE btrim(p_name)
             END),
             '[^[:alnum:][:space:]]+', ' ', 'g'),
-        '[[:space:]]+', ' ', 'g')))
-$$;
+        '[[:space:]]+', ' ', 'g')));
+END;

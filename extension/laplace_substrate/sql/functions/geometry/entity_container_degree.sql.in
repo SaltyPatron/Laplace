@@ -37,7 +37,8 @@ CREATE OR REPLACE FUNCTION structural.entity_container_degree(
     p_ids bytea[],
     p_cap integer DEFAULT 8192)
     RETURNS TABLE(entity_id bytea, degree bigint, icf double precision)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     SELECT t.id,
            COALESCE(c.n, 0)::bigint,
            /* 1 / log2(2 + degree): 1.0 for an id nothing contains, ~0.077 at a
@@ -66,5 +67,5 @@ CREATE OR REPLACE FUNCTION structural.entity_container_degree(
               WHERE public.laplace_trajectory_constituent_ids(w.trajectory) @> ARRAY[t.id]
               LIMIT p_cap) z
     ) c ON true
-    GROUP BY t.id, c.n
-$$;
+    GROUP BY t.id, c.n;
+END;

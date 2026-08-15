@@ -15,7 +15,7 @@ RETURNS TABLE(
     rd_fp1e9         bigint
 )
 LANGUAGE sql STABLE
-    AS $$
+BEGIN ATOMIC
     SELECT c.object_id,
            (consensus.eff_mu(c.rating, c.rd) / 1e9)::double precision,
            c.witness_count::integer,
@@ -37,5 +37,5 @@ LANGUAGE sql STABLE
             )
           )
     ORDER BY consensus.eff_mu(c.rating, c.rd) DESC
-    LIMIT GREATEST(1, p_top_k)
-$$;
+    LIMIT GREATEST(1, p_top_k);
+END;

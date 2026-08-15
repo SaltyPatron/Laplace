@@ -6,7 +6,8 @@
 DROP FUNCTION IF EXISTS laplace.sentence_order(int, int);
 CREATE OR REPLACE FUNCTION generation.sentence_order(p_docs int DEFAULT 100000, p_gap int DEFAULT 1)
     RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     WITH t AS (
         -- Role by TYPE, not tier: `tier = 4` misses a single-sentence document, and tier
         -- is a containment floor rather than a kind. Ranked by trajectory length instead
@@ -40,5 +41,5 @@ CREATE OR REPLACE FUNCTION generation.sentence_order(p_docs int DEFAULT 100000, 
         SELECT cur, nxt, count(*)::float8 AS c
         FROM bg WHERE nxt IS NOT NULL GROUP BY cur, nxt
     )
-    SELECT cur, nxt, c FROM cnt
-$$;
+    SELECT cur, nxt, c FROM cnt;
+END;

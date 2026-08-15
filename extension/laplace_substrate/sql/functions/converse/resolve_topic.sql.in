@@ -55,7 +55,8 @@
 DROP FUNCTION IF EXISTS laplace.resolve_topic(text, bytea);
 CREATE OR REPLACE FUNCTION converse.resolve_topic(p_phrase text, p_context bytea)
     RETURNS bytea
-    LANGUAGE sql STABLE AS $$
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
     SELECT CASE
         WHEN p_phrase IS NULL OR btrim(p_phrase) = '' THEN p_context
         -- Literal content id (incl. a FEN rewritten to hex by the app resolve
@@ -82,5 +83,5 @@ CREATE OR REPLACE FUNCTION converse.resolve_topic(p_phrase text, p_context bytea
               LIMIT 1),
             converse.resolve_phrase(p_phrase),
             converse.resolve_last_word(p_phrase))
-    END
-$$;
+    END;
+END;

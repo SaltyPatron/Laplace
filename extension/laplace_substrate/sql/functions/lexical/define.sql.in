@@ -12,7 +12,8 @@
 DROP FUNCTION IF EXISTS laplace.define(bytea, int);
 CREATE OR REPLACE FUNCTION lexical.define(p_word bytea, p_limit int DEFAULT 5)
     RETURNS TABLE(definition text, eff_mu numeric, witnesses bigint)
-    LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE
+BEGIN ATOMIC
     WITH picked AS MATERIALIZED (
         SELECT u.object_id, u.eff_mu, u.witnesses, u.sense_rank
         FROM (
@@ -39,5 +40,5 @@ CREATE OR REPLACE FUNCTION lexical.define(p_word bytea, p_limit int DEFAULT 5)
     ), batch AS MATERIALIZED (
       SELECT realize.render_text_batch(array_agg(object_id ORDER BY rn), 24) AS txt FROM numbered
     )
-    SELECT b.txt[d.rn], d.eff_mu, d.witnesses FROM numbered d CROSS JOIN batch b ORDER BY d.rn
-$$;
+    SELECT b.txt[d.rn], d.eff_mu, d.witnesses FROM numbered d CROSS JOIN batch b ORDER BY d.rn;
+END;

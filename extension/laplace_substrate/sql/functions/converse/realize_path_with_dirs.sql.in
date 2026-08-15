@@ -3,7 +3,7 @@ CREATE OR REPLACE FUNCTION realize.path(p_path bytea[], p_types bytea[], p_dirs 
                                         p_lang bytea DEFAULT NULL)
     RETURNS text
     LANGUAGE sql STABLE PARALLEL SAFE
-    AS $$
+BEGIN ATOMIC
     -- realize.label() before '?': an id with no realization in p_lang usually still has a
     -- name, and printing '?' for it threw that away. The walk responders open-coded
     -- this whole realize.render specifically because they needed the label tier
@@ -23,5 +23,5 @@ CREATE OR REPLACE FUNCTION realize.path(p_path bytea[], p_types bytea[], p_dirs 
                               ELSE ' —' || COALESCE(b.types[i-1], '?') || '→ '
                          END || COALESCE(b.realized[i], b.labels[i], '?')
                END, '' ORDER BY i)
-    FROM batch b CROSS JOIN generate_subscripts(p_path, 1) AS i
-$$;
+    FROM batch b CROSS JOIN generate_subscripts(p_path, 1) AS i;
+END;

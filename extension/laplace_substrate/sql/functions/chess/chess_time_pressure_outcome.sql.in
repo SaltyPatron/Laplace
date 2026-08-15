@@ -5,7 +5,8 @@ CREATE OR REPLACE FUNCTION chess.time_pressure_outcome()
         positions       bigint,
         plays           bigint,
         avg_eff_mu      numeric)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     -- "Do rushed moves lead to worse outcomes?" answered as a READ over the
     -- FOLDED consensus layer — never a query-time aggregation of raw evidence.
     --
@@ -57,5 +58,5 @@ CREATE OR REPLACE FUNCTION chess.time_pressure_outcome()
     JOIN mv  ON mv.position = tc.position
     JOIN cls ON cls.id = tc.class_id
     GROUP BY cls.label, cls.ord
-    ORDER BY cls.ord
-$$;
+    ORDER BY cls.ord;
+END;

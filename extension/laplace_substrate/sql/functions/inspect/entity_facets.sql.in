@@ -3,6 +3,6 @@ DROP FUNCTION IF EXISTS ops.entity_facets(bytea);
 CREATE OR REPLACE FUNCTION ops.entity_facets(p_id bytea)
     RETURNS TABLE(tier smallint, type_id bytea)
     LANGUAGE sql STABLE
-    AS $$
-    SELECT e.tier, e.type_id FROM laplace.entities e WHERE e.id = p_id
-$$;
+BEGIN ATOMIC
+    SELECT e.tier, e.type_id FROM laplace.entities e WHERE e.id = p_id;
+END;

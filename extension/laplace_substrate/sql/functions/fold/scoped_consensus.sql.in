@@ -20,7 +20,8 @@ CREATE OR REPLACE FUNCTION consensus.scoped_consensus(p_source_ids bytea[])
     RETURNS TABLE(id bytea, subject_id bytea, type_id bytea, object_id bytea,
                   rating bigint, rd bigint, volatility bigint, witness_count bigint,
                   last_observed_at timestamptz)
-    LANGUAGE sql VOLATILE AS $$
+    LANGUAGE sql VOLATILE
+BEGIN ATOMIC
     SELECT laplace.consensus_id(f.subject_id, f.type_id, f.object_id),
            f.subject_id, f.type_id, f.object_id,
            (f.acc).rating, (f.acc).rd, (f.acc).volatility,
@@ -37,5 +38,5 @@ CREATE OR REPLACE FUNCTION consensus.scoped_consensus(p_source_ids bytea[])
         FROM laplace.attestations a
         WHERE a.source_id = ANY(p_source_ids)
         GROUP BY a.subject_id, a.type_id, a.object_id
-    ) f
-$$;
+    ) f;
+END;

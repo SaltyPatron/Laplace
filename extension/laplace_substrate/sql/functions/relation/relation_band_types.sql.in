@@ -23,24 +23,26 @@
 -- becomes a bound parameter rather than an opaque function scan.
 CREATE OR REPLACE FUNCTION laplace.relation_band_types(p_band int)
     RETURNS bytea[]
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     SELECT COALESCE(array_agg(e.id), '{}'::bytea[])
     FROM laplace.entities e
     WHERE e.type_id = laplace.entity_type_id('RelationType')
-      AND consensus.relation_highway_band(e.id) = p_band
-$$;
+      AND consensus.relation_highway_band(e.id) = p_band;
+END;
 
 -- Multi-band form. Callers testing several bands (the content bands 1/2/4/7 are
 -- the common set) get one array rather than N calls unioned, so the probe stays a
 -- single `= ANY`.
 CREATE OR REPLACE FUNCTION laplace.relation_band_types(p_bands int[])
     RETURNS bytea[]
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     SELECT COALESCE(array_agg(e.id), '{}'::bytea[])
     FROM laplace.entities e
     WHERE e.type_id = laplace.entity_type_id('RelationType')
-      AND consensus.relation_highway_band(e.id) = ANY (p_bands)
-$$;
+      AND consensus.relation_highway_band(e.id) = ANY (p_bands);
+END;
 
 -- Retired before release: this helper shipped with no caller. Keep the DROP in
 -- the extension script so an upgrade removes installations from the brief

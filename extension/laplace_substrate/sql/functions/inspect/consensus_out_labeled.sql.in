@@ -9,7 +9,7 @@ CREATE OR REPLACE FUNCTION ops.consensus_out_labeled(p_id bytea, p_limit integer
         eff_mu numeric,
         witnesses bigint)
     LANGUAGE sql STABLE
-    AS $$
+BEGIN ATOMIC
     WITH subj(id) AS (
         SELECT p_id
         UNION
@@ -40,5 +40,5 @@ CREATE OR REPLACE FUNCTION ops.consensus_out_labeled(p_id bytea, p_limit integer
            o.eff_mu,
            o.witness_count
     FROM ordered o, labels
-    ORDER BY o.ord
-$$;
+    ORDER BY o.ord;
+END;

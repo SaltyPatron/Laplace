@@ -3,7 +3,8 @@ CREATE OR REPLACE FUNCTION generation.consensus_type_plane(
         p_vocab bytea[], p_degree_cap int DEFAULT 48, p_types bytea[] DEFAULT NULL)
     RETURNS TABLE(subject_id bytea, object_id bytea, w double precision,
                   type_id bytea, layer_rank double precision)
-    LANGUAGE sql STABLE PARALLEL RESTRICTED AS $$
+    LANGUAGE sql STABLE PARALLEL RESTRICTED
+BEGIN ATOMIC
     WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
          -- MATERIALIZED is load-bearing here: edges is referenced twice below
          -- (rk's DISTINCT type_id scan and ranked's join), so the fence avoids
@@ -41,5 +42,5 @@ CREATE OR REPLACE FUNCTION generation.consensus_type_plane(
              FROM ranked r
          )
     SELECT c.subject_id, c.object_id, c.w, c.type_id, c.rk
-    FROM capped c WHERE c.rn <= p_degree_cap
-$$;
+    FROM capped c WHERE c.rn <= p_degree_cap;
+END;

@@ -9,6 +9,7 @@ DROP FUNCTION IF EXISTS laplace.realize_path(bytea[], bytea[], bytea);
 CREATE OR REPLACE FUNCTION realize.path(p_path bytea[], p_types bytea[],
                                         p_lang bytea DEFAULT NULL)
     RETURNS text
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
-    SELECT realize.path(p_path, p_types, NULL::int[], p_lang)
-$$;
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+    SELECT realize.path(p_path, p_types, NULL::int[], p_lang);
+END;

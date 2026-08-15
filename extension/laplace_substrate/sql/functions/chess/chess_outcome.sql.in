@@ -1,7 +1,8 @@
 DROP FUNCTION IF EXISTS laplace.chess_outcome(boolean, bytea);
 CREATE OR REPLACE FUNCTION chess.outcome(p_as_white boolean, p_result bytea)
     RETURNS smallint
-    LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
+    LANGUAGE sql IMMUTABLE PARALLEL SAFE
+BEGIN ATOMIC
     -- The one place a game header becomes an outcome for ONE of its two players.
     -- A game's HAS_RESULT object is the verbatim PGN result token the decomposer
     -- recorded as content ("1-0" / "0-1" / "1/2-1/2"); which of Win/Draw/Loss
@@ -20,5 +21,5 @@ CREATE OR REPLACE FUNCTION chess.outcome(p_as_white boolean, p_result bytea)
         WHEN p_result = laplace.word_id('0-1')
             THEN (CASE WHEN p_as_white THEN 0 ELSE 2 END)::smallint
         ELSE NULL
-    END
-$$;
+    END;
+END;

@@ -1,7 +1,8 @@
 DROP FUNCTION IF EXISTS laplace.concept_peers(bytea, int);
 CREATE OR REPLACE FUNCTION lexical.concept_peers(p_word bytea, p_limit int DEFAULT 24)
     RETURNS TABLE(peer text, kind text, strength double precision)
-    LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE
+BEGIN ATOMIC
     -- Words related to p_word through a shared content-addressed anchor -- a
     -- synset/ILI concept or a FrameNet frame. Surface- and language-independent
     -- because the bridge is the anchor id, not any rendered string: two words
@@ -70,5 +71,5 @@ CREATE OR REPLACE FUNCTION lexical.concept_peers(p_word bytea, p_limit int DEFAU
     SELECT l.txt AS peer, r.kind, (r.mu::double precision) AS strength
     FROM survivors r JOIN labels l ON l.id = r.member
     WHERE NULLIF(btrim(l.txt), '') IS NOT NULL
-    ORDER BY r.kind, r.mu DESC NULLS LAST, l.txt
-$$;
+    ORDER BY r.kind, r.mu DESC NULLS LAST, l.txt;
+END;

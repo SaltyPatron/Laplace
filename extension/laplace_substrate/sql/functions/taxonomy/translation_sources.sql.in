@@ -7,9 +7,10 @@
 DROP FUNCTION IF EXISTS laplace.translation_sources(bytea);
 CREATE OR REPLACE FUNCTION taxonomy.translation_sources(p_object bytea)
     RETURNS TABLE(subject_id bytea)
-    LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE
+BEGIN ATOMIC
     SELECT c.subject_id
     FROM laplace.v_consensus_unrefuted c
     WHERE c.type_id = laplace.relation_type_id('IS_TRANSLATION_OF')
-      AND c.object_id = p_object
-$$;
+      AND c.object_id = p_object;
+END;
