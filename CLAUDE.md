@@ -134,6 +134,18 @@ same change.
   in-edge arm, identical 71,405 rows: join 49,861 ms, LATERAL 104,764 ms, array probe **60 ms**.
   An accurate row estimate alone does **not** fix it: the same join against an ANALYZEd
   229-row temp table still cost 49,861 ms.
+- **`relation_type_id('X')` is free — it is a hash, not a lookup.** The chain is
+  `laplace.relation_type_id` → `realize.canonical_id` → `laplace_hash128_blake3(name)`. It never
+  touches a table, which is why it is honestly `IMMUTABLE`: the id *is* the BLAKE3-128 of the
+  canonical name (§3). With a constant argument the planner folds it to a literal `bytea` at
+  plan time, so sixteen of them in a `WHERE` clause cost sixteen hashes **once**, during
+  planning — not per row. A function whose argument is a **column**
+  (`consensus.relation_type_in_family(c.type_id, …)`) cannot fold and runs per row; that one is
+  compiled C at `procost 1`, measured 17.9 ms across all 426 relation types.
+- **Planning is not free on a 216-leaf table.** `consensus.salient_facts(word_id('water'))`
+  plans a **533-node** tree in **545 ms** to return 24 rows, because it references `consensus`
+  many times and each reference expands across the partition set. Execution was 5,167 ms.
+  Count plan nodes before blaming a scan.
 - **Declared row estimates are absent.** 239 of the 244 set-returning functions ship Postgres'
   default `prorows = 1000`; only the five model-lane functions declare a real one. A wrong
   estimate on the inner side of a join is what makes scanning look cheaper than probing.
