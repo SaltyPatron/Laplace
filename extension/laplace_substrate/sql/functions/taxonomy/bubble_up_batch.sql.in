@@ -38,7 +38,8 @@ RETURNS TABLE(
     domain_hits bigint,
     witnesses bigint
 )
-LANGUAGE sql STABLE PARALLEL SAFE AS $$
+LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
 WITH terms AS (
     SELECT DISTINCT t AS term
     FROM unnest(COALESCE(p_terms, ARRAY[]::bytea[])) AS t
@@ -220,8 +221,12 @@ ordered AS (
                                        rk.rank_key DESC, rk.synset_id) AS rn
     FROM ranked rk
 )
-SELECT term, sense_id, synset_id, via_relation, score, base_eff_mu, domain_hits, witnesses
-FROM ordered
-WHERE p_k IS NULL OR rn <= GREATEST(p_k, 1)
-ORDER BY term, rn
-$$;
+-- QUALIFIED, not bare: under BEGIN ATOMIC the RETURNS TABLE names are in scope,
+-- so an unqualified `term` is ambiguous against the output parameter and the
+-- function fails to create.
+SELECT o.term, o.sense_id, o.synset_id, o.via_relation, o.score, o.base_eff_mu,
+       o.domain_hits, o.witnesses
+FROM ordered o
+WHERE p_k IS NULL OR o.rn <= GREATEST(p_k, 1)
+ORDER BY o.term, o.rn;
+END;

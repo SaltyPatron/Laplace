@@ -26,12 +26,12 @@ DROP FUNCTION IF EXISTS converse.attested_language_batch(bytea[]);
 CREATE OR REPLACE FUNCTION converse.attested_language_batch(p_ids bytea[])
     RETURNS TABLE(id bytea, lang bytea)
     LANGUAGE sql STABLE PARALLEL SAFE
-AS $$
+BEGIN ATOMIC
     SELECT DISTINCT ON (a.subject_id) a.subject_id, a.context_id
     FROM laplace.attestations a
     JOIN laplace.entities e ON e.id = a.context_id
                            AND e.type_id = realize.canonical_id('Language')
     WHERE a.subject_id = ANY (p_ids)
     GROUP BY a.subject_id, a.context_id
-    ORDER BY a.subject_id, SUM(a.sum_score_fp1e9) DESC, a.context_id
-$$;
+    ORDER BY a.subject_id, SUM(a.sum_score_fp1e9) DESC, a.context_id;
+END;
