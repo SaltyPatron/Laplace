@@ -661,3 +661,121 @@ common path entirely; `graph_contrast` backs `converse.contrast`.
 The general claim that the C layer is "a serial SPI driver" (item 2) does not survive this
 check and is withdrawn. What does survive: **zero files use threads**, so the C layer is
 single-threaded, and it delegates ranking work to SQL rather than computing it.
+
+---
+
+## S. CI — every red pipeline, cause and state (2026-08-15)
+
+The last green foundation seed was 31688163001 (2026-08-13 09:47). Everything after it
+was red. Six distinct causes, not one.
+
+### S1. `actions/checkout` EACCES — blocked every run on `main` — **LANDED (#1102)**
+
+Both merge runs (31905602463 / #1100, 31905612757 / #1101) failed inside checkout, before
+any job step:
+
+```
+EACCES: permission denied, unlink
+'.../_work/Laplace/Laplace/app/Laplace.Cli/bin/Release/net10.0/logs/laplace-cli.csv'
+```
+
+`logs/` was `ahart:ahart 755` inside the `laplace-runner` workspace (Aug 14 18:48). Parent
+`775 laplace-runner` let the runner in; `logs/` did not.
+
+Cause: `LaplaceInstall.OpsLogDirectory` defaulted to `$InstallRoot/logs`, and `$InstallRoot`
+is `AppContext.BaseDirectory` — inside the checkout for a repo build. Any user running the
+built CLI poisons the workspace permanently.
+
+- [x] Directory removed; workspace scanned for other non-runner paths.
+- [x] Default resolves to the per-user state dir when the binary is under a working tree.
+- [x] Gated by `Laplace.Core.Tests/Core/OpsLogDirectoryTests` — both host locations asserted
+      and both exercised on Linux (default host; `LAPLACE_BUILD_ROOT` host). Fails on the old
+      property (1/2), passes on the new (2/2).
+
+### S2. Policy job — ISA literalism gate — **PR #1103, every violation mine**
+
+Masked by S1 until checkout worked (31906799492).
+
+- [x] g12: `attested_language_batch`, `word_adjacency`, `bubble_up_batch` converted to
+      `BEGIN ATOMIC`; verified creating clean against the live substrate in a rolled-back
+      transaction. `bubble_up_batch`'s bare final SELECT qualified — `RETURNS TABLE` names
+      are in scope under ATOMIC.
+- [x] g12 stale `lexical_peers` removed (it became plpgsql); ceiling 216 → 215.
+- [x] g3 stale `synset_gloss::HAS_DEFINITION` removed.
+- [x] g3: `sql/generated/` exempted — codegen rendering of the manifest, the same directory
+      G14 already exempts.
+- [x] g3: `relate_path` 239 → 262, visible raise. The compliant form was MEASURED first:
+      folded literals 29.9 s / 24.2 s vs InitPlan arrays 46.9 s / 38.4 s (warm, identical
+      1-row result) — 59% cost, refused.
+- [ ] **Durable fix**: declare `relate_path`'s lateral (11) and upward (2) relation sets in
+      `engine/manifest/relation_types.toml` so codegen emits foldable accessors. No existing
+      family is equivalent — measured live, `IS_A` holds 3 members against the 2 wanted,
+      `IS_SYNONYM_OF` holds only itself against 11.
+
+### S3. Four "failed" knowledge seeds that SUCCEEDED — **already fixed, re-running**
+
+`795e1a54` (08-13) restored a throughput gate that parses
+`$RUNNER_TEMP/laplace-ingest/laplace-ingest-<source>.log` for `INGEST_TIMING` — a line that
+at the time went only to the job console. Every clean ingest died on
+`ingest-baseline: no timing lines found in input`.
+
+| source | ingest result | job |
+|---|---|---|
+| atomic2020 | `elapsed_s=244 rc=0` | failed |
+| omw | rc=0 | failed |
+| conceptnet | `elapsed_s=1438 rc=0` | failed |
+| wiktionary | `elapsed_s=21698 rc=0` (6 h) | failed |
+
+- [x] Cause identified; fixed by `3bd8f25c` (08-14), which appends `INGEST_TIMING` to the
+      detail log (`ingest-source.sh:77`). No further code change needed.
+- [x] omw / atomic2020 / conceptnet re-dispatched (31907872473, 31907896161, 31907894845).
+- [ ] wiktionary re-dispatch — CANCELLED deliberately (31907897393): a 6-hour run behind a
+      per-source concurrency guard blocks the queue. Run it alone, not behind three others.
+
+### S4. UD — OOM-killed, and the working-set budget does not bound RSS — **OPEN, real defect**
+
+```
+Out of memory: Killed process 2282897 (dotnet)
+total-vm:381196684kB, anon-rss:83136288kB, oom_score_adj:500
+```
+
+83 GB RSS on a 135 GB box, killed at 30/686 treebank files (18,765 / 1,853,007 sentences,
+1,041,493 rows). Declared `working_set_budget_bytes=4294967296` — **4 GiB**, a 20x overrun.
+Trigger was a co-tenant (`cpuset=minecraft-vanilla.service`) invoking the global OOM killer;
+the ingest was chosen on `oom_score_adj`.
+
+- [x] Established that `IngestSizing`'s budget only sizes batches, channels and
+      `max_intents` — it bounds in-flight batch memory, never long-lived structures.
+- [ ] Identify what actually holds 83 GB. Prime suspect is the presence preload
+      (`NpgsqlWorkingSetApply.PreloadPresenceSetsAsync`), two
+      `ConcurrentDictionary<Hash128,byte>` over every entity + physicality id — but it is
+      gated on `LAPLACE_PRESENCE_PRELOAD` / `NpgsqlIndexCycle.Deferred` and whether it ran
+      in that job is NOT yet established. Do not report a cause without the log line.
+- [ ] Bound it by construction, per CLAUDE.md — not by a tuned cap.
+
+### S5. Chess — Postgres restarted underneath a running seed — **OPEN (policy)**
+
+```
+sudo: ahart : PWD=/home/ahart/Projects/Laplace ; USER=root ;
+COMMAND=/usr/bin/systemctl restart laplace-postgresql.service
+```
+22:36:41, mid-seed → `57P03: the database system is shutting down`, rc=1 after 1 s.
+
+- [ ] A seed preempted by a deliberate PG bounce reports as `failure`. `laplace.yml` already
+      states preemption is by design and seeds are resumable — the run status should say
+      preempted, not failed, or the seed should wait on the bounce.
+
+### S6. Chess ingest state — partial, NOT corrupted (measured 2026-08-15)
+
+`ChessPgn`: 2 cancelled, 1 failed, zero `ok`.
+
+| measure | value |
+|---|---|
+| attestations written by the 3 incomplete runs | 20,866,751 |
+| distinct attestations in the substrate | 1,472,737 |
+
+Content addressing collapsed every re-write; re-ingest converges rather than duplicating.
+The `verify — re-ingest does not double-count` job is skipped whenever ingest fails, so this
+is the first measurement of it since those runs.
+
+- [ ] Complete a `ChessPgn` run to `ok` — it has never reached it.
