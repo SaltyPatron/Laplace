@@ -94,17 +94,18 @@ resolved AS (
 -- is dropped only when both sides have a primary language and they differ.
 -- Candidates with no HAS_LANGUAGE (concepts) and terms with no language are
 -- untouched, so this can only narrow a language-blind set, never empty a
--- concept-level one. converse.word_language IS the primary-language definition
--- (argmax over HAS_LANGUAGE); a boolean "has an edge to the query language" does
--- not discriminate, because loanwords carry English edges too.
+-- concept-level one. converse.attested_language IS the primary-language definition:
+-- the argmax over the PROVENANCE of the surface's own testimony, weighted by the
+-- fold's own inputs. A boolean "has an edge to the query language" does not
+-- discriminate, because loanwords carry English edges too.
 term_lang AS MATERIALIZED (
-    SELECT converse.word_language(p_term) AS id
+    SELECT converse.attested_language(p_term) AS id
 ),
 scoped AS (
     SELECT r.* FROM resolved r
     WHERE (SELECT id FROM term_lang) IS NULL
-       OR converse.word_language(r.synset_id) IS NULL
-       OR converse.word_language(r.synset_id) = (SELECT id FROM term_lang)
+       OR converse.attested_language(r.synset_id) IS NULL
+       OR converse.attested_language(r.synset_id) = (SELECT id FROM term_lang)
 ),
 domain AS (
     SELECT DISTINCT d AS id
