@@ -387,6 +387,32 @@ Core, benchmarked: **≥500k tokens/sec floor on commodity CPU, no GPU required*
 **measured 10x with a 1080Ti** when present (GPU is a multiplier, never a requirement). No
 session has produced a benchmark contradicting these.
 
+**There was no harness for that figure until 2026-08-15** — `just --list | grep bench` gave
+only `build-perfcache` / `verify-perfcache`, `ninja -t targets all | grep bench` gave nothing,
+and `BenchCommands.cs` holds only `svd-exact-bench` and `model-bench`, neither of which
+measures composition. The number was true and unreproducible, which is the same shape as an
+unmeasured dial. `scripts/bench-compose.py` now measures it on the core — UTF-8 in,
+`content_witness_tree_build` out, no database, no COPY, bounded first-party corpus so the
+input cannot drift between runs.
+
+Measured 2026-08-15, 875 documents / 67.9 MB / 67,899,577 codepoints, three runs within 0.4%:
+
+| | per thread |
+|---|---|
+| codepoints/s | **1,859,000** |
+| BPE-equivalent tokens/s (4 chars/token) | **464,800** |
+| tier-tree nodes/s | **4,555,400** (166,383,573 nodes built) |
+
+Read that as a **floor**: single-threaded, on a box with 12 physical cores and another agent
+working, and `content_tree_build` is lock-free and per-call (`Decomposer.cs:265`) so it fans
+out. The aggregate figure is deliberately not stated here — nobody has measured it, and
+multiplying by a core count is how the original number became folklore.
+
+The unit matters when comparing to a model. A BPE token is a subword byte string whose meaning
+lives only in the weights; a Laplace constituent is an entity with a merkle id, a coordinate,
+and typed edges carrying ratings and witness counts. Tokens/sec across the two is a category
+error in both directions — quote the codepoint figure, which is what the core actually consumes.
+
 Read paths: the timings in §9. Slow surfaces there are query plans, partition scans, and a
 resolver selecting the wrong token — defects layered on the core. Refuting a throughput figure
 requires benchmarking the same path under the same conditions.
