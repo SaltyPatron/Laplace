@@ -256,6 +256,23 @@ wall clock do not stand** until re-measured on a quiet database, repeated.
 Before any further optimisation work: confirm no ingest run is active, then measure each
 variant at least 3 times.
 
+**VALIDATED 2026-08-15 on a QUIET database** (0 active backends, all 9 ingest runs `ok`) —
+the first trustworthy end-to-end numbers of the session:
+
+| surface | rows | session start | quiesced now |
+|---|---|---|---|
+| `realize.resolve_name` (context branch) | 1 | 36,000 ms | **0 ms** |
+| `generation.separator_ids` | 85 | 9,450 ms | **11 ms** |
+| `lexical.senses('wolf')` | 39 | — | **71 ms** |
+| `lexical.senses(dog, [animal,pet])` | 8 | 7,482 ms | **1,340 ms** |
+| `taxonomy.tree('wolf')` | 32 | — | **234 ms** |
+| `consensus.relate_path(dog,animal,4)` | 1 | — | **176 ms** |
+| `taxonomy.bubble_up_batch` (20 terms) | 1,002 | — | **1,087 ms** |
+| `consensus.salient_facts('water')` | 24 | 5,167 ms | **2,454 ms** |
+
+Remaining slow, in order: `salient_facts` (dominated by `realize.batch`, item Q),
+`senses(word, context)`, `bubble_up_batch` (dominated by `cand_lang`, item 1).
+
 ## M. Partitioning — the detector already exists and its output was never acted on
 
 `ops.consensus_partition_pressure(min_rows bigint DEFAULT 100000)` names unpartitioned
