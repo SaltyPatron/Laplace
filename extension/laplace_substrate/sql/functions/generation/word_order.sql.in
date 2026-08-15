@@ -16,6 +16,9 @@ CREATE OR REPLACE FUNCTION generation.word_order(p_vocab bytea[], p_trajs int DE
     -- The continuation lane values the same rows by the adjudicated standing of the
     -- witnessing composition instead; keeping one extraction body is what stops the
     -- counter and the belief reader from drifting (§15).
+    -- sep_id is dropped HERE, at the count, not at the extraction: what sits
+    -- between two entities is real content and word_adjacency carries it. A caller
+    -- that needs it reads word_adjacency directly.
     SELECT a.subject_id, a.object_id, count(*)::float8
     FROM generation.word_adjacency(p_vocab, p_trajs, p_gap) a
     GROUP BY a.subject_id, a.object_id
