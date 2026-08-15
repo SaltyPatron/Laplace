@@ -102,7 +102,12 @@ CREATE TABLE IF NOT EXISTS laplace.sql_tier_sweep(
     measured_at timestamptz DEFAULT now());
 DELETE FROM laplace.sql_tier_sweep WHERE tier = :tier;
 
-CREATE OR REPLACE PROCEDURE laplace.sql_tier_sweep_run(p_tier int, p_cap text DEFAULT '2s')
+-- NO p_cap PARAMETER. It was declared and never read: the caps are set at SESSION
+-- level below, because this procedure COMMITs after every function and a SET LOCAL is
+-- transaction-scoped, so a per-iteration cap is dropped and silently does nothing --
+-- measured, converse.hypernyms ran 4.5 MINUTES under a 2s cap that was never in force.
+-- A parameter the body cannot honour is a lie about the API; the caller sets the caps.
+CREATE OR REPLACE PROCEDURE laplace.sql_tier_sweep_run(p_tier int)
 LANGUAGE plpgsql AS $proc$
 DECLARE r record; t0 timestamptz; n bigint; nn bigint; call text;
 BEGIN
