@@ -565,3 +565,30 @@ content. The projection would have made a wrong model faster.
 The underlying problem it was meant to solve (English `wolf` losing to Portuguese `lobo` in
 `bubble_up`) is therefore still open, and the fix belongs at the boundary between election and
 realization, not in a language column.
+
+
+## Y. Covering index — proven 5.25x, with a precondition, and a sized cost
+
+The canonical forward read (`subject_id + type_id` selecting `object_id, rating, rd,
+witness_count`) plans as `Index Scan`, never `Index Only`, because the payload columns are
+not in the index. Tested by building one covering index on a single leaf
+(`consensus_r_is_a_h5`, 125,343 rows, built in **100 ms**):
+
+| index | plan | heap fetches | buffers |
+|---|---|---|---|
+| existing `(subject_id, type_id)` | Index Scan | — | **21** |
+| `+ INCLUDE (object_id, rating, rd, witness_count)` | Index Only Scan | **42** | 22 |
+| same, **after VACUUM** | Index Only Scan | **0** | **4** |
+
+**The covering index alone buys NOTHING** — 22 buffers against 21, because every row still
+hits the heap for visibility. It pays only once VACUUM has set the visibility map, and then
+it is **5.25x** on the substrate's most common read. On a table taking continuous ingest
+writes that precondition is not free.
+
+Sizing: the existing `(subject_id, type_id)` index family is **13 GB** across 216 leaves.
+Adding `object_id` (16B) + `rating` (8B) + `rd` (8B) + `witness_count` ≈ 40B/row over 371M
+rows ≈ **+15 GB**. Against an estate already at 226 GB with 126 GB never or barely scanned,
+that is a reasonable trade — but it is a schema and disk decision, and it comes bundled with
+a VACUUM policy, so it is the owner's.
+
+- [ ] Decide: covering index + VACUUM policy, or leave the heap fetches.
