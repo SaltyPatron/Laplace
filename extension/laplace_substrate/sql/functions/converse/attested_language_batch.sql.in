@@ -22,6 +22,18 @@
 -- Ids with no Language-typed attestation return NO ROW, not a NULL row. Callers
 -- LEFT JOIN and treat the absence as "no primary language", which is the same
 -- structural answer the scalar's NULL carried.
+-- DROP ORDER IS LOAD-BEARING (same law as metric_ladder.sql.in:41-42).
+-- taxonomy.bubble_up_batch is BEGIN ATOMIC and calls BOTH this function and
+-- consensus.relation_family_ids, so the live catalog pins both their OIDs in
+-- pg_depend. On a live-DB `ALTER EXTENSION UPDATE` — where all three already
+-- exist — the installed dependent RESTRICTs its bases and the drop below fails.
+-- A fresh install never sees it, because nothing is installed to pin anything;
+-- only the live catalog knows, which is what scripts/check-upgrade-drop-order.py
+-- asks. This file is the FIRST of the two bases in manifest.upgrade (174, against
+-- generated/relation_family_ids.sql.in at 219), and the gate takes the first drop
+-- position for a name, so dropping the dependent here clears both hazards.
+-- Its CREATE stays at 330, after both bases exist, which BEGIN ATOMIC requires.
+DROP FUNCTION IF EXISTS taxonomy.bubble_up_batch(bytea[], bytea[], integer);
 DROP FUNCTION IF EXISTS converse.attested_language_batch(bytea[]);
 CREATE OR REPLACE FUNCTION converse.attested_language_batch(p_ids bytea[])
     RETURNS TABLE(id bytea, lang bytea)
