@@ -551,8 +551,10 @@ internal sealed class SubstrateTools
             ["depth"] = r.Depth,
             ["path"] = r.Path,
             ["eff_mu"] = Math.Round(r.EffMu, 1),
-            ["path_mu"] = Math.Round(r.PathMu, 1),
-            ["witnesses"] = r.Witnesses,
+            // null, not 0: the greedy chain computes no path aggregate and counts no
+            // witnesses. JSON null is the structural answer (INVENTION §7).
+            ["path_mu"] = r.PathMu is { } pm ? JsonValue.Create(Math.Round(pm, 1)) : null,
+            ["witnesses"] = r.Witnesses is { } w ? JsonValue.Create(w) : null,
         }));
     }
 

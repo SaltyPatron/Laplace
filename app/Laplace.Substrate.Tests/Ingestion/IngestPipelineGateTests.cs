@@ -139,7 +139,10 @@ public sealed class IngestPipelineGateTests : IClassFixture<LocalPgFixture>, IAs
         warmSw.Stop();
 
         Assert.Equal(0, warm.UnitsFailed);
-        Assert.True(warm.UnitsApplied > 0);
+        // `> 0` let this gate pass on a run that touched one unit: the elapsed time then
+        // measures a no-op, not an input scan, and the s/GB figure is meaningless. The warm
+        // path must re-read every unit it was given.
+        Assert.Equal(unitCount, warm.UnitsApplied);
 
         double mbPerSec = inputBytes / (1024.0 * 1024.0) / warmSw.Elapsed.TotalSeconds;
         Assert.True(warmSw.Elapsed.TotalSeconds <= maxSeconds,

@@ -1964,15 +1964,34 @@ public static class NpgsqlSubstrateReads
                 p.AddWithValue("limit", limit);
             }, ct: ct, label: "translations", onError: onError);
 
+    /// <param name="PathMu">Accumulated path belief. NULL on the greedy chain, which computes
+    /// no aggregate: a chain step's belief is the step's own, and copying EffMu here would
+    /// invent an aggregate the walk never took.</param>
+    /// <param name="Witnesses">Corroboration breadth (INVENTION §5), distinct from strength.
+    /// NULL when the shape did not count them — 0 asserts "no witness", a claim about
+    /// evidence that was never measured.</param>
     public readonly record struct WalkBranchRow(
-        int Depth, string Path, decimal EffMu, decimal PathMu, long Witnesses);
+        int Depth, string Path, decimal EffMu, decimal? PathMu, long? Witnesses);
 
-    /// <summary><c>consensus.walk_branches</c> over converse.resolve(prompt) or a hex entity id.</summary>
+    private static WalkBranchRow MapWalkBranch(NpgsqlDataReader r) => new(
+        r.GetInt32(0), r.GetString(1), r.GetDecimal(2),
+        r.IsDBNull(3) ? null : r.GetDecimal(3),
+        r.IsDBNull(4) ? null : r.GetInt64(4));
+
+    /// <summary>
+    /// <c>consensus.walk_branches</c> over converse.resolve(prompt) or a hex entity id.
+    /// Unfiltered walk_branches Append-scans every relation-type partition, so the beam shape
+    /// is only available when a relation type bounds the scan; with no lens this degrades to
+    /// the greedy strongest chain. The choice lives here, at the single reads entry point, so
+    /// every caller inherits it.
+    /// </summary>
     public static Task<IReadOnlyList<WalkBranchRow>> WalkBranchesAsync(
         NpgsqlDataSource dataSource, string? prompt, string? entityHex, string? relationType,
         int depth, int breadth, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
-        NpgsqlRead.ReadRowsAsync(dataSource, """
+        string.IsNullOrWhiteSpace(relationType)
+        ? WalkStrongestChainAsync(dataSource, null, prompt, entityHex, depth, ct, onError)
+        : NpgsqlRead.ReadRowsAsync(dataSource, """
             WITH node AS (SELECT CASE WHEN @e IS NULL THEN converse.resolve(@p)
                                       ELSE decode(@e, 'hex') END AS id)
             SELECT w.depth,
@@ -1984,8 +2003,7 @@ public static class NpgsqlSubstrateReads
                      @depth, @breadth) w
             ORDER BY w.depth, w.path_mu DESC
             """,
-            static r => new WalkBranchRow(
-                r.GetInt32(0), r.GetString(1), r.GetDecimal(2), r.GetDecimal(3), r.GetInt64(4)),
+            MapWalkBranch,
             p =>
             {
                 // Explicit types: a DBNull with no NpgsqlDbType leaves the wire type
@@ -2000,6 +2018,40 @@ public static class NpgsqlSubstrateReads
                 p.AddWithValue("depth", depth);
                 p.AddWithValue("breadth", breadth);
             }, ct: ct, label: "walk_branches", onError: onError);
+
+    /// <summary>
+    /// The one body that reads <c>consensus.walk_strongest</c> (INVENTION §15: a second body
+    /// expressing the same quantity is a future divergence). Accepts an already-resolved topic,
+    /// a prompt, or a hex entity id; the node CTE is the only difference between callers.
+    /// Unfiltered walk_branches Append-scans every relation-type partition, so without a
+    /// relation type the beam is unavailable and this greedy chain is the shape that returns.
+    /// </summary>
+    public static Task<IReadOnlyList<WalkBranchRow>> WalkStrongestChainAsync(
+        NpgsqlDataSource dataSource, byte[]? topic, string? prompt, string? entityHex, int depth,
+        CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            WITH node AS (SELECT CASE WHEN @t IS NOT NULL THEN @t
+                                      WHEN @e IS NOT NULL THEN decode(@e, 'hex')
+                                      ELSE converse.resolve(@p) END AS id)
+            SELECT w.step::int AS depth,
+                   converse.label_or_hex(w.entity_id)
+                     || COALESCE(' (' || consensus.relation_canonical(w.type_id) || ')', '') AS path,
+                   w.eff_mu::numeric AS eff_mu,
+                   NULL::numeric AS path_mu,
+                   NULL::bigint AS witnesses
+            FROM node, consensus.walk_strongest(node.id, NULL, @depth) w
+            ORDER BY w.step
+            """,
+            MapWalkBranch,
+            p =>
+            {
+                // Explicit wire types: an untyped DBNull leaves the parameter undetermined and
+                // the statement fails 42P08. All three are null on some call path.
+                p.Add(new NpgsqlParameter("t", NpgsqlTypes.NpgsqlDbType.Bytea) { Value = (object?)topic ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("p", NpgsqlTypes.NpgsqlDbType.Text) { Value = (object?)prompt ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("e", NpgsqlTypes.NpgsqlDbType.Text) { Value = (object?)entityHex ?? DBNull.Value });
+                p.AddWithValue("depth", depth);
+            }, ct: ct, label: "walk_strongest_chain", onError: onError);
 
     public readonly record struct ApiCatalogRow(string Name, string? Args, string? Returns);
 
@@ -2145,23 +2197,19 @@ public static class NpgsqlSubstrateReads
                 p.AddWithValue("limit", limit);
             }, ct: ct, label: "band_facts", onError: onError);
 
-    /// <summary><c>consensus.walk_strongest(topic, NULL, depth)</c> — greedy single chain.</summary>
-    public static Task<IReadOnlyList<ConverseReplyRow>> WalkStrongestAsync(
+    /// <summary>
+    /// <c>consensus.walk_strongest(topic, NULL, depth)</c> — greedy single chain, projected as
+    /// a converse reply. Adapter only: <see cref="WalkStrongestChainAsync"/> owns the query, so
+    /// the two surfaces cannot drift (INVENTION §15).
+    /// </summary>
+    public static async Task<IReadOnlyList<ConverseReplyRow>> WalkStrongestAsync(
         NpgsqlDataSource dataSource, byte[] topic, int depth, CancellationToken ct,
-        NpgsqlRead.ErrorTranslator? onError = null) =>
-        NpgsqlRead.ReadRowsAsync(dataSource, """
-            SELECT converse.label_or_hex(w.entity_id)
-                     || ' (' || consensus.relation_canonical(w.type_id) || ')' AS reply,
-                   w.eff_mu, NULL::bigint
-            FROM consensus.walk_strongest(@topic, NULL, @depth) w
-            ORDER BY w.step
-            """,
-            MapConverseReply,
-            p =>
-            {
-                p.Add("topic", NpgsqlDbType.Bytea).Value = topic;
-                p.AddWithValue("depth", depth);
-            }, ct: ct, label: "walk_strongest", onError: onError);
+        NpgsqlRead.ErrorTranslator? onError = null)
+    {
+        var chain = await WalkStrongestChainAsync(
+            dataSource, topic, null, null, depth, ct, onError).ConfigureAwait(false);
+        return [.. chain.Select(r => new ConverseReplyRow(r.Path, r.EffMu, r.Witnesses))];
+    }
 
     /// <summary>
     /// <c>consensus.walk_branches</c> gated by a highway band mask and/or named relation type.
