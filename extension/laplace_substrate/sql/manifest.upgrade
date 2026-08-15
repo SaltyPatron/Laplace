@@ -214,6 +214,7 @@ functions/converse/structural_locale.sql.in
 functions/converse/links.sql.in
 inference/attention.sql.in
 functions/converse/correlate.sql.in
+generated/relation_family_ids.sql.in
 generated/seed_relation_types.sql.in
 generated/seed_relation_partitions.sql.in
 generated/seed_pos.sql.in
