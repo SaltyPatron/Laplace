@@ -91,15 +91,27 @@ compiled perfcache. Compiling it is the remaining option; scanning for it is not
 
 ## Tier-0 sweep harness
 
-Zero-argument leaves can be exercised directly. `SET LOCAL statement_timeout` inside the loop
-is required: without it the sweep dies on the first slow leaf —
-`ops.consensus_tier_distribution()` exceeds 300 s.
+Zero-argument leaves can be exercised directly. Two things are mandatory.
+
+**Force the value.** `SELECT count(*) FROM (SELECT fn()) q` does **not** evaluate `fn()` — the
+count needs no column, so the planner elides the call. A first sweep using that form reported
+`generation.separator_ids` at **0.2 ms** when it actually takes **10–26 s**. Scalar returns
+must be consumed (cast to text and tested `IS NOT NULL`); set returns must be counted from the
+FROM clause.
+
+**Cap each call.** Without `SET LOCAL statement_timeout` inside the loop the sweep dies on the
+first slow leaf.
 
 ```sql
-DO $$ DECLARE r record; t0 timestamptz; BEGIN
-  FOR r IN SELECT fq FROM leaf0 ORDER BY fq LOOP
-    BEGIN SET LOCAL statement_timeout='20s'; t0:=clock_timestamp();
-      EXECUTE format('SELECT count(*) FROM (SELECT %s) q', r.fq||'()');
+DO $$ DECLARE r record; t0 timestamptz; n bigint; BEGIN
+  FOR r IN SELECT fq, proretset FROM leaf0 ORDER BY fq LOOP
+    BEGIN SET LOCAL statement_timeout='30s'; t0:=clock_timestamp();
+      IF r.proretset THEN
+        EXECUTE format('SELECT count(*) FROM %s() q', r.fq) INTO n;
+      ELSE
+        EXECUTE format('SELECT count(*) FROM (SELECT (%s())::text AS v) q WHERE q.v IS NOT NULL',
+                       r.fq) INTO n;
+      END IF;
       INSERT INTO tm VALUES (r.fq, EXTRACT(epoch FROM clock_timestamp()-t0)*1000, NULL);
     EXCEPTION WHEN OTHERS THEN
       INSERT INTO tm VALUES (r.fq, EXTRACT(epoch FROM clock_timestamp()-t0)*1000, SQLERRM);
@@ -107,5 +119,12 @@ DO $$ DECLARE r record; t0 timestamptz; BEGIN
   END LOOP; END $$;
 ```
 
-22 of the 130 tier-0 leaves take no arguments. The rest need a fixture argument set per
-signature, which does not exist yet.
+A killed `psql` does not kill its backend. An orphaned harness holding catalog locks blocks
+`ALTER EXTENSION` with `canceling statement due to lock timeout`; find it in
+`pg_stat_activity` and `pg_cancel_backend` it before diagnosing anything else.
+
+22 of the 130 tier-0 leaves take no arguments. Measured, with the forcing form:
+`ops.consensus_tier_distribution` **549,925 ms**, `consensus.stats` **134,740 ms**,
+`generation.separator_ids` 10–26 s, `ops.app_log` 201 ms, `generation.corpus_trajectory_probe`
+41 ms, the rest ≤ 3 ms. The remaining 108 leaves need a fixture argument set per signature,
+which does not exist yet.
