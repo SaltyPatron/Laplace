@@ -217,14 +217,34 @@ BEGIN
     -- LM-Head slot: realize.realize(concept, p_lang) finally gets to choose the
     -- language member instead of parroting the witness's surface — p_lang
     -- bites.
+    kept_ids AS MATERIALIZED (
+        SELECT DISTINCT k.entity_id AS id FROM kept k
+    ),
+    -- ONE election for every kept token, not one election per token.
+    --
+    -- This was a scalar subquery calling lexical.senses(d.id) per distinct token, which
+    -- re-ran taxonomy.bubble_up's whole CTE cascade each time. Measured under
+    -- auto_explain on compose_batch('what is a wolf', 12): CTE Scan `scoped`
+    -- 51,351 ms over 798 loops, `cand_lang` 32,438 ms over 728 loops, `family_out`
+    -- 15,358 ms over 2,394 loops -- 51.4 s of a 52.2 s statement, to elect senses
+    -- for ~266 distinct tokens. The per-token work is small; the repetition was the
+    -- cost. cand_lang collapses hardest: attestations cannot prune on subject_id, so
+    -- the scalar form paid the full partition set once PER TOKEN.
+    --
+    -- Same ordering keys lexical.senses applied (witnesses, then base_eff_mu), and no k --
+    -- bubble_up_batch's p_k defaults to NULL, so the election sees every candidate
+    -- instead of a per-token prefix of one ordering.
+    sense_pick AS MATERIALIZED (
+        SELECT DISTINCT ON (b.term) b.term, b.synset_id
+        FROM taxonomy.bubble_up_batch(ARRAY(SELECT id FROM kept_ids)) b
+        ORDER BY b.term, b.witnesses DESC, b.base_eff_mu DESC NULLS LAST, b.synset_id
+    ),
     concept_map AS MATERIALIZED (
-        SELECT d.id AS wid,
-               COALESCE(
-                   (SELECT s.synset_id FROM lexical.senses(d.id) s
-                     ORDER BY s.witnesses DESC, s.eff_mu DESC NULLS LAST,
-                              s.synset_id LIMIT 1),
-                   d.id) AS cid
-        FROM (SELECT DISTINCT k.entity_id AS id FROM kept k) d
+        -- Tokens with no sense (numbers, names, glue) keep their surface id, so
+        -- realization still has something to print.
+        SELECT k.id AS wid, COALESCE(sp.synset_id, k.id) AS cid
+        FROM kept_ids k
+        LEFT JOIN sense_pick sp ON sp.term = k.id
     ),
     seq AS MATERIALIZED (
         -- THE STEER. Provenance weight (which source) PLUS frontier salience
