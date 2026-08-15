@@ -128,3 +128,80 @@ A killed `psql` does not kill its backend. An orphaned harness holding catalog l
 `generation.separator_ids` 10–26 s, `ops.app_log` 201 ms, `generation.corpus_trajectory_probe`
 41 ms, the rest ≤ 3 ms. The remaining 108 leaves need a fixture argument set per signature,
 which does not exist yet.
+
+## Who calls what: the six populations
+
+Measured 2026-08-15 by collecting every `schema.function` mention across `app/`, `scripts/`,
+`web/`, the C extension sources and the extension tests, and joining that against the 381
+installed functions and the SQL call graph.
+
+| class | functions |
+|---|---|
+| public — called by the app / MCP | 180 |
+| internal — called by another SQL function | 73 |
+| internal — called from the C extension | 56 |
+| **no caller found in any population** | **45** |
+| ops / scripts only | 13 |
+| test only | 6 |
+
+"Unreachable from a SQL entry point" is **not** the same as unused: 88 of 373 are reachable
+from the ten real entry points, and most of the remaining 285 are the entry point for something
+else — the MCP runtime calls `consensus.by_ids` and `chess.moves` directly, visible in
+`pg_stat_activity`. Only the 45 below have no caller in SQL, C, the app, scripts or tests.
+
+## The 45 with no caller anywhere
+
+These are implemented and never wired — whole families, not stragglers. Isolate and account
+for them; do not delete them without knowing why each was built.
+
+- **circuit family** — `generation.circuit_matrix`, `circuit_row`, `circuit_coupling`,
+  `adjudicated_row`, `adjudicated_coupling`
+- **model lane** — `generation.model_attention_row`, `model_pair_cos`, `distill`, `decay`,
+  `prune`, `witness`
+- **generation** — `astar_path`, `continue_text`, `variant_walk`, `respell_variant`,
+  `pos_transition_plane`, `corpus_trajectory_probe`
+- **structural / geometry** — `nearest_neighbors_4d`, `trajectory_prefix_distance`,
+  `word_shape_distance`, `trajectory_point_count`, `geometry_predecessors`, `geometry_audit`,
+  `entity_physicality_coord`, `consensus_export_relations`, `consensus_export_relations_mu`,
+  `consensus_export_unary`
+- **ops diagnostics** — `index_health`, `index_usage_detail`, `index_usage_report`,
+  `ingest_integrity_gate`, `placement_health`, `placement_health_by_tier`,
+  `orphan_physicality_count`, `ducet_ordered`, `metric_ladder_words`
+- **chess** — `distance_to_syzygy`, `missed_finish`, `opening_endgames`, `opening_preference`,
+  `opening_record`, `opening_shape_peers`
+- **other** — `consensus.related_objects`, `converse.recall_interaction_response`,
+  `lexical.word_shape_peers_fast`
+
+`generation.pos_transition_plane` is on this list and was repaired earlier the same day — a
+function can be broken, fixed, and still have no caller.
+
+## Orchestrate versus compute
+
+§15: native libraries hold the math, the extension is a thin versioned surface, the app
+orchestrates and never inlines math a kernel owns. Where that stands:
+
+| language | functions | recursive | window fns | generate_series | LATERAL | body > 2 KB |
+|---|---|---|---|---|---|---|
+| sql | 284 | 2 | 41 | 3 | 57 | 36 |
+| c | 57 | — | — | — | — | — |
+| plpgsql | 40 | 0 | 9 | 2 | 8 | 14 |
+
+57 kernels against 324 orchestrators, of which 50 run window functions, 65 use LATERAL and 50
+carry bodies over 2 KB. Ranked by compute sitting in the orchestration layer (recursive 3,
+window 2, generate_series 2, LATERAL 1, size up to 2):
+
+| function | body | score |
+|---|---|---|
+| `converse.facts` | 9,381 B | 6 |
+| `generation.grapheme_order` | 2,069 B | 6 |
+| `converse.chat` | **27,077 B** | 5 |
+| `generation.walk_batch` | 16,028 B | 5 |
+| `generation.compose_batch` | 15,098 B | 5 |
+| `ops.evidence_receipt` | 8,269 B | 5 |
+| `generation.foundry_vocab_crawl` | 6,184 B | 5 |
+| `converse.infer` | 5,761 B | 5 |
+| `consensus.salient_facts` | 4,777 B | 5 |
+| `consensus.relate_path` | 4,416 B | 5 |
+
+`converse.chat` is the tier-8 entry point and 27 KB of plpgsql — the furthest thing from a thin
+versioned surface in the tree.
