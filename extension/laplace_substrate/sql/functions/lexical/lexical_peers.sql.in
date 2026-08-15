@@ -5,18 +5,40 @@ DROP FUNCTION IF EXISTS laplace.lexical_peers(bytea);
 CREATE OR REPLACE FUNCTION lexical.lexical_peers(p_word bytea)
     RETURNS bytea[]
     LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$
-    -- Orthographic identity peers only: the word itself + its case variants
-    -- (dog/Dog/DOG share senses). The frechet-shape scan that used to live
-    -- here (word_shape_peers_fast) is a native buffer scan costing 0.3-2.4s
-    -- per call and returned nothing on exact lookups — measured 99% of
-    -- lexical.senses()/taxonomy.top_synset()/lexical.define() wall time. Shape-fuzzy matching stays
-    -- available as word_shape_peers_fast for callers that explicitly want it;
-    -- it does NOT belong on the exact sense-lookup hot path.
-    WITH merged AS (
-        SELECT p_word AS id
-        UNION SELECT unnest(lexical.word_case_variant_ids(p_word)) AS id
-    )
-    SELECT COALESCE(array_agg(DISTINCT id ORDER BY id), ARRAY[p_word])
-    FROM merged
-    WHERE id IS NOT NULL
+    -- WIDENING IS A FALLBACK, NOT A FIRST STEP.
+    --
+    -- dog, Dog and DOG are DIFFERENT CONTENT, so they are different hashes and
+    -- different entities -- laplace.word_id('dog') = 01cdcce1..., laplace.word_id('Dog') =
+    -- af1513f0..., equal = false. Merging them asserts an equivalence the identity
+    -- scheme denies, and case folding only exists in bicameral scripts, so it is a
+    -- Latin-script text-preprocessing convention, not a property of this substrate.
+    -- Where the relationship is real the graph already witnesses it: dog and Dog
+    -- carry an attested IS_SYNONYM_OF edge.
+    --
+    -- The previous body widened UNCONDITIONALLY, so every caller paid the case-variant
+    -- routine whether or not the exact word resolved. Measured live in
+    -- laplace.pg_stat_statements: this body 11,964 calls / 96 ms mean / 1,146 s, and the
+    -- native lexical.word_case_variants it calls 12,303 calls / 96 ms / 1,179 s, whose own
+    -- inner `SELECT u.id, realize.render_text(u.id) FROM unnest($1)` is another 12,223
+    -- calls / 88 ms / 1,081 s. Measured on 20 common words, ALL 20 resolve exactly --
+    -- they carry HAS_SENSE-family edges on their own id -- and the old body returned 3
+    -- peers for every one. The widening fired 100% of the time and was needed 0%.
+    --
+    -- Now the exact id is tried first: an indexed (subject_id, type_id) probe that
+    -- prunes to ONE leaf. Only when the exact content witnesses no sense does the
+    -- fallback widen to case variants, which is where "we did not find anything, try
+    -- the variants" belongs.
+    SELECT CASE
+        WHEN EXISTS (SELECT 1 FROM laplace.consensus c
+                      WHERE c.subject_id = p_word
+                        AND c.type_id = ANY (consensus.relation_family_ids('HAS_SENSE')))
+        THEN ARRAY[p_word]
+        ELSE (
+            WITH merged AS (
+                SELECT p_word AS id
+                UNION SELECT unnest(lexical.word_case_variant_ids(p_word)) AS id
+            )
+            SELECT COALESCE(array_agg(DISTINCT id ORDER BY id), ARRAY[p_word])
+            FROM merged WHERE id IS NOT NULL)
+    END
 $$;
