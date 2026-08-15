@@ -13,11 +13,13 @@ AS $$
     -- rendered the chain text for every direct candidate edge even though
     -- ORDER BY len, mu LIMIT 1 kept one row.)
     WITH RECURSIVE
-    lat(k) AS (SELECT laplace.relation_type_id(n) FROM unnest(ARRAY[
-        'IS_SYNONYM_OF','IS_SIMILAR_TO','IS_ANTONYM_OF','HAS_PART','HAS_MEMBER',
-        'HAS_SUBSTANCE','DERIVATIONALLY_RELATED','PERTAINS_TO','ALSO_SEE',
-        'IN_VERB_GROUP_WITH','HAS_ATTRIBUTE']) n),
-    up_k(k) AS (SELECT laplace.relation_type_id(n) FROM unnest(ARRAY['IS_A','IS_INSTANCE_OF']) n),
+    -- The lateral and upward relation sets were CTEs of relation_type_id() over literal
+    -- arrays -- constants -- and each predicate read them back as `type_id IN (SELECT k
+    -- FROM lat)`. relation_type_id is IMMUTABLE (a BLAKE3 hash, no table), so called
+    -- INLINE these fold to a literal bytea[] before planning and the LIST partitions
+    -- prune. Read back from a CTE column they are per-row variables and nothing prunes --
+    -- and two of the four sites sit inside RECURSIVE arms, so the unbound form paid that
+    -- on every iteration. Same defect as realize.resolve_name.
     x_top AS (SELECT sn.synset_id FROM lexical.senses(p_x) sn
               ORDER BY sn.eff_mu DESC NULLS LAST LIMIT 1),
     y_top AS (SELECT sn.synset_id FROM lexical.senses(p_y) sn
@@ -30,13 +32,23 @@ AS $$
                c.type_id AS plane_type
         FROM xset x JOIN laplace.v_consensus_unrefuted c ON c.subject_id = x.id
           AND c.object_id IN (SELECT id FROM yset)
-          AND c.type_id IN (SELECT k FROM lat)
+          AND c.type_id = ANY (ARRAY[laplace.relation_type_id('IS_SYNONYM_OF'), laplace.relation_type_id('IS_SIMILAR_TO'),
+                          laplace.relation_type_id('IS_ANTONYM_OF'), laplace.relation_type_id('HAS_PART'),
+                          laplace.relation_type_id('HAS_MEMBER'), laplace.relation_type_id('HAS_SUBSTANCE'),
+                          laplace.relation_type_id('DERIVATIONALLY_RELATED'), laplace.relation_type_id('PERTAINS_TO'),
+                          laplace.relation_type_id('ALSO_SEE'), laplace.relation_type_id('IN_VERB_GROUP_WITH'),
+                          laplace.relation_type_id('HAS_ATTRIBUTE')])
         UNION ALL
         SELECT ARRAY[x.id, c.subject_id], ARRAY[c.type_id], ARRAY[-1],
                consensus.eff_mu_display(c.rating, c.rd), 1, c.type_id
         FROM xset x JOIN laplace.v_consensus_unrefuted c ON c.object_id = x.id
           AND c.subject_id IN (SELECT id FROM yset)
-          AND c.type_id IN (SELECT k FROM lat)
+          AND c.type_id = ANY (ARRAY[laplace.relation_type_id('IS_SYNONYM_OF'), laplace.relation_type_id('IS_SIMILAR_TO'),
+                          laplace.relation_type_id('IS_ANTONYM_OF'), laplace.relation_type_id('HAS_PART'),
+                          laplace.relation_type_id('HAS_MEMBER'), laplace.relation_type_id('HAS_SUBSTANCE'),
+                          laplace.relation_type_id('DERIVATIONALLY_RELATED'), laplace.relation_type_id('PERTAINS_TO'),
+                          laplace.relation_type_id('ALSO_SEE'), laplace.relation_type_id('IN_VERB_GROUP_WITH'),
+                          laplace.relation_type_id('HAS_ATTRIBUTE')])
     ),
     ux(node, path, types, mu, d) AS (
         SELECT id, ARRAY[id], ARRAY[]::bytea[], NULL::numeric, 0 FROM xset
@@ -45,7 +57,7 @@ AS $$
                LEAST(COALESCE(u.mu, consensus.eff_mu_display(c.rating, c.rd)),
                      consensus.eff_mu_display(c.rating, c.rd)), u.d + 1
         FROM ux u JOIN laplace.v_consensus_unrefuted c ON c.subject_id = u.node
-          AND c.type_id IN (SELECT k FROM up_k) AND c.object_id IS NOT NULL
+          AND c.type_id = ANY (ARRAY[laplace.relation_type_id('IS_A'), laplace.relation_type_id('IS_INSTANCE_OF')]) AND c.object_id IS NOT NULL
           AND NOT (c.object_id = ANY (u.path))
         WHERE u.d < p_depth
     ),
@@ -56,7 +68,7 @@ AS $$
                LEAST(COALESCE(u.mu, consensus.eff_mu_display(c.rating, c.rd)),
                      consensus.eff_mu_display(c.rating, c.rd)), u.d + 1
         FROM uy u JOIN laplace.v_consensus_unrefuted c ON c.subject_id = u.node
-          AND c.type_id IN (SELECT k FROM up_k) AND c.object_id IS NOT NULL
+          AND c.type_id = ANY (ARRAY[laplace.relation_type_id('IS_A'), laplace.relation_type_id('IS_INSTANCE_OF')]) AND c.object_id IS NOT NULL
           AND NOT (c.object_id = ANY (u.path))
         WHERE u.d < p_depth
     ),
