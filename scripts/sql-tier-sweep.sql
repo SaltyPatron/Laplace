@@ -85,7 +85,7 @@ BEGIN
     END IF;
     call := r.fq||'('||COALESCE(r.arglist, '')||')';
     BEGIN
-      SET LOCAL statement_timeout = '30s';
+      SET LOCAL statement_timeout = '5s';
       t0 := clock_timestamp();
       IF r.proretset THEN
         EXECUTE format('SELECT count(*) FROM %s q', call) INTO n;
