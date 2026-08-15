@@ -67,17 +67,15 @@ CREATE OR REPLACE FUNCTION realize.resolve_name(
             -- consensus.relation_family_members is the same family rollup the predicate consulted.
             -- This is the move chat.sql.in's band lens already documents for exactly the
             -- same reason.
+            -- consensus.relation_family_ids is IMMUTABLE and generated from the manifest,
+            -- so these fold to literal bytea[] at PLAN time and the LIST partitions prune
+            -- before execution. The rollup this replaces called a STABLE set-returning
+            -- function that scans laplace.entities, which folds to nothing.
             WITH fam AS MATERIALIZED (
-                SELECT COALESCE(array_agg(id) FILTER (WHERE fam = 'HAS_NAME'), '{}'::bytea[]) AS name_t,
-                       COALESCE(array_agg(id) FILTER (WHERE fam IN ('HAS_NAME','HAS_NAME_ALIAS')), '{}'::bytea[]) AS any_name_t,
-                       COALESCE(array_agg(id) FILTER (WHERE fam = 'HAS_SENSE'), '{}'::bytea[]) AS sense_t
-                FROM (
-                    SELECT 'HAS_NAME'::text AS fam, id FROM consensus.relation_family_members('HAS_NAME')
-                    UNION ALL
-                    SELECT 'HAS_NAME_ALIAS', id FROM consensus.relation_family_members('HAS_NAME_ALIAS')
-                    UNION ALL
-                    SELECT 'HAS_SENSE', id FROM consensus.relation_family_members('HAS_SENSE')
-                ) f
+                SELECT consensus.relation_family_ids('HAS_NAME') AS name_t,
+                       consensus.relation_family_ids('HAS_NAME')
+                         || consensus.relation_family_ids('HAS_NAME_ALIAS') AS any_name_t,
+                       consensus.relation_family_ids('HAS_SENSE') AS sense_t
             ),
             ctx AS (
                 SELECT id, sum(boost) AS boost FROM (

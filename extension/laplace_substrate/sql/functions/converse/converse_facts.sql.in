@@ -74,7 +74,8 @@ BEGIN
     SELECT c.type_id INTO tax_type
     FROM laplace.consensus c
     WHERE c.subject_id = p_syn
-      AND c.type_id IN (SELECT id FROM consensus.relation_family_members('IS_A'))
+      -- Folded: IMMUTABLE and manifest-generated, so this prunes at plan time.
+      AND c.type_id = ANY (consensus.relation_family_ids('IS_A'))
     ORDER BY consensus.eff_mu(c.rating, c.rd) DESC
     LIMIT 1;
     -- NO band fallback. An earlier revision fell back to the taxonomic BAND when the
