@@ -13,6 +13,8 @@ CREATE OR REPLACE FUNCTION realize._defines(p_id bytea)
          FROM laplace.v_consensus_unrefuted g
          WHERE g.subject_id = p_id
            AND g.type_id = laplace.relation_type_id('HAS_DEFINITION')
-         ORDER BY consensus.eff_mu(g.rating, g.rd) DESC
+         -- object_id CLOSES the order: without it a tie is broken by plan order,
+         -- which is not reproducible. Matches Q_DEFINES in realize_batch.c.
+         ORDER BY consensus.eff_mu(g.rating, g.rd) DESC, g.object_id
          LIMIT 1), 24)
 $$;
