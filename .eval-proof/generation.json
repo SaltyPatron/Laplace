@@ -1,0 +1,233 @@
+{
+  "fingerprint": {
+    "entities(ESTIMATE)": 110787680,
+    "physicalities(ESTIMATE)": 110569080,
+    "attestations(ESTIMATE)": 370411328,
+    "consensus(ESTIMATE)": 351518016
+  },
+  "sources": [
+    "Atomic2020Decomposer",
+    "CILIDecomposer",
+    "ChessBook",
+    "ChessOpenings",
+    "ChessPgn",
+    "ConceptNetDecomposer",
+    "FrameNetDecomposer",
+    "ISO639Decomposer",
+    "MapNetDecomposer",
+    "OMWDecomposer",
+    "PropBankDecomposer",
+    "SemLinkDecomposer",
+    "UDDecomposer",
+    "UnicodeDecomposer",
+    "UserPrompt",
+    "VerbNetDecomposer",
+    "WiktionaryDecomposer",
+    "WordFrameNetDecomposer",
+    "WordNetDecomposer"
+  ],
+  "verdicts": {
+    "election_correctness": {
+      "passed": 1,
+      "total": 6,
+      "exact": false
+    },
+    "latency_budget": {
+      "p50_s": 2.9028,
+      "ceiling_s": 30.0,
+      "ok": true
+    },
+    "glue_words_imported": 90,
+    "forward_hygiene": {
+      "passed": 4,
+      "total": 4,
+      "clean": true,
+      "leaks": []
+    },
+    "forward_answer": {
+      "passed": 0,
+      "total": 1,
+      "unreached": [
+        "forward-hot-opposite"
+      ]
+    },
+    "fingerprint_drift": "seeded sources changed (added=['Atomic2020Decomposer', 'ChessBook', 'ChessOpenings', 'ChessPgn', 'ConceptNetDecomposer', 'OMWDecomposer', 'UDDecomposer', 'UserPrompt', 'WiktionaryDecomposer'], removed=['PredicateMatrixDecomposer'])"
+  },
+  "probes": [
+    {
+      "id": "election-glacier",
+      "surface": "op",
+      "class": "election",
+      "held_out": true,
+      "prompt": "What is a glacier?",
+      "expected_topic_surface": "glacier",
+      "got_topic_surface": "h\u00e4",
+      "specificity": 0.21674164682223435,
+      "latency_s": 2.4127,
+      "election_correctness": false,
+      "miss": true
+    },
+    {
+      "id": "election-pawn-chess",
+      "surface": "op",
+      "class": "election",
+      "held_out": true,
+      "prompt": "What is a pawn in chess?",
+      "expected_topic_surface": "pawn",
+      "got_topic_surface": "h\u00e4",
+      "specificity": 0.21674164682223435,
+      "latency_s": 3.5375,
+      "election_correctness": false,
+      "miss": true
+    },
+    {
+      "id": "forward-hot-opposite",
+      "surface": "forward",
+      "class": "forward",
+      "held_out": false,
+      "prompt": "The opposite of hot is",
+      "expected_answer_surface": "cold",
+      "predictions": [
+        "album",
+        "contemporary r b",
+        "j pop",
+        "billions of stars in sky",
+        "many chairs in waiting room",
+        "many species of insects",
+        "640 acres in square mile",
+        "numerus buildings in city"
+      ],
+      "leaks": [],
+      "answer_reached": false,
+      "latency_s": 5.2864,
+      "forward_clean": false,
+      "miss": true
+    },
+    {
+      "id": "smoke-france",
+      "surface": "op",
+      "class": "smoke",
+      "held_out": false,
+      "prompt": "The capital of France is",
+      "expected_topic_surface": "france",
+      "got_topic_surface": "LATIN SMALL LETTER I",
+      "specificity": 0.11326078583679243,
+      "latency_s": 2.9028,
+      "election_correctness": false,
+      "miss": true
+    },
+    {
+      "id": "smoke-hot",
+      "surface": "op",
+      "class": "smoke",
+      "held_out": false,
+      "prompt": "The opposite of hot is",
+      "expected_topic_surface": "hot",
+      "got_topic_surface": "the",
+      "specificity": 0.13981707213724545,
+      "latency_s": 3.9453,
+      "election_correctness": false,
+      "miss": true
+    },
+    {
+      "id": "smoke-water",
+      "surface": "op",
+      "class": "smoke",
+      "held_out": false,
+      "prompt": "Water is made of",
+      "expected_topic_surface": "water",
+      "got_topic_surface": "LATIN SMALL LETTER I",
+      "specificity": 0.09439619753671943,
+      "latency_s": 2.056,
+      "election_correctness": false,
+      "miss": true
+    },
+    {
+      "id": "election-dog",
+      "surface": "op",
+      "class": "election",
+      "held_out": false,
+      "prompt": "dog",
+      "expected_topic_surface": "dog",
+      "got_topic_surface": "dog",
+      "specificity": null,
+      "latency_s": 1.039,
+      "election_correctness": true,
+      "miss": false
+    },
+    {
+      "id": "forward-glacier",
+      "surface": "forward",
+      "class": "forward",
+      "held_out": true,
+      "prompt": "What is a glacier?",
+      "expected_answer_surface": null,
+      "predictions": [
+        "layer",
+        "frozen fresh water",
+        "ice mass",
+        "slowly moving river of ice",
+        "natural inanimate thing",
+        "topographical feature",
+        "ecological region"
+      ],
+      "leaks": [],
+      "answer_reached": null,
+      "latency_s": 2.7604,
+      "forward_clean": true,
+      "miss": false
+    },
+    {
+      "id": "forward-pawn-chess",
+      "surface": "forward",
+      "class": "forward",
+      "held_out": true,
+      "prompt": "What is a pawn in chess?",
+      "expected_answer_surface": null,
+      "predictions": [
+        "game",
+        "musical",
+        "board game",
+        "brome",
+        "game of skill",
+        "game of strategy",
+        "great game",
+        "two player game"
+      ],
+      "leaks": [],
+      "answer_reached": null,
+      "latency_s": 4.8573,
+      "forward_clean": true,
+      "miss": false
+    },
+    {
+      "id": "forward-water",
+      "surface": "forward",
+      "class": "forward",
+      "held_out": false,
+      "prompt": "Water is made of",
+      "expected_answer_surface": null,
+      "predictions": [
+        "letter",
+        "abbreviation",
+        "sr",
+        "voyelle",
+        "buchstabe",
+        "\u6587\u5b57",
+        "\u30a2\u30eb\u30d5\u30a1\u30d9\u30c3\u30c8",
+        "programming language"
+      ],
+      "leaks": [],
+      "answer_reached": null,
+      "latency_s": 2.8209,
+      "forward_clean": true,
+      "miss": false
+    }
+  ],
+  "misses_first": true,
+  "baseline": {
+    "path": "scripts/eval-baselines.json",
+    "recorded_at": "2026-08-07T11:01:26Z",
+    "advisory_until": "2026-08-10"
+  }
+}
