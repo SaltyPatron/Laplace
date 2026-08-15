@@ -66,10 +66,6 @@ CREATE OR REPLACE FUNCTION lexical.senses(p_word bytea, p_context bytea[])
         FROM ctx CROSS JOIN LATERAL lexical.senses(ctx.id) s
         WHERE s.synset_id IS NOT NULL
     ),
-    -- Folded: IMMUTABLE, manifest-generated, prunes at plan time.
-    frame_t AS MATERIALIZED (
-        SELECT unnest(consensus.relation_family_ids('EVOKES_FRAME')) AS id
-    ),
     cand AS MATERIALIZED (
         SELECT s.sense_id, ss.object_id AS synset_id,
                s.rating, s.rd, s.witness_count AS w1,
@@ -101,14 +97,14 @@ CREATE OR REPLACE FUNCTION lexical.senses(p_word bytea, p_context bytea[])
         SELECT DISTINCT c.object_id AS fid, consensus.eff_mu(c.rating, c.rd) AS w
         FROM ctx_syn s
         JOIN @extschema@.consensus c ON c.subject_id = s.sid
-        WHERE c.type_id IN (SELECT id FROM frame_t)
+        WHERE c.type_id = ANY (consensus.relation_family_ids('EVOKES_FRAME'))
     ),
     lane_frame AS (
         SELECT c.subject_id AS sid, sum(cf.w) AS boost
         FROM @extschema@.consensus c
         JOIN ctx_frame cf ON cf.fid = c.object_id
         WHERE c.subject_id IN (SELECT synset_id FROM cand)
-          AND c.type_id IN (SELECT id FROM frame_t)
+          AND c.type_id = ANY (consensus.relation_family_ids('EVOKES_FRAME'))
         GROUP BY c.subject_id
     ),
     -- TAXON: candidate meets a context sense within one hop, either direction.

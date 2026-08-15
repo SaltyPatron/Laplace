@@ -52,6 +52,11 @@ DECLARE
     -- Resolved once (see converse_facts): a function on consensus.type_id is a
     -- function on the partition key, so it prunes nothing and runs per edge.
     t_def  bytea[];
+    -- Content bands 1,2,4,7. A local, not a CTE column: relation_band_types is
+    -- STABLE so it cannot fold at plan time, but a plpgsql local binds as a
+    -- parameter and `type_id = ANY($n)` prunes the LIST partitions at execution.
+    -- Read back from a CTE column it is a per-row variable and prunes nothing.
+    t_band bytea[];
     SENT   bytea := '\x00';
     MINLEN int := 5;
     syn    bytea;
@@ -62,7 +67,8 @@ DECLARE
     core_seq bytea[];
     n      int;
 BEGIN
-    t_def := laplace.relation_band_types(b_def);
+    t_def  := laplace.relation_band_types(b_def);
+    t_band := laplace.relation_band_types(ARRAY[1,2,4,7]);
     -- ORIENT. Same hash-space signal converse.chat() uses: how strongly the token denotes the
     -- sense, then highway-mask breadth. No realize.realize(), no surface comparison.
     -- Two levels: breadth picks WHICH TOKEN, denote_mu picks WHICH SENSE of it.
@@ -96,28 +102,16 @@ BEGIN
     END IF;
 
     WITH
-    -- CONTENT-BAND TYPE IDS, RESOLVED ONCE.
-    --
-    -- Every arm below used to test `consensus.relation_highway_band(c.type_id) IN (1,2,4,7)`
-    -- directly against consensus. consensus is LIST-partitioned by type_id and holds
-    -- ~48M rows, so a function on the partition key means no pruning, no index on the
-    -- predicate, and one C call per edge scanned -- five times in this one function,
-    -- on the hot conversation path. The band is a property of ~221 relation types.
-    -- Resolved here it becomes a bound array and each arm is an indexed
-    -- (subject_id, type_id) probe.
-    bands AS MATERIALIZED (
-        SELECT laplace.relation_band_types(ARRAY[1,2,4,7]) AS t
-    ),
     -- FRONTIER: the topic's consensus neighbourhood, both directions, over the
     -- content bands. This is the turn's semantic plan -- concept-level, language-free.
     frontier AS MATERIALIZED (
         SELECT c.object_id AS cid, consensus.eff_mu(c.rating, c.rd) AS mu
-        FROM bands b, laplace.consensus c
-        WHERE c.subject_id = syn AND c.type_id = ANY (b.t)
+        FROM laplace.consensus c
+        WHERE c.subject_id = syn AND c.type_id = ANY (t_band)
         UNION ALL
         SELECT c.subject_id, consensus.eff_mu(c.rating, c.rd)
-        FROM bands b, laplace.consensus c
-        WHERE c.object_id = syn AND c.type_id = ANY (b.t)
+        FROM laplace.consensus c
+        WHERE c.object_id = syn AND c.type_id = ANY (t_band)
         UNION ALL
         SELECT syn, (SELECT max(consensus.eff_mu(c2.rating, c2.rd)) FROM laplace.consensus c2
                      WHERE c2.subject_id = syn)
@@ -137,17 +131,15 @@ BEGIN
         -- double-count it at full-plus-decayed weight (Copilot, PR #896).
         UNION ALL
         SELECT c.object_id, consensus.eff_mu(c.rating, c.rd) / (2 ^ x.dist)
-        FROM bands b
-        CROSS JOIN unnest(COALESCE(p_ctx, ARRAY[]::bytea[])) WITH ORDINALITY x(cid, dist)
+        FROM unnest(COALESCE(p_ctx, ARRAY[]::bytea[])) WITH ORDINALITY x(cid, dist)
         JOIN laplace.consensus c ON c.subject_id = x.cid
-                        AND c.type_id = ANY (b.t)
+                        AND c.type_id = ANY (t_band)
         WHERE x.cid <> syn
         UNION ALL
         SELECT c.subject_id, consensus.eff_mu(c.rating, c.rd) / (2 ^ x.dist)
-        FROM bands b
-        CROSS JOIN unnest(COALESCE(p_ctx, ARRAY[]::bytea[])) WITH ORDINALITY x(cid, dist)
+        FROM unnest(COALESCE(p_ctx, ARRAY[]::bytea[])) WITH ORDINALITY x(cid, dist)
         JOIN laplace.consensus c ON c.object_id = x.cid
-                        AND c.type_id = ANY (b.t)
+                        AND c.type_id = ANY (t_band)
         WHERE x.cid <> syn
         UNION ALL
         SELECT x.cid, (SELECT max(consensus.eff_mu(c2.rating, c2.rd)) FROM laplace.consensus c2
