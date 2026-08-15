@@ -24,6 +24,7 @@ SELECT p.oid,
        p.pronargs,
        p.pronargdefaults,
        p.proretset,
+       p.proargnames,
        regexp_replace(regexp_replace(pg_get_functiondef(p.oid), '--[^\n]*', ' ', 'g'),
                       '/\*.*?\*/', ' ', 'gs') AS def
 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
@@ -45,31 +46,50 @@ WITH RECURSIVE walk(root, node, d) AS (
     WHERE w.d < 20)
 SELECT root AS fq, max(d) AS tier FROM walk GROUP BY root;
 
--- One fixture per argument type. Deliberately a real id from the live substrate:
--- a synthetic id exercises the miss path and measures nothing.
-CREATE TEMP TABLE fixture(typ text, expr text);
+-- Fixtures are chosen by PARAMETER NAME first, then by type. Type alone is not
+-- enough: a bytea named p_type_id wants a relation type id, and handing it a word
+-- id makes the function correctly return NULL -- which a null-probing sweep then
+-- reports as a defect. Six false positives before this was added.
+CREATE TEMP TABLE fixture(match text, typ text, expr text);
 INSERT INTO fixture VALUES
-  ('bytea',            'laplace.word_id(''wolf'')'),
-  ('text',             '''wolf'''),
-  ('integer',          '8'),
-  ('smallint',         '2::smallint'),
-  ('bigint',           '1500000000000'),
-  ('double precision', '1.0'),
-  ('numeric',          '1.0'),
-  ('boolean',          'false'),
-  ('bytea[]',          'ARRAY[laplace.word_id(''hot''), laplace.word_id(''dog'')]'),
-  ('text[]',           'ARRAY[''wolf'']'),
-  ('integer[]',        'ARRAY[1]'),
-  ('geometry',         '(SELECT trajectory FROM laplace.v_word_points WHERE trajectory IS NOT NULL LIMIT 1)'),
-  ('timestamp with time zone', 'now()'),
-  ('jsonb',            '''{}''::jsonb');
+  ('type',    'bytea', 'laplace.relation_type_id(''IS_A'')'),
+  ('relation','bytea', 'laplace.relation_type_id(''IS_A'')'),
+  ('lang',    'bytea', 'converse.prompt_language_top(''what is a wolf'')'),
+  ('source',  'bytea', '(SELECT source_id FROM ops.source_status() WHERE source=''WordNetDecomposer'')'),
+  ('context', 'bytea', 'converse.prompt_language_top(''what is a wolf'')'),
+  (NULL,      'bytea', 'laplace.word_id(''wolf'')'),
+  ('name',    'text',  '''IS_A'''),
+  ('prompt',  'text',  '''what is a wolf'''),
+  ('phrase',  'text',  '''what is a wolf'''),
+  (NULL,      'text',  '''wolf'''),
+  (NULL,      'integer','8'),
+  (NULL,      'smallint','2::smallint'),
+  (NULL,      'bigint','1500000000000'),
+  (NULL,      'double precision','1.0'),
+  (NULL,      'numeric','1.0'),
+  (NULL,      'boolean','false'),
+  ('type',    'bytea[]','ARRAY[laplace.relation_type_id(''IS_A'')]'),
+  (NULL,      'bytea[]','ARRAY[laplace.word_id(''hot''), laplace.word_id(''dog'')]'),
+  (NULL,      'text[]','ARRAY[''wolf'']'),
+  (NULL,      'integer[]','ARRAY[1]'),
+  (NULL,      'geometry','(SELECT trajectory FROM laplace.v_word_points WHERE trajectory IS NOT NULL LIMIT 1)'),
+  (NULL,      'timestamp with time zone','now()'),
+  (NULL,      'jsonb','''{}''::jsonb');
 
 CREATE TEMP TABLE calls AS
 SELECT f.fq, f.proretset,
        (SELECT string_agg(COALESCE(x.expr, '<<unfixtured:'||x.typ||'>>'), ', ' ORDER BY x.ord)
-        FROM (SELECT t.ord, format_type(t.typid, NULL) AS typ,
-                     (SELECT expr FROM fixture WHERE typ = format_type(t.typid, NULL)) AS expr
-              FROM unnest(f.proargtypes) WITH ORDINALITY AS t(typid, ord)) x) AS arglist
+        FROM (
+          SELECT t.ord, format_type(t.typid, NULL) AS typ,
+                 COALESCE(
+                   (SELECT fx.expr FROM fixture fx
+                     WHERE fx.typ = format_type(t.typid, NULL) AND fx.match IS NOT NULL
+                       AND COALESCE(f.proargnames[t.ord],'') ILIKE '%'||fx.match||'%'
+                     LIMIT 1),
+                   (SELECT fx.expr FROM fixture fx
+                     WHERE fx.typ = format_type(t.typid, NULL) AND fx.match IS NULL LIMIT 1)
+                 ) AS expr
+          FROM unnest(f.proargtypes) WITH ORDINALITY AS t(typid, ord)) x) AS arglist
 FROM fns f JOIN depth d ON d.fq = f.fq
 WHERE d.tier = :tier;
 
