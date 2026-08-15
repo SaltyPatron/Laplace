@@ -27,13 +27,18 @@ plan-time pruning). Negations become `<> ALL (…)`, which lets LIST pruning exc
 Equivalence of the substitution is exact: `relation_band_types(ARRAY[1,7])` = 47 types = the
 `highway_band IN (1,7)` set; `ARRAY[2,4,7]` = 83 = 83.
 
-**THE RULE IS CONDITIONAL, and applying it blindly is a regression.** In
-`senses_with_context.own_sent` the predicate `subject_id IN (SELECT … FROM cand)` had already
-reduced the set to 64 candidates, so `relation_highway_band(c.type_id)` was a cheap C
-post-filter on a handful of rows. Replacing it with `type_id = ANY(47 ids)` gave the planner a
-second indexable predicate and it began enumerating 64×47 combinations. Measured standalone,
-identical 11,591 rows: **function-on-key 46 ms, band-array 331 ms** — 7× worse. End to end,
-`lexical.senses(dog,[animal,pet])` went 1,891 → 3,150 ms, and back to 1,884 ms on revert.
+**THE RULE IS CONDITIONAL, and applying it blindly is a regression.** Measured standalone on
+`senses_with_context.own_sent`, identical 11,591 rows: **function-on-key 46 ms, band-array
+331 ms** — 7× worse. End to end, `lexical.senses(dog,[animal,pet])` went 1,891 → 3,150 ms,
+and back to 1,884 ms on revert.
+
+**Cause, from `EXPLAIN (ANALYZE, BUFFERS)` — not inferred from wall clock.** The band-array
+form plans **Seq Scans over the consensus partitions, 346,116 buffers**; the function-on-key
+form keeps an index scan driven by `subject_id` with the band as a cheap C filter.
+`laplace.relation_band_types` is **STABLE**, so it cannot fold to a literal and arrives as a
+runtime array. `subject_id IN (SELECT … FROM cand)` had already reduced the set to 64
+candidates, and rather than combine the two predicates on
+`consensus_subject_type_btree`, the planner dropped the subject index path entirely.
 
 Apply this fix **only where the type predicate is the selective one**. Where another predicate
 has already reduced the working set, a function on the partition key is a filter, not a
@@ -50,8 +55,15 @@ identical md5: per-row **487 ms**, batch **106 ms** (4.6×). `render_text` fans 
 `model/model_factor`, `readback/render_text`, `realize/realize_translation`,
 `realize/realize_defines`, `readback/render`, `realize/realize_synset_lemma`.
 
-- [ ] Rewire each site that renders more than one id.
-- [ ] Leave genuinely scalar sites (one id, one row) alone and say so per site.
+- [x] **CLOSED.** 6 of 13 hits were comments or the definition itself; 2 more render a
+      single id and correctly stay scalar. The 5 real sites are fixed:
+      - `realize._defines` and `taxonomy.synset_gloss` order by `eff_mu`, not by the text, so
+        the winner is picked in id space and rendered **once**. They were also
+        byte-identical bodies of each other (§15); `synset_gloss` now delegates.
+      - `realize._has_name`, `realize._synset_lemma`, `realize._translation` filter on the
+        rendered text, so they rank ids and take ONE `render_text_batch`.
+      Parity 15 ids x 5 functions, 0 mismatches; the same five-call sweep took over
+      120 s before and 10.9 s after.
 
 ## C. Per-row scalars with no batch form — 37 call sites
 
@@ -114,7 +126,12 @@ is a Unicode general-category fact (Zs/Zl/Zp/Cc), not a string property.
 
 Cost is **604 ms of 52,171 ms** — a correctness/consistency fix, not a hot spot. Say so.
 
-- [ ] Replace with `= ANY (generation.separator_ids())` — blocked on I.
+- [x] **CLOSED.** Replaced with `= ANY (generation.separator_ids())`. Verified over 362 real
+      trajectory tokens: render-side and id-side agree on every one, 0 disagreements.
+      The comment at that site argued against the id form on the grounds that general
+      category is attested on codepoints while `toks` holds words — true of a per-token
+      `HAS_GENERAL_CATEGORY` probe, false of `separator_ids()`, which is the closed set
+      including compositions.
 
 **Recorded, not assumed:** there is **no UAX#29 word_break data ingested** (0 rows matching
 `word_break` in `canonical_names`); only `line_break` and `general_category` exist.
@@ -130,8 +147,15 @@ Approaches measured and rejected, with reasons:
 - first-constituent index pre-filter → **599,753 rows**; a leading separator is common.
 - `structural.containers_of` over the 84 atoms → **25.7 s**, worse, and truncates at 1,000.
 
-- [ ] Derive the cluster set from the alphabet (UCD tables are compiled in via
-      `laplace_ucd_tables_emit`), not from a corpus scan.
+- [x] **CLOSED — 9,450 ms to 10.3 ms, 917x, identical 85 ids
+      (fingerprint 20a10803bf930f506c88c9b4a24391b5).** Entity identity is a BLAKE3 hash of
+      the content at every tier, so the cluster did not need discovering:
+      `laplace.word_id(chr(32))` IS the space atom's id and
+      `laplace.word_id(chr(13)||chr(10))` IS the CRLF cluster's id
+      (`cafeb486a01baa2c1ee30a8b78e2ff4d`, the single non-atom id the scan returned).
+      CR+LF is not a special case — it is a composition hashed exactly as `'as'` is, and
+      composition lifts the property (§3, Merkle); the `bool_and` the old body computed
+      WAS that definition.
 
 ## H. `structural.containers_of` — C that loops SPI per element
 
@@ -179,3 +203,34 @@ Not "joins are bad" and not "arrays are the workaround". Measured at three sites
 The planner's cost constants are already tuned (`random_page_cost` 1.1, `effective_cache_size`
 81 GB, `shared_buffers` 32 GB). Where it chose wrong, the query gave it a shape it could not
 prune — that is ours, not its.
+
+
+---
+
+## K. Tier is a property of the container, not of the entity
+
+Established by measurement while fixing F, and it invalidates a filter used on the
+generation path.
+
+The DAG is content-addressed and recursive, so the same content recurs at many levels
+and dedupes trunk-down: ingest the verses, then the bible, and the verses resolve to the
+ids already recorded, now one level deeper. `entities.tier` is one scalar per entity, so
+it can only be the minimum over every container that content ever appeared in.
+
+- `laplace.word_id('a')`, `word_id('I')`, `word_id('狼')` are all tier **0** and typed
+  **Codepoint** — a single-character word IS the codepoint entity, same content, same
+  hash, one entity. No tier test and no type test separates "a used as a word" from "a
+  the codepoint".
+- The trajectory's packed vertex tier does NOT disambiguate either: measured, the word
+  `'a'` occurs **152 times** inside sentence trajectories carrying stored tier 0, and the
+  stored tier equals the entities floor on all 3,642 points sampled.
+- Only the **container's** tier says which level a constituent sits at.
+
+- [x] `converse_compose` `WHERE u.ctier = 2` removed — its `gids` are already tier-3
+      containers, so their constituents are word-position by construction, and the tier
+      test was deleting every single-character and single-grapheme CJK word.
+- [x] `trajectory_unpacked_points` now reads the tier from the packed vertex flags
+      instead of a per-point `entities` lookup (3,642 points, 0 mismatches).
+- [ ] Remaining `ctier = 2` sites named in CLAUDE.md: `converse_tiered.sql.in:150`,
+      `senses_with_context.sql.in:95`, `explore_anchor_neighbors.sql.in:89`,
+      `variant_synth.c:266`. Each needs the same question: what is the container?
