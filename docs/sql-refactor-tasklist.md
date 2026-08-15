@@ -455,3 +455,27 @@ this for every unprunable reference in the system.
       `hot` makes the next install drain those rows via `DELETE … RETURNING` + `INSERT`
       (`seed_relation_partitions.sql.in:77`) — hours of WAL and locks on both tables. Owner
       schedules this; it is not an agent action.
+
+
+## T. Proof that the partition indexes are correctly chosen
+
+`EXPLAIN (ANALYZE)` on the four canonical access shapes, 2026-08-15:
+
+| read | leaves touched | index chosen |
+|---|---|---|
+| `subject_id` + `type_id` | **1** | `consensus_r_is_a_h5_subject_id_type_id_idx` |
+| `object_id` + `type_id` | **8** | `…_object_id_type_id_idx`, one per hash child |
+| `subject_id` only | 17 index + **9 Seq Scan** | `…_subject_id_type_id_idx` per type partition |
+| `attestations.subject_id` | 18 index + **9 Seq Scan** | `…_subject_id_type_id_object_id_idx` |
+
+The right index is chosen on every partition that holds data, and pruning matches the map in
+CLAUDE.md exactly. **Index choice is not a defect.**
+
+The 9 Seq Scans are the planner correctly declining to descend an index on an empty table.
+All 9 are the empty/near-empty partitions: `token_maps_to`, `attends`, `continues_to`,
+`has_external_id`, `ov_relates`, `completes_to`, `contains` at **0 rows**, plus `appears_in`
+(12) and `precedes` (17). They cost a scan node on **every** subject-only read.
+
+Correction to item R: 0 scans on the `attestations` primary key is **not** evidence it is
+worthless. A unique index is a write-side constraint; zero reads is the expected shape. What
+was measured is non-use for reads, nothing more.
