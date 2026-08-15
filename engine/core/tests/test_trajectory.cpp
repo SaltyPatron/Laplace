@@ -5,6 +5,7 @@
 
 #include "laplace/core/trajectory.h"
 #include "laplace/core/hash128.h"
+#include "laplace/core/mantissa.h"
 
 TEST(LaplaceCoreTrajectory, BuildThenConstituentsRoundTrips) {
     std::vector<hash128_t> in(5);
@@ -36,8 +37,54 @@ TEST(LaplaceCoreTrajectory, EveryVertexIsGeometryValidDouble) {
     }
 }
 
-TEST(LaplaceCoreTrajectory, RejectsOverwideTrajectory) {
+/* Was named RejectsOverwideTrajectory and asserted nothing about width: both
+ * pointers are null, so it returned on the null-output check and never reached
+ * the width guard it claimed to cover. */
+TEST(LaplaceCoreTrajectory, RejectsNullOutput) {
     EXPECT_NE(0, trajectory_build(nullptr, 70000, nullptr));
+}
+
+/* A composition wider than the 16-bit ordinal field builds and round-trips.
+ * The width of a spare field is not a bound on how many constituents a thing
+ * may have; vertex position carries the sequence, so the packed ordinal going
+ * un-representable past 65,535 costs a duplicate copy and nothing else. */
+TEST(LaplaceCoreTrajectory, WiderThanTheOrdinalFieldRoundTrips) {
+    const size_t n = 70000;
+    std::vector<hash128_t> in(n);
+    for (size_t i = 0; i < n; ++i) { in[i].hi = i + 1; in[i].lo = ~(uint64_t)i; }
+
+    std::vector<double> xyzm(n * 4);
+    ASSERT_EQ(0, trajectory_build(in.data(), n, xyzm.data()));
+
+    std::vector<hash128_t> back(n);
+    ASSERT_EQ((int)n, trajectory_constituents(xyzm.data(), n, back.data(), n));
+    for (size_t i = 0; i < n; ++i) {
+        EXPECT_EQ(in[i].hi, back[i].hi) << "constituent " << i;
+        EXPECT_EQ(in[i].lo, back[i].lo) << "constituent " << i;
+    }
+}
+
+/* A run longer than the 16-bit run_length splits across vertices instead of
+ * clamping: run_length is what readback expands, so a clamped value would
+ * reconstruct fewer constituents than went in. */
+TEST(LaplaceCoreTrajectoryRle, RunLongerThanTheFieldSplitsRatherThanClamps) {
+    const size_t n = 70000;
+    std::vector<hash128_t> in(n);
+    for (size_t i = 0; i < n; ++i) { in[i].hi = 7; in[i].lo = 7; }
+
+    std::vector<double> xyzm(n * 4);
+    size_t vc = 0;
+    ASSERT_EQ(0, trajectory_build_rle(in.data(), n, xyzm.data(), &vc));
+    EXPECT_EQ(2u, vc) << "70,000 identical constituents need two vertices at 65,535 each";
+
+    size_t total = 0;
+    for (size_t v = 0; v < vc; ++v) {
+        mantissa_payload_t p;
+        mantissa_unpack(&xyzm[v * 4], &p);
+        EXPECT_EQ(7u, p.entity_id.hi);
+        total += p.run_length;
+    }
+    EXPECT_EQ(n, total) << "expanding the runs must return every constituent";
 }
 
 TEST(LaplaceCoreTrajectory, EmptyTrajectoryIsValid) {

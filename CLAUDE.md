@@ -101,10 +101,30 @@ same change.
 - **§7, the election law.** *No ranking may be decided on a single-token scalar.* Topic, sense,
   and relation are elected **together** from the graph between the prompt's tokens. Selecting
   the highest-rated token, the highest witness count, the highest scalar, or the
-  longest/leftmost span all violate it. So do top-k truncation, TF-IDF, IDF, and per-token
-  frequency priors — reaching for those is reaching into training data instead of reading this
-  system. A per-token frequency scalar (`joint_degree × icf`) proposed as an election fix is the
-  same violation in a new costume.
+  longest/leftmost span all violate it.
+  - **This is not a ban on counting, and earlier revisions of this file said it was.**
+    Spec 36 makes SCAN *"discover bounded candidates"* a stage of the canonical program, so
+    bounding a candidate set is design, not sin. `08_Record_vs_Calculate_Spec.txt` makes a
+    derived statistic legitimate **calculated testimony** that "competes as another witness"
+    — provided it carries analyzer identity, version, inputs, and recipe, and never
+    overwrites the recorded literal it estimates.
+  - **What actually violates §7** is a bound or a score applied **per token, in isolation,
+    before the joint election** — it can delete the candidate the joint evidence would have
+    picked, and STEER reranks proposals rather than regenerating them, so nothing downstream
+    recovers it. `prompt_coherence` collapsing each token to one sense before the seat (§9b)
+    is the live instance.
+  - **Why TF-IDF specifically is wrong here**, structurally: IDF's denominator is a fixed
+    document collection, and this substrate is a merkle DAG where identical content exists
+    once by hash and is *referenced* N times — document frequency is not defined, and counting
+    references measures ingestion composition, not meaning. The signal it approximates is
+    already adjudicated per typed edge as a Glicko2 rating carrying `rd` and `witness_count`.
+    The `joint_degree × icf` revert (4d658df9) was not "frequency bad" — it was an
+    **unwitnessed, unversioned scalar injected into the election path**, which
+    Record-vs-Calculate forbids by name.
+  - **Frequency at export is correct.** The foundry's bigram pairs and vocabulary frequencies
+    are the artifact being rendered (§10, model as render target), produced by a named
+    analyzer with a recorded recipe. Same arithmetic, different position in the pipeline.
+    Do not cite §7 at the foundry.
 - **§15, the recurring failure.** An operation gets a canonical implementation, the caller that
   should use it is never rewired, both survive, and they drift. Live: 32 of 33 decomposers
   bypass `IngestComposePipeline`.
@@ -114,6 +134,73 @@ same change.
     `generation.astar_path`). It is `p_use_geometry DEFAULT false` — "off by default" is a
     different defect from "unreachable."
 - **§4, the evidence law.** Attestations never record a magnitude. No raw per-edge floats.
+- **The partitioning does not currently earn its keep, measured 2026-08-15 from the catalog.**
+  216 leaves, 371,272,166 rows, and the **DEFAULT partition holds 219,684,688 — 59.2%**.
+  The cause is not a range or hilbert key — **nothing here is partitioned by hilbert or
+  RANGE.** Every partitioned table is LIST or HASH:
+  `consensus` and `attestations` are `LIST (type_id)` → `HASH (subject_id)`;
+  **`entities` is `LIST (tier)` → `HASH (id)`** with t0/t2/t3 and no t1;
+  `physicalities` is `HASH (id)`.
+  The DEFAULT skew is that **only 27 relation types have a named partition out of 426 live
+  types**, so 399 types share one bucket. **8 of the 27 named partitions hold 0 rows**
+  (attends, completes_to, contains, continues_to, has_external_id, ov_relates,
+  token_maps_to; precedes holds 115). So the LIST level buys pruning only for 27 types and
+  only when the caller supplies `type_id`; everything else pays a 216-way Append.
+  **`entities` keyed on `tier` is keyed on a floor** — the value this file records as
+  container-relative, not a property of the entity.
+- **The named partition set is a hardcoded guess, and `ops.consensus_partition_pressure()`
+  already measures how wrong it is.** Run that function before theorising about partitions —
+  it exists, it takes `min_rows`, and it names the unpartitioned relations by share of
+  DEFAULT. Live 2026-08-15:
+
+  | relation | rows | % of DEFAULT |
+  |---|---|---|
+  | **HAS_FEATURE** | **186,562,442** | **84.93** |
+  | TRANSCRIBES_AS | 5,192,208 | 2.36 |
+  | DERIVED_FROM | 3,836,962 | 1.75 |
+  | HAS_THINK_CLASS | 3,022,618 | 1.38 |
+  | HAS_CLOCK | 2,531,014 | 1.15 |
+  | ETYMOLOGICALLY_DERIVED_FROM | 2,606,533 | 1.19 |
+  | HAS_ETYMOLOGY | 2,595,036 | 1.18 |
+  | HAS_EXAMPLE | 1,803,197 | 0.82 |
+
+  The DEFAULT skew is **one relation**, not 399 sharing a bucket. Meanwhile
+  `sql/generated/seed_relation_partitions.sql.in:9` hardcodes 26 `hot` types — **8 of which
+  hold 0 rows** (ATTENDS, COMPLETES_TO, CONTAINS, CONTINUES_TO, HAS_EXTERNAL_ID, OV_RELATES,
+  TOKEN_MAPS_TO, and APPEARS_IN at 60 / PRECEDES at 115) — so ~80 leaves exist for ~175 rows
+  while the largest relation in the substrate has none. The adoption machinery in that file
+  already drains DEFAULT into new partitions; the list is what is stale.
+- **An empty relation partition is not a dead relation.** PRECEDES and APPEARS_IN are
+  **read from the geometry**, which is why their tables are near-empty:
+  - order comes from the trajectory — `word_order.sql.in:2` ("text emits no PRECEDES
+    attestations; this is the calculated..."), `word_adjacency.sql.in:12` ("Order is fetched
+    from the TRAJECTORY, never from an edge"), `pos_class_transitions.sql.in:71` and
+    `usage_overlap.sql.in:9` ("the same knowledge PRECEDES materialised as"),
+    `continuation_conditional_plane.sql.in:15`, `geometry_successors.sql.in:5`.
+  - containment comes from the GIN index — `containers_of.c:65` probes
+    `laplace_trajectory_constituent_ids(w.trajectory) @> ARRAY[$1]` against
+    `physicalities_constituents_gin`.
+
+  Do not read a low row count as "unused" and do not propose materialising either one.
+
+  **Sequence is geometry in EVERY lane** — text ingestion emits trajectories, and PRECEDES is
+  read back from them (six inference sites above). A decomposer that writes PRECEDES edges is
+  writing the same content in the wrong shape.
+
+  **Live violation, measured 2026-08-15 by source_id** (`ops.source_status()` joined to the
+  three ids on the 120 PRECEDES attestations, all written 2026-08-13/14):
+  `FrameNetDecomposer` **89**, plus two sources not in `source_status` (**29** and **2**).
+  A text/lexical decomposer is emitting sequence as edges. Fix it at the decomposer.
+
+  **Do not narrate a provenance for these rows without running that query.** This file has
+  claimed "populated only by model ingestion — a deposed model's sequence testimony ...
+  model-lane residue"; a session then upgraded that to "attested vs inferred are different
+  populations, the design working." Both were written without checking source_id. The write
+  sites in the app are `IngestCommands.cs:385` (document deposit — "entities + physicalities
+  + PRECEDES bigrams") and the OODA feedback lane (`QueryCommands.cs:309`,
+  `EndpointMappings.Feedback.cs:99`); a grep of those is evidence about code, not about which
+  rows exist.
+
 - **Supply the partition keys, or pay 216×.** `laplace.consensus` is `LIST (type_id)` — 208
   named type partitions plus a DEFAULT — and **each is itself `HASH (subject_id)` over 8**, for
   **216 leaf partitions** (not the 27 this file used to claim; 27 is what a subject-only read
@@ -186,6 +273,33 @@ same change.
   why an unfixed adjacency lane learns CJK and nothing else.
 - **§15, determinism.** Integer-pure identity, no fast math, byte-identical across compilers and
   OSes. Measured: 21,330,410 placements inside the glome, worst excess 4 ULPs.
+  - **Re-measured 2026-08-15 over the whole codespace: still 4 ULP**, and now gated —
+    `LaplaceCoreSuperFibonacci.UnitNormHoldsToFourUlpAcrossTheCodespace` asserts it in ULPs
+    across all 1,114,112 placements (worst at index 2614; 643,019 exact, 292 at the bound).
+    The two pre-existing norm tests could not catch drift: one checks 8,192 points and the
+    other seven hand-picked indices, both at `1e-13` — about 450 ULP, 112x looser than the
+    real behaviour, and neither index set contains the worst case.
+  - **The identity half is unconditional; the geometry half is bought by pinning the
+    toolchain, not by the flags.** `hash128_merkle` is BLAKE3 over child ids with no float
+    anywhere, and physicality ids are content-derived from `(entity_id, type)` — so ids and
+    packed trajectory vertices are byte-identical on any conforming machine. `coord` and the
+    `hilbert_index` derived from it are not: `sqrt` is IEEE-mandated and correctly rounded,
+    but `sin`/`cos` are not, and the core imports `__bwr_sin`/`__bwr_cos` from Intel's libimf,
+    never glibc's. Measured 2026-08-15, same formula and inputs, 30,112 placements strided
+    across the codespace: **glibc libm and Intel libimf disagree on 226 of 120,448 components,
+    worst 2 ULP** (index 22348). `-fno-fast-math -ffp-contract=off` is necessary and does not
+    help here — it governs codegen, not which library supplies the transcendental.
+  - **Why the cross-OS claim still holds:** both platforms build with the same compiler, so
+    both link the same libimf. `scripts/win/build-engine.cmd:34` sets
+    `-DCMAKE_C_COMPILER=icx -DCMAKE_CXX_COMPILER=icx`; oneAPI is required anyway for MKL and
+    TBB. **The toolchain is part of the identity contract for geometry.** Read the claim as
+    "byte-identical across OSes on the pinned toolchain," not "across compilers."
+  - **`cmake/toolchains/gcc-deterministic.cmake` is referenced by nothing** — no `.sh`,
+    `.cmd`, `.cmake`, `.md`, or Justfile — and is a trap rather than an alternative: correct
+    flags, authoritative filename, silently different coordinates. Delete it, or make it
+    correctly-rounded. Correct rounding is the only fix that is a *property* rather than a
+    deployment constraint, because the correctly-rounded result is unique and therefore
+    identical on every conforming implementation by definition.
 - **No arbitrary dials.** Bound by construction (ownership, lifetime), not tuned constants. Any
   unavoidable constant is measured with the measurement recorded and a test keeping it honest,
   or flagged as a stopgap with the by-construction follow-up named. Constants already in the
@@ -198,6 +312,26 @@ same change.
   reference, trunk→leaf. Raw per-edge floats produced a multi-hundred-GB blowup.
 - **Comments state constraints only.** Ownership, ordering, contract,
   why-not-the-obvious-alternative. History lives in commits.
+
+## 4a. Ask the catalog before writing anything
+
+`SELECT * FROM ops.api()` lists **442 installed operations**, and `ops.*` alone holds **63**.
+Read that first. A session that skipped it hand-wrote replacements for at least five
+functions that were already installed, then reported the hand-rolled numbers as findings:
+
+| written by hand | already installed |
+|---|---|
+| index audit over `pg_stat_user_indexes` | `ops.index_usage_report`, `ops.index_usage_detail`, `ops.index_health` |
+| partition skew over `pg_class` | `ops.partition_pressure`, `ops.consensus_partition_pressure` |
+| entity/attestation counts | `ops.substrate_counts`, `ops.substrate_pulse` |
+| geometric comparison | `ops.metric_ladder`, `ops.metric_ladder_words` |
+
+The installed ones are better: `ops.index_usage_report()` returns the whole estate in 121 ms
+— **4,075 indexes / 226 GB, of which 1,707 are never scanned (31 GB) and 1,237 more are under
+100 scans (95 GB)** — where the hand-rolled query covered two tables and mis-grouped them.
+
+The one-line index: `SELECT proname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+WHERE n.nspname='ops' ORDER BY 1;`
 
 ## 5. Working mode
 
