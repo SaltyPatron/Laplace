@@ -3,6 +3,25 @@ CREATE OR REPLACE FUNCTION generation.trajectory_unpacked_points(p_entity bytea)
     RETURNS TABLE(entity_id bytea, run_length int, ctier int)
     LANGUAGE sql STABLE PARALLEL SAFE
  AS $$
+    -- THE TRAJECTORY IS FETCHED BY SCALAR SUBQUERY, NOT JOINED.
+    --
+    -- physicalities is HASH (id) and this lookup is by entity_id, so its 64-way Append
+    -- cannot prune. Joined into the body, that Append multiplies against ST_DumpPoints'
+    -- declared 1000 rows (procost 5000) and the body plans at cost 983,329 -- far over
+    -- parallel_setup_cost -- so EVERY call paid Gather Merge worker startup to return a
+    -- measured 3.47 rows. Real trajectories hold 5.93 points (avg over 500, max 15).
+    --
+    -- As a scalar subquery the lookup is an InitPlan: 64 index probes once, then a bare
+    -- ST_DumpPoints with no partial path to gather. Plan cost 983,329 -> 264, no Gather.
+    -- Measured on one gloss trajectory: 37.7 ms -> 7.1 ms per call.
+    --
+    -- EXACT, not a sample: an entity owns AT MOST ONE type=1 trajectory. Verified over
+    -- the whole table -- max(count(*)) GROUP BY entity_id WHERE type=1 AND trajectory
+    -- IS NOT NULL = 1. If that ever admits a second row this must go back to a join.
+    -- No match yields NULL, and ST_DumpPoints(NULL) yields zero rows, as the join did.
+    --
+    -- ORDER BY u.ordinal is the contract: every caller applies WITH ORDINALITY and
+    -- takes the position as the sequence. It is not decoration.
     SELECT u.entity_id,
            GREATEST(u.run_length, 1)::int AS run_length,
            COALESCE(
@@ -12,9 +31,10 @@ CREATE OR REPLACE FUNCTION generation.trajectory_unpacked_points(p_entity bytea)
                (SELECT min(e.tier) FROM laplace.entities e WHERE e.id = u.entity_id),
                CASE WHEN realize.codepoint_for_id(u.entity_id) IS NOT NULL THEN 0 END
            ) AS ctier
-    FROM laplace.v_word_points w,
-    LATERAL public.ST_DumpPoints(w.trajectory) dp,
+    FROM public.ST_DumpPoints(
+             (SELECT p.trajectory FROM laplace.physicalities p
+               WHERE p.entity_id = p_entity AND p.type = 1
+                 AND p.trajectory IS NOT NULL)) dp,
     LATERAL public.laplace_mantissa_unpack(dp.geom) u
-    WHERE w.id = p_entity AND w.trajectory IS NOT NULL
     ORDER BY u.ordinal
 $$;
