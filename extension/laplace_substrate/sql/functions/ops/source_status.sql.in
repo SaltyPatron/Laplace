@@ -77,7 +77,17 @@ ids AS (
 ),
 rolled AS (
     SELECT i.source_id,
-           COALESCE(ev.evidence_approx, 0)                     AS evidence_approx,
+           -- EXACT FOR THE TAIL, ESTIMATE FOR THE HEAD. ops.source_counts_approx()
+           -- derives evidence from pg_stats most-common-values, and the MCV list holds
+           -- TEN entries: with one source at 84% of 371M rows, a source at 0.004% is
+           -- about one row in the sample and can never qualify as a common value at ANY
+           -- statistics target. Rendering that blindness as 0 is what made four sources
+           -- that between them hold 96,037 attestations read as "ingested nothing".
+           -- The sources the estimator cannot see are by definition the small ones, so
+           -- counting them exactly is affordable; the head keeps the free estimate.
+           COALESCE(ev.evidence_approx,
+                    (SELECT count(*) FROM @extschema@.attestations a
+                      WHERE a.source_id = i.source_id))       AS evidence_approx,
            EXISTS (SELECT 1 FROM @extschema@.entities e
                    WHERE e.first_observed_by = i.source_id)    AS has_entities,
            jr.source_name                                      AS journal_name,

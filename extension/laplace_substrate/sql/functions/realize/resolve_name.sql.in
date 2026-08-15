@@ -33,8 +33,17 @@ CREATE OR REPLACE FUNCTION realize.resolve_name(
     -- that delegate here stay behaviour-identical wherever no HAS_NAME edge exists.
     SELECT CASE
         WHEN p_context IS NULL OR cardinality(p_context) = 0 THEN
+            -- realize._canonical last, and only last: its own comment says it runs
+            -- inside realize's COALESCE, but nothing called it from here. It reads
+            -- laplace.canonical_names and matches ONLY the substrate/<kind>/<name>/v1
+            -- form -- 274 of the registry's 10,253 rows -- so it cannot leak the other
+            -- 9,979, which are internal keys ('language:len', 'iso639-1:eo') rather
+            -- than names. An entity with no attested name and no substrate canonical
+            -- form still returns NULL, which is the structural answer (§7: "no gloss
+            -- witnessed yet" is an answer, not a failure), not a hex address.
             COALESCE(realize._has_name(p_id, p_lang),
-                     realize._synset_lemma(p_id, p_lang))
+                     realize._synset_lemma(p_id, p_lang),
+                     realize._canonical(p_id))
         ELSE (
             -- Context-conditioned selection. Same lang-pref-then-consensus.eff_mu shape as
             -- the null-context helpers, plus a domain boost for name candidates
