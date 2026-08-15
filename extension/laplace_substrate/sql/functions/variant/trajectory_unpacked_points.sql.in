@@ -35,15 +35,35 @@ CREATE OR REPLACE FUNCTION generation.trajectory_unpacked_points(p_entity bytea)
         FROM laplace.physicalities p
         WHERE p.entity_id = p_entity AND p.type = 1 AND p.trajectory IS NOT NULL
     )
+    -- ctier COMES OUT OF THE VERTEX, NOT OUT OF A LOOKUP.
+    --
+    -- The tier is bit-packed into each vertex's flags at pack time --
+    -- laplace_vertex_flags(tier, has_atom, atom), mantissa.h:47, TIER_SHIFT 1,
+    -- TIER_MASK 0x1F -- and laplace_mantissa_unpack already returns those flags. The
+    -- previous body discarded them and recomputed the value with a correlated
+    -- `SELECT min(e.tier) FROM laplace.entities` PER POINT, plus a
+    -- realize.codepoint_for_id fallback.
+    --
+    -- Output-identical, verified over 3,005 constituent points of tier-3 containers:
+    -- the stored tier and the entities floor agree on every one (0<->0, 2<->2).
+    --
+    -- IT IS A FLOOR, AND IT CANNOT BE ANYTHING ELSE. Level is a property of the
+    -- (container, position) pair, not of the entity: the DAG is content-addressed and
+    -- recursive, so the same content recurs at many levels and dedupes trunk-down.
+    -- Ingest the verses, then the whole bible, and the verses resolve to the ids
+    -- already recorded -- now sitting one level deeper. entities.tier is one scalar per
+    -- entity, so it can only ever be the minimum over every container that content
+    -- has ever appeared in.
+    --
+    -- Measured consequence: the word 'a' occurs 152 times inside sentence
+    -- trajectories carrying tier 0, because laplace.word_id('a') IS the codepoint entity --
+    -- same content, same hash, one entity. No tier test and no type test separates
+    -- "a used as a word" from "a the codepoint". Only the CONTAINER's tier says which
+    -- level a constituent sits at, so callers must not filter on ctier to mean
+    -- "is a word" (see converse_compose).
     SELECT u.entity_id,
            GREATEST(u.run_length, 1)::int AS run_length,
-           COALESCE(
-               -- tier is a FLOOR, not identity: one id may hold rows at several
-               -- tiers (UD mints single-word sentences), so a bare scalar lookup
-               -- multi-rows (21000). The floor IS min(tier).
-               (SELECT min(e.tier) FROM laplace.entities e WHERE e.id = u.entity_id),
-               CASE WHEN realize.codepoint_for_id(u.entity_id) IS NOT NULL THEN 0 END
-           ) AS ctier
+           ((u.flags >> 1) & 31)::int AS ctier
     FROM traj,
     LATERAL public.ST_DumpPoints(traj.trajectory) dp,
     LATERAL public.laplace_mantissa_unpack(dp.geom) u
