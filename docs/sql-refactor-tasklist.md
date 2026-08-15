@@ -515,3 +515,53 @@ and 314 single-id calls agree exactly.
 - Index decisions (item R): ~180 GB, `attestations` PK 36 GB with 0 read scans.
 - `cand_lang` (item 1): still re-derives an entity's primary language by argmax over 389M
   attestation rows per read. Wants a maintained projection.
+
+
+## V. HAS_FEATURE justified — it is Wiktionary's morphology layer
+
+`ops.consensus_partition_pressure()` names HAS_FEATURE as 186,562,442 rows / 84.93% of
+DEFAULT. Provenance and content, measured:
+
+- source: **WiktionaryDecomposer 186,543,984**, PropBankDecomposer 18,458.
+- content: every inflected form carrying its grammatical features —
+  `knaget → nominative`, `altııñ → genitive`, `tapsaink → first-person`,
+  `cristalelor → definite`, `huoneellanne → singular`, `kaiunnasta → elative`,
+  `Hei → romanization`, `𢃧 → alternative`, `trung → Hán-Nôm`.
+- shape: **3.0 features per subject** (max 20) over 50,000 sampled subjects, so roughly
+  **62 million distinct word forms** across Wiktionary's ~1,300 languages.
+
+It is the largest relation in the substrate because morphology is the largest fact class in a
+multilingual lexicon. It is content, not residue. It needs a partition *because* it is real
+and half of consensus — every unprunable read Appends over it today.
+
+## W. Retraction: index scan counts are not a drop signal
+
+An earlier item here proposed dropping the `attestations` primary key on the grounds that it
+had 0 read scans. That is backwards. A primary key is a **uniqueness constraint** on
+content-addressed ids; its read-scan count says nothing about whether it is required, and
+dropping it would remove write-side dedup enforcement. Scan counts identify candidates for
+INVESTIGATION only.
+
+The real work, not yet done: audit every index against the access shapes the SQL actually
+issues. `ops.index_usage_report()` gives the estate (4,075 indexes / 226 GB; 1,707 never
+scanned / 31 GB; 1,237 under 100 scans / 95 GB) and `ops.index_usage_detail(table, limit)`
+gives the per-index breakdown. Neither answers "is this index required" — that comes from the
+predicates in the 300+ functions.
+
+Known gap found while checking: the canonical forward read
+(`subject_id + type_id`, selecting `object_id, rating, rd, witness_count`) plans as
+**Index Scan, never Index Only** — 21 buffers for 42 rows — because the payload columns are
+not in the index. No covering/INCLUDE index exists for the substrate's most common read.
+
+## X. Withdrawn: "primary language" projection
+
+An earlier item proposed materialising an entity's "primary language" to replace `cand_lang`'s
+per-read argmax. **Withdrawn.** INVENTION §7: *language is a render-time choice, not a property
+of knowledge — testimony in any language strengthens consensus readable in every language*,
+and spec 36 §3.1 makes the frontier concept-level and language-free with realization choosing
+the surface last. Attaching a primary language to an entity puts a rendering property on
+content. The projection would have made a wrong model faster.
+
+The underlying problem it was meant to solve (English `wolf` losing to Portuguese `lobo` in
+`bubble_up`) is therefore still open, and the fix belongs at the boundary between election and
+realization, not in a language column.
