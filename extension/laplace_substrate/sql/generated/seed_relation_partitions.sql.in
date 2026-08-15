@@ -6,15 +6,31 @@
 -- drained back through the parent, and the default reattached.
 DO $$
 DECLARE
+    -- MEASURED 2026-08-15, not guessed. Every name here gets 8 hash leaves on BOTH
+    -- consensus and attestations, and every unprunable read Appends across all of them:
+    -- one such reference costs 216 scan nodes and 83.9 ms of PLANNING (8 references =
+    -- 1,728 nodes / 155.3 ms), which is why lexical.senses(word, context) spends 699.8 ms
+    -- planning against 288.1 ms executing.
+    --
+    -- REMOVED because they hold exactly 0 rows, verified by count(*) and not reltuples:
+    -- ATTENDS, COMPLETES_TO, CONTAINS, CONTINUES_TO, HAS_EXTERNAL_ID, OV_RELATES,
+    -- TOKEN_MAPS_TO. That was 112 leaves (7 x 8 x 2 tables) existing for nothing; a fresh
+    -- install now builds 152 consensus leaves instead of 216. Rows of those types land in
+    -- DEFAULT, which is correct -- a type earns a partition by carrying rows.
+    --
+    -- STILL MISSING, and it is the whole skew: ops.consensus_partition_pressure() reports
+    -- HAS_FEATURE at 186,562,442 rows = 84.93% of DEFAULT with no partition of its own,
+    -- then TRANSCRIBES_AS 5.2M, DERIVED_FROM 3.8M, HAS_THINK_CLASS 3.0M. Adding any of
+    -- them here makes the next install drain those rows through the DELETE ... RETURNING
+    -- + INSERT below -- hours of WAL and AccessExclusive on both tables -- so it is
+    -- scheduled deliberately, never slipped into a list edit.
+    --
+    -- APPEARS_IN (60 rows) and PRECEDES (115) are kept: they are read from the geometry
+    -- rather than stored, so a low row count is the design, not disuse.
     hot text[] := ARRAY[
         'APPEARS_IN',
-        'ATTENDS',
-        'COMPLETES_TO',
-        'CONTAINS',
-        'CONTINUES_TO',
         'FORM_OF',
         'HAS_DEFINITION',
-        'HAS_EXTERNAL_ID',
         'HAS_LANGUAGE',
         'HAS_MOTIF',
         'HAS_POS',
@@ -28,11 +44,9 @@ DECLARE
         'IS_TRANSLATION_OF',
         'MOVE',
         'OUTCOME',
-        'OV_RELATES',
         'PRECEDES',
         'RELATED_TO',
-        'SIMILAR_TO',
-        'TOKEN_MAPS_TO'
+        'SIMILAR_TO'
     ];
     r text; rid bytea; tbl text; part text; dflt text; i int;
     missing text[]; rids bytea[]; moved bigint; has_default boolean;
