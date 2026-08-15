@@ -22,12 +22,18 @@ CREATE OR REPLACE FUNCTION ops.eval_pair_plane_score(
     LANGUAGE sql STABLE PARALLEL SAFE
     AS $$
     SELECT GREATEST(
+        -- type_id and subject_id are the partition keys and both are in hand. Filtering
+        -- on c.id alone prunes nothing across the 216 leaves; with them it is one leaf
+        -- and the primary key (id, type_id, subject_id). Measured on consensus.cell,
+        -- the same shape: 97.1ms -> 21.0ms. This runs once per evaluated pair.
         COALESCE((SELECT consensus.eff_mu_display(c.rating, c.rd)
                   FROM laplace.consensus c
-                  WHERE c.id = laplace.consensus_id(p_w1, p_type, p_w2)), 0),
+                  WHERE c.id = laplace.consensus_id(p_w1, p_type, p_w2)
+                    AND c.type_id = p_type AND c.subject_id = p_w1), 0),
         COALESCE((SELECT consensus.eff_mu_display(c.rating, c.rd)
                   FROM laplace.consensus c
-                  WHERE c.id = laplace.consensus_id(p_w2, p_type, p_w1)), 0))::float8
+                  WHERE c.id = laplace.consensus_id(p_w2, p_type, p_w1)
+                    AND c.type_id = p_type AND c.subject_id = p_w2), 0))::float8
 $$;
 
 -- POSITIVES: pairs the ground-truth relation grounds together (two surfaces sharing

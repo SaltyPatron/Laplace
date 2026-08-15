@@ -1,0 +1,66 @@
+-- Witnessed adjacency over UNICODE ENTITIES: one row per (x, what sits between, y,
+-- the composition that witnessed it).
+--
+-- NOTHING IS DELETED. An earlier form of this function removed separator entities
+-- before the window. That hardcodes a Latin-script assumption: SPACE is an entity
+-- like any other, it is not a delimiter to be stripped, and stripping it destroys
+-- real content -- 'hot-tempered' is HYPHEN-MINUS between hot and tempered, and
+-- 'hot, ' is COMMA then SPACE. What sits between is carried in sep_id, which is
+-- what generation.trajectory_continuations already does. For a script that does not
+-- delimit, sep_id is simply NULL and the pair is direct; no branch, no special case.
+--
+-- Order is fetched from the TRAJECTORY, never from an edge: text emits no PRECEDES
+-- attestations, and PRECEDES is populated only by model ingestion.
+--
+-- IDS, NOT CONTENT. laplace_trajectory_constituent_ids returns the ordered id array
+-- and is what physicalities_constituents_gin indexes, so a caller can select
+-- trajectories by containment BEFORE any of this runs -- measured, the 346
+-- trajectories containing both 'hot' and 'dog' come back in 1.6s by @> against 57s
+-- for the unpack path. Positional access is array indexing; the row explosion is
+-- only for the pairs actually emitted.
+--
+-- A sequence is itself an entity. 'hot dog' is ebffb84ed9cbad9821843b7c1b7ff0c2 at
+-- tier 3, composing exactly [hot, SPACE, dog], with 904 consensus edges of its own;
+-- 'hotdog' is different bytes and therefore a different id. Counting adjacency is
+-- the weakest way to ask a question the merkle DAG answers by hash, so treat this
+-- as a floor and prefer the composition where one exists.
+DROP FUNCTION IF EXISTS generation.word_adjacency(bytea[], int, int);
+CREATE OR REPLACE FUNCTION generation.word_adjacency(p_vocab bytea[], p_trajs int DEFAULT 100000,
+                                                    p_gap int DEFAULT 1)
+    RETURNS TABLE(subject_id bytea, sep_id bytea, object_id bytea, witness_id bytea)
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
+    sep AS MATERIALIZED (
+        SELECT COALESCE(generation.separator_ids(), '{}'::bytea[]) AS ids
+    ),
+    -- SELECTED BY CONTENT, NOT BY SLICE. The previous form took p_trajs trajectories
+    -- in content-hash order -- an arbitrary sample, which this file's ancestor
+    -- recorded as a deliberate defect. Measured: 20,000 arbitrary trajectories yield
+    -- ZERO 'hot SPACE dog' pairs in 65s, while the trajectories that actually contain
+    -- both ids yield 35 in 13s. physicalities_constituents_gin indexes exactly this
+    -- array, so containment is an index probe and the sample is no longer a guess.
+    -- p_trajs remains a bound on how many witnesses are read, not a lottery.
+    t AS (
+        SELECT p.entity_id AS sid, public.laplace_trajectory_constituent_ids(p.trajectory) AS cids
+        FROM laplace.physicalities p
+        WHERE p.type = 1 AND p.trajectory IS NOT NULL
+          AND public.laplace_trajectory_constituent_ids(p.trajectory) && p_vocab
+        LIMIT p_trajs
+    ),
+    pos AS (
+        SELECT t.sid, t.cids, i
+        FROM t CROSS JOIN LATERAL generate_series(1, cardinality(t.cids) - p_gap) AS i
+    )
+    -- Direct adjacency at the requested gap, whatever the constituents are.
+    SELECT p.cids[i], NULL::bytea, p.cids[i + p_gap], p.sid
+    FROM pos p JOIN v vs ON vs.id = p.cids[i] JOIN v vo ON vo.id = p.cids[i + p_gap]
+    UNION ALL
+    -- Across an intervening constituent, carrying it. Emitted only when that
+    -- constituent is a separator, so this cannot invent an adjacency between two
+    -- words that had a third WORD between them.
+    SELECT p.cids[i], p.cids[i + p_gap], p.cids[i + p_gap + 1], p.sid
+    FROM pos p CROSS JOIN sep
+    JOIN v vs ON vs.id = p.cids[i]
+    JOIN v vo ON vo.id = p.cids[i + p_gap + 1]
+    WHERE p.cids[i + p_gap] = ANY (sep.ids)
+$$;

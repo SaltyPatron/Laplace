@@ -71,7 +71,7 @@ static const char *Q_HAS_NAME =
     " WHERE nm.subject_id = ANY($1)"
     "   AND nm.type_id IN (laplace.relation_type_id('HAS_NAME'),"
     "                      laplace.relation_type_id('HAS_NAME_ALIAS'))"
-    " ORDER BY nm.subject_id, lp DESC, prim DESC, mu DESC";
+    " ORDER BY nm.subject_id, lp DESC, prim DESC, mu DESC, nm.object_id";
 
 static const char *Q_SYNSET_LEMMA =
     "SELECT io.object_id, hs.subject_id,"
@@ -85,7 +85,7 @@ static const char *Q_SYNSET_LEMMA =
     "   AND lang.object_id = $2"
     " WHERE io.object_id = ANY($1)"
     "   AND io.type_id = laplace.relation_type_id('IS_SENSE_OF')"
-    " ORDER BY io.object_id, lp DESC, mu DESC";
+    " ORDER BY io.object_id, lp DESC, mu DESC, hs.subject_id";
 
 static const char *Q_TRANSLATION =
     "SELECT m.subject_id, m.object_id,"
@@ -97,7 +97,7 @@ static const char *Q_TRANSLATION =
     "   AND lang.object_id = $2"
     " WHERE m.subject_id = ANY($1)"
     "   AND m.type_id = laplace.relation_type_id('IS_TRANSLATION_OF')"
-    " ORDER BY m.subject_id, lp DESC, mu DESC";
+    " ORDER BY m.subject_id, lp DESC, mu DESC, m.object_id";
 
 static const char *Q_CANONICAL =
     "SELECT n.id, regexp_replace(n.name, '^substrate/[a-z_]+/(.+)/v1$', '\\1')"
@@ -111,7 +111,7 @@ static const char *Q_DEFINES =
     " FROM laplace.v_consensus_unrefuted g"
     " WHERE g.subject_id = ANY($1)"
     "   AND g.type_id = laplace.relation_type_id('HAS_DEFINITION')"
-    " ORDER BY g.subject_id, mu DESC";
+    " ORDER BY g.subject_id, mu DESC, g.object_id";   /* object_id CLOSES the order */
 
 static const char *Q_RENDER =
     "SELECT realize.render_text_batch($1, 24)";
@@ -177,6 +177,14 @@ typedef struct RenderEntry
     IdKey key;
     int32 slot;
 } RenderEntry;
+
+/* EVERY ARM CARRIES A TOTAL ORDER. Each of these took "the first row per id" off an
+ * ORDER BY that ended on mu, so any tie was broken by whatever order the plan
+ * happened to produce -- and the plan depends on the size of the input array. Running
+ * the arms on the residual instead of on every input changed that array and therefore
+ * changed which definition won for 4 of 314 ids ("dog" vs "a form of abuse" for the
+ * same entity). The rows were equally valid; the choice was simply not reproducible.
+ * Closing each ORDER BY on an id makes the winner a property of the data. */
 
 /* Canonical-name arm: id -> stripped name text (first row per id). */
 typedef struct CanonEntry
@@ -393,6 +401,7 @@ pg_laplace_resolve_name_batch(PG_FUNCTION_ARGS)
     bool          lang_null = true;
     bool          need_finish = false;
     HTAB         *render_ids;
+    HTAB         *canon;
     Datum        *union_ids;
     int32         un = 0, ucap;
     ArmData       arm_name, arm_lemma;
@@ -426,6 +435,50 @@ pg_laplace_resolve_name_batch(PG_FUNCTION_ARGS)
                   render_ids, &union_ids, &un, &ucap);
     rendered = render_union(union_ids, un, "resolve_name_batch");
 
+    /* THE CANONICAL ARM. realize.resolve_name's null-context branch is
+     * COALESCE(_has_name, _synset_lemma, _canonical) -- THREE arms -- and this batch
+     * carried only the first two, so it silently returned NULL where the scalar
+     * returned a name. Found by comparing the two over 2,000 tier-2 entities: 19
+     * non-null from the scalar, 18 from the batch, differing on one id that has no
+     * render and resolves canonically to 'CONTENT'. Anyone swapping the scalar for
+     * the batch to make a sweep affordable was losing canonical names.
+     *
+     * Same query and same "first row per id" rule realize_batch uses below. */
+    canon = make_id_htab("resolve_name_batch canonical", sizeof(CanonEntry), 256);
+    {
+        Oid   one[1] = { BYTEAARRAYOID };
+        Datum args[1] = { PointerGetDatum(in_arr) };
+        int   rc;
+
+        ensure_plan(&plan_canonical, Q_CANONICAL, 1, one);
+        rc = SPI_execute_plan(plan_canonical, args, NULL, true, 0);
+        if (rc != SPI_OK_SELECT)
+            elog(ERROR, "resolve_name_batch: canonical arm failed: %s",
+                 SPI_result_code_string(rc));
+        for (uint64 r = 0; r < SPI_processed; r++)
+        {
+            HeapTuple   tup = SPI_tuptable->vals[r];
+            TupleDesc   td = SPI_tuptable->tupdesc;
+            bool        isnull;
+            Datum       in_id = SPI_getbinval(tup, td, 1, &isnull);
+            Datum       txt;
+            IdKey       ckey;
+            bool        found;
+            CanonEntry *ce;
+
+            if (isnull)
+                continue;
+            txt = SPI_getbinval(tup, td, 2, &isnull);
+            if (isnull)
+                continue;
+            id_key(&ckey, in_id, "canonical");
+            ce = (CanonEntry *) hash_search(canon, &ckey, HASH_ENTER, &found);
+            if (!found)
+                ce->text = datumCopy(txt, false, -1);
+        }
+        SPI_freetuptable(SPI_tuptable);
+    }
+
     out = (Datum *) palloc0(sizeof(Datum) * n);
     out_nulls = (bool *) palloc(sizeof(bool) * n);
     for (int i = 0; i < n; i++)
@@ -447,6 +500,21 @@ pg_laplace_resolve_name_batch(PG_FUNCTION_ARGS)
             out[i] = CStringGetTextDatum(label);
             MemoryContextSwitchTo(old);
             out_nulls[i] = false;
+        }
+        else
+        {
+            /* arm 3: canonical name text AS-IS, matching the scalar's third arm. */
+            CanonEntry *ce = (CanonEntry *) hash_search(canon, &key,
+                                                        HASH_FIND, NULL);
+
+            if (ce != NULL)
+            {
+                MemoryContext old = MemoryContextSwitchTo(caller);
+
+                out[i] = datumCopy(ce->text, false, -1);
+                MemoryContextSwitchTo(old);
+                out_nulls[i] = false;
+            }
         }
     }
 
@@ -477,6 +545,7 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
 
     HTAB         *render_ids;
     Datum        *union_ids;
+    ArrayType    *arm_input = NULL;   /* residual ids the arms run on; NULL = none */
     int32         un = 0, ucap;
     ArmData       arm_name, arm_lemma, arm_trans, arm_def;
     HTAB         *canon;
@@ -521,14 +590,74 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
         if (!in_nulls[i])
             render_union_add(render_ids, &union_ids, &un, &ucap, in_elems[i]);
 
-    /* ---- the four candidate arms (batched, grouped, rank-ordered) ---- */
-    run_name_arms(in_arr, lang, lang_null, &arm_name, &arm_lemma,
-                  render_ids, &union_ids, &un, &ucap);
-    run_arm(plan_translation, PointerGetDatum(in_arr), lang, lang_null,
-            &arm_trans, render_ids, &union_ids, &un, &ucap, "translation");
-    /* defines takes no lang; reuse the runner with a one-arg plan. */
+    /* ---- THE ARMS RUN ON THE RESIDUAL, NOT ON EVERY INPUT ----
+     *
+     * Arm 1 is the self render, so an input that renders never consults has_name,
+     * synset_lemma, translation, canonical or defines. Measured on 200 real object
+     * ids, 185 (92.5%) render directly -- so running all five arms over the whole
+     * input array, and rendering every candidate they return, is work thrown away
+     * for the overwhelming majority. realize.render_text_batch was 1,385 ms mean over
+     * 205 calls, ~1,200 ids per call against ~200 inputs.
+     *
+     * The inputs are rendered once here to decide the residual. That costs n extra
+     * renders and removes roughly 5n candidate renders. Everything downstream --
+     * the union, the single shared render pass, the ladder -- is untouched, so an
+     * id in the residual is resolved exactly as before.
+     *
+     * When the residual is empty the arms are skipped entirely: five SPI queries and
+     * their whole candidate set never happen. */
     {
-        Datum args[1] = { PointerGetDatum(in_arr) };
+        char **probe;
+
+        /* Every arm must be a VALID EMPTY arm before the residual test, because the
+         * ladder hash-searches all four unconditionally. run_arm builds by_id itself,
+         * and arm_def's htab is built inside the defines block -- both of which are
+         * now conditional, so without this an empty residual left four stack-garbage
+         * ArmData structs for the ladder to search. That is what produced 4 wrong
+         * labels out of 314 on the first attempt. */
+        arm_name.by_id  = make_id_htab("has_name empty", sizeof(ArmEntry), 32);
+        arm_lemma.by_id = make_id_htab("synset_lemma empty", sizeof(ArmEntry), 32);
+        arm_trans.by_id = make_id_htab("translation empty", sizeof(ArmEntry), 32);
+        arm_def.by_id   = make_id_htab("defines empty", sizeof(ArmEntry), 32);
+        arm_name.cands = arm_lemma.cands = arm_trans.cands = arm_def.cands = NULL;
+        arm_name.n = arm_lemma.n = arm_trans.n = arm_def.n = 0;
+        arm_name.cap = arm_lemma.cap = arm_trans.cap = arm_def.cap = 0;
+
+        probe = render_union(union_ids, un, "realize_batch residual probe");
+        Datum *resid = (Datum *) palloc(sizeof(Datum) * Max(1, n));
+        int32  nresid = 0;
+
+        for (int i = 0; i < n; i++)
+        {
+            IdKey        key;
+            RenderEntry *re;
+
+            if (in_nulls[i])
+                continue;
+            id_key(&key, in_elems[i], "residual");
+            re = (RenderEntry *) hash_search(render_ids, &key, HASH_FIND, NULL);
+            if (re == NULL || probe[re->slot] == NULL || probe[re->slot][0] == '\0')
+                resid[nresid++] = in_elems[i];
+        }
+
+        if (nresid > 0)
+        {
+            ArrayType *resid_arr = construct_array(resid, nresid, BYTEAOID, -1,
+                                                   false, TYPALIGN_INT);
+
+            run_name_arms(resid_arr, lang, lang_null, &arm_name, &arm_lemma,
+                          render_ids, &union_ids, &un, &ucap);
+            run_arm(plan_translation, PointerGetDatum(resid_arr), lang, lang_null,
+                    &arm_trans, render_ids, &union_ids, &un, &ucap, "translation");
+            arm_input = resid_arr;
+        }
+        else
+            arm_input = NULL;
+    }
+    /* defines takes no lang; reuse the runner with a one-arg plan. Residual only. */
+    if (arm_input != NULL)
+    {
+        Datum args[1] = { PointerGetDatum(arm_input) };
         int   rc = SPI_execute_plan(plan_defines, args, NULL, true, 0);
 
         if (rc != SPI_OK_SELECT)
@@ -575,8 +704,9 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
 
     /* ---- canonical-name arm (text result, no rendering) ---- */
     canon = make_id_htab("canonical", sizeof(CanonEntry), 256);
+    if (arm_input != NULL)
     {
-        Datum args[1] = { PointerGetDatum(in_arr) };
+        Datum args[1] = { PointerGetDatum(arm_input) };
         int   rc = SPI_execute_plan(plan_canonical, args, NULL, true, 0);
 
         if (rc != SPI_OK_SELECT)
@@ -624,12 +754,23 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
             continue;
         id_key(&key, in_elems[i], "input");
 
-        /* arms 1, 2: first non-empty render */
-        label = first_nonempty(&arm_name, &key, rendered, render_ids);
-        if (label == NULL)
-            label = first_nonempty(&arm_lemma, &key, rendered, render_ids);
-        /* arm 3: self render, NULLIF '' */
-        if (label == NULL)
+        /* arm 1: SELF RENDER, NULLIF '' -- CONTENT BEFORE NAME.
+         *
+         * render_text is the VALUE an entity carries; a name is the LABEL for it.
+         * An entity that has content must emit the content. This arm used to sit
+         * third, behind has_name and synset_lemma, so any entity carrying a
+         * HAS_NAME edge emitted its name instead of itself -- and every Unicode
+         * codepoint carries one, which put "MIDDLE DOT" and "COLON" into replies.
+         *
+         * Measured over the 224 distinct constituents of 40 tier-3 containers: all
+         * 224 render, only 16 carry a name, and all 16 are the label losing to the
+         * content (COLON/':', DIGIT ONE/'1', AMPERSAND/'&'). Reordering cannot lose
+         * a name: an entity whose name IS the right answer renders empty and falls
+         * through to arm 2 (a Language entity renders NULL and names 'English').
+         *
+         * This MUST match realize/realize.sql.in's COALESCE order -- the two are one
+         * policy with two implementations (§15), and they diverged when the scalar
+         * was fixed in 0b55b8ac and this was not. */
         {
             RenderEntry *re = (RenderEntry *) hash_search(render_ids, &key,
                                                           HASH_FIND, NULL);
@@ -638,6 +779,11 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
                 && rendered[re->slot][0] != '\0')
                 label = rendered[re->slot];
         }
+        /* arms 2, 3: name then synset lemma, first non-empty render */
+        if (label == NULL)
+            label = first_nonempty(&arm_name, &key, rendered, render_ids);
+        if (label == NULL)
+            label = first_nonempty(&arm_lemma, &key, rendered, render_ids);
         /* arm 4: translation, first non-empty render */
         if (label == NULL)
             label = first_nonempty(&arm_trans, &key, rendered, render_ids);

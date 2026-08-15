@@ -3,10 +3,18 @@ DROP FUNCTION IF EXISTS laplace._realize_defines(bytea);
 CREATE OR REPLACE FUNCTION realize._defines(p_id bytea)
     RETURNS text
     LANGUAGE sql STABLE PARALLEL SAFE STRICT AS $$
-    SELECT realize.render_text(g.object_id, 24)
-    FROM laplace.v_consensus_unrefuted g
-    WHERE g.subject_id = p_id
-      AND g.type_id = laplace.relation_type_id('HAS_DEFINITION')
-    ORDER BY consensus.eff_mu(g.rating, g.rd) DESC
-    LIMIT 1
+    -- RANK IN ID SPACE, RENDER THE WINNER. The ordering key is eff_mu, not the
+    -- rendered text, so nothing needs a surface to decide. Rendering in the target
+    -- list made realize.render_text run for EVERY candidate and kept one: each call opens
+    -- its own SPI connection and walks realize.constituents_closure, the largest single
+    -- line item in the system (1,496,183 calls, 19.6 hours cumulative).
+    SELECT realize.render_text(
+        (SELECT g.object_id
+         FROM laplace.v_consensus_unrefuted g
+         WHERE g.subject_id = p_id
+           AND g.type_id = laplace.relation_type_id('HAS_DEFINITION')
+         -- object_id CLOSES the order: without it a tie is broken by plan order,
+         -- which is not reproducible. Matches Q_DEFINES in realize_batch.c.
+         ORDER BY consensus.eff_mu(g.rating, g.rd) DESC, g.object_id
+         LIMIT 1), 24)
 $$;

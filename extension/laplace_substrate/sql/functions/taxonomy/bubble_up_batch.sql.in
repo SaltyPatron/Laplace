@@ -1,0 +1,227 @@
+-- taxonomy.bubble_up_batch(terms[], domain_context[], k): bubble_up for a SET of terms
+-- in one pass. Same election, same ordering, same output columns, plus the term.
+--
+-- WHY THIS EXISTS. taxonomy.bubble_up takes ONE term, so every caller that needs senses
+-- for a token stream calls it per token and re-runs the entire CTE cascade each
+-- time. Measured under auto_explain on generation.compose_batch('what is a wolf', 12):
+-- CTE Scan `scoped` 51,351 ms over 798 loops, `cand_lang` 32,438 ms over 728 loops,
+-- `family_out` 15,358 ms over 2,394 loops -- 51.4 s of a 52.2 s statement, to elect
+-- senses for ~266 distinct tokens. The work per token is small; the repetition is
+-- the cost.
+--
+-- WHAT ACTUALLY COLLAPSES. cand_lang is the clearest case: the scalar form issues one
+-- attestations probe per term, and attestations cannot prune on subject_id, so each
+-- probe pays the full partition set. Batched, every candidate synset of every term
+-- is resolved by ONE probe. term_lang and peers stay per-term (they are per-term
+-- facts) but run as one set-based pass instead of N statements.
+--
+-- ORDERING IS PER TERM. The scalar form ends in ORDER BY ... LIMIT p_k. Here that is
+-- row_number() OVER (PARTITION BY term ORDER BY <same three keys>) <= p_k, which is
+-- the same selection applied independently to each term. The ORDER BY rationale
+-- (EVIDENCE BEFORE ADJUDICATED STRENGTH) lives in bubble_up.sql.in and is not
+-- restated here -- one body owns that argument, this one must not drift from it.
+DROP FUNCTION IF EXISTS taxonomy.bubble_up_batch(bytea[], bytea[], integer);
+CREATE OR REPLACE FUNCTION taxonomy.bubble_up_batch(
+    p_terms bytea[],
+    p_domain_context bytea[] DEFAULT NULL,
+    -- NULL = no truncation. See the note above `ordered`: a default number here
+    -- would cut the candidate field before the election.
+    p_k integer DEFAULT NULL
+)
+RETURNS TABLE(
+    term bytea,
+    sense_id bytea,
+    synset_id bytea,
+    via_relation text,
+    score numeric,
+    base_eff_mu numeric,
+    domain_hits bigint,
+    witnesses bigint
+)
+LANGUAGE sql STABLE PARALLEL SAFE AS $$
+WITH terms AS (
+    SELECT DISTINCT t AS term
+    FROM unnest(COALESCE(p_terms, ARRAY[]::bytea[])) AS t
+    WHERE t IS NOT NULL
+),
+peers AS (
+    SELECT t.term, unnest(lexical.lexical_peers(t.term)) AS id
+    FROM terms t
+),
+family_out AS (
+    SELECT p.term,
+           c.object_id AS target_id,
+           consensus.relation_canonical(c.type_id) AS via_relation,
+           consensus.eff_mu_display(c.rating, c.rd) AS base_eff_mu,
+           c.witness_count AS witnesses,
+           c.rating,
+           c.rd
+    FROM peers p
+    JOIN laplace.consensus c ON c.subject_id = p.id
+    -- Inline, not a CTE column: IMMUTABLE + constant arg folds to a literal bytea[]
+    -- before planning, so the LIST partitions prune. See realize.resolve_name.
+    WHERE c.type_id = ANY (consensus.relation_family_ids('HAS_SENSE'))
+),
+resolved AS (
+    /* lemma --HAS_SENSE--> sense --IS_SENSE_OF--> synset */
+    SELECT fo.term,
+           fo.target_id AS sense_id,
+           ss.object_id AS synset_id,
+           fo.via_relation,
+           fo.base_eff_mu,
+           (fo.witnesses + COALESCE(ss.witness_count, 0))::bigint AS witnesses,
+           fo.rating,
+           fo.rd
+    FROM family_out fo
+    LEFT JOIN laplace.consensus ss
+      ON ss.subject_id = fo.target_id
+     AND ss.type_id = ANY (consensus.relation_family_ids('HAS_SENSE'))
+     AND consensus.relation_canonical(ss.type_id) = 'IS_SENSE_OF'
+    WHERE fo.via_relation = 'HAS_SENSE'
+      AND ss.object_id IS NOT NULL
+
+    UNION ALL
+
+    /* lemma --IS_SYNONYM_OF--> synset (WordNet co-membership) */
+    SELECT fo.term, fo.target_id, fo.target_id, fo.via_relation,
+           fo.base_eff_mu, fo.witnesses, fo.rating, fo.rd
+    FROM family_out fo
+    WHERE fo.via_relation = 'IS_SYNONYM_OF'
+
+    UNION ALL
+
+    /* rare: lemma --IS_SENSE_OF--> synset */
+    SELECT fo.term, fo.target_id, fo.target_id, fo.via_relation,
+           fo.base_eff_mu, fo.witnesses, fo.rating, fo.rd
+    FROM family_out fo
+    WHERE fo.via_relation = 'IS_SENSE_OF'
+),
+-- Per-term fact, set-based pass. Language is a CONSTRAINT on which surface the
+-- input denotes, never a score -- see bubble_up.sql.in for why a boolean
+-- "has an edge to the query language" does not discriminate.
+term_lang AS MATERIALIZED (
+    SELECT al.id AS term, al.lang AS id
+    FROM converse.attested_language_batch(ARRAY(SELECT term FROM terms)) al
+),
+-- ONE probe for EVERY candidate synset of EVERY term, through the canonical body
+-- (§15: this argmax used to be inlined here AND written again as the scalar
+-- converse.attested_language). attestations cannot prune on
+-- subject_id, so the scalar form paid the full partition set once per term; this
+-- pays it once for the whole batch.
+-- = ANY(ARRAY(SELECT ...)), NOT A JOIN. This one is scale-dependent and the small-set
+-- measurement gives the WRONG answer.
+--
+-- Standalone on 1,362 candidate synsets, identical 844 rows:
+--   JOIN on a.subject_id      413 ms
+--   = ANY(ARRAY(SELECT ...))  587 ms
+--   IN (SELECT ...) semi-join 1,145 ms
+-- so the join looks best. At real scale it is not. Measured under auto_explain on
+-- generation.compose_batch('what is a wolf', 12), same output both ways:
+--   array form   cand_lang  30,623 ms,   Index probes    18,555 loops
+--   join form    cand_lang 150,653 ms,   Index probes 1,076,788 loops
+-- The join becomes a nested loop issuing one probe per candidate; the array form is
+-- ONE bounded ScalarArrayOp per partition however many ids it carries. laplace.attestations
+-- is LIST (type_id) and this predicate is on subject_id, so nothing prunes and the
+-- probe count is what decides.
+--
+-- Routing the same set through converse.attested_language_batch as an ARGUMENT is worse
+-- again -- the set must materialise as one Datum before the call, and the whole
+-- bubble_up_batch went 3,155 -> 4,950 ms. attested_language_batch stays canonical for
+-- callers that already hold an array (term_lang below); this site holds a relation
+-- and binds it as an InitPlan.
+cand_lang AS MATERIALIZED (
+    SELECT DISTINCT ON (a.subject_id) a.subject_id AS id, a.context_id AS lang
+    FROM laplace.attestations a
+    JOIN laplace.entities e ON e.id = a.context_id
+                           AND e.type_id = realize.canonical_id('Language')
+    WHERE a.subject_id = ANY (ARRAY(SELECT DISTINCT r.synset_id FROM resolved r))
+    GROUP BY a.subject_id, a.context_id
+    ORDER BY a.subject_id, SUM(a.sum_score_fp1e9) DESC, a.context_id
+),
+scoped AS (
+    SELECT r.* FROM resolved r
+    LEFT JOIN cand_lang cl ON cl.id = r.synset_id
+    LEFT JOIN term_lang tl ON tl.term = r.term
+    WHERE tl.id IS NULL
+       OR cl.lang IS NULL
+       OR cl.lang = tl.id
+),
+domain AS (
+    SELECT DISTINCT d AS id
+    FROM unnest(COALESCE(p_domain_context, ARRAY[]::bytea[])) AS d
+    WHERE d IS NOT NULL
+),
+-- Feeds domain_scores ONLY. The cardinality gate keeps the geometry_neighbours
+-- lateral from ever being evaluated on the no-domain path; see bubble_up.sql.in.
+-- Keyed by synset, not by term: a synset's domain hits do not depend on which
+-- term reached it.
+members AS (
+    SELECT r.synset_id, m.object_id AS member_id
+    FROM scoped r
+    JOIN laplace.consensus m ON m.subject_id = r.synset_id
+    WHERE m.type_id = ANY (consensus.relation_family_ids('HAS_SENSE'))
+      AND COALESCE(cardinality(p_domain_context), 0) > 0
+    UNION
+    SELECT r.synset_id, m.subject_id AS member_id
+    FROM scoped r
+    JOIN laplace.consensus m ON m.object_id = r.synset_id
+    WHERE m.type_id = ANY (consensus.relation_family_ids('HAS_SENSE'))
+      AND COALESCE(cardinality(p_domain_context), 0) > 0
+),
+domain_scores AS (
+    SELECT m.synset_id, count(*)::bigint AS domain_hits
+    FROM members m
+    JOIN domain d ON true
+    JOIN LATERAL structural.geometry_neighbours(m.member_id, 200, 8) gn
+      ON gn.neighbour_id = d.id
+    GROUP BY m.synset_id
+),
+ranked AS (
+    SELECT DISTINCT ON (r.term, r.synset_id)
+           r.term,
+           r.sense_id,
+           r.synset_id,
+           r.via_relation,
+           r.base_eff_mu,
+           COALESCE(ds.domain_hits, 0)::bigint AS domain_hits,
+           r.witnesses,
+           (r.base_eff_mu * (1::numeric + ln(1::numeric + COALESCE(ds.domain_hits, 0)))) AS score,
+           consensus.eff_mu(r.rating, r.rd) AS rank_key
+    FROM scoped r
+    LEFT JOIN domain_scores ds ON ds.synset_id = r.synset_id
+    ORDER BY r.term, r.synset_id, consensus.eff_mu(r.rating, r.rd) DESC
+),
+-- p_k DEFAULTS TO NULL, MEANING NO TRUNCATION.
+--
+-- Bounding a candidate set is legitimate -- spec 36 makes SCAN "discover bounded
+-- candidates" a stage of the canonical program. What this default avoids is
+-- narrower: a bound applied PER TERM, in isolation, before any joint election
+-- across the prompt's terms. §7's election law puts the discriminating
+-- information in the graph BETWEEN tokens, so a per-term prefix can remove the
+-- candidate that the joint evidence would have selected, and no downstream
+-- re-rank can recover it (spec 36: STEER reranks proposals, it does not
+-- regenerate them). That is the same shape §9b records in prompt_coherence,
+-- which collapses each token to one sense before the seat.
+--
+-- The scalar form's LIMIT 64 is not load-bearing: lexical.senses passes 64 and then
+-- RE-SORTS the survivors on different keys, so the 64 only bounds rows. Measured
+-- over 20 terms, one term carries 135 senses, so k=64 drops 71 of them, and with
+-- no final tiebreak WHICH 71 is not reproducible -- 33 of 835 rows differed
+-- between two equally valid cuts. Untruncated, the scalar and batch forms are
+-- byte-identical over 1,012 rows.
+--
+-- The parameter stays so an explicit caller bound remains expressible; it is
+-- simply never defaulted to a number. row_number carries the total order
+-- (synset_id closes it) so a caller that does pass k gets a repeatable cut.
+ordered AS (
+    SELECT rk.*,
+           row_number() OVER (PARTITION BY rk.term
+                              ORDER BY rk.witnesses DESC, rk.score DESC,
+                                       rk.rank_key DESC, rk.synset_id) AS rn
+    FROM ranked rk
+)
+SELECT term, sense_id, synset_id, via_relation, score, base_eff_mu, domain_hits, witnesses
+FROM ordered
+WHERE p_k IS NULL OR rn <= GREATEST(p_k, 1)
+ORDER BY term, rn
+$$;

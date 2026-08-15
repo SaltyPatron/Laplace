@@ -8,7 +8,12 @@ CREATE OR REPLACE FUNCTION consensus.stats_approx()
                GREATEST(c.reltuples, 0)::bigint AS est_rows
         FROM pg_class c
         JOIN pg_namespace n ON n.oid = c.relnamespace
-        WHERE n.nspname = current_schema()
+        -- SCHEMA-QUALIFIED, never current_schema(). Under the deployed search_path
+        -- ("$user", public) current_schema() is public, so this looked for
+        -- attestations/consensus there, found neither, and returned a row of ALL
+        -- NULLS in 1.8ms -- fast enough to pass a timing sweep while answering
+        -- nothing. The only current_schema() call in the function surface.
+        WHERE n.nspname = '@extschema@'
           AND c.relname IN ('attestations', 'consensus')
     )
     SELECT (SELECT est_rows FROM est WHERE relname = 'attestations'),
