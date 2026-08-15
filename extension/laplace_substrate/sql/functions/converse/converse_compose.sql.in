@@ -220,8 +220,10 @@ BEGIN
     -- real trajectory tokens: render-side and id-side agree on every one, 0
     -- disagreements. separator_ids() is 10.3 ms for the whole set.
     --
-    -- realize.is_all_whitespace(text) was also the only English/ASCII assumption on this
-    -- path; separator-ness is a Unicode general-category fact (Zs/Zl/Zp/Cc).
+    -- realize.is_all_whitespace is NOT an English/ASCII assumption -- it is
+    -- pg_laplace_is_all_whitespace in perfcache.c, an O(1) read of the compiled UCD
+    -- record. The defect was only that it takes TEXT, so the caller had to render to
+    -- reach it. Classifying by id skips the render, not a bad classifier.
     ws AS MATERIALIZED (
         SELECT DISTINCT t.entity_id AS id,
                t.entity_id = ANY (t_sep) AS is_ws

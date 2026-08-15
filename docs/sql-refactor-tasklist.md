@@ -292,3 +292,48 @@ back from them. Measured by `source_id` over the 120 live PRECEDES attestations 
 (29 and 2).
 
 - [ ] Fix at the decomposer — it should emit a trajectory, not PRECEDES edges.
+
+
+## O. The perfcache — corrections to two claims made earlier in this file
+
+`engine/core/include/laplace/core/perfcache_format.h` defines a flat record for ALL
+**1,114,112** codepoints: `codepoint, uca_order, coord[4], hilbert, **hash128**, flags`, with
+flags packing **GB (grapheme break), WB (word break), SB (sentence break), INCB, CCC**.
+
+- **"There is no UAX#29 word_break data ingested (0 rows)" was WRONG.** UAX#29 segmentation
+  properties are compiled into the perfcache and available O(1) by codepoint index. The
+  earlier claim came from grepping `canonical_names` and declaring absence — the wrong search.
+- **"`is_all_whitespace` is English/ASCII hardcoding" was WRONG.** It is
+  `pg_laplace_is_all_whitespace` in `perfcache.c`, an O(1) read of the compiled UCD record.
+  Its only defect is that it takes **text**, so callers rendered to reach it.
+- The record carries **`hash128`**, so codepoint → entity id is an **array index**, not a hash
+  computation and not a query. `laplace.word_id` is itself perfcache-backed
+  (`pg_laplace_word_id`).
+
+Exported to SQL today: `word_id`, `codepoint_for_id`, `is_all_whitespace`, `atom_window`,
+`chess_position_ready`. **Missing and worth adding:** an id-taking separator/category
+predicate, so classification never needs a surface.
+
+## P. Case folding is not universal — landed
+
+`dog` / `Dog` / `DOG` are different content, therefore different hashes, therefore different
+entities (`01cdcce1…` vs `af1513f0…`, equal = false). Merging them asserts an equivalence the
+identity scheme denies, and case folding exists only in bicameral scripts. Where the relation
+is real the graph attests it — `dog` and `Dog` carry an `IS_SYNONYM_OF` edge.
+
+`lexical_peers` widened **unconditionally**: 11,964 calls / 96 ms / 1,146 s, driving
+`word_case_variants` (12,303 / 96 ms / 1,179 s) and its inner per-id render (12,223 / 88 ms /
+1,081 s). Measured on 20 common words, all 20 resolve exactly and the old body returned 3
+peers for every one — fired 100%, needed 0%.
+
+- [x] Widening is now a fallback behind an indexed exact probe (`c4a95c1e`).
+      `lexical.senses(dog,[animal,pet])` 1,884 → **388 ms**; `bubble_up_batch` 20 terms
+      3,155 → **1,092 ms**; `top_synset('wolf')` unchanged; `senses('wolf')` 39 rows at
+      **117.8 ms** — all under the same concurrent ingest.
+- [ ] `word_case_variants` (C) still does hash → text → hash with five SPI round trips on the
+      fallback path. The codepoints are already packed in the trajectory vertices
+      (`ATOM_SHIFT 31`), and the case maps are attested
+      (`HAS_LOWERCASE_MAPPING`/`UPPERCASE`/`TITLECASE`), so it needs no render at all. A SQL
+      rewrite was tried and rejected: it is RBAR (one row per character) and was not
+      equivalent (3/18 mismatches on single-character words). The correct form is C over the
+      perfcache — needs a rebuild and a PG bounce.
