@@ -390,3 +390,68 @@ the defect on both paths. One correct and one wrong beats two wrong.
 rows and plans **575 nodes in 381.8 ms**, executing 2,769 ms of which a single `Aggregate` is
 **2,530 ms / 2,157,380 buffers** — `realize.batch` (892 ms for 24 ids on its own) plus
 `lexical.type_label_batch` (46 ms). The scans are not the cost; the last-mile realization is.
+
+
+## R. Index audit — never done before, ~180 GB, and the largest index is never scanned
+
+Measured from `pg_stat_user_indexes` on 2026-08-15, aggregated over all 216 leaves:
+
+| table | index | scans | size |
+|---|---|---|---|
+| attestations | `(id, type_id, subject_id)` PK | **0** | **36 GB** |
+| consensus | `(id, type_id, subject_id)` PK | 1,444 | 35 GB |
+| attestations | `(subject_id, type_id, object_id)` | **37,918,123** | 28 GB |
+| consensus | `(subject_id, type_id, eff_mu DESC)` partial | 34,733 | 16 GB |
+| consensus | `(type_id, subject_id)` partial | 335,887 | 13 GB |
+| consensus | `(subject_id, type_id)` | 1,419,783 | 13 GB |
+| consensus | `(subject_id, eff_mu DESC)` partial | 147,737 | 12 GB |
+| consensus | `(object_id, type_id)` partial | 248,914 | 5.9 GB |
+| attestations | `(object_id)` partial | 1,044,072 | 4.8 GB |
+| attestations | `(source_id)` | 30,971 | 2.7 GB |
+| attestations | `(type_id)` | 1,011,383 | 2.7 GB |
+| consensus | `(type_id)` | 6,959 | 2.6 GB |
+| consensus | `(eff_mu DESC)` partial | 9,171 | 2.5 GB |
+| attestations | `(context_id)` partial | 1,057,281 | 510 MB |
+| attestations | `brin (last_observed_at)` | **0** | 7 MB |
+
+Nothing here has been changed — this is the evidence, not a decision.
+
+- `attestations` PK, **36 GB, 0 scans**: nothing reads attestations by `id`. It exists to
+  enforce uniqueness, and `id` is already the content hash, so the question is whether the
+  constraint is doing work the hash does not already do.
+- `consensus (type_id)` **2.6 GB**: `type_id` IS the LIST partition key, so pruning already
+  isolates it; a standalone index on it adds write amplification × 216 leaves.
+- `consensus (subject_id, type_id)` earns its keep (1.4M scans) while
+  `(subject_id, type_id, eff_mu)` at 16 GB takes 40× fewer scans.
+- Index creation is being re-run: `pg_stat_statements` shows
+  `CREATE INDEX IF NOT EXISTS entities_tier_type_btree` **17 calls / 796 s** and
+  `entities_tier_type_brin` **16 calls / 68 s**.
+
+- [ ] Decide per index with the owner. Do not drop on agent judgement.
+
+## S. Planning cost is linear in partition count — quantified
+
+Each **unprunable** reference to `laplace.consensus` adds **216 scan nodes** to the plan:
+1 ref = 216 nodes / 83.9 ms planning, 4 refs = 864 / 113.4 ms, 8 refs = 1,728 / 155.3 ms.
+With a prunable predicate (`subject_id = <constant>`) planning stays flat at 20–30 ms.
+
+Consequence, measured on a quiet database:
+
+| function | planning | execution |
+|---|---|---|
+| `lexical.senses(dog, context)` | **699.8 ms** | 288.1 ms |
+| `consensus.salient_facts('water')` | 373.3 ms | 2,768.9 ms |
+| `taxonomy.bubble_up_batch` (2 terms) | 177.7 ms | 468.0 ms |
+
+`senses(word, context)` spends **71% of its time planning**. Reducing the leaf count reduces
+this for every unprunable reference in the system.
+
+- [ ] **112 leaves are exactly empty** (verified by `count(*)`, not `reltuples`): the 7
+      relations ATTENDS, COMPLETES_TO, CONTAINS, CONTINUES_TO, HAS_EXTERNAL_ID, OV_RELATES,
+      TOKEN_MAPS_TO × 8 hash children × both tables. Dropping them takes consensus from 216
+      to 152 leaves — a 30% cut in plan width for every unprunable reference — with no data
+      movement. They must also come out of the `hot` array or the next seed recreates them.
+- [ ] **HAS_FEATURE, 186,562,442 rows, 84.93% of DEFAULT, still unpartitioned.** Adding it to
+      `hot` makes the next install drain those rows via `DELETE … RETURNING` + `INSERT`
+      (`seed_relation_partitions.sql.in:77`) — hours of WAL and locks on both tables. Owner
+      schedules this; it is not an agent action.
