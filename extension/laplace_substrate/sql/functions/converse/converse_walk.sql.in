@@ -189,11 +189,43 @@ BEGIN
         ) q
         WHERE q.cnt >= 2
     ),
+    -- QUERY x KEY. The query is the oriented topic `syn`; the key is a stream token;
+    -- the score is the adjudicated belief on the edge BETWEEN them, either direction.
+    -- A per-source prior cannot express this: it gives every token of a sentence the
+    -- same weight regardless of the prompt, so it is a single-token scalar, which
+    -- INVENTION §7 forbids as a ranking key. Edge-conditioned, the same token scores
+    -- differently under a different topic -- which is what makes it attention rather
+    -- than a frequency prior.
+    --
+    -- = ANY(array), never a join: laplace.consensus is LIST(type_id) with hash
+    -- sub-partitions and this constrains neither side's partition key, so a join
+    -- plans as a full index-only scan of every partition.
+    tokset AS MATERIALIZED (
+        SELECT DISTINCT k.entity_id AS id FROM kept k
+    ),
+    qk AS MATERIALIZED (
+        SELECT e.id, MAX(e.mu) AS mu FROM (
+            SELECT c.object_id AS id, consensus.eff_mu(c.rating, c.rd) AS mu
+            FROM laplace.consensus c
+            WHERE c.subject_id = syn
+              AND c.object_id = ANY (ARRAY(SELECT t.id FROM tokset t))
+            UNION ALL
+            SELECT c.subject_id, consensus.eff_mu(c.rating, c.rd)
+            FROM laplace.consensus c
+            WHERE c.object_id = syn
+              AND c.subject_id = ANY (ARRAY(SELECT t.id FROM tokset t))
+        ) e
+        GROUP BY e.id
+    ),
     seq AS MATERIALIZED (
         -- Each sentence's tokens in order, then one SENT boundary (weight 0)
-        -- ordered past every real token of its sentence.
-        SELECT k.gid, k.is_core, k.wt, k.entity_id AS id, k.rn
-        FROM kept k
+        -- ordered past every real token of its sentence. Weight is the query-key
+        -- belief where the topic and the token are bound by testimony, and falls back
+        -- to the source's own belief where they are not -- absence of a direct edge is
+        -- not evidence of worthlessness, and dropping to zero there would be an
+        -- operator-invented floor.
+        SELECT k.gid, k.is_core, GREATEST(COALESCE(q.mu, k.wt), 0) AS wt, k.entity_id AS id, k.rn
+        FROM kept k LEFT JOIN qk q ON q.id = k.entity_id
         UNION ALL
         SELECT DISTINCT k.gid, k.is_core, 0::bigint, SENT, 2147483647::bigint
         FROM kept k
