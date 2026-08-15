@@ -20,8 +20,8 @@
       file 30/686, rows_new=0.
 - [x] Presence preload ruled out (index_cycle_defer:false, PRELOAD unset in CI)
 - [x] `_canonicalNames` ruled out — bounded vocabulary, not gigabytes
-- [~] `ByteAdmissionGate` written. NOT WIRED, NOT BUILT, NOT COMMITTED.
-- [ ] Wire it into the parallel worker and measure RSS against the same corpus
+- [x] `ByteAdmissionGate` — byte-budget admission, wired into the parallel worker, builds green
+- [ ] Measure RSS against the same UD corpus to confirm the ceiling holds
 
 ## 3. CI
 - [x] #1102 checkout EACCES — merged

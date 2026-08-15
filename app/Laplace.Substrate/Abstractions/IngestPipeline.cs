@@ -781,6 +781,17 @@ public static class IngestBatchPipeline
         int knownFileTotal = exhaustedInPeek ? peeked.Count : 0;
         int fileOrdinal = 0;
 
+        // ADMISSION BY BYTES, NOT BY FILE COUNT. The pool is bounded at `workers`, and a
+        // worker composes its file end to end, so the memory in flight is the SUM OF THE
+        // FILES the pool is holding — a quantity a count cannot bound when a source's files
+        // span five orders of magnitude. MEASURED 2026-08-15 on UD: 686 treebanks from
+        // 4,577 B to 360,217,466 B against file_workers=10 and a declared 4 GiB working-set
+        // budget; RSS reached 83,136,288 kB and the kernel OOM-killer took the run at file
+        // 30 with rows_new still 0 — nothing had committed, so all of it was composed
+        // records held by workers. The budget is the one the sizing plan already declares,
+        // not a new dial.
+        var admission = new ByteAdmissionGate(IngestSizing.ResolveWorkingSetBudgetBytes());
+
         var workerTasks = new Task[workers];
         for (int w = 0; w < workers; w++)
         {
@@ -818,6 +829,13 @@ public static class IngestBatchPipeline
                         continue;
                     }
 
+                    // Admitted on the file's INPUT size, held until the file is done.
+                    // Acquired after the resume skip so a marker-complete file — which
+                    // opens nothing and composes nothing — never consumes budget.
+                    long admitBytes = TryFileBytes(source.FilePath);
+                    await admission.AcquireAsync(admitBytes, ct).ConfigureAwait(false);
+                    try
+                    {
                     var records = new AsyncEnumerableRecordStream<TRecord>(source.RecordsAsync(ct));
                     int segments = segmentsPerFile > 1
                         ? MonolithSegmenter.ResolveSegments(config, segmentsPerFile)
@@ -883,6 +901,13 @@ public static class IngestBatchPipeline
                         Console.Error.WriteLine(
                             $"INGEST_FILE_COMPOSED file={source.FileLabel} worker={workerId} "
                             + $"records={fileUnits:N0} elapsed_s={secs:F1} rate_rec_s={fileUnits / secs:N0}");
+                    }
+                    }
+                    finally
+                    {
+                        // Released on every exit including the `continue` above: a failed
+                        // file must not hold budget for the life of the run.
+                        await admission.ReleaseAsync(admitBytes).ConfigureAwait(false);
                     }
                 }
             }, ct);
