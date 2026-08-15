@@ -592,3 +592,38 @@ that is a reasonable trade — but it is a schema and disk decision, and it come
 a VACUUM policy, so it is the owner's.
 
 - [ ] Decide: covering index + VACUUM policy, or leave the heap fetches.
+
+
+## Z. Index audit against real predicates — DONE
+
+Item R gave scan counts. This is the missing half: every index shape cross-referenced
+against the predicates the 300+ SQL functions actually issue.
+
+Predicate usage across the function corpus (files containing each shape):
+`type_id` 109 · `subject_id` 89 · `object_id` 43 · `source_id` 13 · `context_id` 8 ·
+`last_observed_at` **0** · `id =` on consensus/attestations **4**.
+Composite: subject+type **62** · object+type **21** · subject+type+object **18**.
+
+| index (x216 leaves) | predicate files | scans | verdict |
+|---|---|---|---|
+| `(subject_id, type_id, object_id)` attestations | 18 full / 62 prefix | 37,918,123 | earns it |
+| `(subject_id, type_id)` consensus | 62 | 1,419,783 | earns it |
+| `(object_id)` partial attestations | 43 | 1,044,072 | earns it |
+| `(context_id)` partial | 8 | 1,057,281 | earns it |
+| `(object_id, type_id)` partial consensus | 21 | 248,914 | earns it |
+| `(source_id)` | 13 | 30,971 | earns it |
+| `(type_id)` alone | 109, but it IS the LIST partition key | 6,959 | **redundant with pruning** |
+| `(id, type_id, subject_id)` PK | 4 | 0 on attestations | constraint, not a read path — correct |
+| `brin (last_observed_at)` | **0** | **0** | **no SQL issues this predicate at all** |
+
+Two findings, neither actioned:
+
+- **`brin (last_observed_at)` is supported by zero predicates in the entire corpus and has
+  zero scans.** It exists on 216 leaves of both tables.
+- **`btree (type_id)` alone is redundant with LIST pruning.** `type_id` is the partition key,
+  so supplying it already isolates the partition; a standalone index on it adds write
+  amplification across 216 leaves for 6,959 scans (2.5 GB consensus / 2.7 GB attestations).
+
+The three heavily-used shapes are correct for the access pattern and should stay. The PK's
+zero read scans are the expected shape for a uniqueness constraint and are NOT a drop signal
+— see the retraction in item W.
