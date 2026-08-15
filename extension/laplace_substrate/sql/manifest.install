@@ -273,6 +273,7 @@ functions/generation/consensus_adjacency.sql.in
 functions/generation/foundry_vocab.sql.in
 functions/generation/grapheme_floor_vocab.sql.in
 functions/generation/grapheme_order.sql.in
+functions/corpus/separator_ids.sql.in
 functions/generation/word_adjacency.sql.in
 functions/generation/word_order.sql.in
 functions/generation/sentence_order.sql.in
@@ -360,7 +361,6 @@ functions/recall/recall_fallback_gloss.sql.in
 functions/recall/recall_is_a_yes_reply.sql.in
 functions/recall/recall_is_a_no_reply.sql.in
 functions/corpus/corpus_trajectory_probe.sql.in
-functions/corpus/separator_ids.sql.in
 functions/corpus/corpus_whitespace_vocab_indices.sql.in
 functions/geometry/entity_physicality_coord.sql.in
 functions/geometry/entity_container_degree.sql.in
