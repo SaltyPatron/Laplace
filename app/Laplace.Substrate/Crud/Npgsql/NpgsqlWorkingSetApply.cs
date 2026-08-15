@@ -1354,17 +1354,42 @@ public sealed partial class NpgsqlSubstrateWriter
             stagedPerTier.TryGetValue(tier, out int n);
             stagedPerTier[tier] = n + 1;
         }
-        var tierArr = stagedPerTier.Keys.ToArray();
+        // BOUNDED COUNT, NOT A CENSUS. The only use of this number is the
+        // `have < staged` test below, and `staged` is how many rows THIS batch is
+        // inserting -- a handful for a chat turn. Counting every entity in the tier to
+        // answer "does it already hold at least `staged`?" scanned 73M rows for tier 2
+        // alone. Stopping at `staged` gives the identical answer: at or above the bound
+        // the count comes back == staged, so `have < staged` is false exactly as before;
+        // below it, the true count is returned.
+        //
+        // Measured live 2026-08-15 on tiers {0,2,3} (1,114,240 / 73,532,044 / 38,028,956
+        // rows): full census 4,805 ms, bounded 2.171 ms -- 2,213x. That statement ran
+        // SEVEN times in one MCP chat turn for 29,734 ms of a 44,829 ms turn, with
+        // another 16,309 ms of pg_advisory_xact_lock waiting behind it.
+        var tierArr = new short[stagedPerTier.Count];
+        var needArr = new int[stagedPerTier.Count];
+        {
+            int ti = 0;
+            foreach (var (tier, staged) in stagedPerTier)
+            {
+                tierArr[ti] = tier;
+                needArr[ti] = staged;
+                ti++;
+            }
+        }
 
         await using var conn = await ds.OpenConnectionAsync(ct);
         await using (var countCmd = conn.CreateCommand())
         {
             countCmd.CommandTimeout = 0;
             countCmd.CommandText =
-                "SELECT e.tier, count(*)::bigint FROM laplace.entities e "
-                + "WHERE e.tier = ANY($1) GROUP BY e.tier";
+                "SELECT t.tier, (SELECT count(*)::bigint FROM ("
+                + "  SELECT 1 FROM laplace.entities e WHERE e.tier = t.tier LIMIT t.need) z) "
+                + "FROM unnest($1::smallint[], $2::int[]) AS t(tier, need)";
             countCmd.Parameters.Add(new NpgsqlParameter
             { Value = tierArr, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Smallint });
+            countCmd.Parameters.Add(new NpgsqlParameter
+            { Value = needArr, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Integer });
             var presentCount = new Dictionary<short, long>();
             await using (var reader = await countCmd.ExecuteReaderAsync(ct))
                 while (await reader.ReadAsync(ct))
