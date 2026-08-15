@@ -267,3 +267,66 @@ Traps hit and paid for during this research:
   read touches; 216 exist.
 - **A slow number can be your own query.** "2-hop costs 17.6 s" was a badly written query; the
   same question answered properly is 3.16 s. Rewrite before declaring a wall.
+
+---
+
+## 6. Phase 1 progress, 2026-08-15
+
+### Landed
+
+| fix | before | after |
+|---|---|---|
+| `ops.source_status` evidence for the tail | nine sources reported **0** | exact: 1,642,792 attestations, every value matching an independent count |
+| `consensus.stats_approx` | a row of **all NULLs** in 1.8 ms | 370,411,328 / 351,518,016 / ratio 1.054 in 1.455 ms |
+| `consensus.cell` partition keys | 97.1 ms, all 216 leaves | **21.0 ms**, one leaf |
+| `realize.resolve_name` canonical fallback | 158 of 200 bootstrap names | 162 of 200 |
+| `lexical.senses` row estimate | `prorows` 1000 | `ROWS 64` (structural bound) |
+
+**`source_status` was the significant one.** `ops.source_counts_approx()` reads `pg_stats`
+most-common-values on the **parent** `laplace.attestations`; that list holds exactly **ten**
+entries, so only the ten largest sources could ever report non-zero and every other source
+COALESCEd to 0. CLAUDE.md recorded the resulting zeros as "successful-looking runs that
+deposited nothing: a gate failing open" — false on both counts. ChessPgn alone holds 1,472,737.
+Raising the statistics target cannot fix it: the target is already 100 and with one source at
+84% of 371M rows, a source at 0.004% is about one row in the sample.
+
+Two candidate repairs were measured and **rejected**: aggregating the *child* partitions'
+statistics (180 partitions, 584 MCV entries, which do see VerbNet in 7 and MapNet in 1) gives a
+lower bound only — 13,757 against a true 40,170 for WordFrameNet — because a source contributes
+nothing from partitions where it is present but not common; and the journal's `attestations`
+column is a **deposit** count, not a row count (SemLink 76,182 there against 16,404 actual rows,
+a 4.6:1 merge ratio that is the idempotence law working, not loss).
+
+### Tier 0, measured so far
+
+The SQL at tier 0 is close to clean. The expensive leaves are **C**, which cannot be fixed
+without the preload bounce:
+
+| leaf | ms | language |
+|---|---|---|
+| `consensus.stats` | 92,192 | sql — census by contract, 1.5 ms sibling exists |
+| `converse.contrast` | **20,160** | c — verified 21.6 s on distinct args, 11.7 s on identical |
+| `converse.cascade` | 1,693 | c |
+| `converse.define_fast` | 693 | c — named "fast" |
+| `consensus.cell` | 269 → **21** | sql — fixed |
+| `converse.astar_path_raw` | 208 | c |
+
+### What the harness had to learn
+
+- **Fixture by parameter name, not type.** A `bytea` named `p_type_id` wants a relation type id;
+  handing it `word_id('wolf')` makes the function correctly return NULL, which a null-probe then
+  reports as a defect. Six false positives (`relation_canonical`, `relation_highway_band`,
+  `relation_highway_bit`, `relation_rank`, `relation_rank_resolved`, `chess.outcome`) became one.
+- **Probe null-ness, not just timing.** `consensus.stats_approx` returned a row of all NULLs in
+  1.8 ms and passed a timing-only sweep as "ok".
+- **`lock_timeout`, not just `statement_timeout`.** The latter does not bound a lock wait, so a
+  sweep running while anything requests AccessExclusive convoys behind it — measured, a stall of
+  9 minutes at 42 of 130, with my own `ALTER EXTENSION` as the other half of the convoy.
+- **COMMIT per function.** A single `DO` block is one transaction: no partial results are
+  readable and catalog locks are held for the whole run. The harness is a procedure now.
+
+### Still open at tier 0
+
+`consensus.walk_branches` needs a 32-byte `p_intent_mask` and has no fixture. Domain ids (chess
+games, positions) have no fixture, so chess flags stay suspect. 108 of the 130 leaves take
+arguments, and the sweep only covers those whose types are all fixtured.
