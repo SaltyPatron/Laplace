@@ -628,6 +628,20 @@ pg_laplace_trajectory_constituents(PG_FUNCTION_ARGS)
     size_t  n = 0;
     double *xyzm = geom_to_xyzm_buffer(l, "laplace_trajectory_constituents", &n);
 
+    /* ORDINAL IS DERIVED HERE, NOT READ OUT OF THE VERTEX. The packed field is
+     * a duplicate of what the vertex sequence already states, and it is 16 bits
+     * wide, so it stops being able to state it past 65,535 constituents -- which
+     * is what capped composition width until the writer stopped treating a spare
+     * field's range as a bound on content. The running sum below is exact for
+     * both vertex shapes: run_length is 1 on every plain trajectory, making the
+     * sum the vertex position, and it is the true source ordinal on a run-length
+     * vertex, where position deliberately does not track it.
+     *
+     * Verified against the substrate before the switch (2026-08-15): over 291,412
+     * physicalities / 3,519,140 constituents, zero rows where the packed field
+     * differed from this derivation, so already-stored rows read back identically. */
+    int64 ordinal = 1;
+
     for (size_t i = 0; i < n; ++i)
     {
         mantissa_payload_t payload;
@@ -637,13 +651,19 @@ pg_laplace_trajectory_constituents(PG_FUNCTION_ARGS)
         SET_VARSIZE(eid_out, VARHDRSZ + sizeof(hash128_t));
         memcpy(VARDATA(eid_out), &payload.entity_id, sizeof(hash128_t));
 
+        int32 run = (int32) payload.run_length;
+        if (run < 1)
+            run = 1;
+
         Datum values[4];
         bool  nulls[4] = {false, false, false, false};
-        values[0] = Int32GetDatum((int32) payload.ordinal);
+        values[0] = Int32GetDatum((int32) ordinal);
         values[1] = PointerGetDatum(eid_out);
-        values[2] = Int32GetDatum((int32) payload.run_length);
+        values[2] = Int32GetDatum(run);
         values[3] = Int64GetDatum((int64) payload.flags);
         tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
+
+        ordinal += run;
     }
 
     pfree(xyzm);

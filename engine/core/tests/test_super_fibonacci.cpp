@@ -145,6 +145,48 @@ TEST(LaplaceCoreSuperFibonacci, HopfCircleAnglesEquidistributed) {
     }
 }
 
+/* THE DETERMINISM BOUND, GATED IN ULPs RATHER THAN IN A TOLERANCE.
+ *
+ * |p|^2 = r^2(sin^2 a + cos^2 a) + R^2(sin^2 b + cos^2 b) = r^2 + R^2
+ *       = s/n + (1 - s/n) = 1, exactly, in real arithmetic. Everything that
+ * separates the computed value from 1.0 is floating-point residue from two
+ * sqrts, four transcendentals, four squarings and a four-term sum.
+ *
+ * Measured over the whole codespace 2026-08-15: worst excess 4 ULP (index
+ * 2614), 643,019 placements exact, 292 at the bound. The existing norm tests
+ * assert 1e-13 -- roughly 450 ULP, 112x looser than the real behaviour -- and
+ * the full-scale one samples seven hand-picked indices that do not include the
+ * worst case. A bound believed but ungated is how a documented constant drifts,
+ * so this asserts the measured figure across every placement, in ULPs. */
+static uint64_t ulps_from_one(double v) {
+    uint64_t bits, one;
+    std::memcpy(&bits, &v, sizeof(bits));
+    const double d_one = 1.0;
+    std::memcpy(&one, &d_one, sizeof(one));
+    return bits > one ? bits - one : one - bits;
+}
+
+TEST(LaplaceCoreSuperFibonacci, UnitNormHoldsToFourUlpAcrossTheCodespace) {
+    constexpr size_t UNICODE_N = 1114112;
+    constexpr uint64_t MEASURED_WORST_ULP = 4;
+
+    std::vector<double> q(UNICODE_N * 4);
+    super_fibonacci(UNICODE_N, q.data());
+
+    uint64_t worst = 0;
+    size_t   worst_i = 0;
+    for (size_t i = 0; i < UNICODE_N; ++i) {
+        const double* p = &q[i * 4];
+        const double n2 = p[0]*p[0] + p[1]*p[1] + p[2]*p[2] + p[3]*p[3];
+        const uint64_t u = ulps_from_one(n2);
+        if (u > worst) { worst = u; worst_i = i; }
+    }
+    EXPECT_LE(worst, MEASURED_WORST_ULP)
+        << "placement " << worst_i << " is " << worst << " ULP off the glome; "
+        << "the measured bound across all " << UNICODE_N << " placements is "
+        << MEASURED_WORST_ULP;
+}
+
 TEST(LaplaceCoreSuperFibonacci, HandlesUnicodeCodepointScale) {
     constexpr size_t UNICODE_N = 1114112;
     std::vector<double> q(UNICODE_N * 4);
