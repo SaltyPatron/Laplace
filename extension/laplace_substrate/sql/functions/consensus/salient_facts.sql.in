@@ -34,8 +34,8 @@ CREATE OR REPLACE FUNCTION consensus.salient_facts(p_word bytea, p_lang bytea DE
             LEFT JOIN reltypes obj_rt ON obj_rt.id = c.object_id
             WHERE c.subject_id = s.id AND c.object_id IS NOT NULL
               AND c.type_id IN (SELECT id FROM reltypes)
-              AND NOT consensus.relation_type_in_family(c.type_id, 'HAS_POS')
-              AND NOT consensus.relation_type_in_family(c.type_id, 'HAS_FEATURE')
+              AND c.type_id <> ALL (consensus.relation_family_ids('HAS_POS'))
+              AND c.type_id <> ALL (consensus.relation_family_ids('HAS_FEATURE'))
               AND c.type_id NOT IN (SELECT id FROM feat_dynamic)
               AND c.type_id NOT IN (
                 laplace.relation_type_id('HAS_SENSE'), laplace.relation_type_id('IS_SENSE_OF'),

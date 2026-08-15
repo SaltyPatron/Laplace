@@ -100,18 +100,40 @@ resolved AS (
 -- input denotes, never a score -- see bubble_up.sql.in for why a boolean
 -- "has an edge to the query language" does not discriminate.
 term_lang AS MATERIALIZED (
-    SELECT t.term, converse.attested_language(t.term) AS id
-    FROM terms t
+    SELECT al.id AS term, al.lang AS id
+    FROM converse.attested_language_batch(ARRAY(SELECT term FROM terms)) al
 ),
--- ONE probe for EVERY candidate synset of EVERY term. attestations cannot prune on
+-- ONE probe for EVERY candidate synset of EVERY term, through the canonical body
+-- (§15: this argmax used to be inlined here AND written again as the scalar
+-- converse.attested_language). attestations cannot prune on
 -- subject_id, so the scalar form paid the full partition set once per term; this
 -- pays it once for the whole batch.
+-- JOINED, not passed as an array to converse.attested_language_batch. Measured on
+-- 1,362 candidate synsets, identical 844 rows:
+--   JOIN on a.subject_id                 413 ms   <- attestations_relation_btree leads on subject_id
+--   = ANY(ARRAY(SELECT ...))             587 ms
+--   IN (SELECT ...) semi-join          1,145 ms
+-- Routing it through the batch FUNCTION instead cost the whole call 3,155 -> 4,950 ms:
+-- a SQL function can only accept the set as an array, and that argument boundary
+-- forces the set to materialise before the call, which is more than the shared body
+-- saves. converse.attested_language_batch stays canonical for callers that hold ids in an
+-- array (term_lang below); this site holds them in a relation and joins.
+--
+-- The array form is NOT wrong in general. It is the right shape when the join
+-- column cannot prune the partition set: a reverse-edge read of laplace.consensus by
+-- object_id has an index (consensus_object_type_btree) but prunes at NEITHER level
+-- -- LIST is on type_id, HASH is on subject_id -- so all 216 leaves stay in play and
+-- the planner prices 216 scans below 216 probes and picks wrong (join 49,861 ms,
+-- array probe 60 ms, and the SAME join with enable_hashjoin=off 136 ms). Here
+-- attestations.subject_id leads its index and only 73 leaves are in play, so the
+-- nested loop is chosen and is correct. The rule is whether the join column can
+-- prune, not join-versus-array.
 cand_lang AS MATERIALIZED (
     SELECT DISTINCT ON (a.subject_id) a.subject_id AS id, a.context_id AS lang
-    FROM laplace.attestations a
+    FROM (SELECT DISTINCT r.synset_id AS id FROM resolved r) c
+    JOIN laplace.attestations a ON a.subject_id = c.id
     JOIN laplace.entities e ON e.id = a.context_id
                            AND e.type_id = realize.canonical_id('Language')
-    WHERE a.subject_id = ANY (ARRAY(SELECT DISTINCT r.synset_id FROM resolved r))
     GROUP BY a.subject_id, a.context_id
     ORDER BY a.subject_id, SUM(a.sum_score_fp1e9) DESC, a.context_id
 ),
