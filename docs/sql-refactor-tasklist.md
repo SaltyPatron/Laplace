@@ -479,3 +479,39 @@ All 9 are the empty/near-empty partitions: `token_maps_to`, `attends`, `continue
 Correction to item R: 0 scans on the `attestations` primary key is **not** evidence it is
 worthless. A unique index is a write-side constraint; zero reads is the expected shape. What
 was measured is non-use for reads, nothing more.
+
+
+## U. Final read-path state (warm, quiet database)
+
+| surface | rows | session start | now |
+|---|---|---|---|
+| `realize.resolve_name` (context branch) | 1 | 36,000 ms | **0 ms** |
+| `generation.separator_ids` | 85 | 9,450 ms | **15 ms** |
+| `lexical.senses('wolf')` | 39 | — | **66 ms** |
+| `taxonomy.tree('wolf')` | 32 | — | **199 ms** |
+| `consensus.relate_path(dog,animal,4)` | 1 | — | **225 ms** |
+| `lexical.senses(dog,[animal,pet])` | 8 | 7,482 ms | **277 ms** |
+| `consensus.salient_facts('water')` | 24 | 5,167 ms | **376 ms** |
+| `taxonomy.bubble_up_batch` (20 terms) | 1,002 | — | **1,048 ms** |
+
+**Cold-cache caveat:** Postgres restarted three times during the C work, so a first call
+after a restart is not comparable — `bubble_up_batch` read 19,980 ms cold and 1,048 ms warm
+on the very next call. Warm every surface before timing it.
+
+Item Q is CLOSED: `realize.batch` and `realize.realize` agree on every probe, and the arms now
+run on the residual (92.5% of inputs render directly, so the five arm queries and their whole
+candidate set are skipped for them). Two pre-existing defects surfaced doing it — uninitialised
+`ArmData` when the residual is empty, and every arm taking "first row per id" off an ORDER BY
+with no final tiebreak, so a tie was resolved by plan order and therefore by input-array size.
+All four arm queries and the scalar `realize._defines` now close on an id; a 314-id batch call
+and 314 single-id calls agree exactly.
+
+### Still open, owner decisions
+- `HAS_FEATURE`: 186,562,442 rows, 84.93% of DEFAULT, unpartitioned. Adding it drains those
+  rows via DELETE+INSERT.
+- The 112 empty leaves exist on the live database and are **extension-owned** — dropping them
+  needs `ALTER EXTENSION … DROP TABLE` first. Removed from the seed list, so a fresh install
+  builds 152 consensus leaves instead of 216.
+- Index decisions (item R): ~180 GB, `attestations` PK 36 GB with 0 read scans.
+- `cand_lang` (item 1): still re-derives an entity's primary language by argmax over 389M
+  attestation rows per read. Wants a maintained projection.
