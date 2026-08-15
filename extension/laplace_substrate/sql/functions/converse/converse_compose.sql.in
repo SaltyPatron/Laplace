@@ -57,6 +57,11 @@ DECLARE
     -- parameter and `type_id = ANY($n)` prunes the LIST partitions at execution.
     -- Read back from a CTE column it is a per-row variable and prunes nothing.
     t_band bytea[];
+    -- Separator set as a LOCAL, for the same reason as t_band. generation.separator_ids()
+    -- is STABLE, and measured with EXPLAIN it is NOT hoisted to an InitPlan: it lands
+    -- in the Filter expression and is evaluated PER ROW. At 10.3 ms a call that is
+    -- catastrophic over a token stream. A plpgsql local binds once as a parameter.
+    t_sep  bytea[];
     SENT   bytea := '\x00';
     MINLEN int := 5;
     syn    bytea;
@@ -69,6 +74,7 @@ DECLARE
 BEGIN
     t_def  := laplace.relation_band_types(b_def);
     t_band := laplace.relation_band_types(ARRAY[1,2,4,7]);
+    t_sep  := generation.separator_ids();
     -- ORIENT. Same hash-space signal converse.chat() uses: how strongly the token denotes the
     -- sense, then highway-mask breadth. No realize.realize(), no surface comparison.
     -- Two levels: breadth picks WHICH TOKEN, denote_mu picks WHICH SENSE of it.
@@ -218,7 +224,7 @@ BEGIN
     -- path; separator-ness is a Unicode general-category fact (Zs/Zl/Zp/Cc).
     ws AS MATERIALIZED (
         SELECT DISTINCT t.entity_id AS id,
-               t.entity_id = ANY (generation.separator_ids()) AS is_ws
+               t.entity_id = ANY (t_sep) AS is_ws
         FROM toks t
     ),
     kept AS MATERIALIZED (
