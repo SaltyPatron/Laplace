@@ -39,7 +39,7 @@ CREATE OR REPLACE FUNCTION structural.entity_container_degree(
     RETURNS TABLE(entity_id bytea, degree bigint, icf double precision)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
     SELECT t.id,
-           count(c.entity_id)::bigint,
+           COALESCE(c.n, 0)::bigint,
            /* 1 / log2(2 + degree): 1.0 for an id nothing contains, ~0.077 at a
             * cap of 8192. Monotone decreasing, never zero, so it orders cleanly
             * as a ranking key and never annihilates a product.
@@ -48,8 +48,23 @@ CREATE OR REPLACE FUNCTION structural.entity_container_degree(
             * numeric-only, so the double-precision form does not resolve and
             * casting through numeric would cost a conversion per group for a
             * value that is only ever compared. */
-           (ln(2.0) / ln(2.0 + count(c.entity_id)::double precision))::double precision
+           (ln(2.0) / ln(2.0 + COALESCE(c.n, 0)::double precision))::double precision
+    -- COUNTED, NOT MATERIALISED. This ran structural.containers_of(t.id, 1, p_cap) per id
+    -- and then counted the rows: up to p_cap (8192) container tuples built, deduped
+    -- through the SRF's hash and its tuplestore, per token, to produce ONE number.
+    -- The GIN index answers the count directly.
+    --
+    -- Measured on the five tokens of 'the capital of France is', identical result
+    -- (40,960 = 5 x the 8192 cap): 2,126 ms through containers_of, 707 ms counting.
+    -- The LIMIT is kept inside the subquery so the value stays capped exactly as
+    -- containers_of capped it -- this returns min(true_degree, p_cap), unchanged.
     FROM unnest(p_ids) AS t(id)
-    LEFT JOIN LATERAL structural.containers_of(t.id, 1, p_cap) c ON true
-    GROUP BY t.id
+    LEFT JOIN LATERAL (
+        SELECT count(*) AS n
+        FROM (SELECT 1
+              FROM laplace.v_word_points w
+              WHERE public.laplace_trajectory_constituent_ids(w.trajectory) @> ARRAY[t.id]
+              LIMIT p_cap) z
+    ) c ON true
+    GROUP BY t.id, c.n
 $$;
