@@ -330,3 +330,34 @@ without the preload bounce:
 `consensus.walk_branches` needs a 32-byte `p_intent_mask` and has no fixture. Domain ids (chess
 games, positions) have no fixture, so chess flags stay suspect. 108 of the 130 leaves take
 arguments, and the sweep only covers those whose types are all fixtured.
+
+### Tier 1, measured (82 of 82)
+
+Very different from tier 0: **25 of 82 exceed 2 seconds**, 6 more exceed 200 ms, 4 return all
+NULLs. The SQL ones capped at the 2 s ceiling:
+
+`realize.render_gaps` · `generation.prune` · `generation.model_jitter_catalog` ·
+`generation.distill` · `generation.witness` · `generation.astar_path` ·
+`generation.foundry_vocab_crawl` · `generation.recall_trajectories` ·
+`generation.word_adjacency` · `ops.source_bootstrap_present` · `ops.surface_sample` ·
+`ops.source_roster` · `chess.opening_record` · `converse.relation_bands`
+
+Several of those are in the unwired-45 (`prune`, `distill`, `witness`, `astar_path`,
+`model_jitter_catalog`, `foundry_vocab_crawl`) — unwired *and* slow, which is consistent with
+never having been exercised.
+
+**A wall worth naming: reads by `source_id` cannot prune.** `ops.source_roster` takes 2,421 ms
+to return 8 rows, and the exact per-source counts in `source_status` cost ~1.8 s each, for the
+same reason: `source_id` is not a partition key at either level (`LIST (type_id)` →
+`HASH (subject_id)`), so any source-scoped read fans across all 216 leaves. That is schema
+shape, not a query defect, and no rewrite fixes it — it wants either a source-keyed index
+structure or maintained per-source counters.
+
+### The measurement instrument, finally correct
+
+`scripts/sql-tier-sweep.sh` (shell, one psql statement per function) replaced the SQL harness
+because **`statement_timeout` bounds the top-level statement**: inside a plpgsql procedure the
+inner `EXECUTE`s are not separately capped, so a per-iteration `SET LOCAL` capped nothing
+(`converse.hypernyms` ran 4.5 minutes under a 2 s cap) and a session-level `SET` killed the
+whole `CALL` instead (the sweep exited after 31 of 130). The shell form measured 65 functions in
+90 seconds where the procedure stalled twice.
