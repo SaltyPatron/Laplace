@@ -115,6 +115,11 @@ BEGIN
     call := r.fq||'('||COALESCE(r.arglist,'')||')';
     BEGIN
       EXECUTE format('SET LOCAL statement_timeout = %L', p_cap);
+      -- lock_timeout too: statement_timeout does not bound a LOCK WAIT, so a sweep
+      -- running while anything takes AccessExclusive (ALTER EXTENSION) convoys behind
+      -- it and hangs indefinitely. Measured: a tier-0 sweep stalled 9 minutes at 42
+      -- of 130 that way.
+      SET LOCAL lock_timeout = '2s';
       t0 := clock_timestamp();
       IF r.proretset THEN
         -- rows_out AND a null-ness probe: a function that returns rows of all

@@ -17,9 +17,16 @@ CREATE OR REPLACE FUNCTION consensus.cell(
     RETURNS TABLE(rating bigint, rd bigint, witness_count bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
+    -- The partition keys are in the parameter list; use them. laplace.consensus is
+    -- LIST (type_id) over 208 named partitions plus a DEFAULT, each HASH (subject_id)
+    -- over 8 -- 216 leaves. Filtering on c.id alone prunes NOTHING and touches every
+    -- leaf; adding the two keys prunes to exactly one and hits the primary key
+    -- (id, type_id, subject_id) directly. Same row, measured 97.1ms -> 20.2ms warm.
     SELECT c.rating, c.rd, c.witness_count
     FROM laplace.consensus c
-    WHERE c.id = laplace.consensus_id(p_subject, p_type, p_object);
+    WHERE c.id = laplace.consensus_id(p_subject, p_type, p_object)
+      AND c.type_id = p_type
+      AND c.subject_id = p_subject;
 END;
 
 -- Batch pair scoring for ONE relation type over aligned subject/object arrays.
