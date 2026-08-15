@@ -402,3 +402,60 @@ The harness now calls each function twice and records the second. Re-measured, t
 from 17 to 11 across these tiers. So the real worklist is the functions that exceed two seconds
 warm — 64 across tiers 0–3 — and the earlier "129 of 308 miss the budget" overstated it by
 counting cache warmup as a defect. Measure warm before believing a budget miss.
+
+---
+
+## 7. The dominant cost is PLANNING, not execution
+
+Analysed rather than timed, `taxonomy.bubble_up(word_id('wolf'), NULL, 5)`:
+
+```
+Planning Time:  456.222 ms
+Execution Time: 289.642 ms      -- a 2,695-line plan
+```
+
+**61% of the cost is building the plan.** Every pruning and array-probe fix attacks the smaller
+half. Prepared-statement repetition confirms it: 724 → 525 → 427 → 339 → 333 ms as the generic
+plan takes over after five executions, then a floor around 333 ms.
+
+### Why the plan is that large
+
+Plan-time partition pruning needs the partition key compared to **constants**. Family-scoped
+reads instead use `type_id IN (SELECT id FROM consensus.relation_family_members('HAS_SENSE'))`,
+and that function is **SQL, STABLE, set-returning**, so nothing folds. Measured on one read,
+same answer:
+
+| form | scan nodes in the plan |
+|---|---|
+| `type_id = ANY (ARRAY[<literal ids>])` | **3** |
+| `type_id IN (SELECT … relation_family_members('HAS_SENSE'))` | **54** |
+
+**18×**, purely from foldability. This is the structural reason the surface is slow warm: every
+family-scoped read plans across all candidate partitions because the family cannot be known
+until execution.
+
+### The irony, and the fix shape
+
+The truth is already compiled. `consensus.relation_type_in_family(type_id, family)` is
+**IMMUTABLE C** reading the generated relation law (`relation_law.h` carries `family_root_idx`
+per relation). But `relation_family_members` re-derives membership by **scanning
+`laplace.entities`** for all 426 RelationType entities and testing each — a table scan standing
+in for a compiled constant, and a STABLE wrapper that can never fold.
+
+The compiled law exposes a membership *test*, not an enumeration, so the fix is one of:
+
+1. a C function returning `bytea[]` for a family, `IMMUTABLE`, read from the compiled law — a
+   preload bounce; or
+2. **generate an `IMMUTABLE` family→members function from `engine/manifest/relation_types.toml`
+   at build time**, which is exactly how `relation_law.c` is already produced (§15: "policy
+   lives in native code, generated from a manifest"). SQL-only, no bounce, and it makes every
+   family-scoped read foldable.
+
+Option 2 is the highest-leverage change available on the read path and it is a codegen change,
+so it is written down rather than taken unilaterally.
+
+### What this means for the campaign
+
+Re-order the phases. Before migrating 86 callers onto `edges_raw` (§4 phase 2), make family
+scoping foldable — otherwise every migrated caller still plans across the partition set. Fixing
+foldability first is worth more than every per-query fix landed today combined.
