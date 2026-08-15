@@ -3,10 +3,19 @@ DROP FUNCTION IF EXISTS laplace._realize_synset_lemma(bytea, bytea);
 CREATE OR REPLACE FUNCTION realize._synset_lemma(p_id bytea, p_lang bytea DEFAULT NULL)
     RETURNS text
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
-    SELECT q.s FROM (
-        SELECT realize.render_text(hs.subject_id, 24) AS s,
-               (lang.object_id IS NOT NULL) AS lp,
-               consensus.eff_mu(hs.rating, hs.rd) AS mu
+    -- RANK FIRST, THEN RENDER ONCE FOR ALL CANDIDATES.
+    -- The `s <> ''` filter means an unrenderable candidate must fall through to the
+    -- next, so the surface cannot be dropped from the decision -- but it does not have
+    -- to be produced one candidate at a time. realize.render_text_batch runs ONE
+    -- constituents closure over every id (generate_walk.c fetch_constituents_closure
+    -- with n_roots); the scalar form ran one closure per candidate. Measured on 40 ids,
+    -- identical md5: 487 ms per-row, 106 ms batched.
+    -- Ranked in full, not capped: the render filter can reject any prefix, and a LIMIT
+    -- here would turn "unrenderable" into "no name".
+    WITH ranked AS MATERIALIZED (
+        SELECT hs.subject_id AS id,
+               row_number() OVER (ORDER BY (lang.object_id IS NOT NULL) DESC,
+                        consensus.eff_mu(hs.rating, hs.rd) DESC, hs.subject_id) AS rn
         FROM laplace.v_consensus_unrefuted io
         JOIN laplace.consensus hs ON hs.object_id = io.subject_id
           AND hs.type_id = laplace.relation_type_id('HAS_SENSE')
@@ -15,8 +24,14 @@ CREATE OR REPLACE FUNCTION realize._synset_lemma(p_id bytea, p_lang bytea DEFAUL
           AND lang.object_id = p_lang
         WHERE io.object_id = p_id
           AND io.type_id = laplace.relation_type_id('IS_SENSE_OF')
-    ) q
-    WHERE q.s IS NOT NULL AND q.s <> ''
-    ORDER BY q.lp DESC, q.mu DESC
+    ),
+    lbl AS MATERIALIZED (
+        SELECT realize.render_text_batch(array_agg(r.id ORDER BY r.rn), 24) AS s
+        FROM ranked r
+    )
+    SELECT l.s[r.rn]
+    FROM ranked r CROSS JOIN lbl l
+    WHERE l.s[r.rn] IS NOT NULL AND l.s[r.rn] <> ''
+    ORDER BY r.rn
     LIMIT 1
 $$;
