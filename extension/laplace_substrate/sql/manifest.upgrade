@@ -170,6 +170,7 @@ functions/converse/label_or_hex.sql.in
 functions/converse/label_is_content.sql.in
 functions/inspect/consensus_partition_pressure.sql.in
 functions/converse/prompt_words.sql.in
+functions/converse/attested_language.sql.in
 functions/converse/word_language.sql.in
 inference/synonyms.sql.in
 inference/translations.sql.in
