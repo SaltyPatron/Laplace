@@ -114,6 +114,31 @@ same change.
     `generation.astar_path`). It is `p_use_geometry DEFAULT false` — "off by default" is a
     different defect from "unreachable."
 - **§4, the evidence law.** Attestations never record a magnitude. No raw per-edge floats.
+- **Supply the partition keys, or pay 216×.** `laplace.consensus` is `LIST (type_id)` — 208
+  named type partitions plus a DEFAULT — and **each is itself `HASH (subject_id)` over 8**, for
+  **216 leaf partitions** (not the 27 this file used to claim; 27 is what a subject-only read
+  touches). Measured live, leaves touched:
+
+  | predicate | leaves |
+  |---|---|
+  | `subject_id` + `type_id` | **1** |
+  | `object_id` + `type_id` | 8 |
+  | `subject_id` only | 27 |
+  | `object_id` only | **216** |
+
+  Forward-edge reads prune at both levels. **Reverse-edge (`object_id`) reads prune at
+  neither** — the hash key is `subject_id` — so every in-edge read pays all 216. Reduce the
+  working set before operating: pass `type_id` whenever the caller knows it. Where the read
+  genuinely spans all types, use `= ANY(ARRAY(...))` so the planner emits ScalarArrayOp probes
+  instead of a full index-only scan of every partition — measured on `converse.infer`'s
+  in-edge arm, identical 71,405 rows: join 49,861 ms, LATERAL 104,764 ms, array probe **60 ms**.
+  An accurate row estimate alone does **not** fix it: the same join against an ANALYZEd
+  229-row temp table still cost 49,861 ms.
+- **Declared row estimates are absent.** 239 of the 244 set-returning functions ship Postgres'
+  default `prorows = 1000`; only the five model-lane functions declare a real one. A wrong
+  estimate on the inner side of a join is what makes scanning look cheaper than probing.
+  Declare `ROWS` only from a measured cardinality or a structural bound — `lexical.senses` is
+  `bubble_up(..., 64)` and therefore `ROWS 64`.
 - **Sequence is geometry, not an edge.** Text order lives in the trajectory and is fetched
   with `laplace_trajectory_constituents`. `PRECEDES` is populated **only by model ingestion**
   — a deposed model's sequence testimony — so its 115 live consensus rows are model-lane
