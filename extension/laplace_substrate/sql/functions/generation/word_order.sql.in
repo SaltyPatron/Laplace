@@ -13,6 +13,11 @@ CREATE OR REPLACE FUNCTION generation.word_order(p_vocab bytea[], p_trajs int DE
     RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
     WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
+    -- Hoisted: alphabet-bounded and STABLE, so it is resolved once per call and
+    -- never per constituent row.
+    sep AS MATERIALIZED (
+        SELECT COALESCE(generation.separator_ids(), '{}'::bytea[]) AS ids
+    ),
     t AS (
         -- Role by TYPE, not by tier. tier is a floor in the containment DAG, not a kind:
         -- bootstrap mints relation types, trust classes, POS tags, sources and languages
@@ -47,8 +52,23 @@ CREATE OR REPLACE FUNCTION generation.word_order(p_vocab bytea[], p_trajs int DE
         -- sid is the CONTAINING composition (t.entity_id): the window below partitions
         -- adjacency by the sentence/document a constituent came from, so a lead() can
         -- never pair the last word of one trajectory with the first of the next.
+        -- DELIMITERS ARE NOT CONSTITUENTS OF THE SEQUENCE THEY DELIMIT. Two words
+        -- either side of a space ARE adjacent -- that is what the space means. Left
+        -- in, every gap-1 pair is word->separator or separator->word, so a word
+        -- vocabulary joins to nothing and this returns silence: measured, 'hot' and
+        -- 'dog' co-occur in 91 shared containers with 87 ordered pairs, of which 85
+        -- sit at gap 2 (hot, SPACE, dog) and ZERO at gap 1.
+        --
+        -- This is NOT the vocab filter the comment above forbids. Dropping an
+        -- out-of-vocabulary WORD would pair two words that were never adjacent --
+        -- fabricated evidence. Dropping the delimiter restores the adjacency the
+        -- delimiter expresses. generation.separator_ids() is the one body for that
+        -- truth (§15), alphabet-bounded, and empty for scripts that do not delimit --
+        -- for Han or Thai the sequence is content-contiguous and nothing is removed.
         SELECT t.entity_id AS sid, tc.ordinal AS ord, tc.entity_id AS wid
         FROM t CROSS JOIN LATERAL laplace_trajectory_constituents(t.trajectory) tc
+             CROSS JOIN sep
+        WHERE NOT (tc.entity_id = ANY (sep.ids))
     ),
     bg AS (
         SELECT wid AS cur, lead(wid, p_gap) OVER (PARTITION BY sid ORDER BY ord) AS nxt FROM g
