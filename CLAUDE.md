@@ -497,7 +497,36 @@ Working:
 
 Failing:
 
-- `infer("the capital of France is")` → *direction, location, earthly branch* — 5.4s
+- ~~`infer("the capital of France is")` → *direction, location, earthly branch* — 5.4s~~
+  **MISDIAGNOSED SINCE THIS LINE WAS WRITTEN. Corrected 2026-08-15, measured.** This is not an
+  election defect and no amount of ranking work will move it. `word_id('France')` carries
+  **only lexical relations** — HAS_POS (NOUN/PROPN), HAS_LANGUAGE, IS_SYNONYM_OF, FORM_OF,
+  HAS_DEFINITION. `CAPIT` appears in **zero of the 233 canonical relation names** in
+  `engine/manifest/relation_types.toml` (count with `canonical =`, not `^\[\[relation\]\]`,
+  which gives 210 and is wrong). *nominative*, *singular* and *franc* are the CORRECT lexical
+  neighbours of the token — grammatical case, number, and a lexically adjacent currency. The
+  ranker is returning the best answer available from the edges that exist.
+  - **The fact is nonetheless in the substrate, and finding it requires not making the mistake
+    §4 already warns about.** `France → Paris` under any relation returns **0 rows**, and that
+    is the sequence-is-geometry law working, not absence. The capital fact lives as an
+    adjudicated composition: `Paris --HAS_DEFINITION--> "Paris (the capital and largest city of
+    France)"`, rating 1.83e12 over **10 witnesses**, whose trajectory carries
+    `capital → France` at **gap 5** with separators dropped. Its subject anchors to ILI
+    (`i102495`, `i83645`, `i84698`) with **64 IS_TRANSLATION_OF surfaces** — so a relation
+    extracted once from an English gloss lands on the language-independent hub and is true in
+    all 64. "The seed source is English" is not a limitation; the ILI hub is the distribution
+    mechanism and it is already populated.
+  - **The real defect class is unextracted typed relations.** Thousands of *is the capital of*,
+    *is located in*, *was born in* facts sit inside HAS_DEFINITION objects, invisible to
+    traversal and to the foundry adjacency read, because no analyzer promotes gloss prose to
+    typed edges. Spec 08 sanctions exactly that lane: parsed relations are **calculated
+    testimony** carrying analyzer identity, version, inputs and recipe, competing as another
+    witness and never overwriting the recorded gloss.
+  - **Do not test a pair when diagnosing this class.** `WHERE subject_id = X AND object_id = Y`
+    returning 0 proves nothing here; list what the entity actually carries, resolve the
+    relation type ids through the manifest (they are BLAKE3 of the canonical name, so
+    `resolve_name` renders them as hex), and read the trajectory of the compositions that
+    witness the adjacency.
 - `taxonomy("wolf")` → *lobo* (comics character) under *fictitious character* — 0.46s
 - `chat("What is a wolf?")` → "Hä is huh? uh?. Hä is related to formazza and uri and
   gressoney." — 41.6s
