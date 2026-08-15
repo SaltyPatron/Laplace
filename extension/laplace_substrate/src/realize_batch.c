@@ -624,12 +624,23 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
             continue;
         id_key(&key, in_elems[i], "input");
 
-        /* arms 1, 2: first non-empty render */
-        label = first_nonempty(&arm_name, &key, rendered, render_ids);
-        if (label == NULL)
-            label = first_nonempty(&arm_lemma, &key, rendered, render_ids);
-        /* arm 3: self render, NULLIF '' */
-        if (label == NULL)
+        /* arm 1: SELF RENDER, NULLIF '' -- CONTENT BEFORE NAME.
+         *
+         * render_text is the VALUE an entity carries; a name is the LABEL for it.
+         * An entity that has content must emit the content. This arm used to sit
+         * third, behind has_name and synset_lemma, so any entity carrying a
+         * HAS_NAME edge emitted its name instead of itself -- and every Unicode
+         * codepoint carries one, which put "MIDDLE DOT" and "COLON" into replies.
+         *
+         * Measured over the 224 distinct constituents of 40 tier-3 containers: all
+         * 224 render, only 16 carry a name, and all 16 are the label losing to the
+         * content (COLON/':', DIGIT ONE/'1', AMPERSAND/'&'). Reordering cannot lose
+         * a name: an entity whose name IS the right answer renders empty and falls
+         * through to arm 2 (a Language entity renders NULL and names 'English').
+         *
+         * This MUST match realize/realize.sql.in's COALESCE order -- the two are one
+         * policy with two implementations (§15), and they diverged when the scalar
+         * was fixed in 0b55b8ac and this was not. */
         {
             RenderEntry *re = (RenderEntry *) hash_search(render_ids, &key,
                                                           HASH_FIND, NULL);
@@ -638,6 +649,11 @@ pg_laplace_realize_batch(PG_FUNCTION_ARGS)
                 && rendered[re->slot][0] != '\0')
                 label = rendered[re->slot];
         }
+        /* arms 2, 3: name then synset lemma, first non-empty render */
+        if (label == NULL)
+            label = first_nonempty(&arm_name, &key, rendered, render_ids);
+        if (label == NULL)
+            label = first_nonempty(&arm_lemma, &key, rendered, render_ids);
         /* arm 4: translation, first non-empty render */
         if (label == NULL)
             label = first_nonempty(&arm_trans, &key, rendered, render_ids);
