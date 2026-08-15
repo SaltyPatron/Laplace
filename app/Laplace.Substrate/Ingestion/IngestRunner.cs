@@ -163,6 +163,11 @@ public sealed class IngestRunner
 
         var inventory = await ResolveInventoryAsync(decomposer, ctx, options, ct);
         _obs.OnRunStart(decomposer.SourceName, decomposer.LayerOrder, inventory);
+        // The file boundary is inside the static IngestBatchPipeline, which is called
+        // directly by every decomposer and is handed no observability. The run brackets
+        // the ambient so those two sites can write per-file ledger rows without changing
+        // 33 call sites. Disposed with the run below.
+        using var obsScope = IngestObservabilityScope.Begin(_obs, decomposer.SourceName);
         log.LogInformation(
             "INGEST_START source={Source} layer={Layer} unit_type={UnitType} input_units={InputUnits} files={Files}",
             decomposer.SourceName, decomposer.LayerOrder,

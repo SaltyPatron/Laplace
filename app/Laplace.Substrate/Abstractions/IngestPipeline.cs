@@ -273,6 +273,15 @@ public static class IngestBatchPipeline
     // files above the cap opt out rather than balloon memory (span-based root).
     private const long ResumeHashMaxBytes = 512L << 20;
 
+    /// <summary>Input size for the ledger. Best-effort: a stream-backed source has no path,
+    /// and a missing file is the enumerator's problem, not the journal's.</summary>
+    internal static long TryFileBytes(string? filePath)
+    {
+        if (string.IsNullOrEmpty(filePath)) return 0;
+        try { return new FileInfo(filePath).Length; }
+        catch { return 0; }
+    }
+
     internal static Hash128? TryResolveFileIdentity(string? filePath)
     {
         if (filePath is null) return null;
@@ -532,6 +541,8 @@ public static class IngestBatchPipeline
             if (skipComplete)
             {
                 Console.Error.WriteLine($"INGEST_FILE_SKIPPED file={label} reason=marker-complete");
+                Laplace.Ingestion.IngestObservabilityScope.Current.OnFileFinished(
+                    Laplace.Ingestion.IngestObservabilityScope.SourceName, label, "skipped-complete");
                 // Still a true skip -- zero rows, zero testimony, no re-fold -- but it must
                 // COUNT. FilesTotal comes from enumeration and includes skipped files, while
                 // _filesDone only advances when a period boundary reaches TrackIntent. A bare
@@ -546,6 +557,9 @@ public static class IngestBatchPipeline
                 continue;
             }
 
+            Laplace.Ingestion.IngestObservabilityScope.Current.OnFileStarted(
+                Laplace.Ingestion.IngestObservabilityScope.SourceName, label, TryFileBytes(source.FilePath));
+
             long fileCap = maxTotalUnits > 0 ? maxTotalUnits - unitsConsumed : 0;
             if (maxTotalUnits > 0 && fileCap <= 0)
                 yield break;
@@ -556,6 +570,7 @@ public static class IngestBatchPipeline
                 new AsyncEnumerableRecordStream<TRecord>(source.RecordsAsync(ct)), handler, runConfig, ct);
             var enumerator = changes.GetAsyncEnumerator(ct);
             SubstrateChange? fileFailure = null;
+            string? fileFailureMessage = null;
             try
             {
                 while (true)
@@ -572,6 +587,7 @@ public static class IngestBatchPipeline
                         Console.Error.WriteLine(
                             $"INGEST_FILE_FAILED file={label} error=[{ex.GetType().Name}] {ex.Message}");
                         fileFailure = BuildFileFailure(config.SourceId, label, ex);
+                        fileFailureMessage = $"[{ex.GetType().Name}] {ex.Message}";
                         break;
                     }
                     unitsConsumed += change.Metadata.InputUnitsConsumed;
@@ -592,6 +608,15 @@ public static class IngestBatchPipeline
             // neither counted done nor marked complete, so a re-run retries exactly it.
             // A capped file stopped mid-stream, which is the SAME resume situation as
             // a kill — it must not be marked complete either.
+            // Ledger before the boundary: a capped file stopped mid-stream and is NOT
+            // complete, which is the same resume situation as a kill — recording it 'ok'
+            // would claim a completeness the marker itself refuses to assert.
+            Laplace.Ingestion.IngestObservabilityScope.Current.OnFileFinished(
+                Laplace.Ingestion.IngestObservabilityScope.SourceName, label,
+                fileFailure is not null ? "failed" : hitCap ? "cancelled" : "ok",
+                records: unitsConsumed,
+                error: fileFailureMessage);
+
             yield return fileFailure
                 ?? (fileRoot is { } fr && !hitCap && resume is { } rp
                     ? BuildFileCompletion(config.SourceId, label, fr, rp.LayerOrder)
@@ -778,6 +803,10 @@ public static class IngestBatchPipeline
                     {
                         Console.Error.WriteLine(
                             $"INGEST_FILE_SKIPPED file={source.FileLabel} worker={workerId} reason=marker-complete");
+                        // Ledger: a true-skipped file never opens, so it has no 'running' row.
+                        // Recording it is how a resumed run accounts for the prefix it did not redo.
+                        Laplace.Ingestion.IngestObservabilityScope.Current.OnFileFinished(
+                            Laplace.Ingestion.IngestObservabilityScope.SourceName, source.FileLabel, "skipped-complete");
                         // Counts, for the reason spelled out on the sequential path's skip:
                         // FilesTotal counts enumerated files, _filesDone counts boundaries, so
                         // dropping the boundary makes an already-complete file read as
@@ -796,6 +825,8 @@ public static class IngestBatchPipeline
 
                     int ordinal = Interlocked.Increment(ref fileOrdinal);
                     var fileSw = System.Diagnostics.Stopwatch.StartNew();
+                    Laplace.Ingestion.IngestObservabilityScope.Current.OnFileStarted(
+                        Laplace.Ingestion.IngestObservabilityScope.SourceName, source.FileLabel, TryFileBytes(source.FilePath));
                     bool logFile = MultiFileTelemetry.ShouldLogFileLine(ordinal, knownFileTotal);
                     if (logFile)
                         Console.Error.WriteLine(
@@ -815,6 +846,7 @@ public static class IngestBatchPipeline
 
                     long fileUnits = 0;
                     SubstrateChange? fileFailure = null;
+                    string? fileFailureMessage = null;
                     try
                     {
                         await foreach (var change in changes)
@@ -831,12 +863,18 @@ public static class IngestBatchPipeline
                             $"INGEST_FILE_FAILED file={source.FileLabel} worker={workerId} "
                             + $"error=[{ex.GetType().Name}] {ex.Message}");
                         fileFailure = BuildFileFailure(config.SourceId, source.FileLabel, ex);
+                        fileFailureMessage = $"[{ex.GetType().Name}] {ex.Message}";
                     }
                     await outCh.Writer.WriteAsync(
                         fileFailure
                             ?? (fileRoot is { } fr && resume is { } rp
                                 ? BuildFileCompletion(config.SourceId, source.FileLabel, fr, rp.LayerOrder)
                                 : BuildPeriodBoundary(config.SourceId, source.FileLabel)), ct);
+                    Laplace.Ingestion.IngestObservabilityScope.Current.OnFileFinished(
+                        Laplace.Ingestion.IngestObservabilityScope.SourceName, source.FileLabel,
+                        fileFailure is null ? "ok" : "failed",
+                        records: fileUnits,
+                        error: fileFailure is null ? null : fileFailureMessage);
                     if (fileFailure is not null) continue;
 
                     if (logFile)

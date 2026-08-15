@@ -11,8 +11,8 @@ Status legend: [x] landed  [~] in progress this turn  [ ] queued
       implementor breaks).
 - [x] `NpgsqlIngestObservability` writes both, upsert-keyed on (run_id, file_label).
 - [x] Orphan reconciliation drives a killed run's `running` file rows to `cancelled`.
-- [~] Call sites in `IngestPipeline.cs`: parallel worker (skip at :780, start at :802,
-      finish at :831) and sequential path (:526–534).
+- [x] Call sites wired: parallel worker (skip/start/finish) and sequential path (skip/start/finish).
+
 - [ ] `files_total` is 0 in 16 of 36 run rows — fix the inventory count at the same site.
 - [ ] Test: kill mid-run, assert the mid-apply file is the one left `cancelled`.
 
