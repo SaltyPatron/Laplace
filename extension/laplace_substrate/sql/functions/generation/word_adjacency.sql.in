@@ -28,7 +28,8 @@ DROP FUNCTION IF EXISTS generation.word_adjacency(bytea[], int, int);
 CREATE OR REPLACE FUNCTION generation.word_adjacency(p_vocab bytea[], p_trajs int DEFAULT 100000,
                                                     p_gap int DEFAULT 1)
     RETURNS TABLE(subject_id bytea, sep_id bytea, object_id bytea, witness_id bytea)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
     sep AS MATERIALIZED (
         SELECT COALESCE(generation.separator_ids(), '{}'::bytea[]) AS ids
@@ -62,5 +63,5 @@ CREATE OR REPLACE FUNCTION generation.word_adjacency(p_vocab bytea[], p_trajs in
     FROM pos p CROSS JOIN sep
     JOIN v vs ON vs.id = p.cids[i]
     JOIN v vo ON vo.id = p.cids[i + p_gap + 1]
-    WHERE p.cids[i + p_gap] = ANY (sep.ids)
-$$;
+    WHERE p.cids[i + p_gap] = ANY (sep.ids);
+END;
