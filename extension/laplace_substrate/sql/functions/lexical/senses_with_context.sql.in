@@ -60,11 +60,21 @@ CREATE OR REPLACE FUNCTION lexical.senses(p_word bytea, p_context bytea[])
         FROM unnest(COALESCE(p_context, ARRAY[]::bytea[])) AS t
         WHERE t IS NOT NULL AND t <> p_word
     ),
-    -- context words resolved to their own senses: the comparison is synset<->synset.
+    -- Context words resolved to their own senses: the comparison is synset<->synset.
+    --
+    -- ONE batch election, not a LATERAL per context id. lexical.senses is a SQL wrapper
+    -- over taxonomy.bubble_up, so a LATERAL inlined bubble_up's whole CTE cascade --
+    -- and every consensus reference in it -- once PER context id. Each unprunable
+    -- reference to consensus contributes 216 scan nodes to the plan, which is why this
+    -- function measured 699.8 ms PLANNING against 288.1 ms executing.
+    -- taxonomy.bubble_up_batch elects for the whole context set in one instance.
+    --
+    -- Same rows: bubble_up_batch is byte-identical to per-term bubble_up untruncated
+    -- (1,012 rows, EXCEPT ALL empty both directions), and only synset_id is taken here.
     ctx_syn AS MATERIALIZED (
-        SELECT DISTINCT s.synset_id AS sid
-        FROM ctx CROSS JOIN LATERAL lexical.senses(ctx.id) s
-        WHERE s.synset_id IS NOT NULL
+        SELECT DISTINCT b.synset_id AS sid
+        FROM taxonomy.bubble_up_batch(ARRAY(SELECT id FROM ctx)) b
+        WHERE b.synset_id IS NOT NULL
     ),
     cand AS MATERIALIZED (
         SELECT s.sense_id, ss.object_id AS synset_id,
