@@ -28,10 +28,12 @@ RETURNS TABLE(
     witnesses bigint
 )
 LANGUAGE sql STABLE PARALLEL SAFE AS $$
-WITH fam AS MATERIALIZED (
-    SELECT id FROM consensus.relation_family_members('HAS_SENSE')
-),
-peers AS (
+-- consensus.relation_family_ids is IMMUTABLE and generated from the manifest, so
+-- this folds to a literal bytea[] at PLAN time and the LIST partitions prune before
+-- execution. relation_family_members() is STABLE and scans laplace.entities, which
+-- folds to nothing: measured on one read, same answer, 3 scan nodes against 54.
+-- No CTE and no nested ARRAY(SELECT ...) -- the value is a constant.
+WITH peers AS (
     SELECT unnest(lexical.lexical_peers(p_term)) AS id
 ),
 family_out AS (
@@ -43,7 +45,9 @@ family_out AS (
            c.rd
     FROM peers p
     JOIN laplace.consensus c ON c.subject_id = p.id
-    WHERE c.type_id IN (SELECT id FROM fam)
+    -- = ANY(array), not IN (SELECT): the subquery form prunes only at runtime.
+    -- Measured on this exact read, same 171 rows: 524.9ms -> 390.4ms.
+    WHERE c.type_id = ANY (consensus.relation_family_ids('HAS_SENSE'))
 ),
 resolved AS (
     /* lemma --HAS_SENSE--> sense --IS_SENSE_OF--> synset */
@@ -57,7 +61,7 @@ resolved AS (
     FROM family_out fo
     LEFT JOIN laplace.consensus ss
       ON ss.subject_id = fo.target_id
-     AND ss.type_id IN (SELECT id FROM fam)
+     AND ss.type_id = ANY (consensus.relation_family_ids('HAS_SENSE'))
      AND consensus.relation_canonical(ss.type_id) = 'IS_SENSE_OF'
     WHERE fo.via_relation = 'HAS_SENSE'
       AND ss.object_id IS NOT NULL
@@ -143,14 +147,14 @@ members AS (
            m.object_id AS member_id
     FROM scoped r
     JOIN laplace.consensus m ON m.subject_id = r.synset_id
-    WHERE m.type_id IN (SELECT id FROM fam)
+    WHERE m.type_id = ANY (consensus.relation_family_ids('HAS_SENSE'))
       AND COALESCE(cardinality(p_domain_context), 0) > 0
     UNION
     SELECT r.synset_id,
            m.subject_id AS member_id
     FROM scoped r
     JOIN laplace.consensus m ON m.object_id = r.synset_id
-    WHERE m.type_id IN (SELECT id FROM fam)
+    WHERE m.type_id = ANY (consensus.relation_family_ids('HAS_SENSE'))
       AND COALESCE(cardinality(p_domain_context), 0) > 0
 ),
 domain_scores AS (
