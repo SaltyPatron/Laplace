@@ -1,50 +1,52 @@
-# Execution queue — worked top to bottom, no reordering
+# Execution queue
 
-Status legend: [x] landed  [~] in progress this turn  [ ] queued
+[x] landed   [~] written, not landed   [ ] not started
 
-## 1. Per-file ingest journal — the run is not the unit, the file is
-- [x] `laplace.ingest_file_journal` table (run_id, file_label, source_name, file_id,
-      status, started_at, ended_at, bytes, records, entities, physicalities,
-      attestations, error). DDL validated live, rolled back.
-- [x] Registered in `sql/manifest.install` + `sql/manifest.upgrade`.
-- [x] `IIngestObservability.OnFileStarted` / `OnFileFinished` (default no-op, so no
-      implementor breaks).
-- [x] `NpgsqlIngestObservability` writes both, upsert-keyed on (run_id, file_label).
-- [x] Orphan reconciliation drives a killed run's `running` file rows to `cancelled`.
-- [x] Call sites wired: parallel worker (skip/start/finish) and sequential path (skip/start/finish).
+## 1. Per-file ingest journal — the file is the unit, not the run
+- [x] `laplace.ingest_file_journal` table; DDL validated live, rolled back
+- [x] Registered in manifest.install + manifest.upgrade
+- [x] `OnFileStarted` / `OnFileFinished` on IIngestObservability
+- [x] Npgsql writer, upsert on (run_id, file_label)
+- [x] Orphan reconciliation: killed run's `running` file rows -> `cancelled`
+- [x] `IngestObservabilityScope` ambient, so the static pipeline reaches it
+- [x] Wired at all six boundaries; build green
+- [x] Committed e41cea1c, branch pushed. NO PR OPENED.
+- [ ] `files_total` = 0 in 16 of 36 run rows
+- [ ] Kill-mid-run test
 
-- [ ] `files_total` is 0 in 16 of 36 run rows — fix the inventory count at the same site.
-- [ ] Test: kill mid-run, assert the mid-apply file is the one left `cancelled`.
-
-## 2. Ingest memory is bounded by file COUNT, not bytes
-- [x] Measured: UD's 686 treebanks span 4,577 B – 360,217,466 B (78,000x); knobs are
-      `file_channel=30`, `file_workers=10`, and `working_set_budget_bytes=4 GiB`
-      against a measured 83 GB RSS at OOM.
-- [x] Eliminated the presence preload as the cause (run logged
-      `index_cycle_defer: false`; `LAPLACE_PRESENCE_PRELOAD` set nowhere in CI).
-- [ ] `_canonicalNames` (`ConcurrentDictionary<string,byte>`) is run-scoped and never
-      cleared anywhere in the repo — 7 decomposers carry one. Scope it to the file.
-- [ ] Admit files by byte budget instead of count.
+## 2. Ingest memory — bounded by file COUNT, not bytes
+- [x] Measured: UD 686 files, 4,577 B to 360,217,466 B (78,000x), against
+      file_workers=10 and a 4 GiB declared budget. OOM at 83,136,288 kB RSS,
+      file 30/686, rows_new=0.
+- [x] Presence preload ruled out (index_cycle_defer:false, PRELOAD unset in CI)
+- [x] `_canonicalNames` ruled out — bounded vocabulary, not gigabytes
+- [~] `ByteAdmissionGate` written. NOT WIRED, NOT BUILT, NOT COMMITTED.
+- [ ] Wire it into the parallel worker and measure RSS against the same corpus
 
 ## 3. CI
-- [x] #1102 checkout EACCES — merged.
-- [~] #1103 — ISA gate green + 201 BEGIN ATOMIC conversions. Open, needs merge.
-- [ ] `consensus.walk_branches` has 7-arg and 8-arg overloads live; 4-arg callers
-      (`converse_facts:104`, `recall_walk_response:34`) error as ambiguous. Source
-      already drops the 7-arg form — needs the extension upgrade to land.
-- [ ] Seed re-dispatch: omw / atomic2020 / conceptnet were failed by a gate bug already
-      fixed in 3bd8f25c. wiktionary is a 6-hour run — alone, not behind others.
+- [x] #1102 checkout EACCES — merged
+- [~] #1103 — ISA gate green + 201 BEGIN ATOMIC conversions. OPEN, UNMERGED.
+      main stays red until it lands.
+- [ ] `walk_branches` 7-arg + 8-arg overloads live; 4-arg callers error.
+      Source already drops the 7-arg form; needs the extension upgrade.
+- [ ] Re-dispatch omw / atomic2020 / conceptnet (gate bug fixed in 3bd8f25c).
+      wiktionary alone — 6 hours.
 
-## 4. SQL performance — 382 files total
-- [x] 201 converted to BEGIN ATOMIC, each validated live.
-- [x] Measured warm: recall 0.86 ms, resolve 37 ms, senses 799 ms, bubble_up 743 ms,
-      salient_facts 2,420 ms, **relate_path 24,000–30,000 ms**.
-- [ ] `relate_path`: 18,303,185 shared buffer hits, 383 MB spilled to temp. Two
-      unbounded recursive arms (`ux`, `uy`) expanded to p_depth from both ends before
-      the LCA join cuts to 1 row.
-- [ ] `salient_facts` 2.4 s.
+## 4. SQL — 382 files
+- [x] 201 converted to BEGIN ATOMIC, each validated live. THIS IS NOT THE
+      REFACTOR — it is a syntax change that satisfies a gate. No query got faster.
+- [x] Warm timings: recall 0.86ms, resolve 37ms, senses 799ms, bubble_up 743ms,
+      salient_facts 2,420ms, relate_path 24,000-30,000ms
+- [ ] relate_path — 18,303,185 shared buffer hits, 383 MB temp, two unbounded
+      recursive arms expanded from both ends before the LCA join cuts to 1 row
+- [ ] salient_facts 2.4s
+- [ ] ~370 functions never read for performance
 
 ## 5. Chess
-- [x] Measured: 3 incomplete ChessPgn runs wrote 20,866,751 attestations; 1,472,737
-      distinct. Content addressing converges — partial, not corrupted.
-- [ ] ChessPgn has never reached `ok`. Best run: 41,900 / 875,671 input units (4.8%).
+- [x] 20,866,751 attestations written by 3 incomplete runs -> 1,472,737 distinct.
+      Converges. Partial, not corrupted.
+- [ ] ChessPgn has never reached `ok`. Best run 41,900/875,671 units = 4.8%.
+
+## 6. UD
+- [x] Full run attempted. Killed at 21:12:31 by a Postgres restart, not by code.
+- [ ] Re-run to completion
