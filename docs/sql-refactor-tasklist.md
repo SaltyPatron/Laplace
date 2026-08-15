@@ -634,3 +634,30 @@ Two findings, neither actioned:
 The three heavily-used shapes are correct for the access pattern and should stay. The PK's
 zero read scans are the expected shape for a uniqueness constraint and are NOT a drop signal
 — see the retraction in item W.
+
+
+## AA. Correction: "12 C files call SPI inside a loop" was an overstatement
+
+That count came from an awk heuristic that set a flag on the first `for`/`while` in a file and
+then counted every `SPI_execute` after it, regardless of nesting. Checked properly by what each
+file's SPI queries BIND:
+
+| file | binding | verdict |
+|---|---|---|
+| `generate_walk.c` | 3 array-bound, 1 single | one query per HOP — `walk_branches(gravity,3,5)` issues exactly 3, 209 ms warm |
+| `fold_route.c` | 3 array-bound | batched |
+| `highway_mask.c` | 2 array-bound | batched |
+| `graph_cascade.c`, `descent_probe.c`, `content_resolve.c` | 1 array-bound each | batched |
+| `graph_taxonomy.c` | `FROM unnest($1) … CROSS JOIN LATERAL` | one query for the whole frontier |
+| `explore_web.c`, `foundry_crawl.c` | delegate to SQL functions | not per-element SPI |
+| **`graph_contrast.c`** | `consensus_subject_edges($1)` inside `for (si = -1; si < ns; si++)` | **per-element** |
+| **`geometry_successors.c`** | 2 single-bound | **per-element** |
+| ~~`containers_of.c`~~ | fixed in 689511d0 — one probe per hop | done |
+
+**Two remain, not eleven**, and both are on gated or cold paths: `geometry_successors` feeds
+`bubble_up`'s `domain_scores`, which the `cardinality(p_domain_context) > 0` gate keeps off the
+common path entirely; `graph_contrast` backs `converse.contrast`.
+
+The general claim that the C layer is "a serial SPI driver" (item 2) does not survive this
+check and is withdrawn. What does survive: **zero files use threads**, so the C layer is
+single-threaded, and it delegates ranking work to SQL rather than computing it.
