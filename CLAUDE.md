@@ -333,9 +333,16 @@ Failing:
 - `health` → 9.0s
 - `facts("water")` → one entity id `979cf90cd158a187ba0a101784d1decd` carries water, *dar* (to
   give), and urine. Entity collision at ingest, not a ranking fault.
-- `source_status` reports nine sources `ingested: true`, `last_run_status: ok`,
-  `evidence_approx: 0` — ChessPgn, ChessBook, ChessOpenings, ISO639, UserPrompt, WordFrameNet,
-  MapNet, SemLink, VerbNet. Successful-looking runs that deposited nothing: a gate failing open.
+- ~~`source_status` reports nine sources with `evidence_approx: 0` … a gate failing open.~~
+  **FALSE, corrected 2026-08-15.** No gate failed and nothing was missing. `source_status` drew
+  `evidence_approx` from `ops.source_counts_approx()`, which reads the **parent** table's
+  `pg_stats` most-common-values — a list holding exactly **10** entries, so only the ten largest
+  sources could ever report non-zero. The nine hold **1,642,792 attestations** between them:
+  ChessPgn 1,472,737 · ISO639 42,931 · WordFrameNet 40,170 · ChessOpenings 28,546 · VerbNet
+  25,288 · SemLink 16,404 · MapNet 14,175 · ChessBook 2,540 · UserPrompt 1. Raising the
+  statistics target cannot fix it: with one source at 84% of 371M rows, a source at 0.004% is
+  about one row in the sample. The estimator now covers only the head, and the tail is counted
+  exactly (the sources it cannot see are by definition the small ones). Full listing 1.6s → 4.8s.
 
 ## 10. Open defect: phrase resolution, and an absent language prior
 
