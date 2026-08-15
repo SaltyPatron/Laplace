@@ -84,6 +84,7 @@ functions/mu/foundry_witness_sat.sql.in
 functions/mu/walk_edge_weight.sql.in
 functions/mu/edge_strength.sql.in
 functions/mu/weight.sql.in
+functions/mu/glicko2_logit.sql.in
 functions/fold/scoped_consensus.sql.in
 functions/fold/consensus_fold_result.sql.in
 functions/fold/consensus_upsert.sql.in
@@ -315,6 +316,7 @@ functions/consensus/related.sql.in
 functions/consensus/related_in.sql.in
 functions/consensus/related_objects.sql.in
 functions/consensus/salient_facts.sql.in
+functions/consensus/belief_distribution.sql.in
 functions/consensus/usage_overlap.sql.in
 functions/consensus/relate_path.sql.in
 functions/consensus/relation_summary.sql.in

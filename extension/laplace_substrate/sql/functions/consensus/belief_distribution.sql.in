@@ -1,0 +1,63 @@
+-- consensus.belief_distribution(subject, relation, k) -- the normalised
+-- distribution over what a subject couples to under one relation.
+--
+-- This is the surface a softmax output layer approximates, answered from
+-- adjudicated evidence instead of from a dot product. generation.adjudicated_row
+-- (model/model_consensus.sql.in) already answers the RANKING half exactly and
+-- says so in its comment; the PROBABILITY half had no body anywhere in the tree.
+-- consensus.weight()'s four modes are all per-edge scalars -- conservative,
+-- salience, complete, strength -- and none normalises over a candidate set;
+-- consensus.edge_strength is a per-edge logistic against neutral, which squashes
+-- but does not sum to one. The only normalised conditional that existed,
+-- generation.continuation_conditional_plane, is built from trajectory counts at
+-- export and never touches laplace.consensus.
+--
+-- Normalisation runs over the FULL candidate set for (subject, relation) and
+-- p_k truncates only the OUTPUT, so p is a probability rather than a shortlist
+-- artifact. subject_id + type_id prunes laplace.consensus to 1 leaf of 216
+-- (CLAUDE.md §4, measured), so the full set is one index range and the window
+-- has nothing to fan out over.
+--
+-- ABSTENTION IS THE POINT. No candidates -> no rows. A softmax cannot express
+-- "couples to nothing under this relation"; it sums to 1 over whatever vector it
+-- was handed, which is why a model fabricates a capital for a country it has no
+-- edge for. The empty set is the honest answer and this returns it.
+--
+-- Refuted edges are NOT filtered. A refutation drives rating below neutral, so
+-- its logit is negative and exp() suppresses it to near zero without a gate --
+-- and the mass stays visible in the output rather than being silently removed.
+CREATE OR REPLACE FUNCTION consensus.belief_distribution(
+        p_subject  bytea,
+        p_relation text,
+        p_k        integer DEFAULT 20)
+    RETURNS TABLE(object_id bytea, p double precision, logit double precision,
+                  eff_mu numeric, rd bigint, witness_count bigint)
+-- No SET search_path — blocks inlining, costs the consensus index path. GH #860.
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
+    WITH cand AS (
+        SELECT c.object_id AS oid,
+               consensus.glicko2_logit(c.rating, c.rd) AS lg,
+               consensus.eff_mu_display(c.rating, c.rd) AS emu,
+               c.rd AS crd,
+               c.witness_count AS wc
+        FROM laplace.consensus c
+        WHERE c.subject_id = p_subject
+          AND c.type_id    = laplace.relation_type_id(p_relation)
+          AND c.object_id IS NOT NULL
+    ),
+    -- max-shift before exp(): the standard overflow guard, not a temperature.
+    -- It cancels in the ratio, so p is unchanged by it.
+    shifted AS (
+        SELECT oid, lg, emu, crd, wc, exp(lg - max(lg) OVER ()) AS w FROM cand
+    )
+    SELECT oid, w / sum(w) OVER (), lg, emu, crd, wc
+    FROM shifted
+    ORDER BY w DESC, oid
+    LIMIT p_k;
+END;
+
+COMMENT ON FUNCTION consensus.belief_distribution(bytea, text, integer) IS
+    'Bradley-Terry distribution over one subject''s objects under one relation, '
+    'from Glicko-2 log-odds with RD folded in. Normalised over the full candidate '
+    'set; empty when the subject couples to nothing.';
