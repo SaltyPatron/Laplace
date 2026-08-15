@@ -44,7 +44,10 @@ CREATE OR REPLACE FUNCTION generation.word_order(p_vocab bytea[], p_trajs int DE
         -- fabricated evidence, and the reason this disagreed with grapheme_order, which
         -- has always filtered after counting. The vocab restriction now applies to the
         -- finished counts below, where it selects rows instead of inventing them.
-        SELECT t.sid, tc.ordinal AS ord, tc.entity_id AS wid
+        -- sid is the CONTAINING composition (t.entity_id): the window below partitions
+        -- adjacency by the sentence/document a constituent came from, so a lead() can
+        -- never pair the last word of one trajectory with the first of the next.
+        SELECT t.entity_id AS sid, tc.ordinal AS ord, tc.entity_id AS wid
         FROM t CROSS JOIN LATERAL laplace_trajectory_constituents(t.trajectory) tc
     ),
     bg AS (

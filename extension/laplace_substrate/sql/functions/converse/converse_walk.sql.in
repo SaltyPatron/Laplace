@@ -107,13 +107,30 @@ BEGIN
     WITH gids AS (
         -- DISTINCT: a gloss reachable through two def-band relation types
         -- contributes its token stream once, not twice.
-        SELECT DISTINCT g.gid, g.wt, g.is_core FROM (
-            SELECT c.object_id AS gid, 50::bigint AS wt, true AS is_core,
+        -- THE STEER IS THE VERDICT. wt was 50 for the core gloss and 40 for a
+        -- containing sentence -- two hand-set numbers whose 1.25 ratio disappears
+        -- inside sw_score's `weight * (rng % 100000)`, so the stream was effectively
+        -- unsteered while the adjudicated belief sat one column over, computed for
+        -- the ORDER BY and then discarded. wt is that belief now; eff_mu and the
+        -- weight array are both bigint at the same fp scale, so nothing is rescaled.
+        -- GREATEST(.,0) keeps a refuted source from flipping sw_score's sign instead
+        -- of merely ranking last. The SENT boundary's weight 0 is set in `seq`.
+        --
+        -- GROUP BY gid, not DISTINCT (gid, wt, is_core): a gloss reachable through
+        -- two def-band relation types, or present in both arms, produced two rows
+        -- under DISTINCT and contributed its token stream twice -- the exact thing
+        -- the comment above forbids.
+        SELECT g.gid, MAX(g.wt) AS wt, bool_or(g.is_core) AS is_core FROM (
+            SELECT c.object_id AS gid,
+                   GREATEST(consensus.eff_mu(c.rating, c.rd), 0) AS wt, true AS is_core,
                    consensus.eff_mu(c.rating, c.rd) AS mu
             FROM laplace.consensus c
             WHERE c.subject_id = syn AND c.type_id = ANY (t_def)
             UNION ALL
-            SELECT co.entity_id, 40, false,
+            SELECT co.entity_id,
+                   GREATEST(COALESCE(MAX(consensus.eff_mu(k.rating, k.rd)),
+                                     consensus.glicko2_neutral_mu()), 0),
+                   false,
                    COALESCE(MAX(consensus.eff_mu(k.rating, k.rd)), consensus.glicko2_neutral_mu())
             FROM structural.containers_of(topic_word, 1, 400) co
             LEFT JOIN laplace.consensus k ON k.object_id = co.entity_id
@@ -122,6 +139,7 @@ BEGIN
             ORDER BY is_core DESC, mu DESC
             LIMIT 160
         ) g
+        GROUP BY g.gid
     ),
     toks AS (
         -- The WHOLE attested constituent sequence, at whatever tier the content
