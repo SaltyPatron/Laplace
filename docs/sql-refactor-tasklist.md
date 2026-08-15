@@ -618,11 +618,18 @@ Composite: subject+type **62** · object+type **21** · subject+type+object **18
 
 Two findings, neither actioned:
 
-- **`brin (last_observed_at)` is supported by zero predicates in the entire corpus and has
-  zero scans.** It exists on 216 leaves of both tables.
-- **`btree (type_id)` alone is redundant with LIST pruning.** `type_id` is the partition key,
-  so supplying it already isolates the partition; a standalone index on it adds write
-  amplification across 216 leaves for 6,959 scans (2.5 GB consensus / 2.7 GB attestations).
+- **`brin (last_observed_at)` is supported by zero predicates anywhere and has zero scans.**
+  Verified on both sides, because an absence claim needs the search: zero in the SQL corpus,
+  and in `app/` the column appears only as one that is WRITTEN and READ (folded in
+  `ConsensusClientFoldTests`, parsed in `CopyTupleParser`, selected by `WHERE id = $1` which
+  uses the PK) — never as a RANGE predicate, which is the only access a BRIN serves. It
+  exists on 216 leaves of both tables.
+- **`btree (type_id)` alone is redundant with LIST pruning ON consensus/attestations.**
+  `type_id` is their partition key, so supplying it already isolates the partition; the
+  standalone index adds write amplification across 216 leaves for 6,959 scans (2.5 GB
+  consensus / 2.7 GB attestations). This does NOT extend to `laplace.entities`, which is
+  `LIST (tier)` — there `type_id` is not the partition key and app code does issue
+  `WHERE type_id = …` against it, so `entities_tier_type_btree` is legitimate.
 
 The three heavily-used shapes are correct for the access pattern and should stay. The PK's
 zero read scans are the expected shape for a uniqueness constraint and are NOT a drop signal
