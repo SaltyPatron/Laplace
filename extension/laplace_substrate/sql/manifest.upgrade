@@ -24,6 +24,7 @@ indexes/physicalities_observed_brin.sql.in
 indexes/physicalities_traj_probe.sql.in
 indexes/physicalities_traj_first_id_btree.sql.in
 indexes/physicalities_constituents_gin.sql.in
+indexes/physicalities_set_constituents_gin.sql.in
 indexes/attestations_type_btree.sql.in
 indexes/attestations_object_btree.sql.in
 indexes/attestations_source_btree.sql.in
@@ -319,6 +320,8 @@ functions/consensus/related_in.sql.in
 functions/consensus/related_objects.sql.in
 functions/consensus/salient_facts.sql.in
 functions/consensus/belief_distribution.sql.in
+functions/consensus/set_members.sql.in
+functions/consensus/subjects_with.sql.in
 functions/consensus/usage_overlap.sql.in
 functions/consensus/relate_path.sql.in
 functions/consensus/relation_summary.sql.in

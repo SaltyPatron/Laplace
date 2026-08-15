@@ -1,0 +1,43 @@
+-- consensus.subjects_with(relation, members) -- every subject whose set-valued
+-- attribute CONTAINS all of p_members.
+--
+-- This is the read the edge fan cannot serve. "Which forms are nominative AND singular
+-- AND masculine" against 186,562,442 HAS_FEATURE rows is a three-way self-join, one arm
+-- per tag, each arm pruning to one LIST partition and then fanning across 8 hash leaves.
+-- Against bundles it is one GIN containment probe over 145,619 sets
+-- (physicalities_set_constituents_gin) followed by one reverse-edge read.
+--
+-- The bundle ids arrive as an InitPlan-bound ARRAY(SELECT ...), NOT as a CTE column
+-- joined to consensus. CLAUDE.md §4 measures the difference at two independent sites:
+-- the array form binds before the scan and emits a ScalarArrayOp, the CTE column is a
+-- per-row variable the planner cannot bind and costs 4x. The contents are data-dependent
+-- so the manifest-folded form is unavailable; ARRAY(SELECT ...) is the correct middle
+-- rung of that ladder.
+--
+-- p_relation is required for the same reason: object_id prunes NEITHER partition level
+-- (the hash key is subject_id), so a reverse read without type_id pays all 216 leaves.
+-- With it, 8.
+CREATE OR REPLACE FUNCTION consensus.subjects_with(
+        p_relation text, p_members bytea[], p_limit integer DEFAULT 100)
+    RETURNS TABLE(subject_id bytea, bundle_id bytea,
+                  eff_mu numeric, rd bigint, witness_count bigint)
+-- No SET search_path — blocks inlining, costs the consensus index path. GH #860.
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
+    SELECT c.subject_id, c.object_id,
+           consensus.eff_mu_display(c.rating, c.rd), c.rd, c.witness_count
+    FROM laplace.consensus c
+    WHERE c.type_id = laplace.relation_type_id(p_relation)
+      AND c.object_id = ANY (ARRAY(
+              SELECT p.entity_id
+              FROM laplace.physicalities p
+              WHERE p.type = 5
+                AND p.trajectory IS NOT NULL
+                AND public.laplace_trajectory_constituent_ids(p.trajectory) @> p_members))
+    ORDER BY consensus.eff_mu(c.rating, c.rd) DESC, c.subject_id
+    LIMIT p_limit;
+END;
+
+COMMENT ON FUNCTION consensus.subjects_with(text, bytea[], integer) IS
+    'Subjects whose set-valued attribute contains every member given. One GIN '
+    'containment probe over the bundles, then one type-pruned reverse-edge read.';
