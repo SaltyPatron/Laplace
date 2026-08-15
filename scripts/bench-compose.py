@@ -57,7 +57,8 @@ def load_corpus(root, cap=CORPUS_CAP_BYTES):
     docs, total = [], 0
     for p in sorted(paths):
         try:
-            b = open(p, "rb").read()
+            with open(p, "rb") as fh:
+                b = fh.read()
         except OSError:
             continue
         if not b:
@@ -70,11 +71,34 @@ def load_corpus(root, cap=CORPUS_CAP_BYTES):
 
 
 def main():
-    root = sys.argv[1] if len(sys.argv) > 1 else os.path.dirname(os.path.dirname(
-        os.path.abspath(__file__)))
+    # Parse positionally-independent: `--repeats N` alone must work, and the old
+    # form took sys.argv[1] as the corpus unconditionally, so it set root to
+    # "--repeats" and then found no corpus.
     repeats = 3
-    if "--repeats" in sys.argv:
-        repeats = int(sys.argv[sys.argv.index("--repeats") + 1])
+    root = None
+    argv = sys.argv[1:]
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--repeats":
+            if i + 1 >= len(argv):
+                sys.exit("bench-compose: --repeats needs a value")
+            try:
+                repeats = int(argv[i + 1])
+            except ValueError:
+                sys.exit(f"bench-compose: --repeats expects an integer, got {argv[i + 1]!r}")
+            if repeats < 1:
+                sys.exit("bench-compose: --repeats must be >= 1")
+            i += 2
+            continue
+        if a.startswith("-"):
+            sys.exit(f"bench-compose: unknown option {a!r}")
+        if root is not None:
+            sys.exit("bench-compose: corpus_dir given more than once")
+        root = a
+        i += 1
+    if root is None:
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
     if lib.codepoint_table_load_perfcache(T0.encode()) != 0 or not lib.codepoint_table_is_loaded():
         sys.exit(f"bench-compose: could not load T0 perfcache at {T0}")
