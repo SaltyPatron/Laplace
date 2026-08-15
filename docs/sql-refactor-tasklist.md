@@ -337,3 +337,39 @@ peers for every one — fired 100%, needed 0%.
       rewrite was tried and rejected: it is RBAR (one row per character) and was not
       equivalent (3/18 mismatches on single-character words). The correct form is C over the
       perfcache — needs a rebuild and a PG bounce.
+
+
+## Q. OPEN DEFECT I INTRODUCED — the scalar and batch realizers now disagree
+
+`0b55b8ac` fixed `realize.realize()` to put `render_text` before `resolve_name` (content
+before label). `realize.batch` is a SECOND implementation of the same COALESCE ladder, in C
+(`src/realize_batch.c`, arms documented at lines 9-19: `_has_name`, `_synset_lemma`, render,
+`_translation`, `_canonical`, `_defines`) and still runs name-first.
+
+Live divergence:
+
+| entity | `realize.realize` | `realize.batch` |
+|---|---|---|
+| `:` | `:` | **COLON** |
+| `·` | `·` | **MIDDLE DOT** |
+| `1` | `1` | **DIGIT ONE** |
+| `dog` / wolf synset | `dog` / `wolf` | `dog` / `wolf` (agree) |
+
+`realize.batch` is on the output path of `consensus.salient_facts`, `consensus.related`,
+`converse.structural_neighbors` and `converse.links`, so those still emit labels where the
+entity has content.
+
+**Left in this state deliberately:** the scalar is now correct and reverting it would restore
+the defect on both paths. One correct and one wrong beats two wrong.
+
+- [ ] **The fix:** in `realize_batch.c`'s per-id ladder (around lines 612-654), run the render
+      arm BEFORE `first_nonempty(&arm_name, …)` and `&arm_lemma`, matching
+      `realize/realize.sql.in`. Requires a `.so` rebuild and a Postgres bounce, so it was not
+      done during a live ingest run.
+- [ ] Better: collapse the two ladders to one definition so the order cannot drift again
+      (§15). The C exists for batching, not for a different policy.
+
+**Also measured while finding this:** `consensus.salient_facts(word_id('water'))` returns 24
+rows and plans **575 nodes in 381.8 ms**, executing 2,769 ms of which a single `Aggregate` is
+**2,530 ms / 2,157,380 buffers** — `realize.batch` (892 ms for 24 ids on its own) plus
+`lexical.type_label_batch` (46 ms). The scans are not the cost; the last-mile realization is.
