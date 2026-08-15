@@ -9,21 +9,27 @@ namespace Laplace.Ingestion.Tests;
 public sealed class IngestRunStatusHonestyTests
 {
     [Theory]
-    [InlineData(0, false, false, 10, 10, "ok")]
-    [InlineData(0, false, false, 0, 0, "ok")]
-    [InlineData(1, false, false, 9, 10, "failed")]
-    [InlineData(0, false, false, 33, 14900, "failed")]
-    [InlineData(0, false, false, 0, 10, "failed")]
-    [InlineData(0, false, false, 11, 1, "failed")] // ChessPgn segment markers as files (11/1 ok was a lie)
-    [InlineData(0, true, false, 0, 10, "empty-noop")]
-    [InlineData(0, false, true, 3, 10, "capped")]
-    [InlineData(2, false, true, 3, 10, "failed")]
+    [InlineData(0, false, false, 10, 10, 1, "ok")]
+    [InlineData(0, false, false, 0, 0, 1, "ok")]
+    [InlineData(1, false, false, 9, 10, 1, "failed")]
+    [InlineData(0, false, false, 33, 14900, 1, "failed")]
+    [InlineData(0, false, false, 0, 10, 1, "failed")]
+    [InlineData(0, false, false, 11, 1, 1, "failed")] // ChessPgn segment markers as files (11/1 ok was a lie)
+    [InlineData(0, true, false, 0, 10, 1, "empty-noop")]
+    [InlineData(0, false, true, 3, 10, 1, "capped")]
+    [InlineData(2, false, true, 3, 10, 1, "failed")]
+    // A source that declares nothing skips emptySourceNoOp; zero deposited rows is the proof
+    // it ingested nothing. MEASURED 2026-08-14: nine sources reported last_run_status=ok with
+    // evidence_approx=0 — ChessPgn, ChessBook, ChessOpenings, ISO639, UserPrompt,
+    // WordFrameNet, MapNet, SemLink, VerbNet.
+    [InlineData(0, false, false, 0, 0, 0, "empty-noop")]
+    [InlineData(0, false, false, 10, 10, 0, "empty-noop")]
     public void DeriveRunStatus_ReflectsFileCompleteness(
         long unitsFailed, bool emptyNoOp, bool capped,
-        int filesDone, long filesTotal, string expected)
+        int filesDone, long filesTotal, long rowsDeposited, string expected)
     {
         Assert.Equal(expected, IngestRunner.DeriveRunStatus(
-            unitsFailed, emptyNoOp, capped, filesDone, filesTotal));
+            unitsFailed, emptyNoOp, capped, filesDone, filesTotal, rowsDeposited));
     }
 
     /// <summary>
@@ -55,7 +61,8 @@ public sealed class IngestRunStatusHonestyTests
     public void EveryFailedStatus_HasAReason(long unitsFailed, int filesDone, long filesTotal)
     {
         Assert.Equal("failed", IngestRunner.DeriveRunStatus(
-            unitsFailed, emptySourceNoOp: false, capped: false, filesDone, filesTotal));
+            unitsFailed, emptySourceNoOp: false, capped: false, filesDone, filesTotal,
+            rowsDeposited: 1));
         Assert.False(string.IsNullOrWhiteSpace(
             IngestRunner.DescribeRunFailure(unitsFailed, filesDone, filesTotal)));
     }

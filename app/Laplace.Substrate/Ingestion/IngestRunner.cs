@@ -103,6 +103,11 @@ public sealed class IngestRunner
 
         var log = _loggerFactory.CreateLogger($"Ingest:{decomposer.SourceName}");
         var sw = Stopwatch.StartNew();
+        // A fold that never drained is a write that never became durable, so the run cannot
+        // report a clean terminal status. The drain runs in a finally and cannot throw from
+        // there without masking an in-flight exception, so the failure is carried here and
+        // decided at status derivation.
+        Exception? foldDrainFailure = null;
         var failures = new List<IngestFailure>();
         long unitsAttempted = 0, unitsApplied = 0, unitsFailed = 0;
         long entitiesInserted = 0, physicalitiesInserted = 0, attestationsInserted = 0;
@@ -590,7 +595,7 @@ public sealed class IngestRunner
             // the 42883 it was paired with. Cancelling must mean abnormal teardown and
             // nothing else; a completed decompose owes its folds a drain.
             try { await _writer.DrainFoldsAsync().ConfigureAwait(false); }
-            catch (Exception ex) { log.LogError(ex, "fold drain before run teardown failed"); }
+            catch (Exception ex) { foldDrainFailure = ex; log.LogError(ex, "fold drain before run teardown failed"); }
 
             try { runCts.Cancel(); } catch { /* ignore */ }
             if (cappedWatchdog is not null)
@@ -690,7 +695,12 @@ public sealed class IngestRunner
                 emptySourceNoOp,
                 capped: options.DecomposerOptions.MaxInputUnits > 0,
                 filesDone: counters.FilesDone,
-                filesTotal: declaredFiles);
+                filesTotal: declaredFiles,
+                rowsDeposited: result.EntitiesInserted
+                    + result.PhysicalitiesInserted
+                    + result.AttestationsInserted);
+        // Before INGEST_COMPLETE: the log line and the journal row must carry the same status.
+        if (foldDrainFailure is not null) status = "failed";
         log.LogInformation(
             "INGEST_COMPLETE source={Source} layer={Layer} input_done={InputDone} input_total={InputTotal} "
             + "files_done={FilesDone} files_total={FilesTotal} intents={Applied}/{Produced} "
@@ -704,9 +714,12 @@ public sealed class IngestRunner
             result.WallClock.TotalSeconds, result.UnitsFailed, status,
             SourceEntityIdConventions.SynsetHits, SourceEntityIdConventions.SynsetMisses,
             LanguageReference.ResolveMisses);
-        string? failureReason = status == "failed"
-            ? DescribeRunFailure(result.UnitsFailed, counters.FilesDone, declaredFiles)
-            : null;
+        string? failureReason = foldDrainFailure is not null
+            ? $"fold drain failed before teardown — the run's folds are not durable: "
+                + $"[{foldDrainFailure.GetType().Name}] {foldDrainFailure.Message}"
+            : status == "failed"
+                ? DescribeRunFailure(result.UnitsFailed, counters.FilesDone, declaredFiles)
+                : null;
         _obs.OnRunFinished(decomposer.SourceName, result, status, failureReason);
         // A run that wrote status=failed to the ledger MUST NOT return normally. It used to:
         // the journal recorded failed, this method returned the result, the CLI saw no
@@ -746,13 +759,20 @@ public sealed class IngestRunner
         bool emptySourceNoOp,
         bool capped,
         int filesDone,
-        long filesTotal)
+        long filesTotal,
+        long rowsDeposited)
     {
         if (unitsFailed > 0) return "failed";
         if (emptySourceNoOp) return "empty-noop";
         if (capped) return "capped";
         // Exact match: undercount was Q5; overcount (segment markers counted as files) is the same lie.
         if (filesTotal > 0 && filesDone != filesTotal) return "failed";
+        // emptySourceNoOp only fires when the source DECLARED input, so a source declaring
+        // nothing passes every guard above. A run that deposited no entity, no placement and
+        // no attestation ingested nothing regardless of what it declared: zero rows is proof,
+        // not a threshold. Runs a decomposer can account for never reach this method —
+        // IIngestNoOpExplainer sets their status before it is called.
+        if (rowsDeposited == 0) return "empty-noop";
         return "ok";
     }
 
