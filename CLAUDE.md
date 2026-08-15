@@ -146,6 +146,20 @@ same change.
   plans a **533-node** tree in **545 ms** to return 24 rows, because it references `consensus`
   many times and each reference expands across the partition set. Execution was 5,167 ms.
   Count plan nodes before blaming a scan.
+- **Three levels of array binding, and only the top two prune.** When scoping a partitioned
+  read by a set of ids, *how* the array reaches the predicate decides everything:
+
+  | form | when it is known | measured |
+  |---|---|---|
+  | `consensus.relation_family_ids('HAS_SENSE')` — IMMUTABLE, constant arg | **plan time** (folds to a literal) | 3 scan nodes vs 54 |
+  | `= ANY (ARRAY(SELECT …))` — an InitPlan | **run time, bound before the scan** | 3,342 ms · 500.7 ms |
+  | `CROSS JOIN ids_cte … = ANY (ids_cte.col)` | never — a per-row variable | 14,299 ms · 773.5 ms |
+
+  The CTE column reads like the tidy form and is the slow one: the planner cannot bind it, so
+  it joins across the partition set instead of emitting a ScalarArrayOp. Measured at two
+  independent sites with identical output (44,415 rows and 3,187 rows). Use the manifest-folded
+  function when the contents are known from the relation law; use `ARRAY(SELECT …)` when they
+  are data-dependent; never hand a predicate a CTE column.
 - **Declared row estimates are absent.** 239 of the 244 set-returning functions ship Postgres'
   default `prorows = 1000`; only the five model-lane functions declare a real one. A wrong
   estimate on the inner side of a join is what makes scanning look cheaper than probing.

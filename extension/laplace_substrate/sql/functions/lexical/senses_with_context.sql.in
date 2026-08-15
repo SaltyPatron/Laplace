@@ -66,8 +66,9 @@ CREATE OR REPLACE FUNCTION lexical.senses(p_word bytea, p_context bytea[])
         FROM ctx CROSS JOIN LATERAL lexical.senses(ctx.id) s
         WHERE s.synset_id IS NOT NULL
     ),
+    -- Folded: IMMUTABLE, manifest-generated, prunes at plan time.
     frame_t AS MATERIALIZED (
-        SELECT id FROM consensus.relation_family_members('EVOKES_FRAME')
+        SELECT unnest(consensus.relation_family_ids('EVOKES_FRAME')) AS id
     ),
     cand AS MATERIALIZED (
         SELECT s.sense_id, ss.object_id AS synset_id,

@@ -76,6 +76,16 @@ bias AS (
 -- index-only scan of EVERY partition and hash-joins, while the array form emits
 -- one ScalarArrayOpExpr probe per bias id against
 -- consensus_*_object_id_type_id_idx. A LATERAL rewrite is worse than the join.
+-- ARRAY(SELECT ...) DELIBERATELY, not a CTE column. It reads like the worse form,
+-- but the nesting is exactly what makes it fast: ARRAY(SELECT ...) is evaluated as
+-- an InitPlan -- one sub-plan producing a BOUND CONSTANT array before the scan --
+-- which lets the planner emit a ScalarArrayOp with runtime partition pruning. A CTE
+-- column is a variable from a join, so the planner cannot bind it and falls back to
+-- a join across the partition set. MEASURED here, identical 44,415 rows:
+--   CROSS JOIN ids CTE, = ANY (ids.col)   14,299 ms
+--   = ANY (ARRAY(SELECT ...))              3,342 ms
+-- It is site-specific, not a rule: the same swap made taxonomy.bubble_up FASTER
+-- (484.7ms -> 349.5ms). Measure before changing the shape either way.
 biasfam AS (
     SELECT b.synset_id FROM bias b
     UNION
