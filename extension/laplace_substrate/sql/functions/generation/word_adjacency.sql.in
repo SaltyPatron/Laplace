@@ -1,0 +1,60 @@
+-- Witnessed word adjacency: one row per (x, y, the composition that witnessed it).
+--
+-- ONE EXTRACTION, MANY VALUATIONS (§15). generation.word_order counts these rows;
+-- the continuation lane values them by the adjudicated standing of the witness.
+-- Both are aggregates over THIS body, so the sequence extraction cannot drift
+-- between the counter and the belief reader.
+--
+-- Order is fetched from the TRAJECTORY, never from an edge. Text emits no
+-- PRECEDES attestations (Pillar 3a); PRECEDES is populated only by model
+-- ingestion, so a consensus edge between two consecutive words is legitimately
+-- absent and looking for one is the wrong question.
+--
+-- Separators are removed before the window: two words either side of a space ARE
+-- adjacent, and that is what the space means. generation.separator_ids() is the
+-- one body for that truth, alphabet-bounded, and empty for scripts that do not
+-- delimit -- for Han or Thai the sequence is already content-contiguous.
+--
+-- The vocab join stays AFTER the window. Dropping an out-of-vocabulary WORD before
+-- it would let lead() pair two words that were never adjacent, which is fabricated
+-- evidence; dropping a delimiter restores an adjacency the delimiter expresses.
+DROP FUNCTION IF EXISTS generation.word_adjacency(bytea[], int, int);
+CREATE OR REPLACE FUNCTION generation.word_adjacency(p_vocab bytea[], p_trajs int DEFAULT 100000,
+                                                    p_gap int DEFAULT 1)
+    RETURNS TABLE(subject_id bytea, object_id bytea, witness_id bytea)
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
+    sep AS MATERIALIZED (
+        SELECT COALESCE(generation.separator_ids(), '{}'::bytea[]) AS ids
+    ),
+    t AS (
+        -- Role by TYPE, not by tier: tier is a FLOOR, so 'a', 'I' and single-grapheme
+        -- CJK words all sit at tier 0 while 'hot' sits at tier 2.
+        SELECT w.id AS entity_id, w.trajectory
+        FROM laplace.v_word_points w
+        WHERE w.type_id IN (realize.canonical_id('Sentence'), realize.canonical_id('Document'))
+          AND w.trajectory IS NOT NULL
+        -- Arbitrary content-hash sample, as generation.word_order records: an
+        -- arbitrary LIMIT without an ordering is a missing ranking, left in place
+        -- until an index exists that ingest is willing to pay for.
+        ORDER BY w.id, w.physicality_id
+        LIMIT p_trajs
+    ),
+    g AS (
+        SELECT t.entity_id AS sid, tc.ordinal AS ord, tc.entity_id AS wid
+        FROM t CROSS JOIN LATERAL laplace_trajectory_constituents(t.trajectory) tc
+             CROSS JOIN sep
+        WHERE NOT (tc.entity_id = ANY (sep.ids))
+    ),
+    bg AS (
+        -- Partitioned by the containing composition, so lead() can never pair the
+        -- last word of one trajectory with the first of the next.
+        SELECT sid, wid AS cur, lead(wid, p_gap) OVER (PARTITION BY sid ORDER BY ord) AS nxt
+        FROM g
+    )
+    SELECT b.cur, b.nxt, b.sid
+    FROM bg b
+    JOIN v vs ON vs.id = b.cur
+    JOIN v vo ON vo.id = b.nxt
+    WHERE b.nxt IS NOT NULL
+$$;

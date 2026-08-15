@@ -12,77 +12,11 @@ DROP FUNCTION IF EXISTS laplace.word_order(bytea[], int, int);
 CREATE OR REPLACE FUNCTION generation.word_order(p_vocab bytea[], p_trajs int DEFAULT 100000, p_gap int DEFAULT 1)
     RETURNS TABLE(subject_id bytea, object_id bytea, w double precision)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
-    WITH v(id) AS (SELECT DISTINCT u FROM unnest(p_vocab) AS u),
-    -- Hoisted: alphabet-bounded and STABLE, so it is resolved once per call and
-    -- never per constituent row.
-    sep AS MATERIALIZED (
-        SELECT COALESCE(generation.separator_ids(), '{}'::bytea[]) AS ids
-    ),
-    t AS (
-        -- Role by TYPE, not by tier. tier is a floor in the containment DAG, not a kind:
-        -- bootstrap mints relation types, trust classes, POS tags, sources and languages
-        -- all at tier 2, and single-grapheme words ('a', 'I') collapse to tier 0 by the
-        -- single-child rule -- so `tier > 2` both over- and under-selects. type_id is the
-        -- structural kind stamped at compose time, and it is indexed.
-        --
-        -- Ranked by trajectory length, not by id. `ORDER BY p.entity_id, p.id` sampled by
-        -- CONTENT HASH, which is arbitrary -- an arbitrary LIMIT without an ordering is a
-        -- missing ranking. Longest compositions carry the most adjacency per row read.
-        -- DISTINCT ON is gone: physicality identity is (entity_id, type) and type is
-        -- pinned below, so there is at most one row per entity already.
-        SELECT w.id AS entity_id, w.trajectory
-        FROM laplace.v_word_points w
-        WHERE w.type_id IN (realize.canonical_id('Sentence'), realize.canonical_id('Document'))
-          AND w.trajectory IS NOT NULL
-        -- Sampling is by content hash, which is ARBITRARY -- an arbitrary LIMIT without
-        -- an ordering is a missing ranking. The honest ranking is by trajectory length,
-        -- but MEASURED 2026-08-01 that plans as a seq scan of every physicality partition
-        -- plus a full sort (no index serves n_constituents), so it trades an arbitrary
-        -- sample for an unusable one. Left arbitrary DELIBERATELY until an index exists
-        -- that ingest is willing to pay for; the defect is recorded, not hidden.
-        ORDER BY w.id, w.physicality_id
-        LIMIT p_trajs
-    ),
-    g AS (
-        -- NO vocab join here. Filtering the sequence BEFORE the window made lead() skip
-        -- over every out-of-vocabulary word and emit a pair that was never adjacent --
-        -- fabricated evidence, and the reason this disagreed with grapheme_order, which
-        -- has always filtered after counting. The vocab restriction now applies to the
-        -- finished counts below, where it selects rows instead of inventing them.
-        -- sid is the CONTAINING composition (t.entity_id): the window below partitions
-        -- adjacency by the sentence/document a constituent came from, so a lead() can
-        -- never pair the last word of one trajectory with the first of the next.
-        -- DELIMITERS ARE NOT CONSTITUENTS OF THE SEQUENCE THEY DELIMIT. Two words
-        -- either side of a space ARE adjacent -- that is what the space means. Left
-        -- in, every gap-1 pair is word->separator or separator->word, so a word
-        -- vocabulary joins to nothing and this returns silence: measured, 'hot' and
-        -- 'dog' co-occur in 91 shared containers with 87 ordered pairs, of which 85
-        -- sit at gap 2 (hot, SPACE, dog) and ZERO at gap 1.
-        --
-        -- This is NOT the vocab filter the comment above forbids. Dropping an
-        -- out-of-vocabulary WORD would pair two words that were never adjacent --
-        -- fabricated evidence. Dropping the delimiter restores the adjacency the
-        -- delimiter expresses. generation.separator_ids() is the one body for that
-        -- truth (§15), alphabet-bounded, and empty for scripts that do not delimit --
-        -- for Han or Thai the sequence is content-contiguous and nothing is removed.
-        SELECT t.entity_id AS sid, tc.ordinal AS ord, tc.entity_id AS wid
-        FROM t CROSS JOIN LATERAL laplace_trajectory_constituents(t.trajectory) tc
-             CROSS JOIN sep
-        WHERE NOT (tc.entity_id = ANY (sep.ids))
-    ),
-    bg AS (
-        SELECT wid AS cur, lead(wid, p_gap) OVER (PARTITION BY sid ORDER BY ord) AS nxt FROM g
-    ),
-    cnt AS (
-        -- `cur <> nxt` used to drop self-adjacent pairs. A repeated word is witnessed
-        -- data, and grapheme_order keeps its repeats -- so the filter was an inconsistency
-        -- between two functions of one family, not a rule. A consumer that cannot take a
-        -- self-loop drops it at its own layer; this one no longer discards the observation.
-        SELECT cur, nxt, count(*)::float8 AS c
-        FROM bg WHERE nxt IS NOT NULL GROUP BY cur, nxt
-    )
-    SELECT c.cur, c.nxt, c.c
-    FROM cnt c
-    JOIN v vs ON vs.id = c.cur
-    JOIN v vo ON vo.id = c.nxt
+    -- COUNT is one valuation of generation.word_adjacency, which owns the extraction.
+    -- The continuation lane values the same rows by the adjudicated standing of the
+    -- witnessing composition instead; keeping one extraction body is what stops the
+    -- counter and the belief reader from drifting (§15).
+    SELECT a.subject_id, a.object_id, count(*)::float8
+    FROM generation.word_adjacency(p_vocab, p_trajs, p_gap) a
+    GROUP BY a.subject_id, a.object_id
 $$;
