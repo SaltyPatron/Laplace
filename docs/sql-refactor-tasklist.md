@@ -234,3 +234,61 @@ it can only be the minimum over every container that content ever appeared in.
 - [ ] Remaining `ctier = 2` sites named in CLAUDE.md: `converse_tiered.sql.in:150`,
       `senses_with_context.sql.in:95`, `explore_anchor_neighbors.sql.in:89`,
       `variant_synth.c:266`. Each needs the same question: what is the container?
+
+
+---
+
+## L. MEASUREMENT VALIDITY — read before trusting any wall-clock number in this file
+
+`pg_stat_activity` on 2026-08-15 showed an **active ingest run** (`UPDATE
+laplace.ingest_run_journal SET status = …`, `pg_advisory_lock`, 6 runs completed in the prior
+6 hours) concurrent with the benchmarking in this session.
+
+`generation.compose_batch('what is a wolf', 12)` measured **264,605 → 244,533 → 81,701 →
+316,998 → 144,256 → 144,947 → 153,203 → 301,571 ms** across the session for near-identical
+code. Those are not comparable to each other, and several causal claims were drawn from
+single runs of them.
+
+**Findings from plan structure do not depend on load and stand:** buffer counts, plan cost,
+node types, loop counts, `Gather` presence, and output parity. **Findings from end-to-end
+wall clock do not stand** until re-measured on a quiet database, repeated.
+
+Before any further optimisation work: confirm no ingest run is active, then measure each
+variant at least 3 times.
+
+## M. Partitioning — the detector already exists and its output was never acted on
+
+`ops.consensus_partition_pressure(min_rows bigint DEFAULT 100000)` names unpartitioned
+relations by share of DEFAULT. Live:
+
+| relation | rows | % of DEFAULT |
+|---|---|---|
+| **HAS_FEATURE** | **186,562,442** | **84.93** |
+| TRANSCRIBES_AS | 5,192,208 | 2.36 |
+| DERIVED_FROM | 3,836,962 | 1.75 |
+| HAS_THINK_CLASS | 3,022,618 | 1.38 |
+| ETYMOLOGICALLY_DERIVED_FROM | 2,606,533 | 1.19 |
+| HAS_ETYMOLOGY | 2,595,036 | 1.18 |
+| HAS_CLOCK | 2,531,014 | 1.15 |
+| HAS_EXAMPLE | 1,803,197 | 0.82 |
+
+The 59.2% DEFAULT skew is **one relation**, not 399 sharing a bucket. Meanwhile
+`sql/generated/seed_relation_partitions.sql.in:9` hardcodes 26 `hot` types of which **8 hold
+0 rows**, so ~80 leaves exist for ~175 rows while the largest relation in the substrate has
+none.
+
+- [ ] **NOT DONE, deliberately.** Adding `HAS_FEATURE` to the `hot` array would make the next
+      `just install` create the partition and **drain 186M rows out of DEFAULT**, taking
+      AccessExclusive locks while ingestion is running. That migration needs a quiet window
+      and an explicit decision — it is not a source edit to slip in.
+- [ ] Drop the 8 zero-row named partitions (16 leaves × 2 tables) — cheap, and narrows every
+      unpruned Append.
+
+## N. A text decomposer is writing sequence as edges
+
+Sequence is geometry in every lane; text ingestion emits trajectories and PRECEDES is read
+back from them. Measured by `source_id` over the 120 live PRECEDES attestations (all written
+2026-08-13/14): **`FrameNetDecomposer` 89**, plus two sources not in `ops.source_status()`
+(29 and 2).
+
+- [ ] Fix at the decomposer — it should emit a trajectory, not PRECEDES edges.
