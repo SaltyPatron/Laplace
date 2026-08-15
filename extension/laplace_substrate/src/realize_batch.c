@@ -401,6 +401,7 @@ pg_laplace_resolve_name_batch(PG_FUNCTION_ARGS)
     bool          lang_null = true;
     bool          need_finish = false;
     HTAB         *render_ids;
+    HTAB         *canon;
     Datum        *union_ids;
     int32         un = 0, ucap;
     ArmData       arm_name, arm_lemma;
@@ -434,6 +435,50 @@ pg_laplace_resolve_name_batch(PG_FUNCTION_ARGS)
                   render_ids, &union_ids, &un, &ucap);
     rendered = render_union(union_ids, un, "resolve_name_batch");
 
+    /* THE CANONICAL ARM. realize.resolve_name's null-context branch is
+     * COALESCE(_has_name, _synset_lemma, _canonical) -- THREE arms -- and this batch
+     * carried only the first two, so it silently returned NULL where the scalar
+     * returned a name. Found by comparing the two over 2,000 tier-2 entities: 19
+     * non-null from the scalar, 18 from the batch, differing on one id that has no
+     * render and resolves canonically to 'CONTENT'. Anyone swapping the scalar for
+     * the batch to make a sweep affordable was losing canonical names.
+     *
+     * Same query and same "first row per id" rule realize_batch uses below. */
+    canon = make_id_htab("resolve_name_batch canonical", sizeof(CanonEntry), 256);
+    {
+        Oid   one[1] = { BYTEAARRAYOID };
+        Datum args[1] = { PointerGetDatum(in_arr) };
+        int   rc;
+
+        ensure_plan(&plan_canonical, Q_CANONICAL, 1, one);
+        rc = SPI_execute_plan(plan_canonical, args, NULL, true, 0);
+        if (rc != SPI_OK_SELECT)
+            elog(ERROR, "resolve_name_batch: canonical arm failed: %s",
+                 SPI_result_code_string(rc));
+        for (uint64 r = 0; r < SPI_processed; r++)
+        {
+            HeapTuple   tup = SPI_tuptable->vals[r];
+            TupleDesc   td = SPI_tuptable->tupdesc;
+            bool        isnull;
+            Datum       in_id = SPI_getbinval(tup, td, 1, &isnull);
+            Datum       txt;
+            IdKey       ckey;
+            bool        found;
+            CanonEntry *ce;
+
+            if (isnull)
+                continue;
+            txt = SPI_getbinval(tup, td, 2, &isnull);
+            if (isnull)
+                continue;
+            id_key(&ckey, in_id, "canonical");
+            ce = (CanonEntry *) hash_search(canon, &ckey, HASH_ENTER, &found);
+            if (!found)
+                ce->text = datumCopy(txt, false, -1);
+        }
+        SPI_freetuptable(SPI_tuptable);
+    }
+
     out = (Datum *) palloc0(sizeof(Datum) * n);
     out_nulls = (bool *) palloc(sizeof(bool) * n);
     for (int i = 0; i < n; i++)
@@ -455,6 +500,21 @@ pg_laplace_resolve_name_batch(PG_FUNCTION_ARGS)
             out[i] = CStringGetTextDatum(label);
             MemoryContextSwitchTo(old);
             out_nulls[i] = false;
+        }
+        else
+        {
+            /* arm 3: canonical name text AS-IS, matching the scalar's third arm. */
+            CanonEntry *ce = (CanonEntry *) hash_search(canon, &key,
+                                                        HASH_FIND, NULL);
+
+            if (ce != NULL)
+            {
+                MemoryContext old = MemoryContextSwitchTo(caller);
+
+                out[i] = datumCopy(ce->text, false, -1);
+                MemoryContextSwitchTo(old);
+                out_nulls[i] = false;
+            }
         }
     }
 
