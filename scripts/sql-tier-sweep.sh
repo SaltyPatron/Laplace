@@ -80,9 +80,12 @@ for row in "${CALLS[@]}"; do
   else
     probe="SELECT count(*), count(*) FILTER (WHERE q.v IS NULL) FROM (SELECT (${call})::text AS v) q"
   fi
+  # TWICE, and the SECOND time is recorded. A first call is dominated by cold IO and
+  # plan construction, not by query shape: realize.resolve_name measures 90ms cold and
+  # 15.3ms warm, so a cold-only sweep reports plan+cache warmup as a defect.
   out=$("${PSQL[@]}" -v ON_ERROR_STOP=0 \
         -c "SET statement_timeout='${CAP}'; SET lock_timeout='${CAP}';" \
-        -c "\timing on" -c "$probe" 2>&1)
+        -c "\timing on" -c "$probe" -c "$probe" 2>&1)
   ms=$(sed -n 's/^Time: \([0-9.]*\) ms.*/\1/p' <<<"$out" | tail -1)
   vals=$(grep -E '^[0-9]+\|[0-9]+$' <<<"$out" | tail -1)
   err=$(grep -m1 '^ERROR:' <<<"$out" | cut -c1-60 | sed "s/'/''/g")

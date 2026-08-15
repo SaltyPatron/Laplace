@@ -382,3 +382,23 @@ the argument for fixing bottom-up rather than chasing the surfaces that feel slo
 
 308 of 381 were exercisable; the remainder need fixtures that do not exist yet (32-byte intent
 masks, shape names, chess game ids).
+
+### Correction: the first sweep measured cold
+
+Every function in the first pass was called **once**, so the number reported was a cold call —
+plan construction plus first-touch IO, not query shape. `realize.resolve_name` measures **90 ms
+cold and 15.3 ms warm**; the sweep had flagged it as over budget.
+
+The harness now calls each function twice and records the second. Re-measured, tiers 0–3:
+
+| tier | measured | > 2 s | 200 ms – 2 s (cold → warm) |
+|---|---|---|---|
+| 0 | 78 | 11 | 2 → 3 |
+| 1 | 82 | 25 | 6 → 4 |
+| 2 | 51 | 11 | 5 → **0** |
+| 3 | 50 | 17 | 4 → 4 |
+
+**The 2-second population is stable; the 200 ms–2 s band was mostly cold-start** and collapses
+from 17 to 11 across these tiers. So the real worklist is the functions that exceed two seconds
+warm — 64 across tiers 0–3 — and the earlier "129 of 308 miss the budget" overstated it by
+counting cache warmup as a defect. Measure warm before believing a budget miss.
