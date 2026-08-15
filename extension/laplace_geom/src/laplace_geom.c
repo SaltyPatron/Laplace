@@ -655,6 +655,15 @@ pg_laplace_trajectory_constituents(PG_FUNCTION_ARGS)
         if (run < 1)
             run = 1;
 
+        /* The OUT parameter is int4. Removing the 16-bit cap must not swap one
+         * silent wrap for another, so refuse rather than truncate -- a trajectory
+         * this wide is a corrupt geometry, not a workload. */
+        if (ordinal > PG_INT32_MAX)
+            ereport(ERROR,
+                    (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                     errmsg("laplace_trajectory_constituents: ordinal %ld exceeds int4",
+                            (long) ordinal)));
+
         Datum values[4];
         bool  nulls[4] = {false, false, false, false};
         values[0] = Int32GetDatum((int32) ordinal);

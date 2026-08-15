@@ -299,7 +299,9 @@ ordinal_continuity_bonus(Datum subject_entity, Datum object_entity)
     Datum  args[1];
     int    rc;
     bool   have_subj = false, have_obj = false;
-    uint16_t subj_ord = 0, obj_ord = 0;
+    /* int64, not uint16: the ordinal is DERIVED from vertex position here (see
+     * the loop), so it is no longer bounded by the packed field's width. */
+    int64  subj_ord = 0, obj_ord = 0;
     hash128_t subj_h, obj_h;
 
     ensure_ordinal_continuity_plan();
@@ -311,6 +313,21 @@ ordinal_continuity_bonus(Datum subject_entity, Datum object_entity)
     if (rc != SPI_OK_SELECT || SPI_processed == 0)
         return 0.0;
 
+    /* ORDINAL IS DERIVED FROM VERTEX POSITION, NOT READ OUT OF THE PACKED FIELD.
+     * The query above is ORDER BY (dp.path)[1], so vertices arrive in sequence
+     * and the running sum of run_length IS the ordinal -- exact for both vertex
+     * shapes (run_length is 1 on every plain trajectory, making the sum the
+     * position; it is the true source ordinal on a run-length vertex, where
+     * position deliberately does not track it).
+     *
+     * The packed copy is 16 bits and stops being able to state the position past
+     * 65,535 constituents, where the writer now stores 0 rather than a wrapped
+     * value. Reading it directly there would give both endpoints ordinal 0, hence
+     * delta 0, hence the MAXIMUM continuity bonus for any pair in a wide
+     * trajectory -- silently, since this path never errors by contract. Deriving
+     * costs nothing and removes the width from the equation entirely. */
+    int64 ordinal = 1;
+
     for (uint64 r = 0; r < SPI_processed; r++)
     {
         HeapTuple tup = SPI_tuptable->vals[r];
@@ -318,34 +335,44 @@ ordinal_continuity_bonus(Datum subject_entity, Datum object_entity)
         bool isnull[4];
         double vertex[4];
         mantissa_payload_t payload;
+        int64 run;
 
         vertex[0] = DatumGetFloat8(SPI_getbinval(tup, td, 1, &isnull[0]));
         vertex[1] = DatumGetFloat8(SPI_getbinval(tup, td, 2, &isnull[1]));
         vertex[2] = DatumGetFloat8(SPI_getbinval(tup, td, 3, &isnull[2]));
         vertex[3] = DatumGetFloat8(SPI_getbinval(tup, td, 4, &isnull[3]));
         if (isnull[0] || isnull[1] || isnull[2] || isnull[3])
+        {
+            /* Undecodable vertex: its run_length is unknown, so advance by the
+             * minimum a vertex can cover rather than desynchronising the count. */
+            ordinal += 1;
             continue;
+        }
 
         mantissa_unpack(vertex, &payload);
+        run = (payload.run_length < 1) ? 1 : (int64) payload.run_length;
+
         if (!have_obj && hash128_eq(&payload.entity_id, &obj_h))
         {
-            obj_ord = payload.ordinal;
+            obj_ord = ordinal;
             have_obj = true;
         }
         if (!have_subj && hash128_eq(&payload.entity_id, &subj_h))
         {
-            subj_ord = payload.ordinal;
+            subj_ord = ordinal;
             have_subj = true;
         }
         if (have_obj && have_subj)
             break;
+
+        ordinal += run;
     }
     /* SPI_tuptable freed automatically at the enclosing SPI_finish/next
      * SPI_execute_plan call -- this function borrows no pointers past return. */
     if (!have_obj || !have_subj)
         return 0.0;
     {
-        int delta = (int) obj_ord - (int) subj_ord;
+        int64 delta = obj_ord - subj_ord;   /* int64: ordinals are no longer 16-bit */
         if (delta < 0) delta = -delta;
         return 1.0 / (1.0 + (double) delta);
     }
