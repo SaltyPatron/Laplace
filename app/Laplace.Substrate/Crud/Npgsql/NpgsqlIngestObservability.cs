@@ -145,6 +145,19 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
             + "                     AND l.objsubid = 2 "
             + "                     AND l.objid::bigint = (hashtext(j.run_id::text)::bigint & 4294967295))",
             static _ => { });
+
+        // The file rows of a reconciled run. A file left 'running' by a kill is the one
+        // the run was mid-apply on — the single most useful fact in the ledger after a
+        // crash — so it is driven to the same terminal state as its run rather than left
+        // ambiguous. Keyed off the run's status, which the UPDATE above has just settled.
+        Execute(
+            "UPDATE laplace.ingest_file_journal f SET status = 'cancelled', ended_at = now(), "
+            + "error = 'file did not reach completion: run cancelled (cluster restart, OOM kill, "
+            + "or terminated session). Reconciled at the start of the next run.' "
+            + "WHERE f.status = 'running' "
+            + "  AND EXISTS (SELECT 1 FROM laplace.ingest_run_journal j "
+            + "               WHERE j.run_id = f.run_id AND j.status <> 'running')",
+            static _ => { }, "INGEST_FILE_JOURNAL_WRITE_FAILED");
     }
 
     public void OnIntentApplied(string sourceName, ApplyResult result) { }
@@ -328,7 +341,69 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
                 cmd.Parameters.Add(new NpgsqlParameter { Value = _evidencePersisted });
             });
 
-    private void Execute(string sql, Action<NpgsqlCommand> bind)
+    /// <summary>
+    /// Per-file ledger rows (laplace.ingest_file_journal). Same law as every other write
+    /// in this class: a journal failure logs and never aborts the ingest.
+    ///
+    /// ON CONFLICT DO UPDATE, not DO NOTHING: a file re-opened inside one run (a retry)
+    /// is the same unit, and the second attempt is the one that decides its outcome.
+    /// Leaving the first row in place would report a retried file by its failed attempt.
+    /// </summary>
+    public void OnFileStarted(string sourceName, string fileLabel, long bytes = 0)
+    {
+        if (!_active) return;
+        Execute(
+            "INSERT INTO laplace.ingest_file_journal "
+            + "(run_id, file_label, source_name, status, bytes) VALUES ($1, $2, $3, 'running', $4) "
+            + "ON CONFLICT (run_id, file_label) DO UPDATE SET "
+            + "status = 'running', started_at = now(), ended_at = NULL, error = NULL, "
+            + "bytes = EXCLUDED.bytes",
+            cmd =>
+            {
+                cmd.Parameters.Add(new NpgsqlParameter { Value = _runId, NpgsqlDbType = NpgsqlDbType.Uuid });
+                cmd.Parameters.Add(new NpgsqlParameter { Value = fileLabel });
+                cmd.Parameters.Add(new NpgsqlParameter { Value = sourceName });
+                cmd.Parameters.Add(new NpgsqlParameter { Value = bytes });
+            },
+            "INGEST_FILE_JOURNAL_WRITE_FAILED");
+    }
+
+    public void OnFileFinished(
+        string sourceName, string fileLabel, string status,
+        long records = 0, long entities = 0, long physicalities = 0, long attestations = 0,
+        string? error = null)
+    {
+        if (!_active) return;
+        // Upsert rather than UPDATE: a true-skipped file never opens, so it has no
+        // 'running' row to update, and skipped-complete is exactly the state worth
+        // recording — it is how a resumed run accounts for the prefix it did not redo.
+        Execute(
+            "INSERT INTO laplace.ingest_file_journal "
+            + "(run_id, file_label, source_name, status, ended_at, records, entities, physicalities, attestations, error) "
+            + "VALUES ($1, $2, $3, $4, now(), $5, $6, $7, $8, $9) "
+            + "ON CONFLICT (run_id, file_label) DO UPDATE SET "
+            + "status = EXCLUDED.status, ended_at = EXCLUDED.ended_at, records = EXCLUDED.records, "
+            + "entities = EXCLUDED.entities, physicalities = EXCLUDED.physicalities, "
+            + "attestations = EXCLUDED.attestations, error = EXCLUDED.error",
+            cmd =>
+            {
+                cmd.Parameters.Add(new NpgsqlParameter { Value = _runId, NpgsqlDbType = NpgsqlDbType.Uuid });
+                cmd.Parameters.Add(new NpgsqlParameter { Value = fileLabel });
+                cmd.Parameters.Add(new NpgsqlParameter { Value = sourceName });
+                cmd.Parameters.Add(new NpgsqlParameter { Value = status });
+                cmd.Parameters.Add(new NpgsqlParameter { Value = records });
+                cmd.Parameters.Add(new NpgsqlParameter { Value = entities });
+                cmd.Parameters.Add(new NpgsqlParameter { Value = physicalities });
+                cmd.Parameters.Add(new NpgsqlParameter { Value = attestations });
+                cmd.Parameters.Add(new NpgsqlParameter
+                {
+                    Value = (object?)error ?? DBNull.Value, NpgsqlDbType = NpgsqlDbType.Text
+                });
+            },
+            "INGEST_FILE_JOURNAL_WRITE_FAILED");
+    }
+
+    private void Execute(string sql, Action<NpgsqlCommand> bind, string failTag = "INGEST_RUN_JOURNAL_WRITE_FAILED")
     {
         try
         {
@@ -341,7 +416,7 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
         catch (Exception ex)
         {
             Console.Error.WriteLine(
-                $"INGEST_RUN_JOURNAL_WRITE_FAILED run={_runId} error=[{ex.GetType().Name}] {ex.Message}");
+                $"{failTag} run={_runId} error=[{ex.GetType().Name}] {ex.Message}");
         }
     }
 }
