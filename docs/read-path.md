@@ -361,3 +361,24 @@ inner `EXECUTE`s are not separately capped, so a per-iteration `SET LOCAL` cappe
 (`converse.hypernyms` ran 4.5 minutes under a 2 s cap) and a session-level `SET` killed the
 whole `CALL` instead (the sweep exited after 31 of 130). The shell form measured 65 functions in
 90 seconds where the procedure stalled twice.
+
+### The whole cascade, measured (308 functions, 2026-08-15)
+
+| tier | measured | > 2 s | 200 ms – 2 s | all-NULL |
+|---|---|---|---|---|
+| 0 | 65 | 8 | 2 | 2 |
+| 1 | 82 | **25** | 6 | 4 |
+| 2 | 51 | 11 | 5 | 1 |
+| 3 | 50 | 17 | 4 | 0 |
+| 4 | 15 | 5 | 6 | 0 |
+| 5 | 25 | 15 | 6 | 0 |
+| 6 | 14 | 11 | 2 | 0 |
+| 7 | 5 | **5 of 5** | 0 | 0 |
+| 8 | 1 | 0 | 1 | 0 |
+
+**97 of 308 exceed 2 seconds. 129 (42%) miss the 200 ms budget.** The rate worsens with depth —
+tier 7 is 5 of 5, tier 6 is 11 of 14 — which is what compounding slow leaves predict, and it is
+the argument for fixing bottom-up rather than chasing the surfaces that feel slow.
+
+308 of 381 were exercisable; the remainder need fixtures that do not exist yet (32-byte intent
+masks, shape names, chess game ids).
