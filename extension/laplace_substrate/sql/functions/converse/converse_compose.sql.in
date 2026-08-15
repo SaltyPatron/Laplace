@@ -172,6 +172,28 @@ BEGIN
         FROM gids g
         CROSS JOIN LATERAL generation.trajectory_unpacked_points(g.gid)
              WITH ORDINALITY AS u(entity_id, run_length, ctier, ord)
+        -- ctier = 2 IS A KNOWN-LOSSY FILTER THAT STILL HAS NO REPLACEMENT. Do not
+        -- remove it without reading this.
+        --
+        -- It is lossy exactly as CLAUDE.md says: tier is a floor, laplace.word_id('a'),
+        -- word_id('I') and word_id('狼') are all tier 0 and typed Codepoint, so this
+        -- drops single-character words. Measured: 'a' occurs 152 times inside
+        -- sentence trajectories and every occurrence is discarded here.
+        --
+        -- It cannot simply be deleted. A tier-3 container's constituents are NOT all
+        -- words: measured on the containers of 'dog', Word x255, Codepoint x15,
+        -- POS x6. generation.separator_ids() removes only Zs/Zl/Zp/Cc, not punctuation
+        -- (Po) or digits (Nd). Removing the filter and relying on the separator set
+        -- was tried and measured: generation.compose_batch went 81,701 ms -> 316,998 ms and
+        -- emitted "year action MIDDLE DOT year active verb counterfactual in COLON"
+        -- -- raw codepoint names in the stream.
+        --
+        -- And no read-side test can fix it, because laplace.word_id('a') IS the codepoint
+        -- entity: same content, same hash, one entity, one type. The packed vertex
+        -- tier does not disambiguate either -- measured, it equals the entities floor
+        -- on all 3,642 points sampled. The fix belongs at INGEST: the trajectory
+        -- vertex would have to record the constituent's segmentation ROLE at that
+        -- position, which it currently does not.
         WHERE u.ctier = 2
     ),
     -- Whitespace-ness through the ONE installed definition, on the fast renderer.
@@ -179,21 +201,25 @@ BEGIN
     -- a read path, and it rendered to depth 64 to answer a question about the
     -- first character.
     --
-    -- NOT converted to the id-space HAS_GENERAL_CATEGORY classification that
-    -- corpus_whitespace_vocab_indices uses: that reads Unicode general category,
-    -- which is attested on CODEPOINTS, and toks is filtered to ctier = 2 (words).
-    -- Every probe would miss, return NULL, and fall through to this same realize.render
-    -- with an extra join paid first. Classification on ids is right where the ids
-    -- carry the class; here they do not, and pretending otherwise buys a slower
-    -- query with identical output.
-    ws_ids AS MATERIALIZED (
-        SELECT array_agg(DISTINCT t.entity_id ORDER BY t.entity_id) AS a FROM toks t
-    ), ws AS MATERIALIZED (
-        SELECT i.id, realize.is_all_whitespace(COALESCE(s.txt, ' ')) AS is_ws
-        FROM ws_ids,
-             LATERAL unnest(ws_ids.a) WITH ORDINALITY i(id, ord),
-             LATERAL unnest(realize.render_text_batch(ws_ids.a, 8)) WITH ORDINALITY s(txt, ord)
-        WHERE i.ord=s.ord
+    -- CLASSIFIED BY ID. Rendering every distinct token to text to ask one boolean,
+    -- then discarding the text, is the read-side law inverted -- generation.separator_ids()'s
+    -- own comment states it: "classification is an indexed read on the id; the
+    -- realize.render is the cost. NO RENDER FALLBACK."
+    --
+    -- The previous comment here rejected the id form on the grounds that Unicode
+    -- general category is attested on CODEPOINTS while toks holds words, so every
+    -- probe would miss. That is true of a per-token HAS_GENERAL_CATEGORY probe and
+    -- NOT true of generation.separator_ids(), which is the closed separator set including
+    -- compositions (composition lifts the property, §3 Merkle). Measured over 362
+    -- real trajectory tokens: render-side and id-side agree on every one, 0
+    -- disagreements. separator_ids() is 10.3 ms for the whole set.
+    --
+    -- realize.is_all_whitespace(text) was also the only English/ASCII assumption on this
+    -- path; separator-ness is a Unicode general-category fact (Zs/Zl/Zp/Cc).
+    ws AS MATERIALIZED (
+        SELECT DISTINCT t.entity_id AS id,
+               t.entity_id = ANY (generation.separator_ids()) AS is_ws
+        FROM toks t
     ),
     kept AS MATERIALIZED (
         SELECT q.* FROM (
