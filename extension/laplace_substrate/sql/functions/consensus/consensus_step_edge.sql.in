@@ -28,7 +28,12 @@ CREATE OR REPLACE FUNCTION consensus.step_edge(
     p_from bytea,
     p_to   bytea)
     RETURNS TABLE(type_id bytea, subject_id bytea, rating bigint, rd bigint, witness_count bigint)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+    -- STRUCTURAL bound, not an estimate: the body ends in LIMIT 1, so this
+    -- returns at most one row. Undeclared, Postgres assumes 1000 -- a 1000x
+    -- overestimate on the inner side of any join, which is what makes scanning
+    -- look cheaper than probing.
+    ROWS 1 AS $$
     SELECT e.type_id, e.subject_id, e.rating, e.rd, e.witness_count
     FROM (
         (SELECT c.type_id, c.subject_id, c.rating, c.rd, c.witness_count
