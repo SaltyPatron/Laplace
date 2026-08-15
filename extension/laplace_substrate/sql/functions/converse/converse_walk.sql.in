@@ -224,7 +224,17 @@ BEGIN
         -- to the source's own belief where they are not -- absence of a direct edge is
         -- not evidence of worthlessness, and dropping to zero there would be an
         -- operator-invented floor.
-        SELECT k.gid, k.is_core, GREATEST(COALESCE(q.mu, k.wt), 0) AS wt, k.entity_id AS id, k.rn
+        -- NO FALLBACK. A token the topic has no attested relation to weighs zero,
+        -- because that is what the substrate says about it: absence is provable and
+        -- first-class (§8), not a gap to be filled with the source's prior. Filling it
+        -- was manufacturing a score no witness deposited, and it is also what made the
+        -- steer unable to matter -- every token arrived pre-scored whether or not any
+        -- testimony bound it to this prompt.
+        --
+        -- A stream that goes quiet under this is ABSTAINING, which is the lawful
+        -- answer here ("Abstain = zero rows, never fabricate"), not a failure to be
+        -- engineered around by widening the neighbourhood until something scores.
+        SELECT k.gid, k.is_core, GREATEST(COALESCE(q.mu, 0), 0) AS wt, k.entity_id AS id, k.rn
         FROM kept k LEFT JOIN qk q ON q.id = k.entity_id
         UNION ALL
         SELECT DISTINCT k.gid, k.is_core, 0::bigint, SENT, 2147483647::bigint
