@@ -73,41 +73,54 @@ SELECT f.fq, f.proretset,
 FROM fns f JOIN depth d ON d.fq = f.fq
 WHERE d.tier = :tier;
 
-CREATE TEMP TABLE result(fq text, ms numeric, rows_out bigint, err text);
+-- A REAL table, not TEMP: the sweep commits after every function so a second
+-- session can watch progress, and so catalog locks are released between calls
+-- instead of being held for the whole run (an uncommitted DO block blocks
+-- ALTER EXTENSION for as long as it runs).
+CREATE TABLE IF NOT EXISTS laplace.sql_tier_sweep(
+    fq text, tier int, ms numeric, rows_out bigint, all_null boolean, err text,
+    measured_at timestamptz DEFAULT now());
+DELETE FROM laplace.sql_tier_sweep WHERE tier = :tier;
 
-DO $$
-DECLARE r record; t0 timestamptz; n bigint; call text;
+CREATE OR REPLACE PROCEDURE laplace.sql_tier_sweep_run(p_tier int, p_cap text DEFAULT '2s')
+LANGUAGE plpgsql AS $proc$
+DECLARE r record; t0 timestamptz; n bigint; nn bigint; call text;
 BEGIN
   FOR r IN SELECT DISTINCT ON (fq) fq, proretset, arglist FROM calls ORDER BY fq LOOP
     IF r.arglist LIKE '%<<unfixtured:%' THEN
-      INSERT INTO result VALUES (r.fq, NULL, NULL, 'skipped: '||r.arglist);
-      CONTINUE;
+      INSERT INTO laplace.sql_tier_sweep(fq,tier,err)
+        VALUES (r.fq, p_tier, 'skipped: '||r.arglist);
+      COMMIT; CONTINUE;
     END IF;
-    call := r.fq||'('||COALESCE(r.arglist, '')||')';
+    call := r.fq||'('||COALESCE(r.arglist,'')||')';
     BEGIN
-      SET LOCAL statement_timeout = '5s';
+      EXECUTE format('SET LOCAL statement_timeout = %L', p_cap);
       t0 := clock_timestamp();
       IF r.proretset THEN
-        EXECUTE format('SELECT count(*) FROM %s q', call) INTO n;
+        -- rows_out AND a null-ness probe: a function that returns rows of all
+        -- NULLs is fast and answers nothing, which a timing-only sweep passes.
+        EXECUTE format('SELECT count(*), count(*) FILTER (WHERE q IS NOT DISTINCT FROM NULL) FROM %s q', call)
+          INTO n, nn;
       ELSE
-        -- The cast is what forces evaluation.
-        EXECUTE format('SELECT count(*) FROM (SELECT (%s)::text AS v) q WHERE q.v IS NOT NULL', call)
-          INTO n;
+        EXECUTE format('SELECT count(*), count(*) FILTER (WHERE q.v IS NULL) FROM (SELECT (%s)::text AS v) q', call)
+          INTO n, nn;
       END IF;
-      INSERT INTO result
-        VALUES (r.fq, EXTRACT(epoch FROM clock_timestamp() - t0) * 1000, n, NULL);
+      INSERT INTO laplace.sql_tier_sweep(fq,tier,ms,rows_out,all_null)
+        VALUES (r.fq, p_tier, EXTRACT(epoch FROM clock_timestamp()-t0)*1000, n, (n > 0 AND nn = n));
     EXCEPTION WHEN OTHERS THEN
-      INSERT INTO result
-        VALUES (r.fq, EXTRACT(epoch FROM clock_timestamp() - t0) * 1000, NULL, left(SQLERRM, 60));
+      INSERT INTO laplace.sql_tier_sweep(fq,tier,ms,err)
+        VALUES (r.fq, p_tier, EXTRACT(epoch FROM clock_timestamp()-t0)*1000, left(SQLERRM,60));
     END;
+    COMMIT;
   END LOOP;
-END $$;
+END $proc$;
 
-SELECT fq,
-       round(ms, 1) AS ms,
-       rows_out,
+CALL laplace.sql_tier_sweep_run(:tier);
+
+SELECT fq, round(ms,1) AS ms, rows_out,
        CASE WHEN err IS NOT NULL THEN err
+            WHEN all_null THEN 'ALL NULL -- fast and answers nothing'
             WHEN ms > 200 THEN 'OVER BUDGET'
             ELSE 'ok' END AS verdict
-FROM result
-ORDER BY (err IS NOT NULL AND err NOT LIKE 'skipped:%') DESC, ms DESC NULLS LAST;
+FROM laplace.sql_tier_sweep WHERE tier = :tier
+ORDER BY (err IS NOT NULL AND err NOT LIKE 'skipped:%') DESC, all_null DESC NULLS LAST, ms DESC NULLS LAST;
