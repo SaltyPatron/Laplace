@@ -152,8 +152,16 @@ same change.
     analyzer with a recorded recipe. Same arithmetic, different position in the pipeline.
     Do not cite §7 at the foundry.
 - **§15, the recurring failure.** An operation gets a canonical implementation, the caller that
-  should use it is never rewired, both survive, and they drift. Live: 32 of 33 decomposers
-  bypass `IngestComposePipeline`.
+  should use it is never rewired, both survive, and they drift.
+  - **The live instance, re-measured 2026-08-16, against the right symbol.** The prior
+    revision read "32 of 33 decomposers bypass `IngestComposePipeline`" and sent sessions
+    rewiring callers onto a helper that is not theirs: `DecomposerBatch.cs:6-9` scopes it to
+    *"non-orchestrator code (e.g. ModelTokenEdgeETL)"* and says *"Multi-phase sources use
+    nested `ComposeDecomposerPhase<T>` types instead."* Counting decomposers that do not call
+    it measures nothing. Counted: `IngestComposePipeline` **1** user (ModelTokenEdgeETL, which
+    is what it is for), `ComposeDecomposer` **15**, `ComposeDecomposerPhase<T>` **5**, files
+    referencing `IDecomposer` **34**. The drift is **15 of ~34 on the canonical base**
+    (`Decomposer.cs:412`), and that is the number to move.
   - Corrected 2026-08-14, measured: `astar.cpp` does **not** have zero callers.
     `astar_path.c:280-283` passes `astar_geo_heuristic` to `astar_open` gated on `use_geometry`;
     three functions are installed (`converse.astar_path`, `converse.astar_path_raw`,
@@ -174,8 +182,19 @@ same change.
   only when the caller supplies `type_id`; everything else pays a 216-way Append.
   **`entities` keyed on `tier` is keyed on a floor** — the value this file records as
   container-relative, not a property of the entity.
-- **The named partition set is a hardcoded guess, and `ops.consensus_partition_pressure()`
-  already measures how wrong it is.** Run that function before theorising about partitions —
+- **The named partition set is NOT a hardcoded guess, and the dead partitions are already
+  gone — corrected 2026-08-16 from the file itself.** The roster is derived:
+  `seed_relation_partitions.sql.in:15` — *"The roster is exactly the manifest's `hot = true`
+  relations."* The seven zero-row types this file listed as evidence of a stale guess
+  (ATTENDS, COMPLETES_TO, CONTAINS, CONTINUES_TO, HAS_EXTERNAL_ID, OV_RELATES,
+  TOKEN_MAPS_TO) were **dropped 2026-08-16 by clearing the flag in the manifest**, verified
+  by `count(*)` rather than `reltuples`, retiring 112 leaves (7 x 8 x 2 tables). Per that
+  comment, **a fresh install now builds 152 consensus leaves, not 216.** `grep -c "hot *=
+  *true" engine/manifest/relation_types.toml` reads **27**; 27 named x 8 hash does not equal
+  152, so the live leaf count needs `ops.partition_pressure()` against the running database
+  rather than arithmetic here. Every "216" below predates this change.
+  `ops.consensus_partition_pressure()` still measures DEFAULT share — run it before
+  theorising about partitions —
   it exists, it takes `min_rows`, and it names the unpartitioned relations by share of
   DEFAULT. Live 2026-08-15:
 
@@ -190,15 +209,17 @@ same change.
   | HAS_ETYMOLOGY | 2,595,036 | 1.18 |
   | HAS_EXAMPLE | 1,803,197 | 0.82 |
 
-  The DEFAULT skew is **one relation**, not 399 sharing a bucket. Meanwhile
-  `sql/generated/seed_relation_partitions.sql.in:9` hardcodes 26 `hot` types — **8 of which
-  hold 0 rows** (ATTENDS, COMPLETES_TO, CONTAINS, CONTINUES_TO, HAS_EXTERNAL_ID, OV_RELATES,
-  TOKEN_MAPS_TO, and APPEARS_IN at 60 / PRECEDES at 115) — so ~80 leaves exist for ~175 rows
-  while the largest relation in the substrate has none. The adoption machinery in that file
-  already drains DEFAULT into new partitions; the list is what is stale.
+  The DEFAULT skew is **one relation**, not 399 sharing a bucket — HAS_FEATURE at 84.93%,
+  the largest relation in the substrate, still has no named partition. That is the live
+  item. The seven zero-row partitions that used to sit beside it in this paragraph were
+  retired 2026-08-16 (see above); APPEARS_IN at 60 and PRECEDES at 115 are kept
+  deliberately, because both are read from the geometry rather than from rows. The adoption
+  machinery in that file drains DEFAULT into new partitions and reads its roster from the
+  manifest, so promoting HAS_FEATURE is a manifest flag, not a code change.
 - **An empty relation partition is not a dead relation.** PRECEDES and APPEARS_IN are
   **read from the geometry**, which is why their tables are near-empty:
-  - order comes from the trajectory — `word_order.sql.in:2` ("text emits no PRECEDES
+  - order comes from the trajectory — `generation/word_order.sql.in:2` (moved from
+    `corpus/`; the bare filename in earlier revisions no longer resolves) ("text emits no PRECEDES
     attestations; this is the calculated..."), `word_adjacency.sql.in:12` ("Order is fetched
     from the TRAJECTORY, never from an edge"), `pos_class_transitions.sql.in:71` and
     `usage_overlap.sql.in:9` ("the same knowledge PRECEDES materialised as"),
@@ -288,8 +309,11 @@ same change.
 - **Tier is a floor, not a set level.** `ctier = 2` is not "word": measured live,
   `word_id('a')`, `word_id('I')` and `word_id('狼')` are all **tier 0**, while `word_id('hot')`
   is tier 2. Every `ctier = 2` filter silently deletes single-grapheme words and every
-  single-grapheme CJK word. Live sites: `converse_compose.sql.in:183`,
-  `converse_tiered.sql.in:150`, `senses_with_context.sql.in:95`,
+  single-grapheme CJK word. Live sites, re-verified 2026-08-16 (two line numbers had
+  decayed and one site was missing): `converse_compose.sql.in:203` (its own comment at :181
+  calls it "A KNOWN-LOSSY FILTER THAT STILL HAS NO REPLACEMENT"),
+  **`converse_walk.sql.in:174`**, `converse_tiered.sql.in:150`,
+  `senses_with_context.sql.in:102`,
   `explore_anchor_neighbors.sql.in:89`, `variant_synth.c:266`. Select by TYPE, or by what a
   thing is not (a separator), never by tier.
 - **Separators are not constituents of the sequence they delimit.** Adjacency reads must
@@ -320,10 +344,16 @@ same change.
     `-DCMAKE_C_COMPILER=icx -DCMAKE_CXX_COMPILER=icx`; oneAPI is required anyway for MKL and
     TBB. **The toolchain is part of the identity contract for geometry.** Read the claim as
     "byte-identical across OSes on the pinned toolchain," not "across compilers."
-  - **`cmake/toolchains/gcc-deterministic.cmake` is referenced by nothing** — no `.sh`,
-    `.cmd`, `.cmake`, `.md`, or Justfile — and is a trap rather than an alternative: correct
-    flags, authoritative filename, silently different coordinates. Delete it, or make it
-    correctly-rounded. Correct rounding is the only fix that is a *property* rather than a
+  - **`cmake/toolchains/gcc-deterministic.cmake` IS referenced — do not delete it.** Measured
+    2026-08-16: `external/CMakeLists.txt:27` names it, and
+    `app/Laplace.Substrate.Tests/Abstractions/TypeIdLawTests.cs:131` asserts on it. The prior
+    revision of this line claimed "referenced by nothing — no `.sh`, `.cmd`, `.cmake`, `.md`,
+    or Justfile" and prescribed deletion; that absence claim was written without running the
+    search, and following it breaks the build. It stands as a live example of §1.3 against
+    this file's own text.
+    The substantive half survives: correct flags, authoritative filename, silently different
+    coordinates from the pinned icx/libimf path. The fix is to make it correctly-rounded, not
+    to remove it. Correct rounding is the only fix that is a *property* rather than a
     deployment constraint, because the correctly-rounded result is unique and therefore
     identical on every conforming implementation by definition.
 - **No arbitrary dials.** Bound by construction (ownership, lifetime), not tuned constants. Any
@@ -430,7 +460,8 @@ Measured 2026-08-15, 875 documents / 67.9 MB / 67,899,577 codepoints, three runs
 | tier-tree nodes/s | **4,555,400** (166,383,573 nodes built) |
 
 Read that as a **floor**: single-threaded, on a box with 12 physical cores and another agent
-working, and `content_tree_build` is lock-free and per-call (`Decomposer.cs:265`) so it fans
+working, and `content_tree_build` is lock-free and per-call (`ContentIngestAdapter.cs:41`;
+the `Decomposer.cs:265` this file used to cite holds no such symbol) so it fans
 out. The aggregate figure is deliberately not stated here — nobody has measured it, and
 multiplying by a core count is how the original number became folklore.
 

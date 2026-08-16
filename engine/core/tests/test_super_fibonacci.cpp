@@ -187,6 +187,55 @@ TEST(LaplaceCoreSuperFibonacci, UnitNormHoldsToFourUlpAcrossTheCodespace) {
         << MEASURED_WORST_ULP;
 }
 
+/* The bounded form's radius is (i+0.5)/n, so an address is only stable while the
+ * population never grows. This asserts that the bounded form does move and the
+ * open form cannot -- the losing condition for the prefix-stability claim. */
+TEST(LaplaceCoreSuperFibonacci, OpenPlacementIsPrefixStableWhereBoundedIsNot) {
+    double a[4], b[4];
+    super_fibonacci_point(1000, 7, a);
+    super_fibonacci_point(2000, 7, b);
+    EXPECT_NE(a[0], b[0]) << "bounded placement is population-relative by construction";
+
+    double c[4], d[4];
+    super_fibonacci_point_open(7, c);
+    super_fibonacci_point_open(7, d);
+    for (int k = 0; k < 4; ++k) EXPECT_EQ(c[k], d[k]) << "component " << k;
+}
+
+/* Injectivity is carried by the radial parameter alone: out[0]^2+out[1]^2 is the
+ * radical inverse of i, and distinct i give distinct inverses. A collision here
+ * would mean two entities share an address. */
+TEST(LaplaceCoreSuperFibonacci, OpenPlacementIsInjectiveAndOnTheGlome) {
+    constexpr size_t N = 1u << 20;
+    constexpr uint64_t MEASURED_WORST_ULP = 4;
+
+    std::vector<uint64_t> radial;
+    radial.reserve(N);
+    uint64_t worst = 0;
+    size_t   worst_i = 0;
+
+    for (size_t i = 0; i < N; ++i) {
+        double p[4];
+        super_fibonacci_point_open(i, p);
+
+        const double t = p[0]*p[0] + p[1]*p[1];
+        uint64_t tb;
+        std::memcpy(&tb, &t, sizeof(tb));
+        radial.push_back(tb);
+
+        const double n2 = p[0]*p[0] + p[1]*p[1] + p[2]*p[2] + p[3]*p[3];
+        const uint64_t u = ulps_from_one(n2);
+        if (u > worst) { worst = u; worst_i = i; }
+    }
+
+    std::sort(radial.begin(), radial.end());
+    EXPECT_EQ(std::adjacent_find(radial.begin(), radial.end()), radial.end())
+        << "two indices share a radial parameter -- placement is not injective";
+
+    EXPECT_LE(worst, MEASURED_WORST_ULP)
+        << "open placement " << worst_i << " is " << worst << " ULP off the glome";
+}
+
 TEST(LaplaceCoreSuperFibonacci, HandlesUnicodeCodepointScale) {
     constexpr size_t UNICODE_N = 1114112;
     std::vector<double> q(UNICODE_N * 4);

@@ -107,8 +107,22 @@ jobs:
       # LAPLACE_INDEX_CYCLE(+DEFER) exported so the ladder COPYs into index-free heaps
       # and no rung rebuilds mid-campaign — the terminal step rebuilds once. Gated on a
       # genuine fresh build (force); an incremental re-dispatch keeps its indexes online.
+      # `force` is not "fresh". force means "ignore completion markers", and a
+      # dropped-and-recreated database has none to ignore -- so the genuinely fresh
+      # build, the only case the index cycle exists for, was taking the slow path
+      # while a redundant re-dispatch over a populated DB took the fast one.
+      # --fresh-check exits 0 only when NOT ONE foundation layer is complete.
+      - name: Detect a genuinely fresh build
+        id: fresh
+        run: |
+          if bash scripts/ensure-foundation.sh --fresh-check; then
+            echo "fresh=true"  >> "$GITHUB_OUTPUT"
+          else
+            echo "fresh=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Cycle indexes — drop secondaries once (fresh build only)
-        if: ${{ inputs.force && inputs.index_cycle }}
+        if: ${{ inputs.index_cycle && (inputs.force || steps.fresh.outputs.fresh == 'true') }}
         run: |
           echo "fresh build — dropping plain secondary indexes for an index-free bulk load"
           echo "LAPLACE_INDEX_CYCLE=1"       >> "$GITHUB_ENV"
