@@ -396,7 +396,32 @@ factors pass alone deposited **23× that**, and contributed 775 attestations.
 
 ## Order of work
 
-1. **Decomposition** (#1014). Blocks everything and is actively corrupting tier 2.
+1. ~~**Decomposition** (#1014).~~ **RE-SCOPED 2026-08-16 — this is Phase 5, not a
+   separate first stage.** Decomposition is correct. Verified at HEAD:
+   `LlamaTokenizerParser.Canonicalize:257-261` strips `▁`/`Ġ`, `:262-268` maps `##`
+   to a continuation role, `:233-239` decodes `<0xNN>`; `▁cat` and `cat` canonicalize
+   to identical bytes. The 6,141 tier-2 fragments arrive through the *successful*
+   path: `StageVocabToken:302-306` → `TextDecomposer.Run` → `TextEntityBuilder.cs:74-75`,
+   which writes every tree node as an entity at the tier the native decomposer
+   assigned, and `undert` segments under UAX #29 exactly as `understand` does. **A BPE
+   fragment is lexically indistinguishable from a word**, so no decomposer change
+   fixes it.
+
+   What is actually owed is Phase 2's *"emit usages, not nodes"*, which is an
+   **admission** decision — Phase 5 below — and it has nowhere to live today:
+   decomposers may not probe (Rule #8, pure content→`SubstrateChange`); the spine's
+   probe is contractually present→skip / novel→write and is hardened against
+   declining (`NpgsqlWorkingSetApply.cs:102-104` — *"a false positive would treat a
+   genuinely novel row as present and DROP it"*), inside the subsystem
+   `.scratchpad/38` §12 marks *"do not touch"*; and attestation-only is unavailable
+   because attestation presence is always verified (`:37-38`), so `TOKEN_MAPS_TO`
+   cannot reference an entity the change did not also supply.
+
+   The fork — spine-side admission policy, exposing `ContentLadderLedger` as a
+   decomposer-side present-set, or a two-pass stage-then-`evict_source` — is recorded
+   on #1014 and is a decision about which law bends, not a coding task. Acceptance is
+   already measured: TinyLlama 26,622 resolved / **8,603** minted; the 8,603 is what
+   admission must decline.
 2. **Ingest the five curated sources** that have decomposers and no rows. Makes
    model votes adjudicable and shrinks what models can add.
 3. **Restore magnitude→Glicko** (#1015). Two functions, recoverable.
