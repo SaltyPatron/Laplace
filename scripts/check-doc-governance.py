@@ -35,7 +35,13 @@ STATUS_PATTERNS = {
 }
 
 DESIGN_DRIFT_PATTERNS = {
-    "dated design observation": re.compile(r"\b20\d\d-\d\d-\d\d\b"),
+    # A date is a dated OBSERVATION only when it stands as a token. Inside a longer
+    # identifier it is a literal a reader must copy verbatim -- API version headers
+    # ("anthropic-beta: oauth-2025-04-20"), image tags, filenames -- and rewording it
+    # would break the document's accuracy rather than its governance. Requiring the
+    # date not to be preceded by an identifier character keeps every real annotation
+    # ("RE-SCOPED 2026-08-16", "the 2026-08-13 shell") and drops that class.
+    "dated design observation": re.compile(r"(?<![A-Za-z0-9_-])20\d\d-\d\d-\d\d\b"),
     "status section": re.compile(
         r"^#{1,6}\s+.*\b(?:status|known gaps|todo|what landed)\b", re.I | re.M
     ),
