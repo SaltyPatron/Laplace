@@ -100,6 +100,17 @@ public static class MeasurementLane
         // pool. Sample input_units_done, wait, sample again: movement means live, full stop,
         // whatever the run's binary vintage or lock state. This is strictly stronger than the
         // beacon — it also excludes the corpse the beacon was invented to detect.
+        // 1500 ms WAS TOO SHORT, and the counter is the wrong clock. MEASURED 2026-08-16
+        // against a live ConceptNet seed: input_units_done sat frozen at 1,430,350 for
+        // 16 SECONDS while 12 backends ran consensus.upsert / COPY laplace.* continuously.
+        // ProgressInterval is a 5 s rate-limit FLOOR on journal writes, not a cadence --
+        // the decomposer reports in batch-sized jumps, so any short window lands inside
+        // one and reads a live ingest as idle. That is how a "not advancing" verdict let a
+        // measurement run over a writing substrate.
+        //
+        // So liveness is EITHER signal: a counter that moved, OR a backend actively
+        // executing ingest-shaped work. The second is continuous where the first is
+        // sampled, and neither can be produced by a corpse.
         const int SettleMs = 1500;
         string Snapshot() =>
             "SELECT coalesce(string_agg(j.run_id::text || '|' || j.source_name || '|' "
@@ -126,6 +137,25 @@ public static class MeasurementLane
         {
             a = await ReadAsync().ConfigureAwait(false);
             if (a.Count == 0) return;                      // no 'running' row at all: quiet
+
+            // Continuous evidence first: if writers are executing right now, no amount of
+            // counter-watching is needed and none would be reliable.
+            await using (var busy = conn.CreateCommand())
+            {
+                busy.CommandText =
+                    "SELECT count(*) FROM pg_stat_activity "
+                    + "WHERE datname = current_database() AND state = 'active' "
+                    + "  AND pid <> pg_backend_pid() "
+                    + "  AND query ~* 'consensus\\.upsert|COPY laplace\\.|highway_mask_deposit"
+                    + "|attestations_exist|physicalities_exist'";
+                var n = Convert.ToInt64(await busy.ExecuteScalarAsync(ct).ConfigureAwait(false) ?? 0L);
+                if (n > 0)
+                    throw new InvalidOperationException(
+                        $"measurement refused: {n} backend(s) executing ingest work right now, and "
+                        + string.Join(", ", a.Values.Select(v => $"{v.src} ({v.done}/{v.total})"))
+                        + " is journalled running. Measuring across a live write produces numbers "
+                        + "that are not measurements of the code.");
+            }
             await Task.Delay(SettleMs, ct).ConfigureAwait(false);
             b = await ReadAsync().ConfigureAwait(false);
         }
