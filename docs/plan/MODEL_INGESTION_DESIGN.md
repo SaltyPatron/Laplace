@@ -396,7 +396,7 @@ factors pass alone deposited **23× that**, and contributed 775 attestations.
 
 ## Order of work
 
-1. ~~**Decomposition** (#1014).~~ **RE-SCOPED 2026-08-16 — this is Phase 5, not a
+1. ~~**Decomposition** (#1014).~~ **RE-SCOPED — this is Phase 5, not a
    separate first stage.** Decomposition is correct. Verified at HEAD:
    `LlamaTokenizerParser.Canonicalize:257-261` strips `▁`/`Ġ`, `:262-268` maps `##`
    to a continuation role, `:233-239` decodes `<0xNN>`; `▁cat` and `cat` canonicalize
@@ -427,7 +427,7 @@ factors pass alone deposited **23× that**, and contributed 775 attestations.
 3. **Restore magnitude→Glicko** (#1015). Two functions, recoverable.
 4. **Canonicalization.** New work; permutation first, rotation is the open problem.
 5. **Streaming contraction emitter**, replacing `EmitFactorTrajectories`.
-6. ~~**Wire the traversal engine.**~~ **RETRACTED 2026-08-16 — the premise was
+6. ~~**Wire the traversal engine.**~~ **RETRACTED — the premise was
    false.** This item read *"`astar.cpp` has zero callers and
    `laplace_walk_edge_weight` is unused as a path cost, so the coherence half —
    truth is cheap to traverse, falsehood dead-ends — cannot currently be computed
@@ -444,8 +444,8 @@ factors pass alone deposited **23× that**, and contributed 775 attestations.
      admissible heuristic closure at `:170-186` (`astar_geo_heuristic`).
 
    Source: `MODEL_LANE_AUDIT_2026-08-11.md` §6, which additionally asserted that
-   `generate_walk.c` and `astar_path.c` "neither file exists." Both were added
-   2026-06-05 and 2026-06-06 — two months before that audit — and running §6's own
+   `generate_walk.c` and `astar_path.c` "neither file exists." Both were added two
+   months before that audit — git holds the commits — and running §6's own
    published reproduction grep returns them in its first eight lines. The command
    was printed as a receipt, not executed.
 
