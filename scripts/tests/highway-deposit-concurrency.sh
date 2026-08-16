@@ -47,6 +47,9 @@ ENTITIES_PER_CHUNK="${LAPLACE_DEPOSIT_CHUNK:-500}"
 # The relation whose bit is deposited. Must be one the target entities do NOT already
 # carry, or every UPDATE is filtered and the test measures nothing.
 DEP_TYPE="${LAPLACE_DEPOSIT_TYPE:-IS_A}"
+# The deposit implementation under test. Swappable so a candidate can be benched
+# against the installed one on identical work before anyone proposes replacing it.
+DEP_FN="${LAPLACE_DEPOSIT_FN:-consensus.highway_mask_deposit}"
 
 PSQL=(psql -h "${PGHOST:-/var/run/postgresql}" -U "${PGUSER:-laplace_admin}" -d "$DB" -v ON_ERROR_STOP=1 -qAt)
 
@@ -69,7 +72,7 @@ fi
                   WHERE n.nspname='consensus' AND p.proname='highway_mask_deposit';" | grep -q 1 || {
   echo "::error::consensus.highway_mask_deposit not installed in '$DB'" >&2; exit 1; }
 
-echo "database=$DB workers=$WORKERS chunks=$CHUNKS overlap=${OVERLAP}% entities/chunk=$ENTITIES_PER_CHUNK"
+echo "database=$DB fn=$DEP_FN workers=$WORKERS chunks=$CHUNKS overlap=${OVERLAP}% entities/chunk=$ENTITIES_PER_CHUNK"
 
 # A fixed pool of real entity ids. SHARED holds the overlap; each worker also draws
 # private ids so the sets are not identical (identical sets serialize trivially and never
@@ -118,7 +121,7 @@ for w in $(seq 1 "$WORKERS"); do
             OR n BETWEEN $ENTITIES_PER_CHUNK * ($w - 1) + 1 AND $ENTITIES_PER_CHUNK * $w
          ORDER BY random() LIMIT $ENTITIES_PER_CHUNK
       )
-      SELECT consensus.highway_mask_deposit(
+      SELECT $DEP_FN(
                array_agg(id),
                array_agg(laplace.relation_type_id('$DEP_TYPE')))
       FROM picked;
