@@ -166,25 +166,12 @@ CEILINGS = {
     #                                   api() is an unfiltered pg_proc scan (#989), so
     #                                   "no textual caller" cannot prove unused while
     #                                   any MCP op call reaches them. Not provably dead.
-    # g4 15 -> 16 (2026-08-16), THIRD EXCEPTION, taken visibly for the same reason the
-    # first two were: this ceiling exists to "make an allowlist increase visible in
-    # executable policy rather than hiding it in generated data".
-    #
-    # consensus.glicko2_logit arrived on main with 4f97abb2 and has ZERO callers in SQL,
-    # extension C, or production C# — the gate is right. It is also uncalled ON PURPOSE.
-    # Its own file installs it as the REJECTED form and says so at the definition of the
-    # one that won: "THE ONE USED BY RANKED SURFACES, and the reason glicko2_logit above
-    # is not." It is the derivation that licenses consensus.belief_logit — g(phi)
-    # MULTIPLIES uncertainty by a factor in (0,1] while eff_mu SUBTRACTS 2*rd without
-    # bound, and the file measures them disagreeing on the same pair (rating 2000/rd 100
-    # -> eff_mu 1800, logit 2.7434; rating 2100/rd 200 -> eff_mu 1700, logit 2.9159,
-    # opposite orders). Deleting it would delete the argument for why the installed
-    # weight is the correct one.
-    #
-    # Recorded rather than removed because removal is an authoring decision on a
-    # three-commit-old design, not a gate cleanup. It leaves by being called or by its
-    # author dropping the CREATE and keeping the derivation as prose.
-    "g4_dead_canonical": 16,
+    # g4 stayed 15. A 2026-08-16 exception raised it to 16 for consensus.glicko2_logit,
+    # which landed with 4f97abb2 carrying zero callers and was uncalled on purpose — its
+    # own file installs it as the rejected form beside the winner it derives. main has
+    # since given it a caller, so the exception is obsolete and is removed rather than
+    # left standing: a recorded exception that outlives its cause is just a hole.
+    "g4_dead_canonical": 15,
     # Measured 2026-08-05, landing with its violations enumerated per W6's trap
     # note ("a gate that goes red on merge-day teaches people to ignore it").
     # 29 occurrences across 10 sites, all pre-existing: model_factor (6 names),
