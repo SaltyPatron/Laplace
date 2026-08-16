@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Laplace.Agents</RootNamespace>
+    <AssemblyName>Laplace.Agents</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Laplace.Agents.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Laplace.Core\Laplace.Core.csproj" />
+  </ItemGroup>
+
+</Project>
