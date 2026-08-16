@@ -134,6 +134,21 @@ case "$source" in
             echo ">>> stage $src — done in $((SECONDS - t0))s"
         done
         ;;
+    chain)
+        # ONE process for N sources. `ingest chain` (IngestCommands.cs:181) loads the
+        # codepoint and highway perfcaches once, then dispatches each spec in-process
+        # through the same IngestDispatchTable every other path uses, stopping on the
+        # first non-zero rc. Every other branch here pays one CLI startup, one perfcache
+        # map and one native runtime init PER SOURCE — the tax scripts/win/seed-chain.cmd
+        # was written to avoid ("seed-step.cmd pays those 12x") and which no Linux caller
+        # had. Specs are the CLI's own form: "<source [path] [flags]>", quoted when they
+        # carry a path.
+        build_cli
+        shift
+        [[ $# -gt 0 ]] || { echo "Usage: $0 chain \"<source [path]>\" ..." >&2; exit 2; }
+        source="chain"
+        ingest chain "$@"
+        ;;
     safetensors|model)
         [[ -n "$path" ]] || { echo "Usage: $0 safetensors <snapshot-dir>" >&2; exit 2; }
         build_cli
