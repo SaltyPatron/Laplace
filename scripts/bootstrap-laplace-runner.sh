@@ -962,8 +962,8 @@ verify_pg_nofile() {
     pid=$(systemctl show -p MainPID --value "$LAPLACE_PG_SERVICE" 2>/dev/null)
     if [ -z "$pid" ] || [ "$pid" = "0" ] || [ ! -r "/proc/$pid/limits" ]; then
         red "✗ cannot read /proc/\$MainPID/limits for $LAPLACE_PG_SERVICE — fd ceiling UNVERIFIED"
-        red "  its one caller is \`verify_pg_nofile || return 1\` (line 943): a fatal gate. Returning"
-        red "  success here let fd tuning proceed unchecked in exactly the case verification failed."
+        red "  its only caller treats this as a fatal gate. Returning success here let fd"
+        red "  tuning proceed unchecked in exactly the case verification failed."
         return 1
     fi
     soft=$(awk '/Max open files/ {print $4}' "/proc/$pid/limits" 2>/dev/null)

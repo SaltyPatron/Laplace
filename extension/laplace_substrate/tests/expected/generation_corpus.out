@@ -192,7 +192,6 @@ BEGIN
     -- gap: a plpgsql body is only parsed at first EXECUTE, so a call is the only thing that
     -- proves it compiles. Asserted on shape, not on membership -- the indices depend on which
     -- codepoints this fixture happens to stage.
-    PERFORM generation.corpus_whitespace_vocab_indices(ARRAY[w_capital, w_of]);
     IF EXISTS (
         SELECT 1 FROM generation.corpus_whitespace_vocab_indices(ARRAY[w_capital, w_of]) i
         WHERE i.vocab_idx IS NULL OR i.vocab_idx < 1 OR i.vocab_idx > 2) THEN

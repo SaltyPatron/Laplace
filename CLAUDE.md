@@ -65,8 +65,8 @@ Delivery = implemented + tested + gated + **landed** + verified against the live
 same change.
 
 - A compile, a passing test, a clean diff, a working-tree change, and a filed issue are each a
-  step, and the report names them as that step. 251 open issues is the accumulated cost of
-  reporting specification as delivery.
+  step, and the report names them as that step. The open-issue backlog is the accumulated
+  cost of reporting specification as delivery.
 - `EXPLAIN ANALYZE` output is a measurement of the plan, and the report names it as that. The
   named target still gets the change.
 - Every performance or behavior claim is measured live with the command shown, or carries
@@ -96,24 +96,17 @@ same change.
 - Where landing needs a command the agent genuinely cannot issue, the first sentence of the
   report is that exact command verbatim and the file:line of the mechanism that blocks it
   (§1.2). No citation means no wall, which means it lands now.
-- **A closure is a claim, and its evidence must outlive the file.** Measured 2026-08-16: 30
-  issues were closed on 2026-08-06 between 19:45:49 and 19:46:48 — a fixed 2-second cadence,
-  every close event carrying `commit=none`. Twenty-three cited a bare `file:line` as proof of
-  "verified against running code". Re-checked ten days later, five of six such citations
-  pointed at unrelated code — a comment, an unrelated assignment, a struct field — because the
-  files had moved. Those closures are not unaudited, they are **unauditable**. So:
-  - Cite `path:line@<sha>`, or paste the three-line excerpt. A bare `file:line` decays.
+- **A closure is a claim, and its evidence must outlive the file.**
+  - Cite `path:line@<sha>`, or paste the three-line excerpt. A bare `file:line` decays into an
+    unauditable closure the moment the file moves.
   - **"Fixed or falsified" is not a disposition.** Those are opposite outcomes — work that was
     completed, and work that was never real — and a closure that cannot say which has recorded
-    nothing. 25 of the 30 used exactly that phrasing.
-  - A duplicate or an obsolete issue closes as `NOT_PLANNED`, never `COMPLETED`. All 115
-    closures in that fortnight read `COMPLETED` through the API, including ones whose own
-    comment says `DUPLICATE` — which is what makes a completion count unusable as a delivery
-    count.
+    nothing.
+  - A duplicate or an obsolete issue closes as `NOT_PLANNED`, never `COMPLETED`. A completion
+    count built from reclassification is unusable as a delivery count.
   - Closing as a duplicate **re-points work, it does not retire it**. Name the target and its
-    state. Of the 30, five point at issues that are still open, two of those `REOPENED`.
-  - A pass that closes issues at machine cadence has verified nothing. Two seconds is not
-    enough to read an issue, check a tree, and decide.
+    state.
+  - A pass that closes issues at machine cadence has verified nothing.
 
 ## 3. Order of authority
 
