@@ -208,13 +208,34 @@ if(LAPLACE_DOTNET AND EXISTS "${LAPLACE_CHESS_SURFACES_PROJ}")
     else()
         set(_chess_openings_arg "NONE")
     endif()
+    # HAND THE CHILD THE BLOB, AND ORDER IT AFTER THE BLOB EXISTS.
+    #
+    # This step runs a managed program that calls CodepointPerfcache.LoadDefault ->
+    # LaplaceInstall.ResolveT0Perfcache. Under `dotnet run --project`, that resolver sees
+    # cwd = build/engine/core and AppContext.BaseDirectory = the ChessCatalogSurfaces bin
+    # dir; neither yields an engine build root, so it searched nothing useful and threw.
+    #
+    # MEASURED 2026-08-16, run 31970548937: a clean-workspace build reached 229/230 and
+    # died here with "T0 perfcache not found. Searched: LAPLACE_PERFCACHE_BIN=(unset); no
+    # engine build root resolved from AppContext.BaseDirectory or cwd" — which is only
+    # legible because that message was fixed the same day to name what it probed.
+    #
+    # CMake already knows the path: LAPLACE_PERFCACHE_BIN is the same variable passed as
+    # --t0 to the emit step below. Passing it removes the guesswork rather than widening
+    # the resolver's heuristics.
+    #
+    # DEPENDS gains the blob too. It was absent, so nothing ordered this step after the
+    # blob's own rule -- on a clean tree the two are free to run in either order, and the
+    # failure surfaces as a missing file rather than as a missing edge.
     add_custom_command(
         OUTPUT ${LAPLACE_CHESS_SURFACES}
         COMMAND ${CMAKE_COMMAND} -E make_directory "${LAPLACE_PERFCACHE_DIR}"
-        COMMAND ${LAPLACE_DOTNET} run --project "${LAPLACE_CHESS_SURFACES_PROJ}"
+        COMMAND ${CMAKE_COMMAND} -E env
+                "LAPLACE_PERFCACHE_BIN=${LAPLACE_PERFCACHE_BIN}"
+                ${LAPLACE_DOTNET} run --project "${LAPLACE_CHESS_SURFACES_PROJ}"
                 -c Release --no-launch-profile --
                 "${_chess_openings_arg}" "${LAPLACE_CHESS_SURFACES}"
-        DEPENDS "${LAPLACE_CHESS_SURFACES_PROJ}"
+        DEPENDS "${LAPLACE_CHESS_SURFACES_PROJ}" ${LAPLACE_PERFCACHE_BIN}
         COMMENT "Chess catalog tier-2 surfaces (emit input prep)"
         VERBATIM
     )

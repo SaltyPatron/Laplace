@@ -5,12 +5,12 @@ CREATE OR REPLACE FUNCTION converse.astar_path(
     p_use_geometry bool DEFAULT false)
     RETURNS TABLE(step int, entity_id bytea, g double precision)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    -- Default traversal vocabulary is DECLARED: engine/manifest/relation_types.toml
+    -- [[set]] PATH_TRAVERSABLE (= PATH_UPWARD u PATH_LATERAL), emitted IMMUTABLE by
+    -- codegen so the array folds at plan time. These 13 names were hand-listed here AND
+    -- in consensus.relate_path's two arms -- one walk vocabulary, spelled twice, in two
+    -- files, with nothing keeping them in step.
     SELECT * FROM converse.astar_path_raw(p_start, p_goals,
-        COALESCE(p_types, ARRAY[
-            laplace.relation_type_id('IS_A'), laplace.relation_type_id('IS_INSTANCE_OF'), laplace.relation_type_id('IS_SYNONYM_OF'),
-            laplace.relation_type_id('IS_SIMILAR_TO'), laplace.relation_type_id('HAS_PART'), laplace.relation_type_id('HAS_MEMBER'),
-            laplace.relation_type_id('HAS_SUBSTANCE'), laplace.relation_type_id('DERIVATIONALLY_RELATED'),
-            laplace.relation_type_id('PERTAINS_TO'), laplace.relation_type_id('ALSO_SEE'), laplace.relation_type_id('IS_ANTONYM_OF'),
-            laplace.relation_type_id('HAS_ATTRIBUTE'), laplace.relation_type_id('IN_VERB_GROUP_WITH')]),
+        COALESCE(p_types, consensus.relation_set_ids('PATH_TRAVERSABLE')),
         p_max_depth, p_directed, p_use_geometry)
 $$;

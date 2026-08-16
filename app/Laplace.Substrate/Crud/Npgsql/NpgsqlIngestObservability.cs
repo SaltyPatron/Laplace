@@ -84,6 +84,7 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
             cmd.Parameters.Add(new NpgsqlParameter { Value = RunLivenessLockClass });
             cmd.Parameters.Add(new NpgsqlParameter { Value = _runId.ToString() });
             cmd.ExecuteNonQuery();
+            AcquireMeasurementLane(_livenessConn);
         }
         catch (Exception ex)
         {
@@ -94,6 +95,27 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
             _livenessConn = null;
         }
     }
+
+    /// <summary>
+    /// Take the measurement lane SHARED on the run's liveness connection, so the run
+    /// holds it for exactly as long as it can write and the server drops it the instant
+    /// this process dies.
+    ///
+    /// <para>Blocks while a measurement holds the lane EXCLUSIVE — that is the contract,
+    /// not a stall. It blocks in bounded windows and names the holder each time, because
+    /// the failure this must never reproduce is AdvisoryTxLock's original form: an
+    /// unbounded silent wait that presented as "ingest hung at the end" with nothing to
+    /// act on. An unlocked ingest would silently corrupt every number a measurement is
+    /// taking, so unlike the liveness beacon this one is not optional — it waits.</para>
+    /// </summary>
+    private void AcquireMeasurementLane(NpgsqlConnection conn)
+        => AdvisoryTxLock.HoldMeasurementLaneAsync(
+                conn, exclusive: false,
+                onWaiting: msg => Console.Error.WriteLine(
+                    $"INGEST_WAITING_ON_MEASUREMENT_LANE run={_runId} — {msg}. This run does "
+                    + "not write until the measurement finishes."),
+                ct: CancellationToken.None)
+            .GetAwaiter().GetResult();
 
     private void ReleaseLivenessLock()
     {

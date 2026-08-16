@@ -1,0 +1,108 @@
+-- ops.reindex_invalid / ops.analyze_substrate — the repair half of the operator
+-- surface. ops.index_health names the damage; these fix it.
+--
+-- The 2026-08-13 cycle-shell incident left all 28 partitioned-parent secondaries
+-- as empty invalid shells while every row count read green. index_health made
+-- that VISIBLE as an installed operation; the repair was still hand-typed psql,
+-- which is the same gap one step later — an operator who can see the damage from
+-- the console and must leave it to fix the damage will eventually fix it wrong.
+--
+-- ONE COMMIT PER INDEX, so a rebuild of 28 partitioned parents is resumable and
+-- interruptible: ops.cancel_backend on this procedure's pid loses the index in
+-- flight and keeps every index already rebuilt. A single-transaction repair
+-- would lose all of it and hold the locks for the whole run.
+--
+-- NOT CONCURRENTLY. REINDEX CONCURRENTLY is barred inside a transaction block,
+-- and a PL/pgSQL procedure body is always in one (COMMIT starts the next). A
+-- plain REINDEX takes an exclusive lock on the index's table for the rebuild —
+-- which is the correct trade here, because the indexes this targets are ALREADY
+-- INVALID: reads cannot use them, so the outage began before the repair did.
+--
+-- No SET clause: a procedure carrying one may not COMMIT, so references are
+-- schema-qualified instead (the ops.evict_source rule).
+DROP PROCEDURE IF EXISTS ops.reindex_invalid(boolean);
+
+CREATE OR REPLACE PROCEDURE ops.reindex_invalid(p_dry_run boolean DEFAULT false)
+    LANGUAGE plpgsql AS $$
+DECLARE
+    ix        record;
+    n         int := 0;
+    t0        timestamptz := clock_timestamp();
+    t_index   timestamptz;
+BEGIN
+    FOR ix IN
+        SELECT h.index_name, h.table_name, h.schema_name,
+               h.is_partitioned_parent, h.leaf_count
+        FROM ops.index_health() h
+        ORDER BY h.table_name, h.index_name
+    LOOP
+        n := n + 1;
+        IF p_dry_run THEN
+            RAISE LOG 'reindex_invalid: WOULD rebuild %.% (partitioned parent: %, leaves: %)',
+                ix.table_name, ix.index_name, ix.is_partitioned_parent, ix.leaf_count;
+            CONTINUE;
+        END IF;
+
+        t_index := clock_timestamp();
+        RAISE LOG 'reindex_invalid: rebuilding %.% on %', ix.schema_name, ix.index_name, ix.table_name;
+        -- %I on identifiers the catalog itself supplied, never caller text. The
+        -- schema is load-bearing: index names are unique per schema, and the four
+        -- substrate schemas hold same-named indexes on partitioned mirrors.
+        EXECUTE format('REINDEX INDEX %I.%I', ix.schema_name, ix.index_name);
+        COMMIT;
+        RAISE LOG 'reindex_invalid: % rebuilt in %s',
+            ix.index_name, round(extract(epoch FROM clock_timestamp() - t_index)::numeric, 1);
+    END LOOP;
+
+    IF n = 0 THEN
+        RAISE LOG 'reindex_invalid: no invalid index — nothing to repair';
+    ELSE
+        RAISE LOG 'reindex_invalid: % index(es) % in %s',
+            n,
+            CASE WHEN p_dry_run THEN 'would be rebuilt' ELSE 'rebuilt' END,
+            round(extract(epoch FROM clock_timestamp() - t0)::numeric, 1);
+    END IF;
+END $$;
+
+COMMENT ON PROCEDURE ops.reindex_invalid(boolean) IS
+    'Rebuild every index ops.index_health() reports as non-valid, one COMMIT each '
+    'so the run is resumable and cancellable. p_dry_run logs the plan without '
+    'touching anything. Not CONCURRENTLY: barred inside a procedure, and the '
+    'targets are already unusable for reads. CALL ops.reindex_invalid();';
+
+-- ANALYZE, unlike VACUUM, is legal inside a transaction and therefore inside a
+-- procedure. VACUUM is NOT and cannot be wrapped here at any nesting — it has to
+-- be issued by a client on a connection that is not in a transaction block, which
+-- is why the maintenance endpoint owns it and this file does not pretend to.
+DROP PROCEDURE IF EXISTS ops.analyze_substrate(text[]);
+
+CREATE OR REPLACE PROCEDURE ops.analyze_substrate(p_tables text[] DEFAULT NULL)
+    LANGUAGE plpgsql AS $$
+DECLARE
+    t       record;
+    n       int := 0;
+    t0      timestamptz := clock_timestamp();
+BEGIN
+    FOR t IN
+        SELECT c.oid::regclass AS rel
+        FROM pg_class c
+        WHERE c.relnamespace IN ('laplace'::regnamespace, 'realize'::regnamespace,
+                                 'consensus'::regnamespace, 'generation'::regnamespace)
+          AND c.relkind IN ('r', 'p')
+          AND (p_tables IS NULL OR c.relname = ANY(p_tables))
+        ORDER BY c.relname
+    LOOP
+        n := n + 1;
+        EXECUTE format('ANALYZE %s', t.rel);
+        COMMIT;
+    END LOOP;
+
+    RAISE LOG 'analyze_substrate: % table(s) analyzed in %s',
+        n, round(extract(epoch FROM clock_timestamp() - t0)::numeric, 1);
+END $$;
+
+COMMENT ON PROCEDURE ops.analyze_substrate(text[]) IS
+    'Refresh planner statistics across the substrate schemas, one COMMIT per table. '
+    'p_tables NULL = every ordinary and partitioned table. Fixes the class of '
+    'slowdown where a correct index is present and the planner will not choose it. '
+    'CALL ops.analyze_substrate();';

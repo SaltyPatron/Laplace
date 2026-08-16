@@ -1,10 +1,25 @@
+-- CREATE OR REPLACE cannot widen a function's result set, so the upgrade path
+-- has to drop first — adding `kind` below is exactly that change.
+DROP FUNCTION IF EXISTS ops.api(text);
+
+-- `kind` distinguishes a function from a procedure, and it is not cosmetic: a
+-- procedure is invoked with CALL and a function with SELECT, so a caller that
+-- cannot tell them apart issues the wrong statement and gets
+-- "ops.evict_source(...) is a procedure" from the parser instead of running it.
+-- pg_get_function_result already returns NULL for procedures, but inferring the
+-- kind from a null return is reading a side effect; the column states it.
+-- Appended last so existing named-column readers are unaffected.
 CREATE OR REPLACE FUNCTION ops.api(p_like text DEFAULT NULL)
-    RETURNS TABLE(name text, args text, returns text)
+    RETURNS TABLE(name text, args text, returns text, kind text)
     LANGUAGE sql STABLE AS $$
     SELECT CASE WHEN n.nspname = 'laplace' THEN p.proname::text
                 ELSE n.nspname || '.' || p.proname END,
            pg_get_function_arguments(p.oid),
-           pg_get_function_result(p.oid)
+           pg_get_function_result(p.oid),
+           CASE p.prokind WHEN 'p' THEN 'procedure'
+                          WHEN 'a' THEN 'aggregate'
+                          WHEN 'w' THEN 'window'
+                          ELSE 'function' END
     FROM pg_proc p
     JOIN pg_namespace n ON n.oid = p.pronamespace
     WHERE (

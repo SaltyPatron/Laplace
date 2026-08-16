@@ -110,13 +110,81 @@ jobs:
     # 10-hour one that happened to finish.
     outputs:
       elapsed_s: ${{ steps.run_ingest.outputs.elapsed_s }}
+      # A PREEMPTED run reports green (#S5) so the seed lane's red keeps meaning
+      # "something is broken". Green is not certified: every gate below refuses to
+      # run on it, so nothing reads a bounce-killed seed as a completed one.
+      preempted: ${{ steps.run_ingest.outputs.preempted }}
     env:
       LAPLACE_DB: "Host=/var/run/postgresql;Username=laplace_admin;Database=${{ inputs.database }}"
       PGDATABASE: ${{ inputs.database }}
+      # DURABLE, not RUNNER_TEMP. INGEST_BATCH (IngestRunner.cs:953-958) carries the one
+      # number that separates writer time from decompose time -- elapsed_ms is
+      # apply.WallClock, the writer alone -- and ingest-source.sh:32 already honours this
+      # override. Under RUNNER_TEMP the detail log was read once by the throughput gate
+      # and then died with the runner: the cancelled 43m conceptnet seed (run
+      # 31962409778) left ZERO INGEST_BATCH lines anywhere reachable, so "the seed is
+      # slow" had no number behind it. A cancelled or slow run is exactly when it is
+      # wanted.
+      #
+      # THIS JOB ONLY, deliberately. ingest-source.sh:130 tees rather than appends, and
+      # the idempotency job below re-ingests under the same source name — sharing the
+      # directory would overwrite the seed measurement with a no-op re-run.
+      INGEST_LOGDIR: /opt/laplace/app/logs/ingest
     steps:
       - uses: actions/checkout@v4
         with: { submodules: false, clean: false }
       - uses: ./.github/actions/setup-laplace-env
+
+      - name: Engine present, or built
+        # THE SEED PATH NEVER BUILT THE ENGINE. It assumed a prior deploy had left
+        # build/engine/ populated in this workspace, and setup-laplace-env's
+        # LD_LIBRARY_PATH points there — so an empty build tree is not a missing
+        # variable, it is a missing directory.
+        #
+        # MEASURED 2026-08-16, run 31970409292: conceptnet aborted after 1 second with
+        # rc=134 (SIGABRT) out of MklAvailability.EnsureOrThrow at Program.cs:20 —
+        # "liblaplace_dynamics.so: cannot open shared object file". No journal row, no
+        # ingest, and a dlopen stack trace as the only diagnosis. A 31M-unit seed cannot
+        # be gated on an artifact nothing in this workflow produces.
+        #
+        # phase_build is fingerprint-gated (fp_native), so this is a no-op on a current
+        # tree and pays only when the workspace genuinely lacks the engine.
+        run: |
+          missing=0
+          for so in core/liblaplace_core.so dynamics/liblaplace_dynamics.so; do
+            [ -e "build/engine/$so" ] || { echo "::warning::build/engine/$so absent"; missing=1; }
+          done
+          if [ "$missing" -eq 1 ]; then
+            echo "::notice::engine absent in this workspace — building (fingerprint-gated)"
+            bash scripts/pipeline.sh build
+          fi
+          for so in core/liblaplace_core.so dynamics/liblaplace_dynamics.so; do
+            [ -e "build/engine/$so" ] || {
+              echo "::error::build/engine/$so still absent after build — the CLI will SIGABRT in MklAvailability.EnsureOrThrow before any ingest starts"
+              exit 1; }
+          done
+          echo "engine present: $(ls build/engine/core/liblaplace_core.so build/engine/dynamics/liblaplace_dynamics.so)"
+
+      - name: Ingest log directory is writable
+        # THE S1 CLASS, RECURRING. S1 was logs/ at ahart:ahart 755 inside the runner
+        # workspace, blocking actions/checkout with EACCES. This is the same shape one
+        # directory deeper: MEASURED 2026-08-16 run 31970875030, INGEST_LOGDIR
+        # (/opt/laplace/app/logs/ingest) was drwxr-sr-x ahart:laplace-runner -- created by
+        # a local CLI run, NOT group-writable -- inside a parent the runner owns setgid.
+        # The seed died with "Permission denied" writing its own detail log, then the
+        # error handler tried to tail a file that was never created.
+        #
+        # A seed must not discover this after the CLI has started. Checked here, with the
+        # ownership printed, so the fix is one chmod rather than a log-archaeology session.
+        run: |
+          d="${INGEST_LOGDIR:-}"
+          [ -n "$d" ] || { echo "::error::INGEST_LOGDIR unset"; exit 1; }
+          mkdir -p "$d" 2>/dev/null || true
+          if [ ! -w "$d" ]; then
+            echo "::error::$d is not writable by $(id -un) (mode $(stat -c '%A %U:%G' "$d" 2>/dev/null || echo absent)). The ingest writes its detail log here and the throughput gate parses it; a run started now dies on the first write. Fix: chmod g+w '$d'"
+            exit 1
+          fi
+          echo "$d writable: $(stat -c '%A %U:%G' "$d")"
 
       - name: Wait for the substrate to be free
         # THE QUEUE, done properly. This BLOCKS; it never discards work.
@@ -155,7 +223,7 @@ jobs:
           langs="${{ inputs.langs }}"
           [ -n "$langs" ] && export LAPLACE_INGEST_LANGS="$langs"
           echo "source=${{ inputs.source }} db=${{ inputs.database }} path='${{ inputs.path }}' langs='${LAPLACE_INGEST_LANGS:-}' (empty=all)"
-          echo "validate via ingest_run_journal (LAPLACE_INGEST_CONSOLE=ci); detail log under RUNNER_TEMP"
+          echo "validate via ingest_run_journal (LAPLACE_INGEST_CONSOLE=ci); detail log under $INGEST_LOGDIR"
           if [ -n "${{ inputs.path }}" ]; then
             scripts/ingest-source.sh "${{ inputs.source }}" "${{ inputs.path }}"
           else
@@ -163,7 +231,7 @@ jobs:
           fi
 
       - name: Journal proof
-        if: always() && steps.run_ingest.outcome == 'success'
+        if: always() && steps.run_ingest.outcome == 'success' && steps.run_ingest.outputs.preempted != 'true'
         run: scripts/verify-ingest-journal.sh --cli-key "${{ inputs.source }}"
 
       - name: Throughput gate — ingest-baseline check
@@ -175,15 +243,15 @@ jobs:
         # pass with a notice ("recording is a separate step"). Re-baseline ONLY
         # after a deliberate perf change, never to make a red run green:
         #   python3 scripts/ingest-baseline.py record <detail log>
-        if: always() && steps.run_ingest.outcome == 'success'
+        if: always() && steps.run_ingest.outcome == 'success' && steps.run_ingest.outputs.preempted != 'true'
         run: |
           python3 scripts/ingest-baseline.py check \
-            "$RUNNER_TEMP/laplace-ingest/laplace-ingest-${{ inputs.source }}.log"
+            "$INGEST_LOGDIR/laplace-ingest-${{ inputs.source }}.log"
 
   idempotency:
     name: "verify — re-ingest ${{ inputs.source }} does not double-count"
     needs: ingest
-    if: ${{ inputs.run_idempotency && needs.ingest.result == 'success' }}
+    if: ${{ inputs.run_idempotency && needs.ingest.result == 'success' && needs.ingest.outputs.preempted != 'true' }}
     runs-on: [self-hosted, laplace]
     concurrency:
       # PER SOURCE, NOT GLOBAL. Ten different corpora ingesting at once is a capacity
@@ -243,7 +311,7 @@ jobs:
     name: "gate — ${{ inputs.source }} consensus checks"
     needs: [ingest, idempotency]
     # always(): idempotency is skipped when run_idempotency=false; still gate once ingest is green.
-    if: ${{ always() && inputs.run_gate && needs.ingest.result == 'success' && needs.idempotency.result != 'failure' }}
+    if: ${{ always() && inputs.run_gate && needs.ingest.result == 'success' && needs.ingest.outputs.preempted != 'true' && needs.idempotency.result != 'failure' }}
     runs-on: [self-hosted, laplace]
     timeout-minutes: 30
     steps:

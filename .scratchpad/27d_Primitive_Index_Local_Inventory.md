@@ -1,7 +1,8 @@
 <!-- STATUS COLUMN STALE 2026-07-20 — this is a REFERENCE CATALOG of transformer
      primitives (formulations, tensor names, mutation-check gates, sources). Keep it.
      Its 'Laplace status' column is NOT a tracker and is already wrong in four places:
-     ATT-BIAS, EMB-POS, EMB-SEG and NRM-LN are fixed (ModelTokenEdgeETL.cs:243,
+     ATT-BIAS, EMB-POS, EMB-SEG and NRM-LN are fixed (ModelTokenEdgeETL.cs:302,684 —
+     re-pointed 2026-08-16, :243 had drifted to unrelated code,
      ArchitectureProfile.cs:183-186).
      Live gaps are GitHub issues: #476 gate matrix, #477 rope_scaling, #478 sliding_window,
      #479 shard index.json, #480 __metadata__, #481 unknown model_type, #482 fused layouts,

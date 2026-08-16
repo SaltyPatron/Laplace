@@ -52,33 +52,61 @@ MANIFEST = ROOT / "engine" / "manifest" / "relation_types.toml"
 # its two open-coded `rating - 2*rd` sites went with the body. Shrink, not an
 # exception.
 #
-# SECOND EXCEPTION, TAKEN THE SAME WAY (2026-08-15). g3_sql 240 -> 262:
-# consensus.relate_path, 13 names x 2 arms. The vocabulary is not new — this
-# function has always hand-listed its lateral and upward relation sets — but it
-# spelled them `relation_type_id(n)` over `unnest(ARRAY['IS_A',...])`, which this
-# gate's pattern (a literal INSIDE the call) never matched. 151744b0 inlined the
-# calls so the partition key meets constants and the LIST partitions prune at plan
-# time, and that made the existing hardcoding visible. The gate is right; it was
-# blind before.
+# g3_sql 262 -> 236 (2026-08-16). THE 2026-08-15 EXCEPTION IS PAID BACK, and this is
+# a shrink below where it started (240 -- origin/main corrected that figure from 239
+# in c56a8b1e; the correction is kept), not a return to it.
 #
-# The non-literal surface was tried first and MEASURED, not assumed. Binding the
-# same two sets as `= ANY (ARRAY(SELECT k FROM lat))` — an InitPlan, run-time
-# bound — keeps the names out of the call position and costs 59%:
-#   folded literals   29.9 s / 24.2 s     (installed form, warm, identical 1 row)
-#   InitPlan arrays   46.9 s / 38.4 s     (same body, rolled-back transaction)
-# SELECT * FROM consensus.relate_path(word_id('wolf'), word_id('dog'));
-#   run as the laplace_admin role.
+# That raise admitted consensus.relate_path's 13 names x 2 arms and recorded the
+# durable fix as a follow-up: the lateral and upward sets belong in
+# engine/manifest/relation_types.toml with codegen emitting foldable accessors, the
+# way it already does per family. That is now done — [[set]] PATH_LATERAL and
+# PATH_UPWARD, emitted as consensus.relation_set_ids(text) into
+# sql/generated/relation_set_ids.sql.in — so relate_path holds ZERO relation-name
+# literals and the 26 sites are gone from the baseline.
 #
-# The durable fix is neither: these two sets belong in
-# engine/manifest/relation_types.toml as named sets, with codegen emitting foldable
-# accessors the way it already does per family (sql/generated/relation_family_ids
-# .sql.in, bdcfa088). No existing family is equivalent — measured live, the IS_A
-# family holds 3 members against the 2 this function wants and IS_SYNONYM_OF holds
-# only itself against 11 — so substituting one would silently widen the walk. That
-# is a manifest change, and it is the follow-up this raise buys time for.
+# A SET IS NOT A FAMILY, and the raise's own note said why. Re-measured live
+# 2026-08-16 against the running substrate: consensus.relation_family_ids('IS_A')
+# holds 3 members against the 2 the upward arm wants, and
+# relation_family_ids('IS_SYNONYM_OF') holds 1 against the 11 the lateral arm wants.
+# Substituting a family would have silently widened the walk, so codegen grew a
+# declared-set emitter rather than reusing the derived one.
+#
+# FOLDABILITY PROVEN BY PLAN STRUCTURE, not wall clock (tasklist §L: plan shape does
+# not depend on load; end-to-end timings taken under a live ingest do). Same predicate
+# over laplace.consensus, EXPLAIN (COSTS OFF), scan nodes:
+#   inline literal array                       16
+#   consensus.relation_set_ids('PATH_UPWARD')  16   <- folds identically
+#   a STABLE function (relation_band_types)   216   <- the §A regression form
+# Output parity: 5 real word pairs through relate_path, old body vs new in one
+# rolled-back transaction, EXCEPT ALL both directions = 0 rows either way.
+#
+# g3_sql 236 -> 223 (2026-08-16, same sweep). converse.astar_path defaulted p_types to a
+# hand-listed ARRAY of the SAME 13 names -- one walk vocabulary spelled twice, in two
+# files, with nothing keeping them in step. Declared once as [[set]] PATH_TRAVERSABLE.
+# The union claim is ASSERTED, not assumed: live, PATH_TRAVERSABLE 13 = PATH_UPWARD 2 u
+# PATH_LATERAL 11, sorted-array-equal, and equal to the array astar_path used to inline.
+# Output parity: 5 start/goal pairs, old body vs new in one rolled-back transaction,
+# 12 rows each side, EXCEPT ALL both directions = 0 / 0.
+#
+# g3_sql 223 -> 195 (2026-08-16, same sweep). consensus.salient_facts and
+# inspect.evidence_receipt each carried a BYTE-IDENTICAL 16-name NOT IN list -- one
+# judgement about what is not a content fact, maintained in two files, both sitting
+# directly after the same relation_family_ids('HAS_POS')/('HAS_FEATURE') exclusions.
+# Declared once as [[set]] NON_SALIENT_STRUCTURAL.
+#
+# 14 of the 16, not all 16. CO_OCCURS_WITH and OCCURS_IN_CONTEXT are in neither the
+# manifest's canonicals nor its aliases though both exist as live RelationType entities,
+# so codegen REFUSES them (an undeclared member emits NULL and `= ANY (NULL)` silently
+# matches nothing) and they stay inline with the drift named at both sites. Assigning
+# them a bit/rank/symmetry is an operator decision. FOLLOWS reached the same check as an
+# alias and was rejected -- there the VALIDATOR was wrong, and it now accepts alias
+# surfaces.
+#
+# `<> ALL` for `NOT IN` is exact here, not merely equivalent-looking: type_id is NOT NULL
+# on both laplace.consensus and laplace.attestations, verified in the catalog.
 CEILINGS = {
     "g1_weight_literalism": 11,
-    "g3_sql_vocabulary_literalism": 262,
+    "g3_sql_vocabulary_literalism": 195,
     "g3_c_vocabulary_literalism": 17,
     # 700 -> 701 (2026-08-05): the language-scope declaration. Nine monolingual
     # sources emitted no HAS_LANGUAGE at all, so every English sense read back as
@@ -138,6 +166,11 @@ CEILINGS = {
     #                                   api() is an unfiltered pg_proc scan (#989), so
     #                                   "no textual caller" cannot prove unused while
     #                                   any MCP op call reaches them. Not provably dead.
+    # g4 stayed 15. A 2026-08-16 exception raised it to 16 for consensus.glicko2_logit,
+    # which landed with 4f97abb2 carrying zero callers and was uncalled on purpose — its
+    # own file installs it as the rejected form beside the winner it derives. main has
+    # since given it a caller, so the exception is obsolete and is removed rather than
+    # left standing: a recorded exception that outlives its cause is just a hole.
     "g4_dead_canonical": 15,
     # Measured 2026-08-05, landing with its violations enumerated per W6's trap
     # note ("a gate that goes red on merge-day teaches people to ignore it").
@@ -210,6 +243,11 @@ CEILINGS = {
     # 250 files. Both halves are qualified, so both are correct and neither
     # matches this pattern. This gate only rejects a name with NO schema at all.
     "g15_unqualified_ddl": 0,
+    # 2026-08-16, first measurement. 10 names the hand-written seed/bootstrap
+    # declares that engine/manifest/relation_types.toml does not, counted across
+    # both files. HAS_TRUST_CLASS among them carries 8 LIVE attestation rows with
+    # no bit, no rank, no relation_law.c entry and no family membership.
+    "g16_unmanifested_vocabulary": 16,
 }
 
 # The schema prefix is OPTIONAL AND ARBITRARY. It used to accept only
@@ -892,6 +930,62 @@ def scan_g12_string_sql_bodies() -> Counter[str]:
     return found
 
 
+def scan_g16_unmanifested_vocabulary() -> Counter[str]:
+    """A relation NAME the hand-written seed/bootstrap declares that the manifest does not.
+
+    THE SUBSTRATE HAS TWO VOCABULARY SOURCES AND THEY DISAGREE.
+    engine/manifest/relation_types.toml is the one codegen reads: it emits relation_law.c,
+    consensus.relation_family_ids, consensus.relation_set_ids, the highway bit table and
+    the partition roster. sql/seed/canonical_names_seed.sql.in is a HAND-WRITTEN VALUES
+    list, and sql/bootstrap/bootstrap.sql.in hashes names directly with
+    laplace_hash128_blake3 and INSERTs them as RelationType entities. Nothing reconciles
+    the two, so a name can exist as a live relation type while being invisible to every
+    manifest-driven law.
+
+    MEASURED 2026-08-16, and it is not hypothetical: HAS_TRUST_CLASS carries 8 live
+    attestation rows and is in neither the manifest's canonicals nor its aliases. It
+    therefore has no highway bit, no rank, no relation_law.c entry, and no family
+    membership -- attested data the law layer cannot see. CO_OCCURS_WITH and
+    OCCURS_IN_CONTEXT are seeded and bootstrapped the same way at 0 rows, which is why
+    codegen refuses to admit them to a declared set and consensus.salient_facts /
+    ops.evidence_receipt still name them inline.
+
+    KNOWN IMPRECISION, stated rather than tuned away: the seed is a list of canonical
+    NAMES, not only relations -- it also carries entries like substrate/atomic/none/v1.
+    This scans ALL_CAPS entries as relation-shaped, so POS, UD_UPOS and UD_XPOS are
+    flagged and may be tagset identifiers rather than relations. That is the finding, not
+    a defect in the scan: nothing in the seed distinguishes a relation name from a tagset
+    name today, which is exactly why the two sources can drift unnoticed. Their
+    disposition is to be declared or moved out of the ALL_CAPS list -- either way the
+    ambiguity becomes visible instead of implied.
+
+    Shrink-only. A name leaves this list by being DECLARED in the manifest (with a bit, a
+    rank and a symmetry) or by being removed from the seed -- never by being added here.
+    """
+    manifest = MANIFEST.read_text(encoding="utf-8", errors="replace")
+    declared = set(re.findall(r'^canonical = "([A-Z][A-Z0-9_]*)"$', manifest, re.M))
+    declared |= set(re.findall(r'^surface = "([A-Z][A-Z0-9_]*)"$', manifest, re.M))
+
+    sql_root = ROOT / "extension" / "laplace_substrate" / "sql"
+    found: Counter[str] = Counter()
+
+    seed = sql_root / "seed" / "canonical_names_seed.sql.in"
+    if seed.exists():
+        text = strip_sql_comments(seed.read_text(encoding="utf-8", errors="replace"))
+        for name in re.findall(r"^\s*\('([A-Z][A-Z0-9_]*)'\),?\s*$", text, re.M):
+            if name not in declared:
+                found[f"{relative(seed)}::{name}"] += 1
+
+    boot = sql_root / "bootstrap" / "bootstrap.sql.in"
+    if boot.exists():
+        text = strip_sql_comments(boot.read_text(encoding="utf-8", errors="replace"))
+        for name in re.findall(r"laplace_hash128_blake3\('([A-Z][A-Z0-9_]*)'::bytea\)", text):
+            if name not in declared:
+                found[f"{relative(boot)}::{name}"] += 1
+
+    return found
+
+
 def current_violations() -> dict[str, dict[str, int]]:
     scans = {
         "g1_weight_literalism": scan_g1(),
@@ -905,6 +999,7 @@ def current_violations() -> dict[str, dict[str, int]]:
         "g13_string_op_on_surface": scan_g13_string_op_on_surface(),
         "g14_case_fold": scan_g14_case_fold(),
         "g15_unqualified_ddl": scan_g15_unqualified_ddl(),
+        "g16_unmanifested_vocabulary": scan_g16_unmanifested_vocabulary(),
     }
     return {
         gate: dict(sorted(counter.items()))
