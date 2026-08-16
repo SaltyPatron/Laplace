@@ -1,0 +1,41 @@
+-- consensus.belief_logit(rating, rd) -- eff_mu expressed as log-odds. THE weight for any
+-- ranked surface, and the only one.
+--
+-- eff_mu (rating - 2*rd) is a conservative BOUND in rating points, not a log-odds.
+-- Exponentiating it directly ranks the same and normalises to nothing meaningful, because
+-- the units are wrong: exp() of a rating point needs a divisor, and every divisor invented
+-- for it is a dial. This converts the bound into Glicko-2's own scale instead, so exp() of
+-- the result is a Bradley-Terry weight on belief.
+--
+-- NO DIAL IS INTRODUCED. 1500 comes from consensus.glicko2_neutral_mu(), the body the folder
+-- already uses, and 400/ln(10) is Glicko-2's definitional rating scale -- the constant that
+-- makes its underlying logistic a base-10 400-point curve. Neither is free to choose.
+--
+-- WHY NOT g(phi)*mu. Glicko-2's own attenuation applied to the RAW rating,
+-- g(phi) = 1/sqrt(1 + 3*phi^2/pi^2) with phi = rd/(400/ln 10), was written here first and
+-- then DELETED rather than kept beside this one. It penalises uncertainty by a different
+-- law: eff_mu SUBTRACTS 2*rd without bound, g(phi) MULTIPLIES by a saturating factor in
+-- (0,1]. Measured on one pair -- rating 2000/rd 100 gives eff_mu 1800 and g(phi)*mu 2.7434,
+-- rating 2100/rd 200 gives eff_mu 1700 and 2.9159 -- the two order the same two edges
+-- oppositely. A surface that ORDERS by one and WEIGHTS by the other has a top row that is
+-- not its heaviest row, so "take the best" and "sample the distribution" return different
+-- objects from one call. INVENTION §5 settles which survives: belief is rating - 2*rd and
+-- all ranked reads order by it, so the weight moved onto belief rather than the order
+-- moving off it.
+--
+-- It was deleted rather than left uncalled for two reasons. A correct-looking second weight
+-- standing beside the real one is the trap cmake/toolchains/gcc-deterministic.cmake already
+-- is in this tree -- authoritative name, defensible body, silently different answer. And an
+-- uncalled function has no losing condition: nothing exercises it, so nothing can ever show
+-- it wrong.
+--
+-- NOT a replacement for eff_mu. eff_mu stays the indexed ranking key (#860, the
+-- eff-mu-inlining-law) and this is never an ORDER BY; it is strictly monotone in eff_mu, so
+-- ordering by either gives the same sequence, and the indexes only match the literal form.
+CREATE OR REPLACE FUNCTION consensus.belief_logit(p_rating bigint, p_rd bigint)
+    RETURNS double precision
+    LANGUAGE sql LAPLACE_IMMUTABLE_STRICT
+BEGIN ATOMIC
+    SELECT ((consensus.eff_mu(p_rating, p_rd) - consensus.glicko2_neutral_mu()) / 1e9)
+         / (400 / ln(10));
+END;
