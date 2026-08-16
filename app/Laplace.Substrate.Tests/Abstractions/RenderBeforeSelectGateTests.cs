@@ -53,7 +53,6 @@ public sealed class RenderBeforeSelectGateTests
             ["recall/recall_what_is_response.sql.in"] = 1,  // MATERIALIZED topic label
             ["chess/chess_game.sql.in"] = 1,                // one game document
             ["consensus/relate_path.sql.in"] = 1,           // one winning relation plane
-            ["taxonomy/synset_gloss.sql.in"] = 1,           // one winning gloss
         };
 
     private static string FunctionsRoot(string repoRoot) =>
@@ -141,7 +140,12 @@ public sealed class RenderBeforeSelectGateTests
         Assert.True(changed.Count == 0,
             "singleton scalar counts changed; classify every changed site:\n  "
             + string.Join("\n  ", changed));
-        Assert.Equal(17, actual.Values.Sum());
+        // 17 -> 16: taxonomy/synset_gloss.sql.in no longer realizes a scalar at all
+        // (measured 0 matches), so its exception was deleted above and the pinned
+        // total shrinks with it. Shrink-only is the point — this number may fall as
+        // sites migrate to a batch surface, and may not rise without classifying the
+        // new site in SingletonSites first.
+        Assert.Equal(16, actual.Values.Sum());
     }
 
     [Fact]
