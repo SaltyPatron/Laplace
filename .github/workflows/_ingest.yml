@@ -117,10 +117,53 @@ jobs:
     env:
       LAPLACE_DB: "Host=/var/run/postgresql;Username=laplace_admin;Database=${{ inputs.database }}"
       PGDATABASE: ${{ inputs.database }}
+      # DURABLE, not RUNNER_TEMP. INGEST_BATCH (IngestRunner.cs:953-958) carries the one
+      # number that separates writer time from decompose time -- elapsed_ms is
+      # apply.WallClock, the writer alone -- and ingest-source.sh:32 already honours this
+      # override. Under RUNNER_TEMP the detail log was read once by the throughput gate
+      # and then died with the runner: the cancelled 43m conceptnet seed (run
+      # 31962409778) left ZERO INGEST_BATCH lines anywhere reachable, so "the seed is
+      # slow" had no number behind it. A cancelled or slow run is exactly when it is
+      # wanted.
+      #
+      # THIS JOB ONLY, deliberately. ingest-source.sh:130 tees rather than appends, and
+      # the idempotency job below re-ingests under the same source name — sharing the
+      # directory would overwrite the seed measurement with a no-op re-run.
+      INGEST_LOGDIR: /opt/laplace/app/logs/ingest
     steps:
       - uses: actions/checkout@v4
         with: { submodules: false, clean: false }
       - uses: ./.github/actions/setup-laplace-env
+
+      - name: Engine present, or built
+        # THE SEED PATH NEVER BUILT THE ENGINE. It assumed a prior deploy had left
+        # build/engine/ populated in this workspace, and setup-laplace-env's
+        # LD_LIBRARY_PATH points there — so an empty build tree is not a missing
+        # variable, it is a missing directory.
+        #
+        # MEASURED 2026-08-16, run 31970409292: conceptnet aborted after 1 second with
+        # rc=134 (SIGABRT) out of MklAvailability.EnsureOrThrow at Program.cs:20 —
+        # "liblaplace_dynamics.so: cannot open shared object file". No journal row, no
+        # ingest, and a dlopen stack trace as the only diagnosis. A 31M-unit seed cannot
+        # be gated on an artifact nothing in this workflow produces.
+        #
+        # phase_build is fingerprint-gated (fp_native), so this is a no-op on a current
+        # tree and pays only when the workspace genuinely lacks the engine.
+        run: |
+          missing=0
+          for so in core/liblaplace_core.so dynamics/liblaplace_dynamics.so; do
+            [ -e "build/engine/$so" ] || { echo "::warning::build/engine/$so absent"; missing=1; }
+          done
+          if [ "$missing" -eq 1 ]; then
+            echo "::notice::engine absent in this workspace — building (fingerprint-gated)"
+            bash scripts/pipeline.sh build
+          fi
+          for so in core/liblaplace_core.so dynamics/liblaplace_dynamics.so; do
+            [ -e "build/engine/$so" ] || {
+              echo "::error::build/engine/$so still absent after build — the CLI will SIGABRT in MklAvailability.EnsureOrThrow before any ingest starts"
+              exit 1; }
+          done
+          echo "engine present: $(ls build/engine/core/liblaplace_core.so build/engine/dynamics/liblaplace_dynamics.so)"
 
       - name: Wait for the substrate to be free
         # THE QUEUE, done properly. This BLOCKS; it never discards work.
@@ -159,7 +202,7 @@ jobs:
           langs="${{ inputs.langs }}"
           [ -n "$langs" ] && export LAPLACE_INGEST_LANGS="$langs"
           echo "source=${{ inputs.source }} db=${{ inputs.database }} path='${{ inputs.path }}' langs='${LAPLACE_INGEST_LANGS:-}' (empty=all)"
-          echo "validate via ingest_run_journal (LAPLACE_INGEST_CONSOLE=ci); detail log under RUNNER_TEMP"
+          echo "validate via ingest_run_journal (LAPLACE_INGEST_CONSOLE=ci); detail log under $INGEST_LOGDIR"
           if [ -n "${{ inputs.path }}" ]; then
             scripts/ingest-source.sh "${{ inputs.source }}" "${{ inputs.path }}"
           else
@@ -182,7 +225,7 @@ jobs:
         if: always() && steps.run_ingest.outcome == 'success' && steps.run_ingest.outputs.preempted != 'true'
         run: |
           python3 scripts/ingest-baseline.py check \
-            "$RUNNER_TEMP/laplace-ingest/laplace-ingest-${{ inputs.source }}.log"
+            "$INGEST_LOGDIR/laplace-ingest-${{ inputs.source }}.log"
 
   idempotency:
     name: "verify — re-ingest ${{ inputs.source }} does not double-count"
