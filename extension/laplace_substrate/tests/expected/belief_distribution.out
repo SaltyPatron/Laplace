@@ -68,8 +68,8 @@ SELECT encode(object_id, 'hex') AS obj, round(p::numeric, 6) AS p, eff_mu
 FROM consensus.belief_distribution('\xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'::bytea, 'HAS_LANGUAGE', 10);
                obj                |    p     |  eff_mu  
 ----------------------------------+----------+----------
- 0000000000000000000000000000000a | 0.456941 | 1800.000
- 0000000000000000000000000000000b | 0.543059 | 1700.000
+ 0000000000000000000000000000000a | 0.640065 | 1800.000
+ 0000000000000000000000000000000b | 0.359935 | 1700.000
 (2 rows)
 
 SELECT sum(p) = 1.0 AS mass_is_one

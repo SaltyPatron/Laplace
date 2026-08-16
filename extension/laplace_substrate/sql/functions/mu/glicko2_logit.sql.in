@@ -42,3 +42,31 @@ BEGIN ATOMIC
     SELECT consensus.glicko2_g(p_rd)
          * (((p_rating - consensus.glicko2_neutral_mu()) / 1e9) / (400 / ln(10)));
 END;
+
+-- consensus.belief_logit(rating, rd) -- eff_mu expressed as log-odds.
+--
+-- THE ONE USED BY RANKED SURFACES, and the reason glicko2_logit above is not.
+-- The two penalise uncertainty by different laws: eff_mu SUBTRACTS 2*rd without
+-- bound, g(phi) MULTIPLIES by a factor in (0,1] that saturates. So they disagree
+-- about which of two edges is stronger whenever a higher rating carries a wider
+-- rd -- measured: rating 2000/rd 100 gives eff_mu 1800 and logit 2.7434, while
+-- rating 2100/rd 200 gives eff_mu 1700 and logit 2.9159. Opposite orders on the
+-- same pair.
+--
+-- A surface that ORDERS by one and WEIGHTS by the other is incoherent: its top
+-- row is not its heaviest row, so "take the best" and "sample the distribution"
+-- return different objects from one call. INVENTION §5 settles which survives --
+-- belief is rating - 2*rd and all ranked reads order by it -- so the weight moves
+-- onto belief rather than the order moving off it.
+--
+-- No dial is introduced. 1500 and 400/ln(10) are Glicko-2's own rating scale, the
+-- same two constants glicko2_g uses; this only converts the conservative bound
+-- into that scale instead of the raw rating. exp() of the result is therefore a
+-- Bradley-Terry weight on belief.
+CREATE OR REPLACE FUNCTION consensus.belief_logit(p_rating bigint, p_rd bigint)
+    RETURNS double precision
+    LANGUAGE sql LAPLACE_IMMUTABLE_STRICT
+BEGIN ATOMIC
+    SELECT ((consensus.eff_mu(p_rating, p_rd) - consensus.glicko2_neutral_mu()) / 1e9)
+         / (400 / ln(10));
+END;

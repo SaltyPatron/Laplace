@@ -22,12 +22,13 @@
 -- measured), so the full set is one index range and the window has nothing to fan
 -- out over.
 --
--- ORDERED BY eff_mu, NOT BY p. INVENTION §5: belief is rating - 2*rd and "all ranked
--- reads order by it." The logit is monotone in rating but NOT in eff_mu -- g(phi)
--- discounts where eff_mu subtracts -- so ordering by the softmax weight would have
--- made this the one ranked read in the substrate that disagrees with every index and
--- every other surface about which edge is strongest. p is a returned column here,
--- never the sort key.
+-- ORDER AND MASS ARE THE SAME OBJECT. INVENTION §5: belief is rating - 2*rd and "all
+-- ranked reads order by it." An earlier revision obeyed that in the ORDER BY while
+-- weighting with consensus.glicko2_logit, which penalises rd by a different law --
+-- and the two disagree on real pairs, so the top row was not the heaviest row and
+-- "take the best" and "sample p" returned different objects from one call. Both are
+-- now consensus.belief_logit: eff_mu on Glicko-2's own scale. p descending and eff_mu
+-- descending are therefore the same order by construction, not by coincidence.
 --
 -- ABSTENTION IS THE POINT. No candidates -> no rows. A softmax cannot express
 -- "couples to nothing under this relation"; it sums to 1 over whatever vector it
@@ -48,7 +49,7 @@ CREATE OR REPLACE FUNCTION consensus.belief_distribution(
 BEGIN ATOMIC
     WITH cand AS (
         SELECT c.object_id AS oid,
-               consensus.glicko2_logit(c.rating, c.rd) AS lg,
+               consensus.belief_logit(c.rating, c.rd) AS lg,
                consensus.eff_mu_display(c.rating, c.rd) AS emu,
                consensus.eff_mu(c.rating, c.rd) AS emu_raw,
                c.rd AS crd,
