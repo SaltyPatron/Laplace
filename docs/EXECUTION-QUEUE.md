@@ -1,5 +1,9 @@
 # Execution queue
 
+**Status as of 2026-08-15.** Checkboxes below are a point-in-time
+snapshot; re-verify against HEAD before treating any `[x]` as landed or any `[ ]` as
+outstanding.
+
 [x] landed   [~] written, not landed   [ ] not started
 
 ## 1. Per-file ingest journal — the file is the unit, not the run

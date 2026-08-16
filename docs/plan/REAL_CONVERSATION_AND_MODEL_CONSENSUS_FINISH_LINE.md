@@ -1,5 +1,10 @@
 # Real conversation and heterogeneous-model consensus
 
+**Written 2026-08-08, last revised 2026-08-09.** This is a contract, not a status
+report — the acceptance criteria below are durable. Anything read from it as *current
+state* must be re-verified against HEAD and GitHub, which own delivery state (see
+"Delivery ownership"). Re-verify before citing.
+
 This contract defines the product Laplace must expose through its MCP and
 OpenAI-compatible surfaces. The running deployment and executable code own observed
 behavior. Normative substrate law lives in `docs/specs/`; GitHub issues own delivery

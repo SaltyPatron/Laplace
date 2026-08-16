@@ -1,6 +1,8 @@
 # GH #593 — LSP-backed semantic decomposer: design proposal
 
-Status: PROPOSAL, not started. Written for review before any implementation.
+Status: PROPOSAL, not started **as of 2026-08-05** (written 2026-07-25); 592 commits
+have landed since. Re-verify against GH #593 and HEAD before treating that as current.
+Written for review before any implementation.
 Companion to the batch-ingest fix PR (#662, covering #592/#594/#595/#596) from
 the same corpus run that surfaced this issue.
 
