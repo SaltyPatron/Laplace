@@ -165,6 +165,27 @@ jobs:
           done
           echo "engine present: $(ls build/engine/core/liblaplace_core.so build/engine/dynamics/liblaplace_dynamics.so)"
 
+      - name: Ingest log directory is writable
+        # THE S1 CLASS, RECURRING. S1 was logs/ at ahart:ahart 755 inside the runner
+        # workspace, blocking actions/checkout with EACCES. This is the same shape one
+        # directory deeper: MEASURED 2026-08-16 run 31970875030, INGEST_LOGDIR
+        # (/opt/laplace/app/logs/ingest) was drwxr-sr-x ahart:laplace-runner -- created by
+        # a local CLI run, NOT group-writable -- inside a parent the runner owns setgid.
+        # The seed died with "Permission denied" writing its own detail log, then the
+        # error handler tried to tail a file that was never created.
+        #
+        # A seed must not discover this after the CLI has started. Checked here, with the
+        # ownership printed, so the fix is one chmod rather than a log-archaeology session.
+        run: |
+          d="${INGEST_LOGDIR:-}"
+          [ -n "$d" ] || { echo "::error::INGEST_LOGDIR unset"; exit 1; }
+          mkdir -p "$d" 2>/dev/null || true
+          if [ ! -w "$d" ]; then
+            echo "::error::$d is not writable by $(id -un) (mode $(stat -c '%A %U:%G' "$d" 2>/dev/null || echo absent)). The ingest writes its detail log here and the throughput gate parses it; a run started now dies on the first write. Fix: chmod g+w '$d'"
+            exit 1
+          fi
+          echo "$d writable: $(stat -c '%A %U:%G' "$d")"
+
       - name: Wait for the substrate to be free
         # THE QUEUE, done properly. This BLOCKS; it never discards work.
         # One ingest at a time is substrate law (CLAUDE.md, Operations), and
