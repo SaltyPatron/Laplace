@@ -29,3 +29,27 @@ SELECT consensus.glicko2_logit(2000000000000, 100000000000)
 SELECT count(*) = 0 AS unattested_subject_returns_no_rows
 FROM consensus.belief_distribution(
         '\x00000000000000000000000000000000'::bytea, 'HAS_LANGUAGE', 10);
+
+-- INVENTION §5: belief is rating - 2*rd and "all ranked reads order by it." The logit
+-- is monotone in rating but NOT in eff_mu -- g(phi) discounts where eff_mu subtracts --
+-- so the two orders genuinely disagree and only a discriminating pair proves which one
+-- the function uses. B carries the HIGHER share and the LOWER belief; belief wins.
+--   A rating 2000 rd 100 -> eff_mu 1800, logit 2.7434, p 0.456941
+--   B rating 2100 rd 200 -> eff_mu 1700, logit 2.9160, p 0.543059
+BEGIN;
+INSERT INTO laplace.consensus
+    (id, subject_id, type_id, object_id, rating, rd, volatility, witness_count, last_observed_at)
+VALUES
+ ('\x11111111111111111111111111111111', '\xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+  laplace.relation_type_id('HAS_LANGUAGE'), '\x0000000000000000000000000000000a',
+  2000000000000, 100000000000, 60000000, 5, now()),
+ ('\x22222222222222222222222222222222', '\xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+  laplace.relation_type_id('HAS_LANGUAGE'), '\x0000000000000000000000000000000b',
+  2100000000000, 200000000000, 60000000, 5, now());
+
+SELECT encode(object_id, 'hex') AS obj, round(p::numeric, 6) AS p, eff_mu
+FROM consensus.belief_distribution('\xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'::bytea, 'HAS_LANGUAGE', 10);
+
+SELECT sum(p) = 1.0 AS mass_is_one
+FROM consensus.belief_distribution('\xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'::bytea, 'HAS_LANGUAGE', 10);
+ROLLBACK;

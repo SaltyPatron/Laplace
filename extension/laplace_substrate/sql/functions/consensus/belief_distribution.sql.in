@@ -12,11 +12,22 @@
 -- generation.continuation_conditional_plane, is built from trajectory counts at
 -- export and never touches laplace.consensus.
 --
--- Normalisation runs over the FULL candidate set for (subject, relation) and
--- p_k truncates only the OUTPUT, so p is a probability rather than a shortlist
--- artifact. subject_id + type_id prunes laplace.consensus to 1 leaf of 216
--- (CLAUDE.md §4, measured), so the full set is one index range and the window
--- has nothing to fan out over.
+-- WHAT p IS, EXACTLY. It is this object's share of the attested candidate set for
+-- (subject, relation) -- NOT a probability that the claim is true. Normalisation
+-- runs over the FULL set and p_k truncates only the output, so it is not a
+-- shortlist artifact; but ingesting one more witnessed object for the same subject
+-- and relation changes every other p. A distribution over what has been attested is
+-- the only thing evidence supports, and it is not a distribution over what is so.
+-- subject_id + type_id prunes laplace.consensus to 1 leaf of 216 (CLAUDE.md §4,
+-- measured), so the full set is one index range and the window has nothing to fan
+-- out over.
+--
+-- ORDERED BY eff_mu, NOT BY p. INVENTION §5: belief is rating - 2*rd and "all ranked
+-- reads order by it." The logit is monotone in rating but NOT in eff_mu -- g(phi)
+-- discounts where eff_mu subtracts -- so ordering by the softmax weight would have
+-- made this the one ranked read in the substrate that disagrees with every index and
+-- every other surface about which edge is strongest. p is a returned column here,
+-- never the sort key.
 --
 -- ABSTENTION IS THE POINT. No candidates -> no rows. A softmax cannot express
 -- "couples to nothing under this relation"; it sums to 1 over whatever vector it
@@ -39,6 +50,7 @@ BEGIN ATOMIC
         SELECT c.object_id AS oid,
                consensus.glicko2_logit(c.rating, c.rd) AS lg,
                consensus.eff_mu_display(c.rating, c.rd) AS emu,
+               consensus.eff_mu(c.rating, c.rd) AS emu_raw,
                c.rd AS crd,
                c.witness_count AS wc
         FROM laplace.consensus c
@@ -49,15 +61,16 @@ BEGIN ATOMIC
     -- max-shift before exp(): the standard overflow guard, not a temperature.
     -- It cancels in the ratio, so p is unchanged by it.
     shifted AS (
-        SELECT oid, lg, emu, crd, wc, exp(lg - max(lg) OVER ()) AS w FROM cand
+        SELECT oid, lg, emu, emu_raw, crd, wc, exp(lg - max(lg) OVER ()) AS w FROM cand
     )
     SELECT oid, w / sum(w) OVER (), lg, emu, crd, wc
     FROM shifted
-    ORDER BY w DESC, oid
+    ORDER BY emu_raw DESC, oid
     LIMIT p_k;
 END;
 
 COMMENT ON FUNCTION consensus.belief_distribution(bytea, text, integer) IS
-    'Bradley-Terry distribution over one subject''s objects under one relation, '
-    'from Glicko-2 log-odds with RD folded in. Normalised over the full candidate '
-    'set; empty when the subject couples to nothing.';
+    'Bradley-Terry share of the attested candidate set for one subject under one '
+    'relation, from Glicko-2 log-odds with RD folded in. Not a probability of truth: '
+    'a new witnessed object changes every other p. Ordered by eff_mu per INVENTION '
+    'section 5; empty when the subject couples to nothing.';
