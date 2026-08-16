@@ -1,0 +1,72 @@
+-- consensus.glicko2_g(rd) and consensus.glicko2_logit(rating, rd) -- the per-edge
+-- log-odds, which is what a probability needs and eff_mu cannot supply.
+--
+-- eff_mu (rating - 2*rd) is a conservative BOUND in rating points, not a
+-- log-odds. Exponentiating it ranks the same and normalises to nothing
+-- meaningful, because the units are wrong: exp() of a rating point needs a
+-- divisor, and every divisor invented for it is a dial. The live instance is
+-- ModalityEngine.cs:177 -- exp((eff_mu/1e9 - max)/temperature) -- two dials
+-- stacked on a bound that already threw the uncertainty away.
+--
+-- Glicko-2 defines the conversion and both constants are definitional, not
+-- tuned. Its rating scale is r = 1500 + (400/ln 10)*mu, which is the scale that
+-- makes the underlying logistic a base-10 400-point curve; its uncertainty
+-- attenuation is g(phi) = 1/sqrt(1 + 3*phi^2/pi^2), the factor the expected-score
+-- law applies to a wide-RD rating. Neither is free to choose.
+--
+-- So glicko2_logit = g(phi)*mu is a log-odds in Glicko-2's own units with the
+-- edge's RD already folded in. Bradley-Terry over a set of these reduces EXACTLY
+-- to Glicko-2's pairwise expectation 1/(1+exp(-g(phi)*(mu_i - mu_j))) when the
+-- two candidates carry equal RD, and otherwise discounts each candidate by its
+-- own RD rather than by its rival's. A candidate set is not a match, so the
+-- opponent-RD form has no meaning here; the own-RD form does.
+--
+-- NOT a replacement for eff_mu. eff_mu stays the indexed ranking key (#860, the
+-- eff-mu-inlining-law) and this is never an ORDER BY -- it is monotone in
+-- rating but NOT in eff_mu, because g(phi) discounts rather than subtracts.
+--
+-- Neutral comes from consensus.glicko2_neutral_mu(), the body the folder already
+-- uses. Restating 1500 here is how walk_edge_weight's witness half-max ended up
+-- written twice in two languages.
+CREATE OR REPLACE FUNCTION consensus.glicko2_g(p_rd bigint)
+    RETURNS double precision
+    LANGUAGE sql LAPLACE_IMMUTABLE_STRICT
+BEGIN ATOMIC
+    SELECT 1.0 / sqrt(1.0 + 3.0 * (((p_rd / 1e9) / (400 / ln(10))) ^ 2) / (pi() ^ 2));
+END;
+
+CREATE OR REPLACE FUNCTION consensus.glicko2_logit(p_rating bigint, p_rd bigint)
+    RETURNS double precision
+    LANGUAGE sql LAPLACE_IMMUTABLE_STRICT
+BEGIN ATOMIC
+    SELECT consensus.glicko2_g(p_rd)
+         * (((p_rating - consensus.glicko2_neutral_mu()) / 1e9) / (400 / ln(10)));
+END;
+
+-- consensus.belief_logit(rating, rd) -- eff_mu expressed as log-odds.
+--
+-- THE ONE USED BY RANKED SURFACES, and the reason glicko2_logit above is not.
+-- The two penalise uncertainty by different laws: eff_mu SUBTRACTS 2*rd without
+-- bound, g(phi) MULTIPLIES by a factor in (0,1] that saturates. So they disagree
+-- about which of two edges is stronger whenever a higher rating carries a wider
+-- rd -- measured: rating 2000/rd 100 gives eff_mu 1800 and logit 2.7434, while
+-- rating 2100/rd 200 gives eff_mu 1700 and logit 2.9159. Opposite orders on the
+-- same pair.
+--
+-- A surface that ORDERS by one and WEIGHTS by the other is incoherent: its top
+-- row is not its heaviest row, so "take the best" and "sample the distribution"
+-- return different objects from one call. INVENTION §5 settles which survives --
+-- belief is rating - 2*rd and all ranked reads order by it -- so the weight moves
+-- onto belief rather than the order moving off it.
+--
+-- No dial is introduced. 1500 and 400/ln(10) are Glicko-2's own rating scale, the
+-- same two constants glicko2_g uses; this only converts the conservative bound
+-- into that scale instead of the raw rating. exp() of the result is therefore a
+-- Bradley-Terry weight on belief.
+CREATE OR REPLACE FUNCTION consensus.belief_logit(p_rating bigint, p_rd bigint)
+    RETURNS double precision
+    LANGUAGE sql LAPLACE_IMMUTABLE_STRICT
+BEGIN ATOMIC
+    SELECT ((consensus.eff_mu(p_rating, p_rd) - consensus.glicko2_neutral_mu()) / 1e9)
+         / (400 / ln(10));
+END;

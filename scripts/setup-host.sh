@@ -69,7 +69,9 @@ seed_billing_from_operator_files() {
     # getent, not /home/$user: root's home is /root, and a hardcoded /home/$user
     # is how bootstrap_runner_gh_auth ended up probing /home/root and skipping.
     local home_src
-    home_src="$(getent passwd "${LAPLACE_OPERATOR:-}" 2>/dev/null | cut -d: -f6)/.config/shell/secrets.env"
+    # getent exits 2 on an unresolved key; under `set -euo pipefail` that aborts the whole
+    # script instead of taking the fallback branch below, which is the opposite of intent.
+    home_src="$(getent passwd "${LAPLACE_OPERATOR:-}" 2>/dev/null | cut -d: -f6 || true)/.config/shell/secrets.env"
     local repo_src="$REPO_DIR/.env"
     local src=""
     if [ -f "$home_src" ]; then src="$home_src"
@@ -186,11 +188,15 @@ layer1_build_install_extensions() {
         red "oneAPI setvars did not export MKLROOT/TBBROOT/CMPLR_ROOT"
         return 1
     fi
+    # Capture rather than abort. pipeline.sh runs AS ROOT here, so if it fails under
+    # `set -e` the script exits BEFORE the ownership repair below and leaves precisely the
+    # root-owned build/ tree that repair exists to prevent. Run the repair, then propagate.
+    local _pipeline_rc=0
     (
         cd "$REPO_DIR"
         bash scripts/pipeline.sh build
         bash scripts/pipeline.sh install
-    )
+    ) || _pipeline_rc=$?
     # This runs pipeline.sh AS ROOT, so every artifact it writes into build/ is
     # root-owned and the operator cannot rebuild afterwards. Measured 2026-08-12:
     # 31 root-owned entries under build/, and cmake died on
@@ -208,6 +214,11 @@ layer1_build_install_extensions() {
         sudo chmod -R g+w "$REPO_DIR/build"
         sudo find "$REPO_DIR/build" -type d -exec chmod g+s {} +
         yellow "  - re-owned + group-shared build/ ($RUNNER_USER:$RUNNER_USER, g+w, setgid)"
+    fi
+
+    if [ "$_pipeline_rc" -ne 0 ]; then
+        red "✗ pipeline.sh build/install failed (rc=$_pipeline_rc) — build/ ownership repaired first"
+        return "$_pipeline_rc"
     fi
     green "✓ extensions installed at ${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
 }

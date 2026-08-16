@@ -1,0 +1,82 @@
+CREATE EXTENSION IF NOT EXISTS postgis;
+NOTICE:  extension "postgis" already exists, skipping
+CREATE EXTENSION IF NOT EXISTS laplace_geom;
+NOTICE:  extension "laplace_geom" already exists, skipping
+CREATE EXTENSION IF NOT EXISTS laplace_substrate;
+NOTICE:  extension "laplace_substrate" already exists, skipping
+-- consensus.glicko2_g pinned against Glickman's published Glicko-2 worked
+-- example (RD 30 / 100 / 300 -> g = 0.9955 / 0.9531 / 0.7242). External ground
+-- truth, not a self-consistency check: if the 400/ln(10) scale or the pi^2 term
+-- drifts, these move. rd is fp1e9.
+SELECT round(consensus.glicko2_g( 30000000000)::numeric, 4) = 0.9955 AS g_rd30_matches_paper,
+       round(consensus.glicko2_g(100000000000)::numeric, 4) = 0.9531 AS g_rd100_matches_paper,
+       round(consensus.glicko2_g(300000000000)::numeric, 4) = 0.7242 AS g_rd300_matches_paper;
+ g_rd30_matches_paper | g_rd100_matches_paper | g_rd300_matches_paper 
+----------------------+-----------------------+-----------------------
+ t                    | t                     | t
+(1 row)
+
+-- A certain edge is not attenuated; the neutral rating is the zero of the
+-- log-odds. Both are definitional and neither is a tunable.
+SELECT consensus.glicko2_g(0) = 1.0 AS g_of_zero_rd_is_unity,
+       consensus.glicko2_logit(consensus.glicko2_neutral_mu(), 0) = 0.0 AS neutral_is_logit_zero;
+ g_of_zero_rd_is_unity | neutral_is_logit_zero 
+-----------------------+-----------------------
+ t                     | t
+(1 row)
+
+-- The logit is monotone in rating at fixed rd, and STRICTLY DECREASING in rd at
+-- fixed rating above neutral -- uncertainty shrinks a claim toward the neutral
+-- prior rather than subtracting a fixed multiple of it (which is what eff_mu
+-- does and why eff_mu is a bound, not a log-odds).
+SELECT consensus.glicko2_logit(2000000000000, 100000000000)
+     > consensus.glicko2_logit(1800000000000, 100000000000) AS rises_with_rating,
+       consensus.glicko2_logit(2000000000000, 100000000000)
+     > consensus.glicko2_logit(2000000000000, 300000000000) AS falls_with_rd;
+ rises_with_rating | falls_with_rd 
+-------------------+---------------
+ t                 | t
+(1 row)
+
+-- Abstention: a subject that couples to nothing under the relation yields no
+-- rows. A softmax cannot express this; the empty set is the point.
+SELECT count(*) = 0 AS unattested_subject_returns_no_rows
+FROM consensus.belief_distribution(
+        '\x00000000000000000000000000000000'::bytea, 'HAS_LANGUAGE', 10);
+ unattested_subject_returns_no_rows 
+------------------------------------
+ t
+(1 row)
+
+-- INVENTION §5: belief is rating - 2*rd and "all ranked reads order by it." The logit
+-- is monotone in rating but NOT in eff_mu -- g(phi) discounts where eff_mu subtracts --
+-- so the two orders genuinely disagree and only a discriminating pair proves which one
+-- the function uses. B carries the HIGHER share and the LOWER belief; belief wins.
+--   A rating 2000 rd 100 -> eff_mu 1800, logit 2.7434, p 0.456941
+--   B rating 2100 rd 200 -> eff_mu 1700, logit 2.9160, p 0.543059
+BEGIN;
+INSERT INTO laplace.consensus
+    (id, subject_id, type_id, object_id, rating, rd, volatility, witness_count, last_observed_at)
+VALUES
+ ('\x11111111111111111111111111111111', '\xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+  laplace.relation_type_id('HAS_LANGUAGE'), '\x0000000000000000000000000000000a',
+  2000000000000, 100000000000, 60000000, 5, now()),
+ ('\x22222222222222222222222222222222', '\xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+  laplace.relation_type_id('HAS_LANGUAGE'), '\x0000000000000000000000000000000b',
+  2100000000000, 200000000000, 60000000, 5, now());
+SELECT encode(object_id, 'hex') AS obj, round(p::numeric, 6) AS p, eff_mu
+FROM consensus.belief_distribution('\xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'::bytea, 'HAS_LANGUAGE', 10);
+               obj                |    p     |  eff_mu  
+----------------------------------+----------+----------
+ 0000000000000000000000000000000a | 0.640065 | 1800.000
+ 0000000000000000000000000000000b | 0.359935 | 1700.000
+(2 rows)
+
+SELECT sum(p) = 1.0 AS mass_is_one
+FROM consensus.belief_distribution('\xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'::bytea, 'HAS_LANGUAGE', 10);
+ mass_is_one 
+-------------
+ t
+(1 row)
+
+ROLLBACK;

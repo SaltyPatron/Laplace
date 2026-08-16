@@ -142,6 +142,42 @@ internal static class WiktionarySurfaceTrees
         return true;
     }
 
+    /// <summary>
+    /// The live coordinate of <paramref name="surface"/>'s stored identity — the collapsed
+    /// natural unit of its tier tree.
+    /// </summary>
+    /// <remarks>
+    /// Needed because a set composition's coordinate is the centroid of its MEMBERS' live
+    /// coordinates (INVENTION §9), and a member emitted in an earlier batch is not among this
+    /// builder's staged physicalities. Tag surfaces are short, so they are always in the process
+    /// cache and this is a hit plus one native node read.
+    ///
+    /// Returns false when the tree carries no composed geometry yet — the coord array is zeroed
+    /// at build and filled by the composer, and the origin is not a placement. A caller that
+    /// gets false must not substitute a default; the origin would forge a centroid.
+    /// </remarks>
+    public static bool TryRootCoord(string surface, Span<double> coordXyzm)
+    {
+        if (coordXyzm.Length < 4) throw new ArgumentException("coordXyzm needs 4 doubles", nameof(coordXyzm));
+        if (string.IsNullOrEmpty(surface)) return false;
+        if (!TryBuild(surface, out var tree, out bool owned)) return false;
+        try
+        {
+            var node = tree.GetNode(tree.NaturalUnitIndex());
+            unsafe
+            {
+                if (node.Coord[0] == 0.0 && node.Coord[1] == 0.0
+                    && node.Coord[2] == 0.0 && node.Coord[3] == 0.0) return false;
+                for (int i = 0; i < 4; i++) coordXyzm[i] = node.Coord[i];
+            }
+            return true;
+        }
+        finally
+        {
+            if (owned) tree.Dispose();
+        }
+    }
+
     public static bool TryEmit(
         SubstrateChangeBuilder builder, TierTree tree, Hash128 sourceId,
         ReadOnlySpan<byte> existingBitmap, out Hash128 rootId) =>

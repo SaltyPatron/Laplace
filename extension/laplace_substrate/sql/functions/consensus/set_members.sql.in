@@ -1,0 +1,38 @@
+-- consensus.set_members(subject, relation) -- the members of a set-valued attribute,
+-- read from the bundle composition instead of from a fan of edges.
+--
+-- Replaces the N-row fan: `HAS_FEATURE` today answers "what is this form's
+-- morphological analysis" with 3.01 rows averaged over 62,066,099 subjects, none of
+-- which knows it is part of one analysis. Through a bundle it is one consensus row
+-- (which carries the rating, the rd and the witness_count OF THE ANALYSIS) plus its
+-- packed members.
+--
+-- ord is the canonical position -- ascending by member id, the order StageCollection
+-- sorts into before the merkle. It is NOT a sequence. A set whose members carried
+-- order would be a trajectory of PhysicalityType.Content, not PhysicalityType.Set.
+--
+-- The physicalities join is by entity_id while the table is HASH (id), so it probes
+-- physicalities_entity_btree across all 64 leaves. That is the reverse-key cost
+-- CLAUDE.md §4 records; it is bounded here because the consensus side has already
+-- pruned to one leaf on (subject_id, type_id) and yields at most a handful of bundles.
+CREATE OR REPLACE FUNCTION consensus.set_members(p_subject bytea, p_relation text)
+    RETURNS TABLE(bundle_id bytea, member_id bytea, ord bigint,
+                  eff_mu numeric, rd bigint, witness_count bigint)
+-- No SET search_path — blocks inlining, costs the consensus index path. GH #860.
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
+    SELECT c.object_id, m.id, m.ord,
+           consensus.eff_mu_display(c.rating, c.rd), c.rd, c.witness_count
+    FROM laplace.consensus c
+    JOIN laplace.physicalities p
+      ON p.entity_id = c.object_id AND p.type = 5 AND p.trajectory IS NOT NULL
+    CROSS JOIN LATERAL unnest(public.laplace_trajectory_constituent_ids(p.trajectory))
+         WITH ORDINALITY AS m(id, ord)
+    WHERE c.subject_id = p_subject
+      AND c.type_id    = laplace.relation_type_id(p_relation)
+    ORDER BY c.object_id, m.ord;
+END;
+
+COMMENT ON FUNCTION consensus.set_members(bytea, text) IS
+    'Members of a set-valued attribute, from the bundle composition. ord is canonical '
+    '(ascending by member id), never a sequence.';

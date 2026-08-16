@@ -203,7 +203,11 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
             + "status = $2, ended_at = now(), "
             + "units_attempted = $3, units_applied = $4, units_failed = $5, "
             + "entities = $6, physicalities = $7, attestations = $8, "
-            + "error = COALESCE($9, error) "
+            + "error = COALESCE($9, error), "
+            // files_done rode ONLY the periodic progress UPDATE, so a run whose last flush
+            // did not land ended with a ledger count below the one its own status was
+            // derived from. Terminal write now carries the run's final count.
+            + "files_done = GREATEST(files_done, $10) "
             + "WHERE run_id = $1",
             cmd =>
             {
@@ -220,6 +224,7 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
                     Value = (object?)error ?? DBNull.Value,
                     NpgsqlDbType = NpgsqlDbType.Text,
                 });
+                cmd.Parameters.Add(new NpgsqlParameter { Value = (long)result.FilesDone });
             });
 
         WarnIfPlacementsExceedEntities(sourceName, result);
