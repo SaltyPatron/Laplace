@@ -2,27 +2,29 @@ CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE EXTENSION IF NOT EXISTS laplace_geom;
 CREATE EXTENSION IF NOT EXISTS laplace_substrate;
 
--- consensus.glicko2_g pinned against Glickman's published Glicko-2 worked
--- example (RD 30 / 100 / 300 -> g = 0.9955 / 0.9531 / 0.7242). External ground
--- truth, not a self-consistency check: if the 400/ln(10) scale or the pi^2 term
--- drifts, these move. rd is fp1e9.
-SELECT round(consensus.glicko2_g( 30000000000)::numeric, 4) = 0.9955 AS g_rd30_matches_paper,
-       round(consensus.glicko2_g(100000000000)::numeric, 4) = 0.9531 AS g_rd100_matches_paper,
-       round(consensus.glicko2_g(300000000000)::numeric, 4) = 0.7242 AS g_rd300_matches_paper;
+-- consensus.belief_logit pinned against Glicko-2's published rating scale. External ground
+-- truth, not a self-consistency check: r = 1500 + (400/ln 10)*mu is the scale that makes the
+-- underlying logistic a base-10 400-point curve, so a rating exactly 400 points of belief
+-- above neutral MUST be ln(10) in log-odds, and one 400 below MUST be -ln(10). If the neutral
+-- constant or the scale drifts, these move. rating and rd are fp1e9.
+SELECT round(consensus.belief_logit(1900000000000, 0)::numeric, 6) = round(ln(10)::numeric, 6)
+         AS plus_400_is_ln10,
+       round(consensus.belief_logit(1100000000000, 0)::numeric, 6) = round((-ln(10))::numeric, 6)
+         AS minus_400_is_neg_ln10,
+       consensus.belief_logit(consensus.glicko2_neutral_mu(), 0) = 0.0
+         AS neutral_is_zero;
 
--- A certain edge is not attenuated; the neutral rating is the zero of the
--- log-odds. Both are definitional and neither is a tunable.
-SELECT consensus.glicko2_g(0) = 1.0 AS g_of_zero_rd_is_unity,
-       consensus.glicko2_logit(consensus.glicko2_neutral_mu(), 0) = 0.0 AS neutral_is_logit_zero;
+-- rd is subtracted at 2x and without bound, which is what makes this BELIEF and not rating:
+-- 200 points of deviation costs 400 points of belief, exactly one ln(10).
+SELECT round((consensus.belief_logit(1900000000000, 0)
+            - consensus.belief_logit(1900000000000, 200000000000))::numeric, 6)
+       = round(ln(10)::numeric, 6) AS rd_200_costs_one_ln10;
 
--- The logit is monotone in rating at fixed rd, and STRICTLY DECREASING in rd at
--- fixed rating above neutral -- uncertainty shrinks a claim toward the neutral
--- prior rather than subtracting a fixed multiple of it (which is what eff_mu
--- does and why eff_mu is a bound, not a log-odds).
-SELECT consensus.glicko2_logit(2000000000000, 100000000000)
-     > consensus.glicko2_logit(1800000000000, 100000000000) AS rises_with_rating,
-       consensus.glicko2_logit(2000000000000, 100000000000)
-     > consensus.glicko2_logit(2000000000000, 300000000000) AS falls_with_rd;
+-- Monotone in rating at fixed rd, and decreasing in rd at fixed rating.
+SELECT consensus.belief_logit(2000000000000, 100000000000)
+     > consensus.belief_logit(1800000000000, 100000000000) AS rises_with_rating,
+       consensus.belief_logit(2000000000000, 100000000000)
+     > consensus.belief_logit(2000000000000, 300000000000) AS falls_with_rd;
 
 -- Abstention: a subject that couples to nothing under the relation yields no
 -- rows. A softmax cannot express this; the empty set is the point.
