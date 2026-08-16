@@ -88,11 +88,11 @@ ingest() {
         ( cd "$ROOT/app" && dotnet "$DLL" ingest "$@" ) || rc=$?
     fi
     local elapsed=$((SECONDS - t0))
-    echo "INGEST_TIMING source=$source elapsed_s=$elapsed rc=$rc"
+    echo "INGEST_TIMING ${TIMING_LABEL:-source=$source} elapsed_s=$elapsed rc=$rc"
     if [[ -n "${GITHUB_ACTIONS:-}" && -n "${LOGDIR:-}" ]]; then
         # The throughput gate parses the detail log; under LAPLACE_INGEST_CONSOLE=ci
         # nothing else machine-readable lands there.
-        echo "INGEST_TIMING source=$source elapsed_s=$elapsed rc=$rc" >> "$detail"
+        echo "INGEST_TIMING ${TIMING_LABEL:-source=$source} elapsed_s=$elapsed rc=$rc" >> "$detail"
     fi
     if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
         echo "elapsed_s=$elapsed" >> "$GITHUB_OUTPUT"
@@ -146,7 +146,14 @@ case "$source" in
         build_cli
         shift
         [[ $# -gt 0 ]] || { echo "Usage: $0 chain \"<source [path]>\" ..." >&2; exit 2; }
+        # Do NOT emit `source=chain`: scripts/ingest-baseline.py:46 parses
+        # `INGEST_TIMING source=(\S+)` and would record a phantom source named
+        # "chain". Per-source rows/elapsed still come from the CLI's own
+        # INGEST_COMPLETE (IngestRunner.cs:701), one per dispatched source, which
+        # is COMPLETE_RE — the baseline's primary parse. This line is the chain's
+        # wall clock, which is genuinely one number for N sources.
         source="chain"
+        TIMING_LABEL="chain_sources=$#"
         ingest chain "$@"
         ;;
     safetensors|model)
