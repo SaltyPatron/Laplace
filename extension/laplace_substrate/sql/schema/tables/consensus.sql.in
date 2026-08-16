@@ -54,4 +54,27 @@ BEGIN
 END $$;
 
 
+-- The index for the access pattern. The PK leads on `id` because a unique
+-- constraint on a partitioned table must contain the partition keys, and `id` is
+-- what makes it unique -- but nothing reads consensus by its own row identity.
+-- Every read is "what does this subject assert": consensus_step_edge, related_in,
+-- relate_path, walk_branches, bubble_up, the crawl, and the resolve stage all
+-- filter on subject_id.
+--
+-- Without a subject-leading index that filter has no access path, so the planner
+-- fans a single probe across all 244 partitions -- seq-scanning the ones with no
+-- usable index and full-scanning the PK on the rest, since a scan of
+-- (id, type_id, subject_id) cannot seek on the third column. Measured against the
+-- live cluster 2026-08-16, one subject probe returning ZERO rows: 321,831 buffers
+-- touched, 279,753 of them read from disk. ~2.5 GB of I/O per entity lookup, which
+-- is the read path underneath every slow surface in the system.
+--
+-- INCLUDE rather than a wider key: object_id/rating/rd are the columns the callers
+-- project after filtering, never predicates, so carrying them as payload makes the
+-- probe index-only without widening the search key or the write cost. The header
+-- above already commits to per-partition indexes staying live during bulk loads;
+-- this is the one that pattern was for, and only the PK ever shipped.
+CREATE INDEX IF NOT EXISTS consensus_subject
+    ON consensus (subject_id) INCLUDE (object_id, rating, rd);
+
 SELECT pg_extension_config_dump('consensus', '');

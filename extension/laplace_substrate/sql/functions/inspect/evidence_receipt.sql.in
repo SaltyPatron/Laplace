@@ -42,8 +42,8 @@ CREATE OR REPLACE FUNCTION ops.evidence_receipt(p_id bytea, p_limit integer DEFA
           AND EXISTS (
               SELECT 1 FROM laplace.entities et
               WHERE et.id = a.type_id AND et.type_id = laplace.entity_type_id('RelationType'))
-          AND NOT consensus.relation_type_in_family(a.type_id, 'HAS_POS')
-          AND NOT consensus.relation_type_in_family(a.type_id, 'HAS_FEATURE')
+          AND a.type_id <> ALL (consensus.relation_family_ids('HAS_POS'))
+          AND a.type_id <> ALL (consensus.relation_family_ids('HAS_FEATURE'))
           AND a.type_id NOT IN (SELECT id FROM feat_dynamic)
           AND a.type_id NOT IN (
               laplace.relation_type_id('HAS_SENSE'), laplace.relation_type_id('IS_SENSE_OF'),

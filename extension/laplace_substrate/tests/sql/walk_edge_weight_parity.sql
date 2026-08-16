@@ -22,7 +22,8 @@ BEGIN;
 SELECT consensus.glicko2_neutral_mu() = 1500000000000        AS neutral_matches_engine,
        consensus.foundry_witness_sat(4) = 0.5                AS halfmax_is_4,
        consensus.foundry_witness_sat(0) = 0.0                AS zero_witness_zero_weight,
-       consensus.foundry_rd_kappa() = 1.0                    AS kappa_is_1;
+       consensus.foundry_rd_kappa()
+         = 1e9 / consensus.glicko2_initial_rd()::float8      AS kappa_derived_from_initial_rd;
 
 -- 2. The C weight equals the algebra it replaces, across the interesting
 -- regions: a confident win, a wide-RD win (must stay POSITIVE and walkable --

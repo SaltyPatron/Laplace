@@ -1,0 +1,63 @@
+-- Persistent per-FILE ingest ledger. One row per file per run.
+--
+-- ingest_run_journal carries files_done/files_total and nothing else about which
+-- files those were, so a multi-file source is a single row for the whole run: a
+-- 686-file UD ingest that dies at file 30 records "cancelled, files_done=10" and
+-- the identity of every file it applied, skipped or was mid-apply on is lost.
+-- Measured 2026-08-15 on the standing ledger: 36 run rows, 16 with files_total=0.
+-- Per-file RESUME already exists (GH #898 — each finished file deposits a
+-- HasLayerCompleted marker on the file's content identity and a restart true-skips
+-- it), so the file boundary is already a real unit with a real identity; it simply
+-- never reached the ledger. This table is that unit, written down.
+--
+-- Ops metadata, not substrate content: rows are never folded, never walked, and
+-- (ingest_run_journal precedent) not preserved across dump/restore.
+--
+-- STATUS VOCABULARY, and this CHECK is a write gate rather than documentation —
+-- a status the C# side emits and this list omits raises 23514, the writer logs
+-- INGEST_FILE_JOURNAL_WRITE_FAILED and does not abort the ingest, and the row
+-- stays 'running' forever, indistinguishable from a killed file.
+--   running           opened, not yet finished
+--   ok                applied to completion, marker deposited
+--   skipped-complete  true-skipped before opening: marker already present
+--   failed            raised; error carries the message
+--   cancelled         no terminal write arrived (process killed, cluster bounced)
+CREATE TABLE IF NOT EXISTS ingest_file_journal (
+    run_id        uuid         NOT NULL,
+    file_label    text         NOT NULL,
+    source_name   text         NOT NULL,
+    file_id       bytea        CHECK (file_id IS NULL OR octet_length(file_id) = 16),
+    status        text         NOT NULL DEFAULT 'running'
+        CHECK (status IN ('running','ok','skipped-complete','failed','cancelled')),
+    started_at    timestamptz  NOT NULL DEFAULT now(),
+    ended_at      timestamptz,
+    bytes         bigint       NOT NULL DEFAULT 0,
+    records       bigint       NOT NULL DEFAULT 0,
+    entities      bigint       NOT NULL DEFAULT 0,
+    physicalities bigint       NOT NULL DEFAULT 0,
+    attestations  bigint       NOT NULL DEFAULT 0,
+    error         text,
+    PRIMARY KEY (run_id, file_label)
+);
+
+-- The read this table exists for: which files did a run finish, and which one was
+-- it holding when it died.
+CREATE INDEX IF NOT EXISTS ingest_file_journal_run_status
+    ON ingest_file_journal (run_id, status);
+
+-- Cross-run: has this file ever completed, and how large was it when it did.
+-- bytes is here because input size is the quantity the file pump is NOT bounded by
+-- (measured 2026-08-15: UD's 686 treebanks span 4,577 B to 360,217,466 B, a 78,000x
+-- spread, against file_channel=30 / file_workers=10 — counts, not bytes).
+CREATE INDEX IF NOT EXISTS ingest_file_journal_source_label
+    ON ingest_file_journal (source_name, file_label, started_at DESC);
+
+-- Re-assert the CHECK from the schema of record on every install: CREATE TABLE above
+-- is IF NOT EXISTS, so on a database that already has the table the vocabulary frozen
+-- at creation is the one enforced. Same reason ingest_run_journal does this.
+DO $$
+BEGIN
+    ALTER TABLE ingest_file_journal DROP CONSTRAINT IF EXISTS ingest_file_journal_status_check;
+    ALTER TABLE ingest_file_journal ADD CONSTRAINT ingest_file_journal_status_check
+        CHECK (status IN ('running','ok','skipped-complete','failed','cancelled'));
+END $$;

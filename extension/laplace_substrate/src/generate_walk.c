@@ -92,9 +92,18 @@ ensure_edge_plan(void)
  * ST_X/Y/Z/M (liblwgeom isn't linked, same constraint as recall.c's
  * word_shape_peers_fast_impl) with LEFT JOINs so a coord-less entity (no
  * point physicality yet) degrades to "no geometry bonus", never an error.
- * tableoid on each side gives the physicalities partition (RANGE-partitioned
- * by hilbert_index, 64 bands) for a free, correct-by-construction "same
- * hilbert band" locality signal -- comparing two OIDs, no distance math.
+ * tableoid on each side gives the physicalities partition. That partition is
+ * HASH(id) over 64 partitions -- NOT a hilbert band -- so tableoid equality
+ * certifies only "same hash bucket", which carries no locality. The +1.0 it
+ * used to add scored a hash collision; the bonus is gone, not merely gated.
+ *
+ * GEOMETRY IS OPT-IN because physicalities is HASH(id)-partitioned while this
+ * joins on entity_id: the key cannot prune, so each side fans out across all
+ * 64 partitions, twice per candidate edge. MEASURED live on a 200-node
+ * frontier (21,413 candidate edges): 30,305ms with the two LEFT JOINs vs
+ * 408ms without -- 74x, to fund an ordering nudge bounded at +2.0 against a
+ * base of ~1000-2000. Identical pathology to ordinal_continuity_bonus below,
+ * which was already made opt-in for it; this sibling was never rewired.
  */
 static const char *WALK_BATCH_QUERY =
     "SELECT f.idx, c.object_id, eo.type_id, c.type_id, c.rating, c.rd, c.witness_count, "
@@ -109,7 +118,36 @@ static const char *WALK_BATCH_QUERY =
     "WHERE c.object_id IS NOT NULL "
     "  AND ($2::bytea IS NULL OR c.type_id = $2)";
 
+/* Same edge set, no coordinate fetch. The geometry columns are read
+ * conditionally in the fetch loop, so this plan's narrower tuple descriptor is
+ * the only difference the caller sees. */
+static const char *WALK_BATCH_QUERY_NOGEO =
+    "SELECT f.idx, c.object_id, eo.type_id, c.type_id, c.rating, c.rd, c.witness_count, "
+    "       eo.highway_mask "
+    "FROM unnest($1::bytea[]) WITH ORDINALITY AS f(subject_id, idx) "
+    "JOIN laplace.consensus c ON c.subject_id = f.subject_id "
+    "JOIN laplace.entities eo ON eo.id = c.object_id "
+    "WHERE c.object_id IS NOT NULL "
+    "  AND ($2::bytea IS NULL OR c.type_id = $2)";
+
 static SPIPlanPtr walk_batch_plan = NULL;
+static SPIPlanPtr walk_batch_nogeo_plan = NULL;
+
+static void
+ensure_walk_batch_nogeo_plan(void)
+{
+    if (walk_batch_nogeo_plan == NULL)
+    {
+        Oid argtypes[2] = { BYTEAARRAYOID, BYTEAOID };
+        SPIPlanPtr plan = SPI_prepare(WALK_BATCH_QUERY_NOGEO, 2, argtypes);
+        if (plan == NULL)
+            elog(ERROR, "generate walk: SPI_prepare failed: %s",
+                 SPI_result_code_string(SPI_result));
+        if (SPI_keepplan(plan) != 0)
+            elog(ERROR, "generate walk: SPI_keepplan failed");
+        walk_batch_nogeo_plan = plan;
+    }
+}
 
 static void
 ensure_walk_batch_plan(void)
@@ -191,15 +229,50 @@ typedef struct RankedEdge
     int64  rating;
     int64  rd;
     int64  witnesses;
-    double score;
+    double base;   /* adjudicated: relation_rank * walk_edge_weight */
+    double bonus;  /* instrument-tier nudges, subordinate by construction */
+    double score;  /* base + bonus; retained for callers that report it */
 } RankedEdge;
 
+/*
+ * Belief first, always. The bonuses are additive constants (geometry <= 2.0,
+ * topic bias 3.0) while `base` is signed_mu * exp(-kappa*rd) * saturation,
+ * MEASURED live at max 1.95e-20 over 21,413 real edges because kappa=1.0 is
+ * applied to rd in raw rating units (exp(-265) at the average rd). Comparing
+ * base+bonus therefore ranked purely by the nudges and discarded the
+ * adjudicated verdict entirely -- the exact inversion of INVENTION SS5 ("all
+ * ranked reads order by belief") and SS9 (geometry is instrument-tier; point
+ * proximity is not the relatedness signal), and the opposite of what the
+ * scorer's own comment claims it does.
+ *
+ * Ordering on base alone keeps full resolution: doubles represent down to
+ * 1e-308, so an underflowed belief term still orders correctly even while
+ * kappa remains miscalibrated. Bonuses break exact ties only.
+ *
+ * Final key is the object id, so equal-belief equal-bonus candidates emit in
+ * one fixed order. qsort is unstable and SS15 requires byte-identical output.
+ */
 static int
 ranked_edge_cmp_score_desc(const void *a, const void *b)
 {
-    double sa = ((const RankedEdge *) a)->score;
-    double sb = ((const RankedEdge *) b)->score;
-    return (sa < sb) - (sa > sb);
+    const RankedEdge *ea = (const RankedEdge *) a;
+    const RankedEdge *eb = (const RankedEdge *) b;
+    bytea *oa, *ob;
+    int    la, lb, c;
+
+    if (ea->base != eb->base)
+        return (ea->base < eb->base) - (ea->base > eb->base);
+    if (ea->bonus != eb->bonus)
+        return (ea->bonus < eb->bonus) - (ea->bonus > eb->bonus);
+
+    oa = DatumGetByteaPP(ea->object);
+    ob = DatumGetByteaPP(eb->object);
+    la = VARSIZE_ANY_EXHDR(oa);
+    lb = VARSIZE_ANY_EXHDR(ob);
+    c  = memcmp(VARDATA_ANY(oa), VARDATA_ANY(ob), la < lb ? la : lb);
+    if (c != 0)
+        return c;
+    return (la > lb) - (la < lb);
 }
 
 /*
@@ -448,6 +521,7 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
     Datum  *topic_bias = NULL;
     int     n_topic_bias = 0;
     bool    ordinal_continuity_enabled;
+    bool    use_geometry;
 
     if (PG_ARGISNULL(0))
         ereport(ERROR, (errmsg("walk_branches: prompt entity must not be NULL")));
@@ -487,12 +561,23 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
      * (the live-served path) does not opt in.
      */
     ordinal_continuity_enabled = (PG_NARGS() > 6 && !PG_ARGISNULL(6)) ? PG_GETARG_BOOL(6) : false;
+    /*
+     * Opt-in, default false, for the reason given above WALK_BATCH_QUERY: the
+     * coordinate fetch costs 74x the whole edge scan and buys an ordering
+     * nudge bounded at +2.0. Off, the walk ranks on adjudicated belief alone,
+     * which is what INVENTION SS9 rules anyway -- geometry is instrument-tier
+     * and point proximity is not the relatedness signal.
+     */
+    use_geometry = (PG_NARGS() > 7 && !PG_ARGISNULL(7)) ? PG_GETARG_BOOL(7) : false;
 
     InitMaterializedSRF(fcinfo, 0);
 
     if (SPI_connect() != SPI_OK_CONNECT)
         elog(ERROR, "walk_branches: SPI_connect failed");
-    ensure_walk_batch_plan();
+    if (use_geometry)
+        ensure_walk_batch_plan();
+    else
+        ensure_walk_batch_nogeo_plan();
     ensure_relationtype_type_id();
     kappa = spi_fetch_rd_kappa();
 
@@ -556,7 +641,8 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
             args[1] = type_null ? (Datum) 0 : type_datum;
             if (type_null) nulls[1] = 'n';
 
-            rc = SPI_execute_plan(walk_batch_plan, args, nulls, true, 0);
+            rc = SPI_execute_plan(use_geometry ? walk_batch_plan : walk_batch_nogeo_plan,
+                                  args, nulls, true, 0);
             if (rc != SPI_OK_SELECT)
                 elog(ERROR, "walk_branches: batch edge query failed: %s",
                      SPI_result_code_string(rc));
@@ -580,6 +666,16 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
 
                 hm = SPI_getbinval(tup, td, 8, &isnull);
                 raw[r].highway_mask = isnull ? (Datum) 0 : copy_bytea_datum(hm);
+
+                /* Columns 9..18 exist only in the geometry plan. */
+                if (!use_geometry)
+                {
+                    raw[r].subj_coord_ok = false;
+                    raw[r].obj_coord_ok  = false;
+                    raw[r].subj_partoid  = InvalidOid;
+                    raw[r].obj_partoid   = InvalidOid;
+                    continue;
+                }
 
                 raw[r].subj_xyzm[0] = DatumGetFloat8(SPI_getbinval(tup, td, 9,  &isnull));
                 raw[r].subj_xyzm[1] = DatumGetFloat8(SPI_getbinval(tup, td, 10, &cnull)); isnull |= cnull;
@@ -655,9 +751,12 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
                         double dist = math4d_angular_distance(raw[j].subj_xyzm, raw[j].obj_xyzm);
                         bonus += 2.0 * (1.0 - dist / WALK_PI); /* dist in [0,pi] on S3 */
                     }
-                    if (OidIsValid(raw[j].subj_partoid) && OidIsValid(raw[j].obj_partoid) &&
-                        raw[j].subj_partoid == raw[j].obj_partoid)
-                        bonus += 1.0; /* same hilbert-index partition band */
+                    /*
+                     * No partition-band bonus. laplace.physicalities is
+                     * HASH(id) over 64 partitions, not RANGE over hilbert
+                     * bands, so equal tableoids mean "same hash bucket" and
+                     * nothing else -- the bonus was paid on collision.
+                     */
 
                     /* 3Cd: session/topic frontier bias. */
                     if (topic_bias != NULL)
@@ -688,6 +787,8 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
                      * consensus verdict gates placement; geometry only orders
                      * what consensus already confirmed.
                      */
+                    cands[n_cands].base      = base;
+                    cands[n_cands].bonus     = base > 0.0 ? bonus : 0.0;
                     cands[n_cands].score     = base > 0.0 ? base + bonus : base;
                     n_cands++;
                 }
@@ -707,8 +808,15 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
                 {
                     int shortlist_n = n_cands < beam * 3 ? n_cands : beam * 3;
                     for (int s = 0; s < shortlist_n; s++)
-                        if (cands[s].score > 0.0) /* confirmed-only, same gate as 3Cc */
-                            cands[s].score += ordinal_continuity_bonus(nodes[f].entity, cands[s].object);
+                        if (cands[s].base > 0.0) /* confirmed-only, same gate as 3Cc */
+                        {
+                            /* Into bonus, not score: the comparator ranks on
+                             * base then bonus, so a score-only increment would
+                             * be silently inert. */
+                            double ob = ordinal_continuity_bonus(nodes[f].entity, cands[s].object);
+                            cands[s].bonus += ob;
+                            cands[s].score += ob;
+                        }
                     qsort(cands, n_cands, sizeof(RankedEdge), ranked_edge_cmp_score_desc);
                 }
 

@@ -144,7 +144,6 @@ eval:
     set -euo pipefail
     mkdir -p .eval-proof
     python3 scripts/eval-generation.py \
-      --db "host=${PGHOST:-/var/run/postgresql} user=${PGUSER:-laplace_admin} dbname=${PGDATABASE:-laplace}" \
       --probes scripts/eval-probes.json \
       --baseline scripts/eval-baselines.json \
       --report .eval-proof/generation.json

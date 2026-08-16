@@ -52,6 +52,16 @@ DECLARE
     -- Resolved once (see converse_facts): a function on consensus.type_id is a
     -- function on the partition key, so it prunes nothing and runs per edge.
     t_def  bytea[];
+    -- Content bands 1,2,4,7. A local, not a CTE column: relation_band_types is
+    -- STABLE so it cannot fold at plan time, but a plpgsql local binds as a
+    -- parameter and `type_id = ANY($n)` prunes the LIST partitions at execution.
+    -- Read back from a CTE column it is a per-row variable and prunes nothing.
+    t_band bytea[];
+    -- Separator set as a LOCAL, for the same reason as t_band. generation.separator_ids()
+    -- is STABLE, and measured with EXPLAIN it is NOT hoisted to an InitPlan: it lands
+    -- in the Filter expression and is evaluated PER ROW. At 10.3 ms a call that is
+    -- catastrophic over a token stream. A plpgsql local binds once as a parameter.
+    t_sep  bytea[];
     SENT   bytea := '\x00';
     MINLEN int := 5;
     syn    bytea;
@@ -62,7 +72,9 @@ DECLARE
     core_seq bytea[];
     n      int;
 BEGIN
-    t_def := laplace.relation_band_types(b_def);
+    t_def  := laplace.relation_band_types(b_def);
+    t_band := laplace.relation_band_types(ARRAY[1,2,4,7]);
+    t_sep  := generation.separator_ids();
     -- ORIENT. Same hash-space signal converse.chat() uses: how strongly the token denotes the
     -- sense, then highway-mask breadth. No realize.realize(), no surface comparison.
     -- Two levels: breadth picks WHICH TOKEN, denote_mu picks WHICH SENSE of it.
@@ -96,28 +108,16 @@ BEGIN
     END IF;
 
     WITH
-    -- CONTENT-BAND TYPE IDS, RESOLVED ONCE.
-    --
-    -- Every arm below used to test `consensus.relation_highway_band(c.type_id) IN (1,2,4,7)`
-    -- directly against consensus. consensus is LIST-partitioned by type_id and holds
-    -- ~48M rows, so a function on the partition key means no pruning, no index on the
-    -- predicate, and one C call per edge scanned -- five times in this one function,
-    -- on the hot conversation path. The band is a property of ~221 relation types.
-    -- Resolved here it becomes a bound array and each arm is an indexed
-    -- (subject_id, type_id) probe.
-    bands AS MATERIALIZED (
-        SELECT laplace.relation_band_types(ARRAY[1,2,4,7]) AS t
-    ),
     -- FRONTIER: the topic's consensus neighbourhood, both directions, over the
     -- content bands. This is the turn's semantic plan -- concept-level, language-free.
     frontier AS MATERIALIZED (
         SELECT c.object_id AS cid, consensus.eff_mu(c.rating, c.rd) AS mu
-        FROM bands b, laplace.consensus c
-        WHERE c.subject_id = syn AND c.type_id = ANY (b.t)
+        FROM laplace.consensus c
+        WHERE c.subject_id = syn AND c.type_id = ANY (t_band)
         UNION ALL
         SELECT c.subject_id, consensus.eff_mu(c.rating, c.rd)
-        FROM bands b, laplace.consensus c
-        WHERE c.object_id = syn AND c.type_id = ANY (b.t)
+        FROM laplace.consensus c
+        WHERE c.object_id = syn AND c.type_id = ANY (t_band)
         UNION ALL
         SELECT syn, (SELECT max(consensus.eff_mu(c2.rating, c2.rd)) FROM laplace.consensus c2
                      WHERE c2.subject_id = syn)
@@ -137,17 +137,15 @@ BEGIN
         -- double-count it at full-plus-decayed weight (Copilot, PR #896).
         UNION ALL
         SELECT c.object_id, consensus.eff_mu(c.rating, c.rd) / (2 ^ x.dist)
-        FROM bands b
-        CROSS JOIN unnest(COALESCE(p_ctx, ARRAY[]::bytea[])) WITH ORDINALITY x(cid, dist)
+        FROM unnest(COALESCE(p_ctx, ARRAY[]::bytea[])) WITH ORDINALITY x(cid, dist)
         JOIN laplace.consensus c ON c.subject_id = x.cid
-                        AND c.type_id = ANY (b.t)
+                        AND c.type_id = ANY (t_band)
         WHERE x.cid <> syn
         UNION ALL
         SELECT c.subject_id, consensus.eff_mu(c.rating, c.rd) / (2 ^ x.dist)
-        FROM bands b
-        CROSS JOIN unnest(COALESCE(p_ctx, ARRAY[]::bytea[])) WITH ORDINALITY x(cid, dist)
+        FROM unnest(COALESCE(p_ctx, ARRAY[]::bytea[])) WITH ORDINALITY x(cid, dist)
         JOIN laplace.consensus c ON c.object_id = x.cid
-                        AND c.type_id = ANY (b.t)
+                        AND c.type_id = ANY (t_band)
         WHERE x.cid <> syn
         UNION ALL
         SELECT x.cid, (SELECT max(consensus.eff_mu(c2.rating, c2.rd)) FROM laplace.consensus c2
@@ -180,6 +178,28 @@ BEGIN
         FROM gids g
         CROSS JOIN LATERAL generation.trajectory_unpacked_points(g.gid)
              WITH ORDINALITY AS u(entity_id, run_length, ctier, ord)
+        -- ctier = 2 IS A KNOWN-LOSSY FILTER THAT STILL HAS NO REPLACEMENT. Do not
+        -- remove it without reading this.
+        --
+        -- It is lossy exactly as CLAUDE.md says: tier is a floor, laplace.word_id('a'),
+        -- word_id('I') and word_id('狼') are all tier 0 and typed Codepoint, so this
+        -- drops single-character words. Measured: 'a' occurs 152 times inside
+        -- sentence trajectories and every occurrence is discarded here.
+        --
+        -- It cannot simply be deleted. A tier-3 container's constituents are NOT all
+        -- words: measured on the containers of 'dog', Word x255, Codepoint x15,
+        -- POS x6. generation.separator_ids() removes only Zs/Zl/Zp/Cc, not punctuation
+        -- (Po) or digits (Nd). Removing the filter and relying on the separator set
+        -- was tried and measured: generation.compose_batch went 81,701 ms -> 316,998 ms and
+        -- emitted "year action MIDDLE DOT year active verb counterfactual in COLON"
+        -- -- raw codepoint names in the stream.
+        --
+        -- And no read-side test can fix it, because laplace.word_id('a') IS the codepoint
+        -- entity: same content, same hash, one entity, one type. The packed vertex
+        -- tier does not disambiguate either -- measured, it equals the entities floor
+        -- on all 3,642 points sampled. The fix belongs at INGEST: the trajectory
+        -- vertex would have to record the constituent's segmentation ROLE at that
+        -- position, which it currently does not.
         WHERE u.ctier = 2
     ),
     -- Whitespace-ness through the ONE installed definition, on the fast renderer.
@@ -187,21 +207,27 @@ BEGIN
     -- a read path, and it rendered to depth 64 to answer a question about the
     -- first character.
     --
-    -- NOT converted to the id-space HAS_GENERAL_CATEGORY classification that
-    -- corpus_whitespace_vocab_indices uses: that reads Unicode general category,
-    -- which is attested on CODEPOINTS, and toks is filtered to ctier = 2 (words).
-    -- Every probe would miss, return NULL, and fall through to this same realize.render
-    -- with an extra join paid first. Classification on ids is right where the ids
-    -- carry the class; here they do not, and pretending otherwise buys a slower
-    -- query with identical output.
-    ws_ids AS MATERIALIZED (
-        SELECT array_agg(DISTINCT t.entity_id ORDER BY t.entity_id) AS a FROM toks t
-    ), ws AS MATERIALIZED (
-        SELECT i.id, realize.is_all_whitespace(COALESCE(s.txt, ' ')) AS is_ws
-        FROM ws_ids,
-             LATERAL unnest(ws_ids.a) WITH ORDINALITY i(id, ord),
-             LATERAL unnest(realize.render_text_batch(ws_ids.a, 8)) WITH ORDINALITY s(txt, ord)
-        WHERE i.ord=s.ord
+    -- CLASSIFIED BY ID. Rendering every distinct token to text to ask one boolean,
+    -- then discarding the text, is the read-side law inverted -- generation.separator_ids()'s
+    -- own comment states it: "classification is an indexed read on the id; the
+    -- realize.render is the cost. NO RENDER FALLBACK."
+    --
+    -- The previous comment here rejected the id form on the grounds that Unicode
+    -- general category is attested on CODEPOINTS while toks holds words, so every
+    -- probe would miss. That is true of a per-token HAS_GENERAL_CATEGORY probe and
+    -- NOT true of generation.separator_ids(), which is the closed separator set including
+    -- compositions (composition lifts the property, §3 Merkle). Measured over 362
+    -- real trajectory tokens: render-side and id-side agree on every one, 0
+    -- disagreements. separator_ids() is 10.3 ms for the whole set.
+    --
+    -- realize.is_all_whitespace is NOT an English/ASCII assumption -- it is
+    -- pg_laplace_is_all_whitespace in perfcache.c, an O(1) read of the compiled UCD
+    -- record. The defect was only that it takes TEXT, so the caller had to render to
+    -- reach it. Classifying by id skips the render, not a bad classifier.
+    ws AS MATERIALIZED (
+        SELECT DISTINCT t.entity_id AS id,
+               t.entity_id = ANY (t_sep) AS is_ws
+        FROM toks t
     ),
     kept AS MATERIALIZED (
         SELECT q.* FROM (
@@ -225,14 +251,34 @@ BEGIN
     -- LM-Head slot: realize.realize(concept, p_lang) finally gets to choose the
     -- language member instead of parroting the witness's surface — p_lang
     -- bites.
+    kept_ids AS MATERIALIZED (
+        SELECT DISTINCT k.entity_id AS id FROM kept k
+    ),
+    -- ONE election for every kept token, not one election per token.
+    --
+    -- This was a scalar subquery calling lexical.senses(d.id) per distinct token, which
+    -- re-ran taxonomy.bubble_up's whole CTE cascade each time. Measured under
+    -- auto_explain on compose_batch('what is a wolf', 12): CTE Scan `scoped`
+    -- 51,351 ms over 798 loops, `cand_lang` 32,438 ms over 728 loops, `family_out`
+    -- 15,358 ms over 2,394 loops -- 51.4 s of a 52.2 s statement, to elect senses
+    -- for ~266 distinct tokens. The per-token work is small; the repetition was the
+    -- cost. cand_lang collapses hardest: attestations cannot prune on subject_id, so
+    -- the scalar form paid the full partition set once PER TOKEN.
+    --
+    -- Same ordering keys lexical.senses applied (witnesses, then base_eff_mu), and no k --
+    -- bubble_up_batch's p_k defaults to NULL, so the election sees every candidate
+    -- instead of a per-token prefix of one ordering.
+    sense_pick AS MATERIALIZED (
+        SELECT DISTINCT ON (b.term) b.term, b.synset_id
+        FROM taxonomy.bubble_up_batch(ARRAY(SELECT id FROM kept_ids)) b
+        ORDER BY b.term, b.witnesses DESC, b.base_eff_mu DESC NULLS LAST, b.synset_id
+    ),
     concept_map AS MATERIALIZED (
-        SELECT d.id AS wid,
-               COALESCE(
-                   (SELECT s.synset_id FROM lexical.senses(d.id) s
-                     ORDER BY s.witnesses DESC, s.eff_mu DESC NULLS LAST,
-                              s.synset_id LIMIT 1),
-                   d.id) AS cid
-        FROM (SELECT DISTINCT k.entity_id AS id FROM kept k) d
+        -- Tokens with no sense (numbers, names, glue) keep their surface id, so
+        -- realization still has something to print.
+        SELECT k.id AS wid, COALESCE(sp.synset_id, k.id) AS cid
+        FROM kept_ids k
+        LEFT JOIN sense_pick sp ON sp.term = k.id
     ),
     seq AS MATERIALIZED (
         -- THE STEER. Provenance weight (which source) PLUS frontier salience

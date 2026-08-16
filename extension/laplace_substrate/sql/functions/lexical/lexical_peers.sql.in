@@ -4,19 +4,42 @@
 DROP FUNCTION IF EXISTS laplace.lexical_peers(bytea);
 CREATE OR REPLACE FUNCTION lexical.lexical_peers(p_word bytea)
     RETURNS bytea[]
-    LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$
-    -- Orthographic identity peers only: the word itself + its case variants
-    -- (dog/Dog/DOG share senses). The frechet-shape scan that used to live
-    -- here (word_shape_peers_fast) is a native buffer scan costing 0.3-2.4s
-    -- per call and returned nothing on exact lookups — measured 99% of
-    -- lexical.senses()/taxonomy.top_synset()/lexical.define() wall time. Shape-fuzzy matching stays
-    -- available as word_shape_peers_fast for callers that explicitly want it;
-    -- it does NOT belong on the exact sense-lookup hot path.
-    WITH merged AS (
-        SELECT p_word AS id
-        UNION SELECT unnest(lexical.word_case_variant_ids(p_word)) AS id
-    )
+    LANGUAGE plpgsql STABLE STRICT PARALLEL SAFE AS $$
+DECLARE
+    v bytea[];
+BEGIN
+    -- WIDENING IS A FALLBACK, AND plpgsql IS WHAT MAKES IT ONE.
+    --
+    -- dog, Dog and DOG are DIFFERENT CONTENT, so different hashes and different
+    -- entities (laplace.word_id('dog') = 01cdcce1..., word_id('Dog') = af1513f0...).
+    -- Merging them asserts an equivalence the identity scheme denies, and case folding
+    -- exists only in bicameral scripts. Where the relation is real the graph attests it:
+    -- dog and Dog carry an IS_SYNONYM_OF edge.
+    --
+    -- THIS WAS WRITTEN IN SQL FIRST AND THE GUARD DID NOT HOLD. A `CASE WHEN exists
+    -- THEN ARRAY[p_word] ELSE (widening) END` returns the right ANSWER but still does
+    -- the WORK: the sub-SELECT in the ELSE is hoisted to an InitPlan and evaluated
+    -- unconditionally. Verified by call count -- lexical_peers(word_id('dog')), which
+    -- resolves exactly and returns one peer, still invoked lexical.word_case_variants
+    -- once. Rewriting the guard as `WHERE NOT EXISTS (...)` on the widening arm did not
+    -- help either; the set-returning function was still invoked. plpgsql IF is the
+    -- construct that actually skips it.
+    --
+    -- What that call costs, measured in laplace.pg_stat_statements on one
+    -- converse.prompt_coherence('the capital of France is'): word_case_variants 5 calls /
+    -- 98.5 ms mean, and the per-id realize.render_text inside it another 5 / 88.4 ms --
+    -- ~934 ms, about half that function, for five tokens that all resolve exactly.
+    IF EXISTS (SELECT 1 FROM laplace.consensus c
+                WHERE c.subject_id = p_word
+                  AND c.type_id = ANY (consensus.relation_family_ids('HAS_SENSE')))
+    THEN
+        RETURN ARRAY[p_word];
+    END IF;
+
     SELECT COALESCE(array_agg(DISTINCT id ORDER BY id), ARRAY[p_word])
-    FROM merged
-    WHERE id IS NOT NULL
-$$;
+      INTO v
+      FROM (SELECT p_word AS id
+            UNION SELECT unnest(lexical.word_case_variant_ids(p_word)) AS id) m
+     WHERE id IS NOT NULL;
+    RETURN v;
+END $$;

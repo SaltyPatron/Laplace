@@ -6,6 +6,7 @@ schema/tables/attestations.sql.in
 schema/tables/ingest_flush_journal.sql.in
 schema/tables/index_cycle_journal.sql.in
 schema/tables/ingest_run_journal.sql.in
+schema/tables/ingest_file_journal.sql.in
 indexes/entities_type_btree.sql.in
 indexes/entities_first_observed_btree.sql.in
 indexes/entities_created_at_brin.sql.in
@@ -169,6 +170,8 @@ functions/converse/label_or_hex.sql.in
 functions/converse/label_is_content.sql.in
 functions/inspect/consensus_partition_pressure.sql.in
 functions/converse/prompt_words.sql.in
+functions/converse/attested_language_batch.sql.in
+functions/converse/attested_language.sql.in
 functions/converse/word_language.sql.in
 inference/synonyms.sql.in
 inference/translations.sql.in
@@ -213,6 +216,7 @@ functions/converse/links.sql.in
 inference/attention.sql.in
 functions/converse/correlate.sql.in
 seed/canonical_names_seed.sql.in
+generated/relation_family_ids.sql.in
 generated/seed_relation_types.sql.in
 generated/seed_relation_partitions.sql.in
 generated/seed_pos.sql.in
@@ -271,6 +275,8 @@ functions/generation/consensus_adjacency.sql.in
 functions/generation/foundry_vocab.sql.in
 functions/generation/grapheme_floor_vocab.sql.in
 functions/generation/grapheme_order.sql.in
+functions/corpus/separator_ids.sql.in
+functions/generation/word_adjacency.sql.in
 functions/generation/word_order.sql.in
 functions/generation/sentence_order.sql.in
 functions/generation/sentence_order_word_bridge.sql.in
@@ -325,6 +331,7 @@ functions/consensus/relate_path.sql.in
 functions/consensus/relation_summary.sql.in
 functions/consensus/gaps.sql.in
 functions/taxonomy/bubble_up.sql.in
+functions/taxonomy/bubble_up_batch.sql.in
 functions/taxonomy/retrieve_grounded.sql.in
 functions/taxonomy/top_synset.sql.in
 functions/taxonomy/synset_gloss.sql.in
@@ -359,7 +366,6 @@ functions/recall/recall_fallback_gloss.sql.in
 functions/recall/recall_is_a_yes_reply.sql.in
 functions/recall/recall_is_a_no_reply.sql.in
 functions/corpus/corpus_trajectory_probe.sql.in
-functions/corpus/separator_ids.sql.in
 functions/corpus/corpus_whitespace_vocab_indices.sql.in
 functions/geometry/entity_physicality_coord.sql.in
 functions/geometry/entity_container_degree.sql.in

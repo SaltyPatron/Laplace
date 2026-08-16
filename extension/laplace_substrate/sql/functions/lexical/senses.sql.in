@@ -8,7 +8,15 @@
 DROP FUNCTION IF EXISTS laplace.senses(bytea);
 CREATE OR REPLACE FUNCTION lexical.senses(p_word bytea)
     RETURNS TABLE(sense_id bytea, synset_id bytea, eff_mu numeric, witnesses bigint)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+    -- ROWS is the STRUCTURAL bound below, not an estimate: bubble_up is called with
+    -- p_k = 64, so this cannot return more. Undeclared, Postgres assumes 1000 for a
+    -- set-returning function -- 15.6x high on the bias-expansion path, where the
+    -- estimate decides join order. 239 of the 244 set-returning functions in this
+    -- surface still ship that default; each needs a measured cardinality or a bound
+    -- like this one, never a guessed number.
+    ROWS 64
+    AS $$
     SELECT b.sense_id, b.synset_id, b.base_eff_mu, b.witnesses
     FROM taxonomy.bubble_up(p_word, NULL::bytea[], 64) b
     -- EVIDENCE BEFORE ADJUDICATED STRENGTH — see the matching note in

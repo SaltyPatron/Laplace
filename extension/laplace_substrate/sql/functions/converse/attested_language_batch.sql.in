@@ -1,0 +1,49 @@
+-- converse.attested_language_batch(ids[]) -> (id, lang): the primary language of EACH id,
+-- in one pass. This is the canonical body; converse.attested_language(one) delegates here.
+--
+-- WHY IT EXISTS (§15). This argmax was written twice: once as the scalar
+-- converse.attested_language, and once inline as taxonomy.bubble_up's `cand_lang` CTE --
+-- identical predicate, identical GROUP BY, identical tie-break, two bodies free to
+-- drift. bubble_up then ran BOTH per call: the scalar once for the term, the inline
+-- copy once for the candidate set.
+--
+-- WHY IT IS A BATCH. laplace.attestations is LIST (type_id) and this predicate is on
+-- subject_id, so nothing prunes and every call pays the partition set. Measured:
+-- the scalar costs 71.6 ms warm, so a per-term loop over a token stream pays that
+-- per token, while one batched probe covers every id at once. Under auto_explain on
+-- compose_batch, the per-token form showed cand_lang at 32,438 ms over 728 loops.
+--
+-- The definition is unchanged from the scalar: argmax over SUM(sum_score_fp1e9) per
+-- Language-typed context, ties on context_id. A row COUNT here would be the
+-- frequency prior §7 forbids -- the weight is the fold's own adjudicated input, not
+-- a tally. Contexts are not all languages (chess play and ordinals appear there
+-- too), so the context entity is type-checked rather than assumed.
+--
+-- Ids with no Language-typed attestation return NO ROW, not a NULL row. Callers
+-- LEFT JOIN and treat the absence as "no primary language", which is the same
+-- structural answer the scalar's NULL carried.
+-- DROP ORDER IS LOAD-BEARING (same law as metric_ladder.sql.in:41-42).
+-- taxonomy.bubble_up_batch is BEGIN ATOMIC and calls BOTH this function and
+-- consensus.relation_family_ids, so the live catalog pins both their OIDs in
+-- pg_depend. On a live-DB `ALTER EXTENSION UPDATE` — where all three already
+-- exist — the installed dependent RESTRICTs its bases and the drop below fails.
+-- A fresh install never sees it, because nothing is installed to pin anything;
+-- only the live catalog knows, which is what scripts/check-upgrade-drop-order.py
+-- asks. This file is the FIRST of the two bases in manifest.upgrade (174, against
+-- generated/relation_family_ids.sql.in at 219), and the gate takes the first drop
+-- position for a name, so dropping the dependent here clears both hazards.
+-- Its CREATE stays at 330, after both bases exist, which BEGIN ATOMIC requires.
+DROP FUNCTION IF EXISTS taxonomy.bubble_up_batch(bytea[], bytea[], integer);
+DROP FUNCTION IF EXISTS converse.attested_language_batch(bytea[]);
+CREATE OR REPLACE FUNCTION converse.attested_language_batch(p_ids bytea[])
+    RETURNS TABLE(id bytea, lang bytea)
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+    SELECT DISTINCT ON (a.subject_id) a.subject_id, a.context_id
+    FROM laplace.attestations a
+    JOIN laplace.entities e ON e.id = a.context_id
+                           AND e.type_id = realize.canonical_id('Language')
+    WHERE a.subject_id = ANY (p_ids)
+    GROUP BY a.subject_id, a.context_id
+    ORDER BY a.subject_id, SUM(a.sum_score_fp1e9) DESC, a.context_id;
+END;

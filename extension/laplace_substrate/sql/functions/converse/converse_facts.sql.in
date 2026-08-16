@@ -52,17 +52,29 @@ BEGIN
     v_lbl := COALESCE(realize.realize(p_syn, p_lang), realize.label(p_syn));
 
     -- definition: highest consensus.eff_mu edge in the definitional band.
+    -- RANK IN ID SPACE, RENDER THE WINNER. The ordering key is eff_mu, not the
+    -- rendered text, so nothing needs a surface to decide -- but realize.render_text sat in
+    -- the target list, so it ran for EVERY definitional candidate and one survived
+    -- the LIMIT. Each call opens its own SPI connection and walks
+    -- realize.constituents_closure. Measured on the glacier synset, this arm was 199 ms of
+    -- converse.facts' 868 ms. Same fix as realize._defines (b9cd34df).
+    --
+    -- object_id closes the ORDER BY: without it a tie is broken by plan order, which
+    -- is not reproducible.
     RETURN QUERY
+    WITH best AS (
+        SELECT c.subject_id, c.object_id, c.type_id, c.rating, c.rd, c.witness_count
+        FROM laplace.consensus c
+        WHERE c.subject_id = p_syn AND c.type_id = ANY (t_def)
+        ORDER BY consensus.eff_mu(c.rating, c.rd) DESC, c.object_id
+        LIMIT 1)
     SELECT 'definition'::text,
-           initcap(v_lbl) || ' is ' || realize.render_text(c.object_id, 96) || '.',
-           consensus.eff_mu_display(c.rating, c.rd),
-           c.witness_count::bigint,
-           ARRAY[c.subject_id, c.object_id],
-           ARRAY[c.type_id]
-    FROM laplace.consensus c
-    WHERE c.subject_id = p_syn AND c.type_id = ANY (t_def)
-    ORDER BY consensus.eff_mu(c.rating, c.rd) DESC
-    LIMIT 1;
+           initcap(v_lbl) || ' is ' || realize.render_text(b.object_id, 96) || '.',
+           consensus.eff_mu_display(b.rating, b.rd),
+           b.witness_count::bigint,
+           ARRAY[b.subject_id, b.object_id],
+           ARRAY[b.type_id]
+    FROM best b;
 
     -- taxonomy: multi-hop beam walk up the topic's strongest HYPERNYMY relation.
     -- FAMILY, not band. The taxonomic BAND ranks importance and contains more than
@@ -74,7 +86,8 @@ BEGIN
     SELECT c.type_id INTO tax_type
     FROM laplace.consensus c
     WHERE c.subject_id = p_syn
-      AND c.type_id IN (SELECT id FROM consensus.relation_family_members('IS_A'))
+      -- Folded: IMMUTABLE and manifest-generated, so this prunes at plan time.
+      AND c.type_id = ANY (consensus.relation_family_ids('IS_A'))
     ORDER BY consensus.eff_mu(c.rating, c.rd) DESC
     LIMIT 1;
     -- NO band fallback. An earlier revision fell back to the taxonomic BAND when the

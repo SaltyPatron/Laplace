@@ -1,0 +1,30 @@
+-- The language a surface's own testimony was made in, read from provenance.
+--
+-- Consensus excludes source and context from identity (INVENTION §5), so the fold
+-- cannot answer this; the attestation layer keeps it. context_id carries the
+-- language for the lexical sources, and the row carries the fold's own inputs, so
+-- the answer is an argmax over adjudicated evidence weight -- a row COUNT would be
+-- the frequency prior §7 forbids.
+--
+-- Distinct from converse.word_language, which is an argmax over HAS_LANGUAGE
+-- ASSERTIONS about the word. That form does not discriminate: a loanword carries
+-- those edges in many languages at once. This reads which language the testimony
+-- ITSELF came from, which is the question a language-scoped read is asking.
+--
+-- Contexts are not all languages (chess play and ordinals appear there too), so the
+-- context entity is type-checked rather than assumed. Ties break on context_id:
+-- §15 requires byte-identical output.
+DROP FUNCTION IF EXISTS converse.attested_language(bytea);
+CREATE OR REPLACE FUNCTION converse.attested_language(p_word bytea)
+    RETURNS bytea
+    LANGUAGE sql LAPLACE_STABLE_STRICT
+BEGIN ATOMIC
+    SELECT a.context_id
+    FROM laplace.attestations a
+    JOIN laplace.entities e ON e.id = a.context_id
+    WHERE a.subject_id = p_word
+      AND e.type_id = realize.canonical_id('Language')
+    GROUP BY a.context_id
+    ORDER BY SUM(a.sum_score_fp1e9) DESC, a.context_id
+    LIMIT 1;
+END;

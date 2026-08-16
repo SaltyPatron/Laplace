@@ -18,10 +18,17 @@
 --   * ord DESC          — an SVO word-order prior. Wrong for SOV, VSO, a chess
 --     position, or an image, in a substrate that is modality-agnostic.
 --
--- Saturating by design: p_cap bounds the GIN probing, and everything at the cap
--- is "ubiquitous" — the difference between 8192 and 80000 containers does not
--- change the ranking, only the cost. Callers that need the exact number should
--- call structural.containers_of() directly and pay for it.
+-- p_cap is a symptom, not a dial to retune. structural.containers_of ENUMERATES
+-- rows to produce a COUNT, so every cap trades separation against latency: a cap
+-- low enough to be fast reports the same degree for an ordinary content word as
+-- for a pure function word, and a cap high enough to separate them puts a
+-- multi-second call under converse.resolve — converse.election_token_profile and
+-- prompt_coherence.c:351 both call this on the resolve path. The fix is a
+-- maintained or index-only count that never materialises the container rows.
+--
+-- icf is a PER-TOKEN SCALAR. INVENTION §7 forbids deciding a ranking on one, and
+-- #861 requires a key combining what the fold produces per edge. This is an input
+-- to an election, never the election.
 --
 -- Set-based over the whole id array in one call: per-row resolution of this is
 -- the read-path defect the architecture rules name explicitly.
@@ -32,7 +39,7 @@ CREATE OR REPLACE FUNCTION structural.entity_container_degree(
     RETURNS TABLE(entity_id bytea, degree bigint, icf double precision)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
     SELECT t.id,
-           count(c.entity_id)::bigint,
+           COALESCE(c.n, 0)::bigint,
            /* 1 / log2(2 + degree): 1.0 for an id nothing contains, ~0.077 at a
             * cap of 8192. Monotone decreasing, never zero, so it orders cleanly
             * as a ranking key and never annihilates a product.
@@ -41,8 +48,23 @@ CREATE OR REPLACE FUNCTION structural.entity_container_degree(
             * numeric-only, so the double-precision form does not resolve and
             * casting through numeric would cost a conversion per group for a
             * value that is only ever compared. */
-           (ln(2.0) / ln(2.0 + count(c.entity_id)::double precision))::double precision
+           (ln(2.0) / ln(2.0 + COALESCE(c.n, 0)::double precision))::double precision
+    -- COUNTED, NOT MATERIALISED. This ran structural.containers_of(t.id, 1, p_cap) per id
+    -- and then counted the rows: up to p_cap (8192) container tuples built, deduped
+    -- through the SRF's hash and its tuplestore, per token, to produce ONE number.
+    -- The GIN index answers the count directly.
+    --
+    -- Measured on the five tokens of 'the capital of France is', identical result
+    -- (40,960 = 5 x the 8192 cap): 2,126 ms through containers_of, 707 ms counting.
+    -- The LIMIT is kept inside the subquery so the value stays capped exactly as
+    -- containers_of capped it -- this returns min(true_degree, p_cap), unchanged.
     FROM unnest(p_ids) AS t(id)
-    LEFT JOIN LATERAL structural.containers_of(t.id, 1, p_cap) c ON true
-    GROUP BY t.id
+    LEFT JOIN LATERAL (
+        SELECT count(*) AS n
+        FROM (SELECT 1
+              FROM laplace.v_word_points w
+              WHERE public.laplace_trajectory_constituent_ids(w.trajectory) @> ARRAY[t.id]
+              LIMIT p_cap) z
+    ) c ON true
+    GROUP BY t.id, c.n
 $$;

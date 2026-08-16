@@ -33,8 +33,17 @@ CREATE OR REPLACE FUNCTION realize.resolve_name(
     -- that delegate here stay behaviour-identical wherever no HAS_NAME edge exists.
     SELECT CASE
         WHEN p_context IS NULL OR cardinality(p_context) = 0 THEN
+            -- realize._canonical last, and only last: its own comment says it runs
+            -- inside realize's COALESCE, but nothing called it from here. It reads
+            -- laplace.canonical_names and matches ONLY the substrate/<kind>/<name>/v1
+            -- form -- 274 of the registry's 10,253 rows -- so it cannot leak the other
+            -- 9,979, which are internal keys ('language:len', 'iso639-1:eo') rather
+            -- than names. An entity with no attested name and no substrate canonical
+            -- form still returns NULL, which is the structural answer (§7: "no gloss
+            -- witnessed yet" is an answer, not a failure), not a hex address.
             COALESCE(realize._has_name(p_id, p_lang),
-                     realize._synset_lemma(p_id, p_lang))
+                     realize._synset_lemma(p_id, p_lang),
+                     realize._canonical(p_id))
         ELSE (
             -- Context-conditioned selection. Same lang-pref-then-consensus.eff_mu shape as
             -- the null-context helpers, plus a domain boost for name candidates
@@ -44,33 +53,20 @@ CREATE OR REPLACE FUNCTION realize.resolve_name(
             -- preference stays AHEAD of the boost so a domain hint never overrides
             -- the caller's requested language; the boost only breaks ties the old
             -- global argmax broke blindly by popularity.
-            -- FAMILY TYPE IDS RESOLVED ONCE, AS ARRAYS.
+            -- FAMILY TYPE IDS ARE CALLED INLINE IN EVERY PREDICATE. NEVER HOISTED.
             --
-            -- consensus is LIST-partitioned by type_id, and the previous body filtered
-            -- with `consensus.relation_type_in_family(hs.type_id, 'HAS_SENSE')` -- a FUNCTION CALL
-            -- ON THE PARTITION KEY. The planner cannot prune against that, so the join
-            -- Append-scanned all ~221 relation partitions and ran the function once per
-            -- edge on top. Measured 2026-08-07: the context branch cost 5,706 ms, of
-            -- which ctx was 6.5 ms and the batched realize.render ~140 ms -- the rest was here.
+            -- consensus is LIST-partitioned by type_id. consensus.relation_family_ids is
+            -- IMMUTABLE and generated from the manifest, so an inline call folds to a
+            -- literal bytea[] before planning and the LIST partitions prune. The same
+            -- value read from a CTE column is a per-row variable: nothing prunes, every
+            -- leaf is Seq Scanned, and the join degrades to a disk sort. Measured on one
+            -- synset, identical 475-row result: hoisted into a CTE, 4,477,851 buffers and
+            -- a 1,086,552 kB external merge; called inline, 8,965 buffers and 114.8 ms.
             --
-            -- Resolved up front, `type_id = ANY(...)` is a bound array the planner prunes
-            -- with and serves from the (subject_id, type_id) index. Identical semantics:
-            -- consensus.relation_family_members is the same family rollup the predicate consulted.
-            -- This is the move chat.sql.in's band lens already documents for exactly the
-            -- same reason.
-            WITH fam AS MATERIALIZED (
-                SELECT COALESCE(array_agg(id) FILTER (WHERE fam = 'HAS_NAME'), '{}'::bytea[]) AS name_t,
-                       COALESCE(array_agg(id) FILTER (WHERE fam IN ('HAS_NAME','HAS_NAME_ALIAS')), '{}'::bytea[]) AS any_name_t,
-                       COALESCE(array_agg(id) FILTER (WHERE fam = 'HAS_SENSE'), '{}'::bytea[]) AS sense_t
-                FROM (
-                    SELECT 'HAS_NAME'::text AS fam, id FROM consensus.relation_family_members('HAS_NAME')
-                    UNION ALL
-                    SELECT 'HAS_NAME_ALIAS', id FROM consensus.relation_family_members('HAS_NAME_ALIAS')
-                    UNION ALL
-                    SELECT 'HAS_SENSE', id FROM consensus.relation_family_members('HAS_SENSE')
-                ) f
-            ),
-            ctx AS (
+            -- The predicate this replaced -- consensus.relation_type_in_family(hs.type_id,
+            -- 'HAS_SENSE') -- is a function call ON the partition key, which prunes no
+            -- better than the CTE column and runs once per edge on top.
+            WITH ctx AS (
                 SELECT id, sum(boost) AS boost FROM (
                     SELECT c.object_id AS id, sum(consensus.eff_mu(c.rating, c.rd)) AS boost
                     FROM laplace.v_consensus_unrefuted c
@@ -102,15 +98,16 @@ CREATE OR REPLACE FUNCTION realize.resolve_name(
             cand AS MATERIALIZED (
                 -- HAS_NAME (primary) + HAS_NAME_ALIAS, as families.
                 SELECT nm.object_id AS name_id,
-                       nm.type_id = ANY (fam.name_t) AS prim,
+                       nm.type_id = ANY (consensus.relation_family_ids('HAS_NAME')) AS prim,
                        (lang.object_id IS NOT NULL) AS lp,
                        consensus.eff_mu(nm.rating, nm.rd) AS mu
-                FROM fam CROSS JOIN laplace.v_consensus_unrefuted nm
+                FROM laplace.v_consensus_unrefuted nm
                 LEFT JOIN laplace.consensus lang ON lang.subject_id = nm.object_id
                      AND lang.type_id = laplace.relation_type_id('HAS_LANGUAGE')
                      AND lang.object_id = p_lang
                 WHERE nm.subject_id = p_id
-                  AND nm.type_id = ANY (fam.any_name_t)
+                  AND nm.type_id = ANY (consensus.relation_family_ids('HAS_NAME')
+                                        || consensus.relation_family_ids('HAS_NAME_ALIAS'))
                 UNION ALL
                 -- synset lemma: word --[HAS_SENSE family]--> sense
                 --                    --[IS_SENSE_OF -> HAS_SENSE]--> p_id
@@ -118,16 +115,14 @@ CREATE OR REPLACE FUNCTION realize.resolve_name(
                        false AS prim,
                        (lang.object_id IS NOT NULL) AS lp,
                        consensus.eff_mu(hs.rating, hs.rd) AS mu
-                -- CROSS JOIN, not a comma: a comma-list binds looser than an explicit
-                -- JOIN, so `fam` would not be visible from the ON clause below.
-                FROM fam CROSS JOIN laplace.v_consensus_unrefuted io
+                FROM laplace.v_consensus_unrefuted io
                 JOIN laplace.consensus hs ON hs.object_id = io.subject_id
-                     AND hs.type_id = ANY (fam.sense_t)
+                     AND hs.type_id = ANY (consensus.relation_family_ids('HAS_SENSE'))
                 LEFT JOIN laplace.consensus lang ON lang.subject_id = hs.subject_id
                      AND lang.type_id = laplace.relation_type_id('HAS_LANGUAGE')
                      AND lang.object_id = p_lang
                 WHERE io.object_id = p_id
-                  AND io.type_id = ANY (fam.sense_t)
+                  AND io.type_id = ANY (consensus.relation_family_ids('HAS_SENSE'))
             ),
             -- RANK FIRST, THEN RENDER. The ordering keys are all fold-side, so the
             -- winner is decided in id space and only the survivors are realized.

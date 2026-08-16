@@ -31,6 +31,33 @@ DROP FUNCTION IF EXISTS laplace.separator_ids();
 CREATE OR REPLACE FUNCTION generation.separator_ids()
     RETURNS bytea[]
     LANGUAGE sql STABLE AS $$
+    -- THE CLUSTER ARM IS A HASH, NOT A SEARCH.
+    --
+    -- A separator-only grapheme cluster is alphabet-bounded, so it does not have to
+    -- be DISCOVERED. Entity identity is content-addressed: laplace.word_id(text) is a
+    -- BLAKE3 hash of the CONTENT, at every tier -- laplace.word_id(chr(32)) IS the space
+    -- atom's id, verified byte-for-byte. CR+LF is not a special case: it is a
+    -- composition of two codepoints, hashed exactly as 'as' is, and composition lifts
+    -- the separator property (§3, composition is Merkle -- the bool_and this body used
+    -- to compute WAS that definition). UAX#29 GB3 is only what makes CR+LF the one
+    -- such composition that is a single grapheme cluster, so it is the one the corpus
+    -- carries: laplace.word_id(chr(13)||chr(10)) = cafeb486a01baa2c1ee30a8b78e2ff4d,
+    -- verified equal to the single non-atom id the previous body returned.
+    --
+    -- The previous body found that one id by scanning EVERY tier-1 entity with a
+    -- trajectory and testing bool_and over its constituents. Measured: atoms arm
+    -- 58 ms, whole function 9,450 ms warm -- the entire cost was rediscovering a
+    -- constant. Its own comment already claimed the set was "bounded by the alphabet,
+    -- not by the corpus"; it was not, and now it is.
+    --
+    -- STATED DIFFERENCE: the hash is unconditional, so CRLF is returned whether or not
+    -- that cluster has been ingested yet. Callers use this set for MEMBERSHIP
+    -- (id = ANY(separator_ids())), where an id no entity carries simply never matches.
+    -- Bounded by construction is the property the callers need.
+    --
+    -- Approaches measured and rejected: a first-constituent index pre-filter returns
+    -- 599,753 rows (a leading separator is common); structural.containers_of over the 84
+    -- atoms costs 25.7 s and truncates at its 1,000-row cap.
     WITH atoms AS (
         SELECT DISTINCT a.subject_id AS id
         FROM laplace.attestations a
@@ -40,19 +67,10 @@ CREATE OR REPLACE FUNCTION generation.separator_ids()
                           'unicode/category/Zl/v1',
                           'unicode/category/Zp/v1',
                           'unicode/category/Cc/v1')
-    ),
-    clusters AS (
-        SELECT e.id
-        FROM laplace.entities e
-        JOIN laplace.v_word_points w ON w.id = e.id AND w.trajectory IS NOT NULL
-        CROSS JOIN LATERAL public.laplace_trajectory_constituents(w.trajectory) c
-        WHERE e.tier = 1
-        GROUP BY e.id
-        HAVING bool_and(c.entity_id IN (SELECT id FROM atoms))
     )
     SELECT array_agg(id) FROM (
         SELECT id FROM atoms
         UNION
-        SELECT id FROM clusters
+        SELECT laplace.word_id(chr(13) || chr(10))
     ) s
 $$;

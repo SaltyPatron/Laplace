@@ -51,9 +51,34 @@ MANIFEST = ROOT / "engine" / "manifest" / "relation_types.toml"
 # scan and now wraps edges_raw(), which computes the fold value through eff_mu();
 # its two open-coded `rating - 2*rd` sites went with the body. Shrink, not an
 # exception.
+#
+# SECOND EXCEPTION, TAKEN THE SAME WAY (2026-08-15). g3_sql 240 -> 262:
+# consensus.relate_path, 13 names x 2 arms. The vocabulary is not new — this
+# function has always hand-listed its lateral and upward relation sets — but it
+# spelled them `relation_type_id(n)` over `unnest(ARRAY['IS_A',...])`, which this
+# gate's pattern (a literal INSIDE the call) never matched. 151744b0 inlined the
+# calls so the partition key meets constants and the LIST partitions prune at plan
+# time, and that made the existing hardcoding visible. The gate is right; it was
+# blind before.
+#
+# The non-literal surface was tried first and MEASURED, not assumed. Binding the
+# same two sets as `= ANY (ARRAY(SELECT k FROM lat))` — an InitPlan, run-time
+# bound — keeps the names out of the call position and costs 59%:
+#   folded literals   29.9 s / 24.2 s     (installed form, warm, identical 1 row)
+#   InitPlan arrays   46.9 s / 38.4 s     (same body, rolled-back transaction)
+# SELECT * FROM consensus.relate_path(word_id('wolf'), word_id('dog'));
+#   run as the laplace_admin role.
+#
+# The durable fix is neither: these two sets belong in
+# engine/manifest/relation_types.toml as named sets, with codegen emitting foldable
+# accessors the way it already does per family (sql/generated/relation_family_ids
+# .sql.in, bdcfa088). No existing family is equivalent — measured live, the IS_A
+# family holds 3 members against the 2 this function wants and IS_SYNONYM_OF holds
+# only itself against 11 — so substituting one would silently widen the walk. That
+# is a manifest change, and it is the follow-up this raise buys time for.
 CEILINGS = {
     "g1_weight_literalism": 11,
-    "g3_sql_vocabulary_literalism": 240,
+    "g3_sql_vocabulary_literalism": 262,
     "g3_c_vocabulary_literalism": 17,
     # 700 -> 701 (2026-08-05): the language-scope declaration. Nine monolingual
     # sources emitted no HAS_LANGUAGE at all, so every English sense read back as
@@ -121,7 +146,7 @@ CEILINGS = {
     "g11_unqualified_in_setless_body": 0,
     # GH #764 step 3: LANGUAGE sql with quoted-string bodies (AS $$) — PostgreSQL
     # records no pg_depend. Shrink-only allowlist; new SQL must use BEGIN ATOMIC.
-    "g12_string_sql_bodies": 216,
+    "g12_string_sql_bodies": 215,
     # G13 — case-folding a realized surface. Measured 2026-08-10 with the check
     # that introduced it, so it lands enumerated rather than red on merge day.
     # Both survivors are in translate_to's language-reference matcher, where the
@@ -545,6 +570,15 @@ def scan_g3_sql() -> Counter[str]:
     found: Counter[str] = Counter()
     sql_root = ROOT / "extension" / "laplace_substrate" / "sql"
     for path in production_files(sql_root, (".sql.in",)):
+        # Rendered from engine/manifest/relation_types.toml by codegen. The manifest
+        # IS the vocabulary this gate protects, so its rendering cannot be vocabulary
+        # drift — every name there is one the manifest already declares, and it moves
+        # when the manifest moves. Baselining the names individually would instead
+        # require editing the baseline on every manifest change, which is the
+        # "hiding policy in data" this file's header rejects. Same directory G14
+        # already exempts.
+        if relative(path).startswith(G14_EXEMPT_PREFIXES):
+            continue
         text = strip_sql_comments(path.read_text(encoding="utf-8", errors="replace"))
         add_matches(
             found,
