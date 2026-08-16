@@ -215,9 +215,15 @@ internal static class CpuTopologyCommands
         // io_max_concurrency costs a cluster restart (postmaster context) and nothing above
         // justifies one.
         //
-        // SCOPE, because the rule is conditional: this is a SEQUENTIAL scan, the friendliest
-        // case for prefetch. Random-access ingest probes were NOT measured; re-measure there
-        // before concluding anything about them.
+        // RANDOM ACCESS, measured too. 30,000 sampled entity ids in 3 disjoint groups probed
+        // against laplace.attestations by subject_id, eic-to-group assignment ROTATED so each
+        // setting sees each group once:
+        //   round 1 (first touch)  eic 256: 5811 ms   64: 5395 ms   32: 5154 ms
+        //   round 2 (warm)         eic 256:  677 ms   64:  660 ms   32:  664 ms
+        //   round 3 (warm)         eic 256:  664 ms   64:  675 ms   32:  670 ms
+        // Warm: 660-677 ms with no ordering by eic. Round 1's descent is progressive cache
+        // warming, not queue depth -- a single cold run per setting would have read as a
+        // 13%/row win for 32. Neither workload supports 256.
         w.WriteLine("ALTER SYSTEM SET effective_io_concurrency = 64;");
         w.WriteLine("ALTER SYSTEM SET maintenance_io_concurrency = 64;");
         w.WriteLine("ALTER SYSTEM SET random_page_cost = 1.1;");

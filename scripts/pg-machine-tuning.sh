@@ -112,10 +112,20 @@ pg_compute_machine_tuning() {
   # do. io_max_concurrency is postmaster-context, so RAISING it would cost a cluster
   # restart, and nothing above justifies one.
   #
-  # SCOPE OF THE EVIDENCE, stated because the rule is conditional: this is a SEQUENTIAL
-  # scan, the friendliest case for prefetch. A random-access workload -- index probes
-  # during ingest -- was not measured and may not behave the same. Re-measure there before
-  # concluding anything about it.
+  # RANDOM ACCESS, measured too, because a sequential scan is the friendliest case for
+  # prefetch and the rule is conditional (tasklist SS A). 30,000 sampled entity ids split
+  # into 3 disjoint groups, probed against laplace.attestations by subject_id, with the
+  # eic-to-group assignment ROTATED so each setting sees each group once and set-size
+  # effects cancel:
+  #     round 1 (first touch)   eic 256: 5811 ms   64: 5395 ms   32: 5154 ms
+  #     round 2 (warm)          eic 256:  677 ms   64:  660 ms   32:  664 ms
+  #     round 3 (warm)          eic 256:  664 ms   64:  675 ms   32:  670 ms
+  # Warm, the spread is 660-677 ms with NO ordering by eic -- noise. The descending look in
+  # round 1 is progressive cache warming, not queue depth: the rotation is what separates
+  # the two, and a single cold run per setting would have read as a 13%/row win for 32.
+  # That is the SS L trap, avoided by repeating rather than by reasoning.
+  #
+  # So neither workload supports 256. 64 is not a compromise here, it is the accurate value.
   PG_TUNE_IO_CONC=64
   PG_TUNE_CHECKPOINT=30min
   # Policy knobs the shell used to omit entirely, letting the cluster keep PG
