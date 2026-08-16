@@ -11,8 +11,19 @@ Checks every `path:line` citation found in tracked comments and docs:
   BLANK_LINE    cited line is empty or a lone brace/comment marker
   OK            line has content
 
-Exit 1 when any MISSING_FILE or SHORT_FILE is found, or when BLANK_LINE exceeds the
-recorded baseline. Shrink-only, like scripts/model-payload-gate-check.py.
+NOT WIRED INTO CI, and must not be until MISSING_FILE is clean. Three false-positive
+classes are known and unhandled:
+
+  1. generated artifacts — highway_manifest.h, relation_law.c and friends are codegen
+     outputs and gitignored, so a correct citation to them resolves to nothing;
+  2. ambiguous basenames — resolve() gives up when two files share a name
+     (NativeInterop.cs exists under both Core/Dynamics and Core/Synthesis);
+  3. self-reference — example citations inside this file's own prose are matched.
+
+Arming it before those are handled turns a correct commit red for being correct,
+which is how a gate gets disabled instead of fixed.
+
+Shrink-only, like scripts/model-payload-gate-check.py.
 
 Usage:  scripts/claim-citation-gate.py [--write-baseline]
 """
@@ -25,8 +36,19 @@ SCAN_EXT = {".cs", ".c", ".h", ".cpp", ".hpp", ".sql", ".in", ".py", ".sh",
             ".toml", ".md", ".txt"}
 
 # path:line — require a real extension so `Q4_K:2` and `10:30` do not match.
+# `.sql.in` must be matched whole: a bare `\.in` alternative captures only the
+# `sql.in:27` tail of `foo.sql.in:27` and reports a phantom missing file.
 CITE = re.compile(
-    r"\b((?:[\w.\-]+/)*[\w.\-]+\.(?:cs|c|h|cpp|hpp|sql|in|py|sh|toml|md|txt)):(\d{1,6})\b")
+    r"(?<![\w./-])((?:[\w.\-]+/)*[\w\-]+(?:\.\w+)*?"
+    r"\.(?:sql\.in|cs|cpp|hpp|sql|py|sh|toml|md|txt|yml|c|h|in)):(\d{1,6})\b")
+
+# Citations into source that is not this repository. A reference to PostgreSQL's
+# own tree is a legitimate claim; it is simply not resolvable here, and counting
+# it as decay would fail the build for being correct.
+EXTERNAL = {
+    "clauses.c",            # postgres/src/backend/optimizer/plan
+    "tests/CMakeLists.txt",
+}
 
 # Roots a relative citation may be resolved against.
 PREFIXES = ["", "app/", "engine/", "extension/", "scripts/", "docs/", ".scratchpad/",
@@ -82,6 +104,8 @@ for rel in tracked_cache:
         for m in CITE.finditer(raw):
             cited, lno = m.group(1), int(m.group(2))
             if cited.endswith(tuple(os.path.basename(rel).split())) and cited == rel:
+                continue
+            if cited in EXTERNAL or os.path.basename(cited) in EXTERNAL:
                 continue
             checked += 1
             target = resolve(cited)
