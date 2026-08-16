@@ -786,7 +786,10 @@ int laplace_relation_in_family(const hash128_t* type_id, const char* family_root
     # holds only itself. Substituting either would silently change which edges a path may
     # traverse — a correctness change wearing a performance change's clothes.
     sets = rel.get("set", [])
-    known = set(canon_names)
+    # Aliases count as declared vocabulary: an [[alias]] surface resolves to a canonical
+    # relation, so naming one in a set is not drift. FOLLOWS reached this check as an
+    # alias and was rejected -- the validator was wrong, not the call site.
+    known = set(canon_names) | {a.get("surface") for a in rel.get("alias", []) if a.get("surface")}
     set_members: dict[str, list[str]] = {}
     for s in sets:
         nm = s.get("name")

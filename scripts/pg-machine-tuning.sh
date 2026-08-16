@@ -88,6 +88,27 @@ pg_compute_machine_tuning() {
   PG_TUNE_MAX_WAL=96GB
   PG_TUNE_MIN_WAL=4GB
   PG_TUNE_IO_CONC=256
+  # THE CEILING MOVED WHEN io_method DID, and this pair was never re-derived for it.
+  #
+  # effective_io_concurrency is a REQUEST for queue depth; something else bounds what a
+  # backend may actually hold in flight. Under io_method=worker that bound is the
+  # io_workers pool, which is what the measurement above reasons about. pg_apply_io_method
+  # now probes and selects io_uring whenever the build supports it, and under io_uring the
+  # bound is io_max_concurrency -- a per-backend cap this script never emitted, so it sat
+  # at its default.
+  #
+  # MEASURED ON THE LIVE CLUSTER 2026-08-16: io_method=io_uring, effective_io_concurrency
+  # 256, maintenance_io_concurrency 256, io_max_concurrency 64 (source: default). The
+  # tuning asks for 4x more concurrent reads than the AIO subsystem may hold. io_workers=12
+  # is also still emitted and is inert under io_uring.
+  #
+  # Emitted explicitly rather than left to the default, so the relationship is visible and
+  # gated instead of implied. NOT RAISED BLIND: the value that makes 256 achievable has to
+  # come from a measurement on this device, and the correct experiment is the one the
+  # io_workers note above already models -- queue depth against r_await, not a guess. Until
+  # that runs, this pins the cap to the request so the two cannot silently disagree, and
+  # PgTuningParityTests fails if they drift apart again.
+  PG_TUNE_IO_MAX_CONC=$PG_TUNE_IO_CONC
   PG_TUNE_CHECKPOINT=30min
   # Policy knobs the shell used to omit entirely, letting the cluster keep PG
   # defaults that silently multiply the memory budget: hash_mem_multiplier 2.0

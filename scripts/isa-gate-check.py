@@ -86,9 +86,26 @@ MANIFEST = ROOT / "engine" / "manifest" / "relation_types.toml"
 # PATH_LATERAL 11, sorted-array-equal, and equal to the array astar_path used to inline.
 # Output parity: 5 start/goal pairs, old body vs new in one rolled-back transaction,
 # 12 rows each side, EXCEPT ALL both directions = 0 / 0.
+#
+# g3_sql 223 -> 195 (2026-08-16, same sweep). consensus.salient_facts and
+# inspect.evidence_receipt each carried a BYTE-IDENTICAL 16-name NOT IN list -- one
+# judgement about what is not a content fact, maintained in two files, both sitting
+# directly after the same relation_family_ids('HAS_POS')/('HAS_FEATURE') exclusions.
+# Declared once as [[set]] NON_SALIENT_STRUCTURAL.
+#
+# 14 of the 16, not all 16. CO_OCCURS_WITH and OCCURS_IN_CONTEXT are in neither the
+# manifest's canonicals nor its aliases though both exist as live RelationType entities,
+# so codegen REFUSES them (an undeclared member emits NULL and `= ANY (NULL)` silently
+# matches nothing) and they stay inline with the drift named at both sites. Assigning
+# them a bit/rank/symmetry is an operator decision. FOLLOWS reached the same check as an
+# alias and was rejected -- there the VALIDATOR was wrong, and it now accepts alias
+# surfaces.
+#
+# `<> ALL` for `NOT IN` is exact here, not merely equivalent-looking: type_id is NOT NULL
+# on both laplace.consensus and laplace.attestations, verified in the catalog.
 CEILINGS = {
     "g1_weight_literalism": 11,
-    "g3_sql_vocabulary_literalism": 223,
+    "g3_sql_vocabulary_literalism": 195,
     "g3_c_vocabulary_literalism": 17,
     # 700 -> 701 (2026-08-05): the language-scope declaration. Nine monolingual
     # sources emitted no HAS_LANGUAGE at all, so every English sense read back as

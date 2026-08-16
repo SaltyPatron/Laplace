@@ -2092,3 +2092,29 @@ members = [
   "HAS_SUBSTANCE", "DERIVATIONALLY_RELATED", "PERTAINS_TO", "ALSO_SEE",
   "IN_VERB_GROUP_WITH", "HAS_ATTRIBUTE",
 ]
+
+# NON_SALIENT_STRUCTURAL: lexical and structural plumbing that is not a content fact.
+# consensus.salient_facts and inspect.evidence_receipt each excluded these 16 names with a
+# BYTE-IDENTICAL NOT IN list -- same names, same order, in two files, both sitting directly
+# after the same relation_family_ids('HAS_POS') / ('HAS_FEATURE') exclusions. One judgement
+# about what is not salient, maintained in two places, with nothing keeping them in step.
+[[set]]
+name = "NON_SALIENT_STRUCTURAL"
+# CO_OCCURS_WITH and OCCURS_IN_CONTEXT are NOT here: both are referenced by production
+# SQL and exist as live RelationType entities, but neither is declared in this manifest as
+# a canonical or an alias. Declaring them means assigning a bit, a rank and a symmetry --
+# an operator decision, not a refactor's -- so they stay inline at the two call sites with
+# the drift named there.
+#
+# NO MEMBER WAS DROPPED, and no row count was used to decide that. Spec 36's CORRECTION
+# 2026-07-25 is explicit that PRECEDES and CONTAINS are views derivable from the
+# trajectory rather than stored truth, and that "a low PRECEDES count is not a status
+# signal -- do not cite it". This set is a membership predicate over relation NAMES; its
+# correctness is that it lists the same names the two call sites listed, which is checked
+# by array equality against the live catalog, not by how many rows any member carries.
+members = [
+  "HAS_SENSE", "IS_SENSE_OF", "HAS_LANGUAGE", "PRECEDES", "FOLLOWS",
+  "HAS_LEX_CATEGORY", "HAS_VERB_FRAME",
+  "IS_LEMMA_OF", "IS_TRANSLATION_OF", "HAS_EXAMPLE", "EVOKES_FRAME",
+  "HAS_SYNSET_KEY", "IS_TYPED_AS", "HAS_NAME_ALIAS",
+]

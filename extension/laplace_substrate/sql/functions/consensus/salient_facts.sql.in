@@ -43,16 +43,25 @@ CREATE OR REPLACE FUNCTION consensus.salient_facts(p_word bytea, p_lang bytea DE
               AND c.type_id <> ALL (consensus.relation_family_ids('HAS_POS'))
               AND c.type_id <> ALL (consensus.relation_family_ids('HAS_FEATURE'))
               AND c.type_id NOT IN (SELECT id FROM feat_dynamic)
-              AND c.type_id NOT IN (
-                laplace.relation_type_id('HAS_SENSE'), laplace.relation_type_id('IS_SENSE_OF'),
-                laplace.relation_type_id('HAS_LANGUAGE'), laplace.relation_type_id('PRECEDES'),
-                laplace.relation_type_id('FOLLOWS'), laplace.relation_type_id('CO_OCCURS_WITH'),
-                laplace.relation_type_id('OCCURS_IN_CONTEXT'), laplace.relation_type_id('HAS_LEX_CATEGORY'),
-                laplace.relation_type_id('HAS_VERB_FRAME'),
-                laplace.relation_type_id('IS_LEMMA_OF'), laplace.relation_type_id('IS_TRANSLATION_OF'),
-                laplace.relation_type_id('HAS_EXAMPLE'), laplace.relation_type_id('EVOKES_FRAME'),
-                laplace.relation_type_id('HAS_SYNSET_KEY'), laplace.relation_type_id('IS_TYPED_AS'),
-                laplace.relation_type_id('HAS_NAME_ALIAS'))
+              AND -- The exclusion set is DECLARED: engine/manifest/relation_types.toml [[set]]
+          -- NON_SALIENT_STRUCTURAL. It was a byte-identical 16-name NOT IN list here AND
+          -- in the sibling function -- one judgement about what is not a content fact,
+          -- kept in two files with nothing holding them in step. `<> ALL` matches the two
+          -- family exclusions above and is exactly equivalent to NOT IN here: type_id is
+          -- NOT NULL on both laplace.consensus and laplace.attestations (catalog-verified).
+          c.type_id <> ALL (consensus.relation_set_ids('NON_SALIENT_STRUCTURAL'))
+          -- UNDECLARED VOCABULARY, kept inline deliberately: CO_OCCURS_WITH and
+          -- OCCURS_IN_CONTEXT are in neither the manifest's canonicals nor its
+          -- aliases, though both exist as live RelationType entities. Codegen
+          -- REFUSES a set naming them (an undeclared member would emit NULL and
+          -- silently match nothing), and inventing a bit/rank/symmetry for them
+          -- is an operator decision. Row counts are deliberately NOT cited as the reason
+          -- either way: spec 36's CORRECTION 2026-07-25 retracts exactly that move for this
+          -- family of relations ("a low PRECEDES count is not a status signal -- do not cite
+          -- it"), because sequence lives in the trajectory and these are views of it.
+          AND c.type_id NOT IN (
+                laplace.relation_type_id('CO_OCCURS_WITH'),
+                laplace.relation_type_id('OCCURS_IN_CONTEXT'))
               AND obj_rt.id IS NULL
             ORDER BY consensus.eff_mu(c.rating, c.rd) DESC LIMIT p_limit * 3
         ) cc
