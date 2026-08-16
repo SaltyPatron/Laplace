@@ -52,7 +52,7 @@ MANIFEST = ROOT / "engine" / "manifest" / "relation_types.toml"
 # its two open-coded `rating - 2*rd` sites went with the body. Shrink, not an
 # exception.
 #
-# SECOND EXCEPTION, TAKEN THE SAME WAY (2026-08-15). g3_sql 239 -> 262:
+# SECOND EXCEPTION, TAKEN THE SAME WAY (2026-08-15). g3_sql 240 -> 262:
 # consensus.relate_path, 13 names x 2 arms. The vocabulary is not new — this
 # function has always hand-listed its lateral and upward relation sets — but it
 # spelled them `relation_type_id(n)` over `unnest(ARRAY['IS_A',...])`, which this
@@ -66,7 +66,8 @@ MANIFEST = ROOT / "engine" / "manifest" / "relation_types.toml"
 # bound — keeps the names out of the call position and costs 59%:
 #   folded literals   29.9 s / 24.2 s     (installed form, warm, identical 1 row)
 #   InitPlan arrays   46.9 s / 38.4 s     (same body, rolled-back transaction)
-# psql -U laplace_admin, consensus.relate_path(word_id('wolf'), word_id('dog')).
+# SELECT * FROM consensus.relate_path(word_id('wolf'), word_id('dog'));
+#   run as the laplace_admin role.
 #
 # The durable fix is neither: these two sets belong in
 # engine/manifest/relation_types.toml as named sets, with codegen emitting foldable
