@@ -260,10 +260,14 @@ reproduces it.
 
 **Defects introduced by this change and NOT validated:**
 
-3. `StageCollection` throws when a member has no staged physicality. Never exercised against
-   the bulk Wiktionary lane, where the existence bitmap suppresses re-emission of members
-   already deposited. If it fires there it kills the ingest mid-run. Needs a bulk-lane run
-   or a test that reproduces a bitmap-suppressed member.
+3. ~~`StageCollection` throws and would kill the bulk ingest.~~ **Downgraded 2026-08-16,
+   verified by search, not asserted.** `grep -rn "StageCollection(" app/` returns exactly one
+   production caller — `WiktionaryEmit.cs:303` — and it uses the explicit-coordinates
+   overload, which never reaches the builder lookup. The throwing overload has **zero
+   production callers**, so it cannot fire from any shipping path. It is covered by
+   `StageCollectionTests.MemberWithNoStagedPhysicalityThrowsRatherThanForgingACoordinate`.
+   The remaining risk is a future lane choosing the lookup overload for members the existence
+   bitmap suppressed; the contract is in the XML doc and the throw names the fix.
 4. `TryStageSet` silently DROPS a tag whose tier tree carries no composed geometry
    (`TryRootCoord` false). It fails quiet, not loud, and nothing measures how often. A
    dropped member changes the set id, so this can silently produce two ids for one analysis.
