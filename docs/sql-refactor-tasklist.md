@@ -1,5 +1,8 @@
 # SQL refactor task list
 
+**Measured 2026-08-15.** "This session" below means that
+date. Item state is not tracked here — re-verify each class against HEAD.
+
 Every item below is a **class** of defect found by measurement in this session, with the
 site count from a corpus sweep. The recurring failure was fixing one instance and moving
 on; each item here is closed only when the whole class is swept.
