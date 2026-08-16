@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
@@ -18,6 +19,13 @@ internal static class WiktionaryEmit
 {
     private const double Trust = TC.AcademicCuratedUserInput;
     private static readonly Hash128 LanguageTypeId = EntityTypeRegistry.Language;
+
+    /// <summary>
+    /// Floor recorded on a composed tag set. Tags are words (tier 0-2 — tier is a floor, and
+    /// single-grapheme tags exist), so a composition of them sits at 3. It is not an input to
+    /// the id: <c>hash128_merkle</c> discards its tier argument by law (hash128.c:28).
+    /// </summary>
+    private const byte CollectionTier = 3;
 
     private static readonly HashSet<string> RegisterTags = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -176,10 +184,17 @@ internal static class WiktionaryEmit
         // a sense (GH #867). POS remains attested on the word itself via HAS_POS.
         WalkRelations(b, wordId, in s.Relations, isVerb, langCtx, roots);
 
+        // A sense's register is one reading -- "archaic AND humorous" -- not two independent
+        // claims. Same shape as HAS_FEATURE and the same fix: one composition, one edge, one
+        // thing a second witness can corroborate or refute as a whole.
         if (s.Tags is { } tags)
+        {
+            List<string>? register = null;
             foreach (var tag in tags)
-                if (RegisterTags.Contains(tag) && Stage(b, tag, roots, out var tagId))
-                    Attest(b, wordId, "HAS_USAGE_REGISTER", tagId, posCtx);
+                if (RegisterTags.Contains(tag)) (register ??= []).Add(tag);
+            if (TryStageSet(b, register, roots, out var registerId))
+                Attest(b, wordId, "HAS_USAGE_REGISTER", registerId, posCtx);
+        }
     }
 
     private static void WalkRelations(
@@ -218,10 +233,12 @@ internal static class WiktionaryEmit
         foreach (var snd in sounds)
         {
             if (!Stage(b, snd.Ipa, roots, out var ipaId)) continue;
-            Hash128? dialectCtx = null;
-            if (snd.Tags is { } tags)
-                foreach (var tag in tags)
-                    if (Stage(b, tag, roots, out var dialectId)) { dialectCtx = dialectId; break; }
+            // attestations.context_id is ONE bytea, so the previous shape took the first
+            // stageable dialect tag and dropped the rest — data loss across 5,192,208
+            // TRANSCRIBES_AS rows, forced by the schema rather than chosen. A set composition
+            // fits in the slot, so every tag survives.
+            Hash128? dialectCtx = TryStageSet(b, snd.Tags, roots, out var dialectSetId)
+                ? dialectSetId : null;
             Attest(b, wordId, "TRANSCRIBES_AS", ipaId, dialectCtx);
         }
     }
@@ -235,10 +252,58 @@ internal static class WiktionaryEmit
         {
             if (!Stage(b, form.FormText, roots, out var formId)) continue;
             Attest(b, formId, "FORM_OF", wordId, null);
-            if (form.Tags is { } tags)
-                foreach (var tag in tags)
-                    if (Stage(b, tag, roots, out var tagId)) Attest(b, formId, "HAS_FEATURE", tagId, null);
+            // A form's tags are ONE morphological analysis, not N independent claims. Emitting
+            // them as N edges gave the analysis no id, so nothing could rate, corroborate or
+            // refute it, and 186,562,442 HAS_FEATURE rows encoded 145,619 distinct analyses
+            // (docs/specs/38). One composition, one edge, one adjudicable claim.
+            if (TryStageSet(b, form.Tags, roots, out var featureSetId))
+                Attest(b, formId, "HAS_FEATURE", featureSetId, null);
         }
+    }
+
+    /// <summary>
+    /// Compose a tag list into one set entity and return its id. False when nothing stageable
+    /// remains — the caller then emits no edge, which is the honest answer for an empty analysis.
+    /// </summary>
+    /// <remarks>
+    /// A ONE-tag list returns that tag's own id by the tier-floor collapse law, so the degenerate
+    /// case stays a direct edge to the tag and no wrapper entity is minted.
+    ///
+    /// Member coordinates come from each tag's own tier tree rather than from this builder,
+    /// because a tag emitted in an earlier batch is suppressed by the existence bitmap and has no
+    /// staged physicality here. A tag whose geometry is unavailable is dropped from the set
+    /// rather than substituted with the origin: forging a member coordinate would move the
+    /// centroid of every set that contains it.
+    /// </remarks>
+    private static bool TryStageSet(
+        SubstrateChangeBuilder b, List<string>? tags,
+        IReadOnlyDictionary<string, Hash128>? roots, out Hash128 setId)
+    {
+        setId = default;
+        if (tags is null || tags.Count == 0) return false;
+
+        var ids = new List<Hash128>(tags.Count);
+        var coords = new List<double>(tags.Count * 4);
+        Span<double> c = stackalloc double[4];
+        foreach (var tag in tags)
+        {
+            // A member that cannot be staged or placed FAILS THE WHOLE SET. Dropping it and
+            // composing the remainder is worse than emitting nothing: a partial set is a
+            // DIFFERENT set with a different merkle id, so the same analysis would land under
+            // two ids depending on cache state, and neither would be wrong on its face. No
+            // edge is recoverable -- the substrate can prove an absence (INVENTION §8) and
+            // cannot prove a silently truncated set.
+            if (!Stage(b, tag, roots, out var tagId)) return false;
+            if (!WiktionarySurfaceTrees.TryRootCoord(tag, c)) return false;
+            ids.Add(tagId);
+            for (int i = 0; i < 4; i++) coords.Add(c[i]);
+        }
+        if (ids.Count == 0) return false;
+
+        setId = b.StageCollection(
+            CollectionsMarshal.AsSpan(ids), CollectionsMarshal.AsSpan(coords),
+            CollectionTier, EntityTypeRegistry.Collection, WiktionaryDecomposer.Source);
+        return true;
     }
 
     private static void WalkEtymology(

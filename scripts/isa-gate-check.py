@@ -53,7 +53,8 @@ MANIFEST = ROOT / "engine" / "manifest" / "relation_types.toml"
 # exception.
 #
 # g3_sql 262 -> 236 (2026-08-16). THE 2026-08-15 EXCEPTION IS PAID BACK, and this is
-# a shrink below where it started (239), not a return to it.
+# a shrink below where it started (240 -- origin/main corrected that figure from 239
+# in c56a8b1e; the correction is kept), not a return to it.
 #
 # That raise admitted consensus.relate_path's 13 names x 2 arms and recorded the
 # durable fix as a follow-up: the lateral and upward sets belong in

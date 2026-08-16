@@ -80,4 +80,30 @@ public sealed class IngestRunStatusHonestyTests
         Assert.Equal(0, untracked.FileCount);
         Assert.Equal(0, IngestInventory.Single(14900, "files").FileCount);
     }
+
+    [Theory]
+    [InlineData(1226, 1226, "ok")]
+    [InlineData(1225, 1226, "failed")]
+    public void TheLedgerCarriesTheSameFileCountTheStatusWasDerivedFrom(
+        int filesDone, long filesTotal, string expected)
+    {
+        // The ledger row is the only surviving artifact of a run
+        // (NpgsqlIngestObservability, "MEASURED 2026-08-10 ... no diagnostic in the row").
+        // files_done rode ONLY the periodic progress UPDATE, so a run whose last flush did
+        // not land wrote a count BELOW the one its own status was derived from. Measured on
+        // the live substrate 2026-08-16: OMWDecomposer status=ok, files_done 1225,
+        // files_total 1226 — derived from 1226 in memory, recorded as 1225.
+        var result = new IngestRunResult(
+            SourceId: default,
+            SourceName: "OMWDecomposer",
+            UnitsAttempted: 1, UnitsApplied: 1, UnitsFailed: 0,
+            EntitiesInserted: 0, PhysicalitiesInserted: 0, AttestationsInserted: 0,
+            TotalRoundTrips: 0, WallClock: TimeSpan.Zero,
+            Failures: [], FilesDone: filesDone);
+
+        Assert.Equal(filesDone, result.FilesDone);
+        Assert.Equal(expected, IngestRunner.DeriveRunStatus(
+            unitsFailed: 0, emptySourceNoOp: false, capped: false,
+            filesDone: result.FilesDone, filesTotal: filesTotal));
+    }
 }

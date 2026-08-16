@@ -560,6 +560,12 @@ public static class IngestBatchPipeline
             Laplace.Ingestion.IngestObservabilityScope.Current.OnFileStarted(
                 Laplace.Ingestion.IngestObservabilityScope.SourceName, label, TryFileBytes(source.FilePath));
 
+            // unitsConsumed is the RUN accumulator (it also enforces maxTotalUnits below), so
+            // the per-file ledger has to difference it. Writing it straight through recorded a
+            // cumulative total in every file row, which makes per-file reporting and resume
+            // diagnostics read as monotonically growing regardless of file size. The parallel
+            // path already differences correctly via fileUnits.
+            long unitsAtFileStart = unitsConsumed;
             long fileCap = maxTotalUnits > 0 ? maxTotalUnits - unitsConsumed : 0;
             if (maxTotalUnits > 0 && fileCap <= 0)
                 yield break;
@@ -614,7 +620,7 @@ public static class IngestBatchPipeline
             Laplace.Ingestion.IngestObservabilityScope.Current.OnFileFinished(
                 Laplace.Ingestion.IngestObservabilityScope.SourceName, label,
                 fileFailure is not null ? "failed" : hitCap ? "cancelled" : "ok",
-                records: unitsConsumed,
+                records: unitsConsumed - unitsAtFileStart,
                 error: fileFailureMessage);
 
             yield return fileFailure

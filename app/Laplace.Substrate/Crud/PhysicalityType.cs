@@ -13,4 +13,12 @@ public enum PhysicalityType : short
 
 
     ProjectionOutput = 4,
+
+    // An UNORDERED set of member ids packed into a trajectory. Distinct from Content so the
+    // three partial indexes that read text trajectories -- physicalities_constituents_gin,
+    // physicalities_traj_first_id_btree, physicalities_traj_probe, all WHERE type = 1 -- are
+    // not silently widened by a shape whose vertex order carries no sequence meaning.
+    // Constituents are sorted ascending by id before packing, which is what makes the merkle
+    // id of a set well-defined and therefore deduplicating (docs/specs/38).
+    Set = 5,
 }

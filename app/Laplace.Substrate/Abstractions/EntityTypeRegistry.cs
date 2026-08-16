@@ -15,6 +15,9 @@ public static class EntityTypeRegistry
     public static readonly Hash128 CharacterEncoding = Id("CharacterEncoding");
     public static readonly Hash128 CodeConcept = Id("CodeConcept");
     public static readonly Hash128 Codepoint = Id("Codepoint");
+    // The entity a set-valued attribute points at. One per DISTINCT member set, by content
+    // address: 186,562,442 HAS_FEATURE edges carry 145,619 distinct sets (docs/specs/38).
+    public static readonly Hash128 Collection = Id("Collection");
     public static readonly Hash128 ConversationSession = Id("Conversation_Session");
     public static readonly Hash128 Document = Id("Document");
     public static readonly Hash128 Frame = Id("Frame");
