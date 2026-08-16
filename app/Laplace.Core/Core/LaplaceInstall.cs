@@ -209,19 +209,35 @@ public static class LaplaceInstall
         {
             var fromBuild = Path.Combine(engineBuild, "core", "perfcache", "laplace_t0_perfcache.bin");
             if (File.Exists(fromBuild)) return fromBuild;
-            foreach (var hit in Directory.EnumerateFiles(engineBuild, "laplace_t0_perfcache.bin", SearchOption.AllDirectories))
+            // Sorted: a build tree with two matching blobs (a stale out-of-source dir beside a
+            // fresh one) otherwise resolves to whichever the filesystem lists first, so the
+            // codepoint table backing every ingest could change between runs of the same binary.
+            foreach (var hit in Directory.EnumerateFiles(engineBuild, "laplace_t0_perfcache.bin", SearchOption.AllDirectories)
+                                         .OrderBy(static p => p, StringComparer.Ordinal))
                 return hit;
         }
 
         const string share = "/opt/laplace/share/laplace";
         if (Directory.Exists(share))
         {
-            var hit = Directory.EnumerateFiles(share, "laplace_t0_perfcache*.bin").FirstOrDefault();
+            var hit = Directory.EnumerateFiles(share, "laplace_t0_perfcache*.bin")
+                               .OrderBy(static p => p, StringComparer.Ordinal).FirstOrDefault();
             if (hit is not null) return hit;
         }
 
+        // NAME WHAT WAS ACTUALLY SEARCHED. This threw a hardcoded Windows path --
+        // D:\Data\Laplace\build-win\... -- on every platform, including Linux hosts that
+        // have no D: drive and never looked there. MEASURED 2026-08-16: 590 tests failed
+        // with that message and it sent the reader to a nonexistent Windows build tree
+        // while the file sat at build/engine/core/perfcache/. An error that names a path
+        // the code did not probe is worse than one that names none.
         throw new InvalidOperationException(
-            "T0 perfcache not found — build the engine (D:\\Data\\Laplace\\build-win\\core\\perfcache\\laplace_t0_perfcache.bin).");
+            "T0 perfcache not found. Searched: "
+            + $"LAPLACE_PERFCACHE_BIN={Environment.GetEnvironmentVariable("LAPLACE_PERFCACHE_BIN") ?? "(unset)"}; "
+            + (TryResolveEngineBuildRoot(out var probed)
+                ? $"engine build root '{probed}' (core/perfcache/ and recursive)"
+                : "no engine build root resolved from AppContext.BaseDirectory or cwd")
+            + $"; {share}. Build the engine, or set LAPLACE_PERFCACHE_BIN to the blob.");
     }
 
     public static string ResolveIngestRoot()
@@ -276,7 +292,8 @@ public static class LaplaceInstall
         {
             var fromBuild = Path.Combine(engineBuild, "core", "perfcache", "laplace_highway_perfcache.bin");
             if (File.Exists(fromBuild)) return fromBuild;
-            foreach (var hit in Directory.EnumerateFiles(engineBuild, "laplace_highway_perfcache.bin", SearchOption.AllDirectories))
+            foreach (var hit in Directory.EnumerateFiles(engineBuild, "laplace_highway_perfcache.bin", SearchOption.AllDirectories)
+                                         .OrderBy(static p => p, StringComparer.Ordinal))
                 return hit;
         }
 
