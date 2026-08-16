@@ -1,12 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Button, ErrorText, Input, LoadingText, Muted, Panel, TextArea } from '@ui';
 import { useAppStore } from '../store';
-import { callOp, listOps, type OpSignature } from './api';
+import { callOp, listOps, opPolicy, type OpPolicy, type OpSignature } from './api';
 import styles from './Admin.module.css';
-
-/** Signatures that mutate — badged, because /v1/op refuses them read-only
- * unless allow-listed (InstalledOpInvoker.WritableOps). */
-const WRITE_HINT = /_close|_deposit|_refresh|_set|_apply|_delete|_insert|_update|_reset/i;
 
 /**
  * The operations console.
@@ -19,6 +15,11 @@ const WRITE_HINT = /_close|_deposit|_refresh|_set|_apply|_delete|_insert|_update
 export function OpConsole() {
   const { tenant } = useAppStore();
   const [ops, setOps] = useState<OpSignature[] | null>(null);
+  // The server's own allow-lists, not a regex over the name. The regex this
+  // replaced was wrong in both directions: ops.evict_source matched nothing in it
+  // and is the most destructive call on the surface, while any future
+  // ops.*_reset that is NOT allow-listed was badged as a write it cannot perform.
+  const [policy, setPolicy] = useState<OpPolicy | null>(null);
   const [catalogErr, setCatalogErr] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
 
@@ -33,7 +34,13 @@ export function OpConsole() {
     listOps(undefined, { tenant })
       .then((r) => setOps(r.rows ?? []))
       .catch((e) => setCatalogErr(e instanceof Error ? e.message : String(e)));
+    // A failed policy read must not blank the catalog: without it the console
+    // still calls operations correctly, it just cannot badge them.
+    opPolicy({ tenant }).then(setPolicy).catch(() => setPolicy(null));
   }, [tenant]);
+
+  const isWritable = (name: string) => policy?.writable.includes(name) ?? false;
+  const isDestructive = (name: string) => policy?.destructive.includes(name) ?? false;
 
   const shown = useMemo(() => {
     if (!ops) return [];
@@ -96,7 +103,10 @@ export function OpConsole() {
                   >
                     <span className={styles.opName}>{o.name}</span>
                     <span className={styles.opArgs}>{o.args || '()'}</span>
-                    {WRITE_HINT.test(o.name) && <span className={styles.writeTag}>write</span>}
+                    {isDestructive(o.name)
+                      ? <span className={styles.destructiveTag}>destroys data</span>
+                      : isWritable(o.name) ? <span className={styles.writeTag}>write</span> : null}
+                    {o.kind === 'procedure' && <span className={styles.procTag}>CALL</span>}
                   </button>
                 </li>
               ))}
@@ -110,10 +120,29 @@ export function OpConsole() {
           <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="ops.ingest_runs" />
         </label>
         {selected && <code className={styles.sig}>{selected.name}({selected.args || ''})</code>}
-        {selected && WRITE_HINT.test(selected.name) && (
+        {selected && isDestructive(selected.name) && (
           <Muted className={styles.writeWarn}>
-            This looks like a write operation. <code>POST /v1/op</code> binds a read-only data
-            source, so it will fail rather than take effect.
+            <strong>This destroys stored testimony.</strong> {selected.name} deletes evidence and
+            refolds every cell it touched from what survives; cells left with no witnesses are
+            removed, not zeroed. Re-deriving it means re-running the lane that deposited it.
+          </Muted>
+        )}
+        {selected && !isDestructive(selected.name) && isWritable(selected.name) && (
+          <Muted className={styles.writeWarn}>
+            This is on the write allow-list, so it resolves onto a writable connection and WILL
+            take effect.
+          </Muted>
+        )}
+        {selected && policy && !isWritable(selected.name) && selected.returns == null && (
+          <Muted className={styles.writeWarn}>
+            This mutates but is not allow-listed, so <code>POST /v1/op</code> binds a read-only
+            data source and it will fail rather than take effect.
+          </Muted>
+        )}
+        {selected?.kind === 'procedure' && (
+          <Muted className={styles.writeWarn}>
+            A procedure: it is CALLed and returns no rows. Progress goes to the server log — read
+            it back through <code>ops.app_log</code>.
           </Muted>
         )}
         <label className={styles.field}>

@@ -17,6 +17,15 @@ public static class InstalledOpInvoker
     public const int MaxCommandTimeoutSeconds = 600;
 
     /// <summary>
+    /// Ceiling for CALLed procedures. Separate from <see cref="MaxCommandTimeoutSeconds"/>
+    /// because the risk profiles differ: a read that hangs for six hours pins a
+    /// connection for nothing, whereas an eviction or a reindex legitimately runs
+    /// that long and is on the write allow-list by deliberate act. Bounded in
+    /// practice by cancellation, not by this number.
+    /// </summary>
+    public const int MaxProcedureTimeoutSeconds = 21600;
+
+    /// <summary>
     /// Installed operations permitted to run against a writable connection.
     ///
     /// Every other op resolves onto a <c>default_transaction_read_only=on</c>
@@ -29,12 +38,45 @@ public static class InstalledOpInvoker
     /// <c>ops.ingest_run_close</c> is the gate CI/CD pipelines wait on. Without
     /// it a stuck run can only be cleared by hand against the database, which
     /// leaves the pipeline blocked and the operator with no way to intervene.
+    ///
+    /// The cancel pair is here because closing the journal row without signalling
+    /// the process is the worse outcome, not the safer one: the row reads
+    /// cancelled, the pipeline gate goes green, and the ingest keeps writing.
+    ///
+    /// The repair pair is here because <c>ops.index_health</c> made the
+    /// 2026-08-13 shell class visible from every surface while the fix stayed a
+    /// hand-typed psql session — an operator who can see the damage from a console
+    /// and must leave it to act will eventually act on the wrong cluster.
+    ///
+    /// <c>ops.evict_source</c> DELETES ATTESTED TESTIMONY and refolds what
+    /// survives. It is on this list because retraction is a first-class operator
+    /// duty, not because it is safe: it is the one entry here that destroys data,
+    /// and with authentication stubbed anyone who can reach the host can call it.
     /// </summary>
     public static readonly IReadOnlySet<string> WritableOps =
         new HashSet<string>(StringComparer.Ordinal)
         {
             "ops.ingest_run_close",
+            "ops.cancel_backend",
+            "ops.terminate_backend",
+            "ops.reindex_invalid",
+            "ops.analyze_substrate",
+            "ops.evict_source",
         };
+
+    /// <summary>
+    /// Operations that destroy or rewrite stored testimony. Callers surface a
+    /// confirmation for these; naming them here keeps that judgement in one place
+    /// instead of a string check in each UI.
+    /// </summary>
+    public static readonly IReadOnlySet<string> DestructiveOps =
+        new HashSet<string>(StringComparer.Ordinal)
+        {
+            "ops.evict_source",
+        };
+
+    public static bool IsDestructive(string? name) =>
+        !string.IsNullOrWhiteSpace(name) && DestructiveOps.Contains(name);
 
     /// <summary>True when <paramref name="name"/> may run against a writable connection.</summary>
     public static bool IsWritable(string? name) =>
@@ -105,12 +147,43 @@ public static class InstalledOpInvoker
             bound.Add((slot, OpValue(args![p.Name])));
         }
 
-        // LIMIT rowCap + 1 so truncation is observable.
-        var sql = $"SELECT * FROM {QualifiedCatalogName(name)}({string.Join(", ", call)}) LIMIT {rowCap + 1}";
+        var isProcedure = string.Equals(candidates[0].Row.Kind, "procedure", StringComparison.Ordinal);
+        var argText = string.Join(", ", call);
+
+        // A procedure is CALLed and returns no result set; SELECT ... FROM it is a
+        // parse error, which is what every caller got before the catalog exposed
+        // `kind`. LIMIT rowCap + 1 on the function path so truncation is observable.
+        var sql = isProcedure
+            ? $"CALL {QualifiedCatalogName(name)}({argText})"
+            : $"SELECT * FROM {QualifiedCatalogName(name)}({argText}) LIMIT {rowCap + 1}";
+
         await using var cmd = db.CreateCommand(sql);
-        cmd.CommandTimeout = Math.Clamp(commandTimeoutSeconds, 1, MaxCommandTimeoutSeconds);
+        // Maintenance procedures run for as long as the work takes — a reindex of
+        // 28 partitioned parents is not a 15-second question. They are bounded
+        // instead by being cancellable: ops.activity finds the pid, and
+        // ops.cancel_backend stops it, keeping every COMMIT already taken.
+        cmd.CommandTimeout = Math.Clamp(
+            commandTimeoutSeconds, 1,
+            isProcedure ? MaxProcedureTimeoutSeconds : MaxCommandTimeoutSeconds);
         foreach (var (slot, value) in bound)
             cmd.Parameters.Add(BindArg(slot, value));
+
+        if (isProcedure)
+        {
+            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            // A procedure's progress is in the server log (RAISE LOG), readable as
+            // SQL through ops.app_log. Returning an empty row set would read as
+            // "ran, found nothing"; this states that it ran.
+            return new OpResult(
+                [new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["called"] = name,
+                    ["kind"] = "procedure",
+                    ["returns_rows"] = false,
+                    ["progress"] = "RAISE LOG output — read it back through ops.app_log",
+                }],
+                null, null);
+        }
 
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         var rows = new List<IReadOnlyDictionary<string, object?>>();

@@ -11,6 +11,46 @@ not a "delete duplicates" list.
 > here, and the ten CI gates. Read 37 to know what to build; read this to know
 > why.
 
+<!-- FINDINGS STALE 2026-08-16 — re-verified against HEAD. Several §17 items have
+     LANDED; citing this document as a current defect list overstates the backlog.
+
+     RESOLVED since 2026-07-27:
+       §2.2 / P0.4  related_objects.sql.in no longer open-codes `rating - 2*rd`;
+                    :30 uses consensus.eff_mu(). Its header records the change.
+       §2.1 / P0.1  generate_walk.c:193 — the formula "now lives in walk_score.h,
+                    shared with S7"; :737 calls laplace_walk_edge_weight(), :582
+                    spi_fetch_rd_kappa(). Single-sourced as prescribed.
+       §9   / P0.7  prompt_coherence is WIRED — three live call sites:
+                    resolve_topic.sql.in:72, converse.sql.in:58, chat.sql.in:153.
+                    converse.sql.in:40 records it. §9's "zero call sites / the tip
+                    commit's payload is dead code" and §12b's "OP3 is NOT wired"
+                    are both superseded.
+       §14  / P1.25 IngestDispatchTable copy-pasted rows: 17 -> 10.
+
+     STILL TRUE at HEAD:
+       §2.1  witness half-max duplicated — glicko2.c:445 #define ...HALFMAX 4.0
+             vs foundry_witness_sat.sql.in:8 bare 4.0 (doc cites :444, 1-line drift).
+       §8    realize_batch.sql.in:3 "Reproduces the scalar COALESCE ladder exactly";
+             realize_batch.c:742 carries its own ladder. Two bodies, prose parity.
+       §13   seed-chain.cmd exists, 0 callers. The 12x-startup path is still the
+             only one wired.
+       §7.4  label_is_content survives at converse_facts.sql.in:213 — but :180-186
+             record it moved behind id-space exclusion and scoped to survivors
+             (#903). A documented narrowing, not the unfixed defect implied.
+
+     NOT re-checked: §3 SCAN dialects, §4 #686 orientation, §5/§6 sequence
+     epistemology, §6.1 FoundryDefaults, §7.1-7.3 vocabulary literals, §10-§12,
+     §15, §16. Treat those as of 2026-07-27, not as of HEAD. -->
+
+<!-- Cross-doc: MODEL_LANE_AUDIT_2026-08-11.md §6 asserts astar has zero callers
+     and that generate_walk.c / astar_path.c "neither file exists". Both false —
+     astar_path.c:280,289,298 is reached via NpgsqlSubstrateReads.cs:2205 ->
+     converse.astar_path -> pg_laplace_astar_path, and astar_path.c:113-115 uses
+     laplace_walk_edge_weight as edge_cost. That audit postdates this one and
+     contradicts §2.1, which already cited astar_path.c:267 as live.
+     MODEL_INGESTION_DESIGN.md order-of-work item 6 was retracted 2026-08-16. -->
+
+
 Surfaces covered: 332 SQL function files, 27 extension C files, `engine/core`
 + `engine/dynamics` + `engine/synthesis`, `Laplace.Substrate` (17.8k lines),
 `Laplace.Decomposers` (14.7k), `Laplace.Cli` (8.5k), `Laplace.Endpoints.*`

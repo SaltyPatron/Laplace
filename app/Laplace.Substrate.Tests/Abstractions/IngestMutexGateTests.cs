@@ -50,8 +50,19 @@ public sealed class IngestMutexGateTests
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     /// <summary>The database-level ingest mutex.</summary>
+    /// <summary>
+    /// The database-level ingest mutex.
+    ///
+    /// <para><c>_shared</c> is matched too. The earlier form required <c>(</c> straight
+    /// after <c>lock</c>, so <c>pg_advisory_lock_shared(</c> and
+    /// <c>pg_advisory_xact_lock_shared(</c> passed straight through and this gate could
+    /// not see a shared advisory lock anywhere in the tree. Verified 2026-08-16 against
+    /// all four spellings. A shared lock is still a lock in this lock space and still
+    /// conflicts with an exclusive taker; leaving it invisible meant the next one could
+    /// land unnamed.</para>
+    /// </summary>
     private static readonly Regex DatabaseAdvisoryLock = new(
-        @"pg_advisory(?:_xact)?_lock\s*\(",
+        @"pg_advisory(?:_xact)?_lock(?:_shared)?\s*\(",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     /// <summary>

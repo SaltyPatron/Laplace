@@ -87,7 +87,46 @@ pg_compute_machine_tuning() {
   # CpuTopologyCommands.EmitPgTuning; PgTuningParityTests pins the pair.
   PG_TUNE_MAX_WAL=96GB
   PG_TUNE_MIN_WAL=4GB
-  PG_TUNE_IO_CONC=256
+  # MEASURED 2026-08-16 ON THIS CLUSTER, replacing a hardcoded 256 that was never true.
+  #
+  # THE CEILING MOVED WHEN io_method DID. effective_io_concurrency is a REQUEST for queue
+  # depth; something else bounds what a backend may actually hold in flight. Under
+  # io_method=worker that bound is the io_workers pool, which is what the measurement
+  # above reasons about. pg_apply_io_method now probes and selects io_uring whenever the
+  # build supports it, and under io_uring the bound is io_max_concurrency -- a per-backend
+  # cap this script never emitted, so it sat at its default of 64 while this line asked
+  # for 256.
+  #
+  # THE CAP BINDS, sampled from pg_aios while one backend seq-scanned a 2,573 MB
+  # attestations leaf: MAX in-flight AIO ops held by that backend = 64, exactly
+  # io_max_concurrency. The other 192 of the request were notional.
+  #
+  # AND THE REQUEST BUYS NOTHING EVEN SO. Three cold 2.5 GB leaves, one each, identical
+  # shape, taken under scripts/measure-lane.sh on a quiet substrate:
+  #     effective_io_concurrency=256  attestations_rdefault_h0  3175.480 ms
+  #     effective_io_concurrency=64   attestations_rdefault_h1  3175.204 ms
+  #     effective_io_concurrency=32   attestations_rdefault_h2  3167.613 ms
+  # 8 ms of spread across a 3.17 s scan, with the LOWEST setting marginally fastest.
+  #
+  # So the value is pinned to the cap: the config now states what the backend can actually
+  # do. io_max_concurrency is postmaster-context, so RAISING it would cost a cluster
+  # restart, and nothing above justifies one.
+  #
+  # RANDOM ACCESS, measured too, because a sequential scan is the friendliest case for
+  # prefetch and the rule is conditional (tasklist SS A). 30,000 sampled entity ids split
+  # into 3 disjoint groups, probed against laplace.attestations by subject_id, with the
+  # eic-to-group assignment ROTATED so each setting sees each group once and set-size
+  # effects cancel:
+  #     round 1 (first touch)   eic 256: 5811 ms   64: 5395 ms   32: 5154 ms
+  #     round 2 (warm)          eic 256:  677 ms   64:  660 ms   32:  664 ms
+  #     round 3 (warm)          eic 256:  664 ms   64:  675 ms   32:  670 ms
+  # Warm, the spread is 660-677 ms with NO ordering by eic -- noise. The descending look in
+  # round 1 is progressive cache warming, not queue depth: the rotation is what separates
+  # the two, and a single cold run per setting would have read as a 13%/row win for 32.
+  # That is the SS L trap, avoided by repeating rather than by reasoning.
+  #
+  # So neither workload supports 256. 64 is not a compromise here, it is the accurate value.
+  PG_TUNE_IO_CONC=64
   PG_TUNE_CHECKPOINT=30min
   # Policy knobs the shell used to omit entirely, letting the cluster keep PG
   # defaults that silently multiply the memory budget: hash_mem_multiplier 2.0

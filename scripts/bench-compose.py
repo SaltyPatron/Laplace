@@ -70,7 +70,71 @@ def load_corpus(root, cap=CORPUS_CAP_BYTES):
     return docs
 
 
+def _refuse_if_ingest_advancing():
+    """Refuse to benchmark while an ingest is advancing.
+
+    This harness touches NO database -- its own docstring says so -- so the substrate
+    measurement lane's lock is the wrong instrument here. CPU contention is the right
+    one: content_tree_build is single-threaded by construction, and a 12-core box
+    running a 14-wide ingest does not give it a core to itself.
+
+    MEASURED 2026-08-15, the general case this is an instance of:
+    generation.compose_batch returned 81,701 ms to 316,998 ms for near-identical code
+    with an ingest active -- a 3.9x spread that produced causal claims from single runs.
+    A throughput floor quoted off a loaded box is the same error with a different unit.
+
+    LIVENESS IS A COUNTER THAT MOVES, not the LPLK beacon: measured 2026-08-16, a
+    demonstrably writing ConceptNet run held zero advisory locks for the database, so
+    beacon-absence proves nothing. Set LAPLACE_BENCH_ALLOW_BUSY=1 to override
+    deliberately; an unanswerable probe is NOT treated as busy here, because this
+    harness must still run on a machine with no substrate at all.
+    """
+    if os.environ.get("LAPLACE_BENCH_ALLOW_BUSY") == "1":
+        return
+    import subprocess
+    q = ("SELECT coalesce(sum(input_units_done),0) FROM laplace.ingest_run_journal "
+         "WHERE status = 'running'")
+    def sample(sql=q):
+        try:
+            out = subprocess.run(
+                ["psql", "-h", os.environ.get("PGHOST", "/var/run/postgresql"),
+                 "-U", os.environ.get("PGUSER", "laplace_admin"),
+                 "-d", os.environ.get("PGDATABASE", "laplace"), "-tAc", sql],
+                capture_output=True, text=True, timeout=15)
+            return int(out.stdout.strip()) if out.returncode == 0 and out.stdout.strip().isdigit() else None
+        except Exception:
+            return None
+    a = sample()
+    if a is None or a == 0:
+        return                      # no substrate, or nothing running: proceed
+
+    # CONTINUOUS EVIDENCE BEATS A SAMPLED COUNTER. MEASURED 2026-08-16: with a
+    # ConceptNet seed live, input_units_done sat frozen at 1,430,350 for 16 SECONDS
+    # while 12 backends ran consensus.upsert / COPY laplace.* without pause.
+    # ProgressInterval is a 5 s rate-limit FLOOR on journal writes, not a cadence, and
+    # the decomposer reports in batch-sized jumps -- so a short window lands inside one
+    # and calls a live ingest idle. This harness's first version did exactly that and
+    # benchmarked the core at 1,646.4k codepoints/s on a box running a 14-wide ingest.
+    busy = sample(
+        "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() "
+        "AND state = 'active' AND pid <> pg_backend_pid() AND query ~* "
+        "'consensus\\.upsert|COPY laplace\\.|highway_mask_deposit|attestations_exist|physicalities_exist'")
+    if busy:
+        sys.exit(
+            f"bench-compose: refusing — {busy} backend(s) are executing ingest work right now. "
+            "content_tree_build is single-threaded and this box is not idle; the number would "
+            "measure the load, not the core. Set LAPLACE_BENCH_ALLOW_BUSY=1 to override.")
+
+    time.sleep(6)
+    b = sample()
+    if b is not None and b > a:
+        sys.exit(
+            f"bench-compose: refusing — an ingest is ADVANCING ({a} -> {b} units). "
+            "Set LAPLACE_BENCH_ALLOW_BUSY=1 to override.")
+
+
 def main():
+    _refuse_if_ingest_advancing()
     # Parse positionally-independent: `--repeats N` alone must work, and the old
     # form took sys.argv[1] as the corpus unconditionally, so it set root to
     # "--repeats" and then found no corpus.

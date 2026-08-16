@@ -32,6 +32,7 @@ def _write_text_if_changed(path: Path, text: str) -> None:
 
 OUT_SEED_FRAG = ROOT / "extension/laplace_substrate/sql/generated/seed_relation_types.sql.in"
 OUT_FAMILY_FRAG = ROOT / "extension/laplace_substrate/sql/generated/relation_family_ids.sql.in"
+OUT_SET_FRAG = ROOT / "extension/laplace_substrate/sql/generated/relation_set_ids.sql.in"
 
 
 def parse_simple_toml(path: Path) -> dict:
@@ -41,6 +42,14 @@ def parse_simple_toml(path: Path) -> dict:
         "ranks": {},
         "relation": [],
         "alias": [],
+        # DECLARED sets, as opposed to families. A family is DERIVED — codegen walks
+        # parent/family_root chains, so its membership is whatever the taxonomy implies.
+        # A set is an operator's explicit list, and the two are not interchangeable:
+        # measured live, relate_path's upward arm wants exactly {IS_A, IS_INSTANCE_OF}
+        # while the IS_A family holds 3, and its lateral arm wants 11 while the
+        # IS_SYNONYM_OF family holds only itself. Reusing a family for either would
+        # silently change which edges a path may traverse.
+        "set": [],
         "dynamic": {},
         "upos": {},
         
@@ -50,11 +59,26 @@ def parse_simple_toml(path: Path) -> dict:
     current: dict | None = None
     key_stack = []
 
+    pending = None   # accumulating a multi-line array value
+
     for raw in text.splitlines():
         line = raw.split("#", 1)[0].strip()
+        # MULTI-LINE ARRAYS. A declared set is a list of relation names, and forcing 13
+        # of them onto one line makes the manifest — the single source of truth for 78
+        # IS_A declaration sites — unreadable at exactly the place it must be read.
+        # Accumulate until the closing bracket, then fall through as if it were one line.
+        if pending is not None:
+            pending += " " + line
+            if "]" not in line:
+                continue
+            line, pending = pending, None
+        elif "=" in line and line.split("=", 1)[1].strip().startswith("[") \
+                and "]" not in line.split("=", 1)[1]:
+            pending = line
+            continue
         if not line:
             continue
-        if line.startswith("[") and line.endswith("]"):
+        if line.startswith("[") and line.endswith("]") and "=" not in line:
             inner = line.strip("[]")
             if inner.startswith("relation"):
                 section = "relation"
@@ -65,6 +89,11 @@ def parse_simple_toml(path: Path) -> dict:
                 section = "alias"
                 current = {}
                 data["alias"].append(current)
+                continue
+            if inner.startswith("set"):
+                section = "set"
+                current = {}
+                data["set"].append(current)
                 continue
             if inner.startswith("dynamic."):
                 section = "dynamic"
@@ -744,6 +773,62 @@ int laplace_relation_in_family(const hash128_t* type_id, const char* family_root
     OUT_FAMILY_FRAG.parent.mkdir(parents=True, exist_ok=True)
     _write_text_if_changed(OUT_FAMILY_FRAG, "\n".join(fam_lines) + "\n")
 
+    # DECLARED SETS -> consensus.relation_set_ids(text), same foldability contract as
+    # relation_family_ids: every element is laplace.relation_type_id(<literal>), which is
+    # IMMUTABLE (a BLAKE3 of the name, no table access), so the array folds at plan time
+    # and the LIST partitions prune before execution.
+    #
+    # A set is NOT a family. Families are derived from parent/family_root chains, so their
+    # membership is whatever the taxonomy implies; a set is an explicit roster. Measured
+    # live 2026-08-16 on the running substrate, which is why relate_path could not simply
+    # reuse a family: its upward arm wants exactly {IS_A, IS_INSTANCE_OF} while the IS_A
+    # FAMILY holds 3 members, and its lateral arm wants 11 while the IS_SYNONYM_OF family
+    # holds only itself. Substituting either would silently change which edges a path may
+    # traverse — a correctness change wearing a performance change's clothes.
+    sets = rel.get("set", [])
+    # Aliases count as declared vocabulary: an [[alias]] surface resolves to a canonical
+    # relation, so naming one in a set is not drift. FOLLOWS reached this check as an
+    # alias and was rejected -- the validator was wrong, not the call site.
+    known = set(canon_names) | {a.get("surface") for a in rel.get("alias", []) if a.get("surface")}
+    set_members: dict[str, list[str]] = {}
+    for s in sets:
+        nm = s.get("name")
+        if not nm:
+            raise SystemExit("codegen: a [[set]] has no name")
+        members = s.get("members") or []
+        if not members:
+            raise SystemExit(f"codegen: set '{nm}' declares no members")
+        # FAIL, never emit an empty arm. An unknown name silently yields NULL from the
+        # CASE, and `type_id = ANY (NULL)` matches nothing — a traversal that quietly
+        # returns no rows instead of erroring. Typos must stop the build.
+        unknown = [m for m in members if m not in known]
+        if unknown:
+            raise SystemExit(
+                f"codegen: set '{nm}' names relations that are not in the manifest: "
+                + ", ".join(sorted(unknown)))
+        if nm in set_members:
+            raise SystemExit(f"codegen: set '{nm}' declared twice")
+        set_members[nm] = list(members)
+
+    set_lines = [
+        "-- GENERATED by scripts/codegen-attestation-law.py - do not edit.",
+        "-- Foldable DECLARED relation sets: see the note in the generator.",
+        "DROP FUNCTION IF EXISTS consensus.relation_set_ids(text);",
+        "CREATE OR REPLACE FUNCTION consensus.relation_set_ids(p_set text)",
+        "    RETURNS bytea[]",
+        "    LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $set$",
+        "    SELECT CASE p_set",
+    ]
+    for nm in sorted(set_members):
+        # Sorted members: the emitted array is a set, so a manifest reordering must not
+        # produce a diff in generated SQL and re-trigger every downstream rebuild.
+        elems = ", ".join(f"laplace.relation_type_id('{m}')" for m in sorted(set_members[nm]))
+        set_lines.append(f"        WHEN '{nm}' THEN ARRAY[{elems}]")
+    set_lines.append("        ELSE NULL::bytea[]")
+    set_lines.append("    END")
+    set_lines.append("$set$;")
+    _write_text_if_changed(OUT_SET_FRAG, "\n".join(set_lines) + "\n")
+
     # Highway-axis partitions of consensus + attestations: ONLY the manifest's
     # `hot = true` relations get dedicated partitions (HASH (subject_id) x8 each);
     # the long tail of low-volume relations shares the DEFAULT partition. A flat
@@ -780,6 +865,34 @@ int laplace_relation_in_family(const hash128_t* type_id, const char* family_root
         "-- drained back through the parent, and the default reattached.",
         "DO $$",
         "DECLARE",
+        # MEASURED, and emitted here so REGENERATION CANNOT DESTROY IT. b6810cb0 wrote
+        # this reasoning into the generated file by hand; the generator did not know it,
+        # so the next codegen run silently deleted the note AND put all seven relations
+        # back. cf78518a named that class the "hand-edit flip-flop". A generated file
+        # cannot hold knowledge -- the generator has to.
+        "    -- MEASURED 2026-08-15, not guessed. Every name here gets 8 hash leaves on BOTH",
+        "    -- consensus and attestations, and every unprunable read Appends across all of them:",
+        "    -- one such reference costs 216 scan nodes and 83.9 ms of PLANNING (8 references =",
+        "    -- 1,728 nodes / 155.3 ms), which is why lexical.senses(word, context) spends 699.8 ms",
+        "    -- planning against 288.1 ms executing.",
+        "    --",
+        "    -- The roster is exactly the manifest's `hot = true` relations. ATTENDS,",
+        "    -- COMPLETES_TO, CONTAINS, CONTINUES_TO, HAS_EXTERNAL_ID, OV_RELATES and",
+        "    -- TOKEN_MAPS_TO were dropped 2026-08-16 by clearing the flag IN THE MANIFEST,",
+        "    -- verified 0 rows by count(*) and not reltuples: 112 leaves (7 x 8 x 2 tables)",
+        "    -- existing for nothing. A fresh install now builds 152 consensus leaves, not 216.",
+        "    -- Rows of those types land in DEFAULT, which is correct -- a type earns a",
+        "    -- partition by carrying rows.",
+        "    --",
+        "    -- STILL MISSING, and it is the whole skew: ops.consensus_partition_pressure()",
+        "    -- reports HAS_FEATURE at 186,562,442 rows = 84.93% of DEFAULT with no partition of",
+        "    -- its own, then TRANSCRIBES_AS 5.2M, DERIVED_FROM 3.8M, HAS_THINK_CLASS 3.0M.",
+        "    -- Setting hot on any of them makes the next install drain those rows through the",
+        "    -- DELETE ... RETURNING + INSERT below -- hours of WAL and AccessExclusive on both",
+        "    -- tables -- so it is scheduled deliberately, never slipped into a flag edit.",
+        "    --",
+        "    -- APPEARS_IN (60 rows) and PRECEDES (115) are kept: they are read from the",
+        "    -- geometry rather than stored, so a low row count is the design, not disuse.",
         "    hot text[] := ARRAY[",
     ]
     for i, n in enumerate(hot_names):

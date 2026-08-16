@@ -1,0 +1,88 @@
+{
+  "//": "External-agent routing table. Copy to config/agents.json (repo-local dev) or",
+  "//default": "/opt/laplace/app/agents.json (deployed). Read per call by the MCP `ask`",
+  "//search": "and `agents` tools — call `agents` to see which path was loaded.",
+  "//secrets": "NO KEYS IN THIS FILE. It rides the deploy payload into a shared app",
+  "//secrets2": "directory. Name the variable with api_key_env; put the value in the",
+  "//secrets3": "process environment or /opt/laplace/secrets/agents.env.",
+
+  "default": "house",
+
+  "agents": {
+    "house": {
+      "provider": "anthropic",
+      "model": "claude-opus-5",
+      "max_tokens": 16000
+    },
+
+    "flagship": {
+      "provider": "openai",
+      "model": "REPLACE-WITH-A-CURRENT-OPENAI-MODEL-ID"
+    },
+
+    "grok": {
+      "provider": "xai",
+      "model": "REPLACE-WITH-A-CURRENT-XAI-MODEL-ID"
+    },
+
+    "gemini": {
+      "provider": "google",
+      "model": "REPLACE-WITH-A-CURRENT-GOOGLE-MODEL-ID"
+    },
+
+    "reviewer": {
+      "provider": "anthropic",
+      "model": "claude-opus-5",
+      "system": "You review substrate reads for factual overreach. Answer in one paragraph.",
+      "max_tokens": 2000
+    },
+
+    "//oauth": "OAuth / SSO instead of a static key. Three parts: auth bearer moves",
+    "//oauth2": "the credential off the provider's key header onto Authorization,",
+    "//oauth3": "token_command mints a LIVE token per call (a pasted OAuth token",
+    "//oauth4": "expires and then looks like a revoked key), and headers carries",
+    "//oauth5": "whatever else the flow needs. Anthropic profiles: ant auth login.",
+    "claude-oauth": {
+      "provider": "anthropic",
+      "model": "claude-opus-5",
+      "auth": "bearer",
+      "token_command": "ant auth print-credentials --access-token",
+      "headers": { "anthropic-beta": "oauth-2025-04-20" }
+    },
+
+    "//gateway": "An SSO gateway in front of any provider: same three parts.",
+    "sso-gateway": {
+      "provider": "openai-compatible",
+      "model": "whatever-the-gateway-serves",
+      "base_url": "https://llm-gateway.internal/v1",
+      "auth": "bearer",
+      "token_command": "/opt/laplace/bin/mint-gateway-token"
+    },
+
+    "workstation": {
+      "provider": "ollama",
+      "model": "llama3.2",
+      "base_url": "http://127.0.0.1:11434/v1"
+    },
+
+    "vllm": {
+      "provider": "openai-compatible",
+      "model": "whatever-that-server-serves",
+      "base_url": "http://10.0.0.5:8000/v1",
+      "api_key_env": "VLLM_API_KEY"
+    },
+
+    "self": {
+      "provider": "laplace",
+      "model": "laplace-substrate"
+    }
+  },
+
+  "providers": {
+    "openai": {
+      "//": "Point a provider at a gateway or proxy without touching its aliases.",
+      "base_url": "https://api.openai.com/v1",
+      "api_key_env": "OPENAI_API_KEY"
+    }
+  }
+}

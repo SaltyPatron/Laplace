@@ -36,7 +36,7 @@ set -euo pipefail
 DB="${1:-${PGDATABASE:-laplace}}"
 BUDGET_SECONDS="${2:-18000}"     # 5h: longer than the longest observed seed
 INTERVAL=30
-CORPSE_GRACE=90
+CORPSE_GRACE="${LAPLACE_CORPSE_GRACE:-90}"   # overridable so the reconciliation path is testable
 # Must match NpgsqlIngestObservability.RunLivenessLockClass ("LPLK").
 LOCK_CLASS=$(( 0x4C504C4B ))
 # The unit whose liveness decides "down" vs "misconfigured" below. Must name the
@@ -46,6 +46,7 @@ PG_SERVICE="${LAPLACE_PG_SERVICE:-laplace-postgresql.service}"
 PSQL=(psql -h "${PGHOST:-/var/run/postgresql}" -U "${PGUSER:-laplace_admin}" -d "$DB")
 deadline=$(( SECONDS + BUDGET_SECONDS ))
 corpse_first_seen=""
+corpse_snapshot=""
 
 HELD="EXISTS (SELECT 1 FROM pg_locks l
        WHERE l.locktype = 'advisory'
@@ -75,18 +76,61 @@ while :; do
     if [ "$corpses" -gt 0 ]; then
       if [ -z "$corpse_first_seen" ]; then
         corpse_first_seen=$SECONDS
+        # SNAPSHOT PROGRESS, not just the fact of the lock being absent. See the block below.
+        corpse_snapshot=$("${PSQL[@]}" -tAc \
+          "SELECT j.run_id || ':' || j.input_units_done FROM laplace.ingest_run_journal j
+            WHERE j.status = 'running' AND NOT ${HELD} ORDER BY j.run_id;" 2>/dev/null || echo "")
         echo "::warning::${corpses} 'running' row(s) hold no liveness lock — rechecking in ${CORPSE_GRACE}s before closing them as orphaned"
       elif [ $(( SECONDS - corpse_first_seen )) -ge "$CORPSE_GRACE" ]; then
-        echo "::warning::closing ${corpses} orphaned run(s): 'running' in the journal, liveness lock absent for ${CORPSE_GRACE}s+ — no process is behind them"
-        "${PSQL[@]}" -P pager=off -c \
-          "UPDATE laplace.ingest_run_journal j SET status = 'cancelled', ended_at = now(),
-                  error = 'run did not reach completion: liveness lock absent (cluster restart, OOM kill, or terminated session). Closed by wait-for-quiet-substrate.sh.'
-           WHERE j.status = 'running' AND NOT ${HELD}
-           RETURNING j.run_id, j.source_name, j.input_units_done, j.input_units_total;" || true
-        corpse_first_seen=""
+        # A MISSING BEACON IS NOT PROOF OF DEATH, and closing on it alone can cancel a live
+        # run and then report the substrate quiet — clearing a caller to bounce PostgreSQL
+        # over an ingest in flight. That is the failure this script exists to prevent,
+        # arrived at from the other direction.
+        #
+        # MEASURED 2026-08-16: a ConceptNet seed was writing continuously,
+        # input_units_done climbing 6.0M -> 6.3M -> 7.4M, while pg_locks held ZERO advisory
+        # locks for the database. Evaluated here it read live=0 corpses=1. The beacon is a
+        # session lock on a dedicated pooled connection; if that connection is pruned or
+        # dropped the lock dies while the run continues, and AcquireLivenessLock's own
+        # contract is to log INGEST_RUN_LIVENESS_LOCK_FAILED and PROCEED. So its absence
+        # says nothing about the process.
+        #
+        # A counter that advanced over CORPSE_GRACE does. Only rows whose input_units_done
+        # is UNCHANGED since first sighting are closed; anything that moved is live and is
+        # waited on, beacon or no beacon. A corpse cannot advance a counter, so the
+        # reconciliation this block exists for is preserved exactly.
+        still=$(printf '%s\n' "$corpse_snapshot" | awk -F: 'NF==2 {printf "(%s,%s),", "\047"$1"\047", $2}' | sed 's/,$//')
+        if [ -z "$still" ]; then
+          corpse_first_seen=""
+        else
+          moved=$("${PSQL[@]}" -tAc \
+            "WITH snap(run_id, done) AS (VALUES ${still})
+             SELECT count(*) FROM laplace.ingest_run_journal j
+               JOIN snap s ON s.run_id::uuid = j.run_id
+              WHERE j.status = 'running' AND j.input_units_done <> s.done;" 2>/dev/null || echo "?")
+          if [[ "$moved" =~ ^[0-9]+$ ]] && [ "$moved" -gt 0 ]; then
+            echo "::warning::${moved} 'running' row(s) have NO liveness lock but ARE ADVANCING — live, not orphaned. Not closing them; a missing beacon is not proof of death."
+            corpse_first_seen=""
+          elif [[ "$moved" =~ ^[0-9]+$ ]]; then
+            echo "::warning::closing orphaned run(s): 'running', liveness lock absent for ${CORPSE_GRACE}s+, AND input_units_done unchanged over that window — nothing is behind them"
+            "${PSQL[@]}" -P pager=off -c \
+              "WITH snap(run_id, done) AS (VALUES ${still})
+               UPDATE laplace.ingest_run_journal j SET status = 'cancelled', ended_at = now(),
+                      error = 'run did not reach completion: liveness lock absent AND no progress over the grace window (cluster restart, OOM kill, or terminated session). Closed by wait-for-quiet-substrate.sh.'
+               FROM snap s
+               WHERE s.run_id::uuid = j.run_id AND j.status = 'running'
+                 AND j.input_units_done = s.done AND NOT ${HELD}
+               RETURNING j.run_id, j.source_name, j.input_units_done, j.input_units_total;" || true
+            corpse_first_seen=""
+          else
+            echo "::warning::progress probe failed — treating as BUSY and not closing anything"
+            corpse_first_seen=""
+          fi
+        fi
       fi
     else
       corpse_first_seen=""
+      corpse_snapshot=""
     fi
 
     if [ "$live" -eq 0 ] && [ "$corpses" -eq 0 ]; then

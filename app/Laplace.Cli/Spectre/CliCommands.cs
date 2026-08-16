@@ -220,6 +220,21 @@ internal sealed class SourceBootstrapCommand : ForwardCommand<TailSettings>
     }
 }
 
+[Description("Run a command holding the measurement lane exclusive, so no ingest writes while it is timed. Usage: measure-lane <cmd> [args…]")]
+internal sealed class MeasureLaneCommand : ForwardCommand<TailSettings>
+{
+    protected override Task<int> ExecuteAsync(CommandContext ctx, TailSettings s, CancellationToken ct)
+    {
+        var raw = Raw(ctx);
+        if (raw.Length == 0)
+        {
+            Console.Error.WriteLine("usage: measure-lane <command> [args…]");
+            return Task.FromResult(2);
+        }
+        return Laplace.SubstrateCRUD.Npgsql.MeasurementLane.RunExclusiveAsync(raw[0], raw[1..], ct);
+    }
+}
+
 [Description("Prove tensor_svd_truncate is fp-exact on a real tensor (no DB).")]
 internal sealed class SvdExactBenchCommand : ForwardCommand<TailSettings>
 {

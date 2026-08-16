@@ -96,16 +96,33 @@ if [[ -n "${GITHUB_ACTIONS:-}${CI:-}" && -z "${LAPLACE_INGEST_CONSOLE:-}" ]]; th
   export LAPLACE_INGEST_CONSOLE=ci
 fi
 
+# One process for the whole ladder. The previous loop called ingest-source.sh once
+# per source, paying a CLI startup + perfcache map + native runtime init each time —
+# the 12x tax scripts/win/seed-chain.cmd documents and which no Linux caller avoided.
+# `ingest chain` dispatches every spec in one process through the same table, and
+# stops on the first non-zero rc exactly as `set -e` did here.
+CHAIN=()
+CHAIN_DECOMPOSERS=()
 for entry in "${FOUNDATION[@]}"; do
   IFS=':' read -r cli decomposer layer <<< "$entry"
   if [[ "$FORCE" -eq 1 ]] || ! layer_ok "$decomposer" "$layer"; then
-    echo "==== ingest $cli ===="
-    "$SCRIPTS/ingest-source.sh" "$cli"
-    bash "$SCRIPTS/verify-ingest-journal.sh" "$decomposer"
+    CHAIN+=("$cli")
+    CHAIN_DECOMPOSERS+=("$decomposer")
   else
     echo "==== skip $cli (layer complete) ===="
   fi
 done
+
+if [[ ${#CHAIN[@]} -gt 0 ]]; then
+  echo "==== ingest chain (${#CHAIN[@]} source(s), one process): ${CHAIN[*]} ===="
+  "$SCRIPTS/ingest-source.sh" chain "${CHAIN[@]}"
+  # Journal verification is unchanged, one per ingested source; it ran inline before
+  # and runs after the chain now. A mid-chain failure aborts under set -e before this,
+  # which is the same reachability the inline form had.
+  for decomposer in "${CHAIN_DECOMPOSERS[@]}"; do
+    bash "$SCRIPTS/verify-ingest-journal.sh" "$decomposer"
+  done
+fi
 
 echo "==== foundation journal (latest per source) ===="
 psql -h "$PGHOST" -U "$PGUSER" -d "$DB" -v ON_ERROR_STOP=1 -c \
