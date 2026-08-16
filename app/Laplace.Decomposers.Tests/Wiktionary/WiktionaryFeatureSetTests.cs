@@ -119,4 +119,55 @@ public class WiktionaryFeatureSetTests
         Assert.Equal(PhysicalityType.Set, ctx.Type);
         Assert.Equal(3, ctx.NConstituents);
     }
+
+    private static readonly Hash128 HasUsageRegister =
+        RelationTypeRegistry.RelationTypeId("HAS_USAGE_REGISTER");
+
+    [Fact]
+    public void MultipleRegisterTagsOnASenseComposeOneReading()
+    {
+        // "archaic AND humorous" is one register reading, adjudicable as a whole. As separate
+        // edges a second witness could confirm "archaic" while refuting the reading it belongs
+        // to, and nothing could represent that.
+        var change = EmitEntry(new WiktionaryEntry
+        {
+            Word = "wolf",
+            LangCode = "en",
+            Senses = [new WiktionaryEntry.Sense { Tags = ["archaic", "humorous", "poetic"] }],
+        });
+
+        var reg = Assert.Single(change.Attestations, a => a.TypeId == HasUsageRegister);
+        var bundle = Assert.Single(change.Physicalities, p => p.EntityId == reg.ObjectId!.Value);
+        Assert.Equal(PhysicalityType.Set, bundle.Type);
+        Assert.Equal(3, bundle.NConstituents);
+    }
+
+    [Fact]
+    public void NonRegisterTagsAreExcludedFromTheReading()
+    {
+        // Only RegisterTags members participate; a grammatical tag must not join the register
+        // set, or the set id stops meaning "this register".
+        var change = EmitEntry(new WiktionaryEntry
+        {
+            Word = "wolf",
+            LangCode = "en",
+            Senses = [new WiktionaryEntry.Sense { Tags = ["archaic", "transitive", "humorous"] }],
+        });
+
+        var reg = Assert.Single(change.Attestations, a => a.TypeId == HasUsageRegister);
+        var bundle = Assert.Single(change.Physicalities, p => p.EntityId == reg.ObjectId!.Value);
+        Assert.Equal(2, bundle.NConstituents);
+    }
+
+    [Fact]
+    public void SenseWithNoRegisterTagsEmitsNoRegisterEdge()
+    {
+        var change = EmitEntry(new WiktionaryEntry
+        {
+            Word = "wolf",
+            LangCode = "en",
+            Senses = [new WiktionaryEntry.Sense { Tags = ["transitive", "countable"] }],
+        });
+        Assert.DoesNotContain(change.Attestations, a => a.TypeId == HasUsageRegister);
+    }
 }

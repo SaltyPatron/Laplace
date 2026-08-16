@@ -184,10 +184,17 @@ internal static class WiktionaryEmit
         // a sense (GH #867). POS remains attested on the word itself via HAS_POS.
         WalkRelations(b, wordId, in s.Relations, isVerb, langCtx, roots);
 
+        // A sense's register is one reading -- "archaic AND humorous" -- not two independent
+        // claims. Same shape as HAS_FEATURE and the same fix: one composition, one edge, one
+        // thing a second witness can corroborate or refute as a whole.
         if (s.Tags is { } tags)
+        {
+            List<string>? register = null;
             foreach (var tag in tags)
-                if (RegisterTags.Contains(tag) && Stage(b, tag, roots, out var tagId))
-                    Attest(b, wordId, "HAS_USAGE_REGISTER", tagId, posCtx);
+                if (RegisterTags.Contains(tag)) (register ??= []).Add(tag);
+            if (TryStageSet(b, register, roots, out var registerId))
+                Attest(b, wordId, "HAS_USAGE_REGISTER", registerId, posCtx);
+        }
     }
 
     private static void WalkRelations(
@@ -280,8 +287,14 @@ internal static class WiktionaryEmit
         Span<double> c = stackalloc double[4];
         foreach (var tag in tags)
         {
-            if (!Stage(b, tag, roots, out var tagId)) continue;
-            if (!WiktionarySurfaceTrees.TryRootCoord(tag, c)) continue;
+            // A member that cannot be staged or placed FAILS THE WHOLE SET. Dropping it and
+            // composing the remainder is worse than emitting nothing: a partial set is a
+            // DIFFERENT set with a different merkle id, so the same analysis would land under
+            // two ids depending on cache state, and neither would be wrong on its face. No
+            // edge is recoverable -- the substrate can prove an absence (INVENTION §8) and
+            // cannot prove a silently truncated set.
+            if (!Stage(b, tag, roots, out var tagId)) return false;
+            if (!WiktionarySurfaceTrees.TryRootCoord(tag, c)) return false;
             ids.Add(tagId);
             for (int i = 0; i < 4; i++) coords.Add(c[i]);
         }

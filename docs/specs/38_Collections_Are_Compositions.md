@@ -161,24 +161,47 @@ level), so `subjects_with` resolves the bundle first and passes `type_id`.
 
 ---
 
-## 6. Sites, enumerated
+## 6. Sites, enumerated — CORRECTED 2026-08-16 by reading every emitter
 
-134 `AddAttestation` call sites across 22 files under `app/Laplace.Decomposers/`. The
-set-valued ones, ranked by live row count:
+The first revision of this table listed five set-valued sites. **Three of them were wrong**,
+asserted from a relation name without opening the emitter. The corrected finding is that the
+defect is far narrower than the row count suggests, and concentrated in one witness.
 
-| relation | rows | site | shape |
+**Genuinely set-valued — the whole of it:**
+
+| relation | rows | site | state |
 |---|---|---|---|
-| `HAS_FEATURE` | 186,562,442 | `Wiktionary/WiktionaryEmit.cs:240` | set → bundle |
-| `TRANSCRIBES_AS` | 5,192,208 | `Wiktionary/WiktionaryEmit.cs:216-224` | set truncated to 1 by `break` |
-| `HAS_FEATURE` | (subset) | `PropBank/PropBankDecomposer.cs:137` | set → bundle |
-| `HAS_USAGE_REGISTER` | 495,117 | `Wiktionary/WiktionaryEmit.cs` register tags | set → bundle |
-| `HAS_PROPERTY` | 24,891 | `ConceptNet/ConceptNetSource.cs:32`, `Atomic2020/Atomic2020Source.cs:24` | set → bundle |
+| `HAS_FEATURE` | 186,562,442 | `Wiktionary/WiktionaryEmit.cs` `WalkForms` | rewired 292af9ae |
+| `TRANSCRIBES_AS` | 5,192,208 | `Wiktionary/WiktionaryEmit.cs` `WalkSounds` | rewired 292af9ae (was truncated to 1 by `break`) |
+| `HAS_USAGE_REGISTER` | 495,117 | `Wiktionary/WiktionaryEmit.cs` `WalkSense` | rewired |
 
-Single-valued and correct as edges — **do not convert**: `HAS_LINE_BREAK` (356,930),
-`HAS_EAST_ASIAN_WIDTH` (355,548), `HAS_BLOCK` (303,808), `HAS_AGE` (299,448), `HAS_SCRIPT`
-(159,866), all from `Unicode/UnicodeDecomposer.cs` (24 sites). A codepoint has exactly one
-block. These are a record with named fields, not a collection, and collapsing them would
-destroy the typed relation that names each field.
+**Asserted as set-valued in revision 1 and WRONG — do not convert:**
+
+- `PropBank/PropBankDecomposer.cs:137` — `HAS_FEATURE` from `role.GetAttribute("f")`. One
+  attribute per role. Single-valued, already correct.
+- `UD/UdSentenceEmitter.cs:100` — FEATS emits a **different relation type per feature**
+  (`RelationTypeRegistry.ResolveFeature` → `FEAT_Case`, `FEAT_Number`, …) against a
+  `Name=Value` entity. That is a record with named fields, which §1 shape 3 already calls
+  correct, and it is the *better* shape than a bundle: each field is independently
+  adjudicable and independently queryable. UD was right before this spec existed.
+- `ConceptNet/ConceptNetSource.cs`, `Atomic2020/Atomic2020Source.cs` — `HAS_PROPERTY` comes
+  from source rows that are already triples, one relation per row. There is no bundle in the
+  input to preserve.
+- `WordNet/WordNetDecomposer.cs:267,274` — multiple `HAS_DEFINITION` / `HAS_EXAMPLE` per
+  synset are independent claims, each separately corroborable. Multi-valued is not
+  set-valued.
+
+**Single-valued and correct as edges:** `HAS_LINE_BREAK` (356,930), `HAS_EAST_ASIAN_WIDTH`
+(355,548), `HAS_BLOCK` (303,808), `HAS_AGE` (299,448), `HAS_SCRIPT` (159,866), all from
+`Unicode/UnicodeDecomposer.cs`. A codepoint has exactly one block.
+
+**The test that separates the three cases**, since the relation name does not:
+
+1. Would a second witness corroborate or refute the members *as a whole*? → set → bundle.
+2. Does each member answer a differently-named question? → record → one typed edge per field
+   (UD FEATS).
+3. Is each member an independent claim about the subject? → multi-valued → one edge each
+   (WordNet glosses).
 
 ---
 
@@ -213,3 +236,51 @@ A collection changes what that distribution is *over*. With the edge fan, a dist
 `HAS_FEATURE` is a distribution over 1,610 individually-attested tags, which is not a
 morphological analysis. With bundles it is a distribution over 145,619 attested analyses,
 which is.
+
+---
+
+## 9. What is NOT done — the backlog, enumerated 2026-08-16
+
+No task-list tool exists in this session (searched: EnterPlanMode, ExitPlanMode, CronList,
+TaskOutput, TaskStop, DesignSync, EndConversation, EnterWorktree — none is a checklist), so
+the backlog lives here, where it outlives the session.
+
+**Blocking everything below:** `laplace` was dropped. `psql -l` returns `postgres`,
+`template0`, `template1`. Every measurement in this document was taken before that and none
+can currently be re-run. Treat every live number here as **UNVERIFIED** until a rebuild
+reproduces it.
+
+**Written, never executed:**
+
+1. No set composition has ever reached a database. `StageCollection` is exercised only by
+   in-process tests (`StageCollectionTests` 8/8, `WiktionaryFeatureSetTests` 5/5).
+2. The eviction that would release the rows into the new shape never ran:
+   `evict WiktionaryDecomposer --relations HAS_FEATURE,TRANSCRIBES_AS,HAS_USAGE_REGISTER
+   --rederive`. Blocked at the tool layer, then mooted by the drop.
+
+**Defects introduced by this change and NOT validated:**
+
+3. `StageCollection` throws when a member has no staged physicality. Never exercised against
+   the bulk Wiktionary lane, where the existence bitmap suppresses re-emission of members
+   already deposited. If it fires there it kills the ingest mid-run. Needs a bulk-lane run
+   or a test that reproduces a bitmap-suppressed member.
+4. `TryStageSet` silently DROPS a tag whose tier tree carries no composed geometry
+   (`TryRootCoord` false). It fails quiet, not loud, and nothing measures how often. A
+   dropped member changes the set id, so this can silently produce two ids for one analysis.
+
+**Unwritten:**
+
+5. `docs/INDEX.md` and `docs/INVENTORY.md` carry no entry for `consensus.belief_distribution`,
+   `consensus.glicko2_logit`, `consensus.glicko2_g`, `consensus.set_members`,
+   `consensus.subjects_with`, `physicalities_set_constituents_gin`, or `PhysicalityType.Set`.
+6. CLAUDE.md §9 has no measured entry for any of those surfaces.
+7. 252 issues open. None triaged, filed, or closed against this work.
+
+**Open questions this document does not answer:**
+
+8. A bundle carries one rating for the whole analysis. What happens to the per-member
+   testimony that the edge fan used to carry — is `{nom, sg}` from one witness and
+   `{nom, sg, masc}` from another a corroboration or two distinct claims? The merkle says
+   distinct. Nothing here decides whether that is right.
+9. `consensus.subjects_with` has never run against data. Its GIN plan is asserted from the
+   index definition, not measured.
