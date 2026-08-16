@@ -189,8 +189,37 @@ internal static class CpuTopologyCommands
         w.WriteLine("ALTER SYSTEM SET hash_mem_multiplier = 1.0;");
         w.WriteLine("ALTER SYSTEM SET temp_buffers = '32MB';");
         w.WriteLine("ALTER SYSTEM SET autovacuum_work_mem = '256MB';");
-        w.WriteLine("ALTER SYSTEM SET effective_io_concurrency = 256;");
-        w.WriteLine("ALTER SYSTEM SET maintenance_io_concurrency = 256;");
+        // RE-MEASURED 2026-08-16 ON THIS CLUSTER. 256 was a promise the backend could not
+        // keep, and this emitter is the AUTHORITY -- pg_apply_machine_tuning runs
+        // `cpu-topology --pg-tuning` first and only falls back to the shell's formulas, so
+        // the literal here is what actually reaches a cluster.
+        //
+        // The 2026-08-03 note above reasons about io_method = worker, where the ceiling is
+        // the io_workers pool. pg_apply_io_method now probes and selects io_uring whenever
+        // the build supports it, and under io_uring the ceiling is io_max_concurrency --
+        // per-backend, postmaster-context, never emitted by anything here, and sitting at
+        // its default of 64.
+        //
+        // THE CAP BINDS. Sampled from pg_aios while one backend seq-scanned a 2,573 MB
+        // attestations leaf: max in-flight AIO ops held by that backend = 64, exactly
+        // io_max_concurrency. 192 of the 256 were notional.
+        //
+        // AND THE REQUEST BUYS NOTHING EVEN SO. Three cold 2.5 GB leaves, identical shape,
+        // one each, under scripts/measure-lane.sh on a quiet substrate:
+        //   effective_io_concurrency = 256  attestations_rdefault_h0  3175.480 ms
+        //   effective_io_concurrency =  64  attestations_rdefault_h1  3175.204 ms
+        //   effective_io_concurrency =  32  attestations_rdefault_h2  3167.613 ms
+        // 8 ms of spread on a 3.17 s scan, lowest setting marginally fastest.
+        //
+        // Pinned to the cap so the config states what a backend can actually do. Raising
+        // io_max_concurrency costs a cluster restart (postmaster context) and nothing above
+        // justifies one.
+        //
+        // SCOPE, because the rule is conditional: this is a SEQUENTIAL scan, the friendliest
+        // case for prefetch. Random-access ingest probes were NOT measured; re-measure there
+        // before concluding anything about them.
+        w.WriteLine("ALTER SYSTEM SET effective_io_concurrency = 64;");
+        w.WriteLine("ALTER SYSTEM SET maintenance_io_concurrency = 64;");
         w.WriteLine("ALTER SYSTEM SET random_page_cost = 1.1;");
         w.WriteLine("ALTER SYSTEM SET autovacuum_vacuum_cost_delay = 0;");
         // huge_pages is deliberately NOT emitted here, for the same reason as

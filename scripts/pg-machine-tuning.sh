@@ -87,28 +87,36 @@ pg_compute_machine_tuning() {
   # CpuTopologyCommands.EmitPgTuning; PgTuningParityTests pins the pair.
   PG_TUNE_MAX_WAL=96GB
   PG_TUNE_MIN_WAL=4GB
-  PG_TUNE_IO_CONC=256
-  # THE CEILING MOVED WHEN io_method DID, and this pair was never re-derived for it.
+  # MEASURED 2026-08-16 ON THIS CLUSTER, replacing a hardcoded 256 that was never true.
   #
-  # effective_io_concurrency is a REQUEST for queue depth; something else bounds what a
-  # backend may actually hold in flight. Under io_method=worker that bound is the
-  # io_workers pool, which is what the measurement above reasons about. pg_apply_io_method
-  # now probes and selects io_uring whenever the build supports it, and under io_uring the
-  # bound is io_max_concurrency -- a per-backend cap this script never emitted, so it sat
-  # at its default.
+  # THE CEILING MOVED WHEN io_method DID. effective_io_concurrency is a REQUEST for queue
+  # depth; something else bounds what a backend may actually hold in flight. Under
+  # io_method=worker that bound is the io_workers pool, which is what the measurement
+  # above reasons about. pg_apply_io_method now probes and selects io_uring whenever the
+  # build supports it, and under io_uring the bound is io_max_concurrency -- a per-backend
+  # cap this script never emitted, so it sat at its default of 64 while this line asked
+  # for 256.
   #
-  # MEASURED ON THE LIVE CLUSTER 2026-08-16: io_method=io_uring, effective_io_concurrency
-  # 256, maintenance_io_concurrency 256, io_max_concurrency 64 (source: default). The
-  # tuning asks for 4x more concurrent reads than the AIO subsystem may hold. io_workers=12
-  # is also still emitted and is inert under io_uring.
+  # THE CAP BINDS, sampled from pg_aios while one backend seq-scanned a 2,573 MB
+  # attestations leaf: MAX in-flight AIO ops held by that backend = 64, exactly
+  # io_max_concurrency. The other 192 of the request were notional.
   #
-  # Emitted explicitly rather than left to the default, so the relationship is visible and
-  # gated instead of implied. NOT RAISED BLIND: the value that makes 256 achievable has to
-  # come from a measurement on this device, and the correct experiment is the one the
-  # io_workers note above already models -- queue depth against r_await, not a guess. Until
-  # that runs, this pins the cap to the request so the two cannot silently disagree, and
-  # PgTuningParityTests fails if they drift apart again.
-  PG_TUNE_IO_MAX_CONC=$PG_TUNE_IO_CONC
+  # AND THE REQUEST BUYS NOTHING EVEN SO. Three cold 2.5 GB leaves, one each, identical
+  # shape, taken under scripts/measure-lane.sh on a quiet substrate:
+  #     effective_io_concurrency=256  attestations_rdefault_h0  3175.480 ms
+  #     effective_io_concurrency=64   attestations_rdefault_h1  3175.204 ms
+  #     effective_io_concurrency=32   attestations_rdefault_h2  3167.613 ms
+  # 8 ms of spread across a 3.17 s scan, with the LOWEST setting marginally fastest.
+  #
+  # So the value is pinned to the cap: the config now states what the backend can actually
+  # do. io_max_concurrency is postmaster-context, so RAISING it would cost a cluster
+  # restart, and nothing above justifies one.
+  #
+  # SCOPE OF THE EVIDENCE, stated because the rule is conditional: this is a SEQUENTIAL
+  # scan, the friendliest case for prefetch. A random-access workload -- index probes
+  # during ingest -- was not measured and may not behave the same. Re-measure there before
+  # concluding anything about it.
+  PG_TUNE_IO_CONC=64
   PG_TUNE_CHECKPOINT=30min
   # Policy knobs the shell used to omit entirely, letting the cluster keep PG
   # defaults that silently multiply the memory budget: hash_mem_multiplier 2.0
