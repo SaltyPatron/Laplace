@@ -35,14 +35,10 @@ public sealed class OmwPlacementEntityParityTests(ITestOutputHelper output)
 {
     private const string WnsDir = "/vault/Data/omw/wns";
 
-    [Fact]
+    [SkippableFact]
     public void EveryComposedPlacementHasAStagedEntity()
     {
-        if (!Directory.Exists(WnsDir))
-        {
-            output.WriteLine($"skipped: {WnsDir} not present");
-            return;
-        }
+        Skip.IfNot(Directory.Exists(WnsDir), $"dataset absent: {WnsDir}");
 
         CodepointPerfcache.LoadDefault();
         var omw = EtlManifest.Get("omw");
@@ -117,10 +113,10 @@ public sealed class OmwPlacementEntityParityTests(ITestOutputHelper output)
     /// It is the last layer above the database, and the database is where the
     /// surplus was measured (1,713,165 placements against 1,460,249 entities,
     /// ~17%, scaling linearly with input).
-    [Fact]
+    [SkippableFact]
     public void WitnessDrainKeepsPlacementsUnderEntities()
     {
-        if (!Directory.Exists(WnsDir)) { output.WriteLine($"skipped: {WnsDir} absent"); return; }
+        Skip.IfNot(Directory.Exists(WnsDir), $"dataset absent: {WnsDir}");
 
         CodepointPerfcache.LoadDefault();
         // The witness resolves a language id per row, so the ISO-639 table has to
@@ -190,14 +186,10 @@ public sealed class OmwPlacementEntityParityTests(ITestOutputHelper output)
     /// the native IntentStages (deduped by intent_stage_witness_*). The apply
     /// COPYs both. This measures that boundary the same way — real OMW rows, real
     /// witness, real builder, no database.
-    [Fact]
+    [SkippableFact]
     public void FullBuilderDrainKeepsPlacementsUnderEntities()
     {
-        if (!Directory.Exists(WnsDir))
-        {
-            output.WriteLine($"skipped: {WnsDir} not present");
-            return;
-        }
+        Skip.IfNot(Directory.Exists(WnsDir), $"dataset absent: {WnsDir}");
 
         CodepointPerfcache.LoadDefault();
         var omw = EtlManifest.Get("omw");

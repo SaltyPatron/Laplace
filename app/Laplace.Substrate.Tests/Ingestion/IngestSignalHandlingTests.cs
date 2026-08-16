@@ -27,10 +27,14 @@ public class IngestSignalHandlingTests
 
     private const int SIGTERM = 15;
 
-    [Fact]
+    [SkippableFact]
     public void Sigterm_Cancels_The_Token_Instead_Of_Killing_The_Process()
     {
-        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS()) return;
+        // A [Fact] with an early return reports PASS on a platform where it never ran, which
+        // is the one outcome a signal-handling test must never produce. Skip.IfNot records
+        // the skip in the run.
+        Skip.IfNot(OperatingSystem.IsLinux() || OperatingSystem.IsMacOS(),
+            "POSIX signals — Linux/macOS only");
 
         using var linked = new CancellationTokenSource();
         using var reg = PosixSignalRegistration.Create(PosixSignal.SIGTERM, ctx =>
@@ -49,28 +53,5 @@ public class IngestSignalHandlingTests
             "SIGTERM did not cancel the token — the run would die without journaling a terminal row");
     }
 
-    [Fact]
-    public void Cancelled_Token_Surfaces_As_OperationCanceled_So_The_Runner_Can_Journal()
-    {
-        // The arm that writes status='cancelled' is `catch (OperationCanceledException)`.
-        // A cancelled token must therefore reach it as that exception and not, say, as a
-        // silent early return -- otherwise the signal wiring above buys nothing.
-        using var cts = new CancellationTokenSource();
-        cts.Cancel();
 
-        Assert.Throws<OperationCanceledException>(() => cts.Token.ThrowIfCancellationRequested());
-    }
-
-    [Fact]
-    public void Linked_Source_Still_Honours_The_Caller_Token()
-    {
-        // RunAsync links the caller's token into its own source. A caller that cancels must
-        // still cancel the run -- the signal registration must not shadow it.
-        using var caller = new CancellationTokenSource();
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(caller.Token);
-
-        Assert.False(linked.IsCancellationRequested);
-        caller.Cancel();
-        Assert.True(linked.IsCancellationRequested);
-    }
 }

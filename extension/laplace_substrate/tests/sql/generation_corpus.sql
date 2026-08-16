@@ -187,6 +187,18 @@ BEGIN
         RAISE EXCEPTION 'FAIL: new trajectory not visible to the next read (capital→of should be weight 2)';
     END IF;
 
+    -- generation.corpus_whitespace_vocab_indices shipped with a PL/pgSQL syntax error that
+    -- nothing caught, and the fix landed with no test (GH #1061). One invocation closes the
+    -- gap: a plpgsql body is only parsed at first EXECUTE, so a call is the only thing that
+    -- proves it compiles. Asserted on shape, not on membership -- the indices depend on which
+    -- codepoints this fixture happens to stage.
+    PERFORM generation.corpus_whitespace_vocab_indices(ARRAY[w_capital, w_of]);
+    IF EXISTS (
+        SELECT 1 FROM generation.corpus_whitespace_vocab_indices(ARRAY[w_capital, w_of]) i
+        WHERE i.vocab_idx IS NULL OR i.vocab_idx < 1 OR i.vocab_idx > 2) THEN
+        RAISE EXCEPTION 'FAIL: corpus_whitespace_vocab_indices returned an out-of-range vocab_idx';
+    END IF;
+
     RAISE NOTICE '✓ generation_corpus: trajectories are the single source — separator law by attestation, run boundaries, k-context match, seeded determinism, the consensus floor (stride_used=0), and write-then-read visibility all hold with NO corpus cache';
 END $$;
 
