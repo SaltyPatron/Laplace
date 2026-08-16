@@ -855,6 +855,24 @@
     "g8_band_literalism": {
       "extension/laplace_substrate/sql/functions/lexical/senses_with_context.sql.in::RELATION_HIGHWAY_BAND(C.TYPE_ID)IN(1,7)": 1,
       "extension/laplace_substrate/sql/functions/lexical/senses_with_context.sql.in::RELATION_HIGHWAY_BAND(C.TYPE_ID)IN(2,4,7)": 2
+    },
+    "g16_unmanifested_vocabulary": {
+      "extension/laplace_substrate/sql/bootstrap/bootstrap.sql.in::CO_OCCURS_WITH": 1,
+      "extension/laplace_substrate/sql/bootstrap/bootstrap.sql.in::HAS_TRUST_CLASS": 1,
+      "extension/laplace_substrate/sql/bootstrap/bootstrap.sql.in::IS_ALIAS_OF": 1,
+      "extension/laplace_substrate/sql/bootstrap/bootstrap.sql.in::IS_LOSSY_ENCODING_OF": 1,
+      "extension/laplace_substrate/sql/bootstrap/bootstrap.sql.in::IS_REPLACED_BY": 1,
+      "extension/laplace_substrate/sql/bootstrap/bootstrap.sql.in::OCCURS_IN_CONTEXT": 1,
+      "extension/laplace_substrate/sql/seed/canonical_names_seed.sql.in::CO_OCCURS_WITH": 1,
+      "extension/laplace_substrate/sql/seed/canonical_names_seed.sql.in::HAS_TRUST_CLASS": 1,
+      "extension/laplace_substrate/sql/seed/canonical_names_seed.sql.in::IS_ALIAS_OF": 1,
+      "extension/laplace_substrate/sql/seed/canonical_names_seed.sql.in::IS_LOSSY_ENCODING_OF": 1,
+      "extension/laplace_substrate/sql/seed/canonical_names_seed.sql.in::IS_REPLACED_BY": 1,
+      "extension/laplace_substrate/sql/seed/canonical_names_seed.sql.in::NORMALIZES": 1,
+      "extension/laplace_substrate/sql/seed/canonical_names_seed.sql.in::OCCURS_IN_CONTEXT": 1,
+      "extension/laplace_substrate/sql/seed/canonical_names_seed.sql.in::POS": 1,
+      "extension/laplace_substrate/sql/seed/canonical_names_seed.sql.in::UD_UPOS": 1,
+      "extension/laplace_substrate/sql/seed/canonical_names_seed.sql.in::UD_XPOS": 1
     }
   }
 }

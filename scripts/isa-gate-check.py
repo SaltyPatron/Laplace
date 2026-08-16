@@ -237,6 +237,11 @@ CEILINGS = {
     # 250 files. Both halves are qualified, so both are correct and neither
     # matches this pattern. This gate only rejects a name with NO schema at all.
     "g15_unqualified_ddl": 0,
+    # 2026-08-16, first measurement. 10 names the hand-written seed/bootstrap
+    # declares that engine/manifest/relation_types.toml does not, counted across
+    # both files. HAS_TRUST_CLASS among them carries 8 LIVE attestation rows with
+    # no bit, no rank, no relation_law.c entry and no family membership.
+    "g16_unmanifested_vocabulary": 16,
 }
 
 # The schema prefix is OPTIONAL AND ARBITRARY. It used to accept only
@@ -919,6 +924,62 @@ def scan_g12_string_sql_bodies() -> Counter[str]:
     return found
 
 
+def scan_g16_unmanifested_vocabulary() -> Counter[str]:
+    """A relation NAME the hand-written seed/bootstrap declares that the manifest does not.
+
+    THE SUBSTRATE HAS TWO VOCABULARY SOURCES AND THEY DISAGREE.
+    engine/manifest/relation_types.toml is the one codegen reads: it emits relation_law.c,
+    consensus.relation_family_ids, consensus.relation_set_ids, the highway bit table and
+    the partition roster. sql/seed/canonical_names_seed.sql.in is a HAND-WRITTEN VALUES
+    list, and sql/bootstrap/bootstrap.sql.in hashes names directly with
+    laplace_hash128_blake3 and INSERTs them as RelationType entities. Nothing reconciles
+    the two, so a name can exist as a live relation type while being invisible to every
+    manifest-driven law.
+
+    MEASURED 2026-08-16, and it is not hypothetical: HAS_TRUST_CLASS carries 8 live
+    attestation rows and is in neither the manifest's canonicals nor its aliases. It
+    therefore has no highway bit, no rank, no relation_law.c entry, and no family
+    membership -- attested data the law layer cannot see. CO_OCCURS_WITH and
+    OCCURS_IN_CONTEXT are seeded and bootstrapped the same way at 0 rows, which is why
+    codegen refuses to admit them to a declared set and consensus.salient_facts /
+    ops.evidence_receipt still name them inline.
+
+    KNOWN IMPRECISION, stated rather than tuned away: the seed is a list of canonical
+    NAMES, not only relations -- it also carries entries like substrate/atomic/none/v1.
+    This scans ALL_CAPS entries as relation-shaped, so POS, UD_UPOS and UD_XPOS are
+    flagged and may be tagset identifiers rather than relations. That is the finding, not
+    a defect in the scan: nothing in the seed distinguishes a relation name from a tagset
+    name today, which is exactly why the two sources can drift unnoticed. Their
+    disposition is to be declared or moved out of the ALL_CAPS list -- either way the
+    ambiguity becomes visible instead of implied.
+
+    Shrink-only. A name leaves this list by being DECLARED in the manifest (with a bit, a
+    rank and a symmetry) or by being removed from the seed -- never by being added here.
+    """
+    manifest = MANIFEST.read_text(encoding="utf-8", errors="replace")
+    declared = set(re.findall(r'^canonical = "([A-Z][A-Z0-9_]*)"$', manifest, re.M))
+    declared |= set(re.findall(r'^surface = "([A-Z][A-Z0-9_]*)"$', manifest, re.M))
+
+    sql_root = ROOT / "extension" / "laplace_substrate" / "sql"
+    found: Counter[str] = Counter()
+
+    seed = sql_root / "seed" / "canonical_names_seed.sql.in"
+    if seed.exists():
+        text = strip_sql_comments(seed.read_text(encoding="utf-8", errors="replace"))
+        for name in re.findall(r"^\s*\('([A-Z][A-Z0-9_]*)'\),?\s*$", text, re.M):
+            if name not in declared:
+                found[f"{relative(seed)}::{name}"] += 1
+
+    boot = sql_root / "bootstrap" / "bootstrap.sql.in"
+    if boot.exists():
+        text = strip_sql_comments(boot.read_text(encoding="utf-8", errors="replace"))
+        for name in re.findall(r"laplace_hash128_blake3\('([A-Z][A-Z0-9_]*)'::bytea\)", text):
+            if name not in declared:
+                found[f"{relative(boot)}::{name}"] += 1
+
+    return found
+
+
 def current_violations() -> dict[str, dict[str, int]]:
     scans = {
         "g1_weight_literalism": scan_g1(),
@@ -932,6 +993,7 @@ def current_violations() -> dict[str, dict[str, int]]:
         "g13_string_op_on_surface": scan_g13_string_op_on_surface(),
         "g14_case_fold": scan_g14_case_fold(),
         "g15_unqualified_ddl": scan_g15_unqualified_ddl(),
+        "g16_unmanifested_vocabulary": scan_g16_unmanifested_vocabulary(),
     }
     return {
         gate: dict(sorted(counter.items()))
