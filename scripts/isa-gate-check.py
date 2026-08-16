@@ -52,32 +52,35 @@ MANIFEST = ROOT / "engine" / "manifest" / "relation_types.toml"
 # its two open-coded `rating - 2*rd` sites went with the body. Shrink, not an
 # exception.
 #
-# SECOND EXCEPTION, TAKEN THE SAME WAY (2026-08-15). g3_sql 239 -> 262:
-# consensus.relate_path, 13 names x 2 arms. The vocabulary is not new — this
-# function has always hand-listed its lateral and upward relation sets — but it
-# spelled them `relation_type_id(n)` over `unnest(ARRAY['IS_A',...])`, which this
-# gate's pattern (a literal INSIDE the call) never matched. 151744b0 inlined the
-# calls so the partition key meets constants and the LIST partitions prune at plan
-# time, and that made the existing hardcoding visible. The gate is right; it was
-# blind before.
+# g3_sql 262 -> 236 (2026-08-16). THE 2026-08-15 EXCEPTION IS PAID BACK, and this is
+# a shrink below where it started (239), not a return to it.
 #
-# The non-literal surface was tried first and MEASURED, not assumed. Binding the
-# same two sets as `= ANY (ARRAY(SELECT k FROM lat))` — an InitPlan, run-time
-# bound — keeps the names out of the call position and costs 59%:
-#   folded literals   29.9 s / 24.2 s     (installed form, warm, identical 1 row)
-#   InitPlan arrays   46.9 s / 38.4 s     (same body, rolled-back transaction)
-# psql -U laplace_admin, consensus.relate_path(word_id('wolf'), word_id('dog')).
+# That raise admitted consensus.relate_path's 13 names x 2 arms and recorded the
+# durable fix as a follow-up: the lateral and upward sets belong in
+# engine/manifest/relation_types.toml with codegen emitting foldable accessors, the
+# way it already does per family. That is now done — [[set]] PATH_LATERAL and
+# PATH_UPWARD, emitted as consensus.relation_set_ids(text) into
+# sql/generated/relation_set_ids.sql.in — so relate_path holds ZERO relation-name
+# literals and the 26 sites are gone from the baseline.
 #
-# The durable fix is neither: these two sets belong in
-# engine/manifest/relation_types.toml as named sets, with codegen emitting foldable
-# accessors the way it already does per family (sql/generated/relation_family_ids
-# .sql.in, bdcfa088). No existing family is equivalent — measured live, the IS_A
-# family holds 3 members against the 2 this function wants and IS_SYNONYM_OF holds
-# only itself against 11 — so substituting one would silently widen the walk. That
-# is a manifest change, and it is the follow-up this raise buys time for.
+# A SET IS NOT A FAMILY, and the raise's own note said why. Re-measured live
+# 2026-08-16 against the running substrate: consensus.relation_family_ids('IS_A')
+# holds 3 members against the 2 the upward arm wants, and
+# relation_family_ids('IS_SYNONYM_OF') holds 1 against the 11 the lateral arm wants.
+# Substituting a family would have silently widened the walk, so codegen grew a
+# declared-set emitter rather than reusing the derived one.
+#
+# FOLDABILITY PROVEN BY PLAN STRUCTURE, not wall clock (tasklist §L: plan shape does
+# not depend on load; end-to-end timings taken under a live ingest do). Same predicate
+# over laplace.consensus, EXPLAIN (COSTS OFF), scan nodes:
+#   inline literal array                       16
+#   consensus.relation_set_ids('PATH_UPWARD')  16   <- folds identically
+#   a STABLE function (relation_band_types)   216   <- the §A regression form
+# Output parity: 5 real word pairs through relate_path, old body vs new in one
+# rolled-back transaction, EXCEPT ALL both directions = 0 rows either way.
 CEILINGS = {
     "g1_weight_literalism": 11,
-    "g3_sql_vocabulary_literalism": 262,
+    "g3_sql_vocabulary_literalism": 236,
     "g3_c_vocabulary_literalism": 17,
     # 700 -> 701 (2026-08-05): the language-scope declaration. Nine monolingual
     # sources emitted no HAS_LANGUAGE at all, so every English sense read back as

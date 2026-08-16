@@ -2001,19 +2001,25 @@ public static class NpgsqlSubstrateReads
                 p.AddWithValue("breadth", breadth);
             }, ct: ct, label: "walk_branches", onError: onError);
 
-    public readonly record struct ApiCatalogRow(string Name, string? Args, string? Returns);
+    /// <summary>
+    /// One installed operation. <paramref name="Kind"/> is load-bearing, not
+    /// descriptive: a procedure is invoked with CALL and a function with SELECT, so
+    /// a caller that cannot tell them apart issues the wrong statement.
+    /// </summary>
+    public readonly record struct ApiCatalogRow(string Name, string? Args, string? Returns, string? Kind);
 
     /// <summary><c>ops.api(query)</c> — installed-function catalog search.</summary>
     public static Task<IReadOnlyList<ApiCatalogRow>> ApiCatalogAsync(
         NpgsqlDataSource dataSource, string query, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
-            SELECT name, args, returns FROM ops.api(@q) ORDER BY name
+            SELECT name, args, returns, kind FROM ops.api(@q) ORDER BY name
             """,
             static r => new ApiCatalogRow(
                 r.GetString(0),
                 r.IsDBNull(1) ? null : r.GetString(1),
-                r.IsDBNull(2) ? null : r.GetString(2)),
+                r.IsDBNull(2) ? null : r.GetString(2),
+                r.IsDBNull(3) ? null : r.GetString(3)),
             p => p.AddWithValue("q", query),
             ct: ct, label: "api_catalog", onError: onError);
 

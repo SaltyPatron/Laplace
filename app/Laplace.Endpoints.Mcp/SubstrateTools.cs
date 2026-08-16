@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json.Nodes;
+using Laplace.Agents;
 using Laplace.Chess.Service;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
@@ -164,6 +165,20 @@ internal sealed class SubstrateTools
             "Inspect Laplace pipeline build stamps, deployed binary directory (/opt/laplace/app), and component readiness.",
             () => Schema(),
             (s, a) => s.PipelineStatus(a)),
+        new("ask", "Put one turn to an external model (OpenAI, Anthropic, xAI, Google, local).",
+            "Put one turn to a model OUTSIDE this substrate and return its answer. `model` selects the route three ways, checked in that order: an alias from agents.json ('house'), an explicit 'provider/model' pair ('xai/grok-4', 'openrouter/anthropic/claude-opus-5' -- split once, so a nested vendor id survives), or a bare vendor-branded name whose prefix identifies its provider ('claude-*', 'gpt-*', 'grok-*', 'gemini-*'). A bare name with no vendor prefix (llama, qwen) is REFUSED rather than guessed: a dozen hosts serve those, and inferring one bills the wrong vendor silently. Omit `model` to use LAPLACE_AGENT_DEFAULT, else agents.json's \"default\". `provider` FORCES the route and makes `model` a literal vendor model id -- the alias table is skipped, so 'which provider ran this' stays answerable from the arguments alone. Credentials resolve from the process environment first, then secrets/agents.env through the same reader the API service uses for Stripe and Lichess, because an agent client launches this server over stdio with an empty environment and no way to inject one. The config is re-read PER CALL: nothing owns a restart of a stdio child, so an edited agents.json must take effect without one. Per-wire correctness is not the caller's problem -- Anthropic gets a required max_tokens with headroom for thinking and NO sampling parameters unless you name one (Claude 4.7+ returns 400 for temperature); OpenAI gets max_completion_tokens while its clones get max_tokens; Google gets contents/generationConfig. A refusal or an upstream block is returned as an EMPTY reply with a finish_reason and a note, not as an error: the reason is what decides the next move. 429 and the transient 5xx family retry up to 3 attempts honouring Retry-After; 401/403/404 do not, and say which variable or model id to fix.",
+            () => Schema(("prompt", "string", "the message to send", true),
+                         ("model", "string", "alias, 'provider/model', or a vendor-branded model id; omit for the default", false),
+                         ("provider", "string", "force a provider (openai, anthropic, xai, google, openrouter, groq, deepseek, mistral, ollama, openai-compatible, laplace)", false),
+                         ("system", "string", "system prompt for this turn; overrides the alias's own", false),
+                         ("max_tokens", "integer", "output cap; Anthropic defaults to 16000 because thinking counts against it", false),
+                         ("temperature", "number", "sampling temperature; omitted entirely when unset (current Anthropic models reject it)", false),
+                         ("timeout_seconds", "integer", "wall-clock budget for the whole call including retries, default 180", false)),
+            (s, a) => s.Ask(a)),
+        new("agents", "Which external models are routable from here, and which have credentials.",
+            "The external-agent routing table: every alias from agents.json plus every installed provider, each with the model it would call, the base URL it would call, the environment variable its key is read from, and whether that key is actually resolvable right now. Call this BEFORE concluding an external model is unavailable -- the two failures look identical from a failed `ask` and have different fixes: `credentialed=false` means the named variable is unset in both the process environment and secrets/agents.env, while a null `model` on a provider row means nothing has said which model to call (only anthropic ships a default, because it is the only vendor whose current model id this repository states from a checked-in reference rather than from memory). KEY VALUES ARE NEVER RETURNED, only the variable name that would supply one, so this is safe to read into a model's context. `config` reports which agents.json was loaded, or null when none was found -- a null there with missing aliases means the file is not where the search looked, not that its contents are wrong.",
+            () => Schema(),
+            (s, _) => s.AgentRoutes()),
         new("help", "List every tool (one-line each), or full detail for one name.",
             "Catalog introspection for THIS tool surface, same idea as ops.api('substring') for the SQL catalog: with no name, lists every tool's one-line summary; with name, returns the full rationale and input schema for that one tool. Call this before guessing at a tool's arguments from its one-line summary alone.",
             () => Schema(("name", "string", "tool name for full detail; omit to list every tool", false)),
@@ -194,6 +209,10 @@ internal sealed class SubstrateTools
         catch (NpgsqlException ex)
         {
             return ($"substrate unavailable: {ex.Message}", true);
+        }
+        catch (AgentException ex)
+        {
+            return (ex.Message, true);
         }
         catch (ArgumentException ex)
         {
@@ -480,6 +499,9 @@ internal sealed class SubstrateTools
             ["name"] = r.Name,
             ["args"] = r.Args,
             ["returns"] = r.Returns,
+            // 'procedure' means CALL, not SELECT — the op tool switches on this, and
+            // a caller reading the catalog by hand needs the same warning.
+            ["kind"] = r.Kind,
         }));
     }
 
@@ -809,6 +831,82 @@ internal sealed class SubstrateTools
     private void DepositTurn(string prompt, string? reply, Hash128 sessionId)
         => TurnCloser.CloseAsync(McpTenant, sessionId, prompt, reply).GetAwaiter().GetResult();
 
+    // The outbound lane: this substrate as a CLIENT of other models, symmetric with
+    // Laplace.Endpoints.OpenAICompat serving them. Routing, credentials and per-wire
+    // request shaping live in Laplace.Agents so the CLI and the HTTP surface reach
+    // the same table rather than each growing a second one that drifts.
+    //
+    // One client for the process. A fresh HttpClient per call strands sockets in
+    // TIME_WAIT, and this server can outlive a whole agent session. The CATALOG, by
+    // contrast, is re-read per call — see the `ask` description.
+    private ExternalAgentClient? _agents;
+    private ExternalAgentClient AgentClient => _agents ??= new ExternalAgentClient();
+
+    private (string, bool) Ask(JsonObject? args)
+    {
+        var target = AgentCatalog.Load().Resolve(Opt(args, "model"), Opt(args, "provider"));
+        var request = new AgentRequest(
+            Req(args, "prompt"),
+            Opt(args, "system"),
+            OptInt(args, "max_tokens"),
+            OptDouble(args, "temperature"));
+
+        // Clamped, not defaulted-and-hoped: a caller asking for 0 seconds gets a
+        // call that cannot succeed, and an unbounded one parks this stdio server.
+        var timeout = TimeSpan.FromSeconds(Math.Clamp(Int(args, "timeout_seconds", 180), 1, 3600));
+
+        var reply = AgentClient.AskAsync(target, request, timeout).GetAwaiter().GetResult();
+
+        var result = new JsonObject
+        {
+            ["rows"] = new JsonArray(new JsonObject
+            {
+                ["agent"] = reply.Agent,
+                ["provider"] = reply.Provider,
+                ["model"] = reply.Model,
+                ["reply"] = reply.Text,
+                // Nullable by design: a metric the provider did not report is a
+                // different fact from zero, same rule as the health tool.
+                ["finish_reason"] = reply.FinishReason is null ? null : JsonValue.Create(reply.FinishReason),
+                ["input_tokens"] = reply.InputTokens is null ? null : JsonValue.Create(reply.InputTokens.Value),
+                ["output_tokens"] = reply.OutputTokens is null ? null : JsonValue.Create(reply.OutputTokens.Value),
+                ["attempts"] = reply.Attempts,
+                ["provider_ms"] = Math.Round(reply.LatencyMs, 1),
+                ["note"] = reply.Note is null ? null : JsonValue.Create(reply.Note),
+            }),
+        };
+        return (result.ToJsonString(), false);
+    }
+
+    private (string, bool) AgentRoutes()
+    {
+        var catalog = AgentCatalog.Load();
+        var rows = new JsonArray();
+        foreach (var d in catalog.Describe())
+            rows.Add(new JsonObject
+            {
+                ["name"] = d.Name,
+                ["provider"] = d.Provider,
+                ["model"] = d.Model is null ? null : JsonValue.Create(d.Model),
+                ["base_url"] = d.BaseUrl,
+                ["key_env"] = d.KeyEnv,
+                ["credentialed"] = d.Credentialed,
+                ["alias"] = d.IsAlias,
+                ["default"] = d.IsDefault,
+            });
+
+        var result = new JsonObject
+        {
+            ["rows"] = rows,
+            ["config"] = catalog.ConfigPath is null ? null : JsonValue.Create(catalog.ConfigPath),
+            ["searched"] = new JsonArray(AgentCatalog.ConfigCandidates()
+                .Select(p => (JsonNode)JsonValue.Create(p)!).ToArray()),
+            ["default"] = catalog.DefaultReference() is { } fallback ? JsonValue.Create(fallback) : null,
+            ["secret_file"] = AgentProviders.SecretFile,
+        };
+        return (result.ToJsonString(), false);
+    }
+
     private static (string, bool) Ingest(JsonObject? args)
     {
         var source = Req(args, "source").Trim();
@@ -1042,4 +1140,13 @@ internal sealed class SubstrateTools
 
     private static int Int(JsonObject? args, string name, int fallback) =>
         args?[name]?.GetValue<int>() ?? fallback;
+
+    // Absent and zero are different instructions on the external-agent lane:
+    // temperature 0 is a valid request, and max_tokens 0 is not the same as "let
+    // the provider decide". A sentinel default would collapse the two.
+    private static int? OptInt(JsonObject? args, string name) =>
+        args?[name] is { } node ? node.GetValue<int>() : null;
+
+    private static double? OptDouble(JsonObject? args, string name) =>
+        args?[name] is { } node ? node.GetValue<double>() : null;
 }

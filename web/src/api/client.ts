@@ -62,6 +62,20 @@ export async function apiGet<T>(path: string, opts: ApiOptions = {}): Promise<T>
   return (await res.json()) as T;
 }
 
+/**
+ * PUT a body that is already serialized.
+ *
+ * The agents config is edited as TEXT in the console and validated by the server,
+ * so it must reach the endpoint byte-for-byte as typed — round-tripping it
+ * through JSON.parse/stringify would reformat the operator's file on every save
+ * and silently discard the comment keys the example config uses.
+ */
+export async function apiPutText<T>(path: string, body: string, opts: ApiOptions = {}): Promise<T> {
+  const res = await fetch(path, { method: 'PUT', headers: laplaceHeaders(opts), body });
+  if (!res.ok) await parseError(res);
+  return (await res.json()) as T;
+}
+
 export async function apiPost<T>(path: string, payload: unknown, opts: ApiOptions = {}): Promise<T> {
   const res = await fetch(path, {
     method: 'POST',
