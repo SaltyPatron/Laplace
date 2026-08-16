@@ -650,7 +650,8 @@ public sealed class IngestRunner
             AttestationsInserted: attestationsInserted,
             TotalRoundTrips: totalRoundTrips,
             WallClock: sw.Elapsed,
-            Failures: failures);
+            Failures: failures,
+            FilesDone: counters.FilesDone);
 
 
 
