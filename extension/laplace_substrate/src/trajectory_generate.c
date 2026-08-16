@@ -14,7 +14,13 @@
  *             any size.
  *
  * S7 STEER    generation.steer_candidates($cands, $frontier): re-rank by rated consensus
- *             mass reaching the LIVE frontier — here the prompt's own content
+ *             mass reaching the LIVE frontier — the prompt's content PLUS the last
+ *             max_order emitted constituents, so the frontier is where the walk has
+ *             ARRIVED and not where it started (docs/specs/36 §3; GH #921 acceptance
+ *             "each emitted unit updates the active frontier before the next election").
+ *             steer_candidates.c's own header rejects "a weight fixed BEFORE the walk
+ *             begins" as a prior rather than steering; holding the frontier at the
+ *             prompt made that true of its only caller
  *             ids, re-scored per emitted token. Scored by walk_score.h, the
  *             same kernel walk_branches retrieves with, so proposing and
  *             steering cannot disagree about what an edge is worth.
@@ -180,7 +186,7 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
     Datum     *ctx;
     int        ctx_len = 0, ctx_cap;
     Datum     *frontier;
-    int        n_frontier = 0;
+    int        n_frontier = 0, n_prompt = 0;
     Cand      *cand;
     MemoryContext walk_cxt, old;
 
@@ -217,7 +223,10 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
     ctx_cap = n_in + steps;
     old = MemoryContextSwitchTo(walk_cxt);
     ctx      = (Datum *) palloc(sizeof(Datum) * (ctx_cap > 8 ? ctx_cap : 8));
-    frontier = (Datum *) palloc(sizeof(Datum) * (n_in > 0 ? n_in : 1));
+    /* prompt content, held for the whole walk, plus a rolling window of the emitted
+     * tail. The window is max_order — the SAME k the S6 context backoff already bounds
+     * itself by — so the frontier introduces no constant of its own. */
+    frontier = (Datum *) palloc(sizeof(Datum) * (n_in + max_order > 0 ? n_in + max_order : 1));
     cand     = (Cand *)  palloc(sizeof(Cand) * GEN_CAND_CAP);
     for (int i = 0; i < n_in; i++)
     {
@@ -231,6 +240,7 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
         ctx[ctx_len++]           = copy_id_datum(elems[i]);
         frontier[n_frontier++]   = ctx[ctx_len - 1];
     }
+    n_prompt = n_frontier;
     MemoryContextSwitchTo(old);
 
     if (ctx_len == 0)
@@ -445,6 +455,19 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
         }
 
         ctx[ctx_len++] = cand[pick].obj;
+
+        /* ---- advance the frontier S7 steers toward ----
+         * The prompt stays: it is the request, and consensus mass reaching it must keep
+         * counting. What changes is the tail — the emitted constituents, oldest dropped
+         * once the window is full, so |cands| x |frontier| stays bounded exactly as
+         * steer_candidates.c requires for its single round trip per token. */
+        if (n_frontier - n_prompt >= max_order)
+        {
+            memmove(&frontier[n_prompt], &frontier[n_prompt + 1],
+                    sizeof(Datum) * (size_t) (n_frontier - n_prompt - 1));
+            n_frontier--;
+        }
+        frontier[n_frontier++] = cand[pick].obj;
     }
 
     SPI_finish();
