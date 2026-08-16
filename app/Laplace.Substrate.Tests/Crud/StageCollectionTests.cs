@@ -128,4 +128,76 @@ public class StageCollectionTests
             b.StageCollection([Member("a"), Member("b")], 3, Type, Src));
         Assert.Contains("no physicality staged", ex.Message);
     }
+
+    // docs/plan/REAL_CONVERSATION_AND_MODEL_CONSENSUS_FINISH_LINE.md:46-58 -- "Packed trajectory
+    // vertices are valid doubles by construction but are not child placements. They must never be
+    // copied into coord, averaged to place a parent, or presented as spatial coordinates ... tests
+    // must independently assert the PointZM/Hilbert placement and the trajectory's identity/order
+    // payload." These three are that requirement, asserted independently of the writer.
+
+    [Fact]
+    public void PlacementIsTheCentroidOfMemberCoordinates()
+    {
+        Hash128 a = Member("nominative"), b = Member("singular"), c = Member("masculine");
+        var coords = Coords(3);
+
+        var builder = NewBuilder();
+        builder.StageCollection([a, b, c], coords, 3, Type, Src);
+        var phys = Assert.Single(builder.Build().Physicalities);
+
+        // Recomputed here from the members, not read back from the writer's own kernel call.
+        var expected = Math4d.Centroid(coords);
+        Assert.Equal(expected[0], phys.CoordX, 12);
+        Assert.Equal(expected[1], phys.CoordY, 12);
+        Assert.Equal(expected[2], phys.CoordZ, 12);
+        Assert.Equal(expected[3], phys.CoordM, 12);
+    }
+
+    [Fact]
+    public void PlacementIsNotTheMeanOfThePackedTrajectory()
+    {
+        // The specific forbidden operation. A centroid over packed vertices returns a valid
+        // double with no error to catch it, so only an inequality assertion detects the swap.
+        Hash128 a = Member("nominative"), b = Member("singular"), c = Member("masculine");
+        var builder = NewBuilder();
+        builder.StageCollection([a, b, c], Coords(3), 3, Type, Src);
+        var phys = Assert.Single(builder.Build().Physicalities);
+
+        var packedMean = Math4d.Centroid(phys.TrajectoryXyzm!);
+        Assert.False(
+            Math.Abs(packedMean[0] - phys.CoordX) < 1e-9 &&
+            Math.Abs(packedMean[1] - phys.CoordY) < 1e-9 &&
+            Math.Abs(packedMean[2] - phys.CoordZ) < 1e-9 &&
+            Math.Abs(packedMean[3] - phys.CoordM) < 1e-9,
+            "coord equals the mean of the PACKED trajectory — identity payload was placed as geometry");
+    }
+
+    [Fact]
+    public void HilbertIndexEncodesThatPlacementAndNothingElse()
+    {
+        Hash128 a = Member("nominative"), b = Member("singular"), c = Member("masculine");
+        var coords = Coords(3);
+        var builder = NewBuilder();
+        builder.StageCollection([a, b, c], coords, 3, Type, Src);
+        var phys = Assert.Single(builder.Build().Physicalities);
+
+        var expected = Hilbert128.Encode(Math4d.Centroid(coords));
+        Assert.Equal(0, expected.CompareToBytewise(phys.HilbertIndex));
+    }
+
+    [Fact]
+    public void TrajectoryCarriesMemberIdentityInCanonicalOrder()
+    {
+        // The other half of the separation: the trajectory decodes back to the member IDS, in
+        // ascending bytewise order (the canonical order that makes the set id well-defined).
+        Hash128 a = Member("nominative"), b = Member("singular"), c = Member("masculine");
+        var builder = NewBuilder();
+        builder.StageCollection([c, a, b], Coords(3), 3, Type, Src);
+        var phys = Assert.Single(builder.Build().Physicalities);
+
+        var decoded = Trajectory.Constituents(phys.TrajectoryXyzm!);
+        var expected = new[] { a, b, c };
+        Array.Sort(expected, (x, y) => x.CompareToBytewise(y));
+        Assert.Equal(expected, decoded);
+    }
 }
