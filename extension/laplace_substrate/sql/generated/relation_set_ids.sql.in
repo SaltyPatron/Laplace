@@ -6,6 +6,7 @@ CREATE OR REPLACE FUNCTION consensus.relation_set_ids(p_set text)
     LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $set$
     SELECT CASE p_set
         WHEN 'PATH_LATERAL' THEN ARRAY[laplace.relation_type_id('ALSO_SEE'), laplace.relation_type_id('DERIVATIONALLY_RELATED'), laplace.relation_type_id('HAS_ATTRIBUTE'), laplace.relation_type_id('HAS_MEMBER'), laplace.relation_type_id('HAS_PART'), laplace.relation_type_id('HAS_SUBSTANCE'), laplace.relation_type_id('IN_VERB_GROUP_WITH'), laplace.relation_type_id('IS_ANTONYM_OF'), laplace.relation_type_id('IS_SIMILAR_TO'), laplace.relation_type_id('IS_SYNONYM_OF'), laplace.relation_type_id('PERTAINS_TO')]
+        WHEN 'PATH_TRAVERSABLE' THEN ARRAY[laplace.relation_type_id('ALSO_SEE'), laplace.relation_type_id('DERIVATIONALLY_RELATED'), laplace.relation_type_id('HAS_ATTRIBUTE'), laplace.relation_type_id('HAS_MEMBER'), laplace.relation_type_id('HAS_PART'), laplace.relation_type_id('HAS_SUBSTANCE'), laplace.relation_type_id('IN_VERB_GROUP_WITH'), laplace.relation_type_id('IS_A'), laplace.relation_type_id('IS_ANTONYM_OF'), laplace.relation_type_id('IS_INSTANCE_OF'), laplace.relation_type_id('IS_SIMILAR_TO'), laplace.relation_type_id('IS_SYNONYM_OF'), laplace.relation_type_id('PERTAINS_TO')]
         WHEN 'PATH_UPWARD' THEN ARRAY[laplace.relation_type_id('IS_A'), laplace.relation_type_id('IS_INSTANCE_OF')]
         ELSE NULL::bytea[]
     END

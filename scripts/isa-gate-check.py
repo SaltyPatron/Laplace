@@ -78,9 +78,17 @@ MANIFEST = ROOT / "engine" / "manifest" / "relation_types.toml"
 #   a STABLE function (relation_band_types)   216   <- the §A regression form
 # Output parity: 5 real word pairs through relate_path, old body vs new in one
 # rolled-back transaction, EXCEPT ALL both directions = 0 rows either way.
+#
+# g3_sql 236 -> 223 (2026-08-16, same sweep). converse.astar_path defaulted p_types to a
+# hand-listed ARRAY of the SAME 13 names -- one walk vocabulary spelled twice, in two
+# files, with nothing keeping them in step. Declared once as [[set]] PATH_TRAVERSABLE.
+# The union claim is ASSERTED, not assumed: live, PATH_TRAVERSABLE 13 = PATH_UPWARD 2 u
+# PATH_LATERAL 11, sorted-array-equal, and equal to the array astar_path used to inline.
+# Output parity: 5 start/goal pairs, old body vs new in one rolled-back transaction,
+# 12 rows each side, EXCEPT ALL both directions = 0 / 0.
 CEILINGS = {
     "g1_weight_literalism": 11,
-    "g3_sql_vocabulary_literalism": 236,
+    "g3_sql_vocabulary_literalism": 223,
     "g3_c_vocabulary_literalism": 17,
     # 700 -> 701 (2026-08-05): the language-scope declaration. Nine monolingual
     # sources emitted no HAS_LANGUAGE at all, so every English sense read back as

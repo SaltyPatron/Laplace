@@ -2079,3 +2079,16 @@ members = [
 [[set]]
 name = "PATH_UPWARD"
 members = ["IS_A", "IS_INSTANCE_OF"]
+
+# PATH_TRAVERSABLE = PATH_UPWARD u PATH_LATERAL. converse.astar_path hand-listed exactly
+# these 13 as its default p_types, the same vocabulary consensus.relate_path listed in its
+# two arms -- the same walk, spelled twice, in two files. Declared once here; the union is
+# asserted live rather than assumed (2026-08-16, sorted array equality against both).
+[[set]]
+name = "PATH_TRAVERSABLE"
+members = [
+  "IS_A", "IS_INSTANCE_OF",
+  "IS_SYNONYM_OF", "IS_SIMILAR_TO", "IS_ANTONYM_OF", "HAS_PART", "HAS_MEMBER",
+  "HAS_SUBSTANCE", "DERIVATIONALLY_RELATED", "PERTAINS_TO", "ALSO_SEE",
+  "IN_VERB_GROUP_WITH", "HAS_ATTRIBUTE",
+]
