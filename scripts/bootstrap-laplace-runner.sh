@@ -961,14 +961,16 @@ verify_pg_nofile() {
     local pid soft
     pid=$(systemctl show -p MainPID --value "$LAPLACE_PG_SERVICE" 2>/dev/null)
     if [ -z "$pid" ] || [ "$pid" = "0" ] || [ ! -r "/proc/$pid/limits" ]; then
-        yellow "  cannot read /proc/\$MainPID/limits for $LAPLACE_PG_SERVICE — fd ceiling unverified"
-        return 0
+        red "✗ cannot read /proc/\$MainPID/limits for $LAPLACE_PG_SERVICE — fd ceiling UNVERIFIED"
+        red "  its one caller is \`verify_pg_nofile || return 1\` (line 943): a fatal gate. Returning"
+        red "  success here let fd tuning proceed unchecked in exactly the case verification failed."
+        return 1
     fi
     soft=$(awk '/Max open files/ {print $4}' "/proc/$pid/limits" 2>/dev/null)
     case "$soft" in
         ''|*[!0-9]*)
-            yellow "  could not parse the fd ceiling from /proc/$pid/limits — unverified"
-            return 0 ;;
+            red "✗ could not parse the fd ceiling from /proc/$pid/limits — UNVERIFIED"
+            return 1 ;;
     esac
     if [ "$soft" -lt "$LAPLACE_PG_NOFILE" ]; then
         red "✗ postmaster fd ceiling is $soft, expected $LAPLACE_PG_NOFILE"
