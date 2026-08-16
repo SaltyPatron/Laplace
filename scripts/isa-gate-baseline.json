@@ -446,7 +446,6 @@
       "app/Laplace.Decomposers/FrameNet/FrameNetLuIngest.cs::HAS_DEFINITION": 1,
       "app/Laplace.Decomposers/FrameNet/FrameNetLuIngest.cs::HAS_EXAMPLE": 1,
       "app/Laplace.Decomposers/FrameNet/FrameNetLuIngest.cs::HAS_VALENCE_PATTERN": 1,
-      "app/Laplace.Decomposers/ISO/ISODecomposer.cs::HAS_DEFINITION": 2,
       "app/Laplace.Decomposers/ISO/ISODecomposer.cs::HAS_ISO639_1_CODE": 1,
       "app/Laplace.Decomposers/ISO/ISODecomposer.cs::HAS_ISO639_2B_CODE": 1,
       "app/Laplace.Decomposers/ISO/ISODecomposer.cs::HAS_ISO639_2T_CODE": 1,

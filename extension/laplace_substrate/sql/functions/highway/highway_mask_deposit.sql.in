@@ -22,6 +22,22 @@
 --            (EXPLAIN ANALYZE: 84 ms to find+sort 5,000 rows, 32,039 ms in
 --            LockRows) — concurrent lockers minting multixacts per tuple.
 --            Fold masks/s: 3,305 (crashing run) → 333 (correct, convoyed).
+--   #1112    sharded the lock — hash entities into N buckets, take each chunk's
+--            buckets in ASCENDING order. Deadlock-free by the ordered-resource
+--            argument, and unlike #729 the ordering is over a bounded set so it
+--            survives the sequence of chunk statements; unlike #732/#733 it mints
+--            no multixacts. BENCHED, NOT SHIPPED, and it is a dead end: MEASURED
+--            2026-08-16, 8 workers x 12 chunks x 70% overlap, 4,000 real row
+--            updates, identical to the installed form on every axis —
+--            0 deadlocks / 78% lock_wait / 11-12 ms deposit delta, both, twice.
+--            The reason is arithmetic: a 500-entity chunk touches 16/16 shards,
+--            64/64, 223/256, 399/1024, 475/4096. Hashing entities AFTER the chunk
+--            is formed scatters them across every bucket, so "take only the shards
+--            you need" is "take them all" plus N acquisitions. Sharding can only
+--            pay if the WORK is partitioned shard-locally when the chunk is BUILT,
+--            which is a writer change (ConsensusAccumulatingWriter), not a lock
+--            change. scripts/tests/highway-deposit-concurrency.sh is the bench;
+--            a fifth attempt must beat 0 deadlocks at 78% before it ships.
 --
 -- The enumeration that licenses serialization: during ingest, deposits are the
 -- ONLY writers of entities rows. highway_mask_refresh is reachable solely from
