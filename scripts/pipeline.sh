@@ -234,7 +234,12 @@ phase_codegen() {
   if [[ "$FORCE_CODEGEN" -eq 0 && -f "$stamp" ]]; then
     prev=$(cat "$stamp" 2>/dev/null || true)
     if [[ "$prev" == "$key" ]]; then
-      echo "attestation law codegen skipped (stamp fresh)"
+      # The stamp keys on INPUT mtimes, so it cannot see a hand-edit of an OUTPUT.
+      # Two generated SQL fragments are tracked in git and have been hand-edited
+      # repeatedly; the next build silently reverts them. --check asserts the
+      # outputs still match the manifest before trusting the stamp.
+      "$PYTHON" "$ROOT/scripts/codegen-attestation-law.py" --check || return 1
+      echo "attestation law codegen skipped (stamp fresh, outputs verified)"
       return 0
     fi
   fi

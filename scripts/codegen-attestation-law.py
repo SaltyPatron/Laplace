@@ -13,6 +13,17 @@ MANIFEST = ROOT / "engine/manifest"
 OUT_CORE = ROOT / "engine/core"
 
 
+# --check turns every emit into an assertion: the bytes the manifest implies must
+# already be on disk. Two of the SQL outputs (seed_relation_partitions.sql.in,
+# relation_family_ids.sql.in) are TRACKED in git rather than gitignored like the
+# C outputs, so they look editable and have been hand-edited three times -- #1065
+# (the qualify/unqualify war) and again by b6810cb0, whose `hot` roster edit was
+# silently reverted by the next build because CMake and pipeline.sh regenerate
+# unconditionally. Drift is a build failure now instead of a lost commit.
+CHECK_MODE = False
+DRIFT: list[Path] = []
+
+
 def _write_if_changed(path: Path, data: bytes) -> None:
     """Skip the write when bytes are identical. Two reasons: (1) the runtime
     mmaps the perfcache blobs, and Windows refuses to truncate a user-mapped
@@ -24,6 +35,9 @@ def _write_if_changed(path: Path, data: bytes) -> None:
             return
     except OSError:
         pass
+    if CHECK_MODE:
+        DRIFT.append(path)
+        return
     path.write_bytes(data)
 
 
@@ -1168,6 +1182,8 @@ def emit_highway_perfcache(rel: dict, bin_out_dir: Path) -> None:
 
 
 def main() -> int:
+    global CHECK_MODE
+    CHECK_MODE = "--check" in sys.argv[1:]
     bin_out_dir = OUT_CORE / "src/generated"
     for i, arg in enumerate(sys.argv[1:], 1):
         if arg == "--bin-out-dir" and i < len(sys.argv) - 1:
@@ -1182,6 +1198,22 @@ def main() -> int:
     emit_relation_law(rel)
     emit_pos_law(pos)
     emit_highway_perfcache(rel, bin_out_dir)
+    if CHECK_MODE:
+        if DRIFT:
+            root = ROOT
+            print("codegen-attestation-law --check: generated outputs do not match "
+                  "engine/manifest/*.toml. Edit the manifest or the generator, never "
+                  "these files, then run scripts/codegen-attestation-law.py:",
+                  file=sys.stderr)
+            for p in DRIFT:
+                try:
+                    rel_path = p.relative_to(root)
+                except ValueError:
+                    rel_path = p
+                print(f"  drift: {rel_path}", file=sys.stderr)
+            return 1
+        print("codegen check ok: every generated output matches engine/manifest/*.toml")
+        return 0
     print("codegen ok:", OUT_CORE / "src/generated/relation_law.c")
     return 0
 

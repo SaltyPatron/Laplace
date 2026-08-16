@@ -18,6 +18,22 @@ scalar_valued = 0.12
 standards_structural = 0.08
 probationary = 0.05
 
+# `hot = true` is the ONLY source of the partition roster: codegen emits it into
+# extension/laplace_substrate/sql/generated/seed_relation_partitions.sql.in, which
+# every build regenerates. Hand-editing that file is not a change; it is a change
+# that disappears at the next build (#1065, and again at b6810cb0). Demote here.
+#
+# `count(*) = 0` DOES NOT demote a relation. It measures which lanes have been
+# ingested into the database you happened to query, not which relations carry
+# volume. Seven relations were demoted on 2026-08-15 for holding 0 rows; six of
+# them (ATTENDS, OV_RELATES, COMPLETES_TO, CONTINUES_TO, TOKEN_MAPS_TO, CONTAINS)
+# are written only by the MODEL lane and the seventh (HAS_EXTERNAL_ID) only by
+# Tatoeba, and neither had been ingested into that db. scripts/model-synthesize-ci.sh
+# fails the build at `check_type_evidence ATTENDS/OV_RELATES/COMPLETES_TO 1000`, so
+# the same relations are gated at >= 1000 evidence rows each after one model ingest.
+# A relation is cold only when its WRITER is gone, and that is a code fact, not a
+# row count.
+
 [[relation]]
 canonical = "ADJACENT_TO_PIXEL"
 bit = 0
@@ -103,6 +119,8 @@ symmetry = "asymmetric"
 parent = null
 family_root = "HAS_VOCAB_SIZE"
 
+# HOT: model lane, one edge per attention head pair (model_consensus.sql.in);
+# CI gates it at >= 1000 evidence rows. 0 rows means no model ingested, not cold.
 [[relation]]
 canonical = "ATTENDS"
 bit = 3
@@ -184,6 +202,7 @@ symmetry = "asymmetric"
 parent = null
 family_root = "COMPATIBILITY_DECOMPOSES_TO"
 
+# HOT: model lane (ModelVocabulary.cs); CI gates it at >= 1000 evidence rows.
 [[relation]]
 canonical = "COMPLETES_TO"
 bit = 14
@@ -193,6 +212,7 @@ symmetry = "asymmetric"
 parent = null
 family_root = "COMPLETES_TO"
 
+# HOT: model lane (ModelVocabulary.cs, ProvenanceExtractor.cs plane walk).
 [[relation]]
 canonical = "CONTINUES_TO"
 bit = 17
@@ -210,6 +230,7 @@ symmetry = "symmetric"
 parent = null
 family_root = "CONFUSABLE_WITH"
 
+# HOT: model lane emits one per circuit-anchor nesting (model_factor.sql.in).
 [[relation]]
 canonical = "CONTAINS"
 bit = 16
@@ -486,7 +507,9 @@ family_root = "HAS_EXAMPLE"
 # id (Tatoeba sentence ids, OMW/CILI keys, model recipe ids). Tatoeba alone owes
 # ~41M — it was the #1 writer into consensus_rdefault (2.56M rows and climbing at
 # ~1 per record) before this flag. Low RANK, high VOLUME: partition capacity
-# follows traffic, not salience.
+# follows traffic, not salience. It measured 0 rows on 2026-08-15 and was demoted
+# on that basis; the db simply had no Tatoeba ingested. The 5.2 GB above is the
+# measurement that governs.
 [[relation]]
 canonical = "HAS_EXTERNAL_ID"
 bit = 69
@@ -1064,6 +1087,7 @@ symmetry = "asymmetric"
 parent = null
 family_root = "OBSTRUCTED_BY"
 
+# HOT: model lane, the OV-circuit counterpart of ATTENDS; CI gates it at >= 1000.
 [[relation]]
 canonical = "OV_RELATES"
 bit = 175
@@ -1188,6 +1212,8 @@ symmetry = "asymmetric"
 parent = null
 family_root = "SYMBOL_OF"
 
+# HOT: one edge per tokenizer entry (LlamaTokenizerParser.cs) — a full vocab per
+# model ingested, which is the largest single burst the model lane writes.
 [[relation]]
 canonical = "TOKEN_MAPS_TO"
 bit = 194

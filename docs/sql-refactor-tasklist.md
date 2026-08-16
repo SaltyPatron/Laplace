@@ -446,11 +446,20 @@ Consequence, measured on a quiet database:
 `senses(word, context)` spends **71% of its time planning**. Reducing the leaf count reduces
 this for every unprunable reference in the system.
 
-- [ ] **112 leaves are exactly empty** (verified by `count(*)`, not `reltuples`): the 7
-      relations ATTENDS, COMPLETES_TO, CONTAINS, CONTINUES_TO, HAS_EXTERNAL_ID, OV_RELATES,
-      TOKEN_MAPS_TO × 8 hash children × both tables. Dropping them takes consensus from 216
-      to 152 leaves — a 30% cut in plan width for every unprunable reference — with no data
-      movement. They must also come out of the `hot` array or the next seed recreates them.
+- [x] ~~**112 leaves are exactly empty**~~ — **WITHDRAWN, the measurement did not mean what
+      it was read to mean.** The 7 relations ATTENDS, COMPLETES_TO, CONTAINS, CONTINUES_TO,
+      HAS_EXTERNAL_ID, OV_RELATES, TOKEN_MAPS_TO held 0 rows because the db carried no MODEL
+      ingest and no Tatoeba ingest, not because the relations are cold. Six are written only
+      by the model lane (`ModelVocabulary.cs`, `LlamaTokenizerParser.cs`, `model_factor.sql.in`,
+      `model_consensus.sql.in`) and `scripts/model-synthesize-ci.sh` fails the build unless
+      ATTENDS, OV_RELATES and COMPLETES_TO each carry **≥ 1000** evidence rows after one model
+      ingest; the seventh rode `consensus_rdefault` to 5.2 GB under Tatoeba, which is why it
+      was promoted in the first place. b6810cb0 demoted all seven by hand-editing the
+      GENERATED `seed_relation_partitions.sql.in`, so the next build reverted it — the same
+      hand-edit flip-flop #1065 closed. `hot` is now demoted only from
+      `engine/manifest/relation_types.toml`, and `codegen-attestation-law.py --check` (run by
+      `pipeline.sh` even on a fresh stamp) fails the build on any hand-edited output.
+      **A relation is cold when its writer is gone — a code fact, never a row count.**
 - [ ] **HAS_FEATURE, 186,562,442 rows, 84.93% of DEFAULT, still unpartitioned.** Adding it to
       `hot` makes the next install drain those rows via `DELETE … RETURNING` + `INSERT`
       (`seed_relation_partitions.sql.in:77`) — hours of WAL and locks on both tables. Owner
@@ -475,6 +484,13 @@ The 9 Seq Scans are the planner correctly declining to descend an index on an em
 All 9 are the empty/near-empty partitions: `token_maps_to`, `attends`, `continues_to`,
 `has_external_id`, `ov_relates`, `completes_to`, `contains` at **0 rows**, plus `appears_in`
 (12) and `precedes` (17). They cost a scan node on **every** subject-only read.
+
+**Correction to the reading above (2026-08-16).** Those 7 partitions are empty *in this
+database*, which had no model ingest and no Tatoeba ingest — not empty by nature. Re-measure
+the plan width after a model ingest before treating them as plan-width waste; the Seq Scans
+disappear the moment the partitions hold rows, which CI requires them to. The plan-width
+problem is real, but its remedy is HAS_FEATURE's missing partition (item above), not the
+demotion of populated-lane relations.
 
 Correction to item R: 0 scans on the `attestations` primary key is **not** evidence it is
 worthless. A unique index is a write-side constraint; zero reads is the expected shape. What
