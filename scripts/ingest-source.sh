@@ -64,7 +64,7 @@ ingest() {
         # Job log: timing + journal. Full stderr → file on the runner.
         ( cd "$ROOT/app" && dotnet "$DLL" ingest "$@" ) >"$detail" 2>&1 || rc=$?
         if [[ "$rc" -ne 0 ]]; then
-            # PREEMPTION IS NOT FAILURE (#S5). laplace.yml:17-19 states that rebuilds
+            # PREEMPTION IS NOT FAILURE (#S5). .github/workflows/laplace.yml:17-19 states that rebuilds
             # preempt seeds BY DESIGN and that seed steps are idempotent/resumable, so
             # "a preempted seed loses nothing and re-runs cleanly". MEASURED 2026-08-15:
             # a chess seed was killed at 22:36:41 by `systemctl restart
@@ -77,7 +77,7 @@ ingest() {
             # run as a completed seed.
             if [[ "$(bash "$ROOT/scripts/classify-ingest-exit.sh" "$detail" "$t0_epoch")" == "preempted" ]]; then
                 preempted=1
-                echo "::warning::ingest ${source} PREEMPTED — the cluster went away mid-run (rc=${rc}). Resumable by design (laplace.yml:17-19); re-dispatch to continue. Not certified: no journal proof, no throughput gate, no idempotency check."
+                echo "::warning::ingest ${source} PREEMPTED — the cluster went away mid-run (rc=${rc}). Resumable by design (.github/workflows/laplace.yml:17-19); re-dispatch to continue. Not certified: no journal proof, no throughput gate, no idempotency check."
                 tail -20 "$detail" >&2 || true
             else
                 echo "::error::ingest ${source} failed rc=${rc} — last 80 lines of ${detail}"

@@ -15,7 +15,7 @@
 # WHAT IT IS FOR. MEASURED 2026-08-15 (docs/sql-refactor-tasklist.md §S5): a chess seed
 # died at 22:36:41 to
 #     sudo systemctl restart laplace-postgresql.service
-# and reported `failure` after 1 s with 57P03. laplace.yml:17-19 already states that
+# and reported `failure` after 1 s with 57P03. .github/workflows/laplace.yml:17-19 already states that
 # rebuilds preempt seeds BY DESIGN and that seed steps are idempotent/resumable, so "a
 # preempted seed loses nothing and re-runs cleanly". A run that the workflow's own header
 # calls expected must not be indistinguishable from a broken decomposer -- that is how a
