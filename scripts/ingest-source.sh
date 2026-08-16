@@ -57,14 +57,32 @@ build_cli() {
 # history has a recorded duration. A timeout is a ceiling, not a measurement.
 # INGEST_TIMING is machine-readable on purpose: it is what a throughput baseline parses.
 ingest() {
-    local t0=$SECONDS rc=0
+    local t0=$SECONDS rc=0 t0_epoch preempted=0
+    t0_epoch=$(date +%s)
     local detail="${LOGDIR:-}/laplace-ingest-${source}.log"
     if [[ -n "${GITHUB_ACTIONS:-}" && -n "${LOGDIR:-}" ]]; then
         # Job log: timing + journal. Full stderr → file on the runner.
         ( cd "$ROOT/app" && dotnet "$DLL" ingest "$@" ) >"$detail" 2>&1 || rc=$?
         if [[ "$rc" -ne 0 ]]; then
-            echo "::error::ingest ${source} failed rc=${rc} — last 80 lines of ${detail}"
-            tail -80 "$detail" >&2 || true
+            # PREEMPTION IS NOT FAILURE (#S5). .github/workflows/laplace.yml:17-19 states that rebuilds
+            # preempt seeds BY DESIGN and that seed steps are idempotent/resumable, so
+            # "a preempted seed loses nothing and re-runs cleanly". MEASURED 2026-08-15:
+            # a chess seed was killed at 22:36:41 by `systemctl restart
+            # laplace-postgresql.service` and reported failure after 1s on 57P03. A run
+            # the workflow's own header calls expected must not look identical to a
+            # broken decomposer, or the seed lane's red stops carrying information.
+            #
+            # It only suppresses the red. `preempted` is NOT success: every downstream
+            # certifier in _ingest.yml refuses to run on it, so nothing reads a preempted
+            # run as a completed seed.
+            if [[ "$(bash "$ROOT/scripts/classify-ingest-exit.sh" "$detail" "$t0_epoch")" == "preempted" ]]; then
+                preempted=1
+                echo "::warning::ingest ${source} PREEMPTED — the cluster went away mid-run (rc=${rc}). Resumable by design (.github/workflows/laplace.yml:17-19); re-dispatch to continue. Not certified: no journal proof, no throughput gate, no idempotency check."
+                tail -20 "$detail" >&2 || true
+            else
+                echo "::error::ingest ${source} failed rc=${rc} — last 80 lines of ${detail}"
+                tail -80 "$detail" >&2 || true
+            fi
         fi
     else
         ( cd "$ROOT/app" && dotnet "$DLL" ingest "$@" ) || rc=$?
@@ -78,6 +96,13 @@ ingest() {
     fi
     if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
         echo "elapsed_s=$elapsed" >> "$GITHUB_OUTPUT"
+        echo "preempted=$([[ "$preempted" -eq 1 ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+    fi
+    # A preempted run reports green so the lane's red keeps meaning "something is broken",
+    # and reports it ONLY here -- rc stays non-zero for every non-CI caller, and the
+    # certifiers downstream all gate on outputs.preempted != 'true'.
+    if [[ "$preempted" -eq 1 ]]; then
+        return 0
     fi
     if [[ "$rc" -eq 0 ]]; then
         # Pass/fail is the journal row when this source is in decomposer-gates.json.
@@ -108,6 +133,21 @@ case "$source" in
             fi
             echo ">>> stage $src — done in $((SECONDS - t0))s"
         done
+        ;;
+    chain)
+        # ONE process for N sources. `ingest chain` (IngestCommands.cs:181) loads the
+        # codepoint and highway perfcaches once, then dispatches each spec in-process
+        # through the same IngestDispatchTable every other path uses, stopping on the
+        # first non-zero rc. Every other branch here pays one CLI startup, one perfcache
+        # map and one native runtime init PER SOURCE — the tax scripts/win/seed-chain.cmd
+        # was written to avoid ("seed-step.cmd pays those 12x") and which no Linux caller
+        # had. Specs are the CLI's own form: "<source [path] [flags]>", quoted when they
+        # carry a path.
+        build_cli
+        shift
+        [[ $# -gt 0 ]] || { echo "Usage: $0 chain \"<source [path]>\" ..." >&2; exit 2; }
+        source="chain"
+        ingest chain "$@"
         ;;
     safetensors|model)
         [[ -n "$path" ]] || { echo "Usage: $0 safetensors <snapshot-dir>" >&2; exit 2; }

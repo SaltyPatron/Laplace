@@ -1,0 +1,95 @@
+-- ops.cancel_backend / ops.terminate_backend — stopping work that is already
+-- running, as a named operation rather than a raw pg_cancel_backend() call.
+--
+-- The operator console could start long work and could not stop it: the only
+-- cut-off it had was ops.ingest_run_close, which edits the JOURNAL ROW and
+-- leaves the backend running — the journal says cancelled while the ingest keeps
+-- writing. That is worse than no cancel at all, because the pipeline gate then
+-- reports clear. These two signal the process; the journal row follows.
+--
+-- Both RETURN WHAT THEY ACTED ON, captured BEFORE the signal. pg_cancel_backend
+-- returns a bare boolean, so a caller who only has that cannot answer "what did
+-- I just kill?" — and on an operator surface with no authentication that is the
+-- one question an audit needs. Reading it after the signal races the backend's
+-- own teardown.
+--
+-- THREE REFUSALS, all because the pid is free text from a UI:
+--   * a pid on another database — pg_cancel_backend is cluster-wide, so a typo
+--     reaches a neighbouring database's backend, which is not this operator's to
+--     touch;
+--   * this backend's own pid — cancelling the connection executing the cancel
+--     aborts the call and reports nothing;
+--   * a pid that is not there at all — signalling a dead pid returns false and
+--     is indistinguishable from "refused", so it is named.
+--
+-- Cancel is the first move: it ends the running statement and leaves the session
+-- alive to roll back cleanly. Terminate drops the connection and is for a
+-- backend that ignored a cancel (uninterruptible wait) — an in-flight ingest
+-- batch loses its open transaction, which is the point.
+DROP FUNCTION IF EXISTS ops.cancel_backend(int);
+DROP FUNCTION IF EXISTS ops.terminate_backend(int);
+
+CREATE OR REPLACE FUNCTION ops.cancel_backend(p_pid int)
+    RETURNS TABLE(pid int, signalled boolean, was_state text, was_query text,
+                  was_seconds double precision)
+    LANGUAGE plpgsql VOLATILE
+    AS $$
+DECLARE
+    a pg_stat_activity%ROWTYPE;
+BEGIN
+    SELECT * INTO a FROM pg_stat_activity s WHERE s.pid = p_pid;
+    IF a.pid IS NULL THEN
+        RAISE EXCEPTION 'cancel_backend: no backend with pid % is running', p_pid;
+    END IF;
+    IF a.datname IS DISTINCT FROM current_database() THEN
+        RAISE EXCEPTION 'cancel_backend: pid % belongs to database %, not %',
+            p_pid, COALESCE(a.datname, '(none)'), current_database();
+    END IF;
+    IF p_pid = pg_backend_pid() THEN
+        RAISE EXCEPTION 'cancel_backend: pid % is this session — cancelling it aborts this call', p_pid;
+    END IF;
+
+    RETURN QUERY
+    SELECT p_pid,
+           pg_cancel_backend(p_pid),
+           a.state,
+           a.query,
+           extract(epoch FROM clock_timestamp() - COALESCE(a.query_start, a.backend_start))::double precision;
+END $$;
+
+CREATE OR REPLACE FUNCTION ops.terminate_backend(p_pid int)
+    RETURNS TABLE(pid int, signalled boolean, was_state text, was_query text,
+                  was_seconds double precision)
+    LANGUAGE plpgsql VOLATILE
+    AS $$
+DECLARE
+    a pg_stat_activity%ROWTYPE;
+BEGIN
+    SELECT * INTO a FROM pg_stat_activity s WHERE s.pid = p_pid;
+    IF a.pid IS NULL THEN
+        RAISE EXCEPTION 'terminate_backend: no backend with pid % is running', p_pid;
+    END IF;
+    IF a.datname IS DISTINCT FROM current_database() THEN
+        RAISE EXCEPTION 'terminate_backend: pid % belongs to database %, not %',
+            p_pid, COALESCE(a.datname, '(none)'), current_database();
+    END IF;
+    IF p_pid = pg_backend_pid() THEN
+        RAISE EXCEPTION 'terminate_backend: pid % is this session', p_pid;
+    END IF;
+
+    RETURN QUERY
+    SELECT p_pid,
+           pg_terminate_backend(p_pid),
+           a.state,
+           a.query,
+           extract(epoch FROM clock_timestamp() - COALESCE(a.query_start, a.backend_start))::double precision;
+END $$;
+
+COMMENT ON FUNCTION ops.cancel_backend(int) IS
+    'Cancel the running statement on one backend of THIS database, returning the '
+    'state and query captured before the signal. Refuses another database, a dead '
+    'pid, and this session. signalled=false means the role lacks pg_signal_backend.';
+
+COMMENT ON FUNCTION ops.terminate_backend(int) IS
+    'Drop one backend of THIS database — the escalation for a backend that ignored '
+    'a cancel. Same refusals and same before-the-signal capture as ops.cancel_backend.';

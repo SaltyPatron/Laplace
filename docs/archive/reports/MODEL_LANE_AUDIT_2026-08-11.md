@@ -143,7 +143,37 @@ L1 mass is nearly flat — top 1% carries 4.8%, top 25% carries 55.5%. So there 
 saves nothing. The waste is redundancy (`H×d` per layer) and precision, not
 occupancy.
 
-## 6. The traversal engine is dead code
+## 6. ~~The traversal engine is dead code~~ — **FALSE, RETRACTED 2026-08-16**
+
+> **This section is wrong on both clauses. Do not cite it.** Verified at HEAD:
+>
+> - `extension/laplace_substrate/src/astar_path.c:280,289,298` calls
+>   `astar_open` / `astar_next` / `astar_close`. It is reached from
+>   `NpgsqlSubstrateReads.cs:2205,2213,2225` → `converse.astar_path`
+>   (`cascade/astar_path.sql.in:2`) → `astar_path_raw.sql.in:10`
+>   `AS 'MODULE_PATHNAME', 'pg_laplace_astar_path'`.
+> - `astar_path.c:113-115` — `edge_cost()` **is**
+>   `laplace_walk_edge_weight(rating, rd, witness_count, kappa)`, consumed at
+>   `:158` as `out[r].cost`, with an admissible heuristic closure at `:170-186`.
+> - `generate_walk.c` and `astar_path.c` both exist and were added **2026-06-05**
+>   and **2026-06-06** — two months before this audit.
+> - The cited path `glicko2.h:91` does not resolve; the file is at
+>   `engine/core/include/laplace/core/glicko2.h`.
+>
+> **The reproduction command below was published as a receipt, not executed.**
+> Running it verbatim returns `astar_path_raw.sql.in`, `astar_path.sql.in`,
+> `laplace_astar_path.sql.in`, `NpgsqlSubstrateReads.cs:2205-2225` and
+> `consensus_adjacency.sql.in:42` in its first eight lines.
+>
+> `.scratchpad/38_Operation_ISA_Audit.md` §2.1 — dated 2026-07-27, two weeks
+> *before* this audit — already cited `astar_path.c:267` as a live caller of
+> `spi_fetch_rd_kappa()`. This section contradicted a document already in the tree.
+>
+> Consequence: `docs/plan/MODEL_INGESTION_DESIGN.md` order-of-work **item 6**,
+> which was derived entirely from this section, is retracted. No traversal engine
+> needs to be built.
+
+### Original text, retained as the record of the error
 
 ```bash
 grep -rn 'astar' --include='*.c' --include='*.cpp' --include='*.cs' \

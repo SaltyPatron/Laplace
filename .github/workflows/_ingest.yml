@@ -110,6 +110,10 @@ jobs:
     # 10-hour one that happened to finish.
     outputs:
       elapsed_s: ${{ steps.run_ingest.outputs.elapsed_s }}
+      # A PREEMPTED run reports green (#S5) so the seed lane's red keeps meaning
+      # "something is broken". Green is not certified: every gate below refuses to
+      # run on it, so nothing reads a bounce-killed seed as a completed one.
+      preempted: ${{ steps.run_ingest.outputs.preempted }}
     env:
       LAPLACE_DB: "Host=/var/run/postgresql;Username=laplace_admin;Database=${{ inputs.database }}"
       PGDATABASE: ${{ inputs.database }}
@@ -163,7 +167,7 @@ jobs:
           fi
 
       - name: Journal proof
-        if: always() && steps.run_ingest.outcome == 'success'
+        if: always() && steps.run_ingest.outcome == 'success' && steps.run_ingest.outputs.preempted != 'true'
         run: scripts/verify-ingest-journal.sh --cli-key "${{ inputs.source }}"
 
       - name: Throughput gate — ingest-baseline check
@@ -175,7 +179,7 @@ jobs:
         # pass with a notice ("recording is a separate step"). Re-baseline ONLY
         # after a deliberate perf change, never to make a red run green:
         #   python3 scripts/ingest-baseline.py record <detail log>
-        if: always() && steps.run_ingest.outcome == 'success'
+        if: always() && steps.run_ingest.outcome == 'success' && steps.run_ingest.outputs.preempted != 'true'
         run: |
           python3 scripts/ingest-baseline.py check \
             "$RUNNER_TEMP/laplace-ingest/laplace-ingest-${{ inputs.source }}.log"
@@ -183,7 +187,7 @@ jobs:
   idempotency:
     name: "verify — re-ingest ${{ inputs.source }} does not double-count"
     needs: ingest
-    if: ${{ inputs.run_idempotency && needs.ingest.result == 'success' }}
+    if: ${{ inputs.run_idempotency && needs.ingest.result == 'success' && needs.ingest.outputs.preempted != 'true' }}
     runs-on: [self-hosted, laplace]
     concurrency:
       # PER SOURCE, NOT GLOBAL. Ten different corpora ingesting at once is a capacity
@@ -243,7 +247,7 @@ jobs:
     name: "gate — ${{ inputs.source }} consensus checks"
     needs: [ingest, idempotency]
     # always(): idempotency is skipped when run_idempotency=false; still gate once ingest is green.
-    if: ${{ always() && inputs.run_gate && needs.ingest.result == 'success' && needs.idempotency.result != 'failure' }}
+    if: ${{ always() && inputs.run_gate && needs.ingest.result == 'success' && needs.ingest.outputs.preempted != 'true' && needs.idempotency.result != 'failure' }}
     runs-on: [self-hosted, laplace]
     timeout-minutes: 30
     steps:

@@ -104,6 +104,7 @@ internal static class Program
             config.AddCommand<CloseRunCommand>("close-run");
             config.AddCommand<SourceBootstrapCommand>("source-bootstrap");
             config.AddCommand<CpuTopologyCommand>("cpu-topology");
+            config.AddCommand<MeasureLaneCommand>("measure-lane");
             config.AddCommand<SvdExactBenchCommand>("svd-exact-bench");
             config.AddCommand<ModelBenchCommand>("model-bench");
         });

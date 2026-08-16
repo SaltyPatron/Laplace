@@ -72,6 +72,42 @@ public class PgTuningParityTests
     }
 
     /// <summary>
+    /// The same pin for UNQUOTED numeric GUCs, which the quoted-literal theory above could
+    /// never see: its regex requires <c>= '...'</c>, so an integer setting like
+    /// <c>effective_io_concurrency = 64</c> was unpinnable and silently exempt.
+    ///
+    /// MEASURED 2026-08-16: with the emitter on 64 and the shell on 256 the whole
+    /// PgTuningParityTests suite passed, 18/18. That is exactly the max_wal_size incident
+    /// this file was written for, on a different setting, still open.
+    ///
+    /// effective_io_concurrency and maintenance_io_concurrency moved 256 -> 64 after
+    /// pg_aios showed a backend pinned at io_max_concurrency = 64 during a 2,573 MB scan,
+    /// and three cold 2.5 GB leaves came in at 3175.480 / 3175.204 / 3167.613 ms for
+    /// eic 256 / 64 / 32 -- 8 ms of spread, lowest setting marginally fastest.
+    /// </summary>
+    [Theory]
+    [InlineData("effective_io_concurrency", "PG_TUNE_IO_CONC")]
+    [InlineData("maintenance_io_concurrency", "PG_TUNE_IO_CONC")]
+    public void NumericLiterals_MatchBetweenTheEmitterAndTheShellFallback(string guc, string shellVar)
+    {
+        var emitterPath = Path.Combine(TypeIdLawTests.FindRepoRootPublic(),
+            "app", "Laplace.Cli", "CpuTopologyCommands.cs");
+        Assert.True(File.Exists(emitterPath), $"emitter not found at {emitterPath}");
+        var emitter = File.ReadAllText(emitterPath);
+
+        // Bare integer, not quoted, and not interpolated -- an interpolated value is a
+        // formula and belongs in the arithmetic tests, not here.
+        var em = Regex.Match(emitter, Regex.Escape(guc) + @"\s*=\s*(\d+)\s*;");
+        Assert.True(em.Success, $"{guc} numeric literal not found in CpuTopologyCommands.EmitPgTuning");
+
+        var sm = Regex.Match(TuningScript(), @"^\s*" + Regex.Escape(shellVar) + @"=(\d+)\s*$",
+            RegexOptions.Multiline);
+        Assert.True(sm.Success, $"{shellVar} not found as a bare integer in pg-machine-tuning.sh");
+
+        Assert.Equal(em.Groups[1].Value, sm.Groups[1].Value);
+    }
+
+    /// <summary>
     /// Reads `name=$(( mem_kb / DIV / 1024 )); (( name &lt; LO )) &amp;&amp; name=LO; (( name &gt; HI )) &amp;&amp; name=HI`
     /// and returns (divisor, loMB, hiMB). Whitespace-tolerant, order-fixed (lo then hi).
     /// </summary>

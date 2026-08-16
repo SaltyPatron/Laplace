@@ -396,16 +396,61 @@ factors pass alone deposited **23× that**, and contributed 775 attestations.
 
 ## Order of work
 
-1. **Decomposition** (#1014). Blocks everything and is actively corrupting tier 2.
+1. ~~**Decomposition** (#1014).~~ **RE-SCOPED 2026-08-16 — this is Phase 5, not a
+   separate first stage.** Decomposition is correct. Verified at HEAD:
+   `LlamaTokenizerParser.Canonicalize:257-261` strips `▁`/`Ġ`, `:262-268` maps `##`
+   to a continuation role, `:233-239` decodes `<0xNN>`; `▁cat` and `cat` canonicalize
+   to identical bytes. The 6,141 tier-2 fragments arrive through the *successful*
+   path: `StageVocabToken:302-306` → `TextDecomposer.Run` → `TextEntityBuilder.cs:74-75`,
+   which writes every tree node as an entity at the tier the native decomposer
+   assigned, and `undert` segments under UAX #29 exactly as `understand` does. **A BPE
+   fragment is lexically indistinguishable from a word**, so no decomposer change
+   fixes it.
+
+   What is actually owed is Phase 2's *"emit usages, not nodes"*, which is an
+   **admission** decision — Phase 5 below — and it has nowhere to live today:
+   decomposers may not probe (Rule #8, pure content→`SubstrateChange`); the spine's
+   probe is contractually present→skip / novel→write and is hardened against
+   declining (`NpgsqlWorkingSetApply.cs:102-104` — *"a false positive would treat a
+   genuinely novel row as present and DROP it"*), inside the subsystem
+   `.scratchpad/38` §12 marks *"do not touch"*; and attestation-only is unavailable
+   because attestation presence is always verified (`:37-38`), so `TOKEN_MAPS_TO`
+   cannot reference an entity the change did not also supply.
+
+   The fork — spine-side admission policy, exposing `ContentLadderLedger` as a
+   decomposer-side present-set, or a two-pass stage-then-`evict_source` — is recorded
+   on #1014 and is a decision about which law bends, not a coding task. Acceptance is
+   already measured: TinyLlama 26,622 resolved / **8,603** minted; the 8,603 is what
+   admission must decline.
 2. **Ingest the five curated sources** that have decomposers and no rows. Makes
    model votes adjudicable and shrinks what models can add.
 3. **Restore magnitude→Glicko** (#1015). Two functions, recoverable.
 4. **Canonicalization.** New work; permutation first, rotation is the open problem.
 5. **Streaming contraction emitter**, replacing `EmitFactorTrajectories`.
-6. **Wire the traversal engine.** `astar.cpp` has zero callers and
-   `laplace_walk_edge_weight` is unused as a path cost, so the *coherence* half —
+6. ~~**Wire the traversal engine.**~~ **RETRACTED 2026-08-16 — the premise was
+   false.** This item read *"`astar.cpp` has zero callers and
+   `laplace_walk_edge_weight` is unused as a path cost, so the coherence half —
    truth is cheap to traverse, falsehood dead-ends — cannot currently be computed
-   at all. Per-edge Glicko is not enough: gravity is recursive.
+   at all."* Both clauses are wrong, and the engine is wired end to end:
+
+   - `NpgsqlSubstrateReads.cs:2205,2213,2225` calls `converse.astar_path(...)`
+     (`label: "astar_path"`);
+   - `converse.astar_path` (`cascade/astar_path.sql.in:2`) →
+     `astar_path_raw.sql.in:10` `AS 'MODULE_PATHNAME', 'pg_laplace_astar_path'`;
+   - `extension/laplace_substrate/src/astar_path.c:280,289,298` calls
+     `astar_open` / `astar_next` / `astar_close`;
+   - `astar_path.c:113-115` — `edge_cost()` **is** `laplace_walk_edge_weight(rating,
+     rd, witness_count, kappa)`, consumed at `:158` as `out[r].cost`, with an
+     admissible heuristic closure at `:170-186` (`astar_geo_heuristic`).
+
+   Source: `MODEL_LANE_AUDIT_2026-08-11.md` §6, which additionally asserted that
+   `generate_walk.c` and `astar_path.c` "neither file exists." Both were added
+   2026-06-05 and 2026-06-06 — two months before that audit — and running §6's own
+   published reproduction grep returns them in its first eight lines. The command
+   was printed as a receipt, not executed.
+
+   Nothing is owed here. The remaining question is performance and edge-case
+   behaviour on the existing C path, not construction.
 7. **Delete the 87.4 GB** and re-baseline `scripts/model-payload-gate-check.py`
    downward.
 
