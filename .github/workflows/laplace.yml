@@ -200,6 +200,15 @@ jobs:
       - name: Enforce ISA literalism ratchets
         run: python3 scripts/isa-gate-check.py
 
+      - name: Claim-citation gate (shrink-only)
+        # A comment that cites file:line is a claim about the tree with no owner
+        # and no expiry — it decays silently while reading with the authority of
+        # the code beside it. 1,145 such citations exist; MODEL_LANE_AUDIT §6
+        # declared live code dead by publishing its grep as a receipt instead of
+        # running it. This gives that class a losing condition. Baselined at the
+        # measured present so it arms instead of failing on arrival.
+        run: python3 scripts/claim-citation-gate.py
+
       - name: Model-lane payload gate (shrink-only)
         # GH #1026 class: a model is testimony (attestations), not geometry
         # payload — factors mode filled the cluster volume before anything
