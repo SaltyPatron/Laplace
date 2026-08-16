@@ -181,3 +181,68 @@
   .writeWarn { margin: 0 0 var(--space-2); font-size: var(--text-xs); }
   .runErrBox { margin-top: var(--space-3); white-space: normal; }
 }
+
+/* ---- activity / repair / agents ------------------------------------------ */
+
+/* One-line clamp for a SQL statement or a URL: the full text is on the cell's
+   title attribute, so the column stays readable without losing anything. */
+.queryCell {
+  display: block;
+  max-width: 42ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.85em;
+  opacity: 0.85;
+}
+
+.rowActions {
+  display: flex;
+  gap: 0.35rem;
+  white-space: nowrap;
+}
+
+/* The variable a credential comes from, under its resolved/missing verdict. */
+.credSource {
+  display: block;
+  font-size: 0.78em;
+  opacity: 0.7;
+}
+
+.replyBox {
+  margin: 0.5rem 0 0;
+  padding: 0.6rem 0.75rem;
+  border-radius: 6px;
+  background: var(--surface-2, rgba(127, 127, 127, 0.08));
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 22rem;
+  overflow: auto;
+}
+
+/* Spans both columns of .opGrid — the config editor needs the full width. */
+.wideCell {
+  grid-column: 1 / -1;
+}
+
+/* Distinct from .writeTag: a write is reversible in principle, this is not. */
+.destructiveTag {
+  margin-left: 0.4rem;
+  padding: 0 0.35rem;
+  border-radius: 4px;
+  font-size: 0.72em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--danger-bg, rgba(220, 70, 70, 0.16));
+  color: var(--danger-fg, #d24444);
+}
+
+.procTag {
+  margin-left: 0.4rem;
+  padding: 0 0.35rem;
+  border-radius: 4px;
+  font-size: 0.72em;
+  letter-spacing: 0.04em;
+  background: rgba(127, 127, 127, 0.14);
+  opacity: 0.85;
+}

@@ -14,16 +14,21 @@
 -- BEGIN ATOMIC per G12: pg_catalog relation OIDs are stable for the cluster's
 -- life, and the regnamespace literals name schemas this extension guarantees.
 DROP FUNCTION IF EXISTS ops.index_health();
+-- schema_name is appended last, not inserted: it was added for ops.reindex_invalid,
+-- which cannot issue REINDEX without it (an index name alone is ambiguous across
+-- the four substrate schemas), and appending leaves any positional reader intact.
 CREATE OR REPLACE FUNCTION ops.index_health()
     RETURNS TABLE(index_name text, table_name text, valid boolean,
-                  is_partitioned_parent boolean, leaf_count bigint)
+                  is_partitioned_parent boolean, leaf_count bigint,
+                  schema_name text)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
     SELECT c.relname::text,
            t.relname::text,
            i.indisvalid,
            t.relkind = 'p',
-           (SELECT count(*) FROM pg_inherits h WHERE h.inhparent = i.indexrelid)
+           (SELECT count(*) FROM pg_inherits h WHERE h.inhparent = i.indexrelid),
+           t.relnamespace::regnamespace::text
     FROM pg_index i
     JOIN pg_class c ON c.oid = i.indexrelid
     JOIN pg_class t ON t.oid = i.indrelid
