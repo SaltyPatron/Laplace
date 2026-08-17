@@ -12,3 +12,12 @@ CREATE OR REPLACE FUNCTION lexical.word_case_variants(p_word bytea)
     RETURNS bytea[]
     AS 'MODULE_PATHNAME', 'pg_laplace_word_case_variants'
     LANGUAGE C STABLE;
+
+-- True set form. The scalar function batches the graphemes of one word; this
+-- batches trajectory unpack, case-map lookup, realization, word-id construction,
+-- and existence testing across the complete input frontier.
+DROP FUNCTION IF EXISTS laplace.word_case_variants_batch(bytea[]);
+CREATE OR REPLACE FUNCTION lexical.word_case_variants_batch(p_words bytea[])
+    RETURNS TABLE(word_id bytea, variant_id bytea)
+    AS 'MODULE_PATHNAME', 'pg_laplace_word_case_variants_batch'
+    LANGUAGE C STABLE STRICT PARALLEL SAFE;

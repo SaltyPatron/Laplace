@@ -133,6 +133,23 @@ SELECT converse.resolve_last_word('zzzunknownzzz') IS NULL AS unknown_is_null;
 
 SELECT laplace.word_id('dog') = ANY(lexical.lexical_peers(laplace.word_id('dog'))) AS peer_includes_self;
 
+-- The set case operation is result-identical to independent scalar calls,
+-- including a content id with no physicality (which still includes itself).
+WITH words AS (
+    SELECT ARRAY[laplace.word_id('dog'), laplace.word_id('NoSuchPeer')]::bytea[] AS ids
+), scalar AS (
+    SELECT w.id AS word_id, unnest(lexical.word_case_variants(w.id)) AS variant_id
+    FROM words, unnest(words.ids) AS w(id)
+), batched AS (
+    SELECT b.word_id, b.variant_id
+    FROM words, lexical.word_case_variants_batch(words.ids) b
+)
+SELECT NOT EXISTS (
+    (SELECT * FROM scalar EXCEPT SELECT * FROM batched)
+    UNION ALL
+    (SELECT * FROM batched EXCEPT SELECT * FROM scalar)
+) AS case_batch_matches_scalar;
+
 SELECT count(*) AS dog_senses FROM lexical.senses(laplace.word_id('dog'));
 
 SELECT definition, witnesses FROM lexical.define(laplace.word_id('dog'));
