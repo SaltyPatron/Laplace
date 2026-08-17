@@ -432,12 +432,35 @@ internal sealed class SubstrateTools
     {
         var entity = Opt(args, "entity");
         byte[]? id;
+        string via = "entity";
         if (entity is not null)
             id = Convert.FromHexString(entity);
         else
+        {
             id = NpgsqlSubstrateReads.ResolveRefAsync(
                     _dbReadOnly, ChessPositionRef.RewriteFenToHex(NodeText(args, "term"))!, default)
                 .GetAwaiter().GetResult();
+
+            // LAYER, REPORTED, NEVER GUESSED. consensus.salient_facts is
+            // converse.facts(p_syn bytea, ...) -- it wants a SYNSET. A surface term resolves
+            // to the WORD, and salient_facts on a word returns its neighbourhood rather than
+            // its facts: reading `cat` that way returns "transcribes as /bɜːd/", "[ɡaɪ]" and
+            // "form of: dragon" at 8-17 witnesses, another word's facts under this one's
+            // name, with no error to signal it.
+            //
+            // Auto-climbing to bubble_up's top synset is NOT the fix and was tried: the
+            // top-ranked synset by eff_mu is wrong for most terms (measured 2026-08-16 over
+            // ten common nouns -- dog -> "pole", fire -> "Lacking that which burdens or
+            // makes heavy", book -> "absent"), so climbing silently substitutes a different
+            // wrong answer. Ranking is unreliable because one gloss is deposited at several
+            // granularities and consensus splits across them; that is an ingest question,
+            // not something a read tool may paper over.
+            //
+            // So the layer is REPORTED and the caller decides. `bubble` returns the frontier
+            // with scores and witnesses; pass the id you chose back as `entity`.
+            via = "surface (NOT a synset — salient_facts expects one; "
+                + "use the bubble tool and pass the chosen id as `entity`)";
+        }
         if (id is null)
             return JsonRows(Array.Empty<JsonObject>());
 
@@ -448,6 +471,7 @@ internal sealed class SubstrateTools
         return JsonRows(rows.Select(r => new JsonObject
         {
             ["entity"] = entityHex,
+            ["resolved_via"] = via,
             ["type"] = r.Type,
             ["fact"] = r.Fact,
             ["eff_mu"] = Math.Round(r.EffMu, 1),
