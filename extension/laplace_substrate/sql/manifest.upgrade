@@ -11,7 +11,6 @@ indexes/drop_entities_tier_btree.sql.in
 indexes/drop_entities_tier_type_btree.sql.in
 indexes/entities_first_observed_btree.sql.in
 indexes/entities_created_at_brin.sql.in
-indexes/physicalities_entity_btree.sql.in
 indexes/physicalities_type_btree.sql.in
 indexes/physicalities_coord_gist.sql.in
 indexes/physicalities_hilbert_btree.sql.in

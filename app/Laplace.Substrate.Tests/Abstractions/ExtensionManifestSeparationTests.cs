@@ -22,6 +22,7 @@ public sealed class ExtensionManifestSeparationTests
         Assert.DoesNotContain("schema/tables/physicalities.sql.in", upgrade);
         Assert.DoesNotContain("schema/tables/attestations.sql.in", upgrade);
         Assert.DoesNotContain("schema/tables/consensus.sql.in", upgrade);
+        Assert.DoesNotContain("indexes/physicalities_entity_btree.sql.in", upgrade);
         Assert.Contains("drop_retired_", upgrade);
     }
 
@@ -39,5 +40,30 @@ public sealed class ExtensionManifestSeparationTests
         Assert.DoesNotContain("DETACH PARTITION", topology);
         Assert.DoesNotContain("RETURNING *", topology);
         Assert.DoesNotContain("IF NOT EXISTS", topology);
+    }
+
+    [Fact]
+    public void RecoveredIndexPaths_FailLoudWithoutSessionStateOrStalePlans()
+    {
+        var cycle = Read(
+            "app", "Laplace.Substrate", "Crud", "Npgsql", "NpgsqlIndexCycle.cs");
+        var containers = Read("extension", "laplace_substrate", "src", "containers_of.c");
+        var entityIndex = Read(
+            "extension", "laplace_substrate", "sql", "indexes",
+            "physicalities_entity_btree.sql.in");
+        var floor = Read("scripts", "check-substrate-floor.sh");
+
+        Assert.DoesNotContain("SET search_path", cycle);
+        Assert.DoesNotContain("CREATE INDEX IF NOT EXISTS", cycle);
+        Assert.Contains("RebuildOneValidAsync", cycle);
+        Assert.Contains("IndexValidityAsync", cycle);
+
+        Assert.DoesNotContain("SPI_keepplan", containers);
+        Assert.Contains("SPI_execute_with_args", containers);
+
+        Assert.Contains("(entity_id, id)", entityIndex);
+        Assert.DoesNotContain("IF NOT EXISTS", entityIndex);
+        Assert.Contains("ops.index_health()", floor);
+        Assert.DoesNotContain("pg_index", floor);
     }
 }

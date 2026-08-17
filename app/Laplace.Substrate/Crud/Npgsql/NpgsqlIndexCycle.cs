@@ -28,8 +28,8 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 /// (attestations_relation_btree + consensus_object_btree) overlapped, spilled
 /// many 1 GiB temp filesets, then a backend ACCESS_VIOLATIONed in
 /// VCRUNTIME140.dll (1.6 GiB minidump) and tore the postmaster off SCM.
-/// Parallelism belongs INSIDE one CREATE INDEX (max_parallel_maintenance_workers),
-/// not across multiple CREATE INDEX sessions.
+/// PostgreSQL's runner-owned configuration controls parallelism inside one CREATE INDEX;
+/// this path does not mutate session settings.
 /// </summary>
 public sealed class NpgsqlIndexCycle
 {
@@ -118,17 +118,6 @@ public sealed class NpgsqlIndexCycle
     }
 
     /// <summary>
-    /// Per-connection GUCs for one index build. Outer concurrency is
-    /// <see cref="MaxConcurrentIndexBuilds"/>; inner parallel workers stay on
-    /// for a single sort-based build, with maintenance_work_mem left at the
-    /// topology value because only one build runs at a time.
-    /// </summary>
-    private static string IndexBuildGucs() =>
-        "SET search_path = laplace, public; "
-        + $"SET maintenance_work_mem = '{Laplace.Engine.Core.MemoryTopology.MaintenanceWorkMemBytes >> 20}MB'; "
-        + $"SET max_parallel_maintenance_workers = {Laplace.Engine.Core.CpuTopology.ParallelMaintenanceWorkers}";
-
-    /// <summary>
     /// Auto-rebuild whatever a crashed prior run left journaled, BEFORE this run cycles.
     /// In <see cref="Deferred"/> campaign mode this is a no-op: the journaled drops are
     /// intentional (held down across steps) and the terminal `ingest index-rebuild` rebuilds
@@ -176,18 +165,7 @@ public sealed class NpgsqlIndexCycle
                 var (name, def) = pending[i];
                 log.LogWarning("INDEX_CYCLE recovery: re-creating {Index} from journal", name);
                 await using var conn = await ds.OpenConnectionAsync(token);
-                await using (var guc = conn.CreateCommand())
-                {
-                    guc.CommandText = IndexBuildGucs();
-                    await guc.ExecuteNonQueryAsync(token);
-                }
-                await DropIfInvalidAsync(conn, name, token);
-                await using (var mk = conn.CreateCommand())
-                {
-                    mk.CommandTimeout = 0;
-                    mk.CommandText = def.Replace("CREATE INDEX", "CREATE INDEX IF NOT EXISTS", StringComparison.Ordinal);
-                    await mk.ExecuteNonQueryAsync(token);
-                }
+                await RebuildOneValidAsync(conn, name, def, token);
                 await using (var del = conn.CreateCommand())
                 {
                     del.CommandText = "DELETE FROM laplace.index_cycle_journal WHERE index_name = $1";
@@ -217,7 +195,8 @@ public sealed class NpgsqlIndexCycle
             long live;
             await using (var est = conn.CreateCommand())
             {
-                est.CommandText = "SELECT reltuples::bigint FROM pg_class WHERE oid = ($1)::regclass";
+                est.CommandText =
+                    "SELECT reltuples::bigint FROM pg_catalog.pg_class WHERE oid = ($1)::regclass";
                 est.Parameters.AddWithValue($"laplace.{table}");
                 live = (long)(await est.ExecuteScalarAsync(ct) ?? 0L);
             }
@@ -287,19 +266,7 @@ public sealed class NpgsqlIndexCycle
                 var (name, def) = _dropped[i];
                 var one = System.Diagnostics.Stopwatch.StartNew();
                 await using var conn = await _ds.OpenConnectionAsync(token);
-                await using (var guc = conn.CreateCommand())
-                {
-                    guc.CommandText = IndexBuildGucs();
-                    await guc.ExecuteNonQueryAsync(token);
-                }
-                await DropIfInvalidAsync(conn, name, token);
-                await using (var mk = conn.CreateCommand())
-                {
-                    mk.CommandTimeout = 0;
-                    mk.CommandText = def.Replace(
-                        "CREATE INDEX", "CREATE INDEX IF NOT EXISTS", StringComparison.Ordinal);
-                    await mk.ExecuteNonQueryAsync(token);
-                }
+                await RebuildOneValidAsync(conn, name, def, token);
                 await using (var del = conn.CreateCommand())
                 {
                     del.CommandText = "DELETE FROM laplace.index_cycle_journal WHERE index_name = $1";
@@ -362,28 +329,52 @@ public sealed class NpgsqlIndexCycle
     }
 
     /// <summary>
-    /// An INVALID index of the target name (a killed recursive build, or a shell
-    /// from a pre-fix ON ONLY rebuild) satisfies CREATE INDEX IF NOT EXISTS and
-    /// discharges the journal row with zero children built — drop it first so the
-    /// create actually runs. A VALID index passes through untouched.
+    /// Rebuild one journaled index, then prove it is valid before its journal row may
+    /// be cleared. A valid existing index means the prior process crashed after CREATE
+    /// and before journal cleanup; an invalid index is removed and rebuilt loudly.
     /// </summary>
-    private static async Task DropIfInvalidAsync(
+    private static async Task RebuildOneValidAsync(
+        NpgsqlConnection conn, string name, string def, CancellationToken ct)
+    {
+        bool? existing = await IndexValidityAsync(conn, name, ct);
+        if (existing is true) return;
+
+        if (existing is false)
+        {
+            await using var drop = conn.CreateCommand();
+            drop.CommandTimeout = 0;
+            drop.CommandText = $"DROP INDEX laplace.{QuoteIdentifier(name)}";
+            await drop.ExecuteNonQueryAsync(ct);
+        }
+
+        await using (var create = conn.CreateCommand())
+        {
+            create.CommandTimeout = 0;
+            create.CommandText = def.Replace(" ON ONLY ", " ON ", StringComparison.Ordinal);
+            await create.ExecuteNonQueryAsync(ct);
+        }
+
+        if (await IndexValidityAsync(conn, name, ct) is not true)
+            throw new InvalidOperationException(
+                $"INDEX_CYCLE rebuilt '{name}' but it is invalid or absent; "
+                + "refusing to clear its journal row");
+    }
+
+    private static async Task<bool?> IndexValidityAsync(
         NpgsqlConnection conn, string name, CancellationToken ct)
     {
         await using var probe = conn.CreateCommand();
         probe.CommandText =
-            "SELECT NOT i.indisvalid FROM pg_index i "
-            + "JOIN pg_class c ON c.oid = i.indexrelid "
-            + "JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "SELECT i.indisvalid FROM pg_catalog.pg_index i "
+            + "JOIN pg_catalog.pg_class c ON c.oid = i.indexrelid "
+            + "JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace "
             + "WHERE n.nspname = 'laplace' AND c.relname = $1";
         probe.Parameters.AddWithValue(name);
-        if (await probe.ExecuteScalarAsync(ct) is not true) return;
-
-        await using var drop = conn.CreateCommand();
-        drop.CommandTimeout = 0;
-        drop.CommandText = $"DROP INDEX IF EXISTS laplace.\"{name}\"";
-        await drop.ExecuteNonQueryAsync(ct);
+        return await probe.ExecuteScalarAsync(ct) is bool valid ? valid : null;
     }
+
+    private static string QuoteIdentifier(string value) =>
+        $"\"{value.Replace("\"", "\"\"", StringComparison.Ordinal)}\"";
 
     private static async Task<List<(string Name, string Def)>> ListPlainSecondariesAsync(
         NpgsqlConnection conn, string table, CancellationToken ct)
@@ -405,19 +396,19 @@ public sealed class NpgsqlIndexCycle
             "WITH RECURSIVE parts AS ("
             + "  SELECT ($1)::regclass AS oid "
             + "  UNION ALL "
-            + "  SELECT i.inhrelid FROM pg_inherits i JOIN parts p ON i.inhparent = p.oid"
+            + "  SELECT i.inhrelid FROM pg_catalog.pg_inherits i JOIN parts p ON i.inhparent = p.oid"
             + ") "
             // ON ONLY stripped at capture: pg_get_indexdef on a partitioned ROOT
             // emits the non-recursive form, and rebuilding that creates an empty
             // invalid shell with zero children instead of the index tree the DROP
             // removed. Both rebuild paths run this def verbatim.
-            + "SELECT c.relname, replace(pg_get_indexdef(i.indexrelid), ' ON ONLY ', ' ON ') "
-            + "FROM pg_index i "
-            + "JOIN pg_class c ON c.oid = i.indexrelid "
+            + "SELECT c.relname, replace(pg_catalog.pg_get_indexdef(i.indexrelid), ' ON ONLY ', ' ON ') "
+            + "FROM pg_catalog.pg_index i "
+            + "JOIN pg_catalog.pg_class c ON c.oid = i.indexrelid "
             + "WHERE i.indrelid IN (SELECT oid FROM parts) "
             + "  AND NOT i.indisprimary AND NOT i.indisunique AND NOT i.indisexclusion "
             + "  AND NOT EXISTS ("
-            + "    SELECT 1 FROM pg_inherits ih WHERE ih.inhrelid = i.indexrelid"
+            + "    SELECT 1 FROM pg_catalog.pg_inherits ih WHERE ih.inhrelid = i.indexrelid"
             + ") "
             + "ORDER BY c.relname";
         list.Parameters.AddWithValue($"laplace.{table}");
