@@ -10,7 +10,7 @@
 CREATE OR REPLACE FUNCTION converse.operation_frame_routes()
     RETURNS TABLE(frame_id bytea, operation_id bytea, shape text, role text)
     LANGUAGE sql IMMUTABLE PARALLEL SAFE
-AS $$
+BEGIN ATOMIC
     VALUES
       (laplace.word_id('People'),
        realize.canonical_id('operation/what_is/v1'), 'what_is'::text, 'request'::text),
@@ -19,5 +19,5 @@ AS $$
       (laplace.word_id('Representing'),
        realize.canonical_id('operation/what_is/v1'), 'what_is'::text, 'binder'::text),
       (laplace.word_id('Existence'),
-       realize.canonical_id('operation/what_is/v1'), 'what_is'::text, 'binder'::text)
-$$;
+       realize.canonical_id('operation/what_is/v1'), 'what_is'::text, 'binder'::text);
+END;

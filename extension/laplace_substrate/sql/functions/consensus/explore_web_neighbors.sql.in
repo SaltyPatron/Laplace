@@ -47,12 +47,12 @@ BEGIN ATOMIC
               -- inbound mirror preserves edges_raw(..., 'both') semantics.
               AND x.subject_id <> f.subject_id
         ) c
-        ORDER BY (c.rating - 2 * c.rd) DESC, c.nbr, c.type_id,
+        ORDER BY consensus.eff_mu(c.rating, c.rd) DESC, c.nbr, c.type_id,
                  c.outbound DESC
         LIMIT GREATEST(1, p_limit)
     ) e
     ORDER BY f.frontier_ord,
-             (e.rating - 2 * e.rd) DESC, e.nbr, e.type_id,
+             consensus.eff_mu(e.rating, e.rd) DESC, e.nbr, e.type_id,
              e.outbound DESC;
 END;
 
@@ -123,12 +123,12 @@ BEGIN ATOMIC
               AND x.subject_id <> f.subject_id
               AND (p_types IS NULL OR x.type_id <> ALL (p_types))
         ) c
-        ORDER BY (c.rating - 2 * c.rd) DESC, c.nbr, c.type_id,
+        ORDER BY consensus.eff_mu(c.rating, c.rd) DESC, c.nbr, c.type_id,
                  c.outbound DESC
         LIMIT GREATEST(1, p_limit)
     ) e
     ORDER BY f.frontier_ord,
-             (e.rating - 2 * e.rd) DESC, e.nbr, e.type_id,
+             consensus.eff_mu(e.rating, e.rd) DESC, e.nbr, e.type_id,
              e.outbound DESC;
 END;
 
