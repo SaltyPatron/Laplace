@@ -234,7 +234,8 @@ phase_codegen() {
   if [[ "$FORCE_CODEGEN" -eq 0 && -f "$stamp" ]]; then
     prev=$(cat "$stamp" 2>/dev/null || true)
     if [[ "$prev" == "$key" ]]; then
-      echo "attestation law codegen skipped (stamp fresh)"
+      "$PYTHON" "$ROOT/scripts/codegen-attestation-law.py" --check
+      echo "attestation law codegen verified (stamp fresh)"
       return 0
     fi
   fi

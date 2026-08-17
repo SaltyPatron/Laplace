@@ -2,10 +2,8 @@
 -- attribute CONTAINS all of p_members.
 --
 -- This is the read the edge fan cannot serve. "Which forms are nominative AND singular
--- AND masculine" against 186,562,442 HAS_FEATURE rows is a three-way self-join, one arm
--- per tag, each arm pruning to one LIST partition and then fanning across 8 hash leaves.
--- Against bundles it is one GIN containment probe over 145,619 sets
--- (physicalities_set_constituents_gin) followed by one reverse-edge read.
+-- AND masculine" otherwise requires one self-join arm per tag. Against bundles it is one
+-- GIN containment probe (physicalities_set_constituents_gin), then one reverse-edge read.
 --
 -- The bundle ids arrive as an InitPlan-bound ARRAY(SELECT ...), NOT as a CTE column
 -- joined to consensus. Measurements at two independent sites show that

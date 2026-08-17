@@ -1,9 +1,6 @@
 schema/purpose_schemas.sql.in
 schema/purpose_relocate.sql.in
 schema/laplace_substrate_version.sql.in
-schema/tables/entities.sql.in
-schema/tables/physicalities.sql.in
-schema/tables/attestations.sql.in
 schema/tables/ingest_flush_journal.sql.in
 schema/tables/index_cycle_journal.sql.in
 schema/tables/ingest_run_journal.sql.in
@@ -55,7 +52,6 @@ functions/trajectory/trajectory_point_count.sql.in
 functions/trajectory/trajectory_prefix_distance.sql.in
 indexes/entities_tier_brin.sql.in
 indexes/entities_tier_type_brin.sql.in
-schema/tables/consensus.sql.in
 indexes/consensus_object_btree.sql.in
 indexes/consensus_type_btree.sql.in
 indexes/consensus_subject_type_btree.sql.in
@@ -221,7 +217,6 @@ functions/converse/correlate.sql.in
 generated/relation_family_ids.sql.in
 generated/relation_set_ids.sql.in
 generated/seed_relation_types.sql.in
-generated/seed_relation_partitions.sql.in
 generated/seed_pos.sql.in
 functions/cascade/astar_path.sql.in
 functions/cascade/cascade.sql.in

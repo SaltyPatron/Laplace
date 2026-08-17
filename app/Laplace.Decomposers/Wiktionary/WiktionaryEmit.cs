@@ -275,9 +275,8 @@ internal static class WiktionaryEmit
             if (formId != wordId)
                 Attest(b, formId, "FORM_OF", wordId, null);
             // A form's tags are ONE morphological analysis, not N independent claims. Emitting
-            // them as N edges gave the analysis no id, so nothing could rate, corroborate or
-            // refute it, and 186,562,442 HAS_FEATURE rows encoded 145,619 distinct analyses
-            // (docs/specs/38). One composition, one edge, one adjudicable claim.
+            // them as N edges gives the analysis no id, so nothing can rate, corroborate or
+            // refute it as a whole. One composition, one edge, one adjudicable claim.
             if (TryStageSet(b, form.Tags, roots, out var featureSetId))
                 Attest(b, formId, "HAS_FEATURE", featureSetId, null);
         }

@@ -9,8 +9,7 @@ namespace Laplace.Decomposers.Tests.Wiktionary;
 
 /// <summary>
 /// The Wiktionary write path emits a form's morphological analysis as ONE composition, not as
-/// one edge per tag. Before this, 186,562,442 HAS_FEATURE consensus rows over 62,066,099 forms
-/// encoded 145,619 distinct analyses, none of which had an id (docs/specs/38 §0).
+/// one edge per tag, so the analysis itself has an identity that witnesses can adjudicate.
 /// </summary>
 public class WiktionaryFeatureSetTests
 {
