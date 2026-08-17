@@ -123,8 +123,6 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>
             {
                 b.AddAttestation(NativeAttestation.Categorical(
                     langId, "HAS_NAME_ALIAS", nid, Source, TC.StandardsDerived));
-                b.AddAttestation(NativeAttestation.Categorical(
-                    langId, "HAS_DEFINITION", nid, Source, TC.StandardsDerived));
             }
         }
     }
@@ -318,7 +316,7 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>
             b.AddEntity(lid, EntityTier.Word, LanguageTypeId, Source);
             if (ContentEmitter.Emit(b, rec.PrintName, Source) is { } nid)
                 b.AddAttestation(NativeAttestation.Categorical(
-                    lid, "HAS_DEFINITION", nid, Source, TC.StandardsDerived));
+                    lid, "HAS_NAME_ALIAS", nid, Source, TC.StandardsDerived));
         }
         protected override async IAsyncEnumerable<(string Id, string PrintName)> ExtractRecordsAsync(
             string ecosystemPath, DecomposerOptions options,
