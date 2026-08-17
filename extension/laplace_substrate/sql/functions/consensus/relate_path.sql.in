@@ -29,12 +29,32 @@ AS $$
     -- Previously these were 13 names x 2 arms inlined here, which is why the g3 literalism
     -- ceiling had to be raised 239 -> 262 to admit them (#S2). The names now live in the
     -- manifest with the other 78 IS_A declaration sites, so the ceiling comes back down.
-    x_top AS (SELECT sn.synset_id FROM lexical.senses(p_x) sn
-              ORDER BY sn.eff_mu DESC NULLS LAST LIMIT 1),
-    y_top AS (SELECT sn.synset_id FROM lexical.senses(p_y) sn
-              ORDER BY sn.eff_mu DESC NULLS LAST LIMIT 1),
-    xset(id) AS (SELECT p_x UNION SELECT synset_id FROM x_top),
-    yset(id) AS (SELECT p_y UNION SELECT synset_id FROM y_top),
+    -- EVERY SENSE SEEDS THE SEARCH; THE PATH ELECTS THE SENSE. These were
+    -- `ORDER BY sn.eff_mu DESC LIMIT 1` per side, which is the §7 violation named in
+    -- CLAUDE.md §4 by its shape: a single-token scalar applied per token, in isolation,
+    -- BEFORE the joint election. It can delete the candidate the joint evidence would have
+    -- picked, and nothing downstream recovers it -- lca_pick can only join closures it was
+    -- given.
+    --
+    -- MEASURED 2026-08-16, cat <-> dog at p_depth 7. Seeded from the top synset alone the
+    -- two closures hold 9 nodes each and share NOTHING: relate_path returned zero rows for
+    -- two common nouns, with no error to say why. Seeded from all senses (8 for cat, 5 for
+    -- dog, every one of them carrying PATH_UPWARD out-edges) the closures hold 58 and 37
+    -- nodes and meet at 36 places, the shortest at total length 4.
+    --
+    -- The ranking was unreliable in the way the substrate is already known to be unreliable:
+    -- one gloss is deposited at several granularities and consensus splits across them, so
+    -- eff_mu across a word's senses is a tie-break wearing a rating's clothes. This is the
+    -- same reading behind SubstrateTools' refusal to auto-climb to bubble_up's top synset.
+    --
+    -- lca_pick's ORDER BY (len, then widest bottleneck mu) IS the joint election, and it is
+    -- what should choose the sense: the pair of senses that are actually related is the pair
+    -- with a path between them. Widening the seed is affordable only because the closures
+    -- below now dedup on (node, d) -- see the phase note.
+    xset(id) AS (SELECT p_x UNION SELECT sn.synset_id FROM lexical.senses(p_x) sn
+                 WHERE sn.synset_id IS NOT NULL),
+    yset(id) AS (SELECT p_y UNION SELECT sn.synset_id FROM lexical.senses(p_y) sn
+                 WHERE sn.synset_id IS NOT NULL),
     direct AS (
         SELECT ARRAY[x.id, c.object_id] AS nodes, ARRAY[c.type_id] AS types,
                ARRAY[1] AS dirs, consensus.eff_mu_display(c.rating, c.rd) AS mu, 1 AS len,
@@ -49,34 +69,84 @@ AS $$
           AND c.subject_id IN (SELECT id FROM yset)
           AND c.type_id = ANY (consensus.relation_set_ids('PATH_LATERAL'))
     ),
-    ux(node, path, types, mu, d) AS (
+    -- TWO PHASES, BECAUSE ONE ROW PER PATH IS NOT ONE ROW PER NODE. The upward closure
+    -- runs over an IS_A DAG, where a single ancestor is reachable by many distinct routes.
+    -- Carrying `path` for the cycle check made every one of those routes a separate row
+    -- (UNION ALL cannot collapse them -- the rows differ in `path`), so each arm produced
+    -- one row per PATH and re-expanded each of them, with two growing bytea[] columns
+    -- riding along to depth 7. That is the combinatorial term behind the 383 MB temp and
+    -- the 18,303,185 shared buffer hits: both arms paid it in full before the LCA join
+    -- cut the result to one row.
+    --
+    -- Phase 1 (ux0/uy0) searches on (node, d) alone. UNION now dedups, because two routes
+    -- to the same ancestor at the same depth ARE the same row -- the frontier is bounded by
+    -- |ancestors| x p_depth instead of by the number of paths, and no array is copied.
+    -- Cycle safety no longer needs `path`: a revisit reappears at a strictly greater d and
+    -- `u.d < p_depth` bounds it, and phase 2 only ever walks minimum depths, which are
+    -- simple by construction.
+    --
+    -- Phase 2 (rx/ry) rebuilds path/types/mu for the winning length only, over edges that
+    -- advance the minimum depth by exactly one (`nx.d = r.d + 1`) -- i.e. shortest-path
+    -- edges. The ordering is unchanged: minimum total length first, then the widest
+    -- bottleneck mu, so the row this picks is the row the old body picked.
+    ux0(node, d) AS (
+        SELECT id, 0 FROM xset
+        UNION
+        SELECT c.object_id, u.d + 1
+        FROM ux0 u JOIN laplace.v_consensus_unrefuted c ON c.subject_id = u.node
+          AND c.type_id = ANY (consensus.relation_set_ids('PATH_UPWARD')) AND c.object_id IS NOT NULL
+        WHERE u.d < p_depth
+    ),
+    uy0(node, d) AS (
+        SELECT id, 0 FROM yset
+        UNION
+        SELECT c.object_id, u.d + 1
+        FROM uy0 u JOIN laplace.v_consensus_unrefuted c ON c.subject_id = u.node
+          AND c.type_id = ANY (consensus.relation_set_ids('PATH_UPWARD')) AND c.object_id IS NOT NULL
+        WHERE u.d < p_depth
+    ),
+    uxm(node, d) AS (SELECT node, min(d) FROM ux0 GROUP BY node),
+    uym(node, d) AS (SELECT node, min(d) FROM uy0 GROUP BY node),
+    -- Every node reachable from both ends, and the shortest total length any of them gives.
+    -- The mu tiebreak cannot be applied here -- mu is a property of a path, not of a node --
+    -- so all meeting nodes at the minimum length survive into phase 2 and are ranked there.
+    meet AS (
+        SELECT uxm.node AS m, uxm.d AS dx, uym.d AS dy, uxm.d + uym.d AS len
+        FROM uxm JOIN uym ON uxm.node = uym.node
+        WHERE uxm.d > 0 OR uym.d > 0
+    ),
+    meets AS (SELECT * FROM meet WHERE len = (SELECT min(len) FROM meet)),
+    rx(node, path, types, mu, d) AS (
         SELECT id, ARRAY[id], ARRAY[]::bytea[], NULL::numeric, 0 FROM xset
         UNION ALL
-        SELECT c.object_id, u.path || c.object_id, u.types || c.type_id,
-               LEAST(COALESCE(u.mu, consensus.eff_mu_display(c.rating, c.rd)),
-                     consensus.eff_mu_display(c.rating, c.rd)), u.d + 1
-        FROM ux u JOIN laplace.v_consensus_unrefuted c ON c.subject_id = u.node
-          AND c.type_id = ANY (consensus.relation_set_ids('PATH_UPWARD')) AND c.object_id IS NOT NULL
-          AND NOT (c.object_id = ANY (u.path))
-        WHERE u.d < p_depth
+        SELECT c.object_id, r.path || c.object_id, r.types || c.type_id,
+               LEAST(COALESCE(r.mu, consensus.eff_mu_display(c.rating, c.rd)),
+                     consensus.eff_mu_display(c.rating, c.rd)), r.d + 1
+        FROM rx r
+          JOIN laplace.v_consensus_unrefuted c ON c.subject_id = r.node
+            AND c.type_id = ANY (consensus.relation_set_ids('PATH_UPWARD')) AND c.object_id IS NOT NULL
+          JOIN uxm nx ON nx.node = c.object_id AND nx.d = r.d + 1
+        WHERE r.d < (SELECT COALESCE(max(dx), 0) FROM meets)
     ),
-    uy(node, path, types, mu, d) AS (
+    ry(node, path, types, mu, d) AS (
         SELECT id, ARRAY[id], ARRAY[]::bytea[], NULL::numeric, 0 FROM yset
         UNION ALL
-        SELECT c.object_id, u.path || c.object_id, u.types || c.type_id,
-               LEAST(COALESCE(u.mu, consensus.eff_mu_display(c.rating, c.rd)),
-                     consensus.eff_mu_display(c.rating, c.rd)), u.d + 1
-        FROM uy u JOIN laplace.v_consensus_unrefuted c ON c.subject_id = u.node
-          AND c.type_id = ANY (consensus.relation_set_ids('PATH_UPWARD')) AND c.object_id IS NOT NULL
-          AND NOT (c.object_id = ANY (u.path))
-        WHERE u.d < p_depth
+        SELECT c.object_id, r.path || c.object_id, r.types || c.type_id,
+               LEAST(COALESCE(r.mu, consensus.eff_mu_display(c.rating, c.rd)),
+                     consensus.eff_mu_display(c.rating, c.rd)), r.d + 1
+        FROM ry r
+          JOIN laplace.v_consensus_unrefuted c ON c.subject_id = r.node
+            AND c.type_id = ANY (consensus.relation_set_ids('PATH_UPWARD')) AND c.object_id IS NOT NULL
+          JOIN uym ny ON ny.node = c.object_id AND ny.d = r.d + 1
+        WHERE r.d < (SELECT COALESCE(max(dy), 0) FROM meets)
     ),
     lca_pick AS (
-        SELECT ux.path AS xp, ux.types AS xk, uy.path AS yp, uy.types AS yk,
-               LEAST(ux.mu, uy.mu) AS mu, ux.d + uy.d AS len
-        FROM ux JOIN uy ON ux.node = uy.node
-        WHERE ux.d > 0 OR uy.d > 0
-        ORDER BY ux.d + uy.d, LEAST(ux.mu, uy.mu) DESC NULLS LAST LIMIT 1
+        SELECT rx.path AS xp, rx.types AS xk, ry.path AS yp, ry.types AS yk,
+               LEAST(rx.mu, ry.mu) AS mu, rx.d + ry.d AS len
+        FROM meets mt
+          JOIN rx ON rx.node = mt.m AND rx.d = mt.dx
+          JOIN ry ON ry.node = mt.m AND ry.d = mt.dy
+        ORDER BY rx.d + ry.d, LEAST(rx.mu, ry.mu) DESC NULLS LAST LIMIT 1
     ),
     winner AS (
         SELECT a.nodes, a.types, a.dirs, a.mu, a.len, a.plane_type
