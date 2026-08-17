@@ -1,14 +1,14 @@
 -- The geometry-native continuation operator: for a content point, the next (or
 -- previous) CONTENT constituent in every trajectory that contains it, aggregated
 -- by frequency. Reads the ordered sequence straight from the content-addressed
--- geometry (containers_of's single-key-GIN reverse index + the perfcache
--- separator classifier) -- no PRECEDES attestation, no gen_corpus flat corpus.
+-- geometry (a single-key GIN reverse probe + the central separator alphabet) --
+-- no PRECEDES attestation, no gen_corpus flat corpus.
 -- Native because the walk (find the point, skip separators, take the neighbour,
 -- aggregate) is pointer/loop work SQL cannot do at scale; see geometry_successors.c.
 --
 -- p_backward flips the walk. The trajectory holds the EXACT ordered sequence of
 -- everything ingested, so "what precedes x" is exactly as answerable as "what
--- follows x" -- same containment query, same separator cache, same aggregation.
+-- follows x" -- same containment query, same separator set, same aggregation.
 -- Asking the question is always legal; what is banned is MATERIALISING the answer
 -- as stored PRECEDES rows when the geometry already holds it losslessly.
 DROP FUNCTION IF EXISTS laplace.geometry_successors(bytea, int, int, boolean);
