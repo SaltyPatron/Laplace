@@ -66,6 +66,7 @@ DECLARE
     MINLEN int := 5;
     syn    bytea;
     topic_word bytea;
+    prompt_ids bytea[];
     stream bytea[];
     w      bigint[];
     starts bytea[];
@@ -75,6 +76,13 @@ BEGIN
     t_def  := laplace.relation_band_types(b_def);
     t_band := laplace.relation_band_types(ARRAY[1,2,4,7]);
     t_sep  := generation.separator_ids();
+    -- Carry the prompt's witnessed identities into the source scan.  Array
+    -- containment is set membership only; the returned physicality retains the
+    -- ordered trajectory used below.  No separator/whitespace assumption is
+    -- made here, and no direct edge is invented between co-constituents.
+    SELECT array_agg(DISTINCT p.id ORDER BY p.id) INTO prompt_ids
+    FROM converse.prompt_words(p_prompt) p
+    WHERE p.id IS NOT NULL;
     -- ORIENT. Same hash-space signal converse.chat() uses: how strongly the token denotes the
     -- sense, then highway-mask breadth. No realize.realize(), no surface comparison.
     -- Two levels: breadth picks WHICH TOKEN, denote_mu picks WHICH SENSE of it.
@@ -160,17 +168,27 @@ BEGIN
     frontier_agg AS MATERIALIZED (
         SELECT f.cid, max(f.mu) AS mu FROM frontier f GROUP BY f.cid
     ),
+    context_gids AS MATERIALIZED (
+        SELECT co.entity_id AS gid
+        FROM structural.containers_containing_all(prompt_ids) co
+    ),
     gids AS (
         SELECT DISTINCT g.gid, g.wt, g.is_core FROM (
-            SELECT c.object_id AS gid, 50::bigint AS wt, true AS is_core
+            -- A witnessed composition of multiple prompt identities is the
+            -- backbone.  Definitions remain in the stream as supporting
+            -- evidence.  When no shared composition exists, the definition is
+            -- the backbone exactly as before.  The native walker otherwise
+            -- always seeds from core_seq and merely having a definition makes
+            -- every contextual start unreachable.
+            SELECT c.object_id AS gid,
+                   CASE WHEN EXISTS (SELECT 1 FROM context_gids)
+                        THEN 40 ELSE 50 END::bigint AS wt,
+                   NOT EXISTS (SELECT 1 FROM context_gids) AS is_core
             FROM laplace.consensus c
             WHERE c.subject_id = syn AND c.type_id = ANY (t_def)
             UNION ALL
-            SELECT co.entity_id, 40, false
-            FROM structural.containers_of(topic_word, 1, 400) co
-            WHERE co.tier = 3
-            ORDER BY is_core DESC, gid
-            LIMIT 160
+            SELECT cg.gid, 50, true
+            FROM context_gids cg
         ) g
     ),
     toks AS (
@@ -343,9 +361,15 @@ BEGIN
     -- being the one wired into converse.chat()'s walk shape.
     --
     -- BOTH ladders batch, because both are needed and they answer different
-    -- questions: realize LABELS a concept in p_lang, realize.render_text reconstructs
-    -- content bytes. The COALESCE order is unchanged -- label first, content as
-    -- the fallback for ids with no surface family.
+    -- questions: resolve_name_batch LABELS a concept in p_lang, while
+    -- render_text_batch reconstructs content bytes for stream ids which did not
+    -- resolve to a concept.  This stream is explicitly concept-first (concept_map
+    -- above), so using realize.batch here was the wrong contract: realize.batch is
+    -- content-first to keep ':' from becoming 'COLON', and therefore rendered OMW
+    -- concept content such as `i88813` before consulting its English member
+    -- `captain`.  The operation already knows whether it needs a label or a value;
+    -- preserve that type information instead of asking one generic fallback ladder
+    -- to guess.  COALESCE below remains label first, content second.
     --
     -- string_agg now carries ORDER BY gg.o. The scalar form had none: unnest WITH
     -- ORDINALITY names the position but does not oblige the aggregate to use it,
@@ -369,7 +393,7 @@ BEGIN
     ),
     realized AS MATERIALIZED (
         SELECT i.a,
-               realize.batch(i.a, p_lang) AS lbl,
+               realize.resolve_name_batch(i.a, p_lang) AS lbl,
                realize.render_text_batch(i.a, 64) AS txt
         FROM ids i
     ),

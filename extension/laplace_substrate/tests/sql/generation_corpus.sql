@@ -82,6 +82,19 @@ BEGIN
                 public.laplace_mantissa_pack(w_france, 7, 1, t2flag)]),
             7, now());
 
+    -- Multi-identity containment is one shared GIN probe.  It returns the
+    -- composition carrying both points, not a manufactured capital->of edge.
+    IF NOT EXISTS (
+        SELECT 1
+        FROM structural.containers_containing_all(ARRAY[w_capital, w_of]) c
+        WHERE c.entity_id = sent) THEN
+        RAISE EXCEPTION 'FAIL: shared container for capital/of missing';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM structural.containers_containing_all(ARRAY[]::bytea[])) THEN
+        RAISE EXCEPTION 'FAIL: empty shared-container set scanned physicalities';
+    END IF;
+
     -- doc wraps sent: contributes no pairs of its own and never double-counts.
     INSERT INTO laplace.physicalities (id, entity_id, type, coord, hilbert_index,
                                trajectory, n_constituents, observed_at)

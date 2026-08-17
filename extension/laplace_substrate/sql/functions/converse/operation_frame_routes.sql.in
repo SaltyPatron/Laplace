@@ -1,0 +1,23 @@
+-- Semantic firmware for compiling operator utterances into installed read
+-- programs.  These ids are FrameNet frame entities already witnessed by lexical
+-- surfaces across languages; they are not English prompt strings.  A surface
+-- reaches a row through its EVOKES_FRAME testimony, so another language executes
+-- the same program when its own surface evokes the same frame.
+--
+-- Keep this as data with an operation identity and an explicit operand role.  A
+-- strcmp/regex ladder in an endpoint would erase the evidence path and make the
+-- SQL and UI compilers drift again.
+CREATE OR REPLACE FUNCTION converse.operation_frame_routes()
+    RETURNS TABLE(frame_id bytea, operation_id bytea, shape text, role text)
+    LANGUAGE sql IMMUTABLE PARALLEL SAFE
+AS $$
+    VALUES
+      (laplace.word_id('People'),
+       realize.canonical_id('operation/what_is/v1'), 'what_is'::text, 'request'::text),
+      (laplace.word_id('Entity'),
+       realize.canonical_id('operation/what_is/v1'), 'what_is'::text, 'request'::text),
+      (laplace.word_id('Representing'),
+       realize.canonical_id('operation/what_is/v1'), 'what_is'::text, 'binder'::text),
+      (laplace.word_id('Existence'),
+       realize.canonical_id('operation/what_is/v1'), 'what_is'::text, 'binder'::text)
+$$;
