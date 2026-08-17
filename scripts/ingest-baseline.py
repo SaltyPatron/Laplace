@@ -37,6 +37,18 @@ BASELINE_PATH = ROOT / "scripts" / "ingest-baselines.json"
 # to ignore it. It is here to catch a 2x regression, not a 10% one.
 DEFAULT_TOLERANCE = 1.5
 
+# Sentinel in the failures list — distinct from the slow (>0) and content-drift (==0)
+# buckets so "no baseline" is not reported as "ingested different content".
+UNBASELINED = -1.0
+
+# IngestBaselineGates.MinWriterRowsPerSecond. Reported on every line, never enforced
+# here: every recorded corpus is already 5x-195x under it (framenet 2,559/s ... unicode
+# 94,783/s, measured 2026-08-16), so enforcing would redden the whole seed pipeline in
+# one commit. Printing the ratio is what stops the gap from being invisible — a check
+# that only compares a source to its own past can catch a regression from slow, never
+# slow itself.
+ABSOLUTE_FLOOR_ROWS_PER_S = 500_000
+
 COMPLETE_RE = re.compile(
     r"INGEST_COMPLETE\s+source=(?P<source>\S+).*?"
     r"rows_new=(?P<ent>\d+)e\+(?P<phys>\d+)p\+(?P<att>\d+)a\s+"
@@ -152,11 +164,30 @@ def cmd_check(args) -> int:
         if elapsed is None:
             continue
         if not prev or not prev.get("elapsed_s"):
-            print(f"  {source}: {elapsed}s (no baseline — recording is a separate step)")
+            # WAS A NOTICE, NOW A FAILURE. An empty baseline FILE already refused to pass
+            # (above); a missing ENTRY printed a line and continued, so the largest corpus
+            # in the manifest was the one source the gate could not fail on. Measured
+            # 2026-08-16: conceptnet ran 43m26s at ~2,753 rows/s with no baseline recorded,
+            # and this step went green. --allow-unbaselined is the deliberate first-run
+            # escape hatch; it must be typed, not defaulted.
+            if args.allow_unbaselined:
+                print(f"  {source}: {elapsed}s (no baseline — allowed by --allow-unbaselined)")
+                continue
+            print(f"  NEW  {source}: {elapsed}s with no recorded baseline — "
+                  f"run `ingest-baseline.py record` or pass --allow-unbaselined")
+            failures.append((source, UNBASELINED))
             continue
         ratio = elapsed / prev["elapsed_s"]
         mark = "ok " if ratio <= args.tolerance else "SLOW"
-        print(f"  {mark} {source}: {elapsed}s vs baseline {prev['elapsed_s']}s ({ratio:.2f}x)")
+        rows = obs.get("rows_new")
+        floor = ""
+        if rows and elapsed:
+            rate = rows / elapsed
+            floor = (f"  [{rate:,.0f} rows/s = "
+                     f"{ABSOLUTE_FLOOR_ROWS_PER_S / rate:.0f}x under the "
+                     f"{ABSOLUTE_FLOOR_ROWS_PER_S:,}/s IngestBaselineGates floor]")
+        print(f"  {mark} {source}: {elapsed}s vs baseline {prev['elapsed_s']}s "
+              f"({ratio:.2f}x){floor}")
         if ratio > args.tolerance:
             failures.append((source, ratio))
 
@@ -186,11 +217,14 @@ def cmd_check(args) -> int:
     if failures:
         slow = [f for f in failures if f[1] > 0.0]
         drift = [f for f in failures if f[1] == 0.0]
+        unbaselined = [f for f in failures if f[1] == UNBASELINED]
         parts = []
         if slow:
             parts.append(f"{len(slow)} slower than {args.tolerance}x")
         if drift:
             parts.append(f"{len(drift)} ingested different content")
+        if unbaselined:
+            parts.append(f"{len(unbaselined)} with no recorded baseline")
         sys.stderr.write("ingest-baseline: " + "; ".join(parts) + "\n")
         return 1
     print("ingest-baseline: OK")
@@ -228,6 +262,9 @@ def main() -> int:
                      help=f"allowed slowdown ratio (default {DEFAULT_TOLERANCE})")
     chk.add_argument("--max-seconds", type=float, default=None,
                      help="also fail any source slower than this many seconds")
+    chk.add_argument("--allow-unbaselined", action="store_true",
+                     help="pass a source that has no recorded baseline (first run of a "
+                          "new corpus); without it, an unbaselined source FAILS")
     chk.set_defaults(fn=cmd_check)
 
     show = sub.add_parser("show", help="print the recorded baseline")
