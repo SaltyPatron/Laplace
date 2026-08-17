@@ -105,7 +105,7 @@ Chess:
 - `trajectory`
 - `variant`
 
-## Native extension sources — 27 (`extension/laplace_substrate/src/`)
+## Native extension sources — 28 (`extension/laplace_substrate/src/`)
 
 - `astar_path.c`
 - `consensus_fold_step.c`
@@ -132,6 +132,7 @@ Chess:
 - `recall_route.c`
 - `steer_candidates.c`
 - `steered_walk.c`
+- `trajectory_continuations.c`
 - `trajectory_generate.c`
 - `variant_synth.c`
 
