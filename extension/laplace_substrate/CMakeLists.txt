@@ -34,6 +34,12 @@ set(_ext_version_inputs
     "${CMAKE_CURRENT_SOURCE_DIR}/sql/manifest.upgrade")
 list(REMOVE_DUPLICATES _ext_version_inputs)
 list(SORT _ext_version_inputs)
+# The extension version is content-derived at configure time.  Every hashed SQL
+# input must therefore invalidate CMake's configure step; otherwise an incremental
+# build preprocesses changed SQL under the previous version and ALTER EXTENSION
+# correctly concludes there is nothing to install.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    ${_ext_version_inputs})
 set(_ext_sql_hashes "")
 foreach(_f ${_ext_version_inputs})
     file(SHA256 ${_f} _fh)
