@@ -27,7 +27,7 @@ CREATE OR REPLACE FUNCTION converse.compile_prompt(
         effective_language bytea,
         widened boolean)
     LANGUAGE sql STABLE PARALLEL SAFE
-AS $$
+BEGIN ATOMIC
 WITH words AS MATERIALIZED (
     SELECT p.ord, p.id
     FROM converse.prompt_words(p_prompt) p
@@ -47,7 +47,7 @@ route_evidence AS MATERIALIZED (
     FROM variants v
     JOIN laplace.consensus c
       ON c.subject_id = v.variant_id
-     AND c.type_id = laplace.relation_type_id('EVOKES_FRAME')
+     AND c.type_id = ANY (consensus.relation_family_ids('EVOKES_FRAME'))
     JOIN converse.operation_frame_routes() r ON r.frame_id = c.object_id
     GROUP BY v.word_id, r.operation_id, r.shape, r.role
 ),
@@ -104,5 +104,5 @@ SELECT c.operation_id,
 FROM chosen c
 CROSS JOIN plang p
 WHERE EXISTS (SELECT 1 FROM lexicalized l
-              WHERE NOT EXISTS (SELECT 1 FROM roles r WHERE r.word_id = l.word_id))
-$$;
+              WHERE NOT EXISTS (SELECT 1 FROM roles r WHERE r.word_id = l.word_id));
+END;

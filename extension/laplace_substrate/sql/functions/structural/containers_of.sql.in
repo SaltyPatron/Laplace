@@ -40,12 +40,12 @@ DROP FUNCTION IF EXISTS structural.containers_containing_all(bytea[]);
 CREATE OR REPLACE FUNCTION structural.containers_containing_all(p_members bytea[])
     RETURNS TABLE(entity_id bytea)
     LANGUAGE sql STABLE PARALLEL SAFE
-AS $$
+BEGIN ATOMIC
     SELECT DISTINCT ON (p.entity_id) p.entity_id
     FROM laplace.physicalities p
     WHERE cardinality(p_members) > 0
       AND p.type = 1
       AND p.trajectory IS NOT NULL
       AND public.laplace_trajectory_constituent_ids(p.trajectory) @> p_members
-    ORDER BY p.entity_id, p.id
-$$;
+    ORDER BY p.entity_id, p.id;
+END;

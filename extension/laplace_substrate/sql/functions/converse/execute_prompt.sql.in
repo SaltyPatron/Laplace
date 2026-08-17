@@ -25,7 +25,7 @@ CREATE OR REPLACE FUNCTION converse.execute_prompt(
         effective_language bytea,
         widened boolean)
     LANGUAGE sql STABLE
-AS $$
+BEGIN ATOMIC
 WITH program AS MATERIALIZED (
     SELECT * FROM converse.compile_prompt(p_prompt, p_primary_language)
     WHERE shape = 'what_is'
@@ -94,5 +94,5 @@ SELECT a.rank,
 FROM answers a
 CROSS JOIN needle n
 WHERE a.reply IS NOT NULL AND a.reply <> ''
-ORDER BY a.rank
-$$;
+ORDER BY a.rank;
+END;

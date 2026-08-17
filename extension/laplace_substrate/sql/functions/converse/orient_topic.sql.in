@@ -18,7 +18,8 @@ CREATE OR REPLACE FUNCTION converse.orient_topic(
         prompt_language bytea,
         effective_language bytea,
         widened boolean)
-    LANGUAGE sql STABLE AS $$
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
     WITH candidates AS MATERIALIZED (
         SELECT y.synset_id,
                converse.word_language(y.synset_id) AS lang,
@@ -100,5 +101,5 @@ CREATE OR REPLACE FUNCTION converse.orient_topic(
            s.observed_language,
            s.effective_language,
            s.mode <> 0
-    FROM selected s
-$$;
+    FROM selected s;
+END;
