@@ -77,6 +77,8 @@ BEGIN ATOMIC
                   THEN consensus.edge_rank(e.type_id, consensus.eff_mu(e.rating, e.rd))
                   ELSE (consensus.eff_mu(e.rating, e.rd))::float8 / 1e9
              END DESC,
-             e.neighbour_id
+             e.neighbour_id,
+             e.type_id,
+             CASE e.direction WHEN 'out' THEN 0 ELSE 1 END
     LIMIT p_limit;
 END;

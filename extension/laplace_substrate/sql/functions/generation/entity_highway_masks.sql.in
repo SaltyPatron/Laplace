@@ -9,6 +9,6 @@ CREATE OR REPLACE FUNCTION generation.entity_highway_masks(p_vocab bytea[])
 BEGIN ATOMIC
     SELECT e.id, e.highway_mask
     FROM laplace.entities e
-    JOIN unnest(p_vocab) AS u(id) ON u.id = e.id
-    WHERE e.highway_mask IS NOT NULL;
+    WHERE e.id = ANY (p_vocab)
+      AND e.highway_mask IS NOT NULL;
 END;

@@ -2,7 +2,7 @@
  * explore_web.c — SPI beam crawl for the explore consensus-web viz.
  *
  * Unlike generation.foundry_crawl(vocab / tier-2 emit only), this:
- *   - walks undirected consensus (out ∪ in) via explore_web_neighbors
+ *   - walks undirected consensus (out ∪ in) via one batched frontier probe/hop
  *   - admits every tier
  *   - beams ≤ fanout NEW nodes per hop (pool-safe: one SPI connection)
  *   - emits typed edges for the retained subgraph
@@ -15,11 +15,14 @@
 #include "catalog/pg_type.h"
 #include "executor/spi.h"
 #include "funcapi.h"
+#include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/hsearch.h"
 
 #include "laplace/core/hash128.h"
 #include "laplace/core/glicko2.h"
+#include "laplace/core/highway_table.h"
+#include "laplace/core/relation_law.h"
 #include "spi_common.h"
 #include "spi_nested.h"
 
@@ -54,13 +57,27 @@ typedef struct {
 static int
 cand_cmp_desc(const void *a, const void *b)
 {
-	double sa = ((const EdgeCand *) a)->strength;
-	double sb = ((const EdgeCand *) b)->strength;
+	const EdgeCand *ea = (const EdgeCand *) a;
+	const EdgeCand *eb = (const EdgeCand *) b;
+	double sa = ea->strength;
+	double sb = eb->strength;
+	int cmp;
 
 	if (sa < sb)
 		return 1;
 	if (sa > sb)
 		return -1;
+	cmp = memcmp(&ea->nbr, &eb->nbr, sizeof(hash128_t));
+	if (cmp != 0)
+		return cmp;
+	cmp = memcmp(&ea->type_id, &eb->type_id, sizeof(hash128_t));
+	if (cmp != 0)
+		return cmp;
+	cmp = memcmp(&ea->from, &eb->from, sizeof(hash128_t));
+	if (cmp != 0)
+		return cmp;
+	if (ea->outbound != eb->outbound)
+		return ea->outbound ? -1 : 1;
 	return 0;
 }
 
@@ -80,6 +97,81 @@ emit_edge(ReturnSetInfo *rsinfo, const EdgeOut *e)
 	tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
 }
 
+/* Resolve the union of the frontier's deposited relation bits entirely in
+ * memory after one indexed entity-array lookup.  A missing mask means the
+ * projection cannot prove a complete relation set, so the caller uses the
+ * unmasked correctness path. */
+static ArrayType *
+frontier_relation_types(SPIPlanPtr mask_plan, ArrayType *frontier_array,
+						int expected_rows, bool *complete)
+{
+	Datum		args[1];
+	laplace_mask256_t union_mask;
+	Datum		type_datums[256];
+	int			n_types = 0;
+	int			rc;
+
+	*complete = false;
+	memset(&union_mask, 0, sizeof(union_mask));
+	args[0] = PointerGetDatum(frontier_array);
+	rc = SPI_execute_plan(mask_plan, args, NULL, true, 0);
+	if (rc != SPI_OK_SELECT)
+		elog(ERROR, "explore_web: frontier mask probe failed: %s",
+			 SPI_result_code_string(rc));
+
+	if (SPI_processed != (uint64) expected_rows)
+	{
+		SPI_freetuptable(SPI_tuptable);
+		return NULL;
+	}
+
+	for (uint64 r = 0; r < SPI_processed; r++)
+	{
+		HeapTuple	tup = SPI_tuptable->vals[r];
+		TupleDesc	td = SPI_tuptable->tupdesc;
+		bool		isnull;
+		Datum		d = SPI_getbinval(tup, td, 1, &isnull);
+		bytea	   *mask;
+		laplace_mask256_t one;
+
+		if (isnull)
+		{
+			SPI_freetuptable(SPI_tuptable);
+			return NULL;
+		}
+		mask = DatumGetByteaPP(d);
+		if (VARSIZE_ANY_EXHDR(mask) != sizeof(one))
+			elog(ERROR, "explore_web: entity highway mask is not 32 bytes");
+		memcpy(&one, VARDATA_ANY(mask), sizeof(one));
+		union_mask = highway_table_mask_or(union_mask, one);
+	}
+	SPI_freetuptable(SPI_tuptable);
+
+	if (!highway_table_is_loaded())
+		return NULL;
+	for (int bit = 0; bit < 256; bit++)
+	{
+		const char *canonical = NULL;
+		float		rank;
+		uint8_t		band;
+		hash128_t	type_id;
+
+		if (!highway_table_mask_test(&union_mask, (uint8_t) bit))
+			continue;
+		if (highway_table_relation_by_bit((uint8_t) bit, &canonical,
+									   &rank, &band) != 0)
+			continue;
+		if (laplace_relation_type_id(canonical, &type_id) != 0)
+			continue;
+		type_datums[n_types++] = hash128_to_datum(&type_id);
+	}
+	if (n_types == 0)
+		return NULL;
+
+	*complete = true;
+	return construct_array(type_datums, n_types, BYTEAOID, -1, false, 'i');
+}
+
 Datum
 pg_laplace_explore_web(PG_FUNCTION_ARGS)
 {
@@ -95,8 +187,11 @@ pg_laplace_explore_web(PG_FUNCTION_ARGS)
 	hash128_t  *next_frontier;
 	int			n_front = 0;
 	int			n_seen = 0;
-	SPIPlanPtr	plan;
+	SPIPlanPtr	full_plan;
+	SPIPlanPtr	masked_plan;
+	SPIPlanPtr	mask_plan;
 	EdgeCand   *cands;
+	Datum	   *frontier_datums;
 	int			cand_cap;
 	bool		spi_top = false;
 
@@ -127,14 +222,34 @@ pg_laplace_explore_web(PG_FUNCTION_ARGS)
 		elog(ERROR, "explore_web: SPI_connect failed");
 
 	{
-		Oid			pargs[2] = {BYTEAOID, INT4OID};
+		Oid			pargs[2] = {BYTEAARRAYOID, INT4OID};
 
-		plan = SPI_prepare(
-			"SELECT nbr, type_id, rating, rd, witness_count, outbound "
+		full_plan = SPI_prepare(
+			"SELECT frontier_id, nbr, type_id, rating, rd, witness_count, outbound "
 			"FROM consensus.explore_web_neighbors($1, $2)",
 			2, pargs);
-		if (plan == NULL)
-			elog(ERROR, "explore_web: SPI_prepare failed");
+		if (full_plan == NULL)
+			elog(ERROR, "explore_web: full neighbor SPI_prepare failed");
+	}
+	{
+		Oid			pargs[3] = {BYTEAARRAYOID, BYTEAARRAYOID, INT4OID};
+
+		masked_plan = SPI_prepare(
+			"SELECT frontier_id, nbr, type_id, rating, rd, witness_count, outbound "
+			"FROM consensus.explore_web_neighbors($1, $2, $3)",
+			3, pargs);
+		if (masked_plan == NULL)
+			elog(ERROR, "explore_web: masked neighbor SPI_prepare failed");
+	}
+	{
+		Oid			pargs[1] = {BYTEAARRAYOID};
+
+		mask_plan = SPI_prepare(
+			"SELECT e.highway_mask FROM laplace.entities e "
+			"WHERE e.id = ANY($1) AND e.highway_mask IS NOT NULL",
+			1, pargs);
+		if (mask_plan == NULL)
+			elog(ERROR, "explore_web: frontier mask SPI_prepare failed");
 	}
 
 	memset(&ctl, 0, sizeof(ctl));
@@ -144,6 +259,7 @@ pg_laplace_explore_web(PG_FUNCTION_ARGS)
 
 	frontier = (hash128_t *) palloc(sizeof(hash128_t) * max_nodes);
 	next_frontier = (hash128_t *) palloc(sizeof(hash128_t) * max_nodes);
+	frontier_datums = (Datum *) palloc(sizeof(Datum) * max_nodes);
 	cand_cap = max_nodes * fanout;
 	if (cand_cap > 4096)
 		cand_cap = 4096;
@@ -170,76 +286,94 @@ pg_laplace_explore_web(PG_FUNCTION_ARGS)
 		if (probe_limit > 32)
 			probe_limit = 32;
 
+		Datum		args[3];
+		ArrayType  *frontier_array;
+		ArrayType  *type_array;
+		bool		masked;
+		int			rc;
+
 		for (int fi = 0; fi < n_front; fi++)
+			frontier_datums[fi] = hash128_to_datum(&frontier[fi]);
+		frontier_array = construct_array(frontier_datums, n_front,
+									 BYTEAOID, -1, false, 'i');
+		type_array = frontier_relation_types(mask_plan, frontier_array,
+									 n_front, &masked);
+		args[0] = PointerGetDatum(frontier_array);
+		if (masked)
 		{
-			hash128_t	cur = frontier[fi];
-			Datum		args[2];
-			int			rc;
-
-			args[0] = hash128_to_datum(&cur);
-			args[1] = Int32GetDatum(probe_limit);
-			rc = SPI_execute_plan(plan, args, NULL, true, 0);
-			if (rc != SPI_OK_SELECT)
-				elog(ERROR, "explore_web: neighbor probe failed: %s",
-					 SPI_result_code_string(rc));
-
-			for (uint64 r = 0; r < SPI_processed; r++)
-			{
-				HeapTuple	tup = SPI_tuptable->vals[r];
-				TupleDesc	td = SPI_tuptable->tupdesc;
-				bool		isnull;
-				hash128_t	nbr;
-				hash128_t	type_id;
-				int64		rating;
-				int64		rd;
-				int64		wit;
-				bool		outbound;
-				SeenNode   *oe;
-				bool		ofound;
-				EdgeOut		edge;
-
-				nbr = datum_to_hash128(SPI_getbinval(tup, td, 1, &isnull));
-				if (isnull)
-					continue;
-				type_id = datum_to_hash128(SPI_getbinval(tup, td, 2, &isnull));
-				if (isnull)
-					continue;
-				rating = DatumGetInt64(SPI_getbinval(tup, td, 3, &isnull));
-				rd = DatumGetInt64(SPI_getbinval(tup, td, 4, &isnull));
-				wit = DatumGetInt64(SPI_getbinval(tup, td, 5, &isnull));
-				outbound = DatumGetBool(SPI_getbinval(tup, td, 6, &isnull));
-
-				edge.source = outbound ? cur : nbr;
-				edge.type_id = type_id;
-				edge.object = outbound ? nbr : cur;
-				edge.hop = (int16) hop;
-				edge.rating = rating;
-				edge.rd = rd;
-				edge.witnesses = wit;
-
-				oe = (SeenNode *) hash_search(seen, &nbr, HASH_FIND, &ofound);
-				if (ofound)
-				{
-					/* Weave: both endpoints already retained. */
-					emit_edge(rsinfo, &edge);
-					continue;
-				}
-
-				if (n_cands < cand_cap)
-				{
-					cands[n_cands].nbr = nbr;
-					cands[n_cands].type_id = type_id;
-					cands[n_cands].from = cur;
-					cands[n_cands].rating = rating;
-					cands[n_cands].rd = rd;
-					cands[n_cands].witnesses = wit;
-					cands[n_cands].outbound = outbound;
-					cands[n_cands].strength = laplace_edge_strength(rating, rd);
-					n_cands++;
-				}
-			}
-			SPI_freetuptable(SPI_tuptable);
+			args[1] = PointerGetDatum(type_array);
+			args[2] = Int32GetDatum(probe_limit);
+			rc = SPI_execute_plan(masked_plan, args, NULL, true, 0);
 		}
+		else
+		{
+			args[1] = Int32GetDatum(probe_limit);
+			rc = SPI_execute_plan(full_plan, args, NULL, true, 0);
+		}
+		if (rc != SPI_OK_SELECT)
+			elog(ERROR, "explore_web: frontier probe failed: %s",
+				 SPI_result_code_string(rc));
+
+		for (uint64 r = 0; r < SPI_processed; r++)
+		{
+			HeapTuple	tup = SPI_tuptable->vals[r];
+			TupleDesc	td = SPI_tuptable->tupdesc;
+			bool		isnull;
+			hash128_t	cur;
+			hash128_t	nbr;
+			hash128_t	type_id;
+			int64		rating;
+			int64		rd;
+			int64		wit;
+			bool		outbound;
+			SeenNode   *oe;
+			bool		ofound;
+			EdgeOut		edge;
+
+			cur = datum_to_hash128(SPI_getbinval(tup, td, 1, &isnull));
+			if (isnull)
+				continue;
+			nbr = datum_to_hash128(SPI_getbinval(tup, td, 2, &isnull));
+			if (isnull)
+				continue;
+			type_id = datum_to_hash128(SPI_getbinval(tup, td, 3, &isnull));
+			if (isnull)
+				continue;
+			rating = DatumGetInt64(SPI_getbinval(tup, td, 4, &isnull));
+			rd = DatumGetInt64(SPI_getbinval(tup, td, 5, &isnull));
+			wit = DatumGetInt64(SPI_getbinval(tup, td, 6, &isnull));
+			outbound = DatumGetBool(SPI_getbinval(tup, td, 7, &isnull));
+
+			edge.source = outbound ? cur : nbr;
+			edge.type_id = type_id;
+			edge.object = outbound ? nbr : cur;
+			edge.hop = (int16) hop;
+			edge.rating = rating;
+			edge.rd = rd;
+			edge.witnesses = wit;
+
+			oe = (SeenNode *) hash_search(seen, &nbr, HASH_FIND, &ofound);
+			if (ofound)
+			{
+				/* Weave: both endpoints already retained. */
+				emit_edge(rsinfo, &edge);
+				continue;
+			}
+
+			if (n_cands < cand_cap)
+			{
+				cands[n_cands].nbr = nbr;
+				cands[n_cands].type_id = type_id;
+				cands[n_cands].from = cur;
+				cands[n_cands].rating = rating;
+				cands[n_cands].rd = rd;
+				cands[n_cands].witnesses = wit;
+				cands[n_cands].outbound = outbound;
+				cands[n_cands].strength = laplace_edge_strength(rating, rd);
+				n_cands++;
+			}
+		}
+		SPI_freetuptable(SPI_tuptable);
 
 		if (n_cands == 0)
 			break;
@@ -313,7 +447,9 @@ pg_laplace_explore_web(PG_FUNCTION_ARGS)
 		}
 	}
 
-	SPI_freeplan(plan);
+	SPI_freeplan(mask_plan);
+	SPI_freeplan(masked_plan);
+	SPI_freeplan(full_plan);
 	laplace_spi_finish(spi_top);
 	return (Datum) 0;
 }

@@ -1,7 +1,137 @@
--- Undirected consensus probe for the explore_web SPI beam. Thin wrapper over
--- consensus.edges_raw(); pins both directions, every type, eff_mu order and
--- refuted edges INCLUDED — the axes this lane has always used. outbound is the
--- direction the core already returns.
+-- Undirected consensus probe for the explore_web SPI beam.  The array overload
+-- is the executor primitive: one query per FRONTIER, with the per-root beam
+-- width applied after both directions are combined.  The scalar overload is a
+-- compatibility wrapper.  Keeping the frontier in one executor invocation is
+-- materially different from moving an RBAR loop into C and issuing one SPI
+-- query per node.
+--
+-- This lane deliberately includes refuted edges and every relation type.  It is
+-- a policy-neutral topology primitive; firmware decides which candidates are
+-- relevant.  `outbound` preserves the stored orientation.
+CREATE OR REPLACE FUNCTION consensus.explore_web_neighbors(
+    p_subjects bytea[],
+    p_limit    int)
+    RETURNS TABLE(
+        frontier_id bytea,
+        nbr bytea,
+        type_id bytea,
+        rating bigint,
+        rd bigint,
+        witness_count bigint,
+        outbound boolean)
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+    WITH frontier AS MATERIALIZED (
+        SELECT s.subject_id, s.frontier_ord
+        FROM unnest(p_subjects) WITH ORDINALITY AS s(subject_id, frontier_ord)
+    )
+    SELECT f.subject_id, e.nbr, e.type_id,
+           e.rating, e.rd, e.witness_count, e.outbound
+    FROM frontier f
+    CROSS JOIN LATERAL (
+        SELECT c.nbr, c.type_id, c.rating, c.rd, c.witness_count, c.outbound
+        FROM (
+            SELECT x.object_id AS nbr, x.type_id,
+                   x.rating, x.rd, x.witness_count, true AS outbound
+            FROM laplace.consensus x
+            WHERE x.subject_id = f.subject_id
+              AND x.object_id IS NOT NULL
+
+            UNION ALL
+
+            SELECT x.subject_id, x.type_id,
+                   x.rating, x.rd, x.witness_count, false
+            FROM laplace.consensus x
+            WHERE x.object_id = f.subject_id
+              -- The outbound arm already emits a self-edge.  Suppressing its
+              -- inbound mirror preserves edges_raw(..., 'both') semantics.
+              AND x.subject_id <> f.subject_id
+        ) c
+        ORDER BY (c.rating - 2 * c.rd) DESC, c.nbr, c.type_id,
+                 c.outbound DESC
+        LIMIT GREATEST(1, p_limit)
+    ) e
+    ORDER BY f.frontier_ord,
+             (e.rating - 2 * e.rd) DESC, e.nbr, e.type_id,
+             e.outbound DESC;
+END;
+
+-- Masked frontier probe.  p_types is the governed relation set obtained from
+-- the frontier entities' deposited highway masks.  The explicit equality on
+-- the partition key lets PostgreSQL prune named relation partitions.  Dynamic
+-- relation children share the default partition and inherit their family
+-- root's highway bit, so that partition is probed separately.  The generated
+-- named-partition set can lag the governed vocabulary, however, so a governed
+-- relation MAY still be in the default partition.  The default arms explicitly
+-- exclude p_types: the parent arms own requested types wherever they physically
+-- reside, and the default arms own every other relation in that partition.
+CREATE OR REPLACE FUNCTION consensus.explore_web_neighbors(
+    p_subjects bytea[],
+    p_types    bytea[],
+    p_limit    int)
+    RETURNS TABLE(
+        frontier_id bytea,
+        nbr bytea,
+        type_id bytea,
+        rating bigint,
+        rd bigint,
+        witness_count bigint,
+        outbound boolean)
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+    WITH frontier AS MATERIALIZED (
+        SELECT s.subject_id, s.frontier_ord
+        FROM unnest(p_subjects) WITH ORDINALITY AS s(subject_id, frontier_ord)
+    )
+    SELECT f.subject_id, e.nbr, e.type_id,
+           e.rating, e.rd, e.witness_count, e.outbound
+    FROM frontier f
+    CROSS JOIN LATERAL (
+        SELECT c.nbr, c.type_id, c.rating, c.rd, c.witness_count, c.outbound
+        FROM (
+            SELECT x.object_id AS nbr, x.type_id,
+                   x.rating, x.rd, x.witness_count, true AS outbound
+            FROM laplace.consensus x
+            WHERE x.subject_id = f.subject_id
+              AND x.object_id IS NOT NULL
+              AND x.type_id = ANY (p_types)
+
+            UNION ALL
+
+            SELECT x.subject_id, x.type_id,
+                   x.rating, x.rd, x.witness_count, false
+            FROM laplace.consensus x
+            WHERE x.object_id = f.subject_id
+              AND x.subject_id <> f.subject_id
+              AND x.type_id = ANY (p_types)
+
+            UNION ALL
+
+            SELECT x.object_id, x.type_id,
+                   x.rating, x.rd, x.witness_count, true
+            FROM laplace.consensus_rdefault x
+            WHERE x.subject_id = f.subject_id
+              AND x.object_id IS NOT NULL
+              AND (p_types IS NULL OR x.type_id <> ALL (p_types))
+
+            UNION ALL
+
+            SELECT x.subject_id, x.type_id,
+                   x.rating, x.rd, x.witness_count, false
+            FROM laplace.consensus_rdefault x
+            WHERE x.object_id = f.subject_id
+              AND x.subject_id <> f.subject_id
+              AND (p_types IS NULL OR x.type_id <> ALL (p_types))
+        ) c
+        ORDER BY (c.rating - 2 * c.rd) DESC, c.nbr, c.type_id,
+                 c.outbound DESC
+        LIMIT GREATEST(1, p_limit)
+    ) e
+    ORDER BY f.frontier_ord,
+             (e.rating - 2 * e.rd) DESC, e.nbr, e.type_id,
+             e.outbound DESC;
+END;
+
 DROP FUNCTION IF EXISTS laplace.explore_web_neighbors(bytea, int);
 -- BEGIN ATOMIC: GH #764.
 CREATE OR REPLACE FUNCTION consensus.explore_web_neighbors(
@@ -18,5 +148,6 @@ CREATE OR REPLACE FUNCTION consensus.explore_web_neighbors(
 BEGIN ATOMIC
     SELECT e.neighbour_id, e.type_id, e.rating, e.rd, e.witness_count,
            (e.direction = 'out')
-    FROM consensus.edges_raw(p_subject, 'both', NULL, GREATEST(1, p_limit), true, 'eff_mu') e;
+    FROM consensus.edges_raw(p_subject, 'both', NULL,
+                             GREATEST(1, p_limit), true, 'eff_mu') e;
 END;
