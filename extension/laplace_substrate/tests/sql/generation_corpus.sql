@@ -190,6 +190,36 @@ BEGIN
         RAISE EXCEPTION 'FAIL: repeated matches or new trajectory missing (capital→of should be weight 3)';
     END IF;
 
+    -- Two physical observations may attest the same entity. geometry_successors
+    -- must keep their trajectories separate rather than interleaving equal
+    -- ordinals under entity_id. Together with sent and sent3 this makes three
+    -- containers whose first content successor/predecessor is capital↔of.
+    INSERT INTO laplace.physicalities (id, entity_id, type, coord, hilbert_index,
+                               trajectory, n_constituents, observed_at)
+    VALUES (public.laplace_hash128_blake3('test/corpus/phys-sentence3-observation2'), sent3, 1,
+            public.ST_SetSRID(public.ST_MakePoint(2,2,2,2), 0),
+            decode('00000000000000000000000000000000','hex'),
+            public.ST_MakeLine(ARRAY[
+                public.laplace_mantissa_pack(w_capital, 1, 1, t2flag),
+                public.laplace_mantissa_pack(sp, 2, 1, t2flag),
+                public.laplace_mantissa_pack(w_of, 3, 1, t2flag)]),
+            3, now());
+    IF NOT EXISTS (
+        SELECT 1 FROM structural.geometry_successors(w_capital, 8, 8, false) g
+        WHERE g.successor_id = w_of AND g.seen = 3) THEN
+        RAISE EXCEPTION 'FAIL: geometry successor did not count three physical observations separately';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM structural.geometry_successors(w_of, 8, 8, true) g
+        WHERE g.successor_id = w_capital AND g.seen = 3) THEN
+        RAISE EXCEPTION 'FAIL: geometry predecessor did not count three physical observations separately';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM structural.geometry_successors(w_capital, 8, 8, false) g
+        WHERE g.successor_id = sp) THEN
+        RAISE EXCEPTION 'FAIL: geometry successor leaked a separator';
+    END IF;
+
     -- generation.corpus_whitespace_vocab_indices shipped with a PL/pgSQL syntax error that
     -- nothing caught, and the fix landed with no test (GH #1061). One invocation closes the
     -- gap: a plpgsql body is only parsed at first EXECUTE, so a call is the only thing that
