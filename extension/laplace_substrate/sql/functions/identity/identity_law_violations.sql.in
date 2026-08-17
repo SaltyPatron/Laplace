@@ -1,9 +1,7 @@
 -- Violations of the identity law, as the law actually states it.
 --
--- CLAUDE.md, the first invariant: "Identical content = identical id, at every
--- tier, from every source." And: "Tiers are a FLOOR, not identity: same content =
--- same id at every tier; tier is never mixed into the hash ('Fine' as a one-word
--- reply IS the sentence IS the word — one id)."
+-- Identical content has one id across tiers and sources. Tier is a floor rather than
+-- an input to the content hash (docs/specs/05_Substrate_Invariants.txt).
 --
 -- This function checked ONE thing: that tier fell in 0..255. That is a column
 -- range check, not the identity law. It returned zero rows on a substrate holding

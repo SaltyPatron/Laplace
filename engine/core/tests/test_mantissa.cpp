@@ -268,7 +268,53 @@ TEST(LaplaceCoreMantissa, TestimonyWalkRoundTrip) {
     mantissa_pack(cv, &content);
     EXPECT_EQ(-1, laplace_testimony_unpack_vertex(cv, nullptr, nullptr, nullptr, nullptr));
 
-    
+
     const int64_t too_big[1] = { 1LL << 40 };
     EXPECT_EQ(-2, laplace_testimony_pack_walk(ids, too_big, nullptr, 1, walk));
+}
+
+/* THE WITNESS CEILING OF THE TESTIMONY VERTEX CLASS.
+ *
+ * The score field is 36 bits of zigzag over a 1e9 fixed-point value, so the
+ * representable magnitude is bounded and the bound is what decides whether this
+ * class can carry a SUM rather than a single observation. GH #451 proposes
+ * reusing this vertex "byte for byte" with one vertex per source holding a
+ * summed score; that reuse is valid only below the boundary asserted here.
+ * Above it the packer returns -2 and the fact silently loses witnesses, so the
+ * boundary is a design constraint on #451, not an implementation detail. */
+TEST(LaplaceCoreMantissa, TestimonyScoreCeilingBoundsSummedWitnesses) {
+    const hash128_t id[1] = { {0xAAULL, 0xBBULL} };
+    double v[4];
+
+    /* zigzag(n) = 2n for n >= 0, so the largest packable positive is mask/2. */
+    const int64_t max_pos = (int64_t)(LAPLACE_VFLAG_SCORE_MASK / 2);
+    /* zigzag(n) = -2n-1 for n < 0, giving one more step on the negative side. */
+    const int64_t min_neg = -(int64_t)(LAPLACE_VFLAG_SCORE_MASK / 2) - 1;
+
+    for (int64_t s : { max_pos, min_neg }) {
+        const int64_t one[1] = { s };
+        ASSERT_EQ(0, laplace_testimony_pack_walk(id, one, nullptr, 1, v))
+            << "boundary score " << s << " must pack";
+        int64_t got = 0;
+        ASSERT_EQ(0, laplace_testimony_unpack_vertex(v, nullptr, &got, nullptr, nullptr));
+        EXPECT_EQ(got, s);
+    }
+
+    const int64_t over_pos[1] = { max_pos + 1 };
+    const int64_t over_neg[1] = { min_neg - 1 };
+    EXPECT_EQ(-2, laplace_testimony_pack_walk(id, over_pos, nullptr, 1, v));
+    EXPECT_EQ(-2, laplace_testimony_pack_walk(id, over_neg, nullptr, 1, v));
+
+    /* Restated as the quantity #451 actually needs: how many unit-magnitude
+     * witnesses may be summed into one vertex. 1.0 == 1e9 in this fixed point. */
+    const int64_t kUnit = 1000000000LL;
+    const int64_t witnesses_at_unit_score = max_pos / kUnit;
+    EXPECT_EQ(witnesses_at_unit_score, 34)
+        << "a summed testimony vertex holds " << witnesses_at_unit_score
+        << " unit-score witnesses; #451 must cap, rescale, or spill past that";
+
+    const int64_t at_cap[1]   = { witnesses_at_unit_score * kUnit };
+    const int64_t over_cap[1] = { (witnesses_at_unit_score + 1) * kUnit };
+    EXPECT_EQ(0,  laplace_testimony_pack_walk(id, at_cap,   nullptr, 1, v));
+    EXPECT_EQ(-2, laplace_testimony_pack_walk(id, over_cap, nullptr, 1, v));
 }

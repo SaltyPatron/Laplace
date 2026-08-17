@@ -13,7 +13,15 @@ public static class ChessReviewIngest
     public static int IngestPath(SubstrateChangeBuilder b, ChessModality m, string path, int depth = 4)
     {
         int n = 0;
-        foreach (var file in Directory.Exists(path) ? Directory.EnumerateFiles(path, "*.pgn", SearchOption.AllDirectories) : [path])
+        // Sorted for the reason IngestInput.ResolveFiles documents: EnumerateFiles returns
+        // filesystem order, which makes the order of a multi-file source an input the
+        // filesystem chooses. Batch boundaries move with it and the working-set dedup only
+        // absorbs a repeat WITHIN a batch.
+        IEnumerable<string> files = Directory.Exists(path)
+            ? Directory.EnumerateFiles(path, "*.pgn", SearchOption.AllDirectories)
+                       .OrderBy(static p => p, StringComparer.Ordinal)
+            : [path];
+        foreach (var file in files)
         {
             foreach (var gameText in PgnGames.StreamGames(file))
             {

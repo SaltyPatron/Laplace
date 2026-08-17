@@ -92,7 +92,11 @@ public static class OpeningClassifier
     {
         if (File.Exists(path)) { yield return path; yield break; }
         if (!Directory.Exists(path)) yield break;
-        foreach (var f in Directory.EnumerateFiles(path, "*.tsv", SearchOption.AllDirectories))
+        // Sorted: Index() is TryAdd (first-wins) over a STABLE OrderByDescending, so when two
+        // files carry the same move sequence the winner is decided by load order — i.e. by
+        // filesystem order. Same invariant IngestInput.ResolveFiles holds.
+        foreach (var f in Directory.EnumerateFiles(path, "*.tsv", SearchOption.AllDirectories)
+                                   .OrderBy(static p => p, StringComparer.Ordinal))
             yield return f;
     }
 }

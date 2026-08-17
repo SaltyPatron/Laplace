@@ -64,7 +64,7 @@ BEGIN
     ), numbered AS MATERIALIZED (
         SELECT n.*, row_number() OVER (ORDER BY n.geo, n.entity_id) AS rn FROM nearest n
     ), ids AS MATERIALIZED (
-        SELECT array_agg(entity_id ORDER BY rn) AS a FROM numbered
+        SELECT array_agg(numbered.entity_id ORDER BY numbered.rn) AS a FROM numbered
     ), display AS MATERIALIZED (
         SELECT realize.render_text_batch(a, 8) AS rendered,
                realize.label_batch(a) AS labels
@@ -107,7 +107,7 @@ BEGIN
         ), numbered AS MATERIALIZED (
             SELECT s.*, row_number() OVER (ORDER BY s.fr, s.entity_id) AS rn FROM survivors s
         ), ids AS MATERIALIZED (
-            SELECT array_agg(entity_id ORDER BY rn) AS a FROM numbered
+            SELECT array_agg(numbered.entity_id ORDER BY numbered.rn) AS a FROM numbered
         ), display AS MATERIALIZED (
             SELECT realize.render_text_batch(a, 8) AS rendered,
                    realize.label_batch(a) AS labels

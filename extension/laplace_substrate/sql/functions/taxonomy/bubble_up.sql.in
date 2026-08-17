@@ -108,24 +108,33 @@ term_lang AS MATERIALIZED (
 -- ONE probe for every candidate, not one call per candidate. converse.attested_language
 -- costs 71.6ms warm and the previous form called it TWICE per row, which put ~1.5s on
 -- the hottest function in the surface -- senses, top_synset, taxonomy.tree and infer's
--- bias expansion all land here. Same definition (argmax over SUM(sum_score_fp1e9) per
--- context, ties on context_id, Language-typed contexts only), computed set-based with
--- an = ANY(array) probe because attestations cannot prune on subject_id.
-cand_lang AS MATERIALIZED (
-    SELECT DISTINCT ON (a.subject_id) a.subject_id AS id, a.context_id AS lang
+-- bias expansion all land here. Set-based with an = ANY(array) probe because
+-- attestations cannot prune on subject_id.
+--
+-- MEMBERSHIP, NOT ARGMAX -- bubble_up_batch.sql.in owns that argument and the
+-- measurement; this body must not drift from it. In short: a synset is interlingual, so
+-- collapsing it to its highest-scoring language and testing equality drops it for every
+-- other language that attests it, and hardest for the best-translated concepts. Here the
+-- term language is a single row, so the probe binds it directly and the EXISTS only has
+-- to match the id.
+cand_lang_hit AS MATERIALIZED (
+    SELECT DISTINCT a.subject_id AS id
+    FROM laplace.attestations a
+    WHERE a.subject_id = ANY (ARRAY(SELECT DISTINCT r.synset_id FROM resolved r))
+      AND a.context_id = (SELECT id FROM term_lang)
+),
+cand_lang_any AS MATERIALIZED (
+    SELECT DISTINCT a.subject_id AS id
     FROM laplace.attestations a
     JOIN laplace.entities e ON e.id = a.context_id
                            AND e.type_id = realize.canonical_id('Language')
     WHERE a.subject_id = ANY (ARRAY(SELECT DISTINCT r.synset_id FROM resolved r))
-    GROUP BY a.subject_id, a.context_id
-    ORDER BY a.subject_id, SUM(a.sum_score_fp1e9) DESC, a.context_id
 ),
 scoped AS (
     SELECT r.* FROM resolved r
-    LEFT JOIN cand_lang cl ON cl.id = r.synset_id
     WHERE (SELECT id FROM term_lang) IS NULL
-       OR cl.lang IS NULL
-       OR cl.lang = (SELECT id FROM term_lang)
+       OR NOT EXISTS (SELECT 1 FROM cand_lang_any ca WHERE ca.id = r.synset_id)
+       OR EXISTS (SELECT 1 FROM cand_lang_hit ch WHERE ch.id = r.synset_id)
 ),
 domain AS (
     SELECT DISTINCT d AS id

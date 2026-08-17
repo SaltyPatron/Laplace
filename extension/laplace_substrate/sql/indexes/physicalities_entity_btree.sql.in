@@ -1,1 +1,7 @@
-CREATE INDEX IF NOT EXISTS physicalities_entity_btree ON physicalities USING btree (entity_id);
+-- entity_id remains the leading key for every entity-to-physicality lookup. Appending id
+-- also serves the recursive render probe's `entity_id = ? ORDER BY physicality_id LIMIT 1`
+-- shape directly on every HASH(id) leaf; otherwise the planner can walk each leaf primary
+-- key in id order while looking for a matching entity. This is fresh-install topology: an
+-- existing single-column index is replaced by drop/reseed, not by upgrade-time row movement.
+CREATE INDEX physicalities_entity_btree
+    ON laplace.physicalities USING btree (entity_id, id);

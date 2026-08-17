@@ -13,9 +13,7 @@ attestation per member. A fan of edges gives the set no id, so no witness can co
 refute the set as a whole, and `attestations.context_id` — a single `bytea` — cannot hold a
 set at all, which forces an emitter to drop all but one member.
 
-Measurements motivating this contract are recorded in the pull request that introduced it,
-not here (`docs/DOCUMENTATION_GOVERNANCE.md`: normative files carry no row counts, timings,
-or dated observations).
+Measurements motivating this design are recorded in the pull request that introduced it.
 
 ## 1. Three shapes, one emitter
 
@@ -24,7 +22,7 @@ settled law here and the third has never been implemented.
 
 | shape | example | correct storage | status |
 |---|---|---|---|
-| **ordered sequence** | word order in a sentence | trajectory geometry, read with `laplace_trajectory_constituents` | settled — CLAUDE.md §4, six inference sites |
+| **ordered sequence** | word order in a sentence | trajectory geometry, read with `laplace_trajectory_constituents` | used by six inference sites |
 | **single-valued attribute** | `HAS_BLOCK`, `HAS_AGE`, `HAS_SCRIPT`, `HAS_EAST_ASIAN_WIDTH`, `HAS_LINE_BREAK` | one typed edge | correct as written |
 | **set-valued attribute** | a form's morphological analysis `{nominative, singular, masculine}` | **a composition entity, one edge** | **unimplemented — 186M rows of the wrong shape** |
 
@@ -140,8 +138,8 @@ Two functions, both on shapes that already have index support:
 `consensus.salient_facts` (`salient_facts.sql.in:13-38`) currently carries a hand-written
 fence for "dynamic `HAS_FEATURE` children"; with one edge per form that fence is deletable.
 
-Reverse reads still pay the 216-leaf Append (CLAUDE.md §4 — `object_id` prunes at neither
-level), so `subjects_with` resolves the bundle first and passes `type_id`.
+Reverse reads still pay the 216-leaf Append because `object_id` prunes at neither level,
+so `subjects_with` resolves the bundle first and passes `type_id`.
 
 ---
 

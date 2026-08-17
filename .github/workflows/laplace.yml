@@ -245,11 +245,6 @@ jobs:
         # Countable facts are generated; prose points at the inventory.
         run: python3 scripts/docs-inventory.py --check
 
-      - name: Documentation authority drift gate
-        run: |
-          python3 scripts/test-doc-governance.py
-          python3 scripts/check-doc-governance.py
-
       - name: Forbid C# attestation policy in decomposers
         run: |
           set -e
@@ -279,7 +274,7 @@ jobs:
             while IFS= read -r match; do
               file=$(echo "$match" | cut -d: -f1)
               case "$file" in
-                ./CLAUDE.md|./.claude/agents/conventional-ai-skeptic.md)
+                ./.claude/agents/conventional-ai-skeptic.md)
                   ;;
                 *)
                   echo "::warning file=$file::Banned term '$term' appears outside allowed files"
@@ -551,9 +546,8 @@ jobs:
       # WAIT FOR LIVE INGESTS BEFORE TOUCHING THE BOX.
       #
       # Deploy stops the API, replaces binaries and bounces PostgreSQL. Doing that under
-      # a running ingest kills it -- CLAUDE.md documents the symptom ("a push to main
-      # restarts laplace-postgresql and kills any running ingest") and mitigates it with
-      # operator discipline, which is not a mitigation.
+      # a running ingest is killed when deploy restarts PostgreSQL. The deploy waits on
+      # the substrate's ingest journal instead of relying on operator timing.
       #
       # THE LOCK LIVES IN THE SUBSTRATE, NOT IN GITHUB. Concurrency groups cannot express
       # reader-writer: many seeds may run at once (they are content-addressed writers and

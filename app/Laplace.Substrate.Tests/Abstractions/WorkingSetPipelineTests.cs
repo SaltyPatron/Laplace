@@ -133,6 +133,31 @@ public sealed class WorkingSetPipelineTests
             Assert.Equal(3, change.Metadata.InputUnitsConsumed));
     }
 
+    [Fact]
+    public void WorkingSetConcurrency_RecomputesRecordAndProbeCapsFromSharedEnvelope()
+    {
+        var profile = IngestSourceProfile.UdSentence;
+        var config = new IngestBatchConfig
+        {
+            SourceId = TestSource,
+            BatchLabelPrefix = "working-set-concurrency-test",
+            BatchSize = 1024,
+            WorkingSet = true,
+            WorkingSetProbeInterval = 3276,
+            WorkingSetRecordCap = 24576,
+            WorkingSetProfile = profile,
+        };
+
+        var shared = config.WithWorkingSetConcurrency(10);
+        long perSetEnvelope = IngestSizing.ResolveWorkingSetFlushEnvelopeBytes(10);
+        int expected = IngestSizing.ResolveFlushEnvelopeRecordCap(profile, perSetEnvelope);
+
+        Assert.Equal(10, shared.ConcurrentWorkingSets);
+        Assert.Equal(expected, shared.WorkingSetRecordCap);
+        Assert.True(shared.WorkingSetProbeInterval <= expected);
+        Assert.Equal(24576, config.WorkingSetRecordCap);
+    }
+
     /// <summary>
     /// Simulates a fully warmed process-lifetime proven cache: every id is
     /// already positively confirmed present, so neither the gate nor the

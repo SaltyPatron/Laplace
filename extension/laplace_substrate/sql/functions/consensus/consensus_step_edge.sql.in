@@ -5,7 +5,7 @@
 -- execution.
 --
 -- BOTH is two direction-pinned reads unioned, never an OR predicate (GH #871,
--- spec 37 OP5, and CLAUDE.md's read rules all say the same thing). The old body
+-- spec 37 OP5). The old body
 -- asked for
 --     (subject_id = p_from AND object_id = p_to)
 --  OR (subject_id = p_to   AND object_id = p_from)

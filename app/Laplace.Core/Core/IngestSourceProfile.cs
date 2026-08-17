@@ -7,7 +7,23 @@ namespace Laplace.Engine.Core;
 /// </summary>
 public sealed record IngestSourceProfile(
     int EstBytesPerRecord,
-    int EstComposeUnitsPerRecord = 1)
+    int EstComposeUnitsPerRecord = 1,
+    // RESIDENT BYTES PER COMPOSE UNIT — NOT INPUT BYTES. EstBytesPerRecord carried both
+    // meanings and they are not the same quantity: ResolveRecordBatch divides
+    // TargetBytesPerBatch by it as the size of a record ON DISK, while
+    // WorkingSetBytesPerRecord multiplied it by the fan as the size of the NATIVE COMPOSE
+    // TREES a record leaves resident. A CoNLL-U sentence is ~2 KB of text and composes into
+    // trees whose geometry is two orders of magnitude larger, so one constant could not be
+    // right for both and the working-set arm was the one that was wrong.
+    //
+    // This is why the record cap could not act as the backstop
+    // ResolveFlushEnvelopeRecordCap's summary claims: the cap exists to bound the set when
+    // StagedBytesEstimate under-reports resident cost, but it is DERIVED from this same
+    // per-record model, so an under-declaration here propagates into the guard against it.
+    //
+    // Null = keep the old behaviour (resident == EstBytesPerRecord), so every source that
+    // has not been measured is unchanged by this field's existence.
+    int? ResidentBytesPerComposeUnit = null)
 {
     public static readonly IngestSourceProfile Default =
         new(IngestSizing.DefaultEstBytesPerRecord, 1);
@@ -27,7 +43,27 @@ public sealed record IngestSourceProfile(
     // MWT surfaces), all live at once in FinalizePendingAsync. This multiplier
     // must track that fan: it is the denominator of
     // ResolveFlushEnvelopeRecordCap / EstimateWorkingSetBytes.
-    public static readonly IngestSourceProfile UdSentence = new(2_048, 32);
+    //
+    // RESIDENT BYTES MEASURED FROM THE OOM ITSELF, 2026-08-17. The kernel killed
+    // pid 2554813 at anon-rss 81,742,592 kB (78.0 GiB) on file 25/686, run
+    // 31986555723. The enforcement chain was working: ShouldCloseWorkingSet took
+    // Math.Min(commit_rows 24576, flushEnvelopeCap 3276) = 3,276 records per set, and
+    // file_workers=10 sets ran concurrently, so the resident population was
+    // 10 x 3,276 x 32 = 1,048,320 compose units. 83,729,502,208 B / 1,048,320 =
+    // 79,870 B per unit, against the 2,048 the input-size constant implied — a 39x
+    // under-declaration, which is why a correctly-enforced 512 MiB envelope held 7.8 GiB.
+    //
+    // 80,000 attributes ALL of RSS to compose trees and so slightly OVER-states them
+    // (the content bank, GC heap and Npgsql buffers are in that number too). For a
+    // memory bound, over-stating is the safe direction: it closes sets earlier. The
+    // honest reading is "no more than 80 KB per tree", not "exactly".
+    //
+    // Consequence to watch: this takes the per-set cap from 3,276 records to
+    // 536,870,912 / (80,000 x 32 x 2.5) = 83, so UD flushes far more often than
+    // record_batch=1024 would suggest, and compose throughput may drop. Correctness
+    // first — the previous setting did not finish the corpus at all, twice.
+    public static readonly IngestSourceProfile UdSentence =
+        new(2_048, 32, ResidentBytesPerComposeUnit: 80_000);
 
     /// <summary>Kaikki wiktextract JSON — tens of KB per entry, many tier trees each.</summary>
     // MEASURED 2026-08-01 over 20,000 records of the 20.4 GB raw-wiktextract-data.jsonl:
@@ -121,5 +157,6 @@ public sealed record IngestSourceProfile(
     public static readonly IngestSourceProfile MediaVideo = new(256_000, 1);
 
     public int WorkingSetBytesPerRecord =>
-        Math.Max(1, EstBytesPerRecord) * Math.Max(1, EstComposeUnitsPerRecord);
+        Math.Max(1, ResidentBytesPerComposeUnit ?? EstBytesPerRecord)
+        * Math.Max(1, EstComposeUnitsPerRecord);
 }

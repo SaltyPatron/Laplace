@@ -227,7 +227,7 @@ internal static class QueryCommands
         // converse.chat() IS THE ENTRY POINT. This command used to call generation.walk_text()
         // directly with four hardcoded knobs (steps 48, order 5, temp 0.6, topk 8),
         // which made the CLI a SIBLING entry point to the forward pass rather than a
-        // caller of it — the one thing CLAUDE.md and spec 36 forbid outright:
+        // caller of it, contrary to the single-entry program described by spec 36:
         // "converse.chat() is the only conversational entry point and runs the full ladder;
         // converse, converse_about, converse_walk, converse_facts are internal
         // STAGES of it, never sibling entry points."

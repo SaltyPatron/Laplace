@@ -1,19 +1,16 @@
 -- consensus.set_members(subject, relation) -- the members of a set-valued attribute,
 -- read from the bundle composition instead of from a fan of edges.
 --
--- Replaces the N-row fan: `HAS_FEATURE` today answers "what is this form's
--- morphological analysis" with 3.01 rows averaged over 62,066,099 subjects, none of
--- which knows it is part of one analysis. Through a bundle it is one consensus row
--- (which carries the rating, the rd and the witness_count OF THE ANALYSIS) plus its
--- packed members.
+-- Replaces the N-row fan. Through a bundle, a morphological analysis is one consensus row
+-- (carrying the rating, rd and witness_count OF THE ANALYSIS) plus its packed members.
 --
 -- ord is the canonical position -- ascending by member id, the order StageCollection
 -- sorts into before the merkle. It is NOT a sequence. A set whose members carried
 -- order would be a trajectory of PhysicalityType.Content, not PhysicalityType.Set.
 --
 -- The physicalities join is by entity_id while the table is HASH (id), so it probes
--- physicalities_entity_btree across all 64 leaves. That is the reverse-key cost
--- CLAUDE.md §4 records; it is bounded here because the consensus side has already
+-- physicalities_entity_btree across all 64 leaves. That reverse-key cost is bounded
+-- here because the consensus side has already
 -- pruned to one leaf on (subject_id, type_id) and yields at most a handful of bundles.
 CREATE OR REPLACE FUNCTION consensus.set_members(p_subject bytea, p_relation text)
     RETURNS TABLE(bundle_id bytea, member_id bytea, ord bigint,

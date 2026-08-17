@@ -173,6 +173,11 @@ SELECT reply, witnesses FROM converse.recall_session('dog', convert_to('s1', 'UT
 SELECT ord, prompt, resolved_id = laplace.word_id('dog') AS topic_is_dog
 FROM converse.session_topics WHERE session_id = convert_to('s1', 'UTF8') ORDER BY ord;
 
+SELECT cardinality(nodes) = cardinality(types) + 1
+       AND cardinality(types) = cardinality(dirs) AS raw_path_shape,
+       plane_type = laplace.relation_type_id('IS_SYNONYM_OF') AS raw_direct_plane
+FROM consensus.relate_path_raw(laplace.word_id('dog'), laplace.word_id('h'));
+
 SELECT plane AS reason_plane FROM consensus.relate_path(laplace.word_id('dog'), laplace.word_id('h'));
 
 SELECT count(*) AS band_rows FROM converse.relation_bands();

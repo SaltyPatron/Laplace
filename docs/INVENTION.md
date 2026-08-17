@@ -3,10 +3,9 @@
 Laplace is one invention. This document states its premise and derives the whole system
 from it.
 
-Nothing here is a status report. No dates, no build state, no session annotations — those
-belong in git, in issues, and in `docs/INVENTORY.md`. If you find a progress note in this
-file, delete it. Where this document and the running system disagree, the system is right
-and this document is the thing to fix.
+This document records the intended invention, not transient implementation status. A
+disagreement between it and the running system is an unresolved design or implementation
+gap; neither side silently rewrites the other.
 
 ---
 

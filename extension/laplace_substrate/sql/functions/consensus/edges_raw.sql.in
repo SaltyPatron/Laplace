@@ -58,6 +58,18 @@ BEGIN ATOMIC
         FROM laplace.consensus c
         WHERE p_direction IN ('in', 'both')
           AND c.object_id = p_subject
+          -- SELF-EDGE, ONCE PER SCAN. An edge whose object IS its subject satisfies BOTH
+          -- arms, so 'both' emitted it twice — identical in every column but `direction`.
+          -- That is one row mirrored, not two observations, and it costs a slot in the
+          -- LIMIT below: measured 2026-08-16 over twelve common nouns at p_limit=12, cat,
+          -- green, house and run each spent 2 of 12 slots on the same mirrored self-edge,
+          -- displacing real strands from a fixed-width beam.
+          --
+          -- Suppressed on the INBOUND arm because the outbound arm already emitted it and
+          -- 'out' is the direction the core returns. Guarded on p_direction so an 'in'-only
+          -- scan still yields it — there the outbound arm never ran, and dropping it would
+          -- turn a duplicate into a silent omission.
+          AND (p_direction = 'in' OR c.subject_id <> p_subject)
           AND (p_types IS NULL OR c.type_id = ANY (p_types))
           AND (p_refuted OR NOT consensus.refuted(c.rating, c.rd))
     ) e

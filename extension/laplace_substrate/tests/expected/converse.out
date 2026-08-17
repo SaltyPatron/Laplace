@@ -358,6 +358,15 @@ FROM converse.session_topics WHERE session_id = convert_to('s1', 'UTF8') ORDER B
    3 | dog    | t
 (3 rows)
 
+SELECT cardinality(nodes) = cardinality(types) + 1
+       AND cardinality(types) = cardinality(dirs) AS raw_path_shape,
+       plane_type = laplace.relation_type_id('IS_SYNONYM_OF') AS raw_direct_plane
+FROM consensus.relate_path_raw(laplace.word_id('dog'), laplace.word_id('h'));
+ raw_path_shape | raw_direct_plane 
+----------------+------------------
+ t              | t
+(1 row)
+
 SELECT plane AS reason_plane FROM consensus.relate_path(laplace.word_id('dog'), laplace.word_id('h'));
  reason_plane  
 ---------------

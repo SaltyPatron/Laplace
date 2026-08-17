@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Core composition throughput — the number CLAUDE.md 8 asserts and nothing measured.
+"""Core composition throughput benchmark.
 
 Measures the CORE, not a read path and not the ingest pipeline: UTF-8 in,
 content_tree_build out (UAX #29 segmentation + merkle ids + glome placement for

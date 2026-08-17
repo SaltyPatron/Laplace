@@ -32,13 +32,47 @@ public class GrammarSpineConformanceTests
         Assert.Equal("form", Encoding.UTF8.GetString(form));
     }
 
+    /// <summary>
+    /// Comments are stripped before the needle search. Without that, a needle naming a base
+    /// class is satisfied by any file that MENTIONS it — which is what happened: after
+    /// WiktionaryDecomposer moved to ComposeDecomposer (PR #944), the "GrammarIngestDecomposer"
+    /// needle kept passing on the strength of one doc-comment in WiktionaryGrammarWitness.cs,
+    /// so the gate reported a spine the code had already left. A conformance test that a
+    /// sentence can satisfy measures prose, not structure.
+    /// </summary>
+    private static string StripComments(string source)
+    {
+        var sb = new StringBuilder(source.Length);
+        for (int i = 0; i < source.Length; i++)
+        {
+            if (source[i] == '/' && i + 1 < source.Length && source[i + 1] == '/')
+            {
+                while (i < source.Length && source[i] != '\n') i++;
+                if (i < source.Length) sb.Append('\n');
+                continue;
+            }
+            if (source[i] == '/' && i + 1 < source.Length && source[i + 1] == '*')
+            {
+                i += 2;
+                while (i + 1 < source.Length && !(source[i] == '*' && source[i + 1] == '/')) i++;
+                i++;
+                continue;
+            }
+            sb.Append(source[i]);
+        }
+        return sb.ToString();
+    }
+
     [Fact]
     public void TabularDecomposers_UseStructuredGrammarIngest()
     {
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();
         var grammarSpine = new (string Project, string[] Needles)[]
         {
-            ("Wiktionary", ["GrammarIngestDecomposer", "WiktionaryGrammarWitness", "IGrammarWitness"]),
+            // Wiktionary left the GrammarIngestDecomposer base in PR #944 for the native
+            // per-row parse; the compose lane, not the tree-sitter row spine, is what it
+            // actually runs. The needle now names the base it declares.
+            ("Wiktionary", ["ComposeDecomposer<WiktionaryEntry", "WiktionaryEmit.Emit"]),
             ("SemLink", ["GrammarIngestHandler", "SemLinkGrammarWitness", "IGrammarWitness"]),
             // Tatoeba is two PHASES (sentences then links) rather than parallel files —
             // the link phase needs the id -> content-root map the sentence phase produces.
@@ -61,10 +95,11 @@ public class GrammarSpineConformanceTests
             var text = string.Join('\n', Directory.EnumerateFiles(dir, "*.cs", SearchOption.AllDirectories)
                 .Where(p => !p.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")
                          && !p.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}"))
-                .Select(File.ReadAllText));
+                .Select(p => StripComments(File.ReadAllText(p))));
             foreach (var needle in needles)
                 Assert.True(text.Contains(needle, StringComparison.Ordinal),
-                    $"{project} must use grammar spine pattern '{needle}'");
+                    $"{project} must use grammar spine pattern '{needle}' in CODE "
+                    + "(comments are stripped — a mention is not a use)");
         }
     }
 
@@ -75,7 +110,7 @@ public class GrammarSpineConformanceTests
         var dir = Path.Combine(repoRoot, "app", "Laplace.Decomposers", "OpenSubtitles");
         var text = string.Join('\n', Directory.EnumerateFiles(dir, "*.cs", SearchOption.AllDirectories)
             .Where(p => !p.Contains("bin") && !p.Contains("obj"))
-            .Select(File.ReadAllText));
+            .Select(p => StripComments(File.ReadAllText(p))));
         Assert.Contains("OpenSubtitlesZipIngest", text, StringComparison.Ordinal);
         Assert.Contains("RelationTripleMultiFileDecomposerBase", text, StringComparison.Ordinal);
         Assert.Contains("ExtractFileAsync", text, StringComparison.Ordinal);

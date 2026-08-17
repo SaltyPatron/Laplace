@@ -119,9 +119,8 @@ public sealed class SubstrateChangeBuilder
     /// </summary>
     /// <remarks>
     /// Members are sorted ascending by id and deduplicated before composition, so the returned id
-    /// is a function of the SET and not of the order it arrived in. That is the whole
-    /// deduplication mechanism: 186,562,442 HAS_FEATURE edges carry 145,619 distinct member sets
-    /// (docs/specs/38 §0), and re-staging one of them re-derives the same id and adds no rows.
+    /// is a function of the SET and not of the order it arrived in. Re-staging the same member set
+    /// therefore re-derives the same id and adds no rows.
     ///
     /// Composition runs through <see cref="HashComposer.ComposeNode"/> — the compiled kernel that
     /// every compose path shares — and not through a second C# expression of the same arithmetic

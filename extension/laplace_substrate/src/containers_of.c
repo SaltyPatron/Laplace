@@ -32,16 +32,12 @@
  * probe per frontier element, expressed as a correlated subquery) fared
  * worse still under concurrent load.
  *
- * The fix is exactly the "native C/SPI does the heavy lifting" pattern used
- * elsewhere in this file family (see generate_walk.c's edge_plan): prepare
- * the proven-fast single-key query ONCE via SPI_prepare/SPI_keepplan, then
- * drive the frontier expansion as a tight C loop of SPI_execute_plan calls
- * against that cached plan -- one bound execution per frontier element, in
- * -process, with zero re-parsing/re-planning per call. This is not "batching
- * for its own sake" (word_shape_peers_fast's array-unnest batching measurably
- * did NOT help once its real bottleneck was fixed) -- it's the specific
- * response to a specific, confirmed planner cost-estimation defect for this
- * query shape.
+ * Native C owns frontier expansion and deduplication. Each hop executes one
+ * bound overlap query, but deliberately does not keep a process-wide SPI plan:
+ * the partitioned index cycle can replace the GIN tree, and frontier cardinality
+ * changes the useful plan. A kept generic plan preserves a stale shape for the
+ * backend lifetime. SPI_execute_with_args plans against the current indexes and
+ * bound array on each hop.
  */
 
 /* LIMIT $2 is IN THE QUERY TEXT, and it has to be. SPI_execute_plan's count
@@ -52,37 +48,16 @@
  * MEASURED on 'water' at 37.4M entities, same rows returned:
  *   SPI count = limit_rows (no LIMIT in text)   3,245 ms
  *   LIMIT $2 as a bound parameter                  40.4 ms
- * 80x, and the 40ms figure is the GENERIC plan (6th execution, after PostgreSQL
- * stops re-planning), so it is what the kept plan actually costs -- not a
- * custom-plan best case.
+ * 80x on the former generic kept plan; planning each hop custom retains the SQL
+ * bound while allowing the live index/cardinality shape to participate.
  *
- * The limit must be a PARAMETER, not interpolated into the string: the plan is
- * prepared once with SPI_keepplan and reused process-wide, so a literal would
- * pin the first caller's limit for every later caller. */
+ * The limit remains a parameter so the statement identity is stable and the
+ * caller's bound is visible to custom planning. */
 static const char *CONTAINERS_QUERY =
     "SELECT w.id, w.tier, w.type_id "
     "FROM laplace.v_word_points w "
     "WHERE public.laplace_trajectory_constituent_ids(w.trajectory) && $1::bytea[] "
     "LIMIT $2";
-
-static SPIPlanPtr containers_plan = NULL;
-
-static void
-ensure_containers_plan(void)
-{
-    if (containers_plan == NULL)
-    {
-        Oid argtypes[2] = { BYTEAARRAYOID, INT4OID };
-        SPIPlanPtr plan = SPI_prepare(CONTAINERS_QUERY, 2, argtypes);
-
-        if (plan == NULL)
-            elog(ERROR, "containers_of: SPI_prepare failed: %s",
-                 SPI_result_code_string(SPI_result));
-        if (SPI_keepplan(plan) != 0)
-            elog(ERROR, "containers_of: SPI_keepplan failed");
-        containers_plan = plan;
-    }
-}
 
 PG_FUNCTION_INFO_V1(pg_laplace_containers_of);
 
@@ -113,7 +88,6 @@ pg_laplace_containers_of(PG_FUNCTION_ARGS)
 
     if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
         elog(ERROR, "containers_of: SPI_connect failed");
-    ensure_containers_plan();
 
     frontier = (Datum *) palloc(sizeof(Datum));
     frontier[0] = copy_bytea_datum(PointerGetDatum(prompt));
@@ -147,6 +121,7 @@ pg_laplace_containers_of(PG_FUNCTION_ARGS)
         {
             ArrayType *fr_arr = construct_array(frontier, n_frontier, BYTEAOID, -1,
                                                 false, TYPALIGN_INT);
+            Oid   argtypes[2] = { BYTEAARRAYOID, INT4OID };
             Datum args[2];
             int   rc;
 
@@ -172,7 +147,8 @@ pg_laplace_containers_of(PG_FUNCTION_ARGS)
              * so "the first limit_rows containers" was already an arbitrary subset
              * of the matches. Capping the fetch changes WHICH arbitrary rows come
              * back, not how many the caller is promised. */
-            rc = SPI_execute_plan(containers_plan, args, NULL, true, limit_rows);
+            rc = SPI_execute_with_args(CONTAINERS_QUERY, 2, argtypes,
+                                       args, NULL, true, limit_rows);
             if (rc != SPI_OK_SELECT)
                 elog(ERROR, "containers_of: probe query failed: %s",
                      SPI_result_code_string(rc));

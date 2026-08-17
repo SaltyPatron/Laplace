@@ -1,16 +1,12 @@
-# Normative specifications
+# Design specification index
 
-Files in this directory are stable behavioral and architectural contracts. They do
-not contain project status, dated measurements, session narratives, issue checklists,
-branch names, or implementation reports. GitHub issues own active work and status.
-
-The running system, source, schemas, and executable tests remain the evidence for what
-is implemented. These specifications define what conforming implementation means.
+These files describe behavioral and architectural parts of the invention. They are
+design records, not evidence that a feature is implemented.
 
 Historical annotated versions are preserved under
 [`docs/archive/specs-v1/`](../archive/specs-v1/README.md).
 
-Current normative set:
+Specification set:
 
 - `05_Substrate_Invariants.txt` — identity, tiers, physicality, evidence, consensus.
 - `06_Engineering_Ruleset.txt` — implementation and operational constraints.
@@ -22,6 +18,3 @@ Current normative set:
 - `34_Conversational_Provenance.md` — tenant/session/turn provenance.
 - `36_Laplace_Forward_Pass.md` — canonical stateful forward pass.
 - `37_Substrate_Operation_ISA.md` — typed operation algebra.
-
-Research, audits, execution logs, and superseded specifications are not normative even
-when an old GitHub issue links to them.

@@ -101,8 +101,7 @@ public sealed class DecomposerArchitectureGateTests
     /// The hand-rolled batch idiom. Nine sites wrote some form of
     /// `options.BatchSize > 1 ? options.BatchSize : &lt;literal&gt;`, and five never consulted
     /// IngestSizing at all — so those sources ingested with an identical batch on a 4-core
-    /// laptop and a 128 GB server, while CLAUDE.md documented that batch sizing
-    /// "deliberately has no env override" because IngestSizing/MemoryTopology own it.
+    /// laptop and a 128 GB server even though IngestSizing/MemoryTopology own sizing.
     /// A private `? : 2048` overrides the machine model exactly as effectively as an env
     /// var would. IngestPipelineDefaults.ResolveBatch(profile, options) is the one resolver;
     /// a source that needs different sizing adds an IngestSourceProfile, never a literal.

@@ -251,11 +251,32 @@ internal static class WiktionaryEmit
         foreach (var form in forms)
         {
             if (!Stage(b, form.FormText, roots, out var formId)) continue;
-            Attest(b, formId, "FORM_OF", wordId, null);
+
+            // A FORM TABLE LISTS ITS OWN LEMMA. Wiktionary's form list includes the headword
+            // itself (the singular in a noun's table, the infinitive in a verb's), so
+            // formId == wordId and this emitted `cat FORM_OF cat` — a claim with no losing
+            // condition. Nothing could rate, corroborate or refute it, because there is no
+            // world in which a word is not a form of itself.
+            //
+            // MEASURED 2026-08-16 on laplace.consensus_r_form_of_h0: 143,612 self-edges in
+            // 8,945,068 rows (1.6%), one partition of eight — ~1.15M rows substrate-wide.
+            // They also cost every reader: consensus.edges_raw('both') mirrored each one,
+            // and at p_limit=12 cat/green/house/run each spent 2 of 12 beam slots on the
+            // pair, displacing real strands.
+            //
+            // Skipped HERE and not in SubstrateChangeBuilder.AddAttestation: a self-edge is
+            // vacuous for FORM_OF specifically, not universally. Surface ids are
+            // content-addressed and language-independent, so two languages spelling a word
+            // identically produce a legitimate IS_TRANSLATION_OF X->X, and a blanket guard
+            // at the chokepoint would silently delete it.
+            //
+            // HAS_FEATURE below is still emitted: when the form IS the lemma its tags are
+            // the lemma's own morphology, which is testimony about the headword.
+            if (formId != wordId)
+                Attest(b, formId, "FORM_OF", wordId, null);
             // A form's tags are ONE morphological analysis, not N independent claims. Emitting
-            // them as N edges gave the analysis no id, so nothing could rate, corroborate or
-            // refute it, and 186,562,442 HAS_FEATURE rows encoded 145,619 distinct analyses
-            // (docs/specs/38). One composition, one edge, one adjudicable claim.
+            // them as N edges gives the analysis no id, so nothing can rate, corroborate or
+            // refute it as a whole. One composition, one edge, one adjudicable claim.
             if (TryStageSet(b, form.Tags, roots, out var featureSetId))
                 Attest(b, formId, "HAS_FEATURE", featureSetId, null);
         }

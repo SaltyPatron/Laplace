@@ -79,8 +79,8 @@ CREATE OR REPLACE FUNCTION realize.resolve_name(
                     GROUP BY c.subject_id
                 ) t GROUP BY id
             ),
-            -- CANDIDATES IN ID SPACE. No realize.render here (GH #906/#907 idiom; CLAUDE.md's
-            -- "don't resolve names per row -- aggregate ids, then batch").
+            -- CANDIDATES IN ID SPACE. No realize.render here: aggregate ids, then
+            -- render the selected batch (GH #906/#907).
             --
             -- MEASURED 2026-08-07 via pg_stat_statements on the foundation seed: this
             -- branch was 24,511 calls at a 2,380 ms mean, and the `realize.render_text(...)`

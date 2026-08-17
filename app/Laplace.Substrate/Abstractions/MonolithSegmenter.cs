@@ -89,7 +89,8 @@ public static class MonolithSegmenter
         if (segments <= 1)
         {
             await foreach (var change in IngestBatchPipeline.RunAsync(
-                               stream, handlerFactory(0), configFactory(0), ct))
+                               stream, handlerFactory(0),
+                               configFactory(0).WithWorkingSetConcurrency(1), ct))
                 yield return change;
             yield break;
         }
@@ -155,7 +156,7 @@ public static class MonolithSegmenter
             {
                 var recStream = new ChannelChunkRecordStream<TRecord>(inputs[seg].Reader);
                 var handler = handlerFactory(seg);
-                var config = configFactory(seg);
+                var config = configFactory(seg).WithWorkingSetConcurrency(segments);
                 await foreach (var change in IngestBatchPipeline.RunAsync(recStream, handler, config, ct))
                     await outCh.Writer.WriteAsync(change, ct).ConfigureAwait(false);
                 // Segments are NOT files. Emitting period-boundary/ here inflated

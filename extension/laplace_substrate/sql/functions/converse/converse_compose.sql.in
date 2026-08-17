@@ -181,7 +181,7 @@ BEGIN
         -- ctier = 2 IS A KNOWN-LOSSY FILTER THAT STILL HAS NO REPLACEMENT. Do not
         -- remove it without reading this.
         --
-        -- It is lossy exactly as CLAUDE.md says: tier is a floor, laplace.word_id('a'),
+        -- It is lossy because tier is a floor: laplace.word_id('a'),
         -- word_id('I') and word_id('狼') are all tier 0 and typed Codepoint, so this
         -- drops single-character words. Measured: 'a' occurs 152 times inside
         -- sentence trajectories and every occurrence is discarded here.

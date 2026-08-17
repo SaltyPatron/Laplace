@@ -285,8 +285,8 @@ Traps hit and paid for during this research:
 **`source_status` was the significant one.** `ops.source_counts_approx()` reads `pg_stats`
 most-common-values on the **parent** `laplace.attestations`; that list holds exactly **ten**
 entries, so only the ten largest sources could ever report non-zero and every other source
-COALESCEd to 0. CLAUDE.md recorded the resulting zeros as "successful-looking runs that
-deposited nothing: a gate failing open" — false on both counts. ChessPgn alone holds 1,472,737.
+COALESCEd to 0. Earlier status prose described the resulting zeros as successful-looking
+runs that deposited nothing; the underlying rows disprove that. ChessPgn alone holds 1,472,737.
 Raising the statistics target cannot fix it: the target is already 100 and with one source at
 84% of 371M rows, a source at 0.004% is about one row in the sample.
 

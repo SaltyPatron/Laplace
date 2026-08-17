@@ -392,12 +392,33 @@ public static class NpgsqlFoundryReads
         NpgsqlDataSource ds, string relationType, byte[][] vocab, int degreeCap,
         CancellationToken ct = default) =>
         NpgsqlRead.ReadRowsAsync(ds, """
-            SELECT v.id, e.neighbour_id,
-                   GREATEST(consensus.walk_edge_weight(e.rating, e.rd, e.witness_count), 0) AS w
-            FROM unnest(@vocab) AS v(id)
-            CROSS JOIN LATERAL consensus.edges_raw(
-              v.id, 'out', ARRAY[laplace.relation_type_id(@rel)],
-              GREATEST(@cap, 16), true, 'eff_mu') e
+            -- ONE PLAN, NOT ONE PER VOCAB ENTRY. consensus.edges_raw is LANGUAGE sql with
+            -- UNION ALL + ORDER BY + LIMIT, so it does not inline: under CROSS JOIN LATERAL
+            -- it re-plans against a 216-leaf partitioned table once per subject, and a
+            -- foundry vocab is thousands of subjects inside the 180 s command timeout.
+            -- Inlined here because both partition keys must reach the predicate: type_id is
+            -- a folded IMMUTABLE literal (LIST level) and subject_id is a ScalarArrayOp
+            -- (HASH level). Handing either one to a per-row variable loses the pruning.
+            -- Equivalence to the edges_raw call it replaces, at THIS call site only:
+            -- p_direction 'out' keeps the outbound arm; p_refuted true disables the refuted
+            -- filter; a one-element p_types is an equality; the window reproduces
+            -- ORDER BY eff_mu::float8/1e9 DESC, neighbour_id LIMIT p_limit per subject.
+            WITH ranked AS (
+                SELECT c.subject_id,
+                       c.object_id AS neighbour_id,
+                       GREATEST(consensus.walk_edge_weight(c.rating, c.rd, c.witness_count), 0) AS w,
+                       row_number() OVER (
+                           PARTITION BY c.subject_id
+                           ORDER BY (consensus.eff_mu(c.rating, c.rd))::float8 / 1e9 DESC,
+                                    c.object_id
+                       ) AS rn
+                FROM laplace.consensus c
+                WHERE c.subject_id = ANY (@vocab)
+                  AND c.type_id = laplace.relation_type_id(@rel)
+            )
+            SELECT subject_id, neighbour_id, w
+            FROM ranked
+            WHERE rn <= GREATEST(@cap, 16)
             """,
             static r => new AttributeOutRow((byte[])r[0], (byte[])r[1], r.GetDouble(2)),
             p =>

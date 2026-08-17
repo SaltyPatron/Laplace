@@ -547,7 +547,9 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
         return map;
     }
 
-    private static (List<string> Defs, List<string> Examples) ParseGloss(string gloss)
+    // internal, not private: the gloss/example split is the thing that shredded one
+    // WordNet definition into several facts, so it needs a test that can call it.
+    internal static (List<string> Defs, List<string> Examples) ParseGloss(string gloss)
     {
         var examples = new List<string>();
         if (string.IsNullOrEmpty(gloss)) return (new List<string>(), examples);
@@ -568,7 +570,26 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
 
 
 
-        return (DelimitedContent.Split(def.ToString(), ';'), examples);
+        // ONE SYNSET, ONE GLOSS. The quote walk above already lifted every example out of
+        // `def`; what remains is the definition, and it is a single string. Splitting it on
+        // ';' was reading a separator that is not there: in WordNet's data files ';'
+        // separates the definition from the QUOTED examples, and those are gone by now — so
+        // the only semicolons left are INSIDE the definition.
+        //
+        // MEASURED 2026-08-16 on synset f59f0970 (cat). Gloss:
+        //   "feline mammal usually having thick soft fur and no ability to roar:
+        //    domestic cats; wildcats"
+        // deposited as THREE HAS_DEFINITION facts — the whole string (via OMW/CILI, which
+        // do not split), plus "...domestic cats" and "wildcats" from this line. Consensus
+        // then divides across them: the real gloss and the fragment "wildcats" both landed
+        // at eff_mu 1319.9, so which one a read returns as the top definition was a
+        // tie-break, not a rating. A fragment is not a competing claim about meaning; it is
+        // the same claim cut in half, and it cannot lose to the whole.
+        // Removing the quoted examples leaves their separators behind — "definition; ; " —
+        // so trim ';' and whitespace together until stable rather than in one pass.
+        string definition = def.ToString().TrimEnd(' ', '\t', ';').TrimStart();
+        return (definition.Length == 0 ? new List<string>() : new List<string> { definition },
+                examples);
     }
 
     private static async IAsyncEnumerable<WnSynset> ParseDataAsync(

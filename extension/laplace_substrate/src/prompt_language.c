@@ -1,12 +1,10 @@
 /*
  * prompt_language — which language a prompt is written in.
  *
- * WHY THIS IS C. CLAUDE.md:75: "Per-row set-returning functions, string
- * operations, and both-directions OR joins belong in C, not in a rewritten
- * CTE." The SQL form used converse.prompt_state() as a table source (a per-row SRF)
+ * WHY THIS IS C. The SQL form used converse.prompt_state() as a table source (a per-row SRF)
  * and called consensus.eff_mu() per row over a partitioned consensus join. That is
- * exactly the shape the law names. One indexed range read plus an O(1) hash
- * probe per edge here -- the shape prompt_coherence.c and recall.c use.
+ * replaced here by one indexed range read plus an O(1) hash probe per edge, the
+ * same shape used by prompt_coherence.c and recall.c.
  *
  * WHAT IT IS FOR, AND WHAT IT IS NOT FOR. This substrate is omniglottal by
  * construction: a concept is language-free and its SURFACES are a family

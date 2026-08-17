@@ -24,6 +24,8 @@ typedef struct {
     hash128_t  via_type;
     int64_t    rating;
     int64_t    rd;
+    int64_t    path_mu;
+    bool       path_mu_valid;
 } TaxNode;
 
 
@@ -36,5 +38,16 @@ typedef struct {
 extern int tax_bfs_up(const hash128_t *seeds, int seed_n, int max_depth,
                       const hash128_t *up_types, int up_type_n,
                       TaxNode **nodes_out);
+
+/* Weighted form used when entering the taxonomy is itself an attested edge
+ * (for example word -> lexical sense). Among paths reaching the same node at
+ * the same minimum depth, retain the widest bottleneck. NULL seed arrays mean
+ * that the first traversed edge starts the bottleneck. */
+extern int tax_bfs_up_weighted(const hash128_t *seeds,
+                               const int64_t *seed_mu,
+                               const bool *seed_mu_valid,
+                               int seed_n, int max_depth,
+                               const hash128_t *up_types, int up_type_n,
+                               TaxNode **nodes_out);
 
 #endif                          

@@ -25,7 +25,7 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 ///
 /// Neither list is refactored here. Both RATCHET: current violators are enumerated and
 /// the lists may only shrink. A new offender fails the build by name; migrating a file
-/// forces deleting its entry. Prose in CLAUDE.md is advisory — a gate is not.
+/// forces deleting its entry. The executable check, not a prose claim, owns the roster.
 ///
 /// The sanctioned home for both is app/Laplace.Substrate/Crud/Npgsql.
 /// </summary>

@@ -35,7 +35,6 @@
       "extension/laplace_substrate/sql/functions/consensus/consensus_walk_edges.sql.in::walk_edges": 1,
       "extension/laplace_substrate/sql/functions/consensus/edges.sql.in::edges": 2,
       "extension/laplace_substrate/sql/functions/consensus/gaps.sql.in::gaps": 1,
-      "extension/laplace_substrate/sql/functions/consensus/relate_path.sql.in::relate_path": 1,
       "extension/laplace_substrate/sql/functions/consensus/related.sql.in::related": 1,
       "extension/laplace_substrate/sql/functions/consensus/related_in.sql.in::related_in": 1,
       "extension/laplace_substrate/sql/functions/consensus/related_objects.sql.in::related_objects": 1,

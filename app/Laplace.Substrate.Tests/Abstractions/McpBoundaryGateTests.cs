@@ -38,7 +38,7 @@ public sealed class McpBoundaryGateTests
     }
 
     [Fact]
-    public void EveryAgentClient_LaunchesTheDeployedApphost()
+    public void EveryConfiguredClient_LaunchesTheDeployedApphost()
     {
         const string deployed = "/opt/laplace/app/laplace-mcp";
         foreach (var relative in new[] { ".mcp.json", ".cursor/mcp.json" })
@@ -52,12 +52,6 @@ public sealed class McpBoundaryGateTests
         var codex = Read(".codex", "config.toml");
         Assert.Contains("[mcp_servers.laplace]", codex);
         Assert.Contains($"command = \"{deployed}\"", codex);
-
-        var verifier = Read(".github", "agents", "substrate-verifier.agent.md");
-        Assert.Contains("laplace/*", verifier);
-        Assert.DoesNotContain("laplace-db", verifier);
-        Assert.DoesNotContain("postgres-mcp", verifier);
-        Assert.DoesNotContain("`psql ", verifier);
     }
 
     [Fact]

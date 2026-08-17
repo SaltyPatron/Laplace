@@ -14,14 +14,42 @@ CREATE OR REPLACE FUNCTION realize.path(p_path bytea[], p_types bytea[], p_dirs 
       SELECT realize.batch(p_path,p_lang) AS realized,
              realize.label_batch(p_path) AS labels,
              lexical.type_label_batch(p_types) AS types
+    ),
+    node AS (
+      SELECT i,
+             -- AN ILI ID IS AN IDENTIFIER WEARING CONTENT'S CLOTHES. The COALESCE above
+             -- reached realize.label() only when realize.batch ABSTAINED, and its contract
+             -- is to abstain with NULL — so the ladder was sound for the case it was written
+             -- for. A synset is not that case: CILI's canonical name for one IS the
+             -- Interlingual Index id, so the canonical arm returns a real, non-NULL
+             -- realization, COALESCE takes it, and the label tier is never consulted.
+             --
+             -- MEASURED 2026-08-16 on synset f59f0970 (cat): realize.batch returns 'i46593'
+             -- where realize.label_batch returns 'cat', and its IS_A object realizes as
+             -- 'i46591' against the label 'feline'. Every chain consensus.relate_path
+             -- returned was therefore unreadable — 'i37666 —is a→ i37665 —is a→ i37650' for
+             -- house/building, on both the old and the rewritten body.
+             --
+             -- Matched by SHAPE, not by source: ^i[0-9]+$ is the ILI form and is not a word
+             -- in any language this renders. The realization still wins wherever it is
+             -- anything else, and '?' is still the floor when both tiers abstain. The right
+             -- place to stop this is ingest — an ILI id should not be deposited as a
+             -- canonical name — but that is a re-ingest, and this function must not print an
+             -- identifier at a reader in the meantime.
+             CASE WHEN b.realized[i] ~ '^i[0-9]+$' AND b.labels[i] IS NOT NULL
+                  THEN b.labels[i]
+                  ELSE COALESCE(b.realized[i], b.labels[i], '?')
+             END AS nm,
+             b.types AS types
+      FROM batch b CROSS JOIN generate_subscripts(p_path, 1) AS i
     )
     SELECT string_agg(
-               CASE WHEN i = 1
-                    THEN COALESCE(b.realized[i], b.labels[i], '?')
-                    ELSE CASE WHEN p_dirs[i-1] = -1
-                              THEN ' ←' || COALESCE(b.types[i-1], '?') || '— '
-                              ELSE ' —' || COALESCE(b.types[i-1], '?') || '→ '
-                         END || COALESCE(b.realized[i], b.labels[i], '?')
-               END, '' ORDER BY i)
-    FROM batch b CROSS JOIN generate_subscripts(p_path, 1) AS i
+               CASE WHEN n.i = 1
+                    THEN n.nm
+                    ELSE CASE WHEN p_dirs[n.i-1] = -1
+                              THEN ' ←' || COALESCE(n.types[n.i-1], '?') || '— '
+                              ELSE ' —' || COALESCE(n.types[n.i-1], '?') || '→ '
+                         END || n.nm
+               END, '' ORDER BY n.i)
+    FROM node n
 $$;

@@ -9,11 +9,13 @@ PGUSER="${PGUSER:-laplace_admin}"
 DB="${LAPLACE_DBNAME:-${PGDATABASE:-laplace}}"
 FORCE=0
 CHECK_ONLY=0
+FRESH_CHECK=0
 
 usage() {
-  echo "Usage: $0 [--force|--check-only]" >&2
+  echo "Usage: $0 [--force|--check-only|--fresh-check]" >&2
   echo "  --force       always re-ingest foundation sources (fresh_db path)" >&2
   echo "  --check-only  fail loud if any foundation layer is incomplete (no ingest; #792)" >&2
+  echo "  --fresh-check exit 0 only when NO foundation layer is complete (no ingest)" >&2
   exit 2
 }
 
@@ -21,6 +23,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --force) FORCE=1; shift ;;
     --check-only) CHECK_ONLY=1; shift ;;
+    --fresh-check) FRESH_CHECK=1; shift ;;
     -h|--help) usage ;;
     *) echo "unknown argument: $1" >&2; usage ;;
   esac
@@ -59,6 +62,25 @@ FOUNDATION=(
 
 export LAPLACE_DBNAME="$DB"
 export LAPLACE_DB="Host=${PGHOST};Username=${PGUSER};Database=${DB}"
+
+# GENUINELY FRESH = NOT ONE foundation layer complete, which is a different
+# question from --check-only's "any layer incomplete". The index cycle in
+# seed-foundation.yml must key on this one: dropping the plain secondaries is a
+# win only when every row is still to be COPYed. On a PARTIAL build it rebuilds
+# indexes over rows already ingested, which that workflow calls pure loss.
+# `force` cannot stand in for it -- force means "ignore completion markers", and
+# a dropped-and-recreated database has none to ignore.
+if [[ "$FRESH_CHECK" -eq 1 ]]; then
+  for entry in "${FOUNDATION[@]}"; do
+    IFS=':' read -r _cli decomposer layer <<< "$entry"
+    if layer_ok "$decomposer" "$layer"; then
+      echo "not a fresh build: ${decomposer} layer ${layer} is already complete on $DB"
+      exit 1
+    fi
+  done
+  echo "fresh build: no foundation layer complete on $DB"
+  exit 0
+fi
 
 needs_work=0
 if [[ "$FORCE" -eq 1 ]]; then
