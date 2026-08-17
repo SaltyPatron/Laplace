@@ -10,6 +10,15 @@ namespace Laplace.Decomposers.ISO;
 public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>
 {
     public static readonly Hash128 Source = ISOSource.SourceId;
+    // ONE SPELLING. Two sites emit this relation -- the ISO 639-3 reference name and the
+    // name-index print name -- and both arrived when a misuse of HAS_DEFINITION was
+    // corrected: a name attested as a definition rendered "Batui HAS_DEFINITION Batui",
+    // subject and object the same string, a claim that cannot be false. The correction was
+    // right and it left the literal written twice, which g3_csharp reads as growth even
+    // though the file's total fell 500 -> 499. Named once so the ratchet measures what
+    // actually happened.
+    private const string NameAliasRelation = "HAS_NAME_ALIAS";
+
     public static readonly Hash128 TrustClass = ISOSource.TrustClass;
 
     private static readonly Hash128 LanguageTypeId = EntityTypeRegistry.Language;
@@ -121,8 +130,13 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>
             var nameId = ContentEmitter.Emit(b, rec.RefName, Source);
             if (nameId is { } nid)
             {
+                // A NAME IS NOT A DEFINITION. rec.RefName is ISO 639-3's reference name for
+                // the language; attesting it as HAS_DEFINITION as well produced rows that
+                // render "Batui HAS_DEFINITION Batui" — the subject and object are the same
+                // string, so the claim cannot be false and carries nothing. ISO 639-3
+                // publishes no glosses; the alias below is the whole of what the source says.
                 b.AddAttestation(NativeAttestation.Categorical(
-                    langId, "HAS_NAME_ALIAS", nid, Source, TC.StandardsDerived));
+                    langId, NameAliasRelation, nid, Source, TC.StandardsDerived));
             }
         }
     }
@@ -314,9 +328,12 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>
         {
             var lid = LanguageEntityId.FromIso639_3(rec.Id);
             b.AddEntity(lid, EntityTier.Word, LanguageTypeId, Source);
+            // Same defect as the RefName site above: PrintName is a NAME. It was the only
+            // thing this phase deposited, so the fix is to record it as what it is rather
+            // than to drop it — the language keeps its printed name, as an alias.
             if (ContentEmitter.Emit(b, rec.PrintName, Source) is { } nid)
                 b.AddAttestation(NativeAttestation.Categorical(
-                    lid, "HAS_NAME_ALIAS", nid, Source, TC.StandardsDerived));
+                    lid, NameAliasRelation, nid, Source, TC.StandardsDerived));
         }
         protected override async IAsyncEnumerable<(string Id, string PrintName)> ExtractRecordsAsync(
             string ecosystemPath, DecomposerOptions options,

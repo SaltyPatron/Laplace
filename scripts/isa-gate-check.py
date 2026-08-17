@@ -166,6 +166,11 @@ CEILINGS = {
     #                                   api() is an unfiltered pg_proc scan (#989), so
     #                                   "no textual caller" cannot prove unused while
     #                                   any MCP op call reaches them. Not provably dead.
+    # g4 stayed 15. A 2026-08-16 exception raised it to 16 for consensus.glicko2_logit,
+    # which landed with 4f97abb2 carrying zero callers and was uncalled on purpose — its
+    # own file installs it as the rejected form beside the winner it derives. main has
+    # since given it a caller, so the exception is obsolete and is removed rather than
+    # left standing: a recorded exception that outlives its cause is just a hole.
     "g4_dead_canonical": 15,
     # Measured 2026-08-05, landing with its violations enumerated per W6's trap
     # note ("a gate that goes red on merge-day teaches people to ignore it").

@@ -82,7 +82,7 @@ a masked substrate read as a quiet one.
 ## Repairing
 
 `ops.index_health` returns one row per non-valid index; an **empty set is the
-healthy answer**. `leaf_count` 0 on a partitioned parent is the 2026-08-13 shell
+healthy answer**. `leaf_count` 0 on a partitioned parent is the index-cycle shell
 class: present in the catalog, unusable for reads, invisible to row counts.
 
 `ops.reindex_invalid` rebuilds them, **one COMMIT per index**, so the run is
