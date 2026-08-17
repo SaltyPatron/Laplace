@@ -840,21 +840,23 @@ EOF
     sudo -u "$RUNNER_USER" chmod 0600 "$PG_HBA_FILE"
     green "✓ Wrote substrate cluster pg_hba.conf (managed block as full file)"
 
-    if ! sudo -u "$RUNNER_USER" grep -q "^laplace_map" "$PG_IDENT_FILE" 2>/dev/null; then
-        sudo -u "$RUNNER_USER" tee -a "$PG_IDENT_FILE" >/dev/null <<EOF
-
+    # This cluster owns the ident file. Rebuild it from the resolved host
+    # identities on every bootstrap instead of preserving a stale hard-coded
+    # operator forever.
+    sudo -u "$RUNNER_USER" tee "$PG_IDENT_FILE" >/dev/null <<EOF
+# laplace-runner managed: peer identities for the substrate cluster
 laplace_map   laplace-runner   laplace_admin
-laplace_map   ahart            laplace_admin
 laplace_map   postgres         laplace_admin
 EOF
-        green "✓ Wrote laplace_map to $PG_IDENT_FILE"
-    else
-        green "✓ laplace_map already present in $PG_IDENT_FILE"
+    if [ -n "$GH_SUDO_USER" ]; then
+        printf 'laplace_map   %-16s laplace_admin\n' "$GH_SUDO_USER" \
+            | sudo -u "$RUNNER_USER" tee -a "$PG_IDENT_FILE" >/dev/null
     fi
+    sudo -u "$RUNNER_USER" chmod 0600 "$PG_IDENT_FILE"
+    green "✓ Wrote laplace_map identities to $PG_IDENT_FILE"
 
-    install -d -m 2775 -o postgres -g "$RUNNER_GROUP" "$LAPLACE_PG_SOCKET_DIR" 2>/dev/null \
-        || install -d -m 2775 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "$LAPLACE_PG_SOCKET_DIR"
-    green "✓ $LAPLACE_PG_SOCKET_DIR writable by $RUNNER_GROUP"
+    install -d -m 2775 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "$LAPLACE_PG_SOCKET_DIR"
+    green "✓ $LAPLACE_PG_SOCKET_DIR owned by $RUNNER_USER:$RUNNER_GROUP"
 
     local unit_file="/etc/systemd/system/$LAPLACE_PG_SERVICE"
     cat > "$unit_file" <<EOF
@@ -875,7 +877,11 @@ RequiresMountsFor=$LAPLACE_PG_MOUNT $LAPLACE_PG_WAL
 Type=simple
 User=$RUNNER_USER
 Group=$RUNNER_GROUP
-ExecStartPre=+/usr/bin/install -d -m 2775 -o postgres -g $RUNNER_GROUP $LAPLACE_PG_SOCKET_DIR
+# /run is recreated at boot, while package/tmpfiles activity can recreate the
+# conventional PostgreSQL log directory under a different service identity.
+# This cluster has one owner: converge both paths before every postmaster start.
+ExecStartPre=+/usr/bin/install -d -m 2775 -o $RUNNER_USER -g $RUNNER_GROUP $LAPLACE_PG_SOCKET_DIR
+ExecStartPre=+/usr/bin/install -d -m 2775 -o $RUNNER_USER -g $RUNNER_GROUP $LAPLACE_PG_LOG
 ExecStart=$LAPLACE_PG_PREFIX/bin/postgres -D $LAPLACE_PG_DATA
 # Readiness wait lives in ${LAPLACE_PG_SERVICE}.d/20-ready.conf (written below).
 # Type=simple races the Unix socket; this build has no libsystemd for Type=notify.
@@ -1036,7 +1042,7 @@ validate_pg_tuning() {
 }
 
 bootstrap_pg_roles() {
-    say "Ensure PG roles: laplace_admin (SUPERUSER) / laplace_app / laplace_readonly"
+    say "Ensure PG roles: laplace_admin / host operator / laplace_app / laplace_readonly"
     sudo -u "$RUNNER_USER" "$LAPLACE_PG_PREFIX/bin/psql" \
         -h "$LAPLACE_PG_SOCKET_DIR" -p "$LAPLACE_PG_PORT" \
         -d postgres -U laplace_admin -v ON_ERROR_STOP=1 <<'PG_EOF'
@@ -1065,7 +1071,21 @@ BEGIN
     END IF;
 END $$;
 PG_EOF
-    green "✓ Roles present (laplace_admin = SUPERUSER; postgres = LAN convenience superuser; substrate operator role per AWS/GCP RDS pattern)"
+    if [ -n "$GH_SUDO_USER" ]; then
+        sudo -u "$RUNNER_USER" "$LAPLACE_PG_PREFIX/bin/psql" \
+            -h "$LAPLACE_PG_SOCKET_DIR" -p "$LAPLACE_PG_PORT" \
+            -d postgres -U laplace_admin -v ON_ERROR_STOP=1 \
+            -v operator="$GH_SUDO_USER" <<'PG_EOF'
+SELECT format('CREATE ROLE %I WITH LOGIN INHERIT CREATEDB CREATEROLE', :'operator')
+WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'operator') \gexec
+SELECT format('ALTER ROLE %I WITH LOGIN INHERIT CREATEDB CREATEROLE', :'operator') \gexec
+SELECT format('GRANT laplace_admin TO %I', :'operator') \gexec
+PG_EOF
+        green "✓ PostgreSQL operator '$GH_SUDO_USER' can administer through durable owner laplace_admin"
+    else
+        yellow "  host operator unresolved — no personal PostgreSQL login role created"
+    fi
+    green "✓ Roles present (laplace_admin owns durable objects; postgres is LAN convenience superuser)"
 }
 
 # Create the temp tablespace so sort/hash spill leaves the heap device.
@@ -1169,22 +1189,6 @@ EOF
     systemctl daemon-reload
     systemctl enable --now laplace-pg-log-prune.timer >/dev/null 2>&1 || true
     green "✓ laplace-pg-log-prune.timer — .log/.csv older than ${days}d deleted daily"
-}
-
-bootstrap_pg_legacy_cleanup() {
-    say "Clean up legacy 'ahart' PG state (substrate cluster)"
-    sudo -u "$RUNNER_USER" "$LAPLACE_PG_PREFIX/bin/dropdb" \
-        -h "$LAPLACE_PG_SOCKET_DIR" -p "$LAPLACE_PG_PORT" -U laplace_admin \
-        --if-exists ahart 2>/dev/null \
-        && green "✓ Dropped accidental 'ahart' database (if present)" \
-        || green "✓ No 'ahart' database to drop"
-
-    sudo -u "$RUNNER_USER" "$LAPLACE_PG_PREFIX/bin/psql" \
-        -h "$LAPLACE_PG_SOCKET_DIR" -p "$LAPLACE_PG_PORT" \
-        -d postgres -U laplace_admin \
-        -c "DO \$\$ BEGIN IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='ahart') THEN ALTER ROLE ahart NOSUPERUSER NOCREATEDB NOCREATEROLE; END IF; END \$\$;" >/dev/null 2>&1 \
-        && green "✓ Revoked elevated privileges from 'ahart' PG role (if present)" \
-        || green "✓ 'ahart' PG role already unprivileged (or absent)"
 }
 
 bootstrap_pg_database_and_postgis() {
@@ -1521,7 +1525,9 @@ do_status() {
         -h "$LAPLACE_PG_SOCKET_DIR" -p "$LAPLACE_PG_PORT" \
         -d postgres -U laplace_admin -tAc \
         "SELECT rolname, rolcanlogin, rolcreatedb, rolcreaterole, rolsuper
-         FROM pg_roles WHERE rolname IN ('laplace_admin','laplace_app','laplace_readonly','ahart');" \
+         FROM pg_roles
+         WHERE rolname IN ('laplace_admin','laplace_app','laplace_readonly')
+            OR pg_has_role(oid, 'laplace_admin', 'MEMBER');" \
         2>/dev/null || echo "  (substrate cluster not running, or no roles set up)"
 
     say "Peer auth in pg_hba (substrate cluster)"
@@ -1553,7 +1559,7 @@ do_status() {
     sudo -u "$RUNNER_USER" "$LAPLACE_PG_PREFIX/bin/psql" \
         -h "$LAPLACE_PG_SOCKET_DIR" -p "$LAPLACE_PG_PORT" \
         -d postgres -U laplace_admin -tAc \
-        "SELECT datname FROM pg_database WHERE datname IN ('laplace','ahart');" \
+        "SELECT datname FROM pg_database WHERE datname = 'laplace';" \
         2>/dev/null || echo "  (substrate cluster unavailable)"
 
     say "Stripe sandbox env block (runner .env)"
@@ -1716,7 +1722,6 @@ do_bootstrap() {
     bootstrap_pg_roles
     bootstrap_pg_tempspace
     bootstrap_pg_log_retention
-    bootstrap_pg_legacy_cleanup
     bootstrap_pg_auth
     bootstrap_pg_database_and_postgis
 
@@ -1742,15 +1747,23 @@ do_bootstrap() {
 
     echo
     echo "Peer auth (OS laplace-runner → PG laplace_admin on 'postgres' DB):"
-    sudo -u "$RUNNER_USER" psql -d postgres -U laplace_admin -tAc \
+    sudo -u "$RUNNER_USER" "$LAPLACE_PG_PREFIX/bin/psql" -d postgres -U laplace_admin -tAc \
         "SELECT current_user || ' on ' || current_database();" 2>&1 \
         | sed 's/^/  → /'
 
-    echo
-    echo "Peer auth (OS ahart → PG laplace_admin on 'postgres' DB):"
-    sudo -u ahart psql -d postgres -U laplace_admin -tAc \
-        "SELECT current_user || ' on ' || current_database();" 2>&1 \
-        | sed 's/^/  → /'
+    if [ -n "$GH_SUDO_USER" ]; then
+        echo
+        echo "Peer auth (OS $GH_SUDO_USER → matching PG operator on 'postgres' DB):"
+        sudo -u "$GH_SUDO_USER" "$LAPLACE_PG_PREFIX/bin/psql" -d postgres -tAc \
+            "SELECT current_user || ' on ' || current_database();" 2>&1 \
+            | sed 's/^/  → /'
+
+        echo
+        echo "Administrative role path (OS $GH_SUDO_USER → PG laplace_admin):"
+        sudo -u "$GH_SUDO_USER" "$LAPLACE_PG_PREFIX/bin/psql" -d postgres -U laplace_admin -tAc \
+            "SELECT current_user || ' on ' || current_database();" 2>&1 \
+            | sed 's/^/  → /'
+    fi
 
     echo
     echo "Sudoers entry (laplace-runner NOPASSWD for /usr/bin/cmake --install + legacy /usr/bin/make install*):"

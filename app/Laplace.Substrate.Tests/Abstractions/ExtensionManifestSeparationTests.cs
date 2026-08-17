@@ -16,6 +16,10 @@ public sealed class ExtensionManifestSeparationTests
 
         Assert.Contains("generated/seed_relation_partitions.sql.in", install);
         Assert.DoesNotContain("drop_retired_", install);
+        Assert.True(
+            install.IndexOf("generated/seed_relation_partitions.sql.in", StringComparison.Ordinal)
+            < install.IndexOf("bootstrap/bootstrap.sql.in", StringComparison.Ordinal),
+            "fresh partition topology must exist before bootstrap deposits its first attestation");
 
         Assert.DoesNotContain("generated/seed_relation_partitions.sql.in", upgrade);
         Assert.DoesNotContain("schema/tables/entities.sql.in", upgrade);

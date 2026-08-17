@@ -33,15 +33,23 @@ set -euo pipefail
 
 CLI="${LAPLACE_CLI:-$(dirname "$0")/../app/Laplace.Cli/bin/Release/net10.0/Laplace.Cli}"
 [ -x "$CLI" ] || CLI="dotnet run --project $(dirname "$0")/../app/Laplace.Cli/Laplace.Cli.csproj --"
+LAPLACE_PG_PREFIX="${LAPLACE_PG_PREFIX:-/opt/laplace/pgsql-18}"
+PSQL="$LAPLACE_PG_PREFIX/bin/psql"
+[ -x "$PSQL" ] || { echo "::error::Laplace psql missing: $PSQL" >&2; exit 127; }
+PGHOST="${PGHOST:-/var/run/postgresql}"
+PGPORT="${PGPORT:-5432}"
+PGUSER="${PGUSER:-laplace_admin}"
+PGDATABASE="${PGDATABASE:-laplace}"
+PSQL_TARGET=(-h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE")
 
 usage() { sed -n '2,8p' "$0" >&2; exit 2; }
 
 case "${1:-}" in
   -c) shift; stmt="${1:?-c needs a statement}"
-      exec $CLI measure-lane psql -v ON_ERROR_STOP=1 -c "\timing on" -c "$stmt" ;;
+      exec $CLI measure-lane "$PSQL" "${PSQL_TARGET[@]}" -v ON_ERROR_STOP=1 -c "\timing on" -c "$stmt" ;;
   -f) shift; path="${1:?-f needs a path}"
       [ -r "$path" ] || { echo "::error::unreadable: $path" >&2; exit 2; }
-      exec $CLI measure-lane psql -v ON_ERROR_STOP=1 -c "\timing on" -f "$path" ;;
+      exec $CLI measure-lane "$PSQL" "${PSQL_TARGET[@]}" -v ON_ERROR_STOP=1 -c "\timing on" -f "$path" ;;
   --) shift; [ $# -gt 0 ] || usage
       exec $CLI measure-lane "$@" ;;
   *)  usage ;;
