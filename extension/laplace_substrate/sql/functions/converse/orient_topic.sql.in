@@ -6,7 +6,6 @@
 -- operation widens to the language-neutral candidate set.  The receipt travels
 -- with every returned candidate so callers can distinguish an ordinary
 -- primary-language resolution from a widened turn.
-DROP FUNCTION IF EXISTS converse.orient_topic(text, bytea);
 CREATE OR REPLACE FUNCTION converse.orient_topic(
         p_prompt text,
         p_primary_language bytea DEFAULT NULL)
@@ -23,8 +22,7 @@ BEGIN ATOMIC
     WITH candidates AS MATERIALIZED (
         SELECT y.synset_id,
                converse.word_language(y.synset_id) AS lang,
-               (COALESCE(y.specificity, 0)
-                * GREATEST(COALESCE(y.denote_mu, 0), 1)) AS weighted,
+               y.denote_mu,
                y.specificity,
                y.rel_mass,
                y.peers,
@@ -89,17 +87,18 @@ BEGIN ATOMIC
            OR c.lang = d.effective_language
     )
     SELECT row_number() OVER (ORDER BY
-               s.weighted DESC,
-               s.specificity DESC NULLS LAST,
-               s.rel_mass DESC NULLS LAST,
-               s.peers DESC,
-               s.ord DESC,
-               s.synset_id)::int,
-           s.synset_id,
-           s.lang,
+               (COALESCE(y.specificity, 0)
+                * GREATEST(COALESCE(y.denote_mu, 0), 1)) DESC,
+               y.specificity DESC NULLS LAST,
+               y.rel_mass DESC NULLS LAST,
+               y.peers DESC,
+               y.ord DESC,
+               y.synset_id)::int,
+           y.synset_id,
+           y.lang,
            p_primary_language,
-           s.observed_language,
-           s.effective_language,
-           s.mode <> 0
-    FROM selected s;
+           y.observed_language,
+           y.effective_language,
+           y.mode <> 0
+    FROM selected y;
 END;

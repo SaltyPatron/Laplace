@@ -190,7 +190,7 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
     public Task<IReadOnlyList<ConverseRow>> ConverseAsync(
         string prompt, byte[]? session, ConverseOptions options, CancellationToken ct) =>
         options.Shape is null && options.Bands is null && !options.Elaborate
-            && options.LanguageCode is null
+            && !string.Equals(options.LanguageSource, "request", StringComparison.Ordinal)
             ? ConverseAsync(prompt, session, ct)
             : Task.FromResult<IReadOnlyList<ConverseRow>>(
             [

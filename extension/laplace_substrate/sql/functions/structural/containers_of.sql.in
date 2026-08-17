@@ -36,7 +36,6 @@ CREATE OR REPLACE FUNCTION structural.containers_of(
 -- rather than allowing array containment's empty-set truth to scan every
 -- physicality.
 DROP FUNCTION IF EXISTS laplace.containers_containing_all(bytea[]);
-DROP FUNCTION IF EXISTS structural.containers_containing_all(bytea[]);
 CREATE OR REPLACE FUNCTION structural.containers_containing_all(p_members bytea[])
     RETURNS TABLE(entity_id bytea)
     LANGUAGE sql STABLE PARALLEL SAFE

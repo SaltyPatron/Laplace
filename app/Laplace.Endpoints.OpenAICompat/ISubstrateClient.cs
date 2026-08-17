@@ -9,7 +9,8 @@ internal readonly record struct ConverseOptions(
     int[]? Bands = null,
     bool Elaborate = false,
     string? LanguageCode = null,
-    byte[]? Language = null);
+    byte[]? Language = null,
+    string? LanguageSource = null);
 
 
 

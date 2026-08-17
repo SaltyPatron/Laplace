@@ -181,6 +181,7 @@ functions/converse/resolve_phrase.sql.in
 functions/converse/resolve.sql.in
 functions/converse/prompt_state.sql.in
 functions/converse/prompt_coherence.sql.in
+functions/converse/prompt_language.sql.in
 functions/converse/first_placed_topic.sql.in
 functions/converse/realize_path_with_dirs.sql.in
 functions/converse/realize_path.sql.in
@@ -214,6 +215,7 @@ functions/converse/structural_locale.sql.in
 functions/converse/links.sql.in
 inference/attention.sql.in
 functions/converse/correlate.sql.in
+functions/converse/drop_recompiled_prompt_programs.sql.in
 generated/relation_family_ids.sql.in
 generated/relation_set_ids.sql.in
 generated/seed_relation_types.sql.in
@@ -224,9 +226,6 @@ functions/structural/word_curve.sql.in
 functions/structural/word_shape_distance.sql.in
 functions/structural/anagrams_of.sql.in
 functions/structural/containers_of.sql.in
-functions/converse/operation_frame_routes.sql.in
-functions/converse/compile_prompt.sql.in
-functions/converse/execute_prompt.sql.in
 functions/structural/geometry_successors.sql.in
 functions/structural/collocates.sql.in
 functions/structural/entity_curve.sql.in
@@ -237,6 +236,8 @@ functions/structural/consensus_export_unary.sql.in
 functions/structural/consensus_export_relations_mu.sql.in
 functions/structural/model_recipes.sql.in
 functions/lexical/word_case_variants.sql.in
+functions/converse/operation_frame_routes.sql.in
+functions/converse/compile_prompt.sql.in
 functions/lexical/word_case_variant_ids.sql.in
 functions/lexical/drop_retired_case_surface.sql.in
 functions/converse/drop_retired_english_router.sql.in
@@ -342,6 +343,7 @@ functions/contrast/consensus_subject_edges.sql.in
 functions/contrast/physicality_count.sql.in
 functions/variant/consensus_peer.sql.in
 functions/variant/trajectory_unpacked_points.sql.in
+functions/converse/execute_prompt.sql.in
 functions/variant/entity_tier_of.sql.in
 functions/variant/entity_has_trajectory.sql.in
 functions/variant/respell_variant_seed.sql.in
@@ -456,7 +458,6 @@ functions/chess/chess_distance_to_syzygy.sql.in
 functions/chess/chess_missed_finish.sql.in
 functions/chess/chess_opening_endgames.sql.in
 functions/lexical/sense_audit.sql.in
-functions/converse/prompt_language.sql.in
 functions/converse/election_token_profile.sql.in
 functions/structural/geometry_audit.sql.in
 functions/converse/resolve_audit.sql.in
