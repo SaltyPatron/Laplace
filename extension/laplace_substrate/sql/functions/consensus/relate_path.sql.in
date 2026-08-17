@@ -51,10 +51,29 @@ AS $$
     -- what should choose the sense: the pair of senses that are actually related is the pair
     -- with a path between them. Widening the seed is affordable only because the closures
     -- below now dedup on (node, d) -- see the phase note.
-    xset(id) AS (SELECT p_x UNION SELECT sn.synset_id FROM lexical.senses(p_x) sn
-                 WHERE sn.synset_id IS NOT NULL),
-    yset(id) AS (SELECT p_y UNION SELECT sn.synset_id FROM lexical.senses(p_y) sn
-                 WHERE sn.synset_id IS NOT NULL),
+    -- THE SENSE EDGE IS ON THE PATH, SO IT IS IN THE BOTTLENECK. Seeding every sense
+    -- equally and ranking on length alone elects whichever sense sits in the shallowest
+    -- hierarchy, which is reliably the rarest one: cat/dog came back
+    -- 'guy —is a→ man —is a→ male ←is a— fellow ←is a— dog' and bird/fish started at
+    -- 'dame'. Those are real WordNet senses and the paths are true; they are just not the
+    -- reading either word carries.
+    --
+    -- The walk really does traverse word -> synset before its first IS_A hop, and that hop
+    -- has an adjudicated eff_mu like any other. It was simply omitted — the seed started at
+    -- mu NULL, so the sense link cost nothing and a rare sense was free. Carrying it makes
+    -- the bottleneck the bottleneck of the WHOLE path.
+    --
+    -- This adds no scalar. sn.eff_mu is the same adjudicated rating consensus already holds,
+    -- entering the same LEAST() as every other edge on the path — not a weight invented here
+    -- and injected into the election, which §4 forbids by name.
+    xset(id, smu) AS (SELECT p_x, NULL::numeric
+                      UNION
+                      SELECT sn.synset_id, sn.eff_mu FROM lexical.senses(p_x) sn
+                      WHERE sn.synset_id IS NOT NULL),
+    yset(id, smu) AS (SELECT p_y, NULL::numeric
+                      UNION
+                      SELECT sn.synset_id, sn.eff_mu FROM lexical.senses(p_y) sn
+                      WHERE sn.synset_id IS NOT NULL),
     direct AS (
         SELECT ARRAY[x.id, c.object_id] AS nodes, ARRAY[c.type_id] AS types,
                ARRAY[1] AS dirs, consensus.eff_mu_display(c.rating, c.rd) AS mu, 1 AS len,
@@ -117,7 +136,7 @@ AS $$
     ),
     meets AS (SELECT * FROM meet WHERE len = (SELECT min(len) FROM meet)),
     rx(node, path, types, mu, d) AS (
-        SELECT id, ARRAY[id], ARRAY[]::bytea[], NULL::numeric, 0 FROM xset
+        SELECT id, ARRAY[id], ARRAY[]::bytea[], smu, 0 FROM xset
         UNION ALL
         SELECT c.object_id, r.path || c.object_id, r.types || c.type_id,
                LEAST(COALESCE(r.mu, consensus.eff_mu_display(c.rating, c.rd)),
@@ -129,7 +148,7 @@ AS $$
         WHERE r.d < (SELECT COALESCE(max(dx), 0) FROM meets)
     ),
     ry(node, path, types, mu, d) AS (
-        SELECT id, ARRAY[id], ARRAY[]::bytea[], NULL::numeric, 0 FROM yset
+        SELECT id, ARRAY[id], ARRAY[]::bytea[], smu, 0 FROM yset
         UNION ALL
         SELECT c.object_id, r.path || c.object_id, r.types || c.type_id,
                LEAST(COALESCE(r.mu, consensus.eff_mu_display(c.rating, c.rd)),
