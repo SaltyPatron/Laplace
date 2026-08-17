@@ -6,8 +6,8 @@ using Xunit;
 namespace Laplace.Decomposers.Abstractions.Tests;
 
 /// <summary>
-/// Tier is a FLOOR, not identity (CLAUDE.md / 05_Substrate_Invariants Rule
-/// #1b): same content = same hash at every tier; `tier` records the lowest
+/// Tier is a floor, not identity (05_Substrate_Invariants #1b): same content =
+/// same hash at every tier; `tier` records the lowest
 /// form only. A one-word content unit IS the word — "dog" ingested alone
 /// must not mint a separate sentence/document entity wrapping the word;
 /// its root id must equal the word's id.

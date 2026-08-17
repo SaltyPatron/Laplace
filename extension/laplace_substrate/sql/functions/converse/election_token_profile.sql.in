@@ -34,28 +34,37 @@ CREATE OR REPLACE FUNCTION converse.election_token_profile(p_surfaces text[])
         icf_x_sat      double precision,
         bands          integer)
     LANGUAGE sql STABLE AS $$
-    WITH t AS (
+    WITH t AS MATERIALIZED (
         SELECT s.ord, s.surface, laplace.word_id(s.surface) AS id
         FROM unnest(p_surfaces) WITH ORDINALITY AS s(surface, ord)
     ),
-    deg AS (
-        SELECT t.ord, d.degree, d.icf
-        FROM t
-        LEFT JOIN LATERAL structural.entity_container_degree(ARRAY[t.id]) d ON true
+    ids AS MATERIALIZED (
+        SELECT i.id
+        FROM (SELECT DISTINCT t.id FROM t WHERE t.id IS NOT NULL) i
     ),
-    edg AS (
-        SELECT t.ord,
+    -- The array operation is invoked once for the bounded token set, not once
+    -- with a one-element array for every token.
+    deg AS MATERIALIZED (
+        SELECT d.entity_id, d.degree, d.icf
+        FROM (SELECT array_agg(ids.id ORDER BY ids.id) AS a FROM ids) b
+        CROSS JOIN LATERAL structural.entity_container_degree(b.a) d
+    ),
+    -- The bounded ids drive subject-key probes directly. consensus_out hid the
+    -- same scan behind one SRF invocation per token and imposed a 1,000,000-row
+    -- truncation before this aggregate. A profile needs the full count; it does
+    -- not need edge ordering or rendering.
+    edg AS MATERIALIZED (
+        SELECT ids.id AS entity_id,
                count(c.type_id)                                  AS out_edges,
                COALESCE(sum(c.witness_count), 0)::bigint         AS witnesses
-        FROM t
-        LEFT JOIN LATERAL consensus.consensus_out(t.id, 1000000) c ON true
-        GROUP BY t.ord
+        FROM ids
+        LEFT JOIN laplace.consensus c ON c.subject_id = ids.id
+        GROUP BY ids.id
     ),
-    msk AS (
-        SELECT t.ord,
-               COALESCE(consensus.highway_popcount(m.highway_mask), 0) AS bands
-        FROM t
-        LEFT JOIN LATERAL generation.entity_highway_masks(ARRAY[t.id]) m ON true
+    ent AS MATERIALIZED (
+        SELECT ids.id AS entity_id, e.highway_mask
+        FROM ids
+        LEFT JOIN laplace.entities e ON e.id = ids.id
     )
     SELECT t.surface,
            t.id,
@@ -67,10 +76,10 @@ CREATE OR REPLACE FUNCTION converse.election_token_profile(p_surfaces text[])
            consensus.foundry_witness_sat(COALESCE(edg.witnesses, 0)),
            COALESCE(deg.icf, 1.0)
                * consensus.foundry_witness_sat(COALESCE(edg.witnesses, 0)),
-           COALESCE(msk.bands, 0)
+           COALESCE(consensus.highway_popcount(ent.highway_mask), 0)
     FROM t
-    LEFT JOIN deg ON deg.ord = t.ord
-    LEFT JOIN edg ON edg.ord = t.ord
-    LEFT JOIN msk ON msk.ord = t.ord
+    LEFT JOIN deg ON deg.entity_id = t.id
+    LEFT JOIN edg ON edg.entity_id = t.id
+    LEFT JOIN ent ON ent.entity_id = t.id
     ORDER BY t.ord
 $$;

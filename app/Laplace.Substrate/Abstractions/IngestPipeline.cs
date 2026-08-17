@@ -148,6 +148,13 @@ public sealed class IngestBatchConfig
 
     /// <summary>Per-source byte model for the working-set memory estimate valve.</summary>
     public IngestSourceProfile? WorkingSetProfile { get; init; }
+
+    /// <summary>
+    /// Working sets that may be resident concurrently in this process. Multi-file and
+    /// segmented lanes set this from their actual fan-out so each set receives a share of
+    /// the one compose-memory envelope instead of every set claiming the whole envelope.
+    /// </summary>
+    public int ConcurrentWorkingSets { get; init; } = 1;
     public int CommitEpoch { get; init; }
     public ISubstrateReader? ContainmentReader { get; init; }
     public Action<long>? ReportUnits { get; init; }
@@ -177,7 +184,7 @@ public sealed class IngestBatchConfig
 
     internal ISubstrateReader? EffectiveReader => ContainmentReader;
 
-    public IngestBatchConfig WithMaxInputUnits(long max) =>
+    private IngestBatchConfig Copy(long? maxInputUnits = null, int? concurrentWorkingSets = null) =>
         new()
         {
             SourceId = SourceId,
@@ -188,16 +195,40 @@ public sealed class IngestBatchConfig
             CommitEpoch = CommitEpoch,
             ContainmentReader = ContainmentReader,
             ReportUnits = ReportUnits,
-            MaxInputUnits = max,
+            MaxInputUnits = maxInputUnits ?? MaxInputUnits,
             EnableDeferredContentOnBuilder = EnableDeferredContentOnBuilder,
             EntityCapacity = EntityCapacity,
             PhysicalityCapacity = PhysicalityCapacity,
             AttestationCapacity = AttestationCapacity,
             WorkingSet = WorkingSet,
-            WorkingSetProbeInterval = WorkingSetProbeInterval,
-            WorkingSetRecordCap = WorkingSetRecordCap,
+            WorkingSetProbeInterval = concurrentWorkingSets is { } concurrency
+                ? Math.Min(
+                    WorkingSetProbeInterval ?? int.MaxValue,
+                    IngestSizing.ResolveWorkingSetProbeInterval(
+                        BatchSize,
+                        WorkingSetProfile ?? IngestSourceProfile.Default,
+                        IngestSizing.ResolveWorkingSetFlushEnvelopeBytes(concurrency)))
+                : WorkingSetProbeInterval,
+            WorkingSetRecordCap = concurrentWorkingSets is { } concurrencyCap
+                ? Math.Min(
+                    WorkingSetRecordCap ?? int.MaxValue,
+                    IngestSizing.ResolveFlushEnvelopeRecordCap(
+                        WorkingSetProfile ?? IngestSourceProfile.Default,
+                        IngestSizing.ResolveWorkingSetFlushEnvelopeBytes(concurrencyCap)))
+                : WorkingSetRecordCap,
             WorkingSetProfile = WorkingSetProfile,
+            ConcurrentWorkingSets = concurrentWorkingSets ?? ConcurrentWorkingSets,
         };
+
+    public IngestBatchConfig WithMaxInputUnits(long max) => Copy(maxInputUnits: max);
+
+    public IngestBatchConfig WithWorkingSetConcurrency(int concurrentWorkingSets)
+    {
+        int concurrency = Math.Max(ConcurrentWorkingSets, Math.Max(1, concurrentWorkingSets));
+        return concurrency == ConcurrentWorkingSets
+            ? this
+            : Copy(concurrentWorkingSets: concurrency);
+    }
 }
 
 public static class IngestBatchPipeline
@@ -682,6 +713,9 @@ public static class IngestBatchPipeline
         if (exhaustedInPeek && peeked.Count > 0)
             segmentsPerFile = Math.Max(1,
                 Math.Max(1, IngestTopology.Current.ComposeWorkers) / peeked.Count);
+        int concurrentWorkingSets = exhaustedInPeek
+            ? Math.Max(1, peeked.Count * segmentsPerFile)
+            : Math.Max(1, workers);
 
         // Resolve the resume question a CHUNK at a time on the way into the channel: file
         // identities in parallel (pure CPU: read + BLAKE3), then ONE marker probe for the
@@ -787,17 +821,6 @@ public static class IngestBatchPipeline
         int knownFileTotal = exhaustedInPeek ? peeked.Count : 0;
         int fileOrdinal = 0;
 
-        // ADMISSION BY BYTES, NOT BY FILE COUNT. The pool is bounded at `workers`, and a
-        // worker composes its file end to end, so the memory in flight is the SUM OF THE
-        // FILES the pool is holding — a quantity a count cannot bound when a source's files
-        // span five orders of magnitude. MEASURED 2026-08-15 on UD: 686 treebanks from
-        // 4,577 B to 360,217,466 B against file_workers=10 and a declared 4 GiB working-set
-        // budget; RSS reached 83,136,288 kB and the kernel OOM-killer took the run at file
-        // 30 with rows_new still 0 — nothing had committed, so all of it was composed
-        // records held by workers. The budget is the one the sizing plan already declares,
-        // not a new dial.
-        var admission = new ByteAdmissionGate(IngestSizing.ResolveWorkingSetBudgetBytes());
-
         var workerTasks = new Task[workers];
         for (int w = 0; w < workers; w++)
         {
@@ -810,7 +833,8 @@ public static class IngestBatchPipeline
             {
                 await foreach (var source in sources.Reader.ReadAllAsync(ct))
                 {
-                    var config = configFactory(source.FileLabel);
+                    var config = configFactory(source.FileLabel)
+                        .WithWorkingSetConcurrency(concurrentWorkingSets);
 
                     // Per-file resume (GH #898): identity + marker check happen in the
                     // WORKER, so skips parallelize with the ingest they replace.
@@ -835,13 +859,6 @@ public static class IngestBatchPipeline
                         continue;
                     }
 
-                    // Admitted on the file's INPUT size, held until the file is done.
-                    // Acquired after the resume skip so a marker-complete file — which
-                    // opens nothing and composes nothing — never consumes budget.
-                    long admitBytes = TryFileBytes(source.FilePath);
-                    await admission.AcquireAsync(admitBytes, ct).ConfigureAwait(false);
-                    try
-                    {
                     var records = new AsyncEnumerableRecordStream<TRecord>(source.RecordsAsync(ct));
                     int segments = segmentsPerFile > 1
                         ? MonolithSegmenter.ResolveSegments(config, segmentsPerFile)
@@ -861,7 +878,8 @@ public static class IngestBatchPipeline
                         ? MonolithSegmenter.RunSegmentedAsync(
                             records,
                             _ => handlerFactory(source.FileLabel),
-                            _ => configFactory(source.FileLabel),
+                            _ => configFactory(source.FileLabel)
+                                .WithWorkingSetConcurrency(concurrentWorkingSets),
                             segments,
                             MonolithSegmenter.ResolveChunkRecords(config),
                             source.FileLabel,
@@ -908,13 +926,6 @@ public static class IngestBatchPipeline
                             $"INGEST_FILE_COMPOSED file={source.FileLabel} worker={workerId} "
                             + $"records={fileUnits:N0} elapsed_s={secs:F1} rate_rec_s={fileUnits / secs:N0}");
                     }
-                    }
-                    finally
-                    {
-                        // Released on every exit including the `continue` above: a failed
-                        // file must not hold budget for the life of the run.
-                        await admission.ReleaseAsync(admitBytes).ConfigureAwait(false);
-                    }
                 }
             }, ct);
         }
@@ -947,7 +958,8 @@ public static class IngestBatchPipeline
         // a ~4 GiB set filled with ~3M records before flushing). The envelope (RAM/64,
         // <= 512 MiB) closes the set continuously in small memory-bounded batches so resident
         // memory stays flat and compose stays fast.
-        long envelope = IngestSizing.ResolveWorkingSetFlushEnvelopeBytes();
+        long envelope = IngestSizing.ResolveWorkingSetFlushEnvelopeBytes(
+            config.ConcurrentWorkingSets);
 
         int recordCap = Math.Min(
             config.WorkingSetRecordCap ?? int.MaxValue,

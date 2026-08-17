@@ -5,7 +5,7 @@
 -- this table -- ~96% of its index-entry writes -- and admitting a second shape into it
 -- would put set writes behind the same pending-list flush that the text seed already
 -- saturates. And the two shapes answer different questions: a text trajectory's
--- constituent order carries sequence (CLAUDE.md, sequence-is-geometry), a set's does
+-- constituent order carries sequence, while a set's does
 -- not, so a probe that means "contains this token at some offset" and one that means
 -- "this member is in the set" must not share a posting list.
 --

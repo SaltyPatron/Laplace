@@ -1,9 +1,0 @@
----
-globs: app/Laplace.Decomposers/**
-alwaysApply: false
----
-
-Read `.github/instructions/decomposers.instructions.md`. Decomposers are pure
-content-to-`SubstrateChange` streams with no SQL. The shared Rule #8 spine owns dedup,
-descent, COPY, and fold. Preserve SourceIds and verify current dispatch before editing;
-never select a path from archived lane reports.

@@ -3,8 +3,8 @@ namespace Laplace.Engine.Core;
 /// <summary>
 /// The one place C# composes a substrate canonical key.
 ///
-/// Law (CLAUDE.md): ids are NEVER constructed outside the system — realize.canonical_id(),
-/// source_id(), relation_type_id() and consensus_id() resolve through the native hash.
+/// Canonical ids resolve through the native hash used by realize.canonical_id(),
+/// source_id(), relation_type_id(), and consensus_id().
 /// 152 hand-typed canonical-key literals (raw <c>OfCanonical</c> calls) were scattered
 /// across the app, where a single typo mints a DIFFERENT entity and nothing complains:
 /// the write succeeds, the id is simply wrong forever.

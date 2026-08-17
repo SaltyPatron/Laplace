@@ -4,7 +4,7 @@
 The 2026-07-18 forest audit found every counted claim in prose (project count,
 decomposer count, relation count, SQL family count) had silently drifted from
 the tree. This script makes those facts a deterministic function of the source:
-prose docs (README, CLAUDE.md, continuity) cite docs/INVENTORY.md instead of
+prose docs cite docs/INVENTORY.md instead of
 embedding counts, and the CI policy job fails when the committed file no longer
 matches a regeneration (same shape as the codegen determinism gate).
 

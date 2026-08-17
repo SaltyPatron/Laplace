@@ -18,8 +18,8 @@
 -- shortlist artifact; but ingesting one more witnessed object for the same subject
 -- and relation changes every other p. A distribution over what has been attested is
 -- the only thing evidence supports, and it is not a distribution over what is so.
--- subject_id + type_id prunes laplace.consensus to 1 leaf of 216 (CLAUDE.md §4,
--- measured), so the full set is one index range and the window has nothing to fan
+-- subject_id + type_id prunes laplace.consensus to one measured leaf, so the full
+-- set is one index range and the window has nothing to fan
 -- out over.
 --
 -- ORDER AND MASS ARE THE SAME OBJECT. INVENTION §5: belief is rating - 2*rd and "all

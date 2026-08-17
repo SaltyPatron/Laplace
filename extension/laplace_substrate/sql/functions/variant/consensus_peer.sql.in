@@ -16,8 +16,8 @@ BEGIN
     -- hash tie-break -- identical to the old UNION's hash pick over `elected`.
     --
     -- p_id's own edge set is read BOTH ways as two direction-pinned arms unioned,
-    -- never as `subject_id = p_id OR object_id = p_id` (GH #871, spec 37 OP5,
-    -- CLAUDE.md's read rules). That disjunction spans two different leading
+    -- never as `subject_id = p_id OR object_id = p_id` (GH #871, spec 37 OP5).
+    -- That disjunction spans two different leading
     -- columns, so it is not an index qual on either consensus_subject_type_btree
     -- or consensus_object_type_btree: the planner's only options are a BitmapOr
     -- across both or a scan, which is the shape spec 37 blames for the 280s hang.

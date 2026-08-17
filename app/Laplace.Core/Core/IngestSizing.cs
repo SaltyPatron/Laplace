@@ -195,8 +195,9 @@ public static class IngestSizing
     /// Far below the apply COPY budget so compose flushes continuously and stays fast; see
     /// <see cref="MemoryTopology.WorkingSetFlushEnvelopeBytes"/> for the rationale.
     /// </summary>
-    public static long ResolveWorkingSetFlushEnvelopeBytes() =>
-        MemoryTopology.WorkingSetFlushEnvelopeBytes;
+    public static long ResolveWorkingSetFlushEnvelopeBytes(int concurrentWorkingSets = 1) =>
+        Math.Max(1, MemoryTopology.WorkingSetFlushEnvelopeBytes
+            / Math.Max(1, concurrentWorkingSets));
 
     /// <summary>
     /// Hard record ceiling for one working set derived from the flush envelope and the
@@ -210,7 +211,7 @@ public static class IngestSizing
         long envelope = flushEnvelopeBytes ?? ResolveWorkingSetFlushEnvelopeBytes();
         double perRecord = Math.Max(1, profile.WorkingSetBytesPerRecord) * WorkingSetResidentSlack;
         long cap = (long)(envelope / perRecord);
-        return (int)Math.Clamp(cap, 256, int.MaxValue);
+        return (int)Math.Clamp(cap, 1, int.MaxValue);
     }
 
     /// <summary>
@@ -387,9 +388,9 @@ public static class IngestSizing
     /// mid-stream and applied as intents=1 / ~281k entity verify (measured 2026-08-06).
     /// </summary>
     public static int ResolveWorkingSetProbeInterval(
-        int recordBatchSize, IngestSourceProfile profile)
+        int recordBatchSize, IngestSourceProfile profile, long? flushEnvelopeBytes = null)
     {
-        int flushCap = ResolveFlushEnvelopeRecordCap(profile);
+        int flushCap = ResolveFlushEnvelopeRecordCap(profile, flushEnvelopeBytes);
         int raw = recordBatchSize * Math.Max(1, profile.EstComposeUnitsPerRecord);
         // Stay at or under flushCap so pending cannot outrun the envelope close.
         int capped = Math.Min(raw, flushCap);

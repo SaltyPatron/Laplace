@@ -1,189 +1,37 @@
--- consensus.relate_path — GH #862.
+-- Native path election. The C implementation expands each taxonomy frontier in
+-- one batched SPI call per depth, deduplicates by node at minimum depth, and
+-- retains the widest bottleneck on same-depth rediscovery. Every lexical sense
+-- seeds both arms with its attested sense mu. The lateral plane is two batched
+-- scans over the same installed taxonomy edge surface, one per orientation.
+-- Relation membership remains owned by the manifest-generated
+-- consensus.relation_set_ids operation; no relation roster is duplicated here
+-- or in C.
+DROP FUNCTION IF EXISTS laplace.relate_path_raw(bytea, bytea, int);
+CREATE OR REPLACE FUNCTION consensus.relate_path_raw(
+        p_x bytea,
+        p_y bytea,
+        p_depth int DEFAULT 7)
+    RETURNS TABLE(nodes bytea[], types bytea[], dirs int[],
+                  path_mu numeric, plane_type bytea)
+    LANGUAGE C STABLE STRICT PARALLEL SAFE
+    AS 'MODULE_PATHNAME', 'pg_laplace_relate_path_raw';
+
+-- Rendering is deliberately outside the search and runs once, after native
+-- election. There is no session SET clause: the body is fully qualified and
+-- remains eligible for SQL inlining.
 DROP FUNCTION IF EXISTS laplace.relate_path(bytea, bytea, int);
-CREATE OR REPLACE FUNCTION consensus.relate_path(p_x bytea, p_y bytea, p_depth int DEFAULT 7)
+CREATE OR REPLACE FUNCTION consensus.relate_path(
+        p_x bytea,
+        p_y bytea,
+        p_depth int DEFAULT 7)
     RETURNS TABLE(chain text, path_mu numeric, plane text)
     LANGUAGE sql STABLE PARALLEL SAFE
-    -- No SET search_path (GH #860). Body is purpose-/laplace-qualified; CTE names
-    -- (xset/yset/lat/…) are local and need no schema.
-AS $$
-    -- Candidate discovery is id/attestation logic only: every candidate carries
-    -- its node/type/direction arrays and numeric score, and the single winner is
-    -- picked on (len, mu) before any rendering. realize_path/type_label run
-    -- exactly once, on the winning row -- never inside the search. (The old body
-    -- rendered the chain text for every direct candidate edge even though
-    -- ORDER BY len, mu LIMIT 1 kept one row.)
-    WITH RECURSIVE
-    -- The lateral and upward relation sets are DECLARED in engine/manifest/relation_types.toml
-    -- ([[set]] PATH_LATERAL, PATH_UPWARD) and reached through consensus.relation_set_ids,
-    -- which codegen emits IMMUTABLE with every element a laplace.relation_type_id(<literal>)
-    -- -- a BLAKE3 of the name, no table access -- so the array folds to a literal bytea[]
-    -- before planning and the LIST partitions prune. Two of the four sites sit inside
-    -- RECURSIVE arms, so an unfoldable form pays that on every iteration.
-    --
-    -- A SET, NOT A FAMILY. consensus.relation_family_ids would fold identically, but its
-    -- membership is DERIVED from parent/family_root chains and does not match: measured
-    -- live, the IS_A family holds 3 members against the 2 the upward arm wants, and the
-    -- IS_SYNONYM_OF family holds only itself against the 11 the lateral arm wants.
-    -- Substituting one would silently change which edges a path may traverse.
-    --
-    -- Previously these were 13 names x 2 arms inlined here, which is why the g3 literalism
-    -- ceiling had to be raised 239 -> 262 to admit them (#S2). The names now live in the
-    -- manifest with the other 78 IS_A declaration sites, so the ceiling comes back down.
-    -- EVERY SENSE SEEDS THE SEARCH; THE PATH ELECTS THE SENSE. These were
-    -- `ORDER BY sn.eff_mu DESC LIMIT 1` per side, which is the §7 violation named in
-    -- CLAUDE.md §4 by its shape: a single-token scalar applied per token, in isolation,
-    -- BEFORE the joint election. It can delete the candidate the joint evidence would have
-    -- picked, and nothing downstream recovers it -- lca_pick can only join closures it was
-    -- given.
-    --
-    -- MEASURED 2026-08-16, cat <-> dog at p_depth 7. Seeded from the top synset alone the
-    -- two closures hold 9 nodes each and share NOTHING: relate_path returned zero rows for
-    -- two common nouns, with no error to say why. Seeded from all senses (8 for cat, 5 for
-    -- dog, every one of them carrying PATH_UPWARD out-edges) the closures hold 58 and 37
-    -- nodes and meet at 36 places, the shortest at total length 4.
-    --
-    -- The ranking was unreliable in the way the substrate is already known to be unreliable:
-    -- one gloss is deposited at several granularities and consensus splits across them, so
-    -- eff_mu across a word's senses is a tie-break wearing a rating's clothes. This is the
-    -- same reading behind SubstrateTools' refusal to auto-climb to bubble_up's top synset.
-    --
-    -- lca_pick's ORDER BY (len, then widest bottleneck mu) IS the joint election, and it is
-    -- what should choose the sense: the pair of senses that are actually related is the pair
-    -- with a path between them. Widening the seed is affordable only because the closures
-    -- below now dedup on (node, d) -- see the phase note.
-    -- THE SENSE EDGE IS ON THE PATH, SO IT IS IN THE BOTTLENECK. Seeding every sense
-    -- equally and ranking on length alone elects whichever sense sits in the shallowest
-    -- hierarchy, which is reliably the rarest one: cat/dog came back
-    -- 'guy —is a→ man —is a→ male ←is a— fellow ←is a— dog' and bird/fish started at
-    -- 'dame'. Those are real WordNet senses and the paths are true; they are just not the
-    -- reading either word carries.
-    --
-    -- The walk really does traverse word -> synset before its first IS_A hop, and that hop
-    -- has an adjudicated eff_mu like any other. It was simply omitted — the seed started at
-    -- mu NULL, so the sense link cost nothing and a rare sense was free. Carrying it makes
-    -- the bottleneck the bottleneck of the WHOLE path.
-    --
-    -- This adds no scalar. sn.eff_mu is the same adjudicated rating consensus already holds,
-    -- entering the same LEAST() as every other edge on the path — not a weight invented here
-    -- and injected into the election, which §4 forbids by name.
-    xset(id, smu) AS (SELECT p_x, NULL::numeric
-                      UNION
-                      SELECT sn.synset_id, sn.eff_mu FROM lexical.senses(p_x) sn
-                      WHERE sn.synset_id IS NOT NULL),
-    yset(id, smu) AS (SELECT p_y, NULL::numeric
-                      UNION
-                      SELECT sn.synset_id, sn.eff_mu FROM lexical.senses(p_y) sn
-                      WHERE sn.synset_id IS NOT NULL),
-    direct AS (
-        SELECT ARRAY[x.id, c.object_id] AS nodes, ARRAY[c.type_id] AS types,
-               ARRAY[1] AS dirs, consensus.eff_mu_display(c.rating, c.rd) AS mu, 1 AS len,
-               c.type_id AS plane_type
-        FROM xset x JOIN laplace.v_consensus_unrefuted c ON c.subject_id = x.id
-          AND c.object_id IN (SELECT id FROM yset)
-          AND c.type_id = ANY (consensus.relation_set_ids('PATH_LATERAL'))
-        UNION ALL
-        SELECT ARRAY[x.id, c.subject_id], ARRAY[c.type_id], ARRAY[-1],
-               consensus.eff_mu_display(c.rating, c.rd), 1, c.type_id
-        FROM xset x JOIN laplace.v_consensus_unrefuted c ON c.object_id = x.id
-          AND c.subject_id IN (SELECT id FROM yset)
-          AND c.type_id = ANY (consensus.relation_set_ids('PATH_LATERAL'))
-    ),
-    -- TWO PHASES, BECAUSE ONE ROW PER PATH IS NOT ONE ROW PER NODE. The upward closure
-    -- runs over an IS_A DAG, where a single ancestor is reachable by many distinct routes.
-    -- Carrying `path` for the cycle check made every one of those routes a separate row
-    -- (UNION ALL cannot collapse them -- the rows differ in `path`), so each arm produced
-    -- one row per PATH and re-expanded each of them, with two growing bytea[] columns
-    -- riding along to depth 7. That is the combinatorial term behind the 383 MB temp and
-    -- the 18,303,185 shared buffer hits: both arms paid it in full before the LCA join
-    -- cut the result to one row.
-    --
-    -- Phase 1 (ux0/uy0) searches on (node, d) alone. UNION now dedups, because two routes
-    -- to the same ancestor at the same depth ARE the same row -- the frontier is bounded by
-    -- |ancestors| x p_depth instead of by the number of paths, and no array is copied.
-    -- Cycle safety no longer needs `path`: a revisit reappears at a strictly greater d and
-    -- `u.d < p_depth` bounds it, and phase 2 only ever walks minimum depths, which are
-    -- simple by construction.
-    --
-    -- Phase 2 (rx/ry) rebuilds path/types/mu for the winning length only, over edges that
-    -- advance the minimum depth by exactly one (`nx.d = r.d + 1`) -- i.e. shortest-path
-    -- edges. The ordering is unchanged: minimum total length first, then the widest
-    -- bottleneck mu, so the row this picks is the row the old body picked.
-    ux0(node, d) AS (
-        SELECT id, 0 FROM xset
-        UNION
-        SELECT c.object_id, u.d + 1
-        FROM ux0 u JOIN laplace.v_consensus_unrefuted c ON c.subject_id = u.node
-          AND c.type_id = ANY (consensus.relation_set_ids('PATH_UPWARD')) AND c.object_id IS NOT NULL
-        WHERE u.d < p_depth
-    ),
-    uy0(node, d) AS (
-        SELECT id, 0 FROM yset
-        UNION
-        SELECT c.object_id, u.d + 1
-        FROM uy0 u JOIN laplace.v_consensus_unrefuted c ON c.subject_id = u.node
-          AND c.type_id = ANY (consensus.relation_set_ids('PATH_UPWARD')) AND c.object_id IS NOT NULL
-        WHERE u.d < p_depth
-    ),
-    uxm(node, d) AS (SELECT node, min(d) FROM ux0 GROUP BY node),
-    uym(node, d) AS (SELECT node, min(d) FROM uy0 GROUP BY node),
-    -- Every node reachable from both ends, and the shortest total length any of them gives.
-    -- The mu tiebreak cannot be applied here -- mu is a property of a path, not of a node --
-    -- so all meeting nodes at the minimum length survive into phase 2 and are ranked there.
-    meet AS (
-        SELECT uxm.node AS m, uxm.d AS dx, uym.d AS dy, uxm.d + uym.d AS len
-        FROM uxm JOIN uym ON uxm.node = uym.node
-        WHERE uxm.d > 0 OR uym.d > 0
-    ),
-    meets AS (SELECT * FROM meet WHERE len = (SELECT min(len) FROM meet)),
-    rx(node, path, types, mu, d) AS (
-        SELECT id, ARRAY[id], ARRAY[]::bytea[], smu, 0 FROM xset
-        UNION ALL
-        SELECT c.object_id, r.path || c.object_id, r.types || c.type_id,
-               LEAST(COALESCE(r.mu, consensus.eff_mu_display(c.rating, c.rd)),
-                     consensus.eff_mu_display(c.rating, c.rd)), r.d + 1
-        FROM rx r
-          JOIN laplace.v_consensus_unrefuted c ON c.subject_id = r.node
-            AND c.type_id = ANY (consensus.relation_set_ids('PATH_UPWARD')) AND c.object_id IS NOT NULL
-          JOIN uxm nx ON nx.node = c.object_id AND nx.d = r.d + 1
-        WHERE r.d < (SELECT COALESCE(max(dx), 0) FROM meets)
-    ),
-    ry(node, path, types, mu, d) AS (
-        SELECT id, ARRAY[id], ARRAY[]::bytea[], smu, 0 FROM yset
-        UNION ALL
-        SELECT c.object_id, r.path || c.object_id, r.types || c.type_id,
-               LEAST(COALESCE(r.mu, consensus.eff_mu_display(c.rating, c.rd)),
-                     consensus.eff_mu_display(c.rating, c.rd)), r.d + 1
-        FROM ry r
-          JOIN laplace.v_consensus_unrefuted c ON c.subject_id = r.node
-            AND c.type_id = ANY (consensus.relation_set_ids('PATH_UPWARD')) AND c.object_id IS NOT NULL
-          JOIN uym ny ON ny.node = c.object_id AND ny.d = r.d + 1
-        WHERE r.d < (SELECT COALESCE(max(dy), 0) FROM meets)
-    ),
-    lca_pick AS (
-        SELECT rx.path AS xp, rx.types AS xk, ry.path AS yp, ry.types AS yk,
-               LEAST(rx.mu, ry.mu) AS mu, rx.d + ry.d AS len
-        FROM meets mt
-          JOIN rx ON rx.node = mt.m AND rx.d = mt.dx
-          JOIN ry ON ry.node = mt.m AND ry.d = mt.dy
-        ORDER BY rx.d + ry.d, LEAST(rx.mu, ry.mu) DESC NULLS LAST LIMIT 1
-    ),
-    winner AS (
-        SELECT a.nodes, a.types, a.dirs, a.mu, a.len, a.plane_type
-        FROM (
-            SELECT nodes, types, dirs, mu, len, plane_type FROM direct
-            UNION ALL
-            SELECT xp || array_reverse(yp[1:cardinality(yp)-1]),
-                   xk || array_reverse(yk),
-                   (SELECT COALESCE(array_agg(1), ARRAY[]::int[]) FROM generate_subscripts(xk, 1))
-                       || (SELECT COALESCE(array_agg(-1), ARRAY[]::int[]) FROM generate_subscripts(yk, 1)),
-                   mu, len, NULL::bytea
-            FROM lca_pick
-        ) a ORDER BY a.len, a.mu DESC NULLS LAST LIMIT 1
-    )
-    SELECT realize.path(w.nodes, w.types, w.dirs,
-                        COALESCE(converse.word_language(p_x), converse.word_language(p_y))) AS chain,
-           w.mu AS path_mu,
-           CASE WHEN w.plane_type IS NULL THEN 'taxonomy'
-                ELSE lexical.type_label(w.plane_type) END AS plane
-    FROM winner w
-$$;
+BEGIN ATOMIC
+    SELECT realize.path(r.nodes, r.types, r.dirs,
+                        COALESCE(converse.word_language(p_x),
+                                 converse.word_language(p_y))) AS chain,
+           r.path_mu,
+           CASE WHEN r.plane_type IS NULL THEN 'taxonomy'
+                ELSE lexical.type_label(r.plane_type) END AS plane
+    FROM consensus.relate_path_raw(p_x, p_y, p_depth) r;
+END;

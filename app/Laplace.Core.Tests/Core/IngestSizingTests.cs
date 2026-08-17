@@ -85,17 +85,48 @@ public sealed class IngestSizingTests
     [Fact]
     public void ResolveWorkingSetProbeInterval_RawIntervalAboveFlushCap_ClampsToCap()
     {
-        // This profile drives the envelope-derived cap to its 256-record safety
-        // floor while raw=4*1000. The probe interval must never outrun that cap.
+        // This profile drives the envelope-derived cap below one record while
+        // raw=4*1000. One record is the forward-progress floor; the probe interval
+        // must never outrun it.
         var profile = new IngestSourceProfile(
             EstBytesPerRecord: 1_000_000,
             EstComposeUnitsPerRecord: 1_000);
         int flushCap = IngestSizing.ResolveFlushEnvelopeRecordCap(profile);
 
-        Assert.Equal(256, flushCap);
+        Assert.Equal(1, flushCap);
         Assert.True(4 * profile.EstComposeUnitsPerRecord > flushCap);
         Assert.Equal(flushCap,
             IngestSizing.ResolveWorkingSetProbeInterval(4, profile));
+    }
+
+    [Fact]
+    public void ResolveWorkingSetFlushEnvelope_DividesOneProcessBudgetAcrossConcurrentSets()
+    {
+        long one = IngestSizing.ResolveWorkingSetFlushEnvelopeBytes(1);
+        long ten = IngestSizing.ResolveWorkingSetFlushEnvelopeBytes(10);
+
+        Assert.Equal(one / 10, ten);
+        Assert.True(ten * 10 <= one);
+    }
+
+    [Fact]
+    public void UdResidentTreeEstimate_AndTenWorkers_ShareOneEnvelope()
+    {
+        var profile = IngestSourceProfile.UdSentence;
+        long processEnvelope = 512L << 20;
+        long workerEnvelope = processEnvelope / 10;
+
+        int oneWorkerCap = IngestSizing.ResolveFlushEnvelopeRecordCap(
+            profile, processEnvelope);
+        int tenWorkerCap = IngestSizing.ResolveFlushEnvelopeRecordCap(
+            profile, workerEnvelope);
+
+        Assert.Equal(83, oneWorkerCap);
+        Assert.Equal(8, tenWorkerCap);
+        Assert.True(
+            tenWorkerCap * 10L * profile.WorkingSetBytesPerRecord
+                * IngestSizing.WorkingSetResidentSlack
+            <= processEnvelope);
     }
 
     [Fact]

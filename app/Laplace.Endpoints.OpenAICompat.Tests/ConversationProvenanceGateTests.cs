@@ -91,7 +91,7 @@ public sealed class ConversationProvenanceGateTests
     }
 
     /// <summary>
-    /// converse.chat() is the ONLY conversational entry point (CLAUDE.md / spec 36): the CLI
+    /// converse.chat() is the conversational entry point described by spec 36: the CLI
     /// used to call generation.walk_text() directly with four hardcoded knobs, making it
     /// a sibling entry point that skipped language inference, the specificity
     /// election, shape dispatch and the responder family.

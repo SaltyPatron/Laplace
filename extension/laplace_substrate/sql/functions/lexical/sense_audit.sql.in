@@ -58,8 +58,8 @@ lang AS (
     -- ONE set-based scan, not converse.word_language() per row. #787 fixed the same G3
     -- violation by calling converse.word_language(synset_id) per candidate; that helper
     -- is STRICT and carries a SET clause, so it cannot inline, and each call is
-    -- its own consensus scan -- the per-row shape CLAUDE.md:75 sends to C and
-    -- W15 documents as a defect. Same G3 outcome, different cost.
+    -- its own consensus scan, the per-row shape W15 documents as a defect.
+    -- Same G3 outcome, different cost.
     SELECT c.subject_id AS synset_id, c.object_id AS lang_id,
            row_number() OVER (PARTITION BY c.subject_id
                               ORDER BY consensus.eff_mu(c.rating, c.rd) DESC, c.object_id) AS rk

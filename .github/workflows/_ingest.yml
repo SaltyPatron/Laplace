@@ -187,16 +187,15 @@ jobs:
           echo "$d writable: $(stat -c '%A %U:%G' "$d")"
 
       - name: Wait for the substrate to be free
-        # THE QUEUE, done properly. This BLOCKS; it never discards work.
-        # One ingest at a time is substrate law (CLAUDE.md, Operations), and
-        # the GitHub concurrency group that used to enforce it silently
+        # This blocks rather than discarding work. The GitHub concurrency group
+        # that used to serialize ingest silently
         # cancelled queued seeds instead of queueing them -- see the comment at
         # the top of this file.
         #
         # An active COPY on the target database means an ingest is running.
         # Wait it out rather than fighting it: a second concurrent ingest
         # contends on the same apply lock and index cycle, so it is slower for
-        # both AND violates the law. Timeout is generous because a real corpus
+        # both. Timeout is generous because a real corpus
         # ingest legitimately runs for hours.
         timeout-minutes: 600
         run: |

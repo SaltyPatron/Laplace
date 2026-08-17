@@ -164,8 +164,7 @@ in the query text and `p_limit DEFAULT 1000`. Measured: 83 ms for one id, and it
 exactly 1,000 rows** — silently truncated. The 84-atom fan-out costs 25.7 s.
 
 - [ ] Take an array of roots and expand the frontier in one pass.
-- [ ] Remove the cap or report what it dropped (CLAUDE.md: a cap gets the question *why does
-      the implementation need it at all*).
+- [ ] Remove the cap or return explicit truncation metadata.
 
 ## I. Dual definitions (§15)
 
@@ -231,7 +230,7 @@ it can only be the minimum over every container that content ever appeared in.
       test was deleting every single-character and single-grapheme CJK word.
 - [x] `trajectory_unpacked_points` now reads the tier from the packed vertex flags
       instead of a per-point `entities` lookup (3,642 points, 0 mismatches).
-- [ ] Remaining `ctier = 2` sites named in CLAUDE.md: `converse_tiered.sql.in:150`,
+- [ ] Remaining `ctier = 2` sites from the same audit: `converse_tiered.sql.in:150`,
       `senses_with_context.sql.in:95`, `explore_anchor_neighbors.sql.in:89`,
       `variant_synth.c:266`. Each needs the same question: what is the container?
 
@@ -468,8 +467,8 @@ this for every unprunable reference in the system.
 | `subject_id` only | 17 index + **9 Seq Scan** | `…_subject_id_type_id_idx` per type partition |
 | `attestations.subject_id` | 18 index + **9 Seq Scan** | `…_subject_id_type_id_object_id_idx` |
 
-The right index is chosen on every partition that holds data, and pruning matches the map in
-CLAUDE.md exactly. **Index choice is not a defect.**
+The right index is chosen on every partition that holds data, and pruning matches the map
+above. **Index choice is not a defect.**
 
 The 9 Seq Scans are the planner correctly declining to descend an index on an empty table.
 All 9 are the empty/near-empty partitions: `token_maps_to`, `attends`, `continues_to`,
@@ -751,7 +750,7 @@ the ingest was chosen on `oom_score_adj`.
       `ConcurrentDictionary<Hash128,byte>` over every entity + physicality id — but it is
       gated on `LAPLACE_PRESENCE_PRELOAD` / `NpgsqlIndexCycle.Deferred` and whether it ran
       in that job is NOT yet established. Do not report a cause without the log line.
-- [ ] Bound it by construction, per CLAUDE.md — not by a tuned cap.
+- [ ] Bound the retained state by construction rather than a tuned cap.
 
 ### S5. Chess — Postgres restarted underneath a running seed — **OPEN (policy)**
 

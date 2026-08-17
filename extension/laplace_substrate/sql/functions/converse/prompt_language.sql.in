@@ -2,9 +2,9 @@
 --
 -- NATIVE (src/prompt_language.c). The SQL body this replaces used
 -- converse.prompt_state() as a table source -- a per-row set-returning function -- and
--- called consensus.eff_mu() per row over a partitioned consensus join, which is the
--- exact shape CLAUDE.md:75 sends to C. Extracting it from converse.chat() made it
--- callable; porting it makes it lawful.
+-- called consensus.eff_mu() per row over a partitioned consensus join. Extracting it
+-- from converse.chat() made it callable; the native implementation removes that
+-- per-row SQL shape.
 --
 -- THE TALLY, EXTRACTED. This computation already existed -- inline, in the
 -- body of converse.chat() -- and was therefore callable by nothing. converse.converse(),

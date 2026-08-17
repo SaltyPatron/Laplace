@@ -12,8 +12,8 @@
 -- order would be a trajectory of PhysicalityType.Content, not PhysicalityType.Set.
 --
 -- The physicalities join is by entity_id while the table is HASH (id), so it probes
--- physicalities_entity_btree across all 64 leaves. That is the reverse-key cost
--- CLAUDE.md §4 records; it is bounded here because the consensus side has already
+-- physicalities_entity_btree across all 64 leaves. That reverse-key cost is bounded
+-- here because the consensus side has already
 -- pruned to one leaf on (subject_id, type_id) and yields at most a handful of bundles.
 CREATE OR REPLACE FUNCTION consensus.set_members(p_subject bytea, p_relation text)
     RETURNS TABLE(bundle_id bytea, member_id bytea, ord bigint,

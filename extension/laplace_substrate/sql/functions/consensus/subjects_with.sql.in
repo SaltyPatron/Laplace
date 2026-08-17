@@ -8,7 +8,7 @@
 -- (physicalities_set_constituents_gin) followed by one reverse-edge read.
 --
 -- The bundle ids arrive as an InitPlan-bound ARRAY(SELECT ...), NOT as a CTE column
--- joined to consensus. CLAUDE.md §4 measures the difference at two independent sites:
+-- joined to consensus. Measurements at two independent sites show that
 -- the array form binds before the scan and emits a ScalarArrayOp, the CTE column is a
 -- per-row variable the planner cannot bind and costs 4x. The contents are data-dependent
 -- so the manifest-folded form is unavailable; ARRAY(SELECT ...) is the correct middle

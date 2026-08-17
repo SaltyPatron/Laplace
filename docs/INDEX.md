@@ -1,19 +1,14 @@
 # Documentation index
 
-Start with [DOCUMENTATION_GOVERNANCE.md](DOCUMENTATION_GOVERNANCE.md). It defines the
-authority hierarchy and prevents reports, scratchpads, prompts, and issue prose from
-overriding the running system or normative contracts.
+## Invention and implementation
 
-## Authoritative entry points
+- [INVENTION.md](INVENTION.md) — derivation of the intended invention.
+- [INVENTIONS.md](INVENTIONS.md) — mechanism catalog.
+- [ARCHITECTURE.md](ARCHITECTURE.md) — description of the current source tree, with code citations.
+- [INVENTORY.md](INVENTORY.md) — source-generated counts and file listings.
+- [plan/REAL_CONVERSATION_AND_MODEL_CONSENSUS_FINISH_LINE.md](plan/REAL_CONVERSATION_AND_MODEL_CONSENSUS_FINISH_LINE.md) — product design for conversation, code, model consensus, and export.
 
-- [ARCHITECTURE.md](ARCHITECTURE.md) — architecture as implemented, with code citations.
-- [INVENTIONS.md](INVENTIONS.md) — invention catalog and mechanism map.
-- [INVENTORY.md](INVENTORY.md) — generated, CI-gated countable facts.
-- [specs/README.md](specs/README.md) — normative specification set.
-- [plan/REAL_CONVERSATION_AND_MODEL_CONSENSUS_FINISH_LINE.md](plan/REAL_CONVERSATION_AND_MODEL_CONSENSUS_FINISH_LINE.md) — product definition for MCP/OpenAI conversation, code, heterogeneous-model consensus, and export.
-- GitHub epic [#924](https://github.com/SaltyPatron/Laplace/issues/924) — active delivery ownership and acceptance graph.
-
-## Normative specifications
+## Design specifications
 
 - [05 — Substrate invariants](specs/05_Substrate_Invariants.txt)
 - [06 — Engineering rules](specs/06_Engineering_Ruleset.txt)
@@ -26,17 +21,13 @@ overriding the running system or normative contracts.
 - [36 — Laplace forward pass](specs/36_Laplace_Forward_Pass.md)
 - [37 — Substrate operation ISA](specs/37_Substrate_Operation_ISA.md)
 
-## Design and implementation context
+## Additional design and implementation context
 
-- [plan/README.md](plan/README.md) — stable workstream-to-issue map; no status ledger.
-- [invention/00-CONTINUITY.md](invention/00-CONTINUITY.md) — invention continuity map.
-- [decisions/](decisions/) — accepted architectural decisions.
-- [guides/](guides/) — operational guides; verify prerequisites against the host.
+- [plan/README.md](plan/README.md) — product and workstream design index.
+- [decisions/](decisions/) — architectural decision records.
+- [guides/](guides/) — operational guides.
 
-## Non-authoritative evidence
+## Historical material
 
 - [archive/](archive/) — dated reports, superseded specs, agent plans, and prompts.
-- [`.scratchpad/`](../.scratchpad/README.md) — frozen historical session/audit records.
-
-Do not read either area to determine current status or next work. A current spec or
-GitHub issue must restate any requirement that still matters.
+- [`.scratchpad/`](../.scratchpad/README.md) — historical session and audit records.
