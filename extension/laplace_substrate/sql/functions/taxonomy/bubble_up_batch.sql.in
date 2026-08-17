@@ -130,22 +130,57 @@ term_lang AS MATERIALIZED (
 -- bubble_up_batch went 3,155 -> 4,950 ms. attested_language_batch stays canonical for
 -- callers that already hold an array (term_lang below); this site holds a relation
 -- and binds it as an InitPlan.
-cand_lang AS MATERIALIZED (
-    SELECT DISTINCT ON (a.subject_id) a.subject_id AS id, a.context_id AS lang
+-- MEMBERSHIP, NOT ARGMAX. A SYNSET IS NOT IN ONE LANGUAGE. This was DISTINCT ON
+-- (subject_id) ... ORDER BY SUM(sum_score_fp1e9) DESC -- one winning language per
+-- synset -- and `scoped` then required cl.lang = tl.id. A synset is an interlingual
+-- concept whose lemmas are deposited in every language OMW carries, so collapsing it
+-- to its highest-scoring language and testing EQUALITY drops it for every other
+-- language that attests it.
+--
+-- It fails hardest on the best data, which is why it stayed invisible: the more
+-- translations a concept has, the smaller any one language's share of the score sum,
+-- so a well-attested synset is MORE likely to argmax away from the query language.
+-- An inverted quality filter.
+--
+-- MEASURED 2026-08-16. WordNet's dog#n#1 (02084071-n, synset 7c313cf0) carries
+-- attestations in 229 distinct languages and argmaxes to BULGARIAN. The English
+-- surface `dog` holds an unrefuted IS_SYNONYM_OF edge to it at eff_mu 1502.2, and
+-- lexical.senses('dog') still returned five senses -- dog->stop (the pawl),
+-- dog->support (andiron), hound->villain, dog->fellow, frank->sausage -- with the
+-- canine sense absent. consensus.relate_path could then only answer cat/dog through
+-- 'guy —is a→ man —is a→ male ←is a— fellow ←is a— dog'.
+--
+-- The three branches are unchanged in intent -- no term language, or no language on
+-- the candidate, or the languages agree. Only the last one moves, from "the synset's
+-- ONE language IS this" to "the synset ATTESTS this". Language stays a constraint and
+-- never becomes a score, which is what the note above requires.
+--
+-- Both probes keep the = ANY(ARRAY(SELECT ...)) form the header measured: one bounded
+-- ScalarArrayOp per partition, never a per-candidate nested loop. cand_lang_hit is
+-- additionally bounded to the languages the terms actually use (at most one per term),
+-- so it reads far less than the old argmax, which had to aggregate every language on
+-- every candidate to find a maximum. The entities join is unnecessary there -- those
+-- ids come from term_lang and are Language entities by construction.
+cand_lang_hit AS MATERIALIZED (
+    SELECT DISTINCT a.subject_id AS id, a.context_id AS lang
+    FROM laplace.attestations a
+    WHERE a.subject_id = ANY (ARRAY(SELECT DISTINCT r.synset_id FROM resolved r))
+      AND a.context_id = ANY (ARRAY(SELECT tl.id FROM term_lang tl WHERE tl.id IS NOT NULL))
+),
+cand_lang_any AS MATERIALIZED (
+    SELECT DISTINCT a.subject_id AS id
     FROM laplace.attestations a
     JOIN laplace.entities e ON e.id = a.context_id
                            AND e.type_id = realize.canonical_id('Language')
     WHERE a.subject_id = ANY (ARRAY(SELECT DISTINCT r.synset_id FROM resolved r))
-    GROUP BY a.subject_id, a.context_id
-    ORDER BY a.subject_id, SUM(a.sum_score_fp1e9) DESC, a.context_id
 ),
 scoped AS (
     SELECT r.* FROM resolved r
-    LEFT JOIN cand_lang cl ON cl.id = r.synset_id
     LEFT JOIN term_lang tl ON tl.term = r.term
     WHERE tl.id IS NULL
-       OR cl.lang IS NULL
-       OR cl.lang = tl.id
+       OR NOT EXISTS (SELECT 1 FROM cand_lang_any ca WHERE ca.id = r.synset_id)
+       OR EXISTS (SELECT 1 FROM cand_lang_hit ch
+                   WHERE ch.id = r.synset_id AND ch.lang = tl.id)
 ),
 domain AS (
     SELECT DISTINCT d AS id
