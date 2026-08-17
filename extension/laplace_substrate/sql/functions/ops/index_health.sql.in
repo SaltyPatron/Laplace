@@ -5,8 +5,8 @@
 -- the diagnosis was ad-hoc psql against pg_index — typed by hand, thrown
 -- away, re-typed. A health question this load-bearing must be an installed
 -- operation reachable from every surface (CLI, API, MCP `op`, psql), not a
--- query someone has to know to write. check-substrate-floor.sh asks the same
--- question in shell; this is the one implementation the shell can migrate to.
+-- query someone has to know to write. check-substrate-floor.sh calls this
+-- operation rather than carrying a second pg_catalog implementation.
 --
 -- Returns one row per NON-VALID index in the extension's schemas (empty set =
 -- healthy), plus leaf coverage for partitioned parents so a shell (leaves=0)
@@ -27,11 +27,12 @@ BEGIN ATOMIC
            t.relname::text,
            i.indisvalid,
            t.relkind = 'p',
-           (SELECT count(*) FROM pg_inherits h WHERE h.inhparent = i.indexrelid),
+           (SELECT count(*) FROM pg_catalog.pg_inherits h
+             WHERE h.inhparent = i.indexrelid),
            t.relnamespace::regnamespace::text
-    FROM pg_index i
-    JOIN pg_class c ON c.oid = i.indexrelid
-    JOIN pg_class t ON t.oid = i.indrelid
+    FROM pg_catalog.pg_index i
+    JOIN pg_catalog.pg_class c ON c.oid = i.indexrelid
+    JOIN pg_catalog.pg_class t ON t.oid = i.indrelid
     WHERE t.relnamespace IN ('laplace'::regnamespace, 'realize'::regnamespace,
                              'consensus'::regnamespace, 'generation'::regnamespace)
       AND NOT i.indisvalid

@@ -9,10 +9,9 @@
 -- not, so a probe that means "contains this token at some offset" and one that means
 -- "this member is in the set" must not share a posting list.
 --
--- Sets are small and repeat: 186,562,442 HAS_FEATURE edges carry 145,619 distinct sets
--- over a 1,610-value vocabulary (docs/specs/38 §0), so this index is bounded by the
--- DISTINCT set count and not by the subject count. No pending-list tuning is warranted
--- at that size; the default is left in place until a seed measures otherwise.
+-- Set identities are content-addressed, so repeated member sets reuse one physicality.
+-- This index scales with distinct compositions rather than the number of attributes that
+-- point at them. Pending-list tuning remains measurement-driven.
 CREATE INDEX IF NOT EXISTS physicalities_set_constituents_gin
     ON physicalities USING gin (public.laplace_trajectory_constituent_ids(trajectory))
     WHERE type = 5 AND trajectory IS NOT NULL;

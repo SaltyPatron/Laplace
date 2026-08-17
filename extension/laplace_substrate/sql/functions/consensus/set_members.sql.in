@@ -1,11 +1,8 @@
 -- consensus.set_members(subject, relation) -- the members of a set-valued attribute,
 -- read from the bundle composition instead of from a fan of edges.
 --
--- Replaces the N-row fan: `HAS_FEATURE` today answers "what is this form's
--- morphological analysis" with 3.01 rows averaged over 62,066,099 subjects, none of
--- which knows it is part of one analysis. Through a bundle it is one consensus row
--- (which carries the rating, the rd and the witness_count OF THE ANALYSIS) plus its
--- packed members.
+-- Replaces the N-row fan. Through a bundle, a morphological analysis is one consensus row
+-- (carrying the rating, rd and witness_count OF THE ANALYSIS) plus its packed members.
 --
 -- ord is the canonical position -- ascending by member id, the order StageCollection
 -- sorts into before the merkle. It is NOT a sequence. A set whose members carried

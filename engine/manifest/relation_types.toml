@@ -103,20 +103,11 @@ symmetry = "asymmetric"
 parent = null
 family_root = "HAS_VOCAB_SIZE"
 
-# NOT hot. MEASURED 2026-08-15: exactly 0 rows, by count(*) and not reltuples. A hot
-# relation gets 8 hash leaves on BOTH consensus and attestations, and every unprunable
-# read Appends across all of them -- one reference costs 216 scan nodes and 83.9 ms of
-# PLANNING. These seven were 112 leaves existing for nothing. A type earns a partition
-# by carrying rows; rows of these land in DEFAULT, which is correct.
-# The flag lives HERE, not in the generated seed: b6810cb0 dropped them from
-# generated/seed_relation_partitions.sql.in by hand while this manifest still said
-# hot = true, so every codegen run silently put all seven back -- and per that file's
-# own header, re-adding a partition drains rows through DELETE ... RETURNING + INSERT,
-# hours of WAL and AccessExclusive on both tables. cf78518a called that class the
-# 'hand-edit flip-flop'; this ends it for these seven.
+# Model-lane attention edges; model synthesis requires this family to carry evidence.
 [[relation]]
 canonical = "ATTENDS"
 bit = 3
+hot = true
 rank = "tensor_calculation"
 symmetry = "asymmetric"
 parent = "RELATED_TO"
@@ -194,39 +185,21 @@ symmetry = "asymmetric"
 parent = null
 family_root = "COMPATIBILITY_DECOMPOSES_TO"
 
-# NOT hot. MEASURED 2026-08-15: exactly 0 rows, by count(*) and not reltuples. A hot
-# relation gets 8 hash leaves on BOTH consensus and attestations, and every unprunable
-# read Appends across all of them -- one reference costs 216 scan nodes and 83.9 ms of
-# PLANNING. These seven were 112 leaves existing for nothing. A type earns a partition
-# by carrying rows; rows of these land in DEFAULT, which is correct.
-# The flag lives HERE, not in the generated seed: b6810cb0 dropped them from
-# generated/seed_relation_partitions.sql.in by hand while this manifest still said
-# hot = true, so every codegen run silently put all seven back -- and per that file's
-# own header, re-adding a partition drains rows through DELETE ... RETURNING + INSERT,
-# hours of WAL and AccessExclusive on both tables. cf78518a called that class the
-# 'hand-edit flip-flop'; this ends it for these seven.
+# Model-vocabulary completion edges; model synthesis requires this family.
 [[relation]]
 canonical = "COMPLETES_TO"
 bit = 14
+hot = true
 rank = "tensor_calculation"
 symmetry = "asymmetric"
 parent = null
 family_root = "COMPLETES_TO"
 
-# NOT hot. MEASURED 2026-08-15: exactly 0 rows, by count(*) and not reltuples. A hot
-# relation gets 8 hash leaves on BOTH consensus and attestations, and every unprunable
-# read Appends across all of them -- one reference costs 216 scan nodes and 83.9 ms of
-# PLANNING. These seven were 112 leaves existing for nothing. A type earns a partition
-# by carrying rows; rows of these land in DEFAULT, which is correct.
-# The flag lives HERE, not in the generated seed: b6810cb0 dropped them from
-# generated/seed_relation_partitions.sql.in by hand while this manifest still said
-# hot = true, so every codegen run silently put all seven back -- and per that file's
-# own header, re-adding a partition drains rows through DELETE ... RETURNING + INSERT,
-# hours of WAL and AccessExclusive on both tables. cf78518a called that class the
-# 'hand-edit flip-flop'; this ends it for these seven.
+# Model-vocabulary continuation edges.
 [[relation]]
 canonical = "CONTINUES_TO"
 bit = 17
+hot = true
 rank = "tensor_calculation"
 symmetry = "asymmetric"
 parent = null
@@ -240,20 +213,11 @@ symmetry = "symmetric"
 parent = null
 family_root = "CONFUSABLE_WITH"
 
-# NOT hot. MEASURED 2026-08-15: exactly 0 rows, by count(*) and not reltuples. A hot
-# relation gets 8 hash leaves on BOTH consensus and attestations, and every unprunable
-# read Appends across all of them -- one reference costs 216 scan nodes and 83.9 ms of
-# PLANNING. These seven were 112 leaves existing for nothing. A type earns a partition
-# by carrying rows; rows of these land in DEFAULT, which is correct.
-# The flag lives HERE, not in the generated seed: b6810cb0 dropped them from
-# generated/seed_relation_partitions.sql.in by hand while this manifest still said
-# hot = true, so every codegen run silently put all seven back -- and per that file's
-# own header, re-adding a partition drains rows through DELETE ... RETURNING + INSERT,
-# hours of WAL and AccessExclusive on both tables. cf78518a called that class the
-# 'hand-edit flip-flop'; this ends it for these seven.
+# Model circuit-anchor containment edges.
 [[relation]]
 canonical = "CONTAINS"
 bit = 16
+hot = true
 rank = "partitive"
 symmetry = "asymmetric"
 parent = "HAS_PART"
@@ -526,21 +490,11 @@ family_root = "HAS_EXAMPLE"
 # id (Tatoeba sentence ids, OMW/CILI keys, model recipe ids). Tatoeba alone owes
 # ~41M — it was the #1 writer into consensus_rdefault (2.56M rows and climbing at
 # ~1 per record) before this flag. Low RANK, high VOLUME: partition capacity
-# follows traffic, not salience.
-# NOT hot. MEASURED 2026-08-15: exactly 0 rows, by count(*) and not reltuples. A hot
-# relation gets 8 hash leaves on BOTH consensus and attestations, and every unprunable
-# read Appends across all of them -- one reference costs 216 scan nodes and 83.9 ms of
-# PLANNING. These seven were 112 leaves existing for nothing. A type earns a partition
-# by carrying rows; rows of these land in DEFAULT, which is correct.
-# The flag lives HERE, not in the generated seed: b6810cb0 dropped them from
-# generated/seed_relation_partitions.sql.in by hand while this manifest still said
-# hot = true, so every codegen run silently put all seven back -- and per that file's
-# own header, re-adding a partition drains rows through DELETE ... RETURNING + INSERT,
-# hours of WAL and AccessExclusive on both tables. cf78518a called that class the
-# 'hand-edit flip-flop'; this ends it for these seven.
+# follows traffic, not salience. An unseeded Tatoeba lane does not make this relation cold.
 [[relation]]
 canonical = "HAS_EXTERNAL_ID"
 bit = 69
+hot = true
 rank = "scalar_valued"
 symmetry = "asymmetric"
 parent = null
@@ -549,6 +503,9 @@ family_root = "HAS_EXTERNAL_ID"
 [[relation]]
 canonical = "HAS_FEATURE"
 bit = 70
+# Wiktionary emits one set-valued morphology edge for each tagged form. Give that
+# writer its own fresh-substrate route instead of competing in the shared default.
+hot = true
 rank = "lexical_glue"
 symmetry = "asymmetric"
 parent = null
@@ -1114,20 +1071,11 @@ symmetry = "asymmetric"
 parent = null
 family_root = "OBSTRUCTED_BY"
 
-# NOT hot. MEASURED 2026-08-15: exactly 0 rows, by count(*) and not reltuples. A hot
-# relation gets 8 hash leaves on BOTH consensus and attestations, and every unprunable
-# read Appends across all of them -- one reference costs 216 scan nodes and 83.9 ms of
-# PLANNING. These seven were 112 leaves existing for nothing. A type earns a partition
-# by carrying rows; rows of these land in DEFAULT, which is correct.
-# The flag lives HERE, not in the generated seed: b6810cb0 dropped them from
-# generated/seed_relation_partitions.sql.in by hand while this manifest still said
-# hot = true, so every codegen run silently put all seven back -- and per that file's
-# own header, re-adding a partition drains rows through DELETE ... RETURNING + INSERT,
-# hours of WAL and AccessExclusive on both tables. cf78518a called that class the
-# 'hand-edit flip-flop'; this ends it for these seven.
+# Model-lane output-value circuit edges.
 [[relation]]
 canonical = "OV_RELATES"
 bit = 175
+hot = true
 rank = "tensor_calculation"
 symmetry = "asymmetric"
 parent = "RELATED_TO"
@@ -1248,20 +1196,11 @@ symmetry = "asymmetric"
 parent = null
 family_root = "SYMBOL_OF"
 
-# NOT hot. MEASURED 2026-08-15: exactly 0 rows, by count(*) and not reltuples. A hot
-# relation gets 8 hash leaves on BOTH consensus and attestations, and every unprunable
-# read Appends across all of them -- one reference costs 216 scan nodes and 83.9 ms of
-# PLANNING. These seven were 112 leaves existing for nothing. A type earns a partition
-# by carrying rows; rows of these land in DEFAULT, which is correct.
-# The flag lives HERE, not in the generated seed: b6810cb0 dropped them from
-# generated/seed_relation_partitions.sql.in by hand while this manifest still said
-# hot = true, so every codegen run silently put all seven back -- and per that file's
-# own header, re-adding a partition drains rows through DELETE ... RETURNING + INSERT,
-# hours of WAL and AccessExclusive on both tables. cf78518a called that class the
-# 'hand-edit flip-flop'; this ends it for these seven.
+# One edge per tokenizer entry for each ingested model vocabulary.
 [[relation]]
 canonical = "TOKEN_MAPS_TO"
 bit = 194
+hot = true
 rank = "tensor_calculation"
 symmetry = "asymmetric"
 parent = null

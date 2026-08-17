@@ -272,33 +272,19 @@ the first trustworthy end-to-end numbers of the session:
 Remaining slow, in order: `salient_facts` (dominated by `realize.batch`, item Q),
 `senses(word, context)`, `bubble_up_batch` (dominated by `cand_lang`, item 1).
 
-## M. Partitioning — the detector already exists and its output was never acted on
+## M. Partition topology is a greenfield contract
 
-`ops.consensus_partition_pressure(min_rows bigint DEFAULT 100000)` names unpartitioned
-relations by share of DEFAULT. Live:
+Earlier revisions treated one live, partially seeded database as the source of truth for
+which relation families deserved dedicated partitions. That was not a valid topology
+measurement: absent writers looked cold, and the `HAS_FEATURE` interpretation conflated
+relation identity with language/content observations.
 
-| relation | rows | % of DEFAULT |
-|---|---|---|
-| **HAS_FEATURE** | **186,562,442** | **84.93** |
-| TRANSCRIBES_AS | 5,192,208 | 2.36 |
-| DERIVED_FROM | 3,836,962 | 1.75 |
-| HAS_THINK_CLASS | 3,022,618 | 1.38 |
-| ETYMOLOGICALLY_DERIVED_FROM | 2,606,533 | 1.19 |
-| HAS_ETYMOLOGY | 2,595,036 | 1.18 |
-| HAS_CLOCK | 2,531,014 | 1.15 |
-| HAS_EXAMPLE | 1,803,197 | 0.82 |
-
-The 59.2% DEFAULT skew is **one relation**, not 399 sharing a bucket. Meanwhile
-`sql/generated/seed_relation_partitions.sql.in:9` hardcodes 26 `hot` types of which **8 hold
-0 rows**, so ~80 leaves exist for ~175 rows while the largest relation in the substrate has
-none.
-
-- [ ] **NOT DONE, deliberately.** Adding `HAS_FEATURE` to the `hot` array would make the next
-      `just install` create the partition and **drain 186M rows out of DEFAULT**, taking
-      AccessExclusive locks while ingestion is running. That migration needs a quiet window
-      and an explicit decision — it is not a source edit to slip in.
-- [ ] Drop the 8 zero-row named partitions (16 leaves × 2 tables) — cheap, and narrows every
-      unpruned Append.
+- [x] The relation manifest is the single source for fresh-substrate topology.
+- [x] Install creates that topology only while the substrate is empty.
+- [x] Upgrade SQL cannot detach defaults, drain rows, or manufacture partitions on populated
+      tables. A topology change requires drop and reseed.
+- [x] Writer contracts, rather than an incompletely seeded lane, keep the model relations and
+      Wiktionary's set-valued form-feature route dedicated.
 
 ## N. A text decomposer is writing sequence as edges
 
@@ -445,15 +431,11 @@ Consequence, measured on a quiet database:
 `senses(word, context)` spends **71% of its time planning**. Reducing the leaf count reduces
 this for every unprunable reference in the system.
 
-- [ ] **112 leaves are exactly empty** (verified by `count(*)`, not `reltuples`): the 7
-      relations ATTENDS, COMPLETES_TO, CONTAINS, CONTINUES_TO, HAS_EXTERNAL_ID, OV_RELATES,
-      TOKEN_MAPS_TO × 8 hash children × both tables. Dropping them takes consensus from 216
-      to 152 leaves — a 30% cut in plan width for every unprunable reference — with no data
-      movement. They must also come out of the `hot` array or the next seed recreates them.
-- [ ] **HAS_FEATURE, 186,562,442 rows, 84.93% of DEFAULT, still unpartitioned.** Adding it to
-      `hot` makes the next install drain those rows via `DELETE … RETURNING` + `INSERT`
-      (`seed_relation_partitions.sql.in:77`) — hours of WAL and locks on both tables. Owner
-      schedules this; it is not an agent action.
+- [x] Withdraw the empty-leaf conclusion. Those relations were empty because their writers
+      were not seeded in the measured lane; their production contracts still require dedicated
+      routes.
+- [x] Give Wiktionary's set-valued form-feature writer a dedicated fresh-install route. Upgrade
+      SQL does not drain existing rows; topology changes are realized by drop and reseed.
 
 
 ## T. Proof that the partition indexes are correctly chosen
@@ -506,32 +488,19 @@ All four arm queries and the scalar `realize._defines` now close on an id; a 314
 and 314 single-id calls agree exactly.
 
 ### Still open, owner decisions
-- `HAS_FEATURE`: 186,562,442 rows, 84.93% of DEFAULT, unpartitioned. Adding it drains those
-  rows via DELETE+INSERT.
-- The 112 empty leaves exist on the live database and are **extension-owned** — dropping them
-  needs `ALTER EXTENSION … DROP TABLE` first. Removed from the seed list, so a fresh install
-  builds 152 consensus leaves instead of 216.
 - Index decisions (item R): ~180 GB, `attestations` PK 36 GB with 0 read scans.
 - `cand_lang` (item 1): still re-derives an entity's primary language by argmax over 389M
   attestation rows per read. Wants a maintained projection.
 
 
-## V. HAS_FEATURE justified — it is Wiktionary's morphology layer
+## V. Correction: the HAS_FEATURE inspection was over-interpreted
 
-`ops.consensus_partition_pressure()` names HAS_FEATURE as 186,562,442 rows / 84.93% of
-DEFAULT. Provenance and content, measured:
+The source contract proves that Wiktionary may emit one set-valued `HAS_FEATURE` edge for a
+tagged form. It does not prove the former provenance totals, language distribution, sampled
+examples, or global cardinality story recorded here. Those claims came from a flawed live-data
+inspection and have been withdrawn. The dedicated route follows from the writer shape; it is
+not evidence for those discarded claims.
 
-- source: **WiktionaryDecomposer 186,543,984**, PropBankDecomposer 18,458.
-- content: every inflected form carrying its grammatical features —
-  `knaget → nominative`, `altııñ → genitive`, `tapsaink → first-person`,
-  `cristalelor → definite`, `huoneellanne → singular`, `kaiunnasta → elative`,
-  `Hei → romanization`, `𢃧 → alternative`, `trung → Hán-Nôm`.
-- shape: **3.0 features per subject** (max 20) over 50,000 sampled subjects, so roughly
-  **62 million distinct word forms** across Wiktionary's ~1,300 languages.
-
-It is the largest relation in the substrate because morphology is the largest fact class in a
-multilingual lexicon. It is content, not residue. It needs a partition *because* it is real
-and half of consensus — every unprunable read Appends over it today.
 
 ## W. Retraction: index scan counts are not a drop signal
 
