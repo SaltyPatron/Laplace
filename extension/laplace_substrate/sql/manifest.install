@@ -39,7 +39,6 @@ probes/physicalities_exist_bitmap.sql.in
 probes/content_descent_bitmap.sql.in
 probes/tier_batch_existence_probe.sql.in
 probes/drop_content_descent_novel_ordinals.sql.in
-bootstrap/bootstrap.sql.in
 functions/glicko2/laplace_glicko2_result.sql.in
 functions/glicko2/laplace_glicko2_sfunc.sql.in
 functions/glicko2/laplace_glicko2_finalfunc.sql.in
@@ -220,6 +219,7 @@ generated/relation_family_ids.sql.in
 generated/relation_set_ids.sql.in
 generated/seed_relation_types.sql.in
 generated/seed_relation_partitions.sql.in
+bootstrap/bootstrap.sql.in
 generated/seed_pos.sql.in
 functions/cascade/astar_path.sql.in
 functions/cascade/cascade.sql.in

@@ -29,6 +29,9 @@ execute_process(COMMAND "${LAPLACE_PG_CONFIG}" --pkglibdir
 execute_process(COMMAND "${LAPLACE_PG_CONFIG}" --sharedir
                 OUTPUT_VARIABLE LAPLACE_PG_SHAREDIR
                 OUTPUT_STRIP_TRAILING_WHITESPACE)
+execute_process(COMMAND "${LAPLACE_PG_CONFIG}" --bindir
+                OUTPUT_VARIABLE LAPLACE_PG_BINDIR
+                OUTPUT_STRIP_TRAILING_WHITESPACE)
 execute_process(COMMAND "${LAPLACE_PG_CONFIG}" --version
                 OUTPUT_VARIABLE LAPLACE_PG_VERSION
                 OUTPUT_STRIP_TRAILING_WHITESPACE)
@@ -38,6 +41,7 @@ message(STATUS "  pg_config:        ${LAPLACE_PG_CONFIG}")
 message(STATUS "  server includes:  ${LAPLACE_PG_INCLUDEDIR_SERVER}")
 message(STATUS "  pkglibdir:        ${LAPLACE_PG_PKGLIBDIR}")
 message(STATUS "  sharedir:         ${LAPLACE_PG_SHAREDIR}")
+message(STATUS "  bindir:           ${LAPLACE_PG_BINDIR}")
 
 string(REGEX MATCH "PostgreSQL +([0-9]+)" _pg_major_match "${LAPLACE_PG_VERSION}")
 set(LAPLACE_PG_MAJOR "${CMAKE_MATCH_1}")

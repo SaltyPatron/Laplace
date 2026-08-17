@@ -5,6 +5,7 @@ set -e
 ok=0
 warnings=0
 errors=0
+LAPLACE_PG_PREFIX="${LAPLACE_PG_PREFIX:-/opt/laplace/pgsql-18}"
 
 reset='\033[0m'; green='\033[0;32m'; yellow='\033[0;33m'; red='\033[0;31m'
 
@@ -92,20 +93,15 @@ check_path "oneTBB"                  "/opt/intel/oneapi/tbb/latest"
 echo
 
 echo "=== PostgreSQL ==="
-check_command "pg_config"      "pg_config" "--version"
-check_command "psql"           "psql"      "--version"
-check_path    "PG 18 server-dev headers" "/opt/laplace/pgsql-18/include/server"
-check_path    "PGXS makefile"  "/opt/laplace/pgsql-18/lib/pgxs/src/makefiles/pgxs.mk"
+check_command "Laplace pg_config" "$LAPLACE_PG_PREFIX/bin/pg_config" "--version"
+check_command "Laplace psql"      "$LAPLACE_PG_PREFIX/bin/psql"      "--version"
+check_path    "PG 18 server-dev headers" "$LAPLACE_PG_PREFIX/include/server"
+check_path    "PGXS makefile"  "$LAPLACE_PG_PREFIX/lib/pgxs/src/makefiles/pgxs.mk"
 echo
 
 echo "=== PostGIS ==="
-if dpkg -l postgresql-18-postgis-3 2>/dev/null | grep -q '^ii'; then
-    printf "${green}✓${reset} %-30s → %s\n" "PostGIS 3 for PG18" "$(dpkg -l postgresql-18-postgis-3 | grep '^ii' | awk '{print $3}')"
-    ok=$((ok + 1))
-else
-    printf "${red}✗${reset} %-30s MISSING\n" "PostGIS 3 for PG18"
-    errors=$((errors + 1))
-fi
+check_path "Laplace PostGIS library" "$LAPLACE_PG_PREFIX/lib/postgis-3.so"
+check_path "Laplace PostGIS control" "$LAPLACE_PG_PREFIX/share/extension/postgis.control"
 echo
 
 echo "=== .NET ==="
@@ -161,7 +157,7 @@ check_header "liburing (io_method)"    "/usr/include/liburing.h" "liburing-dev"
 # features as present while the cluster that actually runs (/opt/laplace/pgsql-18, built
 # from external/CMakeLists.txt) has none of them. Checking the wrong binary is how this
 # stayed invisible.
-LAPLACE_PGC="${LAPLACE_PG_PREFIX:-/opt/laplace/pgsql-18}/bin/pg_config"
+LAPLACE_PGC="$LAPLACE_PG_PREFIX/bin/pg_config"
 if [ -x "$LAPLACE_PGC" ]; then
     PGC="$LAPLACE_PGC"
     for feat in lz4 zstd liburing; do

@@ -78,6 +78,15 @@ source "$ROOT/scripts/lib/fp.sh"
 LAPLACE_INSTALL_PREFIX="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
 LAPLACE_PG_PREFIX="${LAPLACE_PG_PREFIX:-/opt/laplace/pgsql-18}"
 LAPLACE_EXTERNAL="${LAPLACE_EXTERNAL:-/build/external}"
+# The substrate runs the PostgreSQL build under LAPLACE_PG_PREFIX.  Never let a
+# distro client or pg_config win merely because /usr/bin appears first in the
+# runner's inherited PATH: build, install, migrate, tune, regress and benchmark
+# must all resolve one PostgreSQL toolchain.
+if [[ ! -x "$LAPLACE_PG_PREFIX/bin/psql" || ! -x "$LAPLACE_PG_PREFIX/bin/pg_config" ]]; then
+  echo "::error::Laplace PostgreSQL toolchain missing under $LAPLACE_PG_PREFIX/bin" >&2
+  exit 127
+fi
+export PATH="$LAPLACE_PG_PREFIX/bin:$PATH"
 # Peer auth over the runner-owned unix socket (laplace_admin). Bare psql without
 # these defaults looks for OS-user role "ahart" / a missing system socket.
 export PGHOST="${PGHOST:-/var/run/postgresql}"
