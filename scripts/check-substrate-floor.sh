@@ -2,6 +2,7 @@
 # Named fail-loud gate for empty / thin / mid-ingest substrate (#792).
 #
 # Fail modes (exact strings — grep these in CI logs / agent claims):
+#   INVALID_INDEXES             — installed index-health operation reports an invalid index
 #   INGEST_JOURNAL_NONTERMINAL  — status='running' row(s) in ingest_run_journal
 #   THIN_SUBSTRATE              — foundation HasLayerCompleted markers incomplete
 #                                 (or database missing)
@@ -21,6 +22,15 @@ PSQL=(psql -h "$PGHOST" -U "$PGUSER" -v ON_ERROR_STOP=1)
 
 if ! "${PSQL[@]}" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='${DB}'" 2>/dev/null | grep -q 1; then
   echo "::error::THIN_SUBSTRATE: database '${DB}' does not exist — heal via seed-foundation / fresh_db (no auto-reseed)"
+  exit 1
+fi
+
+invalid=$("${PSQL[@]}" -d "$DB" -tAc "SELECT count(*) FROM ops.index_health();")
+if [[ "${invalid:-0}" -gt 0 ]]; then
+  echo "::error::INVALID_INDEXES: ${invalid} invalid substrate index(es) on ${DB}"
+  "${PSQL[@]}" -d "$DB" -P pager=off -c \
+    "SELECT * FROM ops.index_health();" || true
+  echo "Heal through the journaled index rebuild; its row is retained until validity is proven."
   exit 1
 fi
 
