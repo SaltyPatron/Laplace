@@ -12,10 +12,10 @@ public sealed class ElectorArchitectureGateTests
 {
     private static readonly string[] ElectorSites =
     [
-        "extension/laplace_substrate/sql/functions/converse/chat.sql.in",
         "extension/laplace_substrate/sql/functions/converse/converse.sql.in",
         "extension/laplace_substrate/sql/functions/converse/converse_walk.sql.in",
         "extension/laplace_substrate/sql/functions/converse/infer.sql.in",
+        "extension/laplace_substrate/sql/functions/converse/orient_topic.sql.in",
         "extension/laplace_substrate/sql/functions/converse/resolve_topic.sql.in",
     ];
 

@@ -222,7 +222,8 @@ internal static class InferenceEndpoints
             var tenantScope = ConversationContent.Resolve(scope.Tenant);
             var converseOptions = new ConverseOptions(
                 payload.Shape, payload.Bands, payload.Elaborate,
-                operatorLanguage?.Code, operatorLanguage?.Id);
+                operatorLanguage?.Code, operatorLanguage?.Id,
+                operatorLanguage?.Source);
             var converseSubstrateClock = Stopwatch.StartNew();
             var rows = tenantScoped
                 ? await substrate.ConverseTenantScopedAsync(prompt, scope.SessionId.ToBytes(),

@@ -122,11 +122,12 @@ set(LAPLACE_INSTALL_EXEC_PERMS
 set(CMAKE_INSTALL_DEFAULT_DIRECTORY_PERMISSIONS ${LAPLACE_INSTALL_DIR_PERMS})
 
 install(CODE "
-  message(STATUS \"Laplace pre-install cleanup under \${CMAKE_INSTALL_PREFIX}\")
+  set(_laplace_install_root \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}\")
+  message(STATUS \"Laplace pre-install cleanup under \${_laplace_install_root}\")
   execute_process(
     COMMAND sh -c \"
       set -u
-      paths='\${CMAKE_INSTALL_PREFIX}/include/laplace \${CMAKE_INSTALL_PREFIX}/share/laplace'
+      paths='\${_laplace_install_root}/include/laplace \${_laplace_install_root}/share/laplace'
       for p in \$paths; do
         [ -e \\\"\$p\\\" ] || continue
         find \\\"\$p\\\" -type d -exec chmod 2775 {} + 2>/dev/null || true
@@ -134,15 +135,15 @@ install(CODE "
       done
       set -e
       rm -rf \$paths
-      rm -f \${CMAKE_INSTALL_PREFIX}/lib/liblaplace_*.so* 2>/dev/null || true
-      rm -f \${CMAKE_INSTALL_PREFIX}/lib/postgresql/${LAPLACE_PG_MAJOR}/laplace_*.so 2>/dev/null || true
-      rm -f \${CMAKE_INSTALL_PREFIX}/share/postgresql/${LAPLACE_PG_MAJOR}/extension/laplace_* 2>/dev/null || true
+      rm -f \${_laplace_install_root}/lib/liblaplace_*.so* 2>/dev/null || true
+      rm -f \${_laplace_install_root}/lib/postgresql/${LAPLACE_PG_MAJOR}/laplace_*.so 2>/dev/null || true
+      rm -f \${_laplace_install_root}/share/postgresql/${LAPLACE_PG_MAJOR}/extension/laplace_* 2>/dev/null || true
     \"
     RESULT_VARIABLE _laplace_wipe_rc
   )
   if(NOT _laplace_wipe_rc EQUAL 0)
     message(FATAL_ERROR
-      \"Laplace pre-install cleanup failed under \${CMAKE_INSTALL_PREFIX}.\"
+      \"Laplace pre-install cleanup failed under \${_laplace_install_root}.\"
       \"\\nLikely a pre-fix cross-user g-w directory from a previous install.\"
       \"\\nOne-time recovery (run once, never again under the structural fix):\"
       \"\\n    sudo rm -rf \${CMAKE_INSTALL_PREFIX}/include/laplace \${CMAKE_INSTALL_PREFIX}/share/laplace\"
@@ -156,11 +157,12 @@ add_subdirectory(engine)
 add_subdirectory(extension)
 
 install(CODE "
-  message(STATUS \"Laplace post-install permission invariant under \${CMAKE_INSTALL_PREFIX}\")
+  set(_laplace_install_root \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}\")
+  message(STATUS \"Laplace post-install permission invariant under \${_laplace_install_root}\")
   execute_process(
     COMMAND sh -c \"
       set -u
-      cd \\\"\${CMAKE_INSTALL_PREFIX}\\\" || exit 1
+      cd \\\"\${_laplace_install_root}\\\" || exit 1
       for p in include lib share; do
         [ -e \\\"\$p\\\" ] || continue
         find \\\"\$p\\\" -type d -exec chmod 2775 {} + 2>/dev/null || true
