@@ -219,6 +219,38 @@ BEGIN
         WHERE g.successor_id = sp) THEN
         RAISE EXCEPTION 'FAIL: geometry successor leaked a separator';
     END IF;
+    IF EXISTS (
+        (SELECT b.point_id, b.successor_id, b.seen
+         FROM structural.geometry_successors_batch(ARRAY[w_capital, w_of], 8, 8, false) b
+         EXCEPT
+         SELECT p.id, g.successor_id, g.seen
+         FROM unnest(ARRAY[w_capital, w_of]) p(id)
+         CROSS JOIN LATERAL structural.geometry_successors(p.id, 8, 8, false) g)
+        UNION ALL
+        (SELECT p.id, g.successor_id, g.seen
+         FROM unnest(ARRAY[w_capital, w_of]) p(id)
+         CROSS JOIN LATERAL structural.geometry_successors(p.id, 8, 8, false) g
+         EXCEPT
+         SELECT b.point_id, b.successor_id, b.seen
+         FROM structural.geometry_successors_batch(ARRAY[w_capital, w_of], 8, 8, false) b)) THEN
+        RAISE EXCEPTION 'FAIL: batched geometry successors differ from scalar results';
+    END IF;
+    IF EXISTS (
+        (SELECT b.point_id, b.successor_id, b.seen
+         FROM structural.geometry_successors_batch(ARRAY[w_capital, w_of], 8, 8, true) b
+         EXCEPT
+         SELECT p.id, g.successor_id, g.seen
+         FROM unnest(ARRAY[w_capital, w_of]) p(id)
+         CROSS JOIN LATERAL structural.geometry_successors(p.id, 8, 8, true) g)
+        UNION ALL
+        (SELECT p.id, g.successor_id, g.seen
+         FROM unnest(ARRAY[w_capital, w_of]) p(id)
+         CROSS JOIN LATERAL structural.geometry_successors(p.id, 8, 8, true) g
+         EXCEPT
+         SELECT b.point_id, b.successor_id, b.seen
+         FROM structural.geometry_successors_batch(ARRAY[w_capital, w_of], 8, 8, true) b)) THEN
+        RAISE EXCEPTION 'FAIL: batched geometry predecessors differ from scalar results';
+    END IF;
 
     -- generation.corpus_whitespace_vocab_indices shipped with a PL/pgSQL syntax error that
     -- nothing caught, and the fix landed with no test (GH #1061). One invocation closes the
