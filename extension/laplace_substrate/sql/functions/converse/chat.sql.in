@@ -45,12 +45,13 @@ DECLARE
     topic bytea; topic2 bytea;
     ctx_arr bytea[];  -- biography for the walk branch (session_trajectory, recent-first)
     cands bytea[];   -- topic orientation, ranked, computed ONCE per turn
+    oriented_lang bytea;
     xl    text;
     depth int;
     layers text[]; s text;
     resolved bytea;
     shape text := NULLIF(btrim(COALESCE(p_shape, '')), '');
-    lang  bytea := p_lang;   -- realization language; inferred below when absent
+    lang  bytea := p_lang;
     out   text := '';
 BEGIN
     -- ANSWER IN THE LANGUAGE THAT WAS ASKED. A concept's surfaces are a FAMILY
@@ -60,40 +61,12 @@ BEGIN
     -- returned a fluent Bulgarian description of a dog. The mesh working exactly as
     -- designed, surfacing at the wrong moment.
     --
-    -- Language is NOT a property of the knowledge -- the knowledge sits at concept
-    -- addresses and has no language. It is a property of the REQUEST, so it is
-    -- resolved from the prompt and threaded to every realize.realize() call, and the caller's
-    -- explicit p_lang always wins (that is a reader asking for a translation).
-    --
-    -- Inference is a WEIGHTED TALLY over every HAS_LANGUAGE attestation carried by
-    -- the prompt's laplace.entities, at every tier that has one -- the language with the
-    -- most evidence behind it wins. Deliberately NOT converse.word_language() per token:
-    -- that is LIMIT 1, one language per word, which discards the distribution and
-    -- makes a token shared across languages ("chat" in English and French, "die" in
-    -- English and German) look monolingual. Summing consensus.eff_mu over all of them lets a
-    -- prompt's genuinely ambiguous tokens contribute to both tallies and be settled
-    -- by the tokens that are decisive, which is how a reader disambiguates too.
-    --
-    -- Tier-agnostic by construction: it tallies whatever the prompt resolved to, so
-    -- a sentence-root HAS_LANGUAGE (the tier a corpus actually asserts language at,
-    -- per the attestation law) counts alongside word-tier evidence rather than being
-    -- invisible to a word-only scan. Nothing here assumes which tier answered.
-    --
-    -- No floors and no minimum margin: the fold already carries confidence, ties
-    -- break on the id for determinism, and a prompt with no language evidence at all
-    -- leaves lang NULL -- today's behaviour, and the honest answer when the prompt
-    -- genuinely does not say.
-    IF lang IS NULL THEN
-        SELECT c.object_id INTO lang
-        FROM converse.prompt_state(p_prompt) p
-        JOIN laplace.consensus c ON c.subject_id = p.id
-                        AND c.type_id = laplace.relation_type_id('HAS_LANGUAGE')
-        WHERE p.id IS NOT NULL AND c.object_id IS NOT NULL
-        GROUP BY c.object_id
-        ORDER BY sum(consensus.eff_mu(c.rating, c.rd)) DESC, c.object_id
-        LIMIT 1;
-    END IF;
-
+    -- Language is not concept identity.  It is request orientation: the operator's
+    -- primary language is tried first, prompt evidence may temporarily redirect a
+    -- turn that otherwise resolves nothing, and realization receives the effective
+    -- language only after concept election.  ORIENT_TOPIC below owns that decision
+    -- and exposes whether it widened; this function does not mutate an operator
+    -- profile because one quotation or code-switch is not a durable preference.
     -- TOPIC = rank-1 of converse.prompt_coherence (native). Keys, in order:
     -- specificity (coherence/own-mass) scaled by denote_mu (GREATEST(.., 1), so
     -- an unrated candidate keeps its bare specificity), bare specificity,
@@ -106,54 +79,19 @@ BEGIN
     -- breadth+denote_mu (2026-07-26), raw coherence, inverse own-mass (2026-08-01).
     IF p_topic IS NOT NULL THEN
         topic := p_topic;
+        lang := COALESCE(lang, converse.prompt_language_top(p_prompt));
     ELSE
-        -- WEIGHED, NOT ORDERED (GH #865). specificity is coherence over the
-        -- candidate's OWN total mass, so dividing by own-mass makes rarity a
-        -- virtue: the rarer sense of a surface wins on the same coherence. And
-        -- denote_mu -- the fold signal that already knows which sense is
-        -- witnessed -- sat at key five, behind three keys that never tie on real
-        -- data, so it was never consulted.
-        --
-        -- MEASURED 2026-08-10, six turns against laplace-converse-001 on an 8M
-        -- entity substrate: "what is a dog" -> Chase (the VERB sense, to pursue),
-        -- "what is a cat" -> Guy (informal), "what is a knight" -> Dub (the verb).
-        -- Right surface, rarest sense, every time. 0/6.
-        --
-        -- Reordering does not fix it and the dead-forms list above says so:
-        -- denote_mu-first, raw coherence and inverse own-mass were each tried and
-        -- each replaced. The failure is that ONE signal decides. #865's done-when
-        -- is explicit -- "election weighs fold signals with containment" -- so the
-        -- primary key is the PRODUCT: a candidate must be both coherent in
-        -- context and actually witnessed. The rare sense keeps its high
-        -- specificity and loses on mass; a well-witnessed but incoherent token
-        -- keeps its mass and loses on specificity.
-        --
-        -- This is spec 36's law applied to election: "approximate geometry may
-        -- propose candidates but cannot establish final identity or truth."
-        -- Containment proposes. The fold governs.
-        --
-        -- NOT YET VERIFIED against a seeded substrate -- the box holds 41
-        -- entities as of this commit. tests/sql/prompt_election.sql pins the law
-        -- with controlled fixtures so the claim is falsifiable without one.
-        SELECT array_agg(y.synset_id ORDER BY
-                    (COALESCE(y.specificity, 0)
-                     * GREATEST(COALESCE(y.denote_mu, 0), 1)) DESC,
-                    y.specificity DESC NULLS LAST,
-                    y.rel_mass DESC NULLS LAST,
-                    y.peers DESC,
-                    y.ord DESC,
-                    y.synset_id)
-          INTO cands
-        -- `lang` is already resolved above and constrains the seat: a candidate
-        -- is dropped only when both it and the prompt have a primary language and
-        -- they differ. Without this a foreign interjection outranks the content
-        -- word on the specificity scalar and takes the topic, which is the §7
-        -- violation. Concepts carry no HAS_LANGUAGE and a prompt with no language
-        -- evidence leaves lang NULL, so both cases pass through untouched.
-        FROM converse.prompt_coherence(p_prompt) y
-        WHERE lang IS NULL
-           OR converse.word_language(y.synset_id) IS NULL
-           OR converse.word_language(y.synset_id) = lang;
+        -- ORIENT_TOPIC owns the language prior, prompt-language fallback and
+        -- election order (coherence * witnessed mass, then total tie-breaks).
+        -- It evaluates prompt_coherence once and returns the
+        -- effective realization language as an execution receipt.  A primary
+        -- language that finds nothing widens this turn; it does not silently
+        -- rewrite the operator's profile.
+        SELECT array_agg(o.synset_id ORDER BY o.rank),
+               (array_agg(o.effective_language ORDER BY o.rank))[1]
+          INTO cands, oriented_lang
+        FROM converse.orient_topic(p_prompt, p_lang) o;
+        lang := COALESCE(oriented_lang, p_lang);
         topic := cands[1];
         -- Nothing in this turn resolved: read the session's BIOGRAPHY, not one
         -- carried id (R7 / GH #759 slice 1). generation.session_last_resolved() answered

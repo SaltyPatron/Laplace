@@ -237,8 +237,14 @@ internal static class QueryCommands
         // (prompt_coherence), shape dispatch, the band lens, the responder family,
         // and converse_about. A CLI answer and an API answer to the same prompt were
         // produced by different machinery and could not be compared.
+        LanguageReference.EnsureLoaded();
+        var languageCode = LanguageReference.ResolveSystemCode();
+        var language = languageCode is null
+            ? null
+            : LanguageReference.IdForResolvedCode(languageCode).ToBytes();
         var response = await NpgsqlSubstrateReads.ChatAsync(
-            conn, prompt, SessionId.ToBytes(), default) ?? string.Empty;
+            conn, prompt, SessionId.ToBytes(), default,
+            language: language) ?? string.Empty;
         Console.WriteLine(response);
 
         // CLOSE through the shared lane (Laplace.Ingestion.TurnCloser), the same one

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using Laplace.Engine.Core;
 
 namespace Laplace.Decomposers.Abstractions;
@@ -43,6 +44,31 @@ public static class LanguageReference
         int dash = s.IndexOf('-');
         if (dash > 0 && map.TryGetValue(s[..dash], out c)) return c;
         return null;
+    }
+
+    public static string? ResolveSystemCode()
+    {
+        EnsureLoaded();
+        foreach (var candidate in SystemLanguageCandidates())
+            if (ResolveCode(candidate) is { } code)
+                return code;
+        return null;
+    }
+
+    private static IEnumerable<string> SystemLanguageCandidates()
+    {
+        if (!string.IsNullOrWhiteSpace(CultureInfo.CurrentUICulture.Name))
+            yield return CultureInfo.CurrentUICulture.Name;
+        if (!string.IsNullOrWhiteSpace(CultureInfo.CurrentCulture.Name)
+            && CultureInfo.CurrentCulture.Name != CultureInfo.CurrentUICulture.Name)
+            yield return CultureInfo.CurrentCulture.Name;
+
+        var locale = Environment.GetEnvironmentVariable("LANG");
+        if (!string.IsNullOrWhiteSpace(locale))
+        {
+            int suffix = locale.IndexOfAny(['.', '@']);
+            yield return suffix > 0 ? locale[..suffix] : locale;
+        }
     }
 
     public static Hash128 Resolve(string? input) => IdForResolvedCode(ResolveCode(input));

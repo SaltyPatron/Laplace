@@ -1133,15 +1133,18 @@ public static class NpgsqlSubstrateReads
     public static Task<string?> ChatAsync(
         NpgsqlConnection conn, string prompt, byte[]? session, CancellationToken ct,
         string? shape = null, int[]? bands = null, bool elaborate = false,
+        byte[]? language = null,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ExecuteScalarAsync<string>(conn, """
-            SELECT converse.chat(@p, @s, NULL, @shape, @bands, NULL, NULL, NULL, @elab)
+            SELECT converse.chat(@p, @s, @lang, @shape, @bands, NULL, NULL, NULL, @elab)
             """,
             p =>
             {
                 p.AddWithValue("p", prompt);
                 var sessionParam = p.Add("s", NpgsqlDbType.Bytea);
                 sessionParam.Value = session is null ? DBNull.Value : session;
+                p.Add(new NpgsqlParameter("lang", NpgsqlDbType.Bytea)
+                    { Value = (object?)language ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("shape", NpgsqlDbType.Text)
                     { Value = (object?)shape ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("bands", NpgsqlDbType.Array | NpgsqlDbType.Integer)
@@ -1149,19 +1152,22 @@ public static class NpgsqlSubstrateReads
                 p.AddWithValue("elab", elaborate);
             }, ct: ct, label: "chat", onError: onError);
 
-    /// <inheritdoc cref="ChatAsync(NpgsqlConnection, string, byte[]?, CancellationToken, string?, int[]?, bool, NpgsqlRead.ErrorTranslator?)"/>
+    /// <inheritdoc cref="ChatAsync(NpgsqlConnection, string, byte[]?, CancellationToken, string?, int[]?, bool, byte[]?, NpgsqlRead.ErrorTranslator?)"/>
     public static Task<string?> ChatAsync(
         NpgsqlDataSource dataSource, string prompt, byte[]? session, CancellationToken ct,
         string? shape = null, int[]? bands = null, bool elaborate = false,
+        byte[]? language = null,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ExecuteScalarAsync<string>(dataSource, """
-            SELECT converse.chat(@p, @s, NULL, @shape, @bands, NULL, NULL, NULL, @elab)
+            SELECT converse.chat(@p, @s, @lang, @shape, @bands, NULL, NULL, NULL, @elab)
             """,
             p =>
             {
                 p.AddWithValue("p", prompt);
                 var sessionParam = p.Add("s", NpgsqlDbType.Bytea);
                 sessionParam.Value = session is null ? DBNull.Value : session;
+                p.Add(new NpgsqlParameter("lang", NpgsqlDbType.Bytea)
+                    { Value = (object?)language ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("shape", NpgsqlDbType.Text)
                     { Value = (object?)shape ?? DBNull.Value });
                 p.Add(new NpgsqlParameter("bands", NpgsqlDbType.Array | NpgsqlDbType.Integer)

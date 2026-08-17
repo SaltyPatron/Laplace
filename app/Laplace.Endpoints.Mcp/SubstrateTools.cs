@@ -89,6 +89,7 @@ internal sealed class SubstrateTools
                          ("session", "string", "session key for continuity", false),
                          ("shape", "string", "optional read shape (see converse.query_shapes())", false),
                          ("bands", "string", "optional comma-separated salience bands to lens the reply", false),
+                         ("language", "string", "operator primary language for this turn (ISO code or name)", false),
                          ("elaborate", "boolean", "advance to the next fact layer of the carried topic", false)),
             (s, a) => s.ChatTurn(a)),
         new("witness", "Deposit a fact as witnessed content (the write lane).",
@@ -701,10 +702,23 @@ internal sealed class SubstrateTools
             : bandsCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .Select(int.Parse).ToArray();
         var elaborate = args?["elaborate"]?.GetValue<bool>() ?? false;
+        var languageInput = Opt(args, "language");
+        byte[]? language = null;
+        LanguageReference.EnsureLoaded();
+        var languageCode = languageInput is null
+            ? LanguageReference.ResolveSystemCode()
+            : LanguageReference.ResolveCode(languageInput);
+        if (languageInput is not null && languageCode is null)
+            return ($"language does not resolve to ISO 639: {languageInput}", true);
+        if (languageCode is not null)
+        {
+            language = LanguageReference.IdForResolvedCode(languageCode).ToBytes();
+        }
 
         var reply = NpgsqlSubstrateReads.ChatAsync(
             _db, prompt, sessionId.ToBytes(), default,
-            shape: shape, bands: bands, elaborate: elaborate).GetAwaiter().GetResult();
+            shape: shape, bands: bands, elaborate: elaborate,
+            language: language).GetAwaiter().GetResult();
 
         DepositTurn(prompt, reply, sessionId);
 

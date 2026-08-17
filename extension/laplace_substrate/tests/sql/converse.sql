@@ -19,15 +19,19 @@ DECLARE
     w_p      bytea := laplace.word_id('p');
     w_h      bytea := laplace.word_id('h');
     w_c      bytea := laplace.word_id('c');
+    w_ja     bytea := laplace.word_id('犬');
     sense1   bytea := public.laplace_hash128_blake3('test/converse/sense1');
     synset1  bytea := public.laplace_hash128_blake3('test/converse/synset1');
     sense_b  bytea := public.laplace_hash128_blake3('test/converse/sense_b');
     synset_b bytea := public.laplace_hash128_blake3('test/converse/synset_b');
     synset2  bytea := public.laplace_hash128_blake3('test/converse/synset2');
     syn_bad  bytea := public.laplace_hash128_blake3('test/converse/synset_bad');
+    sense_ja bytea := public.laplace_hash128_blake3('test/converse/sense_ja');
+    syn_ja   bytea := public.laplace_hash128_blake3('test/converse/synset_ja');
     gloss1   bytea := laplace.word_id('G');
     lang_en  bytea := public.laplace_hash128_blake3('test/converse/lang_en');
     lang_de  bytea := public.laplace_hash128_blake3('test/converse/lang_de');
+    lang_ja  bytea := public.laplace_hash128_blake3('test/converse/lang_ja');
     k_sense  bytea := laplace.relation_type_id('HAS_SENSE');
     k_senseof bytea := laplace.relation_type_id('IS_SENSE_OF');
     k_def    bytea := laplace.relation_type_id('HAS_DEFINITION');
@@ -47,16 +51,19 @@ BEGIN
            (k_isa, 0, rel_meta, src),
            (k_causes, 0, rel_meta, src), (k_anto, 0, rel_meta, src),
            (w_dog, 2, type_t, src), (w_p, 0, type_t, src), (w_h, 0, type_t, src),
-           (w_c, 0, type_t, src),
+           (w_c, 0, type_t, src), (w_ja, 0, type_t, src),
            (sense1, 0, type_t, src), (synset1, 0, type_t, src),
            (sense_b, 0, type_t, src), (synset_b, 0, type_t, src),
+           (sense_ja, 0, type_t, src), (syn_ja, 0, type_t, src),
            (synset2, 0, type_t, src), (syn_bad, 0, type_t, src),
            (gloss1, 0, type_t, src),
-           (lang_en, 0, type_t, src), (lang_de, 0, type_t, src)
+           (lang_en, 0, type_t, src), (lang_de, 0, type_t, src),
+           (lang_ja, 0, type_t, src)
     ON CONFLICT DO NOTHING;
 
     INSERT INTO laplace.canonical_names (id, name)
-    VALUES (lang_en, 'test/lang/en'), (lang_de, 'test/lang/de')
+    VALUES (lang_en, 'test/lang/en'), (lang_de, 'test/lang/de'),
+           (lang_ja, 'test/lang/ja')
     ON CONFLICT DO NOTHING;
     PERFORM realize.register_canonical('IS_A');
     PERFORM realize.register_canonical('CAUSES');
@@ -90,7 +97,32 @@ BEGIN
       (laplace.consensus_id(w_p,   k_lang, lang_en),     w_p,    k_lang, lang_en,    neutral + 250000000000, sharp_rd, 60000000, 5, now()),
       (laplace.consensus_id(w_c,   k_lang, lang_en),     w_c,    k_lang, lang_en,    neutral + 250000000000, sharp_rd, 60000000, 5, now()),
       (laplace.consensus_id(w_h,   k_lang, lang_de),     w_h,    k_lang, lang_de,    neutral + 250000000000, sharp_rd, 60000000, 5, now());
+    INSERT INTO laplace.consensus (id, subject_id, type_id, object_id,
+                           rating, rd, volatility, witness_count, last_observed_at)
+    VALUES
+      (laplace.consensus_id(w_ja, k_sense, sense_ja),    w_ja,     k_sense,   sense_ja, neutral + 300000000000, sharp_rd, 60000000, 7, now()),
+      (laplace.consensus_id(sense_ja, k_senseof, syn_ja), sense_ja, k_senseof, syn_ja, neutral + 300000000000, sharp_rd, 60000000, 7, now()),
+      (laplace.consensus_id(w_ja, k_lang, lang_ja),      w_ja,     k_lang,    lang_ja, neutral + 300000000000, sharp_rd, 60000000, 7, now()),
+      (laplace.consensus_id(sense_ja, k_lang, lang_ja),  sense_ja, k_lang,    lang_ja, neutral + 300000000000, sharp_rd, 60000000, 7, now());
 END $$;
+
+-- The operator's primary language is a prior, not a gate.  With no English
+-- candidate for a Japanese prompt, ORIENT_TOPIC uses the prompt-language pass
+-- for this turn and records that it widened.  The profile value itself remains
+-- English in the receipt.
+SELECT o.rank = 1 AS elected,
+       o.primary_language = public.laplace_hash128_blake3('test/converse/lang_en') AS primary_stays_en,
+       o.prompt_language = public.laplace_hash128_blake3('test/converse/lang_ja') AS observed_ja,
+       o.effective_language = public.laplace_hash128_blake3('test/converse/lang_ja') AS toggled_for_turn,
+       o.candidate_language IS NULL AS identity_stays_neutral,
+       o.widened
+FROM converse.orient_topic('犬', public.laplace_hash128_blake3('test/converse/lang_en')) o
+WHERE o.rank = 1;
+
+SELECT bool_and(NOT o.widened)
+       AND bool_and(o.effective_language = public.laplace_hash128_blake3('test/converse/lang_ja'))
+       AS matching_primary_does_not_widen
+FROM converse.orient_topic('犬', public.laplace_hash128_blake3('test/converse/lang_ja')) o;
 
 SELECT word, (id IS NOT NULL) AS resolved FROM converse.prompt_words('what is a Dog') ORDER BY ord;
 
