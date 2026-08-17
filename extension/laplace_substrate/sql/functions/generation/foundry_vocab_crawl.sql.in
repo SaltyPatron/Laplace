@@ -37,30 +37,34 @@ CREATE OR REPLACE FUNCTION generation.foundry_vocab_crawl(
     
     
     
-    -- Pillar 5 (2026-07-20): continuations come from geometry_successors -- the
-    -- next content constituent in every trajectory containing the point --
+    -- Pillar 5 (2026-07-20): sequence proposals come from geometry_successors --
+    -- the next content constituent in the text projection of every trajectory --
     -- not from PRECEDES consensus, which merely materialized the same sequence
     -- the trajectory already holds (Pillar 3a, e5e1b42). Weight is observed
     -- frequency (seen), not consensus.eff_mu, because there is no rated edge to read.
+    -- This is proposal evidence, not a direct semantic edge: the underlying
+    -- structural path remains point -> containing composition -> constituent.
     order1 AS (
-        SELECT gs.successor_id AS entity_id,
+        SELECT gs.point_id,
+               gs.successor_id AS entity_id,
                gs.seen::numeric AS w,
-               row_number() OVER (PARTITION BY seed.wid ORDER BY gs.seen DESC, gs.successor_id) AS rn
+               row_number() OVER (PARTITION BY gs.point_id ORDER BY gs.seen DESC, gs.successor_id) AS rn
         FROM seed_ids si
-        CROSS JOIN unnest(si.ids) AS seed(wid)
-        CROSS JOIN LATERAL structural.geometry_successors(seed.wid, p_fanout, 8) gs
+        CROSS JOIN LATERAL structural.geometry_successors_batch(si.ids, p_fanout, 8, false) gs
         JOIN laplace.entities e ON e.id = gs.successor_id AND e.type_id = realize.canonical_id('Word')
     ),
     order1_cut AS (
-        SELECT entity_id, w, w::bigint AS weight FROM order1 WHERE rn <= p_fanout
+        SELECT point_id, entity_id, w, w::bigint AS weight
+        FROM order1 WHERE rn <= p_fanout
     ),
     order2 AS (
-        SELECT gs.successor_id AS entity_id,
-               (o.w * gs.seen::numeric)::bigint AS weight,
-               row_number() OVER (ORDER BY o.w * gs.seen DESC, gs.successor_id) AS rn
+        SELECT tc.object_id AS entity_id,
+               (o.w * tc.weight::numeric)::bigint AS weight,
+               row_number() OVER (ORDER BY o.w * tc.weight DESC, tc.object_id) AS rn
         FROM order1_cut o
-        CROSS JOIN LATERAL structural.geometry_successors(o.entity_id, p_fanout, 8) gs
-        JOIN laplace.entities e ON e.id = gs.successor_id AND e.type_id = realize.canonical_id('Word')
+        CROSS JOIN LATERAL generation.trajectory_continuations(
+            ARRAY[o.point_id, o.entity_id], p_fanout) tc
+        JOIN laplace.entities e ON e.id = tc.object_id AND e.type_id = realize.canonical_id('Word')
     ),
     order2_cut AS (
         SELECT entity_id, weight FROM order2 WHERE rn <= p_max
@@ -93,39 +97,34 @@ CREATE OR REPLACE FUNCTION generation.foundry_vocab_crawl(
     
     
     
+    -- The scaffold is contextual vocabulary, so discover it from trajectories
+    -- containing at least one requested seed.  The previous global branch sorted
+    -- by content hash, cut at 400,000 trajectories regardless of p_max, and only
+    -- then unpacked them: a 100-token request took 126.9 seconds while returning
+    -- 57 rows.  Overlap is the GIN-served reduction boundary; ordinal unpack and
+    -- frequency aggregation happen only over the matching physical observations.
+    --
+    -- No parent-entity type join belongs before that boundary.  It scanned 10.6M
+    -- Sentence/Document entity rows to validate 13,457 already-matched trajectories
+    -- in the measured `king` probe.  A word's own grapheme trajectory cannot contain
+    -- its word id, so seed overlap already selects compositions in which the word
+    -- participates.  The final rendered-content predicates below reject separators
+    -- and non-token surfaces after aggregation, over the reduced ID set.
+    scaffold_traj AS MATERIALIZED (
+        SELECT DISTINCT ON (p.entity_id) p.entity_id, p.trajectory
+        FROM seed_ids s, laplace.physicalities p
+        WHERE p.type = 1
+          AND p.trajectory IS NOT NULL
+          AND public.laplace_trajectory_constituent_ids(p.trajectory) && s.ids
+        ORDER BY p.entity_id, p.id
+    ),
     scaffold AS (
-        -- Plan Phase 3b: rank by CONSENSUS TENSION (signed consensus.eff_mu, rd-discounted,
-        -- witness-saturated; consensus.refuted edges excluded), not raw degree count —
-        -- frequent-but-slack pairings stop outranking rare-but-taut terms.
-        SELECT f.id AS entity_id, f.d::bigint AS weight,
-               row_number() OVER (ORDER BY f.d DESC) AS rn
-        FROM (
-            -- Pillar 5: corpus frequency from the trajectory, not PRECEDES mass.
-            SELECT tc.entity_id AS id, count(*)::bigint AS d
-            FROM (
-                SELECT DISTINCT ON (w.id) w.id AS entity_id, w.trajectory
-                FROM laplace.v_word_points w
-                WHERE w.type_id IN (realize.canonical_id('Sentence'), realize.canonical_id('Document'))
-                  AND w.trajectory IS NOT NULL
-                  -- Postgres refuses any single palloc ≥ 1GB and constituent
-                  -- expansion runs ~4x the packed bytes, so a trajectory past
-                  -- 256MB can never expand (XX000 invalid memory alloc) — and a
-                  -- document that size carries no word-frequency signal its
-                  -- sentences don't already carry 400k times over.
-                  -- ::bytea IS LOAD-BEARING. PostGIS gives geometry implicit
-                  -- casts to BOTH bytea and text, so a bare octet_length(w.trajectory)
-                  -- matches octet_length(bytea) and octet_length(text) equally and the
-                  -- parser refuses to choose: 42725 "function octet_length(geometry) is
-                  -- not unique". That aborts the vocab crawl and therefore EVERY
-                  -- synthesize run -- no GGUF can be produced at all. Measured against
-                  -- the live catalog 2026-08-16: candidates are bytea, text, character, bit.
-                  AND octet_length(w.trajectory::bytea) <= 268435456
-                ORDER BY w.id, w.physicality_id LIMIT 400000
-            ) t
-            CROSS JOIN LATERAL laplace_trajectory_constituents(t.trajectory) tc
-            JOIN laplace.entities e ON e.id = tc.entity_id AND e.type_id = realize.canonical_id('Word')
-            GROUP BY tc.entity_id
-        ) f
+        SELECT tc.entity_id AS entity_id,
+               count(*)::bigint AS weight,
+               row_number() OVER (ORDER BY count(*) DESC, tc.entity_id) AS rn
+        FROM scaffold_traj t
+        CROSS JOIN LATERAL public.laplace_trajectory_constituents(t.trajectory) tc
+        GROUP BY tc.entity_id
     ),
     picked AS (
         SELECT entity_id, weight, 2 AS pri FROM order_closure WHERE rn <= p_max / 4

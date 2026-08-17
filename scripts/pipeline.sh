@@ -405,6 +405,14 @@ phase_install() {
   test -d build || { echo "::error::build/ missing — run 'pipeline.sh build' first"; exit 1; }
   local native_fp
   native_fp=$(fp_native)
+  # Never stamp today's source fingerprint onto yesterday's build artifacts.
+  # `install` is callable as a standalone phase, so prove the build phase
+  # completed for exactly this native input domain before trusting build/.
+  if [[ ! -f "$FP_STAMP_DIR/build-native" ]] \
+     || [[ "$(cat "$FP_STAMP_DIR/build-native" 2>/dev/null || true)" != "$native_fp" ]]; then
+    echo "::error::native build artifacts are stale — run 'pipeline.sh build install'" >&2
+    exit 1
+  fi
   if fp_check install-native "$native_fp" \
      && [[ -f "$LAPLACE_INSTALL_PREFIX/lib/liblaplace_core.so" ]]; then
     echo "install up-to-date — skipped (engine/extension unchanged since last install; no API stop, no PG bounce)"

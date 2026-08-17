@@ -228,6 +228,9 @@ functions/structural/word_curve.sql.in
 functions/structural/word_shape_distance.sql.in
 functions/structural/anagrams_of.sql.in
 functions/structural/containers_of.sql.in
+functions/converse/operation_frame_routes.sql.in
+functions/converse/compile_prompt.sql.in
+functions/converse/execute_prompt.sql.in
 functions/structural/geometry_successors.sql.in
 functions/structural/collocates.sql.in
 functions/structural/entity_curve.sql.in

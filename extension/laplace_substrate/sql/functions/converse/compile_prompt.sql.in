@@ -1,0 +1,108 @@
+-- Compile an operator utterance into an installed operation plus typed operands.
+-- This is deliberately an abstaining compiler: if the substrate does not witness
+-- both a request cue and the operation's binder, it emits no program rather than
+-- guessing from punctuation or an English surface pattern.
+--
+-- Stages are visible in the return receipt:
+--   RESOLVE  prompt_words, once
+--   ORIENT   operator/prompt language receipt
+--   ROUTE    case-family surfaces -> EVOKES_FRAME -> operation_frame_routes
+--   COMPOSE  ordered request, binder and operand identity arrays
+--
+-- Case widening is attested identity traversal, not lower(text).  The native set
+-- function shares trajectory unpack, case maps, rendering and existence checks
+-- across the whole prompt.  Consensus is then read once for every variant.
+CREATE OR REPLACE FUNCTION converse.compile_prompt(
+        p_prompt text,
+        p_primary_language bytea DEFAULT NULL)
+    RETURNS TABLE(
+        operation_id bytea,
+        shape text,
+        request_ids bytea[],
+        binder_ids bytea[],
+        operand_ids bytea[],
+        route_mu numeric,
+        primary_language bytea,
+        prompt_language bytea,
+        effective_language bytea,
+        widened boolean)
+    LANGUAGE sql STABLE PARALLEL SAFE
+AS $$
+WITH words AS MATERIALIZED (
+    SELECT p.ord, p.id
+    FROM converse.prompt_words(p_prompt) p
+    WHERE p.id IS NOT NULL
+),
+variants AS MATERIALIZED (
+    SELECT v.word_id, v.variant_id
+    FROM lexical.word_case_variants_batch(
+        ARRAY(SELECT w.id FROM words w ORDER BY w.ord)) v
+),
+route_evidence AS MATERIALIZED (
+    SELECT v.word_id,
+           r.operation_id,
+           r.shape,
+           r.role,
+           max(consensus.eff_mu(c.rating, c.rd)) AS mu
+    FROM variants v
+    JOIN laplace.consensus c
+      ON c.subject_id = v.variant_id
+     AND c.type_id = laplace.relation_type_id('EVOKES_FRAME')
+    JOIN converse.operation_frame_routes() r ON r.frame_id = c.object_id
+    GROUP BY v.word_id, r.operation_id, r.shape, r.role
+),
+programs AS MATERIALIZED (
+    SELECT r.operation_id, r.shape, sum(r.mu) AS route_mu
+    FROM route_evidence r
+    GROUP BY r.operation_id, r.shape
+    HAVING bool_or(r.role = 'request') AND bool_or(r.role = 'binder')
+),
+chosen AS MATERIALIZED (
+    SELECT p.operation_id, p.shape, p.route_mu
+    FROM programs p
+    ORDER BY p.route_mu DESC, p.operation_id
+    LIMIT 1
+),
+roles AS MATERIALIZED (
+    SELECT DISTINCT r.word_id, r.role
+    FROM route_evidence r
+    JOIN chosen c USING (operation_id, shape)
+),
+-- Punctuation and other ungrounded atoms are not operands.  A lexicalized word
+-- is one with a witnessed HAS_SENSE-family edge through any attested case form.
+-- Articles remain part of the operand composition ("a dog" is not rewritten to
+-- "dog"); firmware may later interpret that composition without an English
+-- stop-word list.
+lexicalized AS MATERIALIZED (
+    SELECT DISTINCT v.word_id
+    FROM variants v
+    JOIN laplace.consensus c ON c.subject_id = v.variant_id
+    WHERE c.type_id = ANY (consensus.relation_family_ids('HAS_SENSE'))
+),
+plang AS MATERIALIZED (
+    SELECT converse.prompt_language_top(p_prompt) AS id
+)
+SELECT c.operation_id,
+       c.shape,
+       ARRAY(SELECT w.id FROM words w
+             JOIN roles r ON r.word_id = w.id AND r.role = 'request'
+             ORDER BY w.ord),
+       ARRAY(SELECT w.id FROM words w
+             JOIN roles r ON r.word_id = w.id AND r.role = 'binder'
+             ORDER BY w.ord),
+       ARRAY(SELECT w.id FROM words w
+             JOIN lexicalized l ON l.word_id = w.id
+             WHERE NOT EXISTS (SELECT 1 FROM roles r WHERE r.word_id = w.id)
+             ORDER BY w.ord),
+       c.route_mu,
+       p_primary_language,
+       p.id,
+       COALESCE(p.id, p_primary_language),
+       p_primary_language IS NOT NULL
+         AND p.id IS NOT NULL
+         AND p.id <> p_primary_language
+FROM chosen c
+CROSS JOIN plang p
+WHERE EXISTS (SELECT 1 FROM lexicalized l
+              WHERE NOT EXISTS (SELECT 1 FROM roles r WHERE r.word_id = l.word_id))
+$$;

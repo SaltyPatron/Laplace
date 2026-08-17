@@ -18,3 +18,34 @@ CREATE OR REPLACE FUNCTION structural.containers_of(
     RETURNS TABLE(entity_id bytea, tier smallint, type_id bytea, hops int)
     AS 'MODULE_PATHNAME', 'pg_laplace_containers_of'
     LANGUAGE C STABLE;
+
+-- Set containment is a different operation from frontier expansion.  Given
+-- multiple identities, return compositions whose one witnessed trajectory
+-- contains every identity.  This preserves the composition hop: `Captain` and
+-- `Ahab` remain constituents of the returned sentence; this function does not
+-- fabricate a direct semantic edge between them.
+--
+-- The predicate is the exact expression served by
+-- physicalities_constituents_gin.  It is intentionally one bound @> probe, not
+-- N calls to containers_of followed by an intersection.  On the live Moby Dick
+-- data the two-id Captain/Ahab probe returns 112 containers in ~3 ms; separately
+-- expanding both words and intersecting their result sets ran for minutes.
+--
+-- No row cap belongs in this primitive.  The caller owns policy and may rank or
+-- stop after it has a typed candidate set.  An empty member set returns no rows
+-- rather than allowing array containment's empty-set truth to scan every
+-- physicality.
+DROP FUNCTION IF EXISTS laplace.containers_containing_all(bytea[]);
+DROP FUNCTION IF EXISTS structural.containers_containing_all(bytea[]);
+CREATE OR REPLACE FUNCTION structural.containers_containing_all(p_members bytea[])
+    RETURNS TABLE(entity_id bytea)
+    LANGUAGE sql STABLE PARALLEL SAFE
+AS $$
+    SELECT DISTINCT ON (p.entity_id) p.entity_id
+    FROM laplace.physicalities p
+    WHERE cardinality(p_members) > 0
+      AND p.type = 1
+      AND p.trajectory IS NOT NULL
+      AND public.laplace_trajectory_constituent_ids(p.trajectory) @> p_members
+    ORDER BY p.entity_id, p.id
+$$;

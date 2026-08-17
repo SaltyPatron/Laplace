@@ -1,14 +1,14 @@
 -- The geometry-native continuation operator: for a content point, the next (or
 -- previous) CONTENT constituent in every trajectory that contains it, aggregated
 -- by frequency. Reads the ordered sequence straight from the content-addressed
--- geometry (containers_of's single-key-GIN reverse index + the perfcache
--- separator classifier) -- no PRECEDES attestation, no gen_corpus flat corpus.
+-- geometry (a single-key GIN reverse probe + the central separator alphabet) --
+-- no PRECEDES attestation, no gen_corpus flat corpus.
 -- Native because the walk (find the point, skip separators, take the neighbour,
 -- aggregate) is pointer/loop work SQL cannot do at scale; see geometry_successors.c.
 --
 -- p_backward flips the walk. The trajectory holds the EXACT ordered sequence of
 -- everything ingested, so "what precedes x" is exactly as answerable as "what
--- follows x" -- same containment query, same separator cache, same aggregation.
+-- follows x" -- same containment query, same separator set, same aggregation.
 -- Asking the question is always legal; what is banned is MATERIALISING the answer
 -- as stored PRECEDES rows when the geometry already holds it losslessly.
 DROP FUNCTION IF EXISTS laplace.geometry_successors(bytea, int, int, boolean);
@@ -19,6 +19,25 @@ CREATE OR REPLACE FUNCTION structural.geometry_successors(
         p_backward boolean DEFAULT false)
     RETURNS TABLE(successor_id bytea, seen bigint)
     AS 'MODULE_PATHNAME', 'pg_laplace_geometry_successors'
+    LANGUAGE C STABLE;
+
+-- Multi-root form for sequence-projection expansion.  One GIN overlap probe reads every
+-- trajectory containing ANY requested point, then native code preserves the
+-- scalar contract independently for each root: first occurrence per physical
+-- observation, first non-separator within p_window, top p_limit successors.
+-- This is the set operator; callers with an array must not invoke the scalar
+-- function row by row and rescan the same corpus for every frontier member.
+-- "Successor" is not a direct substrate relationship: this operation projects
+-- a container's ordered constituents into a text-generation stream. Structural
+-- inference retains the point -> container -> constituent hop via containers_of().
+DROP FUNCTION IF EXISTS laplace.geometry_successors_batch(bytea[], int, int, boolean);
+CREATE OR REPLACE FUNCTION structural.geometry_successors_batch(
+        p_points   bytea[],
+        p_limit    int DEFAULT 20,
+        p_window   int DEFAULT 8,
+        p_backward boolean DEFAULT false)
+    RETURNS TABLE(point_id bytea, successor_id bytea, seen bigint)
+    AS 'MODULE_PATHNAME', 'pg_laplace_geometry_successors_batch'
     LANGUAGE C STABLE;
 
 -- Named mirror: "what comes before x", read from the same sequence.

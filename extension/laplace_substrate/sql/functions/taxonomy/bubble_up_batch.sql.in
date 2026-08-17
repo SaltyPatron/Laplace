@@ -45,9 +45,25 @@ WITH terms AS (
     FROM unnest(COALESCE(p_terms, ARRAY[]::bytea[])) AS t
     WHERE t IS NOT NULL
 ),
-peers AS (
-    SELECT t.term, unnest(lexical.lexical_peers(t.term)) AS id
+direct_terms AS MATERIALIZED (
+    SELECT DISTINCT t.term
     FROM terms t
+    JOIN laplace.consensus c ON c.subject_id = t.term
+    WHERE c.type_id = ANY (consensus.relation_family_ids('HAS_SENSE'))
+),
+unresolved AS MATERIALIZED (
+    SELECT t.term FROM terms t
+    LEFT JOIN direct_terms d USING (term)
+    WHERE d.term IS NULL
+),
+peers AS MATERIALIZED (
+    -- Exact identity is the fast path. Only terms with no witnessed sense enter
+    -- orthographic widening, and all of those widen in one native pass.
+    SELECT d.term, d.term AS id FROM direct_terms d
+    UNION ALL
+    SELECT v.word_id, v.variant_id
+    FROM lexical.word_case_variants_batch(
+        ARRAY(SELECT u.term FROM unresolved u ORDER BY u.term)) v
 ),
 family_out AS (
     SELECT p.term,

@@ -1,0 +1,98 @@
+-- Compile and execute the composition-backed WHAT_IS program.  This is a
+-- high-level surface over the explicit recall_intent ISA, not a replacement for
+-- it: callers that already possess an opcode and operands keep calling the
+-- explicit surface; natural operator utterances pass through this compiler.
+--
+-- The WHAT_IS transformation changes interrogative order into a declarative
+-- sequence: request + binder + operand ("who is Captain Ahab") becomes
+-- operand + binder (Captain,Ahab,is).  SCAN first reduces the physicality set by
+-- GIN containment.  Only those survivors are unpacked to verify ordered
+-- adjacency and a witnessed continuation.  A question carrying the request cue
+-- is excluded from the answer set.  No row cap or manufactured score is used;
+-- shortest attested closure is merely the deterministic output ordering.
+CREATE OR REPLACE FUNCTION converse.execute_prompt(
+        p_prompt text,
+        p_primary_language bytea DEFAULT NULL)
+    RETURNS TABLE(
+        rank bigint,
+        reply text,
+        operation_id bytea,
+        shape text,
+        container_id bytea,
+        route_mu numeric,
+        primary_language bytea,
+        prompt_language bytea,
+        effective_language bytea,
+        widened boolean)
+    LANGUAGE sql STABLE
+AS $$
+WITH program AS MATERIALIZED (
+    SELECT * FROM converse.compile_prompt(p_prompt, p_primary_language)
+    WHERE shape = 'what_is'
+),
+needle AS MATERIALIZED (
+    SELECT p.*, p.operand_ids || p.binder_ids AS ids
+    FROM program p
+    WHERE cardinality(p.operand_ids) > 0 AND cardinality(p.binder_ids) > 0
+),
+containers AS MATERIALIZED (
+    SELECT c.entity_id
+    FROM needle n
+    CROSS JOIN LATERAL structural.containers_containing_all(n.ids) c
+),
+separators AS MATERIALIZED (
+    SELECT generation.separator_ids() AS ids
+),
+sequences AS MATERIALIZED (
+    SELECT c.entity_id,
+           array_agg(u.entity_id ORDER BY u.ord)
+             FILTER (WHERE NOT u.entity_id = ANY (s.ids)) AS ids
+    FROM containers c
+    CROSS JOIN LATERAL generation.trajectory_unpacked_points(c.entity_id)
+         WITH ORDINALITY AS u(entity_id, run_length, ctier, ord)
+    CROSS JOIN separators s
+    GROUP BY c.entity_id
+),
+matched AS MATERIALIZED (
+    SELECT DISTINCT q.entity_id, cardinality(q.ids) - cardinality(n.ids) AS extra
+    FROM sequences q
+    CROSS JOIN needle n
+    WHERE q.ids[1 : cardinality(n.ids)] = n.ids
+      -- WHAT_IS asks for a predication whose subject is the operand.  A mere
+      -- mid-sentence mention ("know if a dog is happy") is usage evidence, not
+      -- a definition.  Keep this as a structural position test; do not replace
+      -- it with a rendered-text prefix or a language-specific pattern.
+      -- The declarative prefix must have an observed continuation.  This removes
+      -- truncated fragments such as the five-point "Captain Ahab is" rows.
+      AND cardinality(n.ids) < cardinality(q.ids)
+      -- Do not answer by replaying the interrogative itself.
+      AND NOT q.ids && n.request_ids
+),
+ordered AS MATERIALIZED (
+    SELECT row_number() OVER (ORDER BY m.extra, m.entity_id) AS rank,
+           m.entity_id
+    FROM matched m
+),
+rendered AS MATERIALIZED (
+    SELECT realize.render_text_batch(
+               ARRAY(SELECT o.entity_id FROM ordered o ORDER BY o.rank), 256) AS labels
+),
+answers AS (
+    SELECT o.rank, r.labels[o.rank] AS reply, o.entity_id
+    FROM ordered o CROSS JOIN rendered r
+)
+SELECT a.rank,
+       a.reply,
+       n.operation_id,
+       n.shape,
+       a.entity_id,
+       n.route_mu,
+       n.primary_language,
+       n.prompt_language,
+       n.effective_language,
+       n.widened
+FROM answers a
+CROSS JOIN needle n
+WHERE a.reply IS NOT NULL AND a.reply <> ''
+ORDER BY a.rank
+$$;

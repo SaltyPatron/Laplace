@@ -20,6 +20,10 @@ DECLARE
     w_h      bytea := laplace.word_id('h');
     w_c      bytea := laplace.word_id('c');
     w_ja     bytea := laplace.word_id('犬');
+    w_request bytea := laplace.word_id('compilerrequest');
+    w_binder  bytea := laplace.word_id('compilerbinder');
+    frame_people bytea := laplace.word_id('People');
+    frame_existence bytea := laplace.word_id('Existence');
     sense1   bytea := public.laplace_hash128_blake3('test/converse/sense1');
     synset1  bytea := public.laplace_hash128_blake3('test/converse/synset1');
     sense_b  bytea := public.laplace_hash128_blake3('test/converse/sense_b');
@@ -41,6 +45,7 @@ DECLARE
     k_isa    bytea := laplace.relation_type_id('IS_A');
     k_causes bytea := laplace.relation_type_id('CAUSES');
     k_anto   bytea := laplace.relation_type_id('IS_ANTONYM_OF');
+    k_evokes bytea := laplace.relation_type_id('EVOKES_FRAME');
     neutral  bigint := 1500000000000;
     sharp_rd bigint := 30000000000;
 BEGIN
@@ -50,8 +55,11 @@ BEGIN
            (k_syn, 0, rel_meta, src), (k_member, 0, rel_meta, src), (k_lang, 0, rel_meta, src),
            (k_isa, 0, rel_meta, src),
            (k_causes, 0, rel_meta, src), (k_anto, 0, rel_meta, src),
+           (k_evokes, 0, rel_meta, src),
            (w_dog, 2, type_t, src), (w_p, 0, type_t, src), (w_h, 0, type_t, src),
            (w_c, 0, type_t, src), (w_ja, 0, type_t, src),
+           (w_request, 2, type_t, src), (w_binder, 2, type_t, src),
+           (frame_people, 2, type_t, src), (frame_existence, 2, type_t, src),
            (sense1, 0, type_t, src), (synset1, 0, type_t, src),
            (sense_b, 0, type_t, src), (synset_b, 0, type_t, src),
            (sense_ja, 0, type_t, src), (syn_ja, 0, type_t, src),
@@ -100,6 +108,15 @@ BEGIN
     INSERT INTO laplace.consensus (id, subject_id, type_id, object_id,
                            rating, rd, volatility, witness_count, last_observed_at)
     VALUES
+      (laplace.consensus_id(w_request, k_evokes, frame_people),
+       w_request, k_evokes, frame_people,
+       neutral + 200000000000, sharp_rd, 60000000, 2, now()),
+      (laplace.consensus_id(w_binder, k_evokes, frame_existence),
+       w_binder, k_evokes, frame_existence,
+       neutral + 200000000000, sharp_rd, 60000000, 2, now());
+    INSERT INTO laplace.consensus (id, subject_id, type_id, object_id,
+                           rating, rd, volatility, witness_count, last_observed_at)
+    VALUES
       (laplace.consensus_id(w_ja, k_sense, sense_ja),    w_ja,     k_sense,   sense_ja, neutral + 300000000000, sharp_rd, 60000000, 7, now()),
       (laplace.consensus_id(sense_ja, k_senseof, syn_ja), sense_ja, k_senseof, syn_ja, neutral + 300000000000, sharp_rd, 60000000, 7, now()),
       (laplace.consensus_id(w_ja, k_lang, lang_ja),      w_ja,     k_lang,    lang_ja, neutral + 300000000000, sharp_rd, 60000000, 7, now()),
@@ -131,7 +148,38 @@ SELECT converse.resolve_phrase('what is a dog') = laplace.word_id('dog') AS phra
 SELECT converse.resolve_last_word('what is a dog') = laplace.word_id('dog') AS last_word_is_dog;
 SELECT converse.resolve_last_word('zzzunknownzzz') IS NULL AS unknown_is_null;
 
+-- The natural-language compiler routes through witnessed semantic frames, not
+-- a surface regex, and leaves the lexicalized content as the operand.
+SELECT c.shape = 'what_is' AS compiled_what_is,
+       c.request_ids = ARRAY[laplace.word_id('compilerrequest')]::bytea[] AS request_is_routed,
+       c.binder_ids = ARRAY[laplace.word_id('compilerbinder')]::bytea[] AS binder_is_routed,
+       c.operand_ids = ARRAY[laplace.word_id('dog')]::bytea[] AS dog_is_operand
+FROM converse.compile_prompt(
+    'compilerrequest compilerbinder dog',
+    public.laplace_hash128_blake3('test/converse/lang_en')) c;
+
+SELECT count(*) = 0 AS compiler_abstains_without_route
+FROM converse.compile_prompt(
+    'dog', public.laplace_hash128_blake3('test/converse/lang_en'));
+
 SELECT laplace.word_id('dog') = ANY(lexical.lexical_peers(laplace.word_id('dog'))) AS peer_includes_self;
+
+-- The set case operation is result-identical to independent scalar calls,
+-- including a content id with no physicality (which still includes itself).
+WITH words AS (
+    SELECT ARRAY[laplace.word_id('dog'), laplace.word_id('NoSuchPeer')]::bytea[] AS ids
+), scalar AS (
+    SELECT w.id AS word_id, unnest(lexical.word_case_variants(w.id)) AS variant_id
+    FROM words, unnest(words.ids) AS w(id)
+), batched AS (
+    SELECT b.word_id, b.variant_id
+    FROM words, lexical.word_case_variants_batch(words.ids) b
+)
+SELECT NOT EXISTS (
+    (SELECT * FROM scalar EXCEPT SELECT * FROM batched)
+    UNION ALL
+    (SELECT * FROM batched EXCEPT SELECT * FROM scalar)
+) AS case_batch_matches_scalar;
 
 SELECT count(*) AS dog_senses FROM lexical.senses(laplace.word_id('dog'));
 

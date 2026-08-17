@@ -82,6 +82,19 @@ BEGIN
                 public.laplace_mantissa_pack(w_france, 7, 1, t2flag)]),
             7, now());
 
+    -- Multi-identity containment is one shared GIN probe.  It returns the
+    -- composition carrying both points, not a manufactured capital->of edge.
+    IF NOT EXISTS (
+        SELECT 1
+        FROM structural.containers_containing_all(ARRAY[w_capital, w_of]) c
+        WHERE c.entity_id = sent) THEN
+        RAISE EXCEPTION 'FAIL: shared container for capital/of missing';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM structural.containers_containing_all(ARRAY[]::bytea[])) THEN
+        RAISE EXCEPTION 'FAIL: empty shared-container set scanned physicalities';
+    END IF;
+
     -- doc wraps sent: contributes no pairs of its own and never double-counts.
     INSERT INTO laplace.physicalities (id, entity_id, type, coord, hilbert_index,
                                trajectory, n_constituents, observed_at)
@@ -188,6 +201,68 @@ BEGIN
         SELECT 1 FROM generation.trajectory_continuations(ARRAY[w_capital], 8) t
         WHERE t.object_id = w_of AND t.weight = 3) THEN
         RAISE EXCEPTION 'FAIL: repeated matches or new trajectory missing (capital→of should be weight 3)';
+    END IF;
+
+    -- Two physical observations may attest the same entity. geometry_successors
+    -- must keep their trajectories separate rather than interleaving equal
+    -- ordinals under entity_id. Together with sent and sent3 this makes three
+    -- containers whose first content successor/predecessor is capital↔of.
+    INSERT INTO laplace.physicalities (id, entity_id, type, coord, hilbert_index,
+                               trajectory, n_constituents, observed_at)
+    VALUES (public.laplace_hash128_blake3('test/corpus/phys-sentence3-observation2'), sent3, 1,
+            public.ST_SetSRID(public.ST_MakePoint(2,2,2,2), 0),
+            decode('00000000000000000000000000000000','hex'),
+            public.ST_MakeLine(ARRAY[
+                public.laplace_mantissa_pack(w_capital, 1, 1, t2flag),
+                public.laplace_mantissa_pack(sp, 2, 1, t2flag),
+                public.laplace_mantissa_pack(w_of, 3, 1, t2flag)]),
+            3, now());
+    IF NOT EXISTS (
+        SELECT 1 FROM structural.geometry_successors(w_capital, 8, 8, false) g
+        WHERE g.successor_id = w_of AND g.seen = 3) THEN
+        RAISE EXCEPTION 'FAIL: geometry successor did not count three physical observations separately';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM structural.geometry_successors(w_of, 8, 8, true) g
+        WHERE g.successor_id = w_capital AND g.seen = 3) THEN
+        RAISE EXCEPTION 'FAIL: geometry predecessor did not count three physical observations separately';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM structural.geometry_successors(w_capital, 8, 8, false) g
+        WHERE g.successor_id = sp) THEN
+        RAISE EXCEPTION 'FAIL: geometry successor leaked a separator';
+    END IF;
+    IF EXISTS (
+        (SELECT b.point_id, b.successor_id, b.seen
+         FROM structural.geometry_successors_batch(ARRAY[w_capital, w_of], 8, 8, false) b
+         EXCEPT
+         SELECT p.id, g.successor_id, g.seen
+         FROM unnest(ARRAY[w_capital, w_of]) p(id)
+         CROSS JOIN LATERAL structural.geometry_successors(p.id, 8, 8, false) g)
+        UNION ALL
+        (SELECT p.id, g.successor_id, g.seen
+         FROM unnest(ARRAY[w_capital, w_of]) p(id)
+         CROSS JOIN LATERAL structural.geometry_successors(p.id, 8, 8, false) g
+         EXCEPT
+         SELECT b.point_id, b.successor_id, b.seen
+         FROM structural.geometry_successors_batch(ARRAY[w_capital, w_of], 8, 8, false) b)) THEN
+        RAISE EXCEPTION 'FAIL: batched geometry successors differ from scalar results';
+    END IF;
+    IF EXISTS (
+        (SELECT b.point_id, b.successor_id, b.seen
+         FROM structural.geometry_successors_batch(ARRAY[w_capital, w_of], 8, 8, true) b
+         EXCEPT
+         SELECT p.id, g.successor_id, g.seen
+         FROM unnest(ARRAY[w_capital, w_of]) p(id)
+         CROSS JOIN LATERAL structural.geometry_successors(p.id, 8, 8, true) g)
+        UNION ALL
+        (SELECT p.id, g.successor_id, g.seen
+         FROM unnest(ARRAY[w_capital, w_of]) p(id)
+         CROSS JOIN LATERAL structural.geometry_successors(p.id, 8, 8, true) g
+         EXCEPT
+         SELECT b.point_id, b.successor_id, b.seen
+         FROM structural.geometry_successors_batch(ARRAY[w_capital, w_of], 8, 8, true) b)) THEN
+        RAISE EXCEPTION 'FAIL: batched geometry predecessors differ from scalar results';
     END IF;
 
     -- generation.corpus_whitespace_vocab_indices shipped with a PL/pgSQL syntax error that

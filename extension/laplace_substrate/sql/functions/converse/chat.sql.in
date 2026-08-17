@@ -54,6 +54,26 @@ DECLARE
     lang  bytea := p_lang;
     out   text := '';
 BEGIN
+    -- Natural operator surface: compile semantic operation cues and ordered
+    -- operands before the legacy single-topic elector.  Explicit p_shape or
+    -- p_topic remains an already-decoded instruction and bypasses compilation.
+    -- The compiler abstains when it cannot prove a route, in which case the
+    -- existing orientation/fallback path below is unchanged.
+    IF shape IS NULL AND p_topic IS NULL THEN
+        SELECT x.reply, x.container_id
+          INTO out, resolved
+        FROM converse.execute_prompt(p_prompt, p_lang) x
+        WHERE x.rank = 1;
+
+        IF out IS NOT NULL AND out <> '' THEN
+            IF p_session IS NOT NULL THEN
+                PERFORM generation.session_record_prompt(
+                    p_session, p_prompt, resolved);
+            END IF;
+            RETURN btrim(out);
+        END IF;
+    END IF;
+
     -- ANSWER IN THE LANGUAGE THAT WAS ASKED. A concept's surfaces are a FAMILY
     -- spanning every language that witnesses it, and realize.realize(id, NULL) is free to
     -- pick any member -- so with no language pinned, an English prompt can be
