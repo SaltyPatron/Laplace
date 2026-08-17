@@ -142,7 +142,8 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
             conn, prompt, session, ct,
             shape: options.Shape,
             bands: options.Bands,
-            elaborate: options.Elaborate);
+            elaborate: options.Elaborate,
+            language: options.Language);
         if (!string.IsNullOrWhiteSpace(reply))
             return [new ConverseRow(reply, null, null)];
 

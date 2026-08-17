@@ -191,6 +191,37 @@ public sealed class GoldenShapeTests : IClassFixture<GoldenFactory>
             (string?)body["choices"]?[0]?["message"]?["content"]);
     }
 
+    [Fact]
+    public async Task Chat_OperatorLanguage_ReachesTheSubstrateClient()
+    {
+        var quoteId = await ApproveQuoteAsync("chat.completions", "language-routing-tenant", "evt_language_routing");
+        using var response = await PostWithQuoteAsync("/v1/chat/completions", new
+        {
+            model = "laplace-converse-001",
+            language = "ja-JP",
+            messages = new[] { new { role = "user", content = "犬" } }
+        }, quoteId);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
+        Assert.Equal("language=jpn", (string?)body["choices"]?[0]?["message"]?["content"]);
+    }
+
+    [Fact]
+    public async Task Chat_UnknownExplicitLanguage_IsRejectedBeforeBilling()
+    {
+        using var response = await _client.PostAsJsonAsync("/v1/chat/completions", new
+        {
+            model = "laplace-converse-001",
+            language = "zz-not-a-language",
+            messages = new[] { new { role = "user", content = "hello" } }
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
+        Assert.Equal("invalid_language", (string?)body["error"]?["code"]);
+    }
+
     [Theory]
     [InlineData("laplace-converse-001", "max_tokens", 32)]
     [InlineData("laplace-completions-001", "top_p", 0.5)]

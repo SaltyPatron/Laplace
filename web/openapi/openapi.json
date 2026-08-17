@@ -4674,6 +4674,12 @@
           "elaborate": {
             "type": "boolean",
             "default": false
+          },
+          "language": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },

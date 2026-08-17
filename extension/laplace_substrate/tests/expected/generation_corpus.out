@@ -169,7 +169,8 @@ BEGIN
     END IF;
 
     -- No cache, no invalidation: a trajectory written NOW is visible to the very
-    -- next read. sent3 = capital of (no separator): capital→of goes 1 → 2.
+    -- next read. sent3 repeats capital of twice (no separator): every matching
+    -- occurrence counts, so capital→of goes 1 → 3.
     INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
     VALUES (sent3, 3, type_sent, src);
     INSERT INTO laplace.physicalities (id, entity_id, type, coord, hilbert_index,
@@ -179,12 +180,14 @@ BEGIN
             decode('00000000000000000000000000000000','hex'),
             public.ST_MakeLine(ARRAY[
                 public.laplace_mantissa_pack(w_capital, 1, 1, t2flag),
-                public.laplace_mantissa_pack(w_of, 2, 1, t2flag)]),
-            2, now());
+                public.laplace_mantissa_pack(w_of, 2, 1, t2flag),
+                public.laplace_mantissa_pack(w_capital, 3, 1, t2flag),
+                public.laplace_mantissa_pack(w_of, 4, 1, t2flag)]),
+            4, now());
     IF NOT EXISTS (
         SELECT 1 FROM generation.trajectory_continuations(ARRAY[w_capital], 8) t
-        WHERE t.object_id = w_of AND t.weight = 2) THEN
-        RAISE EXCEPTION 'FAIL: new trajectory not visible to the next read (capital→of should be weight 2)';
+        WHERE t.object_id = w_of AND t.weight = 3) THEN
+        RAISE EXCEPTION 'FAIL: repeated matches or new trajectory missing (capital→of should be weight 3)';
     END IF;
 
     -- generation.corpus_whitespace_vocab_indices shipped with a PL/pgSQL syntax error that

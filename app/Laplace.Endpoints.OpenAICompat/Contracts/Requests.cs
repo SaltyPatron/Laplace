@@ -25,7 +25,8 @@ public sealed record ChatCompletionsRequest(
     [property: JsonPropertyName("scope")] string? Scope = null,
     [property: JsonPropertyName("shape")] string? Shape = null,
     [property: JsonPropertyName("bands")] int[]? Bands = null,
-    [property: JsonPropertyName("elaborate")] bool Elaborate = false);
+    [property: JsonPropertyName("elaborate")] bool Elaborate = false,
+    [property: JsonPropertyName("language")] string? Language = null);
 
 public sealed record ChatMessage(
     [property: JsonPropertyName("role")] string? Role,

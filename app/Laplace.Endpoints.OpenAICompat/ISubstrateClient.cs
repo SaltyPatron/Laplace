@@ -7,7 +7,9 @@ namespace Laplace.Endpoints.OpenAICompat;
 internal readonly record struct ConverseOptions(
     string? Shape = null,
     int[]? Bands = null,
-    bool Elaborate = false);
+    bool Elaborate = false,
+    string? LanguageCode = null,
+    byte[]? Language = null);
 
 
 

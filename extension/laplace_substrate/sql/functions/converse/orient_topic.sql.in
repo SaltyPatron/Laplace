@@ -1,0 +1,104 @@
+-- ORIENT_TOPIC: elect the prompt's candidate concepts under the operator's
+-- primary language without turning that preference into an absolute gate.
+--
+-- The primary language is a request prior.  If it admits no candidate, the
+-- prompt's own language tally gets one pass; if that also admits nothing, the
+-- operation widens to the language-neutral candidate set.  The receipt travels
+-- with every returned candidate so callers can distinguish an ordinary
+-- primary-language resolution from a widened turn.
+DROP FUNCTION IF EXISTS converse.orient_topic(text, bytea);
+CREATE OR REPLACE FUNCTION converse.orient_topic(
+        p_prompt text,
+        p_primary_language bytea DEFAULT NULL)
+    RETURNS TABLE(
+        rank int,
+        synset_id bytea,
+        candidate_language bytea,
+        primary_language bytea,
+        prompt_language bytea,
+        effective_language bytea,
+        widened boolean)
+    LANGUAGE sql STABLE AS $$
+    WITH candidates AS MATERIALIZED (
+        SELECT y.synset_id,
+               converse.word_language(y.synset_id) AS lang,
+               (COALESCE(y.specificity, 0)
+                * GREATEST(COALESCE(y.denote_mu, 0), 1)) AS weighted,
+               y.specificity,
+               y.rel_mass,
+               y.peers,
+               y.ord
+        FROM converse.prompt_coherence(p_prompt) y
+        WHERE y.synset_id IS NOT NULL
+    ),
+    primary_check AS (
+        SELECT EXISTS (
+                   SELECT 1
+                   FROM candidates c
+                   WHERE p_primary_language IS NOT NULL
+                     AND c.lang = p_primary_language
+               ) AS available
+    ),
+    observed AS MATERIALIZED (
+        -- The operator prior is the fast path.  Prompt-language inference is a
+        -- fallback probe, not work every successful primary-language turn pays.
+        SELECT CASE
+                   WHEN p_primary_language IS NULL OR NOT p.available
+                   THEN converse.prompt_language_top(p_prompt)
+                   ELSE NULL::bytea
+               END AS lang
+        FROM primary_check p
+    ),
+    availability AS (
+        SELECT o.lang AS observed_language,
+               EXISTS (
+                   SELECT 1
+                   FROM candidates c
+                   WHERE o.lang IS NULL OR c.lang IS NULL OR c.lang = o.lang
+               ) AS observed_available
+        FROM observed o
+    ),
+    decision AS (
+        SELECT a.*, p.available AS primary_available,
+               CASE
+                   WHEN p_primary_language IS NULL THEN 0
+                   WHEN p.available THEN 0
+                   WHEN a.observed_language IS NULL
+                     OR a.observed_language = p_primary_language THEN 0
+                   WHEN a.observed_available THEN 1
+                   ELSE 2
+               END AS mode,
+               CASE
+                   WHEN p_primary_language IS NULL THEN a.observed_language
+                   WHEN p.available THEN p_primary_language
+                   WHEN a.observed_language IS NULL
+                     OR a.observed_language = p_primary_language THEN p_primary_language
+                   ELSE a.observed_language
+               END AS effective_language
+        FROM availability a
+        CROSS JOIN primary_check p
+    ),
+    selected AS (
+        SELECT c.*, d.observed_language, d.effective_language, d.mode
+        FROM candidates c
+        CROSS JOIN decision d
+        WHERE d.mode = 2
+           OR d.effective_language IS NULL
+           OR c.lang IS NULL
+           OR c.lang = d.effective_language
+    )
+    SELECT row_number() OVER (ORDER BY
+               s.weighted DESC,
+               s.specificity DESC NULLS LAST,
+               s.rel_mass DESC NULLS LAST,
+               s.peers DESC,
+               s.ord DESC,
+               s.synset_id)::int,
+           s.synset_id,
+           s.lang,
+           p_primary_language,
+           s.observed_language,
+           s.effective_language,
+           s.mode <> 0
+    FROM selected s
+$$;

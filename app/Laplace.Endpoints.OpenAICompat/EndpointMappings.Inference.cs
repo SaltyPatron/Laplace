@@ -59,6 +59,9 @@ internal static class InferenceEndpoints
                 (!string.IsNullOrWhiteSpace(payload.Shape) || hasBands || payload.Elaborate))
                 return EndpointJson.BadRequest("invalid_request_error",
                     "Fields 'shape', 'bands', and 'elaborate' are available only on the converse model lane.");
+            if (!converseModel && !string.IsNullOrWhiteSpace(payload.Language))
+                return EndpointJson.BadRequest("unsupported_parameter",
+                    "Field 'language' is not implemented by the completions walk lane.");
             if (payload.Bands is { } suppliedBands &&
                 (suppliedBands.Length == 0 || suppliedBands.Any(b => b is < 1 or > 13)))
                 return EndpointJson.BadRequest("invalid_request_error",
@@ -71,6 +74,11 @@ internal static class InferenceEndpoints
                     "Fields 'shape' and 'bands' select different read paths and cannot be combined.");
             var (scope, scopeError) = await ResolveTurnScopeAsync(request, tenantResolver, payload.Session, payload.User, ct);
             if (scopeError is not null) return scopeError;
+
+            if (!OperatorLanguage.TryResolve(request, payload.Language,
+                    out var operatorLanguage, out var invalidLanguage))
+                return EndpointJson.BadRequest("invalid_language",
+                    $"Field 'language' does not resolve to an ISO 639 language: '{invalidLanguage}'.");
 
             bool tenantScoped = string.Equals(payload.Scope, "tenant", StringComparison.Ordinal);
             if (payload.Scope is not null && !tenantScoped)
@@ -213,7 +221,8 @@ internal static class InferenceEndpoints
             // tenant's own witnessed world and reads inside it (spec 34 isolation).
             var tenantScope = ConversationContent.Resolve(scope.Tenant);
             var converseOptions = new ConverseOptions(
-                payload.Shape, payload.Bands, payload.Elaborate);
+                payload.Shape, payload.Bands, payload.Elaborate,
+                operatorLanguage?.Code, operatorLanguage?.Id);
             var converseSubstrateClock = Stopwatch.StartNew();
             var rows = tenantScoped
                 ? await substrate.ConverseTenantScopedAsync(prompt, scope.SessionId.ToBytes(),
