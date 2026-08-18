@@ -446,3 +446,67 @@ BEGIN
     RAISE NOTICE '- evict fixture cleaned up';
 END $$;
 NOTICE:  - evict fixture cleaned up
+-- DEFAULT is hash-subpartitioned into eight leaves. Nine dynamic relation types
+-- guarantee at least one leaf contains more than one type; relation discovery
+-- must enumerate every distinct type below the DEFAULT ancestor, not LIMIT 1 per
+-- hash leaf and require repeated operator invocations to finish one source.
+DO $$
+DECLARE
+    type_t bytea := public.laplace_hash128_blake3('Type');
+    src    bytea := laplace.source_id('EvictDefaultPartitionTest');
+    subj   bytea := public.laplace_hash128_blake3('test/evict/default/subject');
+    rel    bytea;
+    obj    bytea;
+    evid   bytea;
+BEGIN
+    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
+    VALUES (src, 0, type_t, NULL), (subj, 0, type_t, src);
+
+    FOR i IN 1..9 LOOP
+        rel := public.laplace_hash128_blake3(
+            convert_to('test/evict/default/relation/' || i, 'UTF8'));
+        obj := public.laplace_hash128_blake3(
+            convert_to('test/evict/default/object/' || i, 'UTF8'));
+        evid := public.laplace_hash128_blake3(
+            convert_to('test/evict/default/evidence/' || i, 'UTF8'));
+        INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
+        VALUES (rel, 0, type_t, src), (obj, 0, type_t, src);
+        INSERT INTO laplace.attestations
+            (id, subject_id, type_id, object_id, source_id, context_id,
+             outcome, last_observed_at, observation_count,
+             sum_score_fp1e9, opponent_rd_fp1e9)
+        VALUES
+            (evid, subj, rel, obj, src, NULL,
+             2, '2026-04-01 00:00:00+00', 1, 1000000000, 30000000000);
+    END LOOP;
+    RAISE NOTICE '- default-subpartition fixture deposited: 9 dynamic relation types';
+END $$;
+NOTICE:  - default-subpartition fixture deposited: 9 dynamic relation types
+CALL ops.evict_source(laplace.source_id('EvictDefaultPartitionTest'), NULL, NULL,
+                  p_batch => 2, p_drain => false);
+DO $$
+DECLARE
+    src  bytea := laplace.source_id('EvictDefaultPartitionTest');
+    subj bytea := public.laplace_hash128_blake3('test/evict/default/subject');
+    rel  bytea;
+    obj  bytea;
+    n    bigint;
+BEGIN
+    SELECT count(*) INTO n FROM laplace.attestations WHERE source_id = src;
+    IF n <> 0 THEN
+        RAISE EXCEPTION 'FAIL: DEFAULT-subpartition discovery left % dynamic relation row(s)', n;
+    END IF;
+
+    DELETE FROM laplace.highway_mask_dirty WHERE id = subj;
+    FOR i IN 1..9 LOOP
+        rel := public.laplace_hash128_blake3(
+            convert_to('test/evict/default/relation/' || i, 'UTF8'));
+        obj := public.laplace_hash128_blake3(
+            convert_to('test/evict/default/object/' || i, 'UTF8'));
+        DELETE FROM laplace.highway_mask_dirty WHERE id = obj;
+        DELETE FROM laplace.entities WHERE id IN (rel, obj);
+    END LOOP;
+    DELETE FROM laplace.entities WHERE id IN (src, subj);
+    RAISE NOTICE '- default-subpartition discovery evicted all dynamic relations in one call';
+END $$;
+NOTICE:  - default-subpartition discovery evicted all dynamic relations in one call
