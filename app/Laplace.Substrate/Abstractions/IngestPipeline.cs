@@ -1,4 +1,7 @@
+using System.Buffers;
+using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Channels;
 using Laplace.Engine.Core;
@@ -106,6 +109,13 @@ public interface ITrunkRootRecord
 
 public interface IIngestRecordHandler<TRecord>
 {
+    /// <summary>
+    /// Whether creating deferred units performs independent compose work worth spreading
+    /// across the process compose budget. Direct handlers do their real work during the
+    /// later serial builder drain and opt out.
+    /// </summary>
+    bool ParallelizeDeferredUnitCreation => true;
+
     IIngestDeferredUnit CreateDeferredUnit(TRecord record);
 
     void WalkWitness(TRecord record, Hash128 root, SubstrateChangeBuilder builder, IIngestDeferredUnit unit);
@@ -155,12 +165,20 @@ public sealed class IngestBatchConfig
     /// the one compose-memory envelope instead of every set claiming the whole envelope.
     /// </summary>
     public int ConcurrentWorkingSets { get; init; } = 1;
+    internal Func<int>? ActiveWorkingSetCount { get; init; }
+    internal int EffectiveConcurrentWorkingSets =>
+        Math.Max(1, ActiveWorkingSetCount?.Invoke() ?? ConcurrentWorkingSets);
     public int CommitEpoch { get; init; }
     public ISubstrateReader? ContainmentReader { get; init; }
     public Action<long>? ReportUnits { get; init; }
     public long MaxInputUnits { get; init; }
 
-    public bool EnableDeferredContentOnBuilder { get; init; } = false;
+    /// <summary>
+    /// Batch content surfaces and bulk-probe their resolved roots before materializing
+    /// tier rows. This keeps compose-time content checks on the indexed reader boundary.
+    /// It is effective only when a containment reader is present.
+    /// </summary>
+    public bool EnableDeferredContentOnBuilder { get; init; } = true;
 
     public int? EntityCapacity { get; init; }
     public int? PhysicalityCapacity { get; init; }
@@ -184,7 +202,10 @@ public sealed class IngestBatchConfig
 
     internal ISubstrateReader? EffectiveReader => ContainmentReader;
 
-    private IngestBatchConfig Copy(long? maxInputUnits = null, int? concurrentWorkingSets = null) =>
+    private IngestBatchConfig Copy(
+        long? maxInputUnits = null,
+        int? concurrentWorkingSets = null,
+        Func<int>? activeWorkingSetCount = null) =>
         new()
         {
             SourceId = SourceId,
@@ -218,6 +239,7 @@ public sealed class IngestBatchConfig
                 : WorkingSetRecordCap,
             WorkingSetProfile = WorkingSetProfile,
             ConcurrentWorkingSets = concurrentWorkingSets ?? ConcurrentWorkingSets,
+            ActiveWorkingSetCount = activeWorkingSetCount ?? ActiveWorkingSetCount,
         };
 
     public IngestBatchConfig WithMaxInputUnits(long max) => Copy(maxInputUnits: max);
@@ -229,11 +251,20 @@ public sealed class IngestBatchConfig
             ? this
             : Copy(concurrentWorkingSets: concurrency);
     }
+
+    internal IngestBatchConfig WithActiveWorkingSetConcurrency(
+        int maximumConcurrentWorkingSets,
+        Func<int> activeWorkingSetCount) =>
+        Copy(
+            concurrentWorkingSets: Math.Max(ConcurrentWorkingSets, maximumConcurrentWorkingSets),
+            activeWorkingSetCount: activeWorkingSetCount);
 }
 
 public static class IngestBatchPipeline
 {
     public const string PeriodBoundaryUnitPrefix = "period-boundary/";
+    public const string SkippedBoundaryUnitPrefix = PeriodBoundaryUnitPrefix + "skipped-complete/";
+    public const string CancelledBoundaryUnitPrefix = PeriodBoundaryUnitPrefix + "cancelled/";
 
     /// <summary>Per-file failure marker (see IngestRunner.TrackIntent): emitted INSTEAD of the
     /// file's period boundary when file-failure isolation is on and that file's read/parse/
@@ -244,15 +275,20 @@ public static class IngestBatchPipeline
     /// <summary>Ingest file-progress marker (see IngestRunner.TrackIntent). The fold is inline
     /// per batch (ConsensusAccumulatingWriter → consensus_upsert) — this marker carries no fold
     /// semantics; the writer skips it as an empty change.</summary>
-    public static SubstrateChange BuildPeriodBoundary(Hash128 sourceId, string fileLabel)
-    {
-        string stem = fileLabel.Contains('/', StringComparison.Ordinal)
-            ? fileLabel[(fileLabel.LastIndexOf('/') + 1)..]
-            : fileLabel;
-        return new SubstrateChangeBuilder(
-            sourceId, $"{PeriodBoundaryUnitPrefix}{stem}", null,
+    public static SubstrateChange BuildPeriodBoundary(Hash128 sourceId, string fileLabel) =>
+        new SubstrateChangeBuilder(
+            sourceId, $"{PeriodBoundaryUnitPrefix}{fileLabel}", null,
             entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: 0).Build();
-    }
+
+    public static SubstrateChange BuildSkippedBoundary(Hash128 sourceId, string fileLabel) =>
+        new SubstrateChangeBuilder(
+            sourceId, $"{SkippedBoundaryUnitPrefix}{fileLabel}", null,
+            entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: 0).Build();
+
+    public static SubstrateChange BuildCancelledBoundary(Hash128 sourceId, string fileLabel) =>
+        new SubstrateChangeBuilder(
+            sourceId, $"{CancelledBoundaryUnitPrefix}{fileLabel}", null,
+            entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: 0).Build();
 
     /// <summary>
     /// Per-file resume for multi-file sources (GH #898). A source-level completion
@@ -295,14 +331,9 @@ public static class IngestBatchPipeline
     /// </summary>
     private const int ResumeProbeChunkMax = 512;
 
-    // File identity for resume = FileEntity.SourceId over the raw bytes — the file's
-    // content-DAG root, the ONE documented file-identity convention (same content =
-    // same file = same source; rename-proof; duplicate files true-skip each other).
-    // A name-keyed id was rejected deliberately: ids are content hashes by law, and
-    // FileEntity's own doc records why identity must never bake the path in.
-    // The read is sequential and native-hash cheap next to the compose it replaces;
-    // files above the cap opt out rather than balloon memory (span-based root).
-    private const long ResumeHashMaxBytes = 512L << 20;
+    private const int ResumeHashChunkBytes = 4 << 20;
+    private static readonly Hash128 ResumeHashDomain =
+        SubstrateCanonicalIds.OfVersioned("file-resume-fingerprint");
 
     /// <summary>Input size for the ledger. Best-effort: a stream-backed source has no path,
     /// and a missing file is the enumerator's problem, not the journal's.</summary>
@@ -316,11 +347,40 @@ public static class IngestBatchPipeline
     internal static Hash128? TryResolveFileIdentity(string? filePath)
     {
         if (filePath is null) return null;
+        byte[]? buffer = null;
         try
         {
             var info = new FileInfo(filePath);
-            if (!info.Exists || info.Length == 0 || info.Length > ResumeHashMaxBytes) return null;
-            return FileEntity.SourceId(File.ReadAllBytes(filePath));
+            if (!info.Exists) return null;
+
+            long dataChunks = info.Length / ResumeHashChunkBytes
+                + (info.Length % ResumeHashChunkBytes == 0 ? 0 : 1);
+            var chunks = new List<Hash128>((int)Math.Min(1024, 2 + dataChunks))
+            {
+                ResumeHashDomain,
+            };
+            Span<byte> lengthBytes = stackalloc byte[sizeof(long)];
+            BinaryPrimitives.WriteInt64LittleEndian(lengthBytes, info.Length);
+            chunks.Add(Hash128.Blake3(lengthBytes));
+
+            buffer = ArrayPool<byte>.Shared.Rent(ResumeHashChunkBytes);
+            using var fs = new FileStream(
+                filePath, FileMode.Open, FileAccess.Read, FileShare.Read,
+                bufferSize: 1 << 20, FileOptions.SequentialScan);
+            while (true)
+            {
+                int read = 0;
+                while (read < ResumeHashChunkBytes)
+                {
+                    int n = fs.Read(buffer, read, ResumeHashChunkBytes - read);
+                    if (n == 0) break;
+                    read += n;
+                }
+                if (read == 0) break;
+                chunks.Add(Hash128.Blake3(buffer.AsSpan(0, read)));
+                if (read < ResumeHashChunkBytes) break;
+            }
+            return Hash128.Merkle(0, CollectionsMarshal.AsSpan(chunks));
         }
         catch (Exception ex) when (ex is IOException
             or UnauthorizedAccessException
@@ -331,17 +391,18 @@ public static class IngestBatchPipeline
         {
             return null; // unreadable/degenerate path: no resume identity, never a crash
         }
+        finally
+        {
+            if (buffer is not null) ArrayPool<byte>.Shared.Return(buffer);
+        }
     }
 
     /// <summary>Boundary that ALSO deposits the file's completion marker (resume-enabled lanes).</summary>
     public static SubstrateChange BuildFileCompletion(
         Hash128 sourceId, string fileLabel, Hash128 fileRoot, int layerOrder)
     {
-        string stem = fileLabel.Contains('/', StringComparison.Ordinal)
-            ? fileLabel[(fileLabel.LastIndexOf('/') + 1)..]
-            : fileLabel;
         var builder = new SubstrateChangeBuilder(
-            sourceId, $"{PeriodBoundaryUnitPrefix}{stem}", null,
+            sourceId, $"{PeriodBoundaryUnitPrefix}{fileLabel}", null,
             entityCapacity: 1, physicalityCapacity: 0, attestationCapacity: 1);
         Laplace.Ingestion.LayerCompletion.EmitFileMarker(builder, fileRoot, layerOrder);
         return builder.Build();
@@ -412,7 +473,7 @@ public static class IngestBatchPipeline
             };
         }
 
-        var state = new BatchState(config.NewBuilder(0), resetBankOnBuild: !config.WorkingSet);
+        var state = new BatchState(config.NewBuilder(0));
         long rowsTotal = 0;
         long unitsConsumed = 0;
 
@@ -572,8 +633,8 @@ public static class IngestBatchPipeline
             if (skipComplete)
             {
                 Console.Error.WriteLine($"INGEST_FILE_SKIPPED file={label} reason=marker-complete");
-                Laplace.Ingestion.IngestObservabilityScope.Current.OnFileFinished(
-                    Laplace.Ingestion.IngestObservabilityScope.SourceName, label, "skipped-complete");
+                Laplace.Ingestion.IngestObservabilityScope.Current.OnFileComposed(
+                    Laplace.Ingestion.IngestObservabilityScope.SourceName, label, fileRoot);
                 // Still a true skip -- zero rows, zero testimony, no re-fold -- but it must
                 // COUNT. FilesTotal comes from enumeration and includes skipped files, while
                 // _filesDone only advances when a period boundary reaches TrackIntent. A bare
@@ -584,7 +645,7 @@ public static class IngestBatchPipeline
                 // opposite of the truth, since the content being PRESENT is what caused the
                 // skip. BuildPeriodBoundary carries no fold semantics and the writer drops it
                 // as an empty change, so counting costs nothing the skip was protecting.
-                yield return BuildPeriodBoundary(config.SourceId, label);
+                yield return BuildSkippedBoundary(config.SourceId, label);
                 continue;
             }
 
@@ -607,7 +668,7 @@ public static class IngestBatchPipeline
                 new AsyncEnumerableRecordStream<TRecord>(source.RecordsAsync(ct)), handler, runConfig, ct);
             var enumerator = changes.GetAsyncEnumerator(ct);
             SubstrateChange? fileFailure = null;
-            string? fileFailureMessage = null;
+            long fileEntities = 0, filePhysicalities = 0, fileAttestations = 0;
             try
             {
                 while (true)
@@ -624,10 +685,13 @@ public static class IngestBatchPipeline
                         Console.Error.WriteLine(
                             $"INGEST_FILE_FAILED file={label} error=[{ex.GetType().Name}] {ex.Message}");
                         fileFailure = BuildFileFailure(config.SourceId, label, ex);
-                        fileFailureMessage = $"[{ex.GetType().Name}] {ex.Message}";
                         break;
                     }
                     unitsConsumed += change.Metadata.InputUnitsConsumed;
+                    var rowCounts = CountRows(change);
+                    fileEntities += rowCounts.Entities;
+                    filePhysicalities += rowCounts.Physicalities;
+                    fileAttestations += rowCounts.Attestations;
                     yield return change;
                     if (maxTotalUnits > 0 && unitsConsumed >= maxTotalUnits)
                     {
@@ -648,16 +712,19 @@ public static class IngestBatchPipeline
             // Ledger before the boundary: a capped file stopped mid-stream and is NOT
             // complete, which is the same resume situation as a kill — recording it 'ok'
             // would claim a completeness the marker itself refuses to assert.
-            Laplace.Ingestion.IngestObservabilityScope.Current.OnFileFinished(
-                Laplace.Ingestion.IngestObservabilityScope.SourceName, label,
-                fileFailure is not null ? "failed" : hitCap ? "cancelled" : "ok",
+            Laplace.Ingestion.IngestObservabilityScope.Current.OnFileComposed(
+                Laplace.Ingestion.IngestObservabilityScope.SourceName, label, fileRoot,
                 records: unitsConsumed - unitsAtFileStart,
-                error: fileFailureMessage);
+                entities: fileEntities,
+                physicalities: filePhysicalities,
+                attestations: fileAttestations);
 
             yield return fileFailure
                 ?? (fileRoot is { } fr && !hitCap && resume is { } rp
                     ? BuildFileCompletion(config.SourceId, label, fr, rp.LayerOrder)
-                    : BuildPeriodBoundary(config.SourceId, label));
+                    : hitCap
+                        ? BuildCancelledBoundary(config.SourceId, label)
+                        : BuildPeriodBoundary(config.SourceId, label));
 
             if (hitCap)
                 yield break;
@@ -732,22 +799,9 @@ public static class IngestBatchPipeline
                 var paths = chunk.Where(s => s.FilePath is not null).Select(s => s.FilePath!).ToArray();
                 var roots = new Hash128?[paths.Length];
 
-                // Parallel.For is SYNCHRONOUS: it blocks this thread-pool thread while
-                // requesting more pool threads, on the same pool serving the file workers
-                // that park on outCh.Writer.WriteAsync. That is sync-over-async on a
-                // shared pool -- "one blocking call is enough to poison the pool", and it
-                // passes every unit test before surfacing under real concurrency.
-                //
-                // It also had no MaxDegreeOfParallelism, so it defaulted to
-                // Environment.ProcessorCount -- 12 on this box, and 12 is itself wrong
-                // (6 physical cores, see GH #986). TryResolveFileIdentity is
-                // File.ReadAllBytes, so that is up to 12 WHOLE FILES resident at once,
-                // every one over 85,000 bytes landing on the Large Object Heap, which is
-                // not compacted. ResumeHashMaxBytes is 512 MB, so the ceiling was
-                // 12 x 512 MB = 6 GB against a MemoryTopology budget of 4 GiB that does
-                // not account for any of it.
-                //
-                // Bounded, async, and hashing is I/O-bound anyway.
+                // Identity reads are bounded independently from the file workers. Each
+                // task uses one pooled 4 MiB buffer; no whole-file arrays or nested CPU
+                // fan-out sit outside the ingest memory envelope.
                 using (var gate = new SemaphoreSlim(Math.Max(1, Math.Min(4, paths.Length))))
                 {
                     var hashing = new Task[paths.Length];
@@ -820,6 +874,7 @@ public static class IngestBatchPipeline
         // Approximate total from the peek when the stream fit in it; else 0 (sample-only).
         int knownFileTotal = exhaustedInPeek ? peeked.Count : 0;
         int fileOrdinal = 0;
+        int activeFiles = 0;
 
         var workerTasks = new Task[workers];
         for (int w = 0; w < workers; w++)
@@ -833,8 +888,13 @@ public static class IngestBatchPipeline
             {
                 await foreach (var source in sources.Reader.ReadAllAsync(ct))
                 {
+                    Interlocked.Increment(ref activeFiles);
+                    try
+                    {
                     var config = configFactory(source.FileLabel)
-                        .WithWorkingSetConcurrency(concurrentWorkingSets);
+                        .WithActiveWorkingSetConcurrency(
+                            concurrentWorkingSets,
+                            () => Math.Max(1, Volatile.Read(ref activeFiles) * segmentsPerFile));
 
                     // Per-file resume (GH #898): identity + marker check happen in the
                     // WORKER, so skips parallelize with the ingest they replace.
@@ -846,8 +906,9 @@ public static class IngestBatchPipeline
                             $"INGEST_FILE_SKIPPED file={source.FileLabel} worker={workerId} reason=marker-complete");
                         // Ledger: a true-skipped file never opens, so it has no 'running' row.
                         // Recording it is how a resumed run accounts for the prefix it did not redo.
-                        Laplace.Ingestion.IngestObservabilityScope.Current.OnFileFinished(
-                            Laplace.Ingestion.IngestObservabilityScope.SourceName, source.FileLabel, "skipped-complete");
+                        Laplace.Ingestion.IngestObservabilityScope.Current.OnFileComposed(
+                            Laplace.Ingestion.IngestObservabilityScope.SourceName,
+                            source.FileLabel, fileRoot);
                         // Counts, for the reason spelled out on the sequential path's skip:
                         // FilesTotal counts enumerated files, _filesDone counts boundaries, so
                         // dropping the boundary makes an already-complete file read as
@@ -855,7 +916,7 @@ public static class IngestBatchPipeline
                         // marker this file already carries is what got us here; re-depositing
                         // it would be a write on a lane whose whole contract is zero rows.
                         await outCh.Writer.WriteAsync(
-                            BuildPeriodBoundary(config.SourceId, source.FileLabel), ct);
+                            BuildSkippedBoundary(config.SourceId, source.FileLabel), ct);
                         continue;
                     }
 
@@ -878,8 +939,7 @@ public static class IngestBatchPipeline
                         ? MonolithSegmenter.RunSegmentedAsync(
                             records,
                             _ => handlerFactory(source.FileLabel),
-                            _ => configFactory(source.FileLabel)
-                                .WithWorkingSetConcurrency(concurrentWorkingSets),
+                            _ => config,
                             segments,
                             MonolithSegmenter.ResolveChunkRecords(config),
                             source.FileLabel,
@@ -887,13 +947,17 @@ public static class IngestBatchPipeline
                         : RunAsync(records, handlerFactory(source.FileLabel), config, ct);
 
                     long fileUnits = 0;
+                    long fileEntities = 0, filePhysicalities = 0, fileAttestations = 0;
                     SubstrateChange? fileFailure = null;
-                    string? fileFailureMessage = null;
                     try
                     {
                         await foreach (var change in changes)
                         {
                             fileUnits += change.Metadata.InputUnitsConsumed;
+                            var rowCounts = CountRows(change);
+                            fileEntities += rowCounts.Entities;
+                            filePhysicalities += rowCounts.Physicalities;
+                            fileAttestations += rowCounts.Attestations;
                             await outCh.Writer.WriteAsync(change, ct);
                         }
                     }
@@ -905,18 +969,23 @@ public static class IngestBatchPipeline
                             $"INGEST_FILE_FAILED file={source.FileLabel} worker={workerId} "
                             + $"error=[{ex.GetType().Name}] {ex.Message}");
                         fileFailure = BuildFileFailure(config.SourceId, source.FileLabel, ex);
-                        fileFailureMessage = $"[{ex.GetType().Name}] {ex.Message}";
                     }
+                    Laplace.Ingestion.IngestObservabilityScope.Current.OnFileComposed(
+                        Laplace.Ingestion.IngestObservabilityScope.SourceName, source.FileLabel,
+                        fileRoot,
+                        records: fileUnits,
+                        entities: fileEntities,
+                        physicalities: filePhysicalities,
+                        attestations: fileAttestations);
+                    // Publish compose accounting before the boundary becomes visible to the
+                    // apply consumer. The runner terminalizes the file when that boundary is
+                    // applied; reversing these two operations lets a fast consumer enqueue
+                    // Finished before Composed and exposes a terminal zero-count row in the UI.
                     await outCh.Writer.WriteAsync(
                         fileFailure
                             ?? (fileRoot is { } fr && resume is { } rp
                                 ? BuildFileCompletion(config.SourceId, source.FileLabel, fr, rp.LayerOrder)
                                 : BuildPeriodBoundary(config.SourceId, source.FileLabel)), ct);
-                    Laplace.Ingestion.IngestObservabilityScope.Current.OnFileFinished(
-                        Laplace.Ingestion.IngestObservabilityScope.SourceName, source.FileLabel,
-                        fileFailure is null ? "ok" : "failed",
-                        records: fileUnits,
-                        error: fileFailure is null ? null : fileFailureMessage);
                     if (fileFailure is not null) continue;
 
                     if (logFile)
@@ -925,6 +994,11 @@ public static class IngestBatchPipeline
                         Console.Error.WriteLine(
                             $"INGEST_FILE_COMPOSED file={source.FileLabel} worker={workerId} "
                             + $"records={fileUnits:N0} elapsed_s={secs:F1} rate_rec_s={fileUnits / secs:N0}");
+                    }
+                    }
+                    finally
+                    {
+                        Interlocked.Decrement(ref activeFiles);
                     }
                 }
             }, ct);
@@ -938,6 +1012,24 @@ public static class IngestBatchPipeline
 
         await foreach (var change in outCh.Reader.ReadAllAsync(ct))
             yield return change;
+    }
+
+    private static (long Entities, long Physicalities, long Attestations) CountRows(SubstrateChange change)
+    {
+        long entities = change.Entities.Length;
+        long physicalities = change.Physicalities.Length;
+        long attestations = change.Attestations.Length;
+        if (!change.IntentStages.IsDefaultOrEmpty)
+        {
+            foreach (var stage in change.IntentStages)
+            {
+                if (stage.IsInvalid) continue;
+                entities += stage.EntityCount;
+                physicalities += stage.PhysicalityCount;
+                attestations += stage.AttestationCount;
+            }
+        }
+        return (entities, physicalities, attestations);
     }
 
     private static void ResetBatchScope<TRecord>(IIngestRecordHandler<TRecord> handler)
@@ -1002,7 +1094,7 @@ public static class IngestBatchPipeline
             var deferred = (WorkingSetDeferredBatch<TRecord>)(state.WorkingSetDeferred
                 ??= new WorkingSetDeferredBatch<TRecord>());
             var composed = await IngestDescentFlush.ComposeBatchAsync(
-                batch, handler, reader, state.Builder, probedAbsent, ct).ConfigureAwait(false);
+                batch, handler, reader, state.Builder, config, probedAbsent, ct).ConfigureAwait(false);
             deferred.Shortcircuited.AddRange(composed.Shortcircuited);
             deferred.Pending.AddRange(composed.Pending);
             foreach (var (_, units) in composed.Shortcircuited)
@@ -1027,7 +1119,7 @@ public static class IngestBatchPipeline
         }
     }
 
-    private sealed class BatchState(SubstrateChangeBuilder builder, bool resetBankOnBuild = true)
+    private sealed class BatchState(SubstrateChangeBuilder builder)
     {
         public SubstrateChangeBuilder Builder { get; private set; } = builder;
         public int InBatch { get; private set; }
@@ -1066,11 +1158,6 @@ public static class IngestBatchPipeline
         public async Task<SubstrateChange> YieldBatchAsync(CancellationToken ct)
         {
             var change = await Builder.SetInputUnitsConsumed(_rowsInBatch).BuildAsync(ct);
-            // Working-set mode keeps the content bank across builds: content
-            // already witnessed by an earlier (committed-first) stage must
-            // not re-stage in later ones. The runner resets it at the
-            // working-set boundary, after the apply commits.
-            if (resetBankOnBuild) IntentStage.ResetContentBank();
             InBatch = 0;
             _rowsInBatch = 0;
             BatchNumber++;
@@ -1079,9 +1166,7 @@ public static class IngestBatchPipeline
 
         public async Task<SubstrateChange> BuildRemainingAsync(CancellationToken ct)
         {
-            var change = await Builder.SetInputUnitsConsumed(_rowsInBatch).BuildAsync(ct);
-            if (resetBankOnBuild) IntentStage.ResetContentBank();
-            return change;
+            return await Builder.SetInputUnitsConsumed(_rowsInBatch).BuildAsync(ct);
         }
     }
 

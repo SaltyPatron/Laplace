@@ -1,0 +1,23 @@
+-- Per-file state for one ingest run. Running and failed files sort first so a
+-- bounded UI read shows the actionable part of a large corpus (FrameNet can
+-- contain roughly fifteen thousand files) rather than an arbitrary prefix.
+DROP FUNCTION IF EXISTS laplace.ingest_files(uuid, int);
+
+CREATE OR REPLACE FUNCTION ops.ingest_files(p_run_id uuid, p_limit int DEFAULT 200)
+    RETURNS SETOF laplace.ingest_file_journal
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
+    SELECT *
+    FROM laplace.ingest_file_journal
+    WHERE run_id = p_run_id
+    ORDER BY
+        CASE status
+            WHEN 'running' THEN 0
+            WHEN 'failed' THEN 1
+            WHEN 'cancelled' THEN 2
+            ELSE 3
+        END,
+        COALESCE(ended_at, started_at) DESC,
+        file_label
+    LIMIT greatest(p_limit, 1);
+END;

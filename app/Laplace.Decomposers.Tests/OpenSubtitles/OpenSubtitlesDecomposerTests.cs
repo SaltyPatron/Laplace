@@ -93,6 +93,9 @@ public sealed class OpenSubtitlesDecomposerTests
 
             await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
             {
+                if (change.Metadata.SourceContentUnitName.StartsWith(
+                        IngestBatchPipeline.PeriodBoundaryUnitPrefix, StringComparison.Ordinal))
+                    continue;
                 intentStages += change.IntentStages.Length;
                 foreach (var e in change.Entities) entities.Add(e.Id);
                 foreach (var a in change.Attestations)

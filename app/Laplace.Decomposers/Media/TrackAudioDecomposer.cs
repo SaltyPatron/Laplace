@@ -15,8 +15,6 @@ namespace Laplace.Decomposers.Media;
 public sealed class TrackAudioDecomposer
     : DecomposerMultiFile<AudioIngestRecord, TrackAudioSource, FullScope>, IIngestInventoryProvider
 {
-    private bool _reObservePresent;
-
     public override int LayerOrder => 2;
     protected override double SourceTrust => TC.StructuredCorpus;
     public override bool PerFileCompletion => true;
@@ -24,7 +22,6 @@ public sealed class TrackAudioDecomposer
     protected override IReadOnlyList<(string Path, string Label)> ListFiles(
         string ecosystemPath, DecomposerOptions options)
     {
-        _reObservePresent = options.ReObservePresent;
         bool rootIsFile = File.Exists(ecosystemPath);
         return EnumerateInputFiles(ecosystemPath).Select(f =>
         {
@@ -55,8 +52,9 @@ public sealed class TrackAudioDecomposer
             samples, rate, root.Value, FileMetadata.FromPath(filePath, rel));
     }
 
-    protected override IIngestRecordHandler<AudioIngestRecord> CreateHandlerForFile(string fileLabel) =>
-        new AudioIngestHandler(SourceId, LayerOrder) { IgnoreCompletedFiles = _reObservePresent };
+    protected override IIngestRecordHandler<AudioIngestRecord> CreateHandlerForFile(
+        string fileLabel, DecomposerOptions options) =>
+        new AudioIngestHandler(SourceId, LayerOrder) { IgnoreCompletedFiles = options.ReObservePresent };
 
     protected override IngestBatchConfig ConfigForFile(
         string fileLabel, ISubstrateReader? reader, DecomposerOptions options)

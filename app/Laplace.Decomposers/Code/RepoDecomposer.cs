@@ -8,7 +8,7 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Code;
 
-public sealed class RepoDecomposer : GrammarComposeDecomposer<RepoSource, FullScope>
+public sealed class RepoDecomposer : GrammarComposeDecomposerMultiFile<RepoSource, FullScope>, IIngestInventoryProvider
 {
     public static readonly Hash128 Source = RepoSource.SourceId;
     public static readonly Hash128 TrustClass = RepoSource.TrustClass;
@@ -50,74 +50,83 @@ public sealed class RepoDecomposer : GrammarComposeDecomposer<RepoSource, FullSc
         await context.Writer.ApplyAsync(seed.Build(), ct);
     }
 
-    protected override async IAsyncEnumerable<GrammarComposeRecord> ExtractRecordsAsync(
-        string ecosystemPath, DecomposerOptions options,
+    protected override IReadOnlyList<(string Path, string Label)> ListFiles(
+        string ecosystemPath, DecomposerOptions options)
+    {
+        if (_repoId == default && Directory.Exists(ecosystemPath))
+            _repoId = Hash128.OfCanonical($"repo:{Path.GetFullPath(ecosystemPath)}/v1");
+        return EnumerateRepoFiles(ecosystemPath)
+            .Select(x => (
+                x.File,
+                $"repo/{Path.GetRelativePath(ecosystemPath, x.File).Replace('\\', '/')}"))
+            .ToList();
+    }
+
+    protected override async IAsyncEnumerable<GrammarComposeRecord> ExtractFileAsync(
+        string filePath, string fileLabel, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        if (_repoId == default)
+        string? modality = ModalityFor(filePath);
+        if (modality is null) yield break;
+        byte[] bytes;
+        try { bytes = await File.ReadAllBytesAsync(filePath, ct); }
+        catch (IOException ex)
         {
-            if (!Directory.Exists(ecosystemPath)) yield break;
-            string repoCanonical = $"repo:{Path.GetFullPath(ecosystemPath)}/v1";
-            _repoId = Hash128.OfCanonical(repoCanonical);
+            System.Diagnostics.Trace.TraceWarning(
+                $"RepoDecomposer: failed to read '{filePath}': {ex.Message}");
+            yield break;
+        }
+        if (bytes.Length == 0) yield break;
+
+        Hash128? sourceId;
+        try
+        {
+            sourceId = FileEntity.SourceId(bytes);
+        }
+        catch (InvalidOperationException ex)
+        {
+            System.Diagnostics.Trace.TraceWarning(
+                $"RepoDecomposer: skipping '{filePath}' — unresolvable content root: {ex.Message}");
+            yield break;
         }
 
-        var files = EnumerateRepoFiles(ecosystemPath).ToList();
-        foreach (var (file, modality) in files)
+        string relPath = fileLabel.StartsWith("repo/", StringComparison.Ordinal)
+            ? fileLabel["repo/".Length..]
+            : Path.GetFileName(filePath);
+        var filename = Path.GetFileNameWithoutExtension(filePath);
+        var segments = new List<string>();
+        if (!string.IsNullOrEmpty(filename))
         {
-            ct.ThrowIfCancellationRequested();
-            byte[] bytes;
-            try { bytes = await File.ReadAllBytesAsync(file, ct); }
-            catch (IOException ex)
+            foreach (var seg in filename.Split(['_', '-', '.'], StringSplitOptions.RemoveEmptyEntries))
             {
-                System.Diagnostics.Trace.TraceWarning(
-                    $"RepoDecomposer: failed to read '{file}': {ex.Message}");
-                continue;
+                if (seg.Length >= 3)
+                    segments.Add(seg.ToLowerInvariant());
             }
-            if (bytes.Length == 0) continue;
-
-            // Content-DAG root of the file's own bytes (GH #592): lets the existence
-            // gate true-skip a file whose content is already witnessed anywhere,
-            // before tree-sitter ever parses it. Malformed encoding (a non-UTF8 file
-            // matching a recognized extension — real corpora have these) is skipped
-            // here rather than crashing the batch, same posture as GH #596.
-            Hash128? sourceId;
-            try
-            {
-                sourceId = FileEntity.SourceId(bytes);
-            }
-            catch (InvalidOperationException ex)
-            {
-                System.Diagnostics.Trace.TraceWarning(
-                    $"RepoDecomposer: skipping '{file}' — unresolvable content root: {ex.Message}");
-                continue;
-            }
-
-            string relPath = Path.GetRelativePath(ecosystemPath, file).Replace('\\', '/');
-            var filename = Path.GetFileNameWithoutExtension(file);
-            var segments = new List<string>();
-            if (!string.IsNullOrEmpty(filename))
-            {
-                foreach (var seg in filename.Split(['_', '-', '.'], StringSplitOptions.RemoveEmptyEntries))
-                {
-                    if (seg.Length >= 3)
-                        segments.Add(seg.ToLowerInvariant());
-                }
-            }
-
-            yield return new GrammarComposeRecord(
-                bytes, modality,
-                ExampleSegments: segments.Count > 0 ? segments : null,
-                ConceptAnchorKey: relPath,
-                ConceptCategoryTypeId: FileTypeId,
-                ParentContainerId: _repoId,
-                SourceId: sourceId);
         }
+
+        yield return new GrammarComposeRecord(
+            bytes, modality,
+            ExampleSegments: segments.Count > 0 ? segments : null,
+            ConceptAnchorKey: relPath,
+            ConceptCategoryTypeId: FileTypeId,
+            ParentContainerId: _repoId,
+            SourceId: sourceId);
     }
 
     public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
         => Task.FromResult<long?>(Directory.Exists(context.EcosystemPath)
             ? EnumerateRepoFiles(context.EcosystemPath).Count()
             : null);
+
+    public Task<IngestInventory?> DescribeInputAsync(
+        IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
+    {
+        if (!Directory.Exists(context.EcosystemPath))
+            return Task.FromResult<IngestInventory?>(null);
+        var paths = EnumerateRepoFiles(context.EcosystemPath).Select(x => x.File).ToList();
+        return Task.FromResult(IngestInventory.FromFileUnits(
+            "repository files", paths, options.MaxInputUnits, tracksFileCompletion: true));
+    }
 
     private static void StageRepoRoot(SubstrateChangeBuilder b, string repoCanonical, Hash128 repoId)
     {
@@ -177,16 +186,21 @@ public sealed class RepoDecomposer : GrammarComposeDecomposer<RepoSource, FullSc
         {
             if (VendoredPathFilter.IsVendoredOrBuildPath(file)) continue;
 
-            string fileName = Path.GetFileName(file);
-            string ext = Path.GetExtension(file);
-            if (ext.Length > 0 && ext[0] == '.') ext = ext[1..];
-            string? modality = FileNameToModality.TryGetValue(fileName, out var nameMod)
-                ? nameMod
-                : (ext.Length == 0 ? null : GrammarDecomposer.ModalityByExt(ext.ToLowerInvariant()));
+            string? modality = ModalityFor(file);
             if (modality is null) continue;
 
             if (GrammarDecomposer.LookupById(modality) == IntPtr.Zero) continue;
             yield return (file, modality);
         }
+    }
+
+    private static string? ModalityFor(string file)
+    {
+        string fileName = Path.GetFileName(file);
+        string ext = Path.GetExtension(file);
+        if (ext.Length > 0 && ext[0] == '.') ext = ext[1..];
+        return FileNameToModality.TryGetValue(fileName, out var nameMod)
+            ? nameMod
+            : (ext.Length == 0 ? null : GrammarDecomposer.ModalityByExt(ext.ToLowerInvariant()));
     }
 }

@@ -112,7 +112,6 @@ public static class IngestPipelineDefaults
             BatchSize = ws.Batch,
             ProbeChunkSize = Math.Clamp(ws.ProbeChunk, 64, 1024),
             ContainmentReader = reader,
-            EnableDeferredContentOnBuilder = false,
             EntityCapacity = ws.Batch * 8,
             PhysicalityCapacity = ws.Batch * 8,
             AttestationCapacity = ws.Batch * 16,
@@ -139,20 +138,20 @@ public static class IngestPipelineDefaults
         IngestSourceProfile? profile = null)
     {
         profile ??= IngestSourceProfile.Wiktionary;
-        var sized = IngestSizing.ResolveForSource(profile, defaultBatchSize > 0 ? defaultBatchSize : null);
+        var sized = ResolveWorkingSet(profile, options, defaultBatchSize);
         return new()
         {
             SourceId = sourceId,
             BatchLabelPrefix = batchLabelPrefix,
-            BatchSize = sized.RecordBatchSize,
-            ProbeChunkSize = sized.ProbeChunkSize,
+            BatchSize = sized.Batch,
+            ProbeChunkSize = sized.ProbeChunk,
             WitnessWeight = witnessWeight,
             CommitEpoch = commitEpoch,
             ContainmentReader = reader,
             MaxInputUnits = options.MaxInputUnits,
             WorkingSet = WorkingSetMode.Enabled,
-            WorkingSetProbeInterval = sized.WorkingSetProbeInterval,
-            WorkingSetRecordCap = sized.WorkingSetRecordCap,
+            WorkingSetProbeInterval = sized.ProbeInterval,
+            WorkingSetRecordCap = sized.RecordCap,
             WorkingSetProfile = profile,
         };
     }
@@ -171,7 +170,6 @@ public static class IngestPipelineDefaults
             BatchSize = ws.Batch,
             ProbeChunkSize = Math.Clamp(ws.ProbeChunk, 64, 4096),
             ContainmentReader = reader,
-            EnableDeferredContentOnBuilder = false,
             EntityCapacity = ws.Batch * 3,
             AttestationCapacity = ws.Batch * 3,
             WorkingSet = WorkingSetMode.Enabled,
@@ -223,6 +221,13 @@ public abstract class Decomposer<TRecord> : IDecomposer
 
     protected abstract IIngestRecordHandler<TRecord> CreateHandler();
 
+    /// <summary>
+    /// Option-aware handler factory used by the one production driver. Most handlers are
+    /// option-independent and inherit this adapter.
+    /// </summary>
+    protected virtual IIngestRecordHandler<TRecord> CreateHandler(DecomposerOptions options) =>
+        CreateHandler();
+
     protected abstract IAsyncEnumerable<TRecord> ExtractRecordsAsync(
         string ecosystemPath, DecomposerOptions options, CancellationToken ct);
 
@@ -231,6 +236,22 @@ public abstract class Decomposer<TRecord> : IDecomposer
         IngestPipelineDefaults.Compose(
             SourceId, BatchLabelPrefix, DefaultBatchSize, options, context.Reader, PipelineProfile);
 
+    /// <summary>
+    /// A non-null stream selects the multi-file scheduling branch of the same driver.
+    /// </summary>
+    protected virtual IMultiFileRecordStream<TRecord>? CreateMultiFileStream(
+        string ecosystemPath, DecomposerOptions options) => null;
+
+    protected virtual IIngestRecordHandler<TRecord> CreateHandlerForFile(
+        string fileLabel, DecomposerOptions options) => CreateHandler(options);
+
+    protected virtual IngestBatchConfig ConfigForFile(
+        string fileLabel, ISubstrateReader? reader, DecomposerOptions options) =>
+        throw new NotSupportedException(
+            $"{GetType().Name} selected multi-file execution without a per-file configuration.");
+
+    public virtual bool PerFileResume => false;
+
     public abstract Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default);
 
     public abstract Task<long?> EstimateUnitCountAsync(
@@ -238,22 +259,44 @@ public abstract class Decomposer<TRecord> : IDecomposer
 
     public virtual ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
+    protected virtual Task OnBeforeDecomposeAsync(
+        IDecomposerContext context, DecomposerOptions options, CancellationToken ct) =>
+        Task.CompletedTask;
+
     public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
         IDecomposerContext context,
         DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        await foreach (var change in RunDecomposeAsync(context, options, ct))
-            yield return change;
-    }
-
-    protected virtual async IAsyncEnumerable<SubstrateChange> RunDecomposeAsync(
-        IDecomposerContext context,
-        DecomposerOptions options,
-        [EnumeratorCancellation] CancellationToken ct = default)
-    {
+        await OnBeforeDecomposeAsync(context, options, ct).ConfigureAwait(false);
         ContainmentReader = context.Reader;
         if (options.DryRun) yield break;
+
+        var multiFileStream = CreateMultiFileStream(context.EcosystemPath, options);
+        if (multiFileStream is not null)
+        {
+            IngestBatchPipeline.PerFileResumePlan? resume =
+                PerFileResume && context.Reader is { } reader
+                    ? new IngestBatchPipeline.PerFileResumePlan(
+                        reader, LayerOrder, options.ReObservePresent)
+                    {
+                        Resolved = new System.Collections.Concurrent.ConcurrentDictionary<
+                            string, (Hash128? Root, bool Skip)>(StringComparer.Ordinal),
+                    }
+                    : null;
+
+            await foreach (var change in IngestBatchPipeline.RunMultiFileAsync(
+                               multiFileStream,
+                               label => CreateHandlerForFile(label, options),
+                               label => ConfigForFile(label, context.Reader, options),
+                               maxTotalUnits: options.MaxInputUnits,
+                               fileWorkers: IngestTopology.Current.FileWorkers,
+                               isolateFileFailures: PerFileCompletion,
+                               resume: resume,
+                               ct: ct))
+                yield return change;
+            yield break;
+        }
 
         var stream = new AsyncEnumerableRecordStream<TRecord>(
             ExtractRecordsAsync(context.EcosystemPath, options, ct));
@@ -271,14 +314,14 @@ public abstract class Decomposer<TRecord> : IDecomposer
         if (segments <= 1)
         {
             await foreach (var change in IngestBatchPipeline.RunAsync(
-                               stream, CreateHandler(), BuildConfig(), ct))
+                               stream, CreateHandler(options), BuildConfig(), ct))
                 yield return change;
             yield break;
         }
 
         await foreach (var change in MonolithSegmenter.RunSegmentedAsync(
                            stream,
-                           _ => CreateHandler(),
+                           _ => CreateHandler(options),
                            _ => BuildConfig(),
                            segments,
                            MonolithSegmenter.ResolveChunkRecords(BuildConfig()),
@@ -286,6 +329,7 @@ public abstract class Decomposer<TRecord> : IDecomposer
                            ct))
             yield return change;
     }
+
 }
 
 /// <summary>
@@ -297,6 +341,8 @@ public abstract class Decomposer<TRecord> : IDecomposer
 /// </summary>
 public abstract class DecomposerMultiFile<TRecord> : Decomposer<TRecord>
 {
+    public override bool PerFileCompletion => true;
+
     /// <summary>Cheap path/label enumeration — reads nothing.</summary>
     protected virtual IReadOnlyList<(string Path, string Label)> ListFiles(
         string ecosystemPath, DecomposerOptions options) =>
@@ -316,14 +362,28 @@ public abstract class DecomposerMultiFile<TRecord> : Decomposer<TRecord>
     /// Default: <see cref="PathListMultiFileStream{TRecord}"/> over <see cref="ListFiles"/>,
     /// each file opened via <see cref="ExtractFileAsync"/>.
     /// </summary>
-    protected virtual IMultiFileRecordStream<TRecord> CreateMultiFileStream(
-        string ecosystemPath, DecomposerOptions options) =>
-        new PathListMultiFileStream<TRecord>(
-            ListFiles(ecosystemPath, options), ExtractFileAsync, options);
+    protected override IMultiFileRecordStream<TRecord> CreateMultiFileStream(
+        string ecosystemPath, DecomposerOptions options)
+    {
+        var files = ListFiles(ecosystemPath, options);
+        var labels = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (_, label) in files)
+        {
+            if (string.IsNullOrWhiteSpace(label))
+                throw new InvalidOperationException(
+                    $"{GetType().Name} returned an empty multi-file job label.");
+            if (!labels.Add(label))
+                throw new InvalidOperationException(
+                    $"{GetType().Name} returned duplicate multi-file job label '{label}'. "
+                    + "File labels are journal identities and must be unique within a run.");
+        }
+        return new PathListMultiFileStream<TRecord>(files, ExtractFileAsync, options);
+    }
 
-    protected abstract IIngestRecordHandler<TRecord> CreateHandlerForFile(string fileLabel);
+    protected abstract override IIngestRecordHandler<TRecord> CreateHandlerForFile(
+        string fileLabel, DecomposerOptions options);
 
-    protected abstract IngestBatchConfig ConfigForFile(
+    protected abstract override IngestBatchConfig ConfigForFile(
         string fileLabel, ISubstrateReader? reader, DecomposerOptions options);
 
     /// <summary>
@@ -335,44 +395,10 @@ public abstract class DecomposerMultiFile<TRecord> : Decomposer<TRecord>
     /// the blast radius of a kill is the one file that was mid-apply.
     /// Default ON for every <see cref="DecomposerMultiFile{TRecord}"/> lane — that is
     /// the shape the resume contract was built for. Monolith / multi-phase sources do
-    /// not inherit this base. Files above the resume hash cap opt out per file.
+    /// not inherit this base. The fingerprint is streamed with a bounded pooled buffer,
+    /// so large files retain the same resume contract without whole-file allocation.
     /// </summary>
-    public virtual bool PerFileResume => true;
-
-    // Multi-file sources ingest PARALLEL BY DEFAULT across the file-worker pool. References resolve
-    // content-addressed (hash of the canonical key), so files carry no cross-file ordering and no
-    // phase concept is needed — cross-source agreement is a hash collision.
-    protected sealed override async IAsyncEnumerable<SubstrateChange> RunDecomposeAsync(
-        IDecomposerContext context,
-        DecomposerOptions options,
-        [EnumeratorCancellation] CancellationToken ct = default)
-    {
-        ContainmentReader = context.Reader;
-        if (options.DryRun) yield break;
-
-        IngestBatchPipeline.PerFileResumePlan? resume =
-            PerFileResume && context.Reader is { } rdr
-                ? new IngestBatchPipeline.PerFileResumePlan(
-                    rdr, LayerOrder, options.ReObservePresent)
-                {
-                    // Shared per-run: the dispatcher fills it a chunk at a time so the
-                    // marker probe is one round trip per chunk instead of one per file.
-                    Resolved = new System.Collections.Concurrent.ConcurrentDictionary<
-                        string, (Hash128? Root, bool Skip)>(StringComparer.Ordinal),
-                }
-                : null;
-
-        await foreach (var change in IngestBatchPipeline.RunMultiFileAsync(
-                           CreateMultiFileStream(context.EcosystemPath, options),
-                           CreateHandlerForFile,
-                           label => ConfigForFile(label, context.Reader, options),
-                           maxTotalUnits: options.MaxInputUnits,
-                           fileWorkers: IngestTopology.Current.FileWorkers,
-                           isolateFileFailures: PerFileCompletion,
-                           resume: resume,
-                           ct: ct))
-            yield return change;
-    }
+    public override bool PerFileResume => true;
 
     protected sealed override IIngestRecordHandler<TRecord> CreateHandler() =>
         throw new NotSupportedException(
@@ -381,7 +407,7 @@ public abstract class DecomposerMultiFile<TRecord> : Decomposer<TRecord>
     /// <summary>
     /// Concatenation of <see cref="ExtractFileAsync"/> over <see cref="ListFiles"/> —
     /// the same masticator the parallel pool uses, serial. Not the production driver
-    /// (<see cref="RunDecomposeAsync"/> uses the pool); exists so the unit is callable
+    /// (the shared driver uses the pool); exists so the unit is callable
     /// without a second parser.
     /// </summary>
     protected sealed override async IAsyncEnumerable<TRecord> ExtractRecordsAsync(
@@ -423,6 +449,8 @@ public abstract class ComposeDecomposer<TRecord> : Decomposer<TRecord>
 {
     protected abstract void Compose(TRecord record, SubstrateChangeBuilder builder);
 
+    protected virtual long UnitsPerRecord(TRecord record) => 1;
+
     /// <summary>
     /// Default: compose callback runs in <see cref="IIngestDeferredUnit.DrainInto"/> (serial).
     /// Sources whose <see cref="ContentTierSpine"/> work belongs on the compose fan
@@ -430,7 +458,7 @@ public abstract class ComposeDecomposer<TRecord> : Decomposer<TRecord>
     /// <see cref="IIngestRecordHandler{TRecord}.CreateDeferredUnit"/>.
     /// </summary>
     protected override IIngestRecordHandler<TRecord> CreateHandler() =>
-        new DirectComposeHandler<TRecord>(Compose);
+        new DirectComposeHandler<TRecord>(Compose, unitsPerRecord: UnitsPerRecord);
 
     protected override IngestBatchConfig BuildPipelineConfig(
         IDecomposerContext context, DecomposerOptions options) =>
@@ -456,7 +484,8 @@ public abstract class ComposeDecomposerMultiFile<TRecord> : DecomposerMultiFile<
 {
     protected abstract void Compose(TRecord record, SubstrateChangeBuilder builder);
 
-    protected sealed override IIngestRecordHandler<TRecord> CreateHandlerForFile(string fileLabel) =>
+    protected sealed override IIngestRecordHandler<TRecord> CreateHandlerForFile(
+        string fileLabel, DecomposerOptions options) =>
         new DirectComposeHandler<TRecord>(Compose);
 
     // Per-FILE label, not BatchLabelPrefix: with workers running concurrently the batch label is
@@ -465,6 +494,21 @@ public abstract class ComposeDecomposerMultiFile<TRecord> : DecomposerMultiFile<
         string fileLabel, ISubstrateReader? reader, DecomposerOptions options) =>
         IngestPipelineDefaults.Compose(
             SourceId, fileLabel, DefaultBatchSize, options, reader, PipelineProfile);
+}
+
+/// <summary>Whole-file grammar compose on the generic multi-file scheduler.</summary>
+public abstract class GrammarComposeDecomposerMultiFile : DecomposerMultiFile<GrammarComposeRecord>
+{
+    protected sealed override IIngestRecordHandler<GrammarComposeRecord> CreateHandlerForFile(
+        string fileLabel, DecomposerOptions options) =>
+        new GrammarComposeHandler(SourceId, SourceTrust, ContainmentReader);
+
+    protected override IngestBatchConfig ConfigForFile(
+        string fileLabel, ISubstrateReader? reader, DecomposerOptions options) =>
+        IngestPipelineDefaults.GrammarCompose(
+            SourceId, fileLabel, DefaultBatchSize, options, reader, PipelineProfile);
+
+    protected override int DefaultBatchSize => BatchConfigDefaults.Code;
 }
 
 public abstract class RelationTripleDecomposer : Decomposer<RelationTripleRecord>
@@ -535,13 +579,12 @@ public abstract class GrammarIngestDecomposer : Decomposer<GrammarIngestRecord>
     protected virtual Hash128? ContextId => null;
     protected virtual IngestSourceProfile IngestProfile => IngestSourceProfile.Wiktionary;
 
-    private DecomposerOptions? _activeOptions;
+    protected sealed override IIngestRecordHandler<GrammarIngestRecord> CreateHandler() =>
+        throw new NotSupportedException("Grammar ingest handlers require the active decomposer options.");
 
-    protected sealed override IIngestRecordHandler<GrammarIngestRecord> CreateHandler()
-    {
-        var options = _activeOptions ?? DecomposerOptions.Default;
-        return new GrammarIngestHandler(SourceId, ModalityId, CreateWitness(options), ContextId);
-    }
+    protected sealed override IIngestRecordHandler<GrammarIngestRecord> CreateHandler(
+        DecomposerOptions options) =>
+        new GrammarIngestHandler(SourceId, ModalityId, CreateWitness(options), ContextId);
 
     protected override IngestBatchConfig BuildPipelineConfig(
         IDecomposerContext context, DecomposerOptions options) =>
@@ -549,42 +592,6 @@ public abstract class GrammarIngestDecomposer : Decomposer<GrammarIngestRecord>
             SourceId, BatchLabelPrefix, DefaultBatchSize, options, context.Reader,
             WitnessWeight, CommitEpoch, IngestProfile);
 
-    // Same segmented monolith path as Decomposer<TRecord>.RunDecomposeAsync — do not
-    // keep a second idle-core serial compose lane for grammar monoliths.
-    protected sealed override async IAsyncEnumerable<SubstrateChange> RunDecomposeAsync(
-        IDecomposerContext context,
-        DecomposerOptions options,
-        [EnumeratorCancellation] CancellationToken ct = default)
-    {
-        ContainmentReader = context.Reader;
-        _activeOptions = options;
-        if (options.DryRun) yield break;
-
-        var stream = new AsyncEnumerableRecordStream<GrammarIngestRecord>(
-            ExtractRecordsAsync(context.EcosystemPath, options, ct));
-
-        IngestBatchConfig BuildConfig() => IngestPipelineDefaults.ApplyMaxInputUnits(
-            BuildPipelineConfig(context, options), options);
-
-        int segments = MonolithSegmenter.ResolveSegments(BuildConfig());
-        if (segments <= 1)
-        {
-            await foreach (var change in IngestBatchPipeline.RunAsync(
-                               stream, CreateHandler(), BuildConfig(), ct))
-                yield return change;
-            yield break;
-        }
-
-        await foreach (var change in MonolithSegmenter.RunSegmentedAsync(
-                           stream,
-                           _ => CreateHandler(),
-                           _ => BuildConfig(),
-                           segments,
-                           MonolithSegmenter.ResolveChunkRecords(BuildConfig()),
-                           BatchLabelPrefix,
-                           ct))
-            yield return change;
-    }
 }
 
 public abstract class CategoryCorrespondenceDecomposer : Decomposer<CategoryCorrespondenceRecord>
@@ -609,6 +616,9 @@ public abstract class CategoryCorrespondenceDecomposer : Decomposer<CategoryCorr
 /// </summary>
 public abstract class DecomposerMultiPhase : IDecomposer
 {
+    private long _runUnitsConsumed;
+    private long _runMaxInputUnits;
+
     public abstract Hash128 SourceId { get; }
     public abstract string SourceName { get; }
     public abstract int LayerOrder { get; }
@@ -634,17 +644,32 @@ public abstract class DecomposerMultiPhase : IDecomposer
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         if (options.DryRun) yield break;
+        _runUnitsConsumed = 0;
+        _runMaxInputUnits = options.MaxInputUnits;
         await foreach (var change in RunIngestAsync(context, options, ct))
+        {
             yield return change;
+            _runUnitsConsumed += change.Metadata.InputUnitsConsumed;
+            if (_runMaxInputUnits > 0 && _runUnitsConsumed >= _runMaxInputUnits)
+                yield break;
+        }
     }
 
-    protected static async IAsyncEnumerable<SubstrateChange> RunPhaseAsync(
+    protected async IAsyncEnumerable<SubstrateChange> RunPhaseAsync(
         IDecomposer phase,
         IDecomposerContext context,
         DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        await foreach (var change in phase.DecomposeAsync(context, options, ct))
+        DecomposerOptions phaseOptions = options;
+        if (_runMaxInputUnits > 0)
+        {
+            long remaining = _runMaxInputUnits - _runUnitsConsumed;
+            if (remaining <= 0) yield break;
+            phaseOptions = options with { MaxInputUnits = remaining };
+        }
+
+        await foreach (var change in phase.DecomposeAsync(context, phaseOptions, ct))
             yield return change;
     }
 }
@@ -768,6 +793,70 @@ public abstract class ComposeDecomposer<TRecord, TSource, TScope> : ComposeDecom
     public sealed override string SourceName => TSource.SourceName;
     public sealed override Hash128 TrustClassId => TSource.TrustClass;
 
+    public override int EstimatedBytesPerRecord => TSource.Profile.EstBytesPerRecord;
+    public override int EstimatedComposeUnitsPerRecord => TSource.Profile.EstComposeUnitsPerRecord;
+
+    protected virtual System.Collections.Concurrent.ConcurrentDictionary<string, byte>? VocabularyReadback => null;
+
+    public sealed override async Task InitializeAsync(
+        IDecomposerContext context, CancellationToken ct = default)
+    {
+        await OnBeforeRegisterAsync(context, ct);
+        await SourceVocabularyBootstrap.RegisterManifestAsync(
+            context, Manifest, VocabularyReadback, ct: ct);
+        await OnInitializedAsync(context, ct);
+    }
+
+    protected virtual Task OnBeforeRegisterAsync(IDecomposerContext context, CancellationToken ct) =>
+        Task.CompletedTask;
+
+    protected virtual Task OnInitializedAsync(IDecomposerContext context, CancellationToken ct) =>
+        Task.CompletedTask;
+}
+
+/// <summary>Multi-file compose lane with sealed manifest initialization.</summary>
+public abstract class ComposeDecomposerMultiFile<TRecord, TSource, TScope>
+    : ComposeDecomposerMultiFile<TRecord>
+    where TSource : ISeedSource
+    where TScope : ISeedScope
+{
+    protected ISourceManifest Manifest => SeedSourceManifest<TSource>.Instance;
+
+    public sealed override Hash128 SourceId => TSource.SourceId;
+    public sealed override string SourceName => TSource.SourceName;
+    public sealed override Hash128 TrustClassId => TSource.TrustClass;
+    public override int EstimatedBytesPerRecord => TSource.Profile.EstBytesPerRecord;
+    public override int EstimatedComposeUnitsPerRecord => TSource.Profile.EstComposeUnitsPerRecord;
+
+    protected virtual System.Collections.Concurrent.ConcurrentDictionary<string, byte>? VocabularyReadback => null;
+
+    public sealed override async Task InitializeAsync(
+        IDecomposerContext context, CancellationToken ct = default)
+    {
+        await OnBeforeRegisterAsync(context, ct);
+        await SourceVocabularyBootstrap.RegisterManifestAsync(
+            context, Manifest, VocabularyReadback, ct: ct);
+        await OnInitializedAsync(context, ct);
+    }
+
+    protected virtual Task OnBeforeRegisterAsync(IDecomposerContext context, CancellationToken ct) =>
+        Task.CompletedTask;
+
+    protected virtual Task OnInitializedAsync(IDecomposerContext context, CancellationToken ct) =>
+        Task.CompletedTask;
+}
+
+/// <summary>Multi-file whole-grammar lane with sealed manifest initialization.</summary>
+public abstract class GrammarComposeDecomposerMultiFile<TSource, TScope>
+    : GrammarComposeDecomposerMultiFile
+    where TSource : ISeedSource
+    where TScope : ISeedScope
+{
+    protected ISourceManifest Manifest => SeedSourceManifest<TSource>.Instance;
+
+    public sealed override Hash128 SourceId => TSource.SourceId;
+    public sealed override string SourceName => TSource.SourceName;
+    public sealed override Hash128 TrustClassId => TSource.TrustClass;
     public override int EstimatedBytesPerRecord => TSource.Profile.EstBytesPerRecord;
     public override int EstimatedComposeUnitsPerRecord => TSource.Profile.EstComposeUnitsPerRecord;
 

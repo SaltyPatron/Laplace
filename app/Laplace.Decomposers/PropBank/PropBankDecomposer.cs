@@ -8,7 +8,8 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.PropBank;
 
-public sealed class PropBankDecomposer : ComposeDecomposer<XmlElement, PropBankSource, FullScope>
+public sealed class PropBankDecomposer
+    : ComposeDecomposerMultiFile<XmlElement, PropBankSource, FullScope>, IIngestInventoryProvider
 {
 
 
@@ -41,15 +42,23 @@ public sealed class PropBankDecomposer : ComposeDecomposer<XmlElement, PropBankS
 
     protected override ConcurrentDictionary<string, byte>? VocabularyReadback => _canonicalNames;
 
-    protected override async IAsyncEnumerable<XmlElement> ExtractRecordsAsync(
-        string ecosystemPath, DecomposerOptions options,
-        [EnumeratorCancellation] CancellationToken ct)
+    protected override IReadOnlyList<(string Path, string Label)> ListFiles(
+        string ecosystemPath, DecomposerOptions options)
     {
         string framesDir = IngestInput.ResolveSubdir(
             ecosystemPath, "*.xml",
             Path.Combine("propbank-frames-main", "frames"), "frames");
+        return SharedXmlFramesetReader.EnumerateFramesetFiles(framesDir, ecosystemPath)
+            .Select((file, i) => (file, $"propbank/{i}/{Path.GetFileName(file)}"))
+            .ToList();
+    }
+
+    protected override async IAsyncEnumerable<XmlElement> ExtractFileAsync(
+        string filePath, string fileLabel, DecomposerOptions options,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
         await foreach (var root in SharedXmlFramesetReader.ReadRootsAsync(
-                           SharedXmlFramesetReader.EnumerateFramesetFiles(framesDir, ecosystemPath),
+                           [filePath],
                            "frameset", ct))
             yield return root;
     }
@@ -58,6 +67,14 @@ public sealed class PropBankDecomposer : ComposeDecomposer<XmlElement, PropBankS
 
     public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
         => Task.FromResult<long?>(EstimatedFramesets);
+
+    public Task<IngestInventory?> DescribeInputAsync(
+        IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
+    {
+        var paths = ListFiles(context.EcosystemPath, options).Select(x => x.Path).ToList();
+        return Task.FromResult(IngestInventory.FromFileUnits(
+            "framesets", paths, options.MaxInputUnits, tracksFileCompletion: true));
+    }
 
     private static void ComposeFrameset(XmlElement root, SubstrateChangeBuilder b)
     {

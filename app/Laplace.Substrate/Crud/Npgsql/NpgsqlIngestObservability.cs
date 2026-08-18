@@ -1,21 +1,24 @@
 using global::Npgsql;
 using NpgsqlTypes;
 using Laplace.Decomposers.Abstractions;
+using Laplace.Engine.Core;
 using Laplace.Ingestion;
 
 namespace Laplace.SubstrateCRUD.Npgsql;
 
 /// <summary>
 /// Persists the ingest run ledger (laplace.ingest_run_journal): one row per run,
-/// 'running' at start, driven to a terminal status on every exit path. Writes are
-/// small, synchronous, and blocking — a run-status row is the whole point, so it is
-/// never fire-and-forget; but journaling is ops metadata, so a journal write failure
-/// logs loudly and never aborts the ingest itself. One runner drives one run at a
+/// 'running' at start, driven to a terminal status on every exit path. Run-status writes
+/// are synchronous; high-cardinality file events queue and flush in array-backed batches
+/// so file workers never block on journal I/O. Journaling is ops metadata, so a write
+/// failure logs loudly and never aborts the ingest itself. One runner drives one run at a
 /// time (the ingest mutex), so a single current-run id suffices.
 /// </summary>
 public sealed class NpgsqlIngestObservability : IIngestObservability
 {
     private static readonly TimeSpan ProgressInterval = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan FileJournalFlushInterval = TimeSpan.FromSeconds(1);
+    private const int FileJournalFlushMax = 4_096;
 
     /// <summary>
     /// classid of the per-run session advisory lock (objid = hashtext(run_id::text)).
@@ -33,9 +36,29 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
     private readonly bool _evidencePersisted;
 
     private Guid _runId;
-    private bool _active;
+    private volatile bool _active;
     private DateTime _lastProgressUtc;
     private NpgsqlConnection? _livenessConn;
+    private readonly System.Collections.Concurrent.ConcurrentQueue<FileJournalEvent> _fileEvents = new();
+    private readonly object _fileFlushGate = new();
+    private CancellationTokenSource? _filePumpCts;
+    private Task? _filePump;
+
+    private enum FileJournalEventKind : byte { Started, Composed, Finished }
+
+    private readonly record struct FileJournalEvent(
+        FileJournalEventKind Kind,
+        string SourceName,
+        string FileLabel,
+        DateTimeOffset At,
+        long Bytes = 0,
+        byte[]? FileId = null,
+        long Records = 0,
+        long Entities = 0,
+        long Physicalities = 0,
+        long Attestations = 0,
+        string? Status = null,
+        string? Error = null);
 
     public NpgsqlIngestObservability(NpgsqlDataSource dataSource, bool evidencePersisted = true)
     {
@@ -63,6 +86,7 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
                 cmd.Parameters.Add(new NpgsqlParameter { Value = _evidencePersisted });
             });
         AcquireLivenessLock();
+        StartFileJournalPump();
     }
 
     /// <summary>
@@ -216,6 +240,7 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
     {
         if (!_active) return;
         _active = false;
+        StopFileJournalPump();
         // error is written HERE, not by a follow-up OnRunFailed: that method returns early
         // once the run is terminal, so every failure reaching this path landed in the ledger
         // as status=failed with error NULL. MEASURED 2026-08-10: the document lane recorded
@@ -325,6 +350,7 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
         if (_active)
         {
             _active = false;
+            StopFileJournalPump();
             Execute(
                 "UPDATE laplace.ingest_run_journal SET status = $2, ended_at = now(), error = $3 "
                 + "WHERE run_id = $1",
@@ -369,8 +395,8 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
             });
 
     /// <summary>
-    /// Per-file ledger rows (laplace.ingest_file_journal). Same law as every other write
-    /// in this class: a journal failure logs and never aborts the ingest.
+    /// Per-file ledger rows (laplace.ingest_file_journal). Calls only enqueue; the file
+    /// journal pump bulk-flushes them. A journal failure logs and never aborts the ingest.
     ///
     /// ON CONFLICT DO UPDATE, not DO NOTHING: a file re-opened inside one run (a retry)
     /// is the same unit, and the second attempt is the one that decides its outcome.
@@ -379,56 +405,171 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
     public void OnFileStarted(string sourceName, string fileLabel, long bytes = 0)
     {
         if (!_active) return;
-        Execute(
-            "INSERT INTO laplace.ingest_file_journal "
-            + "(run_id, file_label, source_name, status, bytes) VALUES ($1, $2, $3, 'running', $4) "
-            + "ON CONFLICT (run_id, file_label) DO UPDATE SET "
-            + "status = 'running', started_at = now(), ended_at = NULL, error = NULL, "
-            + "bytes = EXCLUDED.bytes",
-            cmd =>
-            {
-                cmd.Parameters.Add(new NpgsqlParameter { Value = _runId, NpgsqlDbType = NpgsqlDbType.Uuid });
-                cmd.Parameters.Add(new NpgsqlParameter { Value = fileLabel });
-                cmd.Parameters.Add(new NpgsqlParameter { Value = sourceName });
-                cmd.Parameters.Add(new NpgsqlParameter { Value = bytes });
-            },
-            "INGEST_FILE_JOURNAL_WRITE_FAILED");
+        _fileEvents.Enqueue(new FileJournalEvent(
+            FileJournalEventKind.Started, sourceName, fileLabel, DateTimeOffset.UtcNow, Bytes: bytes));
     }
 
     public void OnFileFinished(
-        string sourceName, string fileLabel, string status,
-        long records = 0, long entities = 0, long physicalities = 0, long attestations = 0,
-        string? error = null)
+        string sourceName, string fileLabel, string status, string? error = null)
     {
         if (!_active) return;
-        // Upsert rather than UPDATE: a true-skipped file never opens, so it has no
-        // 'running' row to update, and skipped-complete is exactly the state worth
-        // recording — it is how a resumed run accounts for the prefix it did not redo.
-        Execute(
-            "INSERT INTO laplace.ingest_file_journal "
-            + "(run_id, file_label, source_name, status, ended_at, records, entities, physicalities, attestations, error) "
-            + "VALUES ($1, $2, $3, $4, now(), $5, $6, $7, $8, $9) "
-            + "ON CONFLICT (run_id, file_label) DO UPDATE SET "
-            + "status = EXCLUDED.status, ended_at = EXCLUDED.ended_at, records = EXCLUDED.records, "
-            + "entities = EXCLUDED.entities, physicalities = EXCLUDED.physicalities, "
-            + "attestations = EXCLUDED.attestations, error = EXCLUDED.error",
-            cmd =>
-            {
-                cmd.Parameters.Add(new NpgsqlParameter { Value = _runId, NpgsqlDbType = NpgsqlDbType.Uuid });
-                cmd.Parameters.Add(new NpgsqlParameter { Value = fileLabel });
-                cmd.Parameters.Add(new NpgsqlParameter { Value = sourceName });
-                cmd.Parameters.Add(new NpgsqlParameter { Value = status });
-                cmd.Parameters.Add(new NpgsqlParameter { Value = records });
-                cmd.Parameters.Add(new NpgsqlParameter { Value = entities });
-                cmd.Parameters.Add(new NpgsqlParameter { Value = physicalities });
-                cmd.Parameters.Add(new NpgsqlParameter { Value = attestations });
-                cmd.Parameters.Add(new NpgsqlParameter
-                {
-                    Value = (object?)error ?? DBNull.Value, NpgsqlDbType = NpgsqlDbType.Text
-                });
-            },
-            "INGEST_FILE_JOURNAL_WRITE_FAILED");
+        _fileEvents.Enqueue(new FileJournalEvent(
+            FileJournalEventKind.Finished, sourceName, fileLabel, DateTimeOffset.UtcNow,
+            Status: status, Error: error));
     }
+
+    public void OnFileComposed(
+        string sourceName, string fileLabel, Hash128? fileId = null,
+        long records = 0, long entities = 0, long physicalities = 0, long attestations = 0)
+    {
+        if (!_active) return;
+        _fileEvents.Enqueue(new FileJournalEvent(
+            FileJournalEventKind.Composed, sourceName, fileLabel, DateTimeOffset.UtcNow,
+            FileId: fileId?.ToBytes(), Records: records, Entities: entities,
+            Physicalities: physicalities, Attestations: attestations));
+    }
+
+    private void StartFileJournalPump()
+    {
+        while (_fileEvents.TryDequeue(out _)) { }
+        _filePumpCts?.Dispose();
+        _filePumpCts = new CancellationTokenSource();
+        var token = _filePumpCts.Token;
+        _filePump = Task.Run(async () =>
+        {
+            try
+            {
+                while (true)
+                {
+                    await Task.Delay(FileJournalFlushInterval, token).ConfigureAwait(false);
+                    FlushFileJournalEvents();
+                }
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        }, CancellationToken.None);
+    }
+
+    private void StopFileJournalPump()
+    {
+        var cts = _filePumpCts;
+        var pump = _filePump;
+        _filePumpCts = null;
+        _filePump = null;
+        if (cts is not null)
+        {
+            cts.Cancel();
+            try { pump?.GetAwaiter().GetResult(); }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(
+                    $"INGEST_FILE_JOURNAL_WRITE_FAILED run={_runId} "
+                    + $"error=[{ex.GetType().Name}] {ex.Message}");
+            }
+            cts.Dispose();
+        }
+        while (!_fileEvents.IsEmpty)
+            FlushFileJournalEvents();
+    }
+
+    /// <summary>
+    /// Drain file lifecycle events into at most three array-backed statements in one
+    /// network round-trip. File workers only enqueue; they never wait on journal I/O.
+    /// Events are grouped in lifecycle order because a file has at most one attempt in a
+    /// run: started, composed, then terminal. True-skips intentionally omit started.
+    /// </summary>
+    private void FlushFileJournalEvents()
+    {
+        lock (_fileFlushGate)
+        {
+            var events = new List<FileJournalEvent>(FileJournalFlushMax);
+            while (events.Count < FileJournalFlushMax && _fileEvents.TryDequeue(out var evt))
+                events.Add(evt);
+            if (events.Count == 0) return;
+
+            try
+            {
+                using var conn = _ds.OpenConnection();
+                using var batch = new NpgsqlBatch(conn);
+
+                var started = events.Where(e => e.Kind == FileJournalEventKind.Started).ToArray();
+                if (started.Length > 0)
+                {
+                    var cmd = new NpgsqlBatchCommand(
+                        "INSERT INTO laplace.ingest_file_journal AS current_file "
+                        + "(run_id, file_label, source_name, status, bytes, started_at) "
+                        + "SELECT $1, u.file_label, u.source_name, 'running', u.bytes, u.at "
+                        + "FROM unnest($2, $3, $4, $5) AS u(file_label, source_name, bytes, at) "
+                        + "ON CONFLICT (run_id, file_label) DO UPDATE SET "
+                        + "status = 'running', started_at = EXCLUDED.started_at, ended_at = NULL, error = NULL, "
+                        + "bytes = EXCLUDED.bytes, file_id = NULL, records = 0, entities = 0, "
+                        + "physicalities = 0, attestations = 0");
+                    AddParameter(cmd, _runId, NpgsqlDbType.Uuid);
+                    AddParameter(cmd, started.Select(e => e.FileLabel).ToArray(), NpgsqlDbType.Array | NpgsqlDbType.Text);
+                    AddParameter(cmd, started.Select(e => e.SourceName).ToArray(), NpgsqlDbType.Array | NpgsqlDbType.Text);
+                    AddParameter(cmd, started.Select(e => e.Bytes).ToArray(), NpgsqlDbType.Array | NpgsqlDbType.Bigint);
+                    AddParameter(cmd, started.Select(e => e.At).ToArray(), NpgsqlDbType.Array | NpgsqlDbType.TimestampTz);
+                    batch.BatchCommands.Add(cmd);
+                }
+
+                var composed = events.Where(e => e.Kind == FileJournalEventKind.Composed).ToArray();
+                if (composed.Length > 0)
+                {
+                    var cmd = new NpgsqlBatchCommand(
+                        "INSERT INTO laplace.ingest_file_journal AS current_file "
+                        + "(run_id, file_label, source_name, file_id, status, records, entities, physicalities, attestations, started_at) "
+                        + "SELECT $1, u.file_label, u.source_name, u.file_id, 'running', u.records, "
+                        + "u.entities, u.physicalities, u.attestations, u.at "
+                        + "FROM unnest($2, $3, $4, $5, $6, $7, $8, $9) "
+                        + "AS u(file_label, source_name, file_id, records, entities, physicalities, attestations, at) "
+                        + "ON CONFLICT (run_id, file_label) DO UPDATE SET "
+                        + "file_id = COALESCE(EXCLUDED.file_id, current_file.file_id), "
+                        + "records = EXCLUDED.records, entities = EXCLUDED.entities, "
+                        + "physicalities = EXCLUDED.physicalities, attestations = EXCLUDED.attestations");
+                    AddParameter(cmd, _runId, NpgsqlDbType.Uuid);
+                    AddParameter(cmd, composed.Select(e => e.FileLabel).ToArray(), NpgsqlDbType.Array | NpgsqlDbType.Text);
+                    AddParameter(cmd, composed.Select(e => e.SourceName).ToArray(), NpgsqlDbType.Array | NpgsqlDbType.Text);
+                    AddParameter(cmd, composed.Select(e => e.FileId).ToArray(), NpgsqlDbType.Array | NpgsqlDbType.Bytea);
+                    AddParameter(cmd, composed.Select(e => e.Records).ToArray(), NpgsqlDbType.Array | NpgsqlDbType.Bigint);
+                    AddParameter(cmd, composed.Select(e => e.Entities).ToArray(), NpgsqlDbType.Array | NpgsqlDbType.Bigint);
+                    AddParameter(cmd, composed.Select(e => e.Physicalities).ToArray(), NpgsqlDbType.Array | NpgsqlDbType.Bigint);
+                    AddParameter(cmd, composed.Select(e => e.Attestations).ToArray(), NpgsqlDbType.Array | NpgsqlDbType.Bigint);
+                    AddParameter(cmd, composed.Select(e => e.At).ToArray(), NpgsqlDbType.Array | NpgsqlDbType.TimestampTz);
+                    batch.BatchCommands.Add(cmd);
+                }
+
+                var finished = events.Where(e => e.Kind == FileJournalEventKind.Finished).ToArray();
+                if (finished.Length > 0)
+                {
+                    var cmd = new NpgsqlBatchCommand(
+                        "INSERT INTO laplace.ingest_file_journal "
+                        + "(run_id, file_label, source_name, status, ended_at, error, started_at) "
+                        + "SELECT $1, u.file_label, u.source_name, u.status, u.at, u.error, u.at "
+                        + "FROM unnest($2, $3, $4, $5, $6) "
+                        + "AS u(file_label, source_name, status, at, error) "
+                        + "ON CONFLICT (run_id, file_label) DO UPDATE SET "
+                        + "status = EXCLUDED.status, ended_at = EXCLUDED.ended_at, error = EXCLUDED.error");
+                    AddParameter(cmd, _runId, NpgsqlDbType.Uuid);
+                    AddParameter(cmd, finished.Select(e => e.FileLabel).ToArray(), NpgsqlDbType.Array | NpgsqlDbType.Text);
+                    AddParameter(cmd, finished.Select(e => e.SourceName).ToArray(), NpgsqlDbType.Array | NpgsqlDbType.Text);
+                    AddParameter(cmd, finished.Select(e => e.Status!).ToArray(), NpgsqlDbType.Array | NpgsqlDbType.Text);
+                    AddParameter(cmd, finished.Select(e => e.At).ToArray(), NpgsqlDbType.Array | NpgsqlDbType.TimestampTz);
+                    AddParameter(cmd, finished.Select(e => e.Error).ToArray(), NpgsqlDbType.Array | NpgsqlDbType.Text);
+                    batch.BatchCommands.Add(cmd);
+                }
+
+                batch.ExecuteNonQuery();
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(
+                    $"INGEST_FILE_JOURNAL_WRITE_FAILED run={_runId} "
+                    + $"error=[{ex.GetType().Name}] {ex.Message}");
+            }
+        }
+    }
+
+    private static void AddParameter(NpgsqlBatchCommand command, object value, NpgsqlDbType type) =>
+        command.Parameters.Add(new NpgsqlParameter { Value = value, NpgsqlDbType = type });
 
     private void Execute(string sql, Action<NpgsqlCommand> bind, string failTag = "INGEST_RUN_JOURNAL_WRITE_FAILED")
     {

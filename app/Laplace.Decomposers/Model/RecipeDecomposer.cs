@@ -51,16 +51,15 @@ public sealed class RecipeDecomposer : ComposeDecomposer<RecipeExtractor.RecipeI
             b, rec, _source, EntityTypeRegistry.ModelRecipe,
             HasHiddenSizeTypeId, HasNumLayersTypeId);
 
-    protected override async IAsyncEnumerable<SubstrateChange> RunDecomposeAsync(
+    protected override Task OnBeforeDecomposeAsync(
         IDecomposerContext context,
         DecomposerOptions options,
-        [EnumeratorCancellation] CancellationToken ct = default)
+        CancellationToken ct)
     {
         context.Logger.LogInformation(
             "phase=recipe parsed: name={Name} structure={Structure} hidden={Hidden} layers={Layers}",
             _recipe.Name, _recipe.Structure, _recipe.HiddenSize, _recipe.NumLayers);
-        await foreach (var change in base.RunDecomposeAsync(context, options, ct))
-            yield return change;
+        return Task.CompletedTask;
     }
 
     public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)

@@ -11,7 +11,7 @@ namespace Laplace.Chess.Service;
 /// locked <c>tb_probe_root</c> only when DTZ is needed (non-draws). Placement walks the
 /// material's index space; there is no Fathom "dump table" API. Parallelism:
 /// <see cref="DecomposerMultiFile{TRecord}"/> runs materials across file workers;
-/// within a material, WDL probes fan out across workers.
+/// the decomposer invokes one stream per material and the generic scheduler owns fan-out.
 /// </summary>
 public static class SyzygyTableUnpack
 {

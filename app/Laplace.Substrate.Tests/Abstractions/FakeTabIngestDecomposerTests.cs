@@ -59,7 +59,7 @@ public sealed class FakeTabIngestDecomposerTests
     {
         public string EcosystemPath => "";
         public ISubstrateWriter Writer => throw new NotSupportedException();
-        public ISubstrateReader Reader => throw new NotSupportedException();
+        public ISubstrateReader Reader => IngestBatchPipeline.AllAbsentSubstrateReader.Instance;
         public Microsoft.Extensions.Logging.ILogger Logger =>
             Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
         public string SubstrateVersion => "test";

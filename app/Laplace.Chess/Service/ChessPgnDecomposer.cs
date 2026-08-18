@@ -2,7 +2,6 @@ using System.Linq;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Text;
-using System.Threading.Channels;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.Modality;
@@ -83,9 +82,18 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
     // pipeline's ceiling at ~150 games/s, and the decompose side is a single pinned producer).
     protected override IReadOnlyList<(string Path, string Label)> ListFiles(
         string ecosystemPath, DecomposerOptions options)
-        => EnumerateFiles(ecosystemPath, _scope)
-            .Select(p => (p, $"{BatchLabelPrefix}/{Path.GetFileNameWithoutExtension(p)}"))
+    {
+        bool rootIsFile = File.Exists(ecosystemPath);
+        return EnumerateFiles(ecosystemPath, _scope)
+            .Select(p =>
+            {
+                string rel = rootIsFile
+                    ? Path.GetFileName(p)
+                    : Path.GetRelativePath(ecosystemPath, p).Replace('\\', '/');
+                return (p, $"{BatchLabelPrefix}/{rel}");
+            })
             .ToArray();
+    }
 
     // ONE file's games, novelty-gated in chunks exactly as before. The gate's proven-set lives on
     // the shared reader (a ConcurrentDictionary, monotone: it only ever gains "present"), so two
@@ -96,12 +104,11 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         [EnumeratorCancellation] CancellationToken ct)
     {
         var ws = IngestPipelineDefaults.ResolveWorkingSet(PipelineProfile, options, DefaultBatchSize);
-        int workers = Math.Max(1, IngestTopology.Current.ComposeWorkers);
         // --force / ReObservePresent: every game must be fully parsed+composed. Peek+probe
         // before that is pure double tax (measured: 16s kill still on FILE_START).
         if (options.ReObservePresent)
         {
-            await foreach (var g in ExtractFileParseDirectAsync(filePath, ws.Batch, workers, ct))
+            await foreach (var g in ExtractFileParseDirectAsync(filePath, ws.Batch, ct))
                 yield return g;
             yield break;
         }
@@ -111,89 +118,25 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         // HashSet ballooned RSS to ~7.7GB and wedged ~220s at 0 journal units (futex,
         // no PG). Keep peek batches modest; ProbeLinePositionsAsync slices further.
         const int noveltyProbeBatch = 2_048;
-        if (workers == 1)
-        {
-            await foreach (var g in ExtractFileSerialPeekAsync(
-                               filePath, noveltyProbeBatch, reObservePresent: false, ct))
-                yield return g;
-            yield break;
-        }
-
-        await foreach (var g in ExtractFileParallelAsync(
-                           filePath, noveltyProbeBatch, workers, reObservePresent: false, ct))
+        await foreach (var g in ExtractFileSerialPeekAsync(
+                           filePath, noveltyProbeBatch, reObservePresent: false, ct))
             yield return g;
     }
 
-    /// <summary>Full TryParseGame fan-out — no PlayingId peek (re-observe / force path).</summary>
+    /// <summary>Direct full parse — no PlayingId peek (re-observe / force path).</summary>
     private async IAsyncEnumerable<ChessGameRecord> ExtractFileParseDirectAsync(
-        string filePath, int batch, int workers,
+        string filePath, int batch,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        if (workers == 1)
+        var chunk = new List<ChessGameRecord>(batch);
+        await foreach (var gameText in StreamFileGamesAsync(filePath, ct))
         {
-            var chunk = new List<ChessGameRecord>(batch);
-            await foreach (var gameText in StreamFileGamesAsync(filePath, ct))
-            {
-                if (TryParseGame(gameText) is { } parsed) chunk.Add(parsed);
-                if (chunk.Count < batch) continue;
-                foreach (var g in chunk) yield return g;
-                chunk.Clear();
-            }
+            if (TryParseGame(gameText) is { } parsed) chunk.Add(parsed);
+            if (chunk.Count < batch) continue;
             foreach (var g in chunk) yield return g;
-            yield break;
+            chunk.Clear();
         }
-
-        var texts = Channel.CreateBounded<string>(new BoundedChannelOptions(workers * 8)
-        {
-            FullMode = BoundedChannelFullMode.Wait,
-            SingleWriter = true,
-            SingleReader = false,
-        });
-        var parsedCh = Channel.CreateBounded<ChessGameRecord>(new BoundedChannelOptions(workers * 8)
-        {
-            FullMode = BoundedChannelFullMode.Wait,
-            SingleWriter = false,
-            SingleReader = true,
-        });
-
-        var feeder = Task.Run(async () =>
-        {
-            try
-            {
-                await foreach (var gameText in StreamFileGamesAsync(filePath, ct).ConfigureAwait(false))
-                    await texts.Writer.WriteAsync(gameText, ct).ConfigureAwait(false);
-                texts.Writer.Complete();
-            }
-            catch (Exception ex) { texts.Writer.TryComplete(ex); throw; }
-        }, ct);
-
-        var parsers = new Task[workers];
-        for (int w = 0; w < workers; w++)
-        {
-            parsers[w] = Task.Run(async () =>
-            {
-                await foreach (var gameText in texts.Reader.ReadAllAsync(ct).ConfigureAwait(false))
-                {
-                    if (TryParseGame(gameText) is { } rec)
-                        await parsedCh.Writer.WriteAsync(rec, ct).ConfigureAwait(false);
-                }
-            }, ct);
-        }
-
-        var closer = Task.Run(async () =>
-        {
-            try
-            {
-                await feeder.ConfigureAwait(false);
-                await Task.WhenAll(parsers).ConfigureAwait(false);
-                parsedCh.Writer.Complete();
-            }
-            catch (Exception ex) { parsedCh.Writer.TryComplete(ex); }
-        }, ct);
-
-        await foreach (var rec in parsedCh.Reader.ReadAllAsync(ct).ConfigureAwait(false))
-            yield return rec;
-        await closer.ConfigureAwait(false);
+        foreach (var g in chunk) yield return g;
     }
 
     private async IAsyncEnumerable<ChessGameRecord> ExtractFileSerialPeekAsync(
@@ -218,88 +161,6 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
             }
             pending = next;
         }
-        if (pending is not null)
-        {
-            foreach (var g in await pending.ConfigureAwait(false))
-                yield return g;
-        }
-        if (peeks.Count > 0)
-        {
-            foreach (var g in await MaterializeNovelAsync(
-                         peeks, ContainmentReader, reObservePresent, ct).ConfigureAwait(false))
-                yield return g;
-        }
-    }
-
-    private async IAsyncEnumerable<ChessGameRecord> ExtractFileParallelAsync(
-        string filePath, int batch, int workers, bool reObservePresent,
-        [EnumeratorCancellation] CancellationToken ct)
-    {
-        var texts = Channel.CreateBounded<string>(new BoundedChannelOptions(workers * 8)
-        {
-            FullMode = BoundedChannelFullMode.Wait,
-            SingleWriter = true,
-            SingleReader = false,
-        });
-        var peeked = Channel.CreateBounded<ChessPlayingPeek>(new BoundedChannelOptions(workers * 8)
-        {
-            FullMode = BoundedChannelFullMode.Wait,
-            SingleWriter = false,
-            SingleReader = true,
-        });
-
-        var feeder = Task.Run(async () =>
-        {
-            try
-            {
-                await foreach (var gameText in StreamFileGamesAsync(filePath, ct).ConfigureAwait(false))
-                    await texts.Writer.WriteAsync(gameText, ct).ConfigureAwait(false);
-                texts.Writer.Complete();
-            }
-            catch (Exception ex) { texts.Writer.TryComplete(ex); throw; }
-        }, ct);
-
-        var peekers = new Task[workers];
-        for (int w = 0; w < workers; w++)
-        {
-            peekers[w] = Task.Run(async () =>
-            {
-                await foreach (var gameText in texts.Reader.ReadAllAsync(ct).ConfigureAwait(false))
-                {
-                    if (TryPeekPlaying(gameText) is { } peek)
-                        await peeked.Writer.WriteAsync(peek, ct).ConfigureAwait(false);
-                }
-            }, ct);
-        }
-
-        var closer = Task.Run(async () =>
-        {
-            try
-            {
-                await feeder.ConfigureAwait(false);
-                await Task.WhenAll(peekers).ConfigureAwait(false);
-                peeked.Writer.Complete();
-            }
-            catch (Exception ex) { peeked.Writer.TryComplete(ex); }
-        }, ct);
-
-        var peeks = new List<ChessPlayingPeek>(batch);
-        Task<List<ChessGameRecord>>? pending = null;
-        await foreach (var peek in peeked.Reader.ReadAllAsync(ct).ConfigureAwait(false))
-        {
-            peeks.Add(peek);
-            if (peeks.Count < batch) continue;
-            var handoff = peeks;
-            peeks = new List<ChessPlayingPeek>(batch);
-            var next = MaterializeNovelAsync(handoff, ContainmentReader, reObservePresent, ct);
-            if (pending is not null)
-            {
-                foreach (var g in await pending.ConfigureAwait(false))
-                    yield return g;
-            }
-            pending = next;
-        }
-        await closer.ConfigureAwait(false);
         if (pending is not null)
         {
             foreach (var g in await pending.ConfigureAwait(false))

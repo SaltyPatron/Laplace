@@ -1,4 +1,5 @@
 using Laplace.Decomposers.Abstractions;
+using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
 
 namespace Laplace.Ingestion;
@@ -45,13 +46,18 @@ public interface IIngestObservability
     /// files can span five orders of magnitude (UD: 4,577 B to 360,217,466 B).</summary>
     void OnFileStarted(string sourceName, string fileLabel, long bytes = 0) { }
 
+    /// <summary>The file producer drained, but its changes have not necessarily been
+    /// committed yet. Updates identity and payload counters while status remains running;
+    /// the runner records the terminal state only after the boundary apply succeeds.</summary>
+    void OnFileComposed(
+        string sourceName, string fileLabel, Hash128? fileId = null,
+        long records = 0, long entities = 0, long physicalities = 0, long attestations = 0) { }
+
     /// <summary>A file reached a terminal state. <paramref name="status"/> is one of
-    /// ok / skipped-complete / failed, matching ingest_file_journal's CHECK; a file that
+    /// ok / skipped-complete / failed / cancelled, matching ingest_file_journal's CHECK; a file that
     /// never reaches here stays 'running' and is reconciled to 'cancelled' with its run.</summary>
     void OnFileFinished(
-        string sourceName, string fileLabel, string status,
-        long records = 0, long entities = 0, long physicalities = 0, long attestations = 0,
-        string? error = null) { }
+        string sourceName, string fileLabel, string status, string? error = null) { }
 }
 
 public sealed class NoOpObservability : IIngestObservability

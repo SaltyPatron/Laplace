@@ -222,6 +222,8 @@ public sealed class UnicodeDecomposer : DecomposerMultiPhase<UnicodeSource, Full
 
         protected override void Compose(EntityRow row, SubstrateChangeBuilder b) => b.AddEntity(row);
 
+        protected override long UnitsPerRecord(EntityRow row) => 0;
+
         protected override async IAsyncEnumerable<EntityRow> ExtractRecordsAsync(
             string ecosystemPath, DecomposerOptions options,
             [EnumeratorCancellation] CancellationToken ct)

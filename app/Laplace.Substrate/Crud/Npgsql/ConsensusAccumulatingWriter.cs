@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using global::Npgsql;
 using NpgsqlTypes;
@@ -78,7 +79,8 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
     // Fold fan-out width: per-type segments are row-disjoint under the
     // LIST(type_id) partitioning, so they ride parallel connections exactly
     // like the 12-way COPY apply above them. One connection per segment.
-    private static readonly int FoldConnections = Math.Clamp(Environment.ProcessorCount, 1, 12);
+    private static readonly int FoldConnections =
+        Math.Clamp(IngestTopology.Current.ApplyPartitions, 1, 12);
 
     // GLOBAL connection budget for the fold, shared by every type lane and the
     // mask lane (2026-07-21). FoldConnections is a per-Parallel.ForEachAsync
@@ -200,8 +202,11 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
             // still a fold, so a replay must not reach the queue either.
             if (delta is { Count: > 0 } && !result.JournalReplayHit)
             {
-                if (_bulkRun) await EnqueueFoldAsync(delta, ct);
-                else await UpsertDeltaAsync(delta, ct);
+                // Evidence has committed and its replay journal will suppress this delta
+                // forever. From here the fold is an owed continuation, not cancellable
+                // speculative work; completion/drain owns surfacing any failure.
+                if (_bulkRun) await EnqueueFoldAsync(delta, CancellationToken.None);
+                else await UpsertDeltaAsync(delta, CancellationToken.None);
             }
 
             return result;
@@ -491,7 +496,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
             {
                 var prior = _typeLanes.TryGetValue(run.Type, out var p) ? p : Task.CompletedTask;
                 var r = run;
-                var next = Task.Run(() => FoldRunAfterAsync(prior, r), ct);
+                var next = Task.Run(() => FoldRunAfterAsync(prior, r));
                 _typeLanes[run.Type] = next;
                 completions.Add(next);
             }
@@ -511,7 +516,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
             // split the array across 12 concurrent transactions. It doesn't split
             // any more, so there is nothing to serialize. WhenAll keeps every
             // in-flight deposit reachable from the drain.
-            var maskTask = Task.Run(() => DepositAsync(maskPairs), ct);
+            var maskTask = Task.Run(() => DepositAsync(maskPairs));
             _maskLane = Task.WhenAll(_maskLane, maskTask);
             completions.Add(maskTask);
         }
@@ -855,10 +860,26 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         // Folds drain BEFORE the inner writer rebuilds the cycled consensus
         // secondaries — a live fold during the rebuild would pay live index
         // maintenance on every insert.
-        await DrainFoldsAsync();
+        Exception? foldFailure = null;
+        try
+        {
+            await DrainFoldsAsync();
+        }
+        catch (Exception ex)
+        {
+            foldFailure = ex;
+        }
         bool wasBulk = _bulkRun;
         _bulkRun = false;
-        await _inner.CompleteBulkRunAsync(ct);
+        Exception? completionFailure = null;
+        try
+        {
+            await _inner.CompleteBulkRunAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            completionFailure = ex;
+        }
 
         // NO terminal mask pass (2026-07-21). Masks are deposited inline by every
         // fold, in every lane — see UpsertDeltaAsync. There is nothing left to
@@ -871,6 +892,13 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDispos
         // cannot do), alongside highway_mask_rebuild for highway bit renumbering.
         // Nothing on the ingest hot path populates or drains the queue.
         _ = wasBulk;
+
+        if (foldFailure is not null && completionFailure is not null)
+            throw new AggregateException(foldFailure, completionFailure);
+        if (completionFailure is not null)
+            ExceptionDispatchInfo.Capture(completionFailure).Throw();
+        if (foldFailure is not null)
+            ExceptionDispatchInfo.Capture(foldFailure).Throw();
     }
 
     public async ValueTask DisposeAsync()

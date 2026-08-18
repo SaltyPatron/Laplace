@@ -158,6 +158,68 @@ public sealed class WorkingSetPipelineTests
         Assert.Equal(24576, config.WorkingSetRecordCap);
     }
 
+    [Fact]
+    public void ComposeWorkers_AreOneProcessBudget_NotPerWorkingSet()
+    {
+        var config = WorkingSetConfig(reader: null, probeChunk: 64)
+            .WithWorkingSetConcurrency(4);
+        var parallelHandler = new ContentIngestHandler(TestSource);
+
+        int actual = IngestDescentFlush.ResolveComposeWorkers(
+            10_000, parallelHandler, config);
+        int expected = Math.Max(1, IngestTopology.Current.ComposeWorkers / 4);
+
+        Assert.Equal(expected, actual);
+        Assert.True(actual * config.ConcurrentWorkingSets <=
+                    Math.Max(config.ConcurrentWorkingSets, IngestTopology.Current.ComposeWorkers));
+    }
+
+    [Fact]
+    public void ComposeWorkers_ReturnToTheLastActiveFile()
+    {
+        int activeFiles = 8;
+        var config = WorkingSetConfig(reader: null, probeChunk: 64)
+            .WithActiveWorkingSetConcurrency(8, () => Volatile.Read(ref activeFiles));
+        var handler = new ContentIngestHandler(TestSource);
+
+        int shared = IngestDescentFlush.ResolveComposeWorkers(10_000, handler, config);
+        Volatile.Write(ref activeFiles, 1);
+        int tail = IngestDescentFlush.ResolveComposeWorkers(10_000, handler, config);
+
+        Assert.Equal(Math.Max(1, IngestTopology.Current.ComposeWorkers / 8), shared);
+        Assert.Equal(Math.Max(1, IngestTopology.Current.ComposeWorkers), tail);
+    }
+
+    [Fact]
+    public void DirectCompose_DoesNotParallelizeWrapperAllocation()
+    {
+        var handler = new DirectComposeHandler<int>((_, _) => { });
+        var config = WorkingSetConfig(reader: null, probeChunk: 64);
+
+        Assert.Equal(1, IngestDescentFlush.ResolveComposeWorkers(10_000, handler, config));
+    }
+
+    [Fact]
+    public void PipelineBuilders_DefaultToBulkContentPresenceProbe()
+    {
+        var reader = new ProbeTrackingReader(present: true);
+        var config = IngestPipelineDefaults.Compose(
+            TestSource, "deferred-default", 64, DecomposerOptions.Default, reader);
+
+        Assert.True(config.EnableDeferredContentOnBuilder);
+        Assert.NotNull(config.NewBuilder(0).DeferredContent);
+    }
+
+    [Fact]
+    public void StructuredGrammar_RespectsExplicitOperatorBatch()
+    {
+        var options = DecomposerOptions.Default with { BatchSize = 777 };
+        var config = IngestPipelineDefaults.StructuredGrammar(
+            TestSource, "grammar-batch", 64, options, reader: null);
+
+        Assert.Equal(777, config.BatchSize);
+    }
+
     /// <summary>
     /// Simulates a fully warmed process-lifetime proven cache: every id is
     /// already positively confirmed present, so neither the gate nor the
