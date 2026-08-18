@@ -192,15 +192,15 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
             + "                     AND l.objid::bigint = (hashtext(j.run_id::text)::bigint & 4294967295))",
             static _ => { });
 
-        // The file rows of a reconciled run. A file left 'running' by a kill is the one
-        // the run was mid-apply on — the single most useful fact in the ledger after a
-        // crash — so it is driven to the same terminal state as its run rather than left
-        // ambiguous. Keyed off the run's status, which the UPDATE above has just settled.
+        // The file rows of a reconciled run. A file left 'running' was still producing;
+        // one left 'composed' was queued at the apply boundary. Both are incomplete and
+        // must follow the run to a terminal state rather than remaining falsely active.
+        // Keyed off the run's status, which the UPDATE above has just settled.
         Execute(
             "UPDATE laplace.ingest_file_journal f SET status = 'cancelled', ended_at = now(), "
             + "error = 'file did not reach completion: run cancelled (cluster restart, OOM kill, "
             + "or terminated session). Reconciled at the start of the next run.' "
-            + "WHERE f.status = 'running' "
+            + "WHERE f.status IN ('running','composed') "
             + "  AND EXISTS (SELECT 1 FROM laplace.ingest_run_journal j "
             + "               WHERE j.run_id = f.run_id AND j.status <> 'running')",
             static _ => { }, "INGEST_FILE_JOURNAL_WRITE_FAILED");
@@ -517,12 +517,13 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
                     var cmd = new NpgsqlBatchCommand(
                         "INSERT INTO laplace.ingest_file_journal AS current_file "
                         + "(run_id, file_label, source_name, file_id, status, records, entities, physicalities, attestations, started_at) "
-                        + "SELECT $1, u.file_label, u.source_name, u.file_id, 'running', u.records, "
+                        + "SELECT $1, u.file_label, u.source_name, u.file_id, 'composed', u.records, "
                         + "u.entities, u.physicalities, u.attestations, u.at "
                         + "FROM unnest($2, $3, $4, $5, $6, $7, $8, $9) "
                         + "AS u(file_label, source_name, file_id, records, entities, physicalities, attestations, at) "
                         + "ON CONFLICT (run_id, file_label) DO UPDATE SET "
                         + "file_id = COALESCE(EXCLUDED.file_id, current_file.file_id), "
+                        + "status = 'composed', "
                         + "records = EXCLUDED.records, entities = EXCLUDED.entities, "
                         + "physicalities = EXCLUDED.physicalities, attestations = EXCLUDED.attestations");
                     AddParameter(cmd, _runId, NpgsqlDbType.Uuid);

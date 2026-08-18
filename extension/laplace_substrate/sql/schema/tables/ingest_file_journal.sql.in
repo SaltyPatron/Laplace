@@ -18,6 +18,7 @@
 -- INGEST_FILE_JOURNAL_WRITE_FAILED and does not abort the ingest, and the row
 -- stays 'running' forever, indistinguishable from a killed file.
 --   running           opened, not yet finished
+--   composed          extraction/composition complete; waiting for its boundary to apply
 --   ok                applied to completion, marker deposited
 --   skipped-complete  true-skipped before opening: marker already present
 --   failed            raised; error carries the message
@@ -28,7 +29,7 @@ CREATE TABLE IF NOT EXISTS ingest_file_journal (
     source_name   text         NOT NULL,
     file_id       bytea        CHECK (file_id IS NULL OR octet_length(file_id) = 16),
     status        text         NOT NULL DEFAULT 'running'
-        CHECK (status IN ('running','ok','skipped-complete','failed','cancelled')),
+        CHECK (status IN ('running','composed','ok','skipped-complete','failed','cancelled')),
     started_at    timestamptz  NOT NULL DEFAULT now(),
     ended_at      timestamptz,
     bytes         bigint       NOT NULL DEFAULT 0,
@@ -59,5 +60,5 @@ DO $$
 BEGIN
     ALTER TABLE ingest_file_journal DROP CONSTRAINT IF EXISTS ingest_file_journal_status_check;
     ALTER TABLE ingest_file_journal ADD CONSTRAINT ingest_file_journal_status_check
-        CHECK (status IN ('running','ok','skipped-complete','failed','cancelled'));
+        CHECK (status IN ('running','composed','ok','skipped-complete','failed','cancelled'));
 END $$;
