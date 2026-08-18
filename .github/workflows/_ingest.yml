@@ -139,8 +139,17 @@ jobs:
       # directory would overwrite the seed measurement with a no-op re-run.
       INGEST_LOGDIR: /opt/laplace/app/logs/ingest
     steps:
-      - uses: actions/checkout@v4
-        with: { submodules: false, clean: false }
+      # This is a persistent, single-repository self-hosted runner. Fetch the exact
+      # workflow revision through git instead of downloading actions/checkout for
+      # every job. codeload.github.com throttling otherwise kills the job in "Set up
+      # job" before eviction or ingest can execute. Leave untracked build artifacts
+      # intact, matching checkout's former clean:false contract.
+      - name: Checkout requested revision (preserve build tree)
+        env:
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
+          git checkout --force "$TARGET_SHA"
       - uses: ./.github/actions/setup-laplace-env
 
       - name: Engine present, or built
@@ -325,8 +334,12 @@ jobs:
       LAPLACE_DB: "Host=/var/run/postgresql;Username=laplace_admin;Database=${{ inputs.database }}"
       PGDATABASE: ${{ inputs.database }}
     steps:
-      - uses: actions/checkout@v4
-        with: { submodules: false, clean: false }
+      - name: Checkout requested revision (preserve build tree)
+        env:
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
+          git checkout --force "$TARGET_SHA"
       - uses: ./.github/actions/setup-laplace-env
 
       - name: Re-ingest must be a no-op on the evidence count
@@ -368,8 +381,12 @@ jobs:
     runs-on: [self-hosted, laplace]
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-        with: { submodules: false, clean: false }
+      - name: Checkout requested revision (preserve build tree)
+        env:
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
+          git checkout --force "$TARGET_SHA"
       - uses: ./.github/actions/setup-laplace-env
 
       - name: Decomposer consensus + layer gates
