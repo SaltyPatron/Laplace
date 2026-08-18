@@ -6,7 +6,8 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Code;
 
-public sealed class TabularDecomposer : ComposeDecomposer<TabularDecomposer.RowRecord, TabularSource, FullScope>
+public sealed class TabularDecomposer
+    : ComposeDecomposerMultiFile<TabularDecomposer.RowRecord, TabularSource, FullScope>, IIngestInventoryProvider
 {
     public static readonly Hash128 Source = TabularSource.SourceId;
     public static readonly Hash128 TrustClass = TabularSource.TrustClass;
@@ -21,7 +22,6 @@ public sealed class TabularDecomposer : ComposeDecomposer<TabularDecomposer.RowR
     private readonly string _targetColumn;
     private readonly string _positiveValue;
     private readonly ConcurrentStringSet _canonicalNames = new(StringComparer.Ordinal);
-    private readonly ConcurrentStringSet _stagedColumns = new(StringComparer.Ordinal);
 
     public TabularDecomposer(string targetColumn = "Exited", string positiveValue = "1", int numBins = 10)
     {
@@ -57,14 +57,17 @@ public sealed class TabularDecomposer : ComposeDecomposer<TabularDecomposer.RowR
         await context.Writer.ApplyAsync(seed.Build(), ct);
     }
 
-    protected override async IAsyncEnumerable<RowRecord> ExtractRecordsAsync(
-        string ecosystemPath, DecomposerOptions options,
+    protected override IReadOnlyList<(string Path, string Label)> ListFiles(
+        string ecosystemPath, DecomposerOptions options) =>
+        EnumerateCsv(ecosystemPath)
+            .Select((file, i) => (file, $"tabular/{i}/{Path.GetFileName(file)}"))
+            .ToList();
+
+    protected override async IAsyncEnumerable<RowRecord> ExtractFileAsync(
+        string filePath, string fileLabel, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        var files = EnumerateCsv(ecosystemPath).ToList();
-        if (files.Count == 0) yield break;
-
-        string[]? header = await ReadHeaderAsync(files, ct);
+        string[]? header = await ReadHeaderAsync([filePath], ct);
         if (header is null || header.Length == 0) yield break;
 
         var featureCols = header
@@ -75,7 +78,7 @@ public sealed class TabularDecomposer : ComposeDecomposer<TabularDecomposer.RowR
         int targetIdx = Array.IndexOf(header, _targetColumn);
         if (targetIdx < 0) yield break;
 
-        await foreach (var row in StreamRowsAsync(files, header, featureCols, targetIdx, ct))
+        await foreach (var row in StreamRowsAsync([filePath], header, featureCols, targetIdx, ct))
             yield return row;
     }
 
@@ -111,7 +114,6 @@ public sealed class TabularDecomposer : ComposeDecomposer<TabularDecomposer.RowR
 
     private void EnsureColumn(SubstrateChangeBuilder b, string col, Hash128 columnId)
     {
-        if (!_stagedColumns.Add(col)) return;
         b.AddEntity(new EntityRow(columnId, EntityTier.Word, ColumnTypeId, Source));
         _canonicalNames.Add($"tabular/column/{col}/v1");
         if (ContentEmitter.Emit(b, col, Source) is { } colNameId)
@@ -119,8 +121,17 @@ public sealed class TabularDecomposer : ComposeDecomposer<TabularDecomposer.RowR
                 columnId, "IS_INSTANCE_OF", colNameId, Source, TC.StructuredCorpus));
     }
 
-    public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
-        => Task.FromResult<long?>(null);
+    public Task<IngestInventory?> DescribeInputAsync(
+        IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
+    {
+        var paths = EnumerateCsv(context.EcosystemPath).ToList();
+        return Task.FromResult(IngestInventory.FromFiles(
+            "rows", paths, options.MaxInputUnits, ct, tracksFileCompletion: true));
+    }
+
+    public override async Task<long?> EstimateUnitCountAsync(
+        IDecomposerContext context, CancellationToken ct = default) =>
+        (await DescribeInputAsync(context, DecomposerOptions.Default, ct))?.TotalInputUnits;
 
     private static async Task<string[]?> ReadHeaderAsync(IReadOnlyList<string> files, CancellationToken ct)
     {

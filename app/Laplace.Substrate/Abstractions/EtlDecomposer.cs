@@ -6,13 +6,13 @@ using Laplace.SubstrateCRUD;
 namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
-/// ETL sources route through <see cref="DecomposerMultiPhase"/> +
-/// <see cref="StructuredGrammarIngest"/> (runtime <see cref="EtlRuntimeManifest"/>).
+/// Runtime-manifest ETL source on the same multi-file record pipeline as compiled vendors.
 /// </summary>
-public sealed class EtlDecomposer : DecomposerMultiPhase, IIngestInventoryProvider
+public sealed class EtlDecomposer : DecomposerMultiFile<GrammarIngestRecord>, IIngestInventoryProvider
 {
     private readonly EtlSource _src;
-    private ISubstrateReader? _containmentReader;
+    private readonly ConcurrentDictionary<string, string> _filePathsByLabel =
+        new(StringComparer.Ordinal);
 
     internal static readonly ConcurrentDictionary<string, ConcurrentDictionary<string, byte>> LanguageNamesBySource =
         new(StringComparer.Ordinal);
@@ -23,6 +23,11 @@ public sealed class EtlDecomposer : DecomposerMultiPhase, IIngestInventoryProvid
     public override string SourceName => _src.Name;
     public override int LayerOrder => _src.Layer;
     public override Hash128 TrustClassId => _src.TrustClassId;
+    protected override double SourceTrust => _src.Trust;
+    public override int EstimatedBytesPerRecord =>
+        (_src.Profile ?? IngestSourceProfile.Wiktionary).EstBytesPerRecord;
+    public override int EstimatedComposeUnitsPerRecord =>
+        (_src.Profile ?? IngestSourceProfile.Wiktionary).EstComposeUnitsPerRecord;
 
     public override IReadOnlyCollection<string> CanonicalNamesForReadback
     {
@@ -43,13 +48,11 @@ public sealed class EtlDecomposer : DecomposerMultiPhase, IIngestInventoryProvid
             context, new EtlRuntimeManifest(_src), readbackNames: langs, ct: ct);
     }
 
-    protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
+    protected override Task OnBeforeDecomposeAsync(
         IDecomposerContext context,
         DecomposerOptions options,
-        [EnumeratorCancellation] CancellationToken ct = default)
+        CancellationToken ct)
     {
-        _containmentReader = context.Reader;
-
         if (_src.Anchor == AnchorResolver.IliSynset)
         {
             if (_src.RequireIliMap)
@@ -57,58 +60,62 @@ public sealed class EtlDecomposer : DecomposerMultiPhase, IIngestInventoryProvid
             else
                 SourceEntityIdConventions.WarnIfCiliMapMissing(context.Logger, _src.Name);
         }
+        return Task.CompletedTask;
+    }
 
-        var files = EnumerateFiles(context.EcosystemPath).ToList();
-        if (files.Count == 0) yield break;
+    protected override IReadOnlyList<(string Path, string Label)> ListFiles(
+        string ecosystemPath, DecomposerOptions options)
+    {
+        var files = EnumerateFiles(ecosystemPath).ToList();
+        _filePathsByLabel.Clear();
+        var result = new List<(string Path, string Label)>(files.Count);
+        for (int i = 0; i < files.Count; i++)
+        {
+            string path = files[i];
+            string label = $"{_src.Name}/{i}/{Path.GetFileName(path)}";
+            _filePathsByLabel[label] = path;
+            result.Add((path, label));
+        }
+        return result;
+    }
 
-        // Wiktionary is the FALLBACK, not a description of this lane: the generic ETL
-        // decomposer serves many sources and this literal was the same borrowed profile
-        // Tatoeba was using. Keeping it as the default is a faithful refactor (no source
-        // changes sizing today); `EtlSource.Profile` is the knob for giving a lane its own
-        // memory model once someone measures one, instead of another private literal.
-        int batch = IngestPipelineDefaults.ResolveBatch(
-            _src.Profile ?? IngestSourceProfile.Wiktionary, options);
-        long cap = options.MaxInputUnits;
-        long consumed = 0;
-        int fileBn = 0;
-
+    protected override async IAsyncEnumerable<GrammarIngestRecord> ExtractFileAsync(
+        string filePath, string fileLabel, DecomposerOptions options,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
         Func<ReadOnlySpan<byte>, bool>? acceptRow = _src.AcceptCommentRows
             ? null
             : static line => line.Length > 0 && line[0] != (byte)'#';
+        var stream = GrammarFileRecordStream.ForSource(filePath, _src, acceptRow);
+        await foreach (var record in stream.RecordsAsync(ct))
+            yield return record;
+    }
 
-        ISubstrateReader? composeReader = _containmentReader;
+    protected override IIngestRecordHandler<GrammarIngestRecord> CreateHandlerForFile(
+        string fileLabel, DecomposerOptions options)
+    {
+        string path = _filePathsByLabel.TryGetValue(fileLabel, out var resolved)
+            ? resolved
+            : fileLabel;
+        return new GrammarIngestHandler(
+            SourceId,
+            _src.Modality.GrammarId,
+            new EtlWitness(new EtlWitnessContext(_src, path, options)),
+            _src.ContextIdFromFile?.Invoke(path));
+    }
 
-        foreach (var file in files)
-        {
-            ct.ThrowIfCancellationRequested();
-            if (cap > 0 && consumed >= cap) yield break;
-            long fileCap = cap > 0 ? cap - consumed : 0;
-
-            Hash128? fileContext = _src.ContextIdFromFile?.Invoke(file);
-
-            var witness = new EtlWitness(new EtlWitnessContext(_src, file, options));
-            await foreach (var change in StructuredGrammarIngest.IngestFileAsync(
-                file,
-                _src,
-                witness: witness,
-                batchSize: batch,
-                witnessWeight: 1.0,
-                batchLabelPrefix: $"{_src.Name}/{fileBn++}",
-                reportUnits: null,
-                contextId: fileContext,
-                commitEpoch: 0,
-                acceptRow: acceptRow,
-                maxInputUnits: fileCap,
-                containmentReader: composeReader,
-                ct: ct))
-            {
-                if (!options.DryRun)
-                {
-                    consumed += change.Metadata.InputUnitsConsumed;
-                    yield return change;
-                }
-            }
-        }
+    protected override IngestBatchConfig ConfigForFile(
+        string fileLabel, ISubstrateReader? reader, DecomposerOptions options)
+    {
+        var profile = _src.Profile ?? IngestSourceProfile.Wiktionary;
+        return IngestPipelineDefaults.StructuredGrammar(
+            SourceId,
+            fileLabel,
+            IngestSizing.ResolveForSource(profile).RecordBatchSize,
+            options,
+            reader,
+            witnessWeight: 1.0,
+            profile: profile);
     }
 
     private IEnumerable<string> EnumerateFiles(string ecosystemPath)
@@ -128,7 +135,7 @@ public sealed class EtlDecomposer : DecomposerMultiPhase, IIngestInventoryProvid
     {
         var paths = EnumerateFiles(context.EcosystemPath).ToList();
         return Task.FromResult(IngestInventory.FromFiles(
-            "records", paths, options.MaxInputUnits, ct));
+            "records", paths, options.MaxInputUnits, ct, tracksFileCompletion: true));
     }
 
     public override async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)

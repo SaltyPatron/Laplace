@@ -21,7 +21,8 @@ namespace Laplace.Decomposers.Code;
 /// Content addressing dedups every column/value across rows, files, and sources — a
 /// value that appears in a million rows is stored once and witnessed a million times.
 /// </summary>
-public sealed class ParquetDecomposer : ComposeDecomposer<ParquetDecomposer.RowRecord, ParquetSource, FullScope>
+public sealed class ParquetDecomposer
+    : ComposeDecomposerMultiFile<ParquetDecomposer.RowRecord, ParquetSource, FullScope>, IIngestInventoryProvider
 {
     public static readonly Hash128 Source = ParquetSource.SourceId;
     public static readonly Hash128 TrustClass = ParquetSource.TrustClass;
@@ -30,7 +31,6 @@ public sealed class ParquetDecomposer : ComposeDecomposer<ParquetDecomposer.RowR
     private static readonly Hash128 ValueTypeId = EntityTypeRegistry.TabularValue;
 
     private readonly ConcurrentStringSet _canonicalNames = new(StringComparer.Ordinal);
-    private readonly ConcurrentStringSet _stagedColumns = new(StringComparer.Ordinal);
 
     public override int LayerOrder => 2;
     protected override double SourceTrust => TC.StructuredCorpus;
@@ -42,35 +42,32 @@ public sealed class ParquetDecomposer : ComposeDecomposer<ParquetDecomposer.RowR
     private static Hash128 ColumnId(string col) => Hash128.OfCanonical($"parquet/column/{col}/v1");
     private static Hash128 ValueId(string col, string tok) => Hash128.OfCanonical($"parquet/value/{col}={tok}/v1");
 
-    protected override async IAsyncEnumerable<RowRecord> ExtractRecordsAsync(
-        string ecosystemPath, DecomposerOptions options,
-        [EnumeratorCancellation] CancellationToken ct)
+    protected override IReadOnlyList<(string Path, string Label)> ListFiles(
+        string ecosystemPath, DecomposerOptions options)
     {
         var files = SharedParquetRecordStream
             .EnumerateParquet(ecosystemPath, SearchOption.AllDirectories).ToList();
-        if (files.Count == 0)
-        {
-            if (Directory.Exists(ecosystemPath))
-                throw new InvalidOperationException(
-                    $"ParquetDecomposer: no *.parquet files under '{ecosystemPath}'");
-            yield break;
-        }
+        if (files.Count == 0 && Directory.Exists(ecosystemPath))
+            throw new InvalidOperationException(
+                $"ParquetDecomposer: no *.parquet files under '{ecosystemPath}'");
+        return files.Select((file, i) => (file, $"parquet/{i}/{Path.GetFileName(file)}")).ToList();
+    }
 
-        foreach (var file in files)
+    protected override async IAsyncEnumerable<RowRecord> ExtractFileAsync(
+        string filePath, string fileLabel, DecomposerOptions options,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        await foreach (var row in SharedParquetRecordStream.ReadGenericRowsAsync(filePath, ct))
         {
-            ct.ThrowIfCancellationRequested();
-            await foreach (var row in SharedParquetRecordStream.ReadGenericRowsAsync(file, ct))
+            var cells = new List<(string Column, string Value)>(row.Count);
+            foreach (var cell in row)
             {
-                var cells = new List<(string Column, string Value)>(row.Count);
-                foreach (var cell in row)
-                {
-                    string? tok = FormatCell(cell.Value);
-                    if (tok is null) continue;
-                    cells.Add((cell.Column, tok));
-                }
-                if (cells.Count == 0) continue;
-                yield return new RowRecord(cells);
+                string? tok = FormatCell(cell.Value);
+                if (tok is null) continue;
+                cells.Add((cell.Column, tok));
             }
+            if (cells.Count == 0) continue;
+            yield return new RowRecord(cells);
         }
     }
 
@@ -93,7 +90,6 @@ public sealed class ParquetDecomposer : ComposeDecomposer<ParquetDecomposer.RowR
 
     private void EnsureColumn(SubstrateChangeBuilder b, string col)
     {
-        if (!_stagedColumns.Add(col)) return;
         b.AddEntity(new EntityRow(ColumnId(col), EntityTier.Word, ColumnTypeId, Source));
         _canonicalNames.Add($"parquet/column/{col}/v1");
         if (ContentEmitter.Emit(b, col, Source) is { } colNameId)
@@ -101,9 +97,27 @@ public sealed class ParquetDecomposer : ComposeDecomposer<ParquetDecomposer.RowR
                 ColumnId(col), "IS_INSTANCE_OF", colNameId, Source, TC.StructuredCorpus));
     }
 
-    public override Task<long?> EstimateUnitCountAsync(
-        IDecomposerContext context, CancellationToken ct = default)
-        => Task.FromResult<long?>(null);
+    public async Task<IngestInventory?> DescribeInputAsync(
+        IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
+    {
+        var files = SharedParquetRecordStream
+            .EnumerateParquet(context.EcosystemPath, SearchOption.AllDirectories).ToList();
+        if (files.Count == 0) return null;
+        var specs = new List<IngestFileSpec>(files.Count);
+        long total = 0;
+        foreach (var file in files)
+        {
+            long rows = await SharedParquetRecordStream.CountRowsAsync(file, ct);
+            specs.Add(new IngestFileSpec(Path.GetFileName(file), file, rows));
+            total += rows;
+        }
+        if (options.MaxInputUnits > 0) total = Math.Min(total, options.MaxInputUnits);
+        return new IngestInventory("rows", total, specs, TracksFileCompletion: true);
+    }
+
+    public override async Task<long?> EstimateUnitCountAsync(
+        IDecomposerContext context, CancellationToken ct = default) =>
+        (await DescribeInputAsync(context, DecomposerOptions.Default, ct))?.TotalInputUnits;
 
     /// <summary>
     /// Normalize a native Parquet cell value to its canonical token, or null when the

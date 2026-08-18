@@ -7,7 +7,7 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Code;
 
-public sealed class CodeDecomposer : GrammarComposeDecomposer<CodeSource, FullScope>
+public sealed class CodeDecomposer : GrammarComposeDecomposerMultiFile<CodeSource, FullScope>, IIngestInventoryProvider
 {
     private static readonly HashSet<string> TemplateSuffixes =
         new(StringComparer.OrdinalIgnoreCase) { ".in" };
@@ -19,27 +19,50 @@ public sealed class CodeDecomposer : GrammarComposeDecomposer<CodeSource, FullSc
     protected override double SourceTrust => TC.StructuredCorpus;
     protected override string BatchLabelPrefix => "code";
 
-    protected override async IAsyncEnumerable<GrammarComposeRecord> ExtractRecordsAsync(
-        string ecosystemPath, DecomposerOptions options,
+    public override bool PerFileCompletion => true;
+
+    protected override IReadOnlyList<(string Path, string Label)> ListFiles(
+        string ecosystemPath, DecomposerOptions options)
+    {
+        bool rootIsFile = File.Exists(ecosystemPath);
+        return EnumerateCodeFiles(ecosystemPath)
+            .Select(x =>
+            {
+                string rel = rootIsFile
+                    ? Path.GetFileName(x.File)
+                    : Path.GetRelativePath(ecosystemPath, x.File).Replace('\\', '/');
+                return (x.File, $"code/{rel}");
+            })
+            .ToList();
+    }
+
+    protected override async IAsyncEnumerable<GrammarComposeRecord> ExtractFileAsync(
+        string filePath, string fileLabel, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        var files = EnumerateCodeFiles(ecosystemPath).ToList();
-        foreach (var (file, modality) in files)
+        string? modality = ModalityOf(filePath);
+        if (modality is null) yield break;
+        byte[] bytes;
+        try { bytes = await File.ReadAllBytesAsync(filePath, ct); }
+        catch (Exception ex)
         {
-            ct.ThrowIfCancellationRequested();
-            byte[] bytes;
-            try { bytes = await File.ReadAllBytesAsync(file, ct); }
-            catch (Exception ex)
-            {
-                throw new InvalidOperationException($"CodeDecomposer: failed to read '{file}': {ex.Message}", ex);
-            }
-            if (bytes.Length == 0) continue;
-            yield return new GrammarComposeRecord(bytes, modality);
+            throw new InvalidOperationException(
+                $"CodeDecomposer: failed to read '{filePath}': {ex.Message}", ex);
         }
+        if (bytes.Length == 0) yield break;
+        yield return new GrammarComposeRecord(bytes, modality, SourceId: FileEntity.SourceId(bytes));
     }
 
     public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
         => Task.FromResult<long?>(EnumerateCodeFiles(context.EcosystemPath).Count());
+
+    public Task<IngestInventory?> DescribeInputAsync(
+        IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
+    {
+        var paths = EnumerateCodeFiles(context.EcosystemPath).Select(x => x.File).ToList();
+        return Task.FromResult(IngestInventory.FromFileUnits(
+            "source files", paths, options.MaxInputUnits, tracksFileCompletion: true));
+    }
 
     private static IEnumerable<(string File, string Modality)> EnumerateCodeFiles(string root)
     {

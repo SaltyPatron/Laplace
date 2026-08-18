@@ -30,7 +30,7 @@ public sealed class TatoebaDecomposer : DecomposerMultiPhase<TatoebaSource, Full
 
     public override int LayerOrder => 2;
 
-    private HashSet<long>? _allowedSentenceIds;
+    private ConcurrentDictionary<long, byte>? _allowedSentenceIds;
 
     protected override ConcurrentDictionary<string, byte>? VocabularyReadback => LanguageNames;
 
@@ -45,7 +45,9 @@ public sealed class TatoebaDecomposer : DecomposerMultiPhase<TatoebaSource, Full
         IDecomposerContext context, DecomposerOptions options,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
-        _allowedSentenceIds = options.Languages?.IsActive == true ? new HashSet<long>() : null;
+        _allowedSentenceIds = options.Languages?.IsActive == true
+            ? new ConcurrentDictionary<long, byte>()
+            : null;
 
         await foreach (var c in RunPhaseAsync(
                            new TatoebaSentencePhase(_ids, _allowedSentenceIds), context, options, ct))

@@ -72,15 +72,6 @@ public sealed class DecomposerArchitectureGateTests
         "Laplace.Decomposers/Model/ModelTokenEdgeETL.cs",
         // Catalog-dual Syzygy unpack: bounded board/product channels into Compose.
         "Laplace.Chess/Service/SyzygyTableUnpack.cs",
-        // Reviewed 2026-08-04: PGN throughput lane. Two bounded channels, each a
-        // single-reader fan-in so the async-enumerator contract the runner depends on
-        // is preserved: game text -> full parse, and game text -> ChessPlayingPeek for
-        // the novelty gate (headers + movetext id only, so a re-ingest pays a peek
-        // instead of a full parse per already-present playing). Widths derive from the
-        // machine (workers * 8), not a tuned constant. The work is CPU-bound parsing
-        // ahead of Compose, not substrate I/O — the spine still owns batching, dedup,
-        // descent, fold and COPY. Migrates to the spine with the other three.
-        "Laplace.Chess/Service/ChessPgnDecomposer.cs",
     };
 
     private static readonly Regex ResolveFileWorkersCall = new(
@@ -790,6 +781,41 @@ public sealed class DecomposerArchitectureGateTests
         Assert.True(violations.Count == 0,
             "Production decomposers must not implement IDecomposer directly:\n"
             + string.Join("\n", violations));
+    }
+
+    [Fact]
+    public void GenericDecomposer_OwnsTheOnlyProductionDriver()
+    {
+        var driver = typeof(Decomposer<>).GetMethod(nameof(IDecomposer.DecomposeAsync));
+        Assert.NotNull(driver);
+        // Interface implementations are emitted as virtual/final in IL even when the
+        // C# method is not virtual. Final is the part that prevents vendor replacement.
+        Assert.True(driver.IsFinal,
+            "vendor decomposers must not replace the generic single/multi-file driver");
+    }
+
+    [Fact]
+    public void RuntimeEtl_UsesTheGenericMultiFileVendorContract()
+    {
+        Assert.True(typeof(EtlDecomposer).IsSubclassOf(
+            typeof(DecomposerMultiFile<GrammarIngestRecord>)));
+        Assert.False(typeof(DecomposerMultiPhase).IsAssignableFrom(typeof(EtlDecomposer)));
+    }
+
+    [Fact]
+    public void ProductionHotPath_DoesNotCallTheNativeNoOpContentReset()
+    {
+        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
+        var substrate = Path.Combine(repoRoot, "app", "Laplace.Substrate");
+        var violations = Directory.EnumerateFiles(substrate, "*.cs", SearchOption.AllDirectories)
+            .Where(file => !file.Contains($"{Path.DirectorySeparatorChar}Tests{Path.DirectorySeparatorChar}"))
+            .Where(file => !file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"))
+            .Where(file => !file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}"))
+            .Where(file => File.ReadAllText(file).Contains("IntentStage.ResetContentBank", StringComparison.Ordinal))
+            .Select(file => Path.GetRelativePath(repoRoot, file))
+            .ToList();
+
+        Assert.Empty(violations);
     }
 
     [Fact]

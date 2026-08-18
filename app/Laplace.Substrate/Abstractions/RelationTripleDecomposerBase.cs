@@ -66,7 +66,7 @@ public abstract class RelationTripleMultiFileDecomposerBase<TSource, TScope>
     public override bool PerFileCompletion => true;
 
     protected sealed override IIngestRecordHandler<RelationTripleRecord> CreateHandlerForFile(
-        string fileLabel) =>
+        string fileLabel, DecomposerOptions options) =>
         new RelationTripleHandler(SourceId, SourceTrust);
 
     protected sealed override IngestBatchConfig ConfigForFile(

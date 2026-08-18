@@ -18,15 +18,12 @@ public sealed class DocumentDecomposer : DecomposerMultiFile<ContentIngestRecord
     // all-or-nothing source-level marker — new files in a completed directory just work.
     public override bool PerFileCompletion => true;
 
-    private bool _reObservePresent;
-
     public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
         => context.Writer.ApplyAsync(UserPromptContent.BuildBootstrapChange(), ct);
 
     protected override IReadOnlyList<(string Path, string Label)> ListFiles(
         string ecosystemPath, DecomposerOptions options)
     {
-        _reObservePresent = options.ReObservePresent;
         bool rootIsFile = File.Exists(ecosystemPath);
         return EnumerateInputFiles(ecosystemPath).Select(f =>
         {
@@ -46,8 +43,9 @@ public sealed class DocumentDecomposer : DecomposerMultiFile<ContentIngestRecord
         return DocumentFileExtract.OpenAsync(filePath, rel, ct);
     }
 
-    protected override IIngestRecordHandler<ContentIngestRecord> CreateHandlerForFile(string fileLabel) =>
-        new DocumentIngestHandler(LayerOrder) { IgnoreCompletedFiles = _reObservePresent };
+    protected override IIngestRecordHandler<ContentIngestRecord> CreateHandlerForFile(
+        string fileLabel, DecomposerOptions options) =>
+        new DocumentIngestHandler(LayerOrder) { IgnoreCompletedFiles = options.ReObservePresent };
 
     protected override IngestBatchConfig ConfigForFile(
         string fileLabel, ISubstrateReader? reader, DecomposerOptions options)

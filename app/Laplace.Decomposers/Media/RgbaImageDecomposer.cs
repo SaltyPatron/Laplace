@@ -15,8 +15,6 @@ namespace Laplace.Decomposers.Media;
 public sealed class RgbaImageDecomposer
     : DecomposerMultiFile<ImageIngestRecord, RgbaImageSource, FullScope>, IIngestInventoryProvider
 {
-    private bool _reObservePresent;
-
     public override int LayerOrder => 2;
     protected override double SourceTrust => TC.StructuredCorpus;
     public override bool PerFileCompletion => true;
@@ -24,7 +22,6 @@ public sealed class RgbaImageDecomposer
     protected override IReadOnlyList<(string Path, string Label)> ListFiles(
         string ecosystemPath, DecomposerOptions options)
     {
-        _reObservePresent = options.ReObservePresent;
         bool rootIsFile = File.Exists(ecosystemPath);
         return EnumerateInputFiles(ecosystemPath).Select(f =>
         {
@@ -55,8 +52,9 @@ public sealed class RgbaImageDecomposer
             rgba, w, h, root.Value, FileMetadata.FromPath(filePath, rel));
     }
 
-    protected override IIngestRecordHandler<ImageIngestRecord> CreateHandlerForFile(string fileLabel) =>
-        new ImageIngestHandler(SourceId, LayerOrder) { IgnoreCompletedFiles = _reObservePresent };
+    protected override IIngestRecordHandler<ImageIngestRecord> CreateHandlerForFile(
+        string fileLabel, DecomposerOptions options) =>
+        new ImageIngestHandler(SourceId, LayerOrder) { IgnoreCompletedFiles = options.ReObservePresent };
 
     protected override IngestBatchConfig ConfigForFile(
         string fileLabel, ISubstrateReader? reader, DecomposerOptions options)

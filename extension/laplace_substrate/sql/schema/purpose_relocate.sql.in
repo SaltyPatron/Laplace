@@ -191,6 +191,7 @@ BEGIN
             ('index_usage_report', 'ops', 'index_usage_report'),
             ('infer', 'converse', 'infer'),
             ('ingest_run_close', 'ops', 'ingest_run_close'),
+            ('ingest_files', 'ops', 'ingest_files'),
             ('ingest_runs', 'ops', 'ingest_runs'),
             ('is_all_whitespace', 'realize', 'is_all_whitespace'),
             ('isa_path', 'converse', 'isa_path'),

@@ -251,7 +251,12 @@ public sealed class PropBankDecomposerTests
             var ctx = new FakeContext(new NullWriter()) { EcosystemPath = dir };
             var atts = new List<AttestationRow>();
             await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
+            {
+                if (change.Metadata.SourceContentUnitName.StartsWith(
+                        IngestBatchPipeline.PeriodBoundaryUnitPrefix, StringComparison.Ordinal))
+                    continue;
                 atts.AddRange(change.Attestations.ToArray());
+            }
             return atts;
         }
         finally { try { Directory.Delete(dir, recursive: true); } catch { } }

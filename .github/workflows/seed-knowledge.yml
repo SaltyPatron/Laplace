@@ -32,6 +32,14 @@ on:
         description: "re-ingest and prove no double-count"
         type: boolean
         default: false
+      evict_before_ingest:
+        description: "DESTRUCTIVE: lawfully retract this source's testimony before ingesting it again"
+        type: boolean
+        default: false
+      evict_confirm:
+        description: "when evicting, type the exact decomposer source name (for ud: UDDecomposer)"
+        type: string
+        default: ""
       index_cycle_defer:
         description: >-
           Campaign participation ONLY — default false. Set when a fresh-full-build campaign
@@ -57,3 +65,5 @@ jobs:
       run_gate: true
       run_idempotency: ${{ inputs.run_idempotency }}
       index_cycle_defer: ${{ inputs.index_cycle_defer }}
+      evict_before_ingest: ${{ inputs.evict_before_ingest }}
+      evict_confirm: ${{ inputs.evict_confirm }}

@@ -8,7 +8,7 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Code;
 
-public sealed class TinyCodesDecomposer : GrammarComposeDecomposer<TinyCodesSource, FullScope>, IIngestInventoryProvider
+public sealed class TinyCodesDecomposer : GrammarComposeDecomposerMultiFile<TinyCodesSource, FullScope>, IIngestInventoryProvider
 {
     public static readonly Hash128 Source = TinyCodesSource.SourceId;
     public static readonly Hash128 TrustClass = TinyCodesSource.TrustClass;
@@ -42,44 +42,44 @@ public sealed class TinyCodesDecomposer : GrammarComposeDecomposer<TinyCodesSour
 
     protected override ConcurrentDictionary<string, byte>? VocabularyReadback => _canonicalNames;
 
-    protected override async IAsyncEnumerable<GrammarComposeRecord> ExtractRecordsAsync(
-        string ecosystemPath, DecomposerOptions options,
+    protected override IReadOnlyList<(string Path, string Label)> ListFiles(
+        string ecosystemPath, DecomposerOptions options)
+    {
+        var files = SharedParquetRecordStream
+            .EnumerateParquet(ecosystemPath, SearchOption.TopDirectoryOnly).ToList();
+        if (files.Count == 0 && Directory.Exists(ecosystemPath))
+            throw new InvalidOperationException(
+                $"TinyCodesDecomposer: no *.parquet files under '{ecosystemPath}' "
+                + "(expected top-level shards from download-code-data.cmd)");
+        return files.Select((file, i) => (file, $"tiny-codes/{i}/{Path.GetFileName(file)}")).ToList();
+    }
+
+    protected override async IAsyncEnumerable<GrammarComposeRecord> ExtractFileAsync(
+        string filePath, string fileLabel, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        var files = SharedParquetRecordStream.EnumerateParquet(ecosystemPath, SearchOption.TopDirectoryOnly).ToList();
-        if (files.Count == 0)
+        await foreach (var (conceptKey, lang, prompt, response) in
+                       SharedParquetRecordStream.ReadTinyCodesRowsAsync(filePath, ct))
         {
-            if (Directory.Exists(ecosystemPath))
-                throw new InvalidOperationException(
-                    $"TinyCodesDecomposer: no *.parquet files under '{ecosystemPath}' "
-                    + "(expected top-level shards from download-code-data.cmd)");
-            yield break;
-        }
+            ct.ThrowIfCancellationRequested();
+            if (string.IsNullOrWhiteSpace(response)) continue;
 
-        foreach (var file in files)
-        {
-            await foreach (var (conceptKey, lang, prompt, response) in SharedParquetRecordStream.ReadTinyCodesRowsAsync(file, ct))
-            {
-                ct.ThrowIfCancellationRequested();
-                if (string.IsNullOrWhiteSpace(response)) continue;
+            string? modality = ResolveModality(lang);
+            if (modality is null) continue;
 
-                string? modality = ResolveModality(lang);
-                if (modality is null) continue;
+            byte[] codeBytes = Encoding.UTF8.GetBytes(response);
+            if (codeBytes.Length == 0) continue;
 
-                byte[] codeBytes = Encoding.UTF8.GetBytes(response);
-                if (codeBytes.Length == 0) continue;
+            IReadOnlyList<string>? keywords = string.IsNullOrWhiteSpace(prompt)
+                ? null
+                : ExtractKeywords(prompt).ToList();
 
-                IReadOnlyList<string>? keywords = string.IsNullOrWhiteSpace(prompt)
-                    ? null
-                    : ExtractKeywords(prompt).ToList();
-
-                yield return new GrammarComposeRecord(
-                    codeBytes,
-                    modality,
-                    ConceptAnchorKey: string.IsNullOrEmpty(conceptKey) ? null : conceptKey,
-                    ConceptCategoryTypeId: CodeConceptTypeId,
-                    KeywordExamples: keywords);
-            }
+            yield return new GrammarComposeRecord(
+                codeBytes,
+                modality,
+                ConceptAnchorKey: string.IsNullOrEmpty(conceptKey) ? null : conceptKey,
+                ConceptCategoryTypeId: CodeConceptTypeId,
+                KeywordExamples: keywords);
         }
     }
 
@@ -104,7 +104,7 @@ public sealed class TinyCodesDecomposer : GrammarComposeDecomposer<TinyCodesSour
             total += n;
         }
         if (options.MaxInputUnits > 0) total = Math.Min(total, options.MaxInputUnits);
-        return new IngestInventory("rows", total, specs);
+        return new IngestInventory("rows", total, specs, TracksFileCompletion: true);
     }
 
     public override async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)

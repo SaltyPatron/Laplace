@@ -45,7 +45,8 @@ public sealed class UDDecomposer : DecomposerMultiFile<UdIngestRecord, UDSource,
         }
     }
 
-    protected override IIngestRecordHandler<UdIngestRecord> CreateHandlerForFile(string fileLabel) =>
+    protected override IIngestRecordHandler<UdIngestRecord> CreateHandlerForFile(
+        string fileLabel, DecomposerOptions options) =>
         new UdIngestHandler(Source, _canonicalNames);
 
     protected override IngestBatchConfig ConfigForFile(

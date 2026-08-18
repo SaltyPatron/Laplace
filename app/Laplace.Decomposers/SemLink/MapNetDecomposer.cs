@@ -22,10 +22,10 @@ public sealed class MapNetDecomposer : DecomposerMultiFile<CategoryCorrespondenc
     protected override IReadOnlyList<(string Path, string Label)> ListFiles(
         string ecosystemPath, DecomposerOptions options) =>
         MapNetIngest.ResolvePaths(ecosystemPath)
-            .Select(p =>
+            .Select((p, i) =>
             {
                 var spec = MapNetIngest.DescribeFile(p);
-                return (spec.Path, spec.Label);
+                return (spec.Path, $"{spec.Label}/{i}/{Path.GetFileName(spec.Path)}");
             })
             .ToList();
 
@@ -40,7 +40,8 @@ public sealed class MapNetDecomposer : DecomposerMultiFile<CategoryCorrespondenc
             : MapNetIngest.EnumerateFrameRecordsAsync(filePath, 0, ct);
     }
 
-    protected override IIngestRecordHandler<CategoryCorrespondenceRecord> CreateHandlerForFile(string fileLabel) =>
+    protected override IIngestRecordHandler<CategoryCorrespondenceRecord> CreateHandlerForFile(
+        string fileLabel, DecomposerOptions options) =>
         new CategoryCorrespondenceHandler(Source, SourceTrust);
 
     protected override IngestBatchConfig ConfigForFile(

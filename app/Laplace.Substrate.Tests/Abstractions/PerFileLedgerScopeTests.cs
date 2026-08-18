@@ -15,8 +15,8 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 ///
 /// No test covered either call site, which is how a ledger that records nothing shipped
 /// and stayed silent. These pin the contract at the pipeline boundary — one OnFileStarted
-/// and one OnFileFinished per file, through the ambient scope, on both the sequential and
-/// the parallel path.
+/// and one OnFileComposed per file, through the ambient scope, on both the sequential and
+/// the parallel path. The runner emits OnFileFinished only after the file boundary applies.
 /// </summary>
 [Collection("GrammarPerfcache")]
 public sealed class PerFileLedgerScopeTests
@@ -55,16 +55,55 @@ public sealed class PerFileLedgerScopeTests
             obs.Started.OrderBy(x => x, StringComparer.Ordinal).ToArray());
         Assert.Equal(
             new[] { "ledger-a", "ledger-b" },
-            obs.Finished.OrderBy(x => x, StringComparer.Ordinal).ToArray());
+            obs.Composed.OrderBy(x => x, StringComparer.Ordinal).ToArray());
+        Assert.Empty(obs.Finished);
         Assert.All(obs.SourceNames, s => Assert.Equal("LedgerTest", s));
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task MultiFile_ComposedEvent_PrecedesBoundaryVisibility(int fileWorkers)
+    {
+        var files = new Dictionary<string, IReadOnlyList<ContentIngestRecord>>
+        {
+            ["ledger-order"] = [ContentRecord("ledger order")],
+        };
+        var obs = new RecordingObservability();
+
+        using (IngestObservabilityScope.Begin(obs, "LedgerTest"))
+        {
+            await foreach (var change in IngestBatchPipeline.RunMultiFileAsync(
+                new LabeledContentMultiFileStream(files),
+                _ => new ContentIngestHandler(TestSource),
+                label => new IngestBatchConfig
+                {
+                    SourceId = TestSource,
+                    BatchLabelPrefix = $"ledger/{label}",
+                    BatchSize = 8,
+                    ProbeChunkSize = 1024,
+                },
+                fileWorkers: fileWorkers))
+            {
+                if (change.Metadata.SourceContentUnitName.StartsWith(
+                        IngestBatchPipeline.PeriodBoundaryUnitPrefix, StringComparison.Ordinal))
+                    Assert.Contains("ledger-order", obs.ComposedSnapshot());
+            }
+        }
     }
 
     private sealed class RecordingObservability : IIngestObservability
     {
         private readonly object _gate = new();
         public List<string> Started { get; } = [];
+        public List<string> Composed { get; } = [];
         public List<string> Finished { get; } = [];
         public List<string> SourceNames { get; } = [];
+
+        public string[] ComposedSnapshot()
+        {
+            lock (_gate) return Composed.ToArray();
+        }
 
         public void OnRunStart(string sourceName, int layerOrder, IngestInventory? inventory) { }
         public void OnIntentApplied(string sourceName, ApplyResult result) { }
@@ -76,10 +115,15 @@ public sealed class PerFileLedgerScopeTests
             lock (_gate) { Started.Add(fileLabel); SourceNames.Add(sourceName); }
         }
 
+        public void OnFileComposed(
+            string sourceName, string fileLabel, Laplace.Engine.Core.Hash128? fileId = null,
+            long records = 0, long entities = 0, long physicalities = 0, long attestations = 0)
+        {
+            lock (_gate) { Composed.Add(fileLabel); SourceNames.Add(sourceName); }
+        }
+
         public void OnFileFinished(
-            string sourceName, string fileLabel, string status,
-            long records = 0, long entities = 0, long physicalities = 0, long attestations = 0,
-            string? error = null)
+            string sourceName, string fileLabel, string status, string? error = null)
         {
             lock (_gate) { Finished.Add(fileLabel); SourceNames.Add(sourceName); }
         }

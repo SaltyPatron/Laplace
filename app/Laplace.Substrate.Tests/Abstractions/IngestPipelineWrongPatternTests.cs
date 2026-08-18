@@ -96,7 +96,7 @@ public sealed class IngestPipelineWrongPatternTests
     {
         public string EcosystemPath => "";
         public ISubstrateWriter Writer => writer;
-        public ISubstrateReader Reader => throw new NotSupportedException();
+        public ISubstrateReader Reader => IngestBatchPipeline.AllAbsentSubstrateReader.Instance;
         public Microsoft.Extensions.Logging.ILogger Logger =>
             Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
         public string SubstrateVersion => "test";

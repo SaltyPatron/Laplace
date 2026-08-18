@@ -192,7 +192,6 @@ public static class GrammarComposeIngestSupport
             BatchSize = ws.Batch,
             ProbeChunkSize = Math.Clamp(ws.ProbeChunk, 64, 1024),
             ContainmentReader = reader,
-            EnableDeferredContentOnBuilder = false,
             EntityCapacity = ws.Batch * 8,
             PhysicalityCapacity = ws.Batch * 8,
             AttestationCapacity = ws.Batch * 16,
