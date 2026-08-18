@@ -32,6 +32,13 @@ public class PgTuningParityTests
         return File.ReadAllText(path);
     }
 
+    private static string BootstrapScript()
+    {
+        var path = Path.Combine(TypeIdLawTests.FindRepoRootPublic(), "scripts", "bootstrap-laplace-runner.sh");
+        Assert.True(File.Exists(path), $"bootstrap-laplace-runner.sh not found at {path}");
+        return File.ReadAllText(path);
+    }
+
     /// <summary>
     /// The POLICY literals -- the ones that are not derived from RAM -- exist in TWO
     /// bodies, and only one of them ever runs. pg_apply_machine_tuning invokes
@@ -69,6 +76,35 @@ public class PgTuningParityTests
             $"{guc} diverged: emitter (AUTHORITATIVE) says '{em.Groups[1].Value}', shell "
             + $"{shellVar} says '{sm.Groups[1].Value}'. The emitter is what runs -- a value "
             + "changed only in the shell never reaches a cluster.");
+    }
+
+    /// <summary>
+    /// The host bootstrap sizes the dedicated WAL volume before the tuning script can
+    /// start PostgreSQL. It therefore carries the same max_wal_size target as a shell
+    /// integer. This was left at 32 after the emitter and tuning fallback moved to 96,
+    /// causing setup-host to demand 96 GiB FREE on the 128 GiB volume whose intended
+    /// steady state is 96 GiB WAL plus 32 GiB reserve. Pin the third policy consumer.
+    /// </summary>
+    [Fact]
+    public void BootstrapWalCapacity_MatchesTuningAndIncludesRecoveryReserve()
+    {
+        var tuning = Regex.Match(TuningScript(), @"^\s*PG_TUNE_MAX_WAL=(\d+)GB\s*$",
+            RegexOptions.Multiline);
+        Assert.True(tuning.Success, "PG_TUNE_MAX_WAL integer GiB literal not found");
+
+        var bootstrap = BootstrapScript();
+        var target = Regex.Match(bootstrap,
+            @"^LAPLACE_PG_MAX_WAL_GB=""\$\{LAPLACE_PG_MAX_WAL_GB:-(\d+)\}""$",
+            RegexOptions.Multiline);
+        var reserve = Regex.Match(bootstrap,
+            @"^LAPLACE_PG_WAL_RESERVE_GB=""\$\{LAPLACE_PG_WAL_RESERVE_GB:-(\d+)\}""$",
+            RegexOptions.Multiline);
+
+        Assert.True(target.Success, "bootstrap WAL target literal not found");
+        Assert.True(reserve.Success, "bootstrap WAL recovery reserve literal not found");
+        Assert.Equal(tuning.Groups[1].Value, target.Groups[1].Value);
+        Assert.True(int.Parse(reserve.Groups[1].Value, CultureInfo.InvariantCulture) > 0,
+            "dedicated WAL volume must reserve capacity beyond the soft max_wal_size target");
     }
 
     /// <summary>
