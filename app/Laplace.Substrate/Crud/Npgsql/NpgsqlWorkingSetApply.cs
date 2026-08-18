@@ -262,7 +262,11 @@ public sealed partial class NpgsqlSubstrateWriter
     }
 
     private async Task<(int e, int p, int a, long fold, long eSkip, long pSkip, int rt, bool journalHit)>
-        ApplyStagesCoreAsync(IReadOnlyList<IntentStage> stages, Hash128? workingSetToken, CancellationToken ct)
+        ApplyStagesCoreAsync(
+            IReadOnlyList<IntentStage> stages,
+            Hash128? workingSetToken,
+            Hash128? workingSetSource,
+            CancellationToken ct)
     {
         var prepSw = System.Diagnostics.Stopwatch.StartNew();
         var entBlobs = CollectBlobs(stages, IntentStageTable.Entities, 4, "entities");
@@ -405,10 +409,15 @@ public sealed partial class NpgsqlSubstrateWriter
                 await using var journal = conn.CreateCommand();
                 journal.Transaction = tx;
                 journal.CommandText =
-                    "INSERT INTO laplace.ingest_flush_journal (working_set_id) "
-                    + "VALUES ($1) ON CONFLICT (working_set_id) DO NOTHING";
+                    "INSERT INTO laplace.ingest_flush_journal (working_set_id, source_id) "
+                    + "VALUES ($1, $2) ON CONFLICT (working_set_id) DO NOTHING";
                 journal.Parameters.Add(new NpgsqlParameter
                 { Value = token.ToBytes(), NpgsqlDbType = NpgsqlDbType.Bytea });
+                journal.Parameters.Add(new NpgsqlParameter
+                {
+                    Value = workingSetSource is { } source ? source.ToBytes() : DBNull.Value,
+                    NpgsqlDbType = NpgsqlDbType.Bytea,
+                });
                 int claimed = await journal.ExecuteNonQueryAsync(ct);
                 rtJournal++;
                 if (claimed == 0)

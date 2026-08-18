@@ -17,6 +17,14 @@ public interface ISubstrateReader
 
     Task<bool> HasSourceCompletedAsync(Hash128 sourceId, int layerOrder, CancellationToken ct = default);
 
+    /// <summary>A per-file completion belongs to both the file identity and the
+    /// decomposer vendor. The legacy source-only marker cannot distinguish two vendor
+    /// implementations that consume identical bytes at the same layer.</summary>
+    Task<bool> HasFileCompletedAsync(
+        Hash128 fileId, Hash128 decomposerSourceId, int layerOrder,
+        CancellationToken ct = default) =>
+        HasSourceCompletedAsync(fileId, layerOrder, ct);
+
     /// <summary>
     /// Batched form of <see cref="HasSourceCompletedAsync"/>: returns the subset of
     /// <paramref name="sourceIds"/> that already carry the layer's completion marker.
@@ -48,6 +56,11 @@ public interface ISubstrateReader
                 done.Add(id);
         return done;
     }
+
+    Task<IReadOnlySet<Hash128>> HasFilesCompletedAsync(
+        IReadOnlyList<Hash128> fileIds, Hash128 decomposerSourceId, int layerOrder,
+        CancellationToken ct = default) =>
+        HasSourcesCompletedAsync(fileIds, layerOrder, ct);
 
     Task<long> CountEntitiesByTypeAsync(Hash128 typeId, CancellationToken ct = default);
 

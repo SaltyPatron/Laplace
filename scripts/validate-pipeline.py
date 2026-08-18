@@ -460,6 +460,20 @@ def main() -> int:
 
     errs.extend(validate_retired_workflows())
 
+    ingest_text = read_text(ingest_sh)
+    if "LAPLACE_INGEST_FORCE" not in ingest_text or "ingest_args+=(--force)" not in ingest_text:
+        errs.append(
+            "ingest-source.sh: must translate LAPLACE_INGEST_FORCE into the CLI --force flag"
+        )
+    ingest_workflow = read_text(ROOT / ".github" / "workflows" / "_ingest.yml")
+    if "LAPLACE_INGEST_FORCE: ${{ inputs.evict_before_ingest" not in ingest_workflow:
+        errs.append(
+            "_ingest.yml: evict_before_ingest must force the replacement observation"
+        )
+    for receipt in ("file checkpoint(s)", "replay claim(s)"):
+        if receipt not in ingest_workflow:
+            errs.append(f"_ingest.yml: eviction receipt missing {receipt}")
+
     if not pipeline_sh.is_file():
         errs.append("missing canonical orchestrator: scripts/pipeline.sh")
     elif "ensure-foundation.sh" not in read_text(pipeline_sh):

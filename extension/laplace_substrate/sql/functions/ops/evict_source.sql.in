@@ -73,6 +73,8 @@ DECLARE
     refold_total   bigint := 0;
     culled_total   bigint := 0;
     marker_total   bigint := 0;
+    file_marker_total bigint := 0;
+    replay_total   bigint := 0;
     t0             timestamptz := clock_timestamp();
 BEGIN
     -- Plain TEMP table (per-batch COMMIT would drop ON COMMIT DROP); TRUNCATE per
@@ -83,6 +85,25 @@ BEGIN
         object_id  bytea,
         UNIQUE NULLS NOT DISTINCT (subject_id, object_id));
     TRUNCATE _evict_cells;
+
+    -- File checkpoints are keyed by file identity, not the decomposer source. The
+    -- ingest journals are the ownership edge source eviction uses to find them.
+    -- context_id is the vendor owner on new markers; NULL admits legacy markers.
+    CREATE TEMP TABLE IF NOT EXISTS _evict_file_markers (
+        file_source_id bytea NOT NULL,
+        marker_type_id bytea NOT NULL,
+        owner_source_id bytea NOT NULL,
+        PRIMARY KEY (file_source_id, marker_type_id, owner_source_id));
+    TRUNCATE _evict_file_markers;
+    INSERT INTO _evict_file_markers
+        (file_source_id, marker_type_id, owner_source_id)
+    SELECT DISTINCT f.file_id,
+           realize.canonical_id(
+               'substrate/type/HasLayerCompleted/' || r.layer::text || '/v1'),
+           r.source_id
+    FROM laplace.ingest_run_journal r
+    JOIN laplace.ingest_file_journal f ON f.run_id = r.run_id
+    WHERE r.source_id = p_source AND f.file_id IS NOT NULL;
 
     IF p_relations IS NOT NULL THEN
         rels := p_relations;
@@ -226,6 +247,39 @@ BEGIN
         END LOOP;
     END LOOP;
 
+    -- Per-file completion attestations are ops markers and never enter consensus, so
+    -- retracting them needs no refold. The literal type keeps LIST pruning intact.
+    FOR rel IN SELECT DISTINCT marker_type_id FROM _evict_file_markers LOOP
+        LOOP
+            EXECUTE format($q$
+                WITH pick AS (
+                    SELECT a.id, a.subject_id
+                    FROM laplace.attestations a
+                    JOIN _evict_file_markers m
+                      ON m.marker_type_id = %L::bytea
+                     AND m.file_source_id = a.source_id
+                     AND (a.context_id = m.owner_source_id OR a.context_id IS NULL)
+                    WHERE a.type_id = %L::bytea
+                    LIMIT %s),
+                del AS (
+                    DELETE FROM laplace.attestations a
+                    USING pick
+                    WHERE a.type_id = %L::bytea
+                      AND a.id = pick.id AND a.subject_id = pick.subject_id
+                    RETURNING 1)
+                SELECT count(*) FROM del
+            $q$, rel, rel, p_batch, rel)
+            INTO n;
+
+            EXIT WHEN n = 0;
+            file_marker_total := file_marker_total + n;
+            RAISE LOG 'evict_source: % file checkpoint(s) deleted (running %) — %s elapsed',
+                n, file_marker_total,
+                round(extract(epoch FROM clock_timestamp() - t0)::numeric, 1);
+            COMMIT;
+        END LOOP;
+    END LOOP;
+
     -- (e) marker entities: the lane's derivation gates. Deleting them re-opens every
     -- unit for the hydrator's bitmap probe. first_observed_by scopes to this source;
     -- p_marker_types scopes to gate entities only — content entities never qualify.
@@ -257,15 +311,24 @@ BEGIN
         END LOOP;
     END IF;
 
+    -- Replay claims are applied source state. Keeping them after retraction makes a
+    -- deterministic re-derive silently no-op. Historical NULL-owned rows cannot be
+    -- attributed safely and intentionally remain untouched.
+    DELETE FROM laplace.ingest_flush_journal WHERE source_id = p_source;
+    GET DIAGNOSTICS replay_total = ROW_COUNT;
+    IF replay_total > 0 THEN COMMIT; END IF;
+
     -- (d) drain the mask-repair queue through the existing machinery (refresh
     -- recomputes from scratch and can CLEAR bits deposit could only OR on).
     IF p_drain THEN
         CALL laplace.highway_mask_drain(p_batch);
     END IF;
 
-    RAISE LOG 'evict_source: done — source %: % evidence row(s) deleted, % cell(s) refolded, % cell(s) culled, % marker(s) removed in %s',
+    RAISE LOG 'evict_source: done — source %: % evidence row(s) deleted, % cell(s) refolded, % cell(s) culled, % marker(s) removed, % file checkpoint(s) removed, % replay claim(s) removed in %s',
         encode(p_source, 'hex'), evidence_total, refold_total, culled_total,
-        marker_total, round(extract(epoch FROM clock_timestamp() - t0)::numeric, 1);
+        marker_total, file_marker_total, replay_total,
+        round(extract(epoch FROM clock_timestamp() - t0)::numeric, 1);
 
     DROP TABLE _evict_cells;
+    DROP TABLE _evict_file_markers;
 END $$;

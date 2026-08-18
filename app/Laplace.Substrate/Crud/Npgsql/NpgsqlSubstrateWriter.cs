@@ -54,6 +54,17 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
         if (changes.Count == 0)
             return new ApplyResult(0, 0, 0, 0, 0, 0, 0, sw.Elapsed, false);
 
+        Hash128? workingSetSource = null;
+        if (workingSetToken is not null)
+        {
+            workingSetSource = changes[0].Metadata.SourceId;
+            for (int i = 1; i < changes.Count; i++)
+                if (changes[i].Metadata.SourceId != workingSetSource.Value)
+                    throw new InvalidOperationException(
+                        "one working-set apply cannot mix decomposer sources; replay ownership "
+                        + "and source eviction require a single vendor source boundary");
+        }
+
 
 
 
@@ -176,7 +187,8 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
         {
             if (anyRows)
             {
-                var r = await ApplyStagesCoreAsync(sourceStages, workingSetToken, ct);
+                var r = await ApplyStagesCoreAsync(
+                    sourceStages, workingSetToken, workingSetSource, ct);
                 entitiesInserted = r.e;
                 physicalitiesInserted = r.p;
                 attestationsInserted = r.a;

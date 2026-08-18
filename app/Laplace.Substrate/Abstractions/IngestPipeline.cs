@@ -303,7 +303,8 @@ public static class IngestBatchPipeline
     public readonly record struct PerFileResumePlan(
         ISubstrateReader Reader,
         int LayerOrder,
-        bool IgnoreCompletedFiles)
+        bool IgnoreCompletedFiles,
+        Hash128 DecomposerSourceId = default)
     {
         /// <summary>
         /// Dispatcher-resolved (identity, already-complete) per file path, filled a chunk
@@ -404,7 +405,8 @@ public static class IngestBatchPipeline
         var builder = new SubstrateChangeBuilder(
             sourceId, $"{PeriodBoundaryUnitPrefix}{fileLabel}", null,
             entityCapacity: 1, physicalityCapacity: 0, attestationCapacity: 1);
-        Laplace.Ingestion.LayerCompletion.EmitFileMarker(builder, fileRoot, layerOrder);
+        Laplace.Ingestion.LayerCompletion.EmitFileMarker(
+            builder, fileRoot, sourceId, layerOrder);
         return builder.Build();
     }
 
@@ -607,8 +609,10 @@ public static class IngestBatchPipeline
         Hash128? root = TryResolveFileIdentity(filePath);
         if (root is not { } r) return (null, false);
         if (plan.IgnoreCompletedFiles) return (r, false); // --force: re-observe, still re-mark
-        bool done = await plan.Reader.HasSourceCompletedAsync(r, plan.LayerOrder, ct)
-            .ConfigureAwait(false);
+        bool done = plan.DecomposerSourceId == default
+            ? await plan.Reader.HasSourceCompletedAsync(r, plan.LayerOrder, ct).ConfigureAwait(false)
+            : await plan.Reader.HasFileCompletedAsync(
+                r, plan.DecomposerSourceId, plan.LayerOrder, ct).ConfigureAwait(false);
         return (r, done);
     }
 
@@ -821,8 +825,12 @@ public static class IngestBatchPipeline
                 var probe = new List<Hash128>(paths.Length);
                 foreach (var r in roots) if (r is { } v) probe.Add(v);
                 var done = probe.Count > 0
-                    ? await plan.Reader.HasSourcesCompletedAsync(probe, plan.LayerOrder, ct)
-                        .ConfigureAwait(false)
+                    ? plan.DecomposerSourceId == default
+                        ? await plan.Reader.HasSourcesCompletedAsync(probe, plan.LayerOrder, ct)
+                            .ConfigureAwait(false)
+                        : await plan.Reader.HasFilesCompletedAsync(
+                            probe, plan.DecomposerSourceId, plan.LayerOrder, ct)
+                            .ConfigureAwait(false)
                     : (IReadOnlySet<Hash128>)new HashSet<Hash128>();
 
                 for (int i = 0; i < paths.Length; i++)

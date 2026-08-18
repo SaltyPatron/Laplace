@@ -5,5 +5,17 @@
 -- (attestation count merges) that would otherwise double-apply.
 CREATE TABLE IF NOT EXISTS ingest_flush_journal (
     working_set_id  bytea        PRIMARY KEY CHECK (octet_length(working_set_id) = 16),
+    source_id       bytea        CHECK (source_id IS NULL OR octet_length(source_id) = 16),
     applied_at      timestamptz  NOT NULL DEFAULT now()
 );
+
+-- Existing installations predate source ownership. Those historical NULL rows stay
+-- conservative (they cannot be attributed safely); every new working set records the
+-- decomposer source so source eviction can retract its replay claims along with its data.
+ALTER TABLE ingest_flush_journal
+    ADD COLUMN IF NOT EXISTS source_id bytea
+    CHECK (source_id IS NULL OR octet_length(source_id) = 16);
+
+CREATE INDEX IF NOT EXISTS ingest_flush_journal_source
+    ON ingest_flush_journal (source_id)
+    WHERE source_id IS NOT NULL;

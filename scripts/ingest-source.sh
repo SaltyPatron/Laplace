@@ -58,11 +58,15 @@ build_cli() {
 # INGEST_TIMING is machine-readable on purpose: it is what a throughput baseline parses.
 ingest() {
     local t0=$SECONDS rc=0 t0_epoch preempted=0
+    local -a ingest_args=("$@")
+    if [[ "${LAPLACE_INGEST_FORCE:-0}" == "1" ]]; then
+        ingest_args+=(--force)
+    fi
     t0_epoch=$(date +%s)
     local detail="${LOGDIR:-}/laplace-ingest-${source}.log"
     if [[ -n "${GITHUB_ACTIONS:-}" && -n "${LOGDIR:-}" ]]; then
         # Job log: timing + journal. Full stderr → file on the runner.
-        ( cd "$ROOT/app" && dotnet "$DLL" ingest "$@" ) >"$detail" 2>&1 || rc=$?
+        ( cd "$ROOT/app" && dotnet "$DLL" ingest "${ingest_args[@]}" ) >"$detail" 2>&1 || rc=$?
         if [[ "$rc" -ne 0 ]]; then
             # PREEMPTION IS NOT FAILURE (#S5). .github/workflows/laplace.yml:17-19 states that rebuilds
             # preempt seeds BY DESIGN and that seed steps are idempotent/resumable, so
@@ -85,7 +89,7 @@ ingest() {
             fi
         fi
     else
-        ( cd "$ROOT/app" && dotnet "$DLL" ingest "$@" ) || rc=$?
+        ( cd "$ROOT/app" && dotnet "$DLL" ingest "${ingest_args[@]}" ) || rc=$?
     fi
     local elapsed=$((SECONDS - t0))
     echo "INGEST_TIMING ${TIMING_LABEL:-source=$source} elapsed_s=$elapsed rc=$rc"
