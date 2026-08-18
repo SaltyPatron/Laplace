@@ -377,7 +377,8 @@ public abstract class DecomposerMultiFile<TRecord> : Decomposer<TRecord>
                     $"{GetType().Name} returned duplicate multi-file job label '{label}'. "
                     + "File labels are journal identities and must be unique within a run.");
         }
-        return new PathListMultiFileStream<TRecord>(files, ExtractFileAsync, options);
+        var scheduled = MultiFileScheduler.Schedule(files, options.MaxInputUnits);
+        return new PathListMultiFileStream<TRecord>(scheduled, ExtractFileAsync, options);
     }
 
     protected abstract override IIngestRecordHandler<TRecord> CreateHandlerForFile(

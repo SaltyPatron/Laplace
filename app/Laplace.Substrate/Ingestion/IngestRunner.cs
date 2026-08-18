@@ -261,12 +261,17 @@ public sealed class IngestRunner
             IngestSizing.ResolveWorkingSetFlushEnvelopeBytes(),
             Laplace.Decomposers.Abstractions.WorkingSetMode.BudgetBytes);
 
-        // High compose-unit sources close compose often. Re-coalescing all the way
-        // to applyEnvelope rebuilt ~0.8M-id verifies; committing every single close
-        // paid ~1.3–2.5s verify fixed cost per ~500–2k input records (~100/s).
-        // Coalesce a few closes, hard-cap rows so the mega-flush cannot return.
-        var sizingProfile = decomposer.SizingProfile;
-        int coalesceWorkingSetIntents = sizingProfile.EstComposeUnitsPerRecord >= 8 ? 3 : int.MaxValue;
+        // Compose closes are memory-safety fragments, not database transaction units.
+        // Multi-file sources divide the compose envelope across the active file pool;
+        // a high-fan source can therefore yield very small changes (UD: about eight
+        // sentences per worker close). Flushing after three such changes turned the
+        // generic ten-file pool into 526 indexed applies for 13,672 sentences: 26.5
+        // sentences/apply, with the database NVMe saturated by random presence/fold IO.
+        //
+        // Coalesce finalized fragments here. Their deferred trees have already been
+        // drained and disposed, so the compose-memory reason for closing them no longer
+        // applies. The byte and row caps remain the apply safety boundary; the file-
+        // boundary floor below remains the durability/UI-progress boundary.
         const int workingSetApplyRowCap = 400_000;
 
         // A file boundary is a commit OPPORTUNITY, not a commit requirement
@@ -292,9 +297,8 @@ public sealed class IngestRunner
 
         bool ShouldFlushWithCap(int intents, int rows) =>
             workingSet
-                ? wsBytes >= applyEnvelope
-                  || rows >= workingSetApplyRowCap
-                  || intents >= coalesceWorkingSetIntents
+                ? ShouldFlushWorkingSet(
+                    wsBytes, rows, applyEnvelope, workingSetApplyRowCap)
                 : ShouldFlush(intents, rows) || intents >= maxIntentsPerCommit;
 
 
@@ -745,6 +749,16 @@ public sealed class IngestRunner
         if (filesTotal > 0 && filesDone != filesTotal) return "failed";
         return "ok";
     }
+
+    /// <summary>
+    /// Apply batching is governed by the finalized COPY payload, never by how many
+    /// compose-memory fragments produced it. File workers deliberately close small
+    /// fragments under high fan-out; using their count here reintroduces per-file-ish
+    /// transactions and indexed probes into the shared generic apply lane.
+    /// </summary>
+    internal static bool ShouldFlushWorkingSet(
+        long bufferedBytes, int bufferedRows, long byteCap, int rowCap) =>
+        bufferedBytes >= byteCap || bufferedRows >= rowCap;
 
     /// <summary>
     /// The operator-facing reason a run derived <c>failed</c>, written into
