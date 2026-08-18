@@ -13,7 +13,7 @@ import styles from './Admin.module.css';
 const REFRESH_MS = 5000;
 
 /** Runs that a pipeline waiting on this journal would still be blocked by. */
-const OPEN_STATES = new Set(['running', 'started', 'pending', 'in_progress']);
+const OPEN_STATES = new Set(['running', 'composed', 'started', 'pending', 'in_progress']);
 
 function duration(item: Pick<IngestRun, 'started_at' | 'ended_at'>): string {
   if (!item.started_at) return '—';

@@ -459,12 +459,13 @@ public sealed partial class NpgsqlSubstrateWriter
             // acquired, so anything a prior applier committed is visible.
             var phaseSw = System.Diagnostics.Stopwatch.StartNew();
 
-            // Empty-partition probe skip (under the apply advisory lock only).
-            // If a LIST(tier) leaf / whole phys|att heap has zero rows, every
-            // staged id for that keyspace is absent — the bitmap probe would
-            // return an all-zero mask after paying full chunk round-trips.
-            // Exact EXISTS under the lock; not reltuples. Does NOT weaken the
-            // pure-COPY invariant: non-empty partitions still probe in full.
+            // Empty-relation probe skip (under the apply advisory lock only).
+            // If the whole phys|att heap has zero rows, every staged id for
+            // that keyspace is absent — the bitmap probe would return an
+            // all-zero mask after paying full chunk round-trips. Entity tier
+            // emptiness is resolved by the bounded smaller-side verifier below;
+            // a separate EXISTS roster caused PostgreSQL to aggregate every
+            // entity partition once per apply on large targets.
             //
             // These probes MUST NOT run on the control tx: they leave
             // AccessShareLock on every partition of the probed tables for the
@@ -475,7 +476,7 @@ public sealed partial class NpgsqlSubstrateWriter
             // queued behind our own idle-in-transaction probe locks). Pooled
             // connections give the same visibility: every snapshot starts
             // after the apply advisory lock was acquired.
-            long entEmptySkip = 0, physEmptySkip = 0, attEmptySkip = 0;
+            long physEmptySkip = 0, attEmptySkip = 0;
             long entInvertResolved = 0;
             var presentFromInvert = new HashSet<Hash128>();
             List<Hash128> probeEntIdsUse = probeEntityIds;
@@ -490,23 +491,6 @@ public sealed partial class NpgsqlSubstrateWriter
             }
             else if (entVerifyIdx.Count > 0)
             {
-                var tierSample = new List<short>(entVerifyIdx.Count);
-                for (int k = 0; k < entVerifyIdx.Count; k++)
-                    tierSample.Add(ents.Tiers[entVerifyIdx[k]]);
-                var nonemptyTiers = await NonEmptyEntityTiersAsync(_ds, tierSample, ct);
-                rtProbe++; // one EXISTS roster round-trip
-                if (nonemptyTiers.Count < DistinctShortCount(tierSample))
-                {
-                    var kept = new List<int>(entVerifyIdx.Count);
-                    for (int k = 0; k < entVerifyIdx.Count; k++)
-                    {
-                        int i = entVerifyIdx[k];
-                        if (nonemptyTiers.Contains(ents.Tiers[i])) kept.Add(i);
-                        else entEmptySkip++;
-                    }
-                    entVerifyIdx = kept;
-                }
-
                 // Smaller-build-side verify (under the same lock). Presence is still
                 // proven before COPY. Per LIST(tier) leaf: count committed rows; if
                 // that set is strictly smaller than the staged probe for the tier,
@@ -673,11 +657,11 @@ public sealed partial class NpgsqlSubstrateWriter
                     if (persistedPhys.ContainsKey(id)) presentPhys.Add(id);
             _log.LogInformation(
                 "WS_APPLY verify: {Entities:N0}e+{Phys:N0}p+{Atts:N0}a ids probed in {Ms:N0}ms "
-                + "(skipped {ECache:N0}e/{PCache:N0}p cached, {T0:N0}e tier0-gate, {EEmpty:N0}e/{PEmpty:N0}p/{AEmpty:N0}a empty-partition, {EInv:N0}e smaller-side invert, {AStruct:N0}a novel-by-construction; "
+                + "(skipped {ECache:N0}e/{PCache:N0}p cached, {T0:N0}e tier0-gate, {PEmpty:N0}p/{AEmpty:N0}a empty-relation, {EInv:N0}e smaller-side invert, {AStruct:N0}a novel-by-construction; "
                 + "present: {PresentE:N0}e/{PresentP:N0}p/{PresentA:N0}a)",
                 probeEntIdsUse.Count, probePhysIdsUse.Count, probeAttIdsUse.Count, phaseSw.ElapsedMilliseconds,
                 entCacheSkip, physCacheSkip, tier0Present?.Count ?? 0,
-                entEmptySkip, physEmptySkip, attEmptySkip, entInvertResolved, attStructuralSkip,
+                physEmptySkip, attEmptySkip, entInvertResolved, attStructuralSkip,
                 presentEntities.Count, presentPhys.Count, presentAtts.Count);
 
             // Entities: first occurrence of each id, minus stored rows.
@@ -1259,15 +1243,10 @@ public sealed partial class NpgsqlSubstrateWriter
     }
 
     /// <summary>
-    /// Shared chunked, connection-parallel presence probe. Sends the ids in
-    /// ProbeChunkIds-sized chunks as $1 (bytea[]), lets
-    private static int DistinctShortCount(IReadOnlyList<short> tiers)
-    {
-        var seen = new HashSet<short>();
-        for (int i = 0; i < tiers.Count; i++) seen.Add(tiers[i]);
-        return seen.Count;
-    }
-
+    /// Return the first row for each staged entity id. Once the tier-0
+    /// completion marker is present, tier-0 ids are separated into the exact
+    /// known-present set instead of entering a database probe.
+    /// </summary>
     internal static List<int> DistinctEntityRowIndices(
         CopyTupleParser.EntityRows ents, bool tier0Gate, out List<Hash128>? tier0Present)
     {
@@ -1288,33 +1267,6 @@ public sealed partial class NpgsqlSubstrateWriter
             first.Add(i);
         }
         return first;
-    }
-
-    /// <summary>
-    /// Under the apply lock: which of <paramref name="tiers"/> have at least one
-    /// row in <c>laplace.entities</c>. Empty LIST(tier) leaves need no bitmap probe.
-    /// </summary>
-    private static async Task<HashSet<short>> NonEmptyEntityTiersAsync(
-        NpgsqlDataSource ds, IReadOnlyList<short> tiers, CancellationToken ct)
-    {
-        var distinct = new HashSet<short>();
-        for (int i = 0; i < tiers.Count; i++) distinct.Add(tiers[i]);
-        if (distinct.Count == 0) return distinct;
-
-        var arr = distinct.ToArray();
-        await using var conn = await ds.OpenConnectionAsync(ct);
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandTimeout = 0;
-        cmd.CommandText =
-            "SELECT t FROM unnest($1::smallint[]) AS t "
-            + "WHERE EXISTS (SELECT 1 FROM laplace.entities e WHERE e.tier = t LIMIT 1)";
-        cmd.Parameters.Add(new NpgsqlParameter
-        { Value = arr, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Smallint });
-        var nonempty = new HashSet<short>();
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
-            nonempty.Add(reader.GetInt16(0));
-        return nonempty;
     }
 
     private static async Task<bool> RelationHasRowsAsync(
@@ -1453,6 +1405,8 @@ public sealed partial class NpgsqlSubstrateWriter
     }
 
     /// <summary>
+    /// Shared chunked, connection-parallel presence probe. Sends the ids in
+    /// ProbeChunkIds-sized chunks as $1 (bytea[]).
     /// <paramref name="bindKeys"/> add the target table's partition-key
     /// arrays for the same [start, start+n) window, and decodes the returned
     /// bitmap back to hit ids. Every probe shape (tiered, pair-keyed,
