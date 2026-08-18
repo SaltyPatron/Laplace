@@ -65,7 +65,7 @@ BEGIN
         total := total + n;
         scanned := scanned + cardinality(ids);
         last_id := ids[cardinality(ids)];
-        RAISE LOG 'highway_mask_rebuild: % masks written / % of % candidates (%%) — %s elapsed',
+        RAISE LOG 'highway_mask_rebuild: % masks written / % of % candidates (% percent) — %s elapsed',
             total, scanned, candidates,
             round(100.0 * scanned / NULLIF(candidates, 0), 1),
             round(extract(epoch FROM clock_timestamp() - t0)::numeric, 1);
