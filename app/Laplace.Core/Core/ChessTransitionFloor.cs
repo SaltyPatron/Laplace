@@ -23,6 +23,7 @@ public static unsafe class ChessTransitionFloor
     private static byte* _base;
     private static long _len;
     private static long _count;
+    private static string? _loadedPath;
     private static readonly ConcurrentDictionary<Hash128, Hash128> Novel = new();
 
     static ChessTransitionFloor()
@@ -63,7 +64,8 @@ public static unsafe class ChessTransitionFloor
     {
         ArgumentException.ThrowIfNullOrEmpty(path);
         Unload();
-        var fi = new FileInfo(path);
+        string fullPath = Path.GetFullPath(path);
+        var fi = new FileInfo(fullPath);
         if (!fi.Exists || fi.Length < HeaderSize + TrailerBytes)
             throw new InvalidOperationException($"chess transition floor missing/short: {path}");
 
@@ -93,6 +95,7 @@ public static unsafe class ChessTransitionFloor
             Unload();
             throw new InvalidOperationException("chess transition floor body CRC mismatch");
         }
+        _loadedPath = fullPath;
     }
 
     public static void LoadDefault()
@@ -131,6 +134,7 @@ public static unsafe class ChessTransitionFloor
         _mmf = null;
         _count = 0;
         _len = 0;
+        _loadedPath = null;
         Novel.Clear();
     }
 
@@ -165,33 +169,68 @@ public static unsafe class ChessTransitionFloor
 
     public static void WriteBlob(string path, IReadOnlyList<(Hash128 Key, Hash128 To)> sortedUnique)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
+        string fullPath = Path.GetFullPath(path);
+        string directory = Path.GetDirectoryName(fullPath)!;
+        Directory.CreateDirectory(directory);
+
+        // The catalog generator composes positions while building this floor. Compose
+        // warmup loads an existing floor from the same perfcache directory, so an
+        // incremental build reaches here with its own destination mmap'd. Release only
+        // that mapping; an unrelated floor supplied by a test/caller is not ours to drop.
+        var pathComparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        if (_loadedPath is not null && string.Equals(_loadedPath, fullPath, pathComparison))
+            Unload();
+
         long count = sortedUnique.Count;
         long body = HeaderSize + count * RecordSize;
         long total = body + TrailerBytes;
-        using var fs = new FileStream(path, FileMode.Create, FileAccess.ReadWrite, FileShare.None);
-        fs.SetLength(total);
-        using var mmf = MemoryMappedFile.CreateFromFile(fs, null, total, MemoryMappedFileAccess.ReadWrite, HandleInheritability.None, leaveOpen: false);
-        using var view = mmf.CreateViewAccessor(0, total, MemoryMappedFileAccess.ReadWrite);
-        byte* ptr = null;
-        view.SafeMemoryMappedViewHandle.AcquirePointer(ref ptr);
+        string temporary = Path.Combine(directory,
+            $".{Path.GetFileName(fullPath)}.{Environment.ProcessId}.{Guid.NewGuid():N}.tmp");
         try
         {
-            *(uint*)ptr = Magic;
-            *(uint*)(ptr + 4) = Version;
-            *(ulong*)(ptr + 8) = (ulong)count;
-            for (int i = 0; i < sortedUnique.Count; i++)
+            // Publish only a complete, closed blob. Readers either retain the previous
+            // inode or open the complete replacement; they can never mmap a truncated
+            // FileMode.Create destination while generation is in progress. Unique temp
+            // names also make two deterministic generators safe to run concurrently.
+            using (var fs = new FileStream(temporary, FileMode.CreateNew,
+                       FileAccess.ReadWrite, FileShare.None))
             {
-                var rec = (TransitionRec*)(ptr + HeaderSize + i * RecordSize);
-                rec->Key = sortedUnique[i].Key;
-                rec->To = sortedUnique[i].To;
+                fs.SetLength(total);
+                using var mmf = MemoryMappedFile.CreateFromFile(fs, null, total,
+                    MemoryMappedFileAccess.ReadWrite, HandleInheritability.None,
+                    leaveOpen: true);
+                using var view = mmf.CreateViewAccessor(0, total,
+                    MemoryMappedFileAccess.ReadWrite);
+                byte* ptr = null;
+                view.SafeMemoryMappedViewHandle.AcquirePointer(ref ptr);
+                try
+                {
+                    *(uint*)ptr = Magic;
+                    *(uint*)(ptr + 4) = Version;
+                    *(ulong*)(ptr + 8) = (ulong)count;
+                    for (int i = 0; i < sortedUnique.Count; i++)
+                    {
+                        var rec = (TransitionRec*)(ptr + HeaderSize + i * RecordSize);
+                        rec->Key = sortedUnique[i].Key;
+                        rec->To = sortedUnique[i].To;
+                    }
+                    var crc = Hash128.Blake3(new ReadOnlySpan<byte>(ptr, BodySpanLength(body)));
+                    *(Hash128*)(ptr + body) = crc;
+                }
+                finally
+                {
+                    view.SafeMemoryMappedViewHandle.ReleasePointer();
+                }
+                view.Flush();
             }
-            var crc = Hash128.Blake3(new ReadOnlySpan<byte>(ptr, BodySpanLength(body)));
-            *(Hash128*)(ptr + body) = crc;
+
+            File.Move(temporary, fullPath, overwrite: true);
         }
         finally
         {
-            view.SafeMemoryMappedViewHandle.ReleasePointer();
+            File.Delete(temporary);
         }
     }
 

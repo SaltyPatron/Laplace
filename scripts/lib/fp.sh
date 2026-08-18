@@ -23,6 +23,13 @@ FP_NATIVE_PATHS=(
   cmake
   CMakeLists.txt
   scripts/codegen-attestation-law.py
+  # engine/core invokes ChessCatalogSurfaces to produce two installed ROMs.
+  # Without these inputs the outer pipeline skips CMake entirely, so even a
+  # perfect DEPENDS graph inside CMake never gets a chance to invalidate them.
+  app/ChessCatalogSurfaces
+  app/Laplace.Chess
+  app/Laplace.Core
+  app/Laplace.Substrate
 )
 
 fp_compute() {
