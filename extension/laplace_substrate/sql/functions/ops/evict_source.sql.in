@@ -87,9 +87,12 @@ BEGIN
     IF p_relations IS NOT NULL THEN
         rels := p_relations;
     ELSE
-        -- Discover the source's relations: one indexed LIMIT-1 probe per leaf (a
-        -- relation LIST leaf holds exactly one type), DISTINCT only inside the
-        -- DEFAULT partition (dynamic relations share it).
+        -- Discover the source's relations: one indexed LIMIT-1 probe per leaf in
+        -- a named relation subtree (every such subtree holds exactly one type),
+        -- DISTINCT inside every leaf descended from the DEFAULT partition
+        -- (dynamic relations share its hash leaves). Checking only a leaf's own
+        -- bound is wrong because the DEFAULT partition is itself subpartitioned:
+        -- its leaves have HASH bounds, not the ancestor's DEFAULT bound.
         rels := ARRAY[]::bytea[];
         FOR leaf IN
             SELECT pt.relid
@@ -99,8 +102,12 @@ BEGIN
                 (quote_ident(ns.nspname) || '.attestations')::regclass) pt
             WHERE e.extname = 'laplace_substrate' AND pt.isleaf
         LOOP
-            IF (SELECT pg_get_expr(c.relpartbound, c.oid) FROM pg_class c
-                WHERE c.oid = leaf) = 'DEFAULT' THEN
+            IF EXISTS (
+                SELECT 1
+                FROM pg_partition_ancestors(leaf::regclass) pa
+                JOIN pg_class c ON c.oid = pa.relid
+                WHERE pg_get_expr(c.relpartbound, c.oid) = 'DEFAULT'
+            ) THEN
                 EXECUTE format(
                     'SELECT COALESCE(array_agg(DISTINCT a.type_id), ARRAY[]::bytea[]) '
                     'FROM %s a WHERE a.source_id = $1', leaf::regclass)
