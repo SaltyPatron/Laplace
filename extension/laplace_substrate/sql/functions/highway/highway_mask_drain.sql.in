@@ -48,7 +48,7 @@ BEGIN
 
         total   := total + n;
         drained := drained + cardinality(ids);
-        RAISE LOG 'highway_mask_drain: % masks written / % of % drained (%%) — %s elapsed',
+        RAISE LOG 'highway_mask_drain: % masks written / % of % drained (% percent) — %s elapsed',
             total, drained, queued,
             round(100.0 * drained / NULLIF(queued, 0), 1),
             round(extract(epoch FROM clock_timestamp() - t0)::numeric, 1);

@@ -133,9 +133,8 @@ BEGIN
 END $$;
 NOTICE:  - evict fixture deposited: 6 cells, 12 evidence rows, 2 markers
 -- The eviction under test. p_batch = 2 forces multiple delete/refold batches per
--- relation; p_drain = false leaves highway_mask_dirty observable (drain itself is
--- highway machinery with its own coverage, and its refresh warns when no highway
--- perfcache is configured — environment-dependent output a regress file cannot pin).
+-- relation; p_drain = false leaves highway_mask_dirty observable so its exact
+-- contents can be asserted before the logger-bearing drain path is exercised below.
 CALL ops.evict_source(laplace.source_id('EvictTestAnalysis'), NULL,
                   ARRAY[laplace.entity_type_id('Evict_TestMarker')],
                   p_batch => 2, p_drain => false);
@@ -283,6 +282,21 @@ BEGIN
     RAISE NOTICE '- evict: culled analysis-only cells, refolded survivors byte-identically, kept content, queued mask repair';
 END $$;
 NOTICE:  - evict: culled analysis-only cells, refolded survivors byte-identically, kept content, queued mask repair
+-- Exercise both maintenance procedures far enough to compile and execute their
+-- batched progress loggers. The perfcache is optional in a regress database, so
+-- suppress its environment-dependent warning while retaining any ERROR.
+SET client_min_messages = ERROR;
+CALL laplace.highway_mask_drain(2);
+CALL laplace.highway_mask_rebuild(100000);
+RESET client_min_messages;
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM laplace.highway_mask_dirty) THEN
+        RAISE EXCEPTION 'FAIL: highway mask drain left queued entities';
+    END IF;
+    RAISE NOTICE '- highway mask drain and rebuild progress paths execute';
+END $$;
+NOTICE:  - highway mask drain and rebuild progress paths execute
 -- Idempotence: evicting an already-evicted source changes nothing.
 CALL ops.evict_source(laplace.source_id('EvictTestAnalysis'), NULL,
                   ARRAY[laplace.entity_type_id('Evict_TestMarker')],
