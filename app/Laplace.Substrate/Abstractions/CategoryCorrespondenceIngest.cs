@@ -67,7 +67,6 @@ public static class CategoryCorrespondenceIngestSupport
             BatchSize = ws.Batch,
             ProbeChunkSize = Math.Clamp(ws.ProbeChunk, 64, 4096),
             ContainmentReader = reader,
-            EnableDeferredContentOnBuilder = false,
             EntityCapacity = ws.Batch * 3,
             AttestationCapacity = ws.Batch * 3,
             WorkingSet = WorkingSetMode.Enabled,

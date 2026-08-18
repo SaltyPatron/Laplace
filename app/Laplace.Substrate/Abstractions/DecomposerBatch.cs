@@ -51,18 +51,25 @@ public sealed class DirectComposeHandler<T> : IIngestRecordHandler<T>
 {
     private readonly Action<T, SubstrateChangeBuilder> _compose;
     private readonly Func<T, bool>? _trunkShortcircuit;
+    private readonly Func<T, long>? _unitsPerRecord;
 
     public DirectComposeHandler(
         Action<T, SubstrateChangeBuilder> compose,
-        Func<T, bool>? trunkShortcircuit = null)
+        Func<T, bool>? trunkShortcircuit = null,
+        Func<T, long>? unitsPerRecord = null)
     {
         _compose = compose;
         _trunkShortcircuit = trunkShortcircuit;
+        _unitsPerRecord = unitsPerRecord;
     }
+
+    public bool ParallelizeDeferredUnitCreation => false;
 
     public IIngestDeferredUnit CreateDeferredUnit(T record) => new Unit(record, _compose);
 
     public void WalkWitness(T record, Hash128 root, SubstrateChangeBuilder builder, IIngestDeferredUnit unit) { }
+
+    public long UnitsPerRecord(T record) => _unitsPerRecord?.Invoke(record) ?? 1;
 
     private sealed class Unit(T record, Action<T, SubstrateChangeBuilder> compose) : IIngestDeferredUnit
     {

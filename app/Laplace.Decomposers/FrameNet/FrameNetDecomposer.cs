@@ -92,7 +92,8 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
         }
     }
 
-    protected override IIngestRecordHandler<FnRecord> CreateHandlerForFile(string fileLabel) =>
+    protected override IIngestRecordHandler<FnRecord> CreateHandlerForFile(
+        string fileLabel, DecomposerOptions options) =>
         new DirectComposeHandler<FnRecord>(Compose);
 
     protected override IngestBatchConfig ConfigForFile(

@@ -7,7 +7,7 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.Code;
 
-public sealed class StackDecomposer : GrammarComposeDecomposer<StackSource, FullScope>
+public sealed class StackDecomposer : GrammarComposeDecomposerMultiFile<StackSource, FullScope>, IIngestInventoryProvider
 {
     public static readonly Hash128 Source = StackSource.SourceId;
     public static readonly Hash128 TrustClass = StackSource.TrustClass;
@@ -51,52 +51,69 @@ public sealed class StackDecomposer : GrammarComposeDecomposer<StackSource, Full
 
     public StackDecomposer() { }
 
-    protected override async IAsyncEnumerable<GrammarComposeRecord> ExtractRecordsAsync(
-        string ecosystemPath, DecomposerOptions options,
+    protected override IReadOnlyList<(string Path, string Label)> ListFiles(
+        string ecosystemPath, DecomposerOptions options)
+    {
+        var files = SharedParquetRecordStream
+            .EnumerateParquet(ecosystemPath, SearchOption.AllDirectories).ToList();
+        if (files.Count == 0 && Directory.Exists(ecosystemPath))
+            throw new InvalidOperationException(
+                $"StackDecomposer: no *.parquet files under '{ecosystemPath}' "
+                + "(expected data/<lang>/train-*.parquet from download-code-data.cmd)");
+        return files.Select((file, i) => (file, $"stack/{i}/{Path.GetFileName(file)}")).ToList();
+    }
+
+    protected override async IAsyncEnumerable<GrammarComposeRecord> ExtractFileAsync(
+        string filePath, string fileLabel, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        var files = SharedParquetRecordStream.EnumerateParquet(ecosystemPath, SearchOption.AllDirectories).ToList();
-        if (files.Count == 0)
+        await foreach (var row in SharedParquetRecordStream.ReadStackRowsAsync(filePath, ct))
         {
-            if (Directory.Exists(ecosystemPath))
-                throw new InvalidOperationException(
-                    $"StackDecomposer: no *.parquet files under '{ecosystemPath}' "
-                    + "(expected data/<lang>/train-*.parquet from download-code-data.cmd)");
-            yield break;
-        }
+            ct.ThrowIfCancellationRequested();
+            string? modality = ResolveModality(row.Language);
+            if (modality is null) continue;
+            if (options.Languages?.IsActive == true && !options.Languages.MatchesRaw(modality)) continue;
+            if (_langFilter is not null && !_langFilter.Contains(modality)) continue;
+            if (string.IsNullOrWhiteSpace(row.Content)) continue;
+            byte[] codeBytes = Encoding.UTF8.GetBytes(row.Content);
+            if (codeBytes.Length == 0) continue;
 
-        foreach (var file in files)
-        {
-            await foreach (var row in SharedParquetRecordStream.ReadStackRowsAsync(file, ct))
+            IReadOnlyList<string>? segs = null;
+            if (!string.IsNullOrWhiteSpace(row.Path))
             {
-                ct.ThrowIfCancellationRequested();
-                string? modality = ResolveModality(row.Language);
-                if (modality is null) continue;
-                if (options.Languages?.IsActive == true && !options.Languages.MatchesRaw(modality)) continue;
-                if (_langFilter is not null && !_langFilter.Contains(modality)) continue;
-                if (string.IsNullOrWhiteSpace(row.Content)) continue;
-                byte[] codeBytes = Encoding.UTF8.GetBytes(row.Content);
-                if (codeBytes.Length == 0) continue;
-
-                IReadOnlyList<string>? segs = null;
-                if (!string.IsNullOrWhiteSpace(row.Path))
-                {
-                    var filename = Path.GetFileNameWithoutExtension(row.Path);
-                    segs = filename.Split(
-                            ['_', '-', '.', '/', '\\'],
-                            StringSplitOptions.RemoveEmptyEntries)
-                        .Where(s => s.Length >= 3)
-                        .Select(s => s.ToLowerInvariant())
-                        .ToList();
-                }
-
-                yield return new GrammarComposeRecord(codeBytes, modality, segs);
+                var filename = Path.GetFileNameWithoutExtension(row.Path);
+                segs = filename.Split(
+                        ['_', '-', '.', '/', '\\'],
+                        StringSplitOptions.RemoveEmptyEntries)
+                    .Where(s => s.Length >= 3)
+                    .Select(s => s.ToLowerInvariant())
+                    .ToList();
             }
+
+            yield return new GrammarComposeRecord(codeBytes, modality, segs);
         }
     }
 
-    public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
-        => Task.FromResult<long?>(null);
+    public async Task<IngestInventory?> DescribeInputAsync(
+        IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
+    {
+        var files = SharedParquetRecordStream
+            .EnumerateParquet(context.EcosystemPath, SearchOption.AllDirectories).ToList();
+        if (files.Count == 0) return null;
+        var specs = new List<IngestFileSpec>(files.Count);
+        long total = 0;
+        foreach (var file in files)
+        {
+            long rows = await SharedParquetRecordStream.CountRowsAsync(file, ct);
+            specs.Add(new IngestFileSpec(Path.GetFileName(file), file, rows));
+            total += rows;
+        }
+        if (options.MaxInputUnits > 0) total = Math.Min(total, options.MaxInputUnits);
+        return new IngestInventory("rows", total, specs, TracksFileCompletion: true);
+    }
+
+    public override async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default) =>
+        (await DescribeInputAsync(context, DecomposerOptions.Default, ct))?.TotalInputUnits;
 
     private static string? ResolveModality(string? lang)
     {

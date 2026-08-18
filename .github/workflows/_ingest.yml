@@ -41,6 +41,14 @@ on:
         description: "re-ingest and prove the attestation count is stable (no double-count)"
         type: boolean
         default: false
+      evict_before_ingest:
+        description: "lawfully retract this source's testimony before the ingest"
+        type: boolean
+        default: false
+      evict_confirm:
+        description: "exact decomposer source name required when evict_before_ingest is true"
+        type: string
+        default: ""
       index_cycle_defer:
         description: >-
           Campaign participation ONLY — default false. When a fresh-full-build campaign has
@@ -213,6 +221,52 @@ jobs:
           done
           echo "::error::still busy after 10h — refusing to start a second concurrent ingest"
           exit 1
+
+      - name: Evict this source before ingest
+        if: inputs.evict_before_ingest
+        timeout-minutes: 720
+        env:
+          INGEST_SOURCE_KEY: ${{ inputs.source }}
+          INGEST_PATH_INPUT: ${{ inputs.path }}
+          INGEST_LANGS_INPUT: ${{ inputs.langs }}
+          EVICT_CONFIRM_INPUT: ${{ inputs.evict_confirm }}
+        run: |
+          # Source eviction retracts the WHOLE source. A narrowed re-derive would leave
+          # the canonical database knowingly incomplete, so the destructive mode accepts
+          # neither a path nor a language filter.
+          if [ -n "$INGEST_PATH_INPUT" ] || [ -n "$INGEST_LANGS_INPUT" ]; then
+            echo "::error::evict_before_ingest requires the full source: leave path and langs blank"
+            exit 1
+          fi
+
+          src_name=$(python3 -c \
+            "import json,os; e=json.load(open('scripts/decomposer-gates.json'))['sources'].get(os.environ['INGEST_SOURCE_KEY']); print(e['decomposer'] if e else '')")
+          if [ -z "$src_name" ]; then
+            echo "::error::no decomposer source mapping for '$INGEST_SOURCE_KEY'; refusing an unscoped eviction"
+            exit 1
+          fi
+          if [ "$EVICT_CONFIRM_INPUT" != "$src_name" ]; then
+            echo "::error::evicting '$INGEST_SOURCE_KEY' retracts all testimony from '$src_name'; type '$src_name' in evict_confirm"
+            exit 1
+          fi
+
+          # The CLI owns the lawful inverse fold. Build the checked-out/deployed revision,
+          # then hold the substrate's exclusive measurement lane for the whole eviction:
+          # current ingests hold it shared, and new ingests cannot begin writing midway.
+          (cd app && dotnet build Laplace.Cli/Laplace.Cli.csproj -c Release -v q --nologo)
+          before=$(psql -h /var/run/postgresql -U laplace_admin -d "${{ inputs.database }}" \
+            -v ON_ERROR_STOP=1 -tAc \
+            "SELECT ops.evidence_count(p_source => laplace.source_id('$src_name'));")
+          echo "::warning::authorized source eviction: $src_name has $before evidence row(s)"
+          scripts/measure-lane.sh -- "$GITHUB_WORKSPACE/scripts/laplace" evict "$src_name"
+          after=$(psql -h /var/run/postgresql -U laplace_admin -d "${{ inputs.database }}" \
+            -v ON_ERROR_STOP=1 -tAc \
+            "SELECT ops.evidence_count(p_source => laplace.source_id('$src_name'));")
+          if [ "$after" != "0" ]; then
+            echo "::error::eviction receipt failed: $after evidence row(s) remain for $src_name"
+            exit 1
+          fi
+          echo "::notice::eviction receipt: $src_name evidence $before → 0; beginning full re-ingest"
 
       - name: Ingest
         id: run_ingest

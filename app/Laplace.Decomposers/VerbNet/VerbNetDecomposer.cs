@@ -7,7 +7,8 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.VerbNet;
 
-public sealed class VerbNetDecomposer : ComposeDecomposer<XmlElement, VerbNetSource, FullScope>
+public sealed class VerbNetDecomposer
+    : ComposeDecomposerMultiFile<XmlElement, VerbNetSource, FullScope>, IIngestInventoryProvider
 {
 
 
@@ -30,15 +31,23 @@ public sealed class VerbNetDecomposer : ComposeDecomposer<XmlElement, VerbNetSou
     protected override string BatchLabelPrefix => "verbnet";
     protected override int DefaultBatchSize => BatchConfigDefaults.HighVolume;
 
-    protected override async IAsyncEnumerable<XmlElement> ExtractRecordsAsync(
-        string ecosystemPath, DecomposerOptions options,
-        [EnumeratorCancellation] CancellationToken ct)
+    protected override IReadOnlyList<(string Path, string Label)> ListFiles(
+        string ecosystemPath, DecomposerOptions options)
     {
         string classDir = IngestInput.ResolveSubdir(
             ecosystemPath, "*.xml",
             Path.Combine("verbnet-master", "verbnet3.4"), "verbnet3.4");
+        return SharedXmlFramesetReader.EnumerateXmlFiles(classDir)
+            .Select((file, i) => (file, $"verbnet/{i}/{Path.GetFileName(file)}"))
+            .ToList();
+    }
+
+    protected override async IAsyncEnumerable<XmlElement> ExtractFileAsync(
+        string filePath, string fileLabel, DecomposerOptions options,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
         await foreach (var root in SharedXmlFramesetReader.ReadRootsAsync(
-                           SharedXmlFramesetReader.EnumerateXmlFiles(classDir), "VNCLASS", ct))
+                           [filePath], "VNCLASS", ct))
             yield return root;
     }
 
@@ -47,6 +56,14 @@ public sealed class VerbNetDecomposer : ComposeDecomposer<XmlElement, VerbNetSou
 
     public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
         => Task.FromResult<long?>(EstimatedClasses);
+
+    public Task<IngestInventory?> DescribeInputAsync(
+        IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
+    {
+        var paths = ListFiles(context.EcosystemPath, options).Select(x => x.Path).ToList();
+        return Task.FromResult(IngestInventory.FromFileUnits(
+            "classes", paths, options.MaxInputUnits, tracksFileCompletion: true));
+    }
 
     private static void EmitClass(SubstrateChangeBuilder b, XmlElement el, string? parentClassId)
     {

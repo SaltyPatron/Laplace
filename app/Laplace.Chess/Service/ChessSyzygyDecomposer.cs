@@ -105,14 +105,15 @@ public sealed class ChessSyzygyDecomposer
         long cap = options.MaxInputUnits;
         long n = 0;
         await foreach (var product in SyzygyTableUnpack.ExtractMaterialAsync(
-                           fileLabel, _prober, workers: 0, ct).ConfigureAwait(false))
+                           fileLabel, _prober, workers: 1, ct).ConfigureAwait(false))
         {
             yield return new ChessSyzygyRecord(product);
             if (cap > 0 && ++n >= cap) yield break;
         }
     }
 
-    protected override IIngestRecordHandler<ChessSyzygyRecord> CreateHandlerForFile(string fileLabel) =>
+    protected override IIngestRecordHandler<ChessSyzygyRecord> CreateHandlerForFile(
+        string fileLabel, DecomposerOptions options) =>
         new DirectComposeHandler<ChessSyzygyRecord>(static (r, b) => ChessSyzygy.DeriveProduct(b, r.Product));
 
     protected override IngestBatchConfig ConfigForFile(

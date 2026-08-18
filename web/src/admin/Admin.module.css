@@ -86,6 +86,34 @@
   .source { font-weight: 600; }
   .runId { font-size: var(--text-xs); color: var(--color-text-muted); }
   .failedUnits { color: var(--color-error); }
+  .filePct { display: block; color: var(--color-text-muted); font-size: var(--text-xs); }
+
+  .fileToggle {
+    display: block;
+    margin-top: 2px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--color-accent);
+    font-size: var(--text-xs);
+    cursor: pointer;
+  }
+  .fileToggle:hover { text-decoration: underline; }
+
+  .fileDetailRow > td {
+    padding: var(--space-2) var(--space-3) var(--space-3);
+    background: color-mix(in srgb, var(--color-bg-panel) 92%, var(--color-accent));
+    white-space: normal;
+  }
+  .fileDetailHead {
+    margin-bottom: var(--space-2);
+    color: var(--color-text-muted);
+    font-size: var(--text-xs);
+  }
+  .fileTableWrap { max-height: 28rem; overflow: auto; }
+  .fileTable { font-size: var(--text-xs); }
+  .fileTable thead { position: sticky; top: 0; background: var(--color-bg-panel); }
+  .fileLabel { white-space: normal; overflow-wrap: anywhere; }
 
   .runErr {
     max-width: 40ch;

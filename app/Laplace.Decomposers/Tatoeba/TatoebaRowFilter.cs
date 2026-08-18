@@ -1,6 +1,8 @@
 using System.Text;
 using Laplace.Decomposers.Abstractions;
 
+using System.Collections.Concurrent;
+
 namespace Laplace.Decomposers.Tatoeba;
 
 internal static class TatoebaRowFilter
@@ -13,13 +15,14 @@ internal static class TatoebaRowFilter
         return langs.MatchesRaw(lang);
     }
 
-    public static bool MatchesLinkFilter(ReadOnlySpan<byte> line, HashSet<long>? allowedIds)
+    public static bool MatchesLinkFilter(
+        ReadOnlySpan<byte> line, ConcurrentDictionary<long, byte>? allowedIds)
     {
         if (allowedIds is null) return true;
         if (!TsvSpan.TryField(line, 0, out var aField)) return false;
         if (!TsvSpan.TryField(line, 1, out var bField)) return false;
         if (!TatoebaParse.TryInt64(aField, out long a)) return false;
         if (!TatoebaParse.TryInt64(bField, out long b)) return false;
-        return allowedIds.Contains(a) && allowedIds.Contains(b);
+        return allowedIds.ContainsKey(a) && allowedIds.ContainsKey(b);
     }
 }

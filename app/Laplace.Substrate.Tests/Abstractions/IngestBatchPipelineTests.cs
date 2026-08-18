@@ -10,6 +10,55 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 public sealed class IngestBatchPipelineTests
 {
     [Fact]
+    public void FileResumeFingerprint_IsPathIndependentAndContentSensitive()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), $"laplace-resume-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        try
+        {
+            string a = Path.Combine(dir, "a.bin");
+            string b = Path.Combine(dir, "renamed.bin");
+            File.WriteAllBytes(a, Encoding.UTF8.GetBytes("same file bytes"));
+            File.WriteAllBytes(b, Encoding.UTF8.GetBytes("same file bytes"));
+
+            Hash128? first = IngestBatchPipeline.TryResolveFileIdentity(a);
+            Hash128? renamed = IngestBatchPipeline.TryResolveFileIdentity(b);
+            File.WriteAllBytes(b, Encoding.UTF8.GetBytes("some file bytes"));
+            Hash128? changed = IngestBatchPipeline.TryResolveFileIdentity(b);
+
+            Assert.NotNull(first);
+            Assert.Equal(first, renamed);
+            Assert.NotEqual(first, changed);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void FileCompletionBoundary_PreservesTheJournalLabel()
+    {
+        var boundary = IngestBatchPipeline.BuildFileCompletion(
+            TestSource, "ud/en_ewt-ud-train", Hash128.OfCanonical("file/root"), layerOrder: 2);
+
+        Assert.Equal(
+            "period-boundary/ud/en_ewt-ud-train",
+            boundary.Metadata.SourceContentUnitName);
+    }
+
+    [Fact]
+    public void PeriodBoundaryWithoutResumeIdentity_PreservesTheJournalLabel()
+    {
+        var boundary = IngestBatchPipeline.BuildPeriodBoundary(
+            TestSource, "stream/archive/member.jsonl");
+
+        Assert.Equal(
+            "period-boundary/stream/archive/member.jsonl",
+            boundary.Metadata.SourceContentUnitName);
+    }
+
+    [Fact]
     public async Task BatchProbeAmortization_OneDescentCallPerProbeChunk()
     {
         const int rowCount = 20;
@@ -375,7 +424,8 @@ public sealed class IngestBatchPipelineTests
             await File.WriteAllTextAsync(paths[1], "resume two\n");
             await File.WriteAllTextAsync(paths[2], "resume three\n");
 
-            var roots = paths.Select(p => FileEntity.SourceId(File.ReadAllBytes(p))).ToArray();
+            var roots = paths.Select(p =>
+                IngestBatchPipeline.TryResolveFileIdentity(p)!.Value).ToArray();
             var completed = new HashSet<Hash128> { roots[0], roots[1] };
             var reader = new ProbeTrackingReader(present: false)
             {

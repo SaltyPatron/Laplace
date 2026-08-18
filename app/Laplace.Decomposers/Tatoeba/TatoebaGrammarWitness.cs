@@ -1,4 +1,5 @@
 using System.Text;
+using System.Collections.Concurrent;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
@@ -11,10 +12,11 @@ internal enum TatoebaRowKind { Sentence, Link }
 internal sealed class TatoebaGrammarWitness : IGrammarWitness
 {
     private readonly TatoebaRowKind _kind;
-    private readonly HashSet<long>? _allowedIds;
+    private readonly ConcurrentDictionary<long, byte>? _allowedIds;
     private readonly TatoebaIdMap _ids;
 
-    public TatoebaGrammarWitness(TatoebaRowKind kind, HashSet<long>? allowedIds, TatoebaIdMap ids)
+    public TatoebaGrammarWitness(
+        TatoebaRowKind kind, ConcurrentDictionary<long, byte>? allowedIds, TatoebaIdMap ids)
     {
         _kind = kind;
         _allowedIds = allowedIds;
@@ -71,7 +73,7 @@ internal sealed class TatoebaGrammarWitness : IGrammarWitness
         // roots a second time before the pipeline emits anything.
         _ids.Set(id, emitted);
 
-        _allowedIds?.Add(id);
+        _allowedIds?.TryAdd(id, 0);
     }
 
     private void WalkLink(

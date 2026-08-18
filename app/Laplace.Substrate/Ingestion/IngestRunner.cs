@@ -148,7 +148,6 @@ public sealed class IngestRunner
 
         NativeRuntimeEnv.ApplyFromTopologyIfUnset();
         IngestTopology.EnsureReady();
-        Laplace.Engine.Core.IntentStage.ResetContentBank();
 
         // Directory.Exists ALONE was reported as "exists", so every single-file ingest logged
         // exists=False on a file that was then read successfully — the line immediately after
@@ -581,28 +580,13 @@ public sealed class IngestRunner
         }
         finally
         {
-            // DRAIN BEFORE CANCELLING. runCt is the token the consensus fold lanes are
-            // still holding, so cancelling it here -- on the SUCCESS path, not just on
-            // teardown -- sends a Postgres cancel into whatever fold is mid-statement.
-            // MEASURED: unicode died at exactly 40.1s twice on a clean database with
-            // 57014 raised inside consensus.highway_mask_deposit line 64, holding its
-            // advisory lock, after a healthy 3.98M-row decompose. 40s is not a timeout;
-            // it is the end of decompose.
-            //
-            // The window only opens once the deposit is slow enough to still be running
-            // when decompose ends, which is precisely the state reached when
-            // highway_mask_deposit resolves and does real work -- so the bug hid behind
-            // the 42883 it was paired with. Cancelling must mean abnormal teardown and
-            // nothing else; a completed decompose owes its folds a drain.
-            try { await _writer.DrainFoldsAsync().ConfigureAwait(false); }
-            catch (Exception ex) { log.LogError(ex, "fold drain before run teardown failed"); }
-
             try { runCts.Cancel(); } catch { /* ignore */ }
             if (cappedWatchdog is not null)
             {
                 await cappedWatchdog.ConfigureAwait(false);
             }
-            // Rebuild after every successfully opened run, including failures — a fatal
+            // CompleteBulkRun owns the one fold drain and the index rebuild. Rebuild after
+            // every successfully opened run, including failures — a fatal
             // apply error must not leave the table index-less. The one
             // exception is cancellation: the user is tearing the process
             // down, so don't block exit on a minutes-scale rebuild — the
@@ -858,7 +842,6 @@ public sealed class IngestRunner
                 var progress = MakeProgress(counters);
                 _obs.OnProgress(progress);
                 options.Progress?.Report(progress);
-                Laplace.Engine.Core.IntentStage.ResetContentBank();
                 return;
             }
             catch (OperationCanceledException)
@@ -961,7 +944,6 @@ public sealed class IngestRunner
                 var progress = MakeProgress(counters);
                 _obs.OnProgress(progress);
                 options.Progress?.Report(progress);
-                Laplace.Engine.Core.IntentStage.ResetContentBank();
                 return;
             }
             catch (OperationCanceledException)
@@ -1099,6 +1081,11 @@ public sealed class IngestRunner
                 OccurredAt: DateTimeOffset.UtcNow);
             lock (failures) failures.Add(failure);
             _obs.OnIntentFailed(c.SourceName ?? "", failure);
+            string fileAndError = unit[fileFailed.Length..];
+            int errorAt = fileAndError.IndexOf(": [", StringComparison.Ordinal);
+            string file = errorAt >= 0 ? fileAndError[..errorAt] : fileAndError;
+            string error = errorAt >= 0 ? fileAndError[(errorAt + 2)..] : fileAndError;
+            _obs.OnFileFinished(c.SourceName ?? "", file, "failed", error: error);
             return;
         }
 
@@ -1107,6 +1094,18 @@ public sealed class IngestRunner
         {
             int done = Interlocked.Increment(ref c._filesDone);
             string file = unit[periodBoundary.Length..];
+            string fileStatus = "ok";
+            if (unit.StartsWith(IngestBatchPipeline.SkippedBoundaryUnitPrefix, StringComparison.Ordinal))
+            {
+                file = unit[IngestBatchPipeline.SkippedBoundaryUnitPrefix.Length..];
+                fileStatus = "skipped-complete";
+            }
+            else if (unit.StartsWith(IngestBatchPipeline.CancelledBoundaryUnitPrefix, StringComparison.Ordinal))
+            {
+                file = unit[IngestBatchPipeline.CancelledBoundaryUnitPrefix.Length..];
+                fileStatus = "cancelled";
+            }
+            _obs.OnFileFinished(c.SourceName ?? "", file, fileStatus);
             c._currentFile = file;
             int total = c.Inventory?.FileCount ?? 0;
             if (MultiFileTelemetry.ShouldLogFileLine(done, total))

@@ -76,7 +76,8 @@ public sealed class OMWDecomposer : DecomposerMultiFile<GrammarIngestRecord, OMW
         }
     }
 
-    protected override IIngestRecordHandler<GrammarIngestRecord> CreateHandlerForFile(string fileLabel) =>
+    protected override IIngestRecordHandler<GrammarIngestRecord> CreateHandlerForFile(
+        string fileLabel, DecomposerOptions options) =>
         new GrammarIngestHandler(
             Source, "tsv",
             new OMWGrammarWitness(OmwIngestSupport.LangFromLabel(fileLabel)),

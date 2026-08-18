@@ -50,6 +50,23 @@ export interface IngestRun {
   error: string | null;
 }
 
+/** One independently scheduled file inside an ingest run. */
+export interface IngestFile {
+  run_id: string;
+  file_label: string;
+  source_name: string;
+  file_id: string | null;
+  status: string;
+  started_at: string | null;
+  ended_at: string | null;
+  bytes: number | null;
+  records: number | null;
+  entities: number | null;
+  physicalities: number | null;
+  attestations: number | null;
+  error: string | null;
+}
+
 export interface OpResult<T> {
   object: string;
   name: string;
@@ -94,6 +111,17 @@ export function listOps(like?: string, opts: ApiOptions = {}) {
 /** The ingest journal — the record CI/CD pipelines gate on. */
 export function ingestRuns(limit = 25, opts: ApiOptions = {}) {
   return callOp<IngestRun>('ops.ingest_runs', { p_limit: limit }, limit, undefined, opts);
+}
+
+/** Per-file work for one run, with active and failed files sorted first. */
+export function ingestFiles(runId: string, limit = 200, opts: ApiOptions = {}) {
+  return callOp<IngestFile>(
+    'ops.ingest_files',
+    { p_run_id: runId, p_limit: limit },
+    limit,
+    undefined,
+    opts,
+  );
 }
 
 /**

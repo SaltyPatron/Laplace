@@ -32,7 +32,7 @@ internal static class IngestDescentFlush
         ISet<Hash128>? probedAbsent,
         CancellationToken ct)
     {
-        var batch = await ComposeBatchAsync(records, handler, reader, builder, probedAbsent, ct)
+        var batch = await ComposeBatchAsync(records, handler, reader, builder, config, probedAbsent, ct)
             .ConfigureAwait(false);
         if (batch.Pending.Count == 0)
             return batch.Shortcircuited.ToArray();
@@ -56,6 +56,7 @@ internal static class IngestDescentFlush
         IIngestRecordHandler<TRecord> handler,
         ISubstrateReader reader,
         SubstrateChangeBuilder builder,
+        IngestBatchConfig config,
         ISet<Hash128>? probedAbsent,
         CancellationToken ct)
     {
@@ -68,9 +69,7 @@ internal static class IngestDescentFlush
         if (records.Count == 0) return batch;
 
         var units = new IIngestDeferredUnit[records.Count];
-        int composeWorkers = Math.Min(
-            Math.Max(1, IngestTopology.Current.ComposeWorkers),
-            records.Count);
+        int composeWorkers = ResolveComposeWorkers(records.Count, handler, config);
         if (composeWorkers <= 1)
         {
             for (int i = 0; i < records.Count; i++)
@@ -79,20 +78,39 @@ internal static class IngestDescentFlush
         else
         {
             var snapshot = records;
-            int nextIdx = -1;
-            await CpuTopology.RunPinnedAsyncParallel(composeWorkers, (_, _) =>
-            {
-                for (int i = Interlocked.Increment(ref nextIdx); i < snapshot.Count;
-                     i = Interlocked.Increment(ref nextIdx))
+            await Parallel.ForAsync(
+                0,
+                snapshot.Count,
+                new ParallelOptions
+                {
+                    MaxDegreeOfParallelism = composeWorkers,
+                    CancellationToken = ct,
+                },
+                (i, _) =>
+                {
                     units[i] = handler.CreateDeferredUnit(snapshot[i]);
-                return Task.CompletedTask;
-            }, ct).ConfigureAwait(false);
+                    return ValueTask.CompletedTask;
+                }).ConfigureAwait(false);
         }
 
         for (int i = 0; i < records.Count; i++)
             batch.Pending.Add((records[i], units[i]));
         records.Clear();
         return batch;
+    }
+
+    internal static int ResolveComposeWorkers<TRecord>(
+        int recordCount,
+        IIngestRecordHandler<TRecord> handler,
+        IngestBatchConfig config)
+    {
+        if (recordCount <= 1 || !handler.ParallelizeDeferredUnitCreation)
+            return 1;
+
+        int processBudget = Math.Max(1, IngestTopology.Current.ComposeWorkers);
+        int residentSets = config.EffectiveConcurrentWorkingSets;
+        int localBudget = Math.Max(1, processBudget / residentSets);
+        return Math.Min(localBudget, recordCount);
     }
 
     internal static async Task FinalizeWorkingSetAsync<TRecord>(

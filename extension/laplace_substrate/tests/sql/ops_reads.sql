@@ -76,6 +76,18 @@ INSERT INTO laplace.ingest_run_journal (run_id, source_name, layer)
 VALUES ('00000000-0000-0000-0000-000000000001', 'test/ops/run', 0);
 SELECT status = 'cancelled' AS closed_cancelled, ended_at IS NOT NULL AS closed_stamped
 FROM ops.ingest_run_close('00000000-0000-0000-0000-000000000001');
+
+INSERT INTO laplace.ingest_file_journal
+    (run_id, file_label, source_name, status, ended_at, records)
+VALUES
+    ('00000000-0000-0000-0000-000000000001', 'done.xml', 'test/ops/run', 'ok', now(), 10),
+    ('00000000-0000-0000-0000-000000000001', 'active.xml', 'test/ops/run', 'running', NULL, 3);
+SELECT count(*) = 2 AS ingest_files_rows
+FROM ops.ingest_files('00000000-0000-0000-0000-000000000001', 10);
+SELECT status = 'running' AS ingest_files_active_first
+FROM ops.ingest_files('00000000-0000-0000-0000-000000000001', 10)
+LIMIT 1;
+
 DO $$
 BEGIN
     PERFORM ops.ingest_run_close('00000000-0000-0000-0000-000000000001');

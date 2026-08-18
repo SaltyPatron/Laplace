@@ -74,7 +74,7 @@ public sealed class ContentIngestHandler : IIngestRecordHandler<ContentIngestRec
     }
 }
 
-public sealed class FakeTabIngestDecomposer : IDecomposer
+public sealed class FakeTabIngestDecomposer : Decomposer<ContentIngestRecord>
 {
     private readonly IReadOnlyList<ContentIngestRecord> _records;
     private readonly IngestBatchConfig _config;
@@ -98,24 +98,34 @@ public sealed class FakeTabIngestDecomposer : IDecomposer
         };
     }
 
-    public Hash128 SourceId => _config.SourceId;
-    public string SourceName => "FakeTab";
-    public int LayerOrder => 99;
-    public Hash128 TrustClassId => SubstrateCanonicalIds.OfVersioned("trust", "test", "fake-tab");
+    public override Hash128 SourceId => _config.SourceId;
+    public override string SourceName => "FakeTab";
+    public override int LayerOrder => 99;
+    public override Hash128 TrustClassId => SubstrateCanonicalIds.OfVersioned("trust", "test", "fake-tab");
+    protected override double SourceTrust => 1.0;
 
-    public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
+    public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
         => Task.CompletedTask;
 
-    public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
-        IDecomposerContext context,
+    protected override IIngestRecordHandler<ContentIngestRecord> CreateHandler() =>
+        new ContentIngestHandler(_config.SourceId);
+
+    protected override async IAsyncEnumerable<ContentIngestRecord> ExtractRecordsAsync(
+        string ecosystemPath,
         DecomposerOptions options,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
-        if (options.DryRun) yield break;
+        foreach (var record in _records)
+        {
+            ct.ThrowIfCancellationRequested();
+            yield return record;
+            await Task.Yield();
+        }
+    }
 
-        var stream = new FakeRecordStream(_records);
-        var handler = new ContentIngestHandler(_config.SourceId);
-        var config = new IngestBatchConfig
+    protected override IngestBatchConfig BuildPipelineConfig(
+        IDecomposerContext context, DecomposerOptions options) =>
+        new()
         {
             SourceId = _config.SourceId,
             BatchLabelPrefix = _config.BatchLabelPrefix,
@@ -129,26 +139,6 @@ public sealed class FakeTabIngestDecomposer : IDecomposer
             WorkingSet = _workingSet,
         };
 
-        await foreach (var change in IngestBatchPipeline.RunAsync(stream, handler, config, ct))
-            yield return change;
-    }
-
-    public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+    public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
         => Task.FromResult<long?>(_records.Count);
-
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
-
-    private sealed class FakeRecordStream(IReadOnlyList<ContentIngestRecord> records) : IRecordStream<ContentIngestRecord>
-    {
-        public async IAsyncEnumerable<ContentIngestRecord> RecordsAsync(
-            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
-        {
-            for (int i = 0; i < records.Count; i++)
-            {
-                ct.ThrowIfCancellationRequested();
-                yield return records[i];
-                await Task.Yield();
-            }
-        }
-    }
 }

@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Collections.Concurrent;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
@@ -29,10 +30,11 @@ namespace Laplace.Decomposers.Tatoeba;
 internal abstract class TatoebaPhase : DecomposerPhase<GrammarIngestRecord>
 {
     private readonly TatoebaIdMap _ids;
-    private readonly HashSet<long>? _allowedIds;
+    private readonly ConcurrentDictionary<long, byte>? _allowedIds;
     private readonly string _fileName;
 
-    protected TatoebaPhase(TatoebaIdMap ids, HashSet<long>? allowedIds, string fileName)
+    protected TatoebaPhase(
+        TatoebaIdMap ids, ConcurrentDictionary<long, byte>? allowedIds, string fileName)
     {
         _ids = ids;
         _allowedIds = allowedIds;
@@ -89,7 +91,7 @@ internal abstract class TatoebaPhase : DecomposerPhase<GrammarIngestRecord>
 /// <summary>Phase 1 — sentences.csv. Mints the content roots and records id -> root.</summary>
 internal sealed class TatoebaSentencePhase : TatoebaPhase
 {
-    public TatoebaSentencePhase(TatoebaIdMap ids, HashSet<long>? allowedIds)
+    public TatoebaSentencePhase(TatoebaIdMap ids, ConcurrentDictionary<long, byte>? allowedIds)
         : base(ids, allowedIds, "sentences.csv") { }
 
     protected override string PhaseLabel => "sent";
@@ -104,9 +106,9 @@ internal sealed class TatoebaSentencePhase : TatoebaPhase
 /// <summary>Phase 2 — links.csv. Pure attestations between roots phase 1 already resolved.</summary>
 internal sealed class TatoebaLinkPhase : TatoebaPhase
 {
-    private readonly HashSet<long>? _allowedIds;
+    private readonly ConcurrentDictionary<long, byte>? _allowedIds;
 
-    public TatoebaLinkPhase(TatoebaIdMap ids, HashSet<long>? allowedIds)
+    public TatoebaLinkPhase(TatoebaIdMap ids, ConcurrentDictionary<long, byte>? allowedIds)
         : base(ids, allowedIds, "links.csv") => _allowedIds = allowedIds;
 
     protected override string PhaseLabel => "link";
