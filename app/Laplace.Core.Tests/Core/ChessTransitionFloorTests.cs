@@ -100,6 +100,40 @@ public sealed class ChessTransitionFloorTests
     }
 
     [Fact]
+    public void WriteBlob_AtomicallyReplacesItsCurrentlyMappedDestination()
+    {
+        string path = TempBlob();
+        var before = Pairs("before");
+        var after = Pairs("after-a", "after-b");
+        try
+        {
+            ChessTransitionFloor.WriteBlob(path, before);
+            ChessTransitionFloor.Load(path);
+            Assert.True(ChessTransitionFloor.TryLookup(before[0].Key, out _));
+
+            // Incremental catalog builds compose before emitting. That warmup maps the
+            // previous destination in this same process; publication must not truncate
+            // or collide with its own live ROM.
+            ChessTransitionFloor.WriteBlob(path, after);
+            ChessTransitionFloor.Load(path);
+
+            Assert.False(ChessTransitionFloor.TryLookup(before[0].Key, out _));
+            foreach (var (key, to) in after)
+            {
+                Assert.True(ChessTransitionFloor.TryLookup(key, out var got));
+                Assert.Equal(to, got);
+            }
+            Assert.Empty(Directory.EnumerateFiles(Path.GetDirectoryName(path)!,
+                $".{Path.GetFileName(path)}.*.tmp"));
+        }
+        finally
+        {
+            ChessTransitionFloor.Unload();
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public void BadMagic_Refuses()
     {
         string path = TempBlob();

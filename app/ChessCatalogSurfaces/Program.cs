@@ -101,8 +101,7 @@ static class Program
             return 2;
         }
 
-        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(surfacesOut))!);
-        File.WriteAllLines(surfacesOut, surfaces);
+        WriteAllLinesAtomic(surfacesOut, surfaces);
 
         var sorted = transitions
             .Select(kv => (kv.Key, kv.Value))
@@ -114,6 +113,24 @@ static class Program
             $"chess_catalog: {surfaces.Count} surfaces -> {surfacesOut}; "
             + $"{sorted.Count} transitions -> {transitionsOut}");
         return 0;
+    }
+
+    static void WriteAllLinesAtomic(string path, IEnumerable<string> lines)
+    {
+        string fullPath = Path.GetFullPath(path);
+        string directory = Path.GetDirectoryName(fullPath)!;
+        Directory.CreateDirectory(directory);
+        string temporary = Path.Combine(directory,
+            $".{Path.GetFileName(fullPath)}.{Environment.ProcessId}.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            File.WriteAllLines(temporary, lines);
+            File.Move(temporary, fullPath, overwrite: true);
+        }
+        finally
+        {
+            File.Delete(temporary);
+        }
     }
 
     static string Ep(Board b)

@@ -322,21 +322,30 @@ phase_build() {
   # the producer. Grepping for it is exact: absent -> nothing can emit the blob and the gate
   # must stay quiet; present -> a missing blob is a real skipped target. It arms itself the
   # commit that target lands and needs no second edit here.
-  local chess_bin chess_target_declared=0
+  local chess_bin chess_transition_bin chess_target_declared=0
   if grep -q 'add_custom_target(laplace_chess_position_perfcache' "$ROOT/engine/core/CMakeLists.txt" 2>/dev/null; then
     chess_target_declared=1
   fi
   if [[ "$chess_target_declared" -eq 0 ]]; then
     echo "chess position perfcache: no laplace_chess_position_perfcache target in engine/core/CMakeLists.txt — gate inactive"
-  elif [[ -d "$chess_openings" ]]; then
+  else
     chess_bin=$(find "$ROOT/build" -name 'laplace_chess_position_perfcache*.bin' 2>/dev/null | head -1 || true)
     if [[ -z "$chess_bin" ]]; then
-      echo "::error::chess position perfcache missing after ALL build, but the openings corpus EXISTS at $chess_openings — the CMake target was skipped (LAPLACE_CHESS_OPENINGS not reaching engine/core, or ChessCatalogSurfaces missing)"
+      echo "::error::chess position perfcache missing after ALL build — the declared CMake target was skipped"
       exit 1
     fi
     echo "chess position perfcache ready: $chess_bin"
-  else
-    echo "chess position perfcache: openings corpus absent at $chess_openings — target not expected"
+    chess_transition_bin=$(find "$ROOT/build" -name 'laplace_chess_transition_perfcache*.bin' 2>/dev/null | head -1 || true)
+    if [[ -z "$chess_transition_bin" ]]; then
+      echo "::error::chess transition perfcache missing after catalog generation — it must be a declared CMake output, not an undeclared side effect"
+      exit 1
+    fi
+    echo "chess transition perfcache ready: $chess_transition_bin"
+    if [[ -d "$chess_openings" ]]; then
+      echo "chess catalog coverage: openings corpus $chess_openings"
+    else
+      echo "chess catalog coverage: base positions only (optional openings absent at $chess_openings)"
+    fi
   fi
   echo "===== PHASE — BUILD APP ====="
   phase_build_app
@@ -780,7 +789,7 @@ SQL
 
 phase_perfcache_guc() {
   echo "===== PHASE — PERFCACHE GUC ====="
-  local bin hwbin chessbin
+  local bin hwbin chessbin chesstransitionbin
   bin=$(find "$LAPLACE_INSTALL_PREFIX/share/laplace" -name 'laplace_t0_perfcache*.bin' 2>/dev/null | sort -V | tail -1)
   test -n "$bin" || { echo "::error::t0 perfcache blob not installed under $LAPLACE_INSTALL_PREFIX/share/laplace"; exit 1; }
   # The highway perfcache is built + installed (engine/core/CMakeLists.txt:206) and required
@@ -794,6 +803,11 @@ phase_perfcache_guc() {
   # the GUC was never pointed at it.
   chessbin=$(find "$LAPLACE_INSTALL_PREFIX/share/laplace" -name 'laplace_chess_position_perfcache*.bin' 2>/dev/null | sort -V | tail -1)
   test -n "$chessbin" || { echo "::error::chess position perfcache blob not installed under $LAPLACE_INSTALL_PREFIX/share/laplace"; exit 1; }
+  # Managed transition lookup resolves this sibling from the T0 directory; it
+  # has no separate PostgreSQL GUC, which previously let an undeclared hand copy
+  # masquerade as an installed build product.
+  chesstransitionbin=$(find "$LAPLACE_INSTALL_PREFIX/share/laplace" -name 'laplace_chess_transition_perfcache*.bin' 2>/dev/null | sort -V | tail -1)
+  test -n "$chesstransitionbin" || { echo "::error::chess transition perfcache blob not installed under $LAPLACE_INSTALL_PREFIX/share/laplace"; exit 1; }
   psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 \
     -c "LOAD 'laplace_substrate'" \
     -c "ALTER SYSTEM SET laplace_substrate.perfcache_path = '$bin'" \
@@ -803,6 +817,7 @@ phase_perfcache_guc() {
   echo "perfcache_path -> $bin"
   echo "highway_perfcache_path -> $hwbin"
   echo "chess_position_perfcache_path -> $chessbin"
+  echo "chess transition perfcache sibling -> $chesstransitionbin"
   # Preload the extension in the postmaster so every forked backend inherits
   # the mmap'd perfcache + reverse index copy-on-write (_PG_init prewarm)
   # instead of paying a multi-second lazy load on its first substrate call.

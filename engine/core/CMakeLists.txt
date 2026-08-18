@@ -189,11 +189,28 @@ endif()
 set(LAPLACE_CHESS_OPENINGS "${LAPLACE_CHESS_OPENINGS}" CACHE PATH
     "Optional ECO openings TSV dir for extra tier-2 catalog surfaces (sentences)")
 set(LAPLACE_CHESS_SURFACES "${LAPLACE_PERFCACHE_DIR}/chess_catalog_surfaces.txt")
+set(LAPLACE_CHESS_TRANSITION_BIN
+    "${LAPLACE_PERFCACHE_DIR}/laplace_chess_transition_perfcache.bin"
+    CACHE FILEPATH "Built chess transition-floor blob" FORCE)
 set(LAPLACE_CHESS_PERFCACHE_BIN "${LAPLACE_PERFCACHE_DIR}/laplace_chess_position_perfcache.bin"
     CACHE FILEPATH "Built chess compose-floor blob" FORCE)
 find_program(LAPLACE_DOTNET NAMES dotnet)
 set(LAPLACE_CHESS_SURFACES_PROJ
     "${CMAKE_CURRENT_SOURCE_DIR}/../../app/ChessCatalogSurfaces/ChessCatalogSurfaces.csproj")
+# The managed generator is part of this native/perfcache build graph. Depending
+# on its csproj alone leaves an existing output fresh when Program, compose,
+# hashing, or the openings parser changes. CONFIGURE_DEPENDS makes additions and
+# removals visible too; Ninja then reruns only this generator and its consumer.
+file(GLOB_RECURSE LAPLACE_CHESS_SURFACES_MANAGED_SOURCES CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../app/ChessCatalogSurfaces/*.cs"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../app/ChessCatalogSurfaces/*.csproj"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../app/Laplace.Chess/*.cs"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../app/Laplace.Chess/*.csproj"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../app/Laplace.Core/*.cs"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../app/Laplace.Core/*.csproj"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../app/Laplace.Substrate/*.cs"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../app/Laplace.Substrate/*.csproj")
+list(FILTER LAPLACE_CHESS_SURFACES_MANAGED_SOURCES EXCLUDE REGEX "/(bin|obj)/")
 
 # Tier-1 alphabet always emits (native). Catalog surfaces are optional coverage.
 set(_chess_emit_deps ${LAPLACE_PERFCACHE_BIN} $<TARGET_FILE:laplace_chess_position_tables_emit>)
@@ -228,14 +245,16 @@ if(LAPLACE_DOTNET AND EXISTS "${LAPLACE_CHESS_SURFACES_PROJ}")
     # blob's own rule -- on a clean tree the two are free to run in either order, and the
     # failure surfaces as a missing file rather than as a missing edge.
     add_custom_command(
-        OUTPUT ${LAPLACE_CHESS_SURFACES}
+        OUTPUT ${LAPLACE_CHESS_SURFACES} ${LAPLACE_CHESS_TRANSITION_BIN}
         COMMAND ${CMAKE_COMMAND} -E make_directory "${LAPLACE_PERFCACHE_DIR}"
         COMMAND ${CMAKE_COMMAND} -E env
                 "LAPLACE_PERFCACHE_BIN=${LAPLACE_PERFCACHE_BIN}"
                 ${LAPLACE_DOTNET} run --project "${LAPLACE_CHESS_SURFACES_PROJ}"
                 -c Release --no-launch-profile --
                 "${_chess_openings_arg}" "${LAPLACE_CHESS_SURFACES}"
-        DEPENDS "${LAPLACE_CHESS_SURFACES_PROJ}" ${LAPLACE_PERFCACHE_BIN}
+                "${LAPLACE_CHESS_TRANSITION_BIN}"
+        DEPENDS ${LAPLACE_CHESS_SURFACES_MANAGED_SOURCES} ${LAPLACE_PERFCACHE_BIN}
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
         COMMENT "Chess catalog tier-2 surfaces (emit input prep)"
         VERBATIM
     )
@@ -257,6 +276,13 @@ install(FILES ${LAPLACE_CHESS_PERFCACHE_BIN}
     RENAME "laplace_chess_position_perfcache.bin"
     PERMISSIONS ${LAPLACE_INSTALL_FILE_PERMS}
 )
+if(LAPLACE_DOTNET AND EXISTS "${LAPLACE_CHESS_SURFACES_PROJ}")
+    install(FILES ${LAPLACE_CHESS_TRANSITION_BIN}
+        DESTINATION share/laplace
+        RENAME "laplace_chess_transition_perfcache.bin"
+        PERMISSIONS ${LAPLACE_INSTALL_FILE_PERMS}
+    )
+endif()
 
 # Modality number compose floor (dense 0..255 channel-byte numbers) — spec 33 /
 # modality-ladder-law codepoint floor. Always emits from t0; no corpus path.
