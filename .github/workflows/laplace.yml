@@ -137,7 +137,15 @@ jobs:
     runs-on: [self-hosted, laplace]
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      # Persistent single-repository runner: use git directly so a transient
+      # codeload.github.com throttle cannot kill deployment in "Set up job".
+      # Force only tracked files; preserve the shared untracked build tree.
+      - name: Checkout requested revision (preserve build tree)
+        env:
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
+          git checkout --force "$TARGET_SHA"
 
       - name: CI presence tripwire
         # Guards against a repo-hygiene commit sweeping the CI definition away
@@ -299,8 +307,12 @@ jobs:
     runs-on: [self-hosted, laplace]
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
-        with: { submodules: false, clean: false }
+      - name: Checkout requested revision (preserve build tree)
+        env:
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
+          git checkout --force "$TARGET_SHA"
 
       - name: Guard — workspace must stay submodule-free
         run: |
@@ -474,8 +486,12 @@ jobs:
     runs-on: [self-hosted, laplace]
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
-        with: { submodules: false, clean: false }
+      - name: Checkout requested revision (preserve build tree)
+        env:
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
+          git checkout --force "$TARGET_SHA"
       - uses: ./.github/actions/setup-laplace-env
 
       - name: Clean build tree (dispatch full_clean only)
@@ -508,8 +524,12 @@ jobs:
     runs-on: [self-hosted, laplace]
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-        with: { submodules: false, clean: false }
+      - name: Checkout requested revision (preserve build tree)
+        env:
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
+          git checkout --force "$TARGET_SHA"
       - uses: ./.github/actions/setup-laplace-env
       - name: ctest
         env:
@@ -569,8 +589,12 @@ jobs:
       # ingest silently is the thing being fixed.
       # Checkout precedes the wait: the wait script comes FROM the checkout, so a
       # fresh runner workspace has nothing to run until after it (Copilot, PR #797).
-      - uses: actions/checkout@v4
-        with: { submodules: false, clean: false }
+      - name: Checkout requested revision (preserve build tree)
+        env:
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
+          git checkout --force "$TARGET_SHA"
       - uses: ./.github/actions/setup-laplace-env
       - name: Wait for in-flight ingests (substrate lock)
         timeout-minutes: 305
@@ -603,8 +627,12 @@ jobs:
       cancel-in-progress: false
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-        with: { submodules: false, clean: false }
+      - name: Checkout requested revision (preserve build tree)
+        env:
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
+          git checkout --force "$TARGET_SHA"
       - uses: ./.github/actions/setup-laplace-env
 
       - name: Migrate + sync extension + tune + perfcache GUC + API env
@@ -628,8 +656,12 @@ jobs:
     runs-on: [self-hosted, laplace]
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
-        with: { submodules: false, clean: false }
+      - name: Checkout requested revision (preserve build tree)
+        env:
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
+          git checkout --force "$TARGET_SHA"
       - uses: ./.github/actions/setup-laplace-env
 
       - name: Clear stale regress output (diffs below must be from THIS run)
@@ -704,8 +736,12 @@ jobs:
       STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
       STRIPE_API_Publishable: ${{ vars.STRIPE_API_PUBLISHABLE }}
     steps:
-      - uses: actions/checkout@v4
-        with: { submodules: false, clean: false }
+      - name: Checkout requested revision (preserve build tree)
+        env:
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
+          git checkout --force "$TARGET_SHA"
       - uses: ./.github/actions/setup-laplace-env
 
       - name: Publish (API + SPA + uci + chess-lab + secrets)
@@ -807,8 +843,12 @@ jobs:
       cancel-in-progress: false
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-        with: { submodules: false, clean: false }
+      - name: Checkout requested revision (preserve build tree)
+        env:
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
+          git checkout --force "$TARGET_SHA"
       - uses: ./.github/actions/setup-laplace-env
 
       - name: Substrate floor (fail loud — #792)
@@ -867,8 +907,12 @@ jobs:
     # ordinary deploy runs execute only the bounded correctness harness.
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-        with: { submodules: false, clean: false }
+      - name: Checkout requested revision (preserve build tree)
+        env:
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
+          git checkout --force "$TARGET_SHA"
       - uses: ./.github/actions/setup-laplace-env
       - name: Election + generation quality harness
         run: |
