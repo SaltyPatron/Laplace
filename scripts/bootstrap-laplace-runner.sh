@@ -25,8 +25,11 @@ LAPLACE_PG_DATA="$LAPLACE_PG_MOUNT/data"
 # RAID pair sat at 0.00% util. Every apply stage degraded ~5x in lockstep
 # (verify 25s->117s, fold 39k->5k cells/s) purely from queueing. Splitting WAL
 # onto the idle spindle removes the fsync stream from the read path.
-# The capacity lesson still binds: max_wal_size (32GB) must stay small relative
-# to the WAL volume's free space, which is asserted before initdb/relocation.
+# The capacity lesson still binds: the configured max_wal_size target plus an
+# explicit emergency reserve must fit on the dedicated WAL volume.  Check TOTAL
+# capacity, not currently-free bytes: an existing cluster legitimately keeps
+# reusable segment files in pg_wal, and counting those as unavailable made this
+# supposedly idempotent installer reject the healthy steady state it configured.
 #
 # NOT /opt/laplace/pg_wal (vg-raid on md127). That was the 2026-08-11 default and
 # it cost the cluster: md127 is a two-disk RAID0 with no redundancy, so when sda
@@ -40,11 +43,13 @@ LAPLACE_PG_DATA="$LAPLACE_PG_MOUNT/data"
 # single-disk storage, never on a stripe. /var is on sdc (vg-os), the healthiest
 # device on this host.
 LAPLACE_PG_WAL="${LAPLACE_PG_WAL:-/var/lib/pgwal}"
-# Must equal PG_TUNE_MAX_WAL in pg-machine-tuning.sh — the ENOSPC guard multiplies
-# these; when they were undefined, bash arithmetic made want_free 0 and the guard
-# passed unconditionally (dead since it was written).
-LAPLACE_PG_MAX_WAL_GB="${LAPLACE_PG_MAX_WAL_GB:-32}"
-LAPLACE_PG_WAL_HEADROOM="${LAPLACE_PG_WAL_HEADROOM:-3}"
+# Must equal PG_TUNE_MAX_WAL in pg-machine-tuning.sh and EmitPgTuning in
+# CpuTopologyCommands.cs. PgTuningParityTests pins all three copies. PostgreSQL's
+# max_wal_size is a soft checkpoint/recycling target, not a directory quota, so
+# the dedicated volume also carries a real reserve for checkpoint overshoot and
+# crash recovery. 96 + 32 = the provisioned 128 GiB LV.
+LAPLACE_PG_MAX_WAL_GB="${LAPLACE_PG_MAX_WAL_GB:-96}"
+LAPLACE_PG_WAL_RESERVE_GB="${LAPLACE_PG_WAL_RESERVE_GB:-32}"
 # THE THIRD I/O STREAM. Without a temp tablespace, sort/hash spill lands in
 # $PGDATA/base/pgsql_tmp — the heap device, competing with the reads of the very
 # query that is spilling. WAL was split off the heap after the 2026-07-26
@@ -577,12 +582,28 @@ pg_free_mb_of() {
     df -BM --output=avail "$p" 2>/dev/null | tail -1 | tr -dc '0-9'
 }
 
-# Assert the WAL target is a real split from the heap and has room for max_wal_size.
-# Keeps BOTH invariants: different spindle (the 2026-07-26 I/O contention) and
-# ample free space (the 2026-07-15 ENOSPC crash-loop).
+# Raw device MB beneath the filesystem holding $1. Linux exposes block sizes as
+# 512-byte sectors in sysfs; this measures the provisioned LV rather than XFS's
+# usable block count (which correctly excludes its own metadata).
+pg_device_mb_of() {
+    local p="$1"
+    local dev sectors
+    while [ ! -e "$p" ] && [ "$p" != "/" ]; do p="$(dirname "$p")"; done
+    dev="$(findmnt -n -o MAJ:MIN --target "$p" 2>/dev/null | tr -d '[:space:]')"
+    [ -n "$dev" ] && [ -r "/sys/dev/block/$dev/size" ] || return 1
+    read -r sectors < "/sys/dev/block/$dev/size"
+    printf '%s\n' "$(( sectors / 2048 ))"
+}
+
+# Assert the WAL target is a real split from the heap and that the dedicated
+# volume can hold the configured max_wal_size target plus crash-recovery reserve.
+# Current free space is deliberately NOT the admission criterion: pg_wal contains
+# PostgreSQL-managed reusable segments, so a steady-state rerun can be near the
+# target without being misprovisioned. Retention is diagnosed from the running
+# server (slots/archive/checkpoints), never by deleting or rejecting its files.
 pg_prepare_waldir() {
-    local want_free=$(( LAPLACE_PG_MAX_WAL_GB * LAPLACE_PG_WAL_HEADROOM ))
-    local data_dev wal_dev free_mb
+    local want_total=$(( LAPLACE_PG_MAX_WAL_GB + LAPLACE_PG_WAL_RESERVE_GB ))
+    local data_dev wal_dev device_mb fs_total_mb free_mb
 
     install -d -m 0700 -o "$RUNNER_USER" -g "$RUNNER_GROUP" "$LAPLACE_PG_WAL"
 
@@ -596,15 +617,21 @@ pg_prepare_waldir() {
         return 1
     fi
 
+    if ! device_mb="$(pg_device_mb_of "$LAPLACE_PG_WAL")"; then
+        red "✗ cannot resolve the block-device capacity beneath $LAPLACE_PG_WAL"
+        return 1
+    fi
+    fs_total_mb="$(df -BM --output=size "$LAPLACE_PG_WAL" 2>/dev/null | tail -1 | tr -dc '0-9')"
     free_mb="$(pg_free_mb_of "$LAPLACE_PG_WAL")"
-    if [ -n "$free_mb" ] && [ "$free_mb" -lt $(( want_free * 1024 )) ]; then
-        red "✗ $LAPLACE_PG_WAL has ${free_mb}MB free; want >= ${want_free}GB"
-        red "  (${LAPLACE_PG_WAL_HEADROOM}x max_wal_size=${LAPLACE_PG_MAX_WAL_GB}GB). A WAL volume that can"
-        red "  fill is how the 2026-07-15 seed put recovery into an ENOSPC crash-loop."
+    if [ "$device_mb" -lt $(( want_total * 1024 )) ]; then
+        red "✗ $LAPLACE_PG_WAL device is $(( device_mb / 1024 ))GB; want >= ${want_total}GB total"
+        red "  (max_wal_size target ${LAPLACE_PG_MAX_WAL_GB}GB + recovery reserve"
+        red "  ${LAPLACE_PG_WAL_RESERVE_GB}GB). The 2026-07-15 seed proved that a WAL"
+        red "  volume without recovery room can enter an ENOSPC crash-loop."
         return 1
     fi
 
-    green "✓ WAL volume $LAPLACE_PG_WAL — separate spindle, $(( free_mb / 1024 ))GB free"
+    green "✓ WAL volume $LAPLACE_PG_WAL — separate spindle, $(( device_mb / 1024 ))GB device, $(( fs_total_mb / 1024 ))GB usable, $(( free_mb / 1024 ))GB currently free"
 }
 
 # Move an existing cluster's pg_wal onto $LAPLACE_PG_WAL. Refuses on a running
