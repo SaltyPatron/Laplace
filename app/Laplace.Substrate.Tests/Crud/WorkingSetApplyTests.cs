@@ -219,6 +219,12 @@ public class WorkingSetApplyTests
         var first = await writer.ApplyWorkingSetAsync(change);
         Assert.Equal(1, first.EntitiesInserted);
         Assert.Equal(1, first.AttestationsInserted);
+        await using (var sourceClaim = _pg.DataSource.CreateCommand(
+            "SELECT count(*) FROM laplace.ingest_flush_journal WHERE source_id = $1"))
+        {
+            sourceClaim.Parameters.AddWithValue(src.ToBytes());
+            Assert.Equal(1L, (long)(await sourceClaim.ExecuteScalarAsync())!);
+        }
 
         // Retry after commit-ambiguity: same change, same intent hash. The
         // journal token must block the additive attestation merge that a

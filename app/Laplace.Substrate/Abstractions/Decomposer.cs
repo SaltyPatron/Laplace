@@ -278,7 +278,7 @@ public abstract class Decomposer<TRecord> : IDecomposer
             IngestBatchPipeline.PerFileResumePlan? resume =
                 PerFileResume && context.Reader is { } reader
                     ? new IngestBatchPipeline.PerFileResumePlan(
-                        reader, LayerOrder, options.ReObservePresent)
+                        reader, LayerOrder, options.ReObservePresent, SourceId)
                     {
                         Resolved = new System.Collections.Concurrent.ConcurrentDictionary<
                             string, (Hash128? Root, bool Skip)>(StringComparer.Ordinal),

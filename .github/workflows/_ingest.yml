@@ -275,10 +275,32 @@ jobs:
             echo "::error::eviction receipt failed: $after evidence row(s) remain for $src_name"
             exit 1
           fi
-          echo "::notice::eviction receipt: $src_name evidence $before → 0; beginning full re-ingest"
+          checkpoints_after=$(psql -h /var/run/postgresql -U laplace_admin -d "${{ inputs.database }}" \
+            -v ON_ERROR_STOP=1 -tAc \
+            "WITH owned AS (
+               SELECT DISTINCT f.file_id,
+                      realize.canonical_id('substrate/type/HasLayerCompleted/' || r.layer::text || '/v1') marker_type,
+                      r.source_id owner_source
+               FROM laplace.ingest_run_journal r
+               JOIN laplace.ingest_file_journal f ON f.run_id = r.run_id
+               WHERE r.source_id = laplace.source_id('$src_name') AND f.file_id IS NOT NULL)
+             SELECT count(*) FROM laplace.attestations a JOIN owned o
+               ON a.type_id = o.marker_type AND a.source_id = o.file_id
+              AND (a.context_id = o.owner_source OR a.context_id IS NULL);")
+          replay_after=$(psql -h /var/run/postgresql -U laplace_admin -d "${{ inputs.database }}" \
+            -v ON_ERROR_STOP=1 -tAc \
+            "SELECT count(*) FROM laplace.ingest_flush_journal
+             WHERE source_id = laplace.source_id('$src_name');")
+          if [ "$checkpoints_after" != "0" ] || [ "$replay_after" != "0" ]; then
+            echo "::error::eviction receipt failed: $checkpoints_after file checkpoint(s), $replay_after replay claim(s) remain for $src_name"
+            exit 1
+          fi
+          echo "::notice::eviction receipt: $src_name evidence $before → 0; file checkpoints 0; replay claims 0; beginning forced full re-ingest"
 
       - name: Ingest
         id: run_ingest
+        env:
+          LAPLACE_INGEST_FORCE: ${{ inputs.evict_before_ingest && '1' || '0' }}
         run: |
           # Unset LAPLACE_INGEST_LANGS = ALL languages (witness-manifest law).
           # Narrowing a run is an explicit operator decision via the langs input.

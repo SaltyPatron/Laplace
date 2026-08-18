@@ -31,6 +31,21 @@ public static class LayerCompletion
                 RelationTypeRank.Mandate * SourceTrust.SubstrateMandate));
     }
 
+    /// <summary>Vendor-owned per-file marker. File identity remains the provenance
+    /// source; context identifies the specific decomposer implementation that completed
+    /// it, so another vendor consuming the same bytes cannot inherit its checkpoint.</summary>
+    public static void EmitFileMarker(
+        SubstrateChangeBuilder builder, Hash128 fileRoot, Hash128 decomposerSourceId,
+        int layerOrder)
+    {
+        var typeId = RelationTypeId(layerOrder);
+        builder
+            .AddEntity(typeId, EntityTier.Word, BootstrapIntentBuilder.RelationTypeMetaTypeId, fileRoot)
+            .AddAttestation(NativeAttestation.CategoricalResolved(
+                fileRoot, typeId, fileRoot, fileRoot, contextId: decomposerSourceId,
+                RelationTypeRank.Mandate * SourceTrust.SubstrateMandate));
+    }
+
     public static SubstrateChange BuildMarker(IDecomposer decomposer)
     {
         var typeId = RelationTypeId(decomposer.LayerOrder);

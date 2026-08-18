@@ -25,6 +25,9 @@ DECLARE
     m2       bytea := public.laplace_hash128_blake3('test/evict/marker2');
     m3       bytea := public.laplace_hash128_blake3('test/evict/content-by-analysis');
     m4       bytea := public.laplace_hash128_blake3('test/evict/marker-of-witness');
+    fm_t     bytea := realize.canonical_id('substrate/type/HasLayerCompleted/2/v1');
+    f1       bytea := public.laplace_hash128_blake3('test/evict/file/owned');
+    f2       bytea := public.laplace_hash128_blake3('test/evict/file/legacy');
     phi_w    bigint := 30000000000;
     phi_a    bigint := 150000000000;
     win      bigint := 1000000000;
@@ -44,8 +47,33 @@ BEGIN
         -- m3: CONTENT first-observed by the analysis source (must survive).
         -- m4: a marker-typed entity of ANOTHER source (must survive).
         (m1, 4, marker_t, src_a), (m2, 4, marker_t, src_a),
-        (m3, 4, type_t, src_a), (m4, 4, marker_t, src_w)
+        (m3, 4, type_t, src_a), (m4, 4, marker_t, src_w),
+        (fm_t, 4, type_t, f1), (f1, 4, type_t, src_a), (f2, 4, type_t, src_a)
     ON CONFLICT (id, tier) DO NOTHING;
+
+    INSERT INTO laplace.ingest_run_journal
+        (run_id, source_name, source_id, layer, status)
+    VALUES
+        ('00000000-0000-0000-0000-000000000508', 'EvictTestAnalysis', src_a, 2, 'ok');
+    INSERT INTO laplace.ingest_file_journal
+        (run_id, file_label, source_name, file_id, status)
+    VALUES
+        ('00000000-0000-0000-0000-000000000508', 'owned.file', 'EvictTestAnalysis', f1, 'ok'),
+        ('00000000-0000-0000-0000-000000000508', 'legacy.file', 'EvictTestAnalysis', f2, 'ok');
+    INSERT INTO laplace.ingest_flush_journal (working_set_id, source_id)
+    VALUES (public.laplace_hash128_blake3('test/evict/replay'), src_a);
+
+    -- New checkpoints carry the vendor source in context; the second row is the
+    -- pre-migration shape. Source eviction must retract both through the file journal.
+    INSERT INTO laplace.attestations
+        (id, subject_id, type_id, object_id, source_id, context_id,
+         outcome, last_observed_at, observation_count,
+         sum_score_fp1e9, opponent_rd_fp1e9)
+    VALUES
+        (public.laplace_hash128_blake3('test/evict/file-marker/owned'),
+         f1, fm_t, f1, f1, src_a, 2, t3, 1, win, phi_w),
+        (public.laplace_hash128_blake3('test/evict/file-marker/legacy'),
+         f2, fm_t, f2, f2, NULL, 2, t3, 1, win, phi_w);
 
     -- Evidence rows persist the fold's exact inputs (observation_count,
     -- sum_score_fp1e9, opponent_rd_fp1e9) — the refold replays them verbatim.
@@ -157,6 +185,9 @@ DECLARE
     m2       bytea := public.laplace_hash128_blake3('test/evict/marker2');
     m3       bytea := public.laplace_hash128_blake3('test/evict/content-by-analysis');
     m4       bytea := public.laplace_hash128_blake3('test/evict/marker-of-witness');
+    fm_t     bytea := realize.canonical_id('substrate/type/HasLayerCompleted/2/v1');
+    f1       bytea := public.laplace_hash128_blake3('test/evict/file/owned');
+    f2       bytea := public.laplace_hash128_blake3('test/evict/file/legacy');
     phi_w    bigint := 30000000000;
     win      bigint := 1000000000;
     s_conf   bigint := 900000000;
@@ -174,6 +205,19 @@ BEGIN
     IF n <> 0 THEN RAISE EXCEPTION 'FAIL: % analysis rows survived eviction', n; END IF;
     SELECT count(*) INTO n FROM laplace.attestations WHERE source_id = src_w;
     IF n <> 5 THEN RAISE EXCEPTION 'FAIL: witness evidence count % <> 5', n; END IF;
+    IF EXISTS (
+        SELECT 1 FROM laplace.attestations
+        WHERE type_id = fm_t AND source_id IN (f1, f2)) THEN
+        RAISE EXCEPTION 'FAIL: per-file completion marker survived source eviction';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM laplace.ingest_flush_journal WHERE source_id = src_a) THEN
+        RAISE EXCEPTION 'FAIL: source-owned replay claim survived source eviction';
+    END IF;
+    IF (SELECT count(*) FROM laplace.ingest_file_journal
+        WHERE run_id = '00000000-0000-0000-0000-000000000508') <> 2 THEN
+        RAISE EXCEPTION 'FAIL: eviction destroyed the per-file audit journal';
+    END IF;
 
     -- (I) and (V): zero-survivor cells are DELETED, not zeroed (unattested is not
     -- attested-false)
@@ -428,7 +472,14 @@ DECLARE
     src_a bytea := laplace.source_id('EvictTestAnalysis');
     subj  bytea := public.laplace_hash128_blake3('test/evict/subject');
 BEGIN
+    DELETE FROM laplace.ingest_file_journal
+    WHERE run_id = '00000000-0000-0000-0000-000000000508';
+    DELETE FROM laplace.ingest_run_journal
+    WHERE run_id = '00000000-0000-0000-0000-000000000508';
     DELETE FROM laplace.attestations WHERE source_id IN (src_w, src_a);
+    DELETE FROM laplace.entities
+    WHERE id = realize.canonical_id('substrate/type/HasLayerCompleted/2/v1')
+      AND first_observed_by = public.laplace_hash128_blake3('test/evict/file/owned');
     DELETE FROM laplace.consensus WHERE subject_id = subj;
     DELETE FROM laplace.highway_mask_dirty WHERE id IN (
         subj,
@@ -445,7 +496,9 @@ BEGIN
         public.laplace_hash128_blake3('test/evict/obj4'),
         public.laplace_hash128_blake3('test/evict/obj5'),
         public.laplace_hash128_blake3('test/evict/marker-of-witness'),
-        public.laplace_hash128_blake3('test/evict/content-by-analysis'));
+        public.laplace_hash128_blake3('test/evict/content-by-analysis'),
+        public.laplace_hash128_blake3('test/evict/file/owned'),
+        public.laplace_hash128_blake3('test/evict/file/legacy'));
     DROP TABLE IF EXISTS _ev_snap_v1;
     DROP TABLE IF EXISTS _ev_snap_evicted;
     RAISE NOTICE '- evict fixture cleaned up';

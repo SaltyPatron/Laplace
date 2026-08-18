@@ -48,6 +48,28 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         }
     }
 
+    public async Task<bool> HasFileCompletedAsync(
+        Hash128 fileId, Hash128 decomposerSourceId, int layerOrder,
+        CancellationToken ct = default)
+    {
+        await using var cmd = _ds.CreateCommand(
+            "SELECT EXISTS (SELECT 1 FROM laplace.attestations a "
+            + "WHERE a.type_id = realize.canonical_id($1) "
+            + "AND a.source_id = $2 AND a.context_id = $3)");
+        cmd.Parameters.AddWithValue(NpgsqlDbType.Text,
+            $"substrate/type/HasLayerCompleted/{layerOrder}/v1");
+        cmd.Parameters.AddWithValue(NpgsqlDbType.Bytea, fileId.ToBytes());
+        cmd.Parameters.AddWithValue(NpgsqlDbType.Bytea, decomposerSourceId.ToBytes());
+        try
+        {
+            return await cmd.ExecuteScalarAsync(ct) is true;
+        }
+        catch (PostgresException)
+        {
+            return false;
+        }
+    }
+
     /// <summary>
     /// One round trip for N file roots, replacing N scalar probes. See the interface
     /// doc for the measurement that motivated it (FrameNet: 14,900 files, 37.7 ms each,
@@ -95,6 +117,42 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
             // opposite would silently skip un-ingested files.
             return new HashSet<Hash128>();
         }
+    }
+
+    public async Task<IReadOnlySet<Hash128>> HasFilesCompletedAsync(
+        IReadOnlyList<Hash128> fileIds, Hash128 decomposerSourceId, int layerOrder,
+        CancellationToken ct = default)
+    {
+        var done = new HashSet<Hash128>();
+        if (fileIds.Count == 0) return done;
+
+        var raw = new byte[fileIds.Count][];
+        for (int i = 0; i < fileIds.Count; i++) raw[i] = fileIds[i].ToBytes();
+
+        await using var cmd = _ds.CreateCommand(
+            "SELECT DISTINCT a.source_id FROM laplace.attestations a "
+            + "WHERE a.type_id = realize.canonical_id($1) "
+            + "AND a.source_id = ANY($2) AND a.context_id = $3");
+        cmd.Parameters.AddWithValue(NpgsqlDbType.Text,
+            $"substrate/type/HasLayerCompleted/{layerOrder}/v1");
+        cmd.Parameters.Add(new NpgsqlParameter
+        {
+            Value = raw,
+            NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea,
+        });
+        cmd.Parameters.AddWithValue(NpgsqlDbType.Bytea, decomposerSourceId.ToBytes());
+        try
+        {
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            while (await r.ReadAsync(ct))
+                done.Add(Hash128.FromBytes((byte[])r[0]));
+        }
+        catch (PostgresException)
+        {
+            // Unreadable marker state means not known complete. Re-observation is safe;
+            // silently skipping a file is not.
+        }
+        return done;
     }
 
     public async Task<long> CountEntitiesByTypeAsync(Hash128 typeId, CancellationToken ct = default)
