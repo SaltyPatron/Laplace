@@ -80,6 +80,34 @@ public sealed class PathListMultiFileStream<TRecord>(
     }
 }
 
+/// <summary>Generic file-pool dispatch order. Full-corpus runs use longest-processing-
+/// time first with file bytes as the format-independent cost estimate; this prevents a
+/// giant file discovered late from becoming a one-worker serial tail. Capped runs retain
+/// the decomposer's declared order because their exact input prefix is operator-visible.</summary>
+internal static class MultiFileScheduler
+{
+    internal static IReadOnlyList<(string Path, string Label)> Schedule(
+        IReadOnlyList<(string Path, string Label)> files, long maxTotalUnits)
+    {
+        if (files.Count <= 1 || maxTotalUnits > 0) return files;
+
+        return files
+            .Select(static f => (File: f, Bytes: TryLength(f.Path)))
+            .OrderByDescending(static f => f.Bytes)
+            .ThenBy(static f => f.File.Path, StringComparer.Ordinal)
+            .ThenBy(static f => f.File.Label, StringComparer.Ordinal)
+            .Select(static f => f.File)
+            .ToArray();
+    }
+
+    private static long TryLength(string path)
+    {
+        try { return new FileInfo(path).Length; }
+        catch (IOException) { return -1; }
+        catch (UnauthorizedAccessException) { return -1; }
+    }
+}
+
 public interface IIngestDeferredUnit : IDisposable
 {
     TierTree? TreeForBatchProbe { get; }
