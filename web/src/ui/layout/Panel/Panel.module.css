@@ -1,9 +1,16 @@
 @layer components {
   .panel {
-    background: var(--color-bg-panel);
+    position: relative;
+    background:
+      linear-gradient(var(--color-copper), var(--color-copper)) 0 0 / 18px 1px no-repeat,
+      linear-gradient(var(--color-copper), var(--color-copper)) 100% 0 / 18px 1px no-repeat,
+      linear-gradient(var(--color-copper), var(--color-copper)) 0 100% / 18px 1px no-repeat,
+      linear-gradient(var(--color-copper), var(--color-copper)) 100% 100% / 18px 1px no-repeat,
+      var(--material-enamel);
     border: 1px solid var(--color-border-default);
     border-radius: var(--radius-md);
     padding: 0.75rem 1rem;
+    box-shadow: var(--shadow-instrument);
   }
 
   .fill {
@@ -34,6 +41,7 @@
   .head h3 {
     margin: 0;
     font-size: 0.95rem;
+    letter-spacing: 0.035em;
   }
 
   .actions {
