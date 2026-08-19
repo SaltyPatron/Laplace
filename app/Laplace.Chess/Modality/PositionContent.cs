@@ -52,8 +52,7 @@ public static class PositionContent
         // vector are all recoverable from the squares. They therefore contribute ZERO
         // distinguishing power to the hash — two positions agreeing on placement agree on all
         // of them by construction — while costing roughly a third of the surface string, a
-        // substructure entity per token, a 33-byte trajectory vertex per token, and a per-ply
-        // OUTCOME deposit each (~5 of 25-36 constituents).
+        // substructure entity per token and a 33-byte trajectory vertex per token.
         //
         // The concepts are NOT being discarded. "How do doubled-pawn positions fare" is a real
         // question and its consensus cell should saturate across every position sharing the

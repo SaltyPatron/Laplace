@@ -11,9 +11,9 @@ namespace Laplace.Chess.Service.Tests;
 /// GH #736 — the identity law itself. The game CONTENT entity is the LINE:
 /// Hash128.Merkle(LineTier, ordered position ids), minted at extract time by replay, so
 /// identical PLAY collides regardless of who played it, when, or how the source spelled
-/// the SAN. The playing EVENT is a provenance handle: distinct per record, used as
+/// the SAN. The PLAYING is a provenance handle: distinct per record, used as
 /// attestation context and as the subject of exactly one record edge,
-/// (event, PLAYS_LINE, line).
+/// (playing, PLAYS_LINE, line).
 /// </summary>
 public sealed class ChessLineIdentityTests
 {
@@ -119,11 +119,11 @@ public sealed class ChessLineIdentityTests
             ChessCompose.LineId(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(positionIds)));
     }
 
-    // The recorder's emission shape: exactly one (event, PLAYS_LINE, line) edge carrying
-    // the playing's white-POV outcome, and the line's own (line, OUTCOME) fold cell with
-    // ctx = the event.
+    // The recorder's emission shape: exactly one structural (playing, PLAYS_LINE, line)
+    // edge. The result is witnessed separately at playing grain; neither the join nor the
+    // reusable line is an outcome-bearing move fact.
     [Fact]
-    public void Recorder_EmitsPlaysLine_AndLineOutcome_PerPlaying()
+    public void Recorder_EmitsStructuralPlaysLine_WithoutLineOutcomeProjection()
     {
         var parsed = ChessPgnDecomposer.TryParseGame(GameCanonical)!;
         var b = new SubstrateChangeBuilder(ChessVocabulary.PgnSourceId, "test/identity");
@@ -133,19 +133,46 @@ public sealed class ChessLineIdentityTests
         var plays = Assert.Single(change.Attestations, a => a.TypeId == ChessVocabulary.PlaysLineType);
         Assert.Equal(parsed.PlayingId, plays.SubjectId);
         Assert.Equal(parsed.LineId, plays.ObjectId);
-        Assert.Equal(Glicko2.ScoreWin, plays.SumScoreFp1e9); // 1-0, white POV
         Assert.Equal(1, plays.ObservationCount);
 
-        var lineOutcome = Assert.Single(change.Attestations,
+        Assert.DoesNotContain(change.Attestations,
             a => a.TypeId == ChessVocabulary.OutcomeType && a.SubjectId == parsed.LineId);
-        Assert.Equal(parsed.PlayingId, lineOutcome.ContextId);
-        Assert.Equal(Glicko2.ScoreWin, lineOutcome.SumScoreFp1e9);
-        Assert.Equal(1, lineOutcome.ObservationCount);
+        Assert.Contains(change.Attestations,
+            a => a.TypeId == ChessVocabulary.HasResultType
+                 && a.SubjectId == parsed.LineId
+                 && a.ContextId == parsed.PlayingId);
 
         // Line = content; playing = novelty/attestation handle; tournament Event is separate.
         Assert.Contains(change.Entities, e => e.Id == parsed.LineId && e.TypeId == ChessVocabulary.GameType);
         Assert.Contains(change.Entities, e => e.Id == parsed.PlayingId && e.TypeId == ChessVocabulary.PlayingType);
         Assert.Contains(change.Entities, e => e.Id == parsed.EventId && e.TypeId == ChessVocabulary.EventType);
+    }
+
+    [Fact]
+    public void SameLine_DifferentPlayingResults_AreRecoveredFromPlayingContext()
+    {
+        var whiteWin = ChessPgnDecomposer.TryParseGame(GameCanonical)!;
+        var blackWinPgn = GameCanonical
+            .Replace("[Result \"1-0\"]", "[Result \"0-1\"]", StringComparison.Ordinal)
+            .Replace("Bc5 1-0", "Bc5 0-1", StringComparison.Ordinal);
+        var blackWin = ChessPgnDecomposer.TryParseGame(blackWinPgn)!;
+        Assert.Equal(whiteWin.LineId, blackWin.LineId);
+        Assert.NotEqual(whiteWin.PlayingId, blackWin.PlayingId);
+
+        var b = new SubstrateChangeBuilder(ChessVocabulary.PgnSourceId, "test/results");
+        ChessPgnDecomposer.RecordGame(whiteWin, b);
+        ChessPgnDecomposer.RecordGame(blackWin, b);
+        var change = b.SetInputUnitsConsumed(2).Build();
+
+        Assert.Equal(2, change.Attestations.Count(a =>
+            a.TypeId == ChessVocabulary.PlaysLineType
+            && a.ObjectId == whiteWin.LineId));
+        Assert.Equal(2, change.Attestations.Count(a =>
+            a.TypeId == ChessVocabulary.HasResultType
+            && a.SubjectId == whiteWin.LineId
+            && (a.ContextId == whiteWin.PlayingId || a.ContextId == blackWin.PlayingId)));
+        Assert.DoesNotContain(change.Attestations,
+            a => a.TypeId == ChessVocabulary.OutcomeType && a.SubjectId == whiteWin.LineId);
     }
 
     // Idempotent re-ingest: once a record's event is present, a second pass over the

@@ -36,6 +36,10 @@ public sealed class SubstrateStateValuer : IStateValuer
             }
         }
 
+        // These cells are an optional derived/materialized lens. Recording a game no
+        // longer deposits its result onto every position constituent; a clean substrate
+        // therefore returns neutral until a separate promotion pass materializes a
+        // reusable structural statistic. Missing materialization is not false evidence.
         var stats = await ReadOutcomeStatsAsync(distinct, ct).ConfigureAwait(false);
 
         for (int i = 0; i < n; i++)

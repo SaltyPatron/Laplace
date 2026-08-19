@@ -60,11 +60,16 @@ public sealed class ChessStockfishEvalTests
         var change = Derive(new ScriptedEvaluator(new int?[] { 20, -15, 25, -30, 90, -120, 350 }));
         var evalRows = change.Attestations
             .Where(a => a.TypeId == ChessVocabulary.HasEvalType).ToList();
-        Assert.NotEmpty(evalRows);
+        Assert.Equal(7, evalRows.Count);
+        var positions = change.Entities
+            .Where(e => e.TypeId == ChessVocabulary.PositionType)
+            .Select(e => e.Id)
+            .ToHashSet();
         Assert.All(evalRows, a =>
         {
             Assert.Equal(ChessStockfishEval.SourceId, a.SourceId);
             Assert.NotNull(a.ContextId);
+            Assert.Contains(a.SubjectId, positions);
         });
     }
 

@@ -68,7 +68,7 @@ public sealed class ChessAnalyzerTests
             .Where(e => e.TypeId == ChessVocabulary.SubstructureType)
             .Select(e => e.Id)
             .ToHashSet();
-        Assert.Contains(change.Attestations,
+        Assert.DoesNotContain(change.Attestations,
             a => a.TypeId == ChessVocabulary.OutcomeType
                  && substructures.Contains(a.SubjectId));
     }

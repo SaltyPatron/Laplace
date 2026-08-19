@@ -67,8 +67,6 @@ public sealed class SubstrateTurnHost : IContentAddresser, IEdgeRatings, IStateV
 
 
 
-    private const long CheckmateGames = 3;
-
     public Task LearnGameAsync(IReadOnlyList<RecordedEdge> edges, CancellationToken ct = default)
     => LearnGameAsync(edges, adjudicated: false, ct);
 
@@ -82,21 +80,13 @@ public sealed class SubstrateTurnHost : IContentAddresser, IEdgeRatings, IStateV
         ChessVocabulary.EmitPlayer(
             b, ChessVocabulary.LaplacePlayerId, "Laplace", ChessVocabulary.SourceId, SourceTrust.Response);
 
-        bool hasWin = false;
-        foreach (var e in edges) if (e.MoverOutcome == PlyOutcome.Win) { hasWin = true; break; }
-        bool checkmate = !adjudicated && hasWin;
-        long games = checkmate ? CheckmateGames : 1;
-
         var line = new List<ChessNode>(edges.Count + 1);
         foreach (var e in edges)
         {
-            var moverOutcome = adjudicated ? PlyOutcome.Draw : e.MoverOutcome;
             var from = ChessGraph.EmitComposed(b, e.SubjectKey, ChessVocabulary.SourceId);
             var to = ChessGraph.EmitComposed(b, e.ObjectKey, ChessVocabulary.SourceId);
             if (line.Count == 0) line.Add(from.Position);
             line.Add(to.Position);
-            ChessGraph.AppendSubstructureOutcome(
-                b, from, moverOutcome, games, _witnessWeight, ChessVocabulary.SourceId);
         }
 
         var lineId = ChessCompose.LineId(line.Select(static n => n.Id).ToArray());
@@ -113,17 +103,13 @@ public sealed class SubstrateTurnHost : IContentAddresser, IEdgeRatings, IStateV
         b.AddEntity(
             playingId, EntityTier.Document, ChessVocabulary.PlayingType,
             ChessVocabulary.SourceId);
-        b.AddAttestation(NativeAttestation.Aggregated(
-            subject: playingId,
-            typeId: ChessVocabulary.PlaysLineType,
-            obj: lineId,
-            sourceId: ChessVocabulary.SourceId,
-            contextId: null,
-            games: 1,
-            sumScoreFp1e9: ChessGraph.ScoreFp1e9(whiteOutcome),
-            witnessWeight: _witnessWeight));
-        ChessGraph.AppendLineOutcome(
-            b, lineId, whiteOutcome, _witnessWeight, ChessVocabulary.SourceId, playingId);
+        b.AddAttestation(NativeAttestation.CategoricalResolved(
+            playingId, ChessVocabulary.PlaysLineType, lineId,
+            ChessVocabulary.SourceId, null, _witnessWeight));
+        if (ContentEmitter.Emit(b, resultToken, ChessVocabulary.SourceId) is { } resultId)
+            b.AddAttestation(NativeAttestation.CategoricalResolved(
+                lineId, ChessVocabulary.HasResultType, resultId,
+                ChessVocabulary.SourceId, playingId, _witnessWeight));
         long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
         ChessGraph.AppendGameTrajectory(
             b, lineId, line, ChessVocabulary.TrajectorySourceId, nowUs);
