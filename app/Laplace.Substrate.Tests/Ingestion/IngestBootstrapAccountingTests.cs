@@ -26,12 +26,18 @@ public sealed class IngestBootstrapAccountingTests
 
         Assert.Equal(2, result.EntitiesInserted);
         Assert.Equal(1, result.PhysicalitiesInserted);
-        Assert.Equal(0, result.AttestationsInserted);
+        Assert.Equal(1, result.AttestationsInserted);
         Assert.Equal(1, result.BootstrapEntitiesInserted);
         Assert.Equal(0, result.BootstrapPhysicalitiesInserted);
         Assert.Equal(0, result.BootstrapAttestationsInserted);
         Assert.Equal(1, result.GovernedIdentitiesWithoutPhysicality);
         Assert.Equal(1, result.InputUnitsDone);
+        Assert.Equal(1, result.ConsensusObservations);
+        Assert.Equal(1, result.ConsensusCellDeposits);
+        Assert.Equal(1, result.BootstrapRowsInserted);
+        Assert.Equal(3, result.PayloadRowsInserted);
+        Assert.Equal(3, result.PayloadRowsPerInput);
+        Assert.Equal(1, result.ObservationsPerCellDeposit);
     }
 
     private sealed class BootstrapThenContentDecomposer : IDecomposer
@@ -65,9 +71,16 @@ public sealed class IngestBootstrapAccountingTests
                     PhysicalityId.Compute(Content, PhysicalityType.Content),
                     Content, Source, PhysicalityType.Content,
                     1, 0, 0, 0, Hilbert128.Encode(coord), null, 0, null, null, 0))
-                .SetInputUnitsConsumed(1)
-                .Build();
-            yield return change;
+                .SetInputUnitsConsumed(1);
+            change.AddAttestation(NativeAttestation.CategoricalResolved(
+                Content,
+                RelationTypeRegistry.RelationTypeId("IS_TYPED_AS"),
+                Governed,
+                Source,
+                contextId: null,
+                witnessWeight: 1));
+            var built = change.Build();
+            yield return built;
             await Task.CompletedTask;
         }
 
@@ -77,8 +90,11 @@ public sealed class IngestBootstrapAccountingTests
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
-    private sealed class InsertAllWriter : ISubstrateWriter
+    private sealed class InsertAllWriter : ISubstrateWriter, IConsensusFoldMetrics
     {
+        public long ObservationsAccumulated { get; private set; } = 11;
+        public long CellsFolded { get; private set; } = 7;
+
         public Task<ApplyResult> ApplyAsync(SubstrateChange change, CancellationToken ct = default)
         {
             int entities = change.Entities.Length;
@@ -91,6 +107,8 @@ public sealed class IngestBootstrapAccountingTests
                     physicalities += stage.PhysicalityCount;
                     attestations += stage.AttestationCount;
                 }
+            ObservationsAccumulated += attestations;
+            CellsFolded += attestations;
             return Task.FromResult(new ApplyResult(
                 entities, entities,
                 physicalities, physicalities,
