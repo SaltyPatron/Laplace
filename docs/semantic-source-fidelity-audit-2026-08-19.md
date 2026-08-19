@@ -94,12 +94,32 @@ This audit does not propose namespaced content blobs.
 | Open English WordNet / Namenet | absent | Add current WN-LMF release; do not replace PWN 3.0 anchors |
 | PreMOn / FrameBase | absent | Potential normalized supplemental witnesses, not substitutes for current native releases |
 
-`/vault/models` contains model witnesses, embedding/reranker families, media
-models, code corpora, and GGUF space. It contains no additional WordNet,
-FrameNet, PropBank, VerbNet, SemLink, or Predicate Matrix authority that closes
-the gaps above. Older model snapshots are not automatically bad: if retained as
-heterogeneous testimony, their exact revision and artifact hash must identify
-the witness.
+### Model witness vault
+
+`/vault/models` has 38 top-level directories. It is a separate witness/artifact
+vault, not a hidden lexical-authority tree:
+
+- generative/code families: Qwen 2.5 Coder, Qwen 3 Coder, Qwen 3.8, DeepSeek
+  Coder, TinyLlama, and Phi-2;
+- text/code embedding and reranking: Qwen 3, Jina, and MiniLM families;
+- visual embedding/reranking and detection: Qwen 3 VL, DETR, Conditional DETR,
+  RT-DETR, Florence 2, Grounding DINO, and YOLO;
+- speech/audio/music: SAM Audio, Fish Speech, Granite Speech, Canary-Qwen, and
+  Music Flamingo; and
+- corpora/export space: `code-corpus`, `stack-v2`, `tiny-codes`, and `gguf`.
+
+It contains no additional WordNet, FrameNet, PropBank, VerbNet, SemLink, or
+Predicate Matrix authority that closes the gaps above. Twenty-five top-level
+model directories use a Hugging Face `snapshots` layout, but only 16 expose a
+`refs` directory; other downloads use local-directory/cache layouts. Admission
+must therefore resolve and record an exact snapshot/revision and artifact hash,
+not infer identity or chronology from the directory name.
+
+Older models such as Phi-2, TinyLlama, or older coder families are not
+automatically bad when admitted as exact, heterogeneous testimony. They are bad
+only if an unpinned directory name is treated as witness identity, or if their
+age/size/family is ignored when weighting evidence. None should be mistaken for
+a native semantic authority or used to repair decomposer loss by model vote.
 
 ## Measured extraction losses
 
