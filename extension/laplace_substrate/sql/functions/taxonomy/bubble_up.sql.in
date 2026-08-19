@@ -52,7 +52,7 @@ family_out AS (
 resolved AS (
     /* lemma --HAS_SENSE--> sense --IS_SENSE_OF--> synset */
     SELECT fo.target_id AS sense_id,
-           ss.object_id AS synset_id,
+           COALESCE(ss.object_id, fo.target_id) AS synset_id,
            fo.via_relation,
            fo.base_eff_mu,
            (fo.witnesses + COALESCE(ss.witness_count, 0))::bigint AS witnesses,
@@ -64,7 +64,6 @@ resolved AS (
      AND ss.type_id = ANY (consensus.relation_family_ids('HAS_SENSE'))
      AND consensus.relation_canonical(ss.type_id) = 'IS_SENSE_OF'
     WHERE fo.via_relation = 'HAS_SENSE'
-      AND ss.object_id IS NOT NULL
 
     UNION ALL
 

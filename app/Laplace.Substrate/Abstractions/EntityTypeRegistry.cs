@@ -73,4 +73,6 @@ public static class EntityTypeRegistry
     public static readonly Hash128 Word = Id("Word");
     public static readonly Hash128 WordNetSense = Id("WordNet_Sense");
     public static readonly Hash128 WordNetSynset = Id("WordNet_Synset");
+    public static readonly Hash128 WikidataItem = Id("Wikidata_Item");
+    public static readonly Hash128 WiktionarySense = Id("Wiktionary_Sense");
 }

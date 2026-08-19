@@ -77,22 +77,27 @@ CREATE OR REPLACE FUNCTION lexical.senses(p_word bytea, p_context bytea[])
         WHERE b.synset_id IS NOT NULL
     ),
     cand AS MATERIALIZED (
-        SELECT s.sense_id, ss.object_id AS synset_id,
+        SELECT s.sense_id, COALESCE(ss.object_id, s.sense_id) AS synset_id,
                s.rating, s.rd, s.witness_count AS w1,
-               ss.witness_count AS w2
+               COALESCE(ss.witness_count, 0) AS w2
         FROM @extschema@.v_word_senses s
-        JOIN @extschema@.consensus ss ON ss.subject_id = s.sense_id
+        LEFT JOIN @extschema@.consensus ss ON ss.subject_id = s.sense_id
                          AND ss.type_id = @extschema@.relation_type_id('IS_SENSE_OF')
         WHERE s.word_id = ANY(lexical.lexical_peers(p_word))
+    ),
+    candidate_nodes AS (
+        SELECT c.synset_id AS sid, c.synset_id AS node_id FROM cand c
+        UNION
+        SELECT c.synset_id, c.sense_id FROM cand c
     ),
     -- USAGE: candidate owns a sentence (gloss band 1 / example band 7) whose
     -- word-tier realize.constituents include a context token.
     own_sent AS (
-        SELECT DISTINCT c.subject_id AS sid, c.object_id AS gid,
+        SELECT DISTINCT n.sid, c.object_id AS gid,
                consensus.eff_mu(c.rating, c.rd) AS w
-        FROM @extschema@.consensus c
-        WHERE c.subject_id IN (SELECT synset_id FROM cand)
-          AND consensus.relation_highway_band(c.type_id) IN (1, 7)
+        FROM candidate_nodes n
+        JOIN @extschema@.consensus c ON c.subject_id = n.node_id
+        WHERE consensus.relation_highway_band(c.type_id) IN (1, 7)
     ),
     lane_usage AS (
         SELECT os.sid, sum(os.w) AS boost
