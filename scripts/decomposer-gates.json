@@ -357,6 +357,24 @@
         }
       ]
     },
+    "chess-analyze": {
+      "decomposer": "ChessAnalysis",
+      "layer": 21,
+      "prerequisites": [
+        "chess"
+      ],
+      "marker_entities": "Chess_AnalysisMarker",
+      "consensus_gates": [
+        {
+          "relation": "ANALYZED_AT",
+          "min": 1
+        },
+        {
+          "relation": "MOVE",
+          "max": 0
+        }
+      ]
+    },
     "openings": {
       "decomposer": "ChessOpenings",
       "layer": 20,

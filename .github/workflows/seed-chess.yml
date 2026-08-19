@@ -3,6 +3,8 @@ name: Seed — chess
 # The chess modality as its own phase. Each choice is a distinct decomposer, one
 # per run (no bucket):
 #   chess        — PGN games: record (ChessPgn) + substrate analyze pass
+#   chess-analyze — rederive the calculated ChessAnalysis layer from recorded playings;
+#                  no path, source-scoped eviction is supported for version recovery
 #   openings     — opening book (ChessOpenings)
 #   chess-books  — annotated chess books (ChessBook): record + derive in one pass
 #   chess-syzygy — ingest Syzygy packaging (.rtbw/.rtbz) as position-grain HAS_WDL/HAS_DTZ
@@ -20,8 +22,8 @@ name: Seed — chess
 #                  survive a db-reset, exactly like every other seed re-derives its
 #                  layer. No path (the substrate is the source); marker-gated, so
 #                  re-runs skip already-evaluated games.
-# Corpus sources take an explicit corpus dir (no DATA_ROOT default); chess-eval takes none.
-# Delegates to _ingest.yml. All four sources are registered in decomposer-gates.json,
+# Corpus sources take an explicit corpus dir (no DATA_ROOT default); substrate passes take none.
+# Delegates to _ingest.yml. Every source is registered in decomposer-gates.json,
 # so the run is gated on the consensus cells and on re-ingest idempotency, not on the
 # ingest exit code.
 
@@ -32,7 +34,7 @@ on:
         description: "chess source (one per run)"
         type: choice
         required: true
-        options: [chess, openings, chess-books, chess-eval, chess-syzygy, chess-trajectory, chess-opening-match]
+        options: [chess, openings, chess-books, chess-analyze, chess-eval, chess-syzygy, chess-trajectory, chess-opening-match]
       corpus:
         # Dropdown over what is actually on the runner. The chess corpus is
         # static (same filenames on re-download), so a literal list is durable;
@@ -42,7 +44,7 @@ on:
         # Default is the ELO-2400 cut: one file, the strongest games, the best
         # quality-per-byte in the corpus. Everything larger is a deliberate
         # operator choice, because a seed run holds the one-ingest lock.
-        description: "which corpus (ignored for chess-eval)"
+        description: "which corpus (ignored for substrate-sourced passes)"
         type: choice
         required: true
         default: lumbras-elite
@@ -111,6 +113,16 @@ on:
         type: choice
         options: [laplace]
         default: laplace
+      evict_before_ingest:
+        description: "retract this source before a full rederive (requires exact confirmation)"
+        type: boolean
+        required: false
+        default: false
+      evict_confirm:
+        description: "exact decomposer source name; ChessAnalysis for chess-analyze"
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -156,7 +168,9 @@ jobs:
             chess)       legal="$pgn_corpora" ;;
             openings)    legal="openings-book path-override" ;;
             chess-books) legal="books path-override" ;;
-            chess-eval)  legal="" ;;   # reads the substrate; no path at all
+            chess-analyze|chess-eval|chess-trajectory|chess-opening-match)
+                          legal="" ;;   # read the substrate; no path at all
+            chess-syzygy) legal="syzygy-tablebase path-override" ;;
             *) echo "::error::unknown source '$src'"; exit 1 ;;
           esac
 
@@ -175,6 +189,18 @@ jobs:
               fi
             fi
           fi
+
+          # Substrate-sourced passes consume recorded playings, not packaging.
+          # Resolve them before explicit-path handling so an irrelevant path cannot
+          # defeat source-scoped eviction or accidentally become an ingest scope.
+          case "$src" in
+            chess-analyze|chess-eval|chess-trajectory|chess-opening-match)
+              [ -n "${{ inputs.path }}" ] && \
+                echo "::notice::source '$src' reads the substrate — path input ignored"
+              echo "source=$src reads the substrate — corpus ignored, no path passed"
+              echo "path=" >> "$GITHUB_OUTPUT"
+              exit 0 ;;
+          esac
 
           # Era slice -> the unpacked PGN under Lumbras/otb or Lumbras/online.
           # The .7z siblings are the originals; the unpacked dirs are what the
@@ -268,13 +294,8 @@ jobs:
             lumbras-otb|lumbras-online) : ;;
             *) [ "$slice" = "all" ] || echo "::notice::slice '$slice' ignored for corpus '$corpus'" ;;
           esac
-          # Substrate-sourced lanes read recorded games, not a file: no path at all.
-          # chess-syzygy is the opposite: the corpus IS the packaging directory.
+          # chess-syzygy consumes the packaging directory rather than the substrate.
           case "$src" in
-            chess-eval|chess-trajectory|chess-opening-match)
-              echo "source=$src reads the substrate — corpus ignored, no path passed"
-              echo "path=" >> "$GITHUB_OUTPUT"
-              exit 0 ;;
             chess-syzygy)
               if [ "$corpus" = "syzygy-tablebase" ] || [ "$corpus" = "path-override" ]; then
                 : # fall through to path resolution below
@@ -311,3 +332,5 @@ jobs:
       # the source marker prevents duplicate testimony.
       run_gate: true
       run_idempotency: true
+      evict_before_ingest: ${{ inputs.evict_before_ingest }}
+      evict_confirm: ${{ inputs.evict_confirm }}
