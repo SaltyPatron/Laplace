@@ -64,8 +64,6 @@ public sealed class DecomposerArchitectureGateTests
     private static readonly HashSet<string> ParallelIngestAllowlist = new(StringComparer.OrdinalIgnoreCase)
     {
         "Laplace.Chess/Service/ChessLabService.cs",
-        // Catalog-dual Syzygy unpack: bounded board/product channels into Compose.
-        "Laplace.Chess/Service/SyzygyTableUnpack.cs",
     };
 
     private static readonly Regex ResolveFileWorkersCall = new(
