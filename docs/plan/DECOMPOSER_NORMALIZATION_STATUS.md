@@ -77,11 +77,14 @@ delivered until it is merged.
 | #1191 | VerbNet native FrameNet mapping | Reads the actual VerbNet 3.4 `fn_mapping` field, including its multi-frame shape and `None` sentinel, instead of the nonexistent `fnframe` attribute that dropped every direct mapping. |
 | #1192 | VerbNet member grain | Preserves class-bound `VerbNet_Member` identity from native member keys, moves WordNet/FrameNet/PropBank mappings off shared lemma content, and makes concept/prompt/mesh readers traverse the member's content alias instead of requiring duplicate surface testimony. |
 | #1193 | CILI native grain and packaging dedupe | Preserves Concept versus Instance, native PWN source mapping, license/release metadata, and canonical map-reference identity while selecting one lossless serialization per version instead of treating duplicate Turtle/tab exports as witnesses. |
+| #1194 | PredicateMatrix pipeline grain | Makes one selected native PredicateMatrix row one generic-pipeline record instead of projecting each input into a private multi-change lane. |
+| #1195 | PredicateMatrix native identity | Preserves all six language/POS populations, predicate-bound roles, PB/FN/VN/WN/MCR/ESO semantics across the 27-column row, package-repeat suppression, exact phase-grain inventory, and a measured source profile. |
+| #1196 | Bounded post-ingest completion | Keeps UI/planner `ANALYZE`, GIN draining, and estimated totals in the automatic path while moving unbounded exact source scans to explicit `stats <source>`; emits `LAPSIGHT_POST_INGEST` phase timing. |
 
 The related source-fidelity audit (#1155), durable working agreement (#1156), and
 canonical lexical-peer batch core (#1164) were integrated in the same batch,
-although they are not decomposer implementations. After the batch, the repository
-had no open pull requests.
+although they are not decomposer implementations. Draft campaign-summary PR #1182
+remains open and is not counted as delivered implementation.
 
 ## Latest live acceptance receipt
 
@@ -104,6 +107,19 @@ had no open pull requests.
   OMW `beautiful`/attractive sense, and the harness mislabeled the sense as the topic even
   though production returns token `hot`. #1190 scores the topic and retains the sense as
   diagnostics without weakening exact election or forward-answer gates.
+- [Chess run 32300064613](https://github.com/SaltyPatron/Laplace/actions/runs/32300064613)
+  then ingested the 1970--1989 file: 655,255 games in 3,655.1 seconds, 37,360,190
+  novel entities, 35,199,320 physicalities, and 1,338,361,912 observations folded into
+  22,707,034 cells. The run classified the complete entity/physicality delta
+  (`unexplained=0`), and journal, replay, and throughput gates passed.
+- That run exposed a separate completion-envelope defect: after the payload and fold
+  completed, `ops.content_count(source)` spent another 815 seconds in `DataFileRead`.
+  The read-only diagnostic was cancelled without affecting the committed ingest. #1196
+  removes exact full-corpus source scans from automatic completion while retaining the
+  statistics refresh that keeps UI counts truthful.
+- Both PGN workflow conclusions are red only because they checked out #1186, whose
+  gate still required `MOVE > 0`; the actual playing/result/outcome checks passed.
+  Current `main` (#1189) requires `MOVE = 0`, matching the normalized trajectory law.
 
 ## Remaining product work after integration
 
@@ -125,6 +141,11 @@ had no open pull requests.
 - Remeasure OMW after #1186. The semantic value
   must still compose at grapheme/content grain; the TSV packaging must create zero
   content entities/physicalities.
+- Re-run a normalized PGN slice after #1196 and confirm the completion envelope reports
+  bounded `analyze_ms`, `gin_drain_ms`, and `summary_ms` without an automatic exact-source
+  scan. The 1970--1989 payload itself sustained about 179 games/s and 25.6K novel rows/s,
+  but still generated about 2,042 fold observations per game; relation-level attribution
+  and singleton/witness distributions remain required before calling chess normalized.
 - Validate end-to-end resume, cancellation, per-file journals, canonical readback,
   and UI progress under actual concurrent multi-file failure/restart scenarios.
 - Audit remaining avoidable index probes, index-only eligibility, partition skew,
