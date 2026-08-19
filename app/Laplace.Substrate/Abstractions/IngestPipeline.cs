@@ -38,8 +38,9 @@ public interface IMultiFileRecordStream<TRecord>
     /// <summary>
     /// The source's files as independently-openable record sources. Enumeration is CHEAP — it
     /// yields file handles/specs and reads NOTHING; each worker opens and streams ONE source
-    /// end-to-end (read + parse + compose + apply all in the worker). Files are order-independent
-    /// (references resolve content-addressed), so there is no ordering contract on the sources.
+    /// through read + parse + compose. Finalized changes merge into the driver's bounded output
+    /// stream and the shared applier coalesces them into bulk database transactions. Files are
+    /// order-independent (references resolve content-addressed), so there is no ordering contract.
     /// </summary>
     IAsyncEnumerable<IFileRecordSource<TRecord>> FilesAsync(CancellationToken ct = default);
 }
@@ -591,10 +592,11 @@ public static class IngestBatchPipeline
 
     /// <summary>
     /// Drives a multi-file source, PARALLEL BY DEFAULT. Up to <paramref name="fileWorkers"/> files are
-    /// ingested concurrently across a bounded pool — each file its own handler/config/working-set/
-    /// commit; the native compose is lock-free and each builder owns its intent stage; probes use
-    /// pooled connections; changes merge into one stream the caller's single apply consumer drains
-    /// serially, with channel backpressure. No phase/ordering concept: references resolve content-
+    /// ingested concurrently across a bounded pool — each file has its own handler/config/working
+    /// set; native compose is lock-free and each builder owns its intent stage. Finalized changes
+    /// merge into one bounded stream; the caller coalesces fragments across files and applies those
+    /// batches through the writer's internally parallel bulk path. No phase/ordering concept:
+    /// references resolve content-
     /// addressed (hash of the canonical key), so files are order-independent. A
     /// <paramref name="maxTotalUnits"/> cap forces the sequential path (it needs the exact cross-file
     /// stop point). One serial file at a time was the "files=0/201, 10 idle cores" gate.
@@ -773,11 +775,13 @@ public static class IngestBatchPipeline
         [EnumeratorCancellation] CancellationToken ct)
     {
         // The dispatcher enumerates FILE SOURCES — cheap handles, reading NOTHING — into a bounded
-        // channel; N workers each claim one source and ingest it end-to-end: OPEN + read + parse +
-        // compose + working-set + commit, all in the worker. The expensive parse is therefore
+        // channel; N workers each claim one source and run OPEN + read + parse + compose +
+        // working-set finalization. The expensive parse is therefore
         // parallel across files, and no file is ever slammed into a list — records stream straight
-        // from the file reader into the working-set spine. Files are order-independent (references
-        // resolve content-addressed), so there is no phase/barrier — just the pool.
+        // from the file reader into the working-set spine. Finalized changes cross outCh into the
+        // driver's one coalescing apply lane; database apply itself fans out by table partitions.
+        // Files are order-independent (references resolve content-addressed), so there is no
+        // source-level phase/barrier — just the pool.
         var sources = Channel.CreateBounded<IFileRecordSource<TRecord>>(
             new BoundedChannelOptions(workers * 2)
             { FullMode = BoundedChannelFullMode.Wait, SingleWriter = true, SingleReader = false });
