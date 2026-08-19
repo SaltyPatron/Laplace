@@ -192,27 +192,18 @@ public sealed class CILIDecomposer : DecomposerMultiPhase<CILISource, FullScope>
     private static async IAsyncEnumerable<(byte[] Ili, byte[] OffsetPos, string Version)> ParseIliMapAsync(
         string tab, string version, [EnumeratorCancellation] CancellationToken ct)
     {
-        await foreach (ReadOnlyMemory<byte> lineMem in StreamingUtf8LineReader.ReadLinesAsync(tab, ct))
+        await foreach (var (fields, _) in GrammarRowReader.ReadFieldsAsync(
+                           tab, "tsv", GrammarRecordFraming.Line, ct))
         {
-            if (TryParseIliMapLine(lineMem.Span, out var ili, out var offsetPos))
-                yield return (ili, offsetPos, version);
+            if (fields.Length < 2) continue;
+            string ili = fields[0].Trim();
+            string offsetPos = fields[1].Trim();
+            if (ili.Length == 0 || ili[0] != 'i' || offsetPos.Length == 0) continue;
+            yield return (
+                System.Text.Encoding.UTF8.GetBytes(ili),
+                System.Text.Encoding.UTF8.GetBytes(offsetPos),
+                version);
         }
-    }
-
-    private static bool TryParseIliMapLine(ReadOnlySpan<byte> span, out byte[] ili, out byte[] offsetPos)
-    {
-        ili = [];
-        offsetPos = [];
-        int sep = span.IndexOf((byte)'\t');
-        if (sep <= 0) return false;
-        ReadOnlySpan<byte> iliSpan = TrimAscii(span[..sep]);
-        ReadOnlySpan<byte> rest = span[(sep + 1)..];
-        int sep2 = rest.IndexOf((byte)'\t');
-        ReadOnlySpan<byte> offsetPosSpan = TrimAscii(sep2 >= 0 ? rest[..sep2] : rest);
-        if (iliSpan.IsEmpty || offsetPosSpan.IsEmpty || iliSpan[0] != (byte)'i') return false;
-        ili = iliSpan.ToArray();
-        offsetPos = offsetPosSpan.ToArray();
-        return true;
     }
 
     private static async IAsyncEnumerable<(byte[] Ili, byte[] OffsetPos, string Version)> ParseIliMapTtlAsync(

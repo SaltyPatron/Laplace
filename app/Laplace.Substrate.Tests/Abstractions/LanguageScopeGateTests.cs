@@ -35,7 +35,6 @@ public sealed class LanguageScopeGateTests
         "VerbNetDecomposer",
         "SemLinkDecomposer",
         "WordFrameNetDecomposer",
-        "PredicateMatrixDecomposer",
     };
 
     private static string RepoRoot() => TypeIdLawTests.FindRepoRootPublic();
@@ -54,10 +53,15 @@ public sealed class LanguageScopeGateTests
         // WordNet is the load-bearing one: it is what lexical.senses() reads.
         Assert.Contains("WordNetDecomposer", scoped);
 
-        // Guard against the regex/manifest silently matching nothing, which would turn
-        // every assertion below into a green test measuring an empty set.
-        Assert.True(scoped.Count >= 7,
-            $"expected at least 7 language-scoped sources, found {scoped.Count}");
+        // Guard against the manifest silently dropping one of the known source-wide
+        // declarations. PredicateMatrix is multilingual and emits language per row;
+        // it must not be counted as a source-wide English declaration.
+        foreach (string source in new[]
+                 {
+                     "WordNetDecomposer", "FrameNetDecomposer", "PropBankDecomposer",
+                     "VerbNetDecomposer", "SemLinkDecomposer", "WordFrameNetDecomposer",
+                 })
+            Assert.Contains(source, scoped);
     }
 
     [Fact]
@@ -77,6 +81,7 @@ public sealed class LanguageScopeGateTests
                  {
                      "OMWDecomposer", "TatoebaDecomposer", "UDDecomposer",
                      "OpenSubtitlesDecomposer", "WiktionaryDecomposer",
+                     "PredicateMatrixDecomposer",
                  })
             Assert.DoesNotContain(multilingual, scoped);
     }
@@ -143,12 +148,9 @@ public sealed class LanguageScopeGateTests
                 continue;
 
             string text = StripComments(File.ReadAllText(file));
-            // Either spelling counts: the quoted literal, or the shared constant.
-            // G3 counts governed relation names literal-by-literal in C#, so the
-            // right way to emit from a new site is EtlSource.LanguageScopeRelation
-            // rather than a fresh literal — and a gate that only recognised the
-            // literal would punish exactly that. It did, on this very change.
-            if (Regex.IsMatch(text, @"""" + EtlSource.LanguageScopeRelation + @"""")) return true;
+            // Source-wide language emission must use the shared relation constant.
+            // Counting a quoted declaration is a false positive when several sources
+            // share a folder (SemLink and multilingual PredicateMatrix do).
             if (text.Contains(nameof(EtlSource.LanguageScopeRelation), StringComparison.Ordinal))
                 return true;
         }
