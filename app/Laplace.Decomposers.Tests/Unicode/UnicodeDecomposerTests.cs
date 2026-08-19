@@ -35,13 +35,14 @@ public sealed class UnicodeDecomposerTests
         Hash128 aHash = Hash128.Blake3(new byte[] { 0x41 });
 
         var codepointEntities = new HashSet<Hash128>();
-        long codepointPhysicalities = 0, passThreeEntities = 0;
+        long codepointPhysicalities = 0, passThreeEntities = 0, inputUnits = 0;
         bool allTier0 = true, allFirstObserved = true;
         EntityRow? aEntity = null;
         PhysicalityRow? aPhys = null;
 
         await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
         {
+            inputUnits += change.Metadata.InputUnitsConsumed;
             for (int i = 0; i < change.Entities.Length; i++)
             {
                 var e = change.Entities[i];
@@ -68,6 +69,7 @@ public sealed class UnicodeDecomposerTests
         }
 
         Assert.Equal(TotalCodepoints, codepointEntities.Count);
+        Assert.Equal(TotalCodepoints, inputUnits);
         Assert.True(codepointPhysicalities >= TotalCodepoints,
             "one CONTENT physicality per codepoint (pass-3 content adds more)");
         Assert.True(passThreeEntities > 0,

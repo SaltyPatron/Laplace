@@ -300,6 +300,10 @@ public sealed class UnicodeDecomposer : DecomposerMultiPhase<UnicodeSource, Full
 
         protected override string PhaseLabel => "mappings";
 
+        // This phase projects the tier-0 codepoints already counted by Tier0Phase.
+        // Re-reading them is work, not another 1,114,112 source input units.
+        protected override long UnitsPerRecord(int cp) => 0;
+
         protected override void Compose(int cp, SubstrateChangeBuilder b)
         {
             var recs = _recs;
@@ -468,6 +472,9 @@ public sealed class UnicodeDecomposer : DecomposerMultiPhase<UnicodeSource, Full
 
         protected override string PhaseLabel => "aliases-confusables";
 
+        // Alias/confusable rows enrich the already-counted Unicode inventory.
+        protected override long UnitsPerRecord(AliasConfusableRow row) => 0;
+
         protected override void Compose(AliasConfusableRow row, SubstrateChangeBuilder b)
         {
             if (row.Alias is { } alias)
@@ -523,6 +530,9 @@ public sealed class UnicodeDecomposer : DecomposerMultiPhase<UnicodeSource, Full
             : base(batch, commitEpoch: 1) => _recs = recs;
 
         protected override string PhaseLabel => "bytes";
+
+        // Byte catalog construction is an internal projection of the Unicode seed.
+        protected override long UnitsPerRecord(int value) => 0;
 
         protected override void Compose(int v, SubstrateChangeBuilder b)
         {
