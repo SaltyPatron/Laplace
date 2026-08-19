@@ -14,6 +14,9 @@ delivered until it is merged.
 - [GitHub #1177](https://github.com/SaltyPatron/Laplace/issues/1177) is the campaign
   completion graph. #1175 owns LapSight, #1176 owns derived-consensus promotion and
   eviction, #1178 owns normalized readers, and #1153 owns native source fidelity.
+- [SUBSTRATE_COHESION_STATUS.md](SUBSTRATE_COHESION_STATUS.md) and its
+  [issue ledger](SUBSTRATE_COHESION_ISSUE_LEDGER.md) own the shared SQL/schema,
+  content-identity, modality/media, operation-surface, extension, and reseed gates.
 - Historical comments and issue descriptions are inputs to verification, not the
   status authority. Current code, tests, schema, and measured runs decide status.
 
@@ -189,9 +192,11 @@ remains open and is not counted as delivered implementation.
 - Complete chess validation for live-versus-PGN identity, cross-source historical
   playing identity, history-sensitive state, bounded query projections, and
   deterministic/perfcache publication.
-- Benchmark the OpenSubtitles aligned-trajectory representation against the old
-  pairwise relation form and design the explicit translation-consensus promotion
-  policy before a full 601-million-pair ingest.
+- Correct #1180 before benchmarking OpenSubtitles: the current sequence/alignment
+  preimages include source schema, language, ordinals, and arbitrary batch
+  boundaries. Then benchmark the corrected aligned-trajectory representation
+  against the old pairwise relation form and design the explicit
+  translation-consensus promotion policy before a full 601-million-pair ingest.
 - Audit language, POS, features, definitions, examples, sense membership,
   containment, and correspondence per source at the exact source assertion grain.
 
