@@ -71,6 +71,26 @@ def validate_retired_workflows() -> list[str]:
     return errs
 
 
+def validate_foundation_index_cycle() -> list[str]:
+    """The recovery predicate must cover every state that can drop indexes."""
+    workflow = ROOT / ".github" / "workflows" / "seed-foundation.yml"
+    if not workflow.is_file():
+        return ["missing workflow: .github/workflows/seed-foundation.yml"]
+
+    compact = re.sub(r"\s+", "", read_text(workflow))
+    cycle = "inputs.index_cycle&&(inputs.force||steps.fresh.outputs.fresh=='true')"
+    errs: list[str] = []
+    if f"if:${{{{{cycle}}}}}" not in compact:
+        errs.append(
+            "seed-foundation.yml: index drop must cover force OR genuinely fresh builds"
+        )
+    if f"if:${{{{always()&&{cycle}}}}}" not in compact:
+        errs.append(
+            "seed-foundation.yml: always recovery must match every index-drop path"
+        )
+    return errs
+
+
 def load_manifest() -> dict:
     with MANIFEST.open(encoding="utf-8") as f:
         return json.load(f)
@@ -459,6 +479,7 @@ def main() -> int:
     pipeline_sh = ROOT / "scripts" / "pipeline.sh"
 
     errs.extend(validate_retired_workflows())
+    errs.extend(validate_foundation_index_cycle())
 
     ingest_text = read_text(ingest_sh)
     if "LAPLACE_INGEST_FORCE" not in ingest_text or "ingest_args+=(--force)" not in ingest_text:
