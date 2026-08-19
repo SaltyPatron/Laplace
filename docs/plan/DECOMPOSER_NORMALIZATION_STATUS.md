@@ -76,6 +76,7 @@ delivered until it is merged.
 | #1190 | Eval receipt identity | Scores the actual elected topic token used by production orientation, reports its selected sense separately, and treats the baseline source roster as a required floor rather than a brittle exact snapshot of a concurrently seeded database. |
 | #1191 | VerbNet native FrameNet mapping | Reads the actual VerbNet 3.4 `fn_mapping` field, including its multi-frame shape and `None` sentinel, instead of the nonexistent `fnframe` attribute that dropped every direct mapping. |
 | #1192 | VerbNet member grain | Preserves class-bound `VerbNet_Member` identity from native member keys, moves WordNet/FrameNet/PropBank mappings off shared lemma content, and makes concept/prompt/mesh readers traverse the member's content alias instead of requiring duplicate surface testimony. |
+| #1193 | CILI native grain and packaging dedupe | Preserves Concept versus Instance, native PWN source mapping, license/release metadata, and canonical map-reference identity while selecting one lossless serialization per version instead of treating duplicate Turtle/tab exports as witnesses. |
 
 The related source-fidelity audit (#1155), durable working agreement (#1156), and
 canonical lexical-peer batch core (#1164) were integrated in the same batch,
@@ -144,7 +145,8 @@ had no open pull requests.
   Tracked by #1008 and #1132.
 - Apply the source-fidelity findings from #1155: exact scoped FrameNet roles,
   complete VerbNet syntax/restriction/argument admission, full PredicateMatrix admission, source-versioned
-  OMW/WordNet inputs, and artifact/revision identity for model sources.
+  OMW/WordNet inputs, and artifact/revision identity for model sources. #1193 closes
+  CILI Concept/Instance, source-map, license, and release admission.
 - Finish tokenizer/layout admission regression coverage across model families and
   non-text modalities; serialization markers and whitespace must not mint phantom
   semantic content.
