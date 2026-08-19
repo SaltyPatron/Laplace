@@ -41,7 +41,8 @@ public readonly record struct RelationTripleRecord(
 /// The single ingestion handler for ALL relation-triple sources. Each record becomes a
 /// two-tree deferred unit: the subject and object phrases are content-decomposed and
 /// descent-deduped independently (IMultiTreeIngestDeferredUnit), then the folding
-/// Categorical edge is emitted between their content-addressed roots. Written once;
+/// Categorical edge is emitted between their semantic anchors when the source supplied
+/// them, otherwise between the content-addressed roots. Written once;
 /// atomic, conceptnet, and any future triple source share it verbatim and differ only
 /// in how they extract records.
 /// </summary>
@@ -86,7 +87,11 @@ public sealed class RelationTripleHandler : IIngestRecordHandler<RelationTripleR
         Hash128 subjectRoot, Hash128 objectRoot, Hash128 sourceId, double sourceTrust,
         ConcurrentIdSet? sourceNodeDeclarations)
     {
-        if (subjectRoot != default && objectRoot != default)
+        Hash128 subjectEndpoint = record.SubjectSynsetId is { } ss && ss != default
+            ? ss : subjectRoot;
+        Hash128 objectEndpoint = record.ObjectSynsetId is { } os && os != default
+            ? os : objectRoot;
+        if (subjectEndpoint != default && objectEndpoint != default)
         {
             Hash128? ctx = record.ContextId;
             if (record.ContextAnchorKey is { Length: > 0 } ctxKey
@@ -95,7 +100,7 @@ public sealed class RelationTripleHandler : IIngestRecordHandler<RelationTripleR
                 ctx = AnchorAdmission.Emit(builder, ctxKey, ctxType, sourceId, sourceTrust) ?? ctx;
             }
             builder.AddAttestation(NativeAttestation.Categorical(
-                subjectRoot, record.RelationType, objectRoot, sourceId, sourceTrust,
+                subjectEndpoint, record.RelationType, objectEndpoint, sourceId, sourceTrust,
                 magnitude: record.Magnitude, arenaScale: 1.0, contextId: ctx));
         }
 

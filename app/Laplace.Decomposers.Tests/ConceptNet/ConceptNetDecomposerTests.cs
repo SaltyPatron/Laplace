@@ -49,7 +49,7 @@ public sealed class ConceptNetDecomposerTests
 
             var hasPosSubjects = new HashSet<Hash128>();
             var synSubjects = new HashSet<Hash128>();
-            int relatedEdges = 0;
+            var relatedEdges = new List<AttestationRow>();
 
             await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
             {
@@ -60,11 +60,19 @@ public sealed class ConceptNetDecomposerTests
                     if (a.TypeId == correspondsTo && a.SubjectId is { } cs)
                         synSubjects.Add(cs);
                     if (a.TypeId == relatedTo)
-                        relatedEdges++;
+                        relatedEdges.Add(a);
                 }
             }
 
-            Assert.Equal(1, relatedEdges);
+            var semanticEdge = Assert.Single(relatedEdges);
+            var endpoints = new HashSet<Hash128>
+            {
+                semanticEdge.SubjectId,
+                semanticEdge.ObjectId!.Value,
+            };
+            Assert.Contains(synId.Value, endpoints);
+            Assert.Contains(petRoot.Value, endpoints);
+            Assert.DoesNotContain(dogRoot.Value, endpoints);
             Assert.Contains(dogRoot.Value, hasPosSubjects);
             Assert.Contains(petRoot.Value, hasPosSubjects);
             Assert.Contains(dogRoot.Value, synSubjects);
