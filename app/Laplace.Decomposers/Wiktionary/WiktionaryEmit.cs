@@ -39,7 +39,8 @@ internal static class WiktionaryEmit
     /// Every surface <see cref="Emit"/> would stage — collected so the deferred unit can
     /// <see cref="WiktionarySurfaceTrees.TryBuild"/> them on the compose fan before serial drain.
     /// </summary>
-    public static void CollectSurfaces(WiktionaryEntry e, HashSet<string> into)
+    public static void CollectSurfaces(
+        WiktionaryEntry e, HashSet<string> into, HashSet<string> reusable)
     {
         Add(into, e.Word);
         if (e.Senses is { } senses)
@@ -51,7 +52,10 @@ internal static class WiktionaryEmit
                 if (s.Tags is { } tags)
                     foreach (var tag in tags)
                         if (RegisterTags.Contains(tag))
+                        {
                             Add(into, tag);
+                            Add(reusable, tag);
+                        }
             }
 
         if (e.Sounds is { } sounds)
@@ -59,6 +63,7 @@ internal static class WiktionaryEmit
             {
                 Add(into, snd.Ipa);
                 AddAll(into, snd.Tags);
+                AddAll(reusable, snd.Tags);
             }
 
         CollectRelations(into, in e.Top);
@@ -69,6 +74,7 @@ internal static class WiktionaryEmit
             {
                 Add(into, form.FormText);
                 AddAll(into, form.Tags);
+                AddAll(reusable, form.Tags);
             }
 
         Add(into, e.EtymologyText);
@@ -112,14 +118,16 @@ internal static class WiktionaryEmit
     }
 
     public static void Emit(WiktionaryEntry e, SubstrateChangeBuilder b) =>
-        Emit(e, b, roots: null);
+        Emit(e, b, roots: null, coords: null);
 
     /// <summary>
     /// When <paramref name="roots"/> is non-null, every surface was already emitted into the
     /// builder and this walk only looks up root ids + writes attestations/entities.
     /// </summary>
     public static void Emit(
-        WiktionaryEntry e, SubstrateChangeBuilder b, IReadOnlyDictionary<string, Hash128>? roots)
+        WiktionaryEntry e, SubstrateChangeBuilder b,
+        IReadOnlyDictionary<string, Hash128>? roots,
+        IReadOnlyDictionary<string, WiktionarySurfaceTrees.RootCoord>? coords)
     {
         if (!Stage(b, e.Word, roots, out Hash128 wordId)) return;
 
@@ -163,24 +171,25 @@ internal static class WiktionaryEmit
                 AttestResolved(b, senseId, WiktionarySource.HasNameAliasTypeId, wordId, langCtx);
                 if (langCtx is { } langId)
                     AttestResolved(b, senseId, WiktionarySource.HasLanguageTypeId, langId, null);
-                WalkSense(b, senseId, s, isVerb, langCtx, roots);
+                WalkSense(b, senseId, s, isVerb, langCtx, roots, coords);
                 RouteSynsetLinks(b, senseId, s, langCtx);
                 RouteWikidataLinks(b, senseId, s, langCtx);
             }
 
-        WalkSounds(b, wordId, e.Sounds, roots);
+        WalkSounds(b, wordId, e.Sounds, roots, coords);
         WalkRelations(b, wordId, in e.Top, isVerb, context: langCtx, roots);
         if (e.IncludeTranslations && e.Translations is { } tr)
             foreach (var t in tr)
                 if (Stage(b, t, roots, out var trId))
                     Attest(b, wordId, "IS_TRANSLATION_OF", trId, null);
-        WalkForms(b, wordId, e.Forms, roots);
+        WalkForms(b, wordId, e.Forms, roots, coords);
         WalkEtymology(b, wordId, e, roots);
     }
 
     private static void WalkSense(
         SubstrateChangeBuilder b, Hash128 senseId, WiktionaryEntry.Sense s, bool isVerb,
-        Hash128? langCtx, IReadOnlyDictionary<string, Hash128>? roots)
+        Hash128? langCtx, IReadOnlyDictionary<string, Hash128>? roots,
+        IReadOnlyDictionary<string, WiktionarySurfaceTrees.RootCoord>? coords)
     {
         if (s.Glosses is { } gl)
             foreach (var g in gl)
@@ -200,7 +209,7 @@ internal static class WiktionaryEmit
             List<string>? register = null;
             foreach (var tag in tags)
                 if (RegisterTags.Contains(tag)) (register ??= []).Add(tag);
-            if (TryStageSet(b, register, roots, out var registerId))
+            if (TryStageSet(b, register, roots, coords, out var registerId))
                 Attest(b, senseId, "HAS_USAGE_REGISTER", registerId, langCtx);
         }
     }
@@ -235,7 +244,8 @@ internal static class WiktionaryEmit
 
     private static void WalkSounds(
         SubstrateChangeBuilder b, Hash128 wordId, List<WiktionaryEntry.Sound>? sounds,
-        IReadOnlyDictionary<string, Hash128>? roots)
+        IReadOnlyDictionary<string, Hash128>? roots,
+        IReadOnlyDictionary<string, WiktionarySurfaceTrees.RootCoord>? coords)
     {
         if (sounds is null) return;
         foreach (var snd in sounds)
@@ -245,7 +255,7 @@ internal static class WiktionaryEmit
             // stageable dialect tag and dropped the rest — data loss across 5,192,208
             // TRANSCRIBES_AS rows, forced by the schema rather than chosen. A set composition
             // fits in the slot, so every tag survives.
-            Hash128? dialectCtx = TryStageSet(b, snd.Tags, roots, out var dialectSetId)
+            Hash128? dialectCtx = TryStageSet(b, snd.Tags, roots, coords, out var dialectSetId)
                 ? dialectSetId : null;
             Attest(b, wordId, "TRANSCRIBES_AS", ipaId, dialectCtx);
         }
@@ -253,7 +263,8 @@ internal static class WiktionaryEmit
 
     private static void WalkForms(
         SubstrateChangeBuilder b, Hash128 wordId, List<WiktionaryEntry.Form>? forms,
-        IReadOnlyDictionary<string, Hash128>? roots)
+        IReadOnlyDictionary<string, Hash128>? roots,
+        IReadOnlyDictionary<string, WiktionarySurfaceTrees.RootCoord>? coords)
     {
         if (forms is null) return;
         foreach (var form in forms)
@@ -285,7 +296,7 @@ internal static class WiktionaryEmit
             // A form's tags are ONE morphological analysis, not N independent claims. Emitting
             // them as N edges gives the analysis no id, so nothing can rate, corroborate or
             // refute it as a whole. One composition, one edge, one adjudicable claim.
-            if (TryStageSet(b, form.Tags, roots, out var featureSetId))
+            if (TryStageSet(b, form.Tags, roots, coords, out var featureSetId))
                 Attest(b, formId, "HAS_FEATURE", featureSetId, null);
         }
     }
@@ -306,7 +317,9 @@ internal static class WiktionaryEmit
     /// </remarks>
     private static bool TryStageSet(
         SubstrateChangeBuilder b, List<string>? tags,
-        IReadOnlyDictionary<string, Hash128>? roots, out Hash128 setId)
+        IReadOnlyDictionary<string, Hash128>? roots,
+        IReadOnlyDictionary<string, WiktionarySurfaceTrees.RootCoord>? rootCoords,
+        out Hash128 setId)
     {
         setId = default;
         if (tags is null || tags.Count == 0) return false;
@@ -322,8 +335,18 @@ internal static class WiktionaryEmit
             // two ids depending on cache state, and neither would be wrong on its face. No
             // edge is recoverable -- the substrate can prove an absence (INVENTION §8) and
             // cannot prove a silently truncated set.
-            if (!Stage(b, tag, roots, out var tagId)) return false;
-            if (!WiktionarySurfaceTrees.TryRootCoord(tag, c)) return false;
+            Hash128 tagId;
+            WiktionarySurfaceTrees.RootCoord coord;
+            if (roots is not null)
+            {
+                if (!roots.TryGetValue(tag, out tagId)
+                    || rootCoords is null
+                    || !rootCoords.TryGetValue(tag, out coord)) return false;
+            }
+            else if (!WiktionarySurfaceTrees.TryStageWithCoord(
+                         b, tag, WiktionaryDecomposer.Source, retainForReuse: true,
+                         out tagId, out coord)) return false;
+            coord.CopyTo(c);
             ids.Add(tagId);
             for (int i = 0; i < 4; i++) coords.Add(c[i]);
         }

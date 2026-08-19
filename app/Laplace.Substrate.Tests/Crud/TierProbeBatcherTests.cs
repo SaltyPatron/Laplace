@@ -8,16 +8,16 @@ namespace Laplace.Substrate.Tests.Crud;
 public sealed class TierProbeBatcherTests
 {
     [Fact]
-    public async Task ConcurrentSameTierRequests_CoalesceAndPreservePositionalBitmaps()
+    public async Task ConcurrentSameTierRequests_PreservePositionalBitmapsAcrossSchedulerBatches()
     {
         int calls = 0;
-        IReadOnlyList<Hash128>? probed = null;
+        var probed = new System.Collections.Concurrent.ConcurrentBag<Hash128>();
         short probedTier = -1;
         var present = new HashSet<Hash128> { Id(2), Id(3) };
         var batcher = new TierProbeBatcher((ids, tier, _) =>
         {
             Interlocked.Increment(ref calls);
-            probed = ids.ToArray();
+            foreach (var id in ids) probed.Add(id);
             probedTier = tier;
             var bitmap = new byte[BitmapBits.ByteLength(ids.Count)];
             for (int i = 0; i < ids.Count; i++)
@@ -29,9 +29,13 @@ public sealed class TierProbeBatcherTests
         Task<byte[]> second = batcher.ProbeAsync([Id(2), Id(3)], 3);
         byte[][] results = await Task.WhenAll(first, second);
 
-        Assert.Equal(1, calls);
+        // There is intentionally no fake millisecond coalescing delay. If the pump gets
+        // a scheduler turn between the two producers, two correct batches are lawful;
+        // when both are queued together they collapse to one. Either way the union and
+        // every caller's positional bitmap must be exact.
+        Assert.InRange(calls, 1, 2);
         Assert.Equal(3, probedTier);
-        Assert.Equal(3, probed!.Distinct().Count());
+        Assert.Equal(3, probed.Distinct().Count());
         Assert.False(BitmapBits.IsSet(results[0], 0));
         Assert.True(BitmapBits.IsSet(results[0], 1));
         Assert.True(BitmapBits.IsSet(results[0], 2));

@@ -11,6 +11,9 @@ namespace Laplace.Engine.Core;
 /// </summary>
 public static class MemoryTopology
 {
+    /// <summary>Exact storage width of the canonical BLAKE3-128 identity.</summary>
+    public const int Hash128Bytes = 16;
+
     /// <summary>
     /// Resident owners that can coexist with a working-set buffer: one owner per active
     /// apply partition, plus compose, apply metadata, exact caches, and fold/mask state.
@@ -164,6 +167,13 @@ public static class MemoryTopology
     /// it does not own an unrelated event-count cap.
     /// </summary>
     public const int FileJournalTransitBytesPerEvent = 512;
+
+    /// <summary>
+    /// Exact native tier-tree structure-of-arrays width per allocated node:
+    /// tier(1), six uint32 arrays(24), id(16), coord(32), and Hilbert(16).
+    /// Text bytes and the managed string key are accounted separately by callers.
+    /// </summary>
+    public const int TierTreeResidentBytesPerCapacity = 89;
 
     /// <summary>
     /// Minimum useful payload for another COPY connection. 8192 is PostgreSQL's

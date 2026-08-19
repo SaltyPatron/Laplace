@@ -36,23 +36,33 @@ namespace Laplace.Decomposers.Wiktionary;
 /// </summary>
 internal static class WiktionarySurfaceTrees
 {
-    /// <summary>
-    /// Only SHORT surfaces are cached. Glosses, examples and etymology text are long and
-    /// very nearly unique — caching them would spend native tree memory for no hit rate
-    /// (memo only the repeat class of the key space). Words, tags, POS labels and
-    /// language codes all sit comfortably under this.
-    /// </summary>
-    private const int MaxCachedSurfaceBytes = 64;
+    internal readonly record struct RootCoord(double X, double Y, double Z, double M)
+    {
+        public void CopyTo(Span<double> destination)
+        {
+            if (destination.Length < 4)
+                throw new ArgumentException("destination needs 4 doubles", nameof(destination));
+            destination[0] = X;
+            destination[1] = Y;
+            destination[2] = Z;
+            destination[3] = M;
+        }
+    }
 
     /// <summary>
-    /// Bound on distinct cached surfaces. Cached trees are held for process lifetime, so
-    /// this is the memory ceiling: past it, callers fall back to build-emit-dispose and
-    /// simply lose the reuse, never correctness.
+    /// Cached trees are held for process lifetime. Reserve their actual native capacity,
+    /// UTF-8 text, and managed key bytes from the generic run-cache envelope; there is no
+    /// unrelated distinct-surface count or string-length cap. The caller admits only
+    /// source-governed repeat classes (currently collection tags), rather than guessing
+    /// reuse from a magic byte length.
     /// </summary>
-    private const int Cap = 1 << 16;
+    private static readonly long CacheBudgetBytes = IngestSizing.ResolveApplyIo(
+        IngestTopology.Current.ApplyPartitions).CacheBytesPerOwner;
 
-    private static readonly ConcurrentDictionary<string, TierTree> Trees = new(StringComparer.Ordinal);
+    private sealed record CachedTree(TierTree Tree, long ResidentBytes);
+    private static readonly ConcurrentDictionary<string, CachedTree> Trees = new(StringComparer.Ordinal);
     private static int _count;
+    private static long _residentBytes;
 
     /// <summary>Distinct surfaces currently memoized (diagnostics/tests).</summary>
     internal static int CachedSurfaceCount => Volatile.Read(ref _count);
@@ -60,10 +70,11 @@ internal static class WiktionarySurfaceTrees
     internal static void Clear()
     {
         foreach (var kv in Trees)
-            if (Trees.TryRemove(kv.Key, out var t))
+            if (Trees.TryRemove(kv.Key, out var cached))
             {
                 Interlocked.Decrement(ref _count);
-                t.Dispose();
+                Interlocked.Add(ref _residentBytes, -cached.ResidentBytes);
+                cached.Tree.Dispose();
             }
     }
 
@@ -72,7 +83,8 @@ internal static class WiktionarySurfaceTrees
     /// builder. Safe on the compose fan. When <paramref name="callerOwns"/> is true the
     /// caller must Dispose the tree after emit; when false the process cache owns it.
     /// </summary>
-    public static bool TryBuild(string surface, out TierTree tree, out bool callerOwns)
+    public static bool TryBuild(
+        string surface, bool retainForReuse, out TierTree tree, out bool callerOwns)
     {
         tree = null!;
         callerOwns = false;
@@ -80,47 +92,32 @@ internal static class WiktionarySurfaceTrees
 
         if (Trees.TryGetValue(surface, out var hit))
         {
-            tree = hit;
+            tree = hit.Tree;
             return true;
         }
 
         int byteLen = Encoding.UTF8.GetByteCount(surface);
+        int max = Encoding.UTF8.GetMaxByteCount(surface.Length);
         TierTree? built;
-        if (byteLen <= MaxCachedSurfaceBytes)
+        byte[] rented = ArrayPool<byte>.Shared.Rent(max);
+        try
         {
-            Span<byte> buf = stackalloc byte[MaxCachedSurfaceBytes];
-            int n = Encoding.UTF8.GetBytes(surface, buf);
-            built = ContentTierSpine.BuildTree(buf[..n]);
+            int written = Encoding.UTF8.GetBytes(surface, rented);
+            built = ContentTierSpine.BuildTree(rented.AsSpan(0, written));
         }
-        else
+        finally
         {
-            int max = Encoding.UTF8.GetMaxByteCount(surface.Length);
-            if (max <= 512)
-            {
-                Span<byte> small = stackalloc byte[512];
-                int written = Encoding.UTF8.GetBytes(surface, small);
-                built = ContentTierSpine.BuildTree(small[..written]);
-            }
-            else
-            {
-                byte[] rented = ArrayPool<byte>.Shared.Rent(max);
-                try
-                {
-                    int written = Encoding.UTF8.GetBytes(surface, rented);
-                    built = ContentTierSpine.BuildTree(rented.AsSpan(0, written));
-                }
-                finally
-                {
-                    ArrayPool<byte>.Shared.Return(rented);
-                }
-            }
+            ArrayPool<byte>.Shared.Return(rented);
         }
 
         if (built is null) return false;
 
-        if (byteLen <= MaxCachedSurfaceBytes
-            && Volatile.Read(ref _count) < Cap
-            && Trees.TryAdd(surface, built))
+        long residentBytes = checked(
+            (long)built.Capacity * MemoryTopology.TierTreeResidentBytesPerCapacity
+            + byteLen + (long)surface.Length * sizeof(char));
+        bool reserved = retainForReuse && TryReserve(residentBytes);
+        if (reserved
+            && Trees.TryAdd(surface, new CachedTree(built, residentBytes)))
         {
             Interlocked.Increment(ref _count);
             tree = built;
@@ -128,18 +125,33 @@ internal static class WiktionarySurfaceTrees
             return true;
         }
 
-        // Over-cap, long surface, or lost the publish race: caller owns and disposes.
-        if (byteLen <= MaxCachedSurfaceBytes && Trees.TryGetValue(surface, out hit))
+        // Budget miss, non-reusable surface, or lost publish race: caller owns the tree.
+        if (reserved)
         {
-            built.Dispose();
-            tree = hit;
-            callerOwns = false;
-            return true;
+            Interlocked.Add(ref _residentBytes, -residentBytes);
+            if (Trees.TryGetValue(surface, out hit))
+            {
+                built.Dispose();
+                tree = hit.Tree;
+                callerOwns = false;
+                return true;
+            }
         }
 
         tree = built;
         callerOwns = true;
         return true;
+    }
+
+    private static bool TryReserve(long bytes)
+    {
+        while (true)
+        {
+            long before = Volatile.Read(ref _residentBytes);
+            if (bytes > CacheBudgetBytes - before) return false;
+            if (Interlocked.CompareExchange(ref _residentBytes, before + bytes, before) == before)
+                return true;
+        }
     }
 
     /// <summary>
@@ -156,21 +168,38 @@ internal static class WiktionarySurfaceTrees
     /// at build and filled by the composer, and the origin is not a placement. A caller that
     /// gets false must not substitute a default; the origin would forge a centroid.
     /// </remarks>
-    public static bool TryRootCoord(string surface, Span<double> coordXyzm)
+    public static bool TryRootCoord(TierTree tree, out RootCoord coord)
     {
-        if (coordXyzm.Length < 4) throw new ArgumentException("coordXyzm needs 4 doubles", nameof(coordXyzm));
-        if (string.IsNullOrEmpty(surface)) return false;
-        if (!TryBuild(surface, out var tree, out bool owned)) return false;
+        coord = default;
+        var node = tree.GetNode(tree.NaturalUnitIndex());
+        unsafe
+        {
+            if (node.Coord[0] == 0.0 && node.Coord[1] == 0.0
+                && node.Coord[2] == 0.0 && node.Coord[3] == 0.0) return false;
+            coord = new RootCoord(node.Coord[0], node.Coord[1], node.Coord[2], node.Coord[3]);
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Stage one collection member and return the coordinate produced by that exact
+    /// tree. Collection correctness therefore does not depend on the tree surviving in
+    /// a process-global cache between compose and drain.
+    /// </summary>
+    public static bool TryStageWithCoord(
+        SubstrateChangeBuilder builder, string surface, Hash128 sourceId,
+        bool retainForReuse, out Hash128 rootId, out RootCoord coord)
+    {
+        rootId = default;
+        coord = default;
+        if (string.IsNullOrEmpty(surface) || builder.DeferredContent is not null)
+            return false;
+        if (!TryBuild(surface, retainForReuse, out var tree, out bool owned))
+            return false;
         try
         {
-            var node = tree.GetNode(tree.NaturalUnitIndex());
-            unsafe
-            {
-                if (node.Coord[0] == 0.0 && node.Coord[1] == 0.0
-                    && node.Coord[2] == 0.0 && node.Coord[3] == 0.0) return false;
-                for (int i = 0; i < 4; i++) coordXyzm[i] = node.Coord[i];
-            }
-            return true;
+            return TryEmit(builder, tree, sourceId, ReadOnlySpan<byte>.Empty, out rootId)
+                && TryRootCoord(tree, out coord);
         }
         finally
         {
@@ -194,7 +223,7 @@ internal static class WiktionarySurfaceTrees
         if (builder.DeferredContent is not null)
             return StageDirect(builder, surface, sourceId, out rootId);
 
-        if (!TryBuild(surface, out var tree, out bool owned))
+        if (!TryBuild(surface, retainForReuse: false, out var tree, out bool owned))
             return false;
 
         try

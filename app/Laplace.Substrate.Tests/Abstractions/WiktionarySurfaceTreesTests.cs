@@ -26,8 +26,18 @@ public sealed class WiktionarySurfaceTreesTests
     private static Hash128 StageCached(string surface, string context)
     {
         var b = NewBuilder(context);
-        Assert.True(WiktionarySurfaceTrees.TryStage(b, surface, WiktionaryDecomposer.Source, out var id));
-        return id;
+        Assert.True(WiktionarySurfaceTrees.TryBuild(
+            surface, retainForReuse: true, out var tree, out bool owned));
+        try
+        {
+            Assert.True(WiktionarySurfaceTrees.TryEmit(
+                b, tree, WiktionaryDecomposer.Source, ReadOnlySpan<byte>.Empty, out var id));
+            return id;
+        }
+        finally
+        {
+            if (owned) tree.Dispose();
+        }
     }
 
     private static Hash128 StageDirectSpine(string surface, string context)
@@ -49,8 +59,8 @@ public sealed class WiktionarySurfaceTreesTests
         "日本語",                        // non-Latin
         "🜁",                            // astral plane
         "New York",                     // space
-        // Comfortably past MaxCachedSurfaceBytes (64) — must take the uncached
-        // StageDirect path and still agree with the spine byte for byte.
+        // Long content follows the same identity path; admission is now explicit source
+        // semantics rather than an arbitrary UTF-8 byte threshold.
         "a device for separating solid particles from a liquid or gas passing through it",
     };
 
@@ -125,24 +135,26 @@ public sealed class WiktionarySurfaceTreesTests
     /// entry behind it.
     /// </summary>
     [Fact]
-    public void ShortSurfaces_AreMemoized_LongOnesAreNot()
+    public void CacheAdmission_IsExplicit_NotAStringLengthThreshold()
     {
         CodepointPerfcache.LoadDefault();
 
+        string reusable = "memoizeme-" + Guid.NewGuid().ToString("N");
         int before = WiktionarySurfaceTrees.CachedSurfaceCount;
-        _ = StageCached("memoizeme", "wiktionary/test/m1");
-        int afterShort = WiktionarySurfaceTrees.CachedSurfaceCount;
-        _ = StageCached("memoizeme", "wiktionary/test/m2");
+        _ = StageCached(reusable, "wiktionary/test/m1");
+        int afterAdmission = WiktionarySurfaceTrees.CachedSurfaceCount;
+        _ = StageCached(reusable, "wiktionary/test/m2");
         int afterRepeat = WiktionarySurfaceTrees.CachedSurfaceCount;
 
-        Assert.Equal(before + 1, afterShort);
-        Assert.Equal(afterShort, afterRepeat);
+        Assert.Equal(before + 1, afterAdmission);
+        Assert.Equal(afterAdmission, afterRepeat);
 
-        // Past MaxCachedSurfaceBytes the surface is near-unique; caching it would spend
-        // native tree memory for no reuse.
-        _ = StageCached(
-            "a device for separating solid particles from a liquid or gas passing through it",
-            "wiktionary/test/m3");
+        string unretained = "a device for separating solid particles "
+            + Guid.NewGuid().ToString("N") + " from a liquid or gas passing through it";
+        Assert.True(WiktionarySurfaceTrees.TryBuild(
+            unretained, retainForReuse: false, out var tree, out bool owned));
+        Assert.True(owned);
+        tree.Dispose();
         Assert.Equal(afterRepeat, WiktionarySurfaceTrees.CachedSurfaceCount);
     }
 

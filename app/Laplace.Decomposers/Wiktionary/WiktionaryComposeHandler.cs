@@ -42,10 +42,12 @@ internal sealed class WiktionaryComposeHandler : IIngestRecordHandler<Wiktionary
         {
             _entry = entry;
             var unique = new HashSet<string>(StringComparer.Ordinal);
-            WiktionaryEmit.CollectSurfaces(entry, unique);
+            var reusable = new HashSet<string>(StringComparer.Ordinal);
+            WiktionaryEmit.CollectSurfaces(entry, unique, reusable);
             foreach (var surface in unique)
             {
-                if (!WiktionarySurfaceTrees.TryBuild(surface, out var tree, out bool owned))
+                if (!WiktionarySurfaceTrees.TryBuild(
+                        surface, reusable.Contains(surface), out var tree, out bool owned))
                     continue;
                 _surfaces.Add(surface);
                 _trees.Add(tree);
@@ -64,15 +66,20 @@ internal sealed class WiktionaryComposeHandler : IIngestRecordHandler<Wiktionary
         public Hash128 DrainInto(SubstrateChangeBuilder builder, double witnessWeight, byte[]? descentBitmap)
         {
             var roots = new Dictionary<string, Hash128>(StringComparer.Ordinal);
+            var coords = new Dictionary<string, WiktionarySurfaceTrees.RootCoord>(StringComparer.Ordinal);
             for (int i = 0; i < _trees.Count; i++)
             {
                 if (WiktionarySurfaceTrees.TryEmit(
                         builder, _trees[i], WiktionaryDecomposer.Source, ReadOnlySpan<byte>.Empty, out var root)
                     && root != default)
+                {
                     roots[_surfaces[i]] = root;
+                    if (WiktionarySurfaceTrees.TryRootCoord(_trees[i], out var coord))
+                        coords[_surfaces[i]] = coord;
+                }
             }
 
-            WiktionaryEmit.Emit(_entry, builder, roots);
+            WiktionaryEmit.Emit(_entry, builder, roots, coords);
             return roots.TryGetValue(_entry.Word, out var wordRoot) ? wordRoot : default;
         }
 

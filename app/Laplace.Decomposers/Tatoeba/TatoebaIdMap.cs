@@ -1,4 +1,5 @@
 using Laplace.Engine.Core;
+using System.Numerics;
 
 namespace Laplace.Decomposers.Tatoeba;
 
@@ -26,12 +27,16 @@ namespace Laplace.Decomposers.Tatoeba;
 /// </summary>
 internal sealed class TatoebaIdMap
 {
-    private const int ChunkBits = 20;                 // 1,048,576 ids per chunk = 16 MiB
-    private const int ChunkSize = 1 << ChunkBits;
-    private const int ChunkMask = ChunkSize - 1;
+    private static readonly int ChunkBits = BitOperations.Log2((uint)Math.Max(1, Math.Min(
+        Array.MaxLength,
+        IngestSizing.ResolveApplyIo(
+            IngestTopology.Current.ApplyPartitions).CacheBytesPerOwner
+            / MemoryTopology.Hash128Bytes)));
+    private static readonly int ChunkSize = 1 << ChunkBits;
+    private static readonly int ChunkMask = ChunkSize - 1;
 
     private readonly object _grow = new();
-    private volatile Hash128[]?[] _chunks = new Hash128[]?[64];
+    private volatile Hash128[]?[] _chunks = new Hash128[]?[1];
     private long _count;
 
     /// <summary>Resolved sentence ids held.</summary>
