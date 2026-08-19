@@ -20,6 +20,7 @@ public sealed record IngestInventory(
     public int FileCount => TracksFileCompletion ? Files.Count : 0;
 
     private long _refinedTotal;
+    private long _observedFloor;
 
     /// <summary>
     /// <see cref="TotalInputUnits"/> unless a background exact count has published a
@@ -29,13 +30,35 @@ public sealed record IngestInventory(
     /// </summary>
     public long EffectiveTotalInputUnits
     {
-        get { long r = Interlocked.Read(ref _refinedTotal); return r > 0 ? r : TotalInputUnits; }
+        get
+        {
+            long refined = Interlocked.Read(ref _refinedTotal);
+            long declared = refined > 0 ? refined : TotalInputUnits;
+            return Math.Max(declared, Interlocked.Read(ref _observedFloor));
+        }
     }
 
     /// <summary>Publish the exact total once a background count finishes.</summary>
     public void PublishExactTotal(long exact)
     {
         if (exact > 0) Interlocked.Exchange(ref _refinedTotal, exact);
+    }
+
+    /// <summary>
+    /// Raise a sampled/refined denominator when extraction has already observed more units.
+    /// The observation is a hard lower bound even when no exact background counter exists
+    /// for the source's logical unit (for example PGN games rather than file newlines).
+    /// </summary>
+    public void PublishObservedFloor(long observed)
+    {
+        if (observed <= 0) return;
+        while (true)
+        {
+            long current = Interlocked.Read(ref _observedFloor);
+            if (current >= observed) return;
+            if (Interlocked.CompareExchange(ref _observedFloor, observed, current) == current)
+                return;
+        }
     }
 
     /// <summary>

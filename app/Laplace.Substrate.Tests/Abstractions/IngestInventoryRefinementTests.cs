@@ -1,4 +1,5 @@
 using Laplace.Decomposers.Abstractions;
+using Laplace.Ingestion;
 using Xunit;
 
 namespace Laplace.Decomposers.Abstractions.Tests;
@@ -35,6 +36,45 @@ public sealed class IngestInventoryRefinementTests
         Assert.Equal(500, inv.EffectiveTotalInputUnits);
         inv.PublishExactTotal(-1);
         Assert.Equal(500, inv.EffectiveTotalInputUnits);
+    }
+
+    [Fact]
+    public void ObservedUnitsRaiseAnUnderestimatedDenominatorMonotonically()
+    {
+        var inv = IngestInventory.Single(189_852, "games");
+
+        inv.PublishObservedFloor(190_705);
+        Assert.Equal(190_705, inv.EffectiveTotalInputUnits);
+
+        inv.PublishObservedFloor(190_000);
+        Assert.Equal(190_705, inv.EffectiveTotalInputUnits);
+
+        inv.PublishExactTotal(191_200);
+        inv.PublishObservedFloor(191_000);
+        Assert.Equal(191_200, inv.EffectiveTotalInputUnits);
+
+        // Exact refinement may lawfully correct a sampled overestimate downward, but it
+        // can never move below units extraction has already observed.
+        var overestimated = IngestInventory.Single(250_000, "games");
+        overestimated.PublishObservedFloor(190_705);
+        overestimated.PublishExactTotal(190_000);
+        Assert.Equal(190_705, overestimated.EffectiveTotalInputUnits);
+    }
+
+    [Fact]
+    public void ProgressPercentDefensivelyNeverExceedsOneHundred()
+    {
+        var progress = new IngestProgress(
+            "ChessPgn", 20, 0, 0, 0,
+            InputUnitsTotal: 189_852,
+            InputUnitsDone: 190_705,
+            FilesTotal: 0,
+            FilesDone: 0,
+            CurrentFile: null,
+            UnitType: "games",
+            Elapsed: TimeSpan.Zero);
+
+        Assert.Equal(100.0, progress.InputPercent);
     }
 
     [Fact]

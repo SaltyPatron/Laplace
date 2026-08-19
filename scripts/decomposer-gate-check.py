@@ -193,7 +193,8 @@ def check_source(
 
     for gate in src.get("consensus_gates", []):
         rel = gate["relation"]
-        minimum = int(gate["min"])
+        minimum = int(gate.get("min", 0))
+        maximum = int(gate["max"]) if "max" in gate else None
         try:
             if gate.get("family"):
                 # Family rollup. A governed root whose per-value children are minted at ingest
@@ -222,7 +223,7 @@ def check_source(
                     )
                 )
                 detail = f"consensus={n:,} (min {minimum:,})"
-            passed = n >= minimum
+            passed = n >= minimum and (maximum is None or n <= maximum)
             if not passed and gate.get("fallback") == "source_evidence":
                 alt_rels = gate.get("fallback_relations") or [rel]
                 total = 0
@@ -244,6 +245,8 @@ def check_source(
                         f"consensus={n:,} (min {minimum:,}); "
                         f"source_evidence fallback {total:,} across {alt_rels} (min {alt_min:,})"
                     )
+            if maximum is not None:
+                detail += f" (max {maximum:,})"
             record(
                 f"consensus:{rel}",
                 passed,
@@ -251,9 +254,17 @@ def check_source(
                 relation=rel,
                 consensus=n,
                 min=minimum,
+                **({"max": maximum} if maximum is not None else {}),
             )
         except Exception as e:
-            record(f"consensus:{rel}", False, str(e), relation=rel, min=minimum)
+            record(
+                f"consensus:{rel}",
+                False,
+                str(e),
+                relation=rel,
+                min=minimum,
+                **({"max": maximum} if maximum is not None else {}),
+            )
 
     report = {
         "source": source,

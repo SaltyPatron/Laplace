@@ -71,23 +71,21 @@ def validate_retired_workflows() -> list[str]:
     return errs
 
 
-def validate_foundation_index_cycle() -> list[str]:
-    """The recovery predicate must cover every state that can drop indexes."""
+def validate_foundation_indexes_stay_online() -> list[str]:
+    """Production foundation ingest must not remove the live read indexes."""
     workflow = ROOT / ".github" / "workflows" / "seed-foundation.yml"
     if not workflow.is_file():
         return ["missing workflow: .github/workflows/seed-foundation.yml"]
 
-    compact = re.sub(r"\s+", "", read_text(workflow))
-    cycle = "inputs.index_cycle&&(inputs.force||steps.fresh.outputs.fresh=='true')"
+    text = read_text(workflow)
+    ensure = read_text(ROOT / "scripts" / "ensure-foundation.sh")
     errs: list[str] = []
-    if f"if:${{{{{cycle}}}}}" not in compact:
-        errs.append(
-            "seed-foundation.yml: index drop must cover force OR genuinely fresh builds"
-        )
-    if f"if:${{{{always()&&{cycle}}}}}" not in compact:
-        errs.append(
-            "seed-foundation.yml: always recovery must match every index-drop path"
-        )
+    forbidden = ("index_cycle", "drop-indexes", "LAPLACE_INDEX_CYCLE")
+    for token in forbidden:
+        if token in text or token in ensure:
+            errs.append(
+                f"foundation ingest: production index-cycle token remains: {token}"
+            )
     return errs
 
 
@@ -479,7 +477,7 @@ def main() -> int:
     pipeline_sh = ROOT / "scripts" / "pipeline.sh"
 
     errs.extend(validate_retired_workflows())
-    errs.extend(validate_foundation_index_cycle())
+    errs.extend(validate_foundation_indexes_stay_online())
 
     ingest_text = read_text(ingest_sh)
     if "LAPLACE_INGEST_FORCE" not in ingest_text or "ingest_args+=(--force)" not in ingest_text:
