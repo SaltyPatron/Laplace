@@ -137,9 +137,11 @@ jobs:
 
       # Always rebuild once at campaign end — even if the ladder failed, dropped
       # secondaries must not be left down (every walk/hydrate would otherwise scan).
-      # always() lets this run on failure; still gated on the fresh-build cycle path.
+      # always() lets this run on failure. Its predicate MUST match the drop predicate
+      # above: a genuinely fresh force=false run drops indexes too, and previously
+      # skipped this recovery because the condition tested inputs.force alone.
       - name: Cycle indexes — rebuild secondaries once (fresh build only)
-        if: ${{ always() && inputs.force && inputs.index_cycle }}
+        if: ${{ always() && inputs.index_cycle && (inputs.force || steps.fresh.outputs.fresh == 'true') }}
         run: |
           echo "campaign end — rebuilding the journaled secondaries once (serial sort-based builds)"
           $CLI recover-indexes
