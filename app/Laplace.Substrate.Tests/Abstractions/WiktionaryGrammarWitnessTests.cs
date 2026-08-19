@@ -78,10 +78,13 @@ public sealed class WiktionaryGrammarWitnessTests
         witness.WalkRow(ctx, new RowContext(0, 1), b);
 
         var change = b.Build();
-        Hash128 correspondsTo = RelationTypeRegistry.Resolve("CORRESPONDS_TO").Id;
+        Hash128 hasSense = RelationTypeRegistry.Resolve("HAS_SENSE").Id;
+        Hash128 isSenseOf = RelationTypeRegistry.Resolve("IS_SENSE_OF").Id;
+        Hash128 senseId = Assert.Single(change.Attestations, a =>
+            a.TypeId == hasSense && a.SubjectId == wordId).ObjectId!.Value;
         Assert.Contains(change.Attestations, a =>
-            a.TypeId == correspondsTo
-            && a.SubjectId == wordId
-            && a.ObjectId == synId);
+            a.TypeId == isSenseOf && a.SubjectId == senseId && a.ObjectId == synId);
+        Assert.DoesNotContain(change.Attestations, a =>
+            a.SubjectId == wordId && a.ObjectId == synId);
     }
 }

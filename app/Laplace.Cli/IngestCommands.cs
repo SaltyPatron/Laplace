@@ -532,7 +532,7 @@ internal static class IngestCommands
                 + $"round_trips={p.RoundTrips:N0} elapsed_s={p.Elapsed.TotalSeconds:F0}"
                 + (p.UnitsFailed > 0 ? $" failed={p.UnitsFailed:N0} status=failed" : " status=running"));
         });
-        int workers = IngestTopology.Current.CommitWorkers;
+        int workers = IngestTopology.Current.ApplyDispatchWorkers;
         // LAPLACE_INGEST_MAX_UNITS caps INPUT VOLUME (smoke/bench scoping — an
         // operator decision, like --langs). It is not a machine-sizing knob:
         // batch/commit sizing stays owned by IngestSizing/MemoryTopology and
@@ -949,8 +949,10 @@ internal static class IngestCommands
                                 + $"IsA={await RelationEvidence("IS_A", srcKey):N0}");
                 break;
             case "UDDecomposer":
-                Console.WriteLine($"  check ud: HAS_POS={await RelationEvidence("HAS_POS", srcKey):N0} "
-                                + $"IS_LEMMA_OF={await RelationEvidence("IS_LEMMA_OF", srcKey):N0}");
+                string udParse = UDSource.Relations[2];
+                string udLanguage = UDSource.Relations[0];
+                Console.WriteLine($"  check ud: {udParse}={await RelationEvidence(udParse, srcKey):N0} "
+                                + $"{udLanguage}={await RelationEvidence(udLanguage, srcKey):N0}");
                 break;
             case "TatoebaDecomposer":
                 Console.WriteLine($"  check tatoeba: IS_TRANSLATION_OF={await RelationEvidence("IS_TRANSLATION_OF", srcKey):N0} "

@@ -237,6 +237,14 @@ public abstract class Decomposer<TRecord> : IDecomposer
             SourceId, BatchLabelPrefix, DefaultBatchSize, options, context.Reader, PipelineProfile);
 
     /// <summary>
+    /// Whether a monolithic record stream may be cut into independent working-set
+    /// pipelines. Ordered container lanes override this to false: record-local compose
+    /// still fans across the shared compose workers, but the final ordered structure
+    /// must observe every preceding record before it is emitted.
+    /// </summary>
+    protected virtual bool CanSegmentMonolith => true;
+
+    /// <summary>
     /// A non-null stream selects the multi-file scheduling branch of the same driver.
     /// </summary>
     protected virtual IMultiFileRecordStream<TRecord>? CreateMultiFileStream(
@@ -288,7 +296,16 @@ public abstract class Decomposer<TRecord> : IDecomposer
             await foreach (var change in IngestBatchPipeline.RunMultiFileAsync(
                                multiFileStream,
                                label => CreateHandlerForFile(label, options),
-                               label => ConfigForFile(label, context.Reader, options),
+                               label => ConfigForFile(label, context.Reader, options)
+                                   .WithCanonicalNamesProvider(() =>
+                                   {
+                                       var names = new HashSet<string>(
+                                           CanonicalNamesForReadback, StringComparer.Ordinal)
+                                       {
+                                           $"substrate/source/{SourceName}/v1",
+                                       };
+                                       return names;
+                                   }),
                                maxTotalUnits: options.MaxInputUnits,
                                fileWorkers: IngestTopology.Current.FileWorkers,
                                isolateFileFailures: PerFileCompletion,
@@ -310,7 +327,7 @@ public abstract class Decomposer<TRecord> : IDecomposer
         // rides the same pool as a multi-file source, and content-addressing merges any
         // cross-segment collisions (same content -> same id) with no coordination. Capped
         // runs stay serial (ResolveSegments -> 1) so the exact input-unit stop point holds.
-        int segments = MonolithSegmenter.ResolveSegments(BuildConfig());
+        int segments = CanSegmentMonolith ? MonolithSegmenter.ResolveSegments(BuildConfig()) : 1;
         if (segments <= 1)
         {
             await foreach (var change in IngestBatchPipeline.RunAsync(
@@ -519,8 +536,10 @@ public abstract class RelationTripleDecomposer : Decomposer<RelationTripleRecord
     public override int EstimatedComposeUnitsPerRecord =>
         IngestSourceProfile.RelationTriple.EstComposeUnitsPerRecord;
 
+    protected virtual ConcurrentIdSet? SourceNodeDeclarations => null;
+
     protected sealed override IIngestRecordHandler<RelationTripleRecord> CreateHandler() =>
-        new RelationTripleHandler(SourceId, SourceTrust);
+        new RelationTripleHandler(SourceId, SourceTrust, SourceNodeDeclarations);
 
     protected override IngestBatchConfig BuildPipelineConfig(
         IDecomposerContext context, DecomposerOptions options) =>

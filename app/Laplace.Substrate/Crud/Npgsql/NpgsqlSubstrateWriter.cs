@@ -10,6 +10,8 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
 {
     private readonly NpgsqlDataSource _ds;
     private readonly ILogger<NpgsqlSubstrateWriter> _log;
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte>
+        _persistedCanonicalNames = new(StringComparer.Ordinal);
 
     public NpgsqlSubstrateWriter(
         NpgsqlDataSource dataSource,
@@ -53,6 +55,23 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
         }
         if (changes.Count == 0)
             return new ApplyResult(0, 0, 0, 0, 0, 0, 0, sw.Elapsed, false);
+
+        HashSet<string>? canonicalNames = null;
+        foreach (var change in changes)
+        {
+            if (change.CanonicalNames.IsDefaultOrEmpty) continue;
+            foreach (var name in change.CanonicalNames)
+                if (!_persistedCanonicalNames.ContainsKey(name))
+                    (canonicalNames ??= new(StringComparer.Ordinal)).Add(name);
+        }
+        if (canonicalNames is { Count: > 0 })
+        {
+            // Durable-before-complete: a crash may leave harmless names ahead of the
+            // file marker, but can never leave a completed file without its readback names.
+            await NpgsqlCanonicalRegistry.RegisterCanonicalsAsync(_ds, canonicalNames, ct);
+            roundTrips++;
+            foreach (var name in canonicalNames) _persistedCanonicalNames.TryAdd(name, 0);
+        }
 
         Hash128? workingSetSource = null;
         if (workingSetToken is not null)

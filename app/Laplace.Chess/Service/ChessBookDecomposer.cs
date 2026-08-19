@@ -21,8 +21,8 @@ namespace Laplace.Chess.Service;
 ///    (comment, EXPLAINS, position-after-move): the book's judgment, tied to the exact position
 ///    it judges.
 ///  - Prose move lines — algebraic ("1. e4 e5 2. Nf3") or English descriptive ("1. P-K4, P-K4;
-///    2. Kt-KB3") — are replayed from the standard start; lines that ground legally emit MOVE
-///    edges plus (paragraph, EXPLAINS, final-position). Fragments quoted from diagrams fail
+///    2. Kt-KB3") — are replayed from the standard start; lines that ground legally emit one
+///    ordered line trajectory plus (paragraph, EXPLAINS, line). Fragments quoted from diagrams fail
 ///    replay from the start position and are skipped by construction: only deterministic
 ///    groundings are attested.
 ///
@@ -221,8 +221,8 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
         var m = new ChessModality();
         var state = m.Initial();
 
-        // Replay once to find the terminal fact: a line the book plays out to checkmate carries
-        // a real outcome; anything else is an existence witness (one drawish game's weight).
+        // Replay once and retain the exact ordered structure. Terminal mechanics remain
+        // deterministic calculation; a book line is not fabricated game-outcome testimony.
         var states = new List<ChessState>(record.Sans.Count + 1) { state };
         foreach (var san in record.Sans)
         {
@@ -232,22 +232,17 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
             states.Add(state);
         }
 
-        var result = m.Terminal(state) is { IsDraw: false } t ? GameOutcome.WonBy(t.Winner!.Value) : GameOutcome.Draw;
-
-        for (int ply = 0; ply < record.Sans.Count; ply++)
-        {
-            int mover = ply % 2;
-            ChessGraph.AppendMoveEdge(
-                b, m.StateKey(states[ply]), m.StateKey(states[ply + 1]),
-                result.ForMover(mover), games: 1, BookWitnessWeight,
-                sourceId: src);
-        }
-
         // GH #736: the prose line's content id IS the shared line composition — the same
         // entity a PGN playing of these moves mints — so each book's testimony folds into
         // it, and EXPLAINS targets the line (the play the book teaches), not merely its
         // final position.
         b.AddEntity(record.LineId, EntityTier.Document, ChessVocabulary.GameType, src);
+        var line = new List<ChessNode>(states.Count);
+        foreach (var position in states)
+            line.Add(ChessGraph.EmitComposed(b, m.StateKey(position), src).Position);
+        ChessGraph.AppendGameTrajectory(
+            b, record.LineId, line, src,
+            DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L);
         if (!string.IsNullOrWhiteSpace(record.Context)
             && ContentEmitter.Emit(b, record.Context, src) is { } ctxId)
             b.AddAttestation(NativeAttestation.Categorical(

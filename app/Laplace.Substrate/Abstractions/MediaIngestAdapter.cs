@@ -38,6 +38,22 @@ public readonly record struct VideoFrameIngestRecord(
     Hash128 SourceId = default,
     FileMetadata? Metadata = null);
 
+/// <summary>
+/// Video vendor records share the generic ingest pipeline. Frames compose normally;
+/// the terminal record materializes their one ordered container after every frame
+/// witness has drained.
+/// </summary>
+public abstract record VideoIngestRecord
+{
+    public sealed record Frame(VideoFrameIngestRecord Value) : VideoIngestRecord;
+    public sealed record SequenceEnd : VideoIngestRecord;
+}
+
+internal interface IResolvedRootCoordinateUnit
+{
+    bool TryGetRootCoordinate(out double x, out double y, out double z, out double m);
+}
+
 public sealed class ImageIngestHandler : IIngestRecordHandler<ImageIngestRecord>
 {
     private readonly Hash128 _sourceId;
@@ -66,7 +82,7 @@ public sealed class ImageIngestHandler : IIngestRecordHandler<ImageIngestRecord>
             FileEntity.EmitMetadata(builder, fileRoot, metadata);
     }
 
-    private sealed class ImageDeferredUnit : IIngestDeferredUnit
+    private sealed class ImageDeferredUnit : IIngestDeferredUnit, IResolvedRootCoordinateUnit
     {
         private readonly ImageIngestRecord _record;
         private readonly Hash128 _sourceId;
@@ -96,6 +112,21 @@ public sealed class ImageIngestHandler : IIngestRecordHandler<ImageIngestRecord>
             return ImageTierSpine.EmitTree(
                 builder, _tree, _sourceId, descentBitmap ?? ReadOnlySpan<byte>.Empty, out var rootId)
                 ? rootId : default;
+        }
+
+        public bool TryGetRootCoordinate(out double x, out double y, out double z, out double m)
+        {
+            x = y = z = m = 0;
+            if (_tree is null || _tree.NodeCount == 0) return false;
+            var root = _tree.GetNode(_tree.NaturalUnitIndex());
+            unsafe
+            {
+                x = root.Coord[0];
+                y = root.Coord[1];
+                z = root.Coord[2];
+                m = root.Coord[3];
+            }
+            return true;
         }
 
         public void Dispose()
@@ -178,64 +209,125 @@ public sealed class AudioIngestHandler : IIngestRecordHandler<AudioIngestRecord>
 }
 
 /// <summary>
-/// Video frames share the image ladder; temporal membership edges are emitted in
-/// <see cref="WalkWitness"/> (HAS_FRAME / PRECEDES_IN_TIME) once a frame root exists.
-/// Frame-index map is concurrency-safe so drain order need not match extract order.
+/// Video frames share the image ladder. Their roots and coordinates accumulate during
+/// the ordinary ordered witness drain; the terminal vendor record composes one video
+/// trajectory without manufacturing membership or adjacency testimony.
 /// </summary>
-public sealed class VideoFrameIngestHandler : IIngestRecordHandler<VideoFrameIngestRecord>
+public sealed class VideoFrameIngestHandler : IIngestRecordHandler<VideoIngestRecord>
 {
-    // Declaration roster (the architecture-gate pattern): relation names are
-    // spelled HERE once, resolved once, and emit sites below use resolved ids
-    // (CategoricalResolved) — no ad-hoc call-site literals (ISA G3-C#).
-    // Index coupling is deliberate and local: two entries, resolved on the
-    // next two lines.
-    private static readonly IReadOnlyList<string> DeclaredRelations =
-        ["HAS_FRAME", "PRECEDES_IN_TIME"];
-    private static readonly Hash128 HasFrameId =
-        RelationTypeRegistry.RelationTypeId(DeclaredRelations[0]);
-    private static readonly Hash128 PrecedesInTimeId =
-        RelationTypeRegistry.RelationTypeId(DeclaredRelations[1]);
-
     private readonly Hash128 _sourceId;
     private readonly int _layerOrder;
-    private readonly Hash128 _videoRootId;
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, Hash128> _frameRoots = new();
+    private readonly ImageIngestHandler _imageHandler;
+    private readonly SortedDictionary<int, FramePlacement> _frames = new();
     public bool IgnoreCompletedFiles { get; init; }
 
-    public VideoFrameIngestHandler(Hash128 sourceId, int layerOrder, Hash128 videoRootId)
+    public VideoFrameIngestHandler(Hash128 sourceId, int layerOrder)
     {
         _sourceId = sourceId;
         _layerOrder = layerOrder;
-        _videoRootId = videoRootId;
+        _imageHandler = new ImageIngestHandler(sourceId, layerOrder);
     }
 
-    public IIngestDeferredUnit CreateDeferredUnit(VideoFrameIngestRecord record) =>
-        new ImageIngestHandler(_sourceId, _layerOrder).CreateDeferredUnit(
-            new ImageIngestRecord(record.Rgba, record.Width, record.Height, record.SourceId, record.Metadata));
-
-    public void WalkWitness(VideoFrameIngestRecord record, Hash128 root, SubstrateChangeBuilder builder, IIngestDeferredUnit unit)
+    public IIngestDeferredUnit CreateDeferredUnit(VideoIngestRecord record) => record switch
     {
-        if (unit is PresentRootDeferredUnit) return;
-        Hash128 frameRoot = root != default ? root
-            : ImageTierSpine.ResolveRoot(record.Rgba, record.Width, record.Height) ?? default;
-        if (frameRoot == default) return;
+        VideoIngestRecord.Frame(var frame) => _imageHandler.CreateDeferredUnit(
+            new ImageIngestRecord(frame.Rgba, frame.Width, frame.Height, frame.SourceId, frame.Metadata)),
+        VideoIngestRecord.SequenceEnd => SequenceEndUnit.Instance,
+        _ => throw new ArgumentOutOfRangeException(nameof(record)),
+    };
 
-        // Deposit the video container entity once (content-addressed root over frame ids).
-        builder.AddEntity(new EntityRow(
-            _videoRootId, 4, EntityTypeRegistry.Video, _sourceId));
-        builder.AddAttestation(NativeAttestation.CategoricalResolved(
-            _videoRootId, HasFrameId, frameRoot, _sourceId, null, SourceTrust.StructuredCorpus));
-        _frameRoots[record.FrameIndex] = frameRoot;
-        if (_frameRoots.TryGetValue(record.FrameIndex - 1, out var prev))
-            builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                prev, PrecedesInTimeId, frameRoot, _sourceId, null, SourceTrust.StructuredCorpus));
-        if (_frameRoots.TryGetValue(record.FrameIndex + 1, out var next))
-            builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                frameRoot, PrecedesInTimeId, next, _sourceId, null, SourceTrust.StructuredCorpus));
+    public long UnitsPerRecord(VideoIngestRecord record) =>
+        record is VideoIngestRecord.Frame ? 1 : 0;
 
-        Laplace.Ingestion.LayerCompletion.EmitFileMarker(builder, frameRoot, _layerOrder);
-        if (record.Metadata is { } metadata)
-            FileEntity.EmitMetadata(builder, frameRoot, metadata);
+    public void WalkWitness(
+        VideoIngestRecord record, Hash128 root, SubstrateChangeBuilder builder, IIngestDeferredUnit unit)
+    {
+        switch (record)
+        {
+            case VideoIngestRecord.Frame(var frame):
+                _imageHandler.WalkWitness(
+                    new ImageIngestRecord(
+                        frame.Rgba, frame.Width, frame.Height, frame.SourceId, frame.Metadata),
+                    root, builder, unit);
+                if (root == default) return;
+                if (unit is not IResolvedRootCoordinateUnit coordinate
+                    || !coordinate.TryGetRootCoordinate(out double x, out double y, out double z, out double m))
+                    throw new InvalidOperationException(
+                        $"video frame {frame.FrameIndex} composed without a recoverable root coordinate");
+                _frames[frame.FrameIndex] = new FramePlacement(root, x, y, z, m);
+                break;
+
+            case VideoIngestRecord.SequenceEnd:
+                StageVideoTrajectory(builder, _frames, _sourceId);
+                break;
+        }
+    }
+
+    internal static Hash128 StageVideoTrajectory(
+        SubstrateChangeBuilder builder,
+        IReadOnlyDictionary<int, FramePlacement> frames,
+        Hash128 sourceId)
+    {
+        if (frames.Count == 0) return default;
+
+        var roots = new Hash128[frames.Count];
+        var coords = new double[frames.Count * 4];
+        int expected = 0;
+        foreach (var (ordinal, frame) in frames.OrderBy(static p => p.Key))
+        {
+            if (ordinal != expected)
+                throw new InvalidOperationException(
+                    $"video trajectory is not contiguous: expected frame {expected}, found {ordinal}");
+            roots[expected] = frame.Root;
+            coords[expected * 4 + 0] = frame.X;
+            coords[expected * 4 + 1] = frame.Y;
+            coords[expected * 4 + 2] = frame.Z;
+            coords[expected * 4 + 3] = frame.M;
+            expected++;
+        }
+
+        Hash128 videoRoot = HashVideoRoot(roots);
+        double[] center = Math4d.KarcherMean(coords);
+        var physicality = new PhysicalityRow(
+            Id: PhysicalityId.Compute(videoRoot, PhysicalityType.Content),
+            EntityId: videoRoot,
+            SourceId: sourceId,
+            Type: PhysicalityType.Content,
+            CoordX: center[0], CoordY: center[1], CoordZ: center[2], CoordM: center[3],
+            HilbertIndex: Hilbert128.Encode(center),
+            TrajectoryXyzm: Trajectory.Build(roots),
+            NConstituents: roots.Length,
+            AlignmentResidual: null,
+            SourceDim: null,
+            ObservedAtUnixUs: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1_000);
+
+        builder.AddEntity(videoRoot, EntityTier.Document, EntityTypeRegistry.Video, sourceId);
+        builder.AddPhysicality(physicality);
+        return videoRoot;
+    }
+
+    public static Hash128 HashVideoRoot(IReadOnlyList<Hash128> orderedFrameRoots)
+    {
+        ReadOnlySpan<byte> domain = "substrate/video/v1/frames"u8;
+        var buf = new byte[domain.Length + orderedFrameRoots.Count * 16];
+        domain.CopyTo(buf);
+        for (int i = 0; i < orderedFrameRoots.Count; i++)
+            orderedFrameRoots[i].WriteBytes(buf.AsSpan(domain.Length + i * 16, 16));
+        return Hash128.Blake3(buf);
+    }
+
+    internal readonly record struct FramePlacement(
+        Hash128 Root, double X, double Y, double Z, double M);
+
+    private sealed class SequenceEndUnit : IIngestDeferredUnit
+    {
+        internal static readonly SequenceEndUnit Instance = new();
+        public TierTree? TreeForBatchProbe => null;
+        public Task<byte[]?> ProbeDescentAsync(ISubstrateReader reader, CancellationToken ct) =>
+            Task.FromResult<byte[]?>(null);
+        public Hash128 DrainInto(
+            SubstrateChangeBuilder builder, double witnessWeight, byte[]? descentBitmap) => default;
+        public void Dispose() { }
     }
 }
 

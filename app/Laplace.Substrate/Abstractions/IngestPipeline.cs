@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Buffers.Binary;
+using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -109,6 +110,81 @@ internal static class MultiFileScheduler
     }
 }
 
+/// <summary>
+/// Shared bounded fan-out for ingest work whose one input may yield many output records.
+/// Vendors describe the work item and its async masticator; the pipeline owns worker
+/// concurrency, output backpressure, cancellation, and producer failure propagation.
+/// </summary>
+public static class ParallelIngestWork
+{
+    public static async IAsyncEnumerable<TResult> RunAsync<TWork, TResult>(
+        IReadOnlyList<TWork> work,
+        int maxConcurrency,
+        int outputCapacity,
+        Func<TWork, CancellationToken, IAsyncEnumerable<TResult>> execute,
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(work);
+        ArgumentNullException.ThrowIfNull(execute);
+        if (maxConcurrency <= 0)
+            throw new ArgumentOutOfRangeException(nameof(maxConcurrency));
+        if (outputCapacity <= 0)
+            throw new ArgumentOutOfRangeException(nameof(outputCapacity));
+        if (work.Count == 0) yield break;
+
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var output = Channel.CreateBounded<TResult>(new BoundedChannelOptions(outputCapacity)
+        {
+            SingleReader = true,
+            SingleWriter = maxConcurrency == 1,
+            FullMode = BoundedChannelFullMode.Wait,
+        });
+
+        async Task ProduceAsync()
+        {
+            Exception? failure = null;
+            try
+            {
+                await Parallel.ForEachAsync(
+                    work,
+                    new ParallelOptions
+                    {
+                        MaxDegreeOfParallelism = maxConcurrency,
+                        CancellationToken = stop.Token,
+                    },
+                    async (item, token) =>
+                    {
+                        await foreach (var result in execute(item, token)
+                                           .WithCancellation(token).ConfigureAwait(false))
+                            await output.Writer.WriteAsync(result, token).ConfigureAwait(false);
+                    }).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                failure = ex;
+            }
+            finally
+            {
+                output.Writer.TryComplete(failure);
+            }
+        }
+
+        Task producer = ProduceAsync();
+        try
+        {
+            await foreach (var result in output.Reader.ReadAllAsync(ct).ConfigureAwait(false))
+                yield return result;
+        }
+        finally
+        {
+            stop.Cancel();
+            // ProduceAsync converts its terminal exception into channel completion,
+            // so this await observes teardown without masking ReadAllAsync's error.
+            await producer.ConfigureAwait(false);
+        }
+    }
+}
+
 public interface IIngestDeferredUnit : IDisposable
 {
     TierTree? TreeForBatchProbe { get; }
@@ -201,6 +277,7 @@ public sealed class IngestBatchConfig
     public ISubstrateReader? ContainmentReader { get; init; }
     public Action<long>? ReportUnits { get; init; }
     public long MaxInputUnits { get; init; }
+    internal Func<IReadOnlyCollection<string>>? CanonicalNamesProvider { get; init; }
 
     /// <summary>
     /// Batch content surfaces and bulk-probe their resolved roots before materializing
@@ -215,10 +292,11 @@ public sealed class IngestBatchConfig
 
     public SubstrateChangeBuilder NewBuilder(int batchNumber)
     {
+        var capacities = ResolveBuilderCapacities();
         var b = new SubstrateChangeBuilder(SourceId, $"{BatchLabelPrefix}/{batchNumber}", null,
-            entityCapacity: EntityCapacity ?? BatchSize,
-            physicalityCapacity: PhysicalityCapacity ?? BatchSize,
-            attestationCapacity: AttestationCapacity ?? BatchSize * 4)
+            entityCapacity: capacities.Entities,
+            physicalityCapacity: capacities.Physicalities,
+            attestationCapacity: capacities.Attestations)
             .SetCommitEpoch(CommitEpoch);
         if (EnableDeferredContentOnBuilder && ContainmentReader is not null)
             b.EnableDeferredContent(ContainmentReader);
@@ -229,12 +307,40 @@ public sealed class IngestBatchConfig
         return b;
     }
 
+    internal (int Entities, int Physicalities, int Attestations) ResolveBuilderCapacities()
+    {
+        int batchRecords = Math.Max(1, BatchSize);
+        int residentRecords = WorkingSet && WorkingSetRecordCap is { } cap
+            ? Math.Min(batchRecords, Math.Max(1, cap))
+            : batchRecords;
+
+        return (
+            ScaleInitialCapacity(EntityCapacity ?? batchRecords, batchRecords, residentRecords),
+            ScaleInitialCapacity(PhysicalityCapacity ?? batchRecords, batchRecords, residentRecords),
+            ScaleInitialCapacity(AttestationCapacity ?? SaturatingMultiply(batchRecords, 4), batchRecords, residentRecords));
+    }
+
+    private static int ScaleInitialCapacity(int capacity, int batchRecords, int residentRecords)
+    {
+        if (capacity <= 0)
+            return 0;
+        if (residentRecords >= batchRecords)
+            return capacity;
+
+        long scaled = ((long)capacity * residentRecords + batchRecords - 1L) / batchRecords;
+        return (int)Math.Clamp(scaled, 1L, int.MaxValue);
+    }
+
+    private static int SaturatingMultiply(int value, int multiplier) =>
+        (int)Math.Min((long)value * multiplier, int.MaxValue);
+
     internal ISubstrateReader? EffectiveReader => ContainmentReader;
 
     private IngestBatchConfig Copy(
         long? maxInputUnits = null,
         int? concurrentWorkingSets = null,
-        Func<int>? activeWorkingSetCount = null) =>
+        Func<int>? activeWorkingSetCount = null,
+        Func<IReadOnlyCollection<string>>? canonicalNamesProvider = null) =>
         new()
         {
             SourceId = SourceId,
@@ -269,6 +375,7 @@ public sealed class IngestBatchConfig
             WorkingSetProfile = WorkingSetProfile,
             ConcurrentWorkingSets = concurrentWorkingSets ?? ConcurrentWorkingSets,
             ActiveWorkingSetCount = activeWorkingSetCount ?? ActiveWorkingSetCount,
+            CanonicalNamesProvider = canonicalNamesProvider ?? CanonicalNamesProvider,
         };
 
     public IngestBatchConfig WithMaxInputUnits(long max) => Copy(maxInputUnits: max);
@@ -287,6 +394,13 @@ public sealed class IngestBatchConfig
         Copy(
             concurrentWorkingSets: Math.Max(ConcurrentWorkingSets, maximumConcurrentWorkingSets),
             activeWorkingSetCount: activeWorkingSetCount);
+
+    internal IngestBatchConfig WithCanonicalNamesProvider(
+        Func<IReadOnlyCollection<string>> provider)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+        return Copy(canonicalNamesProvider: provider);
+    }
 }
 
 public static class IngestBatchPipeline
@@ -429,14 +543,24 @@ public static class IngestBatchPipeline
 
     /// <summary>Boundary that ALSO deposits the file's completion marker (resume-enabled lanes).</summary>
     public static SubstrateChange BuildFileCompletion(
-        Hash128 sourceId, string fileLabel, Hash128 fileRoot, int layerOrder)
+        Hash128 sourceId, string fileLabel, Hash128 fileRoot, int layerOrder,
+        IReadOnlyCollection<string>? canonicalNames = null)
     {
         var builder = new SubstrateChangeBuilder(
             sourceId, $"{PeriodBoundaryUnitPrefix}{fileLabel}", null,
             entityCapacity: 1, physicalityCapacity: 0, attestationCapacity: 1);
         Laplace.Ingestion.LayerCompletion.EmitFileMarker(
             builder, fileRoot, sourceId, layerOrder);
-        return builder.Build();
+        var change = builder.Build();
+        return canonicalNames is { Count: > 0 }
+            ? change with
+            {
+                CanonicalNames = canonicalNames
+                    .Where(static n => !string.IsNullOrWhiteSpace(n))
+                    .Distinct(StringComparer.Ordinal)
+                    .ToImmutableArray(),
+            }
+            : change;
     }
 
     public static SubstrateChange BuildFileFailure(Hash128 sourceId, string fileLabel, Exception ex) =>
@@ -755,7 +879,8 @@ public static class IngestBatchPipeline
 
             yield return fileFailure
                 ?? (fileRoot is { } fr && !hitCap && resume is { } rp
-                    ? BuildFileCompletion(config.SourceId, label, fr, rp.LayerOrder)
+                    ? BuildFileCompletion(config.SourceId, label, fr, rp.LayerOrder,
+                        config.CanonicalNamesProvider?.Invoke())
                     : hitCap
                         ? BuildCancelledBoundary(config.SourceId, label)
                         : BuildPeriodBoundary(config.SourceId, label));
@@ -1024,7 +1149,8 @@ public static class IngestBatchPipeline
                     await outCh.Writer.WriteAsync(
                         fileFailure
                             ?? (fileRoot is { } fr && resume is { } rp
-                                ? BuildFileCompletion(config.SourceId, source.FileLabel, fr, rp.LayerOrder)
+                                ? BuildFileCompletion(config.SourceId, source.FileLabel, fr, rp.LayerOrder,
+                                    config.CanonicalNamesProvider?.Invoke())
                                 : BuildPeriodBoundary(config.SourceId, source.FileLabel)), ct);
                     if (fileFailure is not null) continue;
 

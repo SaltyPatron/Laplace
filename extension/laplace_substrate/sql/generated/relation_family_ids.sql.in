@@ -109,6 +109,7 @@ CREATE OR REPLACE FUNCTION consensus.relation_family_ids(p_family text)
         WHEN 'HAS_NUM_KV_HEADS' THEN ARRAY[laplace.relation_type_id('HAS_NUM_KV_HEADS')]
         WHEN 'HAS_NUM_LAYERS' THEN ARRAY[laplace.relation_type_id('HAS_NUM_LAYERS')]
         WHEN 'HAS_ONSET_SEGMENT' THEN ARRAY[laplace.relation_type_id('HAS_ONSET_SEGMENT')]
+        WHEN 'HAS_PARSE' THEN ARRAY[laplace.relation_type_id('HAS_PARSE')]
         WHEN 'HAS_PART' THEN ARRAY[laplace.relation_type_id('CONTAINS'), laplace.relation_type_id('HAS_A'), laplace.relation_type_id('HAS_MEMBER'), laplace.relation_type_id('HAS_PART'), laplace.relation_type_id('HAS_SUBSTANCE'), laplace.relation_type_id('MADE_UP_OF')]
         WHEN 'HAS_PATCH' THEN ARRAY[laplace.relation_type_id('HAS_PATCH')]
         WHEN 'HAS_POS' THEN ARRAY[laplace.relation_type_id('HAS_POS'), laplace.relation_type_id('HAS_XPOS')]

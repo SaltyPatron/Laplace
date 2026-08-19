@@ -31,9 +31,9 @@ public sealed class IngestSizingTests
     }
 
     [Fact]
-    public void Resolve_DefaultApplyPartitions_OneBulkApplyPerCommit()
+    public void Resolve_DefaultApplyDispatch_OneBulkApplyAtATime()
     {
-        Assert.Equal(1, IngestTopology.ResolveApplyPartitions());
+        Assert.Equal(1, IngestTopology.ResolveApplyDispatchWorkers());
     }
 
     [Fact]
@@ -121,8 +121,8 @@ public sealed class IngestSizingTests
         int tenWorkerCap = IngestSizing.ResolveFlushEnvelopeRecordCap(
             profile, workerEnvelope);
 
-        Assert.Equal(83, oneWorkerCap);
-        Assert.Equal(8, tenWorkerCap);
+        Assert.Equal(167, oneWorkerCap);
+        Assert.Equal(16, tenWorkerCap);
         Assert.True(
             tenWorkerCap * 10L * profile.WorkingSetBytesPerRecord
                 * IngestSizing.WorkingSetResidentSlack
@@ -139,6 +139,9 @@ public sealed class IngestSizingTests
         Assert.Equal(plan.WorkingSetProbeInterval,
             IngestSizing.ResolveWorkingSetProbeInterval(plan.RecordBatchSize, IngestSourceProfile.RelationTriple));
         Assert.Equal(IngestTopology.Current.ComposeWorkers, plan.ComposeWorkers);
+        Assert.Equal(IngestTopology.Current.IoWorkersAvailable, plan.IoWorkersAvailable);
+        Assert.Equal(IngestTopology.Current.ApplyDispatchWorkers, plan.ApplyDispatchWorkers);
+        Assert.Equal(IngestTopology.Current.ApplyPartitions, plan.ApplyPartitions);
         Assert.InRange(plan.WorkingSetBudgetBytes, 1L << 30, 8L << 30);
     }
 

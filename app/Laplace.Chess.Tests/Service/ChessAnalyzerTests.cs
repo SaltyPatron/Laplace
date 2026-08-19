@@ -1,4 +1,6 @@
 using Laplace.Engine.Core;
+using Laplace.Decomposers.Abstractions;
+using Laplace.Modality;
 using Laplace.SubstrateCRUD;
 using Xunit;
 
@@ -45,6 +47,54 @@ public sealed class ChessAnalyzerTests
         Assert.Contains(change.Entities, e => e.TypeId == ChessVocabulary.SubstructureType);
         Assert.False(change.Physicalities.IsDefaultOrEmpty);
         Assert.True(change.Physicalities.Length > 0, "analyzer emits geometry (physicalities)");
+    }
+
+    [Fact]
+    public void Analyzer_KeepsExactTransitionsInTrajectory_NotConsensus()
+    {
+        var change = Analyze(Game);
+        Assert.DoesNotContain(change.Attestations,
+            a => a.TypeId == ChessVocabulary.MoveType);
+
+        var positions = change.Entities
+            .Where(e => e.TypeId == ChessVocabulary.PositionType)
+            .Select(e => e.Id)
+            .ToHashSet();
+        Assert.DoesNotContain(change.Attestations,
+            a => a.TypeId == ChessVocabulary.OutcomeType
+                 && positions.Contains(a.SubjectId));
+
+        var substructures = change.Entities
+            .Where(e => e.TypeId == ChessVocabulary.SubstructureType)
+            .Select(e => e.Id)
+            .ToHashSet();
+        Assert.Contains(change.Attestations,
+            a => a.TypeId == ChessVocabulary.OutcomeType
+                 && substructures.Contains(a.SubjectId));
+    }
+
+    [Fact]
+    public void ThinkClass_FoldsOutcomeAtReusableClassGrain()
+    {
+        CodepointPerfcache.LoadDefault();
+        var b = new SubstrateChangeBuilder(ChessVocabulary.AnalysisSourceId, "test/think");
+        var position = Hash128.OfCanonical("test/chess/position");
+        ChessGraph.AppendThinkClass(
+            b, position, "rushed", PlyOutcome.Win, 0.7,
+            ChessVocabulary.AnalysisSourceId, Hash128.OfCanonical("test/chess/playing"));
+        var change = b.Build();
+        var classId = ContentEmitter.RootId("rushed");
+        Assert.NotNull(classId);
+
+        Assert.Contains(change.Attestations,
+            a => a.SubjectId == position
+                 && a.TypeId == ChessVocabulary.HasThinkClassType
+                 && a.ObjectId == classId.Value);
+        Assert.Contains(change.Attestations,
+            a => a.SubjectId == classId.Value
+                 && a.TypeId == ChessVocabulary.OutcomeType
+                 && a.ObjectId == ChessVocabulary.OutcomeObject
+                 && a.ContextId is null);
     }
 
     [Fact]

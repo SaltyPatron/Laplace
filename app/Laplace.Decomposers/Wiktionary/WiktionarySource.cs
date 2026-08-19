@@ -22,11 +22,23 @@ public readonly struct WiktionarySource : ISeedSource
         "IS_TRANSLATION_OF", "ETYMOLOGICALLY_DERIVED_FROM", "BORROWED_FROM",
         "INHERITED_FROM", "ETYMOLOGICALLY_RELATED_TO", "DERIVED_FROM",
         "FORM_OF", "HAS_FEATURE", "MANNER_OF",
-        // Emitted by WiktionaryEmit all along but previously absent from this declaration.
-        "HAS_LANGUAGE", "CORRESPONDS_TO",
+        // Source-owned lexical and sense relations.
+        "HAS_LANGUAGE", "CORRESPONDS_TO", "HAS_SENSE", "IS_SENSE_OF", "HAS_NAME_ALIAS",
     ];
 
-    public static IReadOnlyList<string>? TypeNodeNames => null;
+    internal static readonly Hash128 CorrespondsToTypeId =
+        RelationTypeRegistry.RelationTypeId(Relations[26]);
+    internal static readonly Hash128 HasLanguageTypeId =
+        RelationTypeRegistry.RelationTypeId(Relations[25]);
+    internal static readonly Hash128 HasSenseTypeId =
+        RelationTypeRegistry.RelationTypeId(Relations[27]);
+    internal static readonly Hash128 IsSenseOfTypeId =
+        RelationTypeRegistry.RelationTypeId(Relations[28]);
+    internal static readonly Hash128 HasNameAliasTypeId =
+        RelationTypeRegistry.RelationTypeId(Relations[29]);
+
+    public static IReadOnlyList<string>? TypeNodeNames { get; } =
+        ["Wiktionary_Sense", "Wikidata_Item"];
 
     public static SourceLicense License => SourceLicense.Unknown;
 

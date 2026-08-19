@@ -14,16 +14,18 @@ public readonly struct UDSource : ISeedSource
         SubstrateCanonicalIds.TrustClass("AcademicCurated");
 
     public static IReadOnlyList<string> Relations { get; } =
-        ["HAS_DEFINITION", "TRANSCRIBES_AS", "ENHANCED_DEPENDS_ON",
-         "HAS_POS", "HAS_XPOS", "HAS_LANGUAGE", "IS_A",
-         // Emitted by UdSentenceEmitter all along but never declared here.
-         "IS_LEMMA_OF", "HAS_PART",
-         // The BASIC dependency family — 160k live rows before this line existed,
-         // while the list carried only the enhanced family (#1057 defect 6).
-         "DEPENDS_ON"];
+        ["HAS_LANGUAGE", "IS_A", "HAS_PARSE"];
+
+    internal static readonly Hash128 HasParseTypeId =
+        RelationTypeRegistry.RelationTypeId(Relations[2]);
+    internal static readonly Hash128 IsATypeId =
+        RelationTypeRegistry.RelationTypeId(Relations[1]);
+    internal static readonly Hash128 HasLanguageTypeId =
+        RelationTypeRegistry.RelationTypeId(Relations[0]);
 
     public static IReadOnlyList<string>? TypeNodeNames { get; } =
-        ["UD_Feature"];
+        ["UD_Annotation_Marker", "UD_Annotation_Value", "UD_Feature", "UD_Parse",
+         "UD_Parse_Occurrence", "UD_Token_Ref", "UD_XPOS"];
 
     public static SourceLicense License => SourceLicense.Unknown;
 

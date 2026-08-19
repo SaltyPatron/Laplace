@@ -132,11 +132,11 @@ public sealed class SemLinkJsonPairStream : IRecordStream<GrammarIngestRecord>
 public static class SemLinkIngestSupport
 {
     public static IngestBatchConfig PipelineConfig(
-        Hash128 sourceId, string batchLabelPrefix, int batchSize, ISubstrateReader? reader,
-        long maxInputUnits = 0)
+        Hash128 sourceId, string batchLabelPrefix, DecomposerOptions options,
+        ISubstrateReader? reader)
     {
         var profile = IngestSourceProfile.Wiktionary;
-        var ws = IngestPipelineDefaults.ResolveWorkingSet(profile, defaultBatch: batchSize);
+        var ws = IngestPipelineDefaults.ResolveWorkingSet(profile, options);
         var config = new IngestBatchConfig
         {
             SourceId = sourceId,
@@ -144,14 +144,14 @@ public static class SemLinkIngestSupport
             BatchSize = ws.Batch,
             ProbeChunkSize = Math.Clamp(ws.ProbeChunk, 64, 1024),
             ContainmentReader = reader,
-            MaxInputUnits = maxInputUnits,
+            MaxInputUnits = options.MaxInputUnits,
             EnableDeferredContentOnBuilder = true,
             WorkingSet = WorkingSetMode.Enabled,
             WorkingSetProbeInterval = ws.ProbeInterval,
             WorkingSetRecordCap = ws.RecordCap,
             WorkingSetProfile = profile,
         };
-        return maxInputUnits > 0 ? config.WithMaxInputUnits(maxInputUnits) : config;
+        return IngestPipelineDefaults.ApplyMaxInputUnits(config, options);
     }
 }
 
@@ -198,10 +198,6 @@ internal sealed class SemLinkJsonDocumentPhase : DecomposerPhase<GrammarIngestRe
 
     protected override IngestBatchConfig BuildPipelineConfig(
         IDecomposerContext context, DecomposerOptions options)
-    {
-        int batchSize = options.BatchSize > 0 ? options.BatchSize : 1;
-        var config = SemLinkIngestSupport.PipelineConfig(
-            SourceId, BatchLabelPrefix, batchSize, context.Reader, options.MaxInputUnits);
-        return IngestPipelineDefaults.ApplyMaxInputUnits(config, options);
-    }
+        => SemLinkIngestSupport.PipelineConfig(
+            SourceId, BatchLabelPrefix, options, context.Reader);
 }

@@ -8,15 +8,20 @@ namespace Laplace.Decomposers.OpenSubtitles;
 
 internal static class OpenSubtitlesZipIngest
 {
+    public const int BlockPairs = 512;
+
     /// <summary>
-    /// One zip → relation-triple records. Single copy from the streaming line buffer
-    /// into the record's owned byte[] — no intermediate LinePair.ToArray().
+    /// Streams one language-pair zip into bounded, contiguous alignment blocks. Blank
+    /// alignments terminate a block so its source ordinal range remains exact.
     /// </summary>
-    public static async IAsyncEnumerable<RelationTripleRecord> ReadZipTripleAsync(
+    public static async IAsyncEnumerable<AlignedSubtitleBlock> ReadZipBlocksAsync(
         string zipPath,
         string pairStem,
+        int blockPairs = BlockPairs,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
+        ArgumentOutOfRangeException.ThrowIfLessThan(blockPairs, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(blockPairs, BlockPairs);
         using var zip = ZipFile.OpenRead(zipPath);
         var textEntries = zip.Entries
             .Where(e => e.Length > 0 && IsTextEntry(e.FullName))
@@ -36,22 +41,45 @@ internal static class OpenSubtitlesZipIngest
         await using var streamB = entB.Open();
         await using var eA = StreamingUtf8LineReader.ReadLinesAsync(streamA, ct).GetAsyncEnumerator(ct);
         await using var eB = StreamingUtf8LineReader.ReadLinesAsync(streamB, ct).GetAsyncEnumerator(ct);
+        var left = new List<byte[]>(blockPairs);
+        var right = new List<byte[]>(blockPairs);
+        long sourceOrdinal = 0;
+        long blockStart = 0;
         while (await eA.MoveNextAsync() && await eB.MoveNextAsync())
         {
+            sourceOrdinal++;
             var lineA = eA.Current;
             var lineB = eB.Current;
-            if (lineA.IsEmpty || lineB.IsEmpty) continue;
             int lenA = TrimCr(lineA);
             int lenB = TrimCr(lineB);
-            if (lenA == 0 || lenB == 0) continue;
-            yield return new RelationTripleRecord(
-                lineA.Span[..lenA].ToArray(),
-                "IS_TRANSLATION_OF",
-                lineB.Span[..lenB].ToArray(),
-                SubjectLangId: langA,
-                ObjectLangId: langB);
+            if (lenA == 0 || lenB == 0)
+            {
+                if (left.Count > 0)
+                {
+                    yield return BuildBlock(pairStem, blockStart, left, right, langA, langB);
+                    left = new List<byte[]>(blockPairs);
+                    right = new List<byte[]>(blockPairs);
+                }
+                continue;
+            }
+            if (left.Count == 0) blockStart = sourceOrdinal;
+            left.Add(lineA.Span[..lenA].ToArray());
+            right.Add(lineB.Span[..lenB].ToArray());
+            if (left.Count == blockPairs)
+            {
+                yield return BuildBlock(pairStem, blockStart, left, right, langA, langB);
+                left = new List<byte[]>(blockPairs);
+                right = new List<byte[]>(blockPairs);
+            }
         }
+        if (left.Count > 0)
+            yield return BuildBlock(pairStem, blockStart, left, right, langA, langB);
     }
+
+    private static AlignedSubtitleBlock BuildBlock(
+        string pairStem, long startOrdinal,
+        List<byte[]> left, List<byte[]> right, Hash128 leftLanguage, Hash128 rightLanguage) =>
+        new(pairStem, startOrdinal, left.ToArray(), right.ToArray(), leftLanguage, rightLanguage);
 
     private static int TrimCr(ReadOnlyMemory<byte> line)
     {

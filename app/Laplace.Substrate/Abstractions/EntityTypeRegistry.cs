@@ -20,6 +20,8 @@ public static class EntityTypeRegistry
     public static readonly Hash128 ConversationSession = Id("Conversation_Session");
     public static readonly Hash128 Document = Id("Document");
     public static readonly Hash128 Frame = Id("Frame");
+    public static readonly Hash128 FrameNetAnnotation = Id("FrameNet_Annotation");
+    public static readonly Hash128 FrameNetAnnotationOccurrence = Id("FrameNet_Annotation_Occurrence");
     public static readonly Hash128 FrameNetCoreness = Id("FrameNet_Coreness");
     public static readonly Hash128 FrameNetFe = Id("FrameNet_FE");
     public static readonly Hash128 FrameNetFrame = Id("FrameNet_Frame");
@@ -36,6 +38,8 @@ public static class EntityTypeRegistry
     public static readonly Hash128 Ngram = Id("Ngram");
     public static readonly Hash128 Number = Id("Number");
     public static readonly Hash128 OnsetSegment = Id("OnsetSegment");
+    public static readonly Hash128 OpenSubtitlesAlignment = Id("OpenSubtitles_Alignment");
+    public static readonly Hash128 OpenSubtitlesSequence = Id("OpenSubtitles_Sequence");
     public static readonly Hash128 Ordinal = Id("Ordinal");
     public static readonly Hash128 OrdinalContext = Id("OrdinalContext");
     public static readonly Hash128 Patch = Id("Patch");
@@ -60,6 +64,11 @@ public static class EntityTypeRegistry
     public static readonly Hash128 Video = Id("Video");
     public static readonly Hash128 UcdClassifier = Id("UcdClassifier");
     public static readonly Hash128 UdFeature = Id("UD_Feature");
+    public static readonly Hash128 UdAnnotationMarker = Id("UD_Annotation_Marker");
+    public static readonly Hash128 UdAnnotationValue = Id("UD_Annotation_Value");
+    public static readonly Hash128 UdParse = Id("UD_Parse");
+    public static readonly Hash128 UdParseOccurrence = Id("UD_Parse_Occurrence");
+    public static readonly Hash128 UdTokenRef = Id("UD_Token_Ref");
     public static readonly Hash128 UdXpos = Id("UD_XPOS");
     public static readonly Hash128 Utf8Role = Id("Utf8Role");
     public static readonly Hash128 VerbNetClass = Id("VerbNet_Class");
@@ -71,4 +80,6 @@ public static class EntityTypeRegistry
     public static readonly Hash128 Word = Id("Word");
     public static readonly Hash128 WordNetSense = Id("WordNet_Sense");
     public static readonly Hash128 WordNetSynset = Id("WordNet_Synset");
+    public static readonly Hash128 WikidataItem = Id("Wikidata_Item");
+    public static readonly Hash128 WiktionarySense = Id("Wiktionary_Sense");
 }

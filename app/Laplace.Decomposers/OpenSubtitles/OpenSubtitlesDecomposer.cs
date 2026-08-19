@@ -8,11 +8,11 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 namespace Laplace.Decomposers.OpenSubtitles;
 
 /// <summary>
-/// Multi-file relation-triple source. Each language-pair zip is one
-/// <see cref="ExtractFileAsync"/> unit; the pool parallelizes across zips.
+/// Multi-file aligned-corpus source. Each language-pair zip is decomposed by one
+/// per-file worker into bounded ordered alignment blocks; files run concurrently.
 /// </summary>
 public sealed class OpenSubtitlesDecomposer
-    : RelationTripleMultiFileDecomposerBase<OpenSubtitlesSource, FullScope>, IIngestInventoryProvider
+    : DecomposerMultiFile<AlignedSubtitleBlock, OpenSubtitlesSource, FullScope>, IIngestInventoryProvider
 {
     public static readonly Hash128 Source = OpenSubtitlesSource.SourceId;
     public static readonly Hash128 TrustClass = OpenSubtitlesSource.TrustClass;
@@ -32,7 +32,13 @@ public sealed class OpenSubtitlesDecomposer
     };
 
     public override int LayerOrder => 2;
+    public override bool PerFileCompletion => true;
     protected override double SourceTrust => TC.StructuredCorpus;
+
+    private static IngestSourceProfile BlockProfile => OpenSubtitlesSource.Profile;
+
+    public override int EstimatedBytesPerRecord => BlockProfile.EstBytesPerRecord;
+    public override int EstimatedComposeUnitsPerRecord => BlockProfile.EstComposeUnitsPerRecord;
 
     internal static readonly ConcurrentDictionary<string, byte> LanguageNames = new(StringComparer.Ordinal);
     public override IReadOnlyCollection<string> CanonicalNamesForReadback => LanguageNames.Keys.ToArray();
@@ -48,14 +54,42 @@ public sealed class OpenSubtitlesDecomposer
             .ToList();
     }
 
-    protected override async IAsyncEnumerable<RelationTripleRecord> ExtractFileAsync(
+    protected override async IAsyncEnumerable<AlignedSubtitleBlock> ExtractFileAsync(
         string filePath, string fileLabel, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
     {
         string pairStem = Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(filePath));
-        await foreach (var record in OpenSubtitlesZipIngest.ReadZipTripleAsync(filePath, pairStem, ct))
+        // The generic cap is record-boundary based. Use one pair per record only for
+        // bounded diagnostic runs so a cross-file cap cannot overshoot by a partial block;
+        // full ingestion retains the 512-pair amortization.
+        int blockPairs = options.MaxInputUnits > 0 ? 1 : OpenSubtitlesZipIngest.BlockPairs;
+        await foreach (var record in OpenSubtitlesZipIngest.ReadZipBlocksAsync(
+                           filePath, pairStem, blockPairs, ct))
             yield return record;
     }
+
+    protected override IIngestRecordHandler<AlignedSubtitleBlock> CreateHandlerForFile(
+        string fileLabel, DecomposerOptions options) =>
+        new OpenSubtitlesAlignedHandler(Source, TC.StructuredCorpus);
+
+    protected override IngestBatchConfig ConfigForFile(
+        string fileLabel, ISubstrateReader? reader, DecomposerOptions options) =>
+        new()
+        {
+            SourceId = Source,
+            BatchLabelPrefix = fileLabel,
+            BatchSize = 1,
+            ProbeChunkSize = 1,
+            WorkingSet = true,
+            WorkingSetProbeInterval = 1,
+            WorkingSetRecordCap = 1,
+            WorkingSetProfile = BlockProfile,
+            ContainmentReader = reader,
+            MaxInputUnits = options.MaxInputUnits,
+            EntityCapacity = OpenSubtitlesZipIngest.BlockPairs * 8,
+            PhysicalityCapacity = OpenSubtitlesZipIngest.BlockPairs * 8,
+            AttestationCapacity = 2,
+        };
 
     public Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)

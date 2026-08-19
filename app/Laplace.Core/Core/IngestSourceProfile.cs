@@ -38,10 +38,9 @@ public sealed record IngestSourceProfile(
     public static readonly IngestSourceProfile RelationTriple = new(8_192, 2);
 
     /// <summary>UD sentence — a few KB of CoNLL-U tokens per record.</summary>
-    // UdSentenceEmitContext.CollectCanonicals builds ~30-60 native trees per
-    // sentence (sentence text, token forms, differing lemmas, Gloss/Translit,
-    // MWT surfaces), all live at once in FinalizePendingAsync. This multiplier
-    // must track that fan: it is the denominator of
+    // The UD content forest reuses nodes already present in the sentence tree and
+    // builds independent trees only for content absent from it (differing lemmas,
+    // Gloss/Translit, MWT surfaces). This multiplier must track that fan: it is the denominator of
     // ResolveFlushEnvelopeRecordCap / EstimateWorkingSetBytes.
     //
     // RESIDENT BYTES MEASURED FROM THE OOM ITSELF, 2026-08-17. The kernel killed
@@ -58,12 +57,13 @@ public sealed record IngestSourceProfile(
     // memory bound, over-stating is the safe direction: it closes sets earlier. The
     // honest reading is "no more than 80 KB per tree", not "exactly".
     //
-    // Consequence to watch: this takes the per-set cap from 3,276 records to
-    // 536,870,912 / (80,000 x 32 x 2.5) = 83, so UD flushes far more often than
-    // record_batch=1024 would suggest, and compose throughput may drop. Correctness
-    // first — the previous setting did not finish the corpus at all, twice.
+    // That run predated constituent reuse and therefore measured the old 32-tree
+    // forest. The current real-corpus gate measures 14,676 independent trees over
+    // 2,000 sentences (7.34/sentence) from the largest v2.17 file. Sixteen leaves
+    // >2x average headroom, while the 2.5 resident slack still covers adversarial
+    // sentences whose source text is absent and cannot supply token-form nodes.
     public static readonly IngestSourceProfile UdSentence =
-        new(2_048, 32, ResidentBytesPerComposeUnit: 80_000);
+        new(2_048, 16, ResidentBytesPerComposeUnit: 80_000);
 
     /// <summary>Kaikki wiktextract JSON — tens of KB per entry, many tier trees each.</summary>
     // MEASURED 2026-08-01 over 20,000 records of the 20.4 GB raw-wiktextract-data.jsonl:

@@ -23,6 +23,8 @@ public sealed class DeferredContentBatchTests
     {
         private readonly bool _present;
         public FakeReader(bool present) => _present = present;
+        public int RootProbeCalls { get; private set; }
+        public List<Hash128> TierCandidates { get; } = [];
         public Task<bool> HasSourceEverCompletedAsync(int layerOrder, CancellationToken ct = default)
             => Task.FromResult(false);
         public Task<bool> HasSourceCompletedAsync(Hash128 sourceId, int layerOrder, CancellationToken ct = default)
@@ -31,9 +33,20 @@ public sealed class DeferredContentBatchTests
             => Task.FromResult(0L);
         public Task<byte[]> EntitiesExistBitmapAsync(IReadOnlyList<Hash128> candidates, CancellationToken ct = default)
         {
+            RootProbeCalls++;
             var bm = new byte[(candidates.Count + 7) / 8];
             if (_present)
                 for (int i = 0; i < candidates.Count; i++)
+                    bm[i >> 3] |= (byte)(1 << (i & 7));
+            return Task.FromResult(bm);
+        }
+        public Task<byte[]> TierBatchExistenceProbeAsync(
+            IReadOnlyList<Hash128> ids, short tier, CancellationToken ct = default)
+        {
+            TierCandidates.AddRange(ids);
+            var bm = new byte[(ids.Count + 7) / 8];
+            if (_present)
+                for (int i = 0; i < ids.Count; i++)
                     bm[i >> 3] |= (byte)(1 << (i & 7));
             return Task.FromResult(bm);
         }
@@ -116,5 +129,22 @@ public sealed class DeferredContentBatchTests
 
         var change = await b.SetInputUnitsConsumed(1).BuildAsync();
         Assert.True(ContentEntityCount(change) > 0);
+    }
+
+    [Fact]
+    public async Task AbsentRoot_IsNotProbedAgainDuringTierDescent()
+    {
+        var reader = new FakeReader(present: false);
+        var b = new SubstrateChangeBuilder(Src, "test/root-probe").EnableDeferredContent(reader);
+
+        Assert.True(ContentTierSpine.TryStageIntoBuilder(
+            b, Encoding.UTF8.GetBytes("a sentence with several tiers"), Src, out var root));
+
+        var change = await b.SetInputUnitsConsumed(1).BuildAsync();
+
+        Assert.True(ContentEntityCount(change) > 0);
+        Assert.Equal(1, reader.RootProbeCalls);
+        Assert.DoesNotContain(root, reader.TierCandidates);
+        Assert.NotEmpty(reader.TierCandidates);
     }
 }

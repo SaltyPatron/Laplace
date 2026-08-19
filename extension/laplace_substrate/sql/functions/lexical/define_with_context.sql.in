@@ -10,7 +10,8 @@ CREATE OR REPLACE FUNCTION lexical.define(p_word bytea, p_context bytea[], p_lim
                    g.witness_count AS witnesses,
                    sn.score AS sense_rank
             FROM lexical.senses(p_word, p_context) sn
-            JOIN laplace.consensus g ON g.subject_id = sn.synset_id
+            JOIN laplace.consensus g
+              ON g.subject_id = ANY (ARRAY[sn.sense_id, sn.synset_id])
                             AND g.type_id = laplace.relation_type_id('HAS_DEFINITION')
             UNION ALL
             SELECT g.object_id,

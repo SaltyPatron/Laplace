@@ -171,16 +171,12 @@ public static class RelationTypeRegistry
         var all = new List<RelationTypeResolution>(AllCanonical());
         foreach (var k in all)
             builder.AddEntity(new EntityRow(k.Id, EntityTier.Word, BootstrapIntentBuilder.RelationTypeMetaTypeId, sourceId));
-        foreach (var k in all)
-            if (k.ParentId is { } parent)
-                builder.AddAttestation(NativeAttestation.Categorical(
-                    k.Id, "IS_A", parent, sourceId, null, SourceTrust.SubstrateMandate));
 
-        // GH #1041: no content DAGs for canonical relation names — the ids are
-        // blake3(canonical) and every canonical name is in the static
-        // canonical_names seed, so realize.render resolves them from arm 1.
-        // The old loop staged a text DAG per relation name (221 identifier
-        // strings minted as word/sentence entities).
+        // The parent relation is governed by the native manifest. It is structural
+        // vocabulary, not testimony by each vendor that happens to initialize. The
+        // previous IS_A loop gave every installed decomposer another witness of the
+        // same deterministic hierarchy and made witness_count track source count.
+        // Readers resolve relation families from the same manifest directly.
     }
 
     public static void SeedDynamic(SubstrateChangeBuilder builder, in RelationTypeResolution k, Hash128 sourceId,

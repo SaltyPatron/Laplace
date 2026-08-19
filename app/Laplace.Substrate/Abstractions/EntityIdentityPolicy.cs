@@ -21,6 +21,9 @@ public static class EntityIdentityPolicy
         EntityTypeRegistry.Text,
         EntityTypeRegistry.Ngram,
         EntityTypeRegistry.Collection,
+        EntityTypeRegistry.OpenSubtitlesAlignment,
+        EntityTypeRegistry.OpenSubtitlesSequence,
+        EntityTypeRegistry.FrameNetAnnotation,
         EntityTypeRegistry.Pixel,
         EntityTypeRegistry.Patch,
         EntityTypeRegistry.Region,
@@ -32,6 +35,7 @@ public static class EntityIdentityPolicy
         EntityTypeRegistry.Frame,
         EntityTypeRegistry.Video,
         EntityTypeRegistry.OnsetSegment,
+        EntityTypeRegistry.UdParse,
     ];
 
     /// <summary>
