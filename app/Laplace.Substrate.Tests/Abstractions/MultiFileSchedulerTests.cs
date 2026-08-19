@@ -48,6 +48,30 @@ public sealed class MultiFileSchedulerTests
         Assert.Same(declared, MultiFileScheduler.Schedule(declared, maxTotalUnits: 1));
     }
 
+    [Fact]
+    public void InitialWave_GivesSpareComposeLaneToDominantFile()
+    {
+        long[] costs = [32, 8, 6, 6, 5, 5, 4, 4, 4, 3];
+
+        int[] widths = MultiFileScheduler.PlanInitialSegments(
+            costs, fileWorkers: 10, composeWorkers: 11);
+
+        Assert.Equal(11, widths.Sum());
+        Assert.Equal(2, widths[0]);
+        Assert.All(widths.Skip(1), width => Assert.Equal(1, width));
+    }
+
+    [Fact]
+    public void FewFiles_UseTheWholeComposePoolWithoutInventingFiles()
+    {
+        int[] widths = MultiFileScheduler.PlanInitialSegments(
+            [100, 50], fileWorkers: 10, composeWorkers: 6);
+
+        Assert.Equal(2, widths.Length);
+        Assert.Equal(6, widths.Sum());
+        Assert.True(widths[0] >= widths[1]);
+    }
+
     private static string Write(string dir, string name, int bytes)
     {
         string path = Path.Combine(dir, name);
