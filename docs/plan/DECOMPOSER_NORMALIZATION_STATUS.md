@@ -158,6 +158,10 @@ delivered decomposer implementation.
   fails if a future advertised chess source is rejected before dispatch. This provides
   one atomic CI/CD recovery run: evict only `ChessAnalysis`, then force its complete v3
   rederive from the surviving PGN playing/trajectory evidence.
+- Chess acceptance thresholds are source-scoped evidence checks. This prevents a lawful
+  `MOVE` population owned by the opening catalog from either failing the PGN/analyzer
+  zero-`MOVE` invariant or satisfying a different chess source's positive gate. Global
+  consensus remains the folded product; admission proves what the named source emitted.
 
 ## Remaining product work after integration
 

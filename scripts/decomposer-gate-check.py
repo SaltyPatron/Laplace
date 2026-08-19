@@ -195,8 +195,21 @@ def check_source(
         rel = gate["relation"]
         minimum = int(gate.get("min", 0))
         maximum = int(gate["max"]) if "max" in gate else None
+        scope = gate.get("scope", "consensus")
         try:
-            if gate.get("family"):
+            if scope == "source_evidence":
+                n = int(
+                    psql(
+                        dbname,
+                        "SELECT ops.evidence_count("
+                        f"p_type => laplace.relation_type_id('{rel}'), "
+                        f"p_source => laplace.source_id('{decomposer}'));",
+                        host=host,
+                        user=user,
+                    )
+                )
+                detail = f"source_evidence={n:,} (min {minimum:,})"
+            elif gate.get("family"):
                 # Family rollup. A governed root whose per-value children are minted at ingest
                 # (dynamic relations: EDEP_nsubj, DEP_obj, FEAT_case, ...) gets ZERO direct edges
                 # by design — every edge attests under a child. The children carry an
@@ -248,17 +261,17 @@ def check_source(
             if maximum is not None:
                 detail += f" (max {maximum:,})"
             record(
-                f"consensus:{rel}",
+                f"{scope}:{rel}",
                 passed,
                 detail,
                 relation=rel,
-                consensus=n,
+                **({"source_evidence": n} if scope == "source_evidence" else {"consensus": n}),
                 min=minimum,
                 **({"max": maximum} if maximum is not None else {}),
             )
         except Exception as e:
             record(
-                f"consensus:{rel}",
+                f"{scope}:{rel}",
                 False,
                 str(e),
                 relation=rel,
