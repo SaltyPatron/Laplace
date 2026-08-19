@@ -142,6 +142,16 @@ public sealed record IngestSourceProfile(
     public static readonly IngestSourceProfile FrameNet = new(4_096, 2);
 
     /// <summary>
+    /// PredicateMatrix v1.3 row — about 330 UTF-8 bytes on disk, retained as 27
+    /// normalized fields plus its compact bridge projections until the working set drains.
+    /// It admits governed references and attestations rather than content trees, so there is
+    /// one compose unit; the distinct resident estimate keeps the input batch large without
+    /// pretending the parsed object graph costs only its serialized bytes.
+    /// </summary>
+    public static readonly IngestSourceProfile PredicateMatrix =
+        new(384, 1, ResidentBytesPerComposeUnit: 2_048);
+
+    /// <summary>
     /// Image packaging → RGBA recovery buffer size dominates; one codepoint-floor
     /// image ladder compose per file.
     /// </summary>

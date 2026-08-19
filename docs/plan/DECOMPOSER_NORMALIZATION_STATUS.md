@@ -143,13 +143,15 @@ had no open pull requests.
 - Enforce one content ID globally across tiers in the physical schema. The current
   `(id, tier)` database key is a SQL/schema workstream and remains unresolved.
   Tracked by #1008 and #1132.
-- Apply the source-fidelity findings from #1155: exact scoped FrameNet roles,
-  complete VerbNet syntax/restriction/argument admission, PredicateMatrix multilingual
-  predicate/role identity and remaining MCR/ESO fields, source-versioned OMW/WordNet
+- Apply the remaining source-fidelity findings from #1155: exact scoped FrameNet roles,
+  complete VerbNet syntax/restriction/argument admission, source-versioned OMW/WordNet
   inputs, and artifact/revision identity for model sources. PredicateMatrix now keeps one
-  admitted source row as one generic-pipeline unit, suppresses repeated package projections,
-  and carries its CC-BY-3.0/version/citation receipt; #1193 closes CILI Concept/Instance,
-  source-map, license, and release admission.
+  selected source row as one generic-pipeline unit; preserves all language/POS populations,
+  native predicate/role identity, and the semantic information carried by the 27-column
+  PB/FN/VN/MCR/ESO row; suppresses repeated package projections; carries its
+  CC-BY-3.0/version/citation receipt; and uses a measured resident profile. SemLink inventory
+  now sums JSON records, admitted XML roles, and filtered PredicateMatrix rows at the same grain
+  extraction reports. #1193 closes CILI Concept/Instance, source-map, license, and release admission.
 - Finish tokenizer/layout admission regression coverage across model families and
   non-text modalities; serialization markers and whitespace must not mint phantom
   semantic content.

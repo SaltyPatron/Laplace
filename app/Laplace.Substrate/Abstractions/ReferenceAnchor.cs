@@ -24,6 +24,9 @@ public enum ReferenceIdentityKind : ushort
     // Complete lemma%ss_type:lex_filenum:lex_id:head_word:head_id source key.
     WordNetExactSenseKey = 8,
     WikidataItem = 9,
+    PredicateMatrixPredicate = 10,
+    PredicateMatrixVocabulary = 11,
+    PredicateMatrixAnnotationValue = 12,
 }
 
 /// <summary>
@@ -43,7 +46,7 @@ public static class ReferenceAnchor
 
     public static Hash128 IdUtf8(ReferenceIdentityKind kind, ReadOnlySpan<byte> normalizedKey)
     {
-        if (kind is < ReferenceIdentityKind.CiliIli or > ReferenceIdentityKind.WikidataItem)
+        if (kind is < ReferenceIdentityKind.CiliIli or > ReferenceIdentityKind.PredicateMatrixAnnotationValue)
             throw new ArgumentOutOfRangeException(nameof(kind), kind, "unknown reference identity domain");
         if (normalizedKey.IsEmpty)
             throw new ArgumentException("reference key must not be empty", nameof(normalizedKey));

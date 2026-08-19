@@ -25,10 +25,10 @@ public sealed class SemLinkDecomposerTests
         """{"give.01": "30-02244956-v", "speak.01": "30-00941990-v"}""";
 
     private const string PredicateMatrixHeader =
-        "1_ID_LANG\t1_ID_POS\t2_ID_PRED\t3_ID_ROLE\t4_VN_CLASS\t5_VN_CLASS_NUMBER\t6_VN_SUBCLASS\t7_VN_SUBCLASS_NUMBER\t8_VN_LEMA\t9_VN_ROLE\t10_WN_SENSE\t11_MCR_iliOffset\t12_FN_FRAME\t13_FN_LE\t14_FN_FRAME_ELEMENT\t15_PB_ROLESET\t16_PB_ARG";
+        "1_ID_LANG\t1_ID_POS\t2_ID_PRED\t3_ID_ROLE\t4_VN_CLASS\t5_VN_CLASS_NUMBER\t6_VN_SUBCLASS\t7_VN_SUBCLASS_NUMBER\t8_VN_LEMA\t9_VN_ROLE\t10_WN_SENSE\t11_MCR_iliOffset\t12_FN_FRAME\t13_FN_LE\t14_FN_FRAME_ELEMENT\t15_PB_ROLESET\t16_PB_ARG\t18_MCR_BC\t19_MCR_DOMAIN\t20_MCR_SUMO\t21_MCR_TO\t22_MCR_LEXNAME\t23_MCR_BLC\t24_WN_SENSEFREC\t25_WN_SYNSET_REL_NUM\t26_ESO_CLASS\t27_ESO_ROLE";
 
     private const string PredicateMatrixRow =
-        "id:eng\tid:v\tid:give.01\tid:0\tvn:give\t13.1\t13.1-1\t1\tgive\tvn:Agent\twn:give%2:40:03\tili-30-02244956-v\tfn:Giving\tNULL\tfn:Donor\tpb:give.01\tpb:0";
+        "id:eng\tid:v\tid:give.01\tid:0\tvn:give\t13.1\t13.1-1\t1\tgive\tvn:Agent\twn:give%2:40:03\tili-30-02244956-v\tfn:Giving\tfn:give.v\tfn:Donor\tpb:give.01\tpb:0\tmcr:1\tmcr:factotum\tmcr:Motion\tmcr:Dynamic;Location\tmcr:motion\tmcr:ili-30-01835496-v\twn:21\twn:007\teso:Transfer\teso:source";
 
     [Fact]
     public async Task Attestations_Are_Only_RegistryRouted_CorrespondsTo()
@@ -84,6 +84,51 @@ public sealed class SemLinkDecomposerTests
     }
 
     [Fact]
+    public async Task PredicateMatrix_PreservesMultilingualPredicateAndRoleIdentity()
+    {
+        var (entities, atts) = await CollectPredicateMatrixAsync();
+        Hash128 predicate = PredicateMatrixIngest.PredicateId("eng", "v", "give.01")!.Value;
+        Hash128 matrixRole = PredicateMatrixIngest.PredicateRoleId("eng", "v", "give.01", "0")!.Value;
+        Hash128 roleset = AnchorAdmission.Id("give.01", EntityTypeRegistry.PropBankRoleset)!.Value;
+        Hash128 propBankRole = RoleAnchor.Id(RoleIdentityKind.PropBank, roleset, "ARG0")!.Value;
+
+        Assert.Contains(entities, e =>
+            e.Id == predicate && e.TypeId == EntityTypeRegistry.PredicateMatrixPredicate);
+        Assert.Contains(entities, e =>
+            e.Id == matrixRole && e.TypeId == EntityTypeRegistry.PredicateMatrixRole);
+        Assert.Contains(atts, a =>
+            a.SubjectId == predicate
+            && a.TypeId == PredicateMatrixSource.HasLanguageTypeId
+            && a.ObjectId == LanguageReference.Resolve("eng"));
+        Assert.Contains(atts, a =>
+            a.TypeId == PredicateMatrixSource.RoleCorrespondsToTypeId
+            && (a.SubjectId == matrixRole || a.ObjectId == matrixRole)
+            && (a.SubjectId == propBankRole || a.ObjectId == propBankRole));
+        Assert.NotEqual(
+            predicate,
+            PredicateMatrixIngest.PredicateId("spa", "v", "give.01")!.Value);
+    }
+
+    [Fact]
+    public async Task PredicateMatrix_PreservesMcrAndEsoNativeFieldsWithoutTextAdmission()
+    {
+        var (entities, atts) = await CollectPredicateMatrixAsync();
+        Assert.Contains(entities, e => e.TypeId == EntityTypeRegistry.McrDomain);
+        Assert.Contains(entities, e => e.TypeId == EntityTypeRegistry.McrSumo);
+        Assert.Contains(entities, e => e.TypeId == EntityTypeRegistry.McrTopOntology);
+        Assert.Contains(entities, e => e.TypeId == EntityTypeRegistry.McrLexname);
+        Assert.Contains(entities, e => e.TypeId == EntityTypeRegistry.EsoClass);
+        Assert.Contains(entities, e => e.TypeId == EntityTypeRegistry.EsoRole);
+        Assert.Contains(entities, e => e.TypeId == EntityTypeRegistry.PredicateMatrixAnnotationValue);
+
+        Assert.Contains(atts, a => a.TypeId == PredicateMatrixSource.HasDomainTopicTypeId);
+        Assert.Contains(atts, a => a.TypeId == PredicateMatrixSource.HasLexCategoryTypeId);
+        Assert.Contains(atts, a => a.TypeId == PredicateMatrixSource.HasBaseConceptStatusTypeId);
+        Assert.Contains(atts, a => a.TypeId == PredicateMatrixSource.HasSenseFrequencyTypeId);
+        Assert.Contains(atts, a => a.TypeId == PredicateMatrixSource.HasSynsetRelationCountTypeId);
+    }
+
+    [Fact]
     public async Task PredicateMatrix_OneSourceRow_IsOnePipelineRecord_AndOneInputUnit()
     {
         string path = Path.Combine(Path.GetTempPath(), "pm-row-grain-" + Guid.NewGuid().ToString("N") + ".txt");
@@ -117,9 +162,44 @@ public sealed class SemLinkDecomposerTests
             string.Join(Environment.NewLine, PredicateMatrixHeader, PredicateMatrixRow, spanish, noun, noSynset, ""));
         try
         {
-            Assert.Equal(1L, await PredicateMatrixIngest.EstimateRecordCountAsync(path, null, default));
-            Assert.Null(await PredicateMatrixIngest.EstimateRecordCountAsync(
+            Assert.Equal(4L, await PredicateMatrixIngest.EstimateRecordCountAsync(path, null, default));
+            Assert.Equal(1L, await PredicateMatrixIngest.EstimateRecordCountAsync(
                 path, LanguageFilter.FromSpec("es"), default));
+        }
+        finally { try { File.Delete(path); } catch { } }
+    }
+
+    [Fact]
+    public async Task SemLinkJson_Inventory_CountsTopLevelSourceRecords()
+    {
+        string path = Path.Combine(Path.GetTempPath(), "sl-json-inventory-" + Guid.NewGuid().ToString("N") + ".json");
+        await File.WriteAllTextAsync(path, PbVnJson);
+        try
+        {
+            Assert.Equal(2L, await SemLinkJsonPairStream.CountRecordsAsync(path, default));
+        }
+        finally { try { File.Delete(path); } catch { } }
+    }
+
+    [Fact]
+    public async Task SemLinkRoleInventory_CountsAdmittedMappings_NotPhysicalLines()
+    {
+        const string xml = """
+<mappings>
+  <vncls class="9.1" fnframe="Placing">
+    <roles>
+      <role fnrole="Goal" vnrole="Destination"/>
+      <role fnrole="" vnrole="Theme"/>
+    </roles>
+  </vncls>
+  <vncls class="" fnframe="Broken"><roles><role fnrole="X" vnrole="Y"/></roles></vncls>
+</mappings>
+""";
+        string path = Path.Combine(Path.GetTempPath(), "sl-role-inventory-" + Guid.NewGuid().ToString("N") + ".xml");
+        await File.WriteAllTextAsync(path, xml);
+        try
+        {
+            Assert.Equal(1L, await SemLinkRoleMappingIngest.EstimateUnitCountAsync(path, default));
         }
         finally { try { File.Delete(path); } catch { } }
     }
@@ -218,6 +298,8 @@ public sealed class SemLinkDecomposerTests
             c.Metadata.SourceContentUnitName == "bootstrap/PredicateMatrixDecomposer");
         Assert.Contains(pmBoot.Entities, e =>
             e.Id == PredicateMatrixIngest.Source && e.TypeId == BootstrapIntentBuilder.SourceTypeId);
+        Assert.Contains(pmBoot.Entities, e => e.Id == EntityTypeRegistry.PredicateMatrixPredicate);
+        Assert.Contains(pmBoot.Entities, e => e.Id == EntityTypeRegistry.PredicateMatrixRole);
         Assert.Contains(writer.Captured, c =>
             c.Metadata.SourceContentUnitName == "bootstrap/license/PredicateMatrixDecomposer");
         Assert.Equal("CC-BY-3.0", PredicateMatrixSource.License.Spdx);
@@ -303,18 +385,27 @@ public sealed class SemLinkDecomposerTests
     {
         string dir = Path.Combine(Path.GetTempPath(), "sl-test-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(Path.Combine(dir, "instances"));
-        await File.WriteAllTextAsync(Path.Combine(dir, "instances", "pb-vn2.json"), PbVnJson);
-        await File.WriteAllTextAsync(Path.Combine(dir, "instances", "vn-fn2.json"), VnFnJson);
+        string pbVnPath = Path.Combine(dir, "instances", "pb-vn2.json");
+        string vnFnPath = Path.Combine(dir, "instances", "vn-fn2.json");
+        await File.WriteAllTextAsync(pbVnPath, PbVnJson);
+        await File.WriteAllTextAsync(vnFnPath, VnFnJson);
         try
         {
-            var dec = new SemLinkDecomposer();
             var ctx = new FakeContext(new NullWriter()) { EcosystemPath = dir };
             var ents = new List<EntityRow>();
             var atts = new List<AttestationRow>();
-            await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
+            IDecomposer[] phases =
+            [
+                new SemLinkJsonDocumentPhase(pbVnPath, SemLinkDocumentKind.PbVn, "pb-vn2"),
+                new SemLinkJsonDocumentPhase(vnFnPath, SemLinkDocumentKind.VnFn, "vn-fn2"),
+            ];
+            foreach (var phase in phases)
             {
-                ents.AddRange(change.Entities.ToArray());
-                atts.AddRange(change.Attestations.ToArray());
+                await foreach (var change in phase.DecomposeAsync(ctx, DecomposerOptions.Default))
+                {
+                    ents.AddRange(change.Entities.ToArray());
+                    atts.AddRange(change.Attestations.ToArray());
+                }
             }
             return (ents, atts);
         }
@@ -327,13 +418,14 @@ public sealed class SemLinkDecomposerTests
         string dir = Path.Combine(Path.GetTempPath(), "sl-pm-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(Path.Combine(dir, "PredicateMatrix"));
         if (rows.Length == 0) rows = [PredicateMatrixRow];
+        string path = Path.Combine(dir, "PredicateMatrix", "PredicateMatrix.txt");
         await File.WriteAllTextAsync(
-            Path.Combine(dir, "PredicateMatrix", "PredicateMatrix.txt"),
+            path,
             PredicateMatrixHeader + Environment.NewLine
             + string.Join(Environment.NewLine, rows) + Environment.NewLine);
         try
         {
-            var dec = new SemLinkDecomposer();
+            var dec = new PredicateMatrixPhase(path, null);
             var ctx = new FakeContext(new NullWriter()) { EcosystemPath = dir };
             var ents = new List<EntityRow>();
             var atts = new List<AttestationRow>();
@@ -351,10 +443,11 @@ public sealed class SemLinkDecomposerTests
     {
         string dir = Path.Combine(Path.GetTempPath(), "sl-pbwn-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(Path.Combine(dir, "instances"));
-        await File.WriteAllTextAsync(Path.Combine(dir, "instances", "pb-wn.json"), PbWnJson);
+        string path = Path.Combine(dir, "instances", "pb-wn.json");
+        await File.WriteAllTextAsync(path, PbWnJson);
         try
         {
-            var dec = new SemLinkDecomposer();
+            var dec = new SemLinkJsonDocumentPhase(path, SemLinkDocumentKind.PbWn, "pb-wn");
             var ctx = new FakeContext(new NullWriter()) { EcosystemPath = dir };
             var ents = new List<EntityRow>();
             var atts = new List<AttestationRow>();

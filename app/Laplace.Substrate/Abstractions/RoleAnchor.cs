@@ -15,6 +15,8 @@ public enum RoleIdentityKind : ushort
     PropBank = 1,
     VerbNet = 2,
     FrameNet = 3,
+    PredicateMatrix = 4,
+    Eso = 5,
 }
 
 /// <summary>
@@ -32,7 +34,7 @@ public static class RoleAnchor
         if (key is null) return null;
         if (parentId == default)
             throw new ArgumentException("role parent must not be empty", nameof(parentId));
-        if (kind is < RoleIdentityKind.PropBank or > RoleIdentityKind.FrameNet)
+        if (kind is < RoleIdentityKind.PropBank or > RoleIdentityKind.Eso)
             throw new ArgumentOutOfRangeException(nameof(kind), kind, "unknown role identity domain");
 
         byte[] keyUtf8 = Encoding.UTF8.GetBytes(key);
@@ -96,6 +98,8 @@ public static class RoleAnchor
         if (parentTypeId == EntityTypeRegistry.PropBankRoleset) return RoleIdentityKind.PropBank;
         if (parentTypeId == EntityTypeRegistry.VerbNetClass) return RoleIdentityKind.VerbNet;
         if (parentTypeId == EntityTypeRegistry.FrameNetFrame) return RoleIdentityKind.FrameNet;
+        if (parentTypeId == EntityTypeRegistry.PredicateMatrixPredicate) return RoleIdentityKind.PredicateMatrix;
+        if (parentTypeId == EntityTypeRegistry.EsoClass) return RoleIdentityKind.Eso;
         throw new ArgumentOutOfRangeException(
             nameof(parentTypeId), parentTypeId, "entity type does not own semantic roles");
     }
@@ -105,6 +109,8 @@ public static class RoleAnchor
         RoleIdentityKind.PropBank => EntityTypeRegistry.PropBankRole,
         RoleIdentityKind.VerbNet => EntityTypeRegistry.VerbNetRole,
         RoleIdentityKind.FrameNet => EntityTypeRegistry.FrameNetFe,
+        RoleIdentityKind.PredicateMatrix => EntityTypeRegistry.PredicateMatrixRole,
+        RoleIdentityKind.Eso => EntityTypeRegistry.EsoRole,
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "unknown role identity domain"),
     };
 

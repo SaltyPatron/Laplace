@@ -87,24 +87,36 @@ public sealed class SemLinkDecomposer : DecomposerMultiPhase<SemLinkSource, Full
     private static DecomposerOptions RemainingOptions(DecomposerOptions options, long cap, long consumed) =>
         cap > 0 ? options with { MaxInputUnits = cap - consumed } : options;
 
-    public Task<IngestInventory?> DescribeInputAsync(
+    public async Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
     {
         string instancesDir = ResolveInstancesDir(context.EcosystemPath);
-        var paths = new List<string>();
-        foreach (var (path, _, _) in JsonDocumentSpecs(instancesDir))
-            paths.Add(path);
+        var files = new List<IngestFileSpec>();
+        long total = 0;
+        foreach (var (path, _, label) in JsonDocumentSpecs(instancesDir))
+        {
+            long units = await SemLinkJsonPairStream.CountRecordsAsync(path, ct) ?? 0;
+            files.Add(new IngestFileSpec(label, path, units));
+            total += units;
+        }
         foreach (string pmPath in PredicateMatrixIngest.ResolvePaths(context.EcosystemPath))
         {
-            paths.Add(pmPath);
+            long units = await PredicateMatrixIngest.EstimateRecordCountAsync(
+                pmPath, options.Languages, ct) ?? 0;
+            files.Add(new IngestFileSpec("semlink/predicate-matrix", pmPath, units));
+            total += units;
             break;
         }
         string? roleMappingPath = SemLinkRoleMappingIngest.ResolvePath(context.EcosystemPath);
-        if (roleMappingPath is not null) paths.Add(roleMappingPath);
-        if (paths.Count == 0) return Task.FromResult<IngestInventory?>(null);
-        // Inventory is a progress denominator — never full-parse JSON / XML / TSV here.
-        return Task.FromResult(IngestInventory.FromFiles(
-            "records", paths, options.MaxInputUnits, ct));
+        if (roleMappingPath is not null)
+        {
+            long units = await SemLinkRoleMappingIngest.EstimateUnitCountAsync(roleMappingPath, ct) ?? 0;
+            files.Add(new IngestFileSpec("semlink/vn-fn-role-mapping", roleMappingPath, units));
+            total += units;
+        }
+        if (files.Count == 0) return null;
+        if (options.MaxInputUnits > 0) total = Math.Min(total, options.MaxInputUnits);
+        return new IngestInventory("records", total, files);
     }
 
     public override async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
