@@ -38,6 +38,8 @@ public static class EntityTypeRegistry
     public static readonly Hash128 Ngram = Id("Ngram");
     public static readonly Hash128 Number = Id("Number");
     public static readonly Hash128 OnsetSegment = Id("OnsetSegment");
+    public static readonly Hash128 OpenSubtitlesAlignment = Id("OpenSubtitles_Alignment");
+    public static readonly Hash128 OpenSubtitlesSequence = Id("OpenSubtitles_Sequence");
     public static readonly Hash128 Ordinal = Id("Ordinal");
     public static readonly Hash128 OrdinalContext = Id("OrdinalContext");
     public static readonly Hash128 Patch = Id("Patch");

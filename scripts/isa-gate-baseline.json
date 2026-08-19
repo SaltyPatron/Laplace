@@ -482,7 +482,6 @@
       "app/Laplace.Decomposers/OMW/OMWGrammarWitness.cs::HAS_EXAMPLE": 1,
       "app/Laplace.Decomposers/OMW/OMWGrammarWitness.cs::HAS_LANGUAGE": 1,
       "app/Laplace.Decomposers/OMW/OMWGrammarWitness.cs::IS_SYNONYM_OF": 1,
-      "app/Laplace.Decomposers/OpenSubtitles/OpenSubtitlesZipIngest.cs::IS_TRANSLATION_OF": 1,
       "app/Laplace.Decomposers/PropBank/PropBankDecomposer.cs::HAS_EXAMPLE": 1,
       "app/Laplace.Decomposers/PropBank/PropBankDecomposer.cs::HAS_SENSE": 1,
       "app/Laplace.Decomposers/SemLink/SemLinkGrammarWitness.cs::CORRESPONDS_TO": 4,

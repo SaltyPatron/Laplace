@@ -21,6 +21,8 @@ public static class EntityIdentityPolicy
         EntityTypeRegistry.Text,
         EntityTypeRegistry.Ngram,
         EntityTypeRegistry.Collection,
+        EntityTypeRegistry.OpenSubtitlesAlignment,
+        EntityTypeRegistry.OpenSubtitlesSequence,
         EntityTypeRegistry.FrameNetAnnotation,
         EntityTypeRegistry.Pixel,
         EntityTypeRegistry.Patch,
