@@ -3,8 +3,8 @@
 Status date: 2026-08-19
 
 This is the integration inventory for the decomposer campaign. It records what is
-already on `main`, what is implemented in a pull request, and what still requires
-product work. A pull request is not counted as delivered until it is merged.
+on `main` and what still requires product work. A pull request is not counted as
+delivered until it is merged.
 
 ## Governing laws
 
@@ -35,7 +35,7 @@ product work. A pull request is not counted as delivered until it is merged.
 | ISA ratchet repair | #1151 restores the merged-main gate after the reference cleanup without relaxing the policy. |
 | Proposition identity | #1152 binds PropBank, VerbNet, FrameNet, SemLink, and PredicateMatrix roles/predicates to their owning semantic structures instead of context or global labels. |
 
-## Implemented and awaiting integration
+## Integrated in the 2026-08-19 batch
 
 | PR | Area | Result |
 | --- | --- | --- |
@@ -58,8 +58,9 @@ product work. A pull request is not counted as delivered until it is merged.
 | #1173 | Generic parallel fanout | Moves model layer fanout, backpressure, cancellation, and failures into a shared generic pipeline primitive. |
 
 The related source-fidelity audit (#1155), durable working agreement (#1156), and
-canonical lexical-peer batch core (#1164) are also part of the current open
-integration set, although they are not decomposer implementations.
+canonical lexical-peer batch core (#1164) were integrated in the same batch,
+although they are not decomposer implementations. After the batch, the repository
+had no open pull requests.
 
 ## Remaining product work after integration
 
