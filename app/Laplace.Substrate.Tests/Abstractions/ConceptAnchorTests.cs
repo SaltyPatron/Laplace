@@ -16,7 +16,7 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 public class ConceptAnchorTests
 {
     [SkippableFact]
-    public void EmitSynset_Runs_AndProducesDecomposedAnchorPlusIsA()
+    public void EmitSynset_ProducesGovernedSemanticAnchorWithoutContentTree()
     {
         string cili = TestPathHelpers.CiliOrFallback();
         Skip.IfNot(File.Exists(Path.Combine(cili, IliMap.MapFileName)), "CILI map not present");
@@ -36,9 +36,14 @@ public class ConceptAnchorTests
 
 
 
-        Assert.True(b.ContentStage.EntityCount > 0, "decomposed ILI anchor must stage entities");
+        Assert.Equal(0, b.ContentStage.EntityCount);
 
         var change = b.Build();
+        var entity = Assert.Single(change.Entities);
+        Assert.Equal(id, entity.Id);
+        Assert.Equal(EntityTypeRegistry.WordNetSynset, entity.TypeId);
+        Assert.Empty(change.Physicalities);
+        Assert.False(EntityIdentityPolicy.RequiresPhysicality(entity.TypeId));
         var typedAs = RelationTypeRegistry.RelationTypeId("IS_TYPED_AS");
         Assert.Contains(change.Attestations, a =>
             a.SubjectId == id!.Value && a.TypeId == typedAs && a.ObjectId == EntityTypeRegistry.WordNetSynset);

@@ -71,7 +71,9 @@ public sealed class VerbNetDecomposerTests
 
         var lendId = ContentEmitter.Emit(b, "lend", VerbNetDecomposer.Source);
 
-        var classId = CategoryAnchor.Id(SourceEntityIdConventions.NumericVerbNetClassId("give-13.1"));
+        var classId = AnchorAdmission.Id(
+            SourceEntityIdConventions.NumericVerbNetClassId("give-13.1"),
+            EntityTypeRegistry.VerbNetClass);
         Assert.NotNull(lendId);
         Assert.NotNull(classId);
         Assert.Contains(atts, a =>
@@ -86,7 +88,9 @@ public sealed class VerbNetDecomposerTests
             && a.SubjectId == classId!.Value
             && a.ObjectId == EntityTypeRegistry.Id("VerbNet_Class"));
 
-        var subId = CategoryAnchor.Id(SourceEntityIdConventions.NumericVerbNetClassId("give-13.1-1"));
+        var subId = AnchorAdmission.Id(
+            SourceEntityIdConventions.NumericVerbNetClassId("give-13.1-1"),
+            EntityTypeRegistry.VerbNetClass);
         Assert.NotNull(subId);
         Assert.Contains(atts, a =>
             a.TypeId == RelationTypeRegistry.RelationTypeId("IS_A")
@@ -102,7 +106,7 @@ public sealed class VerbNetDecomposerTests
 
 
 
-        var senseId = CategoryAnchor.Id("lend%2:40:00");
+        var senseId = SenseAnchor.Id("lend%2:40:00");
         Assert.NotNull(senseId);
         Assert.NotNull(lendId);
         Assert.Contains(atts, a =>

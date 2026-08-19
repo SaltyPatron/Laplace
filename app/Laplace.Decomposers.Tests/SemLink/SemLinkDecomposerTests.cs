@@ -45,8 +45,8 @@ public sealed class SemLinkDecomposerTests
     public async Task PbVn_Maps_Roleset_To_VerbNet_Class_With_Shared_Ids()
     {
         var atts = await CollectAttestationsAsync();
-        var rsId = CategoryAnchor.Id("give.01")!.Value;
-        var vnId = CategoryAnchor.Id("13.1-1")!.Value;
+        var rsId = AnchorAdmission.Id("give.01", EntityTypeRegistry.PropBankRoleset)!.Value;
+        var vnId = AnchorAdmission.Id("13.1-1", EntityTypeRegistry.VerbNetClass)!.Value;
         Assert.Contains(atts, a =>
             (a.SubjectId == rsId && a.ObjectId == vnId) ||
             (a.SubjectId == vnId && a.ObjectId == rsId));
@@ -59,7 +59,7 @@ public sealed class SemLinkDecomposerTests
         var atts = allAtts.Where(
             a => a.TypeId == RelationTypeRegistry.RelationTypeId("ROLE_CORRESPONDS_TO")).ToList();
         var (argId, thetaId) = ComposedArgThetaIds();
-        var vnId = CategoryAnchor.Id("13.1-1")!.Value;
+        var vnId = AnchorAdmission.Id("13.1-1", EntityTypeRegistry.VerbNetClass)!.Value;
         Assert.Contains(atts, a =>
             a.ContextId == vnId
             && (a.SubjectId == argId || a.ObjectId == argId)
@@ -70,7 +70,7 @@ public sealed class SemLinkDecomposerTests
     public async Task VnFn_Maps_Class_To_FrameNet_Frame_With_Shared_Ids()
     {
         var atts = await CollectAttestationsAsync();
-        var vnId = CategoryAnchor.Id("13.1-1")!.Value;
+        var vnId = AnchorAdmission.Id("13.1-1", EntityTypeRegistry.VerbNetClass)!.Value;
         var fnId = CategoryAnchor.Id("Giving")!.Value;
         Assert.Contains(atts, a =>
             (a.SubjectId == vnId && a.ObjectId == fnId) ||
@@ -87,13 +87,13 @@ public sealed class SemLinkDecomposerTests
     }
 
     [Fact]
-    public async Task Referenced_Concepts_Are_Shared_Content_Anchors_Not_Blobs()
+    public async Task Referenced_Concepts_ConvergeAcrossSourceSpecificAdmissionPaths()
     {
 
 
         var atts = await CollectAttestationsAsync();
-        var rs = CategoryAnchor.Id("give.01")!.Value;
-        var vn = CategoryAnchor.Id("13.1-1")!.Value;
+        var rs = AnchorAdmission.Id("give.01", EntityTypeRegistry.PropBankRoleset)!.Value;
+        var vn = AnchorAdmission.Id("13.1-1", EntityTypeRegistry.VerbNetClass)!.Value;
         var fn = CategoryAnchor.Id("Giving")!.Value;
         Assert.Contains(atts, a => a.SubjectId == rs || a.ObjectId == rs);
         Assert.Contains(atts, a => a.SubjectId == vn || a.ObjectId == vn);
@@ -155,15 +155,15 @@ public sealed class SemLinkDecomposerTests
         if (!TestInstall.HasFullCiliMap(cili)) return;
 
         var atts = await CollectPredicateMatrixAttestationsAsync();
-        var rsId = CategoryAnchor.Id("give.01")!.Value;
-        var vnId = CategoryAnchor.Id("13.1-1")!.Value;
+        var rsId = AnchorAdmission.Id("give.01", EntityTypeRegistry.PropBankRoleset)!.Value;
+        var vnId = AnchorAdmission.Id("13.1-1", EntityTypeRegistry.VerbNetClass)!.Value;
         var fnId = CategoryAnchor.Id("Giving")!.Value;
         Hash128? synId = ConceptAnchor.SynsetId(2244956, 'v');
         Assert.NotNull(synId);
 
-        Assert.Contains(atts, a => a.SubjectId == rsId && a.ObjectId == synId);
-        Assert.Contains(atts, a => a.SubjectId == vnId && a.ObjectId == synId);
-        Assert.Contains(atts, a => a.SubjectId == fnId && a.ObjectId == synId);
+        CorrespondsToAssert.Contains(atts, rsId, synId.Value);
+        CorrespondsToAssert.Contains(atts, vnId, synId.Value);
+        CorrespondsToAssert.Contains(atts, fnId, synId.Value);
     }
 
     [Fact]
@@ -173,10 +173,10 @@ public sealed class SemLinkDecomposerTests
         if (!TestInstall.HasFullCiliMap(cili)) return;
 
         var atts = await CollectPbWnAttestationsAsync();
-        var rsId = CategoryAnchor.Id("give.01")!.Value;
+        var rsId = AnchorAdmission.Id("give.01", EntityTypeRegistry.PropBankRoleset)!.Value;
         Hash128? synId = ConceptAnchor.SynsetId(2244956, 'v');
         Assert.NotNull(synId);
-        Assert.Contains(atts, a => a.SubjectId == rsId && a.ObjectId == synId);
+        CorrespondsToAssert.Contains(atts, rsId, synId.Value);
     }
 
     private static (Hash128 ArgId, Hash128 ThetaId) ComposedArgThetaIds()

@@ -17,7 +17,7 @@ public readonly struct CILISource : ISeedSource
         ["IS_TYPED_AS", "HAS_DEFINITION", "HAS_NAME_ALIAS", "HAS_SYNSET_KEY"];
 
     public static IReadOnlyList<string>? TypeNodeNames { get; } =
-        ["WordNet_Synset"];
+        ["WordNet_Synset", "Source_Reference", "Source_Version"];
 
     public static SourceLicense License => SourceLicense.Unknown;
 

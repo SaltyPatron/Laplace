@@ -72,23 +72,19 @@ public sealed class VerbNetDecomposer
 
 
 
-        Hash128? classAnchor = CategoryAnchor.Emit(b, SourceEntityIdConventions.NumericVerbNetClassId(classId), ClassTypeId, Source, TC.AcademicCurated);
+        Hash128? classAnchor = AnchorAdmission.Emit(
+            b, SourceEntityIdConventions.NumericVerbNetClassId(classId),
+            ClassTypeId, Source, TC.AcademicCurated);
         if (classAnchor is null) return;
         Hash128 classEntity = classAnchor.Value;
-
-
-
-        if (ContentEmitter.Emit(b, classId, Source) is { } classNameId)
-            b.AddAttestation(NativeAttestation.Categorical(
-                classEntity, "HAS_NAME_ALIAS", classNameId, Source, TC.AcademicCurated));
-
         if (parentClassId is not null)
         {
 
 
 
 
-            Hash128? parentAnchor = CategoryAnchor.Id(SourceEntityIdConventions.NumericVerbNetClassId(parentClassId));
+            Hash128? parentAnchor = AnchorAdmission.Id(
+                SourceEntityIdConventions.NumericVerbNetClassId(parentClassId), ClassTypeId);
             if (parentAnchor is not null)
                 b.AddAttestation(NativeAttestation.Categorical(
                     classEntity, "IS_A", parentAnchor.Value, Source, TC.AcademicCurated));

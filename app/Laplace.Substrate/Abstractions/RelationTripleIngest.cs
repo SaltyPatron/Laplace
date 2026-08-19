@@ -85,7 +85,7 @@ public sealed class RelationTripleHandler : IIngestRecordHandler<RelationTripleR
             if (record.ContextAnchorKey is { Length: > 0 } ctxKey
                 && record.ContextCategoryTypeId is { } ctxType && ctxType != default)
             {
-                ctx = CategoryAnchor.Emit(builder, ctxKey, ctxType, sourceId, sourceTrust) ?? ctx;
+                ctx = AnchorAdmission.Emit(builder, ctxKey, ctxType, sourceId, sourceTrust) ?? ctx;
             }
             builder.AddAttestation(NativeAttestation.Categorical(
                 subjectRoot, record.RelationType, objectRoot, sourceId, sourceTrust,

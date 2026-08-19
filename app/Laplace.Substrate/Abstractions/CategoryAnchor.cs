@@ -15,6 +15,10 @@ namespace Laplace.Decomposers.Abstractions;
 
 
 
+/// <summary>
+/// Admission path for human-readable semantic category labels. Opaque source/catalog
+/// keys belong in <see cref="ReferenceAnchor"/> and must not pass through this API.
+/// </summary>
 public static class CategoryAnchor
 {
 

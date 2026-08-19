@@ -81,9 +81,10 @@ public sealed class CILIDecomposer : DecomposerMultiPhase<CILISource, FullScope>
         protected override void Compose((byte[] Ili, byte[]? Def) rec, SubstrateChangeBuilder b)
         {
             var (ili, def) = rec;
-            if (ContentEmitter.Emit(b, ili, Source) is not { } id) return;
-            b.AddAttestation(NativeAttestation.Categorical(
-                id, "IS_TYPED_AS", SynsetTypeId, Source, TC.AcademicCurated));
+            if (ReferenceAnchor.EmitUtf8(
+                    b, ReferenceIdentityKind.CiliIli, ili, SynsetTypeId,
+                    Source, TC.AcademicCurated) is not { } id)
+                return;
             // CILI asserts a DEFINITION for the ILI concept — only that. The old
             // duplicate HAS_NAME_ALIAS emission of the same text made resolve_name's
             // authoritative-name arm serve the gloss as every synset's NAME,
@@ -154,9 +155,16 @@ public sealed class CILIDecomposer : DecomposerMultiPhase<CILISource, FullScope>
         SubstrateChangeBuilder mb, (byte[] Ili, byte[] OffsetPos, string Version) rec)
     {
         var (ili, offsetPos, version) = rec;
-        if (ContentEmitter.Emit(mb, ili, Source) is not { } id) return;
-        if (ContentEmitter.Emit(mb, offsetPos, Source) is not { } keyId) return;
-        var verCtx = ContentEmitter.Emit(mb, version, Source) ?? id;
+        if (ReferenceAnchor.DeclareUtf8(
+                mb, ReferenceIdentityKind.CiliIli, ili, SynsetTypeId, Source) is not { } id)
+            return;
+        string offsetKey = System.Text.Encoding.UTF8.GetString(offsetPos);
+        if (ReferenceAnchor.DeclareWordNetSynsetKey(
+                mb, version, offsetKey, Source) is not { } keyId)
+            return;
+        var verCtx = ReferenceAnchor.Declare(
+            mb, ReferenceIdentityKind.CiliMapVersion, version,
+            EntityTypeRegistry.SourceVersion, Source) ?? id;
         mb.AddAttestation(NativeAttestation.Categorical(
             id, "HAS_SYNSET_KEY", keyId, Source, TC.AcademicCurated, verCtx));
     }

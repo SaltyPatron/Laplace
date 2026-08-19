@@ -116,7 +116,9 @@ public sealed class WordFrameNetDecomposerTests
         if (!TestInstall.HasFullCiliMap(cili)) return;
 
         var atts = await CollectAttestationsAsync();
-        var luId = CategoryAnchor.Id(SourceEntityIdConventions.FrameNetLuKey("Giving", "give.v"))!.Value;
+        var luId = AnchorAdmission.Id(
+            SourceEntityIdConventions.FrameNetLuKey("Giving", "give.v"),
+            EntityTypeRegistry.FrameNetLu)!.Value;
         Hash128? synId = ConceptAnchor.SynsetId(2244956, 'v');
         Assert.NotNull(synId);
         CorrespondsToAssert.Contains(atts, luId, synId.Value);

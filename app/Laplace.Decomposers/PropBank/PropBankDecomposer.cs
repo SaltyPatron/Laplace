@@ -98,7 +98,8 @@ public sealed class PropBankDecomposer
 
 
 
-            Hash128? rsAnchor = CategoryAnchor.Emit(b, rsId, RolesetTypeId, Source, TC.AcademicCurated);
+            Hash128? rsAnchor = AnchorAdmission.Emit(
+                b, rsId, RolesetTypeId, Source, TC.AcademicCurated);
             if (rsAnchor is null) continue;
             Hash128 rsEntity = rsAnchor.Value;
 
@@ -174,7 +175,9 @@ public sealed class PropBankDecomposer
 
                 Hash128? anchor =
                     resource.Equals("VerbNet", StringComparison.OrdinalIgnoreCase)
-                        ? CategoryAnchor.Id(SourceEntityIdConventions.NumericVerbNetClassId(cls))
+                        ? AnchorAdmission.Id(
+                            SourceEntityIdConventions.NumericVerbNetClassId(cls),
+                            EntityTypeRegistry.VerbNetClass)
                     : resource.Equals("FrameNet", StringComparison.OrdinalIgnoreCase)
                         ? CategoryAnchor.Id(cls)
                         : null;

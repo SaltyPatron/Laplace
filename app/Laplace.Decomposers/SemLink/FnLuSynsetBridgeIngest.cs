@@ -32,7 +32,7 @@ internal static class FnLuSynsetBridgeIngest
             if (synId is null) continue;
 
             string luKey = SourceEntityIdConventions.FrameNetLuKey(frame, luName);
-            if (CategoryAnchor.Id(luKey) is null) continue;
+            if (AnchorAdmission.Id(luKey, LuTypeId) is null) continue;
 
             if (maxInputUnits > 0 && rowsTotal >= maxInputUnits) yield break;
             rowsTotal++;
@@ -73,7 +73,7 @@ internal static class FnLuSynsetBridgeIngest
 
             string luName = PosSuffix(pos) is { Length: > 0 } sfx ? $"{lemma}.{sfx}" : lemma;
             string luKey = SourceEntityIdConventions.FrameNetLuKey(currentFrame, luName);
-            if (CategoryAnchor.Id(luKey) is null) continue;
+            if (AnchorAdmission.Id(luKey, LuTypeId) is null) continue;
 
             if (maxInputUnits > 0 && rowsTotal >= maxInputUnits) yield break;
             rowsTotal++;

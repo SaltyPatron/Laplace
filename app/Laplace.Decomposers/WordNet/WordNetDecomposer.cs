@@ -329,15 +329,14 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
 
     private static void ComposeSense(WnSense s, SubstrateChangeBuilder b)
     {
-        EmitSurface(b, s.SenseKey, Source);
         EmitSurface(b, s.Lemma, Source);
 
-        var senseId = SenseAnchor.IdNormalized(s.SenseKey);
+        var senseId = SenseAnchor.Emit(
+            b, s.SenseKey, Source, SourceTrust.StandardsDerived);
         var lemmaId = RootSurface(s.Lemma);
         var synAnchor = ConceptAnchor.SynsetId(s.Offset, s.Pos);
         if (senseId is null || lemmaId is null || synAnchor is null) return;
 
-        SenseAnchor.AttestSenseCategory(b, senseId.Value, Source, SourceTrust.StandardsDerived);
         // The source's declared language scope, recorded rather than inferred. Emitted on
         // the LEMMA and the SENSE and deliberately not on the synset: a synset is
         // ILI-shared across every wordnet, so it is language-neutral and this source does

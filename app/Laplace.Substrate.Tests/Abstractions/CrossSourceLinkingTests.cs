@@ -8,13 +8,16 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 public sealed class CrossSourceLinkingTests
 {
     [Fact]
-    public void SenseAnchor_And_CategoryAnchor_Agree_On_Normalized_SenseKey()
+    public void SenseAnchor_ConvergesAcrossNormalizedSourceKeys_WithoutBecomingContent()
     {
         const string raw = "?lend%2:40:00";
         string? norm = SourceEntityIdConventions.NormalizeSenseKey(raw);
         Assert.NotNull(norm);
         Assert.Equal(SenseAnchor.Id(raw), SenseAnchor.IdNormalized(norm!));
-        Assert.Equal(CategoryAnchor.Id(norm!), SenseAnchor.Id(raw));
+        Assert.Equal(
+            ReferenceAnchor.Id(ReferenceIdentityKind.WordNetSenseKey, norm!),
+            SenseAnchor.Id(raw));
+        Assert.NotEqual(CategoryAnchor.Id(norm!), SenseAnchor.Id(raw));
     }
 
     [Fact]
@@ -37,7 +40,6 @@ public sealed class CrossSourceLinkingTests
 
         Assert.Equal(CategoryAnchor.Id("Giving"), CategoryAnchor.Id("Giving "));
         Assert.Equal(CategoryAnchor.Id("Giving"), CategoryAnchor.Id(" Giving"));
-        Assert.Equal(CategoryAnchor.Id("13.1-1"), CategoryAnchor.Id(" 13.1-1 "));
         Assert.NotEqual(CategoryAnchor.Id("Giving"), CategoryAnchor.Id("giving"));
     }
 

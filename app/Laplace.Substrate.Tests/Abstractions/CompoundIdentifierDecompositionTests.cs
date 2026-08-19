@@ -1,133 +1,81 @@
-using System.Text;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
 using Xunit;
 
 namespace Laplace.Decomposers.Abstractions.Tests;
 
-/// <summary>
-/// Compound identifiers staged as content (PropBank roleset keys like
-/// "abandon.01", VerbNet class ids, FrameNet frame names — everything
-/// CategoryAnchor.Emit / ContentEmitter touches) MUST decompose through the
-/// same tiered content pipeline as ordinary text. The load-bearing
-/// consequence of content addressing is that the "abandon" inside
-/// "abandon.01" is THE SAME ENTITY (bit-identical id) as the "abandon"
-/// WordNet ingested — merging happens by hash collision, not by an
-/// entity-resolution pass. If these tests fail, category anchors are
-/// minting opaque word-tier blobs that never link to anything: orphaned
-/// clutter that no recall/walk can reach from the lexical graph.
-/// </summary>
 [Collection("GrammarPerfcache")]
 public sealed class CompoundIdentifierDecompositionTests
 {
-    private static HashSet<Hash128> NodeIds(string text, out int nodeCount, out int maxTier)
+    [Fact]
+    public void OpaqueRoleset_IsOneGovernedIdentity_NotAContentTree()
     {
-        using var tree = IntentStage.BuildContentTree(Encoding.UTF8.GetBytes(text));
-        Assert.NotNull(tree);
-        nodeCount = tree!.NodeCount;
-        var ids = new HashSet<Hash128>();
-        maxTier = 0;
-        for (uint i = 0; i < tree.NodeCount; i++)
-        {
-            var node = tree.GetNode(i);
-            ids.Add(node.Id);
-            maxTier = Math.Max(maxTier, node.Tier);
-        }
-        return ids;
-    }
+        var source = SubstrateCanonicalIds.Source("reference-admission-test");
+        var builder = new SubstrateChangeBuilder(source, "propbank/abandon.01");
 
-    private static HashSet<Hash128> TierIds(string text, int tier)
-    {
-        using var tree = IntentStage.BuildContentTree(Encoding.UTF8.GetBytes(text));
-        Assert.NotNull(tree);
-        var ids = new HashSet<Hash128>();
-        for (uint i = 0; i < tree!.NodeCount; i++)
-        {
-            var node = tree.GetNode(i);
-            if (node.Tier == tier) ids.Add(node.Id);
-        }
-        return ids;
+        Hash128? id = ReferenceAnchor.Emit(
+            builder,
+            ReferenceIdentityKind.PropBankRoleset,
+            "abandon.01",
+            EntityTypeRegistry.PropBankRoleset,
+            source,
+            SourceTrust.AcademicCurated);
+
+        Assert.NotNull(id);
+        Assert.Equal(0, builder.ContentStage.EntityCount);
+        var change = builder.Build();
+        var entity = Assert.Single(change.Entities);
+        Assert.Equal(id, entity.Id);
+        Assert.Equal(EntityTypeRegistry.PropBankRoleset, entity.TypeId);
+        Assert.Empty(change.Physicalities);
+        Assert.False(EntityIdentityPolicy.RequiresPhysicality(entity.TypeId));
     }
 
     [Fact]
-    public void RolesetKey_DecomposesIntoConstituents_NotOneOpaqueBlob()
+    public void ReferenceDomains_KeepIdenticalSerializationsDistinct()
     {
-        var ids = NodeIds("abandon.01", out int nodeCount, out int maxTier);
-        // 1 root + word nodes + grapheme nodes + shared codepoint nodes — an
-        // opaque single-entity encoding would have a handful of nodes at one
-        // tier. "abandon.01" must fan out across tiers.
-        Assert.True(nodeCount > 10,
-            $"expected full tiered decomposition, got {nodeCount} nodes");
-        Assert.True(maxTier >= 2, $"expected word tier or above, got maxTier={maxTier}");
-        Assert.True(ids.Count > 10);
+        const string key = "13.1-1";
+        Assert.NotEqual(
+            ReferenceAnchor.Id(ReferenceIdentityKind.PropBankRoleset, key),
+            ReferenceAnchor.Id(ReferenceIdentityKind.VerbNetClass, key));
+        Assert.NotEqual(
+            ReferenceAnchor.Id(ReferenceIdentityKind.VerbNetClass, key),
+            ContentEmitter.RootId(key));
     }
 
     [Fact]
-    public void CompoundSharesWordEntity_WithStandaloneWord()
+    public void ReferenceNormalization_TrimsWithoutChangingCaseOrMeaning()
     {
-        // The word-tier ids inside "abandon.01" must include the word-tier
-        // id of standalone "abandon" — same content, same hash, same entity.
-        var compoundWords = TierIds("abandon.01", tier: 2);
-        var standaloneWords = TierIds("abandon", tier: 2);
-
-        Assert.NotEmpty(standaloneWords);
-        Assert.True(standaloneWords.IsSubsetOf(compoundWords),
-            "the 'abandon' inside 'abandon.01' must be bit-identical to standalone 'abandon' — " +
-            "otherwise category anchors mint orphaned blobs that never merge with lexical content");
+        Assert.Equal(
+            ReferenceAnchor.Id(ReferenceIdentityKind.VerbNetClass, "13.1-1"),
+            ReferenceAnchor.Id(ReferenceIdentityKind.VerbNetClass, " 13.1-1 "));
+        Assert.NotEqual(
+            ReferenceAnchor.Id(ReferenceIdentityKind.VerbNetClass, "Giving"),
+            ReferenceAnchor.Id(ReferenceIdentityKind.VerbNetClass, "giving"));
     }
 
     [Fact]
-    public void CompoundSharesGraphemesAndCodepoints_WithStandaloneWord()
+    public void WordNetSynsetKey_IsVersionScopedInPropositionIdentity()
     {
-        static Dictionary<int, HashSet<Hash128>> PerTier(string text)
-        {
-            using var tree = IntentStage.BuildContentTree(Encoding.UTF8.GetBytes(text));
-            Assert.NotNull(tree);
-            var byTier = new Dictionary<int, HashSet<Hash128>>();
-            for (uint i = 0; i < tree!.NodeCount; i++)
-            {
-                var node = tree.GetNode(i);
-                if (!byTier.TryGetValue(node.Tier, out var set))
-                    byTier[node.Tier] = set = new HashSet<Hash128>();
-                set.Add(node.Id);
-            }
-            return byTier;
-        }
-
-        var compound = PerTier("abandon.01");
-        var standalone = PerTier("abandon");
-        var compoundAll = compound.Values.SelectMany(s => s).ToHashSet();
-
-        // Every SUB-word tier of standalone "abandon" (words, graphemes,
-        // codepoints — tiers <= 2) must reappear identically inside the
-        // compound's tree. Standalone "abandon"'s nodes ABOVE tier 2 carry
-        // the word's own id (tier is a floor — a one-word content unit IS
-        // the word, see TierFloorIdentityTests); the compound's higher-tier
-        // nodes carry the compound's id (different content). So tiers <= 2
-        // is the correct comparison universe, not an exemption.
-        var leaks = new List<string>();
-        foreach (var (tier, ids) in standalone.OrderBy(kv => kv.Key))
-        {
-            if (tier > 2) continue;
-            int missing = ids.Count(id => !compoundAll.Contains(id));
-            if (missing > 0) leaks.Add($"tier {tier}: {missing}/{ids.Count} distinct ids missing");
-        }
-        Assert.True(leaks.Count == 0,
-            "constituents of standalone 'abandon' missing from 'abandon.01' — " + string.Join("; ", leaks));
+        Assert.NotEqual(
+            ReferenceAnchor.WordNetSynsetKeyId("pwn30", "02084071-n"),
+            ReferenceAnchor.WordNetSynsetKeyId("pwn16", "02084071-n"));
     }
 
     [Fact]
-    public void VnClassAndFrameNames_AlsoDecompose()
+    public void HumanReadableFrameLabel_RemainsContentAddressed()
     {
-        // The other identifier families staged by SemLink/VerbNet/FrameNet
-        // witnesses: numeric VN class ids and CamelCase frame names.
-        var vn = NodeIds("13.1-1", out int vnCount, out _);
-        Assert.True(vnCount > 5, $"VN class id must decompose, got {vnCount} nodes");
+        CodepointPerfcache.LoadDefault();
+        var source = SubstrateCanonicalIds.Source("content-category-test");
+        string label = "Giving_" + Guid.NewGuid().ToString("N");
+        var builder = new SubstrateChangeBuilder(source, "framenet/content-label");
 
-        var fn = NodeIds("Abandonment", out int fnCount, out int fnMaxTier);
-        Assert.True(fnCount > 5, $"frame name must decompose, got {fnCount} nodes");
-        Assert.True(fnMaxTier >= 2);
+        Hash128? id = CategoryAnchor.Emit(
+            builder, label, EntityTypeRegistry.FrameNetFrame,
+            source, SourceTrust.AcademicCurated);
 
-        Assert.True(vn.Count > 0 && fn.Count > 0);
+        Assert.Equal(ContentEmitter.RootId(label), id);
+        Assert.True(builder.ContentStage.EntityCount > 0);
+        Assert.True(builder.ContentStage.PhysicalityCount > 0);
     }
 }

@@ -79,7 +79,7 @@ public sealed class PropBankDecomposerTests
         var atts = await CollectAttestationsAsync();
         var b = new SubstrateChangeBuilder(PropBankDecomposer.Source, "fixture", null);
         var giveId = ContentEmitter.Emit(b, "give", PropBankDecomposer.Source);
-        var rsId = CategoryAnchor.Id("give.01");
+        var rsId = AnchorAdmission.Id("give.01", EntityTypeRegistry.PropBankRoleset);
         Assert.NotNull(rsId);
         Assert.NotNull(giveId);
 
@@ -94,7 +94,7 @@ public sealed class PropBankDecomposerTests
         var atts = await CollectAttestationsAsync();
         var b = new SubstrateChangeBuilder(PropBankDecomposer.Source, "fixture", null);
         var giverId = ContentEmitter.Emit(b, "giver", PropBankDecomposer.Source);
-        var rsId = CategoryAnchor.Id("give.01");
+        var rsId = AnchorAdmission.Id("give.01", EntityTypeRegistry.PropBankRoleset);
 
         var ord0 = PropBankDecomposer.OrdinalId("0");
         Assert.Equal(Hash128.OfCanonical("ordinal/0/v1"), ord0);
@@ -110,10 +110,12 @@ public sealed class PropBankDecomposerTests
     {
         var atts = await CollectAttestationsAsync();
         var b = new SubstrateChangeBuilder(PropBankDecomposer.Source, "fixture", null);
-        var rsId = CategoryAnchor.Id("give.01");
+        var rsId = AnchorAdmission.Id("give.01", EntityTypeRegistry.PropBankRoleset);
 
 
-        var vnId = CategoryAnchor.Id(SourceEntityIdConventions.NumericVerbNetClassId("give-13.1-1"));
+        var vnId = AnchorAdmission.Id(
+            SourceEntityIdConventions.NumericVerbNetClassId("give-13.1-1"),
+            EntityTypeRegistry.VerbNetClass);
         Assert.NotNull(rsId);
         Assert.NotNull(vnId);
         Assert.Contains(atts, a =>
@@ -137,7 +139,7 @@ public sealed class PropBankDecomposerTests
     {
         var atts = await CollectAttestationsAsync();
         var b = new SubstrateChangeBuilder(PropBankDecomposer.Source, "fixture", null);
-        var rsId = CategoryAnchor.Id("give.01");
+        var rsId = AnchorAdmission.Id("give.01", EntityTypeRegistry.PropBankRoleset);
 
 
 
@@ -198,14 +200,17 @@ public sealed class PropBankDecomposerTests
             var giveId = ContentEmitter.Emit(
                 new SubstrateChangeBuilder(PropBankDecomposer.Source, "fixture", null),
                 "give", PropBankDecomposer.Source);
-            var beDestinedForId = CategoryAnchor.Id("be-destined-for.91");
+            var beDestinedForId = AnchorAdmission.Id(
+                "be-destined-for.91", EntityTypeRegistry.PropBankRoleset);
             Assert.NotNull(giveId);
             Assert.NotNull(beDestinedForId);
 
 
             Assert.Contains(atts, a =>
                 a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_SENSE")
-                && a.SubjectId == giveId!.Value && a.ObjectId == CategoryAnchor.Id("give.01")!.Value);
+                && a.SubjectId == giveId!.Value
+                && a.ObjectId == AnchorAdmission.Id(
+                    "give.01", EntityTypeRegistry.PropBankRoleset)!.Value);
 
 
 
@@ -241,7 +246,7 @@ public sealed class PropBankDecomposerTests
     }
 
     [Fact]
-    public async Task NonphysicalManagedEntities_AreGovernedRoleOrdinals()
+    public async Task NonphysicalManagedEntities_AreGovernedReferencesAndRoleOrdinals()
     {
         string dir = Path.Combine(Path.GetTempPath(), "pb-admission-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(Path.Combine(dir, "frames"));
@@ -262,16 +267,18 @@ public sealed class PropBankDecomposerTests
                         nonphysical[entity.Id] = entity.TypeId;
             }
 
-            Assert.Equal(3, nonphysical.Count);
-            Assert.All(nonphysical.Values,
-                typeId => Assert.Equal(EntityTypeRegistry.Ordinal, typeId));
+            Assert.Equal(4, nonphysical.Count);
+            Assert.Contains(nonphysical.Values,
+                typeId => typeId == EntityTypeRegistry.PropBankRoleset);
+            Assert.Equal(3, nonphysical.Values.Count(
+                typeId => typeId == EntityTypeRegistry.Ordinal));
             var expected = new[]
             {
                 PropBankDecomposer.OrdinalId("0"),
                 PropBankDecomposer.OrdinalId("1"),
                 PropBankDecomposer.OrdinalId("2"),
             }.ToHashSet();
-            Assert.True(expected.SetEquals(nonphysical.Keys));
+            Assert.True(expected.IsSubsetOf(nonphysical.Keys));
         }
         finally { try { Directory.Delete(dir, recursive: true); } catch { } }
     }
