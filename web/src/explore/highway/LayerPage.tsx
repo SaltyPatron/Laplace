@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
-import { ErrorText, LoadingText, LookupRow, Muted, Panel } from '@ui';
+import { Link, Navigate, useParams } from 'react-router-dom';
+import { ErrorText, LoadingText, Muted, Panel } from '@ui';
 import { queryLeaders, relationBands } from '../../query/api';
 import type { BandLeaders, RelationBand } from '../../query/types';
-import { exploreResolve } from '../api';
+import { SearchBar } from '../components/SearchBar';
 import { findLayer } from './layers';
 import styles from './Highway.module.css';
 
@@ -17,15 +17,11 @@ import styles from './Highway.module.css';
  */
 export function LayerPage() {
   const { slug } = useParams();
-  const nav = useNavigate();
   const layer = findLayer(slug);
 
   const [leaders, setLeaders] = useState<BandLeaders[] | null>(null);
   const [band, setBand] = useState<RelationBand | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [lookup, setLookup] = useState('');
-  const [lookupErr, setLookupErr] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
 
   const bandNo = layer?.band;
 
@@ -45,23 +41,6 @@ export function LayerPage() {
   }, [bandNo]);
 
   if (!layer) return <Navigate to="/explore/highway" replace />;
-
-  async function enter(term: string) {
-    const t = term.trim();
-    if (!t || busy) return;
-    setBusy(true);
-    setLookupErr(null);
-    try {
-      const hit = await exploreResolve(t);
-      // resolve answers with exists:false rather than 404 for an unheld term.
-      if (!hit?.exists) { setLookupErr(`Nothing witnessed for "${t}".`); return; }
-      nav(`/explore/entity/${hit.id_hex}`);
-    } catch (e) {
-      setLookupErr(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  }
 
   const rows = leaders?.[0]?.rows ?? [];
 
@@ -155,14 +134,11 @@ export function LayerPage() {
       )}
 
       <Panel title="Enter the division">
-        <LookupRow
-          value={lookup}
-          onChange={setLookup}
-          onSubmit={() => void enter(lookup)}
+        <SearchBar
           placeholder="a word, sense, frame, or id hex…"
-          submitLabel="Open"
-          error={lookupErr}
-          disabled={busy}
+          label={`Open a witnessed entity in ${layer.name}`}
+          hint="Unwitnessed terms open the nearest geometric neighborhood."
+          shortcut={false}
         />
       </Panel>
     </div>

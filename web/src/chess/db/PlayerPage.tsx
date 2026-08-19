@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { Button, ErrorText, LoadingText, Muted, Panel, Stack, Table, Td, Th } from '@ui';
 import { StatCard } from '../../explore/components/StatCard';
 import { chessPlayer, chessPlayerGames } from './api';
@@ -20,18 +20,21 @@ const PAGE = 25;
  */
 export function PlayerPage() {
   const { idHex } = useParams();
+  const [params, setParams] = useSearchParams();
   const [player, setPlayer] = useState<ChessPlayerResponse | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [games, setGames] = useState<ChessGameRow[] | null>(null);
   const [gamesErr, setGamesErr] = useState<string | null>(null);
-  const [offset, setOffset] = useState(0);
+  const rawOffset = Number(params.get('offset') ?? 0);
+  const offset = Number.isFinite(rawOffset) && rawOffset > 0
+    ? Math.floor(rawOffset / PAGE) * PAGE
+    : 0;
 
   useEffect(() => {
     if (!idHex) return;
     let stale = false;
     setPlayer(null);
     setErr(null);
-    setOffset(0);
     chessPlayer(idHex)
       .then((p) => { if (!stale) setPlayer(p); })
       .catch((e) => { if (!stale) setErr(e instanceof Error ? e.message : String(e)); });
@@ -143,12 +146,21 @@ export function PlayerPage() {
             </Table>
             <div className={styles.pager}>
               <Button variant="ghost" disabled={offset <= 0}
-                onClick={() => setOffset(Math.max(0, offset - PAGE))}>‹ Newer</Button>
+                onClick={() => {
+                  const next = new URLSearchParams(params);
+                  const value = Math.max(0, offset - PAGE);
+                  if (value) next.set('offset', String(value)); else next.delete('offset');
+                  setParams(next);
+                }}>‹ Newer</Button>
               <Muted>
                 {offset + 1}–{offset + games.length} of {player.overall.games.toLocaleString()}
               </Muted>
               <Button variant="ghost" disabled={offset + games.length >= player.overall.games}
-                onClick={() => setOffset(offset + PAGE)}>Older ›</Button>
+                onClick={() => {
+                  const next = new URLSearchParams(params);
+                  next.set('offset', String(offset + PAGE));
+                  setParams(next);
+                }}>Older ›</Button>
             </div>
           </>
         ) : null}

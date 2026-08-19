@@ -21,13 +21,31 @@
   }
 
   .navLink {
+    position: relative;
+    padding: 0.46rem 0.58rem;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
     color: var(--color-text-muted);
     text-decoration: none;
     font-size: var(--text-base);
+    transition:
+      color var(--duration-fast) var(--ease-standard),
+      border-color var(--duration-fast) var(--ease-standard),
+      background var(--duration-fast) var(--ease-standard);
   }
 
   .navLink:hover {
     color: var(--color-text-primary);
+    background: var(--color-bg-elevated);
+  }
+
+  .navLinkActive {
+    color: var(--color-text-primary);
+    border-color: color-mix(in srgb, var(--color-copper) 42%, var(--color-border-default));
+    background: linear-gradient(90deg,
+      color-mix(in srgb, var(--color-copper) 11%, transparent),
+      var(--color-bg-elevated));
+    box-shadow: inset 2px 0 0 var(--color-signal);
   }
 
   .content {

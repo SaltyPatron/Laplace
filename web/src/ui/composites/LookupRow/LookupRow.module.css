@@ -1,12 +1,36 @@
 @layer components {
   .row {
-    display: flex;
+    display: grid;
     gap: var(--space-2);
     margin: var(--space-3) 0;
-    align-items: center;
+    width: 100%;
+  }
+
+  .controls {
+    display: flex;
+    gap: var(--space-2);
+    align-items: stretch;
   }
 
   .input {
     flex: 1;
+  }
+
+  .error {
+    padding-left: var(--space-1);
+  }
+
+  @media (max-width: 520px) {
+    .controls {
+      flex-wrap: wrap;
+    }
+
+    .input {
+      flex-basis: 100%;
+    }
+
+    .controls > button {
+      flex: 1;
+    }
   }
 }
