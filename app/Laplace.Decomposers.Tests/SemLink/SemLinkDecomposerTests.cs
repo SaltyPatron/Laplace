@@ -84,6 +84,55 @@ public sealed class SemLinkDecomposerTests
     }
 
     [Fact]
+    public async Task PredicateMatrix_OneSourceRow_IsOnePipelineRecord_AndOneInputUnit()
+    {
+        string path = Path.Combine(Path.GetTempPath(), "pm-row-grain-" + Guid.NewGuid().ToString("N") + ".txt");
+        await File.WriteAllTextAsync(
+            path,
+            PredicateMatrixHeader + Environment.NewLine
+            + PredicateMatrixRow + Environment.NewLine
+            + PredicateMatrixRow.Replace("id:give.01", "id:send.01", StringComparison.Ordinal) + Environment.NewLine);
+        try
+        {
+            var records = new List<PredicateMatrixIngest.PredicateMatrixRecord>();
+            await foreach (var record in PredicateMatrixIngest.EnumerateRecordsAsync(path, null, 1, default))
+                records.Add(record);
+
+            var only = Assert.Single(records);
+            Assert.Equal(7, only.Edges.Length);
+            Assert.Equal(2L, await PredicateMatrixIngest.EstimateRecordCountAsync(path, null, default));
+        }
+        finally { try { File.Delete(path); } catch { } }
+    }
+
+    [Fact]
+    public async Task PredicateMatrix_Inventory_UsesTheSameAdmissionGrainAsExtraction()
+    {
+        string path = Path.Combine(Path.GetTempPath(), "pm-inventory-" + Guid.NewGuid().ToString("N") + ".txt");
+        string spanish = PredicateMatrixRow.Replace("id:eng", "id:spa", StringComparison.Ordinal);
+        string noun = PredicateMatrixRow.Replace("id:v", "id:n", StringComparison.Ordinal);
+        string noSynset = PredicateMatrixRow.Replace("ili-30-02244956-v", "NULL", StringComparison.Ordinal);
+        await File.WriteAllTextAsync(
+            path,
+            string.Join(Environment.NewLine, PredicateMatrixHeader, PredicateMatrixRow, spanish, noun, noSynset, ""));
+        try
+        {
+            Assert.Equal(1L, await PredicateMatrixIngest.EstimateRecordCountAsync(path, null, default));
+            Assert.Null(await PredicateMatrixIngest.EstimateRecordCountAsync(
+                path, LanguageFilter.FromSpec("es"), default));
+        }
+        finally { try { File.Delete(path); } catch { } }
+    }
+
+    [Fact]
+    public async Task PredicateMatrix_PackagingRepetition_DoesNotAmplifyWitnessCount()
+    {
+        var (_, atts) = await CollectPredicateMatrixAsync(PredicateMatrixRow, PredicateMatrixRow);
+        Assert.NotEmpty(atts);
+        Assert.All(atts, a => Assert.Equal(1, a.ObservationCount));
+    }
+
+    [Fact]
     public async Task VnFnRoleMapping_PreservesTheFrameOwnerFromTheSourceRow()
     {
         const string xml = """
@@ -153,7 +202,7 @@ public sealed class SemLinkDecomposerTests
         var writer = new CapturingWriter();
         await dec.InitializeAsync(new FakeContext(writer));
 
-        Assert.Equal(2, writer.Captured.Count);
+        Assert.Equal(3, writer.Captured.Count);
         var boot = writer.Captured.First(c =>
             c.Metadata.SourceContentUnitName == "bootstrap/SemLinkDecomposer");
         Assert.Contains(boot.Entities, e =>
@@ -169,6 +218,10 @@ public sealed class SemLinkDecomposerTests
             c.Metadata.SourceContentUnitName == "bootstrap/PredicateMatrixDecomposer");
         Assert.Contains(pmBoot.Entities, e =>
             e.Id == PredicateMatrixIngest.Source && e.TypeId == BootstrapIntentBuilder.SourceTypeId);
+        Assert.Contains(writer.Captured, c =>
+            c.Metadata.SourceContentUnitName == "bootstrap/license/PredicateMatrixDecomposer");
+        Assert.Equal("CC-BY-3.0", PredicateMatrixSource.License.Spdx);
+        Assert.Equal("1.3", PredicateMatrixSource.License.Version);
         Assert.Contains("substrate/source/PredicateMatrixDecomposer/v1", dec.CanonicalNamesForReadback);
     }
 
@@ -268,13 +321,16 @@ public sealed class SemLinkDecomposerTests
         finally { try { Directory.Delete(dir, recursive: true); } catch { } }
     }
 
-    private static async Task<(List<EntityRow> Entities, List<AttestationRow> Attestations)> CollectPredicateMatrixAsync()
+    private static async Task<(List<EntityRow> Entities, List<AttestationRow> Attestations)> CollectPredicateMatrixAsync(
+        params string[] rows)
     {
         string dir = Path.Combine(Path.GetTempPath(), "sl-pm-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(Path.Combine(dir, "PredicateMatrix"));
+        if (rows.Length == 0) rows = [PredicateMatrixRow];
         await File.WriteAllTextAsync(
             Path.Combine(dir, "PredicateMatrix", "PredicateMatrix.txt"),
-            PredicateMatrixHeader + Environment.NewLine + PredicateMatrixRow + Environment.NewLine);
+            PredicateMatrixHeader + Environment.NewLine
+            + string.Join(Environment.NewLine, rows) + Environment.NewLine);
         try
         {
             var dec = new SemLinkDecomposer();

@@ -21,6 +21,8 @@ namespace Laplace.Decomposers.Abstractions;
 /// </summary>
 public static class CategoryAnchor
 {
+    private static readonly Hash128 IsTypedAsTypeId =
+        RelationTypeRegistry.RelationTypeId("IS_TYPED_AS");
 
 
 
@@ -41,7 +43,12 @@ public static class CategoryAnchor
 
     public static void AttestCategory(
         SubstrateChangeBuilder b, Hash128 anchor, Hash128 categoryTypeId, Hash128 source, double trust)
-        => b.AddAttestation(NativeAttestation.Categorical(anchor, "IS_TYPED_AS", categoryTypeId, source, trust));
+        => b.AddAttestation(NativeAttestation.CategoricalResolved(
+            anchor, IsTypedAsTypeId, categoryTypeId, source, null, trust));
+
+    public static Hash128 CategoryAttestationId(
+        Hash128 anchor, Hash128 categoryTypeId, Hash128 source) =>
+        NativeAttestation.ComputeId(anchor, IsTypedAsTypeId, categoryTypeId, source, null);
 
 
 
