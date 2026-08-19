@@ -353,7 +353,7 @@
         },
         {
           "relation": "MOVE",
-          "min": 1
+          "max": 0
         }
       ]
     },

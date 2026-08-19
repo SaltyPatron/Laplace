@@ -23,7 +23,8 @@ public sealed record IngestProgress(
 {
     public double InputPercent =>
         InputUnitsTotal > 0
-            ? 100.0 * Math.Max(InputUnitsDone, InputUnitsComposed) / InputUnitsTotal
+            ? Math.Min(100.0,
+                100.0 * Math.Max(InputUnitsDone, InputUnitsComposed) / InputUnitsTotal)
         : UnitsProduced > 0 ? 100.0 * UnitsApplied / UnitsProduced
         : 0;
 
