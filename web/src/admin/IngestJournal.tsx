@@ -205,6 +205,9 @@ export function IngestJournal() {
                     <tr className={OPEN_STATES.has(r.status.toLowerCase()) ? styles.openRow : undefined}>
                       <td>
                         <span className={`${styles.badge} ${statusClass(r.status)}`}>{r.status}</span>
+                        {OPEN_STATES.has(r.status.toLowerCase()) && r.phase && (
+                          <div className={styles.progressPct}>{r.phase}</div>
+                        )}
                         {r.error && <div className={styles.runErr} title={r.error}>{r.error.slice(0, 90)}</div>}
                       </td>
                       <td>
@@ -241,7 +244,14 @@ export function IngestJournal() {
                         {(r.physicalities ?? 0).toLocaleString()}/
                         {(r.attestations ?? 0).toLocaleString()}
                       </td>
-                      <td className={styles.num}>{duration(r)}</td>
+                      <td className={styles.num}>
+                        <div>{duration(r)}</div>
+                        {isComplete(r.status) && ((r.fold_drain_ms ?? 0) > 0 || (r.writer_maintenance_ms ?? 0) > 0) && (
+                          <span className={styles.progressPct}>
+                            drain {Math.round((r.fold_drain_ms ?? 0) / 1000)}s · maintenance {Math.round((r.writer_maintenance_ms ?? 0) / 1000)}s
+                          </span>
+                        )}
+                      </td>
                       <td>
                         <Button
                           variant="ghost"

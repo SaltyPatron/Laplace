@@ -7,6 +7,14 @@ public interface IConsensusFoldMetrics
 {
     long ObservationsAccumulated { get; }
     long CellsFolded { get; }
+    TimeSpan LastFoldDrainWallClock => TimeSpan.Zero;
+    TimeSpan LastWriterMaintenanceWallClock => TimeSpan.Zero;
+}
+
+public enum BulkRunCompletionPhase
+{
+    ConsensusDrain,
+    WriterMaintenance,
 }
 
 public interface ISubstrateWriter
@@ -94,4 +102,18 @@ public interface ISubstrateWriter
     /// </summary>
     Task CompleteBulkRunAsync(CancellationToken ct = default)
         => Task.CompletedTask;
+
+    /// <summary>
+    /// Ends a bulk run while reporting the two completion barriers separately.
+    /// The default writer has no queued consensus lane, so its only barrier is
+    /// writer maintenance. Consensus-accumulating writers override this to
+    /// report the fold drain before the inner writer's index maintenance.
+    /// </summary>
+    Task CompleteBulkRunAsync(
+        Action<BulkRunCompletionPhase>? onPhase,
+        CancellationToken ct = default)
+    {
+        onPhase?.Invoke(BulkRunCompletionPhase.WriterMaintenance);
+        return CompleteBulkRunAsync(ct);
+    }
 }

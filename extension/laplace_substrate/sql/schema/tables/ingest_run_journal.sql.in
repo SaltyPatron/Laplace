@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS ingest_run_journal (
         CHECK (status IN ('running','ok','failed','empty-noop','capped',
                           'cancelled','skipped-complete',
                           'already-present','already-complete','dependency-unset')),
+    phase              text         NOT NULL DEFAULT 'extracting',
     started_at         timestamptz  NOT NULL DEFAULT now(),
     ended_at           timestamptz,
     units_attempted    bigint       NOT NULL DEFAULT 0,
@@ -44,9 +45,18 @@ CREATE TABLE IF NOT EXISTS ingest_run_journal (
     files_total        bigint       NOT NULL DEFAULT 0,
     input_units_done   bigint       NOT NULL DEFAULT 0,
     input_units_total  bigint       NOT NULL DEFAULT 0,
+    fold_drain_ms      bigint       NOT NULL DEFAULT 0,
+    writer_maintenance_ms bigint     NOT NULL DEFAULT 0,
     evidence_persisted boolean      NOT NULL DEFAULT true,
     error              text
 );
+
+ALTER TABLE ingest_run_journal
+    ADD COLUMN IF NOT EXISTS phase text NOT NULL DEFAULT 'extracting';
+ALTER TABLE ingest_run_journal
+    ADD COLUMN IF NOT EXISTS fold_drain_ms bigint NOT NULL DEFAULT 0;
+ALTER TABLE ingest_run_journal
+    ADD COLUMN IF NOT EXISTS writer_maintenance_ms bigint NOT NULL DEFAULT 0;
 
 CREATE INDEX IF NOT EXISTS ingest_run_journal_source_started
     ON ingest_run_journal (source_name, started_at DESC);

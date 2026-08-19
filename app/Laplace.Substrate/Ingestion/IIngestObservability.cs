@@ -35,6 +35,15 @@ public interface IIngestObservability
     /// <summary>Throttleable progress snapshot alongside each applied batch.</summary>
     void OnProgress(IngestProgress progress) { }
 
+    /// <summary>The producer is complete and the run is crossing a named terminal
+    /// barrier. This is deliberately separate from status: a run remains live and
+    /// blocks deployment while queued folds or writer maintenance are outstanding.</summary>
+    void OnCompletionPhase(string sourceName, BulkRunCompletionPhase phase) { }
+
+    /// <summary>Persist the measured terminal barriers for LapSight.</summary>
+    void OnBulkCompletion(
+        string sourceName, TimeSpan foldDrain, TimeSpan writerMaintenance) { }
+
     /// <summary>A file was opened for ingest. The file boundary is already a real unit
     /// with a real identity — per-file resume (GH #898) deposits a HasLayerCompleted
     /// marker on the file's content identity and a restart true-skips it — but this
