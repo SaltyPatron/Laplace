@@ -181,6 +181,83 @@ public sealed class FrameNetDecomposerTests
     }
 
     [Fact]
+    public async Task Fulltext_Targets_Preserve_Exact_Span_And_Occurrence()
+    {
+        const string fulltextXml = """
+<?xml version="1.0" encoding="UTF-8"?>
+<fullTextAnnotation xmlns="http://framenet.icsi.berkeley.edu">
+  <sentence ID="77">
+    <text>bank bank</text>
+    <annotationSet ID="100" frameName="Commerce">
+      <layer name="Target"><label name="Target" start="0" end="3"/></layer>
+    </annotationSet>
+    <annotationSet ID="101" frameName="Natural_features">
+      <layer name="Target"><label name="Target" start="5" end="8"/></layer>
+    </annotationSet>
+  </sentence>
+</fullTextAnnotation>
+""";
+
+        string dir = Path.Combine(Path.GetTempPath(), "fn-span-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(dir, "fulltext"));
+        string path = Path.Combine(dir, "fulltext", "sample.xml");
+        await File.WriteAllTextAsync(path, fulltextXml);
+        try
+        {
+            var parsed = new List<FrameNetDecomposer.FulltextAnno>();
+            await foreach (var ann in FrameNetDecomposer.ParseFulltextAsync(
+                               path, "framenet/fulltext/sample.xml", CancellationToken.None))
+                parsed.Add(ann);
+
+            Assert.Collection(parsed,
+                a =>
+                {
+                    Assert.Equal((0, 3), (a.TargetStart, a.TargetEnd));
+                    Assert.Equal("77", a.SentenceReference);
+                    Assert.Equal("100", a.AnnotationReference);
+                },
+                a =>
+                {
+                    Assert.Equal((5, 8), (a.TargetStart, a.TargetEnd));
+                    Assert.Equal("101", a.AnnotationReference);
+                });
+
+            var dec = new FrameNetDecomposer();
+            var ctx = new FakeContext(new NullWriter()) { EcosystemPath = dir };
+            var changes = new List<SubstrateChange>();
+            await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
+                changes.Add(change);
+
+            var evokes = changes.SelectMany(c => c.Attestations)
+                .Where(a => a.TypeId == RelationTypeRegistry.RelationTypeId("EVOKES_FRAME"))
+                .ToList();
+            Assert.Equal(2, evokes.Count);
+            Assert.Equal(2, evokes.Select(a => a.SubjectId).Distinct().Count());
+            Assert.Equal(2, evokes.Select(a => a.ContextId).Distinct().Count());
+            Assert.DoesNotContain(evokes, a => a.SubjectId == ContentEmitter.RootId("bank"));
+
+            var annotationIds = changes.SelectMany(c => c.Entities)
+                .Where(e => e.TypeId == EntityTypeRegistry.FrameNetAnnotation)
+                .Select(e => e.Id)
+                .ToHashSet();
+            Assert.Equal(2, annotationIds.Count);
+            Assert.All(evokes, a => Assert.Contains(a.SubjectId, annotationIds));
+
+            var annotationPhysicalities = changes.SelectMany(c => c.Physicalities)
+                .Where(p => annotationIds.Contains(p.EntityId))
+                .ToList();
+            Assert.Equal(2, annotationPhysicalities.Count);
+            Assert.Contains(annotationPhysicalities, p =>
+                Trajectory.Constituents(p.TrajectoryXyzm!).Contains(FrameNetDecomposer.OffsetId(0))
+                && Trajectory.Constituents(p.TrajectoryXyzm!).Contains(FrameNetDecomposer.OffsetId(3)));
+            Assert.Contains(annotationPhysicalities, p =>
+                Trajectory.Constituents(p.TrajectoryXyzm!).Contains(FrameNetDecomposer.OffsetId(5))
+                && Trajectory.Constituents(p.TrajectoryXyzm!).Contains(FrameNetDecomposer.OffsetId(8)));
+        }
+        finally { try { Directory.Delete(dir, recursive: true); } catch { } }
+    }
+
+    [Fact]
     public async Task Bootstrap_Registers_Source_Types_And_RelationTypeEntities()
     {
         var dec = new FrameNetDecomposer();
