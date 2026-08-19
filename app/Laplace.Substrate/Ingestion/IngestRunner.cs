@@ -488,7 +488,7 @@ public sealed class IngestRunner
                 // workers=2, attestations_r_has_definition_h1_pkey). Keep apply serial
                 // until claim-before-COPY is proven under multi-writer; compose fan can
                 // still run. Wrong parallelism is slower and corrupt.
-                int applyWorkers = 1;
+                int applyWorkers = IngestTopology.Current.ApplyDispatchWorkers;
                 if (workingSet
                     && Laplace.SubstrateCRUD.Npgsql.NpgsqlIndexCycle.Deferred
                     && options.ParallelWorkers > 1)
