@@ -18,3 +18,11 @@ analyses are under `docs/archive/plans/workstreams-v1/`.
 the merged implementation inventory. The companion
 [DECOMPOSER_NORMALIZATION_ISSUE_LEDGER.md](DECOMPOSER_NORMALIZATION_ISSUE_LEDGER.md)
 maps the full campaign to GitHub owners and falsifiable release gates.
+
+## Substrate cohesion and SQL
+
+[SUBSTRATE_COHESION_STATUS.md](SUBSTRATE_COHESION_STATUS.md) records the merged
+SQL, identity, modality, media, perfcache, operation-surface, extension-install,
+and reseed inventory. The companion
+[SUBSTRATE_COHESION_ISSUE_LEDGER.md](SUBSTRATE_COHESION_ISSUE_LEDGER.md) maps
+every expected outcome to a GitHub owner and falsifiable completion gate.

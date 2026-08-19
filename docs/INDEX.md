@@ -9,6 +9,8 @@
 - [plan/REAL_CONVERSATION_AND_MODEL_CONSENSUS_FINISH_LINE.md](plan/REAL_CONVERSATION_AND_MODEL_CONSENSUS_FINISH_LINE.md) — product design for conversation, code, model consensus, and export.
 - [plan/DECOMPOSER_NORMALIZATION_STATUS.md](plan/DECOMPOSER_NORMALIZATION_STATUS.md) — merged decomposer implementation inventory and remaining product work.
 - [plan/DECOMPOSER_NORMALIZATION_ISSUE_LEDGER.md](plan/DECOMPOSER_NORMALIZATION_ISSUE_LEDGER.md) — authoritative decomposer outcome-to-issue map, source disposition, acceptance fixtures, and release sequence.
+- [plan/SUBSTRATE_COHESION_STATUS.md](plan/SUBSTRATE_COHESION_STATUS.md) — SQL, identity, modality, media, perfcache, operation-surface, extension, and greenfield-reseed outcome inventory.
+- [plan/SUBSTRATE_COHESION_ISSUE_LEDGER.md](plan/SUBSTRATE_COHESION_ISSUE_LEDGER.md) — substrate campaign outcome-to-issue map, completion gates, preserved work, and release order.
 
 ## Design specifications
 
