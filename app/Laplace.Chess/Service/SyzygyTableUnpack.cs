@@ -1,5 +1,5 @@
 using System.Runtime.CompilerServices;
-using System.Threading.Channels;
+using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.Modality.Chess;
 
@@ -16,6 +16,7 @@ namespace Laplace.Chess.Service;
 public static class SyzygyTableUnpack
 {
     private static readonly int[] BoardSquares = BuildBoardSquares();
+    private static readonly ChessModality Modality = new();
 
     private static int[] BuildBoardSquares()
     {
@@ -76,104 +77,37 @@ public static class SyzygyTableUnpack
         if (!TryParseMaterial(materialName, out var pieces))
             yield break;
 
-        // The workers below MUST die when this iterator dies. An IAsyncEnumerable can be
-        // abandoned by its consumer — a `break`, a Take(n), an exception, or a test disposing
-        // the enumerator — and when that happens the method resumes only in a `finally`. The
-        // `await closeProducts` at the end is NOT reached, so without this the producer and
-        // every consumer keep running: blocked writing into a bounded channel nobody reads,
-        // and still calling prober.ProbeWdl on background threads long after the caller is
-        // gone. Those orphans probe Syzygy while a later Free() unmaps the tables, which is a
-        // native SIGSEGV with no managed exception and a crash point that moves every run
-        // depending on how many orphans accumulated. (GH #817.)
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        var workCt = cts.Token;
-
         int degree = workers > 0
             ? workers
             : Math.Max(1, IngestTopology.Current.ComposeWorkers);
-        var boardCh = Channel.CreateBounded<Board>(
-            new BoundedChannelOptions(degree * 64)
-            {
-                FullMode = BoundedChannelFullMode.Wait,
-                SingleWriter = true,
-                SingleReader = false,
-            });
-        var productCh = Channel.CreateBounded<SyzygyProduct>(
-            new BoundedChannelOptions(degree * 64)
-            {
-                FullMode = BoundedChannelFullMode.Wait,
-                SingleWriter = false,
-                SingleReader = true,
-            });
+        await foreach (var product in ParallelIngestWork.RunAsync(
+                           EnumerateBoardsAsync(pieces, ct),
+                           degree,
+                           degree * 64,
+                           (board, token) => ProbeBoardAsync(board, prober, token),
+                           ct).ConfigureAwait(false))
+            yield return product;
+    }
 
-        var producer = Task.Run(async () =>
+    private static async IAsyncEnumerable<SyzygyProduct> ProbeBoardAsync(
+        Board board,
+        ISyzygyProber prober,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (prober.ProbeWdl(board) is not { } wdl) yield break;
+        int dtz = 0;
+        if (wdl != SyzygyNative.Draw)
         {
-            try
-            {
-                await foreach (var board in EnumerateBoardsAsync(pieces, workCt).ConfigureAwait(false))
-                    await boardCh.Writer.WriteAsync(board, workCt).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) { }
-            finally { boardCh.Writer.TryComplete(); }
-        }, workCt);
-
-        var consumers = new Task[degree];
-        for (int w = 0; w < degree; w++)
-        {
-            consumers[w] = Task.Run(async () =>
-            {
-                var modality = new ChessModality();
-                try
-                {
-                    await foreach (var board in boardCh.Reader.ReadAllAsync(workCt).ConfigureAwait(false))
-                    {
-                        if (prober.ProbeWdl(board) is not { } wdl) continue;
-                        int dtz = 0;
-                        if (wdl != SyzygyNative.Draw)
-                        {
-                            // Root probe is process-locked inside the native kernel.
-                            if (prober.Probe(board) is not { } full) continue;
-                            wdl = full.Wdl;
-                            dtz = full.Dtz;
-                        }
-
-                        string surface = modality.StateKey(new ChessState(board));
-                        await productCh.Writer.WriteAsync(
-                            new SyzygyProduct(
-                                surface, ChessCompose.PositionId(surface), wdl, dtz),
-                            workCt).ConfigureAwait(false);
-                    }
-                }
-                catch (OperationCanceledException) { }
-            }, workCt);
+            // Root probe is process-locked inside the native kernel.
+            if (prober.Probe(board) is not { } full) yield break;
+            wdl = full.Wdl;
+            dtz = full.Dtz;
         }
 
-        var closeProducts = Task.Run(async () =>
-        {
-            try
-            {
-                await producer.ConfigureAwait(false);
-                await Task.WhenAll(consumers).ConfigureAwait(false);
-            }
-            finally { productCh.Writer.TryComplete(); }
-        }, ct);
-
-        try
-        {
-            await foreach (var product in productCh.Reader.ReadAllAsync(ct).ConfigureAwait(false))
-                yield return product;
-        }
-        finally
-        {
-            // Runs on EVERY exit, including abandonment. Cancelling unblocks any consumer
-            // parked in WriteAsync on the full bounded channel and stops the producer, so
-            // every worker unwinds instead of outliving this iterator and probing into
-            // tables that are about to be unmapped. Then wait for them to actually be gone —
-            // observing the tasks is the point, not a formality.
-            cts.Cancel();
-            try { await closeProducts.ConfigureAwait(false); }
-            catch (OperationCanceledException) { }
-        }
+        string surface = Modality.StateKey(new ChessState(board));
+        yield return new SyzygyProduct(surface, ChessCompose.PositionId(surface), wdl, dtz);
+        await Task.CompletedTask;
     }
 
     internal static async IAsyncEnumerable<Board> EnumerateBoardsAsync(

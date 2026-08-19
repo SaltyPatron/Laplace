@@ -153,8 +153,24 @@ internal static class MultiFileScheduler
 /// </summary>
 public static class ParallelIngestWork
 {
-    public static async IAsyncEnumerable<TResult> RunAsync<TWork, TResult>(
+    public static IAsyncEnumerable<TResult> RunAsync<TWork, TResult>(
         IReadOnlyList<TWork> work,
+        int maxConcurrency,
+        int outputCapacity,
+        Func<TWork, CancellationToken, IAsyncEnumerable<TResult>> execute,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(work);
+        return RunAsync(Enumerate(work), maxConcurrency, outputCapacity, execute, ct);
+    }
+
+    /// <summary>
+    /// Streaming-work overload for vendors whose input is generated lazily or is too large to
+    /// materialize. The shared primitive owns enumeration concurrency, output backpressure,
+    /// cancellation on consumer abandonment, and producer-failure propagation.
+    /// </summary>
+    public static async IAsyncEnumerable<TResult> RunAsync<TWork, TResult>(
+        IAsyncEnumerable<TWork> work,
         int maxConcurrency,
         int outputCapacity,
         Func<TWork, CancellationToken, IAsyncEnumerable<TResult>> execute,
@@ -166,7 +182,6 @@ public static class ParallelIngestWork
             throw new ArgumentOutOfRangeException(nameof(maxConcurrency));
         if (outputCapacity <= 0)
             throw new ArgumentOutOfRangeException(nameof(outputCapacity));
-        if (work.Count == 0) yield break;
 
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var output = Channel.CreateBounded<TResult>(new BoundedChannelOptions(outputCapacity)
@@ -218,6 +233,18 @@ public static class ParallelIngestWork
             // so this await observes teardown without masking ReadAllAsync's error.
             await producer.ConfigureAwait(false);
         }
+    }
+
+    private static async IAsyncEnumerable<T> Enumerate<T>(
+        IReadOnlyList<T> work,
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        for (int i = 0; i < work.Count; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            yield return work[i];
+        }
+        await Task.CompletedTask;
     }
 }
 

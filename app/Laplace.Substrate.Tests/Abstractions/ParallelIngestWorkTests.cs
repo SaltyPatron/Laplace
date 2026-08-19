@@ -72,4 +72,45 @@ public sealed class ParallelIngestWorkTests
             yield return item;
         }
     }
+
+    [Fact]
+    public async Task StreamingWork_ConsumerAbandonmentCancelsAndJoinsWorkers()
+    {
+        int active = 0;
+        int produced = 0;
+
+        await foreach (int _ in ParallelIngestWork.RunAsync(
+                           Work(), maxConcurrency: 4, outputCapacity: 1, Execute))
+            break;
+
+        Assert.Equal(0, Volatile.Read(ref active));
+        Assert.True(Volatile.Read(ref produced) > 0);
+
+        static async IAsyncEnumerable<int> Work(
+            [EnumeratorCancellation] CancellationToken ct = default)
+        {
+            for (int i = 0; i < 1_000; i++)
+            {
+                ct.ThrowIfCancellationRequested();
+                yield return i;
+                await Task.Yield();
+            }
+        }
+
+        async IAsyncEnumerable<int> Execute(
+            int item, [EnumeratorCancellation] CancellationToken ct)
+        {
+            Interlocked.Increment(ref active);
+            try
+            {
+                await Task.Delay(5, ct);
+                Interlocked.Increment(ref produced);
+                yield return item;
+            }
+            finally
+            {
+                Interlocked.Decrement(ref active);
+            }
+        }
+    }
 }
