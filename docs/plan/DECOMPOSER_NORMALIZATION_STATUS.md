@@ -152,6 +152,12 @@ delivered decomposer implementation.
   Legacy line OUTCOME rows belong to the PGN source and therefore remain in the current
   database until a PGN-source eviction/reseed; readers treat them as optional promotion,
   never as the authoritative occurrence count.
+- `seed-chess.yml` now exposes `chess-analyze` and forwards the reusable ingest
+  workflow's exact-confirmation eviction controls. The same repair makes every source
+  advertised by the chess dispatch UI reachable by its resolver; policy validation now
+  fails if a future advertised chess source is rejected before dispatch. This provides
+  one atomic CI/CD recovery run: evict only `ChessAnalysis`, then force its complete v3
+  rederive from the surviving PGN playing/trajectory evidence.
 
 ## Remaining product work after integration
 

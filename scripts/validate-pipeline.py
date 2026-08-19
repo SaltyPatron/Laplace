@@ -320,9 +320,50 @@ def _seed_workflow_sources() -> set[str]:
     return keys
 
 
+def validate_seed_chess_routes() -> list[str]:
+    """Every advertised chess source must be accepted by its resolver.
+
+    The workflow previously listed syzygy/trajectory/opening-match in the dispatch UI
+    while its first source case rejected all three as unknown. Because the generic
+    workflow-source collector only sees the choices, orphan-gate validation could not
+    detect that the advertised route was unreachable.
+    """
+    path = ROOT / ".github" / "workflows" / "seed-chess.yml"
+    if not path.is_file():
+        return ["missing workflow: .github/workflows/seed-chess.yml"]
+
+    text = read_text(path)
+    source_input = re.search(
+        r"^\s{6}source:\s*\n(?P<body>(?:^\s{8,}.*\n|^\s*\n)*)",
+        text,
+        re.M,
+    )
+    if not source_input:
+        return ["seed-chess.yml: could not parse source input"]
+    options = re.search(r"options:\s*\[([^]]+)\]", source_input.group("body"))
+    if not options:
+        return ["seed-chess.yml: source input must use an explicit options list"]
+    advertised = {
+        value.strip().strip("\"'") for value in options.group(1).split(",") if value.strip()
+    }
+
+    source_case = re.search(r'case "\$src" in\s*\n(?P<body>.*?)^\s{10}esac$', text, re.M | re.S)
+    if not source_case:
+        return ["seed-chess.yml: could not parse source legality resolver"]
+    accepted: set[str] = set()
+    for label in re.findall(r"^\s{12}([^#\n][^\n)]*)\)", source_case.group("body"), re.M):
+        accepted.update(part.strip() for part in label.split("|") if part.strip() != "*")
+
+    missing = sorted(advertised - accepted)
+    return ([f"seed-chess.yml: advertised sources rejected by resolver: {missing}"]
+            if missing else [])
+
+
 def validate_decomposer_matrix(manifest: dict, gates: dict) -> list[str]:
     errs: list[str] = []
     root = ROOT
+
+    errs.extend(validate_seed_chess_routes())
 
     required_scripts = [
         root / "scripts" / "decomposer-gates.json",
