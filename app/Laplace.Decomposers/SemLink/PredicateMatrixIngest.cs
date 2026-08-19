@@ -86,7 +86,8 @@ internal static class PredicateMatrixIngest
                         new CategoryCorrespondenceRecord(roleset, RolesetTypeId, rs));
             }
 
-            if (TryFrame(fields[ColFnFrame], out string? frame) && frame is not null)
+            string? frame = null;
+            if (TryFrame(fields[ColFnFrame], out frame) && frame is not null)
             {
                 yield return PredicateMatrixEdge.FromCategory(
                     new CategoryCorrespondenceRecord(frame, FrameTypeId, synId.Value));
@@ -112,12 +113,10 @@ internal static class PredicateMatrixIngest
                 if (vnRole.Length > 0 && !vnRole.Equals("NULL", StringComparison.OrdinalIgnoreCase)
                     && fnFe.Length > 0 && !fnFe.Equals("NULL", StringComparison.OrdinalIgnoreCase))
                 {
-                    yield return PredicateMatrixEdge.FromTriple(new RelationTripleRecord(
-                        Encoding.UTF8.GetBytes(vnRole),
-                        "ROLE_CORRESPONDS_TO",
-                        Encoding.UTF8.GetBytes(fnFe),
-                        ContextAnchorKey: vnClass,
-                        ContextCategoryTypeId: VnClassTypeId));
+                    if (frame is not null)
+                        yield return PredicateMatrixEdge.FromRole(new RoleCorrespondenceRecord(
+                            vnClass, VnClassTypeId, vnRole,
+                            frame, FrameTypeId, fnFe));
                 }
             }
 
@@ -197,10 +196,10 @@ internal static class PredicateMatrixIngest
 
     internal readonly record struct PredicateMatrixEdge(
         CategoryCorrespondenceRecord? Category,
-        RelationTripleRecord? Triple)
+        RoleCorrespondenceRecord? Role)
     {
         public static PredicateMatrixEdge FromCategory(CategoryCorrespondenceRecord c) => new(c, null);
-        public static PredicateMatrixEdge FromTriple(RelationTripleRecord t) => new(null, t);
+        public static PredicateMatrixEdge FromRole(RoleCorrespondenceRecord r) => new(null, r);
     }
 
     internal static IIngestRecordHandler<PredicateMatrixEdge> CreateEdgeHandler(double trust) =>
@@ -209,18 +208,19 @@ internal static class PredicateMatrixIngest
     private sealed class PredicateMatrixEdgeHandler : IIngestRecordHandler<PredicateMatrixEdge>
     {
         private readonly CategoryCorrespondenceHandler _category;
-        private readonly RelationTripleHandler _triple;
+        private readonly RoleCorrespondenceHandler _role;
 
         public PredicateMatrixEdgeHandler(Hash128 sourceId, double trust)
         {
             _category = new CategoryCorrespondenceHandler(sourceId, trust);
-            _triple = new RelationTripleHandler(sourceId, trust);
+            _role = new RoleCorrespondenceHandler(
+                sourceId, SemLinkSource.RoleCorrespondsToTypeId, trust);
         }
 
         public IIngestDeferredUnit CreateDeferredUnit(PredicateMatrixEdge record) =>
             record.Category is { } cat
                 ? _category.CreateDeferredUnit(cat)
-                : _triple.CreateDeferredUnit(record.Triple!.Value);
+                : _role.CreateDeferredUnit(record.Role!.Value);
 
         public void WalkWitness(
             PredicateMatrixEdge record, Hash128 root, SubstrateChangeBuilder builder, IIngestDeferredUnit unit)
@@ -263,9 +263,8 @@ internal sealed class PredicateMatrixPhase : DecomposerPhase<PredicateMatrixInge
     protected override IngestBatchConfig BuildPipelineConfig(
         IDecomposerContext context, DecomposerOptions options)
     {
-        int batchSize = options.BatchSize > 0 ? options.BatchSize : BatchConfigDefaults.HighVolume;
         var config = IngestPipelineDefaults.CategoryCorrespondence(
-            SourceId, BatchLabelPrefix, batchSize, options, context.Reader);
+            SourceId, BatchLabelPrefix, BatchConfigDefaults.HighVolume, options, context.Reader);
         return IngestPipelineDefaults.ApplyMaxInputUnits(config, options);
     }
 }

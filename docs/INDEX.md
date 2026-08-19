@@ -27,6 +27,11 @@
 - [decisions/](decisions/) — architectural decision records.
 - [guides/](guides/) — operational guides.
 
+## Audits
+
+- [Semantic source fidelity — 2026-08-19](semantic-source-fidelity-audit-2026-08-19.md) — measured native-source, schema, identity, bridge-version, and decomposer coverage for the lexical/semantic seed.
+- [SQL cohesion — 2026-08-18](sql-cohesion-audit-2026-08-18.md) — SQL duplication, query-shape, indexability, scan, and modular-core findings.
+
 ## Historical material
 
 - [archive/](archive/) — dated reports, superseded specs, agent plans, and prompts.

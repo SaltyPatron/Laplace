@@ -18,72 +18,22 @@ public static class ChessGraph
         _ => Glicko2.ScoreLoss,
     };
 
-    // AGGREGATING lane only: deduped substructure/position outcome deposits + the MOVE edge.
-    // Ply-grain GAME_AT / GAME_AT_PLY emitters were removed (and retired from
-    // ChessSeedManifest — GH #577): at that grain they can never corroborate across
-    // games, so each was a permanently single-witness consensus cell. The game's
-    // verbatim HAS_MOVETEXT plus replay reconstructs them; contextId keeps
-    // per-game provenance on the evidence rows.
-    //
-    // PLAYED_BY at PLAYER grain is the opposite case and is emitted (AppendPlayerResult): one
-    // cell per pairing, so two players who met 28 times corroborate into a single cell with 28
-    // witnesses. The grain is what decides whether an edge can accumulate, not the name.
-    public static void AppendMoveEdge(
-    SubstrateChangeBuilder b, string fromKey, string toKey, PlyOutcome outcome,
-    long games, double witnessWeight,
-    Hash128? sourceId = null, long moveChoiceGames = 0,
-    Hash128? contextId = null)
-    {
-        var src = sourceId ?? ChessVocabulary.SourceId;
-        long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
-        var from = EmitNodes(b, fromKey, nowUs, src);
-        var to = EmitNodes(b, toKey, nowUs, src);
-        AppendMoveEdge(b, from, to, outcome, games, witnessWeight, src, moveChoiceGames, contextId);
-    }
-
-    // Already-staged overload: the per-ply analyzer loop stages each distinct position once
-    // (ChessAnalyze) and hands the composed nodes to every Append* call for that ply.
-    internal static void AppendMoveEdge(
-    SubstrateChangeBuilder b, ChessComposed from, ChessComposed to, PlyOutcome outcome,
-    long games, double witnessWeight,
-    Hash128 sourceId, long moveChoiceGames = 0,
-    Hash128? contextId = null)
+    /// <summary>
+    /// Persist only the bounded statistical projection used by learned evaluation. The exact
+    /// position transition is already present as adjacent vertices in the line trajectory;
+    /// emitting a MOVE cell and an exact-position OUTCOME cell for every ply creates an
+    /// effectively unbounded population of one-off consensus cells. Piece-square and other
+    /// position constituents come from a closed vocabulary and therefore accumulate useful
+    /// evidence across games.
+    /// </summary>
+    internal static void AppendSubstructureOutcome(
+        SubstrateChangeBuilder b, ChessComposed from, PlyOutcome outcome,
+        long games, double witnessWeight, Hash128 sourceId)
     {
         if (games < 1) games = 1;
-        if (moveChoiceGames < 1) moveChoiceGames = games;
         long sum = checked(ScoreFp1e9(outcome) * games);
-
-        // ctx = null, on purpose — the same rule RecordOpeningHeaders states for line-grain
-        // facts: "each playing that asserts the same [fact] for the same line MERGES into one
-        // evidence row whose observation count accumulates."
-        //
-        // The attestation id is blake3(subject | type | object | source | context)
-        // (attestation_engine.c:110-132), so ctx = the playing made every one of these rows
-        // unique BY CONSTRUCTION. Identical content — the same position, the same move —
-        // could never merge, and the row count scaled with positions x games instead of
-        // saturating with the vocabulary. Measured: 280 OUTCOME rows per game over 1,193
-        // chess.com games, and marginal rows per game still RISING at game 190,705 (429 ->
-        // 552), which a closed vocabulary cannot do.
-        //
-        // Nothing is lost with ctx dropped. These are the AGGREGATING lane: they are read as
-        // eff_mu / rd / witness_count, i.e. "how do games through this position fare", which
-        // IS the merged cell — witness_count becomes times-seen instead of always 1. The
-        // per-playing record lives where it belongs: the line's trajectory carries which
-        // positions this game passed through, and the event carries who played it.
         foreach (var s in from.Substructures)
             b.AddAttestation(Outcome(s.Id, games, sum, witnessWeight, sourceId, contextId: null));
-        b.AddAttestation(Outcome(from.Position.Id, games, sum, witnessWeight, sourceId, contextId: null));
-
-        long moveSum = checked(ScoreFp1e9(outcome) * moveChoiceGames);
-        b.AddAttestation(NativeAttestation.Aggregated(
-            subject: from.Position.Id,
-            typeId: ChessVocabulary.MoveType,
-            obj: to.Position.Id,
-            sourceId: sourceId,
-            contextId: null,
-            games: moveChoiceGames,
-            sumScoreFp1e9: moveSum,
-            witnessWeight: witnessWeight));
     }
 
     public static void AppendEval(
@@ -180,12 +130,19 @@ public static class ChessGraph
     }
 
     internal static void AppendThinkClass(
-    SubstrateChangeBuilder b, Hash128 positionId, string thinkClass, double witnessWeight,
+    SubstrateChangeBuilder b, Hash128 positionId, string thinkClass, PlyOutcome moverOutcome,
+    double witnessWeight,
     Hash128 sourceId, Hash128? contextId = null)
     {
         if (ContentEmitter.Emit(b, thinkClass, sourceId) is not { } tid) return;
         b.AddAttestation(NativeAttestation.Categorical(
             positionId, "HAS_THINK_CLASS", tid, sourceId, contextId, witnessWeight));
+        // The exact occurrence remains tied to position + playing above. The reusable
+        // statistical question is folded directly at class grain, so the read never needs
+        // an exact-position MOVE/OUTCOME population merely to recover the game result.
+        b.AddAttestation(Outcome(
+            tid, games: 1, ScoreFp1e9(moverOutcome), witnessWeight, sourceId,
+            contextId: null));
     }
 
     public static void AppendGameMeta(
@@ -210,8 +167,8 @@ public static class ChessGraph
 
     /// <summary>
     /// Emit the position (and its substructures) as content nodes and return the position id.
-    /// For lanes that attest onto a position without emitting a MOVE edge for it — e.g. the
-    /// chess-book decomposer grounding prose commentary to the exact position it explains.
+    /// For lanes that attest onto a position — e.g. the chess-book decomposer grounding prose
+    /// commentary to the exact position it explains.
     /// </summary>
     public static Hash128 EmitPosition(SubstrateChangeBuilder b, string surface, Hash128 src)
     {

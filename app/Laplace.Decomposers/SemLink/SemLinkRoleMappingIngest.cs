@@ -1,5 +1,4 @@
 using System.Runtime.CompilerServices;
-using System.Text;
 using System.Xml;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
@@ -26,7 +25,7 @@ internal static class SemLinkRoleMappingIngest
     internal static string? ResolvePath(string ecosystemPath) =>
         IngestInput.Locate(ecosystemPath, Layout).FirstOrDefault();
 
-    internal static async IAsyncEnumerable<RelationTripleRecord> EnumerateRecordsAsync(
+    internal static async IAsyncEnumerable<RoleCorrespondenceRecord> EnumerateRecordsAsync(
         string path, [EnumeratorCancellation] CancellationToken ct)
     {
         var doc = new XmlDocument();
@@ -48,7 +47,10 @@ internal static class SemLinkRoleMappingIngest
                 continue;
 
             string vnClass = cls.GetAttribute("class").Trim();
-            if (vnClass.Length == 0) continue;
+            string fnFrame = cls.GetAttribute("fnframe").Trim();
+            if (fnFrame.Length == 0)
+                fnFrame = cls.GetAttribute("fnclass").Trim();
+            if (vnClass.Length == 0 || fnFrame.Length == 0) continue;
             string vnClassKey = SourceEntityIdConventions.NumericVerbNetClassId(vnClass);
 
             foreach (XmlNode rolesNode in cls.ChildNodes)
@@ -65,12 +67,9 @@ internal static class SemLinkRoleMappingIngest
                     string vnRole = role.GetAttribute("vnrole").Trim();
                     if (fnRole.Length == 0 || vnRole.Length == 0) continue;
 
-                    yield return new RelationTripleRecord(
-                        Encoding.UTF8.GetBytes(vnRole),
-                        "ROLE_CORRESPONDS_TO",
-                        Encoding.UTF8.GetBytes(fnRole),
-                        ContextAnchorKey: vnClassKey,
-                        ContextCategoryTypeId: EntityTypeRegistry.VerbNetClass);
+                    yield return new RoleCorrespondenceRecord(
+                        vnClassKey, EntityTypeRegistry.VerbNetClass, vnRole,
+                        fnFrame, EntityTypeRegistry.FrameNetFrame, fnRole);
                 }
             }
         }
@@ -81,7 +80,7 @@ internal static class SemLinkRoleMappingIngest
         Task.FromResult<long?>(Math.Max(1, EtlInventory.EstimateNewlineCount(path, ct)));
 }
 
-internal sealed class SemLinkRoleMappingPhase : DecomposerPhase<RelationTripleRecord>
+internal sealed class SemLinkRoleMappingPhase : DecomposerPhase<RoleCorrespondenceRecord>
 {
     private readonly string _path;
 
@@ -101,21 +100,19 @@ internal sealed class SemLinkRoleMappingPhase : DecomposerPhase<RelationTripleRe
     public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default) =>
         SemLinkRoleMappingIngest.EstimateUnitCountAsync(_path, ct);
 
-    protected override IIngestRecordHandler<RelationTripleRecord> CreateHandler() =>
-        new RelationTripleHandler(SourceId, SourceTrust);
+    protected override IIngestRecordHandler<RoleCorrespondenceRecord> CreateHandler() =>
+        new RoleCorrespondenceHandler(
+            SourceId, SemLinkSource.RoleCorrespondsToTypeId, SourceTrust);
 
-    protected override IAsyncEnumerable<RelationTripleRecord> ExtractRecordsAsync(
+    protected override IAsyncEnumerable<RoleCorrespondenceRecord> ExtractRecordsAsync(
         string ecosystemPath, DecomposerOptions options, CancellationToken ct) =>
         SemLinkRoleMappingIngest.EnumerateRecordsAsync(_path, ct);
 
     protected override IngestBatchConfig BuildPipelineConfig(
         IDecomposerContext context, DecomposerOptions options)
     {
-        int batchSize = options.BatchSize > 0 ? options.BatchSize : BatchConfigDefaults.HighVolume;
         var config = IngestPipelineDefaults.RelationTriple(
-            SourceId, BatchLabelPrefix,
-            options with { BatchSize = batchSize },
-            context.Reader);
+            SourceId, BatchLabelPrefix, options, context.Reader);
         return IngestPipelineDefaults.ApplyMaxInputUnits(config, options);
     }
 }

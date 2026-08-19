@@ -30,6 +30,13 @@ public sealed class VerbNetDecomposerTests
    <DESCRIPTION descriptionNumber="0.2" primary="NP V NP PP.recipient" secondary="NP-PP" xtag=""/>
    <EXAMPLES><EXAMPLE>They lent a bicycle to me.</EXAMPLE></EXAMPLES>
    <SYNTAX><NP value="Agent"/></SYNTAX>
+   <SEMANTICS>
+    <PRED value="cause"><ARGS>
+     <ARG type="Event" value="E"/>
+     <ARG type="ThemRole" value="?Agent"/>
+     <ARG type="ThemRole" value="?Theme"/>
+    </ARGS></PRED>
+   </SEMANTICS>
   </FRAME>
  </FRAMES>
  <SUBCLASSES>
@@ -139,6 +146,70 @@ public sealed class VerbNetDecomposerTests
     }
 
     [Fact]
+    public async Task ThematicRole_IsBoundToItsVerbNetClass_NotTheSharedLabel()
+    {
+        var atts = await CollectAttestationsAsync();
+        Hash128 classId = AnchorAdmission.Id(
+            SourceEntityIdConventions.NumericVerbNetClassId("give-13.1"),
+            EntityTypeRegistry.VerbNetClass)!.Value;
+        Hash128 agentRole = RoleAnchor.Id(
+            RoleIdentityKind.VerbNet, classId, "Agent")!.Value;
+        var b = new SubstrateChangeBuilder(VerbNetDecomposer.Source, "fixture", null);
+        Hash128 agentLabel = ContentEmitter.Emit(b, "Agent", VerbNetDecomposer.Source)!.Value;
+
+        Assert.Contains(atts, a =>
+            a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_THEMATIC_ROLE")
+            && a.SubjectId == classId && a.ObjectId == agentRole && a.ContextId is null);
+        Assert.Contains(atts, a =>
+            a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_NAME_ALIAS")
+            && a.SubjectId == agentRole && a.ObjectId == agentLabel);
+        Assert.DoesNotContain(atts, a =>
+            a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_THEMATIC_ROLE")
+            && a.SubjectId == classId && a.ObjectId == agentLabel);
+    }
+
+    [Fact]
+    public async Task SemanticPredicateOccurrence_OwnsItsClassBoundArguments()
+    {
+        var atts = await CollectAttestationsAsync();
+        Hash128 classId = AnchorAdmission.Id(
+            SourceEntityIdConventions.NumericVerbNetClassId("give-13.1"),
+            EntityTypeRegistry.VerbNetClass)!.Value;
+        Hash128 causeLabel = ContentEmitter.RootId("cause")!.Value;
+        var arguments = new[]
+        {
+            new SemanticPredicateArgument("Event", "E"),
+            new SemanticPredicateArgument("ThemRole", "?Agent"),
+            new SemanticPredicateArgument("ThemRole", "?Theme"),
+        };
+        Hash128 predicate = SemanticPredicateAnchor.Id(
+            SemanticPredicateIdentityKind.VerbNet, classId,
+            frameOrdinal: 0, predicateOrdinal: 0, labelId: causeLabel, arguments: arguments);
+        Assert.NotEqual(predicate, SemanticPredicateAnchor.Id(
+            SemanticPredicateIdentityKind.VerbNet, classId,
+            frameOrdinal: 1, predicateOrdinal: 0, labelId: causeLabel, arguments: arguments));
+        Assert.NotEqual(predicate, SemanticPredicateAnchor.Id(
+            SemanticPredicateIdentityKind.VerbNet, classId,
+            frameOrdinal: 0, predicateOrdinal: 0, labelId: causeLabel,
+            arguments: arguments[..^1]));
+        Hash128 agentRole = RoleAnchor.Id(
+            RoleIdentityKind.VerbNet, classId, "Agent")!.Value;
+
+        Assert.Contains(atts, a =>
+            a.TypeId == RelationTypeRegistry.RelationTypeId("ENTAILS")
+            && a.SubjectId == classId && a.ObjectId == predicate);
+        Assert.Contains(atts, a =>
+            a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_NAME_ALIAS")
+            && a.SubjectId == predicate && a.ObjectId == causeLabel);
+        Assert.Contains(atts, a =>
+            a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_SEMANTIC_ROLE")
+            && a.SubjectId == predicate && a.ObjectId == agentRole);
+        Assert.DoesNotContain(atts, a =>
+            a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_SEMANTIC_ROLE")
+            && a.SubjectId == causeLabel);
+    }
+
+    [Fact]
     public async Task Bootstrap_Registers_Source_Types_And_RelationTypeEntities()
     {
         var dec = new VerbNetDecomposer();
@@ -151,6 +222,12 @@ public sealed class VerbNetDecomposerTests
             e.Id == VerbNetDecomposer.Source && e.TypeId == BootstrapIntentBuilder.SourceTypeId);
         Assert.Contains(boot.Entities, e =>
             e.Id == EntityTypeRegistry.Id("VerbNet_Class")
+            && e.TypeId == BootstrapIntentBuilder.TypeMetaTypeId);
+        Assert.Contains(boot.Entities, e =>
+            e.Id == EntityTypeRegistry.Id("VerbNet_Role")
+            && e.TypeId == BootstrapIntentBuilder.TypeMetaTypeId);
+        Assert.Contains(boot.Entities, e =>
+            e.Id == EntityTypeRegistry.Id("VerbNet_Predicate")
             && e.TypeId == BootstrapIntentBuilder.TypeMetaTypeId);
         Assert.Contains(boot.Entities, e => e.Id == RelationTypeRegistry.RelationTypeId("HAS_THEMATIC_ROLE"));
         Assert.Contains(boot.Entities, e => e.Id == RelationTypeRegistry.RelationTypeId("MEMBER_OF_VERBNET_CLASS"));

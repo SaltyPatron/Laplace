@@ -142,11 +142,9 @@ public sealed class ChessEngineService : IAsyncDisposable
     }
 
     /// <summary>
-    /// Opening explorer over the rated MOVE web: every continuation consensus has witnessed
-    /// out of this position, ranked by eff_mu, optionally scoped to one player's own games
-    /// (a provenance read over MOVE evidence context → game → HAS_WHITE/HAS_BLACK). The
-    /// player's color is resolved from the position's side to move — moves out of a
-    /// white-to-move position are theirs only in games they played as White.
+    /// Opening explorer over exact successors projected from line trajectories. Optional
+    /// materialized MOVE ratings remain a secondary cache; player repertoire is read through
+    /// playing→line provenance rather than per-ply MOVE evidence.
     /// </summary>
     public async Task<ChessExploreResponse> ExploreAsync(
         string fen, string? player = null, int limit = 12, CancellationToken ct = default)
@@ -170,34 +168,58 @@ public sealed class ChessEngineService : IAsyncDisposable
             }
         }
 
-        var rows = new List<ChessExploreMove>(limit);
+        int candidateLimit = Math.Max(limit, legal.Count);
+        var successorTask = NpgsqlSubstrateReads.ChessTrajectorySuccessorsAsync(
+            _ds!, rootId.ToBytes(), candidateLimit, ct);
+        var materializedTask = NpgsqlSubstrateReads.ChessMovesAsync(
+            _ds!, rootId.ToBytes(), candidateLimit, ct);
+        Task<IReadOnlyList<NpgsqlSubstrateReads.ChessPlayerMoveRow>>? playerTask = null;
+        if (!string.IsNullOrWhiteSpace(player))
+            playerTask = NpgsqlSubstrateReads.ChessPlayerMovesAsync(
+                _ds!, rootId.ToBytes(), ChessVocabulary.PlayerId(player).ToBytes(),
+                state.Board.WhiteToMove, candidateLimit, ct);
+
+        var successorRows = await successorTask;
+        var materializedRows = await materializedTask;
+        var rows = new List<ChessExploreMove>(candidateLimit);
         var playerStats = new Dictionary<Hash128, (long Games, double Score)>();
 
-        if (!string.IsNullOrWhiteSpace(player))
+        if (playerTask is not null)
         {
-            var playerRows = await NpgsqlSubstrateReads.ChessPlayerMovesAsync(
-                _ds!, rootId.ToBytes(), ChessVocabulary.PlayerId(player).ToBytes(),
-                state.Board.WhiteToMove, Math.Max(limit, legal.Count), ct);
+            var playerRows = await playerTask;
             foreach (var pr in playerRows)
                 playerStats[Hash128.FromBytes(pr.NextPosition)] = (pr.Games, pr.Score);
         }
 
-        var moveRows = await NpgsqlSubstrateReads.ChessMovesAsync(
-            _ds!, rootId.ToBytes(), limit, ct);
-        foreach (var mr in moveRows)
+        var materialized = materializedRows.ToDictionary(
+            static r => Hash128.FromBytes(r.NextPosition));
+        var seenChildren = new HashSet<Hash128>();
+        foreach (var sr in successorRows)
         {
-            var childId = Hash128.FromBytes(mr.NextPosition);
+            var childId = Hash128.FromBytes(sr.NextPosition);
             if (!byChild.TryGetValue(childId, out var mv)) continue;
+            seenChildren.Add(childId);
             var ps = playerStats.TryGetValue(childId, out var s) ? s : (Games: 0L, Score: 0d);
+            bool hasRating = materialized.TryGetValue(childId, out var mr);
             rows.Add(new ChessExploreMove(
                 mv.Uci, mv.San,
-                // chess.moves() returns DISPLAY units (fp1e9 already /1e9-rounded),
-                // so only the neutral prior still needs scaling here.
-                mr.EffMu - GlickoPriors.NeutralMu / 1e9,
-                mr.Rd,
-                mr.WitnessCount,
+                hasRating ? mr.EffMu - GlickoPriors.NeutralMu / 1e9 : 0d,
+                hasRating ? mr.Rd : 0d,
+                Math.Max(sr.Seen, hasRating ? mr.WitnessCount : 0L),
                 ps.Games,
                 ps.Games > 0 ? ps.Score : null));
+        }
+
+        // Compatibility with explicitly promoted/hot MOVE cells deposited before this
+        // normalization: do not hide one merely because no line trajectory is resident.
+        foreach (var mr in materializedRows)
+        {
+            var childId = Hash128.FromBytes(mr.NextPosition);
+            if (!seenChildren.Add(childId) || !byChild.TryGetValue(childId, out var mv)) continue;
+            var ps = playerStats.TryGetValue(childId, out var s) ? s : (Games: 0L, Score: 0d);
+            rows.Add(new ChessExploreMove(
+                mv.Uci, mv.San, mr.EffMu - GlickoPriors.NeutralMu / 1e9,
+                mr.Rd, mr.WitnessCount, ps.Games, ps.Games > 0 ? ps.Score : null));
         }
 
         // Player-scoped rows whose continuation fell outside the consensus read's LIMIT
@@ -209,7 +231,12 @@ public sealed class ChessEngineService : IAsyncDisposable
             rows.Add(new ChessExploreMove(known.Uci, known.San, 0d, 0d, 0, s.Games, s.Score));
         }
 
-        return new ChessExploreResponse(fen, player, rows);
+        var ranked = rows
+            .OrderByDescending(r => playerTask is null ? r.Witnesses : r.PlayerGames)
+            .ThenByDescending(r => r.EffMu)
+            .Take(limit)
+            .ToList();
+        return new ChessExploreResponse(fen, player, ranked);
     }
 
     public async Task<ChessBestMove> BestMoveAsync(string fen, double temperature = 0d, CancellationToken ct = default)

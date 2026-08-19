@@ -146,7 +146,8 @@ public static class IngestSizing
         int WorkingSetProbeInterval,
         int ComposeWorkers,
         int FileWorkers,
-        int CommitWorkers,
+        int IoWorkersAvailable,
+        int ApplyDispatchWorkers,
         int ApplyPartitions,
         int ProbeChunkSize,
         int DecomposeChannelCapacity,
@@ -158,8 +159,9 @@ public static class IngestSizing
             Console.Error.WriteLine(
                 "ingest_source_sizing: source={0} budget_bytes={1} total_ram_bytes={2} "
                 + "record_batch={3} commit_rows={4} ws_record_cap={5} ws_probe={6} "
-                + "compose_workers={7} file_workers={8} commit_workers={9} apply_partitions={10} "
-                + "probe_chunk={11} decompose_channel={12} max_intents={13} row_budget={14}",
+                + "compose_workers={7} file_workers={8} io_workers_available={9} "
+                + "apply_dispatch_workers={10} apply_partitions={11} "
+                + "probe_chunk={12} decompose_channel={13} max_intents={14} row_budget={15}",
                 sourceLabel,
                 WorkingSetBudgetBytes,
                 TotalMemoryBytes,
@@ -169,7 +171,8 @@ public static class IngestSizing
                 WorkingSetProbeInterval,
                 ComposeWorkers,
                 FileWorkers,
-                CommitWorkers,
+                IoWorkersAvailable,
+                ApplyDispatchWorkers,
                 ApplyPartitions,
                 ProbeChunkSize,
                 DecomposeChannelCapacity,
@@ -246,7 +249,8 @@ public static class IngestSizing
             ResolveWorkingSetProbeInterval(batch, profile),
             topo.ComposeWorkers,
             topo.FileWorkers,
-            topo.CommitWorkers,
+            topo.IoWorkersAvailable,
+            topo.ApplyDispatchWorkers,
             topo.ApplyPartitions,
             plan.ProbeChunkSize,
             plan.DecomposeChannelCapacity,

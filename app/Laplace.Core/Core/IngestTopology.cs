@@ -38,7 +38,13 @@ public sealed class IngestTopology
 
     public int ComposeWorkers { get; }
 
-    public int CommitWorkers { get; }
+    public int IoWorkersAvailable { get; }
+
+    /// <summary>
+    /// Outer database-apply dispatch width. This remains one until claim-before-COPY is
+    /// race-free; each dispatched apply still fans out internally across ApplyPartitions.
+    /// </summary>
+    public int ApplyDispatchWorkers { get; }
 
     public int ApplyPartitions { get; }
 
@@ -70,7 +76,9 @@ public sealed class IngestTopology
 
         int composeWorkers,
 
-        int commitWorkers,
+        int ioWorkersAvailable,
+
+        int applyDispatchWorkers,
 
         int applyPartitions,
 
@@ -100,7 +108,9 @@ public sealed class IngestTopology
 
         ComposeWorkers = composeWorkers;
 
-        CommitWorkers = commitWorkers;
+        IoWorkersAvailable = ioWorkersAvailable;
+
+        ApplyDispatchWorkers = applyDispatchWorkers;
 
         ApplyPartitions = applyPartitions;
 
@@ -132,7 +142,8 @@ public sealed class IngestTopology
 
                 + "p_primary_lps=[{6}] e_lps=[{7}] entry_pinned={8} "
 
-                + "file_workers={9} compose_workers={10} commit_workers={11} apply_partitions={12}",
+                + "file_workers={9} compose_workers={10} io_workers_available={11} "
+                + "apply_dispatch_workers={12} apply_partitions={13}",
 
                 t.DetectionSource,
 
@@ -156,7 +167,9 @@ public sealed class IngestTopology
 
                 t.ComposeWorkers,
 
-                t.CommitWorkers,
+                t.IoWorkersAvailable,
+
+                t.ApplyDispatchWorkers,
 
                 t.ApplyPartitions);
 
@@ -186,7 +199,9 @@ public sealed class IngestTopology
 
         int composeWorkers = CpuTopology.ResolveCpuBoundWorkers(headroom: 1);
 
-        int commitWorkers = CpuTopology.ResolveIngestCommitWorkers(headroom: 1);
+        int ioWorkersAvailable = CpuTopology.ResolveIoBoundWorkers(headroom: 1);
+
+        const int applyDispatchWorkers = 1;
 
         // Read the P-core count EXACTLY ONCE and derive apply partitions from that same
         // value. Previously applyPartitions came from ResolveApplyPartitions() (its own
@@ -226,7 +241,9 @@ public sealed class IngestTopology
 
             composeWorkers,
 
-            commitWorkers,
+            ioWorkersAvailable,
+
+            applyDispatchWorkers,
 
             applyPartitions,
 
@@ -236,11 +253,10 @@ public sealed class IngestTopology
 
 
 
-    public static int ResolveApplyPartitions() => 1;
+    public static int ResolveApplyDispatchWorkers() => Current.ApplyDispatchWorkers;
 
 
 
     internal static void ResetForTests() { }
 
 }
-
