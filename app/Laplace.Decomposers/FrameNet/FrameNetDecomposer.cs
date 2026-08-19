@@ -142,8 +142,12 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
     {
         var paths = InputFilesLabeled(context.EcosystemPath).Select(x => x.Path).ToList();
-        return Task.FromResult(IngestInventory.FromFileUnits(
-            "files", paths, options.MaxInputUnits, tracksFileCompletion: true));
+        // One XML file does not equal one input record: frame/LU files yield one,
+        // while fulltext files yield every annotated target. Keep record progress and
+        // exact file completion as separate grains; the runner publishes the observed
+        // record total when the uncapped run finishes.
+        return Task.FromResult(IngestInventory.FromFilesWithUnknownUnitCount(
+            "records", paths, options.MaxInputUnits, tracksFileCompletion: true));
     }
 
     public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)

@@ -200,6 +200,55 @@ public sealed class FrameNetDecomposerTests
     }
 
     [Fact]
+    public async Task NonphysicalManagedEntities_AreGovernedProbationaryPos()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "fn-admission-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(dir, "frame"));
+        await File.WriteAllTextAsync(Path.Combine(dir, "frame", "Giving.xml"), FrameXml);
+        try
+        {
+            var dec = new FrameNetDecomposer();
+            var ctx = new FakeContext(new NullWriter()) { EcosystemPath = dir };
+            var nonphysical = new Dictionary<Hash128, Hash128>();
+            await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
+            {
+                if (change.Metadata.SourceContentUnitName.StartsWith(
+                        IngestBatchPipeline.PeriodBoundaryUnitPrefix, StringComparison.Ordinal))
+                    continue;
+                var placed = change.Physicalities.Select(p => p.EntityId).ToHashSet();
+                foreach (var entity in change.Entities)
+                    if (!placed.Contains(entity.Id))
+                        nonphysical[entity.Id] = entity.TypeId;
+            }
+
+            var entry = Assert.Single(nonphysical);
+            Assert.Equal(SubstrateCanonicalIds.PosProbationary("framenet", "IDIO"), entry.Key);
+            Assert.Equal(EntityTypeRegistry.Pos, entry.Value);
+        }
+        finally { try { Directory.Delete(dir, recursive: true); } catch { } }
+    }
+
+    [Fact]
+    public async Task Inventory_SeparatesUnknownRecordTotalFromExactFileTotal()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "fn-inventory-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(dir, "frame"));
+        await File.WriteAllTextAsync(Path.Combine(dir, "frame", "Giving.xml"), FrameXml);
+        try
+        {
+            var dec = new FrameNetDecomposer();
+            var ctx = new FakeContext(new NullWriter()) { EcosystemPath = dir };
+            var inventory = await dec.DescribeInputAsync(ctx, DecomposerOptions.Default);
+
+            Assert.NotNull(inventory);
+            Assert.Equal("records", inventory!.UnitType);
+            Assert.Equal(0, inventory.TotalInputUnits);
+            Assert.Equal(1, inventory.FileCount);
+        }
+        finally { try { Directory.Delete(dir, recursive: true); } catch { } }
+    }
+
+    [Fact]
     public async Task SubframeOf_Emits_Parent_HasSubevent_Child()
     {
         var atts = await CollectAttestationsAsync();

@@ -360,6 +360,7 @@ public sealed class IngestRunner
 
                 var sbatch = new List<SubstrateChange>(batchSize);
                 int sbatchRows = 0;
+                Hash128? sbatchSource = null;
                 await foreach (var intent in decomposer
                     .DecomposeAsync(ctx, options.DecomposerOptions, runCt).WithCancellation(runCt))
                 {
@@ -375,6 +376,19 @@ public sealed class IngestRunner
                         continue;
                     }
                     long sib = BytesOf(intent);
+                    // A decomposer may orchestrate independent witness vendors. Preserve
+                    // their stream order, but never coalesce them into one replay/eviction
+                    // transaction: working-set ownership is exactly one SourceId.
+                    if (workingSet && ShouldFlushWorkingSetSourceBoundary(
+                            sbatchSource, intent.Metadata.SourceId))
+                    {
+                        await ProcessBatchAsync(sbatch, decomposer, options, rng,
+                                                counters, failures, log, workingSet, runCt);
+                        sbatch.Clear();
+                        sbatchRows = 0;
+                        wsBytes = 0;
+                        sbatchSource = null;
+                    }
                     // Flush BEFORE adding an intent that would push the accumulated COPY
                     // bytes past the budget, so a single apply never exceeds it. Adding then
                     // checking (below) let the crossing intent land first, so one apply could
@@ -387,8 +401,10 @@ public sealed class IngestRunner
                         sbatch.Clear();
                         sbatchRows = 0;
                         wsBytes = 0;
+                        sbatchSource = null;
                     }
                     sbatch.Add(intent);
+                    sbatchSource ??= intent.Metadata.SourceId;
                     sbatchRows += RowsOf(intent);
                     wsBytes += sib;
                     if (ShouldFlushWithCap(sbatch.Count, sbatchRows)
@@ -399,6 +415,7 @@ public sealed class IngestRunner
                         sbatch.Clear();
                         sbatchRows = 0;
                         wsBytes = 0;
+                        sbatchSource = null;
                     }
                 }
                 if (sbatch.Count > 0)
@@ -525,6 +542,7 @@ public sealed class IngestRunner
 
                 var batch = new List<SubstrateChange>(batchSize);
                 int batchRows = 0;
+                Hash128? batchSource = null;
                 while (await channel.Reader.WaitToReadAsync(runCt))
                 {
                     while (channel.Reader.TryRead(out var intent))
@@ -541,6 +559,17 @@ public sealed class IngestRunner
                             continue;
                         }
                         long ib = BytesOf(intent);
+                        // Flush the ordered prefix when an orchestrator crosses into a
+                        // different witness vendor. Grouping by SourceId would reorder
+                        // testimony; carrying both forward would corrupt run ownership.
+                        if (workingSet && ShouldFlushWorkingSetSourceBoundary(
+                                batchSource, intent.Metadata.SourceId))
+                        {
+                            await FlushBatchAsync(batch);
+                            batchRows = 0;
+                            wsBytes = 0;
+                            batchSource = null;
+                        }
                         // Flush BEFORE adding an intent that would push accumulated COPY bytes
                         // past the budget, so a single working-set apply never exceeds it and
                         // no single-table buffer approaches the 2 GiB int wall.
@@ -550,8 +579,10 @@ public sealed class IngestRunner
                             await FlushBatchAsync(batch);
                             batchRows = 0;
                             wsBytes = 0;
+                            batchSource = null;
                         }
                         batch.Add(intent);
+                        batchSource ??= intent.Metadata.SourceId;
                         batchRows += RowsOf(intent);
                         wsBytes += ib;
                         if (ShouldFlushWithCap(batch.Count, batchRows)
@@ -560,6 +591,7 @@ public sealed class IngestRunner
                             await FlushBatchAsync(batch);
                             batchRows = 0;
                             wsBytes = 0;
+                            batchSource = null;
                         }
                     }
                 }
@@ -619,6 +651,18 @@ public sealed class IngestRunner
         attestationsInserted = counters.AttestationsInserted;
         totalRoundTrips = counters.RoundTrips;
 
+        bool enforceEntityAdmission = options.DecomposerOptions.MaxInputUnits <= 0
+            && counters.UnitsFailed == 0
+            && failures.Count == 0;
+        int governedWithoutPhysicality = ValidateEntityAdmission(
+            counters, log, enforceEntityAdmission);
+
+        // An explicitly unknown record denominator is more honest than files disguised
+        // as records. Once the stream is complete, its observed count becomes exact and
+        // feeds the terminal journal/LapSight amplification record.
+        if (inventory is { EffectiveTotalInputUnits: 0 } && counters.InputUnitsDone > 0)
+            inventory.PublishExactTotal(counters.InputUnitsDone);
+
         long filesTotalForMarker = inventory?.FileCount ?? 0;
         bool filesComplete = filesTotalForMarker <= 0
             || counters.FilesDone == filesTotalForMarker;
@@ -644,7 +688,8 @@ public sealed class IngestRunner
             TotalRoundTrips: totalRoundTrips,
             WallClock: sw.Elapsed,
             Failures: failures,
-            FilesDone: counters.FilesDone);
+            FilesDone: counters.FilesDone,
+            GovernedIdentitiesWithoutPhysicality: governedWithoutPhysicality);
 
 
 
@@ -759,6 +804,15 @@ public sealed class IngestRunner
     internal static bool ShouldFlushWorkingSet(
         long bufferedBytes, int bufferedRows, long byteCap, int rowCap) =>
         bufferedBytes >= byteCap || bufferedRows >= rowCap;
+
+    /// <summary>
+    /// A working-set apply is owned by one witness vendor. Composite decomposers may
+    /// emit several vendors, but the runner must close the ordered prefix before the
+    /// source changes so replay and source eviction retain an unambiguous owner.
+    /// </summary>
+    internal static bool ShouldFlushWorkingSetSourceBoundary(
+        Hash128? bufferedSource, Hash128 nextSource) =>
+        bufferedSource is { } source && source != nextSource;
 
     /// <summary>
     /// The operator-facing reason a run derived <c>failed</c>, written into
@@ -1068,6 +1122,39 @@ public sealed class IngestRunner
         return est is long n ? IngestInventory.Single(n) : null;
     }
 
+    private static int ValidateEntityAdmission(
+        RunCounters counters,
+        ILogger log,
+        bool enforce)
+    {
+        var pending = counters.EntityAdmission.SnapshotPendingContent();
+        if (pending.Length == 0)
+        {
+            int governed = counters.EntityAdmission.GovernedWithoutPhysicalityCount;
+            log.LogInformation(
+                "INGEST_IDENTITY_ADMISSION source={Source} composed_unplaced=0 governed_nonphysical={Governed} status=ok",
+                counters.SourceName, governed);
+            return governed;
+        }
+
+        int governedPending = counters.EntityAdmission.GovernedWithoutPhysicalityCount;
+        string examples = string.Join(", ", pending.Take(8).Select(static e =>
+            $"{e.Id}:{e.TypeId}@{e.UnitName}"));
+        if (!enforce)
+        {
+            log.LogWarning(
+                "INGEST_IDENTITY_ADMISSION source={Source} composed_unplaced={Unplaced} "
+                + "governed_nonphysical={Governed} status=partial detail={Examples}",
+                counters.SourceName, pending.Length, governedPending, examples);
+            return governedPending;
+        }
+        throw new InvalidOperationException(
+            $"entity admission failed for {counters.SourceName}: {pending.Length} content/composition "
+            + "entity id(s) were emitted without physicality in the complete source stream; "
+            + "existing database state cannot make an incomplete decomposer output lawful. Governed structural "
+            + $"identities are exempt by type. First: {examples}");
+    }
+
     private static IngestInventory ApplyInputCap(IngestInventory inv, long cap) =>
         cap > 0 && inv.TotalInputUnits > cap
             ? inv with { TotalInputUnits = cap }
@@ -1133,6 +1220,9 @@ public sealed class IngestRunner
         }
         if (unit.StartsWith("layer-complete/", StringComparison.Ordinal)) return;
 
+        // Operational boundary/marker entities above are runner scaffolding, not source
+        // admission. Only the decomposer's semantic payload feeds the identity metric.
+        c.EntityAdmission.Observe(intent);
         long consumed = intent.Metadata.InputUnitsConsumed;
         if (consumed > 0 && intent.CountsAsUnit)
             Interlocked.Add(ref c._inputUnitsDone, consumed);
@@ -1208,6 +1298,7 @@ public sealed class IngestRunner
         internal long _inputUnitsComposed;
         internal int _filesDone;
         internal string? _currentFile;
+        internal EntityAdmissionTracker EntityAdmission { get; } = new();
         internal Stopwatch? Sw;
         internal string? SourceName;
         internal int LayerOrder;

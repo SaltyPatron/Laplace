@@ -158,6 +158,29 @@ public sealed record IngestInventory(
     }
 
     /// <summary>
+    /// Multi-file source whose files emit a variable number of logical records and
+    /// cannot know that total without doing the ingest twice. The live denominator is
+    /// deliberately unknown (zero) while file progress remains exact; the runner
+    /// publishes the observed record total at successful completion. A capped run does
+    /// know its record ceiling and reports that ceiling immediately.
+    /// </summary>
+    public static IngestInventory? FromFilesWithUnknownUnitCount(
+        string unitType,
+        IReadOnlyList<string> paths,
+        long maxInputUnits = 0,
+        bool tracksFileCompletion = true)
+    {
+        if (paths.Count == 0) return null;
+        var specs = paths.Select(p => new IngestFileSpec(
+            Path.GetFileName(p), p, InputUnits: 0)).ToList();
+        return new IngestInventory(
+            unitType,
+            maxInputUnits > 0 ? maxInputUnits : 0,
+            specs,
+            tracksFileCompletion);
+    }
+
+    /// <summary>
     /// Multi-file CoNLL-U inventory — shared sample budget across the path list
     /// (same death-by-thousand-cuts guard as <see cref="FromFiles"/>).
     /// </summary>
