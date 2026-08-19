@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Buffers.Binary;
+using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -201,6 +202,7 @@ public sealed class IngestBatchConfig
     public ISubstrateReader? ContainmentReader { get; init; }
     public Action<long>? ReportUnits { get; init; }
     public long MaxInputUnits { get; init; }
+    internal Func<IReadOnlyCollection<string>>? CanonicalNamesProvider { get; init; }
 
     /// <summary>
     /// Batch content surfaces and bulk-probe their resolved roots before materializing
@@ -262,7 +264,8 @@ public sealed class IngestBatchConfig
     private IngestBatchConfig Copy(
         long? maxInputUnits = null,
         int? concurrentWorkingSets = null,
-        Func<int>? activeWorkingSetCount = null) =>
+        Func<int>? activeWorkingSetCount = null,
+        Func<IReadOnlyCollection<string>>? canonicalNamesProvider = null) =>
         new()
         {
             SourceId = SourceId,
@@ -297,6 +300,7 @@ public sealed class IngestBatchConfig
             WorkingSetProfile = WorkingSetProfile,
             ConcurrentWorkingSets = concurrentWorkingSets ?? ConcurrentWorkingSets,
             ActiveWorkingSetCount = activeWorkingSetCount ?? ActiveWorkingSetCount,
+            CanonicalNamesProvider = canonicalNamesProvider ?? CanonicalNamesProvider,
         };
 
     public IngestBatchConfig WithMaxInputUnits(long max) => Copy(maxInputUnits: max);
@@ -315,6 +319,13 @@ public sealed class IngestBatchConfig
         Copy(
             concurrentWorkingSets: Math.Max(ConcurrentWorkingSets, maximumConcurrentWorkingSets),
             activeWorkingSetCount: activeWorkingSetCount);
+
+    internal IngestBatchConfig WithCanonicalNamesProvider(
+        Func<IReadOnlyCollection<string>> provider)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+        return Copy(canonicalNamesProvider: provider);
+    }
 }
 
 public static class IngestBatchPipeline
@@ -457,14 +468,24 @@ public static class IngestBatchPipeline
 
     /// <summary>Boundary that ALSO deposits the file's completion marker (resume-enabled lanes).</summary>
     public static SubstrateChange BuildFileCompletion(
-        Hash128 sourceId, string fileLabel, Hash128 fileRoot, int layerOrder)
+        Hash128 sourceId, string fileLabel, Hash128 fileRoot, int layerOrder,
+        IReadOnlyCollection<string>? canonicalNames = null)
     {
         var builder = new SubstrateChangeBuilder(
             sourceId, $"{PeriodBoundaryUnitPrefix}{fileLabel}", null,
             entityCapacity: 1, physicalityCapacity: 0, attestationCapacity: 1);
         Laplace.Ingestion.LayerCompletion.EmitFileMarker(
             builder, fileRoot, sourceId, layerOrder);
-        return builder.Build();
+        var change = builder.Build();
+        return canonicalNames is { Count: > 0 }
+            ? change with
+            {
+                CanonicalNames = canonicalNames
+                    .Where(static n => !string.IsNullOrWhiteSpace(n))
+                    .Distinct(StringComparer.Ordinal)
+                    .ToImmutableArray(),
+            }
+            : change;
     }
 
     public static SubstrateChange BuildFileFailure(Hash128 sourceId, string fileLabel, Exception ex) =>
@@ -783,7 +804,8 @@ public static class IngestBatchPipeline
 
             yield return fileFailure
                 ?? (fileRoot is { } fr && !hitCap && resume is { } rp
-                    ? BuildFileCompletion(config.SourceId, label, fr, rp.LayerOrder)
+                    ? BuildFileCompletion(config.SourceId, label, fr, rp.LayerOrder,
+                        config.CanonicalNamesProvider?.Invoke())
                     : hitCap
                         ? BuildCancelledBoundary(config.SourceId, label)
                         : BuildPeriodBoundary(config.SourceId, label));
@@ -1052,7 +1074,8 @@ public static class IngestBatchPipeline
                     await outCh.Writer.WriteAsync(
                         fileFailure
                             ?? (fileRoot is { } fr && resume is { } rp
-                                ? BuildFileCompletion(config.SourceId, source.FileLabel, fr, rp.LayerOrder)
+                                ? BuildFileCompletion(config.SourceId, source.FileLabel, fr, rp.LayerOrder,
+                                    config.CanonicalNamesProvider?.Invoke())
                                 : BuildPeriodBoundary(config.SourceId, source.FileLabel)), ct);
                     if (fileFailure is not null) continue;
 

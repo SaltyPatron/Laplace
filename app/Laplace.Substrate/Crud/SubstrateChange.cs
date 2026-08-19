@@ -9,7 +9,8 @@ public sealed record SubstrateChange(
     ImmutableArray<AttestationRow> Attestations,
     SubstrateChangeMetadata Metadata,
     ImmutableArray<IntentStage> IntentStages = default,
-    ImmutableArray<TestimonyWalkRow> TestimonyWalks = default)
+    ImmutableArray<TestimonyWalkRow> TestimonyWalks = default,
+    ImmutableArray<string> CanonicalNames = default)
 {
     public bool CountsAsUnit { get; init; } = true;
 }
