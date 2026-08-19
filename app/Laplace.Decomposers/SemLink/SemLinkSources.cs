@@ -50,7 +50,12 @@ public readonly struct PredicateMatrixSource : ISeedSource
             "FrameNet_Frame", "FrameNet_FE",
         ];
 
-    public static SourceLicense License => SourceLicense.Unknown;
+    public static SourceLicense License { get; } = new(
+        "Creative Commons Attribution 3.0 Unported",
+        Spdx: "CC-BY-3.0",
+        Url: "http://adimen.si.ehu.es/web/PredicateMatrix",
+        Citation: "López de Lacalle, Laparra, Aldabe, and Rigau (2016), A Multilingual Predicate Matrix",
+        Version: "1.3");
 
     public static IngestSourceProfile Profile => IngestSourceProfile.Default;
 }

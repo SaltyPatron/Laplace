@@ -34,7 +34,7 @@ internal static class PredicateMatrixIngest
     private static readonly Hash128 VnClassTypeId = EntityTypeRegistry.VerbNetClass;
     private static readonly Hash128 FrameTypeId = EntityTypeRegistry.FrameNetFrame;
 
-    internal static async IAsyncEnumerable<PredicateMatrixEdge> EnumerateEdgesAsync(
+    internal static async IAsyncEnumerable<PredicateMatrixRecord> EnumerateRecordsAsync(
         string path,
         LanguageFilter? langs,
         long maxInputUnits,
@@ -56,78 +56,101 @@ internal static class PredicateMatrixIngest
             }
 
             string line = Encoding.UTF8.GetString(lineMem.Span);
-            var fields = line.Split('\t');
-            if (fields.Length <= ColPbRoleset) continue;
-            if (fields[ColLang].Equals("1_ID_LANG", StringComparison.Ordinal)) continue;
-
-            string lang = SourceEntityIdConventions.StripPredicateMatrixNamespace(fields[ColLang]);
-            string pos = SourceEntityIdConventions.StripPredicateMatrixNamespace(fields[ColPos]);
-            if (!lang.Equals("eng", StringComparison.Ordinal) || !pos.Equals("v", StringComparison.Ordinal))
-                continue;
-            if (langs is { IsActive: true } && !langs.MatchesRaw("eng"))
-                continue;
-
-            Hash128? synId = SynsetAnchor(fields[ColMcrIli]);
-            if (synId is null) continue;
-
+            if (!TryParseRecord(line.Split('\t'), langs, out var record)) continue;
             if (maxInputUnits > 0 && rowsTotal >= maxInputUnits) yield break;
             rowsTotal++;
-
-            string wnSenseRaw = SourceEntityIdConventions.StripPredicateMatrixNamespace(fields[ColWnSense]);
-            Hash128? senseId = wnSenseRaw.Equals("NULL", StringComparison.OrdinalIgnoreCase)
-                ? null : SenseAnchor.Id(wnSenseRaw);
-
-            if (TryRoleset(fields[ColPbRoleset], out string? roleset) && roleset is not null)
-            {
-                yield return PredicateMatrixEdge.FromCategory(
-                    new CategoryCorrespondenceRecord(roleset, RolesetTypeId, synId.Value));
-                if (senseId is { } rs)
-                    yield return PredicateMatrixEdge.FromCategory(
-                        new CategoryCorrespondenceRecord(roleset, RolesetTypeId, rs));
-            }
-
-            string? frame = null;
-            if (TryFrame(fields[ColFnFrame], out frame) && frame is not null)
-            {
-                yield return PredicateMatrixEdge.FromCategory(
-                    new CategoryCorrespondenceRecord(frame, FrameTypeId, synId.Value));
-                if (senseId is { } fs)
-                    yield return PredicateMatrixEdge.FromCategory(
-                        new CategoryCorrespondenceRecord(frame, FrameTypeId, fs));
-            }
-
-            string? vnClass = VerbNetClassKey(fields);
-            if (vnClass is not null)
-            {
-                yield return PredicateMatrixEdge.FromCategory(
-                    new CategoryCorrespondenceRecord(vnClass, VnClassTypeId, synId.Value));
-                if (senseId is { } vs)
-                    yield return PredicateMatrixEdge.FromCategory(
-                        new CategoryCorrespondenceRecord(vnClass, VnClassTypeId, vs));
-            }
-
-            if (vnClass is not null && fields.Length > ColFnFe)
-            {
-                string vnRole = SourceEntityIdConventions.StripPredicateMatrixNamespace(fields[ColVnRole]).Trim();
-                string fnFe = SourceEntityIdConventions.StripPredicateMatrixNamespace(fields[ColFnFe]).Trim();
-                if (vnRole.Length > 0 && !vnRole.Equals("NULL", StringComparison.OrdinalIgnoreCase)
-                    && fnFe.Length > 0 && !fnFe.Equals("NULL", StringComparison.OrdinalIgnoreCase))
-                {
-                    if (frame is not null)
-                        yield return PredicateMatrixEdge.FromRole(new RoleCorrespondenceRecord(
-                            vnClass, VnClassTypeId, vnRole,
-                            frame, FrameTypeId, fnFe));
-                }
-            }
-
-            if (maxInputUnits > 0 && rowsTotal >= maxInputUnits) yield break;
+            yield return record;
         }
     }
 
-    internal static Task<long?> EstimateLineCountAsync(string path, CancellationToken ct)
+    internal static async Task<long?> EstimateRecordCountAsync(
+        string path, LanguageFilter? langs, CancellationToken ct)
     {
-        long n = EtlInventory.EstimateNewlineCount(path, ct);
-        return Task.FromResult<long?>(n > 1 ? n - 1 : null);
+        bool skippedHeader = false;
+        long count = 0;
+        await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
+        {
+            ct.ThrowIfCancellationRequested();
+            if (lineMem.Length == 0) continue;
+            if (!skippedHeader)
+            {
+                skippedHeader = true;
+                continue;
+            }
+
+            string line = Encoding.UTF8.GetString(lineMem.Span);
+            if (TryParseRecord(line.Split('\t'), langs, out _)) count++;
+        }
+        return count > 0 ? count : null;
+    }
+
+    private static bool TryParseRecord(
+        string[] fields, LanguageFilter? langs, out PredicateMatrixRecord record)
+    {
+        record = default;
+        if (fields.Length <= ColPbRoleset) return false;
+        if (fields[ColLang].Equals("1_ID_LANG", StringComparison.Ordinal)) return false;
+
+        string lang = SourceEntityIdConventions.StripPredicateMatrixNamespace(fields[ColLang]);
+        string pos = SourceEntityIdConventions.StripPredicateMatrixNamespace(fields[ColPos]);
+        if (!lang.Equals("eng", StringComparison.Ordinal) || !pos.Equals("v", StringComparison.Ordinal))
+            return false;
+        if (langs is { IsActive: true } && !langs.MatchesRaw("eng"))
+            return false;
+
+        Hash128? synId = SynsetAnchor(fields[ColMcrIli]);
+        if (synId is null) return false;
+
+        string wnSenseRaw = SourceEntityIdConventions.StripPredicateMatrixNamespace(fields[ColWnSense]);
+        Hash128? senseId = wnSenseRaw.Equals("NULL", StringComparison.OrdinalIgnoreCase)
+            ? null : SenseAnchor.Id(wnSenseRaw);
+        var edges = new List<PredicateMatrixEdge>(7);
+
+        if (TryRoleset(fields[ColPbRoleset], out string? roleset) && roleset is not null)
+        {
+            edges.Add(PredicateMatrixEdge.FromCategory(
+                new CategoryCorrespondenceRecord(roleset, RolesetTypeId, synId.Value)));
+            if (senseId is { } rs)
+                edges.Add(PredicateMatrixEdge.FromCategory(
+                    new CategoryCorrespondenceRecord(roleset, RolesetTypeId, rs)));
+        }
+
+        string? frame = null;
+        if (TryFrame(fields[ColFnFrame], out frame) && frame is not null)
+        {
+            edges.Add(PredicateMatrixEdge.FromCategory(
+                new CategoryCorrespondenceRecord(frame, FrameTypeId, synId.Value)));
+            if (senseId is { } fs)
+                edges.Add(PredicateMatrixEdge.FromCategory(
+                    new CategoryCorrespondenceRecord(frame, FrameTypeId, fs)));
+        }
+
+        string? vnClass = VerbNetClassKey(fields);
+        if (vnClass is not null)
+        {
+            edges.Add(PredicateMatrixEdge.FromCategory(
+                new CategoryCorrespondenceRecord(vnClass, VnClassTypeId, synId.Value)));
+            if (senseId is { } vs)
+                edges.Add(PredicateMatrixEdge.FromCategory(
+                    new CategoryCorrespondenceRecord(vnClass, VnClassTypeId, vs)));
+        }
+
+        if (vnClass is not null && fields.Length > ColFnFe)
+        {
+            string vnRole = SourceEntityIdConventions.StripPredicateMatrixNamespace(fields[ColVnRole]).Trim();
+            string fnFe = SourceEntityIdConventions.StripPredicateMatrixNamespace(fields[ColFnFe]).Trim();
+            if (vnRole.Length > 0 && !vnRole.Equals("NULL", StringComparison.OrdinalIgnoreCase)
+                && fnFe.Length > 0 && !fnFe.Equals("NULL", StringComparison.OrdinalIgnoreCase)
+                && frame is not null)
+            {
+                edges.Add(PredicateMatrixEdge.FromRole(new RoleCorrespondenceRecord(
+                    vnClass, VnClassTypeId, vnRole,
+                    frame, FrameTypeId, fnFe)));
+            }
+        }
+
+        record = new PredicateMatrixRecord(edges.ToArray());
+        return true;
     }
 
     private static readonly string[] UnpackDirs = ["PredicateMatrix", "predicate-matrix", "PredicateMatrix.v1.3"];
@@ -202,33 +225,119 @@ internal static class PredicateMatrixIngest
         public static PredicateMatrixEdge FromRole(RoleCorrespondenceRecord r) => new(null, r);
     }
 
-    internal static IIngestRecordHandler<PredicateMatrixEdge> CreateEdgeHandler(double trust) =>
-        new PredicateMatrixEdgeHandler(Source, trust);
+    internal readonly record struct PredicateMatrixRecord(PredicateMatrixEdge[] Edges);
 
-    private sealed class PredicateMatrixEdgeHandler : IIngestRecordHandler<PredicateMatrixEdge>
+    internal static IIngestRecordHandler<PredicateMatrixRecord> CreateRecordHandler(double trust) =>
+        new PredicateMatrixRecordHandler(Source, trust);
+
+    private sealed class PredicateMatrixRecordHandler : IIngestRecordHandler<PredicateMatrixRecord>
     {
-        private readonly CategoryCorrespondenceHandler _category;
-        private readonly RoleCorrespondenceHandler _role;
+        private readonly Hash128 _sourceId;
+        private readonly double _trust;
+        private readonly ConcurrentIdSet _declarations = new();
+        private readonly ConcurrentIdSet _roleEntities = new();
+        private readonly ConcurrentIdSet _relations = new();
 
-        public PredicateMatrixEdgeHandler(Hash128 sourceId, double trust)
+        public PredicateMatrixRecordHandler(Hash128 sourceId, double trust)
         {
-            _category = new CategoryCorrespondenceHandler(sourceId, trust);
-            _role = new RoleCorrespondenceHandler(
-                sourceId, SemLinkSource.RoleCorrespondsToTypeId, trust);
+            _sourceId = sourceId;
+            _trust = trust;
         }
 
-        public IIngestDeferredUnit CreateDeferredUnit(PredicateMatrixEdge record) =>
-            record.Category is { } cat
-                ? _category.CreateDeferredUnit(cat)
-                : _role.CreateDeferredUnit(record.Role!.Value);
+        // Parsing already produced the row's compact projection. All admission is a cheap,
+        // ordered builder drain, so consuming compose-worker slots here would be fake fan-out.
+        public bool ParallelizeDeferredUnitCreation => false;
+
+        public IIngestDeferredUnit CreateDeferredUnit(PredicateMatrixRecord record) =>
+            new Unit(this, record);
 
         public void WalkWitness(
-            PredicateMatrixEdge record, Hash128 root, SubstrateChangeBuilder builder, IIngestDeferredUnit unit)
+            PredicateMatrixRecord record, Hash128 root,
+            SubstrateChangeBuilder builder, IIngestDeferredUnit unit)
         { }
+
+        private Hash128 Drain(PredicateMatrixRecord record, SubstrateChangeBuilder builder)
+        {
+            Hash128 root = default;
+            foreach (var edge in record.Edges)
+            {
+                Hash128? emitted = edge.Category is { } category
+                    ? EmitCategory(category, builder)
+                    : EmitRole(edge.Role!.Value, builder);
+                if (root == default && emitted is { } id) root = id;
+            }
+            return root;
+        }
+
+        private Hash128? EmitCategory(
+            CategoryCorrespondenceRecord record, SubstrateChangeBuilder builder)
+        {
+            Hash128? subjectId = AnchorAdmission.Id(record.SubjectKey, record.SubjectTypeId);
+            if (subjectId is null) return null;
+
+            Hash128 declarationId = CategoryAnchor.CategoryAttestationId(
+                subjectId.Value, record.SubjectTypeId, _sourceId);
+            if (_declarations.Add(declarationId))
+                subjectId = AnchorAdmission.Emit(
+                    builder, record.SubjectKey, record.SubjectTypeId, _sourceId, _trust);
+            if (subjectId is null) return null;
+
+            var relation = NativeAttestation.Categorical(
+                subjectId.Value, record.RelationType, record.ObjectId, _sourceId, _trust,
+                magnitude: record.Magnitude, arenaScale: 1.0, contextId: record.ContextId);
+            if (_relations.Add(relation.Id)) builder.AddAttestation(relation);
+            return subjectId.Value;
+        }
+
+        private Hash128? EmitRole(RoleCorrespondenceRecord record, SubstrateChangeBuilder builder)
+        {
+            Hash128? subjectParent = AnchorAdmission.Id(
+                record.SubjectParentKey, record.SubjectParentTypeId);
+            Hash128? objectParent = AnchorAdmission.Id(
+                record.ObjectParentKey, record.ObjectParentTypeId);
+            if (subjectParent is null || objectParent is null) return null;
+
+            RoleIdentityKind subjectKind = RoleAnchor.KindForParentType(record.SubjectParentTypeId);
+            RoleIdentityKind objectKind = RoleAnchor.KindForParentType(record.ObjectParentTypeId);
+            Hash128? subjectRole = RoleAnchor.Id(subjectKind, subjectParent.Value, record.SubjectRoleKey);
+            Hash128? objectRole = RoleAnchor.Id(objectKind, objectParent.Value, record.ObjectRoleKey);
+            if (subjectRole is null || objectRole is null) return null;
+
+            if (_roleEntities.Add(subjectRole.Value))
+                RoleAnchor.Declare(
+                    builder, subjectKind, subjectParent.Value, record.SubjectRoleKey,
+                    RoleAnchor.EntityTypeFor(subjectKind), _sourceId);
+            if (_roleEntities.Add(objectRole.Value))
+                RoleAnchor.Declare(
+                    builder, objectKind, objectParent.Value, record.ObjectRoleKey,
+                    RoleAnchor.EntityTypeFor(objectKind), _sourceId);
+
+            var relation = NativeAttestation.ResolvedScored(
+                subjectRole.Value, SemLinkSource.RoleCorrespondsToTypeId, objectRole.Value,
+                _sourceId, null, _trust, record.Magnitude, arenaScale: 1.0);
+            if (_relations.Add(relation.Id)) builder.AddAttestation(relation);
+            return subjectRole.Value;
+        }
+
+        private sealed class Unit(
+            PredicateMatrixRecordHandler owner,
+            PredicateMatrixRecord record) : IIngestDeferredUnit
+        {
+            public TierTree? TreeForBatchProbe => null;
+
+            public Task<byte[]?> ProbeDescentAsync(ISubstrateReader reader, CancellationToken ct) =>
+                Task.FromResult<byte[]?>(null);
+
+            public Hash128 DrainInto(
+                SubstrateChangeBuilder builder, double witnessWeight, byte[]? descentBitmap) =>
+                owner.Drain(record, builder);
+
+            public void Dispose() { }
+        }
     }
 }
 
-internal sealed class PredicateMatrixPhase : DecomposerPhase<PredicateMatrixIngest.PredicateMatrixEdge>
+internal sealed class PredicateMatrixPhase : DecomposerPhase<PredicateMatrixIngest.PredicateMatrixRecord>
 {
     private readonly string _path;
     private readonly LanguageFilter? _langs;
@@ -251,14 +360,14 @@ internal sealed class PredicateMatrixPhase : DecomposerPhase<PredicateMatrixInge
         Task.CompletedTask;
 
     public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default) =>
-        PredicateMatrixIngest.EstimateLineCountAsync(_path, ct);
+        PredicateMatrixIngest.EstimateRecordCountAsync(_path, _langs, ct);
 
-    protected override IIngestRecordHandler<PredicateMatrixIngest.PredicateMatrixEdge> CreateHandler() =>
-        PredicateMatrixIngest.CreateEdgeHandler(SourceTrust);
+    protected override IIngestRecordHandler<PredicateMatrixIngest.PredicateMatrixRecord> CreateHandler() =>
+        PredicateMatrixIngest.CreateRecordHandler(SourceTrust);
 
-    protected override IAsyncEnumerable<PredicateMatrixIngest.PredicateMatrixEdge> ExtractRecordsAsync(
+    protected override IAsyncEnumerable<PredicateMatrixIngest.PredicateMatrixRecord> ExtractRecordsAsync(
         string ecosystemPath, DecomposerOptions options, CancellationToken ct) =>
-        PredicateMatrixIngest.EnumerateEdgesAsync(_path, _langs, options.MaxInputUnits, ct);
+        PredicateMatrixIngest.EnumerateRecordsAsync(_path, _langs, options.MaxInputUnits, ct);
 
     protected override IngestBatchConfig BuildPipelineConfig(
         IDecomposerContext context, DecomposerOptions options)
