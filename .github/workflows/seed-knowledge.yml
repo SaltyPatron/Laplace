@@ -40,15 +40,6 @@ on:
         description: "when evicting, type the exact decomposer source name (for ud: UDDecomposer)"
         type: string
         default: ""
-      index_cycle_defer:
-        description: >-
-          Campaign participation ONLY — default false. Set when a fresh-full-build campaign
-          has dropped the secondary indexes (`drop-indexes`) and will rebuild once at the end
-          (`recover-indexes`), so this seed COPYs into index-free heaps. The knowledge corpora
-          are the largest in the tree; the full wiktionary file is exactly the run the
-          campaign bracket exists for.
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -64,6 +55,5 @@ jobs:
       timeout_minutes: 720
       run_gate: true
       run_idempotency: ${{ inputs.run_idempotency }}
-      index_cycle_defer: ${{ inputs.index_cycle_defer }}
       evict_before_ingest: ${{ inputs.evict_before_ingest }}
       evict_confirm: ${{ inputs.evict_confirm }}

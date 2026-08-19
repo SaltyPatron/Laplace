@@ -29,7 +29,7 @@ on:
           - status      # READ-ONLY. Migration state + extension version + substrate counts.
           - migrate     # `up` only. Idempotent; applies any pending migrations.
           - repair      # Re-sync extension SQL + re-tune + re-point perfcache/API env. NO DATA LOSS.
-          - reindex     # Rebuild INVALID indexes (interrupted index cycles). CONCURRENTLY; NO DATA LOSS.
+          - reindex     # Rebuild INVALID indexes (interrupted DDL/legacy cycles). CONCURRENTLY; NO DATA LOSS.
           - remigrate   # `reset` + `up`: re-apply ALL migrations. Keeps substrate data.
           - recreate    # DESTRUCTIVE. `nuke` + `up` + repair. Drops the database and rebuilds it EMPTY.
       confirm:
@@ -137,7 +137,7 @@ jobs:
         run: bash scripts/pipeline.sh sync-extension tune-pg tune-laplace perfcache-guc api-env
 
       - name: Reindex — rebuild INVALID indexes
-        # An interrupted index cycle (OOM-killed ingest, cancelled run) leaves
+        # Interrupted DDL or a database upgraded from the retired index-cycle loader can leave
         # indexes marked indisvalid=false; the planner ignores them and every read
         # seq-scans. 2026-08-14: 28 of them across attestations/consensus/entities/
         # physicalities — every core query index — after the wiktionary-era kills.

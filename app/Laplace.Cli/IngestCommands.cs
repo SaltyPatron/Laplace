@@ -697,11 +697,9 @@ internal static class IngestCommands
         return present ? 0 : 1;
     }
 
-    // Restore secondary indexes a killed or crashed bulk ingest left dropped (journaled in
-    // laplace.index_cycle_journal by NpgsqlIndexCycle). The pipeline recovers automatically at
-    // the START of the next bulk run — this is the ops entry for the window in between, when
-    // every non-pkey query on attestations/consensus/entities is a full scan. Refreshes
-    // planner statistics afterwards: freshly built indexes without stats still plan badly.
+    // Restore secondary indexes a legacy killed/crashed index-cycle ingest left absent and
+    // journaled. Current ingest never drops indexes; this remains only to repair an upgraded
+    // database already in that state. Refresh planner statistics after recovery.
     public static async Task<int> RecoverCycledIndexesAsync()
     {
         await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
@@ -716,8 +714,6 @@ internal static class IngestCommands
         Console.WriteLine($"recovering {pending} journaled secondary index(es) — serial builds ...");
         var log = CliRuntime.LoggerFactory.CreateLogger("index-cycle");
         var sw = Stopwatch.StartNew();
-        // Force the rebuild even under LAPLACE_INDEX_CYCLE_DEFER: this verb IS the deliberate
-        // campaign-end rebuild the defer flag was holding for (RecoverAsync no-ops when deferred).
         await NpgsqlIndexCycle.RebuildJournaledAsync(ds, log, CancellationToken.None);
 
         Console.WriteLine("refreshing planner statistics ...");
@@ -729,29 +725,6 @@ internal static class IngestCommands
             $"recovered {pending - remaining}/{pending} index(es) in {sw.Elapsed.TotalSeconds:F0}s"
             + (remaining > 0 ? $" — {remaining} still journaled (rerun)" : ""));
         return remaining == 0 ? 0 : 1;
-    }
-
-    // Up-front campaign drop of EVERY plain secondary on the core write tables, journaled in
-    // laplace.index_cycle_journal. Pair with LAPLACE_INDEX_CYCLE_DEFER=1 for the seed steps (so
-    // each step COPYs into index-free heaps and none auto-rebuilds) and ONE terminal
-    // `recover-indexes` to rebuild them all once — turning N per-step drop/rebuild cycles into one
-    // drop and one rebuild. Name read-critical indexes in LAPLACE_INDEX_CYCLE_KEEP to hold them up
-    // (e.g. attestations_relation_btree, which the interleaved chess-analyze hydrate reads).
-    public static async Task<int> DropCoreIndexesAsync()
-    {
-        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
-        var log = CliRuntime.LoggerFactory.CreateLogger("index-cycle");
-        string[] tables = ["entities", "physicalities", "attestations", "consensus"];
-        Console.WriteLine($"campaign index-drop across {tables.Length} core table(s) — journaled for one rebuild ...");
-        var sw = Stopwatch.StartNew();
-        await NpgsqlIndexCycle.DropSecondariesAsync(ds, log, tables, CancellationToken.None);
-        sw.Stop();
-
-        long journaled = await NpgsqlIngestOps.IndexCycleJournalCountAsync(ds);
-        Console.WriteLine(
-            $"index-drop complete in {sw.Elapsed.TotalSeconds:F0}s — {journaled} secondary index(es) journaled "
-            + "(down until `recover-indexes`)");
-        return 0;
     }
 
     public static async Task<int> RebuildPhysIndexesAsync()
@@ -812,17 +785,6 @@ internal static class IngestCommands
 
     private static async Task PrintIngestValidationAsync(NpgsqlDataSource ds, IDecomposer? decomposer)
     {
-        // Index-cycle defer leaves secondaries down; ANALYZE + evidence walks after a
-        // multi-million-row COPY sat for minutes with CommandTimeout=0 (measured:
-        // process hung after INGEST_COMPLETE with no WALL_SEC). Skip the heavy
-        // post-path; recover-indexes + a later stats pass own that work.
-        if (NpgsqlIndexCycle.Deferred)
-        {
-            Console.WriteLine(
-                "ingest validation skipped (LAPLACE_INDEX_CYCLE_DEFER) — run recover-indexes then stats");
-            return;
-        }
-
         await using var conn = await ds.OpenConnectionAsync();
 
         // Immediately after a bulk COPY ingest the just-loaded tables can still carry

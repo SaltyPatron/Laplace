@@ -876,9 +876,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
         Action<BulkRunCompletionPhase>? onPhase,
         CancellationToken ct = default)
     {
-        // Folds drain BEFORE the inner writer rebuilds the cycled consensus
-        // secondaries — a live fold during the rebuild would pay live index
-        // maintenance on every insert.
+        // Folds drain before the inner writer releases its run-scoped state.
         Exception? foldFailure = null;
         var phaseSw = System.Diagnostics.Stopwatch.StartNew();
         onPhase?.Invoke(BulkRunCompletionPhase.ConsensusDrain);

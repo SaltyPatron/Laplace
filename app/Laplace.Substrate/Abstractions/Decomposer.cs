@@ -124,7 +124,7 @@ public static class IngestPipelineDefaults
     }
 
     /// <summary>
-    /// Witnessed structured-grammar lane (OMW, Wiktionary, Tatoeba, Etl rows).
+    /// Witnessed structured-grammar lane (Tatoeba and generic Etl rows).
     /// Mirrors <see cref="StructuredGrammarIngest.IngestFileAsync"/> config shape.
     /// </summary>
     public static IngestBatchConfig StructuredGrammar(

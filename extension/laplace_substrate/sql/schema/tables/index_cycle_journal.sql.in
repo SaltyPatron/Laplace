@@ -1,8 +1,7 @@
--- Crash-recovery journal for bulk-load index cycling. The working-set apply
--- drops secondary indexes before a fresh-seed-shaped COPY and rebuilds them
--- after; each dropped index's definition is journaled here in its own
--- committed transaction first. Rows are deleted as rebuilds succeed, so a
--- non-empty journal after a crash lists exactly the indexes to re-create.
+-- Compatibility recovery journal for the retired index-cycle loader. Current
+-- ingest never inserts here or drops a production index. Keep the table so an
+-- upgraded database can restore indexes an older interrupted run left absent;
+-- recovery deletes each row only after the index is valid again.
 CREATE TABLE IF NOT EXISTS index_cycle_journal (
     index_name  text         PRIMARY KEY,
     table_name  text         NOT NULL,

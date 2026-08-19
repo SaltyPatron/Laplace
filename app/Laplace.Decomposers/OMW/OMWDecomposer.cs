@@ -7,7 +7,9 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.OMW;
 
-public sealed class OMWDecomposer : DecomposerMultiFile<GrammarIngestRecord, OMWSource, FullScope>, IIngestInventoryProvider
+public readonly record struct OmwIngestRecord(OmwRow Row, byte[] ValueUtf8);
+
+public sealed class OMWDecomposer : DecomposerMultiFile<OmwIngestRecord, OMWSource, FullScope>, IIngestInventoryProvider
 {
     public static readonly Hash128 Source = OMWSource.SourceId;
     public static readonly Hash128 TrustClass = OMWSource.TrustClass;
@@ -50,38 +52,35 @@ public sealed class OMWDecomposer : DecomposerMultiFile<GrammarIngestRecord, OMW
         return labeled;
     }
 
-    protected override async IAsyncEnumerable<GrammarIngestRecord> ExtractFileAsync(
+    protected override async IAsyncEnumerable<OmwIngestRecord> ExtractFileAsync(
         string filePath, string fileLabel, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        var omw = EtlManifest.Get("omw");
-        var stream = GrammarFileRecordStream.ForSource(
-            filePath, omw, static line => line.Length > 0 && line[0] != (byte)'#');
-
-        await using var e = stream.RecordsAsync(ct).GetAsyncEnumerator(ct);
+        string fileLang = OmwIngestSupport.LangFromLabel(fileLabel);
+        await using var e = StreamingUtf8LineReader.ReadLinesAsync(filePath, ct).GetAsyncEnumerator(ct);
         while (true)
         {
-            GrammarIngestRecord record;
+            ReadOnlyMemory<byte> line;
             try
             {
                 if (!await e.MoveNextAsync()) break;
-                record = e.Current;
+                line = e.Current;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 throw new InvalidOperationException(
                     $"OMW ingest failed in \"{filePath}\": {ex.Message}", ex);
             }
-            yield return record;
+            if (!OMWRowParser.TryParseRow(line.Span, fileLang, out var row, out var valueUtf8))
+                continue;
+            yield return new OmwIngestRecord(row, valueUtf8.ToArray());
         }
     }
 
-    protected override IIngestRecordHandler<GrammarIngestRecord> CreateHandlerForFile(
+    protected override IIngestRecordHandler<OmwIngestRecord> CreateHandlerForFile(
         string fileLabel, DecomposerOptions options) =>
-        new GrammarIngestHandler(
-            Source, "tsv",
-            new OMWGrammarWitness(OmwIngestSupport.LangFromLabel(fileLabel)),
-            contextId: null);
+        new DirectComposeHandler<OmwIngestRecord>(
+            static (record, builder) => OMWEmitter.Emit(builder, record.Row, record.ValueUtf8));
 
     protected override IngestBatchConfig ConfigForFile(
         string fileLabel, ISubstrateReader? reader, DecomposerOptions options)
@@ -89,10 +88,8 @@ public sealed class OMWDecomposer : DecomposerMultiFile<GrammarIngestRecord, OMW
         int batch = IngestPipelineDefaults.ResolveBatch(IngestSourceProfile.Omw, options);
         int slash = fileLabel.LastIndexOf('/');
         string prefix = slash > 0 ? fileLabel[..slash] : fileLabel;
-        return IngestPipelineDefaults.ApplyMaxInputUnits(
-            IngestPipelineDefaults.StructuredGrammar(
-                Source, prefix, batch, options, reader, witnessWeight: 1.0),
-            options);
+        return IngestPipelineDefaults.Compose(
+            Source, prefix, batch, options, reader, IngestSourceProfile.Omw);
     }
 
     public Task<IngestInventory?> DescribeInputAsync(

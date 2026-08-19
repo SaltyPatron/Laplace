@@ -70,4 +70,23 @@ public sealed class ExtensionManifestSeparationTests
         Assert.Contains("ops.index_health()", floor);
         Assert.DoesNotContain("pg_index", floor);
     }
+
+    [Fact]
+    public void ProductionIngest_KeepsSecondaryIndexesOnline()
+    {
+        var writer = Read(
+            "app", "Laplace.Substrate", "Crud", "Npgsql", "NpgsqlWorkingSetApply.cs");
+        var recovery = Read(
+            "app", "Laplace.Substrate", "Crud", "Npgsql", "NpgsqlIndexCycle.cs");
+        var program = Read("app", "Laplace.Cli", "Program.cs");
+        var ingestWorkflow = Read(".github", "workflows", "_ingest.yml");
+        var foundationWorkflow = Read(".github", "workflows", "seed-foundation.yml");
+
+        Assert.DoesNotContain("DropSecondariesAsync", recovery);
+        Assert.DoesNotContain("JournalAndDropAsync", recovery);
+        Assert.DoesNotContain("cycle.BeginAsync", writer);
+        Assert.DoesNotContain("DropIndexesCommand", program);
+        Assert.DoesNotContain("LAPLACE_INDEX_CYCLE", ingestWorkflow);
+        Assert.DoesNotContain("drop-indexes", foundationWorkflow);
+    }
 }

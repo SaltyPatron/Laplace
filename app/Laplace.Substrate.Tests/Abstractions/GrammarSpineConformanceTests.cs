@@ -81,8 +81,8 @@ public class GrammarSpineConformanceTests
                 "TatoebaGrammarWitness", "IngestPipelineDefaults.StructuredGrammar"]),
             // ConceptNet: monolith triple — ExtractFileAsync unit on RelationTripleDecomposerBase.
             ("ConceptNet", ["RelationTripleRecord", "ExtractFileAsync", "RelationTripleDecomposerBase"]),
-            ("OMW", ["DecomposerMultiFile<GrammarIngestRecord", "ExtractFileAsync",
-                "GrammarIngestHandler", "OMWGrammarWitness"]),
+            ("OMW", ["DecomposerMultiFile<OmwIngestRecord", "StreamingUtf8LineReader",
+                "DirectComposeHandler<OmwIngestRecord>", "OMWEmitter.Emit"]),
             // Atomic: multi-file triple — same ExtractFileAsync unit via RelationTripleMultiFile.
             ("Atomic2020", ["RelationTripleRecord", "ExtractFileAsync", "RelationTripleMultiFileDecomposerBase"]),
             ("UD", ["DecomposerMultiFile<UdIngestRecord", "ExtractFileAsync",
