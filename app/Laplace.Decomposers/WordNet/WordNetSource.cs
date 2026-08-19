@@ -45,6 +45,10 @@ public readonly struct WordNetSource : ISeedSource
 
     public static IReadOnlyList<string> Relations { get; } = BuildRelations();
 
+    private static IReadOnlyList<string> DeclaredRelations { get; } = ["CORRESPONDS_TO"];
+    internal static readonly Hash128 CorrespondsToTypeId =
+        RelationTypeRegistry.RelationTypeId(DeclaredRelations[0]);
+
     public static IReadOnlyList<string>? TypeNodeNames { get; } =
         ["WordNet_Synset", "WordNet_Sense", "Source_Reference"];
 
@@ -56,10 +60,12 @@ public readonly struct WordNetSource : ISeedSource
     {
         var set = new HashSet<string>(StringComparer.Ordinal)
         {
-            "IS_SYNONYM_OF", "HAS_POS", "HAS_DEFINITION", "HAS_EXAMPLE", "HAS_LEX_CATEGORY",
+            "HAS_POS", "HAS_DEFINITION", "HAS_EXAMPLE", "HAS_LEX_CATEGORY",
             "HAS_DOMAIN_TOPIC", "HAS_VERB_FRAME", "IS_LEMMA_OF", "HAS_SENSE", "IS_SENSE_OF",
-            "HAS_NAME_ALIAS", "MANNER_OF", "CORRESPONDS_TO",
+            "HAS_NAME_ALIAS", "MANNER_OF",
         };
+        foreach (string name in DeclaredRelations)
+            set.Add(name);
         // From the manifest's declared language scope, not a literal here: the source
         // states the language, this only obliges the declaration to match what the
         // decomposer emits. DecomposerArchitectureGateTests faults an undeclared emit.

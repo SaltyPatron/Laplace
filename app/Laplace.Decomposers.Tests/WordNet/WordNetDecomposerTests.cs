@@ -129,4 +129,49 @@ public sealed class WordNetDecomposerTests
             try { Directory.Delete(root, recursive: true); } catch { }
         }
     }
+
+    [SkippableFact]
+    public async Task Decompose_SynsetMembership_UsesExactSenseChainWithoutShortcutWitness()
+    {
+        Skip.IfNot(TestInstall.HasFullCiliMap(), "full CILI map is not installed");
+        const string senseKey = "able%3:00:00::";
+        const string data =
+            "00001740 00 a 01 able 0 005 = 05200169 n 0000 = 05616246 n 0000 "
+            + "+ 05616246 a 0101 + 05200169 a 0101 ! 00002098 a 0101 "
+            + "| having the necessary means or skill\n";
+        string root = Path.Combine(Path.GetTempPath(), "wordnet-membership-" + Guid.NewGuid().ToString("N"));
+        string dict = Path.Combine(root, "WordNet-3.0", "dict");
+        Directory.CreateDirectory(dict);
+        await File.WriteAllTextAsync(Path.Combine(dict, "data.adj"), data);
+        await File.WriteAllTextAsync(
+            Path.Combine(dict, "index.sense"), $"{senseKey} 00001740 1 5\n");
+
+        try
+        {
+            var attestations = new List<AttestationRow>();
+            await foreach (var change in new WordNetDecomposer().DecomposeAsync(
+                               new FakeContext(root, new NullWriter()), DecomposerOptions.Default))
+                attestations.AddRange(change.Attestations);
+
+            Hash128 lemma = ContentEmitter.RootId("able")!.Value;
+            Hash128 sense = SenseAnchor.ExactId(senseKey)!.Value;
+            Hash128 synset = ConceptAnchor.SynsetId(1740, 'a')!.Value;
+            Hash128 hasSense = RelationTypeRegistry.RelationTypeId("HAS_SENSE");
+            Hash128 isSenseOf = RelationTypeRegistry.RelationTypeId("IS_SENSE_OF");
+            Hash128 synonym = RelationTypeRegistry.RelationTypeId("IS_SYNONYM_OF");
+
+            Assert.Contains(attestations, a =>
+                a.SubjectId == lemma && a.TypeId == hasSense && a.ObjectId == sense);
+            Assert.Contains(attestations, a =>
+                a.SubjectId == sense && a.TypeId == isSenseOf && a.ObjectId == synset);
+            Assert.DoesNotContain(attestations, a =>
+                a.TypeId == synonym
+                && ((a.SubjectId == lemma && a.ObjectId == synset)
+                    || (a.SubjectId == synset && a.ObjectId == lemma)));
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch { }
+        }
+    }
 }

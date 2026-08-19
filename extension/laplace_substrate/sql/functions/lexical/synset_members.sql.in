@@ -19,6 +19,22 @@ CREATE OR REPLACE FUNCTION lexical.synset_members(p_word bytea)
         GROUP BY s.synset_id
     ),
     members AS (
+        -- Exact WordNet membership: lemma -> sense -> synset. The data-file shortcut
+        -- was removed because it duplicated the index.sense observation and erased the
+        -- lexical-sense identity. HAS_SENSE-family matching keeps aliases governed.
+        SELECT hs.subject_id AS w, hs.rating, hs.rd, hs.witness_count, syn.sense_mu
+        FROM syn
+        JOIN laplace.consensus so
+          ON so.object_id = syn.id
+         AND so.type_id = ANY (consensus.relation_family_ids('HAS_SENSE'))
+         AND consensus.relation_canonical(so.type_id) = 'IS_SENSE_OF'
+        JOIN laplace.consensus hs
+          ON hs.object_id = so.subject_id
+         AND hs.type_id = ANY (consensus.relation_family_ids('HAS_SENSE'))
+         AND consensus.relation_canonical(hs.type_id) = 'HAS_SENSE'
+        UNION ALL
+        -- OMW and other resources without a source sense key may still make a direct
+        -- lexical membership assertion. Keep that distinct source shape readable.
         SELECT c.object_id AS w, c.rating, c.rd, c.witness_count, syn.sense_mu
         FROM laplace.consensus c JOIN syn ON c.subject_id = syn.id
         WHERE c.type_id = laplace.relation_type_id('IS_SYNONYM_OF') AND c.object_id IS NOT NULL

@@ -256,8 +256,10 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
         {
             var lemmaId = RootSurface(lemma);
             if (lemmaId is null) continue;
-            b.AddAttestation(NativeAttestation.Categorical(
-                lemmaId.Value, "IS_SYNONYM_OF", synId, Source, SourceTrust.StandardsDerived));
+            // Synset membership is carried by index.sense at its exact lexical grain:
+            // lemma -> HAS_SENSE -> sense -> IS_SENSE_OF -> synset. Repeating that same
+            // source observation here as lemma -> IS_SYNONYM_OF -> synset made one WordNet
+            // fact look like two independent witnesses and discarded the sense identity.
             PosReference.Attest(b, lemmaId.Value, syn.SsType.ToString(),
                 PosReference.PosTagset.WordNet, Source, null, SourceTrust.StandardsDerived,
                 _vocabularyNames);
@@ -342,9 +344,9 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
         // compatibility hub and connect it to every exact source sense instead of using it
         // as identity. The two real PWN senses remain distinct on HAS_SENSE/IS_SENSE_OF.
         if (compatibilityId is { } alias && alias != senseId.Value)
-            b.AddAttestation(NativeAttestation.Categorical(
-                alias, "CORRESPONDS_TO", senseId.Value, Source,
-                SourceTrust.StandardsDerived));
+            b.AddAttestation(NativeAttestation.CategoricalResolved(
+                alias, WordNetSource.CorrespondsToTypeId, senseId.Value, Source,
+                null, SourceTrust.StandardsDerived));
 
         var lemmaId = RootSurface(s.Lemma);
         var synAnchor = ConceptAnchor.SynsetId(s.Offset, s.Pos);
