@@ -551,8 +551,8 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
     // construction, so every such row is a permanently single-witness consensus cell — dead
     // weight in the Glicko fold (measured ~40M of 62M consensus rows). The verbatim PGN
     // movetext witnessed below (HAS_MOVETEXT, one edge per game) carries every one of those
-    // tokens losslessly; readback re-parses it (ChessWitnessHydrator). Aggregating edges
-    // (deduped moves/positions carrying outcomes) remain the analyzer's job.
+    // tokens losslessly; readback re-parses it (ChessWitnessHydrator). The game's HAS_RESULT
+    // is the only move/line outcome evidence; queries join the playing to its line trajectory.
     internal static void RecordGame(ChessGameRecord parsed, SubstrateChangeBuilder b, Hash128? sourceId = null)
     {
         var (gameText, _, result, lineId, eventId, playingId) = parsed;
@@ -785,23 +785,15 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         b.AddEntity(eventId, EntityTier.Document, ChessVocabulary.EventType, src);
         b.AddEntity(playingId, EntityTier.Document, ChessVocabulary.PlayingType, src);
 
-        // Playing → line (this occurrence of the content). Context null on the join itself.
-        b.AddAttestation(NativeAttestation.Aggregated(
-            subject: playingId,
-            typeId: ChessVocabulary.PlaysLineType,
-            obj: lineId,
-            sourceId: src,
-            contextId: null,
-            games: 1,
-            sumScoreFp1e9: ChessGraph.ScoreFp1e9(result.ForMover(0)),
-            witnessWeight: PgnWitnessWeight));
+        // Playing → line is a structural occurrence/content join. The result is witnessed
+        // once through HAS_RESULT below; smuggling the score into this edge records the same
+        // observation twice and makes a structural link pretend to be a rating event.
+        b.AddAttestation(NativeAttestation.CategoricalResolved(
+            playingId, ChessVocabulary.PlaysLineType, lineId, src, null, PgnWitnessWeight));
 
         // Playing → event (this game belongs to the tournament/named event).
         b.AddAttestation(NativeAttestation.Categorical(
             playingId, HasEventRelation, eventId, src, null, PgnWitnessWeight));
-
-        // Line fold: one witness per playing; ctx = playing (not the tournament event).
-        ChessGraph.AppendLineOutcome(b, lineId, result.ForMover(0), PgnWitnessWeight, src, playingId);
 
         if (whitePlayer is { } wp) b.AddAttestation(NativeAttestation.Categorical(lineId, "HAS_WHITE", wp, src, playingId, PgnWitnessWeight));
         if (blackPlayer is { } bp) b.AddAttestation(NativeAttestation.Categorical(lineId, "HAS_BLACK", bp, src, playingId, PgnWitnessWeight));

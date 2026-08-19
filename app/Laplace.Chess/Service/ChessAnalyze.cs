@@ -7,7 +7,7 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Chess.Service;
 
-// CALCULATED layer. Derives positions / geometry / bounded outcome projections / motifs / opening classification /
+// CALCULATED layer. Derives positions / geometry / motifs / opening classification /
 // consensus by REPLAYING a game's witnessed movetext. Pure deterministic function of the witnessed
 // inputs (movetext + start FEN + per-ply annotation tokens the recorder stored). Emitted under the
 // analysis source and stamped ANALYZED_AT=Version so the analyzer scan skips already-derived games.
@@ -16,7 +16,7 @@ namespace Laplace.Chess.Service;
 // PGN path is legacy bootstrap only when an explicit file path is passed.
 public static class ChessAnalyze
 {
-    public const int Version = 2;
+    public const int Version = 3;
     public static Hash128 SourceId => ChessVocabulary.AnalysisSourceId;
 
     private const double MoveWeight = 0.7;
@@ -170,8 +170,6 @@ public static class ChessAnalyze
         // the flagging line. Both 0 for the spent dialect (no remaining clock witnessed).
         double medianRemEven = PgnClocks.MedianRemaining(clocks, 0);
         double medianRemOdd = PgnClocks.MedianRemaining(clocks, 1);
-        bool mate = sans.Count > 0 && sans[^1].IndexOf('#') >= 0;
-        int? winner = result.IsDraw ? null : result.Winner;
         // Reused across plies so the TT warms; only built when engine-eval is requested.
         var engine = engineDepth > 0 ? new Search(EvalTerm.All) : null;
 
@@ -202,13 +200,6 @@ public static class ChessAnalyze
             line.Add(to.Position);
             boards.Add(next.Board);
             played.Add(mv.Value);
-
-            long games = 1;
-            if (mate && winner == mover) games += 1;
-
-            ChessGraph.AppendSubstructureOutcome(
-                b, from, result.ForMover(mover), games, MoveWeight, src);
-
 
             string? clk = Tok(clockTokens, ply);
             if (clk is not null)

@@ -16,8 +16,6 @@ namespace Laplace.Chess.Service;
 public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
 {
     private const double WitnessWeight = 0.7;
-    private const long CheckmateGames = 3;
-
     private readonly NpgsqlDataSource _ds;
     private readonly ConsensusAccumulatingWriter _writer;
     private readonly SubstrateTurnHost _turnHost;
@@ -153,20 +151,11 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
                     lineId, result.IsDraw ? "1/2-1/2" : result.Winner == 0 ? "1-0" : "0-1");
                 EnsurePlayingEntity(b, playingId, session);
 
-                // The one record edge whose subject is the PLAYING, carrying its outcome
-                // (white POV) — the playing→line join the read side navigates by. Subjecting
-                // it on a tournament event would be wrong twice: an event spans many games,
-                // so it cannot carry one game's result, and ChessPgnDecomposer.EmitGame
-                // already subjects this edge on the playing.
-                b.AddAttestation(NativeAttestation.Aggregated(
-                    subject: playingId,
-                    typeId: ChessVocabulary.PlaysLineType,
-                    obj: lineId,
-                    sourceId: ChessVocabulary.SourceId,
-                    contextId: null,
-                    games: 1,
-                    sumScoreFp1e9: ChessGraph.ScoreFp1e9(result.ForMover(0)),
-                    witnessWeight: WitnessWeight));
+                // The structural playing→line join the read side navigates. It carries no
+                // score: HAS_RESULT below is the one witnessed game result.
+                b.AddAttestation(NativeAttestation.CategoricalResolved(
+                    playingId, ChessVocabulary.PlaysLineType, lineId,
+                    ChessVocabulary.SourceId, null, WitnessWeight));
 
                 // Game grain: ONE verbatim movetext edge for the whole game, witnessed at
                 // completion (not a growing per-ply prefix — that minted N single-witness
@@ -181,10 +170,9 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
                     b.AddAttestation(NativeAttestation.Categorical(
                         lineId, "HAS_BLACK", bp, ChessVocabulary.SourceId, playingId, WitnessWeight));
 
-                // Aggregating lanes: the line's own fold cell (witness_count = times played)
-                // and the players' records, both carrying this playing's result.
-                ChessGraph.AppendLineOutcome(
-                    b, lineId, result.ForMover(0), WitnessWeight, ChessVocabulary.SourceId, playingId);
+                // The player/head-to-head cells are bounded, explicitly reusable statistics.
+                // Move, position, substructure, and exact-line outcomes are recovered from
+                // this playing's result plus its associated line trajectory instead.
                 if (session.WhitePlayerId is { } w2)
                     ChessGraph.AppendPlayerResult(
                         b, w2, session.BlackPlayerId, result.ForMover(0), WitnessWeight,
@@ -194,10 +182,6 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
                         b, b2, session.WhitePlayerId, result.ForMover(1), WitnessWeight,
                         ChessVocabulary.SourceId, playingId);
 
-                bool hasWin = session.Plies.Any(
-                    p => result.ForMover(p.MoverSide) == PlyOutcome.Win);
-                bool checkmate = !adjudicated && hasWin;
-                long games = checkmate ? CheckmateGames : 1;
                 var line = new List<ChessNode>(session.Plies.Count + 1);
                 foreach (var rp in session.Plies)
                 {
@@ -205,11 +189,6 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
                     var to = ChessGraph.EmitComposed(b, rp.ToKey, ChessVocabulary.SourceId);
                     if (line.Count == 0) line.Add(from.Position);
                     line.Add(to.Position);
-                    var moverOutcome = adjudicated
-                        ? PlyOutcome.Draw
-                        : result.ForMover(rp.MoverSide);
-                    ChessGraph.AppendSubstructureOutcome(
-                        b, from, moverOutcome, games, WitnessWeight, ChessVocabulary.SourceId);
                 }
 
                 long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;

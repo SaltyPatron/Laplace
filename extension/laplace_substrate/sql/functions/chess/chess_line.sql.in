@@ -7,9 +7,9 @@ CREATE OR REPLACE FUNCTION chess.line(p_line bytea)
     -- The line-grain read GH #736's re-key pays for: one row per PLAYING of this
     -- line (the events that carry a PLAYS_LINE edge onto it), each with the
     -- headers that playing asserted (ON_DATE / HAS_RESULT, pinned by context),
-    -- alongside the line's own fold cell -- (line, OUTCOME, Chess_Result) --
-    -- where witness_count IS "times this line was played" and consensus.eff_mu IS how the
-    -- line fares (white POV), already folded, never recomputed.
+    -- alongside any explicitly promoted legacy line fold. Times played comes from the
+    -- playing→line occurrence joins themselves; it must not depend on an OUTCOME
+    -- projection existing.
     --
     -- The fold columns are LEFT-joined and repeat per playing: a line recorded
     -- before the fold ran returns its playings with NULL rating rather than
@@ -20,6 +20,9 @@ CREATE OR REPLACE FUNCTION chess.line(p_line bytea)
         FROM laplace.attestations pl
         WHERE pl.object_id = p_line
           AND pl.type_id = laplace.relation_type_id('PLAYS_LINE')
+    ),
+    play_count AS MATERIALIZED (
+        SELECT count(*)::bigint AS n FROM playings
     ),
     hdr AS MATERIALIZED (
         -- The playings' headers off ONE scan of the line's subject rows, grouped
@@ -68,7 +71,7 @@ CREATE OR REPLACE FUNCTION chess.line(p_line bytea)
     SELECT pg.event,
            d.txt,
            r.txt,
-           f.witness_count::bigint,
+           pc.n,
            f.rating::double precision,
            f.rd::double precision,
            consensus.eff_mu(f.rating, f.rd)::double precision
@@ -77,5 +80,6 @@ CREATE OR REPLACE FUNCTION chess.line(p_line bytea)
     LEFT JOIN surface_text d ON d.id = h.date_id
     LEFT JOIN surface_text r ON r.id = h.result_id
     LEFT JOIN fold f ON true
+    CROSS JOIN play_count pc
     ORDER BY d.txt DESC NULLS LAST, pg.event
 $$;

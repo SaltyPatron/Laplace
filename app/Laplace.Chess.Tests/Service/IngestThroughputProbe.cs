@@ -170,7 +170,8 @@ public sealed class IngestThroughputProbe(ITestOutputHelper o)
         o.WriteLine($"analyze share of time: {100.0 * (tFull - tRec) / tFull,5:F1}%");
         o.WriteLine($"projected 190k games : {190705 / (games.Count / tFull) / 60,6:F1} min of pure compose");
 
-        // WHERE the rows come from. 839/game is the cost driver; volume, not inefficiency.
+        // Attribute the remaining row fanout by relation. A large population is not
+        // presumed necessary merely because compose can produce it quickly.
         var byType = new Dictionary<Hash128, long>();
         long ents = 0, phys = 0;
         foreach (var g in games.Take(200))
