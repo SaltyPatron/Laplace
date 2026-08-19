@@ -215,10 +215,11 @@ public sealed class IngestBatchConfig
 
     public SubstrateChangeBuilder NewBuilder(int batchNumber)
     {
+        var capacities = ResolveBuilderCapacities();
         var b = new SubstrateChangeBuilder(SourceId, $"{BatchLabelPrefix}/{batchNumber}", null,
-            entityCapacity: EntityCapacity ?? BatchSize,
-            physicalityCapacity: PhysicalityCapacity ?? BatchSize,
-            attestationCapacity: AttestationCapacity ?? BatchSize * 4)
+            entityCapacity: capacities.Entities,
+            physicalityCapacity: capacities.Physicalities,
+            attestationCapacity: capacities.Attestations)
             .SetCommitEpoch(CommitEpoch);
         if (EnableDeferredContentOnBuilder && ContainmentReader is not null)
             b.EnableDeferredContent(ContainmentReader);
@@ -228,6 +229,33 @@ public sealed class IngestBatchConfig
         b.SetPresenceOracle(ContainmentReader);
         return b;
     }
+
+    internal (int Entities, int Physicalities, int Attestations) ResolveBuilderCapacities()
+    {
+        int batchRecords = Math.Max(1, BatchSize);
+        int residentRecords = WorkingSet && WorkingSetRecordCap is { } cap
+            ? Math.Min(batchRecords, Math.Max(1, cap))
+            : batchRecords;
+
+        return (
+            ScaleInitialCapacity(EntityCapacity ?? batchRecords, batchRecords, residentRecords),
+            ScaleInitialCapacity(PhysicalityCapacity ?? batchRecords, batchRecords, residentRecords),
+            ScaleInitialCapacity(AttestationCapacity ?? SaturatingMultiply(batchRecords, 4), batchRecords, residentRecords));
+    }
+
+    private static int ScaleInitialCapacity(int capacity, int batchRecords, int residentRecords)
+    {
+        if (capacity <= 0)
+            return 0;
+        if (residentRecords >= batchRecords)
+            return capacity;
+
+        long scaled = ((long)capacity * residentRecords + batchRecords - 1L) / batchRecords;
+        return (int)Math.Clamp(scaled, 1L, int.MaxValue);
+    }
+
+    private static int SaturatingMultiply(int value, int multiplier) =>
+        (int)Math.Min((long)value * multiplier, int.MaxValue);
 
     internal ISubstrateReader? EffectiveReader => ContainmentReader;
 
