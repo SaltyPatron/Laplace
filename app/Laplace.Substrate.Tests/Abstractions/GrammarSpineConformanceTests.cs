@@ -64,7 +64,7 @@ public class GrammarSpineConformanceTests
     }
 
     [Fact]
-    public void TabularDecomposers_UseStructuredGrammarIngest()
+    public void StructuredSources_UseDeclaredGenericPipelineAdapters()
     {
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();
         var grammarSpine = new (string Project, string[] Needles)[]
@@ -73,12 +73,12 @@ public class GrammarSpineConformanceTests
             // per-row parse; the compose lane, not the tree-sitter row spine, is what it
             // actually runs. The needle now names the base it declares.
             ("Wiktionary", ["ComposeDecomposer<WiktionaryEntry", "WiktionaryEmit.Emit"]),
-            ("SemLink", ["GrammarIngestHandler", "SemLinkGrammarWitness", "IGrammarWitness"]),
+            ("SemLink", ["GrammarWitnessIngestHandler", "SemLinkGrammarWitness", "IGrammarWitness"]),
             // Tatoeba is two PHASES (sentences then links) rather than parallel files —
             // the link phase needs the id -> content-root map the sentence phase produces.
-            // Still the grammar spine, reached through DecomposerPhase<GrammarIngestRecord>.
-            ("Tatoeba", ["DecomposerPhase<GrammarIngestRecord", "GrammarIngestHandler",
-                "TatoebaGrammarWitness", "IngestPipelineDefaults.StructuredGrammar"]),
+            // Both phases use the generic direct-compose path; TSV packaging is not content.
+            ("Tatoeba", ["DecomposerPhase<TatoebaIngestRecord", "StreamingUtf8LineReader",
+                "DirectComposeHandler<TatoebaIngestRecord>", "TatoebaEmitter"]),
             // ConceptNet: monolith triple — ExtractFileAsync unit on RelationTripleDecomposerBase.
             ("ConceptNet", ["RelationTripleRecord", "ExtractFileAsync", "RelationTripleDecomposerBase"]),
             ("OMW", ["DecomposerMultiFile<OmwIngestRecord", "StreamingUtf8LineReader",
@@ -101,6 +101,20 @@ public class GrammarSpineConformanceTests
                     $"{project} must use grammar spine pattern '{needle}' in CODE "
                     + "(comments are stripped — a mention is not a use)");
         }
+    }
+
+    [Fact]
+    public void VendorDecomposers_DoNotAdmitSerializedGrammarRowsByConvenience()
+    {
+        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
+        var root = Path.Combine(repoRoot, "app", "Laplace.Decomposers");
+        var text = string.Join('\n', Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories)
+            .Where(p => !p.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")
+                     && !p.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}"))
+            .Select(p => StripComments(File.ReadAllText(p))));
+
+        Assert.DoesNotContain("new GrammarIngestHandler(", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("IngestPipelineDefaults.StructuredGrammar(", text, StringComparison.Ordinal);
     }
 
     [Fact]

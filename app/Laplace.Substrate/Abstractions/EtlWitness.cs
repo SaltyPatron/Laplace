@@ -24,9 +24,7 @@ public sealed class EtlWitness : IGrammarWitness
             _delegate.WalkRow(composed, ctx, b);
             return;
         }
-        if (composed.Composer is null) return;
-
-        var fields = composed.Composer.FieldSpans();
+        var fields = GrammarAstFields.FieldSpans(composed.Ast);
         ReadOnlySpan<byte> utf8 = composed.Utf8;
 
         foreach (var rule in _src.NodeEdgeMap)

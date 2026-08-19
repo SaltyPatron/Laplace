@@ -124,7 +124,9 @@ public static class IngestPipelineDefaults
     }
 
     /// <summary>
-    /// Witnessed structured-grammar lane (Tatoeba and generic Etl rows).
+    /// Explicit grammar-content lane. Use this only when the parsed serialization itself is
+    /// admitted content. Parser-only vendor witnesses use <see cref="Compose"/> so delimiters,
+    /// field names, and source-local keys do not manufacture a second content tree.
     /// Mirrors <see cref="StructuredGrammarIngest.IngestFileAsync"/> config shape.
     /// </summary>
     public static IngestBatchConfig StructuredGrammar(

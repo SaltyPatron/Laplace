@@ -33,7 +33,11 @@ public sealed class TatoebaDecomposerTests
     private const string EnText = "The cat sat on the mat.";
     private const string FrText = "Le chat s'est assis sur le tapis.";
 
-    private static async Task<(List<AttestationRow> Attestations, List<EntityRow> Entities)> RunAsync(string dir)
+    private static async Task<(
+        List<AttestationRow> Attestations,
+        List<EntityRow> Entities,
+        List<PhysicalityRow> Physicalities,
+        long PhysicalityCount)> RunAsync(string dir)
     {
         var dec = new TatoebaDecomposer();
         var ctx = new FakeContext(dir, new NullWriter());
@@ -44,12 +48,17 @@ public sealed class TatoebaDecomposerTests
 
         var attestations = new List<AttestationRow>();
         var entities = new List<EntityRow>();
+        var physicalities = new List<PhysicalityRow>();
+        long physicalityCount = 0;
         await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
         {
             attestations.AddRange(change.Attestations);
             entities.AddRange(change.Entities);
+            physicalities.AddRange(change.Physicalities);
+            physicalityCount += change.Physicalities.Length;
+            physicalityCount += change.IntentStages.Sum(stage => (long)stage.PhysicalityCount);
         }
-        return (attestations, entities);
+        return (attestations, entities, physicalities, physicalityCount);
     }
 
     [Fact]
@@ -63,7 +72,7 @@ public sealed class TatoebaDecomposerTests
                 $"1\teng\t{EnText}\n2\tfra\t{FrText}\n", new UTF8Encoding(false));
             await File.WriteAllTextAsync(Path.Combine(dir, "links.csv"), "1\t2\n", new UTF8Encoding(false));
 
-            var (attestations, entities) = await RunAsync(dir);
+            var (attestations, entities, physicalities, physicalityCount) = await RunAsync(dir);
 
             Hash128 translationType = RelationTypeRegistry.Resolve("IS_TRANSLATION_OF").Id;
             Hash128 languageType = RelationTypeRegistry.Resolve("HAS_LANGUAGE").Id;
@@ -92,6 +101,22 @@ public sealed class TatoebaDecomposerTests
             Assert.DoesNotContain(surrogate1, entities.Select(e => e.Id));
             Assert.DoesNotContain(surrogate2, entities.Select(e => e.Id));
             Assert.DoesNotContain("HAS_EXTERNAL_ID", TatoebaSource.Relations);
+
+            // TSV is transport packaging, not content. The entire phase must place exactly
+            // the two selected sentences — no extra tree for ids, language fields, tabs, or
+            // serialized rows.
+            var expectedBuilder = new SubstrateChangeBuilder(
+                TatoebaDecomposer.Source, "tatoeba-expected-content");
+            Assert.True(ContentTierSpine.TryStageIntoBuilder(
+                expectedBuilder, Encoding.UTF8.GetBytes(EnText), TatoebaDecomposer.Source, out _));
+            Assert.True(ContentTierSpine.TryStageIntoBuilder(
+                expectedBuilder, Encoding.UTF8.GetBytes(FrText), TatoebaDecomposer.Source, out _));
+            var expected = expectedBuilder.Build();
+            long expectedPhysicalities = expected.Physicalities.Length
+                + expected.IntentStages.Sum(stage => (long)stage.PhysicalityCount);
+            Assert.Equal(expectedPhysicalities, physicalityCount);
+            Assert.DoesNotContain(physicalities,
+                p => p.EntityId == ContentTierSpine.ResolveRoot("1")!.Value);
         }
         finally
         {
@@ -111,7 +136,7 @@ public sealed class TatoebaDecomposerTests
                 $"1\teng\t{EnText}\n", new UTF8Encoding(false));
             await File.WriteAllTextAsync(Path.Combine(dir, "links.csv"), "1\t999\n", new UTF8Encoding(false));
 
-            var (attestations, entities) = await RunAsync(dir);
+            var (attestations, entities, _, _) = await RunAsync(dir);
 
             Hash128 translationType = RelationTypeRegistry.Resolve("IS_TRANSLATION_OF").Id;
 
@@ -125,5 +150,22 @@ public sealed class TatoebaDecomposerTests
         {
             Directory.Delete(dir, recursive: true);
         }
+    }
+
+    [Fact]
+    public void DirectRowParser_PreservesTabsInsideSentenceText_AndRejectsBadScaffolding()
+    {
+        Assert.True(TatoebaParse.TrySentence(
+            "42\teng\tleft\tright"u8, out var sentence));
+        Assert.Equal(42, sentence.FirstId);
+        Assert.Equal("eng", sentence.Language);
+        Assert.Equal("left\tright", Encoding.UTF8.GetString(sentence.TextUtf8!));
+
+        Assert.True(TatoebaParse.TryLink("42\t84"u8, out var link));
+        Assert.Equal(42, link.FirstId);
+        Assert.Equal(84, link.SecondId);
+
+        Assert.False(TatoebaParse.TrySentence("not-an-id\teng\ttext"u8, out _));
+        Assert.False(TatoebaParse.TryLink("42\tnot-an-id"u8, out _));
     }
 }

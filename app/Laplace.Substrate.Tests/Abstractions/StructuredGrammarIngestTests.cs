@@ -18,6 +18,64 @@ public sealed class StructuredGrammarIngestTests
         public void WalkRow(in GrammarComposeContext composed, in RowContext ctx, SubstrateChangeBuilder builder) { }
     }
 
+    private sealed class SelectedFieldWitness : IGrammarWitness
+    {
+        public string ModalityId => "tsv";
+
+        public void WalkRow(
+            in GrammarComposeContext composed,
+            in RowContext ctx,
+            SubstrateChangeBuilder builder)
+        {
+            var fields = GrammarAstFields.FieldSpans(composed.Ast);
+            Assert.True(fields.Count >= 3);
+            var selected = fields[2];
+            Assert.True(ContentTierSpine.TryStageIntoBuilder(
+                builder,
+                composed.Utf8[(int)selected.Start..(int)selected.End],
+                Src,
+                out var root));
+            builder.AddAttestation(NativeAttestation.Categorical(
+                root, "OBSERVED", null, Src, sourceTrust: 1.0));
+        }
+    }
+
+    [Fact]
+    public async Task WitnessOnlyHandler_ParsesFieldsWithoutComposingSerializedRow()
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"laplace-tsv-witness-{Guid.NewGuid():N}.tsv");
+        try
+        {
+            await File.WriteAllTextAsync(path, "opaque-7\teng\tselected content\n", Encoding.UTF8);
+            var config = IngestPipelineDefaults.Compose(
+                Src, "witness-only", 8, DecomposerOptions.Default, reader: null);
+            var changes = new List<SubstrateChange>();
+            await foreach (var change in IngestBatchPipeline.RunAsync(
+                new GrammarFileRecordStream(path, "tsv"),
+                new GrammarWitnessIngestHandler(new SelectedFieldWitness()),
+                config))
+                changes.Add(change);
+
+            Assert.Equal(1, changes.Sum(c => c.Metadata.InputUnitsConsumed));
+            Assert.True(changes.Sum(c => c.Attestations.Length
+                + c.IntentStages.Sum(stage => stage.AttestationCount)) > 0);
+
+            var expectedBuilder = new SubstrateChangeBuilder(Src, "selected-only");
+            Assert.True(ContentTierSpine.TryStageIntoBuilder(
+                expectedBuilder, "selected content"u8, Src, out _));
+            var expected = expectedBuilder.Build();
+            long expectedPhysicalities = expected.Physicalities.Length
+                + expected.IntentStages.Sum(stage => (long)stage.PhysicalityCount);
+            long actualPhysicalities = changes.Sum(c => (long)c.Physicalities.Length
+                + c.IntentStages.Sum(stage => (long)stage.PhysicalityCount));
+            Assert.Equal(expectedPhysicalities, actualPhysicalities);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
     [Fact]
     public async Task IngestFileAsync_MaxInputUnits_StopsEarly()
     {

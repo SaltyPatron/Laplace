@@ -8,14 +8,16 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 namespace Laplace.Decomposers.Tatoeba;
 
 internal enum TatoebaRowKind { Sentence, Link }
+internal readonly record struct TatoebaIngestRecord(
+    long FirstId, long SecondId, string? Language, byte[]? TextUtf8);
 
-internal sealed class TatoebaGrammarWitness : IGrammarWitness
+internal sealed class TatoebaEmitter
 {
     private readonly TatoebaRowKind _kind;
     private readonly ConcurrentDictionary<long, byte>? _allowedIds;
     private readonly TatoebaIdMap _ids;
 
-    public TatoebaGrammarWitness(
+    public TatoebaEmitter(
         TatoebaRowKind kind, ConcurrentDictionary<long, byte>? allowedIds, TatoebaIdMap ids)
     {
         _kind = kind;
@@ -23,32 +25,23 @@ internal sealed class TatoebaGrammarWitness : IGrammarWitness
         _ids = ids;
     }
 
-    public string ModalityId => "tsv";
-
-    public void WalkRow(in GrammarComposeContext composed, in RowContext ctx, SubstrateChangeBuilder b)
+    public void Emit(TatoebaIngestRecord record, SubstrateChangeBuilder b)
     {
-        if (composed.Composer is null) return;
-        var fields = composed.Composer.FieldSpans();
-        ReadOnlySpan<byte> utf8 = composed.Utf8;
         switch (_kind)
         {
             case TatoebaRowKind.Sentence:
-                WalkSentence(fields, utf8, b);
+                WalkSentence(record, b);
                 break;
             case TatoebaRowKind.Link:
-                WalkLink(fields, utf8, b);
+                WalkLink(record, b);
                 break;
         }
     }
 
-    private void WalkSentence(
-        IReadOnlyList<(uint Start, uint End)> fields, ReadOnlySpan<byte> utf8, SubstrateChangeBuilder b)
+    private void WalkSentence(TatoebaIngestRecord record, SubstrateChangeBuilder b)
     {
-        if (fields.Count < 3) return;
-        if (!TatoebaParse.TryInt64(Slice(utf8, fields[0]), out long id)) return;
-        string lang = Encoding.UTF8.GetString(Slice(utf8, fields[1])).Trim();
-        ReadOnlySpan<byte> text = Slice(utf8, fields[2]);
-        if (text.IsEmpty) return;
+        if (record.Language is not { Length: > 0 } lang || record.TextUtf8 is not { Length: > 0 } text)
+            return;
 
         // Resolve the language code once; id + readback tracking both reuse it.
         string? iso3 = LanguageReference.ResolveCode(lang);
@@ -71,18 +64,13 @@ internal sealed class TatoebaGrammarWitness : IGrammarWitness
         // The link phase's whole input. FREE here — the root is already composed — which is
         // the point of doing this in phase 1 instead of a prelude that resolves all 13.26M
         // roots a second time before the pipeline emits anything.
-        _ids.Set(id, emitted);
+        _ids.Set(record.FirstId, emitted);
 
-        _allowedIds?.TryAdd(id, 0);
+        _allowedIds?.TryAdd(record.FirstId, 0);
     }
 
-    private void WalkLink(
-        IReadOnlyList<(uint Start, uint End)> fields, ReadOnlySpan<byte> utf8, SubstrateChangeBuilder b)
+    private void WalkLink(TatoebaIngestRecord record, SubstrateChangeBuilder b)
     {
-        if (fields.Count < 2) return;
-        if (!TatoebaParse.TryInt64(Slice(utf8, fields[0]), out long a)) return;
-        if (!TatoebaParse.TryInt64(Slice(utf8, fields[1]), out long bId)) return;
-
         // links.csv is an ATTESTATION file, not an entity file. What Tatoeba asserts is
         // "this sentence is a translation of that sentence" — a fact between two CONTENT
         // ROOTS. The ids are scaffolding: they exist only because the links file cannot
@@ -97,7 +85,8 @@ internal sealed class TatoebaGrammarWitness : IGrammarWitness
         // A link naming a sentence absent from sentences.csv is DROPPED, not grounded on a
         // synthetic node: an edge between two ids we cannot resolve to text asserts nothing
         // about language, and a bare anchor is an unattested node pretending otherwise.
-        if (!_ids.TryGet(a, out var rootA) || !_ids.TryGet(bId, out var rootB))
+        if (!_ids.TryGet(record.FirstId, out var rootA)
+            || !_ids.TryGet(record.SecondId, out var rootB))
         {
             Interlocked.Increment(ref TatoebaDecomposer.UnresolvedLinks);
             return;
@@ -108,12 +97,42 @@ internal sealed class TatoebaGrammarWitness : IGrammarWitness
             rootA, "IS_TRANSLATION_OF", rootB, TatoebaDecomposer.Source, SourceTrust.StructuredCorpus));
     }
 
-    private static ReadOnlySpan<byte> Slice(ReadOnlySpan<byte> utf8, (uint Start, uint End) sp) =>
-        utf8[(int)sp.Start..(int)sp.End];
 }
 
 internal static class TatoebaParse
 {
+    public static bool TrySentence(ReadOnlySpan<byte> line, out TatoebaIngestRecord record)
+    {
+        record = default;
+        int firstTab = line.IndexOf((byte)'\t');
+        if (firstTab <= 0) return false;
+        ReadOnlySpan<byte> tail = line[(firstTab + 1)..];
+        int secondTab = tail.IndexOf((byte)'\t');
+        if (secondTab <= 0) return false;
+        if (!TryInt64(line[..firstTab], out long id)) return false;
+
+        string language = Encoding.UTF8.GetString(tail[..secondTab]).Trim();
+        ReadOnlySpan<byte> text = tail[(secondTab + 1)..];
+        if (language.Length == 0 || text.IsEmpty) return false;
+        record = new TatoebaIngestRecord(id, 0, language, text.ToArray());
+        return true;
+    }
+
+    public static bool TryLink(ReadOnlySpan<byte> line, out TatoebaIngestRecord record)
+    {
+        record = default;
+        int firstTab = line.IndexOf((byte)'\t');
+        if (firstTab <= 0) return false;
+        ReadOnlySpan<byte> tail = line[(firstTab + 1)..];
+        int secondTab = tail.IndexOf((byte)'\t');
+        ReadOnlySpan<byte> second = secondTab < 0 ? tail : tail[..secondTab];
+        if (!TryInt64(line[..firstTab], out long first)
+            || !TryInt64(second, out long other))
+            return false;
+        record = new TatoebaIngestRecord(first, other, null, null);
+        return true;
+    }
+
     public static bool TryInt64(ReadOnlySpan<byte> s, out long v)
     {
         v = 0;

@@ -97,9 +97,7 @@ public sealed class EtlDecomposer : DecomposerMultiFile<GrammarIngestRecord>, II
         string path = _filePathsByLabel.TryGetValue(fileLabel, out var resolved)
             ? resolved
             : fileLabel;
-        return new GrammarIngestHandler(
-            SourceId,
-            _src.Modality.GrammarId,
+        return new GrammarWitnessIngestHandler(
             new EtlWitness(new EtlWitnessContext(_src, path, options)),
             _src.ContextIdFromFile?.Invoke(path));
     }
@@ -108,13 +106,12 @@ public sealed class EtlDecomposer : DecomposerMultiFile<GrammarIngestRecord>, II
         string fileLabel, ISubstrateReader? reader, DecomposerOptions options)
     {
         var profile = _src.Profile ?? IngestSourceProfile.Wiktionary;
-        return IngestPipelineDefaults.StructuredGrammar(
+        return IngestPipelineDefaults.Compose(
             SourceId,
             fileLabel,
-            IngestSizing.ResolveForSource(profile).RecordBatchSize,
+            IngestPipelineDefaults.ResolveBatch(profile, options),
             options,
             reader,
-            witnessWeight: 1.0,
             profile: profile);
     }
 

@@ -88,6 +88,49 @@ public sealed class GrammarIngestHandler : IIngestRecordHandler<GrammarIngestRec
     }
 }
 
+/// <summary>
+/// Retains a grammar AST only as a parser result for a vendor witness. It deliberately does not
+/// content-compose the serialized row: field names, delimiters, source keys, and JSON/TSV layout
+/// are an encoding of the observation unless a vendor explicitly selects them as content.
+/// </summary>
+public sealed class GrammarWitnessIngestHandler : IIngestRecordHandler<GrammarIngestRecord>
+{
+    private readonly IGrammarWitness _witness;
+    private readonly Hash128? _contextId;
+
+    public GrammarWitnessIngestHandler(IGrammarWitness witness, Hash128? contextId = null)
+    {
+        _witness = witness;
+        _contextId = contextId;
+    }
+
+    public bool ParallelizeDeferredUnitCreation => false;
+
+    public IIngestDeferredUnit CreateDeferredUnit(GrammarIngestRecord record) =>
+        new WitnessDeferredUnit(record.Ast);
+
+    public void WalkWitness(
+        GrammarIngestRecord record,
+        Hash128 root,
+        SubstrateChangeBuilder builder,
+        IIngestDeferredUnit unit) =>
+        _witness.WalkRow(
+            new GrammarComposeContext(record.LineUtf8, record.Ast, default, null),
+            new RowContext(record.RowIndex, record.RowsTotal, _contextId), builder);
+
+    private sealed class WitnessDeferredUnit(GrammarAst ast) : IIngestDeferredUnit
+    {
+        private GrammarAst? _ast = ast;
+
+        public TierTree? TreeForBatchProbe => null;
+        public Task<byte[]?> ProbeDescentAsync(ISubstrateReader reader, CancellationToken ct = default) =>
+            Task.FromResult<byte[]?>(null);
+        public Hash128 DrainInto(
+            SubstrateChangeBuilder builder, double witnessWeight, byte[]? descentBitmap) => default;
+        public void Dispose() => Interlocked.Exchange(ref _ast, null)?.Dispose();
+    }
+}
+
 public sealed class GrammarFileRecordStream : IRecordStream<GrammarIngestRecord>
 {
     private readonly string _filePath;
