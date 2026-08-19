@@ -138,8 +138,10 @@ public sealed class VerbNetDecomposer
                 Source, null, TC.AcademicCurated));
         }
 
+        int frameOrdinal = -1;
         foreach (var frame in SharedXmlFramesetReader.ChildElements(el, "FRAMES", "FRAME"))
         {
+            frameOrdinal++;
             string primary = "";
             foreach (XmlNode d in frame.GetElementsByTagName("DESCRIPTION"))
             {
@@ -169,31 +171,53 @@ public sealed class VerbNetDecomposer
 
 
 
+            int predicateOrdinal = 0;
             foreach (XmlNode semNode in frame.GetElementsByTagName("SEMANTICS"))
             {
                 if (semNode is not XmlElement sem) continue;
                 foreach (XmlNode predNode in sem.GetElementsByTagName("PRED"))
                 {
                     if (predNode is not XmlElement pred) continue;
+                    int currentPredicateOrdinal = predicateOrdinal++;
                     string predVal = pred.GetAttribute("value").Trim();
                     if (predVal.Length == 0) continue;
-                    var predId = ContentEmitter.Emit(b, predVal, Source);
-                    if (predId is null) continue;
-                    b.AddAttestation(NativeAttestation.Categorical(
-                        classEntity, "ENTAILS", predId.Value, Source, TC.AcademicCurated));
+                    var predLabelId = ContentEmitter.Emit(b, predVal, Source);
+                    if (predLabelId is null) continue;
+                    var arguments = new List<SemanticPredicateArgument>();
+                    var roleValues = new List<string>();
                     foreach (XmlNode argNode in pred.GetElementsByTagName("ARG"))
                     {
                         if (argNode is not XmlElement arg) continue;
-                        if (!arg.GetAttribute("type").Trim().Equals("ThemRole", StringComparison.OrdinalIgnoreCase))
-                            continue;
-                        string roleVal = arg.GetAttribute("value").Trim().TrimStart('?');
-                        if (roleVal.Length == 0) continue;
+                        string argType = arg.GetAttribute("type").Trim();
+                        string argValue = arg.GetAttribute("value").Trim();
+                        arguments.Add(new SemanticPredicateArgument(argType, argValue));
+                        string roleValue = argValue.TrimStart('?');
+                        if (argType.Equals("ThemRole", StringComparison.OrdinalIgnoreCase)
+                            && roleValue.Length > 0)
+                            roleValues.Add(roleValue);
+                    }
+
+                    Hash128 predicateId = SemanticPredicateAnchor.Declare(
+                        b, SemanticPredicateIdentityKind.VerbNet, classEntity,
+                        frameOrdinal, currentPredicateOrdinal, predLabelId.Value, arguments,
+                        EntityTypeRegistry.VerbNetPredicate, Source);
+                    CategoryAnchor.AttestCategory(
+                        b, predicateId, EntityTypeRegistry.VerbNetPredicate,
+                        Source, TC.AcademicCurated);
+                    b.AddAttestation(NativeAttestation.CategoricalResolved(
+                        classEntity, VerbNetSource.EntailsTypeId, predicateId,
+                        Source, null, TC.AcademicCurated));
+                    b.AddAttestation(NativeAttestation.CategoricalResolved(
+                        predicateId, VerbNetSource.HasNameAliasTypeId, predLabelId.Value,
+                        Source, null, TC.AcademicCurated));
+                    foreach (string roleVal in roleValues)
+                    {
                         var roleId = RoleAnchor.Declare(
                             b, RoleIdentityKind.VerbNet, classEntity, roleVal,
                             EntityTypeRegistry.VerbNetRole, Source);
                         if (roleId is not null)
                             b.AddAttestation(NativeAttestation.CategoricalResolved(
-                                predId.Value, VerbNetSource.HasSemanticRoleTypeId, roleId.Value,
+                                predicateId, VerbNetSource.HasSemanticRoleTypeId, roleId.Value,
                                 Source, null, TC.AcademicCurated));
                     }
                 }

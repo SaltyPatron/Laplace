@@ -524,7 +524,6 @@
       "app/Laplace.Decomposers/Unicode/UnicodeDecomposer.cs::HAS_NAME_ALIAS": 1,
       "app/Laplace.Decomposers/Unicode/UnicodeDecomposer.cs::HAS_UTF8_ROLE": 1,
       "app/Laplace.Decomposers/VerbNet/VerbNetDecomposer.cs::CORRESPONDS_TO": 1,
-      "app/Laplace.Decomposers/VerbNet/VerbNetDecomposer.cs::ENTAILS": 1,
       "app/Laplace.Decomposers/VerbNet/VerbNetDecomposer.cs::EVOKES_FRAME": 1,
       "app/Laplace.Decomposers/VerbNet/VerbNetDecomposer.cs::HAS_EXAMPLE": 1,
       "app/Laplace.Decomposers/VerbNet/VerbNetDecomposer.cs::HAS_VERB_FRAME": 1,

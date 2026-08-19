@@ -63,6 +63,7 @@ public static class EntityTypeRegistry
     public static readonly Hash128 UdXpos = Id("UD_XPOS");
     public static readonly Hash128 Utf8Role = Id("Utf8Role");
     public static readonly Hash128 VerbNetClass = Id("VerbNet_Class");
+    public static readonly Hash128 VerbNetPredicate = Id("VerbNet_Predicate");
     public static readonly Hash128 VerbNetRole = Id("VerbNet_Role");
     // Audio ladder tier 2 — matches native laplace_modality_tier_type_id
     // (blake3("Window")); the audio lanes' "Frame" registration was the split.
