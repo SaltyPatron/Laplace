@@ -49,17 +49,6 @@ on:
         description: "exact decomposer source name required when evict_before_ingest is true"
         type: string
         default: ""
-      index_cycle_defer:
-        description: >-
-          Campaign participation ONLY — default false. When a fresh-full-build campaign has
-          dropped the plain secondary indexes up front (`drop-indexes`) and will rebuild them
-          once at the end (`recover-indexes`), set this so THIS phase COPYs into the index-free
-          heaps without rebuilding the campaign's drops at its run start
-          (LAPLACE_INDEX_CYCLE_DEFER). Leave false for every individual re-dispatch: a lone
-          source is an increment, and this phase does NOT drop or rebuild anything on its own —
-          the drop/rebuild bracket is owned by the campaign, never by a single-source call.
-        type: boolean
-        default: false
 
 # No GitHub concurrency group: a group retains only one pending run and is not
 # a FIFO queue. Database serialization is enforced by the ingest mutex.
@@ -77,21 +66,8 @@ env:
   LAPLACE_DATA_ROOT: /vault/Data
   # Journal + ops CSV are the ingest record; keep the job log short.
   LAPLACE_INGEST_CONSOLE: ci
-  # Empty (the default) = no cycling: NpgsqlIndexCycle.Deferred reads only "1"/"true".
-  # Only a campaign sets index_cycle_defer=true, and even then this phase merely refrains
-  # from rebuilding the campaign's up-front drops — it never drops or rebuilds on its own.
-  LAPLACE_INDEX_CYCLE_DEFER: ${{ inputs.index_cycle_defer && '1' || '' }}
-  # Master switch ON for every seed dispatch (2026-08-13). With it unset, single-source
-  # runs paid live secondary-index maintenance for every row — measured 2026-08-12:
-  # attestation COPY at 4.2k rows/s and 21.3KB WAL per consensus insert with all nine
-  # indexes live, vs 7.5KB with them cycled. The volume gates still protect small runs:
-  # cycling fires only once a run's CUMULATIVE staged rows cross MinRowsToCycle and the
-  # live-fraction gate below; the run-end rebuild is one sort-based build per index.
-  LAPLACE_INDEX_CYCLE: '1'
-  # GiST/GIN/expression-heavy tables win from cycling well below staged==live (the
-  # knob's own documentation); 0.2 lets a UD/document-scale increment cycle after the
-  # first ~2-3M rows instead of paying per-row maintenance for the whole run.
-  LAPLACE_INDEX_CYCLE_MIN_FRACTION: '0.2'
+  # Production ingest keeps every index online. COPY batching, partition-local writes,
+  # deduplication, and bulk merge must provide throughput without an index outage.
 
 jobs:
   ingest:
@@ -211,7 +187,7 @@ jobs:
         #
         # An active COPY on the target database means an ingest is running.
         # Wait it out rather than fighting it: a second concurrent ingest
-        # contends on the same apply lock and index cycle, so it is slower for
+        # contends on the same apply lock and write partitions, so it is slower for
         # both. Timeout is generous because a real corpus
         # ingest legitimately runs for hours.
         timeout-minutes: 600

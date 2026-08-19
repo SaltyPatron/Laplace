@@ -75,6 +75,23 @@ canonical lexical-peer batch core (#1164) were integrated in the same batch,
 although they are not decomposer implementations. After the batch, the repository
 had no open pull requests.
 
+## Active correction awaiting merge
+
+- [#1186](https://github.com/SaltyPatron/Laplace/pull/1186) separates parsing a structured ETL record from
+  admitting that record's serialization as content. OMW currently composes each raw
+  TSV row (synset key, field tag, delimiters, and value) and then composes the selected
+  lemma/definition/example again. The corrected vendor masticator reads bounded UTF-8
+  lines directly through the generic multi-file pipeline and sends only the parsed
+  semantic value to `DirectComposeHandler`; no raw-row AST or packaging tree is built.
+- The same correction retires automatic index cycling. Production ingest keeps all
+  indexes online; the workflows and `drop-indexes` command no longer provide a path
+  that removes the read surface. The journal/recovery path remains solely to restore
+  indexes an older interrupted cycle already left absent.
+- The measured reason is explicit: the clean OMW run spent 188.44 of 716.2 seconds
+  rebuilding 30 indexes, while the current document run held indexes unavailable for
+  more than ten minutes during rebuild. Post-merge OMW/document runs must establish
+  throughput with live indexes rather than accepting an outage as an optimization.
+
 ## Remaining product work after integration
 
 ### Generic pipeline and performance
@@ -92,10 +109,15 @@ had no open pull requests.
   OMW 3,438,843 inputs in 716.2 seconds, including a 526.2-second single-file Japanese
   compose critical path and 188.44 seconds rebuilding 30 indexes. OMW's final apply and
   final fold were only 451 milliseconds apart.
+- Remeasure OMW after the structured-record admission correction. The semantic value
+  must still compose at grapheme/content grain; the TSV packaging must create zero
+  content entities/physicalities.
 - Validate end-to-end resume, cancellation, per-file journals, canonical readback,
   and UI progress under actual concurrent multi-file failure/restart scenarios.
 - Audit remaining avoidable index probes, index-only eligibility, partition skew,
   COPY/apply cadence, database round trips, allocations, and bytes per input.
+  Index availability is now an invariant: improve live-index writes instead of
+  dropping the production read surface.
   Tracked by #588, #429, #860, #871, #908, #1008, and #1175.
 
 ### Identity and source fidelity

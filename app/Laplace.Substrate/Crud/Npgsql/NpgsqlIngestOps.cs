@@ -4,7 +4,7 @@ using NpgsqlTypes;
 namespace Laplace.SubstrateCRUD.Npgsql;
 
 /// <summary>
-/// CLI ingest ops: evidence/content counts, index-cycle journal, post-COPY ANALYZE,
+/// CLI ingest ops: evidence/content counts, legacy index-recovery journal, post-COPY ANALYZE,
 /// validation probes. Hosts print; SQL stays here.
 /// </summary>
 public static class NpgsqlIngestOps

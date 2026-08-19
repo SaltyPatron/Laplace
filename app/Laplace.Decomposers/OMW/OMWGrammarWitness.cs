@@ -1,4 +1,3 @@
-using System.Text;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
@@ -9,27 +8,10 @@ namespace Laplace.Decomposers.OMW;
 public enum OmwType { Lemma, Def, Exe }
 public readonly record struct OmwRow(long Offset, char SsType, string Lang, OmwType Type);
 
-internal sealed class OMWGrammarWitness(string fileLang) : IGrammarWitness
+internal static class OMWEmitter
 {
-    public string ModalityId => "tsv";
-
-    public void WalkRow(in GrammarComposeContext composed, in RowContext ctx, SubstrateChangeBuilder b)
-    {
-        OmwRow row;
-        ReadOnlySpan<byte> valueUtf8;
-        if (composed.Composer is { } composer)
-        {
-            if (!OMWRowParser.TryParseFields(
-                    composer.FieldSpans(), composed.Utf8, fileLang, out row, out valueUtf8))
-                return;
-        }
-        else if (!OMWRowParser.TryParseRow(composed.Utf8, fileLang, out row, out valueUtf8))
-            return;
-
-        EmitRow(b, row, valueUtf8);
-    }
-
-    private static void EmitRow(SubstrateChangeBuilder b, in OmwRow row, ReadOnlySpan<byte> valueUtf8)
+    internal static void Emit(
+        SubstrateChangeBuilder b, in OmwRow row, ReadOnlySpan<byte> valueUtf8)
     {
         if (!TryAppendLemmaUtf8(b, valueUtf8, OMWDecomposer.Source, out var root))
             return;

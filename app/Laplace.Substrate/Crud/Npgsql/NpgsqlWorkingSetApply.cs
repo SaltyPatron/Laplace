@@ -66,29 +66,8 @@ public sealed partial class NpgsqlSubstrateWriter
     internal static readonly int ApplyParallelism = CpuTopology.ResolveApplyPartitions();
 
     /// <summary>
-    /// Run-scoped index cycle, active between BeginBulkRunAsync and
-    /// CompleteBulkRunAsync. While active, qualifying applies drop
-    /// secondaries but do NOT rebuild them — the rebuild happens once at
-    /// run end. Only the apply lane touches this (applies are serialized
-    /// by the runner and by the apply advisory lock), so no locking.
-    /// </summary>
-    private NpgsqlIndexCycle? _runCycle;
-
-    // Cumulative staged rows across the whole bulk-run bracket. BeginAsync's
-    // volume gates (MinRowsToCycle, CycleMinLiveFraction) answer "is this RUN
-    // fresh-seed shaped?" — but each apply stages only tens of thousands of
-    // rows, so testing per-apply counts meant the run-scoped cycle could never
-    // fire mid-run no matter how large the run grew (measured 2026-08-12: the
-    // UD/OMW seed paid live secondary maintenance for every row — 21.3KB WAL
-    // per consensus insert across 9 indexes vs 7.5KB with them cycled). The
-    // drop decision is idempotent (each qualifying apply drops whatever still
-    // stands), so passing running totals lets it fire the moment cumulative
-    // volume crosses the gates.
-    private long _runStagedEnts, _runStagedPhys, _runStagedAtts;
-
-    /// <summary>
     /// Run-scoped persisted-id caches for the existence probe, active on the
-    /// same BeginBulkRunAsync/CompleteBulkRunAsync bracket as <see cref="_runCycle"/>.
+    /// BeginBulkRunAsync/CompleteBulkRunAsync bracket.
     /// Inside a bulk run applies are serialized (the runner and the apply advisory
     /// lock) and the substrate is append-only, so any content id THIS run has already
     /// COPYed-and-committed is durably present for the rest of the run — a later
@@ -141,11 +120,9 @@ public sealed partial class NpgsqlSubstrateWriter
 
     public async Task BeginBulkRunAsync(CancellationToken ct = default)
     {
-        // Recover any journaled drops a crashed prior run left behind
-        // BEFORE this run makes its own cycling decisions.
+        // Repair any index an older, interrupted index-cycle run left absent.
+        // Current ingest never drops indexes: the production read surface stays online.
         await NpgsqlIndexCycle.RecoverAsync(_ds, _log, ct);
-        _runCycle = new NpgsqlIndexCycle(_ds, _log);
-        _runStagedEnts = _runStagedPhys = _runStagedAtts = 0;
         _persistedEntityIds = new System.Collections.Concurrent.ConcurrentDictionary<Hash128, byte>();
         _persistedPhysIds = new System.Collections.Concurrent.ConcurrentDictionary<Hash128, byte>();
         _claimedEntityIds = new System.Collections.Concurrent.ConcurrentDictionary<Hash128, byte>();
@@ -160,18 +137,13 @@ public sealed partial class NpgsqlSubstrateWriter
             _log.LogInformation(
                 "WS_APPLY tier-0 gate ON: unicode L0 layer-complete marker present — "
                 + "tier-0 entity ids answer presence client-side, zero probes");
-        // Campaign bulk loads (index secondaries deferred) preload e+p only.
         // Attestation preload (~429s / 85M) is banned in-band.
-        if (EnvFlag.IsSet("LAPLACE_PRESENCE_PRELOAD")
-            || NpgsqlIndexCycle.Deferred)
+        if (EnvFlag.IsSet("LAPLACE_PRESENCE_PRELOAD"))
             await PreloadPresenceSetsAsync(ct).ConfigureAwait(false);
     }
 
-    public async Task CompleteBulkRunAsync(CancellationToken ct = default)
+    public Task CompleteBulkRunAsync(CancellationToken ct = default)
     {
-        var cycle = _runCycle;
-        _runCycle = null;
-        _runStagedEnts = _runStagedPhys = _runStagedAtts = 0;
         _persistedEntityIds = null;
         _persistedPhysIds = null;
         _claimedEntityIds = null;
@@ -181,8 +153,7 @@ public sealed partial class NpgsqlSubstrateWriter
         _physPresenceComplete = false;
         Laplace.Decomposers.Abstractions.ContentLadderLedger.End();
         _tier0LayerComplete = false;
-        if (cycle is not null)
-            await cycle.FinishAsync(ct);
+        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -476,15 +447,10 @@ public sealed partial class NpgsqlSubstrateWriter
             // a separate EXISTS roster caused PostgreSQL to aggregate every
             // entity partition once per apply on large targets.
             //
-            // These probes MUST NOT run on the control tx: they leave
-            // AccessShareLock on every partition of the probed tables for the
-            // rest of the apply, and cycle.BeginAsync below issues DROP INDEX
-            // (AccessExclusive) on those same tables from a sibling connection
-            // — a self-deadlock this process cannot resolve (measured
-            // 2026-08-13: foundation seed wedged 22+ min at unicode, DROP
-            // queued behind our own idle-in-transaction probe locks). Pooled
-            // connections give the same visibility: every snapshot starts
-            // after the apply advisory lock was acquired.
+            // These probes do not run on the control transaction: pooled connections
+            // release their AccessShare locks as soon as each probe completes while
+            // preserving the same visibility (every snapshot starts after the apply
+            // advisory lock was acquired).
             long physEmptySkip = 0, attEmptySkip = 0;
             long entInvertResolved = 0;
             var presentFromInvert = new HashSet<Hash128>();
@@ -885,62 +851,14 @@ public sealed partial class NpgsqlSubstrateWriter
             }
             else
             {
-                // Bulk COPY fans out across connections owning DISJOINT
-                // index keyspaces (sorted + range-partitioned: id for btree
-                // tables, hilbert for the coord GiST). Fresh-seed-shaped
-                // volumes additionally cycle secondary indexes: drop → COPY
-                // clean heaps → parallel sort-based rebuilds (journal-backed
-                // for crash recovery). Per-table barriers keep referenced
-                // rows durable before their referencers (entities →
-                // physicalities → attestations). The control tx holds the
-                // advisory lock across the whole window, so no other applier
-                // interleaves; a crash mid-phase leaves no flush-journal
-                // token and the replay's verification subtracts whatever
-                // landed.
-                //
-                // Cycle scope: inside a bulk run the run-scoped cycle owns
-                // the indexes — each qualifying apply drops whatever is
-                // still standing (idempotent: dropped indexes no longer
-                // appear in pg_index) and the ONE rebuild happens at
-                // CompleteBulkRunAsync. Outside a bulk run (no bracket),
-                // the apply cycles locally as before. Correct with the
-                // indexes down between applies: every write-lane presence
-                // probe (*_stored_bitmap / *_present_ordinals) is a PK
-                // lookup, and PK/unique/exclusion never cycle.
-                var cycle = _runCycle;
-                bool runScoped = cycle is not null;
-                if (cycle is null)
-                {
-                    cycle = new NpgsqlIndexCycle(_ds, _log);
-                    await NpgsqlIndexCycle.RecoverAsync(_ds, _log, ct);
-                }
-                // Inside a bulk run the volume gates see CUMULATIVE staged rows
-                // (_runStagedEnts and siblings): the bracket owns the whole run,
-                // so the fresh-seed-shaped question is about the run's volume,
-                // not one apply's ~50k rows — per-apply counts could never cross
-                // MinRowsToCycle and the bracket never fired (2026-08-12 seeds
-                // paid live-index maintenance end to end). Outside a bracket the
-                // local cycle keeps per-apply semantics unchanged.
-                long entStaged = keptEnts.Count, physStaged = keptPhys.Count, attStaged = keptAtts.Count;
-                if (runScoped)
-                {
-                    entStaged = Interlocked.Add(ref _runStagedEnts, entStaged);
-                    physStaged = Interlocked.Add(ref _runStagedPhys, physStaged);
-                    attStaged = Interlocked.Add(ref _runStagedAtts, attStaged);
-                }
-                await cycle.BeginAsync(new[]
-                {
-                    ("entities", entStaged),
-                    ("physicalities", physStaged),
-                    ("attestations", attStaged),
-                    // Consensus is written by the client fold, which has no cycle
-                    // of its own and paid 6 live secondary-index inserts per novel
-                    // row (fold collapsed to ~5K rel/s on the big sources). Drop
-                    // them in the same run-scoped bracket, rebuilt once at run end;
-                    // the fold's prior-read is a PK lookup, unaffected by dropping
-                    // the secondaries. Staged proxied by the attestation count.
-                    ("consensus", attStaged),
-                }, ct);
+                // Bulk COPY fans out across connections owning disjoint primary-key ranges.
+                // All production indexes remain online throughout the apply; partitioning and
+                // batching reduce write amplification without taking the read surface down.
+                // Per-table barriers keep referenced rows durable before their referencers
+                // (entities → physicalities → attestations). The control transaction holds the
+                // advisory lock across the whole window, so no other applier interleaves; a crash
+                // mid-phase leaves no flush-journal token and replay verification subtracts what
+                // already landed.
 
                 // Entities COMPLETE first — the structural attestation
                 // novelty rule (and crash recovery) depends on "attestation
@@ -973,8 +891,6 @@ public sealed partial class NpgsqlSubstrateWriter
                 pIns = keptPhys.Count;
                 aIns = keptAtts.Count;
 
-                if (!ReferenceEquals(cycle, _runCycle))
-                    await cycle.FinishAsync(ct);
             }
 
             if (mergeRows.Count > 0)

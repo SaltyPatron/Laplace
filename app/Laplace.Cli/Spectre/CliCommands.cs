@@ -267,14 +267,7 @@ internal sealed class RebuildPhysIndexesCommand : ForwardCommand<TailSettings>
         => IngestCommands.RebuildPhysIndexesAsync();
 }
 
-[Description("Drop core indexes (maintenance).")]
-internal sealed class DropIndexesCommand : ForwardCommand<TailSettings>
-{
-    protected override Task<int> ExecuteAsync(CommandContext ctx, TailSettings s, CancellationToken ct)
-        => IngestCommands.DropCoreIndexesAsync();
-}
-
-[Description("Recover cycled indexes after an interrupted maintenance run.")]
+[Description("Recover indexes left absent by a legacy interrupted index-cycle run.")]
 internal sealed class RecoverIndexesCommand : ForwardCommand<TailSettings>
 {
     protected override Task<int> ExecuteAsync(CommandContext ctx, TailSettings s, CancellationToken ct)

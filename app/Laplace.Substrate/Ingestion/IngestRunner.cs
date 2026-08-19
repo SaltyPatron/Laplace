@@ -313,12 +313,8 @@ public sealed class IngestRunner
 
         bool syncIngest = false;
 
-        // The RUN is the index-cycle scope. Rebuilding an index scans the
-        // whole live table, so per-apply cycling costs
-        // O(applies × table size); bracketing the run drops once at the
-        // first qualifying apply and rebuilds exactly once, in the finally
-        // below. A crash before the finally is covered by the writer's
-        // index-cycle journal (recovered at the next run's begin).
+        // The writer's run bracket owns exact presence caches, fold lanes,
+        // recovery checks, and the terminal completion barrier. Indexes stay online.
         if (_ladderSource != decomposer.SourceId)
         {
             ContentLadderLedger.Reset();
@@ -489,21 +485,7 @@ public sealed class IngestRunner
                 // up to ApplyParallelism COPY conns (and merge fans). Force-run on this
                 // host (max_connections=60) with workers=8 × ~12 COPY blew 53300 too-many
                 // clients, then left half-committed attestations and 23505 races.
-                // Parallel apply under Deferred still 23505s on attestation PKs even with
-                // claim dicts + conn budget (measured 2026-08-06 Wiktionary --force:
-                // workers=2, attestations_r_has_definition_h1_pkey). Keep apply serial
-                // until claim-before-COPY is proven under multi-writer; compose fan can
-                // still run. Wrong parallelism is slower and corrupt.
                 int applyWorkers = IngestTopology.Current.ApplyDispatchWorkers;
-                if (workingSet
-                    && Laplace.SubstrateCRUD.Npgsql.NpgsqlIndexCycle.Deferred
-                    && options.ParallelWorkers > 1)
-                {
-                    log.LogInformation(
-                        "INGEST_PARALLEL_APPLY disabled (serial apply); "
-                        + "ParallelWorkers={W} ignored until attestation claim is race-free",
-                        options.ParallelWorkers);
-                }
 
                 var applyChannel = applyWorkers > 1
                     ? Channel.CreateBounded<List<SubstrateChange>>(new BoundedChannelOptions(applyWorkers * 2)
@@ -822,10 +804,7 @@ public sealed class IngestRunner
         // Zero-novel re-ingest did not add traffic — the default-partition scan is a
         // multi-second catalog read on a populated box and must not sit on the process
         // completion envelope after a no-op fold.
-        // Partition-pressure scan walks consensus_rdefault; with secondaries down
-        // under DEFER it is a multi-minute heap scan after INGEST_COMPLETE.
-        if (result.EntitiesInserted + result.PhysicalitiesInserted + result.AttestationsInserted > 0
-            && !Laplace.SubstrateCRUD.Npgsql.NpgsqlIndexCycle.Deferred)
+        if (result.EntitiesInserted + result.PhysicalitiesInserted + result.AttestationsInserted > 0)
             await ReportPartitionPressureAsync(log, ct);
         if (emptySourceNoOp)
             throw new InvalidOperationException(

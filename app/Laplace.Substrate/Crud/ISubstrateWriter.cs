@@ -83,22 +83,16 @@ public interface ISubstrateWriter
         => Task.FromResult((0, 0, 0));
 
     /// <summary>
-    /// Declares that a bulk ingest run is starting. Writers that cycle
-    /// secondary indexes for fresh-seed-shaped applies scope the cycle to
-    /// the whole run: drop at the first qualifying apply, keep them down
-    /// across every apply of the run, rebuild once at
-    /// <see cref="CompleteBulkRunAsync"/>. Rebuild cost is a full-table
-    /// scan per index, so per-apply cycling is O(applies × table size) —
-    /// the run, not the apply, is the correct scope. No-op by default.
+    /// Declares that a bulk ingest run is starting. Implementations use this boundary for
+    /// run-scoped caches, recovery checks, and other writer state. Production indexes remain
+    /// online throughout the run. No-op by default.
     /// </summary>
     Task BeginBulkRunAsync(CancellationToken ct = default)
         => Task.CompletedTask;
 
     /// <summary>
-    /// Ends the bulk run declared by <see cref="BeginBulkRunAsync"/>:
-    /// rebuilds whatever indexes the run dropped. Must be called on every
-    /// exit path (the index-cycle journal makes a missed call recoverable,
-    /// not free — reads degrade until the next recovery). No-op by default.
+    /// Ends the bulk run declared by <see cref="BeginBulkRunAsync"/> and releases run-scoped
+    /// writer state. No-op by default.
     /// </summary>
     Task CompleteBulkRunAsync(CancellationToken ct = default)
         => Task.CompletedTask;
@@ -107,7 +101,7 @@ public interface ISubstrateWriter
     /// Ends a bulk run while reporting the two completion barriers separately.
     /// The default writer has no queued consensus lane, so its only barrier is
     /// writer maintenance. Consensus-accumulating writers override this to
-    /// report the fold drain before the inner writer's index maintenance.
+    /// report the fold drain before the inner writer's completion work.
     /// </summary>
     Task CompleteBulkRunAsync(
         Action<BulkRunCompletionPhase>? onPhase,

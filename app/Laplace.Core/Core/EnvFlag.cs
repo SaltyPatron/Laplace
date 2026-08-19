@@ -4,11 +4,9 @@ namespace Laplace.Engine.Core;
 /// One reading of a boolean environment variable.
 ///
 /// Before this there were four, and they disagreed on what "on" means:
-/// CpuTopology trimmed and lowercased then matched 1/true/yes; NpgsqlIndexCycle
-/// matched only the literals "1"/"true"/"TRUE", so LAPLACE_INDEX_CYCLE_DEFER=True
-/// or a trailing space silently left the index bracket OFF with no error — on the
-/// exact flag a seed campaign depends on for its fast path; CopyBlobValidator
-/// tested != "0", which makes any typo mean "on" for an opt-OUT flag.
+/// CpuTopology trimmed and lowercased then matched 1/true/yes while other callers
+/// matched only selected literal spellings; CopyBlobValidator tested != "0",
+/// which makes any typo mean "on" for an opt-OUT flag.
 ///
 /// The disagreement is the defect, not any one spelling. This accepts
 /// 1/true/yes/on and their negations, case- and whitespace-insensitive, and
