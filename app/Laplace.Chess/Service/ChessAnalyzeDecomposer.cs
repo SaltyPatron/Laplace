@@ -34,7 +34,6 @@ public sealed class ChessAnalyzeDecomposer
     public override Hash128 TrustClassId => ChessVocabulary.AnalysisTrustClass;
     protected override double SourceTrust => TC.StructuredCorpus;
     protected override string BatchLabelPrefix => "chess/analysis";
-    protected override int DefaultBatchSize => BatchConfigDefaults.Chess;
 
     public override int EstimatedBytesPerRecord => IngestSourceProfile.ChessAnalyze.EstBytesPerRecord;
     public override int EstimatedComposeUnitsPerRecord => IngestSourceProfile.ChessAnalyze.EstComposeUnitsPerRecord;
@@ -56,7 +55,7 @@ public sealed class ChessAnalyzeDecomposer
                 "ChessAnalysis requires a live Postgres substrate (NpgsqlSubstrateReader). "
                 + "Record games first: laplace ingest chess <pgn>");
 
-        var ws = IngestPipelineDefaults.ResolveWorkingSet(PipelineProfile, options, DefaultBatchSize);
+        var ws = IngestPipelineDefaults.ResolveWorkingSet(PipelineProfile, options);
         _candidatesStreamed = 0;
         await foreach (var witnessed in ChessWitnessHydrator.StreamUnanalyzedEventsAsync(
                            ds, ContainmentReader!, ws.Batch, ct))

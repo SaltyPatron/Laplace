@@ -100,7 +100,7 @@ public sealed class IngestRecordSizeMeasurementTests
         double ratio = (double)declared / measured;
         Assert.True(ratio is > 0.667 and < 1.5,
             $"IngestSourceProfile.Wiktionary declares {declared} bytes/record but the corpus "
-            + $"measures {measured} ({ratio:F2}x). Re-derive it -- batch size is "
-            + "TargetBytesPerBatch / this number, so drift here costs the whole run.");
+            + $"measures {measured} ({ratio:F2}x). Re-derive it -- this is the "
+            + "per-worker memory denominator, so drift here costs the whole run.");
     }
 }

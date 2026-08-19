@@ -335,15 +335,15 @@ public static class MediaIngestSupport
 {
     public static IngestBatchConfig PipelineConfig(
         Hash128 sourceId, double witnessWeight, string batchLabelPrefix,
-        ISubstrateReader? reader, IngestSourceProfile profile, int batchSize = 16)
+        ISubstrateReader? reader, IngestSourceProfile profile, DecomposerOptions? options = null)
     {
-        var ws = IngestPipelineDefaults.ResolveWorkingSet(profile, defaultBatch: batchSize);
+        var ws = IngestPipelineDefaults.ResolveWorkingSet(profile, options);
         return new()
         {
             SourceId = sourceId,
             BatchLabelPrefix = batchLabelPrefix,
-            BatchSize = Math.Clamp(ws.Batch, 1, 256),
-            ProbeChunkSize = Math.Clamp(ws.ProbeChunk, 16, 256),
+            BatchSize = ws.Batch,
+            ProbeChunkSize = ws.ProbeChunk,
             WitnessWeight = witnessWeight,
             ContainmentReader = reader,
             WorkingSet = WorkingSetMode.Enabled,

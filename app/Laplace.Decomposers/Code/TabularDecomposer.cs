@@ -34,7 +34,6 @@ public sealed class TabularDecomposer
     public override int LayerOrder => 2;
     protected override double SourceTrust => TC.StructuredCorpus;
     protected override string BatchLabelPrefix => "tabular";
-    protected override int DefaultBatchSize => BatchConfigDefaults.HighVolume;
 
     public override IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
 

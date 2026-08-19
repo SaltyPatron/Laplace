@@ -197,7 +197,7 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>
             IDecomposerContext context, DecomposerOptions options) =>
             IngestPipelineDefaults.ApplyMaxInputUnits(
                 IngestPipelineDefaults.Compose(
-                    SourceId, BatchLabelPrefix, ResolveBatch(options), options, context.Reader, PipelineProfile),
+                    SourceId, BatchLabelPrefix, options, context.Reader, PipelineProfile),
                 options);
     }
 

@@ -22,7 +22,6 @@ public sealed class ChessOpeningsDecomposer(bool recursive = false)
     public override Hash128 TrustClassId => ChessVocabulary.OpeningsTrustClass;
     protected override double SourceTrust => TC.AcademicCurated;
     protected override string BatchLabelPrefix => "chess/openings";
-    protected override int DefaultBatchSize => BatchConfigDefaults.ChessOpening;
 
     private const double OpeningWitnessWeight = 0.7;
 

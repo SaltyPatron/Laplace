@@ -2,27 +2,27 @@
 --
 -- NATIVE (2026-07-21, GH #565): the body lives in C (src/fold_route.c).
 -- Consensus is content: dedup it the way ingest dedups laplace.entities. The batch is
--- split by what it IS, per relation type:
---   * EXISTING cells  -> bulk UPDATE, re-fold against current state;
---   * NOVEL cells     -> bulk INSERT; INSERT tuple-routes to the one owning
---                        leaf, and NOT EXISTS (literal type -> pruned) proves
---                        novelty, so there is NO conflict to arbitrate.
+-- split by what it IS, per relation type, then one MERGE handles matched and novel
+-- cells against the literal-routed relation partition. Existing cells re-fold from
+-- stored state; novel cells fold from the neutral prior.
 --
 -- History of the SQL forms this replaces (all measured, kept so nobody
 -- re-tries them):
---  * MERGE: fans out across ALL consensus leaves because the partition key is
---    a runtime join value (2026-07-16, the CILI 7-minute peg).
+--  * Runtime-key MERGE: fanned out across ALL consensus leaves because type_id
+--    arrived from the join (2026-07-16, the CILI 7-minute peg). This no longer
+--    describes the native router: it embeds type_id as a plan literal, and PG18
+--    prunes to the owning LIST partition before the matched/unmatched join.
 --  * per-type loop re-unnesting the FULL arrays each iteration: O(2·N·T)
 --    materializations (21s insert / 60s re-fold at N=200k,T=10).
 --  * BATCH-ONCE temp table (2026-07-16): correct and O(N) — but still a fresh
 --    CREATE TEMP TABLE + CREATE INDEX + ANALYZE on every call, and generic
 --    per-type statements re-planned per call.
 --
--- The native routing groups the batch by type in C and executes SESSION-CACHED
--- prepared plans per type whose type_id is a LITERAL in the plan text (HTAB of
--- type -> SPI_keepplan'd plan in TopMemoryContext): LIST pruning once per
--- (backend, type) reused across every call, HASH pruning per row, no temp
--- table, no ANALYZE, no re-plan.
+-- The native routing groups the batch by type in C and executes one SESSION-CACHED
+-- MERGE plan per type whose type_id is a LITERAL in the plan text (HTAB of type ->
+-- SPI_keepplan'd plan in TopMemoryContext): LIST pruning once per (backend, type),
+-- matched/unmatched decided in one target join, HASH pruning per row, no temp table,
+-- no ANALYZE, no re-plan, and no UPDATE-then-NOT-EXISTS double probe.
 --
 -- One implementation per fact, preserved:
 --  * the Glicko fold runs in the SAME native scalar the plpgsql called

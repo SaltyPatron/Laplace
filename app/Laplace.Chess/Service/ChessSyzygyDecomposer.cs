@@ -32,7 +32,6 @@ public sealed class ChessSyzygyDecomposer
     public override bool PerFileCompletion => true;
     protected override double SourceTrust => TC.StandardsDerived;
     protected override string BatchLabelPrefix => "chess/syzygy";
-    protected override int DefaultBatchSize => BatchConfigDefaults.Chess;
 
     public override int EstimatedBytesPerRecord => IngestSourceProfile.ChessAnalyze.EstBytesPerRecord;
     public override int EstimatedComposeUnitsPerRecord => IngestSourceProfile.ChessAnalyze.EstComposeUnitsPerRecord;
@@ -119,7 +118,7 @@ public sealed class ChessSyzygyDecomposer
     protected override IngestBatchConfig ConfigForFile(
         string fileLabel, ISubstrateReader? reader, DecomposerOptions options) =>
         IngestPipelineDefaults.Compose(
-            SourceId, $"{BatchLabelPrefix}/{fileLabel}", DefaultBatchSize, options, reader, PipelineProfile);
+            SourceId, $"{BatchLabelPrefix}/{fileLabel}", options, reader, PipelineProfile);
 
     public (string Status, string Detail)? ExplainEmptyRun(long declaredInputUnits)
     {

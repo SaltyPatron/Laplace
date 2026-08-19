@@ -48,7 +48,7 @@ public sealed class MapNetDecomposer : DecomposerMultiFile<CategoryCorrespondenc
         string fileLabel, ISubstrateReader? reader, DecomposerOptions options) =>
         IngestPipelineDefaults.ApplyMaxInputUnits(
             IngestPipelineDefaults.CategoryCorrespondence(
-                Source, fileLabel, DefaultBatchSize, options, reader),
+                Source, fileLabel, options, reader),
             options);
 
     public Task<IngestInventory?> DescribeInputAsync(

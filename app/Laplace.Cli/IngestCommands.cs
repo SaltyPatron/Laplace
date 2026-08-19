@@ -542,9 +542,8 @@ internal static class IngestCommands
                 out var mu) && mu > 0 ? mu : 0;
         var profile = sizingProfile ?? IngestSourceProfile.Default;
         // MEASURE the record size from the file in hand instead of trusting the per-source
-        // constant. EstBytesPerRecord is the DENOMINATOR in ResolveRecordBatch
-        // (TargetBytesPerBatch / estBytesPerRecord), so a wrong value silently halves or
-        // quadruples every batch for the whole run.
+        // constant. EstBytesPerRecord is the denominator of the per-worker memory
+        // calculation, so a wrong value silently shrinks or expands every batch.
         //
         // The constants are demonstrably wrong, and worse, one constant cannot be right for
         // one source: MEASURED 2026-08-01, WiktionaryDecomposer ingests BOTH

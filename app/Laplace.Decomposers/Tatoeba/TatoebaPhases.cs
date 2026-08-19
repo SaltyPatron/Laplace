@@ -67,9 +67,7 @@ internal abstract class TatoebaPhase : DecomposerPhase<TatoebaIngestRecord>
     protected override IngestBatchConfig BuildPipelineConfig(
         IDecomposerContext context, DecomposerOptions options) =>
         IngestPipelineDefaults.Compose(
-            SourceId, BatchLabelPrefix,
-            IngestPipelineDefaults.ResolveBatch(IngestSourceProfile.Tatoeba, options),
-            options, context.Reader, IngestSourceProfile.Tatoeba);
+            SourceId, BatchLabelPrefix, options, context.Reader, IngestSourceProfile.Tatoeba);
 
     protected override async IAsyncEnumerable<TatoebaIngestRecord> ExtractRecordsAsync(
         string ecosystemPath, DecomposerOptions options,

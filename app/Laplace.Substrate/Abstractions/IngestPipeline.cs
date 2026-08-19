@@ -670,7 +670,7 @@ public static class IngestBatchPipeline
                ?? IngestSizing.ResolveWorkingSetProbeInterval(
                    config.BatchSize, config.WorkingSetProfile ?? IngestSourceProfile.Default))
             : config.ProbeChunkSize;
-        var pending = new List<TRecord>(Math.Min(probeInterval, 65_536));
+        var pending = new List<TRecord>(probeInterval);
         var probedAbsent = config.WorkingSet ? new HashSet<Hash128>() : null;
 
         // Working sets yield nothing mid-stream, which starves every
@@ -1177,7 +1177,6 @@ public static class IngestBatchPipeline
                             _ => handlerFactory(source.FileLabel),
                             _ => config,
                             segments,
-                            MonolithSegmenter.ResolveChunkRecords(config),
                             source.FileLabel,
                             ct)
                         : RunAsync(records, handlerFactory(source.FileLabel), config, ct);

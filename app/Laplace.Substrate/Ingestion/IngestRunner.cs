@@ -276,9 +276,8 @@ public sealed class IngestRunner
         //
         // Coalesce finalized fragments here. Their deferred trees have already been
         // drained and disposed, so the compose-memory reason for closing them no longer
-        // applies. The byte and row caps remain the apply safety boundary; the file-
+        // applies. The byte envelope remains the apply safety boundary; the file-
         // boundary floor below remains the durability/UI-progress boundary.
-        const int workingSetApplyRowCap = 400_000;
 
         // A file boundary is a commit OPPORTUNITY, not a commit requirement
         // (2026-07-21). Flushing on EVERY boundary shreds a many-small-files
@@ -295,7 +294,8 @@ public sealed class IngestRunner
         // advances files=n/N live (in steps of several files) and still bounds
         // what a cancelled run loses. Per-FILE visibility does not depend on
         // this: INGEST_FILE_COMPOSED/COMMITTED name every file individually.
-        long boundaryCommitFloor = applyEnvelope / 8;
+        long boundaryCommitFloor = applyEnvelope
+            / Math.Max(1, topo.ApplyPartitions);
 
         static bool IsPeriodBoundary(SubstrateChange c) =>
             c.Metadata.SourceContentUnitName.StartsWith(
@@ -304,7 +304,7 @@ public sealed class IngestRunner
         bool ShouldFlushWithCap(int intents, int rows) =>
             workingSet
                 ? ShouldFlushWorkingSet(
-                    wsBytes, rows, applyEnvelope, workingSetApplyRowCap)
+                    wsBytes, applyEnvelope)
                 : ShouldFlush(intents, rows) || intents >= maxIntentsPerCommit;
 
 
@@ -841,8 +841,8 @@ public sealed class IngestRunner
     /// transactions and indexed probes into the shared generic apply lane.
     /// </summary>
     internal static bool ShouldFlushWorkingSet(
-        long bufferedBytes, int bufferedRows, long byteCap, int rowCap) =>
-        bufferedBytes >= byteCap || bufferedRows >= rowCap;
+        long bufferedBytes, long byteCap) =>
+        bufferedBytes >= byteCap;
 
     /// <summary>
     /// A working-set apply is owned by one witness vendor. Composite decomposers may

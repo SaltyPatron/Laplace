@@ -262,17 +262,17 @@ public static class UdIngestSupport
     }
 
     public static IngestBatchConfig PipelineConfig(
-        Hash128 sourceId, string batchLabelPrefix, int batchSentences, ISubstrateReader? reader,
+        Hash128 sourceId, string batchLabelPrefix, DecomposerOptions options, ISubstrateReader? reader,
         long maxInputUnits = 0)
     {
         var profile = IngestSourceProfile.UdSentence;
-        var ws = IngestPipelineDefaults.ResolveWorkingSet(profile, defaultBatch: batchSentences);
+        var ws = IngestPipelineDefaults.ResolveWorkingSet(profile, options);
         return new()
         {
             SourceId = sourceId,
             BatchLabelPrefix = batchLabelPrefix,
             BatchSize = ws.Batch,
-            ProbeChunkSize = Math.Clamp(ws.ProbeChunk, 64, 512),
+            ProbeChunkSize = ws.ProbeChunk,
             ContainmentReader = reader,
             MaxInputUnits = maxInputUnits,
             EnableDeferredContentOnBuilder = false,
@@ -286,6 +286,4 @@ public static class UdIngestSupport
         };
     }
 
-    public static int ResolveBatchSentences(DecomposerOptions options) =>
-        IngestPipelineDefaults.ResolveBatch(IngestSourceProfile.UdSentence, options);
 }

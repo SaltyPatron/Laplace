@@ -60,16 +60,15 @@ public static class MonolithSegmenter
 
     /// <summary>
     /// Records per dispatch chunk — the round-robin unit handed to a segment. A chunk is a
-    /// list of WHOLE records, so cutting the stream here is record-aligned. Kept small (a
-    /// fraction of the working-set probe interval) so records spread evenly across segments
-    /// and the in-flight raw-record buffers stay bounded: at most segments x depth x chunk
-    /// RECORDS are buffered — the cheap parsed records, never their composed tier trees,
-    /// which remain bounded by each segment's own working-set flush envelope.
+    /// list of WHOLE records, so cutting the stream here is record-aligned. Every segment
+    /// receives one fair share of the machine-sized probe interval; there is no independent
+    /// 256/8192 dispatch limiter competing with the central source plan.
     /// </summary>
-    public static int ResolveChunkRecords(IngestBatchConfig config)
+    public static int ResolveChunkRecords(IngestBatchConfig config, int segments)
     {
-        int probe = config.WorkingSetProbeInterval ?? 4096;
-        return Math.Clamp(probe / 4, 256, 8192);
+        var shared = config.WithWorkingSetConcurrency(Math.Max(1, segments));
+        int probe = shared.WorkingSetProbeInterval ?? shared.BatchSize;
+        return Math.Max(1, (probe + Math.Max(1, segments) - 1) / Math.Max(1, segments));
     }
 
     /// <summary>
@@ -82,7 +81,6 @@ public static class MonolithSegmenter
         Func<int, IIngestRecordHandler<TRecord>> handlerFactory,
         Func<int, IngestBatchConfig> configFactory,
         int segments,
-        int chunkRecords,
         string progressLabel,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
@@ -95,19 +93,19 @@ public static class MonolithSegmenter
             yield break;
         }
 
-        chunkRecords = Math.Max(1, chunkRecords);
+        int chunkRecords = ResolveChunkRecords(configFactory(0), segments);
 
-        // One bounded input channel per segment carries record-aligned chunks (lists of
-        // whole records). The bounded depth backpressures the dispatcher to the real compose
-        // rate, so the dispatched-record counter below is a faithful live compose gauge.
+        // One outstanding record chunk and one outstanding composed change per active
+        // segment is sufficient to overlap dispatcher, compose, and consumer. Queue memory
+        // therefore scales with actual topology instead of fixed depth multipliers.
         var inputs = new Channel<List<TRecord>>[segments];
         for (int s = 0; s < segments; s++)
             inputs[s] = Channel.CreateBounded<List<TRecord>>(
-                new BoundedChannelOptions(2)
+                new BoundedChannelOptions(1)
                 { FullMode = BoundedChannelFullMode.Wait, SingleWriter = true, SingleReader = true });
 
         var outCh = Channel.CreateBounded<SubstrateChange>(
-            new BoundedChannelOptions(segments * 4)
+            new BoundedChannelOptions(segments)
             { FullMode = BoundedChannelFullMode.Wait, SingleWriter = false, SingleReader = true });
 
         long dispatched = 0;
@@ -116,7 +114,7 @@ public static class MonolithSegmenter
         var dispatcher = Task.Run(async () =>
         {
             int rr = 0;
-            long sinceReport = 0;
+            long lastReportMs = 0;
             var buf = new List<TRecord>(chunkRecords);
             await foreach (var rec in stream.RecordsAsync(ct))
             {
@@ -129,9 +127,10 @@ public static class MonolithSegmenter
                     // Live compose telemetry DURING the run (dispatch is backpressured to the
                     // compose rate by the bounded input channels), with the source's name —
                     // not silence until the commit.
-                    if ((sinceReport += buf.Count) >= 262_144)
+                    long nowMs = sw.ElapsedMilliseconds;
+                    if (nowMs - lastReportMs >= IngestConsoleMode.ProgressMinIntervalMs)
                     {
-                        sinceReport = 0;
+                        lastReportMs = nowMs;
                         Console.WriteLine(
                             $"SEGMENTED_COMPOSE {progressLabel}: {n:N0} records across "
                             + $"{segments} segments "

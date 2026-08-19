@@ -76,21 +76,11 @@ public sealed class ModelTokenEdgeETL
     // convergence, and the physicality's 4-space coordinate (below) puts two
     // checkpoints' matching circuits next to each other under physicalities_coord_gist.
 
-    // Testimony width per circuit. NOT a hand-set k: it is one target compose
-    // batch's record count (IngestSizing.TargetBytesPerBatch /
-    // IngestSizing.DefaultEstBytesPerRecord) divided across the intents the sizing
-    // authority permits one commit (IngestSizing.MaxIntentsPerCommitCap) — one
-    // circuit's testimony is one intent's share of one batch.
-    //
-    // Read off the sizing authority's CONSTANTS and deliberately not off
-    // ResolveForSource: k decides WHICH consensus cells exist, so a machine-derived
-    // k would make two boxes disagree about content. _rowsPerChange below is
-    // machine-derived because it only decides how rows are GROUPED, never which
-    // rows there are.
-    private static readonly int TopTokensPerCircuit =
-        IngestSizing.TargetBytesPerBatch
-        / IngestSizing.DefaultEstBytesPerRecord
-        / IngestSizing.MaxIntentsPerCommitCap;
+    // Semantic materialization width, not an execution batch/cap. This must remain
+    // topology-independent because it decides which consensus cells exist. The full,
+    // lossless circuit assertion is the factor trajectory; removing this compatibility
+    // projection requires its readers to move to trajectory containment first.
+    private const int TopTokensPerCircuit = 64;
 
     /// <summary>Per-circuit testimony width — the bound the row-count regression pins.</summary>
     public static int TestimonyWidthPerCircuit => TopTokensPerCircuit;
@@ -473,6 +463,9 @@ public sealed class ModelTokenEdgeETL
             MemoryTopology.WorkingSetBudgetBytes / (4 * Math.Max(1, perDeposit)),
             1, _rowsPerChange);
 
+        var depositProfile = new IngestSourceProfile(
+            (int)Math.Min(int.MaxValue, Math.Max(1, perDeposit)),
+            ResidentBytesPerComposeUnit: (int)Math.Min(int.MaxValue, Math.Max(1, perDeposit)));
         await foreach (var batch in IngestComposePipeline.RunAsync(
                            EnumerateDepositsAsync(deposits, ct),
                            (dep, b) =>
@@ -502,8 +495,8 @@ public sealed class ModelTokenEdgeETL
                                        ObservedAtUnixUs: IngestClock.NowUnixUs()));
                                }
                            },
-                           _source, label, 1,
-                           reader, options, ct, commitEpoch, rowBudget))
+                           _source, label, reader, options, ct, commitEpoch,
+                           attestationCapacity: rowBudget, profile: depositProfile))
             yield return batch;
     }
 
@@ -1191,7 +1184,7 @@ public sealed class ModelTokenEdgeETL
                                }
                                StageEdgeChunk(b, chunk);
                            },
-                           _source, EdgeBatchLabel(descriptor) + "/occ", 1,
+                           _source, EdgeBatchLabel(descriptor) + "/occ",
                            reader, options, ct, commitEpoch, _rowsPerChange))
             yield return batch;
     }
@@ -1297,7 +1290,7 @@ public sealed class ModelTokenEdgeETL
         await foreach (var batch in IngestComposePipeline.RunAsync(
                            SingleClassifyRecordAsync(record.Value, ct),
                            (rec, b) => HeadClassifier.StageClassifyRecord(b, rec, _source),
-                           _source, "model/decoder-ring", 1, reader, options, ct, commitEpoch))
+                           _source, "model/decoder-ring", reader, options, ct, commitEpoch))
             yield return batch;
     }
 

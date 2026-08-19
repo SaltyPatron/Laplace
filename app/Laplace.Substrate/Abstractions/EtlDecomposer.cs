@@ -109,7 +109,6 @@ public sealed class EtlDecomposer : DecomposerMultiFile<GrammarIngestRecord>, II
         return IngestPipelineDefaults.Compose(
             SourceId,
             fileLabel,
-            IngestPipelineDefaults.ResolveBatch(profile, options),
             options,
             reader,
             profile: profile);

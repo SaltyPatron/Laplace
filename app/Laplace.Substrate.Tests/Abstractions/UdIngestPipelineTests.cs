@@ -21,7 +21,8 @@ public sealed class UdIngestPipelineTests
         const int sentenceCount = 8;
         var records = BuildFakeSentences(sentenceCount);
         var reader = new ProbeTrackingReader(present: false);
-        var config = UdIngestSupport.PipelineConfig(UdSource, "ud-test", batchSentences: sentenceCount, reader);
+        var config = UdIngestSupport.PipelineConfig(
+            UdSource, "ud-test", DecomposerOptions.Default with { BatchSize = sentenceCount }, reader);
         config = new IngestBatchConfig
         {
             SourceId = config.SourceId,
@@ -50,7 +51,8 @@ public sealed class UdIngestPipelineTests
     {
         var records = BuildFakeSentences(6);
         var reader = new ProbeTrackingReader(present: true);
-        var config = UdIngestSupport.PipelineConfig(UdSource, "ud-present", batchSentences: 6, reader);
+        var config = UdIngestSupport.PipelineConfig(
+            UdSource, "ud-present", DecomposerOptions.Default with { BatchSize = 6 }, reader);
         config = new IngestBatchConfig
         {
             SourceId = config.SourceId,
@@ -67,7 +69,8 @@ public sealed class UdIngestPipelineTests
         var baselineHandler = new UdIngestHandler(UdSource, new System.Collections.Concurrent.ConcurrentDictionary<string, byte>());
         var baseline = new List<SubstrateChange>();
         await foreach (var c in IngestBatchPipeline.RunAsync(
-            new UdListRecordStream(records), baselineHandler, UdIngestSupport.PipelineConfig(UdSource, "ud-base", batchSentences: 6, null)))
+            new UdListRecordStream(records), baselineHandler, UdIngestSupport.PipelineConfig(
+                UdSource, "ud-base", DecomposerOptions.Default with { BatchSize = 6 }, null)))
             baseline.Add(c);
         Assert.True(ContentEntityCount(baseline) > 0);
 

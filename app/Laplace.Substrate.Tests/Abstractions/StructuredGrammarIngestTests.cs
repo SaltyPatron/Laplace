@@ -48,7 +48,7 @@ public sealed class StructuredGrammarIngestTests
         {
             await File.WriteAllTextAsync(path, "opaque-7\teng\tselected content\n", Encoding.UTF8);
             var config = IngestPipelineDefaults.Compose(
-                Src, "witness-only", 8, DecomposerOptions.Default, reader: null);
+                Src, "witness-only", DecomposerOptions.Default, reader: null);
             var changes = new List<SubstrateChange>();
             await foreach (var change in IngestBatchPipeline.RunAsync(
                 new GrammarFileRecordStream(path, "tsv"),

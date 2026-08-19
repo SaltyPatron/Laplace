@@ -85,11 +85,10 @@ public sealed class OMWDecomposer : DecomposerMultiFile<OmwIngestRecord, OMWSour
     protected override IngestBatchConfig ConfigForFile(
         string fileLabel, ISubstrateReader? reader, DecomposerOptions options)
     {
-        int batch = IngestPipelineDefaults.ResolveBatch(IngestSourceProfile.Omw, options);
         int slash = fileLabel.LastIndexOf('/');
         string prefix = slash > 0 ? fileLabel[..slash] : fileLabel;
         return IngestPipelineDefaults.Compose(
-            Source, prefix, batch, options, reader, IngestSourceProfile.Omw);
+            Source, prefix, options, reader, IngestSourceProfile.Omw);
     }
 
     public Task<IngestInventory?> DescribeInputAsync(

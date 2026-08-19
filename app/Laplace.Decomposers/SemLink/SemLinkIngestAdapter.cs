@@ -154,7 +154,6 @@ public static class SemLinkIngestSupport
         return IngestPipelineDefaults.Compose(
             sourceId,
             batchLabelPrefix,
-            IngestPipelineDefaults.ResolveBatch(profile, options),
             options,
             reader,
             profile);

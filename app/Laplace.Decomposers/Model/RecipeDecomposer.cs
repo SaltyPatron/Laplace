@@ -32,7 +32,6 @@ public sealed class RecipeDecomposer : ComposeDecomposer<RecipeExtractor.RecipeI
     public override Hash128 TrustClassId => _manifest.TrustClass;
     protected override double SourceTrust => TC.UserCuratedResource;
     protected override string BatchLabelPrefix => "laplace.recipe";
-    protected override int DefaultBatchSize => 1;
 
     public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
         SourceVocabularyBootstrap.RegisterManifestAsync(context, _manifest, ct: ct);

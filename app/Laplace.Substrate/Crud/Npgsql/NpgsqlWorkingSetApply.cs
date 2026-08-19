@@ -42,28 +42,9 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 /// </summary>
 public sealed partial class NpgsqlSubstrateWriter
 {
-    // Was 131_072: a 70–120k-id Wiktionary verify became chunkCount=1 (serial) while
-    // IngestSizing already advertised probe_chunk=16384 for the compose lane. Match
-    // that grain so ApplyParallelism actually fans the bitmap probes.
-    private const int ProbeChunkIds = 16_384;
-
-    /// <summary>
-    /// Rows below this stay on the fully-atomic single-transaction path;
-    /// above it, COPY fans out across connections (per-table barriers keep
-    /// entities durable before physicalities before attestations).
-    /// </summary>
-    private const int ParallelCopyMinRows = 65_536;
-    /// <summary>
-    /// Skip run-cache / ladder ledger fills above this. The fill is dictionary adds
-    /// (~sub-second per million ids) against multi-second applies; the old 100k gate
-    /// silently excluded every Wiktionary working set (738k+ distinct entities), so
-    /// the ledger stayed EMPTY for the whole 2026-08-06 full-file run while its
-    /// staging-site cost was still paid per surface. The gate exists to bound the
-    /// post-COPY tax on pathological id floods, not to starve normal corpora.
-    /// </summary>
-    private const int MaxRunCacheFillIds = 2_000_000;
-
     internal static readonly int ApplyParallelism = CpuTopology.ResolveApplyPartitions();
+    private static readonly IngestSizing.ApplyIoPlan ApplySizing =
+        IngestSizing.ResolveApplyIo(ApplyParallelism);
 
     /// <summary>
     /// Run-scoped persisted-id caches for the existence probe, active on the
@@ -94,6 +75,8 @@ public sealed partial class NpgsqlSubstrateWriter
     private System.Collections.Concurrent.ConcurrentDictionary<Hash128, byte>? _claimedEntityIds;
     private System.Collections.Concurrent.ConcurrentDictionary<Hash128, byte>? _claimedPhysIds;
     private System.Collections.Concurrent.ConcurrentDictionary<Hash128, byte>? _claimedAttIds;
+    private int _persistedEntityCount;
+    private int _persistedPhysCount;
 
     /// <summary>
     /// When true, the matching run cache holds EVERY id in the target at run
@@ -128,10 +111,13 @@ public sealed partial class NpgsqlSubstrateWriter
         _claimedEntityIds = new System.Collections.Concurrent.ConcurrentDictionary<Hash128, byte>();
         _claimedPhysIds = new System.Collections.Concurrent.ConcurrentDictionary<Hash128, byte>();
         _claimedAttIds = new System.Collections.Concurrent.ConcurrentDictionary<Hash128, byte>();
+        _persistedEntityCount = 0;
+        _persistedPhysCount = 0;
         _entityPresenceComplete = false;
         _physPresenceComplete = false;
         // Content roots proven present feed the spine's pre-derivation ladder skip.
-        Laplace.Decomposers.Abstractions.ContentLadderLedger.Begin();
+        Laplace.Decomposers.Abstractions.ContentLadderLedger.Begin(ApplySizing.LadderCacheIds);
+        ApplySizing.Log();
         _tier0LayerComplete = await QueryTier0LayerCompleteAsync(ct);
         if (_tier0LayerComplete)
             _log.LogInformation(
@@ -149,6 +135,8 @@ public sealed partial class NpgsqlSubstrateWriter
         _claimedEntityIds = null;
         _claimedPhysIds = null;
         _claimedAttIds = null;
+        _persistedEntityCount = 0;
+        _persistedPhysCount = 0;
         _entityPresenceComplete = false;
         _physPresenceComplete = false;
         Laplace.Decomposers.Abstractions.ContentLadderLedger.End();
@@ -163,32 +151,45 @@ public sealed partial class NpgsqlSubstrateWriter
     private async Task PreloadPresenceSetsAsync(CancellationToken ct)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        var eTask = LoadRelationIdsBinaryAsync(_persistedEntityIds!, "entities", ct);
-        var pTask = LoadRelationIdsBinaryAsync(_persistedPhysIds!, "physicalities", ct);
+        var eTask = LoadRelationIdsBinaryAsync(
+            _persistedEntityIds!, "entities", ApplySizing.EntityPresenceCacheIds, ct);
+        var pTask = LoadRelationIdsBinaryAsync(
+            _persistedPhysIds!, "physicalities", ApplySizing.PhysicalityPresenceCacheIds, ct);
         await Task.WhenAll(eTask, pTask).ConfigureAwait(false);
-        _entityPresenceComplete = true;
-        _physPresenceComplete = true;
+        _persistedEntityCount = _persistedEntityIds!.Count;
+        _persistedPhysCount = _persistedPhysIds!.Count;
+        _entityPresenceComplete = eTask.Result;
+        _physPresenceComplete = pTask.Result;
         _log.LogInformation(
             "WS_APPLY presence preload: {E:N0}e+{P:N0}p in {Ms:N0}ms — e/p bitmap probes skipped; att still probes",
             _persistedEntityIds!.Count, _persistedPhysIds!.Count,
             sw.ElapsedMilliseconds);
     }
 
-    private async Task LoadRelationIdsBinaryAsync(
+    private async Task<bool> LoadRelationIdsBinaryAsync(
         System.Collections.Concurrent.ConcurrentDictionary<Hash128, byte> into,
-        string table, CancellationToken ct)
+        string table, int capacity, CancellationToken ct)
     {
         await using var conn = await _ds.OpenConnectionAsync(ct).ConfigureAwait(false);
+        // Read at most capacity+1: the extra row proves incompleteness without scanning
+        // a hundred-million-row relation after the acceleration cache is already full.
         // Parent partitioned tables reject COPY tablename TO — use a SELECT query.
+        long limit = (long)capacity + 1;
         await using var exporter = await conn.BeginBinaryExportAsync(
-            $"COPY (SELECT id FROM laplace.{table}) TO STDOUT (FORMAT BINARY)", ct)
+            $"COPY (SELECT id FROM laplace.{table} LIMIT {limit}) TO STDOUT (FORMAT BINARY)", ct)
             .ConfigureAwait(false);
+        bool complete = true;
+        int loaded = 0;
         while (await exporter.StartRowAsync(ct).ConfigureAwait(false) >= 0)
         {
             var raw = await exporter.ReadAsync<byte[]>(NpgsqlDbType.Bytea, ct).ConfigureAwait(false);
             if (raw is { Length: >= 16 })
-                into.TryAdd(Hash128.FromBytes(raw), 0);
+            {
+                if (loaded >= capacity) complete = false;
+                else if (into.TryAdd(Hash128.FromBytes(raw), 0)) loaded++;
+            }
         }
+        return complete;
     }
 
     private async Task<bool> QueryTier0LayerCompleteAsync(CancellationToken ct)
@@ -335,12 +336,14 @@ public sealed partial class NpgsqlSubstrateWriter
         // Entity sort+pack before advisory lock / verify — overlaps
         // open+lock+invert. Contended pack-during-parse was a net loss.
         Task<(byte[][] Payloads, int Groups)>? optimisticEntCopy = null;
-        if (firstEntIdx.Count >= ParallelCopyMinRows && phys.Ids.Count == 0 && atts.Ids.Count == 0)
+        long firstEntBytes = TotalEntityBytes(ents, firstEntIdx);
+        int optimisticGroups = ResolveCopyGroups(firstEntIdx.Count, firstEntBytes);
+        if (optimisticGroups > 1 && phys.Ids.Count == 0 && atts.Ids.Count == 0)
         {
             var idxSnap = firstEntIdx;
             var entsSnap = ents;
             var blobsSnap = entBlobs;
-            int groupsSnap = ResolveCopyGroups(idxSnap.Count, sharedSecondaryKeys: 1);
+            int groupsSnap = optimisticGroups;
             optimisticEntCopy = Task.Run(() =>
             {
                 var payloads = BuildSortedEntityPayloads(
@@ -649,11 +652,6 @@ public sealed partial class NpgsqlSubstrateWriter
             List<KeptRow> keptEnts;
             byte[][]? prebuiltEntPayloads = null;
             int prebuiltEntGroups = 0;
-            // Only allocate the run-cache novel list when we will fill it.
-            var novelEntIds = persistedEnt is null || firstEntIdx.Count > MaxRunCacheFillIds
-                ? null
-                : new List<Hash128>(firstEntIdx.Count);
-            var keptEntTypes = new HashSet<Hash128>();
             bool anyPresent = presentEntities.Count > 0;
             if (optimisticEntCopy is not null)
             {
@@ -663,16 +661,6 @@ public sealed partial class NpgsqlSubstrateWriter
                     prebuiltEntPayloads = prepared.Payloads;
                     prebuiltEntGroups = prepared.Groups;
                     keptEnts = new List<KeptRow> { default };
-                    if (novelEntIds is not null)
-                    {
-                        CollectionsMarshal.SetCount(novelEntIds, firstEntIdx.Count);
-                        var ns = CollectionsMarshal.AsSpan(novelEntIds);
-                        var ids = CollectionsMarshal.AsSpan(ents.Ids);
-                        var idx = CollectionsMarshal.AsSpan(firstEntIdx);
-                        for (int k = 0; k < ns.Length; k++) ns[k] = ids[idx[k]];
-                    }
-                    if (ents.TypeIds.Count > 0)
-                        keptEntTypes.Add(ents.TypeIds[firstEntIdx[0]]);
                 }
                 else
                 {
@@ -690,8 +678,6 @@ public sealed partial class NpgsqlSubstrateWriter
                         keptEnts.Add(new KeptRow(
                             CopyPartitionKey.ForEntityId(eid),
                             CopyPartitionKey.ForEntityId(eid), ents.Rows[i], -1, 0));
-                        novelEntIds?.Add(eid);
-                        if (i < ents.TypeIds.Count) keptEntTypes.Add(ents.TypeIds[i]);
                     }
                     if (eSkip == 0)
                     {
@@ -716,8 +702,6 @@ public sealed partial class NpgsqlSubstrateWriter
                     keptEnts.Add(new KeptRow(
                         CopyPartitionKey.ForEntityId(eid),
                         CopyPartitionKey.ForEntityId(eid), ents.Rows[i], -1, 0));
-                    novelEntIds?.Add(eid);
-                    if (i < ents.TypeIds.Count) keptEntTypes.Add(ents.TypeIds[i]);
                 }
             }
 
@@ -734,9 +718,6 @@ public sealed partial class NpgsqlSubstrateWriter
             // installed read prunes on hilbert, so no KNN ever used the bands.
             var keptPhys = new List<KeptRow>(phys.Rows.Count);
             var seenPhys = new HashSet<Hash128>(phys.Ids.Count);
-            var novelPhysIds = _claimedPhysIds is null && persistedPhys is null
-                ? null
-                : new List<Hash128>(keptPhys.Capacity);
             for (int i = 0; i < phys.Ids.Count; i++)
             {
                 if (!seenPhys.Add(phys.Ids[i])) continue;
@@ -751,7 +732,6 @@ public sealed partial class NpgsqlSubstrateWriter
                     CopyPartitionKey.ForEntityId(pid),
                     CopyPartitionKey.ForHilbertIndex(phys.HilbertKeys[i]),
                     phys.Rows[i], -1, 0));
-                novelPhysIds?.Add(pid);
             }
 
             // Attestations: novel groups COPY their representative (count
@@ -817,12 +797,19 @@ public sealed partial class NpgsqlSubstrateWriter
             int keptEntCount = prebuiltEntPayloads is not null
                 ? firstEntIdx.Count - (int)eSkip
                 : keptEnts.Count;
+            long keptEntBytes = prebuiltEntPayloads is not null
+                ? prebuiltEntPayloads.Sum(static p => (long)p.Length)
+                : TotalKeptBytes(keptEnts);
+            long keptPhysBytes = TotalKeptBytes(keptPhys);
+            long keptAttBytes = TotalKeptBytes(keptAtts);
             _log.LogInformation(
                 "WS_APPLY kept: {E:N0}e/{P:N0}p/{A:N0}a novel after verify in {Ms:N0}ms since verify-start",
                 keptEntCount, keptPhys.Count, keptAtts.Count, phaseSw.ElapsedMilliseconds);
 
             bool parallelCopy = ApplyParallelism > 1
-                && keptEntCount + keptPhys.Count + keptAtts.Count >= ParallelCopyMinRows;
+                && (ResolveCopyGroups(keptEntCount, keptEntBytes) > 1
+                    || ResolveCopyGroups(keptPhys.Count, keptPhysBytes) > 1
+                    || ResolveCopyGroups(keptAtts.Count, keptAttBytes) > 1);
 
             if (!parallelCopy)
             {
@@ -879,13 +866,13 @@ public sealed partial class NpgsqlSubstrateWriter
                 else
                 {
                     rtCopy += await CopyPhaseParallelAsync("entities", IntentStageTable.Entities,
-                        entBlobs, keptEnts, ct, sharedSecondaryKeys: keptEntTypes.Count);
+                        entBlobs, keptEnts, ct);
                 }
                 eIns = keptEntCount;
                 var physCopyTask = CopyPhaseParallelAsync("physicalities", IntentStageTable.Physicalities,
-                    physBlobs, keptPhys, ct, sharedSecondaryKeys: int.MaxValue);
+                    physBlobs, keptPhys, ct);
                 var attCopyTask = CopyPhaseParallelAsync("attestations", IntentStageTable.Attestations,
-                    attBlobs, keptAtts, ct, sharedSecondaryKeys: int.MaxValue);
+                    attBlobs, keptAtts, ct);
                 await Task.WhenAll(physCopyTask, attCopyTask);
                 rtCopy += physCopyTask.Result + attCopyTask.Result;
                 pIns = keptPhys.Count;
@@ -927,7 +914,7 @@ public sealed partial class NpgsqlSubstrateWriter
                 // Same connection-per-group shape as CopyPhaseParallelAsync —
                 // the apply is already multi-transaction there, so this
                 // introduces no new atomicity boundary.
-                const int mergeChunk = 32_768;
+                int mergeChunk = ApplySizing.MergeChunkRows;
                 // CHUNK-level distribution, not whole-type bins (2026-07-21).
                 // The first version packed whole relation types into bins so a
                 // type could never be split across connections. Relation volume
@@ -1046,13 +1033,13 @@ public sealed partial class NpgsqlSubstrateWriter
             // that point still leaves the rows present and a later probe will catch them —
             // the cache is a pure optimization, never a correctness input.)
             //
-            // Fill the probe-skip cache with EVERY distinct entity/phys this working set
-            // staged — not only the novel COPYed subset, and not gated on MaxRunCacheFillIds.
+            // Fill the probe-skip cache with distinct staged ids up to the exact cache's
+            // byte-derived capacity. A full cache simply restores DB probes for misses.
             // After commit, present-at-probe and newly-COPYed rows are equally durable under
             // append-only law. MEASURED 2026-08-04 ChessPgn (OTB year on a DB that already
             // holds another OTB year): first WS staged ~360k distinct entities, verify paid
-            // ~34s with present≈346k, and because firstEntIdx.Count > MaxRunCacheFillIds the
-            // old novel-only fill left novelEntIds=null → cache stayed empty → every later
+            // ~34s with present≈346k, and because the old fixed fill gate rejected that
+            // apply, the cache stayed empty → every later
             // WS re-probed the same shared position graph with "skipped 0e cached". HashSet
             // add of ~360k ids is ~100ms; repeating a 34s bitmap is the gate killer.
             // ContentLadderLedger stays novel/staged-gated below (provenance across sources).
@@ -1061,14 +1048,18 @@ public sealed partial class NpgsqlSubstrateWriter
                 var ids = CollectionsMarshal.AsSpan(ents.Ids);
                 var idx = CollectionsMarshal.AsSpan(firstEntIdx);
                 for (int k = 0; k < idx.Length; k++)
-                    persistedEnt.TryAdd(ids[idx[k]], 0);
+                    TryAddBounded(persistedEnt, ids[idx[k]],
+                        ApplySizing.EntityPresenceCacheIds, ref _persistedEntityCount);
                 if (tier0Present is not null)
-                    foreach (var id in tier0Present) persistedEnt.TryAdd(id, 0);
+                    foreach (var id in tier0Present)
+                        TryAddBounded(persistedEnt, id,
+                            ApplySizing.EntityPresenceCacheIds, ref _persistedEntityCount);
             }
             if (persistedPhys is not null && probePhysIds.Count > 0)
             {
                 for (int i = 0; i < probePhysIds.Count; i++)
-                    persistedPhys.TryAdd(probePhysIds[i], 0);
+                    TryAddBounded(persistedPhys, probePhysIds[i],
+                        ApplySizing.PhysicalityPresenceCacheIds, ref _persistedPhysCount);
             }
             // Release in-flight claims only after commit — peers may now merge safely.
             if (_claimedEntityIds is not null)
@@ -1103,19 +1094,11 @@ public sealed partial class NpgsqlSubstrateWriter
             // Ids withheld from the probe are consistent with that: cache-skipped ids are
             // already ledgered from the apply that committed them, and tier-0 gated ids
             // are single codepoints with no ladder below them to re-walk.
-            // Same size gate as run-cache fill: ledger mark over 500k roots is
-            // another post-COPY tax on the throughput path; large applies skip.
-            if (novelEntIds is { Count: > 0 and <= MaxRunCacheFillIds })
-                Laplace.Decomposers.Abstractions.ContentLadderLedger.MarkPersisted(novelEntIds);
-            else if (novelEntIds is null && firstEntIdx.Count > 0
-                     && firstEntIdx.Count <= MaxRunCacheFillIds)
-            {
-                var stagedIds = new Hash128[firstEntIdx.Count];
-                var ids = CollectionsMarshal.AsSpan(ents.Ids);
-                var idx = CollectionsMarshal.AsSpan(firstEntIdx);
-                for (int k = 0; k < stagedIds.Length; k++) stagedIds[k] = ids[idx[k]];
-                Laplace.Decomposers.Abstractions.ContentLadderLedger.MarkPersisted(stagedIds);
-            }
+            // The ledger owns its byte-derived capacity and stops accreting when full;
+            // there is no per-apply row gate and no temporary copy of the ids.
+            if (firstEntIdx.Count > 0)
+                Laplace.Decomposers.Abstractions.ContentLadderLedger.MarkPersisted(
+                    ents.Ids, firstEntIdx);
         }
         catch
         {
@@ -1331,7 +1314,7 @@ public sealed partial class NpgsqlSubstrateWriter
 
     /// <summary>
     /// Shared chunked, connection-parallel presence probe. Sends the ids in
-    /// ProbeChunkIds-sized chunks as $1 (bytea[]).
+    /// byte-budgeted chunks as $1 (bytea[]).
     /// <paramref name="bindKeys"/> add the target table's partition-key
     /// arrays for the same [start, start+n) window, and decodes the returned
     /// bitmap back to hit ids. Every probe shape (tiered, pair-keyed,
@@ -1345,13 +1328,14 @@ public sealed partial class NpgsqlSubstrateWriter
         var present = new HashSet<Hash128>();
         if (ids.Count == 0) return present;
 
-        int chunkCount = (ids.Count + ProbeChunkIds - 1) / ProbeChunkIds;
+        int probeChunkIds = ApplySizing.ProbeChunkIds;
+        int chunkCount = (ids.Count + probeChunkIds - 1) / probeChunkIds;
         var perChunk = new List<Hash128>[chunkCount];
 
         async Task ProbeChunkAsync(int c, CancellationToken token)
         {
-            int start = c * ProbeChunkIds;
-            int n = Math.Min(ProbeChunkIds, ids.Count - start);
+            int start = c * probeChunkIds;
+            int n = Math.Min(probeChunkIds, ids.Count - start);
             var chunk = new byte[n][];
             for (int i = 0; i < n; i++) chunk[i] = ids[start + i].ToBytes();
 
@@ -1600,20 +1584,47 @@ public sealed partial class NpgsqlSubstrateWriter
         await CopyFilteredAsync(conn, tableName, table, blobs, rows, patches, countOffs, sumPatches, sumOffs, ct);
     }
 
-    private static int ResolveCopyGroups(int rowCount, int sharedSecondaryKeys)
+    private static int ResolveCopyGroups(int rowCount, long payloadBytes)
     {
-        // Id-range groups own disjoint PK leaves after LaneKey order. MEASURED
-        // (Npgsql binary COPY into live entities, indexes UP, this host): 8-way
-        // peaked ~591k rows/s; 12-way fell to ~534k (type-btree contention).
-        // Cap at that measured peak — not the old homogeneous-2 scar.
-        //
-        // Floor was 16_384 → Wiktionary applies (~30–36k phys/ent) always got
-        // groups=1 while phys COPY sat at ~2.4k rows/s. 4_096 fans a 30k batch
-        // to 7–8 connections without waiting for a mega-flush.
-        _ = sharedSecondaryKeys;
-        const int MeasuredPeakGroups = 8;
-        int bySize = (int)Math.Min(ApplyParallelism, Math.Max(1L, rowCount / 4_096));
-        return Math.Min(bySize, MeasuredPeakGroups);
+        // Id-range groups own disjoint PK leaves after LaneKey order. Fanout is
+        // justified by finalized payload bytes: another connection must receive at
+        // least one transport buffer/page and one row. No row-count crossover or
+        // host-specific worker cap survives here; topology owns the ceiling.
+        return IngestSizing.ResolveCopyConnections(
+            rowCount, payloadBytes, ApplyParallelism, ApplySizing.CopyStartupBytes);
+    }
+
+    private static long TotalEntityBytes(
+        CopyTupleParser.EntityRows entities, IReadOnlyList<int> indices)
+    {
+        long bytes = 0;
+        for (int i = 0; i < indices.Count; i++)
+            bytes = checked(bytes + entities.Rows[indices[i]].Length);
+        return bytes;
+    }
+
+    private static long TotalKeptBytes(IReadOnlyList<KeptRow> kept)
+    {
+        long bytes = 0;
+        for (int i = 0; i < kept.Count; i++)
+            bytes = checked(bytes + kept[i].Row.Length);
+        return bytes;
+    }
+
+    private static bool TryAddBounded(
+        System.Collections.Concurrent.ConcurrentDictionary<Hash128, byte> cache,
+        Hash128 id, int capacity, ref int count)
+    {
+        if (Volatile.Read(ref count) >= capacity) return false;
+        if (!cache.TryAdd(id, 0)) return true;
+        int after = Interlocked.Increment(ref count);
+        if (after <= capacity) return true;
+
+        // Concurrent adders may cross the boundary together. Remove only this
+        // caller's new key and restore the counter; a cache miss costs a probe and
+        // cannot affect correctness.
+        if (cache.TryRemove(id, out _)) Interlocked.Decrement(ref count);
+        return false;
     }
 
     /// <summary>
@@ -1791,12 +1802,12 @@ public sealed partial class NpgsqlSubstrateWriter
 
     private async Task<int> CopyPhaseParallelAsync(
         string tableName, IntentStageTable table,
-        IReadOnlyList<(IntPtr Ptr, long Len)> blobs, List<KeptRow> kept, CancellationToken ct,
-        int sharedSecondaryKeys = int.MaxValue)
+        IReadOnlyList<(IntPtr Ptr, long Len)> blobs, List<KeptRow> kept, CancellationToken ct)
     {
         if (kept.Count == 0) return 0;
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        int groups = ResolveCopyGroups(kept.Count, sharedSecondaryKeys);
+        long payloadBytes = TotalKeptBytes(kept);
+        int groups = ResolveCopyGroups(kept.Count, payloadBytes);
         // Bound StagedRowRef.Blob before pack — IndexOutOfRange inside
         // BuildSortedCopyPayloads / PackFiltered has no table name on the stack
         // (Release inlines the packer). Measured 2026-08-02: Unicode second
@@ -1824,7 +1835,7 @@ public sealed partial class NpgsqlSubstrateWriter
             throw new InvalidOperationException(
                 $"COPY pack {tableName}: IndexOutOfRange in BuildSortedCopyPayloads "
                 + $"(kept={kept.Count:N0}, groups={groups}, blobs={blobCount}, "
-                + $"blobIndexRange=[{minBlob}..{maxBlob}], sharedSecondaryKeys={sharedSecondaryKeys})",
+                + $"blobIndexRange=[{minBlob}..{maxBlob}], payloadBytes={payloadBytes})",
                 ex);
         }
         long sortMs = sw.ElapsedMilliseconds;

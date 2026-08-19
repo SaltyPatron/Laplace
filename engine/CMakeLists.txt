@@ -21,9 +21,16 @@ if(WIN32)
     # (determinism gate: no fused-multiply-add). icx's driver warns about that
     # exact override; the override is the point, so silence only that diagnostic.
     set(LAPLACE_ENGINE_FP_FLAGS /fp:precise /Qimf-arch-consistency:true /Qfma- -Wno-overriding-option)
-else()
+elseif(CMAKE_C_COMPILER_ID STREQUAL "IntelLLVM")
     add_compile_options(-Wall -Wextra -Wpedantic)
     set(LAPLACE_ENGINE_FP_FLAGS -fp-model=precise -fimf-arch-consistency=true -no-fma -Wno-overriding-option)
+else()
+    add_compile_options(-Wall -Wextra -Wpedantic)
+    # GCC/Clang spell the same deterministic floating-point contract differently.
+    # Feeding Intel driver flags to the system compiler made the documented GCC
+    # toolchain impossible to build, so local/CI validation never reached the
+    # extension being changed.
+    set(LAPLACE_ENGINE_FP_FLAGS -fno-fast-math -ffp-contract=off)
 endif()
 
 # Emit CodeView debug info + a linker PDB for optimized Release native builds so a

@@ -20,12 +20,9 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
     // API process's own lane. Lab artifacts are small (tens of games) so waiting is fine.
     private static readonly SemaphoreSlim Gate = new(1, 1);
 
-    // Games per apply. IngestSourceProfile.ChessPgn already models a PGN game as a fat
-    // 4 MB input unit (one game explodes into hundreds of substrate rows via per-ply replay
-    // and geometry) — this lane just never asked. It was `= 256`, the same class of private
-    // literal that had eight decomposers ingesting identically on a laptop and a 128 GB box.
-    // The fat-record branch of ResolveRecordBatch floors at 256, so this preserves today's
-    // value on a small box and lets a large one scale.
+    // Games per apply. The source profile separates measured serialized game bytes from
+    // resident compose bytes; the shared resolver turns both plus live RAM/topology into
+    // this value. No private chess batch literal or special "fat-record" branch remains.
     private static readonly int ChunkSize =
         IngestPipelineDefaults.ResolveBatch(IngestSourceProfile.ChessPgn, null);
 

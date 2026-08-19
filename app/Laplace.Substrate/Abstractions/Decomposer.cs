@@ -16,11 +16,14 @@ public static class IngestPipelineDefaults
     /// </summary>
     public static (int Batch, int ProbeInterval, int RecordCap, int ProbeChunk) ResolveWorkingSet(
         IngestSourceProfile profile,
-        DecomposerOptions? options = null,
-        int? defaultBatch = null)
+        DecomposerOptions? options = null)
     {
-        int batch = BatchConfigDefaults.Resolve(
-            options, defaultBatch ?? IngestSizing.ResolveForSource(profile).RecordBatchSize);
+        // Only an explicit operator --batch is an execution-policy override.
+        // Vendor default literals were removed because they bypassed the supposedly
+        // generic machine/profile resolver.
+        int batch = options is { BatchSize: > 1 }
+            ? options.BatchSize
+            : IngestSizing.ResolveForSource(profile).RecordBatchSize;
         var sized = IngestSizing.ResolveForSource(profile, batch);
         return (batch, sized.WorkingSetProbeInterval, sized.WorkingSetRecordCap, sized.ProbeChunkSize);
     }
@@ -70,7 +73,6 @@ public static class IngestPipelineDefaults
     public static IngestBatchConfig Compose(
         Hash128 sourceId,
         string batchLabelPrefix,
-        int defaultBatchSize,
         DecomposerOptions options,
         ISubstrateReader? reader,
         IngestSourceProfile? profile = null,
@@ -78,7 +80,7 @@ public static class IngestPipelineDefaults
         int commitEpoch = 0)
     {
         profile ??= IngestSourceProfile.Default;
-        var ws = ResolveWorkingSet(profile, options, defaultBatchSize);
+        var ws = ResolveWorkingSet(profile, options);
         return new()
         {
             SourceId = sourceId,
@@ -99,18 +101,18 @@ public static class IngestPipelineDefaults
     }
 
     public static IngestBatchConfig GrammarCompose(
-        Hash128 sourceId, string batchLabelPrefix, int defaultBatchSize,
+        Hash128 sourceId, string batchLabelPrefix,
         DecomposerOptions options, ISubstrateReader? reader,
         IngestSourceProfile? profile = null)
     {
         profile ??= IngestSourceProfile.Default;
-        var ws = ResolveWorkingSet(profile, options, defaultBatchSize);
+        var ws = ResolveWorkingSet(profile, options);
         return new()
         {
             SourceId = sourceId,
             BatchLabelPrefix = batchLabelPrefix,
             BatchSize = ws.Batch,
-            ProbeChunkSize = Math.Clamp(ws.ProbeChunk, 64, 1024),
+            ProbeChunkSize = ws.ProbeChunk,
             ContainmentReader = reader,
             EntityCapacity = ws.Batch * 8,
             PhysicalityCapacity = ws.Batch * 8,
@@ -132,7 +134,6 @@ public static class IngestPipelineDefaults
     public static IngestBatchConfig StructuredGrammar(
         Hash128 sourceId,
         string batchLabelPrefix,
-        int defaultBatchSize,
         DecomposerOptions options,
         ISubstrateReader? reader,
         double witnessWeight = 1.0,
@@ -140,7 +141,7 @@ public static class IngestPipelineDefaults
         IngestSourceProfile? profile = null)
     {
         profile ??= IngestSourceProfile.Wiktionary;
-        var sized = ResolveWorkingSet(profile, options, defaultBatchSize);
+        var sized = ResolveWorkingSet(profile, options);
         return new()
         {
             SourceId = sourceId,
@@ -159,18 +160,18 @@ public static class IngestPipelineDefaults
     }
 
     public static IngestBatchConfig CategoryCorrespondence(
-        Hash128 sourceId, string batchLabelPrefix, int defaultBatchSize,
+        Hash128 sourceId, string batchLabelPrefix,
         DecomposerOptions options, ISubstrateReader? reader,
         IngestSourceProfile? profile = null)
     {
         profile ??= IngestSourceProfile.Default;
-        var ws = ResolveWorkingSet(profile, options, defaultBatchSize);
+        var ws = ResolveWorkingSet(profile, options);
         return new()
         {
             SourceId = sourceId,
             BatchLabelPrefix = batchLabelPrefix,
             BatchSize = ws.Batch,
-            ProbeChunkSize = Math.Clamp(ws.ProbeChunk, 64, 4096),
+            ProbeChunkSize = ws.ProbeChunk,
             ContainmentReader = reader,
             EntityCapacity = ws.Batch * 3,
             AttestationCapacity = ws.Batch * 3,
@@ -203,8 +204,6 @@ public abstract class Decomposer<TRecord> : IDecomposer
 
     protected virtual string BatchLabelPrefix => SourceName;
 
-    protected virtual int DefaultBatchSize => BatchConfigDefaults.Structural;
-
     public virtual int EstimatedBytesPerRecord => IngestSizing.DefaultEstBytesPerRecord;
 
     public virtual int EstimatedComposeUnitsPerRecord => 1;
@@ -236,7 +235,7 @@ public abstract class Decomposer<TRecord> : IDecomposer
     protected virtual IngestBatchConfig BuildPipelineConfig(
         IDecomposerContext context, DecomposerOptions options) =>
         IngestPipelineDefaults.Compose(
-            SourceId, BatchLabelPrefix, DefaultBatchSize, options, context.Reader, PipelineProfile);
+            SourceId, BatchLabelPrefix, options, context.Reader, PipelineProfile);
 
     /// <summary>
     /// Whether a monolithic record stream may be cut into independent working-set
@@ -343,7 +342,6 @@ public abstract class Decomposer<TRecord> : IDecomposer
                            _ => CreateHandler(options),
                            _ => BuildConfig(),
                            segments,
-                           MonolithSegmenter.ResolveChunkRecords(BuildConfig()),
                            BatchLabelPrefix,
                            ct))
             yield return change;
@@ -483,7 +481,7 @@ public abstract class ComposeDecomposer<TRecord> : Decomposer<TRecord>
     protected override IngestBatchConfig BuildPipelineConfig(
         IDecomposerContext context, DecomposerOptions options) =>
         IngestPipelineDefaults.Compose(
-            SourceId, BatchLabelPrefix, DefaultBatchSize, options, context.Reader, PipelineProfile);
+            SourceId, BatchLabelPrefix, options, context.Reader, PipelineProfile);
 }
 
 /// <summary>
@@ -513,7 +511,7 @@ public abstract class ComposeDecomposerMultiFile<TRecord> : DecomposerMultiFile<
     protected override IngestBatchConfig ConfigForFile(
         string fileLabel, ISubstrateReader? reader, DecomposerOptions options) =>
         IngestPipelineDefaults.Compose(
-            SourceId, fileLabel, DefaultBatchSize, options, reader, PipelineProfile);
+            SourceId, fileLabel, options, reader, PipelineProfile);
 }
 
 /// <summary>Whole-file grammar compose on the generic multi-file scheduler.</summary>
@@ -526,9 +524,8 @@ public abstract class GrammarComposeDecomposerMultiFile : DecomposerMultiFile<Gr
     protected override IngestBatchConfig ConfigForFile(
         string fileLabel, ISubstrateReader? reader, DecomposerOptions options) =>
         IngestPipelineDefaults.GrammarCompose(
-            SourceId, fileLabel, DefaultBatchSize, options, reader, PipelineProfile);
+            SourceId, fileLabel, options, reader, PipelineProfile);
 
-    protected override int DefaultBatchSize => BatchConfigDefaults.Code;
 }
 
 public abstract class RelationTripleDecomposer : Decomposer<RelationTripleRecord>
@@ -583,9 +580,8 @@ public abstract class GrammarComposeDecomposer : Decomposer<GrammarComposeRecord
     protected override IngestBatchConfig BuildPipelineConfig(
         IDecomposerContext context, DecomposerOptions options) =>
         IngestPipelineDefaults.GrammarCompose(
-            SourceId, BatchLabelPrefix, DefaultBatchSize, options, context.Reader);
+            SourceId, BatchLabelPrefix, options, context.Reader);
 
-    protected override int DefaultBatchSize => BatchConfigDefaults.Code;
 }
 
 /// <summary>
@@ -611,7 +607,7 @@ public abstract class GrammarIngestDecomposer : Decomposer<GrammarIngestRecord>
     protected override IngestBatchConfig BuildPipelineConfig(
         IDecomposerContext context, DecomposerOptions options) =>
         IngestPipelineDefaults.StructuredGrammar(
-            SourceId, BatchLabelPrefix, DefaultBatchSize, options, context.Reader,
+            SourceId, BatchLabelPrefix, options, context.Reader,
             WitnessWeight, CommitEpoch, IngestProfile);
 
 }
@@ -624,9 +620,7 @@ public abstract class CategoryCorrespondenceDecomposer : Decomposer<CategoryCorr
     protected override IngestBatchConfig BuildPipelineConfig(
         IDecomposerContext context, DecomposerOptions options) =>
         IngestPipelineDefaults.CategoryCorrespondence(
-            SourceId, BatchLabelPrefix, DefaultBatchSize, options, context.Reader);
-
-    protected override int DefaultBatchSize => BatchConfigDefaults.HighVolume;
+            SourceId, BatchLabelPrefix, options, context.Reader);
 }
 
 /// <summary>

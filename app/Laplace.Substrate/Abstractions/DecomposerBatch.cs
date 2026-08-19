@@ -14,20 +14,20 @@ public static class IngestComposePipeline
         Action<T, SubstrateChangeBuilder> compose,
         Hash128 sourceId,
         string labelPrefix,
-        int batchSize,
         ISubstrateReader? reader,
         DecomposerOptions options,
         CancellationToken ct = default,
         int commitEpoch = 0,
         int? attestationCapacity = null,
-        Func<T, bool>? trunkShortcircuit = null)
+        Func<T, bool>? trunkShortcircuit = null,
+        IngestSourceProfile? profile = null)
     {
         if (options.DryRun) return Empty();
 
-        int cap = Math.Max(1, batchSize);
         var config = IngestPipelineDefaults.ApplyMaxInputUnits(
             IngestPipelineDefaults.Compose(
-                sourceId, labelPrefix, cap, options, reader,
+                sourceId, labelPrefix, options, reader,
+                profile: profile,
                 attestationCapacity: attestationCapacity, commitEpoch: commitEpoch),
             options);
         return IngestBatchPipeline.RunAsync(
