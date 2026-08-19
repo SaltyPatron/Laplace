@@ -30,7 +30,6 @@ public sealed class ChessOpeningsDecomposer(bool recursive = false)
     // an outcome — at games=4 the fabricated Draw mass systematically dragged sharp book lines
     // toward neutral against real-game evidence. games=1 keeps the existence witness while real
     // outcomes dominate as soon as any actual games fold in.
-    private static long OpeningGames => 1;
 
     private IReadOnlyCollection<string> _canonicalNames = Array.Empty<string>();
     public override IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
@@ -94,30 +93,28 @@ public sealed class ChessOpeningsDecomposer(bool recursive = false)
 
     /// <summary>
     /// Catalog unit is the LINE (GH #736 / Chess catalog dual): Merkle of ordered position
-    /// ids, trajectory physicality, OPENING_NAME / HAS_ECO on the line. MOVE edges remain
-    /// on the shared position web (existence witness only — games=1 Draw, light weight).
+    /// ids, trajectory physicality, OPENING_NAME / HAS_ECO on the line. Ordered transitions
+    /// are read from the trajectory rather than restated as fabricated draw testimony.
     /// Final-position name stamps stay as a temporary bridge for
     /// <see cref="ChessOpeningIndex"/> until readers are fully line-aware.
     /// </summary>
     private static void AppendLine(SubstrateChangeBuilder b, ChessModality m, List<string> sans, string eco, string name)
     {
-        long games = OpeningGames;
         var state = m.Initial();
         var line = new List<ChessNode>(sans.Count + 1);
-        var keys = new List<string>(sans.Count + 1);
         long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
 
         lock (ChessCompose.Gate)
         {
-            keys.Add(m.StateKey(state));
-            line.Add(ChessCompose.Position(keys[^1]).Position);
+            line.Add(ChessGraph.EmitComposed(
+                b, m.StateKey(state), ChessVocabulary.OpeningsSourceId).Position);
             foreach (var san in sans)
             {
                 var mv = San.Resolve(state.Board, m.LegalActions(state), san);
                 if (mv is null) return;
                 state = m.Apply(state, mv.Value);
-                keys.Add(m.StateKey(state));
-                line.Add(ChessCompose.Position(keys[^1]).Position);
+                line.Add(ChessGraph.EmitComposed(
+                    b, m.StateKey(state), ChessVocabulary.OpeningsSourceId).Position);
             }
         }
         if (line.Count < 2) return;
@@ -129,14 +126,6 @@ public sealed class ChessOpeningsDecomposer(bool recursive = false)
         // Shared Game/line type — identity is the merkle; do not mint a parallel id space.
         b.AddEntity(lineId, EntityTier.Document, ChessVocabulary.GameType, ChessVocabulary.OpeningsSourceId);
         ChessGraph.AppendGameTrajectory(b, lineId, line, ChessVocabulary.OpeningsSourceId, nowUs);
-
-        // MOVE web: existence only. Fabricated draw mass is not the opening's identity.
-        for (int i = 0; i < keys.Count - 1; i++)
-        {
-            ChessGraph.AppendMoveEdge(
-                b, keys[i], keys[i + 1], PlyOutcome.Draw, games, OpeningWitnessWeight,
-                sourceId: ChessVocabulary.OpeningsSourceId);
-        }
 
         var finalId = ids[^1];
         Hash128? nameId = null;

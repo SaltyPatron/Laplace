@@ -10,6 +10,7 @@ DECLARE
     mv       bytea := laplace.relation_type_id('MOVE');
     hw       bytea := laplace.relation_type_id('HAS_WHITE');
     hb       bytea := laplace.relation_type_id('HAS_BLACK');
+    hr       bytea := laplace.relation_type_id('HAS_RESULT');
     plns     bytea := laplace.relation_type_id('PLAYS_LINE');
     src      bytea := public.laplace_hash128_blake3('test/chess/source');
     pos      bytea := public.laplace_hash128_blake3('test/chess/pos');
@@ -22,6 +23,7 @@ DECLARE
     g_black  bytea := public.laplace_hash128_blake3('test/chess/game_as_black');
     l_white  bytea := public.laplace_hash128_blake3('test/chess/line_as_white');
     l_black  bytea := public.laplace_hash128_blake3('test/chess/line_as_black');
+    r_white  bytea := laplace.word_id('1-0');
     c_strong bytea := public.laplace_hash128_blake3('test/chess/c_strong');
     c_mid    bytea := public.laplace_hash128_blake3('test/chess/c_mid');
     c_thin   bytea := public.laplace_hash128_blake3('test/chess/c_thin');
@@ -36,7 +38,18 @@ BEGIN
         (n_mid, 0, type_t, src), (n_thin, 0, type_t, src),
         (player, 0, type_t, src), (rival, 0, type_t, src),
         (g_white, 0, type_t, src), (g_black, 0, type_t, src),
-        (l_white, 0, type_t, src), (l_black, 0, type_t, src);
+        (l_white, 0, type_t, src), (l_black, 0, type_t, src),
+        (r_white, 0, type_t, src);
+
+    INSERT INTO laplace.physicalities (id, entity_id, type, coord, hilbert_index,
+                               trajectory, n_constituents, observed_at)
+    VALUES
+        (public.laplace_hash128_blake3('test/chess/line_white_phys'), l_white, 1,
+         'SRID=0;POINT ZM (0 0 0 0)'::geometry, decode(repeat('00', 16), 'hex'),
+         public.laplace_trajectory_build(ARRAY[pos, n_strong]), 2, now()),
+        (public.laplace_hash128_blake3('test/chess/line_black_phys'), l_black, 1,
+         'SRID=0;POINT ZM (0 0 0 0)'::geometry, decode(repeat('00', 16), 'hex'),
+         public.laplace_trajectory_build(ARRAY[pos, n_mid]), 2, now());
 
     -- eff_mu = rating - 2*rd:
     --   strong: 1600e9 - 2*50e9  = 1500e9   (ranked 1st)
@@ -64,7 +77,9 @@ BEGIN
         (public.laplace_hash128_blake3('test/chess/hw1'), l_white, hw, player, src, g_white, 2, now(), 1, 1000000000, 30000000000),
         (public.laplace_hash128_blake3('test/chess/hb1'), l_white, hb, rival,  src, g_white, 2, now(), 1, 1000000000, 30000000000),
         (public.laplace_hash128_blake3('test/chess/hw2'), l_black, hw, rival,  src, g_black, 2, now(), 1, 1000000000, 30000000000),
-        (public.laplace_hash128_blake3('test/chess/hb2'), l_black, hb, player, src, g_black, 2, now(), 1, 1000000000, 30000000000);
+        (public.laplace_hash128_blake3('test/chess/hb2'), l_black, hb, player, src, g_black, 2, now(), 1, 1000000000, 30000000000),
+        (public.laplace_hash128_blake3('test/chess/hr1'), l_white, hr, r_white, src, g_white, 2, now(), 1, 1000000000, 30000000000),
+        (public.laplace_hash128_blake3('test/chess/hr2'), l_black, hr, r_white, src, g_black, 2, now(), 1, 1000000000, 30000000000);
 
     -- chess_moves: eff_mu ranking, full and LIMITed.
     SELECT array_agg(next_position ORDER BY ord) INTO got
@@ -83,12 +98,13 @@ BEGIN
         RAISE EXCEPTION 'FAIL: chess_moves must return display-scale eff_mu/rd, got %/%', s, s2;
     END IF;
 
-    -- chess_player_moves: only the playing where the player held the queried color.
+    -- chess_player_moves: exact successor comes from the line trajectory; score comes
+    -- from the result witnessed under that same playing context.
     SELECT count(*) INTO n FROM chess.player_moves(pos, player, true);
     IF n <> 1 THEN RAISE EXCEPTION 'FAIL: player-as-white expected 1 row, got %', n; END IF;
     SELECT games, score INTO n, s FROM chess.player_moves(pos, player, true);
-    IF n <> 3 OR s <> 1.0 THEN
-        RAISE EXCEPTION 'FAIL: player-as-white expected games=3 score=1.0, got %/%', n, s;
+    IF n <> 1 OR s <> 1.0 THEN
+        RAISE EXCEPTION 'FAIL: player-as-white expected games=1 score=1.0, got %/%', n, s;
     END IF;
 
     SELECT games, score INTO n, s FROM chess.player_moves(pos, player, false);
@@ -230,7 +246,21 @@ BEGIN
         (r_white, 0, type_t, src), (r_black, 0, type_t, src), (r_draw, 0, type_t, src),
         (d1, 0, type_t, src), (d2, 0, type_t, src), (d3, 0, type_t, src),
         (en, 0, type_t, src), (ec, 0, type_t, src), (mt, 0, type_t, src),
-        (elo, 0, type_t, src), (pos_probe, 0, type_t, src);
+        (elo, 0, type_t, src), (pos_probe, 0, type_t, src)
+    ON CONFLICT DO NOTHING;
+
+    INSERT INTO laplace.physicalities (id, entity_id, type, coord, hilbert_index,
+                               trajectory, n_constituents, observed_at)
+    VALUES
+        (public.laplace_hash128_blake3('t2/line_a_phys'), ln_a, 1,
+         'SRID=0;POINT ZM (0 0 0 0)'::geometry, decode(repeat('00', 16), 'hex'),
+         public.laplace_trajectory_build(ARRAY[pos2, mv_w]), 2, now()),
+        (public.laplace_hash128_blake3('t2/line_b_phys'), ln_b, 1,
+         'SRID=0;POINT ZM (0 0 0 0)'::geometry, decode(repeat('00', 16), 'hex'),
+         public.laplace_trajectory_build(ARRAY[pos2, mv_b]), 2, now()),
+        (public.laplace_hash128_blake3('t2/line_c_phys'), ln_c, 1,
+         'SRID=0;POINT ZM (0 0 0 0)'::geometry, decode(repeat('00', 16), 'hex'),
+         public.laplace_trajectory_build(ARRAY[ln_c]), 1, now());
 
     -- e1 Tal(W) beat Botvinnik on ln_a    e2 Botvinnik(W) beat Tal on ln_b
     -- e3 Tal(W) drew Spassky on ln_c      e4 Tal(W) v Botvinnik, never scored,
@@ -363,11 +393,9 @@ BEGIN
     SELECT count(*) INTO n FROM chess.game(public.laplace_hash128_blake3('test/chess2/no_such_game'));
     IF n <> 0 THEN RAISE EXCEPTION 'FAIL: an unwitnessed playing returned % rows', n; END IF;
 
-    -- chess_player_moves across the re-key: MOVE evidence carries ctx = the
-    -- playing-EVENT and the colour facts subject the LINE, so the repertoire
-    -- join threads event equality. Same shared position, per-colour
-    -- attribution: as White Tal chose mv_w (e1, won); e2's move must surface
-    -- only on his Black side, never leak through the shared line subjects.
+    -- chess_player_moves across the re-key: the exact successor comes from each
+    -- line trajectory, and colour/result testimony is joined through the playing
+    -- context. e4 shares ln_a but has no result, so it remains unscored.
     SELECT count(*) INTO n FROM chess.player_moves(pos2, tal, true);
     IF n <> 1 THEN RAISE EXCEPTION 'FAIL: Tal-as-White repertoire expected 1 move, got %', n; END IF;
     SELECT next_position, games, score INTO got, n, sc FROM chess.player_moves(pos2, tal, true);
@@ -573,19 +601,19 @@ END $$;
 
 -- chess_time_pressure_outcome: the folded think-class read, now carrying the lens
 -- dimension (planned_quick / pressed_think / flagging beside rushed / normal / deep).
--- Post-#736 shape: HAS_THINK_CLASS and MOVE cells both subject the POSITION; the
--- playing's event enters only as evidence context, which this folded read never touches.
+-- HAS_THINK_CLASS retains distinct observed positions; OUTCOME folds directly on the
+-- reusable class id, so no exact-position transition cell is needed.
 DO $$
 DECLARE
     type_t   bytea := public.laplace_hash128_blake3('Type');
-    mv       bytea := laplace.relation_type_id('MOVE');
+    outcome  bytea := laplace.relation_type_id('OUTCOME');
     tcl      bytea := laplace.relation_type_id('HAS_THINK_CLASS');
     src      bytea := public.laplace_hash128_blake3('test/chess3/source');
     p_rush   bytea := public.laplace_hash128_blake3('test/chess3/p_rush');
     p_plan   bytea := public.laplace_hash128_blake3('test/chess3/p_plan');
     p_press  bytea := public.laplace_hash128_blake3('test/chess3/p_press');
     p_flag   bytea := public.laplace_hash128_blake3('test/chess3/p_flag');
-    nx       bytea := public.laplace_hash128_blake3('test/chess3/next');
+    result   bytea := public.laplace_hash128_blake3('Chess_Result');
     w_rush   bytea := laplace.word_id('rushed');
     w_plan   bytea := laplace.word_id('planned_quick');
     w_press  bytea := laplace.word_id('pressed_think');
@@ -595,23 +623,23 @@ DECLARE
     mu       numeric;
 BEGIN
     INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) VALUES
-        (src, 0, type_t, NULL), (nx, 0, type_t, src),
+        (src, 0, type_t, NULL), (result, 0, type_t, src),
         (p_rush, 0, type_t, src), (p_plan, 0, type_t, src),
         (p_press, 0, type_t, src), (p_flag, 0, type_t, src),
         (w_rush, 0, type_t, src), (w_plan, 0, type_t, src),
         (w_press, 0, type_t, src), (w_flag, 0, type_t, src)
     ON CONFLICT DO NOTHING;
 
-    -- One MOVE cell per position (the folded-outcome side of the join) and one
-    -- think-class cell naming its class. consensus.eff_mu(rushed) = 1600e9 - 2*50e9 = 1500e9,
+    -- One class OUTCOME fold plus the position→class membership cells.
+    -- consensus.eff_mu(rushed) = 1600e9 - 2*50e9 = 1500e9,
     -- which must read back display-scale (1500.000), never raw fp1e9.
     INSERT INTO laplace.consensus
         (id, subject_id, type_id, object_id, rating, rd, volatility, witness_count, last_observed_at)
     VALUES
-        (public.laplace_hash128_blake3('t3/mv_rush'),  p_rush,  mv, nx, 1600000000000, 50000000000, 60000000, 10, now()),
-        (public.laplace_hash128_blake3('t3/mv_plan'),  p_plan,  mv, nx, 1500000000000, 50000000000, 60000000, 20, now()),
-        (public.laplace_hash128_blake3('t3/mv_press'), p_press, mv, nx, 1400000000000, 50000000000, 60000000, 5, now()),
-        (public.laplace_hash128_blake3('t3/mv_flag'),  p_flag,  mv, nx, 1200000000000, 50000000000, 60000000, 2, now()),
+        (public.laplace_hash128_blake3('t3/out_rush'),  w_rush,  outcome, result, 1600000000000, 50000000000, 60000000, 10, now()),
+        (public.laplace_hash128_blake3('t3/out_plan'),  w_plan,  outcome, result, 1500000000000, 50000000000, 60000000, 20, now()),
+        (public.laplace_hash128_blake3('t3/out_press'), w_press, outcome, result, 1400000000000, 50000000000, 60000000, 5, now()),
+        (public.laplace_hash128_blake3('t3/out_flag'),  w_flag,  outcome, result, 1200000000000, 50000000000, 60000000, 2, now()),
         (public.laplace_hash128_blake3('t3/tc_rush'),  p_rush,  tcl, w_rush,  1500000000000, 50000000000, 60000000, 3, now()),
         (public.laplace_hash128_blake3('t3/tc_plan'),  p_plan,  tcl, w_plan,  1500000000000, 50000000000, 60000000, 4, now()),
         (public.laplace_hash128_blake3('t3/tc_press'), p_press, tcl, w_press, 1500000000000, 50000000000, 60000000, 2, now()),
@@ -624,7 +652,7 @@ BEGIN
         RAISE EXCEPTION 'FAIL: lens dimension wrong or misordered: %', labels;
     END IF;
 
-    -- plays is the MOVE fold's witness_count, carried not recomputed.
+    -- plays is the class OUTCOME fold's witness_count, carried not recomputed.
     SELECT q.plays INTO n FROM chess.time_pressure_outcome() q WHERE q.think_class = 'planned_quick';
     IF n <> 20 THEN RAISE EXCEPTION 'FAIL: planned_quick plays should be 20, got %', n; END IF;
 
