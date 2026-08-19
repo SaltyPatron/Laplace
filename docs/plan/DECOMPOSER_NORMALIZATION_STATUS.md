@@ -6,6 +6,17 @@ This is the integration inventory for the decomposer campaign. It records what i
 on `main` and what still requires product work. A pull request is not counted as
 delivered until it is merged.
 
+## Tracking authority
+
+- [DECOMPOSER_NORMALIZATION_ISSUE_LEDGER.md](DECOMPOSER_NORMALIZATION_ISSUE_LEDGER.md)
+  maps every expected outcome to merged evidence, an owning GitHub issue, and a
+  falsifiable completion gate.
+- [GitHub #1177](https://github.com/SaltyPatron/Laplace/issues/1177) is the campaign
+  completion graph. #1175 owns LapSight, #1176 owns derived-consensus promotion and
+  eviction, #1178 owns normalized readers, and #1153 owns native source fidelity.
+- Historical comments and issue descriptions are inputs to verification, not the
+  status authority. Current code, tests, schema, and measured runs decide status.
+
 ## Governing laws
 
 - Content is a composition; order is a trajectory; unordered multi-value state is
@@ -68,25 +79,28 @@ had no open pull requests.
 
 - Remove or justify every remaining vendor-owned scheduler. The known next target
   is the Syzygy unpack fanout; non-decomposer service concurrency remains outside
-  this invariant.
+  this invariant. Tracked by #967 and #605.
 - Make outer database applies safely concurrent only after claim-before-COPY and
   working-set ownership are race-safe. Until then `apply_dispatch_workers=1` is
-  intentional and must remain reported honestly.
+  intentional and must remain reported honestly. Tracked by #967.
 - Audit source profiles against measured compose fanout and memory, then benchmark
   bounded foundation, Wiktionary, UD, chess, model, media, and OpenSubtitles runs.
 - Validate end-to-end resume, cancellation, per-file journals, canonical readback,
   and UI progress under actual concurrent multi-file failure/restart scenarios.
 - Audit remaining avoidable index probes, index-only eligibility, partition skew,
   COPY/apply cadence, database round trips, allocations, and bytes per input.
+  Tracked by #588, #429, #860, #871, #908, #1008, and #1175.
 
 ### Identity and source fidelity
 
 - Complete source-reference admission for any opaque identifiers not covered by
   #1149/#1154/#1157; add explicit governed identities rather than catch-all hashes.
+  Tracked by #1041 and #1153.
 - Resolve governed vocabulary entities that currently look like content while
   lawfully having no content physicality.
 - Enforce one content ID globally across tiers in the physical schema. The current
   `(id, tier)` database key is a SQL/schema workstream and remains unresolved.
+  Tracked by #1008 and #1132.
 - Apply the source-fidelity findings from #1155: exact scoped FrameNet roles,
   correct VerbNet mapping fields, full PredicateMatrix admission, source-versioned
   OMW/WordNet inputs, and artifact/revision identity for model sources.
@@ -116,9 +130,10 @@ had no open pull requests.
 
 - Update every reader that still depends on compatibility edges before removing
   those edges. Sense-aware lexical, taxonomy, converse, chess, and containment
-  paths must traverse normalized structures directly.
+  paths must traverse normalized structures directly. Tracked by #1178.
 - Define statistical promotion and eviction policies for one-off occurrence data;
   raw evidence remains lossless while hot/repeated aggregates are rebuildable.
+  Tracked by #1176.
 - Implement testimony virtualization only after proposition grain is stable: one
   fact plus an ordered witness history preserving all exact non-commutative fold
   inputs, provenance, counts, time, scores, and opponent uncertainty.
@@ -130,7 +145,7 @@ had no open pull requests.
 
 - Add per-relation unique consensus counts, singleton percentages, witness
   distributions, trajectory vertices, bytes per input, partition pressure/skew,
-  and entity/physicality breakdown by identity class.
+  and entity/physicality breakdown by identity class. Tracked by #1175.
 - Add automatic amplification alarms and bounded-source acceptance thresholds;
   current #1172 reports cell deposits, not novel consensus cells or singleton rate.
 - Expose the complete LapSight surface in the UI and CI artifacts rather than only

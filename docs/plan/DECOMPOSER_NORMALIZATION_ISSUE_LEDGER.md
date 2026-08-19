@@ -1,0 +1,149 @@
+# Decomposer normalization issue and acceptance ledger
+
+Status date: 2026-08-19
+
+This is the durable work graph for the decomposer normalization campaign. The
+campaign-level GitHub tracker is
+[#1177](https://github.com/SaltyPatron/Laplace/issues/1177). The implementation
+inventory is [DECOMPOSER_NORMALIZATION_STATUS.md](DECOMPOSER_NORMALIZATION_STATUS.md).
+
+This ledger deliberately treats comments, old issue bodies, and design prose as
+evidence to verify, not as implementation truth. Status is based on merged code,
+tests, current schema, and measured runs. A merged implementation is not the same
+thing as production proof; those states are recorded separately.
+
+## Status vocabulary
+
+| State | Meaning |
+| --- | --- |
+| Delivered | The implementation and a proportionate regression gate are on `main`. |
+| Partial | A material slice is on `main`, but the listed acceptance outcome is not complete. |
+| Open | The required implementation is not on `main`. |
+| Proof pending | The implementation is present, but bounded/live/reseed acceptance evidence is still owed. |
+
+## Governing normalization law
+
+| Information | Primitive |
+| --- | --- |
+| Literal content | Content-addressed entity/composition |
+| Ordered constituents or occurrence coordinates | Trajectory or ordered annotation structure |
+| Unordered multi-valued structure | Collection composition |
+| One source claiming `(subject, relation, object)` | Attestation |
+| Where, when, and by whom a claim was observed | Context/provenance |
+| A distinction that changes a proposition's meaning | Subject, object, or semantic composition; never context alone |
+| Opaque source identifier or serialization token | Typed reference/encoding, not text content |
+| Deterministic consequence | Calculation or perfcache |
+| Reusable statistical projection | Explicit, traced, evictable materialization |
+| Ordered witness history | Testimony trajectory after proposition grain is correct |
+
+Two negative rules bind every row below:
+
+1. A decomposer records an irreducible source observation at the grain where it is
+   true. It does not precompute every question a future reader might ask.
+2. The generic pipeline owns execution. A vendor implementation owns source-specific
+   discovery, parsing, and composition, not a private thread pool, batching policy,
+   retry loop, journal, or database apply protocol.
+
+## Campaign scorecard
+
+| ID | Outcome | State | Merged evidence | Remaining owner and completion gate |
+| --- | --- | --- | --- | --- |
+| DN-01 | One generic single-file/multi-file execution pipeline | Partial | #1144 introduced shared largest-first multi-file scheduling; #1166 centralized sizing; #1167 separated reported concurrency layers; #1173 moved model phase fanout into the shared primitive. | [#967](https://github.com/SaltyPatron/Laplace/issues/967), [#605](https://github.com/SaltyPatron/Laplace/issues/605): remove Syzygy's remaining private scheduler, audit the allowlist to zero or justified non-decomposer entries, and prove bounded source profiles. |
+| DN-02 | Safe parallel compose, batching, backpressure, cancellation, and failure propagation | Delivered for compose; apply proof pending | `DecomposerMultiFile<T>` runs one file parser per claimed file through the bounded generic pool; shared phase fanout and source profiles own capacity. | [#967](https://github.com/SaltyPatron/Laplace/issues/967): outer database apply dispatch remains intentionally `1` until claim-before-COPY and working-set ownership are race-safe. |
+| DN-03 | Witness-source boundaries cannot mix inside an apply | Delivered | #1146 splits changes by `Metadata.SourceId`, fixing the SemLink/PredicateMatrix crash without falsifying their independent provenance. | [#1153](https://github.com/SaltyPatron/Laplace/issues/1153): retain independent provenance while finishing bridge coverage and source receipts. |
+| DN-04 | Per-file journals, restart true-skip, and canonical readback | Delivered; live proof pending | #898 and #1019 are closed after code verification; #1160 persists dynamic canonical names before a file completion marker. Kill/restart and batched-probe fixtures are on `main`. | [#433](https://github.com/SaltyPatron/Laplace/issues/433): run a real concurrent kill/restart campaign and prove no fold activity for completed files. Monolith byte-offset checkpoints remain outside the per-file contract. |
+| DN-05 | Input, file, and progress counters use one declared grain | Delivered | #960 is closed; #1146 separates record/unit progress from file completion, and FrameNet now uses one file pool instead of three nested passes. | [#1175](https://github.com/SaltyPatron/Laplace/issues/1175): preserve unit labels in the common receipt and reject impossible terminal counters. |
+| DN-06 | Whole-process memory bounds scale with concurrency | Delivered for current compose/apply width; proof pending | #993 is closed; the compose envelope is divided across concurrent working sets, and #1159 sizes each builder to retained records. | [#967](https://github.com/SaltyPatron/Laplace/issues/967), [#588](https://github.com/SaltyPatron/Laplace/issues/588): measure RSS/high-water per source and re-evaluate the budget before widening apply concurrency. |
+| DN-07 | Index, probe, COPY, and database round-trip efficiency is measured rather than inferred | Open/partial | #1145 coalesces tier probes; #1168 removes duplicate root probes; #1167 exposes apply/COPY concurrency honestly. | [#588](https://github.com/SaltyPatron/Laplace/issues/588), [#429](https://github.com/SaltyPatron/Laplace/issues/429), [#860](https://github.com/SaltyPatron/Laplace/issues/860), [#871](https://github.com/SaltyPatron/Laplace/issues/871), [#908](https://github.com/SaltyPatron/Laplace/issues/908), [#1008](https://github.com/SaltyPatron/Laplace/issues/1008): profile avoidable probes, index versus index-only eligibility, pruning, skew, apply cadence, and bytes per input. SQL semantics remain owned by the SQL audit workstream. |
+| DN-08 | LapSight run/source/relation amplification and convergence | Partial | #1148 added exact terminal counters and initial admin amplification; #1170 separated bootstrap/payload accounting; #1172 added fold deposits and observations per deposit. | [#1175](https://github.com/SaltyPatron/Laplace/issues/1175), [#1080](https://github.com/SaltyPatron/Laplace/issues/1080): add novel consensus, singleton/witness distributions, trajectory vertices, bytes, identity classes, partition/index pressure, alarms, and one UI/API/CI receipt. |
+| DN-09 | Global entity identity is independent of tier | Open | Application builders deduplicate by ID, but PostgreSQL still declares `PRIMARY KEY (id, tier)` and `PARTITION BY LIST (tier)`. | [#1008](https://github.com/SaltyPatron/Laplace/issues/1008), [#1132](https://github.com/SaltyPatron/Laplace/issues/1132): enforce one stored logical entity per ID and validate zero cross-tier duplicates after reseed. |
+| DN-10 | Content, governed vocabulary, semantic concept, source reference, occurrence, and annotation identities are explicit | Partial | #1146 introduced admission classification; #1149 introduced typed foundation references; #1154/#1157 extended exact lexical identity. | [#1038](https://github.com/SaltyPatron/Laplace/issues/1038), [#1041](https://github.com/SaltyPatron/Laplace/issues/1041), [#1153](https://github.com/SaltyPatron/Laplace/issues/1153): finish the identity classes and reject unexplained off-DAG physical-content entities. |
+| DN-11 | Context never carries the only proposition-defining distinction | Partial | #1152 scopes PropBank roles, VerbNet predicates, FrameNet roles, SemLink, and PredicateMatrix endpoints to their owners. | [#1153](https://github.com/SaltyPatron/Laplace/issues/1153): complete the per-source scope audit and add a context-collapse gate for every meaning-bearing dimension. |
+| DN-12 | Tokenizer and serialization encodings do not mint phantom content | Partial | #1014 is closed: SentencePiece `▁`, GPT `Ġ`, WordPiece `##`, byte tokens, and newline spellings decode to canonical bytes with structural roles. | [#1042](https://github.com/SaltyPatron/Laplace/issues/1042), [#1153](https://github.com/SaltyPatron/Laplace/issues/1153): finish whitespace/layout admission, model sidecars, checkpoint/tensor coordinates, and artifact provenance. |
+| DN-13 | Wiktionary preserves first-class sense bundles | Partial | #1154 moves definitions, examples, semantic relations, registers, POS/language, and external concept links from the ambiguous spelling to a source sense identity; collection morphology remains one set-valued claim. | [#1153](https://github.com/SaltyPatron/Laplace/issues/1153), [#1178](https://github.com/SaltyPatron/Laplace/issues/1178): translation language/sense scope, spans/provenance, pronunciation/audio, artifact identity, and normalized sense-aware reads. |
+| DN-14 | WordNet/OMW/CILI preserve exact concepts, senses, references, and release provenance | Partial | #1157 preserves full WordNet sense keys and removes duplicate lemma-to-synset membership testimony; #1149 fixes foundation reference admission. | [#1153](https://github.com/SaltyPatron/Laplace/issues/1153): lexical pointer scope, adjective position, examples/frames, WN-LMF/OEWN/OMW packages, version/license/confidence, and CILI concept-versus-instance/source metadata. |
+| DN-15 | UD stores exact sentence/token annotation occurrences rather than corpus projections onto word types | Delivered for exact parse structure; policy/read proof pending | #1158 stores one ordered parse occurrence carrying token ordinals, forms, lemmas, UPOS/XPOS, FEATS collections, heads, enhanced dependencies, MWT, and MISC. | [#548](https://github.com/SaltyPatron/Laplace/issues/548), [#1176](https://github.com/SaltyPatron/Laplace/issues/1176), [#1178](https://github.com/SaltyPatron/Laplace/issues/1178): namespace XPOS, define derived type-level grammar promotion, prove repeated-token readback, and run post-merge UD. |
+| DN-16 | FrameNet, PropBank, VerbNet, PredicateMatrix, and SemLink preserve occurrence and owner scope | Partial | #1152 binds roles/predicates to owning structures; #1161 retains FrameNet target spans and attests the occurrence. | [#1153](https://github.com/SaltyPatron/Laplace/issues/1153): FrameNet FE layers/semantic types/core sets/valence, PropBank aliases/lexlinks/spans, VerbNet `fn_mapping`/syntax/restrictions/arguments, and full PredicateMatrix columns/languages/PB alignment. |
+| DN-17 | ConceptNet node declarations do not amplify with graph degree, while direct-triple sources remain direct | Delivered for ConceptNet; preservation proof pending | #1162 emits intrinsic node metadata once and uses semantic URI endpoints. Atomic remains one source triple to one testimony; Tatoeba continues to discard numeric scaffolding in favor of content roots. | [#1175](https://github.com/SaltyPatron/Laplace/issues/1175), [#1178](https://github.com/SaltyPatron/Laplace/issues/1178): degree-amplification receipt and normalized reader coverage. |
+| DN-18 | OpenSubtitles preserves aligned occurrence structure before semantic promotion | Delivered for storage shape; benchmark/promotion pending | #1163 replaces unconditional `IS_TRANSLATION_OF` deposits with bounded paired trajectories and exact source ranges. | [#1176](https://github.com/SaltyPatron/Laplace/issues/1176), [#1175](https://github.com/SaltyPatron/Laplace/issues/1175), [#1178](https://github.com/SaltyPatron/Laplace/issues/1178): benchmark a bounded corpus against the old shape, prove query parity, define promotion, then decide admission for the 601M-pair corpus. |
+| DN-19 | Chess separates physical mechanics, historical playing, and derived art-of-chess analytics | Partial | #1165 removes exact MOVE and per-position OUTCOME testimony recoverable from the playing line trajectory. | [#838](https://github.com/SaltyPatron/Laplace/issues/838), [#1176](https://github.com/SaltyPatron/Laplace/issues/1176), [#1178](https://github.com/SaltyPatron/Laplace/issues/1178): live/PGN parity, cross-source playing identity, history-sensitive state, bounded projections, perfcache publication, and measured reseed. |
+| DN-20 | Ordered media structures use trajectories without duplicating adjacency testimony | Partial | #1169 stores video frames as one trajectory and removes structural `HAS_FRAME`/`PRECEDES_IN_TIME` rows and double decoding. | [#1134](https://github.com/SaltyPatron/Laplace/issues/1134), [#1153](https://github.com/SaltyPatron/Laplace/issues/1153): exact image/audio/document/model reconstruction, tensor/checkpoint composition, and artifact receipts. |
+| DN-21 | Reader paths consume normalized structures instead of storage compatibility lies | Open/partial | `bubble_up` already uses trajectory geometry for contextual neighborhood; WordNet readers already understand a surface→sense→synset chain. | [#1178](https://github.com/SaltyPatron/Laplace/issues/1178): bank/fork sense routing, UD/FrameNet occurrence reads, chess projection, subtitle alignment, containment, and entry-surface parity before deleting shortcuts. |
+| DN-22 | Raw occurrence retention is separate from statistical promotion | Open | Normalized occurrence structures now exist for UD, FrameNet, subtitles, and chess, but promotion is not governed. | [#1176](https://github.com/SaltyPatron/Laplace/issues/1176): explicit promotion triggers, dependency lineage, trace, eviction, rebuild, and fallback reads. |
+| DN-23 | Evidence storage virtualizes witness history only after proposition grain is correct | Open/design | Existing rows retain exact fold inputs; no testimony virtualization has landed. | [#451](https://github.com/SaltyPatron/Laplace/issues/451): one fact plus ordered witness history preserving source/context/outcome/count/score/opponent uncertainty/time and non-commutative order. |
+| DN-24 | Clean bounded and full reseed proves correctness and speed | Proof pending | The pre-drop totals and source timings are retained as the before baseline. A fresh foundation run exposed the source-boundary and telemetry defects that the merged batch fixed. | [#433](https://github.com/SaltyPatron/Laplace/issues/433), [#761](https://github.com/SaltyPatron/Laplace/issues/761), [#1132](https://github.com/SaltyPatron/Laplace/issues/1132): install/deploy, clean DB, bounded fixtures, full seed, reader parity, restart proof, row/byte amplification, and the admitted time envelope. |
+
+## Source disposition
+
+| Source/lane | Current disposition | Tracker |
+| --- | --- | --- |
+| Unicode/ISO foundation | Preserve as reference spines; verify admission and amplification. | #1038, #1042, #1175 |
+| Wiktionary | Sense identity delivered; complete native fields and readers. | #1153, #1178 |
+| WordNet | Exact sense identity delivered; complete pointer/native-schema fidelity. | #1153 |
+| OMW | Preserve language-scoped lexical testimony; add package/release provenance and modern adapters. | #1153 |
+| CILI | Typed references delivered; preserve concept/instance and source metadata. | #1153 |
+| UD | Exact parse occurrence delivered; namespace XPOS and govern derived grammar promotion. | #548, #1176, #1178 |
+| FrameNet | Exact target span delivered; complete FE/semantic/valence schema. | #1153, #1178 |
+| PropBank | Scoped role slots delivered; complete aliases, mappings, confidence, and example spans. | #1153 |
+| VerbNet | Scoped predicate occurrence delivered; fix `fn_mapping` and preserve syntax/restrictions/arguments. | #1153 |
+| PredicateMatrix/SemLink | Independent witness boundary and scoped endpoints delivered; complete columns/languages/method/confidence. | #1153 |
+| MapNet/WFN/XWFN | Preserve bridge provenance; stop silently dropping unresolved historical targets. | #1153 |
+| ConceptNet | Semantic endpoints and one-time node declarations delivered. | #1175, #1178 |
+| Atomic2020 | Preserve direct triple ingestion; audit, do not trajectory-ize by convention. | #1175 |
+| Tatoeba | Preserve content-root identity and discard external numeric scaffolding. | #433, #1175 |
+| OpenSubtitles | Paired trajectories delivered; benchmark and promote selectively before full ingest. | #1175, #1176, #1178 |
+| Chess | Structural testimony removed in part; finish physical/art separation and live proof. | #838, #1176, #1178 |
+| Model | Token serialization decoding delivered; checkpoint/tensor/artifact fidelity remains. | #1153 |
+| Video | Ordered frame trajectory delivered. | #1134, #1175 |
+| Image/audio/document | Keep generic content identity; finish exact recipe/reconstruction and layout contracts. | #1042, #1134, #1153 |
+| Syzygy | Preserve catalog semantics; replace the final private decomposer scheduler. | #605, #967 |
+
+## Required bounded acceptance suite
+
+These gates are not optional examples. They are the smallest falsifiers for the
+normalization laws and are owned by #1175/#1178 unless a more specific issue is
+listed.
+
+- `bank`: one surface ID, isolated river and finance senses, context-sensitive path.
+- `fork`: one surface ID, distinct chess and cutlery concepts.
+- Wiktionary sense isolation: definitions/examples/relations cannot cross senses.
+- UD repeated tokens: every ordinal and dependency round-trips exactly.
+- UD FEATS: one collection composition per morphological analysis.
+- FrameNet repeated target text: the annotated span remains distinguishable.
+- Context collapse: meaning-bearing role/sense/class changes must change semantic
+  identity even when context folding would otherwise collide.
+- Opaque references: ILI, synset, sense, roleset, class, release, split, and tokenizer
+  serialization keys cannot silently become ordinary text content.
+- Tokenizer parity: alternate serialization spellings converge on the same decoded
+  content while structural boundary roles remain available.
+- Entity/tier uniqueness: zero content IDs occupy multiple physical entity rows.
+- ConceptNet degree: 100 incident relations do not create 100 language/POS witnesses.
+- Direct versus derived witness: compatibility paths cannot double-vote one source row.
+- Chess trajectory recovery: every removed transition/outcome projection is exactly
+  reconstructable from the irreducible playing representation.
+- Chess live versus PGN: identical content converges while occurrence provenance stays
+  distinct where appropriate.
+- OpenSubtitles bounded equivalence: frequency, language, source range, alignment, and
+  surrounding context remain answerable without pairwise row explosion.
+- Resume/cancellation: completed files true-skip with zero refold, the interrupted file
+  is bounded, and journal/UI state is truthful.
+
+## Release sequence
+
+1. Finish generic execution and identity/schema prerequisites (#967, #1008, #1038,
+   #1041, #1042).
+2. Complete native source fidelity and coverage receipts (#1153).
+3. Make normalized readers pass before removing any remaining compatibility edge
+   (#1178).
+4. Define promotion/eviction and then witness virtualization (#1176, then #451).
+5. Complete LapSight machine-readable gates (#1175/#1080).
+6. Install/deploy the merged extension and run bounded fixtures.
+7. Start from a clean database and run the full campaign (#433/#761/#1132).
+8. Publish the before/after receipt: information retained, input and row counts,
+   entities, physicalities, attestations, novel consensus, singleton distribution,
+   trajectory vertices, bytes, throughput, restart correctness, reader parity, and
+   partition/index pressure.
+
+The campaign is not complete at “all PRs merged.” It is complete when DN-01 through
+DN-24 have delivered implementation and the proof-pending rows have current measured
+evidence from the normalized clean seed.
