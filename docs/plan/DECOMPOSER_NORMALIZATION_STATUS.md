@@ -73,6 +73,7 @@ delivered until it is merged.
 | #1187 | Structured ETL admission | Keeps SemLink/generic grammar ASTs parser-only and moves Tatoeba numeric/TSV scaffolding outside the content spine. |
 | #1188 | Final vendor scheduler | Routes Syzygy board enumeration through the bounded generic fanout, leaving only non-ingest service concurrency on the scheduler allowlist. |
 | #1189 | Live receipt correctness | Raises sampled denominators to the observed floor, caps UI progress at 100%, forbids reintroduced chess `MOVE` consensus, and ratchets production foundation ingest to keep indexes online. |
+| #1190 | Eval receipt identity | Scores the actual elected topic token used by production orientation, reports its selected sense separately, and treats the baseline source roster as a required floor rather than a brittle exact snapshot of a concurrently seeded database. |
 
 The related source-fidelity audit (#1155), durable working agreement (#1156), and
 canonical lexical-peer batch core (#1164) were integrated in the same batch,
@@ -94,6 +95,12 @@ had no open pull requests.
 - The live extractor exceeded its sampled 189,852-game estimate and briefly reported
   100.4%. #1189 makes observed progress a monotonic denominator floor and caps percentage
   rendering defensively, so future receipts cannot report impossible progress.
+- The earlier #1183 integration red was an unrelated test receiving process-wide
+  cancellation; #1184 isolated that signal test and both later runs passed integration.
+  The #1184/#1185 eval reds then exposed a receipt identity bug: token `hot` selected its
+  OMW `beautiful`/attractive sense, and the harness mislabeled the sense as the topic even
+  though production returns token `hot`. #1190 scores the topic and retains the sense as
+  diagnostics without weakening exact election or forward-answer gates.
 
 ## Remaining product work after integration
 

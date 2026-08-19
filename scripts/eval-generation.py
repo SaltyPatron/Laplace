@@ -62,6 +62,17 @@ def seeded_sources(api: str) -> list[str]:
     )
 
 
+def canonical_source_name(source: str) -> str:
+    """Compare legacy display names and governed source references as one source."""
+    name = str(source).strip()
+    prefix = "substrate/source/"
+    if name.startswith(prefix):
+        name = name[len(prefix):]
+    if name.endswith("/v1"):
+        name = name[:-3]
+    return name
+
+
 # How far the row estimates may move before a baseline is considered
 # incomparable. Nothing about a 5% drift in a planner estimate invalidates a
 # hand-written expected-topic list.
@@ -79,16 +90,19 @@ def fingerprint_drift(baseline: dict, fp: dict, sources: list[str]) -> str | Non
     that fires on noise teaches people to ignore it (ingest-baseline.py:34-37
     says exactly this in the repo's own words).
 
-    What actually decides whether two runs are comparable is WHICH SOURCES ARE
-    SEEDED — a baseline recorded on foundation-only cannot judge a run that
-    also has OMW, and no row count expresses that. Counts stay, as a wide
-    tolerance band, to catch a truncated or half-loaded substrate.
+    Baseline sources are a required floor, not an exact database snapshot. CI
+    shares one live substrate with independent seed workflows, so new sources
+    can lawfully arrive between code pushes. Missing baseline sources still
+    make the run incomparable. Counts likewise enforce a lower bound to catch a
+    truncated/half-loaded substrate while permitting later sources to add rows.
     """
     base_sources = baseline.get("sources")
-    if base_sources is not None and sorted(base_sources) != sorted(sources):
-        added = sorted(set(sources) - set(base_sources))
-        removed = sorted(set(base_sources) - set(sources))
-        return f"seeded sources changed (added={added}, removed={removed})"
+    if base_sources is not None:
+        required = {canonical_source_name(s) for s in base_sources}
+        current_sources = {canonical_source_name(s) for s in sources}
+        missing = sorted(required - current_sources)
+        if missing:
+            return f"required seeded sources missing: {missing}"
 
     # Purpose-schema migration removed the historical `laplace.` prefix from
     # metric labels. The measured relation is the same; compare canonical
@@ -102,9 +116,9 @@ def fingerprint_drift(baseline: dict, fp: dict, sources: list[str]) -> str | Non
             return f"metric {metric!r} no longer reported"
         if base_val <= 0:
             continue
-        if abs(cur - base_val) / base_val > FINGERPRINT_TOLERANCE:
+        if cur < base_val * (1.0 - FINGERPRINT_TOLERANCE):
             pct = 100.0 * (cur - base_val) / base_val
-            return f"{metric} moved {pct:+.1f}% ({base_val} -> {cur})"
+            return f"{metric} shrank {pct:+.1f}% ({base_val} -> {cur})"
     return None
 
 
@@ -162,8 +176,16 @@ def _elector_key(row: dict) -> tuple:
     )
 
 
-def prompt_coherence_rank1(api: str, prompt: str) -> tuple[str | None, float | None, float]:
-    """Return (synset_surface, specificity, latency_s) for the elected candidate."""
+def prompt_coherence_rank1(
+    api: str, prompt: str
+) -> tuple[str | None, str | None, float | None, float]:
+    """Return (topic surface, sense surface, specificity, latency) for rank one.
+
+    Production orientation returns the elected token (`y.tok`). The selected
+    synset explains which sense won, but its preferred label is not the topic
+    surface: after OMW, token `hot` can lawfully select a synset realized as
+    `beautiful`. Conflating those two made a correct topic look like a miss.
+    """
     t0 = time.perf_counter()
     rows = op_rows(
         api,
@@ -173,10 +195,10 @@ def prompt_coherence_rank1(api: str, prompt: str) -> tuple[str | None, float | N
     )
     latency = time.perf_counter() - t0
     if not rows:
-        return None, None, latency
+        return None, None, None, latency
     elected = min(rows, key=_elector_key)
     specificity = elected.get("specificity")
-    return label(api, elected.get("synset_id")), (
+    return label(api, elected.get("tok")), label(api, elected.get("synset_id")), (
         float(specificity) if specificity is not None else None
     ), latency
 
@@ -277,10 +299,11 @@ def run_op_election(api: str, probe: dict) -> dict:
     t0 = time.perf_counter()
     if mode == "resolve_topic":
         got = resolve_topic_surface(api, prompt)
+        sense = None
         latency = time.perf_counter() - t0
         specificity = None
     else:
-        got, specificity, latency = prompt_coherence_rank1(api, prompt)
+        got, sense, specificity, latency = prompt_coherence_rank1(api, prompt)
     ok = expected is not None and got is not None and got.lower() == expected.lower()
     return {
         "id": probe.get("id"),
@@ -290,6 +313,7 @@ def run_op_election(api: str, probe: dict) -> dict:
         "prompt": prompt,
         "expected_topic_surface": expected,
         "got_topic_surface": got,
+        "got_sense_surface": sense,
         "specificity": specificity,
         "latency_s": round(latency, 4),
         "election_correctness": ok,
@@ -425,8 +449,8 @@ def main() -> None:
             "recorded_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "advisory_until": probes_doc.get("advisory_until", "2026-08-10"),
             "blocking_flip_date": probes_doc.get("blocking_flip_date"),
-            # WHICH SOURCES ARE SEEDED is what decides comparability; the row
-            # estimates below are a tolerance band, not an equality check.
+            # These sources are the minimum corpus floor needed by the probes.
+            # Later seed workflows may add sources before the next code push.
             "sources": sources,
             "fingerprint": fp,
             "election": {
@@ -437,11 +461,10 @@ def main() -> None:
             },
             "latency_ceiling_s": latency_ceiling,
             "notes": (
-                "election_correctness is exact. Comparability is decided by the seeded "
-                "source set; row estimates are a "
-                f"{int(FINGERPRINT_TOLERANCE * 100)}% tolerance band, not an equality "
-                "check — substrate_counts() reports sampled planner estimates that move "
-                "on autovacuum with no data change."
+                "election_correctness is exact. Baseline sources are a required floor; "
+                "additional sources are allowed. Row estimates enforce only a "
+                f"{int(FINGERPRINT_TOLERANCE * 100)}% shrink floor because sampled planner "
+                "estimates move on maintenance and later ingests add rows."
             ),
         }
         baseline_path.write_text(json.dumps(baseline, indent=2) + "\n", encoding="utf-8")
