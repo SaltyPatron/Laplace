@@ -13,6 +13,8 @@ public static class EntityTypeRegistry
     public static readonly Hash128 Byte = Id("Byte");
     public static readonly Hash128 Channel = Id("Channel");
     public static readonly Hash128 CharacterEncoding = Id("CharacterEncoding");
+    public static readonly Hash128 CiliConcept = Id("CILI_Concept");
+    public static readonly Hash128 CiliInstance = Id("CILI_Instance");
     public static readonly Hash128 CodeConcept = Id("CodeConcept");
     public static readonly Hash128 Codepoint = Id("Codepoint");
     // The entity a set-valued attribute points at: one per distinct member set, by content id.

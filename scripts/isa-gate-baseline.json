@@ -372,8 +372,6 @@
       "app/Laplace.Decomposers/Atomic2020/Atomic2020Source.cs::X_REACT": 1,
       "app/Laplace.Decomposers/Atomic2020/Atomic2020Source.cs::X_REASON": 1,
       "app/Laplace.Decomposers/Atomic2020/Atomic2020Source.cs::X_WANT": 1,
-      "app/Laplace.Decomposers/CILI/CILIDecomposer.cs::HAS_DEFINITION": 1,
-      "app/Laplace.Decomposers/CILI/CILIDecomposer.cs::HAS_SYNSET_KEY": 1,
       "app/Laplace.Decomposers/Code/ParquetDecomposer.cs::IS_INSTANCE_OF": 2,
       "app/Laplace.Decomposers/Code/TabularDecomposer.cs::IS_INSTANCE_OF": 4,
       "app/Laplace.Decomposers/ConceptNet/ConceptNetRelations.cs::AT_LOCATION": 1,
