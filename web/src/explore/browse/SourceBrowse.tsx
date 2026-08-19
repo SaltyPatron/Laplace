@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { ErrorText, LoadingText, Muted, Panel, Stack } from '@ui';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { ErrorText, Input, LoadingText, Muted, Panel, Stack } from '@ui';
 import { exploreCatalog, exploreSourceRoster } from '../api';
-import { SearchBar } from '../components/SearchBar';
 import { StatCard } from '../components/StatCard';
 import { useExploreStore } from '../store';
 import type { ExploreSourceRow, SourceRosterRow } from '../types';
@@ -17,11 +16,13 @@ import browse from './Browse.module.css';
  */
 export function SourceBrowse() {
   const { sourceKey } = useParams();
+  const [params, setParams] = useSearchParams();
   const setBreadcrumb = useExploreStore((s) => s.setBreadcrumb);
   const [source, setSource] = useState<ExploreSourceRow | null>(null);
   const [missing, setMissing] = useState(false);
   const [roster, setRoster] = useState<SourceRosterRow[] | null>(null);
   const [rosterError, setRosterError] = useState<string | null>(null);
+  const rosterQuery = params.get('q') ?? '';
 
   useEffect(() => {
     const key = decodeURIComponent(sourceKey ?? '');
@@ -33,7 +34,7 @@ export function SourceBrowse() {
       setMissing(!hit);
       if (hit?.stage) setBreadcrumb({ stage: hit.stage, source: hit.key });
       if (hit?.id_hex) {
-        exploreSourceRoster(hit.id_hex, 40)
+        exploreSourceRoster(hit.id_hex, 200)
           .then((r) => { if (!stale) setRoster(r.rows); })
           .catch((e) => { if (!stale) setRosterError(e instanceof Error ? e.message : String(e)); });
       }
@@ -44,6 +45,17 @@ export function SourceBrowse() {
   if (missing) return <ErrorText>No live source named “{decodeURIComponent(sourceKey ?? '')}”.</ErrorText>;
   if (!source) return <LoadingText>Loading source…</LoadingText>;
 
+  const needle = rosterQuery.trim().toLocaleLowerCase();
+  const filteredRoster = roster?.filter((row) =>
+    !needle || [row.subject, row.relation, row.object]
+      .some((value) => value.toLocaleLowerCase().includes(needle))) ?? null;
+
+  function setRosterQuery(value: string) {
+    const next = new URLSearchParams(params);
+    if (value) next.set('q', value); else next.delete('q');
+    setParams(next, { replace: true });
+  }
+
   return (
     <Stack gap={4}>
       <Panel title={source.key}>
@@ -53,13 +65,19 @@ export function SourceBrowse() {
           <StatCard label="Content entities" value={source.content?.toLocaleString() ?? "—"} />
         </div>
         {source.role ? <Muted>{source.role}</Muted> : null}
-        <SearchBar placeholder={`Search within ${source.key}…`} />
       </Panel>
 
       <Panel title="Roster — what this witness asserts">
         <Muted style={{ marginBottom: '0.5rem' }}>
-          a bounded sample of its testimony; every name drills into the entity
+          up to 200 sampled assertions; filter subjects, relations, and objects below
         </Muted>
+        <Input
+          value={rosterQuery}
+          onChange={(event) => setRosterQuery(event.target.value)}
+          placeholder={`Filter ${source.key}'s roster…`}
+          aria-label={`Filter ${source.key}'s roster`}
+          className={browse.rosterFilter}
+        />
         {rosterError ? (
           <ErrorText>{rosterError}</ErrorText>
         ) : !source.id_hex ? (
@@ -68,9 +86,11 @@ export function SourceBrowse() {
           <LoadingText>Sampling testimony…</LoadingText>
         ) : roster.length === 0 ? (
           <Muted>Nothing witnessed by this source yet.</Muted>
+        ) : filteredRoster?.length === 0 ? (
+          <Muted>No sampled assertions match “{rosterQuery}”.</Muted>
         ) : (
           <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
-            {roster.map((r, i) => (
+            {filteredRoster?.map((r, i) => (
               <li key={i} className={browse.rosterRow}>
                 <Link className={browse.rosterSubject} to={`/explore/entity/${r.subject_id}`}>{r.subject}</Link>
                 <span className={browse.rosterRel}>{r.relation.replace(/_/g, ' ').toLowerCase()}</span>
