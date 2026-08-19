@@ -95,6 +95,64 @@ class EvalOperationLaneTests(unittest.TestCase):
         self.assertLess(key(changed(denote_mu=2)), key(base))
         self.assertLess(key(changed(synset_id="a")), key(base))
 
+    def test_prompt_election_scores_topic_token_and_reports_sense_separately(self):
+        module = _load_eval_generation()
+        row = {
+            "tok": "topic-id",
+            "synset_id": "sense-id",
+            "specificity": 0.5,
+            "rel_mass": 1,
+            "peers": 1,
+            "ord": 2,
+            "denote_mu": 1,
+        }
+
+        surfaces = {"topic-id": "hot", "sense-id": "beautiful"}
+        with patch.object(module, "op_rows", return_value=[row]), patch.object(
+            module, "label", side_effect=lambda _api, entity_id: surfaces[entity_id]
+        ):
+            topic, sense, specificity, _latency = module.prompt_coherence_rank1(
+                "http://laplace", "The opposite of hot is"
+            )
+
+        self.assertEqual("hot", topic)
+        self.assertEqual("beautiful", sense)
+        self.assertEqual(0.5, specificity)
+
+    def test_baseline_is_a_required_floor_not_an_exact_live_snapshot(self):
+        module = _load_eval_generation()
+        baseline = {
+            "sources": ["PredicateMatrixDecomposer", "WordNetDecomposer"],
+            "fingerprint": {"laplace.entities(ESTIMATE)": 100},
+        }
+
+        self.assertIsNone(module.fingerprint_drift(
+            baseline,
+            {"entities(ESTIMATE)": 500},
+            [
+                "substrate/source/PredicateMatrixDecomposer/v1",
+                "WordNetDecomposer",
+                "OMWDecomposer",
+                "UserPrompt",
+            ],
+        ))
+        self.assertIn(
+            "WordNetDecomposer",
+            module.fingerprint_drift(
+                baseline,
+                {"entities(ESTIMATE)": 100},
+                ["substrate/source/PredicateMatrixDecomposer/v1"],
+            ),
+        )
+        self.assertIn(
+            "shrank",
+            module.fingerprint_drift(
+                baseline,
+                {"entities(ESTIMATE)": 70},
+                ["PredicateMatrixDecomposer", "WordNetDecomposer"],
+            ),
+        )
+
     def test_eval_scripts_have_no_private_database_lane(self):
         forbidden = ["subprocess", "ps" + "ql", "SET " + "search_path", '"--' + 'db"']
         for relative in ("scripts/eval-generation.py", "scripts/verify-generation.py"):

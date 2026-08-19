@@ -27,5 +27,5 @@
     "require_exact": true
   },
   "latency_ceiling_s": 30.0,
-  "notes": "election_correctness is exact. Comparability is decided by the seeded source set; row estimates are a 25% tolerance band, not an equality check \u2014 substrate_counts() reports sampled planner estimates that move on autovacuum with no data change."
+  "notes": "election_correctness is exact. Baseline sources are a required floor and later sources are allowed. Row estimates enforce only a 25% shrink floor because sampled planner estimates move on maintenance and later ingests add rows."
 }
