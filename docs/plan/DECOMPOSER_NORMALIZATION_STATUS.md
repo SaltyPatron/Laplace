@@ -75,6 +75,7 @@ delivered until it is merged.
 | #1189 | Live receipt correctness | Raises sampled denominators to the observed floor, caps UI progress at 100%, forbids reintroduced chess `MOVE` consensus, and ratchets production foundation ingest to keep indexes online. |
 | #1190 | Eval receipt identity | Scores the actual elected topic token used by production orientation, reports its selected sense separately, and treats the baseline source roster as a required floor rather than a brittle exact snapshot of a concurrently seeded database. |
 | #1191 | VerbNet native FrameNet mapping | Reads the actual VerbNet 3.4 `fn_mapping` field, including its multi-frame shape and `None` sentinel, instead of the nonexistent `fnframe` attribute that dropped every direct mapping. |
+| #1192 | VerbNet member grain | Preserves class-bound `VerbNet_Member` identity from native member keys, moves WordNet/FrameNet/PropBank mappings off shared lemma content, and makes concept/prompt/mesh readers traverse the member's content alias instead of requiring duplicate surface testimony. |
 
 The related source-fidelity audit (#1155), durable working agreement (#1156), and
 canonical lexical-peer batch core (#1164) were integrated in the same batch,
