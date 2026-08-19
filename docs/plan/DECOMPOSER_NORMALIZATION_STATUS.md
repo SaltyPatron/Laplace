@@ -37,10 +37,10 @@ delivered until it is merged.
 
 | Area | Delivery |
 | --- | --- |
-| Generic multi-file execution | #1144 schedules files largest-first and coalesces compose fragments by the real apply bounds; #1145 coalesces concurrent tier probes. |
+| Generic multi-file execution | #1144 schedules files largest-first and coalesces compose fragments by the real apply bounds; #1145 coalesces concurrent tier probes; #1184 divides the first LPT wave across the compose pool so one dominant file can be segmented even when the corpus contains more files than workers. |
 | Admission gates | #1146 splits applies at witness-source boundaries, fixes record/file accounting grain, and distinguishes physical content from lawful governed identities. |
 | Fresh seed lifecycle | #1147 makes deferred-index recovery run for every fresh foundation build. |
-| Initial LapSight accounting | #1148 persists exact terminal input/file counters and exposes raw per-source row amplification in the admin ingest view. |
+| Initial LapSight accounting | #1148 persists exact terminal input/file counters and exposes raw per-source row amplification in the admin ingest view; #1183 separates consensus drain from writer/index maintenance; #1184 fixes aggregate multi-file denominator refinement. |
 | Reference admission | #1149 introduces typed reference identities across the foundation lexical resources instead of text-composing opaque IDs. |
 | Partition count visibility | #1150 fixes partitioned estimates and includes physicalities in terminal `ANALYZE`. |
 | ISA ratchet repair | #1151 restores the merged-main gate after the reference cleanup without relaxing the policy. |
@@ -67,6 +67,8 @@ delivered until it is merged.
 | #1171 | Bootstrap ownership | Stops vendors from witnessing deterministic governed relation hierarchy. |
 | #1172 | LapSight fold metrics | Emits run-local payload/bootstrap amplification and observations-per-cell-deposit from the generic runner. |
 | #1173 | Generic parallel fanout | Moves model layer fanout, backpressure, cancellation, and failures into a shared generic pipeline primitive. |
+| #1183 | Fold tail and completion phases | Replaces overlapping highway-mask writers with stable entity-sharded FIFO lanes and records live/terminal consensus-drain versus writer-maintenance timing. |
+| #1184 | Skewed multi-file execution | Lets the generic pool segment a dominant file inside a many-file corpus, corrects aggregate sampled-inventory refinement, and isolates the process-wide signal test that cancelled unrelated integration tests. |
 
 The related source-fidelity audit (#1155), durable working agreement (#1156), and
 canonical lexical-peer batch core (#1164) were integrated in the same batch,
@@ -85,6 +87,11 @@ had no open pull requests.
   intentional and must remain reported honestly. Tracked by #967.
 - Audit source profiles against measured compose fanout and memory, then benchmark
   bounded foundation, Wiktionary, UD, chess, model, media, and OpenSubtitles runs.
+- Remeasure full Atomic2020 and OMW after #1183/#1184. The pre-fix clean receipts were:
+  Atomic2020 1,331,097 inputs in 414 seconds with about 247 seconds of consensus drain;
+  OMW 3,438,843 inputs in 716.2 seconds, including a 526.2-second single-file Japanese
+  compose critical path and 188.44 seconds rebuilding 30 indexes. OMW's final apply and
+  final fold were only 451 milliseconds apart.
 - Validate end-to-end resume, cancellation, per-file journals, canonical readback,
   and UI progress under actual concurrent multi-file failure/restart scenarios.
 - Audit remaining avoidable index probes, index-only eligibility, partition skew,
