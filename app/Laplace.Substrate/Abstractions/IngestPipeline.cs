@@ -109,6 +109,81 @@ internal static class MultiFileScheduler
     }
 }
 
+/// <summary>
+/// Shared bounded fan-out for ingest work whose one input may yield many output records.
+/// Vendors describe the work item and its async masticator; the pipeline owns worker
+/// concurrency, output backpressure, cancellation, and producer failure propagation.
+/// </summary>
+public static class ParallelIngestWork
+{
+    public static async IAsyncEnumerable<TResult> RunAsync<TWork, TResult>(
+        IReadOnlyList<TWork> work,
+        int maxConcurrency,
+        int outputCapacity,
+        Func<TWork, CancellationToken, IAsyncEnumerable<TResult>> execute,
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(work);
+        ArgumentNullException.ThrowIfNull(execute);
+        if (maxConcurrency <= 0)
+            throw new ArgumentOutOfRangeException(nameof(maxConcurrency));
+        if (outputCapacity <= 0)
+            throw new ArgumentOutOfRangeException(nameof(outputCapacity));
+        if (work.Count == 0) yield break;
+
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var output = Channel.CreateBounded<TResult>(new BoundedChannelOptions(outputCapacity)
+        {
+            SingleReader = true,
+            SingleWriter = maxConcurrency == 1,
+            FullMode = BoundedChannelFullMode.Wait,
+        });
+
+        async Task ProduceAsync()
+        {
+            Exception? failure = null;
+            try
+            {
+                await Parallel.ForEachAsync(
+                    work,
+                    new ParallelOptions
+                    {
+                        MaxDegreeOfParallelism = maxConcurrency,
+                        CancellationToken = stop.Token,
+                    },
+                    async (item, token) =>
+                    {
+                        await foreach (var result in execute(item, token)
+                                           .WithCancellation(token).ConfigureAwait(false))
+                            await output.Writer.WriteAsync(result, token).ConfigureAwait(false);
+                    }).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                failure = ex;
+            }
+            finally
+            {
+                output.Writer.TryComplete(failure);
+            }
+        }
+
+        Task producer = ProduceAsync();
+        try
+        {
+            await foreach (var result in output.Reader.ReadAllAsync(ct).ConfigureAwait(false))
+                yield return result;
+        }
+        finally
+        {
+            stop.Cancel();
+            // ProduceAsync converts its terminal exception into channel completion,
+            // so this await observes teardown without masking ReadAllAsync's error.
+            await producer.ConfigureAwait(false);
+        }
+    }
+}
+
 public interface IIngestDeferredUnit : IDisposable
 {
     TierTree? TreeForBatchProbe { get; }
