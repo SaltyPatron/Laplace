@@ -106,7 +106,7 @@ MANIFEST = ROOT / "engine" / "manifest" / "relation_types.toml"
 # on both laplace.consensus and laplace.attestations, verified in the catalog.
 CEILINGS = {
     "g1_weight_literalism": 11,
-    "g3_sql_vocabulary_literalism": 194,
+    "g3_sql_vocabulary_literalism": 192,
     "g3_c_vocabulary_literalism": 17,
     # 700 -> 701 (2026-08-05): the language-scope declaration. Nine monolingual
     # sources emitted no HAS_LANGUAGE at all, so every English sense read back as
@@ -120,7 +120,7 @@ CEILINGS = {
     # The remaining 1 is the floor: the name has to exist once in C#, and this is
     # the single place the feature owns it. A scoped source that spelled it again
     # locally would be the per-source hand-roll that caused the defect.
-    "g3_csharp_vocabulary_literalism": 481,
+    "g3_csharp_vocabulary_literalism": 464,
     "g8_band_literalism": 3,
     # G4 scaffolding (W6 D3): grep for CREATE FUNCTION with zero callers outside
     # its own CREATE line. Destination form is substrate CALLS in-degree after W3
