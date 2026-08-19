@@ -1,0 +1,74 @@
+DROP FUNCTION IF EXISTS chess.player_search_candidates(text, integer);
+CREATE FUNCTION chess.player_search_candidates(p_query text, p_limit integer DEFAULT 600)
+    RETURNS TABLE(player_id bytea, name text, games bigint,
+                  rating double precision, rd double precision, eff_mu double precision)
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    -- A partial player query cannot be a content-address lookup: "Karpov" does
+    -- not contain the missing given name needed to mint Karpov's player id. Use
+    -- the existing trajectory constituent GIN to make a bounded candidate set,
+    -- then let the endpoint perform human-name/fuzzy ranking over that set.
+    WITH forms(value) AS MATERIALIZED (
+        SELECT DISTINCT v
+        FROM (VALUES
+            (btrim(p_query)),
+            (initcap(lower(btrim(p_query)))),
+            (lower(btrim(p_query)))) q(v)
+        WHERE length(v) >= 2
+    ),
+    required AS MATERIALIZED (
+        SELECT f.value,
+               array_agg(DISTINCT laplace.word_id(ch)) AS ids
+        FROM forms f,
+             LATERAL string_to_table(f.value, NULL) AS c(ch)
+        WHERE ch ~ '^[[:alnum:]]$'
+        GROUP BY f.value
+    ),
+    name_ids AS MATERIALIZED (
+        SELECT DISTINCT w.id AS name_id
+        FROM required r
+        JOIN laplace.v_word_points w
+          ON w.trajectory IS NOT NULL
+         AND public.laplace_trajectory_constituent_ids(w.trajectory) @> r.ids
+        WHERE cardinality(r.ids) >= 2
+    ),
+    players AS MATERIALIZED (
+        SELECT DISTINCT c.subject_id AS player
+        FROM laplace.consensus c
+        JOIN name_ids n ON n.name_id = c.object_id
+        JOIN laplace.entities e
+          ON e.id = c.subject_id
+         AND e.type_id = laplace.entity_type_id('Chess_Player')
+        WHERE c.type_id = ANY (
+            consensus.relation_family_ids('HAS_NAME')
+            || consensus.relation_family_ids('HAS_NAME_ALIAS'))
+    ),
+    rated AS MATERIALIZED (
+        SELECT p.player, o.witness_count AS games, o.rating, o.rd
+        FROM players p
+        JOIN laplace.consensus o
+          ON o.subject_id = p.player
+         AND o.type_id = laplace.relation_type_id('OUTCOME')
+        ORDER BY consensus.eff_mu(o.rating, o.rd) DESC, p.player
+        LIMIT greatest(1, least(p_limit, 2000))
+    ),
+    batch AS MATERIALIZED (
+        SELECT COALESCE(array_agg(r.player ORDER BY r.player), '{}'::bytea[]) AS ids
+        FROM rated r
+    ),
+    surfaced AS (
+        SELECT q.id, t.txt
+        FROM batch b,
+             LATERAL unnest(b.ids) WITH ORDINALITY AS q(id, i),
+             LATERAL unnest(realize.batch(b.ids)) WITH ORDINALITY AS t(txt, j)
+        WHERE q.i = t.j
+    )
+    SELECT r.player,
+           COALESCE(NULLIF(s.txt, ''), encode(r.player, 'hex')),
+           r.games,
+           round((r.rating / 1e9)::numeric, 3)::double precision,
+           round((r.rd / 1e9)::numeric, 3)::double precision,
+           consensus.eff_mu_display(r.rating, r.rd)::double precision
+    FROM rated r
+    LEFT JOIN surfaced s ON s.id = r.player
+    ORDER BY consensus.eff_mu(r.rating, r.rd) DESC, r.player
+$$;
