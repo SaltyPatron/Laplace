@@ -641,6 +641,14 @@ parent = null
 family_root = "HAS_PART"
 
 [[relation]]
+canonical = "HAS_PARSE"
+bit = 210
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_PARSE"
+
+[[relation]]
 canonical = "HAS_POS"
 bit = 103
 hot = true

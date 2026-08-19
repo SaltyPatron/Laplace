@@ -17,6 +17,7 @@ public sealed class UDDecomposer : DecomposerMultiFile<UdIngestRecord, UDSource,
     protected override double SourceTrust => TC.AcademicCurated;
 
     private readonly ConcurrentDictionary<string, byte> _canonicalNames = new(StringComparer.Ordinal);
+    private ConcurrentIdSet _seenSourceDeclarations = new();
     public override IReadOnlyCollection<string> CanonicalNamesForReadback => new List<string>(_canonicalNames.Keys);
 
     protected override ConcurrentDictionary<string, byte>? VocabularyReadback => _canonicalNames;
@@ -25,11 +26,7 @@ public sealed class UDDecomposer : DecomposerMultiFile<UdIngestRecord, UDSource,
         string ecosystemPath, DecomposerOptions options)
     {
         var files = ListTreebankFiles(ecosystemPath, options);
-        return files.Select(p =>
-        {
-            string stem = Path.GetFileNameWithoutExtension(p);
-            return (Path: p, Label: $"ud/{stem}");
-        }).ToList();
+        return files.Select(p => (Path: p, Label: UdIngestSupport.FileLabel(p))).ToList();
     }
 
     protected override async IAsyncEnumerable<UdIngestRecord> ExtractFileAsync(
@@ -47,7 +44,13 @@ public sealed class UDDecomposer : DecomposerMultiFile<UdIngestRecord, UDSource,
 
     protected override IIngestRecordHandler<UdIngestRecord> CreateHandlerForFile(
         string fileLabel, DecomposerOptions options) =>
-        new UdIngestHandler(Source, _canonicalNames);
+        new UdIngestHandler(Source, _canonicalNames, fileLabel, _seenSourceDeclarations);
+
+    protected override Task OnBeforeRegisterAsync(IDecomposerContext context, CancellationToken ct)
+    {
+        _seenSourceDeclarations = new ConcurrentIdSet();
+        return Task.CompletedTask;
+    }
 
     protected override IngestBatchConfig ConfigForFile(
         string fileLabel, ISubstrateReader? reader, DecomposerOptions options) =>

@@ -949,8 +949,10 @@ internal static class IngestCommands
                                 + $"IsA={await RelationEvidence("IS_A", srcKey):N0}");
                 break;
             case "UDDecomposer":
-                Console.WriteLine($"  check ud: HAS_POS={await RelationEvidence("HAS_POS", srcKey):N0} "
-                                + $"IS_LEMMA_OF={await RelationEvidence("IS_LEMMA_OF", srcKey):N0}");
+                string udParse = UDSource.Relations[2];
+                string udLanguage = UDSource.Relations[0];
+                Console.WriteLine($"  check ud: {udParse}={await RelationEvidence(udParse, srcKey):N0} "
+                                + $"{udLanguage}={await RelationEvidence(udLanguage, srcKey):N0}");
                 break;
             case "TatoebaDecomposer":
                 Console.WriteLine($"  check tatoeba: IS_TRANSLATION_OF={await RelationEvidence("IS_TRANSLATION_OF", srcKey):N0} "

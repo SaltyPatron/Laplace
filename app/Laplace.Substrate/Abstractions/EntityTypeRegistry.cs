@@ -62,6 +62,11 @@ public static class EntityTypeRegistry
     public static readonly Hash128 Video = Id("Video");
     public static readonly Hash128 UcdClassifier = Id("UcdClassifier");
     public static readonly Hash128 UdFeature = Id("UD_Feature");
+    public static readonly Hash128 UdAnnotationMarker = Id("UD_Annotation_Marker");
+    public static readonly Hash128 UdAnnotationValue = Id("UD_Annotation_Value");
+    public static readonly Hash128 UdParse = Id("UD_Parse");
+    public static readonly Hash128 UdParseOccurrence = Id("UD_Parse_Occurrence");
+    public static readonly Hash128 UdTokenRef = Id("UD_Token_Ref");
     public static readonly Hash128 UdXpos = Id("UD_XPOS");
     public static readonly Hash128 Utf8Role = Id("Utf8Role");
     public static readonly Hash128 VerbNetClass = Id("VerbNet_Class");

@@ -33,6 +33,7 @@ public static class EntityIdentityPolicy
         EntityTypeRegistry.Frame,
         EntityTypeRegistry.Video,
         EntityTypeRegistry.OnsetSegment,
+        EntityTypeRegistry.UdParse,
     ];
 
     /// <summary>

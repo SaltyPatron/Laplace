@@ -121,8 +121,8 @@ public sealed class IngestSizingTests
         int tenWorkerCap = IngestSizing.ResolveFlushEnvelopeRecordCap(
             profile, workerEnvelope);
 
-        Assert.Equal(83, oneWorkerCap);
-        Assert.Equal(8, tenWorkerCap);
+        Assert.Equal(167, oneWorkerCap);
+        Assert.Equal(16, tenWorkerCap);
         Assert.True(
             tenWorkerCap * 10L * profile.WorkingSetBytesPerRecord
                 * IngestSizing.WorkingSetResidentSlack
