@@ -83,6 +83,12 @@ delivered until it is merged.
 | #1194 | PredicateMatrix pipeline grain | Makes one selected native PredicateMatrix row one generic-pipeline record instead of projecting each input into a private multi-change lane. |
 | #1195 | PredicateMatrix native identity | Preserves all six language/POS populations, predicate-bound roles, PB/FN/VN/WN/MCR/ESO semantics across the 27-column row, package-repeat suppression, exact phase-grain inventory, and a measured source profile. |
 | #1196 | Bounded post-ingest completion | Keeps UI/planner `ANALYZE`, GIN draining, and estimated totals in the automatic path while moving unbounded exact source scans to explicit `stats <source>`; emits `LAPSIGHT_POST_INGEST` phase timing. |
+| #1198 | Registered grammar execution | Routes structured decomposer formats through their registered grammar contracts instead of private parser/batching paths. |
+| #1200 | Chess result/trajectory grain | Records the playing result once, makes `PLAYS_LINE` a categorical occurrence/content join, and removes exact-line outcome materialization. |
+| #1201 | Chess recovery surface | Exposes source-scoped analyzer eviction/rederive through the reusable CI/CD ingest path. |
+| #1202 | Source-scoped chess gates | Validates the evidence owned by the named decomposer instead of letting unrelated global consensus satisfy or fail its gate. |
+| #1203 | Resource-derived ingest and fold | Removes vendor batch defaults and fixed 65,536-cell/fold/cache/COPY limits; derives the generic pipeline from RAM, CPU topology, and row transit width; changes consensus upsert to one partition-routed PostgreSQL 18 `MERGE`. |
+| #1204 | Residual limiter and eval cleanup | Removes remaining fixed queue/cache/probe/journal/I/O/resume/marshal limits, replaces the 4-GiB/512-MiB working-set clamps with topology ownership, makes mask/fold scheduling work-conserving, and stops planner row-count shrink from invalidating semantic evals. |
 
 The related source-fidelity audit (#1155), durable working agreement (#1156), and
 canonical lexical-peer batch core (#1164) were integrated in the same batch,
@@ -91,6 +97,12 @@ merged as the durable substrate-cohesion companion ledger; it is not counted as
 delivered decomposer implementation.
 
 ## Latest live acceptance receipt
+
+- [Clean OMW run 32313436484](https://github.com/SaltyPatron/Laplace/actions/runs/32313436484)
+  completed ingest in 338 seconds with every journal, throughput, health, layer, and
+  `HAS_LANGUAGE` gate green. The comparable pre-fix clean receipt was 716.2 seconds:
+  2.12x faster while indexes remained online. This closes the requested post-#1186 OMW
+  remeasurement; PR #1204's larger topology-owned envelope still requires its own live run.
 
 - [Chess run 32297973379](https://github.com/SaltyPatron/Laplace/actions/runs/32297973379)
   ingested 190,705 games in 1,065 seconds, then journal replay completed as a seven-second
@@ -175,14 +187,11 @@ delivered decomposer implementation.
   intentional and must remain reported honestly. Tracked by #967.
 - Audit source profiles against measured compose fanout and memory, then benchmark
   bounded foundation, Wiktionary, UD, chess, model, media, and OpenSubtitles runs.
-- Remeasure full Atomic2020 and OMW after #1183/#1184. The pre-fix clean receipts were:
-  Atomic2020 1,331,097 inputs in 414 seconds with about 247 seconds of consensus drain;
-  OMW 3,438,843 inputs in 716.2 seconds, including a 526.2-second single-file Japanese
-  compose critical path and 188.44 seconds rebuilding 30 indexes. OMW's final apply and
-  final fold were only 451 milliseconds apart.
-- Remeasure OMW after #1186. The semantic value
-  must still compose at grapheme/content grain; the TSV packaging must create zero
-  content entities/physicalities.
+- Finish the active clean Atomic2020 remeasurement after #1203/#1204 and compare producer,
+  consensus-drain, and mask timing against the prior 1,331,097-input / 414-second receipt,
+  whose consensus drain occupied about 247 seconds. Clean OMW is now measured at 338 seconds
+  versus 716.2 seconds before the generic resource-derived pipeline; its semantic values still
+  compose at grapheme/content grain while TSV packaging creates no content physicalities.
 - Re-run analyzer v3 after source eviction and confirm the completion envelope reports
   bounded `analyze_ms`, `gin_drain_ms`, and `summary_ms` without an automatic exact-source
   scan. The 1970--1989 payload itself sustained about 179 games/s and 25.6K novel rows/s.
