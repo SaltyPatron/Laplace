@@ -57,16 +57,16 @@ public sealed class CategoryCorrespondenceHandler : IIngestRecordHandler<Categor
 public static class CategoryCorrespondenceIngestSupport
 {
     public static IngestBatchConfig PipelineConfig(
-        Hash128 sourceId, string batchLabelPrefix, int batchSize, ISubstrateReader? reader)
+        Hash128 sourceId, string batchLabelPrefix, ISubstrateReader? reader)
     {
         var profile = IngestSourceProfile.Default;
-        var ws = IngestPipelineDefaults.ResolveWorkingSet(profile, defaultBatch: batchSize);
+        var ws = IngestPipelineDefaults.ResolveWorkingSet(profile);
         return new()
         {
             SourceId = sourceId,
             BatchLabelPrefix = batchLabelPrefix,
             BatchSize = ws.Batch,
-            ProbeChunkSize = Math.Clamp(ws.ProbeChunk, 64, 4096),
+            ProbeChunkSize = ws.ProbeChunk,
             ContainmentReader = reader,
             EntityCapacity = ws.Batch * 3,
             AttestationCapacity = ws.Batch * 3,
@@ -82,7 +82,6 @@ public static class CategoryCorrespondenceIngestSupport
         Hash128 sourceId,
         double trust,
         string batchLabelPrefix,
-        int batchSize,
         ISubstrateReader? reader,
         DecomposerOptions options,
         CancellationToken ct = default)
@@ -91,7 +90,7 @@ public static class CategoryCorrespondenceIngestSupport
         var stream = new AsyncEnumerableRecordStream<CategoryCorrespondenceRecord>(records);
         var handler = new CategoryCorrespondenceHandler(sourceId, trust);
         var config = IngestPipelineDefaults.ApplyMaxInputUnits(
-            IngestPipelineDefaults.CategoryCorrespondence(sourceId, batchLabelPrefix, batchSize, options, reader),
+            IngestPipelineDefaults.CategoryCorrespondence(sourceId, batchLabelPrefix, options, reader),
             options);
         return IngestBatchPipeline.RunAsync(stream, handler, config, ct);
     }

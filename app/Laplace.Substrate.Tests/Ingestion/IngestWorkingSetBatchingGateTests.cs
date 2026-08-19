@@ -13,16 +13,15 @@ namespace Laplace.Ingestion.Tests;
 public sealed class IngestWorkingSetBatchingGateTests
 {
     [Theory]
-    [InlineData(0, 0, false)]
-    [InlineData(1, 1, false)]
-    [InlineData(499_999, 399_999, false)]
-    [InlineData(500_000, 1, true)]
-    [InlineData(1, 400_000, true)]
-    public void WorkingSetFlushPolicy_UsesFinalizedPayloadBounds(
-        long bytes, int rows, bool expected)
+    [InlineData(0, false)]
+    [InlineData(1, false)]
+    [InlineData(499_999, false)]
+    [InlineData(500_000, true)]
+    public void WorkingSetFlushPolicy_UsesFinalizedPayloadBytes(
+        long bytes, bool expected)
     {
         Assert.Equal(expected, IngestRunner.ShouldFlushWorkingSet(
-            bytes, rows, byteCap: 500_000, rowCap: 400_000));
+            bytes, byteCap: 500_000));
     }
 
     [Fact]

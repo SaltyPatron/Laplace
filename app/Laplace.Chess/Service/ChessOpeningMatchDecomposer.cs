@@ -55,7 +55,6 @@ public sealed class ChessOpeningMatchDecomposer
     public override Hash128 TrustClassId => ChessVocabulary.AnalysisTrustClass;
     protected override double SourceTrust => TC.StandardsDerived;
     protected override string BatchLabelPrefix => "chess/opening-match";
-    protected override int DefaultBatchSize => BatchConfigDefaults.Chess;
 
     public override int EstimatedBytesPerRecord => IngestSourceProfile.ChessAnalyze.EstBytesPerRecord;
     public override int EstimatedComposeUnitsPerRecord => IngestSourceProfile.ChessAnalyze.EstComposeUnitsPerRecord;
@@ -96,7 +95,7 @@ public sealed class ChessOpeningMatchDecomposer
         Console.Out.WriteLine(
             $"CHESS_OPENING_INDEX positions={_index.Count} source=ChessOpenings");
 
-        var ws = IngestPipelineDefaults.ResolveWorkingSet(PipelineProfile, options, DefaultBatchSize);
+        var ws = IngestPipelineDefaults.ResolveWorkingSet(PipelineProfile, options);
         ChessDropLedger.Reset();
         try
         {

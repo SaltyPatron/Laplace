@@ -32,7 +32,6 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
     public override Hash128 TrustClassId => ChessVocabulary.PgnTrustClass;
     protected override double SourceTrust => TC.StructuredCorpus;
     protected override string BatchLabelPrefix => "chess/pgn";
-    protected override int DefaultBatchSize => BatchConfigDefaults.Chess;
 
     public override int EstimatedBytesPerRecord => IngestSourceProfile.ChessPgn.EstBytesPerRecord;
     public override int EstimatedComposeUnitsPerRecord => IngestSourceProfile.ChessPgn.EstComposeUnitsPerRecord;
@@ -103,7 +102,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         string filePath, string fileLabel, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        var ws = IngestPipelineDefaults.ResolveWorkingSet(PipelineProfile, options, DefaultBatchSize);
+        var ws = IngestPipelineDefaults.ResolveWorkingSet(PipelineProfile, options);
         // --force / ReObservePresent: every game must be fully parsed+composed. Peek+probe
         // before that is pure double tax (measured: 16s kill still on FILE_START).
         if (options.ReObservePresent)

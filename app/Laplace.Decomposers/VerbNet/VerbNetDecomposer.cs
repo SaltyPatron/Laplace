@@ -29,7 +29,6 @@ public sealed class VerbNetDecomposer
     public override int LayerOrder => 2;
     protected override double SourceTrust => TC.AcademicCurated;
     protected override string BatchLabelPrefix => "verbnet";
-    protected override int DefaultBatchSize => BatchConfigDefaults.HighVolume;
 
     protected override IReadOnlyList<(string Path, string Label)> ListFiles(
         string ecosystemPath, DecomposerOptions options)

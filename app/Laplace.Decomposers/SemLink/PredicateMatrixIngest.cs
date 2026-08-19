@@ -622,7 +622,7 @@ internal sealed class PredicateMatrixPhase : DecomposerPhase<PredicateMatrixInge
         IDecomposerContext context, DecomposerOptions options)
     {
         var config = IngestPipelineDefaults.CategoryCorrespondence(
-            SourceId, BatchLabelPrefix, BatchConfigDefaults.HighVolume, options, context.Reader,
+            SourceId, BatchLabelPrefix, options, context.Reader,
             PredicateMatrixSource.Profile);
         return IngestPipelineDefaults.ApplyMaxInputUnits(config, options);
     }

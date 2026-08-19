@@ -55,7 +55,7 @@ public sealed class UDDecomposer : DecomposerMultiFile<UdIngestRecord, UDSource,
     protected override IngestBatchConfig ConfigForFile(
         string fileLabel, ISubstrateReader? reader, DecomposerOptions options) =>
         UdIngestSupport.PipelineConfig(
-            Source, fileLabel, UdIngestSupport.ResolveBatchSentences(options), reader);
+            Source, fileLabel, options, reader);
 
     public Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)

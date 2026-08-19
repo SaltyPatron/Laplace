@@ -203,7 +203,7 @@ public sealed class UnicodeDecomposer : DecomposerMultiPhase<UnicodeSource, Full
             IDecomposerContext context, DecomposerOptions options) =>
             IngestPipelineDefaults.ApplyMaxInputUnits(
                 IngestPipelineDefaults.Compose(
-                    SourceId, BatchLabelPrefix, _batch, options, context.Reader,
+                    SourceId, BatchLabelPrefix, options, context.Reader,
                     IngestSourceProfile.Unicode,
                     attestationCapacity: _attestationCapacity,
                     commitEpoch: _commitEpoch),

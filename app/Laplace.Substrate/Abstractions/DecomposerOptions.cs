@@ -21,7 +21,7 @@ public sealed record DecomposerOptions(
 
     public static DecomposerOptions ForWitness(
         string sourceKey,
-        int batchSize = 2048,
+        int batchSize = 1,
         LanguageFilter? languageOverride = null,
         bool? emitCrossLanguageLinks = null)
     {

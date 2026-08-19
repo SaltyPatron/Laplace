@@ -19,7 +19,8 @@ public sealed class DocumentIngestPipelineTests
             .ToList();
 
         var reader = new ProbeTrackingReader(present: false);
-        var config = DocumentIngestSupport.PipelineConfig("document/test", reader, batchSize: docCount);
+        var config = DocumentIngestSupport.PipelineConfig(
+            "document/test", reader, DecomposerOptions.Default with { BatchSize = docCount });
         config = new IngestBatchConfig
         {
             SourceId = config.SourceId,
@@ -49,13 +50,15 @@ public sealed class DocumentIngestPipelineTests
         var baseline = new List<SubstrateChange>();
         await foreach (var c in IngestBatchPipeline.RunAsync(
             new ListContentStream(records), new DocumentIngestHandler(layerOrder: 2),
-            DocumentIngestSupport.PipelineConfig("document/base", null, batchSize: 6)))
+            DocumentIngestSupport.PipelineConfig(
+                "document/base", null, DecomposerOptions.Default with { BatchSize = 6 })))
             baseline.Add(c);
         Assert.True(ContentEntityCount(baseline) > 0);
 
         var reader = new ProbeTrackingReader(present: true);
         var changes = new List<SubstrateChange>();
-        var config = DocumentIngestSupport.PipelineConfig("document/present", reader, batchSize: 6);
+        var config = DocumentIngestSupport.PipelineConfig(
+            "document/present", reader, DecomposerOptions.Default with { BatchSize = 6 });
         config = new IngestBatchConfig
         {
             SourceId = config.SourceId,
@@ -187,7 +190,8 @@ public sealed class DocumentIngestPipelineTests
 
     private static IngestBatchConfig DefaultDocumentConfig(ProbeTrackingReader reader)
     {
-        var config = DocumentIngestSupport.PipelineConfig("document/test", reader, batchSize: 8);
+        var config = DocumentIngestSupport.PipelineConfig(
+            "document/test", reader, DecomposerOptions.Default with { BatchSize = 8 });
         return new IngestBatchConfig
         {
             SourceId = config.SourceId,

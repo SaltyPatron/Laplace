@@ -71,7 +71,6 @@ public sealed class ChessTrajectoryDecomposer
     public override Hash128 TrustClassId => ChessVocabulary.AnalysisTrustClass;
     protected override double SourceTrust => TC.StructuredCorpus;
     protected override string BatchLabelPrefix => "chess/trajectory";
-    protected override int DefaultBatchSize => BatchConfigDefaults.Chess;
 
     public override int EstimatedBytesPerRecord => IngestSourceProfile.ChessAnalyze.EstBytesPerRecord;
     public override int EstimatedComposeUnitsPerRecord => IngestSourceProfile.ChessAnalyze.EstComposeUnitsPerRecord;
@@ -93,7 +92,7 @@ public sealed class ChessTrajectoryDecomposer
                 "ChessAnalysis requires a live Postgres substrate (NpgsqlSubstrateReader). "
                 + "Record games first: laplace ingest chess <pgn>");
 
-        var ws = IngestPipelineDefaults.ResolveWorkingSet(PipelineProfile, options, DefaultBatchSize);
+        var ws = IngestPipelineDefaults.ResolveWorkingSet(PipelineProfile, options);
         // LINE-grain stream (GH #736), gated on THIS pass's per-line marker: a line whose
         // trajectory has already been COMMITTED is skipped before compose, so a second run
         // costs a bitmap probe per line rather than a replay. Composed-but-uncommitted work is

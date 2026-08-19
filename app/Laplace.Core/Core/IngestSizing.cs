@@ -4,7 +4,6 @@ namespace Laplace.Engine.Core;
 
 public static class IngestSizing
 {
-    public const int TargetBytesPerBatch = 1 << 20;
 
     // Fallback only — real bytes/record comes from IngestSourceProfile.
     public const int DefaultEstBytesPerRecord = 512;
@@ -32,10 +31,9 @@ public static class IngestSizing
     /// first 20,000 records is 6,158 bytes. <c>IngestSourceProfile.Wiktionary</c> declares
     /// 12,000 — 1.95x too high.
     ///
-    /// The error is in the slow direction, not the dangerous one:
-    /// <see cref="ResolveRecordBatch"/> computes <c>TargetBytesPerBatch / estBytesPerRecord</c>,
-    /// so an over-estimate halves the batch and doubles the round trips for the same
-    /// corpus. Nothing fails; it just costs the whole run.
+    /// The error is in the slow direction, not the dangerous one: record width is
+    /// the denominator of the per-worker memory share, so an over-estimate shrinks
+    /// every batch and increases scheduling/probe overhead for the whole corpus.
     ///
     /// Returns <paramref name="fallback"/> on any unreadable/empty/implausible input.
     /// Sizing must never be the thing that throws.
@@ -67,10 +65,6 @@ public static class IngestSizing
         catch (IOException) { return fallback; }
         catch (UnauthorizedAccessException) { return fallback; }
     }
-
-    public const int ApplyWavesPerCommit = 2;
-
-    public const int MaxIntentsPerCommitCap = 32;
 
     /// <summary>
     /// Staged-byte estimate under-counts true resident cost ~2.5× (WorkingSetMode).
@@ -181,6 +175,168 @@ public static class IngestSizing
         }
     }
 
+    /// <summary>
+    /// Machine-derived sizing for the consensus fold. These are one plan because
+    /// chunk width, connection fanout, retained deltas, and mask-pair residency
+    /// consume the same process/backend memory envelope; tuning them independently
+    /// is how fixed powers of two accumulated in the writer.
+    /// </summary>
+    public sealed record ConsensusFoldPlan(
+        int Connections,
+        int ChunkCells,
+        int MinSegmentCells,
+        int ParallelDeltaMinAttestations,
+        int PipelineDepth,
+        int DeltaCapacityCells,
+        int MaskPairCapacity)
+    {
+        public void Log() => Console.Error.WriteLine(
+            "consensus_fold_sizing: connections={0} chunk_cells={1} min_segment_cells={2} "
+            + "parallel_delta_min={3} pipeline_depth={4} delta_capacity_cells={5} "
+            + "mask_pair_capacity={6} transit_bytes_per_cell={7} mask_pair_bytes={8}",
+            Connections,
+            ChunkCells,
+            MinSegmentCells,
+            ParallelDeltaMinAttestations,
+            PipelineDepth,
+            DeltaCapacityCells,
+            MaskPairCapacity,
+            MemoryTopology.ConsensusFoldTransitBytesPerCell,
+            MemoryTopology.ConsensusMaskPairResidentBytes);
+    }
+
+    /// <summary>
+    /// Machine-derived sizing for working-set verification/COPY/merge and the
+    /// run-scoped exact caches. All counts are byte budgets divided by the actual
+    /// transport/resident width; none are corpus-tuned row literals.
+    /// </summary>
+    public sealed record ApplyIoPlan(
+        int Connections,
+        int ProbeChunkIds,
+        int MergeChunkRows,
+        int EntityPresenceCacheIds,
+        int PhysicalityPresenceCacheIds,
+        int LadderCacheIds,
+        int CopyStartupBytes)
+    {
+        public void Log() => Console.Error.WriteLine(
+            "apply_io_sizing: connections={0} probe_chunk_ids={1} merge_chunk_rows={2} "
+            + "entity_cache_ids={3} physicality_cache_ids={4} ladder_cache_ids={5} "
+            + "copy_startup_bytes={6}",
+            Connections,
+            ProbeChunkIds,
+            MergeChunkRows,
+            EntityPresenceCacheIds,
+            PhysicalityPresenceCacheIds,
+            LadderCacheIds,
+            CopyStartupBytes);
+    }
+
+    /// <summary>
+    /// Resolve the fold from the same memory and topology inputs as compose/apply.
+    /// No throughput cap lives here: the only ceilings are the shared memory envelope
+    /// and the CLR/PostgreSQL signed-array index range.
+    /// </summary>
+    public static ConsensusFoldPlan ResolveConsensusFold(
+        int applyPartitions,
+        long? workingSetBudgetBytes = null,
+        long? flushEnvelopeBytes = null)
+    {
+        int connections = Math.Max(1, applyPartitions);
+        long budget = Math.Max(1, workingSetBudgetBytes ?? ResolveWorkingSetBudgetBytes());
+        long envelope = Math.Clamp(
+            flushEnvelopeBytes ?? ResolveWorkingSetFlushEnvelopeBytes(), 1, budget);
+
+        // The transit estimate includes both managed/Npgsql parameter objects and
+        // PostgreSQL array/slice residency, so all active connections share ONE
+        // envelope rather than each receiving an unrelated fixed row count.
+        long perConnectionBytes = Math.Max(1, envelope / connections);
+        int chunkCells = IntCount(perConnectionBytes
+            / MemoryTopology.ConsensusFoldTransitBytesPerCell);
+
+        // A small type run should not create one transaction per core. The minimum
+        // is the machine-sized chunk divided among the available writers, so it
+        // scales down/up with both memory and topology.
+        int minSegmentCells = Math.Max(1, chunkCells / connections);
+
+        // Retain as many complete flush-envelope deltas as fit after reserving one
+        // envelope each for active compose, apply transit, exact presence/ladder
+        // caches, and mask-pair dedup.
+        // One fold slot is the forward-progress floor on constrained hosts.
+        int pipelineDepth = IntCount(Math.Max(1, budget / envelope - 4));
+
+        int deltaCapacityCells = IntCount(envelope
+            / MemoryTopology.ConsensusFoldBytesPerRelation);
+        int maskPairCapacity = IntCount(envelope
+            / MemoryTopology.ConsensusMaskPairResidentBytes);
+
+        return new ConsensusFoldPlan(
+            connections,
+            chunkCells,
+            minSegmentCells,
+            chunkCells,
+            pipelineDepth,
+            deltaCapacityCells,
+            maskPairCapacity);
+    }
+
+    /// <summary>
+    /// Resolve apply IO from the same budget/envelope/topology inputs as compose and
+    /// consensus fold. One cache envelope is split across the two presence maps and
+    /// the ladder ledger; simultaneous probe/merge connections share one transit
+    /// envelope. Counts are consequences of byte width, not tuning knobs.
+    /// </summary>
+    public static ApplyIoPlan ResolveApplyIo(
+        int applyPartitions,
+        long? workingSetBudgetBytes = null,
+        long? flushEnvelopeBytes = null)
+    {
+        int connections = Math.Max(1, applyPartitions);
+        long budget = Math.Max(1, workingSetBudgetBytes ?? ResolveWorkingSetBudgetBytes());
+        long envelope = Math.Clamp(
+            flushEnvelopeBytes ?? ResolveWorkingSetFlushEnvelopeBytes(), 1, budget);
+        long perConnectionBytes = Math.Max(1, envelope / connections);
+
+        int probeChunkIds = IntCount(perConnectionBytes
+            / MemoryTopology.PresenceProbeTransitBytesPerId);
+        int mergeChunkRows = IntCount(perConnectionBytes
+            / MemoryTopology.AttestationMergeTransitBytesPerRow);
+
+        // Presence-e, presence-p, and ladder each receive one third of the cache
+        // envelope. They are exact acceleration structures; reaching capacity only
+        // restores the normal DB probe/compose path and cannot lose data.
+        long cacheBytesPerMap = Math.Max(1, envelope / 3);
+        int cacheIds = IntCount(cacheBytesPerMap
+            / MemoryTopology.ConcurrentHash128ResidentBytes);
+
+        return new ApplyIoPlan(
+            connections,
+            probeChunkIds,
+            mergeChunkRows,
+            cacheIds,
+            cacheIds,
+            cacheIds,
+            MemoryTopology.CopyStartupBytesPerConnection);
+    }
+
+    /// <summary>
+    /// Number of COPY connections justified by the finalized payload. Every extra
+    /// connection must own at least one row and one transport buffer/page of bytes;
+    /// the upper bound is the machine's apply topology.
+    /// </summary>
+    public static int ResolveCopyConnections(
+        int rowCount, long payloadBytes, int applyPartitions, int copyStartupBytes)
+    {
+        if (rowCount <= 0 || payloadBytes <= 0) return 1;
+        long byPayload = (payloadBytes + Math.Max(1, copyStartupBytes) - 1)
+            / Math.Max(1, copyStartupBytes);
+        return (int)Math.Max(1, Math.Min(
+            Math.Min((long)Math.Max(1, applyPartitions), rowCount), byPayload));
+    }
+
+    private static int IntCount(long value) =>
+        (int)Math.Clamp(value, 1, int.MaxValue);
+
     public static long TotalPhysicalMemoryBytes() => MemoryTopology.TotalPhysicalBytes;
 
     /// <summary>
@@ -245,7 +401,7 @@ public static class IngestSizing
             ram,
             batch,
             plan.CommitRows,
-            plan.CommitRows,
+            ResolveFlushEnvelopeRecordCap(profile),
             ResolveWorkingSetProbeInterval(batch, profile),
             topo.ComposeWorkers,
             topo.FileWorkers,
@@ -263,8 +419,13 @@ public static class IngestSizing
     /// and per-source staged-byte model (includes compose-unit multiplier + resident slack).
     /// </summary>
     public static int ResolveWorkingSetRecordCap(
-        IngestSourceProfile profile, long? workingSetBudgetBytes = null) =>
-        ResolveForSource(profile, workingSetBudgetBytes: workingSetBudgetBytes).WorkingSetRecordCap;
+        IngestSourceProfile profile, long? workingSetBudgetBytes = null)
+    {
+        long envelope = Math.Min(
+            workingSetBudgetBytes ?? ResolveWorkingSetBudgetBytes(),
+            ResolveWorkingSetFlushEnvelopeBytes());
+        return ResolveFlushEnvelopeRecordCap(profile, envelope);
+    }
 
     /// <summary>
     /// Working-set memory estimate: staged builder bytes plus deferred compose trees
@@ -294,19 +455,20 @@ public static class IngestSizing
                 profile.EstBytesPerRecord,
                 profile.EstComposeUnitsPerRecord,
                 composeWorkers,
-                workingSetBudgetBytes);
-        int probe = ResolveProbeChunk(batch, fileWorkers);
+                workingSetBudgetBytes,
+                profile.ResidentBytesPerComposeUnit);
+        int probe = ResolveProbeChunk(applyPartitions);
 
         int commit = commitRowsOverride
             ?? ResolveCommitRows(batch, applyPartitions, profile, workingSetBudgetBytes);
 
         int maxIntents = ResolveMaxIntentsPerCommit(batch, commit, commitRowsOverride);
 
-        int decomposeChan = Math.Max(8, applyPartitions * 4 + fileWorkers);
-
-        int slotsPerWorker = Math.Max(2,
-            (applyPartitions * ApplyWavesPerCommit + fileWorkers - 1) / Math.Max(1, fileWorkers));
-        int fileChan = fileWorkers * slotsPerWorker;
+        // One backpressure slot per active pipeline actor. Queue depth follows the
+        // actual compose/file/apply topology instead of a fixed waves multiplier.
+        int decomposeChan = checked(Math.Max(1, composeWorkers)
+            + Math.Max(1, fileWorkers) + Math.Max(1, applyPartitions));
+        int fileChan = checked(Math.Max(1, fileWorkers) + Math.Max(1, applyPartitions));
 
         long rowBudget = (long)Math.Max(commit, batch) * decomposeChan;
 
@@ -322,33 +484,23 @@ public static class IngestSizing
         int estBytesPerRecord = DefaultEstBytesPerRecord,
         int estComposeUnits = 1,
         int composeWorkers = 1,
-        long? workingSetBudgetBytes = null)
+        long? workingSetBudgetBytes = null,
+        int? residentBytesPerComposeUnit = null)
     {
+        _ = performanceCoreCount; // topology is represented by composeWorkers
         long budget = workingSetBudgetBytes ?? ResolveWorkingSetBudgetBytes();
-        int workingBytes = Math.Max(1, estBytesPerRecord) * Math.Max(1, estComposeUnits);
+        long envelope = Math.Min(budget, ResolveWorkingSetFlushEnvelopeBytes());
+        long residentBytes = (long)Math.Max(1,
+                residentBytesPerComposeUnit ?? estBytesPerRecord)
+            * Math.Max(1, estComposeUnits);
+        long perWorkerBytes = Math.Max(1, envelope / Math.Max(1, composeWorkers));
 
-        int fromTarget = TargetBytesPerBatch / Math.Max(1, estBytesPerRecord);
-        int fromMemory = (int)Math.Clamp(
-            budget / (8L * workingBytes * Math.Max(1, composeWorkers)),
-            256,
-            32_768);
-
-        int coreCeiling = performanceCoreCount switch
-        {
-            <= 4 => 2048,
-            <= 8 => 4096,
-            <= 16 => 8192,
-            _ => 8192,
-        };
-        int coreFloor = performanceCoreCount <= 4 ? 512 : 1024;
-
-        int raw = Math.Min(Math.Min(fromTarget, fromMemory), coreCeiling);
-        // Only truly fat input units (chess games, documents) skip coreFloor.
-        int batch = estBytesPerRecord > 256_000
-            ? Math.Clamp(raw, 256, coreCeiling)
-            : Math.Clamp(raw, coreFloor, coreCeiling);
-
-        return batch;
+        // One batch per compose worker fits in the shared envelope, including the
+        // measured managed/native residency slack. There are no source classes,
+        // powers-of-two bands, or hidden minimum/maximum batch sizes.
+        long records = (long)(perWorkerBytes
+            / Math.Max(1.0, residentBytes * WorkingSetResidentSlack));
+        return IntCount(records);
     }
 
     /// <summary>
@@ -360,27 +512,11 @@ public static class IngestSizing
         IngestSourceProfile profile,
         long? workingSetBudgetBytes = null)
     {
+        _ = recordBatch;
+        _ = applyPartitions;
         long budget = workingSetBudgetBytes ?? ResolveWorkingSetBudgetBytes();
-        // Fat input units (chess PGN games) use a large EstBytes solely so
-        // ResolveRecordBatch takes the fat-batch lane. That same number must NOT
-        // shrink commit_rows to ~6k — measured apply then pays ~80s/batch for
-        // ~0.9M rows (~11k rows/s) and the 20s/250MB gate is impossible.
-        // Commit sizing uses a staged-row estimate (~32 KiB/game working set).
-        int workingBytes = profile.EstBytesPerRecord > 256_000
-            ? 32_768 * Math.Max(1, profile.EstComposeUnitsPerRecord)
-            : profile.WorkingSetBytesPerRecord;
-
-        long maxByBudget = (long)(budget / (workingBytes * WorkingSetResidentSlack));
-        int budgetCap = (int)Math.Clamp(maxByBudget, recordBatch, int.MaxValue);
-
-        int derived = recordBatch * applyPartitions * ApplyWavesPerCommit;
-        // Fat sources: do not cap commit at the tiny wave product (batch×parts×2).
-        int commit = profile.EstBytesPerRecord > 256_000
-            ? budgetCap
-            : Math.Min(derived, budgetCap);
-
-        int floor = Math.Min(Math.Max(recordBatch, 1_024), budgetCap);
-        return Math.Clamp(commit, floor, budgetCap);
+        long envelope = Math.Min(budget, ResolveWorkingSetFlushEnvelopeBytes());
+        return ResolveFlushEnvelopeRecordCap(profile, envelope);
     }
 
     /// <summary>
@@ -395,10 +531,9 @@ public static class IngestSizing
         int recordBatchSize, IngestSourceProfile profile, long? flushEnvelopeBytes = null)
     {
         int flushCap = ResolveFlushEnvelopeRecordCap(profile, flushEnvelopeBytes);
-        int raw = recordBatchSize * Math.Max(1, profile.EstComposeUnitsPerRecord);
+        long raw = (long)recordBatchSize * Math.Max(1, profile.EstComposeUnitsPerRecord);
         // Stay at or under flushCap so pending cannot outrun the envelope close.
-        int capped = Math.Min(raw, flushCap);
-        return Math.Clamp(capped, Math.Min(256, flushCap), flushCap);
+        return (int)Math.Max(1, Math.Min(raw, flushCap));
     }
 
     // Presence probes are ROUND-TRIP dominated (~10ms fixed cost each, id
@@ -408,37 +543,16 @@ public static class IngestSizing
     // 2026-07-16: continuous 10-12ms probe stream, zero writes). The WS-apply
     // probe already runs 131,072-id chunks through the same functions; match
     // its scale. 32k ids = 512KB parameter — noise.
-    public static int ResolveProbeChunk(int recordBatchSize, int fileWorkers = 1) =>
-        Math.Clamp(recordBatchSize * 16, 2048, 32_768);
+    public static int ResolveProbeChunk(int applyPartitions = 1) =>
+        ResolveApplyIo(Math.Max(1, applyPartitions)).ProbeChunkIds;
 
     public static int ResolveMaxIntentsPerCommit(
         int recordBatch, int commitRowBudget, int? commitRowsOverride = null)
     {
         int budget = commitRowsOverride ?? commitRowBudget;
-
-        if (budget <= 0)
-            return Math.Max(1, recordBatch);
-
-        int estRowsPerIntent = Math.Max(1, recordBatch * 8);
-        int byRowBudget = Math.Max(1, budget / estRowsPerIntent);
-
-        int heapCap = budget >= 100_000
-            ? Math.Clamp(budget / 25_000, MaxIntentsPerCommitCap, 48)
-            : MaxIntentsPerCommitCap;
-
-        // Fat-record sources (chess) can resolve a commit_rows just above
-        // recordBatch but below batch*8 — the estRowsPerIntent heuristic then
-        // forces max_intents=1 and serializes apply on a multi-core box
-        // (measured 2026-08-03: ChessPgn 4MiB estimate → commit_rows=429,
-        // max_intents=1, ~50% of one core). When the budget clearly holds more
-        // than one batch, allow parallel intents up to the heap cap.
-        if (byRowBudget == 1 && budget >= recordBatch)
-        {
-            int byBatch = (budget + recordBatch - 1) / recordBatch;
-            byRowBudget = Math.Min(heapCap, Math.Max(2, byBatch));
-        }
-
-        return Math.Max(1, Math.Min(byRowBudget, heapCap));
+        if (budget <= 0) return 1;
+        return IntCount((budget + (long)Math.Max(1, recordBatch) - 1)
+            / Math.Max(1, recordBatch));
     }
 
     public static void LogPlan(Plan plan)

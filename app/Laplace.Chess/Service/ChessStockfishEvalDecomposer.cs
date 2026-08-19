@@ -62,7 +62,6 @@ public sealed class ChessStockfishEvalDecomposer
     public override Hash128 TrustClassId => ChessStockfishEval.TrustClassId;
     protected override double SourceTrust => TC.StructuredCorpus;
     protected override string BatchLabelPrefix => "chess/stockfish-eval";
-    protected override int DefaultBatchSize => BatchConfigDefaults.Chess;
 
     public override int EstimatedBytesPerRecord => IngestSourceProfile.ChessAnalyze.EstBytesPerRecord;
     public override int EstimatedComposeUnitsPerRecord => IngestSourceProfile.ChessAnalyze.EstComposeUnitsPerRecord;
@@ -84,7 +83,7 @@ public sealed class ChessStockfishEvalDecomposer
                 "ChessStockfishEval requires a live Postgres substrate (NpgsqlSubstrateReader). "
                 + "Record games first: laplace ingest chess <pgn>");
 
-        var ws = IngestPipelineDefaults.ResolveWorkingSet(PipelineProfile, options, DefaultBatchSize);
+        var ws = IngestPipelineDefaults.ResolveWorkingSet(PipelineProfile, options);
         // LINE-grain stream (GH #736): a line shared by many playings is evaluated ONCE.
         _candidatesStreamed = 0;
         await foreach (var witnessed in ChessWitnessHydrator.StreamUnanalyzedLinesAsync(

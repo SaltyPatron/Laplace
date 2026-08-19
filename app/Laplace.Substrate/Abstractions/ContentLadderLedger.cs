@@ -48,21 +48,21 @@ namespace Laplace.Decomposers.Abstractions;
 public static class ContentLadderLedger
 {
     /// <summary>
-    /// Bounded by DISTINCT content roots deposited on a run, which is the same order as
-    /// the apply's own persisted-id caches (tens of millions on a full seed). The cap is
-    /// a backstop against an unbounded id space (a model ingest mints roots per tensor
-    /// row); past it the ledger stops accreting and callers fall back to deriving, which
-    /// loses reuse and never correctness.
+    /// Bounded by DISTINCT content roots deposited on a run. Capacity is supplied by
+    /// the generic apply resource plan from its cache byte envelope; past it the ledger
+    /// stops accreting and callers fall back to deriving, which loses reuse and never
+    /// correctness.
     /// </summary>
-    private const int Cap = 1 << 24;
-
     private static ConcurrentDictionary<Hash128, bool>? _persisted;
     private static int _count;
     private static int _armed;
+    private static int _capacity;
 
     /// <summary>Arms the ledger for a bulk run. Keeps any membership left by a prior End.</summary>
-    public static void Begin()
+    public static void Begin(int? capacity = null)
     {
+        Volatile.Write(ref _capacity, Math.Max(1, capacity
+            ?? IngestSizing.ResolveApplyIo(IngestTopology.Current.ApplyPartitions).LadderCacheIds));
         if (_persisted is null)
         {
             _persisted = new ConcurrentDictionary<Hash128, bool>();
@@ -83,6 +83,7 @@ public static class ContentLadderLedger
         Volatile.Write(ref _armed, 0);
         _persisted = null;
         Volatile.Write(ref _count, 0);
+        Volatile.Write(ref _capacity, 0);
     }
 
     /// <summary>True while a bulk run has armed the ledger. Outside one, never skip.</summary>
@@ -117,8 +118,35 @@ public static class ContentLadderLedger
         if (map is null) return;
         foreach (var id in roots)
         {
-            if (Volatile.Read(ref _count) >= Cap) return;
-            if (map.TryAdd(id, true)) Interlocked.Increment(ref _count);
+            if (!TryAddBounded(map, id)) return;
         }
+    }
+
+    /// <summary>
+    /// Allocation-free working-set feed: records ids selected by the caller's
+    /// first-occurrence index without manufacturing another Hash128 array.
+    /// </summary>
+    public static void MarkPersisted(
+        IReadOnlyList<Hash128> ids, IReadOnlyList<int> indices)
+    {
+        if (!Armed) return;
+        var map = _persisted;
+        if (map is null) return;
+        for (int i = 0; i < indices.Count; i++)
+        {
+            if (!TryAddBounded(map, ids[indices[i]])) return;
+        }
+    }
+
+    private static bool TryAddBounded(
+        ConcurrentDictionary<Hash128, bool> map, Hash128 id)
+    {
+        int capacity = Volatile.Read(ref _capacity);
+        if (Volatile.Read(ref _count) >= capacity) return false;
+        if (!map.TryAdd(id, true)) return true;
+        int after = Interlocked.Increment(ref _count);
+        if (after <= capacity) return true;
+        if (map.TryRemove(id, out _)) Interlocked.Decrement(ref _count);
+        return false;
     }
 }

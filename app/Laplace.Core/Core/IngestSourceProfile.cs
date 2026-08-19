@@ -9,10 +9,9 @@ public sealed record IngestSourceProfile(
     int EstBytesPerRecord,
     int EstComposeUnitsPerRecord = 1,
     // RESIDENT BYTES PER COMPOSE UNIT — NOT INPUT BYTES. EstBytesPerRecord carried both
-    // meanings and they are not the same quantity: ResolveRecordBatch divides
-    // TargetBytesPerBatch by it as the size of a record ON DISK, while
-    // WorkingSetBytesPerRecord multiplied it by the fan as the size of the NATIVE COMPOSE
-    // TREES a record leaves resident. A CoNLL-U sentence is ~2 KB of text and composes into
+    // meanings and they are not the same quantity: record scheduling uses serialized input
+    // width, while WorkingSetBytesPerRecord uses the size of the NATIVE COMPOSE TREES a
+    // record leaves resident. A CoNLL-U sentence is ~2 KB of text and composes into
     // trees whose geometry is two orders of magnitude larger, so one constant could not be
     // right for both and the working-set arm was the one that was wrong.
     //
@@ -68,9 +67,9 @@ public sealed record IngestSourceProfile(
     /// <summary>Kaikki wiktextract JSON — tens of KB per entry, many tier trees each.</summary>
     // MEASURED 2026-08-01 over 20,000 records of the 20.4 GB raw-wiktextract-data.jsonl:
     // the mean record is 6,158 bytes. The previous 12,000 was an estimate nothing ever
-    // checked, and it is the DENOMINATOR in ResolveRecordBatch's
-    // TargetBytesPerBatch / estBytesPerRecord -- so it halved every batch and doubled the
-    // round trips across a 20 GB corpus. Rounded up to 6,500 for headroom on the tail.
+    // checked, and it is the denominator of the per-worker memory calculation, so it
+    // needlessly shrank every batch across a 20 GB corpus. Rounded up to 6,500 for tail
+    // variation.
     // IngestRecordSizeMeasurementTests keeps this honest against the real file.
     //
     // EstComposeUnits sizes ResolveFlushEnvelopeRecordCap / EstimateWorkingSetBytes.
@@ -84,35 +83,22 @@ public sealed record IngestSourceProfile(
     public static readonly IngestSourceProfile Document = new(64_000, 1);
 
     /// <summary>
-    /// Chess PGN game — one input unit explodes into hundreds of substrate rows
-    /// (per-ply board replay, geometry, attestations). Fat enough to skip the
-    /// cheap-record coreFloor in <see cref="IngestSizing.ResolveRecordBatch"/>,
-    /// but not so fat that commit_rows collapses below <c>3 × batch × 8</c> and
-    /// <see cref="IngestSizing.ResolveMaxIntentsPerCommit"/> returns 1.
-    ///
-    /// Apply-side attestation merge cost is billed via
-    /// <see cref="IngestSizing.AttestationApplySurchargeBytes"/> so the MemoryTopology
-    /// flush envelope closes merge storms; do not reinvent that with EstComposeUnits dials.
-    ///
-    /// MEASURED 2026-08-03 on Seed — chess games OTB-2025 (run 30850033122):
-    /// the previous 4_000_000 estimate resolved to
-    /// <c>record_batch=256 commit_rows=429 max_intents=1</c> on a 12-core /
-    /// 4 GiB working-set box — one intent per commit, CLI ~50% of one core,
-    /// multi-minute single <c>COPY physicalities</c>, progress frozen after
-    /// ~4k/224k games. Live throughput before the choke: ~16 games/s and
-    /// ~291 novel rows/game. 256001 keeps the fat path (batch 256, above the
-    /// 256 KiB coreFloor cut) so commit sizing stays on the fat-batch lane and
-    /// preserves multi-intent apply parallelism under the same budget (exact
-    /// commit_rows/max_intents follow <see cref="IngestSizing"/>, not a fixed
-    /// product of batch×partitions).
+    /// Chess PGN game. OTB-2025 measures 256,162,073 bytes / 221,634 games =
+    /// 1,156 serialized bytes/game. The pre-normalization writer measured about 291
+    /// staged rows/game (~44 KiB of tuple payload at the apply estimator's 152 B/row),
+    /// so 64 KiB is the conservative resident compose width. Keeping input width and
+    /// resident width separate removes the former magic 256,001-byte sentinel whose only
+    /// purpose was to enter a special sizing branch.
     /// </summary>
-    public static readonly IngestSourceProfile ChessPgn = new(256_001, 1);
+    public static readonly IngestSourceProfile ChessPgn =
+        new(1_200, 1, ResidentBytesPerComposeUnit: 64_000);
 
     /// <summary>
     /// Chess analysis derive — same working-set class as <see cref="ChessPgn"/>
     /// (fused Compose and standalone chess-analyze share the explosion shape).
     /// </summary>
-    public static readonly IngestSourceProfile ChessAnalyze = new(256_001, 1);
+    public static readonly IngestSourceProfile ChessAnalyze =
+        new(1_200, 1, ResidentBytesPerComposeUnit: 64_000);
 
     /// <summary>WordNet synset/sense line — small text, many emitted rows per line.</summary>
     public static readonly IngestSourceProfile WordNet = new(4_096, 4);
@@ -122,7 +108,7 @@ public sealed record IngestSourceProfile(
     // memory model entirely — a per-source constant cannot track the box, which is the
     // whole reason IngestSizing/MemoryTopology exist. Values are per-record BYTE estimates,
     // not batch sizes: IngestSizing.ResolveRecordBatch turns them into a batch under the
-    // RAM budget, then clamps to the core band, so they are bounded by construction.
+    // RAM budget, so they are bounded by construction.
 
     /// <summary>Tatoeba CSV row — id + lang + one sentence. Was borrowing Wiktionary's
     /// 12 KB profile, over-estimating a ~100-byte row by ~100x.</summary>

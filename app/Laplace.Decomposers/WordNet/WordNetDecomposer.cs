@@ -101,7 +101,7 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
             IDecomposerContext context, DecomposerOptions options) =>
             IngestPipelineDefaults.ApplyMaxInputUnits(
                 IngestPipelineDefaults.Compose(
-                    SourceId, BatchLabelPrefix, _batch, options, context.Reader,
+                    SourceId, BatchLabelPrefix, options, context.Reader,
                     IngestSourceProfile.WordNet),
                 options);
     }

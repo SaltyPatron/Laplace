@@ -35,7 +35,6 @@ public sealed class ParquetDecomposer
     public override int LayerOrder => 2;
     protected override double SourceTrust => TC.StructuredCorpus;
     protected override string BatchLabelPrefix => "parquet";
-    protected override int DefaultBatchSize => BatchConfigDefaults.HighVolume;
 
     public override IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
 

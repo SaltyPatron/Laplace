@@ -87,12 +87,11 @@ public sealed class DecomposerArchitectureGateTests
     /// an IngestSourceProfile and passes the complete DecomposerOptions through.
     /// </summary>
     private static readonly Regex HandRolledBatch = new(
-        @"\boptions\.BatchSize\b|\bBatchConfigDefaults\.Resolve\s*\(",
+        @"\boptions\.BatchSize\b|\bDefaultBatchSize\b|\bBatchConfigDefaults\b",
         RegexOptions.Compiled);
 
     private static readonly HashSet<string> BatchOptionAuthorities = new(StringComparer.Ordinal)
     {
-        "BatchConfigDefaults.cs",
         "Decomposer.cs",
         "IngestRunner.cs",
     };

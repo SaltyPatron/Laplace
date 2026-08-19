@@ -62,12 +62,13 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
     // next apply call or at the drain — never silently. OUTSIDE a bulk run the
     // fold is awaited inline: online lanes (feedback → immediate fold → next
     // walk) require read-your-writes consensus.
-    // Was 2: Wiktionary fresh batches fold 300–450k cells in 10–19s while the
-    // next apply is only 8–16s, so depth-2 backpressured EnqueueFoldAsync into
-    // the apply critical path. Depth 6 keeps folds off the probe/COPY lane
-    // without unbounded RAM (each delta is one working-set cell map).
-    private const int FoldPipelineDepth = 6;
-    private readonly SemaphoreSlim _foldDepth = new(FoldPipelineDepth, FoldPipelineDepth);
+    // One sizing authority for the whole fold. The retired implementation fixed
+    // chunk=65,536, pipeline depth=6, mask cap=8,388,608 and segment floor=2,048
+    // independently, so none of them tracked RAM, row width, or connection fanout.
+    private static readonly IngestSizing.ConsensusFoldPlan FoldSizing =
+        IngestSizing.ResolveConsensusFold(IngestTopology.Current.ApplyPartitions);
+    private readonly SemaphoreSlim _foldDepth =
+        new(FoldSizing.PipelineDepth, FoldSizing.PipelineDepth);
     private readonly object _foldChainLock = new();
     private volatile bool _bulkRun;
 
@@ -76,19 +77,13 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
     private int _inflightApplies;
     private volatile bool _disposing;
 
-    private const int UpsertChunkCells = 65_536;
-
-    // Fold fan-out width: per-type segments are row-disjoint under the
-    // LIST(type_id) partitioning, so they ride parallel connections exactly
-    // like the 12-way COPY apply above them. One connection per segment.
-    private static readonly int FoldConnections =
-        Math.Clamp(IngestTopology.Current.ApplyPartitions, 1, 12);
+    // Fold fan-out width: inherited from the topology plan, never re-clamped here.
+    private static int FoldConnections => FoldSizing.Connections;
 
     // Leave most of the global fold budget available to consensus.upsert. Four
     // disjoint mask writers saturate the set-based UPDATE without letting twelve
     // mask shards starve every upsert segment on a 12-core host.
-    private static readonly int MaskShards =
-        Math.Clamp(FoldConnections / 3, 1, 4);
+    private static readonly int MaskShards = Math.Max(1, FoldConnections / 3);
 
     // GLOBAL connection budget for the fold, shared by every type lane and the
     // mask lane (2026-07-21). FoldConnections is a per-Parallel.ForEachAsync
@@ -107,7 +102,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
     private readonly HashSet<(Hash128 Ent, Hash128 Typ)>[] _depositedMaskPairs =
         Enumerable.Range(0, MaskShards)
             .Select(_ => new HashSet<(Hash128 Ent, Hash128 Typ)>()).ToArray();
-    private const int DepositedMaskPairsCap = 8_388_608;
+    private static int DepositedMaskPairsCap => FoldSizing.MaskPairCapacity;
 
     // There is NO deferred mask phase (2026-07-21). Masks deposit inline in every
     // lane, bulk included — see UpsertDeltaAsync. Both former deferral schemes are
@@ -228,12 +223,6 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
         }
     }
 
-    /// <summary>
-    /// Cells below which the parallel merge's shard + combine overhead outweighs
-    /// the scan it saves. Above it the merge shards across P-cores.
-    /// </summary>
-    private const int ParallelDeltaMinAttestations = 65_536;
-
     private Dictionary<(Hash128 S, Hash128 T, Hash128? O), Delta>? BuildDelta(
         IReadOnlyList<SubstrateChange> changes)
     {
@@ -271,8 +260,8 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
         // The per-row Interlocked.Add on _observations is gone: it was a locked
         // bus operation per attestation on what was a single-threaded loop.
         // Shards count locally and publish once.
-        int workers = total >= ParallelDeltaMinAttestations
-            ? Math.Clamp(CpuTopology.PerformanceCoreCount, 1, 16)
+        int workers = total >= FoldSizing.ParallelDeltaMinAttestations
+            ? Math.Max(1, CpuTopology.PerformanceCoreCount)
             : 1;
 
         if (workers == 1)
@@ -318,7 +307,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
     }
 
     private static Dictionary<(Hash128, Hash128, Hash128?), Delta> NewDeltaMap(int hint) =>
-        new(Math.Clamp(hint, 16, 1 << 20));
+        new(Math.Clamp(hint, 1, FoldSizing.DeltaCapacityCells));
 
     /// <summary>
     /// Ops-marker relation types that never fold into consensus: per-file completion
@@ -583,7 +572,9 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
             // so ANY chunking is row-disjoint. The 2,048 floor keeps a tiny run
             // from paying twelve transactions for a few hundred cells.
             int segLen = Math.Clamp(
-                (run.Len + FoldConnections - 1) / FoldConnections, 2_048, UpsertChunkCells);
+                (run.Len + FoldConnections - 1) / FoldConnections,
+                FoldSizing.MinSegmentCells,
+                FoldSizing.ChunkCells);
             var segments = new List<(int Off, int Len)>();
             for (int s = run.Off; s < run.Off + run.Len; s += segLen)
                 segments.Add((s, Math.Min(segLen, run.Off + run.Len - s)));
@@ -611,9 +602,9 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                     await guc.ExecuteNonQueryAsync(token);
                 }
                 long segFolded = 0;
-                for (int off = seg.Off; off < seg.Off + seg.Len; off += UpsertChunkCells)
+                for (int off = seg.Off; off < seg.Off + seg.Len; off += FoldSizing.ChunkCells)
                 {
-                    int m = Math.Min(UpsertChunkCells, seg.Off + seg.Len - off);
+                    int m = Math.Min(FoldSizing.ChunkCells, seg.Off + seg.Len - off);
                     var subjects = new byte[m][];
                     var types = new byte[m][];
                     var objects = new byte[m][];
@@ -712,9 +703,9 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
             try
             {
                 await using var conn = await _ds.OpenConnectionAsync(ct);
-                for (int off = 0; off < todo.Count; off += UpsertChunkCells)
+                for (int off = 0; off < todo.Count; off += FoldSizing.ChunkCells)
                 {
-                    int m = Math.Min(UpsertChunkCells, todo.Count - off);
+                    int m = Math.Min(FoldSizing.ChunkCells, todo.Count - off);
                     var pairEnts = new byte[m][];
                     var pairTypes = new byte[m][];
                     for (int i = 0; i < m; i++)
@@ -781,7 +772,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
     /// Bulk fold: dispatch onto the per-type lanes and return as soon as the
     /// delta is QUEUED, so the apply lane starts probing/COPYing the next working
     /// set immediately — the fold leaves the critical path. Bounded to
-    /// FoldPipelineDepth outstanding deltas as backpressure on RAM.
+    /// The machine-sized fold plan's outstanding deltas act as backpressure on RAM.
     /// </summary>
     private async Task EnqueueFoldAsync(
         Dictionary<(Hash128 S, Hash128 T, Hash128? O), Delta> delta, CancellationToken ct)
@@ -866,6 +857,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
     public Task BeginBulkRunAsync(CancellationToken ct = default)
     {
         _bulkRun = true;
+        FoldSizing.Log();
         return _inner.BeginBulkRunAsync(ct);
     }
 

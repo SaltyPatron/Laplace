@@ -240,10 +240,21 @@ public sealed class WorkingSetPipelineTests
     {
         var reader = new ProbeTrackingReader(present: true);
         var config = IngestPipelineDefaults.Compose(
-            TestSource, "deferred-default", 64, DecomposerOptions.Default, reader);
+            TestSource, "deferred-default", DecomposerOptions.Default, reader);
 
         Assert.True(config.EnableDeferredContentOnBuilder);
         Assert.NotNull(config.NewBuilder(0).DeferredContent);
+    }
+
+    [Fact]
+    public void VendorDefaultBatch_DoesNotOverrideMachineProfileSizing()
+    {
+        var profile = IngestSourceProfile.Default;
+        var config = IngestPipelineDefaults.Compose(
+            TestSource, "machine-profile", DecomposerOptions.Default,
+            reader: null, profile: profile);
+
+        Assert.Equal(IngestSizing.ResolveForSource(profile).RecordBatchSize, config.BatchSize);
     }
 
     [Fact]
@@ -251,7 +262,7 @@ public sealed class WorkingSetPipelineTests
     {
         var options = DecomposerOptions.Default with { BatchSize = 777 };
         var config = IngestPipelineDefaults.StructuredGrammar(
-            TestSource, "grammar-batch", 64, options, reader: null);
+            TestSource, "grammar-batch", options, reader: null);
 
         Assert.Equal(777, config.BatchSize);
     }

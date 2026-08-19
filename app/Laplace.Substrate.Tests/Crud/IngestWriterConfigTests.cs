@@ -16,7 +16,7 @@ public sealed class IngestWriterConfigTests
     public void MaxIntentsPerCommit_WordNetBudget_ScalesAboveOmwCap()
     {
         int n = IngestSizing.ResolveMaxIntentsPerCommit(2048, 250_000, 250_000);
-        Assert.InRange(n, 9, 48);
+        Assert.Equal((250_000 + 2047) / 2048, n);
     }
 
     [Fact]

@@ -153,13 +153,48 @@ public static class MemoryTopology
     public const int ConsensusFoldBytesPerRelation = 256;
 
     /// <summary>
-    /// Max distinct relations to accumulate before flushing a consensus-fold batch. Bounded so
-    /// the fold dictionary stays within the working-set budget on any box (the former hardcoded
-    /// 4,000,000 was ~2 GiB of dictionary regardless of installed RAM). Single source for
-    /// <c>ConsensusAccumulatingWriter</c>'s staging threshold.
+    /// Conservative transient resident cost per cell while a fold chunk crosses
+    /// managed byte arrays, the Npgsql write buffer, PostgreSQL arrays, native cell-id
+    /// construction, and per-type slices. This is byte accounting, not a row-count cap:
+    /// 3 varlena ids/references + 4 scalar arrays + wire copy + server arrays/slices.
     /// </summary>
-    public static int ConsensusFoldMaxRelations => (int)Math.Clamp(
-        WorkingSetBudgetBytes / ConsensusFoldBytesPerRelation, 500_000, 8_000_000);
+    public const int ConsensusFoldTransitBytesPerCell = 512;
+
+    /// <summary>
+    /// Conservative resident cost for one HashSet entry carrying two Hash128 values,
+    /// including slot/bucket overhead. Used to derive the run-scoped mask dedup capacity
+    /// from the compose envelope instead of fixing it at 8,388,608 entries.
+    /// </summary>
+    public const int ConsensusMaskPairResidentBytes = 64;
+
+    /// <summary>
+    /// Conservative resident cost of one Hash128 key in a ConcurrentDictionary,
+    /// including the key/value, node, bucket, and allocator overhead. Run-scoped
+    /// presence and content-ladder caches are sized from bytes with this value;
+    /// they never own an unrelated fixed entry cap.
+    /// </summary>
+    public const int ConcurrentHash128ResidentBytes = 64;
+
+    /// <summary>
+    /// Worst-case transient bytes per presence-probe id. The keyed attestation
+    /// probe carries three Hash128 arrays (id/type/subject), plus managed byte-array
+    /// objects, Npgsql framing, wire data, and PostgreSQL array storage.
+    /// </summary>
+    public const int PresenceProbeTransitBytesPerId = 256;
+
+    /// <summary>
+    /// Transient bytes per present-attestation merge row: three Hash128 arrays,
+    /// two int64 arrays, one timestamp array, and their client/wire/server copies.
+    /// </summary>
+    public const int AttestationMergeTransitBytesPerRow = 512;
+
+    /// <summary>
+    /// Minimum useful payload for another COPY connection. 8192 is PostgreSQL's
+    /// physical page size and Npgsql's default write buffer: below one buffer/page
+    /// there is no payload to amortize an additional connection and transaction.
+    /// This is a transport unit, not a corpus row-count threshold.
+    /// </summary>
+    public const int CopyStartupBytesPerConnection = 8 * 1024;
 
     // ---- Aggregate budget: the invariant nothing computed ------------------------------
     //

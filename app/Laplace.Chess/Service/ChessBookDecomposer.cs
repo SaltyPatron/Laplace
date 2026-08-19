@@ -42,7 +42,6 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
     public override Hash128 TrustClassId => ChessVocabulary.BookTrustClass;
     protected override double SourceTrust => TC.AcademicCurated;
     protected override string BatchLabelPrefix => "chess/book";
-    protected override int DefaultBatchSize => BatchConfigDefaults.ChessOpening;
 
     /// <summary>
     /// Drop reason: a prose move line that will not replay from the standard start. The

@@ -10,16 +10,18 @@ public sealed class IngestSizingTests
     [Fact]
     public void Resolve_14900KLikeTopology_MatchesApplyPartitions()
     {
-        var plan = IngestSizing.Resolve(8, 6, 8, workingSetBudgetBytes: TestBudgetBytes);
-        Assert.Equal(2048, plan.RecordBatchSize);
-        // batch*16 clamped to [2048, 32768] — the big-source probe-chunk law
-        // (fee9e1f): presence probes are round-trip dominated, match the
-        // WS-apply probe scale instead of thousands of serial 512-id trips.
-        Assert.Equal(32_768, plan.ProbeChunkSize);
-        Assert.Equal(32_768, plan.CommitRows);
-        Assert.Equal(2, plan.MaxIntentsPerCommit);
-        Assert.Equal(38, plan.DecomposeChannelCapacity);
-        Assert.Equal(18, plan.FileWorkerChannelDepth);
+        var plan = IngestSizing.Resolve(
+            8, 6, 8, workingSetBudgetBytes: TestBudgetBytes, composeWorkers: 7);
+        Assert.Equal(IngestSizing.ResolveRecordBatch(
+            8, composeWorkers: 7, workingSetBudgetBytes: TestBudgetBytes),
+            plan.RecordBatchSize);
+        Assert.Equal(IngestSizing.ResolveApplyIo(8).ProbeChunkIds, plan.ProbeChunkSize);
+        Assert.Equal(IngestSizing.ResolveFlushEnvelopeRecordCap(
+            IngestSourceProfile.Default), plan.CommitRows);
+        Assert.Equal((plan.CommitRows + plan.RecordBatchSize - 1) / plan.RecordBatchSize,
+            plan.MaxIntentsPerCommit);
+        Assert.Equal(7 + 6 + 8, plan.DecomposeChannelCapacity);
+        Assert.Equal(6 + 8, plan.FileWorkerChannelDepth);
         Assert.Equal((long)plan.CommitRows * plan.DecomposeChannelCapacity, plan.RowBudget);
     }
 
@@ -27,7 +29,7 @@ public sealed class IngestSizingTests
     public void ResolveMaxIntentsPerCommit_LargeRowBudget_AllowsMoreThanOmwCap()
     {
         int n = IngestSizing.ResolveMaxIntentsPerCommit(2048, 250_000, 250_000);
-        Assert.InRange(n, 9, 48);
+        Assert.Equal((250_000 + 2047) / 2048, n);
     }
 
     [Fact]
@@ -37,11 +39,14 @@ public sealed class IngestSizingTests
     }
 
     [Fact]
-    public void Resolve_SmallCoreCount_ShrinksBatch()
+    public void Resolve_MoreComposeWorkersDivideOneBatchEnvelope()
     {
-        var plan = IngestSizing.Resolve(4, 2, 4, workingSetBudgetBytes: TestBudgetBytes);
-        Assert.InRange(plan.RecordBatchSize, 512, 2048);
-        Assert.True(plan.CommitRows >= plan.RecordBatchSize);
+        var two = IngestSizing.Resolve(
+            4, 2, 4, workingSetBudgetBytes: TestBudgetBytes, composeWorkers: 2);
+        var four = IngestSizing.Resolve(
+            4, 2, 4, workingSetBudgetBytes: TestBudgetBytes, composeWorkers: 4);
+        Assert.Equal(two.RecordBatchSize / 2, four.RecordBatchSize);
+        Assert.Equal(two.CommitRows, four.CommitRows);
     }
 
     [Fact]
@@ -50,7 +55,8 @@ public sealed class IngestSizingTests
         var plan = IngestSizing.Resolve(
             8, 6, 8, recordBatchOverride: 4096, workingSetBudgetBytes: TestBudgetBytes);
         Assert.Equal(4096, plan.RecordBatchSize);
-        Assert.Equal(65_536, plan.CommitRows);
+        Assert.Equal(IngestSizing.ResolveFlushEnvelopeRecordCap(
+            IngestSourceProfile.Default), plan.CommitRows);
     }
 
     [Fact]
@@ -58,10 +64,17 @@ public sealed class IngestSizingTests
     {
         var plan = IngestSizing.Resolve(
             8, 6, 1, profile: IngestSourceProfile.RelationTriple, workingSetBudgetBytes: TestBudgetBytes);
-        Assert.Equal(1024, plan.RecordBatchSize);
-        Assert.Equal(2048, plan.CommitRows);
-        Assert.Equal(2048, IngestSizing.ResolveWorkingSetProbeInterval(plan.RecordBatchSize,
-            IngestSourceProfile.RelationTriple));
+        Assert.Equal(IngestSizing.ResolveRecordBatch(
+            8,
+            IngestSourceProfile.RelationTriple.EstBytesPerRecord,
+            IngestSourceProfile.RelationTriple.EstComposeUnitsPerRecord,
+            workingSetBudgetBytes: TestBudgetBytes,
+            residentBytesPerComposeUnit: IngestSourceProfile.RelationTriple.ResidentBytesPerComposeUnit),
+            plan.RecordBatchSize);
+        Assert.Equal(IngestSizing.ResolveFlushEnvelopeRecordCap(
+            IngestSourceProfile.RelationTriple), plan.CommitRows);
+        Assert.Equal(plan.CommitRows, IngestSizing.ResolveWorkingSetProbeInterval(
+            plan.RecordBatchSize, IngestSourceProfile.RelationTriple));
     }
 
     [Fact]
@@ -134,7 +147,7 @@ public sealed class IngestSizingTests
     {
         IngestTopology.EnsureReady();
         var plan = IngestSizing.ResolveForSource(IngestSourceProfile.RelationTriple);
-        Assert.InRange(plan.RecordBatchSize, 256, 4096);
+        Assert.True(plan.RecordBatchSize > 0);
         Assert.Equal(plan.CommitRows, plan.WorkingSetRecordCap);
         Assert.Equal(plan.WorkingSetProbeInterval,
             IngestSizing.ResolveWorkingSetProbeInterval(plan.RecordBatchSize, IngestSourceProfile.RelationTriple));
@@ -150,8 +163,15 @@ public sealed class IngestSizingTests
     {
         var plan = IngestSizing.Resolve(
             8, 6, 1, profile: IngestSourceProfile.Unicode, workingSetBudgetBytes: TestBudgetBytes);
-        Assert.Equal(4096, plan.RecordBatchSize);
-        Assert.Equal(8192, plan.CommitRows);
+        Assert.Equal(IngestSizing.ResolveRecordBatch(
+            8,
+            IngestSourceProfile.Unicode.EstBytesPerRecord,
+            IngestSourceProfile.Unicode.EstComposeUnitsPerRecord,
+            workingSetBudgetBytes: TestBudgetBytes,
+            residentBytesPerComposeUnit: IngestSourceProfile.Unicode.ResidentBytesPerComposeUnit),
+            plan.RecordBatchSize);
+        Assert.Equal(IngestSizing.ResolveFlushEnvelopeRecordCap(
+            IngestSourceProfile.Unicode), plan.CommitRows);
     }
 
     [Fact]
@@ -179,7 +199,7 @@ public sealed class IngestSizingTests
             profile: IngestSourceProfile.ChessPgn,
             workingSetBudgetBytes: 4L << 30,
             composeWorkers: 11);
-        Assert.Equal(256, plan.RecordBatchSize);
+        Assert.True(plan.RecordBatchSize > 0);
         Assert.True(plan.CommitRows >= plan.RecordBatchSize * 2);
         Assert.True(plan.MaxIntentsPerCommit >= 3);
     }
@@ -191,5 +211,81 @@ public sealed class IngestSizingTests
         // Pin the post-fix floor: a commit that holds ≥2 batches must not serialize to 1.
         int n = IngestSizing.ResolveMaxIntentsPerCommit(256, 429);
         Assert.True(n >= 2);
+    }
+
+    [Fact]
+    public void ResolveConsensusFold_DerivesEveryCountFromOneEnvelopeAndTopology()
+    {
+        var plan = IngestSizing.ResolveConsensusFold(
+            applyPartitions: 12,
+            workingSetBudgetBytes: 4L << 30,
+            flushEnvelopeBytes: 512L << 20);
+
+        Assert.Equal(12, plan.Connections);
+        Assert.Equal((512L << 20) / 12 / MemoryTopology.ConsensusFoldTransitBytesPerCell,
+            plan.ChunkCells);
+        Assert.Equal(plan.ChunkCells / plan.Connections, plan.MinSegmentCells);
+        Assert.Equal(plan.ChunkCells, plan.ParallelDeltaMinAttestations);
+        Assert.Equal(4, plan.PipelineDepth); // compose/apply/caches/masks reserve four of eight
+        Assert.Equal((512L << 20) / MemoryTopology.ConsensusFoldBytesPerRelation,
+            plan.DeltaCapacityCells);
+        Assert.Equal((512L << 20) / MemoryTopology.ConsensusMaskPairResidentBytes,
+            plan.MaskPairCapacity);
+        Assert.NotEqual(65_536, plan.ChunkCells);
+    }
+
+    [Fact]
+    public void ResolveConsensusFold_MoreConnectionsDivideRatherThanMultiplyMemory()
+    {
+        var four = IngestSizing.ResolveConsensusFold(4, 2L << 30, 256L << 20);
+        var eight = IngestSizing.ResolveConsensusFold(8, 2L << 30, 256L << 20);
+
+        Assert.Equal(four.ChunkCells / 2, eight.ChunkCells);
+        Assert.True((long)eight.ChunkCells * eight.Connections
+            * MemoryTopology.ConsensusFoldTransitBytesPerCell <= 256L << 20);
+        Assert.Equal(four.PipelineDepth, eight.PipelineDepth);
+    }
+
+    [Fact]
+    public void ResolveConsensusFold_ConstrainedBudgetKeepsOneBoundedPipelineSlot()
+    {
+        var plan = IngestSizing.ResolveConsensusFold(4, 256L << 20, 256L << 20);
+
+        Assert.Equal(1, plan.PipelineDepth);
+        Assert.True((long)plan.ChunkCells * plan.Connections
+            * MemoryTopology.ConsensusFoldTransitBytesPerCell <= 256L << 20);
+    }
+
+
+    [Fact]
+    public void ResolveApplyIo_DerivesCountsFromSharedBytesAndConnections()
+    {
+        var plan = IngestSizing.ResolveApplyIo(
+            applyPartitions: 12,
+            workingSetBudgetBytes: 4L << 30,
+            flushEnvelopeBytes: 512L << 20);
+
+        Assert.Equal(12, plan.Connections);
+        Assert.Equal((int)((512L << 20) / 12
+            / MemoryTopology.PresenceProbeTransitBytesPerId), plan.ProbeChunkIds);
+        Assert.Equal((int)((512L << 20) / 12
+            / MemoryTopology.AttestationMergeTransitBytesPerRow), plan.MergeChunkRows);
+        Assert.Equal((int)((512L << 20) / 3
+            / MemoryTopology.ConcurrentHash128ResidentBytes), plan.EntityPresenceCacheIds);
+        Assert.Equal(plan.EntityPresenceCacheIds, plan.PhysicalityPresenceCacheIds);
+        Assert.Equal(plan.EntityPresenceCacheIds, plan.LadderCacheIds);
+    }
+
+    [Theory]
+    [InlineData(0, 0, 12, 1)]
+    [InlineData(1, 1, 12, 1)]
+    [InlineData(12, 8 * 1024, 12, 1)]
+    [InlineData(12, 12 * 8 * 1024, 12, 12)]
+    [InlineData(4, 12 * 8 * 1024, 12, 4)]
+    public void ResolveCopyConnections_UsesPayloadBytesRowsAndTopology(
+        int rows, long bytes, int workers, int expected)
+    {
+        Assert.Equal(expected, IngestSizing.ResolveCopyConnections(
+            rows, bytes, workers, MemoryTopology.CopyStartupBytesPerConnection));
     }
 }

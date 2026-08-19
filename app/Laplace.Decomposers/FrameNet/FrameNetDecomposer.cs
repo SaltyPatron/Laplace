@@ -99,13 +99,12 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
     protected override IngestBatchConfig ConfigForFile(
         string fileLabel, ISubstrateReader? reader, DecomposerOptions options)
     {
-        int batch = IngestPipelineDefaults.ResolveBatch(IngestSourceProfile.FrameNet, options);
         string kind = fileLabel.StartsWith("framenet/lu/", StringComparison.Ordinal) ? "lu"
             : fileLabel.StartsWith("framenet/fulltext/", StringComparison.Ordinal) ? "fulltext"
             : "frame";
         return IngestPipelineDefaults.ApplyMaxInputUnits(
             IngestPipelineDefaults.Compose(
-                Source, $"FrameNetDecomposer/{kind}", batch, options, reader,
+                Source, $"FrameNetDecomposer/{kind}", options, reader,
                 IngestSourceProfile.FrameNet),
             options);
     }

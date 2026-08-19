@@ -31,7 +31,6 @@ public sealed class PropBankDecomposer
     public override int LayerOrder => 2;
     protected override double SourceTrust => TC.AcademicCurated;
     protected override string BatchLabelPrefix => "propbank";
-    protected override int DefaultBatchSize => BatchConfigDefaults.HighVolume;
 
 
     private const long EstimatedFramesets = 7_567L;

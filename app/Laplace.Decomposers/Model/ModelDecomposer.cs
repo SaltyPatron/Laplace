@@ -444,7 +444,7 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
             IDecomposerContext context, DecomposerOptions options) =>
             IngestPipelineDefaults.ApplyMaxInputUnits(
                 IngestPipelineDefaults.Compose(
-                    SourceId, BatchLabelPrefix, _batch, options, context.Reader, PipelineProfile),
+                    SourceId, BatchLabelPrefix, options, context.Reader, PipelineProfile),
                 options);
     }
 
