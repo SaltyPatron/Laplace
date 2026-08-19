@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json.Nodes;
 using Laplace.Api.Contracts;
+using Laplace.Chess.Service;
 using Laplace.Endpoints.OpenAICompat;
 using Laplace.SubstrateCRUD.Npgsql;
 
@@ -154,6 +155,11 @@ internal sealed class UnreachableSubstrateClient : ISubstrateClient
         throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
 
     public Task<ChessPlayersResponse> ChessPlayersAsync(int limit, int offset, string? search, string? initial, CancellationToken ct) =>
+        throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
+
+    public Task<ChessPlayersResponse> ChessPlayersAsync(
+        int limit, int offset, string? search, string? initial,
+        string? sort, string? direction, CancellationToken ct) =>
         throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
 
     public Task<ChessPlayerResponse?> ChessPlayerAsync(string idHex, int opponentLimit, CancellationToken ct) =>
@@ -602,6 +608,10 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
     // are the same kind of thing here, as they are in the substrate.
     private const string TalIdHex = "b422a7d40dec7948426e7c8ae40810d5";
     private const string BotvinnikIdHex = "aa11bb22cc33dd44ee55ff6677889900";
+    private const string KarpovIdHex = "11112222333344445555666677778888";
+    private const string FischerIdHex = "99990000aaaabbbbccccddddeeeeffff";
+    private static readonly string LaplaceIdHex =
+        Convert.ToHexStringLower(ChessVocabulary.LaplacePlayerId.ToBytes());
     private const string GameIdHex = "0f1e2d3c4b5a69788796a5b4c3d2e1f0";
 
     // eff_mu = rating - 2*rd, the conservative estimate everything ranks by.
@@ -611,41 +621,61 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
     private static readonly ChessPlayerRow BotvinnikRow = new(
         2, BotvinnikIdHex, "Botvinnik, Mikhail", 28, 1600.0, 50.0, 1500.0);
 
+    private static readonly ChessPlayerRow KarpovRow = new(
+        2, KarpovIdHex, "Karpov, Anatoly", 2056, 1820.0, 60.0, 1700.0);
+
+    private static readonly ChessPlayerRow FischerRow = new(
+        3, FischerIdHex, "Fischer, Bobby", 812, 1740.0, 45.0, 1650.0);
+
     public Task<IReadOnlyList<ChessPlayerRow>> ChessRosterAsync(int limit, int offset, CancellationToken ct)
     {
-        IReadOnlyList<ChessPlayerRow> all = [TalRow, BotvinnikRow];
+        IReadOnlyList<ChessPlayerRow> all = [TalRow, KarpovRow, FischerRow, BotvinnikRow];
         return Task.FromResult<IReadOnlyList<ChessPlayerRow>>(
             [.. all.Skip(Math.Max(0, offset)).Take(Math.Clamp(limit, 1, 200))]);
     }
 
     public Task<ChessPlayersResponse> ChessPlayersAsync(
         int limit, int offset, string? search, CancellationToken ct)
-        => ChessPlayersAsync(limit, offset, search, null, ct);
+        => ChessPlayersAsync(limit, offset, search, null, null, null, ct);
 
     public async Task<ChessPlayersResponse> ChessPlayersAsync(
         int limit, int offset, string? search, string? initial, CancellationToken ct)
+        => await ChessPlayersAsync(limit, offset, search, initial, null, null, ct);
+
+    public async Task<ChessPlayersResponse> ChessPlayersAsync(
+        int limit, int offset, string? search, string? initial,
+        string? sort, string? direction, CancellationToken ct)
     {
+        var all = (await ChessRosterAsync(200, 0, ct)).ToList();
+        IEnumerable<ChessPlayerRow> matches = all;
         if (!string.IsNullOrWhiteSpace(initial))
+            matches = matches.Where(p => p.Name.StartsWith(
+                initial.Trim(), StringComparison.OrdinalIgnoreCase));
+        else if (!string.IsNullOrWhiteSpace(search))
         {
-            // First-codepoint bucketing: reaches every player, not a warm window.
-            var all = await ChessRosterAsync(200, 0, ct);
-            var hits = all
-                .Where(p => p.Name.StartsWith(initial.Trim(), StringComparison.OrdinalIgnoreCase))
-                .Skip(Math.Max(0, offset)).Take(Math.Clamp(limit, 1, 200))
-                .Select((p, i) => p with { Rank = offset + i + 1 })
-                .ToList();
-            return new ChessPlayersResponse("chess.players", hits.Count, Math.Max(0, offset), hits);
+            var q = search.Trim();
+            matches = matches.Where(p =>
+                p.Name.Contains(q, StringComparison.OrdinalIgnoreCase)
+                || (q.Equals("mikhail tal", StringComparison.OrdinalIgnoreCase) && p == TalRow)
+                || (q.Equals("Fisher", StringComparison.OrdinalIgnoreCase) && p == FischerRow));
         }
 
-        if (!string.IsNullOrWhiteSpace(search))
+        var materialized = matches.ToList();
+        IEnumerable<ChessPlayerRow> ordered = sort?.ToLowerInvariant() switch
         {
-            // Content-address lookup: an exactly-spelled name or nothing.
-            var hit = search.Trim().Equals("Tal, Mikhail", StringComparison.OrdinalIgnoreCase)
-                   || search.Trim().Equals("mikhail tal", StringComparison.OrdinalIgnoreCase);
-            return new ChessPlayersResponse("chess.players", hit ? 1 : 0, 0, hit ? [TalRow] : []);
-        }
-        var page = await ChessRosterAsync(limit, offset, ct);
-        return new ChessPlayersResponse("chess.players", page.Count, offset, page);
+            "games" => materialized.OrderByDescending(static p => p.Games),
+            "rating" => materialized.OrderByDescending(static p => p.Rating),
+            "rd" => materialized.OrderByDescending(static p => p.Rd),
+            "relevance" => materialized,
+            _ => materialized.OrderByDescending(static p => p.EffMu),
+        };
+        if (direction?.Equals("asc", StringComparison.OrdinalIgnoreCase) == true)
+            ordered = ordered.Reverse();
+        var page = ordered.Skip(Math.Max(0, offset)).Take(Math.Clamp(limit, 1, 200))
+            .Select((p, i) => p with { Rank = Math.Max(0, offset) + i + 1 })
+            .ToList();
+        return new ChessPlayersResponse(
+            "chess.players", materialized.Count, Math.Max(0, offset), page);
     }
 
     public Task<ChessPlayerResponse?> ChessPlayerAsync(string idHex, int opponentLimit, CancellationToken ct) =>
@@ -672,6 +702,12 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
                 : new ChessGamesResponse("chess.games", idHex, offset,
                     offset > 0
                         ? []
+                        : string.Equals(idHex, LaplaceIdHex, StringComparison.OrdinalIgnoreCase)
+                        ?
+                        [
+                            new ChessGameRow(GameIdHex, "2026.08.19", "Laplace browser game", null,
+                                AsWhite: false, TalIdHex, "Tal, Mikhail", "0-1", 2),
+                        ]
                         :
                         [
                             new ChessGameRow(GameIdHex, "1960.03.15", "World Championship", "B44",

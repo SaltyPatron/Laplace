@@ -1,6 +1,8 @@
 using Laplace.Api.Contracts;
 using Laplace.SubstrateCRUD.Npgsql;
 using Npgsql;
+using System.Globalization;
+using System.Text;
 
 namespace Laplace.Endpoints.OpenAICompat;
 
@@ -20,19 +22,25 @@ namespace Laplace.Endpoints.OpenAICompat;
 /// is an ORDER BY over a single relation partition. No TTL, no prewarm, no stale
 /// window, nothing to repopulate.
 ///
-/// Search is a content-address lookup: chess.player_id() folds a typed name the way
-/// the decomposer did and hashes it, so a fully-spelled name resolves in one round
-/// trip at any depth in the corpus.
+/// Exact names still use their content address. Partial names and nearby spellings
+/// use the indexed constituent set of name trajectories to find a bounded candidate
+/// set, then apply human-name matching. That reaches beyond the first ranked page
+/// without turning the player index into a corpus-wide rendered substring scan.
 /// </summary>
 internal sealed partial class SubstrateClient
 {
     /// <summary>
     /// The ranked roster, straight off the folded cells. Paging is an OFFSET over an index.
     /// </summary>
-    public async Task<IReadOnlyList<ChessPlayerRow>> ChessRosterAsync(int limit, int offset, CancellationToken ct)
+    public Task<IReadOnlyList<ChessPlayerRow>> ChessRosterAsync(
+        int limit, int offset, CancellationToken ct)
+        => ChessRosterAsync(limit, offset, "strength", "desc", ct);
+
+    private async Task<IReadOnlyList<ChessPlayerRow>> ChessRosterAsync(
+        int limit, int offset, string sort, string direction, CancellationToken ct)
     {
         var rows = await NpgsqlSubstrateReads.ChessRankedAsync(
-            _dataSource, limit, offset, ct, TranslateReadError);
+            _dataSource, limit, offset, sort, direction, ct, TranslateReadError);
         return rows.Select(static r => new ChessPlayerRow(
             r.Rank, r.IdHex, r.Name, r.Games, r.Rating, r.Rd, r.EffMu)).ToList();
     }
@@ -46,10 +54,11 @@ internal sealed partial class SubstrateClient
     /// ones a warm list happened to hold.
     /// </summary>
     public async Task<IReadOnlyList<ChessPlayerRow>> ChessPlayersByInitialAsync(
-        string initial, int limit, int offset, CancellationToken ct)
+        string initial, int limit, int offset, string sort, string direction,
+        CancellationToken ct)
     {
         var rows = await NpgsqlSubstrateReads.ChessPlayersByInitialAsync(
-            _dataSource, initial, limit, offset, ct, TranslateReadError);
+            _dataSource, initial, limit, offset, sort, direction, ct, TranslateReadError);
 
         // Rank is positional within the letter; the fold's ordering already decided it.
         return [.. rows.Select((r, i) => new ChessPlayerRow(
@@ -57,37 +66,155 @@ internal sealed partial class SubstrateClient
     }
 
     /// <summary>
-    /// A page of the roster, or — when a name is supplied — the player it names.
-    ///
-    /// The partial-name pass that used to run over the cached ranking went with the cache.
-    /// It was only ever a substring scan of the top N held in memory: it could not see past
-    /// that window, and it existed because the window existed. A name resolves by content
-    /// address instead, which has no window — it finds the right man at any depth in one
-    /// round trip, or honestly finds nobody.
+    /// A page of the sortable roster, or fuzzy-ranked player matches when a name is supplied.
     /// </summary>
     public async Task<ChessPlayersResponse> ChessPlayersAsync(
         int limit, int offset, string? search, CancellationToken ct)
-        => await ChessPlayersAsync(limit, offset, search, null, ct);
+        => await ChessPlayersAsync(limit, offset, search, null, null, null, ct);
 
     /// <inheritdoc cref="ChessPlayersAsync(int,int,string?,CancellationToken)"/>
     public async Task<ChessPlayersResponse> ChessPlayersAsync(
         int limit, int offset, string? search, string? initial, CancellationToken ct)
+        => await ChessPlayersAsync(limit, offset, search, initial, null, null, ct);
+
+    public async Task<ChessPlayersResponse> ChessPlayersAsync(
+        int limit, int offset, string? search, string? initial,
+        string? sort, string? direction, CancellationToken ct)
     {
+        limit = Math.Clamp(limit, 1, 200);
+        offset = Math.Max(0, offset);
+        var normalizedSort = NormalizePlayerSort(
+            sort, hasSearch: !string.IsNullOrWhiteSpace(search));
+        var normalizedDirection = string.Equals(direction, "asc", StringComparison.OrdinalIgnoreCase)
+            ? "asc"
+            : "desc";
+
         if (!string.IsNullOrWhiteSpace(initial))
         {
-            var letter = await ChessPlayersByInitialAsync(initial, limit, offset, ct);
-            return new ChessPlayersResponse("chess.players", letter.Count, Math.Max(0, offset), letter);
+            var sqlSort = normalizedSort == "relevance" ? "strength" : normalizedSort;
+            var letter = await ChessPlayersByInitialAsync(
+                initial, limit, offset, sqlSort, normalizedDirection, ct);
+            return new ChessPlayersResponse("chess.players", letter.Count, offset, letter);
         }
 
         if (!string.IsNullOrWhiteSpace(search))
         {
-            var hit = await ChessFindPlayerAsync(search.Trim(), ct);
-            return new ChessPlayersResponse("chess.players", hit is null ? 0 : 1, 0,
-                hit is null ? [] : [hit]);
+            var query = search.Trim();
+            var candidates = await NpgsqlSubstrateReads.ChessPlayerSearchCandidatesAsync(
+                _dataSource, query, 2000, ct, TranslateReadError);
+            var exact = await ChessFindPlayerAsync(query, ct);
+            var scored = candidates
+                .Select(static r => new ChessPlayerRow(
+                    0, r.IdHex, r.Name, r.Games, r.Rating, r.Rd, r.EffMu))
+                .Concat(exact is null ? [] : [exact])
+                .DistinctBy(static p => p.IdHex, StringComparer.OrdinalIgnoreCase)
+                .Select(p => (Player: p, Score: PlayerSearchScore(query, p.Name)))
+                .Where(static x => x.Score < int.MaxValue)
+                .ToList();
+
+            IEnumerable<(ChessPlayerRow Player, int Score)> ordered = normalizedSort switch
+            {
+                "games" => OrderPlayers(scored, normalizedDirection, static x => x.Player.Games),
+                "rating" => OrderPlayers(scored, normalizedDirection, static x => x.Player.Rating),
+                "rd" => OrderPlayers(scored, normalizedDirection, static x => x.Player.Rd),
+                "strength" => OrderPlayers(scored, normalizedDirection, static x => x.Player.EffMu),
+                _ => scored.OrderBy(static x => x.Score)
+                    .ThenByDescending(static x => x.Player.EffMu)
+                    .ThenBy(static x => x.Player.Name, StringComparer.OrdinalIgnoreCase),
+            };
+
+            var page = ordered.Skip(offset).Take(limit)
+                .Select((x, i) => x.Player with { Rank = offset + i + 1 })
+                .ToList();
+            return new ChessPlayersResponse("chess.players", scored.Count, offset, page);
         }
 
-        var page = await ChessRosterAsync(limit, offset, ct);
-        return new ChessPlayersResponse("chess.players", page.Count, Math.Max(0, offset), page);
+        var rosterSort = normalizedSort == "relevance" ? "strength" : normalizedSort;
+        var roster = await ChessRosterAsync(limit, offset, rosterSort, normalizedDirection, ct);
+        return new ChessPlayersResponse("chess.players", roster.Count, offset, roster);
+    }
+
+    private static string NormalizePlayerSort(string? sort, bool hasSearch) =>
+        sort?.ToLowerInvariant() switch
+        {
+            "games" => "games",
+            "rating" => "rating",
+            "rd" => "rd",
+            "strength" => "strength",
+            "relevance" when hasSearch => "relevance",
+            _ => hasSearch ? "relevance" : "strength",
+        };
+
+    private static IEnumerable<(ChessPlayerRow Player, int Score)> OrderPlayers(
+        IEnumerable<(ChessPlayerRow Player, int Score)> players,
+        string direction,
+        Func<(ChessPlayerRow Player, int Score), double> selector) =>
+        direction == "asc"
+            ? players.OrderBy(selector).ThenBy(static x => x.Player.Name, StringComparer.OrdinalIgnoreCase)
+            : players.OrderByDescending(selector).ThenBy(static x => x.Player.Name, StringComparer.OrdinalIgnoreCase);
+
+    private static int PlayerSearchScore(string query, string candidate)
+    {
+        var q = NormalizePlayerName(query);
+        var name = NormalizePlayerName(candidate);
+        if (q.Length == 0 || name.Length == 0) return int.MaxValue;
+        if (name == q) return 0;
+
+        var qTokens = q.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var nameTokens = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (nameTokens.Contains(q, StringComparer.Ordinal)) return 2;
+        if (name.Contains(q, StringComparison.Ordinal)) return 4;
+        if (qTokens.All(t => nameTokens.Contains(t, StringComparer.Ordinal))) return 6;
+
+        var distance = 0;
+        foreach (var token in qTokens)
+        {
+            var closest = nameTokens.Min(n => Levenshtein(token, n));
+            var allowance = token.Length >= 8 ? 2 : token.Length >= 4 ? 1 : 0;
+            if (closest > allowance) return int.MaxValue;
+            distance += closest;
+        }
+        return 10 + distance;
+    }
+
+    private static string NormalizePlayerName(string value)
+    {
+        var decomposed = value.Normalize(NormalizationForm.FormD);
+        var sb = new StringBuilder(decomposed.Length);
+        var pendingSpace = false;
+        foreach (var ch in decomposed)
+        {
+            if (CharUnicodeInfo.GetUnicodeCategory(ch) == UnicodeCategory.NonSpacingMark) continue;
+            if (char.IsLetterOrDigit(ch))
+            {
+                if (pendingSpace && sb.Length > 0) sb.Append(' ');
+                sb.Append(char.ToLowerInvariant(ch));
+                pendingSpace = false;
+            }
+            else
+            {
+                pendingSpace = sb.Length > 0;
+            }
+        }
+        return sb.ToString();
+    }
+
+    private static int Levenshtein(string left, string right)
+    {
+        if (left.Length == 0) return right.Length;
+        if (right.Length == 0) return left.Length;
+        var previous = Enumerable.Range(0, right.Length + 1).ToArray();
+        var current = new int[right.Length + 1];
+        for (var i = 1; i <= left.Length; i++)
+        {
+            current[0] = i;
+            for (var j = 1; j <= right.Length; j++)
+                current[j] = Math.Min(
+                    Math.Min(current[j - 1] + 1, previous[j] + 1),
+                    previous[j - 1] + (left[i - 1] == right[j - 1] ? 0 : 1));
+            (previous, current) = (current, previous);
+        }
+        return previous[right.Length];
     }
 
     /// <summary>

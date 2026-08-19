@@ -92,6 +92,33 @@ public sealed class ChessReadContractTests : IClassFixture<ExploreFactory>
         }
     }
 
+    [Theory]
+    [InlineData("Karpov", "Karpov, Anatoly")]
+    [InlineData("Fisher", "Fischer, Bobby")]
+    public async Task Players_SearchAcceptsSurnameAndNearbySpelling(string query, string expected)
+    {
+        using var response = await _client.GetAsync(
+            $"/v1/chess/players?search={Uri.EscapeDataString(query)}");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<ChessPlayersResponse>();
+        Assert.NotNull(body);
+        Assert.Equal(expected, Assert.Single(body!.Players).Name);
+    }
+
+    [Fact]
+    public async Task Players_ServerSortsSearchResultsAndPreservesPaging()
+    {
+        using var response = await _client.GetAsync(
+            "/v1/chess/players?search=Mikhail&sort=games&direction=asc&limit=1&offset=1");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<ChessPlayersResponse>();
+        Assert.NotNull(body);
+        Assert.Equal(2, body!.Total);
+        Assert.Equal(1, body.Offset);
+        Assert.Equal("Tal, Mikhail", Assert.Single(body.Players).Name);
+        Assert.Equal(2, body.Players[0].Rank);
+    }
+
     [Fact]
     public async Task Players_SearchForNobody_IsEmptyNotAnError()
     {
@@ -164,6 +191,19 @@ public sealed class ChessReadContractTests : IClassFixture<ExploreFactory>
         var body = await response.Content.ReadFromJsonAsync<ChessGamesResponse>();
         Assert.NotNull(body);
         Assert.Empty(body!.Games);
+    }
+
+    [Fact]
+    public async Task LaplaceGames_HasItsOwnAttributedLog()
+    {
+        using var response = await _client.GetAsync("/v1/chess/laplace/games?limit=25");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<ChessGamesResponse>();
+        Assert.NotNull(body);
+        var game = Assert.Single(body!.Games);
+        Assert.Equal("Laplace browser game", game.Event);
+        Assert.False(game.AsWhite);
+        Assert.Equal("Tal, Mikhail", game.Opponent);
     }
 
     [Fact]

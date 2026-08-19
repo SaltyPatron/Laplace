@@ -69,6 +69,10 @@ internal interface ISubstrateClient
 
     Task<ChessPlayersResponse> ChessPlayersAsync(int limit, int offset, string? search, string? initial, CancellationToken ct);
 
+    Task<ChessPlayersResponse> ChessPlayersAsync(
+        int limit, int offset, string? search, string? initial,
+        string? sort, string? direction, CancellationToken ct);
+
     Task<ChessPlayerResponse?> ChessPlayerAsync(string idHex, int opponentLimit, CancellationToken ct);
 
     Task<ChessGamesResponse?> ChessPlayerGamesAsync(string idHex, int limit, int offset, CancellationToken ct);
