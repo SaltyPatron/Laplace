@@ -136,22 +136,13 @@ public static class SemLinkIngestSupport
         ISubstrateReader? reader)
     {
         var profile = IngestSourceProfile.Wiktionary;
-        var ws = IngestPipelineDefaults.ResolveWorkingSet(profile, options);
-        var config = new IngestBatchConfig
-        {
-            SourceId = sourceId,
-            BatchLabelPrefix = batchLabelPrefix,
-            BatchSize = ws.Batch,
-            ProbeChunkSize = Math.Clamp(ws.ProbeChunk, 64, 1024),
-            ContainmentReader = reader,
-            MaxInputUnits = options.MaxInputUnits,
-            EnableDeferredContentOnBuilder = true,
-            WorkingSet = WorkingSetMode.Enabled,
-            WorkingSetProbeInterval = ws.ProbeInterval,
-            WorkingSetRecordCap = ws.RecordCap,
-            WorkingSetProfile = profile,
-        };
-        return IngestPipelineDefaults.ApplyMaxInputUnits(config, options);
+        return IngestPipelineDefaults.Compose(
+            sourceId,
+            batchLabelPrefix,
+            IngestPipelineDefaults.ResolveBatch(profile, options),
+            options,
+            reader,
+            profile);
     }
 }
 
@@ -189,7 +180,7 @@ internal sealed class SemLinkJsonDocumentPhase : DecomposerPhase<GrammarIngestRe
     protected override IIngestRecordHandler<GrammarIngestRecord> CreateHandler()
     {
         var witness = new SemLinkGrammarWitness(_kind);
-        return new GrammarIngestHandler(SemLinkDecomposer.Source, witness.ModalityId, witness);
+        return new GrammarWitnessIngestHandler(witness);
     }
 
     protected override IAsyncEnumerable<GrammarIngestRecord> ExtractRecordsAsync(

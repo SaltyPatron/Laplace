@@ -412,16 +412,7 @@ public sealed unsafe class GrammarRowComposer : IDisposable
     }
 
     public IReadOnlyList<(uint Start, uint End)> FieldSpans()
-    {
-        var list = new List<(uint, uint)>();
-        for (int i = 0; i < _ast.NodeCount; i++)
-        {
-            var nd = _ast.GetNode(i);
-            if (_ast.NodeTypeIs(nd.NodeTypeId, "field"u8))
-                list.Add((nd.StartByte, nd.EndByte));
-        }
-        return list;
-    }
+        => GrammarAstFields.FieldSpans(_ast);
 
     public void Dispose()
     {
@@ -437,5 +428,20 @@ public sealed unsafe class GrammarRowComposer : IDisposable
         _probe = IntPtr.Zero;
         _disposed = true;
         GC.SuppressFinalize(this);
+    }
+}
+
+public static class GrammarAstFields
+{
+    public static IReadOnlyList<(uint Start, uint End)> FieldSpans(GrammarAst ast)
+    {
+        var list = new List<(uint, uint)>();
+        for (int i = 0; i < ast.NodeCount; i++)
+        {
+            var node = ast.GetNode(i);
+            if (ast.NodeTypeIs(node.NodeTypeId, "field"u8))
+                list.Add((node.StartByte, node.EndByte));
+        }
+        return list;
     }
 }
