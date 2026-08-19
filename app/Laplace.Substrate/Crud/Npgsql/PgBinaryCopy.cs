@@ -25,7 +25,11 @@ internal static class PgBinaryCopy
 
 
 
-    public const long DefaultChunkBytes = 1L << 23;
+    // All concurrently active COPY connections together receive one flush envelope
+    // of unmanaged-to-managed streaming windows. No independent 8 MiB window remains.
+    public static readonly long StreamWindowBytes = Math.Max(1,
+        IngestSizing.ResolveWorkingSetFlushEnvelopeBytes()
+        / Math.Max(1, IngestTopology.Current.ApplyPartitions));
 
 
 
@@ -53,7 +57,7 @@ internal static class PgBinaryCopy
         long maxLen = 0;
         foreach (var (_, len) in blobs) if (len > maxLen) maxLen = len;
         byte[]? window = maxLen > 0
-            ? new byte[(int)Math.Min(DefaultChunkBytes, maxLen)]
+            ? new byte[(int)Math.Min(Math.Min(StreamWindowBytes, Array.MaxLength), maxLen)]
             : null;
         foreach (var (ptr, len) in blobs)
             await WriteBlobBodyAsync(stream, ptr, len, window, ct);
@@ -64,7 +68,9 @@ internal static class PgBinaryCopy
     private static async Task WriteBlobBodyAsync(
         Stream stream, IntPtr ptr, long len, byte[]? reuse, CancellationToken ct)
     {
-        if (len <= int.MaxValue)
+        int windowLength = (int)Math.Min(
+            Math.Min(StreamWindowBytes, Array.MaxLength), len);
+        if (len <= windowLength)
         {
             int n = (int)len;
             byte[] buf = reuse is not null && reuse.Length >= n ? reuse : new byte[n];
@@ -75,7 +81,7 @@ internal static class PgBinaryCopy
             await stream.WriteAsync(buf.AsMemory(0, n), ct).ConfigureAwait(false);
             return;
         }
-        byte[] window = reuse ?? new byte[(int)Math.Min(DefaultChunkBytes, len)];
+        byte[] window = reuse ?? new byte[windowLength];
         for (long off = 0; off < len; off += window.Length)
         {
             int n = (int)Math.Min(window.Length, len - off);
@@ -101,61 +107,5 @@ internal static class PgBinaryCopy
         BinaryPrimitives.WriteInt32BigEndian(dst[o..], 8);
         BinaryPrimitives.WriteInt64BigEndian(dst[(o + 4)..], v);
         return o + 12;
-    }
-}
-
-
-
-
-
-
-
-
-internal sealed class PgCopyRowBuffer
-{
-    private readonly Stream _stream;
-    private byte[] _buffer;
-    private int _filled;
-
-    public PgCopyRowBuffer(Stream stream, int initialCapacity = 4 * 1024 * 1024)
-    {
-        _stream = stream;
-        _buffer = new byte[initialCapacity];
-        PgBinaryCopy.Header.CopyTo(_buffer, 0);
-        _filled = PgBinaryCopy.Header.Length;
-    }
-
-
-    public byte[] Array => _buffer;
-
-
-    public int Filled => _filled;
-
-
-
-
-
-
-    public async ValueTask EnsureRoomAsync(int rowBytes, CancellationToken ct)
-    {
-        if (_filled + rowBytes <= _buffer.Length) return;
-        if (_filled > 0)
-        {
-            await _stream.WriteAsync(_buffer.AsMemory(0, _filled), ct);
-            _filled = 0;
-        }
-        if (rowBytes > _buffer.Length) _buffer = new byte[rowBytes];
-    }
-
-
-    public void Commit(int newFilled) => _filled = newFilled;
-
-
-    public async Task FinalizeAsync(CancellationToken ct)
-    {
-        await EnsureRoomAsync(2, ct);
-        BinaryPrimitives.WriteInt16BigEndian(_buffer.AsSpan(_filled), -1);
-        _filled += 2;
-        await _stream.WriteAsync(_buffer.AsMemory(0, _filled), ct);
     }
 }

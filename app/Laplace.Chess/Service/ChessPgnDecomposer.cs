@@ -113,12 +113,10 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         }
 
         // Idempotent path: PlayingId peek+probe, full parse only for novel playings.
-        // MEASURED 2026-08-04: 32_768 peeks → parse-all-novel then one giant PositionIds
-        // HashSet ballooned RSS to ~7.7GB and wedged ~220s at 0 journal units (futex,
-        // no PG). Keep peek batches modest; ProbeLinePositionsAsync slices further.
-        const int noveltyProbeBatch = 2_048;
+        // The same resident-width source plan that sizes full compose also bounds this
+        // peek population; chess no longer owns a separate 2,048-game limiter.
         await foreach (var g in ExtractFileSerialPeekAsync(
-                           filePath, noveltyProbeBatch, reObservePresent: false, ct))
+                           filePath, ws.Batch, reObservePresent: false, ct))
             yield return g;
     }
 
@@ -210,7 +208,8 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
             }
         }
         if (unknown.Count == 0) return;
-        const int chunk = 4_096;
+        int chunk = IngestSizing.ResolveApplyIo(
+            IngestTopology.Current.ApplyPartitions).ProbeChunkIds;
         var ids = new Hash128[unknown.Count];
         unknown.CopyTo(ids);
         for (int i = 0; i < ids.Length; i += chunk)
@@ -714,7 +713,8 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         var sb = new StringBuilder(2048);
         var carry = new StringBuilder(256);
         bool inGame = false;
-        var buf = new char[1 << 20];
+        var buf = new char[Math.Max(1,
+            IngestSizing.ResolveSequentialIoBufferBytes() / sizeof(char))];
         int read;
         while ((read = await reader.ReadAsync(buf.AsMemory(), ct).ConfigureAwait(false)) > 0)
         {
@@ -888,8 +888,8 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         ReadOnlySpan<byte> prefix = "[Event "u8;
         long games = 0;
         using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
-            bufferSize: 1 << 20, useAsync: false);
-        var buf = new byte[1 << 20];
+            bufferSize: MemoryTopology.CopyStartupBytesPerConnection, useAsync: false);
+        var buf = new byte[IngestSizing.ResolveSequentialIoBufferBytes()];
         int matched = 0;   // prefix bytes matched on the current line; -1 = line can't match
         bool first = true;
         int read;

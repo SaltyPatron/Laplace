@@ -301,7 +301,8 @@ public static class SourceEntityIdConventions
         var chunks = new List<Hash128>();
         byte[] buf = new byte[ContentHashChunkBytes];
         using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
-                                       bufferSize: 1 << 20, FileOptions.SequentialScan))
+                                       bufferSize: MemoryTopology.CopyStartupBytesPerConnection,
+                                       FileOptions.SequentialScan))
         {
             int n;
             while ((n = ReadExact(fs, buf)) > 0)

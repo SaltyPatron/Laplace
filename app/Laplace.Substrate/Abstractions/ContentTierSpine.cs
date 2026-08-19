@@ -22,7 +22,8 @@ public static class ContentTierSpine
     /// <summary>Maximum tier-scoped existence rounds per probe batch (inclusive 0..4).</summary>
     public const int MaxExistenceRounds = MaxContentTier + 1;
 
-    private const int RootMemoCap = 1 << 20;
+    private static readonly int RootMemoCapacity = IngestSizing.ResolveApplyIo(
+        IngestTopology.Current.ApplyPartitions).TextRootCacheIds;
     private static readonly ConcurrentDictionary<Hash128, Hash128?> RootMemo = new();
     private static int _rootMemoCount;
 
@@ -53,16 +54,14 @@ public static class ContentTierSpine
         }
         if (cheap is not null)
         {
-            if (Volatile.Read(ref _rootMemoCount) < RootMemoCap && RootMemo.TryAdd(key, cheap))
-                Interlocked.Increment(ref _rootMemoCount);
+            TryMemoize(key, cheap);
             return cheap;
         }
         byte[] owned = canonicalUtf8.ToArray();
         Hash128? result = TextEntityBuilder.TryDecomposeRoot(
                 owned, out var rootId, out _, out _, out _, out _, out _)
             ? rootId : null;
-        if (Volatile.Read(ref _rootMemoCount) < RootMemoCap && RootMemo.TryAdd(key, result))
-            Interlocked.Increment(ref _rootMemoCount);
+        TryMemoize(key, result);
         return result;
     }
 
@@ -70,6 +69,15 @@ public static class ContentTierSpine
     {
         if (string.IsNullOrEmpty(surface)) return null;
         return ResolveRoot(Encoding.UTF8.GetBytes(surface));
+    }
+
+    private static void TryMemoize(Hash128 key, Hash128? root)
+    {
+        if (Volatile.Read(ref _rootMemoCount) >= RootMemoCapacity) return;
+        if (!RootMemo.TryAdd(key, root)) return;
+        int after = Interlocked.Increment(ref _rootMemoCount);
+        if (after <= RootMemoCapacity) return;
+        if (RootMemo.TryRemove(key, out _)) Interlocked.Decrement(ref _rootMemoCount);
     }
 
     /// <summary>O(tiers) trunk-to-leaf existence for one composed tree.</summary>
@@ -156,8 +164,7 @@ public static class ContentTierSpine
             {
                 if (!builder.ContentStage.TryAddContentWitness(canonicalUtf8, sourceId, out rootId))
                     return false;
-                if (Volatile.Read(ref _rootMemoCount) < RootMemoCap && RootMemo.TryAdd(key, rootId))
-                    Interlocked.Increment(ref _rootMemoCount);
+                TryMemoize(key, rootId);
                 return true;
             }
         }

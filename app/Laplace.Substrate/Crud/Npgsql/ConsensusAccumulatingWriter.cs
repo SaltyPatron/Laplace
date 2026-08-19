@@ -80,10 +80,10 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
     // Fold fan-out width: inherited from the topology plan, never re-clamped here.
     private static int FoldConnections => FoldSizing.Connections;
 
-    // Leave most of the global fold budget available to consensus.upsert. Four
-    // disjoint mask writers saturate the set-based UPDATE without letting twelve
-    // mask shards starve every upsert segment on a 12-core host.
-    private static readonly int MaskShards = Math.Max(1, FoldConnections / 3);
+    // One stable entity shard per fold connection. Shards are ownership lanes, not
+    // reserved connections: each byte-derived chunk leases the shared connection gate
+    // independently, so masks and consensus remain work-conserving.
+    private static readonly int MaskShards = FoldConnections;
 
     // GLOBAL connection budget for the fold, shared by every type lane and the
     // mask lane (2026-07-21). FoldConnections is a per-Parallel.ForEachAsync
@@ -699,20 +699,21 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
             // correct) and the WHOLE deposit's pairs unmarked below, so the resend
             // re-runs every chunk as a server-side no-op.
             long dep = 0;
-            await _foldConnections.WaitAsync(ct).ConfigureAwait(false);
-            try
+            for (int off = 0; off < todo.Count; off += FoldSizing.ChunkCells)
             {
-                await using var conn = await _ds.OpenConnectionAsync(ct);
-                for (int off = 0; off < todo.Count; off += FoldSizing.ChunkCells)
+                int m = Math.Min(FoldSizing.ChunkCells, todo.Count - off);
+                var pairEnts = new byte[m][];
+                var pairTypes = new byte[m][];
+                for (int i = 0; i < m; i++)
                 {
-                    int m = Math.Min(FoldSizing.ChunkCells, todo.Count - off);
-                    var pairEnts = new byte[m][];
-                    var pairTypes = new byte[m][];
-                    for (int i = 0; i < m; i++)
-                    {
-                        pairEnts[i] = todo[off + i].Ent.ToBytes();
-                        pairTypes[i] = todo[off + i].Typ.ToBytes();
-                    }
+                    pairEnts[i] = todo[off + i].Ent.ToBytes();
+                    pairTypes[i] = todo[off + i].Typ.ToBytes();
+                }
+
+                await _foldConnections.WaitAsync(ct).ConfigureAwait(false);
+                try
+                {
+                    await using var conn = await _ds.OpenConnectionAsync(ct);
                     await using var tx = await conn.BeginTransactionAsync(ct);
                     await using var mask = conn.CreateCommand();
                     mask.Transaction = tx;
@@ -723,8 +724,8 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                     dep += (long)(await mask.ExecuteScalarAsync(ct) ?? 0L);
                     await tx.CommitAsync(ct);
                 }
+                finally { _foldConnections.Release(); }
             }
-            finally { _foldConnections.Release(); }
 
             long maskTotal = dep;
             Interlocked.Add(ref masks, maskTotal);
@@ -750,7 +751,6 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
     {
         lock (_laneLock)
         {
-            if (_typeLanes.Count < 64) return;
             foreach (var key in _typeLanes.Where(kv => kv.Value.IsCompletedSuccessfully)
                                           .Select(kv => kv.Key).ToList())
                 _typeLanes.Remove(key);

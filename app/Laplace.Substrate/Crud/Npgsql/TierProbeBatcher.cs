@@ -12,16 +12,17 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 /// </summary>
 internal sealed class TierProbeBatcher
 {
-    private const int CoalesceDelayMilliseconds = 1;
-    private const int MaxRequestsPerBatch = 256;
-
     private readonly Func<IReadOnlyList<Hash128>, short, CancellationToken, Task<byte[]>> _probe;
     private readonly ConcurrentDictionary<short, Lane> _lanes = new();
+    private readonly int _maxProbeIds;
 
     internal TierProbeBatcher(
-        Func<IReadOnlyList<Hash128>, short, CancellationToken, Task<byte[]>> probe)
+        Func<IReadOnlyList<Hash128>, short, CancellationToken, Task<byte[]>> probe,
+        int? maxProbeIds = null)
     {
         _probe = probe ?? throw new ArgumentNullException(nameof(probe));
+        _maxProbeIds = Math.Max(1, maxProbeIds
+            ?? IngestSizing.ResolveApplyIo(IngestTopology.Current.ApplyPartitions).ProbeChunkIds);
     }
 
     internal Task<byte[]> ProbeAsync(
@@ -37,7 +38,7 @@ internal sealed class TierProbeBatcher
         for (int i = 0; i < ids.Count; i++) snapshot[i] = ids[i];
 
         var request = new Request(snapshot, ct);
-        _lanes.GetOrAdd(tier, t => new Lane(t, _probe)).Enqueue(request);
+        _lanes.GetOrAdd(tier, t => new Lane(t, _probe, _maxProbeIds)).Enqueue(request);
         return request.Completion.Task;
     }
 
@@ -51,7 +52,8 @@ internal sealed class TierProbeBatcher
 
     private sealed class Lane(
         short tier,
-        Func<IReadOnlyList<Hash128>, short, CancellationToken, Task<byte[]>> probe)
+        Func<IReadOnlyList<Hash128>, short, CancellationToken, Task<byte[]>> probe,
+        int maxProbeIds)
     {
         private readonly ConcurrentQueue<Request> _pending = new();
         private int _pumping;
@@ -74,15 +76,19 @@ internal sealed class TierProbeBatcher
             {
                 while (true)
                 {
-                    // One scheduler tick is often enough for the other file workers to reach
-                    // the same tier. The 1 ms ceiling is negligible beside a database probe
-                    // and avoids turning an ingest optimization into visible serial latency.
-                    await Task.Delay(CoalesceDelayMilliseconds, CancellationToken.None)
-                        .ConfigureAwait(false);
+                    // Yield one scheduler turn so concurrently composing files can join this
+                    // tier without imposing a fixed millisecond delay on every probe.
+                    await Task.Yield();
 
-                    var requests = new List<Request>(MaxRequestsPerBatch);
-                    while (requests.Count < MaxRequestsPerBatch && _pending.TryDequeue(out var request))
+                    var requests = new List<Request>();
+                    long ids = 0;
+                    while (_pending.TryPeek(out var next)
+                        && (requests.Count == 0 || ids + next.Ids.Length <= maxProbeIds)
+                        && _pending.TryDequeue(out var request))
+                    {
                         requests.Add(request);
+                        ids += request.Ids.Length;
+                    }
                     if (requests.Count == 0) break;
 
                     await RunBatchAsync(requests).ConfigureAwait(false);

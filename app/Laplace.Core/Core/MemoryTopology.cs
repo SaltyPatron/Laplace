@@ -12,36 +12,14 @@ namespace Laplace.Engine.Core;
 public static class MemoryTopology
 {
     /// <summary>
-    /// Ceiling for one working-set apply's byte budget. HISTORY: this was 1 GiB, sized so a
-    /// single-table COPY buffer could never approach a 2 GiB int wall in the then int-addressed
-    /// validate/COPY paths. That wall has since been eliminated — the apply/COPY path is now
-    /// long/size_t-addressed end to end (native IntentStage arena is size_t; TupleBuffer,
-    /// CollectBlobs, CopyBlobValidator, CopyTupleParser.Parse*, and WriteFilteredAsync are all
-    /// long, and the write streams from the unmanaged arena in 8 MiB windows — audited: no
-    /// managed byte[] ever concatenates a whole single-table working set). So the 1 GiB clamp
-    /// had become a throughput tourniquet, not a safety invariant: on a 48 GiB box it truncated
-    /// the RAM/16 budget (~3.2 GiB) down to 1 GiB while tune-pg hands PG shared_buffers = RAM/4.
-    ///
-    /// The REAL remaining bound is row-COUNT, not bytes: CopyTupleParser's per-table metadata
-    /// lists (List&lt;Hash128&gt;, List&lt;StagedRowRef&gt;) are int-indexed managed arrays that
-    /// cap near ~134M rows/table (~2 GiB / 16 B); for the smallest rows (entities ~70 B) that is
-    /// ~10 GiB of buffer. This ceiling is 4 GiB — ~2.5× under that row-count wall even for the
-    /// smallest rows — so the RAM/16 budget flows through unclamped on typical boxes. To lift it
-    /// further, first convert those row-metadata lists to long-indexed; do NOT raise ABOVE the
-    /// row-count bound without that conversion.
+    /// Resident owners that can coexist with a working-set buffer: one owner per active
+    /// apply partition, plus compose, apply metadata, exact caches, and fold/mask state.
+    /// The latter four are real simultaneously-live ownership classes, not a tuning value.
+    /// This replaces the historical RAM/16 plus 4-GiB clamp: a 12-partition machine still
+    /// has sixteen owners, while another topology scales instead of inheriting its number.
     /// </summary>
-    public const long MaxApplyBufferBytes = 4L << 30;
-
-    /// <summary>Floor so tiny/constrained hosts still make forward progress per apply.</summary>
-    public const long MinWorkingSetBudgetBytes = 256L << 20;
-
-    /// <summary>
-    /// Fraction of physical RAM offered to one working-set apply before the COPY ceiling
-    /// clamps it. The native COPY arenas are resident simultaneously with the PG-side write
-    /// and the compose working set, so the per-apply share of RAM stays deliberately small;
-    /// the ceiling wins on any large-memory box.
-    /// </summary>
-    private const int RamShareDivisor = 16;
+    public static int WorkingSetResidentOwners =>
+        checked(CpuTopology.ResolveApplyPartitions() + 4);
 
     private static readonly Lazy<long> LazyTotalPhysical =
         new(DetectTotalPhysicalBytes, LazyThreadSafetyMode.ExecutionAndPublication);
@@ -54,39 +32,24 @@ public static class MemoryTopology
     public static string DetectionSource { get; private set; } = "uninitialized";
 
     /// <summary>
-    /// Byte budget for one working-set apply: a fraction of physical RAM, clamped to
-    /// <see cref="MinWorkingSetBudgetBytes"/> below and <see cref="MaxApplyBufferBytes"/>
-    /// above. The single source for <c>WorkingSetMode.BudgetBytes</c> and the runner's
-    /// working-set flush cap.
+    /// Byte budget for one working-set apply. Every simultaneously-live owner receives
+    /// one equal RAM share. The only floor is enough PostgreSQL transport pages for the
+    /// active apply partitions; there is no corpus- or machine-specific byte ceiling.
     /// </summary>
-    public static long WorkingSetBudgetBytes => Math.Clamp(
-        TotalPhysicalBytes / RamShareDivisor,
-        MinWorkingSetBudgetBytes,
-        MaxApplyBufferBytes);
-
-    /// <summary>
-    /// Default ceiling for the COMPOSE-side flush envelope (see
-    /// <see cref="WorkingSetFlushEnvelopeBytes"/>). Deliberately far below
-    /// <see cref="MaxApplyBufferBytes"/>: this bounds the RESIDENT compose memory of one
-    /// working set (deferred tier trees + the process-global content bank held live
-    /// while a set is composed), not the COPY buffer.
-    /// </summary>
-    public const long DefaultFlushEnvelopeCeilingBytes = 512L << 20;
-
-    /// <summary>RAM share offered to one compose flush envelope before the ceiling clamps it.</summary>
-    private const int FlushEnvelopeRamShareDivisor = 64;
+    public static long WorkingSetBudgetBytes => Math.Max(
+        (long)CopyStartupBytesPerConnection * CpuTopology.ResolveApplyPartitions(),
+        TotalPhysicalBytes / WorkingSetResidentOwners);
 
     /// <summary>
     /// COMPOSE-side flush envelope — the resident-memory ceiling for ONE working set
     /// before it is closed, applied, and its builder + content bank reset. This is
-    /// DELIBERATELY far below <see cref="WorkingSetBudgetBytes"/> (which is the apply
-    /// COPY-buffer safety ceiling). Holding millions of deferred tier trees plus a giant
+    /// Deliberately below <see cref="WorkingSetBudgetBytes"/>. Holding millions of
+    /// deferred tier trees plus a giant
     /// content bank in a single working set collapses compose throughput (MEASURED
     /// 30k → 1.8k rec/s as a ~4 GiB set filled with ~3M records before flushing) and
-    /// spikes GC; a tight envelope flushes continuously in small bulk COPYs so compose
-    /// stays fast and resident memory flat. Never exceeds the apply budget. Tunable via
-    /// <c>LAPLACE_WS_FLUSH_MB</c> (megabytes); default RAM/64 clamped to
-    /// [<see cref="MinWorkingSetBudgetBytes"/>, <see cref="DefaultFlushEnvelopeCeilingBytes"/>].
+    /// spikes GC. The default is one apply-partition share of the working-set budget,
+    /// so the exact topology controls the flush width. Tunable via
+    /// <c>LAPLACE_WS_FLUSH_MB</c> for an explicit operator experiment.
     /// </summary>
     public static long WorkingSetFlushEnvelopeBytes => ResolveFlushEnvelope();
 
@@ -96,11 +59,11 @@ public static class MemoryTopology
         string? env = Environment.GetEnvironmentVariable("LAPLACE_WS_FLUSH_MB");
         if (!string.IsNullOrWhiteSpace(env)
             && long.TryParse(env.Trim(), out long mb) && mb > 0)
-            return Math.Clamp(mb << 20, MinWorkingSetBudgetBytes, apply);
+            return Math.Clamp(mb << 20, CopyStartupBytesPerConnection, apply);
 
-        long ceiling = Math.Min(DefaultFlushEnvelopeCeilingBytes, apply);
-        return Math.Clamp(TotalPhysicalBytes / FlushEnvelopeRamShareDivisor,
-            MinWorkingSetBudgetBytes, ceiling);
+        return Math.Max(
+            CopyStartupBytesPerConnection,
+            apply / CpuTopology.ResolveApplyPartitions());
     }
 
     // ---- Postgres memory GUC derivations (single source for tune-pg) --------------------
@@ -176,6 +139,12 @@ public static class MemoryTopology
     public const int ConcurrentHash128ResidentBytes = 64;
 
     /// <summary>
+    /// Conservative resident cost of one Hash128-to-Hash128 cache entry, including
+    /// two values plus dictionary node/bucket and allocator overhead.
+    /// </summary>
+    public const int ConcurrentHash128PairResidentBytes = 96;
+
+    /// <summary>
     /// Worst-case transient bytes per presence-probe id. The keyed attestation
     /// probe carries three Hash128 arrays (id/type/subject), plus managed byte-array
     /// objects, Npgsql framing, wire data, and PostgreSQL array storage.
@@ -187,6 +156,14 @@ public static class MemoryTopology
     /// two int64 arrays, one timestamp array, and their client/wire/server copies.
     /// </summary>
     public const int AttestationMergeTransitBytesPerRow = 512;
+
+    /// <summary>
+    /// Resident/wire allowance for one ingest-file journal event: the event object,
+    /// file/source/status strings, array slots, Npgsql framing, and PostgreSQL array
+    /// values. Journal batching divides a real byte envelope by this measured shape;
+    /// it does not own an unrelated event-count cap.
+    /// </summary>
+    public const int FileJournalTransitBytesPerEvent = 512;
 
     /// <summary>
     /// Minimum useful payload for another COPY connection. 8192 is PostgreSQL's

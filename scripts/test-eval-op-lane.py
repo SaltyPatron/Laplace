@@ -119,7 +119,7 @@ class EvalOperationLaneTests(unittest.TestCase):
         self.assertEqual("beautiful", sense)
         self.assertEqual(0.5, specificity)
 
-    def test_baseline_is_a_required_floor_not_an_exact_live_snapshot(self):
+    def test_baseline_is_a_source_floor_not_a_row_count_threshold(self):
         module = _load_eval_generation()
         baseline = {
             "sources": ["PredicateMatrixDecomposer", "WordNetDecomposer"],
@@ -144,11 +144,16 @@ class EvalOperationLaneTests(unittest.TestCase):
                 ["substrate/source/PredicateMatrixDecomposer/v1"],
             ),
         )
+        self.assertIsNone(module.fingerprint_drift(
+            baseline,
+            {"entities(ESTIMATE)": 1},
+            ["PredicateMatrixDecomposer", "WordNetDecomposer"],
+        ))
         self.assertIn(
-            "shrank",
+            "empty",
             module.fingerprint_drift(
                 baseline,
-                {"entities(ESTIMATE)": 70},
+                {},
                 ["PredicateMatrixDecomposer", "WordNetDecomposer"],
             ),
         )

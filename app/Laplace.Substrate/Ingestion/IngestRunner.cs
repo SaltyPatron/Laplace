@@ -320,32 +320,7 @@ public sealed class IngestRunner
             ContentLadderLedger.Reset();
             _ladderSource = decomposer.SourceId;
         }
-        using var runCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        var runCt = runCts.Token;
-        Exception? cappedFail = null;
-        Task? cappedWatchdog = null;
-        if (options.DecomposerOptions.MaxInputUnits > 0)
-        {
-            // Poll even when DecomposeAsync has not yielded — the 20k Wiktionary smoke
-            // sat minutes at composed=0 with no ThrowIfCappedFailFast call sites hit.
-            cappedWatchdog = Task.Run(async () =>
-            {
-                try
-                {
-                    while (!runCt.IsCancellationRequested)
-                    {
-                        await Task.Delay(250, runCt).ConfigureAwait(false);
-                        ThrowIfCappedFailFast(options, counters);
-                    }
-                }
-                catch (OperationCanceledException) when (runCt.IsCancellationRequested) { }
-                catch (Exception ex)
-                {
-                    Interlocked.Exchange(ref cappedFail, ex);
-                    try { runCts.Cancel(); } catch { /* already cancelled */ }
-                }
-            }, CancellationToken.None);
-        }
+        var runCt = ct;
 
         bool bulkRunStarted = false;
         try
@@ -369,7 +344,6 @@ public sealed class IngestRunner
                     Interlocked.Increment(ref counters._unitsProduced);
                     long units = intent.Metadata.InputUnitsConsumed;
                     if (units > 0) Interlocked.Add(ref counters._inputUnitsComposed, units);
-                    ThrowIfCappedFailFast(options, counters);
                     options.Progress?.Report(MakeProgress(counters));
                     if (!workingSet && batchSize == 1 && commitRows == 0)
                     {
@@ -455,7 +429,6 @@ public sealed class IngestRunner
                             Interlocked.Increment(ref counters._unitsProduced);
                             long units = intent.Metadata.InputUnitsConsumed;
                             if (units > 0) Interlocked.Add(ref counters._inputUnitsComposed, units);
-                            ThrowIfCappedFailFast(options, counters);
                             options.Progress?.Report(MakeProgress(counters));
                             int r = RowsOf(intent);
                             long b = BytesOf(intent);
@@ -488,7 +461,7 @@ public sealed class IngestRunner
                 int applyWorkers = IngestTopology.Current.ApplyDispatchWorkers;
 
                 var applyChannel = applyWorkers > 1
-                    ? Channel.CreateBounded<List<SubstrateChange>>(new BoundedChannelOptions(applyWorkers * 2)
+                    ? Channel.CreateBounded<List<SubstrateChange>>(new BoundedChannelOptions(applyWorkers)
                     {
                         SingleWriter = true,
                         SingleReader = false,
@@ -594,21 +567,9 @@ public sealed class IngestRunner
 
                 await producer;
             }
-
-            if (Volatile.Read(ref cappedFail) is { } cappedFailure)
-                throw cappedFailure;
-        }
-        catch (OperationCanceledException) when (Volatile.Read(ref cappedFail) is not null)
-        {
-            throw Volatile.Read(ref cappedFail)!;
         }
         finally
         {
-            try { runCts.Cancel(); } catch { /* ignore */ }
-            if (cappedWatchdog is not null)
-            {
-                await cappedWatchdog.ConfigureAwait(false);
-            }
             // CompleteBulkRun owns the one fold drain and the index rebuild. Rebuild after
             // every successfully opened run, including failures — a fatal
             // apply error must not leave the table index-less. The one
@@ -649,9 +610,6 @@ public sealed class IngestRunner
                     + "drops will be recovered at the next run's begin");
             }
         }
-
-        if (Volatile.Read(ref cappedFail) is { } terminalCappedFailure)
-            throw terminalCappedFailure;
 
         unitsAttempted = counters.UnitsAttempted;
         unitsApplied = counters.UnitsApplied;
@@ -1292,36 +1250,6 @@ public sealed class IngestRunner
             c.RoundTrips,
             c.UnitsProduced,
             c.InputUnitsComposed);
-    }
-
-    /// <summary>
-    /// Capped <see cref="DecomposerOptions.MaxInputUnits"/> runs are smoke gates, not seeds.
-    /// They used to sit for minutes at composed=0/committed=0 with CommandTimeout=0 and no
-    /// wall — legal under the old code, useless as a gate. Floor 3s; scale with cap at
-    /// 7k input units/s (the Wiktionary 10-minute full-corpus bar).
-    /// </summary>
-    private static void ThrowIfCappedFailFast(IngestRunOptions options, RunCounters c)
-    {
-        long cap = options.DecomposerOptions.MaxInputUnits;
-        if (cap <= 0) return;
-        double sec = c.Sw?.Elapsed.TotalSeconds ?? 0;
-        if (sec < 3.0) return;
-
-        if (c.UnitsProduced == 0 && c.InputUnitsComposed == 0 && c.InputUnitsDone == 0)
-        {
-            throw new InvalidOperationException(
-                $"INGEST_STALL_FAILFAST source={c.SourceName} MaxInputUnits={cap} "
-                + $"elapsed_s={sec:F1} produced=0 composed=0 committed=0 — "
-                + "capped smoke made no progress in 3s");
-        }
-
-        double wall = Math.Max(3.0, cap / 7000.0);
-        if (sec <= wall) return;
-
-        throw new InvalidOperationException(
-            $"INGEST_WALL_FAILFAST source={c.SourceName} MaxInputUnits={cap} "
-            + $"elapsed_s={sec:F1} wall_s={wall:F1} composed={c.InputUnitsComposed} "
-            + $"committed={c.InputUnitsDone} — capped smoke exceeded wall");
     }
 
     private sealed class RunCounters

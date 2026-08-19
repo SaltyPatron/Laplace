@@ -1,3 +1,5 @@
+using Laplace.Engine.Core;
+
 namespace Laplace.Decomposers.Abstractions;
 
 
@@ -266,17 +268,20 @@ public static class EtlInventory
     /// sampled — inventory is a progress denominator, not a correctness gate, and
     /// full-scanning ConceptNet (9.5G) / Wiktionary (21G) blocked first-batch for minutes.
     /// </summary>
-    internal const long ExactScanThresholdBytes = 64L << 20; // 64 MiB
+    internal static long ExactScanThresholdBytes =>
+        IngestSizing.ResolveSequentialIoBufferBytes();
 
     /// <summary>Total sample budget across head/mid/tail windows for large-file estimates.</summary>
-    internal const long SampleBudgetBytes = 64L << 20; // 64 MiB
+    internal static long SampleBudgetBytes =>
+        IngestSizing.ResolveSequentialIoBufferBytes();
 
     /// <summary>
     /// Cap on total bytes read while building a multi-file inventory. Without this,
     /// OMW/UD path lists exact-scan every file under <see cref="ExactScanThresholdBytes"/>
     /// and death-by-thousand-cuts blocks INGEST_START.
     /// </summary>
-    internal const long MultiFileInventoryBudgetBytes = 64L << 20; // 64 MiB
+    internal static long MultiFileInventoryBudgetBytes =>
+        IngestSizing.ResolveSequentialIoBufferBytes();
 
     public static async Task<long> CountDataLinesAsync(
         string path,
@@ -304,8 +309,8 @@ public static class EtlInventory
     {
         long n = 0;
         using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
-            bufferSize: 1 << 20, useAsync: false);
-        var buf = new byte[1 << 20];
+            bufferSize: MemoryTopology.CopyStartupBytesPerConnection, useAsync: false);
+        var buf = new byte[IngestSizing.ResolveSequentialIoBufferBytes()];
         bool hasContent = false, prevCr = false, first = true;
         int read;
         while ((read = fs.Read(buf, 0, buf.Length)) > 0)
@@ -458,7 +463,7 @@ public static class EtlInventory
                 continue;
             }
 
-            if (budgetLeft >= 1 << 20)
+            if (budgetLeft >= MemoryTopology.CopyStartupBytesPerConnection)
             {
                 long fileBudget = Math.Min(budgetLeft, SampleBudgetBytes);
                 var (n, hits, sampled) = SampleFile(paths[i], size, fileBudget, countInBuffer, ct);
@@ -477,7 +482,8 @@ public static class EtlInventory
             else
             {
                 // No measurements at all (degenerate) — one cheap head sample of this file.
-                long head = Math.Min(1L << 20, size);
+                long head = Math.Min(
+                    IngestSizing.ResolveSequentialIoBufferBytes(), size);
                 var (n, hits, sampled) = SampleFile(paths[i], size, head, countInBuffer, ct);
                 units[i] = n;
                 measuredHits += hits;
@@ -503,8 +509,8 @@ public static class EtlInventory
     {
         long n = 0;
         using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
-            bufferSize: 1 << 20, useAsync: false);
-        var buf = new byte[1 << 20];
+            bufferSize: MemoryTopology.CopyStartupBytesPerConnection, useAsync: false);
+        var buf = new byte[IngestSizing.ResolveSequentialIoBufferBytes()];
         int read;
         long remaining = size;
         while (remaining > 0 && (read = fs.Read(buf, 0, (int)Math.Min(buf.Length, remaining))) > 0)
@@ -555,7 +561,8 @@ public static class EtlInventory
     private static IEnumerable<(long Offset, int Length)> SampleWindows(long size, long budget)
     {
         int window = (int)Math.Min(budget / 3, int.MaxValue);
-        if (window < 1 << 20) window = (int)Math.Min(budget, 1 << 20);
+        if (window < MemoryTopology.CopyStartupBytesPerConnection)
+            window = (int)Math.Min(budget, MemoryTopology.CopyStartupBytesPerConnection);
         if (window > size) { yield return (0, (int)size); yield break; }
 
         yield return (0, window);
@@ -568,7 +575,7 @@ public static class EtlInventory
     private static byte[] ReadWindow(string path, long offset, int length)
     {
         using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
-            bufferSize: 1 << 20, useAsync: false);
+            bufferSize: MemoryTopology.CopyStartupBytesPerConnection, useAsync: false);
         fs.Seek(offset, SeekOrigin.Begin);
         var buf = new byte[length];
         int got = 0;
@@ -592,8 +599,8 @@ public static class EtlInventory
     {
         if (!File.Exists(path)) return 0;
         using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
-            bufferSize: 1 << 20, useAsync: false);
-        var buf = new byte[1 << 20];
+            bufferSize: MemoryTopology.CopyStartupBytesPerConnection, useAsync: false);
+        var buf = new byte[IngestSizing.ResolveSequentialIoBufferBytes()];
         var state = new ConlluCountState();
         int read;
         while ((read = fs.Read(buf, 0, buf.Length)) > 0)
@@ -766,8 +773,8 @@ public static class EtlInventory
         string path, ReadOnlySpan<byte> marker, CancellationToken ct)
     {
         using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
-            bufferSize: 1 << 20, useAsync: false);
-        var buf = new byte[1 << 20];
+            bufferSize: MemoryTopology.CopyStartupBytesPerConnection, useAsync: false);
+        var buf = new byte[IngestSizing.ResolveSequentialIoBufferBytes()];
         long n = 0;
         bool atLineStart = true;
         // Carry for marker spanning buffer boundaries.

@@ -248,7 +248,6 @@ public sealed class ModelTokenEdgeETL
         await foreach (var change in ParallelIngestWork.RunAsync(
                            layerWork,
                            fanOut,
-                           fanOut * 2,
                            (layer, token) => EmitLayer(
                                layer, Af, Ad, ents, n, d, commitEpoch,
                                refMap, reader, options, token),

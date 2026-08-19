@@ -16,7 +16,6 @@ public sealed class ParallelIngestWorkTests
         await foreach (int result in ParallelIngestWork.RunAsync(
                            Enumerable.Range(0, 12).ToArray(),
                            maxConcurrency: 3,
-                           outputCapacity: 2,
                            Execute))
             results.Add(result);
 
@@ -55,7 +54,7 @@ public sealed class ParallelIngestWorkTests
         async Task DrainAsync()
         {
             await foreach (int _ in ParallelIngestWork.RunAsync(
-                               new[] { 0, 1, 2 }, 2, 1, Execute))
+                               new[] { 0, 1, 2 }, 2, Execute))
             {
             }
         }
@@ -80,7 +79,7 @@ public sealed class ParallelIngestWorkTests
         int produced = 0;
 
         await foreach (int _ in ParallelIngestWork.RunAsync(
-                           Work(), maxConcurrency: 4, outputCapacity: 1, Execute))
+                           Work(), maxConcurrency: 4, Execute))
             break;
 
         Assert.Equal(0, Volatile.Read(ref active));

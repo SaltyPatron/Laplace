@@ -78,10 +78,15 @@ public sealed class IngestSizingTests
     }
 
     [Fact]
-    public void ResolveWorkingSetBudgetBytes_On48GiBMachine_IsAboutThreeGiB()
+    public void ResolveWorkingSetBudgetBytes_DividesRamAcrossActualResidentOwners()
     {
         long budget = IngestSizing.ResolveWorkingSetBudgetBytes();
-        Assert.InRange(budget, 1L << 30, 8L << 30);
+        int partitions = CpuTopology.ResolveApplyPartitions();
+        long expected = Math.Max(
+            (long)MemoryTopology.CopyStartupBytesPerConnection * partitions,
+            MemoryTopology.TotalPhysicalBytes / (partitions + 4));
+        Assert.Equal(expected, budget);
+        Assert.Equal(partitions + 4, MemoryTopology.WorkingSetResidentOwners);
     }
 
     [Fact]
@@ -155,7 +160,7 @@ public sealed class IngestSizingTests
         Assert.Equal(IngestTopology.Current.IoWorkersAvailable, plan.IoWorkersAvailable);
         Assert.Equal(IngestTopology.Current.ApplyDispatchWorkers, plan.ApplyDispatchWorkers);
         Assert.Equal(IngestTopology.Current.ApplyPartitions, plan.ApplyPartitions);
-        Assert.InRange(plan.WorkingSetBudgetBytes, 1L << 30, 8L << 30);
+        Assert.Equal(MemoryTopology.WorkingSetBudgetBytes, plan.WorkingSetBudgetBytes);
     }
 
     [Fact]
@@ -270,10 +275,16 @@ public sealed class IngestSizingTests
             / MemoryTopology.PresenceProbeTransitBytesPerId), plan.ProbeChunkIds);
         Assert.Equal((int)((512L << 20) / 12
             / MemoryTopology.AttestationMergeTransitBytesPerRow), plan.MergeChunkRows);
-        Assert.Equal((int)((512L << 20) / 3
+        Assert.Equal((int)((512L << 20) / 8
             / MemoryTopology.ConcurrentHash128ResidentBytes), plan.EntityPresenceCacheIds);
         Assert.Equal(plan.EntityPresenceCacheIds, plan.PhysicalityPresenceCacheIds);
         Assert.Equal(plan.EntityPresenceCacheIds, plan.LadderCacheIds);
+        Assert.Equal(plan.EntityPresenceCacheIds, plan.ReaderProvenCacheIds);
+        Assert.Equal((int)((512L << 20) / 8
+            / MemoryTopology.ConcurrentHash128PairResidentBytes), plan.ReaderRootCacheIds);
+        Assert.Equal(plan.ReaderRootCacheIds, plan.TextRootCacheIds);
+        Assert.Equal(plan.ReaderRootCacheIds, plan.ImageRootCacheIds);
+        Assert.Equal(plan.ReaderRootCacheIds, plan.AudioRootCacheIds);
     }
 
     [Theory]

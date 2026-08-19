@@ -317,8 +317,9 @@ internal static class CopyTupleParser
         long total = 0;
         for (int i = 0; i < rows.Count; i++)
             total += rows[i].Length;
-        if (total > int.MaxValue)
-            throw new InvalidOperationException($"PGCOPY payload exceeds 2 GiB ({total:N0} bytes)");
+        if (total > Array.MaxLength)
+            throw new InvalidOperationException(
+                $"PGCOPY payload exceeds CLR array addressability ({total:N0} bytes)");
 
         byte[] packed = total == 0 ? Array.Empty<byte>() : new byte[(int)total];
         int filled = 0;
@@ -367,13 +368,7 @@ internal static class CopyTupleParser
     public static async Task WritePackedAsync(Stream stream, byte[] packed, CancellationToken ct = default)
     {
         await stream.WriteAsync(PgBinaryCopy.Header, ct).ConfigureAwait(false);
-        const int Chunk = 4 << 20;
-        for (int off = 0; off < packed.Length;)
-        {
-            int n = Math.Min(Chunk, packed.Length - off);
-            await stream.WriteAsync(packed.AsMemory(off, n), ct).ConfigureAwait(false);
-            off += n;
-        }
+        await stream.WriteAsync(packed, ct).ConfigureAwait(false);
         await stream.WriteAsync(PgBinaryCopy.Trailer, ct).ConfigureAwait(false);
         await stream.FlushAsync(ct).ConfigureAwait(false);
     }

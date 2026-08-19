@@ -30,13 +30,13 @@ public static class ParallelLineParse
         where T : class
     {
         int workers = Math.Max(1, workerCount);
-        var rawLines = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(workers * 8)
+        var rawLines = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(workers)
         {
             SingleWriter = true,
             SingleReader = false,
             FullMode = BoundedChannelFullMode.Wait,
         });
-        var parsed = Channel.CreateBounded<T>(new BoundedChannelOptions(workers * 4)
+        var parsed = Channel.CreateBounded<T>(new BoundedChannelOptions(workers)
         {
             SingleWriter = false,
             SingleReader = true,
