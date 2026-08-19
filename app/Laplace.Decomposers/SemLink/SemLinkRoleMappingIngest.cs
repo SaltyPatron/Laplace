@@ -1,5 +1,4 @@
 using System.Runtime.CompilerServices;
-using System.Xml;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
@@ -28,49 +27,35 @@ internal static class SemLinkRoleMappingIngest
     internal static async IAsyncEnumerable<RoleCorrespondenceRecord> EnumerateRecordsAsync(
         string path, [EnumeratorCancellation] CancellationToken ct)
     {
-        var doc = new XmlDocument();
-        await Task.Run(() =>
-        {
-            using var stream = new FileStream(
-                path, FileMode.Open, FileAccess.Read, FileShare.Read,
-                bufferSize: 1 << 16, FileOptions.SequentialScan);
-            doc.Load(stream);
-        }, ct);
-
-        var root = doc.DocumentElement;
-        if (root is null) yield break;
-
-        foreach (XmlNode clsNode in root.ChildNodes)
+        byte[] utf8 = await File.ReadAllBytesAsync(path, ct);
+        using var ast = GrammarDecomposer.Parse(utf8, "xml");
+        IReadOnlyList<int> roleTags = XmlGrammarHelper.StartTags(ast, utf8, "role");
+        foreach (int classTag in XmlGrammarHelper.StartTags(ast, utf8, "vncls"))
         {
             ct.ThrowIfCancellationRequested();
-            if (clsNode is not XmlElement cls || !cls.Name.Equals("vncls", StringComparison.Ordinal))
-                continue;
-
-            string vnClass = cls.GetAttribute("class").Trim();
-            string fnFrame = cls.GetAttribute("fnframe").Trim();
-            if (fnFrame.Length == 0)
-                fnFrame = cls.GetAttribute("fnclass").Trim();
+            XmlGrammarHelper.TryAttribute(ast, utf8, classTag, "class", out string vnClass);
+            XmlGrammarHelper.TryAttribute(ast, utf8, classTag, "fnframe", out string fnFrame);
+            if (string.IsNullOrWhiteSpace(fnFrame))
+                XmlGrammarHelper.TryAttribute(ast, utf8, classTag, "fnclass", out fnFrame);
+            vnClass = vnClass.Trim();
+            fnFrame = fnFrame.Trim();
             if (vnClass.Length == 0 || fnFrame.Length == 0) continue;
             string vnClassKey = SourceEntityIdConventions.NumericVerbNetClassId(vnClass);
 
-            foreach (XmlNode rolesNode in cls.ChildNodes)
+            int classElement = XmlGrammarHelper.ContainingElement(ast, classTag);
+            if (classElement < 0) continue;
+            foreach (int roleTag in roleTags)
             {
-                if (rolesNode is not XmlElement roles || !roles.Name.Equals("roles", StringComparison.Ordinal))
-                    continue;
+                if (!XmlGrammarHelper.IsDescendantOf(ast, roleTag, classElement)) continue;
+                XmlGrammarHelper.TryAttribute(ast, utf8, roleTag, "fnrole", out string fnRole);
+                XmlGrammarHelper.TryAttribute(ast, utf8, roleTag, "vnrole", out string vnRole);
+                fnRole = fnRole.Trim();
+                vnRole = vnRole.Trim();
+                if (fnRole.Length == 0 || vnRole.Length == 0) continue;
 
-                foreach (XmlNode roleNode in roles.ChildNodes)
-                {
-                    if (roleNode is not XmlElement role || !role.Name.Equals("role", StringComparison.Ordinal))
-                        continue;
-
-                    string fnRole = role.GetAttribute("fnrole").Trim();
-                    string vnRole = role.GetAttribute("vnrole").Trim();
-                    if (fnRole.Length == 0 || vnRole.Length == 0) continue;
-
-                    yield return new RoleCorrespondenceRecord(
-                        vnClassKey, EntityTypeRegistry.VerbNetClass, vnRole,
-                        fnFrame, EntityTypeRegistry.FrameNetFrame, fnRole);
-                }
+                yield return new RoleCorrespondenceRecord(
+                    vnClassKey, EntityTypeRegistry.VerbNetClass, vnRole,
+                    fnFrame, EntityTypeRegistry.FrameNetFrame, fnRole);
             }
         }
     }
@@ -79,62 +64,8 @@ internal static class SemLinkRoleMappingIngest
     // not a role mapping: the current v1.2 file has 4,026 lines but only 1,663 admitted roles.
     internal static async Task<long?> EstimateUnitCountAsync(string path, CancellationToken ct)
     {
-        var settings = new XmlReaderSettings
-        {
-            Async = true,
-            IgnoreComments = true,
-            IgnoreWhitespace = true,
-        };
-        using var reader = XmlReader.Create(path, settings);
-        bool validClass = false;
-        int classDepth = -1;
-        int rolesDepth = -1;
         long count = 0;
-        while (await reader.ReadAsync())
-        {
-            ct.ThrowIfCancellationRequested();
-            if (reader.NodeType == XmlNodeType.Element)
-            {
-                if (reader.Name.Equals("vncls", StringComparison.Ordinal))
-                {
-                    string vnClass = reader.GetAttribute("class")?.Trim() ?? string.Empty;
-                    string fnFrame = reader.GetAttribute("fnframe")?.Trim() ?? string.Empty;
-                    if (fnFrame.Length == 0)
-                        fnFrame = reader.GetAttribute("fnclass")?.Trim() ?? string.Empty;
-                    validClass = vnClass.Length > 0 && fnFrame.Length > 0;
-                    classDepth = reader.Depth;
-                    rolesDepth = -1;
-                    if (reader.IsEmptyElement)
-                    {
-                        validClass = false;
-                        classDepth = -1;
-                    }
-                }
-                else if (validClass && reader.Name.Equals("roles", StringComparison.Ordinal))
-                {
-                    rolesDepth = reader.Depth;
-                    if (reader.IsEmptyElement) rolesDepth = -1;
-                }
-                else if (validClass && rolesDepth >= 0
-                         && reader.Name.Equals("role", StringComparison.Ordinal))
-                {
-                    string fnRole = reader.GetAttribute("fnrole")?.Trim() ?? string.Empty;
-                    string vnRole = reader.GetAttribute("vnrole")?.Trim() ?? string.Empty;
-                    if (fnRole.Length > 0 && vnRole.Length > 0) count++;
-                }
-            }
-            else if (reader.NodeType == XmlNodeType.EndElement)
-            {
-                if (reader.Depth == rolesDepth && reader.Name.Equals("roles", StringComparison.Ordinal))
-                    rolesDepth = -1;
-                if (reader.Depth == classDepth && reader.Name.Equals("vncls", StringComparison.Ordinal))
-                {
-                    validClass = false;
-                    classDepth = -1;
-                    rolesDepth = -1;
-                }
-            }
-        }
+        await foreach (var _ in EnumerateRecordsAsync(path, ct)) count++;
         return count;
     }
 }
