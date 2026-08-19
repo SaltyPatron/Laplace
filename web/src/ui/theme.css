@@ -32,6 +32,7 @@
     --color-bg-surface: var(--primitive-neutral-900);
     --color-bg-panel: var(--primitive-neutral-800);
     --color-bg-panel-2: var(--primitive-neutral-700);
+    --color-bg-elevated: color-mix(in srgb, var(--primitive-neutral-700) 72%, var(--primitive-neutral-800));
     --color-bg-abyss: var(--primitive-neutral-950);
     --color-border-default: var(--primitive-neutral-600);
     --color-text-primary: var(--primitive-text-100);

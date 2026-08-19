@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Modal } from '@ui';
 
 import { apiGet, apiPost } from '../api/client';
+import { useAppStore } from '../store';
 
 import { Board, parseBoard, whiteToMove, useBoardRef, type MoveScore } from './play/Board';
 
@@ -74,6 +75,8 @@ const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 
 export function ChessView() {
+
+  const tenant = useAppStore((state) => state.tenant);
 
   const savedBoot = useMemo(() => {
     const saved = loadSavedPlayGame();
@@ -358,6 +361,7 @@ export function ChessView() {
       const r = await apiPost<PlayStart>('/chess/play/start', {
         record,
         moves: moves && moves.length > 0 ? moves : undefined,
+        tenant,
       });
       setPlaySessionId(r.sessionId);
       return r;
@@ -366,7 +370,7 @@ export function ChessView() {
       setPlaySessionId(null);
       return null;
     }
-  }, []);
+  }, [tenant]);
 
   const positionsRef = useRef(positions);
   positionsRef.current = positions;
@@ -876,5 +880,4 @@ export function ChessView() {
   );
 
 }
-
 
