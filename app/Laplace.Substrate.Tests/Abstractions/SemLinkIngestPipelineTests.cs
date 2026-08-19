@@ -33,7 +33,7 @@ public sealed class SemLinkIngestPipelineTests
     }
 
     [Fact]
-    public async Task SemLinkJsonPipeline_BatchedProbe()
+    public async Task SemLinkJsonPipeline_DoesNotProbeOrComposeJsonPackaging()
     {
         string path = Path.Combine(Path.GetTempPath(), $"laplace-semlink-{Guid.NewGuid():N}.json");
         try
@@ -45,12 +45,14 @@ public sealed class SemLinkIngestPipelineTests
             var ctx = new SemLinkTestContext(reader);
             var options = DecomposerOptions.Default with { BatchSize = pairCount };
 
-            await foreach (var _ in phase.DecomposeAsync(ctx, options))
-            { }
+            var changes = new List<SubstrateChange>();
+            await foreach (var change in phase.DecomposeAsync(ctx, options))
+                changes.Add(change);
 
             Assert.Equal(0, reader.LegacyContentDescentCalls);
-            Assert.InRange(reader.FlatProbeCalls, 1,
-                MaxProbeCallsFor(ExpectedExistenceRoundChunks(pairCount, pairCount)));
+            Assert.Equal(0, reader.FlatProbeCalls);
+            Assert.Equal(0, PhysicalityCount(changes));
+            Assert.True(AttestationCount(changes) > 0);
         }
         finally
         {
@@ -59,7 +61,7 @@ public sealed class SemLinkIngestPipelineTests
     }
 
     [Fact]
-    public async Task SemLinkJsonPipeline_PresentReader_ZeroEntities()
+    public async Task SemLinkJsonPipeline_PresentReader_StillEmitsSemanticRows()
     {
         string path = Path.Combine(Path.GetTempPath(), $"laplace-semlink-present-{Guid.NewGuid():N}.json");
         try
@@ -74,9 +76,10 @@ public sealed class SemLinkIngestPipelineTests
             await foreach (var change in phase.DecomposeAsync(ctx, options))
                 changes.Add(change);
 
-            Assert.Equal(0, ContentEntityCount(changes));
+            Assert.Equal(0, reader.FlatProbeCalls);
+            Assert.Equal(0, PhysicalityCount(changes));
             Assert.True(AttestationCount(changes) > 0,
-                "SemLink witness edges must still stage on present compose roots");
+                "SemLink witness edges must not depend on a packaging-root probe");
             Assert.Equal(2, changes.Sum(c => c.Metadata.InputUnitsConsumed));
         }
         finally
@@ -93,4 +96,8 @@ public sealed class SemLinkIngestPipelineTests
         public Microsoft.Extensions.Logging.ILogger Logger => NullLogger.Instance;
         public string SubstrateVersion => "test";
     }
+
+    private static int PhysicalityCount(IEnumerable<SubstrateChange> changes) =>
+        changes.Sum(change => change.Physicalities.Length
+            + change.IntentStages.Sum(stage => stage.PhysicalityCount));
 }

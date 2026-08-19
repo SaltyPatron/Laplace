@@ -69,6 +69,7 @@ delivered until it is merged.
 | #1173 | Generic parallel fanout | Moves model layer fanout, backpressure, cancellation, and failures into a shared generic pipeline primitive. |
 | #1183 | Fold tail and completion phases | Replaces overlapping highway-mask writers with stable entity-sharded FIFO lanes and records live/terminal consensus-drain versus writer-maintenance timing. |
 | #1184 | Skewed multi-file execution | Lets the generic pool segment a dominant file inside a many-file corpus, corrects aggregate sampled-inventory refinement, and isolates the process-wide signal test that cancelled unrelated integration tests. |
+| #1186 | Online-index and OMW admission policy | Removes automatic index dropping/rebuilding from production ingest and makes OMW parse bounded UTF-8 records directly so only lemma/definition/example values enter the content spine. |
 
 The related source-fidelity audit (#1155), durable working agreement (#1156), and
 canonical lexical-peer batch core (#1164) were integrated in the same batch,
@@ -77,20 +78,19 @@ had no open pull requests.
 
 ## Active correction awaiting merge
 
-- [#1186](https://github.com/SaltyPatron/Laplace/pull/1186) separates parsing a structured ETL record from
-  admitting that record's serialization as content. OMW currently composes each raw
-  TSV row (synset key, field tag, delimiters, and value) and then composes the selected
-  lemma/definition/example again. The corrected vendor masticator reads bounded UTF-8
-  lines directly through the generic multi-file pipeline and sends only the parsed
-  semantic value to `DirectComposeHandler`; no raw-row AST or packaging tree is built.
-- The same correction retires automatic index cycling. Production ingest keeps all
-  indexes online; the workflows and `drop-indexes` command no longer provide a path
-  that removes the read surface. The journal/recovery path remains solely to restore
-  indexes an older interrupted cycle already left absent.
-- The measured reason is explicit: the clean OMW run spent 188.44 of 716.2 seconds
-  rebuilding 30 indexes, while the current document run held indexes unavailable for
-  more than ten minutes during rebuild. Post-merge OMW/document runs must establish
-  throughput with live indexes rather than accepting an outage as an optimization.
+- [#1187](https://github.com/SaltyPatron/Laplace/pull/1187) extends the distinction OMW
+  established between parsing a serialized record and admitting
+  that serialization as content. The same gate is now being applied to the remaining
+  grammar-backed vendors.
+- Tatoeba parses its sentence/link TSV directly into a compact vendor record. Only the
+  selected sentence enters the content spine; numeric ids and row packaging remain
+  transient scaffolding.
+- SemLink and the generic manifest ETL lane retain their grammar AST solely for vendor
+  field selection. A shared witness-only handler emits semantic rows without probing or
+  composing the enclosing JSON/CSV/TSV serialization.
+- Explicit grammar-document ingest remains available only for a source that declares
+  the parsed serialization itself to be content. This prevents a convenience parser
+  from silently becoming an admission policy.
 
 ## Remaining product work after integration
 
@@ -109,7 +109,7 @@ had no open pull requests.
   OMW 3,438,843 inputs in 716.2 seconds, including a 526.2-second single-file Japanese
   compose critical path and 188.44 seconds rebuilding 30 indexes. OMW's final apply and
   final fold were only 451 milliseconds apart.
-- Remeasure OMW after the structured-record admission correction. The semantic value
+- Remeasure OMW after #1186. The semantic value
   must still compose at grapheme/content grain; the TSV packaging must create zero
   content entities/physicalities.
 - Validate end-to-end resume, cancellation, per-file journals, canonical readback,

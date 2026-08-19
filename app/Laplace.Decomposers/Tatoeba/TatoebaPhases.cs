@@ -18,7 +18,7 @@ namespace Laplace.Decomposers.Tatoeba;
 /// 13 minutes elapsed, 135% CPU, zero database activity, no progress line of any kind.
 /// Reported as a hang, and indistinguishable from one.
 ///
-/// Here the map is a free side effect: <see cref="TatoebaGrammarWitness.WalkSentence"/>
+/// Here the map is a free side effect: <see cref="TatoebaEmitter.Emit"/>
 /// already holds the composed root, so it just records it. Phase 2 reads a map that is
 /// complete by construction. No second pass, no dead time.
 ///
@@ -27,7 +27,7 @@ namespace Laplace.Decomposers.Tatoeba;
 /// is preserved. That is what a sequential multi-FILE barrier would have cost, and why
 /// this is phases rather than ordered files.
 /// </summary>
-internal abstract class TatoebaPhase : DecomposerPhase<GrammarIngestRecord>
+internal abstract class TatoebaPhase : DecomposerPhase<TatoebaIngestRecord>
 {
     private readonly TatoebaIdMap _ids;
     private readonly ConcurrentDictionary<long, byte>? _allowedIds;
@@ -58,33 +58,36 @@ internal abstract class TatoebaPhase : DecomposerPhase<GrammarIngestRecord>
         IDecomposerContext context, CancellationToken ct = default)
         => Task.FromResult<long?>(null);
 
-    protected override IIngestRecordHandler<GrammarIngestRecord> CreateHandler() =>
-        new GrammarIngestHandler(
-            TatoebaSource.SourceId, "tsv",
-            new TatoebaGrammarWitness(Kind, _allowedIds, _ids),
-            contextId: null);
+    protected override IIngestRecordHandler<TatoebaIngestRecord> CreateHandler()
+    {
+        var emitter = new TatoebaEmitter(Kind, _allowedIds, _ids);
+        return new DirectComposeHandler<TatoebaIngestRecord>(emitter.Emit);
+    }
 
     protected override IngestBatchConfig BuildPipelineConfig(
         IDecomposerContext context, DecomposerOptions options) =>
-        IngestPipelineDefaults.ApplyMaxInputUnits(
-            IngestPipelineDefaults.StructuredGrammar(
-                SourceId, BatchLabelPrefix,
-                IngestPipelineDefaults.ResolveBatch(IngestSourceProfile.Tatoeba, options),
-                options, context.Reader, witnessWeight: 1.0,
-                profile: IngestSourceProfile.Tatoeba),
-            options);
+        IngestPipelineDefaults.Compose(
+            SourceId, BatchLabelPrefix,
+            IngestPipelineDefaults.ResolveBatch(IngestSourceProfile.Tatoeba, options),
+            options, context.Reader, IngestSourceProfile.Tatoeba);
 
-    protected override async IAsyncEnumerable<GrammarIngestRecord> ExtractRecordsAsync(
+    protected override async IAsyncEnumerable<TatoebaIngestRecord> ExtractRecordsAsync(
         string ecosystemPath, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
     {
         string path = Path.Combine(ecosystemPath, _fileName);
         if (!File.Exists(path)) yield break;
 
-        var stream = GrammarFileRecordStream.ForSource(
-            path, EtlManifest.Get("tatoeba"), AcceptRow(options));
-        await foreach (var record in stream.RecordsAsync(ct))
-            yield return record;
+        var accept = AcceptRow(options);
+        await foreach (var line in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
+        {
+            if (line.IsEmpty || (accept is not null && !accept(line.Span))) continue;
+            TatoebaIngestRecord record;
+            bool parsed = Kind == TatoebaRowKind.Sentence
+                ? TatoebaParse.TrySentence(line.Span, out record)
+                : TatoebaParse.TryLink(line.Span, out record);
+            if (parsed) yield return record;
+        }
     }
 }
 
