@@ -41,7 +41,8 @@ public sealed class CategoryCorrespondenceHandler : IIngestRecordHandler<Categor
 
         public Hash128 DrainInto(SubstrateChangeBuilder builder, double witnessWeight, byte[]? descentBitmap)
         {
-            Hash128? subjectId = CategoryAnchor.Emit(builder, record.SubjectKey, record.SubjectTypeId, sourceId, trust);
+            Hash128? subjectId = AnchorAdmission.Emit(
+                builder, record.SubjectKey, record.SubjectTypeId, sourceId, trust);
             if (subjectId is null) return default;
             builder.AddAttestation(NativeAttestation.Categorical(
                 subjectId.Value, record.RelationType, record.ObjectId, sourceId, trust,

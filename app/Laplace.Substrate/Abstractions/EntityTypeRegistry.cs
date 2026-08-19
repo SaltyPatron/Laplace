@@ -48,6 +48,8 @@ public static class EntityTypeRegistry
     public static readonly Hash128 Sample = Id("Sample");
     public static readonly Hash128 Scalar = Id("Scalar");
     public static readonly Hash128 Sentence = Id("Sentence");
+    public static readonly Hash128 SourceReference = Id("Source_Reference");
+    public static readonly Hash128 SourceVersion = Id("Source_Version");
     public static readonly Hash128 SourceFile = Id("SourceFile");
     public static readonly Hash128 TabularColumn = Id("TabularColumn");
     public static readonly Hash128 TabularOutcome = Id("TabularOutcome");

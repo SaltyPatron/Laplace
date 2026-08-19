@@ -10,20 +10,17 @@ public static class SenseAnchor
     public static Hash128? Id(string? rawSenseKey)
     {
         string? key = rawSenseKey is null ? null : SourceEntityIdConventions.NormalizeSenseKey(rawSenseKey);
-        return key is null ? null : CategoryAnchor.Id(key);
+        return key is null ? null : ReferenceAnchor.Id(ReferenceIdentityKind.WordNetSenseKey, key);
     }
 
     public static Hash128? IdNormalized(string normalizedSenseKey) =>
-        CategoryAnchor.Id(normalizedSenseKey);
+        ReferenceAnchor.Id(ReferenceIdentityKind.WordNetSenseKey, normalizedSenseKey);
 
     public static Hash128? Emit(
         SubstrateChangeBuilder b, string rawSenseKey, Hash128 source, double trust)
     {
         string? key = SourceEntityIdConventions.NormalizeSenseKey(rawSenseKey);
-        return key is null ? null : CategoryAnchor.Emit(b, key, SenseTypeId, source, trust);
+        return key is null ? null : ReferenceAnchor.Emit(
+            b, ReferenceIdentityKind.WordNetSenseKey, key, SenseTypeId, source, trust);
     }
-
-    public static void AttestSenseCategory(
-        SubstrateChangeBuilder b, Hash128 senseId, Hash128 source, double trust)
-        => CategoryAnchor.AttestCategory(b, senseId, SenseTypeId, source, trust);
 }

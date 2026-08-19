@@ -25,7 +25,8 @@ public static class ConceptAnchor
     public static Hash128? EmitAnchor(SubstrateChangeBuilder b, long offset, char ssType, Hash128 source)
     {
         string? ili = SourceEntityIdConventions.WordNetIli(offset, ssType);
-        return ili is null ? null : ContentEmitter.Emit(b, ili, source);
+        return ili is null ? null : ReferenceAnchor.Declare(
+            b, ReferenceIdentityKind.CiliIli, ili, SynsetTypeId, source);
     }
 
 
@@ -57,6 +58,7 @@ public static class ConceptAnchor
     public static Hash128? SynsetId(long offset, char ssType, string version = "pwn30")
     {
         string? ili = SourceEntityIdConventions.WordNetIli(offset, ssType, version);
-        return ili is null ? null : ContentEmitter.RootId(ili);
+        return ili is null ? null : ReferenceAnchor.Id(ReferenceIdentityKind.CiliIli, ili);
     }
+
 }
