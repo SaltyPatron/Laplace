@@ -77,7 +77,7 @@ had no open pull requests.
 
 ## Active correction awaiting merge
 
-- `fix/structured-record-admission` separates parsing a structured ETL record from
+- [#1186](https://github.com/SaltyPatron/Laplace/pull/1186) separates parsing a structured ETL record from
   admitting that record's serialization as content. OMW currently composes each raw
   TSV row (synset key, field tag, delimiters, and value) and then composes the selected
   lemma/definition/example again. The corrected vendor masticator reads bounded UTF-8
