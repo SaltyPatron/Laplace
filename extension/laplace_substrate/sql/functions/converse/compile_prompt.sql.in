@@ -38,15 +38,25 @@ variants AS MATERIALIZED (
     FROM lexical.word_case_variants_batch(
         ARRAY(SELECT w.id FROM words w ORDER BY w.ord)) v
 ),
+route_nodes AS MATERIALIZED (
+    SELECT v.word_id, v.variant_id AS node_id
+    FROM variants v
+    UNION
+    SELECT v.word_id, n.subject_id
+    FROM variants v
+    JOIN laplace.consensus n
+     ON n.object_id = v.variant_id
+     AND n.type_id = ANY (consensus.relation_set_ids('NAME_ALIAS_EDGE'))
+),
 route_evidence AS MATERIALIZED (
     SELECT v.word_id,
            r.operation_id,
            r.shape,
            r.role,
            max(consensus.eff_mu(c.rating, c.rd)) AS mu
-    FROM variants v
+    FROM route_nodes v
     JOIN laplace.consensus c
-      ON c.subject_id = v.variant_id
+      ON c.subject_id = v.node_id
      AND c.type_id = ANY (consensus.relation_family_ids('EVOKES_FRAME'))
     JOIN converse.operation_frame_routes() r ON r.frame_id = c.object_id
     GROUP BY v.word_id, r.operation_id, r.shape, r.role

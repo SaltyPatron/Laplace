@@ -96,8 +96,22 @@ public sealed class VerbNetDecomposer
             if (name.Length == 0) continue;
             var lemmaId = ContentEmitter.Emit(b, name, Source);
             if (lemmaId is null) continue;
+
+            // A VerbNet member is a class-owned lexical entry, not the globally
+            // reusable lemma content. Ten entries in the 3.4 corpus omit
+            // verbnet_key; the class-bound source name is their lossless fallback.
+            string memberKey = member.GetAttribute("verbnet_key").Trim();
+            if (memberKey.Length == 0) memberKey = $"name:{name}";
+            var memberId = LexicalMemberAnchor.Emit(
+                b, LexicalMemberIdentityKind.VerbNet, classEntity, memberKey,
+                EntityTypeRegistry.VerbNetMember, Source, TC.AcademicCurated);
+            if (memberId is null) continue;
+
+            b.AddAttestation(NativeAttestation.CategoricalResolved(
+                memberId.Value, VerbNetSource.HasNameAliasTypeId, lemmaId.Value,
+                Source, null, TC.AcademicCurated));
             b.AddAttestation(NativeAttestation.Categorical(
-                lemmaId.Value, "MEMBER_OF_VERBNET_CLASS", classEntity, Source, TC.AcademicCurated));
+                memberId.Value, "MEMBER_OF_VERBNET_CLASS", classEntity, Source, TC.AcademicCurated));
 
             string wn = member.GetAttribute("wn");
             if (wn.Length > 0)
@@ -107,9 +121,23 @@ public sealed class VerbNetDecomposer
                     if (key is null) continue;
                     var senseEntity = SenseAnchor.Id(key);
                     if (senseEntity is null) continue;
-                    b.AddAttestation(NativeAttestation.Categorical(
-                        lemmaId.Value, "CORRESPONDS_TO", senseEntity.Value, Source, TC.AcademicCurated));
+                    b.AddAttestation(NativeAttestation.CategoricalResolved(
+                        memberId.Value, VerbNetSource.CorrespondsToTypeId, senseEntity.Value,
+                        Source, null, TC.AcademicCurated));
                 }
+
+            foreach (string rolesetKey in member.GetAttribute("grouping")
+                         .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                         .Distinct(StringComparer.Ordinal))
+            {
+                var rolesetId = ReferenceAnchor.Declare(
+                    b, ReferenceIdentityKind.PropBankRoleset, rolesetKey,
+                    EntityTypeRegistry.PropBankRoleset, Source);
+                if (rolesetId is not null)
+                    b.AddAttestation(NativeAttestation.CategoricalResolved(
+                        memberId.Value, VerbNetSource.CorrespondsToTypeId, rolesetId.Value,
+                        Source, null, TC.AcademicCurated));
+            }
 
             // VerbNet 3.4 calls this field fn_mapping. Values are FrameNet frame
             // names, whitespace-separated when one member maps to multiple frames;
@@ -121,12 +149,14 @@ public sealed class VerbNetDecomposer
                          .Where(static value => !value.Equals("None", StringComparison.OrdinalIgnoreCase))
                          .Distinct(StringComparer.Ordinal))
             {
-                var frameId = CategoryAnchor.Emit(
-                    b, frameName, EntityTypeRegistry.FrameNetFrame,
-                    Source, TC.AcademicCurated);
+                // The mapping row witnesses member->frame. Do not also re-witness
+                // the frame's intrinsic type once for every member that names it;
+                // FrameNet owns that node declaration and the relation already
+                // fixes the object domain for readers.
+                var frameId = ContentEmitter.Emit(b, frameName, Source);
                 if (frameId is not null)
                     b.AddAttestation(NativeAttestation.Categorical(
-                        lemmaId.Value, "EVOKES_FRAME", frameId.Value, Source, TC.AcademicCurated));
+                        memberId.Value, "EVOKES_FRAME", frameId.Value, Source, TC.AcademicCurated));
             }
         }
 
