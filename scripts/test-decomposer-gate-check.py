@@ -16,15 +16,17 @@ GATE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(GATE)
 
 
-class ConsensusGateBoundsTests(unittest.TestCase):
-    def run_gate(self, count: int) -> dict:
+class SourceScopedGateBoundsTests(unittest.TestCase):
+    def run_gate(self, source_count: int, global_count: int = 99) -> dict:
         config = {
             "sources": {
                 "chess": {
                     "decomposer": "ChessPgn",
                     "layer": 20,
                     "skip_layer_complete": True,
-                    "consensus_gates": [{"relation": "MOVE", "max": 0}],
+                    "consensus_gates": [
+                        {"relation": "MOVE", "max": 0, "scope": "source_evidence"}
+                    ],
                 }
             }
         }
@@ -33,11 +35,11 @@ class ConsensusGateBoundsTests(unittest.TestCase):
             if "substrate_health" in sql:
                 return "t"
             if "evidence_count" in sql:
-                return "1"
+                return str(source_count) if "p_type =>" in sql else "1"
             if "physicalities" in sql:
                 return "t"
             if "consensus_count" in sql:
-                return str(count)
+                return str(global_count)
             raise AssertionError(f"unexpected SQL: {sql}")
 
         with patch.object(GATE, "load_gates", return_value=config), patch.object(
@@ -48,16 +50,17 @@ class ConsensusGateBoundsTests(unittest.TestCase):
                 allow_health_tier=False,
             )
 
-    def test_zero_move_consensus_passes_normalized_chess_gate(self) -> None:
+    def test_zero_source_evidence_passes_even_when_other_sources_emit_relation(self) -> None:
         report = self.run_gate(0)
-        move = next(c for c in report["checks"] if c["check"] == "consensus:MOVE")
+        move = next(c for c in report["checks"] if c["check"] == "source_evidence:MOVE")
         self.assertTrue(report["passed"])
         self.assertTrue(move["passed"])
         self.assertEqual(0, move["max"])
+        self.assertEqual(0, move["source_evidence"])
 
-    def test_reintroduced_move_consensus_fails_normalized_chess_gate(self) -> None:
+    def test_reintroduced_move_evidence_from_source_fails_normalized_gate(self) -> None:
         report = self.run_gate(1)
-        move = next(c for c in report["checks"] if c["check"] == "consensus:MOVE")
+        move = next(c for c in report["checks"] if c["check"] == "source_evidence:MOVE")
         self.assertFalse(report["passed"])
         self.assertFalse(move["passed"])
         self.assertIn("max 0", move["detail"])

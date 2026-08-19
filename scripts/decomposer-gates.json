@@ -333,27 +333,33 @@
       "consensus_gates": [
         {
           "relation": "PLAYS_LINE",
-          "min": 1
+          "min": 1,
+          "scope": "source_evidence"
         },
         {
           "relation": "HAS_WHITE",
-          "min": 1
+          "min": 1,
+          "scope": "source_evidence"
         },
         {
           "relation": "HAS_BLACK",
-          "min": 1
+          "min": 1,
+          "scope": "source_evidence"
         },
         {
           "relation": "HAS_RESULT",
-          "min": 1
+          "min": 1,
+          "scope": "source_evidence"
         },
         {
           "relation": "OUTCOME",
-          "min": 1
+          "min": 1,
+          "scope": "source_evidence"
         },
         {
           "relation": "MOVE",
-          "max": 0
+          "max": 0,
+          "scope": "source_evidence"
         }
       ]
     },
@@ -367,11 +373,13 @@
       "consensus_gates": [
         {
           "relation": "ANALYZED_AT",
-          "min": 1
+          "min": 1,
+          "scope": "source_evidence"
         },
         {
           "relation": "MOVE",
-          "max": 0
+          "max": 0,
+          "scope": "source_evidence"
         }
       ]
     },
@@ -383,15 +391,18 @@
       "consensus_gates": [
         {
           "relation": "OPENING_NAME",
-          "min": 1
+          "min": 1,
+          "scope": "source_evidence"
         },
         {
           "relation": "HAS_ECO",
-          "min": 1
+          "min": 1,
+          "scope": "source_evidence"
         },
         {
           "relation": "MOVE",
-          "min": 1
+          "min": 1,
+          "scope": "source_evidence"
         }
       ]
     },
@@ -403,11 +414,13 @@
       "consensus_gates": [
         {
           "relation": "EXPLAINS",
-          "min": 1
+          "min": 1,
+          "scope": "source_evidence"
         },
         {
           "relation": "MOVE",
-          "min": 1
+          "min": 1,
+          "scope": "source_evidence"
         }
       ]
     },
@@ -421,11 +434,13 @@
       "consensus_gates": [
         {
           "relation": "MOVE_QUALITY",
-          "min": 1
+          "min": 1,
+          "scope": "source_evidence"
         },
         {
           "relation": "ANALYZED_AT",
-          "min": 1
+          "min": 1,
+          "scope": "source_evidence"
         }
       ]
     },
@@ -472,11 +487,13 @@
       "consensus_gates": [
         {
           "relation": "HAS_WDL",
-          "min": 1
+          "min": 1,
+          "scope": "source_evidence"
         },
         {
           "relation": "HAS_DTZ",
-          "min": 1
+          "min": 1,
+          "scope": "source_evidence"
         }
       ]
     },
@@ -500,11 +517,13 @@
       "consensus_gates": [
         {
           "relation": "GAME_HAS_OPENING",
-          "min": 1
+          "min": 1,
+          "scope": "source_evidence"
         },
         {
           "relation": "GAME_HAS_ECO",
-          "min": 1
+          "min": 1,
+          "scope": "source_evidence"
         }
       ]
     }
