@@ -111,11 +111,8 @@ internal sealed class SemLinkRoleMappingPhase : DecomposerPhase<RoleCorresponden
     protected override IngestBatchConfig BuildPipelineConfig(
         IDecomposerContext context, DecomposerOptions options)
     {
-        int batchSize = options.BatchSize > 0 ? options.BatchSize : BatchConfigDefaults.HighVolume;
         var config = IngestPipelineDefaults.RelationTriple(
-            SourceId, BatchLabelPrefix,
-            options with { BatchSize = batchSize },
-            context.Reader);
+            SourceId, BatchLabelPrefix, options, context.Reader);
         return IngestPipelineDefaults.ApplyMaxInputUnits(config, options);
     }
 }

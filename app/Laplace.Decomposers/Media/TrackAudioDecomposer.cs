@@ -59,7 +59,8 @@ public sealed class TrackAudioDecomposer
     protected override IngestBatchConfig ConfigForFile(
         string fileLabel, ISubstrateReader? reader, DecomposerOptions options)
     {
-        int batchSize = BatchConfigDefaults.Resolve(options, 8);
+        int batchSize = IngestPipelineDefaults.ResolveBatch(
+            IngestSourceProfile.MediaAudio, options);
         return MediaIngestSupport.PipelineConfig(
             SourceId, TC.StructuredCorpus, fileLabel, reader,
             IngestSourceProfile.MediaAudio, batchSize);

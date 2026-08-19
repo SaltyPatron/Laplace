@@ -263,9 +263,8 @@ internal sealed class PredicateMatrixPhase : DecomposerPhase<PredicateMatrixInge
     protected override IngestBatchConfig BuildPipelineConfig(
         IDecomposerContext context, DecomposerOptions options)
     {
-        int batchSize = options.BatchSize > 0 ? options.BatchSize : BatchConfigDefaults.HighVolume;
         var config = IngestPipelineDefaults.CategoryCorrespondence(
-            SourceId, BatchLabelPrefix, batchSize, options, context.Reader);
+            SourceId, BatchLabelPrefix, BatchConfigDefaults.HighVolume, options, context.Reader);
         return IngestPipelineDefaults.ApplyMaxInputUnits(config, options);
     }
 }
