@@ -103,6 +103,11 @@ delivered decomposer implementation.
   `HAS_LANGUAGE` gate green. The comparable pre-fix clean receipt was 716.2 seconds:
   2.12x faster while indexes remained online. This closes the requested post-#1186 OMW
   remeasurement; PR #1204's larger topology-owned envelope still requires its own live run.
+- [Clean Atomic2020 run 32314149469](https://github.com/SaltyPatron/Laplace/actions/runs/32314149469)
+  completed ingest in 418 seconds with every journal, throughput, health, layer, and relation
+  gate green. That is effectively flat against the prior 414-second receipt and isolates its
+  remaining cost to consensus/mask processing rather than producer throughput. #1204 changes
+  that tail's long-lived mask connection leases; the post-deploy rerun is the proof gate.
 
 - [Chess run 32297973379](https://github.com/SaltyPatron/Laplace/actions/runs/32297973379)
   ingested 190,705 games in 1,065 seconds, then journal replay completed as a seven-second
@@ -187,9 +192,9 @@ delivered decomposer implementation.
   intentional and must remain reported honestly. Tracked by #967.
 - Audit source profiles against measured compose fanout and memory, then benchmark
   bounded foundation, Wiktionary, UD, chess, model, media, and OpenSubtitles runs.
-- Finish the active clean Atomic2020 remeasurement after #1203/#1204 and compare producer,
-  consensus-drain, and mask timing against the prior 1,331,097-input / 414-second receipt,
-  whose consensus drain occupied about 247 seconds. Clean OMW is now measured at 338 seconds
+- Rerun clean Atomic2020 after #1204 deploys and compare producer, consensus-drain, and mask
+  timing against the #1203 418-second and prior 414-second receipts; the older receipt's
+  consensus drain occupied about 247 seconds. Clean OMW is now measured at 338 seconds
   versus 716.2 seconds before the generic resource-derived pipeline; its semantic values still
   compose at grapheme/content grain while TSV packaging creates no content physicalities.
 - Re-run analyzer v3 after source eviction and confirm the completion envelope reports
