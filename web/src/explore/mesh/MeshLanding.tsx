@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { LookupRow, Muted } from '@ui';
-import { exploreResolve } from '../api';
+import { useEffect } from 'react';
+import { Muted } from '@ui';
+import { Link } from 'react-router-dom';
+import { SearchBar } from '../components/SearchBar';
 import { useExploreStore } from '../store';
 import { ModalityMap } from './ModalityMap';
 import styles from './MeshView.module.css';
@@ -22,30 +22,9 @@ const DIVISIONS: { name: string; tag: string; blurb: string }[] = [
 ];
 
 export function MeshLanding() {
-  const nav = useNavigate();
   const resetMeshTrail = useExploreStore((s) => s.resetMeshTrail);
-  const [ref, setRef] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
 
   useEffect(() => resetMeshTrail(), [resetMeshTrail]);
-
-  async function enterMesh(term: string) {
-    const t = term.trim();
-    if (!t || busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const hit = await exploreResolve(t);
-      if (!hit) { setError(`Nothing witnessed for "${t}".`); return; }
-      resetMeshTrail();
-      nav(`/explore/mesh/${hit.id_hex}`);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  }
 
   return (
     <div className={styles.landing}>
@@ -58,14 +37,11 @@ export function MeshLanding() {
           arrow is a witnessed, rated edge.
         </p>
         <div className={styles.landingSearch}>
-          <LookupRow
-            value={ref}
-            onChange={setRef}
-            onSubmit={() => void enterMesh(ref)}
+          <SearchBar
             placeholder="a word, sense, frame, or id hex…"
-            submitLabel="Enter mesh"
-            error={error}
-            disabled={busy}
+            label="Enter the mesh at any witnessed node"
+            hint="Names, words, semantic IDs, and close spellings work."
+            destination="mesh"
           />
         </div>
       </header>
@@ -84,10 +60,10 @@ export function MeshLanding() {
         <Muted>Or start from a familiar concept:</Muted>
         <div className={styles.exampleChips}>
           {['whale', 'run', 'gravity', 'justice', 'cell'].map((w) => (
-            <button key={w} type="button" className={styles.exampleChip}
-              onClick={() => void enterMesh(w)} disabled={busy}>
+            <Link key={w} className={styles.exampleChip}
+              to={`/explore/resolve/${encodeURIComponent(w)}`}>
               {w}
-            </button>
+            </Link>
           ))}
         </div>
       </div>

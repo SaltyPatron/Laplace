@@ -90,11 +90,11 @@
   }
 
   .wander {
-    transition: transform 1.55s cubic-bezier(0.35, 0.02, 0.22, 1);
+    transition: transform 1.7s cubic-bezier(0.32, 0.04, 0.22, 1);
   }
 
   .wander .sprite {
-    animation: familiar-step 520ms ease-in-out infinite;
+    animation: familiar-step 760ms ease-in-out infinite;
   }
 
   .stalk {
@@ -147,7 +147,7 @@
 
   @keyframes familiar-step {
     0%, 100% { transform: translateY(0) rotate(0); }
-    50% { transform: translateY(-3px) rotate(-0.7deg); }
+    50% { transform: translateY(-0.8px) rotate(-0.18deg); }
   }
 
   @keyframes familiar-stalk {

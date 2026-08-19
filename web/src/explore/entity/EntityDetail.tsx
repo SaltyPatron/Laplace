@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   ErrorText,
   LoadingText,
@@ -8,7 +8,7 @@ import {
   Panel,
   cn,
 } from '@ui';
-import { PaymentRequiredError } from '../../api/client';
+import { ApiError, PaymentRequiredError } from '../../api/client';
 import {
   exploreContainers,
   exploreDecompose,
@@ -351,8 +351,10 @@ export function EntityDetail() {
 export function ResolveRedirect() {
   const { ref = '' } = useParams();
   const nav = useNavigate();
+  const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     const surface = decodeURIComponent(ref);
+    setError(null);
     exploreResolve(surface)
       .then((r) =>
         // A resolvable-but-unwitnessed reference (exists=false) has no entity
@@ -362,7 +364,23 @@ export function ResolveRedirect() {
           ? nav(`/explore/entity/${r.id_hex}`, { replace: true })
           : nav(`/explore/notfound/${encodeURIComponent(surface)}`, { replace: true }),
       )
-      .catch(() => nav('/explore', { replace: true }));
+      .catch((reason) => {
+        if (reason instanceof ApiError && reason.status === 404) {
+          nav(`/explore/notfound/${encodeURIComponent(surface)}`, { replace: true });
+          return;
+        }
+        setError(reason instanceof ApiError && reason.status === 503
+          ? 'Search is temporarily unavailable. Try this reference again in a moment.'
+          : reason instanceof Error ? reason.message : String(reason));
+      });
   }, [ref, nav]);
+  if (error) {
+    return (
+      <div>
+        <ErrorText role="alert">{error}</ErrorText>
+        <Link to="/explore">Return to warehouse search</Link>
+      </div>
+    );
+  }
   return <LoadingText>Resolving…</LoadingText>;
 }
