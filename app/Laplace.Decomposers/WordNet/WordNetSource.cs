@@ -46,7 +46,7 @@ public readonly struct WordNetSource : ISeedSource
     public static IReadOnlyList<string> Relations { get; } = BuildRelations();
 
     public static IReadOnlyList<string>? TypeNodeNames { get; } =
-        ["WordNet_Synset", "WordNet_Sense"];
+        ["WordNet_Synset", "WordNet_Sense", "Source_Reference"];
 
     public static SourceLicense License => SourceLicense.Unknown;
 
@@ -58,7 +58,7 @@ public readonly struct WordNetSource : ISeedSource
         {
             "IS_SYNONYM_OF", "HAS_POS", "HAS_DEFINITION", "HAS_EXAMPLE", "HAS_LEX_CATEGORY",
             "HAS_DOMAIN_TOPIC", "HAS_VERB_FRAME", "IS_LEMMA_OF", "HAS_SENSE", "IS_SENSE_OF",
-            "HAS_NAME_ALIAS", "MANNER_OF",
+            "HAS_NAME_ALIAS", "MANNER_OF", "CORRESPONDS_TO",
         };
         // From the manifest's declared language scope, not a literal here: the source
         // states the language, this only obliges the declaration to match what the

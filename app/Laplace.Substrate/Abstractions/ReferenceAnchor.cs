@@ -13,12 +13,16 @@ namespace Laplace.Decomposers.Abstractions;
 public enum ReferenceIdentityKind : ushort
 {
     CiliIli = 1,
+    // Persisted three-field bridge key. It can refer to multiple adjective-satellite
+    // senses; keep the value stable and never promote it to exact native identity.
     WordNetSenseKey = 2,
     WordNetSynsetKey = 3,
     CiliMapVersion = 4,
     PropBankRoleset = 5,
     VerbNetClass = 6,
     FrameNetLexicalUnit = 7,
+    // Complete lemma%ss_type:lex_filenum:lex_id:head_word:head_id source key.
+    WordNetExactSenseKey = 8,
 }
 
 /// <summary>
@@ -38,7 +42,7 @@ public static class ReferenceAnchor
 
     public static Hash128 IdUtf8(ReferenceIdentityKind kind, ReadOnlySpan<byte> normalizedKey)
     {
-        if (kind is < ReferenceIdentityKind.CiliIli or > ReferenceIdentityKind.FrameNetLexicalUnit)
+        if (kind is < ReferenceIdentityKind.CiliIli or > ReferenceIdentityKind.WordNetExactSenseKey)
             throw new ArgumentOutOfRangeException(nameof(kind), kind, "unknown reference identity domain");
         if (normalizedKey.IsEmpty)
             throw new ArgumentException("reference key must not be empty", nameof(normalizedKey));
