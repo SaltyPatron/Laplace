@@ -43,9 +43,9 @@ public readonly struct WordNetSource : ISeedSource
         ["\\"] = "PERTAINS_TO",
     };
 
+    private static IReadOnlyList<string> DeclaredRelations { get; } = ["CORRESPONDS_TO"];
     public static IReadOnlyList<string> Relations { get; } = BuildRelations();
 
-    private static IReadOnlyList<string> DeclaredRelations { get; } = ["CORRESPONDS_TO"];
     internal static readonly Hash128 CorrespondsToTypeId =
         RelationTypeRegistry.RelationTypeId(DeclaredRelations[0]);
 

@@ -112,8 +112,11 @@ public class GrammarSpineConformanceTests
             .Where(p => !p.Contains("bin") && !p.Contains("obj"))
             .Select(p => StripComments(File.ReadAllText(p))));
         Assert.Contains("OpenSubtitlesZipIngest", text, StringComparison.Ordinal);
-        Assert.Contains("RelationTripleMultiFileDecomposerBase", text, StringComparison.Ordinal);
+        Assert.Contains("DecomposerMultiFile<AlignedSubtitleBlock", text, StringComparison.Ordinal);
+        Assert.Contains("OpenSubtitlesAlignedHandler", text, StringComparison.Ordinal);
         Assert.Contains("ExtractFileAsync", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("RelationTripleMultiFileDecomposerBase", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("new SubstrateChangeBuilder", text, StringComparison.Ordinal);
         Assert.DoesNotContain("OpenSubtitlesIngestHandler", text, StringComparison.Ordinal);
         Assert.DoesNotContain("OpenSubtitlesFastIngest", text, StringComparison.Ordinal);
     }
