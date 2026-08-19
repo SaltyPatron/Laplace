@@ -20,6 +20,8 @@ public static class EntityTypeRegistry
     public static readonly Hash128 ConversationSession = Id("Conversation_Session");
     public static readonly Hash128 Document = Id("Document");
     public static readonly Hash128 Frame = Id("Frame");
+    public static readonly Hash128 FrameNetAnnotation = Id("FrameNet_Annotation");
+    public static readonly Hash128 FrameNetAnnotationOccurrence = Id("FrameNet_Annotation_Occurrence");
     public static readonly Hash128 FrameNetCoreness = Id("FrameNet_Coreness");
     public static readonly Hash128 FrameNetFe = Id("FrameNet_FE");
     public static readonly Hash128 FrameNetFrame = Id("FrameNet_Frame");

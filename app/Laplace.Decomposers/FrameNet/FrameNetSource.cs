@@ -22,7 +22,8 @@ public readonly struct FrameNetSource : ISeedSource
     ];
 
     public static IReadOnlyList<string>? TypeNodeNames { get; } =
-        ["FrameNet_Frame", "FrameNet_FE", "FrameNet_LU", "FrameNet_Coreness"];
+        ["FrameNet_Frame", "FrameNet_FE", "FrameNet_LU", "FrameNet_Coreness",
+         "FrameNet_Annotation", "FrameNet_Annotation_Occurrence"];
 
     public static SourceLicense License => SourceLicense.Unknown;
 

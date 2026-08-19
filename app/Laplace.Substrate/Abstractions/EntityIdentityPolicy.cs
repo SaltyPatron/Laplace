@@ -21,6 +21,7 @@ public static class EntityIdentityPolicy
         EntityTypeRegistry.Text,
         EntityTypeRegistry.Ngram,
         EntityTypeRegistry.Collection,
+        EntityTypeRegistry.FrameNetAnnotation,
         EntityTypeRegistry.Pixel,
         EntityTypeRegistry.Patch,
         EntityTypeRegistry.Region,
