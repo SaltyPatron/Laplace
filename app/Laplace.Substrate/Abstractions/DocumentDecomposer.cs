@@ -50,7 +50,8 @@ public sealed class DocumentDecomposer : DecomposerMultiFile<ContentIngestRecord
     protected override IngestBatchConfig ConfigForFile(
         string fileLabel, ISubstrateReader? reader, DecomposerOptions options)
     {
-        int batchSize = BatchConfigDefaults.Resolve(options, BatchConfigDefaults.Document);
+        int batchSize = IngestPipelineDefaults.ResolveBatch(
+            IngestSourceProfile.Document, options);
         return DocumentIngestSupport.PipelineConfig(fileLabel, reader, batchSize);
     }
 

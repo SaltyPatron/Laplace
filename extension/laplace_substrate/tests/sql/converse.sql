@@ -164,6 +164,32 @@ FROM converse.compile_prompt(
 
 SELECT laplace.word_id('dog') = ANY(lexical.lexical_peers(laplace.word_id('dog'))) AS peer_includes_self;
 
+-- The lexical peer batch is the canonical implementation.  Preserve caller
+-- order, duplicate inputs, NULL semantics and byte-identical peer arrays.
+WITH words AS (
+    SELECT ARRAY[
+        laplace.word_id('dog'),
+        laplace.word_id('NoSuchPeer'),
+        laplace.word_id('dog'),
+        NULL::bytea
+    ]::bytea[] AS ids
+), scalar AS (
+    SELECT u.ord AS input_ordinal, u.word_id,
+           lexical.lexical_peers(u.word_id) AS peers
+    FROM words, unnest(words.ids) WITH ORDINALITY AS u(word_id, ord)
+), batched AS (
+    SELECT b.input_ordinal, b.word_id, b.peers
+    FROM words, lexical.lexical_peers_batch(words.ids) b
+)
+SELECT NOT EXISTS (
+    (SELECT * FROM scalar EXCEPT ALL SELECT * FROM batched)
+    UNION ALL
+    (SELECT * FROM batched EXCEPT ALL SELECT * FROM scalar)
+) AS lexical_peer_batch_matches_scalar;
+
+SELECT count(*) = 0 AS lexical_peer_empty_batch_is_empty
+FROM lexical.lexical_peers_batch('{}'::bytea[]);
+
 -- The set case operation is result-identical to independent scalar calls,
 -- including a content id with no physicality (which still includes itself).
 WITH words AS (

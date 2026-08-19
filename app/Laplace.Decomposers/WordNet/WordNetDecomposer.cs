@@ -256,8 +256,10 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
         {
             var lemmaId = RootSurface(lemma);
             if (lemmaId is null) continue;
-            b.AddAttestation(NativeAttestation.Categorical(
-                lemmaId.Value, "IS_SYNONYM_OF", synId, Source, SourceTrust.StandardsDerived));
+            // Synset membership is carried by index.sense at its exact lexical grain:
+            // lemma -> HAS_SENSE -> sense -> IS_SENSE_OF -> synset. Repeating that same
+            // source observation here as lemma -> IS_SYNONYM_OF -> synset made one WordNet
+            // fact look like two independent witnesses and discarded the sense identity.
             PosReference.Attest(b, lemmaId.Value, syn.SsType.ToString(),
                 PosReference.PosTagset.WordNet, Source, null, SourceTrust.StandardsDerived,
                 _vocabularyNames);
@@ -331,11 +333,24 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
     {
         EmitSurface(b, s.Lemma, Source);
 
-        var senseId = SenseAnchor.Emit(
+        var senseId = SenseAnchor.EmitExact(
             b, s.SenseKey, Source, SourceTrust.StandardsDerived);
+        var compatibilityId = SenseAnchor.Emit(
+            b, s.SenseKey, Source, SourceTrust.StandardsDerived);
+        if (senseId is null) return;
+
+        // Older bridges frequently retain only lemma%ss_type:lex_filenum:lex_id. That
+        // serialization is not unique for adjective satellites, so keep it as an explicit
+        // compatibility hub and connect it to every exact source sense instead of using it
+        // as identity. The two real PWN senses remain distinct on HAS_SENSE/IS_SENSE_OF.
+        if (compatibilityId is { } alias && alias != senseId.Value)
+            b.AddAttestation(NativeAttestation.CategoricalResolved(
+                alias, WordNetSource.CorrespondsToTypeId, senseId.Value, Source,
+                null, SourceTrust.StandardsDerived));
+
         var lemmaId = RootSurface(s.Lemma);
         var synAnchor = ConceptAnchor.SynsetId(s.Offset, s.Pos);
-        if (senseId is null || lemmaId is null || synAnchor is null) return;
+        if (lemmaId is null || synAnchor is null) return;
 
         // The source's declared language scope, recorded rather than inferred. Emitted on
         // the LEMMA and the SENSE and deliberately not on the synset: a synset is
@@ -486,8 +501,8 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
             if (sp <= 0) continue;
 
             string senseKey = System.Text.Encoding.UTF8.GetString(line[..sp]);
-            string? normKey = SourceEntityIdConventions.NormalizeSenseKey(senseKey);
-            if (normKey is null || !senseIndex.TryGetValue(normKey, out var syn)) continue;
+            string? exactKey = SourceEntityIdConventions.NormalizeExactSenseKey(senseKey);
+            if (exactKey is null || !senseIndex.TryGetValue(exactKey, out var syn)) continue;
 
             Hash128? synId = ConceptAnchor.SynsetId(syn.Offset, syn.Pos);
             if (synId is null) continue;
@@ -698,9 +713,9 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
                 _ => 'n',
             };
 
-            string? normKey = SourceEntityIdConventions.NormalizeSenseKey(senseKey);
-            if (normKey is null) continue;
-            yield return new WnSense(normKey, offset, pos, lemma, tagCount);
+            string? exactKey = SourceEntityIdConventions.NormalizeExactSenseKey(senseKey);
+            if (exactKey is null) continue;
+            yield return new WnSense(exactKey, offset, pos, lemma, tagCount);
         }
     }
 

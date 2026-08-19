@@ -193,19 +193,31 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
                     ChessGraph.AppendPlayerResult(
                         b, b2, session.WhitePlayerId, result.ForMover(1), WitnessWeight,
                         ChessVocabulary.SourceId, playingId);
-            }
 
-            bool hasWin = session.Plies.Any(p => result.ForMover(p.MoverSide) == PlyOutcome.Win);
-            bool checkmate = !adjudicated && hasWin;
-            long games = checkmate ? CheckmateGames : 1;
+                bool hasWin = session.Plies.Any(
+                    p => result.ForMover(p.MoverSide) == PlyOutcome.Win);
+                bool checkmate = !adjudicated && hasWin;
+                long games = checkmate ? CheckmateGames : 1;
+                var line = new List<ChessNode>(session.Plies.Count + 1);
+                foreach (var rp in session.Plies)
+                {
+                    var from = ChessGraph.EmitComposed(b, rp.FromKey, ChessVocabulary.SourceId);
+                    var to = ChessGraph.EmitComposed(b, rp.ToKey, ChessVocabulary.SourceId);
+                    if (line.Count == 0) line.Add(from.Position);
+                    line.Add(to.Position);
+                    var moverOutcome = adjudicated
+                        ? PlyOutcome.Draw
+                        : result.ForMover(rp.MoverSide);
+                    ChessGraph.AppendSubstructureOutcome(
+                        b, from, moverOutcome, games, WitnessWeight, ChessVocabulary.SourceId);
+                }
 
-            foreach (var rp in session.Plies)
-            {
-                var moverOutcome = adjudicated ? PlyOutcome.Draw : result.ForMover(rp.MoverSide);
-                ChessGraph.AppendMoveEdge(
-                    b, rp.FromKey, rp.ToKey, moverOutcome, games, WitnessWeight,
-                    sourceId: ChessVocabulary.SourceId,
-                    contextId: playingId);
+                long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
+                ChessGraph.AppendGameTrajectory(
+                    b, lineId, line, ChessVocabulary.TrajectorySourceId, nowUs);
+                b.AddEntity(
+                    ChessTrajectoryDecomposer.MarkerId(lineId), EntityTier.Document,
+                    ChessVocabulary.AnalysisMarkerType, ChessVocabulary.TrajectorySourceId);
             }
 
             var change = await b.BuildAsync(ct);

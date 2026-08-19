@@ -23,10 +23,11 @@ internal static class CpuTopologyCommands
                     Console.WriteLine(CpuTopology.ResolveCpuBoundWorkers(headroom: headroom));
                     return 0;
                 case "--io-bound-workers":
-                    Console.WriteLine(CpuTopology.ResolveIngestCommitWorkers(headroom: 1));
+                    Console.WriteLine(CpuTopology.ResolveIoBoundWorkers(headroom: 1));
                     return 0;
                 case "--ingest-commit-workers":
-                    Console.WriteLine(CpuTopology.ResolveIngestCommitWorkers(headroom: 1));
+                case "--apply-dispatch-workers":
+                    Console.WriteLine(IngestTopology.Current.ApplyDispatchWorkers);
                     return 0;
                 case "--p-core-indices":
                     Console.WriteLine(string.Join(",", CpuTopology.PerformanceCoreCpuIndices));
@@ -67,7 +68,7 @@ internal static class CpuTopologyCommands
             + $"p_primary_lps=[{string.Join(",", CpuTopology.PerformanceCoreCpuIndices)}] "
             + $"e_lps=[{string.Join(",", CpuTopology.EfficientCoreCpuIndices)}] "
             + $"cpu_bound_workers={CpuTopology.ResolveCpuBoundWorkers(headroom: 1)} "
-            + $"io_bound_workers={CpuTopology.ResolveIngestCommitWorkers(headroom: 1)} "
+            + $"io_bound_workers={CpuTopology.ResolveIoBoundWorkers(headroom: 1)} "
             + $"apply_partitions={CpuTopology.ResolveApplyPartitions()}");
 
         bool pinOk = CpuTopology.PinCurrentThreadToPerformanceCores();
@@ -76,7 +77,9 @@ internal static class CpuTopologyCommands
         var topo = IngestTopology.EnsureReady();
         Console.Error.WriteLine(
             $"ingest_ready: file={topo.FileWorkers} compose={topo.ComposeWorkers} "
-            + $"commit={topo.CommitWorkers} apply={topo.ApplyPartitions} pinned={topo.EntryThreadPinned.ToString().ToLowerInvariant()}");
+            + $"io_available={topo.IoWorkersAvailable} "
+            + $"apply_dispatch={topo.ApplyDispatchWorkers} apply_partitions={topo.ApplyPartitions} "
+            + $"pinned={topo.EntryThreadPinned.ToString().ToLowerInvariant()}");
         return 0;
     }
 
@@ -275,4 +278,3 @@ internal static class CpuTopologyCommands
         w.WriteLine("SELECT" + " pg_reload_conf();");
     }
 }
-

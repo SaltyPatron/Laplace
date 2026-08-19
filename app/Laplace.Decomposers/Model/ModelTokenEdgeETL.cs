@@ -245,50 +245,47 @@ public sealed class ModelTokenEdgeETL
         unsafe { fixed (float* pf = Af) fixed (double* pd = Ad)
             DynInterop.F32ToF64(pf, (nuint)((long)n * d), pd); }
 
-        // Layers are independent: produce them with bounded fan-out (memory is
-        // the bound — each in-flight layer holds GB-scale projection buffers)
-        // into one bounded channel; the single consumer preserves the async-
-        // enumerator contract for the runner. Machine-derived width, no
-        // constant: the working-set budget divided by one layer's buffer
-        // footprint (n×attn doubles ≈ the dominant allocation), clamped to
-        // the compose-worker count.
+        // Layers are independent. The shared pipeline owns bounded fan-out and
+        // output backpressure; this vendor supplies only the per-layer masticator.
+        // Width remains memory-derived because each active layer holds GB-scale
+        // projection buffers.
         int layers = _manifest.LayerCount;
         long perLayerBytes = 3L * n * d * sizeof(double);
         int fanOut = (int)Math.Clamp(
             MemoryTopology.WorkingSetBudgetBytes / Math.Max(1, perLayerBytes),
             1, IngestTopology.Current.ComposeWorkers);
-        var chan = System.Threading.Channels.Channel.CreateBounded<SubstrateChange>(
-            new System.Threading.Channels.BoundedChannelOptions(fanOut * 2)
-            { SingleReader = true, SingleWriter = false });
-        var gate = new SemaphoreSlim(fanOut, fanOut);
-        var producers = new List<Task>(layers);
-        for (int i = 0; i < layers; i++)
-        {
-            int L = i;
-            producers.Add(Task.Run(async () =>
-            {
-                await gate.WaitAsync(ct);
-                try
-                {
-                    await foreach (var change in EmitAttentionLayer(L, Af, Ad, ents, n, d, commitEpoch, refMap, reader, options, ct))
-                        await chan.Writer.WriteAsync(change, ct);
-                    await foreach (var change in EmitOvLayer(L, Af, Ad, ents, n, d, commitEpoch, refMap, reader, options, ct))
-                        await chan.Writer.WriteAsync(change, ct);
-                    await foreach (var change in EmitMlpLayer(L, Ad, ents, n, d, commitEpoch, refMap, reader, options, ct))
-                        await chan.Writer.WriteAsync(change, ct);
-                }
-                finally { gate.Release(); }
-            }, ct));
-        }
-        var completion = Task.WhenAll(producers).ContinueWith(t =>
-        {
-            chan.Writer.Complete(t.Exception?.GetBaseException());
-            return t;
-        }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default).Unwrap();
-
-        await foreach (var change in chan.Reader.ReadAllAsync(ct))
+        var layerWork = Enumerable.Range(0, layers).ToArray();
+        await foreach (var change in ParallelIngestWork.RunAsync(
+                           layerWork,
+                           fanOut,
+                           fanOut * 2,
+                           (layer, token) => EmitLayer(
+                               layer, Af, Ad, ents, n, d, commitEpoch,
+                               refMap, reader, options, token),
+                           ct))
             yield return change;
-        await completion;
+    }
+
+    private async IAsyncEnumerable<SubstrateChange> EmitLayer(
+        int layer, float[] af, double[] ad, List<Hash128> entities, int n, int d,
+        int commitEpoch,
+        Dictionary<string, SafetensorsContainerParser.TensorReference> references,
+        ISubstrateReader? reader,
+        DecomposerOptions options,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        await foreach (var change in EmitAttentionLayer(
+                           layer, af, ad, entities, n, d, commitEpoch,
+                           references, reader, options, ct))
+            yield return change;
+        await foreach (var change in EmitOvLayer(
+                           layer, af, ad, entities, n, d, commitEpoch,
+                           references, reader, options, ct))
+            yield return change;
+        await foreach (var change in EmitMlpLayer(
+                           layer, ad, entities, n, d, commitEpoch,
+                           references, reader, options, ct))
+            yield return change;
     }
 
     private readonly record struct FactorDeposit(

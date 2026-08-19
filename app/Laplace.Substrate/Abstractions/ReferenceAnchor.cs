@@ -13,13 +13,17 @@ namespace Laplace.Decomposers.Abstractions;
 public enum ReferenceIdentityKind : ushort
 {
     CiliIli = 1,
+    // Persisted three-field bridge key. It can refer to multiple adjective-satellite
+    // senses; keep the value stable and never promote it to exact native identity.
     WordNetSenseKey = 2,
     WordNetSynsetKey = 3,
     CiliMapVersion = 4,
     PropBankRoleset = 5,
     VerbNetClass = 6,
     FrameNetLexicalUnit = 7,
-    WikidataItem = 8,
+    // Complete lemma%ss_type:lex_filenum:lex_id:head_word:head_id source key.
+    WordNetExactSenseKey = 8,
+    WikidataItem = 9,
 }
 
 /// <summary>

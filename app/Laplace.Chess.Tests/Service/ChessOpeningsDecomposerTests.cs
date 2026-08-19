@@ -69,6 +69,8 @@ public sealed class ChessOpeningsDecomposerTests
         var traj = Assert.Single(change.Physicalities, p => p.EntityId == expectedLine);
         Assert.NotNull(traj.TrajectoryXyzm);
         Assert.Equal(sans.Count + 1, traj.NConstituents);
+        Assert.DoesNotContain(change.Attestations,
+            a => a.TypeId == ChessVocabulary.MoveType);
 
         Assert.Contains(change.Attestations,
             a => a.TypeId == ChessVocabulary.OpeningNameType && a.SubjectId == expectedLine);

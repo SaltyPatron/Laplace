@@ -143,8 +143,9 @@ public sealed class FrameNetDecomposerTests
     public async Task FeToFe_Requires_And_Excludes_Are_Emitted()
     {
         var atts = await CollectAttestationsAsync();
-        var donorId = CategoryAnchor.Id("Donor");
-        var placeId = CategoryAnchor.Id("Place");
+        var frameId = CategoryAnchor.Id("Giving")!.Value;
+        var donorId = RoleAnchor.Id(RoleIdentityKind.FrameNet, frameId, "Donor");
+        var placeId = RoleAnchor.Id(RoleIdentityKind.FrameNet, frameId, "Place");
         Assert.NotNull(donorId);
         Assert.NotNull(placeId);
         Assert.Contains(atts, a =>
@@ -156,7 +157,7 @@ public sealed class FrameNetDecomposerTests
     }
 
     [Fact]
-    public async Task EvokesFrame_Targets_Frame_Meta_And_CoreType_Rides_Context()
+    public async Task EvokesFrame_Targets_Frame_AndCorenessBelongsToBoundFrameElement()
     {
         var atts = await CollectAttestationsAsync();
         var b = new SubstrateChangeBuilder(FrameNetDecomposer.Source, "fixture", null);
@@ -170,8 +171,90 @@ public sealed class FrameNetDecomposerTests
             && a.ObjectId == frameId!.Value);
 
         var coreCtx = Hash128.OfCanonical("framenet/coreness/Core");
+        var donorRole = RoleAnchor.Id(RoleIdentityKind.FrameNet, frameId.Value, "Donor")!.Value;
         Assert.Contains(atts, a =>
-            a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_FRAME_ELEMENT") && a.ContextId == coreCtx);
+            a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_FRAME_ELEMENT")
+            && a.SubjectId == frameId.Value && a.ObjectId == donorRole && a.ContextId is null);
+        Assert.Contains(atts, a =>
+            a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_FEATURE")
+            && a.SubjectId == donorRole && a.ObjectId == coreCtx && a.ContextId is null);
+    }
+
+    [Fact]
+    public async Task Fulltext_Targets_Preserve_Exact_Span_And_Occurrence()
+    {
+        const string fulltextXml = """
+<?xml version="1.0" encoding="UTF-8"?>
+<fullTextAnnotation xmlns="http://framenet.icsi.berkeley.edu">
+  <sentence ID="77">
+    <text>bank bank</text>
+    <annotationSet ID="100" frameName="Commerce">
+      <layer name="Target"><label name="Target" start="0" end="3"/></layer>
+    </annotationSet>
+    <annotationSet ID="101" frameName="Natural_features">
+      <layer name="Target"><label name="Target" start="5" end="8"/></layer>
+    </annotationSet>
+  </sentence>
+</fullTextAnnotation>
+""";
+
+        string dir = Path.Combine(Path.GetTempPath(), "fn-span-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(dir, "fulltext"));
+        string path = Path.Combine(dir, "fulltext", "sample.xml");
+        await File.WriteAllTextAsync(path, fulltextXml);
+        try
+        {
+            var parsed = new List<FrameNetDecomposer.FulltextAnno>();
+            await foreach (var ann in FrameNetDecomposer.ParseFulltextAsync(
+                               path, "framenet/fulltext/sample.xml", CancellationToken.None))
+                parsed.Add(ann);
+
+            Assert.Collection(parsed,
+                a =>
+                {
+                    Assert.Equal((0, 3), (a.TargetStart, a.TargetEnd));
+                    Assert.Equal("77", a.SentenceReference);
+                    Assert.Equal("100", a.AnnotationReference);
+                },
+                a =>
+                {
+                    Assert.Equal((5, 8), (a.TargetStart, a.TargetEnd));
+                    Assert.Equal("101", a.AnnotationReference);
+                });
+
+            var dec = new FrameNetDecomposer();
+            var ctx = new FakeContext(new NullWriter()) { EcosystemPath = dir };
+            var changes = new List<SubstrateChange>();
+            await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
+                changes.Add(change);
+
+            var evokes = changes.SelectMany(c => c.Attestations)
+                .Where(a => a.TypeId == RelationTypeRegistry.RelationTypeId("EVOKES_FRAME"))
+                .ToList();
+            Assert.Equal(2, evokes.Count);
+            Assert.Equal(2, evokes.Select(a => a.SubjectId).Distinct().Count());
+            Assert.Equal(2, evokes.Select(a => a.ContextId).Distinct().Count());
+            Assert.DoesNotContain(evokes, a => a.SubjectId == ContentEmitter.RootId("bank"));
+
+            var annotationIds = changes.SelectMany(c => c.Entities)
+                .Where(e => e.TypeId == EntityTypeRegistry.FrameNetAnnotation)
+                .Select(e => e.Id)
+                .ToHashSet();
+            Assert.Equal(2, annotationIds.Count);
+            Assert.All(evokes, a => Assert.Contains(a.SubjectId, annotationIds));
+
+            var annotationPhysicalities = changes.SelectMany(c => c.Physicalities)
+                .Where(p => annotationIds.Contains(p.EntityId))
+                .ToList();
+            Assert.Equal(2, annotationPhysicalities.Count);
+            Assert.Contains(annotationPhysicalities, p =>
+                Trajectory.Constituents(p.TrajectoryXyzm!).Contains(FrameNetDecomposer.OffsetId(0))
+                && Trajectory.Constituents(p.TrajectoryXyzm!).Contains(FrameNetDecomposer.OffsetId(3)));
+            Assert.Contains(annotationPhysicalities, p =>
+                Trajectory.Constituents(p.TrajectoryXyzm!).Contains(FrameNetDecomposer.OffsetId(5))
+                && Trajectory.Constituents(p.TrajectoryXyzm!).Contains(FrameNetDecomposer.OffsetId(8)));
+        }
+        finally { try { Directory.Delete(dir, recursive: true); } catch { } }
     }
 
     [Fact]
@@ -221,9 +304,11 @@ public sealed class FrameNetDecomposerTests
                         nonphysical[entity.Id] = entity.TypeId;
             }
 
-            var entry = Assert.Single(nonphysical);
-            Assert.Equal(SubstrateCanonicalIds.PosProbationary("framenet", "IDIO"), entry.Key);
-            Assert.Equal(EntityTypeRegistry.Pos, entry.Value);
+            Assert.Equal(3, nonphysical.Count);
+            Assert.Equal(2, nonphysical.Values.Count(t => t == EntityTypeRegistry.FrameNetFe));
+            Assert.Contains(nonphysical, entry =>
+                entry.Key == SubstrateCanonicalIds.PosProbationary("framenet", "IDIO")
+                && entry.Value == EntityTypeRegistry.Pos);
         }
         finally { try { Directory.Delete(dir, recursive: true); } catch { } }
     }

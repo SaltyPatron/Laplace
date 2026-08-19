@@ -1,14 +1,17 @@
--- lexical.lexical_peers — GH #862 / #860. No SET (it blocks plan caching and SQL
--- inlining, so the body re-plans per call); real schema names, no build-time
--- placeholder.
+-- lexical.lexical_peers[_batch] — GH #862 / #860.  The batch function owns the
+-- semantic body; the scalar is a one-element adapter.  One row per input keeps
+-- duplicate inputs and their order while still letting callers unnest each peer
+-- set after one database call.
 DROP FUNCTION IF EXISTS laplace.lexical_peers(bytea);
-CREATE OR REPLACE FUNCTION lexical.lexical_peers(p_word bytea)
-    RETURNS bytea[]
+CREATE OR REPLACE FUNCTION lexical.lexical_peers_batch(p_words bytea[])
+    RETURNS TABLE(input_ordinal bigint, word_id bytea, peers bytea[])
     LANGUAGE plpgsql STABLE STRICT PARALLEL SAFE AS $$
 DECLARE
-    v bytea[];
+    v_word bytea;
+    v_peers bytea[];
 BEGIN
-    -- WIDENING IS A FALLBACK, AND plpgsql IS WHAT MAKES IT ONE.
+    -- WIDENING IS A FALLBACK.  Correlation to each classified input row is what
+    -- prevents the fallback from becoming an unconditional InitPlan.
     --
     -- dog, Dog and DOG are DIFFERENT CONTENT, so different hashes and different
     -- entities (laplace.word_id('dog') = 01cdcce1..., word_id('Dog') = af1513f0...).
@@ -16,30 +19,88 @@ BEGIN
     -- exists only in bicameral scripts. Where the relation is real the graph attests it:
     -- dog and Dog carry an IS_SYNONYM_OF edge.
     --
-    -- THIS WAS WRITTEN IN SQL FIRST AND THE GUARD DID NOT HOLD. A `CASE WHEN exists
-    -- THEN ARRAY[p_word] ELSE (widening) END` returns the right ANSWER but still does
-    -- the WORK: the sub-SELECT in the ELSE is hoisted to an InitPlan and evaluated
-    -- unconditionally. Verified by call count -- lexical_peers(word_id('dog')), which
-    -- resolves exactly and returns one peer, still invoked lexical.word_case_variants
-    -- once. Rewriting the guard as `WHERE NOT EXISTS (...)` on the widening arm did not
-    -- help either; the set-returning function was still invoked. plpgsql IF is the
-    -- construct that actually skips it.
+    -- The former scalar SQL attempt let its uncorrelated fallback become an InitPlan,
+    -- so PostgreSQL evaluated it even when the exact-sense guard won.  Here the
+    -- fallback is correlated to each input row.  The exact-sense classification is one
+    -- set probe; CASE evaluates widening only for unresolved inputs.
     --
     -- What that call costs, measured in laplace.pg_stat_statements on one
     -- converse.prompt_coherence('the capital of France is'): word_case_variants 5 calls /
     -- 98.5 ms mean, and the per-id realize.render_text inside it another 5 / 88.4 ms --
     -- ~934 ms, about half that function, for five tokens that all resolve exactly.
-    IF EXISTS (SELECT 1 FROM laplace.consensus c
-                WHERE c.subject_id = p_word
-                  AND c.type_id = ANY (consensus.relation_family_ids('HAS_SENSE')))
-    THEN
-        RETURN ARRAY[p_word];
+    --
+    -- Preserve that scalar short circuit inside the canonical core.  Sending one id
+    -- through the general ScalarArray plan touches every HAS_SENSE leaf before it can
+    -- answer; the existential probe can stop on the first hit.  The public scalar still
+    -- delegates here, so this is a shape specialization rather than a second semantic
+    -- implementation.
+    IF cardinality(p_words) = 1 THEN
+        v_word := p_words[1];
+        IF v_word IS NULL THEN
+            RETURN QUERY SELECT 1::bigint, NULL::bytea, NULL::bytea[];
+            RETURN;
+        END IF;
+
+        IF EXISTS (
+            SELECT 1
+            FROM laplace.consensus c
+            WHERE c.subject_id = v_word
+              AND c.type_id = ANY (consensus.relation_family_ids('HAS_SENSE'))
+        ) THEN
+            v_peers := ARRAY[v_word];
+        ELSE
+            SELECT COALESCE(array_agg(DISTINCT p.id ORDER BY p.id), ARRAY[v_word])
+            INTO v_peers
+            FROM (
+                SELECT v_word AS id
+                UNION ALL
+                SELECT unnest(lexical.word_case_variant_ids(v_word)) AS id
+            ) p
+            WHERE p.id IS NOT NULL;
+        END IF;
+
+        RETURN QUERY SELECT 1::bigint, v_word, v_peers;
+        RETURN;
     END IF;
 
-    SELECT COALESCE(array_agg(DISTINCT id ORDER BY id), ARRAY[p_word])
-      INTO v
-      FROM (SELECT p_word AS id
-            UNION SELECT unnest(lexical.word_case_variant_ids(p_word)) AS id) m
-     WHERE id IS NOT NULL;
-    RETURN v;
+    RETURN QUERY
+    WITH inputs AS MATERIALIZED (
+        SELECT u.word_id, u.ord
+        FROM unnest(p_words) WITH ORDINALITY AS u(word_id, ord)
+    ), resolved AS MATERIALIZED (
+        SELECT DISTINCT c.subject_id
+        FROM laplace.consensus c
+        WHERE c.subject_id = ANY (p_words)
+          AND c.type_id = ANY (consensus.relation_family_ids('HAS_SENSE'))
+    ), classified AS MATERIALIZED (
+        SELECT i.word_id, i.ord, r.subject_id IS NOT NULL AS resolves_exactly
+        FROM inputs i
+        LEFT JOIN resolved r ON r.subject_id = i.word_id
+    )
+    SELECT c.ord, c.word_id,
+           CASE
+               WHEN c.word_id IS NULL THEN NULL::bytea[]
+               WHEN c.resolves_exactly THEN ARRAY[c.word_id]
+               ELSE (
+                   SELECT COALESCE(array_agg(DISTINCT p.id ORDER BY p.id),
+                                   ARRAY[c.word_id])
+                   FROM (
+                       SELECT c.word_id AS id
+                       UNION ALL
+                       SELECT unnest(lexical.word_case_variant_ids(c.word_id)) AS id
+                   ) p
+                   WHERE p.id IS NOT NULL
+               )
+           END AS peers
+    FROM classified c
+    ORDER BY c.ord;
 END $$;
+
+CREATE OR REPLACE FUNCTION lexical.lexical_peers(p_word bytea)
+    RETURNS bytea[]
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE
+BEGIN ATOMIC
+    SELECT b.peers
+    FROM lexical.lexical_peers_batch(ARRAY[p_word]) b
+    WHERE b.input_ordinal = 1;
+END;

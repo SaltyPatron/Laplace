@@ -240,7 +240,8 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
         var tokens = LlamaTokenizerParser.Parse(tokenizerPath);
         log.LogInformation("phase=vocab parsed: {Count} tokens ({Ms} ms)",
             tokens.Count, phaseSw.ElapsedMilliseconds);
-        int batchSz = Math.Max(options.BatchSize, 8192);
+        int batchSz = IngestPipelineDefaults.ResolveBatch(
+            IngestSourceProfile.Default, options);
 
         if (recorderRun)
         {

@@ -35,10 +35,9 @@ public sealed record ChessReplayResult(
 ///
 /// The positions are NOT reconstructed-and-thrown-away, though. Every board here is
 /// hashed through ChessCompose to the same content address the analyzer deposited, so a
-/// replayed ply lands on a real Chess_Position entity — one of ~5.2M, each carrying S³
-/// geometry and rated MOVE edges to its continuations. Replaying a game is therefore a
-/// walk INTO the substrate, not a private computation beside it: at any ply the caller
-/// can ask what the rest of the corpus played from that same board.
+/// replayed ply lands on a real Chess_Position entity carrying S³ geometry. Continuations
+/// are projected from the containing line trajectories; replay is therefore a walk INTO
+/// the substrate without duplicating each adjacent pair as a MOVE consensus row.
 ///
 /// SAN never gets parsed twice. Resolution goes through San.Resolve against the engine's
 /// own legal-move list, the same call the analyzer and the book decomposer make.
