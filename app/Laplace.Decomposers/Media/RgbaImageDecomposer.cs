@@ -59,7 +59,8 @@ public sealed class RgbaImageDecomposer
     protected override IngestBatchConfig ConfigForFile(
         string fileLabel, ISubstrateReader? reader, DecomposerOptions options)
     {
-        int batchSize = BatchConfigDefaults.Resolve(options, 16);
+        int batchSize = IngestPipelineDefaults.ResolveBatch(
+            IngestSourceProfile.MediaImage, options);
         return MediaIngestSupport.PipelineConfig(
             SourceId, TC.StructuredCorpus, fileLabel, reader,
             IngestSourceProfile.MediaImage, batchSize);

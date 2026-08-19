@@ -89,17 +89,21 @@ public sealed class DecomposerArchitectureGateTests
     }
 
     /// <summary>
-    /// The hand-rolled batch idiom. Nine sites wrote some form of
-    /// `options.BatchSize > 1 ? options.BatchSize : &lt;literal&gt;`, and five never consulted
-    /// IngestSizing at all — so those sources ingested with an identical batch on a 4-core
-    /// laptop and a 128 GB server even though IngestSizing/MemoryTopology own sizing.
-    /// A private `? : 2048` overrides the machine model exactly as effectively as an env
-    /// var would. IngestPipelineDefaults.ResolveBatch(profile, options) is the one resolver;
-    /// a source that needs different sizing adds an IngestSourceProfile, never a literal.
+    /// Decomposer implementations do not interpret the raw batch option. Conditional,
+    /// clamp and fallback variants all fork operator semantics and the machine sizing model.
+    /// IngestPipelineDefaults is the one resolver; a source that needs different sizing adds
+    /// an IngestSourceProfile and passes the complete DecomposerOptions through.
     /// </summary>
     private static readonly Regex HandRolledBatch = new(
-        @"BatchSize\s*>\s*1\s*\?",
+        @"\boptions\.BatchSize\b|\bBatchConfigDefaults\.Resolve\s*\(",
         RegexOptions.Compiled);
+
+    private static readonly HashSet<string> BatchOptionAuthorities = new(StringComparer.Ordinal)
+    {
+        "BatchConfigDefaults.cs",
+        "Decomposer.cs",
+        "IngestRunner.cs",
+    };
 
     /// <summary>
     /// ISeedSource.Profile is the RUN-LEVEL sizing authority: it reaches
@@ -170,15 +174,14 @@ public sealed class DecomposerArchitectureGateTests
                 if (file.Contains(".Tests", StringComparison.OrdinalIgnoreCase)) continue;
                 if (file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")) continue;
                 if (file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")) continue;
-                // Decomposer.cs documents the banned idiom in ResolveBatch's own summary.
-                if (Path.GetFileName(file).Equals("Decomposer.cs", StringComparison.Ordinal)) continue;
+                if (BatchOptionAuthorities.Contains(Path.GetFileName(file))) continue;
                 if (HandRolledBatch.IsMatch(File.ReadAllText(file)))
                     violations.Add(Path.GetRelativePath(repoRoot, file));
             }
         }
         Assert.True(violations.Count == 0,
-            "Resolve record batches with IngestPipelineDefaults.ResolveBatch(profile, options); "
-            + "add an IngestSourceProfile instead of a private literal:\n"
+            "Pass DecomposerOptions to IngestPipelineDefaults; decomposer implementations "
+            + "must not inspect options.BatchSize or combine it with private literals:\n"
             + string.Join("\n", violations));
     }
 

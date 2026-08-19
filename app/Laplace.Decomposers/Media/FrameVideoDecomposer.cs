@@ -58,7 +58,8 @@ public sealed class FrameVideoDecomposer
     protected override IngestBatchConfig BuildPipelineConfig(
         IDecomposerContext context, DecomposerOptions options)
     {
-        int batchSize = BatchConfigDefaults.Resolve(options, 8);
+        int batchSize = IngestPipelineDefaults.ResolveBatch(
+            IngestSourceProfile.MediaVideo, options);
         return MediaIngestSupport.PipelineConfig(
             SourceId, TC.StructuredCorpus, "frame-video", context.Reader,
             IngestSourceProfile.MediaVideo, batchSize);
