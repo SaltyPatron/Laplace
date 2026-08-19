@@ -664,7 +664,7 @@
       "app/Laplace.Substrate/Abstractions/PosReference.cs::HAS_POS": 1,
       "app/Laplace.Substrate/Abstractions/RelationTripleIngest.cs::CORRESPONDS_TO": 1,
       "app/Laplace.Substrate/Abstractions/RelationTripleIngest.cs::HAS_LANGUAGE": 2,
-      "app/Laplace.Substrate/Abstractions/RelationTypeRegistry.cs::IS_A": 2,
+      "app/Laplace.Substrate/Abstractions/RelationTypeRegistry.cs::IS_A": 1,
       "app/Laplace.Substrate/Abstractions/SourceVocabularyBootstrap.cs::HAS_ATTRIBUTION": 1,
       "app/Laplace.Substrate/Abstractions/SourceVocabularyBootstrap.cs::HAS_CITATION": 1,
       "app/Laplace.Substrate/Abstractions/SourceVocabularyBootstrap.cs::HAS_LICENSE": 1,

@@ -64,6 +64,18 @@ public class BootstrapIntentBuilderTests
     }
 
     [Fact]
+    public void Build_DoesNotTurnGovernedRelationHierarchyIntoVendorTestimony()
+    {
+        var change = new BootstrapIntentBuilder(
+            SourceId, "TestDecomposer", TrustClassId).Build();
+        var isA = RelationTypeRegistry.RelationTypeId("IS_A");
+
+        Assert.DoesNotContain(change.Attestations, a => a.TypeId == isA);
+        Assert.Contains(change.Entities,
+            e => e.Id == RelationTypeRegistry.RelationTypeId("HAS_DEFINITION"));
+    }
+
+    [Fact]
     public void Build_IsDeterministicAcrossRebuilds()
     {
         BootstrapIntentBuilder Make()
