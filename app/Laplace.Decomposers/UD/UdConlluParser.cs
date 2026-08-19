@@ -11,6 +11,8 @@ public static class UdConlluParser
         var tokens = new List<UdToken>(48);
         var mwts = new List<UdMwt>(4);
         byte[]? textUtf8 = null;
+        string? sourceSentenceId = null;
+        long sentenceOrdinal = 0;
         int maxId = 0;
 
         await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
@@ -19,17 +21,25 @@ public static class UdConlluParser
             if (line.IsEmpty)
             {
                 if (tokens.Count > 0)
-                    yield return new UdSentence(textUtf8, tokens.ToList(), mwts.ToList(), maxId);
-                tokens.Clear(); mwts.Clear(); textUtf8 = null; maxId = 0;
+                    yield return new UdSentence(
+                        textUtf8, tokens.ToList(), mwts.ToList(), maxId,
+                        sourceSentenceId, ++sentenceOrdinal);
+                tokens.Clear(); mwts.Clear(); textUtf8 = null; sourceSentenceId = null; maxId = 0;
                 continue;
             }
             if (line[0] == (byte)'#')
             {
                 int eq = line.IndexOf((byte)'=');
-                if (eq > 0 && line[..eq].Trim((byte)' ').SequenceEqual("# text"u8))
+                if (eq > 0)
                 {
+                    ReadOnlySpan<byte> key = line[..eq].Trim((byte)' ');
                     var raw = line[(eq + 1)..].Trim((byte)' ');
-                    textUtf8 = raw.IsEmpty ? null : CopyUtf8Field(raw);
+                    if (key.SequenceEqual("# text"u8))
+                        textUtf8 = raw.IsEmpty ? null : CopyUtf8Field(raw);
+                    else if (key.SequenceEqual("# sent_id"u8))
+                        sourceSentenceId = raw.IsEmpty
+                            ? null
+                            : System.Text.Encoding.UTF8.GetString(raw);
                 }
                 continue;
             }
@@ -42,7 +52,13 @@ public static class UdConlluParser
                 int dash = id0.IndexOf('-');
                 if (int.TryParse(id0[..dash], out int st) && int.TryParse(id0[(dash + 1)..], out int en)
                     && TsvSpan.TryField(line, 1, out var mwtForm))
-                    mwts.Add(new UdMwt(st, en, CopyUtf8Field(mwtForm.Trim((byte)' '))));
+                {
+                    string mwtMisc = TsvSpan.TryField(line, 9, out var mwtMiscSpan)
+                        ? System.Text.Encoding.UTF8.GetString(mwtMiscSpan).Trim()
+                        : "_";
+                    mwts.Add(new UdMwt(
+                        st, en, CopyUtf8Field(mwtForm.Trim((byte)' ')), mwtMisc));
+                }
                 continue;
             }
             bool isEmptyNode = id0.Contains('.');
@@ -65,8 +81,9 @@ public static class UdConlluParser
             string[] feats = TsvSpan.TryField(line, 5, out var featSpan) && !featSpan.SequenceEqual("_"u8)
                 ? System.Text.Encoding.UTF8.GetString(featSpan).Split('|', StringSplitOptions.RemoveEmptyEntries)
                 : Array.Empty<string>();
-            int head = TsvSpan.TryField(line, 6, out var headSpan)
-                && int.TryParse(System.Text.Encoding.UTF8.GetString(headSpan), out int h) ? h : 0;
+            int head = 0;
+            bool headSpecified = TsvSpan.TryField(line, 6, out var headSpan)
+                && int.TryParse(System.Text.Encoding.UTF8.GetString(headSpan), out head);
             string deprel = TsvSpan.TryField(line, 7, out var depSpan)
                 ? System.Text.Encoding.UTF8.GetString(depSpan).Trim() : "";
             string deps = TsvSpan.TryField(line, 8, out var depsSpan)
@@ -76,10 +93,12 @@ public static class UdConlluParser
 
             if (!isEmptyNode && id > maxId) maxId = id;
             tokens.Add(new UdToken(isEmptyNode ? -1 : id, id0, formUtf8, lemmaUtf8, formLemmaSame,
-                upos, xpos, feats, head, deprel, deps, misc));
+                upos, xpos, feats, head, deprel, deps, misc, headSpecified));
         }
         if (tokens.Count > 0)
-            yield return new UdSentence(textUtf8, tokens.ToList(), mwts.ToList(), maxId);
+            yield return new UdSentence(
+                textUtf8, tokens.ToList(), mwts.ToList(), maxId,
+                sourceSentenceId, ++sentenceOrdinal);
     }
 
     private static byte[] CopyUtf8Field(ReadOnlySpan<byte> span)

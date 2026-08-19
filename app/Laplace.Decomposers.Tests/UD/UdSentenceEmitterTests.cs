@@ -9,7 +9,6 @@ using Xunit;
 
 namespace Laplace.Decomposers.UD.Tests;
 
-// Validates docs/specs/16 §1a (HAS_LANGUAGE at sentence root) and §5 (XPOS IS_A UPOS + FEAT_*).
 public sealed class UdSentenceEmitterTests
 {
     private static readonly Hash128 UdSource = UDDecomposer.Source;
@@ -21,178 +20,278 @@ public sealed class UdSentenceEmitterTests
     }
 
     [Fact]
-    public void HasLanguage_AttestsOnce_AtSentenceRoot_NotPerToken()
+    public void SentenceEmitsOneParseAndOneLanguageClaim_NotTokenGlobalClaims()
     {
-        byte[] sentenceText = Encoding.UTF8.GetBytes("The cat sat.");
-        byte[] cat = Encoding.UTF8.GetBytes("cat");
-        byte[] sat = Encoding.UTF8.GetBytes("sat");
-        var tokens = new List<UdToken>
+        byte[] text = Utf8("The cat sat.");
+        var sentence = Sentence(text,
+            Token(1, "The", "the", "DET", "DT", ["PronType=Art"], 2, "det"),
+            Token(2, "cat", "cat", "NOUN", "NN", ["Number=Sing"], 3, "nsubj"),
+            Token(3, "sat", "sit", "VERB", "VBD", ["Tense=Past"], 0, "root"));
+
+        (SubstrateChange change, Hash128 parseId, UdParseStructure.DecodedParse parse) =
+            EmitAndDecode(sentence);
+
+        Hash128 hasParse = RelationTypeRegistry.Resolve("HAS_PARSE").Id;
+        Hash128 hasLanguage = RelationTypeRegistry.Resolve("HAS_LANGUAGE").Id;
+        AttestationRow parseClaim = Assert.Single(change.Attestations.Where(a => a.TypeId == hasParse));
+        AttestationRow languageClaim = Assert.Single(change.Attestations.Where(a => a.TypeId == hasLanguage));
+
+        Assert.Equal(ContentTierSpine.ResolveRoot(text), parseClaim.SubjectId);
+        Assert.Equal(parseId, parseClaim.ObjectId);
+        Assert.NotNull(parseClaim.ContextId);
+        Assert.Equal(ContentTierSpine.ResolveRoot(text), languageClaim.SubjectId);
+        Assert.Equal(LanguageReference.Resolve("en"), languageClaim.ObjectId);
+        Assert.Equal(3, parse.Tokens.Count);
+
+        string[] removedOccurrenceProjections =
+        [
+            "HAS_POS", "HAS_XPOS", "IS_LEMMA_OF", "HAS_PART",
+            "HAS_DEFINITION", "TRANSCRIBES_AS",
+        ];
+        foreach (string relation in removedOccurrenceProjections)
         {
-            new(1, "1", cat, cat, true, "NOUN", "NN", ["Number=Sing"], 0, "root", "_", "_"),
-            new(2, "2", sat, sat, true, "VERB", "VB", [], 1, "nsubj", "_", "_"),
-        };
-        var sentence = new UdSentence(sentenceText, tokens, [], 2);
-
-        var ctx = BuildEmitContext(sentenceText, cat, sat);
-        var change = Emit(sentence, ctx);
-
-        Hash128 hasLang = RelationTypeRegistry.Resolve("HAS_LANGUAGE").Id;
-        var langAtts = change.Attestations.Where(a => a.TypeId == hasLang).ToList();
-
-        Assert.Single(langAtts);
-        Assert.Equal(ctx.RootFor(sentenceText), langAtts[0].SubjectId);
-        Assert.Equal(LanguageReference.Resolve("en"), langAtts[0].ObjectId);
-
-        Hash128? catRoot = ContentTierSpine.ResolveRoot(cat);
-        Hash128? satRoot = ContentTierSpine.ResolveRoot(sat);
-        Assert.DoesNotContain(langAtts, a => a.SubjectId == catRoot);
-        Assert.DoesNotContain(langAtts, a => a.SubjectId == satRoot);
-    }
-
-    [Fact]
-    public void HasLanguage_PerToken_OnlyWhenMiscLangMarksCodeSwitching()
-    {
-        byte[] sentenceText = Encoding.UTF8.GetBytes("Bonjour world");
-        byte[] bonjour = Encoding.UTF8.GetBytes("Bonjour");
-        byte[] world = Encoding.UTF8.GetBytes("world");
-        var tokens = new List<UdToken>
-        {
-            new(1, "1", bonjour, bonjour, true, "INTJ", "_", [], 0, "root", "_", "Lang=fr"),
-            new(2, "2", world, world, true, "NOUN", "NN", [], 1, "flat", "_", "_"),
-        };
-        var sentence = new UdSentence(sentenceText, tokens, [], 2);
-
-        var ctx = BuildEmitContext(sentenceText, bonjour, world);
-        var change = Emit(sentence, ctx, langCode: "en");
-
-        Hash128 hasLang = RelationTypeRegistry.Resolve("HAS_LANGUAGE").Id;
-        var langAtts = change.Attestations.Where(a => a.TypeId == hasLang).ToList();
-
-        Assert.Equal(2, langAtts.Count);
-        Assert.Contains(langAtts, a =>
-            a.SubjectId == ctx.RootFor(sentenceText)
-            && a.ObjectId == LanguageReference.Resolve("en"));
-        Assert.Contains(langAtts, a =>
-            a.SubjectId == ctx.RootFor(bonjour)
-            && a.ObjectId == LanguageReference.Resolve("fr"));
-        Assert.DoesNotContain(langAtts, a => a.SubjectId == ctx.RootFor(world));
-    }
-
-    [Fact]
-    public void Gloss_DoesNotEmitSelfReferentialHasDefinition()
-    {
-        // Gloss that roots to the same content as the form → self-loop (#496).
-        byte[] sentenceText = Encoding.UTF8.GetBytes("dog.");
-        byte[] dog = Encoding.UTF8.GetBytes("dog");
-        var tokens = new List<UdToken>
-        {
-            new(1, "1", dog, dog, true, "NOUN", "NN", [], 0, "root", "_", "Gloss=dog"),
-        };
-        var sentence = new UdSentence(sentenceText, tokens, [], 1);
-        var ctx = BuildEmitContext(sentenceText, dog);
-        var change = Emit(sentence, ctx);
-
-        Hash128 hasDef = RelationTypeRegistry.Resolve("HAS_DEFINITION").Id;
-        Assert.DoesNotContain(change.Attestations, a =>
-            a.TypeId == hasDef && a.SubjectId == a.ObjectId);
-        Assert.DoesNotContain(change.Attestations, a => a.TypeId == hasDef);
-    }
-
-    [Fact]
-    public void Xpos_LinksToUposViaIsA_AndFeatsEmitOnForm()
-    {
-        byte[] sentenceText = Encoding.UTF8.GetBytes("Cats run.");
-        byte[] cats = Encoding.UTF8.GetBytes("Cats");
-        var tokens = new List<UdToken>
-        {
-            new(1, "1", cats, cats, true, "NOUN", "NNS", ["Number=Plur"], 0, "root", "_", "_"),
-        };
-        var sentence = new UdSentence(sentenceText, tokens, [], 1);
-
-        var ctx = BuildEmitContext(sentenceText, cats);
-        var change = Emit(sentence, ctx);
-
-        Hash128 hasXpos = RelationTypeRegistry.Resolve("HAS_XPOS").Id;
-        Hash128 isA = RelationTypeRegistry.Resolve("IS_A").Id;
-        Hash128 hasPos = RelationTypeRegistry.Resolve("HAS_POS").Id;
-        Hash128 nounUpos = PosReference.CanonicalId("NOUN");
-
-        var formRoot = ctx.RootFor(cats);
-        Assert.NotNull(formRoot);
-
-        var xposAtt = Assert.Single(change.Attestations.Where(a =>
-            a.TypeId == hasXpos && a.SubjectId == formRoot));
-        Assert.NotNull(xposAtt.ObjectId);
-
-        Assert.Contains(change.Attestations, a =>
-            a.TypeId == isA && a.SubjectId == xposAtt.ObjectId && a.ObjectId == nounUpos);
-        Assert.Contains(change.Attestations, a =>
-            a.TypeId == hasPos && a.SubjectId == formRoot && a.ObjectId == nounUpos);
-
-        var featNumber = RelationTypeRegistry.ResolveFeature("Number");
-        Assert.Contains(change.Attestations, a =>
-            a.TypeId == featNumber.Id && a.SubjectId == formRoot);
-    }
-
-    [Fact]
-    public void DependencyArcs_CarrySentenceContext_AndRootBindsToSentence()
-    {
-        byte[] sentenceText = Encoding.UTF8.GetBytes("The cat sat.");
-        byte[] cat = Encoding.UTF8.GetBytes("cat");
-        byte[] sat = Encoding.UTF8.GetBytes("sat");
-        var tokens = new List<UdToken>
-        {
-            new(1, "1", sat, sat, true, "VERB", "VB", [], 0, "root", "_", "_"),
-            new(2, "2", cat, cat, true, "NOUN", "NN", [], 1, "nsubj", "_", "_"),
-        };
-        var sentence = new UdSentence(sentenceText, tokens, [], 2);
-        var ctx = BuildEmitContext(sentenceText, cat, sat);
-        var change = Emit(sentence, ctx);
-
-        var sentRoot = ctx.RootFor(sentenceText);
-        Assert.NotNull(sentRoot);
-
-        // A dependency arc is bound to THIS sentence via contextId (#1057): with a
-        // null context the nsubj arc from "The cat sat" was the same attestation
-        // identity as every other cat→sat pair in every corpus — an aggregate
-        // grammar statistic, never a parse.
-        var nsubj = RelationTypeRegistry.ResolveDeprel("nsubj");
-        var arc = Assert.Single(change.Attestations.Where(a => a.TypeId == nsubj.Id));
-        Assert.Equal(ctx.RootFor(cat), arc.SubjectId);
-        Assert.Equal(ctx.RootFor(sat), arc.ObjectId);
-        Assert.Equal(sentRoot, arc.ContextId);
-
-        // HEAD=0 binds the heading word to the SENTENCE — previously dropped
-        // entirely (~2.31M sentence-head markers across the treebanks, #1057).
-        var root = RelationTypeRegistry.ResolveDeprel("root");
-        var rootArc = Assert.Single(change.Attestations.Where(a => a.TypeId == root.Id));
-        Assert.Equal(ctx.RootFor(sat), rootArc.SubjectId);
-        Assert.Equal(sentRoot, rootArc.ObjectId);
-        Assert.Equal(sentRoot, rootArc.ContextId);
-    }
-
-    private static UdSentenceEmitContext BuildEmitContext(params byte[][] canonicals)
-    {
-        var ctx = new UdSentenceEmitContext();
-        foreach (var bytes in canonicals)
-        {
-            var root = ContentTierSpine.ResolveRoot(bytes);
-            Assert.NotNull(root);
-            ctx.RegisterRoot(bytes, root.Value);
+            Hash128 relationId = RelationTypeRegistry.Resolve(relation).Id;
+            Assert.DoesNotContain(change.Attestations, a => a.TypeId == relationId);
         }
-        return ctx;
+        Assert.DoesNotContain(change.Attestations, a =>
+            a.TypeId == RelationTypeRegistry.ResolveDeprel("det").Id
+            || a.TypeId == RelationTypeRegistry.ResolveDeprel("nsubj").Id
+            || a.TypeId == RelationTypeRegistry.ResolveDeprel("root").Id
+            || a.TypeId == RelationTypeRegistry.ResolveFeature("Number").Id);
     }
 
-    private static SubstrateChange Emit(UdSentence sentence, UdSentenceEmitContext ctx, string langCode = "en")
+    [Fact]
+    public void RepeatedIdenticalFormsPreserveDistinctOrdinalsAndHeads()
+    {
+        byte[] had = Utf8("had");
+        var sentence = Sentence(Utf8("had had had"),
+            Token(1, had, Utf8("have"), "AUX", "VBD", [], 0, "root"),
+            Token(2, had, Utf8("have"), "AUX", "VBN", [], 1, "dep"),
+            Token(3, had, Utf8("have"), "AUX", "VBN", [], 2, "dep"));
+
+        var parse = EmitAndDecode(sentence).Parse;
+
+        Assert.Equal(3, parse.Tokens.Count);
+        Assert.Single(parse.Tokens.Select(t => t.FormId).Distinct());
+        Assert.Equal(3, parse.Tokens.Select(t => t.RefId).Distinct().Count());
+        Assert.Equal(UdParseStructure.TokenRefId("1"), parse.Tokens[0].RefId);
+        Assert.Equal(UdParseStructure.RootId, parse.Tokens[0].HeadRefId);
+        Assert.Equal(UdParseStructure.TokenRefId("1"), parse.Tokens[1].HeadRefId);
+        Assert.Equal(UdParseStructure.TokenRefId("2"), parse.Tokens[2].HeadRefId);
+    }
+
+    [Fact]
+    public void MissingHeadIsNotSilentlyRewrittenAsRoot()
+    {
+        UdToken token = Token(1, "orphan", "orphan", "NOUN", "NN", [], 0, "_", headSpecified: false);
+        var parse = EmitAndDecode(Sentence(Utf8("orphan"), token)).Parse;
+
+        Assert.Equal(UdParseStructure.NoneId, Assert.Single(parse.Tokens).HeadRefId);
+    }
+
+    [Fact]
+    public void FeatureSetIdentityIsIndependentOfInputOrderAndDuplicates()
+    {
+        byte[] text = Utf8("cats");
+        UdToken ordered = Token(1, "cats", "cat", "NOUN", "NNS",
+            ["Case=Nom", "Number=Plur", "Gender=Fem"], 0, "root");
+        UdToken shuffled = Token(1, "cats", "cat", "NOUN", "NNS",
+            ["Gender=Fem", "Number=Plur", "Case=Nom", "Number=Plur"], 0, "root");
+
+        var a = EmitAndDecode(Sentence(text, ordered));
+        var b = EmitAndDecode(Sentence(text, shuffled));
+
+        Assert.Equal(a.ParseId, b.ParseId);
+        Assert.Equal(3, Assert.Single(a.Parse.Tokens).Features.Count);
+        Assert.Equal(
+            Assert.Single(a.Parse.Tokens).Features,
+            Assert.Single(b.Parse.Tokens).Features);
+    }
+
+    [Fact]
+    public void EnhancedDependencySubtypeIsPreserved()
+    {
+        UdToken token = Token(1, "seen", "see", "VERB", "VBN", [], 0, "root",
+            deps: "0:root|2:nsubj:pass");
+        var parse = EmitAndDecode(Sentence(Utf8("seen"), token)).Parse;
+        var enhanced = Assert.Single(parse.Tokens).Enhanced;
+
+        Assert.Contains(enhanced, edge =>
+            edge.HeadRefId == UdParseStructure.TokenRefId("2")
+            && edge.RelationId == RelationTypeRegistry.ResolveEnhancedDeprel("nsubj:pass").Id);
+        Assert.DoesNotContain(enhanced, edge =>
+            edge.HeadRefId == UdParseStructure.TokenRefId("2")
+            && edge.RelationId == RelationTypeRegistry.ResolveEnhancedDeprel("nsubj").Id);
+    }
+
+    [Fact]
+    public void XposIdentityIsLanguageBound()
+    {
+        Hash128 english = UdParseStructure.XposId("en", "NN");
+        Hash128 german = UdParseStructure.XposId("de", "NN");
+
+        Assert.NotEqual(english, german);
+        Assert.Equal(english, Assert.Single(EmitAndDecode(
+            Sentence(Utf8("cat"), Token(1, "cat", "cat", "NOUN", "NN", [], 0, "root"))).Parse.Tokens).XposId);
+        Assert.Equal(german, Assert.Single(EmitAndDecode(
+            Sentence(Utf8("Katze"), Token(1, "Katze", "Katze", "NOUN", "NN", [], 0, "root")),
+            "de").Parse.Tokens).XposId);
+    }
+
+    [Fact]
+    public void MiscAndMultiwordRangesRemainInsideTheParseStructure()
+    {
+        var sentence = new UdSentence(
+            Utf8("du monde"),
+            [
+                Token(1, "de", "de", "ADP", "P", [], 2, "case", misc: "Lang=fr|Gloss=of"),
+                Token(2, "le", "le", "DET", "D", [], 0, "root", misc: "SpaceAfter=No"),
+            ],
+            [new UdMwt(1, 2, Utf8("du"), "SpaceAfter=No|Typo")],
+            2,
+            "fr-fixture-1",
+            1);
+
+        (SubstrateChange change, _, UdParseStructure.DecodedParse parse) = EmitAndDecode(sentence);
+        var first = parse.Tokens[0];
+
+        Assert.Contains(first.Misc, item =>
+            item.KeyId == UdParseStructure.MiscKeyId("Lang")
+            && item.ValueId == LanguageReference.Resolve("fr"));
+        Assert.Contains(first.Misc, item =>
+            item.KeyId == UdParseStructure.MiscKeyId("Gloss")
+            && item.ValueId == ContentTierSpine.ResolveRoot(Utf8("of")));
+        Assert.Contains(parse.Tokens[1].Misc, item =>
+            item.KeyId == UdParseStructure.MiscKeyId("SpaceAfter")
+            && item.ValueId == UdParseStructure.MiscOpaqueValueId("SpaceAfter", "No"));
+
+        var mwt = Assert.Single(parse.Mwts);
+        Assert.Equal(UdParseStructure.TokenRefId("1"), mwt.StartRefId);
+        Assert.Equal(UdParseStructure.TokenRefId("2"), mwt.EndRefId);
+        Assert.Equal(ContentTierSpine.ResolveRoot(Utf8("du")), mwt.FormId);
+        Assert.Contains(mwt.Misc, item =>
+            item.KeyId == UdParseStructure.MiscKeyId("SpaceAfter")
+            && item.ValueId == UdParseStructure.MiscOpaqueValueId("SpaceAfter", "No"));
+        Assert.Contains(mwt.Misc, item =>
+            item.KeyId == UdParseStructure.MiscKeyId("Typo")
+            && item.ValueId == UdParseStructure.PresentId);
+
+        Hash128 hasLanguage = RelationTypeRegistry.Resolve("HAS_LANGUAGE").Id;
+        Assert.Single(change.Attestations.Where(a => a.TypeId == hasLanguage));
+    }
+
+    [Fact]
+    public async Task ParserPreservesSourceIdentityAndMissingHeadState()
+    {
+        string path = Path.GetTempFileName();
+        try
+        {
+            await File.WriteAllTextAsync(path,
+                "# sent_id = repeated-1\n# text = had had\n"
+                + "1\thad\thave\tAUX\tVBD\t_\t0\troot\t0:root\t_\n"
+                + "2\thad\thave\tAUX\tVBN\t_\t_\t_\t_\t_\n\n");
+
+            var sentences = new List<UdSentence>();
+            await foreach (UdSentence sentence in UdConlluParser.ParseSentencesAsync(path))
+                sentences.Add(sentence);
+
+            UdSentence parsed = Assert.Single(sentences);
+            Assert.Equal("repeated-1", parsed.SourceSentenceId);
+            Assert.Equal(1, parsed.SourceOrdinal);
+            Assert.True(parsed.Tokens[0].HeadSpecified);
+            Assert.False(parsed.Tokens[1].HeadSpecified);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void FileLabelIncludesTreebankDirectory_NotOnlyTheRepeatedSplitName()
+    {
+        string a = UdIngestSupport.FileLabel(
+            Path.Combine("root", "UD_English-EWT", "en_train.conllu"));
+        string b = UdIngestSupport.FileLabel(
+            Path.Combine("root", "UD_English-GUM", "en_train.conllu"));
+
+        Assert.Equal("ud/UD_English-EWT/en_train", a);
+        Assert.Equal("ud/UD_English-GUM/en_train", b);
+        Assert.NotEqual(a, b);
+    }
+
+    private static UdSentence Sentence(byte[] text, params UdToken[] tokens) =>
+        new(text, tokens, [], tokens.Where(t => t.Id > 0).Select(t => t.Id).DefaultIfEmpty().Max(),
+            "fixture-1", 1);
+
+    private static UdToken Token(
+        int id,
+        string form,
+        string lemma,
+        string upos,
+        string xpos,
+        string[] feats,
+        int head,
+        string deprel,
+        string deps = "_",
+        string misc = "_",
+        bool headSpecified = true) =>
+        Token(id, Utf8(form), Utf8(lemma), upos, xpos, feats, head, deprel, deps, misc, headSpecified);
+
+    private static UdToken Token(
+        int id,
+        byte[] form,
+        byte[] lemma,
+        string upos,
+        string xpos,
+        string[] feats,
+        int head,
+        string deprel,
+        string deps = "_",
+        string misc = "_",
+        bool headSpecified = true) =>
+        new(id, id.ToString(), form, lemma, form.AsSpan().SequenceEqual(lemma),
+            upos, xpos, feats, head, deprel, deps, misc, headSpecified);
+
+    private static (SubstrateChange Change, Hash128 ParseId, UdParseStructure.DecodedParse Parse)
+        EmitAndDecode(UdSentence sentence, string langCode = "en")
     {
         Hash128 langId = LanguageReference.Resolve(langCode);
-        var b = new SubstrateChangeBuilder(
+        var builder = new SubstrateChangeBuilder(
             UdSource, "ud/emitter-test", null,
-            entityCapacity: 128, physicalityCapacity: 128, attestationCapacity: 256);
+            entityCapacity: 256, physicalityCapacity: 256, attestationCapacity: 256);
+        UdSentenceEmitContext context = BuildEmitContext(sentence);
         UdSentenceEmitContext.EmitWitness(
-            b, sentence, langId, langCode,
+            builder, sentence, langId, langCode, "ud/test.conllu",
             new HashSet<Hash128>(), new ConcurrentIdSet(),
-            new ConcurrentDictionary<string, byte>(), ctx, UdSource);
-        return b.Build();
+            new ConcurrentDictionary<string, byte>(), context, UdSource);
+        SubstrateChange change = builder.Build();
+
+        Hash128 hasParse = RelationTypeRegistry.Resolve("HAS_PARSE").Id;
+        Hash128 parseId = Assert.Single(change.Attestations.Where(a => a.TypeId == hasParse)).ObjectId!.Value;
+        PhysicalityRow physicality = Assert.Single(change.Physicalities.Where(p =>
+            p.EntityId == parseId && p.Type == PhysicalityType.Content));
+        Assert.NotNull(physicality.TrajectoryXyzm);
+        Hash128[] constituents = Trajectory.Constituents(physicality.TrajectoryXyzm!);
+        Assert.True(UdParseStructure.TryDecode(constituents, out var decoded));
+        return (change, parseId, Assert.IsType<UdParseStructure.DecodedParse>(decoded));
     }
+
+    private static UdSentenceEmitContext BuildEmitContext(UdSentence sentence)
+    {
+        var canonicals = new List<byte[]>();
+        UdSentenceEmitContext.CollectCanonicals(sentence, canonicals);
+        var context = new UdSentenceEmitContext();
+        int n = 0;
+        foreach (byte[] canonical in canonicals)
+        {
+            Hash128? root = ContentTierSpine.ResolveRoot(canonical);
+            Assert.NotNull(root);
+            double x = 0.05 + (++n % 10) * 0.02;
+            context.RegisterRoot(canonical, root.Value, [x, 0.1, 0.2, 0.3]);
+        }
+        return context;
+    }
+
+    private static byte[] Utf8(string value) => Encoding.UTF8.GetBytes(value);
 }
