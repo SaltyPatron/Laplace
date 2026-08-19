@@ -1,4 +1,5 @@
 using Laplace.Api.Contracts;
+using Laplace.Chess.Service;
 
 namespace Laplace.Endpoints.OpenAICompat;
 
@@ -17,12 +18,26 @@ internal static class ChessReadEndpoints
 {
     public static void MapChessReadEndpoints(this WebApplication app)
     {
+        app.MapGet("/v1/chess/laplace/games", async (
+            int? limit, int? offset, ISubstrateClient substrate, CancellationToken ct) =>
+        {
+            var laplaceId = Convert.ToHexStringLower(ChessVocabulary.LaplacePlayerId.ToBytes());
+            var games = await substrate.ChessPlayerGamesAsync(
+                laplaceId, limit ?? 100, offset ?? 0, ct);
+            return Results.Json(games ?? new ChessGamesResponse(
+                "chess.games", laplaceId, Math.Max(0, offset ?? 0), []));
+        })
+        .WithTags("chess")
+        .Produces<ChessGamesResponse>()
+        .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
+
         app.MapGet("/v1/chess/players", async (
             int? limit, int? offset, string? search, string? initial,
+            string? sort, string? direction,
             ISubstrateClient substrate, CancellationToken ct) =>
         {
             return Results.Json(await substrate.ChessPlayersAsync(
-                limit ?? 50, offset ?? 0, search, initial, ct));
+                limit ?? 50, offset ?? 0, search, initial, sort, direction, ct));
         })
         .WithTags("chess")
         .Produces<ChessPlayersResponse>()

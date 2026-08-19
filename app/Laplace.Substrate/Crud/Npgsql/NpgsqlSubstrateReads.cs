@@ -2285,9 +2285,14 @@ public static class NpgsqlSubstrateReads
     public static Task<IReadOnlyList<ChessRankedPlayerRow>> ChessRankedAsync(
         NpgsqlDataSource dataSource, int limit, int offset, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
+        ChessRankedAsync(dataSource, limit, offset, "strength", "desc", ct, onError);
+
+    public static Task<IReadOnlyList<ChessRankedPlayerRow>> ChessRankedAsync(
+        NpgsqlDataSource dataSource, int limit, int offset, string sort, string direction,
+        CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
             SELECT rank, encode(player_id, 'hex'), name, games, rating, rd, eff_mu
-            FROM chess.ranked(@limit, @offset)
+            FROM chess.ranked(@limit, @offset, @sort, @direction)
             """,
             static r => new ChessRankedPlayerRow(
                 r.GetInt64(0), r.GetString(1), r.GetString(2),
@@ -2296,6 +2301,8 @@ public static class NpgsqlSubstrateReads
             {
                 p.AddWithValue("limit", Math.Clamp(limit, 1, 200));
                 p.AddWithValue("offset", Math.Max(0, offset));
+                p.AddWithValue("sort", sort);
+                p.AddWithValue("direction", direction);
             }, ct: ct, label: "chess_ranked", onError: onError);
 
     public readonly record struct ChessPlayerStrengthRow(
@@ -2305,9 +2312,16 @@ public static class NpgsqlSubstrateReads
     public static Task<IReadOnlyList<ChessPlayerStrengthRow>> ChessPlayersByInitialAsync(
         NpgsqlDataSource dataSource, string initial, int limit, int offset, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
+        ChessPlayersByInitialAsync(
+            dataSource, initial, limit, offset, "strength", "desc", ct, onError);
+
+    public static Task<IReadOnlyList<ChessPlayerStrengthRow>> ChessPlayersByInitialAsync(
+        NpgsqlDataSource dataSource, string initial, int limit, int offset,
+        string sort, string direction, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
             SELECT encode(player_id, 'hex'), name, games, rating, rd, eff_mu
-            FROM chess.players_by_initial(@initial, @limit, @offset)
+            FROM chess.players_by_initial(@initial, @limit, @offset, @sort, @direction)
             """,
             static r => new ChessPlayerStrengthRow(
                 r.GetString(0), r.GetString(1),
@@ -2317,8 +2331,32 @@ public static class NpgsqlSubstrateReads
                 p.AddWithValue("initial", initial);
                 p.AddWithValue("limit", Math.Clamp(limit, 1, 200));
                 p.AddWithValue("offset", Math.Max(0, offset));
+                p.AddWithValue("sort", sort);
+                p.AddWithValue("direction", direction);
             }, ct: ct, label: "chess_players_by_initial", onError: onError,
             timeoutSeconds: 60);
+
+    /// <summary>
+    /// Bounded partial/fuzzy candidates found through the trajectory constituent GIN.
+    /// Human-name ranking remains in the endpoint client, where punctuation and edit
+    /// distance can be expressed without teaching the substrate a second text identity.
+    /// </summary>
+    public static Task<IReadOnlyList<ChessPlayerStrengthRow>> ChessPlayerSearchCandidatesAsync(
+        NpgsqlDataSource dataSource, string query, int limit, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT encode(player_id, 'hex'), name, games, rating, rd, eff_mu
+            FROM chess.player_search_candidates(@query, @limit)
+            """,
+            static r => new ChessPlayerStrengthRow(
+                r.GetString(0), r.GetString(1),
+                r.GetInt64(2), r.GetDouble(3), r.GetDouble(4), r.GetDouble(5)),
+            p =>
+            {
+                p.AddWithValue("query", query);
+                p.AddWithValue("limit", Math.Clamp(limit, 1, 2000));
+            }, ct: ct, label: "chess_player_search_candidates", onError: onError,
+            timeoutSeconds: 30);
 
     /// <summary>
     /// Name → player via <c>chess_player_id</c> + OUTCOME cell through <c>edges_raw</c>.
