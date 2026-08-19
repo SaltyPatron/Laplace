@@ -1,4 +1,4 @@
-import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { WarehouseHome } from './catalog/WarehouseHome';
 import { AuditPanel } from './catalog/AuditPanel';
 import { StageBrowse } from './browse/StageBrowse';
@@ -40,17 +40,30 @@ function ExploreBreadcrumb() {
 }
 
 export function ExploreView() {
+  const navItems = [
+    ['Highway', '/explore/highway'],
+    ['Mesh', '/explore/mesh'],
+    ['Warehouse', '/explore'],
+    ['Matchup', '/explore/matchup'],
+    ['Constellation', '/explore/constellation'],
+    ['Walk', '/explore/walk'],
+    ['Audit', '/explore/audit'],
+  ] as const;
+
   return (
     <div className={styles.layout}>
       <aside className={styles.sidebar}>
         <nav className={styles.nav}>
-          <Link className={styles.navLink} to="/explore/highway">Highway</Link>
-          <Link className={styles.navLink} to="/explore/mesh">Mesh</Link>
-          <Link className={styles.navLink} to="/explore">Warehouse</Link>
-          <Link className={styles.navLink} to="/explore/matchup">Matchup</Link>
-          <Link className={styles.navLink} to="/explore/constellation">Constellation</Link>
-          <Link className={styles.navLink} to="/explore/walk">Walk</Link>
-          <Link className={styles.navLink} to="/explore/audit">Audit</Link>
+          {navItems.map(([label, to]) => (
+            <NavLink
+              key={to}
+              className={({ isActive }) => `${styles.navLink} ${isActive ? styles.navLinkActive : ''}`}
+              to={to}
+              end={to === '/explore'}
+            >
+              {label}
+            </NavLink>
+          ))}
         </nav>
       </aside>
       <div className={styles.content}>

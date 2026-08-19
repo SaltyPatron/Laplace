@@ -7,13 +7,16 @@ import type {
   ChessPlayersResponse,
 } from './types';
 
-/**
- * Searching is a lookup, not a scan: the server folds the typed name exactly the
- * way the decomposer did and hashes it, so "Tal, Mikhail" and "mikhail tal" land
- * on the same content-addressed player or on nothing at all.
- */
+/** Exact names use their content address; surnames and close spellings use the indexed name trajectory. */
 export function chessPlayers(
-  params: { limit?: number; offset?: number; search?: string; initial?: string } = {},
+  params: {
+    limit?: number;
+    offset?: number;
+    search?: string;
+    initial?: string;
+    sort?: 'relevance' | 'strength' | 'games' | 'rating' | 'rd';
+    direction?: 'asc' | 'desc';
+  } = {},
   opts: ApiOptions = {},
 ) {
   const q = new URLSearchParams();
@@ -21,6 +24,8 @@ export function chessPlayers(
   if (params.offset != null) q.set('offset', String(params.offset));
   if (params.search) q.set('search', params.search);
   if (params.initial) q.set('initial', params.initial);
+  if (params.sort) q.set('sort', params.sort);
+  if (params.direction) q.set('direction', params.direction);
   return apiGet<ChessPlayersResponse>(`/v1/chess/players?${q}`, opts);
 }
 
@@ -37,6 +42,16 @@ export function chessPlayerGames(
   q.set('limit', String(params.limit ?? 25));
   q.set('offset', String(params.offset ?? 0));
   return apiGet<ChessGamesResponse>(`/v1/chess/players/${idHex}/games?${q}`, opts);
+}
+
+export function chessLaplaceGames(
+  params: { limit?: number; offset?: number } = {},
+  opts: ApiOptions = {},
+) {
+  const q = new URLSearchParams();
+  q.set('limit', String(params.limit ?? 200));
+  q.set('offset', String(params.offset ?? 0));
+  return apiGet<ChessGamesResponse>(`/v1/chess/laplace/games?${q}`, opts);
 }
 
 export function chessGame(idHex: string, opts: ApiOptions = {}) {

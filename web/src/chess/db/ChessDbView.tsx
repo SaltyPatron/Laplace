@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { PlayersIndex } from './PlayersIndex';
 import { PlayerPage } from './PlayerPage';
 import { GamePage } from './GamePage';
+import { LaplaceGames } from './LaplaceGames';
 
 /**
  * The chess database — the read half of the chess pillar. Play and Lab drive a
@@ -12,6 +13,7 @@ export function ChessDbView() {
   return (
     <Routes>
       <Route index element={<PlayersIndex />} />
+      <Route path="laplace" element={<LaplaceGames />} />
       <Route path="players/:idHex" element={<PlayerPage />} />
       <Route path="games/:idHex" element={<GamePage />} />
       <Route path="*" element={<Navigate to="/chess" replace />} />
