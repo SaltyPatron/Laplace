@@ -33,6 +33,8 @@ public static class AnchorAdmission
             return ReferenceIdentityKind.VerbNetClass;
         if (entityTypeId == EntityTypeRegistry.FrameNetLu)
             return ReferenceIdentityKind.FrameNetLexicalUnit;
+        if (entityTypeId == EntityTypeRegistry.PredicateMatrixPredicate)
+            return ReferenceIdentityKind.PredicateMatrixPredicate;
         return null;
     }
 }

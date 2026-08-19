@@ -21,6 +21,8 @@ public static class EntityTypeRegistry
     public static readonly Hash128 Collection = Id("Collection");
     public static readonly Hash128 ConversationSession = Id("Conversation_Session");
     public static readonly Hash128 Document = Id("Document");
+    public static readonly Hash128 EsoClass = Id("ESO_Class");
+    public static readonly Hash128 EsoRole = Id("ESO_Role");
     public static readonly Hash128 Frame = Id("Frame");
     public static readonly Hash128 FrameNetAnnotation = Id("FrameNet_Annotation");
     public static readonly Hash128 FrameNetAnnotationOccurrence = Id("FrameNet_Annotation_Occurrence");
@@ -37,6 +39,10 @@ public static class EntityTypeRegistry
     public static readonly Hash128 ModelLayer = Id("Model_Layer");
     public static readonly Hash128 ModelRecipe = Id("Model_Recipe");
     public static readonly Hash128 ModelTokenizer = Id("Model_Tokenizer");
+    public static readonly Hash128 McrDomain = Id("MCR_Domain");
+    public static readonly Hash128 McrLexname = Id("MCR_Lexname");
+    public static readonly Hash128 McrSumo = Id("MCR_SUMO");
+    public static readonly Hash128 McrTopOntology = Id("MCR_Top_Ontology");
     public static readonly Hash128 Ngram = Id("Ngram");
     public static readonly Hash128 Number = Id("Number");
     public static readonly Hash128 OnsetSegment = Id("OnsetSegment");
@@ -48,6 +54,9 @@ public static class EntityTypeRegistry
     public static readonly Hash128 Phrase = Id("Phrase");
     public static readonly Hash128 Pixel = Id("Pixel");
     public static readonly Hash128 Pos = Id("POS");
+    public static readonly Hash128 PredicateMatrixAnnotationValue = Id("PredicateMatrix_Annotation_Value");
+    public static readonly Hash128 PredicateMatrixPredicate = Id("PredicateMatrix_Predicate");
+    public static readonly Hash128 PredicateMatrixRole = Id("PredicateMatrix_Role");
     public static readonly Hash128 PropBankRole = Id("PropBank_Role");
     public static readonly Hash128 PropBankRoleset = Id("PropBank_Roleset");
     public static readonly Hash128 Region = Id("Region");

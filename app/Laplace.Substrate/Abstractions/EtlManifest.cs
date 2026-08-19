@@ -151,7 +151,7 @@ public static class EtlManifest
             ["predicatematrix"] = Row("predicatematrix", "PredicateMatrixDecomposer", 3, "AcademicCurated", TC.AcademicCurated,
                 "predicatematrix", new EtlModality("tsv", Glob: "*.txt", GrammarReady: false,
                     RecordFraming: GrammarRecordFraming.Line),
-                anchor: AnchorResolver.IliSynset, languageScope: "eng"),
+                anchor: AnchorResolver.IliSynset),
         };
         return m;
     }

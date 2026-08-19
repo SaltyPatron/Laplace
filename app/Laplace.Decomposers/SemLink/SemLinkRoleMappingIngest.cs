@@ -75,9 +75,68 @@ internal static class SemLinkRoleMappingIngest
         }
     }
 
-    // Inventory denominator only — do not DOM-load the XML just to count <role> tags.
-    internal static Task<long?> EstimateUnitCountAsync(string path, CancellationToken ct) =>
-        Task.FromResult<long?>(Math.Max(1, EtlInventory.EstimateNewlineCount(path, ct)));
+    // Exact source-grain inventory without constructing the extraction DOM. A physical line is
+    // not a role mapping: the current v1.2 file has 4,026 lines but only 1,663 admitted roles.
+    internal static async Task<long?> EstimateUnitCountAsync(string path, CancellationToken ct)
+    {
+        var settings = new XmlReaderSettings
+        {
+            Async = true,
+            IgnoreComments = true,
+            IgnoreWhitespace = true,
+        };
+        using var reader = XmlReader.Create(path, settings);
+        bool validClass = false;
+        int classDepth = -1;
+        int rolesDepth = -1;
+        long count = 0;
+        while (await reader.ReadAsync())
+        {
+            ct.ThrowIfCancellationRequested();
+            if (reader.NodeType == XmlNodeType.Element)
+            {
+                if (reader.Name.Equals("vncls", StringComparison.Ordinal))
+                {
+                    string vnClass = reader.GetAttribute("class")?.Trim() ?? string.Empty;
+                    string fnFrame = reader.GetAttribute("fnframe")?.Trim() ?? string.Empty;
+                    if (fnFrame.Length == 0)
+                        fnFrame = reader.GetAttribute("fnclass")?.Trim() ?? string.Empty;
+                    validClass = vnClass.Length > 0 && fnFrame.Length > 0;
+                    classDepth = reader.Depth;
+                    rolesDepth = -1;
+                    if (reader.IsEmptyElement)
+                    {
+                        validClass = false;
+                        classDepth = -1;
+                    }
+                }
+                else if (validClass && reader.Name.Equals("roles", StringComparison.Ordinal))
+                {
+                    rolesDepth = reader.Depth;
+                    if (reader.IsEmptyElement) rolesDepth = -1;
+                }
+                else if (validClass && rolesDepth >= 0
+                         && reader.Name.Equals("role", StringComparison.Ordinal))
+                {
+                    string fnRole = reader.GetAttribute("fnrole")?.Trim() ?? string.Empty;
+                    string vnRole = reader.GetAttribute("vnrole")?.Trim() ?? string.Empty;
+                    if (fnRole.Length > 0 && vnRole.Length > 0) count++;
+                }
+            }
+            else if (reader.NodeType == XmlNodeType.EndElement)
+            {
+                if (reader.Depth == rolesDepth && reader.Name.Equals("roles", StringComparison.Ordinal))
+                    rolesDepth = -1;
+                if (reader.Depth == classDepth && reader.Name.Equals("vncls", StringComparison.Ordinal))
+                {
+                    validClass = false;
+                    classDepth = -1;
+                    rolesDepth = -1;
+                }
+            }
+        }
+        return count;
+    }
 }
 
 internal sealed class SemLinkRoleMappingPhase : DecomposerPhase<RoleCorrespondenceRecord>

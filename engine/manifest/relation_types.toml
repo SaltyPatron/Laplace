@@ -72,6 +72,30 @@ parent = null
 family_root = "HAS_NUM_LAYERS"
 
 [[relation]]
+canonical = "HAS_BASE_CONCEPT_STATUS"
+bit = 211
+rank = "scalar_valued"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_BASE_CONCEPT_STATUS"
+
+[[relation]]
+canonical = "HAS_SENSE_FREQUENCY"
+bit = 212
+rank = "scalar_valued"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_SENSE_FREQUENCY"
+
+[[relation]]
+canonical = "HAS_SYNSET_RELATION_COUNT"
+bit = 213
+rank = "scalar_valued"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_SYNSET_RELATION_COUNT"
+
+[[relation]]
 canonical = "HAS_NUM_HEADS"
 bit = 97
 rank = "scalar_valued"

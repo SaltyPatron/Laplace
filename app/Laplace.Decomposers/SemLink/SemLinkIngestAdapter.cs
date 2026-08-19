@@ -39,6 +39,21 @@ public sealed class SemLinkJsonPairStream : IRecordStream<GrammarIngestRecord>
         }
     }
 
+    internal static async Task<long?> CountRecordsAsync(string path, CancellationToken ct)
+    {
+        byte[]? utf8 = await ReadFileBytesAsync(path, ct);
+        if (utf8 is null || utf8.Length == 0) return null;
+        try
+        {
+            return ReadTopLevelPairSpansUtf8(utf8).Count;
+        }
+        catch (JsonException)
+        {
+            IntPtr recipe = GrammarDecomposer.LookupById("json");
+            return recipe == IntPtr.Zero ? null : ReadTopLevelPairSpans(utf8, recipe).Count;
+        }
+    }
+
     /// <summary>
     /// Top-level object property byte ranges. Prefer <see cref="Utf8JsonReader"/>;
     /// fall back to a single Grammar AST walk only when the JSON reader rejects the file.
@@ -170,12 +185,8 @@ internal sealed class SemLinkJsonDocumentPhase : DecomposerPhase<GrammarIngestRe
     public override Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default) =>
         Task.CompletedTask;
 
-    public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
-    {
-        // Progress denominator: size heuristic — full JSON AST pair-count is ingest work, not inventory.
-        long bytes = new FileInfo(_path).Length;
-        return Task.FromResult<long?>(Math.Max(1, bytes / 48));
-    }
+    public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default) =>
+        SemLinkJsonPairStream.CountRecordsAsync(_path, ct);
 
     protected override IIngestRecordHandler<GrammarIngestRecord> CreateHandler()
     {
