@@ -48,6 +48,30 @@ public sealed class ChessAnalyzerTests
     }
 
     [Fact]
+    public void Analyzer_KeepsExactTransitionsInTrajectory_NotConsensus()
+    {
+        var change = Analyze(Game);
+        Assert.DoesNotContain(change.Attestations,
+            a => a.TypeId == ChessVocabulary.MoveType);
+
+        var positions = change.Entities
+            .Where(e => e.TypeId == ChessVocabulary.PositionType)
+            .Select(e => e.Id)
+            .ToHashSet();
+        Assert.DoesNotContain(change.Attestations,
+            a => a.TypeId == ChessVocabulary.OutcomeType
+                 && positions.Contains(a.SubjectId));
+
+        var substructures = change.Entities
+            .Where(e => e.TypeId == ChessVocabulary.SubstructureType)
+            .Select(e => e.Id)
+            .ToHashSet();
+        Assert.Contains(change.Attestations,
+            a => a.TypeId == ChessVocabulary.OutcomeType
+                 && substructures.Contains(a.SubjectId));
+    }
+
+    [Fact]
     public void Analyzer_StampsAnalysisMarker()
     {
         var change = Analyze(Game);

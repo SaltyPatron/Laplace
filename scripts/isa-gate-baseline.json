@@ -711,7 +711,6 @@
       "extension/laplace_substrate/sql/functions/chess/chess_player_games.sql.in::HAS_RESULT": 2,
       "extension/laplace_substrate/sql/functions/chess/chess_player_games.sql.in::HAS_WHITE": 4,
       "extension/laplace_substrate/sql/functions/chess/chess_player_games.sql.in::ON_DATE": 1,
-      "extension/laplace_substrate/sql/functions/chess/chess_player_moves.sql.in::MOVE": 1,
       "extension/laplace_substrate/sql/functions/chess/chess_player_ratings.sql.in::HAS_RATING": 1,
       "extension/laplace_substrate/sql/functions/chess/chess_player_record.sql.in::HAS_BLACK": 1,
       "extension/laplace_substrate/sql/functions/chess/chess_player_record.sql.in::HAS_RESULT": 1,

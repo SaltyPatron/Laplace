@@ -7,7 +7,7 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Chess.Service;
 
-// CALCULATED layer. Derives positions / geometry / move edges / motifs / opening classification /
+// CALCULATED layer. Derives positions / geometry / bounded outcome projections / motifs / opening classification /
 // consensus by REPLAYING a game's witnessed movetext. Pure deterministic function of the witnessed
 // inputs (movetext + start FEN + per-ply annotation tokens the recorder stored). Emitted under the
 // analysis source and stamped ANALYZED_AT=Version so the analyzer scan skips already-derived games.
@@ -16,7 +16,7 @@ namespace Laplace.Chess.Service;
 // PGN path is legacy bootstrap only when an explicit file path is passed.
 public static class ChessAnalyze
 {
-    public const int Version = 1;
+    public const int Version = 2;
     public static Hash128 SourceId => ChessVocabulary.AnalysisSourceId;
 
     private const double MoveWeight = 0.7;
@@ -206,10 +206,8 @@ public static class ChessAnalyze
             long games = 1;
             if (mate && winner == mover) games += 1;
 
-            ChessGraph.AppendMoveEdge(
-                b, from, to, result.ForMover(mover), games, MoveWeight,
-                sourceId: src,
-                contextId: eventId);
+            ChessGraph.AppendSubstructureOutcome(
+                b, from, result.ForMover(mover), games, MoveWeight, src);
 
 
             string? clk = Tok(clockTokens, ply);
