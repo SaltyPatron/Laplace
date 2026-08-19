@@ -72,7 +72,7 @@ public sealed class OpenSubtitlesDecomposerTests
     }
 
     [Fact]
-    public async Task Emits_Content_Translation_And_Language_For_Aligned_Pairs()
+    public async Task Emits_Aligned_Sequence_Structure_Without_Pairwise_Consensus()
     {
         string dir = Path.Combine(Path.GetTempPath(), "laplace-opensub-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
@@ -83,11 +83,11 @@ public sealed class OpenSubtitlesDecomposerTests
             var dec = new OpenSubtitlesDecomposer();
             var ctx = new FakeContext(dir, new NullWriter());
 
-            var entities = new HashSet<Hash128>();
+            var entities = new Dictionary<Hash128, EntityRow>();
+            var physicalities = new Dictionary<Hash128, PhysicalityRow>();
             int translationEdges = 0, languageEdges = 0, intentStages = 0;
             var langObjects = new HashSet<Hash128>();
-            var translationSubjects = new HashSet<Hash128>();
-            var translationObjects = new HashSet<Hash128>();
+            var languageSubjects = new HashSet<Hash128>();
             Hash128 translationType = RelationTypeRegistry.Resolve("IS_TRANSLATION_OF").Id;
             Hash128 languageType = RelationTypeRegistry.Resolve("HAS_LANGUAGE").Id;
 
@@ -97,23 +97,26 @@ public sealed class OpenSubtitlesDecomposerTests
                         IngestBatchPipeline.PeriodBoundaryUnitPrefix, StringComparison.Ordinal))
                     continue;
                 intentStages += change.IntentStages.Length;
-                foreach (var e in change.Entities) entities.Add(e.Id);
+                foreach (var e in change.Entities) entities[e.Id] = e;
+                foreach (var p in change.Physicalities) physicalities[p.EntityId] = p;
                 foreach (var a in change.Attestations)
                 {
                     if (a.TypeId == translationType)
                     {
                         translationEdges++;
-                        translationSubjects.Add(a.SubjectId);
-                        if (a.ObjectId is { } to) translationObjects.Add(to);
                     }
-                    else if (a.TypeId == languageType) { languageEdges++; if (a.ObjectId is { } o) langObjects.Add(o); }
-                    Assert.True(a.TypeId == translationType || a.TypeId == languageType,
-                        "only registry-routed IS_TRANSLATION_OF / HAS_LANGUAGE types are emitted");
+                    else if (a.TypeId == languageType)
+                    {
+                        languageEdges++;
+                        languageSubjects.Add(a.SubjectId);
+                        if (a.ObjectId is { } o) langObjects.Add(o);
+                    }
+                    Assert.Equal(languageType, a.TypeId);
                 }
             }
 
-            Assert.Equal(2, translationEdges);
-            Assert.Equal(4, languageEdges);
+            Assert.Equal(0, translationEdges);
+            Assert.Equal(2, languageEdges);
             Assert.True(intentStages > 0, "content witness batches should populate IntentStages");
 
             Hash128 enId = LanguageReference.Resolve("en");
@@ -121,15 +124,51 @@ public sealed class OpenSubtitlesDecomposerTests
             Assert.Contains(enId, langObjects);
             Assert.Contains(esId, langObjects);
 
-            Assert.Contains(enId, entities);
-            Assert.Contains(esId, entities);
+            Assert.Contains(enId, entities.Keys);
+            Assert.Contains(esId, entities.Keys);
 
             Hash128? helloId = ContentEmitter.RootId("Hello there.");
             Hash128? holaId = ContentEmitter.RootId("Hola allí.");
+            Hash128? whatId = ContentEmitter.RootId("What is your name?");
+            Hash128? comoId = ContentEmitter.RootId("¿Cómo te llamas?");
             Assert.NotNull(helloId);
             Assert.NotNull(holaId);
-            Assert.Contains(helloId!.Value, translationSubjects);
-            Assert.Contains(holaId!.Value, translationObjects);
+            Assert.NotNull(whatId);
+            Assert.NotNull(comoId);
+
+            Hash128 sequenceSchema =
+                Hash128.OfCanonical("opensubtitles/sequence-block512/schema/v1");
+            Hash128 pairReference =
+                Hash128.OfCanonical("opensubtitles/language-pair/en-es/v1");
+            Hash128 leftSequence = Hash128.Merkle(
+                EntityTier.Document, [sequenceSchema, helloId!.Value, whatId!.Value]);
+            Hash128 rightSequence = Hash128.Merkle(
+                EntityTier.Document, [sequenceSchema, holaId!.Value, comoId!.Value]);
+
+            Assert.Equal(EntityTypeRegistry.OpenSubtitlesSequence, entities[leftSequence].TypeId);
+            Assert.Equal(EntityTypeRegistry.OpenSubtitlesSequence, entities[rightSequence].TypeId);
+            Assert.Equal(
+                [sequenceSchema, helloId.Value, whatId.Value],
+                Trajectory.Constituents(physicalities[leftSequence].TrajectoryXyzm!));
+            Assert.Equal(
+                [sequenceSchema, holaId.Value, comoId.Value],
+                Trajectory.Constituents(physicalities[rightSequence].TrajectoryXyzm!));
+            Assert.True(languageSubjects.SetEquals([leftSequence, rightSequence]));
+
+            Hash128 start = Hash128.OfCanonical("opensubtitles/source-ordinal/1/v1");
+            Hash128 end = Hash128.OfCanonical("opensubtitles/source-ordinal/2/v1");
+            Hash128 alignmentSchema =
+                Hash128.OfCanonical("opensubtitles/alignment-block512/schema/v1");
+            Hash128[] alignmentMembers =
+            [
+                alignmentSchema, pairReference,
+                enId, leftSequence, esId, rightSequence, start, end,
+            ];
+            Hash128 alignment = Hash128.Merkle(EntityTier.Document, alignmentMembers);
+            Assert.Equal(EntityTypeRegistry.OpenSubtitlesAlignment, entities[alignment].TypeId);
+            Assert.Equal(
+                alignmentMembers,
+                Trajectory.Constituents(physicalities[alignment].TrajectoryXyzm!));
         }
         finally
         {
@@ -138,7 +177,7 @@ public sealed class OpenSubtitlesDecomposerTests
     }
 
     [Fact]
-    public async Task Initialize_Bootstraps_Source_And_Translation_RelationType()
+    public async Task Initialize_Bootstraps_Source_Alignment_Types_And_Language_Relation()
     {
         var dec = new OpenSubtitlesDecomposer();
         var writer = new CapturingWriter();
@@ -149,8 +188,14 @@ public sealed class OpenSubtitlesDecomposerTests
 
         Assert.Contains(boot.Entities, e =>
             e.Id == OpenSubtitlesDecomposer.Source && e.TypeId == BootstrapIntentBuilder.SourceTypeId);
-        Hash128 translationType = RelationTypeRegistry.Resolve("IS_TRANSLATION_OF").Id;
-        Assert.Contains(boot.Entities, e => e.Id == translationType);
+        Assert.Contains(boot.Entities, e =>
+            e.Id == EntityTypeRegistry.OpenSubtitlesSequence
+            && e.TypeId == BootstrapIntentBuilder.TypeMetaTypeId);
+        Assert.Contains(boot.Entities, e =>
+            e.Id == EntityTypeRegistry.OpenSubtitlesAlignment
+            && e.TypeId == BootstrapIntentBuilder.TypeMetaTypeId);
+        Hash128 languageType = RelationTypeRegistry.Resolve("HAS_LANGUAGE").Id;
+        Assert.Contains(boot.Entities, e => e.Id == languageType);
     }
 
     [Fact]
