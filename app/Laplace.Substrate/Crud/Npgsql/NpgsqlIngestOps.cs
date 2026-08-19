@@ -44,7 +44,8 @@ public static class NpgsqlIngestOps
         NpgsqlRead.ExecuteNonQueryAsync(ds, """
             ANALYZE laplace.attestations;
             ANALYZE laplace.consensus;
-            ANALYZE laplace.entities
+            ANALYZE laplace.entities;
+            ANALYZE laplace.physicalities (entity_id, type)
             """, timeoutSeconds: 0, ct: ct, label: "analyze_core_write_tables");
 
     public static Task AnalyzePostIngestValidationAsync(

@@ -18,6 +18,8 @@ public sealed class SubstrateCountsExactTests
         var text = File.ReadAllText(sql);
         Assert.Contains("(ESTIMATE)", text, StringComparison.Ordinal);
         Assert.Contains("pg_class.reltuples", text, StringComparison.Ordinal);
+        Assert.Contains("pg_partition_tree", text, StringComparison.Ordinal);
+        Assert.Contains("WHERE p.isleaf", text, StringComparison.Ordinal);
         Assert.DoesNotContain("'entities ~'", text, StringComparison.Ordinal);
         Assert.Contains("ops.substrate_counts()", text, StringComparison.Ordinal);
         Assert.Contains("'entities(ESTIMATE)'", text, StringComparison.Ordinal);
@@ -32,5 +34,19 @@ public sealed class SubstrateCountsExactTests
         var text = File.ReadAllText(ingest);
         Assert.Contains("reltuples ESTIMATE", text, StringComparison.Ordinal);
         Assert.Contains("ops.substrate_counts()", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RecoverIndexes_RefreshesEveryCoreTableIncludingPhysicalities()
+    {
+        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
+        var ingestOps = Path.Combine(
+            repoRoot, "app", "Laplace.Substrate", "Crud", "Npgsql", "NpgsqlIngestOps.cs");
+        var text = File.ReadAllText(ingestOps);
+
+        Assert.Contains("ANALYZE laplace.attestations", text, StringComparison.Ordinal);
+        Assert.Contains("ANALYZE laplace.consensus", text, StringComparison.Ordinal);
+        Assert.Contains("ANALYZE laplace.entities", text, StringComparison.Ordinal);
+        Assert.Contains("ANALYZE laplace.physicalities (entity_id, type)", text, StringComparison.Ordinal);
     }
 }

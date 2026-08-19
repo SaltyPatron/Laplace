@@ -7,15 +7,25 @@ CREATE OR REPLACE FUNCTION ops.substrate_counts()
     LANGUAGE sql STABLE
 BEGIN ATOMIC
     -- Planner estimates (pg_class.reltuples), NOT count(*). Full scans on 100M+ unvacuumed
-    -- tables hung every ingest tail; these numbers are directionally correct post-ingest.
-    -- Run ANALYZE for exact counts, or ops.evidence_count()/source_id() for source precision.
+    -- tables hung every ingest tail. Read the LEAVES: a partitioned parent can retain
+    -- reltuples=-1 even while its 64 children contain millions of rows. Clamping that parent
+    -- value made a populated physicalities table appear as zero in the operator UI.
+    --
+    -- ANALYZE bounds estimate error; ops.evidence_count()/source_id() provide source precision.
     -- Metric keys are relation roles (entities/…); oids name current storage homes until
     -- the table cut. No install-time schema placeholder, no SET, no Brand.table metric labels.
-    SELECT 'entities(ESTIMATE)',      GREATEST(0, (SELECT reltuples FROM pg_class WHERE oid = 'laplace.entities'::regclass))::bigint
-    UNION ALL
-    SELECT 'physicalities(ESTIMATE)', GREATEST(0, (SELECT reltuples FROM pg_class WHERE oid = 'laplace.physicalities'::regclass))::bigint
-    UNION ALL
-    SELECT 'attestations(ESTIMATE)',  GREATEST(0, (SELECT reltuples FROM pg_class WHERE oid = 'laplace.attestations'::regclass))::bigint
-    UNION ALL
-    SELECT 'consensus(ESTIMATE)',     GREATEST(0, (SELECT reltuples FROM pg_class WHERE oid = 'laplace.consensus'::regclass))::bigint;
+    WITH targets(metric, relid, ordinal) AS (
+        VALUES
+            ('entities(ESTIMATE)'::text,      'laplace.entities'::regclass,      1),
+            ('physicalities(ESTIMATE)'::text, 'laplace.physicalities'::regclass, 2),
+            ('attestations(ESTIMATE)'::text,  'laplace.attestations'::regclass,  3),
+            ('consensus(ESTIMATE)'::text,     'laplace.consensus'::regclass,     4)
+    )
+    SELECT t.metric, COALESCE(sum(GREATEST(c.reltuples, 0)::bigint), 0)::bigint
+    FROM targets t
+    CROSS JOIN LATERAL pg_partition_tree(t.relid) p
+    JOIN pg_class c ON c.oid = p.relid
+    WHERE p.isleaf
+    GROUP BY t.metric, t.ordinal
+    ORDER BY t.ordinal;
 END;
