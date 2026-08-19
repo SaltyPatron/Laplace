@@ -601,19 +601,19 @@ END $$;
 
 -- chess_time_pressure_outcome: the folded think-class read, now carrying the lens
 -- dimension (planned_quick / pressed_think / flagging beside rushed / normal / deep).
--- Post-#736 shape: HAS_THINK_CLASS and MOVE cells both subject the POSITION; the
--- playing's event enters only as evidence context, which this folded read never touches.
+-- HAS_THINK_CLASS retains distinct observed positions; OUTCOME folds directly on the
+-- reusable class id, so no exact-position transition cell is needed.
 DO $$
 DECLARE
     type_t   bytea := public.laplace_hash128_blake3('Type');
-    mv       bytea := laplace.relation_type_id('MOVE');
+    outcome  bytea := laplace.relation_type_id('OUTCOME');
     tcl      bytea := laplace.relation_type_id('HAS_THINK_CLASS');
     src      bytea := public.laplace_hash128_blake3('test/chess3/source');
     p_rush   bytea := public.laplace_hash128_blake3('test/chess3/p_rush');
     p_plan   bytea := public.laplace_hash128_blake3('test/chess3/p_plan');
     p_press  bytea := public.laplace_hash128_blake3('test/chess3/p_press');
     p_flag   bytea := public.laplace_hash128_blake3('test/chess3/p_flag');
-    nx       bytea := public.laplace_hash128_blake3('test/chess3/next');
+    result   bytea := public.laplace_hash128_blake3('Chess_Result');
     w_rush   bytea := laplace.word_id('rushed');
     w_plan   bytea := laplace.word_id('planned_quick');
     w_press  bytea := laplace.word_id('pressed_think');
@@ -623,23 +623,23 @@ DECLARE
     mu       numeric;
 BEGIN
     INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) VALUES
-        (src, 0, type_t, NULL), (nx, 0, type_t, src),
+        (src, 0, type_t, NULL), (result, 0, type_t, src),
         (p_rush, 0, type_t, src), (p_plan, 0, type_t, src),
         (p_press, 0, type_t, src), (p_flag, 0, type_t, src),
         (w_rush, 0, type_t, src), (w_plan, 0, type_t, src),
         (w_press, 0, type_t, src), (w_flag, 0, type_t, src)
     ON CONFLICT DO NOTHING;
 
-    -- One MOVE cell per position (the folded-outcome side of the join) and one
-    -- think-class cell naming its class. consensus.eff_mu(rushed) = 1600e9 - 2*50e9 = 1500e9,
+    -- One class OUTCOME fold plus the position→class membership cells.
+    -- consensus.eff_mu(rushed) = 1600e9 - 2*50e9 = 1500e9,
     -- which must read back display-scale (1500.000), never raw fp1e9.
     INSERT INTO laplace.consensus
         (id, subject_id, type_id, object_id, rating, rd, volatility, witness_count, last_observed_at)
     VALUES
-        (public.laplace_hash128_blake3('t3/mv_rush'),  p_rush,  mv, nx, 1600000000000, 50000000000, 60000000, 10, now()),
-        (public.laplace_hash128_blake3('t3/mv_plan'),  p_plan,  mv, nx, 1500000000000, 50000000000, 60000000, 20, now()),
-        (public.laplace_hash128_blake3('t3/mv_press'), p_press, mv, nx, 1400000000000, 50000000000, 60000000, 5, now()),
-        (public.laplace_hash128_blake3('t3/mv_flag'),  p_flag,  mv, nx, 1200000000000, 50000000000, 60000000, 2, now()),
+        (public.laplace_hash128_blake3('t3/out_rush'),  w_rush,  outcome, result, 1600000000000, 50000000000, 60000000, 10, now()),
+        (public.laplace_hash128_blake3('t3/out_plan'),  w_plan,  outcome, result, 1500000000000, 50000000000, 60000000, 20, now()),
+        (public.laplace_hash128_blake3('t3/out_press'), w_press, outcome, result, 1400000000000, 50000000000, 60000000, 5, now()),
+        (public.laplace_hash128_blake3('t3/out_flag'),  w_flag,  outcome, result, 1200000000000, 50000000000, 60000000, 2, now()),
         (public.laplace_hash128_blake3('t3/tc_rush'),  p_rush,  tcl, w_rush,  1500000000000, 50000000000, 60000000, 3, now()),
         (public.laplace_hash128_blake3('t3/tc_plan'),  p_plan,  tcl, w_plan,  1500000000000, 50000000000, 60000000, 4, now()),
         (public.laplace_hash128_blake3('t3/tc_press'), p_press, tcl, w_press, 1500000000000, 50000000000, 60000000, 2, now()),
@@ -652,7 +652,7 @@ BEGIN
         RAISE EXCEPTION 'FAIL: lens dimension wrong or misordered: %', labels;
     END IF;
 
-    -- plays is the MOVE fold's witness_count, carried not recomputed.
+    -- plays is the class OUTCOME fold's witness_count, carried not recomputed.
     SELECT q.plays INTO n FROM chess.time_pressure_outcome() q WHERE q.think_class = 'planned_quick';
     IF n <> 20 THEN RAISE EXCEPTION 'FAIL: planned_quick plays should be 20, got %', n; END IF;
 

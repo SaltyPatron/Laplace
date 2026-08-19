@@ -130,12 +130,19 @@ public static class ChessGraph
     }
 
     internal static void AppendThinkClass(
-    SubstrateChangeBuilder b, Hash128 positionId, string thinkClass, double witnessWeight,
+    SubstrateChangeBuilder b, Hash128 positionId, string thinkClass, PlyOutcome moverOutcome,
+    double witnessWeight,
     Hash128 sourceId, Hash128? contextId = null)
     {
         if (ContentEmitter.Emit(b, thinkClass, sourceId) is not { } tid) return;
         b.AddAttestation(NativeAttestation.Categorical(
             positionId, "HAS_THINK_CLASS", tid, sourceId, contextId, witnessWeight));
+        // The exact occurrence remains tied to position + playing above. The reusable
+        // statistical question is folded directly at class grain, so the read never needs
+        // an exact-position MOVE/OUTCOME population merely to recover the game result.
+        b.AddAttestation(Outcome(
+            tid, games: 1, ScoreFp1e9(moverOutcome), witnessWeight, sourceId,
+            contextId: null));
     }
 
     public static void AppendGameMeta(

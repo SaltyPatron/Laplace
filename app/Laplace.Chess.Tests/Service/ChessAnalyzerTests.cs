@@ -1,4 +1,6 @@
 using Laplace.Engine.Core;
+using Laplace.Decomposers.Abstractions;
+using Laplace.Modality;
 using Laplace.SubstrateCRUD;
 using Xunit;
 
@@ -69,6 +71,30 @@ public sealed class ChessAnalyzerTests
         Assert.Contains(change.Attestations,
             a => a.TypeId == ChessVocabulary.OutcomeType
                  && substructures.Contains(a.SubjectId));
+    }
+
+    [Fact]
+    public void ThinkClass_FoldsOutcomeAtReusableClassGrain()
+    {
+        CodepointPerfcache.LoadDefault();
+        var b = new SubstrateChangeBuilder(ChessVocabulary.AnalysisSourceId, "test/think");
+        var position = Hash128.OfCanonical("test/chess/position");
+        ChessGraph.AppendThinkClass(
+            b, position, "rushed", PlyOutcome.Win, 0.7,
+            ChessVocabulary.AnalysisSourceId, Hash128.OfCanonical("test/chess/playing"));
+        var change = b.Build();
+        var classId = ContentEmitter.RootId("rushed");
+        Assert.NotNull(classId);
+
+        Assert.Contains(change.Attestations,
+            a => a.SubjectId == position
+                 && a.TypeId == ChessVocabulary.HasThinkClassType
+                 && a.ObjectId == classId.Value);
+        Assert.Contains(change.Attestations,
+            a => a.SubjectId == classId.Value
+                 && a.TypeId == ChessVocabulary.OutcomeType
+                 && a.ObjectId == ChessVocabulary.OutcomeObject
+                 && a.ContextId is null);
     }
 
     [Fact]

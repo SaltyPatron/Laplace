@@ -721,7 +721,6 @@
       "extension/laplace_substrate/sql/functions/chess/chess_syzygy_line.sql.in::HAS_DTZ": 1,
       "extension/laplace_substrate/sql/functions/chess/chess_syzygy_line.sql.in::HAS_WDL": 1,
       "extension/laplace_substrate/sql/functions/chess/chess_time_pressure_outcome.sql.in::HAS_THINK_CLASS": 1,
-      "extension/laplace_substrate/sql/functions/chess/chess_time_pressure_outcome.sql.in::MOVE": 1,
       "extension/laplace_substrate/sql/functions/consensus/salient_facts.sql.in::CO_OCCURS_WITH": 1,
       "extension/laplace_substrate/sql/functions/consensus/salient_facts.sql.in::HAS_FEATURE": 1,
       "extension/laplace_substrate/sql/functions/consensus/salient_facts.sql.in::IS_A": 1,

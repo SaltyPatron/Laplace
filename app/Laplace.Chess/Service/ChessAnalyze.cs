@@ -217,14 +217,18 @@ public static class ChessAnalyze
                 if (clocks.Length > 0)
                 {
                     double tf = PgnClocks.ThinkFactor(clocks, medianDrop, ply);
-                    ChessGraph.AppendThinkClass(b, from.Position.Id, ChessCanonical.ThinkClass(tf), MetaWeight, src, eventId);
+                    ChessGraph.AppendThinkClass(
+                        b, from.Position.Id, ChessCanonical.ThinkClass(tf),
+                        result.ForMover(mover), MetaWeight, src, eventId);
                     // Phase × clock × spent lens beside the base class. Lens strings are
                     // content values on the same HAS_THINK_CLASS cell shape — no manifest
                     // change, and no ChessAnalyze.Version bump: re-deriving old games at
                     // the new vocabulary rides `laplace evict` (the PR-4 eviction lane).
                     if (ChessCanonical.ThinkLens(ply, sans.Count, tf, clocks[ply],
                             (ply & 1) == 0 ? medianRemEven : medianRemOdd, medianDrop) is { } lens)
-                        ChessGraph.AppendThinkClass(b, from.Position.Id, lens, MetaWeight, src, eventId);
+                        ChessGraph.AppendThinkClass(
+                            b, from.Position.Id, lens, result.ForMover(mover),
+                            MetaWeight, src, eventId);
                 }
             }
             else if (spentSeconds is not null && medianSpent > 0)
@@ -232,13 +236,17 @@ public static class ChessAnalyze
                 // cutechess dialect (GH #494): per-move spent time is the think signal directly.
                 // No HAS_CLOCK deposit — the source never asserted a remaining clock.
                 double tf = PgnClocks.ThinkFactorFromSpent(spentSeconds, medianSpent, ply);
-                ChessGraph.AppendThinkClass(b, from.Position.Id, ChessCanonical.ThinkClass(tf), MetaWeight, src, eventId);
+                ChessGraph.AppendThinkClass(
+                    b, from.Position.Id, ChessCanonical.ThinkClass(tf),
+                    result.ForMover(mover), MetaWeight, src, eventId);
                 // Spent dialect: no remaining clock witnessed, so only the phase × spent
                 // lens can derive (clock lenses would fabricate a quantity the source
                 // never asserted — the same law that forbids synthetic HAS_CLOCK above).
                 if (ChessCanonical.ThinkLens(ply, sans.Count, tf,
                         remaining: 0, medianRemaining: 0, medianDrop: 0) is { } lens)
-                    ChessGraph.AppendThinkClass(b, from.Position.Id, lens, MetaWeight, src, eventId);
+                    ChessGraph.AppendThinkClass(
+                        b, from.Position.Id, lens, result.ForMover(mover),
+                        MetaWeight, src, eventId);
             }
 
             string? evTok = Tok(evalTokens, ply);
