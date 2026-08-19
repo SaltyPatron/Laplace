@@ -12,6 +12,7 @@ import { ExploreView } from './explore/ExploreView';
 import { AdminView } from './admin/AdminView';
 import { useAppStore } from './store';
 import { SubstrateStatusBanner } from './layout/SubstrateStatusBanner';
+import { AmbientFamiliar } from './layout/AmbientFamiliar';
 import styles from './App.module.css';
 
 /**
@@ -77,6 +78,7 @@ function Shell() {
           <Route path="/operator" element={<AdminView />} />
         </Routes>
       </main>
+      <AmbientFamiliar />
     </div>
   );
 }

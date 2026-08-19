@@ -1,6 +1,6 @@
 @layer components {
   .home {
-    max-width: 1080px;
+    max-width: 1160px;
     margin: 0 auto;
     padding: clamp(var(--space-4), 5vw, var(--space-6)) var(--space-4) var(--space-6);
     display: flex;
@@ -8,12 +8,66 @@
     gap: clamp(var(--space-5), 5vw, var(--space-6));
   }
 
+  .home > * {
+    flex-shrink: 0;
+  }
+
   /* Hero */
   .hero {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 300px;
+    align-items: center;
+    gap: clamp(var(--space-5), 6vw, 4rem);
+    min-height: 15rem;
+    padding: clamp(var(--space-5), 4vw, 2.4rem);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-lg);
+    background:
+      linear-gradient(110deg, color-mix(in srgb, var(--color-steel) 7%, transparent), transparent 43%),
+      linear-gradient(var(--color-copper), var(--color-copper)) 0 0 / 46px 1px no-repeat,
+      linear-gradient(var(--color-copper), var(--color-copper)) 100% 100% / 46px 1px no-repeat,
+      var(--material-enamel);
+    box-shadow: var(--shadow-instrument);
+    overflow: hidden;
+  }
+
+  .hero::after {
+    content: '';
+    position: absolute;
+    inset: auto -10% -70% 42%;
+    aspect-ratio: 1;
+    border-radius: 50%;
+    background: radial-gradient(circle, color-mix(in srgb, var(--color-signal) 7%, transparent), transparent 66%);
+    pointer-events: none;
+  }
+
+  .heroCopy {
+    position: relative;
+    z-index: 1;
     display: flex;
     flex-direction: column;
     gap: var(--space-3);
     max-width: 64ch;
+  }
+
+  .eyebrow {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    color: var(--color-copper);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    font-weight: 650;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+  }
+
+  .eyebrowMark {
+    width: 18px;
+    height: 1px;
+    background: var(--color-copper);
+    box-shadow: 7px 0 0 color-mix(in srgb, var(--color-signal) 78%, transparent);
   }
 
   .title {
@@ -32,14 +86,101 @@
     color: var(--color-text-muted);
   }
 
+  .heroInstrument {
+    position: relative;
+    z-index: 1;
+    width: 248px;
+    aspect-ratio: 1;
+    justify-self: center;
+    border-radius: 50%;
+    background:
+      radial-gradient(circle at center, color-mix(in srgb, var(--color-signal) 14%, transparent) 0 2%, transparent 3%),
+      repeating-conic-gradient(from 0deg,
+        color-mix(in srgb, var(--color-copper) 30%, transparent) 0 1deg,
+        transparent 1deg 15deg);
+    box-shadow:
+      inset 0 0 34px color-mix(in srgb, var(--color-bg-abyss) 72%, transparent),
+      0 0 52px color-mix(in srgb, var(--color-signal) 7%, transparent);
+  }
+
+  .orbit {
+    position: absolute;
+    inset: 13%;
+    border: 1px solid color-mix(in srgb, var(--color-copper) 70%, transparent);
+    border-radius: 50%;
+    box-shadow:
+      inset 0 0 0 5px color-mix(in srgb, var(--color-bg-panel) 86%, transparent),
+      0 0 0 1px color-mix(in srgb, var(--color-steel) 15%, transparent);
+  }
+
+  .orbitOuter {
+    transform: rotate(24deg) scaleY(0.46);
+  }
+
+  .orbitInner {
+    inset: 23%;
+    border-color: color-mix(in srgb, var(--color-steel) 66%, transparent);
+    transform: rotate(-38deg) scaleX(0.5);
+  }
+
+  .instrumentCore {
+    position: absolute;
+    inset: 39%;
+    border: 1px solid var(--color-copper);
+    background: var(--color-signal);
+    box-shadow:
+      0 0 0 6px color-mix(in srgb, var(--color-bg-panel-2) 92%, transparent),
+      0 0 0 7px color-mix(in srgb, var(--color-copper) 52%, transparent),
+      0 0 24px color-mix(in srgb, var(--color-signal) 56%, transparent);
+    transform: rotate(45deg);
+  }
+
+  .instrumentNeedle {
+    position: absolute;
+    left: 50%;
+    top: 10%;
+    width: 1px;
+    height: 40%;
+    background: linear-gradient(var(--color-copper), var(--color-signal));
+    transform: rotate(36deg);
+    transform-origin: 50% 100%;
+  }
+
+  .instrumentTrace {
+    position: absolute;
+    left: 7%;
+    right: 7%;
+    top: 50%;
+    height: 1px;
+    background: linear-gradient(90deg,
+      transparent,
+      var(--color-copper) 18% 42%,
+      transparent 42% 58%,
+      var(--color-signal) 58% 82%,
+      transparent);
+  }
+
+  .instrumentLegend {
+    position: absolute;
+    left: 50%;
+    bottom: 3%;
+    transform: translateX(-50%);
+    color: var(--color-text-muted);
+    font-family: var(--font-mono);
+    font-size: 0.56rem;
+    letter-spacing: 0.12em;
+    white-space: nowrap;
+  }
+
   /* Modes — the three things you can do, made legible */
   .modes {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: var(--space-3);
   }
 
   .mode {
+    position: relative;
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
@@ -47,24 +188,103 @@
     text-align: left;
     padding: var(--space-4);
     border: 1px solid var(--color-border-default);
-    border-radius: var(--radius-lg);
-    background: var(--color-bg-panel);
+    border-radius: var(--radius-md);
+    background:
+      linear-gradient(var(--color-copper), var(--color-copper)) 0 0 / 24px 1px no-repeat,
+      linear-gradient(var(--color-copper), var(--color-copper)) 100% 100% / 24px 1px no-repeat,
+      var(--material-enamel);
     color: inherit;
     cursor: pointer;
     font-family: var(--font-sans);
-    transition: border-color var(--duration-fast) var(--ease-standard),
-                transform var(--duration-fast) var(--ease-standard),
-                background var(--duration-fast) var(--ease-standard);
+    box-shadow: var(--shadow-instrument);
+    transition: border-color var(--duration-engage) var(--ease-standard),
+                transform var(--duration-engage) var(--ease-standard),
+                background var(--duration-engage) var(--ease-standard);
   }
 
   .mode:hover {
-    border-color: var(--primitive-blue-500);
-    transform: translateY(-2px);
+    border-color: color-mix(in srgb, var(--color-copper) 64%, var(--color-border-default));
+    transform: translateY(-3px);
   }
 
   .modeAccent {
     background: var(--color-bg-panel-2);
-    border-color: color-mix(in srgb, var(--primitive-blue-500) 45%, var(--color-border-default));
+    border-color: color-mix(in srgb, var(--color-signal) 34%, var(--color-border-default));
+  }
+
+  .modeTop {
+    width: 100%;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--space-3);
+    margin-bottom: var(--space-2);
+  }
+
+  .modeSerial {
+    color: var(--color-text-muted);
+    font-family: var(--font-mono);
+    font-size: 0.58rem;
+    letter-spacing: 0.12em;
+  }
+
+  .modeEmblem {
+    position: relative;
+    width: 34px;
+    height: 34px;
+    flex: 0 0 34px;
+    border: 1px solid color-mix(in srgb, var(--color-copper) 64%, var(--color-border-default));
+    background: color-mix(in srgb, var(--color-bg-abyss) 34%, transparent);
+    transform: rotate(45deg);
+    box-shadow: inset 0 0 0 4px color-mix(in srgb, var(--color-bg-panel-2) 78%, transparent);
+  }
+
+  .modeEmblem span,
+  .modeEmblem::before,
+  .modeEmblem::after {
+    content: '';
+    position: absolute;
+  }
+
+  .modeEmblem span {
+    inset: 11px;
+    border-radius: 50%;
+    background: var(--color-signal);
+    box-shadow: 0 0 9px color-mix(in srgb, var(--color-signal) 58%, transparent);
+  }
+
+  .mode[data-module='chat'] .modeEmblem::before {
+    inset: 6px;
+    border: 1px solid var(--color-steel);
+    border-radius: 50%;
+  }
+
+  .mode[data-module='query'] .modeEmblem::before {
+    left: 16px;
+    top: 4px;
+    width: 1px;
+    height: 25px;
+    background: var(--color-copper);
+  }
+
+  .mode[data-module='query'] .modeEmblem::after {
+    inset: 7px;
+    border: 1px solid color-mix(in srgb, var(--color-steel) 72%, transparent);
+  }
+
+  .mode[data-module='explore'] .modeEmblem::before {
+    inset: 5px 15px;
+    border: 1px solid var(--color-copper);
+    transform: rotate(45deg);
+  }
+
+  .mode[data-module='chess'] .modeEmblem::before {
+    left: 7px;
+    right: 7px;
+    bottom: 7px;
+    height: 4px;
+    border: 1px solid var(--color-steel);
+    border-top-width: 5px;
   }
 
   .modeName {
@@ -76,7 +296,7 @@
   .modeTagline {
     font-size: var(--text-base);
     font-weight: 600;
-    color: var(--color-accent);
+    color: var(--color-signal);
   }
 
   .modeBody {
@@ -130,8 +350,8 @@
     gap: var(--space-3);
     padding: var(--space-3);
     border: 1px solid var(--color-border-default);
-    border-radius: var(--radius-md);
-    background: var(--color-bg-panel);
+    border-radius: var(--radius-sm);
+    background: var(--material-enamel);
     color: var(--color-text-primary);
     font-size: var(--text-sm);
     font-family: var(--font-sans);
@@ -142,7 +362,7 @@
   }
 
   .example:hover {
-    border-color: var(--primitive-blue-500);
+    border-color: var(--color-copper);
     background: var(--color-bg-panel-2);
   }
 
@@ -151,7 +371,7 @@
     font-family: var(--font-mono);
     font-size: var(--text-xs);
     padding: 2px 8px;
-    border-radius: var(--radius-pill);
+    border-radius: var(--radius-sm);
     background: var(--color-bg-panel-2);
     color: var(--color-accent);
   }
@@ -160,7 +380,13 @@
     min-width: 0;
   }
 
+  @media (max-width: 1050px) {
+    .modes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+
   @media (max-width: 860px) {
     .modes { grid-template-columns: 1fr; }
+    .hero { grid-template-columns: 1fr; }
+    .heroInstrument { display: none; }
   }
 }
