@@ -7,11 +7,15 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 public sealed class NpgsqlSubstrateReader : ISubstrateReader
 {
     private readonly NpgsqlDataSource _ds;
+    private readonly TierProbeBatcher _tierProbes;
 
     public NpgsqlDataSource DataSource => _ds;
 
     public NpgsqlSubstrateReader(NpgsqlDataSource dataSource)
-        => _ds = dataSource ?? throw new ArgumentNullException(nameof(dataSource));
+    {
+        _ds = dataSource ?? throw new ArgumentNullException(nameof(dataSource));
+        _tierProbes = new TierProbeBatcher(TierBatchExistenceProbeDirectAsync);
+    }
 
     public async Task<bool> HasSourceEverCompletedAsync(int layerOrder, CancellationToken ct = default)
     {
@@ -328,9 +332,9 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
 
     /// <summary>
     /// One round of the tier-by-tier, trunk-to-leaf batch existence probe.
-    /// Calls the native tier_batch_existence_probe() SQL function directly
-    /// -- no C#-side caching layer here, deliberately: the native side
-    /// already does its own perfcache fast-path internally
+    /// Concurrent callers are coalesced by tier before this direct native
+    /// tier_batch_existence_probe() call. There is no C# result cache here:
+    /// the native side already does its own perfcache fast-path internally
     /// (batch_presence_core() in descent_probe.c), and every bit in the
     /// result is a real, positive confirmation for exactly the ids passed
     /// in. The round's tier rides along as the parallel key array so the
@@ -341,7 +345,12 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
     /// MarkProven with the subset this round's bitmap actually confirmed
     /// present.
     /// </summary>
-    public async Task<byte[]> TierBatchExistenceProbeAsync(IReadOnlyList<Hash128> ids, short tier, CancellationToken ct = default)
+    public Task<byte[]> TierBatchExistenceProbeAsync(
+        IReadOnlyList<Hash128> ids, short tier, CancellationToken ct = default) =>
+        _tierProbes.ProbeAsync(ids, tier, ct);
+
+    private async Task<byte[]> TierBatchExistenceProbeDirectAsync(
+        IReadOnlyList<Hash128> ids, short tier, CancellationToken ct)
     {
         if (ids is null) throw new ArgumentNullException(nameof(ids));
         int n = ids.Count;
