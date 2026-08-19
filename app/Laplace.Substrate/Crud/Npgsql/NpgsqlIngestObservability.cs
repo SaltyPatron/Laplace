@@ -325,24 +325,27 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
             return;
         }
 
-        // The other direction is equally a fault, and was previously not reported at
-        // all. An entity IS composed content: every constituent codepoint carries a
-        // coordinate, so 'C', 'A' and 'T' each have one and therefore 'CAT' has one.
-        // No class of entity legitimately lacks a placement — an entity with none was
-        // minted from a hashed string rather than composed from the DAG (GH #1038,
-        // measured 2026-08-12: 10,293 such rows, all reporting zero constituents).
-        //
-        // The one benign reading is timing, not design: entities COPY before
-        // physicalities within an apply, so a run interrupted between the two phases
-        // ends with a real entity surplus and nothing wrong. The message names that
-        // explicitly instead of asserting a defect the counts cannot distinguish.
+        long entitySurplus = -delta;
+        long unexplained = Math.Max(
+            0, entitySurplus - result.GovernedIdentitiesWithoutPhysicality);
+        if (unexplained == 0)
+        {
+            Console.Error.WriteLine(
+                $"INGEST_GOVERNED_IDENTITY_DELTA source={sourceName} run={_runId} "
+                + $"entities={result.EntitiesInserted} physicalities={result.PhysicalitiesInserted} "
+                + $"delta={entitySurplus} governed_nonphysical={result.GovernedIdentitiesWithoutPhysicality} "
+                + "unexplained=0 — non-content identities were admitted by explicit entity type; "
+                + "content/composition placement was validated separately.");
+            return;
+        }
+
         Console.Error.WriteLine(
             $"INGEST_ENTITY_SURPLUS source={sourceName} run={_runId} "
             + $"entities={result.EntitiesInserted} physicalities={result.PhysicalitiesInserted} "
-            + $"surplus={-delta} — this run declared {-delta} entities it never placed. "
-            + "Benign if the run was interrupted between the entity and physicality COPY "
-            + "phases; otherwise these entities were minted outside the compose DAG and "
-            + "have no coordinate. See GH #1038.");
+            + $"surplus={entitySurplus} governed_nonphysical={result.GovernedIdentitiesWithoutPhysicality} "
+            + $"unexplained={unexplained} — the run-level admission gate should have rejected "
+            + "unplaced content; inspect interrupted COPY state or an unclassified identity type. "
+            + "See GH #1038.");
     }
 
     public void OnRunFailed(string sourceName, string status, string error)

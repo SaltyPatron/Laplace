@@ -240,6 +240,42 @@ public sealed class PropBankDecomposerTests
             && a.ObjectId == PropBankDecomposer.TrustClass);
     }
 
+    [Fact]
+    public async Task NonphysicalManagedEntities_AreGovernedRoleOrdinals()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "pb-admission-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(dir, "frames"));
+        await File.WriteAllTextAsync(Path.Combine(dir, "frames", "give.xml"), FramesetXml);
+        try
+        {
+            var dec = new PropBankDecomposer();
+            var ctx = new FakeContext(new NullWriter()) { EcosystemPath = dir };
+            var nonphysical = new Dictionary<Hash128, Hash128>();
+            await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
+            {
+                if (change.Metadata.SourceContentUnitName.StartsWith(
+                        IngestBatchPipeline.PeriodBoundaryUnitPrefix, StringComparison.Ordinal))
+                    continue;
+                var placed = change.Physicalities.Select(p => p.EntityId).ToHashSet();
+                foreach (var entity in change.Entities)
+                    if (!placed.Contains(entity.Id))
+                        nonphysical[entity.Id] = entity.TypeId;
+            }
+
+            Assert.Equal(3, nonphysical.Count);
+            Assert.All(nonphysical.Values,
+                typeId => Assert.Equal(EntityTypeRegistry.Ordinal, typeId));
+            var expected = new[]
+            {
+                PropBankDecomposer.OrdinalId("0"),
+                PropBankDecomposer.OrdinalId("1"),
+                PropBankDecomposer.OrdinalId("2"),
+            }.ToHashSet();
+            Assert.True(expected.SetEquals(nonphysical.Keys));
+        }
+        finally { try { Directory.Delete(dir, recursive: true); } catch { } }
+    }
+
     private static async Task<List<AttestationRow>> CollectAttestationsAsync()
     {
         string dir = Path.Combine(Path.GetTempPath(), "pb-test-" + Guid.NewGuid().ToString("N"));
