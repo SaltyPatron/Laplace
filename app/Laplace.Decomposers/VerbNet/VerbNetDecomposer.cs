@@ -125,10 +125,17 @@ public sealed class VerbNetDecomposer
         {
             string type = role.GetAttribute("type").Trim();
             if (type.Length == 0) continue;
-            var roleId = ContentEmitter.Emit(b, type, Source);
-            if (roleId is null) continue;
-            b.AddAttestation(NativeAttestation.Categorical(
-                classEntity, "HAS_THEMATIC_ROLE", roleId.Value, Source, TC.AcademicCurated));
+            var roleLabelId = ContentEmitter.Emit(b, type, Source);
+            var roleId = RoleAnchor.Emit(
+                b, RoleIdentityKind.VerbNet, classEntity, type,
+                EntityTypeRegistry.VerbNetRole, Source, TC.AcademicCurated);
+            if (roleLabelId is null || roleId is null) continue;
+            b.AddAttestation(NativeAttestation.CategoricalResolved(
+                classEntity, VerbNetSource.HasThematicRoleTypeId, roleId.Value,
+                Source, null, TC.AcademicCurated));
+            b.AddAttestation(NativeAttestation.CategoricalResolved(
+                roleId.Value, VerbNetSource.HasNameAliasTypeId, roleLabelId.Value,
+                Source, null, TC.AcademicCurated));
         }
 
         foreach (var frame in SharedXmlFramesetReader.ChildElements(el, "FRAMES", "FRAME"))
@@ -181,10 +188,13 @@ public sealed class VerbNetDecomposer
                             continue;
                         string roleVal = arg.GetAttribute("value").Trim().TrimStart('?');
                         if (roleVal.Length == 0) continue;
-                        var roleId = ContentEmitter.Emit(b, roleVal, Source);
+                        var roleId = RoleAnchor.Declare(
+                            b, RoleIdentityKind.VerbNet, classEntity, roleVal,
+                            EntityTypeRegistry.VerbNetRole, Source);
                         if (roleId is not null)
-                            b.AddAttestation(NativeAttestation.Categorical(
-                                predId.Value, "HAS_SEMANTIC_ROLE", roleId.Value, Source, TC.AcademicCurated));
+                            b.AddAttestation(NativeAttestation.CategoricalResolved(
+                                predId.Value, VerbNetSource.HasSemanticRoleTypeId, roleId.Value,
+                                Source, null, TC.AcademicCurated));
                     }
                 }
             }

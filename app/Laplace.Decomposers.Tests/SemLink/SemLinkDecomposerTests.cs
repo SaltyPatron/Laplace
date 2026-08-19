@@ -1,4 +1,3 @@
-using System.Text;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Decomposers.Tests;
 using Laplace.Engine.Core;
@@ -29,7 +28,7 @@ public sealed class SemLinkDecomposerTests
         "1_ID_LANG\t1_ID_POS\t2_ID_PRED\t3_ID_ROLE\t4_VN_CLASS\t5_VN_CLASS_NUMBER\t6_VN_SUBCLASS\t7_VN_SUBCLASS_NUMBER\t8_VN_LEMA\t9_VN_ROLE\t10_WN_SENSE\t11_MCR_iliOffset\t12_FN_FRAME\t13_FN_LE\t14_FN_FRAME_ELEMENT\t15_PB_ROLESET\t16_PB_ARG";
 
     private const string PredicateMatrixRow =
-        "id:eng\tid:v\tid:give.01\tid:0\tvn:give\t13.1\t13.1-1\t1\tgive\tvn:Agent\twn:give%2:40:03\tili-30-02244956-v\tfn:Giving\tNULL\tNULL\tpb:give.01\tpb:0";
+        "id:eng\tid:v\tid:give.01\tid:0\tvn:give\t13.1\t13.1-1\t1\tgive\tvn:Agent\twn:give%2:40:03\tili-30-02244956-v\tfn:Giving\tNULL\tfn:Donor\tpb:give.01\tpb:0";
 
     [Fact]
     public async Task Attestations_Are_Only_RegistryRouted_CorrespondsTo()
@@ -53,17 +52,64 @@ public sealed class SemLinkDecomposerTests
     }
 
     [Fact]
-    public async Task PbVn_Role_Level_Maps_Arg_Content_To_Theta_Content_With_Class_Context()
+    public async Task PbVn_Role_Level_Maps_ParentBoundRoles_WithoutSemanticContext()
     {
         var (_, allAtts) = await CollectAllAsync();
         var atts = allAtts.Where(
             a => a.TypeId == RelationTypeRegistry.RelationTypeId("ROLE_CORRESPONDS_TO")).ToList();
-        var (argId, thetaId) = ComposedArgThetaIds();
+        var rsId = AnchorAdmission.Id("give.01", EntityTypeRegistry.PropBankRoleset)!.Value;
         var vnId = AnchorAdmission.Id("13.1-1", EntityTypeRegistry.VerbNetClass)!.Value;
+        var argId = RoleAnchor.Id(RoleIdentityKind.PropBank, rsId, "ARG0")!.Value;
+        var thetaId = RoleAnchor.Id(RoleIdentityKind.VerbNet, vnId, "agent")!.Value;
         Assert.Contains(atts, a =>
-            a.ContextId == vnId
+            a.ContextId is null
             && (a.SubjectId == argId || a.ObjectId == argId)
             && (a.SubjectId == thetaId || a.ObjectId == thetaId));
+    }
+
+    [Fact]
+    public async Task PredicateMatrix_RoleMapping_BindsBothClassAndFrameIntoEndpoints()
+    {
+        var (_, atts) = await CollectPredicateMatrixAsync();
+        Hash128 vnClass = AnchorAdmission.Id("13.1-1", EntityTypeRegistry.VerbNetClass)!.Value;
+        Hash128 frame = AnchorAdmission.Id("Giving", EntityTypeRegistry.FrameNetFrame)!.Value;
+        Hash128 vnRole = RoleAnchor.Id(RoleIdentityKind.VerbNet, vnClass, "Agent")!.Value;
+        Hash128 frameRole = RoleAnchor.Id(RoleIdentityKind.FrameNet, frame, "Donor")!.Value;
+
+        Assert.Contains(atts, a =>
+            a.TypeId == RelationTypeRegistry.RelationTypeId("ROLE_CORRESPONDS_TO")
+            && a.ContextId is null
+            && (a.SubjectId == vnRole || a.ObjectId == vnRole)
+            && (a.SubjectId == frameRole || a.ObjectId == frameRole));
+    }
+
+    [Fact]
+    public async Task VnFnRoleMapping_PreservesTheFrameOwnerFromTheSourceRow()
+    {
+        const string xml = """
+<mappings>
+  <vncls class="9.1" fnframe="Placing">
+    <roles><role fnrole="Goal" vnrole="Destination"/></roles>
+  </vncls>
+</mappings>
+""";
+        string path = Path.Combine(Path.GetTempPath(), "vn-fn-role-" + Guid.NewGuid().ToString("N") + ".xml");
+        await File.WriteAllTextAsync(path, xml);
+        try
+        {
+            var records = new List<RoleCorrespondenceRecord>();
+            await foreach (var record in SemLinkRoleMappingIngest.EnumerateRecordsAsync(path, default))
+                records.Add(record);
+
+            RoleCorrespondenceRecord mapping = Assert.Single(records);
+            Assert.Equal("9.1", mapping.SubjectParentKey);
+            Assert.Equal(EntityTypeRegistry.VerbNetClass, mapping.SubjectParentTypeId);
+            Assert.Equal("Destination", mapping.SubjectRoleKey);
+            Assert.Equal("Placing", mapping.ObjectParentKey);
+            Assert.Equal(EntityTypeRegistry.FrameNetFrame, mapping.ObjectParentTypeId);
+            Assert.Equal("Goal", mapping.ObjectRoleKey);
+        }
+        finally { try { File.Delete(path); } catch { } }
     }
 
     [Fact]
@@ -177,34 +223,6 @@ public sealed class SemLinkDecomposerTests
         Hash128? synId = ConceptAnchor.SynsetId(2244956, 'v');
         Assert.NotNull(synId);
         CorrespondsToAssert.Contains(atts, rsId, synId.Value);
-    }
-
-    private static (Hash128 ArgId, Hash128 ThetaId) ComposedArgThetaIds()
-    {
-
-        const string singlePair =
-            """{"give.01": {"13.1-1": {"ARG0": "agent", "ARG1": "theme"}}}""";
-        byte[] utf8 = Encoding.UTF8.GetBytes(singlePair);
-        var recipe = GrammarDecomposer.LookupById("json");
-        using var ast = GrammarDecomposer.Parse(utf8, recipe);
-        using var composer = new GrammarRowComposer(utf8, ast, SemLinkDecomposer.Source, "json");
-        var (_, _, _, root) = composer.Materialize(1.0);
-        var ctx = new GrammarComposeContext(utf8, ast, root, composer, JsonGrammarHelper.FindRootObjectNode(ast));
-        int rootObj = JsonGrammarHelper.FindRootObjectNode(ast);
-        foreach (var (_, vnObjNode) in JsonGrammarHelper.EnumerateObjectPairs(ast, rootObj))
-        {
-            foreach (var (_, rolesObjNode) in JsonGrammarHelper.EnumerateObjectPairs(ast, vnObjNode))
-            {
-                if (!JsonGrammarHelper.IsObjectNode(ast, rolesObjNode)) continue;
-                foreach (var (argKeyNode, thetaNode) in JsonGrammarHelper.EnumerateObjectPairs(ast, rolesObjNode))
-                {
-                    if (JsonGrammarHelper.TryComposedNode(ctx, argKeyNode, out var argId)
-                        && JsonGrammarHelper.TryComposedNode(ctx, thetaNode, out var thetaId))
-                        return (argId, thetaId);
-                }
-            }
-        }
-        throw new InvalidOperationException("ARG0/agent composed spans not found in fixture JSON");
     }
 
     private static async Task<List<AttestationRow>> CollectAttestationsAsync()

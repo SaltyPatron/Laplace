@@ -139,6 +139,29 @@ public sealed class VerbNetDecomposerTests
     }
 
     [Fact]
+    public async Task ThematicRole_IsBoundToItsVerbNetClass_NotTheSharedLabel()
+    {
+        var atts = await CollectAttestationsAsync();
+        Hash128 classId = AnchorAdmission.Id(
+            SourceEntityIdConventions.NumericVerbNetClassId("give-13.1"),
+            EntityTypeRegistry.VerbNetClass)!.Value;
+        Hash128 agentRole = RoleAnchor.Id(
+            RoleIdentityKind.VerbNet, classId, "Agent")!.Value;
+        var b = new SubstrateChangeBuilder(VerbNetDecomposer.Source, "fixture", null);
+        Hash128 agentLabel = ContentEmitter.Emit(b, "Agent", VerbNetDecomposer.Source)!.Value;
+
+        Assert.Contains(atts, a =>
+            a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_THEMATIC_ROLE")
+            && a.SubjectId == classId && a.ObjectId == agentRole && a.ContextId is null);
+        Assert.Contains(atts, a =>
+            a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_NAME_ALIAS")
+            && a.SubjectId == agentRole && a.ObjectId == agentLabel);
+        Assert.DoesNotContain(atts, a =>
+            a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_THEMATIC_ROLE")
+            && a.SubjectId == classId && a.ObjectId == agentLabel);
+    }
+
+    [Fact]
     public async Task Bootstrap_Registers_Source_Types_And_RelationTypeEntities()
     {
         var dec = new VerbNetDecomposer();
@@ -151,6 +174,9 @@ public sealed class VerbNetDecomposerTests
             e.Id == VerbNetDecomposer.Source && e.TypeId == BootstrapIntentBuilder.SourceTypeId);
         Assert.Contains(boot.Entities, e =>
             e.Id == EntityTypeRegistry.Id("VerbNet_Class")
+            && e.TypeId == BootstrapIntentBuilder.TypeMetaTypeId);
+        Assert.Contains(boot.Entities, e =>
+            e.Id == EntityTypeRegistry.Id("VerbNet_Role")
             && e.TypeId == BootstrapIntentBuilder.TypeMetaTypeId);
         Assert.Contains(boot.Entities, e => e.Id == RelationTypeRegistry.RelationTypeId("HAS_THEMATIC_ROLE"));
         Assert.Contains(boot.Entities, e => e.Id == RelationTypeRegistry.RelationTypeId("MEMBER_OF_VERBNET_CLASS"));

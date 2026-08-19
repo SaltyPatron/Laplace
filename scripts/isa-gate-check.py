@@ -120,7 +120,7 @@ CEILINGS = {
     # The remaining 1 is the floor: the name has to exist once in C#, and this is
     # the single place the feature owns it. A scoped source that spelled it again
     # locally would be the per-source hand-roll that caused the defect.
-    "g3_csharp_vocabulary_literalism": 504,
+    "g3_csharp_vocabulary_literalism": 481,
     "g8_band_literalism": 3,
     # G4 scaffolding (W6 D3): grep for CREATE FUNCTION with zero callers outside
     # its own CREATE line. Destination form is substrate CALLS in-degree after W3
