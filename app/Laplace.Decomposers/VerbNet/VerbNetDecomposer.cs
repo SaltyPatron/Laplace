@@ -111,10 +111,19 @@ public sealed class VerbNetDecomposer
                         lemmaId.Value, "CORRESPONDS_TO", senseEntity.Value, Source, TC.AcademicCurated));
                 }
 
-            string fnframe = member.GetAttribute("fnframe").Trim();
-            if (fnframe.Length > 0)
+            // VerbNet 3.4 calls this field fn_mapping. Values are FrameNet frame
+            // names, whitespace-separated when one member maps to multiple frames;
+            // the literal None is the source sentinel for no mapping. The previous
+            // fnframe lookup matched zero attributes in the 3.4 vault corpus and
+            // silently dropped every direct member mapping.
+            foreach (string frameName in member.GetAttribute("fn_mapping")
+                         .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                         .Where(static value => !value.Equals("None", StringComparison.OrdinalIgnoreCase))
+                         .Distinct(StringComparer.Ordinal))
             {
-                var frameId = CategoryAnchor.Id(fnframe);
+                var frameId = CategoryAnchor.Emit(
+                    b, frameName, EntityTypeRegistry.FrameNetFrame,
+                    Source, TC.AcademicCurated);
                 if (frameId is not null)
                     b.AddAttestation(NativeAttestation.Categorical(
                         lemmaId.Value, "EVOKES_FRAME", frameId.Value, Source, TC.AcademicCurated));

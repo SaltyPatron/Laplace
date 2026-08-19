@@ -18,8 +18,8 @@ public sealed class VerbNetDecomposerTests
     private const string ClassXml = """
 <VNCLASS ID="give-13.1">
  <MEMBERS>
-  <MEMBER name="lend" verbnet_key="lend#1" wn="lend%2:40:00" features=""/>
-  <MEMBER name="give-back" verbnet_key="give-back#1" wn="" features=""/>
+  <MEMBER name="lend" verbnet_key="lend#1" wn="lend%2:40:00" fn_mapping="Commerce_buy" features=""/>
+  <MEMBER name="give-back" verbnet_key="give-back#1" wn="" fn_mapping="Locating Becoming_aware" features=""/>
  </MEMBERS>
  <THEMROLES>
   <THEMROLE type="Agent"><SELRESTRS logic="or"><SELRESTR Value="+" type="animate"/></SELRESTRS></THEMROLE>
@@ -42,7 +42,7 @@ public sealed class VerbNetDecomposerTests
  <SUBCLASSES>
   <VNSUBCLASS ID="give-13.1-1">
    <MEMBERS>
-    <MEMBER name="sell" verbnet_key="sell#1" wn="sell%2:40:00 sell%2:40:01" features=""/>
+    <MEMBER name="sell" verbnet_key="sell#1" wn="sell%2:40:00 sell%2:40:01" fn_mapping="None" features=""/>
    </MEMBERS>
    <THEMROLES>
     <THEMROLE type="Asset"><SELRESTRS/></THEMROLE>
@@ -120,6 +120,32 @@ public sealed class VerbNetDecomposerTests
             a.TypeId == RelationTypeRegistry.RelationTypeId("CORRESPONDS_TO")
             && (a.SubjectId == lendId!.Value || a.ObjectId == lendId!.Value)
             && (a.SubjectId == senseId!.Value || a.ObjectId == senseId!.Value));
+    }
+
+    [Fact]
+    public async Task Member_FnMapping_Emits_Each_Frame_And_Drops_None_Sentinel()
+    {
+        var atts = await CollectAttestationsAsync();
+        Hash128 lend = ContentEmitter.RootId("lend")!.Value;
+        Hash128 giveBack = ContentEmitter.RootId("give-back")!.Value;
+        Hash128 commerceBuy = ContentEmitter.RootId("Commerce_buy")!.Value;
+        Hash128 locating = ContentEmitter.RootId("Locating")!.Value;
+        Hash128 becomingAware = ContentEmitter.RootId("Becoming_aware")!.Value;
+        Hash128 none = ContentEmitter.RootId("None")!.Value;
+        Hash128 evokes = RelationTypeRegistry.RelationTypeId("EVOKES_FRAME");
+        Hash128 typedAs = RelationTypeRegistry.RelationTypeId("IS_TYPED_AS");
+
+        Assert.Contains(atts, a =>
+            a.SubjectId == lend && a.TypeId == evokes && a.ObjectId == commerceBuy);
+        Assert.Contains(atts, a =>
+            a.SubjectId == giveBack && a.TypeId == evokes && a.ObjectId == locating);
+        Assert.Contains(atts, a =>
+            a.SubjectId == giveBack && a.TypeId == evokes && a.ObjectId == becomingAware);
+        Assert.Contains(atts, a =>
+            a.SubjectId == commerceBuy && a.TypeId == typedAs
+            && a.ObjectId == EntityTypeRegistry.FrameNetFrame);
+        Assert.DoesNotContain(atts, a =>
+            a.TypeId == evokes && a.ObjectId == none);
     }
 
     [Fact]
