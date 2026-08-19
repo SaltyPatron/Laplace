@@ -103,6 +103,9 @@ public sealed class IngestRunner
 
         var log = _loggerFactory.CreateLogger($"Ingest:{decomposer.SourceName}");
         var sw = Stopwatch.StartNew();
+        var foldMetrics = _writer as IConsensusFoldMetrics;
+        long foldObservationsAtStart = foldMetrics?.ObservationsAccumulated ?? 0;
+        long foldCellsAtStart = foldMetrics?.CellsFolded ?? 0;
         var failures = new List<IngestFailure>();
         long unitsAttempted = 0, unitsApplied = 0, unitsFailed = 0;
         long entitiesInserted = 0, physicalitiesInserted = 0, attestationsInserted = 0;
@@ -703,7 +706,12 @@ public sealed class IngestRunner
             GovernedIdentitiesWithoutPhysicality: governedWithoutPhysicality,
             BootstrapEntitiesInserted: counters.BootstrapEntitiesInserted,
             BootstrapPhysicalitiesInserted: counters.BootstrapPhysicalitiesInserted,
-            BootstrapAttestationsInserted: counters.BootstrapAttestationsInserted);
+            BootstrapAttestationsInserted: counters.BootstrapAttestationsInserted,
+            ConsensusObservations: Math.Max(
+                0, (foldMetrics?.ObservationsAccumulated ?? foldObservationsAtStart)
+                   - foldObservationsAtStart),
+            ConsensusCellDeposits: Math.Max(
+                0, (foldMetrics?.CellsFolded ?? foldCellsAtStart) - foldCellsAtStart));
 
 
 
@@ -760,6 +768,19 @@ public sealed class IngestRunner
             result.BootstrapAttestationsInserted,
             SourceEntityIdConventions.SynsetHits, SourceEntityIdConventions.SynsetMisses,
             LanguageReference.ResolveMisses);
+        log.LogInformation(
+            "LAPSIGHT_AMPLIFICATION source={Source} input={Input} "
+            + "payload_rows={PayloadRows} payload_entities={PayloadEntities} "
+            + "payload_physicalities={PayloadPhysicalities} payload_attestations={PayloadAttestations} "
+            + "bootstrap_rows={BootstrapRows} rows_per_input={RowsPerInput:F3} "
+            + "fold_observations={FoldObservations} fold_cell_deposits={FoldCells} "
+            + "observations_per_cell_deposit={ObservationsPerCell:F3}",
+            decomposer.SourceName, result.InputUnitsDone,
+            result.PayloadRowsInserted, result.PayloadEntitiesInserted,
+            result.PayloadPhysicalitiesInserted, result.PayloadAttestationsInserted,
+            result.BootstrapRowsInserted, result.PayloadRowsPerInput,
+            result.ConsensusObservations, result.ConsensusCellDeposits,
+            result.ObservationsPerCellDeposit);
         string? failureReason = status == "failed"
             ? DescribeRunFailure(result.UnitsFailed, counters.FilesDone, declaredFiles)
             : null;
