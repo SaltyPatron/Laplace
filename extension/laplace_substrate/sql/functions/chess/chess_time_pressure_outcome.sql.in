@@ -9,12 +9,10 @@ CREATE OR REPLACE FUNCTION chess.time_pressure_outcome()
     -- "Do rushed moves lead to worse outcomes?" answered as a READ over the
     -- FOLDED consensus layer — never a query-time aggregation of raw evidence.
     --
-    -- Both inputs are already folded at ingest and indexed on subject_id
-    -- (the position): HAS_THINK_CLASS(position -> rushed/normal/deep) from the
-    -- ChessAnalysis pass, and MOVE(position -> next_position) whose Glicko
-    -- rating IS the folded outcome of playing from that position (win=2 /
-    -- draw=1 / loss=0 folded via consensus). So this joins two consensus sets
-    -- on position and reads consensus.eff_mu — the conservative folded outcome estimate.
+    -- Both inputs are already folded at ingest. HAS_THINK_CLASS retains the set of distinct
+    -- positions observed under each class; OUTCOME is deposited directly on the reusable
+    -- class content id, one observation per classified ply. Exact transitions remain in line
+    -- trajectories and are not recreated here as a statistical lookup table.
     -- The earlier evidence-layer form (joining 133M laplace.attestations by game
     -- context_id) timed out at 90s; this is the substrate's own answer: the
     -- adjudication already happened, the read is a lookup (GH #606).
@@ -24,16 +22,18 @@ CREATE OR REPLACE FUNCTION chess.time_pressure_outcome()
     -- analyzer to fold (player, time-class -> outcome) as its own consensus
     -- cell at ingest, then that read is a single indexed lookup — the same
     -- record-vs-calculate discipline. Tracked as the ingest-fold extension.
-    WITH tc AS (
-        SELECT c.subject_id AS position, c.object_id AS class_id
+    WITH tc AS MATERIALIZED (
+        SELECT c.object_id AS class_id, count(DISTINCT c.subject_id)::bigint AS positions
         FROM laplace.consensus c
         WHERE c.type_id = laplace.relation_type_id('HAS_THINK_CLASS')
-    ), mv AS (
-        SELECT c.subject_id AS position,
+        GROUP BY c.object_id
+    ), outcome AS MATERIALIZED (
+        SELECT c.subject_id AS class_id,
                consensus.eff_mu(c.rating, c.rd) AS mu,
-               c.witness_count
+               c.witness_count AS plays
         FROM laplace.consensus c
-        WHERE c.type_id = laplace.relation_type_id('MOVE')
+        WHERE c.type_id = ANY (consensus.relation_family_ids('OUTCOME'))
+          AND c.object_id = public.laplace_hash128_blake3('Chess_Result')
     ), cls(id, label, ord) AS (
         VALUES
             (laplace.word_id('rushed'), 'rushed', 1),
@@ -49,13 +49,12 @@ CREATE OR REPLACE FUNCTION chess.time_pressure_outcome()
             (laplace.word_id('flagging'),      'flagging',      6)
     )
     SELECT cls.label,
-           count(DISTINCT tc.position)::bigint                       AS positions,
-           sum(mv.witness_count)::bigint                             AS plays,
-           round(consensus.eff_mu_display(
-                   avg(mv.mu)::bigint, 0)::numeric, 3)               AS avg_eff_mu
+           tc.positions,
+           outcome.plays,
+           round(consensus.eff_mu_display(outcome.mu, 0)::numeric, 3) AS avg_eff_mu
     FROM tc
-    JOIN mv  ON mv.position = tc.position
+    JOIN outcome ON outcome.class_id = tc.class_id
     JOIN cls ON cls.id = tc.class_id
-    GROUP BY cls.label, cls.ord
+    GROUP BY cls.label, cls.ord, tc.positions, outcome.plays, outcome.mu
     ORDER BY cls.ord
 $$;

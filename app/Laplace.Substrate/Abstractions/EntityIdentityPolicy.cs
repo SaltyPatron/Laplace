@@ -23,6 +23,7 @@ public static class EntityIdentityPolicy
         EntityTypeRegistry.Collection,
         EntityTypeRegistry.OpenSubtitlesAlignment,
         EntityTypeRegistry.OpenSubtitlesSequence,
+        EntityTypeRegistry.FrameNetAnnotation,
         EntityTypeRegistry.Pixel,
         EntityTypeRegistry.Patch,
         EntityTypeRegistry.Region,

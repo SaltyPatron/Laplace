@@ -15,6 +15,24 @@ public sealed class SemLinkIngestPipelineTests
         """{"give.01": {"13.1-1": {"ARG0": "agent", "ARG1": "theme"}}, "abdicate.01": {"10.11-2": {}}}""";
 
     [Fact]
+    public void SemLinkConfig_UsesSharedSizingAndPreservesExplicitBatch()
+    {
+        var automatic = SemLinkIngestSupport.PipelineConfig(
+            default, "semlink/automatic", DecomposerOptions.Default, reader: null);
+        var explicitOptions = DecomposerOptions.Default with { BatchSize = 777 };
+        var explicitConfig = SemLinkIngestSupport.PipelineConfig(
+            default, "semlink/explicit", explicitOptions, reader: null);
+
+        Assert.Equal(
+            IngestPipelineDefaults.ResolveBatch(
+                Laplace.Engine.Core.IngestSourceProfile.Wiktionary,
+                DecomposerOptions.Default),
+            automatic.BatchSize);
+        Assert.NotEqual(1, automatic.BatchSize);
+        Assert.Equal(777, explicitConfig.BatchSize);
+    }
+
+    [Fact]
     public async Task SemLinkJsonPipeline_BatchedProbe()
     {
         string path = Path.Combine(Path.GetTempPath(), $"laplace-semlink-{Guid.NewGuid():N}.json");

@@ -87,7 +87,7 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
         }
         else if (fileLabel.StartsWith("framenet/fulltext/", StringComparison.Ordinal))
         {
-            await foreach (var ann in ParseFulltextAsync(filePath, ct))
+            await foreach (var ann in ParseFulltextAsync(filePath, fileLabel, ct))
                 yield return new FnFulltext(ann);
         }
     }
@@ -132,10 +132,53 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
         var sentId = ContentEmitter.Emit(b, ann.Sentence, Source);
         var targetId = ContentEmitter.Emit(b, ann.TargetText, Source);
         var frameId = CategoryAnchor.Emit(b, ann.FrameName, FrameTypeId, Source, TC.AcademicCurated);
-        if (sentId is not null && targetId is not null && frameId is not null)
-            b.AddAttestation(NativeAttestation.Categorical(
-                targetId.Value, "EVOKES_FRAME", frameId.Value,
-                Source, TC.AcademicCurated, contextId: sentId.Value));
+        if (sentId is null || targetId is null || frameId is null) return;
+
+        Hash128 startId = OffsetId(ann.TargetStart);
+        Hash128 endId = OffsetId(ann.TargetEnd);
+        b.AddEntity(startId, EntityTier.Word, EntityTypeRegistry.Ordinal, Source);
+        b.AddEntity(endId, EntityTier.Word, EntityTypeRegistry.Ordinal, Source);
+
+        Hash128 schemaId = Hash128.OfCanonical("framenet/span-annotation/schema/v1");
+        b.AddEntity(schemaId, EntityTier.Word, EntityTypeRegistry.SourceReference, Source);
+        Hash128[] constituents = [schemaId, sentId.Value, startId, endId, targetId.Value];
+        Hash128 annotationId = Hash128.Merkle(EntityTier.Document, constituents);
+        b.AddEntity(
+            annotationId, EntityTier.Document, EntityTypeRegistry.FrameNetAnnotation, Source);
+
+        byte[] sentenceUtf8 = Encoding.UTF8.GetBytes(ann.Sentence);
+        if (!TextEntityBuilder.TryDecomposeRoot(
+                sentenceUtf8, out _, out _, out double x, out double y, out double z, out double m))
+            throw new InvalidOperationException("FrameNet span annotation has no sentence placement");
+        Hash128 physicalityId = PhysicalityId.Compute(annotationId, PhysicalityType.Content);
+        if (b.TrySeePhysicality(physicalityId))
+        {
+            double[] coord = [x, y, z, m];
+            b.AddPhysicalityPreSeen(new PhysicalityRow(
+                physicalityId, annotationId, Source, PhysicalityType.Content,
+                x, y, z, m, Hilbert128.Encode(coord),
+                Trajectory.Build(constituents), constituents.Length,
+                null, null, 0));
+        }
+
+        Hash128 occurrenceId = AnnotationOccurrenceId(ann, annotationId);
+        b.AddEntity(
+            occurrenceId, EntityTier.Document,
+            EntityTypeRegistry.FrameNetAnnotationOccurrence, Source);
+        b.AddAttestation(NativeAttestation.Categorical(
+            annotationId, "EVOKES_FRAME", frameId.Value,
+            Source, TC.AcademicCurated, contextId: occurrenceId));
+    }
+
+    internal static Hash128 OffsetId(int offset) =>
+        Hash128.OfCanonical($"framenet/character-offset/{offset}/v1");
+
+    private static Hash128 AnnotationOccurrenceId(FulltextAnno ann, Hash128 annotationId)
+    {
+        static string Hex(string value) => Convert.ToHexString(Encoding.UTF8.GetBytes(value));
+        return Hash128.OfCanonical(
+            $"framenet/annotation-occurrence/{annotationId}/{Hex(ann.FileLabel)}/"
+            + $"{Hex(ann.SentenceReference)}/{Hex(ann.AnnotationReference)}/v1");
     }
 
     public Task<IngestInventory?> DescribeInputAsync(
@@ -198,15 +241,18 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
 
     private static void EmitFrameEntities(SubstrateChangeBuilder b, Frame frame)
     {
-
-
-        CategoryAnchor.Emit(b, frame.Name, FrameTypeId, Source, TC.AcademicCurated);
+        Hash128? frameAnchor = CategoryAnchor.Emit(
+            b, frame.Name, FrameTypeId, Source, TC.AcademicCurated);
+        if (frameAnchor is null) return;
         if (frame.Definition.Length > 0) ContentEmitter.Emit(b, frame.Definition, Source);
         foreach (var ex in frame.Examples) ContentEmitter.Emit(b, ex, Source);
 
         foreach (var fe in frame.Elements)
         {
-            CategoryAnchor.Emit(b, fe.Name, FeTypeId, Source, TC.AcademicCurated);
+            ContentEmitter.Emit(b, fe.Name, Source);
+            RoleAnchor.Emit(
+                b, RoleIdentityKind.FrameNet, frameAnchor.Value, fe.Name,
+                FeTypeId, Source, TC.AcademicCurated);
             if (fe.Definition.Length > 0) ContentEmitter.Emit(b, fe.Definition, Source);
         }
 
@@ -233,8 +279,9 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
         {
             var defId = ContentEmitter.RootId(frame.Definition);
             if (defId is not null)
-                b.AddAttestation(NativeAttestation.Categorical(
-                    frameId, "HAS_DEFINITION", defId.Value, Source, TC.AcademicCurated));
+                b.AddAttestation(NativeAttestation.CategoricalResolved(
+                    frameId, FrameNetSource.HasDefinitionTypeId, defId.Value,
+                    Source, null, TC.AcademicCurated));
         }
         foreach (var ex in frame.Examples)
         {
@@ -246,31 +293,41 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
 
         foreach (var fe in frame.Elements)
         {
-            var feNameId = CategoryAnchor.Id(fe.Name);
-            if (feNameId is null) continue;
+            var feNameId = ContentEmitter.RootId(fe.Name);
+            var feRoleId = RoleAnchor.Id(RoleIdentityKind.FrameNet, frameId, fe.Name);
+            if (feNameId is null || feRoleId is null) continue;
             Hash128? coreCtx = CorenessValues.Contains(fe.CoreType) ? CorenessId(fe.CoreType) : null;
-            b.AddAttestation(NativeAttestation.Categorical(
-                frameId, "HAS_FRAME_ELEMENT", feNameId.Value, Source, TC.AcademicCurated,
-                contextId: coreCtx));
+            b.AddAttestation(NativeAttestation.CategoricalResolved(
+                frameId, FrameNetSource.HasFrameElementTypeId, feRoleId.Value,
+                Source, null, TC.AcademicCurated));
+            b.AddAttestation(NativeAttestation.CategoricalResolved(
+                feRoleId.Value, FrameNetSource.HasNameAliasTypeId, feNameId.Value,
+                Source, null, TC.AcademicCurated));
+            if (coreCtx is { } coreness)
+                b.AddAttestation(NativeAttestation.CategoricalResolved(
+                    feRoleId.Value, FrameNetSource.HasFeatureTypeId, coreness,
+                    Source, null, TC.AcademicCurated));
 
             if (fe.Definition.Length > 0)
             {
                 var feDefId = ContentEmitter.RootId(fe.Definition);
                 if (feDefId is not null)
-                    b.AddAttestation(NativeAttestation.Categorical(
-                        feNameId.Value, "HAS_DEFINITION", feDefId.Value,
-                        Source, TC.AcademicCurated));
+                    b.AddAttestation(NativeAttestation.CategoricalResolved(
+                        feRoleId.Value, FrameNetSource.HasDefinitionTypeId, feDefId.Value,
+                        Source, null, TC.AcademicCurated));
             }
 
 
             foreach (var reqName in fe.Requires)
-                if (CategoryAnchor.Id(reqName) is { } reqId)
-                    b.AddAttestation(NativeAttestation.Categorical(
-                        feNameId.Value, "REQUIRES", reqId, Source, TC.AcademicCurated));
+                if (RoleAnchor.Id(RoleIdentityKind.FrameNet, frameId, reqName) is { } reqId)
+                    b.AddAttestation(NativeAttestation.CategoricalResolved(
+                        feRoleId.Value, FrameNetSource.RequiresTypeId, reqId,
+                        Source, null, TC.AcademicCurated));
             foreach (var exName in fe.Excludes)
-                if (CategoryAnchor.Id(exName) is { } exId)
-                    b.AddAttestation(NativeAttestation.Categorical(
-                        feNameId.Value, "EXCLUDES", exId, Source, TC.AcademicCurated));
+                if (RoleAnchor.Id(RoleIdentityKind.FrameNet, frameId, exName) is { } exId)
+                    b.AddAttestation(NativeAttestation.CategoricalResolved(
+                        feRoleId.Value, FrameNetSource.ExcludesTypeId, exId,
+                        Source, null, TC.AcademicCurated));
         }
 
         foreach (var lu in frame.LexUnits)
@@ -368,11 +425,20 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
     internal static async IAsyncEnumerable<FulltextAnno> ParseFulltextAsync(
         string path, [EnumeratorCancellation] CancellationToken ct)
     {
+        await foreach (var ann in ParseFulltextAsync(path, Path.GetFileName(path), ct))
+            yield return ann;
+    }
+
+    internal static async IAsyncEnumerable<FulltextAnno> ParseFulltextAsync(
+        string path, string fileLabel, [EnumeratorCancellation] CancellationToken ct)
+    {
         var settings = new XmlReaderSettings { Async = true, IgnoreWhitespace = false };
         using var reader = XmlReader.Create(path, settings);
 
         string sentence = "";
         string? frameName = null;
+        string sentenceReference = "";
+        string annotationReference = "";
         int targetStart = -1, targetEnd = -1;
         bool inTargetLayer = false;
 
@@ -385,12 +451,14 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
                 {
                     case "sentence":
                         sentence = "";
+                        sentenceReference = reader.GetAttribute("ID") ?? "";
                         break;
                     case "text":
                         sentence = await reader.ReadElementContentAsStringAsync();
                         break;
                     case "annotationSet":
                         frameName = reader.GetAttribute("frameName");
+                        annotationReference = reader.GetAttribute("ID") ?? "";
                         targetStart = targetEnd = -1;
                         inTargetLayer = false;
                         break;
@@ -416,7 +484,9 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
                 {
                     string target = sentence.Substring(targetStart, targetEnd - targetStart + 1).Trim();
                     if (target.Length > 0)
-                        yield return new FulltextAnno(sentence, target, frameName!);
+                        yield return new FulltextAnno(
+                            sentence, target, frameName!, targetStart, targetEnd,
+                            fileLabel, sentenceReference, annotationReference);
                 }
                 frameName = null;
                 targetStart = targetEnd = -1;
@@ -516,5 +586,13 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
 
     public sealed record FrameRel(string Type, string TargetFrame);
 
-    public sealed record FulltextAnno(string Sentence, string TargetText, string FrameName);
+    public sealed record FulltextAnno(
+        string Sentence,
+        string TargetText,
+        string FrameName,
+        int TargetStart,
+        int TargetEnd,
+        string FileLabel,
+        string SentenceReference,
+        string AnnotationReference);
 }

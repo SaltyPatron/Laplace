@@ -247,7 +247,7 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         var result = await runner.RunAsync(decomposer, options);
         Assert.Equal(8, result.UnitsApplied);
         Assert.Equal(0, result.UnitsFailed);
-        Assert.Equal(9, result.EntitiesInserted);
+        Assert.Equal(9, result.EntitiesInserted - result.BootstrapEntitiesInserted);
     }
 
     [Fact]
@@ -293,7 +293,7 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         Assert.Equal(48, result.UnitsApplied);
         Assert.Equal(0, result.UnitsFailed);
 
-        Assert.Equal(49, result.EntitiesInserted);
+        Assert.Equal(49, result.EntitiesInserted - result.BootstrapEntitiesInserted);
     }
 
     [Fact]
@@ -315,7 +315,7 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         var result = await runner.RunAsync(decomposer, options);
         Assert.Equal(40, result.UnitsApplied);
         Assert.Equal(0, result.UnitsFailed);
-        Assert.Equal(41, result.EntitiesInserted);
+        Assert.Equal(41, result.EntitiesInserted - result.BootstrapEntitiesInserted);
     }
 
     private sealed class PhasedDecomposer : IDecomposer

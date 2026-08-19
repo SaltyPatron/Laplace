@@ -14,6 +14,7 @@ namespace Laplace.Decomposers.Abstractions;
 public static class PosReference
 {
     public static readonly Hash128 PosTypeId = EntityTypeRegistry.Pos;
+    public static readonly Hash128 HasPosTypeId = RelationTypeRegistry.RelationTypeId("HAS_POS");
 
 
 
@@ -65,8 +66,8 @@ public static class PosReference
             // id, so rendering resolves from canonical_names.
         }
         VocabularyNames.TrackProbationaryPos(readbackNames, tag, tagset, probationary);
-        b.AddAttestation(NativeAttestation.Categorical(
-            subject, "HAS_POS", posId, sourceId, contextId, sourceTrust,
+        b.AddAttestation(NativeAttestation.CategoricalResolved(
+            subject, HasPosTypeId, posId, sourceId, contextId, sourceTrust,
             observationCount: observationCount));
         return posId;
     }

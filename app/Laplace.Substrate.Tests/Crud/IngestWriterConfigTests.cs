@@ -7,9 +7,9 @@ namespace Laplace.SubstrateCRUD.Tests;
 public sealed class IngestWriterConfigTests
 {
     [Fact]
-    public void ResolveApplyPartitions_IsAlwaysOne()
+    public void ResolveApplyDispatchWorkers_IsAlwaysOne()
     {
-        Assert.Equal(1, IngestTopology.ResolveApplyPartitions());
+        Assert.Equal(1, IngestTopology.ResolveApplyDispatchWorkers());
     }
 
     [Fact]

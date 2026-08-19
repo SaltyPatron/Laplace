@@ -288,7 +288,16 @@ public abstract class Decomposer<TRecord> : IDecomposer
             await foreach (var change in IngestBatchPipeline.RunMultiFileAsync(
                                multiFileStream,
                                label => CreateHandlerForFile(label, options),
-                               label => ConfigForFile(label, context.Reader, options),
+                               label => ConfigForFile(label, context.Reader, options)
+                                   .WithCanonicalNamesProvider(() =>
+                                   {
+                                       var names = new HashSet<string>(
+                                           CanonicalNamesForReadback, StringComparer.Ordinal)
+                                       {
+                                           $"substrate/source/{SourceName}/v1",
+                                       };
+                                       return names;
+                                   }),
                                maxTotalUnits: options.MaxInputUnits,
                                fileWorkers: IngestTopology.Current.FileWorkers,
                                isolateFileFailures: PerFileCompletion,
@@ -519,8 +528,10 @@ public abstract class RelationTripleDecomposer : Decomposer<RelationTripleRecord
     public override int EstimatedComposeUnitsPerRecord =>
         IngestSourceProfile.RelationTriple.EstComposeUnitsPerRecord;
 
+    protected virtual ConcurrentIdSet? SourceNodeDeclarations => null;
+
     protected sealed override IIngestRecordHandler<RelationTripleRecord> CreateHandler() =>
-        new RelationTripleHandler(SourceId, SourceTrust);
+        new RelationTripleHandler(SourceId, SourceTrust, SourceNodeDeclarations);
 
     protected override IngestBatchConfig BuildPipelineConfig(
         IDecomposerContext context, DecomposerOptions options) =>

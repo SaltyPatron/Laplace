@@ -19,9 +19,11 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase<ConceptN
     public override int LayerOrder => 2;
     protected override double SourceTrust => TC.UserCuratedResource;
     internal static readonly ConcurrentDictionary<string, byte> LanguageNames = new(StringComparer.Ordinal);
+    private readonly ConcurrentIdSet _sourceNodeDeclarations = new();
     public override IReadOnlyCollection<string> CanonicalNamesForReadback => LanguageNames.Keys.ToArray();
 
     protected override ConcurrentDictionary<string, byte>? VocabularyReadback => LanguageNames;
+    protected override ConcurrentIdSet? SourceNodeDeclarations => _sourceNodeDeclarations;
 
     public Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
@@ -104,6 +106,11 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase<ConceptN
         Hash128? startLangId = LangId(startLang);
         Hash128? endLangId = LangId(endLang);
 
+        // The generic handler uses the resolved synset ids as the semantic edge endpoints
+        // where present, while retaining these surfaces as lexical routes into those hubs.
+        // A sense-bearing /c/en/bank/n/wn/... assertion must not flatten back onto the shared
+        // text root for "bank" and then rely on side metadata to recover its meaning.
+        //
         // dbpedia's subject order is not the manifest's: it says (France, capital, Paris)
         // while AT_LOCATION reads "subject is located at object". Flipping HERE, at record
         // construction, keeps every downstream stage order-agnostic -- the alternative is a

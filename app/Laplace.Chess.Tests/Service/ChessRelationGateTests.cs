@@ -7,7 +7,7 @@ namespace Laplace.Chess.Service.Tests;
 
 // The decomposer contract's sharp edge (GH #577, the UD HAS_POS 0xC0000005 class): every
 // relation a lane emits MUST be declared in its manifest. This gate runs a real game through
-// BOTH chess lanes (recorder + analyzer, exercising header facts, MOVE/OUTCOME, evals from
+// BOTH chess lanes (recorder + analyzer, exercising header facts, bounded OUTCOME projections, evals from
 // cutechess comments, think class from spent time, motifs, opening classification, quality
 // glyphs) and asserts every attested relation id resolves to a declared name.
 [Trait("Tier", "fast")]

@@ -2,6 +2,13 @@ using Laplace.Engine.Core;
 
 namespace Laplace.SubstrateCRUD;
 
+/// <summary>Run-monotonic counters exposed by writers that fold testimony.</summary>
+public interface IConsensusFoldMetrics
+{
+    long ObservationsAccumulated { get; }
+    long CellsFolded { get; }
+}
+
 public interface ISubstrateWriter
 {
     /// <summary>
