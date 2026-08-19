@@ -137,9 +137,18 @@ public sealed class IngestRunner
                 Failures: Array.Empty<IngestFailure>());
         }
 
+        var counters = new RunCounters
+        {
+            Sw = sw,
+            SourceName = decomposer.SourceName,
+            LayerOrder = decomposer.LayerOrder,
+        };
         var ctx = new InternalContext(
             EcosystemPath: ResolveEcosystemPath(decomposer, options),
-            Writer: _writer,
+            // Initialization is part of the decomposer's write surface. Route it
+            // through the same run counters so manifest/bootstrap rows cannot vanish
+            // from source amplification and identity-admission reporting.
+            Writer: new InitializationAccountingWriter(_writer, counters),
             Reader: _reader,
             Logger: _loggerFactory.CreateLogger($"Decomposer:{decomposer.SourceName}"),
             SubstrateVersion: "v1");
@@ -173,13 +182,7 @@ public sealed class IngestRunner
             inventory?.UnitType ?? "units", inventory?.TotalInputUnits ?? 0, inventory?.FileCount ?? 0);
 
         var rng = new Random(unchecked((int)decomposer.SourceId.Lo));
-        var counters = new RunCounters
-        {
-            Sw = sw,
-            SourceName = decomposer.SourceName,
-            LayerOrder = decomposer.LayerOrder,
-            Inventory = inventory,
-        };
+        counters.Inventory = inventory;
 
         int batchSize = Math.Max(1, options.BatchSize);
         int commitRows = Math.Max(0, options.CommitRows);
@@ -697,7 +700,10 @@ public sealed class IngestRunner
             FilesDone: counters.FilesDone,
             InputUnitsDone: counters.InputUnitsDone,
             InputUnitsTotal: inventory?.EffectiveTotalInputUnits ?? 0,
-            GovernedIdentitiesWithoutPhysicality: governedWithoutPhysicality);
+            GovernedIdentitiesWithoutPhysicality: governedWithoutPhysicality,
+            BootstrapEntitiesInserted: counters.BootstrapEntitiesInserted,
+            BootstrapPhysicalitiesInserted: counters.BootstrapPhysicalitiesInserted,
+            BootstrapAttestationsInserted: counters.BootstrapAttestationsInserted);
 
 
 
@@ -742,6 +748,7 @@ public sealed class IngestRunner
             "INGEST_COMPLETE source={Source} layer={Layer} input_done={InputDone} input_total={InputTotal} "
             + "files_done={FilesDone} files_total={FilesTotal} intents={Applied}/{Produced} "
             + "rows_new={Ent}e+{Phys}p+{Att}a elapsed_s={Elapsed:F1} failed={Failed} status={Status} "
+            + "bootstrap_rows_new={BootEnt}e+{BootPhys}p+{BootAtt}a "
             + "synset_hit_cum={SynHit} synset_miss_cum={SynMiss} lang_miss_cum={LangMiss}",
             decomposer.SourceName, decomposer.LayerOrder,
             counters.InputUnitsDone, declaredInput,
@@ -749,6 +756,8 @@ public sealed class IngestRunner
             result.UnitsApplied, result.UnitsAttempted,
             result.EntitiesInserted, result.PhysicalitiesInserted, result.AttestationsInserted,
             result.WallClock.TotalSeconds, result.UnitsFailed, status,
+            result.BootstrapEntitiesInserted, result.BootstrapPhysicalitiesInserted,
+            result.BootstrapAttestationsInserted,
             SourceEntityIdConventions.SynsetHits, SourceEntityIdConventions.SynsetMisses,
             LanguageReference.ResolveMisses);
         string? failureReason = status == "failed"
@@ -1301,6 +1310,9 @@ public sealed class IngestRunner
         internal long _physicalitiesInserted;
         internal long _attestationsInserted;
         internal long _roundTrips;
+        internal long _bootstrapEntitiesInserted;
+        internal long _bootstrapPhysicalitiesInserted;
+        internal long _bootstrapAttestationsInserted;
         internal long _unitsProduced;
         internal long _inputUnitsDone;
         internal long _inputUnitsComposed;
@@ -1323,6 +1335,36 @@ public sealed class IngestRunner
         public long PhysicalitiesInserted => Interlocked.Read(ref _physicalitiesInserted);
         public long AttestationsInserted => Interlocked.Read(ref _attestationsInserted);
         public long RoundTrips => Interlocked.Read(ref _roundTrips);
+        public long BootstrapEntitiesInserted => Interlocked.Read(ref _bootstrapEntitiesInserted);
+        public long BootstrapPhysicalitiesInserted => Interlocked.Read(ref _bootstrapPhysicalitiesInserted);
+        public long BootstrapAttestationsInserted => Interlocked.Read(ref _bootstrapAttestationsInserted);
+    }
+
+    /// <summary>
+    /// Decomposer initialization historically wrote through the raw writer before run
+    /// counters existed. That made source totals exclude vocabulary/bootstrap rows and
+    /// let their entity admission bypass the terminal gate. This wrapper is deliberately
+    /// scoped to <see cref="IDecomposer.InitializeAsync"/>; streamed changes continue
+    /// through the runner's normal batching and accounting path.
+    /// </summary>
+    private sealed class InitializationAccountingWriter(
+        ISubstrateWriter inner,
+        RunCounters counters) : ISubstrateWriter
+    {
+        public async Task<ApplyResult> ApplyAsync(
+            SubstrateChange change, CancellationToken ct = default)
+        {
+            var result = await inner.ApplyAsync(change, ct).ConfigureAwait(false);
+            Interlocked.Add(ref counters._entitiesInserted, result.EntitiesInserted);
+            Interlocked.Add(ref counters._physicalitiesInserted, result.PhysicalitiesInserted);
+            Interlocked.Add(ref counters._attestationsInserted, result.AttestationsInserted);
+            Interlocked.Add(ref counters._bootstrapEntitiesInserted, result.EntitiesInserted);
+            Interlocked.Add(ref counters._bootstrapPhysicalitiesInserted, result.PhysicalitiesInserted);
+            Interlocked.Add(ref counters._bootstrapAttestationsInserted, result.AttestationsInserted);
+            Interlocked.Add(ref counters._roundTrips, result.RoundTrips);
+            counters.EntityAdmission.Observe(change);
+            return result;
+        }
     }
 
     private sealed record InternalContext(
