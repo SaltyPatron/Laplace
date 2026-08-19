@@ -16,8 +16,14 @@ public readonly struct SemLinkSource : ISeedSource
     public static IReadOnlyList<string> Relations { get; } =
         ["CORRESPONDS_TO", "ROLE_CORRESPONDS_TO"];
 
+    internal static readonly Hash128 RoleCorrespondsToTypeId =
+        RelationTypeRegistry.RelationTypeId(Relations[1]);
+
     public static IReadOnlyList<string>? TypeNodeNames { get; } =
-        ["VerbNet_Class", "PropBank_Roleset", "FrameNet_Frame"];
+        [
+            "VerbNet_Class", "VerbNet_Role", "PropBank_Roleset", "PropBank_Role",
+            "FrameNet_Frame", "FrameNet_FE",
+        ];
 
     public static SourceLicense License => SourceLicense.Unknown;
 
@@ -39,7 +45,10 @@ public readonly struct PredicateMatrixSource : ISeedSource
         ["CORRESPONDS_TO", "ROLE_CORRESPONDS_TO"];
 
     public static IReadOnlyList<string>? TypeNodeNames { get; } =
-        ["VerbNet_Class", "PropBank_Roleset", "FrameNet_Frame", "FrameNet_FE"];
+        [
+            "VerbNet_Class", "VerbNet_Role", "PropBank_Roleset", "PropBank_Role",
+            "FrameNet_Frame", "FrameNet_FE",
+        ];
 
     public static SourceLicense License => SourceLicense.Unknown;
 

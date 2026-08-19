@@ -23,7 +23,7 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 /// tables, no walk journal, no terminal fold, no advisory-lock wall.
 /// The Glicko rating period is the batch (ratified 2026-07-15).
 /// </summary>
-public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IAsyncDisposable
+public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFoldMetrics, IAsyncDisposable
 {
     public const string PeriodBoundaryUnitPrefix = IngestBatchPipeline.PeriodBoundaryUnitPrefix;
 

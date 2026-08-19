@@ -85,6 +85,7 @@ public sealed class ContentBatch : IDisposable
 
         var probeTrees = new List<TierTree>();
         var emitEntries = new List<Entry>();
+        var rootsProvenAbsent = new HashSet<Hash128>();
 
         for (int i = 0; i < entries.Count; i++)
         {
@@ -96,6 +97,11 @@ public sealed class ContentBatch : IDisposable
                 continue;
             }
 
+            // The unscoped root probe above already proved this identity absent.
+            // Carry that result into the tier descent so its highest-tier round
+            // does not immediately issue the same indexed lookup a second time.
+            rootsProvenAbsent.Add(e.RootId);
+
             e.Tree ??= ContentTierSpine.BuildTree(e.Canonical);
             if (e.Tree is null) continue;
             probeTrees.Add(e.Tree);
@@ -103,7 +109,8 @@ public sealed class ContentBatch : IDisposable
         }
 
         byte[]?[] bitmaps = probeTrees.Count > 0
-            ? await ContentTierSpine.BatchExistenceEmitBitmapsAsync(probeTrees, _reader, ct).ConfigureAwait(false)
+            ? await ContentTierSpine.BatchExistenceEmitBitmapsAsync(
+                probeTrees, _reader, rootsProvenAbsent, ct).ConfigureAwait(false)
             : [];
 
         for (int t = 0; t < emitEntries.Count; t++)

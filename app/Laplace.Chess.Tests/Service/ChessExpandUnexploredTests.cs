@@ -1,3 +1,4 @@
+using Laplace.Engine.Core;
 using Laplace.Modality.Chess;
 using Laplace.SubstrateCRUD;
 using Xunit;
@@ -17,10 +18,20 @@ public sealed class ChessExpandUnexploredTests
 
         Assert.Equal(20, n); // standard start: 20 legal moves
         Assert.Equal(20, change.Entities.Count(e => e.TypeId == ChessVocabulary.GameType));
-        Assert.Equal(20, change.Physicalities.Count(p => p.NConstituents == 2));
-        Assert.All(
-            change.Attestations.Where(a => a.TypeId == ChessVocabulary.MoveType),
-            a => Assert.Equal(ChessExpandUnexplored.SourceId, a.SourceId));
+        var lines = change.Physicalities.Where(p => p.NConstituents == 2).ToList();
+        Assert.Equal(20, lines.Count);
+        Assert.DoesNotContain(change.Attestations,
+            a => a.TypeId == ChessVocabulary.MoveType);
+
+        Hash128 root = ChessCompose.PositionId(m.StateKey(m.Initial()));
+        var successors = new HashSet<Hash128>();
+        foreach (var line in lines)
+        {
+            var ids = Trajectory.Constituents(line.TrajectoryXyzm!);
+            Assert.Equal(root, ids[0]);
+            successors.Add(ids[1]);
+        }
+        Assert.Equal(20, successors.Count);
     }
 
     [Fact]

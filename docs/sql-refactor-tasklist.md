@@ -78,7 +78,10 @@ Measured per-call cost, and call counts from `laplace.pg_stat_statements`:
 | `structural.geometry_neighbours` | sql | — | 6 | 14 s/call for *dog* (bubble_up comment) |
 
 - [x] `converse.attested_language_batch(bytea[])` written and installed.
-- [ ] `lexical.lexical_peers_batch(bytea[])` — blocks further `bubble_up_batch` gains.
+- [x] `lexical.lexical_peers_batch(bytea[])` — one set probe, correlated fallback only
+      for unresolved inputs, stable input ordinals/duplicates, and scalar/batch parity.
+      Warm 40-id seeded-db plan: independent scalars 8.205 ms / 320 buffers; one batch
+      6.949 ms / 190 buffers. The delegated scalar fast path was 8.851 ms / 341 buffers.
 - [ ] `lexical.word_case_variants` array form (C; needs a preload bounce).
 - [ ] `structural.geometry_neighbours` array form.
 

@@ -4,32 +4,58 @@ CREATE OR REPLACE FUNCTION chess.player_moves(
         p_limit integer DEFAULT 12)
     RETURNS TABLE(next_position bytea, games bigint, score double precision)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
-    -- Player-scoped repertoire: a PROVENANCE read over evidence, not a fold.
-    -- GH #736: MOVE evidence rows carry context_id = the playing-EVENT they
-    -- were played in, and the colour facts subject the shared LINE with
-    -- context = that same event -- so this join threads CONTEXT equality (the
-    -- events where the player held the colour), never the colour fact's
-    -- subject: that is the line, and joining on it would cross every OTHER
-    -- playing of the same content into his repertoire. The caller resolves
-    -- which colour the player held from the position's side to move (moves out
-    -- of a white-to-move position in his games are his only when he is White).
-    -- score is the mover's net outcome in [0,1], weighted by observation_count
-    -- (outcome is the net CLASS on the folded evidence row).
-    SELECT a.object_id,
-           sum(a.observation_count)::bigint AS games,
-           (sum(a.outcome::double precision * a.observation_count)
-                / (2.0 * sum(a.observation_count)))::double precision AS score
-    FROM laplace.attestations a
-    WHERE a.subject_id = p_position
-      AND a.type_id = laplace.relation_type_id('MOVE')
-      AND a.context_id IN (
-            SELECT g.context_id
-            FROM laplace.attestations g
-            WHERE g.type_id = laplace.relation_type_id(
-                      CASE WHEN p_as_white THEN 'HAS_WHITE' ELSE 'HAS_BLACK' END)
-              AND g.object_id = p_player
-              AND g.context_id IS NOT NULL)
-    GROUP BY a.object_id
+    -- Start from this player's own playing/line headers, then decode each line ONCE and
+    -- take the constituent after every matching position ordinal. Exact move occurrence is
+    -- ordered structure; no per-ply MOVE evidence row is required. HAS_RESULT is joined on
+    -- the same playing context so another playing of an identical line cannot leak its score.
+    WITH rel AS MATERIALIZED (
+        SELECT consensus.relation_family_ids('HAS_RESULT') AS result_types
+    ),
+    player_lines AS MATERIALIZED (
+        SELECT h.subject_id AS line_id, h.context_id AS playing_id,
+               max(h.observation_count)::bigint AS games
+        FROM laplace.attestations h
+        WHERE h.type_id = laplace.relation_type_id(
+                  CASE WHEN p_as_white THEN 'HAS_WHITE' ELSE 'HAS_BLACK' END)
+          AND h.object_id = p_player
+          AND h.context_id IS NOT NULL
+        GROUP BY h.subject_id, h.context_id
+    ),
+    results AS MATERIALIZED (
+        SELECT pl.line_id, pl.playing_id, pl.games, max(r.object_id) AS result_id
+        FROM player_lines pl
+        JOIN laplace.attestations r
+          ON r.subject_id = pl.line_id
+         AND r.context_id = pl.playing_id
+        JOIN rel ON r.type_id = ANY (rel.result_types)
+        GROUP BY pl.line_id, pl.playing_id, pl.games
+    ),
+    player_games AS MATERIALIZED (
+        SELECT r.line_id, r.playing_id, r.games,
+               chess.outcome(p_as_white, r.result_id)::double precision / 2.0 AS score
+        FROM results r
+        WHERE chess.outcome(p_as_white, r.result_id) IS NOT NULL
+    ),
+    steps AS MATERIALIZED (
+        SELECT pg.games, pg.score, t.ids[i.ordinal + 1] AS next_position
+        FROM player_games pg
+        JOIN laplace.physicalities p
+          ON p.entity_id = pg.line_id
+         AND p.type = 1
+         AND p.trajectory IS NOT NULL
+        CROSS JOIN LATERAL (
+            SELECT array_agg(c.entity_id ORDER BY c.ordinal) AS ids
+            FROM public.laplace_trajectory_constituents(p.trajectory) c
+        ) t
+        CROSS JOIN LATERAL generate_subscripts(t.ids, 1) AS i(ordinal)
+        WHERE t.ids[i.ordinal] = p_position
+          AND i.ordinal < cardinality(t.ids)
+    )
+    SELECT next_position,
+           sum(games)::bigint AS games,
+           (sum(score * games) / sum(games))::double precision AS score
+    FROM steps
+    GROUP BY next_position
     ORDER BY games DESC
     LIMIT p_limit
 $$;

@@ -2550,6 +2550,28 @@ public static class NpgsqlSubstrateReads
     public readonly record struct ChessMoveRow(
         byte[] NextPosition, double EffMu, double Rd, long WitnessCount);
 
+    public readonly record struct ChessTrajectorySuccessorRow(
+        byte[] NextPosition, long Seen);
+
+    /// <summary>
+    /// Exact next-position candidates projected from ordered line trajectories. This is
+    /// structure, not a second MOVE testimony population.
+    /// </summary>
+    public static Task<IReadOnlyList<ChessTrajectorySuccessorRow>> ChessTrajectorySuccessorsAsync(
+        NpgsqlDataSource dataSource, byte[] rootId, int limit, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT successor_id, seen
+            FROM structural.geometry_successors(@root, @limit, 1, false)
+            """,
+            static r => new ChessTrajectorySuccessorRow(
+                (byte[])r[0], r.GetInt64(1)),
+            p =>
+            {
+                p.Add("root", NpgsqlDbType.Bytea).Value = rootId;
+                p.AddWithValue("limit", limit);
+            }, ct: ct, label: "chess_trajectory_successors", onError: onError);
+
     /// <summary><c>chess.moves(root, limit)</c>.</summary>
     public static Task<IReadOnlyList<ChessMoveRow>> ChessMovesAsync(
         NpgsqlDataSource dataSource, byte[] rootId, int limit, CancellationToken ct,

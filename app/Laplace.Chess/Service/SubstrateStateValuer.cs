@@ -25,16 +25,13 @@ public sealed class SubstrateStateValuer : IStateValuer
             for (int i = 0; i < n; i++)
             {
                 var c = ChessCompose.Position(stateSurfaces[i]);
-                var ids = new Hash128[c.Substructures.Count + 1];
+                var ids = new Hash128[c.Substructures.Count];
                 for (int j = 0; j < c.Substructures.Count; j++)
                 {
                     var e = ConsensusKeys.EdgeId(
                         c.Substructures[j].Id, ChessVocabulary.OutcomeType, ChessVocabulary.OutcomeObject);
                     ids[j] = e; distinct.Add(e);
                 }
-                var pe = ConsensusKeys.EdgeId(
-                    c.Position.Id, ChessVocabulary.OutcomeType, ChessVocabulary.OutcomeObject);
-                ids[^1] = pe; distinct.Add(pe);
                 perState[i] = ids;
             }
         }

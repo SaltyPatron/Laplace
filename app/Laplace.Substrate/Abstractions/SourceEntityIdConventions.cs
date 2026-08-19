@@ -119,6 +119,27 @@ public static class SourceEntityIdConventions
         return $"{lemma}%{fields[0]}:{fields[1]}:{fields[2]}";
     }
 
+    /// <summary>
+    /// Canonicalizes a complete WordNet sense key without discarding the satellite-head
+    /// fields. Unlike <see cref="NormalizeSenseKey"/>, this is an exact source identity,
+    /// not the deliberately lossy three-field compatibility key used by older bridges.
+    /// </summary>
+    public static string? NormalizeExactSenseKey(string raw)
+    {
+        if (string.IsNullOrEmpty(raw)) return null;
+        string key = raw.Trim().TrimStart('?', '!');
+        int pct = key.IndexOf('%');
+        if (pct <= 0 || pct + 1 >= key.Length) return null;
+
+        string[] fields = key[(pct + 1)..].Split(':', StringSplitOptions.None);
+        if (fields.Length != 5 || fields[0].Length != 1
+            || fields[0][0] is < '1' or > '5'
+            || fields[1].Length == 0 || fields[2].Length == 0)
+            return null;
+
+        return $"{key[..pct]}%{string.Join(':', fields)}";
+    }
+
     public static string NumericVerbNetClassId(string classId)
     {
         if (classId.Length == 0 || char.IsDigit(classId[0])) return classId;

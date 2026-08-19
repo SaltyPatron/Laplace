@@ -146,6 +146,9 @@ public sealed class WorkingSetPipelineTests
             WorkingSetProbeInterval = 3276,
             WorkingSetRecordCap = 24576,
             WorkingSetProfile = profile,
+            EntityCapacity = 1024 * 40,
+            PhysicalityCapacity = 1024 * 32,
+            AttestationCapacity = 1024 * 8,
         };
 
         var shared = config.WithWorkingSetConcurrency(10);
@@ -156,6 +159,39 @@ public sealed class WorkingSetPipelineTests
         Assert.Equal(expected, shared.WorkingSetRecordCap);
         Assert.True(shared.WorkingSetProbeInterval <= expected);
         Assert.Equal(24576, config.WorkingSetRecordCap);
+
+        int residentRecords = Math.Min(config.BatchSize, expected);
+        var capacities = shared.ResolveBuilderCapacities();
+        Assert.Equal(residentRecords * 40, capacities.Entities);
+        Assert.Equal(residentRecords * 32, capacities.Physicalities);
+        Assert.Equal(residentRecords * 8, capacities.Attestations);
+
+        var originalCapacities = config.ResolveBuilderCapacities();
+        Assert.Equal(1024 * 40, originalCapacities.Entities);
+        Assert.Equal(1024 * 32, originalCapacities.Physicalities);
+        Assert.Equal(1024 * 8, originalCapacities.Attestations);
+    }
+
+    [Fact]
+    public void BuilderCapacityScaling_PreservesZeroAndRoundsNonzeroCapacityUp()
+    {
+        var config = new IngestBatchConfig
+        {
+            SourceId = TestSource,
+            BatchLabelPrefix = "builder-capacity-scaling-test",
+            BatchSize = 2048,
+            WorkingSet = true,
+            WorkingSetRecordCap = 16,
+            EntityCapacity = 1,
+            PhysicalityCapacity = 0,
+            AttestationCapacity = 2048 * 8,
+        };
+
+        var capacities = config.ResolveBuilderCapacities();
+
+        Assert.Equal(1, capacities.Entities);
+        Assert.Equal(0, capacities.Physicalities);
+        Assert.Equal(16 * 8, capacities.Attestations);
     }
 
     [Fact]

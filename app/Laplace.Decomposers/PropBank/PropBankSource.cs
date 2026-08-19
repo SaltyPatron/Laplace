@@ -19,8 +19,22 @@ public readonly struct PropBankSource : ISeedSource
         "CORRESPONDS_TO", "ROLE_CORRESPONDS_TO", "HAS_FEATURE",
     ];
 
+    internal static readonly Hash128 HasDefinitionTypeId =
+        RelationTypeRegistry.RelationTypeId(Relations[1]);
+    internal static readonly Hash128 HasSemanticRoleTypeId =
+        RelationTypeRegistry.RelationTypeId(Relations[2]);
+    internal static readonly Hash128 CorrespondsToTypeId =
+        RelationTypeRegistry.RelationTypeId(Relations[4]);
+    internal static readonly Hash128 RoleCorrespondsToTypeId =
+        RelationTypeRegistry.RelationTypeId(Relations[5]);
+    internal static readonly Hash128 HasFeatureTypeId =
+        RelationTypeRegistry.RelationTypeId(Relations[6]);
+
     public static IReadOnlyList<string>? TypeNodeNames { get; } =
-        ["PropBank_Roleset", "VerbNet_Class", "FrameNet_Frame", "Ordinal"];
+        [
+            "PropBank_Roleset", "PropBank_Role", "VerbNet_Class", "VerbNet_Role",
+            "FrameNet_Frame", "FrameNet_FE", "Ordinal",
+        ];
 
     public static SourceLicense License => SourceLicense.Unknown;
 

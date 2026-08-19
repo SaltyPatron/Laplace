@@ -174,6 +174,10 @@ audit-decomposers *args: build-app
     @chmod +x scripts/audit-decomposers.sh
     scripts/audit-decomposers.sh {{args}}
 
+audit-source-fidelity:
+    @chmod +x scripts/audit-semantic-source-fidelity.sh
+    scripts/audit-semantic-source-fidelity.sh
+
 query sql:
     psql -h /var/run/postgresql -U laplace_admin -d "${LAPLACE_QUERY_DB:-laplace-dev}" -c "{{sql}}"
 
