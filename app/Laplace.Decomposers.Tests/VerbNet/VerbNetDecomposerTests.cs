@@ -18,8 +18,8 @@ public sealed class VerbNetDecomposerTests
     private const string ClassXml = """
 <VNCLASS ID="give-13.1">
  <MEMBERS>
-  <MEMBER name="lend" verbnet_key="lend#1" wn="lend%2:40:00" fn_mapping="Commerce_buy" features=""/>
-  <MEMBER name="give-back" verbnet_key="give-back#1" wn="" fn_mapping="Locating Becoming_aware" features=""/>
+  <MEMBER name="lend" verbnet_key="lend#1" wn="lend%2:40:00" grouping="lend.01 loan.01" fn_mapping="Commerce_buy" features=""/>
+  <MEMBER name="give-back" verbnet_key="give-back#1" wn="" grouping="" fn_mapping="Locating Becoming_aware" features=""/>
  </MEMBERS>
  <THEMROLES>
   <THEMROLE type="Agent"><SELRESTRS logic="or"><SELRESTR Value="+" type="animate"/></SELRESTRS></THEMROLE>
@@ -42,7 +42,7 @@ public sealed class VerbNetDecomposerTests
  <SUBCLASSES>
   <VNSUBCLASS ID="give-13.1-1">
    <MEMBERS>
-    <MEMBER name="sell" verbnet_key="sell#1" wn="sell%2:40:00 sell%2:40:01" fn_mapping="None" features=""/>
+    <MEMBER name="sell" verbnet_key="sell#1" wn="sell%2:40:00 sell%2:40:01" grouping="sell.01" fn_mapping="None" features=""/>
    </MEMBERS>
    <THEMROLES>
     <THEMROLE type="Asset"><SELRESTRS/></THEMROLE>
@@ -83,11 +83,17 @@ public sealed class VerbNetDecomposerTests
             EntityTypeRegistry.VerbNetClass);
         Assert.NotNull(lendId);
         Assert.NotNull(classId);
+        var memberId = LexicalMemberAnchor.Id(
+            LexicalMemberIdentityKind.VerbNet, classId!.Value, "lend#1");
+        Assert.NotNull(memberId);
         Assert.Contains(atts, a =>
             a.TypeId == RelationTypeRegistry.RelationTypeId("MEMBER_OF_VERBNET_CLASS")
-            && a.SubjectId == lendId!.Value && a.ObjectId == classId!.Value);
+            && a.SubjectId == memberId!.Value && a.ObjectId == classId.Value);
+        Assert.Contains(atts, a =>
+            a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_NAME_ALIAS")
+            && a.SubjectId == memberId.Value && a.ObjectId == lendId!.Value);
         Assert.DoesNotContain(atts, a =>
-            a.TypeId == RelationTypeRegistry.RelationTypeId("IS_A")
+            a.TypeId == RelationTypeRegistry.RelationTypeId("MEMBER_OF_VERBNET_CLASS")
             && a.SubjectId == lendId!.Value && a.ObjectId == classId!.Value);
 
         Assert.Contains(atts, a =>
@@ -110,30 +116,42 @@ public sealed class VerbNetDecomposerTests
         var atts = await CollectAttestationsAsync();
         var b = new SubstrateChangeBuilder(VerbNetDecomposer.Source, "fixture", null);
         var lendId = ContentEmitter.Emit(b, "lend", VerbNetDecomposer.Source);
-
-
+        Hash128 classId = AnchorAdmission.Id(
+            SourceEntityIdConventions.NumericVerbNetClassId("give-13.1"),
+            EntityTypeRegistry.VerbNetClass)!.Value;
+        Hash128 memberId = LexicalMemberAnchor.Id(
+            LexicalMemberIdentityKind.VerbNet, classId, "lend#1")!.Value;
 
         var senseId = SenseAnchor.Id("lend%2:40:00");
         Assert.NotNull(senseId);
         Assert.NotNull(lendId);
         Assert.Contains(atts, a =>
             a.TypeId == RelationTypeRegistry.RelationTypeId("CORRESPONDS_TO")
-            && (a.SubjectId == lendId!.Value || a.ObjectId == lendId!.Value)
+            && (a.SubjectId == memberId || a.ObjectId == memberId)
             && (a.SubjectId == senseId!.Value || a.ObjectId == senseId!.Value));
+        Assert.DoesNotContain(atts, a =>
+            a.TypeId == RelationTypeRegistry.RelationTypeId("CORRESPONDS_TO")
+            && (a.SubjectId == lendId!.Value || a.ObjectId == lendId.Value)
+            && (a.SubjectId == senseId.Value || a.ObjectId == senseId.Value));
     }
 
     [Fact]
     public async Task Member_FnMapping_Emits_Each_Frame_And_Drops_None_Sentinel()
     {
         var atts = await CollectAttestationsAsync();
-        Hash128 lend = ContentEmitter.RootId("lend")!.Value;
-        Hash128 giveBack = ContentEmitter.RootId("give-back")!.Value;
+        Hash128 classId = AnchorAdmission.Id(
+            SourceEntityIdConventions.NumericVerbNetClassId("give-13.1"),
+            EntityTypeRegistry.VerbNetClass)!.Value;
+        Hash128 lend = LexicalMemberAnchor.Id(
+            LexicalMemberIdentityKind.VerbNet, classId, "lend#1")!.Value;
+        Hash128 giveBack = LexicalMemberAnchor.Id(
+            LexicalMemberIdentityKind.VerbNet, classId, "give-back#1")!.Value;
         Hash128 commerceBuy = ContentEmitter.RootId("Commerce_buy")!.Value;
         Hash128 locating = ContentEmitter.RootId("Locating")!.Value;
         Hash128 becomingAware = ContentEmitter.RootId("Becoming_aware")!.Value;
         Hash128 none = ContentEmitter.RootId("None")!.Value;
         Hash128 evokes = RelationTypeRegistry.RelationTypeId("EVOKES_FRAME");
-        Hash128 typedAs = RelationTypeRegistry.RelationTypeId("IS_TYPED_AS");
+        Hash128 lendSurface = ContentEmitter.RootId("lend")!.Value;
 
         Assert.Contains(atts, a =>
             a.SubjectId == lend && a.TypeId == evokes && a.ObjectId == commerceBuy);
@@ -141,11 +159,47 @@ public sealed class VerbNetDecomposerTests
             a.SubjectId == giveBack && a.TypeId == evokes && a.ObjectId == locating);
         Assert.Contains(atts, a =>
             a.SubjectId == giveBack && a.TypeId == evokes && a.ObjectId == becomingAware);
-        Assert.Contains(atts, a =>
-            a.SubjectId == commerceBuy && a.TypeId == typedAs
-            && a.ObjectId == EntityTypeRegistry.FrameNetFrame);
+        Assert.DoesNotContain(atts, a =>
+            a.SubjectId == lendSurface && a.TypeId == evokes);
         Assert.DoesNotContain(atts, a =>
             a.TypeId == evokes && a.ObjectId == none);
+    }
+
+    [Fact]
+    public async Task Member_PropBankGrouping_Emits_Each_Roleset_From_Member_Grain()
+    {
+        var atts = await CollectAttestationsAsync();
+        Hash128 classId = AnchorAdmission.Id(
+            SourceEntityIdConventions.NumericVerbNetClassId("give-13.1"),
+            EntityTypeRegistry.VerbNetClass)!.Value;
+        Hash128 memberId = LexicalMemberAnchor.Id(
+            LexicalMemberIdentityKind.VerbNet, classId, "lend#1")!.Value;
+        Hash128 lendRoleset = AnchorAdmission.Id(
+            "lend.01", EntityTypeRegistry.PropBankRoleset)!.Value;
+        Hash128 loanRoleset = AnchorAdmission.Id(
+            "loan.01", EntityTypeRegistry.PropBankRoleset)!.Value;
+        Hash128 corresponds = RelationTypeRegistry.RelationTypeId("CORRESPONDS_TO");
+
+        Assert.Contains(atts, a => a.TypeId == corresponds
+            && (a.SubjectId == memberId || a.ObjectId == memberId)
+            && (a.SubjectId == lendRoleset || a.ObjectId == lendRoleset));
+        Assert.Contains(atts, a => a.TypeId == corresponds
+            && (a.SubjectId == memberId || a.ObjectId == memberId)
+            && (a.SubjectId == loanRoleset || a.ObjectId == loanRoleset));
+    }
+
+    [Fact]
+    public void MemberIdentity_Is_ClassBound_And_Does_Not_Use_Lemma_ContentIdentity()
+    {
+        Hash128 classA = AnchorAdmission.Id("13.1", EntityTypeRegistry.VerbNetClass)!.Value;
+        Hash128 classB = AnchorAdmission.Id("13.2", EntityTypeRegistry.VerbNetClass)!.Value;
+        Hash128 memberA = LexicalMemberAnchor.Id(
+            LexicalMemberIdentityKind.VerbNet, classA, "lend#1")!.Value;
+        Hash128 memberB = LexicalMemberAnchor.Id(
+            LexicalMemberIdentityKind.VerbNet, classB, "lend#1")!.Value;
+
+        Assert.NotEqual(memberA, memberB);
+        Assert.NotEqual(ContentEmitter.RootId("lend")!.Value, memberA);
     }
 
     [Fact]
@@ -251,6 +305,9 @@ public sealed class VerbNetDecomposerTests
             && e.TypeId == BootstrapIntentBuilder.TypeMetaTypeId);
         Assert.Contains(boot.Entities, e =>
             e.Id == EntityTypeRegistry.Id("VerbNet_Role")
+            && e.TypeId == BootstrapIntentBuilder.TypeMetaTypeId);
+        Assert.Contains(boot.Entities, e =>
+            e.Id == EntityTypeRegistry.Id("VerbNet_Member")
             && e.TypeId == BootstrapIntentBuilder.TypeMetaTypeId);
         Assert.Contains(boot.Entities, e =>
             e.Id == EntityTypeRegistry.Id("VerbNet_Predicate")

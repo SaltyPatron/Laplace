@@ -21,7 +21,15 @@ CREATE OR REPLACE FUNCTION lexical.concept_members(p_concept bytea)
                      AND hs.type_id = laplace.relation_type_id('HAS_SENSE')
     WHERE so.object_id = p_concept AND so.type_id = laplace.relation_type_id('IS_SENSE_OF')
     UNION ALL
-    SELECT c.subject_id, 'frame'::text, consensus.eff_mu_display(c.rating, c.rd), c.witness_count
+    -- A source-owned lexical member (for example VerbNet_Member) carries
+    -- EVOKES_FRAME at its natural grain and exposes its surface through
+    -- HAS_NAME_ALIAS. Preserve the public surface-member contract without
+    -- requiring a duplicate surface->frame testimony edge.
+    SELECT COALESCE(n.object_id, c.subject_id), 'frame'::text,
+           consensus.eff_mu_display(c.rating, c.rd), c.witness_count
     FROM laplace.v_consensus_unrefuted c
+    LEFT JOIN laplace.v_consensus_unrefuted n
+     ON n.subject_id = c.subject_id
+     AND n.type_id = ANY (consensus.relation_set_ids('NAME_ALIAS_EDGE'))
     WHERE c.object_id = p_concept AND c.type_id = laplace.relation_type_id('EVOKES_FRAME')
 $$;

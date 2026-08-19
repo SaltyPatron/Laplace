@@ -26,11 +26,13 @@ public readonly struct VerbNetSource : ISeedSource
         RelationTypeRegistry.RelationTypeId(Relations[3]);
     internal static readonly Hash128 HasNameAliasTypeId =
         RelationTypeRegistry.RelationTypeId(Relations[8]);
+    internal static readonly Hash128 CorrespondsToTypeId =
+        RelationTypeRegistry.RelationTypeId(Relations[6]);
     internal static readonly Hash128 EntailsTypeId =
         RelationTypeRegistry.RelationTypeId(Relations[9]);
 
     public static IReadOnlyList<string>? TypeNodeNames { get; } =
-        ["VerbNet_Class", "VerbNet_Role", "VerbNet_Predicate"];
+        ["VerbNet_Class", "VerbNet_Member", "VerbNet_Role", "VerbNet_Predicate", "PropBank_Roleset"];
 
     public static SourceLicense License => SourceLicense.Unknown;
 

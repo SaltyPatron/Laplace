@@ -9,9 +9,20 @@ CREATE OR REPLACE FUNCTION lexical.concept_peers(p_word bytea, p_limit int DEFAU
     -- realize.label() runs once per surviving row, past the LIMIT, at the boundary.
     WITH me AS (SELECT lexical.lexical_peers(p_word) AS ids),
     self AS (SELECT unnest(ids) AS id FROM me),
+    -- Source-owned lexical entries carry their semantic edges; the queried
+    -- content surface reaches those entries through the inverse alias edge.
+    semantic_self AS (
+        SELECT id FROM self
+        UNION
+        SELECT n.subject_id
+        FROM self s
+        JOIN laplace.v_consensus_unrefuted n
+          ON n.object_id = s.id
+         AND n.type_id = ANY (consensus.relation_set_ids('NAME_ALIAS_EDGE'))
+    ),
     anchors AS (
         SELECT DISTINCT c.object_id AS anchor
-        FROM self s JOIN laplace.v_consensus_unrefuted c ON c.subject_id = s.id
+        FROM semantic_self s JOIN laplace.v_consensus_unrefuted c ON c.subject_id = s.id
         WHERE c.type_id IN (laplace.relation_type_id('IS_SYNONYM_OF'), laplace.relation_type_id('EVOKES_FRAME'))
           AND c.object_id IS NOT NULL
         UNION
@@ -39,9 +50,12 @@ CREATE OR REPLACE FUNCTION lexical.concept_peers(p_word bytea, p_limit int DEFAU
                        JOIN laplace.v_consensus_unrefuted hs ON hs.object_id = so.subject_id
                           AND hs.type_id = laplace.relation_type_id('HAS_SENSE')
         UNION ALL
-        SELECT c.subject_id, 'frame'::text, consensus.eff_mu_display(c.rating, c.rd)
+        SELECT COALESCE(n.object_id, c.subject_id), 'frame'::text,
+               consensus.eff_mu_display(c.rating, c.rd)
         FROM anchors a JOIN laplace.v_consensus_unrefuted c ON c.object_id = a.anchor
                           AND c.type_id = laplace.relation_type_id('EVOKES_FRAME')
+        LEFT JOIN laplace.v_consensus_unrefuted n ON n.subject_id = c.subject_id
+                          AND n.type_id = ANY (consensus.relation_set_ids('NAME_ALIAS_EDGE'))
     ),
     peers AS (
         SELECT m.member, m.kind, max(m.mu) AS mu

@@ -2027,6 +2027,13 @@ members = [
 name = "PATH_UPWARD"
 members = ["IS_A", "IS_INSTANCE_OF"]
 
+# Source-owned lexical entries expose their reusable content surface through this
+# exact structural edge. Readers use the governed set instead of redeclaring the
+# relation vocabulary independently at each alias traversal.
+[[set]]
+name = "NAME_ALIAS_EDGE"
+members = ["HAS_NAME_ALIAS"]
+
 # PATH_TRAVERSABLE = PATH_UPWARD u PATH_LATERAL. converse.astar_path hand-listed exactly
 # these 13 as its default p_types, the same vocabulary consensus.relate_path listed in its
 # two arms -- the same walk, spelled twice, in two files. Declared once here; the union is

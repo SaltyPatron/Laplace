@@ -10,6 +10,13 @@ CREATE OR REPLACE FUNCTION structural.mesh_position(p_id bytea)
                 FROM laplace.consensus t
                 WHERE t.subject_id=p_id AND t.type_id=laplace.relation_type_id('IS_TYPED_AS')
                 ORDER BY consensus.eff_mu(t.rating,t.rd) DESC, t.object_id LIMIT 1) AS object_id
+    ), up_subjects AS MATERIALIZED (
+        SELECT p_id AS id
+        UNION
+        SELECT n.subject_id
+        FROM laplace.consensus n
+        WHERE n.object_id = p_id
+          AND n.type_id = ANY (consensus.relation_set_ids('NAME_ALIAS_EDGE'))
     ), sense_rows AS MATERIALIZED (
         SELECT s.synset_id AS id, s.eff_mu, s.witnesses,
                row_number() OVER (ORDER BY s.eff_mu DESC NULLS LAST, s.synset_id) AS ord
@@ -27,9 +34,9 @@ CREATE OR REPLACE FUNCTION structural.mesh_position(p_id bytea)
                consensus.eff_mu_display(c.rating,c.rd) AS eff_mu, c.witness_count,
                row_number() OVER (ORDER BY consensus.eff_mu_display(c.rating,c.rd) DESC NULLS LAST,
                                            c.object_id) AS ord
-        FROM laplace.consensus c
-        WHERE c.subject_id=p_id
-          AND c.type_id IN (laplace.relation_type_id('IS_SENSE_OF'),
+        FROM up_subjects s
+        JOIN laplace.consensus c ON c.subject_id=s.id
+        WHERE c.type_id IN (laplace.relation_type_id('IS_SENSE_OF'),
                             laplace.relation_type_id('HAS_SENSE'),
                             laplace.relation_type_id('EVOKES_FRAME'),
                             laplace.relation_type_id('MEMBER_OF_VERBNET_CLASS'),
