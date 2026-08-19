@@ -120,6 +120,17 @@ remains open and is not counted as delivered implementation.
 - Both PGN workflow conclusions are red only because they checked out #1186, whose
   gate still required `MOVE > 0`; the actual playing/result/outcome checks passed.
   Current `main` (#1189) requires `MOVE = 0`, matching the normalized trajectory law.
+- Relation attribution identified the remaining 2,042-observations/game signal rather
+  than accepting it as fold overhead. The live `ChessAnalysis` source contained only
+  771 distinct `OUTCOME` evidence rows carrying 1,698,648,916 observations: every game
+  result had been projected onto every closed-vocabulary position substructure at every
+  ply. Analyzer v3 removes that eager projection from PGN analysis, live games, and the
+  turn learner. It also keeps engine evaluation at the exact evaluated position instead
+  of projecting one evaluation onto all 25--36 constituents.
+- Existing v2 evidence must be evicted by source before v3 is derived. Re-running v3 on
+  top of v2 would leave the obsolete observations in place and only add a new analysis
+  marker. The recovery order is therefore `evict ChessAnalysis` followed by
+  `ingest chess-analyze`; the PGN witness source and playing trajectories remain intact.
 
 ## Remaining product work after integration
 
@@ -141,11 +152,12 @@ remains open and is not counted as delivered implementation.
 - Remeasure OMW after #1186. The semantic value
   must still compose at grapheme/content grain; the TSV packaging must create zero
   content entities/physicalities.
-- Re-run a normalized PGN slice after #1196 and confirm the completion envelope reports
+- Re-run analyzer v3 after source eviction and confirm the completion envelope reports
   bounded `analyze_ms`, `gin_drain_ms`, and `summary_ms` without an automatic exact-source
-  scan. The 1970--1989 payload itself sustained about 179 games/s and 25.6K novel rows/s,
-  but still generated about 2,042 fold observations per game; relation-level attribution
-  and singleton/witness distributions remain required before calling chess normalized.
+  scan. The 1970--1989 payload itself sustained about 179 games/s and 25.6K novel rows/s.
+  Verify that its former roughly 2,042 fold observations/game substructure projection is
+  absent, then collect relation-level singleton/witness distributions for the remaining
+  natural-grain metadata and motif populations.
 - Validate end-to-end resume, cancellation, per-file journals, canonical readback,
   and UI progress under actual concurrent multi-file failure/restart scenarios.
 - Audit remaining avoidable index probes, index-only eligibility, partition skew,
@@ -187,8 +199,9 @@ remains open and is not counted as delivered implementation.
   structure still needs a lawful binary/tensor composition primitive before its
   compatibility edges can be removed.
 - Complete chess validation for live-versus-PGN identity, cross-source historical
-  playing identity, history-sensitive state, bounded query projections, and
-  deterministic/perfcache publication.
+  playing identity, history-sensitive state, bounded query projections, an explicit
+  promotion policy for reusable structural outcome statistics, and deterministic
+  transition/evaluation perfcache publication.
 - Benchmark the OpenSubtitles aligned-trajectory representation against the old
   pairwise relation form and design the explicit translation-consensus promotion
   policy before a full 601-million-pair ingest.

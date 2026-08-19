@@ -18,24 +18,6 @@ public static class ChessGraph
         _ => Glicko2.ScoreLoss,
     };
 
-    /// <summary>
-    /// Persist only the bounded statistical projection used by learned evaluation. The exact
-    /// position transition is already present as adjacent vertices in the line trajectory;
-    /// emitting a MOVE cell and an exact-position OUTCOME cell for every ply creates an
-    /// effectively unbounded population of one-off consensus cells. Piece-square and other
-    /// position constituents come from a closed vocabulary and therefore accumulate useful
-    /// evidence across games.
-    /// </summary>
-    internal static void AppendSubstructureOutcome(
-        SubstrateChangeBuilder b, ChessComposed from, PlyOutcome outcome,
-        long games, double witnessWeight, Hash128 sourceId)
-    {
-        if (games < 1) games = 1;
-        long sum = checked(ScoreFp1e9(outcome) * games);
-        foreach (var s in from.Substructures)
-            b.AddAttestation(Outcome(s.Id, games, sum, witnessWeight, sourceId, contextId: null));
-    }
-
     public static void AppendEval(
     SubstrateChangeBuilder b, string fromKey, int cpSideToMove, long games, double witnessWeight,
     Hash128 sourceId, Hash128? contextId = null)
@@ -51,8 +33,9 @@ public static class ChessGraph
     {
         if (games < 1) games = 1;
         long sum = PgnEvals.EvalSumFp1e9(cpSideToMove, games);
-        foreach (var s in from.Substructures)
-            b.AddAttestation(EvalRow(s.Id, games, sum, witnessWeight, sourceId, contextId));
+        // The verdict is about this evaluated position. Projecting it onto every
+        // constituent makes one engine observation look like 25-36 independent
+        // observations and precomputes every possible structural question.
         b.AddAttestation(EvalRow(from.Position.Id, games, sum, witnessWeight, sourceId, contextId));
     }
 

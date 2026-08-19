@@ -67,8 +67,6 @@ public sealed class SubstrateTurnHost : IContentAddresser, IEdgeRatings, IStateV
 
 
 
-    private const long CheckmateGames = 3;
-
     public Task LearnGameAsync(IReadOnlyList<RecordedEdge> edges, CancellationToken ct = default)
     => LearnGameAsync(edges, adjudicated: false, ct);
 
@@ -82,21 +80,13 @@ public sealed class SubstrateTurnHost : IContentAddresser, IEdgeRatings, IStateV
         ChessVocabulary.EmitPlayer(
             b, ChessVocabulary.LaplacePlayerId, "Laplace", ChessVocabulary.SourceId, SourceTrust.Response);
 
-        bool hasWin = false;
-        foreach (var e in edges) if (e.MoverOutcome == PlyOutcome.Win) { hasWin = true; break; }
-        bool checkmate = !adjudicated && hasWin;
-        long games = checkmate ? CheckmateGames : 1;
-
         var line = new List<ChessNode>(edges.Count + 1);
         foreach (var e in edges)
         {
-            var moverOutcome = adjudicated ? PlyOutcome.Draw : e.MoverOutcome;
             var from = ChessGraph.EmitComposed(b, e.SubjectKey, ChessVocabulary.SourceId);
             var to = ChessGraph.EmitComposed(b, e.ObjectKey, ChessVocabulary.SourceId);
             if (line.Count == 0) line.Add(from.Position);
             line.Add(to.Position);
-            ChessGraph.AppendSubstructureOutcome(
-                b, from, moverOutcome, games, _witnessWeight, ChessVocabulary.SourceId);
         }
 
         var lineId = ChessCompose.LineId(line.Select(static n => n.Id).ToArray());

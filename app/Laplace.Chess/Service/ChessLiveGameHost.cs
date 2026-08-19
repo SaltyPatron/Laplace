@@ -16,8 +16,6 @@ namespace Laplace.Chess.Service;
 public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
 {
     private const double WitnessWeight = 0.7;
-    private const long CheckmateGames = 3;
-
     private readonly NpgsqlDataSource _ds;
     private readonly ConsensusAccumulatingWriter _writer;
     private readonly SubstrateTurnHost _turnHost;
@@ -194,10 +192,6 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
                         b, b2, session.WhitePlayerId, result.ForMover(1), WitnessWeight,
                         ChessVocabulary.SourceId, playingId);
 
-                bool hasWin = session.Plies.Any(
-                    p => result.ForMover(p.MoverSide) == PlyOutcome.Win);
-                bool checkmate = !adjudicated && hasWin;
-                long games = checkmate ? CheckmateGames : 1;
                 var line = new List<ChessNode>(session.Plies.Count + 1);
                 foreach (var rp in session.Plies)
                 {
@@ -205,11 +199,6 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
                     var to = ChessGraph.EmitComposed(b, rp.ToKey, ChessVocabulary.SourceId);
                     if (line.Count == 0) line.Add(from.Position);
                     line.Add(to.Position);
-                    var moverOutcome = adjudicated
-                        ? PlyOutcome.Draw
-                        : result.ForMover(rp.MoverSide);
-                    ChessGraph.AppendSubstructureOutcome(
-                        b, from, moverOutcome, games, WitnessWeight, ChessVocabulary.SourceId);
                 }
 
                 long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
