@@ -9,30 +9,22 @@ namespace Laplace.Decomposers.Media;
 
 /// <summary>
 /// Thin video lane: ordered image-frame packaging under a directory. Spatial =
-/// <see cref="ImageTierSpine"/> (codepoint floor); temporal edges in WalkWitness
-/// (HAS_FRAME / PRECEDES_IN_TIME). Video root = blake3 over ordered frame ladder
-/// roots (path-independent) — not blake3 of frame RGBA buffers.
+/// <see cref="ImageTierSpine"/> (codepoint floor). The video is one ordered
+/// trajectory over frame roots; frame membership and adjacency are recovered from
+/// that trajectory rather than deposited as testimony. Video root = blake3 over
+/// ordered frame ladder roots (path-independent), not blake3 of frame RGBA buffers.
 /// </summary>
 public sealed class FrameVideoDecomposer
-    : Decomposer<VideoFrameIngestRecord, FrameVideoSource, FullScope>, IIngestInventoryProvider
+    : Decomposer<VideoIngestRecord, FrameVideoSource, FullScope>, IIngestInventoryProvider
 {
-    private Hash128 _videoRootId;
-    private VideoFrameIngestHandler? _handler;
-
     public override int LayerOrder => 2;
     protected override double SourceTrust => TC.StructuredCorpus;
+    protected override bool CanSegmentMonolith => false;
 
-    protected override async Task OnInitializedAsync(IDecomposerContext context, CancellationToken ct)
-    {
-        _videoRootId = await ComputeContentAddressedVideoRootAsync(context.EcosystemPath, ct)
-            .ConfigureAwait(false);
-        _handler = new VideoFrameIngestHandler(SourceId, LayerOrder, _videoRootId);
-    }
+    protected override IIngestRecordHandler<VideoIngestRecord> CreateHandler() =>
+        new VideoFrameIngestHandler(SourceId, LayerOrder);
 
-    protected override IIngestRecordHandler<VideoFrameIngestRecord> CreateHandler() =>
-        _handler ?? new VideoFrameIngestHandler(SourceId, LayerOrder, _videoRootId);
-
-    protected override async IAsyncEnumerable<VideoFrameIngestRecord> ExtractRecordsAsync(
+    protected override async IAsyncEnumerable<VideoIngestRecord> ExtractRecordsAsync(
         string ecosystemPath, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
     {
@@ -50,16 +42,17 @@ public sealed class FrameVideoDecomposer
                 Trace.TraceWarning("FrameVideoDecomposer: skipping '{0}' — unresolvable root", rel);
                 continue;
             }
-            yield return new VideoFrameIngestRecord(
-                rgba, w, h, frameIndex++, root.Value, FileMetadata.FromPath(filePath, rel));
+            yield return new VideoIngestRecord.Frame(new VideoFrameIngestRecord(
+                rgba, w, h, frameIndex++, root.Value, FileMetadata.FromPath(filePath, rel)));
         }
+        if (frameIndex > 0)
+            yield return new VideoIngestRecord.SequenceEnd();
     }
 
     protected override IngestBatchConfig BuildPipelineConfig(
         IDecomposerContext context, DecomposerOptions options)
     {
-        int batchSize = IngestPipelineDefaults.ResolveBatch(
-            IngestSourceProfile.MediaVideo, options);
+        int batchSize = IngestPipelineDefaults.ResolveBatch(IngestSourceProfile.MediaVideo, options);
         return MediaIngestSupport.PipelineConfig(
             SourceId, TC.StructuredCorpus, "frame-video", context.Reader,
             IngestSourceProfile.MediaVideo, batchSize);
@@ -102,27 +95,7 @@ public sealed class FrameVideoDecomposer
     }
 
     internal static Hash128 HashVideoRoot(IReadOnlyList<Hash128> orderedFrameRoots)
-    {
-        // Domain tag + packed frame roots.
-        byte[] tag = "substrate/video/v1/frames"u8.ToArray();
-        var buf = new byte[tag.Length + orderedFrameRoots.Count * 16];
-        tag.CopyTo(buf, 0);
-        for (int i = 0; i < orderedFrameRoots.Count; i++)
-        {
-            var r = orderedFrameRoots[i];
-            // Hash128 layout: write via BitConverter-style lo/hi if exposed; else Blake3 of ToString is wrong.
-            // Use the public byte encode if any — fall back to unsafe-free path via Hash128 fields.
-            WriteHash128(buf.AsSpan(tag.Length + i * 16), r);
-        }
-        return Hash128.Blake3(buf);
-    }
-
-    private static void WriteHash128(Span<byte> dst, Hash128 h)
-    {
-        // Hash128 is a readonly struct with Hi/Lo ulong in Laplace.Engine.Core.
-        BitConverter.TryWriteBytes(dst, h.Hi);
-        BitConverter.TryWriteBytes(dst[8..], h.Lo);
-    }
+        => VideoFrameIngestHandler.HashVideoRoot(orderedFrameRoots);
 
     internal static IEnumerable<string> EnumerateInputFiles(string path)
     {
