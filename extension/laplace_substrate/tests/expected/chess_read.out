@@ -470,6 +470,9 @@ BEGIN
     SELECT player_id INTO got FROM chess.ranked(1, 1);
     IF got <> botv THEN RAISE EXCEPTION 'FAIL: chess_ranked OFFSET 1 should be Botvinnik'; END IF;
 
+    SELECT player_id INTO got FROM chess.ranked(1, 0, 'games', 'asc');
+    IF got <> spas THEN RAISE EXCEPTION 'FAIL: chess_ranked games ASC should put the one-game player first'; END IF;
+
     -- rating/rd/eff_mu leave chess_ranked in DISPLAY units (the eff_mu_display /1e9
     -- round), never raw fp1e9: Tal's cell is 1900.0 / 50.0 / 1800.0, not 1.9e12.
     SELECT r.rating, r.rd, r.eff_mu INTO ra, rdv, mu FROM chess.ranked(10) r WHERE r.player_id = tal;
@@ -514,10 +517,13 @@ BEGIN
                                trajectory, n_constituents, observed_at)
     VALUES (public.laplace_hash128_blake3('t2/name/tal_phys'), tname, 1,
             'SRID=0;POINT ZM (0 0 0 0)'::geometry, decode(repeat('00', 16), 'hex'),
-            public.laplace_trajectory_build(ARRAY[cap_t]), 1, now());
+            public.laplace_trajectory_build(ARRAY[cap_t, en]), 2, now());
     INSERT INTO laplace.consensus
         (id, subject_id, type_id, object_id, rating, rd, volatility, witness_count, last_observed_at)
-    VALUES (public.laplace_hash128_blake3('t2/c_alias'), tal, laplace.relation_type_id('HAS_NAME_ALIAS'),
+    VALUES
+        (public.laplace_hash128_blake3('t2/c_alias'), tal, laplace.relation_type_id('HAS_NAME_ALIAS'),
+            tname, 1500000000000, 50000000000, 60000000, 1, now()),
+        (public.laplace_hash128_blake3('t2/c_primary_name'), botv, laplace.relation_type_id('HAS_NAME'),
             tname, 1500000000000, 50000000000, 60000000, 1, now());
 
     SELECT p.rating, p.rd, p.eff_mu INTO ra, rdv, mu
@@ -527,6 +533,20 @@ BEGIN
     END IF;
     IF ra <> 1900.0 OR rdv <> 50.0 OR mu <> 1800.0 THEN
         RAISE EXCEPTION 'FAIL: chess_players_by_initial must return display-scale rating/rd/eff_mu, got %/%/%', ra, rdv, mu;
+    END IF;
+
+    SELECT count(*) INTO n
+      FROM chess.players_by_initial('t', 10, 0, 'games', 'asc') p
+     WHERE p.player_id = botv;
+    IF n <> 1 THEN
+        RAISE EXCEPTION 'FAIL: lower-case initial or primary HAS_NAME player was hidden';
+    END IF;
+
+    SELECT count(*) INTO n
+      FROM chess.player_search_candidates('Te', 10) p
+     WHERE p.player_id = botv;
+    IF n <> 1 THEN
+        RAISE EXCEPTION 'FAIL: partial player candidates did not include primary HAS_NAME';
     END IF;
 
     -- chess_game_plies: a playing read back as LOOKUPS. The trajectory lives on

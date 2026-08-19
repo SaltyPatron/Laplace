@@ -75,10 +75,24 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
     // content-derived at completion (ChessVocabulary.LivePlayingId).
     public Task OpenGameAsync(
         Hash128 eventId, string learnContext, Hash128? whitePlayerId = null, Hash128? blackPlayerId = null,
+        string? whitePlayerName = null, string? blackPlayerName = null,
         CancellationToken ct = default)
     {
-        _games[eventId] = new LiveGameSession(learnContext, whitePlayerId, blackPlayerId);
+        _games[eventId] = new LiveGameSession(
+            learnContext, whitePlayerId, blackPlayerId, whitePlayerName, blackPlayerName);
         return Task.CompletedTask;
+    }
+
+    /// <summary>Attach source-asserted players once a live provider reveals its game header.</summary>
+    public void SetGamePlayers(
+        Hash128 eventId,
+        Hash128? whitePlayerId,
+        string? whitePlayerName,
+        Hash128? blackPlayerId,
+        string? blackPlayerName)
+    {
+        if (_games.TryGetValue(eventId, out var session))
+            session.SetPlayers(whitePlayerId, whitePlayerName, blackPlayerId, blackPlayerName);
     }
 
     public async Task RecordPlyAsync(
@@ -163,6 +177,12 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
                 // subjected on the line with ctx = this playing.
                 WitnessMovetext(b, lineId, playingId, session.Moves);
                 WitnessResult(b, lineId, playingId, result);
+                if (session.WhitePlayerId is { } emitWhite && session.WhitePlayerName is { Length: > 0 } whiteName)
+                    ChessVocabulary.EmitPlayer(
+                        b, emitWhite, whiteName, ChessVocabulary.SourceId, SourceTrust.Response);
+                if (session.BlackPlayerId is { } emitBlack && session.BlackPlayerName is { Length: > 0 } blackName)
+                    ChessVocabulary.EmitPlayer(
+                        b, emitBlack, blackName, ChessVocabulary.SourceId, SourceTrust.Response);
                 if (session.WhitePlayerId is { } wp)
                     b.AddAttestation(NativeAttestation.Categorical(
                         lineId, "HAS_WHITE", wp, ChessVocabulary.SourceId, playingId, WitnessWeight));
@@ -280,7 +300,9 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
     public NpgsqlDataSource DataSource => _ds;
 
     public Guid StartPlaySession(bool recordToSubstrate = true, string learnContext = "chess/play/session",
-        string tenantId = "public", string? userId = null)
+        string tenantId = "public", string? userId = null,
+        Hash128? whitePlayerId = null, string? whitePlayerName = null,
+        Hash128? blackPlayerId = null, string? blackPlayerName = null)
     {
         // Same identifier guard the conversational lane uses (spec 34): tenant and user become
         // canonical-key segments, so the charset is load-bearing even while values are stubbed.
@@ -295,7 +317,9 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
         var eventId = ChessVocabulary.PlaySessionHandle(id);
         _playSessions[id] = new PlaySession(eventId, learnContext, recordToSubstrate, tenantId, userId);
         if (recordToSubstrate)
-            _ = OpenGameAsync(eventId, learnContext);
+            _ = OpenGameAsync(
+                eventId, learnContext, whitePlayerId, blackPlayerId,
+                whitePlayerName, blackPlayerName);
         return id;
     }
 
@@ -368,16 +392,35 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
                 lineId, "HAS_RESULT", rid, ChessVocabulary.SourceId, eventId, WitnessWeight));
     }
 
-    private sealed class LiveGameSession(string learnContext, Hash128? whitePlayerId, Hash128? blackPlayerId)
+    private sealed class LiveGameSession(
+        string learnContext,
+        Hash128? whitePlayerId,
+        Hash128? blackPlayerId,
+        string? whitePlayerName,
+        string? blackPlayerName)
     {
         public string LearnContext { get; } = learnContext;
-        public Hash128? WhitePlayerId { get; } = whitePlayerId;
-        public Hash128? BlackPlayerId { get; } = blackPlayerId;
+        public Hash128? WhitePlayerId { get; private set; } = whitePlayerId;
+        public Hash128? BlackPlayerId { get; private set; } = blackPlayerId;
+        public string? WhitePlayerName { get; private set; } = whitePlayerName;
+        public string? BlackPlayerName { get; private set; } = blackPlayerName;
         public List<string> Moves { get; } = new();
         public List<RecordedPly> Plies { get; } = new();
         // GH #736: the ordered position ids this playing passes through (start position
         // first) — the line composition CompleteGameAsync mints.
         public List<Hash128> PositionIds { get; } = new();
+
+        public void SetPlayers(
+            Hash128? nextWhiteId,
+            string? nextWhiteName,
+            Hash128? nextBlackId,
+            string? nextBlackName)
+        {
+            WhitePlayerId = nextWhiteId ?? WhitePlayerId;
+            BlackPlayerId = nextBlackId ?? BlackPlayerId;
+            WhitePlayerName = string.IsNullOrWhiteSpace(nextWhiteName) ? WhitePlayerName : nextWhiteName;
+            BlackPlayerName = string.IsNullOrWhiteSpace(nextBlackName) ? BlackPlayerName : nextBlackName;
+        }
         public bool EntityEmitted { get; set; }
 
         public int MoverSide(int ply) => (ply - 1) % 2;

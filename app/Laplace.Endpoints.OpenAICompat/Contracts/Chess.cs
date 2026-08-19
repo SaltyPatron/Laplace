@@ -33,9 +33,8 @@ public sealed record ChessPlayerRow(
     [property: JsonPropertyName("eff_mu")] double EffMu);
 
 /// <summary>
-/// A page of the roster, or the hits for a search. The roster is a read of folded cells
-/// ordered by eff_mu, so paging is a plain OFFSET over an index — there is no cached ranking
-/// to bound, and therefore no depth to disclose.
+/// A page of the sortable roster, or the relevance-ranked hits for a search. The roster is
+/// a read of folded cells, so there is no cached ranking to bound and no hidden search depth.
 /// </summary>
 public sealed record ChessPlayersResponse(
     [property: JsonPropertyName("object")] string Object,

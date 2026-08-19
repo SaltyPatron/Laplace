@@ -173,6 +173,14 @@ public sealed class LichessBot : IAsyncDisposable
 
                 if (type == "gameFull")
                 {
+                    var sourceWhite = ReadPlayerName(ev, "white") ?? "Lichess player";
+                    var sourceBlack = ReadPlayerName(ev, "black") ?? "Lichess player";
+                    var whiteName = weAreWhite ? "Laplace" : sourceWhite;
+                    var blackName = weAreWhite ? sourceBlack : "Laplace";
+                    _host.SetGamePlayers(
+                        substrateGameId,
+                        ChessVocabulary.PlayerId(whiteName), whiteName,
+                        ChessVocabulary.PlayerId(blackName), blackName);
                     stateEl = ev.GetProperty("state");
                     moves = stateEl.TryGetProperty("moves", out var m) ? m.GetString() ?? "" : "";
                     wtime = stateEl.TryGetProperty("wtime", out var wt) ? wt.GetInt32() : 0;
@@ -317,6 +325,19 @@ public sealed class LichessBot : IAsyncDisposable
     {
         bool botMove = (moverSide == 0) == weAreWhite;
         if (botMove) return ChessVocabulary.LaplacePlayerId;
+        return null;
+    }
+
+    private static string? ReadPlayerName(JsonElement game, string side)
+    {
+        if (!game.TryGetProperty(side, out var player)) return null;
+        foreach (var key in new[] { "name", "username", "id" })
+        {
+            if (player.TryGetProperty(key, out var value)
+                && value.ValueKind == JsonValueKind.String
+                && !string.IsNullOrWhiteSpace(value.GetString()))
+                return value.GetString();
+        }
         return null;
     }
 
