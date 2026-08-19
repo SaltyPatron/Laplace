@@ -41,13 +41,15 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
     private readonly object _laneLock = new();
     private readonly Dictionary<Hash128, Task> _typeLanes = new();
 
-    // Mask deposits are tracked here ONLY so the drain can await them. They are no
-    // longer serialized: highway_mask_deposit is a single set-based statement, so
-    // one deposit = one statement = PG's own locking, and OR-accumulate is
-    // commutative and idempotent. The FIFO this field used to be existed to suppress
-    // contention that this class created itself by splitting one set-based call
-    // across 12 concurrent transactions.
-    private Task _maskLane = Task.CompletedTask;
+    // Stable entity-sharded mask lanes. An entity always maps to exactly one lane,
+    // across every delta in the run: lanes are row-disjoint and run in parallel,
+    // while deposits that can touch the same entity are FIFO. The former unchained
+    // per-delta tasks let six large deposits update the same hot entity rows at once;
+    // Atomic2020 measured fold throughput collapsing from 6,880 to 401-779 cells/s
+    // while the producer had already finished. PostgreSQL correctly serialized those
+    // row locks, but only after we had manufactured the contention.
+    private readonly Task[] _maskLanes =
+        Enumerable.Repeat(Task.CompletedTask, MaskShards).ToArray();
 
     // Fold pipeline (bulk runs only): the fold of batch N runs in the background
     // so the apply lane starts probing/COPYing batch N+1 immediately — the fold
@@ -82,6 +84,12 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
     private static readonly int FoldConnections =
         Math.Clamp(IngestTopology.Current.ApplyPartitions, 1, 12);
 
+    // Leave most of the global fold budget available to consensus.upsert. Four
+    // disjoint mask writers saturate the set-based UPDATE without letting twelve
+    // mask shards starve every upsert segment on a 12-core host.
+    private static readonly int MaskShards =
+        Math.Clamp(FoldConnections / 3, 1, 4);
+
     // GLOBAL connection budget for the fold, shared by every type lane and the
     // mask lane (2026-07-21). FoldConnections is a per-Parallel.ForEachAsync
     // width; once per-type lanes could run concurrently, that width stopped
@@ -93,13 +101,12 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
     // independent of how many lanes happen to be live.
     private readonly SemaphoreSlim _foldConnections = new(FoldConnections, FoldConnections);
 
-    // Run-scoped mask-pair dedup: masks only ACCRETE, so a pair deposited once
-    // this run never needs resending — without this, every flush re-verifies
-    // every earlier flush's pairs server-side (~6 leaf probes per pair) for
-    // zero writes. Touched only from the mask lane (a single FIFO chain), so it
-    // needs no lock. Cleared at the cap as a memory valve: clearing costs
-    // re-verification, never correctness.
-    private readonly HashSet<(Hash128 Ent, Hash128 Typ)> _depositedMaskPairs = new();
+    // Run-scoped pair dedup, owned by the same stable shard as the entity. Each set
+    // is touched only by its FIFO lane. Clearing is a memory valve: it costs a
+    // server-side idempotent recheck, never correctness.
+    private readonly HashSet<(Hash128 Ent, Hash128 Typ)>[] _depositedMaskPairs =
+        Enumerable.Range(0, MaskShards)
+            .Select(_ => new HashSet<(Hash128 Ent, Hash128 Typ)>()).ToArray();
     private const int DepositedMaskPairsCap = 8_388_608;
 
     // There is NO deferred mask phase (2026-07-21). Masks deposit inline in every
@@ -130,6 +137,10 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
 
     /// <summary>Total consensus cells folded (inserted or updated) this run.</summary>
     public long CellsFolded => Interlocked.Read(ref _cellsFolded);
+
+    public TimeSpan LastFoldDrainWallClock { get; private set; }
+
+    public TimeSpan LastWriterMaintenanceWallClock { get; private set; }
 
     public Task<ApplyResult> ApplyAsync(SubstrateChange change, CancellationToken ct = default)
         => ApplyManyAsync(new[] { change }, ct);
@@ -501,24 +512,30 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                 completions.Add(next);
             }
 
-            // Masks ride ONE dedicated lane rather than the type lanes. An entity
-            // accretes bits from many types, so a mask write for type A and one
-            // for type B can hit the SAME entities row — across concurrent type
-            // lanes that is exactly the cross-transaction row contention (and
-            // deadlock risk) the type split otherwise eliminates. Serializing
-            // deposits costs nothing in ordering terms: OR-accumulate is
-            // commutative and idempotent, so the mask lane is order-free even
-            // though the fold lanes are not.
-            // No longer chained. highway_mask_deposit is ONE set-based statement
-            // (DISTINCT pairs -> GROUP BY entity -> single UPDATE ... FROM m), so a
-            // deposit takes its rows in one statement and PG owns the locking. The
-            // FIFO existed to suppress contention that only arose because this side
-            // split the array across 12 concurrent transactions. It doesn't split
-            // any more, so there is nothing to serialize. WhenAll keeps every
-            // in-flight deposit reachable from the drain.
-            var maskTask = Task.Run(() => DepositAsync(maskPairs));
-            _maskLane = Task.WhenAll(_maskLane, maskTask);
-            completions.Add(maskTask);
+            // Partition by a FIXED entity hash. The earlier bucketed implementation
+            // changed bucket count with each delta, so the same entity moved between
+            // lanes and the buckets were only disjoint within one call. Fixed shards
+            // preserve disjointness across the whole run.
+            var buckets = new List<(Hash128 Ent, Hash128 Typ)>?[MaskShards];
+            foreach (var pair in maskPairs)
+            {
+                int shard = MaskShard(pair.Ent);
+                (buckets[shard] ??= new()).Add(pair);
+            }
+            for (int shard = 0; shard < buckets.Length; shard++)
+            {
+                if (buckets[shard] is not { Count: > 0 } bucket) continue;
+                Task prior = _maskLanes[shard];
+                int ownedShard = shard;
+                var ownedBucket = bucket;
+                var next = Task.Run(async () =>
+                {
+                    await prior.ConfigureAwait(false);
+                    await DepositAsync(ownedBucket, ownedShard).ConfigureAwait(false);
+                });
+                _maskLanes[shard] = next;
+                completions.Add(next);
+            }
         }
 
         return CompleteAsync();
@@ -635,21 +652,19 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
             });
         }
 
-        async Task DepositAsync(HashSet<(Hash128 Ent, Hash128 Typ)> pairs)
+        async Task DepositAsync(
+            List<(Hash128 Ent, Hash128 Typ)> pairs, int shard)
         {
             if (pairs.Count == 0) return;
 
             // Never resend a pair this run already deposited — masks only ACCRETE,
             // so a pair deposited once is permanently satisfied, and the server-side
-            // no-op still costs ~6 tier-leaf probes per pair. Locked: this used to
-            // rely on the mask lane being a single FIFO chain for thread safety.
-            List<(Hash128 Ent, Hash128 Typ)> todo;
-            lock (_depositedMaskPairs)
-            {
-                pairs.ExceptWith(_depositedMaskPairs);
-                if (pairs.Count == 0) return;
-                todo = new List<(Hash128 Ent, Hash128 Typ)>(pairs);
-            }
+            // no-op still costs ~6 tier-leaf probes per pair. This shard's FIFO is
+            // the synchronization; no cross-shard pair can share an entity.
+            var deposited = _depositedMaskPairs[shard];
+            pairs.RemoveAll(deposited.Contains);
+            if (pairs.Count == 0) return;
+            var todo = pairs;
 
             // SORT BY ENTITY ID BEFORE CHUNKING — the transaction-scope half of the
             // deadlock fix, and the half #729 missed. The SQL-side ordered locking
@@ -723,17 +738,16 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
             long maskTotal = dep;
             Interlocked.Add(ref masks, maskTotal);
 
-            // Mark AFTER the transaction commits — pairs from any failed deposit
-            // stay resendable; resends are no-ops server-side. Locked for the same
-            // reason as the read above: deposits from different deltas now overlap.
-            lock (_depositedMaskPairs)
-            {
-                if (_depositedMaskPairs.Count + todo.Count > DepositedMaskPairsCap)
-                    _depositedMaskPairs.Clear();
-                foreach (var pair in todo) _depositedMaskPairs.Add(pair);
-            }
+            // Mark AFTER every chunk commits. A failed lane stays poisoned and its
+            // pairs stay resendable on a new writer/run.
+            if (deposited.Count + todo.Count > DepositedMaskPairsCap / MaskShards)
+                deposited.Clear();
+            deposited.UnionWith(todo);
         }
     }
+
+    private static int MaskShard(Hash128 entity)
+        => (int)((uint)entity.GetHashCode() % (uint)MaskShards);
 
     /// <summary>
     /// Drops lanes whose chain has completed. Without this the map retains one
@@ -811,7 +825,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
             lock (_laneLock)
             {
                 foreach (var lane in _typeLanes.Values) lanes.Add(lane);
-                lanes.Add(_maskLane);
+                lanes.AddRange(_maskLanes);
             }
             return lanes.ToArray();
         }
@@ -855,12 +869,19 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
         return _inner.BeginBulkRunAsync(ct);
     }
 
-    public async Task CompleteBulkRunAsync(CancellationToken ct = default)
+    public Task CompleteBulkRunAsync(CancellationToken ct = default)
+        => CompleteBulkRunAsync(null, ct);
+
+    public async Task CompleteBulkRunAsync(
+        Action<BulkRunCompletionPhase>? onPhase,
+        CancellationToken ct = default)
     {
         // Folds drain BEFORE the inner writer rebuilds the cycled consensus
         // secondaries — a live fold during the rebuild would pay live index
         // maintenance on every insert.
         Exception? foldFailure = null;
+        var phaseSw = System.Diagnostics.Stopwatch.StartNew();
+        onPhase?.Invoke(BulkRunCompletionPhase.ConsensusDrain);
         try
         {
             await DrainFoldsAsync();
@@ -869,9 +890,12 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
         {
             foldFailure = ex;
         }
+        LastFoldDrainWallClock = phaseSw.Elapsed;
         bool wasBulk = _bulkRun;
         _bulkRun = false;
         Exception? completionFailure = null;
+        phaseSw.Restart();
+        onPhase?.Invoke(BulkRunCompletionPhase.WriterMaintenance);
         try
         {
             await _inner.CompleteBulkRunAsync(ct);
@@ -880,6 +904,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
         {
             completionFailure = ex;
         }
+        LastWriterMaintenanceWallClock = phaseSw.Elapsed;
 
         // NO terminal mask pass (2026-07-21). Masks are deposited inline by every
         // fold, in every lane — see UpsertDeltaAsync. There is nothing left to

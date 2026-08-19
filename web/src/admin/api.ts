@@ -34,6 +34,7 @@ export interface IngestRun {
   source_id: string | null;
   layer: number | null;
   status: string;
+  phase: string | null;
   started_at: string | null;
   ended_at: string | null;
   units_attempted: number | null;
@@ -46,6 +47,8 @@ export interface IngestRun {
   files_total: number | null;
   input_units_done: number | null;
   input_units_total: number | null;
+  fold_drain_ms: number | null;
+  writer_maintenance_ms: number | null;
   evidence_persisted: boolean | null;
   error: string | null;
 }

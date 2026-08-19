@@ -154,9 +154,11 @@ DECLARE
     e2      bytea := public.laplace_hash128_blake3('test/chess2/e2');
     e3      bytea := public.laplace_hash128_blake3('test/chess2/e3');
     e4      bytea := public.laplace_hash128_blake3('test/chess2/e4');
+    e_no_traj bytea := public.laplace_hash128_blake3('test/chess2/e_no_trajectory');
     ln_a    bytea := public.laplace_hash128_blake3('test/chess2/line_a');
     ln_b    bytea := public.laplace_hash128_blake3('test/chess2/line_b');
     ln_c    bytea := public.laplace_hash128_blake3('test/chess2/line_c');
+    ln_no_traj bytea := public.laplace_hash128_blake3('test/chess2/line_no_trajectory');
     pos2    bytea := public.laplace_hash128_blake3('test/chess2/opening_pos');
     mv_w    bytea := public.laplace_hash128_blake3('test/chess2/mv_w');
     mv_b    bytea := public.laplace_hash128_blake3('test/chess2/mv_b');
@@ -241,7 +243,9 @@ BEGIN
         (tal, 0, type_t, src), (botv, 0, type_t, src), (spas, 0, type_t, src),
         (e1, 0, type_t, src), (e2, 0, type_t, src),
         (e3, 0, type_t, src), (e4, 0, type_t, src),
+        (e_no_traj, 0, type_t, src),
         (ln_a, 0, type_t, src), (ln_b, 0, type_t, src), (ln_c, 0, type_t, src),
+        (ln_no_traj, 0, type_t, src),
         (pos2, 0, type_t, src), (mv_w, 0, type_t, src), (mv_b, 0, type_t, src),
         (r_white, 0, type_t, src), (r_black, 0, type_t, src), (r_draw, 0, type_t, src),
         (d1, 0, type_t, src), (d2, 0, type_t, src), (d3, 0, type_t, src),
@@ -278,6 +282,7 @@ BEGIN
         (public.laplace_hash128_blake3('t2/e2pl'), e2, plns, ln_b, src, NULL, 2, now(), 1, 1000000000, 30000000000),
         (public.laplace_hash128_blake3('t2/e3pl'), e3, plns, ln_c, src, NULL, 1, now(), 1, 500000000, 30000000000),
         (public.laplace_hash128_blake3('t2/e4pl'), e4, plns, ln_a, src, NULL, 2, now(), 1, 1000000000, 30000000000),
+        (public.laplace_hash128_blake3('t2/e_no_traj_pl'), e_no_traj, plns, ln_no_traj, src, NULL, 2, now(), 1, 1000000000, 30000000000),
         (public.laplace_hash128_blake3('t2/e1w'), ln_a, hw, tal,  src, e1, 2, now(), 1, 1000000000, 30000000000),
         (public.laplace_hash128_blake3('t2/e1b'), ln_a, hb, botv, src, e1, 2, now(), 1, 1000000000, 30000000000),
         (public.laplace_hash128_blake3('t2/e1r'), ln_a, hr, r_white, src, e1, 2, now(), 1, 1000000000, 30000000000),
@@ -587,7 +592,7 @@ BEGIN
 
     -- a playing whose line has no trajectory returns nothing rather than guessing
     -- an order, and so does an event handle with no PLAYS_LINE record at all
-    SELECT count(*) INTO n FROM chess.game_plies(e1);
+    SELECT count(*) INTO n FROM chess.game_plies(e_no_traj);
     IF n <> 0 THEN
         RAISE EXCEPTION 'FAIL: a line with no trajectory returned % rows instead of abstaining', n;
     END IF;

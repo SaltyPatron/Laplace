@@ -236,6 +236,39 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
             });
     }
 
+    public void OnCompletionPhase(string sourceName, BulkRunCompletionPhase phase)
+    {
+        if (!_active) return;
+        string value = phase switch
+        {
+            BulkRunCompletionPhase.ConsensusDrain => "consensus-drain",
+            BulkRunCompletionPhase.WriterMaintenance => "writer-maintenance",
+            _ => "finalizing",
+        };
+        Execute(
+            "UPDATE laplace.ingest_run_journal SET phase = $2 WHERE run_id = $1",
+            cmd =>
+            {
+                cmd.Parameters.Add(new NpgsqlParameter { Value = _runId, NpgsqlDbType = NpgsqlDbType.Uuid });
+                cmd.Parameters.Add(new NpgsqlParameter { Value = value });
+            });
+    }
+
+    public void OnBulkCompletion(
+        string sourceName, TimeSpan foldDrain, TimeSpan writerMaintenance)
+    {
+        if (!_active) return;
+        Execute(
+            "UPDATE laplace.ingest_run_journal SET fold_drain_ms = $2, writer_maintenance_ms = $3 "
+            + "WHERE run_id = $1",
+            cmd =>
+            {
+                cmd.Parameters.Add(new NpgsqlParameter { Value = _runId, NpgsqlDbType = NpgsqlDbType.Uuid });
+                cmd.Parameters.Add(new NpgsqlParameter { Value = (long)foldDrain.TotalMilliseconds });
+                cmd.Parameters.Add(new NpgsqlParameter { Value = (long)writerMaintenance.TotalMilliseconds });
+            });
+    }
+
     public void OnRunFinished(string sourceName, IngestRunResult result, string status, string? error = null)
     {
         if (!_active) return;
@@ -247,7 +280,8 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
         // failed at files_done=199/207 twice, with no diagnostic in the row either time.
         Execute(
             "UPDATE laplace.ingest_run_journal SET "
-            + "status = $2, ended_at = now(), "
+            + "status = $2, phase = CASE WHEN $2 = 'failed' THEN 'failed' ELSE 'complete' END, "
+            + "ended_at = now(), "
             + "units_attempted = $3, units_applied = $4, units_failed = $5, "
             + "entities = $6, physicalities = $7, attestations = $8, "
             + "error = COALESCE($9, error), "
@@ -359,7 +393,8 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
             _active = false;
             StopFileJournalPump();
             Execute(
-                "UPDATE laplace.ingest_run_journal SET status = $2, ended_at = now(), error = $3 "
+                "UPDATE laplace.ingest_run_journal SET status = $2, phase = 'failed', "
+                + "ended_at = now(), error = $3 "
                 + "WHERE run_id = $1",
                 cmd =>
                 {
@@ -376,8 +411,8 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
         if (_runId != Guid.Empty) return;
         Execute(
             "INSERT INTO laplace.ingest_run_journal "
-            + "(run_id, source_name, source_id, layer, status, ended_at, evidence_persisted, error) "
-            + "VALUES ($1, $2, laplace.source_id($2), -1, $3, now(), $4, $5)",
+            + "(run_id, source_name, source_id, layer, status, phase, ended_at, evidence_persisted, error) "
+            + "VALUES ($1, $2, laplace.source_id($2), -1, $3, 'failed', now(), $4, $5)",
             cmd =>
             {
                 cmd.Parameters.Add(new NpgsqlParameter { Value = Guid.NewGuid(), NpgsqlDbType = NpgsqlDbType.Uuid });
@@ -391,8 +426,8 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
     public void OnRunSkipped(string sourceName, int layerOrder) =>
         Execute(
             "INSERT INTO laplace.ingest_run_journal "
-            + "(run_id, source_name, source_id, layer, status, ended_at, evidence_persisted) "
-            + "VALUES ($1, $2, laplace.source_id($2), $3, 'skipped-complete', now(), $4)",
+            + "(run_id, source_name, source_id, layer, status, phase, ended_at, evidence_persisted) "
+            + "VALUES ($1, $2, laplace.source_id($2), $3, 'skipped-complete', 'complete', now(), $4)",
             cmd =>
             {
                 cmd.Parameters.Add(new NpgsqlParameter { Value = Guid.NewGuid(), NpgsqlDbType = NpgsqlDbType.Uuid });

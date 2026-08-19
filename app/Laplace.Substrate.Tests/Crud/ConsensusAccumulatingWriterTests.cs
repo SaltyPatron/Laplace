@@ -134,9 +134,15 @@ public class ConsensusAccumulatingWriterTests
             Change(src, "bulk-fold-b", Obs(H(931), subj, relType, o2, src, 900_000_000)));
         // Bulk-run folds are queued behind the apply lane; completing the run
         // drains the pipeline, so both cells must be folded and visible here.
-        await accumulator.CompleteBulkRunAsync();
+        var completionPhases = new List<BulkRunCompletionPhase>();
+        await accumulator.CompleteBulkRunAsync(completionPhases.Add);
 
         Assert.Equal(2L, accumulator.CellsFolded);
+        Assert.Equal(
+            [BulkRunCompletionPhase.ConsensusDrain, BulkRunCompletionPhase.WriterMaintenance],
+            completionPhases);
+        Assert.True(accumulator.LastFoldDrainWallClock >= TimeSpan.Zero);
+        Assert.True(accumulator.LastWriterMaintenanceWallClock >= TimeSpan.Zero);
         Assert.NotNull(await ConsensusRowAsync(subj, relType, o1));
         Assert.NotNull(await ConsensusRowAsync(subj, relType, o2));
     }

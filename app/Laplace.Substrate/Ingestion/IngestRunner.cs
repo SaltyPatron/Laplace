@@ -636,7 +636,29 @@ public sealed class IngestRunner
             try
             {
                 if (bulkRunStarted)
-                    await _writer.CompleteBulkRunAsync(ct);
+                {
+                    try
+                    {
+                        await _writer.CompleteBulkRunAsync(
+                            phase => _obs.OnCompletionPhase(decomposer.SourceName, phase), ct);
+                    }
+                    finally
+                    {
+                        if (foldMetrics is not null)
+                        {
+                            _obs.OnBulkCompletion(
+                                decomposer.SourceName,
+                                foldMetrics.LastFoldDrainWallClock,
+                                foldMetrics.LastWriterMaintenanceWallClock);
+                            log.LogInformation(
+                                "LAPSIGHT_COMPLETION source={Source} fold_drain_ms={FoldMs} "
+                                + "writer_maintenance_ms={MaintenanceMs}",
+                                decomposer.SourceName,
+                                foldMetrics.LastFoldDrainWallClock.TotalMilliseconds,
+                                foldMetrics.LastWriterMaintenanceWallClock.TotalMilliseconds);
+                        }
+                    }
+                }
             }
             catch (OperationCanceledException)
             {
