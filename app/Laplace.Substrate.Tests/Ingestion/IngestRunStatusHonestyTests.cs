@@ -106,4 +106,21 @@ public sealed class IngestRunStatusHonestyTests
             unitsFailed: 0, emptySourceNoOp: false, capped: false,
             filesDone: result.FilesDone, filesTotal: filesTotal));
     }
+
+    [Fact]
+    public void TerminalResultCarriesExactInputCountersPastTheHeartbeatBoundary()
+    {
+        var result = new IngestRunResult(
+            SourceId: default,
+            SourceName: "SemLinkDecomposer",
+            UnitsAttempted: 43, UnitsApplied: 43, UnitsFailed: 0,
+            EntitiesInserted: 6_446, PhysicalitiesInserted: 6_446,
+            AttestationsInserted: 76_182,
+            TotalRoundTrips: 23, WallClock: TimeSpan.FromSeconds(22),
+            Failures: [], FilesDone: 6,
+            InputUnitsDone: 435_649, InputUnitsTotal: 435_649);
+
+        Assert.Equal(435_649, result.InputUnitsDone);
+        Assert.Equal(result.InputUnitsDone, result.InputUnitsTotal);
+    }
 }

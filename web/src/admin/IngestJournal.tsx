@@ -40,7 +40,16 @@ function bytes(value: number | null): string {
 
 function pct(done: number | null, total: number | null): string {
   if (!total || total <= 0 || done == null) return '—';
-  return `${Math.min(100, Math.round((done / total) * 100))}%`;
+  return `${Math.round((done / total) * 100)}%`;
+}
+
+function isComplete(status: string): boolean {
+  const value = status.toLowerCase();
+  return value === 'ok' || value === 'complete' || value === 'completed';
+}
+
+function counterMismatch(status: string, done: number | null, total: number | null): boolean {
+  return isComplete(status) && total != null && total > 0 && done !== total;
 }
 
 function statusClass(status: string): string {
@@ -147,7 +156,7 @@ export function IngestJournal() {
   }
 
   return (
-    <Panel title="Ingest journal — the CI/CD gate">
+    <Panel title="LapSight / Ingest — the CI/CD gate">
       <div className={styles.toolbar}>
         <label className={styles.liveLabel}>
           <Toggle checked={live} onCheckedChange={setLive} aria-label="Live refresh" />
@@ -185,7 +194,7 @@ export function IngestJournal() {
                   <th scope="col" className={styles.num}>Units</th>
                   <th scope="col" className={styles.num}>Input</th>
                   <th scope="col" className={styles.num}>Files</th>
-                  <th scope="col" className={styles.num}>Entities</th>
+                  <th scope="col" className={styles.num}>Staged E/P/A</th>
                   <th scope="col" className={styles.num}>Took</th>
                   <th scope="col">Force close</th>
                 </tr>
@@ -217,12 +226,21 @@ export function IngestJournal() {
                         {r.units_applied ?? 0}/{r.units_attempted ?? 0}
                         {(r.units_failed ?? 0) > 0 && <span className={styles.failedUnits}> ({r.units_failed} failed)</span>}
                       </td>
-                      <td className={styles.num}>{pct(r.input_units_done, r.input_units_total)}</td>
-                      <td className={styles.num}>
-                        <div>{r.files_done ?? 0}/{r.files_total ?? 0}</div>
-                        <span className={styles.filePct}>{pct(r.files_done, r.files_total)}</span>
+                      <td className={`${styles.num} ${counterMismatch(r.status, r.input_units_done, r.input_units_total) ? styles.counterMismatch : ''}`}>
+                        <div>{(r.input_units_done ?? 0).toLocaleString()}/{(r.input_units_total ?? 0).toLocaleString()}</div>
+                        <span className={styles.progressPct}>{pct(r.input_units_done, r.input_units_total)}</span>
                       </td>
-                      <td className={styles.num}>{(r.entities ?? 0).toLocaleString()}</td>
+                      <td className={styles.num}>
+                        <div className={counterMismatch(r.status, r.files_done, r.files_total) ? styles.counterMismatch : undefined}>
+                          {r.files_done ?? 0}/{r.files_total ?? 0}
+                        </div>
+                        <span className={styles.progressPct}>{pct(r.files_done, r.files_total)}</span>
+                      </td>
+                      <td className={styles.num}>
+                        {(r.entities ?? 0).toLocaleString()}/
+                        {(r.physicalities ?? 0).toLocaleString()}/
+                        {(r.attestations ?? 0).toLocaleString()}
+                      </td>
                       <td className={styles.num}>{duration(r)}</td>
                       <td>
                         <Button

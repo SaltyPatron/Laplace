@@ -657,21 +657,27 @@ public sealed class IngestRunner
         int governedWithoutPhysicality = ValidateEntityAdmission(
             counters, log, enforceEntityAdmission);
 
-        // An explicitly unknown record denominator is more honest than files disguised
-        // as records. Once the stream is complete, its observed count becomes exact and
-        // feeds the terminal journal/LapSight amplification record.
-        if (inventory is { EffectiveTotalInputUnits: 0 } && counters.InputUnitsDone > 0)
-            inventory.PublishExactTotal(counters.InputUnitsDone);
-
         long filesTotalForMarker = inventory?.FileCount ?? 0;
         bool filesComplete = filesTotalForMarker <= 0
             || counters.FilesDone == filesTotalForMarker;
-        if (!options.SkipSourceCompletion
+        bool fullSuccessfulExtraction = options.DecomposerOptions.MaxInputUnits <= 0
             && counters.UnitsFailed == 0
             && failures.Count == 0
-            && counters.UnitsApplied > 0
-            && options.DecomposerOptions.MaxInputUnits <= 0
-            && filesComplete)
+            && filesComplete;
+
+        // Inventory totals are estimates until extraction proves otherwise. Reconcile
+        // both upward and downward after a complete run so newline estimates, filtered
+        // records and refined multi-file inventories cannot leave LapSight above/below
+        // 100%. Internal decomposer phases must report zero input units when they merely
+        // project an already-counted source record.
+        if (fullSuccessfulExtraction
+            && inventory is not null
+            && counters.InputUnitsDone > 0)
+            inventory.PublishExactTotal(counters.InputUnitsDone);
+
+        if (!options.SkipSourceCompletion
+            && fullSuccessfulExtraction
+            && counters.UnitsApplied > 0)
             await _writer.ApplyAsync(LayerCompletion.BuildMarker(decomposer), ct);
 
         sw.Stop();
@@ -689,6 +695,8 @@ public sealed class IngestRunner
             WallClock: sw.Elapsed,
             Failures: failures,
             FilesDone: counters.FilesDone,
+            InputUnitsDone: counters.InputUnitsDone,
+            InputUnitsTotal: inventory?.EffectiveTotalInputUnits ?? 0,
             GovernedIdentitiesWithoutPhysicality: governedWithoutPhysicality);
 
 

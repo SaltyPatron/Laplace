@@ -251,10 +251,12 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
             + "units_attempted = $3, units_applied = $4, units_failed = $5, "
             + "entities = $6, physicalities = $7, attestations = $8, "
             + "error = COALESCE($9, error), "
-            // files_done rode ONLY the periodic progress UPDATE, so a run whose last flush
-            // did not land ended with a ledger count below the one its own status was
-            // derived from. Terminal write now carries the run's final count.
-            + "files_done = GREATEST(files_done, $10) "
+            // File and input counters rode ONLY the throttled progress UPDATE, so fast
+            // runs routinely ended with stale ledger values. The terminal result is the
+            // authoritative snapshot. Totals are assigned directly because extraction
+            // can lawfully refine an inventory estimate downward as well as upward.
+            + "files_done = $10, "
+            + "input_units_done = $11, input_units_total = $12 "
             + "WHERE run_id = $1",
             cmd =>
             {
@@ -272,6 +274,8 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
                     NpgsqlDbType = NpgsqlDbType.Text,
                 });
                 cmd.Parameters.Add(new NpgsqlParameter { Value = (long)result.FilesDone });
+                cmd.Parameters.Add(new NpgsqlParameter { Value = result.InputUnitsDone });
+                cmd.Parameters.Add(new NpgsqlParameter { Value = result.InputUnitsTotal });
             });
 
         WarnIfPlacementsExceedEntities(sourceName, result);

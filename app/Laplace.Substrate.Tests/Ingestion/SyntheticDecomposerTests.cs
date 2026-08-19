@@ -23,10 +23,12 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
     private sealed class SyntheticDecomposer : IDecomposer
     {
         private readonly int _unitCount;
+        private readonly int _estimatedUnitCount;
 
-        public SyntheticDecomposer(int unitCount, Hash128 sourceId)
+        public SyntheticDecomposer(int unitCount, Hash128 sourceId, int? estimatedUnitCount = null)
         {
             _unitCount = unitCount;
+            _estimatedUnitCount = estimatedUnitCount ?? unitCount;
             SourceId = sourceId;
         }
 
@@ -85,13 +87,13 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
                 }
                 var parent = Hash128.Merkle(1, children);
                 builder.AddEntity(parent, 1, BootstrapIntentBuilder.SourceTypeId, SourceId);
-                yield return builder.Build();
+                yield return builder.SetInputUnitsConsumed(1).Build();
                 await Task.Yield();
             }
         }
 
         public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
-            => Task.FromResult<long?>(_unitCount);
+            => Task.FromResult<long?>(_estimatedUnitCount);
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
@@ -115,6 +117,27 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         Assert.Equal(10, result.UnitsApplied);
         Assert.Equal(0, result.UnitsFailed);
         Assert.True(result.EntitiesInserted >= 40);
+        Assert.Equal(10, result.InputUnitsDone);
+        Assert.Equal(10, result.InputUnitsTotal);
+    }
+
+    [Fact]
+    public async Task CompleteRun_ReconcilesInventoryEstimateToExactExtractedUnits()
+    {
+        var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
+        var reader = new NpgsqlSubstrateReader(_pg.DataSource);
+        var runner = new IngestRunner(writer, reader);
+        var srcId = SubstrateCanonicalIds.Source("SyntheticInventoryRefinement");
+        var decomposer = new SyntheticDecomposer(
+            unitCount: 3, sourceId: srcId, estimatedUnitCount: 999);
+
+        var result = await runner.RunAsync(decomposer, IngestRunOptions.Default with
+        {
+            SkipLayerOrderingCheck = true,
+        });
+
+        Assert.Equal(3, result.InputUnitsDone);
+        Assert.Equal(3, result.InputUnitsTotal);
     }
 
     [Fact]

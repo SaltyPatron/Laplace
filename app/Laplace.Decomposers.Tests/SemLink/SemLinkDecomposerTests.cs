@@ -123,6 +123,7 @@ public sealed class SemLinkDecomposerTests
             c.Metadata.SourceContentUnitName == "bootstrap/PredicateMatrixDecomposer");
         Assert.Contains(pmBoot.Entities, e =>
             e.Id == PredicateMatrixIngest.Source && e.TypeId == BootstrapIntentBuilder.SourceTypeId);
+        Assert.Contains("substrate/source/PredicateMatrixDecomposer/v1", dec.CanonicalNamesForReadback);
     }
 
     [Fact]
