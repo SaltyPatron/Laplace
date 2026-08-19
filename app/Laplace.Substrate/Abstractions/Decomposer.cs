@@ -528,8 +528,10 @@ public abstract class RelationTripleDecomposer : Decomposer<RelationTripleRecord
     public override int EstimatedComposeUnitsPerRecord =>
         IngestSourceProfile.RelationTriple.EstComposeUnitsPerRecord;
 
+    protected virtual ConcurrentIdSet? SourceNodeDeclarations => null;
+
     protected sealed override IIngestRecordHandler<RelationTripleRecord> CreateHandler() =>
-        new RelationTripleHandler(SourceId, SourceTrust);
+        new RelationTripleHandler(SourceId, SourceTrust, SourceNodeDeclarations);
 
     protected override IngestBatchConfig BuildPipelineConfig(
         IDecomposerContext context, DecomposerOptions options) =>
