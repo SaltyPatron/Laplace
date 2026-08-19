@@ -3,6 +3,9 @@ using System.Runtime.InteropServices;
 
 namespace Laplace.Ingestion.Tests;
 
+[CollectionDefinition("process-signal", DisableParallelization = true)]
+public sealed class ProcessSignalCollection;
+
 /// <summary>
 /// IngestRunner.RunAsync must convert SIGTERM into token cancellation, not process death.
 ///
@@ -20,6 +23,7 @@ namespace Laplace.Ingestion.Tests;
 /// These pin the MECHANISM in-process. The end-to-end path (SIGTERM a real ingest, read the
 /// journal) needs a live substrate and is not automatable here.
 /// </summary>
+[Collection("process-signal")]
 public class IngestSignalHandlingTests
 {
     [DllImport("libc", SetLastError = true)]

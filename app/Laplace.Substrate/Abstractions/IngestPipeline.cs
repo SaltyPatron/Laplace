@@ -94,7 +94,7 @@ internal static class MultiFileScheduler
         if (files.Count <= 1 || maxTotalUnits > 0) return files;
 
         return files
-            .Select(static f => (File: f, Bytes: TryLength(f.Path)))
+            .Select(static f => (File: f, Bytes: EstimateBytes(f.Path)))
             .OrderByDescending(static f => f.Bytes)
             .ThenBy(static f => f.File.Path, StringComparer.Ordinal)
             .ThenBy(static f => f.File.Label, StringComparer.Ordinal)
@@ -102,11 +102,47 @@ internal static class MultiFileScheduler
             .ToArray();
     }
 
-    private static long TryLength(string path)
+    internal static long EstimateBytes(string? path)
     {
+        if (path is null) return 1;
         try { return new FileInfo(path).Length; }
-        catch (IOException) { return -1; }
-        catch (UnauthorizedAccessException) { return -1; }
+        catch (IOException) { return 1; }
+        catch (UnauthorizedAccessException) { return 1; }
+    }
+
+    /// <summary>
+    /// Divide the compose pool across the first LPT wave. Every claimed file keeps one
+    /// independent pipeline; spare compose lanes go to the file with the largest current
+    /// cost-per-segment. This closes the many-files/one-giant-file hole: OMW had 1,226 files,
+    /// so the old "segment only when file count &lt;= workers" rule left its 526k-record
+    /// Japanese file on one core for 526 seconds even though it was scheduled first.
+    /// </summary>
+    internal static int[] PlanInitialSegments(
+        IReadOnlyList<long> costs,
+        int fileWorkers,
+        int composeWorkers)
+    {
+        int active = Math.Min(costs.Count, Math.Max(1, fileWorkers));
+        if (active == 0) return [];
+
+        var widths = Enumerable.Repeat(1, active).ToArray();
+        int spare = Math.Max(0, composeWorkers - active);
+        while (spare-- > 0)
+        {
+            int best = 0;
+            double bestRemaining = Math.Max(1L, costs[0]) / (double)widths[0];
+            for (int i = 1; i < active; i++)
+            {
+                double remaining = Math.Max(1L, costs[i]) / (double)widths[i];
+                if (remaining > bestRemaining)
+                {
+                    best = i;
+                    bestRemaining = remaining;
+                }
+            }
+            widths[best]++;
+        }
+        return widths;
     }
 }
 
@@ -937,13 +973,20 @@ public static class IngestBatchPipeline
             if (peeked.Count > workers) exhaustedInPeek = false;
         }
 
-        int segmentsPerFile = 1;
-        if (exhaustedInPeek && peeked.Count > 0)
-            segmentsPerFile = Math.Max(1,
-                Math.Max(1, IngestTopology.Current.ComposeWorkers) / peeked.Count);
-        int concurrentWorkingSets = exhaustedInPeek
-            ? Math.Max(1, peeked.Count * segmentsPerFile)
-            : Math.Max(1, workers);
+        int composeWorkers = Math.Max(1, IngestTopology.Current.ComposeWorkers);
+        int initialFileCount = exhaustedInPeek ? peeked.Count : Math.Min(workers, peeked.Count);
+        var initialSources = peeked.Take(initialFileCount).ToArray();
+        int[] initialWidths = MultiFileScheduler.PlanInitialSegments(
+            initialSources.Select(static source =>
+                    MultiFileScheduler.EstimateBytes(source.FilePath))
+                .ToArray(),
+            workers,
+            composeWorkers);
+        var plannedSegments = new Dictionary<IFileRecordSource<TRecord>, int>(
+            ReferenceEqualityComparer.Instance);
+        for (int i = 0; i < initialSources.Length; i++)
+            plannedSegments[initialSources[i]] = initialWidths[i];
+        int concurrentWorkingSets = Math.Max(1, initialWidths.Sum());
 
         // Resolve the resume question a CHUNK at a time on the way into the channel: file
         // identities in parallel (pure CPU: read + BLAKE3), then ONE marker probe for the
@@ -1039,7 +1082,7 @@ public static class IngestBatchPipeline
         // Approximate total from the peek when the stream fit in it; else 0 (sample-only).
         int knownFileTotal = exhaustedInPeek ? peeked.Count : 0;
         int fileOrdinal = 0;
-        int activeFiles = 0;
+        int activeWorkingSets = 0;
 
         var workerTasks = new Task[workers];
         for (int w = 0; w < workers; w++)
@@ -1053,13 +1096,18 @@ public static class IngestBatchPipeline
             {
                 await foreach (var source in sources.Reader.ReadAllAsync(ct))
                 {
-                    Interlocked.Increment(ref activeFiles);
+                    var baseConfig = configFactory(source.FileLabel);
+                    int desiredSegments = plannedSegments.TryGetValue(source, out int planned)
+                        ? planned
+                        : 1;
+                    int segments = MonolithSegmenter.ResolveSegments(baseConfig, desiredSegments);
+                    Interlocked.Add(ref activeWorkingSets, segments);
                     try
                     {
-                    var config = configFactory(source.FileLabel)
+                    var config = baseConfig
                         .WithActiveWorkingSetConcurrency(
                             concurrentWorkingSets,
-                            () => Math.Max(1, Volatile.Read(ref activeFiles) * segmentsPerFile));
+                            () => Math.Max(1, Volatile.Read(ref activeWorkingSets)));
 
                     // Per-file resume (GH #898): identity + marker check happen in the
                     // WORKER, so skips parallelize with the ingest they replace.
@@ -1086,10 +1134,6 @@ public static class IngestBatchPipeline
                     }
 
                     var records = new AsyncEnumerableRecordStream<TRecord>(source.RecordsAsync(ct));
-                    int segments = segmentsPerFile > 1
-                        ? MonolithSegmenter.ResolveSegments(config, segmentsPerFile)
-                        : 1;
-
                     int ordinal = Interlocked.Increment(ref fileOrdinal);
                     var fileSw = System.Diagnostics.Stopwatch.StartNew();
                     Laplace.Ingestion.IngestObservabilityScope.Current.OnFileStarted(
@@ -1164,7 +1208,7 @@ public static class IngestBatchPipeline
                     }
                     finally
                     {
-                        Interlocked.Decrement(ref activeFiles);
+                        Interlocked.Add(ref activeWorkingSets, -segments);
                     }
                 }
             }, ct);

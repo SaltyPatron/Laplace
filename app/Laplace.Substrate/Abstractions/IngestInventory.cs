@@ -49,16 +49,7 @@ public sealed record IngestInventory(
         Func<string, CancellationToken, long> exactCount,
         CancellationToken ct)
     {
-        bool anySampled = false;
-        foreach (var p in paths)
-        {
-            if (File.Exists(p) && new FileInfo(p).Length > EtlInventory.ExactScanThresholdBytes)
-            {
-                anySampled = true;
-                break;
-            }
-        }
-        if (!anySampled) return;
+        if (!NeedsBackgroundRefinement(paths)) return;
 
         _ = Task.Run(() =>
         {
@@ -77,6 +68,29 @@ public sealed record IngestInventory(
                 // Best-effort refinement: the sampled estimate stands.
             }
         }, ct);
+    }
+
+    internal static bool NeedsBackgroundRefinement(IReadOnlyList<string> paths)
+    {
+        long totalBytes = 0;
+        bool anySampled = false;
+        foreach (var p in paths)
+        {
+            if (!File.Exists(p)) continue;
+            long bytes = new FileInfo(p).Length;
+            totalBytes = totalBytes > long.MaxValue - bytes ? long.MaxValue : totalBytes + bytes;
+            if (bytes > EtlInventory.ExactScanThresholdBytes)
+            {
+                anySampled = true;
+                break;
+            }
+        }
+        // The multi-file estimator also samples when the CORPUS exceeds its shared
+        // budget even if every individual file is small. OMW is exactly that shape:
+        // 1,226 files / 138 MiB, largest 32 MiB. Testing only the per-file threshold
+        // meant refinement never ran and live progress reached 114.9%.
+        anySampled |= totalBytes > EtlInventory.MultiFileInventoryBudgetBytes;
+        return anySampled;
     }
 
     public static IngestInventory Single(long units, string unitType = "units") =>
