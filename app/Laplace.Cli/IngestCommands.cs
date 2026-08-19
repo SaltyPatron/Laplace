@@ -372,7 +372,7 @@ internal static class IngestCommands
         {
             sw.Stop();
         }
-        try { await PrintIngestValidationAsync(ds, dec); }
+        try { await PrintIngestValidationAsync(ds, dec, exactSourceValidation: false); }
         catch (Exception ex)
         { Console.Error.WriteLine($"warn: safetensor deposition validation failed: {ex.Message}"); }
         return 0;
@@ -645,17 +645,23 @@ internal static class IngestCommands
             + result.AttestationsInserted;
         if (novelRows > 0)
         {
-            try { await PrintIngestValidationAsync(ds, dec); }
+            try { await PrintIngestValidationAsync(ds, dec, exactSourceValidation: false); }
             catch (Exception ex)
             { Console.Error.WriteLine($"warn: ingest validation failed (ingest itself is complete): {ex.Message}"); }
         }
         return 0;
     }
 
-    public static async Task<int> StatsAsync()
+    public static async Task<int> StatsAsync(string? sourceKey = null)
     {
+        IDecomposer? decomposer = null;
+        if (!string.IsNullOrWhiteSpace(sourceKey))
+        {
+            try { decomposer = CliRuntime.Decomposers.Resolve(sourceKey); }
+            catch (ArgumentException ex) { return Fail(ex.Message); }
+        }
         await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
-        await PrintIngestValidationAsync(ds, decomposer: null);
+        await PrintIngestValidationAsync(ds, decomposer, exactSourceValidation: true);
         return 0;
     }
 
@@ -783,26 +789,29 @@ internal static class IngestCommands
         Console.WriteLine($"registered {names.Count:N0} canonical names");
     }
 
-    private static async Task PrintIngestValidationAsync(NpgsqlDataSource ds, IDecomposer? decomposer)
+    private static async Task PrintIngestValidationAsync(
+        NpgsqlDataSource ds,
+        IDecomposer? decomposer,
+        bool exactSourceValidation)
     {
         await using var conn = await ds.OpenConnectionAsync();
+        var phase = Stopwatch.StartNew();
 
         // Immediately after a bulk COPY ingest the just-loaded tables can still carry
-        // pre-load planner statistics (autoanalyze has not necessarily caught up). With a
-        // stale reltuples≈0 the planner picks a nested loop for content_count/evidence_count
-        // and — because these validation commands run with CommandTimeout=0 — the query
-        // hangs indefinitely instead of finishing in ~1s. Refresh the stats the validations
-        // depend on before running them. Column-scoped so we skip the minutes-long PostGIS
-        // ND-stats on physicalities.coord/trajectory (never touched by these counts); a
-        // column-list ANALYZE still refreshes pg_class.reltuples, which is the estimate that
-        // matters here.
+        // pre-load planner statistics (autoanalyze has not necessarily caught up). Refresh
+        // the columns used by the UI and read paths. Column-scoped so we skip the
+        // minutes-long PostGIS ND-stats on physicalities.coord/trajectory.
         await NpgsqlIngestOps.AnalyzePostIngestValidationAsync(conn);
+        long analyzeMs = phase.ElapsedMilliseconds;
+        phase.Restart();
 
         // The write burst is over: drain the GIN pending lists so the first reader
         // after a seed does not scan them linearly. See CleanGinPendingListsAsync —
         // this is what lets gin_pending_list_limit be sized for bulk-load batching
         // without taxing the containment probe the read model runs on.
         await NpgsqlIngestOps.CleanGinPendingListsAsync(conn);
+        long ginMs = phase.ElapsedMilliseconds;
+        phase.Restart();
 
         Task<long> EvidenceForSource(string sourceKey) =>
             NpgsqlIngestOps.EvidenceCountForSourceNameAsync(conn, sourceKey);
@@ -816,6 +825,26 @@ internal static class IngestCommands
             var counts = await NpgsqlSubstrateReads.SubstrateCountsAsync(conn, CancellationToken.None);
             foreach (var row in counts)
                 Console.WriteLine($"  {row.Metric,-32}: {row.Value,12:N0}");
+        }
+        long summaryMs = phase.ElapsedMilliseconds;
+        Console.WriteLine(
+            $"LAPSIGHT_POST_INGEST analyze_ms={analyzeMs} gin_drain_ms={ginMs} "
+            + $"summary_ms={summaryMs} exact_source_validation={exactSourceValidation.ToString().ToLowerInvariant()}");
+
+        // Keep automatic ingest completion bounded. The stats refresh above is necessary
+        // for the UI and planner, and the GIN drain protects the first reader. Exact
+        // source-content attribution is a diagnostic scan, not part of committing an
+        // ingest. MEASURED 2026-08-19: ChessPgn finished 655,255 games in 3,655s, then
+        // ops.content_count(source) read for another 815s until cancelled; the journal and
+        // workflow were already waiting on a successful ingest. The workflow's decomposer
+        // gate proves the indexed witness relations. Operators can request the unbounded
+        // exact diagnostic explicitly with `laplace stats <cli-source>`.
+        if (decomposer is not null && !exactSourceValidation)
+        {
+            Console.WriteLine(
+                $"  witness [{decomposer.SourceName}] exact source counts deferred "
+                + "(workflow gate; explicit: laplace stats <cli-source>)");
+            return;
         }
 
         if (decomposer is null)

@@ -183,11 +183,19 @@ internal sealed class EvalCommand : ForwardCommand<TailSettings>
         => EvalCommands.RunAsync(Raw(ctx));
 }
 
-[Description("Substrate row-count inventory and health.")]
+[Description("Substrate row-count inventory and health. Optional source key runs exact source diagnostics.")]
 internal sealed class StatsCommand : ForwardCommand<TailSettings>
 {
     protected override Task<int> ExecuteAsync(CommandContext ctx, TailSettings s, CancellationToken ct)
-        => IngestCommands.StatsAsync();
+    {
+        var raw = Raw(ctx);
+        if (raw.Length > 1)
+        {
+            Console.Error.WriteLine("usage: stats [cli-source]");
+            return Task.FromResult(2);
+        }
+        return IngestCommands.StatsAsync(raw.Length == 1 ? raw[0] : null);
+    }
 }
 
 [Description("Close a cut-off ingest journal row: close-run <run_id> [cancelled|failed].")]
