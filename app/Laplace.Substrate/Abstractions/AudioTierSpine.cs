@@ -17,7 +17,8 @@ public static class AudioTierSpine
     public const int MaxAudioTiers = 5;
     public const int MaxExistenceRounds = MaxAudioTiers + 1;
 
-    private const int RootMemoCap = 1 << 18;
+    private static readonly int RootMemoCapacity = IngestSizing.ResolveApplyIo(
+        IngestTopology.Current.ApplyPartitions).AudioRootCacheIds;
     private static readonly ConcurrentDictionary<Hash128, Hash128?> RootMemo = new();
     private static int _rootMemoCount;
 
@@ -34,8 +35,12 @@ public static class AudioTierSpine
         var memoKey = Hash128.Blake3(MemoryMarshal.AsBytes(pcm));
         if (RootMemo.TryGetValue(memoKey, out var cached)) return cached;
         Hash128? root = IntentStage.AudioRootId(pcm);
-        if (Volatile.Read(ref _rootMemoCount) < RootMemoCap && RootMemo.TryAdd(memoKey, root))
-            Interlocked.Increment(ref _rootMemoCount);
+        if (Volatile.Read(ref _rootMemoCount) < RootMemoCapacity && RootMemo.TryAdd(memoKey, root))
+        {
+            int after = Interlocked.Increment(ref _rootMemoCount);
+            if (after > RootMemoCapacity && RootMemo.TryRemove(memoKey, out _))
+                Interlocked.Decrement(ref _rootMemoCount);
+        }
         return root;
     }
 

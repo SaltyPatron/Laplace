@@ -83,7 +83,6 @@ public static class SyzygyTableUnpack
         await foreach (var product in ParallelIngestWork.RunAsync(
                            EnumerateBoardsAsync(pieces, ct),
                            degree,
-                           degree * 64,
                            (board, token) => ProbeBoardAsync(board, prober, token),
                            ct).ConfigureAwait(false))
             yield return product;

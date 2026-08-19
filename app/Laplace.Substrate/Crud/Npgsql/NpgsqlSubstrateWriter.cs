@@ -138,17 +138,21 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
             // wall-safe. Buffers are sized once to the first chunk and reused across chunks
             // (n <= cap always, so no re-alloc and no LOH churn); the native call only reads
             // the first `n` rows / `n*32` mask bytes.
-            const int MaxAttsPerMarshal = 1 << 20; // masksFlat <= 32 MiB, stagedRows well under 2 GiB
+            int stagedBytes = System.Runtime.InteropServices.Marshal.SizeOf<AttestationStagedNative>();
+            int maxAttsPerMarshal = (int)Math.Max(1, Math.Min(
+                Array.MaxLength / 32L,
+                IngestSizing.ResolveWorkingSetFlushEnvelopeBytes()
+                    / Math.Max(1L, stagedBytes + 32L)));
             foreach (var c in changes)
             {
                 var atts = c.Attestations;
                 if (atts.IsEmpty) continue;
-                int cap = Math.Min(MaxAttsPerMarshal, atts.Length);
+                int cap = Math.Min(maxAttsPerMarshal, atts.Length);
                 var stagedRows = new AttestationStagedNative[cap];
                 var masksFlat = new byte[cap * 32];
-                for (int chunkStart = 0; chunkStart < atts.Length; chunkStart += MaxAttsPerMarshal)
+                for (int chunkStart = 0; chunkStart < atts.Length; chunkStart += maxAttsPerMarshal)
                 {
-                    int n = Math.Min(MaxAttsPerMarshal, atts.Length - chunkStart);
+                    int n = Math.Min(maxAttsPerMarshal, atts.Length - chunkStart);
                     for (int i = 0; i < n; i++)
                     {
                         var a = atts[chunkStart + i];

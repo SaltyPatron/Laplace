@@ -16,7 +16,8 @@ public static class ImageTierSpine
     public const int MaxImageTiers = 6;
     public const int MaxExistenceRounds = MaxImageTiers + 1;
 
-    private const int RootMemoCap = 1 << 18;
+    private static readonly int RootMemoCapacity = IngestSizing.ResolveApplyIo(
+        IngestTopology.Current.ApplyPartitions).ImageRootCacheIds;
     private static readonly ConcurrentDictionary<Hash128, Hash128?> RootMemo = new();
     private static int _rootMemoCount;
 
@@ -33,8 +34,12 @@ public static class ImageTierSpine
         var memoKey = Hash128.Blake3(rgba);
         if (RootMemo.TryGetValue(memoKey, out var cached)) return cached;
         Hash128? root = IntentStage.ImageRootId(rgba, width, height);
-        if (Volatile.Read(ref _rootMemoCount) < RootMemoCap && RootMemo.TryAdd(memoKey, root))
-            Interlocked.Increment(ref _rootMemoCount);
+        if (Volatile.Read(ref _rootMemoCount) < RootMemoCapacity && RootMemo.TryAdd(memoKey, root))
+        {
+            int after = Interlocked.Increment(ref _rootMemoCount);
+            if (after > RootMemoCapacity && RootMemo.TryRemove(memoKey, out _))
+                Interlocked.Decrement(ref _rootMemoCount);
+        }
         return root;
     }
 

@@ -9,19 +9,6 @@ public static class IngestSizing
     public const int DefaultEstBytesPerRecord = 512;
 
     /// <summary>
-    /// Records sampled by <see cref="MeasureBytesPerRecord"/>. Enough to average out a
-    /// long tail without reading a meaningful fraction of a 20GB file.
-    /// </summary>
-    public const int RecordSampleCount = 4096;
-
-    /// <summary>
-    /// Widest believable mean record size. A sample that lands above this is not a
-    /// measurement of records, it is a file that is not line-delimited the way the caller
-    /// thinks — fall back rather than size a batch from it.
-    /// </summary>
-    public const int MaxCredibleBytesPerRecord = 1 << 20;
-
-    /// <summary>
     /// MEASURE bytes/record from the file about to be read, instead of trusting the
     /// per-source constant declared in <c>IngestSourceProfile</c>.
     ///
@@ -35,23 +22,28 @@ public static class IngestSizing
     /// the denominator of the per-worker memory share, so an over-estimate shrinks
     /// every batch and increases scheduling/probe overhead for the whole corpus.
     ///
-    /// Returns <paramref name="fallback"/> on any unreadable/empty/implausible input.
-    /// Sizing must never be the thing that throws.
+    /// By default it samples one machine-derived sequential-I/O window; tests and
+    /// diagnostics may request an exact record count. Returns <paramref name="fallback"/>
+    /// on unreadable/empty input. Sizing must never be the thing that throws.
     /// </summary>
     public static int MeasureBytesPerRecord(
         string path,
-        int sampleRecords = RecordSampleCount,
+        int? sampleRecords = null,
         int fallback = DefaultEstBytesPerRecord)
     {
-        if (string.IsNullOrWhiteSpace(path) || sampleRecords <= 0) return fallback;
+        if (string.IsNullOrWhiteSpace(path) || sampleRecords is <= 0) return fallback;
         try
         {
             if (!File.Exists(path)) return fallback;
 
             long bytes = 0;
             int records = 0;
+            long sampleByteBudget = ResolveSequentialIoBufferBytes();
             using var reader = new StreamReader(path);
-            while (records < sampleRecords && reader.ReadLine() is { } line)
+            while ((sampleRecords.HasValue
+                    ? records < sampleRecords.Value
+                    : bytes < sampleByteBudget)
+                && reader.ReadLine() is { } line)
             {
                 if (line.Length == 0) continue;          // blank separators are not records
                 bytes += Encoding.UTF8.GetByteCount(line) + 1;   // + the newline it cost
@@ -60,7 +52,7 @@ public static class IngestSizing
 
             if (records == 0 || bytes <= 0) return fallback;
             long mean = bytes / records;
-            return mean is > 0 and <= MaxCredibleBytesPerRecord ? (int)mean : fallback;
+            return mean is > 0 and <= int.MaxValue ? (int)mean : fallback;
         }
         catch (IOException) { return fallback; }
         catch (UnauthorizedAccessException) { return fallback; }
@@ -217,18 +209,29 @@ public static class IngestSizing
         int EntityPresenceCacheIds,
         int PhysicalityPresenceCacheIds,
         int LadderCacheIds,
+        int ReaderProvenCacheIds,
+        int ReaderRootCacheIds,
+        int TextRootCacheIds,
+        int ImageRootCacheIds,
+        int AudioRootCacheIds,
         int CopyStartupBytes)
     {
         public void Log() => Console.Error.WriteLine(
             "apply_io_sizing: connections={0} probe_chunk_ids={1} merge_chunk_rows={2} "
             + "entity_cache_ids={3} physicality_cache_ids={4} ladder_cache_ids={5} "
-            + "copy_startup_bytes={6}",
+            + "reader_proven_ids={6} reader_root_ids={7} text_root_ids={8} "
+            + "image_root_ids={9} audio_root_ids={10} copy_startup_bytes={11}",
             Connections,
             ProbeChunkIds,
             MergeChunkRows,
             EntityPresenceCacheIds,
             PhysicalityPresenceCacheIds,
             LadderCacheIds,
+            ReaderProvenCacheIds,
+            ReaderRootCacheIds,
+            TextRootCacheIds,
+            ImageRootCacheIds,
+            AudioRootCacheIds,
             CopyStartupBytes);
     }
 
@@ -302,12 +305,16 @@ public static class IngestSizing
         int mergeChunkRows = IntCount(perConnectionBytes
             / MemoryTopology.AttestationMergeTransitBytesPerRow);
 
-        // Presence-e, presence-p, and ladder each receive one third of the cache
-        // envelope. They are exact acceleration structures; reaching capacity only
-        // restores the normal DB probe/compose path and cannot lose data.
-        long cacheBytesPerMap = Math.Max(1, envelope / 3);
+        // The cache envelope is shared by every run-long exact acceleration map:
+        // writer entity/physicality presence, content ladder, reader proven ids, and
+        // reader canonical-root pairs, and text/image/audio root memoization. Reaching
+        // capacity only restores the normal DB probe/compose path and cannot lose data.
+        const int cacheOwners = 8;
+        long cacheBytesPerMap = Math.Max(1, envelope / cacheOwners);
         int cacheIds = IntCount(cacheBytesPerMap
             / MemoryTopology.ConcurrentHash128ResidentBytes);
+        int rootCacheIds = IntCount(cacheBytesPerMap
+            / MemoryTopology.ConcurrentHash128PairResidentBytes);
 
         return new ApplyIoPlan(
             connections,
@@ -316,6 +323,11 @@ public static class IngestSizing
             cacheIds,
             cacheIds,
             cacheIds,
+            cacheIds,
+            rootCacheIds,
+            rootCacheIds,
+            rootCacheIds,
+            rootCacheIds,
             MemoryTopology.CopyStartupBytesPerConnection);
     }
 
@@ -334,24 +346,57 @@ public static class IngestSizing
             Math.Min((long)Math.Max(1, applyPartitions), rowCount), byPayload));
     }
 
+    /// <summary>
+    /// Row capacity for one array/COPY-style transit operation. Active connections
+    /// divide a single process envelope; <paramref name="transitBytesPerRow"/> is the
+    /// row's actual client/wire/server resident shape. This is the common replacement
+    /// for fixed 4K/64K/etc. bulk-operation caps.
+    /// </summary>
+    public static int ResolveTransitBatchRows(
+        int transitBytesPerRow,
+        int? activeConnections = null,
+        long? flushEnvelopeBytes = null)
+    {
+        int connections = Math.Max(1,
+            activeConnections ?? IngestTopology.Current.ApplyPartitions);
+        long envelope = Math.Max(1,
+            flushEnvelopeBytes ?? ResolveWorkingSetFlushEnvelopeBytes());
+        return IntCount(envelope / connections / Math.Max(1, transitBytesPerRow));
+    }
+
     private static int IntCount(long value) =>
         (int)Math.Clamp(value, 1, int.MaxValue);
 
     public static long TotalPhysicalMemoryBytes() => MemoryTopology.TotalPhysicalBytes;
 
     /// <summary>
+    /// Per-worker sequential I/O window. All active I/O workers share one compose
+    /// envelope, so file readers no longer each allocate an unrelated 1 MiB buffer.
+    /// PostgreSQL/Npgsql's transport page is the forward-progress floor.
+    /// </summary>
+    public static int ResolveSequentialIoBufferBytes(int? ioWorkers = null)
+    {
+        int workers = Math.Max(1, ioWorkers ?? CpuTopology.ResolveIoBoundWorkers());
+        long bytes = ResolveWorkingSetFlushEnvelopeBytes() / workers;
+        return (int)Math.Clamp(
+            bytes,
+            MemoryTopology.CopyStartupBytesPerConnection,
+            Array.MaxLength);
+    }
+
+    /// <summary>
     /// Working-set apply byte budget — delegated to <see cref="MemoryTopology"/>, the single
-    /// RAM authority. Derived from real physical memory and clamped to the hard COPY-buffer
-    /// safety ceiling so a single-table apply buffer can never approach the 2 GiB int wall.
-    /// The former inline phys/16 (~3 GiB on this box) was itself the source of the >2 GiB
-    /// COPY overflow that aborted UD/ConceptNet/chess with committed=0.
+    /// RAM authority. The budget is real RAM divided across the topology's simultaneously
+    /// resident owners. Historical 1/4-GiB and RAM/16 clamps are gone; COPY now streams and
+    /// every managed allocation obeys the runtime's actual array-addressability boundary.
     /// </summary>
     public static long ResolveWorkingSetBudgetBytes() => MemoryTopology.WorkingSetBudgetBytes;
 
     /// <summary>
     /// Compose-side flush envelope (resident-memory bound that closes a working set before
     /// its builder + content bank are reset) — delegated to <see cref="MemoryTopology"/>.
-    /// Far below the apply COPY budget so compose flushes continuously and stays fast; see
+    /// One apply-partition share of the apply budget so compose flushes continuously and
+    /// stays fast; see
     /// <see cref="MemoryTopology.WorkingSetFlushEnvelopeBytes"/> for the rationale.
     /// </summary>
     public static long ResolveWorkingSetFlushEnvelopeBytes(int concurrentWorkingSets = 1) =>

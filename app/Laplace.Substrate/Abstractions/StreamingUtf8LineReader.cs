@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Runtime.CompilerServices;
+using Laplace.Engine.Core;
 
 namespace Laplace.Decomposers.Abstractions;
 
@@ -10,7 +11,7 @@ public static class StreamingUtf8LineReader
         string filePath, [EnumeratorCancellation] CancellationToken ct = default)
     {
         await using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read,
-            FileShare.Read, bufferSize: 1 << 20, useAsync: true);
+            FileShare.Read, bufferSize: MemoryTopology.CopyStartupBytesPerConnection, useAsync: true);
         await foreach (var line in ReadLinesAsync(fs, ct))
             yield return line;
     }
@@ -20,7 +21,7 @@ public static class StreamingUtf8LineReader
     {
         var carry = ArrayPool<byte>.Shared.Rent(256);
         int carryLen = 0;
-        var buf = ArrayPool<byte>.Shared.Rent(1 << 20);
+        var buf = ArrayPool<byte>.Shared.Rent(IngestSizing.ResolveSequentialIoBufferBytes());
         var lineBuf = ArrayPool<byte>.Shared.Rent(4096);
         int lineCap = lineBuf.Length;
 

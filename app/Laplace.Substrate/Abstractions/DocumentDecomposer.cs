@@ -130,7 +130,7 @@ public static class DocumentFileExtract
                 + "compose limit; split the file into documents below the limit");
         var bytes = new byte[(int)fi.Length];
         await using var fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read,
-            bufferSize: 1 << 20, useAsync: true);
+            bufferSize: MemoryTopology.CopyStartupBytesPerConnection, useAsync: true);
         int off = 0;
         while (off < bytes.Length)
         {

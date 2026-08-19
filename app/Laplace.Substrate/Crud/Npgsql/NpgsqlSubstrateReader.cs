@@ -8,13 +8,16 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
 {
     private readonly NpgsqlDataSource _ds;
     private readonly TierProbeBatcher _tierProbes;
+    private readonly IngestSizing.ApplyIoPlan _cachePlan;
 
     public NpgsqlDataSource DataSource => _ds;
 
     public NpgsqlSubstrateReader(NpgsqlDataSource dataSource)
     {
         _ds = dataSource ?? throw new ArgumentNullException(nameof(dataSource));
-        _tierProbes = new TierProbeBatcher(TierBatchExistenceProbeDirectAsync);
+        _cachePlan = IngestSizing.ResolveApplyIo(IngestTopology.Current.ApplyPartitions);
+        _tierProbes = new TierProbeBatcher(
+            TierBatchExistenceProbeDirectAsync, _cachePlan.ProbeChunkIds);
     }
 
     public async Task<bool> HasSourceEverCompletedAsync(int layerOrder, CancellationToken ct = default)
@@ -188,23 +191,19 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
     /// present -- see the dorian.txt repro in
     /// .scratchpad/02_Identified_Issues.txt.
     ///
-    /// Cleared at the cap (memory valve, same as
-    /// ConsensusAccumulatingWriter._depositedMaskPairs): a miss falls through
-    /// to the DB, so clearing costs re-probes, never correctness.
+    /// Capacity comes from the shared cache byte envelope. Once full, misses fall
+    /// through to the DB; the useful hot prefix is not periodically erased.
     /// </summary>
     private readonly System.Collections.Concurrent.ConcurrentDictionary<Hash128, byte> _proven = new();
-    private const int ProvenCacheCap = 1 << 24;
     private int _provenApprox;
 
     private void AddProven(Hash128 id)
     {
+        if (Volatile.Read(ref _provenApprox) >= _cachePlan.ReaderProvenCacheIds) return;
         if (!_proven.TryAdd(id, 1)) return;
-        // Approximate on purpose: ConcurrentDictionary.Count locks every stripe.
-        if (Interlocked.Increment(ref _provenApprox) >= ProvenCacheCap)
-        {
-            _proven.Clear();
-            Interlocked.Exchange(ref _provenApprox, 0);
-        }
+        int after = Interlocked.Increment(ref _provenApprox);
+        if (after <= _cachePlan.ReaderProvenCacheIds) return;
+        if (_proven.TryRemove(id, out _)) Interlocked.Decrement(ref _provenApprox);
     }
 
     public async Task<byte[]> EntitiesExistBitmapAsync(IReadOnlyList<Hash128> candidates, CancellationToken ct = default)
@@ -272,20 +271,18 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
 
 
 
-    // Same memory valve as _proven: canonical→root is deterministic, so a cleared
-    // entry only costs a recompute.
+    // Same resource plan as _proven: canonical→root is deterministic, so a cache
+    // miss only costs a recompute.
     private readonly System.Collections.Concurrent.ConcurrentDictionary<Hash128, Hash128> _rootCache = new();
-    private const int RootCacheCap = 1 << 22;
     private int _rootCacheApprox;
     public bool TryGetCachedRoot(Hash128 canonicalKey, out Hash128 rootId) => _rootCache.TryGetValue(canonicalKey, out rootId);
     public void CacheRoot(Hash128 canonicalKey, Hash128 rootId)
     {
+        if (Volatile.Read(ref _rootCacheApprox) >= _cachePlan.ReaderRootCacheIds) return;
         if (!_rootCache.TryAdd(canonicalKey, rootId)) return;
-        if (Interlocked.Increment(ref _rootCacheApprox) >= RootCacheCap)
-        {
-            _rootCache.Clear();
-            Interlocked.Exchange(ref _rootCacheApprox, 0);
-        }
+        int after = Interlocked.Increment(ref _rootCacheApprox);
+        if (after <= _cachePlan.ReaderRootCacheIds) return;
+        if (_rootCache.TryRemove(canonicalKey, out _)) Interlocked.Decrement(ref _rootCacheApprox);
     }
 
     public async Task<byte[]> ContentDescentBitmapAsync(

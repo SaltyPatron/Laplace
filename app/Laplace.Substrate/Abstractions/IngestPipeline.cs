@@ -156,12 +156,11 @@ public static class ParallelIngestWork
     public static IAsyncEnumerable<TResult> RunAsync<TWork, TResult>(
         IReadOnlyList<TWork> work,
         int maxConcurrency,
-        int outputCapacity,
         Func<TWork, CancellationToken, IAsyncEnumerable<TResult>> execute,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(work);
-        return RunAsync(Enumerate(work), maxConcurrency, outputCapacity, execute, ct);
+        return RunAsync(Enumerate(work), maxConcurrency, execute, ct);
     }
 
     /// <summary>
@@ -172,7 +171,6 @@ public static class ParallelIngestWork
     public static async IAsyncEnumerable<TResult> RunAsync<TWork, TResult>(
         IAsyncEnumerable<TWork> work,
         int maxConcurrency,
-        int outputCapacity,
         Func<TWork, CancellationToken, IAsyncEnumerable<TResult>> execute,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
@@ -180,11 +178,11 @@ public static class ParallelIngestWork
         ArgumentNullException.ThrowIfNull(execute);
         if (maxConcurrency <= 0)
             throw new ArgumentOutOfRangeException(nameof(maxConcurrency));
-        if (outputCapacity <= 0)
-            throw new ArgumentOutOfRangeException(nameof(outputCapacity));
 
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        var output = Channel.CreateBounded<TResult>(new BoundedChannelOptions(outputCapacity)
+        // One result slot per active producer overlaps production and consumption
+        // without a vendor-supplied queue-depth multiplier.
+        var output = Channel.CreateBounded<TResult>(new BoundedChannelOptions(maxConcurrency)
         {
             SingleReader = true,
             SingleWriter = maxConcurrency == 1,
@@ -536,9 +534,10 @@ public static class IngestBatchPipeline
     /// 14,900-file corpus still reaches full batching after ~10 doublings (~30 probes
     /// total instead of 14,900).
     /// </summary>
-    private const int ResumeProbeChunkMax = 512;
-
-    private const int ResumeHashChunkBytes = 4 << 20;
+    // Part of file-resume identity format v1: changing this block size changes the
+    // Merkle preimage and would invalidate existing completion markers. It is not an
+    // execution batch knob.
+    private const int ResumeFingerprintBlockBytes = 4 << 20;
     private static readonly Hash128 ResumeHashDomain =
         SubstrateCanonicalIds.OfVersioned("file-resume-fingerprint");
 
@@ -560,9 +559,7 @@ public static class IngestBatchPipeline
             var info = new FileInfo(filePath);
             if (!info.Exists) return null;
 
-            long dataChunks = info.Length / ResumeHashChunkBytes
-                + (info.Length % ResumeHashChunkBytes == 0 ? 0 : 1);
-            var chunks = new List<Hash128>((int)Math.Min(1024, 2 + dataChunks))
+            var chunks = new List<Hash128>()
             {
                 ResumeHashDomain,
             };
@@ -570,22 +567,23 @@ public static class IngestBatchPipeline
             BinaryPrimitives.WriteInt64LittleEndian(lengthBytes, info.Length);
             chunks.Add(Hash128.Blake3(lengthBytes));
 
-            buffer = ArrayPool<byte>.Shared.Rent(ResumeHashChunkBytes);
+            buffer = ArrayPool<byte>.Shared.Rent(ResumeFingerprintBlockBytes);
             using var fs = new FileStream(
                 filePath, FileMode.Open, FileAccess.Read, FileShare.Read,
-                bufferSize: 1 << 20, FileOptions.SequentialScan);
+                bufferSize: MemoryTopology.CopyStartupBytesPerConnection,
+                FileOptions.SequentialScan);
             while (true)
             {
                 int read = 0;
-                while (read < ResumeHashChunkBytes)
+                while (read < ResumeFingerprintBlockBytes)
                 {
-                    int n = fs.Read(buffer, read, ResumeHashChunkBytes - read);
+                    int n = fs.Read(buffer, read, ResumeFingerprintBlockBytes - read);
                     if (n == 0) break;
                     read += n;
                 }
                 if (read == 0) break;
                 chunks.Add(Hash128.Blake3(buffer.AsSpan(0, read)));
-                if (read < ResumeHashChunkBytes) break;
+                if (read < ResumeFingerprintBlockBytes) break;
             }
             return Hash128.Merkle(0, CollectionsMarshal.AsSpan(chunks));
         }
@@ -971,10 +969,10 @@ public static class IngestBatchPipeline
         // Files are order-independent (references resolve content-addressed), so there is no
         // source-level phase/barrier — just the pool.
         var sources = Channel.CreateBounded<IFileRecordSource<TRecord>>(
-            new BoundedChannelOptions(workers * 2)
+            new BoundedChannelOptions(workers)
             { FullMode = BoundedChannelFullMode.Wait, SingleWriter = true, SingleReader = false });
         var outCh = Channel.CreateBounded<SubstrateChange>(
-            new BoundedChannelOptions(workers * 4)
+            new BoundedChannelOptions(workers)
             { FullMode = BoundedChannelFullMode.Wait, SingleWriter = false, SingleReader = true });
 
         // FEW-BIG-FILES SOURCES SEGMENT INSIDE THE FILE (2026-07-21). One worker
@@ -1020,8 +1018,10 @@ public static class IngestBatchPipeline
         // whole chunk. The scalar path this replaces cost one round trip per file, which
         // on FrameNet was 14,900 of them and ~100% of the run's wall clock. Chunked rather
         // than whole-corpus so the stream stays lazy — nothing materializes 14,900 sources.
-        var chunk = new List<IFileRecordSource<TRecord>>(ResumeProbeChunkMax);
-        int chunkTarget = 1;   // ramps 1,2,4,...,ResumeProbeChunkMax
+        int resumeProbeChunkMax = IngestSizing.ResolveApplyIo(
+            IngestTopology.Current.ApplyPartitions).ProbeChunkIds;
+        var chunk = new List<IFileRecordSource<TRecord>>();
+        int chunkTarget = 1;   // ramps to the byte-derived database probe width
         async Task FlushChunkAsync()
         {
             if (chunk.Count == 0) return;
@@ -1033,21 +1033,18 @@ public static class IngestBatchPipeline
                 // Identity reads are bounded independently from the file workers. Each
                 // task uses one pooled 4 MiB buffer; no whole-file arrays or nested CPU
                 // fan-out sit outside the ingest memory envelope.
-                using (var gate = new SemaphoreSlim(Math.Max(1, Math.Min(4, paths.Length))))
-                {
-                    var hashing = new Task[paths.Length];
-                    for (int i = 0; i < paths.Length; i++)
+                int hashWorkers = Math.Max(1, Math.Min(
+                    IngestTopology.Current.IoWorkersAvailable,
+                    (int)Math.Max(1, IngestSizing.ResolveWorkingSetFlushEnvelopeBytes()
+                        / ResumeFingerprintBlockBytes)));
+                await Parallel.ForEachAsync(
+                    Enumerable.Range(0, paths.Length),
+                    new ParallelOptions { MaxDegreeOfParallelism = hashWorkers, CancellationToken = ct },
+                    (idx, _) =>
                     {
-                        int idx = i;
-                        hashing[i] = Task.Run(async () =>
-                        {
-                            await gate.WaitAsync(ct).ConfigureAwait(false);
-                            try { roots[idx] = TryResolveFileIdentity(paths[idx]); }
-                            finally { gate.Release(); }
-                        }, ct);
-                    }
-                    await Task.WhenAll(hashing).ConfigureAwait(false);
-                }
+                        roots[idx] = TryResolveFileIdentity(paths[idx]);
+                        return ValueTask.CompletedTask;
+                    }).ConfigureAwait(false);
 
                 var probe = new List<Hash128>(paths.Length);
                 foreach (var r in roots) if (r is { } v) probe.Add(v);
@@ -1065,7 +1062,8 @@ public static class IngestBatchPipeline
             }
             foreach (var s in chunk) await sources.Writer.WriteAsync(s, ct);
             chunk.Clear();
-            if (chunkTarget < ResumeProbeChunkMax) chunkTarget = Math.Min(ResumeProbeChunkMax, chunkTarget * 2);
+            if (chunkTarget < resumeProbeChunkMax)
+                chunkTarget = (int)Math.Min(resumeProbeChunkMax, (long)chunkTarget * 2);
         }
 
         var dispatcher = Task.Run(async () =>

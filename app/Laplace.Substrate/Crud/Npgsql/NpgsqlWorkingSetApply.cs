@@ -1510,11 +1510,11 @@ public sealed partial class NpgsqlSubstrateWriter
         long Patch, int CountOff, long PatchSum = 0, int SumOff = 0);
 
     /// <summary>
-    /// Half of PackFiltered's 2 GiB ceiling, so a chunk that lands slightly over the
-    /// estimate still packs. Bytes, never rows: row COUNT says nothing about payload
-    /// size when one row can be a 145 MB trajectory.
+    /// Exact CLR array-addressability ceiling for the contiguous payload PackFiltered
+    /// currently requires. Bytes, never rows: row count says nothing about payload size
+    /// when one row can be a 145 MB trajectory.
     /// </summary>
-    private const long MaxCopyPayloadBytes = 1L << 30;
+    private static readonly long MaxCopyPayloadBytes = Array.MaxLength;
 
     /// <summary>
     /// Splits a kept-range into byte-bounded COPY payloads. PackFiltered packs an

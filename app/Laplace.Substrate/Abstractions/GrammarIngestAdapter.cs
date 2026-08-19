@@ -303,13 +303,13 @@ public sealed class ParallelGrammarFileRecordStream : IRecordStream<GrammarInges
         IntPtr recipe = GrammarDecomposer.LookupById(_modalityId);
         if (recipe == IntPtr.Zero) yield break;
 
-        var rawLines = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(_workerCount * 8)
+        var rawLines = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(_workerCount)
         {
             SingleWriter = true,
             SingleReader = false,
             FullMode = BoundedChannelFullMode.Wait,
         });
-        var parsed = Channel.CreateBounded<GrammarIngestRecord>(new BoundedChannelOptions(_workerCount * 4)
+        var parsed = Channel.CreateBounded<GrammarIngestRecord>(new BoundedChannelOptions(_workerCount)
         {
             SingleWriter = false,
             SingleReader = true,
@@ -396,13 +396,13 @@ public sealed class ParallelGrammarFileRecordStream : IRecordStream<GrammarInges
         IntPtr recipe = GrammarDecomposer.LookupById(_modalityId);
         if (recipe == IntPtr.Zero) yield break;
 
-        var rawLines = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(_workerCount * 8)
+        var rawLines = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(_workerCount)
         {
             SingleWriter = true,
             SingleReader = false,
             FullMode = BoundedChannelFullMode.Wait,
         });
-        var parsed = Channel.CreateBounded<GrammarIngestRecord>(new BoundedChannelOptions(_workerCount * 4)
+        var parsed = Channel.CreateBounded<GrammarIngestRecord>(new BoundedChannelOptions(_workerCount)
         {
             SingleWriter = false,
             SingleReader = true,

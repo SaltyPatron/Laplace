@@ -18,7 +18,6 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
 {
     private static readonly TimeSpan ProgressInterval = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan FileJournalFlushInterval = TimeSpan.FromSeconds(1);
-    private const int FileJournalFlushMax = 4_096;
 
     /// <summary>
     /// classid of the per-run session advisory lock (objid = hashtext(run_id::text)).
@@ -34,6 +33,7 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
 
     private readonly NpgsqlDataSource _ds;
     private readonly bool _evidencePersisted;
+    private readonly int _fileJournalFlushRows;
 
     private Guid _runId;
     private volatile bool _active;
@@ -64,6 +64,8 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
     {
         _ds = dataSource ?? throw new ArgumentNullException(nameof(dataSource));
         _evidencePersisted = evidencePersisted;
+        _fileJournalFlushRows = IngestSizing.ResolveTransitBatchRows(
+            MemoryTopology.FileJournalTransitBytesPerEvent);
     }
 
     public void OnRunStart(string sourceName, int layerOrder, IngestInventory? inventory)
@@ -523,8 +525,8 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
     {
         lock (_fileFlushGate)
         {
-            var events = new List<FileJournalEvent>(FileJournalFlushMax);
-            while (events.Count < FileJournalFlushMax && _fileEvents.TryDequeue(out var evt))
+            var events = new List<FileJournalEvent>(_fileJournalFlushRows);
+            while (events.Count < _fileJournalFlushRows && _fileEvents.TryDequeue(out var evt))
                 events.Add(evt);
             if (events.Count == 0) return;
 

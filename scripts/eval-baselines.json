@@ -27,5 +27,5 @@
     "require_exact": true
   },
   "latency_ceiling_s": 30.0,
-  "notes": "election_correctness is exact. Baseline sources are a required floor and later sources are allowed. Row estimates enforce only a 25% shrink floor because sampled planner estimates move on maintenance and later ingests add rows."
+  "notes": "election_correctness is exact. Baseline sources are a required floor and later sources are allowed. Row estimates are diagnostic only: planner maintenance and intentional normalization can change them without changing corpus coverage or semantic correctness."
 }

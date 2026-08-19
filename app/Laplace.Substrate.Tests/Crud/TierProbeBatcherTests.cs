@@ -59,6 +59,25 @@ public sealed class TierProbeBatcherTests
     }
 
     [Fact]
+    public async Task SameTier_CoalescesUpToTheByteDerivedIdBudget()
+    {
+        var widths = new System.Collections.Concurrent.ConcurrentBag<int>();
+        var batcher = new TierProbeBatcher((ids, _, _) =>
+        {
+            widths.Add(ids.Count);
+            return Task.FromResult(new byte[BitmapBits.ByteLength(ids.Count)]);
+        }, maxProbeIds: 2);
+
+        await Task.WhenAll(
+            batcher.ProbeAsync([Id(1)], 1),
+            batcher.ProbeAsync([Id(2)], 1),
+            batcher.ProbeAsync([Id(3)], 1));
+
+        Assert.Equal(3, widths.Sum());
+        Assert.All(widths, width => Assert.InRange(width, 1, 2));
+    }
+
+    [Fact]
     public async Task CancelledCaller_DoesNotCancelSharedProbe()
     {
         using var cancelled = new CancellationTokenSource();
