@@ -143,8 +143,9 @@ public sealed class FrameNetDecomposerTests
     public async Task FeToFe_Requires_And_Excludes_Are_Emitted()
     {
         var atts = await CollectAttestationsAsync();
-        var donorId = CategoryAnchor.Id("Donor");
-        var placeId = CategoryAnchor.Id("Place");
+        var frameId = CategoryAnchor.Id("Giving")!.Value;
+        var donorId = RoleAnchor.Id(RoleIdentityKind.FrameNet, frameId, "Donor");
+        var placeId = RoleAnchor.Id(RoleIdentityKind.FrameNet, frameId, "Place");
         Assert.NotNull(donorId);
         Assert.NotNull(placeId);
         Assert.Contains(atts, a =>
@@ -156,7 +157,7 @@ public sealed class FrameNetDecomposerTests
     }
 
     [Fact]
-    public async Task EvokesFrame_Targets_Frame_Meta_And_CoreType_Rides_Context()
+    public async Task EvokesFrame_Targets_Frame_AndCorenessBelongsToBoundFrameElement()
     {
         var atts = await CollectAttestationsAsync();
         var b = new SubstrateChangeBuilder(FrameNetDecomposer.Source, "fixture", null);
@@ -170,8 +171,13 @@ public sealed class FrameNetDecomposerTests
             && a.ObjectId == frameId!.Value);
 
         var coreCtx = Hash128.OfCanonical("framenet/coreness/Core");
+        var donorRole = RoleAnchor.Id(RoleIdentityKind.FrameNet, frameId.Value, "Donor")!.Value;
         Assert.Contains(atts, a =>
-            a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_FRAME_ELEMENT") && a.ContextId == coreCtx);
+            a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_FRAME_ELEMENT")
+            && a.SubjectId == frameId.Value && a.ObjectId == donorRole && a.ContextId is null);
+        Assert.Contains(atts, a =>
+            a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_FEATURE")
+            && a.SubjectId == donorRole && a.ObjectId == coreCtx && a.ContextId is null);
     }
 
     [Fact]
@@ -221,9 +227,11 @@ public sealed class FrameNetDecomposerTests
                         nonphysical[entity.Id] = entity.TypeId;
             }
 
-            var entry = Assert.Single(nonphysical);
-            Assert.Equal(SubstrateCanonicalIds.PosProbationary("framenet", "IDIO"), entry.Key);
-            Assert.Equal(EntityTypeRegistry.Pos, entry.Value);
+            Assert.Equal(3, nonphysical.Count);
+            Assert.Equal(2, nonphysical.Values.Count(t => t == EntityTypeRegistry.FrameNetFe));
+            Assert.Contains(nonphysical, entry =>
+                entry.Key == SubstrateCanonicalIds.PosProbationary("framenet", "IDIO")
+                && entry.Value == EntityTypeRegistry.Pos);
         }
         finally { try { Directory.Delete(dir, recursive: true); } catch { } }
     }

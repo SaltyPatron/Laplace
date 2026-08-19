@@ -42,6 +42,7 @@ public static class EntityTypeRegistry
     public static readonly Hash128 Phrase = Id("Phrase");
     public static readonly Hash128 Pixel = Id("Pixel");
     public static readonly Hash128 Pos = Id("POS");
+    public static readonly Hash128 PropBankRole = Id("PropBank_Role");
     public static readonly Hash128 PropBankRoleset = Id("PropBank_Roleset");
     public static readonly Hash128 Region = Id("Region");
     public static readonly Hash128 RepoRoot = Id("RepoRoot");
@@ -62,6 +63,8 @@ public static class EntityTypeRegistry
     public static readonly Hash128 UdXpos = Id("UD_XPOS");
     public static readonly Hash128 Utf8Role = Id("Utf8Role");
     public static readonly Hash128 VerbNetClass = Id("VerbNet_Class");
+    public static readonly Hash128 VerbNetPredicate = Id("VerbNet_Predicate");
+    public static readonly Hash128 VerbNetRole = Id("VerbNet_Role");
     // Audio ladder tier 2 — matches native laplace_modality_tier_type_id
     // (blake3("Window")); the audio lanes' "Frame" registration was the split.
     public static readonly Hash128 Window = Id("Window");

@@ -59,13 +59,22 @@ internal sealed class SemLinkGrammarWitness(SemLinkDocumentKind kind) : IGrammar
                 if (!JsonGrammarHelper.IsObjectNode(ctx.Ast, rolesObjNode)) continue;
                 foreach (var (argKeyNode, thetaNode) in JsonGrammarHelper.EnumerateObjectPairs(ctx.Ast, rolesObjNode))
                 {
-                    if (!JsonGrammarHelper.TryComposedNode(ctx, argKeyNode, out var argId))
+                    if (!JsonGrammarHelper.TryKeyUtf8(ctx.Ast, ctx.Utf8, argKeyNode, out var argSpan))
                         continue;
-                    if (!JsonGrammarHelper.TryComposedNode(ctx, thetaNode, out var thetaId))
+                    if (!JsonGrammarHelper.TryKeyUtf8(ctx.Ast, ctx.Utf8, thetaNode, out var thetaSpan))
                         continue;
-                    b.AddAttestation(NativeAttestation.Categorical(
-                        argId, "ROLE_CORRESPONDS_TO", thetaId, SemLinkDecomposer.Source, TC.AcademicCurated,
-                        contextId: vnEntity.Value));
+                    string arg = JsonGrammarHelper.Utf8ToString(argSpan).Trim();
+                    string theta = JsonGrammarHelper.Utf8ToString(thetaSpan).Trim();
+                    Hash128? argId = RoleAnchor.Declare(
+                        b, RoleIdentityKind.PropBank, rsEntity.Value, arg,
+                        EntityTypeRegistry.PropBankRole, SemLinkDecomposer.Source);
+                    Hash128? thetaId = RoleAnchor.Declare(
+                        b, RoleIdentityKind.VerbNet, vnEntity.Value, theta,
+                        EntityTypeRegistry.VerbNetRole, SemLinkDecomposer.Source);
+                    if (argId is null || thetaId is null) continue;
+                    b.AddAttestation(NativeAttestation.CategoricalResolved(
+                        argId.Value, SemLinkSource.RoleCorrespondsToTypeId, thetaId.Value,
+                        SemLinkDecomposer.Source, null, TC.AcademicCurated));
                 }
             }
         }

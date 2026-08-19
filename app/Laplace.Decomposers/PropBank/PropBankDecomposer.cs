@@ -111,8 +111,9 @@ public sealed class PropBankDecomposer
             {
                 var defId = ContentEmitter.Emit(b, name, Source);
                 if (defId is not null)
-                    b.AddAttestation(NativeAttestation.Categorical(
-                        rsEntity, "HAS_DEFINITION", defId.Value, Source, TC.AcademicCurated));
+                    b.AddAttestation(NativeAttestation.CategoricalResolved(
+                        rsEntity, PropBankSource.HasDefinitionTypeId, defId.Value,
+                        Source, null, TC.AcademicCurated));
             }
 
             EmitRoles(b, roleset, rsEntity);
@@ -122,27 +123,41 @@ public sealed class PropBankDecomposer
 
     private static void EmitRoles(SubstrateChangeBuilder b, XmlElement roleset, Hash128 rsEntity)
     {
+        var linkedClasses = new HashSet<Hash128>();
         foreach (var role in SharedXmlFramesetReader.DescendantElements(roleset, "role"))
         {
             string descr = role.GetAttribute("descr").Trim();
             string num = role.GetAttribute("n").Trim();
             if (descr.Length == 0) continue;
-            var roleId = ContentEmitter.Emit(b, descr, Source);
-            if (roleId is null) continue;
+            var roleLabelId = ContentEmitter.Emit(b, descr, Source);
+            if (roleLabelId is null) continue;
 
-            Hash128? ctx = null;
+            string roleKey = num.Length > 0
+                ? $"ARG{(num.Equals("M", StringComparison.OrdinalIgnoreCase) ? "M" : num)}"
+                : descr;
+            Hash128? roleAnchor = RoleAnchor.Emit(
+                b, RoleIdentityKind.PropBank, rsEntity, roleKey,
+                EntityTypeRegistry.PropBankRole, Source, TC.AcademicCurated);
+            if (roleAnchor is null) continue;
+            Hash128 roleEntity = roleAnchor.Value;
+
+            b.AddAttestation(NativeAttestation.CategoricalResolved(
+                rsEntity, PropBankSource.HasSemanticRoleTypeId, roleEntity,
+                Source, null, TC.AcademicCurated));
+            b.AddAttestation(NativeAttestation.CategoricalResolved(
+                roleEntity, PropBankSource.HasDefinitionTypeId, roleLabelId.Value,
+                Source, null, TC.AcademicCurated));
+
             if (num.Length > 0)
             {
                 string ord = num.Equals("M", StringComparison.OrdinalIgnoreCase) ? "m" : num;
                 _canonicalNames.TryAdd($"ordinal/{ord}/v1", 0);
                 Hash128 ordEntity = OrdinalId(ord);
                 b.AddEntity(new EntityRow(ordEntity, EntityTier.Word, OrdinalTypeId, Source));
-                ctx = ordEntity;
+                b.AddAttestation(NativeAttestation.CategoricalResolved(
+                    roleEntity, PropBankSource.HasFeatureTypeId, ordEntity,
+                    Source, null, TC.AcademicCurated));
             }
-
-            b.AddAttestation(NativeAttestation.Categorical(
-                rsEntity, "HAS_SEMANTIC_ROLE", roleId.Value, Source, TC.AcademicCurated,
-                contextId: ctx));
 
 
 
@@ -151,8 +166,9 @@ public sealed class PropBankDecomposer
             {
                 var funcId = ContentEmitter.Emit(b, func, Source);
                 if (funcId is not null)
-                    b.AddAttestation(NativeAttestation.Categorical(
-                        roleId.Value, "HAS_FEATURE", funcId.Value, Source, TC.AcademicCurated));
+                    b.AddAttestation(NativeAttestation.CategoricalResolved(
+                        roleEntity, PropBankSource.HasFeatureTypeId, funcId.Value,
+                        Source, null, TC.AcademicCurated));
             }
 
             foreach (var link in SharedXmlFramesetReader.DescendantElements(role, "rolelink"))
@@ -183,16 +199,24 @@ public sealed class PropBankDecomposer
                         : null;
                 if (anchor is null) continue;
                 Hash128 classEntity = anchor.Value;
-                b.AddAttestation(NativeAttestation.Categorical(
-                    rsEntity, "CORRESPONDS_TO", classEntity, Source, TC.AcademicCurated));
+                if (linkedClasses.Add(classEntity))
+                    b.AddAttestation(NativeAttestation.CategoricalResolved(
+                        rsEntity, PropBankSource.CorrespondsToTypeId, classEntity,
+                        Source, null, TC.AcademicCurated));
 
                 if (inner.Length > 0)
                 {
-                    var thetaId = ContentEmitter.Emit(b, inner, Source);
-                    if (thetaId is not null)
-                        b.AddAttestation(NativeAttestation.Categorical(
-                            roleId.Value, "ROLE_CORRESPONDS_TO", thetaId.Value, Source, TC.AcademicCurated,
-                            contextId: classEntity));
+                    RoleIdentityKind targetKind =
+                        resource.Equals("VerbNet", StringComparison.OrdinalIgnoreCase)
+                            ? RoleIdentityKind.VerbNet
+                            : RoleIdentityKind.FrameNet;
+                    Hash128? targetRole = RoleAnchor.Declare(
+                        b, targetKind, classEntity, inner,
+                        RoleAnchor.EntityTypeFor(targetKind), Source);
+                    if (targetRole is not null)
+                        b.AddAttestation(NativeAttestation.CategoricalResolved(
+                            roleEntity, PropBankSource.RoleCorrespondsToTypeId, targetRole.Value,
+                            Source, null, TC.AcademicCurated));
                 }
             }
         }

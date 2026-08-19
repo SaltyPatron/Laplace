@@ -89,20 +89,21 @@ public sealed class PropBankDecomposerTests
     }
 
     [Fact]
-    public async Task SemanticRole_Carries_ArgNumber_As_Ordinal_Context()
+    public async Task SemanticRole_IsRolesetBound_AndOrdinalIsAProperty_NotContext()
     {
         var atts = await CollectAttestationsAsync();
-        var b = new SubstrateChangeBuilder(PropBankDecomposer.Source, "fixture", null);
-        var giverId = ContentEmitter.Emit(b, "giver", PropBankDecomposer.Source);
         var rsId = AnchorAdmission.Id("give.01", EntityTypeRegistry.PropBankRoleset);
 
         var ord0 = PropBankDecomposer.OrdinalId("0");
+        var roleId = RoleAnchor.Id(RoleIdentityKind.PropBank, rsId!.Value, "ARG0");
         Assert.Equal(Hash128.OfCanonical("ordinal/0/v1"), ord0);
-        Assert.NotNull(rsId);
-        Assert.NotNull(giverId);
+        Assert.NotNull(roleId);
         Assert.Contains(atts, a =>
             a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_SEMANTIC_ROLE")
-            && a.SubjectId == rsId!.Value && a.ObjectId == giverId!.Value && a.ContextId == ord0);
+            && a.SubjectId == rsId.Value && a.ObjectId == roleId.Value && a.ContextId is null);
+        Assert.Contains(atts, a =>
+            a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_FEATURE")
+            && a.SubjectId == roleId.Value && a.ObjectId == ord0 && a.ContextId is null);
     }
 
     [Fact]
@@ -123,15 +124,15 @@ public sealed class PropBankDecomposerTests
             && (a.SubjectId == rsId!.Value || a.ObjectId == rsId!.Value)
             && (a.SubjectId == vnId!.Value || a.ObjectId == vnId!.Value));
 
-        var giverId = ContentEmitter.Emit(b, "giver", PropBankDecomposer.Source);
-        var agentId = ContentEmitter.Emit(b, "agent", PropBankDecomposer.Source);
-        Assert.NotNull(giverId);
-        Assert.NotNull(agentId);
+        var giverRole = RoleAnchor.Id(RoleIdentityKind.PropBank, rsId!.Value, "ARG0");
+        var agentRole = RoleAnchor.Id(RoleIdentityKind.VerbNet, vnId!.Value, "agent");
+        Assert.NotNull(giverRole);
+        Assert.NotNull(agentRole);
         Assert.Contains(atts, a =>
             a.TypeId == RelationTypeRegistry.RelationTypeId("ROLE_CORRESPONDS_TO")
-            && a.ContextId == vnId!.Value
-            && (a.SubjectId == giverId!.Value || a.ObjectId == giverId!.Value)
-            && (a.SubjectId == agentId!.Value || a.ObjectId == agentId!.Value));
+            && a.ContextId is null
+            && (a.SubjectId == giverRole.Value || a.ObjectId == giverRole.Value)
+            && (a.SubjectId == agentRole.Value || a.ObjectId == agentRole.Value));
     }
 
     [Fact]
@@ -151,29 +152,30 @@ public sealed class PropBankDecomposerTests
             && (a.SubjectId == rsId!.Value || a.ObjectId == rsId!.Value)
             && (a.SubjectId == fnId!.Value || a.ObjectId == fnId!.Value));
 
-        var giverId = ContentEmitter.Emit(b, "giver", PropBankDecomposer.Source);
-        var donorId = ContentEmitter.Emit(b, "Donor", PropBankDecomposer.Source);
-        Assert.NotNull(giverId);
-        Assert.NotNull(donorId);
+        var giverRole = RoleAnchor.Id(RoleIdentityKind.PropBank, rsId!.Value, "ARG0");
+        var donorRole = RoleAnchor.Id(RoleIdentityKind.FrameNet, fnId!.Value, "Donor");
+        Assert.NotNull(giverRole);
+        Assert.NotNull(donorRole);
         Assert.Contains(atts, a =>
             a.TypeId == RelationTypeRegistry.RelationTypeId("ROLE_CORRESPONDS_TO")
-            && a.ContextId == fnId!.Value
-            && (a.SubjectId == giverId!.Value || a.ObjectId == giverId!.Value)
-            && (a.SubjectId == donorId!.Value || a.ObjectId == donorId!.Value));
+            && a.ContextId is null
+            && (a.SubjectId == giverRole.Value || a.ObjectId == giverRole.Value)
+            && (a.SubjectId == donorRole.Value || a.ObjectId == donorRole.Value));
     }
 
     [Fact]
     public async Task Role_Carries_FunctionTag_As_Feature()
     {
         var atts = await CollectAttestationsAsync();
+        var rsId = AnchorAdmission.Id("give.01", EntityTypeRegistry.PropBankRoleset)!.Value;
+        var giverRole = RoleAnchor.Id(RoleIdentityKind.PropBank, rsId, "ARG0");
         var b = new SubstrateChangeBuilder(PropBankDecomposer.Source, "fixture", null);
-        var giverId = ContentEmitter.Emit(b, "giver", PropBankDecomposer.Source);
         var pagId = ContentEmitter.Emit(b, "PAG", PropBankDecomposer.Source);
-        Assert.NotNull(giverId);
+        Assert.NotNull(giverRole);
         Assert.NotNull(pagId);
         Assert.Contains(atts, a =>
             a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_FEATURE")
-            && a.SubjectId == giverId!.Value && a.ObjectId == pagId!.Value);
+            && a.SubjectId == giverRole.Value && a.ObjectId == pagId!.Value);
     }
 
     [Fact]
@@ -238,6 +240,8 @@ public sealed class PropBankDecomposerTests
             e.Id == PropBankDecomposer.Source && e.TypeId == BootstrapIntentBuilder.SourceTypeId);
         Assert.Contains(boot.Entities, e =>
             e.Id == EntityTypeRegistry.Id("PropBank_Roleset"));
+        Assert.Contains(boot.Entities, e =>
+            e.Id == EntityTypeRegistry.Id("PropBank_Role"));
         Assert.Contains(boot.Entities, e => e.Id == RelationTypeRegistry.RelationTypeId("HAS_SEMANTIC_ROLE"));
         Assert.Contains(boot.Attestations, a =>
             a.SubjectId == PropBankDecomposer.Source
@@ -267,9 +271,14 @@ public sealed class PropBankDecomposerTests
                         nonphysical[entity.Id] = entity.TypeId;
             }
 
-            Assert.Equal(4, nonphysical.Count);
             Assert.Contains(nonphysical.Values,
                 typeId => typeId == EntityTypeRegistry.PropBankRoleset);
+            Assert.Equal(3, nonphysical.Values.Count(
+                typeId => typeId == EntityTypeRegistry.PropBankRole));
+            Assert.Equal(2, nonphysical.Values.Count(
+                typeId => typeId == EntityTypeRegistry.VerbNetRole));
+            Assert.Single(nonphysical.Values,
+                typeId => typeId == EntityTypeRegistry.FrameNetFe);
             Assert.Equal(3, nonphysical.Values.Count(
                 typeId => typeId == EntityTypeRegistry.Ordinal));
             var expected = new[]

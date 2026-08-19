@@ -198,15 +198,18 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
 
     private static void EmitFrameEntities(SubstrateChangeBuilder b, Frame frame)
     {
-
-
-        CategoryAnchor.Emit(b, frame.Name, FrameTypeId, Source, TC.AcademicCurated);
+        Hash128? frameAnchor = CategoryAnchor.Emit(
+            b, frame.Name, FrameTypeId, Source, TC.AcademicCurated);
+        if (frameAnchor is null) return;
         if (frame.Definition.Length > 0) ContentEmitter.Emit(b, frame.Definition, Source);
         foreach (var ex in frame.Examples) ContentEmitter.Emit(b, ex, Source);
 
         foreach (var fe in frame.Elements)
         {
-            CategoryAnchor.Emit(b, fe.Name, FeTypeId, Source, TC.AcademicCurated);
+            ContentEmitter.Emit(b, fe.Name, Source);
+            RoleAnchor.Emit(
+                b, RoleIdentityKind.FrameNet, frameAnchor.Value, fe.Name,
+                FeTypeId, Source, TC.AcademicCurated);
             if (fe.Definition.Length > 0) ContentEmitter.Emit(b, fe.Definition, Source);
         }
 
@@ -233,8 +236,9 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
         {
             var defId = ContentEmitter.RootId(frame.Definition);
             if (defId is not null)
-                b.AddAttestation(NativeAttestation.Categorical(
-                    frameId, "HAS_DEFINITION", defId.Value, Source, TC.AcademicCurated));
+                b.AddAttestation(NativeAttestation.CategoricalResolved(
+                    frameId, FrameNetSource.HasDefinitionTypeId, defId.Value,
+                    Source, null, TC.AcademicCurated));
         }
         foreach (var ex in frame.Examples)
         {
@@ -246,31 +250,41 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
 
         foreach (var fe in frame.Elements)
         {
-            var feNameId = CategoryAnchor.Id(fe.Name);
-            if (feNameId is null) continue;
+            var feNameId = ContentEmitter.RootId(fe.Name);
+            var feRoleId = RoleAnchor.Id(RoleIdentityKind.FrameNet, frameId, fe.Name);
+            if (feNameId is null || feRoleId is null) continue;
             Hash128? coreCtx = CorenessValues.Contains(fe.CoreType) ? CorenessId(fe.CoreType) : null;
-            b.AddAttestation(NativeAttestation.Categorical(
-                frameId, "HAS_FRAME_ELEMENT", feNameId.Value, Source, TC.AcademicCurated,
-                contextId: coreCtx));
+            b.AddAttestation(NativeAttestation.CategoricalResolved(
+                frameId, FrameNetSource.HasFrameElementTypeId, feRoleId.Value,
+                Source, null, TC.AcademicCurated));
+            b.AddAttestation(NativeAttestation.CategoricalResolved(
+                feRoleId.Value, FrameNetSource.HasNameAliasTypeId, feNameId.Value,
+                Source, null, TC.AcademicCurated));
+            if (coreCtx is { } coreness)
+                b.AddAttestation(NativeAttestation.CategoricalResolved(
+                    feRoleId.Value, FrameNetSource.HasFeatureTypeId, coreness,
+                    Source, null, TC.AcademicCurated));
 
             if (fe.Definition.Length > 0)
             {
                 var feDefId = ContentEmitter.RootId(fe.Definition);
                 if (feDefId is not null)
-                    b.AddAttestation(NativeAttestation.Categorical(
-                        feNameId.Value, "HAS_DEFINITION", feDefId.Value,
-                        Source, TC.AcademicCurated));
+                    b.AddAttestation(NativeAttestation.CategoricalResolved(
+                        feRoleId.Value, FrameNetSource.HasDefinitionTypeId, feDefId.Value,
+                        Source, null, TC.AcademicCurated));
             }
 
 
             foreach (var reqName in fe.Requires)
-                if (CategoryAnchor.Id(reqName) is { } reqId)
-                    b.AddAttestation(NativeAttestation.Categorical(
-                        feNameId.Value, "REQUIRES", reqId, Source, TC.AcademicCurated));
+                if (RoleAnchor.Id(RoleIdentityKind.FrameNet, frameId, reqName) is { } reqId)
+                    b.AddAttestation(NativeAttestation.CategoricalResolved(
+                        feRoleId.Value, FrameNetSource.RequiresTypeId, reqId,
+                        Source, null, TC.AcademicCurated));
             foreach (var exName in fe.Excludes)
-                if (CategoryAnchor.Id(exName) is { } exId)
-                    b.AddAttestation(NativeAttestation.Categorical(
-                        feNameId.Value, "EXCLUDES", exId, Source, TC.AcademicCurated));
+                if (RoleAnchor.Id(RoleIdentityKind.FrameNet, frameId, exName) is { } exId)
+                    b.AddAttestation(NativeAttestation.CategoricalResolved(
+                        feRoleId.Value, FrameNetSource.ExcludesTypeId, exId,
+                        Source, null, TC.AcademicCurated));
         }
 
         foreach (var lu in frame.LexUnits)
