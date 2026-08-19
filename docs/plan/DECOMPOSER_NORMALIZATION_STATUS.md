@@ -70,35 +70,38 @@ delivered until it is merged.
 | #1183 | Fold tail and completion phases | Replaces overlapping highway-mask writers with stable entity-sharded FIFO lanes and records live/terminal consensus-drain versus writer-maintenance timing. |
 | #1184 | Skewed multi-file execution | Lets the generic pool segment a dominant file inside a many-file corpus, corrects aggregate sampled-inventory refinement, and isolates the process-wide signal test that cancelled unrelated integration tests. |
 | #1186 | Online-index and OMW admission policy | Removes automatic index dropping/rebuilding from production ingest and makes OMW parse bounded UTF-8 records directly so only lemma/definition/example values enter the content spine. |
+| #1187 | Structured ETL admission | Keeps SemLink/generic grammar ASTs parser-only and moves Tatoeba numeric/TSV scaffolding outside the content spine. |
+| #1188 | Final vendor scheduler | Routes Syzygy board enumeration through the bounded generic fanout, leaving only non-ingest service concurrency on the scheduler allowlist. |
+| #1189 | Live receipt correctness | Raises sampled denominators to the observed floor, caps UI progress at 100%, forbids reintroduced chess `MOVE` consensus, and ratchets production foundation ingest to keep indexes online. |
 
 The related source-fidelity audit (#1155), durable working agreement (#1156), and
 canonical lexical-peer batch core (#1164) were integrated in the same batch,
 although they are not decomposer implementations. After the batch, the repository
 had no open pull requests.
 
-## Active correction awaiting merge
+## Latest live acceptance receipt
 
-- [#1187](https://github.com/SaltyPatron/Laplace/pull/1187) extends the distinction OMW
-  established between parsing a serialized record and admitting
-  that serialization as content. The same gate is now being applied to the remaining
-  grammar-backed vendors.
-- Tatoeba parses its sentence/link TSV directly into a compact vendor record. Only the
-  selected sentence enters the content spine; numeric ids and row packaging remain
-  transient scaffolding.
-- SemLink and the generic manifest ETL lane retain their grammar AST solely for vendor
-  field selection. A shared witness-only handler emits semantic rows without probing or
-  composing the enclosing JSON/CSV/TSV serialization.
-- Explicit grammar-document ingest remains available only for a source that declares
-  the parsed serialization itself to be content. This prevents a convenience parser
-  from silently becoming an admission policy.
+- [Chess run 32297973379](https://github.com/SaltyPatron/Laplace/actions/runs/32297973379)
+  ingested 190,705 games in 1,065 seconds, then journal replay completed as a seven-second
+  no-op. The run declared 11,783,549 novel entities, 11,142,803 physicalities, 3,018,585
+  source attestations, and 6,340,104 folded cells from 399,069,276 observations.
+- Its 640,746 entity/physicality delta was fully classified as governed nonphysical
+  identity (`unexplained=0`), rather than an off-DAG content leak.
+- Every semantic gate passed except the stale requirement for `MOVE > 0`. #1189 reverses
+  that obsolete assertion: `MOVE` consensus must remain zero because #1165 made the exact
+  transition recoverable from the playing trajectory. Playing, players, result, and
+  outcome gates remain positive.
+- The live extractor exceeded its sampled 189,852-game estimate and briefly reported
+  100.4%. #1189 makes observed progress a monotonic denominator floor and caps percentage
+  rendering defensively, so future receipts cannot report impossible progress.
 
 ## Remaining product work after integration
 
 ### Generic pipeline and performance
 
-- Remove or justify every remaining vendor-owned scheduler. The known next target
-  is the Syzygy unpack fanout; non-decomposer service concurrency remains outside
-  this invariant. Tracked by #967 and #605.
+- Keep the vendor scheduler architecture gate at zero. #1188 moved Syzygy onto the
+  shared bounded fanout; the remaining allowlisted `ChessLabService` concurrency is a
+  service workload, not decomposer orchestration. Tracked by #967 and #605.
 - Make outer database applies safely concurrent only after claim-before-COPY and
   working-set ownership are race-safe. Until then `apply_dispatch_workers=1` is
   intentional and must remain reported honestly. Tracked by #967.
