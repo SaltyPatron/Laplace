@@ -21,7 +21,8 @@ CREATE OR REPLACE FUNCTION lexical.define(p_word bytea, p_limit int DEFAULT 5)
                    g.witness_count AS witnesses,
                    sn.eff_mu AS sense_rank
             FROM lexical.senses(p_word) sn
-            JOIN @extschema@.consensus g ON g.subject_id = sn.synset_id
+            JOIN @extschema@.consensus g
+              ON g.subject_id = ANY (ARRAY[sn.sense_id, sn.synset_id])
                             AND g.type_id = @extschema@.relation_type_id('HAS_DEFINITION')
             UNION ALL
             SELECT g.object_id,

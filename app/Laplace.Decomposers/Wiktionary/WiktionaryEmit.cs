@@ -141,20 +141,31 @@ internal static class WiktionaryEmit
             langCtx = langEntity;
         }
 
-        Hash128? posCtx = null;
+        Hash128? posId = null;
         bool isVerb = false;
         if (e.Pos is { Length: > 0 } pos)
         {
             isVerb = pos.Equals("verb", StringComparison.OrdinalIgnoreCase);
-            posCtx = PosReference.Attest(b, wordId, pos, PosReference.PosTagset.Wiktionary,
-                WiktionaryDecomposer.Source, null, Trust, WiktionaryDecomposer.VocabularyNames);
+            posId = PosReference.Attest(
+                b, wordId, pos, PosReference.PosTagset.Wiktionary,
+                WiktionaryDecomposer.Source, langCtx, Trust,
+                WiktionaryDecomposer.VocabularyNames);
         }
 
         if (e.Senses is { } senses)
             foreach (var s in senses)
             {
-                WalkSense(b, wordId, s, posCtx, isVerb, langCtx, roots);
-                RouteSynsetLinks(b, wordId, s, langCtx);
+                if (WiktionarySenseAnchor.Declare(
+                        b, wordId, langCtx, posId, s, WiktionaryDecomposer.Source) is not { } senseId)
+                    continue;
+
+                AttestResolved(b, wordId, WiktionarySource.HasSenseTypeId, senseId, langCtx);
+                AttestResolved(b, senseId, WiktionarySource.HasNameAliasTypeId, wordId, langCtx);
+                if (langCtx is { } langId)
+                    AttestResolved(b, senseId, WiktionarySource.HasLanguageTypeId, langId, null);
+                WalkSense(b, senseId, s, isVerb, langCtx, roots);
+                RouteSynsetLinks(b, senseId, s, langCtx);
+                RouteWikidataLinks(b, senseId, s, langCtx);
             }
 
         WalkSounds(b, wordId, e.Sounds, roots);
@@ -168,21 +179,18 @@ internal static class WiktionaryEmit
     }
 
     private static void WalkSense(
-        SubstrateChangeBuilder b, Hash128 wordId, WiktionaryEntry.Sense s, Hash128? posCtx, bool isVerb,
+        SubstrateChangeBuilder b, Hash128 senseId, WiktionaryEntry.Sense s, bool isVerb,
         Hash128? langCtx, IReadOnlyDictionary<string, Hash128>? roots)
     {
         if (s.Glosses is { } gl)
             foreach (var g in gl)
-                if (Stage(b, g, roots, out var gId)) Attest(b, wordId, "HAS_DEFINITION", gId, posCtx);
+                if (Stage(b, g, roots, out var gId)) Attest(b, senseId, "HAS_DEFINITION", gId, langCtx);
 
         if (s.Examples is { } ex)
             foreach (var x in ex)
-                if (Stage(b, x, roots, out var xId)) Attest(b, wordId, "HAS_EXAMPLE", xId, null);
+                if (Stage(b, x, roots, out var xId)) Attest(b, senseId, "HAS_EXAMPLE", xId, langCtx);
 
-        // Relation edges carry the LANGUAGE, not the POS: IS_SYNONYM_OF lives in the
-        // HAS_SENSE family, and an unscoped edge there is a translation competing as
-        // a sense (GH #867). POS remains attested on the word itself via HAS_POS.
-        WalkRelations(b, wordId, in s.Relations, isVerb, langCtx, roots);
+        WalkRelations(b, senseId, in s.Relations, isVerb, langCtx, roots);
 
         // A sense's register is one reading -- "archaic AND humorous" -- not two independent
         // claims. Same shape as HAS_FEATURE and the same fix: one composition, one edge, one
@@ -193,7 +201,7 @@ internal static class WiktionaryEmit
             foreach (var tag in tags)
                 if (RegisterTags.Contains(tag)) (register ??= []).Add(tag);
             if (TryStageSet(b, register, roots, out var registerId))
-                Attest(b, wordId, "HAS_USAGE_REGISTER", registerId, posCtx);
+                Attest(b, senseId, "HAS_USAGE_REGISTER", registerId, langCtx);
         }
     }
 
@@ -375,31 +383,34 @@ internal static class WiktionaryEmit
     }
 
     private static void RouteSynsetLinks(
-        SubstrateChangeBuilder b, Hash128 wordId, WiktionaryEntry.Sense s, Hash128? langCtx)
+        SubstrateChangeBuilder b, Hash128 senseId, WiktionaryEntry.Sense s, Hash128? langCtx)
     {
-        if (s.LinkTargets is { } links)
-            foreach (var key in links)
-            {
-                if (SourceEntityIdConventions.ResolveSynsetAnchor(key) is { } syn && syn != default)
-                    LinkSynset(b, wordId, syn, langCtx);
-            }
-
-        if (s.SynsetKey is { Length: > 0 } sk
-            && SourceEntityIdConventions.ResolveSynsetAnchor(sk) is { } synId && synId != default)
-            LinkSynset(b, wordId, synId, langCtx);
+        if (s.LinkTargets is not { } links) return;
+        var seen = new HashSet<Hash128>();
+        foreach (var key in links)
+            if (SourceEntityIdConventions.ResolveSynsetAnchor(key) is { } syn
+                && syn != default && seen.Add(syn))
+                AttestResolved(b, senseId, WiktionarySource.IsSenseOfTypeId, syn, langCtx);
     }
 
-    // Both edges on purpose. CORRESPONDS_TO is the cross-reference hub the CILI/
-    // WordNet routing reads — but it is NOT in the HAS_SENSE family, so before this
-    // change Wiktionary's word->synset converse.links(the GOOD sense evidence) were invisible
-    // to lexical.senses()/bubble_up while its word->word converse.synonyms(translation-shaped) were
-    // the only Wiktionary edges electing senses. Both edges carry language context
-    // (OMW post-#867 / Copilot #891); POS stays on the word via HAS_POS.
-    private static void LinkSynset(
-        SubstrateChangeBuilder b, Hash128 wordId, Hash128 synId, Hash128? langCtx)
+    private static void RouteWikidataLinks(
+        SubstrateChangeBuilder b, Hash128 senseId, WiktionaryEntry.Sense s, Hash128? langCtx)
     {
-        Attest(b, wordId, "CORRESPONDS_TO", synId, langCtx);
-        Attest(b, wordId, "IS_SYNONYM_OF", synId, langCtx);
+        if (s.WikidataIds is not { } items) return;
+        var seen = new HashSet<Hash128>();
+        foreach (string raw in items)
+        {
+            string qid = raw.Trim().ToUpperInvariant();
+            if (qid.Length < 2 || qid[0] != 'Q'
+                || !long.TryParse(qid.AsSpan(1), out long ordinal) || ordinal <= 0)
+                continue;
+            if (ReferenceAnchor.Declare(
+                    b, ReferenceIdentityKind.WikidataItem, qid,
+                    EntityTypeRegistry.WikidataItem, WiktionaryDecomposer.Source) is not { } itemId
+                || !seen.Add(itemId))
+                continue;
+            AttestResolved(b, senseId, WiktionarySource.CorrespondsToTypeId, itemId, langCtx);
+        }
     }
 
     private static bool Stage(
@@ -417,4 +428,9 @@ internal static class WiktionaryEmit
         SubstrateChangeBuilder b, Hash128 subject, string typeName, Hash128 objectId, Hash128? context) =>
         b.AddAttestation(NativeAttestation.Categorical(
             subject, typeName, objectId, WiktionaryDecomposer.Source, Trust, contextId: context));
+
+    private static void AttestResolved(
+        SubstrateChangeBuilder b, Hash128 subject, Hash128 typeId, Hash128 objectId, Hash128? context) =>
+        b.AddAttestation(NativeAttestation.CategoricalResolved(
+            subject, typeId, objectId, WiktionaryDecomposer.Source, context, Trust));
 }

@@ -39,7 +39,8 @@ public sealed class WiktionaryEntry
         public RelationBlock Relations;
         public List<string>? Tags;
         public List<string>? LinkTargets;
-        public string? SynsetKey;
+        public List<string>? SenseIds;
+        public List<string>? WikidataIds;
     }
 
     public struct RelationBlock
@@ -163,14 +164,8 @@ public sealed class WiktionaryEntry
             else if (reader.ValueTextEquals("coordinate_terms"u8)) { reader.Read(); s.Relations.Coordinate = ReadWordArray(ref reader); }
             else if (reader.ValueTextEquals("tags"u8)) { reader.Read(); s.Tags = ReadStringArray(ref reader); }
             else if (reader.ValueTextEquals("links"u8)) { reader.Read(); s.LinkTargets = ReadLinks(ref reader); }
-            else if (reader.ValueTextEquals("wikidata"u8)) { reader.Read(); s.SynsetKey ??= ReadStringValue(ref reader); }
-            else if (reader.ValueTextEquals("senseid"u8))
-            {
-                reader.Read();
-                // wikidata wins; only take senseid when wikidata absent (matches witness OR-order).
-                string? sid = ReadStringValue(ref reader);
-                s.SynsetKey ??= sid;
-            }
+            else if (reader.ValueTextEquals("wikidata"u8)) { reader.Read(); s.WikidataIds = ReadStringOrArray(ref reader); }
+            else if (reader.ValueTextEquals("senseid"u8)) { reader.Read(); s.SenseIds = ReadStringOrArray(ref reader); }
             else reader.Skip();
         }
         return s;
@@ -338,6 +333,20 @@ public sealed class WiktionaryEntry
             else reader.Skip();
         }
         return list;
+    }
+
+    private static List<string>? ReadStringOrArray(ref Utf8JsonReader reader)
+    {
+        if (reader.TokenType == JsonTokenType.StartArray)
+            return ReadStringArray(ref reader);
+        if (reader.TokenType != JsonTokenType.String)
+        {
+            if (reader.TokenType is JsonTokenType.StartObject) reader.Skip();
+            return null;
+        }
+
+        string? value = reader.GetString();
+        return string.IsNullOrEmpty(value) ? null : [value];
     }
 
     // Read the first-level string property `name` from the object the reader is

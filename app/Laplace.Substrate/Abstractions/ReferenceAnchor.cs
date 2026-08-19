@@ -19,6 +19,7 @@ public enum ReferenceIdentityKind : ushort
     PropBankRoleset = 5,
     VerbNetClass = 6,
     FrameNetLexicalUnit = 7,
+    WikidataItem = 8,
 }
 
 /// <summary>
@@ -38,7 +39,7 @@ public static class ReferenceAnchor
 
     public static Hash128 IdUtf8(ReferenceIdentityKind kind, ReadOnlySpan<byte> normalizedKey)
     {
-        if (kind is < ReferenceIdentityKind.CiliIli or > ReferenceIdentityKind.FrameNetLexicalUnit)
+        if (kind is < ReferenceIdentityKind.CiliIli or > ReferenceIdentityKind.WikidataItem)
             throw new ArgumentOutOfRangeException(nameof(kind), kind, "unknown reference identity domain");
         if (normalizedKey.IsEmpty)
             throw new ArgumentException("reference key must not be empty", nameof(normalizedKey));
