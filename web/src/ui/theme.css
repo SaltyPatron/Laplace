@@ -1,20 +1,25 @@
 @layer tokens {
   :root {
     /* Tier A — Primitives */
-    --primitive-neutral-900: #0b0e14;
-    --primitive-neutral-800: #121826;
-    --primitive-neutral-700: #1a2235;
-    --primitive-neutral-600: #243049;
-    --primitive-blue-500: #4f8cff;
+    --primitive-neutral-950: #03070b;
+    --primitive-neutral-900: #07111b;
+    --primitive-neutral-800: #0d1a25;
+    --primitive-neutral-700: #142633;
+    --primitive-neutral-600: #2a4556;
+    --primitive-blue-500: #5d9bd3;
     /* Fill variant: white small text on blue-500 is 3.2:1 (fails WCAG 4.5:1, caught by
        axe). blue-600 gives 5.2:1; use it wherever the accent is a text-bearing fill.
        blue-500 stays for borders, glows and accents on dark surfaces. */
-    --primitive-blue-600: #2563eb;
-    --primitive-red-500: #ff6b6b;
-    --primitive-green-500: #3ecf8e;
-    --primitive-yellow-500: #e8b339;
-    --primitive-text-100: #d7e0f0;
-    --primitive-text-400: #7d8db0;
+    --primitive-blue-600: #245b83;
+    --primitive-teal-400: #55e1d3;
+    --primitive-teal-600: #087b79;
+    --primitive-copper-400: #d69867;
+    --primitive-copper-600: #9b5738;
+    --primitive-red-500: #f06f72;
+    --primitive-green-500: #48d493;
+    --primitive-yellow-500: #e4b957;
+    --primitive-text-100: #dce8ef;
+    --primitive-text-400: #8299aa;
 
     --primitive-space-1: 0.25rem;
     --primitive-space-2: 0.45rem;
@@ -27,15 +32,32 @@
     --color-bg-surface: var(--primitive-neutral-900);
     --color-bg-panel: var(--primitive-neutral-800);
     --color-bg-panel-2: var(--primitive-neutral-700);
+    --color-bg-abyss: var(--primitive-neutral-950);
     --color-border-default: var(--primitive-neutral-600);
     --color-text-primary: var(--primitive-text-100);
     --color-text-muted: var(--primitive-text-400);
-    --color-accent: var(--primitive-blue-500);
-    --color-accent-fill: var(--primitive-blue-600);
+    --color-accent: var(--primitive-teal-400);
+    --color-accent-fill: var(--primitive-teal-600);
+    --color-signal: var(--primitive-teal-400);
+    --color-structure: var(--primitive-copper-600);
+    --color-copper: var(--primitive-copper-400);
+    --color-steel: var(--primitive-blue-500);
     --color-error: var(--primitive-red-500);
     --color-confirm: var(--primitive-green-500);
     --color-refute: var(--primitive-red-500);
     --color-draw: var(--primitive-yellow-500);
+    --color-uncertain: var(--primitive-yellow-500);
+
+    --material-enamel:
+      linear-gradient(145deg, color-mix(in srgb, var(--color-bg-panel-2) 62%, transparent), transparent 42%),
+      var(--color-bg-panel);
+    --material-raised:
+      linear-gradient(180deg,
+        color-mix(in srgb, var(--color-bg-panel-2) 86%, var(--color-steel) 4%),
+        var(--color-bg-panel));
+    --shadow-instrument:
+      inset 0 1px 0 color-mix(in srgb, var(--color-text-primary) 4%, transparent),
+      0 10px 30px color-mix(in srgb, var(--color-bg-abyss) 48%, transparent);
 
     --space-1: var(--primitive-space-1);
     --space-2: var(--primitive-space-2);
@@ -44,12 +66,13 @@
     --space-5: var(--primitive-space-5);
     --space-6: var(--primitive-space-6);
 
-    --radius-sm: 6px;
-    --radius-md: 8px;
-    --radius-lg: 10px;
+    --radius-sm: 3px;
+    --radius-md: 5px;
+    --radius-lg: 7px;
     --radius-pill: 99px;
 
     --font-sans: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    --font-display: Constantia, 'Iowan Old Style', 'Palatino Linotype', serif;
     --font-mono: ui-monospace, 'Cascadia Code', monospace;
 
     --text-xs: 0.72rem;
@@ -58,7 +81,9 @@
     --text-lg: 1.15rem;
 
     --duration-fast: 150ms;
-    --ease-standard: ease;
+    --duration-engage: 260ms;
+    --ease-standard: cubic-bezier(0.2, 0.72, 0.25, 1);
+    --ease-lock: cubic-bezier(0.16, 0.82, 0.3, 1);
     --z-tooltip: 1000;
     --z-modal: 1100;
 
@@ -107,7 +132,13 @@
   body {
     margin: 0;
     height: 100%;
-    background: var(--color-bg-surface);
+    background-color: var(--color-bg-surface);
+    background-image:
+      radial-gradient(circle at 50% -20%, color-mix(in srgb, var(--color-steel) 10%, transparent), transparent 42rem),
+      linear-gradient(90deg, color-mix(in srgb, var(--color-copper) 2.5%, transparent) 1px, transparent 1px),
+      linear-gradient(color-mix(in srgb, var(--color-signal) 1.8%, transparent) 1px, transparent 1px);
+    background-size: auto, 72px 72px, 72px 72px;
+    background-attachment: fixed;
     color: var(--color-text-primary);
     font-family: var(--font-sans);
   }
