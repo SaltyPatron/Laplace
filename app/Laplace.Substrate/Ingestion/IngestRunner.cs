@@ -1272,6 +1272,7 @@ public sealed class IngestRunner
     private static IngestProgress MakeProgress(RunCounters c)
     {
         var inv = c.Inventory;
+        inv?.PublishObservedFloor(Math.Max(c.InputUnitsDone, c.InputUnitsComposed));
         return new(
             c.SourceName ?? "",
             c.LayerOrder,
