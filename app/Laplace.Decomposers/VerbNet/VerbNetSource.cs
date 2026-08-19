@@ -15,12 +15,19 @@ public readonly struct VerbNetSource : ISeedSource
 
     public static IReadOnlyList<string> Relations { get; } =
     [
-        "IS_A", "MEMBER_OF_VERBNET_CLASS", "HAS_THEMATIC_ROLE",
+        "IS_A", "MEMBER_OF_VERBNET_CLASS", "HAS_THEMATIC_ROLE", "HAS_SEMANTIC_ROLE",
         "HAS_VERB_FRAME", "HAS_EXAMPLE", "CORRESPONDS_TO", "EVOKES_FRAME", "HAS_NAME_ALIAS",
     ];
 
+    internal static readonly Hash128 HasThematicRoleTypeId =
+        RelationTypeRegistry.RelationTypeId(Relations[2]);
+    internal static readonly Hash128 HasSemanticRoleTypeId =
+        RelationTypeRegistry.RelationTypeId(Relations[3]);
+    internal static readonly Hash128 HasNameAliasTypeId =
+        RelationTypeRegistry.RelationTypeId(Relations[8]);
+
     public static IReadOnlyList<string>? TypeNodeNames { get; } =
-        ["VerbNet_Class"];
+        ["VerbNet_Class", "VerbNet_Role"];
 
     public static SourceLicense License => SourceLicense.Unknown;
 
