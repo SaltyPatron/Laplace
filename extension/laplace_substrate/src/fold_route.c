@@ -60,8 +60,7 @@ typedef struct TypePlanEntry
 } TypePlanEntry;
 
 static HTAB *merge_plans = NULL;          /* attestations UPDATE            */
-static HTAB *upsert_update_plans = NULL;  /* consensus re-fold UPDATE       */
-static HTAB *upsert_insert_plans = NULL;  /* consensus novel-cell INSERT    */
+static HTAB *upsert_merge_plans = NULL;   /* consensus re-fold + novel MERGE */
 
 static HTAB *
 plan_htab(HTAB **slot, const char *name)
@@ -319,8 +318,39 @@ pg_laplace_attestation_merge(PG_FUNCTION_ARGS)
 
 /* EXISTING cells: re-fold against current state. Fold math = the same native
  * scalar the plpgsql called; one implementation per fact. */
-static const char *UPSERT_UPDATE_SQL =
-    "UPDATE laplace.consensus c SET "
+/* ONE probe per cell, not two.
+ *
+ * The prior shape ran an UPDATE that probed every key, then an
+ * INSERT ... WHERE NOT EXISTS that probed the SAME keys again to prove novelty
+ * -- two index descents per cell per call, plus a window between the two
+ * statements. MEASURED 2026-08-18 against the live substrate, 5,000 real cells
+ * of the highest-volume type (10.3M rows in one shard): the UPDATE arm ALONE
+ * ran 2,378 ms with loops=5000 on consensus_rdefault_h0_pkey, touching 43.5
+ * buffers and dirtying 5.1 pages per single cell. The INSERT arm then repeated
+ * the probe.
+ *
+ * MERGE probes once and branches. The novel-cell fold moves into the USING
+ * subquery because MERGE's WHEN NOT MATCHED accepts VALUES only, never SELECT
+ * -- that is a syntax constraint, not a preference. Cost of the move: the fresh
+ * fold is evaluated for matched rows too. That is one native scalar call on an
+ * already-materialized row, against a saved index descent into an 11GB shard.
+ *
+ * Requires PostgreSQL 15+ for MERGE; the cluster is 18.3.
+ */
+static const char *UPSERT_MERGE_SQL =
+    "MERGE INTO laplace.consensus c "
+    "USING (SELECT b.id, b.s, b.o, b.phi, b.games, b.sum, b.ts, "
+    "              f.rating AS f_rating, f.rd AS f_rd, f.volatility AS f_vol "
+    "       FROM unnest($1::bytea[], $2::bytea[], $3::bytea[], $4::int8[], "
+    "                   $5::int8[], $6::int8[], $7::timestamptz[]) "
+    "            AS b(id, s, o, phi, games, sum, ts) "
+    "       CROSS JOIN LATERAL laplace.laplace_glicko2_accumulate_games("
+    "            consensus.glicko2_neutral_mu(), consensus.glicko2_initial_rd(), "
+    "            consensus.glicko2_initial_volatility(), "
+    "            consensus.glicko2_neutral_mu(), "
+    "            b.phi, b.games, b.sum, consensus.glicko2_tau()) AS f) b "
+    "   ON c.type_id = '\\x%s'::bytea AND c.subject_id = b.s AND c.id = b.id "
+    "WHEN MATCHED THEN UPDATE SET "
     "   (rating, rd, volatility) = "
     "       (SELECT r.rating, r.rd, r.volatility "
     "        FROM laplace.laplace_glicko2_accumulate_games("
@@ -328,28 +358,11 @@ static const char *UPSERT_UPDATE_SQL =
     "             b.phi, b.games, b.sum, consensus.glicko2_tau()) AS r), "
     "   witness_count    = c.witness_count + b.games, "
     "   last_observed_at = GREATEST(c.last_observed_at, b.ts) "
-    "FROM unnest($1::bytea[], $2::bytea[], $3::int8[], $4::int8[], $5::int8[], "
-    "            $6::timestamptz[]) AS b(id, s, phi, games, sum, ts) "
-    "WHERE c.type_id = '\\x%s'::bytea AND c.subject_id = b.s AND c.id = b.id";
-
-/* NOVEL cells: INSERT tuple-routes to the owning leaf; NOT EXISTS (literal
- * type -> pruned) proves novelty, no ON CONFLICT. Fresh fold state comes from
- * the same native scalar, seeded from the neutral prior. */
-static const char *UPSERT_INSERT_SQL =
-    "INSERT INTO laplace.consensus "
+    "WHEN NOT MATCHED THEN INSERT "
     "   (id, subject_id, type_id, object_id, "
     "    rating, rd, volatility, witness_count, last_observed_at) "
-    "SELECT b.id, b.s, '\\x%s'::bytea, b.o, "
-    "       f.rating, f.rd, f.volatility, b.games, b.ts "
-    "FROM unnest($1::bytea[], $2::bytea[], $3::bytea[], $4::int8[], $5::int8[], "
-    "            $6::int8[], $7::timestamptz[]) AS b(id, s, o, phi, games, sum, ts) "
-    "CROSS JOIN LATERAL laplace.laplace_glicko2_accumulate_games("
-    "     consensus.glicko2_neutral_mu(), consensus.glicko2_initial_rd(), "
-    "     consensus.glicko2_initial_volatility(), consensus.glicko2_neutral_mu(), "
-    "     b.phi, b.games, b.sum, consensus.glicko2_tau()) AS f "
-    "WHERE NOT EXISTS (SELECT 1 FROM laplace.consensus c "
-    "                  WHERE c.type_id = '\\x%s'::bytea "
-    "                    AND c.subject_id = b.s AND c.id = b.id)";
+    "   VALUES (b.id, b.s, '\\x%s'::bytea, b.o, "
+    "           b.f_rating, b.f_rd, b.f_vol, b.games, b.ts)";
 
 /* NO mask queue here — parity with the plpgsql body this replaces
  * (2026-07-21): the caller deposits highway bits INLINE for this same delta
@@ -441,12 +454,9 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
         const uint8_t *type16 = bytea16(types.elems[run_start], label);
         int            run_n = 0;
         int            j = run_start;
-        SPIPlanPtr     up_plan, ins_plan;
-        Datum          up_vals[6], ins_vals[7];
-        static const Oid up_args[6] =
-            {BYTEAARRAYOID, BYTEAARRAYOID, INT8ARRAYOID, INT8ARRAYOID,
-             INT8ARRAYOID, 1185};
-        static const Oid ins_args[7] =
+        SPIPlanPtr     mrg_plan;
+        Datum          mrg_vals[7];
+        static const Oid mrg_args[7] =
             {BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID, INT8ARRAYOID,
              INT8ARRAYOID, INT8ARRAYOID, 1185};
         int            rc;
@@ -458,46 +468,29 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
             j++;
         }
 
-        /* EXISTING cells of this type: re-fold. */
-        up_plan = typed_plan(&upsert_update_plans, "consensus_upsert update plans",
-                             type16, UPSERT_UPDATE_SQL, 6, up_args);
-        up_vals[0] = PointerGetDatum(slice_array(cell_ids, NULL, idx, run_n,
-                                                 BYTEAOID, -1, false, 'i'));
-        up_vals[1] = PointerGetDatum(slice_array(subjects.elems, NULL, idx, run_n,
-                                                 BYTEAOID, -1, false, 'i'));
-        up_vals[2] = PointerGetDatum(slice_array(phis.elems, NULL, idx, run_n,
-                                                 INT8OID, 8, true, 'd'));
-        up_vals[3] = PointerGetDatum(slice_array(games.elems, NULL, idx, run_n,
-                                                 INT8OID, 8, true, 'd'));
-        up_vals[4] = PointerGetDatum(slice_array(sums.elems, NULL, idx, run_n,
-                                                 INT8OID, 8, true, 'd'));
-        up_vals[5] = PointerGetDatum(slice_array(ts.elems, NULL, idx, run_n,
-                                                 TIMESTAMPTZOID, 8, true, 'd'));
-        rc = SPI_execute_plan(up_plan, up_vals, NULL, false, 0);
-        if (rc != SPI_OK_UPDATE)
-            ereport(ERROR,
-                    (errcode(ERRCODE_INTERNAL_ERROR),
-                     errmsg("%s: UPDATE failed: %s",
-                            label, SPI_result_code_string(rc))));
-        affected += (int64) SPI_processed;
-
-        /* NOVEL cells of this type. */
-        ins_plan = typed_plan(&upsert_insert_plans, "consensus_upsert insert plans",
-                              type16, UPSERT_INSERT_SQL, 7, ins_args);
-        ins_vals[0] = up_vals[0];
-        ins_vals[1] = up_vals[1];
-        ins_vals[2] = PointerGetDatum(slice_array(objects.elems, objects.nulls,
+        /* EXISTING and NOVEL cells of this type, in ONE probe. */
+        mrg_plan = typed_plan(&upsert_merge_plans, "consensus_upsert merge plans",
+                              type16, UPSERT_MERGE_SQL, 7, mrg_args);
+        mrg_vals[0] = PointerGetDatum(slice_array(cell_ids, NULL, idx, run_n,
+                                                  BYTEAOID, -1, false, 'i'));
+        mrg_vals[1] = PointerGetDatum(slice_array(subjects.elems, NULL, idx, run_n,
+                                                  BYTEAOID, -1, false, 'i'));
+        mrg_vals[2] = PointerGetDatum(slice_array(objects.elems, objects.nulls,
                                                   idx, run_n,
                                                   BYTEAOID, -1, false, 'i'));
-        ins_vals[3] = up_vals[2];
-        ins_vals[4] = up_vals[3];
-        ins_vals[5] = up_vals[4];
-        ins_vals[6] = up_vals[5];
-        rc = SPI_execute_plan(ins_plan, ins_vals, NULL, false, 0);
-        if (rc != SPI_OK_INSERT)
+        mrg_vals[3] = PointerGetDatum(slice_array(phis.elems, NULL, idx, run_n,
+                                                  INT8OID, 8, true, 'd'));
+        mrg_vals[4] = PointerGetDatum(slice_array(games.elems, NULL, idx, run_n,
+                                                  INT8OID, 8, true, 'd'));
+        mrg_vals[5] = PointerGetDatum(slice_array(sums.elems, NULL, idx, run_n,
+                                                  INT8OID, 8, true, 'd'));
+        mrg_vals[6] = PointerGetDatum(slice_array(ts.elems, NULL, idx, run_n,
+                                                  TIMESTAMPTZOID, 8, true, 'd'));
+        rc = SPI_execute_plan(mrg_plan, mrg_vals, NULL, false, 0);
+        if (rc != SPI_OK_MERGE)
             ereport(ERROR,
                     (errcode(ERRCODE_INTERNAL_ERROR),
-                     errmsg("%s: INSERT failed: %s",
+                     errmsg("%s: MERGE failed: %s",
                             label, SPI_result_code_string(rc))));
         affected += (int64) SPI_processed;
 

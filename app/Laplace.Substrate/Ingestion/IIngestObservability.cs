@@ -46,6 +46,22 @@ public interface IIngestObservability
     /// files can span five orders of magnitude (UD: 4,577 B to 360,217,466 B).</summary>
     void OnFileStarted(string sourceName, string fileLabel, long bytes = 0) { }
 
+    /// <summary>Payload counters for a file that is still composing. Advisory and
+    /// lossy by design: it only ever moves the counters of a row already in 'running',
+    /// never creates a row and never changes status, so dropping one costs nothing.
+    ///
+    /// This exists because OnFileComposed fires ONCE, after the file's producer has
+    /// fully drained, so until then a running file reported records/entities/
+    /// physicalities/attestations as 0/0/0 whether it was 1% or 99% done. A 344 MiB
+    /// UD treebank therefore sat at 0/0/0 for 34 minutes and was indistinguishable
+    /// from a hang — the operator view could not tell a working file from a wedged
+    /// one, which is exactly the question the per-file ledger exists to answer.
+    /// The counters were already being accumulated per change; only publication was
+    /// missing.</summary>
+    void OnFileProgress(
+        string sourceName, string fileLabel,
+        long records, long entities, long physicalities, long attestations) { }
+
     /// <summary>The file producer drained, but its changes have not necessarily been
     /// committed yet. Updates identity and payload counters while status remains running;
     /// the runner records the terminal state only after the boundary apply succeeds.</summary>

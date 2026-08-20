@@ -724,6 +724,14 @@ public static class IngestBatchPipeline
                     fileEntities += rowCounts.Entities;
                     filePhysicalities += rowCounts.Physicalities;
                     fileAttestations += rowCounts.Attestations;
+                    if (Environment.TickCount64 >= nextProgressAt)
+                    {
+                        nextProgressAt = Environment.TickCount64 + FileProgressIntervalMs;
+                        Laplace.Ingestion.IngestObservabilityScope.Current.OnFileProgress(
+                            Laplace.Ingestion.IngestObservabilityScope.SourceName, label,
+                            unitsConsumed - unitsAtFileStart,
+                            fileEntities, filePhysicalities, fileAttestations);
+                    }
                     yield return change;
                     if (maxTotalUnits > 0 && unitsConsumed >= maxTotalUnits)
                     {
