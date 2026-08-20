@@ -418,13 +418,13 @@ public static class NpgsqlFoundryReads
             )
             SELECT subject_id, neighbour_id, w
             FROM ranked
-            WHERE rn <= GREATEST(@cap, 16)
+            WHERE rn <= @cap
             """,
             static r => new AttributeOutRow((byte[])r[0], (byte[])r[1], r.GetDouble(2)),
             p =>
             {
                 p.AddWithValue("rel", relationType);
                 p.Add(ByteaArray("vocab", vocab));
-                p.AddWithValue("cap", degreeCap > 0 ? degreeCap : 64);
+                p.AddWithValue("cap", Math.Max(0, degreeCap));
             }, timeoutSeconds: 180, ct: ct, label: "attribute_outbound");
 }

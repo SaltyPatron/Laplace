@@ -202,6 +202,12 @@ rendering total when no lexical realization exists. No winner is silently
 dropped, and inspection, explore-web, journal, and index-report limits preserve
 the caller's zero instead of silently promoting it to one.
 
+`structural.locale` no longer reports radius populations from a fixed nearest-
+3,000 sample. It now uses the unit-direction GiST for an exact nearest neighbour
+and an n-D chord bounding box plus exact angular filter for the requested radius
+counts. Foundry attribute reads likewise honor the declared degree cap directly;
+they no longer raise every cap below 16 or replace non-positive caps with 64.
+
 PostgreSQL documents that `LIMIT` can alter plan choice but does not make an
 unordered subset deterministic. A matching B-tree can satisfy `ORDER BY ...
 LIMIT` without sorting the whole input; otherwise the sort still consumes its

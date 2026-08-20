@@ -228,7 +228,14 @@ public sealed class IngestSizingTests
             plan.DeltaCapacityCells);
         Assert.Equal((512L << 20) / MemoryTopology.ConsensusMaskPairResidentBytes,
             plan.MaskPairCapacity);
-        Assert.NotEqual(65_536, plan.ChunkCells);
+
+        // A resource equation may legitimately evaluate to any integer, including
+        // a power of two. Pin the equation, not a blacklist of the retired literal.
+        var halfEnvelope = IngestSizing.ResolveConsensusFold(
+            applyPartitions: 12,
+            workingSetBudgetBytes: 4L << 30,
+            flushEnvelopeBytes: 256L << 20);
+        Assert.Equal(plan.ChunkCells / 2, halfEnvelope.ChunkCells);
     }
 
     [Fact]

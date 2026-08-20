@@ -569,8 +569,9 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
             // connections idled — measured 14-20x under the 21-36k cells/s this
             // same fold recorded on OMW's multi-type deltas. Safety is unchanged
             // and was never the chunk boundary's job: cells are client-deduped,
-            // so ANY chunking is row-disjoint. The 2,048 floor keeps a tiny run
-            // from paying twelve transactions for a few hundred cells.
+            // so ANY chunking is row-disjoint. MinSegmentCells is the byte-derived
+            // per-connection chunk divided across the live connection topology;
+            // it is not the retired 2,048-cell floor.
             int segLen = Math.Clamp(
                 (run.Len + FoldConnections - 1) / FoldConnections,
                 FoldSizing.MinSegmentCells,

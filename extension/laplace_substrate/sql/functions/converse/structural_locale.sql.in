@@ -5,9 +5,18 @@ CREATE OR REPLACE FUNCTION structural.locale(p_word text, p_near double precisio
                   within_2x bigint, within_5x bigint, isolated boolean)
     LANGUAGE plpgsql STABLE AS $sl$
 DECLARE
-    v_id    bytea;
-    v_coord geometry;
+    v_id        bytea;
+    v_coord     geometry;
+    v_direction geometry;
+    v_nearest   double precision;
+    v_max_angle double precision;
+    v_chord     double precision;
 BEGIN
+    IF p_near < 0 THEN
+        RAISE EXCEPTION 'structural.locale: p_near must be non-negative (got %)', p_near
+            USING ERRCODE = '22023';
+    END IF;
+
     SELECT w.id, w.coord INTO v_id, v_coord
     FROM laplace.v_word_points w
     JOIN converse.prompt_state(p_word) s ON w.id = s.id
@@ -16,24 +25,44 @@ BEGIN
     LIMIT 1;
     IF v_id IS NULL THEN RETURN; END IF;
 
+    v_direction := public.laplace_direction_4d(v_coord);
+    IF v_direction IS NULL THEN RETURN; END IF;
+    v_max_angle := LEAST(pi(), 5 * p_near);
+    -- On S3, unit chord = sqrt(2 - 2*cos(angle)). The direction GiST can
+    -- reject everything outside this exact angular radius with an n-D box;
+    -- laplace_angular_distance_4d below removes the box's corner false positives.
+    v_chord := sqrt(GREATEST(0, 2 - 2 * cos(v_max_angle)));
+
+    -- Exact nearest neighbour: unit-chord order is strictly monotone with angle.
+    -- No fixed prefix is involved, and excluding entity_id removes all duplicate
+    -- physical realizations of the anchor before LIMIT.
+    SELECT public.laplace_angular_distance_4d(p.coord, v_coord)
+      INTO v_nearest
+    FROM laplace.physicalities p
+    WHERE p.type = 1
+      AND p.entity_id <> v_id
+      AND public.laplace_direction_4d(p.coord) IS NOT NULL
+    ORDER BY public.laplace_direction_4d(p.coord) <<->> v_direction,
+             p.entity_id, p.id
+    LIMIT 1;
+
     RETURN QUERY
-    WITH cand AS (
-        SELECT w.id AS entity_id, w.coord
-        FROM laplace.v_word_points w
-        WHERE w.coord IS NOT NULL
-        ORDER BY w.coord <<->> v_coord
-        LIMIT 3000),
-    g AS (
-        SELECT DISTINCT ON (c.entity_id) c.entity_id,
-               public.laplace_angular_distance_4d(c.coord, v_coord) AS d
-        FROM cand c
-        WHERE c.entity_id <> v_id
-        ORDER BY c.entity_id, public.laplace_angular_distance_4d(c.coord, v_coord))
-    SELECT min(d),
+    WITH within_max AS MATERIALIZED (
+        SELECT p.entity_id,
+               min(public.laplace_angular_distance_4d(p.coord, v_coord)) AS d
+        FROM laplace.physicalities p
+        WHERE p.type = 1
+          AND p.entity_id <> v_id
+          AND public.laplace_direction_4d(p.coord) IS NOT NULL
+          AND public.laplace_direction_4d(p.coord) &&&
+              public.ST_Expand(v_direction, v_chord, v_chord, v_chord, v_chord)
+          AND public.laplace_angular_distance_4d(p.coord, v_coord) <= v_max_angle
+        GROUP BY p.entity_id)
+    SELECT v_nearest,
            count(*) FILTER (WHERE d <= p_near),
            count(*) FILTER (WHERE d <= 2 * p_near),
            count(*) FILTER (WHERE d <= 5 * p_near),
-           COALESCE(min(d) > p_near, true)
-    FROM g;
+           COALESCE(v_nearest > p_near, true)
+    FROM within_max;
 END;
 $sl$;
