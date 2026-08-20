@@ -68,6 +68,42 @@ FROM ops.surface_sample(public.laplace_hash128_blake3('test/ops/source'), 2::sma
 SELECT count(*) = 0 AS surface_sample_zero_is_empty
 FROM ops.surface_sample(public.laplace_hash128_blake3('test/ops/source'), 2::smallint, 0);
 
+-- top_relations merges exact per-relation heads. Raw eff_mu alone would choose
+-- HAS_LANGUAGE below; salience-weighted edge rank must choose IS_A.
+INSERT INTO laplace.consensus (
+    id, subject_id, type_id, object_id, rating, rd, volatility,
+    witness_count, last_observed_at)
+VALUES
+    (public.laplace_hash128_blake3('test/ops/top/is-a'),
+     public.laplace_hash128_blake3('test/ops/top/is-a/subject'),
+     laplace.relation_type_id('IS_A'),
+     public.laplace_hash128_blake3('test/ops/top/is-a/object'),
+     2000000000000000000, 1, 1, 2, statement_timestamp()),
+    (public.laplace_hash128_blake3('test/ops/top/language'),
+     public.laplace_hash128_blake3('test/ops/top/language/subject'),
+     laplace.relation_type_id('HAS_LANGUAGE'),
+     public.laplace_hash128_blake3('test/ops/top/language/object'),
+     9000000000000000000, 1, 1, 9, statement_timestamp());
+
+SELECT count(*) = 1 AS top_relations_exact_bound,
+       bool_and(type_id = laplace.relation_type_id('IS_A'))
+           AS top_relations_uses_edge_rank
+FROM consensus.top_relations(1, NULL);
+
+SELECT count(*) = 1 AS top_relations_typed_bound,
+       bool_and(type_id = laplace.relation_type_id('HAS_LANGUAGE'))
+           AS top_relations_typed_exact
+FROM consensus.top_relations(1, laplace.relation_type_id('HAS_LANGUAGE'));
+
+SELECT count(*) = 0 AS top_relations_zero_is_empty
+FROM consensus.top_relations(0, NULL);
+
+SELECT pg_get_functiondef('consensus.top_relations(integer,bytea)'::regprocedure)
+           LIKE '%CROSS JOIN LATERAL%'
+       AND pg_get_functiondef('consensus.top_relations(integer,bytea)'::regprocedure)
+           LIKE '%x.type_id = t.type_id%'
+       AS top_relations_uses_partition_heads;
+
 -- mesh_position always yields the self row, even for an unwitnessed id
 SELECT count(*) >= 1 AS mesh_has_self,
        count(*) FILTER (WHERE dir = 'self') = 1 AS mesh_one_self
