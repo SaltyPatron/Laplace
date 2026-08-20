@@ -104,6 +104,20 @@ TEST(LaplaceCoreGlicko2, ConsensusExpectedScoreUsesGlickoUncertainty) {
               SCALE - laplace_glicko2_expected_score_fp(high, to_fp(80.0)));
 }
 
+TEST(LaplaceCoreGlicko2, WalkWeightIsSignedFoldedExpectation) {
+    const int64_t rating = to_fp(1800.0);
+    const int64_t narrow = to_fp(30.0);
+    const int64_t wide   = to_fp(350.0);
+    const double expected = 2.0 * from_fp(
+        laplace_glicko2_expected_score_fp(rating, narrow)) - 1.0;
+
+    EXPECT_DOUBLE_EQ(laplace_walk_edge_weight(rating, narrow), expected);
+    EXPECT_EQ(laplace_walk_edge_weight(to_fp(1500.0), wide), 0.0);
+    EXPECT_GT(laplace_walk_edge_weight(rating, narrow),
+              laplace_walk_edge_weight(rating, wide));
+    EXPECT_LT(laplace_walk_edge_weight(to_fp(1200.0), narrow), 0.0);
+}
+
 TEST(LaplaceCoreGlicko2, InitSetsInitialState) {
     glicko2_state_t st;
     glicko2_init(&st, to_fp(1500.0), to_fp(350.0), to_fp(0.06));

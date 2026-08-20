@@ -83,26 +83,10 @@ int64_t laplace_glicko2_expected_score_fp(int64_t rating, int64_t rd);
  * does), so a shared name would silently macro-redefine across type. */
 #define LAPLACE_GLICKO2_FP_SCALE_D 1000000000.0
 
-/*
- * The Glicko-complete signed edge weight -- doc 14 P5, ratified and live on
- * the Foundry export path as consensus_adjacency.sql.in's per-edge term:
- *   (rating - neutral)/1e9 * exp(-kappa * rd/1e9) * witness_sat(wc)
- * SIGN IS THE RATING'S, never eff_mu's (INVENTION SS5): rd is a confidence
- * interval and applies once, as the decay factor. Signing on eff_mu
- * (rating - 2*rd) double-counts it and scores a wide-rd WIN as a refutation --
- * measured at 99.04% of won claims. The body in glicko2.c is authoritative.
- * witness_sat(wc) = wc/(wc+4.0) (Michaelis-Menten, half-max at 4 witnesses --
- * see mu/foundry_witness_sat.sql.in for the documented rationale). `kappa` is
- * consensus.foundry_rd_kappa() (mu/foundry_rd_kappa.sql.in), which derives it
- * as 1/initial_rd so the decay reads exp(-rd/rd_initial) and cannot drift from
- * consensus.glicko2_initial_rd() -- callers fetch it once (not per-candidate) and pass it in,
- * so the walk and the Foundry export share one tunable, never drift apart.
- * Rule #1 (one implementation per fact): this is the ONLY native copy of this
- * formula; both generate_walk.c's beam scorer and astar_path.c's edge_cost
- * call it.
- */
-double laplace_walk_edge_weight(int64_t rating, int64_t rd, int64_t witness_count,
-                                double kappa);
+/* Signed Glicko-2 expectation around neutral, in [-1, 1]. Consensus rating and
+ * RD are already the sufficient folded state of the witness population; this
+ * deliberately does not apply a second witness-count saturation or RD decay. */
+double laplace_walk_edge_weight(int64_t rating, int64_t rd);
 
 int64_t laplace_fp_mul(int64_t a, int64_t b);
 int64_t laplace_fp_div(int64_t a, int64_t b);

@@ -234,19 +234,9 @@ typedef struct RankedEdge
 } RankedEdge;
 
 /*
- * Belief first, always. The bonuses are additive constants (geometry <= 2.0,
- * topic bias 3.0) while `base` is signed_mu * exp(-kappa*rd) * saturation,
- * MEASURED live at max 1.95e-20 over 21,413 real edges because kappa=1.0 is
- * applied to rd in raw rating units (exp(-265) at the average rd). Comparing
- * base+bonus therefore ranked purely by the nudges and discarded the
- * adjudicated verdict entirely -- the exact inversion of INVENTION SS5 ("all
- * ranked reads order by belief") and SS9 (geometry is instrument-tier; point
- * proximity is not the relatedness signal), and the opposite of what the
- * scorer's own comment claims it does.
- *
- * Ordering on base alone keeps full resolution: doubles represent down to
- * 1e-308, so an underflowed belief term still orders correctly even while
- * kappa remains miscalibrated. Bonuses break exact ties only.
+ * Belief first, always. Base is the relation rank times the signed Glicko
+ * expectation of the folded state. Geometry/topic values break exact belief
+ * ties only; they cannot replace or reverse the adjudicated verdict.
  *
  * Final key is the object id, so equal-belief equal-bonus candidates emit in
  * one fixed order. qsort is unstable and SS15 requires byte-identical output.
@@ -515,7 +505,6 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
     int32   max_depth, beam;
     WalkNode *nodes;
     int     n_nodes = 0, cap;
-    double  kappa;
     bool    have_intent_mask = false;
     laplace_mask256_t intent_mask;
     Datum  *topic_bias = NULL;
@@ -579,7 +568,6 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
     else
         ensure_walk_batch_nogeo_plan();
     ensure_relationtype_type_id();
-    kappa = spi_fetch_rd_kappa();
 
     cap = 1;
     nodes = (WalkNode *) palloc(sizeof(WalkNode) * cap);
@@ -762,8 +750,7 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
 
                     rel_type_id = datum_to_hash128(raw[j].rel_type);
                     base = walk_relation_rank(rel_type_id) *
-                           laplace_walk_edge_weight(raw[j].rating, raw[j].rd,
-                                                    raw[j].witnesses, kappa);
+                           laplace_walk_edge_weight(raw[j].rating, raw[j].rd);
 
                     /*
                      * 3Cc additive geometry bonuses. Constants below are
@@ -807,8 +794,8 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
 
                     /*
                      * Bonuses rank CONFIRMED edges only. A refuted edge with
-                     * wide RD has a squashed |base| (exp(-kappa*rd) ~ 0), and
-                     * an unconditional additive bonus (geometry up to +2,
+                     * wide RD has a Glicko expectation near neutral, and an
+                     * unconditional additive bonus (geometry up to +2,
                      * partition +1, topic +3) would flip it positive and walk
                      * it -- caught live by the closed-loop test: 60 refutes
                      * left signed_mu at -600 yet the edge still placed. The

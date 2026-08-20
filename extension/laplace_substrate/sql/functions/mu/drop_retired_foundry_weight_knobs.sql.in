@@ -1,0 +1,12 @@
+-- Upgrade cleanup after every first-party dependent has moved to the folded
+-- rating/RD law. Fresh installs never create these historical second-stage
+-- confidence transforms.
+DROP FUNCTION IF EXISTS consensus.foundry_witness_sat(bigint);
+DROP FUNCTION IF EXISTS consensus.foundry_rd_kappa();
+DROP FUNCTION IF EXISTS laplace.foundry_witness_sat(bigint);
+DROP FUNCTION IF EXISTS laplace.foundry_rd_kappa();
+DROP FUNCTION IF EXISTS consensus.walk_edge_weight(bigint, bigint, bigint);
+DROP FUNCTION IF EXISTS consensus.walk_edge_weight(bigint, bigint, bigint, double precision);
+DROP FUNCTION IF EXISTS laplace.walk_edge_weight(bigint, bigint, bigint);
+DROP FUNCTION IF EXISTS laplace.walk_edge_weight(bigint, bigint, bigint, double precision);
+DROP FUNCTION IF EXISTS generation.steer_candidates(bytea[], bytea[], double precision);

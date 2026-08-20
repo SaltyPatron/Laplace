@@ -1,7 +1,7 @@
 /*
  * steer_candidates.c — S7 STEER (docs/specs/36 §3).
  *
- *   generation.steer_candidates(candidates bytea[], frontier bytea[], kappa float8)
+ *   generation.steer_candidates(candidates bytea[], frontier bytea[])
  *     -> TABLE(candidate bytea, steer float8, edges bigint)
  *
  * THE STAGE THE SPEC SAYS NOBODY WROTE. S6 proposes continuations from sequence
@@ -93,14 +93,14 @@ ensure_steer_plan(void)
          * `Paris` carries moderate edges to `france` AND `capital`; a bare sum lets Lyon win.
          */
         SPIPlanPtr plan = SPI_prepare(
-            "SELECT e.cand, e.front, e.type_id, e.rating, e.rd, e.witness_count FROM ("
+            "SELECT e.cand, e.front, e.type_id, e.rating, e.rd FROM ("
             "  SELECT c.subject_id AS cand, c.object_id AS front,"
-            "         c.type_id, c.rating, c.rd, c.witness_count"
+            "         c.type_id, c.rating, c.rd"
             "    FROM laplace.consensus c"
             "   WHERE c.subject_id = ANY($1) AND c.object_id = ANY($2)"
             "  UNION ALL"
             "  SELECT c.object_id, c.subject_id,"
-            "         c.type_id, c.rating, c.rd, c.witness_count"
+            "         c.type_id, c.rating, c.rd"
             "    FROM laplace.consensus c"
             "   WHERE c.object_id = ANY($1) AND c.subject_id = ANY($2)"
             ") e",
@@ -119,7 +119,6 @@ Datum
 pg_laplace_steer_candidates(PG_FUNCTION_ARGS)
 {
     ArrayType   *cand_arr, *front_arr;
-    double       kappa;
     HASHCTL      hctl, phctl;
     HTAB        *acc, *pairs;
     Datum       *cand_elems;
@@ -142,9 +141,6 @@ pg_laplace_steer_candidates(PG_FUNCTION_ARGS)
 
     if (SPI_connect() != SPI_OK_CONNECT)
         elog(ERROR, "steer_candidates: SPI_connect failed");
-
-    /* Same kappa the retrieval half uses; never a second constant. */
-    kappa = PG_ARGISNULL(2) ? spi_fetch_rd_kappa() : PG_GETARG_FLOAT8(2);
 
     memset(&hctl, 0, sizeof(hctl));
     hctl.keysize   = 16;
@@ -204,7 +200,6 @@ pg_laplace_steer_candidates(PG_FUNCTION_ARGS)
         bytea      *tb  = DatumGetByteaPP(SPI_getbinval(tup, td, 3, &isnull));
         int64       rating = DatumGetInt64(SPI_getbinval(tup, td, 4, &isnull));
         int64       rd     = DatumGetInt64(SPI_getbinval(tup, td, 5, &isnull));
-        int64       wit    = DatumGetInt64(SPI_getbinval(tup, td, 6, &isnull));
         hash128_t   type_id;
         SteerEntry *e;
         PairEntry  *p;
@@ -230,7 +225,7 @@ pg_laplace_steer_candidates(PG_FUNCTION_ARGS)
             p->score = 0.0;
             e->covered += 1;
         }
-        p->score += walk_edge_score(type_id, rating, rd, wit, kappa);
+        p->score += walk_edge_score(type_id, rating, rd);
 
         if ((r & 0xFFFF) == 0)
             CHECK_FOR_INTERRUPTS();

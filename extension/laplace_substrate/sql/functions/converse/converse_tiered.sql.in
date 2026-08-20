@@ -67,10 +67,9 @@ CREATE OR REPLACE FUNCTION converse.tiered(p_topic bytea,
 -- weakly-witnessed edge BELOW neutral. Measured on pawn: the whole gloss family
 -- sits at 1.17e12-1.37e12, i.e. Glicko 1170-1370. Subtracting neutral and
 -- keeping w > 0 would have dropped every unit and fallen back to template prose
--- forever, silently. Rank by the walker's own formula instead --
--- consensus.relation_rank x consensus.eff_mu x witness-saturation -- which keeps everything the fold
--- kept and lets a genuinely consensus.refuted edge go negative on its own rating. consensus.eff_mu
--- already carries the rd penalty (rating - 2*rd), so no separate exp(-k*rd).
+-- forever, silently. Rank by the walker's signed Glicko expectation of the
+-- folded rating/RD state instead; no second witness saturation or RD decay is
+-- applied after the fold.
 DECLARE
     said     bytea[] := ARRAY[]::bytea[];   -- units already emitted, in order
     seen     bytea[] := ARRAY[]::bytea[];   -- concepts already said

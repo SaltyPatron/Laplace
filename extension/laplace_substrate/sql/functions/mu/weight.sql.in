@@ -13,10 +13,9 @@
 --   salience      relation-type rank x eff_mu -- what the consensus reads order
 --                 by, so a strong edge of a weak relation type sorts below a
 --                 weak edge of a strong one.
---   complete      the Glicko-complete walk weight: signed mu, rd-decayed,
---                 witness-saturated. Signed on purpose -- a wide-rd win stays
---                 walkable, a refutation goes negative and dead-ends.
---   strength      the foundry/explore logistic, clamped [0.05, 1.0].
+    --   complete      signed Glicko expectation around neutral. Rating/RD are
+    --                 already the folded state of the observation population.
+    --   strength      Glicko expected score against neutral, in [0, 1].
 --
 -- WHY p_mode IS AN ENUM AND NOT text. A text mode with a CASE would return NULL
 -- for a typo, silently, and a NULL weight sorts as "no opinion" rather than as
@@ -57,8 +56,7 @@ BEGIN ATOMIC
         WHEN 'conservative' THEN consensus.eff_mu(p_rating, p_rd)::float8 / 1e9
         WHEN 'salience'     THEN consensus.edge_rank(
                                      p_type, consensus.eff_mu(p_rating, p_rd)::numeric)
-        WHEN 'complete'     THEN consensus.walk_edge_weight(
-                                     p_rating, p_rd, p_witness_count)
+        WHEN 'complete'     THEN consensus.walk_edge_weight(p_rating, p_rd)
         WHEN 'strength'     THEN consensus.edge_strength(p_rating, p_rd)
     END;
 END;

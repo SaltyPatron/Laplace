@@ -439,9 +439,8 @@ factors pass alone deposited **23× that**, and contributed 775 attestations.
      `astar_path_raw.sql.in:10` `AS 'MODULE_PATHNAME', 'pg_laplace_astar_path'`;
    - `extension/laplace_substrate/src/astar_path.c:280,289,298` calls
      `astar_open` / `astar_next` / `astar_close`;
-   - `astar_path.c:113-115` — `edge_cost()` **is** `laplace_walk_edge_weight(rating,
-     rd, witness_count, kappa)`, consumed at `:158` as `out[r].cost`, with an
-     admissible heuristic closure at `:170-186` (`astar_geo_heuristic`).
+   - `astar_path.c` derives additive path cost as negative-log Glicko expected
+     score; exact accumulated cost leads and geometry only orders equal-cost ties.
 
    Source: `MODEL_LANE_AUDIT_2026-08-11.md` §6, which additionally asserted that
    `generate_walk.c` and `astar_path.c` "neither file exists." Both were added two

@@ -1,5 +1,5 @@
--- Retired into consensus_subject.  Fresh installs create the combined
--- subject/effective-μ covering index with the table and must not maintain a
+-- Retired into consensus_subject. Fresh installs create the combined
+-- subject/effective-μ covering index here and must not maintain a
 -- second tree with the same ordered prefix.
 --
 -- A populated pre-combination database is deliberately left unchanged during
@@ -7,6 +7,15 @@
 -- inside the extension transaction, and dropping a live read path during deploy
 -- violates the online-index law.  Its next greenfield reseed gets the combined
 -- shape.  An empty old-schema database can be corrected in place safely.
+--
+-- Effective μ is the second key because bounded subject reads order by it. On
+-- a real 746k-row default leaf the former covering + rank trees occupied
+-- 83 MB + 28 MB; this combined shape occupied 69 MB and preserved the measured
+-- index-only full and top-k plans.
+CREATE INDEX IF NOT EXISTS consensus_subject
+    ON consensus (subject_id, ((rating - 2*rd)) DESC)
+    INCLUDE (object_id, rating, rd);
+
 DO $do$
 DECLARE
     v_combined boolean;

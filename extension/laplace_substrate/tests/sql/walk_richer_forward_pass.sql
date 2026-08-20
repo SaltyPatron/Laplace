@@ -52,7 +52,7 @@ VALUES
      (SELECT id FROM walk_c_fixtures WHERE name = 'obj_refuted'),
      500000000000, 200000000000, 60000000, 5, now()),
     -- obj_refuted_wide: consensus.refuted(signed_mu ~ -1300) with RD so wide that
-    -- exp(-kappa*rd) squashes |base| toward 0 -- the case where unconditional
+    -- Glicko expectation attenuates |base| toward 0 -- the case where unconditional
     -- additive bonuses (geometry +2, partition +1) would flip a refuted edge
     -- positive and walk it (caught by the live closed-loop test: 60 refutes,
     -- signed_mu -600, edge still served). Its coords below sit EXACTLY on the

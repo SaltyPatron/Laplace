@@ -1238,9 +1238,8 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
                  * (more sense witnesses, far less total_mass). The prior that
                  * clears both is ICF × mass sat, where mass sat =
                  * total_mass/(total_mass+HALFMAX_MASS) and HALFMAX_MASS (~1e13)
-                 * is the sparse-concept scale on this substrate — same class of
-                 * saturation constant as foundry_witness_sat's half-max, not a
-                 * per-probe knob. total_mass is the fold's own volume on the
+                 * is the sparse-concept scale on this substrate — an empirical
+                 * threshold still requiring retirement. total_mass is the fold's own volume on the
                  * elected sense. share still leads when the graph speaks. */
                 /* A NAMER IS NOT A TOPIC (2026-08-05).
                  *

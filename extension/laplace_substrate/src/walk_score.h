@@ -1,7 +1,7 @@
 /*
  * walk_score.h — the walk's per-edge score, in ONE place.
  *
- * `consensus.relation_rank(type) * laplace_walk_edge_weight(rating, rd, witnesses, kappa)`
+ * `consensus.relation_rank(type) * laplace_walk_edge_weight(rating, rd)`
  * is the Glicko-complete signed weight (doc 15 §3Ca, glicko2.h) and is the SAME
  * formula consensus_adjacency uses on the Foundry export side. It was previously
  * a file-static in generate_walk.c, which meant S7 (steer_candidates.c) could
@@ -33,17 +33,15 @@ walk_relation_rank(hash128_t type_id)
 }
 
 /*
- * The signed edge weight. Sign comes from the RATING (§5): a refuted edge goes
- * negative and dead-ends, while a wide-RD win stays positive but squashed by
- * exp(-kappa*rd) so it ranks low and remains walkable. Signing on the
- * conservative bound instead would collapse "uncertain" into "refuted".
+ * The signed edge weight is the folded state's Glicko expectation around
+ * neutral. RD attenuates uncertain states through g(phi); witness count is
+ * already represented by the folded rating/RD and is not applied again.
  */
 static inline double
-walk_edge_score(hash128_t type_id, int64 rating, int64 rd, int64 witnesses,
-                double kappa)
+walk_edge_score(hash128_t type_id, int64 rating, int64 rd)
 {
     return walk_relation_rank(type_id) *
-           laplace_walk_edge_weight(rating, rd, witnesses, kappa);
+           laplace_walk_edge_weight(rating, rd);
 }
 
 #endif /* LAPLACE_WALK_SCORE_H */
