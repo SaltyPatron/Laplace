@@ -47,10 +47,10 @@ internal static class QueryEndpoints
                 .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .Select(s => int.TryParse(s, out var b) ? b : -1)
                 .Where(b => b is >= 0 and <= 12)
-                .Distinct().Take(8).ToArray();
+                .Distinct().ToArray();
             if (bandIds.Length == 0)
                 return EndpointJson.BadRequest("invalid_request_error", "Query parameter 'bands' must name bands 0-12.");
-            var per = Math.Clamp(limit ?? 5, 1, 25);
+            var per = Math.Max(0, limit ?? 5);
             var leaders = await substrate.LeadersAsync(bandIds, per, ct);
             return Results.Json(new LeadersResponse("list", leaders));
         })

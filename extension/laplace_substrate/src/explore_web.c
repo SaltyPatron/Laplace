@@ -202,21 +202,29 @@ pg_laplace_explore_web(PG_FUNCTION_ARGS)
 
 	hops = PG_ARGISNULL(1) ? 2 : PG_GETARG_INT32(1);
 	fanout = PG_ARGISNULL(2) ? 10 : PG_GETARG_INT32(2);
-	max_nodes = PG_ARGISNULL(3) ? 160 : PG_GETARG_INT32(3);
-	if (hops < 1)
-		hops = 1;
-	if (hops > 4)
-		hops = 4;
-	if (fanout < 2)
-		fanout = 2;
-	if (fanout > 16)
-		fanout = 16;
-	if (max_nodes < 8)
-		max_nodes = 8;
-	if (max_nodes > 400)
-		max_nodes = 400;
+	if (hops < 0 || fanout < 0)
+		ereport(ERROR, (errmsg("explore_web: hops and fanout must be >= 0")));
+	if (hops > PG_INT16_MAX)
+		ereport(ERROR, (errmsg("explore_web: hops exceeds the smallint result coordinate")));
+	if (PG_ARGISNULL(3))
+	{
+		int64 derived = 1 + (int64) hops * (int64) fanout;
+		if (derived > PG_INT32_MAX)
+			ereport(ERROR, (errmsg("explore_web: derived node budget exceeds int32")));
+		max_nodes = (int32) derived;
+	}
+	else
+		max_nodes = PG_GETARG_INT32(3);
+	if (max_nodes < 0)
+		ereport(ERROR, (errmsg("explore_web: max_nodes must be >= 0")));
 
 	InitMaterializedSRF(fcinfo, 0);
+	if (hops == 0 || fanout == 0 || max_nodes == 0)
+		return (Datum) 0;
+	if ((Size) max_nodes > MaxAllocSize / sizeof(hash128_t)
+		|| (Size) max_nodes > MaxAllocSize / sizeof(Datum)
+		|| (Size) max_nodes > MaxAllocSize / sizeof(SeenNode))
+		ereport(ERROR, (errmsg("explore_web: requested node budget exceeds PostgreSQL allocation capacity")));
 
 	if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
 		elog(ERROR, "explore_web: SPI_connect failed");
@@ -260,10 +268,8 @@ pg_laplace_explore_web(PG_FUNCTION_ARGS)
 	frontier = (hash128_t *) palloc(sizeof(hash128_t) * max_nodes);
 	next_frontier = (hash128_t *) palloc(sizeof(hash128_t) * max_nodes);
 	frontier_datums = (Datum *) palloc(sizeof(Datum) * max_nodes);
-	cand_cap = max_nodes * fanout;
-	if (cand_cap > 4096)
-		cand_cap = 4096;
-	cands = (EdgeCand *) palloc(sizeof(EdgeCand) * cand_cap);
+	cand_cap = 0;
+	cands = NULL;
 
 	{
 		SeenNode   *e;
@@ -281,10 +287,26 @@ pg_laplace_explore_web(PG_FUNCTION_ARGS)
 		int			n_next = 0;
 		int			room = max_nodes - n_seen;
 		int			admit_n;
-		int			probe_limit = fanout * 2;
+		int			admit_target = fanout < room ? fanout : room;
+		int			probe_limit = n_seen + admit_target;
+		int64		required_cands = (int64) n_front * (int64) probe_limit;
 
-		if (probe_limit > 32)
-			probe_limit = 32;
+		/* SQL returns one ranked, neighbour-distinct head per frontier member. At
+		 * most n_seen entries in any head can already be retained, so
+		 * n_seen+admit_target proves enough room for the requested number of new
+		 * nodes. The exact union is n_front*probe_limit; C ranks and deduplicates
+		 * that union globally. This replaces the former fixed multiplier and
+		 * ceiling probability guess. */
+		if ((uint64) required_cands > (uint64) (MaxAllocSize / sizeof(EdgeCand))
+			|| required_cands > PG_INT32_MAX)
+			ereport(ERROR, (errmsg("explore_web: candidate budget exceeds PostgreSQL allocation capacity")));
+		if ((int) required_cands > cand_cap)
+		{
+			cand_cap = (int) required_cands;
+			cands = cands == NULL
+				? (EdgeCand *) palloc(sizeof(EdgeCand) * cand_cap)
+				: (EdgeCand *) repalloc(cands, sizeof(EdgeCand) * cand_cap);
+		}
 
 		Datum		args[3];
 		ArrayType  *frontier_array;

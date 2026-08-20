@@ -171,18 +171,18 @@ internal sealed partial class SubstrateClient
     };
 }
 
-/// <summary>Clamped dials for one read. Bounds live here, not scattered as literals.</summary>
+/// <summary>Normalized dials for one read. Caller work budgets pass through unchanged.</summary>
 internal readonly record struct QueryDials(
     int Depth, int Breadth, int Limit, int Steps, double Spread, int MaxStride,
     long? Seed, bool Directed, bool UseGeometry)
 {
     public static QueryDials From(QueryRequest req) => new(
-        Depth: Math.Clamp(req.Depth ?? 4, 1, 16),
-        Breadth: Math.Clamp(req.Breadth ?? 5, 1, 32),
-        Limit: Math.Clamp(req.Limit ?? 40, 1, 500),
-        Steps: Math.Clamp(req.Steps ?? 24, 1, 256),
+        Depth: Math.Max(0, req.Depth ?? 4),
+        Breadth: Math.Max(0, req.Breadth ?? 5),
+        Limit: Math.Max(0, req.Limit ?? 40),
+        Steps: Math.Max(0, req.Steps ?? 24),
         Spread: Math.Clamp(req.Spread ?? 0.7, 0.0, 1.0),
-        MaxStride: Math.Clamp(req.MaxStride ?? 5, 1, 8),
+        MaxStride: Math.Max(0, req.MaxStride ?? 5),
         Seed: req.Seed,
         Directed: req.Directed ?? false,
         UseGeometry: req.UseGeometry ?? false);

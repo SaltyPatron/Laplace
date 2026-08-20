@@ -113,7 +113,6 @@ public static class NpgsqlSubstrateReads
             SELECT type, entities_approx
             FROM ops.entity_type_counts_approx()
             ORDER BY entities_approx DESC
-            LIMIT 32
             """,
             static r => (r.IsDBNull(0) ? "" : r.GetString(0), r.IsDBNull(1) ? 0L : r.GetInt64(1)),
             ct: ct, label: "entity_type_counts_approx", onError: onError);
@@ -125,7 +124,6 @@ public static class NpgsqlSubstrateReads
             SELECT parent, partition, pct_of_parent
             FROM ops.partition_pressure(NULL)
             ORDER BY pct_of_parent DESC NULLS LAST
-            LIMIT 32
             """,
             static r => (
                 r.IsDBNull(0) ? "" : r.GetString(0),
@@ -184,7 +182,6 @@ public static class NpgsqlSubstrateReads
         NpgsqlRead.ReadRowsAsync(dataSource, """
             SELECT type, relations, witnesses
             FROM ops.arena_counts()
-            LIMIT 64
             """,
             static r => (
                 r.IsDBNull(0) ? "" : r.GetString(0),
@@ -258,7 +255,7 @@ public static class NpgsqlSubstrateReads
     public static Task<IReadOnlyList<(string Type, short Tier, long Entities)>> EntityTypeCountsAsync(
         NpgsqlDataSource dataSource, CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
-            SELECT type, tier, entities FROM ops.entity_type_counts() LIMIT 64
+            SELECT type, tier, entities FROM ops.entity_type_counts()
             """,
             static r => (r.IsDBNull(0) ? "" : r.GetString(0), r.GetInt16(1), r.GetInt64(2)),
             ct: ct, label: "entity_type_counts", onError: onError);
@@ -505,7 +502,6 @@ public static class NpgsqlSubstrateReads
         NpgsqlRead.ReadRowsAsync(dataSource, """
             SELECT encode(subject_id, 'hex'), encode(type_id, 'hex'), witness_count
             FROM generation.model_jitter_catalog(@rel, 150000000000)
-            LIMIT 32
             """,
             static r => (
                 r.IsDBNull(0) ? "" : r.GetString(0),
@@ -1744,7 +1740,7 @@ public static class NpgsqlSubstrateReads
     public readonly record struct EntityConstituentRow(
         int Ordinal, string ChildIdHex, int RunLength, long Flags, string ChildLabel);
 
-    /// <summary><c>realize.constituents(id)</c>, capped at 512 rows.</summary>
+    /// <summary><c>realize.constituents(id)</c>, lossless for every constituent.</summary>
     public static Task<IReadOnlyList<EntityConstituentRow>> ConstituentsAsync(
         NpgsqlConnection conn, byte[] id, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
@@ -1754,7 +1750,6 @@ public static class NpgsqlSubstrateReads
                        NULLIF(realize.render_text_fast(c.child_id, 8), ''),
                        left(encode(c.child_id, 'hex'), 16))
             FROM realize.constituents(@id) c
-            LIMIT 512
             """,
             static r => new EntityConstituentRow(r.GetInt32(0), r.GetString(1), r.GetInt32(2), r.GetInt64(3), r.GetString(4)),
             p => p.Add("id", NpgsqlDbType.Bytea).Value = id,
@@ -1787,7 +1782,6 @@ public static class NpgsqlSubstrateReads
                  LATERAL public.ST_DumpPoints(t.trajectory) dp,
                  LATERAL public.laplace_mantissa_unpack(dp.geom) u
             ORDER BY u.ordinal
-            LIMIT 512
             """,
             static r => new PackedTrajectoryVertexRow(
                 r.GetInt32(0), r.GetDouble(1), r.GetDouble(2), r.GetDouble(3), r.GetDouble(4),
@@ -1819,7 +1813,6 @@ public static class NpgsqlSubstrateReads
             JOIN laplace.v_word_points w ON w.id = c.child_id
             WHERE w.coord IS NOT NULL
             ORDER BY c.ordinal
-            LIMIT 512
             """,
             static r => new RealizedTrajectoryVertexRow(
                 r.GetInt32(0), r.GetDouble(1), r.GetDouble(2), r.GetDouble(3), r.GetDouble(4),

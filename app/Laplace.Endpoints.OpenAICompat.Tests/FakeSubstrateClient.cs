@@ -98,7 +98,7 @@ internal sealed class UnreachableSubstrateClient : ISubstrateClient
         throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
 
     public Task<ExploreGraphResponse?> ExploreConsensusGraphAsync(
-        string idHex, int hops, int fanout, CancellationToken ct) =>
+        string idHex, int hops, int fanout, int maxNodes, CancellationToken ct) =>
         throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
 
     public Task<InstalledOpInvoker.OpResult> InvokeOpAsync(
@@ -423,23 +423,24 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
             idHex, [new ExploreContainerRow(WhaleIdHex, "whale document", 4, "Document", 1)]));
 
     public Task<ExploreGraphResponse?> ExploreConsensusGraphAsync(
-        string idHex, int hops, int fanout, CancellationToken ct) =>
+        string idHex, int hops, int fanout, int maxNodes, CancellationToken ct) =>
         Task.FromResult<ExploreGraphResponse?>(new ExploreGraphResponse(
             IdHex: idHex,
             Label: "whale",
             Hops: hops,
             Fanout: fanout,
-            Nodes:
-            [
+            Nodes: [..
+            new[] {
                 new ExploreGraphNode(idHex, "whale", 0, 2),
                 new ExploreGraphNode(CetaceanIdHex, "cetacean", 1, 2),
-            ],
-            Edges:
+            }.Take(Math.Max(0, maxNodes))],
+            Edges: maxNodes > 1 && hops > 0 && fanout > 0
+            ?
             [
                 new ExploreGraphEdge(idHex, CetaceanIdHex, "IS_A", 0.91m, 42, 1),
-            ],
-            Truncated: false,
-            MaxNodes: 160));
+            ] : [],
+            Truncated: maxNodes < 2,
+            MaxNodes: maxNodes));
 
     public Task<InstalledOpInvoker.OpResult> InvokeOpAsync(
         string name, IReadOnlyDictionary<string, JsonNode?>? args, int maxRows,

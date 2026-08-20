@@ -25,12 +25,15 @@ BEGIN ATOMIC
         SELECT s.subject_id, s.frontier_ord
         FROM unnest(p_subjects) WITH ORDINALITY AS s(subject_id, frontier_ord)
     )
-    SELECT f.subject_id, e.nbr, e.type_id,
-           e.rating, e.rd, e.witness_count, e.outbound
+    SELECT f.subject_id AS frontier_id,
+           e.nbr, e.type_id, e.rating, e.rd, e.witness_count, e.outbound
     FROM frontier f
     CROSS JOIN LATERAL (
-        SELECT c.nbr, c.type_id, c.rating, c.rd, c.witness_count, c.outbound
+        SELECT d.nbr, d.type_id, d.rating, d.rd, d.witness_count, d.outbound
         FROM (
+          SELECT DISTINCT ON (c.nbr)
+                 c.nbr, c.type_id, c.rating, c.rd, c.witness_count, c.outbound
+          FROM (
             SELECT x.object_id AS nbr, x.type_id,
                    x.rating, x.rd, x.witness_count, true AS outbound
             FROM laplace.consensus x
@@ -46,14 +49,16 @@ BEGIN ATOMIC
               -- The outbound arm already emits a self-edge.  Suppressing its
               -- inbound mirror preserves edges_raw(..., 'both') semantics.
               AND x.subject_id <> f.subject_id
-        ) c
-        ORDER BY consensus.eff_mu(c.rating, c.rd) DESC, c.nbr, c.type_id,
-                 c.outbound DESC
+          ) c
+          ORDER BY c.nbr, consensus.eff_mu(c.rating, c.rd) DESC,
+                   c.type_id, c.outbound DESC
+        ) d
+        ORDER BY consensus.eff_mu(d.rating, d.rd) DESC, d.nbr, d.type_id,
+                 d.outbound DESC
         LIMIT GREATEST(p_limit, 0)
     ) e
-    ORDER BY f.frontier_ord,
-             consensus.eff_mu(e.rating, e.rd) DESC, e.nbr, e.type_id,
-             e.outbound DESC;
+    ORDER BY f.frontier_ord, consensus.eff_mu(e.rating, e.rd) DESC,
+             e.nbr, e.type_id, e.outbound DESC;
 END;
 
 -- Masked frontier probe.  p_types is the governed relation set obtained from
@@ -83,12 +88,15 @@ BEGIN ATOMIC
         SELECT s.subject_id, s.frontier_ord
         FROM unnest(p_subjects) WITH ORDINALITY AS s(subject_id, frontier_ord)
     )
-    SELECT f.subject_id, e.nbr, e.type_id,
-           e.rating, e.rd, e.witness_count, e.outbound
+    SELECT f.subject_id AS frontier_id,
+           e.nbr, e.type_id, e.rating, e.rd, e.witness_count, e.outbound
     FROM frontier f
     CROSS JOIN LATERAL (
-        SELECT c.nbr, c.type_id, c.rating, c.rd, c.witness_count, c.outbound
+        SELECT d.nbr, d.type_id, d.rating, d.rd, d.witness_count, d.outbound
         FROM (
+          SELECT DISTINCT ON (c.nbr)
+                 c.nbr, c.type_id, c.rating, c.rd, c.witness_count, c.outbound
+          FROM (
             SELECT x.object_id AS nbr, x.type_id,
                    x.rating, x.rd, x.witness_count, true AS outbound
             FROM laplace.consensus x
@@ -122,14 +130,16 @@ BEGIN ATOMIC
             WHERE x.object_id = f.subject_id
               AND x.subject_id <> f.subject_id
               AND (p_types IS NULL OR x.type_id <> ALL (p_types))
-        ) c
-        ORDER BY consensus.eff_mu(c.rating, c.rd) DESC, c.nbr, c.type_id,
-                 c.outbound DESC
+          ) c
+          ORDER BY c.nbr, consensus.eff_mu(c.rating, c.rd) DESC,
+                   c.type_id, c.outbound DESC
+        ) d
+        ORDER BY consensus.eff_mu(d.rating, d.rd) DESC, d.nbr, d.type_id,
+                 d.outbound DESC
         LIMIT GREATEST(p_limit, 0)
     ) e
-    ORDER BY f.frontier_ord,
-             consensus.eff_mu(e.rating, e.rd) DESC, e.nbr, e.type_id,
-             e.outbound DESC;
+    ORDER BY f.frontier_ord, consensus.eff_mu(e.rating, e.rd) DESC,
+             e.nbr, e.type_id, e.outbound DESC;
 END;
 
 DROP FUNCTION IF EXISTS laplace.explore_web_neighbors(bytea, int);
@@ -146,8 +156,6 @@ CREATE OR REPLACE FUNCTION consensus.explore_web_neighbors(
         outbound boolean)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-    SELECT e.neighbour_id, e.type_id, e.rating, e.rd, e.witness_count,
-           (e.direction = 'out')
-    FROM consensus.edges_raw(p_subject, 'both', NULL,
-                             GREATEST(p_limit, 0), true, 'eff_mu') e;
+    SELECT e.nbr, e.type_id, e.rating, e.rd, e.witness_count, e.outbound
+    FROM consensus.explore_web_neighbors(ARRAY[p_subject], p_limit) e;
 END;

@@ -264,8 +264,8 @@ internal sealed partial class SubstrateClient
         var id = TryParseIdHex(idHex);
         if (id is null) return null;
 
-        consensusLimit = Math.Clamp(consensusLimit, 1, 200);
-        evidenceLimit = Math.Clamp(evidenceLimit, 1, 100);
+        consensusLimit = Math.Max(0, consensusLimit);
+        evidenceLimit = Math.Max(0, evidenceLimit);
 
         try
         {
@@ -358,7 +358,7 @@ internal sealed partial class SubstrateClient
     {
         var id = TryParseIdHex(idHex);
         if (id is null) return null;
-        k = Math.Clamp(k, 1, 50);
+        k = Math.Max(0, k);
 
         try
         {
@@ -393,7 +393,7 @@ internal sealed partial class SubstrateClient
     {
         var id = TryParseIdHex(idHex);
         if (id is null) return null;
-        limit = Math.Clamp(limit, 1, 500);
+        limit = Math.Max(0, limit);
 
         try
         {
@@ -416,7 +416,7 @@ internal sealed partial class SubstrateClient
     {
         var id = TryParseIdHex(idHex);
         if (id is null) return null;
-        limit = Math.Clamp(limit, 1, 100);
+        limit = Math.Max(0, limit);
 
         try
         {
@@ -440,8 +440,8 @@ internal sealed partial class SubstrateClient
     {
         var id = TryParseIdHex(idHex);
         if (id is null) return null;
-        maxHops = Math.Clamp(maxHops, 1, 8);
-        limit = Math.Clamp(limit, 1, 1000);
+        maxHops = Math.Max(0, maxHops);
+        limit = Math.Max(0, limit);
 
         try
         {
@@ -461,16 +461,16 @@ internal sealed partial class SubstrateClient
     }
 
     public async Task<ExploreGraphResponse?> ExploreConsensusGraphAsync(
-        string idHex, int hops, int fanout, CancellationToken ct)
+        string idHex, int hops, int fanout, int maxNodes, CancellationToken ct)
     {
         var seed = TryParseIdHex(idHex);
         if (seed is null) return null;
 
         // Native SPI beam (pg_laplace_explore_web): one connection, undirected
         // consensus probe, ≤fanout new nodes/hop, all tiers. Labels via render_text_fast.
-        hops = Math.Clamp(hops, 1, 4);
-        fanout = Math.Clamp(fanout, 2, 16);
-        const int maxNodes = 160;
+        hops = Math.Max(0, hops);
+        fanout = Math.Max(0, fanout);
+        maxNodes = Math.Max(0, maxNodes);
 
         try
         {
@@ -479,6 +479,10 @@ internal sealed partial class SubstrateClient
             if (label is null) return null;
 
             var seedHex = idHex.ToLowerInvariant();
+            if (maxNodes == 0)
+                return new ExploreGraphResponse(
+                    seedHex, label, hops, fanout, [], [], true, 0);
+
             var nodes = new Dictionary<string, ExploreGraphNode>(StringComparer.OrdinalIgnoreCase)
             {
                 [seedHex] = new ExploreGraphNode(seedHex, label, 0, tier),

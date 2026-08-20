@@ -56,6 +56,7 @@ internal static class ExploreEndpoints
             int? geodesic_k,
             int? frechet_k,
             double? frechet_max,
+            int? suggestion_limit,
             ExploreDecomposeService decompose,
             ISubstrateClient substrate,
             CancellationToken ct) =>
@@ -67,8 +68,8 @@ internal static class ExploreEndpoints
             var anchor = decompose.ComputeAnchor(surface);
             var neighbors = await substrate.ExploreAnchorNeighborsAsync(
                 anchor,
-                Math.Clamp(geodesic_k ?? 12, 1, 48),
-                Math.Clamp(frechet_k ?? 12, 1, 48),
+                Math.Max(0, geodesic_k ?? 12),
+                Math.Max(0, frechet_k ?? 12),
                 Math.Clamp(frechet_max ?? 0.5, 0.0, 2.0),
                 ct);
 
@@ -80,11 +81,11 @@ internal static class ExploreEndpoints
             var refLower = surface.ToLowerInvariant();
             var witnessed = await substrate.WitnessedWordsAsync(
                 EditDistance1Candidates(refLower), ct);
-            var suggestions = witnessed
+            var suggestionRows = witnessed
                 .Select(w => (w, dist: Levenshtein(refLower, w.Surface.ToLowerInvariant(), 3)))
                 .Where(x => x.dist > 0)
                 .OrderBy(x => x.dist).ThenByDescending(x => x.w.Witnesses)
-                .Take(8)
+                .Take(Math.Max(0, suggestion_limit ?? 8))
                 .Select(x => new ExploreSuggestion(x.w.Surface, x.w.IdHex, x.dist))
                 .ToList();
 
@@ -95,8 +96,8 @@ internal static class ExploreEndpoints
                 Coord: new[] { anchor.Cx, anchor.Cy, anchor.Cz, anchor.Cm },
                 Decomposition: anchor.Decomposition,
                 Neighbors: neighbors,
-                Suggestions: suggestions,
-                DidYouMean: suggestions.Count > 0 ? suggestions[0].Surface : null));
+                Suggestions: suggestionRows,
+                DidYouMean: suggestionRows.Count > 0 ? suggestionRows[0].Surface : null));
         })
         .WithTags("explore")
         .Produces<ExploreNotFoundResponse>()
@@ -319,14 +320,24 @@ internal static class ExploreEndpoints
             string idHex,
             int? hops,
             int? fanout,
+            int? max_nodes,
             ISubstrateClient substrate,
             IBillingOrchestrator billing,
             CancellationToken ct) =>
         {
             return await RunGatedExploreAsync(request, billing, "visualization.deep_export", ct, async gateQuote =>
             {
+                var normalizedHops = Math.Max(0, hops ?? 2);
+                var normalizedFanout = Math.Max(0, fanout ?? 10);
+                var derivedNodes = 1L + (long)normalizedHops * normalizedFanout;
+                if (max_nodes is null && derivedNodes > int.MaxValue)
+                    return EndpointJson.BadRequest(
+                        "invalid_request_error",
+                        "The derived graph node capacity exceeds the supported integer coordinate range; provide max_nodes explicitly.");
+
                 var graph = await substrate.ExploreConsensusGraphAsync(
-                    idHex, hops ?? 2, fanout ?? 10, ct);
+                    idHex, normalizedHops, normalizedFanout,
+                    Math.Max(0, max_nodes ?? (int)derivedNodes), ct);
                 if (graph is null)
                     return EndpointJson.BadRequest("invalid_request_error", "Invalid entity id hex.");
 
@@ -349,11 +360,11 @@ internal static class ExploreEndpoints
     // The edit-distance-1 neighbourhood of a lowercase word: deletions,
     // substitutions, insertions, and adjacent transpositions over [a-z]. ~54n
     // strings for length n -- resolved in one batched entity_exists round trip,
-    // so did-you-mean is an exact index probe, not a fuzzy scan. Capped to keep
-    // a pasted paragraph from generating a runaway set.
+    // so did-you-mean is an exact index probe, not a fuzzy scan. Work is linear
+    // in the caller's surface length; there is no unrelated spelling-length cap.
     private static IReadOnlyList<string> EditDistance1Candidates(string word)
     {
-        if (string.IsNullOrEmpty(word) || word.Length > 40)
+        if (string.IsNullOrEmpty(word))
             return Array.Empty<string>();
 
         const string alpha = "abcdefghijklmnopqrstuvwxyz";
@@ -431,7 +442,7 @@ internal static class ExploreEndpoints
             try { sid = Convert.FromHexString(idHex); }
             catch (FormatException) { return EndpointJson.NotFound("source_not_found", $"'{idHex}' is not a hex source id."); }
 
-            var rows = await substrate.SourceRosterAsync(sid, Math.Clamp(limit ?? 40, 1, 200), ct);
+            var rows = await substrate.SourceRosterAsync(sid, Math.Max(0, limit ?? 40), ct);
             return Results.Json(new SourceRosterResponse("source.roster", idHex.ToLowerInvariant(), rows));
         })
         .WithTags("explore")

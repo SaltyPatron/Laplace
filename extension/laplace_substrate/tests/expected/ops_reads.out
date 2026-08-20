@@ -193,7 +193,7 @@ FROM taxonomy.tree(laplace.word_id('x'));
 SELECT count(*) = 1 AS mesh_zero_branches_keeps_self
 FROM structural.mesh_position(laplace.word_id('x'), 0, 0);
  mesh_zero_branches_keeps_self 
---------------------------------
+-------------------------------
  t
 (1 row)
 

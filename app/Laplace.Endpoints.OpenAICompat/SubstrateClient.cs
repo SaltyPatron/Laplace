@@ -180,7 +180,7 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         try
         {
             await using var conn = await _dataSource.OpenConnectionAsync(ct);
-            var rows = await NpgsqlSubstrateReads.CompletionsAsync(conn, prompt, Math.Max(1, limit), ct);
+            var rows = await NpgsqlSubstrateReads.CompletionsAsync(conn, prompt, Math.Max(0, limit), ct);
             return [.. rows.Select(r => new CompletionRow(
                 r.ObjectIdHex, r.TypeIdHex, r.EffectiveMu, r.Witnesses, r.ObjectLabel))];
         }
@@ -208,7 +208,7 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
             if (includeConvergence)
                 multiSource = await TryReadMultiSourceCountAsync(conn, budgetSeconds: 20, ct);
 
-            var topRelations = await ReadTopRelationsAsync(conn, Math.Clamp(topRelationLimit, 1, 200), ct);
+            var topRelations = await ReadTopRelationsAsync(conn, Math.Max(0, topRelationLimit), ct);
             return new SubstrateAuditReport(counts, consensus, multiSource, topRelations);
         }
         catch (Exception ex) when (ex is NpgsqlException or TimeoutException)
@@ -222,7 +222,7 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         try
         {
             await using var conn = await _dataSource.OpenConnectionAsync(ct);
-            var edges = await ReadTopRelationsAsync(conn, Math.Clamp(limit, 1, 500), ct);
+            var edges = await ReadTopRelationsAsync(conn, Math.Max(0, limit), ct);
             var nodes = edges
                 .SelectMany(edge => new[]
                 {
@@ -291,7 +291,7 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         {
             await using var conn = await _dataSource.OpenConnectionAsync(ct);
             var steps = await NpgsqlSubstrateReads.ExplainTraceStepsAsync(
-                conn, prompt, Math.Clamp(depth, 1, 64), Math.Clamp(beam, 1, 64), ct);
+                conn, prompt, Math.Max(0, depth), Math.Max(0, beam), ct);
             var rows = steps.Select(s => new ExplainTraceStep(
                 Depth: s.Depth,
                 PathHex: s.PathHex,
@@ -583,7 +583,7 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
             // GH #575: FEN → composed position hex before resolve_ref.
             input = ChessPositionRef.RewriteFenToHex(input) ?? input;
             var rows = await NpgsqlSubstrateReads.EmbeddingLookupAsync(
-                conn, input.Trim(), Math.Clamp(meaningLimit, 1, 100), includeMeaning, ct);
+                conn, input.Trim(), Math.Max(0, meaningLimit), includeMeaning, ct);
             foreach (var row in rows)
             {
                 if (row.Kind == 0)
