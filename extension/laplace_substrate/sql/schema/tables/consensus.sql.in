@@ -69,16 +69,4 @@ END $$;
 -- touched, 279,753 of them read from disk. ~2.5 GB of I/O per entity lookup, which
 -- is the read path underneath every slow surface in the system.
 --
--- Effective μ is the second key because bounded subject reads order by it.  The
--- former schema maintained this covering tree plus a second
--- (subject_id,effective-μ) tree.  On a real 746k-row default leaf they occupied
--- 83 MB + 28 MB.  This combined shape occupied 69 MB, kept the full-subject read
--- index-only (0.842 ms -> 0.893 ms for 6,989 rows), and made its top-64 read
--- index-only and ordered (2.37 ms -> 0.064 ms).  One tree now serves both jobs.
--- object_id/rating/rd remain INCLUDE payload: callers project them, but only
--- subject and effective μ are search/order keys.
-CREATE INDEX IF NOT EXISTS consensus_subject
-    ON consensus (subject_id, ((rating - 2*rd)) DESC)
-    INCLUDE (object_id, rating, rd);
-
 SELECT pg_extension_config_dump('consensus', '');

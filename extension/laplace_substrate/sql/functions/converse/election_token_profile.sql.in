@@ -9,7 +9,7 @@
 --
 -- That read was being hand-written each time it was needed: a CTE over
 -- entity_container_degree, a lateral count over consensus_out, a witness sum,
--- and consensus.foundry_witness_sat, re-derived per investigation. This is the same
+-- and a hand-tuned witness transform, re-derived per investigation. This is the same
 -- reinvented-wheel defect W16 documents in the read path, committed by the
 -- person documenting it. One implementation, named, installed, callable through
 -- `op` — so the next measurement quotes a function instead of a paragraph of SQL.
@@ -73,9 +73,9 @@ CREATE OR REPLACE FUNCTION converse.election_token_profile(p_surfaces text[])
            COALESCE(deg.icf, 1.0),
            COALESCE(edg.out_edges, 0),
            COALESCE(edg.witnesses, 0),
-           consensus.foundry_witness_sat(COALESCE(edg.witnesses, 0)),
+           COALESCE(edg.witnesses, 0)::double precision,
            COALESCE(deg.icf, 1.0)
-               * consensus.foundry_witness_sat(COALESCE(edg.witnesses, 0)),
+               * COALESCE(edg.witnesses, 0)::double precision,
            COALESCE(consensus.highway_popcount(ent.highway_mask), 0)
     FROM t
     LEFT JOIN deg ON deg.entity_id = t.id

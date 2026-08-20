@@ -172,34 +172,16 @@ pg_laplace_glicko2_neutral_mu(PG_FUNCTION_ARGS)
     PG_RETURN_INT64(laplace_glicko2_neutral_mu_fp());
 }
 
-/*
- * The Glicko-complete signed edge weight, as SQL.
- *
- * This formula previously existed TWICE: here in C (glicko2.c, called by
- * generate_walk.c's beam scorer and astar_path.c's edge_cost) and again as a
- * hand-written SQL expression inside consensus_adjacency.sql.in's `summed`
- * CTE. The two were kept in agreement by a comment -- glicko2.h claims to be
- * "the ONLY native copy", which was true and beside the point: the Foundry
- * export path was not calling the native copy at all, it was re-deriving the
- * same algebra in SQL. The witness half-max lived in both
- * (LAPLACE_WITNESS_SAT_HALFMAX 4.0 and foundry_witness_sat's 4.0), so a change
- * to one silently desynchronised what the engine WALKS from what the foundry
- * EXPORTS -- the same graph, two weights.
- *
- * kappa stays a caller-supplied parameter, unchanged: it is the SQL tunable
- * consensus.foundry_rd_kappa(), fetched once per call site (spi_fetch_rd_kappa in the
- * native walkers, the function default here), so the tunable itself was never
- * duplicated. Only the formula and the half-max were.
- */
+/* Signed Glicko-2 expectation around neutral, shared by native walks and SQL
+ * export. Compatibility SQL overloads may pass historical witness/kappa
+ * arguments, but this entry reads only the sufficient folded state. */
 PG_FUNCTION_INFO_V1(pg_laplace_walk_edge_weight);
 
 Datum
 pg_laplace_walk_edge_weight(PG_FUNCTION_ARGS)
 {
     PG_RETURN_FLOAT8(laplace_walk_edge_weight(PG_GETARG_INT64(0),
-                                              PG_GETARG_INT64(1),
-                                              PG_GETARG_INT64(2),
-                                              PG_GETARG_FLOAT8(3)));
+                                              PG_GETARG_INT64(1)));
 }
 
 /*

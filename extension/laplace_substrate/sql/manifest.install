@@ -81,8 +81,6 @@ functions/mu/glicko2_neutral_mu.sql.in
 functions/mu/glicko2_initial_rd.sql.in
 functions/mu/glicko2_initial_volatility.sql.in
 functions/mu/glicko2_tau.sql.in
-functions/mu/foundry_rd_kappa.sql.in
-functions/mu/foundry_witness_sat.sql.in
 functions/mu/walk_edge_weight.sql.in
 functions/mu/edge_strength.sql.in
 functions/mu/weight.sql.in

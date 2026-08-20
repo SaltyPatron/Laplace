@@ -9,7 +9,7 @@ CREATE OR REPLACE FUNCTION generation.consensus_layer_plane_masked(
              FROM unnest(consensus.relation_mask_types(p_band_mask)) AS t(id)
          ),
          edges AS (
-             SELECT c.subject_id, c.object_id, c.rating, c.rd, c.witness_count, c.type_id,
+             SELECT c.subject_id, c.object_id, c.rating, c.rd, c.type_id,
                     bt.rank
              FROM v
              JOIN laplace.consensus c ON c.subject_id = v.id
@@ -17,14 +17,10 @@ CREATE OR REPLACE FUNCTION generation.consensus_layer_plane_masked(
              JOIN band_types bt ON bt.id = c.type_id
              WHERE bt.rank IS NOT NULL
          ),
-         -- P5 Glicko-complete weight (doc 14 M5): signed, rd-discounted,
-         -- witness-saturated. consensus.walk_edge_weight IS the law; kappa resolved once
-         -- rather than per row.
-         kappa(k) AS (SELECT consensus.foundry_rd_kappa()),
+         -- Signed Glicko expectation of the folded rating/RD.
          ranked AS (
              SELECT e.subject_id, e.object_id,
-                    consensus.walk_edge_weight(e.rating, e.rd, e.witness_count,
-                                     (SELECT k FROM kappa)) AS w,
+                    consensus.walk_edge_weight(e.rating, e.rd) AS w,
                     e.rank AS rk
              FROM edges e
          ),

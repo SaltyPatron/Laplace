@@ -406,7 +406,7 @@ public static class NpgsqlFoundryReads
             WITH ranked AS (
                 SELECT c.subject_id,
                        c.object_id AS neighbour_id,
-                       GREATEST(consensus.walk_edge_weight(c.rating, c.rd, c.witness_count), 0) AS w,
+                       GREATEST(consensus.walk_edge_weight(c.rating, c.rd), 0) AS w,
                        row_number() OVER (
                            PARTITION BY c.subject_id
                            ORDER BY (consensus.eff_mu(c.rating, c.rd))::float8 / 1e9 DESC,

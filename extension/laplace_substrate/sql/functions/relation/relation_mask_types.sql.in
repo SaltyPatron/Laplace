@@ -3,12 +3,14 @@
 -- vocabulary/perfcache, not of an entity's accumulated incident-edge mask.
 --
 -- Static governed relations resolve directly.  Dynamic relation types (FEAT_*,
--- DEP_*, ...) inherit their family root's bit through IS_A, exactly as the
+-- DEP_*, ...) inherit their family root's bit through the governed upward set,
+-- exactly as the
 -- deposit path does.  This examines the small RelationType roster once and
 -- returns ids that large consensus reads can use with = ANY(...).
 CREATE OR REPLACE FUNCTION consensus.relation_mask_types(p_mask bytea)
     RETURNS bytea[]
-    LANGUAGE sql STABLE STRICT PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE STRICT PARALLEL SAFE
+BEGIN ATOMIC
     WITH wanted(bits) AS (
         SELECT consensus.highway_mask_bits(p_mask)
     ), resolved AS (
@@ -16,11 +18,11 @@ CREATE OR REPLACE FUNCTION consensus.relation_mask_types(p_mask bytea)
         FROM laplace.entities et
         LEFT JOIN laplace.consensus fam
           ON fam.subject_id = et.id
-         AND fam.type_id = laplace.relation_type_id('IS_A')
+         AND fam.type_id = ANY (consensus.relation_set_ids('PATH_UPWARD'))
         CROSS JOIN wanted w
         WHERE et.type_id = laplace.entity_type_id('RelationType')
           AND COALESCE(consensus.relation_highway_bit(et.id),
                        consensus.relation_highway_bit(fam.object_id)) = ANY (w.bits)
     )
-    SELECT COALESCE(array_agg(id), '{}'::bytea[]) FROM resolved
-$$;
+    SELECT COALESCE(array_agg(id), '{}'::bytea[]) FROM resolved;
+END;
