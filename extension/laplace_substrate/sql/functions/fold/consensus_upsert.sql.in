@@ -57,3 +57,17 @@ CREATE OR REPLACE FUNCTION consensus.upsert(
     RETURNS bigint
     AS 'MODULE_PATHNAME', 'pg_laplace_consensus_upsert'
     LANGUAGE C VOLATILE;
+
+-- Direct routed form for first-party type lanes. The type is part of every cell
+-- identity but is transmitted once per set operation, not once per row.
+CREATE OR REPLACE FUNCTION consensus.upsert_type(
+    p_type     bytea,
+    p_subjects bytea[],
+    p_objects  bytea[],
+    p_phis     bigint[],
+    p_games    bigint[],
+    p_sums     bigint[],
+    p_ts       timestamptz[])
+    RETURNS bigint
+    AS 'MODULE_PATHNAME', 'pg_laplace_consensus_upsert_type'
+    LANGUAGE C VOLATILE;
