@@ -1,22 +1,12 @@
--- bubble_up: top-k sense frontier for the forward pass (R2).
--- Ranks HAS_SENSE-family edges by base consensus.eff_mu × domain co-occurrence.
--- Local 0 at a hop is a backtrack signal for the beam; this function seeds the
--- open set. Abstain = zero rows (queue empty), never fabricate.
---
--- No SET search_path so it inlines into callers (#617); family membership is
--- joined against consensus.relation_family_members('HAS_SENSE') (fenced once) instead
--- of calling consensus.relation_type_in_family() per consensus row — the same static
--- truth table, but sargable through the (subject_id, type_id) indexes.
--- Row-set equivalence of the sargable family_out proven live 2026-07-24
--- ("run": 345 = 345 rows, both EXCEPT directions empty).
--- taxonomy.bubble_up — GH #862. The schema names the operation (hierarchy
--- traversal, spec 37 TRAVERSE), not the project. Old name dropped rather than
--- shimmed: two names for one function is the dual-definition defect (#532).
+-- Scalar adapter over the one set implementation. Selection, language scoping,
+-- domain geometry, ranking, ordering, and explicit truncation all belong to
+-- bubble_up_batch; duplicating that CTE cascade here made two definitions of one
+-- operation and paid the scalar partition fanout again.
 DROP FUNCTION IF EXISTS laplace.bubble_up(bytea, bytea[], integer);
 CREATE OR REPLACE FUNCTION taxonomy.bubble_up(
     p_term bytea,
     p_domain_context bytea[] DEFAULT NULL,
-    p_k integer DEFAULT 5
+    p_k integer DEFAULT NULL
 )
 RETURNS TABLE(
     sense_id bytea,
@@ -27,212 +17,15 @@ RETURNS TABLE(
     domain_hits bigint,
     witnesses bigint
 )
-LANGUAGE sql STABLE PARALLEL SAFE AS $$
--- consensus.relation_family_ids is IMMUTABLE and generated from the manifest, so
--- this folds to a literal bytea[] at PLAN time and the LIST partitions prune before
--- execution. relation_family_members() is STABLE and scans laplace.entities, which
--- folds to nothing: measured on one read, same answer, 3 scan nodes against 54.
--- No CTE and no nested ARRAY(SELECT ...) -- the value is a constant.
-WITH peers AS (
-    SELECT unnest(lexical.lexical_peers(p_term)) AS id
-),
-family_out AS (
-    SELECT c.object_id AS target_id,
-           consensus.relation_canonical(c.type_id) AS via_relation,
-           consensus.eff_mu_display(c.rating, c.rd) AS base_eff_mu,
-           c.witness_count AS witnesses,
-           c.rating,
-           c.rd
-    FROM peers p
-    JOIN laplace.consensus c ON c.subject_id = p.id
-    -- = ANY(array), not IN (SELECT): the subquery form prunes only at runtime.
-    -- Measured on this exact read, same 171 rows: 524.9ms -> 390.4ms.
-    WHERE c.type_id = ANY (consensus.relation_family_ids('HAS_SENSE'))
-),
-resolved AS (
-    /* lemma --HAS_SENSE--> sense --IS_SENSE_OF--> synset */
-    SELECT fo.target_id AS sense_id,
-           COALESCE(ss.object_id, fo.target_id) AS synset_id,
-           fo.via_relation,
-           fo.base_eff_mu,
-           (fo.witnesses + COALESCE(ss.witness_count, 0))::bigint AS witnesses,
-           fo.rating,
-           fo.rd
-    FROM family_out fo
-    LEFT JOIN laplace.consensus ss
-      ON ss.subject_id = fo.target_id
-     AND ss.type_id = ANY (consensus.relation_family_ids('HAS_SENSE'))
-     AND consensus.relation_canonical(ss.type_id) = 'IS_SENSE_OF'
-    WHERE fo.via_relation = 'HAS_SENSE'
-
-    UNION ALL
-
-    /* lemma --IS_SYNONYM_OF--> synset (WordNet co-membership) */
-    SELECT fo.target_id AS sense_id,
-           fo.target_id AS synset_id,
-           fo.via_relation,
-           fo.base_eff_mu,
-           fo.witnesses,
-           fo.rating,
-           fo.rd
-    FROM family_out fo
-    WHERE fo.via_relation = 'IS_SYNONYM_OF'
-
-    UNION ALL
-
-    /* rare: lemma --IS_SENSE_OF--> synset */
-    SELECT fo.target_id AS sense_id,
-           fo.target_id AS synset_id,
-           fo.via_relation,
-           fo.base_eff_mu,
-           fo.witnesses,
-           fo.rating,
-           fo.rd
-    FROM family_out fo
-    WHERE fo.via_relation = 'IS_SENSE_OF'
-),
--- The ILI hub makes a term's synonym set language-blind, so an English surface
--- competes against its own translations and loses on base_eff_mu alone. Language
--- is a CONSTRAINT on which surface the input denotes, never a score: a candidate
--- is dropped only when both sides have a primary language and they differ.
--- Candidates with no HAS_LANGUAGE (concepts) and terms with no language are
--- untouched, so this can only narrow a language-blind set, never empty a
--- concept-level one. converse.attested_language IS the primary-language definition:
--- the argmax over the PROVENANCE of the surface's own testimony, weighted by the
--- fold's own inputs. A boolean "has an edge to the query language" does not
--- discriminate, because loanwords carry English edges too.
-term_lang AS MATERIALIZED (
-    SELECT converse.attested_language(p_term) AS id
-),
--- ONE probe for every candidate, not one call per candidate. converse.attested_language
--- costs 71.6ms warm and the previous form called it TWICE per row, which put ~1.5s on
--- the hottest function in the surface -- senses, top_synset, taxonomy.tree and infer's
--- bias expansion all land here. Set-based with an = ANY(array) probe because
--- attestations cannot prune on subject_id.
---
--- MEMBERSHIP, NOT ARGMAX -- bubble_up_batch.sql.in owns that argument and the
--- measurement; this body must not drift from it. In short: a synset is interlingual, so
--- collapsing it to its highest-scoring language and testing equality drops it for every
--- other language that attests it, and hardest for the best-translated concepts. Here the
--- term language is a single row, so the probe binds it directly and the EXISTS only has
--- to match the id.
-cand_lang_hit AS MATERIALIZED (
-    SELECT DISTINCT a.subject_id AS id
-    FROM laplace.attestations a
-    WHERE a.subject_id = ANY (ARRAY(SELECT DISTINCT r.synset_id FROM resolved r))
-      AND a.context_id = (SELECT id FROM term_lang)
-),
-cand_lang_any AS MATERIALIZED (
-    SELECT DISTINCT a.subject_id AS id
-    FROM laplace.attestations a
-    JOIN laplace.entities e ON e.id = a.context_id
-                           AND e.type_id = realize.canonical_id('Language')
-    WHERE a.subject_id = ANY (ARRAY(SELECT DISTINCT r.synset_id FROM resolved r))
-),
-scoped AS (
-    SELECT r.* FROM resolved r
-    WHERE (SELECT id FROM term_lang) IS NULL
-       OR NOT EXISTS (SELECT 1 FROM cand_lang_any ca WHERE ca.id = r.synset_id)
-       OR EXISTS (SELECT 1 FROM cand_lang_hit ch WHERE ch.id = r.synset_id)
-),
-domain AS (
-    SELECT DISTINCT d AS id
-    FROM unnest(COALESCE(p_domain_context, ARRAY[]::bytea[])) AS d
-    WHERE d IS NOT NULL
-),
-members AS (
-    -- Feeds domain_scores ONLY, whose sole output (domain_hits) is 0 for every
-    -- synset when no domain context is supplied. The domain-presence gate below
-    -- is a one-time filter on the p_domain_context parameter: when the caller
-    -- passes NULL/empty (the common lexical.senses()/lexical.define()/consensus.salient_facts() path) it
-    -- makes `members` empty, so the geometry_neighbours lateral in domain_scores
-    -- is never evaluated. Without it, structural.geometry_neighbours(member,200,8) runs once
-    -- per synset member of a high-frequency word -- 14s each for "dog", 37s total
-    -- -- for a domain_hits of 0 that changes nothing (measured 2026-07-20; this is
-    -- what CommandTimeout-cancelled the explore preview endpoint). Output-identical:
-    -- only the no-domain case changes, where every domain_hits was already 0.
-    SELECT r.synset_id,
-           m.object_id AS member_id
-    FROM scoped r
-    JOIN laplace.consensus m ON m.subject_id = r.synset_id
-    WHERE m.type_id = ANY (consensus.relation_family_ids('HAS_SENSE'))
-      AND COALESCE(cardinality(p_domain_context), 0) > 0
-    UNION
-    SELECT r.synset_id,
-           m.subject_id AS member_id
-    FROM scoped r
-    JOIN laplace.consensus m ON m.object_id = r.synset_id
-    WHERE m.type_id = ANY (consensus.relation_family_ids('HAS_SENSE'))
-      AND COALESCE(cardinality(p_domain_context), 0) > 0
-),
-domain_scores AS (
-    SELECT m.synset_id,
-           count(*)::bigint AS domain_hits
-    -- Pillar 5 (2026-07-20): domain co-occurrence is read from the GEOMETRY.
-    -- geometry_neighbours walks the trajectories containing the member and
-    -- returns the adjacent content realize.constituents in BOTH directions -- the same
-    -- bidirectional adjacency the consensus form matched, without the
-    -- materialised PRECEDES rows (Pillar 3a, e5e1b42).
-    FROM members m
-    JOIN domain d ON true
-    JOIN LATERAL structural.geometry_neighbours(m.member_id, 200, 8) gn
-      ON gn.neighbour_id = d.id
-    GROUP BY m.synset_id
-),
-ranked AS (
-    SELECT DISTINCT ON (r.synset_id)
-           r.sense_id,
-           r.synset_id,
-           r.via_relation,
-           r.base_eff_mu,
-           COALESCE(ds.domain_hits, 0)::bigint AS domain_hits,
-           r.witnesses,
-           (r.base_eff_mu * (1::numeric + ln(1::numeric + COALESCE(ds.domain_hits, 0)))) AS score,
-           consensus.eff_mu(r.rating, r.rd) AS rank_key
-    FROM scoped r
-    LEFT JOIN domain_scores ds ON ds.synset_id = r.synset_id
-    ORDER BY r.synset_id, consensus.eff_mu(r.rating, r.rd) DESC
-)
-SELECT sense_id,
-       synset_id,
-       via_relation,
-       score,
-       base_eff_mu,
-       domain_hits,
-       witnesses
-FROM ranked
--- EVIDENCE BEFORE ADJUDICATED STRENGTH (2026-08-05).
---
--- This was `ORDER BY score DESC, rank_key DESC, witnesses DESC`, which is two
--- keys, not three: with no domain context domain_hits is 0, so
--- score = base_eff_mu * (1 + ln(1)) = base_eff_mu, and rank_key is
--- consensus.eff_mu(rating, rd) — the same quantity in a different type. Witness count only
--- broke exact ties in it.
---
--- On a thin substrate that inverts the ranking. Measured on the foundation
--- ladder, lexical.senses(laplace.word_id('water')):
---
---     urine   1 witness   consensus.eff_mu 1169.73   <- elected
---     water   1 witness   consensus.eff_mu 1169.73
---     water   1 witness   consensus.eff_mu 1169.73
---     water   2 witnesses consensus.eff_mu 1168.45
---     water   2 witnesses consensus.eff_mu 1165.57
---
--- Three senses tie exactly at the top on one witness each, so the id memcmp
--- picks — and it picked urine. Meanwhile senses carrying TWICE the evidence sit
--- below them, losing by 1.28 on a quantity whose uncertainty term is larger than
--- its signal: W16 3.2 measured mean |rating - neutral| = 192.85 against mean rd
--- = 262.24 over 447,145 consensus rows, so 2*rd runs ~2.7x the signal and
--- consensus.eff_mu orders substantially by how much rd has NOT yet shrunk.
---
--- consensus.eff_mu is the right conservative bound for a well-witnessed edge and the wrong
--- primary sort when rd dominates, because "least uncertain" and "best attested"
--- come apart exactly where evidence is thin. Ordering by witnesses first states
--- the evidence explicitly instead of reading it backwards through rd; consensus.eff_mu
--- then adjudicates among equally-attested senses, which is what it is for.
---
--- Not a floor or a cap — nothing is excluded, the sort order changes. Spec 37 L6
--- is untouched.
-ORDER BY witnesses DESC, score DESC, rank_key DESC
-LIMIT GREATEST(COALESCE(p_k, 5), 1)
-$$;
+LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+    SELECT b.sense_id, b.synset_id, b.via_relation, b.score, b.base_eff_mu,
+           b.domain_hits, b.witnesses
+    FROM taxonomy.bubble_up_batch(
+        ARRAY[p_term], p_domain_context, p_k)
+        WITH ORDINALITY AS b(
+            term, sense_id, synset_id, via_relation, score, base_eff_mu,
+            domain_hits, witnesses, ord)
+    WHERE b.term = p_term
+    ORDER BY b.ord;
+END;

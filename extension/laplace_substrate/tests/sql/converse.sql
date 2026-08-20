@@ -14,6 +14,7 @@ DO $$
 DECLARE
     rel_meta bytea := laplace.entity_type_id('RelationType');
     type_t   bytea := public.laplace_hash128_blake3('Type');
+    type_lang bytea := realize.canonical_id('Language');
     src      bytea := public.laplace_hash128_blake3('test/converse/source');
     w_dog    bytea := laplace.word_id('dog');
     w_p      bytea := laplace.word_id('p');
@@ -65,8 +66,8 @@ BEGIN
            (sense_ja, 0, type_t, src), (syn_ja, 0, type_t, src),
            (synset2, 0, type_t, src), (syn_bad, 0, type_t, src),
            (gloss1, 0, type_t, src),
-           (lang_en, 0, type_t, src), (lang_de, 0, type_t, src),
-           (lang_ja, 0, type_t, src)
+           (lang_en, 0, type_lang, src), (lang_de, 0, type_lang, src),
+           (lang_ja, 0, type_lang, src)
     ON CONFLICT DO NOTHING;
 
     INSERT INTO laplace.canonical_names (id, name)
@@ -121,6 +122,18 @@ BEGIN
       (laplace.consensus_id(sense_ja, k_senseof, syn_ja), sense_ja, k_senseof, syn_ja, neutral + 300000000000, sharp_rd, 60000000, 7, now()),
       (laplace.consensus_id(w_ja, k_lang, lang_ja),      w_ja,     k_lang,    lang_ja, neutral + 300000000000, sharp_rd, 60000000, 7, now()),
       (laplace.consensus_id(sense_ja, k_lang, lang_ja),  sense_ja, k_lang,    lang_ja, neutral + 300000000000, sharp_rd, 60000000, 7, now());
+
+    -- Provenance-language fixture: English wins the exact sum-score argmax.
+    -- These are witness rows, not HAS_LANGUAGE assertions.
+    INSERT INTO laplace.attestations (
+        id, subject_id, type_id, object_id, source_id, context_id,
+        outcome, last_observed_at, observation_count, sum_score_fp1e9,
+        opponent_rd_fp1e9)
+    VALUES
+      (public.laplace_hash128_blake3('test/converse/attested-language/en'),
+       w_dog, k_sense, sense1, src, lang_en, 2, now(), 2, 2000000000, sharp_rd),
+      (public.laplace_hash128_blake3('test/converse/attested-language/de'),
+       w_dog, k_sense, sense1, src, lang_de, 2, now(), 1, 1000000000, sharp_rd);
 END $$;
 
 -- The operator's primary language is a prior, not a gate.  With no English
@@ -189,6 +202,55 @@ SELECT NOT EXISTS (
 
 SELECT count(*) = 0 AS lexical_peer_empty_batch_is_empty
 FROM lexical.lexical_peers_batch('{}'::bytea[]);
+
+-- One provenance argmax implementation: scalar calls are one-element projections
+-- of the set core, including no-row/NULL behavior and explicit empty input.
+WITH inputs(ord, id) AS (
+    VALUES (1, laplace.word_id('dog')),
+           (2, laplace.word_id('NoSuchAttestedLanguage')),
+           (3, laplace.word_id('dog'))
+), batch AS (
+    SELECT al.id, al.lang
+    FROM converse.attested_language_batch(
+        ARRAY(SELECT i.id FROM inputs i ORDER BY i.ord)) al
+), projected AS (
+    SELECT i.ord, i.id, b.lang
+    FROM inputs i
+    LEFT JOIN batch b ON b.id = i.id
+), scalar AS (
+    SELECT i.ord, i.id, converse.attested_language(i.id) AS lang
+    FROM inputs i
+)
+SELECT NOT EXISTS (
+    (SELECT * FROM scalar EXCEPT ALL SELECT * FROM projected)
+    UNION ALL
+    (SELECT * FROM projected EXCEPT ALL SELECT * FROM scalar)
+) AND (SELECT lang = public.laplace_hash128_blake3('test/converse/lang_en')
+       FROM scalar WHERE ord = 1) AS attested_language_batch_matches_scalar;
+
+SELECT count(*) = 0 AS attested_language_empty_batch_is_empty
+FROM converse.attested_language_batch('{}'::bytea[]);
+
+-- bubble_up has one relational body. The scalar preserves the core's row order,
+-- and zero means zero rows rather than being silently coerced to one.
+WITH scalar AS (
+    SELECT b.*
+    FROM taxonomy.bubble_up(laplace.word_id('dog'), NULL::bytea[], 64) b
+), batched AS (
+    SELECT b.sense_id, b.synset_id, b.via_relation, b.score, b.base_eff_mu,
+           b.domain_hits, b.witnesses
+    FROM taxonomy.bubble_up_batch(
+        ARRAY[laplace.word_id('dog')], NULL::bytea[], 64) b
+)
+SELECT (SELECT count(*) FROM scalar) > 0
+   AND NOT EXISTS (
+       (SELECT * FROM scalar EXCEPT ALL SELECT * FROM batched)
+       UNION ALL
+       (SELECT * FROM batched EXCEPT ALL SELECT * FROM scalar)
+   ) AS bubble_up_batch_matches_scalar;
+
+SELECT count(*) = 0 AS bubble_up_zero_bound_is_empty
+FROM taxonomy.bubble_up(laplace.word_id('dog'), NULL::bytea[], 0);
 
 -- The set case operation is result-identical to independent scalar calls,
 -- including a content id with no physicality (which still includes itself).

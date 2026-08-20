@@ -173,10 +173,9 @@ exactly 1,000 rows** — silently truncated. The 84-atom fan-out costs 25.7 s.
 
 - [x] `converse.attested_language` vs `bubble_up`'s inline `cand_lang` — same argmax, two
       bodies. Canonical body now exists as `attested_language_batch`.
-- [ ] Collapse `taxonomy.bubble_up` into `bubble_up_batch(ARRAY[term])` so one body owns the
-      election. Blocked on: the scalar's `LIMIT p_k` has no final tiebreak, so a truncating k
-      is not reproducible (33 of 835 rows differed between two equally valid cuts); untruncated
-      the two forms are byte-identical over 1,012 rows.
+- [x] Collapse `taxonomy.bubble_up` into `bubble_up_batch(ARRAY[term])` so one body owns the
+      election. The set core supplies the missing total tiebreak and the scalar preserves its
+      ordinality. Omitted bounds are unbounded; explicit zero returns zero rows.
 - [ ] `lexical.senses` / `lexical.senses(word, context)` / `senses_with_context` overlap.
 
 ## J. Subquery on a HASH partition key
