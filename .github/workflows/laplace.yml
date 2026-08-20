@@ -637,6 +637,27 @@ jobs:
 
       - name: Migrate + sync extension + tune + perfcache GUC + API env
         run: |
+          # ALTER EXTENSION takes AccessExclusive locks. Deploy's install phase
+          # restarts the API before this separate job begins, so a live read can
+          # immediately reacquire AccessShare and make the DDL fail its lock
+          # timeout. Measured in run 32337957529: a 29-second API query blocked
+          # DROP INDEX during the exact-render upgrade.
+          #
+          # Quiesce the known connection owner for the complete DB mutation
+          # window, then restore precisely the state we found. The always-run
+          # restore-api job remains the outer failure safety net.
+          api_was_active=0
+          if systemctl is-active --quiet laplace-api; then
+            api_was_active=1
+            sudo -n systemctl stop laplace-api
+          fi
+          restore_db_ops_api() {
+            if [ "$api_was_active" -eq 1 ]; then
+              sudo -n systemctl start laplace-api || true
+            fi
+          }
+          trap restore_db_ops_api EXIT
+
           args=()
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.fresh_db }}" = "true" ]; then
             args+=(--fresh-db)
