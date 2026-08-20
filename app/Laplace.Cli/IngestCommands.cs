@@ -569,7 +569,12 @@ internal static class IngestCommands
         return IngestRunOptions.Default with
         {
             SkipLayerOrderingCheck = skipLayerCheck,
+            // Suppressing completion and bypassing its pre-run guard are different
+            // operations. Incremental lanes deliberately own their own completion
+            // protocol; --force merely re-runs an ordinary source and must still
+            // publish its terminal HasLayerCompleted marker.
             SkipSourceCompletion = skipSourceCompletion,
+            BypassSourceCompletionGuard = cli?.Force ?? false,
             EcosystemPath = ecosystemPath,
             BatchSize = batch,
             DecomposerOptions = decoOpts,
@@ -614,7 +619,7 @@ internal static class IngestCommands
         var result = await runner.RunAsync(
             dec,
             BuildIngestOptions(sw, dec.SourceName, skipLayerCheck, ecosystemPath, cli,
-                skipSourceCompletion || (cli?.Force ?? false),
+                skipSourceCompletion,
                 sizingProfile: dec.SizingProfile),
             CancellationToken.None);
         sw.Stop();

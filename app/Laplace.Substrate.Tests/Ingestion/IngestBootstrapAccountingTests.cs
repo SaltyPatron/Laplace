@@ -40,6 +40,25 @@ public sealed class IngestBootstrapAccountingTests
         Assert.Equal(1, result.ObservationsPerCellDeposit);
     }
 
+    [Fact]
+    public async Task BypassCompletionGuard_StillWritesTerminalMarker()
+    {
+        var writer = new InsertAllWriter();
+        var runner = new IngestRunner(
+            writer, new EmptyReader(sourceCompleted: true), NullLoggerFactory.Instance);
+
+        var result = await runner.RunAsync(
+            new BootstrapThenContentDecomposer(),
+            IngestRunOptions.Default with
+            {
+                SkipLayerOrderingCheck = true,
+                BypassSourceCompletionGuard = true,
+            });
+
+        Assert.Equal(1, result.UnitsApplied);
+        Assert.Contains("layer-complete/0", writer.AppliedUnits);
+    }
+
     private sealed class BootstrapThenContentDecomposer : IDecomposer
     {
         private static readonly Hash128 Source = Hash128.OfCanonical("test/bootstrap-accounting/source");
@@ -92,11 +111,13 @@ public sealed class IngestBootstrapAccountingTests
 
     private sealed class InsertAllWriter : ISubstrateWriter, IConsensusFoldMetrics
     {
+        public List<string> AppliedUnits { get; } = [];
         public long ObservationsAccumulated { get; private set; } = 11;
         public long CellsFolded { get; private set; } = 7;
 
         public Task<ApplyResult> ApplyAsync(SubstrateChange change, CancellationToken ct = default)
         {
+            AppliedUnits.Add(change.Metadata.SourceContentUnitName);
             int entities = change.Entities.Length;
             int physicalities = change.Physicalities.Length;
             int attestations = change.Attestations.Length;
@@ -119,12 +140,13 @@ public sealed class IngestBootstrapAccountingTests
         }
     }
 
-    private sealed class EmptyReader : ISubstrateReader
+    private sealed class EmptyReader(bool sourceCompleted = false) : ISubstrateReader
     {
         public Task<bool> HasSourceEverCompletedAsync(int layerOrder, CancellationToken ct = default) =>
             Task.FromResult(false);
         public Task<bool> HasSourceCompletedAsync(
-            Hash128 sourceId, int layerOrder, CancellationToken ct = default) => Task.FromResult(false);
+            Hash128 sourceId, int layerOrder, CancellationToken ct = default) =>
+            Task.FromResult(sourceCompleted);
         public Task<long> CountEntitiesByTypeAsync(Hash128 typeId, CancellationToken ct = default) =>
             Task.FromResult(0L);
         public Task<byte[]> EntitiesExistBitmapAsync(
