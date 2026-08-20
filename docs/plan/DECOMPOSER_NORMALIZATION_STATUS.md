@@ -90,6 +90,7 @@ delivered until it is merged.
 | #1203 | Resource-derived ingest and fold | Removes vendor batch defaults and fixed 65,536-cell/fold/cache/COPY limits; derives the generic pipeline from RAM, CPU topology, and row transit width; changes consensus upsert to one partition-routed PostgreSQL 18 `MERGE`. |
 | #1204 | Residual limiter and eval cleanup | Removes remaining fixed queue/cache/probe/journal/I/O/resume/marshal limits, replaces the 4-GiB/512-MiB working-set clamps with topology ownership, makes mask/fold scheduling work-conserving, and stops planner row-count shrink from invalidating semantic evals. |
 | #1205 | Vendor cache/chunk derivation and CI repair | Removes Tatoeba's fixed 1,048,576-id/64-slot allocation and Wiktionary's 65,536-entry/64-byte cache gates; budgets the vendor cache as a real resident owner, carries collection coordinates from the exact composed tree, and corrects the delay-free tier-probe test contract exposed by main run 32314788241. |
+| #1206 | Highway-mask parallel SQL | Removes the obsolete global advisory lock that serialized every stable entity-sharded mask lane; disjoint shards now execute concurrently, while deterministic `(id,tier)` row acquisition protects overlapping external writers before one set-based `UPDATE ... FROM`. |
 
 The related source-fidelity audit (#1155), durable working agreement (#1156), and
 canonical lexical-peer batch core (#1164) were integrated in the same batch,
@@ -108,7 +109,9 @@ delivered decomposer implementation.
   completed ingest in 418 seconds with every journal, throughput, health, layer, and relation
   gate green. That is effectively flat against the prior 414-second receipt and isolates its
   remaining cost to consensus/mask processing rather than producer throughput. #1204 changes
-  that tail's long-lived mask connection leases; the post-deploy rerun is the proof gate.
+  that tail's long-lived mask connection leases. #1206 then removes the global SQL
+  advisory lock that still collapsed those leases to one mask writer; the post-deploy
+  rerun is the proof gate.
 - [Main run 32314788241](https://github.com/SaltyPatron/Laplace/actions/runs/32314788241)
   built, installed, migrated, and passed PostgreSQL regression after #1204. Its only red
   was a stale unit contract requiring two immediately adjacent tier-probe callers to
