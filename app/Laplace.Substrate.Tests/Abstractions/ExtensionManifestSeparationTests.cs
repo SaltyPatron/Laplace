@@ -89,4 +89,17 @@ public sealed class ExtensionManifestSeparationTests
         Assert.DoesNotContain("LAPLACE_INDEX_CYCLE", ingestWorkflow);
         Assert.DoesNotContain("drop-indexes", foundationWorkflow);
     }
+
+    [Fact]
+    public void EdgeRankIndex_IsInstalledAfterItsImmutableRankFunction()
+    {
+        foreach (var manifestName in new[] { "manifest.install", "manifest.upgrade" })
+        {
+            var manifest = Read("extension", "laplace_substrate", "sql", manifestName);
+            Assert.True(
+                manifest.IndexOf("functions/relation/relation_rank.sql.in", StringComparison.Ordinal)
+                < manifest.IndexOf("indexes/consensus_edge_rank_btree.sql.in", StringComparison.Ordinal),
+                $"{manifestName} must define consensus.relation_rank before its expression index");
+        }
+    }
 }

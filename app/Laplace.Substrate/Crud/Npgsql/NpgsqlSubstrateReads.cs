@@ -1631,8 +1631,8 @@ public static class NpgsqlSubstrateReads
     ///
     /// It used to hand-roll the ranking instead, on the stated grounds that
     /// top_relations ran "full-table consensus.edge_rank() measured &gt;9 minutes live". That
-    /// defect was fixed extension-side (Issue 52: exact partition-local heads via
-    /// consensus_eff_mu_btree) and the copy here was
+    /// defect was fixed extension-side (Issue 52: exact indexed edge rank via
+    /// consensus_edge_rank_btree) and the copy here was
     /// never retired — so the API kept serving the superseded shape, with a scalar
     /// label_or_hex per row on top of it. On 2026-08-06 that query held AccessShareLock
     /// for 2h08m, queued an ALTER EXTENSION behind it, and wedged the whole read

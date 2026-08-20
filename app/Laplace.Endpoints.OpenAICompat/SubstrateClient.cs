@@ -425,9 +425,9 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
 
     /// <summary>
     /// consensus.top_relations(@limit, NULL) avoids both historical failures: it
-    /// neither sorts the full consensus table nor guesses a raw-eff_mu pool. Each
-    /// relation partition contributes its exact local top-k through
-    /// consensus_eff_mu_btree, then the sufficient heads merge by edge rank.
+    /// neither sorts the full consensus table nor guesses a raw-eff_mu pool. The
+    /// exact governed edge-rank expression is indexed on every consensus leaf, so
+    /// PostgreSQL performs one bounded merge instead of a type-by-leaf probe matrix.
     /// </summary>
     private static async Task<IReadOnlyList<VisualizationEdge>> ReadTopRelationsAsync(NpgsqlConnection conn, int limit, CancellationToken ct)
     {

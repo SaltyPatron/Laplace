@@ -3,48 +3,30 @@ CREATE OR REPLACE FUNCTION consensus.top_relations(p_limit integer DEFAULT 50, p
     RETURNS TABLE(subject_id bytea, type_id bytea, object_id bytea, eff_mu numeric, witnesses bigint)
 -- No SET search_path — blocks inlining, costs the consensus index path. GH #860.
     LANGUAGE sql STABLE AS $$
-    -- Exact partitioned top-k. The old global arm took max(5000, limit*25) rows
-    -- by raw eff_mu and hoped every salience-weighted winner occurred in that
-    -- prefix. It was fast but not top-k: a lower-eff_mu edge in a stronger
-    -- relation band could sit outside the guessed pool and still outrank it.
+    -- Exact global top-k over the index's identical immutable expression. The
+    -- previous implementation took p_limit from each relation type, but the
+    -- LATERAL type parameter could not prune the LIST(type_id) parent. At the
+    -- measured foundation shape that became 231 types x 224 leaves = 51,744
+    -- filtered index probes and held the warehouse request for ~33 seconds.
     --
-    -- Relation rank is positive and constant inside one relation type. Therefore
-    -- no global top-k can contain a row below that type's own top-k under the
-    -- remaining keys. Take exactly p_limit from each governed relation type via
-    -- the per-partition consensus_eff_mu_btree, then merge those mathematically
-    -- sufficient heads by the real edge rank. The work bound follows from the
-    -- partition/ranking law; it is not an empirical multiplier.
-    WITH relation_types AS MATERIALIZED (
-        SELECT e.id AS type_id,
-               consensus.relation_rank_resolved(e.id) AS relation_rank
-        FROM laplace.entities e
-        WHERE e.type_id = laplace.entity_type_id('RelationType')
-          AND (p_type IS NULL OR e.id = p_type)
-    ), per_type AS MATERIALIZED (
-        SELECT t.relation_rank,
-               c.subject_id, c.type_id, c.object_id,
-               c.eff_mu, c.eff_mu_raw, c.witness_count
-        FROM relation_types t
-        CROSS JOIN LATERAL (
-            SELECT x.subject_id, x.type_id, x.object_id,
-                   x.eff_mu, x.eff_mu_raw, x.witness_count
-            FROM laplace.v_consensus_resolved x
-            WHERE x.type_id = t.type_id
-              AND x.object_id IS NOT NULL
-            ORDER BY x.eff_mu_raw DESC,
-                     x.witness_count DESC,
-                     x.subject_id,
-                     x.object_id
-            LIMIT p_limit
-        ) c
-        WHERE t.relation_rank IS NOT NULL
-    )
-    SELECT p.subject_id, p.type_id, p.object_id, p.eff_mu, p.witness_count
-    FROM per_type p
-    ORDER BY (p.relation_rank * (p.eff_mu_raw / 1e9)) DESC NULLS LAST,
-             p.witness_count DESC,
-             p.type_id,
-             p.subject_id,
-             p.object_id
+    -- The manifest rank is the governed rank for stored relation types (and the
+    -- only rank indexable without baking mutable consensus ancestry into an
+    -- index). Ungoverned types have no leaderboard score and remain absent, as
+    -- they were when relation_rank_resolved returned NULL.
+    SELECT c.subject_id,
+           c.type_id,
+           c.object_id,
+           consensus.eff_mu_display(c.rating, c.rd),
+           c.witness_count
+    FROM laplace.consensus c
+    WHERE c.object_id IS NOT NULL
+      AND consensus.relation_rank(c.type_id) IS NOT NULL
+      AND (p_type IS NULL OR c.type_id = p_type)
+    ORDER BY (consensus.relation_rank(c.type_id)
+                  * consensus.eff_mu(c.rating, c.rd)::double precision) DESC NULLS LAST,
+             c.witness_count DESC,
+             c.type_id,
+             c.subject_id,
+             c.object_id
     LIMIT p_limit
 $$;

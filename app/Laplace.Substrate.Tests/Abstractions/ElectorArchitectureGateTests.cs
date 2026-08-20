@@ -35,8 +35,8 @@ public sealed class ElectorArchitectureGateTests
         "SPECIFICITY DESC NULLS LAST",
         "REL_MASS DESC NULLS LAST",
         "PEERS DESC",
-        "DENOTE_MU DESC NULLS LAST",
         "ORD DESC",
+        "DENOTE_MU DESC NULLS LAST",
         "SYNSET_ID",
     ];
 
@@ -149,6 +149,20 @@ public sealed class ElectorArchitectureGateTests
                 repoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar))));
             Assert.DoesNotMatch(@"specificity\s*[^,\r\n]*\*", sql);
         }
+    }
+
+    [Fact]
+    public void PromptCoherence_SpecificityUsesBidirectionalIncidentMass()
+    {
+        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
+        var source = File.ReadAllText(Path.Combine(
+            repoRoot, "extension", "laplace_substrate", "src", "prompt_coherence.c"));
+
+        Assert.Contains("cands[me->idx[i]].total_mass += rank * eff;", source,
+            StringComparison.Ordinal);
+        Assert.DoesNotMatch(
+            @"if\s*\(forward\)\s*for\s*\([^)]*\)\s*cands\[me->idx\[i\]\]\.total_mass",
+            StripComments(source));
     }
 
     private static List<IReadOnlyList<string>> ExtractElectorOrders(string sql)

@@ -109,7 +109,7 @@ public class SqlConsolidationTests
                  {
                      "consensus_type_btree",
                      "consensus_subject_type_btree", "consensus_type_subject_btree",
-                     "consensus_eff_mu_btree", "consensus_subject",
+                     "consensus_eff_mu_btree", "consensus_edge_rank_btree", "consensus_subject",
                      "consensus_object_type_btree",
                  })
         {

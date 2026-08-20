@@ -44,8 +44,8 @@ ranked AS (
            row_number() OVER (ORDER BY y.specificity DESC NULLS LAST,
                                        y.rel_mass DESC NULLS LAST,
                                        y.peers DESC,
-                                       y.denote_mu DESC NULLS LAST,
                                        y.ord DESC,
+                                       y.denote_mu DESC NULLS LAST,
                                        y.synset_id) AS rk
     FROM converse.prompt_coherence(p_prompt) y
     WHERE (SELECT id FROM plang) IS NULL
