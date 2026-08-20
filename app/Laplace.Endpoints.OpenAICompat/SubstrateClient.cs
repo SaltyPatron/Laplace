@@ -31,7 +31,8 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         _dataSourceReadOnlyLong = LaplaceDataSource.Create(SubstrateAccess.Serving, dsb =>
         {
             dsb.ConnectionStringBuilder.CommandTimeout = InstalledOpInvoker.MaxCommandTimeoutSeconds;
-            dsb.ConnectionStringBuilder.MaxPoolSize = 2;
+            dsb.ConnectionStringBuilder.MaxPoolSize =
+                PostgresResourcePlan.Current.MaintenanceConnectionOwners;
             dsb.ConnectionStringBuilder.Options =
                 "-c default_transaction_read_only=on -c statement_timeout=600000";
         });

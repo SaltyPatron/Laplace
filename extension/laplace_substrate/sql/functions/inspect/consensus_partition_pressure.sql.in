@@ -10,16 +10,18 @@
 -- (5.2 GB, the largest consensus table) — discovered only by watching an ingest's
 -- input rate decay from 8,190 to 5,093 rec/s under LWLock.BufferContent contention.
 --
--- This names the offenders in the substrate's own vocabulary so promotion is a
--- measurement, not a memory. Rows come back worst-first; anything with a material
--- `rows` count is owed a `hot = true` in the manifest plus a codegen run — the
--- partition seed adopts it in place, no reseed.
+-- This names the offenders from planner statistics, not by scanning both DEFAULT
+-- partitions after every ingest. ANALYZE is already part of the completion envelope;
+-- MCV frequency x reltuples gives the crowding population without turning a diagnostic
+-- into a second corpus pass. Relations below the MCV roster are, by definition, not the
+-- dominant crowding population this operation is meant to find.
 --
 -- Not part of substrate_health(): that function gates IDENTITY law. This is
 -- physical layout, a different claim on a different layer.
 DROP FUNCTION IF EXISTS laplace.consensus_partition_pressure(bigint);
 DROP FUNCTION IF EXISTS ops.consensus_partition_pressure(bigint);
-CREATE OR REPLACE FUNCTION ops.consensus_partition_pressure(min_rows bigint DEFAULT 100000)
+DROP FUNCTION IF EXISTS ops.consensus_partition_pressure();
+CREATE OR REPLACE FUNCTION ops.consensus_partition_pressure()
 RETURNS TABLE(
     tbl         text,
     relation    text,
@@ -30,24 +32,32 @@ RETURNS TABLE(
 LANGUAGE sql
 STABLE
     AS $$
-    WITH d AS (
-        SELECT 'consensus'::text AS tbl, c.type_id
-          FROM laplace.consensus_rdefault c
-        UNION ALL
-        SELECT 'attestations'::text, a.type_id
-          FROM laplace.attestations_rdefault a
+    WITH targets(tbl, relname) AS (
+        VALUES ('consensus'::text, 'consensus_rdefault'::text),
+               ('attestations'::text, 'attestations_rdefault'::text)
     ),
-    agg AS (
-        SELECT d.tbl, d.type_id, count(*) AS rows
-          FROM d
-         GROUP BY d.tbl, d.type_id
-    ),
-    tot AS (
-        SELECT agg.tbl, sum(agg.rows) AS total FROM agg GROUP BY agg.tbl
-    )
-    , numbered AS MATERIALIZED (
-      SELECT agg.*, tot.total, row_number() OVER (ORDER BY agg.rows DESC,agg.tbl,agg.type_id) AS rn
-      FROM agg JOIN tot ON tot.tbl=agg.tbl WHERE agg.rows>=min_rows
+    stats AS (
+        SELECT t.tbl,
+               c.reltuples,
+               s.most_common_vals::text::bytea[] AS vals,
+               s.most_common_freqs AS freqs
+        FROM targets t
+        JOIN pg_class c ON c.relname = t.relname
+        JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = '@extschema@'
+        JOIN pg_stats s ON s.schemaname = '@extschema@'
+                       AND s.tablename = t.relname
+                       AND s.attname = 'type_id'
+    ), raw AS MATERIALIZED (
+        SELECT st.tbl,
+               m.type_id,
+               (m.freq * st.reltuples)::bigint AS rows,
+               round(100.0 * m.freq, 2) AS pct_of_default
+        FROM stats st,
+             LATERAL unnest(st.vals, st.freqs) AS m(type_id, freq)
+    ), numbered AS MATERIALIZED (
+      SELECT raw.*,
+             row_number() OVER (ORDER BY rows DESC, tbl, type_id) AS rn
+      FROM raw
     ), batch AS MATERIALIZED (
       SELECT realize.label_batch(array_agg(type_id ORDER BY rn)) AS labels FROM numbered
     )
@@ -56,7 +66,7 @@ STABLE
         b.labels[agg.rn] AS relation,
         agg.type_id,
         agg.rows,
-        round(100.0 * agg.rows / NULLIF(agg.total, 0), 2) AS pct_of_default
+        agg.pct_of_default
       FROM numbered agg CROSS JOIN batch b
      ORDER BY agg.rn;
 $$;

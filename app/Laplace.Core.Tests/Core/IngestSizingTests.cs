@@ -84,7 +84,7 @@ public sealed class IngestSizingTests
         int partitions = CpuTopology.ResolveApplyPartitions();
         long expected = Math.Max(
             (long)MemoryTopology.CopyStartupBytesPerConnection * partitions,
-            MemoryTopology.TotalPhysicalBytes / (partitions + 4));
+            PostgresResourcePlan.Current.ClientBudgetBytes / (partitions + 4));
         Assert.Equal(expected, budget);
         Assert.Equal(partitions + 4, MemoryTopology.WorkingSetResidentOwners);
     }
@@ -231,7 +231,7 @@ public sealed class IngestSizingTests
             plan.ChunkCells);
         Assert.Equal(plan.ChunkCells / plan.Connections, plan.MinSegmentCells);
         Assert.Equal(plan.ChunkCells, plan.ParallelDeltaMinAttestations);
-        Assert.Equal(4, plan.PipelineDepth); // compose/apply/caches/masks reserve four of eight
+        Assert.Equal(8, plan.PipelineDepth);
         Assert.Equal((512L << 20) / MemoryTopology.ConsensusFoldBytesPerRelation,
             plan.DeltaCapacityCells);
         Assert.Equal((512L << 20) / MemoryTopology.ConsensusMaskPairResidentBytes,

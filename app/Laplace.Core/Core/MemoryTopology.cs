@@ -35,13 +35,15 @@ public static class MemoryTopology
     public static string DetectionSource { get; private set; } = "uninitialized";
 
     /// <summary>
-    /// Byte budget for one working-set apply. Every simultaneously-live owner receives
-    /// one equal RAM share. The only floor is enough PostgreSQL transport pages for the
-    /// active apply partitions; there is no corpus- or machine-specific byte ceiling.
+    /// Byte budget for one working-set apply. Every simultaneously-live client owner
+    /// receives one equal share of PostgresResourcePlan's client domain; PostgreSQL shared
+    /// cache/private backends and the OS page cache are therefore not promised to the
+    /// ingest heap a second time. The only floor is enough transport pages for active apply
+    /// partitions; there is no corpus- or machine-specific byte ceiling.
     /// </summary>
     public static long WorkingSetBudgetBytes => Math.Max(
         (long)CopyStartupBytesPerConnection * CpuTopology.ResolveApplyPartitions(),
-        TotalPhysicalBytes / WorkingSetResidentOwners);
+        PostgresResourcePlan.Current.ClientBudgetBytes / WorkingSetResidentOwners);
 
     /// <summary>
     /// COMPOSE-side flush envelope — the resident-memory ceiling for ONE working set
@@ -51,66 +53,26 @@ public static class MemoryTopology
     /// content bank in a single working set collapses compose throughput (MEASURED
     /// 30k → 1.8k rec/s as a ~4 GiB set filled with ~3M records before flushing) and
     /// spikes GC. The default is one apply-partition share of the working-set budget,
-    /// so the exact topology controls the flush width. Tunable via
-    /// <c>LAPLACE_WS_FLUSH_MB</c> for an explicit operator experiment.
+    /// so the exact topology controls the flush width.
     /// </summary>
-    public static long WorkingSetFlushEnvelopeBytes => ResolveFlushEnvelope();
-
-    private static long ResolveFlushEnvelope()
-    {
-        long apply = WorkingSetBudgetBytes;
-        string? env = Environment.GetEnvironmentVariable("LAPLACE_WS_FLUSH_MB");
-        if (!string.IsNullOrWhiteSpace(env)
-            && long.TryParse(env.Trim(), out long mb) && mb > 0)
-            return Math.Clamp(mb << 20, CopyStartupBytesPerConnection, apply);
-
-        return Math.Max(
+    public static long WorkingSetFlushEnvelopeBytes => Math.Max(
             CopyStartupBytesPerConnection,
-            apply / CpuTopology.ResolveApplyPartitions());
-    }
+            WorkingSetBudgetBytes / CpuTopology.ResolveApplyPartitions());
 
     // ---- Postgres memory GUC derivations (single source for tune-pg) --------------------
     // All are functions of physical RAM. tune-pg emits these; nothing hardcodes a GB literal.
 
-    /// <summary>
-    /// shared_buffers ≈ 25% of RAM, the standard OLTP starting point.
-    ///
-    /// CEILING RAISED 16 GiB -> 64 GiB (2026-07-28). The 16 GiB cap was sized when the
-    /// substrate was small and stopped tracking it: MEASURED on the 128 GB box, RAM/4 is
-    /// 33.5 GiB but the cap pinned shared_buffers at 16 GiB against a 173 GB database —
-    /// ~11x oversubscribed — and a full-corpus ingest sat in IO.DataFileRead /
-    /// IO.AioIoCompletion with content-hash dedup probes missing cache and going to disk.
-    /// A hardcoded ceiling that no longer tracks the machine is the same defect as the
-    /// frozen hot-relation roster and the per-decomposer batch literals.
-    ///
-    /// Unlike <see cref="WorkMemBytes"/> this is a SINGLE shared allocation, not a
-    /// per-connection multiplier, so it carries none of the 2026-07-15 starvation
-    /// arithmetic — 64 GiB is one allocation on any box large enough for RAM/4 to reach it,
-    /// and RAM/4 still governs everything smaller. Above ~64 GiB, PostgreSQL's own clock
-    /// sweep and checkpoint cost stop paying back, which is why a ceiling remains.
-    /// </summary>
-    public static long SharedBuffersBytes => Clamp(TotalPhysicalBytes / 4, 128L << 20, 64L << 30);
+    /// <summary>PostgreSQL's shared-cache domain; no machine-size ceiling.</summary>
+    public static long SharedBuffersBytes => PostgresResourcePlan.Current.SharedBuffersBytes;
 
-    /// <summary>effective_cache_size ≈ 65% of RAM (planner hint for OS + PG cache).</summary>
-    public static long EffectiveCacheSizeBytes => Clamp(TotalPhysicalBytes * 65 / 100, 512L << 20, 96L << 30);
+    /// <summary>Planner-visible cache: PostgreSQL shared cache plus OS page cache.</summary>
+    public static long EffectiveCacheSizeBytes => PostgresResourcePlan.Current.EffectiveCacheSizeBytes;
 
-    /// <summary>maintenance_work_mem ≈ RAM/32 (index builds/vacuum), capped.</summary>
-    // Index builds plateau near 1GB; autovacuum workers inherit this when
-    // autovacuum_work_mem = -1, so an oversized value multiplies by worker
-    // count (2026-07-15 incident arithmetic, doc 28).
-    public static long MaintenanceWorkMemBytes => Clamp(TotalPhysicalBytes / 48, 256L << 20, 1L << 30);
+    /// <summary>One backend-private owner share for index/vacuum maintenance.</summary>
+    public static long MaintenanceWorkMemBytes => PostgresResourcePlan.Current.MaintenanceWorkMemBytes;
 
-    /// <summary>work_mem ≈ RAM/256 per sort/hash node, capped modestly.</summary>
-    // work_mem is PER SORT/HASH NODE PER CONNECTION — it must be sized against
-    // the connection budget (max_connections × concurrent nodes), never as a
-    // flat RAM fraction. RAM/256 gave 190MB on a 48GB box; one misplanned
-    // partitioned hash join starved the machine to a cold power boot
-    // (2026-07-15, doc 28). RAM/1536 → 32MB at 48GB: worst case
-    // 60 conns × 2 nodes × 32MB ≈ 3.8GB.
-    public static long WorkMemBytes => Clamp(TotalPhysicalBytes / 1536, 16L << 20, 64L << 20);
-
-    /// <summary>wal_buffers ≈ RAM/512, PostgreSQL's own auto-cap is 16 MiB..1 GiB.</summary>
-    public static long WalBuffersBytes => Clamp(TotalPhysicalBytes / 512, 16L << 20, 1L << 30);
+    /// <summary>Executor half of one accounted backend-private owner share.</summary>
+    public static long WorkMemBytes => PostgresResourcePlan.Current.WorkMemBytes;
 
     /// <summary>
     /// Approx resident bytes one accumulated consensus relation holds in the client-side fold
@@ -185,76 +147,15 @@ public static class MemoryTopology
 
     // ---- Aggregate budget: the invariant nothing computed ------------------------------
     //
-    // Every GUC above is derived in ISOLATION from physical RAM. Nothing ever added them
-    // up. shared_buffers is one pinned allocation, but work_mem is per sort/hash node PER
-    // CONNECTION and maintenance_work_mem is per autovacuum worker, so the resident peak
-    // is a PRODUCT of knobs that live in three different files — and it was never
-    // expressed anywhere, in either language. The 2026-07-15 starvation was that product
-    // going over the machine; it was diagnosed after the fact by hand, and the fix was a
-    // tighter divisor rather than an invariant, so the same class of failure can recur the
-    // moment max_connections or a cap moves.
-    //
-    // WorkMemBytes' own doc comment states the law -- "it must be sized against the
-    // connection budget (max_connections x concurrent nodes), never as a flat RAM
-    // fraction" -- and then the expression below it is a flat RAM fraction. These members
-    // make the stated law computable so a test can hold the knobs to it.
-
-    /// <summary>
-    /// RAM deliberately left to the OS: page cache, the ingest client's own managed heap,
-    /// and the CLI/runner processes. A quarter is too generous on a large box and too mean
-    /// on a small one, so it is RAM/8 within a hard band.
-    /// </summary>
-    public static long OsReserveBytes => Clamp(TotalPhysicalBytes / 8, 1L << 30, 16L << 30);
+    /// <summary>Combined ingest/client and OS page-cache memory domains.</summary>
+    public static long OsReserveBytes =>
+        PostgresResourcePlan.Current.ClientBudgetBytes
+        + PostgresResourcePlan.Current.OsPageCacheBudgetBytes;
 
     /// <summary>What remains for backend private memory once shared_buffers and the OS
     /// reserve are committed. Backend grants must fit inside THIS, not inside RAM.</summary>
     public static long BackendMemoryBudgetBytes =>
-        Math.Max(0, TotalPhysicalBytes - SharedBuffersBytes - OsReserveBytes);
-
-    /// <summary>
-    /// work_mem sized the way the law says it should be: the backend budget divided by the
-    /// worst-case number of simultaneous grants. Exposed alongside <see cref="WorkMemBytes"/>
-    /// rather than replacing it, because changing the emitted value is a tuning decision
-    /// that must move the shell, the C# and the parity pins together.
-    /// </summary>
-    public static long WorkMemBytesFor(int maxConnections, int nodesPerQuery) =>
-        Clamp(BackendMemoryBudgetBytes / Math.Max(1L, (long)maxConnections * nodesPerQuery),
-              16L << 20, 64L << 20);
-
-    /// <summary>
-    /// Worst-case resident bytes across the enumerable grants. A LOWER BOUND on the true
-    /// peak: it cannot see a backend taking more than <paramref name="nodesPerQuery"/>
-    /// grants, nor the client's own heap. Under-counting is the safe direction for a
-    /// guard -- if even this bound exceeds the machine, the configuration is
-    /// indefensible without measuring anything.
-    /// </summary>
-    public static long PeakResidentLowerBoundBytes(
-        int maxConnections, int nodesPerQuery, int autovacuumWorkers, long autovacuumWorkMemBytes)
-        => PeakResidentLowerBoundBytes(maxConnections, nodesPerQuery, autovacuumWorkers,
-                                       autovacuumWorkMemBytes, SharedBuffersBytes, WorkMemBytes);
-
-    /// <summary>
-    /// Pure form, every term injected. Exists so the guard can be aimed at a configuration
-    /// this host does not currently have -- a historical one, or a proposed one -- because
-    /// a bound that can only ever be evaluated against the current machine cannot be shown
-    /// to reject anything, and an assertion never demonstrated to fail is decoration.
-    /// </summary>
-    public static long PeakResidentLowerBoundBytes(
-        int maxConnections, int nodesPerQuery, int autovacuumWorkers,
-        long autovacuumWorkMemBytes, long sharedBuffersBytes, long workMemBytes)
-        => sharedBuffersBytes
-         + (long)maxConnections * nodesPerQuery * workMemBytes
-         + (long)autovacuumWorkers * autovacuumWorkMemBytes;
-
-    /// <summary>
-    /// Fraction of physical RAM the enumerable grants may claim. Not a preference: above
-    /// this the OS has no room for page cache and the box starts swapping, which is how
-    /// 2026-07-15 ended in a cold power boot rather than in an OOM kill -- swap death
-    /// leaves no kill record, which is exactly why it was hard to attribute.
-    /// </summary>
-    public const double PeakResidentSafeFraction = 0.80;
-
-    private static long Clamp(long v, long lo, long hi) => Math.Clamp(v, lo, hi);
+        PostgresResourcePlan.Current.BackendPrivateBudgetBytes;
 
     private static long DetectTotalPhysicalBytes()
     {

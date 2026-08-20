@@ -616,7 +616,7 @@ file's SPI queries BIND:
 | file | binding | verdict |
 |---|---|---|
 | `generate_walk.c` | 3 array-bound, 1 single | one query per HOP — `walk_branches(gravity,3,5)` issues exactly 3, 209 ms warm |
-| `fold_route.c` | 3 array-bound | batched |
+| `fold_route.c` | 3 array-bound, literal-routed PostgreSQL 18 `MERGE` | set-based; no row loop / `ON CONFLICT` fallback |
 | `highway_mask.c` | 2 array-bound | batched |
 | `graph_cascade.c`, `descent_probe.c`, `content_resolve.c` | 1 array-bound each | batched |
 | `graph_taxonomy.c` | `FROM unnest($1) … CROSS JOIN LATERAL` | one query for the whole frontier |

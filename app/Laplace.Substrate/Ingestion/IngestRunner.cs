@@ -848,13 +848,10 @@ public sealed class IngestRunner
     /// </summary>
     private async Task ReportPartitionPressureAsync(ILogger log, CancellationToken ct)
     {
-        // Floor, not a fraction: below this a relation cannot meaningfully crowd anything,
-        // and a small/empty substrate reports nothing rather than noise.
-        const long MinRows = 1_000_000;
         IReadOnlyList<PartitionPressure> pressure;
         try
         {
-            pressure = await _reader.PartitionPressureAsync(MinRows, ct);
+            pressure = await _reader.PartitionPressureAsync(ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

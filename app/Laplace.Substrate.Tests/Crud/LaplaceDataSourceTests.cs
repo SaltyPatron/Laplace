@@ -51,6 +51,8 @@ public sealed class LaplaceDataSourceTests
         Assert.Equal(0, b.CommandTimeout);
         Assert.True(b.MaxAutoPrepare > 0,
             "ingest must reuse plans: re-planning a ~130-leaf Append per call cost 4x its execution");
+        Assert.Equal(PostgresResourcePlan.Current.IngestConnectionOwners, b.MaxPoolSize);
+        Assert.True(b.AutoPrepareMinUsages > 0);
     }
 
     [Fact]
@@ -81,5 +83,6 @@ public sealed class LaplaceDataSourceTests
 
         Assert.True(b.MaxAutoPrepare > 0);
         Assert.True(b.AutoPrepareMinUsages > 0);
+        Assert.Equal(PostgresResourcePlan.Current.ServingConnectionOwners, b.MaxPoolSize);
     }
 }

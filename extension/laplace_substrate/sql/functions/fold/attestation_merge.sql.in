@@ -28,7 +28,9 @@
 -- Contract with the caller (NpgsqlWorkingSetApply) — unchanged:
 --   * arrays are parallel and CLIENT-DEDUPED per call — one row per
 --     attestation id (a duplicate id would double-apply the UPDATE);
---   * every id was probe-verified present under the apply advisory lock;
+--   * every id was probe-verified present under the apply advisory lock, so the
+--     one set-based MERGE intentionally owns only a MATCHED arm (there is no
+--     row loop and no ON CONFLICT fallback);
 --   * rows arrive sorted by (type, subject, id) — partition-key order, so
 --     cross-writer lock acquisition stays globally ordered; the router only
 --     needs same-type rows ADJACENT and remains correct (merely one extra

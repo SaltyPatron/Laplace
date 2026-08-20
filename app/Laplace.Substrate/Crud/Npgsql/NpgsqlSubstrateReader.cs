@@ -440,15 +440,14 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
     }
 
     public async Task<IReadOnlyList<PartitionPressure>> PartitionPressureAsync(
-        long minRows, CancellationToken ct = default)
+        CancellationToken ct = default)
     {
-        // The scan lives in consensus_partition_pressure() — one implementation of the
-        // fact, on the layer that owns partition layout. An install predating the
-        // function degrades to "nothing to report" rather than sinking a finished run.
+        // Planner-statistics estimation lives in consensus_partition_pressure() — one
+        // implementation on the layer that owns partition layout. An install predating
+        // the function degrades to "nothing to report" rather than sinking a finished run.
         await using var cmd = _ds.CreateCommand(
-            "SELECT relation, rows, pct_of_default FROM ops.consensus_partition_pressure($1) "
+            "SELECT relation, rows, pct_of_default FROM ops.consensus_partition_pressure() "
             + "WHERE tbl = 'consensus' ORDER BY rows DESC");
-        cmd.Parameters.AddWithValue(NpgsqlDbType.Bigint, minRows);
         try
         {
             var outv = new List<PartitionPressure>();

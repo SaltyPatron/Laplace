@@ -89,18 +89,13 @@ internal static class CpuTopologyCommands
     // value, and workload policy (durability/checkpoint/io) lives here in ONE place too.
     private static void EmitPgTuning()
     {
-        long sharedMb = MemoryTopology.SharedBuffersBytes >> 20;
-        long cacheMb = MemoryTopology.EffectiveCacheSizeBytes >> 20;
-        long maintMb = MemoryTopology.MaintenanceWorkMemBytes >> 20;
-        long workMb = MemoryTopology.WorkMemBytes >> 20;
-        long walMb = MemoryTopology.WalBuffersBytes >> 20;
-        int pcores = CpuTopology.PerformanceCoreCount;
-        int maint = CpuTopology.ParallelMaintenanceWorkers;
-        // Gather parallelism is a per-QUERY burst multiplier on work_mem and
-        // CPU; index builds keep full maintenance parallelism, but scans get
-        // half (2026-07-15 incident, doc 28).
-        int gather = Math.Max(2, pcores / 4);
-        int logical = CpuTopology.LogicalProcessorCount;
+        var pg = PostgresResourcePlan.Current;
+        long sharedKb = pg.SharedBuffersBytes >> 10;
+        long cacheKb = pg.EffectiveCacheSizeBytes >> 10;
+        long maintKb = pg.MaintenanceWorkMemBytes >> 10;
+        long workKb = pg.WorkMemBytes >> 10;
+        long tempKb = pg.TempBuffersBytes >> 10;
+        long autovacKb = pg.AutovacuumWorkMemBytes >> 10;
 
         // I/O WORKERS ARE NOT PARALLEL-QUERY WORKERS, AND SIZING THEM AS IF THEY WERE CAPPED
         // THE STORAGE LAYER AT ~6% OF THE DEVICE.
@@ -121,32 +116,34 @@ internal static class CpuTopologyCommands
         // request in flight" on a device with hardware queues and is NOT saturation. The
         // pool, not the disk, was the limit.
         //
-        // Sized off logical processors as a proxy for concurrent I/O-issuing backends, with
-        // a floor because 3 is never enough for NVMe and a ceiling because these are real
-        // processes. Storage type is not discoverable here, so the floor is what makes the
-        // default safe on flash; a spinning-disk host would want it lower and has none.
-        int ioWorkers = Math.Clamp(logical, 8, 32);
+        // Sized from logical issuers with no [8,32] machine clamp. Device-native io_uring
+        // is still selected by the live probe below when the PostgreSQL build supports it.
+        int ioWorkers = pg.IoWorkers;
 
         // max_worker_processes is the SHARED pool that parallel query AND the io_worker pool
         // both draw from. It was set to the logical count while max_parallel_workers alone
         // already claimed pcores — so the cluster was oversubscribed before io_workers took
         // its cut, and raising the I/O pool without this would starve parallel query instead.
-        // Shape mirrors pg-machine-tuning.sh's `mwp=$(( pcores + pdeg + iow + 8 ))` so the
-        // bootstrap fallback and this emitter do not hand a host two different pool sizes.
-        int workers = pcores + maint + ioWorkers + 8;
+        // Maintenance workers are a subset of max_parallel_workers, so the shared pool is
+        // exactly the compute pool plus blocking I/O workers; the former mystery +8 is gone.
+        int workers = pg.MaxWorkerProcesses;
         var w = Console.Out;
 
         // Machine-derived (RAM + P/E topology) — the single source of truth.
-        w.WriteLine($"ALTER SYSTEM SET shared_buffers = '{sharedMb}MB';");
-        w.WriteLine($"ALTER SYSTEM SET effective_cache_size = '{cacheMb}MB';");
-        w.WriteLine($"ALTER SYSTEM SET maintenance_work_mem = '{maintMb}MB';");
-        w.WriteLine($"ALTER SYSTEM SET work_mem = '{workMb}MB';");
-        w.WriteLine($"ALTER SYSTEM SET wal_buffers = '{walMb}MB';");
+        w.WriteLine($"ALTER SYSTEM SET shared_buffers = '{sharedKb}kB';");
+        w.WriteLine($"ALTER SYSTEM SET effective_cache_size = '{cacheKb}kB';");
+        w.WriteLine($"ALTER SYSTEM SET maintenance_work_mem = '{maintKb}kB';");
+        w.WriteLine($"ALTER SYSTEM SET work_mem = '{workKb}kB';");
+        // Let PostgreSQL derive WAL buffering from the machine-sized shared buffer
+        // pool. The former RAM/512 with 16MiB/1GiB clamps was a second, conflicting
+        // policy layered over PostgreSQL's own shared_buffers-aware calculation.
+        w.WriteLine("ALTER SYSTEM RESET wal_buffers;");
         w.WriteLine($"ALTER SYSTEM SET max_worker_processes = {workers};");
-        w.WriteLine($"ALTER SYSTEM SET max_parallel_workers = {pcores};");
-        w.WriteLine($"ALTER SYSTEM SET max_parallel_workers_per_gather = {gather};");
-        w.WriteLine($"ALTER SYSTEM SET max_parallel_maintenance_workers = {maint};");
+        w.WriteLine($"ALTER SYSTEM SET max_parallel_workers = {pg.MaxParallelWorkers};");
+        w.WriteLine($"ALTER SYSTEM SET max_parallel_workers_per_gather = {pg.MaxParallelWorkersPerGather};");
+        w.WriteLine($"ALTER SYSTEM SET max_parallel_maintenance_workers = {pg.MaxParallelMaintenanceWorkers};");
         w.WriteLine($"ALTER SYSTEM SET io_workers = {ioWorkers};");
+        w.WriteLine($"ALTER SYSTEM SET autovacuum_max_workers = {pg.AutovacuumWorkers};");
 
         // Workload POLICY — deliberate, machine-independent (durability/checkpoint/IO shape).
         w.WriteLine("ALTER SYSTEM SET synchronous_commit = off;");
@@ -170,7 +167,8 @@ internal static class CpuTopologyCommands
         // Every Windows backend is a full process plus a per-connection
         // perfcache map; connections are budgeted, not free. Memory ceiling
         // arithmetic and the 2026-07-15 incident live in doc 28.
-        w.WriteLine("ALTER SYSTEM SET max_connections = 60;");
+        w.WriteLine($"ALTER SYSTEM SET max_connections = {pg.MaxConnections};");
+        w.WriteLine($"ALTER SYSTEM SET superuser_reserved_connections = {pg.ReservedConnections};");
         // MEASURED 2026-08-01 on a freshly migrated cluster: 479 partitions and 4,456
         // total relations in the laplace schema — more than double the ~220 this was
         // sized against, because the leaf count tracks relation_types.toml (207 relations)
@@ -190,45 +188,13 @@ internal static class CpuTopologyCommands
         // groups up to max_locks_per_transaction = 16k).
         w.WriteLine("ALTER SYSTEM SET max_locks_per_transaction = 1024;");
         w.WriteLine("ALTER SYSTEM SET hash_mem_multiplier = 1.0;");
-        w.WriteLine("ALTER SYSTEM SET temp_buffers = '32MB';");
-        w.WriteLine("ALTER SYSTEM SET autovacuum_work_mem = '256MB';");
-        // RE-MEASURED 2026-08-16 ON THIS CLUSTER. 256 was a promise the backend could not
-        // keep, and this emitter is the AUTHORITY -- pg_apply_machine_tuning runs
-        // `cpu-topology --pg-tuning` first and only falls back to the shell's formulas, so
-        // the literal here is what actually reaches a cluster.
-        //
-        // The 2026-08-03 note above reasons about io_method = worker, where the ceiling is
-        // the io_workers pool. pg_apply_io_method now probes and selects io_uring whenever
-        // the build supports it, and under io_uring the ceiling is io_max_concurrency --
-        // per-backend, postmaster-context, never emitted by anything here, and sitting at
-        // its default of 64.
-        //
-        // THE CAP BINDS. Sampled from pg_aios while one backend seq-scanned a 2,573 MB
-        // attestations leaf: max in-flight AIO ops held by that backend = 64, exactly
-        // io_max_concurrency. 192 of the 256 were notional.
-        //
-        // AND THE REQUEST BUYS NOTHING EVEN SO. Three cold 2.5 GB leaves, identical shape,
-        // one each, under scripts/measure-lane.sh on a quiet substrate:
-        //   effective_io_concurrency = 256  attestations_rdefault_h0  3175.480 ms
-        //   effective_io_concurrency =  64  attestations_rdefault_h1  3175.204 ms
-        //   effective_io_concurrency =  32  attestations_rdefault_h2  3167.613 ms
-        // 8 ms of spread on a 3.17 s scan, lowest setting marginally fastest.
-        //
-        // Pinned to the cap so the config states what a backend can actually do. Raising
-        // io_max_concurrency costs a cluster restart (postmaster context) and nothing above
-        // justifies one.
-        //
-        // RANDOM ACCESS, measured too. 30,000 sampled entity ids in 3 disjoint groups probed
-        // against laplace.attestations by subject_id, eic-to-group assignment ROTATED so each
-        // setting sees each group once:
-        //   round 1 (first touch)  eic 256: 5811 ms   64: 5395 ms   32: 5154 ms
-        //   round 2 (warm)         eic 256:  677 ms   64:  660 ms   32:  664 ms
-        //   round 3 (warm)         eic 256:  664 ms   64:  675 ms   32:  670 ms
-        // Warm: 660-677 ms with no ordering by eic. Round 1's descent is progressive cache
-        // warming, not queue depth -- a single cold run per setting would have read as a
-        // 13%/row win for 32. Neither workload supports 256.
-        w.WriteLine("ALTER SYSTEM SET effective_io_concurrency = 64;");
-        w.WriteLine("ALTER SYSTEM SET maintenance_io_concurrency = 64;");
+        w.WriteLine($"ALTER SYSTEM SET temp_buffers = '{tempKb}kB';");
+        w.WriteLine($"ALTER SYSTEM SET autovacuum_work_mem = '{autovacKb}kB';");
+        // Queue-depth requests follow the live I/O issuer pool. The previous fixed 64
+        // merely mirrored one host's io_max_concurrency and silently capped larger hosts;
+        // pg_apply_io_method still chooses the device-native implementation at runtime.
+        w.WriteLine($"ALTER SYSTEM SET effective_io_concurrency = {pg.IoConcurrency};");
+        w.WriteLine($"ALTER SYSTEM SET maintenance_io_concurrency = {pg.IoConcurrency};");
         w.WriteLine("ALTER SYSTEM SET random_page_cost = 1.1;");
         w.WriteLine("ALTER SYSTEM SET autovacuum_vacuum_cost_delay = 0;");
         // huge_pages is deliberately NOT emitted here, for the same reason as
