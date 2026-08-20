@@ -8,8 +8,18 @@
 -- deposit IS the population — highway_mask_refresh/rebuild are legacy repair
 -- verbs for pre-deposit databases and retire once no such DB exists.
 --
--- ONE DEPOSIT AT A TIME, by advisory lock — the third and final shape of the
--- 2026-07-29 deadlock fix, and the ledger of why the first two were wrong:
+-- Deposits are entity-sharded BEFORE this function is called. Every entity has
+-- one stable writer lane for the run, so concurrent ingest calls are row-disjoint.
+-- The former global advisory lock survived that writer correction and silently
+-- collapsed the topology-derived mask fanout back to one connection.
+--
+-- External/online writers can still overlap an ingest. Their safety boundary is
+-- deterministic target-row acquisition below: every statement locks `(id,tier)`
+-- in bytewise order before the set UPDATE. Two overlapping writers therefore
+-- cannot acquire the same rows in opposite order; disjoint ingest shards never
+-- wait on each other and no process-global mutex remains.
+--
+-- History of the earlier shapes, retained so none are repeated:
 --
 --   bd10fcf  moved the deposit server-side and CONCURRENT → AB/BA deadlocks
 --            between fold lanes on shared entity rows (hot words appear in
@@ -39,17 +49,9 @@
 --            change. scripts/tests/highway-deposit-concurrency.sh is the bench;
 --            a fifth attempt must beat 0 deadlocks at 78% before it ships.
 --
--- The enumeration that licenses serialization: during ingest, deposits are the
--- ONLY writers of entities rows. highway_mask_refresh is reachable solely from
--- the highway_mask_rebuild repair verb (never during ingest; ops law forbids
--- it); WS_APPLY merges target attestations; COPY inserts proven-novel rows
--- only; consensus_upsert touches consensus. So one-at-a-time deposits eliminate
--- ALL entity-row contention: no cycle (single writer), no per-row lock tax
--- (uncontended xmax, no multixacts), no ordering machinery. The caller commits
--- per chunk (ConsensusAccumulatingWriter), so the advisory lock is held for one
--- chunk's work and waiters queue in chunk-sized steps. Serial-and-fast beats
--- parallel-and-taxed: the parallelism never parallelised the row updates, it
--- only manufactured the contention (the pre-bd10fcf C# scheduler knew this).
+-- #1183 supplied the missing writer change identified above: work is now
+-- partitioned shard-locally when the chunk is built. Retaining a global lock
+-- after that change was pure serialization, not a correctness mechanism.
 DROP FUNCTION IF EXISTS laplace.highway_mask_deposit(bytea[], bytea[]);
 CREATE OR REPLACE FUNCTION consensus.highway_mask_deposit(p_entity_ids bytea[], p_type_ids bytea[])
     RETURNS bigint
@@ -64,7 +66,7 @@ BEGIN
         RETURN 0;
     END IF;
 
-    -- COMPUTE OUTSIDE THE LOCK. MEASURED 2026-08-01 on the English corpus:
+    -- COMPUTE BEFORE TARGET ROW LOCKS. MEASURED 2026-08-01 on the English corpus:
     --   highway_mask_deposit        196 calls  651,955 ms  (3,321 ms mean)
     --   its pairs/types/tbits CTE   196 calls  468,420 ms  (2,390 ms mean)
     --   pg_advisory_xact_lock       196 calls  181,947 ms    (928 ms mean)
@@ -72,13 +74,10 @@ BEGIN
     -- other fold lane queued behind work that never touches `entities`. 182 s of that
     -- run was pure convoy wait.
     --
-    -- The serialization argument in the header is about ENTITIES ROW CONTENTION: the
-    -- UPDATE is the only part that writes entities, so it is the only part that must be
-    -- alone. pairs/types/tbits read `consensus` and the unnested arguments and touch no
-    -- entity row, so computing them concurrently cannot reintroduce the AB/BA deadlock
-    -- the lock exists to prevent. The UPDATE still re-reads e.highway_mask inside the
-    -- lock, so OR-accumulate remains read-modify-write under a single writer and no bit
-    -- can be lost.
+    -- pairs/types/tbits read `consensus` and the unnested arguments and touch no entity
+    -- row. Target rows are selected and locked only after this calculation. The UPDATE
+    -- then re-reads e.highway_mask from those locked rows, so OR-accumulate cannot lose a
+    -- bit even when an external writer reached an overlapping entity first.
     WITH pairs AS (
         SELECT DISTINCT u.eid, u.tid
         FROM unnest(p_entity_ids, p_type_ids) AS u(eid, tid)
@@ -112,23 +111,26 @@ BEGIN
         RETURN 0;
     END IF;
 
-    -- xact-scoped, released at the caller's per-chunk COMMIT. Held for the UPDATE
-    -- alone now, not for the computation above.
-    PERFORM pg_advisory_xact_lock(hashtext('highway_mask_deposit')::bigint);
-
     WITH d AS (
         SELECT u.eid, array_agg(DISTINCT u.bit) AS bits
         FROM unnest(v_eids, v_bits) AS u(eid, bit)
         GROUP BY u.eid
     ),
+    targets AS MATERIALIZED (
+        SELECT e.id, e.tier, d.bits
+        FROM laplace.entities e
+        JOIN d ON d.eid = e.id
+        WHERE e.highway_mask IS NULL
+           OR NOT (consensus.highway_mask_bits(e.highway_mask) @> d.bits)
+        ORDER BY e.id, e.tier
+        FOR NO KEY UPDATE OF e
+    ),
     upd AS (
         UPDATE laplace.entities e
         SET highway_mask = consensus.highway_mask_from_bits(
-                COALESCE(consensus.highway_mask_bits(e.highway_mask), ARRAY[]::int[]) || d.bits)
-        FROM d
-        WHERE e.id = d.eid
-          AND (e.highway_mask IS NULL
-               OR NOT (consensus.highway_mask_bits(e.highway_mask) @> d.bits))
+                COALESCE(consensus.highway_mask_bits(e.highway_mask), ARRAY[]::int[]) || t.bits)
+        FROM targets t
+        WHERE e.id = t.id AND e.tier = t.tier
         RETURNING 1
     )
     SELECT count(*) INTO updated FROM upd;
