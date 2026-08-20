@@ -2,7 +2,11 @@
 -- its top synset — taxonomy lives on concepts, not spellings), dir='up' the
 -- parent chain to the root, dir='child' the strongest sub-kinds.
 DROP FUNCTION IF EXISTS laplace.taxonomy_tree(bytea);
-CREATE OR REPLACE FUNCTION taxonomy.tree(p_id bytea)
+DROP FUNCTION IF EXISTS taxonomy.tree(bytea);
+CREATE OR REPLACE FUNCTION taxonomy.tree(
+    p_id bytea,
+    p_depth integer DEFAULT NULL,
+    p_child_limit integer DEFAULT NULL)
     RETURNS TABLE(dir text, ord int, id bytea, label text, eff_mu numeric)
     LANGUAGE sql STABLE
     AS $$
@@ -12,7 +16,8 @@ CREATE OR REPLACE FUNCTION taxonomy.tree(p_id bytea)
       SELECT 'self'::text AS dir, 0 AS ord, root.id, NULL::numeric AS eff_mu FROM root
       UNION ALL
       SELECT 'up', w.step, w.entity_id, w.eff_mu
-      FROM root, consensus.walk_strongest(root.id, laplace.relation_type_id('IS_A'), 10) w
+      FROM root, consensus.walk_strongest(
+          root.id, laplace.relation_type_id('IS_A'), p_depth) w
       UNION ALL
       (SELECT 'child',
             row_number() OVER (ORDER BY consensus.eff_mu_display(c.rating, c.rd) DESC)::int,
@@ -21,7 +26,7 @@ CREATE OR REPLACE FUNCTION taxonomy.tree(p_id bytea)
        FROM root JOIN laplace.consensus c
          ON c.object_id = root.id AND c.type_id = laplace.relation_type_id('IS_A')
        ORDER BY consensus.eff_mu_display(c.rating, c.rd) DESC
-       LIMIT 24)
+       LIMIT GREATEST(p_child_limit, 0))
     ), ids AS MATERIALIZED (
       SELECT array_agg(DISTINCT id ORDER BY id) AS a FROM raw
     ), labels AS MATERIALIZED (

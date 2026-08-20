@@ -190,6 +190,20 @@ FROM taxonomy.tree(laplace.word_id('x'));
  t            | t
 (1 row)
 
+SELECT count(*) = 1 AS mesh_zero_branches_keeps_self
+FROM structural.mesh_position(laplace.word_id('x'), 0, 0);
+ mesh_zero_branches_keeps_self 
+--------------------------------
+ t
+(1 row)
+
+SELECT count(*) = 1 AS taxonomy_zero_branches_keeps_self
+FROM taxonomy.tree(laplace.word_id('x'), 0, 0);
+ taxonomy_zero_branches_keeps_self 
+-----------------------------------
+ t
+(1 row)
+
 SELECT count(*) >= 0 AS leaders_runs FROM ops.band_leaders(ARRAY[1,2], 2);
  leaders_runs 
 --------------

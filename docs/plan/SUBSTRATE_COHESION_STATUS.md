@@ -193,6 +193,13 @@ still fetches one extra row solely to report truncation; and
 geometric admission instead of a fixed 48-candidate side pool. Defaults remain
 surface choices, not lower-layer caps.
 
+The same rule now covers mesh and taxonomy. `structural.mesh_position` no
+longer owns fixed 40/60 relation/member pools, `taxonomy.tree` no longer owns a
+fixed 24-child pool or ten-step climb, and the cycle-safe greedy
+`consensus.walk_strongest` no longer truncates omitted depth at eight. SQL
+omission means complete; HTTP/MCP publish their presentation defaults as
+arguments and pass any non-negative caller value unchanged.
+
 ### UD acceptance
 
 The code now has exact occurrence-grain representation and much safer sizing.

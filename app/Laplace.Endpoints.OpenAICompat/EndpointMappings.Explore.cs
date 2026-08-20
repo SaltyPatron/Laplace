@@ -410,9 +410,12 @@ internal static class ExploreEndpoints
         // The entity's verdict record — confirmed/contested/refuted/thin counts
         // from the canonical epistemic_status logic. Preview-class information,
         // served ungated like the entity preview.
-        app.MapGet("/v1/explore/entities/{idHex}/mesh", async (string idHex, ISubstrateClient substrate, CancellationToken ct) =>
+        app.MapGet("/v1/explore/entities/{idHex}/mesh", async (
+            string idHex, int? relations, int? members,
+            ISubstrateClient substrate, CancellationToken ct) =>
         {
-            var mesh = await substrate.MeshAsync(idHex, ct);
+            var mesh = await substrate.MeshAsync(
+                idHex, Math.Max(0, relations ?? 40), Math.Max(0, members ?? 60), ct);
             return mesh is null
                 ? EndpointJson.NotFound("entity_not_found", $"'{idHex}' is not a 32-hex entity id.")
                 : Results.Json(mesh);
@@ -436,9 +439,12 @@ internal static class ExploreEndpoints
         .Produces<ErrorResponse>(StatusCodes.Status404NotFound)
         .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
 
-        app.MapGet("/v1/explore/entities/{idHex}/taxonomy", async (string idHex, ISubstrateClient substrate, CancellationToken ct) =>
+        app.MapGet("/v1/explore/entities/{idHex}/taxonomy", async (
+            string idHex, int? depth, int? children,
+            ISubstrateClient substrate, CancellationToken ct) =>
         {
-            var tax = await substrate.TaxonomyAsync(idHex, ct);
+            var tax = await substrate.TaxonomyAsync(
+                idHex, Math.Max(0, depth ?? 10), Math.Max(0, children ?? 24), ct);
             return tax is null
                 ? EndpointJson.NotFound("entity_not_found", $"'{idHex}' is not a 32-hex entity id.")
                 : Results.Json(tax);

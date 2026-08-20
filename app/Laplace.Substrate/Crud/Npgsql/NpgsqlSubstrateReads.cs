@@ -26,11 +26,12 @@ public static class NpgsqlSubstrateReads
 
     /// <summary><c>structural.mesh_position(id)</c> — hub gating and ranking live in the extension.</summary>
     public static Task<IReadOnlyList<MeshPositionRow>> MeshPositionAsync(
-        NpgsqlDataSource dataSource, byte[] id, CancellationToken ct,
+        NpgsqlDataSource dataSource, byte[] id, int relationLimit, int memberLimit,
+        CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
             SELECT dir, encode(id, 'hex'), label, relation, hub_type, eff_mu, witnesses
-            FROM structural.mesh_position(@id)
+            FROM structural.mesh_position(@id, @relation_limit, @member_limit)
             """,
             static r => new MeshPositionRow(
                 r.GetString(0), r.GetString(1),
@@ -39,7 +40,12 @@ public static class NpgsqlSubstrateReads
                 r.IsDBNull(4) ? null : r.GetString(4),
                 r.IsDBNull(5) ? (decimal?)null : r.GetDecimal(5),
                 r.IsDBNull(6) ? 0L : r.GetInt64(6)),
-            p => p.Add("id", NpgsqlDbType.Bytea).Value = id,
+            p =>
+            {
+                p.Add("id", NpgsqlDbType.Bytea).Value = id;
+                p.AddWithValue("relation_limit", RequestedLimit(relationLimit));
+                p.AddWithValue("member_limit", RequestedLimit(memberLimit));
+            },
             ct: ct, label: "mesh_position", onError: onError);
 
     public readonly record struct TaxonomyTreeRow(
@@ -47,18 +53,24 @@ public static class NpgsqlSubstrateReads
 
     /// <summary><c>taxonomy.tree(id)</c> — the IS_A climb/descent around a topic.</summary>
     public static Task<IReadOnlyList<TaxonomyTreeRow>> TaxonomyTreeAsync(
-        NpgsqlDataSource dataSource, byte[] id, CancellationToken ct,
+        NpgsqlDataSource dataSource, byte[] id, int depth, int childLimit,
+        CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
             SELECT dir, ord, encode(id, 'hex'), label, eff_mu
-            FROM taxonomy.tree(@id)
+            FROM taxonomy.tree(@id, @depth, @child_limit)
             ORDER BY dir DESC, ord
             """,
             static r => new TaxonomyTreeRow(
                 r.GetString(0), r.GetInt32(1), r.GetString(2),
                 r.IsDBNull(3) ? "" : r.GetString(3),
                 r.IsDBNull(4) ? (decimal?)null : r.GetDecimal(4)),
-            p => p.Add("id", NpgsqlDbType.Bytea).Value = id,
+            p =>
+            {
+                p.Add("id", NpgsqlDbType.Bytea).Value = id;
+                p.AddWithValue("depth", RequestedLimit(depth));
+                p.AddWithValue("child_limit", RequestedLimit(childLimit));
+            },
             timeoutSeconds: 30, ct: ct, label: "taxonomy_tree", onError: onError);
 
     /// <summary><c>ops.modality_counts()</c> — corpus modality breakdown, one row.</summary>

@@ -12,11 +12,13 @@ namespace Laplace.Endpoints.OpenAICompat;
 /// </summary>
 internal sealed partial class SubstrateClient
 {
-    public async Task<MeshResponse?> MeshAsync(string idHex, CancellationToken ct)
+    public async Task<MeshResponse?> MeshAsync(
+        string idHex, int relationLimit, int memberLimit, CancellationToken ct)
     {
         if (TryParseIdHex(idHex) is not { } id) return null;
 
-        var rows = await NpgsqlSubstrateReads.MeshPositionAsync(_dataSource, id, ct, TranslateSubstrateError);
+        var rows = await NpgsqlSubstrateReads.MeshPositionAsync(
+            _dataSource, id, relationLimit, memberLimit, ct, TranslateSubstrateError);
 
         var self = rows.FirstOrDefault(r => r.Dir == "self");
         static MeshLink Link(NpgsqlSubstrateReads.MeshPositionRow r) =>
@@ -29,11 +31,13 @@ internal sealed partial class SubstrateClient
             [.. rows.Where(r => r.Dir == "down").Select(Link)]);
     }
 
-    public async Task<TaxonomyResponse?> TaxonomyAsync(string idHex, CancellationToken ct)
+    public async Task<TaxonomyResponse?> TaxonomyAsync(
+        string idHex, int depth, int childLimit, CancellationToken ct)
     {
         if (TryParseIdHex(idHex) is not { } id) return null;
 
-        var rows = await NpgsqlSubstrateReads.TaxonomyTreeAsync(_dataSource, id, ct, TranslateSubstrateError);
+        var rows = await NpgsqlSubstrateReads.TaxonomyTreeAsync(
+            _dataSource, id, depth, childLimit, ct, TranslateSubstrateError);
 
         var self = rows.FirstOrDefault(r => r.Dir == "self");
         if (self.IdHex is null) return null;

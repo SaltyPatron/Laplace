@@ -128,6 +128,12 @@ SELECT count(*) >= 1 AS tax_has_self,
        count(*) FILTER (WHERE dir = 'self') = 1 AS tax_one_self
 FROM taxonomy.tree(laplace.word_id('x'));
 
+SELECT count(*) = 1 AS mesh_zero_branches_keeps_self
+FROM structural.mesh_position(laplace.word_id('x'), 0, 0);
+
+SELECT count(*) = 1 AS taxonomy_zero_branches_keeps_self
+FROM taxonomy.tree(laplace.word_id('x'), 0, 0);
+
 SELECT count(*) >= 0 AS leaders_runs FROM ops.band_leaders(ARRAY[1,2], 2);
 
 SELECT count(*) = 1 AS record_one_row,

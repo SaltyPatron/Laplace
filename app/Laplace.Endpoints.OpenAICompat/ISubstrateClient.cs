@@ -49,9 +49,9 @@ internal interface ISubstrateClient
 
     Task<ModalitiesResponse> ModalitiesAsync(CancellationToken ct);
 
-    Task<MeshResponse?> MeshAsync(string idHex, CancellationToken ct);
+    Task<MeshResponse?> MeshAsync(string idHex, int relationLimit, int memberLimit, CancellationToken ct);
 
-    Task<TaxonomyResponse?> TaxonomyAsync(string idHex, CancellationToken ct);
+    Task<TaxonomyResponse?> TaxonomyAsync(string idHex, int depth, int childLimit, CancellationToken ct);
 
     Task<IReadOnlyList<SourceRosterRow>> SourceRosterAsync(byte[] sourceId, int limit, CancellationToken ct);
 
