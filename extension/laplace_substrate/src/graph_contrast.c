@@ -26,28 +26,31 @@
 PG_FUNCTION_INFO_V1(pg_laplace_contrast);
 
 /*
- * consensus_subject_edges is prepared once (static) and re-executed per
- * synset/anchor subject instead of re-planning on every call. Same query,
- * same single bytea argument, same rows read back -- output is unchanged.
+ * The subject frontier is passed as one ordered array. The old implementation
+ * re-executed consensus_subject_edges once per anchor/synset, hiding RBAR behind
+ * a prepared scalar statement. One set query preserves side ordinality while
+ * allowing PostgreSQL to plan and execute the whole frontier together.
  */
-static SPIPlanPtr subject_edges_plan = NULL;
+static SPIPlanPtr subject_edges_batch_plan = NULL;
 
 static void
 ensure_subject_edges_plan(void)
 {
-    if (subject_edges_plan == NULL)
+    if (subject_edges_batch_plan == NULL)
     {
-        Oid        argtypes[1] = { BYTEAOID };
+        Oid        argtypes[1] = { BYTEAARRAYOID };
         SPIPlanPtr plan = SPI_prepare(
-            "SELECT type_id, object_id, rating, rd "
-            "FROM converse.consensus_subject_edges($1)",
+            "SELECT u.ord, e.type_id, e.object_id, e.rating, e.rd "
+            "FROM unnest($1) WITH ORDINALITY AS u(subject_id, ord) "
+            "CROSS JOIN LATERAL converse.consensus_subject_edges(u.subject_id) e "
+            "ORDER BY u.ord",
             1, argtypes);
         if (plan == NULL)
             elog(ERROR, "contrast: SPI_prepare failed: %s",
                  SPI_result_code_string(SPI_result));
         if (SPI_keepplan(plan) != 0)
             elog(ERROR, "contrast: SPI_keepplan failed");
-        subject_edges_plan = plan;
+        subject_edges_batch_plan = plan;
     }
 }
 
@@ -170,6 +173,8 @@ pg_laplace_contrast(PG_FUNCTION_ARGS)
     int            feat_n = 9;
     TaxNode       *ax, *ay;
     int            n_ax, n_ay;
+    Datum         *synsets_x = NULL, *synsets_y = NULL;
+    int            ns_x = 0, ns_y = 0;
     ContrastRow   *rows;
     int            n_rows = 0;
     int            emitted = 0;
@@ -203,10 +208,6 @@ pg_laplace_contrast(PG_FUNCTION_ARGS)
     {
         hash128_t seeds_x[32], seeds_y[32];
         int nx = 0, ny = 0;
-        Datum *synsets_x = NULL;
-        Datum *synsets_y = NULL;
-        int    ns_x = 0, ns_y = 0;
-
         seeds_x[nx++] = datum_to_hash128(x);
         spi_fetch_synset_ids(x, &synsets_x, &ns_x);
         for (int i = 0; i < ns_x && nx < 32; i++)
@@ -247,49 +248,47 @@ pg_laplace_contrast(PG_FUNCTION_ARGS)
   }
 
     {
-        bytea *subjbuf = (bytea *) palloc(VARHDRSZ + sizeof(hash128_t));
-        Datum  args[1];
-        SET_VARSIZE(subjbuf, VARHDRSZ + sizeof(hash128_t));
+        int        n_x_subjects = ns_x + 1;
+        int        n_subjects = n_x_subjects + ns_y + 1;
+        Datum     *subjects = (Datum *) palloc(sizeof(Datum) * (Size) n_subjects);
+        ArrayType *subject_array;
+        Datum      args[1];
+        int        pos = 0;
+        int        rc;
 
-        for (int side = 0; side < 2; side++)
+        subjects[pos++] = x;
+        for (int i = 0; i < ns_x; i++) subjects[pos++] = synsets_x[i];
+        subjects[pos++] = y;
+        for (int i = 0; i < ns_y; i++) subjects[pos++] = synsets_y[i];
+        subject_array = construct_array(
+            subjects, n_subjects, BYTEAOID, -1, false, TYPALIGN_INT);
+        args[0] = PointerGetDatum(subject_array);
+
+        rc = SPI_execute_plan(subject_edges_batch_plan, args, NULL, true, 0);
+        if (rc != SPI_OK_SELECT)
+            elog(ERROR, "contrast: consensus batch query failed");
+
+        for (uint64 r = 0; r < SPI_processed; r++)
         {
-            Datum  anchor = side == 0 ? x : y;
-            Datum *synsets;
-            int    ns;
-            bool   from_x = side == 0;
+            HeapTuple tup = SPI_tuptable->vals[r];
+            TupleDesc td  = SPI_tuptable->tupdesc;
+            bool      isnull;
+            int64     ord;
+            hash128_t tid, oid;
+            int64     rating, rd;
+            Datum     mu;
 
-            spi_fetch_synset_ids(anchor, &synsets, &ns);
-            for (int si = -1; si < ns; si++)
-            {
-                Datum subj = si < 0 ? anchor : synsets[si];
-                int   rc;
-
-                args[0] = subj;
-                rc = SPI_execute_plan(subject_edges_plan, args, NULL, true, 0);
-                if (rc != SPI_OK_SELECT)
-                    elog(ERROR, "contrast: consensus query failed");
-
-                for (uint64 r = 0; r < SPI_processed; r++)
-                {
-                    HeapTuple tup = SPI_tuptable->vals[r];
-                    TupleDesc td  = SPI_tuptable->tupdesc;
-                    bool      isnull;
-                    hash128_t tid, oid;
-                    int64     rating, rd;
-                    Datum     mu;
-
-                    tid = datum_to_hash128(SPI_getbinval(tup, td, 1, &isnull));
-                    oid = datum_to_hash128(SPI_getbinval(tup, td, 2, &isnull));
-                    rating = DatumGetInt64(SPI_getbinval(tup, td, 3, &isnull));
-                    rd = DatumGetInt64(SPI_getbinval(tup, td, 4, &isnull));
-                    if (!contrast_type_allowed(&tid, feat_types, feat_n))
-                        continue;
-                    mu = eff_mu_display_numeric(rating, rd);
-                    contrast_add_fact(rowmap, &rows, &n_rows, &rows_cap, &tid, &oid, mu, from_x);
-                }
-            }
+            ord = DatumGetInt64(SPI_getbinval(tup, td, 1, &isnull));
+            tid = datum_to_hash128(SPI_getbinval(tup, td, 2, &isnull));
+            oid = datum_to_hash128(SPI_getbinval(tup, td, 3, &isnull));
+            rating = DatumGetInt64(SPI_getbinval(tup, td, 4, &isnull));
+            rd = DatumGetInt64(SPI_getbinval(tup, td, 5, &isnull));
+            if (!contrast_type_allowed(&tid, feat_types, feat_n))
+                continue;
+            mu = eff_mu_display_numeric(rating, rd);
+            contrast_add_fact(rowmap, &rows, &n_rows, &rows_cap, &tid, &oid,
+                              mu, ord <= n_x_subjects);
         }
-        pfree(subjbuf);
     }
 
     /* Batch label resolution for the emitted window: the per-row

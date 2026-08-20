@@ -6,7 +6,6 @@ internal static class CpuTopologyCommands
 {
     public static int Run(string[] args)
     {
-        int headroom = 2;
         for (int i = 0; i < args.Length; i++)
         {
             switch (args[i])
@@ -15,15 +14,10 @@ internal static class CpuTopologyCommands
                     Console.WriteLine(CpuTopology.PerformanceCoreCount);
                     return 0;
                 case "--cpu-bound-workers":
-                    if (i + 1 < args.Length && int.TryParse(args[i + 1], out int hr) && hr >= 0)
-                    {
-                        headroom = hr;
-                        i++;
-                    }
-                    Console.WriteLine(CpuTopology.ResolveCpuBoundWorkers(headroom: headroom));
+                    Console.WriteLine(CpuTopology.ResolveCpuBoundWorkers());
                     return 0;
                 case "--io-bound-workers":
-                    Console.WriteLine(CpuTopology.ResolveIoBoundWorkers(headroom: 1));
+                    Console.WriteLine(CpuTopology.ResolveIoBoundWorkers());
                     return 0;
                 case "--ingest-commit-workers":
                 case "--apply-dispatch-workers":
@@ -67,8 +61,8 @@ internal static class CpuTopologyCommands
             + $"logical={CpuTopology.LogicalProcessorCount} "
             + $"p_primary_lps=[{string.Join(",", CpuTopology.PerformanceCoreCpuIndices)}] "
             + $"e_lps=[{string.Join(",", CpuTopology.EfficientCoreCpuIndices)}] "
-            + $"cpu_bound_workers={CpuTopology.ResolveCpuBoundWorkers(headroom: 1)} "
-            + $"io_bound_workers={CpuTopology.ResolveIoBoundWorkers(headroom: 1)} "
+            + $"cpu_bound_workers={CpuTopology.ResolveCpuBoundWorkers()} "
+            + $"io_bound_workers={CpuTopology.ResolveIoBoundWorkers()} "
             + $"apply_partitions={CpuTopology.ResolveApplyPartitions()}");
 
         bool pinOk = CpuTopology.PinCurrentThreadToPerformanceCores();

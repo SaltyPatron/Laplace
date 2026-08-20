@@ -76,7 +76,7 @@ public class CpuTopologyTests
 
     [Fact]
 
-    public void ResolveCpuBoundWorkers_UsesPhysicalPCoresMinusHeadroom()
+    public void ResolveCpuBoundWorkers_UsesFullPhysicalPCorePool()
 
     {
 
@@ -86,13 +86,7 @@ public class CpuTopologyTests
 
         {
 
-            Assert.Equal(7, CpuTopology.ResolveCpuBoundWorkers(headroom: 1));
-
-            Assert.Equal(6, CpuTopology.ResolveCpuBoundWorkers(headroom: 2));
-
-            Assert.Equal(1, CpuTopology.ResolveCpuBoundWorkers(headroom: 20));
-
-            Assert.Equal(4, CpuTopology.ResolveCpuBoundWorkers(headroom: 1, maxCap: 4));
+            Assert.Equal(8, CpuTopology.ResolveCpuBoundWorkers());
 
         }
 
@@ -104,7 +98,7 @@ public class CpuTopologyTests
 
     [Fact]
 
-    public void ResolveIngestCommitWorkers_UsesECorePoolMinusHeadroom()
+    public void ResolveIngestCommitWorkers_UsesFullECorePool()
 
     {
 
@@ -114,9 +108,7 @@ public class CpuTopologyTests
 
         {
 
-            Assert.Equal(15, CpuTopology.ResolveIngestCommitWorkers(headroom: 1));
-
-            Assert.Equal(1, CpuTopology.ResolveIngestCommitWorkers(headroom: 20));
+            Assert.Equal(16, CpuTopology.ResolveIngestCommitWorkers());
 
         }
 
@@ -192,7 +184,7 @@ public class CpuTopologyTests
 
         {
 
-            Assert.Equal(1, CpuTopology.ResolveIngestCommitWorkers(headroom: 1));
+            Assert.Equal(1, CpuTopology.ResolveIngestCommitWorkers());
 
         }
 
@@ -241,5 +233,4 @@ public class CpuTopologyTests
     }
 
 }
-
 

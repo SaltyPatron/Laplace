@@ -60,6 +60,21 @@ internal sealed class WiktionaryComposeHandler : IIngestRecordHandler<Wiktionary
         // the first yield was the 50s/0-committed stall on the 21GB file.
         public TierTree? TreeForBatchProbe => null;
 
+        public long ResidentBytes
+        {
+            get
+            {
+                long bytes = 0;
+                for (int i = 0; i < _trees.Count; i++)
+                {
+                    if (!_owned[i]) continue;
+                    bytes = checked(bytes
+                        + (long)_trees[i].Capacity * MemoryTopology.TierTreeResidentBytesPerCapacity);
+                }
+                return bytes;
+            }
+        }
+
         public Task<byte[]?> ProbeDescentAsync(ISubstrateReader reader, CancellationToken ct) =>
             Task.FromResult<byte[]?>(null);
 

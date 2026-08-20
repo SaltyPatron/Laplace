@@ -250,6 +250,14 @@ public interface IIngestDeferredUnit : IDisposable
 {
     TierTree? TreeForBatchProbe { get; }
 
+    /// <summary>
+    /// Native/managed bytes retained by this unit but not visible in the change builder.
+    /// Zero asks the generic pipeline to measure exposed tier-tree capacity or fall back
+    /// to the source profile. Units which intentionally hide probe trees still report
+    /// their retained allocation here.
+    /// </summary>
+    long ResidentBytes => 0;
+
     Task<byte[]?> ProbeDescentAsync(ISubstrateReader reader, CancellationToken ct = default);
 
     Hash128 DrainInto(SubstrateChangeBuilder builder, double witnessWeight, byte[]? descentBitmap);
@@ -338,6 +346,32 @@ public sealed class IngestBatchConfig
     internal Func<int>? ActiveWorkingSetCount { get; init; }
     internal int EffectiveConcurrentWorkingSets =>
         Math.Max(1, ActiveWorkingSetCount?.Invoke() ?? ConcurrentWorkingSets);
+
+    internal int EffectiveWorkingSetRecordCap
+    {
+        get
+        {
+            int configured = WorkingSetRecordCap ?? int.MaxValue;
+            if (!WorkingSet) return configured;
+            long envelope = IngestSizing.ResolveWorkingSetFlushEnvelopeBytes(
+                EffectiveConcurrentWorkingSets);
+            return Math.Min(configured, IngestSizing.ResolveFlushEnvelopeRecordCap(
+                WorkingSetProfile ?? IngestSourceProfile.Default, envelope));
+        }
+    }
+
+    internal int EffectiveWorkingSetProbeInterval
+    {
+        get
+        {
+            int configured = WorkingSetProbeInterval ?? int.MaxValue;
+            if (!WorkingSet) return configured;
+            long envelope = IngestSizing.ResolveWorkingSetFlushEnvelopeBytes(
+                EffectiveConcurrentWorkingSets);
+            return Math.Min(configured, IngestSizing.ResolveWorkingSetProbeInterval(
+                BatchSize, WorkingSetProfile ?? IngestSourceProfile.Default, envelope));
+        }
+    }
     public int CommitEpoch { get; init; }
     public ISubstrateReader? ContainmentReader { get; init; }
     public Action<long>? ReportUnits { get; init; }
@@ -375,8 +409,8 @@ public sealed class IngestBatchConfig
     internal (int Entities, int Physicalities, int Attestations) ResolveBuilderCapacities()
     {
         int batchRecords = Math.Max(1, BatchSize);
-        int residentRecords = WorkingSet && WorkingSetRecordCap is { } cap
-            ? Math.Min(batchRecords, Math.Max(1, cap))
+        int residentRecords = WorkingSet
+            ? Math.Min(batchRecords, Math.Max(1, EffectiveWorkingSetRecordCap))
             : batchRecords;
 
         return (
@@ -422,21 +456,8 @@ public sealed class IngestBatchConfig
             PhysicalityCapacity = PhysicalityCapacity,
             AttestationCapacity = AttestationCapacity,
             WorkingSet = WorkingSet,
-            WorkingSetProbeInterval = concurrentWorkingSets is { } concurrency
-                ? Math.Min(
-                    WorkingSetProbeInterval ?? int.MaxValue,
-                    IngestSizing.ResolveWorkingSetProbeInterval(
-                        BatchSize,
-                        WorkingSetProfile ?? IngestSourceProfile.Default,
-                        IngestSizing.ResolveWorkingSetFlushEnvelopeBytes(concurrency)))
-                : WorkingSetProbeInterval,
-            WorkingSetRecordCap = concurrentWorkingSets is { } concurrencyCap
-                ? Math.Min(
-                    WorkingSetRecordCap ?? int.MaxValue,
-                    IngestSizing.ResolveFlushEnvelopeRecordCap(
-                        WorkingSetProfile ?? IngestSourceProfile.Default,
-                        IngestSizing.ResolveWorkingSetFlushEnvelopeBytes(concurrencyCap)))
-                : WorkingSetRecordCap,
+            WorkingSetProbeInterval = WorkingSetProbeInterval,
+            WorkingSetRecordCap = WorkingSetRecordCap,
             WorkingSetProfile = WorkingSetProfile,
             ConcurrentWorkingSets = concurrentWorkingSets ?? ConcurrentWorkingSets,
             ActiveWorkingSetCount = activeWorkingSetCount ?? ActiveWorkingSetCount,
@@ -665,9 +686,7 @@ public static class IngestBatchPipeline
         // existence runs once per working set in FinalizeWorkingSetAsync (06 L93-94a).
         // Legacy batch mode uses ProbeChunkSize and probes every flush.
         int probeInterval = config.WorkingSet
-            ? (config.WorkingSetProbeInterval
-               ?? IngestSizing.ResolveWorkingSetProbeInterval(
-                   config.BatchSize, config.WorkingSetProfile ?? IngestSourceProfile.Default))
+            ? config.EffectiveWorkingSetProbeInterval
             : config.ProbeChunkSize;
         var pending = new List<TRecord>(probeInterval);
         var probedAbsent = config.WorkingSet ? new HashSet<Hash128>() : null;
@@ -727,16 +746,21 @@ public static class IngestBatchPipeline
                 }
             }
 
-            // pending.Count must count toward the envelope: InBatch only advances inside
-            // FlushPending. A probeInterval larger than recordCap (Wiktionary units=64 →
-            // probe 32768 vs cap ~516) otherwise held the whole stream until EOF.
-            if (config.WorkingSet && pending.Count > 0
+            // Pending records count through the source model before compose. Composed
+            // deferred units count through their actual retained tree capacity. Check both
+            // after every probe flush so an unexpectedly broad tree closes immediately
+            // instead of waiting for another arbitrary record-count threshold.
+            if (config.WorkingSet
                 && ShouldCloseWorkingSet(state, config, pending.Count))
             {
-                await foreach (var change in FlushPending(pending, handler, reader, state, config, probedAbsent, ct))
+                if (pending.Count > 0)
                 {
-                    yield return change;
-                    ResetBatchScope(handler);
+                    await foreach (var change in FlushPending(
+                                       pending, handler, reader, state, config, probedAbsent, ct))
+                    {
+                        yield return change;
+                        ResetBatchScope(handler);
+                    }
                 }
 
                 if (state.InBatch > 0)
@@ -1286,26 +1310,24 @@ public static class IngestBatchPipeline
         // <= 512 MiB) closes the set continuously in small memory-bounded batches so resident
         // memory stays flat and compose stays fast.
         long envelope = IngestSizing.ResolveWorkingSetFlushEnvelopeBytes(
-            config.ConcurrentWorkingSets);
+            config.EffectiveConcurrentWorkingSets);
 
-        int recordCap = Math.Min(
-            config.WorkingSetRecordCap ?? int.MaxValue,
-            IngestSizing.ResolveFlushEnvelopeRecordCap(profile, envelope));
+        int recordCap = config.EffectiveWorkingSetRecordCap;
         // InBatch + still-buffered pending: pending is not in InBatch until FlushPending.
         int inFlight = state.InBatch + Math.Max(0, pendingCount);
         if (recordCap > 0 && inFlight >= recordCap)
             return true;
 
         long staged = state.Builder.StagedBytesEstimate;
-        if (staged >= envelope)
+        long deferred = state.WorkingSetDeferred is IWorkingSetDeferredBatch resident
+            ? resident.ResidentBytes
+            : 0;
+        long uncomposed = checked(
+            (long)Math.Max(0, pendingCount) * profile.UncomposedResidentBytesPerRecord);
+        if (staged >= envelope
+            || deferred >= envelope - staged
+            || uncomposed >= envelope - staged - deferred)
             return true;
-
-        if (inFlight > 0)
-        {
-            long est = IngestSizing.EstimateWorkingSetBytes(inFlight, staged, profile);
-            if (est >= envelope)
-                return true;
-        }
 
         return false;
     }
@@ -1332,6 +1354,7 @@ public static class IngestBatchPipeline
                 batch, handler, reader, state.Builder, config, probedAbsent, ct).ConfigureAwait(false);
             deferred.Shortcircuited.AddRange(composed.Shortcircuited);
             deferred.Pending.AddRange(composed.Pending);
+            deferred.AddResidentBytes(composed.ResidentBytes);
             foreach (var (_, units) in composed.Shortcircuited)
                 state.AddUnits(units);
             foreach (var (record, _) in composed.Pending)

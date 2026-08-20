@@ -96,7 +96,7 @@ public sealed class UdComposeFanMeasurementTests
     }
 
     [Fact]
-    public void ResidentSlackCoversARecordWhoseSourceTextCannotSupplyTokenForms()
+    public void ExactTreeCapacityMeasuresARecordWhoseSourceTextCannotSupplyTokenForms()
     {
         var tokens = Enumerable.Range(1, 24)
             .Select(i => Token(i, $"detached_{i}", i % 4 == 0 ? $"lemma_{i}" : null))
@@ -104,11 +104,14 @@ public sealed class UdComposeFanMeasurementTests
         var sentence = new UdSentence(null, tokens, [], 24);
 
         using var forest = UdContentForest.Build(sentence);
-        double budgetedUnits = IngestSourceProfile.UdSentence.EstComposeUnitsPerRecord
-            * IngestSizing.WorkingSetResidentSlack;
+        long measuredBytes = forest.Trees
+            .Where(static tree => tree is not null)
+            .Sum(static tree =>
+                (long)tree!.Capacity * MemoryTopology.TierTreeResidentBytesPerCapacity);
 
-        Assert.True(budgetedUnits >= forest.Trees.Count,
-            $"UD resident budget covers {budgetedUnits:F1} trees but detached sentence needs {forest.Trees.Count}");
+        Assert.True(measuredBytes > 0);
+        Assert.True(forest.Trees.Count > IngestSourceProfile.UdSentence.EstComposeUnitsPerRecord,
+            "fixture must exceed the profile fan so exact capacity, not a fan multiplier, is exercised");
     }
 
     [Fact]

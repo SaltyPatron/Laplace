@@ -621,17 +621,19 @@ file's SPI queries BIND:
 | `graph_cascade.c`, `descent_probe.c`, `content_resolve.c` | 1 array-bound each | batched |
 | `graph_taxonomy.c` | `FROM unnest($1) … CROSS JOIN LATERAL` | one query for the whole frontier |
 | `explore_web.c`, `foundry_crawl.c` | delegate to SQL functions | not per-element SPI |
-| **`graph_contrast.c`** | `consensus_subject_edges($1)` inside `for (si = -1; si < ns; si++)` | **per-element** |
-| **`geometry_successors.c`** | 2 single-bound | **per-element** |
+| `graph_contrast.c` | one `bytea[]` subject-edge query for both endpoints and all resolved synsets | set-sized |
+| `geometry_successors.c` | one `bytea[]` GIN-overlap query; scalar SQL is a one-root adapter | set-sized |
 | ~~`containers_of.c`~~ | fixed in 689511d0 — one probe per hop | done |
 
-**Two remain, not eleven**, and both are on gated or cold paths: `geometry_successors` feeds
-`bubble_up`'s `domain_scores`, which the `cardinality(p_domain_context) > 0` gate keeps off the
-common path entirely; `graph_contrast` backs `converse.contrast`.
+**Zero confirmed native per-element SPI sites remain in this census.** `graph_contrast`
+binds both endpoints plus their synsets in one ordinal-preserving array query.
+`geometry_successors` has one native array implementation; the published scalar operation
+delegates to it and the duplicate single-bound C implementation has been removed.
 
 The general claim that the C layer is "a serial SPI driver" (item 2) does not survive this
-check and is withdrawn. What does survive: **zero files use threads**, so the C layer is
-single-threaded, and it delegates ranking work to SQL rather than computing it.
+check and is withdrawn. Native execution remains backend-local by PostgreSQL design; database
+parallelism belongs in set plans and across independent backend owners, not unmanaged threads
+inside one extension call.
 
 ---
 

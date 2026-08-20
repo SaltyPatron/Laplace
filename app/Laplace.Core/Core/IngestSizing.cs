@@ -59,11 +59,6 @@ public static class IngestSizing
     }
 
     /// <summary>
-    /// Staged-byte estimate under-counts true resident cost ~2.5× (WorkingSetMode).
-    /// </summary>
-    public const double WorkingSetResidentSlack = 2.5;
-
-    /// <summary>
     /// Per-tuple byte estimate used by the ingest runner's apply gate
     /// (<c>IngestRunner.BytesOf</c>) for entities / physicalities / attestations.
     /// </summary>
@@ -433,8 +428,7 @@ public static class IngestSizing
         IngestSourceProfile profile, long? flushEnvelopeBytes = null)
     {
         long envelope = flushEnvelopeBytes ?? ResolveWorkingSetFlushEnvelopeBytes();
-        double perRecord = Math.Max(1, profile.WorkingSetBytesPerRecord) * WorkingSetResidentSlack;
-        long cap = (long)(envelope / perRecord);
+        long cap = envelope / Math.Max(1, profile.UncomposedResidentBytesPerRecord);
         return (int)Math.Clamp(cap, 1, int.MaxValue);
     }
 
@@ -481,7 +475,8 @@ public static class IngestSizing
 
     /// <summary>
     /// Max input records per working set before descent/apply — derived from the RAM budget
-    /// and per-source staged-byte model (includes compose-unit multiplier + resident slack).
+    /// and per-source staged-byte model. The live pipeline replaces this pre-compose
+    /// estimate with actual native tree capacity as soon as each unit is built.
     /// </summary>
     public static int ResolveWorkingSetRecordCap(
         IngestSourceProfile profile, long? workingSetBudgetBytes = null)
@@ -500,7 +495,7 @@ public static class IngestSizing
     public static long EstimateWorkingSetBytes(
         long recordsInSet, long stagedBuilderBytes, IngestSourceProfile profile) =>
         stagedBuilderBytes
-        + (long)(recordsInSet * profile.WorkingSetBytesPerRecord * WorkingSetResidentSlack);
+        + checked(recordsInSet * profile.UncomposedResidentBytesPerRecord);
 
     public static Plan Resolve(
         int performanceCoreCount,
@@ -561,10 +556,10 @@ public static class IngestSizing
         long perWorkerBytes = Math.Max(1, envelope / Math.Max(1, composeWorkers));
 
         // One batch per compose worker fits in the shared envelope, including the
-        // measured managed/native residency slack. There are no source classes,
+        // parsed-record plus declared deferred residency. There are no source classes,
         // powers-of-two bands, or hidden minimum/maximum batch sizes.
-        long records = (long)(perWorkerBytes
-            / Math.Max(1.0, residentBytes * WorkingSetResidentSlack));
+        long perRecordBytes = checked((long)Math.Max(1, estBytesPerRecord) + residentBytes);
+        long records = perWorkerBytes / Math.Max(1, perRecordBytes);
         return IntCount(records);
     }
 

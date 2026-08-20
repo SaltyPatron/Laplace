@@ -156,8 +156,9 @@ public sealed class WorkingSetPipelineTests
         int expected = IngestSizing.ResolveFlushEnvelopeRecordCap(profile, perSetEnvelope);
 
         Assert.Equal(10, shared.ConcurrentWorkingSets);
-        Assert.Equal(expected, shared.WorkingSetRecordCap);
-        Assert.True(shared.WorkingSetProbeInterval <= expected);
+        Assert.Equal(expected, shared.EffectiveWorkingSetRecordCap);
+        Assert.True(shared.EffectiveWorkingSetProbeInterval <= expected);
+        Assert.Equal(24576, shared.WorkingSetRecordCap);
         Assert.Equal(24576, config.WorkingSetRecordCap);
 
         int residentRecords = Math.Min(config.BatchSize, expected);
@@ -166,10 +167,12 @@ public sealed class WorkingSetPipelineTests
         Assert.Equal(residentRecords * 32, capacities.Physicalities);
         Assert.Equal(residentRecords * 8, capacities.Attestations);
 
+        int originalResidentRecords = Math.Min(
+            config.BatchSize, config.EffectiveWorkingSetRecordCap);
         var originalCapacities = config.ResolveBuilderCapacities();
-        Assert.Equal(1024 * 40, originalCapacities.Entities);
-        Assert.Equal(1024 * 32, originalCapacities.Physicalities);
-        Assert.Equal(1024 * 8, originalCapacities.Attestations);
+        Assert.Equal(originalResidentRecords * 40, originalCapacities.Entities);
+        Assert.Equal(originalResidentRecords * 32, originalCapacities.Physicalities);
+        Assert.Equal(originalResidentRecords * 8, originalCapacities.Attestations);
     }
 
     [Fact]
@@ -224,6 +227,25 @@ public sealed class WorkingSetPipelineTests
 
         Assert.Equal(Math.Max(1, IngestTopology.Current.ComposeWorkers / 8), shared);
         Assert.Equal(Math.Max(1, IngestTopology.Current.ComposeWorkers), tail);
+    }
+
+    [Fact]
+    public void WorkingSetEnvelope_ReturnsToTheLastActiveFile()
+    {
+        int activeFiles = 8;
+        var config = WorkingSetConfig(reader: null, probeChunk: 64)
+            .WithActiveWorkingSetConcurrency(8, () => Volatile.Read(ref activeFiles));
+
+        int shared = config.EffectiveWorkingSetRecordCap;
+        Volatile.Write(ref activeFiles, 1);
+        int tail = config.EffectiveWorkingSetRecordCap;
+
+        Assert.True(tail > shared);
+        Assert.Equal(
+            IngestSizing.ResolveFlushEnvelopeRecordCap(
+                config.WorkingSetProfile ?? IngestSourceProfile.Default,
+                IngestSizing.ResolveWorkingSetFlushEnvelopeBytes(1)),
+            tail);
     }
 
     [Fact]

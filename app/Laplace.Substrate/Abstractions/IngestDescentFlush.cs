@@ -4,12 +4,21 @@ using Laplace.SubstrateCRUD;
 namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>Compose-only batch accumulated across flush intervals within one working set.</summary>
-internal sealed class WorkingSetDeferredBatch<TRecord>
+internal interface IWorkingSetDeferredBatch
+{
+    long ResidentBytes { get; }
+}
+
+internal sealed class WorkingSetDeferredBatch<TRecord> : IWorkingSetDeferredBatch
 {
     internal readonly List<(TRecord Record, IIngestDeferredUnit Unit)> Pending = new();
     internal readonly List<(TRecord Record, long Units)> Shortcircuited = new();
+    public long ResidentBytes { get; private set; }
 
     internal bool HasWork => Pending.Count > 0 || Shortcircuited.Count > 0;
+
+    internal void AddResidentBytes(long bytes) =>
+        ResidentBytes = checked(ResidentBytes + Math.Max(0, bytes));
 }
 
 internal static class IngestDescentFlush
@@ -94,9 +103,46 @@ internal static class IngestDescentFlush
         }
 
         for (int i = 0; i < records.Count; i++)
+        {
             batch.Pending.Add((records[i], units[i]));
+            batch.AddResidentBytes(MeasureResidentBytes(units[i], config.WorkingSetProfile));
+        }
         records.Clear();
         return batch;
+    }
+
+    /// <summary>
+    /// Account what is actually resident after compose. Tier trees expose their exact
+    /// native allocation capacity; source records remain managed and are billed by their
+    /// measured input width. Handlers with hidden/non-tree state may report it directly.
+    /// </summary>
+    internal static long MeasureResidentBytes(
+        IIngestDeferredUnit unit, IngestSourceProfile? sourceProfile)
+    {
+        var profile = sourceProfile ?? IngestSourceProfile.Default;
+        long explicitBytes = Math.Max(0, unit.ResidentBytes);
+        long treeBytes = 0;
+
+        if (unit is IMultiTreeIngestDeferredUnit multi)
+        {
+            var seen = new HashSet<TierTree>(ReferenceEqualityComparer.Instance);
+            foreach (var tree in multi.AllProbeTrees)
+            {
+                if (tree is null || !seen.Add(tree)) continue;
+                treeBytes = checked(treeBytes
+                    + (long)tree.Capacity * MemoryTopology.TierTreeResidentBytesPerCapacity);
+            }
+        }
+        else if (unit.TreeForBatchProbe is { } tree)
+        {
+            treeBytes = checked(
+                (long)tree.Capacity * MemoryTopology.TierTreeResidentBytesPerCapacity);
+        }
+
+        long deferredBytes = Math.Max(explicitBytes, treeBytes);
+        if (deferredBytes == 0)
+            deferredBytes = profile.WorkingSetBytesPerRecord;
+        return checked((long)Math.Max(1, profile.EstBytesPerRecord) + deferredBytes);
     }
 
     internal static int ResolveComposeWorkers<TRecord>(

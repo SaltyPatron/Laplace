@@ -195,11 +195,14 @@ public sealed class IngestTopology
 
         bool pinned = CpuTopology.PinCurrentThreadToPerformanceCores();
 
-        int fileWorkers = CpuTopology.ResolveCpuBoundWorkers(headroom: 2);
+        // File pipelines and their compose fans share this one P-core pool; they do
+        // not each own an independently headroom-reduced pool. Active files divide
+        // ComposeWorkers in IngestDescentFlush and the tail receives the released lanes.
+        int fileWorkers = CpuTopology.ResolveCpuBoundWorkers();
 
-        int composeWorkers = CpuTopology.ResolveCpuBoundWorkers(headroom: 1);
+        int composeWorkers = CpuTopology.ResolveCpuBoundWorkers();
 
-        int ioWorkersAvailable = CpuTopology.ResolveIoBoundWorkers(headroom: 1);
+        int ioWorkersAvailable = CpuTopology.ResolveIoBoundWorkers();
 
         const int applyDispatchWorkers = 1;
 
