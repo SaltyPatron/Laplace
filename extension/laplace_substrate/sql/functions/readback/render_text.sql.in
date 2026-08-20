@@ -1,4 +1,6 @@
-CREATE OR REPLACE FUNCTION realize.render_text(p_id bytea, p_max_depth integer DEFAULT 32)
+-- Exact rendering follows the complete, cycle-safe constituent DAG. A positive
+-- depth remains available when a caller explicitly requests a preview.
+CREATE OR REPLACE FUNCTION realize.render_text(p_id bytea, p_max_depth integer DEFAULT 0)
     RETURNS text
     AS 'MODULE_PATHNAME', 'pg_laplace_render_text'
     LANGUAGE C STABLE;

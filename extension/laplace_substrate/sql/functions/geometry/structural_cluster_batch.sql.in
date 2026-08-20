@@ -83,7 +83,7 @@ BEGIN ATOMIC
         FROM render_input i
         CROSS JOIN LATERAL unnest(
             i.ids,
-            realize.render_text_batch(i.ids, 48)) AS r(entity_id, label)
+            realize.render_text_batch(i.ids)) AS r(entity_id, label)
     ), recurrences AS MATERIALIZED (
         SELECT s.entity_id, count(p.id)::bigint AS recurrence
         FROM survivor_ids s

@@ -393,7 +393,7 @@ BEGIN
     realized AS MATERIALIZED (
         SELECT i.a,
                realize.resolve_name_batch(i.a, p_lang) AS lbl,
-               realize.render_text_batch(i.a, 64) AS txt
+               realize.render_text_batch(i.a) AS txt
         FROM ids i
     ),
     labels AS MATERIALIZED (

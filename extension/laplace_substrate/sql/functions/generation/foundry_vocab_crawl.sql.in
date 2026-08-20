@@ -146,7 +146,7 @@ CREATE OR REPLACE FUNCTION generation.foundry_vocab_crawl(
     rendered AS (
         SELECT u.entity_id, u.s, a.ws[u.ord::int] AS weight, a.prs[u.ord::int] AS pri
         FROM ids_arr a
-        CROSS JOIN LATERAL unnest(a.ids, realize.render_text_batch(a.ids, 8))
+        CROSS JOIN LATERAL unnest(a.ids, realize.render_text_batch(a.ids))
                    WITH ORDINALITY AS u(entity_id, s, ord)
         WHERE a.ids IS NOT NULL AND cardinality(a.ids) > 0
     ),

@@ -9,7 +9,7 @@
  *   COALESCE(
  *     realize._has_name(id, lang),      -- arm 1: first NON-EMPTY render
  *     realize._synset_lemma(id, lang),  -- arm 2: first NON-EMPTY render
- *     NULLIF(realize.render_text(id, 24), ''),  -- arm 3: self render
+ *     NULLIF(realize.render_text(id), ''),  -- arm 3: exact self render
  *     realize._translation(id, lang),   -- arm 4: first NON-EMPTY render
  *     realize._canonical(id),           -- arm 5: first row, text AS-IS
  *     realize._defines(id))             -- arm 6: TOP-mu row, render AS-IS
@@ -28,10 +28,9 @@
  *     never matches), identical to the scalar helpers;
  *   - abstention: unresolvable ids yield SQL NULL, never hex.
  *
- * All candidate rendering funnels through ONE realize.render_text_batch($ids, 24) call
- * (generate_walk.c) — one shared constituent closure + memo across every
- * candidate of every arm plus the inputs themselves. Depth 24 matches every
- * realize.render_text(x, 24) in the scalar ladder.
+ * All candidate rendering funnels through ONE realize.render_text_batch($ids) call
+ * (generate_walk.c) — one shared, complete, cycle-safe constituent closure + memo
+ * across every candidate of every arm plus the inputs themselves.
  */
 #include "postgres.h"
 
@@ -114,7 +113,7 @@ static const char *Q_DEFINES =
     " ORDER BY g.subject_id, mu DESC, g.object_id";   /* object_id CLOSES the order */
 
 static const char *Q_RENDER =
-    "SELECT realize.render_text_batch($1, 24)";
+    "SELECT realize.render_text_batch($1)";
 
 static SPIPlanPtr ensure_plan(SPIPlanPtr *slot, const char *sql,
                               int nargs, const Oid *argtypes);

@@ -36,7 +36,7 @@ CREATE OR REPLACE FUNCTION generation.corpus_word_vocab(p_size int, p_trajs int 
         SELECT i.id, t.s
         FROM pages p,
              LATERAL unnest(p.ids) WITH ORDINALITY AS i(id, ord),
-             LATERAL unnest(realize.render_text_batch(p.ids, 80)) WITH ORDINALITY AS t(s, ord)
+             LATERAL unnest(realize.render_text_batch(p.ids)) WITH ORDINALITY AS t(s, ord)
         WHERE i.ord = t.ord
     )
     SELECT xr.s, xw.c

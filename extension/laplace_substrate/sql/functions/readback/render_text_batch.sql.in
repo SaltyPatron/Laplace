@@ -1,4 +1,6 @@
-CREATE OR REPLACE FUNCTION realize.render_text_batch(p_ids bytea[], p_max_depth integer DEFAULT 8)
+-- Same exact-render law as render_text: zero walks the complete cycle-safe DAG;
+-- a positive depth is caller-owned preview policy, never an infrastructure cap.
+CREATE OR REPLACE FUNCTION realize.render_text_batch(p_ids bytea[], p_max_depth integer DEFAULT 0)
     RETURNS text[]
     AS 'MODULE_PATHNAME', 'pg_laplace_render_text_batch'
     LANGUAGE C STABLE;

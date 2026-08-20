@@ -7,7 +7,7 @@
 -- projection (every node expanded twice, through the slow path). Rendering ~15 short names
 -- fanned into hundreds of per-node function calls and timed out under load.
 --
--- This version removes the per-node function entirely and keeps the work bounded:
+-- This version removes the per-node function entirely and keeps the work set-based:
 --   * reach  — node-recursion (dedup on entity_id, so a shared node is expanded once per depth
 --               it is reached at, NOT once per incoming edge; edge-recursion would re-expand a
 --               common word/codepoint once per parent — a fan-in blow-up on real documents).
@@ -16,13 +16,14 @@
 --   * picked — ONE physicalities row per reached node, chosen SET-BASED via DISTINCT ON over a
 --               join, replacing N correlated `ORDER BY id LIMIT 1` subqueries with one sort.
 --   * final  — expand each distinct node exactly once to emit its edges.
--- Termination: the content law makes the constituent DAG acyclic (constituents are strictly
--- lower-tier), and the depth cap is a belt-and-braces bound; leaves (codepoints, no type-1
--- trajectory) yield zero rows and stop the descent.
+-- Termination is structural rather than a fitted depth number: the content law makes
+-- constituents a DAG, and PostgreSQL's CYCLE clause also stops a malformed stored cycle.
+-- Zero means exact/full closure; a positive p_max_depth remains an explicit caller preview
+-- budget. Leaves (codepoints, no type-1 trajectory) yield zero rows and stop descent.
 DROP FUNCTION IF EXISTS laplace.constituents_closure(bytea[], integer);
 CREATE OR REPLACE FUNCTION realize.constituents_closure(
     p_roots bytea[],
-    p_max_depth integer DEFAULT 32
+    p_max_depth integer DEFAULT 0
 )
 RETURNS TABLE(
     parent_id bytea,
@@ -67,12 +68,14 @@ WITH RECURSIVE reach(entity_id, depth) AS (
         LIMIT 1
     ) ph
     CROSS JOIN LATERAL public.laplace_trajectory_constituents(ph.trajectory) AS u
-    WHERE rc.depth < GREATEST(COALESCE(p_max_depth, 32), 0)
-),
+    WHERE NOT rc.is_cycle
+      AND (COALESCE(p_max_depth, 0) = 0 OR rc.depth < p_max_depth)
+) CYCLE entity_id SET is_cycle USING path,
 node AS (
     SELECT DISTINCT entity_id
     FROM reach
-    WHERE depth < GREATEST(COALESCE(p_max_depth, 32), 0)
+    WHERE NOT is_cycle
+      AND (COALESCE(p_max_depth, 0) = 0 OR depth < p_max_depth)
 ),
 picked AS (
     -- One physicalities row per node, set-based (not a per-node LIMIT 1).

@@ -52,7 +52,7 @@ CREATE OR REPLACE FUNCTION converse.recall_interaction_response(p_topic bytea, p
         SELECT r.*, row_number() OVER (ORDER BY r.rank DESC,r.mu DESC,r.object_id) AS rn FROM ranked r
     ), batch AS MATERIALIZED (
         SELECT realize.label(p_topic) AS topic,
-               realize.render_text_batch(array_agg(object_id ORDER BY rn),96) AS objects
+               realize.render_text_batch(array_agg(object_id ORDER BY rn)) AS objects
         FROM numbered
     )
     SELECT b.topic || ' — ' || r.phrase || ' ' || b.objects[r.rn] AS reply,

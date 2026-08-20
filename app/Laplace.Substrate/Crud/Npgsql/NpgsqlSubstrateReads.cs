@@ -2631,19 +2631,18 @@ public static class NpgsqlSubstrateReads
                 p.Add("type", NpgsqlDbType.Bytea).Value = typeId;
             }, ct: ct, label: "attestation_subject", onError: onError);
 
-    /// <summary><c>realize.render_text_batch(ids, max_chars)</c>.</summary>
+    /// <summary>Exact <c>realize.render_text_batch(ids)</c>.</summary>
     public static async Task<string[]?> RenderTextBatchAsync(
-        NpgsqlDataSource dataSource, byte[][] ids, int maxChars, CancellationToken ct,
+        NpgsqlDataSource dataSource, byte[][] ids, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null)
     {
         var scalar = await NpgsqlRead.ExecuteScalarAsync<object>(dataSource, """
-            SELECT realize.render_text_batch(@ids, @max)
+            SELECT realize.render_text_batch(@ids)
             """,
             p =>
             {
                 var parameter = p.AddWithValue("ids", ids);
                 parameter.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
-                p.AddWithValue("max", maxChars);
             }, ct: ct, label: "render_text_batch", onError: onError).ConfigureAwait(false);
         return scalar as string[];
     }

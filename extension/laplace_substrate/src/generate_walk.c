@@ -1240,7 +1240,7 @@ render_node(HTAB *closure, HTAB *memo, Datum id, int depth, int max_depth)
         return e->text;
     e->text = NULL;
 
-    if (depth < max_depth)
+    if (max_depth == 0 || depth < max_depth)
     {
         ClosureParent *pe = (ClosureParent *) hash_search(closure, key, HASH_FIND, &found);
 
@@ -1308,7 +1308,11 @@ pg_laplace_render_text(PG_FUNCTION_ARGS)
     if (PG_ARGISNULL(0))
         PG_RETURN_NULL();
     id = PG_GETARG_DATUM(0);
-    max_depth = PG_ARGISNULL(1) ? 32 : PG_GETARG_INT32(1);
+    max_depth = PG_ARGISNULL(1) ? 0 : PG_GETARG_INT32(1);
+    if (max_depth < 0)
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("render_text: max_depth must be zero or positive")));
 
     if (SPI_connect() != SPI_OK_CONNECT)
         elog(ERROR, "render_text: SPI_connect failed");
@@ -1399,7 +1403,11 @@ pg_laplace_render_text_batch(PG_FUNCTION_ARGS)
     if (PG_ARGISNULL(0))
         PG_RETURN_NULL();
     arr = PG_GETARG_ARRAYTYPE_P(0);
-    max_depth = PG_ARGISNULL(1) ? 8 : PG_GETARG_INT32(1);
+    max_depth = PG_ARGISNULL(1) ? 0 : PG_GETARG_INT32(1);
+    if (max_depth < 0)
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("render_text_batch: max_depth must be zero or positive")));
 
     if (ARR_NDIM(arr) == 0)
         PG_RETURN_ARRAYTYPE_P(construct_empty_array(TEXTOID));

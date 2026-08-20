@@ -20,6 +20,10 @@ public sealed class RenderBeforeSelectGateTests
         @"\brow_number\s*\(\s*\)\s*over\s*\(\s*\)",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
+    private static readonly Regex FittedExactRenderDepth = new(
+        @"\brender_text(?!_fast)(?:_batch)?\s*\([^\r\n]*,\s*\d+\s*\)",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
     private static readonly string[] ExcludedDirectories = ["realize/", "readback/"];
     private static readonly string[] ExcludedPrefixes = ["converse/label"];
     private static readonly string[] ExcludedFiles = ["lexical/type_label.sql.in"];
@@ -179,5 +183,38 @@ public sealed class RenderBeforeSelectGateTests
         Assert.Contains("type_ids AS MATERIALIZED", sql);
         Assert.Contains("lexical.type_label_batch(type_ids.a)", sql);
         Assert.DoesNotContain("lexical.type_label_batch(object_ids.a)", sql);
+    }
+
+    [Fact]
+    public void ExactRendering_WalksTheCompleteCycleSafeDag()
+    {
+        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
+        var sqlRoot = Path.Combine(repoRoot, "extension", "laplace_substrate", "sql");
+        var violations = Directory.EnumerateFiles(sqlRoot, "*.sql.in", SearchOption.AllDirectories)
+            .Select(file => new
+            {
+                Relative = Path.GetRelativePath(sqlRoot, file).Replace('\\', '/'),
+                Sql = StripSqlComments(File.ReadAllText(file)),
+            })
+            .Where(x => FittedExactRenderDepth.IsMatch(x.Sql))
+            .Select(x => x.Relative)
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        Assert.True(violations.Count == 0,
+            "exact rendering must not silently truncate a valid constituent DAG; "
+            + "use render_text_fast for an explicit preview budget:\n  "
+            + string.Join("\n  ", violations));
+
+        var closure = File.ReadAllText(Path.Combine(
+            FunctionsRoot(repoRoot), "readback", "constituents_closure.sql.in"));
+        Assert.Contains("p_max_depth integer DEFAULT 0", closure, StringComparison.Ordinal);
+        Assert.Contains("CYCLE entity_id SET is_cycle USING path", closure, StringComparison.Ordinal);
+
+        var native = File.ReadAllText(Path.Combine(
+            repoRoot, "extension", "laplace_substrate", "src", "generate_walk.c"));
+        Assert.Contains("if (max_depth == 0 || depth < max_depth)", native,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("render_text_batch($1, 32)", native, StringComparison.Ordinal);
     }
 }

@@ -295,7 +295,7 @@ BEGIN
         CROSS JOIN LATERAL unnest(e.ids) AS u(id)
     ),
     realized AS MATERIALIZED (
-        SELECT i.a, realize.render_text_batch(i.a, 64) AS txt
+        SELECT i.a, realize.render_text_batch(i.a) AS txt
         FROM ids i
     ),
     labels AS MATERIALIZED (

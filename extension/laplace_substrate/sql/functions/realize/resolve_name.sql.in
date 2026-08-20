@@ -145,7 +145,7 @@ CREATE OR REPLACE FUNCTION realize.resolve_name(
             -- ONE closure walk for every candidate, position-aligned (the alignment is
             -- pinned by tests/sql/realize_ladder_parity.sql).
             lbl AS MATERIALIZED (
-                SELECT realize.render_text_batch(array_agg(r.name_id ORDER BY r.rn), 24) AS s
+                SELECT realize.render_text_batch(array_agg(r.name_id ORDER BY r.rn)) AS s
                 FROM ranked r
             )
             SELECT l.s[r.rn]
