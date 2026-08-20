@@ -549,13 +549,27 @@ public sealed class IngestRunner
                             _obs.OnBulkCompletion(
                                 decomposer.SourceName,
                                 foldMetrics.LastFoldDrainWallClock,
-                                foldMetrics.LastWriterMaintenanceWallClock);
+                                foldMetrics.LastWriterMaintenanceWallClock,
+                                foldMetrics.LastFoldSpanWallClock,
+                                foldMetrics.ConsensusUpsertBackendWallClock,
+                                foldMetrics.HighwayMaskBackendWallClock,
+                                foldMetrics.ConsensusUpsertCalls,
+                                foldMetrics.HighwayMaskCalls,
+                                foldMetrics.HighwayMaskPairs);
                             log.LogInformation(
                                 "LAPSIGHT_COMPLETION source={Source} fold_drain_ms={FoldMs} "
-                                + "writer_maintenance_ms={MaintenanceMs}",
+                                + "writer_maintenance_ms={MaintenanceMs} fold_span_ms={FoldSpanMs} "
+                                + "consensus_backend_ms={ConsensusMs} consensus_calls={ConsensusCalls} "
+                                + "mask_backend_ms={MaskMs} mask_calls={MaskCalls} mask_pairs={MaskPairs}",
                                 decomposer.SourceName,
                                 foldMetrics.LastFoldDrainWallClock.TotalMilliseconds,
-                                foldMetrics.LastWriterMaintenanceWallClock.TotalMilliseconds);
+                                foldMetrics.LastWriterMaintenanceWallClock.TotalMilliseconds,
+                                foldMetrics.LastFoldSpanWallClock.TotalMilliseconds,
+                                foldMetrics.ConsensusUpsertBackendWallClock.TotalMilliseconds,
+                                foldMetrics.ConsensusUpsertCalls,
+                                foldMetrics.HighwayMaskBackendWallClock.TotalMilliseconds,
+                                foldMetrics.HighwayMaskCalls,
+                                foldMetrics.HighwayMaskPairs);
                         }
                     }
                 }

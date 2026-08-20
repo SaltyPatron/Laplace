@@ -9,6 +9,12 @@ public interface IConsensusFoldMetrics
     long CellsFolded { get; }
     TimeSpan LastFoldDrainWallClock => TimeSpan.Zero;
     TimeSpan LastWriterMaintenanceWallClock => TimeSpan.Zero;
+    TimeSpan LastFoldSpanWallClock => TimeSpan.Zero;
+    TimeSpan ConsensusUpsertBackendWallClock => TimeSpan.Zero;
+    TimeSpan HighwayMaskBackendWallClock => TimeSpan.Zero;
+    long ConsensusUpsertCalls => 0;
+    long HighwayMaskCalls => 0;
+    long HighwayMaskPairs => 0;
 }
 
 public enum BulkRunCompletionPhase

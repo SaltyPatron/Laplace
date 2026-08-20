@@ -169,20 +169,16 @@ public static class IngestSizing
     public sealed record ConsensusFoldPlan(
         int Connections,
         int ChunkCells,
-        int MinSegmentCells,
-        int ParallelDeltaMinAttestations,
         int PipelineDepth,
         int DeltaCapacityCells,
         int MaskPairCapacity)
     {
         public void Log() => Console.Error.WriteLine(
-            "consensus_fold_sizing: connections={0} chunk_cells={1} min_segment_cells={2} "
-            + "parallel_delta_min={3} pipeline_depth={4} delta_capacity_cells={5} "
-            + "mask_pair_capacity={6} transit_bytes_per_cell={7} mask_pair_bytes={8}",
+            "consensus_fold_sizing: connections={0} chunk_cells={1} "
+            + "pipeline_depth={2} delta_capacity_cells={3} "
+            + "mask_pair_capacity={4} transit_bytes_per_cell={5} mask_pair_bytes={6}",
             Connections,
             ChunkCells,
-            MinSegmentCells,
-            ParallelDeltaMinAttestations,
             PipelineDepth,
             DeltaCapacityCells,
             MaskPairCapacity,
@@ -253,11 +249,6 @@ public static class IngestSizing
         int chunkCells = IntCount(perConnectionBytes
             / MemoryTopology.ConsensusFoldTransitBytesPerCell);
 
-        // A small type run should not create one transaction per core. The minimum
-        // is the machine-sized chunk divided among the available writers, so it
-        // scales down/up with both memory and topology.
-        int minSegmentCells = Math.Max(1, chunkCells / connections);
-
         // This budget is already the fold/mask owner's share of the client domain;
         // compose, apply transit, and exact caches have their own shares in
         // MemoryTopology.WorkingSetResidentOwners. Subtracting those owners again
@@ -272,11 +263,51 @@ public static class IngestSizing
         return new ConsensusFoldPlan(
             connections,
             chunkCells,
-            minSegmentCells,
-            chunkCells,
             pipelineDepth,
             deltaCapacityCells,
             maskPairCapacity);
+    }
+
+    /// <summary>
+    /// Allocate the live connection topology across type runs without a row-count
+    /// threshold. Every run gets one lane; spare connections repeatedly split the
+    /// run with the largest current per-lane load. A run never gets more lanes than
+    /// cells. When there are more types than connections, the global connection
+    /// gate schedules their one-lane jobs work-conservingly.
+    /// </summary>
+    public static int[] AllocateFoldRunWidths(IReadOnlyList<int> lengths, int connections)
+    {
+        ArgumentNullException.ThrowIfNull(lengths);
+        if (lengths.Count == 0) return [];
+        connections = Math.Max(1, connections);
+
+        var widths = new int[lengths.Count];
+        for (int i = 0; i < lengths.Count; i++)
+        {
+            if (lengths[i] <= 0)
+                throw new ArgumentOutOfRangeException(nameof(lengths), "fold runs must be non-empty");
+            widths[i] = 1;
+        }
+
+        int spare = Math.Max(0, connections - lengths.Count);
+        while (spare-- > 0)
+        {
+            int best = -1;
+            int bestLoad = 0;
+            for (int i = 0; i < lengths.Count; i++)
+            {
+                if (widths[i] >= lengths[i]) continue;
+                int load = (lengths[i] + widths[i] - 1) / widths[i];
+                if (load > bestLoad)
+                {
+                    best = i;
+                    bestLoad = load;
+                }
+            }
+            if (best < 0) break;
+            widths[best]++;
+        }
+        return widths;
     }
 
     /// <summary>
