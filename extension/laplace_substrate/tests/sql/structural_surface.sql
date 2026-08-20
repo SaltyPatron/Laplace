@@ -2,7 +2,10 @@ CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE EXTENSION laplace_geom;
 CREATE EXTENSION laplace_substrate;
 
-SELECT count(*) = 7 AS structural_functions_present
+-- count DISTINCT proname, not rows: entity_curve and trajectory_unpacked_points
+-- now carry a typed (entity, physicality_type) overload beside the content-lane
+-- default, so a row count asserts arity rather than the presence this names.
+SELECT count(DISTINCT p.proname) = 7 AS structural_functions_present
 FROM pg_proc p
 JOIN pg_namespace n ON n.oid = p.pronamespace
 WHERE n.nspname = 'structural'

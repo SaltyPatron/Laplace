@@ -2488,7 +2488,7 @@ public static class NpgsqlSubstrateReads
     public readonly record struct ChessGameDetailRow(
         string? WhiteIdHex, string White, string? BlackIdHex, string Black,
         string? Result, string? PlayedOn, string? Event, string? Eco,
-        string? Termination, string? TimeControl, string? TcClass, string? Movetext);
+        string? Termination, string? TimeControl, string? TcClass);
 
     /// <summary><c>chess.game(id)</c>.</summary>
     public static Task<IReadOnlyList<ChessGameDetailRow>> ChessGameAsync(
@@ -2497,7 +2497,7 @@ public static class NpgsqlSubstrateReads
         NpgsqlRead.ReadRowsAsync(dataSource, """
             SELECT encode(white_id, 'hex'), white, encode(black_id, 'hex'), black,
                    result, played_on, event, eco, termination, time_control,
-                   tc_class, movetext
+                   tc_class
             FROM chess.game(@id)
             """,
             static r => new ChessGameDetailRow(
@@ -2511,8 +2511,7 @@ public static class NpgsqlSubstrateReads
                 r.IsDBNull(7) ? null : r.GetString(7),
                 r.IsDBNull(8) ? null : r.GetString(8),
                 r.IsDBNull(9) ? null : r.GetString(9),
-                r.IsDBNull(10) ? null : r.GetString(10),
-                r.IsDBNull(11) ? null : r.GetString(11)),
+                r.IsDBNull(10) ? null : r.GetString(10)),
             p => p.Add("id", NpgsqlDbType.Bytea).Value = id,
             ct: ct, label: "chess_game", onError: onError,
             timeoutSeconds: 60);

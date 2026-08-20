@@ -55,7 +55,6 @@ public sealed class RenderBeforeSelectGateTests
             ["recall/recall_is_a_no_reply.sql.in"] = 4,     // exactly two endpoint ids
             ["recall/recall_related_response.sql.in"] = 1,  // MATERIALIZED topic label
             ["recall/recall_what_is_response.sql.in"] = 1,  // MATERIALIZED topic label
-            ["chess/chess_game.sql.in"] = 1,                // one game document
             ["consensus/relate_path.sql.in"] = 1,           // one winning relation plane
         };
 
@@ -149,7 +148,12 @@ public sealed class RenderBeforeSelectGateTests
         // total shrinks with it. Shrink-only is the point — this number may fall as
         // sites migrate to a batch surface, and may not rise without classifying the
         // new site in SingletonSites first.
-        Assert.Equal(16, actual.Values.Sum());
+        //
+        // 16 -> 15: chess/chess_game.sql.in realized one game document — the stored
+        // PGN movetext. #1258 stopped storing PGN and this change removed the dead
+        // column, so the site is gone rather than exempted. The mainline is now the
+        // line's typed move trajectory, rendered by replay outside SQL.
+        Assert.Equal(15, actual.Values.Sum());
     }
 
     [Fact]
