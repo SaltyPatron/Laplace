@@ -235,7 +235,7 @@ internal sealed partial class SubstrateClient
     /// <summary>The career page: record by colour, the Elo the source tagged, the rivals.</summary>
     public async Task<ChessPlayerResponse?> ChessPlayerAsync(string idHex, int opponentLimit, CancellationToken ct)
     {
-        if (TryParseIdHex(idHex) is null) return null;
+        if (TryParseIdHex(idHex) is not { } id) return null;
 
         var record = await NpgsqlSubstrateReads.ChessPlayerRecordAsync(
             _dataSource, id, ct, TranslateReadError);
