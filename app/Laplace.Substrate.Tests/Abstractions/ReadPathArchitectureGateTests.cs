@@ -230,4 +230,17 @@ public sealed class ReadPathArchitectureGateTests
         Assert.DoesNotContain("cand_cap = 4096", native, StringComparison.Ordinal);
         Assert.Contains("MaxAllocSize", native, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void GenerationWalk_DerivesCapacityFromTheRequestedFrontier()
+    {
+        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
+        var native = File.ReadAllText(Path.Combine(repoRoot, "extension",
+            "laplace_substrate", "src", "generate_walk.c"));
+
+        Assert.DoesNotContain("GENERATE_NODE_BUDGET", native, StringComparison.Ordinal);
+        Assert.DoesNotMatch(@"beam\s*\*\s*3", native);
+        Assert.Contains("(int64) n_frontier * (int64) beam", native, StringComparison.Ordinal);
+        Assert.Contains("MaxAllocSize / sizeof(WalkNode)", native, StringComparison.Ordinal);
+    }
 }
