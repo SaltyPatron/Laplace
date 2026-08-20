@@ -172,7 +172,7 @@ paths are C:
 | Source | Entry points |
 |---|---|
 | `recall.c` | `recall_intent`, `recall`, `recall_session`, `define_fast`, `word_shape_peers_fast` |
-| `generate_walk.c` | `walk_branches` (batches natively against `consensus`), `walk_strongest` (steps via `consensus_walk_edges`), node budget 10⁶ |
+| `generate_walk.c` | `walk_branches` (batches natively against `consensus` with per-level capacity derived from frontier × caller breadth), `walk_strongest` (steps via `consensus_walk_edges`) |
 | `astar_path.c` | Dijkstra by default; opt-in admissible geometric A* heuristic |
 | `prompt_coherence.c` | joint sense/topic/relation election across a prompt's tokens |
 | `trajectory_generate.c`, `steered_walk.c` | n-gram descent and topic-steered walk |

@@ -25,7 +25,6 @@
 PG_FUNCTION_INFO_V1(pg_laplace_walk_branches);
 PG_FUNCTION_INFO_V1(pg_laplace_walk_strongest);
 
-#define GENERATE_NODE_BUDGET 1000000
 /* Local constant -- avoids relying on M_PI (not portably defined under MSVC
  * without _USE_MATH_DEFINES, and this file doesn't otherwise need <math.h>). */
 #define WALK_PI 3.14159265358979323846
@@ -313,8 +312,9 @@ mask_overlaps(Datum highway_mask_bytea, const laplace_mask256_t *intent_mask)
  * ST_DumpPoints-over-every-match scan containers_of.c's own comment warns
  * against for large arrays), dumps its points, and mantissa_unpacks each
  * vertex looking for the two target ordinals. Applied only to the
- * post-score-sort shortlist (top beam*3), not every raw candidate -- bounds
- * SPI round-trips to O(beam) per frontier node per level, not O(fan-out).
+ * exact post-score-sort admission set. Belief is the primary ordering key and
+ * continuity is only a tie-break bonus, so only candidates through the full
+ * base-score tie at the requested beam boundary can affect the result.
  */
 /*
  * Single-key containment ONLY (proven ~2ms/GIN-index-backed regardless of
@@ -554,7 +554,7 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
      * 64 ways) pays a 64-partition Append scan on every miss -- measured
      * 42ms/call live via EXPLAIN ANALYZE, and misses are the COMMON case
      * (most walked entities aren't a trajectory constituent of anything).
-     * At beam*3 calls/frontier-node across an unfiltered deep walk this was
+     * Per-candidate calls across an unfiltered deep walk were
      * caught turning a sub-second regress test into 24s. Needs a
      * hilbert-band-scoped search before it's cheap enough to default on --
      * tracked as follow-up, not shipped silently slow. recall_walk_response
@@ -581,7 +581,7 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
     ensure_relationtype_type_id();
     kappa = spi_fetch_rd_kappa();
 
-    cap = 256;
+    cap = 1;
     nodes = (WalkNode *) palloc(sizeof(WalkNode) * cap);
 
     nodes[0].parent    = -1;
@@ -616,7 +616,9 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
         seen = hash_create("walk_branches seen", 1024, &ctl, HASH_ELEM | HASH_BLOBS);
         hash_search(seen, &root_id, HASH_ENTER, &found);
 
-        for (int frontier_start = 0, level = 0; level < max_depth; level++)
+        for (int frontier_start = 0, level = 0;
+             level < max_depth && beam > 0;
+             level++)
         {
             int frontier_end = n_nodes;
             int n_frontier;
@@ -632,6 +634,28 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
                 break;
 
             n_frontier = frontier_end - frontier_start;
+
+            /* This level can add at most p_breadth children per frontier
+             * member. Reserve that exact requested work once, rather than
+             * repeatedly doubling a guessed capacity and then failing at an
+             * unrelated fixed global node count. */
+            {
+                int64 level_capacity = (int64) n_nodes
+                                     + (int64) n_frontier * (int64) beam;
+
+                if (level_capacity > PG_INT32_MAX
+                    || (uint64) level_capacity >
+                       (uint64) (MaxAllocSize / sizeof(WalkNode)))
+                    ereport(ERROR, (errmsg(
+                        "walk_branches: requested depth/breadth exceeds PostgreSQL allocation capacity at level %d",
+                        level + 1)));
+                if ((int) level_capacity > cap)
+                {
+                    cap = (int) level_capacity;
+                    nodes = (WalkNode *) repalloc(nodes, sizeof(WalkNode) * cap);
+                }
+            }
+
             frontier_ids = (Datum *) palloc(sizeof(Datum) * n_frontier);
             for (int f = frontier_start; f < frontier_end; f++)
                 frontier_ids[f - frontier_start] = nodes[f].entity;
@@ -647,6 +671,10 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
                 elog(ERROR, "walk_branches: batch edge query failed: %s",
                      SPI_result_code_string(rc));
 
+            if (SPI_processed > (uint64) PG_INT32_MAX
+                || SPI_processed > (uint64) (MaxAllocSize / sizeof(RawEdge)))
+                ereport(ERROR, (errmsg(
+                    "walk_branches: edge frontier exceeds PostgreSQL allocation capacity")));
             n_raw = (int) SPI_processed;
             raw = (RawEdge *) palloc(sizeof(RawEdge) * (n_raw > 0 ? n_raw : 1));
             for (int r = 0; r < n_raw; r++)
@@ -795,18 +823,23 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
                 qsort(cands, n_cands, sizeof(RankedEdge), ranked_edge_cmp_score_desc);
 
                 /*
-                 * 3Cc trajectory-ordinal continuity: bounded to the
-                 * post-sort shortlist (beam*3, not every candidate) --
-                 * O(beam) cached-plan SPI calls per frontier node, matching
-                 * containers_of.c's accepted per-element-probe cost, not the
-                 * full fan-out (see ordinal_continuity_bonus's comment for
-                 * why an unbounded per-candidate probe would repeat the
-                 * exact large-array-containment landmine containers_of.c's
-                 * own header comment documents).
+                 * 3Cc trajectory-ordinal continuity: belief remains the
+                 * primary key and continuity only breaks equal-belief ties.
+                 * Probe the exact admission prefix through the complete tie
+                 * at the beam boundary; a fixed beam multiplier can truncate
+                 * a larger tie and silently choose the wrong members.
                  */
                 if (ordinal_continuity_enabled)
                 {
-                    int shortlist_n = n_cands < beam * 3 ? n_cands : beam * 3;
+                    int shortlist_n = n_cands < beam ? n_cands : beam;
+
+                    if (shortlist_n > 0)
+                    {
+                        double cutoff_base = cands[shortlist_n - 1].base;
+                        while (shortlist_n < n_cands
+                               && cands[shortlist_n].base == cutoff_base)
+                            shortlist_n++;
+                    }
                     for (int s = 0; s < shortlist_n; s++)
                         if (cands[s].base > 0.0) /* confirmed-only, same gate as 3Cc */
                         {
@@ -841,16 +874,6 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
                      */
                     if (cands[k].score <= 0.0)
                         break;
-
-                    if (n_nodes >= GENERATE_NODE_BUDGET)
-                        ereport(ERROR, (errmsg(
-                            "walk_branches: node budget %d exceeded (beam %d × depth %d) — narrow the walk",
-                            GENERATE_NODE_BUDGET, beam, max_depth)));
-                    if (n_nodes == cap)
-                    {
-                        cap *= 2;
-                        nodes = (WalkNode *) repalloc(nodes, sizeof(WalkNode) * cap);
-                    }
 
                     mu = eff_mu_display_numeric(cands[k].rating, cands[k].rd);
                     nodes[n_nodes].parent    = f;
