@@ -22,7 +22,7 @@ CREATE OR REPLACE FUNCTION ops.consensus_out_labeled(p_id bytea, p_limit integer
         WHERE c.subject_id IN (SELECT id FROM subj)
           AND c.object_id IS NOT NULL
         ORDER BY consensus.edge_rank(c.type_id, c.eff_mu_raw) DESC
-        LIMIT GREATEST(1, p_limit)
+        LIMIT GREATEST(p_limit, 0)
     )
     , ordered AS (
         SELECT r.*, row_number() OVER (ORDER BY r.rnk DESC) AS ord

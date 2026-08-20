@@ -104,6 +104,20 @@ SELECT pg_get_functiondef('consensus.top_relations(integer,bytea)'::regprocedure
            LIKE '%x.type_id = t.type_id%'
        AS top_relations_uses_partition_heads;
 
+-- Read limits are exact caller contracts. Zero must not be silently promoted
+-- to one by inspection/operations helpers.
+SELECT count(*) = 0 AS consensus_out_zero_is_empty
+FROM ops.consensus_out_labeled(
+    public.laplace_hash128_blake3('test/ops/top/is-a/subject'), 0);
+SELECT count(*) = 0 AS attestation_response_zero_is_empty
+FROM ops.attestation_response(
+    public.laplace_hash128_blake3('test/ops/top/is-a/subject'),
+    laplace.relation_type_id('IS_A'), NULL, NULL, 0);
+SELECT count(*) = 0 AS evidence_receipt_zero_is_empty
+FROM ops.evidence_receipt(laplace.word_id('roster-content'), 0);
+SELECT count(*) = 0 AS index_usage_zero_is_empty
+FROM ops.index_usage_detail(NULL, 0);
+
 -- mesh_position always yields the self row, even for an unwitnessed id
 SELECT count(*) >= 1 AS mesh_has_self,
        count(*) FILTER (WHERE dir = 'self') = 1 AS mesh_one_self
@@ -164,6 +178,15 @@ LIMIT 1;
 SELECT status = 'composed' AS ingest_files_composed_second
 FROM ops.ingest_files('00000000-0000-0000-0000-000000000001', 10)
 OFFSET 1 LIMIT 1;
+SELECT count(*) = 0 AS ingest_runs_zero_is_empty FROM ops.ingest_runs(0);
+SELECT count(*) = 0 AS ingest_files_zero_is_empty
+FROM ops.ingest_files('00000000-0000-0000-0000-000000000001', 0);
+
+SELECT pg_get_functiondef('ops.evidence_receipt(bytea,integer)'::regprocedure)
+           NOT LIKE '%* 3 + 8%'
+       AND pg_get_functiondef('consensus.salient_facts(bytea,bytea,integer)'::regprocedure)
+           NOT LIKE '%* 3%'
+       AS read_heads_have_no_guessed_multiplier;
 
 DO $$
 BEGIN

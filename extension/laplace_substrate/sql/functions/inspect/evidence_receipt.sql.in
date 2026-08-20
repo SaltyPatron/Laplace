@@ -112,10 +112,10 @@ CREATE OR REPLACE FUNCTION ops.evidence_receipt(p_id bytea, p_limit integer DEFA
         -- Issue 52: rank BEFORE labeling. The old shape labeled every folded claim
         -- (type_label + _realize_synset_lemma/render_text, ~6ms/row — 3,129 labels
         -- to return 3 rows, >25s cold) and only then ordered/limited. Ranking needs
-        -- only the consensus join, so it runs first over everything; labels
-        -- run over a small over-fetched pool (labels can drop rows via the ellipsis/
-        -- empty filters below — 3x+8 makes top-N starvation implausible while
-        -- keeping labeling O(pool), not O(claims)).
+        -- only the consensus join, so it runs first over everything. Labels are
+        -- total below: unrenderable ids receive deterministic hash labels rather
+        -- than disappearing. The requested head is therefore exact; the old
+        -- `3x+8` over-fetch was an unsupported probability bet.
         SELECT fo.type_id, fo.object_id, fo.witness_count, fo.source_labels,
                COALESCE(b.mu_raw, 0)  AS mu_raw,
                COALESCE(b.mu_disp, 0) AS eff_mu_disp
@@ -124,8 +124,10 @@ CREATE OR REPLACE FUNCTION ops.evidence_receipt(p_id bytea, p_limit integer DEFA
                ON b.type_id = fo.type_id AND b.object_id = fo.object_id
         WHERE fo.source_labels IS NOT NULL AND fo.source_labels <> ''
         ORDER BY consensus.edge_rank(fo.type_id, COALESCE(b.mu_raw, 0)) DESC,
-                 fo.witness_count DESC
-        LIMIT GREATEST(1, p_limit) * 3 + 8
+                 fo.witness_count DESC,
+                 fo.type_id,
+                 fo.object_id
+        LIMIT GREATEST(p_limit, 0)
     ), ordered AS (
         SELECT rk.*, row_number() OVER (
                    ORDER BY consensus.edge_rank(rk.type_id, rk.mu_raw) DESC,
@@ -152,7 +154,10 @@ CREATE OR REPLACE FUNCTION ops.evidence_receipt(p_id bytea, p_limit integer DEFA
     ), labeled AS (
         SELECT o.type_id, o.object_id, o.witness_count, o.source_labels,
                o.mu_raw, o.eff_mu_disp,
-               labels.types[o.ord] AS rel,
+               COALESCE(NULLIF(labels.types[o.ord], ''),
+                        lower(replace(COALESCE(
+                            consensus.relation_canonical(o.type_id),
+                            left(encode(o.type_id, 'hex'), 16)), '_', ' '))) AS rel,
                COALESCE(NULLIF(labels.l[o.ord], ''),
                         left(encode(o.object_id, 'hex'), 16)) AS obj
         FROM ordered o, labels
@@ -162,10 +167,9 @@ CREATE OR REPLACE FUNCTION ops.evidence_receipt(p_id bytea, p_limit integer DEFA
            lb.witness_count,
            lb.source_labels
     FROM labeled lb
-    WHERE lb.obj IS NOT NULL AND lb.obj <> ''
-      AND right(lb.obj, 1) <> U&'\2026'
-      AND right(lb.rel, 1) <> U&'\2026'
     ORDER BY consensus.edge_rank(lb.type_id, lb.mu_raw) DESC,
-             lb.witness_count DESC
-    LIMIT GREATEST(1, p_limit)
+             lb.witness_count DESC,
+             lb.type_id,
+             lb.object_id
+    LIMIT GREATEST(p_limit, 0)
 $$;

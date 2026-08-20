@@ -20,5 +20,5 @@ BEGIN ATOMIC
         END,
         COALESCE(ended_at, started_at) DESC,
         file_label
-    LIMIT greatest(p_limit, 1);
+    LIMIT greatest(p_limit, 0);
 END;

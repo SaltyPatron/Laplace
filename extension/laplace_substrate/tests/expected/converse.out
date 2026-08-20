@@ -495,6 +495,13 @@ SELECT type, fact, witnesses FROM consensus.salient_facts(laplace.word_id('dog')
  is antonym of  | h    |         1
 (5 rows)
 
+SELECT count(*) = 0 AS salient_facts_zero_is_empty
+FROM consensus.salient_facts(laplace.word_id('dog'), NULL, 0);
+ salient_facts_zero_is_empty 
+-----------------------------
+ t
+(1 row)
+
 SELECT reply FROM converse.recall_intent('related', laplace.word_id('dog'), NULL, 'IS_ANTONYM_OF');
  reply 
 -------

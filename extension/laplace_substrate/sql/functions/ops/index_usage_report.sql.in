@@ -80,5 +80,5 @@ CREATE OR REPLACE FUNCTION ops.index_usage_detail(p_table text DEFAULT NULL, p_l
     WHERE s.schemaname = 'laplace'
       AND (p_table IS NULL OR s.relname = p_table)
     ORDER BY pg_relation_size(s.indexrelid) DESC
-    LIMIT GREATEST(p_limit, 1)
+    LIMIT GREATEST(p_limit, 0)
 $$;

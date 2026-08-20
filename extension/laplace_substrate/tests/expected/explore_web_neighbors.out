@@ -25,6 +25,7 @@ DECLARE
     chosen_out    boolean;
     snapshot_a    text[];
     snapshot_b    text[];
+    zero_rows     bigint;
 BEGIN
     INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
     VALUES (src, 0, type_t, NULL),
@@ -146,7 +147,23 @@ BEGIN
         RAISE EXCEPTION 'FAIL: repeated masked frontier probes diverged';
     END IF;
 
-    RAISE NOTICE '✓ explore_web_neighbors: scalar/batch/default-partition parity, per-root limits, self-edge deduplication, and total tie order all hold';
+    SELECT count(*) INTO zero_rows
+    FROM consensus.explore_web_neighbors(subjects, 0);
+    IF zero_rows <> 0 THEN
+        RAISE EXCEPTION 'FAIL: unmasked zero limit returned % rows', zero_rows;
+    END IF;
+    SELECT count(*) INTO zero_rows
+    FROM consensus.explore_web_neighbors(subjects, governed, 0);
+    IF zero_rows <> 0 THEN
+        RAISE EXCEPTION 'FAIL: masked zero limit returned % rows', zero_rows;
+    END IF;
+    SELECT count(*) INTO zero_rows
+    FROM consensus.explore_web_neighbors(s1, 0);
+    IF zero_rows <> 0 THEN
+        RAISE EXCEPTION 'FAIL: scalar zero limit returned % rows', zero_rows;
+    END IF;
+
+    RAISE NOTICE '✓ explore_web_neighbors: scalar/batch/default-partition parity, exact per-root limits, self-edge deduplication, and total tie order all hold';
 END $$;
-NOTICE:  ✓ explore_web_neighbors: scalar/batch/default-partition parity, per-root limits, self-edge deduplication, and total tie order all hold
+NOTICE:  ✓ explore_web_neighbors: scalar/batch/default-partition parity, exact per-root limits, self-edge deduplication, and total tie order all hold
 ROLLBACK;

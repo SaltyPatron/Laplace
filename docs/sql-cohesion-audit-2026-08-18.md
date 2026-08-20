@@ -195,6 +195,13 @@ rank. The API's band-fact read uses the analogous proof one level up: exact
 caller-sized heads per requested band, then the declared band/eff_mu ordering.
 The former `max(5000,limit×25)` and `max(limit×4,40)` guesses are gone.
 
+Evidence and salient-fact reads no longer compensate for nullable rendering by
+guessing `limit×3+8` candidate pools. Ranking now selects the exact caller-sized
+head, one batched render labels that head, and a deterministic hash label makes
+rendering total when no lexical realization exists. No winner is silently
+dropped, and inspection, explore-web, journal, and index-report limits preserve
+the caller's zero instead of silently promoting it to one.
+
 PostgreSQL documents that `LIMIT` can alter plan choice but does not make an
 unordered subset deterministic. A matching B-tree can satisfy `ORDER BY ...
 LIMIT` without sorting the whole input; otherwise the sort still consumes its

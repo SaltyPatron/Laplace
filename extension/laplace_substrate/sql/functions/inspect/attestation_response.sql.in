@@ -37,5 +37,5 @@ LANGUAGE sql STABLE
             )
           )
     ORDER BY consensus.eff_mu(c.rating, c.rd) DESC
-    LIMIT GREATEST(1, p_top_k)
+    LIMIT GREATEST(p_top_k, 0)
 $$;
