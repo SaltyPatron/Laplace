@@ -398,7 +398,11 @@ internal sealed class SubstrateTools
         if (id is null)
             return JsonRows(Array.Empty<JsonObject>());
 
-        var rows = NpgsqlSubstrateReads.TaxonomyTreeAsync(_dbReadOnly, id, default)
+        var rows = NpgsqlSubstrateReads.TaxonomyTreeAsync(
+                _dbReadOnly, id,
+                Math.Max(0, Int(args, "depth", 10)),
+                Math.Max(0, Int(args, "children", 24)),
+                default)
             .GetAwaiter().GetResult();
         return JsonRows(rows.Select(r => new JsonObject
         {

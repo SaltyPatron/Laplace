@@ -1,7 +1,11 @@
 -- A node's position in the semantic mesh. IDs are selected and ranked first;
 -- every display label is resolved in one position-aligned batch at the edge.
 DROP FUNCTION IF EXISTS laplace.mesh_position(bytea);
-CREATE OR REPLACE FUNCTION structural.mesh_position(p_id bytea)
+DROP FUNCTION IF EXISTS structural.mesh_position(bytea);
+CREATE OR REPLACE FUNCTION structural.mesh_position(
+    p_id bytea,
+    p_relation_limit integer DEFAULT NULL,
+    p_member_limit integer DEFAULT NULL)
     RETURNS TABLE(dir text, id bytea, label text, relation text,
                   hub_type text, eff_mu numeric, witnesses bigint)
     LANGUAGE sql STABLE AS $$
@@ -44,12 +48,14 @@ CREATE OR REPLACE FUNCTION structural.mesh_position(p_id bytea)
                             laplace.relation_type_id('IS_A'),
                             laplace.relation_type_id('CORRESPONDS_TO'),
                             laplace.relation_type_id('HAS_SEMANTIC_ROLE'))
-        ORDER BY eff_mu DESC NULLS LAST, c.object_id LIMIT 40
+        ORDER BY eff_mu DESC NULLS LAST, c.object_id
+        LIMIT GREATEST(p_relation_limit, 0)
     ), down_rows AS MATERIALIZED (
         SELECT m.member AS id, m.kind, m.mu, m.witnesses,
                row_number() OVER (ORDER BY m.mu DESC NULLS LAST, m.member) AS ord
         FROM lexical.concept_members(p_id) m
-        ORDER BY m.mu DESC NULLS LAST, m.member LIMIT 60
+        ORDER BY m.mu DESC NULLS LAST, m.member
+        LIMIT GREATEST(p_member_limit, 0)
     ), raw AS MATERIALIZED (
         SELECT 0 AS branch, 0::bigint AS ord, 'self'::text AS dir, p_id AS id,
                NULL::text AS relation, h.object_id AS hub_id, NULL::text AS hub_literal,

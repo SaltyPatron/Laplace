@@ -926,7 +926,12 @@ pg_laplace_walk_strongest(PG_FUNCTION_ARGS)
     type_null = PG_ARGISNULL(1);
     if (!type_null)
         type_datum = PG_GETARG_DATUM(1);
-    max_depth = PG_ARGISNULL(2) ? 8 : PG_GETARG_INT32(2);
+    /* NULL means walk until the strongest chain ends or reaches an entity it
+     * has already seen. The old implicit depth 8 truncated a cycle-safe greedy
+     * chain for reasons unrelated to either the data or the caller. */
+    max_depth = PG_ARGISNULL(2) ? PG_INT32_MAX : PG_GETARG_INT32(2);
+    if (max_depth < 0)
+        ereport(ERROR, (errmsg("walk_strongest: depth must be >= 0")));
 
     InitMaterializedSRF(fcinfo, 0);
 
@@ -935,8 +940,8 @@ pg_laplace_walk_strongest(PG_FUNCTION_ARGS)
         elog(ERROR, "walk_strongest: SPI_connect failed");
     ensure_edge_plan();
 
-    seen_cap = max_depth + 1;
-    if (seen_cap < 8) seen_cap = 8;
+    /* Grow with the observed chain; do not reserve p_depth entities up front. */
+    seen_cap = 8;
     seen = (Datum *) palloc(sizeof(Datum) * seen_cap);
     cur = copy_bytea_datum(PointerGetDatum(prompt));
     seen[0] = cur;

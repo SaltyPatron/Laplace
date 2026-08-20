@@ -123,10 +123,10 @@ internal sealed class UnreachableSubstrateClient : ISubstrateClient
     public Task<PulseResponse> PulseAsync(long nowUnix, CancellationToken ct) =>
         throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
 
-    public Task<MeshResponse?> MeshAsync(string idHex, CancellationToken ct) =>
+    public Task<MeshResponse?> MeshAsync(string idHex, int relationLimit, int memberLimit, CancellationToken ct) =>
         throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
 
-    public Task<TaxonomyResponse?> TaxonomyAsync(string idHex, CancellationToken ct) =>
+    public Task<TaxonomyResponse?> TaxonomyAsync(string idHex, int depth, int childLimit, CancellationToken ct) =>
         throw new SubstrateUnavailableException("substrate unreachable", new InvalidOperationException());
 
     public Task<ModalitiesResponse> ModalitiesAsync(CancellationToken ct) =>
@@ -498,14 +498,15 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
     public Task<ModalitiesResponse> ModalitiesAsync(CancellationToken ct) =>
         Task.FromResult(new ModalitiesResponse("modalities", 6_280_000, 781, 0, 0, 22_104));
 
-    public Task<TaxonomyResponse?> TaxonomyAsync(string idHex, CancellationToken ct)
+    public Task<TaxonomyResponse?> TaxonomyAsync(
+        string idHex, int depth, int childLimit, CancellationToken ct)
     {
         if (idHex.Length != 32 || !idHex.All(Uri.IsHexDigit))
             return Task.FromResult<TaxonomyResponse?>(null);
         return Task.FromResult<TaxonomyResponse?>(new TaxonomyResponse("taxonomy",
             WhaleIdHex, "whale",
-            [ new TaxonomyNode(CetaceanIdHex, "cetacean", 1325.09m), new TaxonomyNode(IsAIdHex, "mammal", 1319.14m) ],
-            [ new TaxonomyNode(WordNetIdHex, "sperm whale", 1325.09m) ]));
+            [.. new[] { new TaxonomyNode(CetaceanIdHex, "cetacean", 1325.09m), new TaxonomyNode(IsAIdHex, "mammal", 1319.14m) }.Take(Math.Max(0, depth))],
+            [.. new[] { new TaxonomyNode(WordNetIdHex, "sperm whale", 1325.09m) }.Take(Math.Max(0, childLimit))]));
     }
 
     public Task<IReadOnlyList<SourceRosterRow>> SourceRosterAsync(byte[] sourceId, int limit, CancellationToken ct) =>
@@ -514,15 +515,16 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
             new SourceRosterRow(WhaleIdHex, "whale", "IS_A", CetaceanIdHex, "cetacean", 42),
         ]);
 
-    public Task<MeshResponse?> MeshAsync(string idHex, CancellationToken ct)
+    public Task<MeshResponse?> MeshAsync(
+        string idHex, int relationLimit, int memberLimit, CancellationToken ct)
     {
         if (idHex.Length != 32 || !idHex.All(Uri.IsHexDigit))
             return Task.FromResult<MeshResponse?>(null);
         return Task.FromResult<MeshResponse?>(new MeshResponse("mesh", idHex.ToLowerInvariant(), "whale",
             "WordNet_Synset",
-            [ new MeshLink(CetaceanIdHex, "cetacean", "is a", "WordNet_Synset", 0.91m, 42) ],
-            [ new MeshLink(WhaleIdHex, "whale", "sense", null, 1.0m, 12),
-              new MeshLink(CetaceanIdHex, "orca", "sense", null, 0.8m, 5) ]));
+            [.. new[] { new MeshLink(CetaceanIdHex, "cetacean", "is a", "WordNet_Synset", 0.91m, 42) }.Take(Math.Max(0, relationLimit))],
+            [.. new[] { new MeshLink(WhaleIdHex, "whale", "sense", null, 1.0m, 12),
+              new MeshLink(CetaceanIdHex, "orca", "sense", null, 0.8m, 5) }.Take(Math.Max(0, memberLimit))]));
     }
 
     public Task<IReadOnlyList<BandLeaders>> LeadersAsync(int[] bands, int perBand, CancellationToken ct) =>
