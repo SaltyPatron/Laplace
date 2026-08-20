@@ -17,9 +17,6 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 /// </summary>
 public static class NpgsqlMaintenance
 {
-    /// <summary>Ceiling shared with a CALLed procedure — a VACUUM is the same class of work.</summary>
-    public const int MaxTimeoutSeconds = 21600;
-
     /// <summary>
     /// The schema-qualified, correctly-quoted name of a substrate table, or null
     /// when the name is not one.
@@ -71,7 +68,7 @@ public static class NpgsqlMaintenance
         var sql = qualifiedTable is null ? verb : $"{verb} {qualifiedTable}";
 
         await using var cmd = db.CreateCommand(sql);
-        cmd.CommandTimeout = Math.Clamp(timeoutSeconds, 1, MaxTimeoutSeconds);
+        cmd.CommandTimeout = InstalledOpInvoker.RequestedCommandTimeout(timeoutSeconds);
         await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         return sql;
     }

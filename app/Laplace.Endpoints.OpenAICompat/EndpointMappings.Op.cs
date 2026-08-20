@@ -14,6 +14,16 @@ internal static class OpEndpoints
             if (string.IsNullOrWhiteSpace(payload.Name))
                 return EndpointJson.BadRequest("invalid_request_error", "Field 'name' is required.");
 
+            var name = payload.Name.Trim();
+            var timeout = payload.TimeoutSeconds
+                ?? (InstalledOpInvoker.IsWritable(name)
+                    ? 0
+                    : InstalledOpInvoker.DefaultCommandTimeoutSeconds);
+            if (timeout < 0)
+                return EndpointJson.BadRequest(
+                    "invalid_request_error",
+                    "timeout_seconds must be zero (unbounded) or a positive number of seconds.");
+
             Dictionary<string, JsonNode?>? args = null;
             if (payload.Args is { Count: > 0 })
             {
@@ -25,9 +35,9 @@ internal static class OpEndpoints
             try
             {
                 var result = await substrate.InvokeOpAsync(
-                    payload.Name.Trim(), args,
+                    name, args,
                     payload.MaxRows ?? InstalledOpInvoker.DefaultRowCap,
-                    payload.TimeoutSeconds ?? InstalledOpInvoker.DefaultCommandTimeoutSeconds,
+                    timeout,
                     ct);
                 if (result.Error is not null)
                     return EndpointJson.BadRequest("invalid_request_error", result.Error);
@@ -35,7 +45,7 @@ internal static class OpEndpoints
                 var rows = result.Rows
                     .Select(r => r.ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal))
                     .ToList();
-                return Results.Json(new OpResponse("op.result", payload.Name.Trim(), rows, result.TruncatedAt));
+                return Results.Json(new OpResponse("op.result", name, rows, result.TruncatedAt));
             }
             catch (SubstrateUnavailableException ex)
             {

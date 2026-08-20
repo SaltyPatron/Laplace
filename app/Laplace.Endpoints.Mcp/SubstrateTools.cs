@@ -33,7 +33,7 @@ internal sealed class SubstrateTools
         {
             dsb.ConnectionStringBuilder.CommandTimeout = 20;
             dsb.ConnectionStringBuilder.Options =
-                "-c default_transaction_read_only=on -c statement_timeout=15000";
+                "-c default_transaction_read_only=on";
         });
     }
 
@@ -161,7 +161,7 @@ internal sealed class SubstrateTools
             () => Schema(("name", "string", "installed function name, exactly as ops.api() reports it", true),
                          ("args", "object", "argument name -> value, e.g. {\"p_source\": \"WordNetDecomposer\"}", false),
                          ("max_rows", "integer", "row cap, default 200", false),
-                         ("timeout_seconds", "integer", "command timeout; defaults to 15 for reads and the full procedure ceiling for allow-listed writes", false)),
+                         ("timeout_seconds", "integer", "exact command timeout; defaults to 15 for reads and 0 (unbounded, cancellable) for allow-listed writes", false)),
             (s, a) => s.Op(a)),
         new("pipeline", "Inspect Laplace pipeline build stamps and deployment status.",
             "Inspect Laplace pipeline build stamps, deployed binary directory (/opt/laplace/app), and component readiness.",
@@ -566,12 +566,14 @@ internal sealed class SubstrateTools
         var dict = supplied?.ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
 
         var writable = InstalledOpInvoker.IsWritable(name);
-        // A maintenance procedure runs for as long as the work takes; the 15s read
-        // default cuts it mid-rebuild and leaves the caller unable to tell a slow
-        // repair from a failed one.
+        // Maintenance duration follows live relation size. Zero is Npgsql's explicit
+        // unbounded value; the request remains cancellable and backend cancellation is
+        // also exposed through the ops catalog.
         var timeout = Int(args, "timeout_seconds",
-            writable ? InstalledOpInvoker.MaxProcedureTimeoutSeconds
+            writable ? 0
                      : InstalledOpInvoker.DefaultCommandTimeoutSeconds);
+        if (timeout < 0)
+            return ("timeout_seconds must be zero (unbounded) or a positive number of seconds.", true);
 
         var result = InstalledOpInvoker.InvokeAsync(
                 writable ? _db : _dbReadOnly, name, dict,

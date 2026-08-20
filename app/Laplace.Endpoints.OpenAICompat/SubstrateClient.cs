@@ -12,29 +12,18 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
 {
     private readonly NpgsqlDataSource _dataSource;
     private readonly NpgsqlDataSource _dataSourceReadOnly;
-    private readonly NpgsqlDataSource _dataSourceReadOnlyLong;
 
     public SubstrateClient()
     {
         _dataSource = LaplaceDataSource.Create(SubstrateAccess.Serving);
-        // Same posture as MCP op: server-enforced read-only + statement timeout.
+        // Server-enforced read-only. Individual commands own their exact timeout;
+        // a datasource-wide statement_timeout would silently override that budget.
         _dataSourceReadOnly = LaplaceDataSource.Create(SubstrateAccess.Serving, dsb =>
         {
             dsb.ConnectionStringBuilder.CommandTimeout =
                 InstalledOpInvoker.DefaultCommandTimeoutSeconds;
             dsb.ConnectionStringBuilder.Options =
-                "-c default_transaction_read_only=on -c statement_timeout=15000";
-        });
-        // Explicitly requested long-running installed operations (generation
-        // evals on a cold cache) remain read-only and server-bounded. Normal op
-        // traffic stays on the 15-second datasource above.
-        _dataSourceReadOnlyLong = LaplaceDataSource.Create(SubstrateAccess.Serving, dsb =>
-        {
-            dsb.ConnectionStringBuilder.CommandTimeout = InstalledOpInvoker.MaxCommandTimeoutSeconds;
-            dsb.ConnectionStringBuilder.MaxPoolSize =
-                PostgresResourcePlan.Current.MaintenanceConnectionOwners;
-            dsb.ConnectionStringBuilder.Options =
-                "-c default_transaction_read_only=on -c statement_timeout=600000";
+                "-c default_transaction_read_only=on";
         });
     }
 
@@ -626,8 +615,7 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
     {
         try
         {
-            var boundedTimeout = Math.Clamp(
-                timeoutSeconds, 1, InstalledOpInvoker.MaxCommandTimeoutSeconds);
+            var requestedTimeout = InstalledOpInvoker.RequestedCommandTimeout(timeoutSeconds);
             // Ops on the explicit write allow-list need a connection that is not
             // default_transaction_read_only; everything else keeps the read-only
             // posture. Without this branch a write op resolves from the catalog
@@ -635,11 +623,9 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
             // up only clearable by hand against the database.
             var dataSource = InstalledOpInvoker.IsWritable(name)
                 ? _dataSource
-                : boundedTimeout > InstalledOpInvoker.DefaultCommandTimeoutSeconds
-                    ? _dataSourceReadOnlyLong
-                    : _dataSourceReadOnly;
+                : _dataSourceReadOnly;
             return await InstalledOpInvoker.InvokeAsync(
-                dataSource, name, args, maxRows, boundedTimeout, ct).ConfigureAwait(false);
+                dataSource, name, args, maxRows, requestedTimeout, ct).ConfigureAwait(false);
         }
         // A PostgresException outside the availability classes is the OPERATION
         // answering — a RAISE, a bad argument, a failed precondition — not the
@@ -671,7 +657,6 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
 
     public async ValueTask DisposeAsync()
     {
-        await _dataSourceReadOnlyLong.DisposeAsync();
         await _dataSourceReadOnly.DisposeAsync();
         await _dataSource.DisposeAsync();
     }

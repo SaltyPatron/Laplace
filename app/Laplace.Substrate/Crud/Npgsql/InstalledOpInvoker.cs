@@ -14,16 +14,6 @@ public static class InstalledOpInvoker
 {
     public const int DefaultRowCap = 200;
     public const int DefaultCommandTimeoutSeconds = 15;
-    public const int MaxCommandTimeoutSeconds = 600;
-
-    /// <summary>
-    /// Ceiling for CALLed procedures. Separate from <see cref="MaxCommandTimeoutSeconds"/>
-    /// because the risk profiles differ: a read that hangs for six hours pins a
-    /// connection for nothing, whereas an eviction or a reindex legitimately runs
-    /// that long and is on the write allow-list by deliberate act. Bounded in
-    /// practice by cancellation, not by this number.
-    /// </summary>
-    public const int MaxProcedureTimeoutSeconds = 21600;
 
     /// <summary>
     /// Installed operations permitted to run against a writable connection.
@@ -90,6 +80,18 @@ public static class InstalledOpInvoker
         string? Error);
 
     internal static int RequestedRowCount(int maxRows) => Math.Max(0, maxRows);
+
+    /// <summary>
+    /// Preserve the caller's command budget exactly. Npgsql defines zero as no
+    /// command timeout; cancellation remains available through the request token.
+    /// Infrastructure must not silently replace an operator's budget with a fitted
+    /// ceiling that is unrelated to the operation or the live database.
+    /// </summary>
+    public static int RequestedCommandTimeout(int timeoutSeconds)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(timeoutSeconds);
+        return timeoutSeconds;
+    }
 
     /// <summary>
     /// Resolve <paramref name="name"/> against the live catalog, bind named args
@@ -166,13 +168,10 @@ public static class InstalledOpInvoker
             : $"SELECT * FROM {QualifiedCatalogName(name)}({argText}) LIMIT {rowsToFetch}";
 
         await using var cmd = db.CreateCommand(sql);
-        // Maintenance procedures run for as long as the work takes — a reindex of
-        // 28 partitioned parents is not a 15-second question. They are bounded
-        // instead by being cancellable: ops.activity finds the pid, and
-        // ops.cancel_backend stops it, keeping every COMMIT already taken.
-        cmd.CommandTimeout = Math.Clamp(
-            commandTimeoutSeconds, 1,
-            isProcedure ? MaxProcedureTimeoutSeconds : MaxCommandTimeoutSeconds);
+        // Positive values are exact caller policy. Zero means run until completion
+        // or cancellation — required for maintenance procedures whose duration is
+        // a property of live relation size, not a constant in this client.
+        cmd.CommandTimeout = RequestedCommandTimeout(commandTimeoutSeconds);
         foreach (var (slot, value) in bound)
             cmd.Parameters.Add(BindArg(slot, value));
 

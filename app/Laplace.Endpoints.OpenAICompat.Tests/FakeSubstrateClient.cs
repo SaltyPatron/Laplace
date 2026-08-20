@@ -446,7 +446,7 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
         string name, IReadOnlyDictionary<string, JsonNode?>? args, int maxRows,
         int timeoutSeconds, CancellationToken ct)
     {
-        if (name == "source_status")
+        if (name is "source_status" or "ops.analyze_substrate")
         {
             var row = new Dictionary<string, object?>
             {

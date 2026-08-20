@@ -12,7 +12,7 @@ public sealed class OpContractTests : IClassFixture<GoldenFactory>
     public OpContractTests(GoldenFactory factory) => _client = factory.CreateClient();
 
     [Fact]
-    public async Task Op_PropagatesBoundedLongRunningTimeout()
+    public async Task Op_PropagatesExactCallerTimeout()
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, "/v1/op")
         {
@@ -31,5 +31,31 @@ public sealed class OpContractTests : IClassFixture<GoldenFactory>
         using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         var row = json.RootElement.GetProperty("rows")[0];
         Assert.Equal(300, row.GetProperty("timeout_seconds").GetInt32());
+    }
+
+    [Fact]
+    public async Task WritableOp_DefaultsToUnboundedCancellableExecution()
+    {
+        using var response = await _client.PostAsJsonAsync("/v1/op", new
+        {
+            name = "ops.analyze_substrate",
+            max_rows = 1,
+        });
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var row = json.RootElement.GetProperty("rows")[0];
+        Assert.Equal(0, row.GetProperty("timeout_seconds").GetInt32());
+    }
+
+    [Fact]
+    public async Task Op_RejectsNegativeTimeoutInsteadOfRewritingIt()
+    {
+        using var response = await _client.PostAsJsonAsync("/v1/op", new
+        {
+            name = "source_status",
+            timeout_seconds = -1,
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 }
