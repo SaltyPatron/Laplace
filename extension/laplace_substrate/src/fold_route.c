@@ -48,7 +48,9 @@
 #include "laplace/core/hash128.h"
 
 PG_FUNCTION_INFO_V1(pg_laplace_attestation_merge);
+PG_FUNCTION_INFO_V1(pg_laplace_attestation_merge_type);
 PG_FUNCTION_INFO_V1(pg_laplace_consensus_upsert);
+PG_FUNCTION_INFO_V1(pg_laplace_consensus_upsert_type);
 
 /* ------------------------------------------------------------------ */
 /* Session plan cache: one HTAB per statement family, keyed by type id */
@@ -138,6 +140,7 @@ typed_plan(HTAB **slot, const char *name, const uint8_t *type16,
 
 typedef struct InArray
 {
+    ArrayType *array;          /* original detoasted argument; reusable whole */
     Datum *elems;
     bool  *nulls;
     int    n;
@@ -155,6 +158,7 @@ in_array(FunctionCallInfo fcinfo, int argno, Oid elmtype, int elmlen,
                 (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
                  errmsg("%s: argument %d must not be NULL", label, argno + 1)));
     arr = PG_GETARG_ARRAYTYPE_P(argno);
+    out->array = arr;
     if (ARR_NDIM(arr) > 1)
         ereport(ERROR,
                 (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
@@ -188,9 +192,13 @@ bytea16(Datum d, const char *label)
 }
 
 static ArrayType *
-slice_array(const Datum *src, const bool *src_nulls, const int *idx, int n,
+array_window(ArrayType *original, const Datum *src, const bool *src_nulls,
+            int total, int start, int n,
             Oid elmtype, int elmlen, bool elmbyval, char elmalign)
 {
+    if (start == 0 && n == total)
+        return original;
+
     Datum *d = (Datum *) palloc(sizeof(Datum) * n);
     bool  *nu = (bool *) palloc(sizeof(bool) * n);
     int    dims[1];
@@ -200,9 +208,9 @@ slice_array(const Datum *src, const bool *src_nulls, const int *idx, int n,
 
     for (i = 0; i < n; i++)
     {
-        bool isnull = src_nulls != NULL && src_nulls[idx[i]];
+        bool isnull = src_nulls != NULL && src_nulls[start + i];
 
-        d[i] = isnull ? (Datum) 0 : src[idx[i]];
+        d[i] = isnull ? (Datum) 0 : src[start + i];
         nu[i] = isnull;
         any_null |= isnull;
     }
@@ -240,7 +248,6 @@ pg_laplace_attestation_merge(PG_FUNCTION_ARGS)
     const char *label = "attestation_merge";
     InArray     ids, types, subjects, games, sums, ts;
     int64       affected = 0;
-    int        *idx;
     int         run_start;
 
     in_array(fcinfo, 0, BYTEAOID, -1, false, 'i', false, label, &ids);
@@ -264,8 +271,6 @@ pg_laplace_attestation_merge(PG_FUNCTION_ARGS)
                 (errcode(ERRCODE_INTERNAL_ERROR),
                  errmsg("%s: SPI_connect failed", label)));
 
-    idx = (int *) palloc(sizeof(int) * ids.n);
-
     run_start = 0;
     while (run_start < ids.n)
     {
@@ -282,21 +287,26 @@ pg_laplace_attestation_merge(PG_FUNCTION_ARGS)
         while (i < ids.n &&
                memcmp(bytea16(types.elems[i], label), type16, 16) == 0)
         {
-            idx[run_n++] = i;
+            run_n++;
             i++;
         }
 
         plan = typed_plan(&merge_plans, "attestation_merge plans", type16,
                           MERGE_SQL, 5, argtypes);
-        vals[0] = PointerGetDatum(slice_array(ids.elems, NULL, idx, run_n,
+        vals[0] = PointerGetDatum(array_window(ids.array, ids.elems, NULL,
+                                              ids.n, run_start, run_n,
                                               BYTEAOID, -1, false, 'i'));
-        vals[1] = PointerGetDatum(slice_array(subjects.elems, NULL, idx, run_n,
+        vals[1] = PointerGetDatum(array_window(subjects.array, subjects.elems, NULL,
+                                              subjects.n, run_start, run_n,
                                               BYTEAOID, -1, false, 'i'));
-        vals[2] = PointerGetDatum(slice_array(games.elems, NULL, idx, run_n,
+        vals[2] = PointerGetDatum(array_window(games.array, games.elems, NULL,
+                                              games.n, run_start, run_n,
                                               INT8OID, 8, true, 'd'));
-        vals[3] = PointerGetDatum(slice_array(sums.elems, NULL, idx, run_n,
+        vals[3] = PointerGetDatum(array_window(sums.array, sums.elems, NULL,
+                                              sums.n, run_start, run_n,
                                               INT8OID, 8, true, 'd'));
-        vals[4] = PointerGetDatum(slice_array(ts.elems, NULL, idx, run_n,
+        vals[4] = PointerGetDatum(array_window(ts.array, ts.elems, NULL,
+                                              ts.n, run_start, run_n,
                                               TIMESTAMPTZOID, 8, true, 'd'));
 
         rc = SPI_execute_plan(plan, vals, NULL, false, 0);
@@ -312,6 +322,63 @@ pg_laplace_attestation_merge(PG_FUNCTION_ARGS)
 
     SPI_finish();
     PG_RETURN_INT64(affected);
+}
+
+/* Direct routed form for first-party ingest. The caller already owns a single
+ * type run, so transmitting the same 16-byte type once per row merely to detect
+ * that run again is pure allocation/wire/deconstruction work. */
+Datum
+pg_laplace_attestation_merge_type(PG_FUNCTION_ARGS)
+{
+    const char    *label = "attestation_merge_type";
+    const uint8_t *type16;
+    InArray        ids, subjects, games, sums, ts;
+    SPIPlanPtr     plan;
+    Datum          vals[5];
+    static const Oid argtypes[5] =
+        {BYTEAARRAYOID, BYTEAARRAYOID, INT8ARRAYOID, INT8ARRAYOID,
+         1185 /* timestamptz[] */};
+    int rc;
+
+    if (PG_ARGISNULL(0))
+        ereport(ERROR,
+                (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+                 errmsg("%s: type must not be NULL", label)));
+    type16 = bytea16(PG_GETARG_DATUM(0), label);
+    in_array(fcinfo, 1, BYTEAOID, -1, false, 'i', false, label, &ids);
+    in_array(fcinfo, 2, BYTEAOID, -1, false, 'i', false, label, &subjects);
+    in_array(fcinfo, 3, INT8OID, 8, true, 'd', false, label, &games);
+    in_array(fcinfo, 4, INT8OID, 8, true, 'd', false, label, &sums);
+    in_array(fcinfo, 5, TIMESTAMPTZOID, 8, true, 'd', false, label, &ts);
+    if (subjects.n != ids.n || games.n != ids.n || sums.n != ids.n || ts.n != ids.n)
+        ereport(ERROR,
+                (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
+                 errmsg("%s: parallel arrays must share length", label)));
+    if (ids.n == 0)
+        PG_RETURN_INT64(0);
+
+    if (SPI_connect() != SPI_OK_CONNECT)
+        ereport(ERROR,
+                (errcode(ERRCODE_INTERNAL_ERROR),
+                 errmsg("%s: SPI_connect failed", label)));
+    plan = typed_plan(&merge_plans, "attestation_merge plans", type16,
+                      MERGE_SQL, 5, argtypes);
+    vals[0] = PointerGetDatum(ids.array);
+    vals[1] = PointerGetDatum(subjects.array);
+    vals[2] = PointerGetDatum(games.array);
+    vals[3] = PointerGetDatum(sums.array);
+    vals[4] = PointerGetDatum(ts.array);
+    rc = SPI_execute_plan(plan, vals, NULL, false, 0);
+    if (rc != SPI_OK_MERGE)
+        ereport(ERROR,
+                (errcode(ERRCODE_INTERNAL_ERROR),
+                 errmsg("%s: MERGE failed: %s", label,
+                        SPI_result_code_string(rc))));
+    {
+        int64 affected = (int64) SPI_processed;
+        SPI_finish();
+        PG_RETURN_INT64(affected);
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -373,10 +440,10 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
     const char *label = "consensus_upsert";
     InArray     subjects, types, objects, phis, games, sums, ts;
     Datum      *cell_ids;
+    ArrayType  *cell_id_array;
     int64       affected = 0;
     HTAB       *seen;
     HASHCTL     ctl;
-    int        *idx;
     int         run_start;
     int         i;
 
@@ -432,13 +499,13 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
         cell_ids[i] = PointerGetDatum(out);
     }
     hash_destroy(seen);
+    cell_id_array = construct_array(cell_ids, subjects.n,
+                                    BYTEAOID, -1, false, 'i');
 
     if (SPI_connect() != SPI_OK_CONNECT)
         ereport(ERROR,
                 (errcode(ERRCODE_INTERNAL_ERROR),
                  errmsg("%s: SPI_connect failed", label)));
-
-    idx = (int *) palloc(sizeof(int) * subjects.n);
 
     run_start = 0;
     while (run_start < subjects.n)
@@ -456,26 +523,33 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
         while (j < subjects.n &&
                memcmp(bytea16(types.elems[j], label), type16, 16) == 0)
         {
-            idx[run_n++] = j;
+            run_n++;
             j++;
         }
 
         merge_plan = typed_plan(&upsert_merge_plans, "consensus_upsert merge plans",
                                 type16, UPSERT_MERGE_SQL, 7, args);
-        vals[0] = PointerGetDatum(slice_array(cell_ids, NULL, idx, run_n,
+        vals[0] = PointerGetDatum(array_window(cell_id_array, cell_ids, NULL,
+                                              subjects.n, run_start, run_n,
                                               BYTEAOID, -1, false, 'i'));
-        vals[1] = PointerGetDatum(slice_array(subjects.elems, NULL, idx, run_n,
+        vals[1] = PointerGetDatum(array_window(subjects.array, subjects.elems, NULL,
+                                              subjects.n, run_start, run_n,
                                               BYTEAOID, -1, false, 'i'));
-        vals[2] = PointerGetDatum(slice_array(objects.elems, objects.nulls,
-                                              idx, run_n,
+        vals[2] = PointerGetDatum(array_window(objects.array, objects.elems,
+                                              objects.nulls, objects.n,
+                                              run_start, run_n,
                                               BYTEAOID, -1, false, 'i'));
-        vals[3] = PointerGetDatum(slice_array(phis.elems, NULL, idx, run_n,
+        vals[3] = PointerGetDatum(array_window(phis.array, phis.elems, NULL,
+                                              phis.n, run_start, run_n,
                                               INT8OID, 8, true, 'd'));
-        vals[4] = PointerGetDatum(slice_array(games.elems, NULL, idx, run_n,
+        vals[4] = PointerGetDatum(array_window(games.array, games.elems, NULL,
+                                              games.n, run_start, run_n,
                                               INT8OID, 8, true, 'd'));
-        vals[5] = PointerGetDatum(slice_array(sums.elems, NULL, idx, run_n,
+        vals[5] = PointerGetDatum(array_window(sums.array, sums.elems, NULL,
+                                              sums.n, run_start, run_n,
                                               INT8OID, 8, true, 'd'));
-        vals[6] = PointerGetDatum(slice_array(ts.elems, NULL, idx, run_n,
+        vals[6] = PointerGetDatum(array_window(ts.array, ts.elems, NULL,
+                                              ts.n, run_start, run_n,
                                               TIMESTAMPTZOID, 8, true, 'd'));
         rc = SPI_execute_plan(merge_plan, vals, NULL, false, 0);
         if (rc != SPI_OK_MERGE)
@@ -490,4 +564,105 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
 
     SPI_finish();
     PG_RETURN_INT64(affected);
+}
+
+/* Direct routed form for a caller-owned single type run. Besides eliminating
+ * the redundant type array, this constructs the derived cell-id array exactly
+ * once and passes every caller array straight through to the cached MERGE plan. */
+Datum
+pg_laplace_consensus_upsert_type(PG_FUNCTION_ARGS)
+{
+    const char    *label = "consensus_upsert_type";
+    const uint8_t *type16;
+    InArray        subjects, objects, phis, games, sums, ts;
+    Datum         *cell_ids;
+    ArrayType     *cell_id_array;
+    HTAB          *seen;
+    HASHCTL        ctl;
+    SPIPlanPtr     merge_plan;
+    Datum          vals[7];
+    static const Oid args[7] =
+        {BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID, INT8ARRAYOID,
+         INT8ARRAYOID, INT8ARRAYOID, 1185};
+    int i;
+    int rc;
+
+    if (PG_ARGISNULL(0))
+        ereport(ERROR,
+                (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+                 errmsg("%s: type must not be NULL", label)));
+    type16 = bytea16(PG_GETARG_DATUM(0), label);
+    in_array(fcinfo, 1, BYTEAOID, -1, false, 'i', false, label, &subjects);
+    in_array(fcinfo, 2, BYTEAOID, -1, false, 'i', true, label, &objects);
+    in_array(fcinfo, 3, INT8OID, 8, true, 'd', false, label, &phis);
+    in_array(fcinfo, 4, INT8OID, 8, true, 'd', false, label, &games);
+    in_array(fcinfo, 5, INT8OID, 8, true, 'd', false, label, &sums);
+    in_array(fcinfo, 6, TIMESTAMPTZOID, 8, true, 'd', false, label, &ts);
+    if (objects.n != subjects.n || phis.n != subjects.n || games.n != subjects.n ||
+        sums.n != subjects.n || ts.n != subjects.n)
+        ereport(ERROR,
+                (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
+                 errmsg("%s: parallel arrays must share length", label)));
+    if (subjects.n == 0)
+        PG_RETURN_INT64(0);
+
+    memset(&ctl, 0, sizeof(ctl));
+    ctl.keysize = 16;
+    ctl.entrysize = sizeof(CellSeen);
+    seen = hash_create("consensus_upsert_type cell guard", subjects.n, &ctl,
+                       HASH_ELEM | HASH_BLOBS);
+    cell_ids = (Datum *) palloc(sizeof(Datum) * subjects.n);
+    for (i = 0; i < subjects.n; i++)
+    {
+        uint8_t   buf[48];
+        hash128_t h;
+        bytea    *out;
+        bool      found;
+
+        memcpy(buf, bytea16(subjects.elems[i], label), 16);
+        memcpy(buf + 16, type16, 16);
+        if (objects.nulls[i])
+            memset(buf + 32, 0, 16);
+        else
+            memcpy(buf + 32, bytea16(objects.elems[i], label), 16);
+        hash128_blake3(buf, sizeof(buf), &h);
+        hash_search(seen, &h, HASH_ENTER, &found);
+        if (found)
+            ereport(ERROR,
+                    (errcode(ERRCODE_CARDINALITY_VIOLATION),
+                     errmsg("%s: duplicate cell in one call "
+                            "(client-dedup contract violated)", label)));
+        out = (bytea *) palloc(VARHDRSZ + 16);
+        SET_VARSIZE(out, VARHDRSZ + 16);
+        memcpy(VARDATA(out), &h, 16);
+        cell_ids[i] = PointerGetDatum(out);
+    }
+    hash_destroy(seen);
+    cell_id_array = construct_array(cell_ids, subjects.n,
+                                    BYTEAOID, -1, false, 'i');
+
+    if (SPI_connect() != SPI_OK_CONNECT)
+        ereport(ERROR,
+                (errcode(ERRCODE_INTERNAL_ERROR),
+                 errmsg("%s: SPI_connect failed", label)));
+    merge_plan = typed_plan(&upsert_merge_plans, "consensus_upsert merge plans",
+                            type16, UPSERT_MERGE_SQL, 7, args);
+    vals[0] = PointerGetDatum(cell_id_array);
+    vals[1] = PointerGetDatum(subjects.array);
+    vals[2] = PointerGetDatum(objects.array);
+    vals[3] = PointerGetDatum(phis.array);
+    vals[4] = PointerGetDatum(games.array);
+    vals[5] = PointerGetDatum(sums.array);
+    vals[6] = PointerGetDatum(ts.array);
+    rc = SPI_execute_plan(merge_plan, vals, NULL, false, 0);
+    if (rc != SPI_OK_MERGE)
+        ereport(ERROR,
+                (errcode(ERRCODE_INTERNAL_ERROR),
+                 errmsg("%s: MERGE failed: %s", label,
+                        SPI_result_code_string(rc))));
+    {
+        int64 affected = (int64) SPI_processed;
+        SPI_finish();
+        PG_RETURN_INT64(affected);
+    }
 }

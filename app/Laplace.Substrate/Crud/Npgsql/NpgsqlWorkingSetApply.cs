@@ -45,6 +45,23 @@ public sealed partial class NpgsqlSubstrateWriter
     internal static readonly int ApplyParallelism = CpuTopology.ResolveApplyPartitions();
     private static readonly IngestSizing.ApplyIoPlan ApplySizing =
         IngestSizing.ResolveApplyIo(ApplyParallelism);
+    private int _directAttestationMergeRoute = -1;
+
+    private async ValueTask<bool> SupportsDirectAttestationMergeRouteAsync(
+        NpgsqlConnection connection, CancellationToken ct)
+    {
+        int known = Volatile.Read(ref _directAttestationMergeRoute);
+        if (known >= 0) return known == 1;
+
+        await using var probe = connection.CreateCommand();
+        probe.CommandText = "SELECT to_regprocedure("
+            + "'consensus.attestation_merge_type(bytea,bytea[],bytea[],bigint[],bigint[],timestamptz[])') "
+            + "IS NOT NULL";
+        bool supported = (bool)(await probe.ExecuteScalarAsync(ct) ?? false);
+        Interlocked.CompareExchange(
+            ref _directAttestationMergeRoute, supported ? 1 : 0, -1);
+        return Volatile.Read(ref _directAttestationMergeRoute) == 1;
+    }
 
     /// <summary>
     /// Run-scoped persisted-id caches for the existence probe, active on the
@@ -931,16 +948,23 @@ public sealed partial class NpgsqlSubstrateWriter
                 // disjoint ROWS and no two connections can contend on the same
                 // tuple. Partition-level locks are RowExclusiveLock, which is
                 // self-compatible, and the cross-applier advisory lock still
-                // serializes whole applies. The (type, subject, id) sort is
-                // retained so each chunk stays partition-contiguous — a chunk
-                // that straddles a type boundary is fine, attestation_merge
-                // already loops the distinct types it is handed.
-                var chunks = new List<(int Off, int Len)>();
-                for (int off = 0; off < mergeRows.Count; off += mergeChunk)
-                    chunks.Add((off, Math.Min(mergeChunk, mergeRows.Count - off)));
+                // serializes whole applies. Cut chunks WITHIN each sorted type
+                // run. A boundary-straddling chunk forced native to reconstruct
+                // all arrays even though this caller already owned the route.
+                var chunks = new List<(Hash128 Type, int Off, int Len)>();
+                for (int typeOff = 0; typeOff < mergeRows.Count;)
+                {
+                    var type = mergeRows[typeOff].Type;
+                    int typeEnd = typeOff + 1;
+                    while (typeEnd < mergeRows.Count && mergeRows[typeEnd].Type.Equals(type))
+                        typeEnd++;
+                    for (int off = typeOff; off < typeEnd; off += mergeChunk)
+                        chunks.Add((type, off, Math.Min(mergeChunk, typeEnd - off)));
+                    typeOff = typeEnd;
+                }
                 int mergeGroups = (int)Math.Min(ApplyParallelism, Math.Max(1, chunks.Count));
-                var bins = new List<(int Off, int Len)>[mergeGroups];
-                for (int g = 0; g < mergeGroups; g++) bins[g] = new List<(int, int)>();
+                var bins = new List<(Hash128 Type, int Off, int Len)>[mergeGroups];
+                for (int g = 0; g < mergeGroups; g++) bins[g] = new();
                 for (int c = 0; c < chunks.Count; c++) bins[c % mergeGroups].Add(chunks[c]);
 
                 long mergeFolded = 0;
@@ -949,6 +973,8 @@ public sealed partial class NpgsqlSubstrateWriter
                 {
                     if (bins[g].Count == 0) return;
                     await using var mconn = await _ds.OpenConnectionAsync(token);
+                    bool directRoute = await SupportsDirectAttestationMergeRouteAsync(
+                        mconn, token);
                     await using var mtx = await mconn.BeginTransactionAsync(token);
                     await using (var guc = mconn.CreateCommand())
                     {
@@ -976,9 +1002,16 @@ public sealed partial class NpgsqlSubstrateWriter
                     await using var merge = mconn.CreateCommand();
                     merge.Transaction = mtx;
                     merge.CommandTimeout = 0;
-                    merge.CommandText = "SELECT consensus.attestation_merge($1, $2, $3, $4, $5, $6)";
+                    merge.CommandText = directRoute
+                        ? "SELECT consensus.attestation_merge_type($1, $2, $3, $4, $5, $6)"
+                        : "SELECT consensus.attestation_merge($1, $2, $3, $4, $5, $6)";
                     merge.Parameters.Add(new NpgsqlParameter
-                    { Value = Array.Empty<byte[]>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+                    {
+                        Value = directRoute ? Array.Empty<byte>() : Array.Empty<byte[]>(),
+                        NpgsqlDbType = directRoute
+                            ? NpgsqlDbType.Bytea
+                            : NpgsqlDbType.Array | NpgsqlDbType.Bytea
+                    });
                     merge.Parameters.Add(new NpgsqlParameter
                     { Value = Array.Empty<byte[]>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
                     merge.Parameters.Add(new NpgsqlParameter
@@ -990,36 +1023,46 @@ public sealed partial class NpgsqlSubstrateWriter
                     merge.Parameters.Add(new NpgsqlParameter
                     { Value = Array.Empty<DateTime>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.TimestampTz });
                     await merge.PrepareAsync(token);
-                    foreach (var (spanOff, spanLen) in bins[g])
-                        for (int off = spanOff; off < spanOff + spanLen; off += mergeChunk)
+                    foreach (var (type, off, m) in bins[g])
+                    {
+                        var ids = new byte[m][];
+                        var subjects = new byte[m][];
+                        var games = new long[m];
+                        var sums = new long[m];
+                        var ts = new DateTime[m];
+                        for (int i = 0; i < m; i++)
                         {
-                            int m = Math.Min(mergeChunk, spanOff + spanLen - off);
-                            var ids = new byte[m][];
-                            var types = new byte[m][];
-                            var subjects = new byte[m][];
-                            var games = new long[m];
-                            var sums = new long[m];
-                            var ts = new DateTime[m];
-                            for (int i = 0; i < m; i++)
-                            {
-                                var r = mergeRows[off + i];
-                                ids[i] = r.Id.ToBytes();
-                                types[i] = r.Type.ToBytes();
-                                subjects[i] = r.Subj.ToBytes();
-                                games[i] = r.Games;
-                                sums[i] = r.Sum;
-                                ts[i] = r.Ts;
-                            }
-                            merge.Parameters[0].Value = ids;
-                            merge.Parameters[1].Value = types;
+                            var r = mergeRows[off + i];
+                            ids[i] = r.Id.ToBytes();
+                            subjects[i] = r.Subj.ToBytes();
+                            games[i] = r.Games;
+                            sums[i] = r.Sum;
+                            ts[i] = r.Ts;
+                        }
+                        if (directRoute)
+                        {
+                            merge.Parameters[0].Value = type.ToBytes();
+                            merge.Parameters[1].Value = ids;
                             merge.Parameters[2].Value = subjects;
                             merge.Parameters[3].Value = games;
                             merge.Parameters[4].Value = sums;
                             merge.Parameters[5].Value = ts;
-                            Interlocked.Add(ref mergeFolded,
-                                (long)(await merge.ExecuteScalarAsync(token) ?? 0L));
-                            Interlocked.Increment(ref mergeRt);
                         }
+                        else
+                        {
+                            var legacyTypes = new byte[m][];
+                            Array.Fill(legacyTypes, type.ToBytes());
+                            merge.Parameters[0].Value = ids;
+                            merge.Parameters[1].Value = legacyTypes;
+                            merge.Parameters[2].Value = subjects;
+                            merge.Parameters[3].Value = games;
+                            merge.Parameters[4].Value = sums;
+                            merge.Parameters[5].Value = ts;
+                        }
+                        Interlocked.Add(ref mergeFolded,
+                            (long)(await merge.ExecuteScalarAsync(token) ?? 0L));
+                        Interlocked.Increment(ref mergeRt);
+                    }
                     await mtx.CommitAsync(token);
                 }, ct);
                 aFold += mergeFolded;

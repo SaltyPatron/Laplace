@@ -55,6 +55,16 @@ public class SqlConsolidationTests
             + "WHERE n.nspname = 'consensus' AND p.proname = 'upsert'"))!;
         Assert.Equal("pg_laplace_consensus_upsert", src.Trim());
 
+        var routedSrc = (string)(await ScalarAsync(
+            "SELECT p.prosrc FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
+            + "WHERE n.nspname = 'consensus' AND p.proname = 'upsert_type'"))!;
+        Assert.Equal("pg_laplace_consensus_upsert_type", routedSrc.Trim());
+
+        var mergeSrc = (string)(await ScalarAsync(
+            "SELECT p.prosrc FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
+            + "WHERE n.nspname = 'consensus' AND p.proname = 'attestation_merge_type'"))!;
+        Assert.Equal("pg_laplace_attestation_merge_type", mergeSrc.Trim());
+
         // And the legacy name must stay gone — its DROP is part of the migration.
         var legacy = await ScalarAsync(
             "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "

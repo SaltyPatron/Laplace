@@ -54,3 +54,17 @@ CREATE OR REPLACE FUNCTION consensus.attestation_merge(
     RETURNS bigint
     AS 'MODULE_PATHNAME', 'pg_laplace_attestation_merge'
     LANGUAGE C VOLATILE;
+
+-- First-party ingest owns type-major runs and uses this direct routed form.
+-- Keeping type scalar avoids serializing/deconstructing 16 duplicate bytes per
+-- row and lets native pass every value array directly to the cached MERGE plan.
+CREATE OR REPLACE FUNCTION consensus.attestation_merge_type(
+    p_type     bytea,
+    p_ids      bytea[],
+    p_subjects bytea[],
+    p_games    bigint[],
+    p_sums     bigint[],
+    p_ts       timestamptz[])
+    RETURNS bigint
+    AS 'MODULE_PATHNAME', 'pg_laplace_attestation_merge_type'
+    LANGUAGE C VOLATILE;

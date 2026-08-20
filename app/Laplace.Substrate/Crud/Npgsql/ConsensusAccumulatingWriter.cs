@@ -31,6 +31,22 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
     private readonly NpgsqlDataSource _ds;
     private readonly bool _persistEvidence;
     private readonly ILogger _log;
+    private int _directConsensusRoute = -1;
+
+    private async ValueTask<bool> SupportsDirectConsensusRouteAsync(
+        NpgsqlConnection connection, CancellationToken ct)
+    {
+        int known = Volatile.Read(ref _directConsensusRoute);
+        if (known >= 0) return known == 1;
+
+        await using var probe = connection.CreateCommand();
+        probe.CommandText = "SELECT to_regprocedure("
+            + "'consensus.upsert_type(bytea,bytea[],bytea[],bigint[],bigint[],bigint[],timestamptz[])') "
+            + "IS NOT NULL";
+        bool supported = (bool)(await probe.ExecuteScalarAsync(ct) ?? false);
+        Interlocked.CompareExchange(ref _directConsensusRoute, supported ? 1 : 0, -1);
+        return Volatile.Read(ref _directConsensusRoute) == 1;
+    }
 
     // PER-TYPE FOLD LANES (2026-07-21), replacing a process-wide
     // SemaphoreSlim(1,1) that let no two deltas overlap for any reason. Consensus
@@ -608,6 +624,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                 try
                 {
                 await using var conn = await _ds.OpenConnectionAsync(token);
+                bool directRoute = await SupportsDirectConsensusRouteAsync(conn, token);
                 await using var tx = await conn.BeginTransactionAsync(token);
                 // consensus_upsert's UPDATE arm is the same shape as attestation_merge's
                 // and carries the same landmine: type_id pinned as a literal, subject_id
@@ -624,8 +641,16 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                 await using var up = conn.CreateCommand();
                 up.Transaction = tx;
                 up.CommandTimeout = 0;
-                up.CommandText = "SELECT consensus.upsert($1, $2, $3, $4, $5, $6, $7)";
-                up.Parameters.Add(new NpgsqlParameter { Value = Array.Empty<byte[]>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+                up.CommandText = directRoute
+                    ? "SELECT consensus.upsert_type($1, $2, $3, $4, $5, $6, $7)"
+                    : "SELECT consensus.upsert($1, $2, $3, $4, $5, $6, $7)";
+                up.Parameters.Add(new NpgsqlParameter
+                {
+                    Value = directRoute ? Array.Empty<byte>() : Array.Empty<byte[]>(),
+                    NpgsqlDbType = directRoute
+                        ? NpgsqlDbType.Bytea
+                        : NpgsqlDbType.Array | NpgsqlDbType.Bytea
+                });
                 up.Parameters.Add(new NpgsqlParameter { Value = Array.Empty<byte[]>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
                 up.Parameters.Add(new NpgsqlParameter { Value = Array.Empty<byte[]>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
                 up.Parameters.Add(new NpgsqlParameter { Value = Array.Empty<long>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
@@ -638,7 +663,6 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                 {
                     int m = Math.Min(FoldSizing.ChunkCells, seg.Off + seg.Len - off);
                     var subjects = new byte[m][];
-                    var types = new byte[m][];
                     var objects = new byte[m][];
                     var phis = new long[m];
                     var games = new long[m];
@@ -648,20 +672,34 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                     {
                         var cell = cells[off + i];
                         subjects[i] = cell.Key.S.ToBytes();
-                        types[i] = cell.Key.T.ToBytes();
                         objects[i] = cell.Key.O?.ToBytes()!;
                         phis[i] = cell.D.PhiFp1e9;
                         games[i] = cell.D.Games;
                         sums[i] = cell.D.SumScoreFp1e9;
                         ts[i] = TsFromUnixUs(cell.D.MaxTsUnixUs);
                     }
-                    up.Parameters[0].Value = subjects;
-                    up.Parameters[1].Value = types;
-                    up.Parameters[2].Value = objects;
-                    up.Parameters[3].Value = phis;
-                    up.Parameters[4].Value = games;
-                    up.Parameters[5].Value = sums;
-                    up.Parameters[6].Value = ts;
+                    if (directRoute)
+                    {
+                        up.Parameters[0].Value = run.Type.ToBytes();
+                        up.Parameters[1].Value = subjects;
+                        up.Parameters[2].Value = objects;
+                        up.Parameters[3].Value = phis;
+                        up.Parameters[4].Value = games;
+                        up.Parameters[5].Value = sums;
+                        up.Parameters[6].Value = ts;
+                    }
+                    else
+                    {
+                        var legacyTypes = new byte[m][];
+                        Array.Fill(legacyTypes, run.Type.ToBytes());
+                        up.Parameters[0].Value = subjects;
+                        up.Parameters[1].Value = legacyTypes;
+                        up.Parameters[2].Value = objects;
+                        up.Parameters[3].Value = phis;
+                        up.Parameters[4].Value = games;
+                        up.Parameters[5].Value = sums;
+                        up.Parameters[6].Value = ts;
+                    }
                     segFolded += (long)(await up.ExecuteScalarAsync(token) ?? 0L);
                 }
                 await tx.CommitAsync(token);
