@@ -463,8 +463,33 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
     private Task DispatchDeltaAsync(
         Dictionary<(Hash128 S, Hash128 T, Hash128? O), Delta> delta, CancellationToken ct)
     {
-        // Sort by the partition keys (type, subject) then edge id so every
-        // writer locks rows in one global order.
+        // Sort by type, then edge id, then subject, so every writer locks rows in
+        // one global order.
+        //
+        // TYPE LEADS because the per-type lanes below require cells grouped by
+        // type; that is unchanged. What changed is the tiebreak ORDER, and it is
+        // a physical-locality fix, not a cosmetic one.
+        //
+        // consensus_pkey is btree (id, type_id, subject_id) -- id LEADS -- while
+        // consensus_rdefault is HASH (subject_id) mod 8. Sorting (type, subject,
+        // id) put the PK's leading column LAST, so a 65,536-cell chunk descended
+        // the PK btree in an order uncorrelated with the btree, touching ~65,536
+        // distinct random pages across 88GB of consensus against a 31GB
+        // shared_buffers. MEASURED 2026-08-18 on a live UD run: 25.2k random read
+        // IOPS and 13.2k full-page images/s, 11.1% of WAL records carrying an 8KB
+        // FPI, ~2,300x write amplification against a <4GB corpus.
+        //
+        // Sorting by id after type puts each hash subpartition's accesses in PK
+        // order. Subject stays in the key as the final tiebreak: hash(subject_id)
+        // decides the subpartition and is not monotonic in subject, so the eight
+        // subpartitions still interleave -- but each is now walked ASCENDING
+        // instead of randomly, which is what the buffer cache can actually hold.
+        //
+        // The deadlock invariant is untouched: any TOTAL order avoids the lock
+        // cycle as long as every writer uses the same one, and (type, id, subject)
+        // is total exactly as (type, subject, id) was. Lane determinism is also
+        // untouched -- Glicko-2's non-commutativity is ordered by the per-type
+        // FIFO chain below, never by position within a delta.
         var cells = new ((Hash128 S, Hash128 T, Hash128? O) Key, Hash128 Cid, Delta D)[delta.Count];
         int n = 0;
         foreach (var (key, d) in delta)
@@ -473,8 +498,8 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
         {
             int c = x.Key.T.CompareToBytewise(y.Key.T);
             if (c != 0) return c;
-            c = x.Key.S.CompareToBytewise(y.Key.S);
-            return c != 0 ? c : x.Cid.CompareToBytewise(y.Cid);
+            c = x.Cid.CompareToBytewise(y.Cid);
+            return c != 0 ? c : x.Key.S.CompareToBytewise(y.Key.S);
         });
 
         // Mask pairs from the same delta: (subject, type) + (object, type).
