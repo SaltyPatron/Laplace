@@ -1,6 +1,6 @@
 # Decomposer normalization campaign status
 
-Status date: 2026-08-19
+Status date: 2026-08-20
 
 This is the integration inventory for the decomposer campaign. It records what is
 on `main` and what still requires product work. A pull request is not counted as
@@ -91,6 +91,7 @@ delivered until it is merged.
 | #1204 | Residual limiter and eval cleanup | Removes remaining fixed queue/cache/probe/journal/I/O/resume/marshal limits, replaces the 4-GiB/512-MiB working-set clamps with topology ownership, makes mask/fold scheduling work-conserving, and stops planner row-count shrink from invalidating semantic evals. |
 | #1205 | Vendor cache/chunk derivation and CI repair | Removes Tatoeba's fixed 1,048,576-id/64-slot allocation and Wiktionary's 65,536-entry/64-byte cache gates; budgets the vendor cache as a real resident owner, carries collection coordinates from the exact composed tree, and corrects the delay-free tier-probe test contract exposed by main run 32314788241. |
 | #1206 | Highway-mask parallel SQL | Removes the obsolete global advisory lock that serialized every stable entity-sharded mask lane; disjoint shards now execute concurrently, while deterministic `(id,tier)` row acquisition protects overlapping external writers before one set-based `UPDATE ... FROM`. |
+| #1207 | Residual I/O and parser cap removal | Replaces scattered file-buffer constants with one shared sequential-I/O policy, derives generic batch/probe defaults and contiguous parser envelopes from the shared RAM/CPU topology, and removes Wiktionary's divide-by-four/max-four worker clamp. |
 
 The related source-fidelity audit (#1155), durable working agreement (#1156), and
 canonical lexical-peer batch core (#1164) were integrated in the same batch,
