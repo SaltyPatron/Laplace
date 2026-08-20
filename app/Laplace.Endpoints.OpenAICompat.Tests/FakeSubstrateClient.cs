@@ -615,7 +615,7 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
     {
         IReadOnlyList<ChessPlayerRow> all = [TalRow, BotvinnikRow];
         return Task.FromResult<IReadOnlyList<ChessPlayerRow>>(
-            [.. all.Skip(Math.Max(0, offset)).Take(Math.Clamp(limit, 1, 200))]);
+            [.. all.Skip(Math.Max(0, offset)).Take(Math.Max(0, limit))]);
     }
 
     public Task<ChessPlayersResponse> ChessPlayersAsync(
@@ -628,10 +628,10 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
         if (!string.IsNullOrWhiteSpace(initial))
         {
             // First-codepoint bucketing: reaches every player, not a warm window.
-            var all = await ChessRosterAsync(200, 0, ct);
+            var all = await ChessRosterAsync(int.MaxValue, 0, ct);
             var hits = all
                 .Where(p => p.Name.StartsWith(initial.Trim(), StringComparison.OrdinalIgnoreCase))
-                .Skip(Math.Max(0, offset)).Take(Math.Clamp(limit, 1, 200))
+                .Skip(Math.Max(0, offset)).Take(Math.Max(0, limit))
                 .Select((p, i) => p with { Rank = offset + i + 1 })
                 .ToList();
             return new ChessPlayersResponse("chess.players", hits.Count, Math.Max(0, offset), hits);
@@ -670,7 +670,7 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
             idHex.Length != 32
                 ? null
                 : new ChessGamesResponse("chess.games", idHex, offset,
-                    offset > 0
+                    offset > 0 || limit <= 0
                         ? []
                         :
                         [

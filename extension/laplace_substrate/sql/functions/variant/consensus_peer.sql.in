@@ -79,7 +79,7 @@ BEGIN
         JOIN laplace.entities self ON self.id = p_id AND x.type_id = self.type_id
         GROUP BY x.id
         ORDER BY score DESC
-        LIMIT p_k
+        LIMIT GREATEST(p_k, 0)
     ) z
     ORDER BY public.laplace_hash128_blake3(z.id || p_id)
     LIMIT 1;
@@ -95,7 +95,9 @@ BEGIN
     -- the anchor into locals first so the ordering operand is a genuine bound
     -- parameter, and gate the whole branch behind the election miss.
     -- Shape rank uses REALIZED curves (entity_curve), never packed trajectory
-    -- (Rule #3 / Issue 51).
+    -- (Rule #3 / Issue 51). p_k is the declared admission/election budget for
+    -- both paths. The old fixed 48-row KNN pool silently changed the meaning and
+    -- work of the same call regardless of p_k.
     SELECT a.type_id, a.coord, structural.entity_curve(p_id)
       INTO v_type, v_coord, v_curve
     FROM structural.word_anchor(p_id) a;
@@ -111,11 +113,11 @@ BEGIN
             FROM laplace.v_word_points w
             WHERE w.type_id = v_type AND w.id <> p_id AND w.trajectory IS NOT NULL
             ORDER BY w.coord <<->> v_coord
-            LIMIT 48
+            LIMIT GREATEST(p_k, 0)
         ) knn
         WHERE knn.curve IS NOT NULL AND v_curve IS NOT NULL
         ORDER BY public.laplace_frechet_4d(knn.curve, v_curve) ASC
-        LIMIT p_k
+        LIMIT GREATEST(p_k, 0)
     ) z
     ORDER BY public.laplace_hash128_blake3(z.id || p_id)
     LIMIT 1;

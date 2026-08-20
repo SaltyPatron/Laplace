@@ -18,6 +18,8 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 /// </summary>
 public static class NpgsqlSubstrateReads
 {
+    internal static int RequestedLimit(int limit) => Math.Max(0, limit);
+
     public readonly record struct MeshPositionRow(
         string Dir, string IdHex, string Label, string Relation, string? HubType,
         decimal? EffMu, long Witnesses);
@@ -2295,7 +2297,7 @@ public static class NpgsqlSubstrateReads
                 r.GetInt64(3), r.GetDouble(4), r.GetDouble(5), r.GetDouble(6)),
             p =>
             {
-                p.AddWithValue("limit", Math.Clamp(limit, 1, 200));
+                p.AddWithValue("limit", RequestedLimit(limit));
                 p.AddWithValue("offset", Math.Max(0, offset));
             }, ct: ct, label: "chess_ranked", onError: onError);
 
@@ -2316,7 +2318,7 @@ public static class NpgsqlSubstrateReads
             p =>
             {
                 p.AddWithValue("initial", initial);
-                p.AddWithValue("limit", Math.Clamp(limit, 1, 200));
+                p.AddWithValue("limit", RequestedLimit(limit));
                 p.AddWithValue("offset", Math.Max(0, offset));
             }, ct: ct, label: "chess_players_by_initial", onError: onError,
             timeoutSeconds: 60);
@@ -2394,7 +2396,7 @@ public static class NpgsqlSubstrateReads
             p =>
             {
                 p.Add("id", NpgsqlDbType.Bytea).Value = id;
-                p.AddWithValue("limit", Math.Clamp(limit, 1, 200));
+                p.AddWithValue("limit", RequestedLimit(limit));
             }, ct: ct, label: "chess_head_to_head", onError: onError);
 
     public readonly record struct ChessPlayerGameRow(
@@ -2423,7 +2425,7 @@ public static class NpgsqlSubstrateReads
             p =>
             {
                 p.Add("id", NpgsqlDbType.Bytea).Value = id;
-                p.AddWithValue("limit", Math.Clamp(limit, 1, 200));
+                p.AddWithValue("limit", RequestedLimit(limit));
                 p.AddWithValue("offset", Math.Max(0, offset));
             }, ct: ct, label: "chess_player_games", onError: onError,
             timeoutSeconds: 60);
