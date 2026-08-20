@@ -15,11 +15,9 @@
 -- is resolved by ONE probe. term_lang and peers stay per-term (they are per-term
 -- facts) but run as one set-based pass instead of N statements.
 --
--- ORDERING IS PER TERM. The scalar form ends in ORDER BY ... LIMIT p_k. Here that is
--- row_number() OVER (PARTITION BY term ORDER BY <same three keys>) <= p_k, which is
--- the same selection applied independently to each term. The ORDER BY rationale
--- (EVIDENCE BEFORE ADJUDICATED STRENGTH) lives in bubble_up.sql.in and is not
--- restated here -- one body owns that argument, this one must not drift from it.
+-- ORDERING IS PER TERM. row_number() OVER (PARTITION BY term ORDER BY the complete
+-- evidence order) applies an explicit p_k independently to each term. This file owns
+-- that order; the scalar is only a one-element adapter and cannot drift from it.
 DROP FUNCTION IF EXISTS taxonomy.bubble_up_batch(bytea[], bytea[], integer);
 CREATE OR REPLACE FUNCTION taxonomy.bubble_up_batch(
     p_terms bytea[],
@@ -113,7 +111,7 @@ resolved AS (
     WHERE fo.via_relation = 'IS_SENSE_OF'
 ),
 -- Per-term fact, set-based pass. Language is a CONSTRAINT on which surface the
--- input denotes, never a score -- see bubble_up.sql.in for why a boolean
+-- input denotes, never a score -- a boolean
 -- "has an edge to the query language" does not discriminate.
 term_lang AS MATERIALIZED (
     SELECT al.id AS term, al.lang AS id
@@ -203,7 +201,7 @@ domain AS (
     WHERE d IS NOT NULL
 ),
 -- Feeds domain_scores ONLY. The cardinality gate keeps the geometry_neighbours
--- lateral from ever being evaluated on the no-domain path; see bubble_up.sql.in.
+-- lateral from ever being evaluated on the no-domain path.
 -- Keyed by synset, not by term: a synset's domain hits do not depend on which
 -- term reached it.
 members AS (
@@ -277,6 +275,6 @@ ordered AS (
 SELECT o.term, o.sense_id, o.synset_id, o.via_relation, o.score, o.base_eff_mu,
        o.domain_hits, o.witnesses
 FROM ordered o
-WHERE p_k IS NULL OR o.rn <= GREATEST(p_k, 1)
+WHERE p_k IS NULL OR o.rn <= p_k
 ORDER BY o.term, o.rn;
 END;

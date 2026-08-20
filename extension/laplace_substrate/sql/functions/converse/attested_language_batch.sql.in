@@ -33,7 +33,9 @@
 -- generated/relation_family_ids.sql.in at 219), and the gate takes the first drop
 -- position for a name, so dropping the dependent here clears both hazards.
 -- Its CREATE stays at 330, after both bases exist, which BEGIN ATOMIC requires.
+DROP FUNCTION IF EXISTS taxonomy.bubble_up(bytea, bytea[], integer);
 DROP FUNCTION IF EXISTS taxonomy.bubble_up_batch(bytea[], bytea[], integer);
+DROP FUNCTION IF EXISTS converse.attested_language(bytea);
 DROP FUNCTION IF EXISTS converse.attested_language_batch(bytea[]);
 CREATE OR REPLACE FUNCTION converse.attested_language_batch(p_ids bytea[])
     RETURNS TABLE(id bytea, lang bytea)

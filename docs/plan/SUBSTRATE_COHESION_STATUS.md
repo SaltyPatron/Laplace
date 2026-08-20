@@ -118,7 +118,7 @@ model, or chess source run.
 | --- | --- | --- |
 | Repeatable whole-repository SQL audit | Done | #1136 merged the dependency-free scanner, stable findings, clone detection, report, tests, and CI ratchet. |
 | Exact and near-clone remediation | Started | The audit finds 12 exact and 14 near-clone clusters. #1164 normalized one lexical family; the repository has not entered a shrink-only consolidation cycle. |
-| One semantic scalar/batch core per operation | Partial | `lexical_peers` and `structural.cluster` now delegate to canonical set cores with parity fixtures. Many families still have independent bodies, notably `attested_language` and `bubble_up`. |
+| One semantic scalar/batch core per operation | Partial | `lexical_peers`, `structural.cluster`, `attested_language`, and `bubble_up` delegate to canonical set cores with nonempty parity fixtures. Other independent scalar/batch and SQL/native families remain. |
 | Early result reduction and honest top-k | Audit only | Numeric caps, unordered limits, materialized fences, and post-join limits are inventoried. They have not been classified or plan-gated operation by operation. |
 | Index-friendly predicates and partition pruning | Partial | #1141 removed one 194M-row apply scan. Function-wrapped consensus keys still defeat type partition pruning in known read operations. |
 | No default full-corpus health/discovery scans | Not done | `relation_bands()` and default substrate health retain exact whole-corpus work. Exact maintenance/deep-audit scans are not yet cleanly separated from cheap defaults. |
