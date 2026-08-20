@@ -75,8 +75,8 @@ CREATE OR REPLACE FUNCTION converse.resolve_topic(p_phrase text, p_context bytea
               ORDER BY y.specificity DESC NULLS LAST,
                        y.rel_mass    DESC NULLS LAST,
                        y.peers       DESC,
-                       y.denote_mu    DESC NULLS LAST,
                        y.ord         DESC,
+                       y.denote_mu    DESC NULLS LAST,
                        y.synset_id
               LIMIT 1),
             converse.resolve_phrase(p_phrase),

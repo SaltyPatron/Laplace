@@ -218,6 +218,21 @@ public sealed class ReadPathArchitectureGateTests
     }
 
     [Fact]
+    public void TopRelations_UsesOneIndexedGlobalElection()
+    {
+        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
+        var top = File.ReadAllText(Path.Combine(repoRoot, "extension", "laplace_substrate",
+            "sql", "functions", "consensus", "top_relations.sql.in"));
+        var index = File.ReadAllText(Path.Combine(repoRoot, "extension", "laplace_substrate",
+            "sql", "indexes", "consensus_edge_rank_btree.sql.in"));
+
+        Assert.DoesNotContain("CROSS JOIN LATERAL", top, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("consensus.relation_rank(c.type_id)", top, StringComparison.Ordinal);
+        Assert.Contains("consensus.relation_rank(type_id)", index, StringComparison.Ordinal);
+        Assert.Contains("((rating - 2 * rd)::double precision)", index, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ConsensusWeb_HasNoGuessedFanoutOrFixedNodeCeiling()
     {
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();

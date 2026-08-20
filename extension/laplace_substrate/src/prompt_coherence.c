@@ -292,13 +292,22 @@ pc_scan_edges(HTAB *syn_h, HTAB *type_h, HTAB *peer_h, PcCand *cands,
             rank = (laplace_relation_lookup((const hash128_t *) VARDATA_ANY(tid), &def) == 0
                     && def != NULL) ? def->rank : 0.0;
 
-            /* TOTAL first, and for EVERY edge -- this is the denominator that
-             * makes the coherence sum mean something. Forward pass only, so an
-             * edge with both endpoints in the candidate set is not counted
-             * twice. Free: these rows are already being read. */
-            if (forward)
-                for (int i = 0; i < me->n_idx; i++)
-                    cands[me->idx[i]].total_mass += rank * eff;
+            /* TOTAL first, and for EVERY edge incident to this candidate -- this
+             * is the denominator that makes the bidirectional coherence sum mean
+             * something. The forward scan contributes outgoing mass and the
+             * reverse scan contributes incoming mass. That is not duplication:
+             * an edge between two candidates belongs once to each endpoint's own
+             * incident mass.
+             *
+             * Counting only the forward scan divided incoming coherence by an
+             * outgoing-only denominator. Measured on the foundation seed for
+             * `pawn -> HAS_DOMAIN_TOPIC -> chess`: both endpoints received the
+             * same peer coherence, but chess's large incoming degree was absent
+             * from its denominator, so the broad domain displaced the narrower
+             * pawn. Keep numerator and denominator on the same directional
+             * support. Free: both indexed scans already read these rows. */
+            for (int i = 0; i < me->n_idx; i++)
+                cands[me->idx[i]].total_mass += rank * eff;
 
             peer = (PcSynEntry *) hash_search(syn_h, VARDATA_ANY(other), HASH_FIND, NULL);
             if (peer == NULL)
