@@ -2517,6 +2517,144 @@ public static class NpgsqlSubstrateReads
             ct: ct, label: "chess_game", onError: onError,
             timeoutSeconds: 60);
 
+    public readonly record struct TrajectoryConstituentRow(byte[] ParentId, byte[] EntityId, int Ordinal);
+    public readonly record struct TypedTrajectoryConstituentRow(
+        byte[] ParentId, PhysicalityType Type, byte[] EntityId, int Ordinal);
+
+    /// <summary>Losslessly unpack ordered typed record trajectories for a batch of entities.</summary>
+    public static Task<IReadOnlyList<TrajectoryConstituentRow>> TrajectoryConstituentsAsync(
+        NpgsqlDataSource dataSource, byte[][] entityIds, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT d.id, p.entity_id,
+                   row_number() OVER (PARTITION BY d.id ORDER BY p.ord, rep.n)::integer
+            FROM unnest(@ids) AS d(id)
+            CROSS JOIN LATERAL generation.trajectory_unpacked_points(d.id)
+                 WITH ORDINALITY AS p(entity_id, run_length, ctier, ord)
+            CROSS JOIN LATERAL generate_series(1, GREATEST(p.run_length, 1)) AS rep(n)
+            ORDER BY d.id, p.ord, rep.n
+            """,
+            static r => new TrajectoryConstituentRow(
+                (byte[])r[0], (byte[])r[1], r.GetInt32(2)),
+            p =>
+            {
+                var parameter = p.AddWithValue("ids", entityIds);
+                parameter.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
+            },
+            ct: ct, label: "trajectory_constituents", onError: onError,
+            timeoutSeconds: 60);
+
+    /// <summary>Unpack several physicality lanes for a batch in one round trip.</summary>
+    public static Task<IReadOnlyList<TypedTrajectoryConstituentRow>>
+        TypedTrajectoryConstituentsAsync(
+            NpgsqlDataSource dataSource, byte[][] entityIds, PhysicalityType[] types,
+            CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT d.id, lane.type, p.entity_id,
+                   row_number() OVER (
+                       PARTITION BY d.id, lane.type ORDER BY p.ord, rep.n)::integer
+            FROM unnest(@ids) AS d(id)
+            CROSS JOIN unnest(@types) AS lane(type)
+            CROSS JOIN LATERAL generation.trajectory_unpacked_points(d.id, lane.type)
+                 WITH ORDINALITY AS p(entity_id, run_length, ctier, ord)
+            CROSS JOIN LATERAL generate_series(1, GREATEST(p.run_length, 1)) AS rep(n)
+            ORDER BY d.id, lane.type, p.ord, rep.n
+            """,
+            static r => new TypedTrajectoryConstituentRow(
+                (byte[])r[0], (PhysicalityType)r.GetInt16(1), (byte[])r[2], r.GetInt32(3)),
+            p =>
+            {
+                var ids = p.AddWithValue("ids", entityIds);
+                ids.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
+                var laneTypes = p.AddWithValue("types", types.Select(static t => (short)t).ToArray());
+                laneTypes.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Smallint;
+            },
+            ct: ct, label: "typed_trajectory_constituents", onError: onError,
+            timeoutSeconds: 60);
+
+    /// <summary>Unpack one explicitly typed parallel trajectory for a batch of entities.</summary>
+    public static Task<IReadOnlyList<TrajectoryConstituentRow>> TrajectoryConstituentsAsync(
+        NpgsqlDataSource dataSource, byte[][] entityIds, PhysicalityType type,
+        CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT d.id, p.entity_id,
+                   row_number() OVER (PARTITION BY d.id ORDER BY p.ord, rep.n)::integer
+            FROM unnest(@ids) AS d(id)
+            CROSS JOIN LATERAL generation.trajectory_unpacked_points(d.id, @type)
+                 WITH ORDINALITY AS p(entity_id, run_length, ctier, ord)
+            CROSS JOIN LATERAL generate_series(1, GREATEST(p.run_length, 1)) AS rep(n)
+            ORDER BY d.id, p.ord, rep.n
+            """,
+            static r => new TrajectoryConstituentRow(
+                (byte[])r[0], (byte[])r[1], r.GetInt32(2)),
+            p =>
+            {
+                var ids = p.AddWithValue("ids", entityIds);
+                ids.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
+                p.Add("type", NpgsqlDbType.Smallint).Value = (short)type;
+            },
+            ct: ct, label: "trajectory_constituents_typed", onError: onError,
+            timeoutSeconds: 60);
+
+    public static Task<byte[]?> ChessSetupPositionIdAsync(
+        NpgsqlDataSource dataSource, byte[] playingId, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ExecuteScalarAsync<byte[]>(dataSource, """
+            SELECT a.object_id
+            FROM laplace.attestations pl
+            JOIN laplace.attestations a
+              ON a.subject_id = pl.object_id
+             AND a.context_id = pl.subject_id
+             AND a.type_id = laplace.relation_type_id('HAS_SETUP')
+            WHERE pl.subject_id = @id
+              AND pl.type_id = laplace.relation_type_id('PLAYS_LINE')
+            ORDER BY a.id
+            LIMIT 1
+            """,
+            p => p.Add("id", NpgsqlDbType.Bytea).Value = playingId,
+            ct: ct, label: "chess_setup_position", onError: onError);
+
+    public static Task<byte[]?> ChessLineForPlayingAsync(
+        NpgsqlDataSource dataSource, byte[] playingId, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ExecuteScalarAsync<byte[]>(dataSource, """
+            SELECT object_id
+            FROM laplace.attestations
+            WHERE subject_id = @id
+              AND type_id = laplace.relation_type_id('PLAYS_LINE')
+            ORDER BY id
+            LIMIT 1
+            """,
+            p => p.Add("id", NpgsqlDbType.Bytea).Value = playingId,
+            ct: ct, label: "chess_line_for_playing", onError: onError);
+
+    public readonly record struct NestedTrajectoryConstituentRow(
+        byte[] ParentId, int NodeOrdinal, byte[] NodeId, int FieldOrdinal, byte[] FieldId);
+
+    /// <summary>Unpack position→typed-atom→byte-atom trajectories in one batched query.</summary>
+    public static Task<IReadOnlyList<NestedTrajectoryConstituentRow>>
+        NestedTrajectoryConstituentsAsync(
+            NpgsqlDataSource dataSource, byte[][] entityIds, CancellationToken ct,
+            NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT d.id, a.ord::integer, a.entity_id, f.ord::integer, f.entity_id
+            FROM unnest(@ids) AS d(id)
+            CROSS JOIN LATERAL generation.trajectory_unpacked_points(d.id)
+                 WITH ORDINALITY AS a(entity_id, run_length, ctier, ord)
+            CROSS JOIN LATERAL generation.trajectory_unpacked_points(a.entity_id)
+                 WITH ORDINALITY AS f(entity_id, run_length, ctier, ord)
+            ORDER BY d.id, a.ord, f.ord
+            """,
+            static r => new NestedTrajectoryConstituentRow(
+                (byte[])r[0], r.GetInt32(1), (byte[])r[2], r.GetInt32(3), (byte[])r[4]),
+            p =>
+            {
+                var parameter = p.AddWithValue("ids", entityIds);
+                parameter.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
+            },
+            ct: ct, label: "nested_trajectory_constituents", onError: onError,
+            timeoutSeconds: 60);
+
     public readonly record struct ModelRecipeRow(byte[] RecipeId, string RecipeJson);
 
     /// <summary><c>structural.model_recipes()</c>.</summary>
@@ -2600,7 +2738,7 @@ public static class NpgsqlSubstrateReads
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
             SELECT successor_id, seen
-            FROM structural.geometry_successors(@root, @limit, 1, false)
+            FROM structural.geometry_successors_typed(@root, @limit, 1, false, 3::smallint)
             """,
             static r => new ChessTrajectorySuccessorRow(
                 (byte[])r[0], r.GetInt64(1)),
@@ -2723,7 +2861,7 @@ public static class NpgsqlSubstrateReads
                 FROM named n
                 CROSS JOIN LATERAL (
                     SELECT u.entity_id
-                    FROM generation.trajectory_unpacked_points(n.line_id)
+                    FROM generation.trajectory_unpacked_points(n.line_id, 3::smallint)
                          WITH ORDINALITY AS u(entity_id, run_length, ctier, ord)
                     ORDER BY u.ord DESC
                     LIMIT 1

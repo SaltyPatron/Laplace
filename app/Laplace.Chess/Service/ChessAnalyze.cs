@@ -235,7 +235,7 @@ public static class ChessAnalyze
         // one evictable unit, #508) and stamped with the trajectory lane's own per-line
         // marker, so the standalone backfill skips lines this fused pass already carried.
         long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
-        ChessGraph.AppendGameTrajectory(b, lineId, line, ChessVocabulary.TrajectorySourceId, nowUs);
+        ChessGraph.AppendPositionProjection(b, lineId, line, ChessVocabulary.TrajectorySourceId, nowUs);
         b.AddEntity(ChessTrajectoryDecomposer.MarkerId(lineId), EntityTier.Document,
                     ChessVocabulary.AnalysisMarkerType, ChessVocabulary.TrajectorySourceId);
     }

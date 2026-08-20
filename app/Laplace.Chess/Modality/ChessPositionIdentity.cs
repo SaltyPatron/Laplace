@@ -19,6 +19,12 @@ public static class ChessPositionIdentity
     internal const byte PieceSquareDomain = 4;
     internal const byte RulesDomain = 5;
     internal const byte CastlingRookOverrideDomain = 6;
+    internal const byte MovePieceDomain = 16;
+    internal const byte MoveFromDomain = 17;
+    internal const byte MoveToDomain = 18;
+    internal const byte MoveFlagsDomain = 19;
+    internal const byte MovePromotionDomain = 20;
+    internal const byte AnnotationMissingDomain = 32;
 
     internal readonly record struct Atom(byte Domain, ushort Value, Hash128 Digest, bool HasDigest)
     {
@@ -38,6 +44,25 @@ public static class ChessPositionIdentity
         int n = FillAtoms(board, rules ?? ChessVariantRules.Standard, atoms);
         Span<Hash128> ids = stackalloc Hash128[n];
         for (int i = 0; i < n; i++) ids[i] = AtomId(atoms[i]);
+        return Hash128.Merkle(PositionTier, ids);
+    }
+
+    internal static int FillMoveAtoms(Piece moving, ChessMove move, Span<Atom> atoms)
+    {
+        atoms[0] = Atom.Scalar(MovePieceDomain, checked((ushort)PieceOrdinal(moving)));
+        atoms[1] = Atom.Scalar(MoveFromDomain, checked((ushort)BitIndex(move.From)));
+        atoms[2] = Atom.Scalar(MoveToDomain, checked((ushort)BitIndex(move.To)));
+        atoms[3] = Atom.Scalar(MoveFlagsDomain, (ushort)move.Flags);
+        atoms[4] = Atom.Scalar(MovePromotionDomain, PromotionOrdinal(move.Promotion));
+        return 5;
+    }
+
+    internal static Hash128 MoveId(Piece moving, ChessMove move)
+    {
+        Span<Atom> atoms = stackalloc Atom[5];
+        FillMoveAtoms(moving, move, atoms);
+        Span<Hash128> ids = stackalloc Hash128[5];
+        for (int i = 0; i < ids.Length; i++) ids[i] = AtomId(atoms[i]);
         return Hash128.Merkle(PositionTier, ids);
     }
 
@@ -81,6 +106,96 @@ public static class ChessPositionIdentity
     }
 
     /// <summary>
+    /// Reconstruct a board from the two-level typed position trajectory
+    /// (position→atoms→byte-atoms). This is the inverse of <see cref="FillAtoms"/>;
+    /// FEN is generated only after reconstruction when an interchange surface is requested.
+    /// </summary>
+    public static bool TryBoardFromAtomConstituents(
+        IReadOnlyList<IReadOnlyList<Hash128>> atomConstituents, out Board board)
+    {
+        board = new Board { EpSquare = -1, FullmoveNumber = 1 };
+        var atoms = new List<Atom>(atomConstituents.Count);
+        foreach (var ids in atomConstituents)
+        {
+            if (!TryDecodeAtom(ids, out var atom)) return false;
+            atoms.Add(atom);
+        }
+
+        ushort? rookOverride = null;
+        foreach (var atom in atoms)
+        {
+            switch (atom.Domain)
+            {
+                case SideDomain:
+                    if (atom.Value > 1) return false;
+                    board.WhiteToMove = atom.Value == 1;
+                    break;
+                case CastlingDomain:
+                    if (atom.Value > 15) return false;
+                    board.Castle = (CastleRights)atom.Value;
+                    break;
+                case CastlingRookOverrideDomain:
+                    rookOverride = atom.Value;
+                    break;
+                case EnPassantDomain:
+                    if (atom.Value > 64) return false;
+                    board.EpSquare = atom.Value == 64
+                        ? -1 : Board.Sq(atom.Value & 7, atom.Value >> 3);
+                    break;
+                case PieceSquareDomain:
+                {
+                    int pieceOrdinal = atom.Value >> 6;
+                    int bit = atom.Value & 63;
+                    if (pieceOrdinal > 11) return false;
+                    board.Set(Board.Sq(bit & 7, bit >> 3), PieceFromOrdinal(pieceOrdinal));
+                    break;
+                }
+                case RulesDomain:
+                    // Rule identity is orthogonal to the board payload. PGN setup replay uses
+                    // the board plus its encoded Chess960 rook geometry below.
+                    break;
+                default:
+                    return false;
+            }
+        }
+
+        if (!ResolveCastlingRookFiles(board, rookOverride)) return false;
+        return board.FindKing(white: true) >= 0 && board.FindKing(white: false) >= 0;
+    }
+
+    internal static bool TryDecodeAtom(IReadOnlyList<Hash128> ids, out Atom atom)
+    {
+        atom = default;
+        if (ids.Count is not (5 or 33)) return false;
+        Span<byte> bytes = stackalloc byte[33];
+        for (int i = 0; i < ids.Count; i++)
+        {
+            if (!TryByteForId(ids[i], out bytes[i])) return false;
+        }
+        if (bytes[0] < 0x80) return false;
+        byte domain = (byte)(bytes[0] - 0x80);
+        Span<byte> payload = stackalloc byte[16];
+        int payloadLength = (ids.Count - 1) / 2;
+        for (int i = 0; i < payloadLength; i++)
+        {
+            byte hi = bytes[1 + i * 2], lo = bytes[2 + i * 2];
+            if ((hi & 0xF0) != 0xA0 || (lo & 0xF0) != 0xB0) return false;
+            payload[i] = (byte)(((hi & 0x0F) << 4) | (lo & 0x0F));
+        }
+        if (payloadLength == 2)
+        {
+            atom = Atom.Scalar(domain, (ushort)(payload[0] | (payload[1] << 8)));
+            return true;
+        }
+        if (payloadLength == 16 && domain == RulesDomain)
+        {
+            atom = Atom.Rule(Hash128.FromBytes(payload));
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>
     /// Encode a typed scalar as byte-atom constituents. Payload bytes become two tagged
     /// nibbles, so every constituent stays in ByteAtoms' 0x80..0xFF structural alphabet.
     /// </summary>
@@ -110,13 +225,88 @@ public static class ChessPositionIdentity
         return n;
     }
 
-    private static int PieceOrdinal(Piece piece) => piece switch
+    internal static int PieceOrdinal(Piece piece) => piece switch
     {
         Piece.WPawn => 0, Piece.WKnight => 1, Piece.WBishop => 2,
         Piece.WRook => 3, Piece.WQueen => 4, Piece.WKing => 5,
         Piece.BPawn => 6, Piece.BKnight => 7, Piece.BBishop => 8,
         Piece.BRook => 9, Piece.BQueen => 10, Piece.BKing => 11,
         _ => throw new ArgumentOutOfRangeException(nameof(piece), "empty is not a piece-square atom"),
+    };
+
+    private static Piece PieceFromOrdinal(int ordinal) => ordinal switch
+    {
+        0 => Piece.WPawn, 1 => Piece.WKnight, 2 => Piece.WBishop,
+        3 => Piece.WRook, 4 => Piece.WQueen, 5 => Piece.WKing,
+        6 => Piece.BPawn, 7 => Piece.BKnight, 8 => Piece.BBishop,
+        9 => Piece.BRook, 10 => Piece.BQueen, 11 => Piece.BKing,
+        _ => Piece.Empty,
+    };
+
+    private static readonly Lazy<Dictionary<Hash128, byte>> ByteById = new(() =>
+    {
+        var map = new Dictionary<Hash128, byte>(ByteAtoms.Count);
+        for (int value = ByteAtoms.First; value <= byte.MaxValue; value++)
+            map[ByteAtoms.Id((byte)value)] = (byte)value;
+        return map;
+    });
+
+    private static bool TryByteForId(Hash128 id, out byte value)
+        => ByteById.Value.TryGetValue(id, out value);
+
+    private static bool ResolveCastlingRookFiles(Board board, ushort? packed)
+    {
+        return Resolve(white: true, kingSide: true, CastleRights.WhiteKing)
+            && Resolve(white: true, kingSide: false, CastleRights.WhiteQueen)
+            && Resolve(white: false, kingSide: true, CastleRights.BlackKing)
+            && Resolve(white: false, kingSide: false, CastleRights.BlackQueen);
+
+        bool Resolve(bool white, bool kingSide, CastleRights right)
+        {
+            if ((board.Castle & right) == 0) return true;
+            int king = board.FindKing(white);
+            if (king < 0) return false;
+            int kingFile = Board.FileOf(king), rank = white ? 0 : 7;
+            Piece rook = white ? Piece.WRook : Piece.BRook;
+            int file = -1;
+            for (int f = 0; f < 8; f++)
+            {
+                if ((kingSide ? f <= kingFile : f >= kingFile)) continue;
+                if (board.Squares[Board.Sq(f, rank)] != rook) continue;
+                if (packed is { } mask
+                    && (mask & (1 << ((white ? 0 : 8) + f))) == 0) continue;
+                if (file >= 0) return false;
+                file = f;
+            }
+            if (file < 0) return false;
+            if (white)
+            {
+                if (kingSide) board.WhiteKingRookFile = (sbyte)file;
+                else board.WhiteQueenRookFile = (sbyte)file;
+            }
+            else
+            {
+                if (kingSide) board.BlackKingRookFile = (sbyte)file;
+                else board.BlackQueenRookFile = (sbyte)file;
+            }
+            return true;
+        }
+    }
+
+    private static int BitIndex(int square)
+    {
+        if ((square & 0x88) != 0) throw new ArgumentOutOfRangeException(nameof(square));
+        return (Board.RankOf(square) << 3) | Board.FileOf(square);
+    }
+
+    private static ushort PromotionOrdinal(Piece piece) => Board.TypeOf(piece) switch
+    {
+        Piece.Empty => 0,
+        Piece.WKnight => 1,
+        Piece.WBishop => 2,
+        Piece.WRook => 3,
+        Piece.WQueen => 4,
+        _ => throw new ArgumentOutOfRangeException(nameof(piece), "invalid promotion piece"),
     };
 
     /// <summary>
@@ -137,8 +327,10 @@ public static class ChessPositionIdentity
         void Check(bool white, bool kingSide, CastleRights right, int designatedFile)
         {
             if ((board.Castle & right) == 0) return;
+            int shift = white ? 0 : 8;
+            packed |= (ushort)(1 << (shift + (designatedFile & 7)));
             int kingSquare = board.FindKing(white);
-            if (kingSquare < 0) { Add(white, designatedFile); return; }
+            if (kingSquare < 0) { needed = true; return; }
             int rank = Board.RankOf(kingSquare), kingFile = Board.FileOf(kingSquare);
             Piece rook = white ? Piece.WRook : Piece.BRook;
             int count = 0, onlyFile = -1;
@@ -149,14 +341,7 @@ public static class ChessPositionIdentity
                 count++;
                 onlyFile = file;
             }
-            if (count != 1 || onlyFile != designatedFile) Add(white, designatedFile);
-        }
-
-        void Add(bool white, int file)
-        {
-            needed = true;
-            int shift = white ? 0 : 8;
-            packed |= (ushort)(1 << (shift + (file & 7)));
+            if (count != 1 || onlyFile != designatedFile) needed = true;
         }
     }
 }
