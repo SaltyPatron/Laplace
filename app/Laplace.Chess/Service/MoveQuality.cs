@@ -39,18 +39,4 @@ internal static class MoveQuality
         "inaccuracy" => "inaccuracy",
         _ => null,
     };
-
-    public static string? FromSerializedAnnotations(string? annotations)
-    {
-        if (string.IsNullOrWhiteSpace(annotations)) return null;
-        foreach (var token in annotations.Split(' ', StringSplitOptions.RemoveEmptyEntries))
-        {
-            if (token.Length > 1 && token[0] == '$'
-                && int.TryParse(token.AsSpan(1), out int nag)
-                && FromNag(nag) is { } fromNag)
-                return fromNag;
-            if (FromSuffix(token) is { } fromSuffix) return fromSuffix;
-        }
-        return null;
-    }
 }

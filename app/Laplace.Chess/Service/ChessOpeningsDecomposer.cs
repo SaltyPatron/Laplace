@@ -91,7 +91,7 @@ public sealed class ChessOpeningsDecomposer(bool recursive = false)
     }
 
     /// <summary>
-    /// Catalog unit is the LINE (GH #736 / Chess catalog dual): Merkle of start position and ordered move
+    /// Catalog unit is the LINE (GH #736 / Chess catalog dual): Merkle of ordered position
     /// ids, trajectory physicality, OPENING_NAME / HAS_ECO on the line. Ordered transitions
     /// are read from the trajectory rather than restated as fabricated draw testimony.
     /// The terminal board is recovered from the line trajectory by the catalog reader; it is
@@ -101,7 +101,6 @@ public sealed class ChessOpeningsDecomposer(bool recursive = false)
     {
         var state = m.Initial();
         var line = new List<ChessNode>(sans.Count + 1);
-        var moves = new List<ChessNode>(sans.Count);
         long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
 
         lock (ChessCompose.Gate)
@@ -111,21 +110,19 @@ public sealed class ChessOpeningsDecomposer(bool recursive = false)
             {
                 var mv = San.Resolve(state.Board, m.LegalActions(state), san);
                 if (mv is null) return;
-                moves.Add(ChessGraph.ComposeMovePoint(
-                    state.Board.Squares[mv.Value.From], mv.Value));
                 state = m.Apply(state, mv.Value);
                 line.Add(ChessGraph.ComposePositionPoint(state.Board));
             }
         }
         if (line.Count < 2) return;
 
-        var moveIds = moves.Select(static move => move.Id).ToArray();
-        var lineId = ChessCompose.LineId(line[0].Id, moveIds);
+        var ids = new Hash128[line.Count];
+        for (int i = 0; i < line.Count; i++) ids[i] = line[i].Id;
+        var lineId = ChessCompose.LineId(ids);
 
         // Shared Game/line type — identity is the merkle; do not mint a parallel id space.
         b.AddEntity(lineId, EntityTier.Document, ChessVocabulary.GameType, ChessVocabulary.OpeningsSourceId);
-        ChessGraph.AppendLineTrajectory(b, lineId, moves, ChessVocabulary.OpeningsSourceId, nowUs);
-        ChessGraph.AppendPositionProjection(b, lineId, line, ChessVocabulary.OpeningsSourceId, nowUs);
+        ChessGraph.AppendGameTrajectory(b, lineId, line, ChessVocabulary.OpeningsSourceId, nowUs);
 
         Hash128? nameId = null;
         Hash128? ecoId = null;

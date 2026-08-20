@@ -46,8 +46,7 @@ public sealed class ChessAnalyzerTests
 
         Assert.DoesNotContain(change.Entities, e => e.TypeId == ChessVocabulary.PositionType);
         Assert.DoesNotContain(change.Entities, e => e.TypeId == ChessVocabulary.SubstructureType);
-        var trajectory = Assert.Single(change.Physicalities,
-            p => p.EntityId == parsed.LineId && p.Type == PhysicalityType.Projection);
+        var trajectory = Assert.Single(change.Physicalities, p => p.EntityId == parsed.LineId);
         Assert.Equal(parsed.Moves.Count + 1, trajectory.NConstituents);
         Assert.Equal(parsed.PositionIds, Trajectory.Constituents(trajectory.TrajectoryXyzm!));
     }

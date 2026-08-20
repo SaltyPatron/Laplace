@@ -21,9 +21,4 @@ public enum PhysicalityType : short
     // Constituents are sorted ascending by id before packing, which is what makes the merkle
     // id of a set well-defined and therefore deduplicating (docs/specs/38).
     Set = 5,
-
-    // Sparse, ordinal-aligned chess source annotations. These are parallel sequences on
-    // the PLAYING, not per-ply testimony rows and not part of move/position identity.
-    ChessComment = 6,
-    ChessAnnotation = 7,
 }

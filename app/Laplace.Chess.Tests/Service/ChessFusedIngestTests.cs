@@ -28,13 +28,13 @@ public sealed class ChessFusedIngestTests
     {
         var change = Compose(analyzeInline: true);
 
-        // Witnessed layer: shared line owns one ordered typed-move trajectory.
+        // Witnessed layer intact: the game entity and its verbatim movetext.
         Assert.Contains(change.Entities, e => e.TypeId == ChessVocabulary.GameType);
-        var lineId = Assert.Single(change.Entities, e => e.TypeId == ChessVocabulary.GameType).Id;
-        Assert.Contains(change.Physicalities,
-            p => p.EntityId == lineId && p.Type == PhysicalityType.Content);
-        Assert.DoesNotContain(change.Attestations,
-            a => a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_MOVETEXT"));
+        // The movetext composes from its OWN ply tokens, not prose fragments — resolved
+        // through the decomposer's own definition so test and writer cannot drift.
+        var movetextId = ChessPgnDecomposer.MovetextId(ChessPgnDecomposer.MovetextSection(Game));
+        Assert.Contains(change.Attestations, a =>
+            a.ObjectId == movetextId && a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_MOVETEXT"));
 
         // Derived layer present in the SAME change: one line trajectory referencing typed
         // perfcache position points, without duplicating every board as a SQL tree.
@@ -48,8 +48,8 @@ public sealed class ChessFusedIngestTests
         // the fused calculated pass deposits the game-tier mantissa-packed trajectory
         // on the LINE. Closing the claim that "EmitGame deposits a bare Document" as
         // the whole story — bare on record, trajectory on analyze/fusion.
-        var gameTraj = Assert.Single(change.Physicalities,
-            p => p.EntityId == lineId && p.Type == PhysicalityType.Projection);
+        var lineId = Assert.Single(change.Entities, e => e.TypeId == ChessVocabulary.GameType).Id;
+        var gameTraj = Assert.Single(change.Physicalities, p => p.EntityId == lineId);
         Assert.NotNull(gameTraj.TrajectoryXyzm);
         Assert.True(gameTraj.NConstituents > 0);
     }
@@ -63,13 +63,13 @@ public sealed class ChessFusedIngestTests
         // No board replay: no positions and no ANALYZED_AT watermark.
         Assert.DoesNotContain(change.Entities, e => e.TypeId == ChessVocabulary.PositionType);
 
-        // Recording keeps reusable moves and the line trajectory; --no-analyze withholds
-        // the calculated line-of-positions trajectory.
-        var lineId = Assert.Single(change.Entities, e => e.TypeId == ChessVocabulary.GameType).Id;
-        Assert.Contains(change.Physicalities,
-            p => p.EntityId == lineId && p.Type == PhysicalityType.Content);
-        Assert.DoesNotContain(change.Physicalities,
-            p => p.EntityId == lineId && p.Type == PhysicalityType.Projection);
+        // The movetext DOES carry geometry even here, and that is the record layer, not the
+        // calculated one: its trajectory is the order of the source's own tokens. What
+        // --no-analyze withholds is the replay, so the only physicality is the movetext's.
+        var movetextGeometry = change.Physicalities
+            .Count(p => change.Entities.Any(e => e.Id == p.EntityId
+                                              && e.TypeId == ChessVocabulary.MovetextType));
+        Assert.Equal(change.Physicalities.Length, movetextGeometry);
         Assert.DoesNotContain(change.Attestations, a =>
             a.TypeId == RelationTypeRegistry.RelationTypeId("ANALYZED_AT"));
     }

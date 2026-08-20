@@ -25,17 +25,16 @@ DECLARE
     v_openings_src bytea := laplace.source_id('ChessOpenings');
     v_game_type bytea := laplace.entity_type_id('Chess_Game');
 BEGIN
-    SELECT p.coord, structural.entity_curve(p_line, 3::smallint)
+    SELECT a.coord, structural.entity_curve(p_line)
       INTO v_coord, v_curve
-    FROM laplace.physicalities p
-    WHERE p.entity_id = p_line AND p.type = 3;
+    FROM structural.word_anchor(p_line) a;
     IF v_coord IS NULL OR v_curve IS NULL THEN RETURN; END IF;
 
     RETURN QUERY
     WITH catalog AS MATERIALIZED (
         SELECT e.id AS line_id
         FROM laplace.entities e
-        JOIN laplace.physicalities w ON w.entity_id = e.id AND w.type = 3
+        JOIN laplace.v_word_points w ON w.id = e.id
         WHERE e.type_id = v_game_type
           AND e.first_observed_by = v_openings_src
           AND e.id <> p_line
@@ -43,17 +42,16 @@ BEGIN
           AND w.trajectory IS NOT NULL
     ),
     knn AS (
-        SELECT w.entity_id, w.coord
+        SELECT w.id AS entity_id, w.coord
         FROM catalog c
-        JOIN laplace.physicalities w ON w.entity_id = c.line_id AND w.type = 3
+        JOIN laplace.v_word_points w ON w.id = c.line_id
         ORDER BY w.coord <<->> v_coord
         LIMIT p_k
     ),
     scored AS (
         SELECT k.entity_id,
                public.laplace_angular_distance_4d(k.coord, v_coord) AS geo,
-               public.laplace_frechet_4d(
-                   structural.entity_curve(k.entity_id, 3::smallint), v_curve) AS fr
+               public.laplace_frechet_4d(structural.entity_curve(k.entity_id), v_curve) AS fr
         FROM knn k
     )
     SELECT s.entity_id, s.geo, s.fr

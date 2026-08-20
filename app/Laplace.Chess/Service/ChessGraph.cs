@@ -20,40 +20,6 @@ public static class ChessGraph
     internal static ChessNode ComposePositionPoint(Board board)
         => ChessCompose.Position(board).Position;
 
-    /// <summary>
-    /// Compose one move point without depositing its substructure atoms. Peer of
-    /// <see cref="ComposePositionPoint"/>: a CATALOG line needs the move ids for the line
-    /// merkle and its trajectory, but asserts nothing about the moves themselves, so it must
-    /// not stage the reusable move objects. A source that actually witnesses a move played
-    /// uses <see cref="EmitMove"/> instead.
-    /// </summary>
-    internal static ChessNode ComposeMovePoint(Piece moving, ChessMove move)
-        => ChessCompose.Move(moving, move).Move;
-
-    /// <summary>
-    /// Stage one bounded reusable move object. A move is piece×from×to×special×promotion;
-    /// it is neither a board nor testimony. Which game played it is carried by the playing
-    /// trajectory, and its state transition is the separate deterministic transition floor.
-    /// </summary>
-    internal static ChessNode EmitMove(
-        SubstrateChangeBuilder b, Piece moving, ChessMove move, Hash128 src, long nowUs)
-    {
-        var composed = ChessCompose.Move(moving, move);
-        if (b.PresenceOracle?.IsProvenPresent(composed.Move.Id) == true) return composed.Move;
-        foreach (var field in composed.Fields)
-            AddNode(b, field, ChessVocabulary.SubstructureType, nowUs, src);
-        AddNode(b, composed.Move, ChessVocabulary.MoveType, nowUs, src);
-        return composed.Move;
-    }
-
-    internal static ChessNode EmitAnnotationMissing(
-        SubstrateChangeBuilder b, Hash128 src, long nowUs)
-    {
-        var node = ChessCompose.AnnotationMissing();
-        AddNode(b, node, ChessVocabulary.SubstructureType, nowUs, src);
-        return node;
-    }
-
     // PlyOutcome is bit-identical to the attestation outcome enum on purpose, so
     // the score points are the Glicko2 constants — not a fourth transcription of
     // the same three literals. (Glicko2.ScoreDraw is itself pinned against the
@@ -110,7 +76,7 @@ public static class ChessGraph
 
     /// <summary>
     /// Fold the reusable time-behaviour class without projecting its source occurrence onto an
-    /// exact position. The occurrence remains losslessly present in the playing trajectory.
+    /// exact position. The occurrence remains losslessly present in the witnessed movetext.
     /// </summary>
     internal static void AppendThinkOutcome(
         SubstrateChangeBuilder b, string thinkClass, PlyOutcome moverOutcome,
@@ -201,73 +167,36 @@ public static class ChessGraph
     }
 
     /// <summary>
-    /// Calculated position projection: one GeometryZM linestring on the line entity whose
+    /// The GAME TRAJECTORY (spec 11 §2): one GeometryZM linestring on the game entity whose
     /// vertices are the positions it passed through, in order, with the position ids bit-packed
     /// into the mantissa channel. Chess-trajectory parity with the model lane — a game deposits
     /// its whole move sequence as ONE geometric object, exactly as a circuit deposits its whole
     /// relational assertion as one testimony-packed linestring.
     ///
     /// This is what the ply sequence was missing. Positions were already resident and geometric,
-    /// and every game's line could be reconstructed by replaying its move trajectory — but the line
+    /// and every game's line could be reconstructed by replaying its movetext — but the line
     /// itself was not an object, so "games near this line", maneuver search and transposition
     /// detection had nothing to index. With it they are GiST-backed spatial queries.
     ///
     /// Calculated layer, deliberately: this is deposited under the analyzer's source, versioned
-    /// and evictable, never confused with the witnessed playing trajectory. And it
+    /// and evictable, never confused with the verbatim movetext the recorder transcribes. And it
     /// is a PHYSICALITY, never part of the game's id — geometry is identity and reconstruction,
     /// not semantics, and coord/hilbert equality is not identity above tier 0.
     /// </summary>
-    public static void AppendPositionProjection(
+    public static void AppendGameTrajectory(
         SubstrateChangeBuilder b, Hash128 gameId, IReadOnlyList<ChessNode> line, Hash128 src, long nowUs)
-        => AppendOrderedTrajectory(b, gameId, line, src, nowUs, PhysicalityType.Projection);
-
-    /// <summary>
-    /// The irreducible reusable line: ordered typed move objects. Individual playings point to
-    /// this content; board positions are deterministic transition projections.
-    /// </summary>
-    internal static void AppendLineTrajectory(
-        SubstrateChangeBuilder b, Hash128 lineId, IReadOnlyList<ChessNode> moves,
-        Hash128 src, long nowUs)
-        => AppendOrderedTrajectory(b, lineId, moves, src, nowUs, PhysicalityType.Content);
-
-    /// <summary>
-    /// One compact parallel sequence for occurrence annotations. Ordinals align exactly with
-    /// the playing's move trajectory; missing values use one typed sentinel. This preserves
-    /// source structure without one entity/attestation/consensus row per ply.
-    /// </summary>
-    internal static void AppendPlayingAnnotationTrajectory(
-        SubstrateChangeBuilder b, Hash128 playingId, IReadOnlyList<Hash128> values,
-        IReadOnlyList<ChessNode> movePoints, PhysicalityType type, Hash128 src, long nowUs)
     {
-        if (values.Count == 0 || values.Count != movePoints.Count) return;
-        var coords = new double[(long)movePoints.Count * 4];
-        for (int i = 0; i < movePoints.Count; i++)
-            movePoints[i].Coord.CopyTo(coords, i * 4);
-        double[] centroid = Math4d.KarcherMean(coords);
-        b.AddPhysicality(new PhysicalityRow(
-            Id: PhysicalityId.Compute(playingId, type), EntityId: playingId, SourceId: src,
-            Type: type,
-            CoordX: centroid[0], CoordY: centroid[1], CoordZ: centroid[2], CoordM: centroid[3],
-            HilbertIndex: Hilbert128.Encode(centroid), TrajectoryXyzm: Trajectory.Build([.. values]),
-            NConstituents: values.Count, AlignmentResidual: null, SourceDim: null,
-            ObservedAtUnixUs: nowUs));
-    }
+        if (line.Count == 0) return;
 
-    private static void AppendOrderedTrajectory(
-        SubstrateChangeBuilder b, Hash128 entityId, IReadOnlyList<ChessNode> points,
-        Hash128 src, long nowUs, PhysicalityType type = PhysicalityType.Content)
-    {
-        if (points.Count == 0) return;
-
-        var ids = new Hash128[points.Count];
-        var coords = new double[(long)points.Count * 4];
-        for (int i = 0; i < points.Count; i++)
+        var ids = new Hash128[line.Count];
+        var coords = new double[(long)line.Count * 4];
+        for (int i = 0; i < line.Count; i++)
         {
-            ids[i] = points[i].Id;
-            coords[i * 4 + 0] = points[i].Coord[0];
-            coords[i * 4 + 1] = points[i].Coord[1];
-            coords[i * 4 + 2] = points[i].Coord[2];
-            coords[i * 4 + 3] = points[i].Coord[3];
+            ids[i] = line[i].Id;
+            coords[i * 4 + 0] = line[i].Coord[0];
+            coords[i * 4 + 1] = line[i].Coord[1];
+            coords[i * 4 + 2] = line[i].Coord[2];
+            coords[i * 4 + 3] = line[i].Coord[3];
         }
 
         // Same primitives the position tier composes with — one implementation of "pack an
@@ -278,14 +207,14 @@ public static class ChessGraph
         double[] centroid = Math4d.KarcherMean(coords);
 
         b.AddPhysicality(new PhysicalityRow(
-            Id: PhysicalityId.Compute(entityId, type),
-            EntityId: entityId,
+            Id: PhysicalityId.Compute(gameId, PhysicalityType.Content),
+            EntityId: gameId,
             SourceId: src,
-            Type: type,
+            Type: PhysicalityType.Content,
             CoordX: centroid[0], CoordY: centroid[1], CoordZ: centroid[2], CoordM: centroid[3],
             HilbertIndex: Hilbert128.Encode(centroid),
             TrajectoryXyzm: traj,
-            NConstituents: points.Count,
+            NConstituents: line.Count,
             AlignmentResidual: null,
             SourceDim: null,
             ObservedAtUnixUs: nowUs));

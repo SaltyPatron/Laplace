@@ -35,10 +35,3 @@ CREATE INDEX IF NOT EXISTS physicalities_constituents_gin
     ON physicalities USING gin (public.laplace_trajectory_constituent_ids(trajectory))
     WITH (fastupdate = on, gin_pending_list_limit = 32768)
     WHERE type = 1 AND trajectory IS NOT NULL;
-
--- Evictable calculated chess position paths use Projection physicalities. They need the
--- same containment operator without widening content queries to every projection type.
-CREATE INDEX IF NOT EXISTS physicalities_projection_constituents_gin
-    ON physicalities USING gin (public.laplace_trajectory_constituent_ids(trajectory))
-    WITH (fastupdate = on, gin_pending_list_limit = 32768)
-    WHERE type = 3 AND trajectory IS NOT NULL;

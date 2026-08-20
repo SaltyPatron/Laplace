@@ -127,7 +127,7 @@ public sealed record ChessGamePliesResponse(
     [property: JsonPropertyName("truncated")] string? Truncated,
     [property: JsonPropertyName("plies")] IReadOnlyList<ChessPlyRow> Plies);
 
-/// <summary>One game with source headers and canonical PGN generated from its typed trajectory.</summary>
+/// <summary>One game exactly as its source recorded it — headers plus verbatim movetext.</summary>
 public sealed record ChessGameResponse(
     [property: JsonPropertyName("object")] string Object,
     [property: JsonPropertyName("id")] string IdHex,

@@ -2,7 +2,6 @@ using global::Npgsql;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.Modality;
-using Laplace.Modality.Chess;
 using Laplace.SubstrateCRUD;
 using Laplace.SubstrateCRUD.Npgsql;
 
@@ -82,43 +81,15 @@ public sealed class SubstrateTurnHost : IContentAddresser, IEdgeRatings, IStateV
             b, ChessVocabulary.LaplacePlayerId, "Laplace", ChessVocabulary.SourceId, SourceTrust.Response);
 
         var line = new List<ChessNode>(edges.Count + 1);
-        var moves = new List<ChessNode>(edges.Count);
-        long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
         foreach (var e in edges)
         {
             var from = ChessGraph.ComposePositionPoint(e.SubjectKey);
             var to = ChessGraph.ComposePositionPoint(e.ObjectKey);
             if (line.Count == 0) line.Add(from);
             line.Add(to);
-            if (!PositionContent.TryFenFromSurface(e.SubjectKey, out var fen)) return;
-            var board = Board.FromFen(fen);
-            var legal = MoveGen.Legal(board);
-            ChessMove? resolved = null;
-            if (!string.IsNullOrWhiteSpace(e.MoveKey))
-            {
-                foreach (var candidate in legal)
-                    if (candidate.ToUci() == e.MoveKey) { resolved = candidate; break; }
-                resolved ??= San.Resolve(board, legal, e.MoveKey);
-            }
-            if (resolved is null)
-            {
-                foreach (var candidate in legal)
-                {
-                    var next = board.Clone();
-                    MoveApply.Make(next, candidate);
-                    if (ChessCompose.PositionId(next) != to.Id) continue;
-                    if (resolved is not null) return;
-                    resolved = candidate;
-                }
-            }
-            if (resolved is null) return;
-            moves.Add(ChessGraph.EmitMove(
-                b, board.Squares[resolved.Value.From], resolved.Value,
-                ChessVocabulary.SourceId, nowUs));
         }
 
-        var lineId = ChessCompose.LineId(
-            line[0].Id, moves.Select(static n => n.Id).ToArray());
+        var lineId = ChessCompose.LineId(line.Select(static n => n.Id).ToArray());
         b.AddEntity(lineId, EntityTier.Document, ChessVocabulary.GameType, ChessVocabulary.SourceId);
         PlyOutcome whiteOutcome = WhiteOutcome(edges, adjudicated);
         string resultToken = whiteOutcome switch
@@ -139,9 +110,8 @@ public sealed class SubstrateTurnHost : IContentAddresser, IEdgeRatings, IStateV
             b.AddAttestation(NativeAttestation.CategoricalResolved(
                 lineId, ChessVocabulary.HasResultType, resultId,
                 ChessVocabulary.SourceId, playingId, _witnessWeight));
-        ChessGraph.AppendLineTrajectory(
-            b, lineId, moves, ChessVocabulary.SourceId, nowUs);
-        ChessGraph.AppendPositionProjection(
+        long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
+        ChessGraph.AppendGameTrajectory(
             b, lineId, line, ChessVocabulary.TrajectorySourceId, nowUs);
         b.AddEntity(
             ChessTrajectoryDecomposer.MarkerId(lineId), EntityTier.Document,

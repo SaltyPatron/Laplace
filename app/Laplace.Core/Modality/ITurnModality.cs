@@ -24,13 +24,6 @@ public readonly record struct GameOutcome(int? Winner)
     public static GameOutcome Draw => new((int?)null);
     public static GameOutcome WonBy(int side) => new(side);
     public bool IsDraw => Winner is null;
-
-    /// <summary>
-    /// The PGN result token. One spelling of the three literals, because this string is
-    /// content-addressed identity input (the playing ids in ChessVocabulary) as well as
-    /// witnessed HAS_RESULT testimony — a second transcription is a silent identity fork.
-    /// </summary>
-    public string ResultToken => Winner is null ? "1/2-1/2" : Winner == 0 ? "1-0" : "0-1";
 }
 
 public enum PlyOutcome

@@ -96,8 +96,7 @@ public sealed class ChessLineGeometryGateTests
                 using var c2 = new NpgsqlCommand(
                     """
                     SELECT public.laplace_frechet_4d(
-                        structural.entity_curve(@a, 3::smallint),
-                        structural.entity_curve(@b, 3::smallint))
+                        structural.entity_curve(@a), structural.entity_curve(@b))
                     """, conn);
                 c2.CommandTimeout = 30;
                 c2.Parameters.AddWithValue("a", direct.LineId.ToBytes());
@@ -117,7 +116,6 @@ public sealed class ChessLineGeometryGateTests
         var m = new ChessModality();
         var state = m.Initial();
         var ids = new List<Hash128>();
-        var moveIds = new List<Hash128>();
         var coords = new List<double[]>();
         lock (ChessCompose.Gate)
         {
@@ -128,16 +126,13 @@ public sealed class ChessLineGeometryGateTests
             {
                 var mv = San.Resolve(state.Board, m.LegalActions(state), san);
                 Assert.NotNull(mv);
-                moveIds.Add(ChessCompose.MoveId(
-                    state.Board.Squares[mv!.Value.From], mv.Value));
                 state = m.Apply(state, mv!.Value);
                 var composed = ChessCompose.Position(m.StateKey(state));
                 ids.Add(composed.Position.Id);
                 coords.Add(composed.Position.Coord);
             }
         }
-        return new LineWalk(ChessCompose.LineId(ids[0],
-            System.Runtime.InteropServices.CollectionsMarshal.AsSpan(moveIds)), ids, coords);
+        return new LineWalk(ChessCompose.LineId(ids.ToArray()), ids, coords);
     }
 
     private static double FrechetCurves(NpgsqlConnection conn, IReadOnlyList<double[]> a, IReadOnlyList<double[]> b)
@@ -190,7 +185,6 @@ public sealed class ChessLineGeometryGateTests
             SELECT EXISTS (
               SELECT 1 FROM laplace.physicalities
               WHERE entity_id = @id
-                AND type = 3
                 AND trajectory IS NOT NULL
                 AND n_constituents >= 2)
             """, conn);

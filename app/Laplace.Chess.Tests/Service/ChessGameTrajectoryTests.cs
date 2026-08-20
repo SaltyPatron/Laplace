@@ -7,8 +7,8 @@ using Xunit;
 namespace Laplace.Chess.Service.Tests;
 
 /// <summary>
-/// A reusable LINE owns an irreducible content trajectory of typed moves. Its board walk is a
-/// deterministic, evictable projection produced from the start position and transition floor.
+/// The GAME TRAJECTORY (spec 11 §2): one GeometryZM linestring per game whose vertices are the
+/// positions it passed through, with the position ids bit-packed into the mantissa channel.
 ///
 /// The property that makes it worth depositing rather than recomputing is INVERTIBILITY — the
 /// exact move sequence has to come back out of the geometry. A linestring that only preserved
@@ -30,46 +30,63 @@ public sealed class ChessGameTrajectoryTests
         return b.SetInputUnitsConsumed(1).Build();
     }
 
-    private static ChessGameRecord Parsed() => ChessPgnDecomposer.TryParseGame(Game)!;
+    /// <summary>The position sequence this game walks, composed the way the analyzer composes it.</summary>
+    private static List<Hash128> ExpectedLine()
+    {
+        var m = new ChessModality();
+        var state = m.Initial();
+        var line = new List<Hash128>();
+        lock (ChessCompose.Gate)
+        {
+            line.Add(ChessCompose.PositionId(m.StateKey(state)));
+            foreach (var san in new[] { "e4", "e5", "Qh5", "Nc6", "Bc4", "Nf6", "Qxf7#" })
+            {
+                var mv = San.Resolve(state.Board, m.LegalActions(state), san);
+                Assert.NotNull(mv);
+                state = m.Apply(state, mv!.Value);
+                line.Add(ChessCompose.PositionId(m.StateKey(state)));
+            }
+        }
+        return line;
+    }
 
-    private static PhysicalityRow LineTrajectory(SubstrateChange change, PhysicalityType type)
+    private static PhysicalityRow GameTrajectory(SubstrateChange change)
     {
         var gameEntity = Assert.Single(change.Entities, e => e.TypeId == ChessVocabulary.GameType);
-        return Assert.Single(change.Physicalities,
-            p => p.EntityId == gameEntity.Id && p.Type == type);
+        return Assert.Single(change.Physicalities, p => p.EntityId == gameEntity.Id);
     }
 
     [Fact]
     public void Game_CarriesATrajectory()
     {
-        var traj = LineTrajectory(Compose(), PhysicalityType.Content);
+        var traj = GameTrajectory(Compose());
         Assert.NotNull(traj.TrajectoryXyzm);
         Assert.NotEmpty(traj.TrajectoryXyzm!);
     }
 
     [Fact]
-    public void ContentTrajectory_HasOneVertexPerMove()
+    public void Trajectory_HasOneVertexPerBoardIncludingTheStart()
     {
-        var traj = LineTrajectory(Compose(), PhysicalityType.Content);
-        Assert.Equal(7, traj.NConstituents);
-        Assert.Equal(7 * 4, traj.TrajectoryXyzm!.Length);
+        var traj = GameTrajectory(Compose());
+        // 7 plies means 8 boards: the starting position plus one after each move. Dropping the
+        // start would make the first move unrecoverable from the line alone.
+        Assert.Equal(8, traj.NConstituents);
+        Assert.Equal(8 * 4, traj.TrajectoryXyzm!.Length);
     }
 
     [Fact]
-    public void ContentTrajectory_InvertsBackToTheExactMoveSequence()
+    public void Trajectory_InvertsBackToTheExactPositionSequence()
     {
-        var parsed = Parsed();
-        var traj = LineTrajectory(Compose(), PhysicalityType.Content);
+        var traj = GameTrajectory(Compose());
         var recovered = Trajectory.Constituents(traj.TrajectoryXyzm!);
-        Assert.Equal(parsed.MoveIds, recovered);
+        Assert.Equal(ExpectedLine(), recovered);
     }
 
     [Fact]
     public void Trajectory_ReferencesPerfcachePositionsWithoutDepositingSqlTrees()
     {
         var change = Compose();
-        var recovered = Trajectory.Constituents(
-            LineTrajectory(change, PhysicalityType.Projection).TrajectoryXyzm!);
+        var recovered = Trajectory.Constituents(GameTrajectory(change).TrajectoryXyzm!);
         var deposited = change.Entities
             .Where(e => e.TypeId == ChessVocabulary.PositionType)
             .Select(e => e.Id)
@@ -84,14 +101,12 @@ public sealed class ChessGameTrajectoryTests
     {
         var change = Compose();
         var gameEntity = Assert.Single(change.Entities, e => e.TypeId == ChessVocabulary.GameType);
-        var parsed = Parsed();
-        // The line id is the Merkle over its start state and ordered typed move objects.
-        // Geometry is identity and reconstruction, never semantics,
+        // GH #736: the game CONTENT id is the LINE — the Merkle over the ordered position
+        // ids it passes through. Geometry is identity and reconstruction, never semantics,
         // and must never leak into the hash — otherwise re-deriving geometry would mint a
         // different game. (Provenance — who/when — never enters either; it lives on the
         // event.)
-        Assert.Equal(gameEntity.Id,
-            ChessCompose.LineId(parsed.PositionIds[0], parsed.MoveIds));
+        Assert.Equal(gameEntity.Id, ChessCompose.LineId(ExpectedLine().ToArray()));
     }
 
     [Fact]
@@ -99,8 +114,8 @@ public sealed class ChessGameTrajectoryTests
     {
         // Same game, composed twice: byte-identical geometry. A trajectory that drifted would
         // break the content-addressed rock the same way non-deterministic codegen would.
-        var a = LineTrajectory(Compose(), PhysicalityType.Content);
-        var b = LineTrajectory(Compose(), PhysicalityType.Content);
+        var a = GameTrajectory(Compose());
+        var b = GameTrajectory(Compose());
         Assert.Equal(a.Id, b.Id);
         Assert.Equal(a.TrajectoryXyzm, b.TrajectoryXyzm);
         Assert.Equal(a.CoordX, b.CoordX);
@@ -110,20 +125,17 @@ public sealed class ChessGameTrajectoryTests
     }
 
     [Fact]
-    public void NoAnalyze_KeepsMoveTrajectoryButOmitsPositionProjection()
+    public void NoAnalyze_DepositsNoTrajectory()
     {
-        // The position-line trajectory is calculated. --no-analyze retains the witnessed
-        // typed move trajectory but does not project the ordered board path onto the LINE.
+        // The trajectory is the CALCULATED layer. --no-analyze must leave the pure witnessed
+        // record: the game, its tags, its verbatim movetext, and no derived geometry.
         var parsed = ChessPgnDecomposer.TryParseGame(Game)!;
         var b = new SubstrateChangeBuilder(ChessVocabulary.PgnSourceId, "test/pgn");
         ChessPgnDecomposer.ComposeGame(parsed, b, analyzeInline: false);
         var change = b.SetInputUnitsConsumed(1).Build();
 
         var gameEntity = Assert.Single(change.Entities, e => e.TypeId == ChessVocabulary.GameType);
-        Assert.Contains(change.Physicalities,
-            p => p.EntityId == gameEntity.Id && p.Type == PhysicalityType.Content);
-        Assert.DoesNotContain(change.Physicalities,
-            p => p.EntityId == gameEntity.Id && p.Type == PhysicalityType.Projection);
+        Assert.DoesNotContain(change.Physicalities, p => p.EntityId == gameEntity.Id);
     }
 
     // --- the backfill pass -------------------------------------------------
@@ -164,10 +176,9 @@ public sealed class ChessGameTrajectoryTests
         // GH #736: the linestring hangs on the LINE — one per line, however many playings.
         var lineId = ChessPgnDecomposer.TryParseGame(Game)!.LineId;
 
-        var traj = Assert.Single(change.Physicalities,
-            p => p.EntityId == lineId && p.Type == PhysicalityType.Projection);
+        var traj = Assert.Single(change.Physicalities, p => p.EntityId == lineId);
         Assert.Equal(8, traj.NConstituents);
-        Assert.Equal(Parsed().PositionIds, Trajectory.Constituents(traj.TrajectoryXyzm!));
+        Assert.Equal(ExpectedLine(), Trajectory.Constituents(traj.TrajectoryXyzm!));
 
         // Marker is versioned independently of ChessAnalyze.Version so a geometry backfill
         // and a testimony re-derive can never be mistaken for one another.
@@ -182,9 +193,8 @@ public sealed class ChessGameTrajectoryTests
         // Two roads to the same geometry: a fresh ingest derives it inline, the backfill
         // derives it from the hydrated record. They must agree exactly, or a game's geometry
         // would depend on which path reached it.
-        var inline = LineTrajectory(Compose(), PhysicalityType.Projection);
-        var backfilled = Assert.Single(ComposeBackfill().Physicalities,
-            p => p.EntityId == inline.EntityId && p.Type == PhysicalityType.Projection);
+        var inline = GameTrajectory(Compose());
+        var backfilled = Assert.Single(ComposeBackfill().Physicalities, p => p.EntityId == inline.EntityId);
         Assert.Equal(inline.TrajectoryXyzm, backfilled.TrajectoryXyzm);
         Assert.Equal(inline.Id, backfilled.Id);
         Assert.Equal(inline.NConstituents, backfilled.NConstituents);

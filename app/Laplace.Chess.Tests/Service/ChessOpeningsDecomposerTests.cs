@@ -1,7 +1,6 @@
 using System.Text;
 using Laplace.Engine.Core;
 using Laplace.Modality.Chess;
-using Laplace.SubstrateCRUD;
 using Xunit;
 
 namespace Laplace.Chess.Service.Tests;
@@ -60,21 +59,16 @@ public sealed class ChessOpeningsDecomposerTests
         var sans = ChessOpeningsDecomposer.ExtractSans("1. e4 e5 2. Nf3 Nc6 3. Bb5");
         var change = ChessOpeningsDecomposer.ComposeLineForTest("C60", "Ruy Lopez", sans);
 
-        var replayed = ChessPgnDecomposer.TryReplayLineDetailed(sans, startFen: null);
+        var replayed = ChessPgnDecomposer.TryReplayLine(sans, startFen: null);
         Assert.NotNull(replayed);
-        var expectedLine = ChessCompose.LineId(replayed!.PositionIds[0], replayed.MoveIds);
+        var expectedLine = ChessCompose.LineId(replayed!);
 
         var lineEntity = Assert.Single(change.Entities, e => e.TypeId == ChessVocabulary.GameType);
         Assert.Equal(expectedLine, lineEntity.Id);
 
-        var moves = Assert.Single(change.Physicalities,
-            p => p.EntityId == expectedLine && p.Type == PhysicalityType.Content);
-        Assert.Equal(sans.Count, moves.NConstituents);
-        Assert.Equal(replayed.MoveIds, Trajectory.Constituents(moves.TrajectoryXyzm!));
-        var positions = Assert.Single(change.Physicalities,
-            p => p.EntityId == expectedLine && p.Type == PhysicalityType.Projection);
-        Assert.Equal(sans.Count + 1, positions.NConstituents);
-        Assert.Equal(replayed.PositionIds, Trajectory.Constituents(positions.TrajectoryXyzm!));
+        var traj = Assert.Single(change.Physicalities, p => p.EntityId == expectedLine);
+        Assert.NotNull(traj.TrajectoryXyzm);
+        Assert.Equal(sans.Count + 1, traj.NConstituents);
         Assert.DoesNotContain(change.Attestations,
             a => a.TypeId == ChessVocabulary.MoveType);
         Assert.DoesNotContain(change.Entities, e => e.TypeId == ChessVocabulary.PositionType);
@@ -85,7 +79,7 @@ public sealed class ChessOpeningsDecomposerTests
         Assert.Contains(change.Attestations,
             a => a.TypeId == ChessVocabulary.EcoCodeType && a.SubjectId == expectedLine);
         Assert.DoesNotContain(change.Attestations,
-            a => a.SubjectId == replayed.PositionIds[^1]
+            a => a.SubjectId == replayed![^1]
                  && (a.TypeId == ChessVocabulary.OpeningNameType
                      || a.TypeId == ChessVocabulary.EcoCodeType));
     }

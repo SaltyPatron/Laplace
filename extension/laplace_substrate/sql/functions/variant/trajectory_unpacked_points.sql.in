@@ -1,5 +1,5 @@
 DROP FUNCTION IF EXISTS laplace.trajectory_unpacked_points(bytea);
-CREATE OR REPLACE FUNCTION generation.trajectory_unpacked_points(p_entity bytea, p_type smallint)
+CREATE OR REPLACE FUNCTION generation.trajectory_unpacked_points(p_entity bytea)
     RETURNS TABLE(entity_id bytea, run_length int, ctier int)
     LANGUAGE sql STABLE PARALLEL SAFE
     -- MEASURED, not guessed. One call returns the points of ONE trajectory:
@@ -33,7 +33,7 @@ CREATE OR REPLACE FUNCTION generation.trajectory_unpacked_points(p_entity bytea,
     WITH traj AS MATERIALIZED (
         SELECT p.trajectory
         FROM laplace.physicalities p
-        WHERE p.entity_id = p_entity AND p.type = p_type AND p.trajectory IS NOT NULL
+        WHERE p.entity_id = p_entity AND p.type = 1 AND p.trajectory IS NOT NULL
     )
     -- ctier COMES OUT OF THE VERTEX, NOT OUT OF A LOOKUP.
     --
@@ -69,15 +69,3 @@ CREATE OR REPLACE FUNCTION generation.trajectory_unpacked_points(p_entity bytea,
     LATERAL public.laplace_mantissa_unpack(dp.geom) u
     ORDER BY u.ordinal
 $$;
-
--- Content-lane default. BEGIN ATOMIC, not a string body: the delegation is parsed at
--- CREATE time and recorded in pg_depend, so the two-argument core cannot be dropped or
--- have its signature changed out from under this wrapper (GH #764). Columns are
--- qualified through the alias because RETURNS TABLE names are parameters in scope here.
-CREATE OR REPLACE FUNCTION generation.trajectory_unpacked_points(p_entity bytea)
-    RETURNS TABLE(entity_id bytea, run_length int, ctier int)
-    LANGUAGE sql STABLE PARALLEL SAFE ROWS 6
-BEGIN ATOMIC
-    SELECT t.entity_id, t.run_length, t.ctier
-    FROM generation.trajectory_unpacked_points(p_entity, 1::smallint) AS t;
-END;

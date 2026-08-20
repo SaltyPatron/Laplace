@@ -15,7 +15,6 @@ public readonly record struct ChessNode(
     byte Tier);
 
 public sealed record ChessComposed(ChessNode Position, IReadOnlyList<ChessNode> Substructures);
-public sealed record ChessMoveComposed(ChessNode Move, IReadOnlyList<ChessNode> Fields);
 
 public static class ChessCompose
 {
@@ -35,56 +34,30 @@ public static class ChessCompose
     public const byte LineTier = 4;
 
     /// <summary>
-    /// The reusable line identity: start state plus ordered typed move objects. Replayed board
-    /// states are deterministic projections through the transition floor, not line content.
-    /// Identical play converges regardless of SAN/PGN spelling or provenance.
+    /// The game/line CONTENT id (GH #736): the Merkle composition of the ordered position
+    /// ids the game passes through (start position included) — the same composition law as
+    /// every tier. Identical play = identical id, regardless of who played it, when, or how
+    /// the source spelled the SAN ("O-O" vs "0-0"); provenance lives in attestation
+    /// context, never in this hash. ONE definition — every lane (PGN, book, live) resolves
+    /// line identity through it.
     /// </summary>
-    public static Hash128 LineId(Hash128 startPositionId, ReadOnlySpan<Hash128> orderedMoveIds)
-    {
-        Span<Hash128> constituents = orderedMoveIds.Length + 1 <= 256
-            ? stackalloc Hash128[orderedMoveIds.Length + 1]
-            : new Hash128[orderedMoveIds.Length + 1];
-        constituents[0] = startPositionId;
-        orderedMoveIds.CopyTo(constituents[1..]);
-        return Hash128.Merkle(LineTier, constituents);
-    }
+    public static Hash128 LineId(ReadOnlySpan<Hash128> orderedPositionIds)
+        => Hash128.Merkle(LineTier, orderedPositionIds);
 
     /// <summary>
     /// Resolved-move content id (spec 11): piece × from × to × flags × promotion.
     /// Deduped across games; pairs with <see cref="TransitionKey"/> for state→state floor hits.
     /// </summary>
     public static Hash128 MoveId(Piece moving, ChessMove mv)
-        => ChessPositionIdentity.MoveId(moving, mv);
-
-    /// <summary>
-    /// A move is a bounded reusable physical action, not a position and not testimony.
-    /// Its transition is addressed separately by <see cref="TransitionKey"/>.
-    /// </summary>
-    public static ChessMoveComposed Move(Piece moving, ChessMove move)
     {
-        EnsureLoaded();
-        Span<ChessPositionIdentity.Atom> atoms = stackalloc ChessPositionIdentity.Atom[5];
-        int count = ChessPositionIdentity.FillMoveAtoms(moving, move, atoms);
-        var fields = new ChessNode[count];
-        var ids = new Hash128[count];
-        var coords = new double[count * 4];
-        for (int i = 0; i < count; i++)
-        {
-            var node = AtomMemo.GetOrAdd(atoms[i], ComposeAtom);
-            fields[i] = node;
-            ids[i] = node.Id;
-            node.Coord.CopyTo(coords, i * 4);
-        }
-        return new ChessMoveComposed(ComposeOver(ids, coords, count, PositionTier), fields);
-    }
-
-    /// <summary>Typed sentinel for a missing value in an ordinal-aligned annotation lane.</summary>
-    internal static ChessNode AnnotationMissing()
-    {
-        EnsureLoaded();
-        return AtomMemo.GetOrAdd(
-            ChessPositionIdentity.Atom.Scalar(ChessPositionIdentity.AnnotationMissingDomain, 0),
-            ComposeAtom);
+        Span<byte> buf = stackalloc byte[8];
+        buf[0] = (byte)moving;
+        buf[1] = (byte)(mv.From & 0xFF);
+        buf[2] = (byte)(mv.To & 0xFF);
+        buf[3] = (byte)mv.Flags;
+        buf[4] = (byte)mv.Promotion;
+        buf[5] = 0; buf[6] = 0; buf[7] = 0;
+        return Hash128.Blake3(buf);
     }
 
     /// <summary>

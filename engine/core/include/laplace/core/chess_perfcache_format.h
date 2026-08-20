@@ -5,7 +5,7 @@
  *
  * Deterministic lossless geometry ROM for typed chess structure:
  *   tier 1 — typed binary chess state atoms
- *   tier 2 — bounded move objects and catalog positions composed as typed trajectories
+ *   tier 2 — catalog positions composed as ordered state-atom trajectories
  *
  * Record: id → coord / hilbert / n / tier. No Glicko, attestations, or
  * observation counts. NOT Syzygy. NOT ECO-as-universe. NOT a managed
@@ -34,7 +34,7 @@ extern "C" {
 #define LAPLACE_CHESS_PERFCACHE_HEADER_SIZE 128u
 
 /* Generator tag baked into source_hash inputs (emit side). */
-#define LAPLACE_CHESS_PERFCACHE_GENERATOR_TAG "chess_position_perfcache/v4-typed-board-move-atoms"
+#define LAPLACE_CHESS_PERFCACHE_GENERATOR_TAG "chess_position_perfcache/v3-typed-board-atoms"
 
 typedef struct {
     hash128_t    id;          /* 16 — position content id (tier 2 Merkle) */

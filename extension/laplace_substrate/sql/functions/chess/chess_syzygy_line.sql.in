@@ -37,7 +37,7 @@ WITH rel AS MATERIALIZED (
 ),
 line AS MATERIALIZED (
     SELECT u.ord AS ordinal, u.entity_id AS pos
-    FROM LATERAL generation.trajectory_unpacked_points(p_line, 3::smallint)
+    FROM LATERAL generation.trajectory_unpacked_points(p_line)
          WITH ORDINALITY AS u(entity_id, run_length, ctier, ord)
 ),
 probed AS MATERIALIZED (

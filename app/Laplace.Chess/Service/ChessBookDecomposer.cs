@@ -223,12 +223,10 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
         // Replay once and retain the exact ordered structure. Terminal mechanics remain
         // deterministic calculation; a book line is not fabricated game-outcome testimony.
         var states = new List<ChessState>(record.Sans.Count + 1) { state };
-        var resolved = new List<(Piece Moving, ChessMove Move)>(record.Sans.Count);
         foreach (var san in record.Sans)
         {
             var mv = San.Resolve(state.Board, m.LegalActions(state), san);
             if (mv is null) return; // extraction replayed this already; disagreement = drop
-            resolved.Add((state.Board.Squares[mv.Value.From], mv.Value));
             state = m.Apply(state, mv.Value);
             states.Add(state);
         }
@@ -241,12 +239,9 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
         var line = new List<ChessNode>(states.Count);
         foreach (var position in states)
             line.Add(ChessGraph.ComposePositionPoint(position.Board));
-        long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
-        var movePoints = resolved.Select(r =>
-            ChessGraph.EmitMove(b, r.Moving, r.Move, src, nowUs)).ToArray();
-        ChessGraph.AppendLineTrajectory(b, record.LineId, movePoints, src, nowUs);
-        ChessGraph.AppendPositionProjection(
-            b, record.LineId, line, src, nowUs);
+        ChessGraph.AppendGameTrajectory(
+            b, record.LineId, line, src,
+            DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L);
         if (!string.IsNullOrWhiteSpace(record.Context)
             && ContentEmitter.Emit(b, record.Context, src) is { } ctxId)
             b.AddAttestation(NativeAttestation.Categorical(
@@ -282,7 +277,7 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
             foreach (var sans in ExtractProseLines(paragraph))
             {
                 if (titleContentId is null
-                    || ChessPgnDecomposer.TryReplayLineDetailed(sans, startFen: null) is not { } replay)
+                    || ChessPgnDecomposer.TryReplayLine(sans, startFen: null) is not { } positionIds)
                 {
                     // The book's line does not ground from the standard start — almost
                     // always an endgame/middlegame study quoted off a diagram the text
@@ -293,7 +288,7 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
                     continue;
                 }
                 ChessDropLedger.Kept();
-                var lineId = ChessCompose.LineId(replay.PositionIds[0], replay.MoveIds);
+                var lineId = ChessCompose.LineId(positionIds);
                 yield return new ChessBookRecord(title, null, sans, TrimContext(paragraph))
                 {
                     LineId = lineId,

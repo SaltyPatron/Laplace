@@ -105,11 +105,8 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
         await _writeGate.WaitAsync(ct);
         try
         {
-            var (moving, move) = ResolveMove(fromKey, moveToken);
             session.Moves.Add(moveToken);
-            session.Plies.Add(new RecordedPly(
-                fromKey, toKey, moveToken, session.MoverSide(ply), moving, move));
-            session.MoveIds.Add(ChessCompose.MoveId(moving, move));
+            session.Plies.Add(new RecordedPly(fromKey, toKey, session.MoverSide(ply)));
             // The ordered position ids the session passes through — the line composition
             // CompleteGameAsync mints (start position first, then one vertex per ply).
             if (session.PositionIds.Count == 0)
@@ -154,8 +151,7 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
             if (session.PositionIds.Count > 0)
             {
                 var lineId = ChessCompose.LineId(
-                    session.PositionIds[0],
-                    System.Runtime.InteropServices.CollectionsMarshal.AsSpan(session.MoveIds));
+                    System.Runtime.InteropServices.CollectionsMarshal.AsSpan(session.PositionIds));
                 b.AddEntity(lineId, EntityTier.Document, ChessVocabulary.GameType, ChessVocabulary.SourceId);
 
                 // The playing exists now, and only now. LivePlayingId closes over the line
@@ -166,7 +162,7 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
                 // called with is a routing key and never becomes an entity.
                 playingId = ChessVocabulary.LivePlayingId(
                     session.WhitePlayerId, session.BlackPlayerId, session.LearnContext,
-                    lineId, result.ResultToken);
+                    lineId, result.IsDraw ? "1/2-1/2" : result.Winner == 0 ? "1-0" : "0-1");
                 EnsurePlayingEntity(b, playingId, session);
 
                 // The structural playing→line join the read side navigates. It carries no
@@ -175,14 +171,11 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
                     playingId, ChessVocabulary.PlaysLineType, lineId,
                     ChessVocabulary.SourceId, null, WitnessWeight));
 
-                long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
-                var movePoints = new ChessNode[session.Plies.Count];
-                for (int i = 0; i < movePoints.Length; i++)
-                    movePoints[i] = ChessGraph.EmitMove(
-                        b, session.Plies[i].MovingPiece, session.Plies[i].Move,
-                        ChessVocabulary.SourceId, nowUs);
-                ChessGraph.AppendLineTrajectory(
-                    b, lineId, movePoints, ChessVocabulary.SourceId, nowUs);
+                // Game grain: ONE verbatim movetext edge for the whole game, witnessed at
+                // completion (not a growing per-ply prefix — that minted N single-witness
+                // HAS_MOVETEXT rows per game), plus the result and colour facts — all
+                // subjected on the line with ctx = this playing.
+                WitnessMovetext(b, lineId, playingId, session.Moves);
                 WitnessResult(b, lineId, playingId, result);
                 if (session.WhitePlayerId is { } emitWhite && session.WhitePlayerName is { Length: > 0 } whiteName)
                     ChessVocabulary.EmitPlayer(
@@ -218,7 +211,8 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
                     line.Add(to);
                 }
 
-                ChessGraph.AppendPositionProjection(
+                long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
+                ChessGraph.AppendGameTrajectory(
                     b, lineId, line, ChessVocabulary.TrajectorySourceId, nowUs);
                 b.AddEntity(
                     ChessTrajectoryDecomposer.MarkerId(lineId), EntityTier.Document,
@@ -381,25 +375,18 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
         session.EntityEmitted = true;
     }
 
-    private static (Piece Moving, ChessMove Move) ResolveMove(string fromKey, string token)
+    private static void WitnessMovetext(
+        SubstrateChangeBuilder b, Hash128 lineId, Hash128 eventId, IReadOnlyList<string> moves)
     {
-        if (!PositionContent.TryFenFromSurface(fromKey, out var fen))
-            throw new InvalidOperationException("live move has no typed pre-move board");
-        var board = Board.FromFen(fen);
-        var legal = MoveGen.Legal(board);
-        ChessMove? move = null;
-        foreach (var candidate in legal)
-            if (candidate.ToUci() == token) { move = candidate; break; }
-        if (move is null)
-            move = San.Resolve(board, legal, token);
-        if (move is null)
-            throw new InvalidOperationException($"live move '{token}' does not resolve from its pre-move board");
-        return (board.Squares[move.Value.From], move.Value);
+        if (moves.Count == 0) return;
+        if (ContentEmitter.Emit(b, string.Join(' ', moves), ChessVocabulary.SourceId) is { } mtId)
+            b.AddAttestation(NativeAttestation.Categorical(
+                lineId, "HAS_MOVETEXT", mtId, ChessVocabulary.SourceId, eventId, WitnessWeight));
     }
 
     private static void WitnessResult(SubstrateChangeBuilder b, Hash128 lineId, Hash128 eventId, GameOutcome result)
     {
-        string token = result.ResultToken;
+        string token = result.IsDraw ? "1/2-1/2" : result.Winner == 0 ? "1-0" : "0-1";
         if (ContentEmitter.Emit(b, token, ChessVocabulary.SourceId) is { } rid)
             b.AddAttestation(NativeAttestation.Categorical(
                 lineId, "HAS_RESULT", rid, ChessVocabulary.SourceId, eventId, WitnessWeight));
@@ -422,7 +409,6 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
         // GH #736: the ordered position ids this playing passes through (start position
         // first) — the line composition CompleteGameAsync mints.
         public List<Hash128> PositionIds { get; } = new();
-        public List<Hash128> MoveIds { get; } = new();
 
         public void SetPlayers(
             Hash128? nextWhiteId,
@@ -440,9 +426,7 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
         public int MoverSide(int ply) => (ply - 1) % 2;
     }
 
-    private readonly record struct RecordedPly(
-        string FromKey, string ToKey, string MoveToken, int MoverSide,
-        Piece MovingPiece, ChessMove Move);
+    private readonly record struct RecordedPly(string FromKey, string ToKey, int MoverSide);
 }
 
 public sealed class PlaySession(Hash128 eventId, string learnContext, bool recordToSubstrate,
