@@ -106,7 +106,10 @@ MANIFEST = ROOT / "engine" / "manifest" / "relation_types.toml"
 # on both laplace.consensus and laplace.attestations, verified in the catalog.
 CEILINGS = {
     "g1_weight_literalism": 11,
-    "g3_sql_vocabulary_literalism": 191,
+    # 191 -> 180 (2026-08-20): #1258 retired the SQL per-ply projection. The
+    # chess_game_plies body is now two DROP statements, so its 11 relation-name
+    # literals are gone rather than allowlisted. Shrink-only, as the law requires.
+    "g3_sql_vocabulary_literalism": 180,
     "g3_c_vocabulary_literalism": 17,
     # 700 -> 701 (2026-08-05): the language-scope declaration. Nine monolingual
     # sources emitted no HAS_LANGUAGE at all, so every English sense read back as
@@ -120,7 +123,10 @@ CEILINGS = {
     # The remaining 1 is the floor: the name has to exist once in C#, and this is
     # the single place the feature owns it. A scoped source that spelled it again
     # locally would be the per-source hand-roll that caused the defect.
-    "g3_csharp_vocabulary_literalism": 464,
+    # 464 -> 457 (2026-08-20): ChessGraph no longer spells HAS_CLOCK,
+    # HAS_EVAL_TOKEN, HAS_MOTIF or HAS_THINK_CLASS — the per-ply testimony those
+    # named is now the line/playing trajectory. Lowered by exactly the 7 cleaned.
+    "g3_csharp_vocabulary_literalism": 457,
     "g8_band_literalism": 3,
     # G4 scaffolding (W6 D3): grep for CREATE FUNCTION with zero callers outside
     # its own CREATE line. Destination form is substrate CALLS in-degree after W3
@@ -177,7 +183,8 @@ CEILINGS = {
     "g11_unqualified_in_setless_body": 0,
     # GH #764 step 3: LANGUAGE sql with quoted-string bodies (AS $$) — PostgreSQL
     # records no pg_depend. Shrink-only allowlist; new SQL must use BEGIN ATOMIC.
-    "g12_string_sql_bodies": 206,
+    # 206 -> 205 (2026-08-20): the game_plies string body went with the projection.
+    "g12_string_sql_bodies": 205,
     # G13 — case-folding a realized surface. Measured 2026-08-10 with the check
     # that introduced it, so it lands enumerated rather than red on merge day.
     # Both survivors are in translate_to's language-reference matcher, where the
