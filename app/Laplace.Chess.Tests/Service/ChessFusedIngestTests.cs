@@ -36,9 +36,9 @@ public sealed class ChessFusedIngestTests
         Assert.Contains(change.Attestations, a =>
             a.ObjectId == movetextId && a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_MOVETEXT"));
 
-        // Derived layer present in the SAME change: replayed positions, their geometry, and
-        // the version watermark that makes the standalone analyzer scan skip this game.
-        Assert.Contains(change.Entities, e => e.TypeId == ChessVocabulary.PositionType);
+        // Derived layer present in the SAME change: one line trajectory referencing typed
+        // perfcache position points, without duplicating every board as a SQL tree.
+        Assert.DoesNotContain(change.Entities, e => e.TypeId == ChessVocabulary.PositionType);
         Assert.False(change.Physicalities.IsDefaultOrEmpty || change.Physicalities.Length == 0,
             "fused pass must compose position geometry");
         Assert.Contains(change.Attestations, a =>

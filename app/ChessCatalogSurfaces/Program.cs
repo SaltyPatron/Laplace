@@ -26,9 +26,6 @@ static class Program
             transitionsOut = Path.Combine(dir ?? ".", "laplace_chess_transition_perfcache.bin");
         }
 
-        CodepointPerfcache.LoadDefault();
-        ChessVocabularyCache.Prime(ChessComposeProbe.Compose);
-
         var surfaces = new SortedSet<string>(StringComparer.Ordinal);
         var transitions = new Dictionary<Hash128, Hash128>(); // key → to
         var m = new ChessModality();

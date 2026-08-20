@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Text;
+using Laplace.Engine.Core;
 
 namespace Laplace.Modality.Chess;
 
@@ -14,7 +15,7 @@ public sealed class ChessModality : ITurnModality<ChessState, ChessMove>
     public ChessState FromFen(string fen)
     {
         var board = Board.FromFen(fen);
-        return new ChessState(board, ImmutableList.Create(CanonicalKey(board)));
+        return new ChessState(board, ImmutableList.Create(ChessPositionIdentity.PositionId(board)));
     }
 
     public string StateKey(ChessState state) => CanonicalKey(state.Board);
@@ -67,7 +68,7 @@ public sealed class ChessModality : ITurnModality<ChessState, ChessMove>
 
         MoveApply.Make(nb, action);
 
-        string key = CanonicalKey(nb);
+        Hash128 key = ChessPositionIdentity.PositionId(nb);
         var history = (isPawn || isCapture)
             ? ImmutableList.Create(key)
             : state.RepetitionHistory.Add(key);
@@ -102,7 +103,7 @@ public sealed class ChessModality : ITurnModality<ChessState, ChessMove>
     private static bool IsThreefold(ChessState state)
     {
         if (state.RepetitionHistory.Count == 0) return false;
-        string current = state.RepetitionHistory[^1];
+        Hash128 current = state.RepetitionHistory[^1];
         int count = 0;
         foreach (var k in state.RepetitionHistory)
             if (k == current) count++;

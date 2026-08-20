@@ -6,9 +6,8 @@ using Xunit;
 namespace Laplace.Chess.Service.Tests;
 
 // End-to-end over fixture PGNs: the analyzer's multi-ply motif pass must deposit the
-// sacrifice family at BOTH grains — line grain via GAME_HAS_MOTIF (subject = line) and
-// position grain via HAS_MOTIF (subject = position reached, ctx = null so every game
-// reaching the position corroborates one cell).
+// sacrifice family once at line grain. Exact-board motif projections duplicate a property
+// already recoverable from the played trajectory and create singleton consensus cells.
 [Trait("Tier", "fast")]
 public sealed class ChessMotifDepositTests
 {
@@ -21,7 +20,6 @@ public sealed class ChessMotifDepositTests
         + "1. e4 e5 2. f4 d6 3. Nf3 Nc6 1-0\n";
 
     private static readonly Hash128 GameMotifType = RelationTypeRegistry.RelationTypeId("GAME_HAS_MOTIF");
-    private static readonly Hash128 PositionMotifType = RelationTypeRegistry.RelationTypeId("HAS_MOTIF");
 
     private static (SubstrateChange Change, ChessGameRecord Parsed) Analyze(string pgn)
     {
@@ -36,19 +34,13 @@ public sealed class ChessMotifDepositTests
         => c.Attestations.Any(a => a.TypeId == GameMotifType
             && a.SubjectId == lineId && a.ObjectId == ContentEmitter.RootId(tag));
 
-    private static bool HasPositionMotif(SubstrateChange c, string tag)
-        => c.Attestations.Any(a => a.TypeId == PositionMotifType
-            && a.ObjectId == ContentEmitter.RootId(tag) && a.ContextId is null);
-
     [Fact]
-    public void AcceptedGambit_DepositsGambitAndSacrifice_AtBothGrains()
+    public void AcceptedGambit_DepositsGambitAndSacrifice_OnceOnLine()
     {
         var (change, parsed) = Analyze(KingsGambitAccepted);
         Assert.True(HasGameMotif(change, parsed.LineId, "gambit"));
         Assert.True(HasGameMotif(change, parsed.LineId, "sacrifice"));
         Assert.False(HasGameMotif(change, parsed.LineId, "sacrifice_offered"));
-        Assert.True(HasPositionMotif(change, "gambit"));
-        Assert.True(HasPositionMotif(change, "sacrifice"));
     }
 
     [Fact]
@@ -58,15 +50,13 @@ public sealed class ChessMotifDepositTests
         Assert.True(HasGameMotif(change, parsed.LineId, "gambit"));
         Assert.True(HasGameMotif(change, parsed.LineId, "sacrifice_offered"));
         Assert.False(HasGameMotif(change, parsed.LineId, "sacrifice"));
-        Assert.True(HasPositionMotif(change, "sacrifice_offered"));
     }
 
     [Fact]
-    public void PositionGrainMotifs_RideTheAnalysisSource()
+    public void ExactPositionMotifProjection_IsAbsent()
     {
         var (change, _) = Analyze(KingsGambitAccepted);
-        var rows = change.Attestations.Where(a => a.TypeId == PositionMotifType).ToList();
-        Assert.NotEmpty(rows);
-        Assert.All(rows, a => Assert.Equal(ChessAnalyze.SourceId, a.SourceId));
+        var positionMotifType = RelationTypeRegistry.RelationTypeId("HAS_MOTIF");
+        Assert.DoesNotContain(change.Attestations, a => a.TypeId == positionMotifType);
     }
 }

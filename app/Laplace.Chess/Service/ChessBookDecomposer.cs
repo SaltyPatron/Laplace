@@ -196,7 +196,7 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
 
                 string? comment = mainline[ply].CommentText;
                 if (string.IsNullOrWhiteSpace(comment)) continue;
-                var posId = ChessGraph.EmitPosition(b, m.StateKey(state), src);
+                var posId = ChessGraph.EmitPosition(b, state.Board, src);
                 if (ContentEmitter.Emit(b, comment.Trim(), src) is { } commentId)
                     b.AddAttestation(NativeAttestation.Categorical(
                         commentId, "EXPLAINS", posId, src, parsed.PlayingId, BookWitnessWeight));
@@ -238,7 +238,7 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
         b.AddEntity(record.LineId, EntityTier.Document, ChessVocabulary.GameType, src);
         var line = new List<ChessNode>(states.Count);
         foreach (var position in states)
-            line.Add(ChessGraph.EmitComposed(b, m.StateKey(position), src).Position);
+            line.Add(ChessGraph.ComposePositionPoint(position.Board));
         ChessGraph.AppendGameTrajectory(
             b, record.LineId, line, src,
             DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L);

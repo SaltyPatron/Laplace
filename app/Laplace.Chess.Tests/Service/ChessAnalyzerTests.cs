@@ -6,9 +6,8 @@ using Xunit;
 
 namespace Laplace.Chess.Service.Tests;
 
-// The analyzer (ChessAnalyze.DeriveFromParsed) is the CALCULATED pass: it must emit exactly what
-// the recorder does NOT — positions, substructures, geometry — plus the analysis-version marker
-// the scan probes to skip already-derived games. Mirror of ChessRecorderTests.
+// The analyzer builds one ordered line physicality from deterministic perfcache move points.
+// It must not expand those points into SQL position/substructure trees or per-ply projections.
 public sealed class ChessAnalyzerTests
 {
     private const string Game =
@@ -36,17 +35,20 @@ public sealed class ChessAnalyzerTests
 
         Assert.Equal(direct.Entities.Length, viaWitness.Entities.Length);
         Assert.Equal(direct.Physicalities.Length, viaWitness.Physicalities.Length);
-        Assert.Contains(viaWitness.Entities, e => e.TypeId == ChessVocabulary.PositionType);
+        Assert.DoesNotContain(viaWitness.Entities, e => e.TypeId == ChessVocabulary.PositionType);
     }
 
     [Fact]
-    public void Analyzer_EmitsPositionsAndGeometry()
+    public void Analyzer_EmitsOneLineTrajectoryWithoutPositionTrees()
     {
         var change = Analyze(Game);
-        Assert.Contains(change.Entities, e => e.TypeId == ChessVocabulary.PositionType);
-        Assert.Contains(change.Entities, e => e.TypeId == ChessVocabulary.SubstructureType);
-        Assert.False(change.Physicalities.IsDefaultOrEmpty);
-        Assert.True(change.Physicalities.Length > 0, "analyzer emits geometry (physicalities)");
+        var parsed = ChessPgnDecomposer.TryParseGame(Game)!;
+
+        Assert.DoesNotContain(change.Entities, e => e.TypeId == ChessVocabulary.PositionType);
+        Assert.DoesNotContain(change.Entities, e => e.TypeId == ChessVocabulary.SubstructureType);
+        var trajectory = Assert.Single(change.Physicalities, p => p.EntityId == parsed.LineId);
+        Assert.Equal(parsed.Moves.Count + 1, trajectory.NConstituents);
+        Assert.Equal(parsed.PositionIds, Trajectory.Constituents(trajectory.TrajectoryXyzm!));
     }
 
     [Fact]
@@ -56,21 +58,14 @@ public sealed class ChessAnalyzerTests
         Assert.DoesNotContain(change.Attestations,
             a => a.TypeId == ChessVocabulary.MoveType);
 
-        var positions = change.Entities
-            .Where(e => e.TypeId == ChessVocabulary.PositionType)
-            .Select(e => e.Id)
-            .ToHashSet();
-        Assert.DoesNotContain(change.Attestations,
-            a => a.TypeId == ChessVocabulary.OutcomeType
-                 && positions.Contains(a.SubjectId));
-
-        var substructures = change.Entities
-            .Where(e => e.TypeId == ChessVocabulary.SubstructureType)
-            .Select(e => e.Id)
-            .ToHashSet();
-        Assert.DoesNotContain(change.Attestations,
-            a => a.TypeId == ChessVocabulary.OutcomeType
-                 && substructures.Contains(a.SubjectId));
+        foreach (var relation in new[]
+                 {
+                     "HAS_CLOCK", "HAS_EVAL_TOKEN", "HAS_THINK_CLASS", "MOVE_QUALITY", "HAS_MOTIF"
+                 })
+        {
+            var typeId = RelationTypeRegistry.RelationTypeId(relation);
+            Assert.DoesNotContain(change.Attestations, a => a.TypeId == typeId);
+        }
     }
 
     [Fact]
@@ -78,18 +73,14 @@ public sealed class ChessAnalyzerTests
     {
         CodepointPerfcache.LoadDefault();
         var b = new SubstrateChangeBuilder(ChessVocabulary.AnalysisSourceId, "test/think");
-        var position = Hash128.OfCanonical("test/chess/position");
-        ChessGraph.AppendThinkClass(
-            b, position, "rushed", PlyOutcome.Win, 0.7,
-            ChessVocabulary.AnalysisSourceId, Hash128.OfCanonical("test/chess/playing"));
+        ChessGraph.AppendThinkOutcome(
+            b, "rushed", PlyOutcome.Win, 0.7, ChessVocabulary.AnalysisSourceId);
         var change = b.Build();
         var classId = ContentEmitter.RootId("rushed");
         Assert.NotNull(classId);
 
-        Assert.Contains(change.Attestations,
-            a => a.SubjectId == position
-                 && a.TypeId == ChessVocabulary.HasThinkClassType
-                 && a.ObjectId == classId.Value);
+        Assert.DoesNotContain(change.Attestations,
+            a => a.TypeId == ChessVocabulary.HasThinkClassType);
         Assert.Contains(change.Attestations,
             a => a.SubjectId == classId.Value
                  && a.TypeId == ChessVocabulary.OutcomeType

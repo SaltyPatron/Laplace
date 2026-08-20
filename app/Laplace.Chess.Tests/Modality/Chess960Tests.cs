@@ -147,11 +147,10 @@ public class Chess960Tests
 
     private static ChessMove FindCastle(Board b, bool kingSide)
     {
-        var flag = kingSide ? MoveFlags.CastleKing : MoveFlags.CastleQueen;
         var pseudo = new List<ChessMove>();
         var legal = new List<ChessMove>();
         MoveGen.Legal(b, pseudo, legal);
-        var hit = legal.Where(m => (m.Flags & flag) != 0).ToList();
+        var hit = legal.Where(m => kingSide ? m.IsKingSideCastle : m.IsQueenSideCastle).ToList();
         Assert.True(hit.Count == 1,
             $"expected exactly one {(kingSide ? "king" : "queen")}-side castle, got {hit.Count}");
         return hit[0];
@@ -275,16 +274,16 @@ public class Chess960Tests
         MoveGen.Legal(b, pseudo, legal);
 
         // Both really are legal and both really do land on c1.
-        Assert.Contains(legal, m => m.To == Board.Sq(2, 0) && (m.Flags & MoveFlags.CastleQueen) != 0);
-        Assert.Contains(legal, m => m.To == Board.Sq(2, 0) && (m.Flags & MoveFlags.CastleQueen) == 0);
+        Assert.Contains(legal, m => m.To == Board.Sq(2, 0) && m.IsQueenSideCastle);
+        Assert.Contains(legal, m => m.To == Board.Sq(2, 0) && !m.IsCastle);
 
         var king = San.Resolve(b, legal, "Kc1");
         Assert.NotNull(king);
-        Assert.Equal(MoveFlags.None, king!.Value.Flags & (MoveFlags.CastleKing | MoveFlags.CastleQueen));
+        Assert.False(king!.Value.IsCastle);
 
         var castle = San.Resolve(b, legal, "O-O-O");
         Assert.NotNull(castle);
-        Assert.NotEqual(MoveFlags.None, castle!.Value.Flags & MoveFlags.CastleQueen);
+        Assert.True(castle!.Value.IsQueenSideCastle);
     }
 
     // ---- the collision, enumerated rather than stumbled on --------------------------

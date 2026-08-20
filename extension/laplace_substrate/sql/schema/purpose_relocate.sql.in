@@ -60,7 +60,6 @@ BEGIN
             ('chat_scaffold', 'converse', 'chat_scaffold'),
             ('chess_distance_to_syzygy', 'chess', 'distance_to_syzygy'),
             ('chess_game', 'chess', 'game'),
-            ('chess_game_plies', 'chess', 'game_plies'),
             ('chess_has_dtz_type', 'chess', 'has_dtz_type'),
             ('chess_has_wdl_type', 'chess', 'has_wdl_type'),
             ('chess_head_to_head', 'chess', 'head_to_head'),

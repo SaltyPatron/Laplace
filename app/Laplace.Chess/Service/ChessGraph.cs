@@ -1,12 +1,25 @@
 using Laplace.Engine.Core;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Modality;
+using Laplace.Modality.Chess;
 using Laplace.SubstrateCRUD;
 
 namespace Laplace.Chess.Service;
 
 public static class ChessGraph
 {
+    /// <summary>
+    /// Compose one move point without depositing a SQL position subtree. A recorded game owns
+    /// one line physicality; the deterministic position addresses and coordinates inside it
+    /// come from the chess perfcache or the identical compose fallback. A source that actually
+    /// asserts a fact about an exact position uses <see cref="EmitPosition"/> instead.
+    /// </summary>
+    internal static ChessNode ComposePositionPoint(string surface)
+        => ChessCompose.Position(surface).Position;
+
+    internal static ChessNode ComposePositionPoint(Board board)
+        => ChessCompose.Position(board).Position;
+
     // PlyOutcome is bit-identical to the attestation outcome enum on purpose, so
     // the score points are the Glicko2 constants — not a fourth transcription of
     // the same three literals. (Glicko2.ScoreDraw is itself pinned against the
@@ -61,68 +74,15 @@ public static class ChessGraph
             observationCount: games));
     }
 
-    public static void AppendClock(
-    SubstrateChangeBuilder b, string fromKey, string canonicalClock, double witnessWeight,
-    Hash128 sourceId, Hash128? contextId = null)
-    {
-        if (ContentEmitter.Emit(b, canonicalClock, sourceId) is not { } cid) return;
-        long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
-        var from = EmitNodes(b, fromKey, nowUs, sourceId);
-        b.AddAttestation(NativeAttestation.Categorical(
-            from.Position.Id, "HAS_CLOCK", cid, sourceId, contextId, witnessWeight));
-    }
-
-    internal static void AppendClock(
-    SubstrateChangeBuilder b, Hash128 positionId, string canonicalClock, double witnessWeight,
-    Hash128 sourceId, Hash128? contextId = null)
-    {
-        if (ContentEmitter.Emit(b, canonicalClock, sourceId) is not { } cid) return;
-        b.AddAttestation(NativeAttestation.Categorical(
-            positionId, "HAS_CLOCK", cid, sourceId, contextId, witnessWeight));
-    }
-
-    public static void AppendEvalToken(
-    SubstrateChangeBuilder b, string fromKey, string evalToken, double witnessWeight,
-    Hash128 sourceId, Hash128? contextId = null)
-    {
-        if (ContentEmitter.Emit(b, evalToken, sourceId) is not { } tid) return;
-        long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
-        var from = EmitNodes(b, fromKey, nowUs, sourceId);
-        b.AddAttestation(NativeAttestation.Categorical(
-            from.Position.Id, "HAS_EVAL_TOKEN", tid, sourceId, contextId, witnessWeight));
-    }
-
-    internal static void AppendEvalToken(
-    SubstrateChangeBuilder b, Hash128 positionId, string evalToken, double witnessWeight,
-    Hash128 sourceId, Hash128? contextId = null)
-    {
-        if (ContentEmitter.Emit(b, evalToken, sourceId) is not { } tid) return;
-        b.AddAttestation(NativeAttestation.Categorical(
-            positionId, "HAS_EVAL_TOKEN", tid, sourceId, contextId, witnessWeight));
-    }
-
-    public static void AppendThinkClass(
-    SubstrateChangeBuilder b, string fromKey, string thinkClass, double witnessWeight,
-    Hash128 sourceId, Hash128? contextId = null)
+    /// <summary>
+    /// Fold the reusable time-behaviour class without projecting its source occurrence onto an
+    /// exact position. The occurrence remains losslessly present in the witnessed movetext.
+    /// </summary>
+    internal static void AppendThinkOutcome(
+        SubstrateChangeBuilder b, string thinkClass, PlyOutcome moverOutcome,
+        double witnessWeight, Hash128 sourceId)
     {
         if (ContentEmitter.Emit(b, thinkClass, sourceId) is not { } tid) return;
-        long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
-        var from = EmitNodes(b, fromKey, nowUs, sourceId);
-        b.AddAttestation(NativeAttestation.Categorical(
-            from.Position.Id, "HAS_THINK_CLASS", tid, sourceId, contextId, witnessWeight));
-    }
-
-    internal static void AppendThinkClass(
-    SubstrateChangeBuilder b, Hash128 positionId, string thinkClass, PlyOutcome moverOutcome,
-    double witnessWeight,
-    Hash128 sourceId, Hash128? contextId = null)
-    {
-        if (ContentEmitter.Emit(b, thinkClass, sourceId) is not { } tid) return;
-        b.AddAttestation(NativeAttestation.Categorical(
-            positionId, "HAS_THINK_CLASS", tid, sourceId, contextId, witnessWeight));
-        // The exact occurrence remains tied to position + playing above. The reusable
-        // statistical question is folded directly at class grain, so the read never needs
-        // an exact-position MOVE/OUTCOME population merely to recover the game result.
         b.AddAttestation(Outcome(
             tid, games: 1, ScoreFp1e9(moverOutcome), witnessWeight, sourceId,
             contextId: null));
@@ -137,18 +97,6 @@ public static class ChessGraph
     }
 
     /// <summary>
-    /// GH #736 position-grain motif: (position, HAS_MOTIF, motif concept), ctx = null so
-    /// every game that reaches the position corroborates the SAME cell — the
-    /// shared-content sibling of the line-grain GAME_HAS_MOTIF (one family).
-    /// </summary>
-    internal static void AppendPositionMotif(
-    SubstrateChangeBuilder b, Hash128 positionId, string motif, double witnessWeight, Hash128 sourceId)
-    {
-        if (ContentEmitter.Emit(b, motif, sourceId) is not { } mid) return;
-        b.AddAttestation(NativeAttestation.Categorical(positionId, "HAS_MOTIF", mid, sourceId, null, witnessWeight));
-    }
-
-    /// <summary>
     /// Emit the position (and its substructures) as content nodes and return the position id.
     /// For lanes that attest onto a position — e.g. the chess-book decomposer grounding prose
     /// commentary to the exact position it explains.
@@ -159,10 +107,15 @@ public static class ChessGraph
         return EmitNodes(b, surface, nowUs, src).Position.Id;
     }
 
+    public static Hash128 EmitPosition(SubstrateChangeBuilder b, Board board, Hash128 src)
+    {
+        long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
+        return EmitNodes(b, board, nowUs, src).Position.Id;
+    }
+
     /// <summary>
-    /// Compose + stage a position's nodes once and return the composed nodes, so a caller
-    /// attesting several facts onto the same position per ply (ChessAnalyze) stages each
-    /// distinct position a single time instead of re-staging it in every Append* helper.
+    /// Compose + stage a position's nodes once for a source that actually asserts facts about
+    /// that exact board (for example Syzygy or an evictable engine-analysis product).
     /// </summary>
     internal static ChessComposed EmitComposed(SubstrateChangeBuilder b, string surface, Hash128 src)
     {
@@ -170,9 +123,29 @@ public static class ChessGraph
         return EmitNodes(b, surface, nowUs, src);
     }
 
+    internal static ChessComposed EmitComposed(SubstrateChangeBuilder b, Board board, Hash128 src)
+    {
+        long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
+        return EmitNodes(b, board, nowUs, src);
+    }
+
     private static ChessComposed EmitNodes(SubstrateChangeBuilder b, string surface, long nowUs, Hash128 src)
     {
         var c = ChessCompose.Position(surface);
+        StageNodes(b, c, nowUs, src);
+        return c;
+    }
+
+    private static ChessComposed EmitNodes(SubstrateChangeBuilder b, Board board, long nowUs, Hash128 src)
+    {
+        var c = ChessCompose.Position(board);
+        StageNodes(b, c, nowUs, src);
+        return c;
+    }
+
+    private static void StageNodes(
+        SubstrateChangeBuilder b, ChessComposed c, long nowUs, Hash128 src)
+    {
         // TRUNK SHORT-CIRCUIT. A position whose id is already proven deposited implies its whole
         // substructure subtree is too — they were staged together the first time, and the id is a
         // Merkle over exactly those constituents, so the trunk cannot exist without them. Staging
@@ -187,11 +160,10 @@ public static class ChessGraph
         // that was provably redundant — never something absent. Ids are still COMPOSED (callers
         // need them for the attestations below); only the staging is skipped, so the fold is
         // untouched.
-        if (b.PresenceOracle?.IsProvenPresent(c.Position.Id) == true) return c;
+        if (b.PresenceOracle?.IsProvenPresent(c.Position.Id) == true) return;
 
         foreach (var s in c.Substructures) AddNode(b, s, ChessVocabulary.SubstructureType, nowUs, src);
         AddNode(b, c.Position, ChessVocabulary.PositionType, nowUs, src);
-        return c;
     }
 
     /// <summary>

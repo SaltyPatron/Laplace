@@ -36,16 +36,14 @@ public static class ChessExpandUnexplored
 
         lock (ChessCompose.Gate)
         {
-            string fromKey = modality.StateKey(from);
-            var fromNode = ChessGraph.EmitComposed(b, fromKey, SourceId).Position;
+            var fromNode = ChessGraph.ComposePositionPoint(from.Board);
             foreach (var mv in legal)
             {
                 var next = modality.Apply(from, mv);
-                string toKey = modality.StateKey(next);
-                var toId = ChessCompose.PositionId(toKey);
+                var toId = ChessCompose.PositionId(next.Board);
                 if (!seen.Add(toId)) continue;
 
-                var toNode = ChessGraph.EmitComposed(b, toKey, SourceId).Position;
+                var toNode = ChessGraph.ComposePositionPoint(next.Board);
                 var lineId = ChessCompose.LineId(new[] { fromNode.Id, toNode.Id });
                 b.AddEntity(lineId, EntityTier.Document, ChessVocabulary.GameType, SourceId);
                 ChessGraph.AppendGameTrajectory(

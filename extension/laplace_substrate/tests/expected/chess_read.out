@@ -549,75 +549,8 @@ BEGIN
         RAISE EXCEPTION 'FAIL: partial player candidates did not include primary HAS_NAME';
     END IF;
 
-    -- chess_game_plies: a playing read back as LOOKUPS. The trajectory lives on
-    -- the LINE (built with the SAME native packer the compose path uses, so this
-    -- fixture is byte-identical to a real deposit), the playing-EVENT hops to it
-    -- through PLAYS_LINE, and per-ply facts join by context: the EVENT for this
-    -- playing's own testimony, the LINE for line-grain engine testimony.
-    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) VALUES
-        (pl_p0, 0, type_t, src), (pl_p1, 0, type_t, src), (pl_p2, 0, type_t, src),
-        (pl_line, 0, type_t, src), (pl_event, 0, type_t, src),
-        (pl_sa, 0, type_t, src), (pl_sb, 0, type_t, src),
-        (pl_sc, 0, type_t, src), (qg, 0, type_t, src);
-    INSERT INTO laplace.physicalities (id, entity_id, type, coord, hilbert_index,
-                               trajectory, n_constituents, observed_at)
-    VALUES (public.laplace_hash128_blake3('t2/plies/phys'), pl_line, 1,
-            'SRID=0;POINT ZM (0 0 0 0)'::geometry, decode(repeat('00', 16), 'hex'),
-            public.laplace_trajectory_build(ARRAY[pl_p0, pl_p1, pl_p2]), 3, now());
-
-    -- the packer/decoder round-trip: the ids come back, in order
-    SELECT array_agg(entity_id ORDER BY ordinal) INTO ids_got
-    FROM public.laplace_trajectory_constituents(
-             public.laplace_trajectory_build(ARRAY[pl_p0, pl_p1, pl_p2]));
-    IF ids_got <> ARRAY[pl_p0, pl_p1, pl_p2] THEN
-        RAISE EXCEPTION 'FAIL: trajectory build/decode round-trip lost the sequence';
-    END IF;
-
-    INSERT INTO laplace.attestations
-        (id, subject_id, type_id, object_id, source_id, context_id,
-         outcome, last_observed_at, observation_count,
-         sum_score_fp1e9, opponent_rd_fp1e9)
-    VALUES
-        (public.laplace_hash128_blake3('t2/plies/pl'), pl_event, plns, pl_line, src, NULL, 2, now(), 1, 1000000000, 30000000000),
-        (public.laplace_hash128_blake3('t2/plies/san0'), pl_p0, laplace.relation_type_id('HAS_SAN'),
-             pl_sa, src, pl_event, 2, now(), 1, 1000000000, 30000000000),
-        (public.laplace_hash128_blake3('t2/plies/san1'), pl_p1, laplace.relation_type_id('HAS_SAN'),
-             pl_sb, src, pl_event, 2, now(), 1, 1000000000, 30000000000),
-        -- line-grain engine testimony rides ctx = the LINE and must be included
-        (public.laplace_hash128_blake3('t2/plies/qual'), pl_p1, mq,
-             qg, src, pl_line, 2, now(), 1, 1000000000, 30000000000),
-        -- another playing's ply on the SAME shared position: context must exclude it
-        (public.laplace_hash128_blake3('t2/plies/other'), pl_p0, laplace.relation_type_id('HAS_SAN'),
-             pl_sc, src, e1, 2, now(), 1, 1000000000, 30000000000);
-
-    SELECT count(*) INTO n FROM chess.game_plies(pl_event);
-    IF n <> 3 THEN
-        RAISE EXCEPTION 'FAIL: chess_game_plies expected 3 vertices, got %', n;
-    END IF;
-
-    -- vertex 1 is the starting position; the SAN on a vertex is the move that LEFT it,
-    -- and the OTHER playing's SAN on the same shared position must not appear
-    SELECT position_id INTO got FROM chess.game_plies(pl_event) WHERE ply = 1;
-    IF got <> pl_p0 THEN RAISE EXCEPTION 'FAIL: vertex 1 is not the start position'; END IF;
-    SELECT count(*) INTO n FROM chess.game_plies(pl_event) WHERE san IS NOT NULL;
-    IF n <> 2 THEN
-        RAISE EXCEPTION 'FAIL: expected 2 SANs scoped to this playing, got % (context leak?)', n;
-    END IF;
-    -- ... and the line-grain quality joins through the LINE context branch
-    SELECT count(*) INTO n FROM chess.game_plies(pl_event) WHERE move_quality IS NOT NULL;
-    IF n <> 1 THEN
-        RAISE EXCEPTION 'FAIL: line-grain move quality expected on exactly 1 ply, got %', n;
-    END IF;
-
-    -- a playing whose line has no trajectory returns nothing rather than guessing
-    -- an order, and so does an event handle with no PLAYS_LINE record at all
-    SELECT count(*) INTO n FROM chess.game_plies(e_no_traj);
-    IF n <> 0 THEN
-        RAISE EXCEPTION 'FAIL: a line with no trajectory returned % rows instead of abstaining', n;
-    END IF;
-    SELECT count(*) INTO n FROM chess.game_plies(public.laplace_hash128_blake3('test/chess2/no_such_game'));
-    IF n <> 0 THEN
-        RAISE EXCEPTION 'FAIL: an unrecorded playing returned % rows', n;
+    IF to_regprocedure('chess.game_plies(bytea)') IS NOT NULL THEN
+        RAISE EXCEPTION 'FAIL: retired per-ply SQL board projection is still installed';
     END IF;
 
     RAISE NOTICE '✓ chess_read: name folding is content-addressed, W/L/D abstains on unscored playings, career and log reconcile through the line/event re-key, folded reads rank by eff_mu';

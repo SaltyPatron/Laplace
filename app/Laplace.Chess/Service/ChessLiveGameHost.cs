@@ -205,10 +205,10 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
                 var line = new List<ChessNode>(session.Plies.Count + 1);
                 foreach (var rp in session.Plies)
                 {
-                    var from = ChessGraph.EmitComposed(b, rp.FromKey, ChessVocabulary.SourceId);
-                    var to = ChessGraph.EmitComposed(b, rp.ToKey, ChessVocabulary.SourceId);
-                    if (line.Count == 0) line.Add(from.Position);
-                    line.Add(to.Position);
+                    var from = ChessGraph.ComposePositionPoint(rp.FromKey);
+                    var to = ChessGraph.ComposePositionPoint(rp.ToKey);
+                    if (line.Count == 0) line.Add(from);
+                    line.Add(to);
                 }
 
                 long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;

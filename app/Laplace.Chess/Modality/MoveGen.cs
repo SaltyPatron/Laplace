@@ -257,7 +257,7 @@ public static class MoveGen
         // (MoveApply.MakeWithUndo, the isCastle branch). Castles are at most twice a game, so
         // the fallback costs nothing measurable.
         int kingSq = b.FindKing(mover);
-        const MoveFlags CastleAny = MoveFlags.CastleKing | MoveFlags.CastleQueen;
+        const MoveFlags CastleAny = MoveFlags.Castle;
 
         if (kingSq < 0)
         {
@@ -413,7 +413,7 @@ public static class MoveGen
     {
         bool mover = b.WhiteToMove;
         int kingSq = b.FindKing(mover);
-        const MoveFlags CastleAny = MoveFlags.CastleKing | MoveFlags.CastleQueen;
+        const MoveFlags CastleAny = MoveFlags.Castle;
         if (kingSq < 0) return true;
 
         bool special = m.From == kingSq
@@ -564,13 +564,13 @@ public static class MoveGen
         var queenRight = white ? CastleRights.WhiteQueen : CastleRights.BlackQueen;
 
         if ((b.Castle & kingRight) != 0)
-            TryCastle(b, from, white, kingSide: true, MoveFlags.CastleKing, moves);
+            TryCastle(b, from, white, kingSide: true, moves);
         if ((b.Castle & queenRight) != 0)
-            TryCastle(b, from, white, kingSide: false, MoveFlags.CastleQueen, moves);
+            TryCastle(b, from, white, kingSide: false, moves);
     }
 
     private static void TryCastle(
-        Board b, int kingFrom, bool white, bool kingSide, MoveFlags flag, List<ChessMove> moves)
+        Board b, int kingFrom, bool white, bool kingSide, List<ChessMove> moves)
     {
         int rank = white ? 0 : 7;
         int rookFrom = Board.Sq(b.CastleRookFile(white, kingSide), rank);
@@ -598,7 +598,7 @@ public static class MoveGen
             if (IsSquareAttacked(b, Board.Sq(f, rank), attackerWhite)) return;
         }
 
-        moves.Add(new ChessMove(kingFrom, kingTo, Piece.Empty, flag));
+        moves.Add(new ChessMove(kingFrom, kingTo, Piece.Empty, MoveFlags.Castle));
     }
 
 }

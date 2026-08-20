@@ -3,16 +3,15 @@
 /*
  * Chess compose-floor blob — GH #822 / docs/specs/33_Perfcache_Blob_Law.md
  *
- * Deterministic lossless geometry ROM ABOVE tier 0 (codepoints stay t0 only):
- *   tier 1 — finite piece×square vocabulary (chess "graphemes/words")
- *   tier 2 — catalog positions composed from those units (openings/960/… as
- *            "sentences" that select which boards the ROM covers)
+ * Deterministic lossless geometry ROM for typed chess structure:
+ *   tier 1 — typed binary chess state atoms
+ *   tier 2 — catalog positions composed as ordered state-atom trajectories
  *
  * Record: id → coord / hilbert / n / tier. No Glicko, attestations, or
  * observation counts. NOT Syzygy. NOT ECO-as-universe. NOT a managed
  * ConcurrentDictionary / File.ReadLines presented as the ROM.
  *
- * Emit peers ucd_tables_emit (native pack from declared catalog + t0).
+ * Emit peers ucd_tables_emit (native pack from declared typed inputs).
  * Postgres remains SoR for testimony. Rebuild is one-way. Never seed DB
  * from this file.
  */
@@ -35,7 +34,7 @@ extern "C" {
 #define LAPLACE_CHESS_PERFCACHE_HEADER_SIZE 128u
 
 /* Generator tag baked into source_hash inputs (emit side). */
-#define LAPLACE_CHESS_PERFCACHE_GENERATOR_TAG "chess_position_perfcache/v1"
+#define LAPLACE_CHESS_PERFCACHE_GENERATOR_TAG "chess_position_perfcache/v3-typed-board-atoms"
 
 typedef struct {
     hash128_t    id;          /* 16 — position content id (tier 2 Merkle) */

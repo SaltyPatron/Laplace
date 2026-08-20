@@ -33,7 +33,7 @@ public static class MoveApply
         }
         bool isCapture = captured != Piece.Empty;
 
-        bool isCastle = (m.Flags & (MoveFlags.CastleKing | MoveFlags.CastleQueen)) != 0;
+        bool isCastle = m.IsCastle;
         if (isCastle)
         {
             // ATOMIC, and not via the generic mover. Chess960 breaks two assumptions the
@@ -85,7 +85,7 @@ public static class MoveApply
     {
         bool white = !b.WhiteToMove;
 
-        if ((m.Flags & (MoveFlags.CastleKing | MoveFlags.CastleQueen)) != 0)
+        if (m.IsCastle)
         {
             PlaceCastle(b, m, white, undo: true);
         }
@@ -118,7 +118,7 @@ public static class MoveApply
     private static void PlaceCastle(Board b, ChessMove m, bool white, bool undo)
     {
         int rank = white ? 0 : 7;
-        bool kingSide = (m.Flags & MoveFlags.CastleKing) != 0;
+        bool kingSide = m.IsKingSideCastle;
         int kingFrom = m.From;
         int rookFrom = Board.Sq(b.CastleRookFile(white, kingSide), rank);
         int kingTo = Board.Sq(kingSide ? 6 : 2, rank);

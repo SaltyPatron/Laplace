@@ -83,7 +83,7 @@ public sealed class ChessGameTrajectoryTests
     }
 
     [Fact]
-    public void Trajectory_LandsOnPositionsTheSameChangeDeposited()
+    public void Trajectory_ReferencesPerfcachePositionsWithoutDepositingSqlTrees()
     {
         var change = Compose();
         var recovered = Trajectory.Constituents(GameTrajectory(change).TrajectoryXyzm!);
@@ -92,9 +92,8 @@ public sealed class ChessGameTrajectoryTests
             .Select(e => e.Id)
             .ToHashSet();
 
-        // Every vertex is a position entity this very change emitted — the line indexes the
-        // resident graph, it does not describe boards that live nowhere.
-        Assert.All(recovered, id => Assert.Contains(id, deposited));
+        Assert.NotEmpty(recovered);
+        Assert.Empty(deposited);
     }
 
     [Fact]

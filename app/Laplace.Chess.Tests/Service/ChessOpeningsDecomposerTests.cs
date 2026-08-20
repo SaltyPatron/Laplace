@@ -71,14 +71,17 @@ public sealed class ChessOpeningsDecomposerTests
         Assert.Equal(sans.Count + 1, traj.NConstituents);
         Assert.DoesNotContain(change.Attestations,
             a => a.TypeId == ChessVocabulary.MoveType);
+        Assert.DoesNotContain(change.Entities, e => e.TypeId == ChessVocabulary.PositionType);
+        Assert.DoesNotContain(change.Entities, e => e.TypeId == ChessVocabulary.SubstructureType);
 
         Assert.Contains(change.Attestations,
             a => a.TypeId == ChessVocabulary.OpeningNameType && a.SubjectId == expectedLine);
         Assert.Contains(change.Attestations,
             a => a.TypeId == ChessVocabulary.EcoCodeType && a.SubjectId == expectedLine);
-        // Bridge stamp on final board for ChessOpeningIndex.
-        Assert.Contains(change.Attestations,
-            a => a.TypeId == ChessVocabulary.OpeningNameType && a.SubjectId == replayed![^1]);
+        Assert.DoesNotContain(change.Attestations,
+            a => a.SubjectId == replayed![^1]
+                 && (a.TypeId == ChessVocabulary.OpeningNameType
+                     || a.TypeId == ChessVocabulary.EcoCodeType));
     }
 
     [Fact]

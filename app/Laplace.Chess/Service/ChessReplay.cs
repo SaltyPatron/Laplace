@@ -100,7 +100,7 @@ public static partial class ChessReplay
                 bool whiteMoved = state.Board.WhiteToMove;
                 string san = San.ToSan(state.Board, move.Value);
                 state = modality.Apply(state, move.Value);
-                var positionId = ChessCompose.PositionId(modality.StateKey(state));
+                var positionId = ChessCompose.PositionId(state.Board);
 
                 plies.Add(new ChessPly(
                     plies.Count + 1, san, move.Value.ToUci(), state.Board.ToFen(),

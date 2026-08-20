@@ -2485,26 +2485,6 @@ public static class NpgsqlSubstrateReads
             }, ct: ct, label: "chess_player_games", onError: onError,
             timeoutSeconds: 60);
 
-    public readonly record struct ChessGamePlyStoredRow(
-        int Ply, string PositionIdHex, string? San, string? Clock, string? EvalToken);
-
-    /// <summary><c>chess.game_plies(id)</c>.</summary>
-    public static Task<IReadOnlyList<ChessGamePlyStoredRow>> ChessGamePliesAsync(
-        NpgsqlDataSource dataSource, byte[] id, CancellationToken ct,
-        NpgsqlRead.ErrorTranslator? onError = null) =>
-        NpgsqlRead.ReadRowsAsync(dataSource, """
-            SELECT ply, encode(position_id, 'hex'), san, clock, eval_token
-            FROM chess.game_plies(@id)
-            """,
-            static r => new ChessGamePlyStoredRow(
-                r.GetInt32(0), r.GetString(1),
-                r.IsDBNull(2) ? null : r.GetString(2),
-                r.IsDBNull(3) ? null : r.GetString(3),
-                r.IsDBNull(4) ? null : r.GetString(4)),
-            p => p.Add("id", NpgsqlDbType.Bytea).Value = id,
-            ct: ct, label: "chess_game_plies", onError: onError,
-            timeoutSeconds: 60);
-
     public readonly record struct ChessGameDetailRow(
         string? WhiteIdHex, string White, string? BlackIdHex, string Black,
         string? Result, string? PlayedOn, string? Event, string? Eco,
@@ -2698,9 +2678,11 @@ public static class NpgsqlSubstrateReads
     }
 
     /// <summary>
-    /// Every (position, name, eco) the openings catalog attests, for the board-identity
-    /// opening matcher. One bounded read of a few thousand rows at Initialize, not a query
-    /// per record — the caller probes the result in memory.
+    /// Every (terminal position, name, eco) from the openings catalog's named line
+    /// trajectories, for the board-identity opening matcher. One bounded read of a few
+    /// thousand rows at Initialize, not a query per record — the caller probes the result
+    /// in memory. The terminal position is structure recovered from the ordered line; the
+    /// catalog does not duplicate OPENING_NAME/HAS_ECO testimony onto that board.
     ///
     /// Lives here rather than in the chess lane because ReadPathArchitectureGateTests
     /// forbids hand-written SQL in a consumer, and it is right to: one implementation, one
@@ -2720,21 +2702,36 @@ public static class NpgsqlSubstrateReads
         // names. consensus.eff_mu() is called, never inlined as `rating - 2*rd` — that literal is
         // what g1_weight_literalism exists to reject.
         NpgsqlRead.ReadRowsAsync(dataSource, """
-            SELECT n.subject_id, n.object_id, e.object_id
-            FROM laplace.attestations n
-            LEFT JOIN laplace.attestations e
-                   ON e.subject_id = n.subject_id
-                  AND e.type_id    = @eco
-                  AND e.source_id  = @src
-            LEFT JOIN laplace.consensus c
-                   ON c.subject_id = n.subject_id
-                  AND c.type_id    = n.type_id
-                  AND c.object_id  = n.object_id
-            WHERE n.type_id   = @name
-              AND n.source_id = @src
-            ORDER BY n.subject_id,
-                     consensus.eff_mu(c.rating, c.rd) DESC NULLS LAST,
-                     n.object_id
+            WITH named AS MATERIALIZED (
+                SELECT n.subject_id AS line_id,
+                       n.object_id AS name_id,
+                       e.object_id AS eco_id,
+                       consensus.eff_mu(c.rating, c.rd) AS rank
+                FROM laplace.attestations n
+                LEFT JOIN laplace.attestations e
+                       ON e.subject_id = n.subject_id
+                      AND e.type_id    = @eco
+                      AND e.source_id  = @src
+                LEFT JOIN laplace.consensus c
+                       ON c.subject_id = n.subject_id
+                      AND c.type_id    = n.type_id
+                      AND c.object_id  = n.object_id
+                WHERE n.type_id   = @name
+                  AND n.source_id = @src
+            ), terminal AS MATERIALIZED (
+                SELECT n.name_id, n.eco_id, n.rank, p.entity_id AS position_id
+                FROM named n
+                CROSS JOIN LATERAL (
+                    SELECT u.entity_id
+                    FROM generation.trajectory_unpacked_points(n.line_id)
+                         WITH ORDINALITY AS u(entity_id, run_length, ctier, ord)
+                    ORDER BY u.ord DESC
+                    LIMIT 1
+                ) p
+            )
+            SELECT position_id, name_id, eco_id
+            FROM terminal
+            ORDER BY position_id, rank DESC NULLS LAST, name_id
             """,
             r => ((byte[])r[0], (byte[])r[1], r.IsDBNull(2) ? null : (byte[])r[2]),
             p =>
