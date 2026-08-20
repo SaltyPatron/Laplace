@@ -68,14 +68,6 @@
 
 PG_FUNCTION_INFO_V1(pg_laplace_prompt_coherence);
 
-#define PC_MAX_ORD 63          /* peers ride a uint64 mask; ords beyond this still
-                                * contribute mass and still RECEIVE peer credit
-                                * from trackable tokens, but cannot BE a peer for
-                                * anyone — they never set a bit. Two tokens both
-                                * past 63 score no coherence between them. That is
-                                * a stated ceiling, not a silent degradation; see
-                                * the self-bit comment in pc_scan_edges. */
-
 typedef struct PcCand
 {
     int32   ord;
@@ -88,7 +80,7 @@ typedef struct PcCand
                                 * unattested language is NOT a mismatch. */
     double  coherence;
     double  total_mass;        /* ALL rated mass on this candidate, peers or not */
-    uint64  peer_mask;
+    int64   peer_count;
     double  rel_mass;
     uint8   rel_type[16];
     double  rel_type_rank;     /* rank of the recorded rel_type, for "best" */
@@ -96,11 +88,10 @@ typedef struct PcCand
 } PcCand;
 
 /* syn -> the candidate rows carrying it (a surface/sense pair can repeat across
- * tokens), plus the ord mask, so an edge hit resolves to peers in O(1). */
+ * tokens). */
 typedef struct PcSynEntry
 {
     uint8   key[16];
-    uint64  ord_mask;
     int    *idx;
     int     n_idx;
     int     cap_idx;
@@ -109,19 +100,93 @@ typedef struct PcSynEntry
 typedef struct PcTokEntry
 {
     uint8   key[16];
-    uint64  ord_mask;
+    int32  *ords;
+    int     n_ords;
+    int     cap_ords;
     double  icf;               /* inverse container frequency; see pc_load_icf */
 } PcTokEntry;
 
 typedef struct PcTypeEntry
 {
     uint8   key[16];
-    uint64  namer_mask;        /* ords whose token names this relation type */
+    int32  *namer_ords;        /* ords whose token names this relation type */
+    int     n_namers;
+    int     cap_namers;
     bool    named;
 } PcTypeEntry;
 
+typedef struct PcPeerKey
+{
+    int32 cand_idx;
+    int32 peer_ord;
+} PcPeerKey;
+
+typedef struct PcPeerEntry
+{
+    PcPeerKey key;
+} PcPeerEntry;
+
+typedef struct PcOrdEntry
+{
+    int32 key;
+} PcOrdEntry;
+
 static void
-pc_syn_add(HTAB *h, const uint8 *syn, int32 ord, int idx, MemoryContext cxt)
+pc_int32_add(int32 **values, int *n, int *cap, int32 value,
+             MemoryContext cxt, const char *what)
+{
+    MemoryContext old;
+    int             next;
+
+    for (int i = 0; i < *n; i++)
+        if ((*values)[i] == value)
+            return;
+
+    if (*n < *cap)
+    {
+        (*values)[(*n)++] = value;
+        return;
+    }
+
+    if (*cap > INT_MAX / 2)
+        ereport(ERROR, (errmsg("prompt_coherence: %s cardinality exceeds integer capacity", what)));
+    next = *cap == 0 ? 1 : *cap * 2;
+    if ((Size) next > MaxAllocSize / sizeof(int32))
+        ereport(ERROR, (errmsg("prompt_coherence: %s exceeds PostgreSQL allocation capacity", what)));
+
+    old = MemoryContextSwitchTo(cxt);
+    *values = *values == NULL
+        ? (int32 *) palloc(sizeof(int32) * next)
+        : (int32 *) repalloc(*values, sizeof(int32) * next);
+    MemoryContextSwitchTo(old);
+    *cap = next;
+    (*values)[(*n)++] = value;
+}
+
+static void
+pc_type_add_namers(PcTypeEntry *te, const PcTokEntry *tk, HTAB *namer_h,
+                   MemoryContext cxt)
+{
+    for (int i = 0; i < tk->n_ords; i++)
+    {
+        bool found;
+
+        pc_int32_add(&te->namer_ords, &te->n_namers, &te->cap_namers,
+                     tk->ords[i], cxt, "relation namers");
+        (void) hash_search(namer_h, &tk->ords[i], HASH_ENTER, &found);
+    }
+    te->named = te->n_namers > 0;
+}
+
+static bool
+pc_type_has_other_namer(const PcTypeEntry *te, int32 ord)
+{
+    return te->n_namers > 1 ||
+           (te->n_namers == 1 && te->namer_ords[0] != ord);
+}
+
+static void
+pc_syn_add(HTAB *h, const uint8 *syn, int idx, MemoryContext cxt)
 {
     bool        found;
     PcSynEntry *e = (PcSynEntry *) hash_search(h, syn, HASH_ENTER, &found);
@@ -130,23 +195,27 @@ pc_syn_add(HTAB *h, const uint8 *syn, int32 ord, int idx, MemoryContext cxt)
     {
         MemoryContext old = MemoryContextSwitchTo(cxt);
 
-        e->ord_mask = 0;
         e->cap_idx = 4;
         e->n_idx = 0;
         e->idx = (int *) palloc(sizeof(int) * e->cap_idx);
         MemoryContextSwitchTo(old);
     }
+    for (int i = 0; i < e->n_idx; i++)
+        if (e->idx[i] == idx)
+            return;
     if (e->n_idx == e->cap_idx)
     {
         MemoryContext old = MemoryContextSwitchTo(cxt);
 
+        if (e->cap_idx > INT_MAX / 2 ||
+            (Size) e->cap_idx * 2 > MaxAllocSize / sizeof(int))
+            ereport(ERROR,
+                    (errmsg("prompt_coherence: candidate membership exceeds PostgreSQL allocation capacity")));
         e->cap_idx *= 2;
         e->idx = (int *) repalloc(e->idx, sizeof(int) * e->cap_idx);
         MemoryContextSwitchTo(old);
     }
     e->idx[e->n_idx++] = idx;
-    if (ord >= 0 && ord <= PC_MAX_ORD)
-        e->ord_mask |= (uint64) 1 << ord;
 }
 
 /* One direction of the edge scan. `forward` selects which column carries the
@@ -154,8 +223,8 @@ pc_syn_add(HTAB *h, const uint8 *syn, int32 ord, int idx, MemoryContext cxt)
  * (consensus_subject_type_btree / consensus_object_btree), which is the entire
  * point of splitting the OR the SQL form used. */
 static void
-pc_scan_edges(HTAB *syn_h, HTAB *type_h, PcCand *cands, ArrayType *syn_arr,
-              bool forward, MemoryContext cxt)
+pc_scan_edges(HTAB *syn_h, HTAB *type_h, HTAB *peer_h, PcCand *cands,
+              ArrayType *syn_arr, bool forward)
 {
     Oid        argtypes[1] = { BYTEAARRAYOID };
     Datum      args[1];
@@ -208,7 +277,9 @@ pc_scan_edges(HTAB *syn_h, HTAB *type_h, PcCand *cands, ArrayType *syn_arr,
             te = (PcTypeEntry *) hash_search(type_h, VARDATA_ANY(tid), HASH_ENTER, &found);
             if (!found)
             {
-                te->namer_mask = 0;
+                te->namer_ords = NULL;
+                te->n_namers = 0;
+                te->cap_namers = 0;
                 te->named = false;
             }
 
@@ -237,37 +308,26 @@ pc_scan_edges(HTAB *syn_h, HTAB *type_h, PcCand *cands, ArrayType *syn_arr,
             for (int i = 0; i < me->n_idx; i++)
             {
                 PcCand *c = &cands[me->idx[i]];
-                uint64  self_bit;
-                uint64  others;
+                bool     has_other = false;
 
-                /* Self-exclusion must clear THIS token's bit or nothing at all.
-                 * `1 << (c->ord & 63)` wrapped: ord 64 cleared bit 0, i.e. some
-                 * OTHER token's bit, silently removing a real peer. And the
-                 * `others == 0` guard below was itself gated on ord <= PC_MAX_ORD,
-                 * so past 63 coherence was credited unconditionally — including
-                 * when the peer had no attesting token at all.
-                 *
-                 * A token beyond PC_MAX_ORD never sets a bit (the ord_mask write
-                 * is guarded at load), so it has no self-bit to clear and clearing
-                 * anything for it is always wrong. Clearing nothing is correct.
-                 *
-                 * Stated limit, not a silent one: past ord 63 a token still
-                 * contributes and receives mass, and is still credited whenever
-                 * ANY trackable token attests the same peer. What it cannot do is
-                 * be counted as a peer FOR another token. Two tokens both beyond
-                 * 63 therefore see each other as no peer and score 0 coherence
-                 * between them — conservative and wrong-in-one-direction only,
-                 * where the previous behaviour was wrong in both. Widening the
-                 * mask past 64 ords is the real fix; GH #23 in the task list. */
-                self_bit = (c->ord >= 0 && c->ord <= PC_MAX_ORD)
-                           ? ((uint64) 1 << c->ord)
-                           : 0;
-                others = peer->ord_mask & ~self_bit;
+                for (int j = 0; j < peer->n_idx; j++)
+                {
+                    int32     peer_ord = cands[peer->idx[j]].ord;
+                    PcPeerKey key;
+                    bool      seen;
 
-                if (others == 0)
+                    if (peer_ord == c->ord)
+                        continue;
+                    has_other = true;
+                    key.cand_idx = me->idx[i];
+                    key.peer_ord = peer_ord;
+                    (void) hash_search(peer_h, &key, HASH_ENTER, &seen);
+                    if (!seen)
+                        c->peer_count++;
+                }
+                if (!has_other)
                     continue;           /* no OTHER token attests this peer */
                 c->coherence += rank * eff;
-                c->peer_mask |= others;
             }
         }
         SPI_freetuptable(SPI_tuptable);
@@ -317,9 +377,17 @@ pc_load_icf(HTAB *tok_h, MemoryContext work)
     ArrayType      *arr;
     int             rc;
 
-    old = MemoryContextSwitchTo(work);
-    ids = (Datum *) palloc(sizeof(Datum) * (PC_MAX_ORD + 1));
-    MemoryContextSwitchTo(old);
+    {
+        long count = hash_get_num_entries(tok_h);
+
+        if (count < 0 || (uint64) count > (uint64) INT_MAX ||
+            (Size) count > MaxAllocSize / sizeof(Datum))
+            ereport(ERROR,
+                    (errmsg("prompt_coherence: token set exceeds PostgreSQL array capacity")));
+        old = MemoryContextSwitchTo(work);
+        ids = (Datum *) palloc(sizeof(Datum) * Max(count, 1));
+        MemoryContextSwitchTo(old);
+    }
 
     hash_seq_init(&seq, tok_h);
     while ((tk = (PcTokEntry *) hash_seq_search(&seq)) != NULL)
@@ -327,8 +395,6 @@ pc_load_icf(HTAB *tok_h, MemoryContext work)
         /* Neutral default set for EVERY token before anything can fail: an
          * unmeasured id must not be silently ranked as maximally specific. */
         tk->icf = 1.0;
-        if (n > PC_MAX_ORD)
-            continue;
         old = MemoryContextSwitchTo(work);
         {
             bytea *b = (bytea *) palloc(VARHDRSZ + 16);
@@ -380,12 +446,9 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
     text          *prompt;
     MemoryContext  work, old;
     HASHCTL        ctl;
-    HTAB          *syn_h, *tok_h, *type_h;
+    HTAB          *syn_h, *tok_h, *type_h, *peer_h, *namer_h;
     /* Ords whose token NAMES a relation. A namer is the operator the prompt is
-     * asking with, not the subject it is asking about — spec 37 OP3. The scan
-     * already refuses to let a namer score itself (pc_scan_edges' namer_mask
-     * exclusion); this carries the same principle to topic candidacy. */
-    uint64         namer_ords = 0;
+     * asking with, not the subject it is asking about — spec 37 OP3. */
     PcCand        *cands = NULL;
     int            n_cand = 0, cap_cand = 0;
     Datum         *syn_datums = NULL;
@@ -423,6 +486,18 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
     ctl.hcxt = work;
     type_h = hash_create("pc type", 256, &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
 
+    MemSet(&ctl, 0, sizeof(ctl));
+    ctl.keysize = sizeof(PcPeerKey);
+    ctl.entrysize = sizeof(PcPeerEntry);
+    ctl.hcxt = work;
+    peer_h = hash_create("pc peers", 512, &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+
+    MemSet(&ctl, 0, sizeof(ctl));
+    ctl.keysize = sizeof(int32);
+    ctl.entrysize = sizeof(PcOrdEntry);
+    ctl.hcxt = work;
+    namer_h = hash_create("pc namers", 64, &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+
     /* ---- candidates: ONE query, executed once. The SQL form re-executed this
      * per CTE reference, which is why fencing it MATERIALIZED changed the shape
      * at all. Here it is fetched once into C and never recomputed. ---- */
@@ -450,16 +525,15 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
              * Measured on 'the capital of France is': word_case_variants 5 calls /
              * 486 ms and that inner render 5 calls / 435 ms, ~half of this function.
              *
-             * p_k => 64 keeps the candidate field EXACTLY as lexical.senses produced it
-             * (lexical.senses calls bubble_up with k = 64), so this is a plan change and
-             * not an election change. Verified on the same prompt: 48 rows both ways,
-             * EXCEPT ALL empty in both directions, 881.7 ms -> 196.5 ms.
+             * NULL keeps the candidate field complete. A fixed pre-election cut
+             * changes the winner whenever the joint prompt evidence favors a sense
+             * outside that cut; bubble_up_batch owns only the deterministic order.
              *
              * Row ORDER is not load-bearing here: the loop below appends every row to
              * `cands` and indexes it by token, so no row wins by arriving first. */
             "WITH p AS MATERIALIZED (SELECT * FROM converse.prompt_state($1)), "
             "     b AS MATERIALIZED (SELECT * FROM taxonomy.bubble_up_batch("
-            "         ARRAY(SELECT id FROM p WHERE id IS NOT NULL), NULL, 64)) "
+            "         ARRAY(SELECT id FROM p WHERE id IS NOT NULL), NULL, NULL)) "
             "SELECT p.ord, p.id, b.synset_id, b.base_eff_mu::float8, "
             "       b.witnesses::bigint, p.language, "
             "       converse.word_language(b.sense_id) "
@@ -522,7 +596,12 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
                 old = MemoryContextSwitchTo(work);
                 if (n_cand == cap_cand)
                 {
-                    cap_cand = cap_cand ? cap_cand * 2 : 512;
+                    if (cap_cand > INT_MAX / 2 ||
+                        (Size) (cap_cand ? cap_cand * 2 : 1) >
+                            MaxAllocSize / sizeof(PcCand))
+                        ereport(ERROR,
+                                (errmsg("prompt_coherence: candidate set exceeds PostgreSQL allocation capacity")));
+                    cap_cand = cap_cand ? cap_cand * 2 : 1;
                     cands = cands ? (PcCand *) repalloc(cands, sizeof(PcCand) * cap_cand)
                                   : (PcCand *) palloc(sizeof(PcCand) * cap_cand);
                 }
@@ -536,47 +615,24 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
                 cands[n_cand].witnesses = wit;
                 cands[n_cand].lang_agree = lang_agree;
 
-                if (hash_search(syn_h, VARDATA_ANY(syn), HASH_FIND, NULL) == NULL)
-                {
-                    old = MemoryContextSwitchTo(work);
-                    if (syn_datums == NULL)
-                        syn_datums = (Datum *) palloc(sizeof(Datum) * 4096);
-                    if (n_syn < 4096)
-                    {
-                        bytea *cp = (bytea *) palloc(VARSIZE_ANY(syn));
-
-                        memcpy(cp, syn, VARSIZE_ANY(syn));
-                        syn_datums[n_syn++] = PointerGetDatum(cp);
-                    }
-                    MemoryContextSwitchTo(old);
-                }
-                pc_syn_add(syn_h, (const uint8 *) VARDATA_ANY(syn), ord, n_cand, work);
+                pc_syn_add(syn_h, (const uint8 *) VARDATA_ANY(syn), n_cand, work);
 
                 /* Word-level subjects too. IS_ANTONYM_OF on this seed hangs on
                  * word_id('hot'), not its synsets (0 syn-subject edges, 2 word-
                  * subject). Without the surface id in the membership set,
                  * naming IS_ANTONYM_OF still left rel_mass at 0 — GH #864. */
-                if (hash_search(syn_h, VARDATA_ANY(tok), HASH_FIND, NULL) == NULL)
-                {
-                    old = MemoryContextSwitchTo(work);
-                    if (syn_datums == NULL)
-                        syn_datums = (Datum *) palloc(sizeof(Datum) * 4096);
-                    if (n_syn < 4096)
-                    {
-                        bytea *cp = (bytea *) palloc(VARSIZE_ANY(tok));
-
-                        memcpy(cp, tok, VARSIZE_ANY(tok));
-                        syn_datums[n_syn++] = PointerGetDatum(cp);
-                    }
-                    MemoryContextSwitchTo(old);
-                }
-                pc_syn_add(syn_h, (const uint8 *) VARDATA_ANY(tok), ord, n_cand, work);
+                pc_syn_add(syn_h, (const uint8 *) VARDATA_ANY(tok), n_cand, work);
 
                 tk = (PcTokEntry *) hash_search(tok_h, VARDATA_ANY(tok), HASH_ENTER, &found);
                 if (!found)
-                    tk->ord_mask = 0;
-                if (ord >= 0 && ord <= PC_MAX_ORD)
-                    tk->ord_mask |= (uint64) 1 << ord;
+                {
+                    tk->ords = NULL;
+                    tk->n_ords = 0;
+                    tk->cap_ords = 0;
+                    tk->icf = 1.0;
+                }
+                pc_int32_add(&tk->ords, &tk->n_ords, &tk->cap_ords,
+                             ord, work, "token ordinals");
 
                 n_cand++;
             }
@@ -586,20 +642,40 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
         SPI_cursor_close(portal);
     }
 
-    if (n_cand == 0 || n_syn == 0)
+    if (n_cand == 0)
     {
         MemoryContextDelete(work);
         laplace_spi_finish(spi_top);
         return (Datum) 0;
     }
 
-    old = MemoryContextSwitchTo(work);
-    syn_arr = construct_array(syn_datums, n_syn, BYTEAOID, -1, false, TYPALIGN_INT);
-    MemoryContextSwitchTo(old);
+    {
+        HASH_SEQ_STATUS seq;
+        PcSynEntry     *se;
+        long            count = hash_get_num_entries(syn_h);
+
+        if (count <= 0 || (uint64) count > (uint64) INT_MAX ||
+            (Size) count > MaxAllocSize / sizeof(Datum))
+            ereport(ERROR,
+                    (errmsg("prompt_coherence: unique candidate set exceeds PostgreSQL array capacity")));
+        old = MemoryContextSwitchTo(work);
+        syn_datums = (Datum *) palloc(sizeof(Datum) * count);
+        hash_seq_init(&seq, syn_h);
+        while ((se = (PcSynEntry *) hash_seq_search(&seq)) != NULL)
+        {
+            bytea *cp = (bytea *) palloc(VARHDRSZ + 16);
+
+            SET_VARSIZE(cp, VARHDRSZ + 16);
+            memcpy(VARDATA(cp), se->key, 16);
+            syn_datums[n_syn++] = PointerGetDatum(cp);
+        }
+        syn_arr = construct_array(syn_datums, n_syn, BYTEAOID, -1, false, TYPALIGN_INT);
+        MemoryContextSwitchTo(old);
+    }
 
     /* ---- coherence: two indexed range reads, O(1) probe per edge ---- */
-    pc_scan_edges(syn_h, type_h, cands, syn_arr, true, work);
-    pc_scan_edges(syn_h, type_h, cands, syn_arr, false, work);
+    pc_scan_edges(syn_h, type_h, peer_h, cands, syn_arr, true);
+    pc_scan_edges(syn_h, type_h, peer_h, cands, syn_arr, false);
 
     /* The specificity prior. One batched call; see pc_load_icf for why the
      * graph alone cannot carry this key. */
@@ -615,10 +691,16 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
         Datum           *nw_datums = NULL;
         int              n_nw = 0;
         PcTypeEntry    **nw_owner = NULL;
+        size_t           nw_capacity = laplace_relation_table_count;
 
+        if (nw_capacity > (size_t) INT_MAX ||
+            nw_capacity > (size_t) (MaxAllocSize / sizeof(Datum)) ||
+            nw_capacity > (size_t) (MaxAllocSize / sizeof(PcTypeEntry *)))
+            ereport(ERROR,
+                    (errmsg("prompt_coherence: relation manifest exceeds PostgreSQL array capacity")));
         old = MemoryContextSwitchTo(work);
-        nw_datums = (Datum *) palloc(sizeof(Datum) * 1024);
-        nw_owner = (PcTypeEntry **) palloc(sizeof(PcTypeEntry *) * 1024);
+        nw_datums = (Datum *) palloc(sizeof(Datum) * Max(nw_capacity, (size_t) 1));
+        nw_owner = (PcTypeEntry **) palloc(sizeof(PcTypeEntry *) * Max(nw_capacity, (size_t) 1));
         MemoryContextSwitchTo(old);
 
         /* Iterate the WHOLE MANIFEST, not type_h.
@@ -669,7 +751,9 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
             te = (PcTypeEntry *) hash_search(type_h, &type_id, HASH_ENTER, &found);
             if (!found)
             {
-                te->namer_mask = 0;
+                te->namer_ords = NULL;
+                te->n_namers = 0;
+                te->cap_namers = 0;
                 te->named = false;
             }
 
@@ -789,16 +873,16 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
 
             if (tk != NULL)
             {
-                te->named = true;
-                te->namer_mask |= tk->ord_mask;
-                namer_ords |= tk->ord_mask;
+                pc_type_add_namers(te, tk, namer_h, work);
                 continue;
             }
             /* No direct hit: queue the name id for the lemma probe. */
-            if (n_nw < 1024)
             {
                 bytea *b;
 
+                if ((size_t) n_nw >= nw_capacity)
+                    ereport(ERROR,
+                            (errmsg("prompt_coherence: relation-name cardinality exceeded its exact manifest bound")));
                 old = MemoryContextSwitchTo(work);
                 b = (bytea *) palloc(VARHDRSZ + 16);
                 SET_VARSIZE(b, VARHDRSZ + 16);
@@ -851,9 +935,7 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
 
                         if (memcmp(VARDATA_ANY(nb), VARDATA_ANY(lemma), 16) == 0)
                         {
-                            nw_owner[i]->named = true;
-                            nw_owner[i]->namer_mask |= tk->ord_mask;
-                            namer_ords |= tk->ord_mask;
+                            pc_type_add_namers(nw_owner[i], tk, namer_h, work);
                         }
                     }
                 }
@@ -870,15 +952,20 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
         PcTypeEntry    *te;
         Datum          *td_arr = NULL;
         int             n_td = 0;
+        long            type_count = hash_get_num_entries(type_h);
 
+        if (type_count < 0 || (uint64) type_count > (uint64) INT_MAX ||
+            (Size) type_count > MaxAllocSize / sizeof(Datum))
+            ereport(ERROR,
+                    (errmsg("prompt_coherence: relation type set exceeds PostgreSQL array capacity")));
         old = MemoryContextSwitchTo(work);
-        td_arr = (Datum *) palloc(sizeof(Datum) * 1024);
+        td_arr = (Datum *) palloc(sizeof(Datum) * Max(type_count, 1));
         MemoryContextSwitchTo(old);
 
         hash_seq_init(&seq, type_h);
         while ((te = (PcTypeEntry *) hash_seq_search(&seq)) != NULL)
         {
-            if (!te->named || n_td >= 1024)
+            if (!te->named)
                 continue;
             old = MemoryContextSwitchTo(work);
             {
@@ -952,9 +1039,8 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
                     for (int i = 0; i < me->n_idx; i++)
                     {
                         PcCand *c = &cands[me->idx[i]];
-                        uint64  namers = te2->namer_mask & ~((uint64) 1 << (c->ord & 63));
 
-                        if (namers == 0)
+                        if (!pc_type_has_other_namer(te2, c->ord))
                             continue;   /* only this token named it: no credit */
                         c->rel_mass += rank * eff;
                         if (!c->has_rel_type || rank > c->rel_type_rank)
@@ -1111,7 +1197,7 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
                 values[3] = Float8GetDatum(best->coherence);
                 values[4] = DirectFunctionCall1(float8_numeric,
                                                 Float8GetDatum(best->denote_mu));
-                values[5] = Int64GetDatum((int64) pg_popcount64(best->peer_mask));
+                values[5] = Int64GetDatum(best->peer_count);
                 if (best->has_rel_type)
                 {
                     bytea *rt = (bytea *) palloc(VARHDRSZ + 16);
@@ -1161,7 +1247,7 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
                  * Spec 37 OP3: a token that names a relation selects WHICH
                  * relation to traverse. It is the operator the question is asked
                  * with, not the subject it is asked about. pc_scan_edges already
-                 * acts on this — a type's namer_mask excludes the naming ord from
+                 * acts on this — a type's namer set excludes the naming ord from
                  * receiving its own rel_mass — but the namer stayed a full topic
                  * candidate, and with every discriminating key at 0 it won on
                  * `ord DESC` whenever it sat later in the prompt.
@@ -1190,8 +1276,8 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
                     double share = best->total_mass > 0.0
                                    ? best->coherence / best->total_mass
                                    : 0.0;
-                    bool   is_namer = (best->ord >= 0 && best->ord <= PC_MAX_ORD)
-                                      && ((namer_ords >> best->ord) & 1) != 0;
+                    bool   is_namer = hash_search(
+                        namer_h, &best->ord, HASH_FIND, NULL) != NULL;
                     /* ~1e13: sparsely-wired concept mass on foundation seed. */
                     double mass_sat = best->total_mass <= 0.0
                                           ? 0.0
