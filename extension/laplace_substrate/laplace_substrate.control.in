@@ -1,5 +1,9 @@
 default_version = '@EXT_VERSION@'
-module_pathname = '$libdir/laplace_substrate'
+# The extension is staged under /opt/laplace/lib/postgresql/<major> and reached
+# through dynamic_library_path.  Prefixing this with $libdir bypasses that path
+# search and binds every C function to a stale compatibility copy in pg_config's
+# private lib directory.
+module_pathname = 'laplace_substrate'
 relocatable = false
 schema = 'laplace'
 trusted = true

@@ -27,6 +27,7 @@ laplace_check_manifest_complete("${CMAKE_CURRENT_SOURCE_DIR}/sql"
 set(_ext_version_inputs
     ${_install_modules}
     ${_upgrade_modules}
+    "${CMAKE_CURRENT_SOURCE_DIR}/${EXT_NAME}.control.in"
     "${CMAKE_CURRENT_SOURCE_DIR}/sql/laplace_substrate.sql.in"
     "${CMAKE_CURRENT_SOURCE_DIR}/sql/laplace_substrate_upgrade.sql.in"
     "${CMAKE_CURRENT_SOURCE_DIR}/sql/sqldefines.h.in"

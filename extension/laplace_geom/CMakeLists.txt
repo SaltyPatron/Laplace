@@ -267,6 +267,7 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
 set(_geom_version_inputs
     ${_geom_install_modules}
     ${_geom_upgrade_modules}
+    "${CMAKE_CURRENT_SOURCE_DIR}/${EXT_NAME}.control.in"
     "${CMAKE_CURRENT_SOURCE_DIR}/sql/laplace_geom.sql.in"
     "${CMAKE_CURRENT_SOURCE_DIR}/sql/laplace_geom_upgrade.sql.in"
     "${CMAKE_CURRENT_SOURCE_DIR}/sql/sqldefines.h.in"
