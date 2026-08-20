@@ -113,6 +113,15 @@ delivered decomposer implementation.
   that tail's long-lived mask connection leases. #1206 then removes the global SQL
   advisory lock that still collapsed those leases to one mask writer; the post-deploy
   rerun is the proof gate.
+- [Post-#1206 Atomic2020 run 32316303092](https://github.com/SaltyPatron/Laplace/actions/runs/32316303092)
+  completed the ingest in 263 seconds, down from 418 seconds (37%). Its 12 fold
+  connections processed chunks of 114,408 cells derived from the live memory/connection
+  plan; there was no fixed 65,536-cell cap. The payload, journal, health, exact
+  1,246,592-attestation count, and relation gates passed. The workflow's only failure was
+  the missing source L2 completion marker: `--force` had incorrectly reused
+  `SkipSourceCompletion`, bypassing both the pre-run guard and the post-run marker. The
+  correction separates guard bypass from marker suppression so a forced ordinary source
+  still publishes `HasLayerCompleted`.
 - [Main run 32314788241](https://github.com/SaltyPatron/Laplace/actions/runs/32314788241)
   built, installed, migrated, and passed PostgreSQL regression after #1204. Its only red
   was a stale unit contract requiring two immediately adjacent tier-probe callers to
@@ -203,9 +212,9 @@ delivered decomposer implementation.
   intentional and must remain reported honestly. Tracked by #967.
 - Audit source profiles against measured compose fanout and memory, then benchmark
   bounded foundation, Wiktionary, UD, chess, model, media, and OpenSubtitles runs.
-- Rerun clean Atomic2020 after #1204 deploys and compare producer, consensus-drain, and mask
-  timing against the #1203 418-second and prior 414-second receipts; the older receipt's
-  consensus drain occupied about 247 seconds. Clean OMW is now measured at 338 seconds
+- Rerun clean Atomic2020 after the forced-run completion-marker correction and require the
+  terminal layer gate. The post-#1206 payload already improved from 418 to 263 seconds;
+  its only red gate was the suppressed marker. Clean OMW is now measured at 338 seconds
   versus 716.2 seconds before the generic resource-derived pipeline; its semantic values still
   compose at grapheme/content grain while TSV packaging creates no content physicalities.
 - Re-run analyzer v3 after source eviction and confirm the completion envelope reports

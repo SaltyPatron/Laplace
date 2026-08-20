@@ -1,1 +1,7 @@
-CREATE INDEX IF NOT EXISTS consensus_subject_type_btree ON consensus (subject_id, type_id);
+-- The third key is the content-addressed cell id used by consensus.upsert's MERGE.
+-- (subject_id,type_id) remains the read prefix, while dynamic relations in the
+-- DEFAULT partition can now prove one exact target row without fetching every
+-- cell for the subject/type pair and filtering on id. Named relation partitions
+-- happened to choose their id-leading PK; the DEFAULT chose the former two-key
+-- index and paid the filter for every Atomic/UD dynamic cell.
+CREATE INDEX IF NOT EXISTS consensus_subject_type_btree ON consensus (subject_id, type_id, id);

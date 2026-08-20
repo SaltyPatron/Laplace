@@ -122,6 +122,7 @@ public sealed class IngestRunner
         // per-file (marker-complete files true-skip in the existence gate before compose),
         // so a re-run is cheap AND new files in a completed directory still ingest.
         if (!options.SkipSourceCompletion
+            && !options.BypassSourceCompletionGuard
             && !decomposer.PerFileCompletion
             && await _reader.HasSourceCompletedAsync(decomposer.SourceId, decomposer.LayerOrder, ct))
         {
