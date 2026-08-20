@@ -25,7 +25,6 @@ namespace Laplace.Chess.Service;
 internal static class ChessDropLedger
 {
     internal const string UnreadableSan = "unresolvable-san";
-    internal const string NoMovetext = "no-movetext";
     internal const string NoResultOrMoves = "no-result-or-moves";
     internal const string UnreadableStartPosition = "unreadable-start-position";
 

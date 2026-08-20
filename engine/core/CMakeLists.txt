@@ -177,7 +177,7 @@ add_custom_command(
 add_custom_target(laplace_t0_perfcache       ALL DEPENDS ${LAPLACE_PERFCACHE_BIN})
 add_custom_target(laplace_highway_perfcache  ALL DEPENDS ${LAPLACE_HIGHWAY_BIN})
 
-# Chess compose floor (typed state atoms + catalog tier-2 positions) — GH #822 / spec 33.
+# Chess compose floor (typed state/move atoms + bounded moves + catalog positions).
 # Catalog text is generator interchange only; the emitter parses it into binary state atoms
 # before identity/geometry. It is never admitted as a sentence or chess content.
 add_subdirectory(tools/chess_position_tables_emit)
@@ -210,7 +210,7 @@ file(GLOB_RECURSE LAPLACE_CHESS_SURFACES_MANAGED_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/../../app/Laplace.Substrate/*.csproj")
 list(FILTER LAPLACE_CHESS_SURFACES_MANAGED_SOURCES EXCLUDE REGEX "/(bin|obj)/")
 
-# Tier-1 alphabet always emits (native). Catalog surfaces are optional coverage.
+# Typed atoms and the bounded move alphabet always emit natively. Catalog positions are optional.
 set(_chess_emit_deps $<TARGET_FILE:laplace_chess_position_tables_emit>)
 set(_chess_emit_cmd
     COMMAND $<TARGET_FILE:laplace_chess_position_tables_emit>
@@ -245,7 +245,7 @@ add_custom_command(
     COMMAND ${CMAKE_COMMAND} -E make_directory "${LAPLACE_PERFCACHE_DIR}"
     ${_chess_emit_cmd}
     DEPENDS ${_chess_emit_deps}
-    COMMENT "Emitting chess compose-floor blob (tier-1 alphabet + catalog tier-2)"
+    COMMENT "Emitting chess compose-floor blob (typed atoms + moves + catalog positions)"
     VERBATIM
 )
 add_custom_target(laplace_chess_position_perfcache ALL DEPENDS ${LAPLACE_CHESS_PERFCACHE_BIN})

@@ -9,7 +9,7 @@ namespace Laplace.Chess.Service.Tests;
 
 /// <summary>
 /// GH #736 — the identity law itself. The game CONTENT entity is the LINE:
-/// Hash128.Merkle(LineTier, ordered position ids), minted at extract time by replay, so
+/// Hash128.Merkle(LineTier, start-position id + ordered typed move ids), minted at extract time by replay, so
 /// identical PLAY collides regardless of who played it, when, or how the source spelled
 /// the SAN. The PLAYING is a provenance handle: distinct per record, used as
 /// attestation context and as the subject of exactly one record edge,
@@ -77,11 +77,12 @@ public sealed class ChessLineIdentityTests
     }
 
     [Fact]
-    public void LineId_IsTheMerkleOfTheOrderedPositionIds()
+    public void LineId_IsTheMerkleOfStartPositionAndOrderedMoves()
     {
         var parsed = ChessPgnDecomposer.TryParseGame(GameCanonical)!;
         Assert.Equal(parsed.Moves.Count + 1, parsed.PositionIds.Length); // start included
-        Assert.Equal(ChessCompose.LineId(parsed.PositionIds), parsed.LineId);
+        Assert.Equal(parsed.Moves.Count, parsed.MoveIds.Length);
+        Assert.Equal(ChessCompose.LineId(parsed.PositionIds[0], parsed.MoveIds), parsed.LineId);
     }
 
     // Cross-lane collision, the book path: a prose line replayed through TryReplayLine
@@ -90,10 +91,11 @@ public sealed class ChessLineIdentityTests
     public void ProseLineReplay_CollidesWithThePgnLine()
     {
         var parsed = ChessPgnDecomposer.TryParseGame(GameCanonical)!;
-        var replayed = ChessPgnDecomposer.TryReplayLine(
+        var replayed = ChessPgnDecomposer.TryReplayLineDetailed(
             ["e4", "e5", "Nf3", "Nc6", "Bc4", "Nf6", "O-O", "Bc5"], startFen: null);
         Assert.NotNull(replayed);
-        Assert.Equal(parsed.LineId, ChessCompose.LineId(replayed!));
+        Assert.Equal(parsed.LineId,
+            ChessCompose.LineId(replayed!.PositionIds[0], replayed.MoveIds));
     }
 
     // Cross-lane collision, the live path: the live host accumulates
@@ -106,17 +108,19 @@ public sealed class ChessLineIdentityTests
 
         var m = new ChessModality();
         var state = m.Initial();
-        var positionIds = new List<Hash128> { ChessCompose.PositionId(m.StateKey(state)) };
+        var startPositionId = ChessCompose.PositionId(state.Board);
+        var moveIds = new List<Hash128>();
         foreach (var san in parsed.Moves)
         {
             var mv = San.Resolve(state.Board, m.LegalActions(state), san);
             Assert.NotNull(mv);
+            moveIds.Add(ChessCompose.MoveId(state.Board.Squares[mv!.Value.From], mv.Value));
             state = m.Apply(state, mv!.Value);
-            positionIds.Add(ChessCompose.PositionId(m.StateKey(state)));
         }
 
         Assert.Equal(parsed.LineId,
-            ChessCompose.LineId(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(positionIds)));
+            ChessCompose.LineId(startPositionId,
+                System.Runtime.InteropServices.CollectionsMarshal.AsSpan(moveIds)));
     }
 
     // The recorder's emission shape: exactly one structural (playing, PLAYS_LINE, line)

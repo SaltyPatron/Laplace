@@ -5,8 +5,8 @@ namespace Laplace.Chess.Service;
 
 /// <summary>
 /// GH #575: the conversational resolve surface (resolve_ref / explore / MCP topic)
-/// is lexical — word_id / concept_ref. A FEN is not a word; its position entity is
-/// the Merkle composition of the board's canonical surface (ChessCompose), the same
+/// is lexical — word_id / concept_ref. A FEN is not a word; it is parsed at the boundary
+/// and its position entity is the Merkle composition of typed board-state atoms, the same
 /// id /chess/explore builds. This is the one compose hook those callers share so a
 /// FEN-shaped reference resolves to the position, never to a content-hash of the
 /// FEN string (which finds nothing).

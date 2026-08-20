@@ -1,4 +1,5 @@
 using Laplace.Api.Contracts;
+using Laplace.SubstrateCRUD;
 using Laplace.SubstrateCRUD.Npgsql;
 using Npgsql;
 using System.Globalization;
@@ -10,9 +11,8 @@ namespace Laplace.Endpoints.OpenAICompat;
 /// The chess reading room: who played, what they played, and how it went. Chess is
 /// the proving domain because its ground truth is objectively checkable, and this is
 /// where that shows — every number served here is counted off game headers the PGN
-/// decomposer transcribed verbatim, so a career record can be checked against the
-/// games it came from, and every game against the movetext its own content hash
-/// rebuilds.
+/// decomposer transcribed, so a career record can be checked against the games it came
+/// from, and every game mainline can be replayed from its typed move trajectory.
 ///
 /// NOTHING HERE IS CACHED, and that is the point. The roster used to be a corpus-wide
 /// GROUP BY over every game header (~400k rows, ~10s) hidden behind a TTL cache and a
@@ -235,7 +235,7 @@ internal sealed partial class SubstrateClient
     /// <summary>The career page: record by colour, the Elo the source tagged, the rivals.</summary>
     public async Task<ChessPlayerResponse?> ChessPlayerAsync(string idHex, int opponentLimit, CancellationToken ct)
     {
-        if (TryParseIdHex(idHex) is null) return null;
+        if (TryParseIdHex(idHex) is not { } id) return null;
 
         var record = await NpgsqlSubstrateReads.ChessPlayerRecordAsync(
             _dataSource, id, ct, TranslateReadError);
@@ -283,25 +283,24 @@ internal sealed partial class SubstrateClient
     }
 
     /// <summary>
-    /// Reconstruct a game's boards from its witnessed movetext. The line physicality stores
-    /// deterministic move points for structural search; it deliberately does not require a
-    /// second SQL board record for every ply. Replay supplies FEN/UCI and resolves the same
-    /// position ids carried by that trajectory.
+    /// Reconstruct boards from the playing's associated line trajectory. SAN/PGN/FEN are output
+    /// encodings generated here; none is the stored identity of the moves or positions.
     /// </summary>
     public async Task<ChessGamePliesResponse?> ChessGamePliesAsync(string idHex, CancellationToken ct)
     {
         if (TryParseIdHex(idHex) is not { } id) return null;
 
-        var game = await ChessGameAsync(idHex, ct);
-        if (game is null) return null;
-        var replay = Laplace.Chess.Service.ChessReplay.Replay(game.Movetext);
+        var rows = await NpgsqlSubstrateReads.ChessGameAsync(
+            _dataSource, id, ct, TranslateReadError);
+        if (rows.Count == 0) return null;
+        var replay = await ChessTypedReplayAsync(id, ct);
         return new ChessGamePliesResponse("chess.game.plies", idHex.ToLowerInvariant(),
             replay.StartFen, replay.HasClocks, replay.Truncated,
             [.. replay.Plies.Select(p => new ChessPlyRow(
                 p.Ply, p.San, p.Uci, p.Fen, p.WhiteMoved, p.ClockSeconds, p.PositionId))]);
     }
 
-    /// <summary>One game: its headers and the movetext its own content hash rebuilds.</summary>
+    /// <summary>One game: source headers plus generated PGN from its typed move trajectory.</summary>
     public async Task<ChessGameResponse?> ChessGameAsync(string idHex, CancellationToken ct)
     {
         if (TryParseIdHex(idHex) is not { } id) return null;
@@ -309,9 +308,52 @@ internal sealed partial class SubstrateClient
             _dataSource, id, ct, TranslateReadError);
         if (rows.Count == 0) return null;
         var r = rows[0];
+        var replay = await ChessTypedReplayAsync(id, ct);
+        string movetext = Laplace.Chess.Service.ChessReplay.ToMovetext(replay, r.Result);
         return new ChessGameResponse("chess.game", idHex.ToLowerInvariant(),
             r.WhiteIdHex, r.White, r.BlackIdHex, r.Black,
             r.Result, r.PlayedOn, r.Event, r.Eco,
-            r.Termination, r.TimeControl, r.TcClass, r.Movetext);
+            r.Termination, r.TimeControl, r.TcClass, movetext);
+    }
+
+    private async Task<Laplace.Chess.Service.ChessReplayResult> ChessTypedReplayAsync(
+        byte[] playingId, CancellationToken ct)
+    {
+        byte[]? lineId = await NpgsqlSubstrateReads.ChessLineForPlayingAsync(
+            _dataSource, playingId, ct, TranslateReadError);
+        if (lineId is null)
+            return Laplace.Chess.Service.ChessReplay.Replay(Array.Empty<Laplace.Engine.Core.Hash128>());
+        var rows = await NpgsqlSubstrateReads.TypedTrajectoryConstituentsAsync(
+            _dataSource, [lineId, playingId],
+            [PhysicalityType.Content, PhysicalityType.ChessComment],
+            ct, TranslateReadError);
+        var moves = rows.Where(r => r.Type == PhysicalityType.Content
+                                  && r.ParentId.AsSpan().SequenceEqual(lineId))
+            .OrderBy(static r => r.Ordinal)
+            .Select(static r => Laplace.Engine.Core.Hash128.FromBytes(r.EntityId)).ToArray();
+        byte[]? setupId = await NpgsqlSubstrateReads.ChessSetupPositionIdAsync(
+            _dataSource, playingId, ct, TranslateReadError);
+        string? setup = null;
+        if (setupId is not null)
+        {
+            var setupRows = await NpgsqlSubstrateReads.NestedTrajectoryConstituentsAsync(
+                _dataSource, [setupId], ct, TranslateReadError);
+            var boards = Laplace.Chess.Service.ChessPositionTrajectory.Decode(setupRows);
+            if (boards.TryGetValue(Laplace.Engine.Core.Hash128.FromBytes(setupId), out var board))
+                setup = board.ToFen();
+        }
+        var replay = Laplace.Chess.Service.ChessReplay.Replay(moves, setup);
+        var commentRows = rows.Where(r => r.Type == PhysicalityType.ChessComment
+                                         && r.ParentId.AsSpan().SequenceEqual(playingId))
+            .OrderBy(static r => r.Ordinal).ToArray();
+        if (commentRows.Length == moves.Length && commentRows.Length > 0)
+        {
+            var commentIds = commentRows.Select(static r => r.EntityId).ToArray();
+            var rendered = await NpgsqlSubstrateReads.RenderTextBatchAsync(
+                _dataSource, commentIds, ct, TranslateReadError);
+            if (rendered is not null && rendered.Length == commentRows.Length)
+                replay = Laplace.Chess.Service.ChessReplay.ApplyClockComments(replay, rendered);
+        }
+        return replay;
     }
 }
