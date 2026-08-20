@@ -1,3 +1,5 @@
+using Laplace.Engine.Core;
+
 namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
@@ -35,7 +37,7 @@ public sealed class TreeSitterTextAdapter : IContentRecordAdapter
                 new Dictionary<string, string> { ["path"] = Path.GetFullPath(path), ["kind"] = "directory" }));
         }
 
-        var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        var fs = IngestIo.OpenSequentialRead(path, useAsync: true);
         return ValueTask.FromResult(new ContentAdapterHandle(
             "text-file", fs,
             new Dictionary<string, string> { ["path"] = Path.GetFullPath(path), ["kind"] = "file" }));

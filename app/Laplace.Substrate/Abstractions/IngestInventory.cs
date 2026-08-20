@@ -308,8 +308,7 @@ public static class EtlInventory
     private static long CountNonEmptyLines(string path, CancellationToken ct)
     {
         long n = 0;
-        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
-            bufferSize: MemoryTopology.CopyStartupBytesPerConnection, useAsync: false);
+        using var fs = IngestIo.OpenSequentialRead(path);
         var buf = new byte[IngestSizing.ResolveSequentialIoBufferBytes()];
         bool hasContent = false, prevCr = false, first = true;
         int read;
@@ -508,8 +507,7 @@ public static class EtlInventory
     private static long CountNewlinesExact(string path, long size, CancellationToken ct)
     {
         long n = 0;
-        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
-            bufferSize: MemoryTopology.CopyStartupBytesPerConnection, useAsync: false);
+        using var fs = IngestIo.OpenSequentialRead(path);
         var buf = new byte[IngestSizing.ResolveSequentialIoBufferBytes()];
         int read;
         long remaining = size;
@@ -574,8 +572,7 @@ public static class EtlInventory
 
     private static byte[] ReadWindow(string path, long offset, int length)
     {
-        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
-            bufferSize: MemoryTopology.CopyStartupBytesPerConnection, useAsync: false);
+        using var fs = IngestIo.OpenSequentialRead(path);
         fs.Seek(offset, SeekOrigin.Begin);
         var buf = new byte[length];
         int got = 0;
@@ -598,8 +595,7 @@ public static class EtlInventory
     public static long CountConlluSentences(string path)
     {
         if (!File.Exists(path)) return 0;
-        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
-            bufferSize: MemoryTopology.CopyStartupBytesPerConnection, useAsync: false);
+        using var fs = IngestIo.OpenSequentialRead(path);
         var buf = new byte[IngestSizing.ResolveSequentialIoBufferBytes()];
         var state = new ConlluCountState();
         int read;
@@ -772,8 +768,7 @@ public static class EtlInventory
     private static long CountLineStartMarkerExact(
         string path, ReadOnlySpan<byte> marker, CancellationToken ct)
     {
-        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
-            bufferSize: MemoryTopology.CopyStartupBytesPerConnection, useAsync: false);
+        using var fs = IngestIo.OpenSequentialRead(path);
         var buf = new byte[IngestSizing.ResolveSequentialIoBufferBytes()];
         long n = 0;
         bool atLineStart = true;

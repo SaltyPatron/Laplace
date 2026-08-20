@@ -297,10 +297,14 @@ public interface IIngestBatchScopedHandler
 
 public sealed class IngestBatchConfig
 {
+    private static readonly Lazy<IngestSizing.SourcePlan> LazyDefaultSizing = new(
+        () => IngestSizing.ResolveForSource(IngestSourceProfile.Default),
+        LazyThreadSafetyMode.ExecutionAndPublication);
+
     public required Hash128 SourceId { get; init; }
     public required string BatchLabelPrefix { get; init; }
-    public int BatchSize { get; init; } = 256;
-    public int ProbeChunkSize { get; init; } = 1024;
+    public int BatchSize { get; init; } = LazyDefaultSizing.Value.RecordBatchSize;
+    public int ProbeChunkSize { get; init; } = LazyDefaultSizing.Value.ProbeChunkSize;
     public double WitnessWeight { get; init; } = 1.0;
 
     /// <summary>
@@ -568,10 +572,7 @@ public static class IngestBatchPipeline
             chunks.Add(Hash128.Blake3(lengthBytes));
 
             buffer = ArrayPool<byte>.Shared.Rent(ResumeFingerprintBlockBytes);
-            using var fs = new FileStream(
-                filePath, FileMode.Open, FileAccess.Read, FileShare.Read,
-                bufferSize: MemoryTopology.CopyStartupBytesPerConnection,
-                FileOptions.SequentialScan);
+            using var fs = IngestIo.OpenSequentialRead(filePath);
             while (true)
             {
                 int read = 0;

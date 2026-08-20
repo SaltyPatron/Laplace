@@ -887,8 +887,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
     {
         ReadOnlySpan<byte> prefix = "[Event "u8;
         long games = 0;
-        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
-            bufferSize: MemoryTopology.CopyStartupBytesPerConnection, useAsync: false);
+        using var fs = IngestIo.OpenSequentialRead(path);
         var buf = new byte[IngestSizing.ResolveSequentialIoBufferBytes()];
         int matched = 0;   // prefix bytes matched on the current line; -1 = line can't match
         bool first = true;

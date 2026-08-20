@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using Laplace.Engine.Core;
 using SynInterop = Laplace.Engine.Synthesis.NativeInterop;
 
 namespace Laplace.Decomposers.Model;
@@ -46,8 +47,7 @@ public sealed class SafetensorsContainerParser
 
     public static IReadOnlyList<TensorReference> ParseHeader(string path)
     {
-        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
-                                      bufferSize: 4096, useAsync: false);
+        using var fs = IngestIo.OpenSequentialRead(path);
         var refs = ParseHeader(fs);
         foreach (var r in refs) r.FilePath = path;
         return refs;
@@ -65,7 +65,8 @@ public sealed class SafetensorsContainerParser
 
         long headerJsonLen = 0;
         for (int i = 0; i < 8; i++) headerJsonLen |= ((long)lenBuf[i]) << (8 * i);
-        if (headerJsonLen <= 0 || headerJsonLen > 256 * 1024 * 1024)
+        if (headerJsonLen <= 0
+            || headerJsonLen > IngestSizing.ResolveContiguousPayloadBytes() - 8L)
             throw new InvalidDataException($"safetensors: implausible header length {headerJsonLen}");
 
         // The native parser takes the length prefix and the JSON as one buffer.

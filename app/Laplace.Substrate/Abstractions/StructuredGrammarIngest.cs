@@ -106,9 +106,8 @@ public static class StructuredGrammarIngest
 
         try
         {
-            await using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read,
-                FileShare.Read, bufferSize: 4 << 20, useAsync: true);
-            var buf = new byte[4 << 20];
+            await using var fs = IngestIo.OpenSequentialRead(filePath, useAsync: true);
+            var buf = new byte[IngestSizing.ResolveSequentialIoBufferBytes()];
             bool eof = false;
             while (!eof)
             {
@@ -300,12 +299,13 @@ public static class StructuredGrammarIngest
         // the whole record. Record-oriented multi-record files stream
         // through IngestFileAsync's row iterator instead; a giant file here
         // means a caller routed a corpus at the single-document lane.
-        const long maxSingleDocumentBytes = 64L * 1024 * 1024;
+        long maxSingleDocumentBytes = IngestSizing.ResolveContiguousPayloadBytes();
         long fileLen = new FileInfo(filePath).Length;
         if (fileLen > maxSingleDocumentBytes)
             throw new InvalidOperationException(
                 $"IngestJsonDocumentAsync: {filePath} is {fileLen / (1024 * 1024)}MB — the single-document "
-                + "lane buffers the whole record (a document IS one grammar record). Files past 64MB must "
+                + $"lane's current contiguous envelope is {maxSingleDocumentBytes / (1024 * 1024)}MB. "
+                + "A document IS one grammar record; larger corpora must "
                 + "stream record-boundary chunks through IngestFileAsync's grammar row iterator.");
         byte[] utf8 = await File.ReadAllBytesAsync(filePath, ct);
         if (utf8.Length == 0) return null;
