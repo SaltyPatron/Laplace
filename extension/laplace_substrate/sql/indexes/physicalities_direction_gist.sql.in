@@ -1,0 +1,14 @@
+-- Angular distance ignores a centroid's radius. Raw coord <<->> mixes angular
+-- separation with radius/dispersion, so no finite over-fetch multiplier can
+-- guarantee the true nearest angular rows. Unit directions lie on S3, where
+-- Euclidean chord distance is strictly monotone with angle; this expression
+-- index therefore provides exact angular KNN ordering.
+--
+-- Type=1 physicality identity is (entity_id, Content), so each entity contributes
+-- one canonical direction. The partial predicate avoids taxing Set/projection
+-- writes that no angular entity read consumes. This is an always-live production
+-- index: ingest never drops or rebuilds it.
+CREATE INDEX IF NOT EXISTS physicalities_direction_gist
+    ON physicalities USING gist (
+        public.laplace_direction_4d(coord) gist_geometry_ops_nd)
+    WHERE type = 1 AND public.laplace_direction_4d(coord) IS NOT NULL;

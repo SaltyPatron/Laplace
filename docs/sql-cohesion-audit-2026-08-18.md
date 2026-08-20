@@ -178,6 +178,15 @@ source-owned tier identity before aggregation, orders once, and applies exactly
 the caller limit. It cannot underfill because unrelated rows consumed a guessed
 candidate pool, and `limit=0` means zero rather than being promoted to one.
 
+Angular KNN had the same defect at the metric boundary. Raw PointZM chord order
+mixed direction with centroid radius, then several readers guessed `k×20/200` or
+`k×6/60` prefixes before re-ranking by angle. `laplace_direction_4d` now projects
+non-zero coordinates onto S3 and a partial type-1 GiST indexes that expression.
+Unit chord is monotone with angle, so angular readers consume the exact caller
+bound directly. Shape readers retain raw-coordinate candidate discovery but now
+admit exactly their declared candidate/output budget instead of hidden 200/500
+floors; that contract does not claim global Frechet completeness.
+
 PostgreSQL documents that `LIMIT` can alter plan choice but does not make an
 unordered subset deterministic. A matching B-tree can satisfy `ORDER BY ...
 LIMIT` without sorting the whole input; otherwise the sort still consumes its

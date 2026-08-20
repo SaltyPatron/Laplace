@@ -112,6 +112,49 @@ $cluster_fixture$;
 ROLLBACK;
 \set ECHO all
 
+-- Exact angular KNN must ignore radius. Raw coord chord ranks `raw-close` first,
+-- while its angle is worse; unit-direction KNN must return `angular-close`.
+BEGIN;
+INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) VALUES
+    (public.laplace_hash128_blake3('test/angular/source'), 0,
+     public.laplace_hash128_blake3('Type'), NULL),
+    (public.laplace_hash128_blake3('test/angular/raw-close'), 42,
+     public.laplace_hash128_blake3('Word'),
+     public.laplace_hash128_blake3('test/angular/source')),
+    (public.laplace_hash128_blake3('test/angular/angular-close'), 42,
+     public.laplace_hash128_blake3('Word'),
+     public.laplace_hash128_blake3('test/angular/source'));
+
+INSERT INTO laplace.physicalities
+    (id, entity_id, type, coord, hilbert_index, trajectory, n_constituents)
+VALUES
+    (public.laplace_hash128_blake3('test/angular/raw-close/physicality'),
+     public.laplace_hash128_blake3('test/angular/raw-close'), 1,
+     public.ST_SetSRID(public.ST_MakePoint(0.9, 0.1, 0, 0), 0),
+     decode(repeat('21', 16), 'hex'), NULL, 0),
+    (public.laplace_hash128_blake3('test/angular/angular-close/physicality'),
+     public.laplace_hash128_blake3('test/angular/angular-close'), 1,
+     public.ST_SetSRID(public.ST_MakePoint(100, 1, 0, 0), 0),
+     decode(repeat('22', 16), 'hex'), NULL, 0);
+
+SELECT bool_and(entity_id = public.laplace_hash128_blake3('test/angular/angular-close'))
+       AS angular_knn_ignores_radius
+FROM generation.nearest_entity(1, 0, 0, 0, 1, NULL, ARRAY[42::smallint]);
+
+SELECT count(*) = 0 AS angular_knn_zero_is_empty
+FROM generation.nearest_entity(1, 0, 0, 0, 0, NULL, ARRAY[42::smallint]);
+
+SELECT count(*) = 0 AS zero_anchor_has_no_angular_neighbors
+FROM generation.nearest_entity(0, 0, 0, 0, 1, NULL, ARRAY[42::smallint]);
+
+SELECT pg_get_indexdef(i.indexrelid) LIKE '%laplace_direction_4d(coord)%'
+       AND pg_get_expr(i.indpred, i.indrelid) LIKE '%type = 1%'
+       AND pg_get_expr(i.indpred, i.indrelid) LIKE '%laplace_direction_4d(coord) IS NOT NULL%'
+       AS angular_knn_index_is_partial
+FROM pg_index i
+WHERE i.indexrelid = 'laplace.physicalities_direction_gist'::regclass;
+ROLLBACK;
+
 -- Rule #3 gate: production Frechet helpers must realize via entity_curve /
 -- word_curve. Packed physicalities.trajectory must never be a Frechet argument.
 SELECT count(*) = 0 AS no_packed_trajectory_frechet

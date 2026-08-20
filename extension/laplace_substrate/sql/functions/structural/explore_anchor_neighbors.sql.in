@@ -42,27 +42,20 @@ DECLARE
         ELSE public.ST_SetSRID(public.ST_GeomFromText(p_traj_wkt), 0)
     END;
 BEGIN
-    -- Geodesic: any-tier content nearest the anchor centroid. Over-fetch on the
-    -- index-ordered coord distance, then re-rank by the true angular distance
-    -- (the same two-step structural_neighbors_of uses) and label once.
+    -- Geodesic: exact angular KNN on unit directions, then label the caller-sized
+    -- result once. Chord order on S3 is angular order; no candidate multiplier.
     RETURN QUERY
     WITH g AS (
         SELECT w.id AS entity_id,
                public.laplace_angular_distance_4d(w.coord, v_anchor) AS geo
         FROM laplace.v_word_points w
-        WHERE w.coord IS NOT NULL
-        ORDER BY w.coord <<->> v_anchor
-        LIMIT GREATEST(p_geodesic_k * 6, 60)
-    ),
-    dedup AS (
-        SELECT DISTINCT ON (g.entity_id) g.entity_id, g.geo
-        FROM g ORDER BY g.entity_id, g.geo
-    ),
-    nearest AS (
-        SELECT d.entity_id, d.geo
-        FROM dedup d ORDER BY d.geo LIMIT GREATEST(p_geodesic_k, 1)
+        WHERE public.laplace_direction_4d(w.coord) IS NOT NULL
+          AND public.laplace_direction_4d(v_anchor) IS NOT NULL
+        ORDER BY public.laplace_direction_4d(w.coord)
+                 <<->> public.laplace_direction_4d(v_anchor)
+        LIMIT p_geodesic_k
     ), numbered AS MATERIALIZED (
-        SELECT n.*, row_number() OVER (ORDER BY n.geo, n.entity_id) AS rn FROM nearest n
+        SELECT g.*, row_number() OVER (ORDER BY g.geo, g.entity_id) AS rn FROM g
     ), ids AS MATERIALIZED (
         SELECT array_agg(numbered.entity_id ORDER BY numbered.rn) AS a FROM numbered
     ), display AS MATERIALIZED (
@@ -79,8 +72,9 @@ BEGIN
     FROM numbered n CROSS JOIN display d
     ORDER BY n.geo;
 
-    -- Shape: Frechet of realized curves. Prefilter by coord KNN so Frechet
-    -- only rates a bounded pool; cache entity_curve once per candidate.
+    -- Shape: p_frechet_k is the exact coordinate-nearest candidate/output
+    -- budget. Frechet filters that declared population; there is no hidden
+    -- 500-row workload behind a request for fewer rows.
     IF v_traj IS NOT NULL THEN
         RETURN QUERY
         WITH pre AS (
@@ -88,7 +82,7 @@ BEGIN
             FROM laplace.v_word_points w
             WHERE w.tier = 2 AND w.trajectory IS NOT NULL
             ORDER BY w.coord <<->> v_anchor
-            LIMIT 500
+            LIMIT p_frechet_k
         ),
         f AS (
             SELECT c.entity_id,
@@ -103,7 +97,6 @@ BEGIN
             FROM f
             WHERE f.fr IS NOT NULL AND f.fr <= p_frechet_max
             ORDER BY f.fr, f.entity_id
-            LIMIT GREATEST(p_frechet_k, 1)
         ), numbered AS MATERIALIZED (
             SELECT s.*, row_number() OVER (ORDER BY s.fr, s.entity_id) AS rn FROM survivors s
         ), ids AS MATERIALIZED (
