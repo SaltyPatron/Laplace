@@ -7,7 +7,6 @@
       "extension/laplace_substrate/sql/functions/cascade/astar_path.sql.in::astar_path": 1,
       "extension/laplace_substrate/sql/functions/chess/chess_distance_to_syzygy.sql.in::distance_to_syzygy": 1,
       "extension/laplace_substrate/sql/functions/chess/chess_game.sql.in::game": 1,
-      "extension/laplace_substrate/sql/functions/chess/chess_game_plies.sql.in::game_plies": 1,
       "extension/laplace_substrate/sql/functions/chess/chess_head_to_head.sql.in::head_to_head": 1,
       "extension/laplace_substrate/sql/functions/chess/chess_line.sql.in::line": 1,
       "extension/laplace_substrate/sql/functions/chess/chess_missed_finish.sql.in::missed_finish": 1,
@@ -222,6 +221,24 @@
       "extension/laplace_substrate/sql/inference/translate_to.sql.in::lower": 3
     },
     "g15_unqualified_ddl": {},
+    "g16_unmanifested_vocabulary": {
+      "extension/laplace_substrate/sql/bootstrap/bootstrap.sql.in::CO_OCCURS_WITH": 1,
+      "extension/laplace_substrate/sql/bootstrap/bootstrap.sql.in::HAS_TRUST_CLASS": 1,
+      "extension/laplace_substrate/sql/bootstrap/bootstrap.sql.in::IS_ALIAS_OF": 1,
+      "extension/laplace_substrate/sql/bootstrap/bootstrap.sql.in::IS_LOSSY_ENCODING_OF": 1,
+      "extension/laplace_substrate/sql/bootstrap/bootstrap.sql.in::IS_REPLACED_BY": 1,
+      "extension/laplace_substrate/sql/bootstrap/bootstrap.sql.in::OCCURS_IN_CONTEXT": 1,
+      "extension/laplace_substrate/sql/seed/canonical_names_seed.sql.in::CO_OCCURS_WITH": 1,
+      "extension/laplace_substrate/sql/seed/canonical_names_seed.sql.in::HAS_TRUST_CLASS": 1,
+      "extension/laplace_substrate/sql/seed/canonical_names_seed.sql.in::IS_ALIAS_OF": 1,
+      "extension/laplace_substrate/sql/seed/canonical_names_seed.sql.in::IS_LOSSY_ENCODING_OF": 1,
+      "extension/laplace_substrate/sql/seed/canonical_names_seed.sql.in::IS_REPLACED_BY": 1,
+      "extension/laplace_substrate/sql/seed/canonical_names_seed.sql.in::NORMALIZES": 1,
+      "extension/laplace_substrate/sql/seed/canonical_names_seed.sql.in::OCCURS_IN_CONTEXT": 1,
+      "extension/laplace_substrate/sql/seed/canonical_names_seed.sql.in::POS": 1,
+      "extension/laplace_substrate/sql/seed/canonical_names_seed.sql.in::UD_UPOS": 1,
+      "extension/laplace_substrate/sql/seed/canonical_names_seed.sql.in::UD_XPOS": 1
+    },
     "g1_weight_literalism": {
       "extension/laplace_substrate/src/highway_mask.c::rating-2*rd": 3,
       "extension/laplace_substrate/src/prompt_coherence.c::rating-2*rd": 2,
@@ -250,10 +267,6 @@
       "app/Laplace.Chess/Service/ChessAnalyze.cs::GAME_HAS_MOTIF": 2,
       "app/Laplace.Chess/Service/ChessAnalyze.cs::GAME_HAS_OPENING": 1,
       "app/Laplace.Chess/Service/ChessBookDecomposer.cs::EXPLAINS": 3,
-      "app/Laplace.Chess/Service/ChessGraph.cs::HAS_CLOCK": 2,
-      "app/Laplace.Chess/Service/ChessGraph.cs::HAS_EVAL_TOKEN": 2,
-      "app/Laplace.Chess/Service/ChessGraph.cs::HAS_MOTIF": 1,
-      "app/Laplace.Chess/Service/ChessGraph.cs::HAS_THINK_CLASS": 2,
       "app/Laplace.Chess/Service/ChessGraph.cs::MOVE_QUALITY": 2,
       "app/Laplace.Chess/Service/ChessLiveGameHost.cs::HAS_BLACK": 1,
       "app/Laplace.Chess/Service/ChessLiveGameHost.cs::HAS_RESULT": 1,
@@ -647,12 +660,6 @@
       "extension/laplace_substrate/sql/functions/chess/chess_game.sql.in::HAS_WHITE": 2,
       "extension/laplace_substrate/sql/functions/chess/chess_game.sql.in::ON_DATE": 2,
       "extension/laplace_substrate/sql/functions/chess/chess_game.sql.in::PLAYS_LINE": 1,
-      "extension/laplace_substrate/sql/functions/chess/chess_game_plies.sql.in::HAS_CLOCK": 2,
-      "extension/laplace_substrate/sql/functions/chess/chess_game_plies.sql.in::HAS_EVAL_TOKEN": 2,
-      "extension/laplace_substrate/sql/functions/chess/chess_game_plies.sql.in::HAS_SAN": 2,
-      "extension/laplace_substrate/sql/functions/chess/chess_game_plies.sql.in::HAS_THINK_CLASS": 2,
-      "extension/laplace_substrate/sql/functions/chess/chess_game_plies.sql.in::MOVE_QUALITY": 2,
-      "extension/laplace_substrate/sql/functions/chess/chess_game_plies.sql.in::PLAYS_LINE": 1,
       "extension/laplace_substrate/sql/functions/chess/chess_head_to_head.sql.in::PLAYED_BY": 1,
       "extension/laplace_substrate/sql/functions/chess/chess_line.sql.in::HAS_RESULT": 2,
       "extension/laplace_substrate/sql/functions/chess/chess_line.sql.in::ON_DATE": 2,
@@ -808,24 +815,6 @@
     "g8_band_literalism": {
       "extension/laplace_substrate/sql/functions/lexical/senses_with_context.sql.in::RELATION_HIGHWAY_BAND(C.TYPE_ID)IN(1,7)": 1,
       "extension/laplace_substrate/sql/functions/lexical/senses_with_context.sql.in::RELATION_HIGHWAY_BAND(C.TYPE_ID)IN(2,4,7)": 2
-    },
-    "g16_unmanifested_vocabulary": {
-      "extension/laplace_substrate/sql/bootstrap/bootstrap.sql.in::CO_OCCURS_WITH": 1,
-      "extension/laplace_substrate/sql/bootstrap/bootstrap.sql.in::HAS_TRUST_CLASS": 1,
-      "extension/laplace_substrate/sql/bootstrap/bootstrap.sql.in::IS_ALIAS_OF": 1,
-      "extension/laplace_substrate/sql/bootstrap/bootstrap.sql.in::IS_LOSSY_ENCODING_OF": 1,
-      "extension/laplace_substrate/sql/bootstrap/bootstrap.sql.in::IS_REPLACED_BY": 1,
-      "extension/laplace_substrate/sql/bootstrap/bootstrap.sql.in::OCCURS_IN_CONTEXT": 1,
-      "extension/laplace_substrate/sql/seed/canonical_names_seed.sql.in::CO_OCCURS_WITH": 1,
-      "extension/laplace_substrate/sql/seed/canonical_names_seed.sql.in::HAS_TRUST_CLASS": 1,
-      "extension/laplace_substrate/sql/seed/canonical_names_seed.sql.in::IS_ALIAS_OF": 1,
-      "extension/laplace_substrate/sql/seed/canonical_names_seed.sql.in::IS_LOSSY_ENCODING_OF": 1,
-      "extension/laplace_substrate/sql/seed/canonical_names_seed.sql.in::IS_REPLACED_BY": 1,
-      "extension/laplace_substrate/sql/seed/canonical_names_seed.sql.in::NORMALIZES": 1,
-      "extension/laplace_substrate/sql/seed/canonical_names_seed.sql.in::OCCURS_IN_CONTEXT": 1,
-      "extension/laplace_substrate/sql/seed/canonical_names_seed.sql.in::POS": 1,
-      "extension/laplace_substrate/sql/seed/canonical_names_seed.sql.in::UD_UPOS": 1,
-      "extension/laplace_substrate/sql/seed/canonical_names_seed.sql.in::UD_XPOS": 1
     }
   }
 }
