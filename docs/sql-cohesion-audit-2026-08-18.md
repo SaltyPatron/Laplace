@@ -1080,6 +1080,11 @@ The cleanup is complete only when all of these are true:
   longer promote zero to one or truncate requests at 200, installed operations
   no longer truncate every explicit request above 2,000, and
   `generation.consensus_peer` has no fixed 48-row candidate pool behind `p_k`;
+- serving inventory, geometry, evidence, graph, report, and query adapters no
+  longer impose hidden 25/32/50/64/100/200/500/512 ceilings; consensus-web
+  traversal allocates from the exact requested shape, uses neighbour-distinct
+  per-frontier set probes followed by one global native rank, and rejects only requests that exceed
+  PostgreSQL's actual allocation or result-coordinate representation;
 - a canonical full seed is content-addressed, resumable by phase, and completes
   inside the admitted hardware budget with required serving indexes and exact
   validation included; and

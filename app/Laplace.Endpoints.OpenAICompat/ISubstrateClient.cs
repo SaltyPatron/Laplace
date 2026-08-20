@@ -136,7 +136,7 @@ internal interface ISubstrateClient
     Task<ExploreContainersResponse?> ExploreContainersAsync(string idHex, int maxHops, int limit, CancellationToken ct);
 
     Task<ExploreGraphResponse?> ExploreConsensusGraphAsync(
-        string idHex, int hops, int fanout, CancellationToken ct);
+        string idHex, int hops, int fanout, int maxNodes, CancellationToken ct);
 
     /// <summary>Installed-catalog op invoker — MCP <c>op</c> / HTTP <c>POST /v1/op</c> (GH #812).</summary>
     Task<InstalledOpInvoker.OpResult> InvokeOpAsync(

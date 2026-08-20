@@ -12,7 +12,7 @@ internal static class ReportEndpoints
             if (string.IsNullOrWhiteSpace(target))
                 return EndpointJson.BadRequest("invalid_request_error", "Route parameter 'target' is required.");
 
-            var evidence = await substrate.EvidenceAsync(target.Trim(), Math.Clamp(limit ?? 10, 1, 50), ct);
+            var evidence = await substrate.EvidenceAsync(target.Trim(), Math.Max(0, limit ?? 10), ct);
             if (evidence is null)
                 return EndpointJson.NotFound("entity_not_found", $"No entity for target '{target.Trim()}'.");
 
@@ -63,7 +63,7 @@ internal static class ReportEndpoints
             return await RunGatedReportAsync(request, billing, "visualization.deep_export", ct, async gateQuote =>
             {
                 var graph = await substrate.VisualizationGraphAsync(
-                    limit: Math.Clamp(payload.Limit ?? 100, 1, 500),
+                    limit: Math.Max(0, payload.Limit ?? 100),
                     includeGeometry: payload.IncludeGeometry,
                     includeEvidence: payload.IncludeEvidence,
                     ct);

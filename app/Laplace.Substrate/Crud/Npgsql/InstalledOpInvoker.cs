@@ -122,7 +122,7 @@ public static class InstalledOpInvoker
         {
             var err = catalog.Count == 0
                 ? $"no installed operation named '{name}', and nothing in the catalog matches that substring — try ops.api('<shorter substring>')"
-                : $"no installed operation named '{name}' — did you mean: {string.Join(", ", catalog.Select(r => r.Name).Distinct().Take(8))}";
+                : $"no installed operation named '{name}' — did you mean: {string.Join(", ", catalog.Select(r => r.Name).Distinct())}";
             return new OpResult([], null, err);
         }
 

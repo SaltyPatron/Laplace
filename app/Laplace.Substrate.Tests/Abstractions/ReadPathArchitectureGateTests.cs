@@ -207,4 +207,27 @@ public sealed class ReadPathArchitectureGateTests
             $"{nameof(HandWrittenSqlAllowlist)} has {HandWrittenSqlAllowlist.Count} entries; ceiling is "
             + $"{HandWrittenSqlCeiling}. This list may only shrink.");
     }
+
+    [Fact]
+    public void ReadPath_HasNoLegacyFixedInventoryOrTrajectoryTruncation()
+    {
+        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
+        var reads = File.ReadAllText(Path.Combine(repoRoot, "app", "Laplace.Substrate",
+            "Crud", "Npgsql", "NpgsqlSubstrateReads.cs"));
+        Assert.DoesNotMatch(@"\bLIMIT\s+(32|64|512)\b", reads);
+    }
+
+    [Fact]
+    public void ConsensusWeb_HasNoGuessedFanoutOrFixedNodeCeiling()
+    {
+        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
+        var native = File.ReadAllText(Path.Combine(repoRoot, "extension",
+            "laplace_substrate", "src", "explore_web.c"));
+
+        Assert.DoesNotMatch(@"fanout\s*\*\s*2", native);
+        Assert.DoesNotMatch(@"\b(fanout|max_nodes|hops)\s*=\s*(?:Min|Max)\b", native);
+        Assert.DoesNotContain("max_nodes = 400", native, StringComparison.Ordinal);
+        Assert.DoesNotContain("cand_cap = 4096", native, StringComparison.Ordinal);
+        Assert.Contains("MaxAllocSize", native, StringComparison.Ordinal);
+    }
 }

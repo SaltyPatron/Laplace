@@ -104,15 +104,16 @@ BEGIN
 
     SELECT count(*) INTO wrong_roots
     FROM (
-        SELECT f.frontier_id
+        SELECT f.frontier_id, count(e.nbr) AS admitted,
+               count(DISTINCT e.nbr) AS distinct_admitted
         FROM unnest(subjects) AS f(frontier_id)
         LEFT JOIN consensus.explore_web_neighbors(subjects, 2) e
                ON e.frontier_id = f.frontier_id
         GROUP BY f.frontier_id
-        HAVING count(e.nbr) <> 2
+        HAVING count(e.nbr) > 2 OR count(e.nbr) <> count(DISTINCT e.nbr)
     ) q;
     IF wrong_roots <> 0 THEN
-        RAISE EXCEPTION 'FAIL: % frontier roots did not receive exactly two slots', wrong_roots;
+        RAISE EXCEPTION 'FAIL: % frontier roots exceeded or duplicated neighbor slots', wrong_roots;
     END IF;
 
     SELECT t.type_id INTO expected_type
@@ -163,7 +164,7 @@ BEGIN
         RAISE EXCEPTION 'FAIL: scalar zero limit returned % rows', zero_rows;
     END IF;
 
-    RAISE NOTICE '✓ explore_web_neighbors: scalar/batch/default-partition parity, exact per-root limits, self-edge deduplication, and total tie order all hold';
+    RAISE NOTICE '✓ explore_web_neighbors: scalar/batch/default-partition parity, distinct per-root limits, self-edge deduplication, and total tie order all hold';
 END $$;
-NOTICE:  ✓ explore_web_neighbors: scalar/batch/default-partition parity, exact per-root limits, self-edge deduplication, and total tie order all hold
+NOTICE:  ✓ explore_web_neighbors: scalar/batch/default-partition parity, distinct per-root limits, self-edge deduplication, and total tie order all hold
 ROLLBACK;
