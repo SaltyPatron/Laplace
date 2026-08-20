@@ -91,6 +91,19 @@ TEST(LaplaceCoreGlicko2, EMatchesPaperTable) {
     EXPECT_NEAR(from_fp(laplace_glicko2_E(mu, to_fp( 1.1513), g3)), 0.303, 0.001);
 }
 
+TEST(LaplaceCoreGlicko2, ConsensusExpectedScoreUsesGlickoUncertainty) {
+    const int64_t neutral = to_fp(1500.0);
+    const int64_t high    = to_fp(1800.0);
+
+    EXPECT_EQ(laplace_glicko2_expected_score_fp(neutral, 0), to_fp(0.5));
+    EXPECT_GT(laplace_glicko2_expected_score_fp(high, 0), to_fp(0.5));
+    EXPECT_GT(laplace_glicko2_expected_score_fp(high, to_fp(350.0)), to_fp(0.5));
+    EXPECT_LT(laplace_glicko2_expected_score_fp(high, to_fp(350.0)),
+              laplace_glicko2_expected_score_fp(high, 0));
+    EXPECT_EQ(laplace_glicko2_expected_score_fp(to_fp(1200.0), to_fp(80.0)),
+              SCALE - laplace_glicko2_expected_score_fp(high, to_fp(80.0)));
+}
+
 TEST(LaplaceCoreGlicko2, InitSetsInitialState) {
     glicko2_state_t st;
     glicko2_init(&st, to_fp(1500.0), to_fp(350.0), to_fp(0.06));

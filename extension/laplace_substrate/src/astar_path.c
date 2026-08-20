@@ -21,10 +21,10 @@ PG_FUNCTION_INFO_V1(pg_laplace_astar_path);
 #define ASTAR_PI 3.14159265358979323846
 
 static const char *Q_UNDIRECTED =
-    "SELECT nbr, rating, rd, witness_count FROM consensus.neighbors_undirected($1, $2, $3)";
+    "SELECT nbr, rating, rd FROM consensus.neighbors_undirected($1, $2, $3)";
 
 static const char *Q_DIRECTED =
-    "SELECT nbr, rating, rd, witness_count FROM consensus.neighbors_directed($1, $2, $3)";
+    "SELECT nbr, rating, rd FROM consensus.neighbors_directed($1, $2, $3)";
 
 /* Single-key coordinate lookup, same ensure_*_plan cached-plan idiom as
  * containers_of.c and generate_walk.c's ordinal-continuity probe. Used only
@@ -98,82 +98,92 @@ ensure_plan(bool directed)
     return *slot;
 }
 
-/*
- * Rule #1 reuse: the SAME laplace_walk_edge_weight formula generate_walk.c's
- * beam scorer uses (doc 14 P5 / doc 15 3Ca), squashed from an unbounded
- * signed weight into astar's [1.0, ~1.99) cost domain via a logistic curve
- * so higher confidence/witnessing/lower-rd still means cheaper traversal,
- * same direction the original bare (neutral-eff)/1000 penalty had. SCALE is
- * an initial, empirically-untuned sensitivity constant (Rule #5 caveat:
- * profile before retuning against live data), not a derived quantity.
- */
-#define EDGE_COST_LOGISTIC_SCALE 100.0
-
 static double
-edge_cost(int64 rating, int64 rd, int64 witness_count, double kappa)
+edge_cost(int64 rating, int64 rd)
 {
-    double weight = laplace_walk_edge_weight(rating, rd, witness_count, kappa);
-    return 1.0 + 0.99 / (1.0 + exp(weight / EDGE_COST_LOGISTIC_SCALE));
+    double probability = laplace_edge_strength(rating, rd);
+
+    /* Independent-edge path likelihoods multiply; negative log turns that
+     * product into the non-negative additive cost Dijkstra requires. A zero
+     * expected score is not a traversable edge, handled by spi_expand. */
+    return -log(probability);
 }
 
 typedef struct {
-    Datum  types;
-    bool   directed;
-    bytea *nodebuf;
-    double kappa;
+    Datum         types;
+    bool          directed;
+    bytea        *nodebuf;
+    astar_edge_t *edges;
+    Size          edge_capacity;
 } expand_ctx;
 
-static int
-spi_expand(void *ctxp, const hash128_t *node, astar_edge_t *out, int cap)
+static bool
+spi_expand(void *ctxp, const hash128_t *node,
+           const astar_edge_t **out, size_t *count)
 {
     expand_ctx *ctx = (expand_ctx *) ctxp;
     Datum       args[3];
+    char        nulls[4] = "  n";
     int         rc;
     uint64      r;
+    size_t      n = 0;
 
     memcpy(VARDATA(ctx->nodebuf), node, sizeof(hash128_t));
     args[0] = PointerGetDatum(ctx->nodebuf);
     args[1] = ctx->types;
-    args[2] = Int32GetDatum(cap);
+    args[2] = (Datum) 0; /* NULL p_limit means the complete adjacency list. */
 
-    rc = SPI_execute_plan(ensure_plan(ctx->directed), args, NULL,
-                          true, cap);
+    rc = SPI_execute_plan(ensure_plan(ctx->directed), args, nulls, true, 0);
     if (rc != SPI_OK_SELECT)
-        return -1;
+        return false;
 
-    for (r = 0; r < SPI_processed && (int) r < cap; r++)
+    if (SPI_processed > (uint64) (MaxAllocSize / sizeof(astar_edge_t)))
+        ereport(ERROR,
+                (errmsg("astar_path: adjacency exceeds PostgreSQL allocation capacity"),
+                 errdetail("Node expansion returned %llu edges.",
+                           (unsigned long long) SPI_processed)));
+    if ((Size) SPI_processed > ctx->edge_capacity)
+    {
+        Size bytes = Max((Size) 1, (Size) SPI_processed) * sizeof(astar_edge_t);
+        ctx->edges = ctx->edges == NULL
+                     ? (astar_edge_t *) palloc(bytes)
+                     : (astar_edge_t *) repalloc(ctx->edges, bytes);
+        ctx->edge_capacity = (Size) SPI_processed;
+    }
+
+    for (r = 0; r < SPI_processed; r++)
     {
         HeapTuple tup = SPI_tuptable->vals[r];
         TupleDesc td  = SPI_tuptable->tupdesc;
         bool      isnull;
         Datum     nbr = SPI_getbinval(tup, td, 1, &isnull);
-        int64     rating, rd, witnesses;
+        int64     rating, rd;
+        double    probability;
 
         if (isnull) continue;
         rating    = DatumGetInt64(SPI_getbinval(tup, td, 2, &isnull));
         rd        = DatumGetInt64(SPI_getbinval(tup, td, 3, &isnull));
-        witnesses = DatumGetInt64(SPI_getbinval(tup, td, 4, &isnull));
+        probability = laplace_edge_strength(rating, rd);
+        if (probability <= 0.0)
+            continue;
 
-        out[r].target = *(hash128_t *) VARDATA_ANY(DatumGetByteaPP(nbr));
-        out[r].cost   = edge_cost(rating, rd, witnesses, ctx->kappa);
+        ctx->edges[n].target = *(hash128_t *) VARDATA_ANY(DatumGetByteaPP(nbr));
+        ctx->edges[n].cost   = edge_cost(rating, rd);
+        n++;
     }
     /* All row data copied into out[] above; free before the next probe. */
     SPI_freetuptable(SPI_tuptable);
-    return (int) r;
+    *out = ctx->edges;
+    *count = n;
+    return true;
 }
 
-/* p_use_geometry heuristic closure: goal coordinates are resolved once up
- * front (goal_xyzm/goal_ok, sized goal_n); each call fetches the CURRENT
- * node's own coordinate (fetch_coord, cached plan) and returns the minimum
- * angular distance to any resolved goal, normalized by pi. Since pi is the
- * maximum possible S3 angular distance, h = dist/pi is always <= 1.0, and
- * edge_cost's logistic squash always returns a cost strictly > 1.0 per hop
- * -- so h never overestimates the true cost of the >=1 remaining hop any
- * admissible path needs. This is a deliberately WEAK but honestly-provable
- * bound: no live calibration query is required (an empirically tighter
- * bound, e.g. from a measured max single-hop angular step, is a documented
- * future refinement -- see doc 15 3Cc / Issue 05 coordination note). A node
- * or goal with no point physicality on file degrades to h=0.0, never errors.
+/* p_use_geometry tie-order closure: goal coordinates are resolved once up
+ * front and each call returns normalized angular distance. The core orders
+ * primarily by exact accumulated cost and consults this only for equal-cost
+ * ties. No relationship between S3 distance and consensus probability has
+ * been proved, so geometry must not masquerade as an admissible cost bound.
+ * A node or goal with no point physicality degrades to 0.0, never errors.
  */
 typedef struct {
     double *goal_xyzm; /* goal_n * 4 doubles */
@@ -233,7 +243,7 @@ pg_laplace_astar_path(PG_FUNCTION_ARGS)
         ereport(ERROR, (errmsg("astar_path: start and goals must not be NULL")));
     start_b      = PG_GETARG_BYTEA_PP(0);
     goals_arr    = PG_GETARG_ARRAYTYPE_P(1);
-    max_depth    = PG_ARGISNULL(3) ? 7 : PG_GETARG_INT32(3);
+    max_depth    = PG_ARGISNULL(3) ? PG_INT32_MAX : PG_GETARG_INT32(3);
     directed     = PG_ARGISNULL(4) ? false : PG_GETARG_BOOL(4);
     use_geometry = (PG_NARGS() > 5 && !PG_ARGISNULL(5)) ? PG_GETARG_BOOL(5) : false;
     if (PG_ARGISNULL(2))
@@ -264,7 +274,8 @@ pg_laplace_astar_path(PG_FUNCTION_ARGS)
     ctx.directed = directed;
     ctx.nodebuf  = (bytea *) palloc(VARHDRSZ + sizeof(hash128_t));
     SET_VARSIZE(ctx.nodebuf, VARHDRSZ + sizeof(hash128_t));
-    ctx.kappa    = spi_fetch_rd_kappa();
+    ctx.edges         = NULL;
+    ctx.edge_capacity = 0;
 
     if (use_geometry)
     {

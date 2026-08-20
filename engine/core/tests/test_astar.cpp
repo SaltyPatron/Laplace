@@ -15,16 +15,18 @@ struct Graph {
     std::map<uint64_t, std::vector<astar_edge_t>> adj;
 };
 
-int expand(void* ctx, const hash128_t* node, astar_edge_t* out, int cap) {
+bool expand(void* ctx, const hash128_t* node,
+            const astar_edge_t** out, size_t* count) {
     auto* g  = static_cast<Graph*>(ctx);
     auto  it = g->adj.find(node->lo);
-    if (it == g->adj.end()) return 0;
-    int n = 0;
-    for (const auto& e : it->second) {
-        if (n >= cap) break;
-        out[n++] = e;
+    if (it == g->adj.end()) {
+        *out = nullptr;
+        *count = 0;
+        return true;
     }
-    return n;
+    *out = it->second.data();
+    *count = it->second.size();
+    return true;
 }
 
 std::vector<uint64_t> run(Graph& g, uint64_t start, std::vector<uint64_t> goals,
@@ -100,6 +102,15 @@ TEST(LaplaceCoreAstar, ReachesNearestGoalInRegion) {
     auto p = run(g, 1, {2, 3});
     ASSERT_EQ(p.size(), 2u);
     EXPECT_EQ(p[1], 2u);
+}
+
+TEST(LaplaceCoreAstar, DoesNotTruncateHighDegreeNodes) {
+    Graph g;
+    for (uint64_t i = 2; i <= 302; ++i)
+        g.adj[1].push_back({H(i), 1.0});
+    auto p = run(g, 1, {302});
+    ASSERT_EQ(p.size(), 2u);
+    EXPECT_EQ(p[1], 302u);
 }
 
 TEST(LaplaceCoreAstar, NoPathYieldsEmpty) {

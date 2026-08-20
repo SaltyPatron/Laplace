@@ -1,5 +1,6 @@
 #include "laplace/core/astar.h"
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -24,18 +25,20 @@ struct H128Eq {
 };
 
 struct Frontier {
-    double    f;
     double    g;
+    double    hint;
     size_t    depth;
     hash128_t node;
 };
 struct FrontierGreater {
     bool operator()(const Frontier& a, const Frontier& b) const noexcept {
-        return a.f > b.f;
+        if (a.g != b.g) return a.g > b.g;
+        if (a.hint != b.hint) return a.hint > b.hint;
+        if (a.node.hi != b.node.hi) return a.node.hi > b.node.hi;
+        return a.node.lo > b.node.lo;
     }
 };
 
-constexpr int    kExpandCap = 256;
 constexpr double kInf       = std::numeric_limits<double>::infinity();
 
 }
@@ -65,12 +68,13 @@ astar_query_t* astar_open(const hash128_t* start,
     std::priority_queue<Frontier, std::vector<Frontier>, FrontierGreater> frontier;
 
     best_g[*start] = 0.0;
-    frontier.push(Frontier{0.0, 0.0, 0, *start});
+    double start_hint = heuristic ? heuristic(heur_ctx, start, goal_region, goal_count)
+                                  : 0.0;
+    if (!std::isfinite(start_hint) || start_hint < 0.0) start_hint = 0.0;
+    frontier.push(Frontier{0.0, start_hint, 0, *start});
 
     bool      reached = false;
     hash128_t goal_hit{};
-
-    std::vector<astar_edge_t> buf(kExpandCap);
 
     while (!frontier.empty()) {
         Frontier cur = frontier.top();
@@ -82,13 +86,15 @@ astar_query_t* astar_open(const hash128_t* start,
         if (goals.count(cur.node)) { reached = true; goal_hit = cur.node; break; }
         if (cur.depth >= max_depth) continue;
 
-        int n = expand(ctx, &cur.node, buf.data(), kExpandCap);
-        if (n < 0) {
+        const astar_edge_t* edges = nullptr;
+        size_t              edge_count = 0;
+        if (!expand(ctx, &cur.node, &edges, &edge_count)) {
             return new astar_query();
         }
-        for (int i = 0; i < n; ++i) {
-            const astar_edge_t& e = buf[static_cast<size_t>(i)];
-            double cost = e.cost < 0.0 ? 0.0 : e.cost;
+        for (size_t i = 0; i < edge_count; ++i) {
+            const astar_edge_t& e = edges[i];
+            if (!std::isfinite(e.cost) || e.cost < 0.0) continue;
+            double cost = e.cost;
             double ng   = cur.g + cost;
             auto   it   = best_g.find(e.target);
             double prev = (it == best_g.end()) ? kInf : it->second;
@@ -97,8 +103,8 @@ astar_query_t* astar_open(const hash128_t* start,
                 came_from[e.target] = cur.node;
                 double h = heuristic ? heuristic(heur_ctx, &e.target, goal_region, goal_count)
                                      : 0.0;
-                if (h < 0.0) h = 0.0; /* a negative estimate is never admissible */
-                frontier.push(Frontier{ng + h, ng, cur.depth + 1, e.target});
+                if (!std::isfinite(h) || h < 0.0) h = 0.0;
+                frontier.push(Frontier{ng, h, cur.depth + 1, e.target});
             }
         }
     }
