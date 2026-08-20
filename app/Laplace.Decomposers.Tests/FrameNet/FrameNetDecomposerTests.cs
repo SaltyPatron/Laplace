@@ -236,6 +236,18 @@ public sealed class FrameNetDecomposerTests
             Assert.Equal(2, evokes.Select(a => a.ContextId).Distinct().Count());
             Assert.DoesNotContain(evokes, a => a.SubjectId == ContentEmitter.RootId("bank"));
 
+            Hash128 sentenceId = ContentEmitter.RootId("bank bank")!.Value;
+            Hash128 targetId = ContentEmitter.RootId("bank")!.Value;
+            Hash128 firstSingleSpanId = Hash128.Merkle(EntityTier.Document,
+            [
+                FrameNetDecomposer.AnnotationSchemaId,
+                sentenceId,
+                FrameNetDecomposer.OffsetId(0),
+                FrameNetDecomposer.OffsetId(3),
+                targetId,
+            ]);
+            Assert.Contains(evokes, a => a.SubjectId == firstSingleSpanId);
+
             var annotationIds = changes.SelectMany(c => c.Entities)
                 .Where(e => e.TypeId == EntityTypeRegistry.FrameNetAnnotation)
                 .Select(e => e.Id)
@@ -253,6 +265,68 @@ public sealed class FrameNetDecomposerTests
             Assert.Contains(annotationPhysicalities, p =>
                 Trajectory.Constituents(p.TrajectoryXyzm!).Contains(FrameNetDecomposer.OffsetId(5))
                 && Trajectory.Constituents(p.TrajectoryXyzm!).Contains(FrameNetDecomposer.OffsetId(8)));
+        }
+        finally { try { Directory.Delete(dir, recursive: true); } catch { } }
+    }
+
+    [Fact]
+    public async Task Fulltext_Discontinuous_Target_Preserves_Every_Ordered_Span()
+    {
+        const string fulltextXml = """
+<?xml version="1.0" encoding="UTF-8"?>
+<fullTextAnnotation xmlns="http://framenet.icsi.berkeley.edu">
+  <sentence ID="88">
+    <text>take the box apart</text>
+    <annotationSet ID="200" frameName="Separating">
+      <layer name="Target">
+        <label name="Target" start="0" end="3"/>
+        <label name="Target" start="13" end="17"/>
+      </layer>
+    </annotationSet>
+  </sentence>
+</fullTextAnnotation>
+""";
+
+        string dir = Path.Combine(Path.GetTempPath(), "fn-multispan-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(dir, "fulltext"));
+        string path = Path.Combine(dir, "fulltext", "sample.xml");
+        await File.WriteAllTextAsync(path, fulltextXml);
+        try
+        {
+            var parsed = new List<FrameNetDecomposer.FulltextAnno>();
+            await foreach (var ann in FrameNetDecomposer.ParseFulltextAsync(
+                               path, "framenet/fulltext/sample.xml", CancellationToken.None))
+                parsed.Add(ann);
+
+            var annotation = Assert.Single(parsed);
+            Assert.Equal("take apart", annotation.TargetText);
+            Assert.Equal((0, 3), (annotation.TargetStart, annotation.TargetEnd));
+            Assert.Equal(
+                [new FrameNetDecomposer.TargetSpan(0, 3), new FrameNetDecomposer.TargetSpan(13, 17)],
+                annotation.TargetSpans);
+
+            var dec = new FrameNetDecomposer();
+            var ctx = new FakeContext(new NullWriter()) { EcosystemPath = dir };
+            var changes = new List<SubstrateChange>();
+            await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
+                changes.Add(change);
+
+            var evokes = Assert.Single(
+                changes.SelectMany(c => c.Attestations),
+                a => a.TypeId == RelationTypeRegistry.RelationTypeId("EVOKES_FRAME"));
+            var annotationPhysicality = Assert.Single(
+                changes.SelectMany(c => c.Physicalities),
+                p => p.EntityId == evokes.SubjectId);
+            Assert.Equal(
+            [
+                FrameNetDecomposer.AnnotationSchemaId,
+                ContentEmitter.RootId("take the box apart")!.Value,
+                FrameNetDecomposer.OffsetId(0),
+                FrameNetDecomposer.OffsetId(3),
+                FrameNetDecomposer.OffsetId(13),
+                FrameNetDecomposer.OffsetId(17),
+                ContentEmitter.RootId("take apart")!.Value,
+            ], Trajectory.Constituents(annotationPhysicality.TrajectoryXyzm!));
         }
         finally { try { Directory.Delete(dir, recursive: true); } catch { } }
     }

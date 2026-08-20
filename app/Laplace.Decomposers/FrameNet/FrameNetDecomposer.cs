@@ -133,14 +133,23 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
         var frameId = CategoryAnchor.Emit(b, ann.FrameName, FrameTypeId, Source, TC.AcademicCurated);
         if (sentId is null || targetId is null || frameId is null) return;
 
-        Hash128 startId = OffsetId(ann.TargetStart);
-        Hash128 endId = OffsetId(ann.TargetEnd);
-        b.AddEntity(startId, EntityTier.Word, EntityTypeRegistry.Ordinal, Source);
-        b.AddEntity(endId, EntityTier.Word, EntityTypeRegistry.Ordinal, Source);
+        var constituents = new Hash128[3 + ann.TargetSpans.Count * 2];
+        constituents[0] = AnnotationSchemaId;
+        constituents[1] = sentId.Value;
+        int cursor = 2;
+        foreach (var span in ann.TargetSpans)
+        {
+            Hash128 startId = OffsetId(span.Start);
+            Hash128 endId = OffsetId(span.End);
+            b.AddEntity(startId, EntityTier.Word, EntityTypeRegistry.Ordinal, Source);
+            b.AddEntity(endId, EntityTier.Word, EntityTypeRegistry.Ordinal, Source);
+            constituents[cursor++] = startId;
+            constituents[cursor++] = endId;
+        }
+        constituents[cursor] = targetId.Value;
 
-        Hash128 schemaId = Hash128.OfCanonical("framenet/span-annotation/schema/v1");
-        b.AddEntity(schemaId, EntityTier.Word, EntityTypeRegistry.SourceReference, Source);
-        Hash128[] constituents = [schemaId, sentId.Value, startId, endId, targetId.Value];
+        b.AddEntity(
+            AnnotationSchemaId, EntityTier.Word, EntityTypeRegistry.SourceReference, Source);
         Hash128 annotationId = Hash128.Merkle(EntityTier.Document, constituents);
         b.AddEntity(
             annotationId, EntityTier.Document, EntityTypeRegistry.FrameNetAnnotation, Source);
@@ -171,6 +180,9 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
 
     internal static Hash128 OffsetId(int offset) =>
         Hash128.OfCanonical($"framenet/character-offset/{offset}/v1");
+
+    internal static readonly Hash128 AnnotationSchemaId =
+        Hash128.OfCanonical("framenet/span-annotation/schema/v1");
 
     private static Hash128 AnnotationOccurrenceId(FulltextAnno ann, Hash128 annotationId)
     {
@@ -438,7 +450,8 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
         string? frameName = null;
         string sentenceReference = "";
         string annotationReference = "";
-        int targetStart = -1, targetEnd = -1;
+        var targetSpans = new List<TargetSpan>();
+        bool invalidTargetSpan = false;
         bool inTargetLayer = false;
 
         while (await reader.ReadAsync())
@@ -458,7 +471,8 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
                     case "annotationSet":
                         frameName = reader.GetAttribute("frameName");
                         annotationReference = reader.GetAttribute("ID") ?? "";
-                        targetStart = targetEnd = -1;
+                        targetSpans.Clear();
+                        invalidTargetSpan = false;
                         inTargetLayer = false;
                         break;
                     case "layer":
@@ -467,28 +481,41 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
                     case "label":
                         if (inTargetLayer && reader.GetAttribute("name") == "Target")
                         {
-                            if (targetStart < 0)
-                            {
-                                int.TryParse(reader.GetAttribute("start"), out targetStart);
-                                if (!int.TryParse(reader.GetAttribute("end"), out targetEnd)) targetEnd = -1;
-                            }
+                            if (int.TryParse(reader.GetAttribute("start"), out int start)
+                                && int.TryParse(reader.GetAttribute("end"), out int end)
+                                && start >= 0 && end >= start)
+                                targetSpans.Add(new TargetSpan(start, end));
+                            else
+                                invalidTargetSpan = true;
                         }
                         break;
                 }
             }
+            else if (reader.NodeType == XmlNodeType.EndElement && reader.LocalName == "layer")
+            {
+                inTargetLayer = false;
+            }
             else if (reader.NodeType == XmlNodeType.EndElement && reader.LocalName == "annotationSet")
             {
                 if (!string.IsNullOrEmpty(frameName) && !string.IsNullOrEmpty(sentence)
-                    && targetStart >= 0 && targetEnd >= targetStart && targetEnd < sentence.Length)
+                    && !invalidTargetSpan && targetSpans.Count > 0
+                    && targetSpans.All(span => span.End < sentence.Length))
                 {
-                    string target = sentence.Substring(targetStart, targetEnd - targetStart + 1).Trim();
-                    if (target.Length > 0)
+                    TargetSpan[] orderedSpans = targetSpans
+                        .OrderBy(span => span.Start)
+                        .ThenBy(span => span.End)
+                        .ToArray();
+                    string[] targetParts = orderedSpans
+                        .Select(span => sentence.Substring(span.Start, span.End - span.Start + 1).Trim())
+                        .ToArray();
+                    if (targetParts.All(part => part.Length > 0))
                         yield return new FulltextAnno(
-                            sentence, target, frameName!, targetStart, targetEnd,
+                            sentence, string.Join(' ', targetParts), frameName!, orderedSpans,
                             fileLabel, sentenceReference, annotationReference);
                 }
                 frameName = null;
-                targetStart = targetEnd = -1;
+                targetSpans.Clear();
+                invalidTargetSpan = false;
                 inTargetLayer = false;
             }
         }
@@ -585,13 +612,21 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
 
     public sealed record FrameRel(string Type, string TargetFrame);
 
+    public readonly record struct TargetSpan(int Start, int End);
+
     public sealed record FulltextAnno(
         string Sentence,
         string TargetText,
         string FrameName,
-        int TargetStart,
-        int TargetEnd,
+        IReadOnlyList<TargetSpan> TargetSpans,
         string FileLabel,
         string SentenceReference,
-        string AnnotationReference);
+        string AnnotationReference)
+    {
+        // Compatibility accessors for the original single-span shape. For a
+        // discontinuous target these name its first textual segment; TargetSpans is
+        // authoritative and preserves every segment.
+        public int TargetStart => TargetSpans[0].Start;
+        public int TargetEnd => TargetSpans[0].End;
+    }
 }
