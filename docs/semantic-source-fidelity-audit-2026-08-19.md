@@ -337,6 +337,13 @@ LexiconExtension, external references, and confidence/status metadata.
 
 ## Action order
 
+This section is the lexical/semantic source-fidelity slice, not the complete
+seed or product program. The dependency-ordered cross-cutting sequence is
+[`seed-substrate-remediation-sequence-2026-08-19.md`](seed-substrate-remediation-sequence-2026-08-19.md),
+which also covers the unaudited source families, identity/storage boundary,
+modality reconstruction, models, SQL/native operation cores, perfcaches,
+greenfield reseed execution, read reachability, and conversational acceptance.
+
 This is the measured semantic-source acceptance slice of
 [#1045](https://github.com/SaltyPatron/Laplace/issues/1045)'s ingestion-recipe
 architecture and extends
