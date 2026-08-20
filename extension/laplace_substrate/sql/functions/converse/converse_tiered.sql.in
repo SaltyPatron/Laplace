@@ -57,7 +57,7 @@ DROP FUNCTION IF EXISTS laplace.converse_tiered(bytea, bytea, int, int);
 CREATE OR REPLACE FUNCTION converse.tiered(p_topic bytea,
                                            p_lang  bytea DEFAULT NULL,
                                            p_steps int DEFAULT 4,
-                                           p_pool  int DEFAULT 48)
+                                           p_pool  int DEFAULT NULL)
     RETURNS text
     LANGUAGE plpgsql STABLE AS $$
 -- NO NEUTRAL SUBTRACTION. consensus_adjacency's export weight uses
@@ -87,6 +87,13 @@ DECLARE
     said_rendered text[];
 BEGIN
     IF p_topic IS NULL THEN RETURN NULL; END IF;
+    IF p_steps IS NULL THEN
+        RAISE EXCEPTION 'converse.tiered: steps must not be NULL';
+    END IF;
+    IF p_steps < 0 OR p_pool < 0 THEN
+        RAISE EXCEPTION 'converse.tiered: steps and pool must be >= 0 or NULL for the complete pool';
+    END IF;
+    IF p_steps = 0 OR p_pool = 0 THEN RETURN NULL; END IF;
 
     -- Topic may arrive as a word id (chat/MCP). Gloss/example edges hang on the
     -- synset; walking the word as subject empties the unit pool and degenerates
@@ -124,8 +131,9 @@ BEGIN
 
     IF coalesce(array_length(u_id, 1), 0) = 0 THEN RETURN NULL; END IF;
 
-    -- Cap the pool before the concept lift (same ORDER BY w DESC LIMIT p_pool).
-    IF array_length(u_id, 1) > p_pool THEN
+    -- An explicit caller pool cuts the rated order before the concept lift;
+    -- NULL retains the complete population.
+    IF p_pool IS NOT NULL AND array_length(u_id, 1) > p_pool THEN
         u_id := u_id[1:p_pool];
         u_w  := u_w[1:p_pool];
     END IF;
@@ -191,7 +199,7 @@ BEGIN
     -- OPEN on the best-rated unit (arrays already ordered by w DESC, id).
     cur := u_id[1];
 
-    FOR i IN 1..GREATEST(p_steps, 1) LOOP
+    FOR i IN 1..p_steps LOOP
         EXIT WHEN cur IS NULL;
         said := said || cur;
         seen := seen || ARRAY(

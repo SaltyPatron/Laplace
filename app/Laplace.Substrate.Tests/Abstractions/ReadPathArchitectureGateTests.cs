@@ -261,4 +261,20 @@ public sealed class ReadPathArchitectureGateTests
         Assert.DoesNotContain("for (int s = 0; s < n_seen", containers, StringComparison.Ordinal);
         Assert.Contains("HTAB   *seen", containers, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void ConversePresentationCapacity_IsCallerOwnedAndPreservesZero()
+    {
+        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
+        var facts = File.ReadAllText(Path.Combine(repoRoot, "extension",
+            "laplace_substrate", "sql", "functions", "converse", "converse_facts.sql.in"));
+        var tiered = File.ReadAllText(Path.Combine(repoRoot, "extension",
+            "laplace_substrate", "sql", "functions", "converse", "converse_tiered.sql.in"));
+
+        Assert.DoesNotMatch(@"\bLIMIT\s+(6|8)\b", facts);
+        Assert.Contains("LIMIT p_part_limit", facts, StringComparison.Ordinal);
+        Assert.Contains("LIMIT p_kin_limit", facts, StringComparison.Ordinal);
+        Assert.DoesNotContain("GREATEST(p_steps, 1)", tiered, StringComparison.Ordinal);
+        Assert.DoesNotContain("p_pool  int DEFAULT 48", tiered, StringComparison.Ordinal);
+    }
 }
