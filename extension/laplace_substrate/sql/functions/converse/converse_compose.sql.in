@@ -315,7 +315,7 @@ BEGIN
     )
     SELECT (SELECT array_agg(s.id ORDER BY s.is_core DESC, s.gid, s.rn) FROM seq s),
            (SELECT array_agg(s.wt ORDER BY s.is_core DESC, s.gid, s.rn) FROM seq s),
-           -- STARTS: first token of EVERY kept gid, core first, capped. The
+           -- STARTS: first token of EVERY kept gid, core first. The
            -- core-only version made single-gloss topics deterministic replays:
            -- starts_n == 1, so the seed's start pick had nothing to choose and
            -- the walk replayed the one gloss chain byte-identically for every
@@ -329,8 +329,7 @@ BEGIN
             FROM (SELECT cm.cid, k0.is_core, k0.gid
                   FROM kept k0 JOIN concept_map cm ON cm.wid = k0.entity_id
                   WHERE k0.rn = 1
-                  ORDER BY k0.is_core DESC, k0.gid
-                  LIMIT 32) k1),
+                  ORDER BY k0.is_core DESC, k0.gid) k1),
            (SELECT array_agg(cm.cid ORDER BY k.rn)
               FROM kept k JOIN concept_map cm ON cm.wid = k.entity_id
              WHERE k.is_core AND k.gid = (

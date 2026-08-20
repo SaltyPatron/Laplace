@@ -243,4 +243,22 @@ public sealed class ReadPathArchitectureGateTests
         Assert.Contains("(int64) n_frontier * (int64) beam", native, StringComparison.Ordinal);
         Assert.Contains("MaxAllocSize / sizeof(WalkNode)", native, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void ConverseCorpus_HasNoNestedFixedHeadOrQuadraticNativeDedup()
+    {
+        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
+        var walk = File.ReadAllText(Path.Combine(repoRoot, "extension",
+            "laplace_substrate", "sql", "functions", "converse", "converse_walk.sql.in"));
+        var compose = File.ReadAllText(Path.Combine(repoRoot, "extension",
+            "laplace_substrate", "sql", "functions", "converse", "converse_compose.sql.in"));
+        var containers = File.ReadAllText(Path.Combine(repoRoot, "extension",
+            "laplace_substrate", "src", "containers_of.c"));
+
+        Assert.DoesNotContain("LIMIT 160", walk, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("containers_of(topic_word, 1, 400)", walk, StringComparison.Ordinal);
+        Assert.DoesNotContain("LIMIT 32", compose, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("for (int s = 0; s < n_seen", containers, StringComparison.Ordinal);
+        Assert.Contains("HTAB   *seen", containers, StringComparison.Ordinal);
+    }
 }
