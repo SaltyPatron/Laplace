@@ -29,7 +29,7 @@ CREATE OR REPLACE FUNCTION converse.translations(p_word bytea, p_limit int DEFAU
         SELECT member, lang, mu, witnesses FROM agg
         ORDER BY sense_mu DESC NULLS LAST, mu DESC, witnesses DESC, lang, member
     ) a
-    CROSS JOIN LATERAL (SELECT realize.render_text(a.member, 64) AS txt) r
+    CROSS JOIN LATERAL (SELECT realize.render_text(a.member) AS txt) r
     WHERE NULLIF(btrim(r.txt), '') IS NOT NULL
     LIMIT p_limit
 $$;

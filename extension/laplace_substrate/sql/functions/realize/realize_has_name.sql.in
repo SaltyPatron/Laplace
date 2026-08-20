@@ -27,7 +27,7 @@ CREATE OR REPLACE FUNCTION realize._has_name(p_id bytea, p_lang bytea DEFAULT NU
                              laplace.relation_type_id('HAS_NAME_ALIAS'))
     ),
     lbl AS MATERIALIZED (
-        SELECT realize.render_text_batch(array_agg(r.id ORDER BY r.rn), 24) AS s
+        SELECT realize.render_text_batch(array_agg(r.id ORDER BY r.rn)) AS s
         FROM ranked r
     )
     SELECT l.s[r.rn]

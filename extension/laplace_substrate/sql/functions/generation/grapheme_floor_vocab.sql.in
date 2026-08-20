@@ -34,7 +34,7 @@ CREATE OR REPLACE FUNCTION generation.grapheme_floor_vocab(p_size int DEFAULT 51
         SELECT i.id, t.s
         FROM ids,
              LATERAL unnest(ids.a) WITH ORDINALITY AS i(id, ord),
-             LATERAL unnest(realize.render_text_batch(ids.a, 8)) WITH ORDINALITY AS t(s, ord)
+             LATERAL unnest(realize.render_text_batch(ids.a)) WITH ORDINALITY AS t(s, ord)
         WHERE i.ord = t.ord
     )
     SELECT n.entity_id, r.s, n.cnt

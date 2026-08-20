@@ -949,7 +949,7 @@ pg_laplace_word_case_variants_batch(PG_FUNCTION_ARGS)
 		Oid        at[1] = { BYTEAARRAYOID };
 		Datum      av[1] = { PointerGetDatum(render_array) };
 
-		rc = SPI_execute_with_args("SELECT realize.render_text_batch($1, 32)",
+		rc = SPI_execute_with_args("SELECT realize.render_text_batch($1)",
 								   1, at, av, NULL, true, 1);
 		if (rc != SPI_OK_SELECT || SPI_processed != 1)
 			elog(ERROR, "word_case_variants_batch: render batch failed: %s",

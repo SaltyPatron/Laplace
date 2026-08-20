@@ -453,7 +453,7 @@ internal static class ChessWitnessHydrator
         var bytes = new byte[unique.Length][];
         for (int i = 0; i < unique.Length; i++) bytes[i] = unique[i].ToBytes();
 
-        var texts = await NpgsqlSubstrateReads.RenderTextBatchAsync(ds, bytes, 48, ct)
+        var texts = await NpgsqlSubstrateReads.RenderTextBatchAsync(ds, bytes, ct)
             .ConfigureAwait(false);
         if (texts is null || texts.Length != unique.Length) return map;
         for (int i = 0; i < unique.Length; i++)

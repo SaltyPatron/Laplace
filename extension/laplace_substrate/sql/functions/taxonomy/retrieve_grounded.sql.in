@@ -49,8 +49,8 @@ glossed AS MATERIALIZED (
 ), numbered AS MATERIALIZED (
     SELECT g.*, row_number() OVER (ORDER BY score DESC NULLS LAST,entity_id) AS rn FROM glossed g
 ), batches AS MATERIALIZED (
-    SELECT realize.render_text_batch(array_agg(entity_id ORDER BY rn),32) AS surfaces,
-           realize.render_text_batch(array_agg(definition_id ORDER BY rn),48) AS definitions
+    SELECT realize.render_text_batch(array_agg(entity_id ORDER BY rn)) AS surfaces,
+           realize.render_text_batch(array_agg(definition_id ORDER BY rn)) AS definitions
     FROM numbered
 )
 SELECT entity_id,

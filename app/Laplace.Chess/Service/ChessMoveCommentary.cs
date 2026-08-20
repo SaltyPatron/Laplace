@@ -63,7 +63,7 @@ public static class ChessMoveCommentary
             if (subject is null) return null;
 
             var rendered = await NpgsqlSubstrateReads.RenderTextBatchAsync(
-                ds, [subject], 48, ct);
+                ds, [subject], ct);
             if (rendered is { Length: > 0 } texts && !string.IsNullOrWhiteSpace(texts[0]))
                 return $"Book: {Truncate(texts[0], 70)}";
         }

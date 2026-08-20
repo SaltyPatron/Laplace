@@ -17,6 +17,6 @@ CREATE OR REPLACE FUNCTION generation.recall_trajectories(p_word text, p_limit i
   )
   SELECT left(replace(t.s, chr(10), ' '), 180)
   FROM batch,
-       LATERAL unnest(realize.render_text_batch(batch.a, 300)) WITH ORDINALITY AS t(s, ord)
+       LATERAL unnest(realize.render_text_batch(batch.a)) WITH ORDINALITY AS t(s, ord)
   ORDER BY t.ord
 $$;
