@@ -99,7 +99,7 @@ public class SqlConsolidationTests
                  {
                      "consensus_type_btree",
                      "consensus_subject_type_btree", "consensus_type_subject_btree",
-                     "consensus_eff_mu_btree", "consensus_subject_eff_mu_btree",
+                     "consensus_eff_mu_btree", "consensus_subject",
                      "consensus_object_type_btree",
                  })
         {
@@ -113,6 +113,11 @@ public class SqlConsolidationTests
         var retired = (bool)(await ScalarAsync(
             "SELECT to_regclass('laplace.consensus_object_btree') IS NULL"))!;
         Assert.True(retired, "consensus_object_btree resurrected — retired as a strict prefix duplicate of consensus_object_type_btree");
+
+        var separateSubjectRank = (bool)(await ScalarAsync(
+            "SELECT to_regclass('laplace.consensus_subject_eff_mu_btree') IS NULL"))!;
+        Assert.True(separateSubjectRank,
+            "separate subject-rank index resurrected — consensus_subject owns that ordered prefix");
 
         foreach (var v in new[] { "v_consensus_resolved", "v_consensus_edges", "v_consensus_unrefuted" })
         {

@@ -1,1 +1,34 @@
-CREATE INDEX IF NOT EXISTS consensus_subject_eff_mu_btree ON consensus (subject_id, ((rating - 2*rd)) DESC) WHERE object_id IS NOT NULL;
+-- Retired into consensus_subject.  Fresh installs create the combined
+-- subject/effective-μ covering index with the table and must not maintain a
+-- second tree with the same ordered prefix.
+--
+-- A populated pre-combination database is deliberately left unchanged during
+-- extension upgrade.  Replacing a partitioned index cannot use CONCURRENTLY
+-- inside the extension transaction, and dropping a live read path during deploy
+-- violates the online-index law.  Its next greenfield reseed gets the combined
+-- shape.  An empty old-schema database can be corrected in place safely.
+DO $do$
+DECLARE
+    v_combined boolean;
+    v_empty boolean;
+BEGIN
+    SELECT i.indexprs IS NOT NULL
+      INTO v_combined
+      FROM pg_index i
+      WHERE i.indexrelid = to_regclass('laplace.consensus_subject');
+    SELECT NOT EXISTS (SELECT 1 FROM laplace.consensus LIMIT 1) INTO v_empty;
+
+    IF NOT COALESCE(v_combined, false) AND v_empty THEN
+        DROP INDEX IF EXISTS laplace.consensus_subject;
+        CREATE INDEX consensus_subject
+            ON laplace.consensus (subject_id, ((rating - 2*rd)) DESC)
+            INCLUDE (object_id, rating, rd);
+        v_combined := true;
+    END IF;
+
+    IF COALESCE(v_combined, false) THEN
+        DROP INDEX IF EXISTS laplace.consensus_subject_eff_mu_btree;
+    ELSE
+        RAISE NOTICE 'consensus subject indexes retained online; combined shape applies at reseed';
+    END IF;
+END $do$;

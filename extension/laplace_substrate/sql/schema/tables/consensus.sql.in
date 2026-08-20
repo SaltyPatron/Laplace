@@ -54,7 +54,7 @@ BEGIN
 END $$;
 
 
--- The index for the access pattern. The PK leads on `id` because a unique
+-- The covering/ranked index for the subject access pattern. The PK leads on `id` because a unique
 -- constraint on a partitioned table must contain the partition keys, and `id` is
 -- what makes it unique -- but nothing reads consensus by its own row identity.
 -- Every read is "what does this subject assert": consensus_step_edge, related_in,
@@ -69,12 +69,16 @@ END $$;
 -- touched, 279,753 of them read from disk. ~2.5 GB of I/O per entity lookup, which
 -- is the read path underneath every slow surface in the system.
 --
--- INCLUDE rather than a wider key: object_id/rating/rd are the columns the callers
--- project after filtering, never predicates, so carrying them as payload makes the
--- probe index-only without widening the search key or the write cost. The header
--- above already commits to per-partition indexes staying live during bulk loads;
--- this is the one that pattern was for, and only the PK ever shipped.
+-- Effective μ is the second key because bounded subject reads order by it.  The
+-- former schema maintained this covering tree plus a second
+-- (subject_id,effective-μ) tree.  On a real 746k-row default leaf they occupied
+-- 83 MB + 28 MB.  This combined shape occupied 69 MB, kept the full-subject read
+-- index-only (0.842 ms -> 0.893 ms for 6,989 rows), and made its top-64 read
+-- index-only and ordered (2.37 ms -> 0.064 ms).  One tree now serves both jobs.
+-- object_id/rating/rd remain INCLUDE payload: callers project them, but only
+-- subject and effective μ are search/order keys.
 CREATE INDEX IF NOT EXISTS consensus_subject
-    ON consensus (subject_id) INCLUDE (object_id, rating, rd);
+    ON consensus (subject_id, ((rating - 2*rd)) DESC)
+    INCLUDE (object_id, rating, rd);
 
 SELECT pg_extension_config_dump('consensus', '');
