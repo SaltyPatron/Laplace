@@ -240,6 +240,10 @@ public sealed class ReadPathArchitectureGateTests
 
         Assert.DoesNotContain("GENERATE_NODE_BUDGET", native, StringComparison.Ordinal);
         Assert.DoesNotMatch(@"beam\s*\*\s*3", native);
+        Assert.DoesNotMatch(@"bonus\s*\+=", native);
+        Assert.DoesNotContain("mass_sat", native, StringComparison.Ordinal);
+        Assert.Contains("continuity_distance", native, StringComparison.Ordinal);
+        Assert.Contains("geometry_distance", native, StringComparison.Ordinal);
         Assert.Contains("(int64) n_frontier * (int64) beam", native, StringComparison.Ordinal);
         Assert.Contains("MaxAllocSize / sizeof(WalkNode)", native, StringComparison.Ordinal);
     }

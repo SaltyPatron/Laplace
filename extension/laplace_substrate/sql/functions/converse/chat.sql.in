@@ -88,10 +88,9 @@ BEGIN
     -- and exposes whether it widened; this function does not mutate an operator
     -- profile because one quotation or code-switch is not a durable preference.
     -- TOPIC = rank-1 of converse.prompt_coherence (native). Keys, in order:
-    -- specificity (coherence/own-mass) scaled by denote_mu (GREATEST(.., 1), so
-    -- an unrated candidate keeps its bare specificity), bare specificity,
-    -- rel_mass, peers, ord DESC (recency among sense-bearing tokens when fold
-    -- keys are silent), synset_id.
+    -- contextual/structural specificity, relation-directed mass, peer support,
+    -- folded evidence, ord DESC (recency among sense-bearing tokens when those
+    -- keys are silent), synset_id. Each signal is an explicit dimension.
     -- Entirely in ids — no render/label mid-election. cands kept for topic2.
     --
     -- Dead forms (names only; post-mortems in git / GH #902): surface match

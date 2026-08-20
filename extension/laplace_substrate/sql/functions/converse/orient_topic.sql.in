@@ -87,11 +87,10 @@ BEGIN ATOMIC
            OR c.lang = d.effective_language
     )
     SELECT row_number() OVER (ORDER BY
-               (COALESCE(y.specificity, 0)
-                * GREATEST(COALESCE(y.denote_mu, 0), 1)) DESC,
                y.specificity DESC NULLS LAST,
                y.rel_mass DESC NULLS LAST,
                y.peers DESC,
+               y.denote_mu DESC NULLS LAST,
                y.ord DESC,
                y.synset_id)::int,
            y.synset_id,

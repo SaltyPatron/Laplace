@@ -1209,7 +1209,7 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
                 else
                     nulls[6] = true;
                 values[7] = Float8GetDatum(best->rel_mass);
-                /* SPECIFICITY -- the rank key. A summed mass is meaningless on a
+                /* SPECIFICITY -- the contextual rank key. A summed mass is meaningless on a
                  * high-degree id: an article is wired to everything, so its edges
                  * to the prompt are unremarkable, while a chess pawn's edge to
                  * chess is most of what it has. Measured on this substrate,
@@ -1219,28 +1219,21 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
                  * knob: it is the share of a candidate's OWN witnessed mass that
                  * reaches the rest of the prompt, and it is scale-free, so it
                  * does not drift as seeds land. */
-                /* ...and the containment prior, which is what makes this key
-                 * DEFINED when the graph is silent. The share above needs a
+                /* The containment prior makes the key DEFINED when the graph is
+                 * silent. The share above needs a
                  * direct edge between two candidate sets to be non-zero, and at
                  * one hop the graph is sparse enough that it was 0 on every
                  * token of most prompts — which is what pushed the election onto
                  * ord DESC, an SVO word-order assumption in a substrate that is
-                 * language- and modality-agnostic. Additive because both terms
-                 * are already normalized to (0, 1]: share is the fraction of a
-                 * candidate's own mass that reaches the prompt, icf is the
-                 * inverse containment frequency of its token. Neither can
-                 * annihilate the other, and ties still fall through to rel_mass
-                 * exactly as before.
+                 * language- and modality-agnostic.
                  *
-                 * WEIGHED AGAINST THE FOLD (GH #865). ICF alone elected
-                 * `opposite` over `hot` (rarer wins) — 5/6 → 4/6. Witness sat
-                 * alone fixed that pair but elected capital→great over France
-                 * (more sense witnesses, far less total_mass). The prior that
-                 * clears both is ICF × mass sat, where mass sat =
-                 * total_mass/(total_mass+HALFMAX_MASS) and HALFMAX_MASS (~1e13)
-                 * is the sparse-concept scale on this substrate — an empirical
-                 * threshold still requiring retirement. total_mass is the fold's own volume on the
-                 * elected sense. share still leads when the graph speaks. */
+                 * These are alternatives, not quantities to blend. If direct
+                 * candidate-to-prompt evidence exists, its scale-free share is
+                 * the specificity. Otherwise exact inverse container frequency
+                 * is the structural fallback. The retired implementation added
+                 * ICF after multiplying it by total_mass/(total_mass+1e13); that
+                 * seed-sized half-max made the answer depend on database age.
+                 * No source or substrate law supplied that number. */
                 /* A NAMER IS NOT A TOPIC (2026-08-05).
                  *
                  * Spec 37 OP3: a token that names a relation selects WHICH
@@ -1277,11 +1270,6 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
                                    : 0.0;
                     bool   is_namer = hash_search(
                         namer_h, &best->ord, HASH_FIND, NULL) != NULL;
-                    /* ~1e13: sparsely-wired concept mass on foundation seed. */
-                    double mass_sat = best->total_mass <= 0.0
-                                          ? 0.0
-                                          : (best->total_mass
-                                             / (best->total_mass + 1.0e13));
                     double icf = 1.0;
                     PcTokEntry *te = (PcTokEntry *) hash_search(
                         tok_h, best->tok, HASH_FIND, NULL);
@@ -1290,7 +1278,7 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
                         icf = te->icf;
 
                     values[8] = Float8GetDatum(
-                        is_namer ? -1.0 : (share + icf * mass_sat));
+                        is_namer ? -1.0 : (share > 0.0 ? share : icf));
                 }
                 /* The denominator, exposed raw. Computed here all along and
                  * discarded; returning it is what let the electors' first

@@ -72,11 +72,10 @@ CREATE OR REPLACE FUNCTION converse.resolve_topic(p_phrase text, p_context bytea
                FROM converse.prompt_coherence(p_phrase) y
               WHERE y.tok IS NOT NULL
                 AND y.specificity > 0
-              ORDER BY (COALESCE(y.specificity, 0)
-                                 * GREATEST(COALESCE(y.denote_mu, 0), 1)) DESC,
-                       y.specificity DESC NULLS LAST,
+              ORDER BY y.specificity DESC NULLS LAST,
                        y.rel_mass    DESC NULLS LAST,
                        y.peers       DESC,
+                       y.denote_mu    DESC NULLS LAST,
                        y.ord         DESC,
                        y.synset_id
               LIMIT 1),
