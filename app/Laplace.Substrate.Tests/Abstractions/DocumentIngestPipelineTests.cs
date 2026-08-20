@@ -283,25 +283,28 @@ public sealed class DocumentIngestPipelineTests
     }
 
     [Fact]
-    public async Task DocumentMultiFileStream_Over2GiB_ThrowsWithReason()
+    public async Task DocumentMultiFileStream_OverContiguousEnvelope_ReportsMeasuredBoundary()
     {
         string dir = Path.Combine(Path.GetTempPath(), $"laplace-doc-huge-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
         string path = Path.Combine(dir, "huge.txt");
         try
         {
-            // Sparse file: Length reports >2 GiB without allocating the bytes.
+            int envelope = IngestSizing.ResolveContiguousPayloadBytes();
+            // Sparse file: Length crosses the live contiguous-array envelope without
+            // allocating the bytes. The boundary is resource/runtime-derived, not 2 GiB.
             // Point the stream at the FILE (not the dir): directory enumeration skips
             // >2MB blobs via VendoredPathFilter before OpenAsync ever runs.
             using (var fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None))
-                fs.SetLength((long)int.MaxValue + 1);
+                fs.SetLength((long)envelope + 1);
 
             var source = Assert.Single(await CollectSources(path));
             var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
             {
                 await foreach (var _ in source.RecordsAsync()) { }
             });
-            Assert.Contains("2 GiB", ex.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains($"{envelope:N0}-byte contiguous compose envelope", ex.Message,
+                StringComparison.OrdinalIgnoreCase);
             Assert.Contains("exceeds", ex.Message, StringComparison.OrdinalIgnoreCase);
         }
         finally

@@ -1,18 +1,104 @@
+-- Canonical relation-in/relation-out shape cluster.
+--
+-- p_limit has one honest meaning for resource use and output: at most p_limit
+-- deterministic coordinate-nearest candidates are admitted per DISTINCT resolved seed,
+-- and therefore at most p_limit survivors can be returned for that seed. The old scalar
+-- hid GREATEST(p_limit * 20, 2000), so asking for ten results silently realized and scored
+-- two thousand curves. That was an unmeasured population multiplier, not a correctness
+-- bound: coordinate KNN is only the declared prefilter and cannot prove global Frechet
+-- completeness at any finite multiplier.
+--
+-- Duplicate caller seeds retain their input ordinals but share anchor lookup, KNN,
+-- candidate curve realization, rendering and recurrence aggregation. There is no
+-- procedural FOREACH/scalar call; every database operation consumes a relation.
 DROP FUNCTION IF EXISTS laplace.structural_cluster_batch(bytea[], double precision, integer);
-CREATE OR REPLACE FUNCTION structural.cluster_batch(
+-- The scalar BEGIN ATOMIC body records a dependency on the batch core. Retire the
+-- adapter first so future extension upgrades can replace the core without CASCADE.
+DROP FUNCTION IF EXISTS structural.cluster(bytea, double precision, integer);
+DROP FUNCTION IF EXISTS structural.cluster_batch(bytea[], double precision, integer);
+CREATE FUNCTION structural.cluster_batch(
     p_seeds bytea[],
     p_eps   double precision DEFAULT 0.05,
     p_limit integer          DEFAULT 200)
-    RETURNS TABLE(seed bytea, entity_id bytea, label text, frechet double precision, recurrence bigint)
-    LANGUAGE plpgsql STABLE AS $scb$
-DECLARE
-    v_seed bytea;
-BEGIN
-    IF p_seeds IS NULL THEN RETURN; END IF;
-    FOREACH v_seed IN ARRAY p_seeds LOOP
-        RETURN QUERY
-        SELECT v_seed, sc.entity_id, sc.label, sc.frechet, sc.recurrence
-        FROM structural.cluster(v_seed, p_eps, p_limit) sc;
-    END LOOP;
+    RETURNS TABLE(
+        input_ordinal bigint,
+        seed          bytea,
+        entity_id     bytea,
+        label         text,
+        frechet       double precision,
+        recurrence    bigint)
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
+    WITH inputs AS MATERIALIZED (
+        SELECT u.seed, u.ord::bigint AS input_ordinal
+        FROM unnest(COALESCE(p_seeds, ARRAY[]::bytea[]))
+             WITH ORDINALITY AS u(seed, ord)
+        WHERE u.seed IS NOT NULL
+    ), distinct_seeds AS MATERIALIZED (
+        SELECT DISTINCT i.seed
+        FROM inputs i
+    ), seed_defs AS MATERIALIZED (
+        SELECT s.seed,
+               a.id AS anchor_id,
+               a.coord,
+               structural.entity_curve(a.id) AS curve
+        FROM distinct_seeds s
+        CROSS JOIN LATERAL structural.word_anchor(s.seed) a
+        WHERE a.coord IS NOT NULL
+    ), seed_candidates AS MATERIALIZED (
+        SELECT a.seed, k.entity_id
+        FROM seed_defs a
+        CROSS JOIN LATERAL (
+            SELECT w.id AS entity_id
+            FROM laplace.v_word_points w
+            WHERE w.id <> a.anchor_id
+              AND w.trajectory IS NOT NULL
+            ORDER BY w.coord <<->> a.coord, w.id
+            LIMIT GREATEST(p_limit, 0)
+        ) k
+        WHERE a.curve IS NOT NULL
+    ), candidate_curves AS MATERIALIZED (
+        SELECT c.entity_id, structural.entity_curve(c.entity_id) AS curve
+        FROM (SELECT DISTINCT sc.entity_id FROM seed_candidates sc) c
+    ), scored AS MATERIALIZED (
+        SELECT sc.seed,
+               sc.entity_id,
+               public.laplace_frechet_4d(cc.curve, sd.curve) AS frechet
+        FROM seed_candidates sc
+        JOIN seed_defs sd ON sd.seed = sc.seed
+        JOIN candidate_curves cc ON cc.entity_id = sc.entity_id
+        WHERE cc.curve IS NOT NULL
+    ), survivors AS MATERIALIZED (
+        SELECT s.seed, s.entity_id, s.frechet
+        FROM scored s
+        WHERE s.frechet <= p_eps
+        ORDER BY s.seed, s.frechet, s.entity_id
+    ), survivor_ids AS MATERIALIZED (
+        SELECT DISTINCT s.entity_id FROM survivors s
+    ), render_input AS MATERIALIZED (
+        SELECT array_agg(s.entity_id ORDER BY s.entity_id) AS ids
+        FROM survivor_ids s
+    ), rendered AS MATERIALIZED (
+        SELECT r.entity_id, r.label
+        FROM render_input i
+        CROSS JOIN LATERAL unnest(
+            i.ids,
+            realize.render_text_batch(i.ids, 48)) AS r(entity_id, label)
+    ), recurrences AS MATERIALIZED (
+        SELECT s.entity_id, count(p.id)::bigint AS recurrence
+        FROM survivor_ids s
+        LEFT JOIN laplace.physicalities p ON p.entity_id = s.entity_id
+        GROUP BY s.entity_id
+    )
+    SELECT i.input_ordinal,
+           i.seed,
+           s.entity_id,
+           r.label,
+           s.frechet,
+           c.recurrence
+    FROM inputs i
+    JOIN survivors s ON s.seed = i.seed
+    JOIN rendered r ON r.entity_id = s.entity_id
+    JOIN recurrences c ON c.entity_id = s.entity_id
+    ORDER BY i.input_ordinal, s.frechet, s.entity_id;
 END;
-$scb$;

@@ -97,7 +97,7 @@ The preferred shapes are:
 |---|---|---|---|
 | `converse.attested_language` / `_batch` | Two SQL argmax bodies | The batch file says the scalar delegates to it; the scalar does not | One shared relational argmax core and parity gate |
 | `taxonomy.bubble_up` / `_batch` | Independent bodies of roughly 240 and 284 lines | High semantic drift surface | Extract election/evidence core; adapters only |
-| `structural.cluster` / `_batch` | PL/pgSQL `FOREACH`, calling scalar once per seed | Batch transport around RBAR execution | Set-based core across all seeds |
+| `structural.cluster` / `_batch` | One ordinal-preserving SQL relation core; scalar is a one-seed adapter | Repaired after audit; duplicate seeds share anchor/KNN/curve/render/recurrence work | Keep the non-empty parity fixture and production plan budgets green |
 | `realize.realize` / `batch` | SQL ladder versus native C batch | Distinct implementations, but a parity test exists | Retain only behind enforced parity and one declared contract |
 | `realize.label`, `render`, `render_text` families | Separate scalar/batch SQL or C entry points | Potential native/reference drift | Share internal core and expand parity coverage |
 | `lexical.type_label` / `_batch` | Separate adapters over related render behavior | Duplication is smaller but still contractual | Make core and order guarantees explicit |
@@ -955,7 +955,8 @@ enforced; it cannot gate this SLO as written.
 ### P1 — canonicalize execution shapes
 
 1. Extract shared cores for attested language and bubble-up.
-2. Replace `structural.cluster_batch` RBAR with a set implementation.
+2. Keep the set-based `structural.cluster_batch` regression and bounded
+   production plan receipts green; it replaced the audited `FOREACH` RBAR path.
 3. Factor paired C entry points through shared native cores, then move the
    remaining large hot SQL semantic engines behind those cores in measured
    order. Preserve short planner-visible set joins when they win.

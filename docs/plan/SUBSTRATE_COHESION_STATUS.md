@@ -118,7 +118,7 @@ model, or chess source run.
 | --- | --- | --- |
 | Repeatable whole-repository SQL audit | Done | #1136 merged the dependency-free scanner, stable findings, clone detection, report, tests, and CI ratchet. |
 | Exact and near-clone remediation | Started | The audit finds 12 exact and 14 near-clone clusters. #1164 normalized one lexical family; the repository has not entered a shrink-only consolidation cycle. |
-| One semantic scalar/batch core per operation | Partial | `lexical_peers` now delegates to its canonical batch core with measured parity. Many families still have independent bodies; `structural.cluster_batch` is a broken scalar loop tracked by #1181. |
+| One semantic scalar/batch core per operation | Partial | `lexical_peers` and `structural.cluster` now delegate to canonical set cores with parity fixtures. Many families still have independent bodies, notably `attested_language` and `bubble_up`. |
 | Early result reduction and honest top-k | Audit only | Numeric caps, unordered limits, materialized fences, and post-join limits are inventoried. They have not been classified or plan-gated operation by operation. |
 | Index-friendly predicates and partition pruning | Partial | #1141 removed one 194M-row apply scan. Function-wrapped consensus keys still defeat type partition pruning in known read operations. |
 | No default full-corpus health/discovery scans | Not done | `relation_bands()` and default substrate health retain exact whole-corpus work. Exact maintenance/deep-audit scans are not yet cleanly separated from cheap defaults. |
@@ -171,11 +171,16 @@ before the 601-million-pair ingest.
 
 ### `structural.cluster`
 
-[#1181](https://github.com/SaltyPatron/Laplace/issues/1181) records two merged
-runtime correctness failures and the hidden scalar loop. A local set-oriented
-prototype matched 22/22 expected rows for three seeds, but still consumed about
-10.74 million shared-buffer hits and 10.847 seconds. It is evidence for the
-required semantic shape, not a mergeable performance fix.
+[#1181](https://github.com/SaltyPatron/Laplace/issues/1181) recorded two runtime
+correctness failures, a procedural batch loop, and a hidden
+`GREATEST(p_limit * 20, 2000)` candidate multiplier. The canonical implementation
+is now one relational core: distinct seeds share anchor lookup, coordinate-KNN
+admission, curve realization, rendering, and recurrence aggregation; duplicate
+inputs regain their ordinals at the output boundary. The scalar is a one-seed SQL
+adapter. `p_limit` now honestly bounds both admitted candidates and maximum
+survivors per seed. The non-empty regression proves duplicate, unresolved,
+NULL/empty, scalar/batch, ordering, and recurrence behavior. Seeded warm/cold
+plan and buffer receipts remain the final production acceptance gate.
 
 ### UD acceptance
 
@@ -186,8 +191,6 @@ row. No claim that UD will no longer fail at scale is currently supported.
 
 ## Preserved unpublished work
 
-- `fix/structural-cluster-set` contains the uncommitted four-file prototype behind
-  #1181. It must be rebased and redesigned, not blindly published.
 - `fix/framenet-occurrence-spans` has local commit `a57f620b` for discontinuous
   targets, one commit beyond merged #1161. This belongs to the decomposer campaign.
 - `agent/source-fidelity-audit` contains unpublished audit/index edits and an
@@ -199,9 +202,9 @@ row. No claim that UD will no longer fail at scale is currently supported.
 
 ## Correct remaining execution order
 
-1. **Fix merged violations before adding data.** Correct #1180 and #1181; audit
-   other merged content preimages for source, label, language, ordinal, and batch
-   salts.
+1. **Fix merged violations before adding data.** Correct #1180, deploy and measure
+   #1181's set implementation, and audit other merged content preimages for
+   source, label, language, ordinal, and batch salts.
 2. **Ratify and enforce the global identity/materialization schema.** Complete
    #1052/#1008/#904/#1048 so content, realization, interpretation, occurrence,
    and testimony have compatible keys and admission gates.
