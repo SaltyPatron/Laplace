@@ -451,55 +451,20 @@ public sealed class IngestRunner
                     }
                 }, "ingest-decompose-pcore", runCt);
 
-                // The writer retains its cross-process advisory transaction lock.
-                // This lane only controls in-process apply workers; those remain
-                // serial until claim-before-COPY is proven race-free.
-                //
-                // Cap by connection budget: each apply worker opens 1 control conn plus
-                // up to ApplyParallelism COPY conns (and merge fans). Force-run on this
-                // host (max_connections=60) with workers=8 × ~12 COPY blew 53300 too-many
-                // clients, then left half-committed attestations and 23505 races.
-                int applyWorkers = IngestTopology.Current.ApplyDispatchWorkers;
-
-                var applyChannel = applyWorkers > 1
-                    ? Channel.CreateBounded<List<SubstrateChange>>(new BoundedChannelOptions(applyWorkers)
-                    {
-                        SingleWriter = true,
-                        SingleReader = false,
-                        FullMode = BoundedChannelFullMode.Wait,
-                    })
-                    : null;
-
-                Task[]? applyTasks = null;
-                if (applyChannel is not null)
-                {
-                    applyTasks = new Task[applyWorkers];
-                    for (int w = 0; w < applyWorkers; w++)
-                    {
-                        applyTasks[w] = Task.Run(async () =>
-                        {
-                            await foreach (var b in applyChannel.Reader.ReadAllAsync(runCt).ConfigureAwait(false))
-                            {
-                                await ProcessBatchAsync(b, decomposer, options, rng,
-                                    counters, failures, log, workingSet, runCt).ConfigureAwait(false);
-                            }
-                        }, runCt);
-                    }
-                }
-
+                // One ordered set coordinator consumes the composed stream while the
+                // producer continues composing ahead. This is not a one-thread writer:
+                // each apply fans probes, COPY, merge, fold, and masks across the
+                // machine-derived ApplyPartitions inside NpgsqlWorkingSetApply. A second
+                // outer worker would duplicate that full connection fan and race the
+                // cross-process ownership/journal boundary; the old fixed-width option
+                // never changed the production width and is removed rather than exposed
+                // as a fake performance knob.
                 async Task FlushBatchAsync(List<SubstrateChange> b)
                 {
                     if (b.Count == 0) return;
-                    if (applyChannel is null)
-                    {
-                        await ProcessBatchAsync(b, decomposer, options, rng,
-                            counters, failures, log, workingSet, runCt).ConfigureAwait(false);
-                        b.Clear();
-                        return;
-                    }
-                    var copy = new List<SubstrateChange>(b);
+                    await ProcessBatchAsync(b, decomposer, options, rng,
+                        counters, failures, log, workingSet, runCt).ConfigureAwait(false);
                     b.Clear();
-                    await applyChannel.Writer.WriteAsync(copy, runCt).ConfigureAwait(false);
                 }
 
                 var batch = new List<SubstrateChange>(batchSize);
@@ -560,23 +525,14 @@ public sealed class IngestRunner
                 if (batch.Count > 0)
                     await FlushBatchAsync(batch);
 
-                if (applyChannel is not null)
-                {
-                    applyChannel.Writer.TryComplete();
-                    await Task.WhenAll(applyTasks!).ConfigureAwait(false);
-                }
-
                 await producer;
             }
         }
         finally
         {
-            // CompleteBulkRun owns the one fold drain and the index rebuild. Rebuild after
-            // every successfully opened run, including failures — a fatal
-            // apply error must not leave the table index-less. The one
-            // exception is cancellation: the user is tearing the process
-            // down, so don't block exit on a minutes-scale rebuild — the
-            // journal recovers the drops at the next run's begin.
+            // CompleteBulkRun owns the one fold drain and releases run-scoped writer
+            // state. Production indexes stay online throughout ingest; BeginBulkRun only
+            // repairs journal entries left by the retired drop/rebuild loader.
             try
             {
                 if (bulkRunStarted)
@@ -606,9 +562,7 @@ public sealed class IngestRunner
             }
             catch (OperationCanceledException)
             {
-                log.LogWarning(
-                    "bulk-run index rebuild skipped (cancelled) — journaled "
-                    + "drops will be recovered at the next run's begin");
+                log.LogWarning("bulk-run completion cancelled while releasing run state");
             }
         }
 

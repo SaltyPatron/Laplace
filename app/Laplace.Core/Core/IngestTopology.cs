@@ -40,12 +40,6 @@ public sealed class IngestTopology
 
     public int IoWorkersAvailable { get; }
 
-    /// <summary>
-    /// Outer database-apply dispatch width. This remains one until claim-before-COPY is
-    /// race-free; each dispatched apply still fans out internally across ApplyPartitions.
-    /// </summary>
-    public int ApplyDispatchWorkers { get; }
-
     public int ApplyPartitions { get; }
 
     public IngestSizing.Plan Sizing { get; }
@@ -77,9 +71,6 @@ public sealed class IngestTopology
         int composeWorkers,
 
         int ioWorkersAvailable,
-
-        int applyDispatchWorkers,
-
         int applyPartitions,
 
         IngestSizing.Plan sizing)
@@ -109,9 +100,6 @@ public sealed class IngestTopology
         ComposeWorkers = composeWorkers;
 
         IoWorkersAvailable = ioWorkersAvailable;
-
-        ApplyDispatchWorkers = applyDispatchWorkers;
-
         ApplyPartitions = applyPartitions;
 
         Sizing = sizing;
@@ -143,7 +131,7 @@ public sealed class IngestTopology
                 + "p_primary_lps=[{6}] e_lps=[{7}] entry_pinned={8} "
 
                 + "file_workers={9} compose_workers={10} io_workers_available={11} "
-                + "apply_dispatch_workers={12} apply_partitions={13}",
+                + "apply_mode=set_coordinator apply_partitions={12}",
 
                 t.DetectionSource,
 
@@ -168,9 +156,6 @@ public sealed class IngestTopology
                 t.ComposeWorkers,
 
                 t.IoWorkersAvailable,
-
-                t.ApplyDispatchWorkers,
-
                 t.ApplyPartitions);
 
             IngestSizing.LogPlan(t.Sizing);
@@ -203,8 +188,6 @@ public sealed class IngestTopology
         int composeWorkers = CpuTopology.ResolveCpuBoundWorkers();
 
         int ioWorkersAvailable = CpuTopology.ResolveIoBoundWorkers();
-
-        const int applyDispatchWorkers = 1;
 
         // Read the P-core count EXACTLY ONCE and derive apply partitions from that same
         // value. Previously applyPartitions came from ResolveApplyPartitions() (its own
@@ -245,18 +228,11 @@ public sealed class IngestTopology
             composeWorkers,
 
             ioWorkersAvailable,
-
-            applyDispatchWorkers,
-
             applyPartitions,
 
             sizing);
 
     }
-
-
-
-    public static int ResolveApplyDispatchWorkers() => Current.ApplyDispatchWorkers;
 
 
 

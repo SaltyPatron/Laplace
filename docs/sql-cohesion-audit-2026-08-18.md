@@ -423,6 +423,12 @@ inside a row/candidate loop form a specific review queue. Each should become one
 prepared batch plan, a cursor/stream where result volume requires it, or a
 documented cold one-shot.
 
+The managed path no longer delegates that decision to Npgsql's arbitrary
+`MaxAutoPrepare=50` / two-use LRU. Canonical typed reads explicitly prepare their
+fixed SQL, and the ingest presence/merge/upsert/mask loops prepare their set-sized
+commands once per physical connection and reuse the command for every chunk. DDL,
+dynamic operation dispatch, and genuine one-shot maintenance remain unprepared.
+
 ### Content identity law
 
 The non-negotiable cache key law is:

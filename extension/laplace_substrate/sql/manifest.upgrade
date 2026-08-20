@@ -372,8 +372,6 @@ functions/corpus/corpus_trajectory_probe.sql.in
 functions/corpus/corpus_whitespace_vocab_indices.sql.in
 functions/geometry/entity_physicality_coord.sql.in
 functions/geometry/entity_container_degree.sql.in
-functions/geometry/structural_cluster_batch.sql.in
-functions/geometry/structural_cluster.sql.in
 functions/highway/laplace_highway_match.sql.in
 functions/highway/laplace_highway_popcount.sql.in
 functions/highway/laplace_highway_band_mask.sql.in
@@ -415,6 +413,8 @@ views/v_word_points.sql.in
 views/v_word_senses.sql.in
 views/v_attestation_readable.sql.in
 functions/structural/word_anchor.sql.in
+functions/geometry/structural_cluster_batch.sql.in
+functions/geometry/structural_cluster.sql.in
 functions/analysis/drop_retired_eff_mu.sql.in
 functions/analysis/laplace_entity_attestations.sql.in
 functions/analysis/laplace_entities_at_depth.sql.in

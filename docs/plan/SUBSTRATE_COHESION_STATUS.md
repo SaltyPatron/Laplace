@@ -124,6 +124,7 @@ model, or chess source run.
 | No default full-corpus health/discovery scans | Not done | `relation_bands()` and default substrate health retain exact whole-corpus work. Exact maintenance/deep-audit scans are not yet cleanly separated from cheap defaults. |
 | Planner contracts for public functions | Not done | Most SRFs retain default `ROWS 1000`; cost, volatility, parallel safety, bounds, and work receipts are not governed from one registry. |
 | Native prepared set-sized SPI for hot paths | Implemented for the confirmed census | `graph_contrast` binds both endpoints and every resolved synset in one ordinal-preserving array query; `geometry_successors` exposes one native array core and a scalar SQL adapter. The corrected census has zero confirmed native per-element SPI sites. A mechanical regression gate is still needed. |
+| Managed plan reuse without heuristic caps | Implemented for typed reads and hot ingest cores | Npgsql auto-prepare is disabled instead of guessing `50` slots after `2` uses. Typed reads explicitly prepare; presence probes, attestation merge, consensus upsert, and mask deposit prepare their declared set statements and reuse commands within each connection. Remaining direct one-shot commands stay unprepared intentionally. |
 | PostGIS-style generated extension package | Mostly done | Install/upgrade manifests are complete-gated, versions are content-derived, SQL chains are generated, and the native module is installed. Seed population is already separate. Upgrade/fresh-install parity and deployment receipts still need systematic proof. |
 | Explicit governed operation registry | Not done | `ops.api()` is broad catalog discovery. It lacks explicit public/internal status, safety, cost, bounds, ordering, truncation, receipts, lifecycle, version, and parity metadata. |
 | One dispatcher across MCP/OpenAI/HTTP | Not done | A parameter-bound read-only invoker exists, but #811/#812 remain open and product surfaces do not prove one canonical program or trace. |
@@ -156,7 +157,7 @@ model, or chess source run.
 | #1149/#1152 | Typed references and proposition-bound semantic roles | Partial identity normalization, not the global database key |
 | #1158/#1159/#1160 | UD occurrence structure, bounded builders, durable file canonicals | Code/tests merged; actual UD database acceptance incomplete |
 | #1164 | Canonical lexical peer batch and scalar adapter | One scalar/batch family |
-| #1166/#1167 | Central batch sizing and truthful apply telemetry | Outer database apply remains intentionally serialized |
+| #1166/#1167 | Central batch sizing and truthful apply telemetry | One ordered set coordinator overlaps with compose-ahead; each apply internally fans across machine-derived partitions |
 | #1170/#1172 | Bootstrap/amplification accounting | Initial metrics, not full LapSight gates |
 
 ## Known correctness and performance defects discovered during the campaign

@@ -7,12 +7,6 @@ namespace Laplace.SubstrateCRUD.Tests;
 public sealed class IngestWriterConfigTests
 {
     [Fact]
-    public void ResolveApplyDispatchWorkers_IsAlwaysOne()
-    {
-        Assert.Equal(1, IngestTopology.ResolveApplyDispatchWorkers());
-    }
-
-    [Fact]
     public void MaxIntentsPerCommit_WordNetBudget_ScalesAboveOmwCap()
     {
         int n = IngestSizing.ResolveMaxIntentsPerCommit(2048, 250_000, 250_000);

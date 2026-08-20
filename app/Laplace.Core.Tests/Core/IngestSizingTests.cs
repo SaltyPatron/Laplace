@@ -33,12 +33,6 @@ public sealed class IngestSizingTests
     }
 
     [Fact]
-    public void Resolve_DefaultApplyDispatch_OneBulkApplyAtATime()
-    {
-        Assert.Equal(1, IngestTopology.ResolveApplyDispatchWorkers());
-    }
-
-    [Fact]
     public void Resolve_MoreComposeWorkersDivideOneBatchEnvelope()
     {
         var two = IngestSizing.Resolve(
@@ -157,7 +151,6 @@ public sealed class IngestSizingTests
             IngestSizing.ResolveWorkingSetProbeInterval(plan.RecordBatchSize, IngestSourceProfile.RelationTriple));
         Assert.Equal(IngestTopology.Current.ComposeWorkers, plan.ComposeWorkers);
         Assert.Equal(IngestTopology.Current.IoWorkersAvailable, plan.IoWorkersAvailable);
-        Assert.Equal(IngestTopology.Current.ApplyDispatchWorkers, plan.ApplyDispatchWorkers);
         Assert.Equal(IngestTopology.Current.ApplyPartitions, plan.ApplyPartitions);
         Assert.Equal(MemoryTopology.WorkingSetBudgetBytes, plan.WorkingSetBudgetBytes);
     }

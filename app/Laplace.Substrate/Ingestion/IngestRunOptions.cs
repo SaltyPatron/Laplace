@@ -4,7 +4,6 @@ namespace Laplace.Ingestion;
 
 public sealed record IngestRunOptions(
     DecomposerOptions DecomposerOptions,
-    int ParallelWorkers,
     TransientErrorRetryPolicy RetryPolicy,
     IProgress<IngestProgress>? Progress,
     bool AbortOnTransientExhaustion = false,
@@ -17,7 +16,6 @@ public sealed record IngestRunOptions(
 {
     public static IngestRunOptions Default { get; } = new(
         DecomposerOptions: DecomposerOptions.Default,
-        ParallelWorkers: 1,
         RetryPolicy: TransientErrorRetryPolicy.Default,
         Progress: null);
 }

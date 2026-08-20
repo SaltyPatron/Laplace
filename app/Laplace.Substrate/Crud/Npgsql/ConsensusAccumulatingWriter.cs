@@ -601,6 +601,18 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                     guc.CommandText = "SET LOCAL enable_mergejoin = off; SET LOCAL enable_hashjoin = off";
                     await guc.ExecuteNonQueryAsync(token);
                 }
+                await using var up = conn.CreateCommand();
+                up.Transaction = tx;
+                up.CommandTimeout = 0;
+                up.CommandText = "SELECT consensus.upsert($1, $2, $3, $4, $5, $6, $7)";
+                up.Parameters.Add(new NpgsqlParameter { Value = Array.Empty<byte[]>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+                up.Parameters.Add(new NpgsqlParameter { Value = Array.Empty<byte[]>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+                up.Parameters.Add(new NpgsqlParameter { Value = Array.Empty<byte[]>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+                up.Parameters.Add(new NpgsqlParameter { Value = Array.Empty<long>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
+                up.Parameters.Add(new NpgsqlParameter { Value = Array.Empty<long>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
+                up.Parameters.Add(new NpgsqlParameter { Value = Array.Empty<long>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
+                up.Parameters.Add(new NpgsqlParameter { Value = Array.Empty<DateTime>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.TimestampTz });
+                await up.PrepareAsync(token);
                 long segFolded = 0;
                 for (int off = seg.Off; off < seg.Off + seg.Len; off += FoldSizing.ChunkCells)
                 {
@@ -623,17 +635,13 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                         sums[i] = cell.D.SumScoreFp1e9;
                         ts[i] = TsFromUnixUs(cell.D.MaxTsUnixUs);
                     }
-                    await using var up = conn.CreateCommand();
-                    up.Transaction = tx;
-                    up.CommandTimeout = 0;
-                    up.CommandText = "SELECT consensus.upsert($1, $2, $3, $4, $5, $6, $7)";
-                    up.Parameters.Add(new NpgsqlParameter { Value = subjects, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
-                    up.Parameters.Add(new NpgsqlParameter { Value = types, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
-                    up.Parameters.Add(new NpgsqlParameter { Value = objects, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
-                    up.Parameters.Add(new NpgsqlParameter { Value = phis, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
-                    up.Parameters.Add(new NpgsqlParameter { Value = games, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
-                    up.Parameters.Add(new NpgsqlParameter { Value = sums, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
-                    up.Parameters.Add(new NpgsqlParameter { Value = ts, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.TimestampTz });
+                    up.Parameters[0].Value = subjects;
+                    up.Parameters[1].Value = types;
+                    up.Parameters[2].Value = objects;
+                    up.Parameters[3].Value = phis;
+                    up.Parameters[4].Value = games;
+                    up.Parameters[5].Value = sums;
+                    up.Parameters[6].Value = ts;
                     segFolded += (long)(await up.ExecuteScalarAsync(token) ?? 0L);
                 }
                 await tx.CommitAsync(token);
@@ -721,6 +729,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                     mask.CommandText = "SELECT consensus.highway_mask_deposit($1, $2)";
                     mask.Parameters.Add(new NpgsqlParameter { Value = pairEnts, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
                     mask.Parameters.Add(new NpgsqlParameter { Value = pairTypes, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+                    await mask.PrepareAsync(ct);
                     dep += (long)(await mask.ExecuteScalarAsync(ct) ?? 0L);
                     await tx.CommitAsync(ct);
                 }

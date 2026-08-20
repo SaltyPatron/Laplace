@@ -21,8 +21,10 @@ internal static class CpuTopologyCommands
                     return 0;
                 case "--ingest-commit-workers":
                 case "--apply-dispatch-workers":
-                    Console.WriteLine(IngestTopology.Current.ApplyDispatchWorkers);
-                    return 0;
+                    Console.Error.WriteLine(
+                        "outer apply-worker tuning was removed: one ordered set coordinator "
+                        + "fans each apply across machine-derived apply_partitions");
+                    return 2;
                 case "--p-core-indices":
                     Console.WriteLine(string.Join(",", CpuTopology.PerformanceCoreCpuIndices));
                     return 0;
@@ -72,7 +74,7 @@ internal static class CpuTopologyCommands
         Console.Error.WriteLine(
             $"ingest_ready: file={topo.FileWorkers} compose={topo.ComposeWorkers} "
             + $"io_available={topo.IoWorkersAvailable} "
-            + $"apply_dispatch={topo.ApplyDispatchWorkers} apply_partitions={topo.ApplyPartitions} "
+            + $"apply_mode=set_coordinator apply_partitions={topo.ApplyPartitions} "
             + $"pinned={topo.EntryThreadPinned.ToString().ToLowerInvariant()}");
         return 0;
     }
@@ -228,10 +230,9 @@ internal static class CpuTopologyCommands
         w.WriteLine("ALTER SYSTEM SET shared_preload_libraries = 'laplace_substrate', 'pg_stat_statements';");
         w.WriteLine("ALTER SYSTEM SET pg_stat_statements.track = 'all';");
         w.WriteLine("ALTER SYSTEM SET pg_stat_statements.max = 10000;");
-        // Planning time separately from execution: MEASURED 5.760 ms planning against
-        // 21.053 ms execution on one descent probe, and the ingest path leaves
-        // MaxAutoPrepare at 0, so that tax is paid per batch per tier. Without this the
-        // largest suspected overhead is invisible in the view added to find it.
+        // Planning time separately from execution. MaxAutoPrepare is deliberately zero;
+        // hot typed reads/probes/folds explicitly prepare, so this metric catches both a
+        // missed preparation site and PostgreSQL invalidating a dependent plan.
         w.WriteLine("ALTER SYSTEM SET pg_stat_statements.track_planning = on;");
         // Split so the read-path gate does not treat this conf-file generator as a
         // live substrate query (it never runs against laplace).
