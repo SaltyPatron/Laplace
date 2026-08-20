@@ -25,10 +25,6 @@
 PG_FUNCTION_INFO_V1(pg_laplace_walk_branches);
 PG_FUNCTION_INFO_V1(pg_laplace_walk_strongest);
 
-/* Local constant -- avoids relying on M_PI (not portably defined under MSVC
- * without _USE_MATH_DEFINES, and this file doesn't otherwise need <math.h>). */
-#define WALK_PI 3.14159265358979323846
-
 static const char *EDGE_QUERY =
     "SELECT object_id, type_id, rating, rd, witness_count "
     "FROM consensus.walk_edges($1, $2, $3, $4)";
@@ -90,7 +86,7 @@ ensure_edge_plan(void)
  * per-level batch query -- no extra round trip. Coordinates are fetched via
  * ST_X/Y/Z/M (liblwgeom isn't linked, same constraint as recall.c's
  * word_shape_peers_fast_impl) with LEFT JOINs so a coord-less entity (no
- * point physicality yet) degrades to "no geometry bonus", never an error.
+ * point physicality yet) degrades to "unknown geometry", never an error.
  * tableoid on each side gives the physicalities partition. That partition is
  * HASH(id) over 64 partitions -- NOT a hilbert band -- so tableoid equality
  * certifies only "same hash bucket", which carries no locality. The +1.0 it
@@ -100,8 +96,8 @@ ensure_edge_plan(void)
  * joins on entity_id: the key cannot prune, so each side fans out across all
  * 64 partitions, twice per candidate edge. MEASURED live on a 200-node
  * frontier (21,413 candidate edges): 30,305ms with the two LEFT JOINs vs
- * 408ms without -- 74x, to fund an ordering nudge bounded at +2.0 against a
- * base of ~1000-2000. Identical pathology to ordinal_continuity_bonus below,
+ * 408ms without -- 74x, to fund an ordering tie-break against folded belief.
+ * Identical pathology to ordinal_continuity_distance below,
  * which was already made opt-in for it; this sibling was never rewired.
  */
 static const char *WALK_BATCH_QUERY =
@@ -228,17 +224,22 @@ typedef struct RankedEdge
     int64  rating;
     int64  rd;
     int64  witnesses;
-    double base;   /* adjudicated: relation_rank * walk_edge_weight */
-    double bonus;  /* instrument-tier nudges, subordinate by construction */
-    double score;  /* base + bonus; retained for callers that report it */
+    double base;                  /* adjudicated relation belief */
+    bool   topic_match;           /* exact membership in caller topic set */
+    bool   continuity_known;      /* both endpoints found in one trajectory */
+    uint64 continuity_distance;   /* exact ordinal distance; smaller is nearer */
+    bool   geometry_known;        /* both endpoints have point physicalities */
+    double geometry_distance;     /* exact S3 angle; smaller is nearer */
 } RankedEdge;
 
 /*
  * Belief first, always. Base is the relation rank times the signed Glicko
- * expectation of the folded state. Geometry/topic values break exact belief
- * ties only; they cannot replace or reverse the adjudicated verdict.
+ * expectation of the folded state. The remaining dimensions are ordered facts,
+ * not a weighted score: caller topic membership, exact trajectory distance,
+ * then exact S3 distance. They break belief ties only and therefore cannot
+ * replace or reverse the adjudicated verdict.
  *
- * Final key is the object id, so equal-belief equal-bonus candidates emit in
+ * Final key is the object id, so otherwise-equal candidates emit in
  * one fixed order. qsort is unstable and SS15 requires byte-identical output.
  */
 static int
@@ -251,8 +252,18 @@ ranked_edge_cmp_score_desc(const void *a, const void *b)
 
     if (ea->base != eb->base)
         return (ea->base < eb->base) - (ea->base > eb->base);
-    if (ea->bonus != eb->bonus)
-        return (ea->bonus < eb->bonus) - (ea->bonus > eb->bonus);
+    if (ea->topic_match != eb->topic_match)
+        return ea->topic_match ? -1 : 1;
+    if (ea->continuity_known != eb->continuity_known)
+        return ea->continuity_known ? -1 : 1;
+    if (ea->continuity_known && ea->continuity_distance != eb->continuity_distance)
+        return (ea->continuity_distance > eb->continuity_distance) -
+               (ea->continuity_distance < eb->continuity_distance);
+    if (ea->geometry_known != eb->geometry_known)
+        return ea->geometry_known ? -1 : 1;
+    if (ea->geometry_known && ea->geometry_distance != eb->geometry_distance)
+        return (ea->geometry_distance > eb->geometry_distance) -
+               (ea->geometry_distance < eb->geometry_distance);
 
     oa = DatumGetByteaPP(ea->object);
     ob = DatumGetByteaPP(eb->object);
@@ -302,9 +313,9 @@ mask_overlaps(Datum highway_mask_bytea, const laplace_mask256_t *intent_mask)
  * ST_DumpPoints-over-every-match scan containers_of.c's own comment warns
  * against for large arrays), dumps its points, and mantissa_unpacks each
  * vertex looking for the two target ordinals. Applied only to the
- * exact post-score-sort admission set. Belief is the primary ordering key and
- * continuity is only a tie-break bonus, so only candidates through the full
- * base-score tie at the requested beam boundary can affect the result.
+ * exact post-belief-sort admission set. Belief is the primary ordering key and
+ * continuity is only a tie-break, so only candidates through the full belief
+ * tie at the requested beam boundary can affect the result.
  */
 /*
  * Single-key containment ONLY (proven ~2ms/GIN-index-backed regardless of
@@ -347,17 +358,18 @@ ensure_ordinal_continuity_plan(void)
 }
 
 /*
- * Returns a [0,1] continuity bonus: 1/(1+|ordinal_delta|) when both
- * subject_entity and object_entity are found as vertices of the SAME
+ * Returns true and the exact |ordinal_delta| when both subject_entity and
+ * object_entity are found as vertices of the SAME
  * trajectory selected by the object's own (fast, single-key) containment
- * probe; 0.0 otherwise (no such trajectory, that trajectory doesn't also
+ * probe; false otherwise (no such trajectory, that trajectory doesn't also
  * carry the subject, or coordinate/mantissa data didn't decode -- never an
- * error, this is an additive bonus only). Trades a little converse.recall(a
+ * error). Trades a little converse.recall(a
  * DIFFERENT trajectory might contain both when the object's first match
  * doesn't) for guaranteed single-key-probe performance.
  */
-static double
-ordinal_continuity_bonus(Datum subject_entity, Datum object_entity)
+static bool
+ordinal_continuity_distance(Datum subject_entity, Datum object_entity,
+                            uint64 *distance)
 {
     Datum  args[1];
     int    rc;
@@ -374,7 +386,7 @@ ordinal_continuity_bonus(Datum subject_entity, Datum object_entity)
     args[0] = object_entity;
     rc = SPI_execute_plan(ordinal_continuity_plan, args, NULL, true, 0);
     if (rc != SPI_OK_SELECT || SPI_processed == 0)
-        return 0.0;
+        return false;
 
     /* ORDINAL IS DERIVED FROM VERTEX POSITION, NOT READ OUT OF THE PACKED FIELD.
      * The query above is ORDER BY (dp.path)[1], so vertices arrive in sequence
@@ -386,7 +398,7 @@ ordinal_continuity_bonus(Datum subject_entity, Datum object_entity)
      * The packed copy is 16 bits and stops being able to state the position past
      * 65,535 constituents, where the writer now stores 0 rather than a wrapped
      * value. Reading it directly there would give both endpoints ordinal 0, hence
-     * delta 0, hence the MAXIMUM continuity bonus for any pair in a wide
+     * delta 0, hence the minimum distance for any pair in a wide
      * trajectory -- silently, since this path never errors by contract. Deriving
      * costs nothing and removes the width from the equation entirely. */
     int64 ordinal = 1;
@@ -433,11 +445,12 @@ ordinal_continuity_bonus(Datum subject_entity, Datum object_entity)
     /* SPI_tuptable freed automatically at the enclosing SPI_finish/next
      * SPI_execute_plan call -- this function borrows no pointers past return. */
     if (!have_obj || !have_subj)
-        return 0.0;
+        return false;
     {
         int64 delta = obj_ord - subj_ord;   /* int64: ordinals are no longer 16-bit */
         if (delta < 0) delta = -delta;
-        return 1.0 / (1.0 + (double) delta);
+        *distance = (uint64) delta;
+        return true;
     }
 }
 
@@ -538,8 +551,8 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
                           &topic_bias, &bias_nulls, &n_topic_bias);
     }
     /*
-     * Opt-in, default false: ordinal_continuity_bonus's containment probe
-     * has no hilbert-band restriction, so physicalities (RANGE-partitioned
+     * Opt-in, default false: ordinal_continuity_distance's containment probe
+     * has no locality restriction, so physicalities (HASH-partitioned
      * 64 ways) pays a 64-partition Append scan on every miss -- measured
      * 42ms/call live via EXPLAIN ANALYZE, and misses are the COMMON case
      * (most walked entities aren't a trajectory constituent of anything).
@@ -589,7 +602,7 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
      * re-expanding the same popular hub entity, which is exactly what turns
      * a beam search into an unbounded tree. Once an entity has been placed
      * anywhere in the walk (necessarily via the best-ranked edge that could
-     * reach it, since edges are processed in score order), a worse/deeper
+     * reach it, since edges are processed in rank order), a worse/deeper
      * rediscovery adds no information a beam search should keep.
      */
     {
@@ -728,12 +741,12 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
                     hash128_t rel_type_id;
                     hash128_t obj_id;
                     bool      found2;
-                    double    base, bonus;
+                    double    base;
 
                     /*
                      * 3Ca: refutation is no longer a hard drop -- signed
-                     * scoring (below) naturally pushes refuted consensus.edges(eff_mu
-                     * below neutral) to a negative score, so they qsort last
+                     * folded belief (below) naturally pushes refuted consensus.edges(eff_mu
+                     * below neutral) to a negative base, so they qsort last
                      * but still appear in output (doc 15 I2: confirming a
                      * response = confirming the edges it walked; refuting
                      * must be equally visible, not silently absent).
@@ -752,20 +765,15 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
                     base = walk_relation_rank(rel_type_id) *
                            laplace_walk_edge_weight(raw[j].rating, raw[j].rd);
 
-                    /*
-                     * 3Cc additive geometry bonuses. Constants below are
-                     * initial, empirically-untuned nudges scaled small
-                     * relative to typical |base| (Rule #5 caveat: profile
-                     * before optimizing/retuning against live data) -- they
-                     * break ties and add coherence, they don't override
-                     * epistemic weight.
-                     */
-                    bonus = 0.0;
-                    if (raw[j].subj_coord_ok && raw[j].obj_coord_ok)
-                    {
-                        double dist = math4d_angular_distance(raw[j].subj_xyzm, raw[j].obj_xyzm);
-                        bonus += 2.0 * (1.0 - dist / WALK_PI); /* dist in [0,pi] on S3 */
-                    }
+                    cands[n_cands].topic_match = false;
+                    cands[n_cands].continuity_known = false;
+                    cands[n_cands].continuity_distance = 0;
+                    cands[n_cands].geometry_known =
+                        raw[j].subj_coord_ok && raw[j].obj_coord_ok;
+                    cands[n_cands].geometry_distance =
+                        cands[n_cands].geometry_known
+                            ? math4d_angular_distance(raw[j].subj_xyzm, raw[j].obj_xyzm)
+                            : 0.0;
                     /*
                      * No partition-band bonus. laplace.physicalities is
                      * HASH(id) over 64 partitions, not RANGE over hilbert
@@ -780,7 +788,7 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
                         {
                             if (bytea_eq(raw[j].object, topic_bias[t]))
                             {
-                                bonus += 3.0;
+                                cands[n_cands].topic_match = true;
                                 break;
                             }
                         }
@@ -793,18 +801,11 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
                     cands[n_cands].witnesses = raw[j].witnesses;
 
                     /*
-                     * Bonuses rank CONFIRMED edges only. A refuted edge with
-                     * wide RD has a Glicko expectation near neutral, and an
-                     * unconditional additive bonus (geometry up to +2,
-                     * partition +1, topic +3) would flip it positive and walk
-                     * it -- caught live by the closed-loop test: 60 refutes
-                     * left signed_mu at -600 yet the edge still placed. The
-                     * consensus verdict gates placement; geometry only orders
-                     * what consensus already confirmed.
+                     * The consensus verdict alone gates placement. Every other
+                     * field is a lexicographic tie-break and cannot turn a
+                     * refuted edge into a walked edge.
                      */
-                    cands[n_cands].base      = base;
-                    cands[n_cands].bonus     = base > 0.0 ? bonus : 0.0;
-                    cands[n_cands].score     = base > 0.0 ? base + bonus : base;
+                    cands[n_cands].base = base;
                     n_cands++;
                 }
                 qsort(cands, n_cands, sizeof(RankedEdge), ranked_edge_cmp_score_desc);
@@ -830,12 +831,10 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
                     for (int s = 0; s < shortlist_n; s++)
                         if (cands[s].base > 0.0) /* confirmed-only, same gate as 3Cc */
                         {
-                            /* Into bonus, not score: the comparator ranks on
-                             * base then bonus, so a score-only increment would
-                             * be silently inert. */
-                            double ob = ordinal_continuity_bonus(nodes[f].entity, cands[s].object);
-                            cands[s].bonus += ob;
-                            cands[s].score += ob;
+                            cands[s].continuity_known = ordinal_continuity_distance(
+                                nodes[f].entity,
+                                cands[s].object,
+                                &cands[s].continuity_distance);
                         }
                     qsort(cands, n_cands, sizeof(RankedEdge), ranked_edge_cmp_score_desc);
                 }
@@ -855,11 +854,11 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
                      * converse.sql's deliberate "syn_bad" refuted-edge
                      * fixture: a beam with nothing else available must dead-
                      * end, not walk into the refuted claim by default).
-                     * cands[] is sorted score-descending, so the first
-                     * non-positive score means every remaining candidate is
+                     * cands[] is sorted belief-descending, so the first
+                     * non-positive belief means every remaining candidate is
                      * also non-positive -- stop placing, don't just skip.
                      */
-                    if (cands[k].score <= 0.0)
+                    if (cands[k].base <= 0.0)
                         break;
 
                     mu = eff_mu_display_numeric(cands[k].rating, cands[k].rd);

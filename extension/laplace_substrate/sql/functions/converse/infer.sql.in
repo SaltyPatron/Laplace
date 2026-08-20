@@ -41,11 +41,10 @@ WITH plang AS MATERIALIZED (
 ),
 ranked AS (
     SELECT y.tok, y.synset_id, y.rel_type_id,
-           row_number() OVER (ORDER BY (COALESCE(y.specificity, 0)
-                                                 * GREATEST(COALESCE(y.denote_mu, 0), 1)) DESC,
-                                       y.specificity DESC NULLS LAST,
+           row_number() OVER (ORDER BY y.specificity DESC NULLS LAST,
                                        y.rel_mass DESC NULLS LAST,
                                        y.peers DESC,
+                                       y.denote_mu DESC NULLS LAST,
                                        y.ord DESC,
                                        y.synset_id) AS rk
     FROM converse.prompt_coherence(p_prompt) y
