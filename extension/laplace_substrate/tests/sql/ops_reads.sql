@@ -99,10 +99,16 @@ SELECT count(*) = 0 AS top_relations_zero_is_empty
 FROM consensus.top_relations(0, NULL);
 
 SELECT pg_get_functiondef('consensus.top_relations(integer,bytea)'::regprocedure)
-           LIKE '%CROSS JOIN LATERAL%'
+           NOT LIKE '%CROSS JOIN LATERAL%'
        AND pg_get_functiondef('consensus.top_relations(integer,bytea)'::regprocedure)
-           LIKE '%x.type_id = t.type_id%'
-       AS top_relations_uses_partition_heads;
+           LIKE '%consensus.relation_rank(c.type_id)%'
+       AND EXISTS (
+           SELECT 1
+           FROM pg_catalog.pg_index i
+           WHERE i.indexrelid = 'laplace.consensus_edge_rank_btree'::regclass
+             AND i.indisvalid
+             AND i.indisready)
+       AS top_relations_uses_global_edge_rank;
 
 -- Read limits are exact caller contracts. Zero must not be silently promoted
 -- to one by inspection/operations helpers.
