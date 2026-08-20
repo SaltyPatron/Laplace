@@ -81,7 +81,7 @@ internal sealed partial class SubstrateClient
         int limit, int offset, string? search, string? initial,
         string? sort, string? direction, CancellationToken ct)
     {
-        limit = Math.Clamp(limit, 1, 200);
+        limit = Math.Max(0, limit);
         offset = Math.Max(0, offset);
         var normalizedSort = NormalizePlayerSort(
             sort, hasSearch: !string.IsNullOrWhiteSpace(search));

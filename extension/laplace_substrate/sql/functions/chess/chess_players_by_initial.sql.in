@@ -56,8 +56,8 @@ CREATE FUNCTION chess.players_by_initial(
             CASE WHEN lower(COALESCE(p_direction, 'desc')) <> 'asc'
                  THEN r.sort_value END DESC,
             r.player
-        LIMIT greatest(1, least(p_limit, 200))
-        OFFSET greatest(0, p_offset)
+        LIMIT p_limit
+        OFFSET p_offset
     ),
     batch AS MATERIALIZED (
         SELECT COALESCE(array_agg(page.player ORDER BY page.player), '{}'::bytea[]) AS ids

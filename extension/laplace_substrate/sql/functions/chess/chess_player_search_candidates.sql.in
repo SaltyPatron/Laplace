@@ -49,7 +49,7 @@ CREATE FUNCTION chess.player_search_candidates(p_query text, p_limit integer DEF
           ON o.subject_id = p.player
          AND o.type_id = laplace.relation_type_id('OUTCOME')
         ORDER BY consensus.eff_mu(o.rating, o.rd) DESC, p.player
-        LIMIT greatest(1, least(p_limit, 2000))
+        LIMIT p_limit
     ),
     batch AS MATERIALIZED (
         SELECT COALESCE(array_agg(r.player ORDER BY r.player), '{}'::bytea[]) AS ids
