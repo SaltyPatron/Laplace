@@ -2,7 +2,7 @@
  * trajectory_generate.c — walk_continuations: the S6→S7→S8 emission loop
  * (docs/specs/36 §3), corpus-free.
  *
- * S6 PROPOSE  generation.trajectory_continuations($tail, $topk): the k-context successor
+ * S6 PROPOSE  generation.trajectory_continuations($tail, NULL): the complete k-context successor
  *             read straight off physicalities.trajectory (GIN containment +
  *             ordinal window), with trigram→…→unigram backoff over max_stride.
  *             The trajectory IS the ordered sequence (§9); the per-backend
@@ -35,7 +35,8 @@
  *               edges > 0, steer ≤ 0 → excluded (adjudicated against the
  *                                       frontier: refuted edges dead-end)
  *
- * S8 SAMPLE   Gumbel draw over the top-k surviving candidates at the caller's
+ * S8 SAMPLE   After steering the complete proposal set, a Gumbel draw over the
+ *             top-k surviving candidates at the caller's
  *             spread. (Spec S8 names RD-as-temperature; RD already shapes the
  *             steer term through exp(−κ·rd) inside walk_edge_weight, so the
  *             caller's spread composes with it rather than replacing it.
@@ -62,6 +63,7 @@
 #include "miscadmin.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
+#include "utils/hsearch.h"
 #include "utils/memutils.h"
 #include "utils/tuplestore.h"
 #include "common/pg_prng.h"
@@ -70,10 +72,6 @@
 #include "spi_common.h"
 
 PG_FUNCTION_INFO_V1(pg_laplace_walk_continuations);
-
-#define GEN_MAX_STEPS  4096
-#define GEN_MAX_ORDER  8
-#define GEN_CAND_CAP   256
 
 typedef struct Cand
 {
@@ -85,15 +83,21 @@ typedef struct Cand
     double eff;        /* combined sampling weight       */
 } Cand;
 
+typedef struct CandIndex
+{
+    char key[16];
+    int  index;
+} CandIndex;
+
 static SPIPlanPtr propose_plan = NULL;
 static SPIPlanPtr steer_plan   = NULL;
 static SPIPlanPtr floor_plan   = NULL;
 
 /*
  * Prepared once per backend and kept: the un-prepared path re-plans on every
- * emitted token of every walk. The LIMIT lives in the query text as a bound
- * parameter, never as SPI_execute_plan's count — the count stops the fetch
- * after the bitmap is already built (#691).
+ * emitted token of every walk. Proposal passes NULL deliberately: truncating
+ * before S7 steering changes the answer.  The caller's top-k is applied only
+ * after every exact-context candidate has its frontier score.
  */
 static void
 ensure_plans(void)
@@ -172,6 +176,57 @@ copy_id_datum(Datum d)
     return PointerGetDatum(dst);
 }
 
+static void
+ensure_candidate_capacity(Cand **cand, int *capacity, uint64 needed,
+                          MemoryContext owner)
+{
+    MemoryContext old;
+
+    if (needed <= (uint64) *capacity)
+        return;
+    if (needed > (uint64) INT_MAX ||
+        needed > (uint64) (MaxAllocSize / sizeof(Cand)))
+        ereport(ERROR,
+                (errmsg("walk_continuations: candidate set exceeds PostgreSQL allocation capacity"),
+                 errdetail("Requested %llu candidates.",
+                           (unsigned long long) needed)));
+
+    old = MemoryContextSwitchTo(owner);
+    *cand = *cand == NULL
+        ? (Cand *) palloc(sizeof(Cand) * (Size) needed)
+        : (Cand *) repalloc(*cand, sizeof(Cand) * (Size) needed);
+    MemoryContextSwitchTo(old);
+    *capacity = (int) needed;
+}
+
+static void
+free_candidate_ids(Cand *cand, int count)
+{
+    for (int i = 0; i < count; i++)
+    {
+        pfree(DatumGetPointer(cand[i].obj));
+        if (cand[i].sep != (Datum) 0)
+            pfree(DatumGetPointer(cand[i].sep));
+    }
+}
+
+static int
+candidate_cmp(const void *a, const void *b)
+{
+    const Cand *x = (const Cand *) a;
+    const Cand *y = (const Cand *) b;
+    bytea      *xo;
+    bytea      *yo;
+
+    if (x->eff > y->eff) return -1;
+    if (x->eff < y->eff) return 1;
+    if (x->weight > y->weight) return -1;
+    if (x->weight < y->weight) return 1;
+    xo = DatumGetByteaPP(x->obj);
+    yo = DatumGetByteaPP(y->obj);
+    return memcmp(VARDATA_ANY(xo), VARDATA_ANY(yo), 16);
+}
+
 Datum
 pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
 {
@@ -187,7 +242,8 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
     int        ctx_len = 0, ctx_cap;
     Datum     *frontier;
     int        n_frontier = 0, n_prompt = 0;
-    Cand      *cand;
+    Cand      *cand = NULL;
+    int        cand_capacity = 0;
     MemoryContext walk_cxt, old;
 
     if (PG_ARGISNULL(0))
@@ -200,12 +256,14 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
     rng       = PG_ARGISNULL(5) ? UINT64CONST(0x5851F42D4C957F2D)
                                 : (uint64) PG_GETARG_INT64(5);
 
-    if (steps < 1 || steps > GEN_MAX_STEPS)
-        ereport(ERROR, (errmsg("walk_continuations: steps must be in [1,%d]", GEN_MAX_STEPS)));
-    if (max_order < 1 || max_order > GEN_MAX_ORDER)
-        ereport(ERROR, (errmsg("walk_continuations: max_order must be in [1,%d]", GEN_MAX_ORDER)));
-    if (topk < 1 || topk > GEN_CAND_CAP)
-        ereport(ERROR, (errmsg("walk_continuations: topk must be in [1,%d]", GEN_CAND_CAP)));
+    if (steps < 0)
+        ereport(ERROR, (errmsg("walk_continuations: steps must not be negative")));
+    if (max_order < 0)
+        ereport(ERROR, (errmsg("walk_continuations: max_order must not be negative")));
+    if (topk < 0)
+        ereport(ERROR, (errmsg("walk_continuations: topk must not be negative")));
+    if (!isfinite(temp) || temp < 0.0)
+        ereport(ERROR, (errmsg("walk_continuations: spread must be finite and not negative")));
     if (ARR_NDIM(ctx_arr) != 1 || ARR_ELEMTYPE(ctx_arr) != BYTEAOID)
         ereport(ERROR, (errmsg("walk_continuations: context must be a 1-D bytea array")));
 
@@ -220,14 +278,22 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
     deconstruct_array(ctx_arr, BYTEAOID, -1, false, TYPALIGN_INT,
                       &elems, &nulls, &n_in);
 
+    if ((uint64) n_in + (uint64) steps > (uint64) INT_MAX ||
+        (uint64) n_in + (uint64) steps >
+            (uint64) (MaxAllocSize / sizeof(Datum)))
+        ereport(ERROR,
+                (errmsg("walk_continuations: requested walk exceeds PostgreSQL allocation capacity")));
+    if ((uint64) n_in + (uint64) max_order >
+            (uint64) (MaxAllocSize / sizeof(Datum)))
+        ereport(ERROR,
+                (errmsg("walk_continuations: requested frontier exceeds PostgreSQL allocation capacity")));
     ctx_cap = n_in + steps;
     old = MemoryContextSwitchTo(walk_cxt);
-    ctx      = (Datum *) palloc(sizeof(Datum) * (ctx_cap > 8 ? ctx_cap : 8));
+    ctx      = (Datum *) palloc(sizeof(Datum) * (ctx_cap > 0 ? ctx_cap : 1));
     /* prompt content, held for the whole walk, plus a rolling window of the emitted
      * tail. The window is max_order — the SAME k the S6 context backoff already bounds
      * itself by — so the frontier introduces no constant of its own. */
     frontier = (Datum *) palloc(sizeof(Datum) * (n_in + max_order > 0 ? n_in + max_order : 1));
-    cand     = (Cand *)  palloc(sizeof(Cand) * GEN_CAND_CAP);
     for (int i = 0; i < n_in; i++)
     {
         bytea *b;
@@ -243,7 +309,7 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
     n_prompt = n_frontier;
     MemoryContextSwitchTo(old);
 
-    if (ctx_len == 0)
+    if (ctx_len == 0 || steps == 0 || topk == 0)
     {
         SPI_finish();
         return (Datum) 0;
@@ -261,21 +327,24 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
         {
             ArrayType *tail;
             Datum      args[2];
+            char       argnulls[2] = { ' ', 'n' };
             int        rc;
+            bool       found_candidates = false;
 
             tail = construct_array(ctx + ctx_len - k, k, BYTEAOID, -1, false,
                                    TYPALIGN_INT);
             args[0] = PointerGetDatum(tail);
-            args[1] = Int32GetDatum(GEN_CAND_CAP);
-            rc = SPI_execute_plan(propose_plan, args, NULL, true, 0);
+            args[1] = (Datum) 0;
+            rc = SPI_execute_plan(propose_plan, args, argnulls, true, 0);
             if (rc != SPI_OK_SELECT)
                 elog(ERROR, "walk_continuations: propose failed: %s",
                      SPI_result_code_string(rc));
 
             if (SPI_processed > 0)
             {
-                uint64 max = SPI_processed < GEN_CAND_CAP ? SPI_processed
-                                                          : GEN_CAND_CAP;
+                uint64 max = SPI_processed;
+
+                ensure_candidate_capacity(&cand, &cand_capacity, max, walk_cxt);
 
                 for (uint64 r = 0; r < max; r++)
                 {
@@ -297,6 +366,13 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
                     cand[n_cand].edges  = 0;
                     n_cand++;
                 }
+                found_candidates = n_cand > 0;
+            }
+            if (SPI_tuptable != NULL)
+                SPI_freetuptable(SPI_tuptable);
+            pfree(tail);
+            if (found_candidates)
+            {
                 used = k;
                 break;
             }
@@ -314,7 +390,8 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
             if (rc != SPI_OK_SELECT)
                 elog(ERROR, "walk_continuations: consensus floor probe failed: %s",
                      SPI_result_code_string(rc));
-            for (uint64 r = 0; r < SPI_processed && n_cand < GEN_CAND_CAP; r++)
+            ensure_candidate_capacity(&cand, &cand_capacity, SPI_processed, walk_cxt);
+            for (uint64 r = 0; r < SPI_processed; r++)
             {
                 HeapTuple tup = SPI_tuptable->vals[r];
                 TupleDesc td  = SPI_tuptable->tupdesc;
@@ -333,6 +410,8 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
                 cand[n_cand].edges  = 0;
                 n_cand++;
             }
+            if (SPI_tuptable != NULL)
+                SPI_freetuptable(SPI_tuptable);
             used = 0;
         }
         if (n_cand == 0)
@@ -344,6 +423,8 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
             ArrayType *cand_a, *front_a;
             Datum      args[2];
             int        rc;
+            HASHCTL    ctl;
+            HTAB      *by_id;
 
             objs = (Datum *) palloc(sizeof(Datum) * n_cand);
             for (int i = 0; i < n_cand; i++)
@@ -358,6 +439,24 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
                 elog(ERROR, "walk_continuations: steer failed: %s",
                      SPI_result_code_string(rc));
 
+            memset(&ctl, 0, sizeof(ctl));
+            ctl.keysize = 16;
+            ctl.entrysize = sizeof(CandIndex);
+            ctl.hcxt = walk_cxt;
+            by_id = hash_create("walk continuation candidate index", n_cand,
+                                &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+            for (int i = 0; i < n_cand; i++)
+            {
+                CandIndex *entry;
+                bool       found;
+                bytea     *object = DatumGetByteaPP(cand[i].obj);
+
+                entry = (CandIndex *) hash_search(by_id, VARDATA_ANY(object),
+                                                   HASH_ENTER, &found);
+                if (!found)
+                    entry->index = i;
+            }
+
             for (uint64 r = 0; r < SPI_processed; r++)
             {
                 HeapTuple tup = SPI_tuptable->vals[r];
@@ -367,24 +466,27 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
                 double    st = DatumGetFloat8(SPI_getbinval(tup, td, 2, &s_null));
                 int64     ed = DatumGetInt64(SPI_getbinval(tup, td, 3, &e_null));
                 bytea    *cb;
+                CandIndex *entry;
 
                 if (c_null || s_null || e_null)
                     continue;
                 cb = DatumGetByteaPP(cd);
                 if (VARSIZE_ANY_EXHDR(cb) != 16)
                     continue;
-                for (int i = 0; i < n_cand; i++)
+                entry = (CandIndex *) hash_search(by_id, VARDATA_ANY(cb),
+                                                   HASH_FIND, NULL);
+                if (entry != NULL)
                 {
-                    bytea *ob = DatumGetByteaPP(cand[i].obj);
-
-                    if (memcmp(VARDATA_ANY(ob), VARDATA_ANY(cb), 16) == 0)
-                    {
-                        cand[i].steer = st;
-                        cand[i].edges = ed;
-                        break;
-                    }
+                    cand[entry->index].steer = st;
+                    cand[entry->index].edges = ed;
                 }
             }
+            if (SPI_tuptable != NULL)
+                SPI_freetuptable(SPI_tuptable);
+            hash_destroy(by_id);
+            pfree(objs);
+            pfree(cand_a);
+            pfree(front_a);
         }
 
         /*
@@ -399,10 +501,22 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
             for (int i = 0; i < n_cand; i++)
             {
                 if (cand[i].edges > 0 && cand[i].steer <= 0.0)
+                {
+                    pfree(DatumGetPointer(cand[i].obj));
+                    if (cand[i].sep != (Datum) 0)
+                        pfree(DatumGetPointer(cand[i].sep));
                     continue;
+                }
                 cand[m] = cand[i];
                 cand[m].eff = (double) cand[m].weight *
                               (cand[m].edges > 0 ? cand[m].steer : 1.0);
+                if (cand[m].eff <= 0.0 || !isfinite(cand[m].eff))
+                {
+                    pfree(DatumGetPointer(cand[m].obj));
+                    if (cand[m].sep != (Datum) 0)
+                        pfree(DatumGetPointer(cand[m].sep));
+                    continue;
+                }
                 m++;
             }
             n_cand = m;
@@ -410,32 +524,21 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
         if (n_cand == 0)
             break;
 
-        /* partial selection sort of the top-k by eff */
-        for (int i = 0; i < n_cand; i++)
-        {
-            int best = i;
-
-            for (int j = i + 1; j < n_cand; j++)
-                if (cand[j].eff > cand[best].eff) best = j;
-            if (best != i)
-            {
-                Cand t = cand[i]; cand[i] = cand[best]; cand[best] = t;
-            }
-            if (i + 1 >= topk) break;
-        }
+        qsort(cand, (size_t) n_cand, sizeof(Cand), candidate_cmp);
 
         /* ---- S8 SAMPLE: Gumbel over the top-k at the caller's spread ---- */
         {
             int    limit = (n_cand < topk) ? n_cand : topk;
             double best_key = 0;
 
-            for (int i = 0; i < limit; i++)
+            if (temp == 0.0)
+                pick = 0;
+            for (int i = 0; temp > 0.0 && i < limit; i++)
             {
                 double u   = rng_uniform(&rng);
-                double key = -log(u) / pow(cand[i].eff > 0.0 ? cand[i].eff : 1e-9,
-                                           1.0 / (temp > 1e-6 ? temp : 1e-6));
+                double key = log(cand[i].eff) / temp - log(-log(u));
 
-                if (i == 0 || key < best_key)
+                if (i == 0 || key > best_key)
                     { best_key = key; pick = i; }
             }
         }
@@ -454,20 +557,24 @@ pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
             tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, rnulls);
         }
 
-        ctx[ctx_len++] = cand[pick].obj;
+        old = MemoryContextSwitchTo(walk_cxt);
+        ctx[ctx_len++] = copy_id_datum(cand[pick].obj);
+        MemoryContextSwitchTo(old);
 
         /* ---- advance the frontier S7 steers toward ----
          * The prompt stays: it is the request, and consensus mass reaching it must keep
          * counting. What changes is the tail — the emitted constituents, oldest dropped
          * once the window is full, so |cands| x |frontier| stays bounded exactly as
          * steer_candidates.c requires for its single round trip per token. */
-        if (n_frontier - n_prompt >= max_order)
+        if (max_order > 0 && n_frontier - n_prompt >= max_order)
         {
             memmove(&frontier[n_prompt], &frontier[n_prompt + 1],
                     sizeof(Datum) * (size_t) (n_frontier - n_prompt - 1));
             n_frontier--;
         }
-        frontier[n_frontier++] = cand[pick].obj;
+        if (max_order > 0)
+            frontier[n_frontier++] = ctx[ctx_len - 1];
+        free_candidate_ids(cand, n_cand);
     }
 
     SPI_finish();

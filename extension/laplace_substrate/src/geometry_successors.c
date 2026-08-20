@@ -258,13 +258,15 @@ pg_laplace_geometry_successors_batch(PG_FUNCTION_ARGS)
     limit_rows = PG_ARGISNULL(1) ? 20 : PG_GETARG_INT32(1);
     window = PG_ARGISNULL(2) ? 8 : PG_GETARG_INT32(2);
     backward = (PG_NARGS() > 3 && !PG_ARGISNULL(3)) ? PG_GETARG_BOOL(3) : false;
-    if (limit_rows < 1) limit_rows = 20;
-    if (window < 1) window = 8;
+    if (limit_rows < 0)
+        ereport(ERROR, (errmsg("geometry_successors_batch: limit must not be negative")));
+    if (window < 0)
+        ereport(ERROR, (errmsg("geometry_successors_batch: window must not be negative")));
 
     deconstruct_array(points_array, BYTEAOID, -1, false, TYPALIGN_INT,
                       &point_datums, &point_nulls, &n_input);
     InitMaterializedSRF(fcinfo, 0);
-    if (n_input < 1)
+    if (n_input < 1 || limit_rows == 0 || window == 0)
         return (Datum) 0;
 
     memset(&ctl, 0, sizeof(ctl));

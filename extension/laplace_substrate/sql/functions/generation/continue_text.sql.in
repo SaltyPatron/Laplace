@@ -9,5 +9,5 @@ CREATE OR REPLACE FUNCTION generation.continue_text(
     LANGUAGE sql VOLATILE
 BEGIN ATOMIC
     SELECT g.step, g.entity, NULL::numeric AS mu
-    FROM generation.walk_text(p_prompt, p_steps, GREATEST(p_window, 1), p_spread, p_breadth) g;
+    FROM generation.walk_text(p_prompt, p_steps, p_window, p_spread, p_breadth) g;
 END;

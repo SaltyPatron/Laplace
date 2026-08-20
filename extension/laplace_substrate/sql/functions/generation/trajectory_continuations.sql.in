@@ -1,4 +1,7 @@
 -- generation.trajectory_continuations(ctx, topk) -> what followed this exact context, counted.
+-- NULL topk returns the complete successor set; zero returns no rows.  Callers that
+-- need a bounded presentation choose that bound explicitly after any downstream
+-- steering, rather than losing candidates to a guessed pre-steering cutoff.
 --
 -- The substrate-native replacement for GenCorpus and its RAM suffix array. Same
 -- operation continuations_collect performed -- find every position where the last
@@ -31,7 +34,7 @@
 -- than five hand-written arms.
 DROP FUNCTION IF EXISTS laplace.trajectory_continuations(bytea[], int);
 CREATE OR REPLACE FUNCTION generation.trajectory_continuations(
-        p_ctx bytea[], p_topk int DEFAULT 256)
+        p_ctx bytea[], p_topk int DEFAULT NULL)
     RETURNS TABLE(object_id bytea, sep_id bytea, weight bigint)
     AS 'MODULE_PATHNAME', 'pg_laplace_trajectory_continuations'
     LANGUAGE C STABLE;

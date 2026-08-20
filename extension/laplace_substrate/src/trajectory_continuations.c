@@ -202,7 +202,8 @@ pg_laplace_trajectory_continuations(PG_FUNCTION_ARGS)
     bool          *ctx_nulls;
     int            n_context;
     char          *context;
-    int32          topk;
+    int32          topk = 0;
+    bool           bounded;
     bool           spi_top = false;
     HTAB          *separators;
     HTAB          *successors;
@@ -213,14 +214,21 @@ pg_laplace_trajectory_continuations(PG_FUNCTION_ARGS)
         ereport(ERROR, (errmsg("trajectory_continuations: context must not be NULL")));
 
     ctx_array = PG_GETARG_ARRAYTYPE_P(0);
-    topk = PG_ARGISNULL(1) ? 256 : PG_GETARG_INT32(1);
-    if (topk < 1)
-        ereport(ERROR, (errmsg("trajectory_continuations: topk must be positive")));
+    bounded = !PG_ARGISNULL(1);
+    if (bounded)
+    {
+        topk = PG_GETARG_INT32(1);
+        if (topk < 0)
+            ereport(ERROR, (errmsg("trajectory_continuations: topk must not be negative")));
+    }
 
     deconstruct_array(ctx_array, BYTEAOID, -1, false, TYPALIGN_INT,
                       &ctx_datums, &ctx_nulls, &n_context);
     if (n_context < 1)
         ereport(ERROR, (errmsg("trajectory_continuations: context must not be empty")));
+    if ((uint64) n_context > (uint64) (MaxAllocSize / 16))
+        ereport(ERROR,
+                (errmsg("trajectory_continuations: context exceeds PostgreSQL allocation capacity")));
 
     context = (char *) palloc((Size) n_context * 16);
     for (int i = 0; i < n_context; i++)
@@ -235,6 +243,8 @@ pg_laplace_trajectory_continuations(PG_FUNCTION_ARGS)
     }
 
     InitMaterializedSRF(fcinfo, 0);
+    if (bounded && topk == 0)
+        return (Datum) 0;
 
     if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
         elog(ERROR, "trajectory_continuations: SPI_connect failed");
@@ -358,18 +368,26 @@ pg_laplace_trajectory_continuations(PG_FUNCTION_ARGS)
 
     /* Total order: weight descending, successor id ascending. */
     {
-        int             n = (int) hash_get_num_entries(successors);
-        SuccEntry      *ordered = (SuccEntry *) palloc(sizeof(SuccEntry) * (n > 0 ? n : 1));
+        long            entries = hash_get_num_entries(successors);
+        int             n;
+        int             m = 0;
+        SuccEntry      *ordered;
         HASH_SEQ_STATUS seq;
         SuccEntry      *se;
-        int             m = 0;
+
+        if (entries > INT_MAX ||
+            (uint64) entries > (uint64) (MaxAllocSize / sizeof(SuccEntry)))
+            ereport(ERROR,
+                    (errmsg("trajectory_continuations: successor set exceeds PostgreSQL allocation capacity")));
+        n = (int) entries;
+        ordered = (SuccEntry *) palloc(sizeof(SuccEntry) * (n > 0 ? n : 1));
 
         hash_seq_init(&seq, successors);
         while ((se = (SuccEntry *) hash_seq_search(&seq)) != NULL)
             ordered[m++] = *se;
         qsort(ordered, (size_t) m, sizeof(SuccEntry), successor_cmp);
 
-        if (m > topk) m = topk;
+        if (bounded && m > topk) m = topk;
         for (int i = 0; i < m; i++)
         {
             bytea *object = (bytea *) palloc(VARHDRSZ + 16);

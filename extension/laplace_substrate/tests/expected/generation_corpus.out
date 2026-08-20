@@ -297,8 +297,15 @@ BEGIN
        OR EXISTS (SELECT 1 FROM generation.foundry_vocab(0, NULL)) THEN
         RAISE EXCEPTION 'FAIL: zero vocabulary limit returned rows';
     END IF;
+    IF EXISTS (SELECT 1 FROM generation.trajectory_continuations(ARRAY[w_the], 0))
+       OR EXISTS (SELECT 1 FROM structural.geometry_successors(w_the, 0, 8, false))
+       OR EXISTS (SELECT 1 FROM structural.geometry_successors(w_the, 8, 0, false))
+       OR EXISTS (SELECT 1 FROM generation.walk_continuations(ARRAY[w_the], 0, 3, 0.7, 4, 42))
+       OR EXISTS (SELECT 1 FROM generation.walk_continuations(ARRAY[w_the], 6, 3, 0.7, 0, 42)) THEN
+        RAISE EXCEPTION 'FAIL: zero generation capacity was promoted to a hidden default';
+    END IF;
 
-    RAISE NOTICE '✓ generation_corpus: trajectories are the single source — separator law by attestation, run boundaries, k-context match, seeded determinism, exact batched vocabulary heads, the consensus floor (stride_used=0), and write-then-read visibility all hold with NO corpus cache';
+    RAISE NOTICE '✓ generation_corpus: trajectories are the single source — separator law by attestation, run boundaries, k-context match, seeded determinism, exact candidate steering, zero-capacity preservation, exact batched vocabulary heads, the consensus floor (stride_used=0), and write-then-read visibility all hold with NO corpus cache';
 END $$;
-NOTICE:  ✓ generation_corpus: trajectories are the single source — separator law by attestation, run boundaries, k-context match, seeded determinism, exact batched vocabulary heads, the consensus floor (stride_used=0), and write-then-read visibility all hold with NO corpus cache
+NOTICE:  ✓ generation_corpus: trajectories are the single source — separator law by attestation, run boundaries, k-context match, seeded determinism, exact candidate steering, zero-capacity preservation, exact batched vocabulary heads, the consensus floor (stride_used=0), and write-then-read visibility all hold with NO corpus cache
 ROLLBACK;
