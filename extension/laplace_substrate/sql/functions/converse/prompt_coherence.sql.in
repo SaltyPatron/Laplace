@@ -18,9 +18,10 @@
 -- function call survives anywhere in the read.
 --
 -- Returns, per prompt token, its best sense and the signals it was chosen by:
---   specificity  coherence / own rated mass when connected; otherwise exact
---                inverse container frequency. These are alternative observed
---                signals, never an additively weighted blend.
+--   specificity  coherence / own rated mass. A candidate with no direct prompt
+--                evidence reports zero; structural rarity is a separate
+--                diagnostic and is never substituted into this differently
+--                dimensioned scalar.
 --   coherence    rated mass to the OTHER tokens' candidate senses
 --   rel_mass     rated mass in a relation type another token NAMES (the
 --                "what are the X of Y" shape, where X is a relation not a peer)

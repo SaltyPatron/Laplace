@@ -103,7 +103,6 @@ typedef struct PcTokEntry
     int32  *ords;
     int     n_ords;
     int     cap_ords;
-    double  icf;               /* inverse container frequency; see pc_load_icf */
 } PcTokEntry;
 
 typedef struct PcTypeEntry
@@ -336,109 +335,6 @@ pc_scan_edges(HTAB *syn_h, HTAB *type_h, HTAB *peer_h, PcCand *cands,
     SPI_cursor_close(portal);
 }
 
-/* ---- inverse container frequency: the specificity prior ----
- *
- * coherence is rated mass between one token's candidates and the OTHER tokens'
- * candidates. It requires a DIRECT consensus edge to exist between two
- * candidate sets, and at one hop the graph is sparse: measured 2026-08-04 on
- * the full foundation ladder, coherence was 0 on every token of "hot", "dog"
- * and "Water is made of", and fired on only 2 of 4 tokens of "What is a pawn
- * in chess". specificity is coherence/total_mass, so it was 0 too, and the
- * election fell through to ord DESC — a subject-verb-object word-order prior
- * sitting inside a substrate that is language- and modality-agnostic. It is
- * right for "What is a glacier?" and wrong for "Water is made of", for SOV and
- * VSO languages, for a chess position, and for an image.
- *
- * Containment is the signal that is always defined, because it is structural:
- * how many higher-tier entities contain this id. A token inside nearly every
- * trajectory says almost nothing about which trajectory you meant. This is IDF
- * derived from the composition hierarchy rather than from a stop-word list, so
- * it carries across languages and modalities by construction.
- *
- * One batched call to the installed structural.entity_container_degree() operation — the
- * same body diagnostics use, never a second copy of the read. Bounded by its
- * p_cap, so cost does not scale with how ubiquitous the floor is.
- *
- * Rejected alternatives, all measured on the same probe set rather than
- * reasoned about: highway popcount (the tier-0 floor scores HIGHEST — 'a' at 19
- * bands — because an atom participates in every band; that is degree, not
- * specificity), total_mass (elects 'chess' over 'pawn'; rewards volume), and
- * band-rank sum (better, but still a single hand-picked scalar). */
-static void
-pc_load_icf(HTAB *tok_h, MemoryContext work)
-{
-    HASH_SEQ_STATUS seq;
-    PcTokEntry     *tk;
-    Datum          *ids;
-    int             n = 0;
-    MemoryContext   old;
-    Oid             argtypes[1] = { BYTEAARRAYOID };
-    Datum           args[1];
-    ArrayType      *arr;
-    int             rc;
-
-    {
-        long count = hash_get_num_entries(tok_h);
-
-        if (count < 0 || (uint64) count > (uint64) INT_MAX ||
-            (Size) count > MaxAllocSize / sizeof(Datum))
-            ereport(ERROR,
-                    (errmsg("prompt_coherence: token set exceeds PostgreSQL array capacity")));
-        old = MemoryContextSwitchTo(work);
-        ids = (Datum *) palloc(sizeof(Datum) * Max(count, 1));
-        MemoryContextSwitchTo(old);
-    }
-
-    hash_seq_init(&seq, tok_h);
-    while ((tk = (PcTokEntry *) hash_seq_search(&seq)) != NULL)
-    {
-        /* Neutral default set for EVERY token before anything can fail: an
-         * unmeasured id must not be silently ranked as maximally specific. */
-        tk->icf = 1.0;
-        old = MemoryContextSwitchTo(work);
-        {
-            bytea *b = (bytea *) palloc(VARHDRSZ + 16);
-
-            SET_VARSIZE(b, VARHDRSZ + 16);
-            memcpy(VARDATA(b), tk->key, 16);
-            ids[n++] = PointerGetDatum(b);
-        }
-        MemoryContextSwitchTo(old);
-    }
-    if (n == 0)
-        return;
-
-    old = MemoryContextSwitchTo(work);
-    arr = construct_array(ids, n, BYTEAOID, -1, false, TYPALIGN_INT);
-    MemoryContextSwitchTo(old);
-    args[0] = PointerGetDatum(arr);
-
-    rc = SPI_execute_with_args(
-        "SELECT entity_id, icf FROM structural.entity_container_degree($1)",
-        1, argtypes, args, NULL, true, 0);
-    if (rc != SPI_OK_SELECT)
-        return;                 /* neutral priors already in place */
-
-    for (uint64 r = 0; r < SPI_processed; r++)
-    {
-        HeapTuple   tup = SPI_tuptable->vals[r];
-        TupleDesc   td = SPI_tuptable->tupdesc;
-        bool        isnull;
-        bytea      *eid;
-        double      icf;
-        PcTokEntry *e;
-
-        eid = DatumGetByteaPP(SPI_getbinval(tup, td, 1, &isnull));
-        if (isnull || VARSIZE_ANY_EXHDR(eid) != 16) continue;
-        icf = DatumGetFloat8(SPI_getbinval(tup, td, 2, &isnull));
-        if (isnull) continue;
-        e = (PcTokEntry *) hash_search(tok_h, VARDATA_ANY(eid), HASH_FIND, NULL);
-        if (e != NULL)
-            e->icf = icf;
-    }
-    SPI_freetuptable(SPI_tuptable);
-}
-
 Datum
 pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
 {
@@ -629,7 +525,6 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
                     tk->ords = NULL;
                     tk->n_ords = 0;
                     tk->cap_ords = 0;
-                    tk->icf = 1.0;
                 }
                 pc_int32_add(&tk->ords, &tk->n_ords, &tk->cap_ords,
                              ord, work, "token ordinals");
@@ -676,10 +571,6 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
     /* ---- coherence: two indexed range reads, O(1) probe per edge ---- */
     pc_scan_edges(syn_h, type_h, peer_h, cands, syn_arr, true);
     pc_scan_edges(syn_h, type_h, peer_h, cands, syn_arr, false);
-
-    /* The specificity prior. One batched call; see pc_load_icf for why the
-     * graph alone cannot carry this key. */
-    pc_load_icf(tok_h, work);
 
     /* ---- which of those types does a prompt token NAME? Canonical name and
      * rank come from the manifest in C; the name's object token becomes a
@@ -1219,21 +1110,19 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
                  * knob: it is the share of a candidate's OWN witnessed mass that
                  * reaches the rest of the prompt, and it is scale-free, so it
                  * does not drift as seeds land. */
-                /* The containment prior makes the key DEFINED when the graph is
-                 * silent. The share above needs a
-                 * direct edge between two candidate sets to be non-zero, and at
-                 * one hop the graph is sparse enough that it was 0 on every
-                 * token of most prompts — which is what pushed the election onto
-                 * ord DESC, an SVO word-order assumption in a substrate that is
-                 * language- and modality-agnostic.
+                /* Keep direct prompt evidence and structural rarity in separate
+                 * dimensions. They are not comparable units. The old fallback
+                 * returned ICF in this same column when share was zero, allowing
+                 * a token with NO prompt edge to outrank a token with a witnessed
+                 * edge merely because 0.058 ICF was numerically above a 0.031
+                 * coherence share. Measured in CI on "What is a pawn in chess?":
+                 * `in` beat the directly connected `pawn` by exactly that mistake.
                  *
-                 * These are alternatives, not quantities to blend. If direct
-                 * candidate-to-prompt evidence exists, its scale-free share is
-                 * the specificity. Otherwise exact inverse container frequency
-                 * is the structural fallback. The retired implementation added
-                 * ICF after multiplying it by total_mass/(total_mass+1e13); that
-                 * seed-sized half-max made the answer depend on database age.
-                 * No source or substrate law supplied that number. */
+                 * specificity therefore means one thing: the scale-free share
+                 * of this candidate's mass that reaches the rest of the prompt.
+                 * Silent candidates report zero and reach the existing separate
+                 * lexicographic fallback keys. entity_container_degree remains a
+                 * diagnostic operation; it is not smuggled into this scalar. */
                 /* A NAMER IS NOT A TOPIC (2026-08-05).
                  *
                  * Spec 37 OP3: a token that names a relation selects WHICH
@@ -1270,15 +1159,9 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
                                    : 0.0;
                     bool   is_namer = hash_search(
                         namer_h, &best->ord, HASH_FIND, NULL) != NULL;
-                    double icf = 1.0;
-                    PcTokEntry *te = (PcTokEntry *) hash_search(
-                        tok_h, best->tok, HASH_FIND, NULL);
-
-                    if (te != NULL)
-                        icf = te->icf;
 
                     values[8] = Float8GetDatum(
-                        is_namer ? -1.0 : (share > 0.0 ? share : icf));
+                        is_namer ? -1.0 : share);
                 }
                 /* The denominator, exposed raw. Computed here all along and
                  * discarded; returning it is what let the electors' first
