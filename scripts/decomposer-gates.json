@@ -401,7 +401,7 @@
         },
         {
           "relation": "MOVE",
-          "min": 1,
+          "max": 0,
           "scope": "source_evidence"
         }
       ]
@@ -419,7 +419,7 @@
         },
         {
           "relation": "MOVE",
-          "min": 1,
+          "max": 0,
           "scope": "source_evidence"
         }
       ]
