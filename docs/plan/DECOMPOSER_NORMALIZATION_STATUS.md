@@ -94,6 +94,9 @@ delivered until it is merged.
 | #1207 | Residual I/O and parser cap removal | Replaces scattered file-buffer constants with one shared sequential-I/O policy, derives generic batch/probe defaults and contiguous parser envelopes from the shared RAM/CPU topology, and removes Wiktionary's divide-by-four/max-four worker clamp. |
 | #1208 | Forced-ingest completion and consensus lookup | Separates guard bypass from marker suppression so forced ordinary sources still publish their completion marker, and gives the greenfield dynamic consensus `MERGE` an exact `(subject_id,type_id,id)` lookup path. |
 | #1209 | Accounted PostgreSQL topology and set-based completion | Replaces independent RAM/worker/pool clamps with one conserved resource plan, gives the ingest heap only its accounted client domain, removes the unexplained fold-depth subtraction and half-core maintenance limiter, changes present-attestation accumulation to one literal-routed PostgreSQL 18 `MERGE`, and replaces the terminal exact default-partition scan with `pg_stats × reltuples`. |
+| #1232 | Highway-mask index retirement | Replaces four readers that inferred relation families from an entity's accumulated incident mask with exact relation-family resolution, then removes the 119-MB entity mask GIN index that had 6.8M maintained updates and zero scans on the clean seed. |
+| #1233 | Consensus subject-index consolidation | Replaces separate subject covering and subject-rank indexes on greenfield populations with one ranked covering index, preserving the measured top-k plan while reducing index bytes and one maintained index per consensus cell. Populated installations retain their online serving pair until a separately scheduled migration. |
+| #1234 | Work-conserving fold and backend breakdown | Removes the 9,534-cell connection-fanout floor and 114,408-attestation CPU threshold, allocates live connections from actual relation-run sizes, and persists fold span plus summed consensus/mask backend time, SQL calls, and mask-pair volume for LapSight attribution. |
 | Current adaptive-capacity delivery | Live working-set residency and native set execution | Removes P/E-core headroom subtraction, replaces the global 2.5× working-set multiplier with exact exposed tier-tree capacity plus source-declared hidden residency, lets the final active file reclaim the shared compose envelope, and removes the two confirmed native per-element SPI execution paths. |
 
 The related source-fidelity audit (#1155), durable working agreement (#1156), and
@@ -221,6 +224,12 @@ delivered decomposer implementation.
   its only red gate was the suppressed marker. Clean OMW is now measured at 338 seconds
   versus 716.2 seconds before the generic resource-derived pipeline; its semantic values still
   compose at grapheme/content grain while TSV packaging creates no content physicalities.
+- The latest clean Atomic2020 journal completed in 245.4 seconds, with 147.8 seconds
+  still reported as terminal fold drain after the producer was largely complete. It folded
+  1,246,595 observations into 1,246,593 cells in 29 apply round trips. #1234 removes the
+  unrelated scheduling thresholds and makes the next run split that interval into fold span,
+  summed consensus backend work, mask backend work, SQL calls, and mask-pair volume; use that
+  receipt to choose the next SQL/write-path change rather than inferring from total wall time.
 - Re-run analyzer v3 after source eviction and confirm the completion envelope reports
   bounded `analyze_ms`, `gin_drain_ms`, and `summary_ms` without an automatic exact-source
   scan. The 1970--1989 payload itself sustained about 179 games/s and 25.6K novel rows/s.
