@@ -87,6 +87,16 @@ if [[ ! -x "$LAPLACE_PG_PREFIX/bin/psql" || ! -x "$LAPLACE_PG_PREFIX/bin/pg_conf
   exit 127
 fi
 export PATH="$LAPLACE_PG_PREFIX/bin:$PATH"
+LAPLACE_PG_MAJOR="${LAPLACE_PG_MAJOR:-$("$LAPLACE_PG_PREFIX/bin/pg_config" --version | sed -E 's/^PostgreSQL ([0-9]+).*/\1/')}"
+[[ "$LAPLACE_PG_MAJOR" =~ ^[0-9]+$ ]] || {
+  echo "::error::could not derive PostgreSQL major from $LAPLACE_PG_PREFIX/bin/pg_config" >&2
+  exit 1
+}
+# CMake's staged-install contract. Do not rediscover this with `find | head`:
+# the custom PG toolchain also carries a compatibility tree under pgsql-18/, and
+# choosing that stale duplicate produced a bridge PostgreSQL never searches.
+LAPLACE_EXT_SHAREDIR="$LAPLACE_INSTALL_PREFIX/share/postgresql/$LAPLACE_PG_MAJOR/extension"
+LAPLACE_EXT_LIBDIR="$LAPLACE_INSTALL_PREFIX/lib/postgresql/$LAPLACE_PG_MAJOR"
 # Peer auth over the runner-owned unix socket (laplace_admin). Bare psql without
 # these defaults looks for OS-user role "ahart" / a missing system socket.
 export PGHOST="${PGHOST:-/var/run/postgresql}"
@@ -146,7 +156,7 @@ EOF
 # Content digest of the libraries the postmaster preloads. Empty string when
 # neither is installed yet (first install — nothing is pinned, nothing to bounce).
 preloaded_so_digest() {
-  local d="$LAPLACE_INSTALL_PREFIX/lib/postgresql/18"
+  local d="$LAPLACE_EXT_LIBDIR"
   cat "$d/laplace_substrate.so" "$d/laplace_geom.so" 2>/dev/null | sha256sum | cut -d' ' -f1
 }
 
@@ -501,8 +511,11 @@ sync_one_extension() {
   fi
   [[ "$installed" == "$avail" ]] && { echo "OK $ext already at $avail"; return 0; }
 
-  share=$(dirname "$(find "$LAPLACE_INSTALL_PREFIX" -name "$ext.control" -not -path '*/build*' 2>/dev/null | head -1)")
-  test -n "$share" || { echo "::error::could not locate $ext.control under $LAPLACE_INSTALL_PREFIX"; exit 1; }
+  share="$LAPLACE_EXT_SHAREDIR"
+  test -f "$share/$ext.control" || {
+    echo "::error::$ext.control missing from staged extension directory $share" >&2
+    exit 1
+  }
   bridge="$share/$ext--${installed}--${avail}.sql"
   install -m 664 "$share/${ext}_upgrade.sql" "$bridge"
   alter_extension_update "$ext" "$avail" || exit 1
@@ -581,8 +594,11 @@ phase_sync_extension() {
     psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 \
       -c "CREATE EXTENSION IF NOT EXISTS laplace_substrate"
   elif [[ "$installed" != "$avail" ]]; then
-    share=$(dirname "$(find "$LAPLACE_INSTALL_PREFIX" -name laplace_substrate.control -not -path '*/build*' 2>/dev/null | head -1)")
-    test -n "$share" || { echo "::error::could not locate laplace_substrate.control under $LAPLACE_INSTALL_PREFIX"; exit 1; }
+    share="$LAPLACE_EXT_SHAREDIR"
+    test -f "$share/laplace_substrate.control" || {
+      echo "::error::laplace_substrate.control missing from staged extension directory $share" >&2
+      exit 1
+    }
     # install -m 664 (not cp): group-writable so a leftover bridge script can be
     # refreshed; cmake install already ships extension SQL as 0664.
     local bridge="$share/laplace_substrate--${installed}--${avail}.sql"
@@ -590,7 +606,7 @@ phase_sync_extension() {
     # Fail fast if on-disk .so is missing any C symbol the upgrade SQL binds.
     # Usual cause: install wrote a new .so but shared_preload still holds the
     # old image (or build tree was never reinstalled).
-    local so="$LAPLACE_INSTALL_PREFIX/lib/postgresql/18/laplace_substrate.so"
+    local so="$LAPLACE_EXT_LIBDIR/laplace_substrate.so"
     if [[ -f "$so" ]] && command -v nm >/dev/null 2>&1; then
       # ONE nm, buffered. The per-symbol `nm | grep -q` form under pipefail
       # was a coin flip: grep -q exits on first match, nm takes SIGPIPE (141),
@@ -687,7 +703,7 @@ phase_sync_extension() {
 # same wall, so the fix belongs here rather than in a per-extension exclusion.
 verify_c_symbols() {
   local so sym missing=0
-  so="$LAPLACE_INSTALL_PREFIX/lib/postgresql/18/laplace_substrate.so"
+  so="$LAPLACE_EXT_LIBDIR/laplace_substrate.so"
   [[ -f "$so" ]] || { echo "::error::verify_c_symbols: $so not found"; return 1; }
   command -v nm >/dev/null 2>&1 || { echo "verify_c_symbols: nm unavailable — skipped"; return 0; }
   echo "===== GATE — C symbol integrity ====="
