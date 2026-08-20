@@ -8,6 +8,28 @@ namespace Laplace.Substrate.Tests.Crud;
 public sealed class InstalledOpInvokerTests
 {
     [Theory]
+    [InlineData(-1, 0)]
+    [InlineData(0, 0)]
+    [InlineData(200, 200)]
+    [InlineData(2001, 2001)]
+    [InlineData(int.MaxValue, int.MaxValue)]
+    public void RequestedRowCount_HonorsTheCallerWithoutAnUpperCeiling(int requested, int expected)
+    {
+        Assert.Equal(expected, InstalledOpInvoker.RequestedRowCount(requested));
+    }
+
+    [Theory]
+    [InlineData(-1, 0)]
+    [InlineData(0, 0)]
+    [InlineData(200, 200)]
+    [InlineData(201, 201)]
+    [InlineData(int.MaxValue, int.MaxValue)]
+    public void RequestedReadLimit_HonorsTheCallerWithoutAnUpperCeiling(int requested, int expected)
+    {
+        Assert.Equal(expected, NpgsqlSubstrateReads.RequestedLimit(requested));
+    }
+
+    [Theory]
     [InlineData("substrate_health", "laplace.\"substrate_health\"")]
     [InlineData("ops.substrate_counts", "\"ops\".\"substrate_counts\"")]
     [InlineData("converse.resolve_topic", "\"converse\".\"resolve_topic\"")]

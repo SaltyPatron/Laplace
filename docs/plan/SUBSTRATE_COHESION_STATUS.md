@@ -183,6 +183,16 @@ survivors per seed. The non-empty regression proves duplicate, unresolved,
 NULL/empty, scalar/batch, ordering, and recurrence behavior. Seeded warm/cold
 plan and buffer receipts remain the final production acceptance gate.
 
+### Explicit read budgets
+
+Read adapters now preserve the caller's requested cardinality instead of
+silently rewriting it. Chess paging has no hidden 200-row ceiling and zero means
+zero; the installed-operation dispatcher has no hidden 2,000-row ceiling and
+still fetches one extra row solely to report truncation; and
+`generation.consensus_peer(p_id,p_k)` uses `p_k` for both relational election and
+geometric admission instead of a fixed 48-candidate side pool. Defaults remain
+surface choices, not lower-layer caps.
+
 ### UD acceptance
 
 The code now has exact occurrence-grain representation and much safer sizing.

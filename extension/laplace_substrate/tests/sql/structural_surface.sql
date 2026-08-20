@@ -220,4 +220,16 @@ WHERE (
   )
   AND pg_get_functiondef(p.oid) LIKE '%entity_curve%';
 
+-- consensus_peer's declared p_k is the only candidate/election budget. It used
+-- to admit a fixed 48 geometric neighbors before applying the caller's p_k,
+-- making the same API request do hidden work unrelated to its contract.
+SELECT pg_get_functiondef('generation.consensus_peer(bytea,integer)'::regprocedure)
+           NOT LIKE '%LIMIT 48%'
+       AND pg_get_functiondef('generation.consensus_peer(bytea,integer)'::regprocedure)
+           LIKE '%LIMIT GREATEST(p_k, 0)%'
+       AS consensus_peer_uses_declared_candidate_budget;
+
+SELECT generation.consensus_peer(laplace.word_id('w'), 0) IS NULL
+       AS consensus_peer_zero_budget_is_empty;
+
 -- structural_surface complete

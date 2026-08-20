@@ -1076,6 +1076,10 @@ The cleanup is complete only when all of these are true:
   interactive operations;
 - top-k results have a total order and a measured reduction path, while work and
   transport caps expose truncation/underfill;
+- caller-supplied limits pass unchanged through adapters: the chess reads no
+  longer promote zero to one or truncate requests at 200, installed operations
+  no longer truncate every explicit request above 2,000, and
+  `generation.consensus_peer` has no fixed 48-row candidate pool behind `p_k`;
 - a canonical full seed is content-addressed, resumable by phase, and completes
   inside the admitted hardware budget with required serving indexes and exact
   validation included; and

@@ -89,6 +89,8 @@ public static class InstalledOpInvoker
         int? TruncatedAt,
         string? Error);
 
+    internal static int RequestedRowCount(int maxRows) => Math.Max(0, maxRows);
+
     /// <summary>
     /// Resolve <paramref name="name"/> against the live catalog, bind named args
     /// with declared-type casts, and return rows. The endpoint hands ops a
@@ -104,7 +106,13 @@ public static class InstalledOpInvoker
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        var rowCap = Math.Clamp(maxRows, 1, 2000);
+        // maxRows is the caller's transport budget. Preserve it exactly (apart
+        // from rejecting a negative count as an empty request); the former
+        // Clamp(..., 1, 2000) silently changed both zero and every larger
+        // explicitly requested page. Fetch one extra row only to report honest
+        // truncation without imposing another ceiling.
+        var rowCap = RequestedRowCount(maxRows);
+        var rowsToFetch = (long)rowCap + 1L;
         var keys = args?.Keys.ToHashSet(StringComparer.Ordinal) ?? [];
 
         var catalog = await NpgsqlSubstrateReads.ApiCatalogAsync(db, name, ct)
@@ -155,7 +163,7 @@ public static class InstalledOpInvoker
         // `kind`. LIMIT rowCap + 1 on the function path so truncation is observable.
         var sql = isProcedure
             ? $"CALL {QualifiedCatalogName(name)}({argText})"
-            : $"SELECT * FROM {QualifiedCatalogName(name)}({argText}) LIMIT {rowCap + 1}";
+            : $"SELECT * FROM {QualifiedCatalogName(name)}({argText}) LIMIT {rowsToFetch}";
 
         await using var cmd = db.CreateCommand(sql);
         // Maintenance procedures run for as long as the work takes — a reindex of
