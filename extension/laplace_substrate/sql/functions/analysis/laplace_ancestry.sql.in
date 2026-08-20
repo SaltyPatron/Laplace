@@ -15,9 +15,7 @@ LANGUAGE sql STABLE
 BEGIN ATOMIC
     WITH RECURSIVE
         band_types AS (
-            SELECT e.id FROM laplace.entities e
-            WHERE e.highway_mask IS NOT NULL
-              AND consensus.highway_mask_bits(e.highway_mask) && consensus.highway_mask_bits(p_band_mask)
+            SELECT id FROM unnest(consensus.relation_mask_types(p_band_mask)) AS t(id)
         ),
         ancestry(ancestor_id, depth, eff_mu_raw, visited) AS (
             SELECT c.object_id, 1, consensus.eff_mu(c.rating, c.rd),

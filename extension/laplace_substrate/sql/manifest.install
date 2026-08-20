@@ -390,6 +390,7 @@ functions/taxonomy/taxonomy_tree.sql.in
 functions/ops/band_leaders.sql.in
 functions/ops/entity_record.sql.in
 functions/highway/laplace_highway_mask_bits.sql.in
+functions/relation/relation_mask_types.sql.in
 functions/highway/laplace_highway_ready.sql.in
 functions/chess/laplace_chess_position_ready.sql.in
 functions/highway/laplace_highway_mask_from_bits.sql.in
