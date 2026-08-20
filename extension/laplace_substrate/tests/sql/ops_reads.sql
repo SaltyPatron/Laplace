@@ -31,6 +31,43 @@ SELECT count(*) = 1 AS roster_excludes_bootstrap,
        bool_and(subject_id = laplace.word_id('roster-content')) AS roster_returns_content
 FROM ops.source_roster(public.laplace_hash128_blake3('test/ops/source'), 3);
 
+-- surface_sample admits the requested source×tier before ranking. A much heavier
+-- tier-3 subject cannot consume a tier-2 result slot, and zero is an exact bound.
+INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
+VALUES
+    (laplace.word_id('sample-tier2-high'), 2, public.laplace_hash128_blake3('Type'),
+     public.laplace_hash128_blake3('test/ops/source')),
+    (laplace.word_id('sample-tier2-low'), 2, public.laplace_hash128_blake3('Type'),
+     public.laplace_hash128_blake3('test/ops/source')),
+    (laplace.word_id('sample-tier3-heavy'), 3, public.laplace_hash128_blake3('Type'),
+     public.laplace_hash128_blake3('test/ops/source'))
+ON CONFLICT DO NOTHING;
+
+INSERT INTO laplace.attestations (
+    id, subject_id, type_id, object_id, source_id, context_id, outcome,
+    last_observed_at, observation_count, sum_score_fp1e9, opponent_rd_fp1e9,
+    highway_mask)
+VALUES
+    (public.laplace_hash128_blake3('test/ops/sample/tier2-high'),
+     laplace.word_id('sample-tier2-high'), laplace.relation_type_id('HAS_NAME_ALIAS'),
+     laplace.word_id('roster-label'), public.laplace_hash128_blake3('test/ops/source'),
+     NULL, 2, statement_timestamp(), 5, 5000000000, 350000000000, NULL),
+    (public.laplace_hash128_blake3('test/ops/sample/tier2-low'),
+     laplace.word_id('sample-tier2-low'), laplace.relation_type_id('HAS_NAME_ALIAS'),
+     laplace.word_id('roster-label'), public.laplace_hash128_blake3('test/ops/source'),
+     NULL, 2, statement_timestamp(), 2, 2000000000, 350000000000, NULL),
+    (public.laplace_hash128_blake3('test/ops/sample/tier3-heavy'),
+     laplace.word_id('sample-tier3-heavy'), laplace.relation_type_id('HAS_NAME_ALIAS'),
+     laplace.word_id('roster-label'), public.laplace_hash128_blake3('test/ops/source'),
+     NULL, 2, statement_timestamp(), 100, 100000000000, 350000000000, NULL);
+
+SELECT count(*) = 1 AS surface_sample_exact_bound,
+       bool_and(entity_id = laplace.word_id('sample-tier2-high')) AS surface_sample_filters_before_limit
+FROM ops.surface_sample(public.laplace_hash128_blake3('test/ops/source'), 2::smallint, 1);
+
+SELECT count(*) = 0 AS surface_sample_zero_is_empty
+FROM ops.surface_sample(public.laplace_hash128_blake3('test/ops/source'), 2::smallint, 0);
+
 -- mesh_position always yields the self row, even for an unwitnessed id
 SELECT count(*) >= 1 AS mesh_has_self,
        count(*) FILTER (WHERE dir = 'self') = 1 AS mesh_one_self
