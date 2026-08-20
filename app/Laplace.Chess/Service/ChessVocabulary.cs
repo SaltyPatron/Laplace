@@ -143,12 +143,22 @@ public static class ChessVocabulary
 
     /// <summary>
     /// One playing of a line (one PGN game record). Novelty gate and attestation context.
-    /// Closed over the decomposed line so formatting-equivalent PGNs converge. Never Chess_Event.
+    /// Closed over the decomposed line so formatting-equivalent PGNs converge, and over the
+    /// witnessed result so two source records are two playings. Never Chess_Event.
+    ///
+    /// GH #736 rules this handle provenance-shaped and SOURCE-RECORD-derived, precisely so
+    /// re-ingest is idempotent while distinct records stay distinct. Closing it over the line
+    /// alone made it a pure function of content, so the same players/date/event replaying the
+    /// same moves to a DIFFERENT result collapsed onto one playing — and HAS_RESULT is
+    /// subjected on the line with this id as its context, so the two results became
+    /// indistinguishable rather than separately recoverable. The result token restores the
+    /// record grain without reintroducing a dependency on PGN spelling.
     /// </summary>
     public static Hash128 PgnPlayingId(
         string white, string black, string date, string @event, string round, string site,
-        Hash128 lineId)
-        => Hash128.OfCanonical($"chess/playing/{white}|{black}|{date}|{@event}|{round}|{site}|{lineId}");
+        Hash128 lineId, string resultToken)
+        => Hash128.OfCanonical(
+            $"chess/playing/{white}|{black}|{date}|{@event}|{round}|{site}|{lineId}|{resultToken}");
 
     /// <summary>
     /// One playing of a live/lab game. Content-derived exactly like <see cref="PgnPlayingId"/>:

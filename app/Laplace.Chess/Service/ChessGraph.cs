@@ -21,6 +21,16 @@ public static class ChessGraph
         => ChessCompose.Position(board).Position;
 
     /// <summary>
+    /// Compose one move point without depositing its substructure atoms. Peer of
+    /// <see cref="ComposePositionPoint"/>: a CATALOG line needs the move ids for the line
+    /// merkle and its trajectory, but asserts nothing about the moves themselves, so it must
+    /// not stage the reusable move objects. A source that actually witnesses a move played
+    /// uses <see cref="EmitMove"/> instead.
+    /// </summary>
+    internal static ChessNode ComposeMovePoint(Piece moving, ChessMove move)
+        => ChessCompose.Move(moving, move).Move;
+
+    /// <summary>
     /// Stage one bounded reusable move object. A move is piece×from×to×special×promotion;
     /// it is neither a board nor testimony. Which game played it is carried by the playing
     /// trajectory, and its state transition is the separate deterministic transition floor.

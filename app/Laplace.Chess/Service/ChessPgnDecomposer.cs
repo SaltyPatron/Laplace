@@ -435,7 +435,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         string roundTag = PgnGames.TagStr(gameText, "Round");
         var eventId = ChessVocabulary.PgnEventId(eventTag, siteTag, date);
         var playingId = ChessVocabulary.PgnPlayingId(
-            whiteName, blackName, date, eventTag, roundTag, siteTag, lineId);
+            whiteName, blackName, date, eventTag, roundTag, siteTag, lineId, result.ResultToken);
 
         return new ChessGameRecord(gameText, moves, result, lineId, eventId, playingId)
         {
@@ -746,7 +746,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         Meta(b, lineId, "ON_DATE", date, src, playingId);
         Meta(b, lineId, "HAS_ECO", PgnGames.TagStr(gameText, "ECO"), src, playingId);
         Meta(b, lineId, "HAS_TERMINATION", PgnGames.TagStr(gameText, "Termination"), src, playingId);
-        Meta(b, lineId, "HAS_RESULT", result.IsDraw ? "1/2-1/2" : result.Winner == 0 ? "1-0" : "0-1", src, playingId);
+        Meta(b, lineId, "HAS_RESULT", result.ResultToken, src, playingId);
 
         string tc = PgnGames.TagStr(gameText, "TimeControl");
         Meta(b, lineId, "HAS_TIME_CONTROL", tc, src, playingId);
