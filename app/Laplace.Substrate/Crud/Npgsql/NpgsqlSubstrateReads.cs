@@ -1616,13 +1616,13 @@ public static class NpgsqlSubstrateReads
         string ObjectIdHex, string Object, decimal EffMu, long Witnesses);
 
     /// <summary>
-    /// The bounded top-M edges by salience band x eff_mu. This is the LABELING layer
+    /// The exact top-k edges by salience band x eff_mu. This is the LABELING layer
     /// over <c>consensus.top_relations</c> and nothing else.
     ///
     /// It used to hand-roll the ranking instead, on the stated grounds that
     /// top_relations ran "full-table consensus.edge_rank() measured &gt;9 minutes live". That
-    /// defect was fixed extension-side (Issue 52: bounded-candidate form, raw-eff_mu
-    /// head via consensus_eff_mu_btree, measured 0.5s at 124M) and the copy here was
+    /// defect was fixed extension-side (Issue 52: exact partition-local heads via
+    /// consensus_eff_mu_btree) and the copy here was
     /// never retired — so the API kept serving the superseded shape, with a scalar
     /// label_or_hex per row on top of it. On 2026-08-06 that query held AccessShareLock
     /// for 2h08m, queued an ALTER EXTENSION behind it, and wedged the whole read
@@ -2126,26 +2126,27 @@ public static class NpgsqlSubstrateReads
         NpgsqlDataSource dataSource, byte[] topic, int[]? bands, int limit, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
-            WITH band_types AS (
-                SELECT CASE WHEN @bands::int[] IS NULL THEN NULL::bytea[]
-                       ELSE (SELECT array_agg(e.id)
-                             FROM laplace.entities e
-                             WHERE e.type_id = laplace.entity_type_id('RelationType')
-                               AND consensus.relation_highway_band(e.id) = ANY(@bands::int[]))
-                       END AS ids
+            WITH requested_bands AS MATERIALIZED (
+                SELECT b.band, b.name, b.rank,
+                       laplace.relation_band_types(b.band) AS type_ids
+                FROM converse.relation_band_catalog() b
+                WHERE @bands::int[] IS NULL OR b.band = ANY(@bands::int[])
+            ), ranked AS MATERIALIZED (
+                SELECT b.name, b.rank, z.*
+                FROM requested_bands b
+                CROSS JOIN LATERAL consensus.edges_raw(
+                    @topic, 'both', b.type_ids, @limit, true, 'eff_mu') z
             )
-            SELECT b.name || ' · ' || consensus.relation_canonical(z.type_id) || ' → '
+            SELECT z.name || ' · ' || consensus.relation_canonical(z.type_id) || ' → '
                      || converse.label_or_hex(z.neighbour_id) AS reply,
                    consensus.eff_mu_display(z.rating, z.rd) AS eff_mu,
                    z.witness_count
-            FROM band_types bt
-            CROSS JOIN LATERAL consensus.edges_raw(
-                @topic, 'both', bt.ids,
-                GREATEST(@limit * 4, 40),
-                true, 'eff_mu') z
-            JOIN converse.relation_band_catalog() b
-              ON b.band = consensus.relation_highway_band(z.type_id)
-            ORDER BY b.rank DESC, consensus.eff_mu(z.rating, z.rd) DESC
+            FROM ranked z
+            ORDER BY z.rank DESC,
+                     consensus.eff_mu(z.rating, z.rd) DESC,
+                     z.neighbour_id,
+                     z.type_id,
+                     CASE z.direction WHEN 'out' THEN 0 ELSE 1 END
             LIMIT @limit
             """,
             MapConverseReply,

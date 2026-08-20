@@ -187,6 +187,14 @@ bound directly. Shape readers retain raw-coordinate candidate discovery but now
 admit exactly their declared candidate/output budget instead of hidden 200/500
 floors; that contract does not claim global Frechet completeness.
 
+Global relation ranking no longer treats a raw-eff_mu prefix as though it were a
+proof of salience-weighted top-k. Because relation rank is positive and constant
+inside a relation type, `consensus.top_relations` can take the exact caller-sized
+head from every type's eff_mu index and merge those sufficient heads by edge
+rank. The API's band-fact read uses the analogous proof one level up: exact
+caller-sized heads per requested band, then the declared band/eff_mu ordering.
+The former `max(5000,limit×25)` and `max(limit×4,40)` guesses are gone.
+
 PostgreSQL documents that `LIMIT` can alter plan choice but does not make an
 unordered subset deterministic. A matching B-tree can satisfy `ORDER BY ...
 LIMIT` without sorting the whole input; otherwise the sort still consumes its

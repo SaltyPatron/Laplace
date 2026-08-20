@@ -435,12 +435,10 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
     };
 
     /// <summary>
-    /// consensus.top_relations(@limit, NULL) computes consensus.edge_rank() per row over the FULL
-    /// consensus table (124M+ rows) before its LIMIT — measured >9 minutes live, which
-    /// killed /v1/explore/catalog, /v1/audit/report and /v1/visualizations/substrate.
-    /// <see cref="NpgsqlSubstrateReads.TopRelationsAsync"/> supersedes it: consensus_eff_mu_btree
-    /// serves the global top-M by raw eff_mu instantly; consensus.edge_rank(salience band x eff_mu, the
-    /// single readout law) then reorders only that candidate pool. Measured 0.5s live.
+    /// consensus.top_relations(@limit, NULL) avoids both historical failures: it
+    /// neither sorts the full consensus table nor guesses a raw-eff_mu pool. Each
+    /// relation partition contributes its exact local top-k through
+    /// consensus_eff_mu_btree, then the sufficient heads merge by edge rank.
     /// </summary>
     private static async Task<IReadOnlyList<VisualizationEdge>> ReadTopRelationsAsync(NpgsqlConnection conn, int limit, CancellationToken ct)
     {
