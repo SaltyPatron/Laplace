@@ -166,7 +166,7 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
                 // called with is a routing key and never becomes an entity.
                 playingId = ChessVocabulary.LivePlayingId(
                     session.WhitePlayerId, session.BlackPlayerId, session.LearnContext,
-                    lineId, result.IsDraw ? "1/2-1/2" : result.Winner == 0 ? "1-0" : "0-1");
+                    lineId, result.ResultToken);
                 EnsurePlayingEntity(b, playingId, session);
 
                 // The structural playing→line join the read side navigates. It carries no
@@ -399,7 +399,7 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
 
     private static void WitnessResult(SubstrateChangeBuilder b, Hash128 lineId, Hash128 eventId, GameOutcome result)
     {
-        string token = result.IsDraw ? "1/2-1/2" : result.Winner == 0 ? "1-0" : "0-1";
+        string token = result.ResultToken;
         if (ContentEmitter.Emit(b, token, ChessVocabulary.SourceId) is { } rid)
             b.AddAttestation(NativeAttestation.Categorical(
                 lineId, "HAS_RESULT", rid, ChessVocabulary.SourceId, eventId, WitnessWeight));

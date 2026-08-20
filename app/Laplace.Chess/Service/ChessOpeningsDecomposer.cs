@@ -111,9 +111,8 @@ public sealed class ChessOpeningsDecomposer(bool recursive = false)
             {
                 var mv = San.Resolve(state.Board, m.LegalActions(state), san);
                 if (mv is null) return;
-                moves.Add(ChessGraph.EmitMove(
-                    b, state.Board.Squares[mv.Value.From], mv.Value,
-                    ChessVocabulary.OpeningsSourceId, nowUs));
+                moves.Add(ChessGraph.ComposeMovePoint(
+                    state.Board.Squares[mv.Value.From], mv.Value));
                 state = m.Apply(state, mv.Value);
                 line.Add(ChessGraph.ComposePositionPoint(state.Board));
             }
