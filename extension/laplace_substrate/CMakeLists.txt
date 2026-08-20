@@ -1,4 +1,5 @@
 set(EXT_NAME laplace_substrate)
+set(EXT_MODULE_PATHNAME "${EXT_NAME}")
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/SqlManifest.cmake)
 
@@ -46,6 +47,7 @@ foreach(_f ${_ext_version_inputs})
     file(SHA256 ${_f} _fh)
     string(APPEND _ext_sql_hashes "${_fh}")
 endforeach()
+string(APPEND _ext_sql_hashes "module_pathname=${EXT_MODULE_PATHNAME}")
 string(SHA256 _ext_sql_hash "${_ext_sql_hashes}")
 string(SUBSTRING ${_ext_sql_hash} 0 16 EXT_VERSION)
 
@@ -168,7 +170,7 @@ add_custom_command(
             ${CMAKE_CURRENT_SOURCE_DIR}/sql/${EXT_NAME}.sql.in
             > ${EXT_TMP_SQL}
     COMMAND ${BASH} -c "grep -v '^#' ${EXT_TMP_SQL} \
-            | perl -lpe \"s'MODULE_PATHNAME'\\\$libdir/${EXT_NAME}'g\" \
+            | perl -lpe \"s'MODULE_PATHNAME'${EXT_MODULE_PATHNAME}'g\" \
             > ${EXT_BUILT_SQL}"
     COMMAND ${CMAKE_COMMAND} -E remove ${EXT_TMP_SQL}
     COMMENT "Preprocessing ${EXT_NAME} .sql.in → ${EXT_NAME}--${EXT_VERSION}.sql"
@@ -189,7 +191,7 @@ add_custom_command(
             ${CMAKE_CURRENT_SOURCE_DIR}/sql/${EXT_NAME}_upgrade.sql.in
             > ${EXT_UPGRADE_TMP}
     COMMAND ${BASH} -c "grep -v '^#' ${EXT_UPGRADE_TMP} \
-            | perl -lpe \"s'MODULE_PATHNAME'\\\$libdir/${EXT_NAME}'g\" \
+            | perl -lpe \"s'MODULE_PATHNAME'${EXT_MODULE_PATHNAME}'g\" \
             > ${EXT_UPGRADE_SQL}"
     COMMAND ${CMAKE_COMMAND} -E remove ${EXT_UPGRADE_TMP}
     COMMENT "Preprocessing ${EXT_NAME} upgrade body → ${EXT_NAME}_upgrade.sql"

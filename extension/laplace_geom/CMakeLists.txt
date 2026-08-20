@@ -242,6 +242,7 @@ endif()
 if(NOT EXT_NAME)
     set(EXT_NAME laplace_geom)
 endif()
+set(EXT_MODULE_PATHNAME "${EXT_NAME}")
 # EXT_VERSION is a CONTENT HASH of what actually ships, not PROJECT_VERSION.
 #
 # It was PROJECT_VERSION, which never changed, so laplace_geom had exactly one
@@ -280,6 +281,7 @@ foreach(_f ${_geom_version_inputs})
     file(SHA256 ${_f} _fh)
     string(APPEND _geom_sql_hashes "${_fh}")
 endforeach()
+string(APPEND _geom_sql_hashes "module_pathname=${EXT_MODULE_PATHNAME}")
 string(SHA256 _geom_sql_hash "${_geom_sql_hashes}")
 string(SUBSTRING ${_geom_sql_hash} 0 16 EXT_VERSION)
 
@@ -323,7 +325,7 @@ add_custom_command(
             ${CMAKE_CURRENT_SOURCE_DIR}/sql/${EXT_NAME}.sql.in
             > ${EXT_TMP_SQL}
     COMMAND ${BASH} -c "grep -v '^#' ${EXT_TMP_SQL} \
-            | perl -lpe \"s'MODULE_PATHNAME'\\\$libdir/${EXT_NAME}'g\" \
+            | perl -lpe \"s'MODULE_PATHNAME'${EXT_MODULE_PATHNAME}'g\" \
             | perl -lpe \"s'\@extschema\@\\\\.''g\" \
             > ${EXT_BUILT_SQL}"
     COMMAND ${CMAKE_COMMAND} -E remove ${EXT_TMP_SQL}
@@ -354,7 +356,7 @@ add_custom_command(
             ${CMAKE_CURRENT_SOURCE_DIR}/sql/${EXT_NAME}_upgrade.sql.in
             > ${EXT_UPGRADE_TMP}
     COMMAND ${BASH} -c "grep -v '^#' ${EXT_UPGRADE_TMP} \
-            | perl -lpe \"s'MODULE_PATHNAME'\\\$libdir/${EXT_NAME}'g\" \
+            | perl -lpe \"s'MODULE_PATHNAME'${EXT_MODULE_PATHNAME}'g\" \
             | perl -lpe \"s'\@extschema\@\\\\.''g\" \
             > ${EXT_UPGRADE_SQL}"
     COMMAND ${CMAKE_COMMAND} -E remove ${EXT_UPGRADE_TMP}
