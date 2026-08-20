@@ -1,6 +1,8 @@
 -- BEGIN ATOMIC SQL bodies pin their callees in pg_depend.  The generated
 -- relation-family surface is replaced during an extension upgrade, so remove
--- the executor and compiler in dependency order before that replacement.  The
--- current definitions are recreated after all of their dependencies exist.
+-- every installed reader that depends on it before that replacement. Their
+-- current definitions are recreated after all dependencies exist.
 DROP FUNCTION IF EXISTS converse.execute_prompt(text, bytea);
 DROP FUNCTION IF EXISTS converse.compile_prompt(text, bytea);
+DROP FUNCTION IF EXISTS chess.player_search_candidates(text[], integer);
+DROP FUNCTION IF EXISTS chess.players_by_initial(text[], integer, integer, text, text);
