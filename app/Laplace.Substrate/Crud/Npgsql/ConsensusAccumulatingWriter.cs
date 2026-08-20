@@ -676,11 +676,11 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
             //
             // highway_mask_deposit already does the whole job set-based: DISTINCT
             // over the pairs, one probe per DISTINCT type, GROUP BY entity, then a
-            // single UPDATE ... FROM m. Splitting its input across 12 concurrent
-            // transactions did not parallelise that work -- it manufactured
-            // cross-transaction contention on shared entity rows, which is precisely
-            // what the FIFO chain above then existed to suppress. C# orchestrates;
-            // the set-based work and its concurrency belong to the server.
+            // single UPDATE ... FROM. This writer now partitions work by a stable
+            // entity shard BEFORE statements are built, so concurrent shard calls are
+            // row-disjoint. SQL acquires any externally-overlapping target rows in a
+            // deterministic order; it no longer collapses the disjoint ingest calls
+            // behind one global advisory lock.
             //
             // WHY PER-CHUNK COMMITS, measured 2026-07-29 on the Wiktionary seed:
             // deposits from different deltas always overlap on hot words, so with

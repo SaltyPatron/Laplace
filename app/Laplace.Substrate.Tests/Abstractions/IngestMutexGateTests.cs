@@ -107,15 +107,13 @@ public sealed class IngestMutexGateTests
     /// Advisory-lock call sites OUTSIDE <see cref="DatabaseMutexSanctionedHome"/>,
     /// 2026-08-05. THIS LIST MAY ONLY SHRINK.
     ///
-    /// <para><c>highway_mask_deposit</c> is not the ingest mutex — it serializes mask
-    /// deposit on its own lock name, and its header records the contention measurement
-    /// that justified it. It is listed so that a SECOND SQL-side advisory lock, or any
-    /// C# one outside AdvisoryTxLock, is a named failure rather than a quiet second
-    /// mutex.</para>
+    /// <para>The former <c>highway_mask_deposit</c> exception is gone: #1183 made
+    /// mask chunks stable and entity-shard-local, and retaining its global advisory
+    /// lock serialized those disjoint writers. Cross-writer safety now comes from
+    /// deterministic target-row acquisition, not a process-wide mutex.</para>
     /// </summary>
     private static readonly HashSet<string> DatabaseMutexAllowlist = new(StringComparer.OrdinalIgnoreCase)
     {
-        "extension/laplace_substrate/sql/functions/highway/highway_mask_deposit.sql.in", // 1x @ 101
         // GH #911: session ord RMW serialization — not the ingest mutex. Keyed on
         // session id via hash128_lo; covers the empty-session FOR UPDATE gap.
         "extension/laplace_substrate/sql/functions/variant/session_record_prompt.sql.in",
@@ -377,6 +375,12 @@ public sealed class IngestMutexGateTests
         Assert.Contains($"SELECT {installedName}($1, $2)", writer,
             StringComparison.Ordinal);
         Assert.DoesNotContain("laplace.highway_mask_deposit(", writer,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("PERFORM pg_advisory_xact_lock", installer,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ORDER BY e.id, e.tier", installer,
+            StringComparison.Ordinal);
+        Assert.Contains("FOR NO KEY UPDATE OF e", installer,
             StringComparison.Ordinal);
     }
 
