@@ -1,69 +1,84 @@
 DROP FUNCTION IF EXISTS laplace.chess_ranked(integer, integer);
-CREATE OR REPLACE FUNCTION chess.ranked(p_limit integer DEFAULT 200, p_offset integer DEFAULT 0)
+DROP FUNCTION IF EXISTS chess.ranked(integer, integer, text, text);
+DROP FUNCTION IF EXISTS chess.ranked(integer, integer);
+
+-- Sortable roster core. The two-argument wrapper below preserves the established
+-- SQL/API contract while the web reader can request a real server-side order.
+CREATE FUNCTION chess.ranked(
+        p_limit integer, p_offset integer, p_sort text, p_direction text)
     RETURNS TABLE(rank bigint, player_id bytea, name text, games bigint,
                   rating double precision, rd double precision, eff_mu double precision)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
-    -- The roster as a READ of already-folded cells, not an aggregate.
-    --
-    -- chess_leaderboard() answers the same question by GROUP BY over every colour-header row
-    -- in the corpus (~400k rows, ~10s) and has to be cached to be usable. That is a cache
-    -- standing in for a fold. Each game now carries its result onto the player himself in the
-    -- aggregating lane, so the record is one consensus cell: witness_count IS games played,
-    -- rating IS the Glicko-2 strength, rd IS how sure the corpus is. Ranking is then an ORDER
-    -- BY over a single relation partition with nothing to keep warm.
-    --
-    -- The subject's ENTITY TYPE is the discriminator, deliberately. OUTCOME is the universal
-    -- aggregating edge -- positions carry it too, on the identical (OUTCOME, Chess_Result)
-    -- shape -- because "how did this thing fare" is one fact whatever is being rated. What
-    -- separates a player from a position is what it IS, which the substrate already records.
-    -- Minting a player-only outcome object to make the query easier would duplicate a fact the
-    -- entity type already states.
-    --
-    -- consensus.eff_mu, not a win percentage: Glicko-2 weighs WHO you beat, so a 68% score against 1960s
-    -- grandmasters outranks 68% against beginners instead of tying it, and a thin record sinks
-    -- on RD rather than flattering itself. A raw ratio can express neither.
-    --
-    -- LIMIT/OFFSET are the only cuts. No minimum-games floor: a one-game player is a real
-    -- witness with a wide RD, and the conservative estimate places him accordingly.
-    WITH rec AS MATERIALIZED (
+    WITH rated AS MATERIALIZED (
         SELECT c.subject_id AS player,
                c.witness_count AS games,
                c.rating,
-               c.rd
+               c.rd,
+               CASE lower(COALESCE(p_sort, 'strength'))
+                   WHEN 'games'  THEN c.witness_count::double precision
+                   WHEN 'rating' THEN c.rating::double precision
+                   WHEN 'rd'     THEN c.rd::double precision
+                   ELSE consensus.eff_mu(c.rating, c.rd)::double precision
+               END AS sort_value
         FROM laplace.entities e
         JOIN laplace.consensus c
           ON c.subject_id = e.id
          AND c.type_id = laplace.relation_type_id('OUTCOME')
         WHERE e.type_id = laplace.entity_type_id('Chess_Player')
-        ORDER BY consensus.eff_mu(c.rating, c.rd) DESC, c.subject_id
-        LIMIT p_limit OFFSET p_offset
+    ),
+    page AS MATERIALIZED (
+        -- Apply the bound before numbering. PostgreSQL can use a top-N sort here;
+        -- numbering the entire roster first made page one pay for every rank.
+        SELECT r.*
+        FROM rated r
+        ORDER BY
+            CASE WHEN lower(COALESCE(p_direction, 'desc')) = 'asc'
+                 THEN r.sort_value END ASC,
+            CASE WHEN lower(COALESCE(p_direction, 'desc')) <> 'asc'
+                 THEN r.sort_value END DESC,
+            r.player
+        LIMIT p_limit
+        OFFSET p_offset
     ),
     batch AS MATERIALIZED (
-        SELECT COALESCE(
-                   array_agg(rec.player ORDER BY consensus.eff_mu(rec.rating, rec.rd) DESC, rec.player),
-                   '{}'::bytea[]) AS ids
-        FROM rec
+        SELECT COALESCE(array_agg(page.player ORDER BY page.player), '{}'::bytea[]) AS ids
+        FROM page
     ),
     named AS (
-        -- Batched name resolution, never per-row realize.label(): resolving names one at a time is
-        -- ~45ms each and would dominate a read that is otherwise an index scan.
+        -- Name the bounded page once. Resolving one player at a time made the
+        -- otherwise-indexed roster spend nearly all of its time in rendering.
         SELECT p.id, t.txt
         FROM batch b,
              LATERAL unnest(b.ids) WITH ORDINALITY AS p(id, i),
              LATERAL unnest(realize.batch(b.ids)) WITH ORDINALITY AS t(txt, j)
         WHERE p.i = t.j
     )
-    SELECT row_number() OVER (ORDER BY consensus.eff_mu(rec.rating, rec.rd) DESC, rec.player)
-               + p_offset,
-           rec.player,
-           COALESCE(NULLIF(n.txt, ''), encode(rec.player, 'hex')),
-           rec.games,
-           -- DISPLAY units, never raw fp1e9: consensus.eff_mu_display is the one scaling law
-           -- (functions/mu/consensus.eff_mu_display.sql.in), rating/rd take the same /1e9 round.
-           round((rec.rating / 1e9)::numeric, 3)::double precision,
-           round((rec.rd / 1e9)::numeric, 3)::double precision,
-           consensus.eff_mu_display(rec.rating, rec.rd)::double precision
-    FROM rec
-    LEFT JOIN named n ON n.id = rec.player
-    ORDER BY consensus.eff_mu(rec.rating, rec.rd) DESC, rec.player
+    SELECT (p_offset + row_number() OVER (
+               ORDER BY
+                   CASE WHEN lower(COALESCE(p_direction, 'desc')) = 'asc'
+                        THEN page.sort_value END ASC,
+                   CASE WHEN lower(COALESCE(p_direction, 'desc')) <> 'asc'
+                        THEN page.sort_value END DESC,
+                   page.player))::bigint,
+           page.player,
+           COALESCE(NULLIF(n.txt, ''), encode(page.player, 'hex')),
+           page.games,
+           round((page.rating / 1e9)::numeric, 3)::double precision,
+           round((page.rd / 1e9)::numeric, 3)::double precision,
+           consensus.eff_mu_display(page.rating, page.rd)::double precision
+    FROM page
+    LEFT JOIN named n ON n.id = page.player
+    ORDER BY
+        CASE WHEN lower(COALESCE(p_direction, 'desc')) = 'asc'
+             THEN page.sort_value END ASC,
+        CASE WHEN lower(COALESCE(p_direction, 'desc')) <> 'asc'
+             THEN page.sort_value END DESC,
+        page.player
+$$;
+
+CREATE FUNCTION chess.ranked(p_limit integer DEFAULT 200, p_offset integer DEFAULT 0)
+    RETURNS TABLE(rank bigint, player_id bytea, name text, games bigint,
+                  rating double precision, rd double precision, eff_mu double precision)
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    SELECT * FROM chess.ranked(p_limit, p_offset, 'strength', 'desc')
 $$;

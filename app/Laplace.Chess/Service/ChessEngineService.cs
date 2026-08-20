@@ -408,7 +408,18 @@ public sealed class ChessEngineService : IAsyncDisposable
     {
         await EngineAsync(ct);
         var liveHost = _liveHost!;
-        var id = liveHost.StartPlaySession(recordToSubstrate, tenantId: tenantId, userId: userId);
+        var humanName = string.IsNullOrWhiteSpace(userId)
+            ? tenantId == "public" ? "Browser player" : tenantId
+            : userId;
+        var humanId = ChessVocabulary.PlayerId(humanName);
+        var id = liveHost.StartPlaySession(
+            recordToSubstrate,
+            tenantId: tenantId,
+            userId: userId,
+            whitePlayerId: humanId,
+            whitePlayerName: humanName,
+            blackPlayerId: ChessVocabulary.LaplacePlayerId,
+            blackPlayerName: "Laplace");
         var session = liveHost.GetPlaySession(id)
             ?? throw new InvalidOperationException("play session missing after start");
 

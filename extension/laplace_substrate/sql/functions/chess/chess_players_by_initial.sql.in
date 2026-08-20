@@ -1,59 +1,67 @@
 DROP FUNCTION IF EXISTS laplace.chess_players_by_initial(text, integer, integer);
-CREATE OR REPLACE FUNCTION chess.players_by_initial(
-        p_initial text, p_limit integer DEFAULT 50, p_offset integer DEFAULT 0)
+DROP FUNCTION IF EXISTS chess.players_by_initial(text, integer, integer, text, text);
+DROP FUNCTION IF EXISTS chess.players_by_initial(text, integer, integer);
+
+CREATE FUNCTION chess.players_by_initial(
+        p_initial text, p_limit integer, p_offset integer, p_sort text, p_direction text)
     RETURNS TABLE(player_id bytea, name text, games bigint,
                   rating double precision, rd double precision, eff_mu double precision)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
-    -- Browse the roster by first letter, WITHOUT rendering a single name.
-    --
-    -- A player's name is content, and composed content packs its constituent ids into the
-    -- trajectory mantissa -- so the first codepoint of a name is vertex 1 of that name's
-    -- trajectory, and laplace.word_id('T') IS that codepoint's tier-0 entity. Matching them is an
-    -- equality test on an indexed expression over the authoritative geometry
-    -- (physicalities_traj_first_id_btree), not a scan and not a string comparison.
-    --
-    -- This is the access path constituent_edges was reaching for, done as an INDEX instead
-    -- of a hand-refreshed side table: Postgres maintains an expression index on write, so
-    -- there is nothing to regenerate and nothing that can go silently empty. The expression
-    -- must match physicalities_traj_first_id_btree exactly or the scan falls back to a seq.
-    --
-    -- Ordered by consensus.eff_mu within the letter, for the same reason the roster is: strength is
-    -- what the fold knows, and a thin record sinks on its own RD rather than surfacing just
-    -- because it sorts early. Names are resolved ONCE for the page, batched.
     WITH target AS MATERIALIZED (
-        -- The tier-0 codepoint for the requested initial. Single-character content IS its
-        -- codepoint entity, so this needs no separate lookup table.
-        SELECT laplace.word_id(left(btrim(p_initial), 1)) AS cp
+        SELECT ARRAY[
+            laplace.word_id(upper(left(btrim(p_initial), 1))),
+            laplace.word_id(lower(left(btrim(p_initial), 1)))
+        ] AS cps
     ),
-    named AS MATERIALIZED (
-        -- Name laplace.entities whose FIRST constituent is that codepoint -- index range scan.
+    name_ids AS MATERIALIZED (
+        -- This expression is exactly the physicalities_traj_first_id_btree key.
         SELECT w.id AS name_id
         FROM laplace.v_word_points w, target t
         WHERE w.trajectory IS NOT NULL
-          AND (public.laplace_trajectory_constituent_ids(w.trajectory))[1] = t.cp
+          AND (public.laplace_trajectory_constituent_ids(w.trajectory))[1] = ANY (t.cps)
     ),
     players AS MATERIALIZED (
-        -- Back to the players those names belong to. HAS_NAME_ALIAS is the edge the chess
-        -- decomposer writes; the join is on the consensus cell, so an unnamed or consensus.refuted
-        -- alias never surfaces a player.
+        -- Primary names and aliases are both names. Restricting this to
+        -- HAS_NAME_ALIAS hid players whose PGN supplied a primary name (including
+        -- Karpov and Fischer) even though the normal label resolver showed them.
         SELECT DISTINCT c.subject_id AS player
         FROM laplace.consensus c
-        JOIN named n ON n.name_id = c.object_id
-        WHERE c.type_id = laplace.relation_type_id('HAS_NAME_ALIAS')
+        JOIN name_ids n ON n.name_id = c.object_id
+        WHERE c.type_id = ANY (
+            consensus.relation_family_ids('HAS_NAME')
+            || consensus.relation_family_ids('HAS_NAME_ALIAS'))
     ),
     rated AS MATERIALIZED (
-        -- Only players the fold has actually rated, ranked by the conservative estimate.
-        SELECT p.player, o.witness_count AS games, o.rating, o.rd
+        SELECT p.player,
+               o.witness_count AS games,
+               o.rating,
+               o.rd,
+               CASE lower(COALESCE(p_sort, 'strength'))
+                   WHEN 'games'  THEN o.witness_count::double precision
+                   WHEN 'rating' THEN o.rating::double precision
+                   WHEN 'rd'     THEN o.rd::double precision
+                   ELSE consensus.eff_mu(o.rating, o.rd)::double precision
+               END AS sort_value
         FROM players p
         JOIN laplace.consensus o
           ON o.subject_id = p.player
          AND o.type_id = laplace.relation_type_id('OUTCOME')
-        ORDER BY consensus.eff_mu(o.rating, o.rd) DESC, p.player
-        LIMIT p_limit OFFSET p_offset
+    ),
+    page AS MATERIALIZED (
+        SELECT r.*
+        FROM rated r
+        ORDER BY
+            CASE WHEN lower(COALESCE(p_direction, 'desc')) = 'asc'
+                 THEN r.sort_value END ASC,
+            CASE WHEN lower(COALESCE(p_direction, 'desc')) <> 'asc'
+                 THEN r.sort_value END DESC,
+            r.player
+        LIMIT p_limit
+        OFFSET p_offset
     ),
     batch AS MATERIALIZED (
-        SELECT COALESCE(array_agg(rated.player ORDER BY rated.player), '{}'::bytea[]) AS ids
-        FROM rated
+        SELECT COALESCE(array_agg(page.player ORDER BY page.player), '{}'::bytea[]) AS ids
+        FROM page
     ),
     surfaced AS (
         SELECT q.id, t.txt
@@ -62,15 +70,27 @@ CREATE OR REPLACE FUNCTION chess.players_by_initial(
              LATERAL unnest(realize.batch(b.ids)) WITH ORDINALITY AS t(txt, j)
         WHERE q.i = t.j
     )
-    SELECT rated.player,
-           COALESCE(NULLIF(s.txt, ''), encode(rated.player, 'hex')),
-           rated.games,
-           -- DISPLAY units, never raw fp1e9: consensus.eff_mu_display is the one scaling law
-           -- (functions/mu/consensus.eff_mu_display.sql.in), rating/rd take the same /1e9 round.
-           round((rated.rating / 1e9)::numeric, 3)::double precision,
-           round((rated.rd / 1e9)::numeric, 3)::double precision,
-           consensus.eff_mu_display(rated.rating, rated.rd)::double precision
-    FROM rated
-    LEFT JOIN surfaced s ON s.id = rated.player
-    ORDER BY consensus.eff_mu(rated.rating, rated.rd) DESC, rated.player
+    SELECT page.player,
+           COALESCE(NULLIF(s.txt, ''), encode(page.player, 'hex')),
+           page.games,
+           round((page.rating / 1e9)::numeric, 3)::double precision,
+           round((page.rd / 1e9)::numeric, 3)::double precision,
+           consensus.eff_mu_display(page.rating, page.rd)::double precision
+    FROM page
+    LEFT JOIN surfaced s ON s.id = page.player
+    ORDER BY
+        CASE WHEN lower(COALESCE(p_direction, 'desc')) = 'asc'
+             THEN page.sort_value END ASC,
+        CASE WHEN lower(COALESCE(p_direction, 'desc')) <> 'asc'
+             THEN page.sort_value END DESC,
+        page.player
+$$;
+
+CREATE FUNCTION chess.players_by_initial(
+        p_initial text, p_limit integer DEFAULT 50, p_offset integer DEFAULT 0)
+    RETURNS TABLE(player_id bytea, name text, games bigint,
+                  rating double precision, rd double precision, eff_mu double precision)
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    SELECT * FROM chess.players_by_initial(
+        p_initial, p_limit, p_offset, 'strength', 'desc')
 $$;

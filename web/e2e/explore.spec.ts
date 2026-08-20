@@ -3,15 +3,41 @@ import { test, expect } from '@playwright/test';
 test('Explore tab loads warehouse', async ({ page }) => {
   await page.goto('/explore');
   await expect(page.getByRole('heading', { name: 'Substrate warehouse' })).toBeVisible();
-  await expect(page.getByPlaceholder('word, ILI, frame, or id hex…')).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'Find anything in the substrate' })).toBeVisible();
 });
 
 test('Explore resolve navigates to entity preview', async ({ page }) => {
   await page.goto('/explore');
-  await page.getByPlaceholder('word, ILI, frame, or id hex…').fill('whale');
-  await page.getByRole('button', { name: 'Resolve' }).click();
+  await page.getByRole('textbox', { name: 'Find anything in the substrate' }).fill('whale');
+  await page.getByRole('button', { name: 'Open' }).click();
   await expect(page).toHaveURL(/\/explore\/entity\/[0-9a-f]{32}/i, { timeout: 15_000 });
   await expect(page.getByRole('heading', { level: 2 }).first()).toBeVisible({ timeout: 15_000 });
+});
+
+test('Explore routes an unwitnessed result to the geometric neighborhood', async ({ page }) => {
+  await page.route('**/v1/explore/catalog', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ counts: [], consensus: null, top_relations: [], sources: [], stages: [], featured_refs: [] }),
+    });
+  });
+  await page.route('**/v1/explore/resolve?**', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        id_hex: '00000000000000000000000000000000',
+        label: 'unheld',
+        ref_kind: 'word',
+        exists: false,
+        preview_facts: [],
+      }),
+    });
+  });
+
+  await page.goto('/explore');
+  await page.getByRole('textbox', { name: 'Find anything in the substrate' }).fill('unheld');
+  await page.getByRole('button', { name: 'Open' }).click();
+  await expect(page).toHaveURL('/explore/notfound/unheld');
 });
 
 test('Glome canvas mounts after unlock', async ({ page }) => {

@@ -77,6 +77,11 @@
     min-width: 0;
   }
 
+  .rosterFilter {
+    width: min(100%, 34rem);
+    margin-bottom: var(--space-3);
+  }
+
   .rosterRow:last-child { border-bottom: none; }
 
   .rosterSubject {
