@@ -8,8 +8,10 @@
 --     count(*) FROM (SELECT fn()) q does not evaluate fn() at all -- the count needs
 --     no column, so the planner elides the call and every scalar leaf reports as
 --     instant. That mistake reported separator_ids at 0.2ms against a real 10-26s.
---   * the sweep sets statement_timeout AND lock_timeout at SESSION level, so one slow function
---     does not end the sweep. ops.consensus_tier_distribution takes 9.2 minutes.
+--   * the caps are SESSION level (issued by the procedure from its p_cap argument), not
+--     SET LOCAL. This procedure COMMITs after every function, so a SET LOCAL would be
+--     dropped each iteration and silently do nothing -- measured, converse.hypernyms ran
+--     4.5 MINUTES under a 2s cap that was never in force. A session SET survives COMMIT.
 --
 -- Comments are stripped before the call graph is built: matching function names in
 -- raw pg_get_functiondef counts prose mentions as calls and invents cycles.
@@ -102,15 +104,21 @@ CREATE TABLE IF NOT EXISTS laplace.sql_tier_sweep(
     measured_at timestamptz DEFAULT now());
 DELETE FROM laplace.sql_tier_sweep WHERE tier = :tier;
 
--- NO p_cap PARAMETER. It was declared and never read: the caps are set at SESSION
--- level below, because this procedure COMMITs after every function and a SET LOCAL is
--- transaction-scoped, so a per-iteration cap is dropped and silently does nothing --
--- measured, converse.hypernyms ran 4.5 MINUTES under a 2s cap that was never in force.
--- A parameter the body cannot honour is a lie about the API; the caller sets the caps.
-CREATE OR REPLACE PROCEDURE laplace.sql_tier_sweep_run(p_tier int)
+-- p_cap IS HONOURED, via a dynamic SET issued once inside the body.
+--
+-- SET LOCAL would NOT work here: it is transaction-scoped and this procedure COMMITs
+-- after every function, so a per-iteration SET LOCAL is dropped and silently does
+-- nothing -- measured, converse.hypernyms ran 4.5 MINUTES under a 2s cap that was never
+-- in force. A plain session-level SET DOES survive COMMIT, so issuing it once here
+-- puts the caller's cap in force for the whole sweep.
+--
+-- It has to be dynamic: SET takes a literal, not a plpgsql variable.
+CREATE OR REPLACE PROCEDURE laplace.sql_tier_sweep_run(p_tier int, p_cap text DEFAULT '2s')
 LANGUAGE plpgsql AS $proc$
 DECLARE r record; t0 timestamptz; n bigint; nn bigint; call text;
 BEGIN
+  EXECUTE format('SET statement_timeout = %L', p_cap);
+  EXECUTE format('SET lock_timeout = %L', p_cap);
   FOR r IN SELECT DISTINCT ON (fq) fq, proretset, arglist FROM calls ORDER BY fq LOOP
     IF r.arglist LIKE '%<<unfixtured:%' THEN
       INSERT INTO laplace.sql_tier_sweep(fq,tier,err)
@@ -145,8 +153,9 @@ END $proc$;
 -- 4.5 MINUTES under a 2s cap that was never in force. lock_timeout matters too --
 -- statement_timeout does not bound a lock wait, and a sweep convoys behind any
 -- AccessExclusive request (ALTER EXTENSION).
-SET statement_timeout = '2s';
-SET lock_timeout = '2s';
+-- The CAP IS THE PROCEDURE'S ARGUMENT, not a session setting the caller pokes in
+-- beside it. The body issues it as a dynamic SET so there is one source of truth and
+-- passing a different cap actually changes the sweep.
 CALL laplace.sql_tier_sweep_run(:tier);
 RESET statement_timeout;
 RESET lock_timeout;
