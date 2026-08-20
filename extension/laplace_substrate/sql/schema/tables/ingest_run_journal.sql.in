@@ -47,6 +47,12 @@ CREATE TABLE IF NOT EXISTS ingest_run_journal (
     input_units_total  bigint       NOT NULL DEFAULT 0,
     fold_drain_ms      bigint       NOT NULL DEFAULT 0,
     writer_maintenance_ms bigint     NOT NULL DEFAULT 0,
+    fold_span_ms       bigint       NOT NULL DEFAULT 0,
+    consensus_backend_ms bigint     NOT NULL DEFAULT 0,
+    highway_mask_backend_ms bigint  NOT NULL DEFAULT 0,
+    consensus_calls    bigint       NOT NULL DEFAULT 0,
+    highway_mask_calls bigint       NOT NULL DEFAULT 0,
+    highway_mask_pairs bigint       NOT NULL DEFAULT 0,
     evidence_persisted boolean      NOT NULL DEFAULT true,
     error              text
 );
@@ -57,6 +63,18 @@ ALTER TABLE ingest_run_journal
     ADD COLUMN IF NOT EXISTS fold_drain_ms bigint NOT NULL DEFAULT 0;
 ALTER TABLE ingest_run_journal
     ADD COLUMN IF NOT EXISTS writer_maintenance_ms bigint NOT NULL DEFAULT 0;
+ALTER TABLE ingest_run_journal
+    ADD COLUMN IF NOT EXISTS fold_span_ms bigint NOT NULL DEFAULT 0;
+ALTER TABLE ingest_run_journal
+    ADD COLUMN IF NOT EXISTS consensus_backend_ms bigint NOT NULL DEFAULT 0;
+ALTER TABLE ingest_run_journal
+    ADD COLUMN IF NOT EXISTS highway_mask_backend_ms bigint NOT NULL DEFAULT 0;
+ALTER TABLE ingest_run_journal
+    ADD COLUMN IF NOT EXISTS consensus_calls bigint NOT NULL DEFAULT 0;
+ALTER TABLE ingest_run_journal
+    ADD COLUMN IF NOT EXISTS highway_mask_calls bigint NOT NULL DEFAULT 0;
+ALTER TABLE ingest_run_journal
+    ADD COLUMN IF NOT EXISTS highway_mask_pairs bigint NOT NULL DEFAULT 0;
 
 CREATE INDEX IF NOT EXISTS ingest_run_journal_source_started
     ON ingest_run_journal (source_name, started_at DESC);

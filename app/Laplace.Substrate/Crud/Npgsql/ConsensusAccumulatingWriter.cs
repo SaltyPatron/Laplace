@@ -74,6 +74,12 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
 
     private long _observations;
     private long _cellsFolded;
+    private long _consensusBackendTicks;
+    private long _highwayMaskBackendTicks;
+    private long _consensusUpsertCalls;
+    private long _highwayMaskCalls;
+    private long _highwayMaskPairs;
+    private long _foldSpanStarted;
     private int _inflightApplies;
     private volatile bool _disposing;
 
@@ -136,6 +142,20 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
     public TimeSpan LastFoldDrainWallClock { get; private set; }
 
     public TimeSpan LastWriterMaintenanceWallClock { get; private set; }
+
+    public TimeSpan LastFoldSpanWallClock { get; private set; }
+
+    public TimeSpan ConsensusUpsertBackendWallClock => StopwatchTime(
+        Interlocked.Read(ref _consensusBackendTicks));
+
+    public TimeSpan HighwayMaskBackendWallClock => StopwatchTime(
+        Interlocked.Read(ref _highwayMaskBackendTicks));
+
+    public long ConsensusUpsertCalls => Interlocked.Read(ref _consensusUpsertCalls);
+
+    public long HighwayMaskCalls => Interlocked.Read(ref _highwayMaskCalls);
+
+    public long HighwayMaskPairs => Interlocked.Read(ref _highwayMaskPairs);
 
     public Task<ApplyResult> ApplyAsync(SubstrateChange change, CancellationToken ct = default)
         => ApplyManyAsync(new[] { change }, ct);
@@ -260,8 +280,8 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
         // The per-row Interlocked.Add on _observations is gone: it was a locked
         // bus operation per attestation on what was a single-threaded loop.
         // Shards count locally and publish once.
-        int workers = total >= FoldSizing.ParallelDeltaMinAttestations
-            ? Math.Max(1, CpuTopology.PerformanceCoreCount)
+        int workers = _bulkRun
+            ? (int)Math.Min(total, Math.Max(1, CpuTopology.PerformanceCoreCount))
             : 1;
 
         if (workers == 1)
@@ -477,6 +497,8 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
             runs.Add((cells[i].Key.T, i, j - i));
             i = j;
         }
+        int[] runWidths = IngestSizing.AllocateFoldRunWidths(
+            runs.Select(static r => r.Len).ToArray(), FoldConnections);
 
         var sw = System.Diagnostics.Stopwatch.StartNew();
         long folded = 0, masks = 0;
@@ -492,11 +514,13 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
         // body on the pool keeps the critical section to dictionary writes.
         lock (_laneLock)
         {
-            foreach (var run in runs)
+            for (int runIndex = 0; runIndex < runs.Count; runIndex++)
             {
+                var run = runs[runIndex];
                 var prior = _typeLanes.TryGetValue(run.Type, out var p) ? p : Task.CompletedTask;
                 var r = run;
-                var next = Task.Run(() => FoldRunAfterAsync(prior, r));
+                int width = runWidths[runIndex];
+                var next = Task.Run(() => FoldRunAfterAsync(prior, r, width));
                 _typeLanes[run.Type] = next;
                 completions.Add(next);
             }
@@ -547,7 +571,8 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                 folded / Math.Max(1e-3, sw.Elapsed.TotalSeconds));
         }
 
-        async Task FoldRunAfterAsync(Task prior, (Hash128 Type, int Off, int Len) run)
+        async Task FoldRunAfterAsync(
+            Task prior, (Hash128 Type, int Off, int Len) run, int connectionWidth)
         {
             // A faulted predecessor rethrows here: the lane stays poisoned and
             // every later segment on it (and the drain) sees the failure.
@@ -561,31 +586,25 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
             // construction, and consensus_upsert's per-type loop still gives
             // every call runtime-pruned, type-major-ordered writes. Each chunk
             // commits its own transaction.
-            // Segment size FANS OUT to the connection budget instead of a fixed
-            // 65,536 (2026-07-23). The fixed chunk was sized for huge deltas
-            // (documents, models) and silently degraded single-type-dominated,
-            // file-grain workloads to ONE connection: a chess-eval census whose
-            // deltas were ~90% HAS_EVAL folded at ~1.5k cells/s while eleven
-            // connections idled — measured 14-20x under the 21-36k cells/s this
-            // same fold recorded on OMW's multi-type deltas. Safety is unchanged
-            // and was never the chunk boundary's job: cells are client-deduped,
-            // so ANY chunking is row-disjoint. MinSegmentCells is the byte-derived
-            // per-connection chunk divided across the live connection topology;
-            // it is not the retired 2,048-cell floor.
-            int segLen = Math.Clamp(
-                (run.Len + FoldConnections - 1) / FoldConnections,
-                FoldSizing.MinSegmentCells,
-                FoldSizing.ChunkCells);
+            // Connection width is allocated across ALL type runs in this delta by
+            // actual run size. There is no minimum-cell threshold: a single-type
+            // delta receives the live topology, while many independent type runs
+            // each receive a lane and share the global gate. ChunkCells remains
+            // only the byte-derived maximum parameter-array residency per command.
+            int segLen = Math.Min(
+                FoldSizing.ChunkCells,
+                (run.Len + connectionWidth - 1) / connectionWidth);
             var segments = new List<(int Off, int Len)>();
             for (int s = run.Off; s < run.Off + run.Len; s += segLen)
                 segments.Add((s, Math.Min(segLen, run.Off + run.Len - s)));
 
             await Parallel.ForEachAsync(segments,
-                new ParallelOptions { MaxDegreeOfParallelism = FoldConnections, CancellationToken = ct },
+                new ParallelOptions { MaxDegreeOfParallelism = connectionWidth, CancellationToken = ct },
                 async (seg, token) =>
             {
                 // Global budget, not the per-loop width: see _foldConnections.
                 await _foldConnections.WaitAsync(token).ConfigureAwait(false);
+                long backendStarted = System.Diagnostics.Stopwatch.GetTimestamp();
                 try
                 {
                 await using var conn = await _ds.OpenConnectionAsync(token);
@@ -648,7 +667,13 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                 await tx.CommitAsync(token);
                 Interlocked.Add(ref folded, segFolded);
                 }
-                finally { _foldConnections.Release(); }
+                finally
+                {
+                    Interlocked.Add(ref _consensusBackendTicks,
+                        System.Diagnostics.Stopwatch.GetTimestamp() - backendStarted);
+                    Interlocked.Increment(ref _consensusUpsertCalls);
+                    _foldConnections.Release();
+                }
             });
         }
 
@@ -720,6 +745,8 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                 }
 
                 await _foldConnections.WaitAsync(ct).ConfigureAwait(false);
+                long backendStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+                Interlocked.Add(ref _highwayMaskPairs, m);
                 try
                 {
                     await using var conn = await _ds.OpenConnectionAsync(ct);
@@ -734,7 +761,13 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                     dep += (long)(await mask.ExecuteScalarAsync(ct) ?? 0L);
                     await tx.CommitAsync(ct);
                 }
-                finally { _foldConnections.Release(); }
+                finally
+                {
+                    Interlocked.Add(ref _highwayMaskBackendTicks,
+                        System.Diagnostics.Stopwatch.GetTimestamp() - backendStarted);
+                    Interlocked.Increment(ref _highwayMaskCalls);
+                    _foldConnections.Release();
+                }
             }
 
             long maskTotal = dep;
@@ -770,6 +803,9 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
     private static DateTime TsFromUnixUs(long unixUs)
         => DateTime.UnixEpoch.AddTicks(unixUs * 10);
 
+    private static TimeSpan StopwatchTime(long ticks)
+        => TimeSpan.FromSeconds(ticks / (double)System.Diagnostics.Stopwatch.Frequency);
+
     /// <summary>
     /// Inline fold: dispatch and AWAIT. Online lanes (feedback → immediate fold →
     /// next walk) require read-your-writes consensus.
@@ -791,6 +827,10 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
         Task dispatched;
         try
         {
+            Interlocked.CompareExchange(
+                ref _foldSpanStarted,
+                System.Diagnostics.Stopwatch.GetTimestamp(),
+                comparand: 0);
             dispatched = DispatchDeltaAsync(delta, ct);
         }
         catch
@@ -866,6 +906,15 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
 
     public Task BeginBulkRunAsync(CancellationToken ct = default)
     {
+        Interlocked.Exchange(ref _consensusBackendTicks, 0);
+        Interlocked.Exchange(ref _highwayMaskBackendTicks, 0);
+        Interlocked.Exchange(ref _consensusUpsertCalls, 0);
+        Interlocked.Exchange(ref _highwayMaskCalls, 0);
+        Interlocked.Exchange(ref _highwayMaskPairs, 0);
+        LastFoldDrainWallClock = TimeSpan.Zero;
+        LastWriterMaintenanceWallClock = TimeSpan.Zero;
+        LastFoldSpanWallClock = TimeSpan.Zero;
+        Interlocked.Exchange(ref _foldSpanStarted, 0);
         _bulkRun = true;
         FoldSizing.Log();
         return _inner.BeginBulkRunAsync(ct);
@@ -891,6 +940,9 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
             foldFailure = ex;
         }
         LastFoldDrainWallClock = phaseSw.Elapsed;
+        LastFoldSpanWallClock = _foldSpanStarted == 0
+            ? TimeSpan.Zero
+            : System.Diagnostics.Stopwatch.GetElapsedTime(_foldSpanStarted);
         bool wasBulk = _bulkRun;
         _bulkRun = false;
         Exception? completionFailure = null;

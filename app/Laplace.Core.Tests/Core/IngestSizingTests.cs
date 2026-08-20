@@ -221,8 +221,6 @@ public sealed class IngestSizingTests
         Assert.Equal(12, plan.Connections);
         Assert.Equal((512L << 20) / 12 / MemoryTopology.ConsensusFoldTransitBytesPerCell,
             plan.ChunkCells);
-        Assert.Equal(plan.ChunkCells / plan.Connections, plan.MinSegmentCells);
-        Assert.Equal(plan.ChunkCells, plan.ParallelDeltaMinAttestations);
         Assert.Equal(8, plan.PipelineDepth);
         Assert.Equal((512L << 20) / MemoryTopology.ConsensusFoldBytesPerRelation,
             plan.DeltaCapacityCells);
@@ -236,6 +234,16 @@ public sealed class IngestSizingTests
             workingSetBudgetBytes: 4L << 30,
             flushEnvelopeBytes: 256L << 20);
         Assert.Equal(plan.ChunkCells / 2, halfEnvelope.ChunkCells);
+    }
+
+    [Fact]
+    public void AllocateFoldRunWidths_DistributesConnectionsByActualRunLoad()
+    {
+        Assert.Equal(new[] { 12 }, IngestSizing.AllocateFoldRunWidths([120], 12));
+        Assert.Equal(new[] { 10, 1, 1 }, IngestSizing.AllocateFoldRunWidths([100, 10, 10], 12));
+        Assert.Equal(new[] { 1, 1, 1 }, IngestSizing.AllocateFoldRunWidths([1, 1, 1], 12));
+        Assert.All(IngestSizing.AllocateFoldRunWidths(Enumerable.Repeat(10, 20).ToArray(), 12),
+            width => Assert.Equal(1, width));
     }
 
     [Fact]

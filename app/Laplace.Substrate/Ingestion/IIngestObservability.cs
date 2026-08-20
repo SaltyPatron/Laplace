@@ -42,7 +42,9 @@ public interface IIngestObservability
 
     /// <summary>Persist the measured terminal barriers for LapSight.</summary>
     void OnBulkCompletion(
-        string sourceName, TimeSpan foldDrain, TimeSpan writerMaintenance) { }
+        string sourceName, TimeSpan foldDrain, TimeSpan writerMaintenance,
+        TimeSpan foldSpan, TimeSpan consensusBackendWork, TimeSpan highwayMaskBackendWork,
+        long consensusCalls, long highwayMaskCalls, long highwayMaskPairs) { }
 
     /// <summary>A file was opened for ingest. The file boundary is already a real unit
     /// with a real identity — per-file resume (GH #898) deposits a HasLayerCompleted

@@ -257,17 +257,27 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
     }
 
     public void OnBulkCompletion(
-        string sourceName, TimeSpan foldDrain, TimeSpan writerMaintenance)
+        string sourceName, TimeSpan foldDrain, TimeSpan writerMaintenance,
+        TimeSpan foldSpan, TimeSpan consensusBackendWork, TimeSpan highwayMaskBackendWork,
+        long consensusCalls, long highwayMaskCalls, long highwayMaskPairs)
     {
         if (!_active) return;
         Execute(
-            "UPDATE laplace.ingest_run_journal SET fold_drain_ms = $2, writer_maintenance_ms = $3 "
+            "UPDATE laplace.ingest_run_journal SET fold_drain_ms = $2, writer_maintenance_ms = $3, "
+            + "fold_span_ms = $4, consensus_backend_ms = $5, highway_mask_backend_ms = $6, "
+            + "consensus_calls = $7, highway_mask_calls = $8, highway_mask_pairs = $9 "
             + "WHERE run_id = $1",
             cmd =>
             {
                 cmd.Parameters.Add(new NpgsqlParameter { Value = _runId, NpgsqlDbType = NpgsqlDbType.Uuid });
                 cmd.Parameters.Add(new NpgsqlParameter { Value = (long)foldDrain.TotalMilliseconds });
                 cmd.Parameters.Add(new NpgsqlParameter { Value = (long)writerMaintenance.TotalMilliseconds });
+                cmd.Parameters.Add(new NpgsqlParameter { Value = (long)foldSpan.TotalMilliseconds });
+                cmd.Parameters.Add(new NpgsqlParameter { Value = (long)consensusBackendWork.TotalMilliseconds });
+                cmd.Parameters.Add(new NpgsqlParameter { Value = (long)highwayMaskBackendWork.TotalMilliseconds });
+                cmd.Parameters.Add(new NpgsqlParameter { Value = consensusCalls });
+                cmd.Parameters.Add(new NpgsqlParameter { Value = highwayMaskCalls });
+                cmd.Parameters.Add(new NpgsqlParameter { Value = highwayMaskPairs });
             });
     }
 

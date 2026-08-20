@@ -143,6 +143,12 @@ public class ConsensusAccumulatingWriterTests
             completionPhases);
         Assert.True(accumulator.LastFoldDrainWallClock >= TimeSpan.Zero);
         Assert.True(accumulator.LastWriterMaintenanceWallClock >= TimeSpan.Zero);
+        Assert.True(accumulator.LastFoldSpanWallClock > TimeSpan.Zero);
+        Assert.True(accumulator.ConsensusUpsertBackendWallClock > TimeSpan.Zero);
+        Assert.True(accumulator.HighwayMaskBackendWallClock > TimeSpan.Zero);
+        Assert.True(accumulator.ConsensusUpsertCalls >= 1);
+        Assert.True(accumulator.HighwayMaskCalls >= 1);
+        Assert.True(accumulator.HighwayMaskPairs >= 1);
         Assert.NotNull(await ConsensusRowAsync(subj, relType, o1));
         Assert.NotNull(await ConsensusRowAsync(subj, relType, o2));
     }
