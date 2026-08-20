@@ -200,6 +200,16 @@ fixed 24-child pool or ten-step climb, and the cycle-safe greedy
 omission means complete; HTTP/MCP publish their presentation defaults as
 arguments and pass any non-negative caller value unchanged.
 
+### Extension deployment path
+
+The deploy bridge now writes to CMake's staged extension directory
+`$prefix/share/postgresql/$major/extension` directly. The previous
+`find $prefix -name control | head -1` could select the stale custom-toolchain
+compatibility tree under `pgsql-18/share`; PostgreSQL never searched the bridge
+written there, so every merge after the database remained on
+`37244dffc7237ab1` failed with “no update path.” Library digest and symbol gates
+now use the same derived major/version directory rather than hard-coding 18.
+
 ### UD acceptance
 
 The code now has exact occurrence-grain representation and much safer sizing.
