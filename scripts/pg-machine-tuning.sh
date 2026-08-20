@@ -12,17 +12,39 @@
 # NO hardcoded GB literals for RAM-derived knobs.
 
 pg_compute_machine_tuning() {
-  local mem_kb cores pcores pdeg mwp avw mwm wm wb iow
+  local mem_kb cores pcores pdeg mwp avw mwm_kb wm_kb iow
+  local ingest_conns serving_conns maintenance_conns reserved_conns
+  local backend_kb backend_processes per_backend_kb temp_kb
   mem_kb=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
   cores=$(nproc)
   pcores=$cores
-  if compgen -G "/sys/devices/system/cpu/cpu*/cpu_capacity" >/dev/null 2>&1; then
+  if [[ -r /sys/devices/cpu_core/cpus ]]; then
+    local spec token lo hi cpu core_ids
+    local -a cpu_tokens
+    spec=$(tr -d '[:space:]' </sys/devices/cpu_core/cpus)
+    core_ids=""
+    IFS=',' read -ra cpu_tokens <<<"$spec"
+    for token in "${cpu_tokens[@]}"; do
+      if [[ "$token" == *-* ]]; then
+        lo=${token%-*}; hi=${token#*-}
+      else
+        lo=$token; hi=$token
+      fi
+      for ((cpu=lo; cpu<=hi; cpu++)); do
+        if [[ -r "/sys/devices/system/cpu/cpu${cpu}/topology/core_id" ]]; then
+          core_ids+="$(<"/sys/devices/system/cpu/cpu${cpu}/topology/core_id")"$'\n'
+        fi
+      done
+    done
+    pcores=$(printf '%s' "$core_ids" | sed '/^$/d' | sort -nu | wc -l)
+    (( pcores < 1 )) && pcores=$cores
+  elif compgen -G "/sys/devices/system/cpu/cpu*/cpu_capacity" >/dev/null 2>&1; then
     local maxcap
     maxcap=$(cat /sys/devices/system/cpu/cpu*/cpu_capacity 2>/dev/null | sort -n | tail -1)
     pcores=$(grep -lxF "$maxcap" /sys/devices/system/cpu/cpu*/cpu_capacity 2>/dev/null | wc -l)
     (( pcores < 1 )) && pcores=$cores
   fi
-  pdeg=$(( (pcores + 1) / 2 ))
+  pdeg=$pcores
   # I/O WORKERS ARE NOT PARALLEL-QUERY WORKERS. Under io_method=worker every asynchronous
   # read for the whole cluster is dispatched through this pool, so it bounds the achievable
   # queue depth no matter what effective_io_concurrency claims. It used to be set to $pdeg
@@ -37,34 +59,42 @@ pg_compute_machine_tuning() {
   # depth allowed, at roughly 6% of what it can do, while %util read 100%. On a device with
   # hardware queues %util means "at least one request in flight", not saturation.
   #
-  # Floor 8 because 3 is never right for flash; ceiling 32 because these are real processes.
-  iow=$cores; (( iow < 8 )) && iow=8; (( iow > 32 )) && iow=32
+  # One blocking I/O worker per logical issuer. The old [8,32] clamp made a
+  # 64-thread host indistinguishable from a 32-thread host and invented eight
+  # workers on a two-thread host without observing either workload.
+  iow=$cores
   # max_worker_processes is the SHARED pool parallel query AND the io_worker pool draw from.
-  mwp=$(( pcores + pdeg + iow + 8 ))
-  avw=$(( cores / 4 )); (( avw < 3 )) && avw=3; (( avw > 6 )) && avw=6
-  # These MUST stay bytes-equal with MemoryTopology.cs (SharedBuffersBytes,
-  # EffectiveCacheSizeBytes, MaintenanceWorkMemBytes, WorkMemBytes, WalBuffersBytes) —
-  # that file carries the 2026-07-15 / doc-28 incident hardening and this script is what
-  # actually issues the ALTER SYSTEM. The two drifted: C# was fixed to RAM/1536-cap-64MB
-  # work_mem, RAM/48-cap-1GB maintenance_work_mem and a 16GB shared_buffers cap, while
-  # this file kept the pre-incident RAM/256-cap-512MB, RAM/32-cap-4GB and an UNCAPPED
-  # shared_buffers. On the 125GB seed host that applied work_mem=502MB,
-  # maintenance_work_mem=3.9GB, shared_buffers=31.4GB and drove 12.5GB into swap during
-  # the wiktionary ingest (26 live backends x ~work_mem of anonymous memory sitting on
-  # top of pinned huge-page shared_buffers). Change both sides together or not at all.
-  mwm=$(( mem_kb / 48 / 1024 )); (( mwm < 256 )) && mwm=256; (( mwm > 1024 )) && mwm=1024
-  wm=$(( mem_kb / 1536 / 1024 )); (( wm < 16 )) && wm=16; (( wm > 64 )) && wm=64
-  wb=$(( mem_kb / 512 / 1024 )); (( wb < 16 )) && wb=16; (( wb > 1024 )) && wb=1024
+  # Maintenance is a subset of the parallel-worker pool. max_worker_processes
+  # therefore owns the compute pool plus the blocking I/O pool, with no mystery +8.
+  mwp=$(( pcores + iow ))
+  avw=$pdeg
+  # These MUST stay bytes-equal with PostgresResourcePlan. The former shell and C#
+  # implementations independently clamped each GUC and oversubscribed RAM when their
+  # products were combined. The replacement is one four-domain resource equation:
+  # shared cache / backend private / ingest client / OS page cache.
+  # Connection owners are the actual simultaneous ingest COPY+fold fan, serving
+  # logical concurrency, maintenance pool, and one recovery connection.
+  ingest_conns=$(( 1 + 2 * pcores ))
+  serving_conns=$cores
+  maintenance_conns=$pdeg
+  reserved_conns=1
+  PG_TUNE_MAXCONN=$(( ingest_conns + serving_conns + maintenance_conns + reserved_conns ))
+  backend_kb=$(( mem_kb / 4 ))
+  backend_processes=$(( PG_TUNE_MAXCONN + pcores + avw ))
+  per_backend_kb=$(( backend_kb / backend_processes ))
+  wm_kb=$(( per_backend_kb / 2 ))
+  temp_kb=$(( per_backend_kb - wm_kb ))
+  mwm_kb=$per_backend_kb
 
   local sb ecs
-  sb=$(( mem_kb / 4 / 1024 )); (( sb < 128 )) && sb=128; (( sb > 65536 )) && sb=65536
-  ecs=$(( mem_kb * 65 / 100 / 1024 )); (( ecs < 512 )) && ecs=512; (( ecs > 98304 )) && ecs=98304
+  sb=$(( mem_kb / 4 ))
+  ecs=$(( mem_kb / 2 ))
 
-  PG_TUNE_SB=${sb}MB
-  PG_TUNE_ECS=${ecs}MB
-  PG_TUNE_MWM=${mwm}MB
-  PG_TUNE_WM=${wm}MB
-  PG_TUNE_WB=${wb}MB
+  PG_TUNE_SB=${sb}kB
+  PG_TUNE_ECS=${ecs}kB
+  PG_TUNE_MWM=${mwm_kb}kB
+  PG_TUNE_WM=${wm_kb}kB
+  PG_TUNE_WB=auto
   # shellcheck disable=SC2034  # no consumer yet; kept so this block mirrors EmitPgTuning's
   # full surface — deleting one member of a mirrored contract is worse than an unused var.
   PG_TUNE_CORES=$cores
@@ -73,10 +103,9 @@ pg_compute_machine_tuning() {
   PG_TUNE_MWP=$mwp
   PG_TUNE_IOW=$iow
   PG_TUNE_AVW=$avw
-  # MUST equal CpuTopologyCommands.EmitPgTuning's literal. That emitter is the
-  # AUTHORITY -- pg_apply_machine_tuning runs `cpu-topology --pg-tuning` first and only
-  # falls back to these formulas when it fails -- so a value changed here alone never
-  # reaches a cluster. PgTuningParityTests pins the pair.
+  PG_TUNE_RESERVED=$reserved_conns
+  # Device/WAL policy below is measured host configuration rather than a machine-size
+  # throughput cap. The parity gate keeps the bootstrap fallback and emitter identical.
   #
   # Measured 2026-07-31 on the 125GB host: 202 volume-forced checkpoints against 24 timed,
   # i.e. one roughly every 9 minutes against a 30-minute target, each re-arming full-page
@@ -125,16 +154,16 @@ pg_compute_machine_tuning() {
   # the two, and a single cold run per setting would have read as a 13%/row win for 32.
   # That is the SS L trap, avoided by repeating rather than by reasoning.
   #
-  # So neither workload supports 256. 64 is not a compromise here, it is the accurate value.
-  PG_TUNE_IO_CONC=64
+  # The request now follows the number of live I/O issuers; no unrelated 64/256 literal
+  # limits a different machine.
+  PG_TUNE_IO_CONC=$iow
   PG_TUNE_CHECKPOINT=30min
   # Policy knobs the shell used to omit entirely, letting the cluster keep PG
   # defaults that silently multiply the memory budget: hash_mem_multiplier 2.0
   # doubles work_mem on every hash node, and autovacuum_work_mem = -1 makes each
   # autovacuum worker inherit maintenance_work_mem. Values mirror EmitPgTuning.
-  PG_TUNE_MAXCONN=60
-  PG_TUNE_AVWM=256MB
-  PG_TUNE_TEMPB=32MB
+  PG_TUNE_AVWM=${mwm_kb}kB
+  PG_TUNE_TEMPB=${temp_kb}kB
 }
 
 pg_tune_psql() {
@@ -322,6 +351,7 @@ pg_apply_machine_tuning_fallback() {
   pg_compute_machine_tuning
   pg_tune_psql -v ON_ERROR_STOP=1 \
     -c "ALTER SYSTEM SET max_connections = $PG_TUNE_MAXCONN" \
+    -c "ALTER SYSTEM SET superuser_reserved_connections = $PG_TUNE_RESERVED" \
     -c "ALTER SYSTEM SET hash_mem_multiplier = 1.0" \
     -c "ALTER SYSTEM SET autovacuum_work_mem = '$PG_TUNE_AVWM'" \
     -c "ALTER SYSTEM SET temp_buffers = '$PG_TUNE_TEMPB'" \
@@ -331,7 +361,7 @@ pg_apply_machine_tuning_fallback() {
     -c "ALTER SYSTEM SET work_mem = '$PG_TUNE_WM'" \
     -c "ALTER SYSTEM SET max_wal_size = '$PG_TUNE_MAX_WAL'" \
     -c "ALTER SYSTEM SET min_wal_size = '$PG_TUNE_MIN_WAL'" \
-    -c "ALTER SYSTEM SET wal_buffers = '$PG_TUNE_WB'" \
+    -c "ALTER SYSTEM RESET wal_buffers" \
     -c "ALTER SYSTEM SET wal_level = minimal" \
     -c "ALTER SYSTEM SET max_wal_senders = 0" \
     -c "ALTER SYSTEM SET checkpoint_timeout = '$PG_TUNE_CHECKPOINT'" \
@@ -386,8 +416,8 @@ WITH want(name, expected, mode) AS (VALUES
   ('work_mem','${PG_TUNE_WM}','mem'),
   ('max_wal_size','${PG_TUNE_MAX_WAL}','mem'),
   ('min_wal_size','${PG_TUNE_MIN_WAL}','mem'),
-  ('wal_buffers','${PG_TUNE_WB}','mem'),
   ('max_connections','${PG_TUNE_MAXCONN}','eq'),
+  ('superuser_reserved_connections','${PG_TUNE_RESERVED}','eq'),
   ('hash_mem_multiplier','1','eq'),
   ('autovacuum_work_mem','${PG_TUNE_AVWM}','mem'),
   ('temp_buffers','${PG_TUNE_TEMPB}','mem'),

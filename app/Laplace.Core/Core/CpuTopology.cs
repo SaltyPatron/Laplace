@@ -148,11 +148,10 @@ public static class CpuTopology
 
 
 
-    // Parallel workers for maintenance operations (index builds, vacuum), matching
-    // tune-pg's max_parallel_maintenance_workers = (P-cores+1)/2. Declared ONCE here so no
-    // call site hardcodes a literal like "4" — the P-vs-E policy for maintenance parallelism
-    // lives with the topology authority, not scattered across the CRUD writer.
-    public static int ParallelMaintenanceWorkers => Math.Max(1, (PerformanceCoreCount + 1) / 2);
+    // Maintenance is CPU-bound work and can consume the same physical P-core pool as
+    // parallel query. The former (P+1)/2 rule was an unexplained throughput limiter;
+    // backend memory is now budgeted for every parallel owner by PostgresResourcePlan.
+    public static int ParallelMaintenanceWorkers => Math.Max(1, PerformanceCoreCount);
 
 
 
@@ -1513,5 +1512,4 @@ public static class CpuTopology
         bool IsHybrid);
 
 }
-
 

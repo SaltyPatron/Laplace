@@ -265,11 +265,11 @@ public static class IngestSizing
         // scales down/up with both memory and topology.
         int minSegmentCells = Math.Max(1, chunkCells / connections);
 
-        // Retain as many complete flush-envelope deltas as fit after reserving one
-        // envelope each for active compose, apply transit, exact presence/ladder
-        // caches, and mask-pair dedup.
-        // One fold slot is the forward-progress floor on constrained hosts.
-        int pipelineDepth = IntCount(Math.Max(1, budget / envelope - 4));
+        // This budget is already the fold/mask owner's share of the client domain;
+        // compose, apply transit, and exact caches have their own shares in
+        // MemoryTopology.WorkingSetResidentOwners. Subtracting those owners again
+        // was double-accounting and became an unexplained "-4" throughput limiter.
+        int pipelineDepth = IntCount(budget / envelope);
 
         int deltaCapacityCells = IntCount(envelope
             / MemoryTopology.ConsensusFoldBytesPerRelation);

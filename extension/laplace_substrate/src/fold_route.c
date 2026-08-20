@@ -60,7 +60,7 @@ typedef struct TypePlanEntry
     SPIPlanPtr plan;
 } TypePlanEntry;
 
-static HTAB *merge_plans = NULL;          /* attestations UPDATE            */
+static HTAB *merge_plans = NULL;          /* attestations matched MERGE     */
 static HTAB *upsert_merge_plans = NULL;   /* consensus matched/unmatched     */
 
 static HTAB *
@@ -224,14 +224,15 @@ slice_array(const Datum *src, const bool *src_nulls, const int *idx, int n,
  * re-witnesses under the same source/relation: incoming phi == stored phi.
  * See sql/functions/fold/attestation_merge.sql.in. */
 static const char *MERGE_SQL =
-    "UPDATE laplace.attestations a SET "
+    "MERGE INTO laplace.attestations a "
+    "USING unnest($1::bytea[], $2::bytea[], $3::int8[], $4::int8[], "
+    "             $5::timestamptz[]) "
+    "      AS b(id, s, games, sum, ts) "
+    "ON a.type_id = '\\x%s'::bytea AND a.subject_id = b.s AND a.id = b.id "
+    "WHEN MATCHED THEN UPDATE SET "
     "   observation_count = a.observation_count + b.games, "
     "   sum_score_fp1e9   = a.sum_score_fp1e9 + b.sum, "
-    "   last_observed_at  = GREATEST(a.last_observed_at, b.ts) "
-    "FROM unnest($1::bytea[], $2::bytea[], $3::int8[], $4::int8[], "
-    "            $5::timestamptz[]) "
-    "     AS b(id, s, games, sum, ts) "
-    "WHERE a.type_id = '\\x%s'::bytea AND a.subject_id = b.s AND a.id = b.id";
+    "   last_observed_at  = GREATEST(a.last_observed_at, b.ts)";
 
 Datum
 pg_laplace_attestation_merge(PG_FUNCTION_ARGS)
@@ -299,10 +300,10 @@ pg_laplace_attestation_merge(PG_FUNCTION_ARGS)
                                               TIMESTAMPTZOID, 8, true, 'd'));
 
         rc = SPI_execute_plan(plan, vals, NULL, false, 0);
-        if (rc != SPI_OK_UPDATE)
+        if (rc != SPI_OK_MERGE)
             ereport(ERROR,
                     (errcode(ERRCODE_INTERNAL_ERROR),
-                     errmsg("%s: UPDATE failed: %s",
+                     errmsg("%s: MERGE failed: %s",
                             label, SPI_result_code_string(rc))));
         affected += (int64) SPI_processed;
 

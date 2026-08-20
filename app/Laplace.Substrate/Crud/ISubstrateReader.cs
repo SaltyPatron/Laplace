@@ -160,6 +160,6 @@ public interface ISubstrateReader
     /// Defaults to empty for readers/installs without the diagnostic.
     /// </summary>
     Task<IReadOnlyList<PartitionPressure>> PartitionPressureAsync(
-        long minRows, CancellationToken ct = default)
+        CancellationToken ct = default)
         => Task.FromResult<IReadOnlyList<PartitionPressure>>(Array.Empty<PartitionPressure>());
 }

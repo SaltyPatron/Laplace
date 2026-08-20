@@ -37,6 +37,22 @@ public sealed class SubstrateCountsExactTests
     }
 
     [Fact]
+    public void IngestPartitionPressure_UsesPlannerStatisticsInsteadOfScanningTheCorpus()
+    {
+        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
+        var sql = Path.Combine(repoRoot, "extension", "laplace_substrate", "sql",
+            "functions", "inspect", "consensus_partition_pressure.sql.in");
+        var text = File.ReadAllText(sql);
+
+        Assert.Contains("pg_stats", text, StringComparison.Ordinal);
+        Assert.Contains("reltuples", text, StringComparison.Ordinal);
+        Assert.Contains("most_common_freqs", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("FROM laplace.consensus_rdefault", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("FROM laplace.attestations_rdefault", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("min_rows", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void RecoverIndexes_RefreshesEveryCoreTableIncludingPhysicalities()
     {
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();
