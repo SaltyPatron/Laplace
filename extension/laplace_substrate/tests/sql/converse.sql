@@ -319,6 +319,8 @@ SELECT realize.path(ARRAY[public.laplace_hash128_blake3('test/converse/synset1')
                     public.laplace_hash128_blake3('test/converse/lang_en')) AS realized_path;
 
 SELECT type, fact, witnesses FROM consensus.salient_facts(laplace.word_id('dog'));
+SELECT count(*) = 0 AS salient_facts_zero_is_empty
+FROM consensus.salient_facts(laplace.word_id('dog'), NULL, 0);
 SELECT reply FROM converse.recall_intent('related', laplace.word_id('dog'), NULL, 'IS_ANTONYM_OF');
 SELECT fact FROM consensus.related_in(public.laplace_hash128_blake3('test/converse/synset1'), laplace.relation_type_id('CAUSES'));
 

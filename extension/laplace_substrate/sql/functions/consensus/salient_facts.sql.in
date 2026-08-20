@@ -63,7 +63,9 @@ CREATE OR REPLACE FUNCTION consensus.salient_facts(p_word bytea, p_lang bytea DE
                 laplace.relation_type_id('CO_OCCURS_WITH'),
                 laplace.relation_type_id('OCCURS_IN_CONTEXT'))
               AND obj_rt.id IS NULL
-            ORDER BY consensus.eff_mu(c.rating, c.rd) DESC LIMIT p_limit * 3
+            ORDER BY consensus.eff_mu(c.rating, c.rd) DESC,
+                     c.type_id, c.object_id
+            LIMIT GREATEST(p_limit, 0)
         ) cc
     ), ranked AS (
         -- Rank BEFORE labeling (mirrors evidence_receipt's Issue 52). The old
@@ -71,14 +73,16 @@ CREATE OR REPLACE FUNCTION consensus.salient_facts(p_word bytea, p_lang bytea DE
         -- rows across 10 subjects) only to ORDER/LIMIT to p_limit afterwards --
         -- ~1.5ms/realize.render x 413 dominated the call (~575ms warm on real data).
         -- Ranking needs only the consensus.eff_mu already in `top`, so it runs first over
-        -- everything; labeling then runs over a small over-fetched pool
-        -- (3x + 8 keeps top-N starvation implausible after the empty/ellipsis
-        -- filters below drop rows). Same consensus.eff_mu order, same result set.
+        -- everything. Labeling is total below: an unrenderable entity/relation
+        -- receives a deterministic hash label instead of making a ranked fact
+        -- disappear. Therefore the exact p_limit head is sufficient; the old
+        -- `3x + 8` pool was neither a correctness proof nor a caller contract.
         SELECT t.type_id, t.object_id, t.rating, t.rd, t.witness_count,
                consensus.eff_mu(t.rating, t.rd) AS sort_mu
         FROM top t
-        ORDER BY consensus.eff_mu(t.rating, t.rd) DESC
-        LIMIT p_limit * 3 + 8
+        ORDER BY consensus.eff_mu(t.rating, t.rd) DESC,
+                 t.type_id, t.object_id
+        LIMIT GREATEST(p_limit, 0)
     )
     , ordered AS (
         SELECT r.*, row_number() OVER (ORDER BY r.sort_mu DESC) AS ord
@@ -91,14 +95,16 @@ CREATE OR REPLACE FUNCTION consensus.salient_facts(p_word bytea, p_lang bytea DE
         FROM ordered o
     )
     SELECT d.type, d.fact, d.eff_mu, d.witnesses FROM (
-        SELECT labels.types[o.ord] AS type,
-               labels.l[o.ord] AS fact,
+        SELECT COALESCE(NULLIF(labels.types[o.ord], ''),
+                        lower(replace(COALESCE(
+                            consensus.relation_canonical(o.type_id),
+                            left(encode(o.type_id, 'hex'), 16)), '_', ' '))) AS type,
+               COALESCE(NULLIF(labels.l[o.ord], ''),
+                        left(encode(o.object_id, 'hex'), 16)) AS fact,
                consensus.eff_mu_display(o.rating, o.rd) AS eff_mu, o.witness_count AS witnesses,
                o.sort_mu
         FROM ordered o, labels
     ) d
-    WHERE d.fact IS NOT NULL AND d.fact <> ''
-      AND right(d.fact, 1) <> U&'\2026' AND right(d.type, 1) <> U&'\2026'
     ORDER BY d.sort_mu DESC
-    LIMIT p_limit
+    LIMIT GREATEST(p_limit, 0)
 $$;
