@@ -450,11 +450,7 @@ int laplace_attestation_aggregated_build(
     int64_t          now_unix_us,
     laplace_attestation_staged_t* out) {
     if (!subject || !type_id || !source || !out) return -1;
-    /* Argument-swap tripwires (Issue 32): a legitimate witness weight is a rank*trust
-     * product in [0,1], and a legitimate games count is far below 1e8 — a 1e9-scaled
-     * fixed-point value landing in either slot means a caller has its arguments
-     * rotated. Fail loudly instead of writing corrupt evidence. */
-    if (games <= 0 || games > LAPLACE_ATTESTATION_GAMES_MAX) return -1;
+    if (games <= 0) return -1;
     if (!(witness_weight >= 0.0 && witness_weight <= 1.0)) return -1;
 
     hash128_t subj;
@@ -508,7 +504,7 @@ int laplace_attestation_aggregated_batch_build(
 
     for (size_t i = 0; i < n; ++i) {
         const laplace_attestation_aggregated_cell_t* c = &cells[i];
-        if (c->games <= 0 || c->games > LAPLACE_ATTESTATION_GAMES_MAX) return -1;
+        if (c->games <= 0) return -1;
 
         hash128_t subj = c->subject;
         hash128_t obj;

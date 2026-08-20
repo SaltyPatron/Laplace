@@ -261,12 +261,6 @@ pg_laplace_glicko2_accumulate_games(PG_FUNCTION_ARGS)
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
              errmsg("laplace_glicko2_accumulate_games: games must be > 0 (got %ld)",
                     (long) games)));
-    if (games > (INT64CONST(1) << 27))
-        ereport(ERROR,
-            (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-             errmsg("laplace_glicko2_accumulate_games: %ld games in one period "
-                    "exceeds the per-relation bound", (long) games)));
-
     if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -277,8 +271,13 @@ pg_laplace_glicko2_accumulate_games(PG_FUNCTION_ARGS)
     /* Closed-form uniform fold: bit-identical to materializing `games`
      * observations of (opp_rating, opp_rd) with the same q/rem score split
      * and running glicko2_update_period, without the O(games) buffer. */
-    glicko2_fold_uniform_period(&st, opp_rating, opp_rd,
-                                games, sum_score, tau, 0);
+    if (glicko2_fold_uniform_period(&st, opp_rating, opp_rd,
+                                    games, sum_score, tau, 0) != 0)
+        ereport(ERROR,
+            (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+             errmsg("laplace_glicko2_accumulate_games: aggregate exceeds fixed-point capacity"),
+             errdetail("games=%ld sum_score=%ld", (long) games,
+                       (long) sum_score)));
 
     values[0] = Int64GetDatum(st.rating);
     values[1] = Int64GetDatum(st.rd);
@@ -307,7 +306,7 @@ presence_bitmap_datum(FunctionCallInfo fcinfo, const char* label,
 {
     ArrayType*  ids_array;
     int         candidate_count;
-    int         bitmap_bytes;
+    Size        bitmap_bytes;
     bytea*      result;
     uint8*      bm;
 
@@ -733,12 +732,14 @@ build_exist_bitmap(ArrayType* ids_array, const char* table)
         return result;
     }
 
-    if (candidate_count > 250000)
+    bitmap_bytes = ((Size) candidate_count + 7) / 8;
+    if (bitmap_bytes > MaxAllocSize - VARHDRSZ)
         ereport(ERROR,
             (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-             errmsg("intent_preflight: id batch too large (%d > 250000)", candidate_count)));
+             errmsg("intent_preflight: result bitmap exceeds PostgreSQL allocation capacity"),
+             errdetail("%d ids require %zu bitmap bytes.",
+                       candidate_count, (size_t) bitmap_bytes)));
 
-    bitmap_bytes = (candidate_count + 7) / 8;
     result = (bytea*) palloc(VARHDRSZ + bitmap_bytes);
     SET_VARSIZE(result, VARHDRSZ + bitmap_bytes);
     memset(VARDATA(result), 0, bitmap_bytes);

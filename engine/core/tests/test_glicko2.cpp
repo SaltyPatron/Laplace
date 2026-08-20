@@ -299,3 +299,15 @@ TEST(LaplaceCoreGlicko2, FoldUniformMatchesObservationLoop) {
         EXPECT_EQ(closed.observation_count, loop.observation_count) << "games=" << c.games;
     }
 }
+
+TEST(LaplaceCoreGlicko2, FoldUniformAcceptsLargeRepresentableAggregate) {
+    glicko2_state_t state;
+    constexpr int64_t games = 600995230LL;
+    constexpr int64_t sum = games * 500000000LL;
+
+    glicko2_init(&state, 1500000000000LL, 350000000000LL, 60000000LL);
+    ASSERT_EQ(0, glicko2_fold_uniform_period(
+        &state, 1500000000000LL, 80000000000LL,
+        games, sum, 500000000LL, 0));
+    EXPECT_EQ(state.observation_count, games);
+}

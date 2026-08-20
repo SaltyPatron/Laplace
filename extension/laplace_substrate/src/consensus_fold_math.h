@@ -28,15 +28,15 @@
 
 
 
-static inline void
+static inline int
 consensus_fold_apply_partial(glicko2_state_t *st,
                              int64_t phi,
                              int64_t games,
                              int64_t sum_score,
                              int64_t tau)
 {
-    glicko2_fold_uniform_period(st, CONSENSUS_FOLD_NEUTRAL_MU, phi,
-                                games, sum_score, tau, 0);
+    return glicko2_fold_uniform_period(st, CONSENSUS_FOLD_NEUTRAL_MU, phi,
+                                       games, sum_score, tau, 0);
 }
 
 #endif 

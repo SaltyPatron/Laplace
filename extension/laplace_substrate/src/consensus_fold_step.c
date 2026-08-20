@@ -101,12 +101,6 @@ pg_laplace_consensus_fold_step(PG_FUNCTION_ARGS)
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                  errmsg("consensus_fold: games must be > 0 (got %ld)", (long) games)));
-        if (games > (INT64CONST(1) << 27))
-            ereport(ERROR,
-                (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-                 errmsg("consensus_fold: %ld games in one period exceeds the "
-                        "per-relation bound", (long) games)));
-
         if (!state->any) {
             glicko2_init(&state->st,
                          CONSENSUS_FOLD_NEUTRAL_MU,
@@ -117,8 +111,18 @@ pg_laplace_consensus_fold_step(PG_FUNCTION_ARGS)
         }
 
 
-        consensus_fold_apply_partial(&state->st, phi, games, sum_score, tau);
+        if (consensus_fold_apply_partial(&state->st, phi, games,
+                                         sum_score, tau) != 0)
+            ereport(ERROR,
+                (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                 errmsg("consensus_fold: aggregate exceeds fixed-point capacity"),
+                 errdetail("games=%ld sum_score=%ld", (long) games,
+                           (long) sum_score)));
 
+        if (state->witness_count > PG_INT64_MAX - games)
+            ereport(ERROR,
+                (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                 errmsg("consensus_fold: witness count exceeds bigint capacity")));
         state->witness_count += games;
     }
 
