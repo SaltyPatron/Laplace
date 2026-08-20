@@ -181,6 +181,33 @@ BEGIN
         RAISE EXCEPTION 'FAIL: dead-end context did not continue through the consensus floor (stride_used=0)';
     END IF;
 
+    -- Foundry traversal reads one whole frontier per hop. Its budget bounds only
+    -- output; zero hops/fanout preserve the seed without secretly expanding.
+    INSERT INTO laplace.consensus (id, subject_id, type_id, object_id,
+                           rating, rd, volatility, witness_count, last_observed_at)
+    VALUES
+        (laplace.consensus_id(w_the, laplace.relation_type_id('COMPLETES_TO'), w_capital),
+         w_the, laplace.relation_type_id('COMPLETES_TO'), w_capital,
+         1900000000000, 50000000000, 60000000, 3, now()),
+        (laplace.consensus_id(w_the, laplace.relation_type_id('COMPLETES_TO'), w_of),
+         w_the, laplace.relation_type_id('COMPLETES_TO'), w_of,
+         1800000000000, 50000000000, 60000000, 3, now()),
+        (laplace.consensus_id(w_capital, laplace.relation_type_id('COMPLETES_TO'), w_france),
+         w_capital, laplace.relation_type_id('COMPLETES_TO'), w_france,
+         1900000000000, 50000000000, 60000000, 3, now());
+    IF (SELECT count(*) FROM generation.foundry_crawl(ARRAY[w_the], 1, 2, 2, NULL)) <> 1 THEN
+        RAISE EXCEPTION 'FAIL: foundry output budget is not exact';
+    END IF;
+    IF (SELECT count(*) FROM generation.foundry_crawl(ARRAY[w_the], 8, 0, 2, NULL)) <> 1
+       OR (SELECT count(*) FROM generation.foundry_crawl(ARRAY[w_the], 8, 2, 0, NULL)) <> 1 THEN
+        RAISE EXCEPTION 'FAIL: zero foundry hops/fanout did not preserve seed-only semantics';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM generation.foundry_crawl(ARRAY[w_the], 8, 2, 2, NULL) f
+        WHERE f.entity_id = w_france) THEN
+        RAISE EXCEPTION 'FAIL: batched foundry frontier did not reach the second hop';
+    END IF;
+
     -- No cache, no invalidation: a trajectory written NOW is visible to the very
     -- next read. sent3 repeats capital of twice (no separator): every matching
     -- occurrence counts, so capital→of goes 1 → 3.
@@ -305,7 +332,7 @@ BEGIN
         RAISE EXCEPTION 'FAIL: zero generation capacity was promoted to a hidden default';
     END IF;
 
-    RAISE NOTICE '✓ generation_corpus: trajectories are the single source — separator law by attestation, run boundaries, k-context match, seeded determinism, exact candidate steering, zero-capacity preservation, exact batched vocabulary heads, the consensus floor (stride_used=0), and write-then-read visibility all hold with NO corpus cache';
+    RAISE NOTICE '✓ generation_corpus: trajectories are the single source — separator law by attestation, run boundaries, k-context match, seeded determinism, exact candidate steering, zero-capacity preservation, frontier-batched foundry crawl, exact batched vocabulary heads, the consensus floor (stride_used=0), and write-then-read visibility all hold with NO corpus cache';
 END $$;
 
 ROLLBACK;
