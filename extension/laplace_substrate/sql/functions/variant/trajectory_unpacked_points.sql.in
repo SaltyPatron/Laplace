@@ -70,9 +70,14 @@ CREATE OR REPLACE FUNCTION generation.trajectory_unpacked_points(p_entity bytea,
     ORDER BY u.ordinal
 $$;
 
+-- Content-lane default. BEGIN ATOMIC, not a string body: the delegation is parsed at
+-- CREATE time and recorded in pg_depend, so the two-argument core cannot be dropped or
+-- have its signature changed out from under this wrapper (GH #764). Columns are
+-- qualified through the alias because RETURNS TABLE names are parameters in scope here.
 CREATE OR REPLACE FUNCTION generation.trajectory_unpacked_points(p_entity bytea)
     RETURNS TABLE(entity_id bytea, run_length int, ctier int)
     LANGUAGE sql STABLE PARALLEL SAFE ROWS 6
-AS $$
-    SELECT * FROM generation.trajectory_unpacked_points(p_entity, 1::smallint)
-$$;
+BEGIN ATOMIC
+    SELECT t.entity_id, t.run_length, t.ctier
+    FROM generation.trajectory_unpacked_points(p_entity, 1::smallint) AS t;
+END;

@@ -109,7 +109,7 @@ CEILINGS = {
     # 191 -> 180 (2026-08-20): #1258 retired the SQL per-ply projection. The
     # chess_game_plies body is now two DROP statements, so its 11 relation-name
     # literals are gone rather than allowlisted. Shrink-only, as the law requires.
-    "g3_sql_vocabulary_literalism": 180,
+    "g3_sql_vocabulary_literalism": 178,
     "g3_c_vocabulary_literalism": 17,
     # 700 -> 701 (2026-08-05): the language-scope declaration. Nine monolingual
     # sources emitted no HAS_LANGUAGE at all, so every English sense read back as
@@ -126,7 +126,7 @@ CEILINGS = {
     # 464 -> 457 (2026-08-20): ChessGraph no longer spells HAS_CLOCK,
     # HAS_EVAL_TOKEN, HAS_MOTIF or HAS_THINK_CLASS — the per-ply testimony those
     # named is now the line/playing trajectory. Lowered by exactly the 7 cleaned.
-    "g3_csharp_vocabulary_literalism": 457,
+    "g3_csharp_vocabulary_literalism": 455,
     "g8_band_literalism": 3,
     # G4 scaffolding (W6 D3): grep for CREATE FUNCTION with zero callers outside
     # its own CREATE line. Destination form is substrate CALLS in-degree after W3

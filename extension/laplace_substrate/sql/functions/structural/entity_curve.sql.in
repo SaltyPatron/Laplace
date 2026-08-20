@@ -8,8 +8,9 @@ CREATE OR REPLACE FUNCTION structural.entity_curve(p_entity bytea, p_type smalli
     JOIN laplace.v_word_points w ON w.id = c.child_id
 $$;
 
+-- Content-lane default, BEGIN ATOMIC so the delegation records pg_depend (GH #764).
 CREATE OR REPLACE FUNCTION structural.entity_curve(p_entity bytea) RETURNS geometry
     LANGUAGE sql STABLE
- AS $$
-    SELECT structural.entity_curve(p_entity, 1::smallint)
-$$;
+BEGIN ATOMIC
+    SELECT structural.entity_curve(p_entity, 1::smallint);
+END;
