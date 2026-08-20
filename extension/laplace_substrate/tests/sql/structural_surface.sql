@@ -153,6 +153,37 @@ SELECT pg_get_indexdef(i.indexrelid) LIKE '%laplace_direction_4d(coord)%'
        AS angular_knn_index_is_partial
 FROM pg_index i
 WHERE i.indexrelid = 'laplace.physicalities_direction_gist'::regclass;
+
+-- Locale counts are exact radius counts over the direction index, not an
+-- estimate from an arbitrary nearest-3,000 prefix.
+INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) VALUES
+    (laplace.word_id('localeanchor'), 2, realize.canonical_id('Word'),
+     public.laplace_hash128_blake3('test/angular/source')),
+    (laplace.word_id('localeneighbor'), 2, realize.canonical_id('Word'),
+     public.laplace_hash128_blake3('test/angular/source'));
+INSERT INTO laplace.physicalities
+    (id, entity_id, type, coord, hilbert_index, trajectory, n_constituents)
+VALUES
+    (public.laplace_hash128_blake3('test/angular/localeanchor/physicality'),
+     laplace.word_id('localeanchor'), 1,
+     public.ST_SetSRID(public.ST_MakePoint(1, 0, 0, 0), 0),
+     decode(repeat('23', 16), 'hex'), NULL, 0),
+    (public.laplace_hash128_blake3('test/angular/localeneighbor/physicality'),
+     laplace.word_id('localeneighbor'), 1,
+     public.ST_SetSRID(public.ST_MakePoint(2, 0, 0, 0), 0),
+     decode(repeat('24', 16), 'hex'), NULL, 0);
+
+SELECT nearest = 0 AND within_near >= 1 AND NOT isolated
+       AS structural_locale_exact_zero_radius
+FROM structural.locale('localeanchor', 0);
+
+SELECT pg_get_functiondef('structural.locale(text,double precision)'::regprocedure)
+           NOT LIKE '%LIMIT 3000%'
+       AND pg_get_functiondef('structural.locale(text,double precision)'::regprocedure)
+           LIKE '%&&&%'
+       AND pg_get_functiondef('structural.locale(text,double precision)'::regprocedure)
+           LIKE '%laplace_direction_4d%'
+       AS structural_locale_uses_exact_indexed_radius;
 ROLLBACK;
 
 -- Rule #3 gate: production Frechet helpers must realize via entity_curve /
