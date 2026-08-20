@@ -12,6 +12,7 @@ functions/laplace_vertex_atom.sql.in
 functions/laplace_vertex_tier.sql.in
 functions/laplace_distance_4d.sql.in
 functions/laplace_angular_distance_4d.sql.in
+functions/laplace_direction_4d.sql.in
 functions/laplace_dwithin_4d.sql.in
 functions/laplace_centroid_4d.sql.in
 functions/laplace_radius_origin.sql.in

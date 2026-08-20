@@ -90,6 +90,19 @@ SELECT laplace_radius_origin(ST_MakePoint(1.0, 1.0, 1.0, 1.0)) AS radius_unit_di
 
 SELECT laplace_radius_origin(ST_MakePoint(3.0, 4.0)) AS radius_3_4_5;
 
+-- Direction removes radius without changing angle. These two points are
+-- collinear despite radically different radii, so both normalize identically.
+SELECT ST_AsText(laplace_direction_4d(ST_MakePoint(2.0, 0.0, 0.0, 0.0)))
+       AS direction_unit_x;
+
+SELECT laplace_distance_4d(
+           laplace_direction_4d(ST_MakePoint(2.0, 2.0, 2.0, 2.0)),
+           laplace_direction_4d(ST_MakePoint(20.0, 20.0, 20.0, 20.0))) = 0
+       AS direction_ignores_radius;
+
+SELECT laplace_direction_4d(ST_MakePoint(0.0, 0.0, 0.0, 0.0)) IS NULL
+       AS zero_has_no_direction;
+
 SELECT laplace_frechet_4d(
     ST_MakeLine(ARRAY[
         ST_MakePoint(0.0, 0.0, 0.0, 0.0),
@@ -202,3 +215,4 @@ SELECT laplace_vertex_tier((5::bigint << 1)) = 5             AS tier_decode,
        laplace_vertex_atom((97::bigint << 31)) IS NULL       AS atom_null_without_flag,
        laplace_vertex_tier(1 + (3::bigint << 1) + (65::bigint << 31)) = 3
                                                              AS tier_ignores_other_fields;
+-- st_4d complete

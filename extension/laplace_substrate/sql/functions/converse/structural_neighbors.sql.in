@@ -17,25 +17,19 @@ BEGIN
     WHERE w.coord IS NOT NULL
     ORDER BY s.ord, w.physicality_id
     LIMIT 1;
-    IF v_id IS NULL THEN RETURN; END IF;
+    IF v_id IS NULL OR public.laplace_direction_4d(v_coord) IS NULL THEN
+        RETURN;
+    END IF;
 
     RETURN QUERY
-    WITH knn AS (
-        SELECT w.id AS entity_id, w.coord
+    WITH nearest AS (
+        SELECT w.id AS entity_id, w.coord,
+               public.laplace_angular_distance_4d(w.coord, v_coord) AS geo
         FROM laplace.v_word_points w
-        WHERE w.coord IS NOT NULL
-        ORDER BY w.coord <<->> v_coord
-        LIMIT GREATEST(p_k * 20, 200)),
-    dedup AS (
-        SELECT DISTINCT ON (k.entity_id) k.entity_id,
-               public.laplace_angular_distance_4d(k.coord, v_coord) AS geo
-        FROM knn k
-        ORDER BY k.entity_id, public.laplace_angular_distance_4d(k.coord, v_coord)),
-    nearest AS (
-        SELECT entity_id, geo
-        FROM dedup
-        WHERE entity_id <> v_id
-        ORDER BY geo
+        WHERE w.id <> v_id
+          AND public.laplace_direction_4d(w.coord) IS NOT NULL
+        ORDER BY public.laplace_direction_4d(w.coord)
+                 <<->> public.laplace_direction_4d(v_coord)
         LIMIT p_k),
     -- Resolve via the full mesh in ONE realize_batch over the <= p_k survivors
     -- (was: scalar realize per neighbour). Hubs surface as their real word;

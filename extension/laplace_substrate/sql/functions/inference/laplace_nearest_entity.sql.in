@@ -26,7 +26,7 @@
 -- unchanged. It is a SCOPE, not a floor — spec 37 L6 forbids operator thresholds
 -- and this adds none.
 --
--- CHORD PREFILTER, TRUE-METRIC RE-RANK. Previously the SELECT reported
+-- EXACT INDEXED ANGULAR ORDER. Previously the SELECT reported
 -- laplace_l2_sq() against an SRID-less point while the ORDER BY ranked on <<->>
 -- against ST_SetSRID(...,0) — two expressions on two scales, so the number
 -- returned did not explain the order.
@@ -40,15 +40,13 @@
 -- order is a blend of angle and radius, and the radius half is dispersion of
 -- realize.constituents rather than anything semantic.
 --
--- So this now does what explore_anchor_neighbors already does and documents:
--- over-fetch on the index-ordered <<->> (GiST-eligible, cheap, correct as a
--- PREFILTER) and then re-rank the bounded pool by laplace_angular_distance_4d,
--- the true metric. `distance` is that angle, and it is the quantity the row was
--- ranked by. The over-fetch factor is a candidate-pool width, not a floor or a
--- top-k on the answer — spec 37 L6 is about cutting results, and nothing is cut.
+-- laplace_direction_4d projects every non-zero coordinate onto S3. Chord distance
+-- between those unit directions is strictly monotone with angular distance, so
+-- physicalities_direction_gist supplies the exact angular order directly. No
+-- guessed candidate pool or second ranking pass remains.
 --
 -- Rule #4 / L2: the comparison point must reach the planner as a bound parameter
--- or the GiST prefilter silently degrades to a scan. A caller passing a
+-- or the GiST KNN silently degrades to a scan. A caller passing a
 -- correlated LATERAL reference does NOT satisfy that — EXPLAIN before trusting
 -- the index.
 DROP FUNCTION IF EXISTS laplace.laplace_nearest_entity(float8, float8, float8, float8, integer, bytea, smallint[]);
@@ -59,23 +57,27 @@ CREATE OR REPLACE FUNCTION generation.nearest_entity(
     p_tiers smallint[] DEFAULT NULL)
 RETURNS TABLE(entity_id bytea, distance float8)
 LANGUAGE sql STABLE PARALLEL RESTRICTED AS $$
-    WITH anchor AS MATERIALIZED (
-        SELECT public.ST_SetSRID(
-                   public.ST_MakePoint(p_cx, p_cy, p_cz, p_cm), 0) AS pt
-    ),
-    pre AS (
-        SELECT w.id, w.coord
-        FROM laplace.v_word_points w, anchor a
-        WHERE w.coord IS NOT NULL
+    WITH nearest AS (
+        SELECT w.id, w.coord,
+               public.laplace_direction_4d(w.coord) <<->>
+               public.laplace_direction_4d(public.ST_SetSRID(
+                   public.ST_MakePoint(p_cx, p_cy, p_cz, p_cm), 0)) AS chord
+        FROM laplace.v_word_points w
+        WHERE public.laplace_direction_4d(w.coord) IS NOT NULL
+          AND public.laplace_direction_4d(public.ST_SetSRID(
+                  public.ST_MakePoint(p_cx, p_cy, p_cz, p_cm), 0)) IS NOT NULL
           AND (p_band_mask IS NULL
                OR consensus.highway_match(w.highway_mask, p_band_mask))
           AND (p_tiers IS NULL OR w.tier = ANY (p_tiers))
-        ORDER BY w.coord <<->> a.pt
-        LIMIT GREATEST(p_k * 6, 60)
+        ORDER BY public.laplace_direction_4d(w.coord)
+                 <<->> public.laplace_direction_4d(public.ST_SetSRID(
+                     public.ST_MakePoint(p_cx, p_cy, p_cz, p_cm), 0))
+        LIMIT p_k
     )
-    SELECT pre.id,
-           public.laplace_angular_distance_4d(pre.coord, a.pt) AS distance
-    FROM pre, anchor a
-    ORDER BY public.laplace_angular_distance_4d(pre.coord, a.pt)
-    LIMIT p_k
+    SELECT nearest.id,
+           public.laplace_angular_distance_4d(
+               nearest.coord,
+               public.ST_SetSRID(public.ST_MakePoint(p_cx, p_cy, p_cz, p_cm), 0))
+    FROM nearest
+    ORDER BY nearest.chord, nearest.id
 $$;

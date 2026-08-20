@@ -13,6 +13,7 @@ indexes/entities_created_at_brin.sql.in
 indexes/physicalities_entity_btree.sql.in
 indexes/physicalities_type_btree.sql.in
 indexes/physicalities_coord_gist.sql.in
+indexes/physicalities_direction_gist.sql.in
 indexes/physicalities_hilbert_btree.sql.in
 indexes/physicalities_ducet_rank_btree.sql.in
 indexes/physicalities_radius_btree.sql.in

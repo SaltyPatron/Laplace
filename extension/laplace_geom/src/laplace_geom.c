@@ -8,6 +8,8 @@
 #include "catalog/pg_type.h"
 #include "access/htup_details.h"
 
+#include <math.h>
+
 #include "laplace/core/version.h"
 #include "laplace/core/hash128.h"
 #include "laplace/core/math4d.h"
@@ -246,6 +248,39 @@ pg_laplace_angular_distance_4d(PG_FUNCTION_ARGS)
     lwgeom_free(l_a);
     lwgeom_free(l_b);
     PG_RETURN_FLOAT8(d);
+}
+
+/*
+ * Unit direction of a PointZM. Angular distance deliberately ignores radius,
+ * while PostGIS' n-D GiST KNN operator measures Euclidean chord distance. On
+ * S3, chord distance is strictly monotone in angle, so indexing this immutable
+ * projection gives the planner an exact angular ordering instead of requiring
+ * callers to guess an over-fetch multiplier and re-rank a lossy prefix.
+ *
+ * The zero vector has no direction. Return NULL so it is not silently assigned
+ * an arbitrary pole and cannot masquerade as an angular nearest neighbour.
+ */
+PG_FUNCTION_INFO_V1(pg_laplace_direction_4d);
+
+Datum
+pg_laplace_direction_4d(PG_FUNCTION_ARGS)
+{
+    GSERIALIZED *g;
+    LWGEOM *l = lwgeom_from_datum(PG_GETARG_DATUM(0), &g);
+
+    POINT4D p;
+    require_point4d(l, "laplace_direction_4d", &p);
+
+    const double v[4] = {p.x, p.y, p.z, p.m};
+    const double r = math4d_norm(v);
+    if (r == 0.0)
+    {
+        lwgeom_free(l);
+        PG_RETURN_NULL();
+    }
+
+    lwgeom_free(l);
+    return gserialized_point4d_datum(v[0] / r, v[1] / r, v[2] / r, v[3] / r);
 }
 
 PG_FUNCTION_INFO_V1(pg_laplace_dwithin_4d);

@@ -1,0 +1,8 @@
+-- Project a 4D point onto S3. Euclidean chord ordering over this projection is
+-- exactly monotone with laplace_angular_distance_4d, which makes angular KNN
+-- indexable without guessed candidate multipliers. The zero vector has no
+-- direction and returns NULL.
+CREATE OR REPLACE FUNCTION @extschema@.laplace_direction_4d(p geometry)
+    RETURNS geometry
+    AS 'MODULE_PATHNAME', 'pg_laplace_direction_4d'
+    LANGUAGE C LAPLACE_IMMUTABLE_STRICT;

@@ -36,7 +36,8 @@ CREATE OR REPLACE FUNCTION ops.api(p_like text DEFAULT NULL)
                 'laplace_hash128_blake3',
                 'laplace_mantissa_unpack',
                 'laplace_distance_4d',
-                'laplace_angular_distance_4d'
+                'laplace_angular_distance_4d',
+                'laplace_direction_4d'
             ]))
           )
       AND (p_like IS NULL

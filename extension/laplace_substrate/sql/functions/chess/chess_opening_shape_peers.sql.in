@@ -46,7 +46,7 @@ BEGIN
         FROM catalog c
         JOIN laplace.v_word_points w ON w.id = c.line_id
         ORDER BY w.coord <<->> v_coord
-        LIMIT GREATEST(p_k * 20, 200)
+        LIMIT p_k
     ),
     scored AS (
         SELECT k.entity_id,
@@ -58,6 +58,6 @@ BEGIN
     FROM scored s
     WHERE s.fr IS NOT NULL AND s.fr <= p_frechet_max
     ORDER BY s.fr ASC, s.geo ASC, s.entity_id
-    LIMIT GREATEST(1, p_k);
+    LIMIT p_k;
 END;
 $peers$;
