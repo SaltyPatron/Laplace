@@ -1,18 +1,17 @@
 DROP FUNCTION IF EXISTS chess.player_search_candidates(text, integer);
-CREATE FUNCTION chess.player_search_candidates(p_query text, p_limit integer DEFAULT 600)
+DROP FUNCTION IF EXISTS chess.player_search_candidates(text[], integer);
+CREATE FUNCTION chess.player_search_candidates(p_queries text[], p_limit integer DEFAULT 600)
     RETURNS TABLE(player_id bytea, name text, games bigint,
                   rating double precision, rd double precision, eff_mu double precision)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     -- A partial player query cannot be a content-address lookup: "Karpov" does
     -- not contain the missing given name needed to mint Karpov's player id. Use
     -- the existing trajectory constituent GIN to make a bounded candidate set,
     -- then let the endpoint perform human-name/fuzzy ranking over that set.
     WITH forms(value) AS MATERIALIZED (
         SELECT DISTINCT v
-        FROM (VALUES
-            (btrim(p_query)),
-            (initcap(lower(btrim(p_query)))),
-            (lower(btrim(p_query)))) q(v)
+        FROM unnest(p_queries) q(v)
         WHERE length(v) >= 2
     ),
     required AS MATERIALIZED (
@@ -47,7 +46,7 @@ CREATE FUNCTION chess.player_search_candidates(p_query text, p_limit integer DEF
         FROM players p
         JOIN laplace.consensus o
           ON o.subject_id = p.player
-         AND o.type_id = laplace.relation_type_id('OUTCOME')
+         AND o.type_id = ANY (consensus.relation_family_ids('OUTCOME'))
         ORDER BY consensus.eff_mu(o.rating, o.rd) DESC, p.player
         LIMIT p_limit
     ),
@@ -70,5 +69,5 @@ CREATE FUNCTION chess.player_search_candidates(p_query text, p_limit integer DEF
            consensus.eff_mu_display(r.rating, r.rd)::double precision
     FROM rated r
     LEFT JOIN surfaced s ON s.id = r.player
-    ORDER BY consensus.eff_mu(r.rating, r.rd) DESC, r.player
-$$;
+    ORDER BY consensus.eff_mu(r.rating, r.rd) DESC, r.player;
+END;

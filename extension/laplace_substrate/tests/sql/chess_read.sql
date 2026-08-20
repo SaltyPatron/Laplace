@@ -528,7 +528,7 @@ BEGIN
             tname, 1500000000000, 50000000000, 60000000, 1, now());
 
     SELECT p.rating, p.rd, p.eff_mu INTO ra, rdv, mu
-      FROM chess.players_by_initial('T', 10, 0) p WHERE p.player_id = tal;
+      FROM chess.players_by_initial(ARRAY['T'], 10, 0, 'strength', 'desc') p WHERE p.player_id = tal;
     IF ra IS NULL THEN
         RAISE EXCEPTION 'FAIL: chess_players_by_initial did not surface Tal under T';
     END IF;
@@ -537,14 +537,14 @@ BEGIN
     END IF;
 
     SELECT count(*) INTO n
-      FROM chess.players_by_initial('t', 10, 0, 'games', 'asc') p
+      FROM chess.players_by_initial(ARRAY['t', 'T'], 10, 0, 'games', 'asc') p
      WHERE p.player_id = botv;
     IF n <> 1 THEN
         RAISE EXCEPTION 'FAIL: lower-case initial or primary HAS_NAME player was hidden';
     END IF;
 
     SELECT count(*) INTO n
-      FROM chess.player_search_candidates('Te', 10) p
+      FROM chess.player_search_candidates(ARRAY['Te', 'te'], 10) p
      WHERE p.player_id = botv;
     IF n <> 1 THEN
         RAISE EXCEPTION 'FAIL: partial player candidates did not include primary HAS_NAME';
