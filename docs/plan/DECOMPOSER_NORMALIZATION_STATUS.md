@@ -210,9 +210,10 @@ delivered decomposer implementation.
 - Keep the vendor scheduler architecture gate at zero. #1188 moved Syzygy onto the
   shared bounded fanout; the remaining allowlisted `ChessLabService` concurrency is a
   service workload, not decomposer orchestration. Tracked by #967 and #605.
-- Make outer database applies safely concurrent only after claim-before-COPY and
-  working-set ownership are race-safe. Until then `apply_dispatch_workers=1` is
-  intentional and must remain reported honestly. Tracked by #967.
+- The pipeline has one ordered set coordinator, not a configurable outer worker
+  pool. It overlaps decomposition with apply while each apply fans COPY, probes,
+  merge, fold, and masks across machine-derived partitions. Do not reintroduce an
+  outer worker count unless ownership is claimed before COPY across processes.
 - Audit source profiles against measured compose fanout and memory, then benchmark
   bounded foundation, Wiktionary, UD, chess, model, media, and OpenSubtitles runs.
 - Rerun clean Atomic2020 after the forced-run completion-marker correction and require the

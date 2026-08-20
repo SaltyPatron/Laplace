@@ -12,14 +12,13 @@ public enum SubstrateAccess
 {
     /// <summary>
     /// Request/response paths: HTTP endpoints, MCP tools, UCI/live-game hosts.
-    /// Bounds the command timeout and enables server-side plan reuse.
+    /// Bounds the command timeout. Typed hot commands prepare themselves explicitly.
     /// </summary>
     Serving,
 
     /// <summary>
     /// Ingest/CLI paths: hours-long COPY and fold statements are legitimate, so the
-    /// timeout stays unbounded; plan reuse is enabled because PostgreSQL invalidates
-    /// affected prepared plans correctly when staging DDL changes dependencies.
+    /// timeout stays unbounded. Hot probes/folds prepare themselves explicitly.
     /// </summary>
     Ingest,
 }
@@ -46,17 +45,6 @@ public static class LaplaceDataSource
     /// </summary>
     public const int ServingCommandTimeoutSeconds = 30;
 
-    /// <summary>Npgsql prepares a statement after this many uses on a physical connection.</summary>
-    private const int AutoPrepareMinUsages = 2;
-
-    /// <summary>
-    /// Existing auto-prepare inventory. This is deliberately not part of the machine
-    /// sizing change: replacing it with int.MaxValue would make Npgsql allocate an
-    /// effectively unbounded slot table. Explicit hot-statement preparation is tracked
-    /// separately from transport/pool sizing.
-    /// </summary>
-    private const int MaxAutoPrepare = 50;
-
     /// <summary>
     /// Resolve the connection string for <paramref name="access"/>, applying that
     /// policy's tuning on top of the installed base string.
@@ -66,9 +54,11 @@ public static class LaplaceDataSource
         var basis = baseConnectionString ?? LaplaceInstall.PostgresConnectionString();
         if (access == SubstrateAccess.Ingest)
         {
-            // PLAN REUSE ON THE INGEST PATH. This used to return the base string untouched,
-            // leaving MaxAutoPrepare at Npgsql's default of 0 -- every statement re-planned
-            // on every execution, for the entire run.
+            // The hot ingest probes and folds explicitly prepare their fixed statements.
+            // Do not place a heuristic LRU between the code and PostgreSQL: the former
+            // `MaxAutoPrepare=50, AutoPrepareMinUsages=2` was unrelated to the operation
+            // inventory, connection count, memory, or workload and silently recycled the
+            // 51st statement.
             //
             // MEASURED 2026-08-01 on physicalities_present_ordinals, the tier-descent probe:
             //   Planning Time   28.622 ms   (Buffers: shared hit=10660)
@@ -80,16 +70,10 @@ public static class LaplaceDataSource
             // against only 59,163 disk reads across 67 probe calls -- ~2M buffer touches per
             // call, none of it I/O, all of it re-derivation.
             //
-            // The old justification -- "the ingest path issues staging DDL, which invalidates
-            // cached plans" -- is not a reason to disable caching. PostgreSQL invalidates a
-            // cached plan automatically when a dependent object changes and re-plans on next
-            // use; that is the mechanism working, not a hazard. It is a reason to expect some
-            // re-planning, not to pay for it on every call of every statement.
             var ing = new NpgsqlConnectionStringBuilder(basis)
             {
                 MaxPoolSize = PostgresResourcePlan.Current.IngestConnectionOwners,
-                MaxAutoPrepare = MaxAutoPrepare,
-                AutoPrepareMinUsages = AutoPrepareMinUsages,
+                MaxAutoPrepare = 0,
             };
             return ing.ConnectionString;
         }
@@ -104,13 +88,10 @@ public static class LaplaceDataSource
         if (b.CommandTimeout <= 0 || b.CommandTimeout > ServingCommandTimeoutSeconds)
             b.CommandTimeout = ServingCommandTimeoutSeconds;
 
-        // Server-side plan reuse. Serving queries are pure reads replayed across
-        // requests on pooled connections; without auto-prepare Postgres re-parses and
-        // re-plans each one on every execution. Safe here because serving issues no
-        // dynamic DDL — the staging/DDL churn lives on the ingest policy, where normal
-        // PostgreSQL invalidation handles it without paying planning cost on every call.
-        b.MaxAutoPrepare = MaxAutoPrepare;
-        b.AutoPrepareMinUsages = AutoPrepareMinUsages;
+        // Typed serving reads prepare their fixed statements explicitly. Disable any
+        // inherited auto-prepare setting so an environment connection string cannot
+        // restore the arbitrary LRU/usage thresholds behind this policy boundary.
+        b.MaxAutoPrepare = 0;
 
         return b.ConnectionString;
     }

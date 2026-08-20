@@ -14,10 +14,10 @@ namespace Laplace.SubstrateCRUD.Tests;
 public sealed class LaplaceDataSourceTests
 {
     [Fact]
-    public void Ingest_PreservesTheInstallStringExceptForPlanReuse()
+    public void Ingest_PreservesTheInstallStringExceptForResourcePolicy()
     {
-        // Was Ingest_IsByteIdenticalToTheInstallString. The ingest policy now adds plan
-        // reuse and nothing else, so every other key must still come through untouched.
+        // Pool ownership and explicit command preparation are separate concerns; every
+        // unrelated installed setting must still come through untouched.
         var installed = new NpgsqlConnectionStringBuilder(LaplaceInstall.PostgresConnectionString());
         var ingest = new NpgsqlConnectionStringBuilder(
             LaplaceDataSource.ConnectionStringFor(SubstrateAccess.Ingest));
@@ -30,29 +30,17 @@ public sealed class LaplaceDataSourceTests
     }
 
     [Fact]
-    public void Ingest_LeavesTimeoutUnbounded_AndReusesPlans()
+    public void Ingest_LeavesTimeoutUnbounded_AndDisablesHeuristicPreparation()
     {
         // Timeout stays unbounded: hours-long COPY and fold statements are legitimate here.
         //
-        // AutoPrepare is now ON, reversing this test's original assertion. The old rationale
-        // was that the ingest path issues staging DDL which would invalidate cached plans --
-        // but PostgreSQL invalidates a dependent plan automatically and re-plans on next use.
-        // That is the mechanism working, not a hazard, and it never justified re-planning
-        // EVERY statement on EVERY call.
-        //
-        // MEASURED 2026-08-01, tier-descent probe over the partitioned physicalities table:
-        //   Planning 28.622 ms (10,660 buffers) against Execution 7.108 ms.
-        // Four times more expensive to plan than to run, because ~130 RANGE leaves are opened
-        // to build an Append that runtime pruning then discards. The same run logged
-        // 131,686,449 buffer hits against 59,163 disk reads across 67 calls.
         var b = new NpgsqlConnectionStringBuilder(
-            LaplaceDataSource.ConnectionStringFor(SubstrateAccess.Ingest, "Host=h;Database=d;Command Timeout=0"));
+            LaplaceDataSource.ConnectionStringFor(SubstrateAccess.Ingest,
+                "Host=h;Database=d;Command Timeout=0;Max Auto Prepare=999;Auto Prepare Min Usages=1"));
 
         Assert.Equal(0, b.CommandTimeout);
-        Assert.True(b.MaxAutoPrepare > 0,
-            "ingest must reuse plans: re-planning a ~130-leaf Append per call cost 4x its execution");
+        Assert.Equal(0, b.MaxAutoPrepare);
         Assert.Equal(PostgresResourcePlan.Current.IngestConnectionOwners, b.MaxPoolSize);
-        Assert.True(b.AutoPrepareMinUsages > 0);
     }
 
     [Fact]
@@ -76,13 +64,13 @@ public sealed class LaplaceDataSourceTests
     }
 
     [Fact]
-    public void Serving_EnablesPlanReuse()
+    public void Serving_DisablesHeuristicPreparation()
     {
         var b = new NpgsqlConnectionStringBuilder(
-            LaplaceDataSource.ConnectionStringFor(SubstrateAccess.Serving, "Host=h;Database=d"));
+            LaplaceDataSource.ConnectionStringFor(SubstrateAccess.Serving,
+                "Host=h;Database=d;Max Auto Prepare=999;Auto Prepare Min Usages=1"));
 
-        Assert.True(b.MaxAutoPrepare > 0);
-        Assert.True(b.AutoPrepareMinUsages > 0);
+        Assert.Equal(0, b.MaxAutoPrepare);
         Assert.Equal(PostgresResourcePlan.Current.ServingConnectionOwners, b.MaxPoolSize);
     }
 }

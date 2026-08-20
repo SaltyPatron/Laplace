@@ -70,6 +70,7 @@ public static class NpgsqlRead
             await using var cmd = new NpgsqlCommand(sql, conn);
             if (timeoutSeconds > 0) cmd.CommandTimeout = timeoutSeconds;
             bind?.Invoke(cmd.Parameters);
+            await cmd.PrepareAsync(ct).ConfigureAwait(false);
 
             var rows = new List<T>(16);
             await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
@@ -128,6 +129,7 @@ public static class NpgsqlRead
             await using var cmd = new NpgsqlCommand(sql, conn);
             if (timeoutSeconds > 0) cmd.CommandTimeout = timeoutSeconds;
             bind?.Invoke(cmd.Parameters);
+            await cmd.PrepareAsync(ct).ConfigureAwait(false);
 
             await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
             return await reader.ReadAsync(ct).ConfigureAwait(false) ? map(reader) : null;
@@ -180,6 +182,7 @@ public static class NpgsqlRead
             await using var cmd = new NpgsqlCommand(sql, conn);
             if (timeoutSeconds > 0) cmd.CommandTimeout = timeoutSeconds;
             bind?.Invoke(cmd.Parameters);
+            await cmd.PrepareAsync(ct).ConfigureAwait(false);
 
             var value = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
             return value is T typed ? typed : default;

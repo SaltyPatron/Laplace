@@ -163,7 +163,7 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
     }
 
     [Fact]
-    public async Task ParallelWorkers_ConvergesUnderRaceWithOverlap()
+    public async Task WorkingSet_ConvergesWithOverlappingIdentity()
     {
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
         var reader = new NpgsqlSubstrateReader(_pg.DataSource);
@@ -174,7 +174,6 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         var options = IngestRunOptions.Default with
         {
             SkipLayerOrderingCheck = true,
-            ParallelWorkers = 4,
         };
 
         var result = await runner.RunAsync(decomposer, options);
@@ -251,7 +250,7 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
     }
 
     [Fact]
-    public async Task EpochBarrier_PhasedEntitiesThenAttestations_ParallelCommits()
+    public async Task EpochBarrier_PhasedEntitiesThenAttestations_StayOrdered()
     {
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
         var reader = new NpgsqlSubstrateReader(_pg.DataSource);
@@ -262,7 +261,6 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         var options = IngestRunOptions.Default with
         {
             SkipLayerOrderingCheck = true,
-            ParallelWorkers = 4,
             BatchSize = 2,
         };
 
@@ -274,7 +272,7 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
     }
 
     [Fact]
-    public async Task ParallelFileDecomposeAndCommit_ConvergesWithSharedVocabulary()
+    public async Task ParallelFileDecompose_ConvergesWithSharedVocabulary()
     {
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
         var reader = new NpgsqlSubstrateReader(_pg.DataSource);
@@ -285,7 +283,6 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         var options = IngestRunOptions.Default with
         {
             SkipLayerOrderingCheck = true,
-            ParallelWorkers = 4,
             BatchSize = 2,
         };
 
@@ -297,7 +294,7 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
     }
 
     [Fact]
-    public async Task ParallelBatched_ConvergesUnderCrossWorkerIdOverlap()
+    public async Task Batched_ConvergesUnderCrossIntentIdOverlap()
     {
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
         var reader = new NpgsqlSubstrateReader(_pg.DataSource);
@@ -308,7 +305,6 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
         var options = IngestRunOptions.Default with
         {
             SkipLayerOrderingCheck = true,
-            ParallelWorkers = 4,
             BatchSize = 4,
         };
 

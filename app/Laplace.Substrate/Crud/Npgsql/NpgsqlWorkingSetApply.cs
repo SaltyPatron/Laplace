@@ -973,6 +973,23 @@ public sealed partial class NpgsqlSubstrateWriter
                             + "SET LOCAL enable_mergejoin = off; SET LOCAL enable_hashjoin = off";
                         await guc.ExecuteNonQueryAsync(token);
                     }
+                    await using var merge = mconn.CreateCommand();
+                    merge.Transaction = mtx;
+                    merge.CommandTimeout = 0;
+                    merge.CommandText = "SELECT consensus.attestation_merge($1, $2, $3, $4, $5, $6)";
+                    merge.Parameters.Add(new NpgsqlParameter
+                    { Value = Array.Empty<byte[]>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+                    merge.Parameters.Add(new NpgsqlParameter
+                    { Value = Array.Empty<byte[]>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+                    merge.Parameters.Add(new NpgsqlParameter
+                    { Value = Array.Empty<byte[]>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+                    merge.Parameters.Add(new NpgsqlParameter
+                    { Value = Array.Empty<long>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
+                    merge.Parameters.Add(new NpgsqlParameter
+                    { Value = Array.Empty<long>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
+                    merge.Parameters.Add(new NpgsqlParameter
+                    { Value = Array.Empty<DateTime>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.TimestampTz });
+                    await merge.PrepareAsync(token);
                     foreach (var (spanOff, spanLen) in bins[g])
                         for (int off = spanOff; off < spanOff + spanLen; off += mergeChunk)
                         {
@@ -993,22 +1010,12 @@ public sealed partial class NpgsqlSubstrateWriter
                                 sums[i] = r.Sum;
                                 ts[i] = r.Ts;
                             }
-                            await using var merge = mconn.CreateCommand();
-                            merge.Transaction = mtx;
-                            merge.CommandTimeout = 0;
-                            merge.CommandText = "SELECT consensus.attestation_merge($1, $2, $3, $4, $5, $6)";
-                            merge.Parameters.Add(new NpgsqlParameter
-                            { Value = ids, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
-                            merge.Parameters.Add(new NpgsqlParameter
-                            { Value = types, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
-                            merge.Parameters.Add(new NpgsqlParameter
-                            { Value = subjects, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
-                            merge.Parameters.Add(new NpgsqlParameter
-                            { Value = games, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
-                            merge.Parameters.Add(new NpgsqlParameter
-                            { Value = sums, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
-                            merge.Parameters.Add(new NpgsqlParameter
-                            { Value = ts, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.TimestampTz });
+                            merge.Parameters[0].Value = ids;
+                            merge.Parameters[1].Value = types;
+                            merge.Parameters[2].Value = subjects;
+                            merge.Parameters[3].Value = games;
+                            merge.Parameters[4].Value = sums;
+                            merge.Parameters[5].Value = ts;
                             Interlocked.Add(ref mergeFolded,
                                 (long)(await merge.ExecuteScalarAsync(token) ?? 0L));
                             Interlocked.Increment(ref mergeRt);
@@ -1250,6 +1257,7 @@ public sealed partial class NpgsqlSubstrateWriter
             { Value = tierArr, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Smallint });
             countCmd.Parameters.Add(new NpgsqlParameter
             { Value = needArr, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Integer });
+            await countCmd.PrepareAsync(ct);
             var presentCount = new Dictionary<short, long>();
             await using (var reader = await countCmd.ExecuteReaderAsync(ct))
                 while (await reader.ReadAsync(ct))
@@ -1270,6 +1278,7 @@ public sealed partial class NpgsqlSubstrateWriter
             loadCmd.CommandText = "SELECT e.id FROM laplace.entities e WHERE e.tier = ANY($1)";
             loadCmd.Parameters.Add(new NpgsqlParameter
             { Value = invertArr, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Smallint });
+            await loadCmd.PrepareAsync(ct);
             var presentInLeaf = new HashSet<Hash128>();
             await using (var idReader = await loadCmd.ExecuteReaderAsync(ct))
             {
@@ -1346,6 +1355,7 @@ public sealed partial class NpgsqlSubstrateWriter
             cmd.Parameters.Add(new NpgsqlParameter
             { Value = chunk, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
             bindKeys(cmd.Parameters, start, n);
+            await cmd.PrepareAsync(token);
             var bm = await cmd.ExecuteScalarAsync(token) as byte[] ?? Array.Empty<byte>();
 
             var hits = new List<Hash128>();

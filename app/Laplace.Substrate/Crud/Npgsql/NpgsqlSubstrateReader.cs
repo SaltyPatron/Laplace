@@ -241,9 +241,12 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         var byteaArray = new byte[dbUnknownIdx.Count][];
         for (int u = 0; u < dbUnknownIdx.Count; u++) byteaArray[u] = candidates[dbUnknownIdx[u]].ToBytes();
 
-        await using var cmd = _ds.CreateCommand("SELECT laplace.entities_exist_bitmap($1)");
+        await using var conn = await _ds.OpenConnectionAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT laplace.entities_exist_bitmap($1)";
         var p = cmd.Parameters.AddWithValue(byteaArray);
         p.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
+        await cmd.PrepareAsync(ct);
         var result = await cmd.ExecuteScalarAsync(ct);
         var dbBm = result as byte[] ?? Array.Empty<byte>();
 
@@ -312,11 +315,14 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         var parentArray = new int[parents.Count];
         for (int i = 0; i < parents.Count; i++) parentArray[i] = parents[i];
 
-        await using var cmd = _ds.CreateCommand("SELECT laplace.content_descent_bitmap($1, $2)");
+        await using var conn = await _ds.OpenConnectionAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT laplace.content_descent_bitmap($1, $2)";
         var p1 = cmd.Parameters.AddWithValue(byteaArray);
         p1.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
         var p2 = cmd.Parameters.AddWithValue(parentArray);
         p2.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Integer;
+        await cmd.PrepareAsync(ct);
         var result = await cmd.ExecuteScalarAsync(ct);
         return result switch
         {
@@ -358,11 +364,14 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         var tiers = new short[n];
         Array.Fill(tiers, tier);
 
-        await using var cmd = _ds.CreateCommand("SELECT laplace.tier_batch_existence_probe($1, $2)");
+        await using var conn = await _ds.OpenConnectionAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT laplace.tier_batch_existence_probe($1, $2)";
         var p = cmd.Parameters.AddWithValue(byteaArray);
         p.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
         var pt = cmd.Parameters.AddWithValue(tiers);
         pt.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Smallint;
+        await cmd.PrepareAsync(ct);
         var result = await cmd.ExecuteScalarAsync(ct);
         return result switch
         {
