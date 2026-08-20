@@ -50,4 +50,22 @@ public sealed class WorkingSetQueryShapeTests
             native,
             StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void WorkingSetApply_HasOneCoordinationOwner_NoInMemoryClaimPolling()
+    {
+        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
+        var apply = File.ReadAllText(Path.Combine(
+            repoRoot, "app", "Laplace.Substrate", "Crud", "Npgsql",
+            "NpgsqlWorkingSetApply.cs"));
+
+        Assert.Contains(
+            "AdvisoryTxLock.BeginWithLockAsync(\n            conn, \"laplace_apply_batch\"",
+            apply,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("_claimedEntityIds", apply, StringComparison.Ordinal);
+        Assert.DoesNotContain("_claimedPhysIds", apply, StringComparison.Ordinal);
+        Assert.DoesNotContain("_claimedAttIds", apply, StringComparison.Ordinal);
+        Assert.DoesNotContain("claimDelayMs", apply, StringComparison.Ordinal);
+    }
 }

@@ -84,14 +84,9 @@ public sealed partial class NpgsqlSubstrateWriter
     /// attestation must still MERGE its observation count (its round-trip is not saved),
     /// and its id space is unbounded (billions on a model ingest).
     /// </summary>
-    // ConcurrentDictionary: presence-complete applies skip the advisory lock and
-    // may run in parallel; HashSet is not safe for that.
+    // ConcurrentDictionary because presence packing can overlap apply preparation.
     private System.Collections.Concurrent.ConcurrentDictionary<Hash128, byte>? _persistedEntityIds;
     private System.Collections.Concurrent.ConcurrentDictionary<Hash128, byte>? _persistedPhysIds;
-    /// <summary>In-flight COPY claims (parallel apply). Not durable presence.</summary>
-    private System.Collections.Concurrent.ConcurrentDictionary<Hash128, byte>? _claimedEntityIds;
-    private System.Collections.Concurrent.ConcurrentDictionary<Hash128, byte>? _claimedPhysIds;
-    private System.Collections.Concurrent.ConcurrentDictionary<Hash128, byte>? _claimedAttIds;
     private int _persistedEntityCount;
     private int _persistedPhysCount;
 
@@ -125,9 +120,6 @@ public sealed partial class NpgsqlSubstrateWriter
         await NpgsqlIndexCycle.RecoverAsync(_ds, _log, ct);
         _persistedEntityIds = new System.Collections.Concurrent.ConcurrentDictionary<Hash128, byte>();
         _persistedPhysIds = new System.Collections.Concurrent.ConcurrentDictionary<Hash128, byte>();
-        _claimedEntityIds = new System.Collections.Concurrent.ConcurrentDictionary<Hash128, byte>();
-        _claimedPhysIds = new System.Collections.Concurrent.ConcurrentDictionary<Hash128, byte>();
-        _claimedAttIds = new System.Collections.Concurrent.ConcurrentDictionary<Hash128, byte>();
         _persistedEntityCount = 0;
         _persistedPhysCount = 0;
         _entityPresenceComplete = false;
@@ -149,9 +141,6 @@ public sealed partial class NpgsqlSubstrateWriter
     {
         _persistedEntityIds = null;
         _persistedPhysIds = null;
-        _claimedEntityIds = null;
-        _claimedPhysIds = null;
-        _claimedAttIds = null;
         _persistedEntityCount = 0;
         _persistedPhysCount = 0;
         _entityPresenceComplete = false;
@@ -386,11 +375,6 @@ public sealed partial class NpgsqlSubstrateWriter
             conn, "laplace_apply_batch", ApplyGucs, _log, ct);
         await using (tx)
         {
-        // Ids this apply successfully claimed — released after commit, or on failure so
-        // peers are not wedged and do not double-COPY after a partial parallel COPY.
-        var claimedEntThis = new List<Hash128>();
-        var claimedPhysThis = new List<Hash128>();
-        var claimedAttThis = new List<Hash128>();
         try
         {
             rtLock++;
@@ -688,10 +672,6 @@ public sealed partial class NpgsqlSubstrateWriter
                         var eid = ents.Ids[i];
                         if (presentEntities.Contains(eid) || (persistedEnt?.ContainsKey(eid) ?? false))
                         { eSkip++; continue; }
-                        // Claim before COPY so a parallel apply cannot stage the same id.
-                        if (_claimedEntityIds is not null && !_claimedEntityIds.TryAdd(eid, 0))
-                        { eSkip++; presentEntities.Add(eid); continue; }
-                        claimedEntThis.Add(eid);
                         keptEnts.Add(new KeptRow(
                             CopyPartitionKey.ForEntityId(eid),
                             CopyPartitionKey.ForEntityId(eid), ents.Rows[i], -1, 0));
@@ -713,9 +693,6 @@ public sealed partial class NpgsqlSubstrateWriter
                     var eid = ents.Ids[i];
                     if (presentEntities.Contains(eid) || (persistedEnt?.ContainsKey(eid) ?? false))
                     { eSkip++; continue; }
-                    if (_claimedEntityIds is not null && !_claimedEntityIds.TryAdd(eid, 0))
-                    { eSkip++; presentEntities.Add(eid); continue; }
-                    claimedEntThis.Add(eid);
                     keptEnts.Add(new KeptRow(
                         CopyPartitionKey.ForEntityId(eid),
                         CopyPartitionKey.ForEntityId(eid), ents.Rows[i], -1, 0));
@@ -741,9 +718,6 @@ public sealed partial class NpgsqlSubstrateWriter
                 var pid = phys.Ids[i];
                 if (presentPhys.Contains(pid) || (persistedPhys?.ContainsKey(pid) ?? false))
                 { pSkip++; continue; }
-                if (_claimedPhysIds is not null && !_claimedPhysIds.TryAdd(pid, 0))
-                { pSkip++; presentPhys.Add(pid); continue; }
-                claimedPhysThis.Add(pid);
                 // Lane by id (uniform), ORDER by hilbert (coord GiST locality).
                 keptPhys.Add(new KeptRow(
                     CopyPartitionKey.ForEntityId(pid),
@@ -768,30 +742,8 @@ public sealed partial class NpgsqlSubstrateWriter
                     mergeRows.Add((atts.TypeIds[g.RepIdx], atts.SubjectIds[g.RepIdx], id,
                         g.Games, g.Sum, AttestationMergeMath.TimestampFromPgMicros(g.MaxTs)));
                 }
-                else if (_claimedAttIds is not null && !_claimedAttIds.TryAdd(id, 0))
-                {
-                    // Peer owns in-flight COPY. Wait for claim release (post-commit) —
-                    // never merge against an uncommitted peer row (count corruption).
-                    var waitSw = System.Diagnostics.Stopwatch.StartNew();
-                    int claimDelayMs = 1;
-                    while (_claimedAttIds.ContainsKey(id))
-                    {
-                        ct.ThrowIfCancellationRequested();
-                        if (waitSw.ElapsedMilliseconds >= 120_000)
-                        {
-                            throw new TimeoutException(
-                                $"Attestation claim {id} remained held for 120 seconds; "
-                                + "refusing to merge against a possibly uncommitted row.");
-                        }
-                        await Task.Delay(claimDelayMs, ct).ConfigureAwait(false);
-                        claimDelayMs = Math.Min(claimDelayMs * 2, 100);
-                    }
-                    mergeRows.Add((atts.TypeIds[g.RepIdx], atts.SubjectIds[g.RepIdx], id,
-                        g.Games, g.Sum, AttestationMergeMath.TimestampFromPgMicros(g.MaxTs)));
-                }
                 else
                 {
-                    claimedAttThis.Add(id);
                     novelRepIdx.Add(g.RepIdx);
                 }
             }
@@ -1111,23 +1063,6 @@ public sealed partial class NpgsqlSubstrateWriter
                     TryAddBounded(persistedPhys, probePhysIds[i],
                         ApplySizing.PhysicalityPresenceCacheIds, ref _persistedPhysCount);
             }
-            // Release in-flight claims only after commit — peers may now merge safely.
-            if (_claimedEntityIds is not null)
-            {
-                foreach (var id in claimedEntThis)
-                    _claimedEntityIds.TryRemove(id, out _);
-            }
-            if (_claimedPhysIds is not null)
-            {
-                foreach (var id in claimedPhysThis)
-                    _claimedPhysIds.TryRemove(id, out _);
-            }
-            if (_claimedAttIds is not null)
-            {
-                foreach (var id in claimedAttThis)
-                    _claimedAttIds.TryRemove(id, out _);
-            }
-
             // Same commit boundary, same reason: a root may only answer "ladder already
             // deposited" once it is durably in the target.
             //
@@ -1154,18 +1089,6 @@ public sealed partial class NpgsqlSubstrateWriter
         {
             try { await tx.RollbackAsync(CancellationToken.None); }
             catch { }
-            // Parallel COPY may already have durably inserted some claimed ids.
-            // Always drop the claims so peers merge (or a retry probes present)
-            // instead of waiting 120s on a zombie claim / double-COPY (23505).
-            if (_claimedEntityIds is not null)
-                foreach (var id in claimedEntThis)
-                    _claimedEntityIds.TryRemove(id, out _);
-            if (_claimedPhysIds is not null)
-                foreach (var id in claimedPhysThis)
-                    _claimedPhysIds.TryRemove(id, out _);
-            if (_claimedAttIds is not null)
-                foreach (var id in claimedAttThis)
-                    _claimedAttIds.TryRemove(id, out _);
             throw;
         }
         }
