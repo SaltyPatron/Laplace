@@ -3,6 +3,7 @@ using Xunit;
 
 namespace Laplace.Engine.Core.Tests;
 
+[Collection("CpuTopology")]
 public sealed class IngestSizingTests
 {
     private const long TestBudgetBytes = 2L << 30;

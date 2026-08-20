@@ -6,8 +6,10 @@ using Xunit;
 
 namespace Laplace.Engine.Core.Tests;
 
+[CollectionDefinition("CpuTopology", DisableParallelization = true)]
+public sealed class CpuTopologyTestCollection { }
 
-
+[Collection("CpuTopology")]
 public class CpuTopologyTests
 
 {
@@ -233,4 +235,3 @@ public class CpuTopologyTests
     }
 
 }
-
