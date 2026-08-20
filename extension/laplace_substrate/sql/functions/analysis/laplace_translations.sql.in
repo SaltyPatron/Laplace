@@ -11,9 +11,7 @@ RETURNS TABLE(translation_id bytea, shared_object_id bytea, eff_mu numeric)
 LANGUAGE sql STABLE
 BEGIN ATOMIC
     WITH band_types AS (
-        SELECT e.id FROM laplace.entities e
-        WHERE e.highway_mask IS NOT NULL
-          AND consensus.highway_mask_bits(e.highway_mask) && consensus.highway_mask_bits(p_band_mask)
+        SELECT id FROM unnest(consensus.relation_mask_types(p_band_mask)) AS t(id)
     )
     SELECT DISTINCT a2.subject_id, a1.object_id,
            consensus.eff_mu_display(a2.rating, a2.rd)

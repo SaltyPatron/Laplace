@@ -150,4 +150,21 @@ public class SqlConsolidationTests
             "SELECT count(*) FROM laplace.table_present_ordinals('entities', ARRAY[]::bytea[])");
         Assert.Equal(0L, (long)idx!);
     }
+
+    [Fact]
+    public async Task HighwayMaskRelationTypes_UseVocabulary_NotEntityMaskGin()
+    {
+        var resolver = (bool)(await ScalarAsync("""
+            SELECT EXISTS (
+                SELECT 1 FROM pg_proc p
+                JOIN pg_namespace n ON n.oid = p.pronamespace
+                WHERE n.nspname = 'consensus' AND p.proname = 'relation_mask_types')
+            """))!;
+        Assert.True(resolver, "relation-mask vocabulary resolver is not installed");
+
+        var retired = (bool)(await ScalarAsync(
+            "SELECT to_regclass('laplace.entities_highway_bits_gin') IS NULL"))!;
+        Assert.True(retired,
+            "entity highway GIN resurrected — band membership belongs to relation vocabulary");
+    }
 }

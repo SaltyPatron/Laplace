@@ -1,13 +1,20 @@
--- Same bit-overlap access for entity masks (currently sparse; the index stays
--- proportional to populated rows via the partial predicate).
--- Same fastupdate reasoning as physicalities_constituents_gin, and the same flush:
--- inserts batch into the pending list during a write burst and
--- NpgsqlIngestOps.CleanGinPendingListsAsync drains every laplace GIN when the burst
--- ends, so readers never scan a populated list. Smaller limit than the constituents
--- index because this one is partial on a sparse column — the mask is populated for a
--- minority of entities, so its insert volume per ingest is a fraction of a
--- 137-entries-per-row trajectory index and it does not need the same runway.
-CREATE INDEX IF NOT EXISTS entities_highway_bits_gin
-    ON laplace.entities USING gin (consensus.highway_mask_bits(highway_mask))
-    WITH (fastupdate = on, gin_pending_list_limit = 8192)
-    WHERE highway_mask IS NOT NULL;
+-- Retire the entity-mask GIN permanently.  The index's only intended readers
+-- were four relation-band queries.  Those queries were also semantically wrong:
+-- they inferred a relation type's governed band from the relation entity's
+-- accumulated incident-edge mask.  They now use consensus.relation_mask_types,
+-- which resolves the small relation vocabulary through the highway perfcache.
+--
+-- On the clean 2026-08-20 seed this partitioned GIN occupied 119 MB, had zero
+-- scans, and every entities.highway_mask deposit maintained it.  That made all
+-- 6.8M observed entity updates non-HOT.  This is a permanent schema correction,
+-- not an ingest-time drop/rebuild cycle.
+DO $do$
+BEGIN
+    BEGIN
+        EXECUTE format('ALTER EXTENSION %I DROP INDEX laplace.entities_highway_bits_gin',
+                       'laplace_substrate');
+    EXCEPTION WHEN OTHERS THEN
+        NULL;
+    END;
+    EXECUTE 'DROP INDEX IF EXISTS laplace.entities_highway_bits_gin';
+END $do$;
