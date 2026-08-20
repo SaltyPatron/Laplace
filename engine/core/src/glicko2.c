@@ -451,6 +451,15 @@ int64_t glicko2_effective_mu(const glicko2_state_t* st) {
     return laplace_effective_mu_fp(st->rating, st->rd);
 }
 
+int64_t laplace_glicko2_expected_score_fp(int64_t rating, int64_t rd) {
+    int64_t mu         = g1_to_mu(rating);
+    int64_t neutral_mu = g1_to_mu(LAPLACE_GLICKO2_NEUTRAL_MU_FP);
+    int64_t phi        = g1_to_phi(rd);
+    int64_t confidence = laplace_glicko2_g(phi);
+
+    return laplace_glicko2_E(mu, neutral_mu, confidence);
+}
+
 /* Michaelis-Menten witness saturation, half-max at 4 -- mirrors
  * foundry_witness_sat.sql.in exactly (same constant, same rationale). */
 #define LAPLACE_WITNESS_SAT_HALFMAX 4.0

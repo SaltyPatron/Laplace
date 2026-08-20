@@ -2,7 +2,7 @@ DROP FUNCTION IF EXISTS laplace.laplace_astar_path(bytea, bytea, bytea[], intege
 CREATE OR REPLACE FUNCTION generation.astar_path(
     p_source bytea, p_target bytea,
     p_type_ids bytea[] DEFAULT NULL,
-    p_max_depth integer DEFAULT 20,
+    p_max_depth integer DEFAULT NULL,
     p_use_geometry bool DEFAULT false)
 RETURNS TABLE(step integer, entity_id bytea, g float8)
 LANGUAGE sql STABLE AS $$

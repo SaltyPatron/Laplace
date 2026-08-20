@@ -1,5 +1,5 @@
 DROP FUNCTION IF EXISTS laplace.cascade(text, text, int);
-CREATE OR REPLACE FUNCTION converse.cascade(p_x text, p_y text, p_max_depth int DEFAULT 7)
+CREATE OR REPLACE FUNCTION converse.cascade(p_x text, p_y text, p_max_depth int DEFAULT NULL)
     RETURNS TABLE(chain text, cost double precision)
     LANGUAGE C STABLE STRICT PARALLEL SAFE
     AS 'MODULE_PATHNAME', 'pg_laplace_cascade';

@@ -21,17 +21,17 @@ typedef struct {
     double    cost;
 } astar_edge_t;
 
-typedef int (*astar_expand_fn)(void* ctx, const hash128_t* node,
-                               astar_edge_t* out, int cap);
+/* Return a borrowed, complete adjacency span for one node. The span only has
+ * to remain valid until the next expansion call. Exact traversal must not
+ * silently truncate high-degree nodes to an engine-owned buffer size. */
+typedef bool (*astar_expand_fn)(void* ctx, const hash128_t* node,
+                                const astar_edge_t** out, size_t* count);
 
 /*
- * Optional admissible-lower-bound estimator: given the current node and the
- * goal region, return a cost estimate that never overestimates the true
- * remaining cost to any goal. NULL (the default at every existing call site)
- * preserves today's exact behavior: h is always 0.0, i.e. uniform-cost search
- * (Dijkstra), not A*. Passing a heuristic is opt-in per call -- this must
- * never change default behavior for a caller that doesn't pass one, since
- * astar_open is shared with the foundry synthesis path (Issue 05).
+ * Optional ordering hint. Uniform-cost g remains the primary frontier key, so
+ * this value can break equal-cost ties without changing the least-cost answer.
+ * No geometric/cost relationship has been proved for substrate edges; treating
+ * geometry as an additive lower bound would make the search inexact.
  */
 typedef double (*astar_heuristic_fn)(void* ctx, const hash128_t* node,
                                      const hash128_t* goal_region, size_t goal_count);

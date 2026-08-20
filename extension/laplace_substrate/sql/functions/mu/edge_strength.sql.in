@@ -1,5 +1,7 @@
--- Edge strength in [0.05, 1.0]: the logistic on eff_mu relative to the neutral
--- rating that the foundry crawl and the web-explore path both walk on.
+-- Edge strength is the Glicko-2 expected score of this consensus state against
+-- the certain neutral reference. Rating supplies the verdict; RD attenuates an
+-- uncertain state toward 0.5 through Glicko's own g(phi) law. There is no
+-- fitted divisor and no artificial floor.
 --
 -- The body is laplace_edge_strength() in spi_common.h:118, already shared by
 -- foundry_crawl.c:233 and explore_web.c:237. This is only the SQL entry to it,

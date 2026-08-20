@@ -62,7 +62,7 @@ pg_laplace_cascade(PG_FUNCTION_ARGS)
         ereport(ERROR, (errmsg("cascade: endpoints must not be NULL")));
     x_txt = PG_GETARG_TEXT_PP(0);
     y_txt = PG_GETARG_TEXT_PP(1);
-    max_depth = PG_ARGISNULL(2) ? 7 : PG_GETARG_INT32(2);
+    max_depth = PG_ARGISNULL(2) ? PG_INT32_MAX : PG_GETARG_INT32(2);
 
     InitMaterializedSRF(fcinfo, 0);
 

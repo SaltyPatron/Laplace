@@ -111,18 +111,15 @@ eff_mu_display_fp(int64 rating, int64 rd)
            / INT64CONST(1000000) * INT64CONST(1000000);
 }
 
-/* Edge strength in [0.05, 1.0]: a logistic on eff_mu relative to the neutral
- * rating. This is the ONE foundry/explore edge-weight formula -- the foundry
- * crawl and the web-explore path both read it from here so they cannot drift. */
+/* Edge strength is the Glicko-2 expected score against the certain neutral
+ * reference. It has no fitted scale or artificial floor: rating supplies the
+ * verdict and RD attenuates uncertain states toward 0.5 through Glicko's own
+ * g(phi) law. This is the one foundry/explore strength conversion. */
 static inline double
 laplace_edge_strength(int64 rating, int64 rd)
 {
-    double eff  = (double) laplace_effective_mu_fp(rating, rd);
-    double diff = (eff - (double) LAPLACE_GLICKO2_NEUTRAL_MU_FP) / 1.0e9;
-    double s    = 0.5 + diff / 800.0;
-    if (s < 0.05) s = 0.05;
-    if (s > 1.0)  s = 1.0;
-    return s;
+    return (double) laplace_glicko2_expected_score_fp(rating, rd)
+           / LAPLACE_GLICKO2_FP_SCALE_D;
 }
 
 /* Convert an int64 fp value (multiple of 1e6 from eff_mu_display_fp sums)
