@@ -77,7 +77,7 @@ CREATE OR REPLACE FUNCTION generation.foundry_vocab(
         
         SELECT u.id, u.s, r.d
         FROM pages p
-        CROSS JOIN LATERAL unnest(p.ids, realize.render_text_batch(p.ids, 64))
+        CROSS JOIN LATERAL unnest(p.ids, realize.render_text_batch(p.ids))
              WITH ORDINALITY AS u(id, s, ord)
         JOIN ranked r ON r.id = u.id
     ),

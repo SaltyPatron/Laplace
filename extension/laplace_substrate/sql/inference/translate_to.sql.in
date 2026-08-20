@@ -35,7 +35,7 @@ CREATE OR REPLACE FUNCTION converse.translate_to(p_word bytea, p_lang text DEFAU
     ),
     -- Definition surfaces for the CANDIDATE languages, rendered ONCE in a fenced
     -- CTE. This used to sit inside the lang_match predicate as
-    -- `lower(realize.render_text(d.object_id, 32)) = w.name`, i.e. a render evaluated per
+    -- `lower(realize.render_text(d.object_id)) = w.name`, i.e. a render evaluated per
     -- probed edge purely to classify it -- the render-to-classify defect the read
     -- law names, in the one position the law calls out. Same accept set, rendered
     -- a bounded number of times.
@@ -45,7 +45,7 @@ CREATE OR REPLACE FUNCTION converse.translate_to(p_word bytea, p_lang text DEFAU
     -- language. consensus carries no outcome column; refutation is a non-positive
     -- fold, the same test the walk uses to dead-end an edge.
     lang_def_names AS MATERIALIZED (
-        SELECT d.subject_id AS lang, lower(realize.render_text(d.object_id, 32)) AS dname
+        SELECT d.subject_id AS lang, lower(realize.render_text(d.object_id)) AS dname
         FROM laplace.consensus d, want w0
         WHERE w0.name IS NOT NULL
           AND d.subject_id IN (SELECT DISTINCT lang FROM agg)
@@ -81,7 +81,7 @@ CREATE OR REPLACE FUNCTION converse.translate_to(p_word bytea, p_lang text DEFAU
         WHERE lang IN (SELECT lang FROM lang_match)
         ORDER BY sense_mu DESC NULLS LAST, mu DESC, witnesses DESC, lang, member
     ) a
-    CROSS JOIN LATERAL (SELECT realize.render_text(a.member, 64) AS txt) r
+    CROSS JOIN LATERAL (SELECT realize.render_text(a.member) AS txt) r
     WHERE NULLIF(btrim(r.txt), '') IS NOT NULL
     LIMIT p_limit
 $$;

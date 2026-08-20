@@ -26,7 +26,7 @@ CREATE OR REPLACE FUNCTION realize._synset_lemma(p_id bytea, p_lang bytea DEFAUL
           AND io.type_id = laplace.relation_type_id('IS_SENSE_OF')
     ),
     lbl AS MATERIALIZED (
-        SELECT realize.render_text_batch(array_agg(r.id ORDER BY r.rn), 24) AS s
+        SELECT realize.render_text_batch(array_agg(r.id ORDER BY r.rn)) AS s
         FROM ranked r
     )
     SELECT l.s[r.rn]

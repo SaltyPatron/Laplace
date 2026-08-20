@@ -75,7 +75,7 @@ ordered AS MATERIALIZED (
 ),
 rendered AS MATERIALIZED (
     SELECT realize.render_text_batch(
-               ARRAY(SELECT o.entity_id FROM ordered o ORDER BY o.rank), 256) AS labels
+               ARRAY(SELECT o.entity_id FROM ordered o ORDER BY o.rank)) AS labels
 ),
 answers AS (
     SELECT o.rank, r.labels[o.rank] AS reply, o.entity_id

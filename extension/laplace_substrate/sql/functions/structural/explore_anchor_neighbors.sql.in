@@ -59,7 +59,7 @@ BEGIN
     ), ids AS MATERIALIZED (
         SELECT array_agg(numbered.entity_id ORDER BY numbered.rn) AS a FROM numbered
     ), display AS MATERIALIZED (
-        SELECT realize.render_text_batch(a, 8) AS rendered,
+        SELECT realize.render_text_batch(a) AS rendered,
                realize.label_batch(a) AS labels
         FROM ids
     )
@@ -102,7 +102,7 @@ BEGIN
         ), ids AS MATERIALIZED (
             SELECT array_agg(numbered.entity_id ORDER BY numbered.rn) AS a FROM numbered
         ), display AS MATERIALIZED (
-            SELECT realize.render_text_batch(a, 8) AS rendered,
+            SELECT realize.render_text_batch(a) AS rendered,
                    realize.label_batch(a) AS labels
             FROM ids
         )

@@ -75,7 +75,7 @@ BEGIN
         ORDER BY consensus.eff_mu(c.rating, c.rd) DESC, c.object_id
         LIMIT 1)
     SELECT 'definition'::text,
-           initcap(v_lbl) || ' is ' || realize.render_text(b.object_id, 96) || '.',
+           initcap(v_lbl) || ' is ' || realize.render_text(b.object_id) || '.',
            consensus.eff_mu_display(b.rating, b.rd),
            b.witness_count::bigint,
            ARRAY[b.subject_id, b.object_id],

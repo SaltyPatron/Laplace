@@ -320,12 +320,12 @@ public static class NpgsqlFoundryReads
             p => p.AddWithValue("s", source), ct: ct, label: "source_id");
 
     /// <summary>
-    /// Surfaces for crawl-seed pinning: <c>realize.render_text(laplace.word_id(s), 80)</c> over a text array.
+    /// Exact surfaces for crawl-seed pinning over a text array.
     /// </summary>
     public static Task<IReadOnlyList<string>> RenderResolvedWordSurfacesAsync(
         NpgsqlDataSource ds, string[] surfaces, CancellationToken ct = default) =>
         NpgsqlRead.ReadRowsAsync(ds, """
-            SELECT realize.render_text(laplace.word_id(s), 80)
+            SELECT realize.render_text(laplace.word_id(s))
             FROM unnest(@surfaces::text[]) AS s
             WHERE laplace.word_id(s) IS NOT NULL
             """,
