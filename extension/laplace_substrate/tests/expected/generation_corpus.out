@@ -276,7 +276,29 @@ BEGIN
         RAISE EXCEPTION 'FAIL: corpus_whitespace_vocab_indices returned an out-of-range vocab_idx';
     END IF;
 
-    RAISE NOTICE '✓ generation_corpus: trajectories are the single source — separator law by attestation, run boundaries, k-context match, seeded determinism, the consensus floor (stride_used=0), and write-then-read visibility all hold with NO corpus cache';
+    -- Vocabulary heads must not guess how many pre-render candidates will
+    -- survive lexical filtering. Rendering remains set/batch based by ranked page.
+    IF pg_get_functiondef('generation.corpus_word_vocab(integer,integer)'::regprocedure)
+           LIKE '%LIMIT p_size * 4%'
+       OR pg_get_functiondef('generation.grapheme_floor_vocab(integer,integer)'::regprocedure)
+           LIKE '%LIMIT p_size * 2%'
+       OR pg_get_functiondef('generation.foundry_vocab(integer,integer)'::regprocedure)
+           LIKE '%LIMIT p_size * 3%'
+       OR pg_get_functiondef('generation.foundry_vocab(integer,integer)'::regprocedure)
+           LIKE '%LIMIT 400000%' THEN
+        RAISE EXCEPTION 'FAIL: hidden vocabulary candidate multiplier/cap returned';
+    END IF;
+    IF pg_get_functiondef('generation.corpus_word_vocab(integer,integer)'::regprocedure)
+           NOT LIKE '%render_text_batch%' THEN
+        RAISE EXCEPTION 'FAIL: corpus vocabulary no longer uses set-based ranked render pages';
+    END IF;
+    IF EXISTS (SELECT 1 FROM generation.corpus_word_vocab(0, NULL))
+       OR EXISTS (SELECT 1 FROM generation.grapheme_floor_vocab(0, 10))
+       OR EXISTS (SELECT 1 FROM generation.foundry_vocab(0, NULL)) THEN
+        RAISE EXCEPTION 'FAIL: zero vocabulary limit returned rows';
+    END IF;
+
+    RAISE NOTICE '✓ generation_corpus: trajectories are the single source — separator law by attestation, run boundaries, k-context match, seeded determinism, exact batched vocabulary heads, the consensus floor (stride_used=0), and write-then-read visibility all hold with NO corpus cache';
 END $$;
-NOTICE:  ✓ generation_corpus: trajectories are the single source — separator law by attestation, run boundaries, k-context match, seeded determinism, the consensus floor (stride_used=0), and write-then-read visibility all hold with NO corpus cache
+NOTICE:  ✓ generation_corpus: trajectories are the single source — separator law by attestation, run boundaries, k-context match, seeded determinism, exact batched vocabulary heads, the consensus floor (stride_used=0), and write-then-read visibility all hold with NO corpus cache
 ROLLBACK;
