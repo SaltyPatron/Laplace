@@ -118,47 +118,49 @@ pg_laplace_prompt_language(PG_FUNCTION_ARGS)
     {
         Oid    argtypes[1] = { TEXTOID };
         Datum  args[1];
-        Portal portal;
+        int    rc;
 
         args[0] = PointerGetDatum(prompt);
-        portal = SPI_cursor_open_with_args(
-            "pl_ids",
+        rc = SPI_execute_with_args(
             "SELECT p.id FROM converse.prompt_state($1) p WHERE p.id IS NOT NULL",
             1, argtypes, args, NULL, true, 0);
+        if (rc != SPI_OK_SELECT)
+            elog(ERROR, "prompt_language: prompt_state read failed: %s",
+                 SPI_result_code_string(rc));
+        if (SPI_processed > (uint64) (MaxAllocSize / sizeof(Datum)))
+            ereport(ERROR,
+                    (errmsg("prompt_language: prompt state exceeds PostgreSQL allocation capacity"),
+                     errdetail("Requested %llu entity ids.",
+                               (unsigned long long) SPI_processed)));
 
-        for (;;)
+        if (SPI_processed > 0)
         {
-            SPI_cursor_fetch(portal, true, 4096);
-            if (SPI_processed == 0)
-                break;
-
-            for (uint64 r = 0; r < SPI_processed; r++)
-            {
-                bool   isnull;
-                bytea *id;
-
-                id = DatumGetByteaPP(SPI_getbinval(SPI_tuptable->vals[r],
-                                                   SPI_tuptable->tupdesc,
-                                                   1, &isnull));
-                if (isnull || VARSIZE_ANY_EXHDR(id) != 16)
-                    continue;
-
-                old = MemoryContextSwitchTo(work);
-                if (id_datums == NULL)
-                    id_datums = (Datum *) palloc(sizeof(Datum) * 4096);
-                if (n_ids < 4096)
-                {
-                    bytea *cp = (bytea *) palloc(VARSIZE_ANY(id));
-
-                    memcpy(cp, id, VARSIZE_ANY(id));
-                    id_datums[n_ids++] = PointerGetDatum(cp);
-                }
-                MemoryContextSwitchTo(old);
-            }
-            SPI_freetuptable(SPI_tuptable);
-            CHECK_FOR_INTERRUPTS();
+            old = MemoryContextSwitchTo(work);
+            id_datums = (Datum *) palloc(sizeof(Datum) * (Size) SPI_processed);
+            MemoryContextSwitchTo(old);
         }
-        SPI_cursor_close(portal);
+
+        for (uint64 r = 0; r < SPI_processed; r++)
+        {
+            bool   isnull;
+            bytea *id;
+
+            id = DatumGetByteaPP(SPI_getbinval(SPI_tuptable->vals[r],
+                                               SPI_tuptable->tupdesc,
+                                               1, &isnull));
+            if (isnull || VARSIZE_ANY_EXHDR(id) != 16)
+                continue;
+
+            old = MemoryContextSwitchTo(work);
+            {
+                bytea *cp = (bytea *) palloc(VARSIZE_ANY(id));
+
+                memcpy(cp, id, VARSIZE_ANY(id));
+                id_datums[n_ids++] = PointerGetDatum(cp);
+            }
+            MemoryContextSwitchTo(old);
+        }
+        SPI_freetuptable(SPI_tuptable);
     }
 
     if (n_ids == 0)

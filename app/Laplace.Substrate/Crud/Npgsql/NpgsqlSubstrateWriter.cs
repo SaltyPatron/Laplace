@@ -253,20 +253,6 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
 
         sw.Stop();
 
-        long rowsAttempted = (long)entitiesAttempted + physAttempted + attAttempted;
-        if (rowsAttempted >= 1000 && RtBudgetPer10K > 0)
-        {
-            long budget = 20 + RtBudgetPer10K * (rowsAttempted / 10_000 + 1);
-            if (roundTrips > budget)
-            {
-                string msg = $"round-trip budget exceeded: {roundTrips} RT for {rowsAttempted:N0} rows "
-                           + $"(budget {budget}; LAPLACE_RT_BUDGET_PER_10K={RtBudgetPer10K})";
-                if (RtBudgetEnforce)
-                    throw new InvalidOperationException(msg);
-                _log.LogWarning("{Message}", msg);
-            }
-        }
-
         return new ApplyResult(
             EntitiesAttempted: entitiesAttempted,
             EntitiesInserted: entitiesInserted,
@@ -285,6 +271,4 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
             JournalReplayHit: journalReplayHit);
     }
 
-    private static readonly long RtBudgetPer10K = 64;
-    private static readonly bool RtBudgetEnforce = false;
 }
