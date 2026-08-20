@@ -43,6 +43,15 @@ BEGIN
 END
 $weight_mode$;
 
+-- A live pre-fold-law installation has this same public signature bound to the
+-- retired three-argument walk_edge_weight(rating, rd, witnesses). CREATE OR
+-- REPLACE cannot run after that base is dropped because the installed body pins
+-- its OID through pg_depend. Drop the dependent while the old base still exists,
+-- then recreate it immediately below against the two-argument folded-state law.
+-- The signature itself has no live dependents (checked by the upgrade gate).
+DROP FUNCTION IF EXISTS consensus.weight(
+    bigint, bigint, consensus.weight_mode, bigint, bytea);
+
 CREATE OR REPLACE FUNCTION consensus.weight(
         p_rating        bigint,
         p_rd            bigint,
