@@ -210,6 +210,11 @@ internal static class AdminEndpoints
             var table = payload["table"]?.GetValue<string>()?.Trim();
             var full = payload["full"]?.GetValue<bool>() ?? false;
             var analyze = payload["analyze"]?.GetValue<bool>() ?? true;
+            var timeout = payload["timeout_seconds"]?.GetValue<int>() ?? 0;
+            if (timeout < 0)
+                return EndpointJson.BadRequest(
+                    "invalid_request_error",
+                    "timeout_seconds must be zero (unbounded) or a positive number of seconds.");
 
             // The table name reaches the planner as an identifier, so it is
             // RESOLVED against the catalog rather than quoted and hoped for: the
@@ -234,7 +239,7 @@ internal static class AdminEndpoints
                 await using var db = LaplaceDataSource.Create(SubstrateAccess.Ingest);
                 sql = await NpgsqlMaintenance.VacuumAsync(
                     db, qualified, full, analyze,
-                    payload["timeout_seconds"]?.GetValue<int>() ?? 3600, ct);
+                    timeout, ct);
             }
             catch (PostgresException ex)
             {

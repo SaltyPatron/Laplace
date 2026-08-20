@@ -19,6 +19,24 @@ public sealed class InstalledOpInvokerTests
     }
 
     [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(600)]
+    [InlineData(21601)]
+    [InlineData(int.MaxValue)]
+    public void RequestedCommandTimeout_HonorsTheCallerWithoutAnUpperCeiling(int requested)
+    {
+        Assert.Equal(requested, InstalledOpInvoker.RequestedCommandTimeout(requested));
+    }
+
+    [Fact]
+    public void RequestedCommandTimeout_RejectsNegativeValues()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => InstalledOpInvoker.RequestedCommandTimeout(-1));
+    }
+
+    [Theory]
     [InlineData(-1, 0)]
     [InlineData(0, 0)]
     [InlineData(200, 200)]
