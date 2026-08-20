@@ -3,7 +3,39 @@
 -- axes this lane has always used. The tier join is this caller's own need, so it
 -- stays here rather than widening the core.
 DROP FUNCTION IF EXISTS laplace.foundry_crawl_neighbors(bytea, int, bytea[]);
+DROP FUNCTION IF EXISTS laplace.foundry_crawl_neighbors(bytea[], int, bytea[]);
 -- BEGIN ATOMIC: GH #764.
+CREATE OR REPLACE FUNCTION consensus.foundry_crawl_neighbors(
+    p_subjects bytea[],
+    p_limit    int,
+    p_types    bytea[] DEFAULT NULL)
+    RETURNS TABLE(frontier_id bytea, object_id bytea, tier smallint,
+                  rating bigint, rd bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+    WITH ranked AS (
+        SELECT c.subject_id AS frontier_id,
+               c.object_id,
+               c.rating,
+               c.rd,
+               row_number() OVER (
+                   PARTITION BY c.subject_id
+                   ORDER BY consensus.eff_mu(c.rating, c.rd) DESC,
+                            c.object_id,
+                            c.type_id) AS rn
+        FROM laplace.consensus c
+        WHERE p_limit > 0
+          AND c.subject_id = ANY (p_subjects)
+          AND c.object_id IS NOT NULL
+          AND (p_types IS NULL OR c.type_id = ANY (p_types))
+    )
+    SELECT r.frontier_id, r.object_id, e.tier, r.rating, r.rd
+    FROM ranked r
+    JOIN laplace.entities e ON e.id = r.object_id
+    WHERE r.rn <= p_limit
+    ORDER BY r.frontier_id, r.rn;
+END;
+
 CREATE OR REPLACE FUNCTION consensus.foundry_crawl_neighbors(
     p_subject bytea,
     p_limit   int,
@@ -11,7 +43,6 @@ CREATE OR REPLACE FUNCTION consensus.foundry_crawl_neighbors(
     RETURNS TABLE(object_id bytea, tier smallint, rating bigint, rd bigint)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-    SELECT e.neighbour_id, en.tier, e.rating, e.rd
-    FROM consensus.edges_raw(p_subject, 'out', p_types, p_limit, true, 'eff_mu') e
-    JOIN laplace.entities en ON en.id = e.neighbour_id;
+    SELECT n.object_id, n.tier, n.rating, n.rd
+    FROM consensus.foundry_crawl_neighbors(ARRAY[p_subject], p_limit, p_types) n;
 END;
