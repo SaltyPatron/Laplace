@@ -2,7 +2,8 @@ namespace Laplace.Engine.Core;
 
 /// <summary>
 /// App load/lookup for the chess compose-floor blob (GH #822 / spec 33):
-/// tier-1 piece×square vocab + catalog tier-2 positions. Tier 0 remains codepoints.
+/// finite tier-1 typed board atoms + catalog tier-2 positions. It is independent of text
+/// and the codepoint floor.
 /// Native mmap only (<c>chess_position_table_*</c>). Not a managed catalog walker.
 /// </summary>
 public static unsafe class ChessPositionFloor

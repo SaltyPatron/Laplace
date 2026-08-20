@@ -83,10 +83,10 @@ public sealed class SubstrateTurnHost : IContentAddresser, IEdgeRatings, IStateV
         var line = new List<ChessNode>(edges.Count + 1);
         foreach (var e in edges)
         {
-            var from = ChessGraph.EmitComposed(b, e.SubjectKey, ChessVocabulary.SourceId);
-            var to = ChessGraph.EmitComposed(b, e.ObjectKey, ChessVocabulary.SourceId);
-            if (line.Count == 0) line.Add(from.Position);
-            line.Add(to.Position);
+            var from = ChessGraph.ComposePositionPoint(e.SubjectKey);
+            var to = ChessGraph.ComposePositionPoint(e.ObjectKey);
+            if (line.Count == 0) line.Add(from);
+            line.Add(to);
         }
 
         var lineId = ChessCompose.LineId(line.Select(static n => n.Id).ToArray());

@@ -5,14 +5,13 @@ using Xunit;
 namespace Laplace.Chess.Service.Tests;
 
 /// <summary>
-/// Board→id must stay bit-identical to Surface→id. Lookup/allocation change only.
+/// Interchange text and the binary board path must resolve to one typed position composition.
 /// </summary>
 public sealed class ChessComposeBoardPositionIdTests
 {
     [Fact]
     public void BoardPositionId_MatchesSurfacePath_StartAndPlies()
     {
-        CodepointPerfcache.LoadDefault();
         var m = new ChessModality();
         lock (ChessCompose.Gate)
         {
@@ -27,6 +26,29 @@ public sealed class ChessComposeBoardPositionIdTests
                 AssertEqual(state);
             }
         }
+    }
+
+    [Fact]
+    public void PositionPhysicality_IsTypedBoardTrajectory_NotTextSentence()
+    {
+        var board = Board.FromFen(ChessModality.StartFen);
+        var composed = ChessCompose.Position(board);
+
+        Assert.Equal(35, composed.Position.NConstituents); // 3 state atoms + 32 pieces
+        Assert.Equal(composed.Substructures.Select(static n => n.Id).ToArray(),
+            Trajectory.Constituents(composed.Position.Trajectory).ToArray());
+        Assert.All(composed.Substructures, atom =>
+            Assert.Equal(5, atom.NConstituents)); // domain + two tagged nibbles per ushort
+        Assert.Equal(0x0F, ChessPositionIdentity.CastlingDestinationMask(board));
+    }
+
+    [Fact]
+    public void Chess960_UsesTheSameFourCastlingDestinationBits()
+    {
+        var board = Board.FromFen(
+            "nqrkbbrn/pppppppp/8/8/8/8/PPPPPPPP/NQRKBBRN w GCgc - 0 1");
+        Assert.Equal(0x0F, ChessPositionIdentity.CastlingDestinationMask(board));
+        Assert.Equal(35, ChessCompose.Position(board).Position.NConstituents);
     }
 
     private static void AssertEqual(ChessState state)

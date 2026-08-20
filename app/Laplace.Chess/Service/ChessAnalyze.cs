@@ -21,9 +21,6 @@ public static class ChessAnalyze
 
     private const double MoveWeight = 0.7;
     private const double MetaWeight = 0.7;
-    private const double EvalWeight = 0.55;
-    private const long EvalGames = 2;
-
     // Entry point for the analyzer decomposer: assemble DeriveGame's inputs from a parsed game
     // (the witnessed content), derive, and stamp the (game, version) marker the scan probes.
     internal static void DeriveFromParsed(SubstrateChangeBuilder b, ChessGameRecord parsed)
@@ -170,13 +167,12 @@ public static class ChessAnalyze
         // the flagging line. Both 0 for the spent dialect (no remaining clock witnessed).
         double medianRemEven = PgnClocks.MedianRemaining(clocks, 0);
         double medianRemOdd = PgnClocks.MedianRemaining(clocks, 1);
-        // Reused across plies so the TT warms; only built when engine-eval is requested.
-        var engine = engineDepth > 0 ? new Search(EvalTerm.All) : null;
 
-        // Directed SAN converse.resolve(same as LineId replay) — full Legal() per ply was ~46% of
-        // analyze time. Apply still owns repetition history for the motif window boards.
+        // Replay builds the ONE ordered line physicality. Its vertices are deterministic move
+        // points (the positions before/after each move), resolved from the chess perfcache or
+        // the identical compose fallback. They are not independently deposited SQL position
+        // entities/physicalities merely because this game passed through them.
         var state = initial;
-        ChessComposed? carried = null;
         var line = new List<ChessNode>(sans.Count + 1);
         var boards = new List<Board>(sans.Count + 1) { initial.Board };
         var played = new List<ChessMove>(sans.Count);
@@ -186,94 +182,50 @@ public static class ChessAnalyze
             var mv = San.Resolve(state.Board, sans[ply], scratch);
             if (mv is null) return;
             int mover = m.SideToMove(state);
-            // Our OWN eval (high-trust ChessAnalysis witness) competes on (position, HAS_EVAL) with
-            // the PGN's eval (lower-trust EvalPgn, emitted below). Score is side-to-move cp.
-            var from = carried ?? ChessGraph.EmitComposed(b, m.StateKey(state), src);
-            if (engine is not null)
-            {
-                int ourCp = engine.Think(state.Board, new Search.Limits(MaxDepth: engineDepth)).Score;
-                ChessGraph.AppendEval(b, from, ourCp, games: 1, witnessWeight: 0.9, src, eventId);
-            }
+            var from = ChessGraph.ComposePositionPoint(state.Board);
             var next = m.Apply(state, mv.Value);
-            var to = ChessGraph.EmitComposed(b, m.StateKey(next), src);
-            if (line.Count == 0) line.Add(from.Position);
-            line.Add(to.Position);
+            var to = ChessGraph.ComposePositionPoint(next.Board);
+            if (line.Count == 0) line.Add(from);
+            line.Add(to);
             boards.Add(next.Board);
             played.Add(mv.Value);
 
             string? clk = Tok(clockTokens, ply);
             if (clk is not null)
             {
-                ChessGraph.AppendClock(b, from.Position.Id, clk, MetaWeight, src, eventId);
                 if (clocks.Length > 0)
                 {
                     double tf = PgnClocks.ThinkFactor(clocks, medianDrop, ply);
-                    ChessGraph.AppendThinkClass(
-                        b, from.Position.Id, ChessCanonical.ThinkClass(tf),
-                        result.ForMover(mover), MetaWeight, src, eventId);
-                    // Phase × clock × spent lens beside the base class. Lens strings are
-                    // content values on the same HAS_THINK_CLASS cell shape — no manifest
-                    // change, and no ChessAnalyze.Version bump: re-deriving old games at
-                    // the new vocabulary rides `laplace evict` (the PR-4 eviction lane).
+                    ChessGraph.AppendThinkOutcome(
+                        b, ChessCanonical.ThinkClass(tf), result.ForMover(mover), MetaWeight, src);
                     if (ChessCanonical.ThinkLens(ply, sans.Count, tf, clocks[ply],
                             (ply & 1) == 0 ? medianRemEven : medianRemOdd, medianDrop) is { } lens)
-                        ChessGraph.AppendThinkClass(
-                            b, from.Position.Id, lens, result.ForMover(mover),
-                            MetaWeight, src, eventId);
+                        ChessGraph.AppendThinkOutcome(
+                            b, lens, result.ForMover(mover), MetaWeight, src);
                 }
             }
             else if (spentSeconds is not null && medianSpent > 0)
             {
-                // cutechess dialect (GH #494): per-move spent time is the think signal directly.
-                // No HAS_CLOCK deposit — the source never asserted a remaining clock.
                 double tf = PgnClocks.ThinkFactorFromSpent(spentSeconds, medianSpent, ply);
-                ChessGraph.AppendThinkClass(
-                    b, from.Position.Id, ChessCanonical.ThinkClass(tf),
-                    result.ForMover(mover), MetaWeight, src, eventId);
-                // Spent dialect: no remaining clock witnessed, so only the phase × spent
-                // lens can derive (clock lenses would fabricate a quantity the source
-                // never asserted — the same law that forbids synthetic HAS_CLOCK above).
+                ChessGraph.AppendThinkOutcome(
+                    b, ChessCanonical.ThinkClass(tf), result.ForMover(mover), MetaWeight, src);
                 if (ChessCanonical.ThinkLens(ply, sans.Count, tf,
                         remaining: 0, medianRemaining: 0, medianDrop: 0) is { } lens)
-                    ChessGraph.AppendThinkClass(
-                        b, from.Position.Id, lens, result.ForMover(mover),
-                        MetaWeight, src, eventId);
+                    ChessGraph.AppendThinkOutcome(
+                        b, lens, result.ForMover(mover), MetaWeight, src);
             }
-
-            string? evTok = Tok(evalTokens, ply);
-            if (evTok is not null)
-                ChessGraph.AppendEvalToken(b, from.Position.Id, evTok, MetaWeight, ChessVocabulary.EvalPgnSourceId, eventId);
-
-            if (evals is not null && ply < evals.Length)
-            {
-                int cp = mover == 0 ? evals[ply] : -evals[ply];
-                ChessGraph.AppendEval(b, from, cp, EvalGames, EvalWeight, ChessVocabulary.EvalPgnSourceId, eventId);
-            }
-
-            string? q = Tok(qualityTokens, ply);
-            if (q is not null)
-                ChessGraph.AppendMoveQuality(b, from.Position.Id, q, 1, MoveWeight * 0.5, src, eventId);
 
             state = next;
-            carried = to;
         }
 
-        // Motifs are multi-ply facts (a sacrifice is only a sacrifice once the reply and
-        // the settled exchange are known), so detection runs over the fully replayed
-        // window after the walk. Same shapes at the same grains as the old per-ply pass:
-        // line grain via GAME_HAS_MOTIF; position grain via HAS_MOTIF on the position
-        // REACHED by the tagged ply — (position, HAS_MOTIF, concept), the shared-content
-        // sibling of the line-grain cell (HAS_MOTIF's family root is GAME_HAS_MOTIF),
-        // ctx = null so every game reaching the position corroborates one cell.
+        // A motif is a property of the played line/window. Do not manufacture an exact-board
+        // occurrence edge in addition to the line classification.
         var motifs = ChessMotifs.DetectGame(
             new ChessMotifs.ReplayWindow(boards, played, evals, standardStart));
         for (int ply = 0; ply < played.Count; ply++)
         {
             foreach (var tag in motifs[ply])
-            {
                 ChessGraph.AppendGameMeta(b, lineId, "GAME_HAS_MOTIF", tag, MoveWeight, src);
-                ChessGraph.AppendPositionMotif(b, line[ply + 1].Id, tag, MoveWeight, src);
-            }
         }
 
         // One linestring per LINE, deposited once the whole line is known. A game whose SAN

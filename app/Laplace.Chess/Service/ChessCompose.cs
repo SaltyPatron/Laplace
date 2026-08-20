@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Text;
 using Laplace.Engine.Core;
 using Laplace.Modality.Chess;
 using Laplace.SubstrateCRUD;
@@ -84,10 +83,7 @@ public static class ChessCompose
 
     public static object Gate => LaplaceCoreGate.Native;
 
-    // Finite tier-1 / pawn-aggregate token nodes only. NOT a position floor (#822).
-    private static readonly ConcurrentDictionary<string, ChessNode> TokenMemo = new(StringComparer.Ordinal);
-
-    private static readonly char[] Sep = { ' ' };
+    private static readonly ConcurrentDictionary<ChessPositionIdentity.Atom, ChessNode> AtomMemo = new();
 
     /// <summary>
     /// Full position composition. Geometry for catalog ids uses native
@@ -96,207 +92,83 @@ public static class ChessCompose
     /// </summary>
     public static ChessComposed Position(string surface)
     {
+        if (!PositionContent.TryFenFromSurface(surface, out var fen))
+            throw new ArgumentException("not a canonical standard-chess position interchange surface", nameof(surface));
+        return Position(Board.FromFen(fen));
+    }
+
+    /// <summary>
+    /// Compose a board directly from typed binary state atoms. No FEN/PGN/state-key string is
+    /// admitted as content. The returned position physicality is the lossless ordered manifest
+    /// of side, four castling-right bits, en-passant and occupied piece×square atoms.
+    /// </summary>
+    public static ChessComposed Position(Board board, ChessVariantRules? rules = null)
+    {
+        ArgumentNullException.ThrowIfNull(board);
         EnsureLoaded();
-        // Span scan, not Split: Split allocates a string[] plus one string PER TOKEN, on a
-        // path that runs once per position composed. The finite piece/square alphabet is
-        // served by ChessVocabularyCache from a ReadOnlySpan<char> with no string at all;
-        // only a token outside that alphabet has to be materialised for the TokenMemo key.
-        // Same two-pass shape as PositionId(string), which never regressed to Split.
-        int tokenCount = 0;
-        for (int i = 0; i < surface.Length; i++)
-            if (surface[i] != ' ' && (i == 0 || surface[i - 1] == ' ')) tokenCount++;
-        if (tokenCount == 0) throw new ArgumentException("empty position surface", nameof(surface));
-
-        var subs = new ChessNode[tokenCount];
-        var ids = new Hash128[tokenCount];
-        var childCoords = new double[(long)tokenCount * 4];
-        int t = 0;
-        int start = -1;
-        for (int i = 0; i <= surface.Length; i++)
+        Span<ChessPositionIdentity.Atom> atoms = stackalloc ChessPositionIdentity.Atom[40];
+        int count = ChessPositionIdentity.FillAtoms(
+            board, rules ?? ChessVariantRules.Standard, atoms);
+        var subs = new ChessNode[count];
+        var ids = new Hash128[count];
+        var childCoords = new double[count * 4];
+        for (int i = 0; i < count; i++)
         {
-            bool end = i == surface.Length || surface[i] == ' ';
-            if (!end) { if (start < 0) start = i; continue; }
-            if (start < 0) continue;
-            var tok = surface.AsSpan(start, i - start);
-            start = -1;
-
-            var s = ChessVocabularyCache.TryGet(tok, out var vocab)
-                ? vocab
-                : TokenMemo.GetOrAdd(new string(tok), ComposeToken);
-            subs[t] = s;
-            ids[t] = s.Id;
-            childCoords[t * 4 + 0] = s.Coord[0]; childCoords[t * 4 + 1] = s.Coord[1];
-            childCoords[t * 4 + 2] = s.Coord[2]; childCoords[t * 4 + 3] = s.Coord[3];
-            t++;
+            ChessNode node = AtomMemo.GetOrAdd(atoms[i], ComposeAtom);
+            subs[i] = node;
+            ids[i] = node.Id;
+            node.Coord.CopyTo(childCoords, i * 4);
         }
 
         Hash128 id = Hash128.Merkle(PositionTier, ids);
-        double[] traj = Trajectory.Build(ids);
-        Hash128 physId = PhysicalityId.Compute(id, PhysicalityType.Content);
-
+        double[] trajectory = Trajectory.Build(ids);
+        Hash128 physicalityId = PhysicalityId.Compute(id, PhysicalityType.Content);
         if (ChessPositionFloor.TryLookup(id, out var x, out var y, out var z, out var m,
                 out var hb, out var n, out var tier))
         {
-            var coord = new[] { x, y, z, m };
             return new ChessComposed(
-                new ChessNode(id, coord, hb, traj, physId, (int)n, tier), subs);
+                new ChessNode(id, [x, y, z, m], hb, trajectory, physicalityId,
+                    n == 0 ? count : checked((int)n), tier == 0 ? PositionTier : tier), subs);
         }
-
-        return new ChessComposed(ComposeOver(ids, childCoords, tokenCount, PositionTier), subs);
-    }
-
-    internal static ChessNode TokenNode(string token)
-        => ChessVocabularyCache.TryGet(token, ComposeToken, out var v) ? v : TokenMemo.GetOrAdd(token, ComposeToken);
-
-    internal static ChessComposed ComposeUncached(string surface)
-    {
-        EnsureLoaded();
-        var tokens = surface.Split(Sep, StringSplitOptions.RemoveEmptyEntries);
-        var subs = new ChessNode[tokens.Length];
-        var ids = new Hash128[tokens.Length];
-        var coords = new double[(long)tokens.Length * 4];
-        for (int i = 0; i < tokens.Length; i++)
-        {
-            var s = ChessVocabularyCache.TryGet(tokens[i], ComposeToken, out var v)
-                ? v : TokenMemo.GetOrAdd(tokens[i], ComposeToken);
-            subs[i] = s; ids[i] = s.Id;
-            coords[i * 4 + 0] = s.Coord[0]; coords[i * 4 + 1] = s.Coord[1];
-            coords[i * 4 + 2] = s.Coord[2]; coords[i * 4 + 3] = s.Coord[3];
-        }
-        return new ChessComposed(ComposeOver(ids, coords, tokens.Length, PositionTier), subs);
+        return new ChessComposed(ComposeOver(ids, childCoords, count, PositionTier), subs);
     }
 
     public static Hash128 PositionId(string surface)
     {
-        EnsureLoaded();
-        // Span-scan the surface — no Split string[] of ~30 tokens per ply.
-        int tokenCount = 0;
-        for (int i = 0; i < surface.Length; i++)
-            if (surface[i] != ' ' && (i == 0 || surface[i - 1] == ' ')) tokenCount++;
-        if (tokenCount == 0) throw new ArgumentException("empty position surface", nameof(surface));
-
-        Span<Hash128> ids = tokenCount <= 64
-            ? stackalloc Hash128[tokenCount]
-            : new Hash128[tokenCount];
-        int n = 0;
-        int start = -1;
-        for (int i = 0; i <= surface.Length; i++)
-        {
-            bool end = i == surface.Length || surface[i] == ' ';
-            if (!end) { if (start < 0) start = i; continue; }
-            if (start < 0) continue;
-            var tok = surface.AsSpan(start, i - start);
-            ids[n++] = TokenId(tok);
-            start = -1;
-        }
-        return Hash128.Merkle(PositionTier, ids[..n]);
+        if (!PositionContent.TryFenFromSurface(surface, out var fen))
+            throw new ArgumentException("not a canonical standard-chess position interchange surface", nameof(surface));
+        return PositionId(Board.FromFen(fen));
     }
 
     /// <summary>
-    /// Board → position id without materialising <see cref="PositionContent.Surface"/>.
-    /// Token order and ids are bit-identical to <see cref="PositionId(string)"/> on that surface.
+    /// Board → position id from typed state atoms, without materialising interchange text.
     /// </summary>
     public static Hash128 PositionId(Board board, ChessVariantRules? rules = null)
     {
         EnsureLoaded();
-        rules ??= ChessVariantRules.Standard;
-        var bb = Bitboards.FromBoard(board);
-        int epSq = ChessModality.CapturableEpSquare(board);
-        string ep = epSq < 0 ? "-" : Board.SquareToAlgebraic(epSq);
-
-        // Header + ≤32 pieces + pawn aggregates + features — well under 64 for standard.
-        Span<Hash128> ids = stackalloc Hash128[64];
-        int n = 0;
-
-        string ruleSurface = rules.Surface();
-        if (ruleSurface.Length > 0)
-            ids[n++] = TokenId(("rules:" + ruleSurface).AsSpan());
-
-        ids[n++] = TokenId(board.WhiteToMove ? "stm:w".AsSpan() : "stm:b".AsSpan());
-        ids[n++] = TokenId(("cr:" + board.CastleString()).AsSpan());
-        ids[n++] = TokenId(("ep:" + ep).AsSpan());
-
-        foreach (int bit in Bitboards.Bits(bb.Occupied))
-        {
-            int f = Bitboards.FileOfBit(bit), r = Bitboards.RankOfBit(bit);
-            char pc = Board.PieceToChar(board.Squares[Board.Sq(f, r)]);
-            if (ChessVocabularyCache.TryGetPieceSquare(pc, f, r, out var node))
-                ids[n++] = node.Id;
-            else
-                ids[n++] = TokenId($"{pc}{(char)('a' + f)}{(char)('1' + r)}".AsSpan());
-        }
-
-        // The wpawns:/bpawns:/wpf:/bpf:/mat: tokens USED TO BE EMITTED HERE, and this is
-        // the other half of removing them from the identity surface (PositionContent.Surface,
-        // plan item 6b). This path must stay bit-identical to PositionId(surface), and the
-        // block was dead under BOTH settings of the flag: with IncludeFeatureTokens false the
-        // surface no longer carries them, so emitting them here diverged the two paths; with
-        // it true the branch below re-derives the id from the surface string and discards
-        // `ids` entirely. Emitting them was therefore never right, only unnoticed — the
-        // surface half shipped without this and left
-        // ChessComposeBoardPositionIdTests.BoardPositionId_MatchesSurfacePath_StartAndPlies
-        // failing, which is why it never landed.
-
-        if (PositionContent.IncludeFeatureTokens)
-        {
-            // Rare path — keep identity via the surface string rather than re-encode features.
-            return PositionId(PositionContent.Surface(board, ep, rules));
-        }
-
-        return Hash128.Merkle(PositionTier, ids[..n]);
+        return ChessPositionIdentity.PositionId(board, rules);
     }
 
-    private static Hash128 TokenId(ReadOnlySpan<char> token)
+    private static ChessNode ComposeAtom(ChessPositionIdentity.Atom atom)
     {
-        if (ChessVocabularyCache.TryGet(token, out var vocab)) return vocab.Id;
-        return TokenMemo.GetOrAdd(token.ToString(), ComposeToken).Id;
-    }
-
-    private static void AppendPawnToken(StringBuilder sb, string tag, ulong pawns)
-    {
-        sb.Append(tag);
-        bool first = true;
-        foreach (int bit in Bitboards.Bits(pawns))
+        Span<byte> bytes = stackalloc byte[33];
+        int count = ChessPositionIdentity.FillAtomBytes(atom, bytes);
+        var ids = new Hash128[count];
+        var coords = new double[count * 4];
+        for (int i = 0; i < count; i++)
         {
-            if (!first) sb.Append('.');
-            sb.Append((char)('a' + Bitboards.FileOfBit(bit)));
-            sb.Append((char)('1' + Bitboards.RankOfBit(bit)));
-            first = false;
+            byte value = bytes[i];
+            ids[i] = ByteAtoms.Id(value);
+            ByteAtoms.Coord(value).CopyTo(coords.AsSpan(i * 4, 4));
         }
-        if (first) sb.Append('-');
-    }
-
-    [ThreadStatic] private static StringBuilder? t_sb;
-    private static StringBuilder RentSb()
-    {
-        var sb = t_sb;
-        if (sb is null) { sb = new StringBuilder(96); t_sb = sb; }
-        else sb.Clear();
-        return sb;
-    }
-    private static void ReturnSb(StringBuilder sb) => sb.Clear();
-
-    internal static ChessNode ComposeTokenForProbe(string token) => ComposeToken(token);
-
-    private static ChessNode ComposeToken(string token)
-    {
-        var recs = CodepointPerfcache.Records;
-        int n = 0;
-        foreach (var _ in token.EnumerateRunes()) n++;
-        if (n == 0) throw new ArgumentException("empty token", nameof(token));
-
-        var ids = new Hash128[n];
-        var coords = new double[(long)n * 4];
-        int i = 0;
-        foreach (var rune in token.EnumerateRunes())
-        {
-            ref readonly var rec = ref recs[rune.Value];
-            ids[i] = rec.Hash;
-            coords[i * 4 + 0] = rec.CoordX; coords[i * 4 + 1] = rec.CoordY;
-            coords[i * 4 + 2] = rec.CoordZ; coords[i * 4 + 3] = rec.CoordM;
-            i++;
-        }
-        return ComposeOver(ids, coords, n, SubstructureTier);
+        Hash128 id = Hash128.Merkle(SubstructureTier, ids);
+        double[] trajectory = Trajectory.Build(ids);
+        Hash128 physicalityId = PhysicalityId.Compute(id, PhysicalityType.Content);
+        if (ChessPositionFloor.TryLookup(id, out var x, out var y, out var z, out var m,
+                out var hb, out var n, out var tier))
+            return new ChessNode(id, [x, y, z, m], hb, trajectory, physicalityId,
+                n == 0 ? count : checked((int)n), tier == 0 ? SubstructureTier : tier);
+        return ComposeOver(ids, coords, count, SubstructureTier);
     }
 
     private static ChessNode ComposeOver(Hash128[] childIds, double[] childCoords, int n, byte tier)
@@ -338,8 +210,6 @@ public static class ChessCompose
         lock (ComposeReadyGate)
         {
             if (_composeReady) return;
-            if (!CodepointPerfcache.IsLoaded) CodepointPerfcache.LoadDefault();
-            ChessVocabularyCache.Prime(ComposeToken);
             ChessPositionFloor.LoadDefault();
             ChessTransitionFloor.LoadDefault();
             _composeReady = true;

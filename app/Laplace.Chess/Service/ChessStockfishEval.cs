@@ -60,7 +60,7 @@ public static class ChessStockfishEval
         ChessComposed? carried = null;
         for (int ply = 0; ply <= n; ply++)
         {
-            var node = carried ?? ChessGraph.EmitComposed(b, m.StateKey(cur), SourceId);
+            var node = carried ?? ChessGraph.EmitComposed(b, cur.Board, SourceId);
             composed[ply] = node;
             bool terminal = m.Terminal(cur) is not null;
             // Positions are content-addressed and shared across games (the start position
@@ -89,7 +89,7 @@ public static class ChessStockfishEval
             var mv = San.Resolve(cur.Board, m.LegalActions(cur), game.Moves[ply]);
             if (mv is null) break; // unreplayable movetext — stop, no marker withheld: partial evals stand
             cur = m.Apply(cur, mv.Value);
-            carried = ChessGraph.EmitComposed(b, m.StateKey(cur), SourceId);
+            carried = ChessGraph.EmitComposed(b, cur.Board, SourceId);
         }
 
         for (int ply = 0; ply < n; ply++)

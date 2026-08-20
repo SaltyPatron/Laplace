@@ -42,7 +42,7 @@ public static class ChessPositionRef
         var m = new ChessModality();
         if (ChessAnalyze.InitialState(fen, m) is not { } start) return false;
         lock (ChessCompose.Gate)
-            id = ChessCompose.PositionId(m.StateKey(start.Initial));
+            id = ChessCompose.PositionId(start.Initial.Board);
         return true;
     }
 

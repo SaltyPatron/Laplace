@@ -134,7 +134,7 @@ public sealed class ChessTrajectoryDecomposer
         var line = new List<ChessNode>(w.Moves.Count + 1);
         lock (ChessCompose.Gate)
         {
-            line.Add(ChessCompose.Position(m.StateKey(state)).Position);
+            line.Add(ChessCompose.Position(state.Board).Position);
             foreach (var san in w.Moves)
             {
                 var mv = San.Resolve(state.Board, m.LegalActions(state), san);
@@ -142,7 +142,7 @@ public sealed class ChessTrajectoryDecomposer
                 // nothing — not the trajectory, not the marker — so a later run can retry.
                 if (mv is null) return;
                 state = m.Apply(state, mv.Value);
-                line.Add(ChessCompose.Position(m.StateKey(state)).Position);
+                line.Add(ChessCompose.Position(state.Board).Position);
             }
         }
 

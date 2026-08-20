@@ -159,11 +159,11 @@ public sealed class ChessEngineService : IAsyncDisposable
         Hash128 rootId;
         lock (ChessCompose.Gate)
         {
-            rootId = ChessCompose.PositionId(_modality.StateKey(state));
+            rootId = ChessCompose.PositionId(state.Board);
             foreach (var mv in legal)
             {
                 var next = _modality.Apply(state, mv);
-                var childId = ChessCompose.PositionId(_modality.StateKey(next));
+                var childId = ChessCompose.PositionId(next.Board);
                 byChild[childId] = (mv.ToUci(), San.ToSan(state.Board, mv));
             }
         }

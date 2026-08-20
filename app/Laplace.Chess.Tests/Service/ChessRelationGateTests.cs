@@ -7,9 +7,9 @@ namespace Laplace.Chess.Service.Tests;
 
 // The decomposer contract's sharp edge (GH #577, the UD HAS_POS 0xC0000005 class): every
 // relation a lane emits MUST be declared in its manifest. This gate runs a real game through
-// BOTH chess lanes (recorder + analyzer, exercising header facts, reusable OUTCOME projections, evals from
-// cutechess comments, think class from spent time, motifs, opening classification, quality
-// glyphs) and asserts every attested relation id resolves to a declared name.
+// BOTH chess lanes (recorder + analyzer, exercising header facts, reusable OUTCOME projections,
+// motifs and opening classification) and asserts every attested relation id resolves to a
+// declared name.
 [Trait("Tier", "fast")]
 public sealed class ChessRelationGateTests
 {
@@ -51,8 +51,7 @@ public sealed class ChessRelationGateTests
     public void Gate_ExercisesTheRiskyEmitters()
     {
         // The gate above is only as strong as the paths it drives. Pin that the two
-        // previously-undeclared emitters actually fire in this fixture, so a regression
-        // in the fixture can't silently hollow the gate out.
+        // reusable think-class outcome fires while occurrence projections remain absent.
         var parsed = ChessPgnDecomposer.TryParseGame(Game)!;
         var b = new SubstrateChangeBuilder(ChessVocabulary.PgnSourceId, "test/relation-gate");
         ChessPgnDecomposer.RecordGame(parsed, b);
@@ -61,7 +60,21 @@ public sealed class ChessRelationGateTests
 
         var alias = RelationTypeRegistry.RelationTypeId("HAS_NAME_ALIAS");
         Assert.Contains(change.Attestations, a => a.TypeId == alias);
-        var think = RelationTypeRegistry.RelationTypeId("HAS_THINK_CLASS");
-        Assert.Contains(change.Attestations, a => a.TypeId == think);
+        var thinkClasses = new[] { "rushed", "normal", "deep" }
+            .Select(ContentEmitter.RootId)
+            .Where(static id => id is not null)
+            .Select(static id => id!.Value)
+            .ToHashSet();
+        Assert.Contains(change.Attestations,
+            a => a.TypeId == ChessVocabulary.OutcomeType && thinkClasses.Contains(a.SubjectId));
+
+        foreach (var relation in new[]
+                 {
+                     "MOVE", "HAS_CLOCK", "HAS_EVAL_TOKEN", "HAS_THINK_CLASS", "MOVE_QUALITY"
+                 })
+        {
+            var typeId = RelationTypeRegistry.RelationTypeId(relation);
+            Assert.DoesNotContain(change.Attestations, a => a.TypeId == typeId);
+        }
     }
 }

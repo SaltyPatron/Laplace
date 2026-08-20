@@ -235,7 +235,7 @@ internal sealed partial class SubstrateClient
     /// <summary>The career page: record by colour, the Elo the source tagged, the rivals.</summary>
     public async Task<ChessPlayerResponse?> ChessPlayerAsync(string idHex, int opponentLimit, CancellationToken ct)
     {
-        if (TryParseIdHex(idHex) is not { } id) return null;
+        if (TryParseIdHex(idHex) is null) return null;
 
         var record = await NpgsqlSubstrateReads.ChessPlayerRecordAsync(
             _dataSource, id, ct, TranslateReadError);
@@ -283,51 +283,15 @@ internal sealed partial class SubstrateClient
     }
 
     /// <summary>
-    /// The game as a board sequence, read as LOOKUPS.
-    ///
-    /// Every per-ply fact is already an attestation keyed by context_id = the game — the MOVE
-    /// edge, HAS_SAN, HAS_CLOCK, HAS_EVAL_TOKEN, HAS_THINK_CLASS, MOVE_QUALITY — and the
-    /// ordered line of boards is the game's own trajectory. chess.game_plies() is one
-    /// trajectory decode plus one indexed pass per relation. Nothing here parses chess.
-    ///
-    /// This used to replay the verbatim movetext through the engine on every request:
-    /// parsing SAN, applying moves, re-deriving boards the analyzer had already composed and
-    /// deposited. That recomputed at query time what ingest had already written.
-    ///
-    /// The replay survives as the FALLBACK for games recorded before the analyzer ran, which
-    /// carry no trajectory and therefore have no stored line to read. It is a compatibility
-    /// path, not the design: once a game is analyzed, reading it never touches the engine.
+    /// Reconstruct a game's boards from its witnessed movetext. The line physicality stores
+    /// deterministic move points for structural search; it deliberately does not require a
+    /// second SQL board record for every ply. Replay supplies FEN/UCI and resolves the same
+    /// position ids carried by that trajectory.
     /// </summary>
     public async Task<ChessGamePliesResponse?> ChessGamePliesAsync(string idHex, CancellationToken ct)
     {
         if (TryParseIdHex(idHex) is not { } id) return null;
 
-        var stored = await NpgsqlSubstrateReads.ChessGamePliesAsync(
-            _dataSource, id, ct, TranslateReadError);
-
-        // Vertex 1 is the starting position; ply N is vertex N+1, and the SAN on vertex N is
-        // the move that LEFT it. A game with no trajectory yields nothing here.
-        if (stored.Count > 1)
-        {
-            var plies = new List<ChessPlyRow>(stored.Count - 1);
-            for (int i = 0; i + 1 < stored.Count; i++)
-            {
-                var from = stored[i];
-                var to = stored[i + 1];
-                plies.Add(new ChessPlyRow(
-                    Ply: i + 1,
-                    San: from.San ?? "",
-                    Uci: "",
-                    Fen: "",
-                    WhiteMoved: i % 2 == 0,
-                    ClockSeconds: ParseClockSeconds(from.Clock),
-                    PositionId: to.PositionIdHex));
-            }
-            return new ChessGamePliesResponse("chess.game.plies", idHex.ToLowerInvariant(),
-                stored[0].PositionIdHex, plies.Any(p => p.ClockSeconds is not null), null, plies);
-        }
-
-        // Fallback: pre-analysis game, no stored line. Replay the verbatim movetext.
         var game = await ChessGameAsync(idHex, ct);
         if (game is null) return null;
         var replay = Laplace.Chess.Service.ChessReplay.Replay(game.Movetext);
@@ -335,20 +299,6 @@ internal sealed partial class SubstrateClient
             replay.StartFen, replay.HasClocks, replay.Truncated,
             [.. replay.Plies.Select(p => new ChessPlyRow(
                 p.Ply, p.San, p.Uci, p.Fen, p.WhiteMoved, p.ClockSeconds, p.PositionId))]);
-    }
-
-    /// <summary>"0:02:59.8" -> 179.8. The clock the source recorded, as the source wrote it.</summary>
-    private static double? ParseClockSeconds(string? clock)
-    {
-        if (string.IsNullOrWhiteSpace(clock)) return null;
-        var parts = clock.Split(':');
-        if (parts.Length != 3) return null;
-        return double.TryParse(parts[0], out var h)
-            && double.TryParse(parts[1], out var m)
-            && double.TryParse(parts[2], System.Globalization.NumberStyles.Float,
-                               System.Globalization.CultureInfo.InvariantCulture, out var sec)
-            ? h * 3600 + m * 60 + sec
-            : null;
     }
 
     /// <summary>One game: its headers and the movetext its own content hash rebuilds.</summary>

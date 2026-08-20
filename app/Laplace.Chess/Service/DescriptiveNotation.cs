@@ -17,10 +17,10 @@ public static class DescriptiveNotation
         string t = Normalize(token);
         if (t.Length == 0) return null;
 
-        if (t is "O-O" or "CASTLES-K") return Unique(legal, m => (m.Flags & MoveFlags.CastleKing) != 0);
-        if (t is "O-O-O" or "CASTLES-Q") return Unique(legal, m => (m.Flags & MoveFlags.CastleQueen) != 0);
+        if (t is "O-O" or "CASTLES-K") return Unique(legal, m => m.IsKingSideCastle);
+        if (t is "O-O-O" or "CASTLES-Q") return Unique(legal, m => m.IsQueenSideCastle);
         if (t == "CASTLES")
-            return Unique(legal, m => (m.Flags & (MoveFlags.CastleKing | MoveFlags.CastleQueen)) != 0);
+            return Unique(legal, m => m.IsCastle);
 
         bool enPassant = false;
         if (t.EndsWith("EP", StringComparison.Ordinal)) { enPassant = true; t = t[..^2]; }

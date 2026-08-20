@@ -171,13 +171,13 @@ public sealed class ChessOpeningMatchDecomposer
         var ids = new List<Hash128>(w.Moves.Count + 1);
         lock (ChessCompose.Gate)
         {
-            ids.Add(ChessCompose.PositionId(m.StateKey(state)));
+            ids.Add(ChessCompose.PositionId(state.Board));
             foreach (var san in w.Moves)
             {
                 var mv = San.Resolve(state.Board, m.LegalActions(state), san);
                 if (mv is null) return null;
                 state = m.Apply(state, mv.Value);
-                ids.Add(ChessCompose.PositionId(m.StateKey(state)));
+                ids.Add(ChessCompose.PositionId(state.Board));
             }
         }
         return ids;

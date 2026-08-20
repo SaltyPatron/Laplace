@@ -30,11 +30,11 @@ public sealed class SubstrateRootBias : IRootBias
         var edgeIds = new Hash128[moves.Count];
         lock (ChessCompose.Gate)
         {
-            var rootId = ChessCompose.PositionId(_modality.StateKey(state));
+            var rootId = ChessCompose.PositionId(state.Board);
             for (int i = 0; i < moves.Count; i++)
             {
                 var next = _modality.Apply(state, moves[i]);
-                var toId = ChessCompose.PositionId(_modality.StateKey(next));
+                var toId = ChessCompose.PositionId(next.Board);
                 edgeIds[i] = ConsensusKeys.EdgeId(rootId, ChessVocabulary.MoveType, toId);
             }
         }

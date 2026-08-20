@@ -94,8 +94,8 @@ public sealed class ChessOpeningsDecomposer(bool recursive = false)
     /// Catalog unit is the LINE (GH #736 / Chess catalog dual): Merkle of ordered position
     /// ids, trajectory physicality, OPENING_NAME / HAS_ECO on the line. Ordered transitions
     /// are read from the trajectory rather than restated as fabricated draw testimony.
-    /// Final-position name stamps stay as a temporary bridge for
-    /// <see cref="ChessOpeningIndex"/> until readers are fully line-aware.
+    /// The terminal board is recovered from the line trajectory by the catalog reader; it is
+    /// structure, not a second source assertion on an exact-position SQL entity.
     /// </summary>
     private static void AppendLine(SubstrateChangeBuilder b, ChessModality m, List<string> sans, string eco, string name)
     {
@@ -105,15 +105,13 @@ public sealed class ChessOpeningsDecomposer(bool recursive = false)
 
         lock (ChessCompose.Gate)
         {
-            line.Add(ChessGraph.EmitComposed(
-                b, m.StateKey(state), ChessVocabulary.OpeningsSourceId).Position);
+            line.Add(ChessGraph.ComposePositionPoint(state.Board));
             foreach (var san in sans)
             {
                 var mv = San.Resolve(state.Board, m.LegalActions(state), san);
                 if (mv is null) return;
                 state = m.Apply(state, mv.Value);
-                line.Add(ChessGraph.EmitComposed(
-                    b, m.StateKey(state), ChessVocabulary.OpeningsSourceId).Position);
+                line.Add(ChessGraph.ComposePositionPoint(state.Board));
             }
         }
         if (line.Count < 2) return;
@@ -126,7 +124,6 @@ public sealed class ChessOpeningsDecomposer(bool recursive = false)
         b.AddEntity(lineId, EntityTier.Document, ChessVocabulary.GameType, ChessVocabulary.OpeningsSourceId);
         ChessGraph.AppendGameTrajectory(b, lineId, line, ChessVocabulary.OpeningsSourceId, nowUs);
 
-        var finalId = ids[^1];
         Hash128? nameId = null;
         Hash128? ecoId = null;
         if (!string.IsNullOrWhiteSpace(name))
@@ -135,20 +132,11 @@ public sealed class ChessOpeningsDecomposer(bool recursive = false)
             ecoId = ContentEmitter.Emit(b, eco, ChessVocabulary.OpeningsSourceId);
 
         if (nameId is { } nid)
-        {
             b.AddAttestation(NativeAttestation.Categorical(
                 lineId, ChessSeedManifest.OpeningName, nid, ChessVocabulary.OpeningsSourceId, null, TC.AcademicCurated));
-            // Bridge: ChessOpeningIndex still keys boards for deepest-named-position match.
-            b.AddAttestation(NativeAttestation.Categorical(
-                finalId, ChessSeedManifest.OpeningName, nid, ChessVocabulary.OpeningsSourceId, null, TC.AcademicCurated));
-        }
         if (ecoId is { } eid)
-        {
             b.AddAttestation(NativeAttestation.Categorical(
                 lineId, ChessSeedManifest.HasEco, eid, ChessVocabulary.OpeningsSourceId, null, TC.AcademicCurated));
-            b.AddAttestation(NativeAttestation.Categorical(
-                finalId, ChessSeedManifest.HasEco, eid, ChessVocabulary.OpeningsSourceId, null, TC.AcademicCurated));
-        }
     }
 
     /// <summary>

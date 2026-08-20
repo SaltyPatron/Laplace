@@ -177,17 +177,15 @@ add_custom_command(
 add_custom_target(laplace_t0_perfcache       ALL DEPENDS ${LAPLACE_PERFCACHE_BIN})
 add_custom_target(laplace_highway_perfcache  ALL DEPENDS ${LAPLACE_HIGHWAY_BIN})
 
-# Chess compose floor (tier-1 vocab + catalog tier-2 positions) — GH #822 / spec 33.
-# Tier 0 remains codepoints (t0). Emit always packs the finite piece×square alphabet
-# in native code; catalog surfaces (openings/960/…) are additional tier-2 INPUT, peer
-# of UCDXML extract before ucd_tables_emit. Openings path: -D or env only — no host
-# path baked into this file.
+# Chess compose floor (typed state atoms + catalog tier-2 positions) — GH #822 / spec 33.
+# Catalog text is generator interchange only; the emitter parses it into binary state atoms
+# before identity/geometry. It is never admitted as a sentence or chess content.
 add_subdirectory(tools/chess_position_tables_emit)
 if(NOT LAPLACE_CHESS_OPENINGS AND DEFINED ENV{LAPLACE_CHESS_OPENINGS})
     set(LAPLACE_CHESS_OPENINGS "$ENV{LAPLACE_CHESS_OPENINGS}")
 endif()
 set(LAPLACE_CHESS_OPENINGS "${LAPLACE_CHESS_OPENINGS}" CACHE PATH
-    "Optional ECO openings TSV dir for extra tier-2 catalog surfaces (sentences)")
+    "Optional ECO openings TSV dir for extra tier-2 catalog position coverage")
 set(LAPLACE_CHESS_SURFACES "${LAPLACE_PERFCACHE_DIR}/chess_catalog_surfaces.txt")
 set(LAPLACE_CHESS_TRANSITION_BIN
     "${LAPLACE_PERFCACHE_DIR}/laplace_chess_transition_perfcache.bin"
@@ -213,10 +211,9 @@ file(GLOB_RECURSE LAPLACE_CHESS_SURFACES_MANAGED_SOURCES CONFIGURE_DEPENDS
 list(FILTER LAPLACE_CHESS_SURFACES_MANAGED_SOURCES EXCLUDE REGEX "/(bin|obj)/")
 
 # Tier-1 alphabet always emits (native). Catalog surfaces are optional coverage.
-set(_chess_emit_deps ${LAPLACE_PERFCACHE_BIN} $<TARGET_FILE:laplace_chess_position_tables_emit>)
+set(_chess_emit_deps $<TARGET_FILE:laplace_chess_position_tables_emit>)
 set(_chess_emit_cmd
     COMMAND $<TARGET_FILE:laplace_chess_position_tables_emit>
-            --t0     ${LAPLACE_PERFCACHE_BIN}
             --output ${LAPLACE_CHESS_PERFCACHE_BIN})
 
 if(LAPLACE_DOTNET AND EXISTS "${LAPLACE_CHESS_SURFACES_PROJ}")
@@ -225,35 +222,16 @@ if(LAPLACE_DOTNET AND EXISTS "${LAPLACE_CHESS_SURFACES_PROJ}")
     else()
         set(_chess_openings_arg "NONE")
     endif()
-    # HAND THE CHILD THE BLOB, AND ORDER IT AFTER THE BLOB EXISTS.
-    #
-    # This step runs a managed program that calls CodepointPerfcache.LoadDefault ->
-    # LaplaceInstall.ResolveT0Perfcache. Under `dotnet run --project`, that resolver sees
-    # cwd = build/engine/core and AppContext.BaseDirectory = the ChessCatalogSurfaces bin
-    # dir; neither yields an engine build root, so it searched nothing useful and threw.
-    #
-    # MEASURED 2026-08-16, run 31970548937: a clean-workspace build reached 229/230 and
-    # died here with "T0 perfcache not found. Searched: LAPLACE_PERFCACHE_BIN=(unset); no
-    # engine build root resolved from AppContext.BaseDirectory or cwd" — which is only
-    # legible because that message was fixed the same day to name what it probed.
-    #
-    # CMake already knows the path: LAPLACE_PERFCACHE_BIN is the same variable passed as
-    # --t0 to the emit step below. Passing it removes the guesswork rather than widening
-    # the resolver's heuristics.
-    #
-    # DEPENDS gains the blob too. It was absent, so nothing ordered this step after the
-    # blob's own rule -- on a clean tree the two are free to run in either order, and the
-    # failure surfaces as a missing file rather than as a missing edge.
+    # The managed prep emits board coverage and deterministic transition keys. Binary
+    # position identity is independent of the Unicode/codepoint floor.
     add_custom_command(
         OUTPUT ${LAPLACE_CHESS_SURFACES} ${LAPLACE_CHESS_TRANSITION_BIN}
         COMMAND ${CMAKE_COMMAND} -E make_directory "${LAPLACE_PERFCACHE_DIR}"
-        COMMAND ${CMAKE_COMMAND} -E env
-                "LAPLACE_PERFCACHE_BIN=${LAPLACE_PERFCACHE_BIN}"
-                ${LAPLACE_DOTNET} run --project "${LAPLACE_CHESS_SURFACES_PROJ}"
+        COMMAND ${LAPLACE_DOTNET} run --project "${LAPLACE_CHESS_SURFACES_PROJ}"
                 -c Release --no-launch-profile --
                 "${_chess_openings_arg}" "${LAPLACE_CHESS_SURFACES}"
                 "${LAPLACE_CHESS_TRANSITION_BIN}"
-        DEPENDS ${LAPLACE_CHESS_SURFACES_MANAGED_SOURCES} ${LAPLACE_PERFCACHE_BIN}
+        DEPENDS ${LAPLACE_CHESS_SURFACES_MANAGED_SOURCES}
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
         COMMENT "Chess catalog tier-2 surfaces (emit input prep)"
         VERBATIM

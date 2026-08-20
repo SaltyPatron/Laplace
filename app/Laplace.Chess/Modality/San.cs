@@ -9,9 +9,9 @@ public static class San
         if (t.Length == 0) return null;
 
         if (t is "O-O-O" or "0-0-0")
-            return Single(legal, m => (m.Flags & MoveFlags.CastleQueen) != 0);
+            return Single(legal, m => m.IsQueenSideCastle);
         if (t is "O-O" or "0-0")
-            return Single(legal, m => (m.Flags & MoveFlags.CastleKing) != 0);
+            return Single(legal, m => m.IsKingSideCastle);
 
         if (!TryParsePieceMove(t, out var pieceType, out int dest, out int fromFile, out int fromRank,
                 out var promoType))
@@ -37,12 +37,12 @@ public static class San
             int kingSq = b.FindKing(white);
             if (kingSq < 0) return null;
             MoveGen.PseudoFrom(b, kingSq, scratch);
-            MoveFlags want = t is "O-O-O" or "0-0-0" ? MoveFlags.CastleQueen : MoveFlags.CastleKing;
+            bool kingSide = t is not ("O-O-O" or "0-0-0");
             ChessMove? hit = null;
             for (int i = 0; i < scratch.Count; i++)
             {
                 var m = scratch[i];
-                if ((m.Flags & want) == 0) continue;
+                if (kingSide ? !m.IsKingSideCastle : !m.IsQueenSideCastle) continue;
                 if (!MoveGen.IsLegal(b, m)) continue;
                 if (hit is not null) return null;
                 hit = m;
@@ -112,7 +112,7 @@ public static class San
     {
         // A CASTLE IS ONLY EVER SPELLED O-O / O-O-O, so a piece-move SAN must never
         // match one. Chess960 collides (e.g. "Kc1" vs queen-side castle ending on c1).
-        if ((m.Flags & (MoveFlags.CastleKing | MoveFlags.CastleQueen)) != 0) return false;
+        if (m.IsCastle) return false;
         if (m.To != dest) return false;
         if (Board.TypeOf(b.Squares[m.From]) != pieceType) return false;
         if (promoType != Piece.Empty)
@@ -127,8 +127,8 @@ public static class San
 
     public static string ToSan(Board b, ChessMove m)
     {
-        if ((m.Flags & MoveFlags.CastleKing) != 0) return WithCheckGlyph(b, m, "O-O");
-        if ((m.Flags & MoveFlags.CastleQueen) != 0) return WithCheckGlyph(b, m, "O-O-O");
+        if (m.IsKingSideCastle) return WithCheckGlyph(b, m, "O-O");
+        if (m.IsQueenSideCastle) return WithCheckGlyph(b, m, "O-O-O");
 
         var legal = MoveGen.Legal(b);
         Piece moving = b.Squares[m.From];
