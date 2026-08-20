@@ -56,8 +56,7 @@ public static class GrammarRowReader
         try
         {
             long units = 0;
-            await using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read,
-                FileShare.Read, bufferSize: MemoryTopology.CopyStartupBytesPerConnection, useAsync: true);
+            await using var fs = IngestIo.OpenSequentialRead(filePath, useAsync: true);
             var buf = new byte[IngestSizing.ResolveSequentialIoBufferBytes()];
             int read;
             while ((read = await fs.ReadAsync(buf, ct)) > 0)

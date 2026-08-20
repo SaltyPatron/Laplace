@@ -10,8 +10,7 @@ public static class StreamingUtf8LineReader
     public static async IAsyncEnumerable<ReadOnlyMemory<byte>> ReadLinesAsync(
         string filePath, [EnumeratorCancellation] CancellationToken ct = default)
     {
-        await using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read,
-            FileShare.Read, bufferSize: MemoryTopology.CopyStartupBytesPerConnection, useAsync: true);
+        await using var fs = IngestIo.OpenSequentialRead(filePath, useAsync: true);
         await foreach (var line in ReadLinesAsync(fs, ct))
             yield return line;
     }

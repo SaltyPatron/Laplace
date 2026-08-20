@@ -15,8 +15,7 @@ public static class WeightTensorETL
     {
         var tref = refMap[name];
         byte[] rawBytes = new byte[tref.DataLength];
-        using var fs = new FileStream(tref.FilePath, FileMode.Open, FileAccess.Read,
-                                      FileShare.Read, 1 << 16, useAsync: false);
+        using var fs = IngestIo.OpenSequentialRead(tref.FilePath);
         fs.Seek(tref.AbsoluteDataStart, SeekOrigin.Begin);
         int total = 0;
         while (total < rawBytes.Length)

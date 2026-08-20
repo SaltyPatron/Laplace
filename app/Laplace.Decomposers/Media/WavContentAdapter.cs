@@ -1,4 +1,5 @@
 using Laplace.Decomposers.Abstractions;
+using Laplace.Engine.Core;
 
 namespace Laplace.Decomposers.Media;
 
@@ -12,8 +13,7 @@ public sealed class WavContentAdapter : IContentRecordAdapter
 
     public ValueTask<ContentAdapterHandle> OpenAsync(string path, CancellationToken ct = default)
     {
-        var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
-            bufferSize: 1 << 20, useAsync: true);
+        var stream = IngestIo.OpenSequentialRead(path, useAsync: true);
         var meta = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["format"] = "wav-pcm16",

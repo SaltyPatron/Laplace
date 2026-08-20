@@ -124,10 +124,10 @@ public sealed class SemLinkJsonPairStream : IRecordStream<GrammarIngestRecord>
         try
         {
             var fi = new FileInfo(file);
-            if (!fi.Exists || fi.Length == 0 || fi.Length > int.MaxValue) return null;
+            if (!fi.Exists || fi.Length == 0
+                || fi.Length > IngestSizing.ResolveContiguousPayloadBytes()) return null;
             var bytes = new byte[(int)fi.Length];
-            await using var fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read,
-                bufferSize: 1 << 20, useAsync: true);
+            await using var fs = IngestIo.OpenSequentialRead(file, useAsync: true);
             int off = 0;
             while (off < bytes.Length)
             {

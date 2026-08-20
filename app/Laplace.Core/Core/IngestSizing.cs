@@ -395,6 +395,16 @@ public static class IngestSizing
     }
 
     /// <summary>
+    /// Largest payload one parser may require as one contiguous managed buffer. It is
+    /// bounded by both the compose envelope and the CLR's actual array addressability;
+    /// there is no format-specific 64/256 MiB rejection threshold.
+    /// </summary>
+    public static int ResolveContiguousPayloadBytes() =>
+        (int)Math.Max(1, Math.Min(
+            (long)Array.MaxLength,
+            ResolveWorkingSetFlushEnvelopeBytes()));
+
+    /// <summary>
     /// Working-set apply byte budget — delegated to <see cref="MemoryTopology"/>, the single
     /// RAM authority. The budget is real RAM divided across the topology's simultaneously
     /// resident owners. Historical 1/4-GiB and RAM/16 clamps are gone; COPY now streams and

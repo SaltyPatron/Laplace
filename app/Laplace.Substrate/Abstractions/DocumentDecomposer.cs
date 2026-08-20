@@ -124,13 +124,13 @@ public static class DocumentFileExtract
         if (!fi.Exists)
             throw new FileNotFoundException($"document vanished between enumeration and open: {file}");
         if (fi.Length == 0) return Array.Empty<byte>();
-        if (fi.Length > int.MaxValue)
+        int contiguousBytes = IngestSizing.ResolveContiguousPayloadBytes();
+        if (fi.Length > contiguousBytes)
             throw new InvalidOperationException(
-                $"document '{file}' is {fi.Length:N0} bytes — exceeds the 2 GiB single-document "
-                + "compose limit; split the file into documents below the limit");
+                $"document '{file}' is {fi.Length:N0} bytes — exceeds the current "
+                + $"{contiguousBytes:N0}-byte contiguous compose envelope; split the file into records");
         var bytes = new byte[(int)fi.Length];
-        await using var fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read,
-            bufferSize: MemoryTopology.CopyStartupBytesPerConnection, useAsync: true);
+        await using var fs = IngestIo.OpenSequentialRead(file, useAsync: true);
         int off = 0;
         while (off < bytes.Length)
         {

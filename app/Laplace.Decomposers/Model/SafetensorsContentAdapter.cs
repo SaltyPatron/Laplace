@@ -1,4 +1,5 @@
 using Laplace.Decomposers.Abstractions;
+using Laplace.Engine.Core;
 
 namespace Laplace.Decomposers.Model;
 
@@ -29,7 +30,7 @@ public sealed class SafetensorsContentAdapter : IContentRecordAdapter
                 new Dictionary<string, string> { ["path"] = full, ["kind"] = "model-dir" }));
         }
 
-        var fs = new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.Read);
+        var fs = IngestIo.OpenSequentialRead(full, useAsync: true);
         return ValueTask.FromResult(new ContentAdapterHandle(
             "safetensors-file", fs,
             new Dictionary<string, string> { ["path"] = full, ["kind"] = "file" }));

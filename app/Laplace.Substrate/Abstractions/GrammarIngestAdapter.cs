@@ -177,9 +177,8 @@ public sealed class GrammarFileRecordStream : IRecordStream<GrammarIngestRecord>
 
         try
         {
-            await using var fs = new FileStream(_filePath, FileMode.Open, FileAccess.Read,
-                FileShare.Read, bufferSize: 4 << 20, useAsync: true);
-            var buf = new byte[4 << 20];
+            await using var fs = IngestIo.OpenSequentialRead(_filePath, useAsync: true);
+            var buf = new byte[IngestSizing.ResolveSequentialIoBufferBytes()];
             int read;
             bool eof = false;
 
