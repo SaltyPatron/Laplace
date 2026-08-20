@@ -23,8 +23,8 @@ public sealed class ConsensusIndexShapeTests
     {
         var root = TypeIdLawTests.FindRepoRootPublic();
         var sql = File.ReadAllText(Path.Combine(
-            root, "extension", "laplace_substrate", "sql", "schema", "tables",
-            "consensus.sql.in"));
+            root, "extension", "laplace_substrate", "sql", "indexes",
+            "consensus_subject_eff_mu_btree.sql.in"));
 
         Assert.Contains(
             "ON consensus (subject_id, ((rating - 2*rd)) DESC)", sql,
