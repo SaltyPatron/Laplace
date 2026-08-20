@@ -194,6 +194,14 @@ jobs:
       - name: Eval operation-lane architecture gate
         run: python3 scripts/test-eval-op-lane.py
 
+      - name: SQL corpus auditor regression tests
+        run: python3 scripts/test-sql-audit.py
+
+      - name: SQL corpus high-severity ratchet
+        # Existing medium/low debt remains visible in the generated local report.
+        # CI blocks only new unbaselined high-confidence correctness/security hazards.
+        run: python3 scripts/sql-audit.py --skip-near-clones --fail-on high
+
       - name: Upgrade drop-order gate — live dependents must drop before their base
         run: python3 scripts/check-upgrade-drop-order.py
 

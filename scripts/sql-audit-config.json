@@ -1,0 +1,26 @@
+{
+  "exact_min_tokens": 20,
+  "near_min_tokens": 50,
+  "shingle_size": 5,
+  "near_similarity": 0.82,
+  "max_shingle_frequency": 40,
+  "report_limit": 200,
+  "exclude": [
+    ".github/archive/**",
+    "engine/core/grammars/generated/**",
+    "scripts/test-sql-audit.py"
+  ],
+  "expensive_functions": [
+    "converse.attested_language",
+    "lexical.lexical_peers",
+    "lexical.word_case_variants",
+    "realize.render_text",
+    "structural.containers_of",
+    "structural.geometry_neighbours"
+  ],
+  "filter_key_functions": [
+    "consensus.relation_highway_band",
+    "consensus.relation_highway_bit",
+    "consensus.relation_type_in_family"
+  ]
+}

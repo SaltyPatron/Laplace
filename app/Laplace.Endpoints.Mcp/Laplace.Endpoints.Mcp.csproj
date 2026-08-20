@@ -12,7 +12,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Laplace.Agents\Laplace.Agents.csproj" />
     <ProjectReference Include="../Laplace.Core/Laplace.Core.csproj" />
     <ProjectReference Include="..\Laplace.Ops\Laplace.Ops.csproj" />
     <ProjectReference Include="../Laplace.Substrate/Laplace.Substrate.csproj" />
