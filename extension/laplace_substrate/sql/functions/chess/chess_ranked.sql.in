@@ -1,6 +1,6 @@
 DROP FUNCTION IF EXISTS laplace.chess_ranked(integer, integer);
-DROP FUNCTION IF EXISTS chess.ranked(integer, integer, text, text);
 DROP FUNCTION IF EXISTS chess.ranked(integer, integer);
+DROP FUNCTION IF EXISTS chess.ranked(integer, integer, text, text);
 
 -- Sortable roster core. The two-argument wrapper below preserves the established
 -- SQL/API contract while the web reader can request a real server-side order.

@@ -23,7 +23,7 @@ JOIN pg_proc dep ON dep.oid = d.objid AND d.classid = 'pg_proc'::regclass
 JOIN pg_proc base ON base.oid = d.refobjid AND d.refclassid = 'pg_proc'::regclass
 JOIN pg_namespace nd ON nd.oid = dep.pronamespace
 JOIN pg_namespace nb ON nb.oid = base.pronamespace
-WHERE nb.nspname IN ('laplace','ops','consensus','generation','realize','converse','structural')
+WHERE nb.nspname IN ('laplace','ops','consensus','generation','realize','converse','structural','chess')
   AND dep.oid <> base.oid
 """
 
