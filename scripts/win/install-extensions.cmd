@@ -113,7 +113,7 @@ if errorlevel 1 (
 set "GUC_SQL=%TEMP%\laplace-install-gucs.sql"
 > "%GUC_SQL%" (
   echo ALTER SYSTEM SET extension_control_path = '%LAPLACE_DEPLOY_PG%/share;$system';
-  echo ALTER SYSTEM SET dynamic_library_path = '$libdir;%LAPLACE_DEPLOY_PG%/lib';
+  echo ALTER SYSTEM SET dynamic_library_path = '%LAPLACE_DEPLOY_PG%/lib;$libdir';
   echo ALTER SYSTEM SET laplace_substrate.perfcache_path = '%LAPLACE_DEPLOY_PG%/share/laplace_t0_perfcache.bin';
   echo ALTER SYSTEM SET laplace_substrate.highway_perfcache_path = '%LAPLACE_DEPLOY_PG%/share/laplace_highway_perfcache.bin';
   echo ALTER SYSTEM SET laplace_substrate.chess_position_perfcache_path = '%LAPLACE_DEPLOY_PG%/share/laplace_chess_position_perfcache.bin';

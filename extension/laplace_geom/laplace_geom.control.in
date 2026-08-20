@@ -1,5 +1,7 @@
 default_version = '@EXT_VERSION@'
-module_pathname = '$libdir/laplace_geom'
+# See laplace_substrate.control.in: staged modules are resolved through
+# dynamic_library_path, not pg_config's private $libdir.
+module_pathname = 'laplace_geom'
 relocatable = false
 schema = 'public'
 trusted = true

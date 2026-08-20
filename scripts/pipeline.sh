@@ -160,6 +160,31 @@ preloaded_so_digest() {
   cat "$d/laplace_substrate.so" "$d/laplace_geom.so" 2>/dev/null | sha256sum | cut -d' ' -f1
 }
 
+# Staged extension modules must win before pg_config's compatibility $libdir.
+# The control files deliberately name the module without a directory so this is
+# the one authoritative resolution order on Linux.  Preserve any operator-added
+# search directories after those two canonical entries.
+ensure_extension_library_path() {
+  local current desired part
+  local -a current_parts desired_parts
+  current=$(psql -d postgres -U laplace_admin -tAX -c "SHOW dynamic_library_path")
+  desired_parts=("$LAPLACE_EXT_LIBDIR" '$libdir')
+  IFS=: read -r -a current_parts <<<"$current"
+  for part in "${current_parts[@]}"; do
+    [[ -z "$part" || "$part" == "$LAPLACE_EXT_LIBDIR" || "$part" == '$libdir' ]] && continue
+    desired_parts+=("$part")
+  done
+  desired=$(IFS=:; echo "${desired_parts[*]}")
+  if [[ "$current" == "$desired" ]]; then
+    return 1
+  fi
+  psql -d postgres -U laplace_admin -v ON_ERROR_STOP=1 \
+    -c "ALTER SYSTEM SET dynamic_library_path = '$desired'" \
+    -c "SELECT pg_reload_conf()"
+  echo "dynamic_library_path: '$current' -> '$desired'"
+  return 0
+}
+
 restart_postgres() {
   # $1 = reason. ROOTLESS self-bounce: on this host the postmaster runs AS the
   # runner user (laplace-postgresql.service, User=laplace-runner), so the
@@ -422,8 +447,11 @@ phase_test() {
 phase_install() {
   echo "===== PHASE — INSTALL ====="
   test -d build || { echo "::error::build/ missing — run 'pipeline.sh build' first"; exit 1; }
-  local native_fp
+  local native_fp library_path_changed=0
   native_fp=$(fp_native)
+  if ensure_extension_library_path; then
+    library_path_changed=1
+  fi
   # Never stamp today's source fingerprint onto yesterday's build artifacts.
   # `install` is callable as a standalone phase, so prove the build phase
   # completed for exactly this native input domain before trusting build/.
@@ -432,7 +460,8 @@ phase_install() {
     echo "::error::native build artifacts are stale — run 'pipeline.sh build install'" >&2
     exit 1
   fi
-  if fp_check install-native "$native_fp" \
+  if [[ "$library_path_changed" -eq 0 ]] \
+     && fp_check install-native "$native_fp" \
      && [[ -f "$LAPLACE_INSTALL_PREFIX/lib/liblaplace_core.so" ]]; then
     echo "install up-to-date — skipped (engine/extension unchanged since last install; no API stop, no PG bounce)"
     return 0
@@ -462,12 +491,12 @@ phase_install() {
   # INCLUDING .sql.in, so editing one function body invalidates it, reaches here,
   # and forced a bounce that nothing needed. Digest the preloaded libraries
   # across the install instead: same bytes, same image, no restart.
-  if [[ "$so_before" != "$so_after" ]]; then
+  if [[ "$so_before" != "$so_after" || "$library_path_changed" -eq 1 ]]; then
     local preload
     preload=$(psql -d postgres -U laplace_admin -tAc "SHOW shared_preload_libraries" 2>/dev/null || true)
     if [[ ",${preload// /}," == *",laplace_substrate,"* ]] \
        || [[ ",${preload// /}," == *",laplace_geom,"* ]]; then
-      restart_postgres "install: preloaded extension .so changed"
+      restart_postgres "install: staged extension image or resolution path changed"
     fi
   else
     echo "install: preloaded .so unchanged — no PG bounce needed (SQL-only change)"
@@ -737,12 +766,21 @@ verify_c_symbols() {
       missing=$((missing+1))
     fi
   done < <(psql -d "$PGDATABASE" -U laplace_admin -tAX -c \
-      "SELECT p.prosrc FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace \
-       WHERE n.nspname='laplace' AND p.prolang=(SELECT oid FROM pg_language WHERE lanname='c') \
-         AND p.probin = '\$libdir/laplace_substrate'")
+      "SELECT p.prosrc FROM pg_proc p \
+       WHERE p.prolang=(SELECT oid FROM pg_language WHERE lanname='c') \
+         AND p.probin IN ('laplace_substrate', '\$libdir/laplace_substrate')")
   rm -f "$symtab"
   if [[ "$missing" -gt 0 ]]; then
     echo "::error::verify_c_symbols: $missing orphaned C function(s) — catalog and .so disagree" >&2
+    return 1
+  fi
+  local stale_bindings
+  stale_bindings=$(psql -d "$PGDATABASE" -U laplace_admin -tAX -c \
+    "SELECT count(*) FROM pg_proc \
+      WHERE prolang=(SELECT oid FROM pg_language WHERE lanname='c') \
+        AND probin IN ('\$libdir/laplace_substrate', '\$libdir/laplace_geom')")
+  if [[ "$stale_bindings" != "0" ]]; then
+    echo "::error::verify_c_symbols: $stale_bindings C function(s) still bypass staged module resolution through \$libdir" >&2
     return 1
   fi
   echo "OK all laplace C functions resolve in the loaded image"
