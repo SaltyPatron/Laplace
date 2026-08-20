@@ -145,7 +145,7 @@ CEILINGS = {
     #      accumulates at ingest, no backfill path" law, and both reachable from
     #      the MCP op tool via api()'s unfiltered pg_proc scan. These are
     #      deletions, tracked in #989 — a write-path hazard, not scaffolding.
-    #   3  converse/geometry — tiered, locale, cluster_batch.
+    #   2  converse/geometry — tiered and locale.
     #      Audited one by one 2026-08-10. NONE are safe deletions; "zero textual
     #      caller" turned out to mean "written ahead of its caller" in every case:
     #        converse.tiered            deliberately off the hot path, and chat.sql.in
@@ -161,17 +161,15 @@ CEILINGS = {
     #                                   are still N+1 and are NOT covered by this entry's
     #                                   removal — measured cost of the scalar form is
     #                                   ~42 ms per label (4,587 labels = 195 s).
-    #        structural.locale          2026-06-30 import, touched since only by schema
-    #        structural.cluster_batch   migrations. Operator-diagnostic shaped, and
-    #                                   api() is an unfiltered pg_proc scan (#989), so
-    #                                   "no textual caller" cannot prove unused while
-    #                                   any MCP op call reaches them. Not provably dead.
+    #        structural.locale          2026-06-30 import, touched since only by schema.
+    #   structural.cluster_batch left this census when cluster became its explicit
+    #   scalar adapter; the batch function is now a directly referenced canonical core.
     # g4 stayed 15. A 2026-08-16 exception raised it to 16 for consensus.glicko2_logit,
     # which landed with 4f97abb2 carrying zero callers and was uncalled on purpose — its
     # own file installs it as the rejected form beside the winner it derives. main has
     # since given it a caller, so the exception is obsolete and is removed rather than
     # left standing: a recorded exception that outlives its cause is just a hole.
-    "g4_dead_canonical": 15,
+    "g4_dead_canonical": 14,
     # Measured 2026-08-05, landing with its violations enumerated per W6's trap
     # note ("a gate that goes red on merge-day teaches people to ignore it").
     # 29 occurrences across 10 sites, all pre-existing: model_factor (6 names),

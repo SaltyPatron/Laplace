@@ -1,6 +1,6 @@
 # Substrate cohesion issue ledger
 
-Status date: 2026-08-19
+Status date: 2026-08-20
 
 This ledger maps every outcome from the SQL/substrate campaign to merged evidence,
 an owning GitHub issue, and a falsifiable completion gate. It is the scheduling
@@ -25,8 +25,8 @@ companion to [SUBSTRATE_COHESION_STATUS.md](SUBSTRATE_COHESION_STATUS.md).
 | Whole-repository SQL scanner | Done | #1136; 550 files/26,292 lines/2,754 units on current main | [#1135](https://github.com/SaltyPatron/Laplace/issues/1135) | Scanner regression and high-severity CI remain green on a clean checkout. |
 | Stable exact/near-clone inventory | Done as measurement | #1136; current 12 exact and 14 near clusters | [#1135](https://github.com/SaltyPatron/Laplace/issues/1135), [#951](https://github.com/SaltyPatron/Laplace/issues/951) | Every cluster has keep/fold/delete disposition and the production function/file count shrinks without reader drift. |
 | Shrink-only SQL finding budgets | Partial | New unbaselined high findings fail; medium/low totals are reported | [#1135](https://github.com/SaltyPatron/Laplace/issues/1135) | Every warning class has an explicit non-increasing budget and linked measured disposition. |
-| Canonical scalar/batch implementations | Partial | #1164 repairs `lexical_peers`; several good native batch families exist | [#1047](https://github.com/SaltyPatron/Laplace/issues/1047), [#1181](https://github.com/SaltyPatron/Laplace/issues/1181) | Every published family declares cardinality; scalar/batch/reference parity passes; no caller or batch loops a scalar database operation. |
-| `structural.cluster` correctness | Broken on main | Non-empty scalar/batch failures reproduced; local prototype proves result shape only | [#1181](https://github.com/SaltyPatron/Laplace/issues/1181) | Non-empty parity fixtures and bounded warm/cold plan budgets pass. |
+| Canonical scalar/batch implementations | Partial | #1164 repairs `lexical_peers`; `structural.cluster` now has one ordinal-preserving relational core and scalar adapter | [#1047](https://github.com/SaltyPatron/Laplace/issues/1047), [#1181](https://github.com/SaltyPatron/Laplace/issues/1181) | Every published family declares cardinality; scalar/batch/reference parity passes; no caller or batch loops a scalar database operation. |
+| `structural.cluster` correctness | Implemented; live plan acceptance pending | Non-empty fixture proves scalar/batch parity, duplicate ordinals, unresolved/empty inputs, recurrence, and deterministic ordering; candidate work is bounded exactly by caller `p_limit` | [#1181](https://github.com/SaltyPatron/Laplace/issues/1181) | Seeded warm/cold plans prove candidate, curve, rendering, recurrence, buffer, and latency budgets on production-scale data. |
 | Early result reduction | Audit only | #1136 inventories late limits, joins, SRFs, and fences | [#1135](https://github.com/SaltyPatron/Laplace/issues/1135) | Each hot operation proves candidate reduction precedes expensive rendering/scoring/fanout. |
 | Honest top-k and truncation | Audit only | Numeric cap and unordered-limit inventory exists | [#1135](https://github.com/SaltyPatron/Laplace/issues/1135), [#1047](https://github.com/SaltyPatron/Laplace/issues/1047) | Every cap is classified as semantic top-k, work budget, transport cap, or explicit sample with deterministic ordering and underfill/truncation receipt. |
 | Partition-prunable large-table reads | Partial | #1141 removed one full-tier apply scan | [#1135](https://github.com/SaltyPatron/Laplace/issues/1135), [#1008](https://github.com/SaltyPatron/Laplace/issues/1008) | Known `relation_canonical`/highway wrappers are removed from partition keys; plans prove bounded leaves and result parity. |
@@ -101,15 +101,15 @@ companion to [SUBSTRATE_COHESION_STATUS.md](SUBSTRATE_COHESION_STATUS.md).
 | #1155 source-fidelity audit | Merged baseline | `docs/semantic-source-fidelity-audit-2026-08-19.md` | #1153/#1177 own implementation; preserve unpublished follow-up edits separately. |
 | #1164 lexical peer batch | Merged | Scalar/batch semantics and measured warm-buffer improvement | Use as one reference pattern; do not claim family-wide completion. |
 | #1180 OpenSubtitles identity | Open issue | Concrete merged violation of same-content law | Fix before full OpenSubtitles ingest. |
-| #1181 structural cluster | Open issue plus local prototype | Correctness defects, parity experiment, unacceptable plan cost | Redesign/rebase, add seeded regression and plan budgets, then publish. |
+| #1181 structural cluster | Set implementation prepared for publication | Canonical relational core, scalar adapter, non-empty parity/ordinality regression, exact caller-bound candidate admission | Deploy, capture seeded warm/cold plan/buffer receipts, and close only if the declared work budget holds. |
 | UD isolated canary | Incomplete experiment | ISO completed; UD never created a run/file journal | Rerun only after current main is installed in an isolated DB with full measurement. |
 | Discontinuous FrameNet local commit | Preserved, unpublished | `a57f620b` on `fix/framenet-occurrence-spans` | Return to #1177 ownership; validate/rebase before publication. |
 | Source-remediation sequence draft | Preserved, unpublished | Local `agent/source-fidelity-audit` edits | Reconcile with #1177 ledger and publish only non-duplicative content. |
 
 ## Release order
 
-1. Correct #1180/#1181 and audit merged content preimages for the same defect
-   class.
+1. Correct #1180, deploy and measure #1181, and audit merged content preimages
+   for the same defect class.
 2. Complete #1052/#1008/#904/#1048 global identity and materialization law.
 3. Complete #1133/#1134 modality, masks, and exact media reconstruction.
 4. Complete #811/#812/#989/#1047 operation registry, cardinality, and dispatcher.

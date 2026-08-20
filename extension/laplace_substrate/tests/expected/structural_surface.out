@@ -4,13 +4,13 @@ CREATE EXTENSION laplace_geom;
 ERROR:  extension "laplace_geom" already exists
 CREATE EXTENSION laplace_substrate;
 ERROR:  extension "laplace_substrate" already exists
-SELECT count(*) = 6 AS structural_functions_present
+SELECT count(*) = 7 AS structural_functions_present
 FROM pg_proc p
 JOIN pg_namespace n ON n.oid = p.pronamespace
 WHERE n.nspname = 'structural'
   AND p.proname IN (
       'word_curve', 'word_shape_distance', 'anagrams_of',
-      'collocates', 'cluster', 'entity_curve');
+      'collocates', 'cluster', 'cluster_batch', 'entity_curve');
  structural_functions_present 
 ------------------------------
  t
@@ -36,6 +36,11 @@ FROM structural.cluster(laplace.word_id('dog'), 0.05, 10);
  t
 (1 row)
 
+-- Non-empty contract and batch parity. The previous test stopped at the early-return
+-- path, so the scalar's ambiguous output variables and the batch's nonexistent
+-- sc.recurrence column both survived into production.
+\set ECHO none
+NOTICE:  structural cluster: bounded non-empty scalar/batch parity and ordinality pass
 -- Rule #3 gate: production Frechet helpers must realize via entity_curve /
 -- word_curve. Packed physicalities.trajectory must never be a Frechet argument.
 SELECT count(*) = 0 AS no_packed_trajectory_frechet
@@ -44,6 +49,7 @@ JOIN pg_namespace n ON n.oid = p.pronamespace
 WHERE (
       (n.nspname = 'structural' AND p.proname IN (
           'cluster',
+          'cluster_batch',
           'neighbors',
           'neighbors_of',
           'explore_anchor_neighbors'))
@@ -63,6 +69,7 @@ JOIN pg_namespace n ON n.oid = p.pronamespace
 WHERE (
       (n.nspname = 'structural' AND p.proname IN (
           'cluster',
+          'cluster_batch',
           'neighbors',
           'neighbors_of',
           'explore_anchor_neighbors'))
@@ -76,3 +83,4 @@ WHERE (
  t
 (1 row)
 
+-- structural_surface complete

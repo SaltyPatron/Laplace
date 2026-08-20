@@ -38,15 +38,15 @@ CREATE OR REPLACE FUNCTION structural.geometry_successors(
         p_backward boolean DEFAULT false)
     RETURNS TABLE(successor_id bytea, seen bigint)
     LANGUAGE sql STABLE
- AS $$
+BEGIN ATOMIC
     -- Scalar is an adapter over the one set-native implementation. The former
     -- scalar C entry point owned a separate single-key SPI plan and duplicated
     -- the complete trajectory walk; callers now share batch semantics exactly.
     SELECT b.successor_id, b.seen
     FROM structural.geometry_successors_batch(
         ARRAY[p_point]::bytea[], p_limit, p_window, p_backward) b
-    ORDER BY b.seen DESC, b.successor_id
-$$;
+    ORDER BY b.seen DESC, b.successor_id;
+END;
 
 -- Named mirror: "what comes before x", read from the same sequence.
 DROP FUNCTION IF EXISTS laplace.geometry_predecessors(bytea, int, int);
