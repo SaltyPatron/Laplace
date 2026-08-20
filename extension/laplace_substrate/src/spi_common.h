@@ -320,7 +320,13 @@ spi_fetch_synset_ids(Datum word, Datum **out_ids, int *out_n)
              SPI_result_code_string(rc));
     if (SPI_processed == 0)
         return 0;
-    *out_ids = (Datum *) palloc(sizeof(Datum) * SPI_processed);
+    if (SPI_processed > (uint64) INT_MAX ||
+        SPI_processed > (uint64) (MaxAllocSize / sizeof(Datum)))
+        ereport(ERROR,
+                (errmsg("laplace_substrate: sense frontier exceeds PostgreSQL allocation capacity"),
+                 errdetail("Requested %llu sense ids.",
+                           (unsigned long long) SPI_processed)));
+    *out_ids = (Datum *) palloc(sizeof(Datum) * (Size) SPI_processed);
     for (uint64 r = 0; r < SPI_processed; r++)
     {
         bool isnull;

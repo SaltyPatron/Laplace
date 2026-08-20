@@ -949,50 +949,39 @@ pg_laplace_isa_path(PG_FUNCTION_ARGS)
 
     up_types[0] = rel_type_id("IS_A");
 
-    /* Grown as appended: translation_sources is unbounded, and the old fixed
-     * TAX_WALK_CAP+64 sizing was a latent overflow waiting on a well-attested
-     * word. */
     {
-        int targets_cap = 64;
-        targets = (hash128_t *) palloc(sizeof(hash128_t) * targets_cap);
+        Datum *synsets;
+        int    ns;
+        Oid    argtypes[1] = { BYTEAOID };
+        Datum  args[1] = { y };
+        int    rc;
 
-#define ISA_PATH_TARGET_PUSH(h) \
-        do { \
-            if (n_targets >= targets_cap) \
-            { \
-                targets_cap *= 2; \
-                targets = (hash128_t *) repalloc(targets, sizeof(hash128_t) * targets_cap); \
-            } \
-            targets[n_targets++] = (h); \
-        } while (0)
+        spi_fetch_synset_ids(y, &synsets, &ns);
+        rc = SPI_execute_with_args(
+            "SELECT subject_id FROM taxonomy.translation_sources($1)",
+            1, argtypes, args, NULL, true, 0);
+        if (rc != SPI_OK_SELECT)
+            elog(ERROR, "isa_path: translation targets query failed");
+        if (SPI_processed + (uint64) ns + 2 > (uint64) INT_MAX ||
+            SPI_processed + (uint64) ns + 2 >
+                (uint64) (MaxAllocSize / sizeof(hash128_t)))
+            ereport(ERROR,
+                    (errmsg("isa_path: target frontier exceeds PostgreSQL allocation capacity")));
 
-        ISA_PATH_TARGET_PUSH(datum_to_hash128(x));
-
+        targets = (hash128_t *) palloc(
+            sizeof(hash128_t) * ((Size) ns + (Size) SPI_processed + 2));
+        targets[n_targets++] = datum_to_hash128(x);
+        for (int i = 0; i < ns; i++)
+            targets[n_targets++] = datum_to_hash128(synsets[i]);
+        targets[n_targets++] = datum_to_hash128(y);
+        for (uint64 r = 0; r < SPI_processed; r++)
         {
-            Datum *synsets;
-            int    ns;
-            spi_fetch_synset_ids(y, &synsets, &ns);
-            for (int i = 0; i < ns; i++)
-                ISA_PATH_TARGET_PUSH(datum_to_hash128(synsets[i]));
-            ISA_PATH_TARGET_PUSH(datum_to_hash128(y));
-
-            {
-                Oid       argtypes[1] = { BYTEAOID };
-                Datum     args[1] = { y };
-                int       rc = SPI_execute_with_args(
-                    "SELECT subject_id FROM taxonomy.translation_sources($1)",
-                    1, argtypes, args, NULL, true, 0);
-                if (rc != SPI_OK_SELECT)
-                    elog(ERROR, "isa_path: translation targets query failed");
-                for (uint64 r = 0; r < SPI_processed; r++)
-                {
-                    bool isnull;
-                    ISA_PATH_TARGET_PUSH(datum_to_hash128(
-                        SPI_getbinval(SPI_tuptable->vals[r], SPI_tuptable->tupdesc, 1, &isnull)));
-                }
-            }
+            bool isnull;
+            Datum subject = SPI_getbinval(
+                SPI_tuptable->vals[r], SPI_tuptable->tupdesc, 1, &isnull);
+            if (!isnull)
+                targets[n_targets++] = datum_to_hash128(subject);
         }
-#undef ISA_PATH_TARGET_PUSH
     }
 
     {
@@ -1001,9 +990,9 @@ pg_laplace_isa_path(PG_FUNCTION_ARGS)
         Datum     *synsets;
         int        ns;
 
-        starts = (hash128_t *) palloc(sizeof(hash128_t) * 64);
-        starts[n_starts++] = datum_to_hash128(x);
         spi_fetch_synset_ids(x, &synsets, &ns);
+        starts = (hash128_t *) palloc(sizeof(hash128_t) * ((Size) ns + 1));
+        starts[n_starts++] = datum_to_hash128(x);
         for (int i = 0; i < ns; i++)
             starts[n_starts++] = datum_to_hash128(synsets[i]);
 

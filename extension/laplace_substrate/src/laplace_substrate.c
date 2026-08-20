@@ -879,8 +879,8 @@ pg_relation_rank(PG_FUNCTION_ARGS)
 
 /* Per-backend memo for the SPI fallback below: without it, a type_id that
  * misses the static table (dynamic DEP_/FEAT_ family members whose family
- * root isn't registered, or a genuinely unranked type) re-walks up to 8
- * unprepared IS_A probes on EVERY ranked-read row that touches it. The
+ * root isn't registered, or a genuinely unranked type) re-walks its
+ * unprepared IS_A ancestry on EVERY ranked-read row that touches it. The
  * resolution is a function of the relation manifest + IS_A consensus, both
  * effectively static for a backend's lifetime (matching perfcache
  * semantics); not-found is memoized too — the unresolvable type is exactly
@@ -935,11 +935,27 @@ pg_relation_rank_resolved(PG_FUNCTION_ARGS)
 
     double out_rank = 0.0;
     bool   found    = false;
-    for (int hop = 0; hop < 8 && !found; hop++)
+    HTAB  *visited;
+    {
+        HASHCTL ctl;
+
+        memset(&ctl, 0, sizeof(ctl));
+        ctl.keysize = sizeof(hash128_t);
+        ctl.entrysize = sizeof(hash128_t);
+        visited = hash_create("relation_rank_resolved visited", 1,
+                              &ctl, HASH_ELEM | HASH_BLOBS);
+    }
+    while (!found)
     {
         Oid    argtypes[1]  = { BYTEAOID };
         Datum  args[1]      = { hash128_to_datum(&cur_id) };
         bool   isnull;
+        bool   seen;
+
+        (void) hash_search(visited, &cur_id, HASH_ENTER, &seen);
+        if (seen)
+            break;
+
         int    rc = SPI_execute_with_args(
             "SELECT object_id FROM laplace.consensus "
             "WHERE subject_id = $1 "
@@ -966,6 +982,7 @@ pg_relation_rank_resolved(PG_FUNCTION_ARGS)
             cur_id = parent_id;      
         }
     }
+    hash_destroy(visited);
 
     SPI_finish();
 

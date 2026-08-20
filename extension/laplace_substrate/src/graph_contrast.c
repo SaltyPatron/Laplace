@@ -206,22 +206,28 @@ pg_laplace_contrast(PG_FUNCTION_ARGS)
     feat_types[8] = rel_type_id("PERTAINS_TO");
 
     {
-        hash128_t seeds_x[32], seeds_y[32];
+        hash128_t *seeds_x, *seeds_y;
         int nx = 0, ny = 0;
-        seeds_x[nx++] = datum_to_hash128(x);
+
         spi_fetch_synset_ids(x, &synsets_x, &ns_x);
-        for (int i = 0; i < ns_x && nx < 32; i++)
+        spi_fetch_synset_ids(y, &synsets_y, &ns_y);
+        seeds_x = (hash128_t *) palloc(sizeof(hash128_t) * ((Size) ns_x + 1));
+        seeds_y = (hash128_t *) palloc(sizeof(hash128_t) * ((Size) ns_y + 1));
+
+        seeds_x[nx++] = datum_to_hash128(x);
+        for (int i = 0; i < ns_x; i++)
             seeds_x[nx++] = datum_to_hash128(synsets_x[i]);
 
         seeds_y[ny++] = datum_to_hash128(y);
-        spi_fetch_synset_ids(y, &synsets_y, &ns_y);
-        for (int i = 0; i < ns_y && ny < 32; i++)
+        for (int i = 0; i < ns_y; i++)
             seeds_y[ny++] = datum_to_hash128(synsets_y[i]);
 
         {
-            n_ax = tax_bfs_up(seeds_x, nx, 7, up_types, 2, &ax);
-            n_ay = tax_bfs_up(seeds_y, ny, 7, up_types, 2, &ay);
+            n_ax = tax_bfs_up(seeds_x, nx, PG_INT32_MAX, up_types, 2, &ax);
+            n_ay = tax_bfs_up(seeds_y, ny, PG_INT32_MAX, up_types, 2, &ay);
         }
+        pfree(seeds_x);
+        pfree(seeds_y);
     }
 
     int rows_cap = CONTRAST_FEAT_INITIAL;

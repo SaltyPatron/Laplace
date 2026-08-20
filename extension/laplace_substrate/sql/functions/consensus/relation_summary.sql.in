@@ -8,10 +8,7 @@ CREATE OR REPLACE FUNCTION consensus.relation_summary(p_x bytea, p_y bytea)
            concat_ws('',
              CASE WHEN r.chain IS NOT NULL THEN 'related via ' || r.plane
                   ELSE 'no witnessed conceptual path' END,
-             CASE WHEN COALESCE(u.n, 0) >= 10 THEN '; strong shared usage (' || u.n || ')'
-                  WHEN COALESCE(u.n, 0) > 0 THEN '; some shared usage (' || u.n || ')'
-                  ELSE '' END,
-             CASE WHEN g.geo IS NOT NULL AND g.geo < 0.4 THEN '; structurally near'
+             CASE WHEN COALESCE(u.n, 0) > 0 THEN '; shared usage (' || u.n || ')'
                   ELSE '' END)
     FROM (SELECT 1) one
     -- No LIMIT: relate_path already picks its single winner on (len, mu) before it

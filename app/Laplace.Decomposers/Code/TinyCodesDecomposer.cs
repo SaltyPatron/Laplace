@@ -127,20 +127,15 @@ public sealed class TinyCodesDecomposer : GrammarComposeDecomposerMultiFile<Tiny
 
     private static IEnumerable<string> ExtractKeywords(string prompt)
     {
-        int count = 0;
         foreach (var raw in prompt.Split(
             [' ', '\t', '\n', '\r', '.', ',', ';', ':', '!', '?', '(', ')', '[', ']', '{', '}', '"', '\'', '/', '\\', '-', '_'],
             StringSplitOptions.RemoveEmptyEntries))
         {
-            if (count >= 20) break;
             if (raw.Length < 4) continue;
             var w = raw.ToLowerInvariant();
             var stem = w.Length > 5 && w.EndsWith('s') ? w[..^1] : w;
             if (!StopWords.Contains(w) && !StopWords.Contains(stem))
-            {
                 yield return w;
-                count++;
-            }
         }
     }
 

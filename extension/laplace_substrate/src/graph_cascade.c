@@ -109,14 +109,19 @@ pg_laplace_cascade(PG_FUNCTION_ARGS)
         }
     }
 
-    goals = (Datum *) palloc(sizeof(Datum) * 64);
-    goals[n_goals++] = y_id;
-
     {
         Datum *synsets;
         int    ns;
+
         spi_fetch_synset_ids(y_id, &synsets, &ns);
-        for (int i = 0; i < ns && n_goals < 64; i++)
+        if (ns < 0 || (Size) ns >= MaxAllocSize / sizeof(Datum))
+            ereport(ERROR,
+                    (errmsg("cascade: goal set exceeds PostgreSQL allocation capacity"),
+                     errdetail("Requested one endpoint plus %d synset goals.", ns)));
+
+        goals = (Datum *) palloc(sizeof(Datum) * ((Size) ns + 1));
+        goals[n_goals++] = y_id;
+        for (int i = 0; i < ns; i++)
             goals[n_goals++] = copy_bytea_datum(synsets[i]);
     }
 
