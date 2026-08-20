@@ -108,37 +108,35 @@ public static class CpuTopology
 
 
 
-    public static int ResolveCpuBoundWorkers(int headroom = 1, int? maxCap = null)
+    public static int ResolveCpuBoundWorkers()
 
     {
 
         int physicalP = Math.Max(1, PerformanceCoreCount);
 
-        int cap = maxCap ?? physicalP;
-
-        return Math.Clamp(physicalP - headroom, 1, cap);
+        return physicalP;
 
     }
 
 
 
 
-    public static int ResolveIngestCommitWorkers(int headroom = 1)
+    public static int ResolveIngestCommitWorkers()
 
     {
 
         if (IsHybrid && EfficientCoreCpuIndices.Count > 0)
 
-            return Math.Max(1, EfficientCoreCpuIndices.Count - headroom);
+            return Math.Max(1, EfficientCoreCpuIndices.Count);
 
-        return Math.Max(1, LogicalProcessorCount - headroom);
+        return Math.Max(1, LogicalProcessorCount);
 
     }
 
 
 
 
-    public static int ResolveIoBoundWorkers(int headroom = 1) => ResolveIngestCommitWorkers(headroom);
+    public static int ResolveIoBoundWorkers() => ResolveIngestCommitWorkers();
 
 
 
@@ -1512,4 +1510,3 @@ public static class CpuTopology
         bool IsHybrid);
 
 }
-

@@ -10,7 +10,7 @@ public static class NativeRuntimeEnv
 
     public static void ApplyFromTopology(bool force = true)
     {
-        int pThreads = Math.Max(1, CpuTopology.ResolveCpuBoundWorkers(headroom: 0));
+        int pThreads = Math.Max(1, CpuTopology.ResolveCpuBoundWorkers());
         int gcHeaps = Math.Max(1, CpuTopology.PerformanceCoreCount);
 
         SetThreadVar("MKL_NUM_THREADS", pThreads, force);

@@ -284,7 +284,7 @@ internal sealed class RecoverIndexesCommand : ForwardCommand<TailSettings>
 
 // ---- cpu-topology ---------------------------------------------------------------------------
 
-[Description("CPU topology probe. Flags: --p-cores, --cpu-bound-workers [[headroom]], --io-bound-workers, --p-core-indices, --e-core-indices, --pg-tuning, --verify-pin.")]
+[Description("CPU topology probe. Flags: --p-cores, --cpu-bound-workers, --io-bound-workers, --p-core-indices, --e-core-indices, --pg-tuning, --verify-pin.")]
 internal sealed class CpuTopologyCommand : ForwardCommand<TailSettings>
 {
     protected override Task<int> ExecuteAsync(CommandContext ctx, TailSettings s, CancellationToken ct)

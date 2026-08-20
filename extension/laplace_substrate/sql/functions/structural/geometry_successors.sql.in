@@ -11,16 +11,6 @@
 -- follows x" -- same containment query, same separator set, same aggregation.
 -- Asking the question is always legal; what is banned is MATERIALISING the answer
 -- as stored PRECEDES rows when the geometry already holds it losslessly.
-DROP FUNCTION IF EXISTS laplace.geometry_successors(bytea, int, int, boolean);
-CREATE OR REPLACE FUNCTION structural.geometry_successors(
-        p_point    bytea,
-        p_limit    int DEFAULT 20,
-        p_window   int DEFAULT 8,
-        p_backward boolean DEFAULT false)
-    RETURNS TABLE(successor_id bytea, seen bigint)
-    AS 'MODULE_PATHNAME', 'pg_laplace_geometry_successors'
-    LANGUAGE C STABLE;
-
 -- Multi-root form for sequence-projection expansion.  One GIN overlap probe reads every
 -- trajectory containing ANY requested point, then native code preserves the
 -- scalar contract independently for each root: first occurrence per physical
@@ -39,6 +29,24 @@ CREATE OR REPLACE FUNCTION structural.geometry_successors_batch(
     RETURNS TABLE(point_id bytea, successor_id bytea, seen bigint)
     AS 'MODULE_PATHNAME', 'pg_laplace_geometry_successors_batch'
     LANGUAGE C STABLE;
+
+DROP FUNCTION IF EXISTS laplace.geometry_successors(bytea, int, int, boolean);
+CREATE OR REPLACE FUNCTION structural.geometry_successors(
+        p_point    bytea,
+        p_limit    int DEFAULT 20,
+        p_window   int DEFAULT 8,
+        p_backward boolean DEFAULT false)
+    RETURNS TABLE(successor_id bytea, seen bigint)
+    LANGUAGE sql STABLE
+ AS $$
+    -- Scalar is an adapter over the one set-native implementation. The former
+    -- scalar C entry point owned a separate single-key SPI plan and duplicated
+    -- the complete trajectory walk; callers now share batch semantics exactly.
+    SELECT b.successor_id, b.seen
+    FROM structural.geometry_successors_batch(
+        ARRAY[p_point]::bytea[], p_limit, p_window, p_backward) b
+    ORDER BY b.seen DESC, b.successor_id
+$$;
 
 -- Named mirror: "what comes before x", read from the same sequence.
 DROP FUNCTION IF EXISTS laplace.geometry_predecessors(bytea, int, int);

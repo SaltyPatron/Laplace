@@ -155,4 +155,12 @@ public sealed record IngestSourceProfile(
     public int WorkingSetBytesPerRecord =>
         Math.Max(1, ResidentBytesPerComposeUnit ?? EstBytesPerRecord)
         * Math.Max(1, EstComposeUnitsPerRecord);
+
+    /// <summary>
+    /// Bytes retained before a record has been composed: the parsed/source record plus
+    /// the declared deferred-compose residency. Once a deferred unit exists the pipeline
+    /// replaces the latter estimate with the unit's actual native tree capacity.
+    /// </summary>
+    public long UncomposedResidentBytesPerRecord => checked(
+        (long)Math.Max(1, EstBytesPerRecord) + WorkingSetBytesPerRecord);
 }
