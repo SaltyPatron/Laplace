@@ -19,7 +19,8 @@
 --   REALIZE -> realize.render_text of the emitted token ids.
 CREATE OR REPLACE FUNCTION generation.walk_batch(p_prompt text,
                                                   p_steps int,
-                                                  p_seeds bigint[])
+                                                  p_seeds bigint[],
+                                                  p_corpus_limit int)
     RETURNS TABLE(seed bigint, reply text)
     LANGUAGE plpgsql VOLATILE AS $$
 DECLARE
@@ -102,8 +103,9 @@ BEGIN
     -- not evidence of worthlessness, and dropping it would be an
     -- operator-invented floor.
     --
-    -- LIMIT 160 is now honest top-k -- a query LIMIT over a rated ordering, which
-    -- is the only form of top-k the substrate law allows.
+    -- Corpus capacity is caller-owned. NULL means the complete indexed
+    -- container population; zero means no usage containers. There is no
+    -- hidden upstream 400-row subset followed by a second 160-row cut.
     WITH gids AS (
         -- DISTINCT: a gloss reachable through two def-band relation types
         -- contributes its token stream once, not twice.
@@ -132,12 +134,10 @@ BEGIN
                                      consensus.glicko2_neutral_mu()), 0),
                    false,
                    COALESCE(MAX(consensus.eff_mu(k.rating, k.rd)), consensus.glicko2_neutral_mu())
-            FROM structural.containers_of(topic_word, 1, 400) co
+            FROM structural.containers_of(topic_word, 1, p_corpus_limit) co
             LEFT JOIN laplace.consensus k ON k.object_id = co.entity_id
             WHERE co.tier = 3
             GROUP BY co.entity_id
-            ORDER BY is_core DESC, mu DESC
-            LIMIT 160
         ) g
         GROUP BY g.gid
     ),
@@ -316,17 +316,43 @@ BEGIN
 END;
 $$;
 
+-- Existing three-argument surface: an ordinal-preserving adapter to the one
+-- implementation. Omission requests the complete corpus rather than choosing
+-- a hidden server-side subset.
+CREATE OR REPLACE FUNCTION generation.walk_batch(p_prompt text,
+                                                  p_steps int,
+                                                  p_seeds bigint[])
+    RETURNS TABLE(seed bigint, reply text)
+    LANGUAGE sql VOLATILE
+BEGIN ATOMIC
+    SELECT b.seed, b.reply
+    FROM generation.walk_batch(p_prompt, p_steps, p_seeds, NULL) b;
+END;
+
 DROP FUNCTION IF EXISTS laplace.converse_walk(text, int, bigint);
-CREATE OR REPLACE FUNCTION converse.walk(p_prompt text, p_steps int DEFAULT 40,
-                                         p_seed bigint DEFAULT NULL)
+CREATE OR REPLACE FUNCTION converse.walk(p_prompt text,
+                                         p_steps int,
+                                         p_seed bigint,
+                                         p_corpus_limit int)
     RETURNS text
     LANGUAGE plpgsql VOLATILE AS $$
 DECLARE
     out_text text;
 BEGIN
     SELECT b.reply INTO out_text
-    FROM generation.walk_batch(p_prompt, p_steps, ARRAY[p_seed]::bigint[]) b
+    FROM generation.walk_batch(
+        p_prompt, p_steps, ARRAY[p_seed]::bigint[], p_corpus_limit) b
     LIMIT 1;
     RETURN out_text;
 END;
 $$;
+
+-- Scalar compatibility surface. All semantics live in the capacity-aware
+-- overload; omitted capacity means exact/unbounded.
+CREATE OR REPLACE FUNCTION converse.walk(p_prompt text, p_steps int DEFAULT 40,
+                                         p_seed bigint DEFAULT NULL)
+    RETURNS text
+    LANGUAGE sql VOLATILE
+BEGIN ATOMIC
+    SELECT converse.walk(p_prompt, p_steps, p_seed, NULL);
+END;

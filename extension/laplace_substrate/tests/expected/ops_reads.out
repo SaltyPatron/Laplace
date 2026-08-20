@@ -204,6 +204,20 @@ FROM taxonomy.tree(laplace.word_id('x'), 0, 0);
  t
 (1 row)
 
+SELECT count(*) = 0 AS containers_zero_hops_is_empty
+FROM structural.containers_of(laplace.word_id('x'), 0, 10);
+ containers_zero_hops_is_empty 
+-------------------------------
+ t
+(1 row)
+
+SELECT count(*) = 0 AS containers_zero_limit_is_empty
+FROM structural.containers_of(laplace.word_id('x'), 1, 0);
+ containers_zero_limit_is_empty 
+--------------------------------
+ t
+(1 row)
+
 SELECT count(*) >= 0 AS leaders_runs FROM ops.band_leaders(ARRAY[1,2], 2);
  leaders_runs 
 --------------

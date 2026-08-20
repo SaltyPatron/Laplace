@@ -1085,6 +1085,10 @@ The cleanup is complete only when all of these are true:
   traversal allocates from the exact requested shape, uses neighbour-distinct
   per-frontier set probes followed by one global native rank, and rejects only requests that exceed
   PostgreSQL's actual allocation or result-coordinate representation;
+- conversational gathering no longer ranks an arbitrary 400-container prefix
+  and then cuts it again at 160, and composition no longer truncates its start
+  population at 32. The canonical walk batch accepts an explicit corpus
+  capacity; omission means the complete indexed population and zero means zero;
 - a canonical full seed is content-addressed, resumable by phase, and completes
   inside the admitted hardware budget with required serving indexes and exact
   validation included; and
