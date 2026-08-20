@@ -171,6 +171,13 @@ If rendering or policy rejects candidates after ranking, “take k and hope” i
 not top-k. Use a declared oversampling/work budget and expose underfill or
 abstention.
 
+`ops.surface_sample` is the first repaired example from this queue. It formerly
+ranked an invented `max(limit×200, 4000)` attestation prefix and only afterward
+discarded subjects outside the requested source×tier. The set query now joins
+source-owned tier identity before aggregation, orders once, and applies exactly
+the caller limit. It cannot underfill because unrelated rows consumed a guessed
+candidate pool, and `limit=0` means zero rather than being promoted to one.
+
 PostgreSQL documents that `LIMIT` can alter plan choice but does not make an
 unordered subset deterministic. A matching B-tree can satisfy `ORDER BY ...
 LIMIT` without sorting the whole input; otherwise the sort still consumes its

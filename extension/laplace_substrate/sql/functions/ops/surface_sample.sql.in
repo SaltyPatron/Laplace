@@ -2,9 +2,12 @@
 -- this answers "what do they look like?" — observation_count from that source's
 -- attestations (fold input), not LIMIT-without-ORDER over entities.
 --
--- Attestation-first: GROUP BY subject on the source_id index, oversample, then
--- keep rows whose entity is first-observed by the source at p_tier. Labels via
--- ONE realize.batch over survivors (not per-row render ahead of LIMIT).
+-- Filter at the requested source×tier grain BEFORE ranking. The former plan took
+-- an invented max(limit×200, 4000) attestation head, then discarded subjects that
+-- did not belong to the source/tier. Besides doing unrelated work, it could still
+-- underfill whenever valid rows fell outside that guess. The source index drives the
+-- evidence side and entity identity decides admission before the exact aggregate.
+-- Labels still run once over the final caller-sized set.
 -- BEGIN ATOMIC: GH #764 beachhead.
 DROP FUNCTION IF EXISTS laplace.surface_sample(bytea, smallint, int);
 
@@ -20,34 +23,30 @@ CREATE OR REPLACE FUNCTION ops.surface_sample(
     LANGUAGE sql
     STABLE
 BEGIN ATOMIC
-    WITH top_subj AS (
-        SELECT a.subject_id,
+    WITH kept AS (
+        SELECT a.subject_id AS id,
+               e.type_id,
                sum(a.observation_count)::bigint AS observations
         FROM laplace.attestations a
+        JOIN laplace.entities e
+          ON e.id = a.subject_id
+         AND e.tier = p_tier
+         AND e.first_observed_by = p_source
         WHERE a.source_id = p_source
           AND consensus.relation_canonical(a.subject_id) IS NULL
-        GROUP BY a.subject_id
-        ORDER BY sum(a.observation_count) DESC
-        LIMIT greatest(GREATEST(p_limit, 1) * 200, 4000)
-    ),
-    kept AS (
-        SELECT t.subject_id AS id,
-               e.type_id,
-               t.observations,
-               row_number() OVER (ORDER BY t.observations DESC, t.subject_id) AS ix
-        FROM top_subj t
-        JOIN laplace.entities e ON e.id = t.subject_id
-        WHERE e.tier = p_tier
-          AND e.first_observed_by = p_source
-        ORDER BY t.observations DESC, t.subject_id
-        LIMIT greatest(p_limit, 1)
+        GROUP BY a.subject_id, e.type_id
+        ORDER BY sum(a.observation_count) DESC, a.subject_id
+        LIMIT p_limit
+    ), numbered AS (
+        SELECT k.*, row_number() OVER (ORDER BY k.observations DESC, k.id) AS ix
+        FROM kept k
     ),
     ids AS (
         SELECT array_agg(v.id ORDER BY v.ord) AS a
         FROM (
-            SELECT k.id, k.ix * 2 - 1 AS ord FROM kept k
+            SELECT k.id, k.ix * 2 - 1 AS ord FROM numbered k
             UNION ALL
-            SELECT k.type_id, k.ix * 2 FROM kept k
+            SELECT k.type_id, k.ix * 2 FROM numbered k
         ) v
     ),
     lbl AS (
@@ -57,6 +56,6 @@ BEGIN ATOMIC
            COALESCE(NULLIF(lbl.l[k.ix * 2 - 1], ''), left(encode(k.id, 'hex'), 16)),
            COALESCE(NULLIF(lbl.l[k.ix * 2], ''), left(encode(k.type_id, 'hex'), 16)),
            k.observations
-    FROM kept k CROSS JOIN lbl
+    FROM numbered k CROSS JOIN lbl
     ORDER BY k.observations DESC, k.id;
 END;
