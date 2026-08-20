@@ -10,7 +10,10 @@
 -- callers that want the provenance columns query converse_facts directly. The
 -- 'web' arrow-chain row is a drill-down surface, not prose -- excluded here.
 DROP FUNCTION IF EXISTS laplace.converse_about(bytea, bytea);
-CREATE OR REPLACE FUNCTION converse.about(p_syn bytea, p_lang bytea DEFAULT NULL)
+CREATE OR REPLACE FUNCTION converse.about(p_syn bytea,
+                                          p_lang bytea,
+                                          p_part_limit int,
+                                          p_kin_limit int)
     RETURNS text
     LANGUAGE plpgsql STABLE AS $$
 DECLARE
@@ -23,7 +26,7 @@ BEGIN
 
     SELECT string_agg(f.sentence, ' ' ORDER BY f.ord)
       INTO prose
-    FROM converse.facts(p_syn, p_lang)
+    FROM converse.facts(p_syn, p_lang, p_part_limit, p_kin_limit)
          WITH ORDINALITY AS f(fact_kind, sentence, eff_mu, witnesses, path, types, ord)
     WHERE f.fact_kind <> 'web';
 
@@ -37,3 +40,12 @@ BEGIN
     RETURN btrim(COALESCE(prose, ''));
 END;
 $$;
+
+-- Existing prose surface preserves dependency identity while delegating to
+-- the one capacity-aware implementation. Omitted listing capacities are exact.
+CREATE OR REPLACE FUNCTION converse.about(p_syn bytea, p_lang bytea DEFAULT NULL)
+    RETURNS text
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
+    SELECT converse.about(p_syn, p_lang, NULL, NULL);
+END;

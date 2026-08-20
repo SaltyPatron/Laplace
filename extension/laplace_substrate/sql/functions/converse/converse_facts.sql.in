@@ -16,12 +16,15 @@
 -- strongest band-2 edge picks that type, so no relation name is hardcoded and
 -- the partition-pruning law from recall_walk_response.sql.in holds. The web row
 -- uses walk_strongest, the correct engine for the type-unfiltered case. The
--- listing rows are 1-hop by nature (a parts inventory IS its ranked edges);
--- LIMIT here is a query limit, not a truncation of what the source asserts.
+-- listing rows are 1-hop by nature (a parts inventory IS its ranked edges).
+-- Their capacity is caller-owned; NULL requests the complete ranked family.
 -- consensus.eff_mu for a chain = the weakest edge on it (a chain is only as certain as
 -- its loosest strand).
 DROP FUNCTION IF EXISTS laplace.converse_facts(bytea, bytea);
-CREATE OR REPLACE FUNCTION converse.facts(p_syn bytea, p_lang bytea DEFAULT NULL)
+CREATE OR REPLACE FUNCTION converse.facts(p_syn bytea,
+                                          p_lang bytea,
+                                          p_part_limit int,
+                                          p_kin_limit int)
     RETURNS TABLE(fact_kind text, sentence text, eff_mu numeric, witnesses bigint,
                   path bytea[], types bytea[])
     LANGUAGE plpgsql STABLE AS $$
@@ -47,6 +50,9 @@ BEGIN
     t_assoc := laplace.relation_band_types(b_assoc);
     IF p_syn IS NULL THEN
         RETURN;
+    END IF;
+    IF p_part_limit < 0 OR p_kin_limit < 0 THEN
+        RAISE EXCEPTION 'converse.facts: listing limits must be >= 0 or NULL for all rows';
     END IF;
 
     v_lbl := COALESCE(realize.realize(p_syn, p_lang), realize.label(p_syn));
@@ -153,7 +159,7 @@ BEGIN
         FROM laplace.consensus c
         WHERE c.subject_id = p_syn AND c.type_id = ANY (t_part)
         ORDER BY consensus.eff_mu(c.rating, c.rd) DESC, c.object_id
-        LIMIT 6
+        LIMIT p_part_limit
     ),
     lbl AS MATERIALIZED (
         SELECT realize.batch(array_agg(r.nid ORDER BY r.ix), p_lang) AS l
@@ -197,7 +203,7 @@ BEGIN
           AND c.type_id = ANY (t_assoc)
           AND c.type_id NOT IN (SELECT id FROM converse.non_kin_assoc_types())
         ORDER BY consensus.eff_mu(c.rating, c.rd) DESC, c.object_id
-        LIMIT 8
+        LIMIT p_kin_limit
     ),
     lbl AS MATERIALIZED (
         SELECT realize.batch(array_agg(r.nid ORDER BY r.ix), p_lang) AS l
@@ -234,3 +240,12 @@ BEGIN
     HAVING count(*) > 0;
 END;
 $$;
+
+-- Existing surface: exact adapter to the capacity-aware implementation.
+CREATE OR REPLACE FUNCTION converse.facts(p_syn bytea, p_lang bytea DEFAULT NULL)
+    RETURNS TABLE(fact_kind text, sentence text, eff_mu numeric, witnesses bigint,
+                  path bytea[], types bytea[])
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
+    SELECT * FROM converse.facts(p_syn, p_lang, NULL, NULL);
+END;

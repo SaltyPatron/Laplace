@@ -1089,6 +1089,9 @@ The cleanup is complete only when all of these are true:
   and then cuts it again at 160, and composition no longer truncates its start
   population at 32. The canonical walk batch accepts an explicit corpus
   capacity; omission means the complete indexed population and zero means zero;
+- conversational fact lists expose caller-owned part/kin capacities instead of
+  fixed six/eight-row heads; tiered generation preserves zero steps and uses a
+  complete pool when the caller does not explicitly request a finite one;
 - a canonical full seed is content-addressed, resumable by phase, and completes
   inside the admitted hardware budget with required serving indexes and exact
   validation included; and

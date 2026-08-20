@@ -101,6 +101,14 @@ WHERE fact_kind IN ('definition', 'taxonomy');
 SELECT bool_and(sentence !~* 'synset_bad') AS refuted_branch_excluded
 FROM converse.facts(public.laplace_hash128_blake3('test/chat_loop/synset1'));
 
+SELECT count(*) = 0 AS zero_listing_capacity_is_empty
+FROM converse.facts(
+    public.laplace_hash128_blake3('test/chat_loop/synset1'), NULL, 0, 0)
+WHERE fact_kind IN ('parts', 'kin');
+SELECT converse.tiered(
+    public.laplace_hash128_blake3('test/chat_loop/synset1'), NULL, 0, NULL)
+    IS NULL AS tiered_zero_steps_is_empty;
+
 -- 2. The prose wrapper weaves the fact rows (web drill-down row excluded).
 SELECT converse.about(public.laplace_hash128_blake3('test/chat_loop/synset1')) AS about;
 
