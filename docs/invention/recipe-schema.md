@@ -42,7 +42,7 @@ Each head/embed/lm_head/ffn is one operator. Operators map to the fixed ETL (see
 |---|---|---|
 | `{"op":"relation","type":"IS_A"}` (or any attestation type) | `consensus_type_plane` for that `type_id` | a head's Q/K (rated affinity) + V/O (residual) |
 | `{"op":"metric","metric":"angular"\|"frechet"\|"hausdorff"}` | `metric_edges` over trajectories/coords | a metric head |
-| `{"op":"trajectory"}` | `trajectory_pairs_plane` (continuation) | lm_head log-odds, or a sequential head/ffn |
+| `{"op":"trajectory"}` | `generation.continuation_conditional_plane` (continuation) | lm_head log-odds, or a sequential head/ffn |
 | `{"op":"coord"}` | native S³ coordinate | `embed_tokens` |
 | `{"op":"spectral"}` | Laplacian eigenmap of the selected graph | `embed_tokens` (alt) |
 | `{"op":"unary"}` | per-token consensus covariance (`unary_gram`) | ffn (per-token implications) |
