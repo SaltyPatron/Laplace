@@ -491,6 +491,10 @@ public sealed class IngestBatchConfig
 
 public static class IngestBatchPipeline
 {
+    /// <summary>How often a still-composing file republishes its counters. Advisory,
+    /// so the cost is one coalesced UPDATE per file per interval, never per change.</summary>
+    private const long FileProgressIntervalMs = 2_000;
+
     public const string PeriodBoundaryUnitPrefix = "period-boundary/";
     public const string SkippedBoundaryUnitPrefix = PeriodBoundaryUnitPrefix + "skipped-complete/";
     public const string CancelledBoundaryUnitPrefix = PeriodBoundaryUnitPrefix + "cancelled/";
@@ -913,6 +917,10 @@ public static class IngestBatchPipeline
             var enumerator = changes.GetAsyncEnumerator(ct);
             SubstrateChange? fileFailure = null;
             long fileEntities = 0, filePhysicalities = 0, fileAttestations = 0;
+            // Wall-clock throttle, not a record count: files differ by five orders of
+            // magnitude in size (UD: 4,577 B to 360,217,466 B), so any per-N-records
+            // trigger is either silent on the big ones or a flood on the small ones.
+            long nextProgressAt = Environment.TickCount64 + FileProgressIntervalMs;
             try
             {
                 while (true)
@@ -936,6 +944,14 @@ public static class IngestBatchPipeline
                     fileEntities += rowCounts.Entities;
                     filePhysicalities += rowCounts.Physicalities;
                     fileAttestations += rowCounts.Attestations;
+                    if (Environment.TickCount64 >= nextProgressAt)
+                    {
+                        nextProgressAt = Environment.TickCount64 + FileProgressIntervalMs;
+                        Laplace.Ingestion.IngestObservabilityScope.Current.OnFileProgress(
+                            Laplace.Ingestion.IngestObservabilityScope.SourceName, label,
+                            unitsConsumed - unitsAtFileStart,
+                            fileEntities, filePhysicalities, fileAttestations);
+                    }
                     yield return change;
                     if (maxTotalUnits > 0 && unitsConsumed >= maxTotalUnits)
                     {

@@ -44,7 +44,7 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
     private CancellationTokenSource? _filePumpCts;
     private Task? _filePump;
 
-    private enum FileJournalEventKind : byte { Started, Composed, Finished }
+    private enum FileJournalEventKind : byte { Started, Progress, Composed, Finished }
 
     private readonly record struct FileJournalEvent(
         FileJournalEventKind Kind,
@@ -472,6 +472,23 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
             Status: status, Error: error));
     }
 
+    /// <summary>
+    /// Advisory counter update for a file still in flight. Never inserts and never
+    /// changes status -- the UPDATE is guarded on status = 'running' -- so a progress
+    /// event that loses a race with Composed or a terminal status is discarded by
+    /// the server rather than resurrecting a stale count onto a finished row.
+    /// </summary>
+    public void OnFileProgress(
+        string sourceName, string fileLabel,
+        long records, long entities, long physicalities, long attestations)
+    {
+        if (!_active) return;
+        _fileEvents.Enqueue(new FileJournalEvent(
+            FileJournalEventKind.Progress, sourceName, fileLabel, DateTimeOffset.UtcNow,
+            Records: records, Entities: entities,
+            Physicalities: physicalities, Attestations: attestations));
+    }
+
     public void OnFileComposed(
         string sourceName, string fileLabel, Hash128? fileId = null,
         long records = 0, long entities = 0, long physicalities = 0, long attestations = 0)
@@ -562,6 +579,36 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
                     AddParameter(cmd, started.Select(e => e.SourceName).ToArray(), NpgsqlDbType.Array | NpgsqlDbType.Text);
                     AddParameter(cmd, started.Select(e => e.Bytes).ToArray(), NpgsqlDbType.Array | NpgsqlDbType.Bigint);
                     AddParameter(cmd, started.Select(e => e.At).ToArray(), NpgsqlDbType.Array | NpgsqlDbType.TimestampTz);
+                    batch.BatchCommands.Add(cmd);
+                }
+
+                // Coalesced to the LAST event per file: counters are cumulative, so
+                // within one flush only the newest sample carries information and
+                // sending the rest would be N round-trip rows for one final value.
+                var progress = events
+                    .Where(e => e.Kind == FileJournalEventKind.Progress)
+                    .GroupBy(e => e.FileLabel, StringComparer.Ordinal)
+                    .Select(g => g.Last())
+                    .ToArray();
+                if (progress.Length > 0)
+                {
+                    // UPDATE, never INSERT: a progress event for a file with no row is
+                    // meaningless (Started owns row creation), and status = 'running'
+                    // keeps a straggler from overwriting a composed or terminal row.
+                    var cmd = new NpgsqlBatchCommand(
+                        "UPDATE laplace.ingest_file_journal f SET "
+                        + "records = u.records, entities = u.entities, "
+                        + "physicalities = u.physicalities, attestations = u.attestations "
+                        + "FROM unnest($2, $3, $4, $5, $6) "
+                        + "AS u(file_label, records, entities, physicalities, attestations) "
+                        + "WHERE f.run_id = $1 AND f.file_label = u.file_label "
+                        + "AND f.status = 'running'");
+                    AddParameter(cmd, _runId, NpgsqlDbType.Uuid);
+                    AddParameter(cmd, progress.Select(e => e.FileLabel).ToArray(), NpgsqlDbType.Array | NpgsqlDbType.Text);
+                    AddParameter(cmd, progress.Select(e => e.Records).ToArray(), NpgsqlDbType.Array | NpgsqlDbType.Bigint);
+                    AddParameter(cmd, progress.Select(e => e.Entities).ToArray(), NpgsqlDbType.Array | NpgsqlDbType.Bigint);
+                    AddParameter(cmd, progress.Select(e => e.Physicalities).ToArray(), NpgsqlDbType.Array | NpgsqlDbType.Bigint);
+                    AddParameter(cmd, progress.Select(e => e.Attestations).ToArray(), NpgsqlDbType.Array | NpgsqlDbType.Bigint);
                     batch.BatchCommands.Add(cmd);
                 }
 
