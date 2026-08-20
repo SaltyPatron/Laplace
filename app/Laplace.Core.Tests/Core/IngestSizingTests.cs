@@ -275,12 +275,13 @@ public sealed class IngestSizingTests
             / MemoryTopology.PresenceProbeTransitBytesPerId), plan.ProbeChunkIds);
         Assert.Equal((int)((512L << 20) / 12
             / MemoryTopology.AttestationMergeTransitBytesPerRow), plan.MergeChunkRows);
-        Assert.Equal((int)((512L << 20) / 8
+        Assert.Equal((512L << 20) / 9, plan.CacheBytesPerOwner);
+        Assert.Equal((int)((512L << 20) / 9
             / MemoryTopology.ConcurrentHash128ResidentBytes), plan.EntityPresenceCacheIds);
         Assert.Equal(plan.EntityPresenceCacheIds, plan.PhysicalityPresenceCacheIds);
         Assert.Equal(plan.EntityPresenceCacheIds, plan.LadderCacheIds);
         Assert.Equal(plan.EntityPresenceCacheIds, plan.ReaderProvenCacheIds);
-        Assert.Equal((int)((512L << 20) / 8
+        Assert.Equal((int)((512L << 20) / 9
             / MemoryTopology.ConcurrentHash128PairResidentBytes), plan.ReaderRootCacheIds);
         Assert.Equal(plan.ReaderRootCacheIds, plan.TextRootCacheIds);
         Assert.Equal(plan.ReaderRootCacheIds, plan.ImageRootCacheIds);

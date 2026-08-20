@@ -214,13 +214,15 @@ public static class IngestSizing
         int TextRootCacheIds,
         int ImageRootCacheIds,
         int AudioRootCacheIds,
+        long CacheBytesPerOwner,
         int CopyStartupBytes)
     {
         public void Log() => Console.Error.WriteLine(
             "apply_io_sizing: connections={0} probe_chunk_ids={1} merge_chunk_rows={2} "
             + "entity_cache_ids={3} physicality_cache_ids={4} ladder_cache_ids={5} "
             + "reader_proven_ids={6} reader_root_ids={7} text_root_ids={8} "
-            + "image_root_ids={9} audio_root_ids={10} copy_startup_bytes={11}",
+            + "image_root_ids={9} audio_root_ids={10} cache_bytes_per_owner={11} "
+            + "copy_startup_bytes={12}",
             Connections,
             ProbeChunkIds,
             MergeChunkRows,
@@ -232,6 +234,7 @@ public static class IngestSizing
             TextRootCacheIds,
             ImageRootCacheIds,
             AudioRootCacheIds,
+            CacheBytesPerOwner,
             CopyStartupBytes);
     }
 
@@ -309,7 +312,13 @@ public static class IngestSizing
         // writer entity/physicality presence, content ladder, reader proven ids, and
         // reader canonical-root pairs, and text/image/audio root memoization. Reaching
         // capacity only restores the normal DB probe/compose path and cannot lose data.
-        const int cacheOwners = 8;
+        const int writerPresenceOwners = 2;
+        const int contentLadderOwners = 1;
+        const int readerIdentityOwners = 2;
+        const int modalityRootOwners = 3;
+        const int vendorReuseOwners = 1;
+        const int cacheOwners = writerPresenceOwners + contentLadderOwners
+            + readerIdentityOwners + modalityRootOwners + vendorReuseOwners;
         long cacheBytesPerMap = Math.Max(1, envelope / cacheOwners);
         int cacheIds = IntCount(cacheBytesPerMap
             / MemoryTopology.ConcurrentHash128ResidentBytes);
@@ -328,6 +337,7 @@ public static class IngestSizing
             rootCacheIds,
             rootCacheIds,
             rootCacheIds,
+            cacheBytesPerMap,
             MemoryTopology.CopyStartupBytesPerConnection);
     }
 

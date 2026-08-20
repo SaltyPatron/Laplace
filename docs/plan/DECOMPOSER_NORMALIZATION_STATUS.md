@@ -89,6 +89,7 @@ delivered until it is merged.
 | #1202 | Source-scoped chess gates | Validates the evidence owned by the named decomposer instead of letting unrelated global consensus satisfy or fail its gate. |
 | #1203 | Resource-derived ingest and fold | Removes vendor batch defaults and fixed 65,536-cell/fold/cache/COPY limits; derives the generic pipeline from RAM, CPU topology, and row transit width; changes consensus upsert to one partition-routed PostgreSQL 18 `MERGE`. |
 | #1204 | Residual limiter and eval cleanup | Removes remaining fixed queue/cache/probe/journal/I/O/resume/marshal limits, replaces the 4-GiB/512-MiB working-set clamps with topology ownership, makes mask/fold scheduling work-conserving, and stops planner row-count shrink from invalidating semantic evals. |
+| #1205 | Vendor cache/chunk derivation and CI repair | Removes Tatoeba's fixed 1,048,576-id/64-slot allocation and Wiktionary's 65,536-entry/64-byte cache gates; budgets the vendor cache as a real resident owner, carries collection coordinates from the exact composed tree, and corrects the delay-free tier-probe test contract exposed by main run 32314788241. |
 
 The related source-fidelity audit (#1155), durable working agreement (#1156), and
 canonical lexical-peer batch core (#1164) were integrated in the same batch,
@@ -108,6 +109,12 @@ delivered decomposer implementation.
   gate green. That is effectively flat against the prior 414-second receipt and isolates its
   remaining cost to consensus/mask processing rather than producer throughput. #1204 changes
   that tail's long-lived mask connection leases; the post-deploy rerun is the proof gate.
+- [Main run 32314788241](https://github.com/SaltyPatron/Laplace/actions/runs/32314788241)
+  built, installed, migrated, and passed PostgreSQL regression after #1204. Its only red
+  was a stale unit contract requiring two immediately adjacent tier-probe callers to
+  produce exactly one database call. With the fake millisecond delay removed, one or two
+  scheduler batches are lawful; #1205 retains exact byte-derived batch bounds and tests
+  the positional result/union rather than scheduling luck.
 
 - [Chess run 32297973379](https://github.com/SaltyPatron/Laplace/actions/runs/32297973379)
   ingested 190,705 games in 1,065 seconds, then journal replay completed as a seven-second
