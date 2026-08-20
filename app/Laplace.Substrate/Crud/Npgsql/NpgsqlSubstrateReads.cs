@@ -2362,7 +2362,7 @@ public static class NpgsqlSubstrateReads
             p =>
             {
                 p.AddWithValue("query", query);
-                p.AddWithValue("limit", Math.Clamp(limit, 1, 2000));
+                p.AddWithValue("limit", RequestedLimit(limit));
             }, ct: ct, label: "chess_player_search_candidates", onError: onError,
             timeoutSeconds: 30);
 

@@ -37,8 +37,8 @@ CREATE FUNCTION chess.ranked(
             CASE WHEN lower(COALESCE(p_direction, 'desc')) <> 'asc'
                  THEN r.sort_value END DESC,
             r.player
-        LIMIT greatest(1, least(p_limit, 200))
-        OFFSET greatest(0, p_offset)
+        LIMIT p_limit
+        OFFSET p_offset
     ),
     batch AS MATERIALIZED (
         SELECT COALESCE(array_agg(page.player ORDER BY page.player), '{}'::bytea[]) AS ids
@@ -53,7 +53,7 @@ CREATE FUNCTION chess.ranked(
              LATERAL unnest(realize.batch(b.ids)) WITH ORDINALITY AS t(txt, j)
         WHERE p.i = t.j
     )
-    SELECT (greatest(0, p_offset) + row_number() OVER (
+    SELECT (p_offset + row_number() OVER (
                ORDER BY
                    CASE WHEN lower(COALESCE(p_direction, 'desc')) = 'asc'
                         THEN page.sort_value END ASC,
