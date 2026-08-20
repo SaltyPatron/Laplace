@@ -138,6 +138,10 @@ public sealed class ElectorArchitectureGateTests
 
         Assert.DoesNotContain("1.0e13", source, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("mass_sat", source, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("pc_load_icf", source, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("structural.entity_container_degree(", source,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("is_namer ? -1.0 : share", source, StringComparison.Ordinal);
 
         foreach (var relativePath in ElectorSites)
         {
