@@ -30,6 +30,16 @@ CREATE OR REPLACE FUNCTION structural.geometry_successors_batch(
     AS 'MODULE_PATHNAME', 'pg_laplace_geometry_successors_batch'
     LANGUAGE C STABLE;
 
+CREATE OR REPLACE FUNCTION structural.geometry_successors_batch_typed(
+        p_points   bytea[],
+        p_limit    int,
+        p_window   int,
+        p_backward boolean,
+        p_type     smallint)
+    RETURNS TABLE(point_id bytea, successor_id bytea, seen bigint)
+    AS 'MODULE_PATHNAME', 'pg_laplace_geometry_successors_batch'
+    LANGUAGE C STABLE;
+
 DROP FUNCTION IF EXISTS laplace.geometry_successors(bytea, int, int, boolean);
 CREATE OR REPLACE FUNCTION structural.geometry_successors(
         p_point    bytea,
@@ -45,6 +55,21 @@ BEGIN ATOMIC
     SELECT b.successor_id, b.seen
     FROM structural.geometry_successors_batch(
         ARRAY[p_point]::bytea[], p_limit, p_window, p_backward) b
+    ORDER BY b.seen DESC, b.successor_id;
+END;
+
+CREATE OR REPLACE FUNCTION structural.geometry_successors_typed(
+        p_point    bytea,
+        p_limit    int,
+        p_window   int,
+        p_backward boolean,
+        p_type     smallint)
+    RETURNS TABLE(successor_id bytea, seen bigint)
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
+    SELECT b.successor_id, b.seen
+    FROM structural.geometry_successors_batch_typed(
+        ARRAY[p_point]::bytea[], p_limit, p_window, p_backward, p_type) b
     ORDER BY b.seen DESC, b.successor_id;
 END;
 

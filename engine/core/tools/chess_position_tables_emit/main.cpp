@@ -40,6 +40,16 @@ static const uint8_t kEnPassantDomain = 3;
 static const uint8_t kPieceSquareDomain = 4;
 static const uint8_t kRulesDomain = 5;
 static const uint8_t kCastlingRookOverrideDomain = 6;
+static const uint8_t kMovePieceDomain = 16;
+static const uint8_t kMoveFromDomain = 17;
+static const uint8_t kMoveToDomain = 18;
+static const uint8_t kMoveFlagsDomain = 19;
+static const uint8_t kMovePromotionDomain = 20;
+
+static const uint16_t kMoveDoublePush = 1;
+static const uint16_t kMoveEnPassant = 2;
+static const uint16_t kMoveCastle = 4;
+static const uint16_t kMovePromotion = 8;
 
 static double g_byte_coords[128 * 4];
 
@@ -108,7 +118,7 @@ static void compute_source_hash(const std::vector<uint8_t>& surfaces_bytes,
     mix.push_back(0);
     /* Finite tier-1 alphabet is always in the blob; tag it so skipping surfaces
      * still fingerprints a real product. */
-    const char* t1 = "tier1-typed-board-atoms/v2";
+    const char* t1 = "typed-board-and-move-alphabet/v3";
     for (const char* t = t1; *t; ++t) mix.push_back((uint8_t)*t);
     mix.push_back(0);
     const char* scope = "catalog";
@@ -239,6 +249,7 @@ static int compose_position(const std::string& surface,
         int king_file = white ? wk : bk;
         int rank = white ? 0 : 7;
         char rook = white ? 'R' : 'r';
+        rook_override |= (uint16_t)(1u << ((white ? 0 : 8) + designated[slot]));
         int count = 0, only = -1;
         for (int file = 0; file < 8; ++file) {
             if ((king_side ? file <= king_file : file >= king_file)) continue;
@@ -246,7 +257,6 @@ static int compose_position(const std::string& surface,
         }
         if (count != 1 || only != designated[slot]) {
             needs_override = true;
-            rook_override |= (uint16_t)(1u << ((white ? 0 : 8) + designated[slot]));
         }
     }
     if (needs_override)
@@ -288,6 +298,29 @@ static void emit_scalar_atom(std::vector<laplace_chess_perfcache_record_t>& out,
     out.push_back(rec);
 }
 
+static void emit_move(std::vector<laplace_chess_perfcache_record_t>& out,
+                      uint16_t piece, uint16_t from, uint16_t to,
+                      uint16_t flags, uint16_t promotion) {
+    atom_t atoms[5] = {
+        {kMovePieceDomain, piece, {}, false},
+        {kMoveFromDomain, from, {}, false},
+        {kMoveToDomain, to, {}, false},
+        {kMoveFlagsDomain, flags, {}, false},
+        {kMovePromotionDomain, promotion, {}, false},
+    };
+    hash128_t ids[5];
+    double coords[5 * 4];
+    for (size_t i = 0; i < 5; ++i)
+        compose_atom(atoms[i], &ids[i], coords + i * 4);
+    laplace_chess_perfcache_record_t rec{};
+    hash128_merkle(kPositionTier, ids, 5, &rec.id);
+    math4d_karcher_mean(coords, 5, nullptr, 1e-12, 64, rec.coord);
+    hilbert4d_encode(rec.coord, &rec.hilbert);
+    rec.n = 5;
+    rec.tier = kPositionTier;
+    out.push_back(rec);
+}
+
 /* Finite typed state atoms. Rare ambiguous-rook overrides and rule digests are composed
  * on demand; the ordinary board alphabet is closed and belongs in ROM. */
 static int emit_tier1_alphabet(std::vector<laplace_chess_perfcache_record_t>& out) {
@@ -297,10 +330,39 @@ static int emit_tier1_alphabet(std::vector<laplace_chess_perfcache_record_t>& ou
         emit_scalar_atom(out, kCastlingDomain, rights);
     for (uint16_t ep = 0; ep <= 64; ++ep)
         emit_scalar_atom(out, kEnPassantDomain, ep);
+    for (uint16_t piece = 0; piece < 12; ++piece)
+        emit_scalar_atom(out, kMovePieceDomain, piece);
+    for (uint16_t sq = 0; sq < 64; ++sq) {
+        emit_scalar_atom(out, kMoveFromDomain, sq);
+        emit_scalar_atom(out, kMoveToDomain, sq);
+    }
+    for (uint16_t flags : {uint16_t{0}, kMoveDoublePush, kMoveEnPassant,
+                           kMoveCastle, kMovePromotion})
+        emit_scalar_atom(out, kMoveFlagsDomain, flags);
+    for (uint16_t promotion = 0; promotion <= 4; ++promotion)
+        emit_scalar_atom(out, kMovePromotionDomain, promotion);
     for (int piece = 0; piece < 12; ++piece) {
         for (int bit = 0; bit < 64; ++bit) {
             emit_scalar_atom(out, kPieceSquareDomain,
                              (uint16_t)((piece << 6) | bit));
+        }
+    }
+    return 0;
+}
+
+static int emit_move_alphabet(std::vector<laplace_chess_perfcache_record_t>& out) {
+    static constexpr uint16_t ordinary_flags[] = {
+        0, kMoveDoublePush, kMoveEnPassant, kMoveCastle
+    };
+    for (uint16_t piece = 0; piece < 12; ++piece) {
+        for (uint16_t from = 0; from < 64; ++from) {
+            for (uint16_t to = 0; to < 64; ++to) {
+                for (uint16_t flags : ordinary_flags)
+                    emit_move(out, piece, from, to, flags, 0);
+                if (piece == 0 || piece == 6)
+                    for (uint16_t promotion = 1; promotion <= 4; ++promotion)
+                        emit_move(out, piece, from, to, kMovePromotion, promotion);
+            }
         }
     }
     return 0;
@@ -344,12 +406,17 @@ int main(int argc, char** argv) {
     }
 
     std::vector<laplace_chess_perfcache_record_t> records;
-    records.reserve(851 + 8192);
+    records.reserve(230000 + 8192);
     if (emit_tier1_alphabet(records) != 0) {
         std::fprintf(stderr, "tier-1 alphabet compose failed\n");
         return 4;
     }
     const size_t tier1_n = records.size();
+    if (emit_move_alphabet(records) != 0) {
+        std::fprintf(stderr, "move alphabet compose failed\n");
+        return 4;
+    }
+    const size_t move_n = records.size() - tier1_n;
 
     size_t surface_n = 0;
     if (!surfaces_bytes.empty()) {
@@ -426,9 +493,9 @@ int main(int argc, char** argv) {
     out.close();
 
     std::fprintf(stderr,
-        "chess_position_perfcache: tier1=%zu catalog_surfaces=%zu unique_ids=%zu "
+        "chess_position_perfcache: tier1=%zu moves=%zu catalog_surfaces=%zu unique_ids=%zu "
         "-> %s (%.1f KiB)\n",
-        tier1_n, surface_n, records.size(), cli.output.c_str(),
+        tier1_n, move_n, surface_n, records.size(), cli.output.c_str(),
         blob.size() / 1024.0);
     return 0;
 }

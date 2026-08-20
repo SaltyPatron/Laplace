@@ -147,7 +147,7 @@ public sealed class ChessTrajectoryDecomposer
         }
 
         long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
-        ChessGraph.AppendGameTrajectory(b, w.LineId, line, sourceId, nowUs);
+        ChessGraph.AppendPositionProjection(b, w.LineId, line, sourceId, nowUs);
         b.AddEntity(MarkerId(w.LineId), EntityTier.Document,
                     ChessVocabulary.AnalysisMarkerType, sourceId);
     }

@@ -48,7 +48,7 @@ static const char *BATCH_UNPACK_QUERY =
     "SELECT p.id, c.entity_id "
     "FROM laplace.physicalities p "
     "CROSS JOIN LATERAL public.laplace_trajectory_constituents(p.trajectory) c "
-    "WHERE p.type = 1 "
+    "WHERE p.type = $2 "
     "AND p.trajectory IS NOT NULL "
     "AND public.laplace_trajectory_constituent_ids(p.trajectory) && $1 "
     "ORDER BY p.id, c.ordinal";
@@ -85,8 +85,8 @@ ensure_plans(void)
 {
     if (batch_unpack_plan == NULL)
     {
-        Oid        argtypes[1] = { BYTEAARRAYOID };
-        SPIPlanPtr plan = SPI_prepare(BATCH_UNPACK_QUERY, 1, argtypes);
+        Oid        argtypes[2] = { BYTEAARRAYOID, INT2OID };
+        SPIPlanPtr plan = SPI_prepare(BATCH_UNPACK_QUERY, 2, argtypes);
 
         if (plan == NULL)
             elog(ERROR, "geometry_successors: SPI_prepare(batch unpack) failed: %s",
@@ -243,6 +243,7 @@ pg_laplace_geometry_successors_batch(PG_FUNCTION_ARGS)
     int32          limit_rows;
     int32          window;
     bool           backward;
+    int16          physicality_type;
     bool           spi_top = false;
     HASHCTL        ctl;
     HTAB          *roots;
@@ -258,6 +259,7 @@ pg_laplace_geometry_successors_batch(PG_FUNCTION_ARGS)
     limit_rows = PG_ARGISNULL(1) ? 20 : PG_GETARG_INT32(1);
     window = PG_ARGISNULL(2) ? 8 : PG_GETARG_INT32(2);
     backward = (PG_NARGS() > 3 && !PG_ARGISNULL(3)) ? PG_GETARG_BOOL(3) : false;
+    physicality_type = (PG_NARGS() > 4 && !PG_ARGISNULL(4)) ? PG_GETARG_INT16(4) : 1;
     if (limit_rows < 0)
         ereport(ERROR, (errmsg("geometry_successors_batch: limit must not be negative")));
     if (window < 0)
@@ -314,8 +316,8 @@ pg_laplace_geometry_successors_batch(PG_FUNCTION_ARGS)
     {
         Datum     *normalized_datums = (Datum *) palloc(sizeof(Datum) * (Size) n_roots);
         ArrayType *normalized;
-        Datum      args[1];
-        char       nulls[1] = { ' ' };
+        Datum      args[2];
+        char       nulls[2] = { ' ', ' ' };
         Portal     portal;
         char        current[16];
         bool        have_current = false;
@@ -334,6 +336,7 @@ pg_laplace_geometry_successors_batch(PG_FUNCTION_ARGS)
         normalized = construct_array(normalized_datums, n_roots, BYTEAOID,
                                      -1, false, TYPALIGN_INT);
         args[0] = PointerGetDatum(normalized);
+        args[1] = Int16GetDatum(physicality_type);
         portal = SPI_cursor_open(NULL, batch_unpack_plan, args, nulls, true);
         if (portal == NULL)
             elog(ERROR, "geometry_successors_batch: unpack cursor failed: %s",

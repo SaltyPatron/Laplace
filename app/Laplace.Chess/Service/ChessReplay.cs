@@ -23,21 +23,14 @@ public sealed record ChessReplayResult(
     string? Truncated);
 
 /// <summary>
-/// Turns a recorded movetext back into the sequence of boards it describes.
-///
-/// This is what a game "is" in the substrate, and it is worth being exact about. The
-/// record layer stores the movetext VERBATIM as content — not a parse, not a blob: a
-/// tier-4 entity whose constituent chain rebuilds the original PGN bytes from its id
-/// alone. Per-ply record consensus.edges(HAS_PLY / HAS_SAN) were deliberately removed, because a
-/// ply of one game can never corroborate a ply of another, so each was a permanently
-/// single-witness consensus cell. The movetext plus replay reconstructs all of them,
-/// which is exactly what this does.
+/// Replays typed move trajectories or parses PGN supplied at an interchange boundary.
+/// The stored record is the former: reusable move objects ordered by the reusable line's
+/// physicality, with sparse playing-specific source annotations in parallel trajectories.
 ///
 /// The positions are NOT reconstructed-and-thrown-away, though. Every board here is
-/// hashed through ChessCompose to the same content address the analyzer deposited, so a
-/// replayed ply lands on a real Chess_Position entity carrying S³ geometry. Continuations
-/// are projected from the containing line trajectories; replay is therefore a walk INTO
-/// the substrate without duplicating each adjacent pair as a MOVE consensus row.
+/// hashed through ChessCompose to the same perfcache address used by the analyzer. A line's
+/// evictable position projection carries those points without depositing a SQL entity tree for
+/// every board or duplicating each adjacent pair as a MOVE consensus row.
 ///
 /// SAN never gets parsed twice. Resolution goes through San.Resolve against the engine's
 /// own legal-move list, the same call the analyzer and the book decomposer make.
@@ -118,6 +111,103 @@ public static partial class ChessReplay
                 plies[i] = plies[i] with { ClockSeconds = clocks[i] };
 
         return new ChessReplayResult(startFen, plies, hasClocks, truncated);
+    }
+
+    /// <summary>
+    /// Replay a line's typed move trajectory. Each move id is matched only against the
+    /// legal actions from the current board; PGN/SAN is generated output, never stored identity.
+    /// </summary>
+    public static ChessReplayResult Replay(
+        IReadOnlyList<Hash128> moveIds, string? startFen = null, int maxPlies = 1024)
+    {
+        var board = string.IsNullOrWhiteSpace(startFen)
+            ? Board.FromFen(ChessModality.StartFen)
+            : Board.FromFen(startFen);
+        string canonicalStart = board.ToFen();
+        var plies = new List<ChessPly>(Math.Min(moveIds.Count, maxPlies));
+        string? truncated = null;
+        lock (ChessCompose.Gate)
+        {
+            for (int i = 0; i < moveIds.Count; i++)
+            {
+                if (plies.Count >= maxPlies)
+                {
+                    truncated = $"stopped at {maxPlies} plies";
+                    break;
+                }
+                var legal = MoveGen.Legal(board);
+                ChessMove? matched = null;
+                foreach (var move in legal)
+                {
+                    Piece moving = board.Squares[move.From];
+                    if (ChessCompose.MoveId(moving, move) != moveIds[i]) continue;
+                    if (matched is not null)
+                    {
+                        truncated = $"ambiguous typed move at ply {i + 1}";
+                        break;
+                    }
+                    matched = move;
+                }
+                if (truncated is not null) break;
+                if (matched is null)
+                {
+                    truncated = $"typed move does not resolve at ply {i + 1}";
+                    break;
+                }
+
+                var mv = matched.Value;
+                bool whiteMoved = board.WhiteToMove;
+                string san = San.ToSan(board, mv);
+                MoveApply.Make(board, mv);
+                var positionId = ChessCompose.PositionId(board);
+                plies.Add(new ChessPly(
+                    i + 1, san, mv.ToUci(), board.ToFen(), whiteMoved, null,
+                    Convert.ToHexString(positionId.ToBytes()).ToLowerInvariant()));
+            }
+        }
+        return new ChessReplayResult(canonicalStart, plies, false, truncated);
+    }
+
+    /// <summary>Apply aligned source comment annotations to generated replay output.</summary>
+    public static ChessReplayResult ApplyClockComments(
+        ChessReplayResult replay, IReadOnlyList<string?> comments)
+    {
+        if (replay.Plies.Count == 0 || comments.Count != replay.Plies.Count) return replay;
+        var text = new System.Text.StringBuilder(replay.Plies.Count * 16);
+        for (int i = 0; i < replay.Plies.Count; i++)
+        {
+            if (text.Length > 0) text.Append(' ');
+            text.Append(replay.Plies[i].San);
+            if (!string.IsNullOrWhiteSpace(comments[i]))
+                text.Append(" { ").Append(comments[i]).Append(" }");
+        }
+        var clocks = PgnClocks.SecondsRemaining(text.ToString(), replay.Plies.Count);
+        if (clocks.Length != replay.Plies.Count) return replay;
+        var plies = replay.Plies.ToArray();
+        for (int i = 0; i < plies.Length; i++)
+            plies[i] = plies[i] with { ClockSeconds = clocks[i] };
+        return replay with { Plies = plies, HasClocks = true };
+    }
+
+    public static string ToMovetext(ChessReplayResult replay, string? result)
+    {
+        var sb = new System.Text.StringBuilder(replay.Plies.Count * 8 + 16);
+        for (int i = 0; i < replay.Plies.Count; i++)
+        {
+            if ((i & 1) == 0)
+            {
+                if (sb.Length > 0) sb.Append(' ');
+                sb.Append((i / 2) + 1).Append('.').Append(' ');
+            }
+            else sb.Append(' ');
+            sb.Append(replay.Plies[i].San);
+        }
+        if (!string.IsNullOrWhiteSpace(result))
+        {
+            if (sb.Length > 0) sb.Append(' ');
+            sb.Append(result);
+        }
+        return sb.ToString();
     }
 
     /// <summary>Movetext to bare SAN tokens, in order.</summary>

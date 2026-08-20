@@ -223,8 +223,8 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
     }
 
     /// <summary>
-    /// Novelty gate on <see cref="ChessPlayingPeek.PlayingId"/>, then full parse only for novel
-    /// games. Present playings are skipped without board replay (lawful idempotent re-ingest).
+    /// Novelty gate on the semantic playing id. Parsing/replay happens before the probe because
+    /// the playing closes over the decomposed line, never over a digest of PGN serialization.
     /// </summary>
     private static async IAsyncEnumerable<ChessGameRecord> YieldNovelParsedAsync(
         List<ChessPlayingPeek> peeks, ISubstrateReader? reader, bool reObservePresent,
@@ -233,8 +233,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         if (peeks.Count == 0) yield break;
         if (reObservePresent || reader is null)
         {
-            foreach (var p in peeks)
-                if (TryParseGame(p.GameText) is { } g) yield return g;
+            foreach (var p in peeks) yield return p.Game;
             yield break;
         }
 
@@ -264,34 +263,26 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         for (int i = 0; i < peeks.Count; i++)
         {
             if (present[i] || reader.IsProvenPresent(peeks[i].PlayingId)) continue;
-            if (TryParseGame(peeks[i].GameText) is { } g) yield return g;
+            yield return peeks[i].Game;
         }
     }
 
     /// <summary>
-    /// Headers + movetext token id only. Enough to mint <see cref="ChessVocabulary.PgnPlayingId"/>
-    /// for the novelty gate — no tree-sitter walk, no board replay.
+    /// Decompose before naming the playing. A PGN byte/token digest is a source encoding, not
+    /// the identity of the game it represents.
     /// </summary>
     internal static ChessPlayingPeek? TryPeekPlaying(string gameText)
     {
-        if (!TryMovetextTokens(MovetextSection(gameText), out _, out _, out var movetextId))
-            return null;
-        var (whiteName, blackName) = ParseNames(gameText);
-        string date = PgnGames.TagStr(gameText, "Date");
-        string eventTag = PgnGames.TagStr(gameText, "Event");
-        string siteTag = PgnGames.TagStr(gameText, "Site");
-        string roundTag = PgnGames.TagStr(gameText, "Round");
-        var playingId = ChessVocabulary.PgnPlayingId(
-            whiteName, blackName, date, eventTag, roundTag, siteTag, movetextId);
-        return new ChessPlayingPeek(gameText, playingId);
+        var game = TryParseGame(gameText);
+        return game is null ? null : new ChessPlayingPeek(game, game.PlayingId);
     }
 
     // ONE pass, ONE pipeline (GH #600): the witnessed record (ChessPgn source) AND the
     // deterministic calculated derivation (positions, move/eval edges, motifs, opening —
     // ChessAnalysis source, via DeriveFromParsed) from the SAME in-memory parse. record.Walk
     // is the tree-sitter parse TryParseGame already produced; the standalone chess-analyze
-    // pass used to re-read HAS_MOVETEXT out of Postgres and re-parse it — a full DB round-trip
-    // plus a second tree-sitter parse of a game we already hold parsed in hand. SAN replay
+    // pass used to re-read serialized PGN out of Postgres and re-parse it — a full DB round-trip
+    // plus a second tree-sitter parse of a game we already held parsed in hand. SAN replay
     // under chess's fixed rules is deterministic parsing, not a versioned judgment, so it
     // belongs in the recording pass (matches ChessBookDecomposer.ComposeEmbeddedGame).
     // DeriveFromParsed stamps ANALYZED_AT, so the standalone analyzer scan permanently skips
@@ -419,7 +410,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         string date = PgnGames.TagStr(gameText, "Date");
 
         // GH #736: line identity is minted HERE, by replay — the content id is the Merkle
-        // of the ordered position ids the game passes through, so two sources writing the
+        // of the start position and ordered typed move ids, so two sources writing the
         // same play differently ("O-O" vs "0-0", disambiguation variants) collide, and
         // who/when never enters the hash. Replay under chess's fixed rules is deterministic
         // parsing, not a versioned judgment (GH #600), and the novelty gate needs the ids
@@ -428,8 +419,8 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         // lane and analyzer already apply.
         string? startFen = PgnGames.TagStr(gameText, "SetUp") == "1"
             ? PgnGames.TagStr(gameText, "FEN") : null;
-        var positionIds = TryReplayLine(moves, startFen);
-        if (positionIds is null)
+        var replay = TryReplayLineDetailed(moves, startFen);
+        if (replay is null)
         {
             ChessDropLedger.Drop(
                 DropReason(gameText, startFen),
@@ -437,22 +428,14 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
                 + (startFen is null ? "" : $" [FEN {startFen}]"));
             return null;
         }
-        var lineId = ChessCompose.LineId(positionIds);
-
-        // One tokenize pass — tokens + ids reused by RecordMovetext (no second parse).
-        if (!TryMovetextTokens(MovetextSection(gameText), out var mtTokens, out var movetextTokenIds,
-                out var movetextId))
-        {
-            ChessDropLedger.Drop(ChessDropLedger.NoMovetext, $"{whiteName} vs {blackName} {date}");
-            return null;
-        }
+        var lineId = ChessCompose.LineId(replay.PositionIds[0], replay.MoveIds);
         ChessDropLedger.Kept();
         string eventTag = PgnGames.TagStr(gameText, "Event");
         string siteTag = PgnGames.TagStr(gameText, "Site");
         string roundTag = PgnGames.TagStr(gameText, "Round");
         var eventId = ChessVocabulary.PgnEventId(eventTag, siteTag, date);
         var playingId = ChessVocabulary.PgnPlayingId(
-            whiteName, blackName, date, eventTag, roundTag, siteTag, movetextId);
+            whiteName, blackName, date, eventTag, roundTag, siteTag, lineId);
 
         return new ChessGameRecord(gameText, moves, result, lineId, eventId, playingId)
         {
@@ -460,10 +443,10 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
             WhiteName = whiteName,
             BlackName = blackName,
             Date = date,
-            PositionIds = positionIds,
-            MovetextId = movetextId,
-            MovetextTokenIds = movetextTokenIds,
-            MovetextTokens = mtTokens,
+            PositionIds = replay.PositionIds,
+            ResolvedMoves = replay.Moves,
+            MovingPieces = replay.MovingPieces,
+            MoveIds = replay.MoveIds,
         };
     }
 
@@ -502,6 +485,10 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
     /// Geometry is analyze/ROM.
     /// </summary>
     internal static Hash128[]? TryReplayLine(IReadOnlyList<string> sans, string? startFen)
+        => TryReplayLineDetailed(sans, startFen)?.PositionIds;
+
+    internal static ChessLineReplay? TryReplayLineDetailed(
+        IReadOnlyList<string> sans, string? startFen)
     {
         var m = new ChessModality();
         // Null start = a start position this parser cannot model. Refuse the line; the caller
@@ -510,6 +497,9 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         if (ChessAnalyze.InitialState(startFen, m) is not { } start) return null;
         var board = start.Initial.Board.Clone();
         var ids = new Hash128[sans.Count + 1];
+        var moves = new ChessMove[sans.Count];
+        var movingPieces = new Piece[sans.Count];
+        var moveIds = new Hash128[sans.Count];
         ids[0] = ChessCompose.PositionId(board);
         var scratch = new List<ChessMove>(16);
         for (int ply = 0; ply < sans.Count; ply++)
@@ -517,7 +507,10 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
             var mv = San.Resolve(board, sans[ply], scratch);
             if (mv is null) return null;
             Piece moving = board.Squares[mv.Value.From];
+            moves[ply] = mv.Value;
+            movingPieces[ply] = moving;
             var moveId = ChessCompose.MoveId(moving, mv.Value);
+            moveIds[ply] = moveId;
             var tKey = ChessCompose.TransitionKey(ids[ply], moveId);
             MoveApply.Make(board, mv.Value);
             if (ChessTransitionFloor.TryLookup(tKey, out var toId))
@@ -532,7 +525,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
                 ChessTransitionFloor.Remember(tKey, toId);
             }
         }
-        return ids;
+        return new ChessLineReplay(ids, moves, movingPieces, moveIds);
     }
 
     // ---- RECORDER: witnessed transcription only. No board replay, no move generation, no
@@ -544,13 +537,11 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
     // sourceId defaults to ChessPgn; the chess-book lane records its embedded games under
     // ChessBook so provenance stays with the asserting source (the analyzer scan accepts both).
     //
-    // GAME GRAIN ONLY. Per-ply record tokens (SAN/clock/eval/comment/quality on a per-game
-    // PlyId subject) are deliberately NOT attested: a PlyId is unique to one game by
-    // construction, so every such row is a permanently single-witness consensus cell — dead
-    // weight in the Glicko fold (measured ~40M of 62M consensus rows). The verbatim PGN
-    // movetext witnessed below (HAS_MOVETEXT, one edge per game) carries every one of those
-    // tokens losslessly; readback re-parses it (ChessWitnessHydrator). The game's HAS_RESULT
-    // is the only move/line outcome evidence; queries join the playing to its line trajectory.
+    // GAME GRAIN ONLY. Per-ply record tokens are deliberately NOT attested: a PlyId is unique
+    // to one game, so every such row is a permanently single-witness consensus cell. The
+    // line's typed move trajectory is the ordered mainline; sparse parallel playing annotation
+    // trajectories retain comments and annotations. The game's HAS_RESULT is the only
+    // outcome evidence; queries join the playing to its line trajectory.
     internal static void RecordGame(ChessGameRecord parsed, SubstrateChangeBuilder b, Hash128? sourceId = null)
     {
         var (gameText, _, result, lineId, eventId, playingId) = parsed;
@@ -568,8 +559,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         EmitGame(b, lineId, eventId, playingId, gameText, date, result, whitePlayer, blackPlayer, whiteElo, blackElo, src);
         RecordStartPosition(b, lineId, playingId, gameText, src);
         RecordOpeningHeaders(b, lineId, gameText, src);
-        RecordMovetext(b, lineId, playingId, gameText, src,
-            parsed.MovetextTokens, parsed.MovetextTokenIds, parsed.MovetextId);
+        RecordPlayingTrajectory(b, parsed, src);
     }
 
     private static void RecordStartPosition(
@@ -578,8 +568,12 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         if (PgnGames.TagStr(gameText, "SetUp") != "1") return;
         string fen = PgnGames.TagStr(gameText, "FEN");
         if (string.IsNullOrWhiteSpace(fen)) return;
-        if (ContentEmitter.Emit(b, fen, src) is { } fid)
-            b.AddAttestation(NativeAttestation.Categorical(lineId, "HAS_SETUP", fid, src, eventId, PgnWitnessWeight));
+        Board board;
+        try { board = Board.FromFen(fen); }
+        catch (FormatException) { return; }
+        Hash128 positionId = ChessGraph.EmitPosition(b, board, src);
+        b.AddAttestation(NativeAttestation.Categorical(
+            lineId, "HAS_SETUP", positionId, src, eventId, PgnWitnessWeight));
     }
 
     // Line-grain facts, ctx = null on purpose: each playing that asserts the same
@@ -593,118 +587,64 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         if (opening.Length > 0) ChessGraph.AppendGameMeta(b, lineId, "GAME_HAS_OPENING", opening, PgnWitnessWeight, src);
     }
 
-    // Witness the VERBATIM PGN movetext (clocks, evals, comments, NAGs, result token — the
-    // bytes the source asserted) as one content edge on the game.
-    //
-    // Composed from the movetext's OWN units, not from prose. Handing the raw string to the
-    // shared text spine applied UAX #29 sentence segmentation, and PGN's move-number separator
-    // is '.', so it split into fragments like "Nd2 Nf6 4. e5 Nfd7 5. " — measured at 82.5%
-    // single-use over 3,000 games (81,373 constituents, 67,108 distinct). Content addressing
-    // pays off by COLLIDING; prose segmentation of a non-prose format collides almost never,
-    // and fills tier-3 content space with fragments that can corroborate with nothing.
-    //
-    // Ply tokens are shared content: there are only a few thousand distinct SAN tokens in all
-    // of chess, so "Nf6" is ONE entity witnessed across millions of games. The movetext is the
-    // Merkle over its ordered tokens — the same composition positions use (ChessCompose), with
-    // the trajectory carrying the sequence, so the record stays lossless and reconstructible
-    // while every unit it is built from is one the corpus actually reuses.
-    private static void RecordMovetext(
-        SubstrateChangeBuilder b, Hash128 lineId, Hash128 eventId, string gameText, Hash128 src,
-        IReadOnlyList<string>? movetextTokens = null, Hash128[]? movetextTokenIds = null,
-        Hash128? movetextId = null)
+    private static void RecordPlayingTrajectory(
+        SubstrateChangeBuilder b, ChessGameRecord parsed, Hash128 src)
     {
-        IReadOnlyList<string> tokens;
-        Hash128[] ids;
-        Hash128 mtId;
-        if (movetextTokens is { Count: > 0 } && movetextTokenIds is { Length: > 0 }
-            && movetextId is { } known)
-        {
-            tokens = movetextTokens;
-            ids = movetextTokenIds;
-            mtId = known;
-        }
-        else
-        {
-            string movetext = MovetextSection(gameText);
-            if (movetext.Length == 0) return;
-            if (!TryMovetextTokens(movetext, out tokens, out ids, out mtId)) return;
-        }
-
-        for (int i = 0; i < tokens.Count && i < ids.Length; i++)
-            ContentEmitter.Emit(b, tokens[i], src);
-
-        b.AddEntity(mtId, EntityTier.Document, ChessVocabulary.MovetextType, src);
-        b.AddPhysicality(new PhysicalityRow(
-            Id: PhysicalityId.Compute(mtId, PhysicalityType.Content),
-            EntityId: mtId,
-            SourceId: src,
-            Type: PhysicalityType.Content,
-            CoordX: 0, CoordY: 0, CoordZ: 0, CoordM: 0,
-            HilbertIndex: default,
-            TrajectoryXyzm: Trajectory.Build(ids),
-            NConstituents: ids.Length,
-            AlignmentResidual: null,
-            SourceDim: null,
-            ObservedAtUnixUs: 0));
-
-        b.AddAttestation(NativeAttestation.Categorical(lineId, "HAS_MOVETEXT", mtId, src, eventId, PgnWitnessWeight));
+        if (parsed.ResolvedMoves.Length == 0
+            || parsed.ResolvedMoves.Length != parsed.MovingPieces.Length) return;
+        var points = new ChessNode[parsed.ResolvedMoves.Length];
+        long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
+        for (int i = 0; i < points.Length; i++)
+            points[i] = ChessGraph.EmitMove(
+                b, parsed.MovingPieces[i], parsed.ResolvedMoves[i], src, nowUs);
+        ChessGraph.AppendLineTrajectory(b, parsed.LineId, points, src, nowUs);
+        RecordAlignedAnnotations(b, parsed, points, src, nowUs);
     }
 
-    private static bool TryMovetextTokens(
-        string movetext, out IReadOnlyList<string> tokens, out Hash128[] ids, out Hash128 mtId)
+    private static void RecordAlignedAnnotations(
+        SubstrateChangeBuilder b, ChessGameRecord parsed, IReadOnlyList<ChessNode> movePoints,
+        Hash128 src, long nowUs)
     {
-        tokens = Array.Empty<string>();
-        ids = [];
-        mtId = default;
-        var parsed = MovetextTokens.Parse(movetext);
-        if (parsed.Count == 0) return false;
-        var list = new List<Hash128>(parsed.Count);
-        foreach (var tok in parsed)
-            if (ContentEmitter.RootId(tok) is { } tid) list.Add(tid);
-        if (list.Count == 0) return false;
-        tokens = parsed;
-        ids = list.ToArray();
-        mtId = MovetextId(ids);
-        return true;
-    }
-
-    // Document tier: a movetext is a whole document made of ply tokens.
-    private const byte MovetextTier = 4;
-
-    /// <summary>
-    /// The composed id of a movetext, from its ordered token ids. ONE definition — the
-    /// decomposer writes through it and any caller that needs to name a movetext resolves
-    /// through it, so the two can never drift.
-    /// </summary>
-    internal static Hash128 MovetextId(ReadOnlySpan<Hash128> tokenIds)
-        => Hash128.Merkle(MovetextTier, tokenIds);
-
-    /// <summary>The composed id of a movetext surface, tokenized the source's way.</summary>
-    internal static Hash128? MovetextId(string movetext)
-    {
-        var tokens = MovetextTokens.Parse(movetext);
-        if (tokens.Count == 0) return null;
-        var ids = new List<Hash128>(tokens.Count);
-        foreach (var tok in tokens)
-            if (ContentEmitter.RootId(tok) is { } tid) ids.Add(tid);
-        return ids.Count == 0 ? null : MovetextId(ids.ToArray());
-    }
-
-    // The movetext section verbatim: everything after the header-tag block. Header lines start
-    // with '['; the first non-blank, non-header line begins the movetext, which then runs to the
-    // end of the game text (comment lines inside movetext are included even if they start oddly).
-    internal static string MovetextSection(string gameText)
-    {
-        int i = 0, n = gameText.Length;
-        while (i < n)
+        if (parsed.Walk.Mainline.Count != movePoints.Count) return;
+        var missing = ChessGraph.EmitAnnotationMissing(b, src, nowUs);
+        var comments = new Hash128[movePoints.Count];
+        var annotations = new Hash128[movePoints.Count];
+        bool anyComment = false, anyAnnotation = false;
+        for (int i = 0; i < movePoints.Count; i++)
         {
-            int j = gameText.IndexOf('\n', i);
-            int end = j < 0 ? n : j;
-            var line = gameText.AsSpan(i, end - i).Trim();
-            if (line.Length > 0 && line[0] != '[') break;
-            i = j < 0 ? n : j + 1;
+            var ply = parsed.Walk.Mainline[i];
+            comments[i] = missing.Id;
+            annotations[i] = missing.Id;
+            if (!string.IsNullOrWhiteSpace(ply.CommentText)
+                && ContentEmitter.Emit(b, ply.CommentText, src) is { } commentId)
+            {
+                comments[i] = commentId;
+                anyComment = true;
+            }
+
+            string annotation = SerializeAnnotations(ply);
+            if (annotation.Length > 0
+                && ContentEmitter.Emit(b, annotation, src) is { } annotationId)
+            {
+                annotations[i] = annotationId;
+                anyAnnotation = true;
+            }
         }
-        return gameText[i..].Trim();
+        if (anyComment)
+            ChessGraph.AppendPlayingAnnotationTrajectory(
+                b, parsed.PlayingId, comments, movePoints,
+                PhysicalityType.ChessComment, src, nowUs);
+        if (anyAnnotation)
+            ChessGraph.AppendPlayingAnnotationTrajectory(
+                b, parsed.PlayingId, annotations, movePoints,
+                PhysicalityType.ChessAnnotation, src, nowUs);
+    }
+
+    private static string SerializeAnnotations(PgnMovetext.PgnMoveStream ply)
+    {
+        Span<string?> parts =
+        [ply.Nag is { } nag ? $"${nag}" : null, ply.StandaloneAnnotation, ply.SuffixAnnotation];
+        return string.Join(' ', parts.ToArray().Where(static p => !string.IsNullOrWhiteSpace(p))!);
     }
 
     private static async IAsyncEnumerable<string> StreamGamesAsync(
@@ -969,11 +909,17 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         => ChessInput.Resolve(path, scope, ChessInput.PgnExtensions, "chess");
 }
 
-/// <summary>Cheap novelty handle: PlayingId from headers+movetext, before board replay.</summary>
-internal readonly record struct ChessPlayingPeek(string GameText, Hash128 PlayingId);
+/// <summary>Parsed novelty handle: one playing identity plus its decomposed source record.</summary>
+internal readonly record struct ChessPlayingPeek(ChessGameRecord Game, Hash128 PlayingId);
+
+internal sealed record ChessLineReplay(
+    Hash128[] PositionIds,
+    ChessMove[] Moves,
+    Piece[] MovingPieces,
+    Hash128[] MoveIds);
 
 /// <summary>
-/// Parsed PGN game: <see cref="LineId"/> = content (Merkle of position ids);
+/// Parsed PGN game: <see cref="LineId"/> = content (Merkle of start position + move ids);
 /// <see cref="EventId"/> = tournament/named event (many games share one);
 /// <see cref="PlayingId"/> = this game record (novelty + attestation context).
 /// </summary>
@@ -993,9 +939,9 @@ public sealed record ChessGameRecord(
     internal string? Date { get; init; }
 
     internal Hash128[] PositionIds { get; init; } = [];
-    internal Hash128 MovetextId { get; init; }
-    internal Hash128[] MovetextTokenIds { get; init; } = [];
-    internal IReadOnlyList<string> MovetextTokens { get; init; } = Array.Empty<string>();
+    internal ChessMove[] ResolvedMoves { get; init; } = [];
+    internal Piece[] MovingPieces { get; init; } = [];
+    internal Hash128[] MoveIds { get; init; } = [];
 
     public Hash128 TrunkRootId => PlayingId;
 }

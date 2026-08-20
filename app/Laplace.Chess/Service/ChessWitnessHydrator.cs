@@ -1,9 +1,9 @@
 using System.Runtime.CompilerServices;
-using System.Text;
 using global::Npgsql;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.Modality;
+using Laplace.Modality.Chess;
 using Laplace.SubstrateCRUD;
 using Laplace.SubstrateCRUD.Npgsql;
 
@@ -15,13 +15,13 @@ namespace Laplace.Chess.Service;
 /// plus header facts subjected on the LINE with ctx = the EVENT, so the hydrator navigates
 /// event → line → context-grouped headers. Two stream grains, matching the two marker
 /// grains: per EVENT (analyzer — per-playing testimony) and per LINE (trajectory/stockfish —
-/// pure functions of the line). Per-ply tokens (SAN/clock/eval/quality) are re-parsed from
-/// each playing's verbatim HAS_MOVETEXT content, the single lossless per-playing record.
+/// pure functions of the line). A line's lossless mainline is its ordered trajectory of typed
+/// move objects; playings carry only occurrence-specific annotation lanes. SAN and board positions
+/// is admitted as stored chess identity.
 /// </summary>
 internal static class ChessWitnessHydrator
 {
     private static readonly Hash128 RelPlaysLine = RelationTypeRegistry.RelationTypeId("PLAYS_LINE");
-    private static readonly Hash128 RelHasMovetext = RelationTypeRegistry.RelationTypeId("HAS_MOVETEXT");
     private static readonly Hash128 RelHasResult = RelationTypeRegistry.RelationTypeId("HAS_RESULT");
     private static readonly Hash128 RelHasWhite = RelationTypeRegistry.RelationTypeId("HAS_WHITE");
     private static readonly Hash128 RelHasBlack = RelationTypeRegistry.RelationTypeId("HAS_BLACK");
@@ -33,8 +33,7 @@ internal static class ChessWitnessHydrator
     // a line — a line entity also carries tags and other edges the loop below discards.
     private static readonly byte[][] GameRelationTypes =
     [
-        RelHasMovetext.ToBytes(), RelHasWhite.ToBytes(), RelHasBlack.ToBytes(),
-        RelHasSetup.ToBytes(), RelHasResult.ToBytes(),
+        RelHasWhite.ToBytes(), RelHasBlack.ToBytes(), RelHasSetup.ToBytes(), RelHasResult.ToBytes(),
     ];
 
     internal static NpgsqlDataSource? TryResolveDataSource(ISubstrateReader reader) =>
@@ -173,8 +172,8 @@ internal static class ChessWitnessHydrator
 
     /// <summary>
     /// Hydrated per-LINE stream: ONE <see cref="ChessWitnessedGame"/> per distinct line (an
-    /// arbitrary-but-deterministic representative playing supplies the movetext — every
-    /// playing of a line replays to the same position sequence by line identity).
+    /// arbitrary-but-deterministic representative playing supplies headers and result — every
+    /// playing of a line reads the same move trajectory by line identity).
     /// </summary>
     internal static async IAsyncEnumerable<ChessWitnessedGame> StreamUnanalyzedLinesAsync(
         NpgsqlDataSource ds,
@@ -293,7 +292,6 @@ internal static class ChessWitnessHydrator
         var representative = new Dictionary<Hash128, (Hash128 Event, GameMeta Meta)>(lineIds.Count);
         foreach (var ((lineId, eventId), gm) in groups)
         {
-            if (gm.MovetextObj == default) continue;
             if (!representative.TryGetValue(lineId, out var cur) || eventId.CompareToBytewise(cur.Event) < 0)
                 representative[lineId] = (eventId, gm);
         }
@@ -321,8 +319,7 @@ internal static class ChessWitnessHydrator
             if (!groups.TryGetValue(key, out var gm)) groups[key] = gm = new GameMeta();
             var type = Hash128.FromBytes(row.TypeId);
             var obj = row.ObjectId is null ? default : Hash128.FromBytes(row.ObjectId);
-            if (type == RelHasMovetext) gm.MovetextObj = obj;
-            else if (type == RelHasWhite) gm.White = obj;
+            if (type == RelHasWhite) gm.White = obj;
             else if (type == RelHasBlack) gm.Black = obj;
             else if (type == RelHasSetup) gm.SetupObj = obj;
             else if (type == RelHasResult) gm.ResultObj = obj;
@@ -336,90 +333,108 @@ internal static class ChessWitnessHydrator
     {
         if (wanted.Count == 0) return Array.Empty<ChessWitnessedGame>();
 
-        // Result and SetUp are single surfaces — render_text_batch round-trips them.
-        // The MOVETEXT is a composition over ordered tokens and does NOT round-trip
-        // through realize.render(see RebuildMovetextsAsync), so it is rebuilt from its
-        // trajectory instead.
+        // Result is a scalar surface. SetUp and the game mainline are typed trajectories:
+        // unpack the batch, reconstruct initial boards, then replay ordered move ids.
         var contentIds = new List<Hash128>();
-        var movetextIds = new List<Hash128>();
         void Need(Hash128 id) { if (id != default) contentIds.Add(id); }
         foreach (var (_, _, gm) in wanted)
         {
-            if (gm.MovetextObj != default) movetextIds.Add(gm.MovetextObj);
             Need(gm.ResultObj);
-            Need(gm.SetupObj);
         }
 
+        var setupIds = wanted.Select(static w => w.Meta.SetupObj)
+            .Where(static id => id != default).Distinct().ToArray();
+        IReadOnlyDictionary<Hash128, Board> setupBoards;
+        if (setupIds.Length == 0) setupBoards = new Dictionary<Hash128, Board>();
+        else
+        {
+            var setupBytes = new byte[setupIds.Length][];
+            for (int i = 0; i < setupIds.Length; i++) setupBytes[i] = setupIds[i].ToBytes();
+            var setupRows = await NpgsqlSubstrateReads.NestedTrajectoryConstituentsAsync(
+                ds, setupBytes, ct).ConfigureAwait(false);
+            setupBoards = ChessPositionTrajectory.Decode(setupRows);
+        }
+        var trajectoryOwners = wanted.SelectMany(static w => new[] { w.Line, w.Event })
+            .Distinct().ToArray();
+        var ownerBytes = new byte[trajectoryOwners.Length][];
+        for (int i = 0; i < trajectoryOwners.Length; i++) ownerBytes[i] = trajectoryOwners[i].ToBytes();
+        var trajectoryRows = await NpgsqlSubstrateReads.TypedTrajectoryConstituentsAsync(
+            ds, ownerBytes,
+            [PhysicalityType.Content, PhysicalityType.ChessComment, PhysicalityType.ChessAnnotation],
+            ct).ConfigureAwait(false);
+        var lanes = new Dictionary<(Hash128 Playing, PhysicalityType Type), List<Hash128>>();
+        foreach (var row in trajectoryRows)
+        {
+            var playing = Hash128.FromBytes(row.ParentId);
+            var key = (playing, row.Type);
+            if (!lanes.TryGetValue(key, out var values)) lanes[key] = values = [];
+            var id = Hash128.FromBytes(row.EntityId);
+            values.Add(id);
+            if (row.Type != PhysicalityType.Content
+                && id != ChessCompose.AnnotationMissing().Id)
+                Need(id);
+        }
         var textById = await RenderTextBatchAsync(ds, contentIds, ct).ConfigureAwait(false);
-        foreach (var (id, text) in await RebuildMovetextsAsync(ds, movetextIds, ct).ConfigureAwait(false))
-            textById[id] = text;
 
         var outList = new List<ChessWitnessedGame>(wanted.Count);
         foreach (var (lineId, eventId, gm) in wanted)
         {
-            if (gm.MovetextObj == default) continue;
-            if (!textById.TryGetValue(gm.MovetextObj, out var movetext)
-                || string.IsNullOrWhiteSpace(movetext)) continue;
-
-            // The verbatim movetext IS the per-ply record: moves, clocks, evals, comments and
-            // quality annotations are re-parsed from the one witnessed content edge (the
-            // lossless law) — no per-ply attestations exist to query.
-            var (moves, clockTokens, evalTokens, qualityTokens) = ParseMovetext(movetext);
-            if (moves.Length == 0) continue;
-
             string? resultStr = gm.ResultObj != default && textById.TryGetValue(gm.ResultObj, out var rs)
                 ? rs : null;
-            string? startFen = gm.SetupObj != default && textById.TryGetValue(gm.SetupObj, out var fen)
-                ? fen : null;
+            string? startFen = gm.SetupObj != default
+                && setupBoards.TryGetValue(gm.SetupObj, out var setupBoard)
+                ? setupBoard.ToFen() : null;
+            if (!lanes.TryGetValue((lineId, PhysicalityType.Content), out var moveIds)
+                || moveIds.Count == 0) continue;
+            var replay = ChessReplay.Replay(moveIds, startFen);
+            if (replay.Truncated is not null || replay.Plies.Count != moveIds.Count) continue;
+            var moves = replay.Plies.Select(static p => p.San).ToArray();
+            string?[]? comments = RenderLane(
+                lanes, eventId, PhysicalityType.ChessComment, moves.Length, textById);
+            string?[]? annotations = RenderLane(
+                lanes, eventId, PhysicalityType.ChessAnnotation, moves.Length, textById);
+            string annotationPgn = RebuildAnnotatedMovetext(moves, comments);
+            string?[]? clockTokens = comments is null
+                ? null : PgnClocks.ClockTokens(annotationPgn, moves.Length);
+            string?[]? evalTokens = comments is null
+                ? null : PgnEvals.EvalTokens(annotationPgn, moves.Length);
+            double[]? spent = comments is null
+                ? null : PgnClocks.SpentSeconds(annotationPgn, moves.Length);
+            string?[]? quality = annotations?.Select(MoveQuality.FromSerializedAnnotations).ToArray();
+            if (quality is not null && quality.All(static q => q is null)) quality = null;
             outList.Add(new ChessWitnessedGame(
                 lineId, eventId, moves, ParseResult(resultStr),
                 gm.White != default ? gm.White : null,
                 gm.Black != default ? gm.Black : null,
-                startFen, clockTokens, evalTokens, qualityTokens,
-                // cutechess dialect (GH #494): spent-time comments survive in the verbatim
-                // movetext, so the readback path recovers them exactly like the parse path.
-                clockTokens is null ? PgnClocks.SpentSeconds(movetext, moves.Length) : null));
+                startFen, clockTokens, evalTokens, quality, spent));
         }
         return outList;
     }
 
-    // Recover the analyzer's witnessed inputs from a game's verbatim movetext. Falls back to a
-    // whitespace split for legacy SAN-joined movetext (recorded before the verbatim change) or
-    // unparseable content — bare moves, no annotations.
-    internal static (string[] Moves, string?[]? ClockTokens, string?[]? EvalTokens, string?[]? QualityTokens)
-        ParseMovetext(string movetext)
+    private static string?[]? RenderLane(
+        IReadOnlyDictionary<(Hash128 Playing, PhysicalityType Type), List<Hash128>> lanes,
+        Hash128 playing, PhysicalityType type, int count,
+        IReadOnlyDictionary<Hash128, string> textById)
     {
-        PgnMovetext.PgnWalkResult? walk = null;
-        try
-        {
-            var bytes = Encoding.UTF8.GetBytes(movetext);
-            using var ast = GrammarDecomposer.Parse(bytes, "pgn");
-            walk = PgnMovetext.Walk(ast, bytes);
-        }
-        catch (Exception)
-        {
-            // fall through to the legacy split
-        }
+        if (!lanes.TryGetValue((playing, type), out var ids) || ids.Count != count) return null;
+        var missing = ChessCompose.AnnotationMissing().Id;
+        var values = new string?[count];
+        for (int i = 0; i < count; i++)
+            if (ids[i] != missing && textById.TryGetValue(ids[i], out var value)) values[i] = value;
+        return values;
+    }
 
-        if (walk is null || walk.Mainline.Count == 0)
+    private static string RebuildAnnotatedMovetext(IReadOnlyList<string> moves, string?[]? comments)
+    {
+        var text = new System.Text.StringBuilder(moves.Count * 16);
+        for (int i = 0; i < moves.Count; i++)
         {
-            var legacy = movetext.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            return (legacy, null, null, null);
+            if (text.Length > 0) text.Append(' ');
+            text.Append(moves[i]);
+            if (comments is not null && !string.IsNullOrWhiteSpace(comments[i]))
+                text.Append(" { ").Append(comments[i]).Append(" }");
         }
-
-        var moves = new string[walk.Mainline.Count];
-        var quality = new string?[moves.Length];
-        bool anyQuality = false;
-        for (int i = 0; i < moves.Length; i++)
-        {
-            moves[i] = walk.Mainline[i].San;
-            quality[i] = MoveQuality.FromStream(walk.Mainline[i]);
-            anyQuality |= quality[i] is not null;
-        }
-        return (moves,
-                PgnClocks.ClockTokens(movetext, moves.Length),
-                PgnEvals.EvalTokens(movetext, moves.Length),
-                anyQuality ? quality : null);
+        return text.ToString();
     }
 
     internal static async Task<ChessWitnessedGame?> TryHydrateAsync(
@@ -429,12 +444,10 @@ internal static class ChessWitnessHydrator
         return list.Count > 0 ? list[0] : null;
     }
 
-    // Per-playing witnessed scaffold: (line, ctx=event) attestation objects only. Per-ply
-    // annotations are NOT read from attestations — they are re-parsed from the verbatim
-    // movetext (ParseMovetext).
+    // Per-playing witnessed scaffold: (line, ctx=event) header attestation objects only.
+    // The ordered move record is the line's content physicality trajectory.
     private sealed class GameMeta
     {
-        public Hash128 MovetextObj;
         public Hash128 White;
         public Hash128 Black;
         public Hash128 SetupObj;
@@ -460,51 +473,6 @@ internal static class ChessWitnessHydrator
         {
             if (!string.IsNullOrEmpty(texts[i])) map[unique[i]] = texts[i];
         }
-        return map;
-    }
-
-    /// <summary>
-    /// Rebuild a movetext from its ORDERED TOKEN IDS, space-joined.
-    ///
-    /// WHY realize.render() CANNOT BE USED HERE. RecordMovetext composes the movetext as a Merkle
-    /// over its ordered ply-token ids — "1." "d4" "d5" "2." … — with the trajectory
-    /// carrying the sequence. That record is lossless and the tokens are all present and
-    /// in order. But <c>realize.render()</c> concatenates a composed document's constituents with
-    /// NO SEPARATOR, so a movetext reads back as
-    ///
-    ///     1.d4d52.c4dxc43.Nf3Nf64.e3e65.Bxc4c5...
-    ///
-    /// which no PGN parser can tokenize. ParseMovetext's walk returns nothing, its legacy
-    /// whitespace split returns one giant token, and every caller then hits
-    /// `if (moves.Length == 0) continue;` and drops the line — SILENTLY, because each
-    /// substrate-sourced lane returns early on an unreplayable line by design.
-    ///
-    /// Measured on this box: 3,314 of 3,341 hydrated lines (99.19%) failed to replay for
-    /// exactly this reason, across chess-opening-match, chess-syzygy, chess-trajectory,
-    /// chess-analyze and chess-eval — every lane that reads games back out of the
-    /// substrate rather than off a PGN file. The recorded data was never wrong; it was
-    /// unreadable, and the lanes reported status=ok while writing almost nothing.
-    ///
-    /// The separator is a space because that is the separator MovetextTokens.Parse split
-    /// on, so join-of-split round-trips exactly. Proven in SQL against a stored game:
-    /// unpacking the 49 token ids and joining with ' ' reproduces the source movetext
-    /// byte for byte, result token included.
-    /// </summary>
-    private static async Task<Dictionary<Hash128, string>> RebuildMovetextsAsync(
-        NpgsqlDataSource ds, IReadOnlyList<Hash128> movetextIds, CancellationToken ct)
-    {
-        var map = new Dictionary<Hash128, string>();
-        var unique = movetextIds.Distinct().Where(id => id != default).ToArray();
-        if (unique.Length == 0) return map;
-
-        var bytes = new byte[unique.Length][];
-        for (int i = 0; i < unique.Length; i++) bytes[i] = unique[i].ToBytes();
-
-        var byHex = await NpgsqlSubstrateReads.TrajectoryTokenTextBatchAsync(ds, bytes, ct)
-            .ConfigureAwait(false);
-        for (int i = 0; i < unique.Length; i++)
-            if (byHex.TryGetValue(Convert.ToHexString(bytes[i]), out var text))
-                map[unique[i]] = text;
         return map;
     }
 

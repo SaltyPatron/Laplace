@@ -9,7 +9,7 @@ public static class ChessSeedManifest
     public static readonly IReadOnlyList<string> TypeNodeNames =
     [
         "Chess_Position", "Chess_Substructure", "Chess_Result", "Chess_Player",
-        "Chess_Game", "Chess_Event", "Chess_Playing", "Chess_Movetext", "Chess_AnalysisMarker",
+        "Chess_Game", "Chess_Event", "Chess_Playing", "Chess_AnalysisMarker",
         "Chess_Eval", "Chess_BookLine",
         // Chess_Concept retired from the seed manifest (GH #577): zero entities
         // on the live box; no emitter. Relation registry bits are untouched.
@@ -31,10 +31,10 @@ public static class ChessSeedManifest
         "MOVE", "OUTCOME", "PLAYED_BY", "HAS_RATING", OpeningName, HasEco,
         // GH #736: the event→line record edge; every chess lane that records playings emits it.
         "PLAYS_LINE",
-        "HAS_MOVETEXT", "HAS_PLY", "HAS_SAN", "HAS_COMMENT", "HAS_SETUP", "ANALYZED_AT",
+        "HAS_SETUP", "ANALYZED_AT",
         "HAS_WHITE", "HAS_BLACK", "HAS_EVENT", "ON_DATE", "HAS_TIME_CONTROL", "HAS_TC_CLASS",
         "HAS_TERMINATION", "HAS_RESULT", "HAS_EVAL", "MOVE_QUALITY",
-        "HAS_CLOCK", "HAS_EVAL_TOKEN", "HAS_THINK_CLASS", GameHasOpening, GameHasEco,
+        "HAS_THINK_CLASS", GameHasOpening, GameHasEco,
         // GAME_AT / GAME_AT_PLY retired from the seed manifest (GH #577): ChessGraph
         // removed the ply-grain emitters; live evidence_count is 0 for both.
         // Append-only relation_types.toml keeps the bits — do not renumber.
