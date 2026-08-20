@@ -1,5 +1,7 @@
 #include "postgres.h"
 
+#include <math.h>
+
 #include "catalog/pg_type.h"
 #include "executor/spi.h"
 #include "funcapi.h"
@@ -33,6 +35,101 @@ typedef struct
     int     tokens;      /* token count (n_constituents column)            */
     int     stride;      /* vertices per token = 1 + ceil(dim/6)           */
 } factor_traj_t;
+
+typedef struct
+{
+    hash128_t token;
+    double    score;
+} model_candidate_t;
+
+static int
+model_token_cmp(const hash128_t *a, const hash128_t *b)
+{
+    return memcmp(a, b, sizeof(*a));
+}
+
+static bool
+model_candidate_better(const model_candidate_t *a, const model_candidate_t *b)
+{
+    return a->score > b->score ||
+           (a->score == b->score && model_token_cmp(&a->token, &b->token) < 0);
+}
+
+static bool
+model_candidate_worse(const model_candidate_t *a, const model_candidate_t *b)
+{
+    return a->score < b->score ||
+           (a->score == b->score && model_token_cmp(&a->token, &b->token) > 0);
+}
+
+static int
+model_candidate_desc(const void *a, const void *b)
+{
+    const model_candidate_t *ca = (const model_candidate_t *) a;
+    const model_candidate_t *cb = (const model_candidate_t *) b;
+
+    if (model_candidate_better(ca, cb)) return -1;
+    if (model_candidate_better(cb, ca)) return 1;
+    return 0;
+}
+
+/* Fixed-capacity min heap: the worst retained token is the root, so each
+ * scanned model token costs O(log k) regardless of the caller's requested k. */
+static void
+model_topk_offer(model_candidate_t *heap, int capacity, int *filled,
+                 const hash128_t *token, double score)
+{
+    model_candidate_t incoming = { *token, score };
+    int i;
+
+    if (*filled < capacity)
+    {
+        i = (*filled)++;
+        heap[i] = incoming;
+        while (i > 0)
+        {
+            int parent = (i - 1) / 2;
+            model_candidate_t tmp;
+
+            if (!model_candidate_worse(&heap[i], &heap[parent]))
+                break;
+            tmp = heap[i]; heap[i] = heap[parent]; heap[parent] = tmp;
+            i = parent;
+        }
+        return;
+    }
+    if (!model_candidate_better(&incoming, &heap[0]))
+        return;
+
+    heap[0] = incoming;
+    i = 0;
+    for (;;)
+    {
+        int left = i * 2 + 1;
+        int right = left + 1;
+        int worst;
+        model_candidate_t tmp;
+
+        if (left >= capacity)
+            break;
+        worst = left;
+        if (right < capacity && model_candidate_worse(&heap[right], &heap[left]))
+            worst = right;
+        if (!model_candidate_worse(&heap[worst], &heap[i]))
+            break;
+        tmp = heap[i]; heap[i] = heap[worst]; heap[worst] = tmp;
+        i = worst;
+    }
+}
+
+static model_candidate_t *
+model_candidate_buffer(int count, const char *who)
+{
+    if ((Size) count > MaxAllocSize / sizeof(model_candidate_t))
+        ereport(ERROR,
+                (errmsg("%s: requested result exceeds PostgreSQL allocation capacity", who)));
+    return (model_candidate_t *) palloc(sizeof(model_candidate_t) * (count > 0 ? count : 1));
+}
 
 static const char *TRAJ_QUERY =
     "SELECT ST_AsBinary(trajectory), source_dim, n_constituents "
@@ -205,14 +302,16 @@ pg_laplace_model_row_topk(PG_FUNCTION_ARGS)
     bool      spi_top = false;
     int       oa;
     float    *fq, *fk;
-    hash128_t *top_tok;
-    double   *top_score;
+    model_candidate_t *top;
+    int       capacity;
     int       filled = 0;
 
-    if (want < 1 || want > 10000)
-        ereport(ERROR, (errmsg("model_row_topk: k must be in [1,10000]")));
+    if (want < 0)
+        ereport(ERROR, (errmsg("model_row_topk: k must not be negative")));
 
     InitMaterializedSRF(fcinfo, 0);
+    if (want == 0)
+        return (Datum) 0;
 
     if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
         elog(ERROR, "model_row_topk: SPI_connect failed");
@@ -236,9 +335,8 @@ pg_laplace_model_row_topk(PG_FUNCTION_ARGS)
     fk = (float *) palloc(sizeof(float) * k.dim);
     unpack_token_factors(&q, oa, fq);
 
-    /* Bounded insertion top-k (want is small); min at slot filled-1. */
-    top_tok = (hash128_t *) palloc(sizeof(hash128_t) * want);
-    top_score = (double *) palloc(sizeof(double) * want);
+    capacity = want < k.tokens ? want : k.tokens;
+    top = model_candidate_buffer(capacity, "model_row_topk");
 
     for (int t = 0; t < k.tokens; t++)
     {
@@ -253,40 +351,19 @@ pg_laplace_model_row_topk(PG_FUNCTION_ARGS)
         unpack_token_factors(&k, t, fk);
         for (int j = 0; j < k.dim; j++)
             dot += (double) fq[j] * (double) fk[j];
-
-        if (filled < want)
-        {
-            int i = filled++;
-            while (i > 0 && top_score[i - 1] < dot)
-            {
-                top_score[i] = top_score[i - 1];
-                top_tok[i] = top_tok[i - 1];
-                i--;
-            }
-            top_score[i] = dot;
-            top_tok[i] = obj;
-        }
-        else if (dot > top_score[want - 1])
-        {
-            int i = want - 1;
-            while (i > 0 && top_score[i - 1] < dot)
-            {
-                top_score[i] = top_score[i - 1];
-                top_tok[i] = top_tok[i - 1];
-                i--;
-            }
-            top_score[i] = dot;
-            top_tok[i] = obj;
-        }
+        if (!isfinite(dot))
+            ereport(ERROR, (errmsg("model_row_topk: non-finite factor score")));
+        model_topk_offer(top, capacity, &filled, &obj, dot);
     }
 
+    qsort(top, (size_t) filled, sizeof(model_candidate_t), model_candidate_desc);
     for (int i = 0; i < filled; i++)
     {
         Datum values[2];
         bool  nulls[2] = { false, false };
 
-        values[0] = hash128_to_datum(&top_tok[i]);
-        values[1] = Float8GetDatum(top_score[i]);
+        values[0] = hash128_to_datum(&top[i].token);
+        values[1] = Float8GetDatum(top[i].score);
         tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
     }
 
@@ -369,14 +446,16 @@ pg_laplace_model_forward(PG_FUNCTION_ARGS)
     bool      *mlp_nulls;
     int        n_mlp;
     int        dim;
-    hash128_t *top_tok;
-    double    *top_score;
+    model_candidate_t *top;
+    int        capacity;
     int        filled = 0;
 
-    if (want < 1 || want > 10000)
-        ereport(ERROR, (errmsg("model_forward: k must be in [1,10000]")));
+    if (want < 0)
+        ereport(ERROR, (errmsg("model_forward: k must not be negative")));
 
     InitMaterializedSRF(fcinfo, 0);
+    if (want == 0)
+        return (Datum) 0;
 
     /* A missing circuit slice (unresolved directory / empty substrate) is an
      * empty forward, never a crash: guard every required argument before any
@@ -419,8 +498,8 @@ pg_laplace_model_forward(PG_FUNCTION_ARGS)
 
     /* Unembed: score(y) = residual · lm(y), top-k over the completion plane. */
     fy = (float *) palloc(sizeof(float) * dim);
-    top_tok = (hash128_t *) palloc(sizeof(hash128_t) * want);
-    top_score = (double *) palloc(sizeof(double) * want);
+    capacity = want < lm.tokens ? want : lm.tokens;
+    top = model_candidate_buffer(capacity, "model_forward");
 
     for (int y = 0; y < lm.tokens; y++)
     {
@@ -435,40 +514,19 @@ pg_laplace_model_forward(PG_FUNCTION_ARGS)
         unpack_token_factors(&lm, y, fy);
         for (int j = 0; j < dim; j++)
             dot += residual[j] * (double) fy[j];
-
-        if (filled < want)
-        {
-            int i = filled++;
-            while (i > 0 && top_score[i - 1] < dot)
-            {
-                top_score[i] = top_score[i - 1];
-                top_tok[i] = top_tok[i - 1];
-                i--;
-            }
-            top_score[i] = dot;
-            top_tok[i] = obj;
-        }
-        else if (dot > top_score[want - 1])
-        {
-            int i = want - 1;
-            while (i > 0 && top_score[i - 1] < dot)
-            {
-                top_score[i] = top_score[i - 1];
-                top_tok[i] = top_tok[i - 1];
-                i--;
-            }
-            top_score[i] = dot;
-            top_tok[i] = obj;
-        }
+        if (!isfinite(dot))
+            ereport(ERROR, (errmsg("model_forward: non-finite factor score")));
+        model_topk_offer(top, capacity, &filled, &obj, dot);
     }
 
+    qsort(top, (size_t) filled, sizeof(model_candidate_t), model_candidate_desc);
     for (int i = 0; i < filled; i++)
     {
         Datum values[2];
         bool  nulls[2] = { false, false };
 
-        values[0] = hash128_to_datum(&top_tok[i]);
-        values[1] = Float8GetDatum(top_score[i]);
+        values[0] = hash128_to_datum(&top[i].token);
+        values[1] = Float8GetDatum(top[i].score);
         tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
     }
 

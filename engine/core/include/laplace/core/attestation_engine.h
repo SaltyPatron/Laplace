@@ -157,11 +157,6 @@ int laplace_attestation_aggregated_build(
     laplace_attestation_staged_t* out);
 
 
-/* Upper bound on a plausible per-attestation games/observation count. The fold engine
- * already bounds per-relation games at 1<<27; anything near 1e9 in a games slot is a
- * fixed-point (1e9-scaled) value in the wrong argument position, not a real count. */
-#define LAPLACE_ATTESTATION_GAMES_MAX 100000000LL
-
 typedef struct {
     hash128_t subject;
     hash128_t object;

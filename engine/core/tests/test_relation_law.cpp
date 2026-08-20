@@ -180,6 +180,21 @@ TEST(LaplaceAttestationEngine, Aggregated_OutcomeFromNetScore) {
     EXPECT_TRUE(hash128_equals(&win.id, &loss.id));
 }
 
+TEST(LaplaceAttestationEngine, AggregatedAcceptsLargeRepresentableObservationCount) {
+    hash128_t subj = hash_path("large-s");
+    hash128_t type = relation_type_id("PRECEDES");
+    hash128_t obj  = hash_path("large-o");
+    hash128_t src  = hash_path("large-src");
+    constexpr int64_t games = 600995230LL;
+    laplace_attestation_staged_t staged;
+
+    ASSERT_EQ(0, laplace_attestation_aggregated_build(
+        &subj, &type, &obj, 0, &src, nullptr, 1, 1.0,
+        games, games * 500000000LL, 0, &staged));
+    EXPECT_EQ(staged.observation_count, games);
+    EXPECT_EQ(staged.outcome, LAPLACE_ATTESTATION_OUTCOME_DRAW);
+}
+
 TEST(LaplaceAttestationEngine, AggregatedBatch_IdenticalToPerCell) {
     hash128_t type = relation_type_id("PRECEDES");
     hash128_t sym  = relation_type_id("IS_SYNONYM_OF");

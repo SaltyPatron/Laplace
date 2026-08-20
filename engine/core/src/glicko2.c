@@ -344,15 +344,17 @@ void glicko2_update_period(glicko2_state_t* st,
 
 
 
-void glicko2_fold_uniform_period(glicko2_state_t* st,
-                                 int64_t opponent_rating,
-                                 int64_t opponent_phi,
-                                 int64_t games,
-                                 int64_t sum_score,
-                                 int64_t tau,
-                                 int64_t now_ns)
+int glicko2_fold_uniform_period(glicko2_state_t* st,
+                                int64_t opponent_rating,
+                                int64_t opponent_phi,
+                                int64_t games,
+                                int64_t sum_score,
+                                int64_t tau,
+                                int64_t now_ns)
 {
-    if (!st || games <= 0) return;
+    if (!st || games <= 0 ||
+        st->observation_count > INT64_MAX - games)
+        return -1;
 
     int64_t mu     = g1_to_mu(st->rating);
     int64_t phi    = g1_to_phi(st->rd);
@@ -367,17 +369,26 @@ void glicko2_fold_uniform_period(glicko2_state_t* st,
     int64_t E_1mE = laplace_fp_mul(E_j, LAPLACE_FP_ONE - E_j);
 
     
-    int64_t v_inv = games * laplace_fp_mul(g_sq, E_1mE);
+    __int128 v_inv_wide = (__int128) games * laplace_fp_mul(g_sq, E_1mE);
 
     
 
-    int64_t q   = sum_score / games;
-    int64_t rem = sum_score - q * (games - 1);
-    int64_t delta_inner = (games - 1) * laplace_fp_mul(g_j, q - E_j)
+    int64_t q = sum_score / games;
+    __int128 rem_wide = (__int128) sum_score - (__int128) q * (games - 1);
+    if (rem_wide > INT64_MAX || rem_wide < INT64_MIN)
+        return -1;
+    int64_t rem = (int64_t) rem_wide;
+    __int128 delta_wide = (__int128) (games - 1) * laplace_fp_mul(g_j, q - E_j)
                         + laplace_fp_mul(g_j, rem - E_j);
 
-    glicko2_finish_period(st, mu, phi, phi_sq, sigma, v_inv, delta_inner,
+    if (v_inv_wide > INT64_MAX || v_inv_wide < INT64_MIN ||
+        delta_wide > INT64_MAX || delta_wide < INT64_MIN)
+        return -1;
+
+    glicko2_finish_period(st, mu, phi, phi_sq, sigma,
+                          (int64_t) v_inv_wide, (int64_t) delta_wide,
                           (size_t) games, tau, now_ns, NULL);
+    return 0;
 }
 
 void laplace_glicko2_update_period_traced(glicko2_state_t* st,

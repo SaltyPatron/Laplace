@@ -3,10 +3,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 #include "tree_sitter/api.h"
-
-#define LAPLACE_GRAMMAR_ROW_MAX (65536u)
 
 typedef struct { uint32_t s; uint32_t e; } laplace_row_rng_t;
 
@@ -52,9 +51,20 @@ static int use_grammar_row_framing(const laplace_grammar_row_iter_t* it) {
 
 static int append_carry(laplace_grammar_row_iter_t* it,
                         const uint8_t* chunk, size_t len) {
-    if (it->carry_len + len > it->carry_cap) {
-        size_t ncap = it->carry_cap ? it->carry_cap * 2 : 65536;
-        while (ncap < it->carry_len + len) ncap *= 2;
+    if (len > SIZE_MAX - it->carry_len) {
+        it->oom = 1;
+        return -3;
+    }
+    const size_t needed = it->carry_len + len;
+    if (needed > it->carry_cap) {
+        size_t ncap = it->carry_cap ? it->carry_cap : needed;
+        while (ncap < needed) {
+            if (ncap > SIZE_MAX / 2) {
+                ncap = needed;
+                break;
+            }
+            ncap *= 2;
+        }
         uint8_t* n = (uint8_t*)realloc(it->carry, ncap);
         if (!n) { it->oom = 1; return -3; }
         it->carry = n;
@@ -134,15 +144,15 @@ fail:
     return -3;
 }
 
-static int row_span_too_large(uint32_t s, uint32_t e) {
-    return e > s && (e - s) > LAPLACE_GRAMMAR_ROW_MAX;
-}
-
 static int split_carry_records(laplace_grammar_row_iter_t* it, int finalize,
                                laplace_raw_row_t** out_rows, size_t* out_count) {
     *out_rows = NULL;
     *out_count = 0;
     if (it->carry_len == 0) return 0;
+    /* Tree-sitter's byte-index ABI is uint32_t. Crossing that real format
+     * boundary is an error; it must never silently change grammar-defined
+     * records into newline-defined records. */
+    if (it->carry_len > UINT32_MAX) return -2;
 
     ts_parser_reset(it->parser);
     TSTree* tree = ts_parser_parse_string(it->parser, NULL,
@@ -166,14 +176,6 @@ static int split_carry_records(laplace_grammar_row_iter_t* it, int finalize,
         rr[rn].s = ts_node_start_byte(c);
         rr[rn].e = ts_node_end_byte(c);
         rn++;
-    }
-
-    for (size_t i = 0; i < rn; ++i) {
-        if (row_span_too_large(rr[i].s, rr[i].e)) {
-            free(rr);
-            ts_tree_delete(tree);
-            return split_carry_lines(it, finalize, out_rows, out_count);
-        }
     }
 
     size_t   emit       = 0;
@@ -227,9 +229,6 @@ int laplace_grammar_row_iter_feed_lines(laplace_grammar_row_iter_t* it,
     int finalize = (chunk == NULL || len == 0);
     if (chunk && len > 0) {
         if (append_carry(it, chunk, len) != 0) return -3;
-    }
-    if (use_grammar_row_framing(it) && it->carry_len > LAPLACE_GRAMMAR_ROW_MAX) {
-        return split_carry_lines(it, finalize, out_rows, out_count);
     }
     if (use_grammar_row_framing(it))
         return split_carry_records(it, finalize, out_rows, out_count);

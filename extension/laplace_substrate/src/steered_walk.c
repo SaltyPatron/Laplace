@@ -30,13 +30,10 @@
 
 PG_FUNCTION_INFO_V1(pg_laplace_steered_walk);
 
-/* Ids are 16-byte content hashes; the sentence sentinel is 1 byte. */
-#define SW_KEY_MAX 19
-
 typedef struct SwVocabKey
 {
     uint8 len;
-    uint8 bytes[SW_KEY_MAX];
+    uint8 bytes[16];
 } SwVocabKey;
 
 typedef struct SwVocabEntry
@@ -87,9 +84,10 @@ sw_key_from_bytea(SwVocabKey *key, bytea *val)
 {
     Size len = VARSIZE_ANY_EXHDR(val);
 
-    if (len == 0 || len > SW_KEY_MAX)
-        ereport(ERROR, (errmsg("steered_walk: token id length %zu outside 1..%d",
-                               (size_t) len, SW_KEY_MAX)));
+    if (len != 1 && len != 16)
+        ereport(ERROR,
+                (errmsg("steered_walk: token ids must be a 16-byte content hash or the 1-byte sentence sentinel"),
+                 errdetail("Received %zu bytes.", (size_t) len)));
     memset(key, 0, sizeof(*key));
     key->len = (uint8) len;
     memcpy(key->bytes, VARDATA_ANY(val), len);
@@ -98,7 +96,7 @@ sw_key_from_bytea(SwVocabKey *key, bytea *val)
 /* Intern a bytea into the vocab; remembers the first-seen datum per token so
  * the output array can be built from original values. */
 static int32
-sw_intern(HTAB *vocab, Datum **tok_datum, int32 *next_tok, int *datum_cap,
+sw_intern(HTAB *vocab, Datum *tok_datum, int32 *next_tok, int datum_cap,
           Datum val)
 {
     SwVocabKey    key;
@@ -110,12 +108,9 @@ sw_intern(HTAB *vocab, Datum **tok_datum, int32 *next_tok, int *datum_cap,
     if (!found)
     {
         e->tok = (*next_tok)++;
-        if (e->tok >= *datum_cap)
-        {
-            *datum_cap *= 2;
-            *tok_datum = (Datum *) repalloc(*tok_datum, sizeof(Datum) * *datum_cap);
-        }
-        (*tok_datum)[e->tok] = val;
+        if (e->tok >= datum_cap)
+            ereport(ERROR, (errmsg("steered_walk: vocabulary cardinality exceeded its exact input bound")));
+        tok_datum[e->tok] = val;
     }
     return e->tok;
 }
@@ -125,7 +120,11 @@ sw_postings_add(SwPostings *p, int32 pos1based)
 {
     if (p->n == p->cap)
     {
-        p->cap = p->cap == 0 ? 4 : p->cap * 2;
+        if (p->cap > INT_MAX / 2 ||
+            (Size) (p->cap > 0 ? p->cap * 2 : 1) > MaxAllocSize / sizeof(int32))
+            ereport(ERROR,
+                    (errmsg("steered_walk: postings exceed PostgreSQL allocation capacity")));
+        p->cap = p->cap == 0 ? 1 : p->cap * 2;
         p->pos = p->pos == NULL
             ? (int32 *) palloc(sizeof(int32) * p->cap)
             : (int32 *) repalloc(p->pos, sizeof(int32) * p->cap);
@@ -182,6 +181,7 @@ pg_laplace_steered_walk(PG_FUNCTION_ARGS)
     int32      *out;
     int         out_n = 0;
     int         emitted;
+    uint64      max_vocab;
 
     deconstruct_array(stream_arr, BYTEAOID, -1, false, TYPALIGN_INT,
                       &stream_elems, &nulls, &n);
@@ -207,17 +207,33 @@ pg_laplace_steered_walk(PG_FUNCTION_ARGS)
         if (nulls[i])
             ereport(ERROR, (errmsg("steered_walk: starts must not contain NULL")));
 
+    if (steps < 0 || minlen < 0)
+        ereport(ERROR, (errmsg("steered_walk: steps and minlen must not be negative")));
+
     if (n < 3)
         PG_RETURN_NULL();
+
+    max_vocab = UINT64CONST(1) + (uint64) n + (uint64) core_n + (uint64) starts_n;
+    if (max_vocab > (uint64) INT_MAX ||
+        max_vocab > (uint64) (MaxAllocSize / sizeof(Datum)))
+        ereport(ERROR,
+                (errmsg("steered_walk: vocabulary exceeds PostgreSQL allocation capacity")));
+    if ((uint64) n > (uint64) (MaxAllocSize / sizeof(int32)) ||
+        (uint64) n > (uint64) (MaxAllocSize / sizeof(int64)))
+        ereport(ERROR,
+                (errmsg("steered_walk: stream exceeds PostgreSQL allocation capacity")));
+    if ((uint64) steps + 2 > (uint64) (MaxAllocSize / sizeof(int32)))
+        ereport(ERROR,
+                (errmsg("steered_walk: requested output exceeds PostgreSQL allocation capacity")));
 
     /* ---- intern the stream ---- */
     memset(&hctl, 0, sizeof(hctl));
     hctl.keysize   = sizeof(SwVocabKey);
     hctl.entrysize = sizeof(SwVocabEntry);
-    vocab = hash_create("steered_walk vocab", 1024, &hctl,
+    vocab = hash_create("steered_walk vocab", (long) max_vocab, &hctl,
                         HASH_ELEM | HASH_BLOBS);
 
-    datum_cap = 1024;
+    datum_cap = (int) max_vocab;
     tok_datum = (Datum *) palloc(sizeof(Datum) * datum_cap);
 
     {
@@ -227,7 +243,7 @@ pg_laplace_steered_walk(PG_FUNCTION_ARGS)
 
         SET_VARSIZE(sent, VARHDRSZ + 1);
         VARDATA(sent)[0] = 0;
-        sent_tok = sw_intern(vocab, &tok_datum, &next_tok, &datum_cap,
+        sent_tok = sw_intern(vocab, tok_datum, &next_tok, datum_cap,
                              PointerGetDatum(sent));
     }
 
@@ -235,7 +251,7 @@ pg_laplace_steered_walk(PG_FUNCTION_ARGS)
     weights = (int64 *) palloc(sizeof(int64) * n);
     for (int i = 0; i < n; i++)
     {
-        tokens[i]  = sw_intern(vocab, &tok_datum, &next_tok, &datum_cap,
+        tokens[i]  = sw_intern(vocab, tok_datum, &next_tok, datum_cap,
                                stream_elems[i]);
         weights[i] = DatumGetInt64(weight_elems[i]);
     }
@@ -244,12 +260,12 @@ pg_laplace_steered_walk(PG_FUNCTION_ARGS)
     memset(&hctl, 0, sizeof(hctl));
     hctl.keysize   = sizeof(SwPairKey);
     hctl.entrysize = sizeof(SwPairEntry);
-    tri = hash_create("steered_walk trigrams", 1024, &hctl,
+    tri = hash_create("steered_walk trigrams", n, &hctl,
                       HASH_ELEM | HASH_BLOBS);
     memset(&hctl, 0, sizeof(hctl));
     hctl.keysize   = sizeof(int32);
     hctl.entrysize = sizeof(SwUniEntry);
-    bi = hash_create("steered_walk bigrams", 1024, &hctl,
+    bi = hash_create("steered_walk bigrams", n, &hctl,
                      HASH_ELEM | HASH_BLOBS);
 
     for (int i = 0; i < n - 1; i++)
@@ -291,9 +307,9 @@ pg_laplace_steered_walk(PG_FUNCTION_ARGS)
         /* uint64 modulus: no negation (UB at INT64_MIN), no signed math for
          * an index pick. */
         core_off = (int) ((uint64) rng % (uint64) (core_n - 1));
-        a = sw_intern(vocab, &tok_datum, &next_tok, &datum_cap,
+        a = sw_intern(vocab, tok_datum, &next_tok, datum_cap,
                       core_elems[core_off]);
-        b = sw_intern(vocab, &tok_datum, &next_tok, &datum_cap,
+        b = sw_intern(vocab, tok_datum, &next_tok, datum_cap,
                       core_elems[core_off + 1]);
         have_b = true;
     }
@@ -307,7 +323,7 @@ pg_laplace_steered_walk(PG_FUNCTION_ARGS)
             PG_RETURN_NULL();
         rng = sw_lcg(rng);
         /* Same uint64 modulus as core_off — no INT64_MIN negation UB. */
-        a = sw_intern(vocab, &tok_datum, &next_tok, &datum_cap,
+        a = sw_intern(vocab, tok_datum, &next_tok, datum_cap,
                       starts_elems[(uint64) rng % (uint64) starts_n]);
         ue = (SwUniEntry *) hash_search(bi, &a, HASH_FIND, NULL);
         if (ue != NULL)
@@ -349,7 +365,7 @@ pg_laplace_steered_walk(PG_FUNCTION_ARGS)
     memset(&hctl, 0, sizeof(hctl));
     hctl.keysize   = sizeof(SwTriKey);
     hctl.entrysize = sizeof(SwTriEntry);
-    visited = hash_create("steered_walk visited", 256, &hctl,
+    visited = hash_create("steered_walk visited", steps > 0 ? steps : 1, &hctl,
                           HASH_ELEM | HASH_BLOBS);
 
     out = (int32 *) palloc(sizeof(int32) * (2 + (steps > 0 ? steps : 0)));

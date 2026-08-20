@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <cstring>
+#include <string>
 
 
 
@@ -75,6 +76,34 @@ TEST(GrammarDecomposer, CsvStructure) {
     EXPECT_TRUE(has_node_type(ast, "row"));
     EXPECT_TRUE(has_node_type(ast, "field"));
     laplace_ast_free(ast);
+}
+
+TEST(GrammarDecomposer, CsvRecordOver64KiBKeepsGrammarFraming) {
+    const TSLanguage* recipe = laplace_grammar_lookup_by_id("csv");
+    ASSERT_NE(recipe, nullptr);
+    laplace_grammar_row_iter_t* iter = nullptr;
+    ASSERT_EQ(laplace_grammar_row_iter_new(recipe, &iter), 0);
+    ASSERT_NE(iter, nullptr);
+
+    std::string src = "\"" + std::string(70000, 'x') +
+                      "\ncontinued\",tail\nnext,row\n";
+    laplace_raw_row_t* rows = nullptr;
+    size_t count = 0;
+    ASSERT_EQ(laplace_grammar_row_iter_feed_lines(
+                  iter, reinterpret_cast<const uint8_t*>(src.data()), src.size(),
+                  &rows, &count), 0);
+    ASSERT_EQ(count, 1u);
+    EXPECT_GT(rows[0].row_len, 65536u);
+    EXPECT_NE(std::memchr(rows[0].row_utf8, '\n', rows[0].row_len), nullptr);
+    laplace_grammar_row_iter_free_lines(rows, count);
+
+    rows = nullptr;
+    count = 0;
+    ASSERT_EQ(laplace_grammar_row_iter_feed_lines(iter, nullptr, 0,
+                                                  &rows, &count), 0);
+    ASSERT_EQ(count, 1u);
+    laplace_grammar_row_iter_free_lines(rows, count);
+    laplace_grammar_row_iter_free(iter);
 }
 
 
