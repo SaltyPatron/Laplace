@@ -8,13 +8,14 @@ CREATE FUNCTION chess.ranked(
         p_limit integer, p_offset integer, p_sort text, p_direction text)
     RETURNS TABLE(rank bigint, player_id bytea, name text, games bigint,
                   rating double precision, rd double precision, eff_mu double precision)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     WITH rated AS MATERIALIZED (
         SELECT c.subject_id AS player,
                c.witness_count AS games,
                c.rating,
                c.rd,
-               CASE lower(COALESCE(p_sort, 'strength'))
+               CASE COALESCE(p_sort, 'strength')
                    WHEN 'games'  THEN c.witness_count::double precision
                    WHEN 'rating' THEN c.rating::double precision
                    WHEN 'rd'     THEN c.rd::double precision
@@ -32,9 +33,9 @@ CREATE FUNCTION chess.ranked(
         SELECT r.*
         FROM rated r
         ORDER BY
-            CASE WHEN lower(COALESCE(p_direction, 'desc')) = 'asc'
+            CASE WHEN COALESCE(p_direction, 'desc') = 'asc'
                  THEN r.sort_value END ASC,
-            CASE WHEN lower(COALESCE(p_direction, 'desc')) <> 'asc'
+            CASE WHEN COALESCE(p_direction, 'desc') <> 'asc'
                  THEN r.sort_value END DESC,
             r.player
         LIMIT p_limit
@@ -55,9 +56,9 @@ CREATE FUNCTION chess.ranked(
     )
     SELECT (p_offset + row_number() OVER (
                ORDER BY
-                   CASE WHEN lower(COALESCE(p_direction, 'desc')) = 'asc'
+                   CASE WHEN COALESCE(p_direction, 'desc') = 'asc'
                         THEN page.sort_value END ASC,
-                   CASE WHEN lower(COALESCE(p_direction, 'desc')) <> 'asc'
+                   CASE WHEN COALESCE(p_direction, 'desc') <> 'asc'
                         THEN page.sort_value END DESC,
                    page.player))::bigint,
            page.player,
@@ -69,16 +70,17 @@ CREATE FUNCTION chess.ranked(
     FROM page
     LEFT JOIN named n ON n.id = page.player
     ORDER BY
-        CASE WHEN lower(COALESCE(p_direction, 'desc')) = 'asc'
+        CASE WHEN COALESCE(p_direction, 'desc') = 'asc'
              THEN page.sort_value END ASC,
-        CASE WHEN lower(COALESCE(p_direction, 'desc')) <> 'asc'
+        CASE WHEN COALESCE(p_direction, 'desc') <> 'asc'
              THEN page.sort_value END DESC,
-        page.player
-$$;
+        page.player;
+END;
 
 CREATE FUNCTION chess.ranked(p_limit integer DEFAULT 200, p_offset integer DEFAULT 0)
     RETURNS TABLE(rank bigint, player_id bytea, name text, games bigint,
                   rating double precision, rd double precision, eff_mu double precision)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
-    SELECT * FROM chess.ranked(p_limit, p_offset, 'strength', 'desc')
-$$;
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+    SELECT * FROM chess.ranked(p_limit, p_offset, 'strength', 'desc');
+END;

@@ -1,17 +1,18 @@
 DROP FUNCTION IF EXISTS laplace.chess_players_by_initial(text, integer, integer);
 DROP FUNCTION IF EXISTS chess.players_by_initial(text, integer, integer, text, text);
 DROP FUNCTION IF EXISTS chess.players_by_initial(text, integer, integer);
+DROP FUNCTION IF EXISTS chess.players_by_initial(text[], integer, integer, text, text);
 
 CREATE FUNCTION chess.players_by_initial(
-        p_initial text, p_limit integer, p_offset integer, p_sort text, p_direction text)
+        p_initials text[], p_limit integer, p_offset integer, p_sort text, p_direction text)
     RETURNS TABLE(player_id bytea, name text, games bigint,
                   rating double precision, rd double precision, eff_mu double precision)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     WITH target AS MATERIALIZED (
-        SELECT ARRAY[
-            laplace.word_id(upper(left(btrim(p_initial), 1))),
-            laplace.word_id(lower(left(btrim(p_initial), 1)))
-        ] AS cps
+        SELECT array_agg(DISTINCT laplace.word_id(left(v, 1))) AS cps
+        FROM unnest(p_initials) q(v)
+        WHERE length(v) > 0
     ),
     name_ids AS MATERIALIZED (
         -- This expression is exactly the physicalities_traj_first_id_btree key.
@@ -36,7 +37,7 @@ CREATE FUNCTION chess.players_by_initial(
                o.witness_count AS games,
                o.rating,
                o.rd,
-               CASE lower(COALESCE(p_sort, 'strength'))
+               CASE COALESCE(p_sort, 'strength')
                    WHEN 'games'  THEN o.witness_count::double precision
                    WHEN 'rating' THEN o.rating::double precision
                    WHEN 'rd'     THEN o.rd::double precision
@@ -51,9 +52,9 @@ CREATE FUNCTION chess.players_by_initial(
         SELECT r.*
         FROM rated r
         ORDER BY
-            CASE WHEN lower(COALESCE(p_direction, 'desc')) = 'asc'
+            CASE WHEN COALESCE(p_direction, 'desc') = 'asc'
                  THEN r.sort_value END ASC,
-            CASE WHEN lower(COALESCE(p_direction, 'desc')) <> 'asc'
+            CASE WHEN COALESCE(p_direction, 'desc') <> 'asc'
                  THEN r.sort_value END DESC,
             r.player
         LIMIT p_limit
@@ -79,18 +80,9 @@ CREATE FUNCTION chess.players_by_initial(
     FROM page
     LEFT JOIN surfaced s ON s.id = page.player
     ORDER BY
-        CASE WHEN lower(COALESCE(p_direction, 'desc')) = 'asc'
+        CASE WHEN COALESCE(p_direction, 'desc') = 'asc'
              THEN page.sort_value END ASC,
-        CASE WHEN lower(COALESCE(p_direction, 'desc')) <> 'asc'
+        CASE WHEN COALESCE(p_direction, 'desc') <> 'asc'
              THEN page.sort_value END DESC,
-        page.player
-$$;
-
-CREATE FUNCTION chess.players_by_initial(
-        p_initial text, p_limit integer DEFAULT 50, p_offset integer DEFAULT 0)
-    RETURNS TABLE(player_id bytea, name text, games bigint,
-                  rating double precision, rd double precision, eff_mu double precision)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
-    SELECT * FROM chess.players_by_initial(
-        p_initial, p_limit, p_offset, 'strength', 'desc')
-$$;
+        page.player;
+END;

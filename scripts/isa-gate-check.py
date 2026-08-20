@@ -106,7 +106,7 @@ MANIFEST = ROOT / "engine" / "manifest" / "relation_types.toml"
 # on both laplace.consensus and laplace.attestations, verified in the catalog.
 CEILINGS = {
     "g1_weight_literalism": 11,
-    "g3_sql_vocabulary_literalism": 192,
+    "g3_sql_vocabulary_literalism": 191,
     "g3_c_vocabulary_literalism": 17,
     # 700 -> 701 (2026-08-05): the language-scope declaration. Nine monolingual
     # sources emitted no HAS_LANGUAGE at all, so every English sense read back as
@@ -177,7 +177,7 @@ CEILINGS = {
     "g11_unqualified_in_setless_body": 0,
     # GH #764 step 3: LANGUAGE sql with quoted-string bodies (AS $$) — PostgreSQL
     # records no pg_depend. Shrink-only allowlist; new SQL must use BEGIN ATOMIC.
-    "g12_string_sql_bodies": 211,
+    "g12_string_sql_bodies": 206,
     # G13 — case-folding a realized surface. Measured 2026-08-10 with the check
     # that introduced it, so it lands enumerated rather than red on merge day.
     # Both survivors are in translate_to's language-reference matcher, where the

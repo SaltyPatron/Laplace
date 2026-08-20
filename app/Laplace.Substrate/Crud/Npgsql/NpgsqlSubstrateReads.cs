@@ -2329,14 +2329,15 @@ public static class NpgsqlSubstrateReads
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
             SELECT encode(player_id, 'hex'), name, games, rating, rd, eff_mu
-            FROM chess.players_by_initial(@initial, @limit, @offset, @sort, @direction)
+            FROM chess.players_by_initial(@initials, @limit, @offset, @sort, @direction)
             """,
             static r => new ChessPlayerStrengthRow(
                 r.GetString(0), r.GetString(1),
                 r.GetInt64(2), r.GetDouble(3), r.GetDouble(4), r.GetDouble(5)),
             p =>
             {
-                p.AddWithValue("initial", initial);
+                p.Add("initials", NpgsqlDbType.Array | NpgsqlDbType.Text).Value =
+                    PlayerCaseForms(initial);
                 p.AddWithValue("limit", RequestedLimit(limit));
                 p.AddWithValue("offset", Math.Max(0, offset));
                 p.AddWithValue("sort", sort);
@@ -2354,17 +2355,28 @@ public static class NpgsqlSubstrateReads
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
             SELECT encode(player_id, 'hex'), name, games, rating, rd, eff_mu
-            FROM chess.player_search_candidates(@query, @limit)
+            FROM chess.player_search_candidates(@queries, @limit)
             """,
             static r => new ChessPlayerStrengthRow(
                 r.GetString(0), r.GetString(1),
                 r.GetInt64(2), r.GetDouble(3), r.GetDouble(4), r.GetDouble(5)),
             p =>
             {
-                p.AddWithValue("query", query);
+                p.Add("queries", NpgsqlDbType.Array | NpgsqlDbType.Text).Value =
+                    PlayerCaseForms(query);
                 p.AddWithValue("limit", RequestedLimit(limit));
             }, ct: ct, label: "chess_player_search_candidates", onError: onError,
             timeoutSeconds: 30);
+
+    internal static string[] PlayerCaseForms(string value)
+    {
+        var exact = value.Trim();
+        if (exact.Length == 0) return [];
+
+        var lower = exact.ToLowerInvariant();
+        var title = System.Globalization.CultureInfo.InvariantCulture.TextInfo.ToTitleCase(lower);
+        return [.. new[] { exact, lower, title }.Distinct(StringComparer.Ordinal)];
+    }
 
     /// <summary>
     /// Name → player via <c>chess_player_id</c> + OUTCOME cell through <c>edges_raw</c>.
