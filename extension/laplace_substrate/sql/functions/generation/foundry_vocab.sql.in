@@ -1,5 +1,7 @@
 DROP FUNCTION IF EXISTS laplace.foundry_vocab(int);
-CREATE OR REPLACE FUNCTION generation.foundry_vocab(p_size int)
+DROP FUNCTION IF EXISTS generation.foundry_vocab(int);
+CREATE OR REPLACE FUNCTION generation.foundry_vocab(
+        p_size int, p_trajs int DEFAULT NULL)
     RETURNS TABLE(entity_id bytea, surface text, weight bigint)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
     -- Pillar 5 (2026-07-20): seed frequency comes from the GEOMETRY, not from
@@ -24,14 +26,10 @@ CREATE OR REPLACE FUNCTION generation.foundry_vocab(p_size int)
         FROM laplace.v_word_points w
         WHERE w.type_id IN (realize.canonical_id('Sentence'), realize.canonical_id('Document'))
           AND w.trajectory IS NOT NULL
-        -- Sampling is by content hash, which is ARBITRARY -- an arbitrary LIMIT without
-        -- an ordering is a missing ranking. The honest ranking is by trajectory length,
-        -- but MEASURED 2026-08-01 that plans as a seq scan of every physicality partition
-        -- plus a full sort (no index serves n_constituents), so it trades an arbitrary
-        -- sample for an unusable one. Left arbitrary DELIBERATELY until an index exists
-        -- that ingest is willing to pay for; the defect is recorded, not hidden.
+        -- Optional input work budget is explicit. NULL means the complete corpus;
+        -- a caller asking for a sample owns and can report that truncation.
         ORDER BY w.id, w.physicality_id
-        LIMIT 400000
+        LIMIT p_trajs
     ),
     freq AS (
         SELECT tc.entity_id AS id, count(*) AS d
@@ -62,31 +60,36 @@ CREATE OR REPLACE FUNCTION generation.foundry_vocab(p_size int)
     
     
     
-    ranked AS (
-        SELECT i.id, COALESCE(f.d, 0) AS d
+    ranked AS MATERIALIZED (
+        SELECT i.id, COALESCE(f.d, 0) AS d,
+               row_number() OVER (ORDER BY COALESCE(f.d, 0) DESC, i.id) AS rn
         FROM ids i LEFT JOIN freq f ON f.id = i.id
-        ORDER BY COALESCE(f.d, 0) DESC, i.id
-        LIMIT p_size * 3
     ),
-    arr AS (
-        SELECT array_agg(id ORDER BY d DESC, id) AS a,
-               array_agg(d  ORDER BY d DESC, id) AS ds
+    pages AS MATERIALIZED (
+        SELECT ((rn - 1) / GREATEST(p_size, 1)) AS page,
+               array_agg(id ORDER BY rn) AS ids
         FROM ranked
+        WHERE p_size > 0
+        GROUP BY ((rn - 1) / GREATEST(p_size, 1))
     ),
     named AS (
         
         
-        SELECT u.id, u.s, a.ds[u.ord::int] AS d
-        FROM arr a
-        CROSS JOIN LATERAL unnest(a.a, realize.render_text_batch(a.a, 64)) WITH ORDINALITY AS u(id, s, ord)
-        WHERE a.a IS NOT NULL
+        SELECT u.id, u.s, r.d
+        FROM pages p
+        CROSS JOIN LATERAL unnest(p.ids, realize.render_text_batch(p.ids, 64))
+             WITH ORDINALITY AS u(id, s, ord)
+        JOIN ranked r ON r.id = u.id
     ),
     clean AS (
         SELECT DISTINCT ON (n.s) n.id, n.s, n.d
         FROM named n
         WHERE n.s IS NOT NULL AND btrim(n.s) <> '' AND NOT realize.is_all_whitespace(n.s)
-          AND position(' ' IN n.s) = 0 AND char_length(n.s) <= 40
-        ORDER BY n.s, n.d DESC
+          AND position(' ' IN n.s) = 0
+        ORDER BY n.s, n.d DESC, n.id
     )
-    SELECT c.id, c.s, c.d FROM clean c ORDER BY c.d DESC, c.id LIMIT p_size
+    SELECT c.id, c.s, c.d
+    FROM clean c
+    ORDER BY c.d DESC, c.id
+    LIMIT GREATEST(p_size, 0)
 $$;

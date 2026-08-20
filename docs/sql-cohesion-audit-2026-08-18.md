@@ -208,6 +208,13 @@ and an n-D chord bounding box plus exact angular filter for the requested radius
 counts. Foundry attribute reads likewise honor the declared degree cap directly;
 they no longer raise every cap below 16 or replace non-positive caps with 64.
 
+Vocabulary builders no longer assume lexical filters will accept one out of a
+fixed `2×`, `3×`, or `4×` candidate prefix. They rank the complete admitted
+population, render in set-based pages sized by the requested output cardinality,
+filter, and then take the exact head. `generation.foundry_vocab` also has no
+implicit 400,000-trajectory cutoff: `p_trajs` is an explicit optional work budget,
+and NULL means the complete admitted corpus.
+
 PostgreSQL documents that `LIMIT` can alter plan choice but does not make an
 unordered subset deterministic. A matching B-tree can satisfy `ORDER BY ...
 LIMIT` without sorting the whole input; otherwise the sort still consumes its
