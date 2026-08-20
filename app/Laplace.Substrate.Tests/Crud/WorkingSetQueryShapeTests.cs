@@ -44,5 +44,10 @@ public sealed class WorkingSetQueryShapeTests
         Assert.DoesNotContain("types[i] =", fold, StringComparison.Ordinal);
         Assert.Contains("if (start == 0 && n == total)", native, StringComparison.Ordinal);
         Assert.Contains("return original;", native, StringComparison.Ordinal);
+        Assert.Contains("initial_fold_arrays", native, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "CROSS JOIN LATERAL laplace.laplace_glicko2_accumulate_games",
+            native,
+            StringComparison.Ordinal);
     }
 }
