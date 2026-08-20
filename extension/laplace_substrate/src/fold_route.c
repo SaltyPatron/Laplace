@@ -46,6 +46,9 @@
 #include "utils/memutils.h"
 
 #include "laplace/core/hash128.h"
+#include "laplace/core/glicko2.h"
+
+#include "consensus_fold_math.h"
 
 PG_FUNCTION_INFO_V1(pg_laplace_attestation_merge);
 PG_FUNCTION_INFO_V1(pg_laplace_attestation_merge_type);
@@ -219,6 +222,63 @@ array_window(ArrayType *original, const Datum *src, const bool *src_nulls,
         return construct_md_array(d, nu, 1, dims, lbs,
                                   elmtype, elmlen, elmbyval, elmalign);
     return construct_array(d, n, elmtype, elmlen, elmbyval, elmalign);
+}
+
+typedef struct InitialFoldArrays
+{
+    Datum     *ratings;
+    Datum     *rds;
+    Datum     *volatilities;
+    ArrayType *rating_array;
+    ArrayType *rd_array;
+    ArrayType *volatility_array;
+} InitialFoldArrays;
+
+/* Fresh-cell folds are independent and have uniform inputs. Compute them in
+ * one tight native pass rather than invoking a record-returning SQL function
+ * through a LATERAL executor node once per source row. */
+static void
+initial_fold_arrays(const InArray *phis, const InArray *games,
+                    const InArray *sums, const char *label,
+                    InitialFoldArrays *out)
+{
+    int i;
+
+    out->ratings = (Datum *) palloc(sizeof(Datum) * games->n);
+    out->rds = (Datum *) palloc(sizeof(Datum) * games->n);
+    out->volatilities = (Datum *) palloc(sizeof(Datum) * games->n);
+    for (i = 0; i < games->n; i++)
+    {
+        glicko2_state_t st;
+        int64 phi = DatumGetInt64(phis->elems[i]);
+        int64 n_games = DatumGetInt64(games->elems[i]);
+        int64 sum = DatumGetInt64(sums->elems[i]);
+
+        if (n_games <= 0)
+            ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                     errmsg("%s: games must be > 0 (got %ld)",
+                            label, (long) n_games)));
+        glicko2_init(&st, CONSENSUS_FOLD_NEUTRAL_MU,
+                     CONSENSUS_FOLD_INITIAL_RD,
+                     CONSENSUS_FOLD_INITIAL_VOLATILITY);
+        if (consensus_fold_apply_partial(&st, phi, n_games, sum,
+                                         LAPLACE_GLICKO2_DEFAULT_TAU) != 0)
+            ereport(ERROR,
+                    (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                     errmsg("%s: aggregate exceeds fixed-point capacity", label),
+                     errdetail("games=%ld sum_score=%ld",
+                               (long) n_games, (long) sum)));
+        out->ratings[i] = Int64GetDatum(st.rating);
+        out->rds[i] = Int64GetDatum(st.rd);
+        out->volatilities[i] = Int64GetDatum(st.volatility);
+    }
+    out->rating_array = construct_array(out->ratings, games->n,
+                                        INT8OID, 8, true, 'd');
+    out->rd_array = construct_array(out->rds, games->n,
+                                    INT8OID, 8, true, 'd');
+    out->volatility_array = construct_array(out->volatilities, games->n,
+                                            INT8OID, 8, true, 'd');
 }
 
 /* ------------------------------------------------------------------ */
@@ -397,17 +457,11 @@ pg_laplace_attestation_merge_type(PG_FUNCTION_ARGS)
  * fold in the NOT MATCHED action. */
 static const char *UPSERT_MERGE_SQL =
     "MERGE INTO laplace.consensus c "
-    "USING ("
-    "  SELECT b.*, f.rating AS initial_rating, f.rd AS initial_rd, "
-    "         f.volatility AS initial_volatility "
-    "  FROM unnest($1::bytea[], $2::bytea[], $3::bytea[], $4::int8[], "
-    "              $5::int8[], $6::int8[], $7::timestamptz[]) "
-    "       AS b(id, s, o, phi, games, score_sum, ts) "
-    "  CROSS JOIN LATERAL laplace.laplace_glicko2_accumulate_games("
-    "       consensus.glicko2_neutral_mu(), consensus.glicko2_initial_rd(), "
-    "       consensus.glicko2_initial_volatility(), consensus.glicko2_neutral_mu(), "
-    "       b.phi, b.games, b.score_sum, consensus.glicko2_tau()) AS f"
-    ") b "
+    "USING unnest($1::bytea[], $2::bytea[], $3::bytea[], $4::int8[], "
+    "             $5::int8[], $6::int8[], $7::timestamptz[], "
+    "             $8::int8[], $9::int8[], $10::int8[]) "
+    "      AS b(id, s, o, phi, games, score_sum, ts, initial_rating, "
+    "           initial_rd, initial_volatility) "
     "ON c.type_id = '\\x%s'::bytea AND c.subject_id = b.s AND c.id = b.id "
     "WHEN MATCHED THEN UPDATE SET "
     "  (rating, rd, volatility) = "
@@ -441,6 +495,7 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
     InArray     subjects, types, objects, phis, games, sums, ts;
     Datum      *cell_ids;
     ArrayType  *cell_id_array;
+    InitialFoldArrays initial;
     int64       affected = 0;
     HTAB       *seen;
     HASHCTL     ctl;
@@ -461,6 +516,7 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
                  errmsg("%s: parallel arrays must share length", label)));
     if (subjects.n == 0)
         PG_RETURN_INT64(0);
+    initial_fold_arrays(&phis, &games, &sums, label, &initial);
 
     /* Cell ids natively: blake3(subject || type || COALESCE(object, zeros)) —
      * the exact byte layout of the SQL consensus_id definition, through the
@@ -514,10 +570,11 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
         int            run_n = 0;
         int            j = run_start;
         SPIPlanPtr     merge_plan;
-        Datum          vals[7];
-        static const Oid args[7] =
+        Datum          vals[10];
+        static const Oid args[10] =
             {BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID, INT8ARRAYOID,
-             INT8ARRAYOID, INT8ARRAYOID, 1185};
+             INT8ARRAYOID, INT8ARRAYOID, 1185,
+             INT8ARRAYOID, INT8ARRAYOID, INT8ARRAYOID};
         int            rc;
 
         while (j < subjects.n &&
@@ -528,7 +585,7 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
         }
 
         merge_plan = typed_plan(&upsert_merge_plans, "consensus_upsert merge plans",
-                                type16, UPSERT_MERGE_SQL, 7, args);
+                                type16, UPSERT_MERGE_SQL, 10, args);
         vals[0] = PointerGetDatum(array_window(cell_id_array, cell_ids, NULL,
                                               subjects.n, run_start, run_n,
                                               BYTEAOID, -1, false, 'i'));
@@ -551,6 +608,18 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
         vals[6] = PointerGetDatum(array_window(ts.array, ts.elems, NULL,
                                               ts.n, run_start, run_n,
                                               TIMESTAMPTZOID, 8, true, 'd'));
+        vals[7] = PointerGetDatum(array_window(initial.rating_array,
+                                              initial.ratings, NULL,
+                                              subjects.n, run_start, run_n,
+                                              INT8OID, 8, true, 'd'));
+        vals[8] = PointerGetDatum(array_window(initial.rd_array,
+                                              initial.rds, NULL,
+                                              subjects.n, run_start, run_n,
+                                              INT8OID, 8, true, 'd'));
+        vals[9] = PointerGetDatum(array_window(initial.volatility_array,
+                                              initial.volatilities, NULL,
+                                              subjects.n, run_start, run_n,
+                                              INT8OID, 8, true, 'd'));
         rc = SPI_execute_plan(merge_plan, vals, NULL, false, 0);
         if (rc != SPI_OK_MERGE)
             ereport(ERROR,
@@ -577,13 +646,15 @@ pg_laplace_consensus_upsert_type(PG_FUNCTION_ARGS)
     InArray        subjects, objects, phis, games, sums, ts;
     Datum         *cell_ids;
     ArrayType     *cell_id_array;
+    InitialFoldArrays initial;
     HTAB          *seen;
     HASHCTL        ctl;
     SPIPlanPtr     merge_plan;
-    Datum          vals[7];
-    static const Oid args[7] =
+    Datum          vals[10];
+    static const Oid args[10] =
         {BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID, INT8ARRAYOID,
-         INT8ARRAYOID, INT8ARRAYOID, 1185};
+         INT8ARRAYOID, INT8ARRAYOID, 1185,
+         INT8ARRAYOID, INT8ARRAYOID, INT8ARRAYOID};
     int i;
     int rc;
 
@@ -605,6 +676,7 @@ pg_laplace_consensus_upsert_type(PG_FUNCTION_ARGS)
                  errmsg("%s: parallel arrays must share length", label)));
     if (subjects.n == 0)
         PG_RETURN_INT64(0);
+    initial_fold_arrays(&phis, &games, &sums, label, &initial);
 
     memset(&ctl, 0, sizeof(ctl));
     ctl.keysize = 16;
@@ -646,7 +718,7 @@ pg_laplace_consensus_upsert_type(PG_FUNCTION_ARGS)
                 (errcode(ERRCODE_INTERNAL_ERROR),
                  errmsg("%s: SPI_connect failed", label)));
     merge_plan = typed_plan(&upsert_merge_plans, "consensus_upsert merge plans",
-                            type16, UPSERT_MERGE_SQL, 7, args);
+                            type16, UPSERT_MERGE_SQL, 10, args);
     vals[0] = PointerGetDatum(cell_id_array);
     vals[1] = PointerGetDatum(subjects.array);
     vals[2] = PointerGetDatum(objects.array);
@@ -654,6 +726,9 @@ pg_laplace_consensus_upsert_type(PG_FUNCTION_ARGS)
     vals[4] = PointerGetDatum(games.array);
     vals[5] = PointerGetDatum(sums.array);
     vals[6] = PointerGetDatum(ts.array);
+    vals[7] = PointerGetDatum(initial.rating_array);
+    vals[8] = PointerGetDatum(initial.rd_array);
+    vals[9] = PointerGetDatum(initial.volatility_array);
     rc = SPI_execute_plan(merge_plan, vals, NULL, false, 0);
     if (rc != SPI_OK_MERGE)
         ereport(ERROR,
