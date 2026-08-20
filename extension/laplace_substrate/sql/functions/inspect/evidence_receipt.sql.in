@@ -155,9 +155,8 @@ CREATE OR REPLACE FUNCTION ops.evidence_receipt(p_id bytea, p_limit integer DEFA
         SELECT o.type_id, o.object_id, o.witness_count, o.source_labels,
                o.mu_raw, o.eff_mu_disp,
                COALESCE(NULLIF(labels.types[o.ord], ''),
-                        lower(replace(COALESCE(
-                            consensus.relation_canonical(o.type_id),
-                            left(encode(o.type_id, 'hex'), 16)), '_', ' '))) AS rel,
+                        consensus.relation_canonical(o.type_id),
+                        left(encode(o.type_id, 'hex'), 16)) AS rel,
                COALESCE(NULLIF(labels.l[o.ord], ''),
                         left(encode(o.object_id, 'hex'), 16)) AS obj
         FROM ordered o, labels
