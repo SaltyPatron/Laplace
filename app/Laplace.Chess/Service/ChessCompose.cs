@@ -133,7 +133,8 @@ public static class ChessCompose
     {
         ArgumentNullException.ThrowIfNull(board);
         EnsureLoaded();
-        Span<ChessPositionIdentity.Atom> atoms = stackalloc ChessPositionIdentity.Atom[40];
+        Span<ChessPositionIdentity.Atom> atoms =
+            stackalloc ChessPositionIdentity.Atom[ChessPositionIdentity.MaxAtoms];
         int count = ChessPositionIdentity.FillAtoms(
             board, rules ?? ChessVariantRules.Standard, atoms);
         var subs = new ChessNode[count];
