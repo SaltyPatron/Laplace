@@ -110,6 +110,7 @@ public sealed class ChessEngineService : IAsyncDisposable
             var modality = _modality ??= new ChessModality();
             var engine = new ModalityEngine<ChessState, ChessMove>(modality, ChessVocabulary.MoveType, host, host);
             _ds = ds; _host = host; _engine = engine;
+            ScheduleLearnedRefresh();
             _log.LogInformation("chess engine initialized from shared live runtime substrate host");
             return engine;
         }
@@ -274,17 +275,57 @@ public sealed class ChessEngineService : IAsyncDisposable
     private SubstructureFoldBias? _foldBias;
     private bool _learnedTried;
     private int[][]? _lpMg, _lpEg;
+    private Task? _learnedRefresh;
+    private readonly object _learnedGate = new();
 
     private SubstructureFoldBias FoldBias() => _foldBias ??= new SubstructureFoldBias(_ds!);
 
+    /// <summary>
+    /// The learned fold NEVER runs on a request thread. MEASURED live 2026-08-21:
+    /// /chess/learned-pst 7.28s and /chess/eval 7.43s on their first hits, and the
+    /// live host invalidates after EVERY recorded game, so play re-paid the fold per
+    /// game. Reads now return the current tables immediately (null = pure PeSTO until
+    /// the first fold lands, exactly the behavior a cold process already had) and the
+    /// fold runs once in the background -- primed at engine init, re-primed on
+    /// invalidation. When the move-outcome consensus cells exist (seed ladder's
+    /// move-outcomes stage), the fold itself is a millisecond lookup and this
+    /// machinery simply makes it invisible either way.
+    /// </summary>
     private (int[][]? Mg, int[][]? Eg) LearnedPstBlend(bool refresh = false)
     {
-        if (refresh) { _learnedTried = false; _learnedCells = null; }
-        if (_learnedTried) return (_lpMg, _lpEg);
-        _learnedTried = true;
-        try { var (lm, le) = LearnedPst.BuildTables(_ds!); (_lpMg, _lpEg) = Evaluation.BlendPeStoWith(lm, le); }
-        catch { _lpMg = null; _lpEg = null; }
+        if (refresh)
+        {
+            lock (_learnedGate) { _learnedTried = false; _learnedCells = null; }
+        }
+        if (!_learnedTried) ScheduleLearnedRefresh();
         return (_lpMg, _lpEg);
+    }
+
+    private void ScheduleLearnedRefresh()
+    {
+        lock (_learnedGate)
+        {
+            if (_learnedTried || _learnedRefresh is { IsCompleted: false }) return;
+            _learnedTried = true;
+            _learnedRefresh = Task.Run(() =>
+            {
+                try
+                {
+                    var cells = LearnedPst.ReadWhite(_ds!);
+                    var (lm, le) = LearnedPst.BuildTables(_ds!);
+                    var blended = Evaluation.BlendPeStoWith(lm, le);
+                    lock (_learnedGate)
+                    {
+                        _learnedCells = cells;
+                        (_lpMg, _lpEg) = blended;
+                    }
+                }
+                catch
+                {
+                    lock (_learnedGate) { _lpMg = null; _lpEg = null; }
+                }
+            });
+        }
     }
 
     // Pool of Search instances: reuses the 32 MB transposition-table
@@ -584,7 +625,12 @@ public sealed class ChessEngineService : IAsyncDisposable
     public async Task<IReadOnlyList<LearnedSquare>> LearnedPstAsync(CancellationToken ct = default)
     {
         await EngineAsync(ct);
-        return _learnedCells ??= LearnedPst.ReadWhite(_ds!);
+        if (_learnedCells is { } cells) return cells;
+        ScheduleLearnedRefresh();
+        // First-ever call on a cold process: wait for the primed fold rather than
+        // duplicate it inline; every later call is the cached table in microseconds.
+        if (_learnedRefresh is { } t) await t.WaitAsync(ct);
+        return _learnedCells ?? [];
     }
 
     public bool StartTraining(double temperature, double weight, int maxPlies, int maxGames = 0)
