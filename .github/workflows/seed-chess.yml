@@ -34,7 +34,7 @@ on:
         description: "chess source (one per run)"
         type: choice
         required: true
-        options: [chess, openings, chess-books, chess-analyze, chess-eval, chess-syzygy, chess-trajectory, chess-opening-match]
+        options: [chess, openings, chess-books, chess-analyze, chess-eval, chess-move-outcomes, chess-syzygy, chess-trajectory, chess-opening-match]
       corpus:
         # Dropdown over what is actually on the runner. The chess corpus is
         # static (same filenames on re-download), so a literal list is durable;
@@ -168,7 +168,7 @@ jobs:
             chess)       legal="$pgn_corpora" ;;
             openings)    legal="openings-book path-override" ;;
             chess-books) legal="books path-override" ;;
-            chess-analyze|chess-eval|chess-trajectory|chess-opening-match)
+            chess-analyze|chess-eval|chess-move-outcomes|chess-trajectory|chess-opening-match)
                           legal="" ;;   # read the substrate; no path at all
             chess-syzygy) legal="syzygy-tablebase path-override" ;;
             *) echo "::error::unknown source '$src'"; exit 1 ;;
@@ -194,7 +194,7 @@ jobs:
           # Resolve them before explicit-path handling so an irrelevant path cannot
           # defeat source-scoped eviction or accidentally become an ingest scope.
           case "$src" in
-            chess-analyze|chess-eval|chess-trajectory|chess-opening-match)
+            chess-analyze|chess-eval|chess-move-outcomes|chess-trajectory|chess-opening-match)
               [ -n "${{ inputs.path }}" ] && \
                 echo "::notice::source '$src' reads the substrate — path input ignored"
               echo "source=$src reads the substrate — corpus ignored, no path passed"
