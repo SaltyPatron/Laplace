@@ -1884,15 +1884,29 @@ public static class NpgsqlSubstrateReads
 
     public readonly record struct FastLabelRow(string IdHex, string? Label, short? Tier);
 
-    /// <summary>Batch label + tier via <c>render_text_fast</c>/<c>label_or_hex</c>, one round trip.</summary>
+    /// <summary>
+    /// Batch label + tier, one round trip. Same label law as the consensus_in read
+    /// (#1281), MEASURED 2026-08-21 there and re-observed here live (a mesh label call
+    /// 16s active on this query): render_text_fast is a constituents_closure per id
+    /// (~230ms warm on one chess line), and this surface's id sets include tier-4 game
+    /// compositions. The tier was ALREADY joined and returned -- just never used to
+    /// gate the render. And the first gated cut still measured 13.9s because the
+    /// label_or_hex FALLBACK is realize.label -> full realize.render for any name-less
+    /// composition (394ms on one game line) -- both arms need the gate. A composition
+    /// is not a surface: names first; shallow render (then label_or_hex) for tiers
+    /// &lt;= 3; stable hex prefix above. 40 game-line ids: 13,868ms -> 299ms.
+    /// </summary>
     public static Task<IReadOnlyList<FastLabelRow>> LabelsFastAsync(
         NpgsqlConnection conn, byte[][] ids, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(conn, """
             SELECT encode(x.id, 'hex'),
                    COALESCE(
-                       NULLIF(realize.render_text_fast(x.id, 8), ''),
-                       converse.label_or_hex(x.id)),
+                       NULLIF(realize.resolve_name(x.id), ''),
+                       CASE WHEN e.tier <= 3
+                            THEN COALESCE(NULLIF(realize.render_text_fast(x.id, 3), ''),
+                                          converse.label_or_hex(x.id)) END,
+                       left(encode(x.id, 'hex'), 16)),
                    e.tier
             FROM unnest(@ids::bytea[]) AS x(id)
             LEFT JOIN laplace.entities e ON e.id = x.id
