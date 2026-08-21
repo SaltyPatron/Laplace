@@ -3,8 +3,16 @@
 -- a move is a lookup. 7,797 distinct tier-2 move entities cover 1.6M games, so
 -- this folds unbounded testimony into a small bounded table. No replay: ordered
 -- move ids are the record and ply parity is the mover.
+-- p_games is REQUIRED to be bounded by default. The first cut shipped DEFAULT 0
+-- (whole corpus), which folds ~135M trajectory constituents through SPI in one
+-- call and does not return on a 1.6M-game corpus -- a query surface must not have
+-- a hang as its default. This is a PASS, not a lookup: the statistic it produces
+-- is 7,797 bounded rows and belongs materialized in laplace.consensus, read O(1)
+-- thereafter, which is exactly what chess.moves already reads and what the rated
+-- MOVE web was designed to hold. Materializing it is the follow-up; until then
+-- callers must state how much testimony they are willing to pay for.
 DROP FUNCTION IF EXISTS chess.learned_moves(integer);
-CREATE OR REPLACE FUNCTION chess.learned_moves(p_games integer DEFAULT 0)
+CREATE OR REPLACE FUNCTION chess.learned_moves(p_games integer DEFAULT 20000)
     RETURNS TABLE(move_id bytea, plays bigint, mover_score double precision)
     LANGUAGE C STABLE PARALLEL SAFE
     AS 'MODULE_PATHNAME', 'pg_laplace_chess_learned_moves';

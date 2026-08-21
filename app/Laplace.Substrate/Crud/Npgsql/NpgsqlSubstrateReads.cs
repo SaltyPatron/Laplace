@@ -2722,6 +2722,33 @@ public static class NpgsqlSubstrateReads
             p => p.AddWithValue("doc", documentId),
             ct: ct, label: "trajectory_tree_dump", onError: onError);
 
+    /// <summary>One row of <c>chess.learned_moves</c> with the move's own atoms.</summary>
+    public readonly record struct ChessLearnedMoveRow(
+        long Plays, double MoverScore, byte[][] Atoms);
+
+    /// <summary>
+    /// <c>chess.learned_moves(p_games)</c> joined to each move's Content trajectory.
+    ///
+    /// The atoms come back with the row because a move id is decodable -- piece, from,
+    /// to, flags, promotion -- so a caller projecting onto piece-square cells needs no
+    /// board and no replay. Lives here rather than in the chess service because the
+    /// read-path gate is right: one implementation, one place.
+    /// </summary>
+    public static Task<IReadOnlyList<ChessLearnedMoveRow>> ChessLearnedMovesAsync(
+        NpgsqlDataSource dataSource, int games, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT lm.plays, lm.mover_score,
+                   public.laplace_trajectory_constituent_ids(p.trajectory)
+            FROM chess.learned_moves(@games) lm
+            JOIN laplace.physicalities p
+              ON p.entity_id = lm.move_id AND p.type = 1 AND p.trajectory IS NOT NULL
+            """,
+            static r => new ChessLearnedMoveRow(
+                r.GetInt64(0), r.GetDouble(1), (byte[][])r[2]),
+            p => p.AddWithValue("games", games),
+            ct: ct, label: "chess_learned_moves", onError: onError);
+
     public readonly record struct ChessMoveRow(
         byte[] NextPosition, double EffMu, double Rd, long WitnessCount);
 

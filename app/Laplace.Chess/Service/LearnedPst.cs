@@ -2,6 +2,7 @@ using global::Npgsql;
 using Laplace.Engine.Core;
 using Laplace.Modality;
 using Laplace.Modality.Chess;
+using Laplace.SubstrateCRUD.Npgsql;
 
 namespace Laplace.Chess.Service;
 
@@ -11,79 +12,67 @@ public static class LearnedPst
 {
     public const string WhitePieces = "PNBRQK";
 
-    private static Piece WhitePiece(char c) => c switch
-    {
-        'P' => Piece.WPawn,
-        'N' => Piece.WKnight,
-        'B' => Piece.WBishop,
-        'R' => Piece.WRook,
-        'Q' => Piece.WQueen,
-        'K' => Piece.WKing,
-        _ => throw new ArgumentOutOfRangeException(nameof(c), c, "not a white piece letter"),
-    };
-
     /// <summary>
-    /// How many games the fold reads. The learned table is a BOUNDED reusable statistic --
-    /// 384 cells -- derived from unbounded testimony, so the cost knob is how much testimony
-    /// to read, never how many rows to write.
+    /// How much testimony chess.learned_moves reads. The statistic it returns is bounded --
+    /// the corpus move vocabulary is 7,797 tier-2 move entities -- and MEASURED 2026-08-21,
+    /// 20,000 games already surface 7,723 of them, so the table saturates almost immediately
+    /// and a bigger sample buys precision on the tail, not coverage.
     /// </summary>
-    /// MEASURED 2026-08-21 on this host: ~73 games/s, the cost being ChessCompose.MoveId
-    /// across ~35 legal actions per ply to resolve each typed move id. 5,000 games is ~70s
-    /// once per process and already fills 366 of 384 cells with coherent signal (advanced
-    /// pawns positive, back-rank knights negative). Raise it via the overload when an
-    /// operator wants a tighter table and can pay for it.
-    public const int DefaultGameSample = 5_000;
+    public const int DefaultGameSample = 20_000;
 
-    /// <summary>
-    /// The learned piece-square table, folded from witnessed games.
-    ///
-    /// VALIDATED 2026-08-21 against the live substrate. The previous implementation asked
-    /// laplace.consensus for an OUTCOME edge on each of 384 piece-square atoms. Measured:
-    /// zero consensus rows and zero attestations carry a piece-square subject, and the
-    /// start position's own 35 substructures are not entities at all -- because positions
-    /// are NOT stored as rows. A game is one ordered trajectory; its constituents live
-    /// packed in the physicality, indexed by physicalities_constituents_gin. Asking for
-    /// exploded per-square edges asks for the exact rows this design exists to not write,
-    /// so the table was all zeros, which BlendPeStoWith turns into plain PeSTO for the UCI
-    /// engine, ChessEngineService, the live host and learned-eval-test alike.
-    ///
-    /// The fold reads what is actually stored: a game's HAS_RESULT and its typed move
-    /// trajectory. Replay is deterministic (ChessReplay, the same surface the PGN and
-    /// movetext paths use), so every board along the line is recovered without storing one.
-    /// Each occupied square accumulates the mover-relative score; black squares mirror onto
-    /// the white-relative table, which is what a piece-square table means.
-    /// </summary>
     public static IReadOnlyList<LearnedSquare> ReadWhite(NpgsqlDataSource ds)
         => ReadWhite(ds, DefaultGameSample);
 
+    /// <summary>
+    /// The learned piece-square table, projected from the move-keyed statistic.
+    ///
+    /// A piece-square cell is a DOT PRODUCT -- "a pawn on e4" has to be summed over every way
+    /// of arriving there (e2e4, e3e4, d3xe4...). A move is a LOOKUP. So chess.learned_moves
+    /// owns the primary object and this reduces it to the 384 PeSTO-shaped cells its consumers
+    /// expect: each move contributes its mover-relative score, weighted by how often it was
+    /// played, to the square it ARRIVES on, with black mirroring onto the white-relative table.
+    ///
+    /// No board is reconstructed and no legal move is generated. The move's own five atoms say
+    /// which piece and which square (ChessPositionIdentity.MoveAtomIndex), and the game already
+    /// happened, so there is nothing to search for.
+    ///
+    /// This previously asked laplace.consensus for an OUTCOME edge on each of 384 piece-square
+    /// atoms. Measured: zero consensus rows and zero attestations carry a piece-square subject,
+    /// and they cannot -- positions along corpus lines are not materialized (1,033 stored
+    /// against 1.6M games). The table was all zeros, which BlendPeStoWith turns into plain
+    /// PeSTO for the UCI engine, ChessEngineService, the live host and learned-eval-test alike.
+    /// </summary>
     public static IReadOnlyList<LearnedSquare> ReadWhite(NpgsqlDataSource ds, int gameSample)
     {
         ArgumentNullException.ThrowIfNull(ds);
 
-        // Phase-weighted accumulators, white-relative: [pieceType 0..5][square 0..63].
-        var sumMg = new double[6][]; var cntMg = new double[6][];
-        var sumEg = new double[6][]; var cntEg = new double[6][];
-        for (int t = 0; t < 6; t++)
-        {
-            sumMg[t] = new double[64]; cntMg[t] = new double[64];
-            sumEg[t] = new double[64]; cntEg[t] = new double[64];
-        }
+        var rows = NpgsqlSubstrateReads
+            .ChessLearnedMovesAsync(ds, gameSample, CancellationToken.None)
+            .GetAwaiter().GetResult();
 
-        foreach (var (resultToken, moveIds) in ReadWitnessedLines(ds, gameSample))
+        var sum = new double[6][]; var wt = new double[6][];
+        for (int t = 0; t < 6; t++) { sum[t] = new double[64]; wt[t] = new double[64]; }
+
+        var index = ChessPositionIdentity.MoveAtomIndex;
+        foreach (var row in rows)
         {
-            double whiteScore = resultToken switch
+            int piece = -1, to = -1;
+            foreach (var atom in row.Atoms)
             {
-                "1-0" => 1.0,
-                "0-1" => 0.0,
-                "1/2-1/2" => 0.5,
-                _ => double.NaN,
-            };
-            if (double.IsNaN(whiteScore)) continue;
+                if (!index.TryGetValue(Hash128.FromBytes(atom), out var d)) continue;
+                if (d.Domain == ChessPositionIdentity.MovePieceDomain) piece = d.Value;
+                else if (d.Domain == ChessPositionIdentity.MoveToDomain) to = d.Value;
+            }
+            if (piece is < 0 or > 11 || to < 0) continue;
 
-            // Boards, not strings: ForEachBoard skips the SAN/FEN/position-id generation
-            // this fold has no use for. A line that does not resolve is dropped whole
-            // rather than folded halfway.
-            ChessReplay.ForEachBoard(moveIds, b => Accumulate(b, whiteScore));
+            // PieceOrdinal is white 0-5 then black 6-11; a black move mirrors onto the
+            // white-relative table, and mover_score is already from the mover's side.
+            int type = piece % 6;
+            bool white = piece < 6;
+            int file = to & 7, rank = to >> 3;
+            int idx = (white ? rank : 7 - rank) * 8 + file;
+            sum[type][idx] += row.MoverScore * row.Plays;
+            wt[type][idx] += row.Plays;
         }
 
         var outv = new LearnedSquare[WhitePieces.Length * 64];
@@ -91,109 +80,26 @@ public static class LearnedPst
         for (int t = 0; t < 6; t++)
         {
             // Centre within the piece type: a uniform shift is the corpus draw rate showing
-            // through and carries no square preference. BuildTables centres again; on an
-            // already-centred table that is a no-op, and the endpoint gets a deviation
-            // rather than a raw win share, which is what the grid renders.
+            // through and carries no square preference. BuildTables centres again, which on an
+            // already-centred table is a no-op, and the endpoint renders a deviation rather
+            // than a raw win share.
             double gs = 0, gc = 0;
-            for (int sq = 0; sq < 64; sq++) { gs += sumMg[t][sq] + sumEg[t][sq]; gc += cntMg[t][sq] + cntEg[t][sq]; }
+            for (int sq = 0; sq < 64; sq++) { gs += sum[t][sq]; gc += wt[t][sq]; }
             double mean = gc > 0 ? gs / gc : 0;
-
             for (int rank = 0; rank < 8; rank++)
                 for (int file = 0; file < 8; file++)
                 {
                     int sq = rank * 8 + file;
-                    double w = cntMg[t][sq] + cntEg[t][sq];
-                    double share = w > 0 ? (sumMg[t][sq] + sumEg[t][sq]) / w : mean;
-                    // Percentage points of score. The old column was a Glicko rating
-                    // deviation; scaleCpPerPoint's 6.0 default was calibrated against that
-                    // magnitude, and score-share points land in the same range.
+                    double w = wt[t][sq];
+                    double share = w > 0 ? sum[t][sq] / w : mean;
+                    // Percentage points of score. The retired column was a Glicko rating
+                    // deviation and scaleCpPerPoint's 6.0 default was calibrated against that
+                    // magnitude; score-share points land in the same range.
                     outv[k++] = new LearnedSquare(
                         WhitePieces[t], file, rank, (share - mean) * 100.0, w);
                 }
         }
         return outv;
-
-        void Accumulate(Board b, double whiteScore)
-        {
-            int phase = 0;
-            for (int sq = 0; sq < 128; sq++)
-            {
-                if ((sq & 0x88) != 0) continue;
-                phase += b.Squares[sq] switch
-                {
-                    Piece.WKnight or Piece.BKnight or Piece.WBishop or Piece.BBishop => 1,
-                    Piece.WRook or Piece.BRook => 2,
-                    Piece.WQueen or Piece.BQueen => 4,
-                    _ => 0,
-                };
-            }
-            double mg = Math.Min(24, phase) / 24.0, eg = 1.0 - mg;
-
-            for (int sq = 0; sq < 128; sq++)
-            {
-                if ((sq & 0x88) != 0) continue;
-                Piece p = b.Squares[sq];
-                if (p == Piece.Empty) continue;
-                int file = Board.FileOf(sq), rank = Board.RankOf(sq);
-                int type = p switch
-                {
-                    Piece.WPawn or Piece.BPawn => 0,
-                    Piece.WKnight or Piece.BKnight => 1,
-                    Piece.WBishop or Piece.BBishop => 2,
-                    Piece.WRook or Piece.BRook => 3,
-                    Piece.WQueen or Piece.BQueen => 4,
-                    Piece.WKing or Piece.BKing => 5,
-                    _ => -1,
-                };
-                if (type < 0) continue;
-                bool white = p is Piece.WPawn or Piece.WKnight or Piece.WBishop
-                                or Piece.WRook or Piece.WQueen or Piece.WKing;
-                // Black mirrors onto the white-relative table: same file, flipped rank,
-                // complementary score.
-                double score = white ? whiteScore : 1.0 - whiteScore;
-                int idx = (white ? rank : 7 - rank) * 8 + file;
-                sumMg[type][idx] += mg * score; cntMg[type][idx] += mg;
-                sumEg[type][idx] += eg * score; cntEg[type][idx] += eg;
-            }
-        }
-    }
-
-    /// <summary>
-    /// A game's recorded result and its typed move trajectory. HAS_RESULT sits on the line
-    /// (Chess_Game) and the ordered move ids are that entity's Content physicality, so one
-    /// join returns everything replay needs. realize.realize resolves the result content
-    /// entity to its token, which keeps this path off the codepoint perfcache.
-    /// </summary>
-    private static IEnumerable<(string ResultToken, Hash128[] MoveIds)> ReadWitnessedLines(
-        NpgsqlDataSource ds, int gameSample)
-    {
-        const string sql = """
-            SELECT realize.realize(c.object_id),
-                   public.laplace_trajectory_constituent_ids(p.trajectory)
-            FROM laplace.consensus c
-            JOIN laplace.physicalities p
-              ON p.entity_id = c.subject_id AND p.type = 1 AND p.trajectory IS NOT NULL
-            WHERE c.type_id = laplace.relation_type_id('HAS_RESULT')
-            ORDER BY c.subject_id
-            LIMIT @sample
-            """;
-
-        using var conn = ds.OpenConnection();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = sql;
-        cmd.CommandTimeout = 0;
-        cmd.Parameters.AddWithValue("sample", gameSample);
-        using var r = cmd.ExecuteReader();
-        while (r.Read())
-        {
-            if (r.IsDBNull(0) || r.IsDBNull(1)) continue;
-            string token = r.GetString(0);
-            var raw = (byte[][])r[1];
-            if (raw.Length == 0) continue;
-            var ids = new Hash128[raw.Length];
-            for (int i = 0; i < raw.Length; i++) ids[i] = Hash128.FromBytes(raw[i]);
-            yield return (token, ids);
-        }
     }
 
     // The learned overlay must stay a positional nudge on top of PeSTO, never a material-scale

@@ -34,20 +34,32 @@
  * by parity, accumulate per move id, rank.
  */
 
+/* MEASURED 2026-08-21, and the reason both CTEs are MATERIALIZED.
+ *
+ * The first cut wrote `WITH res AS (SELECT DISTINCT object_id, realize.realize(object_id) ...)`
+ * and assumed the DISTINCT meant realize ran three times -- there are exactly three result
+ * tokens in the corpus. It does not: without the barrier the planner inlines the CTE and
+ * evaluates realize.realize across the HAS_RESULT scan, so the call lands in
+ * realize.constituents_closure per row over 1.6M rows and the query does not return. That is
+ * a function in a subquery doing RBAR work, and it was mine.
+ *
+ * With MATERIALIZED the token resolution is 309ms for 3 rows, and the whole fold over 20,000
+ * games -- 2,412,665 plies, 7,723 distinct moves -- runs in 18s.
+ */
 static const char *FOLD_QUERY =
-    "WITH res AS ("
-    "  SELECT DISTINCT c.object_id AS id, realize.realize(c.object_id) AS token"
+    "WITH ids AS MATERIALIZED ("
+    "  SELECT DISTINCT c.object_id AS id"
     "  FROM laplace.consensus c"
     "  WHERE c.type_id = laplace.relation_type_id('HAS_RESULT')"
-    "), scored AS ("
-    "  SELECT id, CASE token WHEN '1-0' THEN 1.0::float8"
-    "                        WHEN '0-1' THEN 0.0::float8"
-    "                        WHEN '1/2-1/2' THEN 0.5::float8 END AS white_score"
-    "  FROM res WHERE token IN ('1-0','0-1','1/2-1/2')"
+    "), scored AS MATERIALIZED ("
+    "  SELECT id, CASE realize.realize(id) WHEN '1-0' THEN 1.0::float8"
+    "                                      WHEN '0-1' THEN 0.0::float8"
+    "                                      WHEN '1/2-1/2' THEN 0.5::float8 END AS white_score"
+    "  FROM ids"
     "), g AS ("
     "  SELECT s.white_score, p.trajectory"
     "  FROM laplace.consensus c"
-    "  JOIN scored s ON s.id = c.object_id"
+    "  JOIN scored s ON s.id = c.object_id AND s.white_score IS NOT NULL"
     "  JOIN laplace.physicalities p"
     "    ON p.entity_id = c.subject_id AND p.type = 1 AND p.trajectory IS NOT NULL"
     "  WHERE c.type_id = laplace.relation_type_id('HAS_RESULT')"
