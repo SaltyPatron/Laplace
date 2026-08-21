@@ -1108,7 +1108,22 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
                 }
                 else
                     nulls[6] = true;
-                values[7] = Float8GetDatum(best->rel_mass);
+                /* REL_MASS IS THE SCALE-FREE SHARE (2026-08-21), not the summed mass.
+                 * The SPECIFICITY block below already states the law: "a summed mass is
+                 * meaningless on a high-degree id -- an article is wired to everything, so
+                 * its edges to the prompt are unremarkable." rel_mass sat ABOVE everything
+                 * except specificity in the one canonical elector key and was still the raw
+                 * sum, so whenever specificity tied at zero the article won on sheer degree.
+                 * MEASURED, "What is a glacier?": `a` rel_mass 2.385e12 over total 4.39e14
+                 * (share 0.0054) beat `glacier` 1.193e12 over 1.14e14 (share 0.0104) -- the
+                 * probe elected LATIN SMALL LETTER A. Same denominator as specificity: the
+                 * candidate's own witnessed mass, so the ratio does not drift as seeds land.
+                 * Re-ranked on the share across every eval probe: pawn/glacier/water/hot all
+                 * elect their topic (election 4/6 -> 5/6); france remains #1099's stranded
+                 * fact, unreachable by any ranking. Raw mass stays available to diagnostics
+                 * as share * total_mass -- both columns are returned. */
+                values[7] = Float8GetDatum(
+                    best->total_mass > 0.0 ? best->rel_mass / best->total_mass : 0.0);
                 /* SPECIFICITY -- the contextual rank key. A summed mass is meaningless on a
                  * high-degree id: an article is wired to everything, so its edges
                  * to the prompt are unremarkable, while a chess pawn's edge to

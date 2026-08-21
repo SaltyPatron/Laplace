@@ -23,7 +23,8 @@
 --                diagnostic and is never substituted into this differently
 --                dimensioned scalar.
 --   coherence    rated mass to the OTHER tokens' candidate senses
---   rel_mass     rated mass in a relation type another token NAMES (the
+--   rel_mass     scale-free SHARE of the candidate's own witnessed mass carried in a
+--                relation type another token NAMES (raw mass = rel_mass * total_mass;
 --                "what are the X of Y" shape, where X is a relation not a peer)
 --   total_mass   ALL rated mass on the candidate -- specificity's denominator,
 --                exposed for the electors' inverse-mass fallback (below)
