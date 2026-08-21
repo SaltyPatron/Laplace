@@ -9,7 +9,8 @@ DROP FUNCTION IF EXISTS converse.epistemic_status_core(bytea, int);
 CREATE OR REPLACE FUNCTION converse.epistemic_status_core(p_word bytea, p_limit int DEFAULT 30)
     RETURNS TABLE(type_id bytea, object_id bytea, status text, rating bigint,
                   rd bigint, volatility bigint, witnesses bigint)
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
     WITH subj(id) AS (SELECT p_word UNION SELECT sn.synset_id FROM lexical.senses(p_word) sn),
          rels AS (
             SELECT c.type_id, c.object_id, c.rating, c.rd, c.volatility, c.witness_count
@@ -27,8 +28,8 @@ CREATE OR REPLACE FUNCTION converse.epistemic_status_core(p_word bytea, p_limit 
                 ELSE 'thin' END,
            r.rating, r.rd, r.volatility, r.witness_count
     FROM rels r
-    ORDER BY consensus.edge_rank(r.type_id, consensus.eff_mu(r.rating, r.rd)) DESC
-$$;
+    ORDER BY consensus.edge_rank(r.type_id, consensus.eff_mu(r.rating, r.rd)) DESC;
+END;
 
 -- converse.epistemic_status — GH #862 / #860. No SET, real schema names.
 -- The verdict rule lives in epistemic_status_core; this wrapper ADDS the rendered

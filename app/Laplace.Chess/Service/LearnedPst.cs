@@ -117,7 +117,7 @@ public static class LearnedPst
     private static IReadOnlyList<LearnedSquare>? TryReadMoveOutcomeCells(NpgsqlDataSource ds)
     {
         var moves = NpgsqlSubstrateReads.ChessMoveEntitiesAsync(
-            ds, RelationTypeRegistry.RelationTypeId("MOVE").ToBytes(), CancellationToken.None)
+            ds, ChessVocabulary.MoveType.ToBytes(), CancellationToken.None)
             .GetAwaiter().GetResult();
         if (moves.Count == 0) return null;
 
