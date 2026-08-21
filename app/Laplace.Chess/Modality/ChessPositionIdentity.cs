@@ -120,6 +120,42 @@ public static class ChessPositionIdentity
         return n;
     }
 
+    /// <summary>
+    /// Reverse map for the five MOVE atom domains: atom id -> (domain, value).
+    ///
+    /// A move id is not opaque. FillMoveAtoms composes it from piece, from-square,
+    /// to-square, flags and promotion, and each domain's value space is tiny -- 12
+    /// pieces, 64 squares, a handful of flags -- so the whole table is ~160 entries
+    /// built once. That is what makes a stored move decodable without a board:
+    /// ChessReplay resolves an id by generating every legal action and hashing each
+    /// one (~35 hashes per ply) purely because it treats the id as opaque. A fold
+    /// over recorded games does not need to search for a move that already happened.
+    ///
+    /// VERIFIED 2026-08-21 against a stored corpus move: fe6ea447... decodes to
+    /// WPawn, e2, e4, DoublePush, no promotion -- 1.e4, all five atoms exact.
+    /// </summary>
+    public static IReadOnlyDictionary<Hash128, (byte Domain, ushort Value)> MoveAtomIndex =>
+        MoveAtomIndexLazy.Value;
+
+    private static readonly Lazy<IReadOnlyDictionary<Hash128, (byte, ushort)>> MoveAtomIndexLazy =
+        new(BuildMoveAtomIndex, System.Threading.LazyThreadSafetyMode.ExecutionAndPublication);
+
+    private static IReadOnlyDictionary<Hash128, (byte, ushort)> BuildMoveAtomIndex()
+    {
+        var map = new Dictionary<Hash128, (byte, ushort)>(256);
+        void Add(byte domain, int maxExclusive)
+        {
+            for (ushort v = 0; v < maxExclusive; v++)
+                map[AtomId(Atom.Scalar(domain, v))] = (domain, v);
+        }
+        Add(MovePieceDomain, 12);      // PieceOrdinal, white 0-5 then black 6-11
+        Add(MoveFromDomain, 64);       // BitIndex: (rank << 3) | file
+        Add(MoveToDomain, 64);
+        Add(MoveFlagsDomain, 16);      // MoveFlags is a 4-bit set
+        Add(MovePromotionDomain, 16);  // PromotionOrdinal, sentinel included
+        return map;
+    }
+
     internal static Hash128 AtomId(in Atom atom)
     {
         Span<byte> bytes = stackalloc byte[33];
