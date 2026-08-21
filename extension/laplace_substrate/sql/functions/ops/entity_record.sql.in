@@ -1,6 +1,9 @@
--- An entity's verdict record: its edges grouped by the canonical
--- epistemic_status logic — confirmed / contested / refuted / thin. The verdict
--- rule lives THERE; this only counts, and no client re-derives it from raw mu.
+-- An entity's verdict record: its edges grouped by the canonical epistemic_status
+-- verdict rule — confirmed / contested / refuted / thin. The rule lives in
+-- converse.epistemic_status_core; this only counts, and no client re-derives it
+-- from raw mu. Counts read the CORE, not the rendering wrapper: the wrapper also
+-- renders + realizes up to 500 object texts a counter throws away — MEASURED
+-- 2026-08-21 on a hot entity: 1,984 ms wrapped, 308 ms core, identical counts.
 DROP FUNCTION IF EXISTS laplace.entity_record(bytea);
 
 CREATE OR REPLACE FUNCTION ops.entity_record(p_id bytea)
@@ -11,5 +14,5 @@ CREATE OR REPLACE FUNCTION ops.entity_record(p_id bytea)
            count(*) FILTER (WHERE s.status = 'contested'),
            count(*) FILTER (WHERE s.status = 'refuted'),
            count(*) FILTER (WHERE s.status = 'thin')
-    FROM converse.epistemic_status(p_id, NULL, 500) s
+    FROM converse.epistemic_status_core(p_id, 500) s
 $$;
