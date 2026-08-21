@@ -13,6 +13,30 @@ public static class ChessPositionIdentity
     public const byte AtomTier = 1;
     public const byte PositionTier = 2;
 
+    /// <summary>
+    /// Header atoms: rules, side to move, castling mask, ambiguous-rook override, en passant.
+    /// Every one of these is conditional except side/castling/en-passant; five is the ceiling.
+    /// </summary>
+    internal const int MaxHeaderAtoms = 5;
+
+    /// <summary>
+    /// Upper bound on the atoms <see cref="FillAtoms"/> can emit: the header plus ONE atom per
+    /// OCCUPIED SQUARE. The bound is 64 because the board has 64 squares -- NOT 32, because
+    /// "32 pieces" is a rule of legal chess and this function hashes whatever board it is
+    /// handed. Both call sites previously stackalloc'd a bare 40, which is 5 + 35: enough for
+    /// any legal position and nothing else.
+    ///
+    /// Chess.com "Odds Chess" ships FENs like
+    ///   rnbqkbnr/pppppppp/8/8/PPPPPPPP/PPPPPPPP/PPPPPPPP/4K3 w kq - 0 1
+    /// -- 41 occupied squares. FillAtoms wrote atom 41 into a 40-slot span and threw
+    /// IndexOutOfRangeException out of PositionId, through ChessModality.FromFen, through
+    /// TryParseGame, which does not catch it. The whole FILE died, not the game:
+    /// Firouzja2003_chesscom.pgn and Hikaru_chesscom.pgn each carry exactly one such game
+    /// (2 of 37,099 scanned) and each failed its ingest unit -- seed runs 32438771887 and
+    /// 32439795126, "2 unit(s) failed to apply".
+    /// </summary>
+    internal const int MaxAtoms = MaxHeaderAtoms + 64;
+
     internal const byte SideDomain = 1;
     internal const byte CastlingDomain = 2;
     internal const byte EnPassantDomain = 3;
@@ -40,7 +64,7 @@ public static class ChessPositionIdentity
 
     public static Hash128 PositionId(Board board, ChessVariantRules? rules = null)
     {
-        Span<Atom> atoms = stackalloc Atom[40];
+        Span<Atom> atoms = stackalloc Atom[MaxAtoms];
         int n = FillAtoms(board, rules ?? ChessVariantRules.Standard, atoms);
         Span<Hash128> ids = stackalloc Hash128[n];
         for (int i = 0; i < n; i++) ids[i] = AtomId(atoms[i]);
