@@ -1,6 +1,7 @@
 using global::Npgsql;
 using Laplace.Engine.Core;
 using Laplace.Modality;
+using Laplace.Modality.Chess;
 
 namespace Laplace.Chess.Service;
 
@@ -9,6 +10,17 @@ public readonly record struct LearnedSquare(char Piece, int File, int Rank, doub
 public static class LearnedPst
 {
     public const string WhitePieces = "PNBRQK";
+
+    private static Piece WhitePiece(char c) => c switch
+    {
+        'P' => Piece.WPawn,
+        'N' => Piece.WKnight,
+        'B' => Piece.WBishop,
+        'R' => Piece.WRook,
+        'Q' => Piece.WQueen,
+        'K' => Piece.WKing,
+        _ => throw new ArgumentOutOfRangeException(nameof(c), c, "not a white piece letter"),
+    };
 
     public static IReadOnlyList<LearnedSquare> ReadWhite(NpgsqlDataSource ds)
     {
@@ -21,8 +33,13 @@ public static class LearnedPst
                 for (int rank = 0; rank < 8; rank++)
                     for (int file = 0; file < 8; file++)
                     {
-                        string token = $"{pc}{(char)('a' + file)}{(char)('1' + rank)}";
-                        var subId = ChessCompose.Position(token).Substructures[0].Id;
+                        // Ask for the piece-square constituent directly. This used to build a
+                        // "Pa1" token and hand it to ChessCompose.Position(string), which wants a
+                        // canonical "stm: cr: ep: ..." interchange surface -- so it threw
+                        // ArgumentException on the FIRST square and /chess/learned-pst returned 500
+                        // on every call. Substructures[0] was a second bug underneath the first:
+                        // FillAtoms emits header atoms first, so index 0 is side-to-move.
+                        var subId = ChessCompose.PieceSquareNode(WhitePiece(pc), file, rank).Id;
                         edgeIds[k] = ConsensusKeys.EdgeId(subId, ChessVocabulary.OutcomeType, ChessVocabulary.OutcomeObject);
                         coords[k] = (pc, file, rank);
                         k++;

@@ -177,6 +177,30 @@ public static class ChessCompose
         return ChessPositionIdentity.PositionId(board, rules);
     }
 
+    /// <summary>
+    /// The composed node for ONE piece-square constituent: byte-identical to the substructure
+    /// <see cref="Position(Board)"/> deposits for that piece standing on that square, because it
+    /// is the same atom through the same memo.
+    ///
+    /// This exists because LearnedPst needed exactly this and had no way to ask for it. It was
+    /// synthesizing a token like "Pa1" and handing it to Position(string), which requires a
+    /// canonical "stm: cr: ep: ..." interchange surface -- so TryFenFromSurface rejected it and
+    /// /chess/learned-pst threw ArgumentException on its FIRST square, every call. Reaching for
+    /// Substructures[0] would have been wrong even had it parsed: FillAtoms emits the header
+    /// atoms first, so index 0 is side-to-move, not the piece-square.
+    /// </summary>
+    public static ChessNode PieceSquareNode(Piece piece, int file, int rank)
+    {
+        ArgumentOutOfRangeException.ThrowIfGreaterThan((uint)file, 7u, nameof(file));
+        ArgumentOutOfRangeException.ThrowIfGreaterThan((uint)rank, 7u, nameof(rank));
+        EnsureLoaded();
+        // Same packing as FillAtoms: ordinal in the high bits, (rank<<3)|file square bit below.
+        ushort packed = (ushort)((ChessPositionIdentity.PieceOrdinal(piece) << 6) | (rank << 3) | file);
+        return AtomMemo.GetOrAdd(
+            ChessPositionIdentity.Atom.Scalar(ChessPositionIdentity.PieceSquareDomain, packed),
+            ComposeAtom);
+    }
+
     private static ChessNode ComposeAtom(ChessPositionIdentity.Atom atom)
     {
         Span<byte> bytes = stackalloc byte[33];
