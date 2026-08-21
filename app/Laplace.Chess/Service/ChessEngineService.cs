@@ -145,11 +145,18 @@ public sealed class ChessEngineService : IAsyncDisposable
     /// Opening explorer over exact successors projected from line trajectories. Player
     /// repertoire is read through playing→line provenance rather than per-ply MOVE evidence.
     ///
-    /// VALIDATED 2026-08-21: the MOVE relation holds 0 attestations and 0 consensus rows
-    /// corpus-wide, so calling those ratings a "secondary cache" overstated them -- they are
-    /// empty, and this path has always been carried by the trajectory successors alone.
-    /// chess.moves() now also reads the trajectory arm, so the two agree instead of one
-    /// silently returning nothing.
+    /// MEASURED 2026-08-21: the MOVE relation holds 0 attestations and 0 consensus rows
+    /// corpus-wide -- the typed-trajectory refactor removed the per-ply MOVE evidence that
+    /// fed those cells (#840 records them as they were: e4 at 305,376 witnesses with real
+    /// eff_mu/rd; #838 is the reseed that restores them). Until then chess.moves() returns
+    /// nothing and this path is carried by the trajectory successors alone. Do NOT make
+    /// chess.moves synthesise rows to look populated: tried in #1274, reverted in #1276 --
+    /// a synthetic row flips hasRating true with eff_mu 0 and every move reported -1500.
+    ///
+    /// LATENCY, measured after the revert: geometry_successors_typed on the START position
+    /// alone is 136.7s (the position is a constituent of ~1.64M projection trajectories, so
+    /// the containment probe unpacks the corpus to count 20 successors). Explore's ~145s on
+    /// hot positions is that surface, not the join #1276 removed.
     /// </summary>
     public async Task<ChessExploreResponse> ExploreAsync(
         string fen, string? player = null, int limit = 12, CancellationToken ct = default)

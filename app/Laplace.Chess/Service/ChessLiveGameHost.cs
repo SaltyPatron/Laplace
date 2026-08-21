@@ -199,11 +199,14 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
 
                 // The player/head-to-head cells are bounded, explicitly reusable statistics.
                 // Move, position, substructure and exact-line outcomes are NOT deposited --
-                // they are recovered by folding this playing's result together with its line
-                // trajectory. VALIDATED 2026-08-21: that recovery did not exist when this
-                // comment was written; the deposit had been removed and nothing replaced it,
-                // so every consumer read zeros. LearnedPst.ReadWhite implements it for the
-                // piece-square table (ChessReplay.ForEachBoard over witnessed lines).
+                // per-constituent outcome rows are the write amplification this model
+                // refuses. They are recovered from what is stored: LearnedPst.ReadWhite
+                // projects the move-keyed fold (chess.learned_moves over each game's
+                // HAS_RESULT + move trajectory) onto the piece-square table, and
+                // ChessStockfishEval is the census that materializes positions with
+                // HAS_EVAL/MOVE_QUALITY when dispatched (ingest source "chess-eval";
+                // never yet run for this corpus -- ingest_run_journal has no
+                // ChessStockfish row, measured 2026-08-21).
                 if (session.WhitePlayerId is { } w2)
                     ChessGraph.AppendPlayerResult(
                         b, w2, session.BlackPlayerId, result.ForMover(0), WitnessWeight,

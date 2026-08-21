@@ -94,7 +94,7 @@ export function PstGrid() {
             )}
           </div>
           <Muted className={styles.foot}>
-            All 64 squares folded from witnessed games (384 piece-square cells). PeSTO floor + learned
+            384 piece-square cells projected from the move-keyed fold over witnessed games. PeSTO floor + learned
             deviation · green = better square, red = worse ·{' '}
             {covered}/64 squares with evidence ({totalWitness.toFixed(0)} witnesses) on {PIECE_NAME[piece]}
           </Muted>

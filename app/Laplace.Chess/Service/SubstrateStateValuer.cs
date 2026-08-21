@@ -36,18 +36,17 @@ public sealed class SubstrateStateValuer : IStateValuer
             }
         }
 
-        // VALIDATED 2026-08-21: this returns neutral for everything. Measured on the live
-        // substrate, zero consensus rows and zero attestations carry a position-constituent
-        // subject, so every lookup here misses. The previous comment blamed a "separate
-        // promotion pass" that has never existed in this tree -- grep finds only comments
-        // describing one. Recording a game genuinely does not deposit its result onto every
-        // constituent, and it should not: a game is one trajectory, and exploding it into
-        // per-constituent rows is the write amplification this design refuses.
-        //
-        // What was missing is a READER that folds the stored trajectories instead of asking
-        // for rows nothing writes. LearnedPst.ReadWhite now does that for the piece-square
-        // table. This valuer has not been moved onto the same footing yet, so it still
-        // returns neutral -- honestly, but it is a stale reader, not a pending write.
+        // MEASURED 2026-08-21: this returns neutral for everything today -- zero consensus
+        // rows and zero attestations carry a position-constituent subject. An earlier
+        // rewrite of this comment claimed the promotion pass "has never existed in this
+        // tree". That was FALSE and is retracted: ChessStockfishEval.DeriveGame IS the
+        // pass -- it materializes each position (ChessGraph.EmitComposed) and deposits
+        // HAS_EVAL / MOVE_QUALITY -- dispatched as ingest source "chess-eval"
+        // (IngestDispatchTable) and by seed-chess-eval.yml. AppendEval and
+        // AppendMoveQuality each have exactly one caller, both in that lane, and the
+        // ingest_run_journal holds no ChessStockfish run, so the lane has simply never
+        // been dispatched for this corpus. Neutral-until-census is the design working;
+        // the original comment here was accurate all along.
         var stats = await ReadOutcomeStatsAsync(distinct, ct).ConfigureAwait(false);
 
         for (int i = 0; i < n; i++)
