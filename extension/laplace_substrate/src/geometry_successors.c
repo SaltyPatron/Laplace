@@ -12,6 +12,8 @@
 #include "spi_common.h"
 #include "spi_nested.h"
 
+#include "laplace/core/mantissa.h"
+
 /*
  * structural.geometry_successors_batch(points, limit, window)
  *   -> TABLE(point_id bytea, successor_id bytea, seen bigint)
@@ -44,14 +46,22 @@
  * dedups for the containment index and would break adjacency).
  */
 
+/* MEASURED 2026-08-21, the reason this is ONE WKB BLOB PER TRAJECTORY and not the
+ * former per-vertex LATERAL: the start position is a constituent of ~1.64M type-3
+ * trajectories, and `CROSS JOIN LATERAL laplace_trajectory_constituents(...)
+ * ORDER BY p.id, c.ordinal` materialized AND SORTED ~140M SPI tuples to answer a
+ * 20-row question -- 136.7s for one call, which was the entire /chess/explore
+ * latency (receipt on #939). The vertex order inside a LINESTRING ZM WKB IS the
+ * ordinal order, so the sort bought nothing and every per-vertex tuple carried
+ * ~60 bytes of executor overhead around 32 bytes of payload. One row per
+ * trajectory, vertices decoded here with the same mantissa_unpack the rest of
+ * the tree uses. */
 static const char *BATCH_UNPACK_QUERY =
-    "SELECT p.id, c.entity_id "
+    "SELECT public.ST_AsBinary(p.trajectory) "
     "FROM laplace.physicalities p "
-    "CROSS JOIN LATERAL public.laplace_trajectory_constituents(p.trajectory) c "
     "WHERE p.type = $2 "
     "AND p.trajectory IS NOT NULL "
-    "AND public.laplace_trajectory_constituent_ids(p.trajectory) && $1 "
-    "ORDER BY p.id, c.ordinal";
+    "AND public.laplace_trajectory_constituent_ids(p.trajectory) && $1";
 
 static const char *SEPARATOR_QUERY =
     "SELECT generation.separator_ids()";
@@ -344,7 +354,7 @@ pg_laplace_geometry_successors_batch(PG_FUNCTION_ARGS)
 
         for (;;)
         {
-            SPI_cursor_fetch(portal, true, 50000);
+            SPI_cursor_fetch(portal, true, 2048);
             if (SPI_processed == 0)
                 break;
 
@@ -352,51 +362,80 @@ pg_laplace_geometry_successors_batch(PG_FUNCTION_ARGS)
             {
                 HeapTuple tuple = SPI_tuptable->vals[r];
                 TupleDesc desc = SPI_tuptable->tupdesc;
-                bool      container_null;
-                bool      token_null;
-                Datum     container_datum = SPI_getbinval(
-                    tuple, desc, 1, &container_null);
-                Datum     token_datum = SPI_getbinval(
-                    tuple, desc, 2, &token_null);
-                bytea    *container;
-                bytea    *token;
+                bool      wkb_null;
+                Datum     wkb_datum = SPI_getbinval(tuple, desc, 1, &wkb_null);
+                bytea    *wkb;
+                const unsigned char *b;
+                Size      len;
+                uint32    wkb_type;
+                uint32    npoints;
+                Size      need;
 
-                if (container_null || token_null)
+                if (wkb_null)
                     continue;
-                container = DatumGetByteaPP(container_datum);
-                token = DatumGetByteaPP(token_datum);
-                if (VARSIZE_ANY_EXHDR(container) != 16 ||
-                    VARSIZE_ANY_EXHDR(token) != 16)
-                    continue;
+                wkb = DatumGetByteaPP(wkb_datum);
+                b = (const unsigned char *) VARDATA_ANY(wkb);
+                len = VARSIZE_ANY_EXHDR(wkb);
 
-                if (!have_current ||
-                    memcmp(current, VARDATA_ANY(container), 16) != 0)
+                /* ISO WKB from ST_AsBinary: byte order, uint32 type, then for
+                 * LINESTRING ZM (3002) uint32 npoints and npoints*4 float8s;
+                 * POINT ZM (3001) is one vertex with no count. The writer emits
+                 * machine-order WKB on this host (byte 1 = NDR/little-endian);
+                 * anything else is refused loudly rather than mis-decoded. */
+                if (len < 5 || b[0] != 1)
+                    elog(ERROR,
+                         "geometry_successors_batch: unexpected WKB framing "
+                         "(len=%zu, order=%d)", (size_t) len, len > 0 ? b[0] : -1);
+                memcpy(&wkb_type, b + 1, 4);
+                if (wkb_type == 3001u)
                 {
-                    if (have_current)
-                        scan_batch_trajectory(raw, n_raw, roots, n_roots,
-                                              separators, pairs, window, backward);
-                    memcpy(current, VARDATA_ANY(container), 16);
-                    have_current = true;
-                    n_raw = 0;
+                    npoints = 1;
+                    b += 5;
+                    need = (Size) 32;
                 }
-
-                if (n_raw == raw_cap)
+                else if (wkb_type == 3002u)
                 {
-                    raw_cap = raw_cap == 0 ? 32 : raw_cap * 2;
+                    if (len < 9)
+                        elog(ERROR, "geometry_successors_batch: truncated WKB");
+                    memcpy(&npoints, b + 5, 4);
+                    b += 9;
+                    need = (Size) npoints * 32;
+                }
+                else
+                    elog(ERROR,
+                         "geometry_successors_batch: trajectory is not POINT/"
+                         "LINESTRING ZM (wkb type %u)", wkb_type);
+                if ((Size) (len - (Size)(b - (const unsigned char *) VARDATA_ANY(wkb)))
+                        < need)
+                    elog(ERROR, "geometry_successors_batch: truncated WKB body");
+
+                if ((int) npoints > raw_cap)
+                {
+                    raw_cap = (int) npoints;
                     raw = raw == NULL
                         ? (char *) palloc((Size) raw_cap * 16)
                         : (char *) repalloc(raw, (Size) raw_cap * 16);
                 }
-                memcpy(raw + (Size) n_raw * 16, VARDATA_ANY(token), 16);
-                n_raw++;
+                n_raw = 0;
+                for (uint32 v = 0; v < npoints; v++)
+                {
+                    double             vertex[4];
+                    mantissa_payload_t payload;
+
+                    memcpy(vertex, b + (Size) v * 32, 32);
+                    mantissa_unpack(vertex, &payload);
+                    memcpy(raw + (Size) n_raw * 16, &payload.entity_id, 16);
+                    n_raw++;
+                }
+                scan_batch_trajectory(raw, n_raw, roots, n_roots,
+                                      separators, pairs, window, backward);
             }
             SPI_freetuptable(SPI_tuptable);
             CHECK_FOR_INTERRUPTS();
         }
         SPI_cursor_close(portal);
-        if (have_current)
-            scan_batch_trajectory(raw, n_raw, roots, n_roots,
-                                  separators, pairs, window, backward);
+        (void) have_current;
+        (void) current;
         if (raw != NULL)
             pfree(raw);
     }
