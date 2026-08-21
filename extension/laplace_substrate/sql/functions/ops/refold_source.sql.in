@@ -1,0 +1,119 @@
+-- ops.refold_source — the NON-DESTRUCTIVE half of evict_source (GH #1176).
+--
+-- THE INCIDENT THIS REPAIRS, measured 2026-08-21: the conceptnet ingest (run
+-- 32502815485) applied all 651 units and then died mid-fold on pool exhaustion
+-- (#1271). The ledger says applied; the folds never drained. Result: relation
+-- aa43543b… holds 163,585 attestations but 28,793 consensus rows; 3d5f97dc…
+-- 108,863 vs 66,789 — lanes whose folds finished are exact. Per-file resume
+-- true-skips the files (their HasLayerCompleted markers exist), so re-running
+-- repairs nothing, and until this procedure existed the ONLY recovery was
+-- evict + full re-ingest: destroying 963,549 evidence rows to rebuild rows
+-- that are all still present.
+--
+-- Consensus is DERIVED state: every cell is exactly the consensus_fold of its
+-- surviving attestations. evict_source already proves it — its step (b) refolds
+-- every touched cell in place after deleting testimony. This is that same arm
+-- with NOTHING deleted: enumerate the cells the source's testimony touches,
+-- refold each from ALL evidence, one uniform period, canonical order
+-- (last_observed_at, id), neutral-prior seed. Idempotent by construction — a
+-- second run recomputes identical values. Touches only laplace.consensus rows
+-- whose evidence already justifies them; never inserts, never deletes.
+--
+-- Batched COMMITs exactly like evict_source, so a canceled repair keeps every
+-- relation already refolded. No SET clause (a procedure carrying one may not
+-- COMMIT); references schema-qualified instead — the ops.evict_source rule.
+--
+-- Run (operator, via the measurement lane like evict):
+--   CALL ops.refold_source('ConceptNetDecomposer');
+DROP PROCEDURE IF EXISTS ops.refold_source(text, boolean);
+
+CREATE OR REPLACE PROCEDURE ops.refold_source(
+    p_source_name text,
+    p_dry_run     boolean DEFAULT false)
+    LANGUAGE plpgsql AS $$
+DECLARE
+    src            bytea;
+    rels           bytea[];
+    rel            bytea;
+    n_cells        bigint;
+    n              bigint;
+    refold_total   bigint := 0;
+    t0             timestamptz := clock_timestamp();
+BEGIN
+    src := laplace.source_id(p_source_name);
+    IF src IS NULL THEN
+        RAISE EXCEPTION 'refold_source: unknown source %', p_source_name;
+    END IF;
+
+    SELECT array_agg(DISTINCT a.type_id) INTO rels
+    FROM laplace.attestations a WHERE a.source_id = src;
+    IF rels IS NULL THEN
+        RAISE LOG 'refold_source: % has no testimony — nothing to refold', p_source_name;
+        RETURN;
+    END IF;
+
+    CREATE TEMP TABLE IF NOT EXISTS _refold_cells (
+        subject_id bytea NOT NULL,
+        object_id  bytea,
+        UNIQUE NULLS NOT DISTINCT (subject_id, object_id));
+
+    FOREACH rel IN ARRAY rels LOOP
+        TRUNCATE _refold_cells;
+        EXECUTE format($q$
+            INSERT INTO _refold_cells (subject_id, object_id)
+            SELECT DISTINCT a.subject_id, a.object_id
+            FROM laplace.attestations a
+            WHERE a.source_id = %L::bytea AND a.type_id = %L::bytea
+            ON CONFLICT DO NOTHING
+        $q$, src, rel);
+        GET DIAGNOSTICS n_cells = ROW_COUNT;
+
+        IF p_dry_run THEN
+            RAISE LOG 'refold_source: WOULD refold % cell(s) of relation %',
+                n_cells, encode(rel, 'hex');
+            CONTINUE;
+        END IF;
+
+        -- The refold arm, verbatim from ops.evict_source step (b): the
+        -- consensus_fold aggregate is the SQL surface of the ingest fold's
+        -- native scalar.
+        EXECUTE format($q$
+            UPDATE laplace.consensus c
+            SET rating           = (f.acc).rating,
+                rd               = (f.acc).rd,
+                volatility       = (f.acc).volatility,
+                witness_count    = (f.acc).witness_count,
+                last_observed_at = f.last_ts
+            FROM (
+                SELECT t.subject_id, t.object_id,
+                       laplace.consensus_fold(false, NULL, NULL, NULL,
+                           a.opponent_rd_fp1e9,
+                           GREATEST(a.observation_count, 1),
+                           a.sum_score_fp1e9,
+                           consensus.glicko2_tau()
+                           ORDER BY a.last_observed_at, a.id) AS acc,
+                       max(a.last_observed_at) AS last_ts
+                FROM _refold_cells t
+                JOIN laplace.attestations a
+                  ON a.type_id = %L::bytea
+                 AND a.subject_id = t.subject_id
+                 AND a.object_id IS NOT DISTINCT FROM t.object_id
+                GROUP BY t.subject_id, t.object_id
+            ) f
+            WHERE c.type_id = %L::bytea
+              AND c.subject_id = f.subject_id
+              AND c.id = laplace.consensus_id(f.subject_id, %L::bytea, f.object_id)
+        $q$, rel, rel, rel);
+        GET DIAGNOSTICS n = ROW_COUNT;
+        refold_total := refold_total + n;
+        RAISE LOG 'refold_source: relation % — % cell(s) touched, % consensus row(s) refolded',
+            encode(rel, 'hex'), n_cells, n;
+        COMMIT;
+    END LOOP;
+
+    DROP TABLE IF EXISTS _refold_cells;
+    RAISE LOG 'refold_source: % — % row(s) refolded across % relation(s) in %s',
+        p_source_name, refold_total, array_length(rels, 1),
+        round(extract(epoch FROM clock_timestamp() - t0)::numeric, 1);
+END;
+$$;
