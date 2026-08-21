@@ -18,6 +18,7 @@ public sealed record PostgresResourcePlan(
     long AutovacuumWorkMemBytes,
     long TempBuffersBytes,
     int IngestConnectionOwners,
+    int ObservabilityConnectionOwners,
     int ServingConnectionOwners,
     int MaintenanceConnectionOwners,
     int ReservedConnections,
@@ -51,9 +52,21 @@ public sealed record PostgresResourcePlan(
         int logical = Math.Max(p, logicalProcessors);
         int maintenance = Math.Max(1, parallelMaintenanceWorkers);
 
-        // One control connection plus simultaneous COPY and fold fans. This is the
-        // actual IngestRunner/NpgsqlWorkingSetApply ownership graph.
-        int ingestConnections = checked(1 + 2 * p);
+        // The ingest run's observability owners. These are NOT optional and they are
+        // NOT part of the COPY/fold fan: NpgsqlIngestObservability holds the run
+        // liveness advisory-lock connection CHECKED OUT for the entire run, and the
+        // file-journal pump and the run-journal writer each open one more while the
+        // fans are already at full width. Omitting them made 1 + 2p exactly equal to
+        // the fan population, so the pool had zero slack and those three owners could
+        // only wait the 15s Timeout and throw "connection pool has been exhausted"
+        // (seed runs 32417964629, 32441233524, 32502815485). Per-file progress
+        // publication did not create this; it made an already-zero-slack pool ask
+        // every 2s per running file instead of once per file.
+        const int observabilityConnections = 3;
+        // One control connection plus simultaneous COPY and fold fans, plus the
+        // observability owners above. This is the actual
+        // IngestRunner/NpgsqlWorkingSetApply/NpgsqlIngestObservability ownership graph.
+        int ingestConnections = checked(1 + 2 * p + observabilityConnections);
         // Request concurrency follows schedulable logical processors. Queueing beyond
         // that only creates more backend memory owners without adding CPU throughput.
         int servingConnections = logical;
@@ -104,6 +117,7 @@ public sealed record PostgresResourcePlan(
             perBackend,
             temp,
             ingestConnections,
+            observabilityConnections,
             servingConnections,
             maintenanceConnections,
             reservedConnections,

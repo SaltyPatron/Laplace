@@ -13,7 +13,7 @@
 
 pg_compute_machine_tuning() {
   local mem_kb cores pcores pdeg mwp avw mwm_kb wm_kb iow
-  local ingest_conns serving_conns maintenance_conns reserved_conns
+  local ingest_conns observability_conns serving_conns maintenance_conns reserved_conns
   local backend_kb backend_processes per_backend_kb temp_kb
   mem_kb=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
   cores=$(nproc)
@@ -72,9 +72,15 @@ pg_compute_machine_tuning() {
   # implementations independently clamped each GUC and oversubscribed RAM when their
   # products were combined. The replacement is one four-domain resource equation:
   # shared cache / backend private / ingest client / OS page cache.
-  # Connection owners are the actual simultaneous ingest COPY+fold fan, serving
-  # logical concurrency, maintenance pool, and one recovery connection.
-  ingest_conns=$(( 1 + 2 * pcores ))
+  # Connection owners are the actual simultaneous ingest COPY+fold fan, the ingest
+  # observability owners (run-liveness lock held for the whole run, file-journal
+  # pump, run-journal writer), serving logical concurrency, maintenance pool, and
+  # one recovery connection. Without the observability term 1 + 2*pcores equalled
+  # the fan population exactly, leaving the ingest pool zero slack; the three
+  # observability owners then waited the full 15s Timeout and threw
+  # "connection pool has been exhausted".
+  observability_conns=3
+  ingest_conns=$(( 1 + 2 * pcores + observability_conns ))
   serving_conns=$cores
   maintenance_conns=$pdeg
   reserved_conns=1

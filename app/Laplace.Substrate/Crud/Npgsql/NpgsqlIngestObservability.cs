@@ -92,10 +92,15 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
     }
 
     /// <summary>
-    /// Hold the per-run session advisory lock for the run's lifetime, on a
-    /// dedicated connection pinned outside the pool (a pooled connection would be
-    /// pruned while the run composes in memory between COPY bursts, releasing the
-    /// lock under a live run). Failure to acquire logs loudly and never aborts
+    /// Hold the per-run session advisory lock for the run's lifetime on a dedicated
+    /// connection. It is CHECKED OUT OF THE INGEST POOL and never returned until the
+    /// run ends, so it is a permanent pool owner, not -- as this comment previously
+    /// claimed -- a connection "pinned outside the pool". Idle pruning cannot reclaim
+    /// it precisely because it is never returned, so the lock is safe under a live
+    /// run; what it is not is free. PostgresResourcePlan.ObservabilityConnectionOwners
+    /// budgets this slot together with the file-journal pump and the run-journal
+    /// writer. Do not add another connection owner to this class without moving that
+    /// number. Failure to acquire logs loudly and never aborts
     /// the ingest — same law as every other journal write in this class — but a
     /// run without the lock is indistinguishable from a corpse to the deploy
     /// gate, so the log line matters.
