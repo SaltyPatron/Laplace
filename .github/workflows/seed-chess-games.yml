@@ -182,3 +182,15 @@ jobs:
       # the source marker prevents duplicate testimony.
       run_gate: true
       run_idempotency: true
+
+  # Backfill arm of the record-time move-outcome law: new games deposit inline during
+  # the seed above; this folds any line recorded BEFORE the law existed and true-skips
+  # (marker-gated) everything else, so on a caught-up substrate it is a fast no-op.
+  move-outcomes:
+    needs: seed
+    uses: ./.github/workflows/_ingest.yml
+    with:
+      source: chess-move-outcomes
+      database: ${{ inputs.database }}
+      timeout_minutes: 720
+      run_gate: true
