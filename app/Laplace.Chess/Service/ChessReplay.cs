@@ -114,6 +114,52 @@ public static partial class ChessReplay
     }
 
     /// <summary>
+    /// Replay a typed move trajectory and hand each board to <paramref name="visit"/>,
+    /// starting with the initial position. Same matching law as <see cref="Replay"/> --
+    /// a move id is resolved only against the legal actions of the current board -- but
+    /// no SAN, no FEN and no position id are produced.
+    ///
+    /// This exists because folds over the corpus do not want strings. LearnedPst read
+    /// 2,000 games in 33.6s through Replay(), almost all of it San.ToSan + Board.ToFen +
+    /// PositionId per ply and then Board.FromFen to undo the FEN it had just built.
+    /// Returns false if the line did not resolve, so a caller can drop a partial game
+    /// rather than fold half of it.
+    ///
+    /// The board handed to the visitor is REUSED between plies. Callers accumulate from
+    /// it; they must not retain it.
+    /// </summary>
+    public static bool ForEachBoard(
+        IReadOnlyList<Hash128> moveIds, Action<Board> visit,
+        string? startFen = null, int maxPlies = 1024)
+    {
+        ArgumentNullException.ThrowIfNull(visit);
+        var board = string.IsNullOrWhiteSpace(startFen)
+            ? Board.FromFen(ChessModality.StartFen)
+            : Board.FromFen(startFen);
+        lock (ChessCompose.Gate)
+        {
+            visit(board);
+            int limit = Math.Min(moveIds.Count, maxPlies);
+            for (int i = 0; i < limit; i++)
+            {
+                var legal = MoveGen.Legal(board);
+                ChessMove? matched = null;
+                foreach (var move in legal)
+                {
+                    Piece moving = board.Squares[move.From];
+                    if (ChessCompose.MoveId(moving, move) != moveIds[i]) continue;
+                    if (matched is not null) return false;   // ambiguous typed move
+                    matched = move;
+                }
+                if (matched is null) return false;           // does not resolve
+                MoveApply.Make(board, matched.Value);
+                visit(board);
+            }
+        }
+        return true;
+    }
+
+    /// <summary>
     /// Replay a line's typed move trajectory. Each move id is matched only against the
     /// legal actions from the current board; PGN/SAN is generated output, never stored identity.
     /// </summary>

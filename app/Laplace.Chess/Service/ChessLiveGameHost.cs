@@ -198,8 +198,12 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
                         lineId, "HAS_BLACK", bp, ChessVocabulary.SourceId, playingId, WitnessWeight));
 
                 // The player/head-to-head cells are bounded, explicitly reusable statistics.
-                // Move, position, substructure, and exact-line outcomes are recovered from
-                // this playing's result plus its associated line trajectory instead.
+                // Move, position, substructure and exact-line outcomes are NOT deposited --
+                // they are recovered by folding this playing's result together with its line
+                // trajectory. VALIDATED 2026-08-21: that recovery did not exist when this
+                // comment was written; the deposit had been removed and nothing replaced it,
+                // so every consumer read zeros. LearnedPst.ReadWhite implements it for the
+                // piece-square table (ChessReplay.ForEachBoard over witnessed lines).
                 if (session.WhitePlayerId is { } w2)
                     ChessGraph.AppendPlayerResult(
                         b, w2, session.BlackPlayerId, result.ForMover(0), WitnessWeight,

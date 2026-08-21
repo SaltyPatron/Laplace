@@ -64,6 +64,7 @@ set(EXT_C_SOURCES
     src/steer_candidates.c
     src/trajectory_generate.c
     src/trajectory_continuations.c
+    src/chess_learned_moves.c
     src/variant_synth.c
     src/astar_path.c
     src/graph_taxonomy.c

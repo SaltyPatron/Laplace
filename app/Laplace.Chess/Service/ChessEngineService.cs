@@ -142,9 +142,14 @@ public sealed class ChessEngineService : IAsyncDisposable
     }
 
     /// <summary>
-    /// Opening explorer over exact successors projected from line trajectories. Optional
-    /// materialized MOVE ratings remain a secondary cache; player repertoire is read through
-    /// playing→line provenance rather than per-ply MOVE evidence.
+    /// Opening explorer over exact successors projected from line trajectories. Player
+    /// repertoire is read through playing→line provenance rather than per-ply MOVE evidence.
+    ///
+    /// VALIDATED 2026-08-21: the MOVE relation holds 0 attestations and 0 consensus rows
+    /// corpus-wide, so calling those ratings a "secondary cache" overstated them -- they are
+    /// empty, and this path has always been carried by the trajectory successors alone.
+    /// chess.moves() now also reads the trajectory arm, so the two agree instead of one
+    /// silently returning nothing.
     /// </summary>
     public async Task<ChessExploreResponse> ExploreAsync(
         string fen, string? player = null, int limit = 12, CancellationToken ct = default)
@@ -267,7 +272,7 @@ public sealed class ChessEngineService : IAsyncDisposable
 
     private (int[][]? Mg, int[][]? Eg) LearnedPstBlend(bool refresh = false)
     {
-        if (refresh) _learnedTried = false;
+        if (refresh) { _learnedTried = false; _learnedCells = null; }
         if (_learnedTried) return (_lpMg, _lpEg);
         _learnedTried = true;
         try { var (lm, le) = LearnedPst.BuildTables(_ds!); (_lpMg, _lpEg) = Evaluation.BlendPeStoWith(lm, le); }
@@ -559,10 +564,20 @@ public sealed class ChessEngineService : IAsyncDisposable
 
 
 
+    private IReadOnlyList<LearnedSquare>? _learnedCells;
+
+    /// <summary>
+    /// The learned table is a BOUNDED statistic -- 384 cells -- folded from unbounded
+    /// testimony, so it is computed once and reused, never per request. The fold replays
+    /// witnessed lines (chess rules live in managed code, not in the extension), which is
+    /// tens of seconds of work; serving that on every GET would be the row-by-row shape
+    /// this codebase pushes into C/SPI everywhere it can. Invalidated by the same
+    /// refresh path that drops the blended PeSTO tables.
+    /// </summary>
     public async Task<IReadOnlyList<LearnedSquare>> LearnedPstAsync(CancellationToken ct = default)
     {
         await EngineAsync(ct);
-        return LearnedPst.ReadWhite(_ds!);
+        return _learnedCells ??= LearnedPst.ReadWhite(_ds!);
     }
 
     public bool StartTraining(double temperature, double weight, int maxPlies, int maxGames = 0)
