@@ -268,12 +268,18 @@
       ],
       "consensus_gates": [
         {
-          "relation": "HAS_POS",
-          "min": 10000
+          "relation": "HAS_PARSE",
+          "min": 100000,
+          "scope": "source_evidence"
+        },
+        {
+          "relation": "HAS_LANGUAGE",
+          "min": 100000,
+          "scope": "source_evidence"
         },
         {
           "relation": "DEPENDS_ON",
-          "min": 100000,
+          "max": 0,
           "family": true
         }
       ]
