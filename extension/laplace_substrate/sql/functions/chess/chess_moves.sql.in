@@ -3,24 +3,46 @@ CREATE OR REPLACE FUNCTION chess.moves(p_position bytea, p_limit integer DEFAULT
     RETURNS TABLE(next_position bytea, eff_mu double precision, rd double precision,
                   witness_count bigint)
     LANGUAGE sql STABLE PARALLEL SAFE AS $$
-    -- Opening explorer over the rated MOVE web: every continuation the fold has
-    -- ever witnessed out of one position, ranked by the conservative estimate.
-    -- Position ids are COMPOSED (ChessCompose merkle path), never
-    -- realize.canonical_id(surface) — callers hold them from composing a board state or
-    -- from a prior chess_moves step. Rides
-    -- consensus_subject_type_eff_mu_btree (subject_id, type_id, rating-2*rd DESC
-    -- WHERE object_id IS NOT NULL); consensus.eff_mu() inlines to that exact expression.
-    -- LIMIT is the only cut — no floors, no thresholds.
-    -- consensus.eff_mu/rd are returned in DISPLAY units (consensus.eff_mu_display's /1e9 round), never
-    -- raw fp1e9; the ORDER BY stays on raw consensus.eff_mu() so the index expression matches.
-    SELECT c.object_id,
-           consensus.eff_mu_display(c.rating, c.rd)::double precision,
-           round((c.rd / 1e9)::numeric, 3)::double precision,
-           c.witness_count
-    FROM laplace.consensus c
-    WHERE c.subject_id = p_position
-      AND c.type_id = laplace.relation_type_id('MOVE')
-      AND c.object_id IS NOT NULL
-    ORDER BY consensus.eff_mu(c.rating, c.rd) DESC
+    -- Opening explorer: every continuation witnessed out of one position.
+    --
+    -- VALIDATED 2026-08-21 against the live substrate. The previous body read ONLY
+    -- laplace.consensus type MOVE and described itself as "the rated MOVE web". That
+    -- web has 0 rows -- MOVE attestations 0, MOVE consensus 0 -- because the typed
+    -- trajectory refactor (#1258/#1263) stopped every chess lane attesting per-ply MOVE
+    -- edges: moves became MOVE-typed entities carried in the line's trajectory
+    -- physicality (see 010681de, which correctly flipped the openings/chess-books MOVE
+    -- gates to max 0 for the same reason). So this function returned 0 rows for EVERY
+    -- input on a corpus of 1.6M games, while tests/sql/chess_read.sql passed because it
+    -- INSERTs the consensus rows it then asserts on.
+    --
+    -- Both sources are read now. Rated MOVE cells still rank first and still return
+    -- DISPLAY units, so explicitly promoted/hot cells (and the regress fixture) behave
+    -- exactly as before. Continuations that exist only as trajectory geometry follow,
+    -- ranked by how many lines were witnessed through them. Positions with neither
+    -- return nothing, which is the honest answer.
+    WITH rated AS (
+        SELECT c.object_id AS next_position,
+               consensus.eff_mu_display(c.rating, c.rd)::double precision AS eff_mu,
+               round((c.rd / 1e9)::numeric, 3)::double precision AS rd,
+               c.witness_count,
+               consensus.eff_mu(c.rating, c.rd) AS ord_key
+        FROM laplace.consensus c
+        WHERE c.subject_id = p_position
+          AND c.type_id = laplace.relation_type_id('MOVE')
+          AND c.object_id IS NOT NULL
+    ),
+    seen AS (
+        SELECT s.successor_id AS next_position, s.seen
+        FROM structural.geometry_successors_typed(
+                 p_position, p_limit, 1, false, 3::smallint) s
+    )
+    SELECT COALESCE(r.next_position, t.next_position),
+           COALESCE(r.eff_mu, 0::double precision),
+           COALESCE(r.rd, 0::double precision),
+           GREATEST(COALESCE(r.witness_count, 0), COALESCE(t.seen, 0))::bigint
+    FROM rated r
+    FULL OUTER JOIN seen t ON t.next_position = r.next_position
+    ORDER BY r.ord_key DESC NULLS LAST,
+             GREATEST(COALESCE(r.witness_count, 0), COALESCE(t.seen, 0)) DESC
     LIMIT p_limit
 $$;
