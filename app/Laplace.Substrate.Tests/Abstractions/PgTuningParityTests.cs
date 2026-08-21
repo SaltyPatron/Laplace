@@ -181,6 +181,40 @@ public class PgTuningParityTests
     }
 
     /// <summary>
+    /// THE INGEST POOL MUST HAVE SLACK OVER ITS FAN. MaxPoolSize on the ingest
+    /// connection string IS IngestConnectionOwners, and the simultaneously live
+    /// owners are: one control connection, the apply COPY fan (ApplyPartitions),
+    /// the consensus fold fan (the same width, gated by ConsensusAccumulatingWriter's
+    /// _foldConnections), AND NpgsqlIngestObservability -- which holds the run
+    /// liveness advisory-lock connection checked out for the whole run and opens one
+    /// more for the file-journal pump and one for the run-journal writer.
+    ///
+    /// At 1 + 2p the sum equalled the fans exactly, so the observability owners had
+    /// no slot to take. They waited the connection string's 15s Timeout and threw
+    /// NpgsqlException "the connection pool has been exhausted", failing the ingest
+    /// from the fold path -- seed runs 32417964629 (chess-syzygy), 32441233524
+    /// (chess PGN) and 32502815485 (conceptnet). An equality here is not a margin;
+    /// the assertion is deliberately strict so the next owner added to the ingest
+    /// process has to be accounted rather than silently starving the fans.
+    /// </summary>
+    [Fact]
+    public void IngestPool_CoversItsFansAndItsObservabilityOwners()
+    {
+        var p = PostgresResourcePlan.Current;
+        int applyFan = IngestTopology.Current.ApplyPartitions;
+        int foldFan = applyFan;
+        int control = 1;
+
+        Assert.True(p.ObservabilityConnectionOwners > 0);
+        Assert.True(
+            p.IngestConnectionOwners >= control + applyFan + foldFan
+                + p.ObservabilityConnectionOwners,
+            $"ingest pool {p.IngestConnectionOwners} cannot seat {control} control + "
+            + $"{applyFan} apply + {foldFan} fold + {p.ObservabilityConnectionOwners} "
+            + "observability owners; the losers time out as 'pool has been exhausted'");
+    }
+
+    /// <summary>
     /// The backend budget must be a real number. If shared_buffers plus the OS reserve
     /// consumed the machine, every work_mem grant would be carved out of nothing -- the
     /// shape of an over-large shared_buffers cap on a small host.
