@@ -450,6 +450,22 @@
         }
       ]
     },
+    "chess-move-outcomes": {
+      "decomposer": "ChessMoveOutcomes",
+      "layer": 22,
+      "prerequisites": [
+        "chess"
+      ],
+      "skip_layer_complete": true,
+      "marker_entities": "Chess_AnalysisMarker",
+      "consensus_gates": [
+        {
+          "relation": "OUTCOME",
+          "min": 1,
+          "scope": "source_evidence"
+        }
+      ]
+    },
     "code": {
       "decomposer": "CodeDecomposer",
       "layer": 2,

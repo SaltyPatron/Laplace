@@ -2722,6 +2722,29 @@ public static class NpgsqlSubstrateReads
             p => p.AddWithValue("doc", documentId),
             ct: ct, label: "trajectory_tree_dump", onError: onError);
 
+    /// <summary>One stored move object: its id and its five atom ids.</summary>
+    public readonly record struct ChessMoveEntityRow(byte[] MoveId, byte[][] Atoms);
+
+    /// <summary>
+    /// Every stored tier-2 move object with its atom constituents. The move vocabulary is
+    /// content-addressed and BOUNDED (7,797 entities over 1.6M games, measured 2026-08-21),
+    /// so this is a small read; callers decode the atoms via ChessPositionIdentity's
+    /// reverse index and look cells up in consensus — no fold, no replay.
+    /// </summary>
+    public static Task<IReadOnlyList<ChessMoveEntityRow>> ChessMoveEntitiesAsync(
+        NpgsqlDataSource dataSource, byte[] moveTypeId, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT e.id, public.laplace_trajectory_constituent_ids(p.trajectory)
+            FROM laplace.entities e
+            JOIN laplace.physicalities p
+              ON p.entity_id = e.id AND p.type = 1 AND p.trajectory IS NOT NULL
+            WHERE e.type_id = @type
+            """,
+            static r => new ChessMoveEntityRow((byte[])r[0], (byte[][])r[1]),
+            p => p.Add("type", NpgsqlDbType.Bytea).Value = moveTypeId,
+            ct: ct, label: "chess_move_entities", onError: onError);
+
     /// <summary>One row of <c>chess.learned_moves</c> with the move's own atoms.</summary>
     public readonly record struct ChessLearnedMoveRow(
         long Plays, double MoverScore, byte[][] Atoms);

@@ -14,7 +14,7 @@ USAGE=(tatoeba opensubtitles)
 if [[ -z "$source" ]]; then
     echo "Usage: $0 <source> [path] | all | safetensors <snapshot-dir>" >&2
     echo "Sources: ${FLOOR[*]} document ${KNOWLEDGE[*]} ${USAGE[*]} \\" >&2
-    echo "         code repo stack tiny-codes tabular recipe chess openings chess-books chess-eval safetensors" >&2
+    echo "         code repo stack tiny-codes tabular recipe chess openings chess-books chess-eval chess-move-outcomes safetensors" >&2
     exit 2
 fi
 
@@ -197,6 +197,15 @@ case "$source" in
         build_cli
         [[ -n "$path" ]] || { echo "Usage: $0 $source <corpus-dir>" >&2; exit 2; }
         ingest "$source" "$path"
+        ;;
+    chess-move-outcomes)
+        # Move-outcome fold over recorded games (calculated layer). No path — the
+        # substrate is the source. Deposits aggregated OUTCOME testimony on the bounded
+        # MOVE vocabulary so learned reads are consensus lookups; per-line markers make
+        # re-runs skip-complete, and a db-reset + reseed re-derives it like every other
+        # calculated layer.
+        build_cli
+        ingest chess-move-outcomes
         ;;
     chess-eval)
         # Stockfish eval pass over recorded games (calculated layer, GH #573). No path —

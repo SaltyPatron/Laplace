@@ -557,6 +557,14 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         var blackPlayer = EmitPlayer(b, blackName, src);
 
         EmitGame(b, lineId, eventId, playingId, gameText, date, result, whitePlayer, blackPlayer, whiteElo, blackElo, src);
+        // Fused move-outcome fold (same law as the GH #600 inline analyze): the result
+        // this game witnesses lands on its MOVE objects at record time, so learned reads
+        // are consensus lookups with no separate pass to remember to run. The marker it
+        // writes lets the chess-move-outcomes backfill true-skip this line.
+        if (parsed.MoveIds.Length > 0)
+            ChessMoveOutcomes.AppendGame(
+                b, lineId, parsed.MoveIds, result, src, PgnWitnessWeight);
+
         RecordStartPosition(b, lineId, playingId, gameText, src);
         RecordOpeningHeaders(b, lineId, gameText, src);
         RecordPlayingTrajectory(b, parsed, src);

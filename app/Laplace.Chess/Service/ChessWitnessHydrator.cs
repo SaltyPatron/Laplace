@@ -406,7 +406,7 @@ internal static class ChessWitnessHydrator
                 lineId, eventId, moves, ParseResult(resultStr),
                 gm.White != default ? gm.White : null,
                 gm.Black != default ? gm.Black : null,
-                startFen, clockTokens, evalTokens, quality, spent));
+                startFen, clockTokens, evalTokens, quality, spent) { MoveIds = moveIds });
         }
         return outList;
     }

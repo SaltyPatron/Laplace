@@ -112,6 +112,13 @@ internal static class IngestDispatchTable
         // search depth (default 10 — the v1 census budget); --nodes N switches to a
         // node-capped search (bounded worst case). A run-level memo searches each unique
         // content-addressed position once regardless of how many games share it.
+        // Move-outcome fold over recorded games: each witnessed line's result deposited as
+        // aggregated OUTCOME testimony on its MOVE objects (7,797-entity vocabulary), so the
+        // learned table is a consensus lookup, never a read-time fold. Marker-gated per line.
+        ("chess-move-outcomes", cli => IngestCommands.IngestViaRunnerAsync(
+            new Laplace.Chess.Service.ChessMoveOutcomesDecomposer(), "",
+            skipLayerCheck: true, cli, skipSourceCompletion: true)),
+
         ("chess-eval", cli => IngestCommands.IngestViaRunnerAsync(
             new Laplace.Chess.Service.ChessStockfishEvalDecomposer(
                 cli.AnalyzeDepth > 0 ? cli.AnalyzeDepth : 10,
