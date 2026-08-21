@@ -23,4 +23,12 @@ public sealed record ChessWitnessedGame(
     : ITrunkRootRecord
 {
     public Hash128 TrunkRootId => PlayingId;
+
+    /// <summary>
+    /// The line's ordered typed move ids — the stored record itself, as unpacked from the
+    /// line's Content trajectory during hydration. Carried so calculated lanes fold on the
+    /// move OBJECTS directly; re-deriving them from the SAN strings would be a second
+    /// resolution of ids the hydrator already held.
+    /// </summary>
+    public IReadOnlyList<Hash128> MoveIds { get; init; } = Array.Empty<Hash128>();
 }

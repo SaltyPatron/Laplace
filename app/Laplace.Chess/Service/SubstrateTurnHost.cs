@@ -141,6 +141,16 @@ public sealed class SubstrateTurnHost : IContentAddresser, IEdgeRatings, IStateV
                 ChessVocabulary.SourceId, playingId, _witnessWeight));
         ChessGraph.AppendLineTrajectory(
             b, lineId, moves, ChessVocabulary.SourceId, nowUs);
+        // Fused move-outcome fold, same law as the PGN and live-game lanes.
+        ChessMoveOutcomes.AppendGame(
+            b, lineId, moves.Select(static n => n.Id).ToArray(),
+            whiteOutcome switch
+            {
+                PlyOutcome.Win => Laplace.Modality.GameOutcome.WonBy(0),
+                PlyOutcome.Loss => Laplace.Modality.GameOutcome.WonBy(1),
+                _ => Laplace.Modality.GameOutcome.Draw,
+            },
+            ChessVocabulary.SourceId, _witnessWeight);
         ChessGraph.AppendPositionProjection(
             b, lineId, line, ChessVocabulary.TrajectorySourceId, nowUs);
         b.AddEntity(

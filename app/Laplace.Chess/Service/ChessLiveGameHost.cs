@@ -183,6 +183,12 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
                         ChessVocabulary.SourceId, nowUs);
                 ChessGraph.AppendLineTrajectory(
                     b, lineId, movePoints, ChessVocabulary.SourceId, nowUs);
+                // Fused move-outcome fold: the finished game's result lands on its MOVE
+                // objects at record time (same law as the PGN lane), so the learned table
+                // updates by consensus fold -- no read-time recompute per game.
+                ChessMoveOutcomes.AppendGame(
+                    b, lineId, Array.ConvertAll(movePoints, static n => n.Id),
+                    result, ChessVocabulary.SourceId, WitnessWeight);
                 WitnessResult(b, lineId, playingId, result);
                 if (session.WhitePlayerId is { } emitWhite && session.WhitePlayerName is { Length: > 0 } whiteName)
                     ChessVocabulary.EmitPlayer(

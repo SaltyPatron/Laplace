@@ -2,6 +2,7 @@ using global::Npgsql;
 using Laplace.Engine.Core;
 using Laplace.Modality;
 using Laplace.Modality.Chess;
+using Laplace.Decomposers.Abstractions;
 using Laplace.SubstrateCRUD.Npgsql;
 
 namespace Laplace.Chess.Service;
@@ -46,6 +47,17 @@ public static class LearnedPst
     {
         ArgumentNullException.ThrowIfNull(ds);
 
+        // PRIMARY: consensus LOOKUP. The chess-move-outcomes lane deposits aggregated
+        // OUTCOME testimony on each MOVE object (ChessMoveOutcomes.DeriveGame) and the
+        // fold rates it; reading those cells is bounded by the move vocabulary (7,797)
+        // and costs milliseconds. This is the same read shape the piece-square version
+        // of this file used -- the difference is that MOVE entities exist, so the cells
+        // have a writer.
+        if (TryReadMoveOutcomeCells(ds) is { } cells) return cells;
+
+        // FALLBACK, pre-dispatch: the read-time sample fold. MEASURED 6.4s cold on the
+        // deployed API and re-paid after every recorded live game -- this path exists
+        // only until `laplace ingest chess-move-outcomes` has run once.
         var rows = NpgsqlSubstrateReads
             .ChessLearnedMovesAsync(ds, gameSample, CancellationToken.None)
             .GetAwaiter().GetResult();
@@ -97,6 +109,64 @@ public static class LearnedPst
                     // magnitude; score-share points land in the same range.
                     outv[k++] = new LearnedSquare(
                         WhitePieces[t], file, rank, (share - mean) * 100.0, w);
+                }
+        }
+        return outv;
+    }
+
+    private static IReadOnlyList<LearnedSquare>? TryReadMoveOutcomeCells(NpgsqlDataSource ds)
+    {
+        var moves = NpgsqlSubstrateReads.ChessMoveEntitiesAsync(
+            ds, RelationTypeRegistry.RelationTypeId("MOVE").ToBytes(), CancellationToken.None)
+            .GetAwaiter().GetResult();
+        if (moves.Count == 0) return null;
+
+        var edgeByMove = new Dictionary<Hash128, Hash128>(moves.Count);
+        foreach (var m in moves)
+        {
+            var id = Hash128.FromBytes(m.MoveId);
+            edgeByMove[id] = ConsensusKeys.EdgeId(
+                id, ChessVocabulary.OutcomeType, ChessVocabulary.OutcomeObject);
+        }
+        var stats = NpgsqlConsensusByIds.Read(
+            ds, edgeByMove.Values.ToArray(), ChessVocabulary.OutcomeType);
+        if (stats.Count == 0) return null;   // lane not yet dispatched
+
+        var sum = new double[6][]; var wt = new double[6][];
+        for (int t = 0; t < 6; t++) { sum[t] = new double[64]; wt[t] = new double[64]; }
+        var index = ChessPositionIdentity.MoveAtomIndex;
+        foreach (var m in moves)
+        {
+            if (!stats.TryGetValue(edgeByMove[Hash128.FromBytes(m.MoveId)], out var cell)) continue;
+            int piece = -1, to = -1;
+            foreach (var atom in m.Atoms)
+            {
+                if (!index.TryGetValue(Hash128.FromBytes(atom), out var d)) continue;
+                if (d.Domain == ChessPositionIdentity.MovePieceDomain) piece = d.Value;
+                else if (d.Domain == ChessPositionIdentity.MoveToDomain) to = d.Value;
+            }
+            if (piece is < 0 or > 11 || to < 0) continue;
+            int type = piece % 6;
+            bool white = piece < 6;
+            int idx = ((white ? to >> 3 : 7 - (to >> 3)) << 3) | (to & 7);
+            // Glicko-rated cell: deviation from the neutral prior, witness-weighted --
+            // the exact units the original piece-square reader fed BuildTables.
+            double dev = (cell.EffMu - GlickoPriors.NeutralMu) / 1e9;
+            sum[type][idx] += dev * cell.Witnesses;
+            wt[type][idx] += cell.Witnesses;
+        }
+
+        var outv = new LearnedSquare[WhitePieces.Length * 64];
+        int k = 0;
+        for (int t = 0; t < 6; t++)
+        {
+            for (int rank = 0; rank < 8; rank++)
+                for (int file = 0; file < 8; file++)
+                {
+                    int sq = (rank << 3) | file;
+                    double w = wt[t][sq];
+                    outv[k++] = new LearnedSquare(
+                        WhitePieces[t], file, rank, w > 0 ? sum[t][sq] / w : 0d, w);
                 }
         }
         return outv;

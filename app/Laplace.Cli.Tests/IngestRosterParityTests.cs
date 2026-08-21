@@ -19,6 +19,7 @@ public sealed class IngestRosterParityTests
             "chess-analyze",
             "chess-books",
             "chess-eval",
+            "chess-move-outcomes",
             "chess-opening-match",
             "chess-syzygy",
             "chess-trajectory",
@@ -45,7 +46,10 @@ public sealed class IngestRosterParityTests
     // no corpus seed is ordered for them (modality-ladder campaign law: identity
     // locks land first, seeds only on operator order), so operational-only is the
     // truthful classification until a media corpus enters the ladder.
-    private const int OperationalOnlyRouteCeiling = 18;
+    // 18 -> 19 for chess-move-outcomes: substrate-sourced, marker-gated chess-modality
+    // pass (the move-outcome fold onto the bounded MOVE vocabulary), the same shape and
+    // the same reasoning as chess-opening-match/chess-eval/chess-trajectory above it.
+    private const int OperationalOnlyRouteCeiling = 19;
 
     [Fact]
     public void RuntimeRoutes_MatchManifestPlusExplicitOperationalRoutes()
