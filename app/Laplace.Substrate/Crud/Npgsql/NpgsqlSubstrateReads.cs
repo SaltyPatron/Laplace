@@ -1827,15 +1827,27 @@ public static class NpgsqlSubstrateReads
     public static Task<IReadOnlyList<ConsensusInLabeledRow>> ConsensusInLabeledAsync(
         NpgsqlConnection conn, byte[] id, int limit, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
+        // MEASURED 2026-08-21, Carlsen (1d4e1926...), 40 rows, warm backend, and the
+        // reason this projection is tier-gated: the previous label chain ended in
+        // realize.render_text_fast(subject, 8), and this surface's in-neighbours are
+        // game LINES -- tier 4, 100-231 move constituents. Rendering a game's whole
+        // composition tree per row is a constituents_closure per id: 14.9s for the 40
+        // rows (22.8s mean over 13 calls in pg_stat_statements), which is the warehouse
+        // page's "Explore entity query failed" whenever it tips past the 30s serving
+        // timeout. Depth 3 alone: still 6.2s. realize.batch on the same ids: 25.4s.
+        // A composition is not a surface: render only low tiers, name or hex the rest.
+        // This shape: 269ms cold, 33ms warm.
         NpgsqlRead.ReadRowsAsync(conn, """
             SELECT encode(c.subject_id, 'hex'),
                    lexical.type_label(c.type_id),
                    COALESCE(
-                       NULLIF(realize._synset_lemma(c.subject_id, converse.word_language(@id)), ''),
-                       NULLIF(realize.render_text_fast(c.subject_id, 8), ''),
+                       NULLIF(realize.resolve_name(c.subject_id), ''),
+                       CASE WHEN e.tier <= 3
+                            THEN NULLIF(realize.render_text_fast(c.subject_id, 3), '') END,
                        left(encode(c.subject_id, 'hex'), 16)),
                    consensus.eff_mu_display(c.rating, c.rd), c.witness_count
             FROM consensus.consensus_in(@id, @limit) c
+            JOIN laplace.entities e ON e.id = c.subject_id
             """,
             static r => new ConsensusInLabeledRow(
                 r.GetString(0), r.GetString(1), r.GetString(2), r.GetDecimal(3), r.GetInt64(4)),
