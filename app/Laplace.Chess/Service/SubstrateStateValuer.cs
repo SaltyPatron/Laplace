@@ -36,10 +36,18 @@ public sealed class SubstrateStateValuer : IStateValuer
             }
         }
 
-        // These cells are an optional derived/materialized lens. Recording a game no
-        // longer deposits its result onto every position constituent; a clean substrate
-        // therefore returns neutral until a separate promotion pass materializes a
-        // reusable structural statistic. Missing materialization is not false evidence.
+        // VALIDATED 2026-08-21: this returns neutral for everything. Measured on the live
+        // substrate, zero consensus rows and zero attestations carry a position-constituent
+        // subject, so every lookup here misses. The previous comment blamed a "separate
+        // promotion pass" that has never existed in this tree -- grep finds only comments
+        // describing one. Recording a game genuinely does not deposit its result onto every
+        // constituent, and it should not: a game is one trajectory, and exploding it into
+        // per-constituent rows is the write amplification this design refuses.
+        //
+        // What was missing is a READER that folds the stored trajectories instead of asking
+        // for rows nothing writes. LearnedPst.ReadWhite now does that for the piece-square
+        // table. This valuer has not been moved onto the same footing yet, so it still
+        // returns neutral -- honestly, but it is a stale reader, not a pending write.
         var stats = await ReadOutcomeStatsAsync(distinct, ct).ConfigureAwait(false);
 
         for (int i = 0; i < n; i++)
