@@ -124,6 +124,7 @@ functions/consensus/walk_branches.sql.in
 functions/consensus/walk_strongest.sql.in
 functions/consensus/consensus_stats.sql.in
 functions/chess/chess_moves.sql.in
+functions/chess/chess_learned_moves.sql.in
 functions/chess/chess_player_moves.sql.in
 functions/consensus/consensus_stats_approx.sql.in
 functions/inspect/consensus_out_readable.sql.in

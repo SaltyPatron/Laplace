@@ -1,0 +1,10 @@
+-- The learned statistic keyed on the object the substrate actually stores.
+-- A piece-square cell is a projection (a dot product over every arrival path);
+-- a move is a lookup. 7,797 distinct tier-2 move entities cover 1.6M games, so
+-- this folds unbounded testimony into a small bounded table. No replay: ordered
+-- move ids are the record and ply parity is the mover.
+DROP FUNCTION IF EXISTS chess.learned_moves(integer);
+CREATE OR REPLACE FUNCTION chess.learned_moves(p_games integer DEFAULT 0)
+    RETURNS TABLE(move_id bytea, plays bigint, mover_score double precision)
+    LANGUAGE C STABLE PARALLEL SAFE
+    AS 'MODULE_PATHNAME', 'pg_laplace_chess_learned_moves';
