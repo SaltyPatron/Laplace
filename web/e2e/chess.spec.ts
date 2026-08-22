@@ -87,6 +87,37 @@ test.describe('chess UI', () => {
     await expect(page.getByRole('grid')).toBeVisible();
   });
 
+  // The gauntlet's whole premise is that you can read the command before you spend an hour
+  // of engine time on it — and that the command is the one the server would actually run,
+  // built by CutechessRunner.BuildArguments rather than re-derived in the browser.
+  test('gauntlet previews the exact cutechess command', async ({ page }) => {
+    await page.goto('/lab/gauntlet');
+    await expect(page.getByRole('heading', { name: 'Engine Gauntlet' })).toBeVisible();
+
+    const command = page.locator('code').first();
+    await expect(command).toContainText('cutechess-cli');
+    await expect(command).toContainText('proto=uci');
+    // A bare -debug is rejected by cutechess-cli and kills the match before game one.
+    await expect(command).toContainText('-debug all');
+
+    await page.getByLabel('Games', { exact: true }).fill('7');
+    await expect(command).toContainText('-rounds 7');
+  });
+
+  test('lab surfaces are separate routes, each with its own jobs', async ({ page }) => {
+    await page.goto('/lab');
+    await expect(page.getByRole('heading', { name: 'Chess Lab' })).toBeVisible();
+    // cutechess is no longer one card among the substrate experiments.
+    await expect(page.getByRole('option', { name: /cutechess/ })).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Gauntlet', exact: true }).click();
+    await expect(page).toHaveURL(/\/lab\/gauntlet$/);
+    await expect(page.getByRole('heading', { name: 'Engine Gauntlet' })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Lichess', exact: true }).click();
+    await expect(page).toHaveURL(/\/lab\/lichess$/);
+  });
+
   test('lab tab completes a read-only job', async ({ page }) => {
     await page.goto('/');
     await page.getByRole('button', { name: 'Lab', exact: true }).click();

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { apiGet, apiPost } from '../api/client';
+import { apiGet, apiPost } from '../../api/client';
 import { Alert, Chip, Field, Input, Muted, Panel, Toggle } from '@ui';
 import styles from './LichessPanel.module.css';
 

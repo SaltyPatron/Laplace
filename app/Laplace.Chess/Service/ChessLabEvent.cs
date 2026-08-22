@@ -37,3 +37,32 @@ public sealed record ChessLabTableEvent(
     IReadOnlyList<IReadOnlyList<string>> Rows) : ChessLabEvent;
 
 public sealed record ChessLabDoneEvent(ChessLabJobState FinalState, string? Message = null) : ChessLabEvent;
+
+/// <summary>
+/// The exact process a job is about to launch, published before it starts. The viewer
+/// renders it as a prompt line and lets the operator copy it, so "what did the lab
+/// actually run?" is answerable from the UI instead of only from a server-side log.
+/// </summary>
+public sealed record ChessLabCommandEvent(
+    string FileName,
+    IReadOnlyList<string> Arguments,
+    string? WorkingDirectory = null) : ChessLabEvent
+{
+    /// <summary>The command as a single copy-pasteable line, POSIX-quoted where needed.</summary>
+    public string CommandLine => string.Join(' ', new[] { FileName }.Concat(Arguments).Select(Quote));
+
+    private static string Quote(string arg) =>
+        arg.Length > 0 && arg.IndexOfAny([' ', '\t', '"', '\'', '\\', '$', '&', '|', ';', '<', '>']) < 0
+            ? arg
+            : '"' + arg.Replace("\\", "\\\\").Replace("\"", "\\\"") + '"';
+}
+
+/// <summary>
+/// One line of raw process I/O. Routed to the job's <see cref="ChessLabTerminal"/> rather
+/// than the structured event channel — see that type for why the two cannot share one.
+/// </summary>
+public sealed record ChessLabTerminalEvent(
+    string Stream,
+    string Text,
+    string? Engine = null,
+    string? Direction = null) : ChessLabEvent;

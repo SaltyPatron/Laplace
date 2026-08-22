@@ -27,3 +27,12 @@ test('Chess Lab tab loads with accessible form controls', async ({ page }) => {
     .analyze();
   expect(results.violations.filter((v) => v.impact === 'critical' || v.impact === 'serious')).toEqual([]);
 });
+
+test('Engine Gauntlet surface has no critical a11y violations', async ({ page }) => {
+  await page.goto('/lab/gauntlet');
+  await expect(page.getByRole('heading', { name: 'Engine Gauntlet' })).toBeVisible();
+  const results = await new AxeBuilder({ page })
+    .include('main')
+    .analyze();
+  expect(results.violations.filter((v) => v.impact === 'critical' || v.impact === 'serious')).toEqual([]);
+});

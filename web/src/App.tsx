@@ -6,7 +6,7 @@ import { QueryConsole } from './query/QueryConsole';
 import { TopicView } from './topic/TopicView';
 import { BillingView } from './billing/BillingView';
 import { ChessView } from './chess/ChessView';
-import { ChessLabView } from './chess/ChessLabView';
+import { LabView } from './chess/lab/LabView';
 import { ChessDbView } from './chess/db/ChessDbView';
 import { ExploreView } from './explore/ExploreView';
 import { AdminView } from './admin/AdminView';
@@ -73,7 +73,7 @@ function Shell() {
           <Route path="/explore/*" element={<ExploreView />} />
           <Route path="/chess/*" element={<ChessDbView />} />
           <Route path="/play" element={<ChessView />} />
-          <Route path="/lab" element={<ChessLabView />} />
+          <Route path="/lab/*" element={<LabView />} />
           <Route path="/billing" element={<BillingView />} />
           <Route path="/operator" element={<AdminView />} />
         </Routes>

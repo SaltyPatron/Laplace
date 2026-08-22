@@ -20,13 +20,19 @@ export const SliderField = forwardRef<HTMLDivElement, SliderFieldProps>(function
 ) {
   const clamp = (n: number) => Math.min(max, Math.max(min, n));
 
+  // Snap to the control's own step. This was a bare Math.round, which is correct only while
+  // every step is 1: a 0.1-step slider accepted 0.3 from the range handle and then rewrote it
+  // to the minimum the moment the paired number box was touched.
+  const decimals = (String(step).split('.')[1] ?? '').length;
+  const snap = (n: number) => (decimals > 0 ? Number(n.toFixed(decimals)) : Math.round(n));
+
   const set = (raw: string) => {
     if (raw === '') {
       onChange('');
       return;
     }
     const n = Number(raw);
-    onChange(Number.isFinite(n) ? String(clamp(Math.round(n))) : raw);
+    onChange(Number.isFinite(n) ? String(clamp(snap(n))) : raw);
   };
 
   const onRange = (e: ChangeEvent<HTMLInputElement>) => onChange(e.target.value);
