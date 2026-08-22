@@ -30,6 +30,31 @@ public static class SyzygyTableUnpack
         return sq;
     }
 
+    /// <summary>
+    /// Full-enumeration men ceiling, default 3. Exhaustive unpack walks the RAW
+    /// placement space, which is factorial in men: 3-men is ~500k products/table
+    /// (fine), 4-men ~30M/table (~10^9 across the 30 tables of a 3-4-5 set) and
+    /// 5-men ~1.8×10^9/table (~10^11 across its 110 tables) — centuries and
+    /// petabytes at observed probe rates. Full-enumeration seeding is only viable
+    /// at 3-men scale; coverage for larger materials comes from the game-driven
+    /// path (<c>ChessSyzygy.DeriveGame</c> probes the positions games actually
+    /// reach), not from exhaustive unpack.
+    /// </summary>
+    public const int DefaultMaxMen = 3;
+
+    /// <summary>
+    /// The active ceiling: <c>LAPLACE_SYZYGY_MAX_MEN</c> (mirrors the
+    /// <c>LAPLACE_SYZYGY</c> packaging knob; parse style per ChessShrink), else
+    /// <see cref="DefaultMaxMen"/>. Values below 2 (no material has fewer men
+    /// than the two kings) fall back to the default.
+    /// </summary>
+    public static int ResolveMaxMen() =>
+        int.TryParse(
+            Environment.GetEnvironmentVariable("LAPLACE_SYZYGY_MAX_MEN"),
+            out int v) && v >= 2
+            ? v
+            : DefaultMaxMen;
+
     public static int ParseMen(string materialName)
         => TryParseMaterial(materialName, out var m) ? m.Length : int.MaxValue;
 
