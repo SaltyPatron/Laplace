@@ -1,4 +1,4 @@
-export type LabCategory = 'substrate' | 'diagnostics' | 'external' | 'lichess';
+export type LabCategory = 'substrate' | 'diagnostics' | 'lichess';
 
 export interface LabExperiment {
   kind: string;
@@ -25,14 +25,9 @@ export const LAB_CATEGORIES: { id: LabCategory; label: string; blurb: string }[]
     blurb: 'Quick sanity checks on search strength and game review.',
   },
   {
-    id: 'external',
-    label: 'External gauntlet',
-    blurb: 'Pit Laplace UCI against Stockfish via cutechess-cli.',
-  },
-  {
     id: 'lichess',
     label: 'Lichess & data',
-    blurb: 'Fetch games for ingest. Live play uses the Lichess connectivity panel above.',
+    blurb: 'Fetch games for ingest, and run the bot against live opponents.',
   },
 ];
 
@@ -133,26 +128,6 @@ export const LAB_EXPERIMENTS: LabExperiment[] = [
     recordsLive: false,
   },
   {
-    kind: 'cutechess',
-    title: 'cutechess vs Stockfish',
-    tagline: 'External engine gauntlet.',
-    description:
-      'Runs cutechess-cli: laplace-uci (from install root) vs Stockfish at fixed depth. '
-      + 'Progress streams from the CLI; PGN written when complete.',
-    expect: [
-      'Round-by-round log lines and progress',
-      'games.pgn artifact — use Ingest to add witness evidence if not auto-recorded',
-      'Requires cutechess, Stockfish, Qt, and laplace-uci on the server',
-    ],
-    tips: [
-      'Check engine chips above — all four must be green.',
-      'Rounds × 2 games (colors alternate). Depth is UCI go depth.',
-    ],
-    category: 'external',
-    recordsLive: false,
-    requires: ['cutechess', 'stockfish', 'qt', 'laplaceUci'],
-  },
-  {
     kind: 'lichess-fetch',
     title: 'Fetch player PGN',
     tagline: 'Download games from Lichess or Chess.com.',
@@ -173,8 +148,17 @@ export const LAB_EXPERIMENTS: LabExperiment[] = [
 
 const byKind = new Map(LAB_EXPERIMENTS.map((e) => [e.kind, e]));
 
+/**
+ * Job records carry the server enum name ("SubstrateTest", "LearnedPst"); the catalog and
+ * every start request use the kebab form. Without this the job list rendered raw enum names
+ * because no lookup ever matched.
+ */
+export function normalizeKind(kind: string): string {
+  return kind.includes('-') ? kind : kind.replace(/(?!^)([A-Z])/g, '-$1').toLowerCase();
+}
+
 export function experimentFor(kind: string): LabExperiment | undefined {
-  return byKind.get(kind);
+  return byKind.get(normalizeKind(kind));
 }
 
 export function experimentsInCategory(cat: LabCategory): LabExperiment[] {

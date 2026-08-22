@@ -94,10 +94,60 @@ internal static class ChessEndpoints
                     new { kind = "tactics", label = "Tactics solve rate", @default = new { depth = "6" } },
                     new { kind = "review", label = "PGN review triage", @default = new { depth = "4", maxGames = "10" } },
                     new { kind = "learned-pst", label = "Learned PST grid", @default = new { piece = "PNBRQK" } },
-                    new { kind = "cutechess", label = "cutechess vs Stockfish", @default = new { rounds = "10", st = "1", elo = "2000" } },
+                    new { kind = "cutechess", label = "cutechess vs Stockfish", @default = new { rounds = "10", st = "1", elo = "2000", depth = "0", concurrency = "1", ingest = "true" } },
                     new { kind = "lichess-fetch", label = "Fetch player PGN", @default = new { site = "lichess" } },
                 },
                 engines,
+            });
+        }).WithTags("chess-lab");
+
+        // What the gauntlet WOULD run, resolved against this host's binaries. The form shows
+        // it live as the knobs move, so the operator reads the real argv before spending an
+        // hour of engine time — and it comes from CutechessRunner.BuildArguments, the same
+        // function the job uses, so the preview cannot drift from the thing it previews.
+        app.MapGet("/chess/lab/cutechess/preview", (
+            int? rounds, int? depth, double? st, int? elo, int? concurrency) =>
+        {
+            var options = new CutechessOptions
+            {
+                Rounds = Math.Max(1, rounds ?? 10),
+                Depth = Math.Max(0, depth ?? 0),
+                SecondsPerMove = Math.Max(0.05, st ?? 1),
+                StockfishElo = elo ?? 2000,
+                Concurrency = Math.Max(1, concurrency ?? 1),
+                PgnOut = Path.Combine(ChessLabPaths.LabDir, "{job}", "games.pgn"),
+                Event = "chess-lab/cutechess/{job}",
+            };
+
+            var catalog = ChessLabPaths.Catalog;
+            var required = new (string Name, string Key, string Hint)[]
+            {
+                ("cutechess", "cutechess", "LAPLACE_CUTECHESS"),
+                ("stockfish", "stockfish", "LAPLACE_STOCKFISH"),
+                ("qt", "qt", "LAPLACE_QT_BIN"),
+                ("laplaceUci", "laplaceUci", "publish the API host — laplace-uci ships beside it"),
+            };
+            var missing = required
+                .Where(r => !catalog[r.Key].Found)
+                .Select(r => new { name = r.Name, hint = r.Hint, looked = catalog[r.Key].Path, source = catalog[r.Key].Source })
+                .ToArray();
+
+            var args = CutechessRunner.BuildArguments(
+                options,
+                catalog["laplaceUci"].Path ?? "<laplace-uci>",
+                catalog["stockfish"].Path ?? "<stockfish>");
+            var command = new ChessLabCommandEvent(
+                catalog["cutechess"].Path ?? "<cutechess-cli>", args, ChessLabPaths.LabDir);
+
+            return Results.Json(new
+            {
+                fileName = command.FileName,
+                arguments = args,
+                commandLine = command.CommandLine,
+                workingDirectory = command.WorkingDirectory,
+                games = options.Rounds,
+                ready = missing.Length == 0,
+                missing,
             });
         }).WithTags("chess-lab");
 
@@ -136,12 +186,55 @@ internal static class ChessEndpoints
             }
         }).WithTags("chess-lab");
 
+        // The raw process transcript, separate from /events on purpose: it replays scrollback
+        // to a viewer that arrives late, serves any number of viewers at once, and cannot
+        // starve the structured event channel. `after` resumes a dropped connection — the
+        // client passes the last seq it rendered and gets everything the ring still holds.
+        app.MapGet("/chess/lab/jobs/{jobId}/terminal", async (
+            HttpContext ctx, string jobId, long? after, ChessLabService lab, CancellationToken ct) =>
+        {
+            var terminal = lab.Terminal(jobId);
+            if (terminal is null) { ctx.Response.StatusCode = 404; return; }
+            ctx.Response.Headers.ContentType = "text/event-stream";
+            ctx.Response.Headers.CacheControl = "no-cache";
+            // Proxies that buffer an event stream turn a live transcript into a batch report.
+            ctx.Response.Headers["X-Accel-Buffering"] = "no";
+            await foreach (var line in terminal.ReadAsync(after ?? -1, ct))
+            {
+                await ctx.Response.WriteAsync($"data: {JsonSerializer.Serialize(line, LabEventJson)}\n\n", ct);
+                await ctx.Response.Body.FlushAsync(ct);
+            }
+        }).WithTags("chess-lab");
+
+        app.MapGet("/chess/lab/jobs/{jobId}/terminal.txt", (string jobId, ChessLabService lab) =>
+        {
+            // Prefer the on-disk transcript: the in-memory ring is bounded, so for any run
+            // long enough to be worth saving it is the truncated copy.
+            if (lab.GetJob(jobId)?.Artifacts.TryGetValue("transcript.log", out var file) == true
+                && File.Exists(file))
+                return Results.File(file, "text/plain; charset=utf-8", $"{jobId}-transcript.log");
+
+            var terminal = lab.Terminal(jobId);
+            if (terminal is null) return Results.NotFound();
+            var sb = new System.Text.StringBuilder();
+            foreach (var line in terminal.Snapshot()) sb.AppendLine(ChessLabTerminal.Format(line));
+            return Results.Text(sb.ToString(), "text/plain; charset=utf-8");
+        }).WithTags("chess-lab");
+
         app.MapGet("/chess/lab/jobs/{jobId}/artifact/{name}", (string jobId, string name, ChessLabService lab) =>
         {
             var job = lab.GetJob(jobId);
             if (job is null || !job.Artifacts.TryGetValue(name, out var path) || !File.Exists(path))
                 return Results.NotFound();
-            return Results.File(path, "application/x-chess-pgn", name);
+            // Artifacts are no longer all PGN — a transcript served as x-chess-pgn opens in
+            // whatever the browser reserves for chess files instead of as text.
+            var contentType = Path.GetExtension(path).ToLowerInvariant() switch
+            {
+                ".pgn" => "application/x-chess-pgn",
+                ".log" or ".txt" => "text/plain; charset=utf-8",
+                _ => "application/octet-stream",
+            };
+            return Results.File(path, contentType, name);
         }).WithTags("chess-lab");
 
         app.MapPost("/chess/lab/jobs/{jobId}/ingest", async (string jobId, ChessLabService lab, CancellationToken ct) =>

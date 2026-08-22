@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { apiGet, apiPost } from '../api/client';
+import { apiGet, apiPost } from '../../api/client';
 import {
   Alert,
   Button,
@@ -20,12 +20,13 @@ import {
   experimentFor,
   experimentsInCategory,
   LAB_CATEGORIES,
+  LAB_EXPERIMENTS,
+  type LabCategory,
   type LabExperiment,
-} from './lab/experiments';
-import { streamLabEvents, type LabEvent, type LabJob, type LabCatalog, type LabJobSpec } from './lab/sse';
-import { LiveBoard, type LabBoardState } from './lab/LiveBoard';
-import { LichessPanel } from './LichessPanel';
-import styles from './ChessLabView.module.css';
+} from './experiments';
+import { streamLabEvents, type LabEvent, type LabJob, type LabCatalog, type LabJobSpec } from './sse';
+import { LiveBoard, type LabBoardState } from './LiveBoard';
+import styles from './ExperimentRunner.module.css';
 
 type FieldDef =
   | { key: string; label: string; type: 'number'; min: number; max?: number; step?: number; unit?: string; help?: string; placeholder?: string }
@@ -68,10 +69,6 @@ const JOB_FIELDS: Record<string, FieldDef[]> = {
     { key: 'maxGames', label: 'Max games', type: 'number', min: 1, max: 100 },
   ],
   'learned-pst': [],
-  cutechess: [
-    { key: 'rounds', label: 'Rounds', type: 'number', min: 1, max: 100, help: 'Each round = 2 games (color swap).' },
-    { key: 'depth', label: 'UCI depth', type: 'number', min: 1, max: 20, help: 'Fixed depth sent to both engines.' },
-  ],
   'lichess-fetch': [
     { key: 'user', label: 'Username', type: 'text', placeholder: 'DrNykterstein' },
     { key: 'site', label: 'Site', type: 'select', options: ['lichess', 'chesscom'], optionLabels: { lichess: 'lichess.org', chesscom: 'chess.com' } },
@@ -97,15 +94,26 @@ function requiresFor(exp: LabExperiment | undefined): string[] {
   return exp?.requires ?? [];
 }
 
-export function ChessLabView() {
+export interface ExperimentRunnerProps {
+  /** Which category blocks this surface owns. Every lab operation lives in exactly one. */
+  categories: LabCategory[];
+  initialKind: string;
+}
+
+/**
+ * Pick an experiment, set its parameters, run it, watch the feed. Shared by every lab
+ * surface that is "a list of jobs with forms" — the external gauntlet is not one of those,
+ * which is why it has its own view instead of a seventh card in this grid.
+ */
+export function ExperimentRunner({ categories, initialKind }: ExperimentRunnerProps) {
   const [catalog, setCatalog] = useState<LabCatalog | null>(null);
   const [jobs, setJobs] = useState<LabJob[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [events, setEvents] = useState<LabEvent[]>([]);
   const [boards, setBoards] = useState<Record<number, LabBoardState>>({});
   const [lastGame, setLastGame] = useState<number | null>(null);
-  const [kind, setKind] = useState('substrate-test');
-  const [params, setParams] = useState<Record<string, string>>(() => paramsFor('substrate-test', undefined));
+  const [kind, setKind] = useState(initialKind);
+  const [params, setParams] = useState<Record<string, string>>(() => paramsFor(initialKind, undefined));
   const [starting, setStarting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const esRef = useRef<AbortController | null>(null);
@@ -136,12 +144,27 @@ export function ChessLabView() {
   }, [kind, catalog, activeSpec]);
 
   const engines = catalog?.engines ?? {};
+  const relevantEngines = useMemo(() => {
+    const needed = new Set(
+      LAB_EXPERIMENTS.filter((e) => categories.includes(e.category)).flatMap((e) => e.requires ?? []),
+    );
+    return Object.entries(engines).filter(([name]) => needed.has(name));
+  }, [engines, categories]);
   const missingEngines = requiresFor(experiment).filter((name) => !engines[name]?.found);
   const blockedReason = missingEngines.length > 0
     ? `Install ${missingEngines.map((n) => ENGINE_LABELS[n] ?? n).join(', ')} on the server`
     : null;
 
-  const active = jobs.find((j) => j.id === activeId) ?? jobs[0];
+  // Only this surface's own runs: an experiments list that also showed gauntlet jobs is
+  // precisely the mixing this split undoes.
+  const visibleJobs = useMemo(
+    () => jobs.filter((j) => {
+      const exp = experimentFor(j.kind);
+      return exp !== undefined && categories.includes(exp.category);
+    }),
+    [jobs, categories],
+  );
+  const active = visibleJobs.find((j) => j.id === activeId) ?? visibleJobs[0];
   const activeRunning = active?.state === 'Running' || active?.state === 'Pending';
   const progressPct = active && active.summary.total > 0
     ? Math.min(100, Math.round((100 * active.summary.done) / active.summary.total))
@@ -202,18 +225,14 @@ export function ChessLabView() {
   };
 
   return (
-    <div className={styles.lab}>
-      <header className={styles.hero}>
-        <div>
-          <h3>Chess Lab</h3>
-          <Muted>Run experiments against the substrate and external engines — every result streams live below.</Muted>
-        </div>
-      </header>
-
-      {catalog && (
+    <div className={styles.runner}>
+      {/* Only when something on THIS surface needs an external binary. The strip used to
+          list cutechess, Stockfish and Qt above a page of in-process experiments that touch
+          none of them; binary readiness now lives on the surface that depends on it. */}
+      {catalog && relevantEngines.length > 0 && (
         <section className={styles.engineBar} aria-label="Server engine status">
           <span className={styles.engineBarLabel}>Server tools</span>
-          {Object.entries(engines).map(([name, e]) => (
+          {relevantEngines.map(([name, e]) => (
             <Tooltip key={name}>
               <TooltipTrigger asChild>
                 <Chip variant={e.found ? 'engineOk' : 'engineMissing'}>
@@ -226,16 +245,14 @@ export function ChessLabView() {
               </TooltipContent>
             </Tooltip>
           ))}
-          {Object.keys(engines).length === 0 && <Muted>No engine paths reported by the server.</Muted>}
+
         </section>
       )}
 
       {err && <Alert>{err}</Alert>}
 
-      <LichessPanel />
-
       <Panel title="Choose an experiment">
-        {LAB_CATEGORIES.map((cat) => (
+        {LAB_CATEGORIES.filter((cat) => categories.includes(cat.id)).map((cat) => (
           <div key={cat.id} className={styles.categoryBlock}>
             <div className={styles.categoryHead}>
               <strong>{cat.label}</strong>
@@ -320,10 +337,10 @@ export function ChessLabView() {
         </div>
       </Panel>
 
-      {jobs.length > 0 && (
+      {visibleJobs.length > 0 && (
         <Panel className={styles.jobs} title="Recent jobs">
           <ul className={styles.jobList}>
-            {jobs.map((j) => {
+            {visibleJobs.map((j) => {
               const title = experimentFor(j.kind)?.title ?? j.kind;
               return (
                 <li key={j.id} className={j.id === active?.id ? styles.jobItemSelected : undefined}>

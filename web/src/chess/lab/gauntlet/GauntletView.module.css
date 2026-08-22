@@ -1,0 +1,335 @@
+@layer components {
+  .gauntlet {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-5);
+    min-height: 0;
+  }
+
+  .hero {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+  }
+
+  .hero h3 {
+    margin: 0 0 0.25rem;
+  }
+
+  .hero p,
+  .hero span[class*='muted'] {
+    max-width: 46rem;
+  }
+
+  .readiness {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+  }
+
+  .columns {
+    display: grid;
+    grid-template-columns: minmax(20rem, 1fr) minmax(20rem, 1fr);
+    gap: var(--space-5);
+    align-items: start;
+  }
+
+  @media (max-width: 62rem) {
+    .columns {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .setupCol {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-5);
+    min-width: 0;
+  }
+
+  .setup {
+    min-width: 0;
+  }
+
+  .watch {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-5);
+    min-width: 0;
+  }
+
+  .boardPanel {
+    min-width: 0;
+  }
+
+  .form {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+    gap: 0.65rem 0.9rem;
+    margin-bottom: 0.85rem;
+  }
+
+  .wide {
+    grid-column: 1 / -1;
+  }
+
+  .commandBlock {
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-md);
+    background: var(--color-bg-abyss);
+    padding: 0.5rem 0.6rem;
+    margin-bottom: 0.85rem;
+  }
+
+  .commandHead {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.3rem;
+  }
+
+  .commandLabel {
+    font-size: var(--text-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--color-text-muted);
+  }
+
+  .command {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    line-height: 1.5;
+    /* argv is long by nature; wrap it rather than making the panel scroll sideways. */
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--color-text-primary);
+  }
+
+  .cwd {
+    display: block;
+    margin-top: 0.3rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+  }
+
+  .actions {
+    display: flex;
+    gap: var(--space-3);
+    align-items: center;
+    flex-wrap: wrap;
+    padding-top: 0.55rem;
+    border-top: 1px solid var(--color-border-default);
+  }
+
+  .scoreboard {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(6rem, 1fr));
+    gap: 0.5rem;
+    margin-bottom: 0.7rem;
+  }
+
+  .stat {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    padding: 0.4rem 0.55rem;
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-md);
+    background: var(--color-bg-panel-2);
+  }
+
+  .statLabel {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+  }
+
+  .statValue {
+    font-size: 1.25rem;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+  }
+
+  .statWin {
+    color: var(--color-confirm);
+  }
+
+  .statLoss {
+    color: var(--color-error);
+  }
+
+  .progressWrap {
+    position: relative;
+    height: 1.35rem;
+    background: var(--color-bg-panel-2);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-pill);
+    overflow: hidden;
+  }
+
+  .progressBar {
+    height: 100%;
+    background: var(--color-accent);
+    opacity: 0.5;
+    transition: width 0.25s ease;
+  }
+
+  .progressLabel {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: var(--text-xs);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .artifact {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    margin-top: 0.55rem;
+    font-size: var(--text-sm);
+  }
+
+  .terminalPanel {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .terminal {
+    flex: 1 1 auto;
+    min-height: 22rem;
+    max-height: 34rem;
+  }
+
+  .tableScroll {
+    overflow-x: auto;
+    max-height: 16rem;
+    overflow-y: auto;
+  }
+
+  .table {
+    border-collapse: collapse;
+    width: 100%;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+  }
+
+  .table th,
+  .table td {
+    text-align: left;
+    padding: 0.22rem 0.6rem;
+    border-bottom: 1px solid var(--color-border-default);
+    white-space: nowrap;
+  }
+
+  .table th {
+    color: var(--color-text-muted);
+    font-weight: 500;
+    position: sticky;
+    top: 0;
+    background: var(--color-bg-panel);
+  }
+
+  .table td {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .notes {
+    list-style: none;
+    margin: 0.6rem 0 0;
+    padding: 0;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+
+  .noteError {
+    color: var(--color-error);
+  }
+
+  .noteWarn {
+    color: var(--color-draw);
+  }
+
+  .history {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    max-height: 16rem;
+    overflow-y: auto;
+  }
+
+  .historyItem {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    font: inherit;
+    font-size: var(--text-sm);
+    text-align: left;
+    color: var(--color-text-primary);
+    background: var(--color-bg-panel-2);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-md);
+    padding: 0.3rem 0.55rem;
+    cursor: pointer;
+  }
+
+  .historyItem:hover {
+    border-color: var(--color-accent);
+  }
+
+  .historyItemActive {
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 1px var(--color-accent);
+  }
+
+  .historyId {
+    font-family: var(--font-mono);
+  }
+
+  .historySummary {
+    margin-left: auto;
+    text-align: right;
+  }
+
+  .state {
+    font-size: var(--text-xs);
+    padding: 0.05rem 0.5rem;
+    border-radius: var(--radius-pill);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    border: 1px solid var(--color-border-default);
+    white-space: nowrap;
+  }
+
+  .stateRunning {
+    color: var(--color-accent);
+    border-color: var(--color-accent);
+  }
+
+  .stateCompleted {
+    color: var(--color-confirm);
+  }
+
+  .stateFailed {
+    color: var(--color-error);
+    border-color: var(--color-error);
+  }
+
+  .stateCancelled {
+    color: var(--color-text-muted);
+  }
+}

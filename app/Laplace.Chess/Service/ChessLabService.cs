@@ -90,6 +90,10 @@ public sealed class ChessLabService
     public ChannelReader<ChessLabEvent>? EventReader(string jobId) =>
         _jobs.TryGetValue(jobId, out var slot) ? slot.Channel.Reader : null;
 
+    /// <summary>The job's raw process transcript — replayable, multi-viewer, independent of the event channel.</summary>
+    public ChessLabTerminal? Terminal(string jobId) =>
+        _jobs.TryGetValue(jobId, out var slot) ? slot.Terminal : null;
+
     private async Task RunJobAsync(JobSlot slot, CancellationToken ct)
     {
         try
@@ -144,6 +148,7 @@ public sealed class ChessLabService
 
         Publish(slot, new ChessLabDoneEvent(state, message));
         slot.Channel.Writer.TryComplete();
+        slot.Terminal.Complete();
         _log.LogInformation("chess lab job {JobId} finished ({State})", slot.Job.Id, state);
     }
 
@@ -152,6 +157,14 @@ public sealed class ChessLabService
         if (!slot.Channel.Writer.TryWrite(evt))
             _log.LogWarning("chess lab job {JobId} event dropped (channel full)", slot.Job.Id);
     }
+
+    /// <summary>
+    /// Raw process I/O goes here, never to <see cref="Publish"/>: the event channel is a
+    /// single consumed stream sized for semantic events, and a burst of UCI traffic would
+    /// evict the progress and result frames sharing it.
+    /// </summary>
+    public ChessLabTerminalLine AppendTerminal(JobSlot slot, ChessLabTerminalEvent evt) =>
+        slot.Terminal.Append(evt.Stream, evt.Text, evt.Engine, evt.Direction);
 
     public void UpdateSummary(JobSlot slot, ChessLabJobSummary summary)
     {
@@ -182,6 +195,7 @@ public sealed class ChessLabService
         public readonly object Gate = new();
         public ChessLabJob Job;
         public Channel<ChessLabEvent> Channel { get; }
+        public ChessLabTerminal Terminal { get; } = new();
         public CancellationTokenSource? Cts;
         public Task? RunTask;
 

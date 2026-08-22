@@ -55,8 +55,12 @@ export interface LabCatalog {
   engines: Record<string, LabEngine>;
 }
 
-export async function* streamLabEvents(jobId: string, signal?: AbortSignal): AsyncGenerator<LabEvent> {
-  const res = await fetch(`/chess/lab/jobs/${jobId}/events`, { signal });
+/**
+ * Server-sent events as a typed async iterator. Shared by the structured job feed and the
+ * raw transcript so there is one frame parser, not two that drift.
+ */
+export async function* sseJson<T>(url: string, signal?: AbortSignal): AsyncGenerator<T> {
+  const res = await fetch(url, { signal });
   if (!res.ok || !res.body) throw new Error(`${res.status} SSE failed`);
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
@@ -72,11 +76,15 @@ export async function* streamLabEvents(jobId: string, signal?: AbortSignal): Asy
         buffer = buffer.slice(sep + 2);
         for (const line of block.split('\n')) {
           if (!line.startsWith('data: ')) continue;
-          yield JSON.parse(line.slice(6)) as LabEvent;
+          yield JSON.parse(line.slice(6)) as T;
         }
       }
     }
   } finally {
     reader.releaseLock();
   }
+}
+
+export function streamLabEvents(jobId: string, signal?: AbortSignal): AsyncGenerator<LabEvent> {
+  return sseJson<LabEvent>(`/chess/lab/jobs/${jobId}/events`, signal);
 }
