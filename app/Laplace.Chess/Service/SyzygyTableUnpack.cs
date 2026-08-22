@@ -11,7 +11,9 @@ namespace Laplace.Chess.Service;
 /// locked <c>tb_probe_root</c> only when DTZ is needed (non-draws). Placement walks the
 /// material's index space; there is no Fathom "dump table" API. Parallelism:
 /// <see cref="DecomposerMultiFile{TRecord}"/> runs materials across file workers;
-/// the decomposer invokes one stream per material and the generic scheduler owns fan-out.
+/// the decomposer invokes one stream per material, and concurrent materials share one
+/// compose-worker-sized probe budget (the optional gate on
+/// <see cref="ExtractMaterialAsync"/>) so file fan × probe fan never oversubscribes.
 /// </summary>
 public static class SyzygyTableUnpack
 {
@@ -69,9 +71,14 @@ public static class SyzygyTableUnpack
     /// <summary>
     /// Extract every probeable product for one material table (one <c>.rtbw</c> basename).
     /// WDL probes run in parallel; DTZ uses the locked root probe only for non-draws.
+    /// <paramref name="probeGate"/>, when supplied, is a probe budget SHARED with the other
+    /// concurrently-unpacking materials: each probe holds one slot for its duration, so
+    /// the total probe fan across materials never exceeds the gate's capacity, and the
+    /// tail of a run (few materials still unpacking) widens into the released slots.
     /// </summary>
     public static async IAsyncEnumerable<SyzygyProduct> ExtractMaterialAsync(
         string materialName, ISyzygyProber prober, int workers = 0,
+        SemaphoreSlim? probeGate = null,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         if (!TryParseMaterial(materialName, out var pieces))
@@ -83,7 +90,7 @@ public static class SyzygyTableUnpack
         await foreach (var product in ParallelIngestWork.RunAsync(
                            EnumerateBoardsAsync(pieces, ct),
                            degree,
-                           (board, token) => ProbeBoardAsync(board, prober, token),
+                           (board, token) => ProbeBoardAsync(board, prober, probeGate, token),
                            ct).ConfigureAwait(false))
             yield return product;
     }
@@ -91,22 +98,40 @@ public static class SyzygyTableUnpack
     private static async IAsyncEnumerable<SyzygyProduct> ProbeBoardAsync(
         Board board,
         ISyzygyProber prober,
+        SemaphoreSlim? probeGate,
         [EnumeratorCancellation] CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        if (prober.ProbeWdl(board) is not { } wdl) yield break;
+        SyzygyProduct? product;
+        if (probeGate is null)
+        {
+            product = ProbeBoard(board, prober);
+        }
+        else
+        {
+            // Hold the slot for the probe only — released BEFORE the yield so output
+            // backpressure never parks a slot of the shared budget.
+            await probeGate.WaitAsync(ct).ConfigureAwait(false);
+            try { product = ProbeBoard(board, prober); }
+            finally { probeGate.Release(); }
+        }
+        if (product is { } p) yield return p;
+    }
+
+    private static SyzygyProduct? ProbeBoard(Board board, ISyzygyProber prober)
+    {
+        if (prober.ProbeWdl(board) is not { } wdl) return null;
         int dtz = 0;
         if (wdl != SyzygyNative.Draw)
         {
             // Root probe is process-locked inside the native kernel.
-            if (prober.Probe(board) is not { } full) yield break;
+            if (prober.Probe(board) is not { } full) return null;
             wdl = full.Wdl;
             dtz = full.Dtz;
         }
 
         string surface = Modality.StateKey(new ChessState(board));
-        yield return new SyzygyProduct(surface, ChessCompose.PositionId(surface), wdl, dtz);
-        await Task.CompletedTask;
+        return new SyzygyProduct(surface, ChessCompose.PositionId(surface), wdl, dtz);
     }
 
     internal static async IAsyncEnumerable<Board> EnumerateBoardsAsync(
