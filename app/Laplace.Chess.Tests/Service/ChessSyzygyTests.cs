@@ -354,4 +354,68 @@ public sealed class SyzygyNativeFixtureTests : IClassFixture<SyzygyTablebaseFixt
         Assert.Contains(wdl, a => a.ObjectId == ContentEmitter.RootId("win"));
         Assert.Contains(wdl, a => a.ObjectId == ContentEmitter.RootId("loss"));
     }
+
+    /// <summary>
+    /// The tripartite identity that makes tablebase verdicts reachable from games at all:
+    /// for every ply N of one witnessed game,
+    ///
+    ///   projection[N] == ChessCompose.PositionId(StateKey(board at ply N)) == verdict subject
+    ///
+    /// Leg A is the Projection trajectory the trajectory lane deposits on the LINE, recovered
+    /// through the packed geometry (Trajectory.Constituents) — the same bytes chess.missed_finish
+    /// unpacks server-side. Leg B is an INDEPENDENT replay whose ids go through the interchange
+    /// surface (StateKey → TryFenFromSurface → Board.FromFen → atoms), so the surface round-trip
+    /// is part of what is being proven, not assumed. Leg C is the real Fathom probe over the
+    /// repo's 3-men fixture set. Each leg is produced by the code path production uses.
+    /// </summary>
+    [Fact]
+    public void TripartiteIdentity_ProjectionReplayAndVerdictSubjectsAgree()
+    {
+        const string pgn =
+            "[Event \"T\"]\n[White \"A\"]\n[Black \"B\"]\n[Date \"2024.01.01\"]\n"
+            + "[Result \"1-0\"]\n[SetUp \"1\"]\n[FEN \"4k3/8/8/8/8/8/8/3QK3 w - - 0 1\"]\n\n"
+            + "1. Qd5 Kf8 2. Ke2 1-0\n";
+        var parsed = ChessPgnDecomposer.TryParseGame(pgn)!;
+        var witnessed = ChessAnalyze.WitnessedFromParsed(parsed);
+
+        // Leg A — projection trajectory on the line, ids back out of the geometry.
+        var tb = new SubstrateChangeBuilder(ChessVocabulary.TrajectorySourceId, "test/tripartite-traj");
+        ChessTrajectoryDecomposer.Deposit(tb, witnessed, ChessVocabulary.TrajectorySourceId);
+        var traj = Assert.Single(
+            tb.SetInputUnitsConsumed(1).Build().Physicalities,
+            p => p.EntityId == parsed.LineId && p.Type == PhysicalityType.Projection);
+        var projectionIds = Trajectory.Constituents(traj.TrajectoryXyzm!);
+
+        // Leg B — independent replay; every id crosses the interchange surface round-trip.
+        var m = new ChessModality();
+        var (state, _) = ChessAnalyze.InitialState(witnessed.StartFen, m)!.Value;
+        var replayIds = new List<Hash128> { ChessCompose.PositionId(m.StateKey(state)) };
+        var scratch = new List<ChessMove>(16);
+        foreach (var san in witnessed.Moves)
+        {
+            var mv = San.Resolve(state.Board, san, scratch);
+            Assert.NotNull(mv);
+            state = m.Apply(state, mv!.Value);
+            replayIds.Add(ChessCompose.PositionId(m.StateKey(state)));
+        }
+
+        // Leg C — verdict subjects from the real tablebase probe of the same witnessed game.
+        var sb = new SubstrateChangeBuilder(ChessSyzygy.SourceId, "test/tripartite-syzygy");
+        ChessSyzygy.DeriveGame(sb, witnessed, new SyzygyNativeProber());
+        var change = sb.SetInputUnitsConsumed(1).Build();
+        var wdlSubjects = change.Attestations
+            .Where(a => a.TypeId == ChessVocabulary.HasWdlType)
+            .Select(a => a.SubjectId).ToArray();
+        var dtzSubjects = change.Attestations
+            .Where(a => a.TypeId == ChessVocabulary.HasDtzType)
+            .Select(a => a.SubjectId).ToArray();
+
+        // Non-vacuity: 3 plies -> 4 positions, all 3-men and non-terminal, so every leg
+        // must carry exactly 4 ids — an empty==empty pass would prove nothing.
+        var expected = replayIds.ToArray();
+        Assert.Equal(4, expected.Length);
+        Assert.Equal(expected, projectionIds);
+        Assert.Equal(expected, wdlSubjects);
+        Assert.Equal(expected, dtzSubjects);
+    }
 }
