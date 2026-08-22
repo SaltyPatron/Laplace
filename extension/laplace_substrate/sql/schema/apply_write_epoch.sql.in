@@ -1,0 +1,42 @@
+-- Write epoch for the working-set apply (PR1 of the trusted-novelty series).
+--
+-- Why this exists: the apply path bulk-probes every id the content spine already
+-- claimed novel, because a concurrent writer may have landed overlapping rows
+-- between the unlocked descent and the apply transaction. That probe is the
+-- guard, not the common case — on a quiet substrate nothing intervened and the
+-- probe re-proves absence the descent already knew. A monotonic DB-side write
+-- epoch makes "nothing intervened" PROVABLE: every write-lane transaction calls
+-- nextval BEFORE writing, so an apply that recorded last_value after its own
+-- commit and reads the same value at its next verify has witnessed every
+-- write-lane transaction in between (its own bumps subtracted) and knows no
+-- foreign writer touched the substrate.
+--
+-- THIS PR ONLY INTRODUCES THE EPOCH AND ITS TELEMETRY. Writers bump it and log
+-- the per-apply foreign delta so live seeds quantify how often the trust
+-- condition would hold; no probe/skip decision reads it yet.
+--
+-- Semantics:
+--   * Every write-lane transaction (apply control tx, parallel COPY sub-tx,
+--     attestation merge sub-tx, consensus fold segment, highway-mask deposit)
+--     calls nextval BEFORE its writes.
+--   * Sequence advances survive rollback and crash. That is the CONSERVATIVE
+--     direction: an aborted write still moves the epoch, so the next apply sees
+--     a foreign delta and re-probes — a false "someone wrote" costs one probe;
+--     a rewinding epoch could hide a committed foreign write behind an equal
+--     reading, which would be fatal to a future probe skip.
+--   * CACHE 1, explicitly: per-session value caching would let a writer's bump
+--     land out of order with its writes as observed by another session's
+--     last_value read, and the foreign-delta arithmetic (delta = calls made)
+--     only holds when every nextval is a single uncached increment.
+--
+-- Older installed extensions lack this sequence; writers probe to_regclass once
+-- and degrade to always-probing. Grants match sibling schema objects: none
+-- beyond the extension schema's own — the write lane connects as the
+-- installing role.
+CREATE SEQUENCE IF NOT EXISTS apply_write_epoch CACHE 1;
+
+COMMENT ON SEQUENCE apply_write_epoch IS
+    'Laplace: monotonic write-lane epoch. Every write-lane transaction calls '
+    'nextval before writing; an unchanged last_value across a window proves no '
+    'writer intervened. Advances survive rollback (conservative: aborted writes '
+    'still force the next apply to re-probe).';
