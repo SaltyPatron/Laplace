@@ -64,6 +64,59 @@ public sealed partial class NpgsqlSubstrateWriter
     }
 
     /// <summary>
+    /// Write-epoch telemetry (PR1 of the trusted-novelty series — OBSERVABILITY
+    /// ONLY, no probe/skip decision reads any of this yet). Every write-lane
+    /// transaction bumps laplace.apply_write_epoch BEFORE writing; the epoch is
+    /// a plain sequence, so advances survive rollback/crash — the conservative
+    /// direction (an aborted write still forces the next apply to re-probe).
+    ///
+    /// <see cref="_epochAfterLastCommit"/> is last_value read on the control
+    /// connection AFTER the whole apply committed (control tx + COPY sub-txns +
+    /// merge sub-txns — every bump this apply made). At the next apply the
+    /// control bump returns v, and v − 1 − baseline − ownBumpsSinceBaseline is
+    /// exactly the number of nextval calls made by OTHER transactions in the
+    /// window — the foreign delta a later PR will test against zero to skip the
+    /// verify probe. Two documented simplifications, both conservative
+    /// (overcount foreign, never undercount): bumps by this process's OWN
+    /// background consensus fold/mask lanes (ConsensusAccumulatingWriter) are
+    /// not tracked here and count as foreign; and a bump that lands between the
+    /// merge commit and the last_value read folds into the baseline instead.
+    /// <see cref="_epochOwnBumpsSinceBaseline"/> covers the one path that bumps
+    /// without re-reading the baseline: a journal-replay apply.
+    /// </summary>
+    private int _applyWriteEpochRoute = -1;
+    private long _epochAfterLastCommit = -1;
+    private long _epochOwnBumpsSinceBaseline;
+
+    /// <summary>
+    /// True once any run-persisted presence cache rejected an id at its
+    /// TryAddBounded capacity this run. Logged with the epoch telemetry: a
+    /// future probe skip trusts "no foreign writer AND the cache still holds
+    /// everything this run persisted", and live seeds need to see how often the
+    /// second leg fails too.
+    /// </summary>
+    private bool _presenceCacheOverflowed;
+
+    /// <summary>
+    /// Once-per-writer to_regclass probe, cached like
+    /// <see cref="SupportsDirectAttestationMergeRouteAsync"/>: an older
+    /// installed extension has no epoch sequence and every bump site must
+    /// degrade to the exact pre-epoch behavior instead of failing the apply.
+    /// </summary>
+    private async ValueTask<bool> SupportsApplyWriteEpochAsync(
+        NpgsqlConnection connection, CancellationToken ct)
+    {
+        int known = Volatile.Read(ref _applyWriteEpochRoute);
+        if (known >= 0) return known == 1;
+
+        await using var probe = connection.CreateCommand();
+        probe.CommandText = "SELECT to_regclass('laplace.apply_write_epoch') IS NOT NULL";
+        bool supported = (bool)(await probe.ExecuteScalarAsync(ct) ?? false);
+        Interlocked.CompareExchange(ref _applyWriteEpochRoute, supported ? 1 : 0, -1);
+        return Volatile.Read(ref _applyWriteEpochRoute) == 1;
+    }
+
+    /// <summary>
     /// Run-scoped persisted-id caches for the existence probe, active on the
     /// BeginBulkRunAsync/CompleteBulkRunAsync bracket.
     /// Inside a bulk run applies are serialized (the runner and the apply advisory
@@ -124,6 +177,10 @@ public sealed partial class NpgsqlSubstrateWriter
         _persistedPhysCount = 0;
         _entityPresenceComplete = false;
         _physPresenceComplete = false;
+        // Fresh caches ⇒ fresh overflow telemetry. The epoch baseline is NOT
+        // reset: the sequence is globally monotonic, so a baseline from before
+        // the run still bounds the foreign delta correctly.
+        _presenceCacheOverflowed = false;
         // Content roots proven present feed the spine's pre-derivation ladder skip.
         Laplace.Decomposers.Abstractions.ContentLadderLedger.Begin(ApplySizing.LadderCacheIds);
         ApplySizing.Log();
@@ -145,6 +202,7 @@ public sealed partial class NpgsqlSubstrateWriter
         _persistedPhysCount = 0;
         _entityPresenceComplete = false;
         _physPresenceComplete = false;
+        _presenceCacheOverflowed = false;
         Laplace.Decomposers.Abstractions.ContentLadderLedger.End();
         _tier0LayerComplete = false;
         return Task.CompletedTask;
@@ -327,9 +385,9 @@ public sealed partial class NpgsqlSubstrateWriter
         }
 
         // Per-phase round-trip counters — summed into the returned total AND logged as a
-        // breakdown, so the operator sees WHERE the round-trips go (lock / journal / probe /
-        // copy / merge) instead of one opaque number. Probe fans across connections → atomic.
-        int rtLock = 0, rtJournal = 0, rtProbe = 0, rtCopy = 0, rtMerge = 0;
+        // breakdown, so the operator sees WHERE the round-trips go (lock / journal / epoch /
+        // probe / copy / merge) instead of one opaque number. Probe fans across connections → atomic.
+        int rtLock = 0, rtJournal = 0, rtEpoch = 0, rtProbe = 0, rtCopy = 0, rtMerge = 0;
         int eIns = 0, pIns = 0, aIns = 0;
         long aFold = 0, eSkip = 0, pSkip = 0;
 
@@ -359,6 +417,9 @@ public sealed partial class NpgsqlSubstrateWriter
         }
 
         await using var conn = await _ds.OpenConnectionAsync(ct);
+        // Resolved before the lock: a read-only catalog probe, cached for the
+        // writer's lifetime, so only the very first apply pays it.
+        bool epochRoute = await SupportsApplyWriteEpochAsync(conn, ct);
         // Bulk-apply session SEMANTICS only (FK-trigger bypass, relaxed durability for
         // this bulk tx, no JIT for COPY). Magnitude tuning — work_mem,
         // maintenance_work_mem, parallel workers — is owned by tune-pg.cmd (derived from
@@ -378,6 +439,27 @@ public sealed partial class NpgsqlSubstrateWriter
         try
         {
             rtLock++;
+
+            // Control-transaction epoch bump — nextval BEFORE any write, per the
+            // sequence's law. The returned value doubles as the telemetry read:
+            // nextval values are totally ordered, so v − 1 − baseline −
+            // ownBumpsSinceBaseline is exactly how many OTHER transactions
+            // bumped since this writer's last post-commit baseline. −1 = no
+            // baseline yet (first apply of this writer, or sequence absent).
+            long epochForeignDelta = -1;
+            if (epochRoute)
+            {
+                await using var epoch = conn.CreateCommand();
+                epoch.Transaction = tx;
+                epoch.CommandText = "SELECT nextval('laplace.apply_write_epoch')";
+                long bumped = (long)(await epoch.ExecuteScalarAsync(ct))!;
+                rtEpoch++;
+                if (_epochAfterLastCommit >= 0)
+                    epochForeignDelta = bumped - 1 - _epochAfterLastCommit
+                        - Interlocked.Read(ref _epochOwnBumpsSinceBaseline);
+                // Count our own bump AFTER the delta: v itself is excluded by v − 1.
+                Interlocked.Increment(ref _epochOwnBumpsSinceBaseline);
+            }
 
             if (workingSetToken is Hash128 token)
             {
@@ -401,7 +483,7 @@ public sealed partial class NpgsqlSubstrateWriter
                     _log.LogInformation(
                         "WORKING_SET_REPLAY token={Token} already journaled — skipping apply",
                         token);
-                    return (0, 0, 0, 0, 0, 0, rtLock + rtJournal, true);
+                    return (0, 0, 0, 0, 0, 0, rtLock + rtJournal + rtEpoch, true);
                 }
             }
 
@@ -634,14 +716,23 @@ public sealed partial class NpgsqlSubstrateWriter
             if (persistedPhys is { Count: > 0 })
                 foreach (var id in probePhysIds)
                     if (persistedPhys.ContainsKey(id)) presentPhys.Add(id);
+            // Epoch telemetry rides the existing verify line (PR1: observability
+            // only, no decision reads it). foreign-delta −1 = unknown (first
+            // apply of this writer, or no sequence installed); 0 = the trust
+            // condition a later PR will use to skip this probe would have held.
+            // presence-cache-overflow is the second leg of that future trust
+            // condition (an overflowed cache no longer holds everything this run
+            // persisted, so cache-miss ⇒ novel stops being provable).
             _log.LogInformation(
                 "WS_APPLY verify: {Entities:N0}e+{Phys:N0}p+{Atts:N0}a ids probed in {Ms:N0}ms "
                 + "(skipped {ECache:N0}e/{PCache:N0}p cached, {T0:N0}e tier0-gate, {PEmpty:N0}p/{AEmpty:N0}a empty-relation, {EInv:N0}e smaller-side invert, {AStruct:N0}a novel-by-construction; "
-                + "present: {PresentE:N0}e/{PresentP:N0}p/{PresentA:N0}a)",
+                + "present: {PresentE:N0}e/{PresentP:N0}p/{PresentA:N0}a; "
+                + "epoch foreign-delta {EpochForeignDelta}, presence-cache-overflow {PresenceCacheOverflow})",
                 probeEntIdsUse.Count, probePhysIdsUse.Count, probeAttIdsUse.Count, phaseSw.ElapsedMilliseconds,
                 entCacheSkip, physCacheSkip, tier0Present?.Count ?? 0,
                 physEmptySkip, attEmptySkip, entInvertResolved, attStructuralSkip,
-                presentEntities.Count, presentPhys.Count, presentAtts.Count);
+                presentEntities.Count, presentPhys.Count, presentAtts.Count,
+                epochForeignDelta, _presenceCacheOverflowed);
 
             // Entities: first occurrence of each id, minus stored rows.
             // Kept rows carry their id so parallel COPY groups can own
@@ -927,6 +1018,11 @@ public sealed partial class NpgsqlSubstrateWriter
                     await using var mconn = await _ds.OpenConnectionAsync(token);
                     bool directRoute = await SupportsDirectAttestationMergeRouteAsync(
                         mconn, token);
+                    // Merge sub-transactions are write-lane transactions: bump the
+                    // epoch on the GUC batch (no extra round trip; the batch has no
+                    // positional parameters), nextval before the UPDATEs. Route flag
+                    // already resolved on the control connection this apply.
+                    bool epochBump = Volatile.Read(ref _applyWriteEpochRoute) == 1;
                     await using var mtx = await mconn.BeginTransactionAsync(token);
                     await using (var guc = mconn.CreateCommand())
                     {
@@ -948,9 +1044,11 @@ public sealed partial class NpgsqlSubstrateWriter
                         // 71,829 rows/s, then 242,563 rows at 156 rows/s — a 450x cliff
                         // crossed with no code change, purely from the table growing.
                         guc.CommandText = "SET LOCAL synchronous_commit = off; SET LOCAL jit = off; "
-                            + "SET LOCAL enable_mergejoin = off; SET LOCAL enable_hashjoin = off";
+                            + "SET LOCAL enable_mergejoin = off; SET LOCAL enable_hashjoin = off"
+                            + (epochBump ? "; SELECT nextval('laplace.apply_write_epoch')" : "");
                         await guc.ExecuteNonQueryAsync(token);
                     }
+                    if (epochBump) Interlocked.Increment(ref _epochOwnBumpsSinceBaseline);
                     await using var merge = mconn.CreateCommand();
                     merge.Transaction = mtx;
                     merge.CommandTimeout = 0;
@@ -1027,6 +1125,23 @@ public sealed partial class NpgsqlSubstrateWriter
 
             await tx.CommitAsync(ct);
 
+            // Epoch baseline for the NEXT apply's foreign-delta: last_value read
+            // AFTER every bump this apply made (control tx above, COPY sub-txns,
+            // merge sub-txns) has committed, so any later advance is someone
+            // else's. Reading the sequence relation directly needs no nextval on
+            // this session and takes no lock. A concurrent bump landing between
+            // the merge commits and this read folds into the baseline — kept
+            // simple on purpose; the cost is one undercounted foreign delta in
+            // telemetry, never a wrong skip (nothing skips on this yet).
+            if (epochRoute)
+            {
+                await using var last = conn.CreateCommand();
+                last.CommandText = "SELECT last_value FROM laplace.apply_write_epoch";
+                _epochAfterLastCommit = (long)(await last.ExecuteScalarAsync(ct))!;
+                Interlocked.Exchange(ref _epochOwnBumpsSinceBaseline, 0);
+                rtEpoch++;
+            }
+
             // ONLY now that the whole apply committed are these ids durably persisted, so
             // subsequent applies this run may skip re-probing them. Done post-commit so a
             // rolled-back apply never poisons the cache with never-persisted ids; a miss is
@@ -1045,23 +1160,30 @@ public sealed partial class NpgsqlSubstrateWriter
             // WS re-probed the same shared position graph with "skipped 0e cached". HashSet
             // add of ~360k ids is ~100ms; repeating a 34s bitmap is the gate killer.
             // ContentLadderLedger stays novel/staged-gated below (provenance across sources).
+            // A false return is the capacity rejection (a duplicate returns
+            // true); the sticky flag feeds the verify line's epoch telemetry —
+            // an overflowed cache is the second reason a future probe skip
+            // could not fire, and live seeds should see both legs.
             if (persistedEnt is not null && firstEntIdx.Count > 0)
             {
                 var ids = CollectionsMarshal.AsSpan(ents.Ids);
                 var idx = CollectionsMarshal.AsSpan(firstEntIdx);
                 for (int k = 0; k < idx.Length; k++)
-                    TryAddBounded(persistedEnt, ids[idx[k]],
-                        ApplySizing.EntityPresenceCacheIds, ref _persistedEntityCount);
+                    if (!TryAddBounded(persistedEnt, ids[idx[k]],
+                            ApplySizing.EntityPresenceCacheIds, ref _persistedEntityCount))
+                        _presenceCacheOverflowed = true;
                 if (tier0Present is not null)
                     foreach (var id in tier0Present)
-                        TryAddBounded(persistedEnt, id,
-                            ApplySizing.EntityPresenceCacheIds, ref _persistedEntityCount);
+                        if (!TryAddBounded(persistedEnt, id,
+                                ApplySizing.EntityPresenceCacheIds, ref _persistedEntityCount))
+                            _presenceCacheOverflowed = true;
             }
             if (persistedPhys is not null && probePhysIds.Count > 0)
             {
                 for (int i = 0; i < probePhysIds.Count; i++)
-                    TryAddBounded(persistedPhys, probePhysIds[i],
-                        ApplySizing.PhysicalityPresenceCacheIds, ref _persistedPhysCount);
+                    if (!TryAddBounded(persistedPhys, probePhysIds[i],
+                            ApplySizing.PhysicalityPresenceCacheIds, ref _persistedPhysCount))
+                        _presenceCacheOverflowed = true;
             }
             // Same commit boundary, same reason: a root may only answer "ladder already
             // deposited" once it is durably in the target.
@@ -1093,11 +1215,11 @@ public sealed partial class NpgsqlSubstrateWriter
         }
         }
 
-        int rt = rtLock + rtJournal + rtProbe + rtCopy + rtMerge;
+        int rt = rtLock + rtJournal + rtEpoch + rtProbe + rtCopy + rtMerge;
         _log.LogInformation(
-            "WS_APPLY round-trips: {Total} = {Lock} lock + {Journal} journal + {Probe} probe + {Copy} copy + {Merge} merge "
+            "WS_APPLY round-trips: {Total} = {Lock} lock + {Journal} journal + {Epoch} epoch + {Probe} probe + {Copy} copy + {Merge} merge "
             + "({E:N0}e/{P:N0}p/{A:N0}a novel, {Fold:N0} merged)",
-            rt, rtLock, rtJournal, rtProbe, rtCopy, rtMerge, eIns, pIns, aIns, aFold);
+            rt, rtLock, rtJournal, rtEpoch, rtProbe, rtCopy, rtMerge, eIns, pIns, aIns, aFold);
         return (eIns, pIns, aIns, aFold, eSkip, pSkip, rt, false);
     }
 
@@ -1749,15 +1871,24 @@ public sealed partial class NpgsqlSubstrateWriter
 
                 await using var conn = await _ds.OpenConnectionAsync(ct);
                 await using var tx = await conn.BeginTransactionAsync(ct);
+                // The epoch bump rides the GUC batch — same round trip, and this
+                // command has no positional parameters (Npgsql forbids $n in
+                // multi-statement commands). nextval BEFORE the COPY below, per
+                // the sequence's law; each parallel sub-transaction is its own
+                // write-lane transaction, so each bumps once. The route flag was
+                // resolved on the control connection before any COPY dispatch.
+                bool epochBump = Volatile.Read(ref _applyWriteEpochRoute) == 1;
                 await using (var guc = conn.CreateCommand())
                 {
                     guc.Transaction = tx;
                     guc.CommandText =
                         "SET LOCAL session_replication_role = replica; "
                         + "SET LOCAL synchronous_commit = off; "
-                        + "SET LOCAL jit = off";
+                        + "SET LOCAL jit = off"
+                        + (epochBump ? "; SELECT nextval('laplace.apply_write_epoch')" : "");
                     await guc.ExecuteNonQueryAsync(ct);
                 }
+                if (epochBump) Interlocked.Increment(ref _epochOwnBumpsSinceBaseline);
                 string cols = IntentStage.CopyColumnList(table);
                 await using (var stream = await conn.BeginRawBinaryCopyAsync(
                     $"COPY laplace.{tableName} ({cols}) FROM STDIN (FORMAT BINARY)", ct))

@@ -205,6 +205,57 @@ public class WorkingSetApplyTests
         Assert.Equal(7, games);
     }
 
+    /// <summary>
+    /// Reads how many times laplace.apply_write_epoch has been bumped, or null
+    /// when the installed extension predates the sequence. Two round trips on
+    /// purpose: a single statement embedding "FROM laplace.apply_write_epoch"
+    /// fails at PARSE time when the relation is absent, which is exactly the
+    /// un-upgraded case this probe exists to detect. is_called matters: a fresh
+    /// sequence reports last_value = 1 BEFORE any nextval, and the first
+    /// nextval also returns 1 — raw last_value cannot see the first bump.
+    /// </summary>
+    private async Task<long?> ReadWriteEpochAsync()
+    {
+        await using (var probe = _pg.DataSource.CreateCommand(
+            "SELECT to_regclass('laplace.apply_write_epoch') IS NOT NULL"))
+        {
+            if (await probe.ExecuteScalarAsync() is not true) return null;
+        }
+        await using var read = _pg.DataSource.CreateCommand(
+            "SELECT CASE WHEN is_called THEN last_value ELSE last_value - 1 END "
+            + "FROM laplace.apply_write_epoch");
+        return (long)(await read.ExecuteScalarAsync())!;
+    }
+
+    [Fact]
+    public async Task WorkingSetApply_AdvancesWriteEpoch()
+    {
+        // PR1 write-epoch law: every write-lane transaction bumps
+        // laplace.apply_write_epoch before writing, and a database whose
+        // installed extension predates the sequence degrades to the exact
+        // pre-epoch behavior. The fixture installs whatever laplace_substrate
+        // the host PostgreSQL ships, so both branches are legitimate here:
+        // sequence present ⇒ the apply must advance it; absent ⇒ the apply
+        // must still succeed untouched (the degradation guard is the assert).
+        var before = await ReadWriteEpochAsync();
+
+        var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
+        var change = new SubstrateChangeBuilder(H("source/epoch"), "epoch-unit")
+            .AddEntity(Entity("epoch/e1"))
+            .Build();
+        var result = await writer.ApplyWorkingSetAsync(change);
+        Assert.Equal(1, result.EntitiesInserted);
+
+        var after = await ReadWriteEpochAsync();
+        if (before is null)
+        {
+            Assert.Null(after); // un-upgraded DB: no sequence appeared, apply degraded cleanly
+            return;
+        }
+        Assert.True(after > before,
+            $"apply committed but the write epoch did not advance ({before} -> {after})");
+    }
+
     [Fact]
     public async Task WorkingSetReplay_JournalTokenMakesSecondApplyNoOp()
     {

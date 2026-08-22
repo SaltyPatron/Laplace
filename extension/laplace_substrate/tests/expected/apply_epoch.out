@@ -1,0 +1,47 @@
+-- apply_write_epoch (PR1 of the trusted-novelty series): the write-lane epoch
+-- sequence. Three laws under test: it lives in schema laplace; nextval is
+-- strictly monotonic; and an advance SURVIVES a rolled-back transaction — the
+-- conservative direction (an aborted write still forces the next apply to
+-- re-probe; an epoch that rewound on rollback could hide a committed foreign
+-- write behind an unchanged reading, which would be fatal to a probe skip).
+SELECT n.nspname AS sequence_schema, c.relkind AS kind
+FROM pg_catalog.pg_class c
+JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+WHERE c.relname = 'apply_write_epoch';
+ sequence_schema | kind 
+-----------------+------
+ laplace         | S
+(1 row)
+
+SELECT nextval('laplace.apply_write_epoch') AS e0 \gset
+-- Monotonic: consecutive calls step by exactly one (CACHE 1 — a cached
+-- allocation would break the foreign-delta arithmetic the writers log).
+SELECT nextval('laplace.apply_write_epoch') - :e0 AS step_one;
+ step_one 
+----------
+        1
+(1 row)
+
+-- The advance survives rollback: the aborted transaction's bump stays visible
+-- in last_value, and the next caller continues past it.
+BEGIN;
+SELECT nextval('laplace.apply_write_epoch') - :e0 AS step_two_inside_aborted_tx;
+ step_two_inside_aborted_tx 
+----------------------------
+                          2
+(1 row)
+
+ROLLBACK;
+SELECT last_value - :e0 AS still_two_after_rollback
+FROM laplace.apply_write_epoch;
+ still_two_after_rollback 
+--------------------------
+                        2
+(1 row)
+
+SELECT nextval('laplace.apply_write_epoch') - :e0 AS step_three_after_rollback;
+ step_three_after_rollback 
+---------------------------
+                         3
+(1 row)
+

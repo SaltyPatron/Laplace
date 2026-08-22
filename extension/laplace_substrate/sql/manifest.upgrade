@@ -62,6 +62,7 @@ indexes/consensus_subject_type_eff_mu_btree.sql.in
 indexes/consensus_object_type_btree.sql.in
 schema/tables/consensus_id.sql.in
 schema/tables/highway_mask_dirty.sql.in
+schema/apply_write_epoch.sql.in
 functions/mu/effective_mu.sql.in
 functions/mu/eff_mu.sql.in
 functions/mu/eff_mu_display.sql.in

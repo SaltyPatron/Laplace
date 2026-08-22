@@ -48,6 +48,28 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
         return Volatile.Read(ref _directConsensusRoute) == 1;
     }
 
+    // Write-epoch bump gate (PR1 of the trusted-novelty series). Fold segment
+    // and highway-mask deposit transactions are write-lane transactions, so
+    // each bumps laplace.apply_write_epoch BEFORE its writes — the epoch is
+    // what lets a later apply prove "no writer intervened" instead of
+    // re-probing. Probed once and cached exactly like the direct-route gate
+    // above: an older installed extension has no sequence and every lane must
+    // degrade to the pre-epoch behavior, never fail the fold.
+    private int _applyWriteEpochRoute = -1;
+
+    private async ValueTask<bool> SupportsApplyWriteEpochAsync(
+        NpgsqlConnection connection, CancellationToken ct)
+    {
+        int known = Volatile.Read(ref _applyWriteEpochRoute);
+        if (known >= 0) return known == 1;
+
+        await using var probe = connection.CreateCommand();
+        probe.CommandText = "SELECT to_regclass('laplace.apply_write_epoch') IS NOT NULL";
+        bool supported = (bool)(await probe.ExecuteScalarAsync(ct) ?? false);
+        Interlocked.CompareExchange(ref _applyWriteEpochRoute, supported ? 1 : 0, -1);
+        return Volatile.Read(ref _applyWriteEpochRoute) == 1;
+    }
+
     // PER-TYPE FOLD LANES (2026-07-21), replacing a process-wide
     // SemaphoreSlim(1,1) that let no two deltas overlap for any reason. Consensus
     // is LIST-partitioned by type_id, so two types never share a row: lanes keyed
@@ -650,6 +672,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                 {
                 await using var conn = await _ds.OpenConnectionAsync(token);
                 bool directRoute = await SupportsDirectConsensusRouteAsync(conn, token);
+                bool epochBump = await SupportsApplyWriteEpochAsync(conn, token);
                 await using var tx = await conn.BeginTransactionAsync(token);
                 // consensus_upsert's UPDATE arm is the same shape as attestation_merge's
                 // and carries the same landmine: type_id pinned as a literal, subject_id
@@ -657,10 +680,16 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                 // array driven into a primary key. The nested loop is right at every size;
                 // a Merge Append or hash over the whole relation never is. Pinned here
                 // before the fold grows into the cliff the merge lane already fell off.
+                //
+                // The write-epoch bump rides the same batch — no extra round trip
+                // (this command carries no positional parameters, which Npgsql
+                // forbids in multi-statement commands), nextval before the fold's
+                // writes as the sequence's law requires.
                 await using (var guc = conn.CreateCommand())
                 {
                     guc.Transaction = tx;
-                    guc.CommandText = "SET LOCAL enable_mergejoin = off; SET LOCAL enable_hashjoin = off";
+                    guc.CommandText = "SET LOCAL enable_mergejoin = off; SET LOCAL enable_hashjoin = off"
+                        + (epochBump ? "; SELECT nextval('laplace.apply_write_epoch')" : "");
                     await guc.ExecuteNonQueryAsync(token);
                 }
                 await using var up = conn.CreateCommand();
@@ -813,7 +842,21 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                 try
                 {
                     await using var conn = await _ds.OpenConnectionAsync(ct);
+                    bool epochBump = await SupportsApplyWriteEpochAsync(conn, ct);
                     await using var tx = await conn.BeginTransactionAsync(ct);
+                    // Deposit transactions are write-lane transactions too: bump the
+                    // epoch before the OR-accumulate. Its own command, unlike the
+                    // fold segment's piggyback, because the deposit statement uses
+                    // positional parameters and Npgsql forbids those in
+                    // multi-statement commands — one cheap extra round trip per
+                    // deposit transaction (the support probe itself is cached).
+                    if (epochBump)
+                    {
+                        await using var bump = conn.CreateCommand();
+                        bump.Transaction = tx;
+                        bump.CommandText = "SELECT nextval('laplace.apply_write_epoch')";
+                        await bump.ExecuteNonQueryAsync(ct);
+                    }
                     await using var mask = conn.CreateCommand();
                     mask.Transaction = tx;
                     mask.CommandTimeout = 0;
