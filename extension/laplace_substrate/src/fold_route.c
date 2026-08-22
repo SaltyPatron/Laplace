@@ -42,12 +42,14 @@
  */
 #include "postgres.h"
 
+#include "access/xact.h"
 #include "catalog/pg_type.h"
 #include "executor/spi.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/hsearch.h"
 #include "utils/memutils.h"
+#include "utils/resowner.h"
 
 #include "laplace/core/hash128.h"
 #include "laplace/core/glicko2.h"
@@ -511,9 +513,9 @@ pg_laplace_attestation_merge_type(PG_FUNCTION_ARGS)
  * case). Its precomputed state is a neutral fold — wrong to assign — so the
  * MATCHED arm falls back to the same scalar the pre-native plan called, which
  * folds the concurrent state correctly under EvalPlanQual. CASE keeps that
- * fallback lazy: under the cross-process apply mutex (NpgsqlWorkingSetApply)
- * it never executes, and the (f()).col triple evaluation is acceptable on a
- * path with zero executions. */
+ * fallback lazy: it executes only for rows re-classified after a concurrent-
+ * insert collision (see upsert_merge_with_retry), so the (f()).col triple
+ * evaluation sits on a path whose executions round to zero. */
 static const char *PRIOR_SELECT_SQL =
     "SELECT b.ord, c.rating, c.rd, c.volatility "
     "FROM unnest($1::bytea[], $2::bytea[]) WITH ORDINALITY AS b(id, s, ord) "
@@ -560,6 +562,72 @@ typedef struct CellSeen
 {
     char id[16];
 } CellSeen;
+
+/* Execute one consensus MERGE, absorbing the concurrent-insert race without
+ * leaning on the global apply mutex: if another writer commits a cell of this
+ * run between the prior-state read and this MERGE, the NOT MATCHED arm
+ * collides (MERGE has no ON CONFLICT) and raises unique_violation. The
+ * colliding row is committed, so re-executing the same plan under a fresh
+ * snapshot re-classifies it as MATCHED with b.seen = false — the lazy scalar
+ * fallback arm then folds the concurrent state correctly. Everything the
+ * failed attempt wrote rolls back with its subtransaction; the phase-1 FOR
+ * UPDATE locks belong to the parent transaction and survive. Bounded: every
+ * retry requires a fresh committed collision on this run's cells, so
+ * exhausting the attempts signals something structurally wrong, and the last
+ * error is rethrown as-is. */
+#define UPSERT_MERGE_MAX_ATTEMPTS 4
+
+static uint64
+upsert_merge_with_retry(SPIPlanPtr plan, Datum *vals, const char *label)
+{
+    int attempt = 0;
+
+    for (;;)
+    {
+        MemoryContext   oldcontext = CurrentMemoryContext;
+        ResourceOwner   oldowner = CurrentResourceOwner;
+        volatile uint64 processed = 0;
+        volatile bool   retry = false;
+
+        BeginInternalSubTransaction(NULL);
+        MemoryContextSwitchTo(oldcontext);
+        PG_TRY();
+        {
+            int rc = SPI_execute_plan(plan, vals, NULL, false, 0);
+
+            if (rc != SPI_OK_MERGE)
+                ereport(ERROR,
+                        (errcode(ERRCODE_INTERNAL_ERROR),
+                         errmsg("%s: MERGE failed: %s",
+                                label, SPI_result_code_string(rc))));
+            processed = SPI_processed;
+            ReleaseCurrentSubTransaction();
+            MemoryContextSwitchTo(oldcontext);
+            CurrentResourceOwner = oldowner;
+        }
+        PG_CATCH();
+        {
+            ErrorData *edata;
+
+            MemoryContextSwitchTo(oldcontext);
+            edata = CopyErrorData();
+            FlushErrorState();
+            RollbackAndReleaseCurrentSubTransaction();
+            MemoryContextSwitchTo(oldcontext);
+            CurrentResourceOwner = oldowner;
+
+            if (edata->sqlerrcode != ERRCODE_UNIQUE_VIOLATION ||
+                ++attempt >= UPSERT_MERGE_MAX_ATTEMPTS)
+                ReThrowError(edata);
+            FreeErrorData(edata);
+            retry = true;
+        }
+        PG_END_TRY();
+
+        if (!retry)
+            return processed;
+    }
+}
 
 Datum
 pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
@@ -705,13 +773,7 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
         vals[8] = PointerGetDatum(folds.rating_array);
         vals[9] = PointerGetDatum(folds.rd_array);
         vals[10] = PointerGetDatum(folds.volatility_array);
-        rc = SPI_execute_plan(merge_plan, vals, NULL, false, 0);
-        if (rc != SPI_OK_MERGE)
-            ereport(ERROR,
-                    (errcode(ERRCODE_INTERNAL_ERROR),
-                     errmsg("%s: MERGE failed: %s",
-                            label, SPI_result_code_string(rc))));
-        affected += (int64) SPI_processed;
+        affected += (int64) upsert_merge_with_retry(merge_plan, vals, label);
 
         run_start = j;
     }
@@ -830,14 +892,8 @@ pg_laplace_consensus_upsert_type(PG_FUNCTION_ARGS)
     vals[8] = PointerGetDatum(folds.rating_array);
     vals[9] = PointerGetDatum(folds.rd_array);
     vals[10] = PointerGetDatum(folds.volatility_array);
-    rc = SPI_execute_plan(merge_plan, vals, NULL, false, 0);
-    if (rc != SPI_OK_MERGE)
-        ereport(ERROR,
-                (errcode(ERRCODE_INTERNAL_ERROR),
-                 errmsg("%s: MERGE failed: %s", label,
-                        SPI_result_code_string(rc))));
     {
-        int64 affected = (int64) SPI_processed;
+        int64 affected = (int64) upsert_merge_with_retry(merge_plan, vals, label);
         SPI_finish();
         PG_RETURN_INT64(affected);
     }
