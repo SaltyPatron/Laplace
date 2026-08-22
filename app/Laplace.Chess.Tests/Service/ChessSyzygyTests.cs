@@ -62,6 +62,81 @@ public sealed class ChessSyzygyTests
         Assert.Equal(men, pieces.Length);
     }
 
+    [Theory]
+    [InlineData("KQvK", 3)]
+    [InlineData("KQvKR", 4)]
+    [InlineData("KBBvKN", 5)]
+    public void ParseMen_CountsBothSides(string name, int men)
+        => Assert.Equal(men, SyzygyTableUnpack.ParseMen(name));
+
+    [Fact]
+    public void ParseMen_Unparseable_SitsAboveEveryCeiling()
+        => Assert.Equal(int.MaxValue, SyzygyTableUnpack.ParseMen("not-a-material"));
+
+    [Fact]
+    public void ResolveMaxMen_DefaultsTo3_AndReadsTheEnvKnob()
+    {
+        var prior = Environment.GetEnvironmentVariable("LAPLACE_SYZYGY_MAX_MEN");
+        try
+        {
+            Environment.SetEnvironmentVariable("LAPLACE_SYZYGY_MAX_MEN", null);
+            Assert.Equal(SyzygyTableUnpack.DefaultMaxMen, SyzygyTableUnpack.ResolveMaxMen());
+            Environment.SetEnvironmentVariable("LAPLACE_SYZYGY_MAX_MEN", "5");
+            Assert.Equal(5, SyzygyTableUnpack.ResolveMaxMen());
+            // Below two kings / non-numeric: fall back, never a zero-wide walk.
+            Environment.SetEnvironmentVariable("LAPLACE_SYZYGY_MAX_MEN", "0");
+            Assert.Equal(SyzygyTableUnpack.DefaultMaxMen, SyzygyTableUnpack.ResolveMaxMen());
+            Environment.SetEnvironmentVariable("LAPLACE_SYZYGY_MAX_MEN", "nope");
+            Assert.Equal(SyzygyTableUnpack.DefaultMaxMen, SyzygyTableUnpack.ResolveMaxMen());
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LAPLACE_SYZYGY_MAX_MEN", prior);
+        }
+    }
+
+    [Fact]
+    public void FilterByMenCeiling_KeepsOnlyTablesAtOrUnderTheCeiling()
+    {
+        string[] paths =
+            ["/t/KQvK.rtbw", "/t/KRvK.rtbw", "/t/KQvKR.rtbw", "/t/KBBvKN.rtbw", "/t/junk.rtbw"];
+        var kept = ChessSyzygyDecomposer.FilterByMenCeiling(paths, 3);
+        Assert.Equal(["/t/KQvK.rtbw", "/t/KRvK.rtbw"], kept);
+        var five = ChessSyzygyDecomposer.FilterByMenCeiling(paths, 5);
+        Assert.Equal(4, five.Count);                    // junk (unparseable) never passes
+        Assert.DoesNotContain("/t/junk.rtbw", five);
+    }
+
+    [Fact]
+    public void ExplainEmptyDirectory_TriagesNoTables_CeilingScoped_AndRealAnomaly()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), $"syzygy-explain-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        try
+        {
+            // No .rtbw at all — the documented dependency no-op.
+            var none = ChessSyzygyDecomposer.ExplainEmptyDirectory(dir, 3);
+            Assert.NotNull(none);
+            Assert.Equal("dependency-unset", none.Value.Status);
+
+            // Only tables above the ceiling — deliberate scoping, knob named.
+            File.WriteAllBytes(Path.Combine(dir, "KQvKR.rtbw"), [0]);
+            File.WriteAllBytes(Path.Combine(dir, "KBBvKN.rtbw"), [0]);
+            var scoped = ChessSyzygyDecomposer.ExplainEmptyDirectory(dir, 3);
+            Assert.NotNull(scoped);
+            Assert.Equal("scoped-out", scoped.Value.Status);
+            Assert.Contains("LAPLACE_SYZYGY_MAX_MEN", scoped.Value.Detail);
+
+            // A table under the ceiling with zero records applied stays unexplained.
+            File.WriteAllBytes(Path.Combine(dir, "KQvK.rtbw"), [0]);
+            Assert.Null(ChessSyzygyDecomposer.ExplainEmptyDirectory(dir, 3));
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); } catch (IOException) { }
+        }
+    }
+
     [Fact]
     public void ToBitboards_KQvK_PlacesEveryPiece()
     {

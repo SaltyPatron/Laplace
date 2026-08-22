@@ -11,8 +11,10 @@ namespace Laplace.Chess.Service;
 /// Each <c>.rtbw</c> is one packaging unit (material table) — file workers unpack
 /// materials in parallel; within a material, WDL probes fan out (thread-safe Fathom
 /// <c>tb_probe_wdl</c>) across ONE ComposeWorkers-sized budget shared by all
-/// concurrently-unpacking materials. Path resolution is
-/// <see cref="ChessInput.ResolveSyzygyPackagingDir"/>.
+/// concurrently-unpacking materials. Enumeration is scoped to materials at or under
+/// the men ceiling (<see cref="SyzygyTableUnpack.DefaultMaxMen"/> /
+/// <c>LAPLACE_SYZYGY_MAX_MEN</c>); larger materials are seeded by the game-driven
+/// probe path. Path resolution is <see cref="ChessInput.ResolveSyzygyPackagingDir"/>.
 /// Run: <c>laplace ingest chess-syzygy [&lt;syzygy-dir&gt;]</c>
 /// </summary>
 public sealed class ChessSyzygyDecomposer
@@ -23,6 +25,7 @@ public sealed class ChessSyzygyDecomposer
     private SemaphoreSlim? _probeBudget;
     private bool _packagingMissing;
     private bool _initFailed;
+    private bool _ceilingLogged;
     private string? _resolvedDir;
 
     public ChessSyzygyDecomposer(Func<ISyzygyProber>? proberFactory = null)
@@ -49,6 +52,7 @@ public sealed class ChessSyzygyDecomposer
         _probeBudget ??= new SemaphoreSlim(Math.Max(1, IngestTopology.Current.ComposeWorkers));
         _packagingMissing = false;
         _initFailed = false;
+        _ceilingLogged = false;
         _resolvedDir = ChessInput.ResolveSyzygyPackagingDir(context.EcosystemPath);
         if (_resolvedDir is null)
         {
@@ -85,9 +89,19 @@ public sealed class ChessSyzygyDecomposer
         // were expected; packaging-missing no-op uses the empty list + ExplainEmptyRun.
         try
         {
-            return ChessInput.Resolve(
-                    _resolvedDir, SearchOption.TopDirectoryOnly,
-                    ChessInput.SyzygyExtensions, "chess-syzygy")
+            var all = ChessInput.Resolve(
+                _resolvedDir, SearchOption.TopDirectoryOnly,
+                ChessInput.SyzygyExtensions, "chess-syzygy");
+            // Full enumeration is scoped by the men ceiling BEFORE anything is
+            // declared, so file totals, per-file completion and progress stay honest.
+            // Rationale on SyzygyTableUnpack.DefaultMaxMen: exhaustive unpack is only
+            // viable at 3-men scale (~500k products/table); 4-men is ~10^9 products
+            // and 5-men ~10^11 — larger materials are seeded by the game-driven path
+            // (ChessSyzygy.DeriveGame), not by exhaustive unpack.
+            int maxMen = SyzygyTableUnpack.ResolveMaxMen();
+            var kept = FilterByMenCeiling(all, maxMen);
+            LogCeilingOnce(skipped: all.Count - kept.Count, total: all.Count, maxMen);
+            return kept
                 .OrderBy(p => SyzygyTableUnpack.ParseMen(
                     Path.GetFileNameWithoutExtension(p)!))
                 .ThenBy(p => p, StringComparer.Ordinal)
@@ -98,6 +112,31 @@ public sealed class ChessSyzygyDecomposer
         {
             return Array.Empty<(string, string)>();
         }
+    }
+
+    /// <summary>
+    /// Tables at or under the full-enumeration men ceiling. Unparseable basenames
+    /// (<see cref="SyzygyTableUnpack.ParseMen"/> = MaxValue) never pass — they could
+    /// not be unpacked anyway (TryParseMaterial gates the walk).
+    /// </summary>
+    internal static IReadOnlyList<string> FilterByMenCeiling(
+        IReadOnlyList<string> paths, int maxMen)
+    {
+        var kept = new List<string>(paths.Count);
+        foreach (var p in paths)
+            if (SyzygyTableUnpack.ParseMen(Path.GetFileNameWithoutExtension(p)!) <= maxMen)
+                kept.Add(p);
+        return kept;
+    }
+
+    private void LogCeilingOnce(int skipped, int total, int maxMen)
+    {
+        if (skipped <= 0 || _ceilingLogged) return;
+        _ceilingLogged = true;
+        Console.Error.WriteLine(
+            $"chess-syzygy: enumerating {total - skipped} of {total} table(s); {skipped} exceed "
+            + $"the {maxMen}-men full-enumeration ceiling (raise via LAPLACE_SYZYGY_MAX_MEN; "
+            + "larger materials are seeded by the game-driven probe path, not exhaustive unpack).");
     }
 
     protected override async IAsyncEnumerable<ChessSyzygyRecord> ExtractFileAsync(
@@ -145,18 +184,42 @@ public sealed class ChessSyzygyDecomposer
             return ("dependency-unset",
                 $"ChessSyzygy: Fathom found no tables under {_resolvedDir} — unpack no-op.");
         // The unknown-unit inventory declares zero input units even when tables exist,
-        // so declaredInputUnits == 0 no longer means "no files" — check the directory
-        // itself. Tables present with zero records applied stays UNexplained (a real
-        // anomaly must fail the run, not read as dependency-unset).
+        // so declaredInputUnits == 0 no longer means "no files" — triage the directory
+        // itself.
         if (declaredInputUnits == 0 && _resolvedDir is not null)
+            return ExplainEmptyDirectory(_resolvedDir, SyzygyTableUnpack.ResolveMaxMen());
+        return null;
+    }
+
+    /// <summary>
+    /// Empty-run triage for a RESOLVED packaging directory: no tables at all is the
+    /// documented dependency no-op; tables present but every one above the men ceiling
+    /// is deliberate scoping and names the knob that widens it; tables under the
+    /// ceiling with zero records applied stays UNexplained — a real anomaly must fail
+    /// the run, not read as dependency-unset.
+    /// </summary>
+    internal static (string Status, string Detail)? ExplainEmptyDirectory(
+        string resolvedDir, int maxMen)
+    {
+        IReadOnlyList<string> all;
+        try
         {
-            bool anyTables;
-            try { anyTables = ListFiles(_resolvedDir, DecomposerOptions.Default).Count > 0; }
-            catch (ChessInputException) { anyTables = false; }
-            if (!anyTables)
-                return ("dependency-unset",
-                    "ChessSyzygy: packaging directory resolved but contained no .rtbw files.");
+            all = ChessInput.Resolve(
+                resolvedDir, SearchOption.TopDirectoryOnly,
+                ChessInput.SyzygyExtensions, "chess-syzygy");
         }
+        catch (ChessInputException)
+        {
+            all = Array.Empty<string>();
+        }
+        if (all.Count == 0)
+            return ("dependency-unset",
+                "ChessSyzygy: packaging directory resolved but contained no .rtbw files.");
+        if (FilterByMenCeiling(all, maxMen).Count == 0)
+            return ("scoped-out",
+                $"ChessSyzygy: all {all.Count} table(s) exceed the {maxMen}-men "
+                + "full-enumeration ceiling (LAPLACE_SYZYGY_MAX_MEN) — nothing to unpack; "
+                + "larger materials are seeded by the game-driven probe path.");
         return null;
     }
 
