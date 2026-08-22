@@ -1,9 +1,46 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
+using System.Threading.Channels;
 using Laplace.Modality.Chess;
 
 namespace Laplace.Chess.Service;
+
+/// <summary>Everything the gauntlet needs to build a cutechess-cli invocation.</summary>
+public sealed record CutechessOptions
+{
+    /// <summary>
+    /// Games to play. cutechess's own manual: "for two-player tournaments this option
+    /// [-rounds] should be used to set the total number of games to play" — one game per
+    /// round, with the colours alternating between rounds. The lab treated it as rounds ×2
+    /// for years, so every progress bar counted toward a total twice the size of the match
+    /// it was measuring and stopped, by construction, at 50%.
+    /// </summary>
+    public int Rounds { get; init; } = 10;
+
+    /// <summary>
+    /// Fixed search depth for both engines. Greater than zero selects the unclocked
+    /// <c>tc=inf depth=N</c> mode, where one move can occupy the engine for minutes.
+    /// Zero (the default) uses <see cref="SecondsPerMove"/> instead.
+    /// </summary>
+    public int Depth { get; init; }
+
+    /// <summary>Per-move seconds (cutechess <c>st</c>). Ignored when <see cref="Depth"/> is set.</summary>
+    public double SecondsPerMove { get; init; } = 1;
+
+    /// <summary>Stockfish's <c>UCI_Elo</c> cap, paired with <c>UCI_LimitStrength</c>.</summary>
+    public int StockfishElo { get; init; } = 2000;
+
+    /// <summary>Games in flight. 1 keeps the transcript readable; higher finishes sooner.</summary>
+    public int Concurrency { get; init; } = 1;
+
+    /// <summary>Where cutechess writes the PGN.</summary>
+    public string PgnOut { get; init; } = "";
+
+    /// <summary>PGN <c>Event</c> tag — the provenance string the ingest lane sees.</summary>
+    public string? Event { get; init; }
+}
 
 public static partial class CutechessRunner
 {
@@ -13,18 +50,27 @@ public static partial class CutechessRunner
     [GeneratedRegex(@"Elo difference:\s*([+-]?\d+(?:\.\d+)?)", RegexOptions.IgnoreCase)]
     private static partial Regex EloRegex();
 
-    // cutechess-cli -debug traffic: "<ms> >Engine(0): position startpos moves e2e4 e7e5".
-    // The "position" line cutechess sends before every "go" carries the full move list of
-    // the game so far — parsing it (instead of per-engine bestmove lines) makes the live
-    // board robust to ordering and to which engine is about to move.
-    [GeneratedRegex(@"^\d+\s*>.*?\(\d+\):\s*position\s+(.+)$")]
-    private static partial Regex DebugPositionRegex();
-
-    [GeneratedRegex(@"^\d+\s*[<>]")]
-    private static partial Regex DebugLineRegex();
+    // cutechess-cli -debug traffic, verbatim from a real run:
+    //   "11 >A(0): uci"                       harness -> engine
+    //   "26 <A(0): Stockfish 14.1 by ..."     engine  -> harness
+    // One regex for both directions: it classifies the line for the transcript AND
+    // exposes the payload the live board is rebuilt from. Splitting those into two
+    // patterns is how they drift apart.
+    [GeneratedRegex(@"^(\d+)\s+([<>])(.+?)\((\d+)\):\s?(.*)$")]
+    private static partial Regex DebugTrafficRegex();
 
     [GeneratedRegex(@"Started game (\d+) of (\d+)\s*\((.+?)\s+vs\s+(.+?)\)")]
     private static partial Regex GameStartRegex();
+
+    // "Finished game 1 (A vs B): 1-0 {White mates}"
+    [GeneratedRegex(@"^Finished game (\d+)\s*\((.+?)\s+vs\s+(.+?)\):\s*(\S+)(?:\s*\{(.*)\})?\s*$")]
+    private static partial Regex GameEndRegex();
+
+    // "option name UCI_Elo type spin default 1350 min 1350 max 2850" — the bounds differ
+    // between Stockfish releases (14.1: 1350-2850, 16+: 1320-3190), so the only honest
+    // source for them is the engine that is actually running.
+    [GeneratedRegex(@"option name UCI_Elo type spin.*?min (\d+) max (\d+)", RegexOptions.IgnoreCase)]
+    private static partial Regex UciEloRangeRegex();
 
     public static bool ProbeCatalog(out bool cutechessOk, out bool stockfishOk, out bool qtOk)
     {
@@ -35,17 +81,85 @@ public static partial class CutechessRunner
         return cutechessOk && stockfishOk && qtOk;
     }
 
-    public static async IAsyncEnumerable<ChessLabEvent> RunAsync(
-        int rounds, int depth, string pgnOut,
-        [EnumeratorCancellation] CancellationToken ct)
+    /// <summary>
+    /// The argv for one gauntlet, as its own pure function so the UI can preview the exact
+    /// command and a test can pin it without spawning anything.
+    /// </summary>
+    public static IReadOnlyList<string> BuildArguments(CutechessOptions o, string laplaceUci, string stockfish)
     {
-        await foreach (var evt in RunAsync(rounds, depth, st: 0, elo: 2000, pgnOut, ct))
-            yield return evt;
+        // Every key=value MUST be its own argv token: the old single-token form
+        // ("name=Stockfish cmd=... arg=\"setoption ...\"") reached cutechess-cli as ONE
+        // engine parameter whose value was the rest of the string, so the engine never
+        // started and jobs died with empty artifact dirs. proto=uci is likewise required —
+        // cutechess defaults to the xboard protocol. UCI options ride the supported
+        // option.NAME=value form, not raw setoption strings.
+        var args = new List<string>
+        {
+            "-engine", "name=Laplace", $"cmd={laplaceUci}", "proto=uci",
+            "-engine", "name=Stockfish", $"cmd={stockfish}", "proto=uci",
+            "option.UCI_LimitStrength=true", $"option.UCI_Elo={o.StockfishElo}",
+            "-each",
+        };
+
+        if (o.Depth > 0)
+        {
+            args.Add("tc=inf");
+            args.Add($"depth={o.Depth}");
+        }
+        else
+        {
+            // Per-move seconds: the watchable default. tc=inf/depth=N lets a deep search
+            // sit on one move for minutes ("go depth N" has no clock at all).
+            args.Add($"st={o.SecondsPerMove.ToString(CultureInfo.InvariantCulture)}");
+            args.Add("timemargin=2000");
+        }
+
+        args.Add("-rounds");
+        args.Add(o.Rounds.ToString(CultureInfo.InvariantCulture));
+        if (o.Concurrency > 1)
+        {
+            args.Add("-concurrency");
+            args.Add(o.Concurrency.ToString(CultureInfo.InvariantCulture));
+        }
+        if (!string.IsNullOrWhiteSpace(o.Event))
+        {
+            args.Add("-event");
+            args.Add(o.Event);
+        }
+        args.Add("-pgnout");
+        args.Add(o.PgnOut);
+
+        // "-debug all", never a bare "-debug". cutechess's MatchParser turns an option with
+        // no arguments into QVariant(true); upstream a70c5915 then added
+        //     if (value == "all") ...; else if (!value.isNull()) ok = false;
+        // to the -debug branch, so that boolean now fails the check and the process dies
+        // before a single game with: Warning: Empty value for option "-debug" (exit 1).
+        // "all" is the one accepted value, and it additionally sends "debug on" to each
+        // engine — more transcript, which is the point of running with -debug at all.
+        args.Add("-debug");
+        args.Add("all");
+        return args;
     }
 
+    public static IAsyncEnumerable<ChessLabEvent> RunAsync(
+        int rounds, int depth, string pgnOut, CancellationToken ct)
+        => RunAsync(new CutechessOptions { Rounds = rounds, Depth = depth, PgnOut = pgnOut }, ct);
+
+    public static IAsyncEnumerable<ChessLabEvent> RunAsync(
+        int rounds, int depth, double st, int elo, string pgnOut, CancellationToken ct)
+        => RunAsync(
+            new CutechessOptions
+            {
+                Rounds = rounds,
+                Depth = depth,
+                SecondsPerMove = st,
+                StockfishElo = elo,
+                PgnOut = pgnOut,
+            },
+            ct);
+
     public static async IAsyncEnumerable<ChessLabEvent> RunAsync(
-        int rounds, int depth, double st, int elo, string pgnOut,
-        [EnumeratorCancellation] CancellationToken ct)
+        CutechessOptions options, [EnumeratorCancellation] CancellationToken ct)
     {
         var catalog = ChessLabPaths.Catalog;
         var cc = catalog["cutechess"];
@@ -55,20 +169,35 @@ public static partial class CutechessRunner
 
         if (!cc.Found || !sf.Found || !uci.Found)
         {
-            yield return new ChessLabLogEvent("error",
-                $"binaries missing: cutechess={cc.Found} stockfish={sf.Found} qt={qt.Found} laplaceUci={uci.Found}");
+            foreach (var (name, probe, hint) in new[]
+                     {
+                         ("cutechess-cli", cc, "LAPLACE_CUTECHESS"),
+                         ("stockfish", sf, "LAPLACE_STOCKFISH"),
+                         ("laplace-uci", uci, "publish the API host (it ships beside the entry assembly)"),
+                     })
+            {
+                if (probe.Found) continue;
+                yield return new ChessLabLogEvent("error",
+                    $"{name} not found (looked at '{probe.Path ?? "-"}', source {probe.Source}) — set {hint} in deploy/secrets/chess-lab.env");
+            }
             yield return new ChessLabDoneEvent(ChessLabJobState.Failed, "missing binaries");
             yield break;
         }
 
+        var args = BuildArguments(options, uci.Path!, sf.Path!);
         var psi = new ProcessStartInfo
         {
             FileName = cc.Path!,
+            WorkingDirectory = Path.GetDirectoryName(options.PgnOut) is { Length: > 0 } wd && Directory.Exists(wd)
+                ? wd
+                : Environment.CurrentDirectory,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true,
         };
+        foreach (var a in args) psi.ArgumentList.Add(a);
+
         if (qt.Found)
         {
             var prior = psi.Environment.TryGetValue("PATH", out var existing) ? existing
@@ -78,118 +207,180 @@ public static partial class CutechessRunner
                 : qt.Path! + Path.PathSeparator + prior;
         }
 
-        // Every key=value MUST be its own argv token: the old single-token form
-        // ("name=Stockfish cmd=... arg=\"setoption ...\"") reached cutechess-cli as ONE
-        // engine parameter whose value was the rest of the string, so the engine never
-        // started and jobs died with empty artifact dirs. proto=uci is likewise required —
-        // cutechess defaults to the xboard protocol. UCI options ride the supported
-        // option.NAME=value form, not raw setoption strings.
-        psi.ArgumentList.Add("-engine");
-        psi.ArgumentList.Add("name=Laplace");
-        psi.ArgumentList.Add($"cmd={uci.Path}");
-        psi.ArgumentList.Add("proto=uci");
-        psi.ArgumentList.Add("-engine");
-        psi.ArgumentList.Add("name=Stockfish");
-        psi.ArgumentList.Add($"cmd={sf.Path}");
-        psi.ArgumentList.Add("proto=uci");
-        psi.ArgumentList.Add("option.UCI_LimitStrength=true");
-        psi.ArgumentList.Add($"option.UCI_Elo={elo}");
-        psi.ArgumentList.Add("-each");
-        if (st > 0)
-        {
-            // Per-move seconds: the watchable default. tc=inf/depth=N let a deep search
-            // sit on one move for minutes ("go depth N" has no clock at all).
-            psi.ArgumentList.Add($"st={st.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
-            psi.ArgumentList.Add("timemargin=2000");
-        }
-        else
-        {
-            psi.ArgumentList.Add("tc=inf");
-            psi.ArgumentList.Add($"depth={depth}");
-        }
-        psi.ArgumentList.Add("-rounds");
-        psi.ArgumentList.Add(rounds.ToString());
-        psi.ArgumentList.Add("-pgnout");
-        psi.ArgumentList.Add(pgnOut);
-        psi.ArgumentList.Add("-debug");
+        var command = new ChessLabCommandEvent(psi.FileName, args, psi.WorkingDirectory);
+        yield return command;
+        yield return new ChessLabTerminalEvent(ChessLabStream.Command, command.CommandLine);
+        yield return new ChessLabLogEvent("info", DescribeRun(options));
 
-        yield return new ChessLabLogEvent("info",
-            st > 0
-                ? $"cutechess: {rounds} rounds, {st:0.##}s/move, Stockfish {elo} Elo"
-                : $"cutechess: {rounds} rounds depth {depth}, Stockfish {elo} Elo");
+        var parser = new TranscriptParser(options.Rounds, options.StockfishElo);
 
         using var proc = Process.Start(psi)!;
-        // stderr must be drained or a chatty engine can deadlock the pipe; surface the
-        // tail as logs only when the run fails.
-        var stderrTail = new Queue<string>();
-        var stderrTask = Task.Run(async () =>
+
+        // stdout and stderr merged into one ordered stream. Draining both is not optional —
+        // a chatty engine fills the unread pipe and deadlocks the match — and interleaving
+        // them is what makes a warning legible against the traffic that provoked it. The old
+        // shape kept stderr in a 40-line tail replayed only on failure, which is why the
+        // "-debug" rejection above surfaced as an epitaph instead of as the first line.
+        var merged = Channel.CreateUnbounded<(string Stream, string Text)>(
+            new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
+
+        async Task PumpAsync(StreamReader reader, string stream)
         {
-            while (await proc.StandardError.ReadLineAsync(CancellationToken.None) is { } line)
-                lock (stderrTail)
-                {
-                    stderrTail.Enqueue(line);
-                    if (stderrTail.Count > 40) stderrTail.Dequeue();
-                }
-        }, CancellationToken.None);
-
-        int done = 0;
-        bool sawScore = false;
-        var tracker = new LiveBoardTracker();
-
-        await foreach (var line in ReadLinesAsync(proc, ct))
-        {
-            var debugPos = DebugPositionRegex().Match(line);
-            if (debugPos.Success)
-            {
-                foreach (var evt in tracker.ApplyPositionLine(debugPos.Groups[1].Value))
-                    yield return evt;
-                continue;
-            }
-            if (DebugLineRegex().IsMatch(line))
-                continue; // raw UCI traffic — parsed above, never forwarded as log spam
-
-            yield return new ChessLabLogEvent("info", line);
-
-            var started = GameStartRegex().Match(line);
-            if (started.Success)
-                tracker.Reset(
-                    int.Parse(started.Groups[1].Value),
-                    started.Groups[3].Value,
-                    started.Groups[4].Value);
-
-            var score = ScoreRegex().Match(line);
-            if (score.Success)
-            {
-                sawScore = true;
-                done = int.Parse(score.Groups[1].Value) + int.Parse(score.Groups[2].Value) + int.Parse(score.Groups[3].Value);
-                yield return new ChessLabProgressEvent(done, rounds * 2);
-            }
-            var elo2 = EloRegex().Match(line);
-            if (elo2.Success && double.TryParse(elo2.Groups[1].Value, out var eloVal))
-                yield return new ChessLabMetricEvent("elo_diff", eloVal);
+            // Never cancelled: the pumps end at EOF, which the kill in the finally guarantees.
+            while (await reader.ReadLineAsync(CancellationToken.None) is { } line)
+                await merged.Writer.WriteAsync((stream, line), CancellationToken.None);
         }
 
-        try { proc.Kill(entireProcessTree: true); } catch { }
-        await proc.WaitForExitAsync(ct);
-        try { await stderrTask.WaitAsync(TimeSpan.FromSeconds(2), CancellationToken.None); } catch { }
+        var pumps = Task.WhenAll(
+            PumpAsync(proc.StandardOutput, ChessLabStream.Stdout),
+            PumpAsync(proc.StandardError, ChessLabStream.Stderr));
+        _ = pumps.ContinueWith(t => merged.Writer.TryComplete(t.Exception), TaskScheduler.Default);
+
+        try
+        {
+            await foreach (var (stream, text) in merged.Reader.ReadAllAsync(ct))
+                foreach (var evt in parser.Line(stream, text))
+                    yield return evt;
+        }
+        finally
+        {
+            // Cancellation throws straight out of the loop above. Process.Dispose does not
+            // kill anything, so without this a Stop left cutechess and both engines running
+            // and burning cores until the host was rebooted.
+            try { if (!proc.HasExited) proc.Kill(entireProcessTree: true); } catch { /* already gone */ }
+        }
+
+        await proc.WaitForExitAsync(CancellationToken.None);
+        try { await pumps.WaitAsync(TimeSpan.FromSeconds(2), CancellationToken.None); } catch { /* best effort */ }
+
+        int exitCode = proc.ExitCode;
+        yield return new ChessLabTerminalEvent(ChessLabStream.Runner, $"cutechess-cli exited with code {exitCode}");
+
         // Exit code alone isn't sufficient: a 0 exit with zero parsed "Score of ..." lines means
         // cutechess-cli's output didn't match what we expect (version bump, localization, or a
         // run that produced no games) — that's a real failure, not a silent "Completed" with no
         // metrics.
-        bool ok = proc.ExitCode == 0 && sawScore;
-        if (!ok)
-        {
-            string[] tail;
-            lock (stderrTail) tail = stderrTail.ToArray();
-            foreach (var errLine in tail)
-                yield return new ChessLabLogEvent("error", errLine);
-        }
+        bool ok = exitCode == 0 && parser.SawScore;
         yield return ok
             ? new ChessLabDoneEvent(ChessLabJobState.Completed)
             : new ChessLabDoneEvent(ChessLabJobState.Failed,
-                proc.ExitCode == 0
+                exitCode == 0
                     ? "cutechess exited 0 but no \"Score of ...\" line was ever parsed from its output"
-                    : $"cutechess exited with code {proc.ExitCode}");
+                    : $"cutechess exited with code {exitCode}");
+    }
+
+    private static string DescribeRun(CutechessOptions o)
+    {
+        string clock = o.Depth > 0 ? $"depth {o.Depth} (unclocked)" : $"{o.SecondsPerMove:0.##}s/move";
+        string parallel = o.Concurrency > 1 ? $", {o.Concurrency} games in flight" : "";
+        return $"cutechess: {o.Rounds} games, {clock}, Stockfish capped at {o.StockfishElo} Elo{parallel}";
+    }
+
+    /// <summary>
+    /// Turns one line of cutechess output into lab events. The live run and the tests share
+    /// this instance type, so a parser change cannot pass a test that a real match then fails.
+    /// </summary>
+    internal sealed class TranscriptParser(int rounds, int? requestedElo = null)
+    {
+        private readonly LiveBoardTracker _tracker = new();
+        private bool _eloRangeChecked;
+        // Seeded from the config, then replaced by the count cutechess prints in its own
+        // "Started game N of M" banner — the only total that is true by construction.
+        private int _total = rounds;
+
+        public bool SawScore { get; private set; }
+        public int Done { get; private set; }
+        public int Total => _total;
+
+        public IEnumerable<ChessLabEvent> Line(string stream, string text)
+            => stream == ChessLabStream.Stderr ? Stderr(text) : Stdout(text);
+
+        private IEnumerable<ChessLabEvent> Stderr(string text)
+        {
+            yield return new ChessLabTerminalEvent(ChessLabStream.Stderr, text);
+            // Qt prefixes these; keep the prefix in the transcript, drop it from the feed.
+            string level = text.StartsWith("Warning:", StringComparison.Ordinal) ? "warning" : "error";
+            yield return new ChessLabLogEvent(level, text);
+        }
+
+        private IEnumerable<ChessLabEvent> Stdout(string text)
+        {
+            var traffic = DebugTrafficRegex().Match(text);
+            if (traffic.Success)
+            {
+                string direction = traffic.Groups[2].Value == ">" ? ChessLabDirection.Send : ChessLabDirection.Recv;
+                string engine = traffic.Groups[3].Value;
+                string payload = traffic.Groups[5].Value;
+                yield return new ChessLabTerminalEvent(ChessLabStream.Uci, payload, engine, direction);
+
+                if (direction == ChessLabDirection.Send && payload.StartsWith("position ", StringComparison.Ordinal))
+                {
+                    // The "position" line cutechess sends before every "go" carries the full move
+                    // list of the game so far — replaying it (instead of per-engine bestmove lines)
+                    // makes the live board robust to ordering and to which engine is about to move.
+                    foreach (var evt in _tracker.ApplyPositionLine(payload["position ".Length..]))
+                        yield return evt;
+                }
+                else if (direction == ChessLabDirection.Recv && !_eloRangeChecked && requestedElo is { } want)
+                {
+                    var range = UciEloRangeRegex().Match(payload);
+                    if (range.Success
+                        && int.TryParse(range.Groups[1].Value, out int min)
+                        && int.TryParse(range.Groups[2].Value, out int max))
+                    {
+                        _eloRangeChecked = true;
+                        if (want < min || want > max)
+                            yield return new ChessLabLogEvent("warning",
+                                $"{engine} accepts UCI_Elo {min}–{max}; {want} was requested and will be clamped by the engine, "
+                                + "so the reported strength cap is not the one you asked for");
+                    }
+                }
+                yield break;
+            }
+
+            yield return new ChessLabTerminalEvent(ChessLabStream.Stdout, text);
+            yield return new ChessLabLogEvent("info", text);
+
+            var started = GameStartRegex().Match(text);
+            if (started.Success)
+            {
+                int index = int.Parse(started.Groups[1].Value, CultureInfo.InvariantCulture);
+                _total = int.Parse(started.Groups[2].Value, CultureInfo.InvariantCulture);
+                _tracker.Reset(index, started.Groups[3].Value, started.Groups[4].Value);
+                // Give the progress bar a denominator from the first banner, not from the
+                // end of the first game.
+                yield return new ChessLabProgressEvent(Done, _total, $"game {index}");
+            }
+
+            var finished = GameEndRegex().Match(text);
+            if (finished.Success)
+                yield return new ChessLabGameEvent(
+                    int.Parse(finished.Groups[1].Value, CultureInfo.InvariantCulture),
+                    finished.Groups[2].Value,
+                    finished.Groups[3].Value,
+                    finished.Groups[5].Success && finished.Groups[5].Value.Length > 0
+                        ? $"{finished.Groups[4].Value} ({finished.Groups[5].Value})"
+                        : finished.Groups[4].Value);
+
+            var score = ScoreRegex().Match(text);
+            if (score.Success)
+            {
+                // cutechess prints wins - losses - draws, from the first engine's side.
+                int wins = int.Parse(score.Groups[1].Value, CultureInfo.InvariantCulture);
+                int losses = int.Parse(score.Groups[2].Value, CultureInfo.InvariantCulture);
+                int draws = int.Parse(score.Groups[3].Value, CultureInfo.InvariantCulture);
+                SawScore = true;
+                Done = wins + losses + draws;
+                yield return new ChessLabMetricEvent("wins", wins);
+                yield return new ChessLabMetricEvent("losses", losses);
+                yield return new ChessLabMetricEvent("draws", draws);
+                yield return new ChessLabProgressEvent(Done, _total, $"{wins}W-{losses}L-{draws}D");
+            }
+
+            var elo = EloRegex().Match(text);
+            if (elo.Success && double.TryParse(elo.Groups[1].Value, CultureInfo.InvariantCulture, out var eloVal))
+                yield return new ChessLabMetricEvent("elo_diff", eloVal);
+        }
     }
 
     // Tracks the live board across -debug "position" lines: replay only the new plies
@@ -246,48 +437,23 @@ public static partial class CutechessRunner
         }
     }
 
-    internal static IEnumerable<ChessLabEvent> ParseLinesForTest(IEnumerable<string> lines)
+    /// <summary>Drives the production parser over canned stdout lines.</summary>
+    internal static IEnumerable<ChessLabEvent> ParseLinesForTest(
+        IEnumerable<string> lines, int rounds = 10, int? requestedElo = null)
     {
-        int rounds = 10;
-        var tracker = new LiveBoardTracker();
+        var parser = new TranscriptParser(rounds, requestedElo);
         foreach (var line in lines)
-        {
-            var debugPos = DebugPositionRegex().Match(line);
-            if (debugPos.Success)
-            {
-                foreach (var evt in tracker.ApplyPositionLine(debugPos.Groups[1].Value))
-                    yield return evt;
-                continue;
-            }
-            if (DebugLineRegex().IsMatch(line)) continue;
-
-            yield return new ChessLabLogEvent("info", line);
-            var started = GameStartRegex().Match(line);
-            if (started.Success)
-                tracker.Reset(
-                    int.Parse(started.Groups[1].Value),
-                    started.Groups[3].Value,
-                    started.Groups[4].Value);
-            var score = ScoreRegex().Match(line);
-            if (score.Success)
-            {
-                int done = int.Parse(score.Groups[1].Value) + int.Parse(score.Groups[2].Value) + int.Parse(score.Groups[3].Value);
-                yield return new ChessLabProgressEvent(done, rounds * 2);
-            }
-            var elo = EloRegex().Match(line);
-            if (elo.Success && double.TryParse(elo.Groups[1].Value, out var eloVal))
-                yield return new ChessLabMetricEvent("elo_diff", eloVal);
-        }
+            foreach (var evt in parser.Line(ChessLabStream.Stdout, line))
+                yield return evt;
     }
 
-    private static async IAsyncEnumerable<string> ReadLinesAsync(Process proc, [EnumeratorCancellation] CancellationToken ct)
+    /// <summary>Drives the production parser over canned (stream, line) pairs.</summary>
+    internal static IEnumerable<ChessLabEvent> ParseStreamsForTest(
+        IEnumerable<(string Stream, string Text)> lines, int rounds = 10, int? requestedElo = null)
     {
-        while (!proc.HasExited)
-        {
-            string? line = await proc.StandardOutput.ReadLineAsync(ct);
-            if (line is not null) yield return line;
-            else await Task.Delay(50, ct);
-        }
-        while (proc.StandardOutput.ReadLine() is { } rest) yield return rest;
+        var parser = new TranscriptParser(rounds, requestedElo);
+        foreach (var (stream, text) in lines)
+            foreach (var evt in parser.Line(stream, text))
+                yield return evt;
     }
 }

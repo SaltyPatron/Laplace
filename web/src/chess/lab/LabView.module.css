@@ -1,0 +1,46 @@
+@layer components {
+  .lab {
+    height: 100%;
+    min-height: 0;
+    width: 100%;
+    overflow-y: auto;
+    padding: 1rem 1.2rem 2rem;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-5);
+    box-sizing: border-box;
+  }
+
+  .hero {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+  }
+
+  .hero h3 {
+    margin: 0 0 0.25rem;
+  }
+
+  .heroText {
+    min-width: 0;
+    max-width: 46rem;
+  }
+
+  .subnav {
+    flex: 0 0 auto;
+  }
+
+  .body {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .stack {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-5);
+  }
+}

@@ -201,34 +201,77 @@ public static class ChessLabRunners
 
     public static async Task RunCutechessAsync(ChessLabService lab, ChessLabService.JobSlot slot, CancellationToken ct)
     {
+        var cfg = slot.Job.Config;
         var dir = Path.Combine(LabDir, slot.Job.Id);
         Directory.CreateDirectory(dir);
         var pgnOut = Path.Combine(dir, "games.pgn");
-        int rounds = int.Parse(Config(slot.Job.Config, "rounds", "10"));
-        // Watchable by default: 1s/move via cutechess st. depth>0 switches to the old
-        // tc=inf/depth mode, where a deep search may sit on one move for minutes.
-        int depth = int.Parse(Config(slot.Job.Config, "depth", "0"));
-        double st = double.Parse(Config(slot.Job.Config, "st", "1"),
-            System.Globalization.CultureInfo.InvariantCulture);
-        int elo = int.Parse(Config(slot.Job.Config, "elo", "2000"));
-        if (depth > 0) st = 0;
 
-        await foreach (var evt in CutechessRunner.RunAsync(rounds, depth, st, elo, pgnOut, ct))
+        var options = new CutechessOptions
         {
-            switch (evt)
+            Rounds = int.Parse(Config(cfg, "rounds", "10")),
+            // Watchable by default: 1s/move via cutechess st. depth>0 switches to the old
+            // tc=inf/depth mode, where a deep search may sit on one move for minutes.
+            Depth = int.Parse(Config(cfg, "depth", "0")),
+            SecondsPerMove = double.Parse(Config(cfg, "st", "1"), System.Globalization.CultureInfo.InvariantCulture),
+            StockfishElo = int.Parse(Config(cfg, "elo", "2000")),
+            Concurrency = Math.Max(1, int.Parse(Config(cfg, "concurrency", "1"))),
+            PgnOut = pgnOut,
+            Event = $"chess-lab/cutechess/{slot.Job.Id}",
+        };
+
+        var final = ChessLabJobState.Completed;
+        string? finalMessage = null;
+        // The in-memory transcript is a bounded ring — right for a live pane, useless as the
+        // record of a match that ran for an hour. The file is the complete one, and it is
+        // what /terminal.txt serves once it exists.
+        var transcriptPath = Path.Combine(dir, "transcript.log");
+        await using var transcript = new StreamWriter(transcriptPath) { AutoFlush = false };
+        try
+        {
+            await foreach (var evt in CutechessRunner.RunAsync(options, ct))
             {
-                case ChessLabLogEvent log: lab.Publish(slot, log); break;
-                case ChessLabProgressEvent prog: lab.UpdateSummary(slot, new ChessLabJobSummary(prog.Done, prog.Total)); lab.Publish(slot, prog); break;
-                case ChessLabMetricEvent m: lab.Publish(slot, m); break;
-                default: lab.Publish(slot, evt); break;
+                switch (evt)
+                {
+                    // Raw process I/O never enters the bounded event channel — see
+                    // ChessLabService.AppendTerminal for why the two are separate.
+                    case ChessLabTerminalEvent terminal:
+                        await transcript.WriteLineAsync(ChessLabTerminal.Format(
+                            lab.AppendTerminal(slot, terminal)));
+                        break;
+                    case ChessLabProgressEvent prog:
+                        lab.UpdateSummary(slot, new ChessLabJobSummary(prog.Done, prog.Total, prog.Label));
+                        lab.Publish(slot, prog);
+                        break;
+                    // The runner owns the verdict. Publishing this straight through and then
+                    // calling Finish(Completed) below is how a match that died on argv
+                    // parsing still reported "Completed" — to the web UI, to the CLI's exit
+                    // code, and to anyone reading the job list afterwards.
+                    case ChessLabDoneEvent done:
+                        final = done.FinalState;
+                        finalMessage = done.Message;
+                        break;
+                    default:
+                        lab.Publish(slot, evt);
+                        break;
+                }
             }
         }
-        lab.AddArtifact(slot, "games.pgn", pgnOut);
+        finally
+        {
+            await transcript.FlushAsync(CancellationToken.None);
+            lab.AddArtifact(slot, "transcript.log", transcriptPath);
+            // A stopped match keeps whatever games it finished: cutechess writes the PGN
+            // incrementally, so the artifact is real evidence even when the run was cut short.
+            if (File.Exists(pgnOut)) lab.AddArtifact(slot, "games.pgn", pgnOut);
+        }
 
         // Loop closure: cutechess games are played by the external laplace-uci binary, which
         // cannot record its own plies — without this the PGN artifact is where the evidence
-        // dies. Opt out with config ingest=false.
-        if (Config(slot.Job.Config, "ingest", "true") == "true" && File.Exists(pgnOut))
+        // dies. Opt out with config ingest=false. Skipped for a failed run, whose PGN is
+        // either absent or a fragment of a match that never happened.
+        if (final == ChessLabJobState.Completed
+            && Config(cfg, "ingest", "true") == "true"
+            && File.Exists(pgnOut))
         {
             try
             {
@@ -245,7 +288,8 @@ public static class ChessLabRunners
                     "error", $"substrate ingest failed ({ex.Message}) — artifact kept, retry via /ingest"));
             }
         }
-        Finish(lab, slot, ChessLabJobState.Completed);
+
+        Finish(lab, slot, final, finalMessage);
     }
 
     public static async Task RunLichessBotAsync(ChessLabService lab, ChessLabService.JobSlot slot, CancellationToken ct)
@@ -294,10 +338,19 @@ public static class ChessLabRunners
     {
         lock (slot.Gate)
         {
-            slot.Job = slot.Job with { State = state, FinishedAt = DateTimeOffset.UtcNow, Summary = slot.Job.Summary with { Message = msg } };
+            slot.Job = slot.Job with
+            {
+                State = state,
+                FinishedAt = DateTimeOffset.UtcNow,
+                // Keep the last summary line when the terminal state has nothing to add —
+                // this used to blank the final score the moment the run succeeded, which is
+                // what ChessLabService.Finish has always done and these two had drifted apart.
+                Summary = slot.Job.Summary with { Message = msg ?? slot.Job.Summary.Message },
+            };
         }
         lab.Publish(slot, new ChessLabDoneEvent(state, msg));
         slot.Channel.Writer.TryComplete();
+        slot.Terminal.Complete();
     }
 
     private static string Config(IReadOnlyDictionary<string, string> cfg, string key, string def)

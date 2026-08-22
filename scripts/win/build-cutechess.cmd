@@ -14,7 +14,9 @@ set "CC_BUILD=%LAPLACE_CUTECHESS_BUILD%"
 set "VCVARS=D:\Microsoft Visual Studio\2026\VC\Auxiliary\Build\vcvars64.bat"
 
 if not exist "%CC_SRC%\CMakeLists.txt" (
-  echo [build-cutechess] submodule missing — run: git submodule update --init external\cutechess
+  echo [build-cutechess] source missing. external\ is gitignored and cutechess is NOT a
+  echo   registered submodule (there is no .gitmodules), so `git submodule update` is a no-op.
+  echo   Clone it: git clone https://github.com/cutechess/cutechess.git "%CC_SRC%"
   exit /b 1
 )
 
