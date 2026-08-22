@@ -10,7 +10,9 @@ namespace Laplace.Chess.Service;
 /// Ingest Syzygy tablebases as substrate records via the multi-file spine.
 /// Each <c>.rtbw</c> is one packaging unit (material table) — file workers unpack
 /// materials in parallel; within a material, WDL probes fan out (thread-safe Fathom
-/// <c>tb_probe_wdl</c>). Path resolution is <see cref="ChessInput.ResolveSyzygyPackagingDir"/>.
+/// <c>tb_probe_wdl</c>) across ONE ComposeWorkers-sized budget shared by all
+/// concurrently-unpacking materials. Path resolution is
+/// <see cref="ChessInput.ResolveSyzygyPackagingDir"/>.
 /// Run: <c>laplace ingest chess-syzygy [&lt;syzygy-dir&gt;]</c>
 /// </summary>
 public sealed class ChessSyzygyDecomposer
@@ -18,6 +20,7 @@ public sealed class ChessSyzygyDecomposer
 {
     private readonly Func<ISyzygyProber>? _proberFactory;
     private ISyzygyProber? _prober;
+    private SemaphoreSlim? _probeBudget;
     private bool _packagingMissing;
     private bool _initFailed;
     private string? _resolvedDir;
@@ -43,6 +46,7 @@ public sealed class ChessSyzygyDecomposer
     {
         _canonicalNames = await ChessVocabulary.BootstrapAsync(
             context.Writer, ChessSyzygy.SourceId, SourceName, ChessSyzygy.TrustClassId, ct);
+        _probeBudget ??= new SemaphoreSlim(Math.Max(1, IngestTopology.Current.ComposeWorkers));
         _packagingMissing = false;
         _initFailed = false;
         _resolvedDir = ChessInput.ResolveSyzygyPackagingDir(context.EcosystemPath);
@@ -101,10 +105,21 @@ public sealed class ChessSyzygyDecomposer
         [EnumeratorCancellation] CancellationToken ct)
     {
         if (_prober is null) yield break;
+        // The outer file workers already run materials in parallel, so a fixed inner fan
+        // would multiply into fileWorkers × workers threads. Instead every material asks
+        // for the FULL compose-worker fan and all concurrent materials share ONE
+        // ComposeWorkers-sized probe budget: total in-flight probes never exceed the
+        // budget at full file fan, and the tail of a run (few tables still unpacking)
+        // automatically widens into the slots the finished tables released. Without the
+        // budget (InitializeAsync not run), fall back to the serial fan.
+        var probeBudget = _probeBudget;
+        int workers = probeBudget is null
+            ? 1
+            : Math.Max(1, IngestTopology.Current.ComposeWorkers);
         long cap = options.MaxInputUnits;
         long n = 0;
         await foreach (var product in SyzygyTableUnpack.ExtractMaterialAsync(
-                           fileLabel, _prober, workers: 1, ct).ConfigureAwait(false))
+                           fileLabel, _prober, workers, probeBudget, ct).ConfigureAwait(false))
         {
             yield return new ChessSyzygyRecord(product);
             if (cap > 0 && ++n >= cap) yield break;
@@ -129,9 +144,19 @@ public sealed class ChessSyzygyDecomposer
         if (_initFailed)
             return ("dependency-unset",
                 $"ChessSyzygy: Fathom found no tables under {_resolvedDir} — unpack no-op.");
-        if (declaredInputUnits == 0)
-            return ("dependency-unset",
-                "ChessSyzygy: packaging directory resolved but contained no .rtbw files.");
+        // The unknown-unit inventory declares zero input units even when tables exist,
+        // so declaredInputUnits == 0 no longer means "no files" — check the directory
+        // itself. Tables present with zero records applied stays UNexplained (a real
+        // anomaly must fail the run, not read as dependency-unset).
+        if (declaredInputUnits == 0 && _resolvedDir is not null)
+        {
+            bool anyTables;
+            try { anyTables = ListFiles(_resolvedDir, DecomposerOptions.Default).Count > 0; }
+            catch (ChessInputException) { anyTables = false; }
+            if (!anyTables)
+                return ("dependency-unset",
+                    "ChessSyzygy: packaging directory resolved but contained no .rtbw files.");
+        }
         return null;
     }
 
@@ -151,6 +176,11 @@ public sealed class ChessSyzygyDecomposer
         return true;
     }
 
+    /// <summary>
+    /// Coarse fallback only — the runner consults this when <see cref="DescribeInputAsync"/>
+    /// yields no inventory (dir unresolved / no tables), never as the progress denominator.
+    /// File count, like FrameNet: the record total is unknowable without a full unpack.
+    /// </summary>
     public override Task<long?> EstimateUnitCountAsync(
         IDecomposerContext context, CancellationToken ct = default)
     {
@@ -169,8 +199,15 @@ public sealed class ChessSyzygyDecomposer
         if (dir is null)
             return Task.FromResult<IngestInventory?>(null);
         var paths = ListFiles(dir, options).Select(t => t.Path).ToList();
-        return Task.FromResult(IngestInventory.FromFileUnits(
-            "tables", paths, options.MaxInputUnits, tracksFileCompletion: true));
+        // One .rtbw is one material TABLE, but extraction consumes one input unit per
+        // probed board state — millions per table. FromFileUnits declared the table
+        // count (~145) as the unit total while every record consumed a unit, so
+        // input_pct read 1,367,466%. The record total is unknowable without walking
+        // the material's whole index space, so keep record-grain progress against a
+        // deliberately unknown denominator and exact per-file completion — the same
+        // contract FrameNet uses for its one-file-many-records lane.
+        return Task.FromResult(IngestInventory.FromFilesWithUnknownUnitCount(
+            "positions", paths, options.MaxInputUnits, tracksFileCompletion: true));
     }
 }
 
