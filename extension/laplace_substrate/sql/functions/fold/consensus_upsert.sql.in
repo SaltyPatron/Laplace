@@ -25,9 +25,13 @@
 -- no ANALYZE, no re-plan, and no UPDATE-then-NOT-EXISTS double probe.
 --
 -- One implementation per fact, preserved:
---  * the Glicko fold runs in the SAME native scalar the plpgsql called
---    (laplace_glicko2_accumulate_games), once per row, record-valued — the
---    rating period IS the batch;
+--  * the Glicko fold runs the SAME core (glicko2_init + glicko2_fold_uniform_period)
+--    the scalar laplace_glicko2_accumulate_games wraps — computed in one native
+--    pass per type run for BOTH arms: matched cells fold from their stored prior
+--    (read and row-locked by a per-type FOR UPDATE probe), novel cells from the
+--    neutral prior; the rating period IS the batch. The scalar remains in the
+--    MERGE only as the lazy MATCHED fallback for a cell inserted concurrently
+--    between the prior read and the MERGE;
 --  * cell ids are computed in C through the SAME core hash the SQL
 --    laplace.consensus_id() wraps — blake3(subject || type || COALESCE(object, 16 zero
 --    bytes)) — byte-identical layout;

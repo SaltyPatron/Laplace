@@ -29,12 +29,16 @@
  *  plan is one MERGE, not an UPDATE plus an INSERT/NOT-EXISTS second probe.
  *  No temp table, no ANALYZE, no re-plan, no volatility trap.
  *
- * Fold math stays where it lives: the plans call the same native scalar
- * (laplace_glicko2_accumulate_games) the plpgsql called — one implementation
- * per fact. consensus_id stays one implementation the same way: the SQL
- * definition IS blake3(subject || type || COALESCE(object, 16 zero bytes))
- * via the core hash128_blake3; this file calls that exact core function over
- * the exact 48-byte layout.
+ * Fold math stays one implementation per fact: both fold arms run the same
+ * core (glicko2_init + glicko2_fold_uniform_period) the SQL scalar
+ * (laplace_glicko2_accumulate_games) wraps — computed natively in one pass
+ * per type run, matched cells from their stored prior, novel cells from the
+ * neutral prior. The scalar itself remains in the MERGE only as the lazy
+ * fallback for a concurrently-inserted cell (see UPSERT_MERGE_SQL).
+ * consensus_id stays one implementation the same way: the SQL definition IS
+ * blake3(subject || type || COALESCE(object, 16 zero bytes)) via the core
+ * hash128_blake3; this file calls that exact core function over the exact
+ * 48-byte layout.
  */
 #include "postgres.h"
 
@@ -67,6 +71,7 @@ typedef struct TypePlanEntry
 
 static HTAB *merge_plans = NULL;          /* attestations matched MERGE     */
 static HTAB *upsert_merge_plans = NULL;   /* consensus matched/unmatched     */
+static HTAB *upsert_prior_plans = NULL;   /* consensus prior-state FOR UPDATE */
 
 static HTAB *
 plan_htab(HTAB **slot, const char *name)
@@ -224,44 +229,80 @@ array_window(ArrayType *original, const Datum *src, const bool *src_nulls,
     return construct_array(d, n, elmtype, elmlen, elmbyval, elmalign);
 }
 
-typedef struct InitialFoldArrays
+typedef struct FoldStateArrays
 {
-    Datum     *ratings;
-    Datum     *rds;
-    Datum     *volatilities;
+    ArrayType *seen_array;
     ArrayType *rating_array;
     ArrayType *rd_array;
     ArrayType *volatility_array;
-} InitialFoldArrays;
+} FoldStateArrays;
 
-/* Fresh-cell folds are independent and have uniform inputs. Compute them in
- * one tight native pass rather than invoking a record-returning SQL function
- * through a LATERAL executor node once per source row. */
+/* Fold one type run natively — matched cells from their stored prior
+ * (`priors`: the FOR UPDATE read of this run; ord is 1-based within the run),
+ * novel cells from the neutral prior. One tight native pass instead of a
+ * record-returning SQL function crossing the executor once per matched row.
+ * The novel half was already native (GH #565); this completes the symmetry.
+ *
+ * Bit parity with the SQL scalar is by construction: the scalar's body is
+ * glicko2_init + glicko2_fold_uniform_period, and consensus.glicko2_neutral_mu()
+ * / consensus.glicko2_tau() are defined as exactly CONSENSUS_FOLD_NEUTRAL_MU /
+ * LAPLACE_GLICKO2_DEFAULT_TAU (asserted by tests/sql/consensus_upsert.sql). */
 static void
-initial_fold_arrays(const InArray *phis, const InArray *games,
-                    const InArray *sums, const char *label,
-                    InitialFoldArrays *out)
+fold_run_states(const InArray *phis, const InArray *games, const InArray *sums,
+                int run_start, int run_n, SPITupleTable *priors,
+                uint64 n_prior, const char *label, FoldStateArrays *out)
 {
-    int i;
+    bool   *matched = (bool *) palloc0(sizeof(bool) * run_n);
+    Datum  *seen = (Datum *) palloc(sizeof(Datum) * run_n);
+    Datum  *ratings = (Datum *) palloc(sizeof(Datum) * run_n);
+    Datum  *rds = (Datum *) palloc(sizeof(Datum) * run_n);
+    Datum  *volatilities = (Datum *) palloc(sizeof(Datum) * run_n);
+    uint64  r;
+    int     i;
 
-    out->ratings = (Datum *) palloc(sizeof(Datum) * games->n);
-    out->rds = (Datum *) palloc(sizeof(Datum) * games->n);
-    out->volatilities = (Datum *) palloc(sizeof(Datum) * games->n);
-    for (i = 0; i < games->n; i++)
+    for (r = 0; r < n_prior; r++)
+    {
+        HeapTuple tup = priors->vals[r];
+        TupleDesc desc = priors->tupdesc;
+        bool      null_ord, null_rating, null_rd, null_vol;
+        int64     ord = DatumGetInt64(SPI_getbinval(tup, desc, 1, &null_ord));
+        Datum     prior_rating = SPI_getbinval(tup, desc, 2, &null_rating);
+        Datum     prior_rd = SPI_getbinval(tup, desc, 3, &null_rd);
+        Datum     prior_vol = SPI_getbinval(tup, desc, 4, &null_vol);
+
+        if (null_ord || null_rating || null_rd || null_vol ||
+            ord < 1 || ord > (int64) run_n || matched[ord - 1])
+            ereport(ERROR,
+                    (errcode(ERRCODE_INTERNAL_ERROR),
+                     errmsg("%s: prior-state read returned an invalid row",
+                            label)));
+        matched[ord - 1] = true;
+        /* park the prior in the output slots; the fold pass consumes it */
+        ratings[ord - 1] = prior_rating;
+        rds[ord - 1] = prior_rd;
+        volatilities[ord - 1] = prior_vol;
+    }
+
+    for (i = 0; i < run_n; i++)
     {
         glicko2_state_t st;
-        int64 phi = DatumGetInt64(phis->elems[i]);
-        int64 n_games = DatumGetInt64(games->elems[i]);
-        int64 sum = DatumGetInt64(sums->elems[i]);
+        int64 phi = DatumGetInt64(phis->elems[run_start + i]);
+        int64 n_games = DatumGetInt64(games->elems[run_start + i]);
+        int64 sum = DatumGetInt64(sums->elems[run_start + i]);
 
         if (n_games <= 0)
             ereport(ERROR,
                     (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                      errmsg("%s: games must be > 0 (got %ld)",
                             label, (long) n_games)));
-        glicko2_init(&st, CONSENSUS_FOLD_NEUTRAL_MU,
-                     CONSENSUS_FOLD_INITIAL_RD,
-                     CONSENSUS_FOLD_INITIAL_VOLATILITY);
+        if (matched[i])
+            glicko2_init(&st, DatumGetInt64(ratings[i]),
+                         DatumGetInt64(rds[i]),
+                         DatumGetInt64(volatilities[i]));
+        else
+            glicko2_init(&st, CONSENSUS_FOLD_NEUTRAL_MU,
+                         CONSENSUS_FOLD_INITIAL_RD,
+                         CONSENSUS_FOLD_INITIAL_VOLATILITY);
         if (consensus_fold_apply_partial(&st, phi, n_games, sum,
                                          LAPLACE_GLICKO2_DEFAULT_TAU) != 0)
             ereport(ERROR,
@@ -269,15 +310,16 @@ initial_fold_arrays(const InArray *phis, const InArray *games,
                      errmsg("%s: aggregate exceeds fixed-point capacity", label),
                      errdetail("games=%ld sum_score=%ld",
                                (long) n_games, (long) sum)));
-        out->ratings[i] = Int64GetDatum(st.rating);
-        out->rds[i] = Int64GetDatum(st.rd);
-        out->volatilities[i] = Int64GetDatum(st.volatility);
+        seen[i] = BoolGetDatum(matched[i]);
+        ratings[i] = Int64GetDatum(st.rating);
+        rds[i] = Int64GetDatum(st.rd);
+        volatilities[i] = Int64GetDatum(st.volatility);
     }
-    out->rating_array = construct_array(out->ratings, games->n,
-                                        INT8OID, 8, true, 'd');
-    out->rd_array = construct_array(out->rds, games->n,
-                                    INT8OID, 8, true, 'd');
-    out->volatility_array = construct_array(out->volatilities, games->n,
+
+    out->seen_array = construct_array(seen, run_n, BOOLOID, 1, true, 'c');
+    out->rating_array = construct_array(ratings, run_n, INT8OID, 8, true, 'd');
+    out->rd_array = construct_array(rds, run_n, INT8OID, 8, true, 'd');
+    out->volatility_array = construct_array(volatilities, run_n,
                                             INT8OID, 8, true, 'd');
 }
 
@@ -445,37 +487,68 @@ pg_laplace_attestation_merge_type(PG_FUNCTION_ARGS)
 /* consensus_upsert — routed inline fold                               */
 /* ------------------------------------------------------------------ */
 
-/* One literal-routed set merge per type. The old implementation retained two
- * statements after native routing landed: UPDATE every existing cell, then
- * INSERT ... WHERE NOT EXISTS over the same input. That was a double target
- * probe whose only historical justification was MERGE planned with a runtime
- * type key. The router now embeds type_id as a literal, so PostgreSQL prunes the
- * LIST partition before executing this single matched/unmatched join.
+/* The fold is now three phases per type run, all literal-routed and
+ * session-plan-cached:
  *
- * Fresh-state Glicko values are prepared in the source. Existing cells use the
- * stored prior in the MATCHED action; novel cells consume the prepared neutral
- * fold in the NOT MATCHED action. */
+ *  1. PRIOR_SELECT_SQL reads — and row-locks — the stored Glicko state of
+ *     every cell of the run that already exists. FOR UPDATE is what makes the
+ *     native fold safe: a locked row cannot change between this read and the
+ *     MERGE, so folding from the read state IS folding from the merge-time
+ *     state.
+ *  2. fold_run_states() computes every outgoing (rating, rd, volatility) in
+ *     one tight native pass — matched cells from their stored prior, novel
+ *     cells from the neutral prior. Before this, only the novel half was
+ *     native: every already-existing cell crossed into the record-returning
+ *     scalar through the executor once per matched row — the last per-row
+ *     fold work in the write path.
+ *  3. UPSERT_MERGE_SQL persists precomputed state through both arms of one
+ *     matched/unmatched join. Still one MERGE — the historical
+ *     UPDATE-then-INSERT/NOT-EXISTS double probe stays dead.
+ *
+ * b.seen is the router's own matched prediction from phase 1. A MERGE-matched
+ * row the router did NOT see can only be a cell inserted by a concurrent
+ * writer between phases 1 and 3 (FOR UPDATE excludes the concurrent-update
+ * case). Its precomputed state is a neutral fold — wrong to assign — so the
+ * MATCHED arm falls back to the same scalar the pre-native plan called, which
+ * folds the concurrent state correctly under EvalPlanQual. CASE keeps that
+ * fallback lazy: under the cross-process apply mutex (NpgsqlWorkingSetApply)
+ * it never executes, and the (f()).col triple evaluation is acceptable on a
+ * path with zero executions. */
+static const char *PRIOR_SELECT_SQL =
+    "SELECT b.ord, c.rating, c.rd, c.volatility "
+    "FROM unnest($1::bytea[], $2::bytea[]) WITH ORDINALITY AS b(id, s, ord) "
+    "JOIN laplace.consensus c "
+    "  ON c.type_id = '\\x%s'::bytea AND c.subject_id = b.s AND c.id = b.id "
+    "FOR UPDATE OF c";
+
 static const char *UPSERT_MERGE_SQL =
     "MERGE INTO laplace.consensus c "
     "USING unnest($1::bytea[], $2::bytea[], $3::bytea[], $4::int8[], "
     "             $5::int8[], $6::int8[], $7::timestamptz[], "
-    "             $8::int8[], $9::int8[], $10::int8[]) "
-    "      AS b(id, s, o, phi, games, score_sum, ts, initial_rating, "
-    "           initial_rd, initial_volatility) "
+    "             $8::bool[], $9::int8[], $10::int8[], $11::int8[]) "
+    "      AS b(id, s, o, phi, games, score_sum, ts, seen, new_rating, "
+    "           new_rd, new_volatility) "
     "ON c.type_id = '\\x%s'::bytea AND c.subject_id = b.s AND c.id = b.id "
     "WHEN MATCHED THEN UPDATE SET "
-    "  (rating, rd, volatility) = "
-    "      (SELECT r.rating, r.rd, r.volatility "
-    "       FROM laplace.laplace_glicko2_accumulate_games("
-    "            c.rating, c.rd, c.volatility, consensus.glicko2_neutral_mu(), "
-    "            b.phi, b.games, b.score_sum, consensus.glicko2_tau()) AS r), "
+    "  rating = CASE WHEN b.seen THEN b.new_rating ELSE "
+    "      (laplace.laplace_glicko2_accumulate_games("
+    "           c.rating, c.rd, c.volatility, consensus.glicko2_neutral_mu(), "
+    "           b.phi, b.games, b.score_sum, consensus.glicko2_tau())).rating END, "
+    "  rd = CASE WHEN b.seen THEN b.new_rd ELSE "
+    "      (laplace.laplace_glicko2_accumulate_games("
+    "           c.rating, c.rd, c.volatility, consensus.glicko2_neutral_mu(), "
+    "           b.phi, b.games, b.score_sum, consensus.glicko2_tau())).rd END, "
+    "  volatility = CASE WHEN b.seen THEN b.new_volatility ELSE "
+    "      (laplace.laplace_glicko2_accumulate_games("
+    "           c.rating, c.rd, c.volatility, consensus.glicko2_neutral_mu(), "
+    "           b.phi, b.games, b.score_sum, consensus.glicko2_tau())).volatility END, "
     "  witness_count = c.witness_count + b.games, "
     "  last_observed_at = GREATEST(c.last_observed_at, b.ts) "
     "WHEN NOT MATCHED THEN INSERT "
     "  (id, subject_id, type_id, object_id, rating, rd, volatility, "
     "   witness_count, last_observed_at) "
-    "VALUES (b.id, b.s, '\\x%s'::bytea, b.o, b.initial_rating, b.initial_rd, "
-    "        b.initial_volatility, b.games, b.ts)";
+    "VALUES (b.id, b.s, '\\x%s'::bytea, b.o, b.new_rating, b.new_rd, "
+    "        b.new_volatility, b.games, b.ts)";
 
 /* NO mask queue here — parity with the plpgsql body this replaces
  * (2026-07-21): the caller deposits highway bits INLINE for this same delta
@@ -495,7 +568,6 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
     InArray     subjects, types, objects, phis, games, sums, ts;
     Datum      *cell_ids;
     ArrayType  *cell_id_array;
-    InitialFoldArrays initial;
     int64       affected = 0;
     HTAB       *seen;
     HASHCTL     ctl;
@@ -516,7 +588,6 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
                  errmsg("%s: parallel arrays must share length", label)));
     if (subjects.n == 0)
         PG_RETURN_INT64(0);
-    initial_fold_arrays(&phis, &games, &sums, label, &initial);
 
     /* Cell ids natively: blake3(subject || type || COALESCE(object, zeros)) —
      * the exact byte layout of the SQL consensus_id definition, through the
@@ -569,12 +640,18 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
         const uint8_t *type16 = bytea16(types.elems[run_start], label);
         int            run_n = 0;
         int            j = run_start;
+        SPIPlanPtr     prior_plan;
         SPIPlanPtr     merge_plan;
-        Datum          vals[10];
-        static const Oid args[10] =
+        ArrayType     *run_ids;
+        ArrayType     *run_subjects;
+        FoldStateArrays folds;
+        Datum          pvals[2];
+        Datum          vals[11];
+        static const Oid prior_args[2] = {BYTEAARRAYOID, BYTEAARRAYOID};
+        static const Oid args[11] =
             {BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID, INT8ARRAYOID,
              INT8ARRAYOID, INT8ARRAYOID, 1185,
-             INT8ARRAYOID, INT8ARRAYOID, INT8ARRAYOID};
+             BOOLARRAYOID, INT8ARRAYOID, INT8ARRAYOID, INT8ARRAYOID};
         int            rc;
 
         while (j < subjects.n &&
@@ -584,14 +661,30 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
             j++;
         }
 
+        run_ids = array_window(cell_id_array, cell_ids, NULL,
+                               subjects.n, run_start, run_n,
+                               BYTEAOID, -1, false, 'i');
+        run_subjects = array_window(subjects.array, subjects.elems, NULL,
+                                    subjects.n, run_start, run_n,
+                                    BYTEAOID, -1, false, 'i');
+
+        prior_plan = typed_plan(&upsert_prior_plans, "consensus_upsert prior plans",
+                                type16, PRIOR_SELECT_SQL, 2, prior_args);
+        pvals[0] = PointerGetDatum(run_ids);
+        pvals[1] = PointerGetDatum(run_subjects);
+        rc = SPI_execute_plan(prior_plan, pvals, NULL, false, 0);
+        if (rc != SPI_OK_SELECT)
+            ereport(ERROR,
+                    (errcode(ERRCODE_INTERNAL_ERROR),
+                     errmsg("%s: prior-state SELECT failed: %s",
+                            label, SPI_result_code_string(rc))));
+        fold_run_states(&phis, &games, &sums, run_start, run_n,
+                        SPI_tuptable, SPI_processed, label, &folds);
+
         merge_plan = typed_plan(&upsert_merge_plans, "consensus_upsert merge plans",
-                                type16, UPSERT_MERGE_SQL, 10, args);
-        vals[0] = PointerGetDatum(array_window(cell_id_array, cell_ids, NULL,
-                                              subjects.n, run_start, run_n,
-                                              BYTEAOID, -1, false, 'i'));
-        vals[1] = PointerGetDatum(array_window(subjects.array, subjects.elems, NULL,
-                                              subjects.n, run_start, run_n,
-                                              BYTEAOID, -1, false, 'i'));
+                                type16, UPSERT_MERGE_SQL, 11, args);
+        vals[0] = PointerGetDatum(run_ids);
+        vals[1] = PointerGetDatum(run_subjects);
         vals[2] = PointerGetDatum(array_window(objects.array, objects.elems,
                                               objects.nulls, objects.n,
                                               run_start, run_n,
@@ -608,18 +701,10 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
         vals[6] = PointerGetDatum(array_window(ts.array, ts.elems, NULL,
                                               ts.n, run_start, run_n,
                                               TIMESTAMPTZOID, 8, true, 'd'));
-        vals[7] = PointerGetDatum(array_window(initial.rating_array,
-                                              initial.ratings, NULL,
-                                              subjects.n, run_start, run_n,
-                                              INT8OID, 8, true, 'd'));
-        vals[8] = PointerGetDatum(array_window(initial.rd_array,
-                                              initial.rds, NULL,
-                                              subjects.n, run_start, run_n,
-                                              INT8OID, 8, true, 'd'));
-        vals[9] = PointerGetDatum(array_window(initial.volatility_array,
-                                              initial.volatilities, NULL,
-                                              subjects.n, run_start, run_n,
-                                              INT8OID, 8, true, 'd'));
+        vals[7] = PointerGetDatum(folds.seen_array);
+        vals[8] = PointerGetDatum(folds.rating_array);
+        vals[9] = PointerGetDatum(folds.rd_array);
+        vals[10] = PointerGetDatum(folds.volatility_array);
         rc = SPI_execute_plan(merge_plan, vals, NULL, false, 0);
         if (rc != SPI_OK_MERGE)
             ereport(ERROR,
@@ -646,15 +731,18 @@ pg_laplace_consensus_upsert_type(PG_FUNCTION_ARGS)
     InArray        subjects, objects, phis, games, sums, ts;
     Datum         *cell_ids;
     ArrayType     *cell_id_array;
-    InitialFoldArrays initial;
+    FoldStateArrays folds;
     HTAB          *seen;
     HASHCTL        ctl;
+    SPIPlanPtr     prior_plan;
     SPIPlanPtr     merge_plan;
-    Datum          vals[10];
-    static const Oid args[10] =
+    Datum          pvals[2];
+    Datum          vals[11];
+    static const Oid prior_args[2] = {BYTEAARRAYOID, BYTEAARRAYOID};
+    static const Oid args[11] =
         {BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID, INT8ARRAYOID,
          INT8ARRAYOID, INT8ARRAYOID, 1185,
-         INT8ARRAYOID, INT8ARRAYOID, INT8ARRAYOID};
+         BOOLARRAYOID, INT8ARRAYOID, INT8ARRAYOID, INT8ARRAYOID};
     int i;
     int rc;
 
@@ -676,7 +764,6 @@ pg_laplace_consensus_upsert_type(PG_FUNCTION_ARGS)
                  errmsg("%s: parallel arrays must share length", label)));
     if (subjects.n == 0)
         PG_RETURN_INT64(0);
-    initial_fold_arrays(&phis, &games, &sums, label, &initial);
 
     memset(&ctl, 0, sizeof(ctl));
     ctl.keysize = 16;
@@ -717,8 +804,21 @@ pg_laplace_consensus_upsert_type(PG_FUNCTION_ARGS)
         ereport(ERROR,
                 (errcode(ERRCODE_INTERNAL_ERROR),
                  errmsg("%s: SPI_connect failed", label)));
+    prior_plan = typed_plan(&upsert_prior_plans, "consensus_upsert prior plans",
+                            type16, PRIOR_SELECT_SQL, 2, prior_args);
+    pvals[0] = PointerGetDatum(cell_id_array);
+    pvals[1] = PointerGetDatum(subjects.array);
+    rc = SPI_execute_plan(prior_plan, pvals, NULL, false, 0);
+    if (rc != SPI_OK_SELECT)
+        ereport(ERROR,
+                (errcode(ERRCODE_INTERNAL_ERROR),
+                 errmsg("%s: prior-state SELECT failed: %s",
+                        label, SPI_result_code_string(rc))));
+    fold_run_states(&phis, &games, &sums, 0, subjects.n,
+                    SPI_tuptable, SPI_processed, label, &folds);
+
     merge_plan = typed_plan(&upsert_merge_plans, "consensus_upsert merge plans",
-                            type16, UPSERT_MERGE_SQL, 10, args);
+                            type16, UPSERT_MERGE_SQL, 11, args);
     vals[0] = PointerGetDatum(cell_id_array);
     vals[1] = PointerGetDatum(subjects.array);
     vals[2] = PointerGetDatum(objects.array);
@@ -726,9 +826,10 @@ pg_laplace_consensus_upsert_type(PG_FUNCTION_ARGS)
     vals[4] = PointerGetDatum(games.array);
     vals[5] = PointerGetDatum(sums.array);
     vals[6] = PointerGetDatum(ts.array);
-    vals[7] = PointerGetDatum(initial.rating_array);
-    vals[8] = PointerGetDatum(initial.rd_array);
-    vals[9] = PointerGetDatum(initial.volatility_array);
+    vals[7] = PointerGetDatum(folds.seen_array);
+    vals[8] = PointerGetDatum(folds.rating_array);
+    vals[9] = PointerGetDatum(folds.rd_array);
+    vals[10] = PointerGetDatum(folds.volatility_array);
     rc = SPI_execute_plan(merge_plan, vals, NULL, false, 0);
     if (rc != SPI_OK_MERGE)
         ereport(ERROR,
