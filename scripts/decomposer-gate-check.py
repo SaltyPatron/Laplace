@@ -279,6 +279,60 @@ def check_source(
                 **({"max": maximum} if maximum is not None else {}),
             )
 
+    # ---- rating spread ------------------------------------------------------
+    #
+    # EVERY gate above is a row-count minimum, so a relation whose ratings are
+    # bit-identical passes cleanly. That is the axis that was never broken: the
+    # substrate had 139.5M attestations of which 80.26% scored exactly 1.000 and
+    # only 3.16% varied, and HAS_RATING -- the relation whose object IS a rating --
+    # carried ONE distinct value. Counting rows cannot see any of that.
+    #
+    # This is deliberately a DEFAULT rule rather than an opt-in field. An opt-in
+    # spread check reproduces exactly the blindness it is meant to remove, because
+    # the relations nobody thought to annotate are the ones that degrade.
+    #
+    # A relation is exempt only by saying so in the gate, with a reason:
+    #   "constant_rating_ok": "identity mapping -- nothing to rank"
+    # which is legitimate for bookkeeping relations (CILI HAS_SYNSET_KEY), and is a
+    # claim reviewers can see and challenge.
+    #
+    # The DISTINCT is taken over a bounded sample: if 50,000 cells of one relation
+    # share a single rating, the relation is constant, and the query stays cheap on a
+    # 127M-row partitioned table.
+    SPREAD_MIN_CELLS = 1000
+    SPREAD_SAMPLE = 50000
+    for gate in src.get("consensus_gates", []):
+        rel = gate["relation"]
+        exempt = gate.get("constant_rating_ok")
+        try:
+            row = psql(
+                dbname,
+                "SELECT count(*)::text || ' ' || count(DISTINCT rating)::text FROM ("
+                f"SELECT rating FROM laplace.consensus "
+                f"WHERE type_id = laplace.relation_type_id('{rel}') "
+                f"LIMIT {SPREAD_SAMPLE}) s;",
+                host=host,
+                user=user,
+            ).split()
+            cells, distinct = int(row[0]), int(row[1])
+            if exempt:
+                passed = True
+                detail = f"cells={cells:,} distinct_ratings={distinct} EXEMPT: {exempt}"
+            elif cells < SPREAD_MIN_CELLS:
+                passed = True
+                detail = f"cells={cells:,} distinct_ratings={distinct} (below {SPREAD_MIN_CELLS:,}, not judged)"
+            else:
+                passed = distinct > 1
+                detail = (
+                    f"cells={cells:,} distinct_ratings={distinct}"
+                    + ("" if passed else " -- CONSTANT: every cell folded to one rating,"
+                                         " so this relation carries no ranking signal")
+                )
+            record(f"rating_spread:{rel}", passed, detail,
+                   relation=rel, cells=cells, distinct_ratings=distinct)
+        except Exception as e:
+            record(f"rating_spread:{rel}", False, str(e), relation=rel)
+
     report = {
         "source": source,
         "dbname": dbname,
