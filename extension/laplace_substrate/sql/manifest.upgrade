@@ -166,6 +166,7 @@ functions/converse/word_id.sql.in
 functions/converse/resolve_ref.sql.in
 functions/lexical/word_case_variants.sql.in
 functions/converse/word_segment.sql.in
+functions/converse/word_segment_resolved.sql.in
 functions/converse/label.sql.in
 functions/converse/label_or_hex.sql.in
 functions/converse/label_is_content.sql.in

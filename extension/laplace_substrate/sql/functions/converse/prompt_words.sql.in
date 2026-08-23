@@ -36,7 +36,7 @@ CREATE OR REPLACE FUNCTION converse.prompt_words(p_text text)
 BEGIN ATOMIC
     WITH seg AS MATERIALIZED (
         SELECT ws.ord, ws.word, e.id
-        FROM converse.word_segment(p_text) ws
+        FROM converse.word_segment_resolved(p_text) ws
         LEFT JOIN laplace.entities e ON e.id = ws.id
     ), variants AS MATERIALIZED (
         SELECT v.word_id, v.variant_id

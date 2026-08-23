@@ -1,0 +1,23 @@
+-- converse.word_segment_resolved — word_segment, with the substrate deciding
+-- where a word ends inside a run the text gave no boundary for.
+--
+-- UAX#29 word break joins ALetter runs, so Latin, Cyrillic, Arabic and Hangul
+-- words survive whole while 4.1 puts Han, Hiragana, Katakana, Thai, Lao and
+-- Khmer segmentation explicitly out of scope. Measured live 2026-08-23:
+-- 自転車 (167 edges), 北京 (93), ある (81), สวัสดี (27) and 氷河 (21) all exist
+-- with rated evidence and converse.word_segment reaches none of them, emitting
+-- 3, 2, 2, 4 and 2 fragments. Downstream then runs one rung lower for those
+-- scripts: generation.trajectory_continuations for 氷 returns 20 of 20 non-word
+-- entities, against 20 of 20 words for New.
+--
+-- Whitespace is a real boundary and is never crossed, so "hot dog" and
+-- "New York" stay tier-3 compositions of two tier-2 words rather than becoming
+-- word tokens. Only byte-contiguous runs are joined; the rule names no script.
+--
+-- Stores nothing. Adjacency remains a view over the trajectory per the
+-- 2026-07-25 ruling in relation_types.toml. See src/content_resolve.c.
+DROP FUNCTION IF EXISTS converse.word_segment_resolved(text);
+CREATE OR REPLACE FUNCTION converse.word_segment_resolved(p_text text)
+    RETURNS TABLE(ord int, word text, id bytea)
+    AS 'MODULE_PATHNAME', 'pg_laplace_word_segment_resolved'
+    LANGUAGE C STABLE;

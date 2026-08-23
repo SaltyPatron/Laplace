@@ -1,4 +1,5 @@
 #include "postgres.h"
+#include "miscadmin.h"
 
 #include "catalog/pg_type.h"
 #include "executor/spi.h"
@@ -11,6 +12,8 @@
 #include "spi_common.h"
 #include "spi_nested.h"
 
+#include "laplace/core/mantissa.h"
+
 /*
  * generation.trajectory_continuations(ctx, topk)
  *
@@ -20,14 +23,34 @@
  * occurrence, carry the separator after the matched context, and rank.
  */
 
+/*
+ * ONE WKB BLOB PER TRAJECTORY, not a per-vertex LATERAL. This is the identical
+ * transformation geometry_successors.c took on 2026-08-21 (#939), whose header
+ * measured the shape this replaced at 136.7s for a 20-row question because
+ * `CROSS JOIN LATERAL laplace_trajectory_constituents(...) ORDER BY p.id,
+ * c.ordinal` materialises AND SORTS one executor tuple per vertex -- ~60 bytes
+ * of overhead around 32 bytes of payload -- to answer a top-k question.
+ *
+ * Measured here 2026-08-23 before the change: continuations for `New` took
+ * 2722ms warm, and EXPLAIN ANALYZE showed the GIN probe correctly reducing to
+ * 23,606 candidate containers and the LATERAL then expanding them back out to
+ * 1,966,012 rows, which were sorted. Reduce before expanding (Rule #5).
+ *
+ * The sort bought nothing: vertex order inside a LINESTRING ZM WKB IS ordinal
+ * order, so the sequence arrives already ordered and the decode below reads it
+ * with the same mantissa_unpack the rest of the tree uses.
+ *
+ * Note laplace_trajectory_constituent_ids() stays in the predicate and NOWHERE
+ * else: it is the DEDUPED containment projection the GIN index is built on
+ * (measured: it differs from the ordinal-ordered sequence for 45% of entities),
+ * so using it to walk adjacency would silently drop repeats and order.
+ */
 static const char *UNPACK_QUERY =
-    "SELECT p.id, c.entity_id "
+    "SELECT public.ST_AsBinary(p.trajectory) "
     "FROM laplace.physicalities p "
-    "CROSS JOIN LATERAL public.laplace_trajectory_constituents(p.trajectory) c "
     "WHERE p.type = 1 "
     "AND p.trajectory IS NOT NULL "
-    "AND public.laplace_trajectory_constituent_ids(p.trajectory) @> $1 "
-    "ORDER BY p.id, c.ordinal";
+    "AND public.laplace_trajectory_constituent_ids(p.trajectory) @> $1";
 
 static const char *SEPARATOR_QUERY =
     "SELECT generation.separator_ids()";
@@ -308,8 +331,6 @@ pg_laplace_trajectory_continuations(PG_FUNCTION_ARGS)
         Datum args[1] = { PointerGetDatum(ctx_array) };
         char  nulls[1] = { ' ' };
         int   rc = SPI_execute_plan(unpack_plan, args, nulls, true, 0);
-        char  current[16];
-        bool  have_current = false;
         char *raw = NULL;
         int   n_raw = 0, raw_cap = 0;
 
@@ -319,49 +340,80 @@ pg_laplace_trajectory_continuations(PG_FUNCTION_ARGS)
 
         for (uint64 row = 0; row < SPI_processed; row++)
         {
-            HeapTuple tuple = SPI_tuptable->vals[row];
-            TupleDesc desc  = SPI_tuptable->tupdesc;
-            bool      container_null, token_null;
-            Datum     container_datum = SPI_getbinval(
-                tuple, desc, 1, &container_null);
-            Datum     token_datum = SPI_getbinval(
-                tuple, desc, 2, &token_null);
-            bytea    *container;
-            bytea    *token;
+            HeapTuple            tuple = SPI_tuptable->vals[row];
+            TupleDesc            desc  = SPI_tuptable->tupdesc;
+            bool                 wkb_null;
+            Datum                wkb_datum = SPI_getbinval(tuple, desc, 1, &wkb_null);
+            bytea               *wkb;
+            const unsigned char *b;
+            Size                 len;
+            uint32               wkb_type;
+            uint32               npoints;
+            Size                 need;
 
-            if (container_null || token_null)
+            if (wkb_null)
                 continue;
 
-            container = DatumGetByteaPP(container_datum);
-            token = DatumGetByteaPP(token_datum);
-            if (VARSIZE_ANY_EXHDR(container) != 16 ||
-                VARSIZE_ANY_EXHDR(token) != 16)
-                continue;
+            wkb = DatumGetByteaPP(wkb_datum);
+            b = (const unsigned char *) VARDATA_ANY(wkb);
+            len = (Size) VARSIZE_ANY_EXHDR(wkb);
 
-            if (!have_current || memcmp(current, VARDATA_ANY(container), 16) != 0)
+            /* ISO WKB from ST_AsBinary: byte order, uint32 type, then for
+             * LINESTRING ZM (3002) uint32 npoints and npoints*4 float8s;
+             * POINT ZM (3001) is one vertex with no count. Same framing checks
+             * as geometry_successors.c -- machine-order NDR only, and anything
+             * else is refused loudly rather than mis-decoded. */
+            if (len < 5 || b[0] != 1)
+                elog(ERROR,
+                     "trajectory_continuations: unexpected WKB framing "
+                     "(len=%zu, order=%d)", (size_t) len, len > 0 ? b[0] : -1);
+            memcpy(&wkb_type, b + 1, 4);
+            if (wkb_type == 3001u)
             {
-                if (have_current)
-                    scan_trajectory(raw, n_raw, context, n_context,
-                                    separators, successors, separator_counts);
-                memcpy(current, VARDATA_ANY(container), 16);
-                have_current = true;
-                n_raw = 0;
+                npoints = 1;
+                b += 5;
+                need = (Size) 32;
             }
-
-            if (n_raw == raw_cap)
+            else if (wkb_type == 3002u)
             {
-                raw_cap = raw_cap == 0 ? 32 : raw_cap * 2;
+                if (len < 9)
+                    elog(ERROR, "trajectory_continuations: truncated WKB");
+                memcpy(&npoints, b + 5, 4);
+                b += 9;
+                need = (Size) npoints * 32;
+            }
+            else
+                elog(ERROR,
+                     "trajectory_continuations: trajectory is not POINT/"
+                     "LINESTRING ZM (wkb type %u)", wkb_type);
+            if ((Size) (len - (Size) (b - (const unsigned char *) VARDATA_ANY(wkb))) < need)
+                elog(ERROR, "trajectory_continuations: truncated WKB body");
+
+            if ((int) npoints > raw_cap)
+            {
+                raw_cap = (int) npoints;
                 raw = raw == NULL
                     ? (char *) palloc((Size) raw_cap * 16)
                     : (char *) repalloc(raw, (Size) raw_cap * 16);
             }
-            memcpy(raw + (Size) n_raw * 16, VARDATA_ANY(token), 16);
-            n_raw++;
-        }
 
-        if (have_current)
+            n_raw = 0;
+            for (uint32 v = 0; v < npoints; v++)
+            {
+                double             vertex[4];
+                mantissa_payload_t payload;
+
+                memcpy(vertex, b + (Size) v * 32, 32);
+                mantissa_unpack(vertex, &payload);
+                memcpy(raw + (Size) n_raw * 16, &payload.entity_id, 16);
+                n_raw++;
+            }
+
             scan_trajectory(raw, n_raw, context, n_context,
                             separators, successors, separator_counts);
+            CHECK_FOR_INTERRUPTS();
+        }
+
         if (raw != NULL) pfree(raw);
         SPI_freetuptable(SPI_tuptable);
     }
