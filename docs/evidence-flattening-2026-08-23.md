@@ -278,6 +278,36 @@ Three independent mechanisms, all green throughout:
   it is the output of the broken decomposers, and `CLAUDE.md` makes db-reset + reseed the
   upgrade path.
 
+- **The fold is the ingest bottleneck, and it is provisioned as if it were not.**
+  Measured on the live foundation seed via `pg_stat_statements`, scoped to the `laplace`
+  database and top-level statements only:
+
+  | statement | total | calls | mean |
+  |---|---|---|---|
+  | `consensus.upsert_type` (fold) | **3,189s** | 1,058 | 3,014ms |
+  | COPY attestations | 639s | 865 | 739ms |
+  | `highway_mask_deposit` | 464s | 967 | 479ms |
+  | COPY physicalities | 354s | 785 | 451ms |
+  | COPY entities | 128s | 856 | 149ms |
+
+  The fold costs **2.8× the entire apply side** (3,189s against 1,121s combined), while
+  `IngestSizing` gives it `applyPartitions − ConsensusFoldPoolHeadroom` connections against
+  the COPY fan's `applyPartitions` — fewer. Its comment calls the fold "the elastic
+  background owner, so it cedes the headroom"; the measurement says the fold is the
+  dominant cost, not background. A consumer that is both more expensive per unit and less
+  parallel than its producer accumulates backlog monotonically, which is what
+  `DrainFoldsAsync` then waits out: CILI spent **269s of 336s** there.
+
+  `DrainFoldsAsync` only awaits already-dispatched work — there is no terminal fold pass,
+  and `FoldRunAfterAsync`/`AllocateFoldRunWidths` do give a single-relation source the full
+  connection width. The imbalance is service rate, not lost parallelism.
+
+  **Caveat on method:** `pg_stat_statements` is cluster-wide and `track = all`. An
+  unscoped reading sums every throwaway isolate with the seed and double-counts nested
+  statements inside their callers; the figures above filter on `dbid` and `toplevel`.
+  Rebalancing the two budgets is the obvious next move and is deliberately NOT made here —
+  it needs an A/B on a cluster this session does not own.
+
 - **Hub-word successor lookups.** A common word is still pathological: `the` appears in
   2,376,395 trajectories and its continuation lookup takes ~10.7s even parallel, because
   every containing trajectory is decoded. Bounding that needs a precomputed successor
