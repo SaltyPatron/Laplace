@@ -217,6 +217,17 @@ Three independent mechanisms, all green throughout:
   annotated 87 times and one annotated once could enter at the same strength. The stated
   total is now the `observationCount`. A `valenceUnit` outside a `<pattern>` carries no
   total of its own and enters at 1 rather than borrowing a number the corpus never gave it.
+- **CILI's change log is ingested — and is deliberately NOT a Refute** (this commit).
+  `SelectMapInputs` globbed `ili-map-*` only, so `changes-in-wn31.csv` was never read: 76
+  deprecated ILIs whose withdrawal the corpus states outright. It is recorded as a
+  version-scoped meta-fact rather than a refutation, because **`laplace.consensus_id` is
+  `blake3(subject, type, object)` — context is not in the cell key.** Refuting
+  `ili IS_TYPED_AS concept` would deny it flatly and contradict the wn30 testimony sharing
+  that same cell, so version-scoped denial is not expressible as an outcome in this schema
+  and forcing one would corrupt an unscoped claim. Recording it still converts "absent from
+  `ili-map-wn31`" — which spec 05 calls *unknown*, not refutation — into a stated fact a
+  reader can fetch. The 274 `new` rows are not re-asserted: the `ili-map` file already
+  carries those mappings, and re-emitting them would double-witness one source.
 - **`resolved_scored_build` also applies rank** (this commit) — it had the same raw
   `witness_weight` defect as `resolved_build`.
 
@@ -227,8 +238,10 @@ Three independent mechanisms, all green throughout:
   WordNet `tag_cnt` + `sense_number`, ConceptNet `weight` (31.8% ≠ 1.0) and `sources[]`
   (96,831 rows with ≥2 contributors), PropBank `lexlink confidence` (16,250 rows at
   0.8/1.0), FrameNet `total=` (290,405 values), OMW `wn-freq-ind.tab`.
-- **Refute at the remaining call sites.** CILI `changes-in-wn31.csv` (76 deprecated ILIs)
-  is still never globbed. VerbNet, OMW, ConceptNet and Atomic2020 are done.
+- **Version-scoped refutation is not expressible.** `consensus_id` excludes context, so a
+  denial that holds in one release and not another cannot be an outcome without corrupting
+  the unscoped cell. CILI's deprecations are recorded as meta-facts instead. If
+  version-scoped adjudication is wanted, the cell key has to carry it.
 - **Successor lookup latency.** ~835 ms fixed per call — ~590 ms is the GIN probe fanning
   across all 64 `physicalities` hash partitions (partition key is `id`, probe is on
   constituents, so nothing prunes). Actual work is ~190 ms. At one lookup per token,

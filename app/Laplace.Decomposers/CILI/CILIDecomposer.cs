@@ -37,6 +37,17 @@ public sealed class CILIDecomposer : DecomposerMultiPhase<CILISource, FullScope>
                 yield return change;
         }
 
+        // The release's own change log. SelectMapInputs globs ili-map-* only, so this was
+        // never read: 76 deprecated ILIs whose withdrawal the corpus states outright.
+        foreach (string changes in Directory
+                     .EnumerateFiles(root, "changes-in-*.csv", SearchOption.AllDirectories)
+                     .OrderBy(p => p, StringComparer.Ordinal))
+        {
+            await foreach (var change in RunPhaseAsync(
+                               new IliStatusPhase(changes, VersionLabel(changes)), context, options, ct))
+                yield return change;
+        }
+
         foreach (CiliMapInput map in SelectMapInputs(root, conceptsContainPwn30: File.Exists(ttl)))
         {
             ct.ThrowIfCancellationRequested();
@@ -118,6 +129,59 @@ public sealed class CILIDecomposer : DecomposerMultiPhase<CILISource, FullScope>
         {
             await foreach (var rec in ParseIliTtlAsync(Path.Combine(ecosystemPath, "ili.ttl"), ct))
                 yield return rec;
+        }
+    }
+
+    /// <summary>
+    /// changes-in-&lt;release&gt;.csv: Status,ILI,WN30,WN31,Synset. Only the withdrawals are
+    /// recorded here -- the "new" rows assert a mapping the ili-map file already carries,
+    /// so re-asserting them would double-witness the same triple from one source.
+    /// </summary>
+    private sealed class IliStatusPhase : CiliComposePhase<(string Ili, string Status, string Version)>
+    {
+        private readonly string _path;
+        private readonly string _version;
+
+        public IliStatusPhase(string path, string version)
+        {
+            _path = path;
+            _version = version;
+        }
+
+        protected override string PhaseLabel => $"changes/{_version}";
+
+        protected override void Compose((string Ili, string Status, string Version) rec, SubstrateChangeBuilder b)
+        {
+            if (ReferenceAnchor.Declare(
+                    b, ReferenceIdentityKind.CiliIli, rec.Ili, SynsetTypeId, Source) is not { } iliId)
+                return;
+            if (ContentEmitter.Emit(b, rec.Status, Source) is not { } statusId)
+                return;
+            var verCtx = ReferenceAnchor.Declare(
+                b, ReferenceIdentityKind.CiliMapVersion, rec.Version,
+                EntityTypeRegistry.SourceVersion, Source);
+
+            b.AddEntity(CILISource.IliStatusMetaTypeId, EntityTier.Word,
+                    BootstrapIntentBuilder.RelationTypeMetaTypeId, Source)
+                .AddAttestation(NativeAttestation.CategoricalResolved(
+                    iliId, CILISource.IliStatusMetaTypeId, statusId,
+                    Source, verCtx, TC.AcademicCurated));
+        }
+
+        protected override async IAsyncEnumerable<(string Ili, string Status, string Version)> ExtractRecordsAsync(
+            string ecosystemPath, DecomposerOptions options,
+            [EnumeratorCancellation] CancellationToken ct)
+        {
+            await foreach (var (fields, _) in GrammarRowReader.ReadFieldsAsync(
+                               _path, "csv", GrammarRecordFraming.Line, ct))
+            {
+                if (fields.Length < 2) continue;
+                string status = fields[0].Trim();
+                string ili = fields[1].Trim();
+                if (ili.Length == 0 || status.Length == 0) continue;
+                if (!status.Equals("deprecated", StringComparison.OrdinalIgnoreCase)) continue;
+                yield return (ili, status.ToLowerInvariant(), _version);
+            }
         }
     }
 
