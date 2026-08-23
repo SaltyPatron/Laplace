@@ -228,6 +228,14 @@ Three independent mechanisms, all green throughout:
   `ili-map-wn31`" — which spec 05 calls *unknown*, not refutation — into a stated fact a
   reader can fetch. The 274 `new` rows are not re-asserted: the `ili-map` file already
   carries those mappings, and re-emitting them would double-witness one source.
+- **SPI plans are parallel-eligible** (this commit). `SPI_prepare` plans with parallelism
+  DISABLED, and **no file in the extension used `CURSOR_OPT_PARALLEL_OK`**. The successor
+  probe is a GIN containment scan over all 64 hash partitions of `physicalities` — the
+  partition key is `id`, the predicate is on constituents, so nothing prunes. Standalone
+  the planner uses a Parallel Append with 7 workers at ~42ms; through `SPI_prepare` the
+  identical query ran serially. Measured warm after the change:
+  `trajectory_continuations` **687ms → 183ms**, `geometry_successors_batch`
+  **975ms → 127ms**. Results bit-identical (`New→York` 6407, `氷→河` 72).
 - **`resolved_scored_build` also applies rank** (this commit) — it had the same raw
   `witness_weight` defect as `resolved_build`.
 
@@ -242,10 +250,10 @@ Three independent mechanisms, all green throughout:
   denial that holds in one release and not another cannot be an outcome without corrupting
   the unscoped cell. CILI's deprecations are recorded as meta-facts instead. If
   version-scoped adjudication is wanted, the cell key has to carry it.
-- **Successor lookup latency.** ~835 ms fixed per call — ~590 ms is the GIN probe fanning
-  across all 64 `physicalities` hash partitions (partition key is `id`, probe is on
-  constituents, so nothing prunes). Actual work is ~190 ms. At one lookup per token,
-  generation is unusable on that alone, and no query rewrite reaches it.
+- **Hub-word successor lookups.** A common word is still pathological: `the` appears in
+  2,376,395 trajectories and its continuation lookup takes ~10.7s even parallel, because
+  every containing trajectory is decoded. Bounding that needs a precomputed successor
+  structure, not a faster scan.
 - **Test-suite load sensitivity.** Three different tests failed once each
   (`Token_command_outranks_a_stale_environment_variable`,
   `ManyIndividuallySmallFiles_StillRefineWhenCorpusExceedsSharedBudget`,

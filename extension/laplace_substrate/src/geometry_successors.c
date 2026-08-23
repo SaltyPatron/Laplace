@@ -96,7 +96,21 @@ ensure_plans(void)
     if (batch_unpack_plan == NULL)
     {
         Oid        argtypes[2] = { BYTEAARRAYOID, INT2OID };
-        SPIPlanPtr plan = SPI_prepare(BATCH_UNPACK_QUERY, 2, argtypes);
+        /*
+         * SPI_prepare_cursor(..., CURSOR_OPT_PARALLEL_OK), not SPI_prepare.
+         *
+         * SPI_prepare plans with parallelism DISABLED. This probe is a GIN containment
+         * scan across all 64 hash partitions of laplace.physicalities -- the partition key
+         * is `id` and the predicate is on constituents, so nothing prunes and every
+         * partition is scanned. Standalone the planner uses a Parallel Append with 7
+         * workers and finishes in ~42 ms; planned through SPI_prepare the identical query
+         * runs serially.
+         *
+         * The plan is read-only (SPI_execute_plan passes read_only = true), which is what
+         * makes it eligible.
+         */
+        SPIPlanPtr plan = SPI_prepare_cursor(BATCH_UNPACK_QUERY, 2, argtypes,
+                                            CURSOR_OPT_PARALLEL_OK);
 
         if (plan == NULL)
             elog(ERROR, "geometry_successors: SPI_prepare(batch unpack) failed: %s",
