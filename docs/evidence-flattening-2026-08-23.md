@@ -198,6 +198,18 @@ Three independent mechanisms, all green throughout:
   `relation_types.toml`, never folded — verified live at **209 / 0** and **8,995 / 0**
   attestations/consensus. A game's analysis version is provenance, fetched when asked,
   exactly like a file's name and mtime.
+- **Synthesis is gated on the artifact, not its size** (this commit). CI's entire check was
+  "the file exists and is over 50 MB" — a 50 MB file of zeros passed. Two gates now run.
+  `verify-gguf-nondegenerate.py` needs only the artifact and fails any tensor that is
+  entirely zero or whose rows are identical, which is exactly what a declared-then-zeroed
+  operator, a constant FFN gate, or hub collapse looks like. And
+  `verify-model-behavioral.py` — which existed, names "SIMULATED success" as the project's
+  defining failure mode in its own header, and **was invoked by no workflow** — is now
+  wired in. It could not run: it assumed a `llama-completion` binary, and its SQL called
+  the bare `render(...)` that has not resolved since the purpose-schema migration
+  (#862/#957). It now has an ollama backend (the runtime that is actually installed) and
+  schema-qualified SQL, verified end to end against a stored substrate GGUF where it
+  correctly returned `BEHAVIORAL FAIL: 0/4 probes`.
 - **`resolved_scored_build` also applies rank** (this commit) — it had the same raw
   `witness_weight` defect as `resolved_build`.
 

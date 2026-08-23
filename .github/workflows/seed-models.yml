@@ -135,3 +135,45 @@ jobs:
           sz=$(stat -c%s "$GGUF_OUT")
           [ "$sz" -gt 50000000 ] || { echo "::error::GGUF too small ($sz bytes) — synthesis produced trivial output"; exit 1; }
           echo "::notice::GGUF OK — $((sz/1048576)) MB at $GGUF_OUT"
+
+      # A 50 MB file of zeros passes the size check. These two do not.
+      #
+      # STRUCTURAL: no tensor entirely zero, no projection whose rows are identical.
+      # This is what catches a declared operator that reached the compiler and was then
+      # scaled to nothing (the compile=continuation default), a constant FFN gate, and
+      # hub collapse. Needs only the artifact, so it is unconditional.
+      - name: Gate — GGUF is structurally non-degenerate
+        run: |
+          python3 scripts/verify-gguf-nondegenerate.py --model "$GGUF_OUT" \
+            --report /tmp/laplace-gguf-nondegenerate.json
+
+      # BEHAVIORAL: the expected continuations come from the substrate's OWN consensus,
+      # so a passing model demonstrably carries the knowledge it claims to transcribe.
+      # This harness existed and was never invoked by any workflow, which left "the file
+      # is over 50 MB" as the entire synthesis gate — the SIMULATED success its own
+      # header names as the project's defining failure mode.
+      - name: Gate — model carries substrate knowledge
+        run: |
+          command -v ollama >/dev/null || { echo "::error::ollama runtime missing on runner"; exit 1; }
+          if ! curl -sf http://127.0.0.1:11434/api/version >/dev/null; then
+            nohup ollama serve >/tmp/laplace-ollama.log 2>&1 &
+            for _ in $(seq 1 30); do
+              curl -sf http://127.0.0.1:11434/api/version >/dev/null && break; sleep 1
+            done
+          fi
+          curl -sf http://127.0.0.1:11434/api/version >/dev/null \
+            || { echo "::error::ollama did not come up"; cat /tmp/laplace-ollama.log; exit 1; }
+          python3 scripts/verify-model-behavioral.py \
+            --model "$GGUF_OUT" --runner ollama --ollama-tag laplace-ci-verify \
+            --db "host=/var/run/postgresql user=laplace_admin dbname=$PGDATABASE" \
+            --report /tmp/laplace-model-behavioral.json
+
+      - name: Upload verification reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: model-verification
+          path: |
+            /tmp/laplace-gguf-nondegenerate.json
+            /tmp/laplace-model-behavioral.json
+          if-no-files-found: ignore
