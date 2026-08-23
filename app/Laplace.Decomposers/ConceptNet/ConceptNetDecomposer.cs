@@ -94,6 +94,7 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase<ConceptN
         // own weight carries through as the strength of the denial.
         double weight = ConceptNetUri.ParseWeight(meta);
         if (negated) weight = -weight;
+        long sourceCount = ConceptNetUri.ParseSourceCount(meta);
         // Capture the POS ConceptNet encodes in the concept URI (/c/en/dog/n). Previously
         // discarded (out _); now folded onto the unified POS hub via HAS_POS. The /wn/ synset
         // suffix routes to the WordNet/CILI hub via CORRESPONDS_TO. See docs/specs/16 §4.
@@ -130,7 +131,8 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase<ConceptN
                 SubjectPos: endPos, ObjectPos: startPos,
                 SubjectSynsetId: ConceptNetUri.ResolveSynsetFromWnSuffix(endWn, endPos),
                 ObjectSynsetId: ConceptNetUri.ResolveSynsetFromWnSuffix(startWn, startPos),
-                SubjectLangId: endLangId, ObjectLangId: startLangId);
+                SubjectLangId: endLangId, ObjectLangId: startLangId,
+                ObservationCount: sourceCount);
             return true;
         }
 
@@ -140,7 +142,8 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase<ConceptN
             SubjectPos: startPos, ObjectPos: endPos,
             SubjectSynsetId: ConceptNetUri.ResolveSynsetFromWnSuffix(startWn, startPos),
             ObjectSynsetId: ConceptNetUri.ResolveSynsetFromWnSuffix(endWn, endPos),
-            SubjectLangId: startLangId, ObjectLangId: endLangId);
+            SubjectLangId: startLangId, ObjectLangId: endLangId,
+            ObservationCount: sourceCount);
         return true;
     }
 

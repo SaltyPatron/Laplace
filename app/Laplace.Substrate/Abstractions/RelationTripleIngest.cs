@@ -35,7 +35,14 @@ public readonly record struct RelationTripleRecord(
     Hash128? SubjectLangId = null,
     Hash128? ObjectLangId = null,
     string? ContextAnchorKey = null,
-    Hash128? ContextCategoryTypeId = null);
+    Hash128? ContextCategoryTypeId = null,
+    /// <summary>
+    /// Independent witnesses the source claims for this triple. Sources that state it --
+    /// ConceptNet lists a "sources" array, 96,831 rows of which name two or more -- had it
+    /// discarded: every row folded at 1, so an edge 465 sources agree on folded exactly as
+    /// hard as one asserted once. Defaults to 1, so a source that says nothing is unchanged.
+    /// </summary>
+    long ObservationCount = 1);
 
 /// <summary>
 /// The single ingestion handler for ALL relation-triple sources. Each record becomes a
@@ -101,7 +108,8 @@ public sealed class RelationTripleHandler : IIngestRecordHandler<RelationTripleR
             }
             builder.AddAttestation(NativeAttestation.Categorical(
                 subjectEndpoint, record.RelationType, objectEndpoint, sourceId, sourceTrust,
-                magnitude: record.Magnitude, arenaScale: 1.0, contextId: ctx));
+                magnitude: record.Magnitude, arenaScale: 1.0, contextId: ctx,
+                observationCount: record.ObservationCount));
         }
 
         // Fold source-encoded POS onto the unified POS hub (n/v/a/r/s → canonical via the

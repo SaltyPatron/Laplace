@@ -132,6 +132,11 @@ Three independent mechanisms, all green throughout:
   discarding a hand-curated distinction the source recorded deliberately. Emitted before
   the role pass and sharing its dedup set, so the confidence-bearing witness is the one
   that lands.
+- **ConceptNet's source count reaches `observationCount`** (this commit). The corpus states
+  how much support each assertion has in its `sources` array and it went nowhere: every row
+  folded at 1, so an edge **465 sources** agree on folded exactly as hard as one asserted
+  once. **96,831 rows (5.4%)** list two or more. `RelationTripleRecord` now carries
+  `ObservationCount` (default 1, so a source that says nothing is unchanged).
 - **`resolved_scored_build` also applies rank** (this commit) — it had the same raw
   `witness_weight` defect as `resolved_build`.
 

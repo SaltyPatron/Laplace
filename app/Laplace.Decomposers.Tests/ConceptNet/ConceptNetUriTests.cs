@@ -107,4 +107,28 @@ public sealed class ConceptNetUriTests
         Assert.True(ConceptNetUri.IsExternalUrlRelation("/r/ExternalURL"u8));
         Assert.False(ConceptNetUri.IsExternalUrlRelation("/r/RelatedTo"u8));
     }
+
+    // ConceptNet states how much support an assertion has in its "sources" array and it
+    // went nowhere: every row folded at observationCount 1, so an edge 465 sources agree
+    // on folded exactly as hard as one asserted once. 96,831 rows list two or more.
+    [Theory]
+    [InlineData("{\"weight\": 1.0}", 1L)]
+    [InlineData("{\"sources\": [], \"weight\": 1.0}", 1L)]
+    [InlineData("{\"sources\": [{\"contributor\": \"/s/resource/wiktionary/en\"}], \"weight\": 1.0}", 1L)]
+    [InlineData("{\"sources\": [{\"contributor\": \"/s/a\", \"process\": \"/s/p\"}, "
+              + "{\"contributor\": \"/s/b\", \"process\": \"/s/p\"}], \"weight\": 2.0}", 2L)]
+    [InlineData("{\"sources\": [{\"contributor\": \"/s/a\"}, {\"contributor\": \"/s/b\"}, "
+              + "{\"contributor\": \"/s/c\"}], \"weight\": 1.0}", 3L)]
+    public void ParseSourceCount_CountsTheSupportTheCorpusClaims(string json, long expected)
+        => Assert.Equal(expected, ConceptNetUri.ParseSourceCount(
+            System.Text.Encoding.UTF8.GetBytes(json)));
+
+    // A nested object inside a source record must not be counted as another source.
+    [Fact]
+    public void ParseSourceCount_IgnoresNestedObjects()
+    {
+        const string json =
+            "{\"sources\": [{\"contributor\": \"/s/a\", \"detail\": {\"x\": 1}}], \"weight\": 1.0}";
+        Assert.Equal(1L, ConceptNetUri.ParseSourceCount(System.Text.Encoding.UTF8.GetBytes(json)));
+    }
 }

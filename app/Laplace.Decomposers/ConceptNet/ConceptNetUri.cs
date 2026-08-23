@@ -93,6 +93,53 @@ public static class ConceptNetUri
         SubstrateChangeBuilder b, ReadOnlySpan<byte> termUnderscored, Hash128 sourceId, out Hash128 rootId) =>
         ContentTierSpine.TryStageUnderscoredIntoBuilder(b, termUnderscored, sourceId, out rootId);
 
+    /// <summary>
+    /// How many source records ConceptNet lists for an assertion -- the count of objects in
+    /// its "sources" array. That is the corpus's own statement of how much independent
+    /// support a triple has, and it went nowhere: every row entered the fold at
+    /// observationCount 1, so an edge 465 sources agree on folded exactly as hard as one
+    /// asserted once. 96,831 rows (5.4%) list two or more.
+    ///
+    /// Counts ARRAY ELEMENTS rather than distinct contributor strings: it is the source's
+    /// own grain, and it costs no allocation on a 34M-row hot path. Returns at least 1 so a
+    /// row with no sources block folds exactly as before.
+    /// </summary>
+    public static long ParseSourceCount(ReadOnlySpan<byte> json)
+    {
+        if (json.IsEmpty) return 1;
+        try
+        {
+            var reader = new Utf8JsonReader(json, isFinalBlock: true, state: default);
+            while (reader.Read())
+            {
+                if (reader.TokenType != JsonTokenType.PropertyName
+                    || !reader.ValueTextEquals("sources"u8))
+                    continue;
+                if (!reader.Read() || reader.TokenType != JsonTokenType.StartArray) return 1;
+
+                long count = 0;
+                int depth = 0;
+                while (reader.Read())
+                {
+                    if (reader.TokenType == JsonTokenType.StartObject)
+                    {
+                        if (depth == 0) count++;
+                        depth++;
+                    }
+                    else if (reader.TokenType == JsonTokenType.EndObject) depth--;
+                    else if (reader.TokenType == JsonTokenType.EndArray && depth == 0) break;
+                }
+                return count > 0 ? count : 1;
+            }
+        }
+        catch (JsonException ex)
+        {
+            System.Diagnostics.Trace.TraceWarning(
+                $"ConceptNetUri: failed to parse sources from metadata JSON: {ex.Message}");
+        }
+        return 1;
+    }
+
     /// <summary>Pull ConceptNet's assertion "weight" out of the metadata JSON column
     /// (defaults to 1.0). Shared by the lean managed lane and the retired grammar
     /// witness so the magnitude carried into the fold has one definition.</summary>
