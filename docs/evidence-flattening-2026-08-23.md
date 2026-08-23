@@ -137,6 +137,12 @@ Three independent mechanisms, all green throughout:
   folded at 1, so an edge **465 sources** agree on folded exactly as hard as one asserted
   once. **96,831 rows (5.4%)** list two or more. `RelationTripleRecord` now carries
   `ObservationCount` (default 1, so a source that says nothing is unchanged).
+- **OMW's frequency file is ingested** (this commit). `wn-freq-*.tab` — **4,981 rows** of
+  "this lemma was observed N times for this synset", the only per-row magnitude the corpus
+  ships — was never matched by the glob list. It witnesses the same membership the
+  `wn-data` row asserts and now folds into that cell as a second, *scored* witness, so a
+  lemma observed 50 times outranks one observed once instead of both entering at the
+  categorical constant. A row with no usable count is dropped rather than defaulting to 1.
 - **`resolved_scored_build` also applies rank** (this commit) — it had the same raw
   `witness_weight` defect as `resolved_build`.
 

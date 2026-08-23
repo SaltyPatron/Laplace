@@ -5,9 +5,10 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.OMW;
 
-public enum OmwType { Lemma, Def, Exe }
+public enum OmwType { Lemma, Def, Exe, Freq }
 public readonly record struct OmwRow(
-    long Offset, char SsType, string Lang, OmwType Type, bool Removed = false);
+    long Offset, char SsType, string Lang, OmwType Type, bool Removed = false,
+    double Magnitude = 1.0);
 
 internal static class OMWEmitter
 {
@@ -33,6 +34,19 @@ internal static class OMWEmitter
 
         switch (row.Type)
         {
+            case OmwType.Freq:
+                // wn-freq-ind.tab is the only per-row magnitude OMW ships -- 4,981 rows of
+                // "this lemma was observed N times for this synset" -- and the glob list
+                // never matched it, so the corpus's own usage evidence was dropped whole.
+                //
+                // It witnesses the SAME membership the wn-data row asserts, so it folds
+                // into that cell as a second, SCORED witness: laplace_score_fp(n, 1.0)
+                // rises with n, so a lemma observed 50 times outranks one observed once
+                // instead of both entering at the categorical constant.
+                b.AddAttestation(NativeAttestation.Categorical(
+                    root, MembershipRelation, synId, OMWDecomposer.Source, TC.AcademicCurated,
+                    magnitude: row.Magnitude, arenaScale: 1.0, contextId: langId));
+                break;
             case OmwType.Lemma when row.Removed:
                 // OMW ships its own retractions in <lang>-changes.tab and they were never
                 // globbed: 3,279 REMOVED rows across 26 files, each saying this lemma is no

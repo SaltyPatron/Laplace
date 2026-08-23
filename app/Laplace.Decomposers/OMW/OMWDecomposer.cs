@@ -33,6 +33,7 @@ public sealed class OMWDecomposer : DecomposerMultiFile<OmwIngestRecord, OMWSour
     }
 
     private const string ChangesLabelPrefix = "omw-changes/";
+    private const string FreqLabelPrefix = "omw-freq/";
 
     private static int IndexOfNthTab(ReadOnlySpan<byte> line, int n)
     {
@@ -72,6 +73,14 @@ public sealed class OMWDecomposer : DecomposerMultiFile<OmwIngestRecord, OMWSour
         for (int i = 0; i < changesFiles.Count; i++)
             labeled.Add((changesFiles[i], $"{ChangesLabelPrefix}{i}"));
 
+        // The corpus's only per-row magnitude. Its rows are synset \t lemma \t count,
+        // not the data tabs' synset \t lang:type \t value, so it needs its own label.
+        var freqFiles = OMWTabFiles.EnumerateFreqFiles(wnsDir)
+            .OrderBy(p => p, StringComparer.Ordinal)
+            .ToList();
+        for (int i = 0; i < freqFiles.Count; i++)
+            labeled.Add((freqFiles[i], $"{FreqLabelPrefix}{OMWTabFiles.FileLang(freqFiles[i])}"));
+
         return labeled;
     }
 
@@ -80,7 +89,10 @@ public sealed class OMWDecomposer : DecomposerMultiFile<OmwIngestRecord, OMWSour
         [EnumeratorCancellation] CancellationToken ct)
     {
         bool isChanges = fileLabel.StartsWith(ChangesLabelPrefix, StringComparison.Ordinal);
-        string fileLang = isChanges ? "und" : OmwIngestSupport.LangFromLabel(fileLabel);
+        bool isFreq = fileLabel.StartsWith(FreqLabelPrefix, StringComparison.Ordinal);
+        string fileLang = isChanges ? "und"
+            : isFreq ? fileLabel[FreqLabelPrefix.Length..]
+            : OmwIngestSupport.LangFromLabel(fileLabel);
         await using var e = StreamingUtf8LineReader.ReadLinesAsync(filePath, ct).GetAsyncEnumerator(ct);
         while (true)
         {
@@ -106,6 +118,13 @@ public sealed class OMWDecomposer : DecomposerMultiFile<OmwIngestRecord, OMWSour
                 if (!OMWRowParser.TryParseRow(dataRow, fileLang, out var cr, out var cv))
                     continue;
                 yield return new OmwIngestRecord(cr with { Removed = true }, cv.ToArray());
+                continue;
+            }
+            if (isFreq)
+            {
+                if (!OMWRowParser.TryParseFreqRow(line.Span, fileLang, out var fr, out var fv))
+                    continue;
+                yield return new OmwIngestRecord(fr, fv.ToArray());
                 continue;
             }
             if (!OMWRowParser.TryParseRow(line.Span, fileLang, out var row, out var valueUtf8))
