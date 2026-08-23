@@ -183,13 +183,13 @@ public static class UdParseStructure
         if (!hasCoord)
             throw new InvalidOperationException("UD parse has no sentence or token placement");
 
-        Hash128 physicalityId = PhysicalityId.Compute(parseId, PhysicalityType.Content);
+        Hash128 physicalityId = PhysicalityId.Compute(parseId, PhysicalityType.ParseStructure);
         if (builder.TrySeePhysicality(physicalityId))
             builder.AddPhysicalityPreSeen(new PhysicalityRow(
                 physicalityId,
                 parseId,
                 sourceId,
-                PhysicalityType.Content,
+                PhysicalityType.ParseStructure,
                 parseCoord[0], parseCoord[1], parseCoord[2], parseCoord[3],
                 Hilbert128.Encode(parseCoord),
                 Trajectory.Build(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(flat)),

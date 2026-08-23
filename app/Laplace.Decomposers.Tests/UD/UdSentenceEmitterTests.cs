@@ -270,7 +270,7 @@ public sealed class UdSentenceEmitterTests
         Hash128 hasParse = RelationTypeRegistry.Resolve("HAS_PARSE").Id;
         Hash128 parseId = Assert.Single(change.Attestations.Where(a => a.TypeId == hasParse)).ObjectId!.Value;
         PhysicalityRow physicality = Assert.Single(change.Physicalities.Where(p =>
-            p.EntityId == parseId && p.Type == PhysicalityType.Content));
+            p.EntityId == parseId && p.Type == PhysicalityType.ParseStructure));
         Assert.NotNull(physicality.TrajectoryXyzm);
         Hash128[] constituents = Trajectory.Constituents(physicality.TrajectoryXyzm!);
         Assert.True(UdParseStructure.TryDecode(constituents, out var decoded));

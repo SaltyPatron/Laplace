@@ -311,3 +311,37 @@ TEST(LaplaceAttestationEngine, ResolvedSymmetricOrientsViaLookup) {
     EXPECT_TRUE(hash128_equals(&ab.subject_id, &ba.subject_id));
     EXPECT_TRUE(hash128_equals(&ab.object_id, &ba.object_id));
 }
+
+// laplace_attestation_resolved_build took witness_weight RAW while both sibling
+// builders computed `rank * trust_weight`, so every NativeAttestation.CategoricalResolved
+// call site entered the fold at source trust alone with the relation's salience dropped.
+// Nothing pinned it: 464 native and 2,000 dotnet tests stayed green across the change,
+// because no test asserted witness weight on the resolved path at all.
+//
+// opponent_rd is the observable -- it is laplace_attestation_witness_phi(witness_weight) --
+// so the two paths agreeing on it IS the law: resolving a type_id ahead of time must not
+// change what the relation is worth.
+TEST(LaplaceAttestationEngine, ResolvedBuildAppliesRelationRankLikeSurfaceBuild) {
+    hash128_t src = hash_path("substrate/test/rank/source");
+    hash128_t a   = hash_path("substrate/test/rank/a");
+    hash128_t b   = hash_path("substrate/test/rank/b");
+    hash128_t type = relation_type_id("IS_A");
+
+    const laplace_relation_def_t* def = NULL;
+    ASSERT_EQ(0, laplace_relation_lookup(&type, &def));
+    ASSERT_NE(nullptr, def);
+    // Without this the assertion below would hold vacuously.
+    ASSERT_NE(1.0, def->rank) << "IS_A rank is 1.0; this test can no longer detect a dropped rank";
+
+    laplace_attestation_staged_t via_surface, via_resolved;
+    ASSERT_EQ(0, laplace_attestation_categorical_build(
+        "IS_A", &a, &b, 0, &src, NULL, 1, 0.85, 1, 1, 0, &via_surface));
+    ASSERT_EQ(0, laplace_attestation_resolved_build(
+        &a, &type, &b, 0, &src, NULL, 1, 0.85, 1, 1, 0, &via_resolved));
+
+    EXPECT_EQ(via_surface.opponent_rd_fp1e9, via_resolved.opponent_rd_fp1e9);
+
+    // And the ranked weight must actually differ from the unranked one it used to use.
+    EXPECT_NE(laplace_attestation_witness_phi(0.85),
+              laplace_attestation_witness_phi(def->rank * 0.85));
+}
