@@ -20,7 +20,11 @@ public sealed class ApplyConnectionBudgetTests
     {
         var plan = PostgresResourcePlan.Current;
         int copy = NpgsqlSubstrateWriter.ResolveCopyConnectionBudget();
-        int foldFan = copy; // the equation's other half
+        // The fold half, from the fold lane's OWN sizing — not an assumption of
+        // symmetry. ConsensusAccumulatingWriter has always bounded itself with a
+        // SemaphoreSlim(FoldConnections); the COPY fan was the unbounded half.
+        int foldFan = IngestSizing.ResolveConsensusFold(
+            IngestTopology.Current.ApplyPartitions).Connections;
         Assert.True(
             1 + copy + foldFan + plan.ObservabilityConnectionOwners <= plan.IngestConnectionOwners,
             $"copy={copy} fold={foldFan} obs={plan.ObservabilityConnectionOwners} "
