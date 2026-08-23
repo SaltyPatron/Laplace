@@ -41,16 +41,16 @@ BEGIN ATOMIC
         WHERE pw.id IS NOT NULL
     ), tally AS MATERIALIZED (
         SELECT pl.lang_id, pl.mass FROM converse.prompt_language(p_text) pl
+    ), candidates AS MATERIALIZED (
+        SELECT v.word, v.lang, v.mu
+        FROM converse.word_language_candidates_batch(
+                 (SELECT array_agg(t.id) FROM tokens t)) v
     ), agreed AS MATERIALIZED (
-        SELECT DISTINCT ON (t.ord) t.ord, c.object_id AS language
+        SELECT DISTINCT ON (t.ord) t.ord, v.lang AS language
         FROM tokens t
-        JOIN laplace.consensus c
-          ON c.subject_id = t.id
-         AND c.type_id = laplace.relation_type_id('HAS_LANGUAGE')
-         AND c.object_id IS NOT NULL
-        JOIN tally ON tally.lang_id = c.object_id
-        ORDER BY t.ord, tally.mass DESC, consensus.eff_mu(c.rating, c.rd) DESC,
-                 c.object_id
+        JOIN candidates v ON v.word = t.id
+        JOIN tally ON tally.lang_id = v.lang
+        ORDER BY t.ord, tally.mass DESC, v.mu DESC, v.lang
     )
     SELECT t.ord, t.word, t.id,
            COALESCE(a.language, converse.word_language(t.id))
