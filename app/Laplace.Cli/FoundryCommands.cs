@@ -1420,6 +1420,23 @@ internal static class FoundryCommands
         double attnScale = FoundryDefaults.AttnGain * split;
         double layerScale = FoundryDefaults.ResidGain * split * floorGain;
         bool contCompile = desc.ContinuationCompile;
+        // Continuation mode zeroes every operator outside the whitelist. That is a legitimate
+        // thing to ask for, but it must never be silent: say which declared operators are
+        // being dropped, so a recipe census that lists them cannot be mistaken for tensors
+        // that contain them.
+        if (contCompile)
+        {
+            var dropped = desc.Layers
+                .SelectMany(l => l.Heads.Select(h => h.Key).Append(l.Ffn.Key))
+                .Distinct(StringComparer.Ordinal)
+                .Where(k => !FoundryExport.IsContinuationOperator(k))
+                .OrderBy(k => k, StringComparer.Ordinal)
+                .ToList();
+            if (dropped.Count > 0)
+                Console.Error.WriteLine(
+                    $"foundry: compile=continuation ZEROES {dropped.Count} declared "
+                    + $"operator(s) in the emitted tensors: {string.Join(", ", dropped)}");
+        }
         double ctxQk = FoundryDefaults.CtxQk * split;
         double OpAttnScale(string key) => (contCompile && !FoundryExport.IsContinuationOperator(key)) ? 0.0 : attnScale;
         double OpResidScale(string key) => (contCompile && !FoundryExport.IsContinuationOperator(key)) ? 0.0 : layerScale;

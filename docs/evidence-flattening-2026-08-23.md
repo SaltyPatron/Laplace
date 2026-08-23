@@ -143,6 +143,16 @@ Three independent mechanisms, all green throughout:
   `wn-data` row asserts and now folds into that cell as a second, *scored* witness, so a
   lemma observed 50 times outranks one observed once instead of both entering at the
   categorical constant. A row with no usable count is dropped rather than defaulting to 1.
+- **A recipe's declared operators are no longer silently zeroed** (this commit).
+  `RecipeDescriptor.Parse` inferred `compile` from `lm_head` — and `lm_head` itself
+  defaults to `trajectory` — so a recipe that explicitly declared `relation:IS_A`,
+  `relation:HAS_PROPERTY` … and merely omitted `compile` selected continuation mode.
+  `FoundryCommands` then applies `OpAttnScale = OpResidScale = 0` to every operator
+  outside the whitelist (`context`, `trajectory`, `sentence_order`, `relation:PRECEDES`).
+  The planes were still read and their **edge counts still printed**, so the census said
+  the capability was present while the emitted tensors had it removed. Continuation-only
+  must now be requested explicitly, and when it *is* requested the dropped operators are
+  named on stderr.
 - **`resolved_scored_build` also applies rank** (this commit) — it had the same raw
   `witness_weight` defect as `resolved_build`.
 
