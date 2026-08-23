@@ -39,6 +39,14 @@ public static class FrameNetLuIngest
         if (root is null || root.Name.LocalName != "lexUnit") return null;
         if (!int.TryParse((string?)root.Attribute("ID"), out int id)) return null;
 
+        // FrameNet states how many instances back this lexical unit as
+        // totalAnnotated="N" on every <lexUnit> -- 13,572 of them -- and it was
+        // never read, so an LU with 116 annotated instances entered the fold at the
+        // same strength as one with a single annotation. Absent or unparseable
+        // means the corpus did not say, which is one observation, not zero.
+        long totalAnnotated =
+            long.TryParse((string?)root.Attribute("totalAnnotated"), out long ta) && ta > 0 ? ta : 1;
+
         string? frameName = (string?)root.Attribute("frame");
         string? luName = (string?)root.Attribute("name");
         string pos = (string?)root.Attribute("POS") ?? (string?)root.Element(ns + "lexeme")?.Attribute("POS") ?? "";
@@ -116,7 +124,7 @@ public static class FrameNetLuIngest
             sentences.Add(new LuSentence(text, target));
         }
 
-        return new LuDocument(id, frameName, luName, luKey, lemma, pos, definition, patterns, sentences);
+        return new LuDocument(id, frameName, luName, luKey, lemma, pos, definition, totalAnnotated, patterns, sentences);
     }
 
     internal static void EmitLu(SubstrateChangeBuilder b, LuDocument lu, Hash128 source)
@@ -135,7 +143,7 @@ public static class FrameNetLuIngest
                 source, null, SourceTrust.AcademicCurated, FrameNetDecomposer.VocabularyNames);
             b.AddAttestation(NativeAttestation.Categorical(
                 lemmaId.Value, "EVOKES_FRAME", frameId, source, SourceTrust.AcademicCurated,
-                contextId: luId));
+                contextId: luId, observationCount: lu.TotalAnnotated));
         }
 
         if (lu.Definition.Length > 0)
@@ -192,6 +200,7 @@ public static class FrameNetLuIngest
 
     public sealed record LuDocument(
         int Id, string FrameName, string LuName, string LuKey, string Lemma, string Pos, string Definition,
+        long TotalAnnotated,
         List<ValencePatternCount> ValencePatterns, List<LuSentence> Sentences);
 
     /// <summary>

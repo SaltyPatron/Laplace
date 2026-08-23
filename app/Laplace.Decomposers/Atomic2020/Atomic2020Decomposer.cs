@@ -103,7 +103,7 @@ public sealed class Atomic2020Decomposer
         }
     }
 
-    private static bool TryExtract(
+    internal static bool TryExtract(
         ReadOnlySpan<byte> line, Hash128 splitId, out RelationTripleRecord record)
     {
         record = default;
@@ -124,10 +124,23 @@ public sealed class Atomic2020Decomposer
         // positive form asserts (laplace_score_fp scores v < 0 below 0.5).
         double magnitude = Atomic2020Source.NegatedRelations.Contains(rel) ? -1.0 : 1.0;
 
+        // ATOMIC2020 spells "no tail exists for this head under this relation" as the
+        // literal tail "none" -- 147,608 of 1,331,113 rows, 11.09%. That is the corpus
+        // stating a negative, not omitting a row, and it entered the fold as a CONFIRM
+        // toward the entity `none`: the substrate was told the head DOES stand in that
+        // relation to something. Measured on the 2026-08-23 seed: 83,224 such edges.
+        //
+        // A null object is the record's way of carrying an asserted absence, and the spine
+        // folds it as an object-null REFUTE. This does NOT filter the entity: `none` is a
+        // real word, content-addressed like any other, and WordNet and OMW witness it here
+        // as the same id. Only this decomposer knows ATOMIC's grammar spells absence that
+        // way, which is why the test is here and not in the spine.
+        bool assertsAbsence = tail.SequenceEqual("none"u8);
+
         record = new RelationTripleRecord(
             UnderscoredUtf8Canonicalize.ToSpaces(head),
             relType,
-            UnderscoredUtf8Canonicalize.ToSpaces(tail),
+            assertsAbsence ? null : UnderscoredUtf8Canonicalize.ToSpaces(tail),
             splitId, magnitude);
         return true;
     }

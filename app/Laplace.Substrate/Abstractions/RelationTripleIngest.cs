@@ -25,7 +25,28 @@ public sealed class AsyncEnumerableRecordStream<T>(IAsyncEnumerable<T> source) :
 public readonly record struct RelationTripleRecord(
     byte[] SubjectCanonical,
     string RelationType,
-    byte[] ObjectCanonical,
+    /// <summary>
+    /// NULL means the SOURCE stated that no object exists for this (subject, relation) --
+    /// not that one was omitted. Spec 05 separates those: an absent row is UNKNOWN, but a
+    /// corpus that explicitly says "no tail" has given evidence, and dropping it discards a
+    /// witness. ATOMIC2020 says exactly that on 147,608 of 1,331,113 rows (11.09%) with the
+    /// literal tail "none"; every one folded as a CONFIRM toward the entity `none` instead,
+    /// asserting the head DOES stand in that relation to something.
+    ///
+    /// Null is the meaning, not a flag beside it: NativeAttestation.Categorical already
+    /// takes `Hash128? obj` and treats null as object-null, and laplace.attestations already
+    /// holds 7,929 such cells. This is that same nullability one layer up.
+    ///
+    /// NOT a sentinel filter, and it must never become one. `none` is a real word with a
+    /// real content-addressed identity that WordNet and OMW legitimately witness, and it is
+    /// the SAME entity when ATOMIC names it -- same content, same hash. Only the source knows
+    /// its own grammar spells absence that way, so only the source may pass null; the spine
+    /// folds an object-null REFUTE, which is a different cell from any edge to `none`.
+    ///
+    /// An EMPTY array is distinct again: the object failed to parse, which stays unknown
+    /// and stays dropped.
+    /// </summary>
+    byte[]? ObjectCanonical,
     Hash128? ContextId = null,
     double Magnitude = 1.0,
     char? SubjectPos = null,
@@ -98,7 +119,17 @@ public sealed class RelationTripleHandler : IIngestRecordHandler<RelationTripleR
             ? ss : subjectRoot;
         Hash128 objectEndpoint = record.ObjectSynsetId is { } os && os != default
             ? os : objectRoot;
-        if (subjectEndpoint != default && objectEndpoint != default)
+        // An explicitly asserted absence is a witness, not a missing row: fold it as an
+        // object-null REFUTE against the (subject, relation) cell. Runs before the paired
+        // arm because there is no object endpoint to pair with, by construction.
+        if (subjectEndpoint != default && record.ObjectCanonical is null)
+        {
+            builder.AddAttestation(NativeAttestation.Categorical(
+                subjectEndpoint, record.RelationType, null, sourceId, sourceTrust,
+                contextId: record.ContextId, confirm: false,
+                observationCount: record.ObservationCount));
+        }
+        else if (subjectEndpoint != default && objectEndpoint != default)
         {
             Hash128? ctx = record.ContextId;
             if (record.ContextAnchorKey is { Length: > 0 } ctxKey
@@ -204,7 +235,7 @@ public sealed class RelationTripleHandler : IIngestRecordHandler<RelationTripleR
             _trees = [_subjectTree, _objectTree];
         }
 
-        private static TierTree? TryBuild(byte[] canonical)
+        private static TierTree? TryBuild(byte[]? canonical)
         {
             if (canonical is null || canonical.Length == 0) return null;
             try { return ContentTierSpine.BuildTree(canonical); }

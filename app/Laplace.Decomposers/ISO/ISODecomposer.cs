@@ -267,20 +267,55 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>
         }
     }
 
-    private sealed class RetirementPhase : IsoComposePhase<(string Retired, string Successor)>
+    /// <summary>
+    /// ISO 639-3 retires codes for five stated reasons, and the phase used to require a
+    /// 3-character Change_To, which dropped 174 of the corpus's 386 retirement rows:
+    ///
+    ///   N  non-existent  72 rows -- the standard says the code names NO real language.
+    ///                    Change_To is empty by construction; there is nothing to point at.
+    ///                    This is ISO refuting its own earlier assertion, and it was the
+    ///                    single largest block of negative evidence the source states.
+    ///   S  split        102 rows -- the code split into several successors, so Change_To is
+    ///                    empty and the targets live in Ret_Remedy as bracketed codes
+    ///                    ("Split into ... [sfb], and ... [vgt]"). Every one was lost.
+    ///   C/D/M          212 rows -- one successor in Change_To; these already worked.
+    ///
+    /// The N arm folds an object-null REFUTE against HAS_LANGUAGE_TYPE: the relation holds
+    /// for no object because ISO says the language is not there. Absence of a row would have
+    /// meant UNKNOWN (spec 05); ISO said something stronger, and the substrate now carries it
+    /// as evidence that contradicts any other source asserting the code is a language.
+    /// </summary>
+    private sealed class RetirementPhase : IsoComposePhase<(string Retired, string Reason, string[] Successors)>
     {
         public RetirementPhase(ISODecomposer owner) : base(owner) { }
         protected override string PhaseLabel => "iso639/retirements";
-        protected override void Compose((string Retired, string Successor) rec, SubstrateChangeBuilder b)
+
+        private const string NonExistent = "N";
+
+        protected override void Compose(
+            (string Retired, string Reason, string[] Successors) rec, SubstrateChangeBuilder b)
         {
             var retId = LanguageEntityId.FromIso639_3(rec.Retired);
-            var sucId = LanguageEntityId.FromIso639_3(rec.Successor);
             b.AddEntity(retId, EntityTier.Word, LanguageTypeId, Source);
-            b.AddEntity(sucId, EntityTier.Word, LanguageTypeId, Source);
-            b.AddAttestation(NativeAttestation.Categorical(
-                retId, "SUPERSEDED_BY", sucId, Source, TC.StandardsDerived));
+
+            if (rec.Reason == NonExistent)
+            {
+                b.AddAttestation(NativeAttestation.Categorical(
+                    retId, "HAS_LANGUAGE_TYPE", null, Source, TC.StandardsDerived,
+                    confirm: false));
+                return;
+            }
+
+            foreach (var successor in rec.Successors)
+            {
+                var sucId = LanguageEntityId.FromIso639_3(successor);
+                b.AddEntity(sucId, EntityTier.Word, LanguageTypeId, Source);
+                b.AddAttestation(NativeAttestation.Categorical(
+                    retId, "SUPERSEDED_BY", sucId, Source, TC.StandardsDerived));
+            }
         }
-        protected override async IAsyncEnumerable<(string Retired, string Successor)> ExtractRecordsAsync(
+
+        protected override async IAsyncEnumerable<(string Retired, string Reason, string[] Successors)> ExtractRecordsAsync(
             string ecosystemPath, DecomposerOptions options,
             [EnumeratorCancellation] CancellationToken ct)
         {
@@ -293,9 +328,18 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>
                 string line = Encoding.UTF8.GetString(lineMem.Span);
                 var c = line.Split('\t');
                 if (c.Length < 4) continue;
-                string retired = c[0].Trim(), changeTo = c[3].Trim();
-                if (retired.Length != 3 || changeTo.Length != 3) continue;
-                yield return (retired, changeTo);
+                string retired = c[0].Trim();
+                if (retired.Length != 3) continue;
+                string reason = c[2].Trim();
+                string changeTo = c[3].Trim();
+                string remedy = c.Length > 4 ? c[4].Trim() : "";
+
+                if (reason == NonExistent) { yield return (retired, reason, []); continue; }
+
+                string[] successors =
+                    changeTo.Length == 3 ? [changeTo] : IsoRetirementRemedy.SuccessorsFromRemedy(remedy);
+                if (successors.Length == 0) continue;
+                yield return (retired, reason, successors);
             }
         }
     }
@@ -381,5 +425,34 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>
 
             yield return new IsoRecord(id, part2b, part2t, part1, scope, type, refName);
         }
+    }
+}
+
+/// <summary>
+/// ISO 639-3 names split-retirement successors only inside Ret_Remedy, as bracketed
+/// 3-letter codes. A pure function, lifted out of the phase so it is testable without
+/// widening the phase hierarchy's accessibility.
+/// </summary>
+internal static class IsoRetirementRemedy
+{
+    /// Ret_Remedy names split targets as bracketed 3-letter codes, e.g.
+    /// "Split into five languages: Nong Zhuang [zhn];  Yang Zhuang [zyg]; ...".
+    internal static string[] SuccessorsFromRemedy(string remedy)
+    {
+        if (remedy.Length == 0) return [];
+        var found = new List<string>();
+        for (int i = 0; i + 4 < remedy.Length + 1; i++)
+        {
+        if (remedy[i] != '[') continue;
+        int close = remedy.IndexOf(']', i + 1);
+        if (close != i + 4) continue;
+        var code = remedy.AsSpan(i + 1, 3);
+        bool lower = true;
+        foreach (char ch in code) if (ch is < 'a' or > 'z') { lower = false; break; }
+        if (!lower) continue;
+        string c = new(code);
+        if (!found.Contains(c)) found.Add(c);
+        }
+        return [.. found];
     }
 }
