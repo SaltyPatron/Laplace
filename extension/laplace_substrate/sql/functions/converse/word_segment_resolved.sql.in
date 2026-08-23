@@ -16,7 +16,10 @@
 --
 -- Stores nothing. Adjacency remains a view over the trajectory per the
 -- 2026-07-25 ruling in relation_types.toml. See src/content_resolve.c.
-DROP FUNCTION IF EXISTS converse.word_segment_resolved(text);
+-- No DROP FUNCTION here. converse.prompt_words is BEGIN ATOMIC and references this
+-- body, which records a hard catalog dependency, so a DROP on the upgrade path fails
+-- against the caller installed by the previous version. The signature is new and never
+-- changes under replace, so CREATE OR REPLACE alone is sufficient and idempotent.
 CREATE OR REPLACE FUNCTION converse.word_segment_resolved(p_text text)
     RETURNS TABLE(ord int, word text, id bytea)
     AS 'MODULE_PATHNAME', 'pg_laplace_word_segment_resolved'

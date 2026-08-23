@@ -106,12 +106,14 @@ public sealed class UdSentenceEmitContext
         if (misc.Length == 0 || misc == "_") return;
         foreach (string item in misc.Split('|', StringSplitOptions.RemoveEmptyEntries))
         {
+            // EVERY value, not just Gloss and Translit. UdParseStructure.ResolveMisc
+            // resolves MISC values through content.RootFor, which is a lookup into the
+            // set collected here -- so this whitelist was what forced every other key
+            // down the ud/misc-value/{hex}/v1 slug path that filled 97.9% of
+            // laplace.canonical_names (3,313,800 rows, 892 MB, 0 consensus edges).
+            // A value is content; collecting it is what makes it addressable.
             int equals = item.IndexOf('=');
             if (equals <= 0) continue;
-            string key = item[..equals];
-            if (!key.Equals("Gloss", StringComparison.OrdinalIgnoreCase)
-                && !key.Equals("Translit", StringComparison.OrdinalIgnoreCase))
-                continue;
             string value = item[(equals + 1)..].Trim();
             if (value.Length > 0)
                 AddUnique(System.Text.Encoding.UTF8.GetBytes(value), sink, seen);

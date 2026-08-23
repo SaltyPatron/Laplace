@@ -2,3 +2,22 @@ CREATE TABLE IF NOT EXISTS laplace.canonical_names (
     id   bytea PRIMARY KEY CHECK (octet_length(id) = 16),
     name text  NOT NULL
 );
+
+-- The reverse direction is a real query, and until 2026-08-23 it had no index.
+--
+-- id -> name is the primary key. name -> id had nothing, so every `WHERE name = ...`
+-- or `name IN (...)` seq-scanned all 3,387,109 rows. Measured on the live substrate:
+-- Parallel Seq Scan, 677,421 rows removed by filter, 50,638 buffers shared hit, which
+-- made generation.separator_ids() cost 317 ms warm -- paid once per call by
+-- generation.trajectory_continuations AND structural.geometry_successors_batch, so
+-- once per generated token, for a set its own header calls "bounded by the alphabet,
+-- not by the corpus".
+--
+-- NOT UNIQUE. The name -> id direction is not injective by construction: an entity's
+-- id is the content hash of what it IS, and canonical_names records what a source
+-- CALLS it, so two ids may legitimately carry one name (tests/sql/generation_corpus.sql
+-- registers blake3('test/corpus/zs-category') under 'unicode/category/Zs/v1', which is
+-- the attested-mapping law the separator lane depends on). A unique index would reject
+-- that fixture and, worse, would make the constraint pass or fail on seed order.
+CREATE INDEX IF NOT EXISTS canonical_names_name_btree
+    ON laplace.canonical_names (name);
