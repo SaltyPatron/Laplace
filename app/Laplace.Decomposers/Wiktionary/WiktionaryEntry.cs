@@ -11,6 +11,22 @@ namespace Laplace.Decomposers.Wiktionary;
 /// spine. The emitted attestations (content ids, relation types, contexts) are
 /// identical to the former grammar-witness output — only the parse changed.
 /// </summary>
+/// <summary>
+/// A related word and wiktextract's own computed association weight for it.
+///
+/// Every member of nine of the twelve relation blocks carries `_dis1` -- measured on
+/// kaikki.org-dictionary-English.jsonl, 100% of members in translations, synonyms,
+/// hypernyms, hyponyms, meronyms, derived, related, coordinate_terms and holonyms. It is
+/// the source's sense-disambiguation weight: how strongly this related word attaches to
+/// this sense. ReadWordArray read only `word` and dropped it, so every Wiktionary edge
+/// entered the fold at the categorical constant and all senses of a lemma folded
+/// identically -- 38.5% of entries have two or more senses.
+///
+/// Weight 0 means "the source computed no association", which is not the same as 1.0 and
+/// must not be promoted to it; those members enter unscored, exactly as before.
+/// </summary>
+public readonly record struct WiktionaryMember(string Word, double Dis1);
+
 public sealed class WiktionaryEntry
 {
     public string Word = string.Empty;
@@ -30,7 +46,7 @@ public sealed class WiktionaryEntry
     /// <summary>Top-level relation blocks (context = null when attested).</summary>
     public RelationBlock Top;
 
-    public List<string>? Translations;
+    public List<WiktionaryMember>? Translations;
 
     public sealed class Sense
     {
@@ -45,15 +61,15 @@ public sealed class WiktionaryEntry
 
     public struct RelationBlock
     {
-        public List<string>? Synonyms;
-        public List<string>? Antonyms;
-        public List<string>? Hyponyms;
-        public List<string>? Meronyms;
-        public List<string>? Holonyms;
-        public List<string>? Related;
-        public List<string>? Hypernyms;
-        public List<string>? Derived;
-        public List<string>? Coordinate;
+        public List<WiktionaryMember>? Synonyms;
+        public List<WiktionaryMember>? Antonyms;
+        public List<WiktionaryMember>? Hyponyms;
+        public List<WiktionaryMember>? Meronyms;
+        public List<WiktionaryMember>? Holonyms;
+        public List<WiktionaryMember>? Related;
+        public List<WiktionaryMember>? Hypernyms;
+        public List<WiktionaryMember>? Derived;
+        public List<WiktionaryMember>? Coordinate;
     }
 
     public readonly record struct Sound(string? Ipa, List<string>? Tags);
@@ -306,15 +322,38 @@ public sealed class WiktionaryEntry
     }
 
     // Object-array carrying a "word" field per element (synonyms, hypernyms, …).
-    private static List<string>? ReadWordArray(ref Utf8JsonReader reader)
+    private static List<WiktionaryMember>? ReadWordArray(ref Utf8JsonReader reader)
     {
         if (reader.TokenType != JsonTokenType.StartArray) { reader.Skip(); return null; }
-        List<string>? list = null;
+        List<WiktionaryMember>? list = null;
         while (reader.Read() && reader.TokenType != JsonTokenType.EndArray)
         {
             if (reader.TokenType != JsonTokenType.StartObject) { reader.Skip(); continue; }
-            string? w = ReadNamedString(ref reader, "word"u8);
-            if (!string.IsNullOrEmpty(w)) (list ??= new()).Add(w);
+            string? w = null;
+            double dis1 = 0.0;
+            while (reader.Read())
+            {
+                if (reader.TokenType == JsonTokenType.EndObject) break;
+                if (reader.TokenType != JsonTokenType.PropertyName) continue;
+                if (w is null && reader.ValueTextEquals("word"u8))
+                {
+                    reader.Read();
+                    w = ReadStringValue(ref reader);
+                }
+                else if (reader.ValueTextEquals("_dis1"u8))
+                {
+                    reader.Read();
+                    if (reader.TokenType == JsonTokenType.Number) dis1 = reader.GetDouble();
+                    else if (reader.TokenType == JsonTokenType.String
+                             && double.TryParse(reader.GetString(),
+                                    System.Globalization.NumberStyles.Float,
+                                    System.Globalization.CultureInfo.InvariantCulture, out double d))
+                        dis1 = d;
+                    else reader.Skip();
+                }
+                else reader.Skip();
+            }
+            if (!string.IsNullOrEmpty(w)) (list ??= new()).Add(new WiktionaryMember(w, dis1));
         }
         return list;
     }

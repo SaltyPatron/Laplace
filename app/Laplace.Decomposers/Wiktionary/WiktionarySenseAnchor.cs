@@ -116,6 +116,15 @@ internal static class WiktionarySenseAnchor
         return id;
     }
 
+        /// <summary>Members carry wiktextract's _dis1 weight; identity is still the surface.</summary>
+    private static void Add(List<Hash128> members, MemberKind kind, List<WiktionaryMember>? values)
+    {
+        if (values is null) return;
+        foreach (var mem in values)
+            if (Normalize(mem.Word) is { } normalized)
+                members.Add(Member(kind, normalized));
+    }
+
     private static void Add(List<Hash128> members, MemberKind kind, List<string>? values)
     {
         if (values is null) return;

@@ -117,6 +117,14 @@ internal static class WiktionaryEmit
             Add(into, s);
     }
 
+    /// <summary>Staging needs the surfaces; the _dis1 weight rides along to EmitWords.</summary>
+    private static void AddAll(HashSet<string> into, List<WiktionaryMember>? list)
+    {
+        if (list is null) return;
+        foreach (var m in list)
+            Add(into, m.Word);
+    }
+
     public static void Emit(WiktionaryEntry e, SubstrateChangeBuilder b) =>
         Emit(e, b, roots: null, coords: null);
 
@@ -180,8 +188,15 @@ internal static class WiktionaryEmit
         WalkRelations(b, wordId, in e.Top, isVerb, context: langCtx, roots);
         if (e.IncludeTranslations && e.Translations is { } tr)
             foreach (var t in tr)
-                if (Stage(b, t, roots, out var trId))
-                    Attest(b, wordId, "IS_TRANSLATION_OF", trId, null);
+            {
+                if (!Stage(b, t.Word, roots, out var trId)) continue;
+                if (t.Dis1 > 0.0)
+                    b.AddAttestation(NativeAttestation.Categorical(
+                        wordId, TranslationRelation, trId, WiktionaryDecomposer.Source, Trust,
+                        magnitude: t.Dis1, arenaScale: 1.0, contextId: null));
+                else
+                    Attest(b, wordId, TranslationRelation, trId, null);
+            }
         WalkForms(b, wordId, e.Forms, roots, coords);
         WalkEtymology(b, wordId, e, roots);
     }
@@ -230,16 +245,35 @@ internal static class WiktionaryEmit
         // Derived reverses direction: derived-word DERIVED_FROM this word.
         if (r.Derived is { } derived)
             foreach (var d in derived)
-                if (Stage(b, d, roots, out var dId)) Attest(b, dId, "DERIVED_FROM", wordId, context);
+            {
+                if (!Stage(b, d.Word, roots, out var dId)) continue;
+                if (d.Dis1 > 0.0)
+                    b.AddAttestation(NativeAttestation.Categorical(
+                        dId, DerivedRelation, wordId, WiktionaryDecomposer.Source, Trust,
+                        magnitude: d.Dis1, arenaScale: 1.0, contextId: context));
+                else
+                    Attest(b, dId, DerivedRelation, wordId, context);
+            }
     }
 
     private static void EmitWords(
-        SubstrateChangeBuilder b, Hash128 wordId, string type, List<string>? words, Hash128? context,
-        IReadOnlyDictionary<string, Hash128>? roots)
+        SubstrateChangeBuilder b, Hash128 wordId, string type, List<WiktionaryMember>? words,
+        Hash128? context, IReadOnlyDictionary<string, Hash128>? roots)
     {
         if (words is null) return;
         foreach (var w in words)
-            if (Stage(b, w, roots, out var id)) Attest(b, wordId, type, id, context);
+        {
+            if (!Stage(b, w.Word, roots, out var id)) continue;
+            // wiktextract's own association weight. Zero means the source computed none,
+            // which is not the same as 1.0 and must not be promoted to it -- those enter
+            // unscored, exactly as before.
+            if (w.Dis1 > 0.0)
+                b.AddAttestation(NativeAttestation.Categorical(
+                    wordId, type, id, WiktionaryDecomposer.Source, Trust,
+                    magnitude: w.Dis1, arenaScale: 1.0, contextId: context));
+            else
+                Attest(b, wordId, type, id, context);
+        }
     }
 
     private static void WalkSounds(
@@ -446,6 +480,10 @@ internal static class WiktionaryEmit
             return roots.TryGetValue(surface, out id);
         return WiktionarySurfaceTrees.TryStage(b, surface, WiktionaryDecomposer.Source, out id);
     }
+
+    // Spelled once: the scored and unscored arms must not drift onto different relations.
+    private const string TranslationRelation = "IS_TRANSLATION_OF";
+    private const string DerivedRelation = "DERIVED_FROM";
 
     private static void Attest(
         SubstrateChangeBuilder b, Hash128 subject, string typeName, Hash128 objectId, Hash128? context) =>
