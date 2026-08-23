@@ -51,14 +51,20 @@ public static class FrameNetLuIngest
 
         string definition = FrameNetLemmaHelper.CollapseWs((string?)root.Element(ns + "definition") ?? "");
 
-        var patterns = new List<string>();
+        var patterns = new List<ValencePatternCount>();
+
+        // FrameNet's own annotated-instance count. A valenceUnit outside a <pattern>
+        // carries no total of its own, so it enters at 1 -- the same weight it had before
+        // -- rather than borrowing a number the corpus did not give it.
+        static long PatternTotal(XElement el)
+            => long.TryParse((string?)el.Attribute("total"), out long t) && t > 0 ? t : 1;
         foreach (var vu in root.Descendants(ns + "valenceUnit"))
         {
             string pat = ValencePattern(
                 (string?)vu.Attribute("GF") ?? "",
                 (string?)vu.Attribute("PT") ?? "",
                 (string?)vu.Attribute("FE") ?? "");
-            if (pat.Length > 0) patterns.Add(pat);
+            if (pat.Length > 0) patterns.Add(new ValencePatternCount(pat, 1));
         }
         foreach (var patEl in root.Descendants(ns + "pattern"))
         {
@@ -73,7 +79,8 @@ public static class FrameNetLuIngest
                     (string?)vu.Attribute("FE") ?? "");
                 if (pat.Length > 0) parts.Add(pat);
             }
-            if (parts.Count > 0) patterns.Add(string.Join(" + ", parts));
+            if (parts.Count > 0)
+                patterns.Add(new ValencePatternCount(string.Join(" + ", parts), PatternTotal(patEl)));
         }
 
         var sentences = new List<LuSentence>();
@@ -140,13 +147,16 @@ public static class FrameNetLuIngest
                     contextId: frameId));
         }
 
-        foreach (string pattern in lu.ValencePatterns)
+        foreach (var pattern in lu.ValencePatterns)
         {
-            var patId = ContentEmitter.Emit(b, pattern, source);
+            var patId = ContentEmitter.Emit(b, pattern.Pattern, source);
             if (patId is null) continue;
+            // observationCount is what the fold counts as games, so FrameNet's total= --
+            // the number of annotated instances realising this pattern -- belongs here.
+            // It replaces a count of how often the pattern string repeated in the XML.
             b.AddAttestation(NativeAttestation.Categorical(
                 luId, "HAS_VALENCE_PATTERN", patId.Value, source, SourceTrust.AcademicCurated,
-                contextId: frameId));
+                contextId: frameId, observationCount: pattern.Total));
         }
 
         foreach (var sent in lu.Sentences)
@@ -182,7 +192,18 @@ public static class FrameNetLuIngest
 
     public sealed record LuDocument(
         int Id, string FrameName, string LuName, string LuKey, string Lemma, string Pos, string Definition,
-        List<string> ValencePatterns, List<LuSentence> Sentences);
+        List<ValencePatternCount> ValencePatterns, List<LuSentence> Sentences);
+
+    /// <summary>
+    /// A valence pattern and the number of annotated instances FrameNet recorded for it.
+    ///
+    /// The corpus states this on every &lt;pattern&gt; as total="N" -- 192,241 of them --
+    /// and it was never read. The emitted observation count was instead however many times
+    /// the pattern STRING happened to repeat in the XML, a structural artifact of the file
+    /// layout, so a pattern annotated 87 times and one annotated once could enter the fold
+    /// at the same strength.
+    /// </summary>
+    public readonly record struct ValencePatternCount(string Pattern, long Total);
 
     public sealed record LuSentence(string Text, string? TargetText);
 }

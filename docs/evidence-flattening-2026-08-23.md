@@ -210,6 +210,13 @@ Three independent mechanisms, all green throughout:
   (#862/#957). It now has an ollama backend (the runtime that is actually installed) and
   schema-qualified SQL, verified end to end against a stored substrate GGUF where it
   correctly returned `BEHAVIORAL FAIL: 0/4 probes`.
+- **FrameNet's annotated-instance count reaches the fold** (this commit). Every
+  `<pattern>` states `total="N"` — **192,241 of them in framenet_v17** — and it was never
+  read. `HAS_VALENCE_PATTERN` folded at whatever number of times the pattern *string*
+  happened to repeat in the XML, a structural artifact of the file layout, so a pattern
+  annotated 87 times and one annotated once could enter at the same strength. The stated
+  total is now the `observationCount`. A `valenceUnit` outside a `<pattern>` carries no
+  total of its own and enters at 1 rather than borrowing a number the corpus never gave it.
 - **`resolved_scored_build` also applies rank** (this commit) — it had the same raw
   `witness_weight` defect as `resolved_build`.
 

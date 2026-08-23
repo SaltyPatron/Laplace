@@ -112,7 +112,12 @@ public sealed class FrameNetDecomposerTests
         Assert.Equal("Duplication", lu.FrameName);
         Assert.Equal("copy", lu.Lemma);
         Assert.Contains("make a copy", lu.Definition);
-        Assert.Contains(lu.ValencePatterns, p => p.Contains("Creator"));
+        Assert.Contains(lu.ValencePatterns, p => p.Pattern.Contains("Creator"));
+        // FrameNet states the annotated-instance count on every <pattern> as total="N"
+        // (192,241 of them in framenet_v17) and it was never read: observationCount was
+        // however many times the pattern STRING repeated in the XML, a structural artifact
+        // of the file layout. Every collected pattern now carries a positive count.
+        Assert.All(lu.ValencePatterns, p => Assert.True(p.Total >= 1));
         Assert.Single(lu.Sentences);
         Assert.Equal("copied", lu.Sentences[0].TargetText);
     }
@@ -483,4 +488,49 @@ public sealed class FrameNetDecomposerTests
         }
     }
 
+
+    // The count FrameNet states must arrive verbatim, not be recomputed from how many
+    // times a pattern string happens to appear in the file.
+    [Fact]
+    public void ValencePattern_CarriesTheCorpusStatedTotal()
+    {
+        const string xml = """
+<?xml version="1.0" encoding="UTF-8"?>
+<lexUnit status="FN1_Sent" POS="V" name="copy.v" ID="11" frame="Duplication" xmlns="http://framenet.icsi.berkeley.edu">
+  <definition>COD: make a copy of.</definition>
+  <lexeme POS="V" name="copy"/>
+  <valences>
+    <FERealization total="26">
+      <FE name="Creator"/>
+      <pattern total="24">
+        <valenceUnit GF="Ext" PT="NP" FE="Creator"/>
+        <valenceUnit GF="Obj" PT="NP" FE="Original"/>
+      </pattern>
+      <pattern total="2">
+        <valenceUnit GF="Dep" PT="PP" FE="Creator"/>
+        <valenceUnit GF="Obj" PT="NP" FE="Original"/>
+      </pattern>
+    </FERealization>
+  </valences>
+  <subCorpus name="V-test">
+    <sentence ID="1">
+      <text>She copied the file.</text>
+      <annotationSet status="MANUAL" ID="99">
+        <layer rank="1" name="Target">
+          <label name="Target" start="4" end="10"/>
+        </layer>
+      </annotationSet>
+    </sentence>
+  </subCorpus>
+</lexUnit>
+""";
+        var lu = FrameNetLuIngest.ParseLu(System.Xml.Linq.XDocument.Parse(xml));
+        Assert.NotNull(lu);
+        var totals = lu!.ValencePatterns
+            .Where(p => p.Pattern.Contains(" + "))
+            .Select(p => p.Total)
+            .OrderByDescending(t => t)
+            .ToList();
+        Assert.Equal(new long[] { 24, 2 }, totals);
+    }
 }
