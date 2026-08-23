@@ -120,9 +120,60 @@ public sealed class PropBankDecomposer
         }
     }
 
+    /// <summary>
+    /// Resolve a lexlink/rolelink target to its class entity. One body so the roleset-level
+    /// mapping and the role-level one cannot disagree about what a class name addresses.
+    /// </summary>
+    private static Hash128? ResolveLinkedClass(string resource, string cls)
+        => cls.Length == 0
+            ? null
+            : resource.Equals("VerbNet", StringComparison.OrdinalIgnoreCase)
+                ? AnchorAdmission.Id(
+                    SourceEntityIdConventions.NumericVerbNetClassId(cls),
+                    EntityTypeRegistry.VerbNetClass)
+                : resource.Equals("FrameNet", StringComparison.OrdinalIgnoreCase)
+                    ? CategoryAnchor.Id(cls)
+                    : null;
+
+    /// <summary>
+    /// &lt;lexlinks&gt; carries the ONLY explicit graded confidence in this corpus --
+    /// 16,250 rows at 0.8 or 1.0 -- and the element was never read at all. The roleset's
+    /// mapping to a FrameNet frame or VerbNet class was therefore either absent, or
+    /// present via &lt;rolelink&gt; at a flat unscored 1.0, discarding a hand-curated
+    /// distinction the source went to the trouble of recording.
+    ///
+    /// Emitted BEFORE the role pass and sharing its dedup set, so the confidence-bearing
+    /// witness is the one that lands and rolelink does not overwrite it with a constant.
+    /// </summary>
+    private static void EmitLexLinks(
+        SubstrateChangeBuilder b, XmlElement roleset, Hash128 rsEntity,
+        HashSet<Hash128> linkedClasses)
+    {
+        foreach (var link in SharedXmlFramesetReader.DescendantElements(roleset, "lexlink"))
+        {
+            Hash128? anchor = ResolveLinkedClass(
+                link.GetAttribute("resource"), link.GetAttribute("class").Trim());
+            if (anchor is null || !linkedClasses.Add(anchor.Value)) continue;
+
+            // arenaScale 1.0 keeps the confidence on its own natural scale: 0.8 and 1.0
+            // land at distinct scores instead of collapsing onto the categorical constant.
+            double confidence =
+                double.TryParse(link.GetAttribute("confidence"),
+                    System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out double c)
+                && c > 0.0 ? c : 1.0;
+
+            b.AddAttestation(NativeAttestation.ResolvedScored(
+                rsEntity, PropBankSource.CorrespondsToTypeId, anchor.Value,
+                Source, null, TC.AcademicCurated,
+                signedMagnitude: confidence, arenaScale: 1.0));
+        }
+    }
+
     private static void EmitRoles(SubstrateChangeBuilder b, XmlElement roleset, Hash128 rsEntity)
     {
         var linkedClasses = new HashSet<Hash128>();
+        EmitLexLinks(b, roleset, rsEntity, linkedClasses);
         foreach (var role in SharedXmlFramesetReader.DescendantElements(roleset, "role"))
         {
             string descr = role.GetAttribute("descr").Trim();
@@ -188,14 +239,7 @@ public sealed class PropBankDecomposer
 
 
 
-                Hash128? anchor =
-                    resource.Equals("VerbNet", StringComparison.OrdinalIgnoreCase)
-                        ? AnchorAdmission.Id(
-                            SourceEntityIdConventions.NumericVerbNetClassId(cls),
-                            EntityTypeRegistry.VerbNetClass)
-                    : resource.Equals("FrameNet", StringComparison.OrdinalIgnoreCase)
-                        ? CategoryAnchor.Id(cls)
-                        : null;
+                Hash128? anchor = ResolveLinkedClass(resource, cls);
                 if (anchor is null) continue;
                 Hash128 classEntity = anchor.Value;
                 if (linkedClasses.Add(classEntity))

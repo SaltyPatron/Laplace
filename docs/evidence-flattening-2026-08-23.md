@@ -125,6 +125,13 @@ Three independent mechanisms, all green throughout:
   as a Refute whose strength is ConceptNet's own confidence. That sign channel always
   existed and the full 34M-row file never used it once (0 negative weights). Atomic2020
   carried the identical mapping and is fixed the same way.
+- **PropBank `<lexlinks>` are read, with their confidence** (this commit). The element was
+  never opened. It carries the only explicit graded confidence in either frame corpus —
+  **16,250 rows at 0.8 or 1.0** — mapping a roleset to a FrameNet frame or VerbNet class.
+  The mapping was either absent or arrived via `<rolelink>` at a flat unscored 1.0,
+  discarding a hand-curated distinction the source recorded deliberately. Emitted before
+  the role pass and sharing its dedup set, so the confidence-bearing witness is the one
+  that lands.
 - **`resolved_scored_build` also applies rank** (this commit) — it had the same raw
   `witness_weight` defect as `resolved_build`.
 
@@ -141,5 +148,12 @@ Three independent mechanisms, all green throughout:
   across all 64 `physicalities` hash partitions (partition key is `id`, probe is on
   constituents, so nothing prunes). Actual work is ~190 ms. At one lookup per token,
   generation is unusable on that alone, and no query rewrite reaches it.
+- **Test-suite load sensitivity.** Three different tests failed once each
+  (`Token_command_outranks_a_stale_environment_variable`,
+  `ManyIndividuallySmallFiles_StillRefineWhenCorpusExceedsSharedBudget`,
+  `IngestPool_CoversItsFansAndItsObservabilityOwners`) while builds, `ctest` and `psql`
+  ran concurrently. All three derive from ambient machine resources. **10 consecutive
+  clean runs** on a quiet machine, with and without `LAPLACE_NO_PIN=1`, so CPU-affinity
+  pinning is ruled out as the cause and the mechanism is not isolated.
 - **The 892 MB of existing `ud/misc-value` rows.** The fix is ingest-side; they clear on
   the next `ud` seed.
