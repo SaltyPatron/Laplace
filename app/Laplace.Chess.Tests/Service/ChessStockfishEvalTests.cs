@@ -103,7 +103,7 @@ public sealed class ChessStockfishEvalTests
         var marker = ChessStockfishEval.MarkerId(parsed.LineId, ChessStockfishEval.Version);
         Assert.Contains(change.Entities, e => e.Id == marker);
         Assert.Contains(change.Attestations, a =>
-            a.TypeId == ChessVocabulary.AnalyzedAtType && a.SubjectId == parsed.LineId
+            a.TypeId == ChessVocabulary.AnalysisVersionMetaTypeId && a.SubjectId == parsed.LineId
             && a.SourceId == ChessStockfishEval.SourceId);
     }
 
@@ -194,8 +194,14 @@ public sealed class ChessStockfishEvalTests
         var declared = ChessSeedManifest.Relations
             .Select(RelationTypeRegistry.RelationTypeId).ToHashSet();
         var change = Derive(new ScriptedEvaluator(new int?[] { 20, -15, 25, -30, 90, -120, 500 }));
+        // Substrate meta-types are declared inline in the change, never in the relation
+        // manifest, and never fold -- see ChessRelationGateTests for the full note.
+        var metaTypes = change.Entities
+            .Where(e => e.TypeId == BootstrapIntentBuilder.RelationTypeMetaTypeId)
+            .Select(e => e.Id).ToHashSet();
         var undeclared = change.Attestations
-            .Select(a => a.TypeId).Distinct().Where(t => !declared.Contains(t)).ToList();
+            .Select(a => a.TypeId).Distinct()
+            .Where(t => !declared.Contains(t) && !metaTypes.Contains(t)).ToList();
         Assert.Empty(undeclared);
     }
 }

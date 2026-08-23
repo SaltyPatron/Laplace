@@ -35,11 +35,26 @@ public sealed class ChessRelationGateTests
         ChessAnalyze.DeriveFromParsed(b, parsed);
         var change = b.SetInputUnitsConsumed(1).Build();
 
+        // Substrate META-TYPES are a different category from relations and must not be
+        // declared in the relation manifest: they are minted inline, never entered in
+        // relation_types.toml, never given a highway bit, and therefore never folded
+        // (FileEntity.MetadataRelationTypeId, LayerCompletion's HasLayerCompleted, and the
+        // chess analysis watermark). Verified live: HasFileMetadata 209 attestations / 0
+        // consensus; HasLayerCompleted/2 8,995 / 0.
+        //
+        // The gate keeps its teeth because the exemption is not a name list: the id counts
+        // only if THIS change also declares it as a meta-type entity. A typo'd or
+        // undeclared relation still has nothing declaring it and still fails.
+        var metaTypes = change.Entities
+            .Where(e => e.TypeId == BootstrapIntentBuilder.RelationTypeMetaTypeId)
+            .Select(e => e.Id)
+            .ToHashSet();
+
         Assert.NotEmpty(change.Attestations);
         var undeclared = change.Attestations
             .Select(a => a.TypeId)
             .Distinct()
-            .Where(t => !declared.ContainsKey(t))
+            .Where(t => !declared.ContainsKey(t) && !metaTypes.Contains(t))
             .Select(t => t.ToString())
             .ToList();
         Assert.True(undeclared.Count == 0,

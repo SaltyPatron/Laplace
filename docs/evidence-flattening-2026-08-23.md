@@ -42,6 +42,40 @@ a tally — losses are what make a rating fall. The sources ship losses:
 - ConceptNet `Not*` — **29,547** rows modelled as separate *positive* relation types, so the
   refutation never meets the cell it refutes
 
+## Why consensus ≈ attestations
+
+139,556,085 attestations produce 127,021,587 consensus cells — 1.1 witnesses per cell, and
+**91.46% of cells have exactly one**:
+
+| witnesses | cells | share |
+|---|---|---|
+| 1 | 116,169,744 | 91.46% |
+| 2 | 6,245,260 | 4.92% |
+| 3 | 1,791,717 | 1.41% |
+| ≥4 | 2,817,063 | 2.22% |
+
+A cell is keyed `blake3(subject‖type‖object)`, so two witnesses meet only when they mint the
+identical triple. Where identity is shareable the fold works — `GAME_HAS_MOTIF` is only
+34.8% single-witness. Where the subject is unique per occurrence, a second witness is
+**impossible by construction**: `ANALYZED_AT`, `HAS_DTZ`, `HAS_WDL` and `HAS_EVENT` are all
+**100.0%** single-witness and `HAS_PARSE` is 99.2% — 36.8M cells that can never be rated.
+
+## Why entities outnumber geometries
+
+71,321,006 entities against 47,577,055 placements. The gap is bookkeeping, not missing
+content — real content is placed (tier 0 and 1 at 100%, tier 3 at 99.9%, and `UD_Parse`,
+`Chess_Game` and `Document` at 100%):
+
+| tier-4 type | entities | with geometry |
+|---|---|---|
+| **Chess_AnalysisMarker** | **15,009,212** | 0% |
+| UD_Parse_Occurrence | 2,177,867 | 0% |
+| Chess_Playing | 982,515 | 0% |
+| Chess_Event | 219,141 | 0% |
+| FrameNet_Annotation_Occurrence | 28,941 | 0% |
+
+Tier 2 accounts for a further 6.3M (81.3% placed).
+
 ## Rating spread across the largest relations
 
 Sampled 50,000 cells per relation:
@@ -153,6 +187,17 @@ Three independent mechanisms, all green throughout:
   the capability was present while the emitted tensors had it removed. Continuation-only
   must now be requested explicitly, and when it *is* requested the dropped operators are
   named on stderr.
+- **Game metadata hangs off the trunk instead of folding** (this commit). The chess
+  analysis watermark was emitted as the manifest relation `ANALYZED_AT`, so it folded:
+  **12,891,661 attestations → 12,863,059 consensus cells, 100% single-witness, 2 distinct
+  ratings.** It can never be anything else — the subject is one game and the object is the
+  analyzer version, so the triple is unique by construction and no second witness can
+  exist to rate it against. The substrate already had the right shape and uses it
+  elsewhere: `FileEntity.MetadataRelationTypeId` and `LayerCompletion`'s
+  `HasLayerCompleted` are substrate meta-types, minted inline, never in
+  `relation_types.toml`, never folded — verified live at **209 / 0** and **8,995 / 0**
+  attestations/consensus. A game's analysis version is provenance, fetched when asked,
+  exactly like a file's name and mtime.
 - **`resolved_scored_build` also applies rank** (this commit) — it had the same raw
   `witness_weight` defect as `resolved_build`.
 

@@ -105,9 +105,16 @@ public static class ChessAnalyze
                    spentSeconds, standardStart);
 
         // Watermark: this playing is now derived at the current analysis version.
+        // Metadata on the trunk, not rated testimony -- see ChessVocabulary
+        // .AnalysisVersionMetaTypeId. A substrate meta-type is not in relation_types.toml
+        // and therefore never folds, so this stops minting one unrateable consensus cell
+        // per analysed game.
         if (ContentEmitter.Emit(b, Version.ToString(), SourceId) is { } vId)
-            b.AddAttestation(NativeAttestation.Categorical(
-                eventId, "ANALYZED_AT", vId, SourceId, null, ChessVocabulary.Trust));
+            b.AddEntity(ChessVocabulary.AnalysisVersionMetaTypeId, EntityTier.Word,
+                    BootstrapIntentBuilder.RelationTypeMetaTypeId, SourceId)
+                .AddAttestation(NativeAttestation.CategoricalResolved(
+                    eventId, ChessVocabulary.AnalysisVersionMetaTypeId, vId,
+                    SourceId, contextId: null, ChessVocabulary.Trust));
     }
 
     /// <summary>

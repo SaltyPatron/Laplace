@@ -105,8 +105,15 @@ public static class ChessStockfishEval
 
         b.AddEntity(MarkerId(game.LineId, Version), EntityTier.Document,
             ChessVocabulary.AnalysisMarkerType, SourceId);
+        // Metadata on the trunk, not rated testimony -- see ChessVocabulary
+        // .AnalysisVersionMetaTypeId. A substrate meta-type is not in relation_types.toml
+        // and therefore never folds, so this stops minting one unrateable consensus cell
+        // per analysed game.
         if (ContentEmitter.Emit(b, Version.ToString(), SourceId) is { } vId)
-            b.AddAttestation(NativeAttestation.Categorical(
-                game.LineId, "ANALYZED_AT", vId, SourceId, null, ChessVocabulary.Trust));
+            b.AddEntity(ChessVocabulary.AnalysisVersionMetaTypeId, EntityTier.Word,
+                    BootstrapIntentBuilder.RelationTypeMetaTypeId, SourceId)
+                .AddAttestation(NativeAttestation.CategoricalResolved(
+                    game.LineId, ChessVocabulary.AnalysisVersionMetaTypeId, vId,
+                    SourceId, contextId: null, ChessVocabulary.Trust));
     }
 }
