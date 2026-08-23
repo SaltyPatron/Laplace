@@ -16,6 +16,10 @@
     <PackageVersion Include="Microsoft.Extensions.ApiDescription.Server" Version="10.0.0" />
     <PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.8" />
     <PackageVersion Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="10.0.8" />
+    <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.0" />
+    <!-- Direct pin: Microsoft.Data.Sqlite 10.0.0 transitively pulls e_sqlite3 2.1.11
+         (GHSA-2m69-gcr7-jv3q); the 3.0.x bundle carries the patched native lib. -->
+    <PackageVersion Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.0" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
     <PackageVersion Include="Microsoft.OpenApi" Version="2.7.5" />

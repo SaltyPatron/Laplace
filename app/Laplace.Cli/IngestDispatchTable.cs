@@ -90,6 +90,7 @@ internal static class IngestDispatchTable
         ("parquet",  cli => IngestCommands.IngestParquetAsync(cli)),
         ("document", cli => IngestCommands.IngestDocumentAsync(cli)),
         ("recipe",   cli => IngestCommands.IngestRecipeAsync(cli)),
+        ("agents",   cli => IngestCommands.IngestAgentsAsync(cli)),
         ("omw-probe", cli => IngestCommands.OmwProbeAsync(cli)),
 
         // GH #600: `chess` records AND derives the calculated layer in ONE fused

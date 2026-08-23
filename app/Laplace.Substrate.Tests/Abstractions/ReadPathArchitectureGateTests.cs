@@ -135,6 +135,10 @@ public sealed class ReadPathArchitectureGateTests
                 && file.Contains("OpenAICompat", StringComparison.OrdinalIgnoreCase)) continue;
             if (file.Contains($"{sep}Laplace.Migrations{sep}", StringComparison.OrdinalIgnoreCase)) continue;
             if (file.EndsWith($"{sep}BillingBootstrap.cs", StringComparison.OrdinalIgnoreCase)) continue;
+            // Not substrate catalog: Cursor chat stores are a THIRD-PARTY SQLite container
+            // the agents lane unpacks (a format codec, like Fathom for syzygy), read via
+            // Microsoft.Data.Sqlite — no Npgsql, no substrate SQL surface involved.
+            if (file.EndsWith($"{sep}AgentTrace{sep}CursorAdapter.cs", StringComparison.OrdinalIgnoreCase)) continue;
             yield return file;
         }
     }

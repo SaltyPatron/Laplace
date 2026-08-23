@@ -1881,6 +1881,84 @@ symmetry = "asymmetric"
 parent = null
 family_root = "HAS_COMMIT_MESSAGE"
 
+# ── Agent-trace lane (spec 34 batch counterpart; AgentTraceDecomposer) ──────────
+# Conversational-turn structure for replayed agent session logs. Turn ORDER lives in
+# the session physicality trajectory (Pillar 3a: sequence is geometry, not adjacency
+# attestations); these relations carry only what the geometry cannot.
+
+# Turn → role identity (user / assistant / system / tool). standards_structural: role
+# is transport structure, not semantic content.
+[[relation]]
+canonical = "HAS_ROLE"
+bit = 214
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_ROLE"
+
+# Tool invocation → its input content root. Mirror of HAS_RESULT (definitional): the
+# input is what the invocation IS, the way a result is what it produced.
+[[relation]]
+canonical = "HAS_INPUT"
+bit = 215
+rank = "definitional"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_INPUT"
+
+# Turn/session → token-usage scalar entities. Same shape as the model-recipe scalars
+# (HAS_HIDDEN_SIZE): scalar_valued, object = Scalar entity of the decimal string.
+[[relation]]
+canonical = "HAS_INPUT_TOKENS"
+bit = 216
+rank = "scalar_valued"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_INPUT_TOKENS"
+
+[[relation]]
+canonical = "HAS_OUTPUT_TOKENS"
+bit = 217
+rank = "scalar_valued"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_OUTPUT_TOKENS"
+
+[[relation]]
+canonical = "HAS_CACHE_READ_TOKENS"
+bit = 218
+rank = "scalar_valued"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_CACHE_READ_TOKENS"
+
+[[relation]]
+canonical = "HAS_CACHE_CREATE_TOKENS"
+bit = 219
+rank = "scalar_valued"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_CACHE_CREATE_TOKENS"
+
+# Turn → provider stop/termination reason (end_turn, tool_use, aborted, …).
+[[relation]]
+canonical = "HAS_STOP_REASON"
+bit = 220
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_STOP_REASON"
+
+# Turn/session → monetary cost scalar (micro-USD decimal string), where the provider
+# reports one.
+[[relation]]
+canonical = "HAS_COST"
+bit = 221
+rank = "scalar_valued"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_COST"
+
 
 [[alias]]
 surface = "DEFINED_AS"

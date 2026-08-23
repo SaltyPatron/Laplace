@@ -14,7 +14,7 @@ USAGE=(tatoeba opensubtitles)
 if [[ -z "$source" ]]; then
     echo "Usage: $0 <source> [path] | all | safetensors <snapshot-dir>" >&2
     echo "Sources: ${FLOOR[*]} document ${KNOWLEDGE[*]} ${USAGE[*]} \\" >&2
-    echo "         code repo stack tiny-codes tabular recipe chess openings chess-books chess-eval chess-move-outcomes safetensors" >&2
+    echo "         code repo stack tiny-codes tabular recipe agents chess openings chess-books chess-eval chess-move-outcomes safetensors" >&2
     exit 2
 fi
 
@@ -181,6 +181,18 @@ case "$source" in
             ingest "$source"
         fi
         ;;
+    agents)
+        # Agent session logs (Claude Code, Codex, Gemini, Antigravity, Copilot, Cursor,
+        # generic role-shaped JSON). Path optional: an explicit file/dir is the witness
+        # boundary; with none the decomposer discovers this user's provider roots
+        # (~/.claude/projects, ~/.codex/sessions, …).
+        build_cli
+        if [[ -n "$path" ]]; then
+            ingest agents "$path"
+        else
+            ingest agents
+        fi
+        ;;
     code|repo|tabular|recipe)
         # Witness-unit code/data sources: the <path> IS the witness boundary (a file,
         # a repository root, a table), so it is REQUIRED — no DATA_ROOT default. Same
@@ -238,7 +250,7 @@ case "$source" in
         echo "Sources: ${FLOOR[*]} document ${KNOWLEDGE[*]} ${USAGE[*]} \\" >&2
         echo "         chess openings chess-books chess-analyze chess-trajectory chess-eval chess-syzygy \\" >&2
     echo "         chess-opening-match \\" >&2
-        echo "         code repo stack tiny-codes tabular recipe all safetensors" >&2
+        echo "         code repo stack tiny-codes tabular recipe agents all safetensors" >&2
         exit 2
         ;;
 esac

@@ -57,6 +57,8 @@ public class SourceIdPinTests
           "584ccc3cce1291ad4ac04ce4f8b33a8c", "d12d1f4f079c1aa7f4826ec4b3266b45" },
         { () => new Laplace.Decomposers.Code.TabularDecomposer(),
           "3f0876af5782433a4991d2d02e93b982", "d12d1f4f079c1aa7f4826ec4b3266b45" },
+        { () => new Laplace.Decomposers.AgentTrace.AgentTraceDecomposer(),
+          "2695dfdb6ee5e398ac86cea7a87d1695", "52ca8c3671e50577e460cc2c3845b9ea" },
     };
 
     [Theory]
