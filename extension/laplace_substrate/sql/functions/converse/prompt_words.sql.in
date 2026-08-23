@@ -43,10 +43,23 @@ BEGIN ATOMIC
         FROM lexical.word_case_variants_batch(
                  ARRAY(SELECT DISTINCT s.id FROM seg s WHERE s.id IS NOT NULL)) v
     ), witnessed AS MATERIALIZED (
-        SELECT v.word_id, v.variant_id, count(*) AS edges
+        -- BOUNDED. This picks which case variant holds the evidence; it does not report
+        -- how much. An unbounded count(*) reads every consensus edge of every variant of
+        -- every token, which for a hub surface is thousands of rows to make one
+        -- comparison -- the RBAR this file exists to avoid.
+        --
+        -- The cap only has to separate variants, and it does: on the live substrate
+        -- `What` carries 260 edges against `what` 2,501, `Water` 1 against `water` 2,545,
+        -- `The` 0 against `the` 406. Two variants that both exceed the cap tie and fall to
+        -- the variant_id tie-break below, which is deterministic -- and a surface with
+        -- more than 4,096 witnessed edges either way is not one this discriminator can or
+        -- needs to separate.
+        SELECT v.word_id, v.variant_id,
+               (SELECT count(*) FROM (
+                    SELECT 1 FROM laplace.consensus c
+                    WHERE c.subject_id = v.variant_id
+                    LIMIT 4096) capped) AS edges
         FROM variants v
-        JOIN laplace.consensus c ON c.subject_id = v.variant_id
-        GROUP BY v.word_id, v.variant_id
     ), best AS MATERIALIZED (
         SELECT DISTINCT ON (w.word_id) w.word_id, w.variant_id
         FROM witnessed w
