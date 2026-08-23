@@ -239,10 +239,11 @@ public sealed class VerbNetDecomposer
                     //
                     // VerbNet negates a predicate with bool="!": escape-51.1 entails that the
                     // theme is NOT at its initial location. The attribute was never read, so
-                    // 2,860 of 19,490 PREDs in verbnet-master (14.7%) were deposited as
-                    // ENTAILS -- the substrate asserting the negation of what the source
-                    // states. A further 39 carry bool="?" (optional), which is a DRAW, not a
-                    // confirmation: laplace_score_fp(0, m) is exactly 0.5.
+                    // 1,002 PREDs in verbnet3.4 -- the directory this decomposer reads --
+                    // were deposited as ENTAILS -- the substrate asserting the negation of what the source
+                    // states. bool="?" (optional) is a DRAW, not a confirmation --
+                    // laplace_score_fp(0, m) is exactly 0.5. verbnet3.4 contains none; the
+                    // 39 that exist are in vn-gl and verbnet-test, which are not ingested.
                     //
                     // outcome is the field for this. `confirm: false` folds a Refute against
                     // the same cell a positive ENTAILS would fold into, which is what makes

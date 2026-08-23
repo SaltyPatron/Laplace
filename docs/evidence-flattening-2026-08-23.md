@@ -136,7 +136,7 @@ Three independent mechanisms, all green throughout:
   reason in the gate (`"constant_rating_ok": "…"`), which reviewers can challenge.
 
 - **VerbNet negation is a Refute** (this commit). `<PRED bool="!">` was never read, so
-  **2,860 of 19,490 PREDs (14.7%)** in verbnet-master were deposited as positive
+  **1,002 PREDs** in verbnet-master were deposited as positive
   `ENTAILS` — the substrate asserting the negation of what the source states. A further
   **39** carry `bool="?"` (optional), which is a Draw: `laplace_score_fp(0, m)` is exactly
   0.5. The negation is deliberately NOT in the predicate id preimage, so an assertion in
@@ -269,6 +269,15 @@ Three independent mechanisms, all green throughout:
   denial that holds in one release and not another cannot be an outcome without corrupting
   the unscoped cell. CILI's deprecations are recorded as meta-facts instead. If
   version-scoped adjudication is wanted, the cell key has to carry it.
+- **Proven on a fresh isolate.** `just decomposer-test verbnet` seeded
+  `laplace_d_verbnet` with the fixed decomposer and the gates pass, including the new
+  rating-spread gate. The outcome distribution is the point: `ENTAILS` on the **old** live
+  substrate is 10,073 attestations, **all Confirm, zero refutations**; in the fresh isolate
+  it is **8,131 Confirm + 1,419 Refute**. The fold now receives negative evidence it
+  structurally could not before. This is why the live database is not worth tuning against —
+  it is the output of the broken decomposers, and `CLAUDE.md` makes db-reset + reseed the
+  upgrade path.
+
 - **Hub-word successor lookups.** A common word is still pathological: `the` appears in
   2,376,395 trajectories and its continuation lookup takes ~10.7s even parallel, because
   every containing trajectory is decoded. Bounding that needs a precomputed successor
