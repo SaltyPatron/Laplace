@@ -6,7 +6,7 @@ using Xunit;
 namespace Laplace.Chess.Service.Tests;
 
 // GH #600: `laplace ingest chess` records the witnessed layer AND derives the calculated
-// layer (positions, move edges, ANALYZED_AT marker) in ONE fused Compose pass, reusing the
+// layer (positions, move edges, analysis-version watermark) in ONE fused Compose pass, reusing the
 // in-memory parse — no second Postgres hydrate + re-parse. These pin that the fused pass
 // emits both layers together, and that --no-analyze still yields the pure game-grain record.
 public sealed class ChessFusedIngestTests
@@ -42,7 +42,7 @@ public sealed class ChessFusedIngestTests
         Assert.False(change.Physicalities.IsDefaultOrEmpty || change.Physicalities.Length == 0,
             "fused pass must compose position geometry");
         Assert.Contains(change.Attestations, a =>
-            a.TypeId == RelationTypeRegistry.RelationTypeId("ANALYZED_AT"));
+            a.TypeId == ChessVocabulary.AnalysisVersionMetaTypeId);
 
         // GH #547 / CONSOLIDATION: EmitGame stays a bare Document (spec 08 recorder);
         // the fused calculated pass deposits the game-tier mantissa-packed trajectory
@@ -60,7 +60,7 @@ public sealed class ChessFusedIngestTests
         var change = Compose(analyzeInline: false);
 
         Assert.Contains(change.Entities, e => e.TypeId == ChessVocabulary.GameType);
-        // No board replay: no positions and no ANALYZED_AT watermark.
+        // No board replay: no positions and no analysis-version watermark.
         Assert.DoesNotContain(change.Entities, e => e.TypeId == ChessVocabulary.PositionType);
 
         // Recording keeps reusable moves and the line trajectory; --no-analyze withholds
@@ -71,6 +71,6 @@ public sealed class ChessFusedIngestTests
         Assert.DoesNotContain(change.Physicalities,
             p => p.EntityId == lineId && p.Type == PhysicalityType.Projection);
         Assert.DoesNotContain(change.Attestations, a =>
-            a.TypeId == RelationTypeRegistry.RelationTypeId("ANALYZED_AT"));
+            a.TypeId == ChessVocabulary.AnalysisVersionMetaTypeId);
     }
 }

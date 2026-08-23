@@ -50,12 +50,12 @@ ensure_tax_edges_plan(void)
     if (tax_edges_plan == NULL)
     {
         Oid        argtypes[2] = { BYTEAARRAYOID, BYTEAARRAYOID };
-        SPIPlanPtr plan = SPI_prepare(
+        SPIPlanPtr plan = SPI_prepare_cursor(
             "SELECT u.ord, e.object_id, e.type_id, e.rating, e.rd "
             "FROM unnest($1) WITH ORDINALITY AS u(id, ord) "
             "CROSS JOIN LATERAL taxonomy.consensus_taxonomy_edges(u.id, $2) e "
             "ORDER BY u.ord",
-            2, argtypes);
+            2, argtypes, CURSOR_OPT_PARALLEL_OK);
         if (plan == NULL)
             elog(ERROR, "tax_bfs_up: SPI_prepare failed: %s",
                  SPI_result_code_string(SPI_result));
@@ -402,10 +402,10 @@ ensure_relate_plans(void)
     {
         Oid argtypes[1] = { BYTEAOID };
 
-        relate_senses_plan = SPI_prepare(
+        relate_senses_plan = SPI_prepare_cursor(
             "SELECT synset_id, (eff_mu * 1000000000)::bigint "
             "FROM lexical.senses($1) WHERE synset_id IS NOT NULL",
-            1, argtypes);
+            1, argtypes, CURSOR_OPT_PARALLEL_OK);
         if (relate_senses_plan == NULL || SPI_keepplan(relate_senses_plan) != 0)
             elog(ERROR, "relate_path_raw: could not prepare lexical sense plan");
     }
@@ -413,8 +413,8 @@ ensure_relate_plans(void)
     {
         Oid argtypes[1] = { TEXTOID };
 
-        relation_set_plan = SPI_prepare(
-            "SELECT consensus.relation_set_ids($1)", 1, argtypes);
+        relation_set_plan = SPI_prepare_cursor(
+            "SELECT consensus.relation_set_ids($1)", 1, argtypes, CURSOR_OPT_PARALLEL_OK);
         if (relation_set_plan == NULL || SPI_keepplan(relation_set_plan) != 0)
             elog(ERROR, "relate_path_raw: could not prepare relation-set plan");
     }

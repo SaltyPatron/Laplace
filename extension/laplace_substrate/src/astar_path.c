@@ -42,7 +42,7 @@ ensure_coord_plan(void)
     if (coord_plan == NULL)
     {
         Oid argtypes[1] = { BYTEAOID };
-        SPIPlanPtr plan = SPI_prepare(Q_COORD, 1, argtypes);
+        SPIPlanPtr plan = SPI_prepare_cursor(Q_COORD, 1, argtypes, CURSOR_OPT_PARALLEL_OK);
         if (plan == NULL)
             elog(ERROR, "astar_path: SPI_prepare(coord) failed: %s",
                  SPI_result_code_string(SPI_result));
@@ -87,7 +87,7 @@ ensure_plan(bool directed)
     if (*slot == NULL)
     {
         Oid        argtypes[3] = { BYTEAOID, BYTEAARRAYOID, INT4OID };
-        SPIPlanPtr plan = SPI_prepare(directed ? Q_DIRECTED : Q_UNDIRECTED, 3, argtypes);
+        SPIPlanPtr plan = SPI_prepare_cursor(directed ? Q_DIRECTED : Q_UNDIRECTED, 3, argtypes, CURSOR_OPT_PARALLEL_OK);
         if (plan == NULL)
             elog(ERROR, "astar_path: SPI_prepare failed: %s",
                  SPI_result_code_string(SPI_result));

@@ -92,7 +92,7 @@ ensure_steer_plan(void)
          * "the capital of france is", `Lyon` carries one strong edge to `france` while
          * `Paris` carries moderate edges to `france` AND `capital`; a bare sum lets Lyon win.
          */
-        SPIPlanPtr plan = SPI_prepare(
+        SPIPlanPtr plan = SPI_prepare_cursor(
             "SELECT e.cand, e.front, e.type_id, e.rating, e.rd FROM ("
             "  SELECT c.subject_id AS cand, c.object_id AS front,"
             "         c.type_id, c.rating, c.rd"
@@ -104,7 +104,7 @@ ensure_steer_plan(void)
             "    FROM laplace.consensus c"
             "   WHERE c.object_id = ANY($1) AND c.subject_id = ANY($2)"
             ") e",
-            2, argtypes);
+            2, argtypes, CURSOR_OPT_PARALLEL_OK);
 
         if (plan == NULL)
             elog(ERROR, "steer_candidates: SPI_prepare failed: %s",

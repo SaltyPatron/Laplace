@@ -165,7 +165,9 @@ functions/lexical/define_bootstrap.sql.in
 functions/lexical/define_with_context_bootstrap.sql.in
 functions/converse/word_id.sql.in
 functions/converse/resolve_ref.sql.in
+functions/lexical/word_case_variants.sql.in
 functions/converse/word_segment.sql.in
+functions/converse/word_segment_resolved.sql.in
 functions/converse/label.sql.in
 functions/converse/label_or_hex.sql.in
 functions/converse/label_is_content.sql.in
@@ -182,9 +184,10 @@ functions/converse/hypernyms.sql.in
 functions/converse/resolve_last_word.sql.in
 functions/converse/resolve_phrase.sql.in
 functions/converse/resolve.sql.in
+functions/converse/prompt_language.sql.in
 functions/converse/prompt_state.sql.in
 functions/converse/prompt_coherence.sql.in
-functions/converse/prompt_language.sql.in
+functions/converse/elect.sql.in
 functions/converse/first_placed_topic.sql.in
 functions/converse/realize_path_with_dirs.sql.in
 functions/converse/realize_path.sql.in
@@ -241,7 +244,6 @@ functions/structural/consensus_export_relations.sql.in
 functions/structural/consensus_export_unary.sql.in
 functions/structural/consensus_export_relations_mu.sql.in
 functions/structural/model_recipes.sql.in
-functions/lexical/word_case_variants.sql.in
 functions/converse/operation_frame_routes.sql.in
 functions/converse/compile_prompt.sql.in
 functions/lexical/word_case_variant_ids.sql.in

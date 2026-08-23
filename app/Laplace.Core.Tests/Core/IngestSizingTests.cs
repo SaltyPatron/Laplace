@@ -219,8 +219,9 @@ public sealed class IngestSizingTests
             workingSetBudgetBytes: 4L << 30,
             flushEnvelopeBytes: 512L << 20);
 
-        Assert.Equal(12, plan.Connections);
-        Assert.Equal((512L << 20) / 12 / MemoryTopology.ConsensusFoldTransitBytesPerCell,
+        Assert.Equal(12 - IngestSizing.ConsensusFoldPoolHeadroom, plan.Connections);
+        Assert.Equal((512L << 20) / plan.Connections
+            / MemoryTopology.ConsensusFoldTransitBytesPerCell,
             plan.ChunkCells);
         Assert.Equal(8, plan.PipelineDepth);
         Assert.Equal((512L << 20) / MemoryTopology.ConsensusFoldBytesPerRelation,
@@ -253,7 +254,9 @@ public sealed class IngestSizingTests
         var four = IngestSizing.ResolveConsensusFold(4, 2L << 30, 256L << 20);
         var eight = IngestSizing.ResolveConsensusFold(8, 2L << 30, 256L << 20);
 
-        Assert.Equal(four.ChunkCells / 2, eight.ChunkCells);
+        Assert.True(eight.Connections > four.Connections);
+        Assert.Equal(four.ChunkCells * four.Connections / eight.Connections,
+            eight.ChunkCells);
         Assert.True((long)eight.ChunkCells * eight.Connections
             * MemoryTopology.ConsensusFoldTransitBytesPerCell <= 256L << 20);
         Assert.Equal(four.PipelineDepth, eight.PipelineDepth);

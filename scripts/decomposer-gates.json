@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Per-source ingest gates \u2014 consensus thresholds mirror .github/workflows/*.yml; prerequisites mirror witness-manifest signal-dependency order. The chess lanes were absent from this file entirely, so ingest-source.sh's journal verification never ran for them and their CI seed jobs were green on the exit code alone.",
+  "description": "Per-source ingest gates — consensus thresholds mirror .github/workflows/*.yml; prerequisites mirror witness-manifest signal-dependency order. The chess lanes were absent from this file entirely, so ingest-source.sh's journal verification never ran for them and their CI seed jobs were green on the exit code alone.",
   "naming": {
     "canonical_db": "laplace",
     "isolate_prefix": "laplace_d",
@@ -380,7 +380,8 @@
         {
           "relation": "ANALYZED_AT",
           "min": 1,
-          "scope": "source_evidence"
+          "scope": "source_evidence",
+          "constant_rating_ok": "provenance timestamp, not a claim about the world -- nothing to rank"
         },
         {
           "relation": "MOVE",
@@ -446,7 +447,8 @@
         {
           "relation": "ANALYZED_AT",
           "min": 1,
-          "scope": "source_evidence"
+          "scope": "source_evidence",
+          "constant_rating_ok": "provenance timestamp, not a claim about the world -- nothing to rank"
         }
       ]
     },
@@ -510,12 +512,14 @@
         {
           "relation": "HAS_WDL",
           "min": 1,
-          "scope": "source_evidence"
+          "scope": "source_evidence",
+          "constant_rating_ok": "exact tablebase result -- the object IS the value (win/draw/loss); a syzygy probe ships no confidence to rate"
         },
         {
           "relation": "HAS_DTZ",
           "min": 1,
-          "scope": "source_evidence"
+          "scope": "source_evidence",
+          "constant_rating_ok": "exact tablebase distance -- the object IS the value; a syzygy probe ships no confidence to rate"
         }
       ]
     },

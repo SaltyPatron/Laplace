@@ -13,7 +13,7 @@ internal static class ConceptNetRelations
     // A byte-keyed dictionary was the other option and is rejected on allocation: hashing a
     // ReadOnlySpan<byte> against a Dictionary<byte[],_> needs either a per-row GetString or a
     // custom alternate-lookup comparer, and this path runs tens of millions of times.
-    private static readonly (byte[] RelUtf8, string TypeName)[]?[] ByLength = BuildByLength();
+    private static readonly (byte[] RelUtf8, string TypeName, bool Negated)[]?[] ByLength = BuildByLength();
 
     /*
      * ConceptNet's /r/dbpedia/* lane, mapped onto GENERIC manifest relations rather than
@@ -47,13 +47,25 @@ internal static class ConceptNetRelations
     ];
 
     public static bool TryResolveType(ReadOnlySpan<byte> relationUri, out string typeName)
-        => TryResolveType(relationUri, out typeName, out _);
+        => TryResolveType(relationUri, out typeName, out _, out _);
 
     public static bool TryResolveType(
         ReadOnlySpan<byte> relationUri, out string typeName, out bool flip)
+        => TryResolveType(relationUri, out typeName, out flip, out _);
+
+    /// <summary>
+    /// <paramref name="negated"/> is set for the Not* relations, which map onto the
+    /// relation they DENY. The caller negates the row's magnitude so it folds as a Refute
+    /// against that relation's cell instead of into a separate positive NOT_* type where
+    /// it could never contest anything. Carried in the lookup table so the hot path costs
+    /// no allocation and no second comparison.
+    /// </summary>
+    public static bool TryResolveType(
+        ReadOnlySpan<byte> relationUri, out string typeName, out bool flip, out bool negated)
     {
         typeName = "";
         flip = false;
+        negated = false;
         if (relationUri.Length < 4
             || relationUri[0] != (byte)'/'
             || relationUri[1] != (byte)'r'
@@ -81,20 +93,21 @@ internal static class ConceptNetRelations
         if (bucket is null)
             return false;
 
-        foreach (var (key, name) in bucket)
+        foreach (var (key, name, neg) in bucket)
         {
             if (rel.SequenceEqual(key))
             {
                 typeName = name;
+                negated = neg;
                 return true;
             }
         }
         return false;
     }
 
-    private static (byte[] RelUtf8, string TypeName)[]?[] BuildByLength()
+    private static (byte[] RelUtf8, string TypeName, bool Negated)[]?[] BuildByLength()
     {
-        var byLen = new Dictionary<int, List<(byte[], string)>>();
+        var byLen = new Dictionary<int, List<(byte[], string, bool)>>();
         int max = 0;
 
         foreach (var (rel, typeName) in ConceptNetSource.RelMap)
@@ -102,11 +115,11 @@ internal static class ConceptNetRelations
             byte[] utf8 = System.Text.Encoding.UTF8.GetBytes(rel);
             if (utf8.Length > max) max = utf8.Length;
             if (!byLen.TryGetValue(utf8.Length, out var bucket))
-                byLen[utf8.Length] = bucket = new List<(byte[], string)>(2);
-            bucket.Add((utf8, typeName));
+                byLen[utf8.Length] = bucket = new List<(byte[], string, bool)>(2);
+            bucket.Add((utf8, typeName, ConceptNetSource.NegatedRelations.Contains(rel)));
         }
 
-        var table = new (byte[] RelUtf8, string TypeName)[]?[max + 1];
+        var table = new (byte[] RelUtf8, string TypeName, bool Negated)[]?[max + 1];
         foreach (var (len, bucket) in byLen)
             table[len] = bucket.ToArray();
         return table;

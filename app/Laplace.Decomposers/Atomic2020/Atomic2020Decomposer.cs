@@ -120,11 +120,15 @@ public sealed class Atomic2020Decomposer
         string rel = Encoding.UTF8.GetString(relBytes);
         if (!RelTypeId.TryGetValue(rel, out var relType)) return false;
 
+        // Sign is the outcome: a negated relation folds as a Refute against the cell its
+        // positive form asserts (laplace_score_fp scores v < 0 below 0.5).
+        double magnitude = Atomic2020Source.NegatedRelations.Contains(rel) ? -1.0 : 1.0;
+
         record = new RelationTripleRecord(
             UnderscoredUtf8Canonicalize.ToSpaces(head),
             relType,
             UnderscoredUtf8Canonicalize.ToSpaces(tail),
-            splitId, 1.0);
+            splitId, magnitude);
         return true;
     }
 }

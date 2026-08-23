@@ -33,7 +33,6 @@ public static class UdParseStructure
     private static readonly ConcurrentDictionary<(string Language, string Tag), NamedAnchor> Xpos = new();
     private static readonly ConcurrentDictionary<string, NamedAnchor> MiscKeys =
         new(StringComparer.Ordinal);
-    private static readonly ConcurrentDictionary<(string Key, string Value), NamedAnchor> MiscValues = new();
 
     public sealed record DecodedToken(
         Hash128 RefId,
@@ -184,13 +183,13 @@ public static class UdParseStructure
         if (!hasCoord)
             throw new InvalidOperationException("UD parse has no sentence or token placement");
 
-        Hash128 physicalityId = PhysicalityId.Compute(parseId, PhysicalityType.Content);
+        Hash128 physicalityId = PhysicalityId.Compute(parseId, PhysicalityType.ParseStructure);
         if (builder.TrySeePhysicality(physicalityId))
             builder.AddPhysicalityPreSeen(new PhysicalityRow(
                 physicalityId,
                 parseId,
                 sourceId,
-                PhysicalityType.Content,
+                PhysicalityType.ParseStructure,
                 parseCoord[0], parseCoord[1], parseCoord[2], parseCoord[3],
                 Hilbert128.Encode(parseCoord),
                 Trajectory.Build(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(flat)),
@@ -264,9 +263,6 @@ public static class UdParseStructure
         XposAnchor(languageCode, xpos).Id;
 
     internal static Hash128 MiscKeyId(string key) => MiscKey(key).Id;
-
-    internal static Hash128 MiscOpaqueValueId(string key, string value) =>
-        MiscValue(key, value).Id;
 
     internal static Hash128 NoneId => None;
     internal static Hash128 RootId => Root;
@@ -477,11 +473,39 @@ public static class UdParseStructure
             }
             else
             {
-                NamedAnchor valueAnchor = MiscValue(key, value);
-                valueId = valueAnchor.Id;
-                builder.AddEntity(
-                    valueId, EntityTier.Word, EntityTypeRegistry.UdAnnotationValue, sourceId);
-                VocabularyNames.Track(canonicalNames, valueAnchor.Name);
+                // THE VALUE IS CONTENT, NOT AN IDENTIFIER (2026-08-23).
+                //
+                // This branch used to mint ud/misc-value/{hex(key)}/{hex(value)}/v1 as a
+                // canonical NAME for every distinct (key, value) pair. Measured on the
+                // live substrate: 3,313,800 of laplace.canonical_names' 3,384,985 rows
+                // (97.9%, 892 MB) were those slugs, and 0 of 2,000 sampled carried a
+                // single consensus edge -- pure orphans. Cardinality had no ceiling
+                // because the values embed document-local ids: Entity 655,715 (coref
+                // mention ids), LvtbNodeId 330,863, XmlId 327,584, OccId 201,894,
+                // AlignBegin/AlignEnd 331,621 (character offsets).
+                //
+                // Worse than the bloat, hex-slugging DEFEATS content addressing on the
+                // ~390k values that are real content -- LTranslit 263,089, UnidicInfo
+                // 84,535 -- so a Gloss of "dog" could never be the entity `dog`. Two
+                // keys (Gloss, Translit) were already resolved through content.RootFor
+                // above; every other key fell here.
+                //
+                // Identity is content, and tier is a floor, so the value resolves the
+                // same way a word does. A value colliding with an ordinary word is
+                // CORRECT, not a bug -- SpaceAfter=No IS the content `No`, and the key
+                // marker carries the distinction. That is the substrate law: cross-source
+                // merging is a hash collision, not an entity-resolution pass.
+                //
+                // Nothing is lost: the same (key, value) pair is still emitted, the value
+                // is now addressable, renderable and foldable, and it stops minting a
+                // permanent global name for a mention id that means nothing outside its
+                // own document.
+                valueId = content.RootFor(Encoding.UTF8.GetBytes(value)) ?? None;
+                if (!valueId.Equals(None))
+                {
+                    builder.AddEntity(
+                        valueId, EntityTier.Word, EntityTypeRegistry.UdAnnotationValue, sourceId);
+                }
             }
             resolved.Add((keyAnchor.Id, valueId));
         }
@@ -556,11 +580,6 @@ public static class UdParseStructure
 
     private static NamedAnchor MiscKey(string key) =>
         MiscKeys.GetOrAdd(key, static value => Named("ud/misc-key/", value));
-
-    private static NamedAnchor MiscValue(string key, string value) =>
-        MiscValues.GetOrAdd((key, value), static item => Named(
-            $"ud/misc-value/{Convert.ToHexString(Encoding.UTF8.GetBytes(item.Key))}/",
-            item.Value));
 
     private static NamedAnchor Named(string prefix, string value)
     {

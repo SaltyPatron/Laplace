@@ -1,16 +1,46 @@
 -- converse.word_language — GH #862 / #860. No SET (it invalidates plan caching and
 -- blocks inlining, and this is a per-row call on the realize.render path), real schema names.
+--
+-- THE CANDIDATE SET IS THE BODY; THE ARGMAX IS A PROJECTION (2026-08-23).
+--
+-- word_language answers "which language is this word in" by taking the top HAS_LANGUAGE
+-- edge. converse.prompt_state needs the question one step earlier -- WHICH LANGUAGES IS
+-- THIS WORD ATTESTED IN -- so it can resolve the token against the prompt's own language
+-- tally instead of against a global argmax. Written inline there, that would have been a
+-- second copy of this predicate, free to drift from this one: the exact defect
+-- attested_language_batch.sql.in was written to undo ("identical predicate, identical
+-- GROUP BY, identical tie-break, two bodies free to drift").
+--
+-- So the set is the canonical body and the scalar delegates to it. One predicate, one
+-- place that spells HAS_LANGUAGE, and callers take the projection they need.
+--
+-- WHY IT IS A BATCH: same reason as attested_language_batch. laplace.consensus is
+-- LIST (type_id), this predicate is on subject_id, and a per-token loop pays the whole
+-- partition set once per token.
+--
+-- The ORDER BY gains `lang` as a final tie-break. Without it two languages at equal
+-- eff_mu -- which is not hypothetical, it is what `glacier` does across eng and fra --
+-- resolve in whatever order the scan returns, and spec 05 requires the read path be
+-- deterministic. Same winner as before wherever a winner existed.
 DROP FUNCTION IF EXISTS laplace.word_language(bytea);
 -- BEGIN ATOMIC: GH #764.
+CREATE OR REPLACE FUNCTION converse.word_language_candidates_batch(p_words bytea[])
+    RETURNS TABLE(word bytea, lang bytea, mu double precision)
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+    SELECT c.subject_id, c.object_id, consensus.eff_mu(c.rating, c.rd)
+    FROM laplace.consensus c
+    WHERE c.subject_id = ANY (p_words)
+      AND c.type_id = laplace.relation_type_id('HAS_LANGUAGE')
+      AND c.object_id IS NOT NULL;
+END;
+
 CREATE OR REPLACE FUNCTION converse.word_language(p_word bytea)
     RETURNS bytea
     LANGUAGE sql LAPLACE_STABLE_STRICT
 BEGIN ATOMIC
-    SELECT c.object_id
-    FROM laplace.consensus c
-    WHERE c.subject_id = p_word
-      AND c.type_id = laplace.relation_type_id('HAS_LANGUAGE')
-      AND c.object_id IS NOT NULL
-    ORDER BY consensus.eff_mu(c.rating, c.rd) DESC
+    SELECT v.lang
+    FROM converse.word_language_candidates_batch(ARRAY[p_word]) v
+    ORDER BY v.mu DESC, v.lang
     LIMIT 1;
 END;

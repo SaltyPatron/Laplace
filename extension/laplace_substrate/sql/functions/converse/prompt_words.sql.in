@@ -1,12 +1,71 @@
 -- converse.prompt_words — GH #862 / #860. No SET, real schema names.
+--
+-- CASE IS ORTHOGRAPHY, NOT IDENTITY, FOR EVIDENCE LOOKUP (2026-08-23).
+-- word_segment hashes the surface, so `What` and `what` are different content ids
+-- and the capitalized form holds almost none of the evidence. Measured on the live
+-- substrate: France 224 consensus edges vs france 2,501; Water 1 vs water 2,545;
+-- The 0 vs the 406.
+--
+-- That inverts the election rather than merely weakening it. specificity is
+-- coherence / the candidate's own total rated mass, so a starved denominator
+-- INFLATES the score: on "What is a glacier?" the token `What` measured
+-- total_mass 5.81e12 / coherence 8.66e11 -> specificity 0.1490, against `what`
+-- 1.69e15 / 2.37e13 -> 0.0140 and `glacier` 3.90e14 / 4.08e11 -> 0.0010. The
+-- article-and-interrogative population wins every English prompt because the
+-- sentence-initial word is capitalized and therefore evidence-free. Both probes
+-- the eval harness scored as passes passed for this reason (Water elected on a
+-- single edge; dog is a one-token prompt).
+--
+-- The resolution the substrate already ships is used rather than a new one:
+-- lexical.word_case_variants_batch enumerates a word's case family, and the
+-- variant carrying the most witnessed evidence is the one the graph actually
+-- knows. The SURFACE is untouched (`word` still carries what the caller typed, so
+-- realization and receipts are unaffected); only the id evidence is read against
+-- moves. A word whose own form is the best-attested variant resolves to itself,
+-- and a word no variant of which is attested keeps its own id -- unattested is
+-- not rewritten, it stays unattested.
+--
+-- Set-based by construction: one batched variant call and one grouped count over
+-- an indexed subject_id, never a per-row probe (G2 rank-then-label, INVENTION §7's
+-- id-space rule).
 DROP FUNCTION IF EXISTS laplace.prompt_words(text);
 -- BEGIN ATOMIC: GH #764.
 CREATE OR REPLACE FUNCTION converse.prompt_words(p_text text)
     RETURNS TABLE(ord int, word text, id bytea)
     LANGUAGE sql LAPLACE_STABLE_STRICT
 BEGIN ATOMIC
-    SELECT ws.ord, ws.word, e.id
-    FROM converse.word_segment(p_text) ws
-    LEFT JOIN laplace.entities e ON e.id = ws.id
-    ORDER BY ws.ord;
+    WITH seg AS MATERIALIZED (
+        SELECT ws.ord, ws.word, e.id
+        FROM converse.word_segment_resolved(p_text) ws
+        LEFT JOIN laplace.entities e ON e.id = ws.id
+    ), variants AS MATERIALIZED (
+        SELECT v.word_id, v.variant_id
+        FROM lexical.word_case_variants_batch(
+                 ARRAY(SELECT DISTINCT s.id FROM seg s WHERE s.id IS NOT NULL)) v
+    ), witnessed AS MATERIALIZED (
+        -- BOUNDED. This picks which case variant holds the evidence; it does not report
+        -- how much. An unbounded count(*) reads every consensus edge of every variant of
+        -- every token, which for a hub surface is thousands of rows to make one
+        -- comparison -- the RBAR this file exists to avoid.
+        --
+        -- The cap only has to separate variants, and it does: on the live substrate
+        -- `What` carries 260 edges against `what` 2,501, `Water` 1 against `water` 2,545,
+        -- `The` 0 against `the` 406. Two variants that both exceed the cap tie and fall to
+        -- the variant_id tie-break below, which is deterministic -- and a surface with
+        -- more than 4,096 witnessed edges either way is not one this discriminator can or
+        -- needs to separate.
+        SELECT v.word_id, v.variant_id,
+               (SELECT count(*) FROM (
+                    SELECT 1 FROM laplace.consensus c
+                    WHERE c.subject_id = v.variant_id
+                    LIMIT 4096) capped) AS edges
+        FROM variants v
+    ), best AS MATERIALIZED (
+        SELECT DISTINCT ON (w.word_id) w.word_id, w.variant_id
+        FROM witnessed w
+        ORDER BY w.word_id, w.edges DESC, w.variant_id
+    )
+    SELECT seg.ord, seg.word, COALESCE(best.variant_id, seg.id)
+    FROM seg LEFT JOIN best ON best.word_id = seg.id
+    ORDER BY seg.ord;
 END;

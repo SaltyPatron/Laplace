@@ -22,6 +22,19 @@ public enum PhysicalityType : short
     // id of a set well-defined and therefore deduplicating (docs/specs/38).
     Set = 5,
 
+    // An ORDERED structural encoding: a flat vertex list carrying sentinels and
+    // (role, value) pairs rather than a content sequence. Distinct from Content for
+    // exactly the reason Set is -- the partial indexes that read text trajectories are
+    // all WHERE type = 1, and a structure whose vertices are head refs, deprels,
+    // annotation keys and end markers is not a sequence anyone means to walk.
+    //
+    // Measured 2026-08-23, before this existed: 2,132,050 of 46,542,360 type=1
+    // physicalities were UD parse structures, so generation.trajectory_continuations
+    // returned annotation entities as continuations of words -- hot -> ud/misc-key/...
+    // at weight 544, outranking hot -> water at 502, and New -> substrate/pos/X/v1 at
+    // 1475 outranking New -> Zealand at 1336.
+    ParseStructure = 8,
+
     // Sparse, ordinal-aligned chess source annotations. These are parallel sequences on
     // the PLAYING, not per-ply testimony rows and not part of move/position identity.
     ChessComment = 6,

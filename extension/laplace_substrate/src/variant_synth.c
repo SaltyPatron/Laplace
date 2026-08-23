@@ -46,11 +46,11 @@ ensure_variant_plans(void)
     if (tier_traj_plan == NULL)
     {
         Oid        argtypes[1] = { BYTEAOID };
-        SPIPlanPtr plan = SPI_prepare(
+        SPIPlanPtr plan = SPI_prepare_cursor(
             "SELECT generation.entity_tier_of($1), generation.entity_has_trajectory($1)",
-            1, argtypes);
+            1, argtypes, CURSOR_OPT_PARALLEL_OK);
         if (plan == NULL)
-            elog(ERROR, "variant_walk: SPI_prepare(tier/traj) failed: %s",
+            elog(ERROR, "variant_walk: SPI_prepare_cursor(tier/traj) failed: %s",
                  SPI_result_code_string(SPI_result));
         if (SPI_keepplan(plan) != 0)
             elog(ERROR, "variant_walk: SPI_keepplan(tier/traj) failed");
@@ -59,10 +59,10 @@ ensure_variant_plans(void)
     if (traj_points_plan == NULL)
     {
         Oid        argtypes[1] = { BYTEAOID };
-        SPIPlanPtr plan = SPI_prepare(
+        SPIPlanPtr plan = SPI_prepare_cursor(
             "SELECT entity_id, run_length, ctier "
             "FROM generation.trajectory_unpacked_points($1)",
-            1, argtypes);
+            1, argtypes, CURSOR_OPT_PARALLEL_OK);
         if (plan == NULL)
             elog(ERROR, "variant_walk: SPI_prepare(trajectory) failed: %s",
                  SPI_result_code_string(SPI_result));
@@ -73,8 +73,8 @@ ensure_variant_plans(void)
     if (render_plan == NULL)
     {
         Oid        argtypes[2] = { BYTEAOID, INT4OID };
-        SPIPlanPtr plan = SPI_prepare(
-            "SELECT realize.render_text($1, $2)", 2, argtypes);
+        SPIPlanPtr plan = SPI_prepare_cursor(
+            "SELECT realize.render_text($1, $2)", 2, argtypes, CURSOR_OPT_PARALLEL_OK);
         if (plan == NULL)
             elog(ERROR, "variant_walk: SPI_prepare(render_text) failed: %s",
                  SPI_result_code_string(SPI_result));
@@ -85,8 +85,8 @@ ensure_variant_plans(void)
     if (peer_plan == NULL)
     {
         Oid        argtypes[2] = { BYTEAOID, INT4OID };
-        SPIPlanPtr plan = SPI_prepare(
-            "SELECT generation.consensus_peer($1, $2)", 2, argtypes);
+        SPIPlanPtr plan = SPI_prepare_cursor(
+            "SELECT generation.consensus_peer($1, $2)", 2, argtypes, CURSOR_OPT_PARALLEL_OK);
         if (plan == NULL)
             elog(ERROR, "variant_walk: SPI_prepare(consensus_peer) failed: %s",
                  SPI_result_code_string(SPI_result));

@@ -105,10 +105,10 @@ ensure_plans(void)
     if (propose_plan == NULL)
     {
         Oid        argtypes[2] = { BYTEAARRAYOID, INT4OID };
-        SPIPlanPtr plan = SPI_prepare(
+        SPIPlanPtr plan = SPI_prepare_cursor(
             "SELECT object_id, sep_id, weight "
             "FROM generation.trajectory_continuations($1, $2)",
-            2, argtypes);
+            2, argtypes, CURSOR_OPT_PARALLEL_OK);
 
         if (plan == NULL)
             elog(ERROR, "walk_continuations: SPI_prepare(propose) failed: %s",
@@ -120,10 +120,10 @@ ensure_plans(void)
     if (steer_plan == NULL)
     {
         Oid        argtypes[2] = { BYTEAARRAYOID, BYTEAARRAYOID };
-        SPIPlanPtr plan = SPI_prepare(
+        SPIPlanPtr plan = SPI_prepare_cursor(
             "SELECT candidate, steer, edges "
             "FROM generation.steer_candidates($1, $2)",
-            2, argtypes);
+            2, argtypes, CURSOR_OPT_PARALLEL_OK);
 
         if (plan == NULL)
             elog(ERROR, "walk_continuations: SPI_prepare(steer) failed: %s",
@@ -135,10 +135,10 @@ ensure_plans(void)
     if (floor_plan == NULL)
     {
         Oid        argtypes[2] = { BYTEAOID, INT4OID };
-        SPIPlanPtr plan = SPI_prepare(
+        SPIPlanPtr plan = SPI_prepare_cursor(
             "SELECT object_id, weight "
             "FROM generation.walk_completes_floor($1, $2)",
-            2, argtypes);
+            2, argtypes, CURSOR_OPT_PARALLEL_OK);
 
         if (plan == NULL)
             elog(ERROR, "walk_continuations: SPI_prepare(floor) failed: %s",

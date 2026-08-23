@@ -149,10 +149,10 @@ pg_laplace_foundry_crawl(PG_FUNCTION_ARGS)
 
         if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
             elog(ERROR, "foundry_crawl: SPI_connect failed");
-        plan = SPI_prepare(
+        plan = SPI_prepare_cursor(
             "SELECT frontier_id, object_id, tier, rating, rd "
             "FROM consensus.foundry_crawl_neighbors($1, $2, $3)",
-            3, argtypes);
+            3, argtypes, CURSOR_OPT_PARALLEL_OK);
         if (plan == NULL)
             elog(ERROR, "foundry_crawl: SPI_prepare failed: %s",
                  SPI_result_code_string(SPI_result));

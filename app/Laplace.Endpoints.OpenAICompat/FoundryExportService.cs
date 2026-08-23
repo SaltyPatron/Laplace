@@ -17,11 +17,17 @@ internal interface IFoundryExportService
 }
 
 /// <summary>
-/// Runs Mold-A-Model foundry export via CLI subprocess — writes GGUF (or other format) to disk;
-/// never loads weights on the HTTP request path.
+/// Runs Mold-A-Model foundry export via CLI subprocess — writes GGUF to disk; never loads
+/// weights on the HTTP request path.
 /// </summary>
 internal sealed class CliFoundryExportService : IFoundryExportService
 {
+    /// <summary>Formats this service actually has a writer for. Kept beside the writer
+    /// selection so a format cannot be advertised that nothing emits.</summary>
+    internal static readonly HashSet<string> WritableFormats =
+        new(StringComparer.OrdinalIgnoreCase) { "gguf" };
+
+
     public async Task<FoundryExportResult> ExportAsync(
         string? recipeJson,
         string? recipeIdPrefix,
@@ -30,6 +36,28 @@ internal sealed class CliFoundryExportService : IFoundryExportService
         string? filename,
         CancellationToken ct)
     {
+        // THE RESPONSE MUST NOT NAME A FORMAT THIS DID NOT WRITE.
+        //
+        // `format` used to select only the filename EXTENSION, while the command below is
+        // always `synthesize substrate` -- the GGUF writer. There is no SafeTensors export
+        // anywhere in the tree (SafeTensors appears only as an INGEST witness:
+        // SafetensorSnapshotWitness / IngestSafetensorSnapshotAsync). So
+        // format="safetensors" produced GGUF bytes in a file named .safetensors and
+        // returned Format="safetensors" to the caller -- an artifact that lies about what
+        // it is, which is worse than refusing, because the caller has no way to notice.
+        //
+        // Refuse instead. When a real writer exists, add it here and to WritableFormats
+        // together, so the two cannot disagree.
+        string requested = (format ?? "").Trim();
+        if (requested.Length == 0) requested = "gguf";
+        if (!WritableFormats.Contains(requested))
+            throw new ArgumentException(
+                $"foundry export cannot produce '{requested}'. Writable formats: "
+                + string.Join(", ", WritableFormats.Order(StringComparer.Ordinal))
+                + ". SafeTensors is an ingest format here, not an export target.",
+                nameof(format));
+        var ext = requested.ToLowerInvariant();
+
         if (!LaplaceInstall.TryRepoRoot(out var repoRoot))
             throw new InvalidOperationException("Cannot locate Laplace repo root for foundry export.");
 
@@ -62,7 +90,6 @@ internal sealed class CliFoundryExportService : IFoundryExportService
             args.Add(recipePath);
         }
 
-        var ext = string.Equals(format, "gguf", StringComparison.OrdinalIgnoreCase) ? "gguf" : format.Trim().ToLowerInvariant();
         var outputName = string.IsNullOrWhiteSpace(filename) ? $"laplace-export.{ext}" : filename.Trim();
         var outputPath = Path.Combine(workDir, outputName);
         args.Add(outputPath);

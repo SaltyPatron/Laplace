@@ -86,7 +86,15 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase<ConceptN
         if (!TrySplitAssertion(line, out var rel, out var startUri, out var endUri, out var meta))
             return false;
         if (ConceptNetUri.IsExternalUrlRelation(rel)) return false;
-        if (!ConceptNetRelations.TryResolveType(rel, out var typeName, out bool flipEdge)) return false;
+        if (!ConceptNetRelations.TryResolveType(rel, out var typeName, out bool flipEdge, out bool negated))
+            return false;
+        // A Not* row denies the relation it maps to, and the sign of the magnitude IS the
+        // outcome: laplace_score_fp(v, m) = 0.5*(1 + v/(m+|v|)) scores below 0.5 for v < 0,
+        // which folds a Refute against the very cell the positive form asserts. ConceptNet's
+        // own weight carries through as the strength of the denial.
+        double weight = ConceptNetUri.ParseWeight(meta);
+        if (negated) weight = -weight;
+        long sourceCount = ConceptNetUri.ParseSourceCount(meta);
         // Capture the POS ConceptNet encodes in the concept URI (/c/en/dog/n). Previously
         // discarded (out _); now folded onto the unified POS hub via HAS_POS. The /wn/ synset
         // suffix routes to the WordNet/CILI hub via CORRESPONDS_TO. See docs/specs/16 §4.
@@ -119,21 +127,23 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase<ConceptN
         {
             record = new RelationTripleRecord(
                 UnderscoredUtf8Canonicalize.ToSpaces(endTerm), typeName, UnderscoredUtf8Canonicalize.ToSpaces(startTerm),
-                ContextId: endLangId, Magnitude: ConceptNetUri.ParseWeight(meta),
+                ContextId: endLangId, Magnitude: weight,
                 SubjectPos: endPos, ObjectPos: startPos,
                 SubjectSynsetId: ConceptNetUri.ResolveSynsetFromWnSuffix(endWn, endPos),
                 ObjectSynsetId: ConceptNetUri.ResolveSynsetFromWnSuffix(startWn, startPos),
-                SubjectLangId: endLangId, ObjectLangId: startLangId);
+                SubjectLangId: endLangId, ObjectLangId: startLangId,
+                ObservationCount: sourceCount);
             return true;
         }
 
         record = new RelationTripleRecord(
             UnderscoredUtf8Canonicalize.ToSpaces(startTerm), typeName, UnderscoredUtf8Canonicalize.ToSpaces(endTerm),
-            ContextId: startLangId, Magnitude: ConceptNetUri.ParseWeight(meta),
+            ContextId: startLangId, Magnitude: weight,
             SubjectPos: startPos, ObjectPos: endPos,
             SubjectSynsetId: ConceptNetUri.ResolveSynsetFromWnSuffix(startWn, startPos),
             ObjectSynsetId: ConceptNetUri.ResolveSynsetFromWnSuffix(endWn, endPos),
-            SubjectLangId: startLangId, ObjectLangId: endLangId);
+            SubjectLangId: startLangId, ObjectLangId: endLangId,
+            ObservationCount: sourceCount);
         return true;
     }
 

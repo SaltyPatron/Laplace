@@ -228,16 +228,39 @@ public static class IngestSizing
     }
 
     /// <summary>
+    /// Pool slots the consensus fold leaves free in the shared ingest pool for
+    /// renters the pool equation does not enumerate per-owner: the run-journal /
+    /// progress writer, replay-journal and route probes, finalize, and a batch
+    /// retry re-entering while the failed batch's folds still hold connections.
+    /// </summary>
+    public const int ConsensusFoldPoolHeadroom = 2;
+
+    /// <summary>
     /// Resolve the fold from the same memory and topology inputs as compose/apply.
-    /// No throughput cap lives here: the only ceilings are the shared memory envelope
-    /// and the CLR/PostgreSQL signed-array index range.
+    /// No throughput cap lives here: the only ceilings are the shared memory envelope,
+    /// the fold's share of the ingest connection pool, and the CLR/PostgreSQL
+    /// signed-array index range.
     /// </summary>
     public static ConsensusFoldPlan ResolveConsensusFold(
         int applyPartitions,
         long? workingSetBudgetBytes = null,
         long? flushEnvelopeBytes = null)
     {
-        int connections = Math.Max(1, applyPartitions);
+        // The fold SHARES one ingest pool with the apply fan: the pool is sized
+        // 1 + 2·applyPartitions (control + COPY fan + fold fan, see
+        // PostgresResourcePlan.Resolve), and by design the fold of batch N runs
+        // WHILE batch N+1 probes/COPYs. Taking the full apply width here made the
+        // planned owners sum to EXACTLY the pool — fold p + apply p + control 1 =
+        // 1 + 2p — so the first unplanned renter queued behind long-held fold
+        // connections until Npgsql's rent timeout killed the run.
+        // MEASURED 2026-08-20 on the syzygy seed (run 32417964629): pool 25
+        // exhausted at 908s, the mask deposit lane and the apply COPY fan both
+        // starving at 15s. The fold is the elastic background owner, so it cedes
+        // the headroom: its global connection gate stays BELOW its pool share —
+        // control 1 + COPY fan p + fold (p − headroom) + free headroom = 1 + 2p —
+        // and the fold back-pressures on its own semaphore instead of exhausting
+        // the pool.
+        int connections = Math.Max(1, applyPartitions - ConsensusFoldPoolHeadroom);
         long budget = Math.Max(1, workingSetBudgetBytes ?? ResolveWorkingSetBudgetBytes());
         long envelope = Math.Clamp(
             flushEnvelopeBytes ?? ResolveWorkingSetFlushEnvelopeBytes(), 1, budget);

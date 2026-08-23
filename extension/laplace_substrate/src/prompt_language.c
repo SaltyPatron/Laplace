@@ -120,16 +120,26 @@ pg_laplace_prompt_language(PG_FUNCTION_ARGS)
         Datum  args[1];
         int    rc;
 
+        /*
+         * prompt_words, NOT prompt_state. Only p.id is read here, and the two
+         * agree on it exactly -- prompt_state is prompt_words plus a resolved
+         * language column. Reading prompt_state for a column it does not use
+         * inverts the layering: a token's language is resolved AGAINST this
+         * tally (prompt_state.sql.in), so prompt_state -> prompt_language ->
+         * prompt_state is a cycle that terminates in "stack depth limit
+         * exceeded". The tally is over token IDENTITIES; it must sit below
+         * anything that assigns a language.
+         */
         args[0] = PointerGetDatum(prompt);
         rc = SPI_execute_with_args(
-            "SELECT p.id FROM converse.prompt_state($1) p WHERE p.id IS NOT NULL",
+            "SELECT p.id FROM converse.prompt_words($1) p WHERE p.id IS NOT NULL",
             1, argtypes, args, NULL, true, 0);
         if (rc != SPI_OK_SELECT)
-            elog(ERROR, "prompt_language: prompt_state read failed: %s",
+            elog(ERROR, "prompt_language: prompt_words read failed: %s",
                  SPI_result_code_string(rc));
         if (SPI_processed > (uint64) (MaxAllocSize / sizeof(Datum)))
             ereport(ERROR,
-                    (errmsg("prompt_language: prompt state exceeds PostgreSQL allocation capacity"),
+                    (errmsg("prompt_language: prompt exceeds PostgreSQL allocation capacity"),
                      errdetail("Requested %llu entity ids.",
                                (unsigned long long) SPI_processed)));
 
@@ -188,7 +198,7 @@ pg_laplace_prompt_language(PG_FUNCTION_ARGS)
             "WHERE c.subject_id = ANY($1) "
             "  AND c.type_id = laplace.relation_type_id('HAS_LANGUAGE') "
             "  AND c.object_id IS NOT NULL",
-            1, argtypes, args, NULL, true, 0);
+            1, argtypes, args, NULL, true, CURSOR_OPT_PARALLEL_OK);
 
         for (;;)
         {

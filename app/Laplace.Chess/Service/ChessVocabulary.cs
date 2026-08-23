@@ -71,6 +71,31 @@ public static class ChessVocabulary
     public static readonly Hash128 PlaysLineType = EntityTypeRegistry.Id("PLAYS_LINE");
     public static readonly Hash128 HasSetupType = EntityTypeRegistry.Id("HAS_SETUP");
     // Analysis watermark: analyzer stamps each game once it has derived at a given version.
+    //
+    // GAME METADATA HANGS OFF THE GAME TRUNK; IT IS NOT RATED TESTIMONY.
+    //
+    // This was emitted as the manifest relation ANALYZED_AT, so it FOLDED: measured
+    // 2026-08-23, 12,891,661 attestations produced 12,863,059 consensus cells, 100%
+    // single-witness with 2 distinct ratings across the lot. It cannot ever be anything
+    // else -- the subject is one game and the object is the analyzer version, so the
+    // triple is unique by construction and no second witness can exist to rate it
+    // against. 12.8M cells in the table whose entire purpose is adjudicating competing
+    // testimony, none of which can compete.
+    //
+    // The substrate already has the right shape for this and uses it elsewhere:
+    // FileEntity.MetadataRelationTypeId (HasFileMetadata) and LayerCompletion's
+    // HasLayerCompleted are minted inline as substrate meta-types, never entered in
+    // relation_types.toml, never given a highway bit, and therefore never folded --
+    // verified live: HasFileMetadata 209 attestations / 0 consensus,
+    // HasLayerCompleted/2 8,995 attestations / 0 consensus. Provenance hangs off the
+    // trunk node and is FETCHED when asked, exactly as a file's name/size/mtime is.
+    //
+    // A game's analysis version is that, not a claim about the world.
+    public static readonly Hash128 AnalysisVersionMetaTypeId =
+        SubstrateCanonicalIds.OfVersioned("type", "HasAnalysisVersion");
+
+    // Retained: relation bits are an append-only registry (ADR 0001), so ANALYZED_AT
+    // cannot be withdrawn from the manifest. It is simply no longer emitted.
     public static readonly Hash128 AnalyzedAtType = EntityTypeRegistry.Id("ANALYZED_AT");
     public static readonly Hash128 AnalysisMarkerType = EntityTypeRegistry.Id("Chess_AnalysisMarker");
     public static readonly Hash128 AnalysisSourceId = SubstrateCanonicalIds.Source("ChessAnalysis");

@@ -52,15 +52,10 @@ BEGIN
     -- verbatim. Each signal is an explicit ordered dimension; unlike the retired
     -- specificity*denote_mu product, no unit conversion or weighting constant can
     -- silently change the election as the seed grows.
-    SELECT y.synset_id INTO syn
-    FROM converse.prompt_coherence(p_prompt) y
-    ORDER BY y.specificity DESC NULLS LAST,
-             y.rel_mass DESC NULLS LAST,
-             y.peers DESC,
-             y.ord DESC,
-             y.denote_mu DESC NULLS LAST,
-             y.synset_id
-    LIMIT 1;
+    -- Delegates to converse.elect_sense -- the ONE election body (spec 37: "one
+    -- canonical implementation per operation fact"). The key order used to be
+    -- inlined here and in four other files; identical copies are still copies.
+    syn := converse.elect_sense(p_prompt);
 
     IF syn IS NULL THEN
         RETURN NULL;

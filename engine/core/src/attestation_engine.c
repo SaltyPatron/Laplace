@@ -388,6 +388,28 @@ int laplace_attestation_resolved_build(
     uint8_t ctx_null = context_is_null;
     if (!ctx_null && context) ctx = *context;
 
+    /*
+     * RELATION RANK APPLIES HERE TOO. Both sibling builders compute
+     * `witness_weight = rank * trust_weight`; this one took witness_weight raw, so
+     * every NativeAttestation.CategoricalResolved call site entered the fold at
+     * SOURCE TRUST ALONE with the relation's salience discarded. "Resolved" names the
+     * fact that the caller already has the type_id -- it was never meant to mean the
+     * relation carries no rank.
+     *
+     * Measured consequence: HAS_SYNSET_KEY entered at 0.85 instead of 0.36 * 0.85 =
+     * 0.306 (phi ~78 against ~252), so a bookkeeping mapping folded at near-definitional
+     * strength. It reaches every source's HAS_POS through PosReference.Attest, plus
+     * WordNet CORRESPONDS_TO, CILI, PropBank, VerbNet, FrameNet and Wiktionary.
+     *
+     * A type absent from the manifest -- the dynamic DEP_*, FEAT_* and EDEP_* families
+     * -- keeps the caller's weight unscaled rather than being multiplied by a default
+     * it never declared. Silently re-weighting the families that are deliberately not
+     * in the manifest would be a second, quieter version of this same defect.
+     */
+    const laplace_relation_def_t* def = NULL;
+    if (laplace_relation_lookup(type_id, &def) == 0 && def != NULL)
+        witness_weight = def->rank * witness_weight;
+
     double score = confirm ? 1.0 : 0.0;
     int64_t score_fp = (int64_t)(score * (double)LAPLACE_GLICKO2_FP_SCALE);
     int16_t outcome;
@@ -425,6 +447,13 @@ int laplace_attestation_resolved_scored_build(
     hash128_t ctx;
     uint8_t ctx_null = context_is_null;
     if (!ctx_null && context) ctx = *context;
+
+    /* Same law as laplace_attestation_resolved_build: resolving the type_id ahead of
+     * time must not change what the relation is worth. Both surface builders compute
+     * rank * trust_weight; this one took witness_weight raw. */
+    const laplace_relation_def_t* scored_def = NULL;
+    if (laplace_relation_lookup(type_id, &scored_def) == 0 && scored_def != NULL)
+        witness_weight = scored_def->rank * witness_weight;
 
     int64_t score_fp = laplace_score_fp(magnitude, arena_scale);
     int16_t outcome;

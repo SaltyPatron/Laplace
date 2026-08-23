@@ -1,0 +1,74 @@
+-- converse.elect — THE topic election. One implementation, one key order.
+--
+-- Spec 37's implementation law: "There is one canonical implementation per
+-- operation fact. SQL references and native accelerators require parity tests.
+-- Endpoint-specific helpers delegate to the same program. Installation cannot
+-- arbitrarily select competing semantic bodies."
+--
+-- The election (OP6 STEER + OP7 SELECT over converse.prompt_coherence) was
+-- implemented SIX times: converse.sql.in, converse_walk.sql.in, resolve_topic.sql.in,
+-- infer.sql.in, orient_topic.sql.in, and mirrored a seventh time in Python at
+-- scripts/eval-generation.py (_elector_key). They were kept in step only by
+-- ElectorArchitectureGateTests asserting the six ORDER BY strings match each other
+-- -- a gate that can prove they are IDENTICAL but never that they are RIGHT, and
+-- whose own header records the drift it was written for: "The weighted order landed
+-- in chat.sql.in ALONE, leaving the other four sites on the old keys."
+--
+-- W4 stated the consequence: "the gate is honest and the thing it guards is hollow."
+--
+-- This is the body. The key order is unchanged, verbatim, so this commit changes
+-- WHERE the election lives and not WHAT it decides -- the two are separable and are
+-- being separated deliberately. Changing the judgement (INVENTION §7: "no ranking
+-- may be decided on a single-token scalar"; W15: "an election is convergence across
+-- independent evidence classes, not an extremum on one axis") is the next change,
+-- and after this one it is a single edit rather than six that can drift five ways.
+--
+-- Returns the elected row rather than one column, because the six sites want
+-- different fields off the same decision: converse and converse_walk take
+-- synset_id, resolve_topic takes tok, orient_topic takes the whole row, infer takes
+-- the rank. One election, several projections.
+-- No DROP FUNCTION here. converse(), converse_walk() and resolve_topic() reference
+-- these bodies from BEGIN ATOMIC, which records a hard catalog dependency, so a
+-- DROP on the upgrade path fails against the callers installed by the previous
+-- version. The signatures are new and never change under replace, so CREATE OR
+-- REPLACE alone is both sufficient and idempotent.
+CREATE OR REPLACE FUNCTION converse.elect(p_prompt text)
+    RETURNS TABLE(ord int, tok bytea, synset_id bytea,
+                  coherence double precision, denote_mu numeric, peers bigint,
+                  rel_type_id bytea, rel_mass double precision,
+                  specificity double precision, total_mass double precision)
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
+    SELECT y.ord, y.tok, y.synset_id, y.coherence, y.denote_mu, y.peers,
+           y.rel_type_id, y.rel_mass, y.specificity, y.total_mass
+    FROM converse.prompt_coherence(p_prompt) y
+    ORDER BY y.specificity DESC NULLS LAST,
+             y.rel_mass    DESC NULLS LAST,
+             y.peers       DESC,
+             y.ord         DESC,
+             y.denote_mu   DESC NULLS LAST,
+             y.synset_id
+    LIMIT 1;
+END;
+
+-- The abstention gate resolve_topic applies, as its own delegating projection.
+-- specificity is coherence over the candidate's own total mass, so it is 0 for
+-- every token when no pair of tokens shares a rated edge -- an unseeded domain, not
+-- a wrong answer. resolve_topic.sql.in: "Without the gate the tiebreaks alone would
+-- decide the all-zero prompt ... an arbitrary token dressed up as a decision."
+CREATE OR REPLACE FUNCTION converse.elect_topic(p_prompt text)
+    RETURNS bytea
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
+    SELECT e.tok FROM converse.elect(p_prompt) e WHERE e.specificity > 0;
+END;
+
+-- Sense projection: the synset the elected token resolved to. No abstention gate --
+-- converse() and converse_walk() have always taken the synset unconditionally and
+-- handle NULL themselves.
+CREATE OR REPLACE FUNCTION converse.elect_sense(p_prompt text)
+    RETURNS bytea
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
+    SELECT e.synset_id FROM converse.elect(p_prompt) e;
+END;

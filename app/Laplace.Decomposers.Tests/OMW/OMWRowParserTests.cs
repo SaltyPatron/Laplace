@@ -80,4 +80,102 @@ public sealed class OMWRowParserTests
             try { Directory.Delete(root, recursive: true); } catch { }
         }
     }
+
+    // OMW ships its own retractions -- 3,279 REMOVED rows across 26 <lang>-changes.tab
+    // files -- and they were never globbed, so membership could only ever accumulate.
+    [Fact]
+    public void EnumerateChangesFiles_FindsRetractionsTheDataGlobsExclude()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "omw-chg-" + Guid.NewGuid().ToString("N"));
+        string wns = Path.Combine(root, "wns");
+        Directory.CreateDirectory(Path.Combine(wns, "swe"));
+        File.WriteAllText(Path.Combine(wns, "swe", "wn-data-swe.tab"), "# x\n");
+        File.WriteAllText(Path.Combine(wns, "swe", "swe-changes.tab"),
+            "2025-02-01\tREMOVED\t07451687-n\tswe:lemma\tbegravning\n");
+        try
+        {
+            Assert.DoesNotContain(
+                OMWTabFiles.EnumerateTabFiles(wns, langs: null),
+                f => f.EndsWith("swe-changes.tab", StringComparison.OrdinalIgnoreCase));
+
+            var changes = OMWTabFiles.EnumerateChangesFiles(wns).ToList();
+            string file = Assert.Single(changes);
+            Assert.EndsWith("swe-changes.tab", file, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch { }
+        }
+    }
+
+    // The retraction row is a data row with two extra leading fields, so slicing past the
+    // second tab must yield exactly what the data tab would have produced -- otherwise the
+    // refutation lands on a different triple than the assertion and never contests it.
+    [Fact]
+    public void ChangesRow_SlicedPastActionFields_ParsesAsTheDataRowItRetracts()
+    {
+        byte[] changes = Encoding.UTF8.GetBytes(
+            "2025-02-01\tREMOVED\t07451687-n\tswe:lemma\tbegravning");
+        byte[] data = Encoding.UTF8.GetBytes("07451687-n\tswe:lemma\tbegravning");
+
+        int tabs = 0, cut = -1;
+        for (int i = 0; i < changes.Length; i++)
+            if (changes[i] == (byte)'\t' && ++tabs == 2) { cut = i; break; }
+        Assert.True(cut > 0);
+
+        Assert.True(OMWRowParser.TryParseRow(changes.AsSpan(cut + 1), "und", out var a, out var av));
+        Assert.True(OMWRowParser.TryParseRow(data, "und", out var b, out var bv));
+
+        Assert.Equal(b.Offset, a.Offset);
+        Assert.Equal(b.SsType, a.SsType);
+        Assert.Equal(b.Lang, a.Lang);
+        Assert.Equal(b.Type, a.Type);
+        Assert.Equal(Encoding.UTF8.GetString(bv), Encoding.UTF8.GetString(av));
+    }
+
+    // wn-freq-*.tab is the only per-row magnitude OMW ships -- 4,981 rows -- and the data
+    // globs never matched it, so the corpus's own usage evidence was dropped whole.
+    [Fact]
+    public void EnumerateFreqFiles_FindsTheMagnitudeFileTheDataGlobsExclude()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "omw-freq-" + Guid.NewGuid().ToString("N"));
+        string wns = Path.Combine(root, "wns");
+        Directory.CreateDirectory(Path.Combine(wns, "msa"));
+        File.WriteAllText(Path.Combine(wns, "msa", "wn-data-msa.tab"), "# x\n");
+        File.WriteAllText(Path.Combine(wns, "msa", "wn-freq-ind.tab"), "00001740-a\tkeahlian\t1\n");
+        try
+        {
+            Assert.DoesNotContain(
+                OMWTabFiles.EnumerateTabFiles(wns, langs: null),
+                f => f.EndsWith("wn-freq-ind.tab", StringComparison.OrdinalIgnoreCase));
+            string file = Assert.Single(OMWTabFiles.EnumerateFreqFiles(wns));
+            Assert.EndsWith("wn-freq-ind.tab", file, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal("ind", OMWTabFiles.FileLang(file));
+        }
+        finally { try { Directory.Delete(root, recursive: true); } catch { } }
+    }
+
+    [Fact]
+    public void FreqRow_CarriesTheCountAsMagnitude()
+    {
+        byte[] line = Encoding.UTF8.GetBytes("00001740-a\tkeahlian\t50");
+        Assert.True(OMWRowParser.TryParseFreqRow(line, "ind", out var row, out var value));
+        Assert.Equal(OmwType.Freq, row.Type);
+        Assert.Equal(1740L, row.Offset);
+        Assert.Equal('a', row.SsType);
+        Assert.Equal("ind", row.Lang);
+        Assert.Equal(50.0, row.Magnitude);
+        Assert.Equal("keahlian", Encoding.UTF8.GetString(value));
+    }
+
+    // The row exists only to carry the count; a missing or non-positive one must not
+    // silently become a magnitude of 1 and pass for evidence.
+    [Theory]
+    [InlineData("00001740-a\tkeahlian")]
+    [InlineData("00001740-a\tkeahlian\t")]
+    [InlineData("00001740-a\tkeahlian\t0")]
+    [InlineData("00001740-a\tkeahlian\tx")]
+    public void FreqRow_WithoutAUsableCount_IsDropped(string text)
+        => Assert.False(OMWRowParser.TryParseFreqRow(
+            Encoding.UTF8.GetBytes(text), "ind", out _, out _));
 }

@@ -58,6 +58,22 @@ CREATE OR REPLACE FUNCTION generation.separator_ids()
     -- Approaches measured and rejected: a first-constituent index pre-filter returns
     -- 599,753 rows (a leading separator is common); structural.containers_of over the 84
     -- atoms costs 25.7 s and truncates at its 1,000-row cap.
+    -- THE CATEGORY LOOKUP STAYS A NAME LOOKUP. Separator-ness is an ATTESTED fact
+    -- resolved through laplace.canonical_names, never a derived hash: the id of a
+    -- category entity is NOT required to equal blake3 of its name, and
+    -- tests/sql/generation_corpus.sql proves it by minting
+    -- blake3('test/corpus/zs-category') and registering it under the name
+    -- 'unicode/category/Zs/v1'. Rewriting this filter as `object_id IN
+    -- (realize.canonical_id(...))` passes on production data -- where the convention
+    -- does hold, verified for 200,000 of 200,000 sampled rows -- and silently stops
+    -- honouring the attested mapping. That regress test caught exactly that.
+    --
+    -- The cost was never this join; it was that canonical_names had ONE index, on id,
+    -- so `name IN (...)` seq-scanned 3,387,109 rows (measured 2026-08-23: Parallel Seq
+    -- Scan, 677,421 rows removed by filter, 50,638 buffers, 317 ms warm) on EVERY
+    -- generation.trajectory_continuations and structural.geometry_successors_batch
+    -- call -- once per generated token. canonical_names_name_btree fixes it at the
+    -- table, for every caller, with the semantics untouched.
     WITH atoms AS (
         SELECT DISTINCT a.subject_id AS id
         FROM laplace.attestations a

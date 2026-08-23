@@ -32,6 +32,20 @@ public sealed class OMWDecomposer : DecomposerMultiFile<OmwIngestRecord, OMWSour
         return Task.CompletedTask;
     }
 
+    private const string ChangesLabelPrefix = "omw-changes/";
+    private const string FreqLabelPrefix = "omw-freq/";
+
+    private static int IndexOfNthTab(ReadOnlySpan<byte> line, int n)
+    {
+        int seen = 0;
+        for (int i = 0; i < line.Length; i++)
+        {
+            if (line[i] != (byte)'\t') continue;
+            if (++seen == n) return i;
+        }
+        return -1;
+    }
+
     protected override IReadOnlyList<(string Path, string Label)> ListFiles(
         string ecosystemPath, DecomposerOptions options)
     {
@@ -49,6 +63,24 @@ public sealed class OMWDecomposer : DecomposerMultiFile<OmwIngestRecord, OMWSour
             string lang = OMWTabFiles.FileLang(path);
             labeled.Add((path, $"omw/{i}/{lang}"));
         }
+
+        // The corpus's retractions, ingested through the same per-file spine so they
+        // resume and journal like any other file. Labelled distinctly because their rows
+        // carry two extra leading fields and must not be read as data rows.
+        var changesFiles = OMWTabFiles.EnumerateChangesFiles(wnsDir)
+            .OrderBy(p => p, StringComparer.Ordinal)
+            .ToList();
+        for (int i = 0; i < changesFiles.Count; i++)
+            labeled.Add((changesFiles[i], $"{ChangesLabelPrefix}{i}"));
+
+        // The corpus's only per-row magnitude. Its rows are synset \t lemma \t count,
+        // not the data tabs' synset \t lang:type \t value, so it needs its own label.
+        var freqFiles = OMWTabFiles.EnumerateFreqFiles(wnsDir)
+            .OrderBy(p => p, StringComparer.Ordinal)
+            .ToList();
+        for (int i = 0; i < freqFiles.Count; i++)
+            labeled.Add((freqFiles[i], $"{FreqLabelPrefix}{OMWTabFiles.FileLang(freqFiles[i])}"));
+
         return labeled;
     }
 
@@ -56,7 +88,11 @@ public sealed class OMWDecomposer : DecomposerMultiFile<OmwIngestRecord, OMWSour
         string filePath, string fileLabel, DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        string fileLang = OmwIngestSupport.LangFromLabel(fileLabel);
+        bool isChanges = fileLabel.StartsWith(ChangesLabelPrefix, StringComparison.Ordinal);
+        bool isFreq = fileLabel.StartsWith(FreqLabelPrefix, StringComparison.Ordinal);
+        string fileLang = isChanges ? "und"
+            : isFreq ? fileLabel[FreqLabelPrefix.Length..]
+            : OmwIngestSupport.LangFromLabel(fileLabel);
         await using var e = StreamingUtf8LineReader.ReadLinesAsync(filePath, ct).GetAsyncEnumerator(ct);
         while (true)
         {
@@ -70,6 +106,26 @@ public sealed class OMWDecomposer : DecomposerMultiFile<OmwIngestRecord, OMWSour
             {
                 throw new InvalidOperationException(
                     $"OMW ingest failed in \"{filePath}\": {ex.Message}", ex);
+            }
+            if (isChanges)
+            {
+                // date \t action \t <data row>. Only REMOVED is acted on; see OMWEmitter.
+                if (!TsvSpan.TryField(line.Span, 1, out var action)) continue;
+                if (!action.SequenceEqual("REMOVED"u8)) continue;
+                int cut = IndexOfNthTab(line.Span, 2);
+                if (cut < 0) continue;
+                var dataRow = line.Span[(cut + 1)..];
+                if (!OMWRowParser.TryParseRow(dataRow, fileLang, out var cr, out var cv))
+                    continue;
+                yield return new OmwIngestRecord(cr with { Removed = true }, cv.ToArray());
+                continue;
+            }
+            if (isFreq)
+            {
+                if (!OMWRowParser.TryParseFreqRow(line.Span, fileLang, out var fr, out var fv))
+                    continue;
+                yield return new OmwIngestRecord(fr, fv.ToArray());
+                continue;
             }
             if (!OMWRowParser.TryParseRow(line.Span, fileLang, out var row, out var valueUtf8))
                 continue;

@@ -37,7 +37,7 @@ ensure_edge_plan(void)
     if (edge_plan == NULL)
     {
         Oid argtypes[4] = { BYTEAOID, BYTEAOID, INT4OID, BYTEAARRAYOID };
-        SPIPlanPtr plan = SPI_prepare(EDGE_QUERY, 4, argtypes);
+        SPIPlanPtr plan = SPI_prepare_cursor(EDGE_QUERY, 4, argtypes, CURSOR_OPT_PARALLEL_OK);
         if (plan == NULL)
             elog(ERROR, "generate walk: SPI_prepare failed: %s",
                  SPI_result_code_string(SPI_result));
@@ -134,7 +134,7 @@ ensure_walk_batch_nogeo_plan(void)
     if (walk_batch_nogeo_plan == NULL)
     {
         Oid argtypes[2] = { BYTEAARRAYOID, BYTEAOID };
-        SPIPlanPtr plan = SPI_prepare(WALK_BATCH_QUERY_NOGEO, 2, argtypes);
+        SPIPlanPtr plan = SPI_prepare_cursor(WALK_BATCH_QUERY_NOGEO, 2, argtypes, CURSOR_OPT_PARALLEL_OK);
         if (plan == NULL)
             elog(ERROR, "generate walk: SPI_prepare failed: %s",
                  SPI_result_code_string(SPI_result));
@@ -150,7 +150,7 @@ ensure_walk_batch_plan(void)
     if (walk_batch_plan == NULL)
     {
         Oid argtypes[2] = { BYTEAARRAYOID, BYTEAOID };
-        SPIPlanPtr plan = SPI_prepare(WALK_BATCH_QUERY, 2, argtypes);
+        SPIPlanPtr plan = SPI_prepare_cursor(WALK_BATCH_QUERY, 2, argtypes, CURSOR_OPT_PARALLEL_OK);
         if (plan == NULL)
             elog(ERROR, "walk_branches: SPI_prepare(batch) failed: %s",
                  SPI_result_code_string(SPI_result));
@@ -346,10 +346,10 @@ ensure_ordinal_continuity_plan(void)
     if (ordinal_continuity_plan == NULL)
     {
         Oid argtypes[1] = { BYTEAOID };
-        SPIPlanPtr plan = SPI_prepare(ORDINAL_CONTINUITY_QUERY, 1, argtypes);
+        SPIPlanPtr plan = SPI_prepare_cursor(ORDINAL_CONTINUITY_QUERY, 1, argtypes, CURSOR_OPT_PARALLEL_OK);
 
         if (plan == NULL)
-            elog(ERROR, "walk_branches: SPI_prepare(ordinal continuity) failed: %s",
+            elog(ERROR, "walk_branches: SPI_prepare_cursor(ordinal continuity) failed: %s",
                  SPI_result_code_string(SPI_result));
         if (SPI_keepplan(plan) != 0)
             elog(ERROR, "walk_branches: SPI_keepplan(ordinal continuity) failed");
@@ -1083,7 +1083,7 @@ ensure_render_plans(void)
     if (closure_plan == NULL)
     {
         Oid argtypes[2] = { BYTEAARRAYOID, INT4OID };
-        SPIPlanPtr plan = SPI_prepare(CLOSURE_QUERY, 2, argtypes);
+        SPIPlanPtr plan = SPI_prepare_cursor(CLOSURE_QUERY, 2, argtypes, CURSOR_OPT_PARALLEL_OK);
         if (plan == NULL)
             elog(ERROR, "render_text: SPI_prepare(constituents_closure) failed: %s",
                  SPI_result_code_string(SPI_result));

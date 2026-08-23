@@ -121,8 +121,16 @@ BEGIN
             LIMIT 1
         ),
         steps AS (
+            -- RENDER THE LADDER, DO NOT RECITE IT. Selecting the deepest chain is
+            -- correct for ancestry and wrong for a reply: every hop repeats the
+            -- frame, so a depth-4 winner renders "X is a kind of A, which is a kind
+            -- of B, which is a kind of C, which is a kind of D." Measured on the
+            -- live substrate, 'What is a dog?' rendered four nested frames before
+            -- its kin list. Ancestry beyond the first two hops is available through
+            -- the returned `path` column, which is the machine-readable answer and
+            -- is unbounded; the SENTENCE stops where a person stops reading.
             SELECT i, w.path[i + 1] AS entity_id
-            FROM winner w, generate_series(1, w.depth) AS i
+            FROM winner w, generate_series(1, LEAST(w.depth, 2)) AS i
         ), ids AS MATERIALIZED (
             SELECT array_agg(entity_id ORDER BY i) AS a FROM steps
         ), labels AS MATERIALIZED (
@@ -242,10 +250,37 @@ END;
 $$;
 
 -- Existing surface: exact adapter to the capacity-aware implementation.
+-- CONVERSATIONAL PRESENTATION BOUND (2026-08-23).
+--
+-- This two-argument form is the CALLER-facing surface: converse.chat and the
+-- endpoints reach it, and what it returns is read by a person. It passed NULL for
+-- both listing limits, and NULL means "all rows" in the four-argument form -- so a
+-- reply carried every associative edge the band holds. Measured on the live
+-- substrate: converse.chat('What is a dog?') emitted a single sentence of roughly
+-- 1,500 surfaces joined by " and " -- every pronoun in every language the
+-- substrate has ever witnessed -- and 'The opposite of hot is' did the same with
+-- the letter inventory.
+--
+-- The bound is PRESENTATION POLICY, not a ranking knob and not an infrastructure
+-- cap: the four-argument form still takes NULL for "all rows", which is what the
+-- analysis surfaces, receipts and the eval harness use. This mirrors
+-- realize.render_text's own rule -- "zero walks the complete cycle-safe DAG; a
+-- positive depth is caller-owned preview policy, never an infrastructure cap".
+--
+-- 8 is the established conversational fan for this schema
+-- (converse.session_trajectory(p_session, p_k int DEFAULT 8)); it is reused rather
+-- than a second invented number.
+--
+-- The SIGNATURE IS UNCHANGED on purpose. Adding a defaulted third parameter here
+-- made converse.facts(syn) ambiguous against the four-argument form on an UPGRADED
+-- database, where the old two-argument function still exists: PostgreSQL reported
+-- "function converse.facts(bytea) is not unique" and every caller broke. A fresh
+-- install would not have shown it. Callers that want a different bound already
+-- have the four-argument form.
 CREATE OR REPLACE FUNCTION converse.facts(p_syn bytea, p_lang bytea DEFAULT NULL)
     RETURNS TABLE(fact_kind text, sentence text, eff_mu numeric, witnesses bigint,
                   path bytea[], types bytea[])
     LANGUAGE sql STABLE
 BEGIN ATOMIC
-    SELECT * FROM converse.facts(p_syn, p_lang, NULL, NULL);
+    SELECT * FROM converse.facts(p_syn, p_lang, 8, 8);
 END;

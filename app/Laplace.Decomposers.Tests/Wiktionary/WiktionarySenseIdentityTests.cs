@@ -1,5 +1,6 @@
 using System.Text;
 using Laplace.Decomposers.Abstractions;
+using System.Linq;
 using Laplace.Decomposers.Wiktionary;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
@@ -81,14 +82,14 @@ public sealed class WiktionarySenseIdentityTests
                     SenseIds = ["en-bank-noun-finance"],
                     Glosses = [financeDefinition],
                     Examples = [financeExample],
-                    Relations = new WiktionaryEntry.RelationBlock { Synonyms = ["depository"] },
+                    Relations = new WiktionaryEntry.RelationBlock { Synonyms = [new WiktionaryMember("depository", 0.0)] },
                 },
                 new WiktionaryEntry.Sense
                 {
                     SenseIds = ["en-bank-noun-river"],
                     Glosses = [riverDefinition],
                     Examples = [riverExample],
-                    Relations = new WiktionaryEntry.RelationBlock { Synonyms = ["riverbank"] },
+                    Relations = new WiktionaryEntry.RelationBlock { Synonyms = [new WiktionaryMember("riverbank", 0.0)] },
                 },
             ],
         });
@@ -148,7 +149,8 @@ public sealed class WiktionarySenseIdentityTests
                 {
                     Glosses = glosses,
                     Tags = tags,
-                    Relations = new WiktionaryEntry.RelationBlock { Synonyms = synonyms },
+                    Relations = new WiktionaryEntry.RelationBlock {
+                        Synonyms = synonyms?.Select(x => new WiktionaryMember(x, 0.0)).ToList() },
                 }],
             });
             return Assert.Single(change.Attestations, a => a.TypeId == HasSense).ObjectId!.Value;

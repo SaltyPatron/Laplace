@@ -94,7 +94,7 @@ ensure_plan(void)
         return;
     {
         Oid argtypes[1] = { INT4OID };
-        SPIPlanPtr plan = SPI_prepare(FOLD_QUERY, 1, argtypes);
+        SPIPlanPtr plan = SPI_prepare_cursor(FOLD_QUERY, 1, argtypes, CURSOR_OPT_PARALLEL_OK);
         if (plan == NULL)
             elog(ERROR, "chess_learned_moves: SPI_prepare failed: %s",
                  SPI_result_code_string(SPI_result));

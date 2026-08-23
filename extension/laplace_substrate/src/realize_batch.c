@@ -134,7 +134,7 @@ ensure_plan(SPIPlanPtr *slot, const char *sql, int nargs, const Oid *argtypes)
 {
     if (*slot == NULL)
     {
-        SPIPlanPtr plan = SPI_prepare(sql, nargs, (Oid *) argtypes);
+        SPIPlanPtr plan = SPI_prepare_cursor(sql, nargs, (Oid *) argtypes, CURSOR_OPT_PARALLEL_OK);
 
         if (plan == NULL)
             elog(ERROR, "realize_batch: SPI_prepare failed: %s",

@@ -163,7 +163,7 @@ public sealed class UdSentenceEmitterTests
             && item.ValueId == ContentTierSpine.ResolveRoot(Utf8("of")));
         Assert.Contains(parse.Tokens[1].Misc, item =>
             item.KeyId == UdParseStructure.MiscKeyId("SpaceAfter")
-            && item.ValueId == UdParseStructure.MiscOpaqueValueId("SpaceAfter", "No"));
+            && item.ValueId == ContentTierSpine.ResolveRoot(Utf8("No")));
 
         var mwt = Assert.Single(parse.Mwts);
         Assert.Equal(UdParseStructure.TokenRefId("1"), mwt.StartRefId);
@@ -171,7 +171,7 @@ public sealed class UdSentenceEmitterTests
         Assert.Equal(ContentTierSpine.ResolveRoot(Utf8("du")), mwt.FormId);
         Assert.Contains(mwt.Misc, item =>
             item.KeyId == UdParseStructure.MiscKeyId("SpaceAfter")
-            && item.ValueId == UdParseStructure.MiscOpaqueValueId("SpaceAfter", "No"));
+            && item.ValueId == ContentTierSpine.ResolveRoot(Utf8("No")));
         Assert.Contains(mwt.Misc, item =>
             item.KeyId == UdParseStructure.MiscKeyId("Typo")
             && item.ValueId == UdParseStructure.PresentId);
@@ -270,7 +270,7 @@ public sealed class UdSentenceEmitterTests
         Hash128 hasParse = RelationTypeRegistry.Resolve("HAS_PARSE").Id;
         Hash128 parseId = Assert.Single(change.Attestations.Where(a => a.TypeId == hasParse)).ObjectId!.Value;
         PhysicalityRow physicality = Assert.Single(change.Physicalities.Where(p =>
-            p.EntityId == parseId && p.Type == PhysicalityType.Content));
+            p.EntityId == parseId && p.Type == PhysicalityType.ParseStructure));
         Assert.NotNull(physicality.TrajectoryXyzm);
         Hash128[] constituents = Trajectory.Constituents(physicality.TrajectoryXyzm!);
         Assert.True(UdParseStructure.TryDecode(constituents, out var decoded));
