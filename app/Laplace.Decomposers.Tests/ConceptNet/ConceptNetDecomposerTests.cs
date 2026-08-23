@@ -127,4 +127,37 @@ public sealed class ConceptNetDecomposerTests
             Directory.Delete(dir, recursive: true);
         }
     }
+
+    // ConceptNet's four Not* relations used to map to separate POSITIVE types
+    // (NOT_DESIRES, NOT_USED_FOR, NOT_CAPABLE_OF, NOT_HAS_PROPERTY), so 29,547 rows of
+    // negative evidence folded into cells that could never contest what they deny.
+    // They now map onto the relation they deny and are flagged negated, so the caller
+    // flips the sign of the source's weight: laplace_score_fp(v, m) scores v < 0 below
+    // 0.5, which is a Refute against the very cell the positive form asserts.
+    [Theory]
+    [InlineData("/r/NotDesires", "DESIRES")]
+    [InlineData("/r/NotUsedFor", "USED_FOR")]
+    [InlineData("/r/NotCapableOf", "CAPABLE_OF")]
+    [InlineData("/r/NotHasProperty", "HAS_PROPERTY")]
+    public void NotRelations_ResolveToTheRelationTheyDeny_AndAreNegated(
+        string relationUri, string expectedType)
+    {
+        Assert.True(ConceptNetRelations.TryResolveType(
+            System.Text.Encoding.UTF8.GetBytes(relationUri), out var typeName,
+            out _, out bool negated));
+        Assert.Equal(expectedType, typeName);
+        Assert.True(negated, $"{relationUri} must be negated or it asserts what it denies");
+    }
+
+    [Theory]
+    [InlineData("/r/Desires")]
+    [InlineData("/r/UsedFor")]
+    [InlineData("/r/CapableOf")]
+    [InlineData("/r/HasProperty")]
+    public void PositiveRelations_AreNotNegated(string relationUri)
+    {
+        Assert.True(ConceptNetRelations.TryResolveType(
+            System.Text.Encoding.UTF8.GetBytes(relationUri), out _, out _, out bool negated));
+        Assert.False(negated);
+    }
 }

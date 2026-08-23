@@ -116,6 +116,15 @@ Three independent mechanisms, all green throughout:
   deliberately untouched — the action says the entry changed, not that membership was
   withdrawn, and guessing which half changed would invent testimony the source did not
   give.
+- **ConceptNet and Atomic2020 denials refute what they deny** (this commit). `NotDesires`,
+  `NotUsedFor`, `NotCapableOf` and `NotHasProperty` mapped to separate *positive* relation
+  types (`NOT_DESIRES`, …), so **29,547 rows** of negative evidence folded into cells that
+  could never contest the assertion they contradict — "a fish cannot walk" landed nowhere
+  near "a fish can swim". They now map onto the relation they deny, with the source's own
+  weight **negated**: `laplace_score_fp(v, m)` scores `v < 0` below 0.5, so the row folds
+  as a Refute whose strength is ConceptNet's own confidence. That sign channel always
+  existed and the full 34M-row file never used it once (0 negative weights). Atomic2020
+  carried the identical mapping and is fixed the same way.
 - **`resolved_scored_build` also applies rank** (this commit) — it had the same raw
   `witness_weight` defect as `resolved_build`.
 
@@ -126,9 +135,8 @@ Three independent mechanisms, all green throughout:
   WordNet `tag_cnt` + `sense_number`, ConceptNet `weight` (31.8% ≠ 1.0) and `sources[]`
   (96,831 rows with ≥2 contributors), PropBank `lexlink confidence` (16,250 rows at
   0.8/1.0), FrameNet `total=` (290,405 values), OMW `wn-freq-ind.tab`.
-- **Refute at the remaining call sites.** CILI `changes-in-wn31.csv` (76 deprecated) and
-  ConceptNet `Not*` (29,547, re-encoded as separate positive relation types) still ship
-  denials the substrate never sees. VerbNet and OMW are done.
+- **Refute at the remaining call sites.** CILI `changes-in-wn31.csv` (76 deprecated ILIs)
+  is still never globbed. VerbNet, OMW, ConceptNet and Atomic2020 are done.
 - **Successor lookup latency.** ~835 ms fixed per call — ~590 ms is the GIN probe fanning
   across all 64 `physicalities` hash partitions (partition key is `id`, probe is on
   constituents, so nothing prunes). Actual work is ~190 ms. At one lookup per token,
