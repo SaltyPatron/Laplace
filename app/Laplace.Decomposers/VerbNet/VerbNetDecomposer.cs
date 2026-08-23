@@ -235,6 +235,28 @@ public sealed class VerbNetDecomposer
                             roleValues.Add(roleValue);
                     }
 
+                    // <PRED bool="!"> IS A REFUTATION, AND IT WAS ENTERED AS AN ASSERTION.
+                    //
+                    // VerbNet negates a predicate with bool="!": escape-51.1 entails that the
+                    // theme is NOT at its initial location. The attribute was never read, so
+                    // 2,860 of 19,490 PREDs in verbnet-master (14.7%) were deposited as
+                    // ENTAILS -- the substrate asserting the negation of what the source
+                    // states. A further 39 carry bool="?" (optional), which is a DRAW, not a
+                    // confirmation: laplace_score_fp(0, m) is exactly 0.5.
+                    //
+                    // outcome is the field for this. `confirm: false` folds a Refute against
+                    // the same cell a positive ENTAILS would fold into, which is what makes
+                    // it adjudicate rather than accumulate: the negation is deliberately NOT
+                    // part of the predicate id preimage, so an assertion in one frame and a
+                    // denial in another meet in one consensus cell and contest it.
+                    //
+                    // Without this the substrate has almost no losses anywhere -- every
+                    // observation is a win against a fixed opponent, so rating is a monotone
+                    // function of witness count (docs/evidence-flattening-2026-08-23.md).
+                    string predBool = pred.GetAttribute("bool").Trim();
+                    bool negated = predBool == "!";
+                    bool optional = predBool == "?";
+
                     Hash128 predicateId = SemanticPredicateAnchor.Declare(
                         b, SemanticPredicateIdentityKind.VerbNet, classEntity,
                         frameOrdinal, currentPredicateOrdinal, predLabelId.Value, arguments,
@@ -242,9 +264,14 @@ public sealed class VerbNetDecomposer
                     CategoryAnchor.AttestCategory(
                         b, predicateId, EntityTypeRegistry.VerbNetPredicate,
                         Source, TC.AcademicCurated);
-                    b.AddAttestation(NativeAttestation.CategoricalResolved(
-                        classEntity, VerbNetSource.EntailsTypeId, predicateId,
-                        Source, null, TC.AcademicCurated));
+                    b.AddAttestation(optional
+                        ? NativeAttestation.ResolvedScored(
+                            classEntity, VerbNetSource.EntailsTypeId, predicateId,
+                            Source, null, TC.AcademicCurated,
+                            signedMagnitude: 0.0, arenaScale: 1.0)
+                        : NativeAttestation.CategoricalResolved(
+                            classEntity, VerbNetSource.EntailsTypeId, predicateId,
+                            Source, null, TC.AcademicCurated, confirm: !negated));
                     b.AddAttestation(NativeAttestation.CategoricalResolved(
                         predicateId, VerbNetSource.HasNameAliasTypeId, predLabelId.Value,
                         Source, null, TC.AcademicCurated));

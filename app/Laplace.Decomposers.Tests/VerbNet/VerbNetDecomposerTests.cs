@@ -1,3 +1,4 @@
+using System.Linq;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Decomposers.Tests;
 using Laplace.Engine.Core;
@@ -320,11 +321,52 @@ public sealed class VerbNetDecomposerTests
             && a.ObjectId == VerbNetDecomposer.TrustClass);
     }
 
-    private static async Task<List<AttestationRow>> CollectAttestationsAsync()
+    // VerbNet negates a predicate with bool="!" and marks an optional one with bool="?".
+    // verbnet-master ships 2,860 negated and 39 optional PREDs across 19,490 total. The
+    // attribute was never read, so every one of the 2,860 was deposited as a positive
+    // ENTAILS -- the substrate asserting the negation of what the source states.
+    private const string BoolClassXml = """
+<VNCLASS ID="escape-51.1">
+ <MEMBERS><MEMBER name="escape" verbnet_key="escape#1" wn="" grouping="" fn_mapping="" features=""/></MEMBERS>
+ <THEMROLES><THEMROLE type="Theme"><SELRESTRS/></THEMROLE></THEMROLES>
+ <FRAMES>
+  <FRAME>
+   <DESCRIPTION descriptionNumber="0.1" primary="NP V" secondary="" xtag=""/>
+   <EXAMPLES><EXAMPLE>The prisoner escaped.</EXAMPLE></EXAMPLES>
+   <SYNTAX><NP value="Theme"/></SYNTAX>
+   <SEMANTICS>
+    <PRED value="motion"><ARGS><ARG type="Event" value="E"/></ARGS></PRED>
+    <PRED bool="!" value="location"><ARGS><ARG type="Event" value="E"/></ARGS></PRED>
+    <PRED bool="?" value="cause"><ARGS><ARG type="Event" value="E"/></ARGS></PRED>
+   </SEMANTICS>
+  </FRAME>
+ </FRAMES>
+ <SUBCLASSES/>
+</VNCLASS>
+""";
+
+    [Fact]
+    public async Task NegatedPredicate_FoldsAsRefute_AndOptionalAsDraw()
+    {
+        var atts = await CollectAttestationsAsync(BoolClassXml);
+        Hash128 entails = RelationTypeRegistry.RelationTypeId("ENTAILS");
+        var entailments = atts.Where(a => a.TypeId == entails).ToList();
+
+        Assert.Equal(3, entailments.Count);
+        // One per bool state: plain -> Confirm, "!" -> Refute, "?" -> Draw.
+        Assert.Single(entailments.Where(a => a.Outcome == AttestationOutcome.Confirm));
+        Assert.Single(entailments.Where(a => a.Outcome == AttestationOutcome.Refute));
+        Assert.Single(entailments.Where(a => a.Outcome == AttestationOutcome.Draw));
+    }
+
+    private static Task<List<AttestationRow>> CollectAttestationsAsync()
+        => CollectAttestationsAsync(ClassXml);
+
+    private static async Task<List<AttestationRow>> CollectAttestationsAsync(string classXml)
     {
         string dir = Path.Combine(Path.GetTempPath(), "vn-test-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(Path.Combine(dir, "verbnet3.4"));
-        await File.WriteAllTextAsync(Path.Combine(dir, "verbnet3.4", "give-13.1.xml"), ClassXml);
+        await File.WriteAllTextAsync(Path.Combine(dir, "verbnet3.4", "give-13.1.xml"), classXml);
         try
         {
             var dec = new VerbNetDecomposer();

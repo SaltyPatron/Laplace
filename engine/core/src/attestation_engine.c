@@ -448,6 +448,13 @@ int laplace_attestation_resolved_scored_build(
     uint8_t ctx_null = context_is_null;
     if (!ctx_null && context) ctx = *context;
 
+    /* Same law as laplace_attestation_resolved_build: resolving the type_id ahead of
+     * time must not change what the relation is worth. Both surface builders compute
+     * rank * trust_weight; this one took witness_weight raw. */
+    const laplace_relation_def_t* scored_def = NULL;
+    if (laplace_relation_lookup(type_id, &scored_def) == 0 && scored_def != NULL)
+        witness_weight = scored_def->rank * witness_weight;
+
     int64_t score_fp = laplace_score_fp(magnitude, arena_scale);
     int16_t outcome;
     if (laplace_attestation_outcome_from_score_fp(score_fp, &outcome) != 0) return -1;

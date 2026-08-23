@@ -101,6 +101,16 @@ Three independent mechanisms, all green throughout:
   the relations nobody annotates are the ones that degrade. Exemption requires a stated
   reason in the gate (`"constant_rating_ok": "…"`), which reviewers can challenge.
 
+- **VerbNet negation is a Refute** (this commit). `<PRED bool="!">` was never read, so
+  **2,860 of 19,490 PREDs (14.7%)** in verbnet-master were deposited as positive
+  `ENTAILS` — the substrate asserting the negation of what the source states. A further
+  **39** carry `bool="?"` (optional), which is a Draw: `laplace_score_fp(0, m)` is exactly
+  0.5. The negation is deliberately NOT in the predicate id preimage, so an assertion in
+  one frame and a denial in another meet in one consensus cell and contest it. Pinned by
+  `NegatedPredicate_FoldsAsRefute_AndOptionalAsDraw`.
+- **`resolved_scored_build` also applies rank** (this commit) — it had the same raw
+  `witness_weight` defect as `resolved_build`.
+
 ## Not fixed
 
 - **Magnitude at the call sites.** 199 `NativeAttestation.Categorical` call sites, **5**
@@ -108,8 +118,9 @@ Three independent mechanisms, all green throughout:
   WordNet `tag_cnt` + `sense_number`, ConceptNet `weight` (31.8% ≠ 1.0) and `sources[]`
   (96,831 rows with ≥2 contributors), PropBank `lexlink confidence` (16,250 rows at
   0.8/1.0), FrameNet `total=` (290,405 values), OMW `wn-freq-ind.tab`.
-- **Refute at the call sites.** The four sources listed above ship denials that are still
-  dropped or re-encoded as positive relations.
+- **Refute at the remaining call sites.** OMW `*-changes.tab` (3,279 REMOVED), CILI
+  `changes-in-wn31.csv` (76 deprecated) and ConceptNet `Not*` (29,547) still ship denials
+  that are dropped or re-encoded as positive relations. VerbNet is done.
 - **Successor lookup latency.** ~835 ms fixed per call — ~590 ms is the GIN probe fanning
   across all 64 `physicalities` hash partitions (partition key is `id`, probe is on
   constituents, so nothing prunes). Actual work is ~190 ms. At one lookup per token,
