@@ -1,0 +1,60 @@
+-- session_turns: exact prior-turn recall FROM THE SESSION TRAJECTORY (spec 34
+-- acceptance: "Exact prior-turn recall comes from the session trajectory") — the
+-- geometric read the agent-trace lane finally makes possible. The session entity's
+-- Content physicality holds the ordered, versioned turn manifest; this realizes it
+-- back: ordinal, turn id, role and model (via the HAS_ROLE / AUTHORED_BY consensus
+-- edges, names resolved through IS_INSTANCE_OF), the turn's witnessed EVENT time
+-- (APPEARS_IN evidence under this session's context — the log's clock, not ingest
+-- time), and the realized surface.
+--
+-- Unlike converse.session_trajectory (a topic-cache projection, explicitly an
+-- invalidatable accelerator), this reads the substrate's own order authority. A
+-- session with no deposited trajectory returns zero rows — absence is unknown,
+-- never an empty fabrication.
+--
+-- Validated against real agent-log sessions in a laplace_d_agents isolate
+-- (claude-code / codex / antigravity / copilot / cursor / gemini corpora);
+-- regress coverage rides the next extension install (the isolate cannot install a
+-- branch extension over the shared cluster's copy).
+DROP FUNCTION IF EXISTS converse.session_turns(bytea, int);
+CREATE OR REPLACE FUNCTION converse.session_turns(p_session bytea, p_limit int DEFAULT NULL)
+    RETURNS TABLE(ordinal int, turn_id bytea, role text, model text,
+                  observed_at timestamptz, surface text)
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+WITH traj AS MATERIALIZED (
+    SELECT t.ordinal, t.entity_id AS turn_id
+    FROM laplace.physicalities p
+    CROSS JOIN LATERAL public.laplace_trajectory_constituents(p.trajectory) t
+    WHERE p.entity_id = p_session AND p.type = 1
+)
+SELECT tr.ordinal,
+       tr.turn_id,
+       (SELECT realize.render(n.object_id)
+          FROM laplace.consensus r
+          JOIN laplace.consensus n
+            ON n.subject_id = r.object_id
+           AND n.type_id = realize.canonical_id('IS_INSTANCE_OF')
+         WHERE r.subject_id = tr.turn_id
+           AND r.type_id = realize.canonical_id('HAS_ROLE')
+         ORDER BY consensus.eff_mu(r.rating, r.rd) DESC, consensus.eff_mu(n.rating, n.rd) DESC
+         LIMIT 1) AS role,
+       (SELECT realize.render(n.object_id)
+          FROM laplace.consensus r
+          JOIN laplace.consensus n
+            ON n.subject_id = r.object_id
+           AND n.type_id = realize.canonical_id('IS_INSTANCE_OF')
+         WHERE r.subject_id = tr.turn_id
+           AND r.type_id = realize.canonical_id('AUTHORED_BY')
+         ORDER BY consensus.eff_mu(r.rating, r.rd) DESC, consensus.eff_mu(n.rating, n.rd) DESC
+         LIMIT 1) AS model,
+       (SELECT max(a.last_observed_at)
+          FROM laplace.attestations a
+         WHERE a.subject_id = tr.turn_id
+           AND a.context_id = p_session
+           AND a.type_id = realize.canonical_id('APPEARS_IN')) AS observed_at,
+       realize.render(tr.turn_id) AS surface
+FROM traj tr
+ORDER BY tr.ordinal
+LIMIT COALESCE(p_limit, 2147483647);
+END;
