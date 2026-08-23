@@ -22,8 +22,23 @@ CREATE OR REPLACE FUNCTION consensus.top_relations(p_limit integer DEFAULT 50, p
     WHERE c.object_id IS NOT NULL
       AND consensus.relation_rank(c.type_id) IS NOT NULL
       AND (p_type IS NULL OR c.type_id = p_type)
+    -- DESC, NOT "DESC NULLS LAST". The supporting index is declared DESC, which in
+    -- PostgreSQL means NULLS FIRST, so this one keyword made it unusable: the sort
+    -- orderings do not match and the planner falls back to scanning every partition.
+    --
+    -- Measured 2026-08-23 on the live substrate: this function seq-scanned all consensus
+    -- partitions and top-N heapsorted 126,378,526 rows to return 10, while
+    -- <partition>_expr_witness_count_type_id_subject_id_idx -- 14 GB across 192
+    -- partitions, built for exactly this ORDER BY -- had ZERO scans since the database
+    -- was created. Dropping the NULLS LAST turns it into an index scan returning one row
+    -- per partition.
+    --
+    -- Nothing is lost by the change: the WHERE clause already excludes rows where
+    -- relation_rank(type_id) IS NULL, and rating/rd are NOT NULL, so the sort expression
+    -- cannot be NULL for any row this reaches. NULLS FIRST and NULLS LAST are the same
+    -- order over a set with no nulls.
     ORDER BY (consensus.relation_rank(c.type_id)
-                  * consensus.eff_mu(c.rating, c.rd)::double precision) DESC NULLS LAST,
+                  * consensus.eff_mu(c.rating, c.rd)::double precision) DESC,
              c.witness_count DESC,
              c.type_id,
              c.subject_id,
