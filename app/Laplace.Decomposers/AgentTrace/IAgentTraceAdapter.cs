@@ -101,18 +101,36 @@ internal static class AdapterJson
     /// <summary>First non-empty line, for cheap format sniffs. Null on IO failure.</summary>
     internal static string? FirstLine(string filePath, int maxBytes = 4096)
     {
+        foreach (var line in FirstLines(filePath, 1, maxBytes)) return line;
+        return null;
+    }
+
+    /// <summary>
+    /// Up to <paramref name="count"/> leading lines for format sniffs. A Claude Code
+    /// transcript can OPEN with summary/file-history-snapshot records that carry none of
+    /// the envelope keys, so single-line sniffs misroute real files (measured: this
+    /// session's own transcript fell through to the generic adapter).
+    /// </summary>
+    internal static IEnumerable<string> FirstLines(string filePath, int count, int maxBytes = 65536)
+    {
+        var lines = new List<string>(count);
         try
         {
             using var reader = new StreamReader(filePath);
-            Span<char> buf = new char[maxBytes];
-            int n = reader.Read(buf);
-            if (n <= 0) return null;
-            var s = buf[..n];
-            int nl = s.IndexOf('\n');
-            return new string(nl >= 0 ? s[..nl] : s);
+            var buf = new char[maxBytes];
+            int n = reader.Read(buf, 0, maxBytes);
+            int start = 0;
+            for (int i = 0; i < n && lines.Count < count; i++)
+            {
+                if (buf[i] != '\n') continue;
+                if (i > start) lines.Add(new string(buf, start, i - start));
+                start = i + 1;
+            }
+            if (lines.Count < count && n > start) lines.Add(new string(buf, start, n - start));
         }
-        catch (IOException) { return null; }
-        catch (UnauthorizedAccessException) { return null; }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+        return lines;
     }
 
     /// <summary>First bytes of the file as text, for whole-document sniffs.</summary>

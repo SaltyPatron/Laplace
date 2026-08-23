@@ -20,6 +20,14 @@ public sealed record AgentSession(
     public string? UserKey { get; init; }
     public IReadOnlyDictionary<string, string> Meta { get; init; } =
         System.Collections.Immutable.ImmutableDictionary<string, string>.Empty;
+
+    /// <summary>
+    /// Composed-turn count already witnessed by a prior ingest of this session (the
+    /// deepest Agent_Session_Watermark the existence probe confirmed). Turns below it
+    /// stage content only — no testimony — so re-ingesting a GROWN log never inflates
+    /// observation counts for the already-witnessed prefix. 0 = witness everything.
+    /// </summary>
+    public int WitnessedTurnWatermark { get; init; }
 }
 
 /// <summary>One conversational turn. Ordinal is position in the session, 0-based.</summary>

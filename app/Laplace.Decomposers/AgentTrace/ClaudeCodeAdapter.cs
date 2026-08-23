@@ -22,10 +22,13 @@ public sealed class ClaudeCodeAdapter : IAgentTraceAdapter
                 StringComparison.Ordinal)
             && filePath.Contains("projects", StringComparison.Ordinal))
             return true;
-        var line = AdapterJson.FirstLine(filePath);
-        return line is not null
-            && line.Contains("\"sessionId\"", StringComparison.Ordinal)
-            && line.Contains("\"parentUuid\"", StringComparison.Ordinal);
+        foreach (var line in AdapterJson.FirstLines(filePath, 8))
+        {
+            if (line.Contains("\"sessionId\"", StringComparison.Ordinal)
+                && line.Contains("\"parentUuid\"", StringComparison.Ordinal))
+                return true;
+        }
+        return false;
     }
 
     public IEnumerable<string> DefaultRoots(string homeDir)

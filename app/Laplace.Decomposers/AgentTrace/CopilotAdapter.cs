@@ -25,10 +25,13 @@ public sealed partial class CopilotAdapter : IAgentTraceAdapter
         if (filePath.Contains("session-state", StringComparison.Ordinal)
             && filePath.Contains(".copilot", StringComparison.Ordinal))
             return true;
-        var line = AdapterJson.FirstLine(filePath);
-        return line is not null
-            && line.Contains("\"session.start\"", StringComparison.Ordinal)
-            && line.Contains("copilot", StringComparison.OrdinalIgnoreCase);
+        foreach (var line in AdapterJson.FirstLines(filePath, 4))
+        {
+            if (line.Contains("\"session.start\"", StringComparison.Ordinal)
+                && line.Contains("copilot", StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
     }
 
     public IEnumerable<string> DefaultRoots(string homeDir)

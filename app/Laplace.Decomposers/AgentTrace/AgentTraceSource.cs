@@ -57,6 +57,7 @@ public readonly struct AgentTraceSource : ISeedSource
         "Agent_Tool",
         "Agent_Model",
         "Tool_Invocation",
+        "Agent_Session_Watermark",
     ];
 
     public static SourceLicense License => SourceLicense.Unknown;

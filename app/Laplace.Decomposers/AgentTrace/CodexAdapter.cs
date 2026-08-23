@@ -22,8 +22,9 @@ public sealed class CodexAdapter : IAgentTraceAdapter
             && name.EndsWith(".jsonl", StringComparison.OrdinalIgnoreCase))
             return true;
         if (!filePath.EndsWith(".jsonl", StringComparison.OrdinalIgnoreCase)) return false;
-        var line = AdapterJson.FirstLine(filePath);
-        return line is not null && line.Contains("\"session_meta\"", StringComparison.Ordinal);
+        foreach (var line in AdapterJson.FirstLines(filePath, 4))
+            if (line.Contains("\"session_meta\"", StringComparison.Ordinal)) return true;
+        return false;
     }
 
     public IEnumerable<string> DefaultRoots(string homeDir)

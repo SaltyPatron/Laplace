@@ -83,7 +83,32 @@ public sealed class AgentTraceDecomposer
             : AgentTraceAdapters.Resolve(filePath);
         if (adapter is null) yield break;
         await foreach (var session in adapter.ParseAsync(filePath, ct))
-            yield return session;
+            yield return await ResolveWatermarkAsync(session, ct);
+    }
+
+    /// <summary>
+    /// Grown-log protection: probe the session's Agent_Session_Watermark prefixes in ONE
+    /// batched existence bitmap and mark the deepest witnessed prefix, so Compose skips
+    /// re-witnessing testimony the substrate already holds. A probe miss only ever
+    /// re-witnesses (safe); a hit is only possible for a byte-identical turn prefix.
+    /// </summary>
+    private async ValueTask<AgentSession> ResolveWatermarkAsync(AgentSession session, CancellationToken ct)
+    {
+        var reader = ContainmentReader;
+        if (reader is null || !CodepointPerfcache.IsLoaded) return session;
+        var turnIds = AgentTraceEmitter.ComputeComposedTurnIds(session);
+        if (turnIds.Count == 0) return session;
+
+        Hash128 sessionId = ConversationContent.SessionId(
+            session.Provider, AgentTraceEmitter.SanitizeKey(session.SessionKey));
+        var candidates = AgentTraceEmitter.WatermarkCandidates(sessionId, turnIds);
+        byte[] bitmap = await reader.EntitiesExistBitmapAsync(candidates, ct);
+        for (int i = candidates.Count - 1; i >= 0; i--)
+        {
+            if (BitmapBits.IsSet(bitmap, i))
+                return session with { WitnessedTurnWatermark = i + 1 };
+        }
+        return session;
     }
 
     protected override void Compose(AgentSession session, SubstrateChangeBuilder b) =>

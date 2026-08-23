@@ -42,12 +42,84 @@ public static class AgentTraceEmitter
             SubstrateCanonicalIds.Source($"ToolResult@{provider}"));
     }
 
+    // ── grown-log re-witness protection ───────────────────────────────────────────
+    // A resumed session file GROWS, so its per-file content identity changes and file
+    // resume cannot skip it — without a finer marker every re-ingest would re-witness
+    // the whole prefix and inflate observation counts (the #417 novelty-gate class).
+    // The marker is a bare content-addressed entity per witnessed turn-prefix:
+    //   id = canonical(agent/watermark/{session}/{k}/{chain_k})
+    // where chain_k folds the ordered composed-turn ids, so ANY change inside the
+    // prefix (not just its tail) invalidates deeper marks. The extract stage probes all
+    // k in ONE batched existence bitmap; a probe miss merely re-witnesses (safe), a hit
+    // is only possible for a byte-identical prefix.
+
+    /// <summary>Part texts of a turn in THE composition order (the turn-id contract).</summary>
+    internal static IEnumerable<string> PartTexts(AgentTurn turn)
+    {
+        if (!string.IsNullOrEmpty(turn.Text)) yield return turn.Text;
+        if (!string.IsNullOrEmpty(turn.Thinking)) yield return turn.Thinking;
+        foreach (var call in turn.ToolCalls)
+        {
+            if (!string.IsNullOrEmpty(call.InputJson)) yield return call.InputJson;
+            if (!string.IsNullOrEmpty(call.ResultText)) yield return call.ResultText;
+        }
+    }
+
+    /// <summary>
+    /// Composed-turn ids by pure content resolution (no staging) — the same merkle the
+    /// witness path mints, for watermark probing before compose.
+    /// </summary>
+    public static List<Hash128> ComputeComposedTurnIds(AgentSession session)
+    {
+        var ids = new List<Hash128>(session.Turns.Count);
+        var members = new List<Hash128>(4);
+        foreach (var turn in session.Turns)
+        {
+            members.Clear();
+            foreach (var text in PartTexts(turn))
+                if (ContentTierSpine.ResolveRoot(text) is { } root)
+                    members.Add(root);
+            if (members.Count == 0) continue;
+            ids.Add(members.Count == 1
+                ? members[0]
+                : Hash128.Merkle(EntityTier.Document, System.Runtime.InteropServices
+                    .CollectionsMarshal.AsSpan(members)));
+        }
+        return ids;
+    }
+
+    internal static Hash128 WatermarkChainStep(Hash128 chain, Hash128 turnId)
+    {
+        Span<byte> buf = stackalloc byte[32];
+        chain.WriteBytes(buf[..16]);
+        turnId.WriteBytes(buf[16..]);
+        return Hash128.Blake3(buf);
+    }
+
+    internal static Hash128 WatermarkId(Hash128 sessionId, int k, Hash128 chain) =>
+        Hash128.OfCanonical($"agent/watermark/{sessionId}/{k}/{chain}/v1");
+
+    /// <summary>Candidate watermark ids for every prefix k = 1..N, in prefix order.</summary>
+    public static IReadOnlyList<Hash128> WatermarkCandidates(
+        Hash128 sessionId, IReadOnlyList<Hash128> composedTurnIds)
+    {
+        var candidates = new Hash128[composedTurnIds.Count];
+        Hash128 chain = sessionId;
+        for (int k = 0; k < composedTurnIds.Count; k++)
+        {
+            chain = WatermarkChainStep(chain, composedTurnIds[k]);
+            candidates[k] = WatermarkId(sessionId, k + 1, chain);
+        }
+        return candidates;
+    }
+
     public static void Emit(SubstrateChangeBuilder b, AgentSession session)
     {
         var scope = ProviderScope.Resolve(session.Provider);
         Hash128 sessionId = ConversationContent.SessionId(
             session.Provider, SanitizeKey(session.SessionKey));
         long sessionUs = session.StartedAtUnixUs;
+        int watermark = session.WitnessedTurnWatermark;
 
         b.AddEntity(sessionId, EntityTier.Document, EntityTypeRegistry.ConversationSession,
             scope.Tenant.PromptSource);
@@ -93,6 +165,20 @@ public static class AgentTraceEmitter
             turnIds.Add(tid);
             turnCoords.Add(coords[tid]);
             turnsUsedUs = Math.Max(turnsUsedUs, ts);
+
+            // Prefix turns of a grown log: content stays staged (idempotent), testimony
+            // is NOT re-emitted — the prior ingest already witnessed it, and testimony
+            // is not idempotent (observation counts accumulate).
+            bool witnessTurn = turnIds.Count > watermark;
+            if (!witnessTurn)
+            {
+                if (turn.Usage is { IsEmpty: false } priorUsage) totals.Add(priorUsage);
+                // Q→A pairing state advances through the prefix: a skipped assistant
+                // turn consumed its prompt (that pair was witnessed by the prior run).
+                if (turn.Role == AgentRoles.User) lastUserTextRoot = textRoot;
+                else if (turn.Role == AgentRoles.Assistant) lastUserTextRoot = null;
+                continue;
+            }
 
             // Membership on the live lane's cell: (turn root APPEARS_IN session)@ctx=session.
             // ONE witness class (φ) for every membership row: content collapse means the
@@ -187,6 +273,20 @@ public static class AgentTraceEmitter
                     AlignmentResidual: null, SourceDim: null,
                     ObservedAtUnixUs: endUs));
         }
+
+        // The witnessed-prefix watermark for THIS parse, atomically with its testimony.
+        // A future re-ingest of the grown file probes these and skips the prefix.
+        if (turnIds.Count > 0)
+        {
+            Hash128 chain = sessionId;
+            foreach (var tid in turnIds) chain = WatermarkChainStep(chain, tid);
+            b.AddEntity(WatermarkId(sessionId, turnIds.Count, chain), EntityTier.Word,
+                EntityTypeRegistry.AgentSessionWatermark, LaneSource);
+        }
+
+        // A re-parse with NOTHING beyond the watermark owes no session-level testimony
+        // either — it was all witnessed by the run that deposited the watermark.
+        if (turnIds.Count <= watermark) return;
 
         // Session-level metadata — every field the log carried.
         if (Witness(b, session.Title, scope.Tenant.PromptSource, coords, members: null) is { } title)
