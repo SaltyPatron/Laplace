@@ -6,6 +6,12 @@ namespace Laplace.Ingestion.Tests;
 /// <summary>
 /// CONSOLIDATION Q5: status=ok must not survive partial/incoherent files_done/files_total.
 /// </summary>
+// Pinned to the ledger collection: this class drives IngestRunner, and
+// IngestRunner.Reset() clears the process-global ContentLadderLedger on a source
+// change (IngestRunner.cs:321). Run in parallel with ContentLadderLedgerTests it
+// wipes _persisted between that test's MarkPersisted and IsPersisted -- observed
+// as a full-gate-only failure that passes under any per-class filter.
+[Collection("GrammarPerfcache")]
 public sealed class IngestRunStatusHonestyTests
 {
     [Theory]
