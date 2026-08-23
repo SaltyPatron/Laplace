@@ -26,14 +26,14 @@ ensure_step_edge_plan(void)
     if (step_edge_plan == NULL)
     {
         Oid        argtypes[2] = { BYTEAOID, BYTEAOID };
-        SPIPlanPtr plan = SPI_prepare(
+        SPIPlanPtr plan = SPI_prepare_cursor(
             "SELECT type_id, "
             "       CASE WHEN subject_id = $1 THEN 1 ELSE -1 END AS dir "
             "FROM consensus.step_edge($1, $2)",
-            2, argtypes);
+            2, argtypes, CURSOR_OPT_PARALLEL_OK);
 
         if (plan == NULL)
-            elog(ERROR, "cascade: SPI_prepare(step edge) failed: %s",
+            elog(ERROR, "cascade: SPI_prepare_cursor(step edge) failed: %s",
                  SPI_result_code_string(SPI_result));
         if (SPI_keepplan(plan) != 0)
             elog(ERROR, "cascade: SPI_keepplan(step edge) failed");

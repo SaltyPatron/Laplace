@@ -39,12 +39,12 @@ ensure_subject_edges_plan(void)
     if (subject_edges_batch_plan == NULL)
     {
         Oid        argtypes[1] = { BYTEAARRAYOID };
-        SPIPlanPtr plan = SPI_prepare(
+        SPIPlanPtr plan = SPI_prepare_cursor(
             "SELECT u.ord, e.type_id, e.object_id, e.rating, e.rd "
             "FROM unnest($1) WITH ORDINALITY AS u(subject_id, ord) "
             "CROSS JOIN LATERAL converse.consensus_subject_edges(u.subject_id) e "
             "ORDER BY u.ord",
-            1, argtypes);
+            1, argtypes, CURSOR_OPT_PARALLEL_OK);
         if (plan == NULL)
             elog(ERROR, "contrast: SPI_prepare failed: %s",
                  SPI_result_code_string(SPI_result));

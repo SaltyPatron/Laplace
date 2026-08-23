@@ -232,30 +232,30 @@ pg_laplace_explore_web(PG_FUNCTION_ARGS)
 	{
 		Oid			pargs[2] = {BYTEAARRAYOID, INT4OID};
 
-		full_plan = SPI_prepare(
+		full_plan = SPI_prepare_cursor(
 			"SELECT frontier_id, nbr, type_id, rating, rd, witness_count, outbound "
 			"FROM consensus.explore_web_neighbors($1, $2)",
-			2, pargs);
+			2, pargs, CURSOR_OPT_PARALLEL_OK);
 		if (full_plan == NULL)
 			elog(ERROR, "explore_web: full neighbor SPI_prepare failed");
 	}
 	{
 		Oid			pargs[3] = {BYTEAARRAYOID, BYTEAARRAYOID, INT4OID};
 
-		masked_plan = SPI_prepare(
+		masked_plan = SPI_prepare_cursor(
 			"SELECT frontier_id, nbr, type_id, rating, rd, witness_count, outbound "
 			"FROM consensus.explore_web_neighbors($1, $2, $3)",
-			3, pargs);
+			3, pargs, CURSOR_OPT_PARALLEL_OK);
 		if (masked_plan == NULL)
 			elog(ERROR, "explore_web: masked neighbor SPI_prepare failed");
 	}
 	{
 		Oid			pargs[1] = {BYTEAARRAYOID};
 
-		mask_plan = SPI_prepare(
+		mask_plan = SPI_prepare_cursor(
 			"SELECT e.highway_mask FROM laplace.entities e "
 			"WHERE e.id = ANY($1) AND e.highway_mask IS NOT NULL",
-			1, pargs);
+			1, pargs, CURSOR_OPT_PARALLEL_OK);
 		if (mask_plan == NULL)
 			elog(ERROR, "explore_web: frontier mask SPI_prepare failed");
 	}

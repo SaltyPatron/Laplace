@@ -113,7 +113,7 @@ ensure_plans(void)
                                             CURSOR_OPT_PARALLEL_OK);
 
         if (plan == NULL)
-            elog(ERROR, "geometry_successors: SPI_prepare(batch unpack) failed: %s",
+            elog(ERROR, "geometry_successors: SPI_prepare_cursor(batch unpack) failed: %s",
                  SPI_result_code_string(SPI_result));
         if (SPI_keepplan(plan) != 0)
             elog(ERROR, "geometry_successors: SPI_keepplan(batch unpack) failed");
@@ -122,7 +122,7 @@ ensure_plans(void)
 
     if (separator_plan == NULL)
     {
-        SPIPlanPtr plan = SPI_prepare(SEPARATOR_QUERY, 0, NULL);
+        SPIPlanPtr plan = SPI_prepare_cursor(SEPARATOR_QUERY, 0, NULL, CURSOR_OPT_PARALLEL_OK);
 
         if (plan == NULL)
             elog(ERROR, "geometry_successors: SPI_prepare(separators) failed: %s",

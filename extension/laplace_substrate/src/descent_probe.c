@@ -81,7 +81,7 @@ attest_type_probe_plan(const uint8_t *type_id16)
                  "ON a.type_id = '\\x%s'::bytea AND a.subject_id = u.s AND a.id = u.id",
                  hex);
 
-        plan = SPI_prepare(sql, 3, argtypes);
+        plan = SPI_prepare_cursor(sql, 3, argtypes, CURSOR_OPT_PARALLEL_OK);
         if (plan == NULL)
             ereport(ERROR,
                     (errcode(ERRCODE_INTERNAL_ERROR),

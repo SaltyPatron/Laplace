@@ -110,7 +110,7 @@ ensure_plans(void)
 
     if (separator_plan == NULL)
     {
-        SPIPlanPtr plan = SPI_prepare(SEPARATOR_QUERY, 0, NULL);
+        SPIPlanPtr plan = SPI_prepare_cursor(SEPARATOR_QUERY, 0, NULL, CURSOR_OPT_PARALLEL_OK);
 
         if (plan == NULL)
             elog(ERROR, "trajectory_continuations: SPI_prepare(separators) failed: %s",

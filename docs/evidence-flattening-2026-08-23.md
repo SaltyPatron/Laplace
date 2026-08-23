@@ -234,8 +234,13 @@ Three independent mechanisms, all green throughout:
   partition key is `id`, the predicate is on constituents, so nothing prunes. Standalone
   the planner uses a Parallel Append with 7 workers at ~42ms; through `SPI_prepare` the
   identical query ran serially. Measured warm after the change:
-  `trajectory_continuations` **687ms → 183ms**, `geometry_successors_batch`
+  `trajectory_continuations` **687ms → 173ms**, `geometry_successors_batch`
   **975ms → 127ms**. Results bit-identical (`New→York` 6407, `氷→河` 72).
+
+  Applied to **all 29 read-only plans across 15 files**, not just the two that were
+  profiled. `fold_route.c` is exempt because its plans execute read-write, and
+  `SpiParallelPlanGateTests` both forbids a new serial read-only plan and checks that the
+  exemption really does execute read-write — verified to fail when one call is reverted.
 - **`resolved_scored_build` also applies rank** (this commit) — it had the same raw
   `witness_weight` defect as `resolved_build`.
 
