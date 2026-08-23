@@ -242,11 +242,19 @@ Three independent mechanisms, all green throughout:
   `SpiParallelPlanGateTests` both forbids a new serial read-only plan and checks that the
   exemption really does execute read-write — verified to fail when one call is reverted.
 
-  Cursors are the same class in a second form: `SPI_cursor_open_with_args` takes
-  `cursorOptions`, and every call passed `0`. `converse.prompt_coherence('What is a dog?')`
-  went **6108ms → 1793ms**; `'What is a glacier?'` is unchanged at ~1230ms, so the win
-  depends on whether the plan has anything to parallelise. Elector output is identical
-  (`a` 0.017056, `what` 0.013987, `glacier` 0.001045).
+  Cursors take `cursorOptions` too and every call passed `0`, so that was set as well —
+  but **the cursor change is worth ~6%, not the 3.4× I first claimed.** Measured warm over
+  repeated samples: with the flag 1438–1488ms, without it 1571–1576ms. The 6108ms I
+  compared against was a single cold sample. That is consistent with the documented
+  limitation that a cursor fetched via `SPI_cursor_fetch` executes in a single backend even
+  with `CURSOR_OPT_PARALLEL_OK`.
+
+  Converting the draining cursor to a one-shot `SPI_execute_with_args` — which *is*
+  parallel-eligible, since `SPI_execute` sets `CURSOR_OPT_PARALLEL_OK` itself — measured
+  **1577ms**, no better, so it was reverted rather than kept for tidiness. The fetch
+  mechanism is not the cost: `taxonomy.bubble_up_batch` alone is **696ms** of the ~1450ms,
+  and the per-row `converse.word_language(b.sense_id)` adds ~130ms. Elector output
+  identical throughout (`a` 0.017056, `what` 0.013987, `glacier` 0.001045).
 - **`resolved_scored_build` also applies rank** (this commit) — it had the same raw
   `witness_weight` defect as `resolved_build`.
 
