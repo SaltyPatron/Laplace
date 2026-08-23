@@ -1,11 +1,60 @@
 -- converse.prompt_state — GH #862 / #860. No SET, real schema names.
+--
+-- A TOKEN'S LANGUAGE IS DECIDED BY THE PROMPT, NOT BY THE TOKEN ALONE (2026-08-23).
+--
+-- converse.word_language is a per-token global argmax over HAS_LANGUAGE. On the
+-- live substrate `glacier` carries language:fra at eff_mu 1476.46 and language:eng
+-- at 1474.74 -- five witnesses each, a 1.7 gap on ~1476, which is a tie decided by
+-- whichever corpus happened to attest one more strongly. So "What is a glacier?"
+-- reported: What (none), is -> enm (Middle English), a -> eng, glacier -> fra.
+--
+-- That is not cosmetic. prompt_coherence.c ranks lang_agree ABOVE witness count on
+-- purpose -- "a sense in a language the prompt is not written in is the wrong sense
+-- however well attested it is" -- so tagging the one CONTENT word of an English
+-- prompt as French demotes it through the very axis that exists to protect
+-- addressing, and hands the election to the function words.
+--
+-- The prompt already elects its own languages: converse.prompt_language returns a
+-- ranked mass tally over every token, and INVENTION §7's election law says the
+-- discriminating information lives BETWEEN the prompt's tokens, never in one of
+-- them. So a token's language is resolved AGAINST that tally: among the languages
+-- the token is actually attested in, prefer the one the prompt as a whole supports,
+-- ordered by the prompt's mass and then by the token's own eff_mu.
+--
+-- Falls back to the global argmax when a token shares no language with the prompt
+-- (a loanword, a name, a single-token prompt) -- an unattested intersection is not
+-- an answer, so the previous behaviour stands rather than returning NULL. That
+-- keeps prompt_language's own law: it is "a RANKED TALLY, never a single winner and
+-- never a filter predicate" (src/prompt_language.c) -- this reads it as a bias,
+-- never as a filter.
+--
+-- Set-based: one tally, one join, no per-row scalar (G2, id space throughout).
 DROP FUNCTION IF EXISTS laplace.prompt_state(text);
 -- BEGIN ATOMIC: GH #764.
 CREATE OR REPLACE FUNCTION converse.prompt_state(p_text text)
     RETURNS TABLE(ord int, word text, id bytea, language bytea)
     LANGUAGE sql LAPLACE_STABLE_STRICT
 BEGIN ATOMIC
-    SELECT pw.ord, pw.word, pw.id, converse.word_language(pw.id)
-    FROM converse.prompt_words(p_text) pw
-    WHERE pw.id IS NOT NULL;
+    WITH tokens AS MATERIALIZED (
+        SELECT pw.ord, pw.word, pw.id
+        FROM converse.prompt_words(p_text) pw
+        WHERE pw.id IS NOT NULL
+    ), tally AS MATERIALIZED (
+        SELECT pl.lang_id, pl.mass FROM converse.prompt_language(p_text) pl
+    ), agreed AS MATERIALIZED (
+        SELECT DISTINCT ON (t.ord) t.ord, c.object_id AS language
+        FROM tokens t
+        JOIN laplace.consensus c
+          ON c.subject_id = t.id
+         AND c.type_id = laplace.relation_type_id('HAS_LANGUAGE')
+         AND c.object_id IS NOT NULL
+        JOIN tally ON tally.lang_id = c.object_id
+        ORDER BY t.ord, tally.mass DESC, consensus.eff_mu(c.rating, c.rd) DESC,
+                 c.object_id
+    )
+    SELECT t.ord, t.word, t.id,
+           COALESCE(a.language, converse.word_language(t.id))
+    FROM tokens t
+    LEFT JOIN agreed a ON a.ord = t.ord
+    ORDER BY t.ord;
 END;
