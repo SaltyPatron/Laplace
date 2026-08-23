@@ -241,6 +241,12 @@ Three independent mechanisms, all green throughout:
   profiled. `fold_route.c` is exempt because its plans execute read-write, and
   `SpiParallelPlanGateTests` both forbids a new serial read-only plan and checks that the
   exemption really does execute read-write — verified to fail when one call is reverted.
+
+  Cursors are the same class in a second form: `SPI_cursor_open_with_args` takes
+  `cursorOptions`, and every call passed `0`. `converse.prompt_coherence('What is a dog?')`
+  went **6108ms → 1793ms**; `'What is a glacier?'` is unchanged at ~1230ms, so the win
+  depends on whether the plan has anything to parallelise. Elector output is identical
+  (`a` 0.017056, `what` 0.013987, `glacier` 0.001045).
 - **`resolved_scored_build` also applies rank** (this commit) — it had the same raw
   `witness_weight` defect as `resolved_build`.
 

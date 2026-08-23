@@ -198,7 +198,7 @@ pg_laplace_prompt_language(PG_FUNCTION_ARGS)
             "WHERE c.subject_id = ANY($1) "
             "  AND c.type_id = laplace.relation_type_id('HAS_LANGUAGE') "
             "  AND c.object_id IS NOT NULL",
-            1, argtypes, args, NULL, true, 0);
+            1, argtypes, args, NULL, true, CURSOR_OPT_PARALLEL_OK);
 
         for (;;)
         {

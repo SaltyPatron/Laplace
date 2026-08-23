@@ -235,7 +235,7 @@ pc_scan_edges(HTAB *syn_h, HTAB *type_h, HTAB *peer_h, PcCand *cands,
           "FROM laplace.consensus c WHERE c.object_id = ANY($1)";
 
     args[0] = PointerGetDatum(syn_arr);
-    portal = SPI_cursor_open_with_args("pc_edges", sql, 1, argtypes, args, NULL, true, 0);
+    portal = SPI_cursor_open_with_args("pc_edges", sql, 1, argtypes, args, NULL, true, CURSOR_OPT_PARALLEL_OK);
 
     for (;;)
     {
@@ -896,7 +896,7 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
                 "SELECT c.subject_id, c.type_id, c.rating, c.rd "
                 "FROM laplace.consensus c "
                 "WHERE c.subject_id = ANY($1) AND c.type_id = ANY($2)",
-                2, argtypes, args, NULL, true, 0);
+                2, argtypes, args, NULL, true, CURSOR_OPT_PARALLEL_OK);
 
             for (;;)
             {
