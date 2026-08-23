@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import sys
 from pathlib import Path
 
@@ -64,8 +65,13 @@ def main() -> int:
     if args.format == "json":
         print(json.dumps(out))
     else:
-        print(f"TARGET_DB={target}")
-        print(f"PREREQ_SOURCES={' '.join(prereqs)}")
+        # Shell-quoted: the caller eval's these lines. Unquoted, a multi-prerequisite
+        # source emitted `PREREQ_SOURCES=unicode iso639 cili`, which eval reads as an
+        # assignment followed by the COMMAND `iso639 cili` -- so decomposer-test.sh
+        # died with "iso639: command not found" for every source with more than one
+        # prerequisite, i.e. every source above the floor.
+        print(f"TARGET_DB={shlex.quote(target)}")
+        print(f"PREREQ_SOURCES={shlex.quote(' '.join(prereqs))}")
     return 0
 
 

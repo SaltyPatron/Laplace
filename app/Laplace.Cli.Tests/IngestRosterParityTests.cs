@@ -15,6 +15,7 @@ public sealed class IngestRosterParityTests
     private static readonly HashSet<string> OperationalOnlyRoutes =
         new(StringComparer.OrdinalIgnoreCase)
         {
+            "agents",
             "chess",
             "chess-analyze",
             "chess-books",
@@ -46,10 +47,16 @@ public sealed class IngestRosterParityTests
     // no corpus seed is ordered for them (modality-ladder campaign law: identity
     // locks land first, seeds only on operator order), so operational-only is the
     // truthful classification until a media corpus enters the ladder.
+    // 19 -> 20 for agents: AI-agent session logs (Claude Code, Codex, Gemini,
+    // Antigravity, Copilot, Cursor, ...). Witness-unit lane whose boundary is an
+    // operator-supplied path -- or, with no path, this user's own provider roots.
+    // No witness-manifest entry because the seed cadence orders corpora under
+    // DATA_ROOT and a personal session-log tree is neither a corpus nor orderable
+    // by the ladder; the same classification code/repo/tabular already carry.
     // 18 -> 19 for chess-move-outcomes: substrate-sourced, marker-gated chess-modality
     // pass (the move-outcome fold onto the bounded MOVE vocabulary), the same shape and
     // the same reasoning as chess-opening-match/chess-eval/chess-trajectory above it.
-    private const int OperationalOnlyRouteCeiling = 19;
+    private const int OperationalOnlyRouteCeiling = 20;
 
     [Fact]
     public void RuntimeRoutes_MatchManifestPlusExplicitOperationalRoutes()

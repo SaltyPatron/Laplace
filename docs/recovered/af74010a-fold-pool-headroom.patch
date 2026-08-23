@@ -1,0 +1,195 @@
+--- /proc/self/fd/11	2026-08-23 16:26:27.953351177 +0000
++++ b/app/Laplace.Core/Core/IngestSizing.cs	2026-08-20 21:54:15.626097198 +0000
+@@ -228,16 +228,39 @@
+     }
+ 
+     /// <summary>
++    /// Pool slots the consensus fold leaves free in the shared ingest pool for
++    /// renters the pool equation does not enumerate per-owner: the run-journal /
++    /// progress writer, replay-journal and route probes, finalize, and a batch
++    /// retry re-entering while the failed batch's folds still hold connections.
++    /// </summary>
++    public const int ConsensusFoldPoolHeadroom = 2;
++
++    /// <summary>
+     /// Resolve the fold from the same memory and topology inputs as compose/apply.
+-    /// No throughput cap lives here: the only ceilings are the shared memory envelope
+-    /// and the CLR/PostgreSQL signed-array index range.
++    /// No throughput cap lives here: the only ceilings are the shared memory envelope,
++    /// the fold's share of the ingest connection pool, and the CLR/PostgreSQL
++    /// signed-array index range.
+     /// </summary>
+     public static ConsensusFoldPlan ResolveConsensusFold(
+         int applyPartitions,
+         long? workingSetBudgetBytes = null,
+         long? flushEnvelopeBytes = null)
+     {
+-        int connections = Math.Max(1, applyPartitions);
++        // The fold SHARES one ingest pool with the apply fan: the pool is sized
++        // 1 + 2·applyPartitions (control + COPY fan + fold fan, see
++        // PostgresResourcePlan.Resolve), and by design the fold of batch N runs
++        // WHILE batch N+1 probes/COPYs. Taking the full apply width here made
++        // the planned owners sum to EXACTLY the pool — fold p + apply p +
++        // control 1 = 1 + 2p — so the first unplanned renter queued behind
++        // long-held fold connections until Npgsql's rent timeout killed the run.
++        // MEASURED 2026-08-20 on the syzygy seed (run 32417964629): pool 25
++        // exhausted at 908s, the mask deposit lane and the apply COPY fan both
++        // starving at 15s. The fold is the elastic background owner, so it
++        // cedes the headroom: its global connection gate stays BELOW its pool
++        // share — control 1 + COPY fan p + fold (p − headroom) + free headroom
++        // = 1 + 2p — and the fold back-pressures on its own semaphore instead
++        // of exhausting the pool.
++        int connections = Math.Max(1, applyPartitions - ConsensusFoldPoolHeadroom);
+         long budget = Math.Max(1, workingSetBudgetBytes ?? ResolveWorkingSetBudgetBytes());
+         long envelope = Math.Clamp(
+             flushEnvelopeBytes ?? ResolveWorkingSetFlushEnvelopeBytes(), 1, budget);
+--- /proc/self/fd/11	2026-08-23 16:26:27.961351206 +0000
++++ b/app/Laplace.Substrate/Crud/Npgsql/ConsensusAccumulatingWriter.cs	2026-08-20 21:54:29.613960863 +0000
+@@ -48,28 +48,6 @@
+         return Volatile.Read(ref _directConsensusRoute) == 1;
+     }
+ 
+-    // Write-epoch bump gate (PR1 of the trusted-novelty series). Fold segment
+-    // and highway-mask deposit transactions are write-lane transactions, so
+-    // each bumps laplace.apply_write_epoch BEFORE its writes — the epoch is
+-    // what lets a later apply prove "no writer intervened" instead of
+-    // re-probing. Probed once and cached exactly like the direct-route gate
+-    // above: an older installed extension has no sequence and every lane must
+-    // degrade to the pre-epoch behavior, never fail the fold.
+-    private int _applyWriteEpochRoute = -1;
+-
+-    private async ValueTask<bool> SupportsApplyWriteEpochAsync(
+-        NpgsqlConnection connection, CancellationToken ct)
+-    {
+-        int known = Volatile.Read(ref _applyWriteEpochRoute);
+-        if (known >= 0) return known == 1;
+-
+-        await using var probe = connection.CreateCommand();
+-        probe.CommandText = "SELECT to_regclass('laplace.apply_write_epoch') IS NOT NULL";
+-        bool supported = (bool)(await probe.ExecuteScalarAsync(ct) ?? false);
+-        Interlocked.CompareExchange(ref _applyWriteEpochRoute, supported ? 1 : 0, -1);
+-        return Volatile.Read(ref _applyWriteEpochRoute) == 1;
+-    }
+-
+     // PER-TYPE FOLD LANES (2026-07-21), replacing a process-wide
+     // SemaphoreSlim(1,1) that let no two deltas overlap for any reason. Consensus
+     // is LIST-partitioned by type_id, so two types never share a row: lanes keyed
+@@ -138,6 +116,12 @@
+     // lanes existed (SemaphoreSlim(1,1) over the whole delta) had been holding
+     // that number down as a side effect. This makes the bound explicit and
+     // independent of how many lanes happen to be live.
++    // The budget sits BELOW the fold's share of the ingest pool (2026-08-20):
++    // sized at the full apply width, fold + COPY fan + control summed to exactly
++    // Max Pool Size, and the first unplanned renter — a run-journal write, a
++    // batch retry — starved behind long mask-deposit statements until Npgsql's
++    // 15s rent timeout killed the syzygy seed (run 32417964629). The headroom
++    // subtraction lives in ResolveConsensusFold, the one sizing authority.
+     private readonly SemaphoreSlim _foldConnections = new(FoldConnections, FoldConnections);
+ 
+     // Run-scoped pair dedup, owned by the same stable shard as the entity. Each set
+@@ -672,7 +656,6 @@
+                 {
+                 await using var conn = await _ds.OpenConnectionAsync(token);
+                 bool directRoute = await SupportsDirectConsensusRouteAsync(conn, token);
+-                bool epochBump = await SupportsApplyWriteEpochAsync(conn, token);
+                 await using var tx = await conn.BeginTransactionAsync(token);
+                 // consensus_upsert's UPDATE arm is the same shape as attestation_merge's
+                 // and carries the same landmine: type_id pinned as a literal, subject_id
+@@ -680,16 +663,10 @@
+                 // array driven into a primary key. The nested loop is right at every size;
+                 // a Merge Append or hash over the whole relation never is. Pinned here
+                 // before the fold grows into the cliff the merge lane already fell off.
+-                //
+-                // The write-epoch bump rides the same batch — no extra round trip
+-                // (this command carries no positional parameters, which Npgsql
+-                // forbids in multi-statement commands), nextval before the fold's
+-                // writes as the sequence's law requires.
+                 await using (var guc = conn.CreateCommand())
+                 {
+                     guc.Transaction = tx;
+-                    guc.CommandText = "SET LOCAL enable_mergejoin = off; SET LOCAL enable_hashjoin = off"
+-                        + (epochBump ? "; SELECT nextval('laplace.apply_write_epoch')" : "");
++                    guc.CommandText = "SET LOCAL enable_mergejoin = off; SET LOCAL enable_hashjoin = off";
+                     await guc.ExecuteNonQueryAsync(token);
+                 }
+                 await using var up = conn.CreateCommand();
+@@ -842,21 +819,7 @@
+                 try
+                 {
+                     await using var conn = await _ds.OpenConnectionAsync(ct);
+-                    bool epochBump = await SupportsApplyWriteEpochAsync(conn, ct);
+                     await using var tx = await conn.BeginTransactionAsync(ct);
+-                    // Deposit transactions are write-lane transactions too: bump the
+-                    // epoch before the OR-accumulate. Its own command, unlike the
+-                    // fold segment's piggyback, because the deposit statement uses
+-                    // positional parameters and Npgsql forbids those in
+-                    // multi-statement commands — one cheap extra round trip per
+-                    // deposit transaction (the support probe itself is cached).
+-                    if (epochBump)
+-                    {
+-                        await using var bump = conn.CreateCommand();
+-                        bump.Transaction = tx;
+-                        bump.CommandText = "SELECT nextval('laplace.apply_write_epoch')";
+-                        await bump.ExecuteNonQueryAsync(ct);
+-                    }
+                     await using var mask = conn.CreateCommand();
+                     mask.Transaction = tx;
+                     mask.CommandTimeout = 0;
+--- /proc/self/fd/11	2026-08-23 16:26:27.969351236 +0000
++++ b/app/Laplace.Core.Tests/Core/IngestSizingTests.cs	2026-08-20 21:55:25.845427619 +0000
+@@ -219,8 +219,9 @@
+             workingSetBudgetBytes: 4L << 30,
+             flushEnvelopeBytes: 512L << 20);
+ 
+-        Assert.Equal(12, plan.Connections);
+-        Assert.Equal((512L << 20) / 12 / MemoryTopology.ConsensusFoldTransitBytesPerCell,
++        Assert.Equal(12 - IngestSizing.ConsensusFoldPoolHeadroom, plan.Connections);
++        Assert.Equal((512L << 20) / plan.Connections
++            / MemoryTopology.ConsensusFoldTransitBytesPerCell,
+             plan.ChunkCells);
+         Assert.Equal(8, plan.PipelineDepth);
+         Assert.Equal((512L << 20) / MemoryTopology.ConsensusFoldBytesPerRelation,
+@@ -253,13 +254,42 @@
+         var four = IngestSizing.ResolveConsensusFold(4, 2L << 30, 256L << 20);
+         var eight = IngestSizing.ResolveConsensusFold(8, 2L << 30, 256L << 20);
+ 
+-        Assert.Equal(four.ChunkCells / 2, eight.ChunkCells);
++        Assert.True(eight.Connections > four.Connections);
++        Assert.Equal(four.ChunkCells * four.Connections / eight.Connections,
++            eight.ChunkCells);
+         Assert.True((long)eight.ChunkCells * eight.Connections
+             * MemoryTopology.ConsensusFoldTransitBytesPerCell <= 256L << 20);
+         Assert.Equal(four.PipelineDepth, eight.PipelineDepth);
+     }
+ 
+     [Fact]
++    public void ResolveConsensusFold_LeavesHeadroomInTheSharedIngestPool()
++    {
++        // The ingest pool is 1 + 2·applyPartitions (control + COPY fan + fold
++        // fan, PostgresResourcePlan.Resolve), and the fold of batch N runs while
++        // batch N+1 probes/COPYs. The fold's gate must therefore sit BELOW its
++        // pool share: run 32417964629 (syzygy seed) died with the planned owners
++        // summing to exactly Max Pool Size and every unplanned renter starving
++        // at the 15s rent timeout. Pin the ledger: control + COPY fan + fold
++        // gate + free headroom fills the pool exactly.
++        foreach (int p in new[] { 12, 8, 4 })
++        {
++            int pool = PostgresResourcePlan.Resolve(64L << 30, p, 2 * p, 2)
++                .IngestConnectionOwners;
++            var plan = IngestSizing.ResolveConsensusFold(p, 2L << 30, 256L << 20);
++            Assert.Equal(pool,
++                1 + p + plan.Connections + IngestSizing.ConsensusFoldPoolHeadroom);
++        }
++
++        // A machine too small to cede the full headroom still folds on one
++        // connection; forward progress outranks slack there.
++        Assert.Equal(1,
++            IngestSizing.ResolveConsensusFold(1, 2L << 30, 256L << 20).Connections);
++        Assert.Equal(1,
++            IngestSizing.ResolveConsensusFold(2, 2L << 30, 256L << 20).Connections);
++    }
++
++    [Fact]
+     public void ResolveConsensusFold_ConstrainedBudgetKeepsOneBoundedPipelineSlot()
+     {
+         var plan = IngestSizing.ResolveConsensusFold(4, 256L << 20, 256L << 20);
