@@ -154,17 +154,27 @@ jobs:
       # header names as the project's defining failure mode.
       - name: Gate — model carries substrate knowledge
         run: |
-          command -v ollama >/dev/null || { echo "::error::ollama runtime missing on runner"; exit 1; }
-          if ! curl -sf http://127.0.0.1:11434/api/version >/dev/null; then
-            nohup ollama serve >/tmp/laplace-ollama.log 2>&1 &
-            for _ in $(seq 1 30); do
-              curl -sf http://127.0.0.1:11434/api/version >/dev/null && break; sleep 1
-            done
+          # The harness resolves its own runner: LAPLACE_LLAMA_BIN, then PATH, then known
+          # llama.cpp build locations, then ollama. It validates a candidate by invoking
+          # it, because one checked-in build is +x but dies on a missing libllama.so.0 and
+          # selecting it would report 0/0 probes -- a broken runner reading as a model
+          # verdict. Only bring ollama up if no llama-completion resolves.
+          if ! python3 -c "import sys; sys.path.insert(0,'scripts'); \
+                from importlib.machinery import SourceFileLoader; \
+                m=SourceFileLoader('h','scripts/verify-model-behavioral.py').load_module(); \
+                sys.exit(0 if m.resolve_llama_bin() else 1)"; then
+            command -v ollama >/dev/null || { echo "::error::no model runner: no llama-completion and no ollama"; exit 1; }
+            if ! curl -sf http://127.0.0.1:11434/api/version >/dev/null; then
+              nohup ollama serve >/tmp/laplace-ollama.log 2>&1 &
+              for _ in $(seq 1 30); do
+                curl -sf http://127.0.0.1:11434/api/version >/dev/null && break; sleep 1
+              done
+            fi
+            curl -sf http://127.0.0.1:11434/api/version >/dev/null \
+              || { echo "::error::ollama did not come up"; cat /tmp/laplace-ollama.log; exit 1; }
           fi
-          curl -sf http://127.0.0.1:11434/api/version >/dev/null \
-            || { echo "::error::ollama did not come up"; cat /tmp/laplace-ollama.log; exit 1; }
           python3 scripts/verify-model-behavioral.py \
-            --model "$GGUF_OUT" --runner ollama --ollama-tag laplace-ci-verify \
+            --model "$GGUF_OUT" --ollama-tag laplace-ci-verify \
             --db "host=/var/run/postgresql user=laplace_admin dbname=$PGDATABASE" \
             --report /tmp/laplace-model-behavioral.json
 

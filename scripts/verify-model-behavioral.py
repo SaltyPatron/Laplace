@@ -23,6 +23,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 
@@ -103,6 +104,42 @@ def expected_set(db, word, limit):
 # Same decode contract as the llama path: greedy (temperature 0) and repeat-penalised, so
 # a model is judged on content rather than on sampling luck, and the hub-collapse detector
 # still sees cross-probe repetition.
+LLAMA_BIN_CANDIDATES = (
+    "/data/archive/llama-workspace/llama.cpp/build/bin/llama-completion",
+    "/data/archive/llama-workspace/llama.cpp/build-cpu/bin/llama-completion",
+)
+
+
+def resolve_llama_bin():
+    """Find a llama-completion binary, or None.
+
+    The default used to be the literal string "D:/LlamaCPP/llama-completion.exe", so the
+    harness could not run on any machine that was not one particular Windows box -- which
+    is most of why it was invoked by no workflow. Resolution order: explicit env, PATH,
+    then known build locations.
+    """
+    def usable(path):
+        # Executable is not runnable: one of the checked-in builds is present and
+        # +x but dies with "libllama.so.0: cannot open shared object file". Selecting
+        # it would fail every probe and report 0/0, which reads as a model verdict
+        # rather than a broken runner. Invoke it before trusting it.
+        if not path or not os.path.isfile(path) or not os.access(path, os.X_OK):
+            return False
+        try:
+            r = subprocess.run([path, "--help"], capture_output=True, timeout=30)
+        except Exception:
+            return False
+        return r.returncode == 0
+
+    env = os.environ.get("LAPLACE_LLAMA_BIN")
+    if env:
+        return env if usable(env) else None
+    for cand in (shutil.which("llama-completion"), *LLAMA_BIN_CANDIDATES):
+        if usable(cand):
+            return cand
+    return None
+
+
 def ollama_ensure_model(url, tag, gguf_path):
     """Register the artifact under test.
 
@@ -149,29 +186,30 @@ def run_completion(llama, model, prompt, n_tokens):
     # Greedy + repeat-penalty: deterministic AND loop-suppressed — the decode any
     # real consumer would use. Pure greedy (no penalty) loops even trained models
     # at this length; the hub-collapse detector still fires on cross-probe hubs.
+    # -no-cnv and stdin=DEVNULL are both load-bearing. Without them the binary enters
+    # conversation mode, wraps the probe in the GGUF's chat template (so the scored text
+    # begins "<|user|> king<|assistant|>" rather than the continuation), and then BLOCKS on
+    # inherited stdin until the 180s timeout -- which surfaces as a probe failure and reads
+    # as a verdict on the model rather than on the harness.
     r = subprocess.run(
         [llama, "-m", model, "-p", prompt, "-n", str(n_tokens), "--temp", "0",
-         "--repeat-penalty", "1.4"],
+         "--repeat-penalty", "1.4", "-no-cnv", "--no-display-prompt"],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
-        timeout=180)
+        stdin=subprocess.DEVNULL, timeout=180)
     if r.returncode != 0:
         return None, (r.stderr or "")[-400:]
     # llama-completion prints diagnostics before and perf counters after the
     # generation; the generation itself is the line block that starts with the
     # echoed prompt. Collect from that line until the perf block begins, so
     # words like "sampling"/"tokens" never leak into the scored output.
-    lines = r.stdout.splitlines()
+    # With --no-display-prompt the generation is the whole of stdout; keep the perf-block
+    # cutoff so counters never leak into the scored text, and keep tolerating a build that
+    # echoes the prompt anyway.
     gen_lines = []
-    started = False
-    for ln in lines:
-        if not started:
-            if ln.startswith(prompt):
-                gen_lines.append(ln[len(prompt):])
-                started = True
-            continue
+    for ln in r.stdout.splitlines():
         if ln.startswith(("common_perf_print", "llama_", "generate:", "sampler")):
             break
-        gen_lines.append(ln)
+        gen_lines.append(ln[len(prompt):] if ln.startswith(prompt) else ln)
     return "\n".join(gen_lines).strip(), None
 
 
@@ -262,10 +300,14 @@ def likelihood_mode(args, probes):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", required=True)
-    ap.add_argument("--llama", default="D:/LlamaCPP/llama-completion.exe")
-    # ollama is the runner that actually exists on this host and on the runner box; the
-    # llama-completion path is kept for anyone who has that binary.
-    ap.add_argument("--runner", choices=["llama", "ollama"], default="llama")
+    ap.add_argument("--llama", default=None,
+                    help="llama-completion binary; default resolves LAPLACE_LLAMA_BIN, then PATH, "
+                         "then known build locations")
+    # `auto` is the default because a hardcoded D:/LlamaCPP path meant this harness could
+    # never run anywhere it was actually checked out, which is most of why it was wired
+    # into no workflow. Prefer llama-completion (the decode this was written against);
+    # fall back to ollama, which serves the same GGUF through its HTTP API.
+    ap.add_argument("--runner", choices=["auto", "llama", "ollama"], default="auto")
     ap.add_argument("--ollama-url", default="http://127.0.0.1:11434")
     ap.add_argument("--ollama-tag", default="laplace-verify")
     ap.add_argument("--db", default="host=localhost user=postgres dbname=laplace")
@@ -283,6 +325,22 @@ def main():
                     help="likelihood mode: gate full forward against the layers=0 floor "
                          "(mean rank improves, hits@50 holds, mrr within 3%%)")
     args = ap.parse_args()
+
+    if args.llama is None:
+        args.llama = resolve_llama_bin()
+    if args.runner == "auto":
+        if args.llama:
+            args.runner = "llama"
+        elif shutil.which(os.environ.get("LAPLACE_OLLAMA_BIN", "ollama")):
+            args.runner = "ollama"
+        else:
+            print("::error::no model runner found: set LAPLACE_LLAMA_BIN to a "
+                  "llama-completion binary, or install ollama")
+            return 2
+    if args.runner == "llama" and not args.llama:
+        print("::error::--runner llama but no llama-completion binary resolved "
+              "(set LAPLACE_LLAMA_BIN)")
+        return 2
 
     if args.runner == "ollama":
         err = ollama_ensure_model(args.ollama_url, args.ollama_tag, args.model)
