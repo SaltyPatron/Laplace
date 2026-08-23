@@ -77,6 +77,21 @@ public static class MemoryTopology
     /// <summary>
     /// Approx resident bytes one accumulated consensus relation holds in the client-side fold
     /// dictionary: a (3×16B) key + the Acc state + ConcurrentDictionary node/bucket overhead.
+    ///
+    /// MEASURED 2026-08-23 (FoldMemoryTopologyMeasurementTests): the real accumulator shape --
+    /// Dictionary&lt;(Hash128,Hash128,Hash128?), Delta&gt; with Delta = 4 int64 -- costs
+    /// <b>112 bytes/entry</b> over 200,000 entries. This constant is 256, so it is 2.3x
+    /// conservative.
+    ///
+    /// That is not free: accumulatorCapacity = budget / this, so the fold accumulator holds
+    /// 44% of what memory actually allows and flushes correspondingly more often, and each
+    /// flush lands on consensus.upsert_type -- the most expensive statement in the ingest
+    /// (3,189s over 1,058 calls on the live foundation seed, against 1,121s for all COPY
+    /// combined). Lowering it toward the measurement is a real throughput lever and is NOT
+    /// taken here: it needs an A/B on a cluster, not a guess swapped for a guess.
+    ///
+    /// The test pins both directions -- below the measurement is an under-reserved envelope,
+    /// above 4x is memory reserved for nothing.
     /// </summary>
     public const int ConsensusFoldBytesPerRelation = 256;
 
@@ -85,6 +100,11 @@ public static class MemoryTopology
     /// managed byte arrays, the Npgsql write buffer, PostgreSQL arrays, native cell-id
     /// construction, and per-type slices. This is byte accounting, not a row-count cap:
     /// 3 varlena ids/references + 4 scalar arrays + wire copy + server arrays/slices.
+    ///
+    /// UNMEASURED, and it divides the envelope to produce chunkCells -- the number of cells
+    /// one consensus_upsert carries. FoldMemoryTopologyMeasurementTests pins only that it
+    /// exceeds the resident cost above, because the wire portion cannot be measured from
+    /// managed heap accounting alone. Measuring it needs instrumentation on a live fold.
     /// </summary>
     public const int ConsensusFoldTransitBytesPerCell = 512;
 
