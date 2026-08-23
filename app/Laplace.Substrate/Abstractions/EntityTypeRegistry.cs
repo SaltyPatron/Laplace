@@ -20,6 +20,16 @@ public static class EntityTypeRegistry
     // The entity a set-valued attribute points at: one per distinct member set, by content id.
     public static readonly Hash128 Collection = Id("Collection");
     public static readonly Hash128 ConversationSession = Id("Conversation_Session");
+    // Agent-trace lane (spec 34 batch counterpart): a turn is the ordered composition of
+    // its part content roots; a tool invocation is the composition of input/result roots.
+    public static readonly Hash128 ConversationTurn = Id("Conversation_Turn");
+    public static readonly Hash128 AgentTool = Id("Agent_Tool");
+    public static readonly Hash128 AgentModel = Id("Agent_Model");
+    public static readonly Hash128 ToolInvocation = Id("Tool_Invocation");
+    // Re-ingest watermark for grown session logs (chess ANALYZED_AT precedent): a bare
+    // marker entity per witnessed turn-prefix, probed via the batched existence bitmap so
+    // a re-ingested session only re-witnesses the turns beyond its deepest marker.
+    public static readonly Hash128 AgentSessionWatermark = Id("Agent_Session_Watermark");
     public static readonly Hash128 Document = Id("Document");
     public static readonly Hash128 EsoClass = Id("ESO_Class");
     public static readonly Hash128 EsoRole = Id("ESO_Role");

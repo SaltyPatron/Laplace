@@ -548,6 +548,13 @@
           "scope": "source_evidence"
         }
       ]
+    },
+    "agents": {
+      "decomposer": "AgentTraceDecomposer",
+      "layer": 2,
+      "prerequisites": [],
+      "consensus_gates": [],
+      "skip_layer_complete": true
     }
   }
 }

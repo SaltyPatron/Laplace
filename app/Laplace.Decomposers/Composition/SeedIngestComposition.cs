@@ -64,6 +64,7 @@ public static class SeedIngestComposition
         ("rgba-image", typeof(RgbaImageDecomposer)),
         ("track-audio", typeof(TrackAudioDecomposer)),
         ("frame-video", typeof(FrameVideoDecomposer)),
+        ("agents", typeof(AgentTrace.AgentTraceDecomposer)),
     ];
 
     public static IServiceCollection AddLaplaceSeedIngest(this IServiceCollection services)

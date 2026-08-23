@@ -370,7 +370,7 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
         }
         b.AddAttestation(NativeAttestation.Categorical(
             lemmaId.Value, "HAS_SENSE", senseId.Value, Source, SourceTrust.StandardsDerived,
-            magnitude: s.TagCount, arenaScale: 1.0));
+            magnitude: s.WitnessedMagnitude, arenaScale: 1.0));
         b.AddAttestation(NativeAttestation.Categorical(
             senseId.Value, "IS_SENSE_OF", synAnchor.Value, Source, SourceTrust.StandardsDerived));
         b.AddAttestation(NativeAttestation.Categorical(
@@ -695,9 +695,22 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
             if (offEnd < 0) continue;
             if (!long.TryParse(System.Text.Encoding.UTF8.GetString(line.Slice(idx, offEnd)), out long offset)) continue;
             idx += offEnd + 1;
-            int tagStart = line[idx..].IndexOf((byte)' ');
-            if (tagStart < 0) continue;
-            idx += tagStart + 1;
+            // index.sense is `sense_key synset_offset sense_number tag_cnt`. sense_number
+            // is WordNet's own frequency ordering within the lemma (1 = most common) and
+            // was being STEPPED OVER. It is the discriminator 82% of senses have: measured
+            // on WordNet-3.0, 171,463 of 206,941 senses carry tag_cnt = 0, so their
+            // HAS_SENSE magnitude was 0 -> score exactly 0.5 -> a DRAW, and every sense of
+            // a lemma folded to an identical rating. That is why a token's senses carry no
+            // information for any reader that ranks on the fold (W4 §2.2 measured the
+            // 5-way tie on `a` at 994.8; `what` and `the` still measure eff_mu spread 0.0
+            // on the live substrate, while chess/pawn/dog measure 95.9/80.4/77.5).
+            int senseNumStart = line[idx..].IndexOf((byte)' ');
+            if (senseNumStart < 0) continue;
+            if (!int.TryParse(
+                    System.Text.Encoding.UTF8.GetString(line.Slice(idx, senseNumStart)),
+                    out int senseNumber) || senseNumber < 1)
+                senseNumber = 0;
+            idx += senseNumStart + 1;
             if (!int.TryParse(System.Text.Encoding.UTF8.GetString(line[idx..]), out int tagCount)) tagCount = 0;
 
             int pct = senseKey.IndexOf('%');
@@ -715,7 +728,7 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
 
             string? exactKey = SourceEntityIdConventions.NormalizeExactSenseKey(senseKey);
             if (exactKey is null) continue;
-            yield return new WnSense(exactKey, offset, pos, lemma, tagCount);
+            yield return new WnSense(exactKey, offset, pos, lemma, tagCount, senseNumber);
         }
     }
 
@@ -726,5 +739,19 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
 
     internal readonly record struct WnPointer(string Symbol, long TargetOffset, char TargetPos, int SrcWord, int TgtWord);
 
-    private sealed record WnSense(string SenseKey, long Offset, char Pos, string Lemma, int TagCount);
+    private sealed record WnSense(
+        string SenseKey, long Offset, char Pos, string Lemma, int TagCount, int SenseNumber)
+    {
+        /// <summary>
+        /// Witnessed strength of this lemma->sense claim, from the TWO frequency signals
+        /// index.sense ships. tag_cnt (semantic-concordance occurrences) stays dominant
+        /// where it exists; sense_number (WordNet's editorial ordering, 1 = most common)
+        /// contributes a bounded 1/n term that separates the 82% of senses whose tag_cnt
+        /// is 0 and which therefore all folded to the same draw. Both come from the same
+        /// witnessed line -- this reads evidence the corpus already shipped, it does not
+        /// invent a prior.
+        /// </summary>
+        public double WitnessedMagnitude =>
+            TagCount + (SenseNumber > 0 ? 1.0 / SenseNumber : 0.0);
+    };
 }

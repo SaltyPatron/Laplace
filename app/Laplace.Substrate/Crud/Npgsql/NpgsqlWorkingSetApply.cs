@@ -45,6 +45,36 @@ public sealed partial class NpgsqlSubstrateWriter
     internal static readonly int ApplyParallelism = CpuTopology.ResolveApplyPartitions();
     private static readonly IngestSizing.ApplyIoPlan ApplySizing =
         IngestSizing.ResolveApplyIo(ApplyParallelism);
+
+    /// <summary>
+    /// The COPY half of the ingest connection equation, as ONE process-wide budget.
+    ///
+    /// <see cref="PostgresResourcePlan"/> sizes the pool as
+    /// <c>1 control + 2p (COPY fan + fold fan) + observability</c>, so the COPY fan is
+    /// budgeted at p. But the physicalities and attestations phases OVERLAP by design
+    /// (see the dispatch below: "they overlap, so the phase cost is max(phys, atts)"),
+    /// and each fans out to <see cref="ApplyParallelism"/> = p groups — so live COPY
+    /// connections could reach 2p and consume the fold fan's and observability's share
+    /// as well. The pool then had nothing left to hand out and every remaining owner
+    /// could only wait the 15s rent Timeout and throw "connection pool has been
+    /// exhausted (currently 28)" — the seed-lane failures on runs 32601294533 and
+    /// 32550697390, in WiktionaryDecomposer and the chess eval census respectively.
+    ///
+    /// Group COUNT is unchanged (id-range disjointness and payload sizing still decide
+    /// it); only the number simultaneously HOLDING a connection is bounded, so extra
+    /// groups queue for a slot instead of racing the pool to a timeout. Derived from the
+    /// plan record rather than a literal, so it tracks the same equation that sizes
+    /// MaxPoolSize instead of drifting from it.
+    /// </summary>
+    private static readonly SemaphoreSlim CopyConnectionBudget =
+        new(ResolveCopyConnectionBudget(), ResolveCopyConnectionBudget());
+
+    internal static int ResolveCopyConnectionBudget()
+    {
+        var plan = PostgresResourcePlan.Current;
+        int fans = plan.IngestConnectionOwners - 1 - plan.ObservabilityConnectionOwners;
+        return Math.Max(1, fans / 2);
+    }
     private int _directAttestationMergeRoute = -1;
 
     private async ValueTask<bool> SupportsDirectAttestationMergeRouteAsync(
@@ -1869,6 +1899,13 @@ public sealed partial class NpgsqlSubstrateWriter
                 var payload = payloads[group];
                 if (payload.Length == 0) return;
 
+                // Claim a slot in the plan's COPY share BEFORE renting from the pool:
+                // overlapping phases share one budget, so a group waits on a semaphore
+                // (cheap, fair, cancellable) instead of on a 15s pool-rent timeout that
+                // ends the whole ingest batch.
+                await CopyConnectionBudget.WaitAsync(ct).ConfigureAwait(false);
+                try
+                {
                 await using var conn = await _ds.OpenConnectionAsync(ct);
                 await using var tx = await conn.BeginTransactionAsync(ct);
                 // The epoch bump rides the GUC batch — same round trip, and this
@@ -1896,6 +1933,14 @@ public sealed partial class NpgsqlSubstrateWriter
                     await CopyTupleParser.WritePackedAsync(stream, payload, ct);
                 }
                 await tx.CommitAsync(ct);
+                }
+                finally
+                {
+                    // The connection and transaction above are disposed on the way out of
+                    // the try block, so the slot is released only after the pool has the
+                    // connection back.
+                    CopyConnectionBudget.Release();
+                }
             }, ct);
         }
         await Task.WhenAll(tasks);

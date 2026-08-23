@@ -456,6 +456,17 @@ internal static class IngestCommands
             CliRuntime.Decomposers.Resolve("repo"), path, skipLayerCheck: true, cli, skipSourceCompletion: true);
     }
 
+    internal static async Task<int> IngestAgentsAsync(IngestCliArgs cli)
+    {
+        // Path optional: an explicit file/dir is the witness boundary; empty discovers
+        // the current user's provider roots (~/.claude, ~/.codex, ~/.gemini, …).
+        var path = cli.Path is { Length: > 0 } p ? Path.GetFullPath(p) : "";
+        if (path.Length > 0 && !File.Exists(path) && !Directory.Exists(path))
+            return Fail($"agents: path not found: {path}");
+        return await IngestViaRunnerAsync(
+            CliRuntime.Decomposers.Resolve("agents"), path, skipLayerCheck: true, cli, skipSourceCompletion: true);
+    }
+
     internal static async Task<int> IngestTabularAsync(IngestCliArgs cli)
     {
         var path = ResolveRequiredIngestPath(cli.Path);
