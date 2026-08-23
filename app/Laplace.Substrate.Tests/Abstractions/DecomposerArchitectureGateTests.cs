@@ -74,6 +74,22 @@ public sealed class DecomposerArchitectureGateTests
         @"\bChannel\.CreateBounded\s*<",
         RegexOptions.Compiled);
 
+    /// <summary>
+    /// Worker-pool plumbing — what makes a bounded channel an INGEST FAN rather than
+    /// just a channel. The law here is "do not reimplement ParallelIngestWork", and
+    /// ParallelIngestWork is precisely a bounded channel PLUS a bounded worker pool
+    /// over ingest work. A bounded channel with none of this is a different mechanism:
+    /// ChessLabTerminal publishes terminal scrollback to N UI subscribers, one
+    /// DropOldest channel per subscriber, with no work fan, no worker count, and no
+    /// shared primitive that could own it — routing it through ParallelIngestWork would
+    /// be nonsense. Matching the bare channel turned that correct code into main's only
+    /// red test (build/deploy/test runs 32593699371, 32593689674 and predecessors).
+    /// </summary>
+    private static readonly Regex IngestFanShape = new(
+        @"\bParallel\.ForEachAsync\b|\bMaxDegreeOfParallelism\b|\bIngestTopology\b"
+        + @"|\bFileWorkers\b|\bResolveFileWorkers\b|\bIRecordStream\b|\bRecordsAsync\b",
+        RegexOptions.Compiled);
+
     private static IEnumerable<string> DecomposerProjectRoots(string repoRoot)
     {
         yield return Path.Combine(repoRoot, "app", "Laplace.Decomposers");
@@ -541,7 +557,10 @@ public sealed class DecomposerArchitectureGateTests
                 var relPath = $"{projectRel}/{rel}";
                 if (ParallelIngestAllowlist.Contains(relPath)) continue;
                 var text = File.ReadAllText(file);
-                if (ResolveFileWorkersCall.IsMatch(text) || BoundedChannelCreate.IsMatch(text))
+                // ResolveFileWorkers IS ingest topology wherever it appears; a bounded
+                // channel only counts when the file also carries the worker-pool shape.
+                if (ResolveFileWorkersCall.IsMatch(text)
+                    || (BoundedChannelCreate.IsMatch(text) && IngestFanShape.IsMatch(text)))
                     violations.Add(relPath);
             }
         }
