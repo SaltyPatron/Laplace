@@ -108,6 +108,14 @@ Three independent mechanisms, all green throughout:
   0.5. The negation is deliberately NOT in the predicate id preimage, so an assertion in
   one frame and a denial in another meet in one consensus cell and contest it. Pinned by
   `NegatedPredicate_FoldsAsRefute_AndOptionalAsDraw`.
+- **OMW retractions are ingested as Refutes** (this commit). `<lang>-changes.tab` was
+  never globbed: **3,279 REMOVED rows across 26 files**, each saying a lemma is no longer
+  a member of a synset, so membership could only ever accumulate. The retraction now
+  refutes the SAME triple the `wn-data` row asserts, in the same language context, so it
+  meets the assertion in one consensus cell and contests it. The 129 MODIFIED rows are
+  deliberately untouched — the action says the entry changed, not that membership was
+  withdrawn, and guessing which half changed would invent testimony the source did not
+  give.
 - **`resolved_scored_build` also applies rank** (this commit) — it had the same raw
   `witness_weight` defect as `resolved_build`.
 
@@ -118,9 +126,9 @@ Three independent mechanisms, all green throughout:
   WordNet `tag_cnt` + `sense_number`, ConceptNet `weight` (31.8% ≠ 1.0) and `sources[]`
   (96,831 rows with ≥2 contributors), PropBank `lexlink confidence` (16,250 rows at
   0.8/1.0), FrameNet `total=` (290,405 values), OMW `wn-freq-ind.tab`.
-- **Refute at the remaining call sites.** OMW `*-changes.tab` (3,279 REMOVED), CILI
-  `changes-in-wn31.csv` (76 deprecated) and ConceptNet `Not*` (29,547) still ship denials
-  that are dropped or re-encoded as positive relations. VerbNet is done.
+- **Refute at the remaining call sites.** CILI `changes-in-wn31.csv` (76 deprecated) and
+  ConceptNet `Not*` (29,547, re-encoded as separate positive relation types) still ship
+  denials the substrate never sees. VerbNet and OMW are done.
 - **Successor lookup latency.** ~835 ms fixed per call — ~590 ms is the GIN probe fanning
   across all 64 `physicalities` hash partitions (partition key is `id`, probe is on
   constituents, so nothing prunes). Actual work is ~190 ms. At one lookup per token,

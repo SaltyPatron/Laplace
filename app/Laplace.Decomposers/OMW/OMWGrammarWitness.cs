@@ -6,10 +6,16 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 namespace Laplace.Decomposers.OMW;
 
 public enum OmwType { Lemma, Def, Exe }
-public readonly record struct OmwRow(long Offset, char SsType, string Lang, OmwType Type);
+public readonly record struct OmwRow(
+    long Offset, char SsType, string Lang, OmwType Type, bool Removed = false);
 
 internal static class OMWEmitter
 {
+    // One spelling for the membership relation: the wn-data row asserts it and the
+    // <lang>-changes.tab retraction refutes the SAME triple, so the two must never be
+    // able to drift onto different relations.
+    private const string MembershipRelation = "IS_SYNONYM_OF";
+
     internal static void Emit(
         SubstrateChangeBuilder b, in OmwRow row, ReadOnlySpan<byte> valueUtf8)
     {
@@ -27,6 +33,25 @@ internal static class OMWEmitter
 
         switch (row.Type)
         {
+            case OmwType.Lemma when row.Removed:
+                // OMW ships its own retractions in <lang>-changes.tab and they were never
+                // globbed: 3,279 REMOVED rows across 26 files, each saying this lemma is no
+                // longer a member of this synset. Dropping them meant the substrate could
+                // only ever accumulate membership -- a corpus that took a word back had no
+                // way to say so.
+                //
+                // This refutes the SAME triple the wn-data lemma row asserts, in the same
+                // language context, so the retraction meets the assertion in one consensus
+                // cell and contests it instead of landing somewhere it can never be seen.
+                // outcome is the field for that; confirm:false is a Refute (score 0.0).
+                //
+                // MODIFIED rows (129) are deliberately NOT touched: the action says the
+                // entry changed, not that the membership is withdrawn, and guessing which
+                // half changed would be inventing testimony the source did not give.
+                b.AddAttestation(NativeAttestation.Categorical(
+                    root, MembershipRelation, synId, OMWDecomposer.Source, langId,
+                    TC.AcademicCurated, confirm: false));
+                break;
             case OmwType.Lemma:
 
 
@@ -46,7 +71,7 @@ internal static class OMWEmitter
                 // the English copula elected "ice" and election_correctness fell from
                 // 5/6 to 2/6, with four of six probes answering "ice". GH #867.
                 b.AddAttestation(NativeAttestation.Categorical(
-                    root, "IS_SYNONYM_OF", synId, OMWDecomposer.Source, langId, TC.AcademicCurated));
+                    root, MembershipRelation, synId, OMWDecomposer.Source, langId, TC.AcademicCurated));
                 // HAS_LANGUAGE keeps a null context: the object IS the language, so a
                 // language context would be circular.
                 b.AddAttestation(NativeAttestation.Categorical(

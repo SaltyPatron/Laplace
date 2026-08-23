@@ -80,4 +80,56 @@ public sealed class OMWRowParserTests
             try { Directory.Delete(root, recursive: true); } catch { }
         }
     }
+
+    // OMW ships its own retractions -- 3,279 REMOVED rows across 26 <lang>-changes.tab
+    // files -- and they were never globbed, so membership could only ever accumulate.
+    [Fact]
+    public void EnumerateChangesFiles_FindsRetractionsTheDataGlobsExclude()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "omw-chg-" + Guid.NewGuid().ToString("N"));
+        string wns = Path.Combine(root, "wns");
+        Directory.CreateDirectory(Path.Combine(wns, "swe"));
+        File.WriteAllText(Path.Combine(wns, "swe", "wn-data-swe.tab"), "# x\n");
+        File.WriteAllText(Path.Combine(wns, "swe", "swe-changes.tab"),
+            "2025-02-01\tREMOVED\t07451687-n\tswe:lemma\tbegravning\n");
+        try
+        {
+            Assert.DoesNotContain(
+                OMWTabFiles.EnumerateTabFiles(wns, langs: null),
+                f => f.EndsWith("swe-changes.tab", StringComparison.OrdinalIgnoreCase));
+
+            var changes = OMWTabFiles.EnumerateChangesFiles(wns).ToList();
+            string file = Assert.Single(changes);
+            Assert.EndsWith("swe-changes.tab", file, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch { }
+        }
+    }
+
+    // The retraction row is a data row with two extra leading fields, so slicing past the
+    // second tab must yield exactly what the data tab would have produced -- otherwise the
+    // refutation lands on a different triple than the assertion and never contests it.
+    [Fact]
+    public void ChangesRow_SlicedPastActionFields_ParsesAsTheDataRowItRetracts()
+    {
+        byte[] changes = Encoding.UTF8.GetBytes(
+            "2025-02-01\tREMOVED\t07451687-n\tswe:lemma\tbegravning");
+        byte[] data = Encoding.UTF8.GetBytes("07451687-n\tswe:lemma\tbegravning");
+
+        int tabs = 0, cut = -1;
+        for (int i = 0; i < changes.Length; i++)
+            if (changes[i] == (byte)'\t' && ++tabs == 2) { cut = i; break; }
+        Assert.True(cut > 0);
+
+        Assert.True(OMWRowParser.TryParseRow(changes.AsSpan(cut + 1), "und", out var a, out var av));
+        Assert.True(OMWRowParser.TryParseRow(data, "und", out var b, out var bv));
+
+        Assert.Equal(b.Offset, a.Offset);
+        Assert.Equal(b.SsType, a.SsType);
+        Assert.Equal(b.Lang, a.Lang);
+        Assert.Equal(b.Type, a.Type);
+        Assert.Equal(Encoding.UTF8.GetString(bv), Encoding.UTF8.GetString(av));
+    }
 }
