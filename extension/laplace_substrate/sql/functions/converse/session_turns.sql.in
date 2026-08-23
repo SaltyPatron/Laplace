@@ -12,6 +12,11 @@
 -- session with no deposited trajectory returns zero rows — absence is unknown,
 -- never an empty fabrication.
 --
+-- RANK THEN LABEL (ISA gate G2, Rule #3): ids are selected and LIMITed first, then
+-- resolved through exactly two realize.render_batch calls — one positionally aligned
+-- to the surviving turns, one over the DISTINCT role/model name ids (a handful of
+-- entities across any session). No per-row scalar realization anywhere.
+--
 -- Validated against real agent-log sessions in a laplace_d_agents isolate
 -- (claude-code / codex / antigravity / copilot / cursor / gemini corpora);
 -- regress coverage rides the next extension install (the isolate cannot install a
@@ -27,34 +32,62 @@ WITH traj AS MATERIALIZED (
     FROM laplace.physicalities p
     CROSS JOIN LATERAL public.laplace_trajectory_constituents(p.trajectory) t
     WHERE p.entity_id = p_session AND p.type = 1
+    ORDER BY t.ordinal
+    LIMIT COALESCE(p_limit, 2147483647)
+), picked AS MATERIALIZED (
+    SELECT tr.ordinal,
+           tr.turn_id,
+           row_number() OVER (ORDER BY tr.ordinal) AS rn,
+           (SELECT n.object_id
+              FROM laplace.consensus r
+              JOIN laplace.consensus n
+                ON n.subject_id = r.object_id
+               AND n.type_id = realize.canonical_id('IS_INSTANCE_OF')
+             WHERE r.subject_id = tr.turn_id
+               AND r.type_id = realize.canonical_id('HAS_ROLE')
+             ORDER BY consensus.eff_mu(r.rating, r.rd) DESC,
+                      consensus.eff_mu(n.rating, n.rd) DESC
+             LIMIT 1) AS role_name_id,
+           (SELECT n.object_id
+              FROM laplace.consensus r
+              JOIN laplace.consensus n
+                ON n.subject_id = r.object_id
+               AND n.type_id = realize.canonical_id('IS_INSTANCE_OF')
+             WHERE r.subject_id = tr.turn_id
+               AND r.type_id = realize.canonical_id('AUTHORED_BY')
+             ORDER BY consensus.eff_mu(r.rating, r.rd) DESC,
+                      consensus.eff_mu(n.rating, n.rd) DESC
+             LIMIT 1) AS model_name_id,
+           (SELECT max(a.last_observed_at)
+              FROM laplace.attestations a
+             WHERE a.subject_id = tr.turn_id
+               AND a.context_id = p_session
+               AND a.type_id = realize.canonical_id('APPEARS_IN')) AS observed_at
+    FROM traj tr
+), surfaces AS MATERIALIZED (
+    SELECT s.pos, s.txt
+    FROM (SELECT array_agg(pk.turn_id ORDER BY pk.rn) AS ids FROM picked pk) a
+    CROSS JOIN LATERAL unnest(realize.render_batch(a.ids))
+        WITH ORDINALITY AS s(txt, pos)
+), names AS MATERIALIZED (
+    SELECT n.id, n.txt
+    FROM (
+        SELECT array_agg(DISTINCT u.id) AS ids
+        FROM (SELECT pk.role_name_id AS id FROM picked pk WHERE pk.role_name_id IS NOT NULL
+              UNION
+              SELECT pk.model_name_id FROM picked pk WHERE pk.model_name_id IS NOT NULL) u
+    ) a
+    CROSS JOIN LATERAL unnest(a.ids, realize.render_batch(a.ids)) AS n(id, txt)
 )
-SELECT tr.ordinal,
-       tr.turn_id,
-       (SELECT realize.render(n.object_id)
-          FROM laplace.consensus r
-          JOIN laplace.consensus n
-            ON n.subject_id = r.object_id
-           AND n.type_id = realize.canonical_id('IS_INSTANCE_OF')
-         WHERE r.subject_id = tr.turn_id
-           AND r.type_id = realize.canonical_id('HAS_ROLE')
-         ORDER BY consensus.eff_mu(r.rating, r.rd) DESC, consensus.eff_mu(n.rating, n.rd) DESC
-         LIMIT 1) AS role,
-       (SELECT realize.render(n.object_id)
-          FROM laplace.consensus r
-          JOIN laplace.consensus n
-            ON n.subject_id = r.object_id
-           AND n.type_id = realize.canonical_id('IS_INSTANCE_OF')
-         WHERE r.subject_id = tr.turn_id
-           AND r.type_id = realize.canonical_id('AUTHORED_BY')
-         ORDER BY consensus.eff_mu(r.rating, r.rd) DESC, consensus.eff_mu(n.rating, n.rd) DESC
-         LIMIT 1) AS model,
-       (SELECT max(a.last_observed_at)
-          FROM laplace.attestations a
-         WHERE a.subject_id = tr.turn_id
-           AND a.context_id = p_session
-           AND a.type_id = realize.canonical_id('APPEARS_IN')) AS observed_at,
-       realize.render(tr.turn_id) AS surface
-FROM traj tr
-ORDER BY tr.ordinal
-LIMIT COALESCE(p_limit, 2147483647);
+SELECT pk.ordinal,
+       pk.turn_id,
+       rn_role.txt,
+       rn_model.txt,
+       pk.observed_at,
+       sf.txt
+FROM picked pk
+LEFT JOIN surfaces sf ON sf.pos = pk.rn
+LEFT JOIN names rn_role ON rn_role.id = pk.role_name_id
+LEFT JOIN names rn_model ON rn_model.id = pk.model_name_id
+ORDER BY pk.ordinal;
 END;

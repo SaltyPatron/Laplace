@@ -135,12 +135,32 @@ public sealed class ReadPathArchitectureGateTests
                 && file.Contains("OpenAICompat", StringComparison.OrdinalIgnoreCase)) continue;
             if (file.Contains($"{sep}Laplace.Migrations{sep}", StringComparison.OrdinalIgnoreCase)) continue;
             if (file.EndsWith($"{sep}BillingBootstrap.cs", StringComparison.OrdinalIgnoreCase)) continue;
-            // Not substrate catalog: Cursor chat stores are a THIRD-PARTY SQLite container
-            // the agents lane unpacks (a format codec, like Fathom for syzygy), read via
-            // Microsoft.Data.Sqlite — no Npgsql, no substrate SQL surface involved.
-            if (file.EndsWith($"{sep}AgentTrace{sep}CursorAdapter.cs", StringComparison.OrdinalIgnoreCase)) continue;
+            // Not substrate catalog: a THIRD-PARTY SQLite container the agents lane
+            // unpacks (Cursor store.db, Zed threads.db, Crush crush.db, Goose/OpenCode
+            // session dbs) is a FORMAT CODEC, the same class as Fathom for syzygy — it
+            // reads someone else's file, not the substrate. The test is behavioural, not
+            // a filename list: the file talks to Microsoft.Data.Sqlite and never to
+            // Npgsql. A future adapter that reaches for Npgsql fails this gate as it
+            // should, and no allowlist has to be maintained to keep that true.
+            if (IsForeignSqliteCodec(file)) continue;
             yield return file;
         }
+    }
+
+    /// <summary>
+    /// A foreign-container codec: reads a third-party SQLite file through
+    /// Microsoft.Data.Sqlite and never touches Npgsql. Substrate access is Npgsql by
+    /// construction (LaplaceDataSource), so this cannot hide substrate SQL.
+    /// </summary>
+    private static bool IsForeignSqliteCodec(string file)
+    {
+        var text = File.ReadAllText(file);
+        bool sqlite = text.Contains("Microsoft.Data.Sqlite", StringComparison.Ordinal)
+            || text.Contains("SqliteConnection", StringComparison.Ordinal)
+            // The lane's shared open/sniff helper — an adapter that reads a foreign db
+            // through it holds no connection type of its own.
+            || text.Contains("SqliteSniff", StringComparison.Ordinal);
+        return sqlite && !text.Contains("Npgsql", StringComparison.Ordinal);
     }
 
     private static List<string> Violators(string repoRoot, Regex rule)

@@ -50,7 +50,7 @@ public sealed class AgentTraceAdapterTests : IDisposable
     [Fact]
     public async Task ClaudeCode_Parses_Turns_Tools_Usage_Timestamps()
     {
-        string path = await WriteAsync("763989d6.jsonl", ClaudeFixture);
+        string path = await WriteAsync("763989d6-3dd3-45f3-a5ef-9437faf5f921.jsonl", ClaudeFixture);
         var adapter = new ClaudeCodeAdapter();
         Assert.True(adapter.CanHandle(path));
 
@@ -87,6 +87,18 @@ public sealed class AgentTraceAdapterTests : IDisposable
         Assert.False(call.IsError);
 
         Assert.Equal("Tests pass.", s.Turns[2].Text);
+    }
+
+    [Fact]
+    public async Task ClaudeCode_Sidechain_Gets_Its_Own_Session_Identity()
+    {
+        // A subagent transcript carries the PARENT's sessionId; keying on that alone
+        // collapsed every subagent onto the parent and overwrote its trajectory.
+        string path = await WriteAsync("agent-ab36cc5409c73748d.jsonl", ClaudeFixture);
+        var s = Assert.Single(await ParseAllAsync(new ClaudeCodeAdapter(), path));
+        Assert.Equal(
+            "763989d6-3dd3-45f3-a5ef-9437faf5f921.agent-ab36cc5409c73748d", s.SessionKey);
+        Assert.Equal("763989d6-3dd3-45f3-a5ef-9437faf5f921", s.Meta["sidechain_of"]);
     }
 
     // ── Codex ─────────────────────────────────────────────────────────────────────

@@ -38,6 +38,15 @@ public static class AgentTraceAdapters
         new AntigravityAdapter(),
         new CopilotAdapter(),
         new CursorAdapter(),
+        new DroidAdapter(),
+        new AiderAdapter(),
+        new OpenCodeAdapter(),
+        new ClineAdapter(),
+        new GooseAdapter(),
+        new AmpAdapter(),
+        new ContinueAdapter(),
+        new CrushAdapter(),
+        new ZedAdapter(),
         new GenericJsonAdapter(),
     ];
 

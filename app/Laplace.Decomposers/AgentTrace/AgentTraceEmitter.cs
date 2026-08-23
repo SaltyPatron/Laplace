@@ -209,7 +209,7 @@ public static class AgentTraceEmitter
             if (turn.Usage is { IsEmpty: false } usage)
             {
                 totals.Add(usage);
-                EmitUsage(b, ts, tid, sessionId, usage);
+                EmitUsage(b, ts, tid, sessionId, usage, coords);
             }
 
             foreach (var (call, invocationId, inputRoot, resultRoot) in invocations)
@@ -231,11 +231,11 @@ public static class AgentTraceEmitter
                     Attest(b, ts, NativeAttestation.Categorical(
                         inv, Rel(AgentRelation.HasResult), rr, LaneSource, sessionId, TC.AppDerived));
                 if (call.IsError)
-                    AttestMetaAttribute(b, ts, inv, sessionId, "is_error", "true", scope);
+                    AttestMetaAttribute(b, ts, inv, sessionId, "is_error", "true", coords);
             }
 
             foreach (var (k, v) in turn.Meta)
-                AttestMetaAttribute(b, ts, tid, sessionId, k, v, scope);
+                AttestMetaAttribute(b, ts, tid, sessionId, k, v, coords);
 
             // The live lane's corroborating cell: prompt root PRECEDES the reply root that
             // answered it — cross-session/tenant Q→A consensus (ConversationContent parity).
@@ -296,7 +296,7 @@ public static class AgentTraceEmitter
             Attest(b, endUs, NativeAttestation.Categorical(
                 sessionId, Rel(AgentRelation.HasContext), cwd, LaneSource, sessionId, TC.AppDerived));
         if (session.GitBranch is { Length: > 0 } branch)
-            AttestMetaAttribute(b, endUs, sessionId, sessionId, "gitBranch", branch, scope);
+            AttestMetaAttribute(b, endUs, sessionId, sessionId, "gitBranch", branch, coords);
         if (session.UserKey is { Length: > 0 } user
             && Witness(b, user, scope.Tenant.PromptSource, coords, members: null) is { } userRoot)
             Attest(b, endUs, NativeAttestation.Categorical(
@@ -311,9 +311,9 @@ public static class AgentTraceEmitter
                     sessionId, Rel(AgentRelation.OnDate), dateRoot, LaneSource, sessionId, TC.AppDerived));
         }
         foreach (var (k, v) in session.Meta)
-            AttestMetaAttribute(b, endUs, sessionId, sessionId, k, v, scope);
+            AttestMetaAttribute(b, endUs, sessionId, sessionId, k, v, coords);
         if (!totals.IsEmpty)
-            EmitUsage(b, endUs, sessionId, sessionId, totals.ToUsage());
+            EmitUsage(b, endUs, sessionId, sessionId, totals.ToUsage(), coords);
     }
 
     // ── content witnessing ────────────────────────────────────────────────────────
@@ -442,36 +442,33 @@ public static class AgentTraceEmitter
     /// </summary>
     private static void AttestMetaAttribute(
         SubstrateChangeBuilder b, long ts, Hash128 subject, Hash128 sessionId,
-        string key, string value, in ProviderScope scope)
+        string key, string value, Dictionary<Hash128, double[]> coords)
     {
-        if (Witness(b, $"{key}={value}", LaneSource, ThrowawayCoords, members: null) is { } kv)
+        if (Witness(b, $"{key}={value}", LaneSource, coords, members: null) is { } kv)
             Attest(b, ts, NativeAttestation.Categorical(
                 subject, Rel(AgentRelation.HasAttribute), kv, LaneSource, sessionId, TC.AppDerived));
-        _ = scope;
     }
 
-    // Meta attribute roots never join a composition, so their coords are discardable.
-    private static readonly Dictionary<Hash128, double[]> ThrowawayCoords = new();
-
     private static void EmitUsage(
-        SubstrateChangeBuilder b, long ts, Hash128 subject, Hash128 sessionId, AgentUsage usage)
+        SubstrateChangeBuilder b, long ts, Hash128 subject, Hash128 sessionId, AgentUsage usage,
+        Dictionary<Hash128, double[]> coords)
     {
-        AttestScalar(b, ts, subject, sessionId, Rel(AgentRelation.HasInputTokens), usage.InputTokens);
-        AttestScalar(b, ts, subject, sessionId, Rel(AgentRelation.HasOutputTokens), usage.OutputTokens);
-        AttestScalar(b, ts, subject, sessionId, Rel(AgentRelation.HasCacheReadTokens), usage.CacheReadTokens);
-        AttestScalar(b, ts, subject, sessionId, Rel(AgentRelation.HasCacheCreateTokens), usage.CacheCreateTokens);
+        AttestScalar(b, ts, subject, sessionId, Rel(AgentRelation.HasInputTokens), usage.InputTokens, coords);
+        AttestScalar(b, ts, subject, sessionId, Rel(AgentRelation.HasOutputTokens), usage.OutputTokens, coords);
+        AttestScalar(b, ts, subject, sessionId, Rel(AgentRelation.HasCacheReadTokens), usage.CacheReadTokens, coords);
+        AttestScalar(b, ts, subject, sessionId, Rel(AgentRelation.HasCacheCreateTokens), usage.CacheCreateTokens, coords);
         if (usage.CostUsd is { } cost)
             AttestScalarText(b, ts, subject, sessionId, Rel(AgentRelation.HasCost),
-                cost.ToString("0.######", CultureInfo.InvariantCulture));
+                cost.ToString("0.######", CultureInfo.InvariantCulture), coords);
     }
 
     private static void AttestScalar(
         SubstrateChangeBuilder b, long ts, Hash128 subject, Hash128 sessionId,
-        string relation, long? value)
+        string relation, long? value, Dictionary<Hash128, double[]> coords)
     {
         if (value is { } v)
             AttestScalarText(b, ts, subject, sessionId, relation,
-                v.ToString(CultureInfo.InvariantCulture));
+                v.ToString(CultureInfo.InvariantCulture), coords);
     }
 
     /// <summary>
@@ -480,9 +477,9 @@ public static class AgentTraceEmitter
     /// </summary>
     private static void AttestScalarText(
         SubstrateChangeBuilder b, long ts, Hash128 subject, Hash128 sessionId,
-        string relation, string value)
+        string relation, string value, Dictionary<Hash128, double[]> coords)
     {
-        if (Witness(b, value, LaneSource, ThrowawayCoords, members: null) is not { } scalarRoot)
+        if (Witness(b, value, LaneSource, coords, members: null) is not { } scalarRoot)
             return;
         b.AddEntity(scalarRoot, EntityTier.Word, EntityTypeRegistry.Scalar, LaneSource);
         Attest(b, ts, NativeAttestation.Categorical(
