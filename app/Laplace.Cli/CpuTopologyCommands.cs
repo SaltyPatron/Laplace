@@ -86,12 +86,29 @@ internal static class CpuTopologyCommands
     private static void EmitPgTuning()
     {
         var pg = PostgresResourcePlan.Current;
-        long sharedKb = pg.SharedBuffersBytes >> 10;
-        long cacheKb = pg.EffectiveCacheSizeBytes >> 10;
-        long maintKb = pg.MaintenanceWorkMemBytes >> 10;
-        long workKb = pg.WorkMemBytes >> 10;
-        long tempKb = pg.TempBuffersBytes >> 10;
-        long autovacKb = pg.AutovacuumWorkMemBytes >> 10;
+
+        // shared_buffers, effective_cache_size and temp_buffers are stored by PostgreSQL in
+        // BLOCK_SIZE units (8kB by default), so a value that is not a multiple of 8kB is
+        // ROUNDED and the live setting never equals what was asked. setup-host.sh compares
+        // live against the machine-sized expectation and therefore could NEVER pass:
+        //
+        //   emitted 32949791kB -> 4118723.875 blocks -> PG stores 32949792kB  ✗ shared_buffers
+        //   emitted 65899582kB -> 8237447.75  blocks -> PG stores 65899584kB  ✗ effective_cache_size
+        //
+        // Both were reported as "want machine-sized; not pending alone" on a host where the
+        // tuning was in fact applied correctly, so the script's final verdict was
+        // "Tuning NOT fully live" against a healthy cluster, every run, forever.
+        //
+        // Floor rather than round: the machine-derived value is a BUDGET, and rounding up
+        // hands PostgreSQL more shared memory than the plan allocated. The loss is under 8kB.
+        static long Blocks(long bytes) => (bytes >> 10) & ~7L;
+
+        long sharedKb = Blocks(pg.SharedBuffersBytes);
+        long cacheKb = Blocks(pg.EffectiveCacheSizeBytes);
+        long maintKb = pg.MaintenanceWorkMemBytes >> 10;   // kB units, not blocks
+        long workKb = pg.WorkMemBytes >> 10;               // kB units
+        long tempKb = Blocks(pg.TempBuffersBytes);
+        long autovacKb = pg.AutovacuumWorkMemBytes >> 10;  // kB units
 
         // I/O WORKERS ARE NOT PARALLEL-QUERY WORKERS, AND SIZING THEM AS IF THEY WERE CAPPED
         // THE STORAGE LAYER AT ~6% OF THE DEVICE.
