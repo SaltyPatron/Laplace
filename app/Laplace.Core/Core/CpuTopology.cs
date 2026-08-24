@@ -618,9 +618,22 @@ public static class CpuTopology
 
 
 
-        int logical = Environment.ProcessorCount;
+        // NON-HYBRID took Environment.ProcessorCount as the PHYSICAL core count and threw
+        // pools.PhysicalPCores away. That is the actual mechanism of GH #986, and it is NOT
+        // the sysfs detector: on an i7-6850K (6c/12t) detection now correctly resolves 6
+        // primaries via linux-sysfs-generic, and this line reported 12 anyway, because
+        // ProcessorCount counts LOGICAL processors. Every pool derived from
+        // PerformanceCoreCount -- applyPartitions, the connection pool, compose/commit and
+        // maintenance workers -- was sized from a doubled base on every non-hybrid SMT host.
+        //
+        // Trust the detector where it produced a real reading. The Uniform() fallbacks set
+        // PhysicalPCores to the logical count, so this is byte-identical wherever detection
+        // genuinely failed and differs only where it genuinely succeeded.
+        int logical = Math.Max(1, Environment.ProcessorCount);
 
-        return new CpuSnapshot(logical, 0, logical, IsHybrid: false);
+        int physical = pools.PhysicalPCores > 0 ? Math.Min(pools.PhysicalPCores, logical) : logical;
+
+        return new CpuSnapshot(physical, 0, logical, IsHybrid: false);
 
     }
 

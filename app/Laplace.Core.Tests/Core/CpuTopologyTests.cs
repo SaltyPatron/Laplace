@@ -282,4 +282,34 @@ public class CpuTopologyTests
         Assert.Equal(allowed.Length, allowed.Distinct().Count());
         Assert.Equal(allowed.OrderBy(x => x), allowed);
     }
+
+    // The REPORTED core count, not the detector's. GH #986 survived a first fix because
+    // DetectPlatform discarded pools.PhysicalPCores on any non-hybrid CPU and returned
+    // Environment.ProcessorCount -- the LOGICAL count -- as the physical one. Detection
+    // resolved 6 primaries on this i7-6850K and the reported value was 12 regardless.
+    //
+    // Every pool derives from PerformanceCoreCount, and the entire suite passed at BOTH
+    // values, so nothing in it could tell 6 from 12. This can: where sysfs says a core has
+    // more than one thread sibling, physical MUST be strictly below logical. Verified to
+    // fail on the pre-fix body with "got physical=12 logical=12".
+    [Fact]
+    public void ReportedPhysicalCores_AreCoresNotThreads()
+    {
+        if (!OperatingSystem.IsLinux()) return;
+        const string siblings = "/sys/devices/system/cpu/cpu0/topology/thread_siblings_list";
+        if (!File.Exists(siblings)) return;
+
+        // "0,6" or "0-1" -- more than one entry means SMT is on for this core.
+        string list = File.ReadAllText(siblings).Trim();
+        if (!list.Contains(',') && !list.Contains('-')) return;
+
+        int physical = CpuTopology.PerformanceCoreCount;
+        int logical = CpuTopology.LogicalProcessorCount;
+
+        Assert.True(physical > 0);
+        Assert.True(physical < logical,
+            $"SMT is enabled (cpu0 siblings '{list}') so physical cores must be fewer than "
+            + $"logical processors; got physical={physical} logical={logical}. Equal means the "
+            + "reported count is threads, which is GH #986.");
+    }
 }
