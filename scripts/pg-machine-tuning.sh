@@ -397,8 +397,55 @@ pg_apply_machine_tuning_fallback() {
 
 # Returns 0 if live settings match computed machine tuning and nothing pending_restart.
 # Optional: PG_TUNE_OK / PG_TUNE_BAD callbacks (default: echo).
-pg_validate_machine_tuning() {
+# VALIDATE WHAT WAS APPLIED, NOT A SECOND DERIVATION OF IT.
+#
+# pg_apply_machine_tuning applies `cpu-topology --pg-tuning` -- the C# emitter this file's
+# own header calls "the authoritative emitter", noting that the bash formulas below "survive
+# ONLY as the bare-host bootstrap fallback" after the two "silently diverged on TEN settings".
+#
+# This function then validated against pg_compute_machine_tuning -- those same bash formulas.
+# Apply from one implementation, check against another. It cannot pass whenever they differ,
+# and they differ by construction: measured 2026-08-24 on hart-server, the emitter produced
+# max_connections=37, work_mem=336222kB, autovacuum_work_mem=672444kB and
+# temp_buffers=336216kB while the bash side wanted 53, 213959kB, 427919kB and 213960kB. Every
+# one of those was reported "want machine-sized" against a cluster tuned exactly as the
+# authoritative emitter asked, so setup-host.sh ended in "Tuning NOT fully live" on a
+# correctly configured host.
+#
+# The expectations now come from the emitter when it is available, by the same rule the apply
+# path uses, and fall back to the bash formulas only on a bare host where no CLI exists.
+pg_load_expected_tuning() {
+  local dll line name value
+  if ! dll="$(pg_tune_cli_dll)"; then
+    pg_compute_machine_tuning
+    return 0
+  fi
+  # Seed from the bash formulas so any GUC the emitter does not carry keeps a value, then
+  # override with what the emitter actually emitted.
   pg_compute_machine_tuning
+  while IFS= read -r line; do
+    [[ "$line" =~ ^ALTER[[:space:]]+SYSTEM[[:space:]]+SET[[:space:]]+([a-z_]+)[[:space:]]*=[[:space:]]*\'?([^\';]+)\'?\; ]] || continue
+    name="${BASH_REMATCH[1]}"; value="${BASH_REMATCH[2]}"
+    case "$name" in
+      shared_buffers)                   PG_TUNE_SB="$value" ;;
+      effective_cache_size)             PG_TUNE_ECS="$value" ;;
+      maintenance_work_mem)             PG_TUNE_MWM="$value" ;;
+      work_mem)                         PG_TUNE_WM="$value" ;;
+      max_connections)                  PG_TUNE_MAXCONN="$value" ;;
+      superuser_reserved_connections)   PG_TUNE_RESERVED="$value" ;;
+      autovacuum_work_mem)              PG_TUNE_AVWM="$value" ;;
+      temp_buffers)                     PG_TUNE_TEMPB="$value" ;;
+      checkpoint_timeout)               PG_TUNE_CHECKPOINT="$value" ;;
+      max_parallel_maintenance_workers) PG_TUNE_PDEG="$value" ;;
+      effective_io_concurrency)         PG_TUNE_IO_CONC="$value" ;;
+      max_wal_size)                     PG_TUNE_MAX_WAL="$value" ;;
+      min_wal_size)                     PG_TUNE_MIN_WAL="$value" ;;
+    esac
+  done < <(dotnet "$dll" cpu-topology --pg-tuning 2>/dev/null)
+}
+
+pg_validate_machine_tuning() {
+  pg_load_expected_tuning
   local vbad=0 nm live ok pend
   local _ok="${PG_TUNE_OK:-echo}"
   local _bad="${PG_TUNE_BAD:-echo}"
