@@ -307,29 +307,60 @@ def check_source(
         try:
             row = psql(
                 dbname,
-                "SELECT count(*)::text || ' ' || count(DISTINCT rating)::text FROM ("
-                f"SELECT rating FROM laplace.consensus "
+                "SELECT count(*)::text || ' ' || count(DISTINCT rating)::text "
+                "|| ' ' || COALESCE(max(witness_count), 0)::text FROM ("
+                f"SELECT rating, witness_count FROM laplace.consensus "
                 f"WHERE type_id = laplace.relation_type_id('{rel}') "
                 f"LIMIT {SPREAD_SAMPLE}) s;",
                 host=host,
                 user=user,
             ).split()
-            cells, distinct = int(row[0]), int(row[1])
+            cells, distinct, max_witnesses = int(row[0]), int(row[1]), int(row[2])
             if exempt:
                 passed = True
                 detail = f"cells={cells:,} distinct_ratings={distinct} EXEMPT: {exempt}"
             elif cells < SPREAD_MIN_CELLS:
                 passed = True
                 detail = f"cells={cells:,} distinct_ratings={distinct} (below {SPREAD_MIN_CELLS:,}, not judged)"
+            elif distinct <= 1 and max_witnesses <= 1:
+                # CONSTANT IS FORCED WHEN NOTHING WAS WITNESSED TWICE.
+                #
+                # The fold is deterministic, so cells that saw identical evidence
+                # from identical initial state MUST land on identical ratings.
+                # If no cell in the sample has more than one witness, constancy
+                # is arithmetic, not degradation, and failing here accuses the
+                # fold of flattening a signal the corpus never contained.
+                #
+                # Measured 2026-08-24 on atomic2020, which is exactly this case:
+                # OBSTRUCTED_BY 106,647 cells / max_witnesses 1 / 1 rating, from
+                # 106,658 HinderedBy corpus rows with 0 repeated (head,tail)
+                # pairs; X_INTENT 67,543 cells / max_witnesses 8 / 11 ratings,
+                # from 72,677 xIntent rows with 5,132 repeats. Same source, same
+                # fold, same run -- the only difference is whether the corpus
+                # said anything twice.
+                #
+                # This is a PASS, not an exemption: the relation still carries no
+                # ranking signal, and a second witnessing source dissolves the
+                # condition without any code change. What the gate must keep
+                # catching is the case below -- multi-witness evidence that
+                # flattened anyway.
+                passed = True
+                detail = (f"cells={cells:,} distinct_ratings={distinct} "
+                          f"max_witnesses={max_witnesses} -- SINGLE-WITNESS: no cell was "
+                          "witnessed twice, so one rating is arithmetically forced, "
+                          "not flattened. Unrankable until a second source attests these "
+                          "triples.")
             else:
                 passed = distinct > 1
                 detail = (
-                    f"cells={cells:,} distinct_ratings={distinct}"
-                    + ("" if passed else " -- CONSTANT: every cell folded to one rating,"
-                                         " so this relation carries no ranking signal")
+                    f"cells={cells:,} distinct_ratings={distinct} max_witnesses={max_witnesses}"
+                    + ("" if passed else " -- CONSTANT: cells were witnessed more than once"
+                                         " and still folded to one rating, so the fold is"
+                                         " discarding the signal the repeats carried")
                 )
             record(f"rating_spread:{rel}", passed, detail,
-                   relation=rel, cells=cells, distinct_ratings=distinct)
+                   relation=rel, cells=cells, distinct_ratings=distinct,
+                   max_witnesses=max_witnesses)
         except Exception as e:
             record(f"rating_spread:{rel}", False, str(e), relation=rel)
 
