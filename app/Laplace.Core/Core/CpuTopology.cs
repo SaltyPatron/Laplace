@@ -90,7 +90,16 @@ public static class CpuTopology
 
 
 
-    private static CpuSnapshot Current => TestOverride ?? LazySnapshot.Value;
+    // TestPoolsOverride has to reach Current, and it did not. LazySnapshot caches the
+    // FIRST snapshot it computes, so once any test touched Current the cached value was
+    // returned forever and a later TestPoolsOverride silently stopped affecting anything --
+    // a seam that looks like it works. Measured 2026-08-24: synthetic layout tests passed
+    // individually and failed in a group, whichever ran second onward.
+    //
+    // When a pools override is installed, derive the snapshot from it rather than from the
+    // cache. The uncached path is only ever taken under an override.
+    private static CpuSnapshot Current =>
+        TestOverride ?? (TestPoolsOverride is not null ? DetectPlatform() : LazySnapshot.Value);
 
     private static TopologyPools Pools => TestPoolsOverride ?? LazyPools.Value;
 
@@ -629,7 +638,14 @@ public static class CpuTopology
         // Trust the detector where it produced a real reading. The Uniform() fallbacks set
         // PhysicalPCores to the logical count, so this is byte-identical wherever detection
         // genuinely failed and differs only where it genuinely succeeded.
-        int logical = Math.Max(1, Environment.ProcessorCount);
+        // The clamp uses the POOLS' logical count, not Environment.ProcessorCount. Both
+        // detectors set LogicalCount from ProcessorCount, so this is identical on every real
+        // path -- but reading the ambient machine here makes a synthetic layout impossible to
+        // test: a 64-core pools override clamped to this box's 12 and the layout tests could
+        // not distinguish the rule from the hardware they ran on.
+        int logical = pools.LogicalCount > 0
+            ? pools.LogicalCount
+            : Math.Max(1, Environment.ProcessorCount);
 
         int physical = pools.PhysicalPCores > 0 ? Math.Min(pools.PhysicalPCores, logical) : logical;
 
