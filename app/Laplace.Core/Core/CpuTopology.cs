@@ -492,6 +492,17 @@ public static class CpuTopology
 
                 return ApplyOverrides(lin);
 
+            // NON-HYBRID Linux, and CONTAINERS. TryDetectLinuxSysfsPools keys on
+            // /sys/devices/cpu_core/cpus, which the kernel publishes only for hybrid P/E
+            // parts -- it was written against a 14900KS. On every other CPU that file is
+            // absent and the detector returns false SILENTLY (the catch above only fires on
+            // an exception), so detection fell through to Uniform(Environment.ProcessorCount)
+            // and reported SMT threads as physical cores: GH #986 measured p_physical=12 on
+            // a 6-core i7-6850K, and every ingest pool is sized from that doubled base.
+            if (OperatingSystem.IsLinux() && TryDetectLinuxGenericSysfsPools(out var gen))
+
+                return ApplyOverrides(gen);
+
         }
 
         catch (Exception ex)
@@ -1123,6 +1134,80 @@ public static class CpuTopology
 
 
 
+    /// <summary>
+    /// Physical-core detection for NON-HYBRID Linux, from the generic per-CPU topology every
+    /// Linux CPU exposes. Covers plain SMT x86, AMD multi-die, ARM server parts with no SMT,
+    /// and dual-socket hosts -- none of which publish /sys/devices/cpu_core/cpus.
+    ///
+    /// The CPU set comes from /proc/self/status Cpus_allowed_list, NOT from
+    /// /sys/devices/system/cpu/present. sysfs describes the HOST; a container under a cpuset
+    /// still sees every host CPU there, so `present` would size a 2-CPU container's pools for
+    /// a 64-core machine. Cpus_allowed_list is what this process may actually run on.
+    ///
+    /// The result is additionally clamped to Environment.ProcessorCount, which on .NET also
+    /// honours a cgroup CPU QUOTA (cpu.max) -- a quota restricts how much CPU time the
+    /// process gets without restricting WHICH cpus it may touch, so it is invisible to the
+    /// affinity mask and has to be applied separately.
+    /// </summary>
+    internal static bool TryDetectLinuxGenericSysfsPools([NotNullWhen(true)] out TopologyPools? pools)
+    {
+        pools = null;
+        try
+        {
+            int[] all = ReadLinuxAllowedCpus();
+            if (all.Length == 0) return false;
+
+            var primaries = DedupeLinuxPrimaryCores(all);
+            if (primaries.Length == 0) return false;
+
+            int quota = Math.Max(1, Environment.ProcessorCount);
+            if (primaries.Length > quota) primaries = primaries.Take(quota).ToArray();
+
+            pools = new TopologyPools(
+                isHybrid: false,
+                physicalPCores: primaries.Length,
+                physicalECores: 0,
+                logicalCount: quota,
+                primaryPLogicalCount: Math.Min(all.Length, quota),
+                primaryPCoreGlobalIndices: primaries,
+                primaryPCoreCpuSetIds: Array.Empty<uint>(),
+                primaryPCoreAffinities: primaries
+                    .Select(i => new ProcessorAffinity((ushort)(i / 64), 1UL << (i % 64))).ToArray(),
+                efficientCoreGlobalIndices: Array.Empty<int>(),
+                efficientCoreCpuSetIds: Array.Empty<uint>(),
+                efficientCoreAffinities: Array.Empty<ProcessorAffinity>(),
+                source: "linux-sysfs-generic");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                "cpu_topology: generic Linux sysfs detection FAILED — worker pools will be "
+                + $"mis-sized. {ex.GetType().Name}: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// The CPUs this process may run on, honouring cpuset/taskset. Falls back to the host's
+    /// present list only when /proc is unavailable.
+    internal static int[] ReadLinuxAllowedCpus()
+    {
+        const string statusPath = "/proc/self/status";
+        if (File.Exists(statusPath))
+            foreach (string line in File.ReadLines(statusPath))
+                if (line.StartsWith("Cpus_allowed_list:", StringComparison.Ordinal))
+                {
+                    var list = ParseCpuList(line["Cpus_allowed_list:".Length..].Trim());
+                    if (list.Length > 0) return list;
+                    break;
+                }
+
+        const string presentPath = "/sys/devices/system/cpu/present";
+        return File.Exists(presentPath)
+            ? ParseCpuList(File.ReadAllText(presentPath).Trim())
+            : Array.Empty<int>();
+    }
+
     internal static int[] DedupeLinuxPrimaryCores(int[] cpuList)
 
     {
@@ -1141,7 +1226,13 @@ public static class CpuTopology
 
             if (!int.TryParse(File.ReadAllText(coreIdPath).Trim(), out int coreId)) { primaries.Add(cpu); continue; }
 
-            if (seen.Add(coreId)) primaries.Add(cpu);
+            // Keyed on (package, core): core_id restarts per socket, so a bare
+            // core_id collapses socket 1 onto socket 0 and HALVES the count on a
+            // dual-socket host -- the common server shape.
+            string pkgPath = $"/sys/devices/system/cpu/cpu{cpu}/topology/physical_package_id";
+            int pkg = File.Exists(pkgPath)
+                   && int.TryParse(File.ReadAllText(pkgPath).Trim(), out int pk) ? pk : 0;
+            if (seen.Add(pkg * 65536 + coreId)) primaries.Add(cpu);
 
         }
 

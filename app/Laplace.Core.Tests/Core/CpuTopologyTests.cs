@@ -1,3 +1,6 @@
+using System;
+using System.Linq;
+using System.IO;
 using Laplace.Engine.Core;
 
 using Xunit;
@@ -234,4 +237,49 @@ public class CpuTopologyTests
 
     }
 
+    // GH #986. TryDetectLinuxSysfsPools keys on /sys/devices/cpu_core/cpus, which the
+    // kernel publishes only for hybrid P/E parts -- it was written against a 14900KS. On a
+    // non-hybrid CPU that file is absent, the detector returns false SILENTLY (the catch
+    // only fires on an exception), and detection fell through to
+    // Uniform(Environment.ProcessorCount): SMT threads reported as physical cores, with
+    // every ingest pool sized from a doubled base. Measured live on hart-server, an
+    // i7-6850K with 6 cores / 12 threads: p_physical=12.
+    [Fact]
+    public void NonHybridLinux_ReportsPhysicalCores_NotSmtThreads()
+    {
+        // Not a skip framework here: on a non-Linux host there is nothing to assert and
+        // the detector is not reachable, so the test is vacuously satisfied.
+        if (!OperatingSystem.IsLinux() || !File.Exists("/sys/devices/system/cpu/present")) return;
+
+        Assert.True(CpuTopology.TryDetectLinuxGenericSysfsPools(out var pools),
+            "generic Linux topology detection must succeed wherever sysfs cpu topology exists");
+        Assert.NotNull(pools);
+        Assert.False(pools!.IsHybrid);
+        Assert.True(pools.PhysicalPCores >= 1);
+
+        // A physical core is never MORE numerous than the logical processors it hosts.
+        // The old fallback reported exactly logicalCount, which is the bug.
+        Assert.True(pools.PhysicalPCores <= pools.LogicalCount,
+            $"physical {pools.PhysicalPCores} exceeds logical {pools.LogicalCount}");
+
+        // Every primary index must be a CPU this process may actually run on.
+        var allowed = new HashSet<int>(CpuTopology.ReadLinuxAllowedCpus());
+        foreach (int i in pools.PrimaryPCoreGlobalIndices)
+            Assert.Contains(i, allowed);
+    }
+
+    // sysfs describes the HOST. A container under a cpuset still sees every host CPU in
+    // /sys/devices/system/cpu/present, so sizing from `present` would give a 2-CPU
+    // container the pools of a 64-core machine. Cpus_allowed_list is what the process may
+    // actually run on, and it is what the detector reads.
+    [Fact]
+    public void AllowedCpus_ComeFromTheProcessAffinityMask()
+    {
+        if (!OperatingSystem.IsLinux() || !File.Exists("/proc/self/status")) return;
+
+        var allowed = CpuTopology.ReadLinuxAllowedCpus();
+        Assert.NotEmpty(allowed);
+        Assert.Equal(allowed.Length, allowed.Distinct().Count());
+        Assert.Equal(allowed.OrderBy(x => x), allowed);
+    }
 }

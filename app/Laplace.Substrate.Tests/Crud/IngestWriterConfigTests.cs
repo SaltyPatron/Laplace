@@ -4,6 +4,7 @@ using Xunit;
 
 namespace Laplace.SubstrateCRUD.Tests;
 
+[Collection("cpu-topology-global")]
 public sealed class IngestWriterConfigTests
 {
     [Fact]

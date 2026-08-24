@@ -319,6 +319,19 @@ Three independent mechanisms, all green throughout:
   ran concurrently. All three derive from ambient machine resources. **10 consecutive
   clean runs** on a quiet machine, with and without `LAPLACE_NO_PIN=1`, so CPU-affinity
   pinning is ruled out as the cause and the mechanism is not isolated.
+
+  **RESOLVED 2026-08-24, and it was not ambient.** `CpuTopology.TestOverride`,
+  `TestPCoreIndicesOverride` and `TestPoolsOverride` are static mutable fields, and xunit
+  runs distinct test CLASSES in parallel by default. `IngestParallelismTests` declared no
+  collection, so it installed a fabricated 8-core hybrid topology while sibling classes
+  read `PostgresResourcePlan.Current` / `IngestTopology.Current` and did pool arithmetic
+  against it. Three consecutive runs of the unchanged suite failed three DIFFERENT tests
+  — `ApplyConnectionBudgetTests.CopyBudget_Plus_FoldFan_...`, then
+  `LaplaceDataSourceTests.Ingest_LeavesTimeoutUnbounded_...`, then
+  `PgTuningParityTests.IngestPool_...` — which is the signature of a shared mutable global,
+  not of a marginal machine. A quiet machine made it rarer, which is why 10 clean runs
+  looked like a clearing. Every class touching that global now shares the
+  `cpu-topology-global` xunit collection; five consecutive clean full runs after.
 - **The 892 MB of existing `ud/misc-value` rows.** The fix is ingest-side; they clear on
   the next `ud` seed.
 

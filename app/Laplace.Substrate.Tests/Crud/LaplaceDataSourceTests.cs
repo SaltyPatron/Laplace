@@ -11,6 +11,7 @@ namespace Laplace.SubstrateCRUD.Tests;
 /// bare LaplaceInstall.PostgresConnectionString() passthrough they used before. If that
 /// ever stops being true, every ingest path silently acquires a timeout it never had.
 /// </summary>
+[Collection("cpu-topology-global")]
 public sealed class LaplaceDataSourceTests
 {
     [Fact]
