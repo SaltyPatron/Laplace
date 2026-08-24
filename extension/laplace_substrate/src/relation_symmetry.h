@@ -45,9 +45,24 @@ laplace_symmetric_relation_types(void)
         Datum        *ids = (Datum *) palloc(sizeof(Datum) * cap);
         int           n = 0;
 
+        /*
+         * Resolve through laplace_relation_type_id(), NOT the def's type_id
+         * field. The generated table stores ids in a separate lazily-populated
+         * cache (k_relation_type_id_cache, filled by relation_ids_ensure());
+         * the struct member is left zero. Reading it yields an array of
+         * zero-hashes that matches nothing, and the reverse arm silently never
+         * fires -- measured exactly that way before this was corrected.
+         */
         for (size_t i = 0; i < laplace_relation_table_count; i++)
-            if (laplace_relation_table[i].symmetry == LAPLACE_REL_SYMMETRY_SYMMETRIC)
-                ids[n++] = hash128_to_datum(&laplace_relation_table[i].type_id);
+        {
+            hash128_t tid;
+
+            if (laplace_relation_table[i].symmetry != LAPLACE_REL_SYMMETRY_SYMMETRIC)
+                continue;
+            if (laplace_relation_type_id(laplace_relation_table[i].canonical, &tid) < 0)
+                continue;
+            ids[n++] = hash128_to_datum(&tid);
+        }
 
         laplace_symmetric_types_cache =
             construct_array(ids, n, BYTEAOID, -1, false, TYPALIGN_INT);

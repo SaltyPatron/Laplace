@@ -1,0 +1,137 @@
+CREATE EXTENSION IF NOT EXISTS postgis;
+NOTICE:  extension "postgis" already exists, skipping
+CREATE EXTENSION IF NOT EXISTS laplace_geom;
+NOTICE:  extension "laplace_geom" already exists, skipping
+CREATE EXTENSION IF NOT EXISTS laplace_substrate;
+NOTICE:  extension "laplace_substrate" already exists, skipping
+-- A SYMMETRIC EDGE MUST BE TRAVERSABLE FROM EITHER ENDPOINT.
+--
+-- laplace_attestation_orient() canonicalises a symmetric assertion to
+-- subject = min(subject, object) by hash bytes, so the unordered pair folds
+-- into ONE consensus cell. walk_branches probed c.subject_id only, so such a
+-- pair was reachable from its lesser-hashed end and invisible from the other.
+-- Measured live 2026-08-24: 133,019 of 133,019 symmetric cells stored
+-- subject < object, 0 the other way -- i.e. the reverse direction of every
+-- symmetric edge in the substrate was unreachable. The antonym cell
+-- ('avant jesus christ', IS_ANTONYM_OF, 'apres jesus christ') answered when
+-- asked from `avant` and returned nothing when asked from `apres`.
+--
+-- Fixture ids are hand-picked distinct bytes (same convention as
+-- walk_richer_forward_pass.sql), chosen so lo < hi bytewise -- that ordering
+-- is the whole point of the test and must not be left to a real hash.
+CREATE TEMP TABLE sym_fixtures AS
+SELECT * FROM (VALUES
+    ('dummy_type', decode(repeat('d0', 16), 'hex')),
+    ('sym_lo',     decode(repeat('d1', 16), 'hex')),   -- lo < hi
+    ('sym_hi',     decode(repeat('d2', 16), 'hex')),
+    ('asym_lo',    decode(repeat('d3', 16), 'hex')),
+    ('asym_hi',    decode(repeat('d4', 16), 'hex')),
+    ('ref_lo',     decode(repeat('d5', 16), 'hex')),
+    ('ref_hi',     decode(repeat('d6', 16), 'hex'))
+) v(name, id);
+INSERT INTO laplace.entities (id, tier, type_id, highway_mask)
+SELECT id, 2::smallint,
+       (SELECT id FROM sym_fixtures WHERE name = 'dummy_type'), NULL::bytea
+FROM sym_fixtures WHERE name <> 'dummy_type'
+UNION ALL
+SELECT id, 2::smallint, id, NULL::bytea FROM sym_fixtures WHERE name = 'dummy_type'
+ON CONFLICT (id, tier) DO NOTHING;
+-- sym: confirmed symmetric edge, rating 1800 / rd 50 -> signed-positive.
+-- asym: confirmed ASYMMETRIC edge, same ratings -- the control proving the
+--       reverse arm is restricted to symmetric types and did not simply make
+--       every edge bidirectional (IS_A up is not IS_A down).
+-- ref: REFUTED symmetric edge, rating 500 / rd 200 -> signed-negative, so the
+--      reverse arm must not become a way to bypass the refutation gate.
+INSERT INTO laplace.consensus (id, subject_id, type_id, object_id, rating, rd, volatility, witness_count, last_observed_at)
+VALUES
+    (decode(repeat('e1', 16), 'hex'),
+     (SELECT id FROM sym_fixtures WHERE name = 'sym_lo'),
+     laplace.relation_type_id('IS_ANTONYM_OF'),
+     (SELECT id FROM sym_fixtures WHERE name = 'sym_hi'),
+     1800000000000, 50000000000, 60000000, 5, now()),
+    (decode(repeat('e2', 16), 'hex'),
+     (SELECT id FROM sym_fixtures WHERE name = 'asym_lo'),
+     laplace.relation_type_id('IS_A'),
+     (SELECT id FROM sym_fixtures WHERE name = 'asym_hi'),
+     1800000000000, 50000000000, 60000000, 5, now()),
+    (decode(repeat('e3', 16), 'hex'),
+     (SELECT id FROM sym_fixtures WHERE name = 'ref_lo'),
+     laplace.relation_type_id('IS_ANTONYM_OF'),
+     (SELECT id FROM sym_fixtures WHERE name = 'ref_hi'),
+     500000000000, 200000000000, 60000000, 5, now())
+ON CONFLICT (id, type_id, subject_id) DO NOTHING;
+-- The stored orientation, stated rather than assumed.
+SELECT 'stored subject < object' AS fact,
+       (SELECT id FROM sym_fixtures WHERE name = 'sym_lo')
+     < (SELECT id FROM sym_fixtures WHERE name = 'sym_hi') AS ok;
+          fact           | ok 
+-------------------------+----
+ stored subject < object | t
+(1 row)
+
+-- 1. forward: lo -> hi. Passed before the fix as well.
+SELECT 'sym forward lo->hi' AS probe, count(*) AS reached
+FROM consensus.walk_branches(
+        (SELECT id FROM sym_fixtures WHERE name = 'sym_lo'),
+        laplace.relation_type_id('IS_ANTONYM_OF'), 1, 8) w
+WHERE w.entity_id = (SELECT id FROM sym_fixtures WHERE name = 'sym_hi');
+       probe        | reached 
+--------------------+---------
+ sym forward lo->hi |       1
+(1 row)
+
+-- 2. reverse: hi -> lo. THIS IS THE REGRESSION. Returned 0 before the fix.
+SELECT 'sym reverse hi->lo' AS probe, count(*) AS reached
+FROM consensus.walk_branches(
+        (SELECT id FROM sym_fixtures WHERE name = 'sym_hi'),
+        laplace.relation_type_id('IS_ANTONYM_OF'), 1, 8) w
+WHERE w.entity_id = (SELECT id FROM sym_fixtures WHERE name = 'sym_lo');
+       probe        | reached 
+--------------------+---------
+ sym reverse hi->lo |       1
+(1 row)
+
+-- 3. asymmetric forward still served.
+SELECT 'asym forward lo->hi' AS probe, count(*) AS reached
+FROM consensus.walk_branches(
+        (SELECT id FROM sym_fixtures WHERE name = 'asym_lo'),
+        laplace.relation_type_id('IS_A'), 1, 8) w
+WHERE w.entity_id = (SELECT id FROM sym_fixtures WHERE name = 'asym_hi');
+        probe        | reached 
+---------------------+---------
+ asym forward lo->hi |       1
+(1 row)
+
+-- 4. asymmetric reverse still NOT served -- direction still carries meaning.
+SELECT 'asym reverse hi->lo (must be 0)' AS probe, count(*) AS reached
+FROM consensus.walk_branches(
+        (SELECT id FROM sym_fixtures WHERE name = 'asym_hi'),
+        laplace.relation_type_id('IS_A'), 1, 8) w
+WHERE w.entity_id = (SELECT id FROM sym_fixtures WHERE name = 'asym_lo');
+              probe              | reached 
+---------------------------------+---------
+ asym reverse hi->lo (must be 0) |       0
+(1 row)
+
+-- 5/6. a refuted symmetric edge is served from NEITHER end: the reverse arm
+-- feeds the same signed beam gate, it does not route around it.
+SELECT 'refuted sym forward (must be 0)' AS probe, count(*) AS reached
+FROM consensus.walk_branches(
+        (SELECT id FROM sym_fixtures WHERE name = 'ref_lo'),
+        laplace.relation_type_id('IS_ANTONYM_OF'), 1, 8) w
+WHERE w.entity_id = (SELECT id FROM sym_fixtures WHERE name = 'ref_hi');
+              probe              | reached 
+---------------------------------+---------
+ refuted sym forward (must be 0) |       0
+(1 row)
+
+SELECT 'refuted sym reverse (must be 0)' AS probe, count(*) AS reached
+FROM consensus.walk_branches(
+        (SELECT id FROM sym_fixtures WHERE name = 'ref_hi'),
+        laplace.relation_type_id('IS_ANTONYM_OF'), 1, 8) w
+WHERE w.entity_id = (SELECT id FROM sym_fixtures WHERE name = 'ref_lo');
+              probe              | reached 
+---------------------------------+---------
+ refuted sym reverse (must be 0) |       0
+(1 row)
+
