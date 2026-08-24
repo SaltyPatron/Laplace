@@ -14,15 +14,15 @@ must turn red. The harness restores every file it touched, including on failure.
 A mutation whose `before` text is not found is a HARD ERROR, never a skip: silently applying
 nothing and observing a green test is the vacuous-gate failure this harness exists to detect.
 
-NATIVE MUTATIONS ARE NOT SUPPORTED, and the reason is a gap worth knowing about.
-/etc/ld.so.conf.d puts /opt/laplace/lib on the system loader path, so a managed test loads
-the INSTALLED liblaplace_core.so, never the one in build/. Measured 2026-08-24: mutating
-LAPLACE_GLICKO2_NEUTRAL_MU_FP from 1500 to 1400 and relinking the library left
-NeutralMu_MatchesServerConstant green, because the test was reading a copy installed 21
-minutes earlier. Every native-backed parity test -- Glicko2FoldParity, ConsensusKeysParity,
-CollapseIndexParity, QkPairsThresholdParity -- can pass against a stale installed library
-while the source is broken. Reaching them needs an install into a path shared with the CI
-runner, which this harness will not do on its own.
+NATIVE MUTATIONS require the engine rebuilt AND the test loading that build. Until
+2026-08-24 they could not work at all: /etc/ld.so.conf.d puts /opt/laplace/lib on the system
+loader path, so a managed test loaded the INSTALLED liblaplace_core.so and never build/.
+Mutating LAPLACE_GLICKO2_NEUTRAL_MU_FP 1500 -> 1400 and relinking left
+NeutralMu_MatchesServerConstant GREEN -- it asserts a hard literal and would have caught the
+change, but was reading a copy installed 21 minutes earlier. Directory.Build.props now copies
+the built libraries beside every test binary, .NET probes the app directory before the OS
+loader, and NativeArtifactIdentityTests fails the run if the mapped artifact is not the built
+one. The same mutation now reports Expected 1500000000000 / Actual 1400000000000.
 
   scripts/mutation-check.py             # run all
   scripts/mutation-check.py --list
@@ -106,7 +106,29 @@ MUTATIONS = [
     project="Laplace.Core.Tests",
     filter="FullyQualifiedName~ConsensusKeysParity",
   ),
+  dict(
+    id="glicko-neutral-mu",
+    defect="Every witness in the substrate plays an opponent pinned at "
+           "CONSENSUS_FOLD_NEUTRAL_MU = 1500 (consensus_fold_apply_partial), so the "
+           "client and the server must agree on it exactly or the managed fold and the "
+           "server fold produce different ratings from identical evidence -- the "
+           "bit-reproducibility the whole fold rests on.",
+    file="engine/core/include/laplace/core/glicko2.h",
+    before="#define LAPLACE_GLICKO2_NEUTRAL_MU_FP   1500000000000LL",
+    after="#define LAPLACE_GLICKO2_NEUTRAL_MU_FP   1400000000000LL",
+    project="Laplace.Core.Tests",
+    filter="FullyQualifiedName~NeutralMu_MatchesServerConstant",
+    rebuild_native=True,
+  ),
 ]
+
+def rebuild_native():
+    """A native mutation is invisible until the engine is rebuilt AND the test loads that
+    build. Directory.Build.props copies build/engine/*/*.so beside each test binary, and
+    PreserveNewest refreshes the copy on the next `dotnet test`."""
+    r = subprocess.run(["cmake", "--build", "build", "--target", "laplace_core", "-j"],
+                       capture_output=True, text=True, cwd=str(ROOT))
+    return r.returncode == 0
 
 def run_tests(project, filt):
     proj = APP / project / f"{project}.csproj"
@@ -148,6 +170,10 @@ def main():
         backup.write(src.encode("utf-8")); backup.close()
         try:
             path.write_text(src.replace(m["before"], m["after"]), encoding="utf-8")
+            if m.get("rebuild_native") and not rebuild_native():
+                print(f"FAIL {m['id']}: native rebuild failed — cannot observe the mutation",
+                      file=sys.stderr)
+                failures.append(m["id"]); continue
             code, out = run_tests(m["project"], m["filter"])
             if code == 0:
                 print(f"FAIL {m['id']}: test PASSED with the defect reintroduced — it does "
@@ -158,6 +184,8 @@ def main():
         finally:
             shutil.copyfile(backup.name, path)
             pathlib.Path(backup.name).unlink(missing_ok=True)
+            if m.get("rebuild_native"):
+                rebuild_native()   # restore the binary to match the restored source
 
     # Every file restored; prove it rather than assume it.
     dirty = subprocess.run(["git", "status", "--porcelain", "--", *(m["file"] for m in picked)],

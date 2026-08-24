@@ -48,4 +48,41 @@
     <AssemblyMetadata Include="LaplaceRepoRoot"
                       Value="$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..'))" />
   </ItemGroup>
+  <!--
+    THE TEST MUST EXECUTE THE ARTIFACT BUILT FROM THIS TREE.
+
+    /etc/ld.so.conf.d puts /opt/laplace/lib on the system loader path, so a bare
+    `dotnet test` resolved liblaplace_core.so to the INSTALLED copy and never to
+    build/engine/core. scripts/test-parallel.sh exports LD_LIBRARY_PATH and is
+    correct; the bare invocation this file's own docs recommend for running a
+    single test was not, and nothing said so.
+
+    Measured 2026-08-24: LAPLACE_GLICKO2_NEUTRAL_MU_FP was changed 1500 -> 1400 and
+    the library relinked, and NeutralMu_MatchesServerConstant stayed GREEN. It
+    asserts a hard literal and would have caught the change; it was reading a copy
+    installed 21 minutes earlier. Every native-backed parity assertion —
+    Glicko2FoldParity, ConsensusKeysParity, CollapseIndexParity,
+    QkPairsThresholdParity, RootIdNativeParityProbe — could pass against a stale
+    installed library while the source defining the invariant was broken.
+
+    Copying the built libraries beside the test binary fixes it for every
+    invocation rather than for the ones that remember an environment variable:
+    .NET probes NATIVE_DLL_SEARCH_DIRECTORIES, which includes the app base
+    directory, BEFORE handing off to the OS loader — so an app-local copy wins
+    over /opt/laplace/lib without touching a shared path.
+
+    Same reasoning as the Tier filter above: make the script's behaviour the
+    project default so the two cannot drift. NativeArtifactIdentityTests fails the
+    run if they ever do.
+  -->
+  <ItemGroup Condition="$(MSBuildProjectName.EndsWith('.Tests')) AND '$(OS)' != 'Windows_NT'">
+    <LaplaceNativeArtifact Include="$(MSBuildThisFileDirectory)../build/engine/core/*.so*" />
+    <LaplaceNativeArtifact Include="$(MSBuildThisFileDirectory)../build/engine/dynamics/*.so*" />
+    <LaplaceNativeArtifact Include="$(MSBuildThisFileDirectory)../build/engine/synthesis/*.so*" />
+    <None Include="@(LaplaceNativeArtifact)">
+      <Link>%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Visible>false</Visible>
+    </None>
+  </ItemGroup>
 </Project>
