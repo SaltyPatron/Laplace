@@ -41,9 +41,9 @@ outcome and an epistemic claim's outcome are the same three values fed to the sa
 ## Where things are
 
 ```
-app/          10 projects + 5 test projects (app/Laplace.slnx)
+app/          .NET projects (app/Laplace.slnx) — counts live in docs/INVENTORY.md
 engine/       native core, dynamics (eigenmaps/procrustes), synthesis (GGUF), manifest
-extension/    the laplace_substrate PostgreSQL extension — 29 SQL families, 26 native sources
+extension/    the laplace_substrate PostgreSQL extension (SQL families + native sources)
 scripts/      build, seed, deploy and CI entry points
 web/          Vite/React SPA
 docs/         ARCHITECTURE.md, INVENTORY.md (generated)
@@ -76,7 +76,7 @@ extension links the engine statically, so engine freshness is not extension fres
 ```
 psql -h localhost -U postgres -d laplace
 SET search_path = laplace, public;
-SELECT * FROM api('walk');     -- the schema introspects itself
+SELECT * FROM ops.api('walk');  -- the schema introspects itself
 ```
 
 Two mmap'd perfcache blobs are required at runtime (`laplace_t0_perfcache.bin`,
