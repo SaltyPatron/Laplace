@@ -249,12 +249,28 @@ family_root = "HAS_PART"
 
 [[relation]]
 canonical = "CORRESPONDS_TO"
-# HOT. WordNetDecomposer declares exactly ONE relation and wrote 2,828,102 attestations on the
-# 2026-08-23 seed, all of them here. Without hot they land in consensus_rdefault, the partition
-# shared by every non-hot relation AND every dynamic family (DEP_*/EDEP_*/FEAT_*) -- the heap
-# whose own comment records it absorbing 56% of all rows. This is the shape that promoted
-# HAS_EXTERNAL_ID at 5.2 GB / 9.5M rows. WordNet spent 204s of a 287s run in drain (71%);
-# OMW, whose four dominant relations are hot, moved 6.8M attestations and drained in 4s.
+# INGEST_PARTITION_PRESSURE 2026-08-24: 580,874 rows = 12.5% of consensus_rdefault, its
+# second-largest writer. Physical partitioning only; the partition seed adopts existing rows
+# in place, so no reseed is owed.
+#
+# WHAT THIS DOES, precisely, because the obvious reading is wrong: consensus_rdefault is
+# ALREADY HASH(subject_id) x8 (#1008). Promoting does NOT add sharding. It reduces CO-TENANCY
+# -- the relation stops sharing its eight heaps and indexes with every other non-hot relation
+# and every dynamic family. PostgreSQL's own partitioning guidance supports hash distribution
+# where write contention concentrates on one partition; the contention here is co-tenancy on a
+# shared heap, not an unsharded one.
+#
+# UNVALIDATED. No before/after measurement of promotion exists in this repo -- not for this
+# relation, and not for HAS_MOTIF (19.1%) or MOVE (14.3%), whose comments record that they WERE
+# promoted at those shares, never that promotion helped. Prior comments here have been read as
+# law; they are prior assertions. The test that would settle it: seed twice at the same corpus
+# revision, once with these two hot and once without, and compare per-source drain. Until that
+# runs this is a reasoned hypothesis with a stated mechanism, and should be labelled as one.
+hot = true is a
+# physical partitioning decision following WRITE TRAFFIC, independent of rank, and the
+# partition seed adopts existing rows in place -- no reseed.
+#
+# A floor: the seed measured on ran ten sources, without OMW, ATOMIC2020, UD or Wiktionary.
 hot = true
 bit = 18
 rank = "equivalence"
@@ -853,9 +869,12 @@ hot = true
 # Entity typing (e.g. synset -> WordNet_Synset). De-conflated from IS_A so typing edges never
 # pollute hypernym/subsumption walks. Structural authority, not a content subsumption.
 canonical = "IS_TYPED_AS"
-# HOT. Written by two sources and ~1.5M rows on the 2026-08-23 seed: OMW (6,815,401 across six
-# relations) and CILI (1,143,288 across three). CILI spent 272s of a 334s run in drain -- 81%,
-# the worst of the seed -- and IS_TYPED_AS is its one relation that was not already hot.
+# INGEST_PARTITION_PRESSURE 2026-08-24: 763,366 rows = 16.4% of consensus_rdefault, its
+# LARGEST writer. Written by WordNet, CILI, FrameNet, PropBank, VerbNet and OMW. Physical
+# partitioning only; existing rows are adopted in place, no reseed.
+#
+# Co-tenancy reduction on an already-sharded heap, and UNVALIDATED by any before/after
+# measurement -- see CORRESPONDS_TO above for the mechanism and the test that would settle it.
 hot = true
 bit = 155
 rank = "standards_structural"
