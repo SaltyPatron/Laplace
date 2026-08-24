@@ -31,7 +31,20 @@ source "$ROOT/scripts/lib/fp.sh"
 
 MODE=all
 SERIAL="${LAPLACE_TEST_SERIAL:-0}"
-DOTNET_FILTER='Tier!=perf & Tier!=db'
+# Tier=db RUNS. It was excluded here and, mirroring this line, in
+# app/Directory.Build.props -- so 66 passing tests executed NOWHERE: not in CI, not in
+# `just test`, not in a bare `dotnet test`. Among them is
+# ConsensusAccumulatingWriterTests.Production_IsBitExactDeterministic, the fold's
+# bit-exactness guarantee, and Production_MixedPhiFailsLoud.
+#
+# The dependency is a PostgreSQL cluster, and this phase already requires one: pg_regress
+# runs beside these tests and cannot start without it. The db-tier fixtures build their own
+# throwaway databases, so they need the cluster, not a seeded substrate.
+#
+# Verified 2026-08-24 against the live cluster: Substrate 64/64, Decomposers 1/1, Chess 1/1
+# (1 skipped). Tier=perf stays excluded for the reason Directory.Build.props gives -- a
+# ">500k rows/sec" gate on a box that is also seeding reports machine load, not a regression.
+DOTNET_FILTER='Tier!=perf'
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
