@@ -339,12 +339,15 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>
                 string changeTo = c[3].Trim();
                 string remedy = c.Length > 4 ? c[4].Trim() : "";
 
-                if (reason == NonExistent) { yield return (retired, reason, []); continue; }
-
-                string[] successors =
-                    changeTo.Length == 3 ? [changeTo] : IsoRetirementRemedy.SuccessorsFromRemedy(remedy);
-                if (successors.Length == 0) continue;
-                yield return (retired, reason, successors);
+                // The whole per-row decision lives in one pure function so it can be tested
+                // against the real corpus. Testing only SuccessorsFromRemedy tested the
+                // PARSER, not the rule that decides whether to consult it -- reverting this
+                // call site left those tests green while 174 of 386 rows went back to being
+                // dropped.
+                var (reasonOut, successors, keep) =
+                    IsoRetirementRemedy.Classify(reason, changeTo, remedy);
+                if (!keep) continue;
+                yield return (retired, reasonOut, successors);
             }
         }
     }
@@ -440,6 +443,27 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>
 /// </summary>
 internal static class IsoRetirementRemedy
 {
+    /// ISO 639-3 retires a code for one of five stated reasons. The phase used to require a
+    /// 3-character Change_To, which silently dropped 174 of the corpus's 386 rows:
+    ///
+    ///   N  non-existent  72 rows -- the standard says the code names NO real language, so
+    ///                    Change_To is empty by construction and there is nothing to point at.
+    ///                    Emitted as an object-null REFUTE by the caller.
+    ///   S  split        102 rows -- several successors, named in Ret_Remedy as bracketed
+    ///                    codes rather than in Change_To.
+    ///   C/D/M          212 rows -- one successor in Change_To; these already worked.
+    ///
+    /// Returns keep=false only for a row that names no successor and is not a stated
+    /// non-existence -- a malformed row, not a retirement the corpus expressed.
+    internal static (string Reason, string[] Successors, bool Keep) Classify(
+        string reason, string changeTo, string remedy)
+    {
+        if (reason == "N") return (reason, [], true);
+        string[] successors =
+            changeTo.Length == 3 ? [changeTo] : SuccessorsFromRemedy(remedy);
+        return (reason, successors, successors.Length > 0);
+    }
+
     /// Ret_Remedy names split targets as bracketed 3-letter codes, e.g.
     /// "Split into five languages: Nong Zhuang [zhn];  Yang Zhuang [zyg]; ...".
     internal static string[] SuccessorsFromRemedy(string remedy)
