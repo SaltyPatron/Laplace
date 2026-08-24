@@ -30,10 +30,10 @@ SELECT * FROM (VALUES
 
 INSERT INTO laplace.entities (id, tier, type_id, highway_mask)
 SELECT id, 2::smallint,
-       (SELECT id FROM sym_fixtures WHERE name = 'dummy_type'), NULL
+       (SELECT id FROM sym_fixtures WHERE name = 'dummy_type'), NULL::bytea
 FROM sym_fixtures WHERE name <> 'dummy_type'
 UNION ALL
-SELECT id, 2::smallint, id, NULL FROM sym_fixtures WHERE name = 'dummy_type'
+SELECT id, 2::smallint, id, NULL::bytea FROM sym_fixtures WHERE name = 'dummy_type'
 ON CONFLICT (id, tier) DO NOTHING;
 
 -- sym: confirmed symmetric edge, rating 1800 / rd 50 -> signed-positive.
