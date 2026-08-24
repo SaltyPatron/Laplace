@@ -4,6 +4,7 @@
 #include "nodes/execnodes.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
+#include "utils/memutils.h"
 #include "utils/tuplestore.h"
 #include "catalog/pg_type.h"
 #include "access/htup_details.h"
@@ -59,6 +60,21 @@ require_point4d(LWGEOM *geom, const char *fn_name, POINT4D *out)
     getPoint4d_p(lwpoint->point, 0, out);
 }
 
+/* The xyzm buffer is one palloc of sizeof(double) * 4 per vertex, and Postgres
+ * refuses any single palloc at or above MaxAllocSize. The vertex ceiling is
+ * that quotient — derived from the allocator, not chosen. */
+#define LAPLACE_XYZM_MAX_POINTS ((Size) (MaxAllocSize / (sizeof(double) * 4)))
+
+static void
+require_xyzm_capacity(Size npoints, const char *fn_name)
+{
+    if (npoints > LAPLACE_XYZM_MAX_POINTS)
+        ereport(ERROR,
+                (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                 errmsg("%s: %zu vertices exceeds the %zu-vertex expansion ceiling",
+                        fn_name, (size_t) npoints, (size_t) LAPLACE_XYZM_MAX_POINTS)));
+}
+
 static double *
 geom_to_xyzm_buffer(LWGEOM *geom, const char *fn_name, size_t *out_npoints)
 {
@@ -76,6 +92,7 @@ geom_to_xyzm_buffer(LWGEOM *geom, const char *fn_name, size_t *out_npoints)
         {
             LWMPOINT *mp = (LWMPOINT *) geom;
             const uint32_t n = mp->ngeoms;
+            require_xyzm_capacity((Size) n, fn_name);
             double *buf = (double *) palloc(sizeof(double) * 4 * (Size) n);
             for (uint32_t i = 0; i < n; ++i)
             {
@@ -101,6 +118,7 @@ geom_to_xyzm_buffer(LWGEOM *geom, const char *fn_name, size_t *out_npoints)
     }
 
     const uint32_t n = pa->npoints;
+    require_xyzm_capacity((Size) n, fn_name);
     double *buf = (double *) palloc(sizeof(double) * 4 * (Size) n);
     for (uint32_t i = 0; i < n; ++i)
     {
@@ -618,6 +636,7 @@ pg_laplace_trajectory_build(PG_FUNCTION_ARGS)
         memcpy(&ids[i], VARDATA_ANY(b), sizeof(hash128_t));
     }
 
+    require_xyzm_capacity((Size) n, "laplace_trajectory_build");
     double *xyzm = (double *) palloc(sizeof(double) * 4 * (Size) n);
     if (trajectory_build(ids, (size_t) n, xyzm) != 0)
         ereport(ERROR,
