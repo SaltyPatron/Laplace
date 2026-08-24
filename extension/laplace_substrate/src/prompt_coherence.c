@@ -64,6 +64,7 @@
 #include "laplace/core/hash128.h"
 #include "laplace/core/relation_law.h"
 #include "spi_common.h"
+#include "relation_symmetry.h"
 #include "spi_nested.h"
 
 PG_FUNCTION_INFO_V1(pg_laplace_prompt_coherence);
@@ -880,8 +881,8 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
 
         if (n_td > 0)
         {
-            Oid        argtypes[2] = { BYTEAARRAYOID, BYTEAARRAYOID };
-            Datum      args[2];
+            Oid        argtypes[3] = { BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID };
+            Datum      args[3];
             ArrayType *type_arr;
             Portal     portal;
 
@@ -891,12 +892,27 @@ pg_laplace_prompt_coherence(PG_FUNCTION_ARGS)
 
             args[0] = PointerGetDatum(syn_arr);
             args[1] = PointerGetDatum(type_arr);
+            args[2] = PointerGetDatum(laplace_symmetric_relation_types());
             portal = SPI_cursor_open_with_args(
                 "pc_rel",
+                /* Both ends for symmetric types: the candidate may be the
+                 * stored OBJECT of the single canonically-oriented cell, in
+                 * which case a subject-only probe scores it zero mass for a
+                 * relation the prompt explicitly named. Column 1 is "the
+                 * endpoint that IS the candidate" in both arms, so the
+                 * consuming loop below is unchanged. Asymmetric types keep
+                 * forward-only semantics. */
                 "SELECT c.subject_id, c.type_id, c.rating, c.rd "
                 "FROM laplace.consensus c "
-                "WHERE c.subject_id = ANY($1) AND c.type_id = ANY($2)",
-                2, argtypes, args, NULL, true, CURSOR_OPT_PARALLEL_OK);
+                "WHERE c.subject_id = ANY($1) AND c.type_id = ANY($2) "
+                "UNION ALL "
+                "SELECT c.object_id, c.type_id, c.rating, c.rd "
+                "FROM laplace.consensus c "
+                "WHERE c.object_id = ANY($1) AND c.type_id = ANY($2) "
+                "  AND c.object_id IS NOT NULL "
+                "  AND c.subject_id <> c.object_id "
+                "  AND c.type_id = ANY($3)",
+                3, argtypes, args, NULL, true, CURSOR_OPT_PARALLEL_OK);
 
             for (;;)
             {

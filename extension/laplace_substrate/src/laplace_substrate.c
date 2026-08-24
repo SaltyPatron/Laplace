@@ -853,6 +853,38 @@ pg_relation_rank(PG_FUNCTION_ARGS)
 }
 
 
+/*
+ * Is this relation symmetric? Straight off the compiled law, same shape as
+ * pg_relation_rank.
+ *
+ * A symmetric assertion folds into ONE consensus cell canonically oriented to
+ * subject = min(subject, object) (laplace_attestation_orient), so any read that
+ * probes subject_id alone can only see such a pair from its lesser-hashed end.
+ * Callers that must not manufacture absence need to know which types those are,
+ * and the answer belongs to the manifest -- a hand-kept list of "the symmetric
+ * ones" in a SQL body is a second copy of the law that agrees until one of them
+ * is edited.
+ *
+ * NULL for a type the static table does not carry (dynamic DEP_/FEAT_/EDEP_
+ * families), which is honest: they are absent from the manifest, so the manifest
+ * has no symmetry to report. Callers coalesce it to false -- unknown symmetry
+ * must not silently widen a read into the reverse direction.
+ */
+PG_FUNCTION_INFO_V1(pg_relation_is_symmetric);
+
+Datum
+pg_relation_is_symmetric(PG_FUNCTION_ARGS)
+{
+    bytea*    type_ba = PG_GETARG_BYTEA_PP(0);
+    hash128_t type_id = datum_to_hash128(PointerGetDatum(type_ba));
+    const laplace_relation_def_t* def = NULL;
+    int       rc = laplace_relation_lookup(&type_id, &def);
+    if (rc != 0 || def == NULL)
+        PG_RETURN_NULL();
+    PG_RETURN_BOOL(def->symmetry == LAPLACE_REL_SYMMETRY_SYMMETRIC);
+}
+
+
 
 
 

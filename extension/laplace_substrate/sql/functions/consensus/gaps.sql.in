@@ -9,8 +9,29 @@ CREATE OR REPLACE FUNCTION consensus.gaps(p_word bytea)
     ), expected(name) AS (SELECT unnest(ARRAY[
         'IS_A','HAS_PART','HAS_MEMBER','CAUSES','USED_FOR','IS_ANTONYM_OF',
         'IS_SIMILAR_TO','HAS_ATTRIBUTE','DERIVATIONALLY_RELATED']))
+    -- A SYMMETRIC ARENA IS NOT A GAP WHEN THE EVIDENCE SITS ON THE OTHER END.
+    --
+    -- IS_ANTONYM_OF, IS_SIMILAR_TO and DERIVATIONALLY_RELATED are symmetric, so
+    -- their evidence folds into ONE cell oriented to subject = min(subject,
+    -- object) by hash bytes. Probing subject_id alone therefore reported the
+    -- arena "missing" for every word that happens to be the greater-hashed
+    -- endpoint -- manufacturing an absence out of a byte comparison. Spec 05 is
+    -- explicit that absence of a row is UNKNOWN, and this function's whole
+    -- output is a claim about absence, so a false negative here is the one
+    -- failure it cannot afford.
+    --
+    -- Two arms rather than an OR-join: each stays indexable
+    -- (consensus_subject_type_btree / consensus_object_type_btree), and the
+    -- symmetry test is a function of e.name, so it is evaluated once per
+    -- expected arena rather than once per consensus row. Asymmetric arenas keep
+    -- the forward-only semantics -- IS_A up is not IS_A down.
     SELECT e.name FROM expected e
     WHERE NOT EXISTS (
         SELECT 1 FROM laplace.v_consensus_unrefuted c JOIN subj s ON c.subject_id = s.id
-        WHERE c.type_id = laplace.relation_type_id(e.name))
+        WHERE c.type_id = laplace.relation_type_id(e.name)
+        UNION ALL
+        SELECT 1 FROM laplace.v_consensus_unrefuted c JOIN subj s ON c.object_id = s.id
+        WHERE c.type_id = laplace.relation_type_id(e.name)
+          AND COALESCE(consensus.relation_is_symmetric(
+                           laplace.relation_type_id(e.name)), false))
 $$;
