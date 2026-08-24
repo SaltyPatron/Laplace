@@ -19,6 +19,11 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>
     // actually happened.
     private const string NameAliasRelation = "HAS_NAME_ALIAS";
 
+    /// Hoisted because the retirement lane refutes it and the code-table lane asserts it --
+    /// two call sites for one relation, which §15 and the g3 vocabulary gate both forbid
+    /// spelling twice.
+    private const string LanguageTypeRelation = "HAS_LANGUAGE_TYPE";
+
     public static readonly Hash128 TrustClass = ISOSource.TrustClass;
 
     private static readonly Hash128 LanguageTypeId = EntityTypeRegistry.Language;
@@ -123,7 +128,7 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>
             _codeNames.Add($"substrate/iso639/type/{rec.Type}/v1");
             b.AddEntity(typeId, EntityTier.Word, Iso639CodeTypeId, Source);
             b.AddAttestation(NativeAttestation.Categorical(
-                langId, "HAS_LANGUAGE_TYPE", typeId, Source, TC.StandardsDerived));
+                langId, LanguageTypeRelation, typeId, Source, TC.StandardsDerived));
         }
         if (rec.RefName.Length > 0)
         {
@@ -301,7 +306,7 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>
             if (rec.Reason == NonExistent)
             {
                 b.AddAttestation(NativeAttestation.Categorical(
-                    retId, "HAS_LANGUAGE_TYPE", null, Source, TC.StandardsDerived,
+                    retId, LanguageTypeRelation, null, Source, TC.StandardsDerived,
                     confirm: false));
                 return;
             }

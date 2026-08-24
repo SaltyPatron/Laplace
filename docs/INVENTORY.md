@@ -141,7 +141,7 @@ Chess:
 
 ## Relation manifest (`engine/manifest/relation_types.toml`)
 
-- Governed canonical relations: **222** (+23 aliases — aliases map to a canonical and add no highway bits)
+- Governed canonical relations: **223** (+23 aliases — aliases map to a canonical and add no highway bits)
 - Salience bands: **13** — `mandate`, `definitional`, `taxonomic`, `equivalence`, `partitive`, `causal`, `oppositional`, `associative`, `tensor_calculation`, `lexical_glue`, `scalar_valued`, `standards_structural`, `probationary`
 
 Highway bits are an explicit append-only `bit = N` registry in

@@ -116,6 +116,7 @@ public sealed class UnicodeDecomposer : DecomposerMultiPhase<UnicodeSource, Full
             foreach (var v in ucd.EastAsianWidthEntityIds.Keys) names.Add($"unicode/east_asian_width/{v}/v1");
             foreach (var v in ucd.JoiningTypeEntityIds.Keys) names.Add($"unicode/joining_type/{v}/v1");
             foreach (var v in ucd.NumericTypeEntityIds.Keys) names.Add($"unicode/numeric_type/{v}/v1");
+            foreach (var v in ucd.NormalizationFormEntityIds.Keys) names.Add($"unicode/normalization_form/{v}/v1");
             for (int cc = 1; cc <= 254; cc++) names.Add($"unicode/combining_class/{cc}/v1");
             names.Add("Byte");
             names.Add("substrate/encoding/ISO-8859-1/v1");
@@ -334,6 +335,30 @@ public sealed class UnicodeDecomposer : DecomposerMultiPhase<UnicodeSource, Full
             if (jt != null && ucd.JoiningTypeEntityIds.TryGetValue(jt, out var jtId))
                 b.AddAttestation(NativeAttestation.CategoricalResolved(entityId, UcdProperties.RelTypeHasJoiningType,
                     jtId, Source, null, RelationTypeRank.StandardsStructural * TC.StandardsDerived));
+
+            // The only UCD property that states a NEGATIVE. DerivedNormalizationProps lists
+            // only the codepoints whose quick-check is not "Yes": N means the codepoint is
+            // never in that normalization form, M means maybe -- it depends on the
+            // neighbours. Yes is carried by ABSENCE from the file and is deliberately not
+            // asserted: absence is unknown (spec 05), and materialising the ~4.4M derived
+            // Confirms would be inventing evidence the standard never gave.
+            //
+            // N folds as a REFUTE; M folds as a DRAW, because magnitude 0 scores exactly
+            // 0.5 (laplace_score_fp) and a draw is what "maybe" means in a Glicko fold.
+            // Before this, UnicodeDecomposer had 1,631,783 confirms and neither.
+            if (ucd.NormalizationQc.TryGetValue(ucp, out var qcVerdicts))
+                foreach (var (form, maybe) in qcVerdicts)
+                {
+                    if (!ucd.NormalizationFormEntityIds.TryGetValue(form, out var formId)) continue;
+                    double weight = RelationTypeRank.StandardsStructural * TC.StandardsDerived;
+                    b.AddAttestation(maybe
+                        ? NativeAttestation.ResolvedScored(
+                            entityId, UcdProperties.RelTypeHasNormalizationForm, formId, Source, null,
+                            weight, signedMagnitude: 0.0, arenaScale: 1.0)
+                        : NativeAttestation.CategoricalResolved(
+                            entityId, UcdProperties.RelTypeHasNormalizationForm, formId, Source, null,
+                            weight, confirm: false));
+                }
 
             string? nt = ucd.NumericTypeForCodepoint(ucp);
             if (nt != null && ucd.NumericTypeEntityIds.TryGetValue(nt, out var ntId))
