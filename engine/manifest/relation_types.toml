@@ -1421,6 +1421,25 @@ parent = null
 family_root = "HAS_NUMERIC_TYPE"
 
 [[relation]]
+# Unicode Normalization quick-check (DerivedNormalizationProps.txt): whether a codepoint is
+# already in a normalization form (NFC/NFD/NFKC/NFKD).
+#
+# THE ONLY UCD PROPERTY THAT STATES A NEGATIVE. The file lists only the codepoints whose
+# quick-check is NOT "Yes": 36,424 at N ("this codepoint is never in that form") and 264 at M
+# ("maybe -- it depends on the neighbours"), over 1,382 range lines. Yes is the default,
+# carried by ABSENCE from the file, so it is never asserted here: absence is unknown
+# (spec 05), and emitting ~4.4M derived Confirms would be inventing evidence never given.
+#
+# N folds as a REFUTE and M folds as a DRAW (magnitude 0 scores exactly 0.5). Measured on the
+# 2026-08-23 seed, UnicodeDecomposer had 1,631,783 confirms and zero of either.
+canonical = "HAS_NORMALIZATION_FORM"
+bit = 222
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_NORMALIZATION_FORM"
+
+[[relation]]
 # Unicode Script_Extensions (ScriptExtensions.txt): a codepoint usable across multiple scripts. Weaker,
 # multi-valued sibling of USES_SCRIPT.
 canonical = "USES_SCRIPT_EXTENSION"

@@ -533,4 +533,36 @@ public sealed class FrameNetDecomposerTests
             .ToList();
         Assert.Equal(new long[] { 24, 2 }, totals);
     }
+
+    // FrameNet states how much annotation backs each lexical unit as totalAnnotated="N"
+    // on <lexUnit> -- 13,572 of them in v1.7, e.g. cause.v at 116 -- and it was never
+    // read, so every LU evoked its frame at strength 1 and an LU with 116 annotated
+    // instances was indistinguishable from one with a single annotation.
+    [Fact]
+    public void ParseLu_Reads_TotalAnnotated_As_The_Observation_Count()
+    {
+        const string withTotal = """
+<?xml version="1.0" encoding="UTF-8"?>
+<lexUnit status="Finished_Initial" POS="V" name="cause.v" ID="2" frame="Causation" totalAnnotated="116" xmlns="http://framenet.icsi.berkeley.edu">
+  <definition>COD: make happen.</definition>
+  <lexeme POS="V" name="cause"/>
+</lexUnit>
+""";
+        var lu = FrameNetLuIngest.ParseLu(XDocument.Parse(withTotal));
+        Assert.NotNull(lu);
+        Assert.Equal(116L, lu!.TotalAnnotated);
+
+        // Absent means the corpus did not say, which is one observation -- not zero,
+        // which would erase the edge, and not a borrowed number.
+        const string withoutTotal = """
+<?xml version="1.0" encoding="UTF-8"?>
+<lexUnit status="Finished_Initial" POS="V" name="cause.v" ID="2" frame="Causation" xmlns="http://framenet.icsi.berkeley.edu">
+  <definition>COD: make happen.</definition>
+  <lexeme POS="V" name="cause"/>
+</lexUnit>
+""";
+        var bare = FrameNetLuIngest.ParseLu(XDocument.Parse(withoutTotal));
+        Assert.NotNull(bare);
+        Assert.Equal(1L, bare!.TotalAnnotated);
+    }
 }

@@ -24,6 +24,7 @@ public readonly struct UnicodeSource : ISeedSource
         "HAS_EAST_ASIAN_WIDTH", "HAS_JOINING_TYPE", "HAS_NUMERIC_TYPE",
         "HAS_NAME_ALIAS", "CONFUSABLE_WITH", "HAS_EMOJI_PROPERTY",
         "DECODES_TO", "HAS_UTF8_ROLE",
+        "HAS_NORMALIZATION_FORM",
     ];
 
     public static IReadOnlyList<string>? TypeNodeNames { get; } =

@@ -109,6 +109,7 @@ CREATE OR REPLACE FUNCTION consensus.relation_family_ids(p_family text)
         WHEN 'HAS_MOTIF' THEN ARRAY[laplace.relation_type_id('HAS_MOTIF')]
         WHEN 'HAS_NAME' THEN ARRAY[laplace.relation_type_id('HAS_NAME')]
         WHEN 'HAS_NAME_ALIAS' THEN ARRAY[laplace.relation_type_id('HAS_NAME_ALIAS')]
+        WHEN 'HAS_NORMALIZATION_FORM' THEN ARRAY[laplace.relation_type_id('HAS_NORMALIZATION_FORM')]
         WHEN 'HAS_NUMERIC_TYPE' THEN ARRAY[laplace.relation_type_id('HAS_NUMERIC_TYPE')]
         WHEN 'HAS_NUMERIC_VALUE' THEN ARRAY[laplace.relation_type_id('HAS_NUMERIC_VALUE')]
         WHEN 'HAS_NUM_HEADS' THEN ARRAY[laplace.relation_type_id('HAS_NUM_HEADS')]

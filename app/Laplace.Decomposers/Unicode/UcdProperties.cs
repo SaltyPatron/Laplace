@@ -32,6 +32,13 @@ internal sealed class UcdProperties
     public static readonly Hash128 RelTypeHasEastAsianWidth = RelationTypeRegistry.RelationTypeId("HAS_EAST_ASIAN_WIDTH");
     public static readonly Hash128 RelTypeHasJoiningType = RelationTypeRegistry.RelationTypeId("HAS_JOINING_TYPE");
     public static readonly Hash128 RelTypeHasNumericType = RelationTypeRegistry.RelationTypeId("HAS_NUMERIC_TYPE");
+    // Derived from this field's own name, never spelled: the sole roster is
+    // UnicodeSource.Relations, the declaration span the vocabulary law exempts. The g3
+    // baseline froze 2026-08-03 and is shrink-only, so a relation added after it may not
+    // introduce a new literal at a query site.
+    public static readonly Hash128 RelTypeHasNormalizationForm =
+        RelationTypeRegistry.RelationTypeId(
+            RelationSymbol.CanonicalFromField(nameof(RelTypeHasNormalizationForm)));
 
     public readonly string?[] Name;
 
@@ -83,6 +90,30 @@ internal sealed class UcdProperties
     public readonly Dictionary<string, Hash128> EastAsianWidthEntityIds;
     public readonly Dictionary<string, Hash128> JoiningTypeEntityIds;
     public readonly Dictionary<string, Hash128> NumericTypeEntityIds;
+    public readonly Dictionary<string, Hash128> NormalizationFormEntityIds;
+
+    /// <summary>
+    /// Normalization quick-check, the ONLY UCD property that states a negative.
+    /// DerivedNormalizationProps.txt lists only the codepoints whose quick-check is not
+    /// "Yes": 36,424 at N ("never in that form") and 264 at M ("maybe -- depends on the
+    /// neighbours"), stated as 1,382 range lines. Yes is the default and is carried by
+    /// ABSENCE from the file, so it is
+    /// not represented here: absence is unknown (spec 05), and materialising ~4.4M derived
+    /// Confirms would be inventing evidence the standard never gave.
+    ///
+    /// Sparse by construction -- 36,688 verdicts against 1,114,112 codepoints, 3.3% -- so
+    /// this is a keyed lookup, not another per-codepoint array.
+    /// </summary>
+    public readonly Dictionary<uint, List<(string Form, bool Maybe)>> NormalizationQc = new();
+
+    /// Total (codepoint, form) verdicts the standard states. 36,688 on UCD 17.
+    public int NormalizationQcCount
+    {
+        get { int n = 0; foreach (var (_, v) in NormalizationQc) n += v.Count; return n; }
+    }
+
+    /// The four forms the quick-check is stated for, in UCD order.
+    public static readonly string[] NormalizationForms = ["NFC", "NFD", "NFKC", "NFKD"];
 
     public static readonly Hash128 OrdinalCtx0 = Hash128.OfCanonical("ordinal/0/v1");
     public static readonly Hash128 OrdinalCtx1 = Hash128.OfCanonical("ordinal/1/v1");
@@ -148,6 +179,8 @@ internal sealed class UcdProperties
                                            "unicode/joining_type/{0}/v1");
         NumericTypeEntityIds = BuildEntityIds(numericTypeRanges.Select(r => r.N).Distinct(),
                                            "unicode/numeric_type/{0}/v1");
+        NormalizationFormEntityIds = BuildEntityIds(NormalizationForms,
+                                           "unicode/normalization_form/{0}/v1");
     }
 
     private static Dictionary<string, Hash128> BuildEntityIds(
@@ -205,6 +238,8 @@ internal sealed class UcdProperties
         foreach (var (_, id) in JoiningTypeEntityIds)
             yield return new EntityRow(id, EntityTier.Word, typeId, sourceId);
         foreach (var (_, id) in NumericTypeEntityIds)
+            yield return new EntityRow(id, EntityTier.Word, typeId, sourceId);
+        foreach (var (_, id) in NormalizationFormEntityIds)
             yield return new EntityRow(id, EntityTier.Word, typeId, sourceId);
     }
 
@@ -373,13 +408,42 @@ internal sealed class UcdProperties
                 if (ok) confusables.Add((src, sb.ToString()));
             }
 
-        return new UcdProperties(
+        var built = new UcdProperties(
             names,
             genCat, combCls, upperMap, lowerMap, titleMap,
             canonDec, compatDec, numeric, bidiCls, bidiMir, emoji,
             aliases, confusables,
             scriptRanges, blockRanges, ageRanges,
             lineBreakRanges, eaWidthRanges, joiningTypeRanges, numericTypeRanges);
+
+        // DerivedNormalizationProps lines are "range ; PROPERTY ; VALUE" for the quick-check
+        // properties and "range ; PROPERTY" for the rest. ParseRangeFile keeps everything
+        // after the first ';' as one string, so the split below separates them; a line with
+        // no second ';' is one of the non-quick-check properties and is skipped.
+        foreach (var (st, en, field) in OptionalRangeFile(ucdDir, "DerivedNormalizationProps.txt"))
+        {
+            int semi = field.IndexOf(';');
+            if (semi < 0) continue;
+            string prop = field[..semi].Trim();
+            string value = field[(semi + 1)..].Trim();
+            if (!prop.EndsWith("_QC", StringComparison.Ordinal)) continue;
+
+            string form = prop[..^3];
+            if (Array.IndexOf(NormalizationForms, form) < 0) continue;
+
+            // Y is never listed; anything that is not N or M is not a quick-check verdict.
+            bool maybe = value == "M";
+            if (!maybe && value != "N") continue;
+
+            for (uint c = st; c <= en && c < Total; c++)
+            {
+                if (!built.NormalizationQc.TryGetValue(c, out var verdicts))
+                    built.NormalizationQc[c] = verdicts = new List<(string, bool)>(1);
+                verdicts.Add((form, maybe));
+            }
+        }
+
+        return built;
     }
 
     private static (uint S, uint E, string N)[] OptionalRangeFile(string ucdDir, params string[] relPaths)

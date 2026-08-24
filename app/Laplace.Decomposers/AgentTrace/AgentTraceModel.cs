@@ -1,3 +1,4 @@
+using Laplace.Decomposers.Abstractions;
 namespace Laplace.Decomposers.AgentTrace;
 
 /// <summary>
@@ -100,20 +101,14 @@ public static class AgentRelations
 
     public static string Surface(AgentRelation relation) => Canonical[(int)relation];
 
+    // The conversion is not specific to this lane -- every relation added after the
+    // vocabulary baseline froze needs it -- so the body lives in RelationSymbol (§15).
     private static string[] BuildCanonical()
     {
         var names = Enum.GetNames<AgentRelation>();
         var result = new string[names.Length];
         for (int i = 0; i < names.Length; i++)
-        {
-            var sb = new System.Text.StringBuilder(names[i].Length + 4);
-            foreach (char c in names[i])
-            {
-                if (char.IsUpper(c) && sb.Length > 0) sb.Append('_');
-                sb.Append(char.ToUpperInvariant(c));
-            }
-            result[i] = sb.ToString();
-        }
+            result[i] = RelationSymbol.Canonical(names[i]);
         return result;
     }
 }
