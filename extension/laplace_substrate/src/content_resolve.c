@@ -86,7 +86,11 @@ ensure_resolve_container_plan(void)
     if (resolve_container_plan == NULL)
     {
         Oid argtypes[2] = { BYTEAOID, INT4OID };
-        SPIPlanPtr plan = SPI_prepare(RESOLVE_CONTAINER_QUERY, 2, argtypes);
+        /* PARALLEL_OK, not bare SPI_prepare: a read-only plan prepared without
+         * it is planned serial for the life of the backend, and this one is
+         * kept. SpiParallelPlanGateTests enforces this repo-wide. */
+        SPIPlanPtr plan = SPI_prepare_cursor(RESOLVE_CONTAINER_QUERY, 2, argtypes,
+                                             CURSOR_OPT_PARALLEL_OK);
         if (plan == NULL)
             elog(ERROR, "resolve_phrase: SPI_prepare failed: %s",
                  SPI_result_code_string(SPI_result));
@@ -132,7 +136,10 @@ ensure_resolve_joint_edge_plan(void)
     if (resolve_joint_edge_plan == NULL)
     {
         Oid argtypes[1] = { BYTEAARRAYOID };
-        SPIPlanPtr plan = SPI_prepare(RESOLVE_JOINT_EDGE_QUERY, 1, argtypes);
+        /* Same gate: the joint-edge election is a read-only scan over
+         * laplace.consensus and must stay parallel-eligible. */
+        SPIPlanPtr plan = SPI_prepare_cursor(RESOLVE_JOINT_EDGE_QUERY, 1, argtypes,
+                                             CURSOR_OPT_PARALLEL_OK);
         if (plan == NULL)
             elog(ERROR, "resolve_phrase: SPI_prepare failed: %s",
                  SPI_result_code_string(SPI_result));
