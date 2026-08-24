@@ -21,6 +21,7 @@
 #include "spi_nested.h"
 #include "perfcache_native.h"
 #include "walk_score.h"
+#include "relation_symmetry.h"
 
 PG_FUNCTION_INFO_V1(pg_laplace_walk_branches);
 PG_FUNCTION_INFO_V1(pg_laplace_walk_strongest);
@@ -100,30 +101,85 @@ ensure_edge_plan(void)
  * Identical pathology to ordinal_continuity_distance below,
  * which was already made opt-in for it; this sibling was never rewired.
  */
+/*
+ * A SYMMETRIC RELATION IS ONE CELL, SO THE READ MUST PROBE BOTH ENDS.
+ *
+ * laplace_attestation_orient() canonicalises a symmetric assertion to
+ * subject = min(subject, object) by hash bytes, so the unordered pair {a,b}
+ * folds into exactly one consensus cell instead of two half-rated ones. That
+ * is correct and load-bearing on the WRITE side -- all evidence for the pair
+ * accumulates in one place.
+ *
+ * It also means `c.subject_id = frontier` alone can only ever traverse such a
+ * pair from its lesser-hashed end. Measured on the live substrate 2026-08-24:
+ * of 133,019 symmetric cells (DERIVATIONALLY_RELATED, IS_ANTONYM_OF,
+ * IS_SIMILAR_TO, CONFUSABLE_WITH, IN_VERB_GROUP_WITH) 133,019 are stored
+ * subject < object and 0 the other way -- so the reverse direction of every
+ * symmetric edge in the substrate was unreachable. Concretely: the antonym
+ * cell ('avant jesus christ', IS_ANTONYM_OF, 'apres jesus christ') answered
+ * the question asked from `avant` and returned NOTHING asked from `apres`.
+ * Same cell, same rating; the hash order of the id decided whether the
+ * substrate appeared to know the fact.
+ *
+ * The reverse arm is restricted to symmetric type ids ($3): traversing an
+ * ASYMMETRIC edge backwards would be a different claim (IS_A up is not IS_A
+ * down), so it stays forbidden. steer_candidates.c already unions both
+ * directions; this is retrieval agreeing with steering about which edges
+ * exist, the same way walk_score.h makes them agree about what one is worth.
+ *
+ * Indexed, not a scan: consensus_object_type_btree (object_id, type_id)
+ * WHERE object_id IS NOT NULL exists on every partition.
+ */
 static const char *WALK_BATCH_QUERY =
-    "SELECT f.idx, c.object_id, eo.type_id, c.type_id, c.rating, c.rd, c.witness_count, "
+    "SELECT e.idx, e.neighbor, eo.type_id, e.type_id, e.rating, e.rd, e.witness_count, "
     "       eo.highway_mask, "
     "       ST_X(ps.coord), ST_Y(ps.coord), ST_Z(ps.coord), ST_M(ps.coord), ps.physicality_tableoid, "
     "       ST_X(po.coord), ST_Y(po.coord), ST_Z(po.coord), ST_M(po.coord), po.physicality_tableoid "
-    "FROM unnest($1::bytea[]) WITH ORDINALITY AS f(subject_id, idx) "
-    "JOIN laplace.consensus c ON c.subject_id = f.subject_id "
-    "JOIN laplace.entities eo ON eo.id = c.object_id "
-    "LEFT JOIN laplace.v_word_points ps ON ps.id = f.subject_id "
-    "LEFT JOIN laplace.v_word_points po ON po.id = c.object_id "
-    "WHERE c.object_id IS NOT NULL "
-    "  AND ($2::bytea IS NULL OR c.type_id = $2)";
+    "FROM ( "
+    "  SELECT f.idx, f.subject_id AS anchor, c.object_id AS neighbor, "
+    "         c.type_id, c.rating, c.rd, c.witness_count "
+    "    FROM unnest($1::bytea[]) WITH ORDINALITY AS f(subject_id, idx) "
+    "    JOIN laplace.consensus c ON c.subject_id = f.subject_id "
+    "   WHERE c.object_id IS NOT NULL "
+    "     AND ($2::bytea IS NULL OR c.type_id = $2) "
+    "  UNION ALL "
+    "  SELECT f.idx, f.subject_id AS anchor, c.subject_id AS neighbor, "
+    "         c.type_id, c.rating, c.rd, c.witness_count "
+    "    FROM unnest($1::bytea[]) WITH ORDINALITY AS f(subject_id, idx) "
+    "    JOIN laplace.consensus c ON c.object_id = f.subject_id "
+    "   WHERE c.object_id IS NOT NULL "
+    "     AND c.subject_id <> c.object_id "
+    "     AND c.type_id = ANY($3::bytea[]) "
+    "     AND ($2::bytea IS NULL OR c.type_id = $2) "
+    ") e "
+    "JOIN laplace.entities eo ON eo.id = e.neighbor "
+    "LEFT JOIN laplace.v_word_points ps ON ps.id = e.anchor "
+    "LEFT JOIN laplace.v_word_points po ON po.id = e.neighbor";
 
 /* Same edge set, no coordinate fetch. The geometry columns are read
  * conditionally in the fetch loop, so this plan's narrower tuple descriptor is
  * the only difference the caller sees. */
 static const char *WALK_BATCH_QUERY_NOGEO =
-    "SELECT f.idx, c.object_id, eo.type_id, c.type_id, c.rating, c.rd, c.witness_count, "
+    "SELECT e.idx, e.neighbor, eo.type_id, e.type_id, e.rating, e.rd, e.witness_count, "
     "       eo.highway_mask "
-    "FROM unnest($1::bytea[]) WITH ORDINALITY AS f(subject_id, idx) "
-    "JOIN laplace.consensus c ON c.subject_id = f.subject_id "
-    "JOIN laplace.entities eo ON eo.id = c.object_id "
-    "WHERE c.object_id IS NOT NULL "
-    "  AND ($2::bytea IS NULL OR c.type_id = $2)";
+    "FROM ( "
+    "  SELECT f.idx, f.subject_id AS anchor, c.object_id AS neighbor, "
+    "         c.type_id, c.rating, c.rd, c.witness_count "
+    "    FROM unnest($1::bytea[]) WITH ORDINALITY AS f(subject_id, idx) "
+    "    JOIN laplace.consensus c ON c.subject_id = f.subject_id "
+    "   WHERE c.object_id IS NOT NULL "
+    "     AND ($2::bytea IS NULL OR c.type_id = $2) "
+    "  UNION ALL "
+    "  SELECT f.idx, f.subject_id AS anchor, c.subject_id AS neighbor, "
+    "         c.type_id, c.rating, c.rd, c.witness_count "
+    "    FROM unnest($1::bytea[]) WITH ORDINALITY AS f(subject_id, idx) "
+    "    JOIN laplace.consensus c ON c.object_id = f.subject_id "
+    "   WHERE c.object_id IS NOT NULL "
+    "     AND c.subject_id <> c.object_id "
+    "     AND c.type_id = ANY($3::bytea[]) "
+    "     AND ($2::bytea IS NULL OR c.type_id = $2) "
+    ") e "
+    "JOIN laplace.entities eo ON eo.id = e.neighbor";
 
 static SPIPlanPtr walk_batch_plan = NULL;
 static SPIPlanPtr walk_batch_nogeo_plan = NULL;
@@ -133,8 +189,8 @@ ensure_walk_batch_nogeo_plan(void)
 {
     if (walk_batch_nogeo_plan == NULL)
     {
-        Oid argtypes[2] = { BYTEAARRAYOID, BYTEAOID };
-        SPIPlanPtr plan = SPI_prepare_cursor(WALK_BATCH_QUERY_NOGEO, 2, argtypes, CURSOR_OPT_PARALLEL_OK);
+        Oid argtypes[3] = { BYTEAARRAYOID, BYTEAOID, BYTEAARRAYOID };
+        SPIPlanPtr plan = SPI_prepare_cursor(WALK_BATCH_QUERY_NOGEO, 3, argtypes, CURSOR_OPT_PARALLEL_OK);
         if (plan == NULL)
             elog(ERROR, "generate walk: SPI_prepare failed: %s",
                  SPI_result_code_string(SPI_result));
@@ -149,8 +205,8 @@ ensure_walk_batch_plan(void)
 {
     if (walk_batch_plan == NULL)
     {
-        Oid argtypes[2] = { BYTEAARRAYOID, BYTEAOID };
-        SPIPlanPtr plan = SPI_prepare_cursor(WALK_BATCH_QUERY, 2, argtypes, CURSOR_OPT_PARALLEL_OK);
+        Oid argtypes[3] = { BYTEAARRAYOID, BYTEAOID, BYTEAARRAYOID };
+        SPIPlanPtr plan = SPI_prepare_cursor(WALK_BATCH_QUERY, 3, argtypes, CURSOR_OPT_PARALLEL_OK);
         if (plan == NULL)
             elog(ERROR, "walk_branches: SPI_prepare(batch) failed: %s",
                  SPI_result_code_string(SPI_result));
@@ -625,8 +681,8 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
             int n_frontier;
             Datum *frontier_ids;
             ArrayType *frontier_arr;
-            Datum  args[2];
-            char   nulls[3] = "  ";
+            Datum  args[3];
+            char   nulls[4] = "   ";
             int    rc;
             RawEdge *raw;
             int      n_raw;
@@ -665,6 +721,7 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
             args[0] = PointerGetDatum(frontier_arr);
             args[1] = type_null ? (Datum) 0 : type_datum;
             if (type_null) nulls[1] = 'n';
+            args[2] = PointerGetDatum(laplace_symmetric_relation_types());
 
             rc = SPI_execute_plan(use_geometry ? walk_batch_plan : walk_batch_nogeo_plan,
                                   args, nulls, true, 0);

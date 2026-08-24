@@ -1,0 +1,15 @@
+-- consensus.relation_is_symmetric(type_id) -> is this relation symmetric?
+--
+-- Reads the compiled relation manifest, never a hand-kept list. A symmetric
+-- assertion folds into ONE consensus cell oriented to subject = min(subject,
+-- object) by hash bytes, so a read that probes subject_id alone sees such a
+-- pair only from its lesser-hashed end. Any body that would otherwise hardcode
+-- "the symmetric ones" resolves through here instead (§15, one body for one
+-- truth): the manifest is where symmetry is declared, so the manifest is what
+-- answers.
+--
+-- NULL for types absent from the static table (dynamic DEP_*/FEAT_*/EDEP_*
+-- families). Callers COALESCE to false -- unknown symmetry must never widen a
+-- read into the reverse direction.
+CREATE OR REPLACE FUNCTION consensus.relation_is_symmetric(p_type_id bytea) RETURNS boolean
+    LANGUAGE c IMMUTABLE STRICT PARALLEL SAFE AS 'MODULE_PATHNAME', 'pg_relation_is_symmetric';
