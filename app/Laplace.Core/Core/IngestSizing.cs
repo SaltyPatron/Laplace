@@ -228,12 +228,12 @@ public static class IngestSizing
     }
 
     /// <summary>
-    /// Pool slots the consensus fold leaves free in the shared ingest pool for
-    /// renters the pool equation does not enumerate per-owner: the run-journal /
-    /// progress writer, replay-journal and route probes, finalize, and a batch
-    /// retry re-entering while the failed batch's folds still hold connections.
+    /// Kept at 0: the fold's slack is now PROVISIONED in the pool
+    /// (PostgresResourcePlan.foldPoolHeadroom) instead of being subtracted from the
+    /// fold's own width. Paying for pool slack with fold throughput is what made the
+    /// fold narrower than the producer it is 2.8x dearer than.
     /// </summary>
-    public const int ConsensusFoldPoolHeadroom = 2;
+    public const int ConsensusFoldPoolHeadroom = 0;
 
     /// <summary>
     /// Resolve the fold from the same memory and topology inputs as compose/apply.
@@ -260,6 +260,9 @@ public static class IngestSizing
         // control 1 + COPY fan p + fold (p − headroom) + free headroom = 1 + 2p —
         // and the fold back-pressures on its own semaphore instead of exhausting
         // the pool.
+        // Full width. The pool carries the fold's slack explicitly now, so the fold no
+        // longer cedes throughput to buy it. The back-pressure story is unchanged: the
+        // fold still gates on its own semaphore rather than exhausting the pool.
         int connections = Math.Max(1, applyPartitions - ConsensusFoldPoolHeadroom);
         long budget = Math.Max(1, workingSetBudgetBytes ?? ResolveWorkingSetBudgetBytes());
         long envelope = Math.Clamp(
