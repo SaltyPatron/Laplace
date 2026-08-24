@@ -14,6 +14,14 @@ namespace Laplace.Ingestion.Tests;
 /// I2/I5: operator integrity gates — no stub decomposers, empty ingest must fail closed.
 /// </summary>
 [Trait("Tier", "db")]
+// SERIALIZED WITH THE LEDGER TESTS. LocalPgFixture.InitializeAsync calls
+// ContentLadderLedger.Reset() -- process-global state -- on first ref. Run in
+// parallel with ContentLadderLedgerTests that reset lands mid-test and clears
+// membership the test is asserting survives End() (main went red on
+// End_disarms_but_Begin_keeps_membership_for_warm_reingest). These tests never
+// ran together until #1316 stopped excluding Tier=db, which is why it surfaced
+// only now. GrammarPerfcache is the collection those ledger tests already use.
+[Collection("GrammarPerfcache")]
 public sealed class IngestIntegrityGateTests : IClassFixture<LocalPgFixture>, IAsyncLifetime
 {
     private readonly LocalPgFixture _pg;
