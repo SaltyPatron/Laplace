@@ -215,6 +215,10 @@ def main():
         print(f"no mutation matches -k {a.k!r}", file=sys.stderr)
         return 2
 
+    dirty_before = subprocess.run(
+        ["git", "status", "--porcelain", "--", *(m["file"] for m in picked)],
+        capture_output=True, text=True, cwd=str(ROOT)).stdout.strip()
+
     failures = []
     for m in picked:
         path = ROOT / m["file"]
@@ -260,11 +264,15 @@ def main():
             if m.get("rebuild_native"):
                 rebuild_native()   # restore the binary to match the restored source
 
-    # Every file restored; prove it rather than assume it.
-    dirty = subprocess.run(["git", "status", "--porcelain", "--", *(m["file"] for m in picked)],
-                           capture_output=True, text=True, cwd=str(ROOT)).stdout.strip()
-    if dirty:
-        print(f"FAIL: harness left the tree modified:\n{dirty}", file=sys.stderr)
+    # Every file restored; prove it rather than assume it. Compared against the state BEFORE
+    # the run, not against a clean tree: a file the caller had already edited is not something
+    # this harness left behind, and failing on it made the check unusable mid-change.
+    dirty_after = subprocess.run(["git", "status", "--porcelain", "--", *(m["file"] for m in picked)],
+                                 capture_output=True, text=True, cwd=str(ROOT)).stdout.strip()
+    if dirty_after != dirty_before:
+        print("FAIL: harness changed the working tree.\n"
+              f"  before: {dirty_before or '(clean)'}\n  after : {dirty_after or '(clean)'}",
+              file=sys.stderr)
         return 2
 
     print(f"\n{len(picked) - len(failures)}/{len(picked)} guarding tests fail against their defect")
