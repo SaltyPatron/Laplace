@@ -321,3 +321,64 @@ Three independent mechanisms, all green throughout:
   pinning is ruled out as the cause and the mechanism is not isolated.
 - **The 892 MB of existing `ud/misc-value` rows.** The fix is ingest-side; they clear on
   the next `ud` seed.
+
+## Why the fold counts instead of rating — the mechanism, derived
+
+The flattening is not a tuning problem and cannot be fixed by adjusting source trust.
+It follows from three facts in the code, two of which are constants.
+
+**The opponent's rating is pinned.** `consensus_fold_apply_partial`
+(`extension/laplace_substrate/src/consensus_fold_math.h`) calls
+`glicko2_fold_uniform_period(st, CONSENSUS_FOLD_NEUTRAL_MU, phi, ...)`. The opponent
+rating is the literal `CONSENSUS_FOLD_NEUTRAL_MU = 1500`; it is never passed in by any
+caller and never varies. `scoped_consensus.sql.in` confirms this from the SQL side — the
+aggregate receives `opponent_rd_fp1e9`, `observation_count` and `sum_score_fp1e9`, and no
+opponent rating at all.
+
+Internally `mu_j = (1500 - 1500) / 173.7178 = 0` for every witness in the substrate. So
+`E = 1 / (1 + exp(-g(phi_j) * mu))` depends only on the CELL'S OWN rating. A cell never
+plays a strong or a weak opponent — only a more or less CERTAIN one.
+
+**Every observation is a win.** 5,297 REFUTE attestations against 15.4M CONFIRMs on the
+2026-08-23 seed, 0.034%; thirteen of fifteen seeded sources emit zero refutes and zero
+draws. With `s = 1`, the first witness sees `s - E = 0.5` exactly, and thereafter
+`s - E > 0` always. `mu` rises monotonically and `phi` shrinks monotonically, so
+`eff_mu = mu - 2*phi` increases in BOTH terms, without bound, purely in witness count.
+
+**Trust is bounded; count is not.** Trust reaches the math only through `g(phi_j)`.
+Across the 28 distinct opponent RDs observed (86.16 to 348.05):
+
+    g(phi) = 1 / sqrt(1 + 3*phi^2/pi^2),  phi = RD / 173.7178
+    RD =  86.16 -> phi = 0.496 -> g = 0.965
+    RD = 348.05 -> phi = 2.004 -> g = 0.671
+
+A factor of 1.44 on the step size, and it can never change the step's SIGN. Measured
+`eff_mu` bears this out exactly: single-witness cells span 801-1181 (the full 380-point
+trust range), and at ten witnesses the least-trusted cell reaches 1309 — above the
+most-trusted single-witness cell. **The entire 11-rung trust ladder is worth fewer than
+ten witnesses.**
+
+### What this rules out
+
+Retuning `SourceTrust` cannot fix it: a bounded multiplier cannot beat an unbounded
+accumulator. LEARNING trust cannot fix it either — over 1,014,723 contested cells
+(`witness_count > 2`) every source agrees with the standing consensus 100.00%, because
+"agrees with the majority" is 100% by construction when nothing dissents.
+
+Glicko carries its information in LOSSES. With none, it degenerates to a weighted counter,
+and `eff_mu` measures who asserted a triple and how often — never whether it holds.
+
+### What this does not fix either
+
+Deriving refutations from single-valued relations was tested and rejected. The perfectly
+functional relations (`HAS_LINE_BREAK`, `HAS_EAST_ASIAN_WIDTH`, `HAS_BLOCK`, `HAS_AGE`,
+`HAS_SCRIPT` — all 100% single-valued, small domains) would imply on the order of 10^8
+refutations, which is why GH #535 says derivable-evidence VIRTUALIZATION. But those are
+the Unicode property relations, which already carry exactly one confirmed object per
+subject: there is nothing to discriminate, so the derived refutations add no ranking
+power where ranking actually happens.
+
+The negative evidence recovered in this branch — ~122,000 refutes and the substrate's
+first draws, a 23x increase — is necessary and remains under 1% of the confirms. The
+degeneracy is structural, and closing it means either corpora that state negatives, or a
+ranking signal that is not `eff_mu`.
