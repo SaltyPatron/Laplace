@@ -135,6 +135,54 @@ MUTATIONS = [
     project="Laplace.Substrate.Tests",
     filter="FullyQualifiedName~Rule8DeclaredCovers",
   ),
+  dict(
+    id="ladder-rung-calls-upward",
+    defect="The prompt-resolution ladder is word_segment -> prompt_words -> prompt_language "
+           "-> prompt_state -> prompt_coherence -> elect, and a rung may never call a rung "
+           "above it. prompt_language reading prompt_state is a cycle -- prompt_state "
+           "resolves a token's language AGAINST this tally -- and it terminates in \"stack "
+           "depth limit exceeded\" at runtime, not at install.",
+    file="extension/laplace_substrate/src/prompt_language.c",
+    before='            "SELECT p.id FROM converse.prompt_words($1) p WHERE p.id IS NOT NULL",',
+    after='            "SELECT p.id FROM converse.prompt_state($1) p WHERE p.id IS NOT NULL",',
+    project="Laplace.Substrate.Tests",
+    filter="FullyQualifiedName~PromptResolutionLadder",
+  ),
+  dict(
+    id="elector-key-order-drift",
+    defect="converse.elect is THE topic election and every elector must share ONE key "
+           "order. Six bodies carry it; a seventh spelling is a second election policy "
+           "that answers differently while every test still passes.",
+    file="extension/laplace_substrate/sql/functions/converse/elect.sql.in",
+    before="    ORDER BY y.specificity DESC NULLS LAST,\n             y.rel_mass    DESC NULLS LAST,",
+    after="    ORDER BY y.rel_mass    DESC NULLS LAST,\n             y.specificity DESC NULLS LAST,",
+    project="Laplace.Substrate.Tests",
+    filter="FullyQualifiedName~ElectorArchitectureGate",
+  ),
+  dict(
+    id="tier-mixed-into-identity",
+    defect="THE content-addressing law (spec 05 #1b): same content = same hash at every "
+           "tier. The id is a function of the child-id sequence and nothing else -- no "
+           "tier, no ordinal, no container. hash128.c discards the tier parameter with an "
+           "explicit (void)tier and records that a tier byte was briefly mixed in on "
+           "2026-07-01, broke the law, and was reverted. Mixing it back in re-mints every "
+           "entity per tier, so 'cat' the word and 'cat' the one-word sentence stop being "
+           "the same entity and no cross-source merge can ever occur again.",
+    file="engine/core/src/hash128.c",
+    before="    (void)tier;\n"
+           "    static const uint8_t MERKLE_DOMAIN = 0x01;\n"
+           "    blake3_hasher h;\n"
+           "    blake3_hasher_init(&h);\n"
+           "    blake3_hasher_update(&h, &MERKLE_DOMAIN, sizeof(MERKLE_DOMAIN));",
+    after="    static const uint8_t MERKLE_DOMAIN = 0x01;\n"
+          "    blake3_hasher h;\n"
+          "    blake3_hasher_init(&h);\n"
+          "    blake3_hasher_update(&h, &MERKLE_DOMAIN, sizeof(MERKLE_DOMAIN));\n"
+          "    blake3_hasher_update(&h, &tier, sizeof(tier));",
+    project="Laplace.Core.Tests",
+    filter="FullyQualifiedName~ContentAddressingLaw",
+    rebuild_native=True,
+  ),
 ]
 
 def rebuild_native():
@@ -190,6 +238,16 @@ def main():
                       file=sys.stderr)
                 failures.append(m["id"]); continue
             code, out = run_tests(m["project"], m["filter"])
+
+            # A filter matching NOTHING exits 0, and reading that as "the test passed with
+            # the defect" is the vacuous success this harness exists to detect -- committed
+            # here, by naming Laplace.Substrate.Tests for a test that lives in
+            # Laplace.Core.Tests. Require evidence that a test actually ran.
+            if "No test matches the given testcase filter" in out or "Total tests: 0" in out:
+                print(f"FAIL {m['id']}: filter {m['filter']!r} matched NO test in "
+                      f"{m['project']} — the harness verified nothing", file=sys.stderr)
+                failures.append(m["id"]); continue
+
             if code == 0:
                 print(f"FAIL {m['id']}: test PASSED with the defect reintroduced — it does "
                       f"not guard what it claims\n     defect: {m['defect']}", file=sys.stderr)
