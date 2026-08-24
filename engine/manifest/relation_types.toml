@@ -249,6 +249,13 @@ family_root = "HAS_PART"
 
 [[relation]]
 canonical = "CORRESPONDS_TO"
+# HOT. WordNetDecomposer declares exactly ONE relation and wrote 2,828,102 attestations on the
+# 2026-08-23 seed, all of them here. Without hot they land in consensus_rdefault, the partition
+# shared by every non-hot relation AND every dynamic family (DEP_*/EDEP_*/FEAT_*) -- the heap
+# whose own comment records it absorbing 56% of all rows. This is the shape that promoted
+# HAS_EXTERNAL_ID at 5.2 GB / 9.5M rows. WordNet spent 204s of a 287s run in drain (71%);
+# OMW, whose four dominant relations are hot, moved 6.8M attestations and drained in 4s.
+hot = true
 bit = 18
 rank = "equivalence"
 symmetry = "symmetric"
@@ -846,6 +853,10 @@ hot = true
 # Entity typing (e.g. synset -> WordNet_Synset). De-conflated from IS_A so typing edges never
 # pollute hypernym/subsumption walks. Structural authority, not a content subsumption.
 canonical = "IS_TYPED_AS"
+# HOT. Written by two sources and ~1.5M rows on the 2026-08-23 seed: OMW (6,815,401 across six
+# relations) and CILI (1,143,288 across three). CILI spent 272s of a 334s run in drain -- 81%,
+# the worst of the seed -- and IS_TYPED_AS is its one relation that was not already hot.
+hot = true
 bit = 155
 rank = "standards_structural"
 symmetry = "asymmetric"
