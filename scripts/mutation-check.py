@@ -14,6 +14,16 @@ must turn red. The harness restores every file it touched, including on failure.
 A mutation whose `before` text is not found is a HARD ERROR, never a skip: silently applying
 nothing and observing a green test is the vacuous-gate failure this harness exists to detect.
 
+NATIVE MUTATIONS ARE NOT SUPPORTED, and the reason is a gap worth knowing about.
+/etc/ld.so.conf.d puts /opt/laplace/lib on the system loader path, so a managed test loads
+the INSTALLED liblaplace_core.so, never the one in build/. Measured 2026-08-24: mutating
+LAPLACE_GLICKO2_NEUTRAL_MU_FP from 1500 to 1400 and relinking the library left
+NeutralMu_MatchesServerConstant green, because the test was reading a copy installed 21
+minutes earlier. Every native-backed parity test -- Glicko2FoldParity, ConsensusKeysParity,
+CollapseIndexParity, QkPairsThresholdParity -- can pass against a stale installed library
+while the source is broken. Reaching them needs an install into a path shared with the CI
+runner, which this harness will not do on its own.
+
   scripts/mutation-check.py             # run all
   scripts/mutation-check.py --list
   scripts/mutation-check.py -k iso      # substring filter on id
@@ -78,6 +88,23 @@ MUTATIONS = [
     after="        int physical = logical;",
     project="Laplace.Core.Tests",
     filter="FullyQualifiedName~ReportedPhysicalCores",
+  ),
+  dict(
+    id="consensus-key-composition",
+    defect="consensus_id = blake3(subject || type || object). Swapping the component order "
+           "silently re-keys every cell in the substrate and splits the fold: the same "
+           "triple would land on two different rows, and neither would carry the other's "
+           "witnesses. Client and server must compose it identically or the client writes "
+           "cells the server can never find.",
+    file="app/Laplace.Core/Core/ConsensusKeys.cs",
+    before="        subject.WriteBytes(buf[..16]);\n"
+           "        type.WriteBytes(buf.Slice(16, 16));\n"
+           "        obj.WriteBytes(buf.Slice(32, 16));",
+    after="        type.WriteBytes(buf[..16]);\n"
+          "        subject.WriteBytes(buf.Slice(16, 16));\n"
+          "        obj.WriteBytes(buf.Slice(32, 16));",
+    project="Laplace.Core.Tests",
+    filter="FullyQualifiedName~ConsensusKeysParity",
   ),
 ]
 
