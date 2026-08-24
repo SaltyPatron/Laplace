@@ -37,8 +37,14 @@ filter applied before or after it.
 | `attestations` | `(id, type_id, subject_id)` | LIST(`type_id`) | one row per assertion, with provenance |
 | `consensus` | `(id, type_id, subject_id)` | LIST(`type_id`) | the fold: `rating`, `rd`, `volatility`, `witness_count` |
 
-Plus `canonical_names`, `highway_mask_dirty`, and three journals
-(`ingest_run_journal`, `ingest_flush_journal`, `index_cycle_journal`).
+Plus `canonical_names`, `highway_mask_dirty`, and four journals
+(`ingest_run_journal`, `ingest_flush_journal`, `ingest_file_journal`,
+`index_cycle_journal`). The file journal carries per-file resume (#898/#1019).
+
+`highway_mask_dirty` is populated ONLY by the repair verbs (`ops.evict_source`),
+which need to CLEAR bits — something the OR-accumulate deposit the ingest uses
+(`consensus.highway_mask_deposit`) cannot express. It is empty on a substrate that
+has never evicted a source, and that is the correct reading, not a broken queue.
 `trajectory_pairs` and `trajectory_pairs_meta` are not part of the current schema;
 `drop_retired_content_lane.sql.in` defines the compatibility cleanup.
 
@@ -185,7 +191,11 @@ signed weight that additionally uses RD decay, witness saturation and highway-ma
 gating; refuted edges carry negative weight. `eff_mu = rating − 2·rd` is the
 conservative estimate reads rank by.
 
-`SELECT * FROM api('<substring>')` introspects the installed surface.
+`SELECT * FROM ops.api('<substring>')` introspects the installed surface. It MUST be
+schema-qualified: the SQL surface lives in nine purpose schemas (`ops`, `consensus`,
+`converse`, `lexical`, `taxonomy`, `generation`, `structural`, `chess`, `realize`) that
+are deliberately kept off `search_path` (`purpose_schemas.sql.in`), so the bare
+`api(...)` form fails on the current layout (#862/#957).
 
 Two mmap'd perfcache blobs are required at runtime — `laplace_t0_perfcache.bin` via
 the `laplace_substrate.perfcache_path` GUC and `laplace_highway_perfcache.bin` via
