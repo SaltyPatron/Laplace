@@ -30,6 +30,17 @@
     than a regression, which produced failures nobody acted on. That is worse
     than not running the test.
 
+    Tier=db RUNS (2026-08-24). It used to be excluded here and in test-parallel.sh
+    together, so 66 passing tests executed NOWHERE: not in CI, not in `just test`,
+    not in a bare `dotnet test`. Among them is
+    ConsensusAccumulatingWriterTests.Production_IsBitExactDeterministic, the fold's
+    bit-exactness guarantee. Their dependency is a PostgreSQL cluster, and the test
+    phase already requires one: pg_regress runs beside them and cannot start without
+    it. Verified against the live cluster: Substrate 64/64, Decomposers 1/1, Chess 1/1.
+
+    Tier=perf stays excluded, for the reason above: a throughput gate on a box that is
+    also seeding reports machine load rather than a regression.
+
     Same expression as the script, applied as the project default, so the two
     cannot drift. Passing an explicit filter on the command line still
     overrides this, so the tests are skipped by default and never removed:
@@ -40,7 +51,7 @@
   <!-- IsTestProject is set by the test SDK, which imports AFTER this file, so it
        is empty here; key off the project name, which is known immediately. -->
   <PropertyGroup Condition="$(MSBuildProjectName.EndsWith('.Tests')) AND '$(VSTestTestCaseFilter)' == ''">
-    <VSTestTestCaseFilter>Tier!=perf&amp;Tier!=db</VSTestTestCaseFilter>
+    <VSTestTestCaseFilter>Tier!=perf</VSTestTestCaseFilter>
   </PropertyGroup>
   <ItemGroup>
     <!-- Outputs live outside the repo, so tests can no longer find the repo
