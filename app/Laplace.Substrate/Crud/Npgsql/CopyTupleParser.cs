@@ -72,7 +72,7 @@ internal static class CopyTupleParser
 
     private const int EntityFields = 4;
     private const int PhysicalityFields = 10;
-    private const int AttestationFields = 12;
+    private const int AttestationFields = 13;
 
     /// <summary>
     /// Fixed PGCOPY layout for <c>id,tier,type_id,first_observed_by=NULL</c>

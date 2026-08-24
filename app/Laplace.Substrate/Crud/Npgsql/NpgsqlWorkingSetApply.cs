@@ -342,7 +342,12 @@ public sealed partial class NpgsqlSubstrateWriter
         var prepSw = System.Diagnostics.Stopwatch.StartNew();
         var entBlobs = CollectBlobs(stages, IntentStageTable.Entities, 4, "entities");
         var physBlobs = CollectBlobs(stages, IntentStageTable.Physicalities, 10, "physicalities");
-        var attBlobs = CollectBlobs(stages, IntentStageTable.Attestations, 12, "attestations");
+        // 13 since opponent_rating_fp1e9 (GH #1321) — must track
+        // ATTESTATION_COL_COUNT in engine/core/src/intent_stage.c. This validator
+        // is what caught the mismatch when the column landed, which is what it is
+        // for: a COPY blob whose field count disagrees with the target table is a
+        // silent column-shift, not a parse error.
+        var attBlobs = CollectBlobs(stages, IntentStageTable.Attestations, 13, "attestations");
         long blobMs = prepSw.ElapsedMilliseconds;
 
         var ents = CopyTupleParser.ParseEntities(entBlobs);

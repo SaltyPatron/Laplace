@@ -41,7 +41,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
 
         await using var probe = connection.CreateCommand();
         probe.CommandText = "SELECT to_regprocedure("
-            + "'consensus.upsert_type(bytea,bytea[],bytea[],bigint[],bigint[],bigint[],timestamptz[])') "
+            + "'consensus.upsert_type(bytea,bytea[],bytea[],bigint[],bigint[],bigint[],timestamptz[],bigint[])') "
             + "IS NOT NULL";
         bool supported = (bool)(await probe.ExecuteScalarAsync(ct) ?? false);
         Interlocked.CompareExchange(ref _directConsensusRoute, supported ? 1 : 0, -1);
@@ -224,6 +224,12 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
     private struct Delta
     {
         public long PhiFp1e9;
+        // The opponent this witness presents (GH #1321). Pinned per cell for the
+        // same reason PhiFp1e9 is: attestation identity fixes (subject, type,
+        // object, source, context), so every row merging into a cell in one batch
+        // came from the same source under the same relation and therefore the same
+        // witness_weight — which produces both halves.
+        public long OpponentRatingFp1e9;
         public long Games;
         public long SumScoreFp1e9;
         public long MaxTsUnixUs;
@@ -358,7 +364,8 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
             {
                 ref var d = ref CollectionsMarshal.GetValueRefOrAddDefault(delta, key, out bool existed);
                 if (!existed) d = src;
-                else FoldInto(ref d, src.PhiFp1e9, src.Games, src.SumScoreFp1e9, src.MaxTsUnixUs);
+                else FoldInto(ref d, src.PhiFp1e9, src.OpponentRatingFp1e9,
+                              src.Games, src.SumScoreFp1e9, src.MaxTsUnixUs);
             }
         }
         return delta.Count == 0 ? null : delta;
@@ -409,13 +416,15 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                 if (!existed)
                 {
                     d.PhiFp1e9 = a.OpponentRdFp1e9;
+                    d.OpponentRatingFp1e9 = a.OpponentRatingFp1e9;
                     d.Games = a.ObservationCount;
                     d.SumScoreFp1e9 = AttestationMergeMath.RowScoreTotal(a);
                     d.MaxTsUnixUs = a.LastObservedAtUnixUs;
                 }
                 else
                 {
-                    FoldInto(ref d, a.OpponentRdFp1e9, a.ObservationCount,
+                    FoldInto(ref d, a.OpponentRdFp1e9, a.OpponentRatingFp1e9,
+                             a.ObservationCount,
                              AttestationMergeMath.RowScoreTotal(a), a.LastObservedAtUnixUs);
                 }
                 obs += a.ObservationCount;
@@ -425,12 +434,16 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
         return obs;
     }
 
-    private static void FoldInto(ref Delta d, long phi, long games, long score, long tsUnixUs)
+    private static void FoldInto(ref Delta d, long phi, long oppRating, long games, long score, long tsUnixUs)
     {
         if (d.PhiFp1e9 != phi)
             throw new InvalidOperationException(
                 $"fold invariant violated: cell observed with φ={phi} "
                 + $"after φ={d.PhiFp1e9} in the same batch");
+        if (d.OpponentRatingFp1e9 != oppRating)
+            throw new InvalidOperationException(
+                $"fold invariant violated: cell observed with opponent={oppRating} "
+                + $"after opponent={d.OpponentRatingFp1e9} in the same batch");
         d.Games = AttestationMergeMath.SafeAddGames(d.Games, games);
         d.SumScoreFp1e9 = AttestationMergeMath.SafeAddScores(d.SumScoreFp1e9, score);
         if (tsUnixUs > d.MaxTsUnixUs) d.MaxTsUnixUs = tsUnixUs;
@@ -696,8 +709,8 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                 up.Transaction = tx;
                 up.CommandTimeout = 0;
                 up.CommandText = directRoute
-                    ? "SELECT consensus.upsert_type($1, $2, $3, $4, $5, $6, $7)"
-                    : "SELECT consensus.upsert($1, $2, $3, $4, $5, $6, $7)";
+                    ? "SELECT consensus.upsert_type($1, $2, $3, $4, $5, $6, $7, $8)"
+                    : "SELECT consensus.upsert($1, $2, $3, $4, $5, $6, $7, $8)";
                 up.Parameters.Add(new NpgsqlParameter
                 {
                     Value = directRoute ? Array.Empty<byte>() : Array.Empty<byte[]>(),
@@ -711,6 +724,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                 up.Parameters.Add(new NpgsqlParameter { Value = Array.Empty<long>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
                 up.Parameters.Add(new NpgsqlParameter { Value = Array.Empty<long>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
                 up.Parameters.Add(new NpgsqlParameter { Value = Array.Empty<DateTime>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.TimestampTz });
+                up.Parameters.Add(new NpgsqlParameter { Value = Array.Empty<long>(), NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint });
                 await up.PrepareAsync(token);
                 long segFolded = 0;
                 for (int off = seg.Off; off < seg.Off + seg.Len; off += FoldSizing.ChunkCells)
@@ -719,6 +733,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                     var subjects = new byte[m][];
                     var objects = new byte[m][];
                     var phis = new long[m];
+                    var opps = new long[m];
                     var games = new long[m];
                     var sums = new long[m];
                     var ts = new DateTime[m];
@@ -728,6 +743,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                         subjects[i] = cell.Key.S.ToBytes();
                         objects[i] = cell.Key.O?.ToBytes()!;
                         phis[i] = cell.D.PhiFp1e9;
+                        opps[i] = cell.D.OpponentRatingFp1e9;
                         games[i] = cell.D.Games;
                         sums[i] = cell.D.SumScoreFp1e9;
                         ts[i] = TsFromUnixUs(cell.D.MaxTsUnixUs);
@@ -741,6 +757,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                         up.Parameters[4].Value = games;
                         up.Parameters[5].Value = sums;
                         up.Parameters[6].Value = ts;
+                        up.Parameters[7].Value = opps;
                     }
                     else
                     {
@@ -753,6 +770,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                         up.Parameters[4].Value = games;
                         up.Parameters[5].Value = sums;
                         up.Parameters[6].Value = ts;
+                        up.Parameters[7].Value = opps;
                     }
                     segFolded += (long)(await up.ExecuteScalarAsync(token) ?? 0L);
                 }
