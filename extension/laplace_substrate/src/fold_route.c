@@ -201,6 +201,23 @@ bytea16(Datum d, const char *label)
     return (const uint8_t *) VARDATA_ANY(b);
 }
 
+/*
+ * n copies of the neutral opponent, for callers that supply no per-witness
+ * ratings. Keeps UPSERT_MERGE_SQL's concurrent-insert fallback folding against
+ * exactly the same opponent as the precomputed path, so the two arms cannot
+ * disagree about a cell (GH #1321).
+ */
+static ArrayType *
+neutral_opponent_array(int n)
+{
+    Datum *d = (Datum *) palloc(sizeof(Datum) * (n > 0 ? n : 1));
+    int    i;
+
+    for (i = 0; i < n; i++)
+        d[i] = Int64GetDatum(CONSENSUS_FOLD_NEUTRAL_MU);
+    return construct_array(d, n, INT8OID, 8, true, 'd');
+}
+
 static ArrayType *
 array_window(ArrayType *original, const Datum *src, const bool *src_nulls,
             int total, int start, int n,
@@ -250,7 +267,8 @@ typedef struct FoldStateArrays
  * / consensus.glicko2_tau() are defined as exactly CONSENSUS_FOLD_NEUTRAL_MU /
  * LAPLACE_GLICKO2_DEFAULT_TAU (asserted by tests/sql/consensus_upsert.sql). */
 static void
-fold_run_states(const InArray *phis, const InArray *games, const InArray *sums,
+fold_run_states(const InArray *phis, const InArray *opps,
+                const InArray *games, const InArray *sums,
                 int run_start, int run_n, SPITupleTable *priors,
                 uint64 n_prior, const char *label, FoldStateArrays *out)
 {
@@ -289,6 +307,12 @@ fold_run_states(const InArray *phis, const InArray *games, const InArray *sums,
     {
         glicko2_state_t st;
         int64 phi = DatumGetInt64(phis->elems[run_start + i]);
+        /* The opponent this witness presents. opps->n == 0 means the caller did
+         * not supply ratings, which folds against neutral exactly as before
+         * (GH #1321). */
+        int64 opp = (opps != NULL && opps->n > 0)
+                    ? DatumGetInt64(opps->elems[run_start + i])
+                    : CONSENSUS_FOLD_NEUTRAL_MU;
         int64 n_games = DatumGetInt64(games->elems[run_start + i]);
         int64 sum = DatumGetInt64(sums->elems[run_start + i]);
 
@@ -305,7 +329,7 @@ fold_run_states(const InArray *phis, const InArray *games, const InArray *sums,
             glicko2_init(&st, CONSENSUS_FOLD_NEUTRAL_MU,
                          CONSENSUS_FOLD_INITIAL_RD,
                          CONSENSUS_FOLD_INITIAL_VOLATILITY);
-        if (consensus_fold_apply_partial(&st, CONSENSUS_FOLD_NEUTRAL_MU, phi, n_games, sum,
+        if (consensus_fold_apply_partial(&st, opp, phi, n_games, sum,
                                          LAPLACE_GLICKO2_DEFAULT_TAU) != 0)
             ereport(ERROR,
                     (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
@@ -527,22 +551,23 @@ static const char *UPSERT_MERGE_SQL =
     "MERGE INTO laplace.consensus c "
     "USING unnest($1::bytea[], $2::bytea[], $3::bytea[], $4::int8[], "
     "             $5::int8[], $6::int8[], $7::timestamptz[], "
-    "             $8::bool[], $9::int8[], $10::int8[], $11::int8[]) "
+    "             $8::bool[], $9::int8[], $10::int8[], $11::int8[], "
+    "             $12::int8[]) "
     "      AS b(id, s, o, phi, games, score_sum, ts, seen, new_rating, "
-    "           new_rd, new_volatility) "
+    "           new_rd, new_volatility, opp_rating) "
     "ON c.type_id = '\\x%s'::bytea AND c.subject_id = b.s AND c.id = b.id "
     "WHEN MATCHED THEN UPDATE SET "
     "  rating = CASE WHEN b.seen THEN b.new_rating ELSE "
     "      (laplace.laplace_glicko2_accumulate_games("
-    "           c.rating, c.rd, c.volatility, consensus.glicko2_neutral_mu(), "
+    "           c.rating, c.rd, c.volatility, b.opp_rating, "
     "           b.phi, b.games, b.score_sum, consensus.glicko2_tau())).rating END, "
     "  rd = CASE WHEN b.seen THEN b.new_rd ELSE "
     "      (laplace.laplace_glicko2_accumulate_games("
-    "           c.rating, c.rd, c.volatility, consensus.glicko2_neutral_mu(), "
+    "           c.rating, c.rd, c.volatility, b.opp_rating, "
     "           b.phi, b.games, b.score_sum, consensus.glicko2_tau())).rd END, "
     "  volatility = CASE WHEN b.seen THEN b.new_volatility ELSE "
     "      (laplace.laplace_glicko2_accumulate_games("
-    "           c.rating, c.rd, c.volatility, consensus.glicko2_neutral_mu(), "
+    "           c.rating, c.rd, c.volatility, b.opp_rating, "
     "           b.phi, b.games, b.score_sum, consensus.glicko2_tau())).volatility END, "
     "  witness_count = c.witness_count + b.games, "
     "  last_observed_at = GREATEST(c.last_observed_at, b.ts) "
@@ -634,6 +659,7 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
 {
     const char *label = "consensus_upsert";
     InArray     subjects, types, objects, phis, games, sums, ts;
+    InArray     opps;
     Datum      *cell_ids;
     ArrayType  *cell_id_array;
     int64       affected = 0;
@@ -649,6 +675,13 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
     in_array(fcinfo, 4, INT8OID, 8, true, 'd', false, label, &games);
     in_array(fcinfo, 5, INT8OID, 8, true, 'd', false, label, &sums);
     in_array(fcinfo, 6, TIMESTAMPTZOID, 8, true, 'd', false, label, &ts);
+    memset(&opps, 0, sizeof(opps));
+    if (PG_NARGS() > 7 && !PG_ARGISNULL(7))
+        in_array(fcinfo, 7, INT8OID, 8, true, 'd', false, label, &opps);
+    if (opps.n > 0 && opps.n != subjects.n)
+        ereport(ERROR,
+                (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
+                 errmsg("%s: opponent-rating array must match subject length", label)));
     if (types.n != subjects.n || objects.n != subjects.n || phis.n != subjects.n ||
         games.n != subjects.n || sums.n != subjects.n || ts.n != subjects.n)
         ereport(ERROR,
@@ -714,12 +747,13 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
         ArrayType     *run_subjects;
         FoldStateArrays folds;
         Datum          pvals[2];
-        Datum          vals[11];
+        Datum          vals[12];
         static const Oid prior_args[2] = {BYTEAARRAYOID, BYTEAARRAYOID};
-        static const Oid args[11] =
+        static const Oid args[12] =
             {BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID, INT8ARRAYOID,
              INT8ARRAYOID, INT8ARRAYOID, 1185,
-             BOOLARRAYOID, INT8ARRAYOID, INT8ARRAYOID, INT8ARRAYOID};
+             BOOLARRAYOID, INT8ARRAYOID, INT8ARRAYOID, INT8ARRAYOID,
+             INT8ARRAYOID};
         int            rc;
 
         while (j < subjects.n &&
@@ -746,11 +780,11 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
                     (errcode(ERRCODE_INTERNAL_ERROR),
                      errmsg("%s: prior-state SELECT failed: %s",
                             label, SPI_result_code_string(rc))));
-        fold_run_states(&phis, &games, &sums, run_start, run_n,
+        fold_run_states(&phis, &opps, &games, &sums, run_start, run_n,
                         SPI_tuptable, SPI_processed, label, &folds);
 
         merge_plan = typed_plan(&upsert_merge_plans, "consensus_upsert merge plans",
-                                type16, UPSERT_MERGE_SQL, 11, args);
+                                type16, UPSERT_MERGE_SQL, 12, args);
         vals[0] = PointerGetDatum(run_ids);
         vals[1] = PointerGetDatum(run_subjects);
         vals[2] = PointerGetDatum(array_window(objects.array, objects.elems,
@@ -773,6 +807,11 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
         vals[8] = PointerGetDatum(folds.rating_array);
         vals[9] = PointerGetDatum(folds.rd_array);
         vals[10] = PointerGetDatum(folds.volatility_array);
+        vals[11] = PointerGetDatum(
+            opps.n > 0
+            ? array_window(opps.array, opps.elems, NULL, opps.n,
+                           run_start, run_n, INT8OID, 8, true, 'd')
+            : neutral_opponent_array(run_n));
         affected += (int64) upsert_merge_with_retry(merge_plan, vals, label);
 
         run_start = j;
@@ -791,6 +830,7 @@ pg_laplace_consensus_upsert_type(PG_FUNCTION_ARGS)
     const char    *label = "consensus_upsert_type";
     const uint8_t *type16;
     InArray        subjects, objects, phis, games, sums, ts;
+    InArray        opps;
     Datum         *cell_ids;
     ArrayType     *cell_id_array;
     FoldStateArrays folds;
@@ -799,12 +839,13 @@ pg_laplace_consensus_upsert_type(PG_FUNCTION_ARGS)
     SPIPlanPtr     prior_plan;
     SPIPlanPtr     merge_plan;
     Datum          pvals[2];
-    Datum          vals[11];
+    Datum          vals[12];
     static const Oid prior_args[2] = {BYTEAARRAYOID, BYTEAARRAYOID};
-    static const Oid args[11] =
+    static const Oid args[12] =
         {BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID, INT8ARRAYOID,
          INT8ARRAYOID, INT8ARRAYOID, 1185,
-         BOOLARRAYOID, INT8ARRAYOID, INT8ARRAYOID, INT8ARRAYOID};
+         BOOLARRAYOID, INT8ARRAYOID, INT8ARRAYOID, INT8ARRAYOID,
+         INT8ARRAYOID};
     int i;
     int rc;
 
@@ -819,6 +860,13 @@ pg_laplace_consensus_upsert_type(PG_FUNCTION_ARGS)
     in_array(fcinfo, 4, INT8OID, 8, true, 'd', false, label, &games);
     in_array(fcinfo, 5, INT8OID, 8, true, 'd', false, label, &sums);
     in_array(fcinfo, 6, TIMESTAMPTZOID, 8, true, 'd', false, label, &ts);
+    memset(&opps, 0, sizeof(opps));
+    if (PG_NARGS() > 7 && !PG_ARGISNULL(7))
+        in_array(fcinfo, 7, INT8OID, 8, true, 'd', false, label, &opps);
+    if (opps.n > 0 && opps.n != subjects.n)
+        ereport(ERROR,
+                (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
+                 errmsg("%s: opponent-rating array must match subject length", label)));
     if (objects.n != subjects.n || phis.n != subjects.n || games.n != subjects.n ||
         sums.n != subjects.n || ts.n != subjects.n)
         ereport(ERROR,
@@ -876,11 +924,11 @@ pg_laplace_consensus_upsert_type(PG_FUNCTION_ARGS)
                 (errcode(ERRCODE_INTERNAL_ERROR),
                  errmsg("%s: prior-state SELECT failed: %s",
                         label, SPI_result_code_string(rc))));
-    fold_run_states(&phis, &games, &sums, 0, subjects.n,
+    fold_run_states(&phis, &opps, &games, &sums, 0, subjects.n,
                     SPI_tuptable, SPI_processed, label, &folds);
 
     merge_plan = typed_plan(&upsert_merge_plans, "consensus_upsert merge plans",
-                            type16, UPSERT_MERGE_SQL, 11, args);
+                            type16, UPSERT_MERGE_SQL, 12, args);
     vals[0] = PointerGetDatum(cell_id_array);
     vals[1] = PointerGetDatum(subjects.array);
     vals[2] = PointerGetDatum(objects.array);
@@ -892,6 +940,8 @@ pg_laplace_consensus_upsert_type(PG_FUNCTION_ARGS)
     vals[8] = PointerGetDatum(folds.rating_array);
     vals[9] = PointerGetDatum(folds.rd_array);
     vals[10] = PointerGetDatum(folds.volatility_array);
+    vals[11] = PointerGetDatum(
+        opps.n > 0 ? opps.array : neutral_opponent_array((int) subjects.n));
     {
         int64 affected = (int64) upsert_merge_with_retry(merge_plan, vals, label);
         SPI_finish();
