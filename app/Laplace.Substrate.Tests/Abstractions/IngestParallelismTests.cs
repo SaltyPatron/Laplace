@@ -4,6 +4,7 @@ using Xunit;
 
 namespace Laplace.Decomposers.Abstractions.Tests;
 
+[Collection("cpu-topology-global")]
 public class IngestParallelismTests
 {
     [Fact]

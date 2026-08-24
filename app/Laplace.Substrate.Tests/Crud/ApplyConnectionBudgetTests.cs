@@ -13,6 +13,7 @@ namespace Laplace.SubstrateCRUD.Tests;
 /// "connection pool has been exhausted (currently 28)" after a 15s rent timeout,
 /// killing seed runs mid-corpus. Arithmetic, so it holds on every machine shape.
 /// </summary>
+[Collection("cpu-topology-global")]
 public sealed class ApplyConnectionBudgetTests
 {
     [Fact]

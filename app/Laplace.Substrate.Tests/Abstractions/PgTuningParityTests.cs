@@ -10,6 +10,7 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 /// bare-host fallback. These tests keep their equations identical and reject the
 /// independent fixed caps that previously let the two paths oversubscribe RAM.
 /// </summary>
+[Collection("cpu-topology-global")]
 public class PgTuningParityTests
 {
     private const long MiB = 1L << 20;
