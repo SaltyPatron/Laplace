@@ -72,7 +72,12 @@ public sealed partial class NpgsqlSubstrateWriter
     internal static int ResolveCopyConnectionBudget()
     {
         var plan = PostgresResourcePlan.Current;
-        int fans = plan.IngestConnectionOwners - 1 - plan.ObservabilityConnectionOwners;
+        // Minus the control owner, the observability owners, AND the fold's reserved
+        // slack -- the slack is not fan capacity, and counting it as such derives a COPY
+        // budget wider than a single phase's fan-out.
+        int fans = plan.IngestConnectionOwners - 1
+                 - plan.ObservabilityConnectionOwners
+                 - plan.FoldPoolHeadroomOwners;
         return Math.Max(1, fans / 2);
     }
     private int _directAttestationMergeRoute = -1;
