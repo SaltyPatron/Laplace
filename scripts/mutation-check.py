@@ -120,6 +120,21 @@ MUTATIONS = [
     filter="FullyQualifiedName~NeutralMu_MatchesServerConstant",
     rebuild_native=True,
   ),
+  dict(
+    id="rule8-undeclared-relation",
+    defect="Rule #8: a decomposer declares every relation it emits. Nothing enforced it. "
+           "DecomposerArchitectureGateTests asserts DeclaredCoversEmitted over three "
+           "literals and walks no source; a first replacement read the db-tier fixture's "
+           "own database, matched zero sources, and passed with this very declaration "
+           "deleted. Found a real pre-existing violation on landing: ISODecomposer emitted "
+           "HAS_ISO639_2B_CODE, HAS_ISO639_2T_CODE and SUPERSEDED_BY without declaring any "
+           "of them.",
+    file="app/Laplace.Decomposers/Unicode/UnicodeSource.cs",
+    before='        "HAS_BLOCK", "HAS_UPPERCASE_MAPPING", "HAS_LOWERCASE_MAPPING",',
+    after='        "HAS_UPPERCASE_MAPPING", "HAS_LOWERCASE_MAPPING",',
+    project="Laplace.Substrate.Tests",
+    filter="FullyQualifiedName~Rule8DeclaredCovers",
+  ),
 ]
 
 def rebuild_native():
