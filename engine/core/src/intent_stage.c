@@ -36,11 +36,11 @@ static const char* const kPhysicalityColumns =
 static const char* const kAttestationColumns =
     "id, subject_id, type_id, object_id, source_id, context_id, "
     "outcome, last_observed_at, observation_count, "
-    "sum_score_fp1e9, opponent_rd_fp1e9, highway_mask";
+    "sum_score_fp1e9, opponent_rd_fp1e9, opponent_rating_fp1e9, highway_mask";
 
 #define ENTITY_COL_COUNT       4
 #define PHYSICALITY_COL_COUNT 10
-#define ATTESTATION_COL_COUNT 12
+#define ATTESTATION_COL_COUNT 13
 
 typedef struct {
     uint8_t* data;
@@ -381,6 +381,7 @@ int intent_stage_add_attestation(
     int64_t          observation_count,
     int64_t          sum_score_fp1e9,
     int64_t          opponent_rd_fp1e9,
+    int64_t          opponent_rating_fp1e9,
     const uint8_t*   highway_mask) {
     if (!stage || !id || !subject_id || !type_id || !source_id) return -1;
     if (observation_count < 0) return -1;
@@ -407,6 +408,7 @@ int intent_stage_add_attestation(
     if (buf_append_field_int8(b, observation_count) != 0) return -1;
     if (buf_append_field_int8(b, sum_score_fp1e9) != 0) return -1;
     if (buf_append_field_int8(b, opponent_rd_fp1e9) != 0) return -1;
+    if (buf_append_field_int8(b, opponent_rating_fp1e9) != 0) return -1;
     if (highway_mask) {
         if (buf_append_field_bytes(b, highway_mask, 32) != 0) return -1;
     } else {

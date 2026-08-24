@@ -305,7 +305,7 @@ fold_run_states(const InArray *phis, const InArray *games, const InArray *sums,
             glicko2_init(&st, CONSENSUS_FOLD_NEUTRAL_MU,
                          CONSENSUS_FOLD_INITIAL_RD,
                          CONSENSUS_FOLD_INITIAL_VOLATILITY);
-        if (consensus_fold_apply_partial(&st, phi, n_games, sum,
+        if (consensus_fold_apply_partial(&st, CONSENSUS_FOLD_NEUTRAL_MU, phi, n_games, sum,
                                          LAPLACE_GLICKO2_DEFAULT_TAU) != 0)
             ereport(ERROR,
                     (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),

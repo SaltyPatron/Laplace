@@ -14,6 +14,30 @@
 
 static const double kPhiTrusted = 30.0;
 static const double kPhiCrank   = 350.0;
+
+/*
+ * THE OPPONENT'S RATING, which until now did not exist.
+ *
+ * A Glicko update is driven by surprise: delta ~ g(phi_j) * (s - E(mu, mu_j, phi_j)).
+ * The opponent's RATING is the entire information content of a match. The fold
+ * passed CONSENSUS_FOLD_NEUTRAL_MU for it on every call, so every cell replayed
+ * the same match against a constant 1500 forever, and the rating collapsed to a
+ * function of witness count alone (measured 2026-08-24: 400,000 single-witness
+ * cells spanning source trust 0.40..0.95 held 2 distinct ratings, total spread
+ * 0.23, while one extra witness moved eff_mu by 157.98).
+ *
+ * The witness IS the opponent. A trusted, salient witness is a strong and certain
+ * one: high rating, low RD. A crank is weak and uncertain: low rating, high RD.
+ * Both halves are read off the same witness_weight that already produces phi, so
+ * the two cannot disagree about who is on the other side of the board.
+ *
+ * The span is symmetric about neutral and equal to the RD span (320), so a claim
+ * meeting a fully-trusted witness faces 1820 and a fully-untrusted one faces 1180
+ * -- the same dynamic range the RD channel already spends, now on the axis that
+ * actually carries surprise.
+ */
+static const double kOpponentNeutral = 1500.0;
+static const double kOpponentSpan    = 320.0;
 static const int64_t kScoreHalfFp = 500000000LL;
 
 /* Genesis sentinel epoch (2020-01-01T00:00:00Z, microseconds) — mirrors
@@ -140,6 +164,15 @@ double laplace_attestation_witness_phi(double witness_weight) {
     return kPhiCrank + (kPhiTrusted - kPhiCrank) * w;
 }
 
+double laplace_attestation_witness_opponent_rating(double witness_weight) {
+    double w = witness_weight;
+    if (w < 0.0) w = 0.0;
+    if (w > 1.0) w = 1.0;
+    /* w = 0.5 is exactly neutral, so a witness carrying no signal either way
+     * leaves the old behaviour untouched. */
+    return kOpponentNeutral + kOpponentSpan * (2.0 * w - 1.0);
+}
+
 int laplace_attestation_outcome_from_score_fp(int64_t score_fp, int16_t* out_outcome) {
     if (!out_outcome) return -1;
     if (score_fp > kScoreHalfFp) *out_outcome = LAPLACE_ATTESTATION_OUTCOME_CONFIRM;
@@ -219,6 +252,8 @@ static int attestation_resolved_finish(
     out->score_fp1e9 = score_fp;
     out->opponent_rd_fp1e9 =
         (int64_t)(laplace_attestation_witness_phi(witness_weight) * (double)LAPLACE_GLICKO2_FP_SCALE);
+    out->opponent_rating_fp1e9 =
+        (int64_t)(laplace_attestation_witness_opponent_rating(witness_weight) * (double)LAPLACE_GLICKO2_FP_SCALE);
     out->sum_score_fp1e9 = sum_score_fp1e9;
     out->is_aggregated = is_aggregated;
 
@@ -529,6 +564,8 @@ int laplace_attestation_aggregated_batch_build(
 
     const int64_t opponent_rd =
         (int64_t)(laplace_attestation_witness_phi(witness_weight) * (double)LAPLACE_GLICKO2_FP_SCALE);
+    const int64_t opponent_rating =
+        (int64_t)(laplace_attestation_witness_opponent_rating(witness_weight) * (double)LAPLACE_GLICKO2_FP_SCALE);
     const int64_t observed_at = now_unix_us > 0 ? now_unix_us : unix_us_now();
 
     for (size_t i = 0; i < n; ++i) {
@@ -562,6 +599,7 @@ int laplace_attestation_aggregated_batch_build(
         o->observation_count = c->games;
         o->score_fp1e9 = c->sum_score_fp1e9 / c->games;
         o->opponent_rd_fp1e9 = opponent_rd;
+        o->opponent_rating_fp1e9 = opponent_rating;
         o->sum_score_fp1e9 = c->sum_score_fp1e9;
         o->is_aggregated = 1;
 
@@ -602,7 +640,7 @@ static int staged_to_intent(intent_stage_t* stage, const laplace_attestation_sta
     return intent_stage_add_attestation(
         stage, &a->id, &a->subject_id, &a->type_id, obj_ptr, &a->source_id, ctx_ptr,
         a->outcome, a->last_observed_at_unix_us, a->observation_count,
-        sum_score, a->opponent_rd_fp1e9, NULL);
+        sum_score, a->opponent_rd_fp1e9, a->opponent_rating_fp1e9, NULL);
 }
 
 int laplace_attestation_categorical_add(
@@ -667,7 +705,7 @@ int laplace_attestation_staged_batch_add(
                 stage, &a->id, &a->subject_id, &a->type_id, obj_ptr,
                 &a->source_id, ctx_ptr, a->outcome,
                 a->last_observed_at_unix_us, a->observation_count,
-                sum_score, a->opponent_rd_fp1e9,
+                sum_score, a->opponent_rd_fp1e9, a->opponent_rating_fp1e9,
                 masks ? masks + (size_t)i * 32u : NULL) != 0)
             return -2;
     }

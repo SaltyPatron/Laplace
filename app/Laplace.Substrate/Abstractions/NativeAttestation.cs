@@ -297,5 +297,6 @@ public static class NativeAttestation
             s.ObservationCount,
             s.ScoreFp1e9,
             s.OpponentRdFp1e9,
+            s.OpponentRatingFp1e9,
             s.IsAggregated != 0 ? s.SumScoreFp1e9 : null);
 }
