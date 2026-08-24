@@ -32,7 +32,7 @@ filter applied before or after it.
 
 | Table | Primary key | Partitioning | Role |
 |---|---|---|---|
-| `entities` | `(id, tier)` | LIST(`tier`) — 0…4 + DEFAULT; tier 2 sub-partitioned HASH(`id`)×8 | one row per distinct content |
+| `entities` | `(id, tier)` | LIST(`tier`) — 0…4 + DEFAULT; tiers 0, 2, 3 sub-partitioned HASH(`id`)×8 (#1008) | one row per distinct content |
 | `physicalities` | `(id)` | HASH(`id`) × 64 | geometry: `coord geometry(PointZM)`, `trajectory geometry(GeometryZM)` |
 | `attestations` | `(id, type_id, subject_id)` | LIST(`type_id`) | one row per assertion, with provenance |
 | `consensus` | `(id, type_id, subject_id)` | LIST(`type_id`) | the fold: `rating`, `rd`, `volatility`, `witness_count` |
