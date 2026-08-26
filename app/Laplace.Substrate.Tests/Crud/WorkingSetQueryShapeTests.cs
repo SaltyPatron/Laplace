@@ -54,6 +54,29 @@ public sealed class WorkingSetQueryShapeTests
     }
 
     [Fact]
+    public void ConsensusUpsert_RetiresDefaultedEightArgumentOverloadsBeforeCanonicalApi()
+    {
+        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
+        var sql = File.ReadAllText(Path.Combine(
+            repoRoot, "extension", "laplace_substrate", "sql", "functions", "fold",
+            "consensus_upsert.sql.in"));
+
+        const string dropUpsert = "DROP FUNCTION IF EXISTS consensus.upsert(\n"
+            + "    bytea[], bytea[], bytea[], bigint[], bigint[], bigint[], timestamptz[], bigint[]);";
+        const string dropUpsertType = "DROP FUNCTION IF EXISTS consensus.upsert_type(\n"
+            + "    bytea, bytea[], bytea[], bigint[], bigint[], bigint[], timestamptz[], bigint[]);";
+        const string createUpsert = "CREATE OR REPLACE FUNCTION consensus.upsert(";
+        const string createUpsertType = "CREATE OR REPLACE FUNCTION consensus.upsert_type(";
+
+        Assert.Contains(dropUpsert, sql, StringComparison.Ordinal);
+        Assert.Contains(dropUpsertType, sql, StringComparison.Ordinal);
+        Assert.True(sql.IndexOf(dropUpsert, StringComparison.Ordinal)
+            < sql.IndexOf(createUpsert, StringComparison.Ordinal));
+        Assert.True(sql.IndexOf(dropUpsertType, StringComparison.Ordinal)
+            < sql.IndexOf(createUpsertType, StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void WorkingSetApply_HasOneCoordinationOwner_NoInMemoryClaimPolling()
     {
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();

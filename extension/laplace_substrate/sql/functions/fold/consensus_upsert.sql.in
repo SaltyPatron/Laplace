@@ -50,6 +50,17 @@
 --     router only needs same-type rows ADJACENT and remains correct (merely
 --     one extra plan execution) if they are not.
 DROP FUNCTION IF EXISTS laplace.consensus_upsert(bytea[], bytea[], bytea[], bigint[], bigint[], bigint[], timestamptz[]);
+
+-- Retire the defaulted 8-argument opponent-rating experiment before declaring
+-- the canonical 7-argument API below.  CREATE OR REPLACE does not remove an old
+-- overload when arity changes, and a default on the eighth argument makes every
+-- 7-argument call ambiguous (SQLSTATE 42725).  Upgrade bridges replay this file,
+-- so these drops also converge a catalog that briefly ran that unfinished form.
+DROP FUNCTION IF EXISTS consensus.upsert(
+    bytea[], bytea[], bytea[], bigint[], bigint[], bigint[], timestamptz[], bigint[]);
+DROP FUNCTION IF EXISTS consensus.upsert_type(
+    bytea, bytea[], bytea[], bigint[], bigint[], bigint[], timestamptz[], bigint[]);
+
 CREATE OR REPLACE FUNCTION consensus.upsert(
     p_subjects bytea[],
     p_types    bytea[],
