@@ -1,0 +1,16 @@
+-- Dynamic/unpromoted relation families share the hash-sharded DEFAULT
+-- partition.  Band-scoped top-k reads ask for a small head of each relation;
+-- lead on type_id so those reads do not walk the global eff_mu index looking
+-- for a sparse type.  Named relation partitions already contain one type and
+-- can use consensus_eff_mu_btree directly, so avoid duplicating this index on
+-- every named partition.
+DO $$
+BEGIN
+    IF to_regclass(current_schema() || '.consensus_rdefault') IS NOT NULL THEN
+        EXECUTE format(
+            'CREATE INDEX IF NOT EXISTS consensus_default_type_eff_mu_btree '
+            || 'ON %I.consensus_rdefault (type_id, ((rating - 2*rd)) DESC) '
+            || 'WHERE object_id IS NOT NULL',
+            current_schema());
+    END IF;
+END $$;

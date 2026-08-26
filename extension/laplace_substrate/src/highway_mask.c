@@ -321,21 +321,38 @@ pg_laplace_relation_highway_band(PG_FUNCTION_ARGS)
  * first. This is the plane-selection primitive the foundry/synthesis and any
  * band-scoped reader should use.
  *
- * Shape follows the define_fast pattern: the band's relation-type id set is
- * computed entirely in memory from the highway table (no DB round trip —
- * bit -> canonical name -> BLAKE3 type id via the static relation law), then
- * ONE indexed SPI query does the fetch. consensus_type_btree carries the
- * type_id = ANY($1) filter; the eff_mu expression index carries the ordering.
+ * The band's relation-type id set is computed entirely in memory from the
+ * highway table (no DB round trip — bit -> canonical name -> BLAKE3 type id
+ * via the static relation law).  Fetch at most limit rows for each type, then
+ * merge those bounded heads.  This is exactly equivalent to the global top-k:
+ * a row below rank k within its own type cannot enter the top k across types.
+ *
+ * Do not collapse this back to type_id = ANY($1) plus a global ORDER BY.  The
+ * live DEFAULT partition carries the large unpromoted relation families; that
+ * shape walks the global eff_mu indexes until a sparse band happens to match.
+ * Per-type heads use the default partition's (type_id, eff_mu) index, while a
+ * named single-type partition can use its existing eff_mu index directly.
  */
 static const char *BAND_EDGES_QUERY =
-    "SELECT subject_id, type_id, object_id, rating, rd, witness_count, "
-    "       (rating - 2 * rd) AS eff_mu "
-    "FROM laplace.consensus "
-    "WHERE type_id = ANY($1) "
-    "  AND object_id IS NOT NULL "
-    "  AND NOT consensus.refuted(rating, rd) "
-    "  AND (rating - 2 * rd) >= $2 "
-    "ORDER BY (rating - 2 * rd) DESC "
+    "WITH candidates AS MATERIALIZED ("
+    "  SELECT e.subject_id, e.type_id, e.object_id, e.rating, e.rd, "
+    "         e.witness_count, e.eff_mu "
+    "  FROM unnest($1::bytea[]) AS t(type_id) "
+    "  CROSS JOIN LATERAL ("
+    "    SELECT c.subject_id, c.type_id, c.object_id, c.rating, c.rd, "
+    "           c.witness_count, (c.rating - 2 * c.rd) AS eff_mu "
+    "    FROM laplace.consensus c "
+    "    WHERE c.type_id = t.type_id "
+    "      AND c.object_id IS NOT NULL "
+    "      AND NOT consensus.refuted(c.rating, c.rd) "
+    "      AND (c.rating - 2 * c.rd) >= $2 "
+    "    ORDER BY (c.rating - 2 * c.rd) DESC "
+    "    LIMIT $3"
+    "  ) e"
+    ") "
+    "SELECT subject_id, type_id, object_id, rating, rd, witness_count, eff_mu "
+    "FROM candidates "
+    "ORDER BY eff_mu DESC "
     "LIMIT $3";
 
 PG_FUNCTION_INFO_V1(pg_laplace_consensus_band_edges);

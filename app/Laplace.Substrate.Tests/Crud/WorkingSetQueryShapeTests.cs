@@ -77,6 +77,34 @@ public sealed class WorkingSetQueryShapeTests
     }
 
     [Fact]
+    public void BandEdges_MergesIndexedPerTypeHeadsInsteadOfScanningGlobalRank()
+    {
+        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
+        var native = File.ReadAllText(Path.Combine(
+            repoRoot, "extension", "laplace_substrate", "src", "highway_mask.c"));
+        var index = File.ReadAllText(Path.Combine(
+            repoRoot, "extension", "laplace_substrate", "sql", "indexes",
+            "consensus_default_type_eff_mu_btree.sql.in"));
+
+        Assert.Contains("FROM unnest($1::bytea[]) AS t(type_id)", native,
+            StringComparison.Ordinal);
+        Assert.Contains("CROSS JOIN LATERAL (", native, StringComparison.Ordinal);
+        Assert.Contains("WHERE c.type_id = t.type_id", native, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"WHERE type_id = ANY($1) \"", native,
+            StringComparison.Ordinal);
+
+        Assert.Contains("ON %I.consensus_rdefault (type_id, ((rating - 2*rd)) DESC)",
+            index, StringComparison.Ordinal);
+        foreach (var manifestName in new[] { "manifest.install", "manifest.upgrade" })
+        {
+            var manifest = File.ReadAllText(Path.Combine(
+                repoRoot, "extension", "laplace_substrate", "sql", manifestName));
+            Assert.Contains("indexes/consensus_default_type_eff_mu_btree.sql.in",
+                manifest, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
     public void WorkingSetApply_HasOneCoordinationOwner_NoInMemoryClaimPolling()
     {
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();

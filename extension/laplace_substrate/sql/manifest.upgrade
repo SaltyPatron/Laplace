@@ -57,6 +57,7 @@ indexes/consensus_type_btree.sql.in
 indexes/consensus_subject_type_btree.sql.in
 indexes/consensus_type_subject_btree.sql.in
 indexes/consensus_eff_mu_btree.sql.in
+indexes/consensus_default_type_eff_mu_btree.sql.in
 indexes/consensus_subject_eff_mu_btree.sql.in
 indexes/consensus_subject_type_eff_mu_btree.sql.in
 indexes/consensus_object_type_btree.sql.in
