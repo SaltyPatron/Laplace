@@ -20,8 +20,10 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 /// PgTuningParityTests.IngestPool_CoversItsFansAndItsObservabilityOwners -- which is the
 /// signature of a shared mutable global under parallel execution, not of a marginal machine.
 ///
-/// Every class touching that global belongs here so the override can never be observed by a
-/// reader that did not install it.
+/// A serial collection alone excludes only its own members, not all the other readers.
+/// CI run 33105290406 caught inventory sizing reading a synthetic topology between
+/// creating its files and checking their size against the I/O budget. Run this global
+/// override collection without other collections; ordinary tests remain parallel.
 /// </summary>
-[CollectionDefinition("cpu-topology-global")]
+[CollectionDefinition("cpu-topology-global", DisableParallelization = true)]
 public sealed class CpuTopologyGlobalCollection { }

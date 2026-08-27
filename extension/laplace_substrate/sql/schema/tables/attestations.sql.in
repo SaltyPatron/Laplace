@@ -12,7 +12,7 @@
 -- 32B/row dead weight is a follow-up native change.
 --
 -- PK includes the partition keys; FKs dropped (see consensus.sql.in).
--- GREENFIELD: db-reset + reseed is the upgrade path.
+-- Additive witness fields must also migrate existing evidence in place.
 CREATE TABLE IF NOT EXISTS attestations (
     id                bytea         NOT NULL CHECK (octet_length(id) = 16),
     subject_id        bytea         NOT NULL,
@@ -51,6 +51,12 @@ CREATE TABLE IF NOT EXISTS attestations (
     highway_mask      bytea         CHECK (highway_mask IS NULL OR octet_length(highway_mask) = 32),
     PRIMARY KEY (id, type_id, subject_id)
 ) PARTITION BY LIST (type_id);
+
+-- CREATE TABLE IF NOT EXISTS does not widen an installed table. Preserve existing
+-- evidence with its original neutral opponent while allowing the new COPY layout
+-- to write explicit opponent ratings; this recurses to existing partitions too.
+ALTER TABLE attestations ADD COLUMN IF NOT EXISTS opponent_rating_fp1e9
+    bigint NOT NULL DEFAULT 1500000000000;
 
 DO $$
 BEGIN

@@ -65,6 +65,13 @@ else()
     set(LAPLACE_EXT_SHAREDIR "${LAPLACE_PG_SHAREDIR}/extension")
 endif()
 
+# Managed publishes carry the native build artifacts beside the application.
+# Resolve their native-to-native dependencies from that same payload first,
+# rather than a later rebuild in the original checkout or a shared install.
+if(UNIX AND NOT APPLE)
+    list(PREPEND CMAKE_BUILD_RPATH "$ORIGIN")
+endif()
+
 set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
 list(APPEND CMAKE_INSTALL_RPATH "/opt/laplace/geos/lib")
 list(APPEND CMAKE_INSTALL_RPATH "/opt/laplace/proj/lib")

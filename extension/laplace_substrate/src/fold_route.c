@@ -24,10 +24,11 @@
  *  disjoint rows), then execute a SESSION-CACHED prepared plan per type whose
  *  type_id is a hex LITERAL in the plan text, kept in an HTAB of
  *  type_id -> SPI_keepplan'd SPIPlanPtr in TopMemoryContext. Plan-time LIST
- *  pruning happens once per (backend, type) and is reused across every chunk
- *  and every apply; runtime HASH pruning picks the one leaf per row. The fold
+ *  pruning excludes unrelated types; runtime HASH pruning picks the one leaf
+ *  per row. Consensus folds use custom plans for each batch so a plan made
+ *  against an empty seed partition cannot outlive its cardinality. The fold
  *  plan is one MERGE, not an UPDATE plus an INSERT/NOT-EXISTS second probe.
- *  No temp table, no ANALYZE, no re-plan, no volatility trap.
+ *  No temp table, no per-batch ANALYZE, no volatility trap.
  *
  * Fold math stays one implementation per fact: both fold arms run the same
  * core (glicko2_init + glicko2_fold_uniform_period) the SQL scalar
@@ -543,9 +544,14 @@ pg_laplace_attestation_merge_type(PG_FUNCTION_ARGS)
 static const char *PRIOR_SELECT_SQL =
     "SELECT b.ord, c.rating, c.rd, c.volatility "
     "FROM unnest($1::bytea[], $2::bytea[]) WITH ORDINALITY AS b(id, s, ord) "
-    "JOIN laplace.consensus c "
-    "  ON c.type_id = '\\x%s'::bytea AND c.subject_id = b.s AND c.id = b.id "
-    "FOR UPDATE OF c";
+    /* FOR UPDATE inside the correlated subquery prevents join flattening.
+     * The batch must drive keyed probes, even while ANALYZE still describes
+     * an empty partition. An ordinary join can instead rescan/materialize
+     * the whole relation for every input cell (quadratic seed drains). */
+    "CROSS JOIN LATERAL ("
+    "  SELECT c.rating, c.rd, c.volatility FROM laplace.consensus c "
+    "  WHERE c.type_id = '\\x%s'::bytea AND c.subject_id = b.s AND c.id = b.id "
+    "  FOR UPDATE OF c) c";
 
 static const char *UPSERT_MERGE_SQL =
     "MERGE INTO laplace.consensus c "

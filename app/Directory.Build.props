@@ -82,17 +82,19 @@
     directory, BEFORE handing off to the OS loader — so an app-local copy wins
     over /opt/laplace/lib without touching a shared path.
 
-    Same reasoning as the Tier filter above: make the script's behaviour the
-    project default so the two cannot drift. NativeArtifactIdentityTests fails the
-    run if they ever do.
+    Ship the same closure with executable publishes as well. If integration fails
+    after the shared engine is installed, restore-api must not start an old managed
+    layout against a new native ABI. App-local native libraries keep the previous
+    published payload coherent until the next complete publish.
   -->
-  <ItemGroup Condition="$(MSBuildProjectName.EndsWith('.Tests')) AND '$(OS)' != 'Windows_NT'">
+  <ItemGroup Condition="'$(OS)' != 'Windows_NT'">
     <LaplaceNativeArtifact Include="$(MSBuildThisFileDirectory)../build/engine/core/*.so*" />
     <LaplaceNativeArtifact Include="$(MSBuildThisFileDirectory)../build/engine/dynamics/*.so*" />
     <LaplaceNativeArtifact Include="$(MSBuildThisFileDirectory)../build/engine/synthesis/*.so*" />
     <None Include="@(LaplaceNativeArtifact)">
       <Link>%(Filename)%(Extension)</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       <Visible>false</Visible>
     </None>
   </ItemGroup>

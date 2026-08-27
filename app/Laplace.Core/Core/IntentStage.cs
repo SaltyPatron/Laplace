@@ -158,7 +158,8 @@ public sealed class IntentStage : SafeHandle
         long observationCount,
         long sumScoreFp1e9,
         long opponentRdFp1e9,
-        Mask256 highwayMask = default)
+        Mask256 highwayMask = default,
+        long opponentRatingFp1e9 = 1_500_000_000_000L)
     {
         ThrowIfDisposed();
         if (observationCount < 0) throw new ArgumentOutOfRangeException(nameof(observationCount));
@@ -174,7 +175,7 @@ public sealed class IntentStage : SafeHandle
             int rc = NativeInterop.IntentStageAddAttestation(
                 handle, &id, &subjectId, &typeId, objPtr, &sourceId, ctxPtr,
                 outcome, lastObservedAtUnixUs, observationCount,
-                sumScoreFp1e9, opponentRdFp1e9, maskPtr);
+                sumScoreFp1e9, opponentRdFp1e9, opponentRatingFp1e9, maskPtr);
             if (rc != 0) throw new InvalidOperationException("intent_stage_add_attestation failed");
         }
     }

@@ -24,8 +24,6 @@ internal sealed record WitnessedWord(string Surface, string IdHex, long Witnesse
 
 internal sealed class ExploreDecomposeService
 {
-    private static int _perfcacheLoaded;
-
     public DecomposeResponse Decompose(string text)
     {
         ArgumentException.ThrowIfNullOrEmpty(text);
@@ -131,9 +129,10 @@ internal sealed class ExploreDecomposeService
 
     private static void EnsurePerfcache()
     {
-        if (Interlocked.CompareExchange(ref _perfcacheLoaded, 1, 0) != 0)
-            return;
-        CodepointPerfcache.Load(LaplaceInstall.ResolveT0Perfcache());
+        // The shared initializer waits for publication and reuses the mapping.
+        // A private once flag both published too early and reloaded/unmapped a
+        // cache already being read by turn witnessing and native reverse lookup.
+        CodepointPerfcache.LoadDefault();
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]

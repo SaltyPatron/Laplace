@@ -66,6 +66,14 @@ public static unsafe class CodepointPerfcache
         if (rc != 0)
             throw new InvalidOperationException(
                 "codepoint perf-cache not loaded; call CodepointPerfcache.Load first");
+        // Native reverse lookup builds an index lazily. Complete that one-time
+        // initialization under the same gate before publishing lock-free readers;
+        // otherwise concurrent first lookups can race the index/count publication.
+        // Every supported blob contains ASCII, including this non-NUL codepoint.
+        var probe = recs['A'].Hash;
+        uint codepoint;
+        if (NativeInterop.CodepointTableLookupId(&probe, &codepoint) != 0 || codepoint != 'A')
+            throw new InvalidOperationException("codepoint perf-cache reverse index initialization failed");
         _recs = recs;
         _count = checked((int)count);
         _ready = true;

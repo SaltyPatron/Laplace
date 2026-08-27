@@ -516,7 +516,7 @@ jobs:
           bash scripts/pipeline.sh "${args[@]}" build
 
   unit-test:
-    name: Unit tests — native engine (ctest, excludes pg_regress)
+    name: Unit tests — native engine and managed ABI
     needs: build
     if: >-
       github.event_name != 'workflow_dispatch' ||
@@ -548,6 +548,14 @@ jobs:
           else
             bash scripts/test-parallel.sh --engine
           fi
+      - name: Managed core and native ABI gate (before installation)
+        run: |
+          # PR #1329 installed a new ABI before the managed signature regression
+          # ran in integration, then restored the old API after that failure.
+          # Execute the built managed/native boundary before any live install.
+          export LD_LIBRARY_PATH="$PWD/build/engine/core:$PWD/build/engine/dynamics:$PWD/build/engine/synthesis:${LD_LIBRARY_PATH:-}"
+          dotnet test app/Laplace.Core.Tests/Laplace.Core.Tests.csproj \
+            -c Release --no-build --filter 'Tier!=db&Tier!=perf' --verbosity minimal
 
   deploy:
     name: Deploy — stage install to /opt/laplace

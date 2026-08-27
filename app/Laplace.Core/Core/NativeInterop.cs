@@ -267,7 +267,7 @@ public static unsafe partial class NativeInterop
         Hash128* objectId, Hash128* sourceId, Hash128* contextId,
         short outcome,
         long lastObservedAtUnixUs, long observationCount,
-        long sumScoreFp1e9, long opponentRdFp1e9,
+        long sumScoreFp1e9, long opponentRdFp1e9, long opponentRatingFp1e9,
         byte* highwayMask);
 
     [LibraryImport(Library, EntryPoint = "intent_stage_emit_copy_binary")]
