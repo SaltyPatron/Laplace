@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using Xunit;
 using Laplace.Engine.Core;
 
@@ -136,6 +137,58 @@ public class IntentStageTests
                 pos += (int)len;
         }
         Assert.Fail("did not reach highway_mask field");
+    }
+
+    [Fact]
+    public void AddAttestation_DefaultOpponentRatingIsNeutral()
+    {
+        using var stage = IntentStage.New(1);
+        var id = new Hash128(1, 2);
+        stage.AddAttestation(id, id, id, null, id, null, 2, 0, 1,
+            sumScoreFp1e9: 1_000_000_000L, opponentRdFp1e9: 30_000_000_000L);
+
+        var field = AttestationField(stage, "opponent_rating_fp1e9");
+        Assert.Equal(8, field.Length);
+        Assert.Equal(Glicko2.NeutralMuFp1e9(), BinaryPrimitives.ReadInt64BigEndian(field));
+    }
+
+    [Theory]
+    [InlineData(1_180_000_000_000L)]
+    [InlineData(1_820_000_000_000L)]
+    public void AddAttestation_OpponentRatingAndMaskKeepTheirNativeArgumentPositions(long rating)
+    {
+        using var stage = IntentStage.New(1);
+        var id = new Hash128(1, 2);
+        stage.AddAttestation(id, id, id, null, id, null, 2, 0, 1,
+            sumScoreFp1e9: 1_000_000_000L, opponentRdFp1e9: 30_000_000_000L,
+            opponentRatingFp1e9: rating);
+
+        Assert.Equal(rating,
+            BinaryPrimitives.ReadInt64BigEndian(AttestationField(stage, "opponent_rating_fp1e9")));
+        Assert.Equal(new byte[32], AttestationField(stage, "highway_mask"));
+    }
+
+    private static byte[] AttestationField(IntentStage stage, string name)
+    {
+        var columns = IntentStage.CopyColumnList(IntentStageTable.Attestations).Split(", ");
+        int fieldIndex = Array.IndexOf(columns, name);
+        Assert.True(fieldIndex >= 0, $"missing COPY field {name}");
+        var bytes = stage.EmitCopyBinary(IntentStageTable.Attestations);
+        int pos = 19;
+        Assert.Equal(columns.Length, ReadBe16(bytes.AsSpan(pos, 2)));
+        pos += 2;
+        for (int i = 0; i < columns.Length; i++)
+        {
+            int length = BinaryPrimitives.ReadInt32BigEndian(bytes.AsSpan(pos, 4));
+            pos += 4;
+            if (i == fieldIndex)
+            {
+                Assert.True(length >= 0, $"COPY field {name} must not be NULL");
+                return bytes.AsSpan(pos, length).ToArray();
+            }
+            if (length >= 0) pos += length;
+        }
+        throw new InvalidOperationException($"missing COPY field {name}");
     }
 
     [Fact]

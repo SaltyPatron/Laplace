@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Security.Cryptography;
 using Xunit;
 using Xunit.Abstractions;
@@ -64,14 +65,12 @@ public sealed class NativeArtifactIdentityTests
         Assert.True(loaded is not null, $"{Lib} is not mapped after calling into it");
         _out.WriteLine($"loaded: {loaded}");
 
-        // The build tree, relative to the test assembly: app/<proj>/bin/<cfg>/<tfm> -> repo.
-        string repo = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+        // Build outputs may be outside the checkout (LAPLACE_BUILD_ROOT).
+        string repo = typeof(NativeArtifactIdentityTests).Assembly
+            .GetCustomAttributes<AssemblyMetadataAttribute>()
+            .Single(a => a.Key == "LaplaceRepoRoot").Value!;
         string built = Path.Combine(repo, "build", "engine", "core", Lib);
-        if (!File.Exists(built))
-        {
-            _out.WriteLine($"no build tree at {built} — cannot compare, skipping");
-            return;
-        }
+        Assert.True(File.Exists(built), $"missing native build artifact: {built}");
 
         string loadedSha = Sha(loaded!), builtSha = Sha(built);
         _out.WriteLine($"built : {built}");

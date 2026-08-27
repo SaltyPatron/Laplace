@@ -19,10 +19,15 @@
 --    per-type statements re-planned per call.
 --
 -- The native routing groups the batch by type in C and executes one SESSION-CACHED
--- MERGE plan per type whose type_id is a LITERAL in the plan text (HTAB of type ->
--- SPI_keepplan'd plan in TopMemoryContext): LIST pruning once per (backend, type),
+-- prepared statement per type whose type_id is a LITERAL in the plan text (HTAB
+-- of type -> SPI_keepplan'd plan in TopMemoryContext): LIST pruning by type,
 -- matched/unmatched decided in one target join, HASH pruning per row, no temp table,
--- no ANALYZE, no re-plan, and no UPDATE-then-NOT-EXISTS double probe.
+-- no per-batch ANALYZE, and no UPDATE-then-NOT-EXISTS double probe.
+-- The function-local settings replan against the actual batch and current
+-- relation size and disallow materializing the target for repeated full scans.
+-- Otherwise an empty-partition plan can survive foundation ingest and make
+-- the drain quadratic. The prior read also uses a correlated, row-locked probe.
+-- These settings restore the caller's values on return, including errors.
 --
 -- One implementation per fact, preserved:
 --  * the Glicko fold runs the SAME core (glicko2_init + glicko2_fold_uniform_period)
@@ -69,7 +74,9 @@ CREATE OR REPLACE FUNCTION consensus.upsert(
     p_opp_ratings bigint[] DEFAULT NULL)
     RETURNS bigint
     AS 'MODULE_PATHNAME', 'pg_laplace_consensus_upsert'
-    LANGUAGE C VOLATILE;
+    LANGUAGE C VOLATILE
+    SET plan_cache_mode = force_custom_plan
+    SET enable_material = off;
 
 -- Direct routed form for first-party type lanes. The type is part of every cell
 -- identity but is transmitted once per set operation, not once per row.
@@ -84,4 +91,6 @@ CREATE OR REPLACE FUNCTION consensus.upsert_type(
     p_opp_ratings bigint[] DEFAULT NULL)
     RETURNS bigint
     AS 'MODULE_PATHNAME', 'pg_laplace_consensus_upsert_type'
-    LANGUAGE C VOLATILE;
+    LANGUAGE C VOLATILE
+    SET plan_cache_mode = force_custom_plan
+    SET enable_material = off;

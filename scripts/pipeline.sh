@@ -906,6 +906,13 @@ phase_api_env() {
   fi
   echo "LAPLACE_PERFCACHE_BIN -> $bin"
 
+  # Upgrade the old stock loader path to the coherent published native bundle.
+  # Leave operator-customized paths alone. The first directory also governs
+  # ELF dependencies of dynamics/synthesis, not just .NET's direct P/Invokes.
+  if grep -Fxq "LD_LIBRARY_PATH=$LAPLACE_INSTALL_PREFIX/lib" "$env_file"; then
+    sed -i "s|^LD_LIBRARY_PATH=$LAPLACE_INSTALL_PREFIX/lib$|LD_LIBRARY_PATH=$LAPLACE_INSTALL_PREFIX/app:$LAPLACE_INSTALL_PREFIX/lib|" "$env_file"
+  fi
+
   # Reconcile the API's database to the one this pipeline actually seeds ($PGDATABASE),
   # EVERY run. The block above only writes the example (with Database=laplace) when the
   # env file is absent; an existing laplace-api.env keeps whatever DB it had. A stale

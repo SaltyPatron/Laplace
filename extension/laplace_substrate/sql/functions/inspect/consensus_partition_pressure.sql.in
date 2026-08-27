@@ -51,7 +51,7 @@ STABLE
         SELECT st.tbl,
                m.type_id,
                (m.freq * st.reltuples)::bigint AS rows,
-               round(100.0 * m.freq, 2) AS pct_of_default
+               round((100.0 * m.freq)::numeric, 2) AS pct_of_default
         FROM stats st,
              LATERAL unnest(st.vals, st.freqs) AS m(type_id, freq)
     ), numbered AS MATERIALIZED (
