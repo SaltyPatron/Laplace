@@ -140,6 +140,9 @@ class DeploymentTests(unittest.TestCase):
             canonical.replace("Type=simple", "Type=simple\nExecStartPre=/bin/sh -c id"),
             canonical.replace("ProtectSystem=strict", "ProtectSystem=false"),
             canonical.replace("CapabilityBoundingSet=", "CapabilityBoundingSet=CAP_SYS_ADMIN"),
+            canonical.replace("UnsetEnvironment=PGPASSWORD PGPASSFILE\n", ""),
+            canonical.replace("Host=/var/run/postgresql", "Host=127.0.0.1"),
+            canonical.replace("Database=laplace", "Database=laplace;Password=test-only-sentinel"),
             canonical.replace("Group=laplace-mcp", "Group=laplace-runner"),
             canonical.replace("ExecStart=/opt/laplace/app/laplace-mcp --http", "ExecStart=/bin/sh -c id")]
         for mutation in mutations:

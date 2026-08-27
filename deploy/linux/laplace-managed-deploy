@@ -45,6 +45,7 @@ def validate_unit(text, name):
             ("WorkingDirectory", "/var/lib/" + account),
             ("Environment", '"LAPLACE_DB=Host=/var/run/postgresql;Username=laplace_admin;Database=laplace"'),
             ("EnvironmentFile", "/opt/laplace/secrets/" + name + ".env"),
+            ("UnsetEnvironment", "PGPASSWORD PGPASSFILE"),
             ("ExecStart", "/opt/laplace/app/" + account + (" --http" if name == "mcp" else "")),
             ("Restart", "on-failure"), ("RestartSec", "10" if name == "mcp" else "30"),
             ("TimeoutStopSec", "45"), ("StateDirectory", account), ("LogsDirectory", account),

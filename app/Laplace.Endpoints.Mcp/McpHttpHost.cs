@@ -41,6 +41,7 @@ internal static class McpHttpHost
         Func<IMcpTools>? toolsFactory = null, Func<CancellationToken, Task<bool>>? readiness = null)
     {
         options.Validate();
+        var database = toolsFactory is null || readiness is null ? ManagedServiceDatabase.Resolve() : null;
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = [] });
         // HTTP stays on loopback. The existing nginx terminates LAN TLS; no
         // ASPNETCORE_URLS override can accidentally publish the backend directly.
@@ -49,9 +50,9 @@ internal static class McpHttpHost
             k.Listen(IPAddress.Loopback, options.Port);
             k.Limits.MaxRequestBodySize = BodyLimit;
         });
-        builder.Services.AddSingleton(_ => new McpSessions(options, toolsFactory ?? (() => new SubstrateTools())));
+        builder.Services.AddSingleton(_ => new McpSessions(options, toolsFactory ?? (() => new SubstrateTools(database))));
         var app = builder.Build();
-        var checkReady = readiness ?? ReadyAsync;
+        var checkReady = readiness ?? (ct => ReadyAsync(database!, ct));
         app.MapGet("/health/live", () => Results.Json(new { service = "laplace-mcp", live = true }));
         app.MapGet("/health/ready", async (CancellationToken ct) =>
         {
@@ -73,11 +74,28 @@ internal static class McpHttpHost
         return app;
     }
 
-    private static async Task<bool> ReadyAsync(CancellationToken ct)
+    private static async Task<bool> ReadyAsync(string database, CancellationToken ct)
     {
-        await using var db = LaplaceDataSource.Create(SubstrateAccess.Serving);
-        var rows = await NpgsqlSubstrateReads.SubstrateHealthAsync(db, ct);
-        return rows.Any(r => r.Metric == "ok" && r.Value == "true");
+        await using var db = LaplaceDataSource.Create(SubstrateAccess.Serving, database);
+        await using var connection = await db.OpenConnectionAsync(ct);
+        // Use the same typed inventory/perfcache probes as API readiness. The
+        // health/audit tool performs an exact entity count even in shallow mode;
+        // on a populated corpus that scan exceeds the readiness budget.
+        return await ReadyFromProbesAsync(
+            token => NpgsqlSubstrateReads.EntitiesAndConsensusExistAsync(connection, token),
+            token => NpgsqlSubstrateReads.PerfCacheProbeAsync(connection, token), ct);
+    }
+
+    internal static async Task<bool> ReadyFromProbesAsync(
+        Func<CancellationToken, Task<(bool EntitiesExist, bool ConsensusExist)>> inventory,
+        Func<CancellationToken, Task<object?>> perfcache, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        var present = await inventory(ct);
+        if (!present.EntitiesExist || !present.ConsensusExist) return false;
+        await perfcache(ct);
+        // Inventory is estimated; readiness is not a full-corpus integrity claim.
+        return true;
     }
 
     private static async Task HandleAsync(HttpContext context, McpSessions sessions, McpHttpOptions options)

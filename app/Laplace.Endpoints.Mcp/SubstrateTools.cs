@@ -25,16 +25,16 @@ internal sealed class SubstrateTools : IMcpTools
     private readonly NpgsqlDataSource _db;
     private readonly NpgsqlDataSource _dbReadOnly;
 
-    public SubstrateTools()
+    public SubstrateTools(string? connectionString = null)
     {
         // Request/response surface — Serving policy (bounded timeout + auto-prepare).
-        _db = LaplaceDataSource.Create(SubstrateAccess.Serving);
+        _db = LaplaceDataSource.Create(SubstrateAccess.Serving, connectionString);
         _dbReadOnly = LaplaceDataSource.Create(SubstrateAccess.Serving, dsb =>
         {
             dsb.ConnectionStringBuilder.CommandTimeout = 20;
             dsb.ConnectionStringBuilder.Options =
                 "-c default_transaction_read_only=on";
-        });
+        }, connectionString);
     }
 
     public async ValueTask DisposeAsync()

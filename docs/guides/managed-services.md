@@ -41,6 +41,11 @@ removed. Both new app listeners are explicitly loopback-only and ignore
 local peer map to `laplace_admin`. That is privileged database access; the MCP
 bearer belongs only to trusted operators, not anonymous/public clients.
 
+The [PostgreSQL access audit](postgresql-access-audit.md) records the existing
+LAN/loopback `trust` exposure and the staged migration required before claiming
+least-privilege isolation. Managed hosts now reject TCP/password DB overrides;
+the host-bootstrap renderer retains their peer mappings on re-provisioning.
+
 ## One-time privileged bootstrap
 
 The existing runner's sudo policy cannot install new units/users. After the PR's
@@ -87,7 +92,10 @@ Existing GitHub repository secrets remain the source of truth. Publish requires:
 
 Use distinct high-entropy MCP/operator tokens (at least 32 token-safe characters).
 CI never prints their values. Systemd loads the appropriate secret into each
-process; the MCP account has no operator-token file access or sudo grant. Optional
+process; the MCP OS account has no direct operator-token file access or sudo grant.
+Its current database superuser role still carries server-side authority as the
+PostgreSQL OS owner; it is not an isolation boundary from the runner's secrets or
+privileges. See the access audit before enabling access for any untrusted caller. Optional
 Lichess settings are documented in `deploy/linux/managed-services/lichess-service.env.example`.
 An explicit settings change takes effect on service restart, not through a second
 in-process API bot.
@@ -162,7 +170,9 @@ and every prior release are preserved for running STDIO clients. The API stops
 only for its payload replacement, then resumes through the existing readiness
 gate. New units are reconciled/enabled and non-stopped services restart.
 
-MCP `/health/ready` checks the substrate; Lichess readiness requires a configured
+MCP `/health/ready` uses the API's typed estimated-inventory and perfcache probes,
+with a five-second deadline, not the health tool's full entity-count scan. This
+is serving readiness, not full-corpus integrity verification. Lichess readiness requires a configured
 token, initialized chess host and live authenticated event stream. `/health/live`
 only checks the process. CI additionally verifies MCP initialization and tool
 discovery through the authenticated HTTPS nginx URL. This does not claim an
@@ -187,6 +197,7 @@ Focused non-activating checks:
 
 ```sh
 python3 scripts/test-managed-services.py
+python3 scripts/test-pg-access.py
 bash scripts/test-deploy-payload-sync.sh
 dotnet test app/Laplace.Endpoints.Mcp.Tests/Laplace.Endpoints.Mcp.Tests.csproj
 dotnet test app/Laplace.Endpoints.Lichess.Tests/Laplace.Endpoints.Lichess.Tests.csproj

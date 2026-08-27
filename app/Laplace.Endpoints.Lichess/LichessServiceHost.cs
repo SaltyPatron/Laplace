@@ -1,5 +1,6 @@
 using System.Net;
 using Laplace.Chess.Service;
+using Laplace.SubstrateCRUD.Npgsql;
 
 namespace Laplace.Endpoints.Lichess;
 
@@ -30,12 +31,13 @@ internal static class LichessServiceHost
     public static WebApplication Build(LichessOptions options, ILichessConnection? connection = null, Action? failed = null)
     {
         options.Validate();
+        var database = connection is null ? ManagedServiceDatabase.Resolve() : null;
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = [] });
         builder.WebHost.ConfigureKestrel(k => k.Listen(IPAddress.Loopback, options.Port));
         builder.Services.AddSingleton(options);
         builder.Services.AddSingleton(failed ?? (() => Environment.ExitCode = 1));
         builder.Services.AddSingleton<ILichessConnection>(sp => connection ?? new LichessConnectivityService(
-            ct => ChessLiveGameHost.CreateAsync(0.5, ct: ct),
+            ct => ChessLiveGameHost.CreateAsync(0.5, ct: ct, connString: database),
             sp.GetRequiredService<ILoggerFactory>().CreateLogger("lichess"), ownsHost: true));
         builder.Services.Configure<HostOptions>(o => o.ShutdownTimeout = TimeSpan.FromSeconds(40));
         builder.Services.AddHostedService<LichessWorker>();

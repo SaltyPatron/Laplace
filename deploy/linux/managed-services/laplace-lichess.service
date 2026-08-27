@@ -12,6 +12,7 @@ WorkingDirectory=/var/lib/laplace-lichess
 Environment="LAPLACE_DB=Host=/var/run/postgresql;Username=laplace_admin;Database=laplace"
 EnvironmentFile=/opt/laplace/secrets/lichess.env
 EnvironmentFile=-/opt/laplace/secrets/lichess-service.env
+UnsetEnvironment=PGPASSWORD PGPASSFILE
 ExecStart=/opt/laplace/app/laplace-lichess
 Restart=on-failure
 RestartSec=30

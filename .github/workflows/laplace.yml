@@ -199,6 +199,7 @@ jobs:
       - name: Managed service privilege and deployment contracts
         run: |
           python3 scripts/test-managed-services.py
+          python3 scripts/test-pg-access.py
           shellcheck -S warning -x deploy/linux/deploy.sh deploy/linux/managed-publish.sh
 
       - name: Validate witness-manifest vs orchestration scripts
@@ -566,6 +567,7 @@ jobs:
         run: |
           dotnet test app/Laplace.Endpoints.Mcp.Tests/Laplace.Endpoints.Mcp.Tests.csproj -c Release --no-build --verbosity minimal
           dotnet test app/Laplace.Endpoints.Lichess.Tests/Laplace.Endpoints.Lichess.Tests.csproj -c Release --no-build --verbosity minimal
+          dotnet test app/Laplace.Substrate.Tests/Laplace.Substrate.Tests.csproj -c Release --no-build --filter 'FullyQualifiedName~ManagedServiceDatabaseTests' --verbosity minimal
           dotnet test app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj -c Release --no-build --filter 'FullyQualifiedName~ServiceControlTests' --verbosity minimal
 
   deploy:

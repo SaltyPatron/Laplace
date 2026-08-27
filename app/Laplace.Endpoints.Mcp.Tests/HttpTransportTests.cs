@@ -11,6 +11,58 @@ public sealed class HttpTransportTests
 {
     private const string Token = "test-only-0123456789-abcdefghijklmnopqrstuvwxyz";
 
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task ReadinessRequiresInventoryAndSuccessfulPerfcacheProbe(bool entities, bool consensus)
+    {
+        int inventoryCalls = 0, perfcacheCalls = 0;
+        using var budget = new CancellationTokenSource();
+        var ready = await McpHttpHost.ReadyFromProbesAsync(token =>
+        {
+            Assert.Equal(budget.Token, token);
+            inventoryCalls++;
+            return Task.FromResult((entities, consensus));
+        }, token =>
+        {
+            Assert.Equal(budget.Token, token);
+            perfcacheCalls++;
+            return Task.FromResult<object?>(null);
+        }, budget.Token);
+        Assert.Equal(entities && consensus, ready);
+        Assert.Equal(1, inventoryCalls);
+        Assert.Equal(ready ? 1 : 0, perfcacheCalls);
+    }
+
+    [Fact]
+    public async Task ReadinessCannotTurnFailedOrCancelledProbesIntoSuccess()
+    {
+        await Assert.ThrowsAsync<InvalidOperationException>(() => McpHttpHost.ReadyFromProbesAsync(
+            _ => Task.FromResult((true, true)), _ => throw new InvalidOperationException("probe failed"), default));
+        using var budget = new CancellationTokenSource();
+        budget.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => McpHttpHost.ReadyFromProbesAsync(
+            _ => throw new Exception("cancelled probe must not execute"),
+            _ => throw new Exception("cancelled probe must not execute"), budget.Token));
+    }
+
+    [Fact]
+    public void ProductionHostRejectsTcpOverrideBeforeBuildingListenerOrTools()
+    {
+        var prior = Environment.GetEnvironmentVariable("LAPLACE_DB");
+        try
+        {
+            Environment.SetEnvironmentVariable("LAPLACE_DB",
+                "Host=127.0.0.1;Username=laplace_admin;Database=laplace;Password=test-only-sentinel");
+            var error = Assert.Throws<InvalidOperationException>(() =>
+                McpHttpHost.Build(new(Token, "https://hart-server:8443", Port: 0)));
+            Assert.DoesNotContain("test-only-sentinel", error.ToString());
+        }
+        finally { Environment.SetEnvironmentVariable("LAPLACE_DB", prior); }
+    }
+
     private sealed class Tools : IMcpTools
     {
         public int Calls;
