@@ -151,6 +151,13 @@ its RPATH was packaged for `/opt/laplace`, not the temporary test prefix.
 the drain and diagnostic-query fixes requires the shared-service restart
 decision. No main-branch push, PR merge, or deploying CI dispatch was performed.
 
+The final readiness check around 18:41 UTC found an active document ingest
+(`ingest document /vault/Data/test-data`, PID 525290), a live physicality COPY,
+and a refactor CI worker. Do not restart the shared PostgreSQL service during
+that work; recheck clients and ingestion before any approved activation.
+Temporary API sidecars and the isolated PostgreSQL test server were stopped;
+their files and the production API were preserved.
+
 One CLI `ingest unicode --help` probe was interpreted as an ingest command by
 the legacy parser. The production completion marker short-circuited it: zero
 intents, entities, physicalities, or consensus cells were ingested; the CLI
