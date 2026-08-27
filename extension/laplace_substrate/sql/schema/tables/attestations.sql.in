@@ -37,6 +37,17 @@ CREATE TABLE IF NOT EXISTS attestations (
     --                       phi, and the merge keeps the existing value.
     sum_score_fp1e9   bigint        NOT NULL,
     opponent_rd_fp1e9 bigint        NOT NULL,
+    --   opponent_rating_fp1e9 — the per-deposit opponent RATING (GH #1321). Until
+    --                       this column existed the fold passed
+    --                       CONSENSUS_FOLD_NEUTRAL_MU as the opponent on every
+    --                       call, so every cell replayed one match against a
+    --                       constant 1500 and the rating degenerated into a
+    --                       witness counter. The RD half was already stored here;
+    --                       this is the half that carries the surprise term.
+    --                       DEFAULT is neutral, not 0: a row that does not set it
+    --                       must fold exactly as the substrate did before, not
+    --                       against a rating-0 opponent.
+    opponent_rating_fp1e9 bigint    NOT NULL DEFAULT 1500000000000,
     highway_mask      bytea         CHECK (highway_mask IS NULL OR octet_length(highway_mask) = 32),
     PRIMARY KEY (id, type_id, subject_id)
 ) PARTITION BY LIST (type_id);

@@ -50,6 +50,11 @@
 --     router only needs same-type rows ADJACENT and remains correct (merely
 --     one extra plan execution) if they are not.
 DROP FUNCTION IF EXISTS laplace.consensus_upsert(bytea[], bytea[], bytea[], bigint[], bigint[], bigint[], timestamptz[]);
+-- The 7-arg forms are DROPPED, not left alongside: adding a DEFAULTed parameter
+-- via CREATE OR REPLACE would leave the old arity resident as a separate
+-- overload, and a 7-argument call would then be ambiguous.
+DROP FUNCTION IF EXISTS consensus.upsert(bytea[], bytea[], bytea[], bigint[], bigint[], bigint[], timestamptz[]);
+DROP FUNCTION IF EXISTS consensus.upsert_type(bytea, bytea[], bytea[], bigint[], bigint[], bigint[], timestamptz[]);
 CREATE OR REPLACE FUNCTION consensus.upsert(
     p_subjects bytea[],
     p_types    bytea[],
@@ -57,7 +62,11 @@ CREATE OR REPLACE FUNCTION consensus.upsert(
     p_phis     bigint[],
     p_games    bigint[],
     p_sums     bigint[],
-    p_ts       timestamptz[])
+    p_ts       timestamptz[],
+    -- The opponent each witness presents (GH #1321). DEFAULT NULL so every
+    -- existing caller keeps folding against neutral, unchanged, until it starts
+    -- passing attestations.opponent_rating_fp1e9.
+    p_opp_ratings bigint[] DEFAULT NULL)
     RETURNS bigint
     AS 'MODULE_PATHNAME', 'pg_laplace_consensus_upsert'
     LANGUAGE C VOLATILE;
@@ -71,7 +80,8 @@ CREATE OR REPLACE FUNCTION consensus.upsert_type(
     p_phis     bigint[],
     p_games    bigint[],
     p_sums     bigint[],
-    p_ts       timestamptz[])
+    p_ts       timestamptz[],
+    p_opp_ratings bigint[] DEFAULT NULL)
     RETURNS bigint
     AS 'MODULE_PATHNAME', 'pg_laplace_consensus_upsert_type'
     LANGUAGE C VOLATILE;

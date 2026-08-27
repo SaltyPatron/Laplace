@@ -65,6 +65,7 @@ int intent_stage_add_attestation(
     int64_t          observation_count,
     int64_t          sum_score_fp1e9,
     int64_t          opponent_rd_fp1e9,
+    int64_t          opponent_rating_fp1e9,
     const uint8_t*   highway_mask);
 
 size_t intent_stage_emit_copy_binary(

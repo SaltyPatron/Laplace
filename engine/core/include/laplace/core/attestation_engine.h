@@ -30,6 +30,7 @@ typedef struct {
     int64_t   observation_count;
     int64_t   score_fp1e9;
     int64_t   opponent_rd_fp1e9;
+    int64_t   opponent_rating_fp1e9;
     int64_t   sum_score_fp1e9;
     uint8_t   object_is_null;
     uint8_t   context_is_null;
@@ -71,6 +72,10 @@ int laplace_attestation_id_compute(
     hash128_t*       out_id);
 
 double laplace_attestation_witness_phi(double witness_weight);
+
+/* The opponent's RATING for this witness — the half that never existed. See the
+ * note above the constants in attestation_engine.c. w=0.5 is exactly neutral. */
+double laplace_attestation_witness_opponent_rating(double witness_weight);
 
 int laplace_attestation_outcome_from_score(double score, int16_t* out_outcome);
 
