@@ -9,13 +9,23 @@ namespace Laplace.Chess.Service;
 /// <summary>
 /// Lichess bot session: per-ply substrate fold before search; chat ring buffer per game.
 /// </summary>
-public sealed class LichessConnectivityService
+public interface ILichessConnection : IAsyncDisposable
+{
+    LichessConnectivityStatus Status();
+    IReadOnlyList<LichessChatLine> ChatForGame(string gameId);
+    bool Start(int depth = 8, int maxConcurrent = 2, bool substrate = true, IReadOnlySet<string>? acceptSpeeds = null);
+    Task WaitForExitAsync(CancellationToken ct);
+    Task StopAsync(CancellationToken ct);
+}
+
+public sealed class LichessConnectivityService : ILichessConnection
 {
     private const int MaxLogLines = 64;
     private const int MaxChatLines = 32;
     private readonly Func<CancellationToken, Task<ChessLiveGameHost>> _getHost;
     private ChessLiveGameHost? _host;
     private readonly ILogger _log;
+    private readonly bool _ownsHost;
     private readonly object _gate = new();
     private readonly ConcurrentQueue<string> _recentLog = new();
     private readonly ConcurrentDictionary<string, ConcurrentQueue<LichessChatLine>> _chatByGame = new();
@@ -24,6 +34,7 @@ public sealed class LichessConnectivityService
     private Task? _runTask;
     private string? _username;
     private string? _lastError;
+    private bool _connected;
     private int _depth = 8;
     private int _maxConcurrent = 2;
     private bool _substrate = true;
@@ -36,10 +47,11 @@ public sealed class LichessConnectivityService
     }
 
     public LichessConnectivityService(
-        Func<CancellationToken, Task<ChessLiveGameHost>> getHost, ILogger? log = null)
+        Func<CancellationToken, Task<ChessLiveGameHost>> getHost, ILogger? log = null, bool ownsHost = false)
     {
         _getHost = getHost;
         _log = log ?? NullLogger.Instance;
+        _ownsHost = ownsHost;
     }
 
     public LichessConnectivityStatus Status()
@@ -48,10 +60,10 @@ public sealed class LichessConnectivityService
         {
             var token = LichessBot.ResolveToken();
             bool configured = !string.IsNullOrEmpty(token);
-            bool connected = _runTask is not null && !_runTask.IsCompleted;
+            bool connected = _connected && _runTask is not null && !_runTask.IsCompleted;
             return new LichessConnectivityStatus(
                 Configured: configured,
-                TokenPreview: Preview(token),
+                TokenPreview: null,
                 Connected: connected,
                 Username: _username,
                 Depth: _depth,
@@ -59,7 +71,8 @@ public sealed class LichessConnectivityService
                 Substrate: _substrate,
                 GamesRecorded: _gamesRecorded,
                 RecentLog: _recentLog.ToArray(),
-                Error: _lastError);
+                Error: _lastError,
+                Running: _runTask is not null && !_runTask.IsCompleted);
         }
     }
 
@@ -88,9 +101,11 @@ public sealed class LichessConnectivityService
             _maxConcurrent = Math.Max(1, maxConcurrent);
             _substrate = substrate;
             _lastError = null;
+            _connected = false;
             _username = null;
             _cts = new CancellationTokenSource();
-            _runTask = Task.Run(() => RunAsync(token, acceptSpeeds, _cts.Token));
+            var lifetime = _cts.Token;
+            _runTask = Task.Run(() => RunAsync(token, acceptSpeeds, lifetime));
         }
 
         _log.LogInformation("lichess connectivity starting (depth {Depth}, max {Max}, substrate {Substrate})",
@@ -109,17 +124,35 @@ public sealed class LichessConnectivityService
         }
 
         cts?.Cancel();
-        PushLog("stop requested — finishing in-flight games…");
+        PushLog("stop requested — bounded in-flight game drain…");
         _log.LogInformation("lichess connectivity stop requested");
         return true;
+    }
+
+    public Task WaitForExitAsync(CancellationToken ct)
+    {
+        lock (_gate) return (_runTask ?? Task.CompletedTask).WaitAsync(ct);
+    }
+
+    public async Task StopAsync(CancellationToken ct)
+    {
+        Stop();
+        await WaitForExitAsync(ct);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await StopAsync(CancellationToken.None);
+        if (_ownsHost && _host is not null) await _host.DisposeAsync();
     }
 
     private async Task RunAsync(string token, IReadOnlySet<string>? acceptSpeeds, CancellationToken ct)
     {
         try
         {
-            var host = _host ??= await _getHost(ct);
             var user = await LichessBot.FetchUsernameAsync(token, ct);
+            if (user is null) throw new InvalidOperationException("Lichess account authentication failed; verify token and bot scope.");
+            var host = _host ??= await _getHost(ct);
             lock (_gate) { _username = user; }
             PushLog(user is not null
                 ? $"online as @{user} — per-ply fold before each search; games record live"
@@ -145,6 +178,7 @@ public sealed class LichessConnectivityService
                     PushLog($"chat [{line.Room}] @{line.Username}: {line.Text}");
                 },
                 acceptSpeeds: acceptSpeeds,
+                onConnectionChanged: connected => { lock (_gate) { _connected = connected; } },
                 log: new QueueLogger(this));
 
             await bot.RunAsync(_maxConcurrent, ct);
@@ -165,6 +199,7 @@ public sealed class LichessConnectivityService
             lock (_gate)
             {
                 _gamesRecorded = _host?.GamesCompleted ?? _gamesRecorded;
+                _connected = false;
                 _cts?.Dispose();
                 _cts = null;
             }
@@ -176,9 +211,6 @@ public sealed class LichessConnectivityService
         _recentLog.Enqueue(line);
         while (_recentLog.Count > MaxLogLines && _recentLog.TryDequeue(out _)) { }
     }
-
-    private static string? Preview(string? token)
-        => string.IsNullOrEmpty(token) ? null : token[..Math.Min(8, token.Length)] + "…";
 
     private sealed class QueueLogger(LichessConnectivityService svc) : ILogger
     {
@@ -205,4 +237,5 @@ public sealed record LichessConnectivityStatus(
     bool Substrate,
     long GamesRecorded,
     IReadOnlyList<string> RecentLog,
-    string? Error);
+    string? Error,
+    bool Running = false);

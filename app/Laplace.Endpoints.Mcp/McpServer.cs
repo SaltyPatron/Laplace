@@ -9,9 +9,15 @@ namespace Laplace.Endpoints.Mcp;
 /// notifications are ignored, and a reply is returned only for requests
 /// (null for notifications), per JSON-RPC 2.0.
 /// </summary>
-internal sealed class McpServer(SubstrateTools tools)
+internal interface IMcpTools : IAsyncDisposable
 {
-    private const string ProtocolVersion = "2025-06-18";
+    JsonArray ListTools();
+    (string Text, bool IsError) Call(string name, JsonObject? args);
+}
+
+internal sealed class McpServer(IMcpTools tools)
+{
+    internal const string ProtocolVersion = "2025-06-18";
 
     public string? Handle(string line)
     {
@@ -25,11 +31,19 @@ internal sealed class McpServer(SubstrateTools tools)
             return ErrorReply(null, -32700, $"parse error: {ex.Message}");
         }
 
-        var method = msg?["method"]?.GetValue<string>();
+        if (msg is not JsonObject obj || obj["jsonrpc"]?.ToJsonString() != "\"2.0\"")
+            return ErrorReply(null, -32600, "expected a JSON-RPC 2.0 object");
+        if (obj["id"] is JsonObject or JsonArray || obj["id"]?.ToJsonString() is "true" or "false")
+            return ErrorReply(null, -32600, "invalid request id");
+        if (obj["method"] is not JsonValue methodValue || !methodValue.TryGetValue<string>(out var method))
+            return obj.ContainsKey("result") || obj.ContainsKey("error")
+                ? null : ErrorReply(obj["id"]?.DeepClone(), -32600, "missing method");
         var id = msg?["id"]?.DeepClone();
         var isNotification = msg?["id"] is null;
-        if (method is null)
-            return isNotification ? null : ErrorReply(id, -32600, "missing method");
+        // Notifications never execute a request-only tool (or produce a reply).
+        if (isNotification) return null;
+        if (obj["params"] is not (null or JsonObject))
+            return ErrorReply(id, -32602, "params must be an object");
 
         switch (method)
         {
@@ -53,9 +67,11 @@ internal sealed class McpServer(SubstrateTools tools)
 
             case "tools/call":
             {
-                var name = msg?["params"]?["name"]?.GetValue<string>();
-                if (name is null)
+                var nameValue = msg?["params"]?["name"] as JsonValue;
+                if (nameValue is null || !nameValue.TryGetValue<string>(out var name))
                     return ErrorReply(id, -32602, "tools/call requires params.name");
+                if (msg?["params"]?["arguments"] is not (null or JsonObject))
+                    return ErrorReply(id, -32602, "tool arguments must be an object");
                 var args = msg?["params"]?["arguments"] as JsonObject;
                 var (text, isError) = tools.Call(name, args);
                 return Reply(id, new JsonObject

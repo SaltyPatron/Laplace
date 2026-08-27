@@ -89,9 +89,12 @@ internal static class AppComposition
             sp.GetService<ILoggerFactory>()?.CreateLogger("chess")));
         services.AddSingleton(sp => new ChessLabService(
             sp.GetService<ILoggerFactory>()?.CreateLogger("chess-lab")));
-        services.AddSingleton(sp => new LichessConnectivityService(
-            sp.GetRequiredService<ChessRuntimeService>().GetAsync,
-            sp.GetService<ILoggerFactory>()?.CreateLogger("lichess")));
+        services.AddHttpClient<ILichessStatusClient, LichessStatusClient>(client =>
+        {
+            client.BaseAddress = new Uri("http://127.0.0.1:5189");
+            client.Timeout = TimeSpan.FromSeconds(5);
+        });
+        services.AddSingleton<IServiceControl, ServiceControl>();
 
         services.AddSingleton<IRecipeCompileService, RecipeCompileService>();
         services.AddSingleton<IFoundryExportService, CliFoundryExportService>();

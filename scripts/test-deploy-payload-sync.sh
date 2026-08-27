@@ -77,3 +77,31 @@ laplace_reconcile_app_dir_contract "$APP_DIR" "$(id -un)" "$(id -gn)"
 assert_app_contract
 
 echo "OK deploy payload sync preserves bootstrap-owned host metadata across repeat publishes"
+
+LICHESS_STAGE="$TEST_ROOT/lichess-stage"
+mkdir "$LICHESS_STAGE"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$LICHESS_STAGE/Laplace.Endpoints.Lichess"
+chmod 0755 "$LICHESS_STAGE/Laplace.Endpoints.Lichess"
+old_release="$(laplace_stage_managed_runtimes "$APP_DIR" "$MCP_STAGE" "$LICHESS_STAGE")"
+printf 'second-version\n' > "$MCP_STAGE/Laplace.Endpoints.Mcp.dll"
+new_release="$(laplace_stage_managed_runtimes "$APP_DIR" "$MCP_STAGE" "$LICHESS_STAGE")"
+[[ "$old_release" != "$new_release" ]]
+[[ "$(<"$old_release/mcp/Laplace.Endpoints.Mcp.dll")" == managed ]]
+[[ "$(<"$new_release/mcp/Laplace.Endpoints.Mcp.dll")" == second-version ]]
+[[ "$(<"$MCP_DIR/Laplace.Endpoints.Mcp.dll")" == managed ]]
+[[ -x "$new_release/lichess/Laplace.Endpoints.Lichess" ]]
+echo "OK repeat managed publishes preserve existing clients' runtime directories"
+if failed_release="$(laplace_stage_managed_runtimes "$APP_DIR" "$TEST_ROOT/missing-stage" "$LICHESS_STAGE")"; then
+  echo "missing apphost was accepted: $failed_release" >&2
+  exit 1
+fi
+# Deliberately break the copy implementation: even inside $(...), failure must
+# propagate instead of the final path print falsely reporting a good release.
+if (
+  laplace_sync_payload() { return 23; }
+  failed_release="$(laplace_stage_managed_runtimes "$APP_DIR" "$MCP_STAGE" "$LICHESS_STAGE")"
+); then
+  echo "failed runtime copy was accepted" >&2
+  exit 1
+fi
+echo "OK failed managed runtime staging never reports a publishable release"

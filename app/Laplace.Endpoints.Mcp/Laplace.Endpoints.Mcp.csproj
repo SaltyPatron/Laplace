@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <PackageReference Include="Npgsql" />
+    <InternalsVisibleTo Include="Laplace.Endpoints.Mcp.Tests" />
   </ItemGroup>
 
   <ItemGroup>

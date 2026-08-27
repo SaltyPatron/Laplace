@@ -196,6 +196,11 @@ jobs:
       - name: Deploy payload contract
         run: bash scripts/test-deploy-payload-sync.sh
 
+      - name: Managed service privilege and deployment contracts
+        run: |
+          python3 scripts/test-managed-services.py
+          shellcheck -S warning -x deploy/linux/deploy.sh deploy/linux/managed-publish.sh
+
       - name: Validate witness-manifest vs orchestration scripts
         run: python3 scripts/validate-pipeline.py
 
@@ -557,6 +562,12 @@ jobs:
           dotnet test app/Laplace.Core.Tests/Laplace.Core.Tests.csproj \
             -c Release --no-build --filter 'Tier!=db&Tier!=perf' --verbosity minimal
 
+      - name: Managed service transport and authorization tests (no activation)
+        run: |
+          dotnet test app/Laplace.Endpoints.Mcp.Tests/Laplace.Endpoints.Mcp.Tests.csproj -c Release --no-build --verbosity minimal
+          dotnet test app/Laplace.Endpoints.Lichess.Tests/Laplace.Endpoints.Lichess.Tests.csproj -c Release --no-build --verbosity minimal
+          dotnet test app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj -c Release --no-build --filter 'FullyQualifiedName~ServiceControlTests' --verbosity minimal
+
   deploy:
     name: Deploy — stage install to /opt/laplace
     needs: unit-test
@@ -607,6 +618,9 @@ jobs:
       - name: Wait for in-flight ingests (substrate lock)
         timeout-minutes: 305
         run: bash scripts/wait-for-quiet-substrate.sh "${PGDATABASE:-laplace}"
+
+      - name: Managed-service privileged bootstrap preflight (before live install)
+        run: bash deploy/linux/managed-publish.sh preflight
 
       - name: Install
         # pipeline.sh install owns the API stop/start around the install window
@@ -761,6 +775,8 @@ jobs:
     # Non-secret knobs stay in vars / workflow env above.
     env:
       LICHESS_API: ${{ secrets.LICHESS_API }}
+      LAPLACE_MCP_TOKEN: ${{ secrets.LAPLACE_MCP_TOKEN }}
+      LAPLACE_OPERATOR_TOKEN: ${{ secrets.LAPLACE_OPERATOR_TOKEN }}
       STRIPE_API_SECRET: ${{ secrets.STRIPE_API_SECRET }}
       STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
       STRIPE_API_Publishable: ${{ vars.STRIPE_API_PUBLISHABLE }}
@@ -774,7 +790,9 @@ jobs:
       - uses: ./.github/actions/setup-laplace-env
 
       - name: Publish (API + SPA + uci + chess-lab + secrets)
-        run: bash scripts/pipeline.sh publish
+        run: |
+          bash scripts/wait-for-quiet-substrate.sh "${PGDATABASE:-laplace}"
+          bash scripts/pipeline.sh publish
 
       - name: Restart API + readiness gate
         id: readiness
@@ -793,8 +811,10 @@ jobs:
           action=$(cat build/.publish-action 2>/dev/null || echo deployed)
           if [[ "$action" == "skipped" ]] && systemctl is-active --quiet laplace-api; then
             echo "publish skipped (domain unchanged) — service active; verifying readiness without restart"
+            bash deploy/linux/managed-publish.sh verify
           else
             sudo systemctl restart laplace-api
+            bash deploy/linux/managed-publish.sh activate
           fi
           for i in $(seq 1 30); do
             sleep 2
@@ -804,7 +824,6 @@ jobs:
               # after a failed seed; fail loud before stamp / smoke.
               bash scripts/check-substrate-floor.sh "${PGDATABASE:-laplace}"
               echo "seeded=true" >> "$GITHUB_OUTPUT"
-              bash scripts/pipeline.sh publish-stamp
               exit 0
             fi
           done
@@ -984,7 +1003,23 @@ jobs:
       cancel-in-progress: false
     timeout-minutes: 10
     steps:
+      - name: Commit verified publish or restore the previous runtime
+        env:
+          PUBLISH_RESULT: ${{ needs.publish.result }}
+          SMOKE_RESULT: ${{ needs.smoke.result }}
+          EVAL_RESULT: ${{ needs.eval.result }}
+          PUBLISHED_SEEDED: ${{ needs.publish.outputs.seeded }}
+        run: |
+          if [[ "$PUBLISH_RESULT" == success && "$SMOKE_RESULT" != failure && "$SMOKE_RESULT" != cancelled && "$EVAL_RESULT" != failure && "$EVAL_RESULT" != cancelled ]]; then
+            bash deploy/linux/managed-publish.sh commit
+            if [[ "$PUBLISHED_SEEDED" == true ]]; then
+              bash scripts/pipeline.sh publish-stamp
+            fi
+          else
+            bash deploy/linux/managed-publish.sh rollback
+          fi
       - name: Ensure API is running
+        if: always()
         run: |
           sudo systemctl start laplace-api || true
           sleep 3

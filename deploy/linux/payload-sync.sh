@@ -27,3 +27,22 @@ laplace_sync_payload() {
     "$@" \
     "$source_dir/" "$destination_dir/"
 }
+
+# Publish each managed runtime into a NEW immutable directory. Return its absolute
+# path; the caller updates stable launch links only after both copies succeed.
+laplace_stage_managed_runtimes() {
+  local app_dir="$1" mcp_stage="$2" lichess_stage="$3" release
+  # Explicit propagation matters inside command substitution, where Bash may
+  # clear errexit; a failed rsync must never be masked by the final printf.
+  test -x "$mcp_stage/Laplace.Endpoints.Mcp" || return 1
+  test -x "$lichess_stage/Laplace.Endpoints.Lichess" || return 1
+  install -d -m 2775 "$app_dir/releases" || return 1
+  release="$(mktemp -d "$app_dir/releases/runtime.XXXXXX")" || return 1
+  chmod 0755 "$release" || return 1
+  mkdir -m 0755 "$release/mcp" "$release/lichess" || return 1
+  laplace_sync_payload "$mcp_stage" "$release/mcp" || return 1
+  laplace_sync_payload "$lichess_stage" "$release/lichess" || return 1
+  ln -s ../../../logs "$release/mcp/logs" || return 1
+  ln -s ../../../logs "$release/lichess/logs" || return 1
+  printf '%s\n' "$release"
+}

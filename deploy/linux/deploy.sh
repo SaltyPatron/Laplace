@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Publish API + SPA + laplace-uci + laplace-mcp to /opt/laplace/app.
+# Publish API + SPA + UCI and immutable MCP/Lichess runtimes to /opt/laplace/app.
 #
 # Options:
 #   --force-npm    always run npm ci (ignore lockfile stamp)
-#   --serial       publish API then UCI then MCP serially (default: parallel)
+#   --serial       publish API, UCI, MCP, Lichess serially (default: parallel)
 
 set -euo pipefail
 
@@ -55,7 +55,8 @@ popd >/dev/null
 
 UCI_STAGE="$(mktemp -d)"
 MCP_STAGE="$(mktemp -d)"
-trap 'rm -rf "$STAGE" "$UCI_STAGE" "$MCP_STAGE"' EXIT
+LICHESS_STAGE="$(mktemp -d)"
+trap 'rm -rf "$STAGE" "$UCI_STAGE" "$MCP_STAGE" "$LICHESS_STAGE"' EXIT
 
 publish_api() {
   echo "==> publish API -> staging ($STAGE)"
@@ -75,14 +76,20 @@ publish_mcp() {
     -c Release --no-self-contained -o "$MCP_STAGE"
 }
 
+publish_lichess() {
+  dotnet publish "$REPO_ROOT/app/Laplace.Endpoints.Lichess/Laplace.Endpoints.Lichess.csproj" \
+    -c Release --no-self-contained -o "$LICHESS_STAGE"
+}
+
 if [[ "$SERIAL" -eq 1 ]]; then
-  echo "==> [2/4] publish API + UCI + MCP (serial)"
+  echo "==> [2/4] publish API + UCI + MCP + Lichess (serial)"
   publish_api
   publish_uci
   publish_mcp
+  publish_lichess
 else
-  echo "==> [2/4] publish API || UCI || MCP (parallel)"
-  api_log="$(mktemp)"; uci_log="$(mktemp)"; mcp_log="$(mktemp)"
+  echo "==> [2/4] publish API || UCI || MCP || Lichess (parallel)"
+  api_log="$(mktemp)"; uci_log="$(mktemp)"; mcp_log="$(mktemp)"; lichess_log="$(mktemp)"
   set +e
   publish_api >"$api_log" 2>&1 &
   api_pid=$!
@@ -90,14 +97,17 @@ else
   uci_pid=$!
   publish_mcp >"$mcp_log" 2>&1 &
   mcp_pid=$!
+  publish_lichess >"$lichess_log" 2>&1 &
+  lichess_pid=$!
   wait "$api_pid"; api_rc=$?
   wait "$uci_pid"; uci_rc=$?
   wait "$mcp_pid"; mcp_rc=$?
+  wait "$lichess_pid"; lichess_rc=$?
   set -e
-  cat "$api_log" "$uci_log" "$mcp_log"
-  rm -f "$api_log" "$uci_log" "$mcp_log"
-  if [[ "$api_rc" -ne 0 || "$uci_rc" -ne 0 || "$mcp_rc" -ne 0 ]]; then
-    echo "::error::publish failed (api_rc=$api_rc uci_rc=$uci_rc mcp_rc=$mcp_rc)"
+  cat "$api_log" "$uci_log" "$mcp_log" "$lichess_log"
+  rm -f "$api_log" "$uci_log" "$mcp_log" "$lichess_log"
+  if [[ "$api_rc" -ne 0 || "$uci_rc" -ne 0 || "$mcp_rc" -ne 0 || "$lichess_rc" -ne 0 ]]; then
+    echo "::error::publish failed (api=$api_rc uci=$uci_rc mcp=$mcp_rc lichess=$lichess_rc)"
     exit 1
   fi
 fi
@@ -117,28 +127,31 @@ else
   ls -la "$UCI_STAGE" || true
   exit 1
 fi
-MCP_RUNTIME_DIR="mcp-runtime"
-ln -s "../logs" "$MCP_STAGE/logs"
-if [[ -f "$MCP_STAGE/Laplace.Endpoints.Mcp" ]]; then
-  chmod 0755 "$MCP_STAGE/Laplace.Endpoints.Mcp"
-  ln -s "$MCP_RUNTIME_DIR/Laplace.Endpoints.Mcp" "$STAGE/laplace-mcp"
-elif [[ -f "$MCP_STAGE/Laplace.Endpoints.Mcp.exe" ]]; then
-  chmod 0755 "$MCP_STAGE/Laplace.Endpoints.Mcp.exe"
-  ln -s "$MCP_RUNTIME_DIR/Laplace.Endpoints.Mcp.exe" "$STAGE/laplace-mcp"
-else
-  echo "::error::Laplace.Endpoints.Mcp apphost missing from MCP publish output"
-  ls -la "$MCP_STAGE" || true
-  exit 1
-fi
+test -f "$MCP_STAGE/Laplace.Endpoints.Mcp"
+test -f "$LICHESS_STAGE/Laplace.Endpoints.Lichess"
+chmod 0755 "$MCP_STAGE/Laplace.Endpoints.Mcp" "$LICHESS_STAGE/Laplace.Endpoints.Lichess"
+# Retain the original mcp-runtime directory AND prior releases: running STDIO
+# clients resolve managed/native dependencies relative to their original apphost.
+# No rsync is ever allowed to overwrite those directories on a later publish.
+release="$(laplace_stage_managed_runtimes "$APP_DIR" "$MCP_STAGE" "$LICHESS_STAGE")"
+release_name="$(basename "$release")"
+ln -s "releases/$release_name/mcp/Laplace.Endpoints.Mcp" "$STAGE/laplace-mcp"
+ln -s "releases/$release_name/lichess/Laplace.Endpoints.Lichess" "$STAGE/laplace-lichess"
+mkdir "$STAGE/managed-services"
+cp "$REPO_ROOT/deploy/linux/managed-services/"*.service "$STAGE/managed-services/"
+cp "$REPO_ROOT/deploy/linux/laplace-managed-deploy" "$STAGE/managed-services/"
 
 echo "==> [4/4] sync isolated MCP runtime + app into $APP_DIR"
-laplace_sync_payload "$MCP_STAGE" "$APP_DIR/$MCP_RUNTIME_DIR"
+if [[ "${LAPLACE_MANAGED_TRANSACTION:-}" == "1" ]]; then
+  sudo -n systemctl stop laplace-api
+fi
 laplace_sync_payload "$STAGE" "$APP_DIR" \
-  --exclude 'laplace-api.env' --exclude 'logs/' --exclude 'chess-lab-work/' \
-  --exclude "$MCP_RUNTIME_DIR/" --exclude 'mcp/'
+  --exclude 'laplace-api.env' --exclude 'agents.json' --exclude 'logs/' --exclude 'chess-lab-work/' \
+  --exclude 'mcp-runtime/' --exclude 'mcp/' --exclude 'releases/'
 laplace_require_app_dir_contract "$APP_DIR"
 test -x "$APP_DIR/laplace-uci" || { echo "::error::laplace-uci missing from $APP_DIR after sync"; exit 1; }
 test -x "$APP_DIR/laplace-mcp" || { echo "::error::laplace-mcp missing from $APP_DIR after sync"; exit 1; }
-test -f "$APP_DIR/$MCP_RUNTIME_DIR/Laplace.Endpoints.Mcp.dll" || { echo "::error::MCP managed entry assembly missing from $APP_DIR/$MCP_RUNTIME_DIR after sync"; exit 1; }
+test -f "$release/mcp/Laplace.Endpoints.Mcp.dll"
+test -x "$APP_DIR/laplace-lichess"
 timeout 10s "$APP_DIR/laplace-mcp" </dev/null || { echo "::error::deployed laplace-mcp failed its EOF startup smoke test"; exit 1; }
-echo "✓ published API + SPA + laplace-uci + laplace-mcp to $APP_DIR"
+echo "✓ published API + SPA + UCI + versioned MCP/Lichess to $APP_DIR"

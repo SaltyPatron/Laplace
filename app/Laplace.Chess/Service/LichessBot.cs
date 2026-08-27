@@ -21,6 +21,7 @@ public sealed class LichessBot : IAsyncDisposable
     private readonly Action<LichessChatLine>? _onChatLine;
     private readonly IReadOnlySet<string>? _acceptSpeeds;
     private readonly ILogger _log;
+    private readonly Action<bool>? _onConnectionChanged;
 
     private const string Base = "https://lichess.org";
 
@@ -33,7 +34,8 @@ public sealed class LichessBot : IAsyncDisposable
         string? botUsername = null,
         Action<LichessChatLine>? onChatLine = null,
         IReadOnlySet<string>? acceptSpeeds = null,
-        ILogger? log = null)
+        ILogger? log = null,
+        Action<bool>? onConnectionChanged = null)
     {
         _maxDepth = Math.Max(1, maxDepth);
         _host = host;
@@ -43,6 +45,7 @@ public sealed class LichessBot : IAsyncDisposable
         _onChatLine = onChatLine;
         _acceptSpeeds = acceptSpeeds;
         _log = log ?? NullLogger.Instance;
+        _onConnectionChanged = onConnectionChanged;
         _http = new HttpClient { BaseAddress = new Uri(Base), Timeout = System.Threading.Timeout.InfiniteTimeSpan };
         _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
     }
@@ -68,6 +71,7 @@ public sealed class LichessBot : IAsyncDisposable
     public async Task RunAsync(int maxConcurrent = 4, CancellationToken ct = default)
     {
         var games = new Dictionary<string, Task>();
+        using var gameLifetime = new CancellationTokenSource();
         // Exponential backoff with jitter (GH #493): a lichess outage shouldn't be hammered
         // every fixed 10s, and a one-off blip shouldn't wait a full 10s either. Resets to the
         // floor once a stream delivers an event.
@@ -110,13 +114,14 @@ public sealed class LichessBot : IAsyncDisposable
                         if (!games.TryGetValue(gid, out var existing) || existing.IsCompleted)
                         {
                             _log.LogInformation("game {Id} started, we are {Color}", gid, weAreWhite ? "white" : "black");
-                            games[gid] = Task.Run(() => PlayGameAsync(gid, weAreWhite, ct), ct);
+                            games[gid] = Task.Run(() => PlayGameAsync(gid, weAreWhite, gameLifetime.Token));
                         }
                     }
 
                     foreach (var k in games.Keys.Where(k => games[k].IsCompleted).ToList())
                         games.Remove(k);
                 }
+                if (!ct.IsCancellationRequested) throw new IOException("Lichess event stream closed");
             }
             catch (OperationCanceledException) { break; }
             catch (Exception ex) when (!ct.IsCancellationRequested)
@@ -124,15 +129,23 @@ public sealed class LichessBot : IAsyncDisposable
                 var jitter = TimeSpan.FromMilliseconds(Random.Shared.Next(0, 500));
                 _log.LogWarning(ex, "event stream dropped — reconnecting in {Delay:0.#}s",
                     (backoff + jitter).TotalSeconds);
-                await Task.Delay(backoff + jitter, ct).ConfigureAwait(false);
+                try { await Task.Delay(backoff + jitter, ct).ConfigureAwait(false); }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
                 backoff = TimeSpan.FromTicks(Math.Min((backoff + backoff).Ticks, backoffMax.Ticks));
             }
+            finally { _onConnectionChanged?.Invoke(false); }
         }
 
         if (games.Count > 0)
         {
             _log.LogInformation("draining {N} in-flight games…", games.Count);
-            await Task.WhenAll(games.Values).ConfigureAwait(false);
+            try { await Task.WhenAll(games.Values).WaitAsync(TimeSpan.FromSeconds(20)).ConfigureAwait(false); }
+            catch (TimeoutException)
+            {
+                _log.LogWarning("game drain deadline reached; cancelling remaining games (no fabricated outcome)");
+                await gameLifetime.CancelAsync();
+                await Task.WhenAll(games.Values).ConfigureAwait(false);
+            }
         }
     }
 
@@ -424,6 +437,7 @@ public sealed class LichessBot : IAsyncDisposable
         using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct)
             .ConfigureAwait(false);
         resp.EnsureSuccessStatusCode();
+        if (path == "/api/stream/event") _onConnectionChanged?.Invoke(true);
 
         await using var stream = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
         using var reader = new System.IO.StreamReader(stream, System.Text.Encoding.UTF8);
@@ -436,7 +450,7 @@ public sealed class LichessBot : IAsyncDisposable
             JsonDocument doc;
             try { doc = JsonDocument.Parse(line); }
             catch { _log.LogDebug("unparseable ndjson line: {Line}", line); continue; }
-            yield return doc.RootElement;
+            using (doc) yield return doc.RootElement;
         }
     }
 

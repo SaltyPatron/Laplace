@@ -19,7 +19,7 @@ namespace Laplace.Endpoints.Mcp;
 /// the way out). SQL text never crosses the MCP boundary; named tools and
 /// <c>op</c> are the complete client contract.
 /// </summary>
-internal sealed class SubstrateTools
+internal sealed class SubstrateTools : IMcpTools
 {
     private const int DefaultRowCap = 200;
     private readonly NpgsqlDataSource _db;
@@ -35,6 +35,14 @@ internal sealed class SubstrateTools
             dsb.ConnectionStringBuilder.Options =
                 "-c default_transaction_read_only=on";
         });
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_turnCloser is not null) await _turnCloser.DisposeAsync();
+        if (_plainWriter is IAsyncDisposable writer) await writer.DisposeAsync();
+        await _dbReadOnly.DisposeAsync();
+        await _db.DisposeAsync();
     }
 
     /// <summary>

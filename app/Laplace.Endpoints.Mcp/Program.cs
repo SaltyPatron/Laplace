@@ -4,6 +4,20 @@ using Laplace.Endpoints.Mcp;
 using Laplace.Ops;
 using Microsoft.Extensions.Logging;
 
+// No arguments remains the deployed STDIO contract. HTTP is a separate process
+// owned by laplace-mcp.service, never a listener added to an existing client.
+if (args.SequenceEqual(new[] { "--http" }))
+{
+    await using var app = McpHttpHost.Build(McpHttpOptions.FromEnvironment());
+    await app.RunAsync();
+    return 0;
+}
+if (args.Length != 0)
+{
+    Console.Error.WriteLine("usage: laplace-mcp [--http]");
+    return 2;
+}
+
 // MCP stdio server over the substrate's typed operation surface. Same shape as
 // Laplace.Chess.Uci: a Console.ReadLine loop speaking a line protocol —
 // here JSON-RPC 2.0, newline-delimited, per the MCP stdio transport.
@@ -18,7 +32,8 @@ var log = loggerFactory.CreateLogger("server");
 Console.Error.WriteLine($"[mcp] starting server — binary={Environment.ProcessPath ?? AppContext.BaseDirectory}");
 log.LogInformation("starting mcp server, binary={BinaryPath}", Environment.ProcessPath ?? AppContext.BaseDirectory);
 
-var server = new McpServer(new SubstrateTools());
+await using var tools = new SubstrateTools();
+var server = new McpServer(tools);
 string? line;
 while ((line = Console.ReadLine()) is not null)
 {

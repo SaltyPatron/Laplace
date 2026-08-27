@@ -1,0 +1,428 @@
+#!/usr/bin/python3
+"""Fixed managed-service installer. Bootstrap is privileged; CI gets only fixed lifecycle verbs.
+
+CI-supplied unit files are DATA, never scripts: every directive is checked against
+this root-owned policy before installation. Changes to this security policy itself
+require the same explicit bootstrap that first installed it.
+"""
+import argparse
+import fcntl
+import hashlib
+import ipaddress
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.request
+import ssl
+
+ROOT = Path("/opt/laplace")
+STATE = Path("/var/lib/laplace-managed")
+UNITS = ("mcp", "lichess")
+SYSTEMD = Path("/etc/systemd/system")
+PROC = Path("/proc")
+ENV = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C"}
+
+
+def run(*args):
+    return subprocess.run(args, check=True, stdin=subprocess.DEVNULL, capture_output=True,
+        text=True, timeout=65, env=ENV).stdout.strip()
+
+
+def validate_unit(text, name):
+    """Exact directive/value allowlist: no ExecStartPre, drop-ins, root user, shell, or dependencies supplied by CI."""
+    account = "laplace-" + name
+    expected = {
+        "Unit": {("After", "network-online.target laplace-postgresql.service"),
+            ("Wants", "network-online.target laplace-postgresql.service"),
+            ("ConditionPathExists", "!/var/lib/laplace-managed/" + name + ".stopped")},
+        "Service": {("Type", "simple"), ("User", account), ("Group", account),
+            ("WorkingDirectory", "/var/lib/" + account),
+            ("Environment", '"LAPLACE_DB=Host=/var/run/postgresql;Username=laplace_admin;Database=laplace"'),
+            ("EnvironmentFile", "/opt/laplace/secrets/" + name + ".env"),
+            ("ExecStart", "/opt/laplace/app/" + account + (" --http" if name == "mcp" else "")),
+            ("Restart", "on-failure"), ("RestartSec", "10" if name == "mcp" else "30"),
+            ("TimeoutStopSec", "45"), ("StateDirectory", account), ("LogsDirectory", account),
+            ("Environment", "LAPLACE_OPS_LOG_DIR=/var/log/" + account), ("UMask", "0077"),
+            ("NoNewPrivileges", "true"), ("ProtectSystem", "strict"), ("ProtectHome", "true"),
+            ("PrivateTmp", "true"), ("PrivateDevices", "true"), ("ProtectProc", "invisible"),
+            ("RestrictSUIDSGID", "true"), ("CapabilityBoundingSet", ""),
+            ("RestrictAddressFamilies", "AF_UNIX AF_INET AF_INET6"),
+            ("EnvironmentFile", "-/opt/laplace/secrets/agents.env" if name == "mcp" else "-/opt/laplace/secrets/lichess-service.env")},
+        "Install": {("WantedBy", "multi-user.target")},
+    }
+    if name not in UNITS or len(text) > 8192 or "\\" in text or "\x00" in text:
+        raise ValueError("invalid managed unit")
+    seen = {key: set() for key in expected}
+    section = None
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("["):
+            section = line[1:-1]
+            if section not in expected or seen[section]:
+                raise ValueError("unknown or duplicate section")
+            continue
+        if section is None or "=" not in line:
+            raise ValueError("invalid directive")
+        key, value = line.split("=", 1)
+        if section == "Unit" and key == "Description" and re.fullmatch(r"[A-Za-z0-9 -]{1,100}", value):
+            continue
+        pair = (key, value)
+        if pair not in expected[section] or pair in seen[section]:
+            raise ValueError("unit directive is outside root-owned policy")
+        seen[section].add(pair)
+    if seen != expected:
+        raise ValueError("required service hardening or lifecycle directive missing")
+
+
+def atomic_text(path, content, mode=0o644):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix="." + path.name, dir=path.parent)
+    try:
+        with os.fdopen(fd, "w") as stream:
+            stream.write(content)
+        os.chmod(temporary, mode)
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def reconcile():
+    payload = ROOT / "app/managed-services"
+    # Never silently execute an outdated installer against a new policy contract.
+    shipped = payload / "laplace-managed-deploy"
+    if hashlib.sha256(shipped.read_bytes()).digest() != hashlib.sha256(Path(__file__).read_bytes()).digest():
+        raise ValueError("managed deployment policy changed; privileged bootstrap upgrade required")
+    texts = {name: (payload / ("laplace-" + name + ".service")).read_text() for name in UNITS}
+    for name, text in texts.items():
+        validate_unit(text, name)
+    for name, text in texts.items():
+        atomic_text(SYSTEMD / ("laplace-" + name + ".service"), text)
+    atomic_text(SYSTEMD / "laplace-api.service.d/managed-operator.conf",
+        "# Generated by laplace-managed-deploy; server-side operator secret only.\n[Service]\nEnvironmentFile=-/opt/laplace/secrets/operator.env\n")
+    run("/usr/bin/systemctl", "daemon-reload")
+    for name in UNITS:
+        run("/usr/bin/systemctl", "enable", "laplace-" + name + ".service")
+
+
+def preflight():
+    # Refuse to interrupt an old CLI/lab bot or start a second account stream.
+    # Inspect argv locally, but never log it: legacy --token arguments may exist.
+    for process in PROC.iterdir():
+        if not process.name.isdecimal():
+            continue
+        try:
+            argv = (process / "cmdline").read_bytes().split(b"\0")
+        except (FileNotFoundError, ProcessLookupError):
+            continue
+        laplace_cli = any(Path(os.fsdecode(arg)).name in ("laplace", "Laplace.Cli", "Laplace.Cli.dll") for arg in argv)
+        if laplace_cli and any(argv[i:i + 2] == [b"chess", b"lichess"] for i in range(len(argv) - 1)):
+            raise ValueError("legacy Lichess CLI bot is active; let it finish before managed deployment")
+    if run("/usr/bin/systemctl", "show", "laplace-lichess.service", "--property=LoadState", "--value") == "not-found" \
+        and run("/usr/bin/systemctl", "show", "laplace-api.service", "--property=ActiveState", "--value") == "active":
+        try:
+            with urllib.request.urlopen("http://127.0.0.1:5187/chess/lichess/status", timeout=6) as response:
+                status = json.load(response)
+        except (OSError, ValueError) as error:
+            raise ValueError("cannot establish legacy Lichess status; no managed deployment performed") from error
+        if status.get("connected") or status.get("running"):
+            raise ValueError("legacy API Lichess bot is active; let it finish before managed deployment")
+
+
+def begin():
+    transaction = STATE / "transaction.json"
+    if transaction.exists():
+        raise ValueError("previous managed deployment is unresolved; restore it before publishing")
+    preflight()
+    snapshot = {}
+    for name in UNITS:
+        unit = SYSTEMD / ("laplace-" + name + ".service")
+        link = ROOT / ("app/laplace-" + name)
+        snapshot[name] = {"unit": unit.read_text() if unit.exists() else None,
+            "link": os.readlink(link) if link.is_symlink() else None,
+            "enabled": run("/usr/bin/systemctl", "show", "laplace-" + name + ".service", "--property=UnitFileState", "--value"),
+            "active": run("/usr/bin/systemctl", "show", "laplace-" + name + ".service", "--property=ActiveState", "--value") == "active"}
+    dropin = SYSTEMD / "laplace-api.service.d/managed-operator.conf"
+    snapshot["api_operator_dropin"] = dropin.read_text() if dropin.exists() else None
+    atomic_text(transaction, json.dumps(snapshot), 0o600)
+
+
+def activate():
+    for name in UNITS:
+        if (STATE / (name + ".stopped")).exists():
+            continue
+        run("/usr/bin/systemctl", "restart", "laplace-" + name + ".service")
+    verify()
+
+
+def verify():
+    deadline = time.monotonic() + 60
+    pending = {name for name in UNITS if not (STATE / (name + ".stopped")).exists()}
+    while pending and time.monotonic() < deadline:
+        for name in tuple(pending):
+            port = 5188 if name == "mcp" else 5189
+            try:
+                with urllib.request.urlopen(f"http://127.0.0.1:{port}/health/ready", timeout=6) as response:
+                    if json.load(response).get("ready") is True:
+                        pending.remove(name)
+            except (OSError, ValueError):
+                pass
+        if pending:
+            time.sleep(1)
+    if pending:
+        raise ValueError("managed readiness failed: " + ",".join(sorted(pending)))
+    if not (STATE / "mcp.stopped").exists():
+        verify_mcp()
+
+
+def verify_mcp():
+    # Authenticated TLS initialization/tool discovery through the SAME nginx URL
+    # desktop clients use, not just a process liveness check on the backend port.
+    settings = json.loads((STATE / "lan.json").read_text())
+    url = "https://" + settings["hostname"] + ":8443/mcp"
+    context = ssl.create_default_context(cafile=str(ROOT / "share/laplace/managed-services-ca.crt"))
+    token = None
+    for line in (ROOT / "secrets/mcp.env").read_text().splitlines():
+        if line.startswith("LAPLACE_MCP_TOKEN="):
+            token = line.split("=", 1)[1]
+    if not token:
+        raise ValueError("MCP bearer secret is missing")
+    headers = {"Authorization": "Bearer " + token, "Accept": "application/json, text/event-stream",
+        "Content-Type": "application/json"}
+    request = urllib.request.Request(url, json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+        "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "ci-readiness", "version": "1"}}}).encode(), headers)
+    with urllib.request.urlopen(request, context=context, timeout=15) as response:
+        body = json.load(response)
+        session = response.headers.get("Mcp-Session-Id")
+        if not session or body.get("result", {}).get("protocolVersion") != "2025-06-18":
+            raise ValueError("invalid MCP initialize response")
+    headers.update({"Mcp-Session-Id": session, "MCP-Protocol-Version": "2025-06-18"})
+    try:
+        initialized = urllib.request.Request(url, json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}).encode(), headers)
+        with urllib.request.urlopen(initialized, context=context, timeout=15) as response:
+            if response.status != 202:
+                raise ValueError("invalid MCP initialized response")
+        request = urllib.request.Request(url, json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}).encode(), headers)
+        with urllib.request.urlopen(request, context=context, timeout=15) as response:
+            names = {tool["name"] for tool in json.load(response).get("result", {}).get("tools", [])}
+        if not {"health", "api", "query", "mcp_runtime"}.issubset(names):
+            raise ValueError("MCP tool surface is incomplete")
+    finally:
+        with urllib.request.urlopen(urllib.request.Request(url, headers=headers, method="DELETE"), context=context, timeout=15):
+            pass
+
+
+def rollback():
+    transaction = STATE / "transaction.json"
+    if not transaction.exists():
+        return
+    snapshot = json.loads(transaction.read_text())
+    for name in UNITS:
+        if run("/usr/bin/systemctl", "show", "laplace-" + name + ".service", "--property=LoadState", "--value") != "not-found":
+            run("/usr/bin/systemctl", "stop", "laplace-" + name + ".service")
+        unit = SYSTEMD / ("laplace-" + name + ".service")
+        prior = snapshot[name]
+        if prior["unit"] is not None:
+            atomic_text(unit, prior["unit"])
+        elif unit.exists():
+            run("/usr/bin/systemctl", "disable", "laplace-" + name + ".service")
+            unit.unlink()
+        if prior["link"] is not None:
+            link = ROOT / ("app/laplace-" + name)
+            temporary = link.with_name(link.name + ".rollback")
+            temporary.unlink(missing_ok=True)
+            temporary.symlink_to(prior["link"])
+            os.replace(temporary, link)
+        else:
+            link = ROOT / ("app/laplace-" + name)
+            if link.is_symlink() and os.readlink(link).startswith("releases/"):
+                link.unlink()
+    dropin = SYSTEMD / "laplace-api.service.d/managed-operator.conf"
+    if snapshot.get("api_operator_dropin") is not None:
+        atomic_text(dropin, snapshot["api_operator_dropin"])
+    else:
+        dropin.unlink(missing_ok=True)
+    run("/usr/bin/systemctl", "daemon-reload")
+    for name in UNITS:
+        if snapshot[name]["unit"] is not None and snapshot[name].get("enabled") in ("enabled", "disabled"):
+            run("/usr/bin/systemctl", "enable" if snapshot[name]["enabled"] == "enabled" else "disable",
+                "laplace-" + name + ".service")
+        if snapshot[name]["active"] and not (STATE / (name + ".stopped")).exists():
+            run("/usr/bin/systemctl", "start", "laplace-" + name + ".service")
+    # Retain the receipt for audit instead of deleting the last recovery evidence.
+    os.replace(transaction, STATE / ("rollback-" + str(time.time_ns()) + ".json"))
+
+
+def bootstrap(source, address, network, hostname):
+    lan = ipaddress.ip_address(address)
+    subnet = ipaddress.ip_network(network)
+    if lan.version != 4 or not lan.is_private or lan.is_loopback or lan not in subnet:
+        raise ValueError("use a private LAN IPv4 address within the allowed subnet")
+    if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9.-]{0,62}", hostname):
+        raise ValueError("invalid LAN hostname")
+    STATE.mkdir(mode=0o755, exist_ok=True)
+    atomic_text(STATE / "lan.json", json.dumps({"address": address, "network": network, "hostname": hostname}))
+    run("/usr/bin/install", "-d", "-m", "0700", "-o", "laplace-runner", "-g", "laplace-runner", str(ROOT / "app-backups"))
+    for name in UNITS:
+        account = "laplace-" + name
+        found = subprocess.run(["/usr/bin/id", "-u", account], capture_output=True, env=ENV).returncode == 0
+        if not found:
+            run("/usr/sbin/useradd", "--system", "--user-group", "--home-dir", "/var/lib/" + account,
+                "--shell", "/usr/sbin/nologin", account)
+    # Extend only the existing local peer map; never change pg_hba or TCP access.
+    ident = ROOT / "pgsql-18/conf/pg_ident.conf"
+    prior = ident.read_text()
+    updated = prior
+    for name in UNITS:
+        mapping = "laplace_map laplace-" + name + " laplace_admin"
+        if not re.search(r"^\s*laplace_map\s+laplace-" + name + r"\s+laplace_admin\s*$", updated, re.M):
+            updated += "\n" + mapping + "\n"
+    if updated != prior:
+        atomic_text(STATE / ("pg-ident-before-" + str(time.time_ns()) + ".conf"), prior, 0o600)
+        # Preserve the host-managed owner/mode of this existing PostgreSQL file.
+        with ident.open("w") as stream:
+            stream.write(updated)
+        run("/usr/sbin/runuser", "-u", "laplace-runner", "--", str(ROOT / "pgsql-18/bin/psql"),
+            "-X", "-w", "-h", "/var/run/postgresql", "-U", "laplace_admin", "-d", "laplace",
+            "-c", "SELECT pg_reload_conf()")
+    for name in ("laplace-managed-deploy", "laplace-service-control"):
+        atomic_text(Path("/usr/local/libexec") / name, (source / name).read_text(), 0o755)
+    entries = [f"/usr/local/libexec/laplace-service-control {name} {action}"
+        for name in UNITS for action in ("status", "start", "stop", "restart")]
+    entries += ["/usr/local/libexec/laplace-managed-deploy " + action
+        for action in ("preflight", "begin", "reconcile", "activate", "verify", "rollback", "commit")]
+    sudoers = "laplace-runner ALL=(root) NOPASSWD: " + ", ".join(entries) + "\n"
+    with tempfile.TemporaryDirectory(prefix="laplace-sudoers-") as temporary:
+        candidate = Path(temporary) / "policy"
+        candidate.write_text(sudoers)
+        run("/usr/sbin/visudo", "-cf", str(candidate))
+    atomic_text(Path("/etc/sudoers.d/laplace-managed-services"), sudoers, 0o440)
+    configure_tls(address, network, hostname)
+    print("Bootstrap installed; CI will install/enable/start managed units only after test gates.")
+
+
+def configure_tls(address, network, hostname):
+    tls = STATE / "tls"
+    tls.mkdir(mode=0o700, exist_ok=True)
+    ca, ca_key = tls / "ca.crt", tls / "ca.key"
+    key, cert = tls / "server.key", tls / "server.crt"
+    if not ca.exists():
+        run("/usr/bin/openssl", "req", "-x509", "-newkey", "rsa:3072", "-nodes", "-days", "3650",
+            "-keyout", str(ca_key), "-out", str(ca), "-subj", "/CN=Laplace Managed LAN CA",
+            "-addext", "basicConstraints=critical,CA:TRUE", "-addext", "keyUsage=critical,keyCertSign,cRLSign")
+        ca_key.chmod(0o600)
+    renew = not cert.exists()
+    if not renew:
+        renew = subprocess.run(["/usr/bin/openssl", "x509", "-checkend", "2592000", "-noout", "-in", str(cert)],
+            capture_output=True, env=ENV, timeout=10).returncode != 0
+    if renew:
+        # Keep the existing private key on renewal. A failed signing command
+        # must never replace a working nginx key/certificate pair with half a pair.
+        with tempfile.TemporaryDirectory(prefix="renew-", dir=tls) as temporary:
+            candidate = Path(temporary)
+            if not key.exists():
+                new_key = candidate / "server.key"
+                run("/usr/bin/openssl", "genpkey", "-algorithm", "RSA", "-pkeyopt", "rsa_keygen_bits:3072", "-out", str(new_key))
+                new_key.chmod(0o600)
+                os.replace(new_key, key)
+            csr, new_cert = candidate / "server.csr", candidate / "server.crt"
+            run("/usr/bin/openssl", "req", "-new", "-key", str(key), "-out", str(csr), "-subj", "/CN=" + hostname)
+            extensions = candidate / "server.extensions"
+            atomic_text(extensions, "# Generated from the validated LAN hostname/address.\n"
+                "basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\n"
+                "extendedKeyUsage=serverAuth\nsubjectAltName=DNS:" + hostname + ",IP:" + address + "\n")
+            run("/usr/bin/openssl", "x509", "-req", "-in", str(csr), "-CA", str(ca), "-CAkey", str(ca_key),
+                "-CAcreateserial", "-out", str(new_cert), "-days", "365", "-extfile", str(extensions))
+            run("/usr/bin/openssl", "verify", "-CAfile", str(ca), str(new_cert))
+            os.replace(new_cert, cert)
+    atomic_text(ROOT / "share/laplace/managed-services-ca.crt", ca.read_text())
+    # No caller-supplied nginx text: only validated host/address/subnet values.
+    config = f"""# Generated by laplace-managed-deploy from validated LAN settings.
+server {{
+    listen {address}:8443 ssl;
+    server_name {hostname};
+    ssl_certificate {cert};
+    ssl_certificate_key {key};
+    ssl_protocols TLSv1.2 TLSv1.3;
+    allow {network};
+    deny all;
+    client_max_body_size 1m;
+    location = /mcp {{
+        proxy_pass http://127.0.0.1:5188/mcp;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Connection "";
+        proxy_buffering off;
+        proxy_read_timeout 3600s;
+    }}
+    location / {{
+        proxy_pass http://127.0.0.1:5187;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Connection "";
+        proxy_buffering off;
+        proxy_read_timeout 3600s;
+    }}
+}}
+"""
+    destination = Path("/etc/nginx/sites-available/laplace-managed")
+    previous = destination.read_text() if destination.exists() else None
+    atomic_text(destination, config)
+    enabled = Path("/etc/nginx/sites-enabled/laplace-managed")
+    was_enabled = enabled.exists()
+    if not was_enabled:
+        enabled.symlink_to(destination)
+    try:
+        run("/usr/sbin/nginx", "-t")
+    except Exception:
+        if previous is not None:
+            atomic_text(destination, previous)
+        else:
+            destination.unlink()
+        if not was_enabled:
+            enabled.unlink()
+        raise
+    run("/usr/bin/systemctl", "reload", "nginx")
+    print("HTTPS LAN URL: https://" + hostname + ":8443/mcp; public CA: " + str(ROOT / "share/laplace/managed-services-ca.crt"))
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("action", choices=["bootstrap", "preflight", "begin", "reconcile", "activate", "verify", "rollback", "commit"])
+    parser.add_argument("--address", default="192.168.1.2")
+    parser.add_argument("--network", default="192.168.1.0/24")
+    parser.add_argument("--hostname", default="hart-server")
+    args = parser.parse_args()
+    if os.geteuid() != 0:
+        raise ValueError("root bootstrap/installed constrained helper required")
+    if args.action == "bootstrap":
+        bootstrap(Path(__file__).resolve().parent, args.address, args.network, args.hostname)
+    else:
+        with (STATE / "lifecycle.lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            if args.action == "commit":
+                transaction = STATE / "transaction.json"
+                if transaction.exists():
+                    os.replace(transaction, STATE / ("committed-" + str(time.time_ns()) + ".json"))
+            else:
+                globals()[args.action]()
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as error:
+        # Never echo command environments, secret files or HTTP Authorization.
+        print("managed deployment failed: " + str(error) if isinstance(error, ValueError)
+            else "managed deployment failed: " + type(error).__name__, file=sys.stderr)
+        sys.exit(1)

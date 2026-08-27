@@ -978,6 +978,29 @@ phase_runtime_secrets() {
   [ -n "${GITHUB_ACTIONS:-}" ] && in_ci=1
 
   local dst tok stripe_secret stripe_whsec missing=0
+  local name secret value
+  RUNTIME_SECRETS_CHANGED=0
+  for name in mcp operator; do
+    if [[ "$name" == mcp ]]; then secret=LAPLACE_MCP_TOKEN; else secret=LAPLACE_OPERATOR_TOKEN; fi
+    value="${!secret:-}"
+    dst="$dst_dir/$name.env"
+    if [[ -n "$value" ]]; then
+      # Keep EnvironmentFile values a single safe atom and never log the value.
+      if [[ ! "$value" =~ ^[A-Za-z0-9_=/+-]{32,}$ ]]; then
+        echo "::error::$secret must contain at least 32 token-safe characters" >&2
+        missing=1
+      else
+        printf '%s=%s\n' "$secret" "$value" > "$dst.tmp"
+        chmod 640 "$dst.tmp"
+        if ! cmp -s "$dst.tmp" "$dst"; then RUNTIME_SECRETS_CHANGED=1; fi
+        mv "$dst.tmp" "$dst"
+        echo "$name.env refreshed from repository secret"
+      fi
+    elif [[ "$in_ci" -eq 1 || ! -s "$dst" ]]; then
+      echo "::error::$secret repository secret is required for managed services" >&2
+      missing=1
+    fi
+  done
   dst="$dst_dir/lichess.env"
   # Canonical name matches operator .env: LICHESS_API. LICHESS_TOKEN accepted as alias.
   tok="${LICHESS_API:-${LICHESS_TOKEN:-}}"
@@ -985,8 +1008,10 @@ phase_runtime_secrets() {
     {
       printf 'LICHESS_API=%s\n' "$tok"
       printf 'LICHESS_TOKEN=%s\n' "$tok"
-    } >"$dst"
-    chmod 640 "$dst"
+    } >"$dst.tmp"
+    chmod 640 "$dst.tmp"
+    if ! cmp -s "$dst.tmp" "$dst"; then RUNTIME_SECRETS_CHANGED=1; fi
+    mv "$dst.tmp" "$dst"
     echo "lichess.env written from job env"
   elif [ "$in_ci" -eq 1 ]; then
     echo "::error::LICHESS_API secret missing — set with: gh secret set LICHESS_API"
@@ -1009,8 +1034,10 @@ phase_runtime_secrets() {
       if [ -n "$stripe_whsec" ]; then
         printf 'STRIPE_WEBHOOK_SECRET=%s\n' "$stripe_whsec"
       fi
-    } >"$dst"
-    chmod 640 "$dst"
+    } >"$dst.tmp"
+    chmod 640 "$dst.tmp"
+    if ! cmp -s "$dst.tmp" "$dst"; then RUNTIME_SECRETS_CHANGED=1; fi
+    mv "$dst.tmp" "$dst"
     echo "stripe.env written from job env (webhook_secret=$([ -n "$stripe_whsec" ] && echo set || echo missing))"
   elif [ "$in_ci" -eq 1 ]; then
     echo "::error::STRIPE_API_SECRET secret missing — set with: gh secret set STRIPE_API_SECRET"
@@ -1043,6 +1070,7 @@ phase_publish() {
   source "$ROOT/deploy/linux/app-dir-contract.sh"
   laplace_reconcile_app_dir_contract "$app_dir"
   echo "===== PHASE — PUBLISH (full runtime contract) ====="
+  bash "$ROOT/deploy/linux/managed-publish.sh" begin
   # Publish owns the whole target: chess binaries, secrets, API+SPA+uci.
   phase_chess_lab
   phase_runtime_secrets
@@ -1054,7 +1082,7 @@ phase_publish() {
   # `pipeline.sh publish-stamp` only after /health/ready passes. A deploy that
   # never went ready therefore re-deploys on the next run.
   fp=$(fp_publish)
-  if fp_check publish "$fp" && [[ -x "$app_dir/laplace-uci" && -x "$app_dir/laplace-mcp" && -d "$app_dir/wwwroot" ]]; then
+  if fp_check publish "$fp" && [[ "$RUNTIME_SECRETS_CHANGED" == 0 && -x "$app_dir/laplace-uci" && -x "$app_dir/laplace-mcp" && -x "$app_dir/laplace-lichess" && -d "$app_dir/wwwroot" ]]; then
     echo "publish domain unchanged (app/ web/ deploy/) and $app_dir intact — skipping deploy"
     mkdir -p "$ROOT/build"
     printf 'skipped' >"$ROOT/build/.publish-action"
@@ -1063,7 +1091,8 @@ phase_publish() {
   local deploy_args=()
   [[ "${LAPLACE_FORCE_NPM:-}" == "1" ]] && deploy_args+=(--force-npm)
   [[ "${LAPLACE_PUBLISH_SERIAL:-}" == "1" ]] && deploy_args+=(--serial)
-  bash "$ROOT/deploy/linux/deploy.sh" "${deploy_args[@]}"
+  LAPLACE_MANAGED_TRANSACTION=1 bash "$ROOT/deploy/linux/deploy.sh" "${deploy_args[@]}"
+  bash "$ROOT/deploy/linux/managed-publish.sh" reconcile
   mkdir -p "$ROOT/build"
   printf 'deployed' >"$ROOT/build/.publish-action"
 
