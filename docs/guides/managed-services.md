@@ -60,7 +60,13 @@ a private LAN CA and server certificate; private keys remain root-only under
 `/opt/laplace/share/laplace/managed-services-ca.crt`. Transfer that public file over
 the already-trusted remote connection, verify its SHA-256 fingerprint on both
 hosts, and trust it in the local Windows host's certificate store before using
-the URL. Never disable TLS verification. The initial leaf certificate lasts one
+the browser UI. For Codex HTTPS clients, also set `CODEX_CA_CERTIFICATE` in the
+desktop process environment to the absolute path of the verified PEM CA file (or
+the existing trusted CA bundle with this CA added). This is the documented private
+root mechanism; `SSL_CERT_FILE` is its fallback. See the
+[official environment-variable reference](https://learn.chatgpt.com/docs/config-file/environment-variables).
+Do not overwrite an existing corporate CA bundle or disable TLS verification.
+The initial leaf certificate lasts one
 year; renew through the same administrator-owned bootstrap before expiry, keeping
 the CA stable. A blocked firewall needs a LAN-scoped 8443 rule, not public access.
 
@@ -214,3 +220,9 @@ On hart-server, with outputs isolated under `/tmp/laplace-managed-build.nB2AVV`:
 
 These are local results, not a claim that the LAN TLS URL or new systemd units are
 already deployed. PR/Actions evidence and the privileged bootstrap remain release gates.
+
+Delivery: [PR #1331](https://github.com/SaltyPatron/Laplace/pull/1331), implementation
+commit `7f7b38fe`; non-deploying
+[Actions run 33117337062](https://github.com/SaltyPatron/Laplace/actions/runs/33117337062)
+was dispatched with `stage=test`. Its live status is authoritative; dispatch is
+not a passing result. No main merge or privileged activation was performed.
