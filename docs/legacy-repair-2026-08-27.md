@@ -128,7 +128,7 @@ the additive column migration makes its preservation test fail with SQLSTATE
 explorer initialization fails mapping identity and crashes concurrent endpoint
 tests. Restoring the repairs makes these checks pass.
 
-## Live state and remaining activation
+## Live state and CI/CD activation
 
 The final API payload was installed and the legacy API restarted at
 **2026-08-27 18:34:27 UTC**. The SPA, logs, corpus, and unrelated configuration
@@ -147,16 +147,51 @@ Recovery copies are in
 payload. `pending-postgres/` contains the tested native/SQL extension update;
 its RPATH was packaged for `/opt/laplace`, not the temporary test prefix.
 
-**The live PostgreSQL extension has not been updated or restarted.** Activating
-the drain and diagnostic-query fixes requires the shared-service restart
-decision. No main-branch push, PR merge, or deploying CI dispatch was performed.
+The initial database activation was deferred while document ingestion was active.
+The document receipt completed successfully at 18:42:36 UTC, and the user directed
+the remaining activation through CI/CD.
 
 The final readiness check around 18:41 UTC found an active document ingest
 (`ingest document /vault/Data/test-data`, PID 525290), a live physicality COPY,
-and a refactor CI worker. Do not restart the shared PostgreSQL service during
-that work; recheck clients and ingestion before any approved activation.
+and a refactor CI worker. PostgreSQL was left untouched during that ingest.
 Temporary API sidecars and the isolated PostgreSQL test server were stopped;
 their files and the production API were preserved.
+
+The refactor delivery contract was subsequently checked: it targets
+`laplace-refactor-postgresql.service`, port 55433, and versioned releases under
+`/opt/laplace/releases`. Those are separate from the verified legacy install
+targets. No refactor checkout or activation workflow was changed.
+
+CI/CD evidence for [PR #1330](https://github.com/SaltyPatron/Laplace/pull/1330):
+
+- [Pre-deployment run 33105024812](https://github.com/SaltyPatron/Laplace/actions/runs/33105024812)
+  passed policy, build, 465 native tests, and 194 managed Core/ABI tests.
+- [Initial full run 33105290406](https://github.com/SaltyPatron/Laplace/actions/runs/33105290406)
+  installed the native repair, restarted legacy PostgreSQL at 18:49:31 UTC,
+  and upgraded the existing database to `laplace_substrate` version
+  `c43f929cbed1460f`. All PostgreSQL regressions and 196 endpoint tests passed.
+  One inventory test failed because process-global synthetic CPU topology was
+  visible to a concurrently running reader. Its collection now excludes other
+  collections while overrides are installed; ordinary tests remain parallel,
+  and the inventory assertions are unchanged.
+- [Full rerun 33105895688](https://github.com/SaltyPatron/Laplace/actions/runs/33105895688)
+  passed every job, including integration, publish, live smoke, evaluation and
+  API restoration. Integration reported 2,142 passed and 17 existing fixture
+  skips; evaluation reported 6/6 exact elections and 4/4 clean forward outputs.
+  These bounded probes are not full model-quality acceptance. The CI-published
+  API became active at 19:01:23 UTC.
+
+All dispatches used `fresh_db=false`, `full_clean=false`, and
+`generation_benchmark=false`; no reset or corpus reseed was requested. Successful
+content-fingerprint gates retained their normal reuse semantics. Recovery copies
+of the pre-CI native libraries and extension SQL are in `pre-ci-native/` under
+the recovery directory above.
+
+Live verification confirms both fold functions have function-local
+`plan_cache_mode=force_custom_plan` and `enable_material=off`. The partition-pressure
+diagnostic executes successfully, and `pg_stat_statements` contains calls to the
+new correlated prior-read SQL. A full WordNet replay has **not** been performed;
+no new full-corpus drain time or throughput claim is made.
 
 One CLI `ingest unicode --help` probe was interpreted as an ingest command by
 the legacy parser. The production completion marker short-circuited it: zero
