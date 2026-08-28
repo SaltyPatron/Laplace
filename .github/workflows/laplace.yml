@@ -564,6 +564,9 @@ jobs:
           dotnet test app/Laplace.Core.Tests/Laplace.Core.Tests.csproj \
             -c Release --no-build --filter 'Tier!=db&Tier!=perf' --verbosity minimal
 
+      - name: Bootstrap tuning validation (disposable PostgreSQL; no live changes)
+        run: python3 scripts/test-pg-machine-tuning.py
+
       - name: Managed service transport and authorization tests (no activation)
         run: |
           dotnet test app/Laplace.Endpoints.Mcp.Tests/Laplace.Endpoints.Mcp.Tests.csproj -c Release --no-build --verbosity minimal

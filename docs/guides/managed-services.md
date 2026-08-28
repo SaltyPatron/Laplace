@@ -245,6 +245,7 @@ Focused non-activating checks:
 python3 scripts/test-managed-services.py
 python3 scripts/test-managed-host.py
 python3 scripts/test-pg-access.py
+python3 scripts/test-pg-machine-tuning.py
 bash scripts/test-deploy-payload-sync.sh
 dotnet test app/Laplace.Endpoints.Mcp.Tests/Laplace.Endpoints.Mcp.Tests.csproj
 dotnet test app/Laplace.Endpoints.Lichess.Tests/Laplace.Endpoints.Lichess.Tests.csproj
@@ -299,3 +300,29 @@ The 14 host tests passed locally. Deliberately omitting maintenance installation
 and bypassing the renewal deadline each caused the corresponding test to fail;
 the unmodified implementation was then rerun successfully. The existing 14
 deployment-policy and 9 PostgreSQL audit/map tests also pass.
+
+## Full setup tuning validation repair (2026-08-28)
+
+A full `setup-host.sh` run reached PostgreSQL tuning but stopped before managed
+provisioning because the validator compared requested bytes against PostgreSQL's
+rounded native units. On hart-server, `shared_buffers=32949789kB` correctly became
+`32949792kB`, and `effective_cache_size=65899578kB` became `65899576kB`. These are
+8kB-block conversions, not unapplied settings. The validator now compares the
+requested value after conversion to `pg_settings.unit`, using PostgreSQL's
+nearest-even rounding rule. It still rejects a real whole-block difference,
+disabled required features and any pending restart, including unlisted settings.
+Failed SQL/connection queries and empty/incomplete results also fail closed.
+
+The regression suite starts its own temporary, socket-only PostgreSQL with a
+64MB buffer pool and no TCP listener, runs the actual shell validator, then stops
+and removes that test cluster. It tests the reported sizes, rounding boundaries,
+kB/MB units, genuine mismatches, query failures and pending restarts. A disposable
+copy with the original byte comparison restored must fail the rounding regression.
+The same suite runs in the existing CI unit-test stage before live installation.
+
+The corrected validator passed all 18 expectations against the live cluster using
+read-only peer queries and the bootstrap's CPU environment (without this agent
+session's `OMP_NUM_THREADS`/`OMP_THREAD_LIMIT` overrides). No tuning was applied,
+no production service was restarted, and no HBA/listener/credential was changed
+by that validation. This verifies the reported failing step, not completion of
+the remaining privileged full-host setup or managed-service deployment.
