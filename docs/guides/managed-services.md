@@ -406,3 +406,51 @@ from the reviewed source; it cannot grant itself permission to replace root code
 Once upgraded, the enabled boot/timer reconciliation and CI preflight continue
 maintaining the provisioned configuration. Rerun the normal CI deployment rather
 than manually copying helpers, editing service files, or bypassing that check.
+
+## First complete rollout and automatic rollback (2026-08-28)
+
+The operator upgraded the root policy through the targeted setup-host command.
+Both installed helpers matched commit `2b4273a1`; no further policy upgrade was
+needed for rollout run `33137962132`.
+
+That full Actions run passed policy, build, unit tests, host preflight, install,
+database synchronization, integration, managed publication/readiness, and live API
+smoke checks. Both `laplace-mcp.service` and `laplace-lichess.service` were observed
+loaded, enabled and running; each readiness endpoint returned `ready:true`.
+The publish verifier completed authenticated MCP initialization and tool discovery
+through hostname-verified LAN TLS. Independent requests without credentials to
+MCP and the operator stop route returned HTTP 401 without stopping a service.
+
+The final existing semantic evaluation failed, so the workflow automatically
+restored the previous API and removed the newly introduced managed units. API
+readiness returned HTTP 200 after restoration. **MCP/Lichess are therefore not
+currently deployed as managed services.** The host policy and maintenance timer
+remain installed. No merge, data reset, secret rotation, or gate bypass occurred.
+
+The failing operation was `converse.prompt_coherence`. API logs recorded a
+15,054ms request followed by HTTP 503; PostgreSQL logged client cancellation of
+the same statement at `2026-08-28 03:11:11 UTC`. The generic API message reported
+the substrate as unreachable despite successful readiness requests during that
+interval. `pg_stat_statements` is installed in the `laplace` schema; its completed
+statement statistics and PostgreSQL's cancellation log were both inspected.
+
+The evaluation also failed independently against the restored API with MCP and
+Lichess absent. Command:
+
+```bash
+python3 scripts/eval-generation.py --api http://127.0.0.1:8080 \
+  --probes scripts/eval-probes.json --baseline scripts/eval-baselines.json
+```
+
+This replay completed with exit 1: only `dog` passed the six topic-election
+checks; pawn/chess and glacier selected `a` (rendered as `LATIN SMALL LETTER A`),
+and France/water/hot selected `of`. The existing forward-hygiene checks passed,
+but the expected opposite `cold` was not reached. Warming the read path therefore
+does not resolve the semantic failure. The native election implementation and
+expected-answer files are unchanged by this managed-services branch.
+
+The current release policy couples application publication to this existing
+semantic gate. Changing that policy is a separate release decision; this rollout
+did not weaken it or change expected answers. Windows reachability, authenticated
+live operator status after a committed release, and persistent MCP/Lichess
+activation remain unverified until a release is committed.
