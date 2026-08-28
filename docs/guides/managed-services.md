@@ -354,3 +354,22 @@ error propagation, reload acknowledgement, API restoration and build/install
 ordering. Deliberately restoring swallowed preflight/build errors reproduces the
 bad success paths. The suite runs in the existing CI deploy-payload contract gate.
 No corrective live database write was needed for the already-correct library path.
+
+## Integration connection-pool repair (2026-08-28)
+
+Guarded rollout run `33136694752` passed host preflight, installation, database
+synchronization and PostgreSQL regression tests, then stopped before publication:
+seven synthetic-ingest tests reported PostgreSQL `53300` (too many clients).
+The synthetic class passed by itself. `LocalPgFixture` shared one database but
+allocated an independent default 100-connection datasource per fixture, retaining
+separate idle connection pools during concurrent tests against a cluster whose
+live connection limit was 37.
+
+The fixture now shares one reference-counted datasource, created with the existing
+production ingest connection budget. Initialization/disposal are idempotent, failed
+initialization does not acquire a reference, and only the last owner closes the
+pool/database. Three new database-backed regressions failed against the old fixture
+and pass with the repair. The complete substrate suite passed locally: 820 passed,
+one existing corpus-dependent skip. No production connection limit was raised and
+no test was disabled or serialized to obtain that result. CI rollout must still
+pass the full concurrent integration suite before managed-service publication.

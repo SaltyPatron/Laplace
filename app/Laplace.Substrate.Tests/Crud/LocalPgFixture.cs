@@ -2,6 +2,7 @@ using System.Diagnostics;
 using global::Npgsql;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
+using Laplace.SubstrateCRUD.Npgsql;
 using Xunit;
 
 namespace Laplace.SubstrateCRUD.Tests;
@@ -10,6 +11,7 @@ public sealed class LocalPgFixture : IAsyncLifetime
 {
     private static readonly SemaphoreSlim InitGate = new(1, 1);
     private static int _refCount;
+    private static NpgsqlDataSource? _sharedDataSource;
 
     public const string DatabaseName = "laplace_substratecrud_test";
 
@@ -32,26 +34,39 @@ public sealed class LocalPgFixture : IAsyncLifetime
         await InitGate.WaitAsync();
         try
         {
-            if (_refCount++ == 0)
+            if (_ds is not null) return;
+            if (_refCount == 0)
             {
                 // New empty DB: forget any content-ladder skips from a prior fixture life.
                 ContentLadderLedger.Reset();
                 await RunPsqlAdminAsync("dropdb", $"-h {PgHost} -U {PgUser} --force --if-exists {DatabaseName}");
                 await RunPsqlAdminAsync("createdb", $"-h {PgHost} -U {PgUser} -O {PgUser} {DatabaseName}");
-            }
-
-            var dsb = new NpgsqlDataSourceBuilder(ConnectionString);
-            _ds = dsb.Build();
-
-            await using var conn = await _ds.OpenConnectionAsync();
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandText = @"
+                // The database is shared across fixtures; its connection pool must
+                // be shared too. Independent default-sized pools retained idle
+                // sessions and exhausted the server during parallel CI tests.
+                var candidate = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnectionString);
+                try
+                {
+                    await using var conn = await candidate.OpenConnectionAsync();
+                    await using var cmd = conn.CreateCommand();
+                    cmd.CommandText = @"
             CREATE EXTENSION IF NOT EXISTS postgis;
             CREATE EXTENSION IF NOT EXISTS laplace_geom;
             CREATE EXTENSION IF NOT EXISTS laplace_substrate;
             SET search_path TO laplace, public;
         ";
-            await cmd.ExecuteNonQueryAsync();
+                    await cmd.ExecuteNonQueryAsync();
+                    _sharedDataSource = candidate;
+                }
+                catch
+                {
+                    await candidate.DisposeAsync();
+                    throw;
+                }
+            }
+            // Acquire ownership only after initialization has succeeded.
+            _ds = _sharedDataSource ?? throw new InvalidOperationException("Shared fixture pool is unavailable");
+            _refCount++;
         }
         finally
         {
@@ -64,13 +79,14 @@ public sealed class LocalPgFixture : IAsyncLifetime
         await InitGate.WaitAsync();
         try
         {
-            if (_ds is not null)
-            {
-                await _ds.DisposeAsync();
-                _ds = null;
-            }
+            if (_ds is null) return;
+            _ds = null;
             if (--_refCount == 0)
+            {
+                await _sharedDataSource!.DisposeAsync();
+                _sharedDataSource = null;
                 await RunPsqlAdminAsync("dropdb", $"-h {PgHost} -U {PgUser} --force --if-exists {DatabaseName}");
+            }
         }
         finally
         {
