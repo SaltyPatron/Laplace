@@ -1,4 +1,7 @@
 using System.Text.RegularExpressions;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Xunit;
 
 namespace Laplace.Decomposers.Abstractions.Tests;
@@ -48,9 +51,51 @@ public sealed class ReadPathArchitectureGateTests
     /// and raw string literals <c>"""…SELECT…"""</c>. Mid-string SELECT inside a verbatim
     /// CTE was previously invisible to the gate.
     /// </remarks>
-    private static readonly Regex HandWrittenSql = new(
-        @"\bCommandText\b|\bCreateCommand\s*\(\s*(?:""|[A-Za-z_])|""\s*SELECT\s|@""[\s\S]*?\bSELECT\s|""""""[\s\S]*?\bSELECT\s",
+    private static readonly Regex SqlSelect = new(
+        @"\bSELECT\s",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex LeadingSqlSelect = new(
+        @"^\s*SELECT\s",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    private static bool LiteralContainsSql(LiteralExpressionSyntax literal, string value)
+        // Preserve the existing policy: ordinary literals must START with SELECT;
+        // verbatim/raw literals can contain a SELECT inside a multi-line CTE.
+        // This is an architecture ratchet, not an unrestricted SQL classifier.
+        => (literal.Token.Text.StartsWith("@\"", StringComparison.Ordinal)
+                || literal.Token.Text.StartsWith("\"\"\"", StringComparison.Ordinal)
+            ? SqlSelect : LeadingSqlSelect).IsMatch(value);
+
+    internal static bool HasHandWrittenSql(string source)
+    {
+        // A file-wide regex crossed the closing quote of @"D:\Data\Laplace"
+        // and treated a later "select distro" comment as SQL. Parse C# so each
+        // literal has its own boundary and comments are not executable tokens.
+        var root = CSharpSyntaxTree.ParseText(source).GetRoot();
+        // This is a repository gate, not a build-platform gate: inspect code
+        // behind inactive #if branches too, without treating comments as code.
+        if (root.DescendantTrivia().Any(trivia => trivia.IsKind(SyntaxKind.DisabledTextTrivia)
+            && HasHandWrittenSql(trivia.ToString())))
+            return true;
+        if (root.DescendantTokens().Any(token => token.IsKind(SyntaxKind.IdentifierToken)
+            && token.ValueText.Equals("CommandText", StringComparison.OrdinalIgnoreCase)))
+            return true;
+
+        return root.DescendantNodes().Any(node => node switch
+        {
+            InvocationExpressionSyntax call when call.ArgumentList.Arguments.Count > 0 =>
+                (call.Expression switch
+                {
+                    IdentifierNameSyntax name => name.Identifier.ValueText,
+                    MemberAccessExpressionSyntax member => member.Name.Identifier.ValueText,
+                    MemberBindingExpressionSyntax member => member.Name.Identifier.ValueText,
+                    _ => "",
+                }).Equals("CreateCommand", StringComparison.OrdinalIgnoreCase),
+            LiteralExpressionSyntax literal when literal.Token.Value is string value => LiteralContainsSql(literal, value),
+            InterpolatedStringTextSyntax text => SqlSelect.IsMatch(text.TextToken.ValueText),
+            _ => false,
+        });
+    }
 
     /// <summary>
     /// Files building their own datasource, 2026-07-26. THIS LIST MAY ONLY SHRINK.
@@ -163,26 +208,26 @@ public sealed class ReadPathArchitectureGateTests
         return sqlite && !text.Contains("Npgsql", StringComparison.Ordinal);
     }
 
-    private static List<string> Violators(string repoRoot, Regex rule)
+    private static List<string> Violators(string repoRoot, Func<string, bool> rule)
     {
         var found = new List<string>();
         foreach (var file in ScannedFiles(repoRoot))
         {
-            if (rule.IsMatch(File.ReadAllText(file)))
+            if (rule(File.ReadAllText(file)))
                 found.Add(Path.GetRelativePath(Path.Combine(repoRoot, "app"), file).Replace('\\', '/'));
         }
         found.Sort(StringComparer.OrdinalIgnoreCase);
         return found;
     }
 
-    private static void AssertNoNewcomers(Regex rule, IReadOnlySet<string> allowlist, string guidance)
+    private static void AssertNoNewcomers(Func<string, bool> rule, IReadOnlySet<string> allowlist, string guidance)
     {
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();
         var newcomers = Violators(repoRoot, rule).Where(v => !allowlist.Contains(v)).ToList();
         Assert.True(newcomers.Count == 0, guidance + "\n  " + string.Join("\n  ", newcomers));
     }
 
-    private static void AssertNoStaleEntries(Regex rule, IReadOnlySet<string> allowlist, string listName)
+    private static void AssertNoStaleEntries(Func<string, bool> rule, IReadOnlySet<string> allowlist, string listName)
     {
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();
         var current = Violators(repoRoot, rule).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -194,14 +239,14 @@ public sealed class ReadPathArchitectureGateTests
 
     [Fact]
     public void ReadPath_NoNewOwnDataSourceConstruction()
-        => AssertNoNewcomers(OwnDataSourceConstruction, OwnDataSourceAllowlist,
+        => AssertNoNewcomers(OwnDataSourceConstruction.IsMatch, OwnDataSourceAllowlist,
             "New datasource built outside the sanctioned home. Use "
             + "LaplaceDataSource.Create(SubstrateAccess.Serving) for request/response paths "
             + "or SubstrateAccess.Ingest for CLI/ingest paths, instead of here:");
 
     [Fact]
     public void ReadPath_NoNewHandWrittenSql()
-        => AssertNoNewcomers(HandWrittenSql, HandWrittenSqlAllowlist,
+        => AssertNoNewcomers(HasHandWrittenSql, HandWrittenSqlAllowlist,
             "New hand-written SQL in a consumer. Add it to the shared read surface in "
             + "app/Laplace.Substrate/Crud/Npgsql so every caller gets one implementation, "
             + "instead of here:");
@@ -212,13 +257,13 @@ public sealed class ReadPathArchitectureGateTests
     /// </summary>
     [Fact]
     public void ReadPath_OwnDataSourceAllowlist_HasNoStaleEntries()
-        => AssertNoStaleEntries(OwnDataSourceConstruction, OwnDataSourceAllowlist,
+        => AssertNoStaleEntries(OwnDataSourceConstruction.IsMatch, OwnDataSourceAllowlist,
             nameof(OwnDataSourceAllowlist));
 
     /// <inheritdoc cref="ReadPath_OwnDataSourceAllowlist_HasNoStaleEntries"/>
     [Fact]
     public void ReadPath_HandWrittenSqlAllowlist_HasNoStaleEntries()
-        => AssertNoStaleEntries(HandWrittenSql, HandWrittenSqlAllowlist,
+        => AssertNoStaleEntries(HasHandWrittenSql, HandWrittenSqlAllowlist,
             nameof(HandWrittenSqlAllowlist));
 
     [Fact]
