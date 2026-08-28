@@ -257,6 +257,16 @@ typedef struct FoldStateArrays
     ArrayType *volatility_array;
 } FoldStateArrays;
 
+/* Fold is pure in these seven fixed-point inputs and the constant tau. Many
+ * novel corpus cells share all seven; calculate each distinct state transition
+ * once per batch, not once per edge. Never key only by evidence: matched cells
+ * with different stored priors must remain different transitions. */
+typedef struct FoldMemo
+{
+    int64 input[7]; /* rating, rd, volatility, opponent, phi, games, score sum */
+    glicko2_state_t result;
+} FoldMemo;
+
 /* Fold one type run natively — matched cells from their stored prior
  * (`priors`: the FOR UPDATE read of this run; ord is 1-based within the run),
  * novel cells from the neutral prior. One tight native pass instead of a
@@ -280,6 +290,14 @@ fold_run_states(const InArray *phis, const InArray *opps,
     Datum  *volatilities = (Datum *) palloc(sizeof(Datum) * run_n);
     uint64  r;
     int     i;
+    HASHCTL memo_ctl;
+    HTAB *memo;
+
+    memset(&memo_ctl, 0, sizeof(memo_ctl));
+    memo_ctl.keysize = sizeof(((FoldMemo *) 0)->input);
+    memo_ctl.entrysize = sizeof(FoldMemo);
+    memo = hash_create("batch consensus fold transitions", Min(run_n, 128),
+                       &memo_ctl, HASH_ELEM | HASH_BLOBS);
 
     for (r = 0; r < n_prior; r++)
     {
@@ -307,6 +325,9 @@ fold_run_states(const InArray *phis, const InArray *opps,
     for (i = 0; i < run_n; i++)
     {
         glicko2_state_t st;
+        int64 input[7];
+        FoldMemo *entry;
+        bool found;
         int64 phi = DatumGetInt64(phis->elems[run_start + i]);
         /* The opponent this witness presents. opps->n == 0 means the caller did
          * not supply ratings, which folds against neutral exactly as before
@@ -330,18 +351,33 @@ fold_run_states(const InArray *phis, const InArray *opps,
             glicko2_init(&st, CONSENSUS_FOLD_NEUTRAL_MU,
                          CONSENSUS_FOLD_INITIAL_RD,
                          CONSENSUS_FOLD_INITIAL_VOLATILITY);
-        if (consensus_fold_apply_partial(&st, opp, phi, n_games, sum,
-                                         LAPLACE_GLICKO2_DEFAULT_TAU) != 0)
-            ereport(ERROR,
-                    (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
-                     errmsg("%s: aggregate exceeds fixed-point capacity", label),
-                     errdetail("games=%ld sum_score=%ld",
-                               (long) n_games, (long) sum)));
+        input[0] = st.rating;
+        input[1] = st.rd;
+        input[2] = st.volatility;
+        input[3] = opp;
+        input[4] = phi;
+        input[5] = n_games;
+        input[6] = sum;
+        entry = hash_search(memo, input, HASH_ENTER, &found);
+        if (found)
+            st = entry->result;
+        else
+        {
+            if (consensus_fold_apply_partial(&st, opp, phi, n_games, sum,
+                                             LAPLACE_GLICKO2_DEFAULT_TAU) != 0)
+                ereport(ERROR,
+                        (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                         errmsg("%s: aggregate exceeds fixed-point capacity", label),
+                         errdetail("games=%ld sum_score=%ld",
+                                   (long) n_games, (long) sum)));
+            entry->result = st;
+        }
         seen[i] = BoolGetDatum(matched[i]);
         ratings[i] = Int64GetDatum(st.rating);
         rds[i] = Int64GetDatum(st.rd);
         volatilities[i] = Int64GetDatum(st.volatility);
     }
+    hash_destroy(memo);
 
     out->seen_array = construct_array(seen, run_n, BOOLOID, 1, true, 'c');
     out->rating_array = construct_array(ratings, run_n, INT8OID, 8, true, 'd');
