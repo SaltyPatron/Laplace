@@ -218,7 +218,7 @@ layer1_build_install_extensions() {
     local _pipeline_rc=0
     (
         cd "$REPO_DIR"
-        bash scripts/pipeline.sh build
+        bash scripts/pipeline.sh build &&
         bash scripts/pipeline.sh install
     ) || _pipeline_rc=$?
     # This runs pipeline.sh AS ROOT, so every artifact it writes into build/ is

@@ -194,7 +194,9 @@ jobs:
         run: bash scripts/shellcheck-gate.sh
 
       - name: Deploy payload contract
-        run: bash scripts/test-deploy-payload-sync.sh
+        run: |
+          bash scripts/test-deploy-payload-sync.sh
+          python3 scripts/test-pipeline-install.py
 
       - name: Managed service privilege and deployment contracts
         run: |

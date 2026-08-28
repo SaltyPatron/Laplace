@@ -326,3 +326,31 @@ session's `OMP_NUM_THREADS`/`OMP_THREAD_LIMIT` overrides). No tuning was applied
 no production service was restarted, and no HBA/listener/credential was changed
 by that validation. This verifies the reported failing step, not completion of
 the remaining privileged full-host setup or managed-service deployment.
+
+## Completed host setup and install error propagation (2026-08-28)
+
+The subsequent operator-run full setup built/installed the native and managed
+components, found no pending migrations, and installed the managed root policy,
+peer identities, LAN TLS configuration and enabled maintenance timer. Read-only
+checks confirmed the timer is active, the API returns readiness HTTP 200, and the
+live `dynamic_library_path` already matches the canonical staged extension path.
+MCP/Lichess application units still await CI publish; setup completion does not
+mean those services are running.
+
+That setup output exposed two SQL peer-authentication failures in the install
+phase that were incorrectly followed by a success message. The pipeline was
+running as root, which is intentionally not a database peer identity, and bash
+disabled automatic error exits inside a function used as an `if` condition.
+The pipeline now runs root-invoked SQL clients as `laplace-runner` on a local
+socket, without adding a root peer mapping or using password/TCP fallback.
+Library-path read/write/reload errors are distinct from an unchanged path and
+abort installation. Failed copies or post-install SQL probes restore a previously
+active API; an explicitly inactive API stays stopped. Full setup also stops
+before install when its preceding build fails.
+
+`python3 scripts/test-pipeline-install.py` executes these shell functions with
+isolated artifacts and fake OS/database calls. Fifteen tests cover identity,
+error propagation, reload acknowledgement, API restoration and build/install
+ordering. Deliberately restoring swallowed preflight/build errors reproduces the
+bad success paths. The suite runs in the existing CI deploy-payload contract gate.
+No corrective live database write was needed for the already-correct library path.

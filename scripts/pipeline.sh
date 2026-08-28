@@ -153,6 +153,25 @@ EOF
   exit 2
 }
 
+# setup-host invokes the build/install pipeline as root. Root is deliberately
+# not a PostgreSQL peer identity: run only its SQL client as the existing
+# database service account. Normal CI/operator invocations retain their identity.
+psql() {
+  if [[ "$(id -u)" == 0 ]]; then
+    [[ "$PGHOST" == /* ]] || {
+      echo "::error::root pipeline SQL requires a local PostgreSQL socket" >&2
+      return 2
+    }
+    runuser -u laplace-runner -- env \
+      -u PGPASSWORD -u PGPASSFILE -u PGSERVICE -u PGSERVICEFILE -u PGHOSTADDR \
+      "PGHOST=$PGHOST" "PGPORT=${PGPORT:-5432}" "PGUSER=laplace_admin" \
+      "PGDATABASE=$PGDATABASE" "PGOPTIONS=${PGOPTIONS:-}" \
+      "$LAPLACE_PG_PREFIX/bin/psql" -X -w "$@"
+  else
+    command "$LAPLACE_PG_PREFIX/bin/psql" -X -w "$@"
+  fi
+}
+
 # Content digest of the libraries the postmaster preloads. Empty string when
 # neither is installed yet (first install — nothing is pinned, nothing to bounce).
 preloaded_so_digest() {
@@ -165,9 +184,19 @@ preloaded_so_digest() {
 # the one authoritative resolution order on Linux.  Preserve any operator-added
 # search directories after those two canonical entries.
 ensure_extension_library_path() {
-  local current desired part
+  local current desired desired_sql part reloaded
   local -a current_parts desired_parts
-  current=$(psql -d postgres -U laplace_admin -tAX -c "SHOW dynamic_library_path")
+  # This function is called in an if condition, where bash disables errexit.
+  # Every failed SQL command must therefore propagate explicitly. Return 1 ONLY
+  # for an unchanged path; return 2 for a failed read, write or reload.
+  current=$(psql -d postgres -U laplace_admin -tAX -c "SHOW dynamic_library_path") || {
+    echo "::error::could not read dynamic_library_path; install aborted" >&2
+    return 2
+  }
+  [[ -n "$current" ]] || {
+    echo "::error::empty dynamic_library_path result; install aborted" >&2
+    return 2
+  }
   desired_parts=("$LAPLACE_EXT_LIBDIR" '$libdir')
   IFS=: read -r -a current_parts <<<"$current"
   for part in "${current_parts[@]}"; do
@@ -178,9 +207,17 @@ ensure_extension_library_path() {
   if [[ "$current" == "$desired" ]]; then
     return 1
   fi
-  psql -d postgres -U laplace_admin -v ON_ERROR_STOP=1 \
-    -c "ALTER SYSTEM SET dynamic_library_path = '$desired'" \
-    -c "SELECT pg_reload_conf()"
+  desired_sql=${desired//\'/\'\'}
+  reloaded=$(psql -d postgres -U laplace_admin -qtAX -v ON_ERROR_STOP=1 \
+    -c "ALTER SYSTEM SET dynamic_library_path = '$desired_sql'" \
+    -c "SELECT pg_reload_conf()") || {
+    echo "::error::could not update/reload dynamic_library_path; install aborted" >&2
+    return 2
+  }
+  [[ "$reloaded" == t ]] || {
+    echo "::error::PostgreSQL did not acknowledge configuration reload; install aborted" >&2
+    return 2
+  }
   echo "dynamic_library_path: '$current' -> '$desired'"
   return 0
 }
@@ -444,13 +481,16 @@ phase_test() {
   bash "$ROOT/scripts/test-parallel.sh" "${args[@]}"
 }
 
-phase_install() {
+phase_install() (
   echo "===== PHASE — INSTALL ====="
   test -d build || { echo "::error::build/ missing — run 'pipeline.sh build' first"; exit 1; }
   local native_fp library_path_changed=0
   native_fp=$(fp_native)
   if ensure_extension_library_path; then
     library_path_changed=1
+  else
+    local path_rc=$?
+    [[ "$path_rc" -eq 1 ]] || return "$path_rc"
   fi
   # Never stamp today's source fingerprint onto yesterday's build artifacts.
   # `install` is callable as a standalone phase, so prove the build phase
@@ -468,10 +508,19 @@ phase_install() {
   fi
   # Stop the API for the install window (previously the CI deploy job's step —
   # owning it here means a skipped install never bounces the service at all).
-  local api_was_active=0
+  local api_was_active=0 install_rc=0
   if systemctl is-active --quiet laplace-api 2>/dev/null; then
     api_was_active=1
-    sudo -n systemctl stop laplace-api 2>/dev/null || true
+  fi
+  # Scope cleanup to this phase, including a failed copy or post-install SQL
+  # probe. setup-host has no Actions "always" job to restore its serving API.
+  trap 'install_rc=$?; trap - EXIT
+    if [[ "$api_was_active" -eq 1 ]]; then
+      sudo -n systemctl start laplace-api || install_rc=1
+    fi
+    exit "$install_rc"' EXIT
+  if [[ "$api_was_active" -eq 1 ]]; then
+    sudo -n systemctl stop laplace-api
   fi
   local so_before so_after
   so_before=$(preloaded_so_digest)
@@ -493,7 +542,7 @@ phase_install() {
   # across the install instead: same bytes, same image, no restart.
   if [[ "$so_before" != "$so_after" || "$library_path_changed" -eq 1 ]]; then
     local preload
-    preload=$(psql -d postgres -U laplace_admin -tAc "SHOW shared_preload_libraries" 2>/dev/null || true)
+    preload=$(psql -d postgres -U laplace_admin -tAc "SHOW shared_preload_libraries")
     if [[ ",${preload// /}," == *",laplace_substrate,"* ]] \
        || [[ ",${preload// /}," == *",laplace_geom,"* ]]; then
       restart_postgres "install: staged extension image or resolution path changed"
@@ -501,11 +550,12 @@ phase_install() {
   else
     echo "install: preloaded .so unchanged — no PG bounce needed (SQL-only change)"
   fi
-  fp_record install-native "$native_fp"
   if [[ "$api_was_active" -eq 1 ]]; then
-    sudo -n systemctl start laplace-api 2>/dev/null || true
+    sudo -n systemctl start laplace-api
+    api_was_active=0
   fi
-}
+  fp_record install-native "$native_fp"
+)
 
 phase_migrate() {
   echo "===== PHASE — MIGRATE ($PGDATABASE) ====="
@@ -790,6 +840,7 @@ phase_tune_pg() {
   echo "===== PHASE — TUNE PG ====="
   # shellcheck source=scripts/pg-machine-tuning.sh
   source "$ROOT/scripts/pg-machine-tuning.sh"
+  # shellcheck disable=SC2034 # consumed by the sourced pg-machine-tuning functions
   PG_TUNE_PSQL=(psql -d "${PGDATABASE:-laplace}" -U laplace_admin)
   pg_apply_machine_tuning
   local pending
