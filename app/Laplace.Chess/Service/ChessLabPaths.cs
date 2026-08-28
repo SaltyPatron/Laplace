@@ -37,7 +37,10 @@ public static class ChessLabPaths
     public static Probe Stockfish => ResolveExecutable(
         "LAPLACE_STOCKFISH",
         _ => TryDefaultCutechessCandidate(OperatingSystem.IsWindows() ? "stockfish.exe" : "stockfish"),
-        StockfishPathNames);
+        StockfishPathNames,
+        installedCandidate: OperatingSystem.IsWindows() ? null : Path.Combine(
+            Environment.GetEnvironmentVariable("LAPLACE_INSTALL_PREFIX") is { Length: > 0 } prefix
+                ? prefix : "/opt/laplace", "bin", "stockfish"));
 
     public static Probe LaplaceUci => ResolveLaplaceUci();
 
@@ -108,8 +111,9 @@ public static class ChessLabPaths
         string? configValue,
         Func<string, string?>? repoCandidate,
         string[] pathNames,
-        string? assemblyNeighbor = null)
-        => ResolveExecutableCore(configValue, repoCandidate, pathNames, assemblyNeighbor);
+        string? assemblyNeighbor = null,
+        string? installedCandidate = null)
+        => ResolveExecutableCore(configValue, repoCandidate, pathNames, assemblyNeighbor, installedCandidate);
 
     internal static Probe ResolveLaplaceUciForTest(string? installExe, Func<string, string?>? buildOutput = null)
     {
@@ -141,12 +145,14 @@ public static class ChessLabPaths
         string configKey,
         Func<string, string?>? repoCandidate,
         string[] pathNames,
-        string? assemblyNeighbor = null)
+        string? assemblyNeighbor = null,
+        string? installedCandidate = null)
         => ResolveExecutableCore(
             LaplaceInstall.TryReadConfig(configKey, ChessLabEnvFile),
             repoCandidate,
             pathNames,
-            assemblyNeighbor);
+            assemblyNeighbor,
+            installedCandidate);
 
     private static Probe ResolveLaplaceUci()
     {
@@ -206,7 +212,8 @@ public static class ChessLabPaths
         string? configPath,
         Func<string, string?>? repoCandidate,
         string[] pathNames,
-        string? assemblyNeighbor)
+        string? assemblyNeighbor,
+        string? installedCandidate)
     {
         if (!string.IsNullOrWhiteSpace(configPath))
         {
@@ -214,6 +221,11 @@ public static class ChessLabPaths
             if (File.Exists(p))
                 return new Probe(p, true, "config");
         }
+
+        // CLI/ingest callers do not inherit the API's environment file. Prefer
+        // the managed release before build/PATH (which can select distro 14.1).
+        if (!string.IsNullOrEmpty(installedCandidate) && File.Exists(installedCandidate))
+            return new Probe(installedCandidate, true, "install");
 
         LaplaceInstall.TryDefaultBuildRoot(out var buildRoot);
         if (repoCandidate is not null)

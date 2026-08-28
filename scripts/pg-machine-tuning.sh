@@ -6,7 +6,7 @@
 #   pg_compute_machine_tuning          # sets PG_TUNE_* 
 #   PG_TUNE_PSQL=(psql ...)            # optional; default below
 #   pg_apply_machine_tuning            # ALTER SYSTEM + reload
-#   pg_validate_machine_tuning         # live == computed (bytes-equal for mem)
+#   pg_validate_machine_tuning         # live == computed in each GUC's native unit
 #
 # Formulas match MemoryTopology.cs / pipeline phase_tune_pg / cpu-topology --pg-tuning.
 # NO hardcoded GB literals for RAM-derived knobs.
@@ -445,23 +445,14 @@ pg_load_expected_tuning() {
 }
 
 pg_validate_machine_tuning() {
-  pg_load_expected_tuning
-  local vbad=0 nm live ok pend
+  pg_load_expected_tuning || return 1
+  local vbad=0 nm live ok pend rows nrows=0
   local _ok="${PG_TUNE_OK:-echo}"
   local _bad="${PG_TUNE_BAD:-echo}"
 
-  while IFS='|' read -r nm live ok pend; do
-    [ -z "$nm" ] && continue
-    if [ "$ok" != "t" ]; then
-      $_bad "  ✗ $nm = '$live' (want machine-sized; not pending alone)"
-      vbad=1
-    elif [ "$pend" = "t" ]; then
-      $_bad "  ✗ $nm pending_restart — cluster not fully restarted"
-      vbad=1
-    else
-      $_ok "  ✓ $nm = $live"
-    fi
-  done < <(pg_tune_psql -tAF'|' <<PG_EOF
+  # Capture the exit status: process substitution hid failed queries and could
+  # certify an empty result. Never continue after a SQL/connection failure.
+  if ! rows=$(pg_tune_psql -X -v ON_ERROR_STOP=1 -qtAF'|' <<PG_EOF
 WITH want(name, expected, mode) AS (VALUES
   ('shared_buffers','${PG_TUNE_SB}','mem'),
   ('effective_cache_size','${PG_TUNE_ECS}','mem'),
@@ -484,19 +475,51 @@ WITH want(name, expected, mode) AS (VALUES
   -- once the reservation is proven to cover shared_memory_size_in_huge_pages.
   -- Pinning it to 'try' made a successful promotion read as a validation FAILURE.
   ('huge_pages','on','enabled'))
-SELECT w.name, current_setting(w.name),
+SELECT w.name, current_setting(w.name, true),
        CASE w.mode
-         WHEN 'mem'     THEN pg_size_bytes(current_setting(w.name)) = pg_size_bytes(w.expected)
+         -- PostgreSQL parse_int rounds memory inputs to the GUC's native unit
+         -- using rint (ties to even). For example 32949789kB becomes 4118724
+         -- 8kB blocks, not a byte-identical value. float8 round uses that same
+         -- rule; numeric round would incorrectly round half units away from zero.
+         -- Use pg_settings.unit, not an assumed 8kB build or a loose tolerance.
+         WHEN 'mem'     THEN s.setting::double precision = round(
+           pg_size_bytes(w.expected)::double precision /
+           pg_size_bytes(CASE WHEN s.unit ~ '^[0-9]' THEN s.unit ELSE '1' || s.unit END))
          WHEN 'enabled' THEN current_setting(w.name) <> 'off'
          ELSE current_setting(w.name) = w.expected END,
        s.pending_restart
-FROM want w JOIN pg_settings s ON s.name = w.name
+FROM want w LEFT JOIN pg_settings s ON s.name = w.name
 ORDER BY w.name;
 PG_EOF
-)
+  ); then
+    $_bad "  ✗ Could not query live tuning — validation failed"
+    return 1
+  fi
+
+  while IFS='|' read -r nm live ok pend; do
+    [ -z "$nm" ] && continue
+    nrows=$((nrows + 1))
+    if [ "$ok" != "t" ]; then
+      $_bad "  ✗ $nm = '$live' (want machine-sized in PostgreSQL native units)"
+      vbad=1
+    elif [ "$pend" != "f" ]; then
+      $_bad "  ✗ $nm pending_restart or unknown — cluster not fully restarted"
+      vbad=1
+    else
+      $_ok "  ✓ $nm = $live"
+    fi
+  done <<< "$rows"
+  # Every expectation above must produce a row, including unavailable GUCs.
+  if [ "$nrows" -ne 18 ]; then
+    $_bad "  ✗ Incomplete tuning result: $nrows of 18 settings"
+    vbad=1
+  fi
 
   local npend
-  npend=$(pg_tune_psql -tAc "SELECT count(*) FROM pg_settings WHERE pending_restart" 2>/dev/null || echo 1)
+  if ! npend=$(pg_tune_psql -X -v ON_ERROR_STOP=1 -qtAc "SELECT count(*) FROM pg_settings WHERE pending_restart"); then
+    $_bad "  ✗ Could not query pending restarts — validation failed"
+    return 1
+  fi
   if [ "${npend:-1}" != "0" ]; then
     $_bad "  ✗ ${npend:-?} setting(s) pending_restart — cluster not fully restarted"
     vbad=1

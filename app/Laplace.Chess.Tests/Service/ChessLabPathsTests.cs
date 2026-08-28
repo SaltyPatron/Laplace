@@ -8,6 +8,27 @@ namespace Laplace.Chess.Service.Tests;
 public sealed class ChessLabPathsTests
 {
     [Fact]
+    public void ManagedStockfishPrecedesBuildAndPathButPreservesExplicitOverrides()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"stockfish-paths-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var installed = Path.Combine(dir, "installed");
+            var custom = Path.Combine(dir, "custom");
+            File.WriteAllText(installed, "managed");
+            File.WriteAllText(custom, "operator");
+            var probe = ChessLabPaths.ResolveExecutableForTest(null, _ => custom, ["stockfish"],
+                installedCandidate: installed);
+            Assert.Equal(new ChessLabPaths.Probe(installed, true, "install"), probe);
+            probe = ChessLabPaths.ResolveExecutableForTest(custom, _ => installed, ["stockfish"],
+                installedCandidate: installed);
+            Assert.Equal(new ChessLabPaths.Probe(custom, true, "config"), probe);
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    [Fact]
     public void Cutechess_UsesConfigPathWhenProvided()
     {
         var fake = Path.Combine(Path.GetTempPath(), $"cutechess-{Guid.NewGuid():N}.exe");

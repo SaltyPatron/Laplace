@@ -153,6 +153,25 @@ EOF
   exit 2
 }
 
+# setup-host invokes the build/install pipeline as root. Root is deliberately
+# not a PostgreSQL peer identity: run only its SQL client as the existing
+# database service account. Normal CI/operator invocations retain their identity.
+psql() {
+  if [[ "$(id -u)" == 0 ]]; then
+    [[ "$PGHOST" == /* ]] || {
+      echo "::error::root pipeline SQL requires a local PostgreSQL socket" >&2
+      return 2
+    }
+    runuser -u laplace-runner -- env \
+      -u PGPASSWORD -u PGPASSFILE -u PGSERVICE -u PGSERVICEFILE -u PGHOSTADDR \
+      "PGHOST=$PGHOST" "PGPORT=${PGPORT:-5432}" "PGUSER=laplace_admin" \
+      "PGDATABASE=$PGDATABASE" "PGOPTIONS=${PGOPTIONS:-}" \
+      "$LAPLACE_PG_PREFIX/bin/psql" -X -w "$@"
+  else
+    command "$LAPLACE_PG_PREFIX/bin/psql" -X -w "$@"
+  fi
+}
+
 # Content digest of the libraries the postmaster preloads. Empty string when
 # neither is installed yet (first install — nothing is pinned, nothing to bounce).
 preloaded_so_digest() {
@@ -165,9 +184,19 @@ preloaded_so_digest() {
 # the one authoritative resolution order on Linux.  Preserve any operator-added
 # search directories after those two canonical entries.
 ensure_extension_library_path() {
-  local current desired part
+  local current desired desired_sql part reloaded
   local -a current_parts desired_parts
-  current=$(psql -d postgres -U laplace_admin -tAX -c "SHOW dynamic_library_path")
+  # This function is called in an if condition, where bash disables errexit.
+  # Every failed SQL command must therefore propagate explicitly. Return 1 ONLY
+  # for an unchanged path; return 2 for a failed read, write or reload.
+  current=$(psql -d postgres -U laplace_admin -tAX -c "SHOW dynamic_library_path") || {
+    echo "::error::could not read dynamic_library_path; install aborted" >&2
+    return 2
+  }
+  [[ -n "$current" ]] || {
+    echo "::error::empty dynamic_library_path result; install aborted" >&2
+    return 2
+  }
   desired_parts=("$LAPLACE_EXT_LIBDIR" '$libdir')
   IFS=: read -r -a current_parts <<<"$current"
   for part in "${current_parts[@]}"; do
@@ -178,9 +207,17 @@ ensure_extension_library_path() {
   if [[ "$current" == "$desired" ]]; then
     return 1
   fi
-  psql -d postgres -U laplace_admin -v ON_ERROR_STOP=1 \
-    -c "ALTER SYSTEM SET dynamic_library_path = '$desired'" \
-    -c "SELECT pg_reload_conf()"
+  desired_sql=${desired//\'/\'\'}
+  reloaded=$(psql -d postgres -U laplace_admin -qtAX -v ON_ERROR_STOP=1 \
+    -c "ALTER SYSTEM SET dynamic_library_path = '$desired_sql'" \
+    -c "SELECT pg_reload_conf()") || {
+    echo "::error::could not update/reload dynamic_library_path; install aborted" >&2
+    return 2
+  }
+  [[ "$reloaded" == t ]] || {
+    echo "::error::PostgreSQL did not acknowledge configuration reload; install aborted" >&2
+    return 2
+  }
   echo "dynamic_library_path: '$current' -> '$desired'"
   return 0
 }
@@ -444,13 +481,16 @@ phase_test() {
   bash "$ROOT/scripts/test-parallel.sh" "${args[@]}"
 }
 
-phase_install() {
+phase_install() (
   echo "===== PHASE — INSTALL ====="
   test -d build || { echo "::error::build/ missing — run 'pipeline.sh build' first"; exit 1; }
   local native_fp library_path_changed=0
   native_fp=$(fp_native)
   if ensure_extension_library_path; then
     library_path_changed=1
+  else
+    local path_rc=$?
+    [[ "$path_rc" -eq 1 ]] || return "$path_rc"
   fi
   # Never stamp today's source fingerprint onto yesterday's build artifacts.
   # `install` is callable as a standalone phase, so prove the build phase
@@ -468,10 +508,19 @@ phase_install() {
   fi
   # Stop the API for the install window (previously the CI deploy job's step —
   # owning it here means a skipped install never bounces the service at all).
-  local api_was_active=0
+  local api_was_active=0 install_rc=0
   if systemctl is-active --quiet laplace-api 2>/dev/null; then
     api_was_active=1
-    sudo -n systemctl stop laplace-api 2>/dev/null || true
+  fi
+  # Scope cleanup to this phase, including a failed copy or post-install SQL
+  # probe. setup-host has no Actions "always" job to restore its serving API.
+  trap 'install_rc=$?; trap - EXIT
+    if [[ "$api_was_active" -eq 1 ]]; then
+      sudo -n systemctl start laplace-api || install_rc=1
+    fi
+    exit "$install_rc"' EXIT
+  if [[ "$api_was_active" -eq 1 ]]; then
+    sudo -n systemctl stop laplace-api
   fi
   local so_before so_after
   so_before=$(preloaded_so_digest)
@@ -493,7 +542,7 @@ phase_install() {
   # across the install instead: same bytes, same image, no restart.
   if [[ "$so_before" != "$so_after" || "$library_path_changed" -eq 1 ]]; then
     local preload
-    preload=$(psql -d postgres -U laplace_admin -tAc "SHOW shared_preload_libraries" 2>/dev/null || true)
+    preload=$(psql -d postgres -U laplace_admin -tAc "SHOW shared_preload_libraries")
     if [[ ",${preload// /}," == *",laplace_substrate,"* ]] \
        || [[ ",${preload// /}," == *",laplace_geom,"* ]]; then
       restart_postgres "install: staged extension image or resolution path changed"
@@ -501,11 +550,12 @@ phase_install() {
   else
     echo "install: preloaded .so unchanged — no PG bounce needed (SQL-only change)"
   fi
-  fp_record install-native "$native_fp"
   if [[ "$api_was_active" -eq 1 ]]; then
-    sudo -n systemctl start laplace-api 2>/dev/null || true
+    sudo -n systemctl start laplace-api
+    api_was_active=0
   fi
-}
+  fp_record install-native "$native_fp"
+)
 
 phase_migrate() {
   echo "===== PHASE — MIGRATE ($PGDATABASE) ====="
@@ -790,6 +840,7 @@ phase_tune_pg() {
   echo "===== PHASE — TUNE PG ====="
   # shellcheck source=scripts/pg-machine-tuning.sh
   source "$ROOT/scripts/pg-machine-tuning.sh"
+  # shellcheck disable=SC2034 # consumed by the sourced pg-machine-tuning functions
   PG_TUNE_PSQL=(psql -d "${PGDATABASE:-laplace}" -U laplace_admin)
   pg_apply_machine_tuning
   local pending
@@ -951,17 +1002,18 @@ phase_api_env() {
 
 phase_chess_lab() {
   echo "===== PHASE — CHESS LAB (stockfish / Qt / cutechess / path env) ====="
-  # Change-aware: the cutechess pin and this bootstrap are the only inputs, and
-  # the cmake configure (Qt feature checks) dominates the cost. Skip only when
+  # Change-aware: pins and bootstrap inputs drive rebuilds; cmake configure
+  # (Qt feature checks) dominates the cost. Skip the build only when
   # the fingerprint matches AND the installed binary actually exists — stamps
   # attest sources, never artifacts (the stale-.so lesson).
   local fp bin="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/bin/cutechess-cli"
-  fp=$(fp_compute external/cutechess scripts/bootstrap-chess-lab.sh)
-  if fp_check chess-lab "$fp" && [[ -x "$bin" ]]; then
-    echo "chess-lab unchanged (pin + bootstrap fingerprint) and $bin present — skipping"
+  fp=$(fp_compute external/cutechess scripts/bootstrap-chess-lab.sh scripts/install-stockfish.py deploy/linux/stockfish-release.json)
+  if fp_check chess-lab "$fp" && [[ -x "$bin" && -x "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/bin/stockfish" ]]; then
+    python3 "$ROOT/scripts/install-stockfish.py" --prefix "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}" || return 1
+    echo "chess-lab inputs unchanged, Stockfish reverified and $bin present — skipping build"
     return 0
   fi
-  bash "$ROOT/scripts/bootstrap-chess-lab.sh"
+  bash "$ROOT/scripts/bootstrap-chess-lab.sh" || return 1
   fp_record chess-lab "$fp"
 }
 
@@ -978,6 +1030,29 @@ phase_runtime_secrets() {
   [ -n "${GITHUB_ACTIONS:-}" ] && in_ci=1
 
   local dst tok stripe_secret stripe_whsec missing=0
+  local name secret value
+  RUNTIME_SECRETS_CHANGED=0
+  for name in mcp operator; do
+    if [[ "$name" == mcp ]]; then secret=LAPLACE_MCP_TOKEN; else secret=LAPLACE_OPERATOR_TOKEN; fi
+    value="${!secret:-}"
+    dst="$dst_dir/$name.env"
+    if [[ -n "$value" ]]; then
+      # Keep EnvironmentFile values a single safe atom and never log the value.
+      if [[ ! "$value" =~ ^[A-Za-z0-9_=/+-]{32,}$ ]]; then
+        echo "::error::$secret must contain at least 32 token-safe characters" >&2
+        missing=1
+      else
+        printf '%s=%s\n' "$secret" "$value" > "$dst.tmp"
+        chmod 640 "$dst.tmp"
+        if ! cmp -s "$dst.tmp" "$dst"; then RUNTIME_SECRETS_CHANGED=1; fi
+        mv "$dst.tmp" "$dst"
+        echo "$name.env refreshed from repository secret"
+      fi
+    elif [[ "$in_ci" -eq 1 || ! -s "$dst" ]]; then
+      echo "::error::$secret repository secret is required for managed services" >&2
+      missing=1
+    fi
+  done
   dst="$dst_dir/lichess.env"
   # Canonical name matches operator .env: LICHESS_API. LICHESS_TOKEN accepted as alias.
   tok="${LICHESS_API:-${LICHESS_TOKEN:-}}"
@@ -985,8 +1060,10 @@ phase_runtime_secrets() {
     {
       printf 'LICHESS_API=%s\n' "$tok"
       printf 'LICHESS_TOKEN=%s\n' "$tok"
-    } >"$dst"
-    chmod 640 "$dst"
+    } >"$dst.tmp"
+    chmod 640 "$dst.tmp"
+    if ! cmp -s "$dst.tmp" "$dst"; then RUNTIME_SECRETS_CHANGED=1; fi
+    mv "$dst.tmp" "$dst"
     echo "lichess.env written from job env"
   elif [ "$in_ci" -eq 1 ]; then
     echo "::error::LICHESS_API secret missing — set with: gh secret set LICHESS_API"
@@ -1009,8 +1086,10 @@ phase_runtime_secrets() {
       if [ -n "$stripe_whsec" ]; then
         printf 'STRIPE_WEBHOOK_SECRET=%s\n' "$stripe_whsec"
       fi
-    } >"$dst"
-    chmod 640 "$dst"
+    } >"$dst.tmp"
+    chmod 640 "$dst.tmp"
+    if ! cmp -s "$dst.tmp" "$dst"; then RUNTIME_SECRETS_CHANGED=1; fi
+    mv "$dst.tmp" "$dst"
     echo "stripe.env written from job env (webhook_secret=$([ -n "$stripe_whsec" ] && echo set || echo missing))"
   elif [ "$in_ci" -eq 1 ]; then
     echo "::error::STRIPE_API_SECRET secret missing — set with: gh secret set STRIPE_API_SECRET"
@@ -1035,7 +1114,7 @@ phase_runtime_secrets() {
 # dotnet publish closures, web/ the SPA (openapi.json is generated FROM app/
 # content, so app/ subsumes it), deploy/ the script + unit + nginx material.
 fp_publish() {
-  fp_compute app web deploy
+  fp_compute app web deploy scripts/check-uci-runtime.py
 }
 
 phase_publish() {
@@ -1043,6 +1122,7 @@ phase_publish() {
   source "$ROOT/deploy/linux/app-dir-contract.sh"
   laplace_reconcile_app_dir_contract "$app_dir"
   echo "===== PHASE — PUBLISH (full runtime contract) ====="
+  bash "$ROOT/deploy/linux/managed-publish.sh" begin
   # Publish owns the whole target: chess binaries, secrets, API+SPA+uci.
   phase_chess_lab
   phase_runtime_secrets
@@ -1054,7 +1134,8 @@ phase_publish() {
   # `pipeline.sh publish-stamp` only after /health/ready passes. A deploy that
   # never went ready therefore re-deploys on the next run.
   fp=$(fp_publish)
-  if fp_check publish "$fp" && [[ -x "$app_dir/laplace-uci" && -x "$app_dir/laplace-mcp" && -d "$app_dir/wwwroot" ]]; then
+  if fp_check publish "$fp" && [[ "$RUNTIME_SECRETS_CHANGED" == 0 && -x "$app_dir/laplace-uci" && -x "$app_dir/laplace-mcp" && -x "$app_dir/laplace-lichess" && -d "$app_dir/wwwroot" ]] \
+      && python3 "$ROOT/scripts/check-uci-runtime.py" "$app_dir/laplace-uci"; then
     echo "publish domain unchanged (app/ web/ deploy/) and $app_dir intact — skipping deploy"
     mkdir -p "$ROOT/build"
     printf 'skipped' >"$ROOT/build/.publish-action"
@@ -1063,7 +1144,8 @@ phase_publish() {
   local deploy_args=()
   [[ "${LAPLACE_FORCE_NPM:-}" == "1" ]] && deploy_args+=(--force-npm)
   [[ "${LAPLACE_PUBLISH_SERIAL:-}" == "1" ]] && deploy_args+=(--serial)
-  bash "$ROOT/deploy/linux/deploy.sh" "${deploy_args[@]}"
+  LAPLACE_MANAGED_TRANSACTION=1 bash "$ROOT/deploy/linux/deploy.sh" "${deploy_args[@]}"
+  bash "$ROOT/deploy/linux/managed-publish.sh" reconcile
   mkdir -p "$ROOT/build"
   printf 'deployed' >"$ROOT/build/.publish-action"
 

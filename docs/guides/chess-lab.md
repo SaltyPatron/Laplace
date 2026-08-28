@@ -35,6 +35,14 @@ took advantage of fold+openings+explore. Tracked: #834. Framing:
 
 ## The UCI engine (`laplace-uci`)
 
+Linux deployment publishes the **complete .NET runtime closure** into
+`/opt/laplace/app/releases/runtime.*/uci/`, with a stable
+`/opt/laplace/app/laplace-uci` launch symlink. Copying just the apphost fails
+with `laplace-uci.dll` missing. CI and publish execute the copied runtime's
+`uci`, `isready`, and depth-1 legal search before activation; a deliberately
+apphost-only copy must fail that check. This proves packaging/search, not
+substrate learning or playing strength.
+
 `app/Laplace.Chess.Uci` builds a standalone UCI engine. Truncated Chess Forward
 Pass: classical alpha-beta (`PROPOSE`) with root consensus STEER (`Substrate`
 fold/edge/off) and learned PST overlay. Any UCI GUI (cutechess, Arena,
@@ -55,7 +63,7 @@ Manual cutechess-cli invocation (every `key=value` is its own token, and
 ```sh
 cutechess-cli \
   -engine name=Laplace cmd=/path/to/laplace-uci proto=uci \
-  -engine name=Stockfish cmd=/usr/games/stockfish proto=uci \
+  -engine name=Stockfish cmd=/opt/laplace/bin/stockfish proto=uci \
       option.UCI_LimitStrength=true option.UCI_Elo=2000 \
   -each st=1 timemargin=2000 \
   -rounds 10 -pgnout games.pgn -debug all
@@ -77,9 +85,42 @@ that, so a bare flag kills the process before the first game with
 value; it also sends `debug on` to both engines, which is more transcript, which
 is the reason to pass `-debug` at all.
 
-Out-of-range `UCI_Elo` is not an error you will notice by accident — Stockfish
-14.1 accepts 1350–2850 and 16+ accepts 1320–3190, and cutechess reports the
-rejection on **stderr** while the match plays on at full strength.
+2000 is the default Elo cap, not a fixed level. The live engine's UCI handshake
+is authoritative for its range: the former Ubuntu Stockfish 14.1 advertises
+1350–2850; the verified Stockfish 18 release advertises 1320–3190. These are
+engine strength settings, not a guaranteed human rating at arbitrary clocks.
+Disable **Limit Stockfish strength** for full strength: the runner sends
+`UCI_LimitStrength=false` and omits `UCI_Elo`. Existing clients retain the
+limited/default-2000 behavior unless they explicitly set `limitStrength=false`.
+The transcript surfaces unsupported Elo warnings; do not infer the requested
+level was accepted from a match merely starting.
+
+### Persistent Linux engine installation
+
+`setup-host.sh` (through its runner bootstrap) and the existing CI publish phase
+both use `bootstrap-chess-lab.sh`. Stockfish comes from the versioned, SHA-256
+locked official release in `deploy/linux/stockfish-release.json`, **not Ubuntu's
+older package**. The current lock is [Stockfish 18](https://github.com/official-stockfish/Stockfish/releases/tag/sf_18).
+Linux x86-64 AVX2 and baseline artifacts are supported; other architectures fail
+explicitly pending a verified release artifact. cutechess remains built from the
+external source pin; the verified host version 1.5.1 matches
+[upstream v1.5.1](https://github.com/cutechess/cutechess/releases/tag/v1.5.1).
+
+The Stockfish installer verifies the archive before extraction and a real UCI
+handshake before switching `/opt/laplace/bin/stockfish`. Immutable releases,
+including upstream source/license material, remain under `/opt/laplace/stockfish`.
+Cached CI publishes recheck the installed hash and version. Distro binaries and
+unmanaged replacements are not overwritten. Upgrade the lock through review/CI;
+no floating `latest` download or manual binary-copy step is required. Existing
+provisioned hosts need no new privileged policy installation for this repair.
+API, CLI and ingest discovery prefer the managed installation before build/PATH
+fallbacks; an explicit `LAPLACE_STOCKFISH` override still takes precedence.
+
+CI snapshots the prior Stockfish launch pointer and only its API environment key.
+Rollback restores those alongside the previous API/UCI payload, retains releases,
+and preserves unrelated environment changes. Runtime processes are never restarted
+by the dependency installer itself. A tournament is completed only after a zero
+exit and all expected games scored; a `0 - 0 - 0` score is a failure, not success.
 
 ## Watching games live
 
@@ -95,11 +136,12 @@ Each shows only its own jobs. Jobs that play games stream every ply over SSE as
 board events, rendered on a live board:
 
 - **Gauntlet** — Laplace vs Stockfish. Config: `rounds` (games), `st` (sec/move,
-  default 1), `elo` (Stockfish cap, default 2000), `concurrency`, `ingest`.
+  default 1), `elo` (Stockfish cap, default 2000), `limitStrength` (default true),
+  `concurrency`, `ingest`.
   Setting `depth` > 0 switches to the unclocked depth mode. The form previews
   the exact argv before you start it, from the same `BuildArguments` the job
   uses, resolved against this host's binaries:
-  `GET /chess/lab/cutechess/preview?rounds=&depth=&st=&elo=&concurrency=`.
+  `GET /chess/lab/cutechess/preview?rounds=&depth=&st=&elo=&limitStrength=&concurrency=`.
 - `substrate-test` — consensus-guided vs pure search, in-process, parallel;
   the live board follows the most recent game, selector pins one.
 - `ladder` — eval-term ablation ladder, same live view.

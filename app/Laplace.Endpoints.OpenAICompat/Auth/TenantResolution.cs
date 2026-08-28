@@ -137,6 +137,23 @@ internal sealed class ApiKeyEnforcementMiddleware
     public async Task InvokeAsync(HttpContext context, ITenantResolver resolver)
     {
         var path = context.Request.Path.Value ?? "";
+        // Host lifecycle uses the operator credential, not a customer billing key
+        // and never the permissive tenant-header mode. Keep the legacy aliases in
+        // the same fail-closed policy so they cannot start a second bot.
+        if (IsUnder(path, "/v1/admin/services")
+            || path.Equals("/chess/lichess/start", StringComparison.OrdinalIgnoreCase)
+            || path.Equals("/chess/lichess/stop", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!OperatorAuth.IsAuthorized(context.Request, _options))
+            {
+                context.RequestServices.GetRequiredService<ILogger<ApiKeyEnforcementMiddleware>>()
+                    .LogWarning("service control authorization denied: method={Method} path={Path}", context.Request.Method, path);
+                await Reject(context, "operator_token_required", "This endpoint requires the operator credential.");
+                return;
+            }
+            await _next(context);
+            return;
+        }
         // Playing surface sits at /chess/* (outside /v1); without this branch key mode
         // never sees it and C04 stays open (GH #489).
         //

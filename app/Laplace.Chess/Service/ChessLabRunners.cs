@@ -214,6 +214,7 @@ public static class ChessLabRunners
             Depth = int.Parse(Config(cfg, "depth", "0")),
             SecondsPerMove = double.Parse(Config(cfg, "st", "1"), System.Globalization.CultureInfo.InvariantCulture),
             StockfishElo = int.Parse(Config(cfg, "elo", "2000")),
+            StockfishLimitStrength = bool.Parse(Config(cfg, "limitStrength", "true")),
             Concurrency = Math.Max(1, int.Parse(Config(cfg, "concurrency", "1"))),
             PgnOut = pgnOut,
             Event = $"chess-lab/cutechess/{slot.Job.Id}",

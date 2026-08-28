@@ -12,6 +12,7 @@
     "storybook": "cross-env STORYBOOK_DISABLE_TELEMETRY=1 storybook dev -p 6006",
     "build-storybook": "cross-env CI=true STORYBOOK_DISABLE_TELEMETRY=1 storybook build",
     "test:e2e": "playwright test",
+    "test:chess-ui": "node scripts/test-chess-ui.mjs",
     "gen:api": "openapi-typescript ./openapi/openapi.json -o ./src/api/types.gen.ts"
   },
   "dependencies": {

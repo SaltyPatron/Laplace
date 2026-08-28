@@ -1,0 +1,36 @@
+[Unit]
+Description=Laplace authenticated Streamable HTTP MCP
+After=network-online.target laplace-postgresql.service laplace-managed-host.service
+Wants=network-online.target laplace-postgresql.service
+ConditionPathExists=!/var/lib/laplace-managed/mcp.stopped
+
+[Service]
+Type=simple
+User=laplace-mcp
+Group=laplace-mcp
+WorkingDirectory=/var/lib/laplace-mcp
+Environment="LAPLACE_DB=Host=/var/run/postgresql;Username=laplace_admin;Database=laplace"
+EnvironmentFile=/opt/laplace/secrets/mcp.env
+EnvironmentFile=-/opt/laplace/secrets/agents.env
+EnvironmentFile=/var/lib/laplace-managed/mcp-host.env
+UnsetEnvironment=PGPASSWORD PGPASSFILE
+ExecStart=/opt/laplace/app/laplace-mcp --http
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=45
+StateDirectory=laplace-mcp
+LogsDirectory=laplace-mcp
+Environment=LAPLACE_OPS_LOG_DIR=/var/log/laplace-mcp
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectProc=invisible
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

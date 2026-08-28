@@ -867,18 +867,12 @@ EOF
     sudo -u "$RUNNER_USER" chmod 0600 "$PG_HBA_FILE"
     green "✓ Wrote substrate cluster pg_hba.conf (managed block as full file)"
 
-    # This cluster owns the ident file. Rebuild it from the resolved host
-    # identities on every bootstrap instead of preserving a stale hard-coded
-    # operator forever.
-    sudo -u "$RUNNER_USER" tee "$PG_IDENT_FILE" >/dev/null <<EOF
-# laplace-runner managed: peer identities for the substrate cluster
-laplace_map   laplace-runner   laplace_admin
-laplace_map   postgres         laplace_admin
-EOF
-    if [ -n "$GH_SUDO_USER" ]; then
-        printf 'laplace_map   %-16s laplace_admin\n' "$GH_SUDO_USER" \
-            | sudo -u "$RUNNER_USER" tee -a "$PG_IDENT_FILE" >/dev/null
-    fi
+    # Resolve before opening the file: malformed identities must not truncate it.
+    # Re-provisioning must retain peer access for installed managed services.
+    local peer_identities
+    peer_identities="$(python3 "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/render-pg-peer-map.py" \
+        --operator "$GH_SUDO_USER")"
+    printf '%s\n' "$peer_identities" | sudo -u "$RUNNER_USER" tee "$PG_IDENT_FILE" >/dev/null
     sudo -u "$RUNNER_USER" chmod 0600 "$PG_IDENT_FILE"
     green "✓ Wrote laplace_map identities to $PG_IDENT_FILE"
 

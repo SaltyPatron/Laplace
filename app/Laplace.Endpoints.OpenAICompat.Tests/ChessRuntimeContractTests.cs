@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text.Json;
 using Laplace.Chess.Service;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -16,6 +17,23 @@ public sealed class ChessRuntimeContractTests : IClassFixture<ExploreFactory>
     private readonly ExploreFactory _factory;
 
     public ChessRuntimeContractTests(ExploreFactory factory) => _factory = factory;
+
+    [Theory]
+    [InlineData("elo=2300", "option.UCI_LimitStrength=true", "option.UCI_Elo=2300")]
+    [InlineData("elo=1500", "option.UCI_LimitStrength=true", "option.UCI_Elo=1500")]
+    [InlineData("elo=2300&limitStrength=false", "option.UCI_LimitStrength=false", null)]
+    public async Task GauntletPreviewPreservesRequestedStrength(string query, string limiter, string? elo)
+    {
+        using var client = _factory.CreateClient();
+        using var response = await client.GetAsync("/chess/lab/cutechess/preview?" + query);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var args = json.RootElement.GetProperty("arguments").EnumerateArray().Select(x => x.GetString()).ToArray();
+        Assert.Contains(limiter, args);
+        if (elo is not null) Assert.Contains(elo, args);
+        else Assert.DoesNotContain(args, x => x?.StartsWith("option.UCI_Elo=", StringComparison.Ordinal) == true);
+        Assert.False(_factory.Services.GetRequiredService<ChessRuntimeService>().InitializationStarted);
+    }
 
     [Fact]
     public async Task PureAndStatusRoutes_DoNotInitializeWriteRuntime()

@@ -50,7 +50,7 @@ docs/         ARCHITECTURE.md, INVENTORY.md (generated)
 ```
 
 Deployables: `Laplace.Cli`, `Laplace.Endpoints.OpenAICompat`, `Laplace.Endpoints.Mcp`,
-`Laplace.Chess.Uci`, `Laplace.Migrations`.
+`Laplace.Endpoints.Lichess`, `Laplace.Chess.Uci`, `Laplace.Migrations`.
 
 ## Build
 
@@ -86,6 +86,8 @@ Two mmap'd perfcache blobs are required at runtime (`laplace_t0_perfcache.bin`,
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — the system as built, with file citations
 - [docs/INVENTORY.md](docs/INVENTORY.md) — generated counts and listings, CI-gated
+- [Managed MCP and Lichess](docs/guides/managed-services.md) — authenticated LAN MCP,
+  systemd services, operator API, CI/CD bootstrap and recovery
 
 ## License
 

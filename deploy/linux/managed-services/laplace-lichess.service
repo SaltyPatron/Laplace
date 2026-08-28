@@ -1,0 +1,35 @@
+[Unit]
+Description=Laplace managed Lichess bot
+After=network-online.target laplace-postgresql.service laplace-managed-host.service
+Wants=network-online.target laplace-postgresql.service
+ConditionPathExists=!/var/lib/laplace-managed/lichess.stopped
+
+[Service]
+Type=simple
+User=laplace-lichess
+Group=laplace-lichess
+WorkingDirectory=/var/lib/laplace-lichess
+Environment="LAPLACE_DB=Host=/var/run/postgresql;Username=laplace_admin;Database=laplace"
+EnvironmentFile=/opt/laplace/secrets/lichess.env
+EnvironmentFile=-/opt/laplace/secrets/lichess-service.env
+UnsetEnvironment=PGPASSWORD PGPASSFILE
+ExecStart=/opt/laplace/app/laplace-lichess
+Restart=on-failure
+RestartSec=30
+TimeoutStopSec=45
+StateDirectory=laplace-lichess
+LogsDirectory=laplace-lichess
+Environment=LAPLACE_OPS_LOG_DIR=/var/log/laplace-lichess
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectProc=invisible
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

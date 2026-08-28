@@ -1,0 +1,81 @@
+#!/usr/bin/python3
+"""Root-owned, fixed-argv service boundary. No SQL, shell, paths, or unit names from callers."""
+import fcntl
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import syslog
+
+UNITS = {"mcp": "laplace-mcp.service", "lichess": "laplace-lichess.service"}
+ACTIONS = {"status", "start", "stop", "restart"}
+STATE = Path("/var/lib/laplace-managed")
+
+
+def execute(service, action, run=subprocess.run, state=STATE):
+    if service not in UNITS or action not in ACTIONS:
+        raise ValueError("only mcp/lichess and status/start/stop/restart are allowed")
+    # The deploy helper uses this same root-owned lock. Check the transaction
+    # and update stop intent under one lock, never across a begin/activate race.
+    with (state / "lifecycle.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return execute_locked(service, action, run, state)
+
+
+def execute_locked(service, action, run, state):
+    unit = UNITS[service]
+    env = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C"}
+    marker = state / (service + ".stopped")
+    if action != "status":
+        if (state / "transaction.json").exists():
+            raise ValueError("managed deployment in progress")
+        # Persist the operator's stop across deploys and reboots. Only a later
+        # explicit start/restart removes this condition; CI never overrides it.
+        previously_stopped = marker.exists()
+        if action == "stop":
+            marker.touch(mode=0o600)
+        else:
+            marker.unlink(missing_ok=True)
+        try:
+            run(["/usr/bin/systemctl", "--no-block", action, unit], check=True,
+                stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=10, env=env)
+        except Exception:
+            if previously_stopped:
+                marker.touch(mode=0o600)
+            else:
+                marker.unlink(missing_ok=True)
+            raise
+    response = run(["/usr/bin/systemctl", "show", unit, "--no-pager",
+        "--property=LoadState,ActiveState,SubState,Result,MainPID,UnitFileState"], check=True,
+        stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=10, env=env)
+    values = dict(line.split("=", 1) for line in response.stdout.splitlines() if "=" in line)
+    return {"unit": unit, "load_state": values.get("LoadState", "unknown"),
+        "active_state": values.get("ActiveState", "unknown"), "sub_state": values.get("SubState", "unknown"),
+        "result": values.get("Result", "unknown"), "main_pid": int(values.get("MainPID", "0")),
+        "enabled": values.get("UnitFileState", "unknown"), "operator_stopped": marker.exists()}
+
+
+def main():
+    if os.geteuid() != 0 or len(sys.argv) != 3:
+        raise ValueError("requires the installed root-owned helper with service and action")
+    service, action = sys.argv[1:]
+    syslog.openlog("laplace-service-control", facility=syslog.LOG_AUTHPRIV)
+    audit = {"service": service[:64], "action": action[:64], "caller": os.environ.get("SUDO_USER", "root")[:64]}
+    try:
+        result = execute(service, action)
+    except Exception as exc:
+        syslog.syslog(syslog.LOG_WARNING, json.dumps({**audit, "outcome": "rejected_or_failed", "error": type(exc).__name__}))
+        print("service control rejected or failed", file=sys.stderr)
+        return 3 if isinstance(exc, BlockingIOError) or str(exc) == "managed deployment in progress" else 1
+    syslog.syslog(syslog.LOG_NOTICE, json.dumps({**audit, "outcome": "accepted", "state": result["active_state"]}))
+    print(json.dumps(result))
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except ValueError as error:
+        print(str(error), file=sys.stderr)
+        sys.exit(2)

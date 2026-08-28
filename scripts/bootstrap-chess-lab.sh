@@ -35,29 +35,22 @@ run_as_owner() {
 }
 
 install_apt_deps() {
-  say "apt: stockfish + Qt6"
+  say "apt: Qt6 (Stockfish comes from the pinned upstream release)"
   if [ "$(id -u)" -ne 0 ]; then
     yellow "not root — skipping apt (installed by setup-host Layer 0)"
     return 0
   fi
   DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    stockfish \
     qt6-base-dev qt6-base-dev-tools \
     libqt6svg6-dev libqt6core5compat6-dev \
     libqt6svg6 libqt6core5compat6 \
     >/dev/null
-  green "✓ stockfish + Qt6 present"
+  green "✓ Qt6 present"
 }
 
 resolve_stockfish() {
-  local p
-  for p in /usr/games/stockfish /usr/bin/stockfish "$(command -v stockfish 2>/dev/null || true)"; do
-    if [ -n "$p" ] && [ -x "$p" ]; then
-      echo "$p"
-      return 0
-    fi
-  done
-  return 1
+  test -x "$CC_BIN_DIR/stockfish" || return 1
+  echo "$CC_BIN_DIR/stockfish"
 }
 
 resolve_qt_bin() {
@@ -197,6 +190,7 @@ main() {
   install_apt_deps
   ensure_dirs
   build_cutechess
+  run_as_owner python3 "$SCRIPT_DIR/install-stockfish.py" --prefix "$PREFIX"
   write_api_env
   verify
 }

@@ -45,6 +45,7 @@ interface Setup {
   depth: string;
   rounds: string;
   elo: string;
+  limitStrength: boolean;
   concurrency: string;
   ingest: boolean;
 }
@@ -55,6 +56,7 @@ const DEFAULT_SETUP: Setup = {
   depth: '8',
   rounds: '10',
   elo: '2000',
+  limitStrength: true,
   concurrency: '1',
   ingest: true,
 };
@@ -128,6 +130,7 @@ export function GauntletView() {
       depth: setup.clock === 'depth' ? setup.depth || '1' : '0',
       st: setup.clock === 'seconds' ? setup.st || '1' : '0',
       elo: setup.elo || '2000',
+      limitStrength: String(setup.limitStrength),
       concurrency: setup.concurrency || '1',
     });
     const timer = setTimeout(() => {
@@ -199,6 +202,7 @@ export function GauntletView() {
       const config: Record<string, string> = {
         rounds: setup.rounds || '1',
         elo: setup.elo || '2000',
+        limitStrength: String(setup.limitStrength),
         concurrency: setup.concurrency || '1',
         ingest: String(setup.ingest),
         // Exactly one clock reaches the runner: depth>0 is what selects unclocked mode.
@@ -333,12 +337,20 @@ export function GauntletView() {
               />
             </Field>
 
-            <Field label="Stockfish Elo cap" help="Paired with UCI_LimitStrength. Out-of-range values are flagged in the transcript.">
+            <Field label="Stockfish strength" help="Full strength disables UCI_LimitStrength; Elo estimates depend on the engine version and time control.">
+              <Toggle
+                checked={setup.limitStrength}
+                onCheckedChange={(value) => setSetup((s) => ({ ...s, limitStrength: value }))}
+                aria-label="Limit Stockfish strength"
+              />
+            </Field>
+            <Field label="Stockfish Elo cap" help="2000 is a default, not a fixed level. The installed engine reports its supported range in the transcript.">
               <Input
                 type="number"
                 min={100}
                 step={50}
                 value={setup.elo}
+                disabled={!setup.limitStrength}
                 aria-label="Stockfish Elo cap"
                 onChange={(e) => setSetup((s) => ({ ...s, elo: e.target.value }))}
               />

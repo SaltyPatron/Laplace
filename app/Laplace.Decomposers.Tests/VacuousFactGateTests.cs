@@ -3,6 +3,7 @@ using Laplace.Decomposers.ISO;
 using Laplace.Decomposers.WordNet;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
+using System.Reflection;
 using Xunit;
 
 namespace Laplace.Decomposers.Tests;
@@ -81,9 +82,11 @@ public sealed class VacuousFactGateTests
     [Fact]
     public void IsoSource_NoLongerDeclares_HasDefinition()
     {
-        var root = AppContext.BaseDirectory;
-        while (root is not null && !Directory.Exists(Path.Combine(root, "app")))
-            root = Directory.GetParent(root)?.FullName;
+        // Directory.Build.props stamps the source checkout into every assembly.
+        // An external build root also has an app/ directory, but not the source.
+        var root = typeof(VacuousFactGateTests).Assembly
+            .GetCustomAttributes<AssemblyMetadataAttribute>()
+            .Single(attribute => attribute.Key == "LaplaceRepoRoot").Value;
         Assert.NotNull(root);
 
         var src = File.ReadAllText(Path.Combine(

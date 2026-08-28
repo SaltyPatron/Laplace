@@ -7,6 +7,7 @@ export interface LichessStatus {
   configured: boolean;
   tokenPreview?: string | null;
   connected: boolean;
+  running?: boolean;
   username?: string | null;
   depth: number;
   maxConcurrent: number;
@@ -28,6 +29,7 @@ export function LichessPanel() {
   const [depth, setDepth] = useState(8);
   const [maxConcurrent, setMaxConcurrent] = useState(2);
   const [substrate, setSubstrate] = useState(true);
+  const [operatorToken, setOperatorToken] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [activeGameId, setActiveGameId] = useState<string | null>(null);
@@ -69,13 +71,9 @@ export function LichessPanel() {
     setErr(null);
     try {
       if (on) {
-        await apiPost<LichessStatus>('/chess/lichess/start', {
-          depth,
-          maxConcurrent,
-          substrate,
-        });
+        await apiPost('/chess/lichess/start', {}, { operatorToken });
       } else {
-        await apiPost('/chess/lichess/stop', {});
+        await apiPost('/chess/lichess/stop', {}, { operatorToken });
         setActiveGameId(null);
         setChat([]);
       }
@@ -95,7 +93,7 @@ export function LichessPanel() {
     <Panel className={styles.panel} title="Lichess connectivity">
       <p className={styles.intro}>
         Listen for challenges on lichess.org. Each ply folds to consensus before the next search;
-        finished games get a terminal outcome pass. Token from <code>deploy/secrets/lichess.env</code>.
+        finished games get a terminal outcome pass. Managed by <code>laplace-lichess.service</code>.
       </p>
 
       <div className={styles.statusRow}>
@@ -122,9 +120,8 @@ export function LichessPanel() {
 
       {!configured && (
         <Alert>
-          No token visible to the API process. Check <code>deploy/secrets/lichess.env</code>{' '}
-          (<code>LICHESS_TOKEN</code> or <code>LICHESS_API</code>) and republish so IIS picks it up in{' '}
-          <code>web.config</code>.
+          The managed service is unavailable or unconfigured. Check its service status and
+          the server-side <code>LICHESS_API</code> secret. The API does not run a second bot.
         </Alert>
       )}
 
@@ -132,10 +129,16 @@ export function LichessPanel() {
       {err && <Alert>{err}</Alert>}
 
       <div className={styles.controls}>
+        <Field label="Operator token" help="Kept only in this component's memory; service controls require HTTPS.">
+          <Input type="password" autoComplete="off" value={operatorToken}
+            disabled={window.location.protocol !== 'https:'}
+            onChange={(e) => setOperatorToken(e.target.value)} />
+        </Field>
+        {window.location.protocol !== 'https:' && <Alert>Open the HTTPS service URL to use operator controls.</Alert>}
         <Field label="Listen on Lichess" help="Accepts standard challenges while on. Challenge the bot account from lichess.org." layout="row">
           <Toggle
-            checked={connected}
-            disabled={!configured || busy}
+            checked={status?.running ?? connected}
+            disabled={!operatorToken || busy || window.location.protocol !== 'https:'}
             onCheckedChange={(on) => void setConnected(on)}
             aria-label="Listen on Lichess"
           />
@@ -147,7 +150,7 @@ export function LichessPanel() {
             min={1}
             max={20}
             value={depth}
-            disabled={connected || busy}
+            disabled
             aria-label="Search depth"
             onChange={(e) => setDepth(Number(e.target.value))}
           />
@@ -159,7 +162,7 @@ export function LichessPanel() {
             min={1}
             max={8}
             value={maxConcurrent}
-            disabled={connected || busy}
+            disabled
             aria-label="Max concurrent"
             onChange={(e) => setMaxConcurrent(Number(e.target.value))}
           />
@@ -168,7 +171,7 @@ export function LichessPanel() {
         <Field label="Substrate bias" help="Fold consensus at root + learned PST refreshed after each ply fold." layout="row">
           <Toggle
             checked={substrate}
-            disabled={connected || busy}
+            disabled
             onCheckedChange={setSubstrate}
             aria-label="Substrate bias"
           />
@@ -221,7 +224,8 @@ export function LichessPanel() {
       )}
 
       <Muted className={styles.foot}>
-        Token: process env, then <code>deploy/secrets/lichess.env</code>. Stop disconnects after in-flight games finish.
+        Runtime settings come from server-side <code>LAPLACE_LICHESS_*</code> configuration.
+        Stop allows a 20-second game drain, then cancels remaining games without inventing outcomes.
       </Muted>
     </Panel>
   );
