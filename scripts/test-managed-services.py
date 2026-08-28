@@ -141,6 +141,7 @@ class DeploymentTests(unittest.TestCase):
             canonical.replace("ProtectSystem=strict", "ProtectSystem=false"),
             canonical.replace("CapabilityBoundingSet=", "CapabilityBoundingSet=CAP_SYS_ADMIN"),
             canonical.replace("UnsetEnvironment=PGPASSWORD PGPASSFILE\n", ""),
+            canonical.replace("EnvironmentFile=/var/lib/laplace-managed/mcp-host.env\n", ""),
             canonical.replace("Host=/var/run/postgresql", "Host=127.0.0.1"),
             canonical.replace("Database=laplace", "Database=laplace;Password=test-only-sentinel"),
             canonical.replace("Group=laplace-mcp", "Group=laplace-runner"),

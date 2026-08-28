@@ -199,6 +199,7 @@ jobs:
       - name: Managed service privilege and deployment contracts
         run: |
           python3 scripts/test-managed-services.py
+          python3 scripts/test-managed-host.py
           python3 scripts/test-pg-access.py
           shellcheck -S warning -x deploy/linux/deploy.sh deploy/linux/managed-publish.sh
 
@@ -621,7 +622,7 @@ jobs:
         timeout-minutes: 305
         run: bash scripts/wait-for-quiet-substrate.sh "${PGDATABASE:-laplace}"
 
-      - name: Managed-service privileged bootstrap preflight (before live install)
+      - name: Reconcile managed host desired state and check drift (before live install)
         run: bash deploy/linux/managed-publish.sh preflight
 
       - name: Install

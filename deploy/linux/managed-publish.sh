@@ -8,22 +8,38 @@ HELPER=/usr/local/libexec/laplace-managed-deploy
 RECEIPT="$ROOT/build/.managed-publish-backup"
 source "$ROOT/deploy/linux/payload-sync.sh"
 
-preflight() {
+installed_policy() {
   [[ -x "$HELPER" ]] || {
-    echo "::error::managed-service bootstrap required after CI safety checks: sudo python3 deploy/linux/laplace-managed-deploy bootstrap" >&2
+    echo "::error::managed host policy missing; provision through sudo bash scripts/setup-host.sh managed-services after CI safety checks" >&2
     return 1
   }
-  cmp -s "$ROOT/deploy/linux/laplace-managed-deploy" "$HELPER" || {
-    echo "::error::root-owned managed deployment policy needs its explicit bootstrap upgrade" >&2
-    return 1
-  }
+  local name
+  for name in laplace-managed-deploy laplace-service-control; do
+    cmp -s "$ROOT/deploy/linux/$name" "/usr/local/libexec/$name" || {
+      echo "::error::managed root policy version differs; update through sudo bash scripts/setup-host.sh managed-services" >&2
+      return 1
+    }
+  done
+}
+
+preflight() {
+  installed_policy
+  sudo -n "$HELPER" host-status
   sudo -n "$HELPER" preflight
 }
 
+ensure_host() {
+  installed_policy
+  # Same installed/root-owned policy used by setup-host and boot/timer
+  # maintenance. No runner-supplied script or arbitrary unit executes as root.
+  sudo -n "$HELPER" reconcile-host
+  preflight
+}
+
 case "${1:-}" in
-  preflight) preflight ;;
+  preflight) ensure_host ;;
   begin)
-    preflight
+    ensure_host
     [[ ! -f "$RECEIPT" ]] || { echo "unresolved publish receipt" >&2; exit 1; }
     mkdir -p "$ROOT/build" /opt/laplace/app-backups
     backup="$(mktemp -d /opt/laplace/app-backups/managed.XXXXXX)"

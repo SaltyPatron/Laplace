@@ -13,7 +13,7 @@ compatible. Existing STDIO clients are not stopped by deployment.
 The new services are not activated by a build or a test. Branch validation uses
 the existing Actions workflow with `stage=test`; it stops before live installation.
 The managed service tests use ephemeral loopback listeners and fake tools/bots.
-Do not merge or perform the privileged bootstrap until those checks pass.
+Do not merge or provision this branch's privileged host policy until those checks pass.
 
 ## Runtime and access contract
 
@@ -46,21 +46,64 @@ LAN/loopback `trust` exposure and the staged migration required before claiming
 least-privilege isolation. Managed hosts now reject TCP/password DB overrides;
 the host-bootstrap renderer retains their peer mappings on re-provisioning.
 
-## One-time privileged bootstrap
+## Persistent host provisioning
 
-The existing runner's sudo policy cannot install new units/users. After the PR's
-non-deploying CI checks pass, an administrator must run the checked-out, reviewed
-installer once on hart-server:
+`scripts/setup-host.sh` owns the privileged host configuration. Normal fresh-host
+setup includes managed-service provisioning automatically. For an **existing**
+host such as hart-server, its targeted, repeatable mode performs the same managed
+configuration without rebuilding PostgreSQL, installing extensions, migrating the
+database, cleaning build output, or restarting the API/bot/MCP processes:
 
 ```sh
-sudo python3 deploy/linux/laplace-managed-deploy bootstrap \
-  --address 192.168.1.2 --network 192.168.1.0/24 --hostname hart-server
+sudo bash scripts/setup-host.sh managed-services
+sudo bash scripts/setup-host.sh managed-services-status
 ```
 
-This installs root-owned constrained helpers, creates the two service accounts,
-extends only their local PostgreSQL peer mappings (reload, not restart), and adds
-the HTTPS nginx virtual host. It does **not** start either bot/MCP unit. It creates
-a private LAN CA and server certificate; private keys remain root-only under
+Run these from the reviewed **legacy** checkout after CI passes, not from
+Laplace-Refactor. Do not use full fresh-host setup as a service-only upgrade.
+The status mode is read-only, emits a structured drift report and exits nonzero
+on missing/invalid configuration. Both helper code files are version-checked by
+CI. Privilege-policy upgrades go through this same setup entry point; CI cannot
+install arbitrary root code from a runner-writable checkout.
+
+This is not a forgotten manual bootstrap step. The installed root-owned policy
+and desired LAN settings persist, and the same reconciliation runs through:
+
+- Normal `setup-host`, including repeated targeted upgrades.
+- `laplace-managed-host.service`, enabled at boot before the managed app units.
+- `laplace-managed-host.timer`, enabled and running by default, hourly with
+  persistent missed-run catch-up. Transient failures retry with bounded systemd
+  rate limiting; lifecycle-lock conflicts defer without interrupting deployment.
+- CI deploy/publish preflight, before live installation and after the ingest
+  quiet gate; CI repairs expected drift and then requires a healthy status report.
+
+Reconciliation preserves saved settings, creates missing dedicated accounts,
+retains their local peer mappings, verifies constrained sudoers, repairs its
+maintenance units/enablement and managed nginx configuration, and renews the TLS
+leaf certificate before its 30-day renewal threshold. It does not start/restart
+the app or PostgreSQL services, remove explicit operator stop markers, change
+HBA/listen/firewall rules, or replace the CA identity. Unchanged configuration
+does not trigger PostgreSQL/nginx reloads. Changed peer mappings use a reload,
+not a PostgreSQL restart; nginx is syntax-checked and gracefully reloaded only
+when its managed configuration/certificate changes.
+
+Desired settings live in root-owned `/var/lib/laplace-managed/lan.json`. Omitted
+setup arguments preserve them; explicit `--address`, `--network`, `--hostname`
+arguments update them through `setup-host.sh managed-services`. Both address and
+allowlist must remain within an RFC1918 LAN range. CI's fixed reconciliation
+verb accepts no configuration overrides. Conflicting existing user identities or
+untrusted policy files fail closed, rather than reassigning another account.
+The same hostname generates TLS identity, proxy configuration and the MCP origin
+environment file; a hostname change takes effect in the MCP process at its next
+CI deployment/operator restart, without a separate hand-edited environment value.
+
+Policy-upgrade receipts remain root-only under `host-policy-before-*`; failures
+restore prior policy/settings, maintenance definitions/enablement and previous
+proxy/certificate where changed. Failed peer reloads restore the identity file
+and its ownership/mode. Existing accounts/CA material are retained for safe
+retry, not deleted or regenerated. Application payload rollback remains separate.
+
+The private LAN CA and server key remain root-only under
 `/var/lib/laplace-managed/tls`. The public CA is
 `/opt/laplace/share/laplace/managed-services-ca.crt`. Transfer that public file over
 the already-trusted remote connection, verify its SHA-256 fingerprint on both
@@ -71,14 +114,16 @@ the existing trusted CA bundle with this CA added). This is the documented priva
 root mechanism; `SSL_CERT_FILE` is its fallback. See the
 [official environment-variable reference](https://learn.chatgpt.com/docs/config-file/environment-variables).
 Do not overwrite an existing corporate CA bundle or disable TLS verification.
-The initial leaf certificate lasts one
-year; renew through the same administrator-owned bootstrap before expiry, keeping
-the CA stable. A blocked firewall needs a LAN-scoped 8443 rule, not public access.
+Leaf certificates last one year and renew automatically through the installed
+maintenance policy, keeping the CA and existing leaf private key stable. Missing
+or expiring CA material raises an explicit recovery/trust-migration failure; the
+timer never silently changes desktop trust. A blocked firewall needs a reviewed
+LAN-scoped 8443 rule, not public access.
 
 The root helper accepts only the packaged two-unit contract. It rejects extra
 directives, shell commands, alternate users, changed executables, missing sandbox
 settings, or arbitrary unit names. An update to the root security policy itself
-requires an explicit bootstrap upgrade; CI fails before live install if its
+requires the standard setup-host policy upgrade; CI fails before live install if its
 policy differs. Ordinary app/unit payload publication uses the installed helper.
 No root script from a runner-writable payload is executed.
 
@@ -159,7 +204,8 @@ them or printing their arguments. Do not kill them to make deployment pass.
 
 The existing `laplace.yml` owns delivery: policy and native/.NET tests precede any
 installation. Managed policy/auth/transport tests run in the pre-install unit job.
-Deploy fails early if privileged bootstrap is absent. Both install and publish
+Deploy reconciles and checks installed host policy, failing early if it is missing
+or differs from the reviewed source. Both install and publish
 wait for active ingests. No seed, reset, database exposure, or cancellation is
 introduced.
 
@@ -197,6 +243,7 @@ Focused non-activating checks:
 
 ```sh
 python3 scripts/test-managed-services.py
+python3 scripts/test-managed-host.py
 python3 scripts/test-pg-access.py
 bash scripts/test-deploy-payload-sync.sh
 dotnet test app/Laplace.Endpoints.Mcp.Tests/Laplace.Endpoints.Mcp.Tests.csproj
@@ -230,10 +277,25 @@ On hart-server, with outputs isolated under `/tmp/laplace-managed-build.nB2AVV`:
   a bot account. No real bot, challenge, game or managed service is started by these checks.
 
 These are local results, not a claim that the LAN TLS URL or new systemd units are
-already deployed. PR/Actions evidence and the privileged bootstrap remain release gates.
+already deployed. PR/Actions evidence and standard privileged host provisioning remain release gates.
 
 Delivery: [PR #1331](https://github.com/SaltyPatron/Laplace/pull/1331), implementation
 commit `7f7b38fe`; non-deploying
 [Actions run 33117337062](https://github.com/SaltyPatron/Laplace/actions/runs/33117337062)
 was dispatched with `stage=test`. Its live status is authoritative; dispatch is
 not a passing result. No main merge or privileged activation was performed.
+
+## Persistent provisioning follow-up (2026-08-28)
+
+The setup-host integration and boot/timer/CI reconciliation replace the earlier
+standalone manual-bootstrap instructions. Tests execute targeted setup dispatch,
+repeated configuration, drift repair, read-only status, transaction exclusion,
+peer reload rollback, real OpenSSL certificate renewal/name binding, preservation
+of CA/private-key identity, nginx failure recovery and late policy-upgrade recovery
+against isolated files and fake OS actions. `systemd-analyze verify` checks the
+generated maintenance units. These are provisioning contract tests, not evidence
+that this host's root policy or timer has been installed yet.
+The 14 host tests passed locally. Deliberately omitting maintenance installation
+and bypassing the renewal deadline each caused the corresponding test to fail;
+the unmodified implementation was then rerun successfully. The existing 14
+deployment-policy and 9 PostgreSQL audit/map tests also pass.

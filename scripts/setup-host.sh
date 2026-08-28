@@ -15,6 +15,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 BOOTSTRAP="$SCRIPT_DIR/bootstrap-laplace-runner.sh"
 STRIPE_BOOTSTRAP="$SCRIPT_DIR/bootstrap-stripe-dev.sh"
+MANAGED_BOOTSTRAP="$REPO_DIR/deploy/linux/laplace-managed-deploy"
 MIGRATIONS_PROJ="$REPO_DIR/app/Laplace.Migrations/Laplace.Migrations.csproj"
 RUNNER_USER="laplace-runner"
 
@@ -46,8 +47,14 @@ usage() {
     cat <<EOF
 Usage: sudo bash $0
 
-  setup   (default) Full host bring-up. Idempotent.
-  status / reset    Debug / teardown.
+  setup                    (default) Full host bring-up, including managed services.
+  managed-services         Reconcile managed host policy only; no DB rebuild or app restart.
+  managed-services-status  Read-only managed host configuration/drift report.
+  status / reset           Debug / teardown.
+
+managed-services optionally accepts --address, --network and --hostname. Settings
+are persisted; omitted values preserve the installed configuration on later runs.
+Boot maintenance, an hourly timer and CI deploy reapply the installed host policy.
 
 After setup: push to main (CI publish owns /opt/laplace/secrets from GitHub
 repository Secrets: LICHESS_API, STRIPE_API_SECRET, STRIPE_WEBHOOK_SECRET).
@@ -60,6 +67,23 @@ ensure_dotnet_present() {
         red "dotnet not found in PATH. Install .NET 10 SDK first."
         exit 1
     fi
+}
+
+managed_services_setup() {
+    if [ "$(id -u)" -ne 0 ]; then
+        red "managed host provisioning needs root — run: sudo bash scripts/setup-host.sh managed-services"
+        return 1
+    fi
+    say "Managed services — persistent host policy, peer identities, HTTPS and maintenance"
+    python3 "$MANAGED_BOOTSTRAP" bootstrap "$@"
+}
+
+managed_services_status() {
+    if [ "$(id -u)" -ne 0 ]; then
+        red "managed host status needs root — run: sudo bash scripts/setup-host.sh managed-services-status"
+        return 1
+    fi
+    /usr/local/libexec/laplace-managed-deploy host-status
 }
 
 # Optional local convenience only — NOT the deploy path.
@@ -273,6 +297,7 @@ do_setup() {
 
     layer1_build_install_extensions
     layer1_up
+    managed_services_setup
 
     say "DONE — host ready. CI owns deploys + runtime secrets."
     cat <<EOF
@@ -328,12 +353,14 @@ do_stripe() {
 
 case "$MODE" in
     setup)          do_setup ;;
+    managed-services) managed_services_setup "${@:2}" ;;
+    managed-services-status) managed_services_status ;;
     status)         do_status ;;
     reset)          do_reset ;;
     stripe)         do_stripe ;;
     -h|--help|help) usage ;;
     *)
-        red "Unknown mode: $MODE — use setup/status/reset"
+        red "Unknown mode: $MODE — use setup/managed-services/managed-services-status/status/reset"
         usage
         exit 64
         ;;

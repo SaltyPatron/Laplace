@@ -1,6 +1,6 @@
 [Unit]
 Description=Laplace managed Lichess bot
-After=network-online.target laplace-postgresql.service
+After=network-online.target laplace-postgresql.service laplace-managed-host.service
 Wants=network-online.target laplace-postgresql.service
 ConditionPathExists=!/var/lib/laplace-managed/lichess.stopped
 

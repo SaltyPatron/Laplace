@@ -1,6 +1,6 @@
 [Unit]
 Description=Laplace authenticated Streamable HTTP MCP
-After=network-online.target laplace-postgresql.service
+After=network-online.target laplace-postgresql.service laplace-managed-host.service
 Wants=network-online.target laplace-postgresql.service
 ConditionPathExists=!/var/lib/laplace-managed/mcp.stopped
 
@@ -12,6 +12,7 @@ WorkingDirectory=/var/lib/laplace-mcp
 Environment="LAPLACE_DB=Host=/var/run/postgresql;Username=laplace_admin;Database=laplace"
 EnvironmentFile=/opt/laplace/secrets/mcp.env
 EnvironmentFile=-/opt/laplace/secrets/agents.env
+EnvironmentFile=/var/lib/laplace-managed/mcp-host.env
 UnsetEnvironment=PGPASSWORD PGPASSFILE
 ExecStart=/opt/laplace/app/laplace-mcp --http
 Restart=on-failure

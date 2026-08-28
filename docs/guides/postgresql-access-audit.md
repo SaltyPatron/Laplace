@@ -102,6 +102,11 @@ that does not make the underlying superuser role least-privileged.
 - Host bootstrap now renders peer mappings for both known managed accounts when
   installed, preserving their access across re-provisioning. It validates the
   operator before opening the identity file. It does **not** change TCP rules.
+- Persistent managed-host reconciliation is part of `setup-host`, boot/hourly
+  maintenance and CI deploy preflight. It repairs the two managed peer mappings
+  if missing, preserving all others and restoring the previous file if reload
+  fails. It never changes PostgreSQL listener/HBA/firewall configuration; the
+  staged network/role migration below remains necessary.
 - The existing CI policy job executes the redaction/map/deployment tests; its
   pre-install unit job executes `ManagedServiceDatabaseTests`. These tests do not
   connect to production or alter users, files under `/opt`, HBA, or services.
