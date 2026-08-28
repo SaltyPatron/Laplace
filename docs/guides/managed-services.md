@@ -371,5 +371,38 @@ initialization does not acquire a reference, and only the last owner closes the
 pool/database. Three new database-backed regressions failed against the old fixture
 and pass with the repair. The complete substrate suite passed locally: 820 passed,
 one existing corpus-dependent skip. No production connection limit was raised and
-no test was disabled or serialized to obtain that result. CI rollout must still
-pass the full concurrent integration suite before managed-service publication.
+no test was disabled or serialized to obtain that result. Follow-up CI run
+`33137456589` passed installation, database synchronization and the full concurrent
+integration stage, then restored the API. It intentionally stopped at integration;
+managed-service publication still requires a successful publish-stage rollout.
+
+## LAN TLS verification repair (2026-08-28)
+
+On hart-server, the machine's own hostname resolves to `127.0.1.1`, while the
+managed nginx listener deliberately binds only `192.168.1.2:8443`. Deployment
+verification now connects to the provisioned LAN address while retaining the
+configured hostname for TLS SNI, certificate verification and the HTTP Host
+header. It does not change DNS, widen the listener, disable certificate checks,
+use environment proxies, or follow redirects with the bearer token.
+
+`python3 scripts/test-managed-tls.py` exercises real loopback TLS with disposable
+certificates, including wrong-host and untrusted-certificate rejection before
+HTTP credentials are sent, redirect rejection, and MCP initialization, discovery
+and session cleanup. A deliberately restored hostname-resolution defect fails
+the regression check. A read-only request using the candidate verifier against
+the actual LAN listener returned readiness HTTP 200 with hostname verification;
+this does not establish Windows reachability or MCP application deployment.
+
+This repair changes the root-owned deployment policy. After its CI checks pass,
+an administrator must upgrade that policy using the existing targeted entrypoint:
+
+```bash
+sudo bash /home/ahart/Projects/Laplace-Legacy-Services-20260827/scripts/setup-host.sh managed-services
+```
+
+The targeted mode does not rebuild the application or run database migrations.
+CI intentionally refuses application deployment when the installed policy differs
+from the reviewed source; it cannot grant itself permission to replace root code.
+Once upgraded, the enabled boot/timer reconciliation and CI preflight continue
+maintaining the provisioned configuration. Rerun the normal CI deployment rather
+than manually copying helpers, editing service files, or bypassing that check.
