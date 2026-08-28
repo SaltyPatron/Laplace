@@ -31,6 +31,7 @@ public sealed record CutechessOptions
 
     /// <summary>Stockfish's <c>UCI_Elo</c> cap, paired with <c>UCI_LimitStrength</c>.</summary>
     public int StockfishElo { get; init; } = 2000;
+    public bool StockfishLimitStrength { get; init; } = true;
 
     /// <summary>Games in flight. 1 keeps the transcript readable; higher finishes sooner.</summary>
     public int Concurrency { get; init; } = 1;
@@ -97,9 +98,11 @@ public static partial class CutechessRunner
         {
             "-engine", "name=Laplace", $"cmd={laplaceUci}", "proto=uci",
             "-engine", "name=Stockfish", $"cmd={stockfish}", "proto=uci",
-            "option.UCI_LimitStrength=true", $"option.UCI_Elo={o.StockfishElo}",
-            "-each",
+            $"option.UCI_LimitStrength={o.StockfishLimitStrength.ToString().ToLowerInvariant()}",
         };
+        if (o.StockfishLimitStrength)
+            args.Add($"option.UCI_Elo={o.StockfishElo}");
+        args.Add("-each");
 
         if (o.Depth > 0)
         {
@@ -212,7 +215,7 @@ public static partial class CutechessRunner
         yield return new ChessLabTerminalEvent(ChessLabStream.Command, command.CommandLine);
         yield return new ChessLabLogEvent("info", DescribeRun(options));
 
-        var parser = new TranscriptParser(options.Rounds, options.StockfishElo);
+        var parser = new TranscriptParser(options.Rounds, options.StockfishLimitStrength ? options.StockfishElo : null);
 
         using var proc = Process.Start(psi)!;
 
@@ -256,24 +259,15 @@ public static partial class CutechessRunner
         int exitCode = proc.ExitCode;
         yield return new ChessLabTerminalEvent(ChessLabStream.Runner, $"cutechess-cli exited with code {exitCode}");
 
-        // Exit code alone isn't sufficient: a 0 exit with zero parsed "Score of ..." lines means
-        // cutechess-cli's output didn't match what we expect (version bump, localization, or a
-        // run that produced no games) — that's a real failure, not a silent "Completed" with no
-        // metrics.
-        bool ok = exitCode == 0 && parser.SawScore;
-        yield return ok
-            ? new ChessLabDoneEvent(ChessLabJobState.Completed)
-            : new ChessLabDoneEvent(ChessLabJobState.Failed,
-                exitCode == 0
-                    ? "cutechess exited 0 but no \"Score of ...\" line was ever parsed from its output"
-                    : $"cutechess exited with code {exitCode}");
+        yield return parser.Complete(exitCode);
     }
 
     private static string DescribeRun(CutechessOptions o)
     {
         string clock = o.Depth > 0 ? $"depth {o.Depth} (unclocked)" : $"{o.SecondsPerMove:0.##}s/move";
         string parallel = o.Concurrency > 1 ? $", {o.Concurrency} games in flight" : "";
-        return $"cutechess: {o.Rounds} games, {clock}, Stockfish capped at {o.StockfishElo} Elo{parallel}";
+        string strength = o.StockfishLimitStrength ? $"capped at {o.StockfishElo} Elo" : "full strength";
+        return $"cutechess: {o.Rounds} games, {clock}, Stockfish {strength}{parallel}";
     }
 
     /// <summary>
@@ -291,6 +285,15 @@ public static partial class CutechessRunner
         public bool SawScore { get; private set; }
         public int Done { get; private set; }
         public int Total => _total;
+
+        // cutechess can print a zero-game score after engine initialization fails.
+        // A score line (or a successful process exit) does not prove a match completed.
+        public ChessLabDoneEvent Complete(int exitCode)
+            => exitCode == 0 && SawScore && Done > 0 && Done == Total
+                ? new ChessLabDoneEvent(ChessLabJobState.Completed)
+                : new ChessLabDoneEvent(ChessLabJobState.Failed,
+                    $"cutechess exited with code {exitCode}; completed {Done}/{Total} games"
+                    + (SawScore ? "" : "; no score line was parsed"));
 
         public IEnumerable<ChessLabEvent> Line(string stream, string text)
             => stream == ChessLabStream.Stderr ? Stderr(text) : Stdout(text);

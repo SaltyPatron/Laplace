@@ -45,6 +45,7 @@ case "${1:-}" in
     backup="$(mktemp -d /opt/laplace/app-backups/managed.XXXXXX)"
     chmod 0700 "$backup"
     mkdir -m 0700 "$backup/app" "$backup/secrets"
+    python3 "$ROOT/scripts/install-stockfish.py" --prefix "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}" --snapshot "$backup/stockfish.json"
     # Snapshot before replacing any app file. Preserve runtime config, logs,
     # user work, and all prior immutable runtime directories IN PLACE.
     rsync -a --exclude 'laplace-api.env' --exclude 'agents.json' --exclude 'logs/' --exclude 'chess-lab-work/' \
@@ -76,6 +77,9 @@ case "${1:-}" in
       laplace_sync_payload "$backup/app" "$APP_DIR" \
         --exclude 'laplace-api.env' --exclude 'agents.json' --exclude 'logs/' --exclude 'chess-lab-work/' \
         --exclude 'mcp-runtime/' --exclude 'mcp/' --exclude 'releases/'
+      if [[ -f "$backup/stockfish.json" ]]; then
+        python3 "$ROOT/scripts/install-stockfish.py" --prefix "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}" --restore "$backup/stockfish.json"
+      fi
       for name in mcp operator lichess stripe; do
         if [[ -f "$backup/secrets/$name.env" ]]; then
           cp -p "$backup/secrets/$name.env" "/opt/laplace/secrets/$name.env.restore"

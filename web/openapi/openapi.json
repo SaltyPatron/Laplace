@@ -3290,6 +3290,13 @@
               ],
               "format": "int32"
             }
+          },
+          {
+            "name": "limitStrength",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "responses": {

@@ -14,14 +14,47 @@ public sealed class CutechessRunnerTests
         PgnOut = "/tmp/games.pgn",
     };
 
-    // The regression this whole file exists to prevent recurring. cutechess's MatchParser
-    // turns an argument-less option into QVariant(true); upstream a70c5915 made the -debug
-    // branch reject exactly that, so a bare "-debug" kills the process with
-    //   Warning: Empty value for option "-debug"
-    // before the first game. "all" is the only value it accepts.
+    [Theory]
+    [InlineData(0, 0, ChessLabJobState.Failed)]
+    [InlineData(1, 0, ChessLabJobState.Failed)]
+    [InlineData(4, 0, ChessLabJobState.Completed)]
+    [InlineData(4, 1, ChessLabJobState.Failed)]
+    public void CompletionRequiresAllGamesAndSuccessfulExit(int wins, int exitCode, ChessLabJobState expected)
+    {
+        var parser = new CutechessRunner.TranscriptParser(rounds: 4);
+        _ = parser.Line(ChessLabStream.Stdout, $"Score of Laplace vs Stockfish: {wins} - 0 - 0").ToList();
+        Assert.Equal(expected, parser.Complete(exitCode).FinalState);
+    }
+
+    [Fact]
+    public void CompletionWithoutScoreFails()
+    {
+        var parser = new CutechessRunner.TranscriptParser(rounds: 4);
+        Assert.Equal(ChessLabJobState.Failed, parser.Complete(0).FinalState);
+    }
+
+    [Fact]
+    public void FullStrengthDisablesLimiterAndOmitsElo()
+    {
+        var args = CutechessRunner.BuildArguments(Watchable with { StockfishLimitStrength = false }, "uci", "sf");
+        Assert.Contains("option.UCI_LimitStrength=false", args);
+        Assert.DoesNotContain(args, value => value.StartsWith("option.UCI_Elo=", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(1500)]
+    [InlineData(2300)]
+    [InlineData(2800)]
+    public void RequestedEloIsNotReplacedByDefault(int elo)
+    {
+        var args = CutechessRunner.BuildArguments(Watchable with { StockfishElo = elo }, "uci", "sf");
+        Assert.Contains($"option.UCI_Elo={elo}", args);
+    }
+
     [Fact]
     public void BuildArguments_PassesDebugAll_NeverBareDebug()
     {
+        // A bare -debug becomes QVariant(true), rejected by cutechess before game one.
         var args = CutechessRunner.BuildArguments(Watchable, "/opt/laplace-uci", "/usr/games/stockfish").ToList();
 
         int debug = args.IndexOf("-debug");

@@ -1002,17 +1002,18 @@ phase_api_env() {
 
 phase_chess_lab() {
   echo "===== PHASE — CHESS LAB (stockfish / Qt / cutechess / path env) ====="
-  # Change-aware: the cutechess pin and this bootstrap are the only inputs, and
-  # the cmake configure (Qt feature checks) dominates the cost. Skip only when
+  # Change-aware: pins and bootstrap inputs drive rebuilds; cmake configure
+  # (Qt feature checks) dominates the cost. Skip the build only when
   # the fingerprint matches AND the installed binary actually exists — stamps
   # attest sources, never artifacts (the stale-.so lesson).
   local fp bin="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/bin/cutechess-cli"
-  fp=$(fp_compute external/cutechess scripts/bootstrap-chess-lab.sh)
-  if fp_check chess-lab "$fp" && [[ -x "$bin" ]]; then
-    echo "chess-lab unchanged (pin + bootstrap fingerprint) and $bin present — skipping"
+  fp=$(fp_compute external/cutechess scripts/bootstrap-chess-lab.sh scripts/install-stockfish.py deploy/linux/stockfish-release.json)
+  if fp_check chess-lab "$fp" && [[ -x "$bin" && -x "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/bin/stockfish" ]]; then
+    python3 "$ROOT/scripts/install-stockfish.py" --prefix "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}" || return 1
+    echo "chess-lab inputs unchanged, Stockfish reverified and $bin present — skipping build"
     return 0
   fi
-  bash "$ROOT/scripts/bootstrap-chess-lab.sh"
+  bash "$ROOT/scripts/bootstrap-chess-lab.sh" || return 1
   fp_record chess-lab "$fp"
 }
 
@@ -1113,7 +1114,7 @@ phase_runtime_secrets() {
 # dotnet publish closures, web/ the SPA (openapi.json is generated FROM app/
 # content, so app/ subsumes it), deploy/ the script + unit + nginx material.
 fp_publish() {
-  fp_compute app web deploy
+  fp_compute app web deploy scripts/check-uci-runtime.py
 }
 
 phase_publish() {
@@ -1133,7 +1134,8 @@ phase_publish() {
   # `pipeline.sh publish-stamp` only after /health/ready passes. A deploy that
   # never went ready therefore re-deploys on the next run.
   fp=$(fp_publish)
-  if fp_check publish "$fp" && [[ "$RUNTIME_SECRETS_CHANGED" == 0 && -x "$app_dir/laplace-uci" && -x "$app_dir/laplace-mcp" && -x "$app_dir/laplace-lichess" && -d "$app_dir/wwwroot" ]]; then
+  if fp_check publish "$fp" && [[ "$RUNTIME_SECRETS_CHANGED" == 0 && -x "$app_dir/laplace-uci" && -x "$app_dir/laplace-mcp" && -x "$app_dir/laplace-lichess" && -d "$app_dir/wwwroot" ]] \
+      && python3 "$ROOT/scripts/check-uci-runtime.py" "$app_dir/laplace-uci"; then
     echo "publish domain unchanged (app/ web/ deploy/) and $app_dir intact — skipping deploy"
     mkdir -p "$ROOT/build"
     printf 'skipped' >"$ROOT/build/.publish-action"

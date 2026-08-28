@@ -6,6 +6,55 @@ async function expectOk(response: import('@playwright/test').Response) {
 }
 
 test.describe('chess UI', () => {
+  test('gauntlet accepts non-default Elo and sends explicit full strength', async ({ page }) => {
+    const previews: URL[] = [];
+    const starts: { config: Record<string, string> }[] = [];
+    // All chess requests are mocked: this UI contract must not start an engine or write a game.
+    await page.route('**/chess/lab/**', async (route) => {
+      const url = new URL(route.request().url());
+      if (!url.pathname.startsWith('/chess/lab/')) {
+        await route.fallback();
+        return;
+      }
+      let body: unknown = [];
+      if (url.pathname.endsWith('/catalog')) {
+        body = { engines: Object.fromEntries(['cutechess', 'stockfish', 'qt', 'laplaceUci']
+          .map((key) => [key, { path: `/test/${key}`, found: true, source: 'config' }])) };
+      } else if (url.pathname.endsWith('/preview')) {
+        previews.push(url);
+        body = { commandLine: 'cutechess-cli -debug all', ready: true, games: 10, missing: [] };
+      } else if (url.pathname.endsWith('/start')) {
+        starts.push(route.request().postDataJSON());
+        body = { jobId: 'ui-only-test' };
+      } else if (url.pathname.includes('/events')) {
+        await route.fulfill({ contentType: 'text/event-stream', body: '' });
+        return;
+      }
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) });
+    });
+
+    await page.goto('/lab/gauntlet');
+    const elo = page.getByRole('spinbutton', { name: 'Stockfish Elo cap' });
+    await expect(elo).toHaveValue('2000');
+    await elo.fill('2300');
+    await expect(elo).toHaveValue('2300');
+    await expect.poll(() => previews.at(-1)?.searchParams.get('elo')).toBe('2300');
+    await page.getByRole('button', { name: 'Start gauntlet', exact: true }).click();
+    await expect.poll(() => starts.length).toBe(1);
+    expect(starts[0].config).toMatchObject({ elo: '2300', limitStrength: 'true' });
+
+    await page.getByLabel('Limit Stockfish strength', { exact: true }).click();
+    await expect(elo).toBeDisabled();
+    await expect.poll(() => previews.at(-1)?.searchParams.get('limitStrength')).toBe('false');
+    await page.getByRole('button', { name: 'Start gauntlet', exact: true }).click();
+    await expect.poll(() => starts.length).toBe(2);
+    expect(starts[1].config).toMatchObject({ elo: '2300', limitStrength: 'false' });
+
+    await page.getByLabel('Limit Stockfish strength', { exact: true }).click();
+    await expect(elo).toBeEnabled();
+    await expect(elo).toHaveValue('2300');
+  });
+
   test('player search, sorting, and paging are URL-addressable', async ({ page }) => {
     const requests: URL[] = [];
     await page.route('**/v1/chess/players?**', async (route) => {

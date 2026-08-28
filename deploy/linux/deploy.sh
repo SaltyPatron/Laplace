@@ -112,34 +112,29 @@ else
   fi
 fi
 
-echo "==> [3/4] overlay SPA + UCI; prepare isolated MCP runtime"
+echo "==> [3/4] overlay SPA; prepare isolated UCI/MCP/Lichess runtimes"
 rm -rf "$STAGE/wwwroot"
 mkdir -p "$STAGE/wwwroot"
 cp -r "$REPO_ROOT/web/dist/." "$STAGE/wwwroot/"
-if [[ -f "$UCI_STAGE/laplace-uci" ]]; then
-  cp -f "$UCI_STAGE/laplace-uci" "$STAGE/laplace-uci"
-  chmod 0755 "$STAGE/laplace-uci"
-elif [[ -f "$UCI_STAGE/laplace-uci.exe" ]]; then
-  cp -f "$UCI_STAGE/laplace-uci.exe" "$STAGE/laplace-uci"
-  chmod 0755 "$STAGE/laplace-uci"
-else
-  echo "::error::laplace-uci missing from UCI publish output"
-  ls -la "$UCI_STAGE" || true
-  exit 1
-fi
+test -x "$UCI_STAGE/laplace-uci"
 test -f "$MCP_STAGE/Laplace.Endpoints.Mcp"
 test -f "$LICHESS_STAGE/Laplace.Endpoints.Lichess"
 chmod 0755 "$MCP_STAGE/Laplace.Endpoints.Mcp" "$LICHESS_STAGE/Laplace.Endpoints.Lichess"
 # Retain the original mcp-runtime directory AND prior releases: running STDIO
 # clients resolve managed/native dependencies relative to their original apphost.
 # No rsync is ever allowed to overwrite those directories on a later publish.
-release="$(laplace_stage_managed_runtimes "$APP_DIR" "$MCP_STAGE" "$LICHESS_STAGE")"
+release="$(laplace_stage_managed_runtimes "$APP_DIR" "$MCP_STAGE" "$LICHESS_STAGE" "$UCI_STAGE")"
 release_name="$(basename "$release")"
+ln -s "releases/$release_name/uci/laplace-uci" "$STAGE/laplace-uci"
 ln -s "releases/$release_name/mcp/Laplace.Endpoints.Mcp" "$STAGE/laplace-mcp"
 ln -s "releases/$release_name/lichess/Laplace.Endpoints.Lichess" "$STAGE/laplace-lichess"
 mkdir "$STAGE/managed-services"
 cp "$REPO_ROOT/deploy/linux/managed-services/"*.service "$STAGE/managed-services/"
 cp "$REPO_ROOT/deploy/linux/laplace-managed-deploy" "$STAGE/managed-services/"
+
+# Exercise the copied runtime before stopping/replacing the API. File existence
+# alone accepted an apphost whose managed assembly was entirely absent.
+python3 "$REPO_ROOT/scripts/check-uci-runtime.py" "$release/uci/laplace-uci"
 
 echo "==> [4/4] sync isolated MCP runtime + app into $APP_DIR"
 if [[ "${LAPLACE_MANAGED_TRANSACTION:-}" == "1" ]]; then

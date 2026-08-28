@@ -113,7 +113,7 @@ internal static class ChessEndpoints
         // hour of engine time — and it comes from CutechessRunner.BuildArguments, the same
         // function the job uses, so the preview cannot drift from the thing it previews.
         app.MapGet("/chess/lab/cutechess/preview", (
-            int? rounds, int? depth, double? st, int? elo, int? concurrency) =>
+            int? rounds, int? depth, double? st, int? elo, int? concurrency, bool? limitStrength) =>
         {
             var options = new CutechessOptions
             {
@@ -121,6 +121,7 @@ internal static class ChessEndpoints
                 Depth = Math.Max(0, depth ?? 0),
                 SecondsPerMove = Math.Max(0.05, st ?? 1),
                 StockfishElo = elo ?? 2000,
+                StockfishLimitStrength = limitStrength ?? true,
                 Concurrency = Math.Max(1, concurrency ?? 1),
                 PgnOut = Path.Combine(ChessLabPaths.LabDir, "{job}", "games.pgn"),
                 Event = "chess-lab/cutechess/{job}",

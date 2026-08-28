@@ -29,20 +29,28 @@ laplace_sync_payload() {
 }
 
 # Publish each managed runtime into a NEW immutable directory. Return its absolute
-# path; the caller updates stable launch links only after both copies succeed.
+# path; the caller updates stable launch links only after all copies succeed.
 laplace_stage_managed_runtimes() {
-  local app_dir="$1" mcp_stage="$2" lichess_stage="$3" release
+  local app_dir="$1" mcp_stage="$2" lichess_stage="$3" uci_stage="$4" release suffix
   # Explicit propagation matters inside command substitution, where Bash may
   # clear errexit; a failed rsync must never be masked by the final printf.
   test -x "$mcp_stage/Laplace.Endpoints.Mcp" || return 1
   test -x "$lichess_stage/Laplace.Endpoints.Lichess" || return 1
+  test -x "$uci_stage/laplace-uci" || return 1
+  for suffix in dll deps.json runtimeconfig.json; do
+    test -s "$uci_stage/laplace-uci.$suffix" || return 1
+  done
   install -d -m 2775 "$app_dir/releases" || return 1
   release="$(mktemp -d "$app_dir/releases/runtime.XXXXXX")" || return 1
   chmod 0755 "$release" || return 1
-  mkdir -m 0755 "$release/mcp" "$release/lichess" || return 1
+  mkdir -m 0755 "$release/mcp" "$release/lichess" "$release/uci" || return 1
   laplace_sync_payload "$mcp_stage" "$release/mcp" || return 1
   laplace_sync_payload "$lichess_stage" "$release/lichess" || return 1
+  # A .NET apphost is not a standalone executable: preserve its entire publish
+  # closure, isolated from the API's differently named runtime/dependency files.
+  laplace_sync_payload "$uci_stage" "$release/uci" || return 1
   ln -s ../../../logs "$release/mcp/logs" || return 1
   ln -s ../../../logs "$release/lichess/logs" || return 1
+  ln -s ../../../logs "$release/uci/logs" || return 1
   printf '%s\n' "$release"
 }
