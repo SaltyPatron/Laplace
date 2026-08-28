@@ -35,9 +35,13 @@ CREATE OR REPLACE FUNCTION converse.prompt_words(p_text text)
     LANGUAGE sql LAPLACE_STABLE_STRICT
 BEGIN ATOMIC
     WITH seg AS MATERIALIZED (
-        SELECT ws.ord, ws.word, e.id
+        -- Existence is a predicate, not a join: the same content id can be
+        -- witnessed at several tiers/types. Those witnesses must not multiply
+        -- a prompt position. Retain NULL for an unattested surface.
+        SELECT ws.ord, ws.word,
+               CASE WHEN EXISTS (SELECT 1 FROM laplace.entities e WHERE e.id = ws.id)
+                    THEN ws.id END AS id
         FROM converse.word_segment_resolved(p_text) ws
-        LEFT JOIN laplace.entities e ON e.id = ws.id
     ), variants AS MATERIALIZED (
         SELECT v.word_id, v.variant_id
         FROM lexical.word_case_variants_batch(

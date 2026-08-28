@@ -63,3 +63,30 @@ The prior full service rollout failed the semantic election evaluation and
 rolled back. That gate has not been bypassed, weakened or re-baselined. These
 changes require CI verification and successful delivery before the live host
 can be described as upgraded. A green test-only run is not a deployment.
+
+## Rollout 33140857533: still rolled back
+
+The main-branch run at `a9667a7e` passed publish and smoke, then failed election
+correctness (1/6 exact, p50 1.6514 seconds). The restore job rolled the runtime
+back at 04:12 UTC on 2026-08-28. The user's 04:13 cutechess job therefore used
+Stockfish 14.1 and the old incomplete UCI launcher again. No further bootstrap
+command fixes that release outcome. The 4/4 forward-hygiene result is not an
+answer-correctness claim: probes without expected answers can pass with empty
+or irrelevant predictions.
+
+Investigation also reproduced a separate token-identity defect: an id witnessed
+at multiple tiers multiplied one input position in `prompt_words`, then in
+`prompt_state` and `prompt_coherence`. The existence join is now a semi-join
+predicate; unknown ids still yield NULL and repeated input positions remain
+distinct. The `converse` PostgreSQL regression exercises all three operations
+with a two-tier fixture. On a disposable socket-only PostgreSQL instance the
+whole regression passes; restoring the original function deliberately fails
+all three new position assertions, while the unknown-id assertion still passes.
+
+This cardinality repair does **not** establish semantic election correctness.
+Live read-only diagnostics recognize "What is a glacier?" as English but elect
+`a` with sense surface `et` (whose global language winner is French). Candidate
+language disagreement is only a later tie-break, after coherence. The graph
+also attests the `a`→`et` synonym edge in both English and French, so blindly
+filtering by language is not an evidenced solution. The semantic gate, baseline,
+expected answers, and full-release rollback policy remain unchanged.
