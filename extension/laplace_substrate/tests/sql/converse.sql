@@ -156,6 +156,23 @@ FROM converse.orient_topic('犬', public.laplace_hash128_blake3('test/converse/l
 
 SELECT word, (id IS NOT NULL) AS resolved FROM converse.prompt_words('what is a Dog') ORDER BY ord;
 
+-- A content id may exist at multiple tiers; each input position still occurs
+-- exactly once. Repeated input positions must not be collapsed with DISTINCT.
+SAVEPOINT token_identity;
+INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
+SELECT id, 2, type_id, first_observed_by FROM laplace.entities
+WHERE id = laplace.word_id('p') AND tier = 0;
+SELECT count(*) = 2 AND count(DISTINCT ord) = 2
+       AND bool_and(id = laplace.word_id('p')) AS words_keep_positions
+FROM converse.prompt_words('p p');
+SELECT count(*) = 2 AND count(DISTINCT ord) = 2 AS state_keeps_positions
+FROM converse.prompt_state('p p');
+SELECT count(*) = 2 AND count(DISTINCT ord) = 2 AS coherence_keeps_positions
+FROM converse.prompt_coherence('p p');
+SELECT count(*) = 1 AND bool_and(id IS NULL) AS unknown_stays_null
+FROM converse.prompt_words('zzzunknownzzz');
+ROLLBACK TO SAVEPOINT token_identity;
+
 SELECT converse.resolve_phrase('sort a list') = laplace.word_id('sort') AS phrase_prefers_leftmost;
 SELECT converse.resolve_phrase('what is a dog') = laplace.word_id('dog') AS phrase_finds_dog;
 SELECT converse.resolve_last_word('what is a dog') = laplace.word_id('dog') AS last_word_is_dog;
