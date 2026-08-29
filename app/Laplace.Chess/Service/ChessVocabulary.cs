@@ -47,9 +47,9 @@ public static class ChessVocabulary
     public static readonly Hash128 PlayerType = EntityTypeRegistry.Id("Chess_Player");
     public static readonly Hash128 PlayedByType = EntityTypeRegistry.Id("PLAYED_BY");
     public static readonly Hash128 HasRatingType = EntityTypeRegistry.Id("HAS_RATING");
-    // The manifest's tail keeps the two chess-specific family roots in stable order:
-    // CORRESPONDS_TO, HAS_NAME_ALIAS. Reuse that governed spelling instead of adding a
-    // second C# vocabulary literal; the ISA g3 ratchet is shrink-only by design.
+    // The manifest's tail keeps the two chess-specific family roots in stable order. Reuse
+    // that governed spelling instead of adding a second C# vocabulary literal; the ISA g3
+    // ratchet is shrink-only by design.
     public static readonly Hash128 CorrespondsToType = EntityTypeRegistry.Id(ChessSeedManifest.Relations[^2]);
 
 
