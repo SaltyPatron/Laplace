@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
@@ -160,7 +161,13 @@ public sealed class LichessBot : IAsyncDisposable
         Search? search = null;
 
         if (_record)
-            await _host.OpenGameAsync(substrateGameId, "chess/lichess/game", ct: ct);
+            await _host.OpenGameAsync(
+                substrateGameId, "chess/lichess/game",
+                metadata: new ChessLiveGameMetadata(
+                    Event: "Lichess",
+                    Site: "lichess.org",
+                    ExternalGameId: $"lichess:{lichessGameId}"),
+                ct: ct);
 
         try
         {
@@ -188,12 +195,12 @@ public sealed class LichessBot : IAsyncDisposable
                 {
                     var sourceWhite = ReadPlayerName(ev, "white") ?? "Lichess player";
                     var sourceBlack = ReadPlayerName(ev, "black") ?? "Lichess player";
-                    var whiteName = weAreWhite ? "Laplace" : sourceWhite;
-                    var blackName = weAreWhite ? sourceBlack : "Laplace";
+                    var whiteName = weAreWhite ? (_botUsername ?? sourceWhite) : sourceWhite;
+                    var blackName = weAreWhite ? sourceBlack : (_botUsername ?? sourceBlack);
                     _host.SetGamePlayers(
                         substrateGameId,
-                        ChessVocabulary.PlayerId(whiteName), whiteName,
-                        ChessVocabulary.PlayerId(blackName), blackName);
+                        weAreWhite ? ChessVocabulary.LaplacePlayerId : ChessVocabulary.PlayerId(whiteName), whiteName,
+                        weAreWhite ? ChessVocabulary.PlayerId(blackName) : ChessVocabulary.LaplacePlayerId, blackName);
                     stateEl = ev.GetProperty("state");
                     moves = stateEl.TryGetProperty("moves", out var m) ? m.GetString() ?? "" : "";
                     wtime = stateEl.TryGetProperty("wtime", out var wt) ? wt.GetInt32() : 0;
@@ -201,6 +208,17 @@ public sealed class LichessBot : IAsyncDisposable
                     winc = stateEl.TryGetProperty("winc", out var wi) ? wi.GetInt32() : 0;
                     binc = stateEl.TryGetProperty("binc", out var bi) ? bi.GetInt32() : 0;
                     initialFen = ev.TryGetProperty("initialFen", out var fen) ? fen.GetString() ?? "startpos" : "startpos";
+                    var startFenMeta = initialFen is "startpos" or "" ? ChessModality.StartFen : initialFen;
+                    _host.SetGameMetadata(substrateGameId, new ChessLiveGameMetadata(
+                        Event: "Lichess",
+                        Site: "lichess.org",
+                        Date: ReadCreatedDate(ev),
+                        TimeControl: ReadTimeControl(ev),
+                        TimeControlClass: ReadSpeedClass(ev),
+                        StartFen: startFenMeta,
+                        ExternalGameId: $"lichess:{lichessGameId}",
+                        WhiteRating: ReadPlayerRating(ev, "white"),
+                        BlackRating: ReadPlayerRating(ev, "black")));
                 }
                 else
                 {
@@ -246,6 +264,10 @@ public sealed class LichessBot : IAsyncDisposable
                         Hash128? moverId = PlayerIdForSide(mover, weAreWhite);
                         await _host.RecordPlyAsync(
                             substrateGameId, ply, fromKey, toKey, uciMoves[i], moverId, ct);
+                        var motifs = ChessMotifs.DetectAtPly(board, applied.Value, trackState.Board).ToList();
+                        if (motifs.Count > 0)
+                            await _host.RecordPlyAnalysisAsync(
+                                substrateGameId, ply, new ChessLivePlyAnalysis(Motifs: motifs), ct);
                         if (search is null) search = _host.BuildSearch(_substrate, maxDepth: _maxDepth);
                         else _host.RefreshSearch(search, _substrate);
                     }
@@ -253,8 +275,26 @@ public sealed class LichessBot : IAsyncDisposable
                     trackedPlies++;
                 }
 
+                // wtime/btime is the clock AFTER the latest move in this state. It proves the
+                // latest ply's remaining clock and nothing about earlier plies after reconnect.
+                if (_record && uciMoves.Length > 0 && trackedPlies == uciMoves.Length)
+                {
+                    int latestPly = uciMoves.Length;
+                    bool latestWasWhite = (latestPly & 1) == 1;
+                    int remaining = latestWasWhite ? wtime : btime;
+                    if (remaining >= 0)
+                        await _host.RecordPlyClockAsync(substrateGameId, latestPly, remaining, ct);
+                }
+
                 if (TryParseOutcome(stateEl) is { } parsed)
                 {
+                    if (_record)
+                    {
+                        string termination = stateEl.TryGetProperty("status", out var status)
+                            ? status.GetString() ?? "" : "";
+                        _host.SetGameMetadata(substrateGameId,
+                            new ChessLiveGameMetadata(Termination: termination));
+                    }
                     outcome = parsed;
                     break;
                 }
@@ -293,11 +333,14 @@ public sealed class LichessBot : IAsyncDisposable
                     // the old rebuild-here minted a fresh Search whose empty
                     // transposition table yielded no PV for the commentary.
                     var pv = search!.ExtractPv(boardNow);
+                    var motifs = ChessMotifs.DetectAtPly(boardNow, mv, after.Board).ToList();
+                    await _host.RecordPlyAnalysisAsync(
+                        substrateGameId, ply,
+                        new ChessLivePlyAnalysis(result.Score, result.Depth, result.Nodes, pv, motifs), ct);
                     _host.RefreshSearch(search, _substrate);
 
                     try
                     {
-                        var motifs = ChessMotifs.DetectAtPly(boardNow, mv, after.Board).ToList();
                         int whiteCp = boardNow.WhiteToMove ? result.Score : -result.Score;
                         string comment = await ChessMoveCommentary.BuildAsync(
                             _host.DataSource,
@@ -352,6 +395,58 @@ public sealed class LichessBot : IAsyncDisposable
                 return value.GetString();
         }
         return null;
+    }
+
+    internal static int? ReadPlayerRating(JsonElement game, string side)
+    {
+        if (!game.TryGetProperty(side, out var player)
+            || !player.TryGetProperty("rating", out var rating)
+            || rating.ValueKind != JsonValueKind.Number
+            || !rating.TryGetInt32(out int value)
+            || value <= 0)
+            return null;
+        return value;
+    }
+
+    internal static string? ReadCreatedDate(JsonElement game)
+    {
+        if (!game.TryGetProperty("createdAt", out var created)
+            || created.ValueKind != JsonValueKind.Number
+            || !created.TryGetInt64(out long millis))
+            return null;
+        try
+        {
+            return DateTimeOffset.FromUnixTimeMilliseconds(millis)
+                .ToString("yyyy.MM.dd", CultureInfo.InvariantCulture);
+        }
+        catch (ArgumentOutOfRangeException) { return null; }
+    }
+
+    internal static string? ReadTimeControl(JsonElement game)
+    {
+        if (!game.TryGetProperty("clock", out var clock) || clock.ValueKind != JsonValueKind.Object)
+            return null;
+        if (!clock.TryGetProperty("initial", out var initialEl)
+            || !initialEl.TryGetInt32(out int initialMs)
+            || initialMs < 0)
+            return null;
+        int incrementMs = clock.TryGetProperty("increment", out var incEl)
+            && incEl.TryGetInt32(out int inc) ? Math.Max(0, inc) : 0;
+        return $"{initialMs / 1000}+{incrementMs / 1000}";
+    }
+
+    internal static string? ReadSpeedClass(JsonElement game)
+    {
+        if (!game.TryGetProperty("speed", out var speed) || speed.ValueKind != JsonValueKind.String)
+            return null;
+        return speed.GetString() switch
+        {
+            "ultraBullet" or "bullet" => "bullet",
+            "blitz" => "blitz",
+            "rapid" => "rapid",
+            "classical" or "correspondence" => "classical",
+            _ => null,
+        };
     }
 
     public async Task PostChatAsync(string lichessGameId, string room, string text, CancellationToken ct = default)
