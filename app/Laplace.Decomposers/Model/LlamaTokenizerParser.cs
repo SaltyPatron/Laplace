@@ -143,8 +143,6 @@ public sealed class LlamaTokenizerParser
         }
         catch (InvalidOperationException)
         {
-
-
             if (!CodepointPerfcache.IsLoaded) throw;
             entityId = default;
             tier = 0;
@@ -209,9 +207,6 @@ public sealed class LlamaTokenizerParser
         return rev;
     }
 
-
-
-
     private static bool TryByteLevelDecode(string raw, out byte[] bytes, out bool leadingSpace)
     {
         bytes = Array.Empty<byte>(); leadingSpace = false;
@@ -238,15 +233,9 @@ public sealed class LlamaTokenizerParser
                 return ([b], TokenRole.ByteLevel);
         }
 
-
         if (rawToken.Length > 0 && rawToken[0] != '▁' && !rawToken.StartsWith("##", StringComparison.Ordinal)
             && TryByteLevelDecode(rawToken, out byte[] blBytes, out bool blLead) && blBytes.Length > 0)
         {
-
-
-
-
-
             TokenRole br = blLead ? TokenRole.LeadingSpace : TokenRole.None;
             return (NormalizeNfc(blBytes), br);
         }
@@ -261,8 +250,6 @@ public sealed class LlamaTokenizerParser
         }
         else if (surface.Length > 2 && surface.StartsWith("##", StringComparison.Ordinal))
         {
-
-
             role |= TokenRole.Continuation;
             surface = surface.Substring(2);
         }
@@ -298,31 +285,79 @@ public sealed class LlamaTokenizerParser
 
     public static void StageVocabToken(SubstrateChangeBuilder b, TokenRecord rec, Hash128 sourceId)
     {
-        Span<double> coord = stackalloc double[4];
-        if (!rec.Role.HasFlag(TokenRole.Special)
-            && TryBuildTreeRows(rec.CanonicalBytes, sourceId, out var treeEntities, out var treePhys))
+        // Special tokenizer symbols are governed tokenizer vocabulary. Their ids are
+        // namespaced structural ids, not hashes of the bytes a user typed, so typing
+        // them as Word promoted them into the physical-content admission law and made
+        // the complete model stream fail on entities that intentionally have no
+        // content geometry.
+        if (rec.Role.HasFlag(TokenRole.Special))
+        {
+            b.AddEntity(rec.EntityId, rec.Tier, EntityTypeRegistry.ModelTokenizer,
+                firstObservedBy: sourceId);
+            return;
+        }
+
+        if (TryBuildTreeRows(rec.CanonicalBytes, sourceId, out var treeEntities, out var treePhys))
         {
             foreach (var e in treeEntities) b.AddEntity(e);
             foreach (var p in treePhys) b.AddPhysicality(p);
+            return;
         }
-        else
+
+        // Byte-level BPE vocabulary is allowed to contain sequences that are not
+        // standalone UTF-8. TextDecomposer correctly refuses those sequences, but the
+        // bytes are still literal content. Content admission therefore needs the same
+        // atom->composition representation instead of a geometry-less Word fallback.
+        b.AddEntity(rec.EntityId, EntityTier.Word, TextEntityBuilder.WordTypeId,
+            firstObservedBy: sourceId);
+        StageOpaqueByteContent(b, rec.EntityId, rec.CanonicalBytes, sourceId);
+    }
+
+    private static void StageOpaqueByteContent(
+        SubstrateChangeBuilder b, Hash128 entityId, byte[] bytes, Hash128 sourceId)
+    {
+        if (bytes.Length == 0)
+            throw new InvalidOperationException("model tokenizer emitted empty byte content");
+        if (!CodepointPerfcache.IsLoaded)
+            throw new InvalidOperationException("codepoint perfcache must be loaded before model byte composition");
+
+        var ids = new Hash128[bytes.Length];
+        var flags = new ulong[bytes.Length];
+        var coords = new double[bytes.Length * 4];
+        var cp = CodepointPerfcache.Records;
+        for (int i = 0; i < bytes.Length; i++)
         {
-            b.AddEntity(rec.EntityId, EntityTier.Word, TextEntityBuilder.WordTypeId,
-                firstObservedBy: sourceId);
-            if (rec.HasContentCoord)
+            byte value = bytes[i];
+            flags[i] = Trajectory.VertexFlags(0, false, 0);
+            if (value < ByteAtoms.First)
             {
-                coord[0] = rec.ContentX; coord[1] = rec.ContentY;
-                coord[2] = rec.ContentZ; coord[3] = rec.ContentM;
-                Hash128 physId = PhysicalityId.Compute(rec.EntityId, PhysicalityType.Content);
-                b.AddPhysicality(new PhysicalityRow(
-                    Id: physId, EntityId: rec.EntityId, SourceId: sourceId,
-                    Type: PhysicalityType.Content,
-                    CoordX: rec.ContentX, CoordY: rec.ContentY, CoordZ: rec.ContentZ, CoordM: rec.ContentM,
-                    HilbertIndex: Hilbert128.Encode(coord),
-                    TrajectoryXyzm: null, NConstituents: 0,
-                    AlignmentResidual: null, SourceDim: null, ObservedAtUnixUs: 0));
+                ref readonly var r = ref cp[value];
+                ids[i] = r.Hash;
+                coords[i * 4 + 0] = r.CoordX;
+                coords[i * 4 + 1] = r.CoordY;
+                coords[i * 4 + 2] = r.CoordZ;
+                coords[i * 4 + 3] = r.CoordM;
+            }
+            else
+            {
+                ids[i] = ByteAtoms.Id(value);
+                var c = ByteAtoms.Coord(value);
+                coords[i * 4 + 0] = c[0];
+                coords[i * 4 + 1] = c[1];
+                coords[i * 4 + 2] = c[2];
+                coords[i * 4 + 3] = c[3];
             }
         }
+
+        double[] coord = Math4d.KarcherMean(coords);
+        b.AddPhysicality(new PhysicalityRow(
+            Id: PhysicalityId.Compute(entityId, PhysicalityType.Content),
+            EntityId: entityId, SourceId: sourceId,
+            Type: PhysicalityType.Content,
+            CoordX: coord[0], CoordY: coord[1], CoordZ: coord[2], CoordM: coord[3],
+            HilbertIndex: Hilbert128.Encode(coord),
+            TrajectoryXyzm: Trajectory.Build(ids, flags), NConstituents: ids.Length,
+            AlignmentResidual: null, SourceDim: null, ObservedAtUnixUs: 0));
     }
 
     public static async IAsyncEnumerable<TokenRecord> EnumerateVocabRecordsAsync(
@@ -350,7 +385,6 @@ public sealed class LlamaTokenizerParser
             string? left, right;
             if (el.ValueKind == JsonValueKind.String)
             {
-
                 string? pair = el.GetString();
                 if (string.IsNullOrEmpty(pair)) continue;
                 int sp = pair!.IndexOf(' ');
@@ -360,7 +394,6 @@ public sealed class LlamaTokenizerParser
             }
             else if (el.ValueKind == JsonValueKind.Array && el.GetArrayLength() == 2)
             {
-
                 left = el[0].GetString();
                 right = el[1].GetString();
             }
@@ -437,23 +470,7 @@ public sealed class LlamaTokenizerParser
         }
         var id = Hash128.Blake3(canonical);
         b.AddEntity(id, EntityTier.Word, TextEntityBuilder.WordTypeId, firstObservedBy: sourceId);
-        // Same fallback coordinate rule as Parse(): a lone high byte still has a real,
-        // deterministic ByteAtoms placement -- give it the matching physicality rather than
-        // leaving this Word-tier content entity geometry-less.
-        if (canonical.Length == 1 && canonical[0] >= ByteAtoms.First)
-        {
-            var bc = ByteAtoms.Coord(canonical[0]);
-            Span<double> coord = stackalloc double[4] { bc[0], bc[1], bc[2], bc[3] };
-            Hash128 physId = PhysicalityId.Compute(id, PhysicalityType.Content);
-            b.AddPhysicality(new PhysicalityRow(
-                Id: physId, EntityId: id, SourceId: sourceId,
-                Type: PhysicalityType.Content,
-                CoordX: bc[0], CoordY: bc[1], CoordZ: bc[2], CoordM: bc[3],
-                HilbertIndex: Hilbert128.Encode(coord),
-                TrajectoryXyzm: null, NConstituents: 0,
-                AlignmentResidual: null, SourceDim: null, ObservedAtUnixUs: 0));
-        }
+        StageOpaqueByteContent(b, id, canonical, sourceId);
         return id;
     }
-
 }
