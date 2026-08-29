@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import time
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -26,25 +27,48 @@ def op_rows(
     if timeout_seconds is not None:
         payload["timeout_seconds"] = timeout_seconds
 
-    request = Request(
-        f"{api.rstrip('/')}/v1/op",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            "X-Laplace-Tenant": "ci-eval",
-        },
-        method="POST",
-    )
     # Leave a small transport margin beyond the server-side operation budget.
     transport_timeout = max(30, (timeout_seconds or 15) + 10)
-    try:
-        with urlopen(request, timeout=transport_timeout) as response:
-            result = json.load(response)
-    except HTTPError as ex:
-        detail = ex.read().decode("utf-8", errors="replace")
-        raise LaplaceApiError(f"{name}: HTTP {ex.code}: {detail}") from ex
-    except (URLError, TimeoutError) as ex:
-        raise LaplaceApiError(f"{name}: API unavailable: {ex}") from ex
+    result = None
+    last_error: Exception | None = None
+
+    # A just-restarted substrate can legitimately return one transient 503 while
+    # PostgreSQL/page caches settle. The deployment eval is a semantic gate, not a
+    # race against first-touch warm-up: retry that availability signal once, but
+    # never retry 4xx operation failures or turn a persistent outage into a pass.
+    for attempt in range(2):
+        request = Request(
+            f"{api.rstrip('/')}/v1/op",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "X-Laplace-Tenant": "ci-eval",
+            },
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=transport_timeout) as response:
+                result = json.load(response)
+            last_error = None
+            break
+        except HTTPError as ex:
+            detail = ex.read().decode("utf-8", errors="replace")
+            last_error = LaplaceApiError(f"{name}: HTTP {ex.code}: {detail}")
+            if ex.code == 503 and attempt == 0:
+                time.sleep(1.0)
+                continue
+            raise last_error from ex
+        except (URLError, TimeoutError) as ex:
+            last_error = LaplaceApiError(f"{name}: API unavailable: {ex}")
+            if attempt == 0:
+                time.sleep(1.0)
+                continue
+            raise last_error from ex
+
+    if result is None:
+        if last_error is not None:
+            raise last_error
+        raise LaplaceApiError(f"{name}: API unavailable without a response")
 
     if result.get("object") != "op.result" or result.get("name") != name:
         raise LaplaceApiError(f"{name}: invalid operation response: {result!r}")
