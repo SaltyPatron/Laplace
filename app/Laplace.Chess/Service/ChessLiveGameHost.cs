@@ -258,11 +258,11 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
                     ChessVocabulary.EmitPlayer(
                         b, emitBlack, blackName, ChessVocabulary.SourceId, SourceTrust.Response);
                 if (session.WhitePlayerId is { } wp)
-                    b.AddAttestation(NativeAttestation.CategoricalResolved(
-                        lineId, ChessVocabulary.HasWhiteType, wp, ChessVocabulary.SourceId, playingId, WitnessWeight));
+                    b.AddAttestation(NativeAttestation.Categorical(
+                        lineId, "HAS_WHITE", wp, ChessVocabulary.SourceId, playingId, WitnessWeight));
                 if (session.BlackPlayerId is { } bp)
-                    b.AddAttestation(NativeAttestation.CategoricalResolved(
-                        lineId, ChessVocabulary.HasBlackType, bp, ChessVocabulary.SourceId, playingId, WitnessWeight));
+                    b.AddAttestation(NativeAttestation.Categorical(
+                        lineId, "HAS_BLACK", bp, ChessVocabulary.SourceId, playingId, WitnessWeight));
 
                 // The player/head-to-head cells are bounded, explicitly reusable statistics.
                 // Move, position, substructure and exact-line outcomes are NOT deposited --
@@ -527,8 +527,8 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
     {
         string token = result.ResultToken;
         if (ContentEmitter.Emit(b, token, ChessVocabulary.SourceId) is { } rid)
-            b.AddAttestation(NativeAttestation.CategoricalResolved(
-                lineId, ChessVocabulary.HasResultType, rid,
+            b.AddAttestation(NativeAttestation.Categorical(
+                lineId, "HAS_RESULT", rid,
                 ChessVocabulary.SourceId, eventId, WitnessWeight));
     }
 
