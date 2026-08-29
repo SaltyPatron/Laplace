@@ -198,7 +198,7 @@ public static class MatchRunner
                 substrateGameId: gameId,
                 plyRecordSink: liveHost is null && onPly is null ? null : (gid, ply, sub, obj, mover, uci) =>
                 {
-                    liveHost?.RecordPlyAsync(gid, ply, sub, obj, "?", null, ct)
+                    liveHost?.RecordPlyAsync(gid, ply, sub, obj, uci, null, ct)
                         .GetAwaiter().GetResult();
                     onPly?.Invoke(g, ply, uci, obj);
                 });
