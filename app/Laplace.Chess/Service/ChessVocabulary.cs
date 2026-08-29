@@ -47,6 +47,7 @@ public static class ChessVocabulary
     public static readonly Hash128 PlayerType = EntityTypeRegistry.Id("Chess_Player");
     public static readonly Hash128 PlayedByType = EntityTypeRegistry.Id("PLAYED_BY");
     public static readonly Hash128 HasRatingType = EntityTypeRegistry.Id("HAS_RATING");
+    public static readonly Hash128 CorrespondsToType = EntityTypeRegistry.Id("CORRESPONDS_TO");
 
 
 
@@ -186,23 +187,22 @@ public static class ChessVocabulary
             $"chess/playing/{white}|{black}|{date}|{@event}|{round}|{site}|{lineId}|{resultToken}");
 
     /// <summary>
-    /// One playing of a live/lab game. Content-derived exactly like <see cref="PgnPlayingId"/>:
-    /// the line is the Merkle of the ordered position ids, so it already carries the whole
-    /// move sequence; players, learn context and result close over the rest. Two identical
-    /// self-plays therefore mint ONE playing whose observation count folds, which is the
-    /// designed behaviour — testimony accumulates, rows do not duplicate.
-    ///
-    /// Replaces minting the playing from a session GUID. A random id is not a function of
-    /// what it identifies: the same game replayed produced a different entity every time, so
-    /// re-ingest could never dedupe it and the substrate accumulated a fresh playing per run.
-    /// There was no speed argument either — OfCanonical stack-allocates the UTF-8 and calls
-    /// the native SIMD blake3 (NativeInterop.Hash128Blake3), which beats Guid.NewGuid().
+    /// One playing of a live/lab game. The line is the Merkle of the ordered position ids,
+    /// players/context/result close over the normal content record, and an optional external
+    /// occurrence key distinguishes source-asserted occurrences such as two separate Lichess
+    /// game ids that happen to contain the same line and result. A routing GUID is never an
+    /// occurrence key.
     /// </summary>
     public static Hash128 LivePlayingId(
         Hash128? whitePlayer, Hash128? blackPlayer, string learnContext,
-        Hash128 lineId, string resultToken)
-        => Hash128.OfCanonical(
-            $"chess/playing/live/{whitePlayer}|{blackPlayer}|{learnContext}|{lineId}|{resultToken}");
+        Hash128 lineId, string resultToken, string? occurrenceKey = null)
+    {
+        string canonical =
+            $"chess/playing/live/{whitePlayer}|{blackPlayer}|{learnContext}|{lineId}|{resultToken}";
+        return string.IsNullOrWhiteSpace(occurrenceKey)
+            ? Hash128.OfCanonical(canonical)
+            : Hash128.OfCanonical($"{canonical}|occurrence:{occurrenceKey.Trim()}");
+    }
 
     // IN-MEMORY SESSION HANDLE ONLY — never an entity id. A live game needs a key to route
     // plies to a session before any content exists; that key is not identity and no longer

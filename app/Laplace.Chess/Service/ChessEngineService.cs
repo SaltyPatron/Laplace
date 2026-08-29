@@ -482,8 +482,16 @@ public sealed class ChessEngineService : IAsyncDisposable
             foreach (var uci in moves)
             {
                 if (FindLegalUci(state, uci) is not { } mv) break;
-                state = _modality.Apply(state, mv);
+                string fromKey = _modality.StateKey(state);
+                Hash128? moverId = state.Board.WhiteToMove ? session.WhitePlayerId : session.BlackPlayerId;
+                var next = _modality.Apply(state, mv);
+                string toKey = _modality.StateKey(next);
                 session.Moves.Add(uci);
+                session.PlyCount = session.Moves.Count;
+                if (session.RecordToSubstrate)
+                    await liveHost.RecordPlayPlyAsync(
+                        id, session.PlyCount, fromKey, toKey, uci, moverId, ct);
+                state = next;
             }
         }
 
@@ -515,6 +523,7 @@ public sealed class ChessEngineService : IAsyncDisposable
                 Ply: session.PlyCount);
 
         string fromKey = _modality!.StateKey(state);
+        Hash128? moverId = state.Board.WhiteToMove ? session.WhitePlayerId : session.BlackPlayerId;
         var next = _modality.Apply(state, mv);
         string toKey = _modality.StateKey(next);
         var status = _modality.Terminal(next) is { } t ? Describe(t) : "ongoing";
@@ -527,7 +536,10 @@ public sealed class ChessEngineService : IAsyncDisposable
         if (session.RecordToSubstrate)
         {
             await _liveHost.RecordPlayPlyAsync(
-                sessionId, session.PlyCount, fromKey, toKey, uci, moverPlayerId: null, ct);
+                sessionId, session.PlyCount, fromKey, toKey, uci, moverId, ct);
+            await _liveHost.RecordPlayPlyAnalysisAsync(
+                sessionId, session.PlyCount,
+                new ChessLivePlyAnalysis(Motifs: motifs), ct);
         }
 
         if (status != "ongoing")
@@ -572,7 +584,11 @@ public sealed class ChessEngineService : IAsyncDisposable
         {
             await _liveHost.RecordPlayPlyAsync(
                 sessionId, session.PlyCount, fromKey, toKey, mv.ToUci(), ChessVocabulary.LaplacePlayerId, ct);
+            await _liveHost.RecordPlayPlyAnalysisAsync(
+                sessionId, session.PlyCount,
+                new ChessLivePlyAnalysis(result.Score, result.Depth, result.Nodes, pv, motifs), ct);
         }
+        ReturnEngine(search);
 
         if (status != "ongoing")
             await _liveHost.FinishPlaySessionAsync(sessionId, ParseTerminalStatus(status), adjudicated: false, ct);
