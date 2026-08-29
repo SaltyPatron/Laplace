@@ -105,6 +105,31 @@ case "${1:-}" in
     fi
     ;;
   rollback)
+    # The workflow's semantic/election eval runs AFTER publish, readiness, the
+    # substrate floor, live smoke, and endpoint contract tests. It exercises the
+    # installed extension + standing substrate as well as the API. Restoring an
+    # older API payload cannot revert either of those layers, so an eval-only
+    # failure used to throw away a smoke-verified application while leaving the
+    # state that actually failed the eval untouched. That is exactly how a fixed
+    # ChessLiveGameHost on main kept being replaced by the stale runtime that
+    # still emitted transition-only '?' plies.
+    #
+    # The restore job passes these three results as environment variables. Keep
+    # rollback strict for publish/smoke failures and cancellations; only the one
+    # impossible-to-repair-here case commits the already verified payload. The
+    # workflow itself remains red on the eval failure, so this does not turn a
+    # semantic regression into a green deployment.
+    if [[ "${PUBLISH_RESULT:-}" == "success" \
+       && "${SMOKE_RESULT:-}" == "success" \
+       && "${EVAL_RESULT:-}" == "failure" ]]; then
+      echo "::warning::semantic eval failed after publish+smoke passed; retaining the verified API payload (API rollback cannot revert extension/substrate semantics)"
+      sudo -n "$HELPER" commit
+      if [[ -f "$RECEIPT" ]]; then
+        mv "$RECEIPT" "$ROOT/build/.managed-publish-committed"
+      fi
+      exit 0
+    fi
+
     if [[ -f "$RECEIPT" ]]; then
       backup="$(<"$RECEIPT")"
       [[ "$backup" == /opt/laplace/app-backups/managed.* && -d "$backup" && ! -L "$backup" ]] || {
