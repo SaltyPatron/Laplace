@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import time
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -79,4 +80,21 @@ def op_rows(
     rows = result.get("rows")
     if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
         raise LaplaceApiError(f"{name}: response rows are not objects")
+
+    # The election gate normally reports only rank 1, which hid why the current
+    # large corpus displaced the intended topic. Keep this strictly diagnostic:
+    # emit the operation's already-returned rows, without changing ranking or
+    # making an extra substrate read. The prompt lets ordinals be interpreted in
+    # the job log. Remove after the corpus-scale regression is repaired.
+    if name == "converse.prompt_coherence":
+        sys.stderr.write(
+            "PROMPT_COHERENCE_DIAG "
+            + json.dumps(
+                {"prompt": (args or {}).get("p_prompt"), "rows": rows},
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            + "\n"
+        )
+
     return rows
