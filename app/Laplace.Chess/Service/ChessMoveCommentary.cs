@@ -70,6 +70,7 @@ public static class ChessMoveCommentary
                 ds,
                 positionId.ToBytes(),
                 ChessVocabulary.GameType.ToBytes(),
+                (short)PhysicalityType.Projection,
                 containerLimit: 64,
                 limit: 12,
                 ct).ConfigureAwait(false);
