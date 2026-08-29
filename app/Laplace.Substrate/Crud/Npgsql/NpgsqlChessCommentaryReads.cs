@@ -35,8 +35,8 @@ public static class NpgsqlChessCommentaryReads
         CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
-            WITH lines AS MATERIALIZED (
-                SELECT DISTINCT p.entity_id AS line_id
+            WITH raw_lines AS MATERIALIZED (
+                SELECT p.entity_id AS line_id
                 FROM laplace.physicalities p
                 JOIN laplace.entities e ON e.id = p.entity_id
                 WHERE p.type = @projection_type
@@ -45,6 +45,9 @@ public static class NpgsqlChessCommentaryReads
                   AND public.laplace_trajectory_constituent_ids(p.trajectory)
                       @> ARRAY[@position]::bytea[]
                 LIMIT @container_limit
+            ),
+            lines AS MATERIALIZED (
+                SELECT DISTINCT line_id FROM raw_lines
             )
             SELECT l.line_id, h.event_id, h.played_on,
                    g.white_id, g.white, g.black_id, g.black, g.result
