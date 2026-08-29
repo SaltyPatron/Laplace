@@ -397,7 +397,7 @@ This repair changes the root-owned deployment policy. After its CI checks pass,
 an administrator must upgrade that policy using the existing targeted entrypoint:
 
 ```bash
-sudo bash /home/ahart/Projects/Laplace-Legacy-Services-20260827/scripts/setup-host.sh managed-services
+sudo bash /home/ahart/Projects/Laplace-Legacy/scripts/setup-host.sh managed-services
 ```
 
 The targeted mode does not rebuild the application or run database migrations.
