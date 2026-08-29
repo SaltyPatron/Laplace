@@ -2,13 +2,16 @@ using global::Npgsql;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.Modality.Chess;
+using Laplace.SubstrateCRUD;
 using Laplace.SubstrateCRUD.Npgsql;
 
 namespace Laplace.Chess.Service;
 
 /// <summary>
-/// Substrate-backed move commentary: eval line + motif + book EXPLAINS + recall/salient_facts
-/// templates (no LLM).
+/// Substrate-backed move commentary. The commentary is grounded in the exact chess position:
+/// historical playings that contained it, chess-book testimony about it, the detected chess
+/// motif, and the search that actually chose the move. No generic lexical recall is used for
+/// motif names, so a chess fork can never drift into the culinary sense of "fork".
 /// </summary>
 public static class ChessMoveCommentary
 {
@@ -19,28 +22,31 @@ public static class ChessMoveCommentary
         int Depth,
         IReadOnlyList<string> Pv,
         IReadOnlyList<string> Motifs,
-        string? PositionSurface = null);
+        string? PositionSurface = null,
+        string? PlayedSan = null);
 
     public static async Task<string> BuildAsync(
         NpgsqlDataSource ds, Inputs input, CancellationToken ct = default, int maxChars = LichessMaxChars)
     {
-        var parts = new List<string>(4);
-        string evalLine = FormatEval(input.ScoreCp, input.Depth);
-        if (evalLine.Length > 0) parts.Add(evalLine);
+        var parts = new List<string>(5);
 
-        string? motifLine = null;
-        foreach (var motif in input.Motifs)
-        {
-            motifLine = await MotifLineAsync(ds, motif, ct);
-            if (motifLine is not null) break;
-        }
-        if (motifLine is not null) parts.Add(motifLine);
+        // Position history is the most distinctive substrate observation, so give it the scarce
+        // Lichess chat budget before generic engine telemetry.
+        if (input.PositionSurface is { } surface
+            && await HistoricalPositionLineAsync(ds, surface, input.PlayedSan, ct) is { } history)
+            parts.Add(history);
+
+        if (input.Motifs.FirstOrDefault() is { } motif)
+            parts.Add($"Chess motif: {MotifLabel(motif)}");
 
         // The chess literature's judgment of this exact position, if a book attested one —
         // (text, EXPLAINS, position) edges deposited by ChessBookDecomposer.
-        if (input.PositionSurface is { } surface
-            && await BookLineAsync(ds, surface, ct) is { } bookLine)
+        if (input.PositionSurface is { } bookSurface
+            && await BookLineAsync(ds, bookSurface, ct) is { } bookLine)
             parts.Add(bookLine);
+
+        string evalLine = FormatEval(input.ScoreCp, input.Depth);
+        if (evalLine.Length > 0) parts.Add(evalLine);
 
         if (input.Pv.Count > 0)
             parts.Add($"PV {string.Join(' ', input.Pv.Take(3))}");
@@ -49,6 +55,86 @@ public static class ChessMoveCommentary
     }
 
     private static readonly Hash128 ExplainsRelation = RelationTypeRegistry.RelationTypeId("EXPLAINS");
+
+    private static async Task<string?> HistoricalPositionLineAsync(
+        NpgsqlDataSource ds, string positionSurface, string? playedSan, CancellationToken ct)
+    {
+        try
+        {
+            if (!PositionContent.TryFenFromSurface(positionSurface, out var fen)) return null;
+            var board = Board.FromFen(fen);
+            Hash128 positionId;
+            lock (ChessCompose.Gate) { positionId = ChessCompose.PositionId(board); }
+
+            var history = await NpgsqlChessCommentaryReads.PositionHistoryAsync(
+                ds,
+                positionId.ToBytes(),
+                ChessVocabulary.GameType.ToBytes(),
+                containerLimit: 64,
+                limit: 12,
+                ct).ConfigureAwait(false);
+            if (history.Count == 0) return null;
+
+            var distinctLines = history
+                .Select(static h => Hash128.FromBytes(h.LineId))
+                .Distinct()
+                .Select(static id => id.ToBytes())
+                .ToArray();
+            var projection = await NpgsqlSubstrateReads.TrajectoryConstituentsAsync(
+                ds, distinctLines, PhysicalityType.Projection, ct).ConfigureAwait(false);
+
+            var byLine = projection
+                .GroupBy(static p => Hash128.FromBytes(p.ParentId))
+                .ToDictionary(
+                    static g => g.Key,
+                    static g => g.OrderBy(static p => p.Ordinal)
+                        .Select(static p => Hash128.FromBytes(p.EntityId)).ToArray());
+
+            var nextMoves = LegalSuccessors(board);
+            foreach (var row in history)
+            {
+                string mover = board.WhiteToMove ? row.White : row.Black;
+                if (string.IsNullOrWhiteSpace(mover)) continue;
+
+                string? nextSan = null;
+                var lineId = Hash128.FromBytes(row.LineId);
+                if (byLine.TryGetValue(lineId, out var positions))
+                {
+                    for (int i = 0; i + 1 < positions.Length; i++)
+                    {
+                        if (positions[i] != positionId) continue;
+                        if (nextMoves.TryGetValue(positions[i + 1], out var san))
+                            nextSan = san;
+                        break;
+                    }
+                }
+
+                // Prefer a dated witness for the human-facing historical sentence. If an
+                // undated playing is the only witness it remains in the substrate, but it does
+                // not pretend to provide a year it never asserted.
+                if (Year(row.PlayedOn) is null) continue;
+                return FormatHistorical(row.PlayedOn, mover, nextSan, playedSan);
+            }
+        }
+        catch
+        {
+            // Commentary is decoration; a failed historical lookup must never affect play.
+        }
+        return null;
+    }
+
+    private static Dictionary<Hash128, string> LegalSuccessors(Board board)
+    {
+        var result = new Dictionary<Hash128, string>();
+        foreach (var move in MoveGen.Legal(board))
+        {
+            string san = San.ToSan(board, move);
+            var next = board.Clone();
+            MoveApply.Make(next, move);
+            result[ChessCompose.PositionId(next)] = san;
+        }
+        return result;
+    }
 
     private static async Task<string?> BookLineAsync(
         NpgsqlDataSource ds, string positionSurface, CancellationToken ct)
@@ -93,37 +179,34 @@ public static class ChessMoveCommentary
         return $"Eval {sign}{pawns:0.0} (d{depth})";
     }
 
-    private static async Task<string?> MotifLineAsync(NpgsqlDataSource ds, string motif, CancellationToken ct)
-    {
-        await using var conn = await ds.OpenConnectionAsync(ct);
-        var recall = await NpgsqlSubstrateReads.RecallAsync(conn, $"define {motif}", ct);
-        if (recall.Count > 0 && !string.IsNullOrWhiteSpace(recall[0].Reply))
-            return $"{Label(motif)}: {Truncate(recall[0].Reply, 60)}";
-
-        var traj = await NpgsqlSubstrateReads.RecallTrajectoryAnswerAsync(ds, motif, 2, ct);
-        if (!string.IsNullOrWhiteSpace(traj))
-            return $"{Label(motif)} — {Truncate(traj, 60)}";
-
-        var fact = await NpgsqlSubstrateReads.SalientFactForWordAsync(ds, motif, 3, ct);
-        if (!string.IsNullOrWhiteSpace(fact))
-            return $"{Label(motif)} — {Truncate(fact, 60)}";
-
-        return inputMotifOnly(motif);
-    }
-
-    private static string? inputMotifOnly(string motif) => motif switch
-    {
-        "fork" => "Fork — two targets at once",
-        "discovered_check" => "Discovered check",
-        "hanging_piece_won" => "Won material",
-        _ => Label(motif),
-    };
-
-    private static string Label(string motif) => motif switch
+    internal static string MotifLabel(string motif) => motif switch
     {
         "fork" => "Fork",
         "discovered_check" => "Discovered check",
         "hanging_piece_won" => "Material win",
         _ => motif.Replace('_', ' '),
     };
+
+    internal static string? FormatHistorical(
+        string? playedOn, string mover, string? historicalSan, string? playedSan)
+    {
+        string? year = Year(playedOn);
+        if (year is null || string.IsNullOrWhiteSpace(mover)) return null;
+
+        if (!string.IsNullOrWhiteSpace(historicalSan))
+        {
+            if (!string.IsNullOrWhiteSpace(playedSan)
+                && !string.Equals(historicalSan, playedSan, StringComparison.Ordinal))
+                return $"{year}: {mover} had this exact position and played {historicalSan}, not {playedSan}.";
+            return $"{year}: {mover} had this exact position and also played {historicalSan}.";
+        }
+
+        return $"{year}: {mover} also reached this exact position.";
+    }
+
+    private static string? Year(string? playedOn)
+    {
+        if (string.IsNullOrWhiteSpace(playedOn) || playedOn.Length < 4) return null;
+        return playedOn.Take(4).All(char.IsDigit) ? playedOn[..4] : null;
+    }
 }
