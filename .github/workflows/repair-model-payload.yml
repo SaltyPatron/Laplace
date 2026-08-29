@@ -1,0 +1,39 @@
+name: Repair — model projection payload
+
+# One-shot repair lane for the standing payload that predates the shrink-only
+# model gate. The ordinary release workflow cannot reach db-ops while that gate
+# is red, so the repair itself must be able to run without weakening/rebaselining
+# the gate. It is path-triggered by the repair migration and proves the gate after
+# applying it. Future model payload regressions still fail the ordinary gate.
+on:
+  push:
+    branches: [main]
+    paths:
+      - db/migrations/20260829225000_strip_model_projection_payload.sql
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repair:
+    name: Strip legacy dense model projection payload and prove zero
+    runs-on: [self-hosted, laplace]
+    concurrency:
+      group: laplace-substrate-lifecycle
+      cancel-in-progress: false
+    timeout-minutes: 20
+    steps:
+      - name: Checkout requested revision
+        env:
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
+          git checkout --force "$TARGET_SHA"
+      - uses: ./.github/actions/setup-laplace-env
+      - name: Wait for in-flight ingest
+        run: bash scripts/wait-for-quiet-substrate.sh "${PGDATABASE:-laplace}"
+      - name: Apply scoped cleanup
+        run: psql -h /var/run/postgresql -U laplace_admin -d "${PGDATABASE:-laplace}" -v ON_ERROR_STOP=1 -f db/migrations/20260829225000_strip_model_projection_payload.sql
+      - name: Shrink-only model payload gate must pass
+        run: python3 scripts/model-payload-gate-check.py --strict
