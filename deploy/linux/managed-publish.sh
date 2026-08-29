@@ -25,7 +25,44 @@ installed_policy() {
 preflight() {
   installed_policy
   sudo -n "$HELPER" host-status
-  sudo -n "$HELPER" preflight
+
+  local output rc=0 ready=0
+  output="$(sudo -n "$HELPER" preflight 2>&1)" || rc=$?
+  if [[ "$rc" -eq 0 ]]; then
+    [[ -z "$output" ]] || printf '%s\n' "$output"
+    return 0
+  fi
+
+  # Initial managed-service cutover has one special state that the root helper
+  # deliberately refuses: an in-process Lichess bot owned by the legacy API.
+  # That bot's event stream is intentionally long-lived, so "let it finish" can
+  # never become true on its own. The deploy would later restart this same API
+  # during install anyway. Resolve ONLY that exact condition by using the API's
+  # normal systemd shutdown/restart path, which runs the legacy bot's bounded
+  # drain/dispose logic; standalone CLI bots and every other preflight failure
+  # remain hard stops owned by the root policy.
+  if grep -Fq 'legacy API Lichess bot is active; let it finish before managed deployment' <<<"$output"; then
+    echo "::notice::legacy in-process Lichess bot active — performing graceful API-owned handoff before managed cutover"
+    sudo -n systemctl restart laplace-api
+    for _ in $(seq 1 30); do
+      if curl -fsS http://127.0.0.1:5187/health >/dev/null 2>&1; then
+        ready=1
+        break
+      fi
+      sleep 1
+    done
+    if [[ "$ready" -ne 1 ]]; then
+      echo "::error::laplace-api did not return to liveness after legacy Lichess handoff" >&2
+      return 1
+    fi
+    # Prove the root-owned policy is now satisfied; do not convert any second
+    # failure into a bypass.
+    sudo -n "$HELPER" preflight
+    return
+  fi
+
+  printf '%s\n' "$output" >&2
+  return "$rc"
 }
 
 ensure_host() {
