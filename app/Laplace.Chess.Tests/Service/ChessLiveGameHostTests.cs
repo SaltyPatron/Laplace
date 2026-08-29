@@ -128,6 +128,29 @@ public sealed class ChessLiveGameHostTests
     }
 
     [Fact]
+    public async Task MatchRunner_LiveHost_RecordsResolvedMoveTokens()
+    {
+        if (TestDb.ConnString is not { } cs) return; // integration: explicit test DB only
+
+        await using var host = await ChessLiveGameHost.CreateAsync(
+            defaultLearnContext: "chess/test/match-runner", connString: cs);
+
+        var result = MatchRunner.Play(
+            () => MatchRunner.RandomChooser,
+            () => MatchRunner.RandomChooser,
+            games: 1,
+            maxPlies: 2,
+            seed: 17,
+            concurrency: 1,
+            openingPlies: 0,
+            liveHost: host,
+            liveLearnContext: "chess/test/match-runner");
+
+        Assert.Equal(1, result.Games);
+        Assert.Equal(1, host.GamesCompleted);
+    }
+
+    [Fact]
     public async Task BuildSearch_SubstrateOff_HasNoBias()
     {
         if (TestDb.ConnString is not { } cs) return; // integration: explicit test DB only
