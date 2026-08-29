@@ -5,8 +5,8 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 
 /// <summary>
 /// Bounded, chess-specific read surface for live commentary. The chess service supplies the
-/// Chess_Game type id; this layer only performs indexed composition/provenance reads and never
-/// guesses a textual sense for a motif.
+/// line entity type and projection physicality type; this layer only performs indexed
+/// composition/provenance reads and never guesses a textual sense for a motif.
 /// </summary>
 public static class NpgsqlChessCommentaryReads
 {
@@ -22,22 +22,29 @@ public static class NpgsqlChessCommentaryReads
 
     /// <summary>
     /// Recorded playings whose calculated line projection contains the exact position id.
-    /// The containment probe is bounded before joining provenance so live chat cannot turn into
-    /// an unbounded corpus scan.
+    /// The reverse trajectory probe uses the constituent GIN expression directly and is bounded
+    /// before joining playing provenance so live chat cannot become an unbounded corpus scan.
     /// </summary>
     public static Task<IReadOnlyList<PositionHistoryRow>> PositionHistoryAsync(
         NpgsqlDataSource dataSource,
         byte[] positionId,
         byte[] gameTypeId,
+        short projectionType,
         int containerLimit,
         int limit,
         CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
             WITH lines AS MATERIALIZED (
-                SELECT c.entity_id AS line_id
-                FROM structural.containers_of(@position, 1, @container_limit) c
-                WHERE c.type_id = @game_type
+                SELECT DISTINCT p.entity_id AS line_id
+                FROM laplace.physicalities p
+                JOIN laplace.entities e ON e.id = p.entity_id
+                WHERE p.type = @projection_type
+                  AND e.type_id = @game_type
+                  AND p.trajectory IS NOT NULL
+                  AND public.laplace_trajectory_constituent_ids(p.trajectory)
+                      @> ARRAY[@position]::bytea[]
+                LIMIT @container_limit
             )
             SELECT l.line_id, h.event_id, h.played_on,
                    g.white_id, g.white, g.black_id, g.black, g.result
@@ -60,6 +67,7 @@ public static class NpgsqlChessCommentaryReads
             {
                 p.Add("position", NpgsqlDbType.Bytea).Value = positionId;
                 p.Add("game_type", NpgsqlDbType.Bytea).Value = gameTypeId;
+                p.AddWithValue("projection_type", projectionType);
                 p.AddWithValue("container_limit", Math.Clamp(containerLimit, 1, 256));
                 p.AddWithValue("limit", Math.Clamp(limit, 1, 32));
             },
