@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Laplace.Engine.Core;
 using Laplace.Modality;
 using Laplace.Modality.Chess;
@@ -80,6 +81,55 @@ public sealed class ChessLiveGameHostTests
         var b = ChessLiveGameHost.LichessGameId("abc123");
         Assert.Equal(a, b);
         Assert.NotEqual(ChessLiveGameHost.LichessGameId("other"), a);
+    }
+
+    [Fact]
+    [Trait("Tier", "fast")]
+    public void LivePlayingId_PreservesLegacyIdentityWithoutExternalOccurrence()
+    {
+        var white = ChessVocabulary.PlayerId("A");
+        var black = ChessVocabulary.PlayerId("B");
+        var line = Hash128.OfCanonical("line");
+        var expected = Hash128.OfCanonical(
+            $"chess/playing/live/{white}|{black}|ctx|{line}|1-0");
+
+        Assert.Equal(expected, ChessVocabulary.LivePlayingId(white, black, "ctx", line, "1-0"));
+    }
+
+    [Fact]
+    [Trait("Tier", "fast")]
+    public void LivePlayingId_ExternalOccurrenceSeparatesIdenticalGames()
+    {
+        var white = ChessVocabulary.PlayerId("A");
+        var black = ChessVocabulary.PlayerId("B");
+        var line = Hash128.OfCanonical("same-line");
+
+        var first = ChessVocabulary.LivePlayingId(white, black, "chess/lichess/game", line, "1-0", "lichess:aaa");
+        var second = ChessVocabulary.LivePlayingId(white, black, "chess/lichess/game", line, "1-0", "lichess:bbb");
+
+        Assert.NotEqual(first, second);
+    }
+
+    [Fact]
+    [Trait("Tier", "fast")]
+    public void LichessMetadataReaders_PreserveProviderValues()
+    {
+        using var doc = JsonDocument.Parse("""
+            {
+              "createdAt": 0,
+              "speed": "blitz",
+              "clock": { "initial": 300000, "increment": 5000 },
+              "white": { "rating": 1800 },
+              "black": { "rating": 1900 }
+            }
+            """);
+        var game = doc.RootElement;
+
+        Assert.Equal("1970.01.01", LichessBot.ReadCreatedDate(game));
+        Assert.Equal("300+5", LichessBot.ReadTimeControl(game));
+        Assert.Equal("blitz", LichessBot.ReadSpeedClass(game));
+        Assert.Equal(1800, LichessBot.ReadPlayerRating(game, "white"));
+        Assert.Equal(1900, LichessBot.ReadPlayerRating(game, "black"));
     }
 
     [Fact]
