@@ -51,7 +51,9 @@ on:
         type: choice
         required: true
         default: all
-        options: [check, build, test, deploy, integrate, all]
+        # Application-only stages never enter deploy/db-ops. They require the
+        # installed engine to match the tested build and retain full-release eval.
+        options: [check, build, test, deploy, integrate, all, application-check, applications]
       full_clean:
         description: "wipe build/ before building (same as --force-rebuild)"
         type: boolean
@@ -146,6 +148,17 @@ jobs:
         run: |
           git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
           git checkout --force "$TARGET_SHA"
+
+      - name: Validate application-only release options before building
+        if: github.event_name == 'workflow_dispatch' && contains(fromJSON('["application-check", "applications"]'), inputs.stage)
+        env:
+          FRESH_DB: ${{ inputs.fresh_db }}
+          FULL_CLEAN: ${{ inputs.full_clean }}
+        run: |
+          [[ "$FRESH_DB" != true && "$FULL_CLEAN" != true ]] || {
+            echo "::error::application releases cannot reset the DB or discard install receipts"
+            exit 1
+          }
 
       - name: CI presence tripwire
         # Guards against a repo-hygiene commit sweeping the CI definition away
@@ -493,7 +506,7 @@ jobs:
     needs: [policy, deps]
     if: >-
       github.event_name != 'workflow_dispatch' ||
-      contains(fromJSON('["build", "test", "deploy", "integrate", "all"]'), inputs.stage)
+      contains(fromJSON('["build", "test", "deploy", "integrate", "all", "application-check", "applications"]'), inputs.stage)
     runs-on: [self-hosted, laplace]
     timeout-minutes: 60
     steps:
@@ -531,7 +544,7 @@ jobs:
     needs: build
     if: >-
       github.event_name != 'workflow_dispatch' ||
-      contains(fromJSON('["test", "deploy", "integrate", "all"]'), inputs.stage)
+      contains(fromJSON('["test", "deploy", "integrate", "all", "application-check", "applications"]'), inputs.stage)
     runs-on: [self-hosted, laplace]
     timeout-minutes: 30
     steps:
@@ -571,6 +584,11 @@ jobs:
       - name: Bootstrap tuning validation (disposable PostgreSQL; no live changes)
         run: python3 scripts/test-pg-machine-tuning.py
 
+      - name: Application release compatibility and recovery contracts (no activation)
+        run: |
+          python3 scripts/test-application-runtime.py
+          python3 scripts/test-application-publish.py
+
       - name: Managed service transport and authorization tests (no activation)
         run: |
           dotnet test app/Laplace.Endpoints.Mcp.Tests/Laplace.Endpoints.Mcp.Tests.csproj -c Release --no-build --verbosity minimal
@@ -602,6 +620,58 @@ jobs:
           npm run typecheck
           npx playwright install chromium
           npm run test:chess-ui
+
+  application-release:
+    name: Applications — verified existing engine, independent runtime transaction
+    needs: unit-test
+    if: >-
+      !cancelled() && needs.unit-test.result == 'success' &&
+      github.event_name == 'workflow_dispatch' &&
+      contains(fromJSON('["application-check", "applications"]'), inputs.stage)
+    runs-on: [self-hosted, laplace]
+    concurrency:
+      # Hold the lifecycle slot across preflight, publish, verification AND
+      # recovery; no engine install may interleave these steps.
+      group: laplace-substrate-lifecycle
+      cancel-in-progress: false
+    timeout-minutes: 20
+    steps:
+      - name: Checkout requested revision (preserve build tree)
+        env:
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
+          git checkout --force "$TARGET_SHA"
+      - uses: ./.github/actions/setup-laplace-env
+      - name: Refuse destructive/full-engine options in an application release
+        env:
+          FRESH_DB: ${{ inputs.fresh_db }}
+          FULL_CLEAN: ${{ inputs.full_clean }}
+        run: |
+          [[ "$FRESH_DB" != true && "$FULL_CLEAN" != true ]] || {
+            echo "::error::application releases cannot reset the DB or discard install receipts"
+            exit 1
+          }
+      - name: Read-only application compatibility preflight
+        run: bash scripts/publish-applications.sh check
+      - name: API contracts against the installed native runtime
+        run: |
+          export LD_LIBRARY_PATH="/opt/laplace/lib:${LD_LIBRARY_PATH:-}"
+          dotnet test app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj \
+            -c Release --no-build --filter 'Tier!=db&Tier!=perf' --verbosity minimal
+      - name: Publish and verify application-only transaction
+        if: inputs.stage == 'applications'
+        env:
+          LICHESS_API: ${{ secrets.LICHESS_API }}
+          LAPLACE_MCP_TOKEN: ${{ secrets.LAPLACE_MCP_TOKEN }}
+          LAPLACE_OPERATOR_TOKEN: ${{ secrets.LAPLACE_OPERATOR_TOKEN }}
+          STRIPE_API_SECRET: ${{ secrets.STRIPE_API_SECRET }}
+          STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+          STRIPE_API_Publishable: ${{ vars.STRIPE_API_PUBLISHABLE }}
+        run: bash scripts/publish-applications.sh deploy
+      - name: Recover only this run's unfinished application transaction
+        if: always() && inputs.stage == 'applications'
+        run: bash scripts/publish-applications.sh recover
 
   deploy:
     name: Deploy — stage install to /opt/laplace
