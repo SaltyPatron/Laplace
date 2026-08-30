@@ -32,6 +32,7 @@ builder.Host.UseSerilog((_, lc) =>
     lc.MinimumLevel.Information().ApplyLaplaceSinks("api", console: true, consoleToStdErr: false));
 
 builder.Services.AddOpenAiCompatServices();
+builder.Services.AddSingleton<AdminPostgresDataSources>();
 builder.Services.AddOpenApi();
 
 const int perTenantPerMinute = 300;

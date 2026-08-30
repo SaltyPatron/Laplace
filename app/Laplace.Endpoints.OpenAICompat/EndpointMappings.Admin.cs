@@ -205,7 +205,10 @@ internal static class AdminEndpoints
 
         // ---- maintenance SQL cannot express -------------------------------
 
-        app.MapPost("/v1/admin/maintenance/vacuum", async (JsonObject payload, CancellationToken ct) =>
+        app.MapPost("/v1/admin/maintenance/vacuum", async (
+            AdminPostgresDataSources dataSources,
+            JsonObject payload,
+            CancellationToken ct) =>
         {
             var table = payload["table"]?.GetValue<string>()?.Trim();
             var full = payload["full"]?.GetValue<bool>() ?? false;
@@ -216,29 +219,28 @@ internal static class AdminEndpoints
                     "invalid_request_error",
                     "timeout_seconds must be zero (unbounded) or a positive number of seconds.");
 
-            // The table name reaches the planner as an identifier, so it is
-            // RESOLVED against the catalog rather than quoted and hoped for: the
-            // lookup both refuses an unknown name and returns the schema-qualified
-            // form, so the statement never depends on search_path.
-            string? qualified = null;
-            if (table is not null)
-            {
-                await using var probe = LaplaceDataSource.Create(SubstrateAccess.Serving);
-                qualified = await NpgsqlMaintenance.ResolveSubstrateTableAsync(probe, table, ct);
-                if (qualified is null)
-                    return EndpointJson.BadRequest("invalid_request_error",
-                        $"'{table}' is not a table in the substrate schemas.");
-            }
-
             var clock = System.Diagnostics.Stopwatch.StartNew();
             string sql;
             try
             {
+                // The table name reaches the planner as an identifier, so it is
+                // RESOLVED against the catalog rather than quoted and hoped for: the
+                // lookup both refuses an unknown name and returns the schema-qualified
+                // form, so the statement never depends on search_path.
+                string? qualified = null;
+                if (table is not null)
+                {
+                    qualified = await NpgsqlMaintenance.ResolveSubstrateTableAsync(
+                        dataSources.Serving, table, ct);
+                    if (qualified is null)
+                        return EndpointJson.BadRequest("invalid_request_error",
+                            $"'{table}' is not a table in the substrate schemas.");
+                }
+
                 // Ingest policy, not Serving: its timeout is unbounded and its
                 // auto-prepare is off, which is what an hours-long VACUUM needs.
-                await using var db = LaplaceDataSource.Create(SubstrateAccess.Ingest);
                 sql = await NpgsqlMaintenance.VacuumAsync(
-                    db, qualified, full, analyze,
+                    dataSources.Ingest, qualified, full, analyze,
                     timeout, ct);
             }
             catch (PostgresException ex)
@@ -246,6 +248,10 @@ internal static class AdminEndpoints
                 return EndpointJson.BadRequest("substrate_error", $"[{ex.SqlState}] {ex.MessageText}");
             }
             catch (NpgsqlException ex)
+            {
+                return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message);
+            }
+            catch (TimeoutException ex)
             {
                 return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message);
             }
