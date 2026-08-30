@@ -8,6 +8,7 @@ namespace Laplace.Chess.Service;
 public sealed class ChessLabService
 {
     private readonly ILogger _log;
+    private readonly Func<CancellationToken, Task<ChessLiveGameHost>> _getLiveHost;
     private readonly ConcurrentDictionary<string, JobSlot> _jobs = new();
 
     // The /chess/lab/* HTTP surface has no request-level auth (see EndpointMappings.Chess.cs) —
@@ -15,7 +16,23 @@ public sealed class ChessLabService
     // Stockfish process spawns or self-play jobs, independent of caller identity.
     private const int MaxConcurrentJobs = 4;
 
-    public ChessLabService(ILogger? log = null) => _log = log ?? NullLogger.Instance;
+    public ChessLabService(
+        Func<CancellationToken, Task<ChessLiveGameHost>> getLiveHost,
+        ILogger? log = null)
+    {
+        _getLiveHost = getLiveHost ?? throw new ArgumentNullException(nameof(getLiveHost));
+        _log = log ?? NullLogger.Instance;
+    }
+
+    // Kept for non-substrate unit callers. Production composition supplies the Generic-Host
+    // owned ChessRuntimeService provider so lab jobs never manufacture their own PG pools.
+    public ChessLabService(ILogger? log = null)
+        : this(_ => Task.FromException<ChessLiveGameHost>(new InvalidOperationException(
+            "ChessLabService substrate jobs require the host-owned ChessRuntimeService.")), log)
+    {
+    }
+
+    internal Task<ChessLiveGameHost> GetLiveHostAsync(CancellationToken ct) => _getLiveHost(ct);
 
     public string? StartJob(ChessLabJobKind kind, IReadOnlyDictionary<string, string>? config = null)
     {
