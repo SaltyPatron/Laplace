@@ -1,9 +1,7 @@
 using System.Collections.Concurrent;
-using global::Npgsql;
 using Laplace.Engine.Core;
 using Laplace.Modality;
 using Laplace.Modality.Chess;
-using Laplace.SubstrateCRUD.Npgsql;
 using Microsoft.Extensions.Logging;
 
 namespace Laplace.Chess.Service;
@@ -25,13 +23,12 @@ public static class ChessLabRunners
 
         var workDir = Path.Combine(LabDir, slot.Job.Id);
         Directory.CreateDirectory(workDir);
-        await using var recorder = await ChessLabRecorder.OpenAsync(
-            $"chess/lab/substrate-test/{slot.Job.Id}", ct: ct);
+        var liveHost = await lab.GetLiveHostAsync(ct);
 
         lab.Publish(slot, new ChessLabLogEvent("info",
             $"substrate-test [{mode}] {games} games depth {depth} — recording to substrate"));
 
-        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest);
+        var ds = liveHost.DataSource;
         IRootBias? bias = mode switch
         {
             "fold" => new SubstructureFoldBias(ds),
@@ -53,7 +50,7 @@ public static class ChessLabRunners
         var r = await Task.Run(() => MatchRunner.Play(
             guided, pure, games, maxPlies, seed: 99, concurrency: concurrency,
             openingFens: book, pgnSink: pgnSink, progress: progress, ct: ct,
-            liveHost: recorder.Host,
+            liveHost: liveHost,
             liveLearnContext: $"chess/lab/substrate-test/{slot.Job.Id}",
             onPly: LiveBoardPublisher(lab, slot, "Laplace-guided", "Laplace-pure")), ct);
 
@@ -62,12 +59,13 @@ public static class ChessLabRunners
             @event: $"chess-lab/substrate-test/{mode}");
         lab.AddArtifact(slot, "games.pgn", pgnPath);
 
+        int recorded = r.AWins + r.Draws + r.BWins;
         string elo = (r.EloDiff >= 0 ? "+" : "") + r.EloDiff.ToString("F0");
-        lab.Publish(slot, new ChessLabMetricEvent("games_recorded", recorder.Host.GamesCompleted));
+        lab.Publish(slot, new ChessLabMetricEvent("games_recorded", recorded));
         lab.Publish(slot, new ChessLabMetricEvent("elo_diff", r.EloDiff));
         lab.Publish(slot, new ChessLabTableEvent("substrate-test", ["W", "D", "L", "Elo"],
             [[r.AWins.ToString(), r.Draws.ToString(), r.BWins.ToString(), elo]]));
-        lab.UpdateSummary(slot, new ChessLabJobSummary(games, games, $"Elo {elo} · {recorder.Host.GamesCompleted} recorded"));
+        lab.UpdateSummary(slot, new ChessLabJobSummary(games, games, $"Elo {elo} · {recorded} recorded"));
         Finish(lab, slot, ChessLabJobState.Completed);
     }
 
@@ -87,8 +85,7 @@ public static class ChessLabRunners
 
         var workDir = Path.Combine(LabDir, slot.Job.Id);
         Directory.CreateDirectory(workDir);
-        await using var recorder = await ChessLabRecorder.OpenAsync(
-            $"chess/lab/ladder/{slot.Job.Id}", ct: ct);
+        var liveHost = await lab.GetLiveHostAsync(ct);
         var pgnSink = new ConcurrentBag<(IReadOnlyList<ChessMove> Moves, int Outcome, string StartFen)>();
 
         lab.Publish(slot, new ChessLabLogEvent("info",
@@ -129,7 +126,7 @@ public static class ChessLabRunners
 
                 var r = MatchRunner.Play(full, minus, games, maxPlies, seed: 7 + ti, concurrency: perTerm,
                     pgnSink: pgnSink, progress: progress, ct: ct,
-                    liveHost: recorder.Host,
+                    liveHost: liveHost,
                     liveLearnContext: $"chess/lab/ladder/{slot.Job.Id}",
                     onPly: LiveBoardPublisher(lab, slot, "Laplace-full", $"minus-{term}"));
                 string elo = (r.EloDiff >= 0 ? "+" : "") + r.EloDiff.ToString("F0");
@@ -143,11 +140,11 @@ public static class ChessLabRunners
             @event: "chess-lab/ladder");
         lab.AddArtifact(slot, "games.pgn", pgnPath);
 
-        lab.Publish(slot, new ChessLabMetricEvent("games_recorded", recorder.Host.GamesCompleted));
+        lab.Publish(slot, new ChessLabMetricEvent("games_recorded", totalGames));
         lab.Publish(slot, new ChessLabTableEvent("overlay ladder", ["term", "W-D-L", "Elo"],
             rows.Select(r => r!).ToList()));
         lab.UpdateSummary(slot, new ChessLabJobSummary(totalGames, totalGames,
-            $"complete · {recorder.Host.GamesCompleted} recorded"));
+            $"complete · {totalGames} recorded"));
         Finish(lab, slot, ChessLabJobState.Completed);
     }
 
@@ -190,8 +187,8 @@ public static class ChessLabRunners
 
     public static async Task RunLearnedPstAsync(ChessLabService lab, ChessLabService.JobSlot slot, CancellationToken ct)
     {
-        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest);
-        var learned = LearnedPst.ReadWhite(ds);
+        var liveHost = await lab.GetLiveHostAsync(ct);
+        var learned = LearnedPst.ReadWhite(liveHost.DataSource);
         var rows = learned.Where(s => s.Witness > 0).OrderByDescending(s => s.DevPoints).Take(32)
             .Select(s => (IReadOnlyList<string>)[((char)('a' + s.File)).ToString() + (s.Rank + 1), s.Piece.ToString(), s.DevPoints.ToString("+0;-0")])
             .ToList();
@@ -277,7 +274,8 @@ public static class ChessLabRunners
             try
             {
                 lab.Publish(slot, new ChessLabLogEvent("info", "ingesting games.pgn into substrate…"));
-                await using var ingestor = await ChessPgnIngestor.CreateAsync(ct);
+                var liveHost = await lab.GetLiveHostAsync(ct);
+                await using var ingestor = await ChessPgnIngestor.AttachAsync(liveHost, ct);
                 var r = await ingestor.IngestFileAsync(
                     pgnOut, msg => lab.Publish(slot, new ChessLabLogEvent("info", msg)), ct);
                 lab.Publish(slot, new ChessLabMetricEvent("games_ingested", r.Applied));
@@ -304,8 +302,7 @@ public static class ChessLabRunners
         }
         int depth = int.Parse(Config(slot.Job.Config, "depth", "8"));
         int maxConcurrent = int.Parse(Config(slot.Job.Config, "maxConcurrent", "2"));
-        await using var host = await ChessLiveGameHost.CreateAsync(
-            defaultLearnContext: $"chess/lab/lichess-bot/{slot.Job.Id}", ct: ct);
+        var host = await lab.GetLiveHostAsync(ct);
 
         await using var bot = new LichessBot(
             token,
@@ -316,7 +313,6 @@ public static class ChessLabRunners
             log: new LabLogger(lab, slot));
         lab.Publish(slot, new ChessLabLogEvent("info", "lichess bot starting (per-ply fold + recording)"));
         await bot.RunAsync(maxConcurrent, ct);
-        lab.Publish(slot, new ChessLabMetricEvent("games_recorded", host.GamesCompleted));
         Finish(lab, slot, ChessLabJobState.Cancelled, "stopped");
     }
 
