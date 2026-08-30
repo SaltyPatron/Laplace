@@ -1,3 +1,5 @@
+using Xunit;
+
 namespace Laplace.Decomposers.Model.Tests;
 
 public sealed class ArchitectureProfileFailClosedTests
