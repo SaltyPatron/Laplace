@@ -88,6 +88,7 @@ internal static class AppComposition
             sp.GetRequiredService<ChessRuntimeService>().GetAsync,
             sp.GetService<ILoggerFactory>()?.CreateLogger("chess")));
         services.AddSingleton(sp => new ChessLabService(
+            sp.GetRequiredService<ChessRuntimeService>().GetAsync,
             sp.GetService<ILoggerFactory>()?.CreateLogger("chess-lab")));
         services.AddHttpClient<ILichessStatusClient, LichessStatusClient>(client =>
         {
