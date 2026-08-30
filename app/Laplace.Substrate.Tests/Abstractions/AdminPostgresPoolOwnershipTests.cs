@@ -41,17 +41,19 @@ public sealed class AdminPostgresPoolOwnershipTests
         var endpoint = File.ReadAllText(Path.Combine(
             repoRoot, "app", "Laplace.Endpoints.OpenAICompat", "EndpointMappings.Admin.cs"));
 
-        var tryAt = endpoint.IndexOf("try\n            {", StringComparison.Ordinal);
-        var resolveAt = endpoint.IndexOf("ResolveSubstrateTableAsync", StringComparison.Ordinal);
-        var vacuumAt = endpoint.IndexOf("NpgsqlMaintenance.VacuumAsync", StringComparison.Ordinal);
+        var routeAt = endpoint.IndexOf("/v1/admin/maintenance/vacuum", StringComparison.Ordinal);
+        var tryAt = endpoint.IndexOf("try\n            {", routeAt, StringComparison.Ordinal);
+        var resolveAt = endpoint.IndexOf("ResolveSubstrateTableAsync", routeAt, StringComparison.Ordinal);
+        var vacuumAt = endpoint.IndexOf("NpgsqlMaintenance.VacuumAsync", routeAt, StringComparison.Ordinal);
         var unavailableAt = endpoint.IndexOf(
-            "ServiceUnavailable(\"substrate_unavailable\"", StringComparison.Ordinal);
+            "ServiceUnavailable(\"substrate_unavailable\"", routeAt, StringComparison.Ordinal);
 
-        Assert.True(tryAt >= 0);
+        Assert.True(routeAt >= 0);
+        Assert.True(tryAt > routeAt);
         Assert.True(resolveAt > tryAt);
         Assert.True(vacuumAt > resolveAt);
         Assert.True(unavailableAt > vacuumAt);
-        Assert.Contains("catch (NpgsqlException ex)", endpoint);
-        Assert.Contains("catch (TimeoutException ex)", endpoint);
+        Assert.Contains("catch (NpgsqlException ex)", endpoint[routeAt..]);
+        Assert.Contains("catch (TimeoutException ex)", endpoint[routeAt..]);
     }
 }
