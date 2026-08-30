@@ -40,14 +40,20 @@ public sealed record ArchitectureProfile
     public double NormEps { get; init; } = 1e-6;
     public string HiddenAct { get; init; } = "silu";
 
-    public static ArchitectureProfile For(string modelType) => modelType.ToLowerInvariant() switch
+    public static ArchitectureProfile For(string modelType)
     {
-        "llama" => Llama,
-        "phi" => Phi,
-        "qwen2" => Qwen2,
-        "bert" => Bert,
-        _ => Llama,
-    };
+        ArgumentException.ThrowIfNullOrWhiteSpace(modelType);
+        string normalized = modelType.Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "llama" => Llama,
+            "phi" => Phi,
+            "qwen2" => Qwen2,
+            "bert" => Bert,
+            _ => throw new NotSupportedException(
+                $"Unsupported model_type '{modelType}'. Refusing to decompose it with a different architecture profile."),
+        };
+    }
 
     /// <summary>
     /// Family skeleton + config-witnessed scalars. NormEps and HiddenAct are
