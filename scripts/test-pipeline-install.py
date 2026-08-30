@@ -9,12 +9,20 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = (ROOT / "scripts/pipeline.sh").read_text()
+MANAGED_SOURCE = (ROOT / "deploy/linux/managed-publish.sh").read_text()
 
 
 def function(name):
     match = re.search(r"^" + name + r"\(\) ([{(])\n.*?^[})]$", SOURCE, re.M | re.S)
     if match is None:
         raise AssertionError(f"pipeline function missing: {name}")
+    return match.group()
+
+
+def managed_function(name):
+    match = re.search(r"^" + name + r"\(\) ([{(])\n.*?^[})]$", MANAGED_SOURCE, re.M | re.S)
+    if match is None:
+        raise AssertionError(f"managed publish function missing: {name}")
     return match.group()
 
 
@@ -58,6 +66,30 @@ psql() {
   fi
 }
 if ensure_extension_library_path; then exit 0; else exit $?; fi
+''', **env)
+
+    def managed_guard(self, **env):
+        binary = self.base / "pg/bin/psql"
+        binary.parent.mkdir(parents=True, exist_ok=True)
+        binary.write_text(r'''#!/usr/bin/env bash
+printf 'PGOPTIONS=%s\t%s\n' "${PGOPTIONS:-}" "$*" >> "$CALLS"
+if [[ "$*" == *"FROM pg_database"* ]]; then
+  [[ "${DB_QUERY_FAIL:-0}" == 0 ]] || exit 31
+  printf '%s\n' "${DB_EXISTS:-t}"
+elif [[ "$*" == *"to_regclass('laplace.ingest_run_journal')"* ]]; then
+  [[ "${TABLE_QUERY_FAIL:-0}" == 0 ]] || exit 32
+  printf '%s\n' "${TABLE_EXISTS:-t}"
+elif [[ "$*" == *"FROM laplace.ingest_run_journal WHERE status='running'"* ]]; then
+  [[ "${COUNT_QUERY_FAIL:-0}" == 0 ]] || exit 33
+  printf '%s\n' "${RUNNING:-0}"
+else
+  echo "unexpected psql query" >&2
+  exit 34
+fi
+''')
+        binary.chmod(0o700)
+        return self.run_shell(managed_function("assert_ingest_idle") + r'''
+if assert_ingest_idle; then exit 0; else exit $?; fi
 ''', **env)
 
     def test_failed_read_aborts_without_write_or_success(self):
@@ -118,6 +150,44 @@ psql -d postgres -U laplace_admin -c 'SHOW dynamic_library_path'
         result = self.run_shell(function("psql") + '\nid() { echo 994; }; psql -c SELECT')
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual(["-X", "-w", "-c", "SELECT"], self.calls().splitlines())
+
+    def test_managed_deploy_guard_blocks_running_ingest_read_only(self):
+        result = self.managed_guard(RUNNING="2")
+        self.assertEqual(1, result.returncode)
+        self.assertIn("managed deploy postponed", result.stderr)
+        self.assertIn("2 ingest run(s)", result.stderr)
+        calls = self.calls()
+        self.assertIn("default_transaction_read_only=on", calls)
+        self.assertIn("statement_timeout=5000", calls)
+        self.assertIn("status='running'", calls)
+
+    def test_managed_deploy_guard_allows_idle_fresh_and_unmigrated_hosts(self):
+        cases = (
+            ({"RUNNING": "0"}, "ingest_run_journal"),
+            ({"DB_EXISTS": "f"}, "FROM pg_database"),
+            ({"TABLE_EXISTS": "f"}, "to_regclass"),
+        )
+        for env, expected in cases:
+            with self.subTest(env=env):
+                (self.base / "calls").unlink(missing_ok=True)
+                result = self.managed_guard(**env)
+                self.assertEqual(0, result.returncode, result.stderr)
+                self.assertIn(expected, self.calls())
+
+    def test_managed_deploy_guard_fails_closed_on_unreadable_or_malformed_state(self):
+        for env in ({"DB_QUERY_FAIL": "1"}, {"TABLE_QUERY_FAIL": "1"},
+                    {"COUNT_QUERY_FAIL": "1"}, {"RUNNING": "not-a-count"}):
+            with self.subTest(env=env):
+                (self.base / "calls").unlink(missing_ok=True)
+                result = self.managed_guard(**env)
+                self.assertEqual(2, result.returncode)
+                self.assertIn("::error::managed deploy ingest guard", result.stderr)
+
+    def test_managed_deploy_guard_rejects_remote_database_target(self):
+        result = self.managed_guard(PGHOST="192.0.2.1")
+        self.assertEqual(2, result.returncode)
+        self.assertIn("local PostgreSQL socket", result.stderr)
+        self.assertEqual("", self.calls())
 
     def phase(self, source=None, **env):
         return self.run_shell((source or function("phase_install")) + r'''
