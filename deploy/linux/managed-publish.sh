@@ -22,8 +22,78 @@ installed_policy() {
   done
 }
 
+# A native deploy may replace a shared-preload image and pipeline.sh will then
+# bounce PostgreSQL. The self-hosted runner shares that postmaster with operator
+# ingests, so a deploy must prove the durable ingest journal is idle before any
+# managed-host reconciliation or service action begins. This is deliberately a
+# read-only database check: CI never cancels, completes, or rewrites an ingest to
+# make deployment proceed.
+assert_ingest_idle() {
+  local pg_prefix="${LAPLACE_PG_PREFIX:-/opt/laplace/pgsql-18}"
+  local psql_bin="$pg_prefix/bin/psql"
+  local socket="${PGHOST:-/var/run/postgresql}"
+  local database="${PGDATABASE:-laplace}"
+  local db_exists table_exists running
+
+  [[ "$socket" == /* ]] || {
+    echo "::error::managed deploy ingest guard requires the local PostgreSQL socket, got '$socket'" >&2
+    return 2
+  }
+  [[ -x "$psql_bin" ]] || {
+    echo "::error::managed deploy ingest guard cannot execute $psql_bin" >&2
+    return 2
+  }
+
+  db_exists=$(PGOPTIONS="-c default_transaction_read_only=on -c statement_timeout=5000" \
+    "$psql_bin" -X -w -qAt -h "$socket" -U laplace_admin -d postgres \
+      -v "target_db=$database" \
+      -c "SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = :'target_db')") || {
+    echo "::error::managed deploy ingest guard could not determine whether database '$database' exists" >&2
+    return 2
+  }
+  case "$db_exists" in
+    f) return 0 ;; # first install: no Laplace database means no journal can be active
+    t) ;;
+    *)
+      echo "::error::managed deploy ingest guard received malformed database state '$db_exists'" >&2
+      return 2
+      ;;
+  esac
+
+  table_exists=$(PGOPTIONS="-c default_transaction_read_only=on -c statement_timeout=5000" \
+    "$psql_bin" -X -w -qAt -h "$socket" -U laplace_admin -d "$database" \
+      -c "SELECT to_regclass('laplace.ingest_run_journal') IS NOT NULL") || {
+    echo "::error::managed deploy ingest guard could not inspect laplace.ingest_run_journal" >&2
+    return 2
+  }
+  case "$table_exists" in
+    f) return 0 ;; # pre-migration install: the ingest journal does not exist yet
+    t) ;;
+    *)
+      echo "::error::managed deploy ingest guard received malformed journal state '$table_exists'" >&2
+      return 2
+      ;;
+  esac
+
+  running=$(PGOPTIONS="-c default_transaction_read_only=on -c statement_timeout=5000" \
+    "$psql_bin" -X -w -qAt -h "$socket" -U laplace_admin -d "$database" \
+      -c "SELECT count(*) FROM laplace.ingest_run_journal WHERE status='running'") || {
+    echo "::error::managed deploy ingest guard could not read active ingest state" >&2
+    return 2
+  }
+  [[ "$running" =~ ^[0-9]+$ ]] || {
+    echo "::error::managed deploy ingest guard received malformed active-ingest count '$running'" >&2
+    return 2
+  }
+  if (( running > 0 )); then
+    echo "::error::managed deploy postponed: $running ingest run(s) are still marked running in laplace.ingest_run_journal; a PostgreSQL bounce would terminate their backends. Let the ingest close or resolve its journal state, then rerun deployment." >&2
+    return 1
+  fi
+}
+
 preflight() {
   installed_policy
+  assert_ingest_idle
   sudo -n "$HELPER" host-status
 
   local output rc=0 ready=0
