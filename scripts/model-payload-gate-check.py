@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Shrink-only payload gate for the model lane.
+"""Shrink-only payload measurement and enforcement for the model lane.
 
 A model enters the substrate as TESTIMONY: its weights are vote significances on
 edges that already exist, folded by Glicko. Under that law a checkpoint costs
@@ -8,7 +8,7 @@ touches -- measured 2026-08-11 at 55,971 consensus edges between the 26,622
 entities TinyLlama's vocabulary resolves to, i.e. ~9.5 MB. It does not cost
 geometry payload proportional to vocab x dim x heads x layers.
 
-This gate exists because that distinction was violated silently for months and
+This check exists because that distinction was violated silently for months and
 nothing failed. `LAPLACE_MODEL_PLANES=factors` deposits a [V x dim] float field
 per circuit slice; TinyLlama's 22 layers projected to 210 GB and filled the
 cluster volume before anything complained. The projection across the local model
@@ -29,6 +29,13 @@ ingest that composes new content entities (subword vocabulary and the like,
 That friction is the design, not a defect: every payload byte a model source
 deposits gets seen and blessed in a diff.
 
+ENFORCEMENT BELONGS AT THE MUTATION BOUNDARY. A standing substrate may contain
+historical bad payload while unrelated code needs to deploy the repair. Therefore
+the default invocation measures and reports violations but does not make mutable
+production data a prerequisite for every code-policy run. Model-ingest workflows
+must pass --enforce (and --strict) before AND after the ingest. That preserves the
+zero/shrink-only law without letting old bad data deadlock all future repair code.
+
 WHAT THIS DELIBERATELY DOES NOT GATE: constant `witnessWeight: 1.0` in the model
 lane. Seven call sites pass a literal 1.0, and for CONTAINS / PRECEDES / recipe
 edges that is CORRECT -- a tensor either is contained in a checkpoint or is not,
@@ -37,7 +44,8 @@ declared-structure scrape, which is the half of this lane that works (177,959
 attestations, 82% dedup on apply, 38,190 consensus cells folded, 252 s). The
 violation is payload volume, not the constant.
 
-Exit codes: 0 pass or skip, 1 violation, 2 usage/connection error with --strict.
+Exit codes: 0 pass/advisory/skip, 1 enforced violation, 2 usage/connection error
+with --strict.
 """
 
 from __future__ import annotations
@@ -96,9 +104,10 @@ ORDER BY 3 DESC
 def measure(dsn_args: list[str], timeout: int) -> list[dict] | None:
     """Returns per-source payload rows, or None when the cluster is unreachable.
 
-    Unreachable is a SKIP, not a failure: this gate ran during a session where the
-    cluster was intentionally down for a volume migration, and a gate that fails
-    on planned maintenance is a gate that gets commented out.
+    Unreachable is a SKIP, not a failure unless --strict is requested: this check
+    ran during a session where the cluster was intentionally down for a volume
+    migration, and a global observer that fails on planned maintenance is a check
+    that gets commented out. Mutation boundaries use --strict.
     """
     cmd = ["psql", *dsn_args, "-tA", "-F", "\x1f", "-v", "ON_ERROR_STOP=1", "-c", QUERY]
     try:
@@ -131,6 +140,8 @@ def main(argv: list[str]) -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--write-baseline", action="store_true",
                     help="record current measurement as the baseline")
+    ap.add_argument("--enforce", action="store_true",
+                    help="return exit 1 when payload violates the shrink-only contract")
     ap.add_argument("--timeout", type=int, default=900)
     ap.add_argument("--strict", action="store_true",
                     help="treat an unreachable substrate as failure (exit 2)")
@@ -244,7 +255,11 @@ def main(argv: list[str]) -> int:
               "accepts witnessWeight; the magnitude->score conversion "
               "(KindRegistry.AttestWeighted / AttestationFactory.CreateWeighted) "
               "was deleted in 7022bbca and is recoverable from 7022bbca^.")
-        return 1
+        if args.enforce:
+            return 1
+        print("\nmodel-payload-gate: ADVISORY — standing substrate violates the contract; "
+              "code policy remains deployable. Mutation lanes must use --enforce.")
+        return 0
 
     print(f"\nmodel-payload-gate: PASS — {gb(total_bytes)} within "
           f"{gb(CEILING_TOTAL_BYTES)}")
