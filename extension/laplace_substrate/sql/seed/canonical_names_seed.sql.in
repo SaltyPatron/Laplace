@@ -300,5 +300,4 @@ FROM (VALUES
     ('unicode/emoji/Emoji_Modifier_Base/v1'),
     ('unicode/emoji/Emoji_Component/v1'),
     ('unicode/emoji/Extended_Pictographic/v1')
-) AS v(name)
-ON CONFLICT (id) DO NOTHING;
+) AS v(name);
