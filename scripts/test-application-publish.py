@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Execute the real transaction orchestrator with isolated effect adapters."""
 import importlib.util
+import json
 import os
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -168,6 +170,44 @@ class ReleaseWorkflowTests(unittest.TestCase):
                 bad = dict(ready, **{key: False})
                 with self.assertRaises(ValueError):
                     module.require_ready(bad)
+
+    def test_model_payload_enforcement_is_at_model_ingest_boundary(self):
+        main_jobs = yaml.safe_load((ROOT / ".github/workflows/laplace.yml").read_text())["jobs"]
+        policy_commands = "\n".join(
+            step.get("run", "") for step in main_jobs["policy"]["steps"])
+        self.assertIn("python3 scripts/model-payload-gate-check.py", policy_commands)
+        self.assertNotIn("model-payload-gate-check.py --enforce", policy_commands)
+
+        seed = yaml.safe_load((ROOT / ".github/workflows/seed-models.yml").read_text())
+        steps = seed["jobs"]["ingest"]["steps"]
+        runs = [step.get("run", "") for step in steps]
+        ingest_index = next(i for i, run in enumerate(runs) if "ingest-source.sh model" in run)
+        gate_indexes = [
+            i for i, run in enumerate(runs)
+            if "model-payload-gate-check.py --strict --enforce" in run
+        ]
+        self.assertEqual(2, len(gate_indexes))
+        self.assertLess(gate_indexes[0], ingest_index)
+        self.assertGreater(gate_indexes[1], ingest_index)
+
+    def test_model_payload_violation_is_advisory_unless_enforced(self):
+        spec = importlib.util.spec_from_file_location(
+            "model_payload_gate", ROOT / "scripts/model-payload-gate-check.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory(prefix="model-payload-gate-contract-") as td:
+            baseline = Path(td) / "baseline.json"
+            baseline.write_text(json.dumps({
+                "total_payload_bytes": 0,
+                "total_vertices": 0,
+                "per_source": {},
+            }))
+            rows = [{"source": "fixture", "rows": 1,
+                     "payload_bytes": 1024, "vertices": 4}]
+            with patch.object(module, "BASELINE", baseline), \
+                 patch.object(module, "measure", return_value=rows):
+                self.assertEqual(0, module.main([]))
+                self.assertEqual(1, module.main(["--enforce"]))
 
 
 if __name__ == "__main__":
