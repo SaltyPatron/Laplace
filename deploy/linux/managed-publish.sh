@@ -137,6 +137,9 @@ preflight() {
 
 ensure_host() {
   installed_policy
+  # Reconcile-host can change managed unit state, so the durable ingest check
+  # must happen before it just as it does before the later preflight actions.
+  assert_ingest_idle
   # Same installed/root-owned policy used by setup-host and boot/timer
   # maintenance. No runner-supplied script or arbitrary unit executes as root.
   sudo -n "$HELPER" reconcile-host
