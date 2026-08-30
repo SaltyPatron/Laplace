@@ -29,15 +29,18 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
     private readonly NpgsqlDataSource _ds;
     private readonly ConsensusAccumulatingWriter _writer;
     private readonly NpgsqlSubstrateReader _reader;
+    private readonly bool _ownsResources;
 
     public readonly record struct Result(int Parsed, int Novel, int Applied);
 
     private ChessPgnIngestor(
-        NpgsqlDataSource ds, ConsensusAccumulatingWriter writer, NpgsqlSubstrateReader reader)
+        NpgsqlDataSource ds, ConsensusAccumulatingWriter writer, NpgsqlSubstrateReader reader,
+        bool ownsResources)
     {
         _ds = ds;
         _writer = writer;
         _reader = reader;
+        _ownsResources = ownsResources;
     }
 
     public static async Task<ChessPgnIngestor> CreateAsync(CancellationToken ct = default)
@@ -49,14 +52,41 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
             inner, ds, persistEvidence: true);
         var reader = new NpgsqlSubstrateReader(ds);
 
+        await BootstrapSourcesAsync(ds, writer, reader, ct);
+        return new ChessPgnIngestor(ds, writer, reader, ownsResources: true);
+    }
+
+    /// <summary>
+    /// Attach the lab PGN loop-closure lane to the Generic-Host-owned live chess runtime.
+    /// The returned ingestor borrows both datasource and writer and therefore never disposes
+    /// either one. This is the API-host path: one ingest pool/write spine, regardless of how
+    /// many concurrent Lab jobs finish artifacts.
+    /// </summary>
+    public static async Task<ChessPgnIngestor> AttachAsync(
+        ChessLiveGameHost host, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(host);
+        CodepointPerfcache.LoadDefault();
+        var ds = host.DataSource;
+        var writer = host.Writer;
+        var reader = new NpgsqlSubstrateReader(ds);
+
+        await BootstrapSourcesAsync(ds, writer, reader, ct);
+        return new ChessPgnIngestor(ds, writer, reader, ownsResources: false);
+    }
+
+    private static async Task BootstrapSourcesAsync(
+        NpgsqlDataSource ds, ConsensusAccumulatingWriter writer, NpgsqlSubstrateReader reader,
+        CancellationToken ct)
+    {
         var names = new HashSet<string>();
         names.UnionWith(await ChessVocabulary.BootstrapAsync(
-            writer, ChessVocabulary.PgnSourceId, "ChessPgn", ChessVocabulary.PgnTrustClass, ct));
+            writer, ChessVocabulary.PgnSourceId, "ChessPgn", ChessVocabulary.PgnTrustClass,
+            ct, reader));
         names.UnionWith(await ChessVocabulary.BootstrapAsync(
-            writer, ChessVocabulary.AnalysisSourceId, "ChessAnalysis", ChessVocabulary.AnalysisTrustClass, ct));
+            writer, ChessVocabulary.AnalysisSourceId, "ChessAnalysis", ChessVocabulary.AnalysisTrustClass,
+            ct, reader));
         await NpgsqlCanonicalRegistry.RegisterCanonicalsAsync(ds, names, ct);
-
-        return new ChessPgnIngestor(ds, writer, reader);
     }
 
     public async Task<Result> IngestFileAsync(
@@ -119,6 +149,7 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        if (!_ownsResources) return;
         await _writer.DisposeAsync();
         await _ds.DisposeAsync();
     }
