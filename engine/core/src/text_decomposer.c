@@ -12,6 +12,37 @@
 #include "laplace/core/utf8.h"
 #include "laplace/core/word_break.h"
 
+int laplace_text_decomposer_validate_roundtrip(const tier_tree_t* tree) {
+    if (!tree) return -1;
+
+    size_t text_len = 0;
+    const uint8_t* text = tier_tree_text(tree, &text_len);
+    size_t cursor = 0;
+    size_t leaves = 0;
+    size_t node_n = tier_tree_node_count(tree);
+
+    for (size_t i = 0; i < node_n; ++i) {
+        tier_node_view_t v;
+        if (tier_tree_get_node(tree, (uint32_t)i, &v) != 0) return -2;
+        if (v.tier != 0) continue;
+
+        uint8_t encoded[4];
+        size_t encoded_len = laplace_utf8_encode(v.atom, encoded);
+        if (v.text_range_off != cursor
+            || v.text_range_len != encoded_len
+            || cursor + encoded_len > text_len
+            || !text
+            || memcmp(text + cursor, encoded, encoded_len) != 0) {
+            return -2;
+        }
+        cursor += encoded_len;
+        leaves++;
+    }
+
+    if (text_len == 0) return leaves == 0 ? 0 : -2;
+    return (leaves > 0 && cursor == text_len) ? 0 : -2;
+}
+
 int laplace_text_decomposer_run(const uint8_t* utf8, size_t len, tier_tree_t** out_tree) {
     if (!out_tree) return -1;
     *out_tree = NULL;
@@ -23,6 +54,10 @@ int laplace_text_decomposer_run(const uint8_t* utf8, size_t len, tier_tree_t** o
         uint32_t root = tier_tree_add_node(t, 4, TIER_TREE_INVALID, 0, 0, 0);
         if (root == TIER_TREE_INVALID) { tier_tree_free(t); return -3; }
         tier_tree_finalize(t);
+        if (laplace_text_decomposer_validate_roundtrip(t) != 0) {
+            tier_tree_free(t);
+            return -7;
+        }
         *out_tree = t;
         return 0;
     }
@@ -220,6 +255,17 @@ int laplace_text_decomposer_run(const uint8_t* utf8, size_t len, tier_tree_t** o
     }
 
     tier_tree_finalize(tree);
+
+    /* FINAL BYTE-EXACT IDENTITY GATE (#1039). The tree is about to become the
+     * source of hashes and deposition spans, so reconstruct its canonical text
+     * from the tier-0 atoms and require exact parity with the NFC buffer whose
+     * offsets every higher tier indexes. A future normalization/offset drift
+     * fails here before a wrong id can reach the substrate. */
+    if (laplace_text_decomposer_validate_roundtrip(tree) != 0) {
+        laplace_grapheme_floor_free(&floor);
+        tier_tree_free(tree);
+        return -7;
+    }
 
     laplace_grapheme_floor_free(&floor);
     *out_tree = tree;
