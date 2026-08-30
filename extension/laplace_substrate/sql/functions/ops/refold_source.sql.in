@@ -12,12 +12,14 @@
 --
 -- Consensus is DERIVED state: every cell is exactly the consensus_fold of its
 -- surviving attestations. evict_source already proves it — its step (b) refolds
--- every touched cell in place after deleting testimony. This is that same arm
--- with NOTHING deleted: enumerate the cells the source's testimony touches,
--- refold each from ALL evidence, one uniform period, canonical order
--- (last_observed_at, id), neutral-prior seed. Idempotent by construction — a
--- second run recomputes identical values. Touches only laplace.consensus rows
--- whose evidence already justifies them; never inserts, never deletes.
+-- every touched cell in place after deleting testimony. This is the complete
+-- rebuild form of that arm with NOTHING deleted: enumerate the cells the source's
+-- testimony touches, refold each from ALL evidence, one uniform period, canonical
+-- order (last_observed_at, id), neutral-prior seed, and UPSERT the derived row.
+-- The INSERT half matters: an interrupted first fold can leave durable evidence
+-- with no consensus row at all, and UPDATE-only repair cannot reconstruct it.
+-- Idempotent by construction — a second run recomputes identical values. Touches
+-- only laplace.consensus rows whose evidence justifies them; never mutates evidence.
 --
 -- Batched COMMITs exactly like evict_source, so a canceled repair keeps every
 -- relation already refolded. No SET clause (a procedure carrying one may not
@@ -74,16 +76,19 @@ BEGIN
             CONTINUE;
         END IF;
 
-        -- The refold arm, verbatim from ops.evict_source step (b): the
-        -- consensus_fold aggregate is the SQL surface of the ingest fold's
-        -- native scalar.
+        -- Total reconstruction from evidence, not update-in-place. A source can
+        -- have committed attestations before the first consensus insert for a cell
+        -- (#1349/#1292), so the recovery primitive must materialize missing derived
+        -- rows as well as replace stale ones. Identity stays canonical and the
+        -- partitioned-table conflict target is the declared consensus PK.
         EXECUTE format($q$
-            UPDATE laplace.consensus c
-            SET rating           = (f.acc).rating,
-                rd               = (f.acc).rd,
-                volatility       = (f.acc).volatility,
-                witness_count    = (f.acc).witness_count,
-                last_observed_at = f.last_ts
+            INSERT INTO laplace.consensus
+                (id, subject_id, type_id, object_id,
+                 rating, rd, volatility, witness_count, last_observed_at)
+            SELECT laplace.consensus_id(f.subject_id, %L::bytea, f.object_id),
+                   f.subject_id, %L::bytea, f.object_id,
+                   (f.acc).rating, (f.acc).rd, (f.acc).volatility,
+                   (f.acc).witness_count, f.last_ts
             FROM (
                 SELECT t.subject_id, t.object_id,
                        laplace.consensus_fold(false, NULL, NULL, NULL,
@@ -100,19 +105,23 @@ BEGIN
                  AND a.object_id IS NOT DISTINCT FROM t.object_id
                 GROUP BY t.subject_id, t.object_id
             ) f
-            WHERE c.type_id = %L::bytea
-              AND c.subject_id = f.subject_id
-              AND c.id = laplace.consensus_id(f.subject_id, %L::bytea, f.object_id)
+            ON CONFLICT (id, type_id, subject_id) DO UPDATE
+            SET object_id        = EXCLUDED.object_id,
+                rating           = EXCLUDED.rating,
+                rd               = EXCLUDED.rd,
+                volatility       = EXCLUDED.volatility,
+                witness_count    = EXCLUDED.witness_count,
+                last_observed_at = EXCLUDED.last_observed_at
         $q$, rel, rel, rel);
         GET DIAGNOSTICS n = ROW_COUNT;
         refold_total := refold_total + n;
-        RAISE LOG 'refold_source: relation % — % cell(s) touched, % consensus row(s) refolded',
+        RAISE LOG 'refold_source: relation % — % cell(s) touched, % consensus row(s) rebuilt',
             encode(rel, 'hex'), n_cells, n;
         COMMIT;
     END LOOP;
 
     DROP TABLE IF EXISTS _refold_cells;
-    RAISE LOG 'refold_source: % — % row(s) refolded across % relation(s) in %s',
+    RAISE LOG 'refold_source: % — % row(s) rebuilt across % relation(s) in %s',
         p_source_name, refold_total, array_length(rels, 1),
         round(extract(epoch FROM clock_timestamp() - t0)::numeric, 1);
 END;
