@@ -7,7 +7,7 @@ namespace Laplace.Ingestion.Tests;
 public sealed class CanonicalNamesSeedIdentityTests
 {
     [Fact]
-    public void CanonicalSeed_DoesNotSilenceDerivedIdentityCollisions()
+    public void CanonicalSeed_IsIdempotentByName_ButDoesNotSilenceDerivedIdentityCollisions()
     {
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();
         var seedPath = Path.Combine(
@@ -15,10 +15,13 @@ public sealed class CanonicalNamesSeedIdentityTests
             "canonical_names_seed.sql.in");
         var sql = File.ReadAllText(seedPath);
 
-        // GH #959: canonical ids are BLAKE3(name). A collision in this greenfield
-        // manifest is an identity-law failure, not idempotency. Let PostgreSQL's
-        // unique id constraint reject it instead of discarding one name silently.
-        Assert.DoesNotContain("DO NOTHING", sql, StringComparison.OrdinalIgnoreCase);
+        // GH #959: canonical ids are BLAKE3(name). Re-running the manifest must
+        // skip the exact same canonical NAME, while a different name deriving an
+        // already-owned id must still reach PostgreSQL's unique-id constraint and
+        // fail loudly. Generic ON CONFLICT cannot distinguish those two cases.
+        Assert.DoesNotContain("ON CONFLICT", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("WHERE existing.name = v.name", sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("WHERE existing.id =", sql, StringComparison.OrdinalIgnoreCase);
 
         var names = Regex.Matches(sql, @"\('(?<name>[^']+)'\)")
             .Select(match => match.Groups["name"].Value)
