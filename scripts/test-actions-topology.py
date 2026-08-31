@@ -99,7 +99,7 @@ class ActionsAuthorityTests(unittest.TestCase):
             names = {trigger} if isinstance(trigger, str) else set(trigger)
             self.assertNotIn("workflow_run", names, path.name)
 
-    def test_pull_request_proof_is_source_build_only_and_same_repository(self):
+    def test_pull_request_proof_is_source_build_only_same_repository_and_cannot_replace_main(self):
         path = WORKFLOWS / "pr-validation.yml"
         workflow = load(path)
         prove = workflow["jobs"]["prove"]
@@ -125,6 +125,14 @@ class ActionsAuthorityTests(unittest.TestCase):
             "--fresh-db",
         ):
             self.assertNotIn(forbidden, proof)
+
+        main_concurrency = load()["concurrency"]
+        self.assertEqual("laplace-shared-workspace", main_concurrency["group"])
+        self.assertEqual("false", main_concurrency["cancel-in-progress"])
+        pr_concurrency = workflow["concurrency"]
+        self.assertEqual("laplace-shared-workspace", pr_concurrency["group"])
+        self.assertEqual("false", pr_concurrency["cancel-in-progress"])
+        self.assertEqual("max", pr_concurrency["queue"])
 
     def test_manual_mutation_workflows_are_not_source_triggered(self):
         paths = [WORKFLOWS / "db-ops.yml", *sorted(WORKFLOWS.glob("seed-*.yml"))]
