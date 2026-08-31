@@ -24,6 +24,9 @@ python3 scripts/test-cutechess-runtime.py /opt/laplace/bin/cutechess-cli \
 (
   cd web
   npm ci --no-audit --no-fund
+  # npm's pretypecheck hook owns generated-client freshness. The .NET build above
+  # emits web/openapi/openapi.json; typecheck regenerates types.gen.ts from it before
+  # compiling, so a clean PR worktree cannot inherit generated residue from _work.
   npm run typecheck
   npx playwright install chromium
   npm run test:chess-ui

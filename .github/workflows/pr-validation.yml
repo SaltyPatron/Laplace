@@ -8,12 +8,13 @@ on:
 permissions:
   contents: read
 
-# This repository currently has one registered runner and one persistent untracked
-# build tree. PR proof must serialize with main/deployment workflows until immutable
-# artifacts and isolated runner workspaces replace that contract.
+# PR proof is isolated from the persistent main workspace. GitHub concurrency keeps
+# only one pending run per group, so sharing main's group lets PR pushes cancel a
+# pending deployment before any job starts. Superseding the same PR is safe here:
+# this job owns only a temporary worktree and never mutates installed/runtime state.
 concurrency:
-  group: laplace-shared-workspace
-  cancel-in-progress: false
+  group: laplace-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   prove:
@@ -21,13 +22,46 @@ jobs:
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, laplace]
     timeout-minutes: 120
+    env:
+      LAPLACE_EXTERNAL: ${{ vars.LAPLACE_EXTERNAL || '/build/external' }}
+      LAPLACE_INSTALL_PREFIX: ${{ vars.LAPLACE_INSTALL_PREFIX || '/opt/laplace' }}
+      LAPLACE_PG_PREFIX: ${{ vars.LAPLACE_PG_PREFIX || '/opt/laplace/pgsql-18' }}
+      PGDATABASE: laplace
     steps:
-      - name: Checkout exact pull-request head
+      - name: Prepare isolated pull-request worktree
         env:
           TARGET_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
+          set -euo pipefail
+          worktree="$RUNNER_TEMP/laplace-pr-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          git worktree prune
+          rm -rf "$worktree"
           git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
-          git checkout --force "$TARGET_SHA"
-      - uses: ./.github/actions/setup-laplace-env
+          git worktree add --detach "$worktree" "$TARGET_SHA"
+          echo "LAPLACE_PR_WORKTREE=$worktree" >> "$GITHUB_ENV"
+
       - name: Prove merge candidate without production mutation
-        run: bash scripts/pr-proof.sh
+        run: |
+          set -euo pipefail
+          cd "$LAPLACE_PR_WORKTREE"
+          set +u
+          source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
+          set -u
+          export LAPLACE_QUERY_DB="${LAPLACE_QUERY_DB:-${PGDATABASE:-laplace}}"
+          export LAPLACE_DB="${LAPLACE_DB:-Host=/var/run/postgresql;Username=laplace_admin;Database=${PGDATABASE:-laplace}}"
+          export MSBUILDDISABLENODEREUSE=1
+          export UseSharedCompilation=false
+          nproc_n="$(nproc 2>/dev/null || echo 1)"
+          export CMAKE_BUILD_PARALLEL_LEVEL="${CMAKE_BUILD_PARALLEL_LEVEL:-$nproc_n}"
+          export CTEST_PARALLEL_LEVEL="${CTEST_PARALLEL_LEVEL:-$nproc_n}"
+          export LD_LIBRARY_PATH="$PWD/build/engine/core:$PWD/build/engine/dynamics:$PWD/build/engine/synthesis:${LD_LIBRARY_PATH:-}"
+          bash scripts/pr-proof.sh
+
+      - name: Remove isolated pull-request worktree
+        if: always()
+        run: |
+          set +e
+          if [[ -n "${LAPLACE_PR_WORKTREE:-}" ]]; then
+            git worktree remove --force "$LAPLACE_PR_WORKTREE"
+          fi
+          git worktree prune

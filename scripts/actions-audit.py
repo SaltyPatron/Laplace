@@ -81,13 +81,19 @@ for forbidden in ("publish-applications.sh check", "check-application-runtime.py
 pr = workflows.get("pr-validation.yml", {})
 prove = (pr.get("jobs") or {}).get("prove", {})
 pr_source = (WF / "pr-validation.yml").read_text(encoding="utf-8") if (WF / "pr-validation.yml").exists() else ""
+pr_commands = runs(prove)
 if "pull_request" not in triggers(pr): fail("PR proof workflow has no pull_request trigger")
 if "head.repo.full_name == github.repository" not in str(prove.get("if", "")): fail("PR proof may execute fork code on self-hosted runner")
 if "${{ secrets." in pr_source: fail("PR proof workflow reads repository secrets")
-if "scripts/pr-proof.sh" not in runs(prove): fail("PR workflow bypasses canonical PR proof")
+if "scripts/pr-proof.sh" not in pr_commands: fail("PR workflow bypasses canonical PR proof")
+if "git checkout --force" in pr_commands: fail("PR proof mutates the persistent main workspace checkout")
+for token in ("git worktree add --detach", "LAPLACE_PR_WORKTREE", "git worktree remove --force"):
+    if token not in pr_commands: fail(f"PR proof lacks isolated-worktree contract: {token}")
 pr_concurrency = pr.get("concurrency") or {}
-if pr_concurrency.get("group") != "laplace-shared-workspace" or pr_concurrency.get("cancel-in-progress") != "false":
-    fail("PR proof does not honor the persistent single-runner workspace")
+if pr_concurrency.get("group") != "laplace-pr-${{ github.event.pull_request.number }}" or pr_concurrency.get("cancel-in-progress") != "true":
+    fail("PR proof must supersede only the same PR and must not share main's pending-run queue")
+if (main.get("concurrency") or {}).get("group") == pr_concurrency.get("group"):
+    fail("PR proof and main share a concurrency group; PR pushes can cancel pending delivery")
 
 for name, workflow in workflows.items():
     if name == "db-ops.yml" or name.startswith("seed-"):
@@ -116,4 +122,4 @@ if failures:
     print("ACTIONS_AUDIT_FAILED", file=sys.stderr)
     for failure in failures: print(f"  - {failure}", file=sys.stderr)
     raise SystemExit(1)
-print(f"ACTIONS_AUDIT_OK workflows={len(workflows)} delivery=before_qa pr_proof=source-build-only")
+print(f"ACTIONS_AUDIT_OK workflows={len(workflows)} delivery=before_qa pr_proof=isolated-worktree")
