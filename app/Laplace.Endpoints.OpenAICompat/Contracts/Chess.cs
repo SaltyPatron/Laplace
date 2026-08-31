@@ -61,6 +61,21 @@ public sealed record ChessOpponentRow(
     [property: JsonPropertyName("rd")] double Rd,
     [property: JsonPropertyName("eff_mu")] double EffMu);
 
+/// <summary>One provider identity and the profile evidence acquired for it.</summary>
+public sealed record ChessIdentityProfile(
+    [property: JsonPropertyName("id")] string IdHex,
+    [property: JsonPropertyName("provider")] string Provider,
+    [property: JsonPropertyName("provider_id")] string ProviderId,
+    [property: JsonPropertyName("display_name")] string DisplayName,
+    [property: JsonPropertyName("aliases")] IReadOnlyList<string> Aliases,
+    [property: JsonPropertyName("title")] string? Title,
+    [property: JsonPropertyName("federation")] string? Federation,
+    [property: JsonPropertyName("biography")] string? Biography,
+    [property: JsonPropertyName("avatar_url")] string? AvatarUrl,
+    [property: JsonPropertyName("links")] IReadOnlyList<string> Links,
+    [property: JsonPropertyName("ratings")] IReadOnlyDictionary<string, int> Ratings,
+    [property: JsonPropertyName("facts")] IReadOnlyDictionary<string, string> Facts);
+
 /// <summary>
 /// The career page. <c>Overall</c>, <c>AsWhite</c> and <c>AsBlack</c> come from one
 /// pass over the same evidence (SQL GROUPING SETS), so the splits can never
@@ -75,7 +90,8 @@ public sealed record ChessPlayerResponse(
     [property: JsonPropertyName("as_black")] ChessRecord AsBlack,
     [property: JsonPropertyName("peak_rating")] int? PeakRating,
     [property: JsonPropertyName("ratings")] IReadOnlyList<ChessRatingRow> Ratings,
-    [property: JsonPropertyName("opponents")] IReadOnlyList<ChessOpponentRow> Opponents);
+    [property: JsonPropertyName("opponents")] IReadOnlyList<ChessOpponentRow> Opponents,
+    [property: JsonPropertyName("profiles")] IReadOnlyList<ChessIdentityProfile> Profiles);
 
 /// <summary>
 /// One line of a game log. <c>Outcome</c> is this player's result in the substrate's

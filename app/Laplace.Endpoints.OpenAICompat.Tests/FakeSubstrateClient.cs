@@ -695,6 +695,14 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
                     [
                         new ChessOpponentRow(BotvinnikIdHex, "Botvinnik, Mikhail",
                             28, 1700.0, 60.0, 1580.0),
+                    ],
+                    Profiles:
+                    [
+                        new ChessIdentityProfile(TalIdHex, "fide", "5000017", "Tal, Mikhail",
+                            ["Tal, Mikhail", "Mikhail Tal"], "GM", "LAT", null, null,
+                            ["https://ratings.fide.com/profile/5000017"],
+                            new Dictionary<string, int> { ["standard"] = 2705 },
+                            new Dictionary<string, string> { ["birth_year"] = "1936" }),
                     ]));
 
     public Task<ChessGamesResponse?> ChessPlayerGamesAsync(

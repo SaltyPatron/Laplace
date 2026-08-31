@@ -146,6 +146,39 @@ export const LAB_EXPERIMENTS: LabExperiment[] = [
     category: 'lichess',
     recordsLive: false,
   },
+  {
+    kind: 'fide-search',
+    title: 'Find FIDE identity',
+    tagline: 'Resolve a real name to official FIDE candidates before associating an account.',
+    description:
+      'Searches the official FIDE ratings database and returns FIDE ID, name, title, federation, ratings, and birth year for disambiguation.',
+    expect: ['Ranked candidate table with official FIDE IDs', 'Standard, rapid, and blitz ratings where published'],
+    tips: ['Search either “Magnus Carlsen” or “Carlsen, Magnus”, then paste the selected FIDE ID into player ingest.'],
+    category: 'lichess',
+    recordsLive: false,
+  },
+  {
+    kind: 'player-profile',
+    title: 'Associate player identities',
+    tagline: 'Acquire provider and FIDE profiles without redownloading games.',
+    description:
+      'Fetches the selected Chess.com or Lichess profile and an optional official FIDE profile, then writes their metadata and identity link as one substrate operation. If no FIDE ID is supplied, it shows official candidates from the provider real name.',
+    expect: ['Provider and official profile table', 'Downloadable profile JSON', 'identity_links receipt or FIDE candidates'],
+    tips: ['Use Find FIDE identity when several people share the same name; only an explicitly selected FIDE ID is associated.'],
+    category: 'lichess',
+    recordsLive: false,
+  },
+  {
+    kind: 'fide-roster',
+    title: 'Ingest FIDE top players',
+    tagline: 'Acquire an official top-N cohort as player profiles.',
+    description:
+      'Reads FIDE’s official open, women, junior, or girls ranking for standard, rapid, or blitz; fetches each selected profile; and writes the cohort in one substrate operation.',
+    expect: ['Official ranked player table', 'Profile acquisition progress', 'profiles_ingested receipt'],
+    tips: ['Start with 25 to inspect the cohort; the official pages currently publish up to 100 per list.'],
+    category: 'lichess',
+    recordsLive: true,
+  },
 ];
 
 const byKind = new Map(LAB_EXPERIMENTS.map((e) => [e.kind, e]));

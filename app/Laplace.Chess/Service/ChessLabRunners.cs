@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text.Json;
 using Laplace.Engine.Core;
 using Laplace.Modality;
 using Laplace.Modality.Chess;
@@ -346,6 +347,14 @@ public static class ChessLabRunners
         };
         if (fideId.Length > 0)
             profiles.Add(await ChessGameFetcher.FetchProfileAsync(fideId, "fide", ct));
+        lab.Publish(slot, ProfileTable(profiles));
+        await AddProfileArtifactsAsync(lab, slot, profiles, ct);
+        if (fideId.Length == 0 && profiles[0].RealName is { Length: > 1 } realName)
+        {
+            var candidates = await ChessGameFetcher.SearchFideAsync(realName, 10, ct);
+            lab.Publish(slot, FideTable($"Possible FIDE identities for {realName}", candidates));
+            lab.Publish(slot, new ChessLabMetricEvent("fide_candidates", candidates.Count));
+        }
         if (ingest)
         {
             var liveHost = await lab.GetLiveHostAsync(ct);
@@ -355,9 +364,10 @@ public static class ChessLabRunners
             var profileResult = await ingestor.IngestPlayerProfilesAsync(profiles, ct);
             lab.Publish(slot, new ChessLabMetricEvent("games_ingested", gameResult.Applied));
             lab.Publish(slot, new ChessLabMetricEvent("profiles_ingested", profileResult.Profiles));
+            lab.Publish(slot, new ChessLabMetricEvent("identity_links", profileResult.Links));
             lab.UpdateSummary(slot, new ChessLabJobSummary(
                 gameResult.Applied, games,
-                $"{games} fetched · {gameResult.Applied} new games · {profileResult.Profiles} profiles"));
+                $"{games} fetched · {gameResult.Applied} new games · {profileResult.Profiles} profiles · {profileResult.Links} identity links"));
         }
         else
         {
@@ -365,6 +375,141 @@ public static class ChessLabRunners
                 games, games, $"{games} fetched · not ingested"));
         }
         Finish(lab, slot, ChessLabJobState.Completed);
+    }
+
+    public static async Task RunPlayerProfileAsync(
+        ChessLabService lab, ChessLabService.JobSlot slot, CancellationToken ct)
+    {
+        string user = Config(slot.Job.Config, "user", "").Trim();
+        string site = Config(slot.Job.Config, "site", "lichess");
+        string fideId = Config(slot.Job.Config, "fideId", "").Trim();
+        bool ingest = Config(slot.Job.Config, "ingest", "true") == "true";
+        if (user.Length == 0) throw new ArgumentException("A provider username is required.");
+
+        var online = await ChessGameFetcher.FetchProfileAsync(user, site, ct);
+        var profiles = new List<ChessPlayerProfile> { online };
+        if (fideId.Length > 0)
+            profiles.Add(await ChessGameFetcher.FetchProfileAsync(fideId, "fide", ct));
+
+        lab.Publish(slot, ProfileTable(profiles));
+        await AddProfileArtifactsAsync(lab, slot, profiles, ct);
+        if (fideId.Length == 0 && online.RealName is { Length: > 1 } realName)
+        {
+            var candidates = await ChessGameFetcher.SearchFideAsync(realName, 25, ct);
+            lab.Publish(slot, FideTable($"Possible FIDE identities for {realName}", candidates));
+            lab.Publish(slot, new ChessLabMetricEvent("fide_candidates", candidates.Count));
+        }
+
+        if (!ingest)
+        {
+            lab.UpdateSummary(slot, new ChessLabJobSummary(profiles.Count, profiles.Count,
+                $"{profiles.Count} profiles acquired · not ingested"));
+            Finish(lab, slot, ChessLabJobState.Completed);
+            return;
+        }
+
+        var liveHost = await lab.GetLiveHostAsync(ct);
+        await using var ingestor = await ChessPgnIngestor.AttachAsync(liveHost, ct);
+        var result = await ingestor.IngestPlayerProfilesAsync(profiles, ct);
+        lab.Publish(slot, new ChessLabMetricEvent("profiles_ingested", result.Profiles));
+        lab.Publish(slot, new ChessLabMetricEvent("identity_links", result.Links));
+        lab.UpdateSummary(slot, new ChessLabJobSummary(result.Profiles, profiles.Count,
+            $"{result.Profiles} profiles · {result.Links} identity links"));
+        Finish(lab, slot, ChessLabJobState.Completed);
+    }
+
+    public static async Task RunFideSearchAsync(
+        ChessLabService lab, ChessLabService.JobSlot slot, CancellationToken ct)
+    {
+        string query = Config(slot.Job.Config, "query", "").Trim();
+        int limit = Math.Clamp(int.Parse(Config(slot.Job.Config, "limit", "25")), 1, 100);
+        var candidates = await ChessGameFetcher.SearchFideAsync(query, limit, ct);
+        lab.Publish(slot, FideTable($"FIDE matches for {query}", candidates));
+        lab.Publish(slot, new ChessLabMetricEvent("matches", candidates.Count));
+        lab.UpdateSummary(slot, new ChessLabJobSummary(candidates.Count, candidates.Count,
+            $"{candidates.Count} official FIDE candidates"));
+        Finish(lab, slot, ChessLabJobState.Completed);
+    }
+
+    public static async Task RunFideRosterAsync(
+        ChessLabService lab, ChessLabService.JobSlot slot, CancellationToken ct)
+    {
+        string cohort = Config(slot.Job.Config, "cohort", "open");
+        int limit = Math.Clamp(int.Parse(Config(slot.Job.Config, "limit", "25")), 1, 100);
+        bool ingest = Config(slot.Job.Config, "ingest", "true") == "true";
+        var candidates = await ChessGameFetcher.FetchFideTopAsync(cohort, limit, ct);
+        lab.Publish(slot, FideTable($"FIDE {cohort} top {candidates.Count}", candidates));
+        if (!ingest)
+        {
+            lab.UpdateSummary(slot, new ChessLabJobSummary(candidates.Count, candidates.Count,
+                $"{candidates.Count} official FIDE profiles · not ingested"));
+            Finish(lab, slot, ChessLabJobState.Completed);
+            return;
+        }
+
+        var fetched = new ConcurrentDictionary<string, ChessPlayerProfile>(StringComparer.Ordinal);
+        int done = 0;
+        await Parallel.ForEachAsync(candidates,
+            new ParallelOptions { MaxDegreeOfParallelism = 4, CancellationToken = ct },
+            async (candidate, token) =>
+            {
+                var profile = await ChessGameFetcher.FetchFideProfileAsync(candidate.FideId, token);
+                var facts = profile.Facts.ToDictionary(
+                    static x => x.Key, static x => x.Value, StringComparer.OrdinalIgnoreCase);
+                facts["cohort"] = cohort;
+                facts["rank"] = candidate.Rank?.ToString() ?? "";
+                fetched[candidate.FideId] = profile with { Facts = facts };
+                int current = Interlocked.Increment(ref done);
+                lab.UpdateSummary(slot, new ChessLabJobSummary(current, candidates.Count,
+                    $"profiles {current}/{candidates.Count}"));
+                lab.Publish(slot, new ChessLabProgressEvent(current, candidates.Count, candidate.Name));
+            });
+
+        var profiles = candidates.Select(c => fetched[c.FideId]).ToArray();
+        var liveHost = await lab.GetLiveHostAsync(ct);
+        await using var ingestor = await ChessPgnIngestor.AttachAsync(liveHost, ct);
+        var result = await ingestor.IngestPlayerProfilesAsync(profiles, ct);
+        lab.Publish(slot, new ChessLabMetricEvent("profiles_ingested", result.Profiles));
+        lab.UpdateSummary(slot, new ChessLabJobSummary(result.Profiles, candidates.Count,
+            $"{result.Profiles} official FIDE profiles ingested from {cohort}"));
+        Finish(lab, slot, ChessLabJobState.Completed);
+    }
+
+    private static ChessLabTableEvent FideTable(
+        string title, IReadOnlyList<FidePlayerCandidate> candidates)
+        => new(title,
+            ["Rank", "FIDE ID", "Name", "Title", "Fed", "Standard", "Rapid", "Blitz", "Born"],
+            candidates.Select(static c => (IReadOnlyList<string>)[
+                c.Rank?.ToString() ?? "", c.FideId, c.Name, c.Title ?? "", c.Federation,
+                c.Standard == 0 ? "" : c.Standard.ToString(),
+                c.Rapid == 0 ? "" : c.Rapid.ToString(),
+                c.Blitz == 0 ? "" : c.Blitz.ToString(),
+                c.BirthYear == 0 ? "" : c.BirthYear.ToString(),
+            ]).ToArray());
+
+    private static ChessLabTableEvent ProfileTable(IReadOnlyList<ChessPlayerProfile> profiles)
+        => new("Acquired player profiles",
+            ["Provider", "Provider ID", "Display name", "Real name", "Title", "Federation", "Ratings", "Avatar"],
+            profiles.Select(static p => (IReadOnlyList<string>)[
+                p.Provider, p.ProviderId, p.DisplayName, p.RealName ?? "", p.Title ?? "",
+                p.Federation ?? "", string.Join(", ", p.Ratings.Select(static x => $"{x.Key} {x.Value}")),
+                p.AvatarUrl ?? "",
+            ]).ToArray());
+
+    private static async Task AddProfileArtifactsAsync(
+        ChessLabService lab, ChessLabService.JobSlot slot,
+        IReadOnlyList<ChessPlayerProfile> profiles, CancellationToken ct)
+    {
+        string directory = Path.Combine(LabDir, slot.Job.Id);
+        Directory.CreateDirectory(directory);
+        foreach (var profile in profiles)
+        {
+            string name = $"profile-{ChessGameFetcher.Sanitize(profile.Provider)}.json";
+            string path = Path.Combine(directory, name);
+            await File.WriteAllTextAsync(path,
+                JsonSerializer.Serialize(profile, new JsonSerializerOptions { WriteIndented = true }), ct);
+            lab.AddArtifact(slot, name, path);
+        }
     }
 
     private static void Finish(ChessLabService lab, ChessLabService.JobSlot slot, ChessLabJobState state, string? msg = null)

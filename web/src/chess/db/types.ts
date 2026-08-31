@@ -55,6 +55,21 @@ export interface ChessOpponentRow {
   eff_mu: number;
 }
 
+export interface ChessIdentityProfile {
+  id: string;
+  provider: string;
+  provider_id: string;
+  display_name: string;
+  aliases: string[];
+  title: string | null;
+  federation: string | null;
+  biography: string | null;
+  avatar_url: string | null;
+  links: string[];
+  ratings: Record<string, number>;
+  facts: Record<string, string>;
+}
+
 export interface ChessPlayerResponse {
   object: string;
   id: string;
@@ -65,6 +80,7 @@ export interface ChessPlayerResponse {
   peak_rating: number | null;
   ratings: ChessRatingRow[];
   opponents: ChessOpponentRow[];
+  profiles: ChessIdentityProfile[];
 }
 
 /** `outcome` is the substrate's own enum — 2 win, 1 draw, 0 loss, null unscored. */

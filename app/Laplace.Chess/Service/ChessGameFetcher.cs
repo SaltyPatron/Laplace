@@ -157,7 +157,9 @@ public static class ChessGameFetcher
             String(root, "title"),
             profile.ValueKind == JsonValueKind.Object ? String(profile, "country") : null,
             null,
-            links.Distinct(StringComparer.OrdinalIgnoreCase).ToArray(), ratings);
+            null,
+            links.Distinct(StringComparer.OrdinalIgnoreCase).ToArray(), ratings,
+            Facts(root, "createdAt", "seenAt", "playTime", "disabled", "tosViolation"));
     }
 
     public static async Task<ChessPlayerProfile> FetchChessComProfileAsync(string user, CancellationToken ct)
@@ -186,7 +188,10 @@ public static class ChessGameFetcher
         if (String(root, "country") is { } country) links.Add(country);
         return new ChessPlayerProfile(
             "chesscom", username, username, String(root, "name"), null,
-            String(root, "title"), String(root, "country"), null, links, ratings);
+            String(root, "title"), String(root, "country"), null,
+            String(root, "avatar"), links, ratings,
+            Facts(root, "player_id", "status", "location", "joined", "last_online",
+                "followers", "is_streamer", "twitch_url", "league", "verified"));
     }
 
     public static async Task<ChessPlayerProfile> FetchFideProfileAsync(string fideId, CancellationToken ct)
@@ -213,8 +218,152 @@ public static class ChessGameFetcher
             Match(text, @"FIDE title\s+(.+?)\s+(?:World Rank|Titles|Period)\b"),
             Match(text, @"FIDE ID\s+\d+\s+Federation\s+(.+?)\s+B-Year\b")
                 ?? Match(text, @"(?<!Chess )Federation\s+(.+?)\s+(?:B-Year|Gender|FIDE title)\b"),
-            fideId, [url], ratings);
+            fideId, null, [url], ratings,
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["birth_year"] = Match(text, @"B-Year\s+(\d{4})\b") ?? "",
+                ["gender"] = Match(text, @"Gender\s+(.+?)\s+FIDE title\b") ?? "",
+                ["world_rank"] = Match(text, @"World Rank\s+(\d+)\b") ?? "",
+            }.Where(static x => x.Value.Length > 0)
+             .ToDictionary(static x => x.Key, static x => x.Value, StringComparer.OrdinalIgnoreCase));
     }
+
+    public static async Task<IReadOnlyList<FidePlayerCandidate>> SearchFideAsync(
+        string query, int limit, CancellationToken ct)
+    {
+        query = query.Trim();
+        if (query.Length < 2) throw new ArgumentException("FIDE search needs at least two characters.", nameof(query));
+        string url = "https://ratings.fide.com/incl_search_l.php?search="
+            + Uri.EscapeDataString(query) + "&simple=1";
+        using var req = new HttpRequestMessage(HttpMethod.Get, url);
+        req.Headers.Referrer = new Uri("https://ratings.fide.com/");
+        req.Headers.Add("X-Requested-With", "XMLHttpRequest");
+        string html = await SendStringWithRetryAsync(req, ct);
+        return ParseFideSearch(html)
+            .OrderBy(candidate => FideCandidateScore(query, candidate.Name))
+            .ThenByDescending(static candidate => candidate.Standard)
+            .Take(Math.Clamp(limit, 1, 100)).ToArray();
+    }
+
+    public static async Task<IReadOnlyList<FidePlayerCandidate>> FetchFideTopAsync(
+        string cohort, int limit, CancellationToken ct)
+    {
+        cohort = cohort.Trim().ToLowerInvariant();
+        if (!FideCohorts.Contains(cohort))
+            throw new ArgumentException($"unknown FIDE cohort '{cohort}'", nameof(cohort));
+        string html = await GetStringWithRetryAsync(
+            $"https://ratings.fide.com/a_top.php?list={Uri.EscapeDataString(cohort)}", ct);
+        return ParseFideTop(html, cohort).Take(Math.Clamp(limit, 1, 100)).ToArray();
+    }
+
+    public static readonly IReadOnlySet<string> FideCohorts = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "open", "women", "juniors", "girls",
+        "men_rapid", "women_rapid", "juniors_rapid", "girls_rapid",
+        "men_blitz", "women_blitz", "juniors_blitz", "girls_blitz",
+    };
+
+    internal static IReadOnlyList<FidePlayerCandidate> ParseFideSearch(string html)
+    {
+        var result = new List<FidePlayerCandidate>();
+        foreach (Match row in Regex.Matches(html, @"<tr[^>]*>(.*?)</tr>", RegexOptions.IgnoreCase | RegexOptions.Singleline))
+        {
+            string body = row.Groups[1].Value;
+            var profile = Regex.Match(body, @"href\s*=\s*['""]?/profile/(\d+)['""]?[^>]*>(.*?)</a>",
+                RegexOptions.IgnoreCase | RegexOptions.Singleline);
+            if (!profile.Success) continue;
+            var ratings = Regex.Matches(body, @"data-label\s*=\s*['""]Rtg['""][^>]*>(.*?)</td>",
+                    RegexOptions.IgnoreCase | RegexOptions.Singleline)
+                .Select(static m => IntText(m.Groups[1].Value)).ToArray();
+            result.Add(new FidePlayerCandidate(
+                profile.Groups[1].Value,
+                CleanHtml(profile.Groups[2].Value),
+                CleanHtml(HtmlCell(body, "title") ?? ""),
+                Regex.Match(body, @"<img[^>]+alt=['""]([A-Z]{3})['""]", RegexOptions.IgnoreCase).Groups[1].Value.ToUpperInvariant(),
+                ratings.ElementAtOrDefault(0), ratings.ElementAtOrDefault(1), ratings.ElementAtOrDefault(2),
+                IntText(HtmlCell(body, "B-Year") ?? ""), null));
+        }
+        return result;
+    }
+
+    internal static IReadOnlyList<FidePlayerCandidate> ParseFideTop(string html, string cohort)
+    {
+        var result = new List<FidePlayerCandidate>();
+        foreach (Match row in Regex.Matches(html, @"<tr[^>]*>(.*?)</tr>", RegexOptions.IgnoreCase | RegexOptions.Singleline))
+        {
+            string body = row.Groups[1].Value;
+            var profile = Regex.Match(body, @"href\s*=\s*['""]?/profile/(\d+)['""]?[^>]*>(.*?)</a>",
+                RegexOptions.IgnoreCase | RegexOptions.Singleline);
+            if (!profile.Success) continue;
+            int rating = IntText(Regex.Match(body, @"class\s*=\s*['""]?rating_column['""]?[^>]*>(.*?)</td>",
+                RegexOptions.IgnoreCase | RegexOptions.Singleline).Groups[1].Value);
+            int rank = IntText(Regex.Match(body, @"class\s*=\s*['""]rank_span['""][^>]*>(.*?)</span>",
+                RegexOptions.IgnoreCase | RegexOptions.Singleline).Groups[1].Value);
+            var mode = cohort.EndsWith("_rapid", StringComparison.Ordinal) ? "rapid"
+                : cohort.EndsWith("_blitz", StringComparison.Ordinal) ? "blitz" : "standard";
+            result.Add(new FidePlayerCandidate(
+                profile.Groups[1].Value, CleanHtml(profile.Groups[2].Value), null,
+                FideFederation(body),
+                mode == "standard" ? rating : 0,
+                mode == "rapid" ? rating : 0,
+                mode == "blitz" ? rating : 0,
+                IntText(Regex.Match(body, @"class\s*=\s*['""]?bday_column['""]?[^>]*>(.*?)</td>",
+                    RegexOptions.IgnoreCase | RegexOptions.Singleline).Groups[1].Value), rank));
+        }
+        return result;
+    }
+
+    private static int FideCandidateScore(string query, string candidate)
+    {
+        string q = PlayerAlias.Canonical(query);
+        string name = PlayerAlias.Canonical(candidate);
+        if (q == name) return 0;
+        if (q.Replace(" ", "", StringComparison.Ordinal)
+            == name.Replace(" ", "", StringComparison.Ordinal)) return 1;
+        string[] tokens = q.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        string[] nameTokens = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (tokens.All(token => nameTokens.Contains(token, StringComparer.Ordinal))) return 2;
+        if (name.Contains(q, StringComparison.Ordinal)) return 3;
+        return 10;
+    }
+
+    private static string FideFederation(string row)
+    {
+        var alt = Regex.Match(row, @"<img[^>]+alt=['""]([A-Z]{3})['""]", RegexOptions.IgnoreCase);
+        if (alt.Success) return alt.Groups[1].Value.ToUpperInvariant();
+        var text = Regex.Match(row,
+            @"class\s*=\s*['""]?flag-wrapper['""]?[^>]*>.*?<img[^>]*>\s*([A-Z]{3})\b",
+            RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        return text.Success ? text.Groups[1].Value.ToUpperInvariant() : "";
+    }
+
+    private static IReadOnlyDictionary<string, string> Facts(JsonElement root, params string[] names)
+    {
+        var facts = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string name in names)
+        {
+            if (!root.TryGetProperty(name, out var value) || value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+                continue;
+            string text = value.ValueKind == JsonValueKind.String ? value.GetString() ?? "" : value.GetRawText();
+            if (text.Length > 0) facts[name] = text;
+        }
+        return facts;
+    }
+
+    private static string? HtmlCell(string row, string label)
+    {
+        var match = Regex.Match(row,
+            @"data-label\s*=\s*['""]" + Regex.Escape(label) + @"['""][^>]*>(.*?)</td>",
+            RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        return match.Success ? match.Groups[1].Value : null;
+    }
+
+    private static int IntText(string html)
+        => int.TryParse(Regex.Match(CleanHtml(html), @"\d+").Value, out int value) ? value : 0;
+
+    private static string CleanHtml(string html)
+        => System.Net.WebUtility.HtmlDecode(Regex.Replace(html, "<[^>]+>", " "))
+            .Replace('\u00a0', ' ').Trim();
 
     private static string? String(JsonElement root, string name) =>
         root.ValueKind == JsonValueKind.Object && root.TryGetProperty(name, out var value)
@@ -262,6 +411,23 @@ public static class ChessGameFetcher
         }
     }
 
+    private static async Task<string> SendStringWithRetryAsync(HttpRequestMessage request, CancellationToken ct)
+    {
+        for (int attempt = 0; ; attempt++)
+        {
+            using var copy = new HttpRequestMessage(request.Method, request.RequestUri);
+            foreach (var header in request.Headers) copy.Headers.TryAddWithoutValidation(header.Key, header.Value);
+            using var resp = await Http.SendAsync(copy, ct);
+            if ((int)resp.StatusCode == 429 && attempt < 5)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1 << attempt), ct);
+                continue;
+            }
+            resp.EnsureSuccessStatusCode();
+            return await resp.Content.ReadAsStringAsync(ct);
+        }
+    }
+
     internal static string Sanitize(string s)
         => new(s.Where(ch => char.IsLetterOrDigit(ch) || ch is '-' or '_').ToArray());
 }
@@ -275,5 +441,18 @@ public sealed record ChessPlayerProfile(
     string? Title,
     string? Federation,
     string? FideId,
+    string? AvatarUrl,
     IReadOnlyList<string> Links,
-    IReadOnlyDictionary<string, int> Ratings);
+    IReadOnlyDictionary<string, int> Ratings,
+    IReadOnlyDictionary<string, string> Facts);
+
+public sealed record FidePlayerCandidate(
+    string FideId,
+    string Name,
+    string? Title,
+    string Federation,
+    int Standard,
+    int Rapid,
+    int Blitz,
+    int BirthYear,
+    int? Rank);

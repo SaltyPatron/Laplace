@@ -132,6 +132,9 @@ internal static class ChessEndpoints
                     new { kind = "learned-pst", label = "Learned PST grid", @default = new { piece = "PNBRQK" } },
                     new { kind = "cutechess", label = "cutechess vs Stockfish", @default = new { rounds = "10", st = "1", elo = "2000", depth = "0", concurrency = "1", ingest = "true" } },
                     new { kind = "lichess-fetch", label = "Ingest player games", @default = new { site = "lichess", all = "true", max = "1000", ingest = "true" } },
+                    new { kind = "player-profile", label = "Acquire and associate player profiles", @default = new { site = "lichess", ingest = "true" } },
+                    new { kind = "fide-search", label = "Search FIDE players", @default = new { limit = "25" } },
+                    new { kind = "fide-roster", label = "Ingest FIDE top players", @default = new { cohort = "open", limit = "25", ingest = "true" } },
                 },
                 engines,
             });
@@ -302,6 +305,9 @@ internal static class ChessEndpoints
         "cutechess" => (parsed = ChessLabJobKind.Cutechess) == ChessLabJobKind.Cutechess,
         "lichess-bot" or "lichessbot" => (parsed = ChessLabJobKind.LichessBot) == ChessLabJobKind.LichessBot,
         "lichess-fetch" or "lichessfetch" => (parsed = ChessLabJobKind.LichessFetch) == ChessLabJobKind.LichessFetch,
+        "player-profile" or "playerprofile" => (parsed = ChessLabJobKind.PlayerProfile) == ChessLabJobKind.PlayerProfile,
+        "fide-search" or "fidesearch" => (parsed = ChessLabJobKind.FideSearch) == ChessLabJobKind.FideSearch,
+        "fide-roster" or "fideroster" => (parsed = ChessLabJobKind.FideRoster) == ChessLabJobKind.FideRoster,
         _ => (parsed = default) == default && false,
     };
 

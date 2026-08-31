@@ -136,8 +136,10 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
         await Gate.WaitAsync(ct);
         try
         {
-            int players = 0, links = 0;
-            var primary = new Dictionary<string, Hash128>(StringComparer.OrdinalIgnoreCase);
+            int players = 0;
+            var identityLinks = new HashSet<(Hash128 Subject, Hash128 Object, Hash128 Source)>();
+            var planned = new List<(ChessPlayerProfile Profile, Hash128 PlayerId,
+                Hash128 SourceId, double Weight, SubstrateChangeBuilder Builder)>();
             foreach (var profile in profiles)
             {
                 var (sourceId, sourceName, trustClass, weight) = ProfileSource(profile.Provider);
@@ -145,7 +147,8 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                     _writer, sourceId, sourceName, trustClass, ct, _reader);
                 await NpgsqlCanonicalRegistry.RegisterCanonicalsAsync(_ds, names, ct);
 
-                var b = new SubstrateChangeBuilder(sourceId, $"chess/player-profile/{profile.Provider}");
+                var b = new SubstrateChangeBuilder(sourceId,
+                    $"chess/player-profile/{profile.Provider}/{ChessGameFetcher.Sanitize(profile.ProviderId)}");
                 string identityName = profile.Provider.Equals("fide", StringComparison.OrdinalIgnoreCase)
                     ? profile.DisplayName : profile.ProviderId;
                 var playerId = ChessVocabulary.PlayerId(identityName);
@@ -161,11 +164,15 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                 AddProfileValue(b, playerId, ChessVocabulary.FeatureType, profile.Biography, sourceId, weight, "bio");
                 AddProfileValue(b, playerId, ChessVocabulary.FeatureType, profile.Title, sourceId, weight, "title");
                 AddProfileValue(b, playerId, ChessVocabulary.FeatureType, profile.Federation, sourceId, weight, "federation");
+                AddProfileValue(b, playerId, ChessVocabulary.FeatureType, profile.AvatarUrl, sourceId, weight, "avatar");
                 foreach (var link in profile.Links)
                     AddProfileValue(b, playerId, ChessVocabulary.FeatureType, link, sourceId, weight, "link");
                 foreach (var (kind, rating) in profile.Ratings)
                     AddProfileValue(b, playerId, ChessVocabulary.HasRatingType,
                         $"{kind}:{rating}", sourceId, weight);
+                foreach (var (kind, value) in profile.Facts)
+                    AddProfileValue(b, playerId, ChessVocabulary.FeatureType,
+                        value, sourceId, weight, $"fact:{kind}");
 
                 if (!string.IsNullOrWhiteSpace(profile.RealName)
                     && !PlayerAlias.Canonical(profile.RealName).Equals(
@@ -173,32 +180,39 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                 {
                     var realId = ChessVocabulary.PlayerId(profile.RealName);
                     ChessVocabulary.EmitPlayer(b, realId, profile.RealName, sourceId, weight);
-                    b.AddAttestation(NativeAttestation.CategoricalResolved(
-                        playerId, ChessVocabulary.CorrespondsToType, realId,
-                        sourceId, null, weight));
-                    links++;
+                    if (identityLinks.Add((playerId, realId, sourceId)))
+                        b.AddAttestation(NativeAttestation.CategoricalResolved(
+                            playerId, ChessVocabulary.CorrespondsToType, realId,
+                            sourceId, null, weight));
                 }
 
-                primary[profile.Provider] = playerId;
-                await _writer.ApplyAsync(await b.BuildAsync(ct), ct);
+                planned.Add((profile, playerId, sourceId, weight, b));
             }
 
-            if (primary.TryGetValue("fide", out var fide))
+            // A provider account plus one explicitly selected FIDE identity is one ingest
+            // fact. Put the bridge in the provider's original change so evidence, profile
+            // metadata and association commit and fold together. The former second apply
+            // reused the same source-unit label after the profile had already committed;
+            // the bridge could disappear while the job still reported "2 profiles".
+            var fideProfiles = planned.Where(static p =>
+                p.Profile.Provider.Equals("fide", StringComparison.OrdinalIgnoreCase)).ToArray();
+            if (fideProfiles.Length == 1)
             {
-                foreach (var (provider, online) in primary)
+                var fide = fideProfiles[0].PlayerId;
+                foreach (var online in planned)
                 {
-                    if (provider.Equals("fide", StringComparison.OrdinalIgnoreCase)) continue;
-                    var profile = profiles.First(p => p.Provider.Equals(provider, StringComparison.OrdinalIgnoreCase));
-                    var (sourceId, _, _, weight) = ProfileSource(provider);
-                    var b = new SubstrateChangeBuilder(sourceId, $"chess/player-profile/{provider}");
-                    b.AddAttestation(NativeAttestation.CategoricalResolved(
-                        online, ChessVocabulary.CorrespondsToType, fide,
-                        sourceId, null, weight));
-                    await _writer.ApplyAsync(await b.BuildAsync(ct), ct);
-                    links++;
+                    if (online.Profile.Provider.Equals("fide", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (identityLinks.Add((online.PlayerId, fide, online.SourceId)))
+                        online.Builder.AddAttestation(NativeAttestation.CategoricalResolved(
+                            online.PlayerId, ChessVocabulary.CorrespondsToType, fide,
+                            online.SourceId, null, online.Weight));
                 }
             }
-            return new ProfileResult(profiles.Count, players, links);
+
+            var changes = new List<SubstrateChange>(planned.Count);
+            foreach (var item in planned) changes.Add(await item.Builder.BuildAsync(ct));
+            await _writer.ApplyManyAsync(changes, ct);
+            return new ProfileResult(profiles.Count, players, identityLinks.Count);
         }
         finally { Gate.Release(); }
     }
