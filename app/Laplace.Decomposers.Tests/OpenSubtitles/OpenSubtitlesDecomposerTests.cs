@@ -136,25 +136,33 @@ public sealed class OpenSubtitlesDecomposerTests
             Assert.NotNull(whatId);
             Assert.NotNull(comoId);
 
+            // GH #1180: a sequence is the ordered content composition itself. The
+            // OpenSubtitles transport namespace must not enter the Merkle preimage,
+            // otherwise another source admitting the same sentence sequence mints a
+            // different alleged-content id.
             Hash128 sequenceSchema =
                 Hash128.OfCanonical("opensubtitles/sequence-block512/schema/v1");
-            Hash128 pairReference =
-                Hash128.OfCanonical("opensubtitles/language-pair/en-es/v1");
             Hash128 leftSequence = Hash128.Merkle(
-                EntityTier.Document, [sequenceSchema, helloId!.Value, whatId!.Value]);
+                EntityTier.Document, [helloId!.Value, whatId!.Value]);
             Hash128 rightSequence = Hash128.Merkle(
-                EntityTier.Document, [sequenceSchema, holaId!.Value, comoId!.Value]);
+                EntityTier.Document, [holaId!.Value, comoId!.Value]);
+            Hash128 oldNamespacedLeftSequence = Hash128.Merkle(
+                EntityTier.Document, [sequenceSchema, helloId.Value, whatId.Value]);
 
+            Assert.DoesNotContain(sequenceSchema, entities.Keys);
+            Assert.DoesNotContain(oldNamespacedLeftSequence, entities.Keys);
             Assert.Equal(EntityTypeRegistry.OpenSubtitlesSequence, entities[leftSequence].TypeId);
             Assert.Equal(EntityTypeRegistry.OpenSubtitlesSequence, entities[rightSequence].TypeId);
             Assert.Equal(
-                [sequenceSchema, helloId.Value, whatId.Value],
+                [helloId.Value, whatId.Value],
                 Trajectory.Constituents(physicalities[leftSequence].TrajectoryXyzm!));
             Assert.Equal(
-                [sequenceSchema, holaId.Value, comoId.Value],
+                [holaId.Value, comoId.Value],
                 Trajectory.Constituents(physicalities[rightSequence].TrajectoryXyzm!));
             Assert.True(languageSubjects.SetEquals([leftSequence, rightSequence]));
 
+            Hash128 pairReference =
+                Hash128.OfCanonical("opensubtitles/language-pair/en-es/v1");
             Hash128 start = Hash128.OfCanonical("opensubtitles/source-ordinal/1/v1");
             Hash128 end = Hash128.OfCanonical("opensubtitles/source-ordinal/2/v1");
             Hash128 alignmentSchema =
