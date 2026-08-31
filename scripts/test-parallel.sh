@@ -6,7 +6,7 @@
 #   scripts/test-parallel.sh --engine       # ctest -LE regress only
 #   scripts/test-parallel.sh --regress      # ctest -L regress only
 #   scripts/test-parallel.sh --app          # dotnet test only
-#   scripts/test-parallel.sh --integration  # regress || dotnet (CI integration job)
+#   scripts/test-parallel.sh --integration  # DB health, then regress || dotnet
 #   scripts/test-parallel.sh --serial       # force serial (or set LAPLACE_TEST_SERIAL=1)
 #   scripts/test-parallel.sh --all          # ignore fingerprint stamps (LAPLACE_FORCE_ALL=1)
 #
@@ -183,6 +183,8 @@ case "$MODE" in
   regress) run_ctest_regress; exit $? ;;
   app)     run_dotnet; exit $? ;;
   integration)
+    echo "==== database health (seed-agnostic) ===="
+    bash scripts/check-database-health.sh "${PGDATABASE:-laplace}"
     if [[ "$SERIAL" == "1" ]]; then
       run_ctest_regress
       run_dotnet
