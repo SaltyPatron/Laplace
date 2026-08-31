@@ -466,8 +466,9 @@ internal sealed partial class SubstrateClient
         var seed = TryParseIdHex(idHex);
         if (seed is null) return null;
 
-        // Native SPI beam (pg_laplace_explore_web): one connection, undirected
-        // consensus probe, ≤fanout new nodes/hop, all tiers. Labels via render_text_fast.
+        // Native SPI web expansion (pg_laplace_explore_web): one connection,
+        // undirected consensus probe, ≤fanout new nodes/frontier parent, all tiers.
+        // Labels via render_text_fast.
         hops = Math.Max(0, hops);
         fanout = Math.Max(0, fanout);
         maxNodes = Math.Max(0, maxNodes);

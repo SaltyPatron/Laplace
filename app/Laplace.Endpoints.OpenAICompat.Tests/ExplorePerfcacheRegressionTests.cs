@@ -24,6 +24,17 @@ public sealed class ExplorePerfcacheRegressionTests
     }
 
     [Fact]
+    public void Decompose_ReportsStoredNodesWithoutCollapsedSelfWrappers()
+    {
+        CodepointPerfcache.LoadDefault();
+        var result = new ExploreDecomposeService().Decompose("MagnusCarlsen");
+
+        Assert.Single(result.Nodes, n => n.IdHex == result.RootIdHex);
+        Assert.DoesNotContain(result.Nodes, n => n.Tier is 1 or 3 or 4);
+        Assert.Equal(14, result.Nodes.Count); // 13 codepoints + one emitted word root
+    }
+
+    [Fact]
     public async Task ParallelExplorerAndReverseLookup_UseOneInitializedMapping()
     {
         CodepointPerfcache.LoadDefault();

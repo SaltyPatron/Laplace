@@ -4,12 +4,14 @@ using Laplace.Engine.Core;
 using Laplace.Modality;
 using Laplace.Modality.Chess;
 using Laplace.SubstrateCRUD;
+using Laplace.SubstrateCRUD.Npgsql;
 using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Chess.Service;
 
 /// <summary>
-/// Backfills the GAME TRAJECTORY onto games recorded before it existed, and nothing else.
+/// Backfills missing chess physicalities without replaying testimony: game trajectories and
+/// governed player → name compositions recorded before those physicalities existed.
 ///
 /// The obvious way to reach those games would be to bump ChessAnalyze.Version and re-run the
 /// analyzer. That is exactly wrong here: rows are idempotent but TESTIMONY IS NOT. Attestation
@@ -102,7 +104,14 @@ public sealed class ChessTrajectoryDecomposer
                            ds, ContainmentReader!, ws.Batch, MarkerId, ct))
         {
             _candidatesStreamed++;
-            yield return new ChessTrajectoryRecord(witnessed);
+            yield return ChessTrajectoryRecord.ForGame(witnessed);
+        }
+
+        await foreach (var (playerId, name) in
+                       ChessWitnessHydrator.StreamPlayersMissingPhysicalityAsync(ds, ws.Batch, ct))
+        {
+            _candidatesStreamed++;
+            yield return ChessTrajectoryRecord.ForPlayer(playerId, name);
         }
     }
 
@@ -110,12 +119,17 @@ public sealed class ChessTrajectoryDecomposer
     public (string Status, string Detail)? ExplainEmptyRun(long declaredInputUnits)
         => _candidatesStreamed == 0
             ? ("already-complete",
-               $"ChessTrajectory: every one of {declaredInputUnits} recorded line(s) already "
-               + $"carries the v{TrajectoryVersion} trajectory marker — nothing left to backfill.")
+               $"ChessTrajectory: all {declaredInputUnits} declared chess line/player "
+               + "physicalities are already present.")
             : null;
 
     protected override void Compose(ChessTrajectoryRecord record, SubstrateChangeBuilder b)
-        => Deposit(b, record.Game, SourceId);
+    {
+        if (record.Game is { } game)
+            Deposit(b, game, SourceId);
+        else if (record.PlayerId is { } playerId && record.PlayerName is { } name)
+            ChessVocabulary.AppendPlayerPhysicality(b, playerId, name, SourceId);
+    }
 
     /// <summary>
     /// The pass itself, as a pure function of a hydrated game: replay the line, deposit its
@@ -152,16 +166,37 @@ public sealed class ChessTrajectoryDecomposer
                     ChessVocabulary.AnalysisMarkerType, sourceId);
     }
 
-    public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+    public override async Task<long?> EstimateUnitCountAsync(
+        IDecomposerContext context, CancellationToken ct = default)
     {
         if (ChessWitnessHydrator.TryResolveDataSource(context.Reader) is not { } ds)
-            return Task.FromResult<long?>(null);
-        return ChessWitnessHydrator.CountRecordedLinesAsync(ds, ct);
+            return null;
+        long lines = await ChessWitnessHydrator.CountRecordedLinesAsync(ds, ct)
+            .ConfigureAwait(false) ?? 0;
+        long players = await NpgsqlSubstrateReads.CountChessPlayersMissingPhysicalityAsync(
+                ds, ChessVocabulary.PlayerType.ToBytes(), (short)PhysicalityType.Content, ct)
+            .ConfigureAwait(false);
+        return lines + players;
     }
 }
 
 /// <summary>Trunk root is this pass's marker, so its batches never collide with the analyzer's.</summary>
-public sealed record ChessTrajectoryRecord(ChessWitnessedGame Game) : ITrunkRootRecord
+public sealed record ChessTrajectoryRecord : ITrunkRootRecord
 {
-    public Hash128 TrunkRootId => ChessTrajectoryDecomposer.MarkerId(Game.LineId);
+    private ChessTrajectoryRecord(ChessWitnessedGame? game, Hash128? playerId, string? playerName)
+        => (Game, PlayerId, PlayerName) = (game, playerId, playerName);
+
+    public ChessWitnessedGame? Game { get; }
+    public Hash128? PlayerId { get; }
+    public string? PlayerName { get; }
+
+    public static ChessTrajectoryRecord ForGame(ChessWitnessedGame game) =>
+        new(game, null, null);
+
+    public static ChessTrajectoryRecord ForPlayer(Hash128 playerId, string name) =>
+        new(null, playerId, name);
+
+    public Hash128 TrunkRootId => Game is { } game
+        ? ChessTrajectoryDecomposer.MarkerId(game.LineId)
+        : PhysicalityId.Compute(PlayerId!.Value, PhysicalityType.Content);
 }

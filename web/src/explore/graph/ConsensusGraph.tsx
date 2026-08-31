@@ -369,7 +369,7 @@ export function ConsensusGraph({
               max={fanoutMax}
               value={fanout}
               onChange={(e) => onFanoutChange(clamp(Number(e.target.value) || 8, 2, fanoutMax))}
-              aria-label="Fanout per hop"
+              aria-label="Fanout per parent"
             />
           </Field>
         ) : null}
