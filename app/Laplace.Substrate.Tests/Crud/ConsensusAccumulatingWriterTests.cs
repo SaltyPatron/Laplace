@@ -40,13 +40,15 @@ public class ConsensusAccumulatingWriterTests
 
     private static AttestationRow Obs(
         Hash128 id, Hash128 subj, Hash128 relType, Hash128? obj, Hash128 src,
-        long score, long phi = PhiTrust, long games = 1, Hash128? ctx = null) =>
+        long score, long phi = PhiTrust, long games = 1, Hash128? ctx = null,
+        long opponentRating = Glicko2.DefaultRatingFp1e9) =>
         new(id, subj, relType, obj, src, ctx,
             Outcome: score > 500_000_000L ? AttestationOutcome.Confirm
                    : score < 500_000_000L ? AttestationOutcome.Refute
                                           : AttestationOutcome.Draw,
             LastObservedAtUnixUs: 1_770_000_000_000_000L, ObservationCount: games,
-            ScoreFp1e9: score, OpponentRdFp1e9: phi);
+            ScoreFp1e9: score, OpponentRdFp1e9: phi,
+            OpponentRatingFp1e9: opponentRating);
 
     private static SubstrateChange Change(Hash128 src, string unit, params AttestationRow[] rows) =>
         new(ImmutableArray<EntityRow>.Empty,
@@ -206,6 +208,39 @@ public class ConsensusAccumulatingWriterTests
             accumulator.ApplyManyAsync(new[] { Change(src, "acc-phi",
                 Obs(H(430), subj, relType, obj, src, 900_000_000, phi: PhiTrust),
                 Obs(H(431), subj, relType, obj, src, 800_000_000, phi: PhiCrank)) }));
+    }
+
+    [Fact]
+    public async Task Production_MixedOpponentRatingsUseGameWeightedPeriodMean()
+    {
+        var src = H(440); var relType = H(441); var subj = H(450); var obj = H(460);
+        await EnsureScaffoldAsync(src, relType, subj, obj);
+
+        await using var accumulator = new ConsensusAccumulatingWriter(
+            new NpgsqlSubstrateWriter(_pg.DataSource), _pg.DataSource);
+        await accumulator.ApplyManyAsync(new[] { Change(src, "acc-opponents",
+            Obs(H(470), subj, relType, obj, src, 1_000_000_000,
+                games: 1, opponentRating: 1_600_000_000_000),
+            Obs(H(471), subj, relType, obj, src, 0,
+                games: 3, opponentRating: 1_800_000_000_000)) });
+
+        var actual = await ConsensusRowAsync(subj, relType, obj);
+        Assert.NotNull(actual);
+        Assert.Equal(4, actual.Value.wc);
+
+        await using var expectedCmd = _pg.DataSource.CreateCommand("""
+            SELECT (r).rating, (r).rd, (r).volatility
+            FROM (SELECT laplace.laplace_glicko2_accumulate_games(
+                consensus.glicko2_neutral_mu(), consensus.glicko2_initial_rd(),
+                consensus.glicko2_initial_volatility(), 1750000000000::bigint,
+                $1, 4, 1000000000, consensus.glicko2_tau()) AS r) q
+            """);
+        expectedCmd.Parameters.AddWithValue(PhiTrust);
+        await using var expected = await expectedCmd.ExecuteReaderAsync();
+        Assert.True(await expected.ReadAsync());
+        Assert.Equal(expected.GetInt64(0), actual.Value.rating);
+        Assert.Equal(expected.GetInt64(1), actual.Value.rd);
+        Assert.Equal(expected.GetInt64(2), actual.Value.vol);
     }
 
     [Fact]

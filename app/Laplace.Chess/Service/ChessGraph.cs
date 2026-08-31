@@ -360,10 +360,14 @@ public static class ChessGraph
     /// </summary>
     public static void AppendPlayerResult(
         SubstrateChangeBuilder b, Hash128 player, Hash128? opponent, PlyOutcome outcome,
-        double witnessWeight, Hash128 src, Hash128 gameId)
+        double witnessWeight, Hash128 src, Hash128 gameId, int opponentElo = 0)
     {
         long sum = ScoreFp1e9(outcome);
-        b.AddAttestation(Outcome(player, games: 1, sum, witnessWeight, src, gameId));
+        long? opponentRating = opponentElo > 0
+            ? checked((long)opponentElo * Glicko2.FpScale)
+            : null;
+        b.AddAttestation(Outcome(
+            player, games: 1, sum, witnessWeight, src, gameId, opponentRating));
         if (opponent is { } opp)
             b.AddAttestation(NativeAttestation.Aggregated(
                 subject: player,
@@ -373,11 +377,13 @@ public static class ChessGraph
                 contextId: gameId,
                 games: 1,
                 sumScoreFp1e9: sum,
-                witnessWeight: witnessWeight));
+                witnessWeight: witnessWeight,
+                opponentRatingFp1e9: opponentRating));
     }
 
     private static AttestationRow Outcome(
-        Hash128 subject, long games, long sum, double witnessWeight, Hash128 src, Hash128? contextId = null) =>
+        Hash128 subject, long games, long sum, double witnessWeight, Hash128 src,
+        Hash128? contextId = null, long? opponentRatingFp1e9 = null) =>
         NativeAttestation.Aggregated(
             subject: subject,
             typeId: ChessVocabulary.OutcomeType,
@@ -386,7 +392,8 @@ public static class ChessGraph
             contextId: contextId,
             games: games,
             sumScoreFp1e9: sum,
-            witnessWeight: witnessWeight);
+            witnessWeight: witnessWeight,
+            opponentRatingFp1e9: opponentRatingFp1e9);
 
     private static AttestationRow EvalRow(
         Hash128 subject, long games, long sum, double witnessWeight, Hash128 src, Hash128? contextId = null) =>

@@ -224,12 +224,12 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
     private struct Delta
     {
         public long PhiFp1e9;
-        // The opponent this witness presents (GH #1321). Pinned per cell for the
-        // same reason PhiFp1e9 is: attestation identity fixes (subject, type,
-        // object, source, context), so every row merging into a cell in one batch
-        // came from the same source under the same relation and therefore the same
-        // witness_weight — which produces both halves.
-        public long OpponentRatingFp1e9;
+        // A rating period can contain games against different opponents. Keep the
+        // game-weighted total while the client combines rows, then send its exact
+        // integer mean to the native uniform-period kernel. Pinning one opponent
+        // rating per cell made real chess batches fail as soon as the PGN carried
+        // two different Elo tags for the same player's opponents.
+        public Int128 OpponentRatingTimesGamesFp1e9;
         public long Games;
         public long SumScoreFp1e9;
         public long MaxTsUnixUs;
@@ -364,8 +364,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
             {
                 ref var d = ref CollectionsMarshal.GetValueRefOrAddDefault(delta, key, out bool existed);
                 if (!existed) d = src;
-                else FoldInto(ref d, src.PhiFp1e9, src.OpponentRatingFp1e9,
-                              src.Games, src.SumScoreFp1e9, src.MaxTsUnixUs);
+                else FoldDelta(ref d, in src);
             }
         }
         return delta.Count == 0 ? null : delta;
@@ -416,7 +415,8 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                 if (!existed)
                 {
                     d.PhiFp1e9 = a.OpponentRdFp1e9;
-                    d.OpponentRatingFp1e9 = a.OpponentRatingFp1e9;
+                    d.OpponentRatingTimesGamesFp1e9 =
+                        checked((Int128)a.OpponentRatingFp1e9 * a.ObservationCount);
                     d.Games = a.ObservationCount;
                     d.SumScoreFp1e9 = AttestationMergeMath.RowScoreTotal(a);
                     d.MaxTsUnixUs = a.LastObservedAtUnixUs;
@@ -440,13 +440,32 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
             throw new InvalidOperationException(
                 $"fold invariant violated: cell observed with φ={phi} "
                 + $"after φ={d.PhiFp1e9} in the same batch");
-        if (d.OpponentRatingFp1e9 != oppRating)
-            throw new InvalidOperationException(
-                $"fold invariant violated: cell observed with opponent={oppRating} "
-                + $"after opponent={d.OpponentRatingFp1e9} in the same batch");
+        d.OpponentRatingTimesGamesFp1e9 = checked(
+            d.OpponentRatingTimesGamesFp1e9 + (Int128)oppRating * games);
         d.Games = AttestationMergeMath.SafeAddGames(d.Games, games);
         d.SumScoreFp1e9 = AttestationMergeMath.SafeAddScores(d.SumScoreFp1e9, score);
         if (tsUnixUs > d.MaxTsUnixUs) d.MaxTsUnixUs = tsUnixUs;
+    }
+
+    private static void FoldDelta(ref Delta d, in Delta src)
+    {
+        if (d.PhiFp1e9 != src.PhiFp1e9)
+            throw new InvalidOperationException(
+                $"fold invariant violated: cell observed with φ={src.PhiFp1e9} "
+                + $"after φ={d.PhiFp1e9} in the same batch");
+        d.OpponentRatingTimesGamesFp1e9 = checked(
+            d.OpponentRatingTimesGamesFp1e9 + src.OpponentRatingTimesGamesFp1e9);
+        d.Games = AttestationMergeMath.SafeAddGames(d.Games, src.Games);
+        d.SumScoreFp1e9 = AttestationMergeMath.SafeAddScores(
+            d.SumScoreFp1e9, src.SumScoreFp1e9);
+        if (src.MaxTsUnixUs > d.MaxTsUnixUs) d.MaxTsUnixUs = src.MaxTsUnixUs;
+    }
+
+    private static long OpponentRatingMean(in Delta d)
+    {
+        if (d.Games <= 0)
+            throw new InvalidOperationException("fold delta has no opponent observations");
+        return checked((long)(d.OpponentRatingTimesGamesFp1e9 / d.Games));
     }
 
     private IReadOnlyList<SubstrateChange> ForwardChanges(IReadOnlyList<SubstrateChange> changes)
@@ -736,7 +755,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                         subjects[i] = cell.Key.S.ToBytes();
                         objects[i] = cell.Key.O?.ToBytes()!;
                         phis[i] = cell.D.PhiFp1e9;
-                        opps[i] = cell.D.OpponentRatingFp1e9;
+                        opps[i] = OpponentRatingMean(in cell.D);
                         games[i] = cell.D.Games;
                         sums[i] = cell.D.SumScoreFp1e9;
                         ts[i] = TsFromUnixUs(cell.D.MaxTsUnixUs);

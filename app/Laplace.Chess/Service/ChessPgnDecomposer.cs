@@ -763,9 +763,13 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         if (blackPlayer is { } bp) b.AddAttestation(NativeAttestation.Categorical(lineId, "HAS_BLACK", bp, src, playingId, PgnWitnessWeight));
 
         if (whitePlayer is { } w2)
-            ChessGraph.AppendPlayerResult(b, w2, blackPlayer, result.ForMover(0), PgnWitnessWeight, src, playingId);
+            ChessGraph.AppendPlayerResult(
+                b, w2, blackPlayer, result.ForMover(0), PgnWitnessWeight, src, playingId,
+                blackElo);
         if (blackPlayer is { } b2)
-            ChessGraph.AppendPlayerResult(b, b2, whitePlayer, result.ForMover(1), PgnWitnessWeight, src, playingId);
+            ChessGraph.AppendPlayerResult(
+                b, b2, whitePlayer, result.ForMover(1), PgnWitnessWeight, src, playingId,
+                whiteElo);
 
         Meta(b, lineId, HasEventRelation, PgnGames.TagStr(gameText, "Event"), src, playingId);
         Meta(b, lineId, "ON_DATE", date, src, playingId);
