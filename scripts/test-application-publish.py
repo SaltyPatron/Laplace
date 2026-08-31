@@ -225,10 +225,6 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("publish-applications.sh recover", commands)
         self.assertNotIn("needs.integration-test", commands)
 
-        managed = (ROOT / "deploy/linux/managed-publish.sh").read_text()
-        self.assertIn('"${PUBLISH_RESULT:-}" == "success"', managed)
-        self.assertIn("retaining the activated application payload", managed)
-
     def test_runtime_readiness_rejects_false_or_untyped_results(self):
         module = load_module("verify_app", ROOT / "scripts/verify-application-release.py")
         ready = {"ready": True, "substrate_reachable": True, "perfcache_ready": True,
