@@ -16,7 +16,6 @@ public sealed class LichessBot : IAsyncDisposable
     private readonly HttpClient _http;
     private readonly int _maxDepth;
     private readonly ChessLiveGameHost _host;
-    private readonly SubstrateTransitionChooser? _transitionChooser;
     private readonly bool _substrate;
     private readonly bool _record;
     private readonly string? _botUsername;
@@ -42,7 +41,6 @@ public sealed class LichessBot : IAsyncDisposable
         _maxDepth = Math.Max(1, maxDepth);
         _host = host;
         _substrate = substrate;
-        _transitionChooser = substrate ? new SubstrateTransitionChooser(host.DataSource) : null;
         _record = record;
         _botUsername = botUsername;
         _onChatLine = onChatLine;
@@ -312,35 +310,19 @@ public sealed class LichessBot : IAsyncDisposable
                 int searchedDepth;
                 long searchedNodes;
                 IReadOnlyList<string> pv;
-                bool substrateRated = false;
-                if (_transitionChooser is not null)
-                {
-                    var decision = _transitionChooser.ChooseDecision(before, Random.Shared, ct);
-                    mv = decision.Move;
-                    substrateRated = decision.Rated;
-                    scoreCp = (int)Math.Clamp(
-                        Math.Round((decision.EffMu - GlickoPriors.NeutralMu / 1e9) * 8d),
-                        -30_000, 30_000);
-                    searchedDepth = 0;
-                    searchedNodes = 0;
-                    pv = [mv.ToUci()];
-                }
-                else
-                {
-                    search ??= _host.BuildSearch(false, maxDepth: _maxDepth);
-                    var result = search.Think(
-                        boardNow, new Search.Limits(MaxDepth: _maxDepth, MaxTimeMs: budgetMs), ct);
-                    if (result.BestMove is not { } bestMove) continue;
-                    mv = bestMove;
-                    scoreCp = result.Score;
-                    searchedDepth = result.Depth;
-                    searchedNodes = result.Nodes;
-                    pv = search.ExtractPv(boardNow);
-                }
+                search ??= _host.BuildSearch(_substrate, maxDepth: _maxDepth);
+                _host.RefreshSearch(search, _substrate);
+                var result = search.Think(
+                    boardNow, new Search.Limits(MaxDepth: _maxDepth, MaxTimeMs: budgetMs), ct);
+                mv = result.BestMove!.Value;
+                scoreCp = result.Score;
+                searchedDepth = result.Depth;
+                searchedNodes = result.Nodes;
+                pv = search.ExtractPv(boardNow);
 
                 _log.LogDebug(
                     "game {Id}: play {Move} ({Mode}, depth {D}, score {S}cp, budget {B}ms)",
-                    lichessGameId, mv.ToUci(), substrateRated ? "substrate forward pass" : "classical control",
+                    lichessGameId, mv.ToUci(), _substrate ? "substrate-guided search" : "classical control",
                     searchedDepth, scoreCp, budgetMs);
 
                 await PostAsync($"/api/bot/game/{lichessGameId}/move/{mv.ToUci()}", ct);

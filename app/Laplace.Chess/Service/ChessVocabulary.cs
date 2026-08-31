@@ -228,6 +228,16 @@ public static class ChessVocabulary
 
     public static readonly Hash128 LaplacePlayerId = PlayerId("Laplace");
 
+    // Historical lab builds attributed the guided actor to its experiment mode instead of
+    // the canonical Laplace player. Reads retain those content addresses so already-recorded
+    // games remain visible; new games always write LaplacePlayerId.
+    public static readonly IReadOnlyList<Hash128> HistoricalLaplacePlayerIds =
+    [
+        PlayerId("Laplace-guided-transition"),
+        PlayerId("Laplace-guided-fold"),
+        PlayerId("Laplace-guided-edge"),
+    ];
+
     public static Hash128 EmitPlayer(
         SubstrateChangeBuilder b, Hash128 playerId, string name, Hash128 sourceId,
         double witnessWeight = SourceTrust.AcademicCurated)

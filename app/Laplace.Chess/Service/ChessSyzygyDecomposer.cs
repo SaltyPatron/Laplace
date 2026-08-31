@@ -8,13 +8,11 @@ namespace Laplace.Chess.Service;
 
 /// <summary>
 /// Ingest Syzygy tablebases as substrate records via the multi-file spine.
-/// Each <c>.rtbw</c> is one packaging unit (material table) — file workers unpack
-/// materials in parallel; within a material, WDL probes fan out (thread-safe Fathom
-/// <c>tb_probe_wdl</c>) across ONE ComposeWorkers-sized budget shared by all
-/// concurrently-unpacking materials. Enumeration is scoped to materials at or under
-/// the men ceiling (<see cref="SyzygyTableUnpack.DefaultMaxMen"/> /
-/// <c>LAPLACE_SYZYGY_MAX_MEN</c>); larger materials are seeded by the game-driven
-/// probe path. Path resolution is <see cref="ChessInput.ResolveSyzygyPackagingDir"/>.
+/// Each <c>.rtbw</c> is one material-class package. File workers decode materials in
+/// parallel and stream fixed-size semantic transition chunks; no file is accumulated
+/// in memory and no board is expanded into an entity/physicality/attestation triplet.
+/// Each chunk is a content-addressed position → typed move → position graph segment,
+/// and the material root is its ordered trunk.
 /// Run: <c>laplace ingest chess-syzygy [&lt;syzygy-dir&gt;]</c>
 /// </summary>
 public sealed class ChessSyzygyDecomposer
@@ -155,19 +153,53 @@ public sealed class ChessSyzygyDecomposer
         int workers = probeBudget is null
             ? 1
             : Math.Max(1, IngestTopology.Current.ComposeWorkers);
+        // Stream semantic chunks.  The prior implementation retained every FEN string for
+        // the material and only composed after the final probe, ballooning resident memory.
+        var products = new List<SyzygyProduct>(ChessSyzygy.TransitionsPerChunk);
+        var chunks = new List<SyzygyChunkRef>();
         long cap = options.MaxInputUnits;
-        long n = 0;
+        long decoded = 0;
         await foreach (var product in SyzygyTableUnpack.ExtractMaterialAsync(
                            fileLabel, _prober, workers, probeBudget, ct).ConfigureAwait(false))
         {
-            yield return new ChessSyzygyRecord(product);
-            if (cap > 0 && ++n >= cap) yield break;
+            products.Add(product);
+            decoded++;
+            if (products.Count == ChessSyzygy.TransitionsPerChunk)
+            {
+                var record = ChessSyzygyRecord.CreateChunk(fileLabel, products);
+                if (record.Chunk is { } chunk && chunk.Id != default)
+                {
+                    chunks.Add(chunk);
+                    yield return record;
+                }
+                products = new List<SyzygyProduct>(ChessSyzygy.TransitionsPerChunk);
+            }
+            if (cap > 0 && decoded >= cap) break;
         }
+        if (products.Count > 0)
+        {
+            var record = ChessSyzygyRecord.CreateChunk(fileLabel, products);
+            if (record.Chunk is { } chunk && chunk.Id != default)
+            {
+                chunks.Add(chunk);
+                yield return record;
+            }
+        }
+        if (chunks.Count > 0)
+            yield return ChessSyzygyRecord.CreateMaterialRoot(fileLabel, chunks);
     }
 
     protected override IIngestRecordHandler<ChessSyzygyRecord> CreateHandlerForFile(
         string fileLabel, DecomposerOptions options) =>
-        new DirectComposeHandler<ChessSyzygyRecord>(static (r, b) => ChessSyzygy.DeriveProduct(b, r.Product));
+        new DirectComposeHandler<ChessSyzygyRecord>(static (r, b) =>
+        {
+            if (r.Products is { } products && r.Chunk is { } chunk)
+                ChessSyzygy.DeriveTransitionChunk(b, products, chunk.Id);
+            else if (r.Chunks is { } chunks)
+                ChessSyzygy.DeriveMaterialRoot(b, chunks, r.TrunkRootId);
+            else if (r.Product is { } product)
+                ChessSyzygy.DeriveProduct(b, product);
+        }, unitsPerRecord: static r => r.InputUnits);
 
     protected override IngestBatchConfig ConfigForFile(
         string fileLabel, ISubstrateReader? reader, DecomposerOptions options) =>
@@ -240,7 +272,7 @@ public sealed class ChessSyzygyDecomposer
     }
 
     /// <summary>
-    /// Coarse fallback only — the runner consults this when <see cref="DescribeInputAsync"/>
+    /// Coarse estimate only — the runner consults this when <see cref="DescribeInputAsync"/>
     /// yields no inventory (dir unresolved / no tables), never as the progress denominator.
     /// File count, like FrameNet: the record total is unknowable without a full unpack.
     /// </summary>
@@ -262,22 +294,55 @@ public sealed class ChessSyzygyDecomposer
         if (dir is null)
             return Task.FromResult<IngestInventory?>(null);
         var paths = ListFiles(dir, options).Select(t => t.Path).ToList();
-        // One .rtbw is one material TABLE, but extraction consumes one input unit per
-        // probed board state — millions per table. FromFileUnits declared the table
-        // count (~145) as the unit total while every record consumed a unit, so
-        // input_pct read 1,367,466%. The record total is unknowable without walking
-        // the material's whole index space, so keep record-grain progress against a
-        // deliberately unknown denominator and exact per-file completion — the same
-        // contract FrameNet uses for its one-file-many-records lane.
+        // Decoded states are the input units and are not knowable without walking the
+        // material index. File completion remains exact; persisted row counts expose the
+        // compact chunk/root shape independently of decoded-state progress.
         return Task.FromResult(IngestInventory.FromFilesWithUnknownUnitCount(
             "positions", paths, options.MaxInputUnits, tracksFileCompletion: true));
     }
 }
 
 /// <summary>
-/// One unpacked board-state product; trunk root is the versioned per-POSITION marker.
+/// One streamed transition chunk, its material root, or a legacy single-position test record.
 /// </summary>
-public sealed record ChessSyzygyRecord(SyzygyProduct Product) : ITrunkRootRecord
+public sealed record ChessSyzygyRecord : ITrunkRootRecord
 {
-    public Hash128 TrunkRootId => ChessSyzygy.MarkerId(Product.PositionId, ChessSyzygy.Version);
+    public ChessSyzygyRecord(SyzygyProduct product)
+    {
+        Product = product;
+        TrunkRootId = ChessSyzygy.MarkerId(product.PositionId, ChessSyzygy.Version);
+        InputUnits = 1;
+    }
+
+    private ChessSyzygyRecord(
+        string material, IReadOnlyList<SyzygyProduct>? products,
+        SyzygyChunkRef? chunk, IReadOnlyList<SyzygyChunkRef>? chunks,
+        Hash128 trunkRootId, long inputUnits)
+    {
+        Material = material;
+        Products = products;
+        Chunk = chunk;
+        Chunks = chunks;
+        TrunkRootId = trunkRootId;
+        InputUnits = inputUnits;
+    }
+
+    public static ChessSyzygyRecord CreateChunk(string material, IReadOnlyList<SyzygyProduct> products)
+    {
+        var chunk = ChessSyzygy.DescribeTransitionChunk(products);
+        return new ChessSyzygyRecord(
+            material, products, chunk, null, chunk.Id, products.Count);
+    }
+
+    public static ChessSyzygyRecord CreateMaterialRoot(
+        string material, IReadOnlyList<SyzygyChunkRef> chunks) =>
+        new(material, null, null, chunks, ChessSyzygy.MaterialId(material), 0);
+
+    public SyzygyProduct? Product { get; }
+    public string? Material { get; }
+    public IReadOnlyList<SyzygyProduct>? Products { get; }
+    public SyzygyChunkRef? Chunk { get; }
+    public IReadOnlyList<SyzygyChunkRef>? Chunks { get; }
+    public Hash128 TrunkRootId { get; }
+    public long InputUnits { get; }
 }

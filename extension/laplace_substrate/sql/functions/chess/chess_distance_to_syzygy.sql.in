@@ -1,6 +1,7 @@
 -- chess.distance_to_syzygy(line): observed distance along a line to the first
--- deposited closing fact. Silence is not a draw — empty when the line never
--- reaches a deposited tablebase position.
+-- substrate-resident closing transition. Silence is not a draw — empty when the
+-- line never reaches a decoded tablebase position.  Legacy v2 attestations remain
+-- readable until the clean compact seed replaces them.
 --
 -- Relation vocabulary via chess_has_wdl_type / chess.has_dtz_type(ISA G3).
 DROP FUNCTION IF EXISTS laplace.chess_distance_to_syzygy(bytea);
@@ -21,7 +22,14 @@ line AS MATERIALIZED (
     FROM LATERAL generation.trajectory_unpacked_points(p_line, 3::smallint)
          WITH ORDINALITY AS u(entity_id, run_length, ctier, ord)
 ),
-hit AS MATERIALIZED (
+compact AS MATERIALIZED (
+    SELECT l.ply, l.pos, t.wdl, t.dtz
+    FROM line l
+    CROSS JOIN LATERAL chess.syzygy_transition(l.pos) t
+    ORDER BY l.ply
+    LIMIT 1
+),
+legacy AS MATERIALIZED (
     SELECT l.ply, l.pos,
            max(a.object_id) FILTER (WHERE a.type_id = r.wdl) AS wdl_id,
            max(a.object_id) FILTER (WHERE a.type_id = r.dtz) AS dtz_id
@@ -33,6 +41,15 @@ hit AS MATERIALIZED (
     HAVING max(a.object_id) FILTER (WHERE a.type_id = r.wdl) IS NOT NULL
     ORDER BY l.ply
     LIMIT 1
+),
+hit AS MATERIALIZED (
+    SELECT c.ply, c.pos, c.wdl, c.dtz::text AS dtz,
+           NULL::bytea AS wdl_id, NULL::bytea AS dtz_id
+    FROM compact c
+    UNION ALL
+    SELECT l.ply, l.pos, NULL::integer, NULL::text, l.wdl_id, l.dtz_id
+    FROM legacy l
+    WHERE NOT EXISTS (SELECT 1 FROM compact)
 ),
 surfaces AS MATERIALIZED (
     SELECT COALESCE(array_agg(DISTINCT s), '{}'::bytea[]) AS ids
@@ -51,8 +68,16 @@ SELECT h.pos,
        -- Exact men is a board fact (compose-time). Not stored on laplace.physicalities;
        -- NULL here rather than lying with n_constituents (substructure count).
        NULL::integer,
-       w.txt,
-       d.txt
+       COALESCE(
+           CASE h.wdl
+               WHEN 0 THEN 'loss'
+               WHEN 1 THEN 'blessed-loss'
+               WHEN 2 THEN 'draw'
+               WHEN 3 THEN 'cursed-win'
+               WHEN 4 THEN 'win'
+           END,
+           w.txt),
+       COALESCE(h.dtz, d.txt)
 FROM hit h
 LEFT JOIN label w ON w.id = h.wdl_id
 LEFT JOIN label d ON d.id = h.dtz_id

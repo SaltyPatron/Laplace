@@ -2,7 +2,7 @@
 --
 -- NATIVE (2026-07-21, GH #565): the body lives in C (src/fold_route.c).
 -- Consensus is content: dedup it the way ingest dedups laplace.entities. The batch is
--- split by what it IS, per relation type. Phase 1 performs correlated keyed probes;
+-- split by what it IS, per relation type. Phase 1 performs an adaptive keyed batch read;
 -- phase 3 sends matched rows through the primary-key conflict arbiter and novel rows
 -- through target-free inserts. The historical MERGE survives only as the bounded
 -- concurrent-insert collision fallback. Existing cells re-fold from stored state;
@@ -22,15 +22,15 @@
 --
 -- The native routing groups the batch by type in C and executes one SESSION-CACHED
 -- prepared statements per type whose type_id is a LITERAL in the plan text (HTAB
--- of type -> SPI_keepplan'd plans in TopMemoryContext). The prior read is a keyed
--- LATERAL probe; matched persistence uses ON CONFLICT on the declared PK, and novel
+-- of type -> SPI_keepplan'd plans in TopMemoryContext). The prior read exposes the
+-- complete input set for an indexed or hash plan; matched persistence uses ON CONFLICT on the declared PK, and novel
 -- persistence never reads the target. There is no temp table, per-batch ANALYZE, or
 -- UPDATE-then-NOT-EXISTS double probe.
--- The function-local settings replan against the actual batch, disallow
--- materializing the target, and require the correlated prior read to use the
--- declared primary-key indexes. Otherwise freshly analyzed empty HASH leaves
--- look cheap enough to sequentially scan once per input row, recreating the
--- rows-times-leaves drain even though the lookup predicate is fully keyed.
+-- The function-local settings replan against the actual batch, materialize only
+-- the input set, and leave all three join/access methods available. PostgreSQL can
+-- therefore use indexed probes for a small batch or hash the input and visit each
+-- owning leaf once for a corpus-sized matched batch. Disabling hash joins forced
+-- the post-#1388 CILI run through millions of otherwise-fast index descents.
 -- These settings restore the caller's values on return, including errors.
 --
 -- One implementation per fact, preserved:
@@ -81,7 +81,9 @@ CREATE OR REPLACE FUNCTION consensus.upsert(
     LANGUAGE C VOLATILE
     SET plan_cache_mode = force_custom_plan
     SET enable_material = off
-    SET enable_seqscan = off;
+    SET enable_hashjoin = on
+    SET enable_mergejoin = on
+    SET enable_seqscan = on;
 
 -- Direct routed form for first-party type lanes. The type is part of every cell
 -- identity but is transmitted once per set operation, not once per row.
@@ -99,4 +101,6 @@ CREATE OR REPLACE FUNCTION consensus.upsert_type(
     LANGUAGE C VOLATILE
     SET plan_cache_mode = force_custom_plan
     SET enable_material = off
-    SET enable_seqscan = off;
+    SET enable_hashjoin = on
+    SET enable_mergejoin = on
+    SET enable_seqscan = on;

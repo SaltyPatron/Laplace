@@ -272,16 +272,12 @@ public sealed class ChessEngineService : IAsyncDisposable
 
 
 
-    private SubstructureFoldBias? _foldBias;
-    private SubstrateTransitionChooser? _transitionChooser;
+    private SubstrateRootBias? _rootBias;
+    private SubstrateBoardEvaluator? _boardEvaluator;
     private bool _learnedTried;
     private int[][]? _lpMg, _lpEg;
     private Task? _learnedRefresh;
     private readonly object _learnedGate = new();
-
-    private SubstructureFoldBias FoldBias() => _foldBias ??= new SubstructureFoldBias(_ds!);
-    private SubstrateTransitionChooser TransitionChooser() =>
-        _transitionChooser ??= new SubstrateTransitionChooser(_ds!);
 
     /// <summary>
     /// The learned fold NEVER runs on a request thread. MEASURED live 2026-08-21:
@@ -339,13 +335,19 @@ public sealed class ChessEngineService : IAsyncDisposable
 
     private Search BuildEngine(bool substrate, int ttBits = 20)
     {
-        var (mg, eg) = LearnedPstBlend();
+        IRootBias? bias = substrate ? (_rootBias ??= new SubstrateRootBias(_ds!)) : null;
+        ISearchPositionEvaluator? evaluator = substrate
+            ? (_boardEvaluator ??= new SubstrateBoardEvaluator(_ds!)) : null;
         if (_searchPool.TryTake(out var pooled) && pooled.TtBits == ttBits)
         {
-            pooled.Reconfigure(substrate ? FoldBias() : null, mg, eg);
+            pooled.Reconfigure(
+                bias, null, null, evaluator, ChessTablebaseRuntime.ProbeSearch);
             return pooled;
         }
-        return new Search(EvalTerm.All, substrate ? FoldBias() : null, ttBits, mg, eg);
+        return new Search(
+            EvalTerm.All, bias, ttBits,
+            positionEvaluator: evaluator,
+            tablebase: ChessTablebaseRuntime.ProbeSearch);
     }
 
     private void ReturnEngine(Search search) => _searchPool.Add(search);
@@ -377,27 +379,9 @@ public sealed class ChessEngineService : IAsyncDisposable
         if (_modality!.Terminal(state) is { } term)
             return new ChessBestMove(null, state.Board.ToFen(), 0, false, true, Describe(term));
 
-        if (substrate)
-        {
-            var chosen = ChooseFromSubstrate(state, ct);
-            var nextState = _modality.Apply(state, chosen.Move);
-            var nextStatus = _modality.Terminal(nextState) is { } nextTerm ? Describe(nextTerm) : "ongoing";
-            var nextMotifs = ChessMotifs.DetectAtPly(state.Board, chosen.Move, nextState.Board).ToList();
-            int guidedWhiteCp = state.Board.WhiteToMove ? chosen.ScoreCp : -chosen.ScoreCp;
-            return new ChessBestMove(
-                chosen.Move.ToUci(), nextState.Board.ToFen(), chosen.EffMu,
-                chosen.Rated, nextStatus != "ongoing", nextStatus,
-                ScoreCp: guidedWhiteCp, Depth: chosen.Depth, Nodes: chosen.Nodes,
-                Pv: chosen.Pv, Motifs: nextMotifs);
-        }
-
         var search = BuildEngine(substrate);
         var result = search.Think(state.Board, new Search.Limits(MaxDepth: Math.Clamp(depth, 1, 12)));
-        if (result.BestMove is not { } mv)
-        {
-            ReturnEngine(search);
-            return new ChessBestMove(null, state.Board.ToFen(), 0, false, false, "no legal move");
-        }
+        ChessMove mv = result.BestMove!.Value;
 
         var next = _modality.Apply(state, mv);
         var status = _modality.Terminal(next) is { } t ? Describe(t) : "ongoing";
@@ -409,21 +393,6 @@ public sealed class ChessEngineService : IAsyncDisposable
         return new ChessBestMove(mv.ToUci(), next.Board.ToFen(), result.Score, substrate,
             status != "ongoing", status, ScoreCp: whiteCp, Depth: result.Depth, Nodes: result.Nodes,
             Pv: pv, Motifs: motifs);
-    }
-
-    private readonly record struct RuntimeMove(
-        ChessMove Move, bool Rated, double EffMu, int ScoreCp, int Depth,
-        long Nodes, IReadOnlyList<string> Pv);
-
-    private RuntimeMove ChooseFromSubstrate(ChessState state, CancellationToken ct)
-    {
-        var decision = TransitionChooser().ChooseDecision(state, Rng(), ct);
-        int cp = (int)Math.Clamp(
-            Math.Round((decision.EffMu - GlickoPriors.NeutralMu / 1e9) * 8d),
-            -30_000, 30_000);
-        return new RuntimeMove(
-            decision.Move, decision.Rated, decision.EffMu, cp, 0, 0,
-            [decision.Move.ToUci()]);
     }
 
     /// <summary>
@@ -452,9 +421,12 @@ public sealed class ChessEngineService : IAsyncDisposable
         for (int g = 1; g <= games && !ct.IsCancellationRequested; g++)
         {
 
-            bool refresh = (g - 1) % Math.Max(1, reportEvery) == 0;
-            var (mg, eg) = LearnedPstBlend(refresh);
-            var search = new Search(EvalTerm.All, FoldBias(), ttBits: 18, mgPst: mg, egPst: eg);
+            if ((g - 1) % Math.Max(1, reportEvery) == 0)
+                _boardEvaluator = new SubstrateBoardEvaluator(_ds!);
+            var search = new Search(
+                EvalTerm.All, _rootBias ??= new SubstrateRootBias(_ds!), ttBits: 18,
+                positionEvaluator: _boardEvaluator,
+                tablebase: ChessTablebaseRuntime.ProbeSearch);
 
             var state = _modality!.Initial();
             var subjectKeys = new List<string>(); var objectKeys = new List<string>(); var movers = new List<int>();
@@ -466,7 +438,7 @@ public sealed class ChessEngineService : IAsyncDisposable
                 var legal = _modality.LegalActions(state);
                 ChessMove mv = plies < openingPlies
                     ? legal[rng.Next(legal.Count)]
-                    : search.Think(state.Board, new Search.Limits(MaxDepth: depth)).BestMove ?? legal[rng.Next(legal.Count)];
+                    : search.Think(state.Board, new Search.Limits(MaxDepth: depth)).BestMove!.Value;
                 int mover = _modality.SideToMove(state);
                 var next = _modality.Apply(state, mv);
                 subjectKeys.Add(_modality.StateKey(state));
@@ -592,45 +564,9 @@ public sealed class ChessEngineService : IAsyncDisposable
         if (_modality!.Terminal(state) is { } term)
             return new ChessBestMove(null, state.Board.ToFen(), 0, false, true, Describe(term));
 
-        if (substrate)
-        {
-            var chosen = ChooseFromSubstrate(state, ct);
-            string guidedFromKey = _modality.StateKey(state);
-            var nextState = _modality.Apply(state, chosen.Move);
-            string guidedToKey = _modality.StateKey(nextState);
-            var nextStatus = _modality.Terminal(nextState) is { } nextTerm ? Describe(nextTerm) : "ongoing";
-            var nextMotifs = ChessMotifs.DetectAtPly(state.Board, chosen.Move, nextState.Board).ToList();
-            int guidedWhiteCp = state.Board.WhiteToMove ? chosen.ScoreCp : -chosen.ScoreCp;
-
-            session.State = nextState;
-            session.Moves.Add(chosen.Move.ToUci());
-            session.PlyCount = session.Moves.Count;
-            if (session.RecordToSubstrate)
-            {
-                await _liveHost.RecordPlayPlyAsync(
-                    sessionId, session.PlyCount, guidedFromKey, guidedToKey, chosen.Move.ToUci(),
-                    ChessVocabulary.LaplacePlayerId, ct);
-                await _liveHost.RecordPlayPlyAnalysisAsync(
-                    sessionId, session.PlyCount,
-                    new ChessLivePlyAnalysis(chosen.ScoreCp, chosen.Depth, chosen.Nodes, chosen.Pv, nextMotifs), ct);
-            }
-            if (nextStatus != "ongoing")
-                await _liveHost.FinishPlaySessionAsync(
-                    sessionId, ParseTerminalStatus(nextStatus), adjudicated: false, ct);
-            return new ChessBestMove(
-                chosen.Move.ToUci(), nextState.Board.ToFen(), chosen.EffMu,
-                chosen.Rated, nextStatus != "ongoing", nextStatus,
-                ScoreCp: guidedWhiteCp, Depth: chosen.Depth, Nodes: chosen.Nodes,
-                Pv: chosen.Pv, Motifs: nextMotifs);
-        }
-
         var search = BuildEngine(substrate);
         var result = search.Think(state.Board, new Search.Limits(MaxDepth: Math.Clamp(depth, 1, 12)));
-        if (result.BestMove is not { } mv)
-        {
-            ReturnEngine(search);
-            return new ChessBestMove(null, state.Board.ToFen(), 0, false, false, "no legal move");
-        }
+        ChessMove mv = result.BestMove!.Value;
 
         string fromKey = _modality.StateKey(state);
         var next = _modality.Apply(state, mv);

@@ -126,6 +126,12 @@ internal static class IngestDispatchTable
             new Laplace.Chess.Service.ChessMoveOutcomesDecomposer(), "",
             skipLayerCheck: true, cli, skipSourceCompletion: true)),
 
+        // Reusable board-constituent outcome fold. Search loads this bounded atom census once
+        // and evaluates it throughout the tree; no per-node database reads.
+        ("chess-position-outcomes", cli => IngestCommands.IngestViaRunnerAsync(
+            new Laplace.Chess.Service.ChessPositionOutcomesDecomposer(), "",
+            skipLayerCheck: true, cli, skipSourceCompletion: true)),
+
         ("chess-eval", cli => IngestCommands.IngestViaRunnerAsync(
             new Laplace.Chess.Service.ChessStockfishEvalDecomposer(
                 cli.AnalyzeDepth > 0 ? cli.AnalyzeDepth : 10,
@@ -133,7 +139,7 @@ internal static class IngestDispatchTable
             skipLayerCheck: true, cli, skipSourceCompletion: true)),
 
         // Syzygy tablebase ingest: path = packaging dir (.rtbw/.rtbz). Unpack via
-        // Fathom codec → position-grain HAS_WDL/HAS_DTZ substrate records. Empty path
+        // Fathom codec → compact position/move/position material trajectories. Empty path
         // falls back to ChessLabPaths.SyzygyDir. Missing dir = clean no-op.
         ("chess-syzygy", cli => IngestCommands.IngestViaRunnerAsync(
             new Laplace.Chess.Service.ChessSyzygyDecomposer(), cli.Path ?? "",

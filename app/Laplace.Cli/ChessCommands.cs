@@ -135,22 +135,35 @@ internal static class ChessCommands
             (mg, eg) = LearnedPst.BuildTables(ds, ArgDouble(args, "--learned-scale", 1.0));
             (mg, eg) = Evaluation.BlendPeStoWith(mg, eg);
         }
-        var transitionChooser = new SubstrateTransitionChooser(ds);
+        var exactBias = new SubstrateRootBias(ds);
+        var boardEvaluator = new SubstrateBoardEvaluator(ds);
+        MoveChooser GuidedSearch()
+        {
+            var search = new Search(
+                EvalTerm.All, exactBias, ttBits: 16, mgPst: mg, egPst: eg,
+                positionEvaluator: boardEvaluator,
+                tablebase: ChessTablebaseRuntime.ProbeSearch);
+            return (state, rng) => search.Think(
+                state.Board, new Search.Limits(MaxDepth: depth)).BestMove!.Value;
+        }
         Func<MoveChooser> guided = mode switch
         {
-            "transition" or "fold" or "edge" => () =>
-                transitionChooser.CreateChooser(),
-            "off" => MatchRunner.SearcherFactory(depth, EvalTerm.All, ttBits: 16, mgPst: mg, egPst: eg),
+            "transition" or "fold" or "edge" => GuidedSearch,
+            "off" => MatchRunner.SearcherFactory(
+                depth, EvalTerm.All, ttBits: 16, mgPst: mg, egPst: eg,
+                tablebase: ChessTablebaseRuntime.ProbeSearch),
             _ => throw new ArgumentException($"unknown --mode '{mode}' (expected transition|off)"),
         };
-        var pure = MatchRunner.SearcherFactory(depth, EvalTerm.All, bias: null);
+        var pure = MatchRunner.SearcherFactory(
+            depth, EvalTerm.All, bias: null,
+            tablebase: ChessTablebaseRuntime.ProbeSearch);
 
         string openingsDir = ArgStr(args, "--openings-dir", OpeningSeed.DefaultDir);
         var book = seedOpenings ? OpeningSeed.Fens(openingsDir, plies: ArgInt(args, "--openings-plies", 10)) : null;
 
         string desc = mode switch
         {
-            "transition" or "fold" or "edge" => "fused position→move-physicality→child-structure substrate pass",
+            "transition" or "fold" or "edge" => "full-depth conventional + substrate position/transition evaluation",
             _ => "NO prior (sanity)",
         };
         Console.WriteLine($"substrate-test [{mode}]: guided ({desc}) vs pure classical");
@@ -167,7 +180,7 @@ internal static class ChessCommands
                                  openingFens: book, pgnSink: sink,
                                  liveHost: recorder?.Host,
                                  liveLearnContext: $"chess/cli/substrate-test/{mode}",
-                                 aPlayerName: $"Laplace-guided-{mode}", bPlayerName: "Laplace-pure",
+                                 aPlayerName: "Laplace", bPlayerName: "Classical-control",
                                  eventName: $"Laplace CLI substrate lift ({mode})",
                                  externalIdPrefix: $"laplace-cli/substrate/{mode}/seed-99");
         if (sink is not null)
@@ -179,8 +192,7 @@ internal static class ChessCommands
             Console.WriteLine($"  recorded {recorder.Host.GamesCompleted} games to substrate (chess/cli/substrate-test)");
         string elo = (r.EloDiff >= 0 ? "+" : "") + r.EloDiff.ToString("F0");
         Console.WriteLine($"  guided W-D-L: {r.AWins}-{r.Draws}-{r.BWins}   score {r.Score:F3}   Elo {elo} +/- {r.Margin95:F0}");
-        var transitionStats = transitionChooser.Snapshot;
-        Console.WriteLine($"  transition reads={transitionStats.TrunkReads:N0}, substrate decisions={transitionStats.Decisions:N0}, exact signals={transitionStats.ExactTransitionSignals:N0}, move-physicality signals={transitionStats.MovePhysicalitySignals:N0}, child-structure signals={transitionStats.ChildStructureSignals:N0}, substrate epoch={transitionStats.SubstrateEpoch:N0}");
+        Console.WriteLine($"  search depth={depth}, transition reads={exactBias.RootReads:N0}, exact-evidence roots={exactBias.RootsWithExactEvidence:N0}, structure reads={boardEvaluator.PositionReads:N0}, structure hits={boardEvaluator.PositionsWithEvidence:N0}, position atoms={boardEvaluator.LoadedAtoms:N0}, syzygy={ChessTablebaseRuntime.Largest}-men");
         Console.WriteLine(r.EloDiff > 5
             ? "  => the substrate measurably raises the classical floor at this mode/scale."
             : "  => no clear lift at this mode/scale — try --openings, more games, deeper, or a larger --cp-per-point.");

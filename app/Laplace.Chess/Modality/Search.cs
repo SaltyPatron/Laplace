@@ -8,6 +8,14 @@ public interface IRootBias
     int[] Bonus(Board root, IReadOnlyList<ChessMove> moves);
 }
 
+/// <summary>An in-memory position contribution evaluated at every search leaf.</summary>
+public interface ISearchPositionEvaluator
+{
+    int Evaluate(Board board);
+}
+
+public readonly record struct SearchTablebaseVerdict(int Wdl, int Dtz);
+
 public sealed class Search
 {
     public readonly record struct Result(ChessMove? BestMove, int Score, int Depth, long Nodes);
@@ -62,6 +70,8 @@ public sealed class Search
 
     private readonly EvalTerm _terms;
     private IRootBias? _rootBias;
+    private ISearchPositionEvaluator? _positionEvaluator;
+    private Func<Board, SearchTablebaseVerdict?>? _tablebase;
     private int[][]? _mgPst;
     private int[][]? _egPst;
     private Dictionary<string, int>? _rootBonusByUci;
@@ -76,12 +86,16 @@ public sealed class Search
     private const int RootBiasMargin = 256;
 
     public Search(EvalTerm terms = EvalTerm.All, IRootBias? rootBias = null, int ttBits = 20,
-        int[][]? mgPst = null, int[][]? egPst = null)
+        int[][]? mgPst = null, int[][]? egPst = null,
+        ISearchPositionEvaluator? positionEvaluator = null,
+        Func<Board, SearchTablebaseVerdict?>? tablebase = null)
     {
         _terms = terms;
         _rootBias = rootBias;
         _mgPst = mgPst;
         _egPst = egPst;
+        _positionEvaluator = positionEvaluator;
+        _tablebase = tablebase;
         int bits = Math.Clamp(ttBits, 10, 24);
         TtBits = bits;
         _tt = new TtEntry[1 << bits];
@@ -112,14 +126,25 @@ public sealed class Search
 
     /// Swap the bias/PST configuration on an existing instance so callers can
     /// reuse the transposition table allocation (32 MB at the default 2^20
-    /// entries) instead of building a fresh Search per request/ply. Think()
-    /// already resets all per-search state (TT, killers, root bonuses) on
-    /// entry, so a reconfigured instance is behavior-identical to a new one.
-    public void Reconfigure(IRootBias? rootBias, int[][]? mgPst, int[][]? egPst)
+    /// entries) instead of building a fresh Search per request/ply. Stable
+    /// configurations retain deterministic position results between moves;
+    /// changing any evaluator invalidates those results here.
+    public void Reconfigure(
+        IRootBias? rootBias, int[][]? mgPst, int[][]? egPst,
+        ISearchPositionEvaluator? positionEvaluator = null,
+        Func<Board, SearchTablebaseVerdict?>? tablebase = null)
     {
+        bool changed = !ReferenceEquals(_rootBias, rootBias)
+                       || !ReferenceEquals(_mgPst, mgPst)
+                       || !ReferenceEquals(_egPst, egPst)
+                       || !ReferenceEquals(_positionEvaluator, positionEvaluator)
+                       || !Equals(_tablebase, tablebase);
         _rootBias = rootBias;
         _mgPst = mgPst;
         _egPst = egPst;
+        _positionEvaluator = positionEvaluator;
+        _tablebase = tablebase;
+        if (changed) Array.Clear(_tt, 0, _tt.Length);
     }
 
     public Result Think(Board board, Limits limits, CancellationToken ct = default)
@@ -130,10 +155,16 @@ public sealed class Search
         _aborted = false;
         _ct = ct;
         _sw.Restart();
-        Array.Clear(_tt, 0, _tt.Length);
-
         var b = board.Clone();
-        ChessMove? best = null;
+        var rootMoves = MoveGen.Legal(b);
+        if (rootMoves.Count == 0)
+            return new Result(null, MoveGen.InCheck(b, b.WhiteToMove) ? -Mate : 0, 0, 0);
+
+        // A non-terminal search is total: interruption can shorten the completed depth,
+        // but it cannot turn a legal position into "no move". Negamax replaces this seed
+        // as soon as it examines root candidates and updates it throughout the root loop.
+        _rootBestMove = rootMoves[0];
+        ChessMove? best = _rootBestMove;
         int bestScore = 0, reached = 0;
 
         _rootBonusByUci = null;
@@ -143,7 +174,12 @@ public sealed class Search
             ClearKillers();
             _path.Clear();
             int score = Negamax(b, depth, -Inf, Inf, 0);
-            if (_aborted) break;
+            if (_aborted)
+            {
+                best = _rootBestMove;
+                bestScore = score;
+                break;
+            }
             best = _rootBestMove;
             bestScore = score;
             reached = depth;
@@ -185,6 +221,22 @@ public sealed class Search
 
         if (ply > 0 && (b.HalfmoveClock >= 100 || IsInsufficientMaterial(b))) return 0;
 
+        // Exact tablebase truth belongs inside the tree.  The root is intentionally searched:
+        // each child probe then determines which legal move preserves the best WDL result.
+        if (ply > 0 && _tablebase?.Invoke(b) is { } tablebase)
+        {
+            int distance = Math.Min(Math.Abs(tablebase.Dtz), 1_000);
+            return tablebase.Wdl switch
+            {
+                0 => -20_000 + distance + ply,
+                1 => -10_000 + distance + ply,
+                2 => 0,
+                3 => 10_000 - distance - ply,
+                4 => 20_000 - distance - ply,
+                _ => 0,
+            };
+        }
+
         ulong key = Zobrist.Hash(b);
         if (ply > 0 && _path.Contains(key)) return 0;
 
@@ -196,9 +248,10 @@ public sealed class Search
             ttMove = e.Move;
             if (ply > 0 && e.Depth >= depth)
             {
-                if (e.Flag == FlagExact) return e.Score;
-                if (e.Flag == FlagLower && e.Score >= beta) return e.Score;
-                if (e.Flag == FlagUpper && e.Score <= alpha) return e.Score;
+                int cached = ScoreFromTt(e.Score, ply);
+                if (e.Flag == FlagExact) return cached;
+                if (e.Flag == FlagLower && cached >= beta) return cached;
+                if (e.Flag == FlagUpper && cached <= alpha) return cached;
             }
         }
 
@@ -208,7 +261,6 @@ public sealed class Search
         if (moves.Count == 0)
             return MoveGen.InCheck(b, b.WhiteToMove) ? -(Mate - ply) : 0;
 
-        Order(b, moves, ttMove, ply);
         if (ply == 0 && _rootBias is not null && _rootBonusByUci is null)
         {
             var bonus = _rootBias.Bonus(b, moves);
@@ -216,10 +268,12 @@ public sealed class Search
             for (int i = 0; i < moves.Count; i++)
                 if (bonus[i] != 0) _rootBonusByUci[moves[i].ToUci()] = bonus[i];
         }
+        Order(b, moves, ttMove, ply);
 
         _path.Add(key);
         int best = -Inf;
         ChessMove bestMove = moves[0];
+        if (ply == 0) _rootBestMove = bestMove;
         for (int mi = 0; mi < moves.Count; mi++)
         {
             var m = moves[mi];
@@ -227,13 +281,23 @@ public sealed class Search
             int windowAlpha = ply == 0 && _rootBonusByUci is not null ? alpha - RootBiasMargin : alpha;
             int score = -Negamax(b, depth - 1, -beta, -windowAlpha, ply + 1);
             MoveApply.Unmake(b, m, undo);
-            if (_aborted) { _path.RemoveAt(_path.Count - 1); return 0; }
+            if (_aborted)
+            {
+                if (ply == 0) _rootBestMove = bestMove;
+                _path.RemoveAt(_path.Count - 1);
+                return best == -Inf ? 0 : best;
+            }
 
             // A proven mate outranks any bias nudge — bonusing it only corrupts mate distance.
             if (_rootBonusByUci is not null && ply == 0 && Math.Abs(score) < MateThreshold
                 && _rootBonusByUci.TryGetValue(m.ToUci(), out int bon))
                 score += bon;
-            if (score > best) { best = score; bestMove = m; }
+            if (score > best)
+            {
+                best = score;
+                bestMove = m;
+                if (ply == 0) _rootBestMove = bestMove;
+            }
             if (best > alpha) alpha = best;
             if (alpha >= beta) { RecordKiller(b, m, ply); break; }
         }
@@ -242,9 +306,24 @@ public sealed class Search
         if (ply == 0) _rootBestMove = bestMove;
 
         byte flag = best <= alphaOrig ? FlagUpper : best >= beta ? FlagLower : FlagExact;
-        e.Key = key; e.Score = best; e.Depth = (short)depth; e.Flag = flag; e.Move = bestMove; e.Valid = true;
+        e.Key = key; e.Score = ScoreToTt(best, ply); e.Depth = (short)depth;
+        e.Flag = flag; e.Move = bestMove; e.Valid = true;
         return best;
     }
+
+    private static int ScoreToTt(int score, int ply) => score switch
+    {
+        >= MateThreshold => score + ply,
+        <= -MateThreshold => score - ply,
+        _ => score,
+    };
+
+    private static int ScoreFromTt(int score, int ply) => score switch
+    {
+        >= MateThreshold => score - ply,
+        <= -MateThreshold => score + ply,
+        _ => score,
+    };
 
     private int Quiesce(Board b, int alpha, int beta, int ply)
     {
@@ -255,7 +334,8 @@ public sealed class Search
         bool inCheck = MoveGen.InCheck(b, b.WhiteToMove);
         if (!inCheck)
         {
-            int standPat = Evaluation.Evaluate(b, _terms, _mgPst, _egPst);
+            int standPat = Evaluation.Evaluate(b, _terms, _mgPst, _egPst)
+                           + (_positionEvaluator?.Evaluate(b) ?? 0);
             if (standPat >= beta) return beta;
             if (standPat > alpha) alpha = standPat;
         }
@@ -298,7 +378,17 @@ public sealed class Search
     {
         var k0 = ply < MaxPly ? _killers[ply, 0] : default;
         var k1 = ply < MaxPly ? _killers[ply, 1] : default;
-        moves.Sort((x, y) => Score(b, y, ttMove, k0, k1).CompareTo(Score(b, x, ttMove, k0, k1)));
+        moves.Sort((x, y) => OrderScore(b, y, ttMove, k0, k1, ply)
+            .CompareTo(OrderScore(b, x, ttMove, k0, k1, ply)));
+    }
+
+    private int OrderScore(
+        Board b, ChessMove move, ChessMove ttMove, ChessMove k0, ChessMove k1, int ply)
+    {
+        int score = Score(b, move, ttMove, k0, k1);
+        if (ply == 0 && _rootBonusByUci?.TryGetValue(move.ToUci(), out int bonus) == true)
+            score += bonus * 1_000;
+        return score;
     }
 
     private static int Score(Board b, ChessMove m, ChessMove ttMove, ChessMove k0, ChessMove k1)

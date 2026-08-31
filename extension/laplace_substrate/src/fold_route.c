@@ -24,8 +24,8 @@
  *  disjoint rows), then execute a SESSION-CACHED prepared plan per type whose
  *  type_id is a hex LITERAL in the plan text, kept in an HTAB of
  *  type_id -> SPI_keepplan'd SPIPlanPtr in TopMemoryContext. Plan-time LIST
- *  pruning excludes unrelated types. Consensus phase 1 uses correlated keyed
- *  probes; phase 3 persists matched rows through the primary-key conflict
+ *  pruning excludes unrelated types. Consensus phase 1 exposes one materialized
+ *  input set to an adaptive indexed/hash join; phase 3 persists matched rows through the primary-key conflict
  *  arbiter and novel rows as target-free inserts. The old MERGE remains only
  *  as a bounded concurrent-insert collision fallback. No temp table, no
  *  per-batch ANALYZE, no volatility trap.
@@ -580,17 +580,19 @@ pg_laplace_attestation_merge_type(PG_FUNCTION_ARGS)
  * insert collision (see upsert_merge_with_retry), so the (f()).col triple
  * evaluation sits on a path whose executions round to zero. */
 static const char *PRIOR_SELECT_SQL =
+    /* Materialize the input ONCE and expose the whole set to PostgreSQL. For a
+     * small batch against a large leaf the planner chooses indexed probes; for
+     * CILI-sized matched batches it hashes the input and scans each of the eight
+     * owning leaves once. The former correlated LATERAL forced one index descent
+     * through every HASH leaf per row: no sequential scans, but still O(rows x
+     * leaves), which is the 3-minute HAS_SYNSET_KEY call observed after #1388. */
+    "WITH b AS MATERIALIZED ("
+    "  SELECT id, s, ord FROM unnest($1::bytea[], $2::bytea[]) "
+    "       WITH ORDINALITY AS u(id, s, ord)) "
     "SELECT b.ord, c.rating, c.rd, c.volatility "
-    "FROM unnest($1::bytea[], $2::bytea[]) WITH ORDINALITY AS b(id, s, ord) "
-    /* FOR UPDATE inside the correlated subquery prevents join flattening.
-     * The batch must drive keyed probes. The SQL function also disables
-     * sequential scans locally: freshly analyzed empty HASH leaves otherwise
-     * look cheap enough to scan once per input row despite this complete PK
-     * predicate, recreating the rows-times-leaves seed drain. */
-    "CROSS JOIN LATERAL ("
-    "  SELECT c.rating, c.rd, c.volatility FROM laplace.consensus c "
-    "  WHERE c.type_id = '\\x%s'::bytea AND c.subject_id = b.s AND c.id = b.id "
-    "  FOR UPDATE OF c) c";
+    "FROM b JOIN laplace.consensus c "
+    "  ON c.type_id = '\\x%s'::bytea AND c.subject_id = b.s AND c.id = b.id "
+    "FOR UPDATE OF c";
 
 /* Phase 3 has no target join on the ordinary path. Phase 1 already classified
  * and row-locked every existing cell. Persist those rows through the declared

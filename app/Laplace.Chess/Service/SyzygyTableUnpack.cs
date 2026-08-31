@@ -31,14 +31,12 @@ public static class SyzygyTableUnpack
     }
 
     /// <summary>
-    /// Full-enumeration men ceiling, default 3. Exhaustive unpack walks the RAW
+    /// Full material-graph enumeration limit, default 3. The decoder walks the raw
     /// placement space, which is factorial in men: 3-men is ~500k products/table
     /// (fine), 4-men ~30M/table (~10^9 across the 30 tables of a 3-4-5 set) and
-    /// 5-men ~1.8×10^9/table (~10^11 across its 110 tables) — centuries and
-    /// petabytes at observed probe rates. Full-enumeration seeding is only viable
-    /// at 3-men scale; coverage for larger materials comes from the game-driven
-    /// path (<c>ChessSyzygy.DeriveGame</c> probes the positions games actually
-    /// reach), not from exhaustive unpack.
+    /// 5-men ~1.8×10^9/table (~10^11 across its 110 tables). Three-men tables form
+    /// the complete terminal graph; larger table packages stay available to the
+    /// same Fathom perfcache during full-depth search.
     /// </summary>
     public const int DefaultMaxMen = 3;
 
@@ -145,18 +143,15 @@ public static class SyzygyTableUnpack
 
     private static SyzygyProduct? ProbeBoard(Board board, ISyzygyProber prober)
     {
-        if (prober.ProbeWdl(board) is not { } wdl) return null;
-        int dtz = 0;
-        if (wdl != SyzygyNative.Draw)
-        {
-            // Root probe is process-locked inside the native kernel.
-            if (prober.Probe(board) is not { } full) return null;
-            wdl = full.Wdl;
-            dtz = full.Dtz;
-        }
+        if (prober.ProbeWdl(board) is not { }) return null;
+        // Root probe supplies the optimal deterministic transition for wins, draws and losses.
+        // WDL alone cannot compose an endgame trajectory.
+        if (prober.Probe(board) is not { } full) return null;
 
         string surface = Modality.StateKey(new ChessState(board));
-        return new SyzygyProduct(surface, ChessCompose.PositionId(surface), wdl, dtz);
+        return new SyzygyProduct(
+            surface, ChessCompose.PositionId(surface), full.Wdl, full.Dtz,
+            full.From, full.To, full.Promotes);
     }
 
     internal static async IAsyncEnumerable<Board> EnumerateBoardsAsync(
@@ -257,4 +252,6 @@ public static class SyzygyTableUnpack
 }
 
 /// <summary>Raw Syzygy product after packaging unpack — one board state's oracle facts.</summary>
-public readonly record struct SyzygyProduct(string Surface, Hash128 PositionId, int Wdl, int Dtz);
+public readonly record struct SyzygyProduct(
+    string Surface, Hash128 PositionId, int Wdl, int Dtz,
+    int From = -1, int To = -1, int Promotes = 0);

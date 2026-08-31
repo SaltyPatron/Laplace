@@ -57,7 +57,14 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         var transitions = await ChessVocabulary.BootstrapAsync(
             context.Writer, ChessTransitions.SourceId, "ChessTransitions",
             ChessTransitions.TrustClassId, ct, context.Reader);
-        _canonicalNames = pgn.Concat(analysis).Concat(transitions).Distinct().ToArray();
+        var positions = await ChessVocabulary.BootstrapAsync(
+            context.Writer, ChessPositionOutcomes.SourceId, ChessPositionOutcomes.SourceName,
+            ChessPositionOutcomes.TrustClassId, ct, context.Reader);
+        var syzygy = await ChessVocabulary.BootstrapAsync(
+            context.Writer, ChessSyzygy.SourceId, ChessSyzygy.SourceName,
+            ChessSyzygy.TrustClassId, ct, context.Reader);
+        _canonicalNames = pgn.Concat(analysis).Concat(transitions).Concat(positions).Concat(syzygy)
+            .Distinct().ToArray();
 
         // Ledger lifecycle moved here from ExtractRecordsAsync: with the file-worker pool there
         // is no longer ONE record stream to bracket. Reset once per run at init, report once at
@@ -304,6 +311,9 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         {
             ChessAnalyze.DeriveFromParsed(b, record);
             ChessTransitions.DepositFromParsed(b, record);
+            ChessPositionOutcomes.DepositFromParsed(b, record);
+            if (ChessTablebaseRuntime.Prober is { } prober)
+                ChessSyzygy.DeriveGame(b, ChessAnalyze.WitnessedFromParsed(record), prober);
         }
     }
 

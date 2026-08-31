@@ -160,6 +160,15 @@ public sealed class SubstrateTurnHost : IContentAddresser, IEdgeRatings, IStateV
                 _ => Laplace.Modality.GameOutcome.Draw,
             },
             _witnessWeight, ChessVocabulary.SourceId, playingId);
+        ChessPositionOutcomes.DepositSurfaces(
+            b, edges.Select(static edge => edge.SubjectKey).ToArray(),
+            whiteOutcome switch
+            {
+                PlyOutcome.Win => Laplace.Modality.GameOutcome.WonBy(0),
+                PlyOutcome.Loss => Laplace.Modality.GameOutcome.WonBy(1),
+                _ => Laplace.Modality.GameOutcome.Draw,
+            },
+            playingId);
         ChessGraph.AppendPositionProjection(
             b, lineId, line, ChessVocabulary.TrajectorySourceId, nowUs);
         b.AddEntity(

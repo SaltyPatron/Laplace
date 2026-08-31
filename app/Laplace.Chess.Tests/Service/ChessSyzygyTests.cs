@@ -30,7 +30,15 @@ public sealed class ChessSyzygyTests
         public SyzygyVerdict? Probe(Board board)
         {
             ProbedFens.Add(board.ToFen());
-            return verdict;
+            if (verdict is not { } value) return null;
+            var move = MoveGen.Legal(board).FirstOrDefault();
+            if (move == default) return null;
+            return value with
+            {
+                From = Board.RankOf(move.From) * 8 + Board.FileOf(move.From),
+                To = Board.RankOf(move.To) * 8 + Board.FileOf(move.To),
+                Promotes = move.IsPromotion ? 1 : 0,
+            };
         }
     }
 
@@ -156,22 +164,18 @@ public sealed class ChessSyzygyTests
     }
 
     [Fact]
-    public void DeriveGame_DepositsPositionGrain_NullContext()
+    public void DeriveGame_DepositsDeduplicatedTransitionGraph()
     {
         var prober = new FakeProber(3, new SyzygyVerdict(SyzygyNative.Win, 12));
         var change = Derive(prober, EndgameGame);
 
         Assert.Equal(4, prober.ProbedFens.Count);
-        var wdl = change.Attestations.Where(a => a.TypeId == ChessVocabulary.HasWdlType).ToList();
-        var dtz = change.Attestations.Where(a => a.TypeId == ChessVocabulary.HasDtzType).ToList();
-        Assert.Equal(4, wdl.Count);
-        Assert.Equal(4, dtz.Count);
-        Assert.All(wdl.Concat(dtz), a =>
-        {
-            Assert.Equal(ChessSyzygy.SourceId, a.SourceId);
-            Assert.Null(a.ContextId);
-        });
-        Assert.All(wdl, a => Assert.Equal(ContentEmitter.RootId("win"), a.ObjectId));
+        var chunks = change.Physicalities.Where(static p => p.NConstituents == 3).ToList();
+        Assert.Equal(4, chunks.Count);
+        Assert.Contains(change.Physicalities,
+            p => p.EntityId == ChessSyzygy.EndgameLineId(
+                ChessAnalyze.WitnessedFromParsed(ChessPgnDecomposer.TryParseGame(EndgameGame)!).LineId));
+        Assert.Empty(change.Attestations);
     }
 
     [Fact]
@@ -193,12 +197,72 @@ public sealed class ChessSyzygyTests
     }
 
     [Fact]
+    public void MaterialGraph_StoresExactPositionMovePosition_WithoutPerPositionRows()
+    {
+        var modality = new ChessModality();
+        var board = Board.FromFen("4k3/8/8/8/8/8/8/3QK3 w - - 0 1");
+        var move = Assert.Single(MoveGen.Legal(board), static m => m.ToUci() == "d1d5");
+        string surface = modality.StateKey(new ChessState(board));
+        var product = new SyzygyProduct(
+            surface, ChessCompose.PositionId(surface), SyzygyNative.Win, 9,
+            Board.RankOf(move.From) * 8 + Board.FileOf(move.From),
+            Board.RankOf(move.To) * 8 + Board.FileOf(move.To));
+        var record = ChessSyzygyRecord.CreateChunk("KQvK", [product]);
+        var b = new SubstrateChangeBuilder(ChessSyzygy.SourceId, "test/syzygy-material");
+
+        Assert.NotNull(record.Chunk);
+        Assert.True(ChessSyzygy.DeriveTransitionChunk(b, [product], record.Chunk.Value.Id));
+        var change = b.SetInputUnitsConsumed(1).Build();
+
+        var trajectory = Assert.Single(change.Physicalities);
+        var ids = Trajectory.Constituents(trajectory.TrajectoryXyzm!);
+        var next = board.Clone();
+        MoveApply.Make(next, move);
+        Assert.Equal(
+        [
+            ChessCompose.PositionId(board),
+            ChessCompose.MoveId(board.Squares[move.From], move),
+            ChessCompose.PositionId(next),
+        ], ids);
+        Assert.Single(change.Entities);
+        Assert.Empty(change.Attestations);
+    }
+
+    [Theory]
+    [InlineData(0, SyzygyNative.Loss, -17)]
+    [InlineData(1, SyzygyNative.Draw, 0)]
+    [InlineData(2, SyzygyNative.Win, 42)]
+    public void MaterialGraph_FlagsRoundTripRoleWdlAndDtz(int role, int wdl, int dtz)
+    {
+        ulong packed = ChessSyzygy.PackTransitionFlags(role, wdl, dtz);
+        Assert.Equal((role, wdl, dtz), ChessSyzygy.UnpackTransitionFlags(packed));
+    }
+
+    [Fact]
+    public void MaterialRoot_ContainsChunkIdentities_NotDecodedBoards()
+    {
+        var chunks = new[]
+        {
+            new SyzygyChunkRef(Hash128.OfCanonical("chunk/a"), [1d, 0d, 0d, 0d]),
+            new SyzygyChunkRef(Hash128.OfCanonical("chunk/b"), [0d, 1d, 0d, 0d]),
+        };
+        var b = new SubstrateChangeBuilder(ChessSyzygy.SourceId, "test/syzygy-root");
+        ChessSyzygy.DeriveMaterialRoot(b, chunks, ChessSyzygy.MaterialId("KQvK"));
+        var change = b.SetInputUnitsConsumed(0).Build();
+
+        var root = Assert.Single(change.Physicalities);
+        Assert.Equal(chunks.Select(static c => c.Id), Trajectory.Constituents(root.TrajectoryXyzm!));
+        Assert.Equal(2, root.NConstituents);
+        Assert.Empty(change.Attestations);
+    }
+
+    [Fact]
     public void DeriveGame_SkipsPositions_TheTableSetDoesNotCover()
     {
         var prober = new FakeProber(3, new SyzygyVerdict(SyzygyNative.Draw, 0));
         var change = Derive(prober, FullGame);
         Assert.Empty(prober.ProbedFens);
-        Assert.DoesNotContain(change.Attestations, a => a.TypeId == ChessVocabulary.HasWdlType);
+        Assert.Empty(change.Physicalities);
     }
 
     [Fact]
@@ -337,7 +401,7 @@ public sealed class SyzygyNativeFixtureTests : IClassFixture<SyzygyTablebaseFixt
     }
 
     [Fact]
-    public void DeriveGame_NativeProber_DepositsExactVerdicts()
+    public void DeriveGame_NativeProber_DepositsExactTransitions()
     {
         const string pgn =
             "[Event \"T\"]\n[White \"A\"]\n[Black \"B\"]\n[Date \"2024.01.01\"]\n"
@@ -348,11 +412,9 @@ public sealed class SyzygyNativeFixtureTests : IClassFixture<SyzygyTablebaseFixt
         ChessSyzygy.DeriveGame(b, ChessAnalyze.WitnessedFromParsed(parsed), new SyzygyNativeProber());
         var change = b.SetInputUnitsConsumed(1).Build();
 
-        var wdl = change.Attestations.Where(a => a.TypeId == ChessVocabulary.HasWdlType).ToList();
-        Assert.Equal(2, wdl.Count);
-        Assert.All(wdl, a => Assert.Null(a.ContextId));
-        Assert.Contains(wdl, a => a.ObjectId == ContentEmitter.RootId("win"));
-        Assert.Contains(wdl, a => a.ObjectId == ContentEmitter.RootId("loss"));
+        var chunks = change.Physicalities.Where(static p => p.NConstituents == 3).ToList();
+        Assert.Equal(2, chunks.Count);
+        Assert.All(chunks, p => Assert.Equal(ChessSyzygy.SourceId, p.SourceId));
     }
 
     /// <summary>
@@ -399,23 +461,20 @@ public sealed class SyzygyNativeFixtureTests : IClassFixture<SyzygyTablebaseFixt
             replayIds.Add(ChessCompose.PositionId(m.StateKey(state)));
         }
 
-        // Leg C — verdict subjects from the real tablebase probe of the same witnessed game.
+        // Leg C — pre-state vertices from exact tablebase transitions over the same game.
         var sb = new SubstrateChangeBuilder(ChessSyzygy.SourceId, "test/tripartite-syzygy");
         ChessSyzygy.DeriveGame(sb, witnessed, new SyzygyNativeProber());
         var change = sb.SetInputUnitsConsumed(1).Build();
-        var wdlSubjects = change.Attestations
-            .Where(a => a.TypeId == ChessVocabulary.HasWdlType)
-            .Select(a => a.SubjectId).ToArray();
-        var dtzSubjects = change.Attestations
-            .Where(a => a.TypeId == ChessVocabulary.HasDtzType)
-            .Select(a => a.SubjectId).ToArray();
+        var verdictSubjects = change.Physicalities
+            .Where(static p => p.NConstituents == 3)
+            .Select(p => Trajectory.Constituents(p.TrajectoryXyzm!)[0])
+            .ToArray();
 
         // Non-vacuity: 3 plies -> 4 positions, all 3-men and non-terminal, so every leg
         // must carry exactly 4 ids — an empty==empty pass would prove nothing.
         var expected = replayIds.ToArray();
         Assert.Equal(4, expected.Length);
         Assert.Equal(expected, projectionIds);
-        Assert.Equal(expected, wdlSubjects);
-        Assert.Equal(expected, dtzSubjects);
+        Assert.Equal(expected, verdictSubjects);
     }
 }

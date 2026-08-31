@@ -11,6 +11,7 @@ public sealed class UciEngineTests
     {
         var engine = new UciEngine();
         var sw = new StringWriter();
+        engine.Handle("setoption name Substrate value off", sw);
         foreach (var c in commands)
             if (!engine.Handle(c, sw)) break;
         // "go" now runs the search on a background task (so real "stop" can interrupt it) instead
@@ -99,6 +100,7 @@ public sealed class UciEngineTests
     {
         var engine = new UciEngine();
         var sw = new StringWriter();
+        engine.Handle("setoption name Substrate value off", sw);
         Assert.True(engine.Handle("position startpos moves e2e4", sw));
         // Previously: Board.FromFen threw FormatException here with no catch, killing the process.
         Assert.True(engine.Handle("position fen not-a-real-fen", sw));
@@ -120,6 +122,7 @@ public sealed class UciEngineTests
     {
         var engine = new UciEngine();
         var sw = new StringWriter();
+        engine.Handle("setoption name Substrate value off", sw);
         Assert.True(engine.Handle("position startpos", sw));
         // depth 64 with no other time control relies entirely on "stop" (or the 120s safety net,
         // see ParseGo) to end the search — this asserts "stop" is what actually ends it, not the

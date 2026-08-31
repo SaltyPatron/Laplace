@@ -30,8 +30,16 @@ export function GlomeTab({
   onNeighborModeChange: (mode: NeighborMode) => void;
   onLoadNeighbors: () => void;
 }) {
-  const packed = entity.packed_vertices ?? [];
-  const realized = entity.realized_vertices ?? [];
+  // A composite cannot be its own child. Suppress corrupt/stale recursive entries at
+  // the visualization boundary while retaining every legitimate constituent.
+  const packed = useMemo(
+    () => (entity.packed_vertices ?? []).filter((v) => v.child_id_hex !== entity.id_hex),
+    [entity.packed_vertices, entity.id_hex],
+  );
+  const realized = useMemo(
+    () => (entity.realized_vertices ?? []).filter((v) => v.child_id_hex !== entity.id_hex),
+    [entity.realized_vertices, entity.id_hex],
+  );
   const maxOrd = useMemo(() => {
     let m = 0;
     for (const v of packed) m = Math.max(m, v.ordinal);
@@ -142,7 +150,7 @@ export function GlomeTab({
   }, [selectedOrdinal, packed]);
 
   return (
-    <Panel title="Fold viewer" fill>
+    <Panel title="Physicality trajectory" fill>
       <Stack gap={3} className={styles.body}>
         <div className={styles.panes}>
           <section className={styles.pane}>
@@ -152,7 +160,7 @@ export function GlomeTab({
             </header>
             {packedNodes.length === 0 ? (
               <div className={styles.emptyPane}>
-                No trajectory — leaf or unwitnessed path. Packed fold unavailable.
+                No trajectory — this entity is a leaf or has no witnessed path.
               </div>
             ) : (
               <GlomeCanvas
@@ -162,7 +170,7 @@ export function GlomeTab({
                 highlightOrdinal={packedHighlightOrdinal}
                 onSelectOrdinal={setSelectedOrdinal}
                 fill
-                note="Hash-space fold on a display shell. Not S³ placement."
+                note="Hash-space trajectory on a display shell. Not S³ placement."
               />
             )}
           </section>

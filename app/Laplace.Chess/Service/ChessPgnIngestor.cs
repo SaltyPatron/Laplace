@@ -90,6 +90,12 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
         names.UnionWith(await ChessVocabulary.BootstrapAsync(
             writer, ChessTransitions.SourceId, "ChessTransitions", ChessTransitions.TrustClassId,
             ct, reader));
+        names.UnionWith(await ChessVocabulary.BootstrapAsync(
+            writer, ChessPositionOutcomes.SourceId, ChessPositionOutcomes.SourceName,
+            ChessPositionOutcomes.TrustClassId, ct, reader));
+        names.UnionWith(await ChessVocabulary.BootstrapAsync(
+            writer, ChessSyzygy.SourceId, ChessSyzygy.SourceName,
+            ChessSyzygy.TrustClassId, ct, reader));
         await NpgsqlCanonicalRegistry.RegisterCanonicalsAsync(ds, names, ct);
     }
 
@@ -256,6 +262,9 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
             ChessPgnDecomposer.RecordGame(game, record);
             ChessAnalyze.DeriveFromParsed(analyze, game);
             ChessTransitions.DepositFromParsed(analyze, game);
+            ChessPositionOutcomes.DepositFromParsed(analyze, game);
+            if (ChessTablebaseRuntime.Prober is { } prober)
+                ChessSyzygy.DeriveGame(analyze, ChessAnalyze.WitnessedFromParsed(game), prober);
             for (int i = 0; i + 1 < game.PositionIds.Length; i++)
                 observedPositions.Add(game.PositionIds[i]);
         }
