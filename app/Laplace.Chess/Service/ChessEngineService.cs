@@ -379,14 +379,14 @@ public sealed class ChessEngineService : IAsyncDisposable
 
         if (substrate)
         {
-            var chosen = ChooseFromSubstrate(state, depth, ct);
+            var chosen = ChooseFromSubstrate(state, ct);
             var nextState = _modality.Apply(state, chosen.Move);
             var nextStatus = _modality.Terminal(nextState) is { } nextTerm ? Describe(nextTerm) : "ongoing";
             var nextMotifs = ChessMotifs.DetectAtPly(state.Board, chosen.Move, nextState.Board).ToList();
             int guidedWhiteCp = state.Board.WhiteToMove ? chosen.ScoreCp : -chosen.ScoreCp;
             return new ChessBestMove(
                 chosen.Move.ToUci(), nextState.Board.ToFen(), chosen.EffMu,
-                chosen.Witnessed, nextStatus != "ongoing", nextStatus,
+                chosen.Rated, nextStatus != "ongoing", nextStatus,
                 ScoreCp: guidedWhiteCp, Depth: chosen.Depth, Nodes: chosen.Nodes,
                 Pv: chosen.Pv, Motifs: nextMotifs);
         }
@@ -412,40 +412,18 @@ public sealed class ChessEngineService : IAsyncDisposable
     }
 
     private readonly record struct RuntimeMove(
-        ChessMove Move, bool Witnessed, double EffMu, int ScoreCp, int Depth,
+        ChessMove Move, bool Rated, double EffMu, int ScoreCp, int Depth,
         long Nodes, IReadOnlyList<string> Pv);
 
-    private RuntimeMove ChooseFromSubstrate(ChessState state, int requestedDepth, CancellationToken ct)
+    private RuntimeMove ChooseFromSubstrate(ChessState state, CancellationToken ct)
     {
-        Search.Result? fallbackResult = null;
-        IReadOnlyList<string>? fallbackPv = null;
-        ChessMove Fallback(ChessState fallbackState, Random rng)
-        {
-            var search = new Search(EvalTerm.All, ttBits: 16);
-            var result = search.Think(
-                fallbackState.Board,
-                new Search.Limits(MaxDepth: Math.Min(Math.Clamp(requestedDepth, 1, 12), 2)), ct);
-            fallbackResult = result;
-            fallbackPv = search.ExtractPv(fallbackState.Board);
-            return result.BestMove ?? MatchRunner.RandomChooser(fallbackState, rng);
-        }
-
-        var decision = TransitionChooser().ChooseDecision(state, Rng(), Fallback, ct);
-        if (decision.Witnessed)
-        {
-            int cp = (int)Math.Clamp(
-                Math.Round((decision.EffMu - GlickoPriors.NeutralMu / 1e9) * 8d),
-                -30_000, 30_000);
-            return new RuntimeMove(
-                decision.Move, true, decision.EffMu, cp, 0, 0, [decision.Move.ToUci()]);
-        }
-        var fallback = fallbackResult;
+        var decision = TransitionChooser().ChooseDecision(state, Rng(), ct);
+        int cp = (int)Math.Clamp(
+            Math.Round((decision.EffMu - GlickoPriors.NeutralMu / 1e9) * 8d),
+            -30_000, 30_000);
         return new RuntimeMove(
-            decision.Move, false, 0,
-            fallback?.Score ?? 0,
-            fallback?.Depth ?? 0,
-            fallback?.Nodes ?? 0,
-            fallbackPv ?? [decision.Move.ToUci()]);
+            decision.Move, decision.Rated, decision.EffMu, cp, 0, 0,
+            [decision.Move.ToUci()]);
     }
 
     /// <summary>
@@ -616,7 +594,7 @@ public sealed class ChessEngineService : IAsyncDisposable
 
         if (substrate)
         {
-            var chosen = ChooseFromSubstrate(state, depth, ct);
+            var chosen = ChooseFromSubstrate(state, ct);
             string guidedFromKey = _modality.StateKey(state);
             var nextState = _modality.Apply(state, chosen.Move);
             string guidedToKey = _modality.StateKey(nextState);
@@ -641,7 +619,7 @@ public sealed class ChessEngineService : IAsyncDisposable
                     sessionId, ParseTerminalStatus(nextStatus), adjudicated: false, ct);
             return new ChessBestMove(
                 chosen.Move.ToUci(), nextState.Board.ToFen(), chosen.EffMu,
-                chosen.Witnessed, nextStatus != "ongoing", nextStatus,
+                chosen.Rated, nextStatus != "ongoing", nextStatus,
                 ScoreCp: guidedWhiteCp, Depth: chosen.Depth, Nodes: chosen.Nodes,
                 Pv: chosen.Pv, Motifs: nextMotifs);
         }

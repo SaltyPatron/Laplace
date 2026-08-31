@@ -337,10 +337,20 @@ class EntryPointTests(unittest.TestCase):
         self.assertIn('sudo -n "$HELPER" reconcile-host', publish)
         self.assertIn('sudo -n "$HELPER" host-status', publish)
         self.assertIn("  preflight) ensure_host", publish)
+        application_publish = (ROOT / "scripts/publish-applications.sh").read_text()
+        host_check = application_publish.split("application_host_check() {", 1)[1].split("application_managed()", 1)[0]
+        self.assertIn("application_managed preflight", host_check)
+        self.assertNotIn("laplace-managed-deploy host-status", host_check)
         self.assertNotIn('sudo python3 deploy/linux/laplace-managed-deploy bootstrap', publish)
         deploy = workflow.split("  deploy:\n", 1)[1].split("  db-ops:\n", 1)[0]
         self.assertLess(deploy.index("wait-for-quiet-substrate.sh"), deploy.index("managed-publish.sh preflight"))
         self.assertLess(deploy.index("managed-publish.sh preflight"), deploy.index("pipeline.sh install"))
+
+    def test_native_install_cleanup_preserves_root_managed_public_ca(self):
+        cmake = (ROOT / "CMakeLists.txt").read_text()
+        cleanup = cmake.split('message(STATUS \\"Laplace pre-install cleanup', 1)[1].split('add_subdirectory(engine)', 1)[0]
+        self.assertIn("! -name managed-services-ca.crt -delete", cleanup)
+        self.assertNotIn("rm -rf \\$paths", cleanup)
 
 
 if __name__ == "__main__":

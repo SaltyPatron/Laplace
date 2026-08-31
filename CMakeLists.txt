@@ -134,14 +134,19 @@ install(CODE "
   execute_process(
     COMMAND sh -c \"
       set -u
-      paths='\${_laplace_install_root}/include/laplace \${_laplace_install_root}/share/laplace'
+      headers='\${_laplace_install_root}/include/laplace'
+      share='\${_laplace_install_root}/share/laplace'
+      paths=\"\$headers \$share\"
       for p in \$paths; do
         [ -e \\\"\$p\\\" ] || continue
         find \\\"\$p\\\" -type d -exec chmod 2775 {} + 2>/dev/null || true
-        find \\\"\$p\\\" -type f -exec chmod 0664 {} + 2>/dev/null || true
+        find \\\"\$p\\\" -type f ! -name managed-services-ca.crt -exec chmod 0664 {} + 2>/dev/null || true
       done
       set -e
-      rm -rf \$paths
+      rm -rf \\\"\$headers\\\"
+      if [ -d \\\"\$share\\\" ]; then
+        find \\\"\$share\\\" -mindepth 1 ! -name managed-services-ca.crt -delete
+      fi
       rm -f \${_laplace_install_root}/lib/liblaplace_*.so* 2>/dev/null || true
       rm -f \${_laplace_install_root}/lib/postgresql/${LAPLACE_PG_MAJOR}/laplace_*.so 2>/dev/null || true
       rm -f \${_laplace_install_root}/share/postgresql/${LAPLACE_PG_MAJOR}/extension/laplace_* 2>/dev/null || true
@@ -153,7 +158,7 @@ install(CODE "
       \"Laplace pre-install cleanup failed under \${_laplace_install_root}.\"
       \"\\nLikely a pre-fix cross-user g-w directory from a previous install.\"
       \"\\nOne-time recovery (run once, never again under the structural fix):\"
-      \"\\n    sudo rm -rf \${CMAKE_INSTALL_PREFIX}/include/laplace \${CMAKE_INSTALL_PREFIX}/share/laplace\"
+      \"\\n    repair ownership under \${CMAKE_INSTALL_PREFIX}/include/laplace and \${CMAKE_INSTALL_PREFIX}/share/laplace\"
       \"\\nThen re-run cmake --install. The post-install invariant (end of the\"
       \"\\nroot CMakeLists) prevents forward installs from recreating the state.\")
   endif()

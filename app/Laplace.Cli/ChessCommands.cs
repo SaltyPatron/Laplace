@@ -136,12 +136,10 @@ internal static class ChessCommands
             (mg, eg) = Evaluation.BlendPeStoWith(mg, eg);
         }
         var transitionChooser = new SubstrateTransitionChooser(ds);
-        var shallowFallback = MatchRunner.SearcherFactory(
-            Math.Min(depth, 2), EvalTerm.All, ttBits: 16, mgPst: mg, egPst: eg);
         Func<MoveChooser> guided = mode switch
         {
             "transition" or "fold" or "edge" => () =>
-                transitionChooser.CreateChooser(shallowFallback()),
+                transitionChooser.CreateChooser(),
             "off" => MatchRunner.SearcherFactory(depth, EvalTerm.All, ttBits: 16, mgPst: mg, egPst: eg),
             _ => throw new ArgumentException($"unknown --mode '{mode}' (expected transition|off)"),
         };
@@ -152,7 +150,7 @@ internal static class ChessCommands
 
         string desc = mode switch
         {
-            "transition" or "fold" or "edge" => "witnessed position→position transition fold",
+            "transition" or "fold" or "edge" => "fused position→move-physicality→child-structure substrate pass",
             _ => "NO prior (sanity)",
         };
         Console.WriteLine($"substrate-test [{mode}]: guided ({desc}) vs pure classical");
@@ -182,7 +180,7 @@ internal static class ChessCommands
         string elo = (r.EloDiff >= 0 ? "+" : "") + r.EloDiff.ToString("F0");
         Console.WriteLine($"  guided W-D-L: {r.AWins}-{r.Draws}-{r.BWins}   score {r.Score:F3}   Elo {elo} +/- {r.Margin95:F0}");
         var transitionStats = transitionChooser.Snapshot;
-        Console.WriteLine($"  transition reads={transitionStats.TrunkReads:N0}, witnessed decisions={transitionStats.WitnessedDecisions:N0}, unseen fallbacks={transitionStats.FallbackDecisions:N0}, substrate epoch={transitionStats.SubstrateEpoch:N0}");
+        Console.WriteLine($"  transition reads={transitionStats.TrunkReads:N0}, substrate decisions={transitionStats.Decisions:N0}, exact signals={transitionStats.ExactTransitionSignals:N0}, move-physicality signals={transitionStats.MovePhysicalitySignals:N0}, child-structure signals={transitionStats.ChildStructureSignals:N0}, substrate epoch={transitionStats.SubstrateEpoch:N0}");
         Console.WriteLine(r.EloDiff > 5
             ? "  => the substrate measurably raises the classical floor at this mode/scale."
             : "  => no clear lift at this mode/scale — try --openings, more games, deeper, or a larger --cp-per-point.");
@@ -468,7 +466,7 @@ internal static class ChessCommands
             return Fail("usage: laplace chess lichess [--token T] [--depth D] [--max-concurrent N]\n"
                       + "                             [--substrate] [--speed bullet|blitz|rapid|classical]\n"
                       + "  Token from --token, LICHESS_API env var, or deploy\\secrets\\lichess.env.\n"
-                      + "  --substrate: choose witnessed position transitions; unseen positions use a depth-2 fallback.\n"
+                      + "  --substrate: fuse position transitions, move physicality, and child structure in one substrate pass.\n"
                       + "  --speed: accept only this time-control class (repeatable); default = all.");
 
         int depth = ArgInt(args, "--depth", 4);
