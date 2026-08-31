@@ -456,6 +456,7 @@ functions/converse/infer.sql.in
 functions/chess/chess_opening_preference.sql.in
 functions/chess/chess_opening_games.sql.in
 functions/chess/chess_opening_record.sql.in
+functions/chess/chess_syzygy_transition.sql.in
 functions/chess/chess_syzygy_line.sql.in
 functions/chess/chess_opening_shape_peers.sql.in
 functions/chess/chess_distance_to_syzygy.sql.in

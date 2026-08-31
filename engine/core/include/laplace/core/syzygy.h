@@ -61,7 +61,8 @@ int laplace_syzygy_probe_wdl(
 /*
  * Probe WDL + DTZ through the root probe (requires DTZ tables). Same inputs
  * as the WDL probe. On success returns 0 and writes out_wdl (0..4, STM POV)
- * and out_dtz (plies to the next zeroing move under optimal play, >= 0).
+ * and out_dtz (plies to the next zeroing move under optimal play, >= 0), plus the
+ * optimal transition's Fathom squares/promotion code.
  * Returns -1 when the probe failed or the position is terminal (checkmate /
  * stalemate — a terminal position needs no oracle). Serialized internally
  * (Fathom's root probe is not thread-safe).
@@ -69,7 +70,8 @@ int laplace_syzygy_probe_wdl(
 int laplace_syzygy_probe_root(
     uint64_t white, uint64_t black, uint64_t kings, uint64_t queens,
     uint64_t rooks, uint64_t bishops, uint64_t knights, uint64_t pawns,
-    unsigned ep, int white_to_move, int* out_wdl, int* out_dtz);
+    unsigned ep, int white_to_move, int* out_wdl, int* out_dtz,
+    int* out_from, int* out_to, int* out_promotes);
 
 #ifdef __cplusplus
 }

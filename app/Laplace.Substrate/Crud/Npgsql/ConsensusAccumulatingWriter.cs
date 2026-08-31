@@ -687,23 +687,16 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                 bool directRoute = await SupportsDirectConsensusRouteAsync(conn, token);
                 bool epochBump = await SupportsApplyWriteEpochAsync(conn, token);
                 await using var tx = await conn.BeginTransactionAsync(token);
-                // consensus_upsert's UPDATE arm is the same shape as attestation_merge's
-                // and carries the same landmine: type_id pinned as a literal, subject_id
-                // (the HASH key) arriving from the join so it cannot prune, and a bounded
-                // array driven into a primary key. The nested loop is right at every size;
-                // a Merge Append or hash over the whole relation never is. Pinned here
-                // before the fold grows into the cliff the merge lane already fell off.
-                //
                 // The write-epoch bump rides the same batch — no extra round trip
                 // (this command carries no positional parameters, which Npgsql
                 // forbids in multi-statement commands), nextval before the fold's
                 // writes as the sequence's law requires.
-                await using (var guc = conn.CreateCommand())
+                if (epochBump)
                 {
-                    guc.Transaction = tx;
-                    guc.CommandText = "SET LOCAL enable_mergejoin = off; SET LOCAL enable_hashjoin = off"
-                        + (epochBump ? "; SELECT nextval('laplace.apply_write_epoch')" : "");
-                    await guc.ExecuteNonQueryAsync(token);
+                    await using var epoch = conn.CreateCommand();
+                    epoch.Transaction = tx;
+                    epoch.CommandText = "SELECT nextval('laplace.apply_write_epoch')";
+                    await epoch.ExecuteNonQueryAsync(token);
                 }
                 await using var up = conn.CreateCommand();
                 up.Transaction = tx;

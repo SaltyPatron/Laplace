@@ -1,11 +1,9 @@
 -- chess.syzygy_line(line): the exact endgame oracle along one line.
 --
--- Syzygy deposits are POSITION-GRAIN (ctx null): a tablebase verdict is a pure
--- function of the board. Packaging was unpacked into substrate records; a later
--- game that composes the same surface hits the same position id and finds
--- HAS_WDL / HAS_DTZ already there. Reading "the endgame of this line" is therefore
--- the line's trajectory positions joined to those subject-keyed facts — not a
--- context-pinned scan of line-scoped probes (that was the vault-sidecar mistake).
+-- Current packages are material graphs of exact position -> typed move -> position
+-- trajectories.  chess.syzygy_transition performs the indexed graph lookup.  The
+-- legacy attestation branch keeps already-seeded v2 data readable while a clean seed
+-- writes the compact graph.
 --
 -- WDL is five-valued and SIDE-TO-MOVE POV, not white POV: 'win' means the player to
 -- move in that position wins with perfect play. It is never mixed with the OUTCOME
@@ -40,7 +38,16 @@ line AS MATERIALIZED (
     FROM LATERAL generation.trajectory_unpacked_points(p_line, 3::smallint)
          WITH ORDINALITY AS u(entity_id, run_length, ctier, ord)
 ),
-probed AS MATERIALIZED (
+compact AS MATERIALIZED (
+    SELECT l.pos,
+           t.wdl,
+           t.dtz,
+           min(l.ordinal) AS ord
+    FROM line l
+    CROSS JOIN LATERAL chess.syzygy_transition(l.pos) t
+    GROUP BY l.pos, t.wdl, t.dtz
+),
+legacy AS MATERIALIZED (
     SELECT l.pos,
            max(a.object_id) FILTER (WHERE a.type_id = r.wdl) AS wdl_id,
            max(a.object_id) FILTER (WHERE a.type_id = r.dtz) AS dtz_id,
@@ -51,15 +58,30 @@ probed AS MATERIALIZED (
                        AND a.type_id IN (r.wdl, r.dtz)
     GROUP BY l.pos
     HAVING max(a.object_id) FILTER (WHERE a.type_id = r.wdl) IS NOT NULL
-    ORDER BY min(l.ordinal)
-    LIMIT p_limit
 ),
-ord AS MATERIALIZED (
-    SELECT p.*, row_number() OVER (ORDER BY p.ord) AS ix FROM probed p
+chosen AS MATERIALIZED (
+    SELECT c.pos,
+           c.wdl,
+           c.dtz::text AS dtz,
+           NULL::bytea AS wdl_id,
+           NULL::bytea AS dtz_id,
+           c.ord
+    FROM compact c
+    UNION ALL
+    SELECT l.pos,
+           NULL::integer,
+           NULL::text,
+           l.wdl_id,
+           l.dtz_id,
+           l.ord
+    FROM legacy l
+    WHERE NOT EXISTS (SELECT 1 FROM compact c WHERE c.pos = l.pos)
+    ORDER BY ord
+    LIMIT p_limit
 ),
 surfaces AS MATERIALIZED (
     SELECT COALESCE(array_agg(DISTINCT s), '{}'::bytea[]) AS ids
-    FROM ord o, LATERAL (VALUES (o.wdl_id), (o.dtz_id)) v(s)
+    FROM chosen o, LATERAL (VALUES (o.wdl_id), (o.dtz_id)) v(s)
     WHERE s IS NOT NULL
 ),
 label AS MATERIALIZED (
@@ -69,9 +91,19 @@ label AS MATERIALIZED (
          LATERAL unnest(realize.batch(b.ids, NULL)) WITH ORDINALITY AS t(txt, j)
     WHERE p.i = t.j
 )
-SELECT o.pos, w.txt, d.txt
-FROM ord o
+SELECT o.pos,
+       COALESCE(
+           CASE o.wdl
+               WHEN 0 THEN 'loss'
+               WHEN 1 THEN 'blessed-loss'
+               WHEN 2 THEN 'draw'
+               WHEN 3 THEN 'cursed-win'
+               WHEN 4 THEN 'win'
+           END,
+           w.txt),
+       COALESCE(o.dtz, d.txt)
+FROM chosen o
 LEFT JOIN label w ON w.id = o.wdl_id
 LEFT JOIN label d ON d.id = o.dtz_id
-ORDER BY o.ix
+ORDER BY o.ord
 $$;

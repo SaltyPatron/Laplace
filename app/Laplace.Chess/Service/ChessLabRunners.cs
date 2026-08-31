@@ -30,11 +30,13 @@ public static class ChessLabRunners
             $"substrate-test [{mode}] {games} games depth {depth} — recording to substrate"));
 
         var ds = liveHost.DataSource;
-        var transitionChooser = new SubstrateTransitionChooser(ds);
+        var exactBias = new SubstrateRootBias(ds);
+        var boardEvaluator = new SubstrateBoardEvaluator(ds);
+        Func<Board, SearchTablebaseVerdict?> tablebase = ChessTablebaseRuntime.ProbeSearch;
         Func<MoveChooser> guided = mode == "off"
-            ? MatchRunner.SearcherFactory(depth, EvalTerm.All, ct: ct)
-            : () => transitionChooser.CreateChooser(ct);
-        var pure = MatchRunner.SearcherFactory(depth, EvalTerm.All, ct: ct);
+            ? () => SearchChooser(depth, null, null, tablebase, ct)
+            : () => SearchChooser(depth, exactBias, boardEvaluator, tablebase, ct);
+        Func<MoveChooser> pure = () => SearchChooser(depth, null, null, tablebase, ct);
         var book = openings ? OpeningSeed.Fens(OpeningSeed.DefaultDir) : null;
         var pgnSink = new ConcurrentBag<MatchPgnGame>();
 
@@ -49,9 +51,9 @@ public static class ChessLabRunners
             openingFens: book, pgnSink: pgnSink, progress: progress, ct: ct,
             liveHost: liveHost,
             liveLearnContext: $"chess/lab/substrate-test/{mode}",
-            onPly: LiveBoardPublisher(lab, slot, "Laplace-guided", "Laplace-pure"),
-            aPlayerName: $"Laplace-guided-{mode}",
-            bPlayerName: "Laplace-pure",
+            onPly: LiveBoardPublisher(lab, slot, "Laplace", "Classical control"),
+            aPlayerName: "Laplace",
+            bPlayerName: "Classical-control",
             eventName: $"Laplace substrate lift ({mode})",
             externalIdPrefix: $"laplace-lab/substrate/{mode}/seed-99"), ct);
 
@@ -63,17 +65,30 @@ public static class ChessLabRunners
         string elo = (r.EloDiff >= 0 ? "+" : "") + r.EloDiff.ToString("F0");
         lab.Publish(slot, new ChessLabMetricEvent("games_recorded", recorded));
         lab.Publish(slot, new ChessLabMetricEvent("elo_diff", r.EloDiff));
-        var transitionStats = transitionChooser.Snapshot;
-        lab.Publish(slot, new ChessLabMetricEvent("transition_trunk_reads", transitionStats.TrunkReads));
-        lab.Publish(slot, new ChessLabMetricEvent("substrate_decisions", transitionStats.Decisions));
-        lab.Publish(slot, new ChessLabMetricEvent("exact_transition_signals", transitionStats.ExactTransitionSignals));
-        lab.Publish(slot, new ChessLabMetricEvent("move_physicality_signals", transitionStats.MovePhysicalitySignals));
-        lab.Publish(slot, new ChessLabMetricEvent("child_structure_signals", transitionStats.ChildStructureSignals));
-        lab.Publish(slot, new ChessLabMetricEvent("substrate_epoch", transitionStats.SubstrateEpoch));
+        lab.Publish(slot, new ChessLabMetricEvent("search_depth", depth));
+        lab.Publish(slot, new ChessLabMetricEvent("transition_trunk_reads", exactBias.RootReads));
+        lab.Publish(slot, new ChessLabMetricEvent("exact_transition_roots", exactBias.RootsWithExactEvidence));
+        lab.Publish(slot, new ChessLabMetricEvent("exact_transition_signals", exactBias.RootsWithExactEvidence));
+        lab.Publish(slot, new ChessLabMetricEvent("child_structure_reads", boardEvaluator.PositionReads));
+        lab.Publish(slot, new ChessLabMetricEvent("child_structure_signals", boardEvaluator.PositionsWithEvidence));
+        lab.Publish(slot, new ChessLabMetricEvent("position_atoms_loaded", boardEvaluator.LoadedAtoms));
+        lab.Publish(slot, new ChessLabMetricEvent("syzygy_max_men", ChessTablebaseRuntime.Largest));
+        lab.Publish(slot, new ChessLabMetricEvent("substrate_epoch", ChessTransitionObservations.Epoch));
         lab.Publish(slot, new ChessLabTableEvent("substrate-test", ["W", "D", "L", "Elo"],
             [[r.AWins.ToString(), r.Draws.ToString(), r.BWins.ToString(), elo]]));
         lab.UpdateSummary(slot, new ChessLabJobSummary(games, games, $"Elo {elo} · {recorded} recorded"));
         Finish(lab, slot, ChessLabJobState.Completed);
+    }
+
+    private static MoveChooser SearchChooser(
+        int depth, IRootBias? bias, ISearchPositionEvaluator? positionEvaluator,
+        Func<Board, SearchTablebaseVerdict?> tablebase, CancellationToken ct)
+    {
+        var search = new Search(
+            EvalTerm.All, bias, ttBits: 16,
+            positionEvaluator: positionEvaluator, tablebase: tablebase);
+        return (state, rng) => search.Think(
+            state.Board, new Search.Limits(MaxDepth: depth), ct).BestMove!.Value;
     }
 
     public static async Task RunLadderAsync(ChessLabService lab, ChessLabService.JobSlot slot, CancellationToken ct)

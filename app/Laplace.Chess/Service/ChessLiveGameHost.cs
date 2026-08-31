@@ -51,12 +51,9 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
     private readonly ConcurrentDictionary<Hash128, LiveGameSession> _games = new();
     private readonly ConcurrentDictionary<Guid, PlaySession> _playSessions = new();
 
-    private bool _learnedTried;
-    private int[][]? _lpMg, _lpEg;
-
     public long GamesCompleted { get; private set; }
 
-    public void InvalidateLearnedPst() => _learnedTried = false;
+    public void InvalidateLearnedPst() => _boardEvaluator = null;
 
     private ChessLiveGameHost(
         NpgsqlDataSource ds, ConsensusAccumulatingWriter writer, SubstrateTurnHost turnHost)
@@ -89,6 +86,12 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
         canonicalNames.UnionWith(await ChessVocabulary.BootstrapAsync(
             writer, ChessTransitions.SourceId, "ChessTransitions",
             ChessTransitions.TrustClassId, ct, reader));
+        canonicalNames.UnionWith(await ChessVocabulary.BootstrapAsync(
+            writer, ChessPositionOutcomes.SourceId, ChessPositionOutcomes.SourceName,
+            ChessPositionOutcomes.TrustClassId, ct, reader));
+        canonicalNames.UnionWith(await ChessVocabulary.BootstrapAsync(
+            writer, ChessSyzygy.SourceId, ChessSyzygy.SourceName,
+            ChessSyzygy.TrustClassId, ct, reader));
         await NpgsqlCanonicalRegistry.RegisterCanonicalsAsync(ds, canonicalNames, ct);
         return new ChessLiveGameHost(ds, writer, host);
     }
@@ -307,6 +310,11 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
                 b.AddEntity(
                     ChessTransitions.MarkerId(playingId), EntityTier.Document,
                     ChessVocabulary.AnalysisMarkerType, ChessTransitions.SourceId);
+                ChessPositionOutcomes.DepositSurfaces(
+                    b, session.Plies.Select(static ply => ply.FromKey).ToArray(),
+                    result, playingId);
+                if (ChessTablebaseRuntime.Prober is { } prober)
+                    ChessSyzygy.DeriveGame(b, witnessed, prober);
 
                 // Search scores are calculations on exact pre-move positions. Preserve every
                 // one that was actually performed; do not synthesize scores for the other side.
@@ -367,38 +375,30 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
         await CompleteGameAsync(eventId, outcome, adjudicated, ct);
     }
 
-    private SubstructureFoldBias? _foldBias;
+    private SubstrateRootBias? _rootBias;
+    private SubstrateBoardEvaluator? _boardEvaluator;
 
     public Search BuildSearch(bool substrate, int ttBits = 20, int maxDepth = 8)
     {
-        IRootBias? bias = substrate ? (_foldBias ??= new SubstructureFoldBias(_ds)) : null;
-        var (mg, eg) = LearnedPstBlend();
-        if (!substrate) { mg = null; eg = null; }
-        return new Search(EvalTerm.All, bias, ttBits, mg, eg);
+        IRootBias? bias = substrate ? (_rootBias ??= new SubstrateRootBias(_ds)) : null;
+        ISearchPositionEvaluator? evaluator = substrate
+            ? (_boardEvaluator ??= new SubstrateBoardEvaluator(_ds)) : null;
+        return new Search(
+            EvalTerm.All, bias, ttBits,
+            positionEvaluator: evaluator,
+            tablebase: ChessTablebaseRuntime.ProbeSearch);
     }
 
-    /// Re-applies the current bias + learned-PST blend to an existing Search
-    /// so per-ply PST refreshes reuse the instance (and its 32 MB
+    /// Re-applies the current substrate snapshot to an existing Search so per-ply
+    /// refreshes reuse the instance (and its 32 MB
     /// transposition table) instead of allocating a new one every ply.
     public void RefreshSearch(Search search, bool substrate)
     {
-        IRootBias? bias = substrate ? (_foldBias ??= new SubstructureFoldBias(_ds)) : null;
-        var (mg, eg) = LearnedPstBlend();
-        if (!substrate) { mg = null; eg = null; }
-        search.Reconfigure(bias, mg, eg);
-    }
-
-    private (int[][]? Mg, int[][]? Eg) LearnedPstBlend()
-    {
-        if (_learnedTried) return (_lpMg, _lpEg);
-        _learnedTried = true;
-        try
-        {
-            var (lm, le) = LearnedPst.BuildTables(_ds);
-            (_lpMg, _lpEg) = Evaluation.BlendPeStoWith(lm, le);
-        }
-        catch { _lpMg = null; _lpEg = null; }
-        return (_lpMg, _lpEg);
+        IRootBias? bias = substrate ? (_rootBias ??= new SubstrateRootBias(_ds)) : null;
+        ISearchPositionEvaluator? evaluator = substrate
+            ? (_boardEvaluator ??= new SubstrateBoardEvaluator(_ds)) : null;
+        search.Reconfigure(
+            bias, null, null, evaluator, ChessTablebaseRuntime.ProbeSearch);
     }
 
     public NpgsqlDataSource DataSource => _ds;

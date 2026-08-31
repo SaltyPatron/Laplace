@@ -55,7 +55,7 @@ public static unsafe partial class NativeInterop
     internal static partial int SyzygyProbeRoot(
         ulong white, ulong black, ulong kings, ulong queens, ulong rooks,
         ulong bishops, ulong knights, ulong pawns, uint ep, int whiteToMove,
-        out int wdl, out int dtz);
+        out int wdl, out int dtz, out int from, out int to, out int promotes);
 
     [LibraryImport(Library, EntryPoint = "laplace_testimony_pack_walk")]
     internal static partial int LaplaceTestimonyPackWalk(

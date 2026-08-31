@@ -522,12 +522,17 @@ export function ConsensusGraph({
 }
 
 function fromWeb(web: WebGraph, walkPath: WalkPathNode[]) {
-  const nodes = web.nodes.map((n) => ({
-    ...n,
-    walk: walkIdsHas(walkPath, n.id),
-    // Anchor seed at origin so hop shells stay true radii.
-    ...(n.hop === 0 ? { fx: 0, fy: 0, fz: 0, x: 0, y: 0, z: 0 } : {}),
-  }));
+  const unique = new Map<string, WebNode>();
+  for (const n of web.nodes) {
+    if (unique.has(n.id)) continue;
+    unique.set(n.id, {
+      ...n,
+      walk: walkIdsHas(walkPath, n.id),
+      // Anchor seed at origin so hop shells stay true radii.
+      ...(n.hop === 0 ? { fx: 0, fy: 0, fz: 0, x: 0, y: 0, z: 0 } : {}),
+    });
+  }
+  const nodes = [...unique.values()];
   const seen = new Set(nodes.map((n) => n.id));
   for (const step of walkPath) {
     if (!seen.has(step.idHex)) {
@@ -535,8 +540,11 @@ function fromWeb(web: WebGraph, walkPath: WalkPathNode[]) {
       seen.add(step.idHex);
     }
   }
-  const links: WebEdge[] = web.edges.map((e) => ({ ...e, walk: false }));
+  const links: WebEdge[] = web.edges
+    .filter((e) => e.source !== e.target)
+    .map((e) => ({ ...e, walk: false }));
   for (let i = 1; i < walkPath.length; i++) {
+    if (walkPath[i - 1].idHex === walkPath[i].idHex) continue;
     links.push({
       source: walkPath[i - 1].idHex,
       target: walkPath[i].idHex,
@@ -572,6 +580,7 @@ function fromStar(
   const links: WebEdge[] = [];
   for (const e of edges) {
     const id = e.entity_id_hex || e.entity_label;
+    if (id === centerId) continue;
     if (!nodes.has(id)) {
       nodes.set(id, { id, label: e.entity_label || e.type, hop: 1, walk: walkIdsHas(walkPath, id) });
     }
@@ -591,6 +600,7 @@ function fromStar(
     if (!nodes.has(step.idHex)) nodes.set(step.idHex, { id: step.idHex, label: step.label, hop: 0, walk: true });
   }
   for (let i = 1; i < walkPath.length; i++) {
+    if (walkPath[i - 1].idHex === walkPath[i].idHex) continue;
     links.push({
       source: walkPath[i - 1].idHex,
       target: walkPath[i].idHex,

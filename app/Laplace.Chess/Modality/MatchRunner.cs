@@ -140,18 +140,21 @@ public static class MatchRunner
     public static MoveChooser Searcher(int depth, EvalTerm terms = EvalTerm.All, IRootBias? bias = null)
     {
         var search = new Search(terms, bias);
-        return (s, rng) => search.Think(s.Board, new Search.Limits(MaxDepth: depth)).BestMove
-                           ?? RandomChooser(s, rng);
+        return (s, rng) => search.Think(
+            s.Board, new Search.Limits(MaxDepth: depth)).BestMove!.Value;
     }
 
     public static Func<MoveChooser> SearcherFactory(
         int depth, EvalTerm terms = EvalTerm.All, IRootBias? bias = null, int ttBits = 16,
-        int[][]? mgPst = null, int[][]? egPst = null, CancellationToken ct = default)
+        int[][]? mgPst = null, int[][]? egPst = null, CancellationToken ct = default,
+        ISearchPositionEvaluator? positionEvaluator = null,
+        Func<Board, SearchTablebaseVerdict?>? tablebase = null)
         => () =>
         {
-            var search = new Search(terms, bias, ttBits, mgPst, egPst);
-            return (s, rng) => search.Think(s.Board, new Search.Limits(MaxDepth: depth), ct).BestMove
-                               ?? RandomChooser(s, rng);
+            var search = new Search(
+                terms, bias, ttBits, mgPst, egPst, positionEvaluator, tablebase);
+            return (s, rng) => search.Think(
+                s.Board, new Search.Limits(MaxDepth: depth), ct).BestMove!.Value;
         };
 
     public static MatchResult Play(

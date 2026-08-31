@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.Modality.Chess;
@@ -12,7 +13,10 @@ namespace Laplace.Chess.Service;
 /// <see cref="SyzygyNative"/> order); <see cref="Dtz"/> is plies to the next zeroing
 /// move under optimal play.
 /// </summary>
-public readonly record struct SyzygyVerdict(int Wdl, int Dtz);
+public readonly record struct SyzygyVerdict(
+    int Wdl, int Dtz, int From = -1, int To = -1, int Promotes = 0);
+
+public readonly record struct SyzygyChunkRef(Hash128 Id, double[] Coord);
 
 /// <summary>Probe boundary: the native kernel in production, a fake in tests.</summary>
 public interface ISyzygyProber
@@ -48,27 +52,26 @@ public sealed class SyzygyNativeProber : ISyzygyProber
     public SyzygyVerdict? Probe(Board board)
     {
         var bb = ChessSyzygy.ToBitboards(board);
-        return SyzygyNative.ProbeRoot(
+        return SyzygyNative.ProbeRootTransition(
                    bb.White, bb.Black, bb.Kings, bb.Queens, bb.Rooks,
                    bb.Bishops, bb.Knights, bb.Pawns, bb.Ep, board.WhiteToMove)
                is { } v
-            ? new SyzygyVerdict(v.Wdl, v.Dtz)
+            ? new SyzygyVerdict(v.Wdl, v.Dtz, v.From, v.To, v.Promotes)
             : null;
     }
 }
 
 /// <summary>
-/// Syzygy tablebase as an ingest source: packaging (<c>.rtbw</c>/<c>.rtbz</c>) is opened
-/// by <see cref="SyzygyTableUnpack"/> (Fathom = codec, tree-sitter slot for this file type),
-/// and each board state's WDL/DTZ is composed as a <b>position-grain</b> substrate record.
-/// Context is null — a tablebase verdict is a pure function of the board. Later games that
-/// compose the same surface hit the same position id and find the attestations already
-/// there (identity collision / dupe), not a vault mmap peek.
-/// Version 2: position-grain (v1 wrongly pinned ctx to the LINE).
+/// Syzygy tablebase ingest. Fathom decodes package entries into exact optimal transitions;
+/// the substrate stores them as content-addressed position → typed move → position graph
+/// segments with WDL/DTZ on the vertices. The local mapped package is the decoding/search
+/// perfcache, not the persisted knowledge model. The v2 single-position method remains for
+/// already-recorded game evidence; material packages use the compact graph format.
 /// </summary>
 public static class ChessSyzygy
 {
     public const int Version = 2;
+    public const int MaterialGraphVersion = 1;
 
     public const string SourceName = "ChessSyzygy";
     public static readonly Hash128 SourceId = SubstrateCanonicalIds.Source(SourceName);
@@ -80,6 +83,12 @@ public static class ChessSyzygy
     /// <summary>Versioned per-POSITION marker — each board state is probed/deposited once.</summary>
     public static Hash128 MarkerId(Hash128 positionId, int version)
         => Hash128.OfCanonical($"chess/syzygy/{positionId}/{version}");
+
+    public static Hash128 MaterialId(string material) =>
+        Hash128.OfCanonical($"chess/syzygy/material/{material}/{MaterialGraphVersion}");
+
+    public static Hash128 EndgameLineId(Hash128 lineId) =>
+        Hash128.OfCanonical($"chess/syzygy/endgame/{lineId}/{MaterialGraphVersion}");
 
     /// <summary>Five-valued WDL content token, side-to-move POV (Fathom order 0..4).</summary>
     public static string WdlToken(int wdl) => wdl switch
@@ -159,16 +168,181 @@ public static class ChessSyzygy
                 product.PositionId, "ANALYZED_AT", vId, SourceId, null, Weight));
     }
 
+    internal const int TransitionsPerChunk = 2_048;
+
     /// <summary>
-    /// Test/helper: replay a witnessed line and deposit every probeable position as a
-    /// position-grain product. Ingest itself unpacks the table directory — it does not
-    /// sample games against a vault mmap.
+    /// Compact material-class representation: each decoded table entry is the shared
+    /// position → typed move → position transition, packed into bounded trajectory chunks.
+    /// WDL/DTZ ride the pre-state vertex flags.  A material with 500k positions therefore
+    /// emits hundreds of chunk/root rows, not millions of entity/physicality/attestation rows.
+    /// </summary>
+    public static void DeriveMaterial(
+        SubstrateChangeBuilder b, string material, IReadOnlyList<SyzygyProduct> products,
+        Hash128 materialId)
+    {
+        ArgumentNullException.ThrowIfNull(b);
+        if (products.Count == 0) return;
+
+        var chunks = new List<SyzygyChunkRef>((products.Count + TransitionsPerChunk - 1) / TransitionsPerChunk);
+
+        for (int offset = 0; offset < products.Count; offset += TransitionsPerChunk)
+        {
+            int take = Math.Min(TransitionsPerChunk, products.Count - offset);
+            var slice = products.Skip(offset).Take(take).ToArray();
+            var chunk = DescribeTransitionChunk(slice);
+            if (DeriveTransitionChunk(b, slice, chunk.Id)) chunks.Add(chunk);
+        }
+
+        DeriveMaterialRoot(b, chunks, materialId);
+    }
+
+    internal static SyzygyChunkRef DescribeTransitionChunk(IReadOnlyList<SyzygyProduct> products)
+    {
+        var facts = new List<Hash128>(products.Count);
+        var coords = new List<double>(products.Count * 12);
+        foreach (var product in products)
+        {
+            if (!TryTransition(product, out var from, out var move, out var to))
+                throw InvalidTransition(product);
+            facts.Add(Hash128.OfCanonical(
+                $"chess/syzygy/transition/{from.Id}/{move.Id}/{to.Id}/{product.Wdl}/{product.Dtz}"));
+            coords.AddRange(from.Coord); coords.AddRange(move.Coord); coords.AddRange(to.Coord);
+        }
+        return facts.Count == 0
+            ? new SyzygyChunkRef(default, Array.Empty<double>())
+            : new SyzygyChunkRef(
+                Hash128.Merkle(ChessCompose.SegmentTier, CollectionsMarshal.AsSpan(facts)),
+                Math4d.KarcherMean(CollectionsMarshal.AsSpan(coords)));
+    }
+
+    internal static bool DeriveTransitionChunk(
+        SubstrateChangeBuilder b, IReadOnlyList<SyzygyProduct> products, Hash128 chunkId)
+    {
+        if (chunkId == default) return false;
+        var ids = new List<Hash128>(products.Count * 3);
+        var coords = new List<double>(products.Count * 12);
+        var flags = new List<ulong>(products.Count * 3);
+        foreach (var product in products)
+        {
+            if (!TryTransition(product, out var from, out var move, out var to))
+                throw InvalidTransition(product);
+            ids.Add(from.Id); ids.Add(move.Id); ids.Add(to.Id);
+            coords.AddRange(from.Coord); coords.AddRange(move.Coord); coords.AddRange(to.Coord);
+            flags.Add(PackTransitionFlags(0, product.Wdl, product.Dtz));
+            flags.Add(PackTransitionFlags(1, product.Wdl, product.Dtz));
+            flags.Add(PackTransitionFlags(2, product.Wdl, product.Dtz));
+        }
+        if (ids.Count == 0) return false;
+        double[] centroid = Math4d.KarcherMean(CollectionsMarshal.AsSpan(coords));
+        long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
+        b.AddEntity(chunkId, ChessCompose.SegmentTier, ChessVocabulary.AnalysisMarkerType, SourceId);
+        b.AddPhysicality(new PhysicalityRow(
+            PhysicalityId.Compute(chunkId, PhysicalityType.Projection),
+            chunkId, SourceId, PhysicalityType.Projection,
+            centroid[0], centroid[1], centroid[2], centroid[3], Hilbert128.Encode(centroid),
+            Trajectory.Build(CollectionsMarshal.AsSpan(ids), CollectionsMarshal.AsSpan(flags)),
+            ids.Count, null, null, nowUs));
+        return true;
+    }
+
+    private static InvalidDataException InvalidTransition(SyzygyProduct product) => new(
+        $"Syzygy returned a transition that does not resolve to a legal typed move: "
+        + $"from={product.From}, to={product.To}, promotes={product.Promotes}, "
+        + $"position={product.Surface}");
+
+    internal static void DeriveMaterialRoot(
+        SubstrateChangeBuilder b, IReadOnlyList<SyzygyChunkRef> chunks, Hash128 materialId)
+    {
+        if (chunks.Count == 0) return;
+        var chunkIds = new Hash128[chunks.Count];
+        var chunkCoords = new double[chunks.Count * 4];
+        for (int i = 0; i < chunks.Count; i++)
+        {
+            chunkIds[i] = chunks[i].Id;
+            chunks[i].Coord.CopyTo(chunkCoords, i * 4);
+        }
+        double[] rootCentroid = Math4d.KarcherMean(chunkCoords);
+        long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
+        b.AddEntity(materialId, ChessCompose.LineTier, ChessVocabulary.AnalysisMarkerType, SourceId);
+        b.AddPhysicality(new PhysicalityRow(
+            PhysicalityId.Compute(materialId, PhysicalityType.Projection),
+            materialId, SourceId, PhysicalityType.Projection,
+            rootCentroid[0], rootCentroid[1], rootCentroid[2], rootCentroid[3],
+            Hilbert128.Encode(rootCentroid), Trajectory.Build(chunkIds),
+            chunkIds.Length, null, null, nowUs));
+    }
+
+    internal static ulong PackTransitionFlags(int role, int wdl, int dtz)
+    {
+        ulong zigzagDtz = unchecked((ulong)((dtz << 1) ^ (dtz >> 31)));
+        return Trajectory.VertexFlags(ChessCompose.PositionTier, hasAtom: false, atom: 0)
+               | ((ulong)(role & 0x3) << 8)
+               | ((ulong)(wdl & 0x7) << 10)
+               | ((zigzagDtz & 0xFFFFFFFFUL) << 16);
+    }
+
+    internal static (int Role, int Wdl, int Dtz) UnpackTransitionFlags(ulong flags)
+    {
+        int role = (int)((flags >> 8) & 0x3);
+        int wdl = (int)((flags >> 10) & 0x7);
+        uint zigzag = (uint)(flags >> 16);
+        int dtz = (int)(zigzag >> 1) ^ -((int)zigzag & 1);
+        return (role, wdl, dtz);
+    }
+
+    private static bool TryTransition(
+        SyzygyProduct product, out ChessNode from, out ChessNode move, out ChessNode to)
+    {
+        from = move = to = default;
+        if (product.From < 0 || product.To < 0) return false;
+        Board board;
+        if (!PositionContent.TryFenFromSurface(product.Surface, out string fen)) return false;
+        try { board = Board.FromFen(fen); }
+        catch (FormatException) { return false; }
+        int fromSq = Board.Sq(product.From & 7, product.From >> 3);
+        int toSq = Board.Sq(product.To & 7, product.To >> 3);
+        ChessMove? selected = null;
+        foreach (var candidate in MoveGen.Legal(board))
+        {
+            if (candidate.From != fromSq || candidate.To != toSq) continue;
+            if (PromotionCode(candidate) != product.Promotes) continue;
+            selected = candidate;
+            break;
+        }
+        if (selected is not { } best) return false;
+        Piece moving = board.Squares[best.From];
+        from = ChessCompose.Position(board).Position;
+        move = ChessCompose.Move(moving, best).Move;
+        var next = board.Clone();
+        MoveApply.Make(next, best);
+        to = ChessCompose.Position(next).Position;
+        return true;
+    }
+
+    private static int PromotionCode(ChessMove move)
+    {
+        if (!move.IsPromotion) return 0;
+        return Board.TypeOf(move.Promotion) switch
+        {
+            Piece.WQueen => 1,
+            Piece.WRook => 2,
+            Piece.WBishop => 3,
+            Piece.WKnight => 4,
+            _ => 0,
+        };
+    }
+
+    /// <summary>
+    /// Replay a witnessed line and persist every tablebase-covered state as the same exact
+    /// transition primitive used by material ingest. One-transition chunks deduplicate across
+    /// games by content; the line root preserves the observed endgame sequence.
     /// </summary>
     public static void DeriveGame(SubstrateChangeBuilder b, ChessWitnessedGame game, ISyzygyProber prober)
     {
         var m = new ChessModality();
         if (ChessAnalyze.InitialState(game.StartFen, m) is not { } start) return;
         var cur = start.Initial;
+        var chunks = new List<SyzygyChunkRef>();
         int largest = prober.Largest;
         int n = game.Moves.Count;
         for (int ply = 0; ply <= n; ply++)
@@ -180,8 +354,11 @@ public static class ChessSyzygy
                 && prober.Probe(cur.Board) is { } verdict)
             {
                 string surface = m.StateKey(cur);
-                DeriveProduct(b, new SyzygyProduct(
-                    surface, ChessCompose.PositionId(surface), verdict.Wdl, verdict.Dtz));
+                var product = new SyzygyProduct(
+                    surface, ChessCompose.PositionId(surface), verdict.Wdl, verdict.Dtz,
+                    verdict.From, verdict.To, verdict.Promotes);
+                var chunk = DescribeTransitionChunk([product]);
+                if (DeriveTransitionChunk(b, [product], chunk.Id)) chunks.Add(chunk);
             }
 
             if (ply == n) break;
@@ -189,5 +366,6 @@ public static class ChessSyzygy
             if (mv is null) break;
             cur = m.Apply(cur, mv.Value);
         }
+        DeriveMaterialRoot(b, chunks, EndgameLineId(game.LineId));
     }
 }

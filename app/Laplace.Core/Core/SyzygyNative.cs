@@ -27,6 +27,9 @@ public static class SyzygyNative
     /// </summary>
     public static int Init(string path)
     {
+        if (string.IsNullOrWhiteSpace(path)) return -1;
+        string normalized = Path.GetFullPath(path)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         // IDEMPOTENT, and it has to be here rather than in every caller. The mapping is
         // process-global, but Init is called from a test fixture, from the decomposer's
         // InitializeAsync and again from its prober-resolution path — none of which can
@@ -34,21 +37,18 @@ public static class SyzygyNative
         // set is what corrupts Fathom's statics and lands a later probe in gen_captures.
         lock (InitGate)
         {
-            if (_mappedLargest > 0 && string.Equals(_mappedPath, path, StringComparison.Ordinal))
+            if (_mappedLargest > 0 && string.Equals(_mappedPath, normalized, StringComparison.Ordinal))
                 return _mappedLargest;
 
-            // A DIFFERENT set: release the current mapping first. tb_init over a live
-            // mapping is the unsupported case; tb_free then tb_init is the supported one.
             if (_mappedLargest > 0)
-            {
-                _mappedLargest = 0;
-                _mappedPath = null;
-                NativeInterop.SyzygyFree();
-            }
+                throw new InvalidOperationException(
+                    $"Syzygy is already initialized from '{_mappedPath}' and cannot be replaced "
+                    + $"process-wide by '{normalized}'. Configure ingest and play to use one table set.");
 
-            int n = NativeInterop.SyzygyInit(path);
+            int n = NativeInterop.SyzygyInit(normalized);
             _mappedLargest = n > 0 ? n : 0;
-            _mappedPath = n > 0 ? path : null;
+            _mappedPath = n > 0 ? normalized : null;
+            if (n <= 0) NativeInterop.SyzygyFree();
             return n;
         }
     }
@@ -151,8 +151,26 @@ public static class SyzygyNative
         {
             return NativeInterop.SyzygyProbeRoot(
                        white, black, kings, queens, rooks, bishops, knights, pawns,
-                       ep, whiteToMove ? 1 : 0, out int wdl, out int dtz) == 0
+                       ep, whiteToMove ? 1 : 0, out int wdl, out int dtz,
+                       out _, out _, out _) == 0
                 ? (wdl, dtz)
+                : null;
+        }
+    }
+
+    /// <summary>WDL/DTZ plus Fathom's optimal board transition.</summary>
+    public static (int Wdl, int Dtz, int From, int To, int Promotes)? ProbeRootTransition(
+        ulong white, ulong black, ulong kings, ulong queens, ulong rooks,
+        ulong bishops, ulong knights, ulong pawns, uint ep, bool whiteToMove)
+    {
+        if (!Probeable(white, black)) return null;
+        lock (InitGate)
+        {
+            return NativeInterop.SyzygyProbeRoot(
+                       white, black, kings, queens, rooks, bishops, knights, pawns,
+                       ep, whiteToMove ? 1 : 0, out int wdl, out int dtz,
+                       out int from, out int to, out int promotes) == 0
+                ? (wdl, dtz, from, to, promotes)
                 : null;
         }
     }

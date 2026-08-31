@@ -1,7 +1,7 @@
-import { Suspense, useEffect, useMemo, useState } from 'react';
-import { Muted } from '@ui';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
 import { Html, Line, OrbitControls } from '@react-three/drei';
+import * as THREE from 'three';
 import type { ExplorePhysicalityRow } from '../types';
 import { useDeferredWebGlMount } from '../useDeferredWebGlMount';
 import styles from './GlomeCanvas.module.css';
@@ -25,7 +25,6 @@ export interface GlomeNode {
   color?: string;
 }
 
-const MAX_NODES = 500;
 const SHELL = 0.85;
 
 /** Packed: hash-XYZ on a display shell. M is paint, not an axis. */
@@ -105,7 +104,33 @@ function GlomeScene({
   onSelectOrdinal?: (ordinal: number | null) => void;
 }) {
   const [hover, setHover] = useState<GlomeNode | null>(null);
-  const limited = nodes.slice(0, MAX_NODES);
+  const instances = useRef<THREE.InstancedMesh>(null);
+  const transform = useMemo(() => new THREE.Object3D(), []);
+
+  useEffect(() => {
+    const mesh = instances.current;
+    if (!mesh) return;
+    for (let i = 0; i < nodes.length; i++) {
+      const n = nodes[i];
+      const [x, y, z] = project(n, projection, xmAngle);
+      const ordHit = highlightOrdinal != null && n.ordinal === highlightOrdinal;
+      const radius = Math.max(0.02, (ordHit ? 0.045 : 0.028) + (n.runLength ?? 1) * 0.002);
+      transform.position.set(x, y, z);
+      transform.scale.setScalar(radius);
+      transform.updateMatrix();
+      mesh.setMatrixAt(i, transform.matrix);
+      mesh.setColorAt(i, new THREE.Color(
+        n.color
+          ?? (n.kind === 'walk' ? '#3ecf8e'
+            : n.kind === 'neighbor' ? '#e8b339'
+              : n.kind === 'constituent' ? '#9b7bff'
+                : ordHit || highlightIds.has(n.id) ? '#3ecf8e' : '#4f8cff'),
+      ));
+    }
+    mesh.count = nodes.length;
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  }, [nodes, projection, xmAngle, highlightIds, highlightOrdinal, transform]);
 
   return (
     <>
@@ -113,35 +138,23 @@ function GlomeScene({
       <InvalidateOnData revision={revision} />
       <ambientLight intensity={0.55} />
       <pointLight position={[4, 4, 4]} intensity={1.2} />
-      {limited.map((n) => {
-        const pos = project(n, projection, xmAngle);
-        const ordHit = highlightOrdinal != null && n.ordinal === highlightOrdinal;
-        const color =
-          n.color
-            ?? (n.kind === 'walk' ? '#3ecf8e'
-              : n.kind === 'neighbor' ? '#e8b339'
-                : n.kind === 'constituent' ? '#9b7bff'
-                  : ordHit || highlightIds.has(n.id) ? '#3ecf8e' : '#4f8cff');
-        return (
-          <mesh
-            key={n.id}
-            position={pos}
-            onPointerOver={(e) => { e.stopPropagation(); setHover(n); }}
-            onPointerOut={() => setHover(null)}
-            onClick={(e) => {
-              e.stopPropagation();
-              onSelectOrdinal?.(n.ordinal ?? null);
-            }}
-          >
-            <sphereGeometry args={[Math.max(0.02, (ordHit ? 0.045 : 0.028) + (n.runLength ?? 1) * 0.002), 12, 12]} />
-            <meshStandardMaterial
-              color={color}
-              emissive={color}
-              emissiveIntensity={ordHit ? 0.55 : 0.25}
-            />
-          </mesh>
-        );
-      })}
+      <instancedMesh
+        ref={instances}
+        args={[undefined, undefined, nodes.length]}
+        onPointerMove={(e) => {
+          e.stopPropagation();
+          setHover(e.instanceId == null ? null : nodes[e.instanceId] ?? null);
+        }}
+        onPointerOut={() => setHover(null)}
+        onClick={(e) => {
+          e.stopPropagation();
+          const n = e.instanceId == null ? null : nodes[e.instanceId];
+          onSelectOrdinal?.(n?.ordinal ?? null);
+        }}
+      >
+        <sphereGeometry args={[1, 12, 12]} />
+        <meshStandardMaterial vertexColors emissiveIntensity={0.25} />
+      </instancedMesh>
       {trajectory.length > 1 ? (
         <Line
           points={trajectory}
@@ -259,9 +272,6 @@ export function GlomeCanvas({
 
   return (
     <div className={fill ? `${styles.root} ${styles.rootFill}` : styles.root}>
-      {nodes.length > MAX_NODES ? (
-        <Muted className={styles.cap}>Showing {MAX_NODES} of {nodes.length} nodes</Muted>
-      ) : null}
       {projection === 'placement' ? (
         <label className={styles.rotationControl}>
           <span>X–M rotation</span>

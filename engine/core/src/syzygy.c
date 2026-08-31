@@ -80,9 +80,11 @@ int laplace_syzygy_probe_wdl(
 int laplace_syzygy_probe_root(
     uint64_t white, uint64_t black, uint64_t kings, uint64_t queens,
     uint64_t rooks, uint64_t bishops, uint64_t knights, uint64_t pawns,
-    unsigned ep, int white_to_move, int* out_wdl, int* out_dtz)
+    unsigned ep, int white_to_move, int* out_wdl, int* out_dtz,
+    int* out_from, int* out_to, int* out_promotes)
 {
-    if (g_largest == 0 || out_wdl == NULL || out_dtz == NULL)
+    if (g_largest == 0 || out_wdl == NULL || out_dtz == NULL
+        || out_from == NULL || out_to == NULL || out_promotes == NULL)
         return -1;
     syzygy_lock();
     unsigned res = tb_probe_root(
@@ -95,5 +97,8 @@ int laplace_syzygy_probe_root(
         return -1;
     *out_wdl = (int)TB_GET_WDL(res);
     *out_dtz = (int)TB_GET_DTZ(res);
+    *out_from = (int)TB_GET_FROM(res);
+    *out_to = (int)TB_GET_TO(res);
+    *out_promotes = (int)TB_GET_PROMOTES(res);
     return 0;
 }

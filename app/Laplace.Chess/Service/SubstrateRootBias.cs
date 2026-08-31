@@ -12,6 +12,11 @@ public sealed class SubstrateRootBias : IRootBias
     private readonly double _cpPerPoint;
     private readonly int _capCp;
     private readonly double? _shrinkK0;
+    private long _rootReads;
+    private long _rootsWithExactEvidence;
+
+    public long RootReads => Volatile.Read(ref _rootReads);
+    public long RootsWithExactEvidence => Volatile.Read(ref _rootsWithExactEvidence);
 
     public SubstrateRootBias(NpgsqlDataSource ds, double cpPerPoint = 8.0, int capCp = 150, double? shrinkK0 = null)
     {
@@ -25,6 +30,7 @@ public sealed class SubstrateRootBias : IRootBias
     {
         var bonus = new int[moves.Count];
         if (moves.Count == 0) return bonus;
+        Interlocked.Increment(ref _rootReads);
 
         var state = _modality.FromFen(root.ToFen());
         var edgeIds = new Hash128[moves.Count];
@@ -40,6 +46,8 @@ public sealed class SubstrateRootBias : IRootBias
         }
 
         var effMu = ReadShrunkEffMu(edgeIds);
+        if (effMu.Any(static value => !double.IsNaN(value)))
+            Interlocked.Increment(ref _rootsWithExactEvidence);
         for (int i = 0; i < moves.Count; i++)
         {
             if (double.IsNaN(effMu[i])) { bonus[i] = 0; continue; }

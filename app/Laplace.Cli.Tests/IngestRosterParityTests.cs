@@ -22,6 +22,7 @@ public sealed class IngestRosterParityTests
             "chess-eval",
             "chess-move-outcomes",
             "chess-opening-match",
+            "chess-position-outcomes",
             "chess-syzygy",
             "chess-transitions",
             "chess-trajectory",
@@ -60,7 +61,7 @@ public sealed class IngestRosterParityTests
     // 20 -> 21 for chess-transitions: the dedicated substrate-sourced backfill
     // for deterministic position transitions. Keeping it separate from analysis
     // prevents a transition upgrade from replaying unrelated testimony.
-    private const int OperationalOnlyRouteCeiling = 21;
+    private const int OperationalOnlyRouteCeiling = 22;
 
     [Fact]
     public void RuntimeRoutes_MatchManifestPlusExplicitOperationalRoutes()
