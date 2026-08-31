@@ -105,11 +105,20 @@ case "${1:-}" in
     fi
     ;;
   rollback)
-    # Rollback is activation recovery only. The workflow invokes it when publish
-    # failed or was cancelled before the transaction committed. Post-delivery QA,
-    # smoke, and evaluation failures remain visible as red evidence but do not own
-    # this payload transaction and cannot replace the code under investigation with
-    # an older release.
+    # Rollback owns an unfinished ACTIVATION transaction only. Once publish and
+    # readiness succeeded, later environment QA/smoke/eval failures remain red
+    # evidence but cannot replace the code under investigation with an older app.
+    # The full-release restore job supplies PUBLISH_RESULT; application-only
+    # transaction recovery leaves it unset and still receives strict rollback.
+    if [[ "${PUBLISH_RESULT:-}" == "success" ]]; then
+      echo "::warning::post-delivery verification failed; retaining the activated application payload"
+      sudo -n "$HELPER" commit
+      if [[ -f "$RECEIPT" ]]; then
+        mv "$RECEIPT" "$ROOT/build/.managed-publish-committed"
+      fi
+      exit 0
+    fi
+
     if [[ -f "$RECEIPT" ]]; then
       backup="$(<"$RECEIPT")"
       [[ "$backup" == /opt/laplace/app-backups/managed.* && -d "$backup" && ! -L "$backup" ]] || {
