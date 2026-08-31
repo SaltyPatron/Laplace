@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Xunit;
 
 namespace Laplace.Decomposers.Abstractions.Tests;
@@ -38,20 +37,21 @@ public sealed class McpBoundaryGateTests
     }
 
     [Fact]
-    public void EveryConfiguredClient_LaunchesTheDeployedApphost()
+    public void RepositoryLauncher_FallsBackToTheDeployedApphost()
     {
-        const string deployed = "/opt/laplace/app/laplace-mcp";
-        foreach (var relative in new[] { ".mcp.json", ".cursor/mcp.json" })
-        {
-            using var doc = JsonDocument.Parse(Read(relative.Split('/')));
-            var servers = doc.RootElement.GetProperty("mcpServers");
-            Assert.Single(servers.EnumerateObject());
-            Assert.Equal(deployed, servers.GetProperty("laplace").GetProperty("command").GetString());
-        }
-
-        var codex = Read(".codex", "config.toml");
-        Assert.Contains("[mcp_servers.laplace]", codex);
-        Assert.Contains($"command = \"{deployed}\"", codex);
+        // PR #1360 deliberately removed .mcp.json, .cursor/, and .codex/ from the
+        // tracked source boundary. Client-specific configuration is local state;
+        // the repository-owned contract is the canonical launcher and its deployed
+        // apphost fallback.
+        var launcher = Read("scripts", "laplace-mcp");
+        Assert.Contains(
+            "APPHOST=\"${LAPLACE_APP_DIR:-/opt/laplace/app}/laplace-mcp\"",
+            launcher,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "[[ -x \"$APPHOST\" ]] && exec \"$APPHOST\" \"$@\"",
+            launcher,
+            StringComparison.Ordinal);
     }
 
     [Fact]
