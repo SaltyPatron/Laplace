@@ -52,6 +52,9 @@ for path in paths:
             fail(f"{path.name}:{name}: shared/runtime job may be cancelled")
 
 main = workflows.get("laplace.yml", {})
+main_concurrency = main.get("concurrency") or {}
+if main_concurrency.get("group") != "laplace-shared-workspace" or main_concurrency.get("cancel-in-progress") != "false":
+    fail("main workflow does not hold the persistent shared-workspace lock for its full run")
 jobs = main.get("jobs") or {}
 required = {"policy","deps","build","unit-test","deploy","db-ops","publish","integration-test","smoke","eval","restore-api"}
 for name in sorted(required - set(jobs)): fail(f"laplace.yml: missing job {name}")
@@ -88,6 +91,8 @@ if "scripts/pr-proof.sh" not in runs(prove): fail("PR workflow bypasses canonica
 pr_concurrency = pr.get("concurrency") or {}
 if pr_concurrency.get("group") != "laplace-shared-workspace" or pr_concurrency.get("cancel-in-progress") != "false":
     fail("PR proof does not honor the persistent single-runner workspace")
+if pr_concurrency.get("queue") != "max":
+    fail("PR proof may replace an already-pending main delivery instead of queueing behind it")
 
 for name, workflow in workflows.items():
     if name == "db-ops.yml" or name.startswith("seed-"):
